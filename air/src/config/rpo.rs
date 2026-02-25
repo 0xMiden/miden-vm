@@ -3,55 +3,48 @@
 //! This module provides a STARK configuration using the Rescue Prime Optimized (RPO)
 //! hash function, which is Miden's native algebraic hash function.
 
-use miden_crypto::{
-    field::BinomialExtensionField,
-    hash::rpo::{RpoChallenger, RpoCompression, RpoHasher, RpoPermutation256},
-    stark::{
-        StarkConfig,
-        commit::{ExtensionMmcs, MerkleTreeMmcs},
-        dft::Radix2DitParallel,
-        pcs::{FriParameters, TwoAdicFriPcs},
-    },
-};
+use miden_crypto::hash::rpo::RpoPermutation256;
+use p3_challenger::DuplexChallenger;
+use p3_field::Field;
+use p3_miden_lifted_stark::StarkConfig;
+use p3_miden_lmcs::LmcsConfig;
+use p3_miden_stateful_hasher::StatefulSponge;
+use p3_symmetric::TruncatedPermutation;
 
+use super::{Dft, LiftedConfig, PCS_PARAMS};
 use crate::Felt;
 
-/// Challenge field type for RPO config (degree-2 extension of Felt)
-pub type Challenge = BinomialExtensionField<Felt, 2>;
+const WIDTH: usize = 12;
+const RATE: usize = 8;
+const DIGEST: usize = 4;
 
-/// RPO hasher (sponge-based)
-type Hash = RpoHasher;
+/// RPO permutation
+type Perm = RpoPermutation256;
 
-/// Compression function using RPO (2-to-1 compression)
-type Compress = RpoCompression;
+/// Packed field element type (for SIMD-friendly LMCS)
+type PackedFelt = <Felt as Field>::Packing;
 
-/// Merkle tree commitment scheme over base field using RPO
-/// Note: RPO uses Felt (field elements) for digests, not u8 (bytes)
-type ValMmcs = MerkleTreeMmcs<Felt, Felt, Hash, Compress, 4>;
+/// RPO sponge for LMCS leaf hashing
+type Sponge = StatefulSponge<Perm, WIDTH, RATE, DIGEST>;
 
-/// Merkle tree commitment scheme over extension field using RPO
-type ChallengeMmcs = ExtensionMmcs<Felt, Challenge, ValMmcs>;
+/// Compression function using RPO (2-to-1 compression via truncated permutation)
+type Compress = TruncatedPermutation<Perm, 2, DIGEST, WIDTH>;
 
-/// DFT implementation for polynomial operations
-type Dft = Radix2DitParallel<Felt>;
+/// LMCS commitment scheme using RPO.
+/// Note: RPO uses Felt (field elements) for digests, not u8 (bytes).
+type LmcsType = LmcsConfig<PackedFelt, PackedFelt, Sponge, Compress, WIDTH, DIGEST>;
 
-/// FRI-based PCS using RPO
-type FriPcs = TwoAdicFriPcs<Felt, Dft, ValMmcs, ChallengeMmcs>;
-
-/// Challenger for Fiat-Shamir using RPO
-type Challenger = RpoChallenger<Felt>;
-
-/// Complete STARK configuration using RPO
-pub type StarkConfigRpo = StarkConfig<FriPcs, Challenge, Challenger>;
+/// Challenger for Fiat-Shamir using RPO (duplex sponge)
+type Challenger = DuplexChallenger<Felt, Perm, WIDTH, RATE>;
 
 /// Creates an RPO-based STARK configuration.
 ///
 /// This configuration uses:
-/// - RPO (Rescue Prime Optimized) hash function for Merkle trees and Fiat-Shamir
+/// - RPO (Rescue Prime Optimized) hash function for LMCS commitments and Fiat-Shamir
 /// - FRI with 8x blowup (log_blowup = 3)
 /// - 27 query repetitions
 /// - 16 bits of proof-of-work
-/// - Binary folding (log_folding_factor = 1) - fold by 2 each round
+/// - Binary folding (arity 2)
 ///
 /// # Advantages of RPO over Blake3
 ///
@@ -64,28 +57,16 @@ pub type StarkConfigRpo = StarkConfig<FriPcs, Challenge, Challenger>;
 ///
 /// # Returns
 ///
-/// A `StarkConfig` instance configured for RPO-based proving.
-pub fn create_rpo_config() -> StarkConfigRpo {
+/// A `LiftedConfig` instance configured for RPO-based proving.
+pub fn create_rpo_config() -> LiftedConfig<LmcsType, Challenger> {
     let perm = RpoPermutation256;
-    let hash = RpoHasher::new(perm);
-    let compress = RpoCompression::new(perm);
-
-    let val_mmcs = ValMmcs::new(hash, compress);
-    let challenge_mmcs = ChallengeMmcs::new(val_mmcs.clone());
-
+    let sponge = Sponge::new(perm);
+    let compress = Compress::new(perm);
+    let lmcs = LmcsType::new(sponge, compress);
     let dft = Dft::default();
 
-    let fri_config = FriParameters {
-        log_blowup: 3,          // 8x blowup factor
-        log_final_poly_len: 7,  // Final polynomial degree 2^7 = 128
-        num_queries: 27,        // Number of FRI query repetitions
-        proof_of_work_bits: 16, // Grinding parameter
-        mmcs: challenge_mmcs,
-        log_folding_factor: 1, // Binary folding
-    };
+    let config = StarkConfig { pcs: PCS_PARAMS, lmcs, dft };
+    let challenger = Challenger::new(perm);
 
-    let pcs = FriPcs::new(dft, val_mmcs, fri_config);
-    let challenger = RpoChallenger::new(perm);
-
-    StarkConfig::new(pcs, challenger)
+    LiftedConfig { config, challenger }
 }

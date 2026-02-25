@@ -1,9 +1,17 @@
-//! Auxiliary trace builder trait for dependency inversion.
+//! Auxiliary trace builder trait and adapter.
 //!
-//! This trait allows ProcessorAir to build auxiliary traces without depending
-//! on the processor crate, avoiding circular dependencies.
+//! [`AuxTraceBuilder`] breaks the circular dependency between the `air` and
+//! `processor` crates: the trait is defined here, implemented in `processor`,
+//! and injected by the `prover`.
+//!
+//! [`AuxTraceAdapter`] bridges a local `AuxTraceBuilder` to the upstream
+//! [`AuxBuilder`](p3_miden_lifted_air::AuxBuilder) trait expected by the
+//! lifted prover.
 
-use miden_core::utils::RowMajorMatrix;
+use alloc::vec::Vec;
+
+use miden_core::{field::ExtensionField, utils::RowMajorMatrix};
+use p3_miden_lifted_air::AuxBuilder;
 
 use crate::Felt;
 
@@ -12,7 +20,6 @@ use crate::Felt;
 /// # Why This Trait Exists
 ///
 /// This trait serves to avoid circular dependencies:
-/// - `ProcessorAir` (in this crate) needs to build auxiliary traces during proving
 /// - The actual aux building logic lives in the `processor` crate
 /// - But `processor` already depends on `air` for trace types and constraints
 /// - Direct coupling would create: `air` → `processor` → `air`
@@ -20,30 +27,48 @@ use crate::Felt;
 /// The trait breaks the cycle:
 /// - `air` defines the interface (this trait)
 /// - `processor` implements the interface (concrete aux builders)
-/// - `prover` injects the implementation: `ProcessorAir::with_aux_builder(impl)`
+/// - `prover` wraps the implementation in [`AuxTraceAdapter`]
 ///
 /// The trait works with row-major matrices (i.e., Plonky3 format).
+///
+/// Returns `RowMajorMatrix<EF>` (extension field) — the lifted prover handles
+/// the EF→F flattening internally.
 pub trait AuxTraceBuilder<EF>: Send + Sync {
     /// Builds auxiliary trace in row-major format from the main trace.
     ///
     /// Takes the main trace in row-major format (as provided by Plonky3) and
-    /// returns the auxiliary trace also in row-major format.
+    /// returns the auxiliary trace also in row-major format, over the extension field.
     fn build_aux_columns(
         &self,
         main_trace: &RowMajorMatrix<Felt>,
         challenges: &[EF],
-    ) -> RowMajorMatrix<Felt>;
+    ) -> RowMajorMatrix<EF>;
 }
 
-/// Dummy implementation for () to support ProcessorAir without aux trace builders (e.g., in
-/// verifier). This implementation should never be called since ProcessorAir::build_aux_trace
-/// returns None when aux_builder is None.
-impl<EF> AuxTraceBuilder<EF> for () {
-    fn build_aux_columns(
+/// Adapter bridging a local [`AuxTraceBuilder`] to the upstream
+/// [`AuxBuilder`] trait required by the lifted prover.
+pub struct AuxTraceAdapter<B>(pub B);
+
+impl<EF, B> AuxBuilder<Felt, EF> for AuxTraceAdapter<B>
+where
+    EF: ExtensionField<Felt>,
+    B: AuxTraceBuilder<EF>,
+{
+    fn build_aux_trace(
         &self,
-        _main_trace: &RowMajorMatrix<Felt>,
-        _challenges: &[EF],
-    ) -> RowMajorMatrix<Felt> {
-        panic!("No aux trace builder configured - this should never be called")
+        main: &RowMajorMatrix<Felt>,
+        challenges: &[EF],
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        let _span = tracing::info_span!("build_aux_trace").entered();
+        let aux_trace = self.0.build_aux_columns(main, challenges);
+        // The prover sends aux_values into the Fiat-Shamir transcript, and the
+        // verifier reads back exactly `aux_width()` extension field elements.
+        // We use the last row of the aux trace as aux_values. These are used by
+        // reduced_aux_values() for cross-AIR identity checking in multi-table
+        // proofs. Currently reduced_aux_values() returns identity, so the actual
+        // values don't affect correctness — but the count must match aux_width().
+        let width = aux_trace.width;
+        let last_row = aux_trace.values[aux_trace.values.len() - width..].to_vec();
+        (aux_trace, last_row)
     }
 }

@@ -30,7 +30,8 @@
 //! not by these constraints. These constraints only handle the non-END cases.
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::MidenAirBuilder;
+use p3_air::AirBuilder;
+use p3_miden_lifted_air::LiftedAirBuilder;
 
 use crate::{
     MainTraceRow,
@@ -68,7 +69,7 @@ pub fn enforce_main<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     enforce_clock_constraint(builder, local, next);
     enforce_ctx_constraints(builder, local, next);

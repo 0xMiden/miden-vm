@@ -1241,9 +1241,26 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 name = "miden-air"
 version = "0.22.0"
 dependencies = [
+ "bincode",
  "miden-core",
  "miden-crypto",
  "miden-utils-indexing",
+ "p3-air",
+ "p3-blake3",
+ "p3-challenger",
+ "p3-dft",
+ "p3-field",
+ "p3-keccak",
+ "p3-matrix",
+ "p3-miden-lifted-air",
+ "p3-miden-lifted-fri",
+ "p3-miden-lifted-prover",
+ "p3-miden-lifted-stark",
+ "p3-miden-lifted-verifier",
+ "p3-miden-lmcs",
+ "p3-miden-stateful-hasher",
+ "p3-miden-transcript",
+ "p3-symmetric",
  "proptest",
  "serde",
  "thiserror",
@@ -1525,13 +1542,12 @@ dependencies = [
 name = "miden-prover"
 version = "0.22.0"
 dependencies = [
- "bincode",
  "miden-air",
  "miden-core",
  "miden-crypto",
  "miden-debug-types",
  "miden-processor",
- "serde",
+ "p3-matrix",
  "tokio",
  "tracing",
 ]
@@ -1619,7 +1635,6 @@ dependencies = [
 name = "miden-verifier"
 version = "0.22.0"
 dependencies = [
- "bincode",
  "miden-air",
  "miden-core",
  "miden-crypto",
@@ -2031,6 +2046,109 @@ dependencies = [
 ]
 
 [[package]]
+name = "p3-miden-lifted-air"
+version = "0.4.2"
+source = "git+https://github.com/0xMiden/p3-miden.git?branch=lifted-stark-aux#488548cba9de51cff22f0d80c9b282296fe28f73"
+dependencies = [
+ "p3-air",
+ "p3-field",
+ "p3-matrix",
+ "p3-util",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "p3-miden-lifted-fri"
+version = "0.4.2"
+source = "git+https://github.com/0xMiden/p3-miden.git?branch=lifted-stark-aux#488548cba9de51cff22f0d80c9b282296fe28f73"
+dependencies = [
+ "p3-challenger",
+ "p3-commit",
+ "p3-dft",
+ "p3-field",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-miden-lmcs",
+ "p3-miden-transcript",
+ "p3-util",
+ "rand",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "p3-miden-lifted-prover"
+version = "0.4.2"
+source = "git+https://github.com/0xMiden/p3-miden.git?branch=lifted-stark-aux#488548cba9de51cff22f0d80c9b282296fe28f73"
+dependencies = [
+ "p3-challenger",
+ "p3-dft",
+ "p3-field",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-miden-lifted-air",
+ "p3-miden-lifted-fri",
+ "p3-miden-lifted-stark",
+ "p3-miden-lifted-verifier",
+ "p3-miden-lmcs",
+ "p3-miden-transcript",
+ "p3-util",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "p3-miden-lifted-stark"
+version = "0.4.2"
+source = "git+https://github.com/0xMiden/p3-miden.git?branch=lifted-stark-aux#488548cba9de51cff22f0d80c9b282296fe28f73"
+dependencies = [
+ "p3-field",
+ "p3-maybe-rayon",
+ "p3-miden-lifted-air",
+ "p3-miden-lifted-fri",
+ "p3-miden-lmcs",
+ "p3-miden-transcript",
+]
+
+[[package]]
+name = "p3-miden-lifted-verifier"
+version = "0.4.2"
+source = "git+https://github.com/0xMiden/p3-miden.git?branch=lifted-stark-aux#488548cba9de51cff22f0d80c9b282296fe28f73"
+dependencies = [
+ "p3-challenger",
+ "p3-dft",
+ "p3-field",
+ "p3-matrix",
+ "p3-miden-lifted-air",
+ "p3-miden-lifted-fri",
+ "p3-miden-lifted-stark",
+ "p3-miden-lmcs",
+ "p3-miden-transcript",
+ "p3-util",
+ "thiserror",
+]
+
+[[package]]
+name = "p3-miden-lmcs"
+version = "0.4.2"
+source = "git+https://github.com/0xMiden/p3-miden.git?branch=lifted-stark-aux#488548cba9de51cff22f0d80c9b282296fe28f73"
+dependencies = [
+ "p3-commit",
+ "p3-field",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-miden-stateful-hasher",
+ "p3-miden-transcript",
+ "p3-symmetric",
+ "p3-util",
+ "rand",
+ "serde",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "p3-miden-prover"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2049,6 +2167,26 @@ dependencies = [
  "p3-util",
  "serde",
  "tracing",
+]
+
+[[package]]
+name = "p3-miden-stateful-hasher"
+version = "0.4.2"
+source = "git+https://github.com/0xMiden/p3-miden.git?branch=lifted-stark-aux#488548cba9de51cff22f0d80c9b282296fe28f73"
+dependencies = [
+ "p3-field",
+ "p3-symmetric",
+]
+
+[[package]]
+name = "p3-miden-transcript"
+version = "0.4.2"
+source = "git+https://github.com/0xMiden/p3-miden.git?branch=lifted-stark-aux#488548cba9de51cff22f0d80c9b282296fe28f73"
+dependencies = [
+ "p3-challenger",
+ "p3-field",
+ "serde",
+ "thiserror",
 ]
 
 [[package]]

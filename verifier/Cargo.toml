@@ -30,4 +30,3 @@ miden-crypto.workspace = true
 # External dependencies
 tracing.workspace = true
 thiserror.workspace = true
-bincode = "1.3"

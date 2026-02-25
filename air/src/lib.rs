@@ -14,13 +14,13 @@ use miden_core::{
     precompile::PrecompileTranscriptState,
     program::{ProgramInfo, StackInputs, StackOutputs},
 };
-use miden_crypto::stark::matrix::{Matrix, RowMajorMatrix};
+use p3_matrix::Matrix;
 
 pub mod config;
 mod constraints;
 
 pub mod trace;
-use trace::{AUX_TRACE_WIDTH, AuxTraceBuilder, MainTraceRow, TRACE_WIDTH};
+use trace::{AUX_TRACE_WIDTH, MainTraceRow, TRACE_WIDTH};
 
 // RE-EXPORTS
 // ================================================================================================
@@ -30,7 +30,10 @@ mod export {
         serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
         utils::ToElements,
     };
-    pub use miden_crypto::stark::air::{Air, AirBuilder, BaseAir, MidenAir, MidenAirBuilder};
+    pub use p3_air::{AirBuilder, BaseAir, BaseAirWithPublicValues};
+    pub use p3_miden_lifted_air::{
+        AirWithPeriodicColumns, AuxBuilder, LiftedAir, LiftedAirBuilder,
+    };
 }
 
 pub use export::*;
@@ -127,65 +130,56 @@ impl Deserializable for PublicInputs {
 
 /// Miden VM Processor AIR implementation.
 ///
-/// This struct defines the constraints for the Miden VM processor.
-/// Generic over aux trace builder to support different extension fields.
-pub struct ProcessorAir<B = ()> {
-    /// Auxiliary trace builder for generating auxiliary columns.
-    aux_builder: Option<B>,
+/// This is a stateless struct that defines the constraints for the Miden VM processor.
+/// Auxiliary trace building is handled separately via [`AuxBuilder`].
+pub struct ProcessorAir;
+
+impl ProcessorAir {
+    pub fn new() -> Self {
+        Self
+    }
 }
 
-impl Default for ProcessorAir<()> {
+impl Default for ProcessorAir {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl ProcessorAir<()> {
-    /// Creates a new ProcessorAir without auxiliary trace support.
-    pub fn new() -> Self {
-        Self { aux_builder: None }
-    }
-}
+// --- Upstream trait impls for ProcessorAir ---
 
-impl<B> ProcessorAir<B> {
-    /// Creates a new ProcessorAir with auxiliary trace support.
-    pub fn with_aux_builder(builder: B) -> Self {
-        Self { aux_builder: Some(builder) }
-    }
-}
-
-impl<EF, B> MidenAir<Felt, EF> for ProcessorAir<B>
-where
-    EF: ExtensionField<Felt>,
-    B: AuxTraceBuilder<EF>,
-{
+impl BaseAir<Felt> for ProcessorAir {
     fn width(&self) -> usize {
         TRACE_WIDTH
     }
+}
 
-    fn aux_width(&self) -> usize {
-        // Return the number of extension field columns
-        // The prover will interpret the returned base field data as EF columns
-        AUX_TRACE_WIDTH
+impl BaseAirWithPublicValues<Felt> for ProcessorAir {}
+
+impl AirWithPeriodicColumns<Felt> for ProcessorAir {
+    fn periodic_columns(&self) -> &[Vec<Felt>] {
+        // ProcessorAir has no periodic columns; return a static empty slice.
+        const EMPTY: &[Vec<Felt>] = &[];
+        EMPTY
     }
+}
 
+// --- LiftedAir impl ---
+
+impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
     fn num_randomness(&self) -> usize {
         trace::AUX_TRACE_RAND_ELEMENTS
     }
 
-    fn build_aux_trace(
-        &self,
-        main: &RowMajorMatrix<Felt>,
-        challenges: &[EF],
-    ) -> Option<RowMajorMatrix<Felt>> {
-        let _span = tracing::info_span!("build_aux_trace").entered();
-
-        let builders = self.aux_builder.as_ref()?;
-
-        Some(builders.build_aux_columns(main, challenges))
+    fn aux_width(&self) -> usize {
+        AUX_TRACE_WIDTH
     }
 
-    fn eval<AB: MidenAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn num_aux_values(&self) -> usize {
+        AUX_TRACE_WIDTH
+    }
+
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         use crate::constraints;
 
         let main = builder.main();
