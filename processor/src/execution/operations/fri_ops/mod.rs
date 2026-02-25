@@ -3,7 +3,7 @@ use crate::{
     errors::OperationError,
     field::{BasedVectorSpace, Field, QuadFelt},
     processor::{Processor, StackInterface},
-    tracer::{OperationHelperRegisters, Tracer},
+    tracer::OperationHelperRegisters,
 };
 
 #[cfg(test)]
@@ -41,13 +41,11 @@ mod tests;
 /// operation has been executed, the top 10 elements of the stack can be considered to be
 /// "garbage".
 #[inline(always)]
-pub(super) fn op_fri_ext2fold4<P, T>(
+pub(super) fn op_fri_ext2fold4<P>(
     processor: &mut P,
-    tracer: &mut T,
 ) -> Result<OperationHelperRegisters, OperationError>
 where
     P: Processor,
-    T: Tracer<Processor = P>,
 {
     // --- read all relevant variables from the stack ---------------------
     let query_values = get_query_values(processor);
@@ -107,7 +105,6 @@ where
     let poe4 = poe2 * poe2;
 
     processor.stack_mut().decrement_size();
-    tracer.decrement_stack_size();
 
     processor.stack_mut().set(0, tmp0[1]);
     processor.stack_mut().set(1, tmp0[0]);

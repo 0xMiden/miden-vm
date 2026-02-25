@@ -45,7 +45,6 @@ where
         .processor
         .execute_before_enter_decorators(current_node_id, current_forest, state.host)?;
 
-    state.tracer.start_context();
     state.processor.save_context_and_truncate_stack();
 
     let callee_hash = current_forest[call_node.callee()].digest();
@@ -125,8 +124,6 @@ where
             state.host,
         )));
     }
-    state.tracer.restore_context();
-
     // Finalize the clock cycle corresponding to the END operation.
     finalize_clock_cycle_with_continuation(
         state.processor,
