@@ -205,7 +205,7 @@ fn enforce_overflow_flag_constraints<AB>(
     let constraint = (AB::Expr::ONE - op_flags.overflow()) * (depth - AB::Expr::from_u16(16));
 
     builder.tagged(STACK_OVERFLOW_BASE_ID + 5, STACK_OVERFLOW_NAMES[5], |builder| {
-        builder.when_transition().assert_zero(constraint);
+        builder.assert_zero(constraint);
     });
 }
 
