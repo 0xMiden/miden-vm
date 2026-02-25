@@ -26,7 +26,7 @@
 //! - First row: b_chiplets[0] = 1 (AIR boundary constraint)
 //! - Last row: b_chiplets[last] = reduced_kernel_digests (verified via aux_finals)
 
-use miden_crypto::stark::air::MidenAirBuilder;
+use p3_miden_lifted_air::LiftedAirBuilder;
 
 use crate::MainTraceRow;
 
@@ -42,7 +42,7 @@ pub fn enforce_main<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     system::enforce_main(builder, local, next);
     range::enforce_main(builder, local, next);
@@ -54,7 +54,7 @@ pub fn enforce_bus<AB>(
     local: &MainTraceRow<AB::Var>,
     _next: &MainTraceRow<AB::Var>,
 ) where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     range::bus::enforce_bus(builder, local);
 }

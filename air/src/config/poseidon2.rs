@@ -3,95 +3,61 @@
 //! This module provides a STARK configuration using the Poseidon2 hash function,
 //! which is an algebraic hash function designed for STARK-friendly operations.
 
-use miden_crypto::{
-    field::BinomialExtensionField,
-    hash::poseidon2::{
-        Poseidon2Challenger, Poseidon2Compression, Poseidon2Hasher, Poseidon2Permutation256,
-    },
-    stark::{
-        StarkConfig,
-        commit::{ExtensionMmcs, MerkleTreeMmcs},
-        dft::Radix2DitParallel,
-        pcs::{FriParameters, TwoAdicFriPcs},
-    },
-};
+use miden_crypto::hash::poseidon2::Poseidon2Permutation256;
+use p3_challenger::DuplexChallenger;
+use p3_field::Field;
+use p3_miden_lifted_stark::StarkConfig;
+use p3_miden_lmcs::LmcsConfig;
+use p3_miden_stateful_hasher::StatefulSponge;
+use p3_symmetric::TruncatedPermutation;
 
+use super::{Dft, LiftedConfig, PCS_PARAMS};
 use crate::Felt;
 
-/// Challenge field type for Poseidon2 config (degree-2 extension of Felt)
-pub type Challenge = BinomialExtensionField<Felt, 2>;
+const WIDTH: usize = 12;
+const RATE: usize = 8;
+const DIGEST: usize = 4;
 
-/// Poseidon2 hasher (sponge-based)
-type Hash = Poseidon2Hasher;
+/// Poseidon2 permutation
+type Perm = Poseidon2Permutation256;
 
-/// Compression function using Poseidon2 (2-to-1 compression)
-type Compress = Poseidon2Compression;
+/// Packed field element type (for SIMD-friendly LMCS)
+type PackedFelt = <Felt as Field>::Packing;
 
-/// Merkle tree commitment scheme over base field using Poseidon2
-/// Note: Poseidon2 uses Felt (field elements) for digests, not u8 (bytes)
-type ValMmcs = MerkleTreeMmcs<Felt, Felt, Hash, Compress, 4>;
+/// Poseidon2 sponge for LMCS leaf hashing
+type Sponge = StatefulSponge<Perm, WIDTH, RATE, DIGEST>;
 
-/// Merkle tree commitment scheme over extension field using Poseidon2
-type ChallengeMmcs = ExtensionMmcs<Felt, Challenge, ValMmcs>;
+/// Compression function using Poseidon2 (2-to-1 compression via truncated permutation)
+type Compress = TruncatedPermutation<Perm, 2, DIGEST, WIDTH>;
 
-/// DFT implementation for polynomial operations
-type Dft = Radix2DitParallel<Felt>;
+/// LMCS commitment scheme using Poseidon2.
+/// Note: Poseidon2 uses Felt (field elements) for digests, not u8 (bytes).
+type LmcsType = LmcsConfig<PackedFelt, PackedFelt, Sponge, Compress, WIDTH, DIGEST>;
 
-/// FRI-based PCS using Poseidon2
-type FriPcs = TwoAdicFriPcs<Felt, Dft, ValMmcs, ChallengeMmcs>;
-
-/// Challenger for Fiat-Shamir using Poseidon2
-type Challenger = Poseidon2Challenger<Felt>;
-
-/// Complete STARK configuration using Poseidon2
-pub type StarkConfigPoseidon2 = StarkConfig<FriPcs, Challenge, Challenger>;
+/// Challenger for Fiat-Shamir using Poseidon2 (duplex sponge)
+type Challenger = DuplexChallenger<Felt, Perm, WIDTH, RATE>;
 
 /// Creates a Poseidon2-based STARK configuration.
 ///
 /// This configuration uses:
-/// - Poseidon2 hash function for Merkle trees and Fiat-Shamir
+/// - Poseidon2 hash function for LMCS commitments and Fiat-Shamir
 /// - FRI with 8x blowup (log_blowup = 3)
 /// - 27 query repetitions
 /// - 16 bits of proof-of-work
-/// - Binary folding (log_folding_factor = 1) - fold by 2 each round
-///
-/// # Advantages of Poseidon2
-///
-/// - **STARK-friendly**: Poseidon2 is an algebraic hash function optimized for STARK circuits, with
-///   efficient constraint representation.
-/// - **Improved performance**: Compared to Poseidon (original), Poseidon2 offers better performance
-///   with similar security guarantees.
-/// - **Native to field arithmetic**: Being algebraic, Poseidon2 constraints are more efficient to
-///   verify within the VM.
+/// - Binary folding (arity 2)
 ///
 /// # Returns
 ///
-/// A `StarkConfig` instance configured for Poseidon2-based proving.
-pub fn create_poseidon2_config() -> StarkConfigPoseidon2 {
+/// A `LiftedConfig` instance configured for Poseidon2-based proving.
+pub fn create_poseidon2_config() -> LiftedConfig<LmcsType, Challenger> {
     let perm = Poseidon2Permutation256;
-    let hash = Poseidon2Hasher::new(perm);
-    let compress = Poseidon2Compression::new(perm);
-
-    let val_mmcs = ValMmcs::new(hash, compress);
-    let challenge_mmcs = ChallengeMmcs::new(val_mmcs.clone());
-
+    let sponge = Sponge::new(perm);
+    let compress = Compress::new(perm);
+    let lmcs = LmcsType::new(sponge, compress);
     let dft = Dft::default();
 
-    let fri_config = FriParameters {
-        log_blowup: 3,          // 8x blowup factor
-        log_final_poly_len: 7,  // Final polynomial degree 2^7 = 128
-        num_queries: 27,        // Number of FRI query repetitions
-        proof_of_work_bits: 16, // Grinding parameter
-        mmcs: challenge_mmcs,
-        log_folding_factor: 1, /* Binary folding
-                                * NOTE:  (log_folding_factor: 3) causes
-                                * RootMismatch errors
-                                * in verification. This appears to be a bug in the
-                                * 0xMiden/Plonky3 fork. */
-    };
+    let config = StarkConfig { pcs: PCS_PARAMS, lmcs, dft };
+    let challenger = Challenger::new(perm);
 
-    let pcs = FriPcs::new(dft, val_mmcs, fri_config);
-    let challenger = Poseidon2Challenger::new(perm);
-
-    StarkConfig::new(pcs, challenger)
+    LiftedConfig { config, challenger }
 }

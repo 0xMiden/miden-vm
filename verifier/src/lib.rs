@@ -5,10 +5,9 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::vec::Vec;
+use alloc::{string::String, vec::Vec};
 
 use miden_air::{ProcessorAir, PublicInputs, config};
-use miden_crypto::stark;
 
 // RE-EXPORTS
 // ================================================================================================
@@ -93,7 +92,7 @@ pub fn verify_with_precompiles(
 ) -> Result<(u32, PrecompileTranscriptDigest), VerificationError> {
     let security_level = proof.security_level();
 
-    let (hash_fn, proof_bytes, precompile_requests) = proof.into_parts();
+    let (hash_fn, proof_bytes, log_trace_height, precompile_requests) = proof.into_parts();
 
     // Recompute the precompile transcript by verifying all precompile requests and recording the
     // commitments.
@@ -111,6 +110,7 @@ pub fn verify_with_precompiles(
         stack_outputs,
         pc_transcript_state,
         hash_fn,
+        log_trace_height,
         proof_bytes,
     )?;
 
@@ -128,6 +128,7 @@ fn verify_stark(
     stack_outputs: StackOutputs,
     pc_transcript_state: PrecompileTranscriptState,
     hash_fn: HashFunction,
+    log_trace_height: u32,
     proof_bytes: Vec<u8>,
 ) -> Result<(), VerificationError> {
     let program_hash = *program_info.program_hash();
@@ -135,46 +136,26 @@ fn verify_stark(
         PublicInputs::new(program_info, stack_inputs, stack_outputs, pc_transcript_state);
     let public_values = pub_inputs.to_elements();
     let air = ProcessorAir::new();
+    let log_height = log_trace_height as usize;
+    let err = |reason| VerificationError::ProgramVerificationError { program_hash, reason };
 
     match hash_fn {
-        HashFunction::Blake3_256 => {
-            let config = config::create_blake3_256_config();
-            let proof = bincode::deserialize(&proof_bytes)
-                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
-            stark::verify(&config, &air, &proof, &public_values, &[])
-                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
-        },
-        HashFunction::Rpo256 => {
-            let config = config::create_rpo_config();
-            let proof = bincode::deserialize(&proof_bytes)
-                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
-            stark::verify(&config, &air, &proof, &public_values, &[])
-                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
-        },
-        HashFunction::Rpx256 => {
-            let config = config::create_rpx_config();
-            let proof = bincode::deserialize(&proof_bytes)
-                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
-            stark::verify(&config, &air, &proof, &public_values, &[])
-                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
-        },
-        HashFunction::Poseidon2 => {
-            let config = config::create_poseidon2_config();
-            let proof = bincode::deserialize(&proof_bytes)
-                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
-            stark::verify(&config, &air, &proof, &public_values, &[])
-                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
-        },
-        HashFunction::Keccak => {
-            let config = config::create_keccak_config();
-            let proof = bincode::deserialize(&proof_bytes)
-                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
-            stark::verify(&config, &air, &proof, &public_values, &[])
-                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
-        },
-    }?;
-
-    Ok(())
+        HashFunction::Blake3_256 => config::create_blake3_256_config()
+            .verify(&air, log_height, &public_values, &proof_bytes)
+            .map_err(err),
+        HashFunction::Rpo256 => config::create_rpo_config()
+            .verify(&air, log_height, &public_values, &proof_bytes)
+            .map_err(err),
+        HashFunction::Rpx256 => config::create_rpx_config()
+            .verify(&air, log_height, &public_values, &proof_bytes)
+            .map_err(err),
+        HashFunction::Poseidon2 => config::create_poseidon2_config()
+            .verify(&air, log_height, &public_values, &proof_bytes)
+            .map_err(err),
+        HashFunction::Keccak => config::create_keccak_config()
+            .verify(&air, log_height, &public_values, &proof_bytes)
+            .map_err(err),
+    }
 }
 
 // ERRORS
@@ -183,8 +164,8 @@ fn verify_stark(
 /// Errors that can occur during proof verification.
 #[derive(Debug, thiserror::Error)]
 pub enum VerificationError {
-    #[error("failed to verify proof for program with hash {0}")]
-    ProgramVerificationError(Word),
+    #[error("failed to verify proof for program with hash {program_hash}: {reason}")]
+    ProgramVerificationError { program_hash: Word, reason: String },
     #[error("failed to verify precompile calls")]
     PrecompileVerificationError(#[source] PrecompileVerificationError),
 }

@@ -293,11 +293,12 @@ impl<EF: ExtensionField<Felt>> AuxTraceBuilder<EF> for AuxTraceBuilders {
     ///
     /// This adapts the column-major `build_aux_columns` method to work with Plonky3's
     /// row-major format by converting the input and output accordingly.
+    /// Returns `RowMajorMatrix<EF>` — the lifted prover handles EF→F flattening.
     fn build_aux_columns(
         &self,
         main_trace: &RowMajorMatrix<Felt>,
         challenges: &[EF],
-    ) -> RowMajorMatrix<Felt> {
+    ) -> RowMajorMatrix<EF> {
         let _span = tracing::info_span!("build_aux_columns_wrapper").entered();
 
         // Convert row-major to column-major MainTrace
@@ -306,7 +307,7 @@ impl<EF: ExtensionField<Felt>> AuxTraceBuilder<EF> for AuxTraceBuilders {
         // Build auxiliary columns using column-major logic
         let aux_columns = self.build_aux_columns(&main_trace_col_major, challenges);
 
-        // Convert column-major aux columns back to row-major
+        // Convert column-major aux columns back to row-major (no base-field flattening)
         row_major_adapter::aux_columns_to_row_major(aux_columns, main_trace.height())
     }
 }

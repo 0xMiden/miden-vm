@@ -1,8 +1,4 @@
 //! Utilities for converting between row-major and column-major matrix formats.
-//!
-//! This module provides functions for:
-//! - Converting between row-major (Plonky3) and column-major (Miden) matrix formats
-//! - Building auxiliary trace columns from row-major main traces
 
 use alloc::vec::Vec;
 
@@ -11,8 +7,7 @@ use tracing::instrument;
 
 use crate::{
     Felt,
-    field::ExtensionField,
-    trace::AuxTraceBuilders,
+    field::{ExtensionField, PrimeCharacteristicRing},
     utils::{ColMatrix, Matrix, RowMajorMatrix},
 };
 
@@ -64,28 +59,13 @@ fn find_last_program_row(matrix: &RowMajorMatrix<Felt>) -> usize {
     num_rows - 1
 }
 
-/// Converts column-major extension field columns to row-major base field matrix.
-///
-/// This function performs two operations:
-/// 1. Transposes from column-major to row-major layout (using cache-blocked transposition)
-/// 2. Flattens extension field elements to base field representation
-///
-/// The input is a vector of EF columns (each column is a Vec<EF>).
-/// The output is a row-major matrix where each EF element is expanded to its base field
-/// coefficients.
-///
-/// For example, with 2 EF columns and 3 rows:
-/// - Input: [[A0, A1, A2], [B0, B1, B2]] where Ai, Bi are EF elements
-/// - Output: Row-major matrix with rows [A0_coeffs..., B0_coeffs...], [A1_coeffs..., B1_coeffs...],
-///   etc.
-///
-/// Uses cache-blocked transposition to improve memory layout for better cache behavior
-/// in downstream operations.
+/// Converts auxiliary columns from column-major `Vec<Vec<EF>>` to a row-major
+/// `RowMajorMatrix<EF>`.
 #[instrument(skip_all, fields(num_cols = aux_columns.len(), trace_len))]
 pub fn aux_columns_to_row_major<EF: ExtensionField<Felt>>(
     aux_columns: Vec<Vec<EF>>,
     trace_len: usize,
-) -> RowMajorMatrix<Felt> {
+) -> RowMajorMatrix<EF> {
     if aux_columns.is_empty() {
         return RowMajorMatrix::new(Vec::new(), 0);
     }
@@ -99,34 +79,5 @@ pub fn aux_columns_to_row_major<EF: ExtensionField<Felt>>(
     }
 
     // Use optimized cache-blocked transposition: column-major EF -> row-major EF
-    let row_major_ef_matrix = RowMajorMatrix::new(col_major_ef_data, trace_len).transpose();
-    row_major_ef_matrix.flatten_to_base()
-}
-
-/// Builds auxiliary trace columns from a row-major main trace.
-///
-/// This function handles the format conversion between Plonky3's row-major format and
-/// Miden's internal column-major format:
-/// 1. Converts the row-major main trace to column-major `MainTrace`
-/// 2. Builds auxiliary columns using the provided builders
-/// 3. Converts the result back to row-major format
-///
-/// This is the main entry point for auxiliary trace generation when using Plonky3.
-#[allow(dead_code)]
-#[instrument(skip_all, fields(rows = main_trace.height(), cols = main_trace.width()))]
-pub fn build_aux_columns<EF: ExtensionField<Felt>>(
-    aux_builders: &AuxTraceBuilders,
-    main_trace: &RowMajorMatrix<Felt>,
-    challenges: &[EF],
-) -> RowMajorMatrix<Felt> {
-    let _span = tracing::info_span!("build_aux_columns_row_major").entered();
-
-    // Convert row-major to column-major MainTrace
-    let main_trace_col_major = row_major_to_main_trace(main_trace);
-
-    // Build auxiliary columns using column-major logic
-    let aux_columns = aux_builders.build_aux_columns(&main_trace_col_major, challenges);
-
-    // Convert column-major aux columns back to row-major
-    aux_columns_to_row_major(aux_columns, main_trace.height())
+    RowMajorMatrix::new(col_major_ef_data, trace_len).transpose()
 }

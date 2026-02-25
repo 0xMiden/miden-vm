@@ -90,6 +90,26 @@ thiserror       = { version = "2.0", default-features = false }
 tokio           = { version = "1.48", default-features = false }
 tracing         = { version = "0.1", default-features = false, features = ["attributes"] }
 
+# Lifted STARK crates (PR #35: lifted-stark-aux)
+p3-miden-lifted-stark = { git = "https://github.com/0xMiden/p3-miden.git", branch = "lifted-stark-aux" }
+p3-miden-lifted-air = { git = "https://github.com/0xMiden/p3-miden.git", branch = "lifted-stark-aux" }
+p3-miden-lifted-prover = { git = "https://github.com/0xMiden/p3-miden.git", branch = "lifted-stark-aux" }
+p3-miden-lifted-verifier = { git = "https://github.com/0xMiden/p3-miden.git", branch = "lifted-stark-aux" }
+p3-miden-lifted-fri = { git = "https://github.com/0xMiden/p3-miden.git", branch = "lifted-stark-aux" }
+p3-miden-lmcs = { git = "https://github.com/0xMiden/p3-miden.git", branch = "lifted-stark-aux" }
+p3-miden-transcript = { git = "https://github.com/0xMiden/p3-miden.git", branch = "lifted-stark-aux" }
+p3-miden-stateful-hasher = { git = "https://github.com/0xMiden/p3-miden.git", branch = "lifted-stark-aux" }
+
+# Upstream Plonky3 crates (used directly by lifted-stark configs)
+p3-air = { version = "0.4.2", default-features = false }
+p3-field = { version = "0.4.2", default-features = false }
+p3-matrix = { version = "0.4.2", default-features = false }
+p3-challenger = { version = "0.4.2", default-features = false }
+p3-dft = { version = "0.4.2", default-features = false }
+p3-symmetric = { version = "0.4.2", default-features = false }
+p3-blake3 = { version = "0.4.2", default-features = false }
+p3-keccak = { version = "0.4.2", default-features = false }
+
 # WASM support
 getrandom = { version = "0.2", default-features = false, features = ["js"] }
 

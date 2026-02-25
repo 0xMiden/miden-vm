@@ -35,7 +35,8 @@
 //!   integrated alongside decoder/stack gating as those constraints are wired in.
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::MidenAirBuilder;
+use p3_air::AirBuilder;
+use p3_miden_lifted_air::LiftedAirBuilder;
 
 use crate::MainTraceRow;
 
@@ -48,7 +49,7 @@ pub fn enforce_main<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     let clk = local.clk.clone();
     let clk_next = next.clk.clone();

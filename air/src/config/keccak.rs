@@ -2,88 +2,62 @@
 
 use alloc::vec;
 
-use miden_crypto::{
-    field::BinomialExtensionField,
-    hash::keccak::{Keccak256Hash, KeccakF, VECTOR_LEN},
-    stark::{
-        StarkConfig,
-        challenger::{HashChallenger, SerializingChallenger64},
-        commit::{ExtensionMmcs, MerkleTreeMmcs},
-        dft::Radix2DitParallel,
-        pcs::{FriParameters, TwoAdicFriPcs},
-        symmetric::{CompressionFunctionFromHasher, PaddingFreeSponge, SerializingHasher},
-    },
-};
+use p3_challenger::{HashChallenger, SerializingChallenger64};
+use p3_keccak::{Keccak256Hash, KeccakF, VECTOR_LEN};
+use p3_miden_lifted_stark::StarkConfig;
+use p3_miden_lmcs::LmcsConfig;
+use p3_miden_stateful_hasher::{SerializingStatefulSponge, StatefulSponge};
+use p3_symmetric::{CompressionFunctionFromHasher, PaddingFreeSponge};
 
+use super::{Dft, LiftedConfig, PCS_PARAMS};
 use crate::Felt;
 
-/// Challenge field type for Keccak config (degree-2 extension of Felt)
-pub type Challenge = BinomialExtensionField<Felt, 2>;
+const WIDTH: usize = 25;
+const RATE: usize = 17;
+const DIGEST: usize = 4;
 
-/// Standard Keccak256 for byte hashing (used by challenger)
-pub type ByteHash = Keccak256Hash;
+/// Keccak sponge for LMCS leaf hashing (native u64 state)
+type KeccakStatefulSponge = StatefulSponge<KeccakF, WIDTH, RATE, DIGEST>;
 
-/// Keccak optimized for u64 field elements (padding-free sponge)
-pub type U64Hash = PaddingFreeSponge<KeccakF, 25, 17, 4>;
+/// Serializing wrapper for the Keccak sponge (field element → u64 conversion)
+type Sponge = SerializingStatefulSponge<KeccakStatefulSponge>;
 
-/// Field element serializing hasher using Keccak
-pub type FieldHash = SerializingHasher<U64Hash>;
+/// Keccak optimized for u64 field elements (padding-free sponge, for Merkle tree compression)
+type KeccakMmcsSponge = PaddingFreeSponge<KeccakF, WIDTH, RATE, DIGEST>;
 
 /// Compression function derived from Keccak hasher
-pub type MyCompress = CompressionFunctionFromHasher<U64Hash, 2, 4>;
+type Compress = CompressionFunctionFromHasher<KeccakMmcsSponge, 2, DIGEST>;
 
-/// Merkle tree commitment scheme over base field using Keccak
-pub type ValMmcs = MerkleTreeMmcs<[Felt; VECTOR_LEN], [u64; VECTOR_LEN], FieldHash, MyCompress, 4>;
-
-/// Merkle tree commitment scheme over extension field
-pub type ChallengeMmcs = ExtensionMmcs<Felt, Challenge, ValMmcs>;
-
-/// DFT implementation for polynomial operations
-pub type Dft = Radix2DitParallel<Felt>;
-
-/// FRI-based PCS using Keccak
-pub type FriPcs = TwoAdicFriPcs<Felt, Dft, ValMmcs, ChallengeMmcs>;
+/// LMCS commitment scheme using Keccak.
+/// PF = `[Felt; VECTOR_LEN]` and PD = `[u64; VECTOR_LEN]` for SIMD parallelization,
+/// where `VECTOR_LEN` is platform-specific (1, 2, 4, or 8).
+type LmcsType = LmcsConfig<[Felt; VECTOR_LEN], [u64; VECTOR_LEN], Sponge, Compress, WIDTH, DIGEST>;
 
 /// Challenger for Fiat-Shamir using Keccak256
-pub type Challenger = SerializingChallenger64<Felt, HashChallenger<u8, ByteHash, 32>>;
-
-/// Complete STARK configuration using Keccak
-pub type StarkConfigKeccak = StarkConfig<FriPcs, Challenge, Challenger>;
+type Challenger = SerializingChallenger64<Felt, HashChallenger<u8, Keccak256Hash, 32>>;
 
 /// Creates a Keccak-based STARK configuration.
 ///
 /// This configuration uses:
 /// - Keccak256 for the Fiat-Shamir challenger
-/// - KeccakF permutation for field element hashing in Merkle trees
+/// - KeccakF permutation for field element hashing in LMCS commitments
 /// - FRI with 8x blowup (log_blowup = 3)
 /// - 27 query repetitions
 /// - 16 bits of proof-of-work
-/// - Binary folding (log_folding_factor = 1)
+/// - Binary folding (arity 2)
 ///
 /// # Returns
 ///
-/// A `StarkConfig` instance configured for Keccak-based proving.
-pub fn create_keccak_config() -> StarkConfigKeccak {
-    let byte_hash = ByteHash {};
-    let u64_hash = U64Hash::new(KeccakF {});
-    let compress = MyCompress::new(u64_hash);
-
-    let field_hash = FieldHash::new(u64_hash);
-    let val_mmcs = ValMmcs::new(field_hash, compress);
-    let challenge_mmcs = ChallengeMmcs::new(val_mmcs.clone());
+/// A `LiftedConfig` instance configured for Keccak-based proving.
+pub fn create_keccak_config() -> LiftedConfig<LmcsType, Challenger> {
+    let sponge = Sponge::new(StatefulSponge::new(KeccakF {}));
+    let inner = KeccakMmcsSponge::new(KeccakF {});
+    let compress = Compress::new(inner);
+    let lmcs = LmcsType::new(sponge, compress);
     let dft = Dft::default();
 
-    let fri_config = FriParameters {
-        log_blowup: 3,          // 8x blowup factor
-        log_final_poly_len: 7,  // Final polynomial degree 2^7 = 128
-        num_queries: 27,        // Number of FRI query repetitions
-        proof_of_work_bits: 16, // Grinding parameter
-        mmcs: challenge_mmcs,
-        log_folding_factor: 1, // Binary folding
-    };
+    let config = StarkConfig { pcs: PCS_PARAMS, lmcs, dft };
+    let challenger = Challenger::from_hasher(vec![], Keccak256Hash {});
 
-    let pcs = FriPcs::new(dft, val_mmcs, fri_config);
-    let challenger = Challenger::from_hasher(vec![], byte_hash);
-
-    StarkConfig::new(pcs, challenger)
+    LiftedConfig { config, challenger }
 }
