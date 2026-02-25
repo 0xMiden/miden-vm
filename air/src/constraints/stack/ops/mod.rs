@@ -14,7 +14,10 @@ use crate::{
     MainTraceRow,
     constraints::{
         op_flags::OpFlags,
-        tagging::{TAG_STACK_OPS_BASE, TaggingAirBuilderExt},
+        tagging::{
+            TAG_STACK_OPS_BASE, TagGroup, TaggingAirBuilderExt, tagged_assert_zero,
+            tagged_assert_zeros,
+        },
     },
 };
 
@@ -22,7 +25,6 @@ use crate::{
 // ================================================================================================
 
 /// Number of stack ops constraints.
-#[allow(dead_code)]
 pub const NUM_CONSTRAINTS: usize = 88;
 
 /// Base tag ID for stack ops constraints.
@@ -135,6 +137,12 @@ const STACK_OPS_NAMES: [&str; NUM_CONSTRAINTS] = [
     "stack.io.sdepth",
 ];
 
+/// Tag metadata for this constraint group.
+const STACK_OPS_TAGS: TagGroup = TagGroup {
+    base: STACK_OPS_BASE_ID,
+    names: &STACK_OPS_NAMES,
+};
+
 // ENTRY POINT
 // ================================================================================================
 
@@ -234,28 +242,28 @@ pub fn enforce_main<AB>(
     let mut idx = 0usize;
 
     // PAD
-    emit(builder, &mut idx, is_pad * s0_next.clone());
+    assert_zero(builder, &mut idx, is_pad * s0_next.clone());
 
     // DUP*
-    emit(builder, &mut idx, is_dup * (s0_next.clone() - s0.clone()));
-    emit(builder, &mut idx, is_dup1 * (s0_next.clone() - s1.clone()));
-    emit(builder, &mut idx, is_dup2 * (s0_next.clone() - s2.clone()));
-    emit(builder, &mut idx, is_dup3 * (s0_next.clone() - s3.clone()));
-    emit(builder, &mut idx, is_dup4 * (s0_next.clone() - s4.clone()));
-    emit(builder, &mut idx, is_dup5 * (s0_next.clone() - s5.clone()));
-    emit(builder, &mut idx, is_dup6 * (s0_next.clone() - s6.clone()));
-    emit(builder, &mut idx, is_dup7 * (s0_next.clone() - s7.clone()));
-    emit(builder, &mut idx, is_dup9 * (s0_next.clone() - s9.clone()));
-    emit(builder, &mut idx, is_dup11 * (s0_next.clone() - s11.clone()));
-    emit(builder, &mut idx, is_dup13 * (s0_next.clone() - s13.clone()));
-    emit(builder, &mut idx, is_dup15 * (s0_next.clone() - s15.clone()));
+    assert_zero(builder, &mut idx, is_dup * (s0_next.clone() - s0.clone()));
+    assert_zero(builder, &mut idx, is_dup1 * (s0_next.clone() - s1.clone()));
+    assert_zero(builder, &mut idx, is_dup2 * (s0_next.clone() - s2.clone()));
+    assert_zero(builder, &mut idx, is_dup3 * (s0_next.clone() - s3.clone()));
+    assert_zero(builder, &mut idx, is_dup4 * (s0_next.clone() - s4.clone()));
+    assert_zero(builder, &mut idx, is_dup5 * (s0_next.clone() - s5.clone()));
+    assert_zero(builder, &mut idx, is_dup6 * (s0_next.clone() - s6.clone()));
+    assert_zero(builder, &mut idx, is_dup7 * (s0_next.clone() - s7.clone()));
+    assert_zero(builder, &mut idx, is_dup9 * (s0_next.clone() - s9.clone()));
+    assert_zero(builder, &mut idx, is_dup11 * (s0_next.clone() - s11.clone()));
+    assert_zero(builder, &mut idx, is_dup13 * (s0_next.clone() - s13.clone()));
+    assert_zero(builder, &mut idx, is_dup15 * (s0_next.clone() - s15.clone()));
 
     // CLK
     let clk: AB::Expr = local.clk.clone().into();
-    emit(builder, &mut idx, is_clk * (s0_next.clone() - clk));
+    assert_zero(builder, &mut idx, is_clk * (s0_next.clone() - clk));
 
     // SWAP
-    emit_list(
+    assert_zeros(
         builder,
         &mut idx,
         "stack.ops.swap",
@@ -266,25 +274,25 @@ pub fn enforce_main<AB>(
     );
 
     // MOVUP
-    emit(builder, &mut idx, is_movup2 * (s0_next.clone() - s2.clone()));
-    emit(builder, &mut idx, is_movup3 * (s0_next.clone() - s3.clone()));
-    emit(builder, &mut idx, is_movup4 * (s0_next.clone() - s4.clone()));
-    emit(builder, &mut idx, is_movup5 * (s0_next.clone() - s5.clone()));
-    emit(builder, &mut idx, is_movup6 * (s0_next.clone() - s6.clone()));
-    emit(builder, &mut idx, is_movup7 * (s0_next.clone() - s7.clone()));
-    emit(builder, &mut idx, is_movup8 * (s0_next.clone() - s8.clone()));
+    assert_zero(builder, &mut idx, is_movup2 * (s0_next.clone() - s2.clone()));
+    assert_zero(builder, &mut idx, is_movup3 * (s0_next.clone() - s3.clone()));
+    assert_zero(builder, &mut idx, is_movup4 * (s0_next.clone() - s4.clone()));
+    assert_zero(builder, &mut idx, is_movup5 * (s0_next.clone() - s5.clone()));
+    assert_zero(builder, &mut idx, is_movup6 * (s0_next.clone() - s6.clone()));
+    assert_zero(builder, &mut idx, is_movup7 * (s0_next.clone() - s7.clone()));
+    assert_zero(builder, &mut idx, is_movup8 * (s0_next.clone() - s8.clone()));
 
     // MOVDN
-    emit(builder, &mut idx, is_movdn2 * (s2_next.clone() - s0.clone()));
-    emit(builder, &mut idx, is_movdn3 * (s3_next.clone() - s0.clone()));
-    emit(builder, &mut idx, is_movdn4 * (s4_next.clone() - s0.clone()));
-    emit(builder, &mut idx, is_movdn5 * (s5_next.clone() - s0.clone()));
-    emit(builder, &mut idx, is_movdn6 * (s6_next.clone() - s0.clone()));
-    emit(builder, &mut idx, is_movdn7 * (s7_next.clone() - s0.clone()));
-    emit(builder, &mut idx, is_movdn8 * (s8_next.clone() - s0.clone()));
+    assert_zero(builder, &mut idx, is_movdn2 * (s2_next.clone() - s0.clone()));
+    assert_zero(builder, &mut idx, is_movdn3 * (s3_next.clone() - s0.clone()));
+    assert_zero(builder, &mut idx, is_movdn4 * (s4_next.clone() - s0.clone()));
+    assert_zero(builder, &mut idx, is_movdn5 * (s5_next.clone() - s0.clone()));
+    assert_zero(builder, &mut idx, is_movdn6 * (s6_next.clone() - s0.clone()));
+    assert_zero(builder, &mut idx, is_movdn7 * (s7_next.clone() - s0.clone()));
+    assert_zero(builder, &mut idx, is_movdn8 * (s8_next.clone() - s0.clone()));
 
     // SWAPW
-    emit_list(
+    assert_zeros(
         builder,
         &mut idx,
         "stack.ops.swapw",
@@ -301,7 +309,7 @@ pub fn enforce_main<AB>(
     );
 
     // SWAPW2
-    emit_list(
+    assert_zeros(
         builder,
         &mut idx,
         "stack.ops.swapw2",
@@ -318,7 +326,7 @@ pub fn enforce_main<AB>(
     );
 
     // SWAPW3
-    emit_list(
+    assert_zeros(
         builder,
         &mut idx,
         "stack.ops.swapw3",
@@ -335,7 +343,7 @@ pub fn enforce_main<AB>(
     );
 
     // SWAPDW
-    emit_list(
+    assert_zeros(
         builder,
         &mut idx,
         "stack.ops.swapdw",
@@ -364,7 +372,7 @@ pub fn enforce_main<AB>(
     let cswap_c_inv = AB::Expr::ONE - cswap_c.clone();
 
     // Binary constraint for the cswap selector (must be 0 or 1).
-    emit_list(
+    assert_zeros(
         builder,
         &mut idx,
         "stack.ops.cswap",
@@ -380,7 +388,7 @@ pub fn enforce_main<AB>(
     );
 
     // Binary constraint for the cswapw selector (same selector as cswap).
-    emit_list(
+    assert_zeros(
         builder,
         &mut idx,
         "stack.ops.cswapw",
@@ -414,10 +422,10 @@ pub fn enforce_main<AB>(
     );
 
     // ASSERT: top element must be 1 (shift handled by stack general).
-    emit(builder, &mut idx, is_assert * (s0 - AB::Expr::ONE));
+    assert_zero(builder, &mut idx, is_assert * (s0 - AB::Expr::ONE));
 
     // CALLER: load fn_hash into the top 4 stack elements.
-    emit_list(
+    assert_zeros(
         builder,
         &mut idx,
         "stack.system.caller",
@@ -430,30 +438,21 @@ pub fn enforce_main<AB>(
     );
 
     // SDEPTH: push current stack depth to the top.
-    emit(builder, &mut idx, is_sdepth * (s0_next - stack_depth));
+    assert_zero(builder, &mut idx, is_sdepth * (s0_next - stack_depth));
 }
 
 // CONSTRAINT HELPERS
 // ================================================================================================
 
-fn emit<AB: MidenAirBuilder>(builder: &mut AB, idx: &mut usize, expr: AB::Expr) {
-    let id = STACK_OPS_BASE_ID + *idx;
-    let name = STACK_OPS_NAMES[*idx];
-    builder.tagged(id, name, |builder| {
-        builder.when_transition().assert_zero(expr);
-    });
-    *idx += 1;
+fn assert_zero<AB: TaggingAirBuilderExt>(builder: &mut AB, idx: &mut usize, expr: AB::Expr) {
+    tagged_assert_zero(builder, &STACK_OPS_TAGS, idx, expr);
 }
 
-fn emit_list<AB: MidenAirBuilder, const N: usize>(
+fn assert_zeros<AB: TaggingAirBuilderExt, const N: usize>(
     builder: &mut AB,
     idx: &mut usize,
     namespace: &'static str,
     exprs: [AB::Expr; N],
 ) {
-    let ids: [usize; N] = core::array::from_fn(|i| STACK_OPS_BASE_ID + *idx + i);
-    builder.tagged_list(ids, namespace, |builder| {
-        builder.when_transition().assert_zeros(exprs);
-    });
-    *idx += N;
+    tagged_assert_zeros(builder, &STACK_OPS_TAGS, idx, namespace, exprs);
 }
