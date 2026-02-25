@@ -1,0 +1,19 @@
+[package]
+name = "miden-ace-codegen"
+version = "0.21.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/0xMiden/miden-vm"
+
+
+[dependencies]
+miden-core = { workspace = true }
+p3-field = { version = "0.4.2", default-features = false }
+p3-dft = { version = "0.4.2", default-features = false }
+p3-miden-air = { version = "0.4.2", default-features = false }
+p3-miden-uni-stark = { version = "0.4.2", default-features = false }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+miden-air = { workspace = true, features = ["std"] }
+miden-core = { workspace = true, features = ["std"] }
