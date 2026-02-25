@@ -567,7 +567,7 @@ pub fn current_group_expected() -> Vec<EvalRecord> {
         EvalRecord {
             id: 110,
             namespace: "stack.ops.cswap",
-            value: QuadFelt::new([Felt::new(4142872517165003079), Felt::new(0)]),
+            value: QuadFelt::new([Felt::new(7787471015064615045), Felt::new(0)]),
         },
         EvalRecord {
             id: 111,
@@ -582,52 +582,52 @@ pub fn current_group_expected() -> Vec<EvalRecord> {
         EvalRecord {
             id: 113,
             namespace: "stack.ops.cswapw",
-            value: QuadFelt::new([Felt::new(7382517392819628451), Felt::new(0)]),
+            value: QuadFelt::new([Felt::new(4517595434872149482), Felt::new(0)]),
         },
         EvalRecord {
             id: 114,
             namespace: "stack.ops.cswapw",
-            value: QuadFelt::new([Felt::new(4827417633003237585), Felt::new(0)]),
+            value: QuadFelt::new([Felt::new(7382517392819628451), Felt::new(0)]),
         },
         EvalRecord {
             id: 115,
             namespace: "stack.ops.cswapw",
-            value: QuadFelt::new([Felt::new(17779390882653606052), Felt::new(0)]),
+            value: QuadFelt::new([Felt::new(4827417633003237585), Felt::new(0)]),
         },
         EvalRecord {
             id: 116,
             namespace: "stack.ops.cswapw",
-            value: QuadFelt::new([Felt::new(16587491652407655425), Felt::new(0)]),
+            value: QuadFelt::new([Felt::new(17779390882653606052), Felt::new(0)]),
         },
         EvalRecord {
             id: 117,
             namespace: "stack.ops.cswapw",
-            value: QuadFelt::new([Felt::new(6936098212561125534), Felt::new(0)]),
+            value: QuadFelt::new([Felt::new(16587491652407655425), Felt::new(0)]),
         },
         EvalRecord {
             id: 118,
             namespace: "stack.ops.cswapw",
-            value: QuadFelt::new([Felt::new(5094958697700743127), Felt::new(0)]),
+            value: QuadFelt::new([Felt::new(6936098212561125534), Felt::new(0)]),
         },
         EvalRecord {
             id: 119,
             namespace: "stack.ops.cswapw",
-            value: QuadFelt::new([Felt::new(189412762651021203), Felt::new(0)]),
+            value: QuadFelt::new([Felt::new(5094958697700743127), Felt::new(0)]),
         },
         EvalRecord {
             id: 120,
             namespace: "stack.ops.cswapw",
-            value: QuadFelt::new([Felt::new(8308993958309806023), Felt::new(0)]),
+            value: QuadFelt::new([Felt::new(189412762651021203), Felt::new(0)]),
         },
         EvalRecord {
             id: 121,
             namespace: "stack.ops.cswapw",
-            value: QuadFelt::new([Felt::new(16580384734945713908), Felt::new(0)]),
+            value: QuadFelt::new([Felt::new(8308993958309806023), Felt::new(0)]),
         },
         EvalRecord {
             id: 122,
             namespace: "stack.system.assert",
-            value: QuadFelt::new([Felt::new(13682615670963393420), Felt::new(0)]),
+            value: QuadFelt::new([Felt::new(8348363779099446030), Felt::new(0)]),
         },
         EvalRecord {
             id: 123,

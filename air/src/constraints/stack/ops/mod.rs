@@ -16,7 +16,7 @@ use crate::{
         op_flags::OpFlags,
         tagging::{
             TAG_STACK_OPS_BASE, TagGroup, TaggingAirBuilderExt, tagged_assert_zero,
-            tagged_assert_zeros,
+            tagged_assert_zero_integrity, tagged_assert_zeros,
         },
     },
 };
@@ -372,12 +372,18 @@ pub fn enforce_main<AB>(
     let cswap_c_inv = AB::Expr::ONE - cswap_c.clone();
 
     // Binary constraint for the cswap selector (must be 0 or 1).
+    assert_zero_integrity(
+        builder,
+        &mut idx,
+        is_cswap.clone() * (cswap_c.clone() * (cswap_c.clone() - AB::Expr::ONE)),
+    );
+
+    // Conditional swap equations for the top two stack items.
     assert_zeros(
         builder,
         &mut idx,
         "stack.ops.cswap",
         [
-            is_cswap.clone() * (cswap_c.clone() * (cswap_c.clone() - AB::Expr::ONE)),
             is_cswap.clone()
                 * (s0_next.clone()
                     - (cswap_c.clone() * s2.clone() + cswap_c_inv.clone() * s1.clone())),
@@ -388,6 +394,13 @@ pub fn enforce_main<AB>(
     );
 
     // Binary constraint for the cswapw selector (same selector as cswap).
+    assert_zero_integrity(
+        builder,
+        &mut idx,
+        is_cswapw.clone() * (cswap_c.clone() * (cswap_c.clone() - AB::Expr::ONE)),
+    );
+
+    // Conditional swap equations for the top two words.
     assert_zeros(
         builder,
         &mut idx,
@@ -414,15 +427,14 @@ pub fn enforce_main<AB>(
             is_cswapw.clone()
                 * (s6_next.clone()
                     - (cswap_c.clone() * s3.clone() + cswap_c_inv.clone() * s7.clone())),
-            is_cswapw.clone()
+            is_cswapw
                 * (s7_next.clone()
                     - (cswap_c.clone() * s4.clone() + cswap_c_inv.clone() * s8.clone())),
-            is_cswapw * (cswap_c.clone() * (cswap_c - AB::Expr::ONE)),
         ],
     );
 
     // ASSERT: top element must be 1 (shift handled by stack general).
-    assert_zero(builder, &mut idx, is_assert * (s0 - AB::Expr::ONE));
+    assert_zero_integrity(builder, &mut idx, is_assert * (s0 - AB::Expr::ONE));
 
     // CALLER: load fn_hash into the top 4 stack elements.
     assert_zeros(
@@ -443,6 +455,14 @@ pub fn enforce_main<AB>(
 
 // CONSTRAINT HELPERS
 // ================================================================================================
+
+fn assert_zero_integrity<AB: TaggingAirBuilderExt>(
+    builder: &mut AB,
+    idx: &mut usize,
+    expr: AB::Expr,
+) {
+    tagged_assert_zero_integrity(builder, &STACK_OPS_TAGS, idx, expr);
+}
 
 fn assert_zero<AB: TaggingAirBuilderExt>(builder: &mut AB, idx: &mut usize, expr: AB::Expr) {
     tagged_assert_zero(builder, &STACK_OPS_TAGS, idx, expr);
