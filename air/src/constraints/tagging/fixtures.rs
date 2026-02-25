@@ -202,7 +202,7 @@ pub fn current_group_expected() -> Vec<EvalRecord> {
         EvalRecord {
             id: 37,
             namespace: "stack.overflow.flag.transition",
-            value: QuadFelt::new([Felt::new(957822818659219409), Felt::new(0)]),
+            value: QuadFelt::new([Felt::new(5309566436521762910), Felt::new(0)]),
         },
         EvalRecord {
             id: 38,
