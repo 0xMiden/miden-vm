@@ -11,7 +11,7 @@ use core::convert::TryFrom;
 use miden_core::{
     Felt, Word,
     events::EventName,
-    field::{PrimeCharacteristicRing, PrimeField64},
+    field::PrimeCharacteristicRing,
     precompile::{PrecompileCommitment, PrecompileVerifier},
     serde::{Deserializable, Serializable},
     utils::bytes_to_packed_u32_elements,

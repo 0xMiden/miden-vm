@@ -5,7 +5,7 @@ use miden_air::trace::{
     range::{M_COL_IDX, V_COL_IDX},
 };
 
-use crate::{Felt, PrimeField64, ZERO, field::ExtensionField, utils::uninit_vector};
+use crate::{Felt, ZERO, field::ExtensionField, utils::uninit_vector};
 
 // AUXILIARY TRACE BUILDER
 // ================================================================================================

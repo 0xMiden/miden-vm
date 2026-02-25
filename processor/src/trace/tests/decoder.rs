@@ -14,7 +14,7 @@ use super::super::{
 };
 use crate::{
     ContextId, Felt, ONE, Program, Word, ZERO,
-    field::{ExtensionField, Field, PrimeCharacteristicRing},
+    field::{ExtensionField, Field},
     mast::{
         BasicBlockNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor,
         MastNodeExt, SplitNodeBuilder,

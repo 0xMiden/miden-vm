@@ -11,7 +11,7 @@ use miden_air::trace::{
 };
 use miden_core::{
     Felt, Word,
-    field::{BasedVectorSpace, PrimeCharacteristicRing, QuadFelt},
+    field::{BasedVectorSpace, QuadFelt},
 };
 
 use super::{

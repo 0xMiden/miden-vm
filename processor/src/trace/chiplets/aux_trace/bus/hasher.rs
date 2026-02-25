@@ -24,7 +24,7 @@ use miden_core::{
 
 use super::get_op_label;
 use crate::{
-    PrimeField64, Word,
+    Word,
     debug::{BusDebugger, BusMessage},
     trace::chiplets::aux_trace::build_value,
 };

@@ -9,7 +9,6 @@ use super::{
     Felt, HasherState, MerklePath, MerkleRootUpdate, ONE, OpBatch, TraceFragment, Word as Digest,
     ZERO,
 };
-use crate::PrimeField64;
 
 mod trace;
 use trace::HasherTrace;

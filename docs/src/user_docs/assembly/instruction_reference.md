@@ -176,7 +176,7 @@ Instructions for moving data between the stack and other sources like program co
 | -------------- | ------------ | ------------ | ------ | --------------------------------------------------------------------------------------------------------------------------- |
 | `clk`          | `[ ... ]`    | `[t, ... ]`  | 1      | Pushes current clock cycle `t`.                                                                                             |
 | `sdepth`       | `[ ... ]`    | `[d, ... ]`  | 1      | Pushes current stack depth `d`.                                                                                             |
-| `caller`       | `[A, b,...]` | `[H, b,...]` | 1      | In context 0, overwrites the top 4 stack items with hash `H` of the function that syscall'd into the current context, or `[0, 0, 0, 0]` when not servicing a `SYSCALL`. In any other context, `H` corresponds to the hash of the function that entered the current context. |
+| `caller`       | `[A, ...]`   | `[H, ...]`   | 1      | In context 0, overwrites the top 4 stack items with hash `H` of the function that syscall'd into the current context, or `[0, 0, 0, 0]` when not servicing a `SYSCALL`. In any other context, `H` corresponds to the hash of the function that entered the current context. |
 | `locaddr.i`    | `[ ... ]`    | `[a, ... ]`  | 2      | Pushes absolute memory address `a` of local memory at index `i`.                                                            |
 | `procref.name` | `[ ... ]`    | `[A, ... ]`  | 4      | Pushes MAST root `A` of procedure `name`.                                                                                   |
 
@@ -208,7 +208,7 @@ _Insert into Advice Map:_
 | `adv.insert_mem`      | `[K, a, b, ... ]`    | `[K, a, b, ... ]`    | `advice_map[K] ← mem[a..b]`.                                                           |
 | `adv.insert_hdword`   | `[A, B, ... ]`       | `[A, B, ... ]`       | `K ← hash(A \|\| B)` (top first). `advice_map[K] ← [A,B]`. MASM: `hmerge`.             |
 | `adv.insert_hdword_d` | `[A, B, d, ... ]`    | `[A, B, d, ... ]`    | `K ← hash(A \|\| B, domain=d)` (top first). `advice_map[K] ← [A,B]`.                   |
-| `adv.insert_hqword`   | `[D, C, B, A, ... ]` | `[D, C, B, A, ... ]` | `K ← hash(hash(hash(A \|\| B) \|\| C) \|\| D), domain=0`. `advice_map[K] ← [A,B,C,D]`. |
+| `adv.insert_hqword`   | `[A, B, C, D, ... ]` | `[A, B, C, D, ... ]` | `K ← hash_elements([A,B,C,D])`. `advice_map[K] ← [A,B,C,D]`. |
 | `adv.insert_hperm`    | `[R0, R1, C, ...]`   | `[R0, R1, C, ...]`   | `K ← permute(R0,R1,C).digest`. `advice_map[K] ← [R0,R1]`.                                  |
 
 ### Random Access Memory
@@ -253,7 +253,7 @@ Common cryptographic operations, including hashing and Merkle tree manipulations
 | `hmerge`       | `[A, B, ...]`        | `[C, ...]`       | 16     | `C ← hash(A,B)`. 2-to-1 Poseidon2 hash.                                                                                                                                                  |
 | `mtree_get`    | `[d, i, R, ...]`     | `[V, R, ...]`    | 10     | Verifies Merkle path for node `V` at depth `d`, index `i` for tree `R` (from advice provider), returns `V`.                                                                                           |
 | `mtree_set`    | `[d, i, R, V', ...]` | `[V, R', ...]`   | 30     | Updates node in tree `R` at `d,i` to `V'`. Returns old value `V` and new root `R'`. Both trees in advice provider.                                                                                    |
-| `mtree_merge`  | `[R, L, ...]`        | `[M, ...]`       | 16     | Merges Merkle trees with roots `L` (left) and `R` (right) into new tree `M`. Input trees retained.                                                                                                    |
+| `mtree_merge`  | `[L, R, ...]`        | `[M, ...]`       | 16     | Merges Merkle trees with roots `L` (left) and `R` (right) into new tree `M`. Input trees retained.                                                                                                    |
 | `mtree_verify` | `[V, d, i, R, ...]`  | `[V,d,i,R,...]`  | 1      | Verifies Merkle path for node `V` at depth `d`, index `i` for tree `R` (from advice provider). <br /> _Can be parameterized with `err` code (e.g., `mtree_verify.err=123`). Default error code is 0._ |
 
 ## Flow Control Operations

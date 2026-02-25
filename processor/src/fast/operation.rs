@@ -8,7 +8,6 @@ use miden_air::{
 use miden_core::{
     WORD_SIZE, Word, ZERO,
     crypto::{hash::Poseidon2, merkle::MerklePath},
-    field::PrimeField64,
     mast::{BasicBlockNode, MastForest, MastNodeId},
     precompile::{PrecompileTranscript, PrecompileTranscriptState},
 };

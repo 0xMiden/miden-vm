@@ -7,7 +7,7 @@ use miden_air::trace::RowIndex;
 use miden_core::WORD_SIZE;
 
 use super::{Felt, INIT_MEM_VALUE, MemoryError, Word};
-use crate::{ContextId, MemoryAddress, PrimeField64};
+use crate::{ContextId, MemoryAddress};
 
 // MEMORY SEGMENT TRACE
 // ================================================================================================

@@ -5,7 +5,7 @@ use miden_air::trace::chiplets::bitwise::{
     PREV_OUTPUT_COL_IDX, TRACE_WIDTH,
 };
 
-use crate::{Felt, PrimeField64, operation::OperationError, trace::TraceFragment};
+use crate::{Felt, operation::OperationError, trace::TraceFragment};
 
 #[cfg(test)]
 mod tests;

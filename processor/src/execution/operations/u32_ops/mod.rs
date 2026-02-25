@@ -4,7 +4,6 @@ use paste::paste;
 
 use crate::{
     ExecutionError, Felt, ZERO,
-    field::PrimeField64,
     operation::OperationError,
     processor::{Processor, StackInterface, SystemInterface},
     tracer::{OperationHelperRegisters, Tracer},

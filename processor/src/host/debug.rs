@@ -6,7 +6,7 @@ use core::{fmt, ops::RangeInclusive};
 
 use miden_core::{FMP_ADDR, Felt, operations::DebugOptions};
 
-use crate::{DebugError, PrimeField64, ProcessorState, TraceError, host::handlers::DebugHandler};
+use crate::{DebugError, ProcessorState, TraceError, host::handlers::DebugHandler};
 
 // WRITER IMPLEMENTATIONS
 // ================================================================================================

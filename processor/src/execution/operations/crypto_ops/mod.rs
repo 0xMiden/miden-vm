@@ -9,7 +9,7 @@ use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
 use crate::{
     ContextId, Felt, MemoryError, ONE, RowIndex, Word, ZERO,
     errors::{CryptoError, MerklePathVerificationFailedInner, OperationError},
-    field::{BasedVectorSpace, PrimeField64, QuadFelt},
+    field::{BasedVectorSpace, QuadFelt},
     mast::MastForest,
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, StackInterface,

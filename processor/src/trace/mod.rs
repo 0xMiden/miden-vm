@@ -216,7 +216,6 @@ impl ExecutionTrace {
     #[cfg(feature = "std")]
     pub fn print(&self) {
         use miden_air::trace::TRACE_WIDTH;
-        use miden_core::field::PrimeField64;
 
         let mut row = [ZERO; PADDED_TRACE_WIDTH];
         for i in 0..self.length() {

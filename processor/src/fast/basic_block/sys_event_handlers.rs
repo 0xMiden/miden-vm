@@ -4,7 +4,7 @@ use miden_core::{
     Felt, WORD_SIZE, Word, ZERO,
     crypto::hash::Poseidon2,
     events::SystemEvent,
-    field::{BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField64, QuadFelt},
+    field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
 };
 
 use crate::{MemoryError, advice::AdviceError, errors::OperationError, fast::FastProcessor};
@@ -236,11 +236,11 @@ fn insert_hperm_into_adv_map(processor: &mut FastProcessor) -> Result<(), System
 ///
 /// ```text
 /// Inputs:
-///   Operand stack: [event_id, RIGHT_ROOT, LEFT_ROOT, ...]
-///   Merkle store: {RIGHT_ROOT, LEFT_ROOT}
+///   Operand stack: [event_id, LEFT_ROOT, RIGHT_ROOT, ...]
+///   Merkle store: {LEFT_ROOT, RIGHT_ROOT}
 ///
 /// Outputs:
-///   Merkle store: {RIGHT_ROOT, LEFT_ROOT, hash(LEFT_ROOT, RIGHT_ROOT)}
+///   Merkle store: {LEFT_ROOT, RIGHT_ROOT, hash(LEFT_ROOT, RIGHT_ROOT)}
 /// ```
 ///
 /// After the operation, both the original trees and the new tree remains in the advice
@@ -249,8 +249,8 @@ fn insert_hperm_into_adv_map(processor: &mut FastProcessor) -> Result<(), System
 /// It is not checked whether the provided roots exist as Merkle trees in the advice provider.
 fn merge_merkle_nodes(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
     // fetch the arguments from the stack
-    let lhs = processor.stack_get_word(5);
-    let rhs = processor.stack_get_word(1);
+    let lhs = processor.stack_get_word(1);
+    let rhs = processor.stack_get_word(5);
 
     // perform the merge
     processor.advice.merge_roots(lhs, rhs)?;

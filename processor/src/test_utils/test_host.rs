@@ -5,7 +5,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_core::{Felt, field::PrimeField64, operations::DebugOptions};
+use miden_core::{Felt, operations::DebugOptions};
 use miden_debug_types::{
     DefaultSourceManager, Location, SourceFile, SourceManager, SourceManagerSync, SourceSpan,
 };

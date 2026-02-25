@@ -30,7 +30,6 @@ use miden_core::{
     Felt, Word, ZERO,
     crypto::hash::{Keccak256, Poseidon2},
     events::EventName,
-    field::{PrimeCharacteristicRing, PrimeField64},
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
     utils::bytes_to_packed_u32_elements,
 };
@@ -235,8 +234,6 @@ impl AsRef<[Felt]> for KeccakFeltDigest {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::field::PrimeCharacteristicRing;
-
     use super::*;
 
     // KECCAK FELT DIGEST TESTS

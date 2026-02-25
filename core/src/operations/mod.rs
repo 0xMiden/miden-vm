@@ -1,6 +1,5 @@
 use core::fmt;
 
-use miden_crypto::field::PrimeField64;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 

@@ -164,7 +164,7 @@ fn test_sorted_key_value_array_find_half_key() {
                 push.[1,1,1,100] mem_storew_le.116 dropw
                 push.[8,8,8,8] mem_storew_le.120 dropw
 
-                push.124 push.100 push.{key_suffix} push.{key_prefix}
+                push.124 push.100 push.{key_prefix} push.{key_suffix}
 
                 exec.sorted_array::find_half_key_value
                 exec.truncate_stack

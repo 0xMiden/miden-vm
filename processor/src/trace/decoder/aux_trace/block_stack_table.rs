@@ -8,7 +8,7 @@ use miden_core::{
 };
 
 use super::{AuxColumnBuilder, Felt, MainTrace, ONE, ZERO};
-use crate::{PrimeField64, debug::BusDebugger};
+use crate::debug::BusDebugger;
 
 // BLOCK STACK TABLE COLUMN BUILDER
 // ================================================================================================

@@ -1,5 +1,4 @@
 use miden_core_lib::handlers::smt_peek::SMT_PEEK_EVENT_NAME;
-use miden_utils_testing::PrimeField64;
 
 use super::*;
 

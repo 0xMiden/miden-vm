@@ -1,7 +1,7 @@
 use crate::{
     Felt, ONE, ZERO,
     errors::OperationError,
-    field::{BasedVectorSpace, Field, PrimeField64, QuadFelt},
+    field::{BasedVectorSpace, Field, QuadFelt},
     processor::{Processor, StackInterface},
     tracer::{OperationHelperRegisters, Tracer},
 };

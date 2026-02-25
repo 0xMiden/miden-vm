@@ -25,7 +25,7 @@ use miden_air::trace::{
 };
 use miden_core::{
     ONE, ZERO,
-    field::{ExtensionField, PrimeCharacteristicRing},
+    field::ExtensionField,
     operations::{
         OPCODE_CALL, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END, OPCODE_EVALCIRCUIT, OPCODE_HORNERBASE,
         OPCODE_HORNEREXT, OPCODE_HPERM, OPCODE_JOIN, OPCODE_LOGPRECOMPILE, OPCODE_LOOP,
@@ -38,7 +38,6 @@ use miden_core::{
 
 use super::Felt;
 use crate::{
-    PrimeField64,
     debug::{BusDebugger, BusMessage},
     trace::AuxColumnBuilder,
 };

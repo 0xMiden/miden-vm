@@ -1,5 +1,5 @@
 use miden_utils_testing::{
-    PrimeField64, Word, build_op_test,
+    TRUNCATE_STACK_PROC, Word, build_op_test, build_test,
     crypto::{MerkleStore, MerkleTree, Poseidon2, init_merkle_leaf, init_merkle_store},
     rand::rand_vector,
 };
@@ -114,6 +114,52 @@ fn mtree_merge() {
 
     build_op_test!(asm_op, &stack_inputs, &stack_outputs, store)
         .prove_and_verify(stack_inputs, false);
+}
+
+#[test]
+fn mtree_merge_then_get() {
+    // Build two trees and merge them via mtree_merge, then immediately mtree_get from the merged
+    // root. This exercises the advice-store merge and would fail if the merge order mismatched
+    // the hmerge output.
+    let leaves_a = init_merkle_store(&[1, 2, 3, 4, 5, 6, 7, 8]).0;
+    let leaves_b = init_merkle_store(&[9, 10, 11, 12, 13, 14, 15, 16]).0;
+    let tree_a = MerkleTree::new(leaves_a.clone()).unwrap();
+    let tree_b = MerkleTree::new(leaves_b.clone()).unwrap();
+    let root_a = tree_a.root();
+    let root_b = tree_b.root();
+
+    let mut store = MerkleStore::default();
+    store.extend(tree_a.inner_nodes());
+    store.extend(tree_b.inner_nodes());
+
+    let stack_inputs = vec![
+        root_a[0].as_canonical_u64(),
+        root_a[1].as_canonical_u64(),
+        root_a[2].as_canonical_u64(),
+        root_a[3].as_canonical_u64(),
+        root_b[0].as_canonical_u64(),
+        root_b[1].as_canonical_u64(),
+        root_b[2].as_canonical_u64(),
+        root_b[3].as_canonical_u64(),
+    ];
+
+    let depth = (tree_a.depth() + 1) as u64;
+    let index = 0_u64;
+    let source = format!(
+        "
+        {TRUNCATE_STACK_PROC}
+
+        begin
+            mtree_merge
+            push.{index}
+            push.{depth}
+            mtree_get
+            exec.truncate_stack
+        end
+    "
+    );
+
+    build_test!(&source, &stack_inputs, &[], store).prove_and_verify(stack_inputs, false);
 }
 
 /// Helper function that builds a test stack and Merkle tree for testing mtree updates.

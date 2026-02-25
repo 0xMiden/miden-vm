@@ -3,7 +3,7 @@ use alloc::{collections::BTreeMap, vec::Vec};
 use miden_utils_testing::rand::rand_array;
 
 use super::{RangeCheckTrace, RangeChecker};
-use crate::{Felt, PrimeField64, ZERO, utils::ToElements};
+use crate::{Felt, ZERO, utils::ToElements};
 
 // TESTS
 // ================================================================================================

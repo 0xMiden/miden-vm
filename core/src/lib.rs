@@ -55,7 +55,7 @@ assertion failed: `(left matches right)`
 // EXPORTS
 // ================================================================================================
 
-pub use miden_crypto::{EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, word::LexicographicWord};
+pub use miden_crypto::{EMPTY_WORD, Felt, LexicographicWord, ONE, WORD_SIZE, Word, ZERO};
 
 pub mod advice;
 pub mod chiplets;

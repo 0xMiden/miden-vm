@@ -1,11 +1,8 @@
 use miden_assembly::testing::regex;
-use miden_processor::{
-    ExecutionError,
-    field::{Field, PrimeCharacteristicRing, PrimeField64},
-    operation::OperationError,
-};
+use miden_core::field::Field;
+use miden_processor::{ExecutionError, operation::OperationError};
 use miden_utils_testing::{
-    Felt, ONE, WORD_SIZE, ZERO, assert_assembler_diagnostic, assert_diagnostic_lines,
+    Felt, ONE, PrimeField64, WORD_SIZE, ZERO, assert_assembler_diagnostic, assert_diagnostic_lines,
     build_op_test, expect_exec_error_matches, prop_randw, proptest::prelude::*, rand::rand_value,
 };
 

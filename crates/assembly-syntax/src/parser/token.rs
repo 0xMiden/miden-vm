@@ -3,7 +3,7 @@ use core::fmt;
 
 use miden_core::{
     Felt,
-    field::{PrimeCharacteristicRing, PrimeField64},
+    field::PrimeField64,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 #[cfg(feature = "serde")]
