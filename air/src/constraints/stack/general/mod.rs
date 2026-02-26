@@ -29,7 +29,10 @@ use crate::{
     MainTraceRow,
     constraints::{
         op_flags::OpFlags,
-        tagging::{TAG_STACK_GENERAL_BASE, TaggingAirBuilderExt},
+        tagging::{
+            TaggingAirBuilderExt,
+            ids::{TAG_STACK_GENERAL_BASE, TAG_STACK_GENERAL_COUNT},
+        },
     },
 };
 
@@ -38,12 +41,9 @@ use crate::{
 
 /// Number of general stack constraints.
 /// 16 constraints for stack item transitions.
-#[allow(dead_code)]
-pub const NUM_CONSTRAINTS: usize = 16;
+pub const NUM_CONSTRAINTS: usize = TAG_STACK_GENERAL_COUNT;
 
 /// Tag base ID for stack general constraints.
-const STACK_GENERAL_BASE_ID: usize = TAG_STACK_GENERAL_BASE;
-
 /// Tag namespaces for stack general constraints.
 const STACK_GENERAL_NAMES: [&str; NUM_CONSTRAINTS] = [
     "stack.general.transition.0",
@@ -96,7 +96,7 @@ pub fn enforce_main<AB>(
             + op_flags.left_shift_at(1) * local.stack[1].clone().into();
         let actual: AB::Expr = next.stack[0].clone().into();
 
-        builder.tagged(STACK_GENERAL_BASE_ID, STACK_GENERAL_NAMES[0], |builder| {
+        builder.tagged(TAG_STACK_GENERAL_BASE, STACK_GENERAL_NAMES[0], |builder| {
             builder.when_transition().assert_zero(actual * flag_sum - expected);
         });
     }
@@ -112,7 +112,7 @@ pub fn enforce_main<AB>(
             + op_flags.right_shift_at(i - 1) * local.stack[i - 1].clone().into();
         let actual: AB::Expr = next.stack[i].clone().into();
 
-        let id = STACK_GENERAL_BASE_ID + i;
+        let id = TAG_STACK_GENERAL_BASE + i;
         builder.tagged(id, namespace, |builder| {
             builder.when_transition().assert_zero(actual * flag_sum - expected);
         });
@@ -126,7 +126,7 @@ pub fn enforce_main<AB>(
             + op_flags.right_shift_at(14) * local.stack[14].clone().into();
         let actual: AB::Expr = next.stack[15].clone().into();
 
-        builder.tagged(STACK_GENERAL_BASE_ID + 15, STACK_GENERAL_NAMES[15], |builder| {
+        builder.tagged(TAG_STACK_GENERAL_BASE + 15, STACK_GENERAL_NAMES[15], |builder| {
             builder.when_transition().assert_zero(actual * flag_sum - expected);
         });
     }
