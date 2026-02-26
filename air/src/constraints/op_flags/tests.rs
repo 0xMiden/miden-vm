@@ -3,6 +3,7 @@
 use alloc::vec::Vec;
 
 use miden_core::{Felt, ONE, ZERO, operations::Operation};
+use proptest::prelude::*;
 
 use super::{
     DEGREE_4_OPCODE_ENDS, DEGREE_4_OPCODE_STARTS, DEGREE_5_OPCODE_ENDS, DEGREE_5_OPCODE_STARTS,
@@ -100,6 +101,15 @@ fn naive_composites(
         + deg4[2] + deg4[3]; // SYSCALL/CALL
 
     (left_shift_flag, right_shift_flag, control_flow)
+}
+
+fn valid_opcodes() -> Vec<usize> {
+    let mut opcodes = Vec::new();
+    opcodes.extend(DEGREE_7_OPCODE_STARTS..=DEGREE_7_OPCODE_ENDS);
+    opcodes.extend((DEGREE_6_OPCODE_STARTS..=DEGREE_6_OPCODE_ENDS).step_by(2));
+    opcodes.extend(DEGREE_5_OPCODE_STARTS..=DEGREE_5_OPCODE_ENDS);
+    opcodes.extend((DEGREE_4_OPCODE_STARTS..=DEGREE_4_OPCODE_ENDS).step_by(4));
+    opcodes
 }
 
 // BASIC INDEX TESTS
@@ -302,13 +312,7 @@ fn degree_5_op_flags() {
 /// Compares optimized op flags and composite flags against naive bit-product computation.
 #[test]
 fn optimized_flags_match_naive() {
-    let mut opcodes = Vec::new();
-    opcodes.extend(DEGREE_7_OPCODE_STARTS..=DEGREE_7_OPCODE_ENDS);
-    opcodes.extend((DEGREE_6_OPCODE_STARTS..=DEGREE_6_OPCODE_ENDS).step_by(2));
-    opcodes.extend(DEGREE_5_OPCODE_STARTS..=DEGREE_5_OPCODE_ENDS);
-    opcodes.extend((DEGREE_4_OPCODE_STARTS..=DEGREE_4_OPCODE_ENDS).step_by(4));
-
-    for opcode in opcodes {
+    for opcode in valid_opcodes() {
         let bits = get_op_bits(opcode);
         let (deg7, deg6, deg5, deg4) = naive_op_flags(bits);
         let op_flags = op_flags_for_opcode(opcode);
@@ -462,6 +466,7 @@ fn composite_hperm_flags() {
 fn composite_loop_left_shift() {
     let op_flags = op_flags_for_opcode(Operation::Loop.op_code().into());
 
+    assert_eq!(op_flags.left_shift_at(0), ZERO);
     // LOOP shifts the stack left
     for i in 1..16 {
         assert_eq!(op_flags.left_shift_at(i), ONE, "left_shift_at({}) should be ONE for LOOP", i);
@@ -481,6 +486,7 @@ fn composite_and_left_shift() {
     let op_flags = op_flags_for_opcode(Operation::And.op_code().into());
 
     // AND shifts left from position 2
+    assert_eq!(op_flags.left_shift_at(0), ZERO);
     assert_eq!(op_flags.left_shift_at(1), ZERO);
     for i in 2..16 {
         assert_eq!(op_flags.left_shift_at(i), ONE, "left_shift_at({}) should be ONE for AND", i);
@@ -496,7 +502,7 @@ fn composite_dup1_right_shift() {
     let op_flags = op_flags_for_opcode(Operation::Dup1.op_code().into());
 
     // DUP1 shifts the entire stack right
-    for i in 0..15 {
+    for i in 0..=15 {
         assert_eq!(op_flags.right_shift_at(i), ONE, "right_shift_at({}) should be ONE for DUP1", i);
     }
     for i in 0..16 {
@@ -513,7 +519,7 @@ fn composite_push_right_shift() {
     let op_flags = op_flags_for_opcode(Operation::Push(ONE).op_code().into());
 
     // PUSH shifts the entire stack right
-    for i in 0..15 {
+    for i in 0..=15 {
         assert_eq!(op_flags.right_shift_at(i), ONE, "right_shift_at({}) should be ONE for PUSH", i);
     }
 
@@ -616,6 +622,29 @@ fn control_flow_flag() {
     for op in non_cf_ops {
         let op_flags = op_flags_for_opcode(op.op_code().into());
         assert_eq!(op_flags.control_flow(), ZERO, "control_flow should be ZERO for {:?}", op);
+    }
+}
+
+// PROPERTY TESTS
+// ================================================================================================
+
+proptest! {
+    #[test]
+    fn composite_shift_flags_are_binary_and_disjoint(opcode in prop::sample::select(valid_opcodes())) {
+        let op_flags = op_flags_for_opcode(opcode);
+        for idx in 0usize..16 {
+            let no_shift = op_flags.no_shift_at(idx);
+            let left_shift = op_flags.left_shift_at(idx);
+            let right_shift = op_flags.right_shift_at(idx);
+
+            prop_assert_eq!(no_shift * (no_shift - ONE), ZERO);
+            prop_assert_eq!(left_shift * (left_shift - ONE), ZERO);
+            prop_assert_eq!(right_shift * (right_shift - ONE), ZERO);
+
+            prop_assert_eq!(no_shift * left_shift, ZERO);
+            prop_assert_eq!(no_shift * right_shift, ZERO);
+            prop_assert_eq!(left_shift * right_shift, ZERO);
+        }
     }
 }
 
