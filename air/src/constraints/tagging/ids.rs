@@ -35,8 +35,13 @@ pub const TAG_STACK_OVERFLOW_BASE: usize = TAG_STACK_GENERAL_BASE + TAG_STACK_GE
 /// Number of stack overflow constraints in this group.
 pub const TAG_STACK_OVERFLOW_COUNT: usize = 8;
 
+/// Base ID for the stack ops constraint group.
+pub const TAG_STACK_OPS_BASE: usize = TAG_STACK_OVERFLOW_BASE + TAG_STACK_OVERFLOW_COUNT;
+/// Number of stack ops constraints in this group.
+pub const TAG_STACK_OPS_COUNT: usize = 88;
+
 /// Base ID for the range checker bus constraint group.
-pub const TAG_RANGE_BUS_BASE: usize = TAG_STACK_OVERFLOW_BASE + TAG_STACK_OVERFLOW_COUNT;
+pub const TAG_RANGE_BUS_BASE: usize = TAG_STACK_OPS_BASE + TAG_STACK_OPS_COUNT;
 /// Number of range checker bus constraints in this group.
 pub const TAG_RANGE_BUS_COUNT: usize = 1;
 
