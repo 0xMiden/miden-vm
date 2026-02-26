@@ -28,9 +28,9 @@ pub const TAG_RANGE_MAIN_COUNT: usize = 3;
 /// Base ID for the range checker bus constraint group.
 pub const TAG_RANGE_BUS_BASE: usize = TAG_RANGE_MAIN_BASE + TAG_RANGE_MAIN_COUNT;
 /// Number of range checker bus constraints in this group.
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 pub const TAG_RANGE_BUS_COUNT: usize = 1;
 
 /// Total number of tagged constraints in the current group set.
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 pub const TAG_TOTAL_COUNT: usize = TAG_RANGE_BUS_BASE + TAG_RANGE_BUS_COUNT;
