@@ -15,7 +15,7 @@ use crate::{
     constraints::{
         op_flags::OpFlags,
         tagging::{
-            TAG_STACK_OPS_BASE, TagGroup, TaggingAirBuilderExt, tagged_assert_zero,
+            TagGroup, TaggingAirBuilderExt, ids::TAG_STACK_OPS_BASE, tagged_assert_zero,
             tagged_assert_zero_integrity, tagged_assert_zeros,
         },
     },
