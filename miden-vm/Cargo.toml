@@ -41,6 +41,11 @@ required-features = ["internal"]
 harness = false
 
 [[bench]]
+name = "blake3_1to1_fast"
+required-features = ["internal"]
+harness = false
+
+[[bench]]
 name = "deserialize_core_lib"
 harness = false
 
