@@ -36,7 +36,13 @@ use crate::{
     MainTraceRow,
     constraints::{
         op_flags::{ExprDecoderAccess, OpFlags},
-        tagging::TaggingAirBuilderExt,
+        tagging::{
+            TaggingAirBuilderExt,
+            ids::{
+                TAG_SYSTEM_CLK_BASE, TAG_SYSTEM_CLK_COUNT, TAG_SYSTEM_CTX_BASE,
+                TAG_SYSTEM_CTX_COUNT, TAG_SYSTEM_FN_HASH_BASE,
+            },
+        },
     },
     trace::decoder::HASHER_STATE_OFFSET,
 };
@@ -44,14 +50,12 @@ use crate::{
 // TAGGING CONSTANTS
 // ================================================================================================
 
-const SYSTEM_CLK_BASE_ID: usize = 0;
-const SYSTEM_CLK_NAMES: [&str; 2] = ["system.clk.first_row", "system.clk.transition"];
+const SYSTEM_CLK_NAMES: [&str; TAG_SYSTEM_CLK_COUNT] =
+    ["system.clk.first_row", "system.clk.transition"];
 
-const SYSTEM_CTX_BASE_ID: usize = 2;
-const SYSTEM_CTX_NAMES: [&str; 3] =
+const SYSTEM_CTX_NAMES: [&str; TAG_SYSTEM_CTX_COUNT] =
     ["system.ctx.call_dyncall", "system.ctx.syscall", "system.ctx.default"];
 
-const SYSTEM_FN_HASH_BASE_ID: usize = SYSTEM_CTX_BASE_ID + 3;
 const SYSTEM_FN_HASH_LOAD_NAMESPACE: &str = "system.fn_hash.load";
 const SYSTEM_FN_HASH_PRESERVE_NAMESPACE: &str = "system.fn_hash.preserve";
 
@@ -82,11 +86,11 @@ pub(crate) fn enforce_clock_constraint<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    builder.tagged(SYSTEM_CLK_BASE_ID, SYSTEM_CLK_NAMES[0], |builder| {
+    builder.tagged(TAG_SYSTEM_CLK_BASE, SYSTEM_CLK_NAMES[0], |builder| {
         builder.when_first_row().assert_zero(local.clk.clone());
     });
 
-    builder.tagged(SYSTEM_CLK_BASE_ID + 1, SYSTEM_CLK_NAMES[1], |builder| {
+    builder.tagged(TAG_SYSTEM_CLK_BASE + 1, SYSTEM_CLK_NAMES[1], |builder| {
         builder
             .when_transition()
             .assert_eq(next.clk.clone(), local.clk.clone() + AB::Expr::ONE);
@@ -113,19 +117,19 @@ pub(crate) fn enforce_ctx_constraints<AB>(
 
     let call_dyncall_flag = f_call.clone() + f_dyncall.clone();
     let expected_new_ctx = clk + AB::Expr::ONE;
-    builder.tagged(SYSTEM_CTX_BASE_ID, SYSTEM_CTX_NAMES[0], |builder| {
+    builder.tagged(TAG_SYSTEM_CTX_BASE, SYSTEM_CTX_NAMES[0], |builder| {
         builder
             .when_transition()
             .assert_zero(call_dyncall_flag * (ctx_next.clone() - expected_new_ctx));
     });
 
-    builder.tagged(SYSTEM_CTX_BASE_ID + 1, SYSTEM_CTX_NAMES[1], |builder| {
+    builder.tagged(TAG_SYSTEM_CTX_BASE + 1, SYSTEM_CTX_NAMES[1], |builder| {
         builder.when_transition().assert_zero(f_syscall.clone() * ctx_next.clone());
     });
 
     let change_ctx_flag = f_call + f_syscall + f_dyncall + f_end;
     let default_flag = AB::Expr::ONE - change_ctx_flag;
-    builder.tagged(SYSTEM_CTX_BASE_ID + 2, SYSTEM_CTX_NAMES[2], |builder| {
+    builder.tagged(TAG_SYSTEM_CTX_BASE + 2, SYSTEM_CTX_NAMES[2], |builder| {
         builder.when_transition().assert_zero(default_flag * (ctx_next - ctx));
     });
 }
@@ -146,7 +150,7 @@ pub(crate) fn enforce_fn_hash_constraints<AB>(
     let f_load = f_call.clone() + f_dyncall.clone();
     let f_preserve = AB::Expr::ONE - (f_load.clone() + f_end);
 
-    let load_ids: [usize; 4] = core::array::from_fn(|i| SYSTEM_FN_HASH_BASE_ID + i);
+    let load_ids: [usize; 4] = core::array::from_fn(|i| TAG_SYSTEM_FN_HASH_BASE + i);
     builder.tagged_list(load_ids, SYSTEM_FN_HASH_LOAD_NAMESPACE, |builder| {
         builder.when_transition().when(f_load.clone()).assert_zeros(
             core::array::from_fn::<_, 4, _>(|i| {
@@ -157,7 +161,7 @@ pub(crate) fn enforce_fn_hash_constraints<AB>(
         );
     });
 
-    let preserve_ids: [usize; 4] = core::array::from_fn(|i| SYSTEM_FN_HASH_BASE_ID + 4 + i);
+    let preserve_ids: [usize; 4] = core::array::from_fn(|i| TAG_SYSTEM_FN_HASH_BASE + 4 + i);
     builder.tagged_list(preserve_ids, SYSTEM_FN_HASH_PRESERVE_NAMESPACE, |builder| {
         builder
             .when_transition()

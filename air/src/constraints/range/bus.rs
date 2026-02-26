@@ -7,7 +7,7 @@
 //! ## LogUp Protocol
 //!
 //! The bus accumulator b_range uses the LogUp protocol:
-//! - Boundary: b_range[0] = 0 and b_range[last] = 0
+//! - Boundary: b_range[0] = 0 and b_range[last] = 0 (enforced by the wrapper AIR)
 //! - Transition: b_range' = b_range + responses - requests
 //!
 //! Where requests come from stack (4 lookups) and memory (2 lookups), and
@@ -18,7 +18,7 @@ use miden_crypto::stark::{air::MidenAirBuilder, matrix::Matrix};
 
 use crate::{
     MainTraceRow,
-    constraints::tagging::{TAG_RANGE_BASE, TaggingAirBuilderExt},
+    constraints::tagging::{TaggingAirBuilderExt, ids::TAG_RANGE_BUS_BASE},
     trace::{
         CHIPLET_S0_COL_IDX, CHIPLET_S1_COL_IDX, CHIPLET_S2_COL_IDX, CHIPLETS_OFFSET,
         RANGE_CHECK_TRACE_OFFSET, chiplets, decoder, range,
@@ -44,8 +44,7 @@ const RANGE_V_COL_IDX: usize = range::V_COL_IDX - RANGE_CHECK_TRACE_OFFSET;
 // TAGGING CONSTANTS
 // ================================================================================================
 
-const RANGE_BUS_BASE_ID: usize = TAG_RANGE_BASE + 3;
-const RANGE_BUS_NAMESPACE: &str = "range.bus.transition";
+const RANGE_BUS_NAME: &str = "range.bus.transition";
 
 // ENTRY POINTS
 // ================================================================================================
@@ -71,8 +70,8 @@ where
 {
     // In Miden VM, auxiliary trace is always present
     debug_assert!(
-        builder.permutation().height() > 0,
-        "Auxiliary trace must be present for range checker bus constraint"
+        builder.permutation().height() > 1,
+        "Auxiliary trace must have at least 2 rows for range checker bus constraint"
     );
 
     // Extract values needed for constraints
@@ -135,7 +134,7 @@ where
 
     // Main constraint: b_next * lookups = b * lookups + rc_term - s0_term - s1_term - s2_term -
     // s3_term - m0_term - m1_term
-    builder.tagged(RANGE_BUS_BASE_ID, RANGE_BUS_NAMESPACE, |builder| {
+    builder.tagged(TAG_RANGE_BUS_BASE, RANGE_BUS_NAME, |builder| {
         builder.when_transition().assert_zero_ext(
             b_next_term - b_term - rc_term
                 + s0_term

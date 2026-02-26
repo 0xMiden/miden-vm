@@ -1,11 +1,10 @@
 //! Test fixtures for constraint tagging.
-#![allow(dead_code)]
 
 use alloc::vec::Vec;
 
 use miden_core::{Felt, field::QuadFelt};
 
-use super::EvalRecord;
+use super::ood_eval::EvalRecord;
 
 /// Seed used for OOD evaluation fixtures.
 pub const OOD_SEED: u64 = 0xc0ffee;

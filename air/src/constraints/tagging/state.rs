@@ -1,14 +1,10 @@
 //! Thread-local tagging state for enforcing tag ordering and counts.
 
-#![allow(dead_code)]
-
 use alloc::vec::Vec;
 use std::{
     cell::{Cell, RefCell},
     thread_local,
 };
-
-use super::TagRecord;
 
 /// Active tagged block metadata.
 #[derive(Debug)]
@@ -29,6 +25,7 @@ pub fn is_enabled() -> bool {
 }
 
 /// Enables or disables tagging for the current thread.
+#[cfg(test)]
 pub fn set_enabled(enabled: bool) {
     TAGGING_ENABLED.with(|flag| flag.set(enabled));
 }
@@ -72,7 +69,8 @@ pub fn with_tag<R>(ids: Vec<usize>, namespace: &'static str, f: impl FnOnce() ->
 /// Consume the next tag ID for the current tagged context.
 ///
 /// Panics if called outside a tagged block or if the block emits too many assertions.
-pub fn consume_tag() -> TagRecord {
+#[cfg(test)]
+pub fn consume_tag() -> (usize, &'static str) {
     TAG_STACK.with(|stack| {
         let mut stack = stack.borrow_mut();
         let ctx = stack.last_mut().expect("assertion made without an active tagged block");
@@ -85,6 +83,6 @@ pub fn consume_tag() -> TagRecord {
         }
         let id = ctx.ids[ctx.next];
         ctx.next += 1;
-        TagRecord { id, namespace: ctx.namespace }
+        (id, ctx.namespace)
     })
 }

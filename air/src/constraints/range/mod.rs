@@ -11,7 +11,10 @@ use miden_crypto::stark::air::MidenAirBuilder;
 
 use crate::{
     MainTraceRow,
-    constraints::tagging::TaggingAirBuilderExt,
+    constraints::tagging::{
+        TaggingAirBuilderExt,
+        ids::{TAG_RANGE_MAIN_BASE, TAG_RANGE_MAIN_COUNT},
+    },
     trace::{RANGE_CHECK_TRACE_OFFSET, range},
 };
 
@@ -26,8 +29,7 @@ const RANGE_V_COL_IDX: usize = range::V_COL_IDX - RANGE_CHECK_TRACE_OFFSET;
 // TAGGING CONSTANTS
 // ================================================================================================
 
-const RANGE_MAIN_BASE_ID: usize = 13;
-const RANGE_MAIN_NAMES: [&str; 3] =
+const RANGE_MAIN_NAMES: [&str; TAG_RANGE_MAIN_COUNT] =
     ["range.main.v.first_row", "range.main.v.last_row", "range.main.v.transition"];
 
 // ENTRY POINTS
@@ -56,13 +58,13 @@ where
     let v = local.range[RANGE_V_COL_IDX].clone();
 
     // First row: V[0] = 0
-    builder.tagged(RANGE_MAIN_BASE_ID, RANGE_MAIN_NAMES[0], |builder| {
+    builder.tagged(TAG_RANGE_MAIN_BASE, RANGE_MAIN_NAMES[0], |builder| {
         builder.when_first_row().assert_zero(v.clone());
     });
 
     // Last row: V[last] = 65535 (2^16 - 1)
     let sixty_five_k = AB::Expr::from_u32(65535);
-    builder.tagged(RANGE_MAIN_BASE_ID + 1, RANGE_MAIN_NAMES[1], |builder| {
+    builder.tagged(TAG_RANGE_MAIN_BASE + 1, RANGE_MAIN_NAMES[1], |builder| {
         builder.when_last_row().assert_eq(v, sixty_five_k);
     });
 }
@@ -96,7 +98,7 @@ pub fn enforce_range_transition_constraint<AB>(
     let two_one_eight_seven = AB::Expr::from_u16(2187);
 
     // Note: Extra factor of change_v allows V to stay constant (change_v = 0) during padding
-    builder.tagged(RANGE_MAIN_BASE_ID + 2, RANGE_MAIN_NAMES[2], |builder| {
+    builder.tagged(TAG_RANGE_MAIN_BASE + 2, RANGE_MAIN_NAMES[2], |builder| {
         builder.when_transition().assert_zero(
             change_v.clone()
                 * (change_v.clone() - one_expr)
