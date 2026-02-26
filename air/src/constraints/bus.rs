@@ -73,7 +73,7 @@ where
     #[inline]
     pub fn encode(&self, elems: [AB::Expr; N]) -> AB::ExprEF {
         let mut acc = self.alpha.clone();
-        for (beta, elem) in self.betas.iter().zip(elems.into_iter()) {
+        for (beta, elem) in self.betas.iter().zip(elems) {
             acc += beta.clone() * elem;
         }
         acc
