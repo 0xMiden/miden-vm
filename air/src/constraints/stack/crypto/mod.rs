@@ -283,10 +283,10 @@ fn enforce_hornerbase_constraints<AB>(
         + c5.clone() * alpha_sq_1
         + c6 * a1;
 
-    emit(builder, idx, gate.clone() * (tmp0_0 - expected_tmp0_0));
-    emit(builder, idx, gate.clone() * (tmp0_1 - expected_tmp0_1));
-    emit(builder, idx, gate.clone() * (tmp1_0 - expected_tmp1_0));
-    emit(builder, idx, gate.clone() * (tmp1_1 - expected_tmp1_1));
+    emit_integrity(builder, idx, gate.clone() * (tmp0_0 - expected_tmp0_0));
+    emit_integrity(builder, idx, gate.clone() * (tmp0_1 - expected_tmp0_1));
+    emit_integrity(builder, idx, gate.clone() * (tmp1_0 - expected_tmp1_0));
+    emit_integrity(builder, idx, gate.clone() * (tmp1_1 - expected_tmp1_1));
     emit(builder, idx, gate.clone() * (acc0_next - expected_acc0));
     emit(builder, idx, gate * (acc1_next - expected_acc1));
 }
@@ -387,8 +387,8 @@ fn enforce_hornerext_constraints<AB>(
         + c2_0.clone() * a1
         + c3_1;
 
-    emit(builder, idx, gate.clone() * (tmp0 - expected_tmp0));
-    emit(builder, idx, gate.clone() * (tmp1 - expected_tmp1));
+    emit_integrity(builder, idx, gate.clone() * (tmp0 - expected_tmp0));
+    emit_integrity(builder, idx, gate.clone() * (tmp1 - expected_tmp1));
     emit(builder, idx, gate.clone() * (acc0_next - expected_acc0));
     emit(builder, idx, gate * (acc1_next - expected_acc1));
 }
@@ -400,6 +400,17 @@ fn emit<AB: MidenAirBuilder>(builder: &mut AB, idx: &mut usize, expr: AB::Expr) 
     let name = STACK_CRYPTO_NAMES[*idx];
     builder.tagged(id, name, |builder| {
         builder.when_transition().assert_zero(expr);
+    });
+    *idx += 1;
+}
+
+fn emit_integrity<AB: MidenAirBuilder>(builder: &mut AB, idx: &mut usize, expr: AB::Expr) {
+    // Each call emits one tagged integrity constraint and advances the tag index.
+    // The order of calls must match STACK_CRYPTO_NAMES so ids and names stay aligned.
+    let id = STACK_CRYPTO_BASE_ID + *idx;
+    let name = STACK_CRYPTO_NAMES[*idx];
+    builder.tagged(id, name, |builder| {
+        builder.assert_zero(expr);
     });
     *idx += 1;
 }
