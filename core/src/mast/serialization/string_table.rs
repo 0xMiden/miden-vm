@@ -53,6 +53,12 @@ impl StringTable {
             DeserializationError::InvalidValue(format!("invalid index in strings table: {str_idx}"))
         })?;
 
+        if str_offset > self.data.len() {
+            return Err(DeserializationError::InvalidValue(format!(
+                "string data offset {str_offset} is out of bounds (data length: {})",
+                self.data.len()
+            )));
+        }
         let mut reader = SliceReader::new(&self.data[str_offset..]);
         reader.read()
     }
