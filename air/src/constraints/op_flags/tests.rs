@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 
-use miden_core::{Felt, ONE, ZERO, field::PrimeCharacteristicRing, operations::Operation};
+use miden_core::{Felt, ONE, ZERO, operations::Operation};
 
 use super::{
     DEGREE_4_OPCODE_ENDS, DEGREE_4_OPCODE_STARTS, DEGREE_5_OPCODE_ENDS, DEGREE_5_OPCODE_STARTS,
