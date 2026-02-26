@@ -767,22 +767,22 @@ pub fn current_group_expected() -> Vec<EvalRecord> {
         EvalRecord {
             id: 150,
             namespace: "stack.crypto.hornerbase",
-            value: QuadFelt::new([Felt::new(12031819951881691966), Felt::new(0)]),
+            value: QuadFelt::new([Felt::new(8415559196869506674), Felt::new(0)]),
         },
         EvalRecord {
             id: 151,
             namespace: "stack.crypto.hornerbase",
-            value: QuadFelt::new([Felt::new(16763623523728809700), Felt::new(0)]),
+            value: QuadFelt::new([Felt::new(12374820114184953398), Felt::new(0)]),
         },
         EvalRecord {
             id: 152,
             namespace: "stack.crypto.hornerbase",
-            value: QuadFelt::new([Felt::new(16448780392400843578), Felt::new(0)]),
+            value: QuadFelt::new([Felt::new(2975290982061044481), Felt::new(0)]),
         },
         EvalRecord {
             id: 153,
             namespace: "stack.crypto.hornerbase",
-            value: QuadFelt::new([Felt::new(13659290005693061581), Felt::new(0)]),
+            value: QuadFelt::new([Felt::new(13487726821146861348), Felt::new(0)]),
         },
         EvalRecord {
             id: 154,
@@ -867,12 +867,12 @@ pub fn current_group_expected() -> Vec<EvalRecord> {
         EvalRecord {
             id: 170,
             namespace: "stack.crypto.hornerext",
-            value: QuadFelt::new([Felt::new(2516572400933728962), Felt::new(0)]),
+            value: QuadFelt::new([Felt::new(1082901338727409004), Felt::new(0)]),
         },
         EvalRecord {
             id: 171,
             namespace: "stack.crypto.hornerext",
-            value: QuadFelt::new([Felt::new(16462328690369258086), Felt::new(0)]),
+            value: QuadFelt::new([Felt::new(13302599741550075590), Felt::new(0)]),
         },
         EvalRecord {
             id: 172,
