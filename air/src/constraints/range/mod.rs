@@ -7,7 +7,8 @@
 //! Bus constraints for the range checker are in `bus`.
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::MidenAirBuilder;
+use p3_air::AirBuilder;
+use p3_miden_lifted_air::LiftedAirBuilder;
 
 use crate::{
     MainTraceRow,
@@ -31,7 +32,7 @@ pub fn enforce_main<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     enforce_range_boundary_constraints(builder, local);
     enforce_range_transition_constraint(builder, local, next);
@@ -43,7 +44,7 @@ pub fn enforce_main<AB>(
 /// - Last row: V[last] = 65535 (range checker ends at 2^16 - 1)
 pub fn enforce_range_boundary_constraints<AB>(builder: &mut AB, local: &MainTraceRow<AB::Var>)
 where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     let v = local.range[RANGE_V_COL_IDX].clone();
 
@@ -67,7 +68,7 @@ pub fn enforce_range_transition_constraint<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     let v = local.range[RANGE_V_COL_IDX].clone();
     let v_next = next.range[RANGE_V_COL_IDX].clone();
