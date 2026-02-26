@@ -23,6 +23,7 @@
 - Added stack overflow table constraints ([#2735](https://github.com/0xMiden/miden-vm/pull/2735)).
 - Added stack shuffling ops constraints ([#2736](https://github.com/0xMiden/miden-vm/pull/2736)).
 - Added AIR constraints for system, range checker, stack, decoder, and chiplets components ([#2772](https://github.com/0xMiden/miden-vm/pull/2772)).
+- Added general stack transition constraints (shift/no‑shift) ([#2725](https://github.com/0xMiden/miden-vm/pull/2725)).
 
 #### Fixes
 
