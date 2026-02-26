@@ -5,7 +5,6 @@ use std::{
     cell::{Cell, RefCell},
     thread_local,
 };
-
 /// Active tagged block metadata.
 #[derive(Debug)]
 struct TagContext {
