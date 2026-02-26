@@ -10,6 +10,7 @@
 
 #### Fixes
 
+- Implemented custom `Hash` for `QualifiedProcedureName`, ensuring consistency with its `PartialEq` implementation.
 - Fixed `Constant::PartialEq` to include `visibility` field in equality comparison, making it consistent with other exportable items (`Procedure`, `TypeAlias`, `EnumType`).
 
 ## 0.21.1 (2026-02-24)

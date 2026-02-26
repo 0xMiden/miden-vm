@@ -163,6 +163,12 @@ impl PartialEq for QualifiedProcedureName {
     }
 }
 
+impl Hash for QualifiedProcedureName {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.path.hash(state);
+    }
+}
+
 impl Ord for QualifiedProcedureName {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         self.path.cmp(&other.path)
