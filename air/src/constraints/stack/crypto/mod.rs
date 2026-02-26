@@ -10,7 +10,7 @@ use crate::{
     MainTraceRow,
     constraints::{
         op_flags::OpFlags,
-        tagging::{TAG_STACK_CRYPTO_BASE, TaggingAirBuilderExt},
+        tagging::{TaggingAirBuilderExt, ids::TAG_STACK_CRYPTO_BASE},
     },
     trace::decoder::USER_OP_HELPERS_OFFSET,
 };
