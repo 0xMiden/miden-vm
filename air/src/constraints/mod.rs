@@ -9,6 +9,7 @@
 //! ### Main Trace Constraints
 //! - system: clock, ctx, fn_hash transitions
 //! - range: range checker V column transitions
+//! - stack: general stack constraints
 //!
 //! ### Bus Constraints (Auxiliary Trace)
 //! - range::bus
@@ -16,7 +17,7 @@
 //! Bus constraints access the auxiliary trace via `builder.permutation()` and use
 //! random challenges from `builder.permutation_randomness()` for multiset/LogUp verification.
 //!
-//! Additional components (decoder, stack, chiplets) are introduced in later constraint chunks.
+//! Additional components (decoder, chiplets) are introduced in later constraint chunks.
 
 use miden_crypto::stark::air::MidenAirBuilder;
 
@@ -24,6 +25,7 @@ use crate::MainTraceRow;
 
 mod op_flags;
 pub mod range;
+pub mod stack;
 pub mod system;
 pub mod tagging;
 
@@ -40,6 +42,9 @@ pub fn enforce_main<AB>(
 {
     system::enforce_main(builder, local, next);
     range::enforce_main(builder, local, next);
+
+    let op_flags = op_flags::OpFlags::new(op_flags::ExprDecoderAccess::<_, AB::Expr>::new(local));
+    stack::enforce_main(builder, local, next, &op_flags);
 }
 
 /// Enforces all auxiliary (bus) constraints.
