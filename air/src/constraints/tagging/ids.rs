@@ -25,8 +25,13 @@ pub const TAG_RANGE_MAIN_BASE: usize = TAG_SYSTEM_BASE + TAG_SYSTEM_COUNT;
 /// Number of range checker main constraints in this group.
 pub const TAG_RANGE_MAIN_COUNT: usize = 3;
 
+/// Base ID for the stack general constraint group.
+pub const TAG_STACK_GENERAL_BASE: usize = TAG_RANGE_MAIN_BASE + TAG_RANGE_MAIN_COUNT;
+/// Number of stack general constraints in this group.
+pub const TAG_STACK_GENERAL_COUNT: usize = 16;
+
 /// Base ID for the range checker bus constraint group.
-pub const TAG_RANGE_BUS_BASE: usize = TAG_RANGE_MAIN_BASE + TAG_RANGE_MAIN_COUNT;
+pub const TAG_RANGE_BUS_BASE: usize = TAG_STACK_GENERAL_BASE + TAG_STACK_GENERAL_COUNT;
 /// Number of range checker bus constraints in this group.
 #[cfg(all(test, feature = "std"))]
 pub const TAG_RANGE_BUS_COUNT: usize = 1;
