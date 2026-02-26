@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use crate::{
-    BreakReason, Host, ONE, Stopper, ZERO,
+    BreakReason, Host, MapExecErr, ONE, Stopper, ZERO,
     continuation_stack::Continuation,
     execution::{ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation},
     mast::{MastForest, MastNodeId, SplitNode},
@@ -28,12 +28,15 @@ where
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::StartNode(node_id),
-        state.continuation_stack,
-        current_forest,
-    );
+    state
+        .tracer
+        .start_clock_cycle(
+            state.processor,
+            Continuation::StartNode(node_id),
+            state.continuation_stack,
+            current_forest,
+        )
+        .map_break(BreakReason::Err)?;
 
     // Execute decorators that should be executed before entering the node
     state
@@ -43,7 +46,13 @@ where
     let condition = state.processor.stack().get(0);
 
     // drop the condition from the stack
-    state.processor.stack_mut().decrement_size();
+    if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err(
+        current_forest,
+        node_id,
+        state.host,
+    ) {
+        return ControlFlow::Break(BreakReason::Err(err));
+    }
 
     // execute the appropriate branch
     state.continuation_stack.push_finish_split(node_id);
@@ -77,12 +86,15 @@ where
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::FinishSplit(node_id),
-        state.continuation_stack,
-        current_forest,
-    );
+    state
+        .tracer
+        .start_clock_cycle(
+            state.processor,
+            Continuation::FinishSplit(node_id),
+            state.continuation_stack,
+            current_forest,
+        )
+        .map_break(BreakReason::Err)?;
 
     // Finalize the clock cycle corresponding to the END operation.
     finalize_clock_cycle_with_continuation(

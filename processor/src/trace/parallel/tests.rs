@@ -329,7 +329,7 @@ fn test_trace_generation_at_fragment_boundaries(
         let (execution_output, trace_fragment_contexts) =
             processor.execute_for_trace_sync(&program, &mut host).unwrap();
 
-        build_trace(execution_output, trace_fragment_contexts, program.to_info())
+        build_trace(execution_output, trace_fragment_contexts, program.to_info()).unwrap()
     };
 
     let trace_from_single_fragment = {
@@ -346,7 +346,7 @@ fn test_trace_generation_at_fragment_boundaries(
             processor.execute_for_trace_sync(&program, &mut host).unwrap();
         assert!(trace_fragment_contexts.core_trace_contexts.len() == 1);
 
-        build_trace(execution_output, trace_fragment_contexts, program.to_info())
+        build_trace(execution_output, trace_fragment_contexts, program.to_info()).unwrap()
     };
 
     // Ensure that the trace generated from multiple fragments is identical to the one generated
@@ -749,7 +749,11 @@ fn test_build_trace_returns_err_on_empty_memory_reads_replay() {
         ctx.replay.memory_reads = MemoryReadsReplay::default();
     }
 
-    let _ = build_trace(execution_output, trace_generation_context, program.to_info());
+    let result = build_trace(execution_output, trace_generation_context, program.to_info());
+    assert!(
+        result.is_err(),
+        "build_trace should return Err when hasher replay has bad node ID"
+    );
 }
 
 /// Verifies that `build_trace` returns `Err` (instead of panicking) when the hasher chiplet replay
@@ -786,7 +790,11 @@ fn test_build_trace_returns_err_on_bad_node_id_in_hasher_replay() {
         [ZERO; 4].into(),
     );
 
-    let _ = build_trace(execution_output, trace_generation_context, program.to_info());
+    let result = build_trace(execution_output, trace_generation_context, program.to_info());
+    assert!(
+        result.is_err(),
+        "build_trace should return Err when hasher replay has bad node ID"
+    );
 }
 
 // Workaround to make insta and rstest work together.

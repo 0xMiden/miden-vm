@@ -41,7 +41,7 @@ pub fn build_trace_from_program(program: &Program, stack_inputs: &[u64]) -> Exec
     let (execution_output, trace_generation_context) =
         processor.execute_for_trace_sync(program, &mut host).unwrap();
 
-    build_trace(execution_output, trace_generation_context, program.to_info())
+    build_trace(execution_output, trace_generation_context, program.to_info()).unwrap()
 }
 
 /// Builds a sample trace by executing a span block containing the specified operations. This
@@ -85,5 +85,5 @@ pub fn build_trace_from_ops_with_inputs(
     let (execution_output, trace_generation_context) =
         processor.execute_for_trace_sync(&program, &mut host).unwrap();
 
-    build_trace(execution_output, trace_generation_context, program.to_info())
+    build_trace(execution_output, trace_generation_context, program.to_info()).unwrap()
 }

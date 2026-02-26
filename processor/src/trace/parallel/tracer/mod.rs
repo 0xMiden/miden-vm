@@ -1,4 +1,5 @@
 use alloc::sync::Arc;
+use core::ops::ControlFlow;
 
 use miden_air::trace::{STACK_TRACE_WIDTH, SYS_TRACE_WIDTH};
 use miden_core::program::MIN_STACK_DEPTH;
@@ -14,8 +15,9 @@ use super::{
     processor::ReplayProcessor,
 };
 use crate::{
-    Felt, ONE, Word, ZERO,
+    ExecutionError, Felt, ONE, Word, ZERO,
     continuation_stack::{Continuation, ContinuationStack},
+    errors::MapExecErrNoCtx,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
     tracer::{OperationHelperRegisters, Tracer},
 };
@@ -119,10 +121,8 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         node_id: MastNodeId,
         processor: &ReplayProcessor,
         current_forest: &Arc<MastForest>,
-    ) {
-        let node = current_forest
-            .get_node_by_id(node_id)
-            .expect("invalid node ID stored in continuation");
+    ) -> Result<(), ExecutionError> {
+        let node = get_node_in_forest(current_forest, node_id)?;
 
         match node {
             MastNode::Block(basic_block_node) => {
@@ -130,7 +130,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
                     &processor.system,
                     &processor.stack,
                     basic_block_node,
-                );
+                )?;
             },
             MastNode::Join(join_node) => {
                 self.fill_join_start_trace_row(
@@ -138,7 +138,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
                     &processor.stack,
                     join_node,
                     current_forest,
-                );
+                )?;
             },
             MastNode::Split(split_node) => {
                 self.fill_split_start_trace_row(
@@ -146,7 +146,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
                     &processor.stack,
                     split_node,
                     current_forest,
-                );
+                )?;
             },
             MastNode::Loop(loop_node) => {
                 self.fill_loop_start_trace_row(
@@ -154,7 +154,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
                     &processor.stack,
                     loop_node,
                     current_forest,
-                );
+                )?;
             },
             MastNode::Call(call_node) => {
                 self.fill_call_start_trace_row(
@@ -162,18 +162,17 @@ impl<'a> CoreTraceGenerationTracer<'a> {
                     &processor.stack,
                     call_node,
                     current_forest,
-                );
+                )?;
             },
             MastNode::Dyn(dyn_node) => {
-                let callee_hash = self
-                    .dyn_callee_hash
-                    .take()
-                    .expect("dyn callee hash stored at start of clock cycle");
+                let callee_hash = self.dyn_callee_hash.take().ok_or(ExecutionError::Internal(
+                    "dyn callee hash not stored at start of clock cycle",
+                ))?;
 
                 if dyn_node.is_dyncall() {
-                    let ctx_info = self.ctx_info.take().expect(
-                        "execution context info stored at start of clock cycle for DYNCALL node",
-                    );
+                    let ctx_info = self.ctx_info.take().ok_or(ExecutionError::Internal(
+                        "execution context info not stored at start of clock cycle for DYNCALL node",
+                    ))?;
 
                     self.fill_dyncall_start_trace_row(
                         &processor.system,
@@ -189,6 +188,8 @@ impl<'a> CoreTraceGenerationTracer<'a> {
                 unreachable!("The Tracer contract guarantees that external nodes do not occur here")
             },
         }
+
+        Ok(())
     }
 
     /// Returns the execution context info for a DYNCALL node, or `None` if the continuation does
@@ -203,45 +204,48 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         current_forest: &MastForest,
         continuation: &Continuation,
         processor: &ReplayProcessor,
-    ) -> Option<ExecutionContextInfo> {
+    ) -> Result<Option<ExecutionContextInfo>, ExecutionError> {
         let Continuation::StartNode(node_id) = &continuation else {
-            return None;
+            return Ok(None);
         };
 
-        let node = current_forest
-            .get_node_by_id(*node_id)
-            .expect("invalid node ID stored in continuation");
+        let Some(node) = current_forest.get_node_by_id(*node_id) else {
+            return Err(ExecutionError::Internal("invalid node ID stored in continuation"));
+        };
 
         let MastNode::Dyn(dyn_node) = node else {
-            return None;
+            return Ok(None);
         };
 
         if !dyn_node.is_dyncall() {
-            return None;
+            return Ok(None);
         }
 
-        let (stack_depth_after_drop, overflow_addr_after_drop) = if processor.stack.stack_depth()
-            > MIN_STACK_DEPTH
-        {
-            // Stack is above minimum depth, so peek at the overflow replay for the post-pop
-            // overflow address.
-            let (_, overflow_addr_after_drop) =
-                    processor.stack_overflow_replay.peek_replay_pop_overflow().expect("stack depth is above minimum, so we expect a corresponding overflow pop in the replay");
-            let stack_depth_after_drop = processor.stack.stack_depth() - 1;
+        let (stack_depth_after_drop, overflow_addr_after_drop) =
+            if processor.stack.stack_depth() > MIN_STACK_DEPTH {
+                // Stack is above minimum depth, so peek at the overflow replay for the post-pop
+                // overflow address.
+                let (_, overflow_addr_after_drop) = processor
+                .stack_overflow_replay
+                .peek_replay_pop_overflow()
+                .ok_or(ExecutionError::Internal(
+                    "stack depth is above minimum, but no corresponding overflow pop in the replay",
+                ))?;
+                let stack_depth_after_drop = processor.stack.stack_depth() - 1;
 
-            (stack_depth_after_drop as u32, *overflow_addr_after_drop)
-        } else {
-            // Stack is at minimum depth already, so the overflow address is ZERO and the depth
-            // remains the same after the drop.
-            (processor.stack.stack_depth() as u32, ZERO)
-        };
+                (stack_depth_after_drop as u32, *overflow_addr_after_drop)
+            } else {
+                // Stack is at minimum depth already, so the overflow address is ZERO and the depth
+                // remains the same after the drop.
+                (processor.stack.stack_depth() as u32, ZERO)
+            };
 
-        Some(ExecutionContextInfo::new(
+        Ok(Some(ExecutionContextInfo::new(
             processor.system.ctx,
             processor.system.fn_hash,
             stack_depth_after_drop,
             overflow_addr_after_drop,
-        ))
+        )))
     }
 
     /// Returns the loop condition sitting on top of the stack for a `FinishLoop` continuation, or
@@ -272,23 +276,24 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         continuation: &Continuation,
         processor: &ReplayProcessor,
         current_forest: &MastForest,
-    ) -> Option<Word> {
+    ) -> Result<Option<Word>, ExecutionError> {
         if let Continuation::StartNode(node_id) = continuation {
-            let node = current_forest
-                .get_node_by_id(*node_id)
-                .expect("invalid node ID stored in continuation");
+            let Some(node) = current_forest.get_node_by_id(*node_id) else {
+                return Err(ExecutionError::Internal("invalid node ID stored in continuation"));
+            };
 
             if let MastNode::Dyn(_) = node {
-                let (word_read, _addr, _ctx, _clk) = processor
-                    .memory_reads_replay
-                    .iter_read_words()
-                    .next()
-                    .expect("dyn node reads the procedure hash (word) from memory");
-                return Some(word_read);
+                let (word_read, _addr, _ctx, _clk) =
+                    processor.memory_reads_replay.iter_read_words().next().ok_or(
+                        ExecutionError::Internal(
+                            "dyn node reads the procedure hash (word) from memory",
+                        ),
+                    )?;
+                return Ok(Some(word_read));
             }
         }
 
-        None
+        Ok(None)
     }
 }
 
@@ -304,16 +309,28 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
         continuation: Continuation,
         _continuation_stack: &ContinuationStack,
         current_forest: &Arc<MastForest>,
-    ) {
+    ) -> ControlFlow<ExecutionError> {
         // If this is a DYNCALL node, store execution context info needed when writing the trace
         // row in finalize_clock_cycle.
-        self.ctx_info =
-            self.get_execution_context_for_dyncall(current_forest, &continuation, processor);
+        self.ctx_info = match self.get_execution_context_for_dyncall(
+            current_forest,
+            &continuation,
+            processor,
+        ) {
+            Ok(v) => v,
+            Err(e) => return ControlFlow::Break(e),
+        };
         self.finish_loop_condition = self.get_finish_loop_condition(&continuation, processor);
-        self.dyn_callee_hash = self.get_dyn_callee_hash(&continuation, processor, current_forest);
+        self.dyn_callee_hash =
+            match self.get_dyn_callee_hash(&continuation, processor, current_forest) {
+                Ok(v) => v,
+                Err(e) => return ControlFlow::Break(e),
+            };
 
         // Store state for finalizing the clock cycle later.
         self.continuation = Some(continuation);
+
+        ControlFlow::Continue(())
     }
 
     fn finalize_clock_cycle(
@@ -321,120 +338,165 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
         processor: &ReplayProcessor,
         op_helper_registers: OperationHelperRegisters,
         current_forest: &Arc<MastForest>,
-    ) {
+    ) -> ControlFlow<ExecutionError> {
         use Continuation::*;
 
-        match self.continuation.as_ref().expect("continuation stored at start of clock cycle") {
-            StartNode(node_id) => {
-                self.decoder_state.replay_node_start(
-                    &mut self.block_address_replay,
-                    &mut self.block_stack_replay,
-                );
+        let result = (|| -> Result<(), ExecutionError> {
+            let continuation = self.continuation.as_ref().ok_or(ExecutionError::Internal(
+                "continuation not stored at start of clock cycle",
+            ))?;
 
-                self.fill_start_row(*node_id, processor, current_forest);
-            },
-            FinishJoin(node_id) => {
-                let node = expect_node_in_forest(current_forest, *node_id);
-                self.fill_end_trace_row(&processor.system, &processor.stack, node.digest());
-            },
-            FinishSplit(node_id) => {
-                let node = expect_node_in_forest(current_forest, *node_id);
-                self.fill_end_trace_row(&processor.system, &processor.stack, node.digest());
-            },
-            FinishLoop { node_id, was_entered: _ } => {
-                let loop_condition = self.finish_loop_condition.take().expect(
-                    "loop condition stored at start of clock cycle for FinishLoop continuation",
-                );
+            match continuation {
+                StartNode(node_id) => {
+                    self.decoder_state.replay_node_start(
+                        &mut self.block_address_replay,
+                        &mut self.block_stack_replay,
+                    )?;
 
-                if loop_condition {
-                    // Loop body is about to be re-executed, so fill in a REPEAT row.
-                    let loop_node = current_forest
-                        .get_node_by_id(*node_id)
-                        .expect("node not found in forest")
-                        .unwrap_loop();
-                    let current_addr = self.decoder_state.current_addr;
+                    self.fill_start_row(*node_id, processor, current_forest)?;
+                },
+                FinishJoin(node_id) => {
+                    let node = get_node_in_forest(current_forest, *node_id)?;
+                    self.fill_end_trace_row(&processor.system, &processor.stack, node.digest())?;
+                },
+                FinishSplit(node_id) => {
+                    let node = get_node_in_forest(current_forest, *node_id)?;
+                    self.fill_end_trace_row(&processor.system, &processor.stack, node.digest())?;
+                },
+                FinishLoop { node_id, was_entered: _ } => {
+                    let loop_condition = self.finish_loop_condition.take().ok_or(
+                        ExecutionError::Internal(
+                            "loop condition not stored at start of clock cycle for FinishLoop continuation",
+                        ),
+                    )?;
 
-                    self.fill_loop_repeat_trace_row(
+                    if loop_condition {
+                        // Loop body is about to be re-executed, so fill in a REPEAT row.
+                        let MastNode::Loop(loop_node) =
+                            get_node_in_forest(current_forest, *node_id)?
+                        else {
+                            return Err(ExecutionError::Internal(
+                                "expected loop node in FinishLoop continuation",
+                            ));
+                        };
+                        let current_addr = self.decoder_state.current_addr;
+
+                        self.fill_loop_repeat_trace_row(
+                            &processor.system,
+                            &processor.stack,
+                            loop_node,
+                            current_forest,
+                            current_addr,
+                        )?;
+                    } else {
+                        // Loop is finished, so fill in an END row.
+                        let node = get_node_in_forest(current_forest, *node_id)?;
+                        self.fill_end_trace_row(
+                            &processor.system,
+                            &processor.stack,
+                            node.digest(),
+                        )?;
+                    }
+                },
+                FinishCall(node_id) => {
+                    let node = get_node_in_forest(current_forest, *node_id)?;
+                    self.fill_end_trace_row(&processor.system, &processor.stack, node.digest())?;
+                },
+                FinishDyn(node_id) => {
+                    let node = get_node_in_forest(current_forest, *node_id)?;
+                    self.fill_end_trace_row(&processor.system, &processor.stack, node.digest())?;
+                },
+                ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
+                    let MastNode::Block(basic_block_node) =
+                        get_node_in_forest(current_forest, *node_id)?
+                    else {
+                        return Err(ExecutionError::Internal(
+                            "expected basic block node in ResumeBasicBlock continuation",
+                        ));
+                    };
+
+                    let mut basic_block_context = BasicBlockContext::new_at_op(
+                        basic_block_node,
+                        *batch_index,
+                        *op_idx_in_batch,
+                    )
+                    .map_exec_err_no_ctx()?;
+                    let current_batch = basic_block_node
+                        .op_batches()
+                        .get(*batch_index)
+                        .ok_or(ExecutionError::Internal("batch index out of bounds"))?;
+                    let operation = *current_batch
+                        .ops()
+                        .get(*op_idx_in_batch)
+                        .ok_or(ExecutionError::Internal("op index in batch out of bounds"))?;
+                    let (_, op_idx_in_group) = current_batch
+                        .op_idx_in_batch_to_group(*op_idx_in_batch)
+                        .ok_or(ExecutionError::Internal("invalid op index in batch"))?;
+
+                    self.fill_operation_trace_row(
                         &processor.system,
                         &processor.stack,
-                        loop_node,
-                        current_forest,
-                        current_addr,
+                        operation,
+                        op_idx_in_group,
+                        op_helper_registers.to_user_op_helpers(),
+                        &mut basic_block_context,
                     );
-                } else {
-                    // Loop is finished, so fill in an END row.
-                    let node = expect_node_in_forest(current_forest, *node_id);
-                    self.fill_end_trace_row(&processor.system, &processor.stack, node.digest());
-                }
-            },
-            FinishCall(node_id) => {
-                let node = expect_node_in_forest(current_forest, *node_id);
-                self.fill_end_trace_row(&processor.system, &processor.stack, node.digest());
-            },
-            FinishDyn(node_id) => {
-                let node = expect_node_in_forest(current_forest, *node_id);
-                self.fill_end_trace_row(&processor.system, &processor.stack, node.digest());
-            },
-            ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
-                let basic_block_node = current_forest
-                    .get_node_by_id(*node_id)
-                    .expect("node not found in forest")
-                    .unwrap_basic_block();
+                },
+                Respan { node_id, batch_index } => {
+                    let MastNode::Block(basic_block_node) =
+                        get_node_in_forest(current_forest, *node_id)?
+                    else {
+                        return Err(ExecutionError::Internal(
+                            "expected basic block node in Respan continuation",
+                        ));
+                    };
 
-                let mut basic_block_context =
-                    BasicBlockContext::new_at_op(basic_block_node, *batch_index, *op_idx_in_batch);
-                let current_batch = &basic_block_node.op_batches()[*batch_index];
-                let operation = current_batch.ops()[*op_idx_in_batch];
-                let (_, op_idx_in_group) = current_batch
-                    .op_idx_in_batch_to_group(*op_idx_in_batch)
-                    .expect("invalid op index in batch");
+                    let mut basic_block_context =
+                        BasicBlockContext::new_at_batch_start(basic_block_node, *batch_index)
+                            .map_exec_err_no_ctx()?;
+                    let current_batch = basic_block_node
+                        .op_batches()
+                        .get(*batch_index)
+                        .ok_or(ExecutionError::Internal("batch index out of bounds"))?;
 
-                self.fill_operation_trace_row(
-                    &processor.system,
-                    &processor.stack,
-                    operation,
-                    op_idx_in_group,
-                    op_helper_registers.to_user_op_helpers(),
-                    &mut basic_block_context,
-                );
-            },
-            Respan { node_id, batch_index } => {
-                let basic_block_node = current_forest
-                    .get_node_by_id(*node_id)
-                    .expect("node not found in forest")
-                    .unwrap_basic_block();
+                    self.fill_respan_trace_row(
+                        &processor.system,
+                        &processor.stack,
+                        current_batch,
+                        &mut basic_block_context,
+                    )?;
+                },
+                FinishBasicBlock(node_id) => {
+                    let MastNode::Block(basic_block_node) =
+                        get_node_in_forest(current_forest, *node_id)?
+                    else {
+                        return Err(ExecutionError::Internal(
+                            "expected basic block node in FinishBasicBlock continuation",
+                        ));
+                    };
 
-                let mut basic_block_context =
-                    BasicBlockContext::new_at_batch_start(basic_block_node, *batch_index);
-                let current_batch = &basic_block_node.op_batches()[*batch_index];
+                    self.fill_basic_block_end_trace_row(
+                        &processor.system,
+                        &processor.stack,
+                        basic_block_node,
+                    )?;
+                },
+                FinishExternal(_)
+                | EnterForest(_)
+                | AfterExitDecorators(_)
+                | AfterExitDecoratorsBasicBlock(_) => {
+                    unreachable!(
+                        "Tracer contract guarantees that these continuations do not occur here"
+                    )
+                },
+            }
 
-                self.fill_respan_trace_row(
-                    &processor.system,
-                    &processor.stack,
-                    current_batch,
-                    &mut basic_block_context,
-                );
-            },
-            FinishBasicBlock(node_id) => {
-                let basic_block_node = current_forest
-                    .get_node_by_id(*node_id)
-                    .expect("node not found in forest")
-                    .unwrap_basic_block();
+            Ok(())
+        })();
 
-                self.fill_basic_block_end_trace_row(
-                    &processor.system,
-                    &processor.stack,
-                    basic_block_node,
-                );
-            },
-            FinishExternal(_)
-            | EnterForest(_)
-            | AfterExitDecorators(_)
-            | AfterExitDecoratorsBasicBlock(_) => {
-                unreachable!(
-                    "Tracer contract guarantees that these continuations do not occur here"
-                )
-            },
+        match result {
+            Ok(()) => ControlFlow::Continue(()),
+            Err(e) => ControlFlow::Break(e),
         }
     }
 }
@@ -442,14 +504,14 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
 // HELPER FUNCTIONS
 // ================================================================================================
 
-/// Returns a reference to the node with the given ID from the forest.
-///
-/// # Panics
-/// - Panics if the node ID is not found in the forest.
-fn expect_node_in_forest(forest: &MastForest, node_id: MastNodeId) -> &MastNode {
+/// Returns a reference to the node with the given ID from the forest, or an error if not found.
+fn get_node_in_forest(
+    forest: &MastForest,
+    node_id: MastNodeId,
+) -> Result<&MastNode, ExecutionError> {
     forest
         .get_node_by_id(node_id)
-        .unwrap_or_else(|| panic!("invalid node ID stored in continuation: {}", node_id))
+        .ok_or(ExecutionError::Internal("invalid node ID stored in continuation"))
 }
 
 // TESTS
@@ -546,6 +608,7 @@ mod tests {
         // Call the method under test.
         let ctx_info = tracer
             .get_execution_context_for_dyncall(&forest, &continuation, &processor)
+            .expect("replay should not fail")
             .expect("should return Some for a DYNCALL StartNode continuation");
 
         // check for bug: When the stack is at MIN_STACK_DEPTH with a non-empty overflow table
