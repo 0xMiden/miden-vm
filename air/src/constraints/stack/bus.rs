@@ -25,7 +25,7 @@ use crate::{
     constraints::{
         bus::{MessageEncoder, indices::P1_STACK},
         op_flags::OpFlags,
-        tagging::TaggingAirBuilderExt,
+        tagging::{TaggingAirBuilderExt, ids::TAG_STACK_OVERFLOW_BUS_BASE},
     },
     trace::{
         decoder::HASHER_STATE_RANGE,
@@ -34,7 +34,7 @@ use crate::{
 };
 
 /// Tag ID and namespace for the stack overflow bus transition constraint.
-const STACK_OVERFLOW_BUS_ID: usize = 41;
+const STACK_OVERFLOW_BUS_ID: usize = TAG_STACK_OVERFLOW_BUS_BASE;
 const STACK_OVERFLOW_BUS_NAME: &str = "stack.overflow.bus.transition";
 
 // ENTRY POINTS

@@ -33,7 +33,10 @@ use crate::{
     MainTraceRow,
     constraints::{
         op_flags::OpFlags,
-        tagging::{TaggingAirBuilderExt, manifest::TAG_STACK_OVERFLOW_BASE},
+        tagging::{
+            TaggingAirBuilderExt,
+            ids::{TAG_STACK_OVERFLOW_BASE, TAG_STACK_OVERFLOW_COUNT},
+        },
     },
     trace::{
         decoder::{IS_CALL_FLAG_COL_IDX, IS_SYSCALL_FLAG_COL_IDX},
@@ -48,7 +51,7 @@ use crate::{
 const STACK_OVERFLOW_BASE_ID: usize = TAG_STACK_OVERFLOW_BASE;
 
 /// Tag namespaces for stack overflow constraints (boundary + transition).
-const STACK_OVERFLOW_NAMES: [&str; 8] = [
+const STACK_OVERFLOW_NAMES: [&str; TAG_STACK_OVERFLOW_COUNT] = [
     "stack.overflow.depth.first_row",
     "stack.overflow.depth.last_row",
     "stack.overflow.addr.first_row",
