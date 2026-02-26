@@ -280,7 +280,7 @@ mod tests {
     }
 
     #[test]
-    fn ood_system_range_matches_expected() {
+    fn test_miden_vm_ood_evals_match() {
         run_group_parity_test(active_expected_ood_evals());
     }
 }
