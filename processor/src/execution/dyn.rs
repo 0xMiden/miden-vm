@@ -31,12 +31,15 @@ where
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::StartNode(current_node_id),
-        state.continuation_stack,
-        current_forest,
-    );
+    state
+        .tracer
+        .start_clock_cycle(
+            state.processor,
+            Continuation::StartNode(current_node_id),
+            state.continuation_stack,
+            current_forest,
+        )
+        .map_break(|err| InternalBreakReason::from(BreakReason::Err(err)))?;
 
     // Execute decorators that should be executed before entering the node
     state
@@ -174,12 +177,15 @@ where
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::FinishDyn(node_id),
-        state.continuation_stack,
-        current_forest,
-    );
+    state
+        .tracer
+        .start_clock_cycle(
+            state.processor,
+            Continuation::FinishDyn(node_id),
+            state.continuation_stack,
+            current_forest,
+        )
+        .map_break(BreakReason::Err)?;
 
     let dyn_node = current_forest[node_id].unwrap_dyn();
     // For dyncall, restore the context.

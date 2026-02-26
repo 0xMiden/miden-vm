@@ -28,12 +28,15 @@ where
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::StartNode(current_node_id),
-        state.continuation_stack,
-        current_forest,
-    );
+    state
+        .tracer
+        .start_clock_cycle(
+            state.processor,
+            Continuation::StartNode(current_node_id),
+            state.continuation_stack,
+            current_forest,
+        )
+        .map_break(BreakReason::Err)?;
 
     // Execute decorators that should be executed before entering the node
     state
@@ -114,15 +117,18 @@ where
     if condition == ONE {
         // Start the clock cycle corresponding to the REPEAT operation, before re-entering the loop
         // body.
-        state.tracer.start_clock_cycle(
-            state.processor,
-            Continuation::FinishLoop {
-                node_id: current_node_id,
-                was_entered: true,
-            },
-            state.continuation_stack,
-            current_forest,
-        );
+        state
+            .tracer
+            .start_clock_cycle(
+                state.processor,
+                Continuation::FinishLoop {
+                    node_id: current_node_id,
+                    was_entered: true,
+                },
+                state.continuation_stack,
+                current_forest,
+            )
+            .map_break(BreakReason::Err)?;
 
         // Drop the condition from the stack (we know the loop was entered since condition is
         // ONE).
@@ -135,15 +141,18 @@ where
         finalize_clock_cycle(state.processor, state.tracer, state.stopper, current_forest)
     } else if condition == ZERO {
         // Exit the loop - start the clock cycle corresponding to the END operation.
-        state.tracer.start_clock_cycle(
-            state.processor,
-            Continuation::FinishLoop {
-                node_id: current_node_id,
-                was_entered: loop_was_entered,
-            },
-            state.continuation_stack,
-            current_forest,
-        );
+        state
+            .tracer
+            .start_clock_cycle(
+                state.processor,
+                Continuation::FinishLoop {
+                    node_id: current_node_id,
+                    was_entered: loop_was_entered,
+                },
+                state.continuation_stack,
+                current_forest,
+            )
+            .map_break(BreakReason::Err)?;
 
         // The END operation only drops the condition from the stack if the loop was entered. This
         // is because if the loop was never entered, then the condition will have already been

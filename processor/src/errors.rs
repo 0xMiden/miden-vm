@@ -209,6 +209,8 @@ pub enum MemoryError {
         "ensure that the memory address accessed is aligned to a word boundary (it is a multiple of 4)"
     ))]
     UnalignedWordAccess { addr: u32, ctx: ContextId },
+    #[error("failed to read from memory: {0}")]
+    MemoryReadFailed(String),
 }
 
 // CRYPTO ERROR

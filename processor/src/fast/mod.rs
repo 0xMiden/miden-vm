@@ -1017,8 +1017,8 @@ impl Tracer for NoopTracer {
         _continuation: Continuation,
         _continuation_stack: &ContinuationStack,
         _current_forest: &Arc<MastForest>,
-    ) {
-        // do nothing
+    ) -> ControlFlow<ExecutionError> {
+        ControlFlow::Continue(())
     }
 
     #[inline(always)]
@@ -1027,7 +1027,7 @@ impl Tracer for NoopTracer {
         _processor: &FastProcessor,
         _op_helper_registers: OperationHelperRegisters,
         _current_forest: &Arc<MastForest>,
-    ) {
-        // do nothing
+    ) -> ControlFlow<ExecutionError> {
+        ControlFlow::Continue(())
     }
 }

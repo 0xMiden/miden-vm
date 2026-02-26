@@ -1,4 +1,5 @@
 use alloc::{sync::Arc, vec::Vec};
+use core::ops::ControlFlow;
 
 use miden_air::trace::chiplets::hasher::{HASH_CYCLE_LEN, HASH_CYCLE_LEN_FELT, STATE_WIDTH};
 use miden_core::{FMP_ADDR, FMP_INIT_VALUE, operations::Operation};
@@ -16,7 +17,8 @@ use super::{
     utils::split_u32_into_u16,
 };
 use crate::{
-    ContextId, EMPTY_WORD, FastProcessor, Felt, MIN_STACK_DEPTH, ONE, RowIndex, Word, ZERO,
+    ContextId, EMPTY_WORD, ExecutionError, FastProcessor, Felt, MIN_STACK_DEPTH, ONE, RowIndex,
+    Word, ZERO,
     continuation_stack::{Continuation, ContinuationStack},
     crypto::merkle::MerklePath,
     mast::{
@@ -476,7 +478,7 @@ impl Tracer for ExecutionTracer {
         continuation: Continuation,
         continuation_stack: &ContinuationStack,
         current_forest: &Arc<MastForest>,
-    ) {
+    ) -> ControlFlow<ExecutionError> {
         // check if we need to start a new trace state
         if processor.system().clock().as_usize().is_multiple_of(self.fragment_size) {
             self.start_new_fragment_context(
@@ -609,6 +611,8 @@ impl Tracer for ExecutionTracer {
                 )
             },
         }
+
+        ControlFlow::Continue(())
     }
 
     #[inline(always)]
@@ -799,7 +803,7 @@ impl Tracer for ExecutionTracer {
         processor: &FastProcessor,
         _op_helper_registers: OperationHelperRegisters,
         _current_forest: &Arc<MastForest>,
-    ) {
+    ) -> ControlFlow<ExecutionError> {
         // Restore the overflow table context for Call/Syscall/Dyncall END. This is deferred
         // from start_clock_cycle because finalize_clock_cycle is only called when the operation
         // succeeds (i.e., the stack depth check in processor.restore_context() passes).
@@ -847,6 +851,8 @@ impl Tracer for ExecutionTracer {
 
             self.is_eval_circuit_op = false;
         }
+
+        ControlFlow::Continue(())
     }
 }
 

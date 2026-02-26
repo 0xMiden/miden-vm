@@ -160,7 +160,12 @@ impl ReplayProcessor {
                 InternalBreakReason::LoadMastForestFromDyn { .. } => {
                     // load mast forest from replay
                     let (root_id, new_forest) =
-                        self.mast_forest_resolution_replay.replay_resolution();
+                        match self.mast_forest_resolution_replay.replay_resolution() {
+                            Ok(v) => v,
+                            Err(err) => {
+                                return ControlFlow::Break(BreakReason::Err(err));
+                            },
+                        };
 
                     // Finish loading the MAST forest from the Dyn node, as per the sans-IO
                     // contract.
@@ -180,7 +185,12 @@ impl ReplayProcessor {
                 } => {
                     // load mast forest from replay
                     let (root_id, new_forest) =
-                        self.mast_forest_resolution_replay.replay_resolution();
+                        match self.mast_forest_resolution_replay.replay_resolution() {
+                            Ok(v) => v,
+                            Err(err) => {
+                                return ControlFlow::Break(BreakReason::Err(err));
+                            },
+                        };
 
                     // Finish loading the MAST forest from the External node, as per the sans-IO
                     // contract.
@@ -407,7 +417,10 @@ impl Processor for ReplayProcessor {
     }
 
     fn restore_context(&mut self) -> Result<(), OperationError> {
-        let ctx_info = self.execution_context_replay.replay_execution_context();
+        let ctx_info = self
+            .execution_context_replay
+            .replay_execution_context()
+            .expect("invalid trace generation context: no execution context recorded");
 
         // Restore system state
         self.system_mut().set_ctx(ctx_info.parent_ctx);
