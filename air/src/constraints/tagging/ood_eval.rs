@@ -1,3 +1,5 @@
+//! OOD evaluation helper for tagged constraint parity tests.
+
 use alloc::vec::Vec;
 
 use miden_core::{
@@ -6,7 +8,7 @@ use miden_core::{
 };
 use miden_crypto::stark::{air::MidenAirBuilder, matrix::RowMajorMatrix};
 
-use super::{CURRENT_MAX_ID, TagRecord, state};
+use super::{ids::TAG_TOTAL_COUNT, state};
 
 /// Captured evaluation for a single tagged constraint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,7 +98,7 @@ impl OodEvalAirBuilder {
             last_row,
             transition,
             records: Vec::new(),
-            used: vec![None; CURRENT_MAX_ID + 1],
+            used: vec![None; TAG_TOTAL_COUNT],
             prev_enabled,
         }
     }
@@ -105,7 +107,7 @@ impl OodEvalAirBuilder {
         &self.records
     }
 
-    /// Panics if any ID in `0..=CURRENT_MAX_ID` was not recorded.
+    /// Panics if any expected ID was not recorded.
     pub fn assert_complete(&self) {
         let missing: Vec<usize> = self
             .used
@@ -119,13 +121,19 @@ impl OodEvalAirBuilder {
         }
     }
 
-    fn record(&mut self, tag: TagRecord, value: QuadFelt) {
-        tag.validate(&mut self.used, self.records.len());
-        self.records.push(EvalRecord {
-            id: tag.id,
-            namespace: tag.namespace,
-            value,
-        });
+    fn record(&mut self, id: usize, namespace: &'static str, value: QuadFelt) {
+        let expected = self.records.len();
+        if id != expected {
+            panic!("constraint id {} out of order (expected {})", id, expected);
+        }
+        if id >= self.used.len() {
+            panic!("constraint id {} is out of range (max {})", id, self.used.len() - 1);
+        }
+        if let Some(prev) = self.used[id] {
+            panic!("constraint id {} already used (previous namespace: {})", id, prev);
+        }
+        self.used[id] = Some(namespace);
+        self.records.push(EvalRecord { id, namespace, value });
     }
 }
 
@@ -169,18 +177,18 @@ impl MidenAirBuilder for OodEvalAirBuilder {
     }
 
     fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
-        let tag = state::consume_tag();
+        let (id, namespace) = state::consume_tag();
         let value = QuadFelt::from(x.into());
-        self.record(tag, value);
+        self.record(id, namespace, value);
     }
 
     fn assert_zero_ext<I>(&mut self, x: I)
     where
         I: Into<Self::ExprEF>,
     {
-        let tag = state::consume_tag();
+        let (id, namespace) = state::consume_tag();
         let value = x.into();
-        self.record(tag, value);
+        self.record(id, namespace, value);
     }
 
     fn public_values(&self) -> &[Self::PublicVar] {
@@ -239,5 +247,40 @@ impl SeededRng {
         out[16..24].copy_from_slice(&mix.to_le_bytes());
         out[24..32].copy_from_slice(&sum.to_le_bytes());
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
+
+    use miden_core::{Felt, field::QuadFelt};
+    use miden_crypto::stark::air::MidenAir;
+
+    use super::{
+        super::fixtures::{OOD_SEED, active_expected_ood_evals},
+        EvalRecord, OodEvalAirBuilder, TAG_TOTAL_COUNT,
+    };
+    use crate::ProcessorAir;
+
+    fn run_group_parity_test(expected: Vec<EvalRecord>) {
+        assert_eq!(expected.len(), TAG_TOTAL_COUNT);
+        let mut builder = OodEvalAirBuilder::new(OOD_SEED);
+        let air = ProcessorAir::new();
+        MidenAir::<Felt, QuadFelt>::eval(&air, &mut builder);
+        builder.assert_complete();
+
+        let actual = builder.records();
+        assert_eq!(actual.len(), expected.len());
+        for (actual, expected) in actual.iter().zip(expected.iter()) {
+            assert_eq!(actual.id, expected.id);
+            assert_eq!(actual.namespace, expected.namespace);
+            assert_eq!(actual.value, expected.value);
+        }
+    }
+
+    #[test]
+    fn ood_system_range_matches_expected() {
+        run_group_parity_test(active_expected_ood_evals());
     }
 }
