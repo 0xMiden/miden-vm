@@ -27,8 +27,9 @@ use rayon::prelude::*;
 use tracing::instrument;
 
 use crate::{
-    ContextId,
+    ContextId, ExecutionError,
     continuation_stack::ContinuationStack,
+    errors::MapExecErrNoCtx,
     fast::ExecutionOutput,
     trace::{
         AuxTraceBuilders, ChipletsLengths, ExecutionTrace, TraceLenSummary,
@@ -69,7 +70,7 @@ pub fn build_trace(
     execution_output: ExecutionOutput,
     trace_generation_context: TraceGenerationContext,
     program_info: ProgramInfo,
-) -> ExecutionTrace {
+) -> Result<ExecutionTrace, ExecutionError> {
     let TraceGenerationContext {
         core_trace_contexts,
         range_checker_replay,
@@ -90,7 +91,7 @@ pub fn build_trace(
         kernel_replay,
         hasher_for_chiplet,
         ace_replay,
-    );
+    )?;
 
     let range_checker = initialize_range_checker(range_checker_replay, &chiplets);
 
@@ -149,13 +150,13 @@ pub fn build_trace(
         stack: StackAuxTraceBuilder,
     };
 
-    ExecutionTrace::new_from_parts(
+    Ok(ExecutionTrace::new_from_parts(
         program_info,
         execution_output,
         main_trace,
         aux_trace_builders,
         trace_len_summary,
-    )
+    ))
 }
 
 // HELPERS
@@ -451,7 +452,7 @@ fn initialize_chiplets(
     kernel_replay: KernelReplay,
     hasher_for_chiplet: HasherRequestReplay,
     ace_replay: AceReplay,
-) -> Chiplets {
+) -> Result<Chiplets, ExecutionError> {
     let mut chiplets = Chiplets::new(kernel);
 
     // populate hasher chiplet
@@ -480,16 +481,10 @@ fn initialize_chiplets(
     for (bitwise_op, a, b) in bitwise {
         match bitwise_op {
             BitwiseOp::U32And => {
-                let _ = chiplets
-                    .bitwise
-                    .u32and(a, b)
-                    .expect("bitwise AND operation failed when populating chiplet");
+                chiplets.bitwise.u32and(a, b).map_exec_err_no_ctx()?;
             },
             BitwiseOp::U32Xor => {
-                let _ = chiplets
-                    .bitwise
-                    .u32xor(a, b)
-                    .expect("bitwise XOR operation failed when populating chiplet");
+                chiplets.bitwise.u32xor(a, b).map_exec_err_no_ctx()?;
             },
         }
     }
@@ -527,32 +522,26 @@ fn initialize_chiplets(
         [elements_written, words_written, elements_read, words_read]
             .into_iter()
             .kmerge_by(|a, b| a.clk() < b.clk())
-            .for_each(|mem_access| match mem_access {
-                MemoryAccess::ReadElement(addr, ctx, clk) => {
-                    let _ = chiplets
-                        .memory
-                        .read(ctx, addr, clk)
-                        .expect("memory read element failed when populating chiplet");
-                },
-                MemoryAccess::WriteElement(addr, element, ctx, clk) => {
-                    chiplets
-                        .memory
-                        .write(ctx, addr, clk, element)
-                        .expect("memory write element failed when populating chiplet");
-                },
-                MemoryAccess::ReadWord(addr, ctx, clk) => {
-                    chiplets
-                        .memory
-                        .read_word(ctx, addr, clk)
-                        .expect("memory read word failed when populating chiplet");
-                },
-                MemoryAccess::WriteWord(addr, word, ctx, clk) => {
-                    chiplets
-                        .memory
-                        .write_word(ctx, addr, clk, word)
-                        .expect("memory write word failed when populating chiplet");
-                },
-            });
+            .try_for_each(|mem_access| match mem_access {
+                MemoryAccess::ReadElement(addr, ctx, clk) => chiplets
+                    .memory
+                    .read(ctx, addr, clk)
+                    .map(|_| ())
+                    .map_err(ExecutionError::MemoryErrorNoCtx),
+                MemoryAccess::WriteElement(addr, element, ctx, clk) => chiplets
+                    .memory
+                    .write(ctx, addr, clk, element)
+                    .map_err(ExecutionError::MemoryErrorNoCtx),
+                MemoryAccess::ReadWord(addr, ctx, clk) => chiplets
+                    .memory
+                    .read_word(ctx, addr, clk)
+                    .map(|_| ())
+                    .map_err(ExecutionError::MemoryErrorNoCtx),
+                MemoryAccess::WriteWord(addr, word, ctx, clk) => chiplets
+                    .memory
+                    .write_word(ctx, addr, clk, word)
+                    .map_err(ExecutionError::MemoryErrorNoCtx),
+            })?;
 
         enum MemoryAccess {
             ReadElement(Felt, ContextId, RowIndex),
@@ -580,13 +569,10 @@ fn initialize_chiplets(
 
     // populate kernel ROM
     for proc_hash in kernel_replay.into_iter() {
-        chiplets
-            .kernel_rom
-            .access_proc(proc_hash)
-            .expect("kernel proc access failed when populating chiplet");
+        chiplets.kernel_rom.access_proc(proc_hash).map_exec_err_no_ctx()?;
     }
 
-    chiplets
+    Ok(chiplets)
 }
 
 fn pad_trace_columns(trace_columns: &mut [Vec<Felt>], main_trace_len: usize) {

@@ -398,11 +398,11 @@ impl Test {
         // compare fast and slow processors' stack outputs
         self.assert_result_with_step_execution(&fast_stack_result);
 
-        fast_stack_result.map(|(execution_output, trace_generation_ctx)| {
-            let trace = build_trace(execution_output, trace_generation_ctx, program.to_info());
+        fast_stack_result.and_then(|(execution_output, trace_generation_ctx)| {
+            let trace = build_trace(execution_output, trace_generation_ctx, program.to_info())?;
 
             assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
-            trace
+            Ok(trace)
         })
     }
 

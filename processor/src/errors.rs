@@ -509,6 +509,20 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, OperationError> {
     }
 }
 
+impl<T> MapExecErrNoCtx<T> for Result<T, OperationError> {
+    #[inline(always)]
+    fn map_exec_err_no_ctx(self) -> Result<T, ExecutionError> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(err) => Err(ExecutionError::OperationError {
+                label: SourceSpan::UNKNOWN,
+                source_file: None,
+                err,
+            }),
+        }
+    }
+}
+
 // AdviceError implementations
 impl<T> MapExecErr<T> for Result<T, AdviceError> {
     #[inline(always)]

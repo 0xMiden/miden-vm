@@ -152,7 +152,8 @@ fn run_masp_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
         .execute_for_trace_sync(&program, &mut host)
         .wrap_err("Failed to execute program")?;
 
-    let trace = build_trace(execution_output, trace_generation_context, program.to_info());
+    let trace = build_trace(execution_output, trace_generation_context, program.to_info())
+        .wrap_err("Failed to build trace")?;
 
     Ok((trace, program_hash))
 }
@@ -212,7 +213,8 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
         .execute_for_trace_sync(&program, &mut host)
         .wrap_err("Failed to execute program")?;
 
-    let trace = build_trace(execution_output, trace_generation_context, program.to_info());
+    let trace = build_trace(execution_output, trace_generation_context, program.to_info())
+        .wrap_err("Failed to build trace")?;
 
     Ok((trace, program_hash))
 }
