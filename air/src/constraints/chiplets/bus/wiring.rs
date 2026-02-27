@@ -37,7 +37,7 @@ use crate::{
     constraints::{
         bus::{MessageEncoder, alphas_from_challenges, indices::V_WIRING},
         chiplets::selectors::ace_chiplet_flag,
-        tagging::{TAG_WIRING_BUS_BASE, TaggingAirBuilderExt},
+        tagging::{TaggingAirBuilderExt, ids::TAG_WIRING_BUS_BASE},
     },
     trace::chiplets::ace::{
         CLK_IDX, CTX_IDX, ID_0_IDX, ID_1_IDX, ID_2_IDX, M_0_IDX, M_1_IDX, SELECTOR_BLOCK_IDX,
