@@ -221,19 +221,17 @@ impl StackState {
     pub fn pop_overflow(
         &mut self,
         stack_overflow_replay: &mut StackOverflowReplay,
-    ) -> Option<Felt> {
+    ) -> Result<Option<Felt>, OperationError> {
         debug_assert!(self.stack_depth >= MIN_STACK_DEPTH);
 
         if self.stack_depth > MIN_STACK_DEPTH {
-            let (stack_value, new_overflow_addr) = stack_overflow_replay
-                .replay_pop_overflow()
-                .expect("invalid trace generation context: no overflow pop operations recorded");
+            let (stack_value, new_overflow_addr) = stack_overflow_replay.replay_pop_overflow()?;
             self.stack_depth -= 1;
             self.last_overflow_addr = new_overflow_addr;
-            Some(stack_value)
+            Ok(Some(stack_value))
         } else {
             self.last_overflow_addr = ZERO;
-            None
+            Ok(None)
         }
     }
 
@@ -259,14 +257,17 @@ impl StackState {
     /// Restores the prior context for this stack.
     ///
     /// This has the effect bringing back items previously hidden from the overflow table.
-    pub fn restore_context(&mut self, stack_overflow_replay: &mut StackOverflowReplay) {
-        let (stack_depth, last_overflow_addr) = stack_overflow_replay
-            .replay_restore_context_overflow_addr()
-            .expect("invalid trace generation context: no overflow address operations recorded");
+    pub fn restore_context(
+        &mut self,
+        stack_overflow_replay: &mut StackOverflowReplay,
+    ) -> Result<(), OperationError> {
+        let (stack_depth, last_overflow_addr) =
+            stack_overflow_replay.replay_restore_context_overflow_addr()?;
         // Restore stack depth to the value from before the context switch (parallel to Process
         // Stack behavior)
         self.stack_depth = stack_depth;
         self.last_overflow_addr = last_overflow_addr;
+        Ok(())
     }
 }
 
@@ -1162,18 +1163,18 @@ impl StackOverflowReplay {
     /// is, don't call if the stack depth is 16.
     ///
     /// See [Self::record_pop_overflow] for more details.
-    pub fn replay_pop_overflow(&mut self) -> Result<(Felt, Felt), ExecutionError> {
+    pub fn replay_pop_overflow(&mut self) -> Result<(Felt, Felt), OperationError> {
         self.overflow_values
             .pop_front()
-            .ok_or(ExecutionError::Internal("no overflow pop operations recorded"))
+            .ok_or(OperationError::Internal("no overflow pop operations recorded"))
     }
 
     /// Replays the overflow address when restoring a context
     pub fn replay_restore_context_overflow_addr(
         &mut self,
-    ) -> Result<(usize, Felt), ExecutionError> {
+    ) -> Result<(usize, Felt), OperationError> {
         self.restore_context_info
             .pop_front()
-            .ok_or(ExecutionError::Internal("no overflow address operations recorded"))
+            .ok_or(OperationError::Internal("no overflow address operations recorded"))
     }
 }

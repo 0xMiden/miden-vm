@@ -29,7 +29,7 @@ where
         let err_msg = program.resolve_error_message(err_code);
         return Err(OperationError::FailedAssertion { err_code, err_msg });
     }
-    processor.stack_mut().decrement_size();
+    processor.stack_mut().decrement_size()?;
     Ok(OperationHelperRegisters::Empty)
 }
 

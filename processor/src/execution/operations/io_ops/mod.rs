@@ -85,7 +85,7 @@ where
     let ctx = processor.system().ctx();
     let clk = processor.system().clock();
 
-    processor.stack_mut().decrement_size();
+    processor.stack_mut().decrement_size()?;
 
     let word = processor.memory_mut().read_word(ctx, addr, clk)?;
     tracer.record_memory_read_word(
@@ -133,7 +133,7 @@ where
     let ctx = processor.system().ctx();
     let clk = processor.system().clock();
 
-    processor.stack_mut().decrement_size();
+    processor.stack_mut().decrement_size()?;
 
     processor.memory_mut().write_word(ctx, addr, clk, word)?;
     tracer.record_memory_write_word(
@@ -196,7 +196,7 @@ where
     let value = processor.stack().get(1);
     let ctx = processor.system().ctx();
 
-    processor.stack_mut().decrement_size();
+    processor.stack_mut().decrement_size()?;
 
     processor.memory_mut().write_element(ctx, addr, value)?;
     tracer.record_memory_write_element(

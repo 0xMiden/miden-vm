@@ -246,7 +246,7 @@ pub(crate) trait StackInterface {
     /// Concretely, this decrements the stack top pointer by one (removing the top element), and
     /// pushes a `ZERO` at the bottom of the stack if the stack size is already at 16 elements
     /// (since the stack size can never be less than 16).
-    fn decrement_size(&mut self);
+    fn decrement_size(&mut self) -> Result<(), OperationError>;
 }
 
 // ADVICE PROVIDER INTERFACE

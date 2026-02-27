@@ -355,7 +355,7 @@ impl StackInterface for ReplayProcessor {
         Ok(())
     }
 
-    fn decrement_size(&mut self) {
+    fn decrement_size(&mut self) -> Result<(), OperationError> {
         // Shift all other elements up
         for write_idx in 0..(MIN_STACK_DEPTH - 1) {
             let read_idx = write_idx + 1;
@@ -363,13 +363,15 @@ impl StackInterface for ReplayProcessor {
         }
 
         // Pop the last element from the overflow table
-        if let Some(last_element) = self.stack.pop_overflow(&mut self.stack_overflow_replay) {
+        if let Some(last_element) = self.stack.pop_overflow(&mut self.stack_overflow_replay)? {
             // Write the last element to the bottom of the stack
             self.set(MIN_STACK_DEPTH - 1, last_element);
         } else {
             // If overflow table is empty, set the bottom element to zero
             self.set(MIN_STACK_DEPTH - 1, ZERO);
         }
+
+        Ok(())
     }
 }
 
@@ -427,7 +429,7 @@ impl Processor for ReplayProcessor {
         self.system_mut().set_caller_hash(ctx_info.parent_fn_hash);
 
         // Restore stack state
-        self.stack.restore_context(&mut self.stack_overflow_replay);
+        self.stack.restore_context(&mut self.stack_overflow_replay)?;
 
         Ok(())
     }

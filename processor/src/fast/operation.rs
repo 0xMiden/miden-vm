@@ -318,7 +318,8 @@ impl StackInterface for FastProcessor {
     }
 
     #[inline(always)]
-    fn decrement_size(&mut self) {
-        self.decrement_stack_size()
+    fn decrement_size(&mut self) -> Result<(), OperationError> {
+        self.decrement_stack_size();
+        Ok(())
     }
 }

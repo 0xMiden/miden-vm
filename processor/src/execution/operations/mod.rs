@@ -80,9 +80,19 @@ where
         Operation::Halt => unreachable!("control flow operation"),
 
         // ----- field operations -------------------------------------------------------------
-        Operation::Add => field_ops::op_add(processor),
+        Operation::Add => field_ops::op_add(processor).map_exec_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            op_idx,
+        )?,
         Operation::Neg => field_ops::op_neg(processor),
-        Operation::Mul => field_ops::op_mul(processor),
+        Operation::Mul => field_ops::op_mul(processor).map_exec_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            op_idx,
+        )?,
         Operation::Inv => field_ops::op_inv(processor).map_exec_err_with_op_idx(
             current_forest,
             node_id,
@@ -108,7 +118,12 @@ where
             host,
             op_idx,
         )?,
-        Operation::Eq => field_ops::op_eq(processor),
+        Operation::Eq => field_ops::op_eq(processor).map_exec_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            op_idx,
+        )?,
         Operation::Eqz => field_ops::op_eqz(processor),
         Operation::Expacc => field_ops::op_expacc(processor),
 
@@ -171,7 +186,12 @@ where
         // ----- stack manipulation -----------------------------------------------------------
         Operation::Pad => stack_ops::op_pad(processor)?,
         Operation::Drop => {
-            processor.stack_mut().decrement_size();
+            processor.stack_mut().decrement_size().map_exec_err_with_op_idx(
+                current_forest,
+                node_id,
+                host,
+                op_idx,
+            )?;
             OperationHelperRegisters::Empty
         },
         Operation::Dup0 => stack_ops::dup_nth(processor, 0)?,

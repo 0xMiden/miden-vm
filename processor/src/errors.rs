@@ -169,6 +169,9 @@ pub enum IoError {
     Advice(#[from] AdviceError),
     #[error(transparent)]
     Memory(#[from] MemoryError),
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Operation(#[from] OperationError),
     /// Stack operation error (increment/decrement size failures).
     ///
     /// These are internal execution errors that don't need additional context
@@ -673,6 +676,9 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, IoError> {
                 Err(match err {
                     IoError::Advice(err) => ExecutionError::AdviceError { label, source_file, err },
                     IoError::Memory(err) => ExecutionError::MemoryError { label, source_file, err },
+                    IoError::Operation(err) => {
+                        ExecutionError::OperationError { label, source_file, err }
+                    },
                     // Execution errors are already fully formed with their own message.
                     IoError::Execution(boxed_err) => *boxed_err,
                 })

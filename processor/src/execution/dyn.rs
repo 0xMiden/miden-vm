@@ -67,7 +67,13 @@ where
     };
 
     // Drop the memory address from the stack. This needs to be done before saving the context.
-    state.processor.stack_mut().decrement_size();
+    if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err(
+        current_forest,
+        current_node_id,
+        state.host,
+    ) {
+        return ControlFlow::Break(InternalBreakReason::from(BreakReason::Err(err)));
+    }
 
     // For dyncall,
     // - save the context and reset it,

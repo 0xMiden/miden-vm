@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use crate::{
-    BreakReason, Host, ONE, Stopper, ZERO,
+    BreakReason, Host, MapExecErr, ONE, Stopper, ZERO,
     continuation_stack::Continuation,
     execution::{ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation},
     mast::{MastForest, MastNodeId, SplitNode},
@@ -46,7 +46,13 @@ where
     let condition = state.processor.stack().get(0);
 
     // drop the condition from the stack
-    state.processor.stack_mut().decrement_size();
+    if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err(
+        current_forest,
+        node_id,
+        state.host,
+    ) {
+        return ControlFlow::Break(BreakReason::Err(err));
+    }
 
     // execute the appropriate branch
     state.continuation_stack.push_finish_split(node_id);
