@@ -44,7 +44,7 @@ use crate::{
     MainTraceRow,
     constraints::{
         op_flags::{ExprDecoderAccess, OpFlags},
-        tagging::{TAG_DECODER_BASE, TaggingAirBuilderExt},
+        tagging::{TaggingAirBuilderExt, ids::TAG_DECODER_BASE},
     },
     trace::decoder as decoder_cols,
 };
@@ -897,8 +897,8 @@ fn enforce_op_group_decoding_constraints<AB>(
 /// Enforces op batch flag constraints and associated hasher-state zeroing rules.
 ///
 /// Batch flags encode how many groups were emitted by SPAN/RESPAN:
-/// - g8, g4, g2, g1 correspond to batches of 8, 4, 2, or 1 groups.
-/// The hasher lanes h1..h7 store the group values; unused lanes must be zeroed.
+/// - g8, g4, g2, g1 correspond to batches of 8, 4, 2, or 1 groups. The hasher lanes h1..h7 store
+///   the group values; unused lanes must be zeroed.
 fn enforce_batch_flags_constraints<AB>(
     builder: &mut AB,
     cols: &DecoderColumns<AB::Expr>,

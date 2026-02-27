@@ -33,7 +33,7 @@ use crate::{
     constraints::{
         bus::{MessageEncoder, indices::P1_BLOCK_STACK},
         op_flags::OpFlags,
-        tagging::{TAG_DECODER_BUS_BASE, TaggingAirBuilderExt},
+        tagging::{TaggingAirBuilderExt, ids::TAG_DECODER_BUS_BASE},
     },
 };
 

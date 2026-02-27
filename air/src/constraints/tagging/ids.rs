@@ -45,17 +45,24 @@ pub const TAG_STACK_CRYPTO_BASE: usize = TAG_STACK_OPS_BASE + TAG_STACK_OPS_COUN
 /// Number of stack crypto constraints in this group.
 pub const TAG_STACK_CRYPTO_COUNT: usize = 46;
 
+/// Base ID for the decoder constraint group.
+pub const TAG_DECODER_BASE: usize = TAG_STACK_CRYPTO_BASE + TAG_STACK_CRYPTO_COUNT;
+/// Number of decoder constraints in this group.
+pub const TAG_DECODER_COUNT: usize = 57;
+
 /// Base ID for the range checker bus constraint group.
-pub const TAG_RANGE_BUS_BASE: usize = TAG_STACK_CRYPTO_BASE + TAG_STACK_CRYPTO_COUNT;
+pub const TAG_RANGE_BUS_BASE: usize = TAG_DECODER_BASE + TAG_DECODER_COUNT;
 /// Number of range checker bus constraints in this group.
 pub const TAG_RANGE_BUS_COUNT: usize = 1;
 
 /// Base ID for the stack overflow bus constraint group.
 pub const TAG_STACK_OVERFLOW_BUS_BASE: usize = TAG_RANGE_BUS_BASE + TAG_RANGE_BUS_COUNT;
 /// Number of stack overflow bus constraints in this group.
-#[cfg(all(test, feature = "std"))]
 pub const TAG_STACK_OVERFLOW_BUS_COUNT: usize = 1;
+
+/// Base ID for the decoder bus constraint group.
+pub const TAG_DECODER_BUS_BASE: usize = TAG_STACK_OVERFLOW_BUS_BASE + TAG_STACK_OVERFLOW_BUS_COUNT;
 
 /// Total number of tagged constraints in the current group set.
 #[cfg(all(test, feature = "std"))]
-pub const TAG_TOTAL_COUNT: usize = TAG_STACK_OVERFLOW_BUS_BASE + TAG_STACK_OVERFLOW_BUS_COUNT;
+pub const TAG_TOTAL_COUNT: usize = TAG_DECODER_BUS_BASE + 3;
