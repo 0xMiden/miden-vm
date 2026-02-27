@@ -20,7 +20,7 @@ use crate::{
         bus::{alphas_from_challenges, indices::B_HASH_KERNEL},
         chiplets::hasher::{flags, periodic},
         op_flags::OpFlags,
-        tagging::{TAG_HASH_KERNEL_BUS_BASE, TaggingAirBuilderExt},
+        tagging::{TaggingAirBuilderExt, ids::TAG_HASH_KERNEL_BUS_BASE},
     },
     trace::{
         CHIPLETS_OFFSET, LOG_PRECOMPILE_LABEL,
@@ -270,7 +270,7 @@ pub fn enforce_hash_kernel_constraint<AB>(
 
 /// Compute sibling value when b=0 (sibling at h[4..7]).
 ///
-/// Message layout: alpha[0] (constant) + alpha[3] * node_index + alpha[12..15] * h[4..7].
+/// Message layout: alpha[0] (constant) + alpha[3] * node_index + alpha[8..11] * h[4..7].
 fn compute_sibling_b0<AB>(
     alphas: &[AB::ExprEF; 16],
     node_index: &AB::Expr,
@@ -281,15 +281,15 @@ where
 {
     alphas[0].clone()
         + alphas[3].clone() * node_index.clone()
-        + alphas[12].clone() * h[4].clone()
-        + alphas[13].clone() * h[5].clone()
-        + alphas[14].clone() * h[6].clone()
-        + alphas[15].clone() * h[7].clone()
+        + alphas[8].clone() * h[4].clone()
+        + alphas[9].clone() * h[5].clone()
+        + alphas[10].clone() * h[6].clone()
+        + alphas[11].clone() * h[7].clone()
 }
 
 /// Compute sibling value when b=1 (sibling at h[0..3]).
 ///
-/// Message layout: alpha[0] (constant) + alpha[3] * node_index + alpha[8..11] * h[0..3].
+/// Message layout: alpha[0] (constant) + alpha[3] * node_index + alpha[4..7] * h[0..3].
 fn compute_sibling_b1<AB>(
     alphas: &[AB::ExprEF; 16],
     node_index: &AB::Expr,
@@ -300,10 +300,10 @@ where
 {
     alphas[0].clone()
         + alphas[3].clone() * node_index.clone()
-        + alphas[8].clone() * h[0].clone()
-        + alphas[9].clone() * h[1].clone()
-        + alphas[10].clone() * h[2].clone()
-        + alphas[11].clone() * h[3].clone()
+        + alphas[4].clone() * h[0].clone()
+        + alphas[5].clone() * h[1].clone()
+        + alphas[6].clone() * h[2].clone()
+        + alphas[7].clone() * h[3].clone()
 }
 
 /// Build a linear-combination message with a label and a variable number of fields.
