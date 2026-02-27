@@ -48,7 +48,7 @@ use crate::{
         bus::{MessageEncoder, alphas_from_challenges, indices::B_CHIPLETS},
         chiplets::hasher,
         op_flags::OpFlags,
-        tagging::{TAG_CHIPLETS_BUS_BASE, TaggingAirBuilderExt},
+        tagging::{TaggingAirBuilderExt, ids::TAG_CHIPLETS_BUS_BASE},
     },
     trace::{
         chiplets::{
@@ -819,8 +819,6 @@ fn compute_hasher_response<AB: MidenAirBuilder<F = Felt>>(
     };
 
     let one = AB::Expr::ONE;
-    let zero = AB::Expr::ZERO;
-
     // Hasher is active when chiplets[0] == 0
     let hasher_active: AB::Expr = one.clone() - local.chiplets[0].clone().into();
 
@@ -924,7 +922,7 @@ fn compute_hasher_response<AB: MidenAirBuilder<F = Felt>>(
     );
 
     // v_leaf: Leaf node message (for f_mp, f_mv, f_mu)
-    // For Merkle path operations, the leaf is always placed at message positions 4-7.
+    // The leaf is encoded as a 4-lane word using alphas[4..7], matching the processor.
     // The bit determines which part of the trace state to use:
     // - bit=0: use RATE0 (state[0..4])
     // - bit=1: use RATE1 (state[4..8])
@@ -932,77 +930,52 @@ fn compute_hasher_response<AB: MidenAirBuilder<F = Felt>>(
     let two = AB::Expr::from_u16(2);
     let bit = node_index.clone() - two * node_index_next.clone();
 
-    // Leaf always goes to positions 4-7, but the source depends on bit:
+    // Leaf word uses RATE0 or RATE1 depending on bit:
     // bit=0: use state[0..4] (RATE0)
     // bit=1: use state[4..8] (RATE1)
-    let leaf_state: [AB::Expr; 12] = [
-        zero.clone(),
-        zero.clone(),
-        zero.clone(),
-        zero.clone(),
-        // Positions 4..8: RATE0 when bit=0, RATE1 when bit=1
+    let leaf_word: [AB::Expr; 4] = [
         (one.clone() - bit.clone()) * state[0].clone() + bit.clone() * state[4].clone(),
         (one.clone() - bit.clone()) * state[1].clone() + bit.clone() * state[5].clone(),
         (one.clone() - bit.clone()) * state[2].clone() + bit.clone() * state[6].clone(),
         (one.clone() - bit.clone()) * state[3].clone() + bit.clone() * state[7].clone(),
-        zero.clone(),
-        zero.clone(),
-        zero.clone(),
-        zero.clone(),
     ];
-    let v_mp = compute_hasher_message::<AB>(
+    let v_mp = compute_hasher_word_message::<AB>(
         alphas,
         label_mp,
         addr_next.clone(),
         node_index.clone(),
-        &leaf_state,
+        &leaf_word,
     );
-    let v_mv = compute_hasher_message::<AB>(
+    let v_mv = compute_hasher_word_message::<AB>(
         alphas,
         label_mv,
         addr_next.clone(),
         node_index.clone(),
-        &leaf_state,
+        &leaf_word,
     );
-    let v_mu = compute_hasher_message::<AB>(
+    let v_mu = compute_hasher_word_message::<AB>(
         alphas,
         label_mu,
         addr_next.clone(),
         node_index.clone(),
-        &leaf_state,
+        &leaf_word,
     );
 
     // v_hout: Hash output message (for f_hout)
-    // Digest from RATE0 (state[0..4]) goes to message positions 4-7
-    let result_state: [AB::Expr; 12] = [
-        zero.clone(),
-        zero.clone(),
-        zero.clone(),
-        zero.clone(),
-        state[0].clone(),
-        state[1].clone(),
-        state[2].clone(),
-        state[3].clone(),
-        zero.clone(),
-        zero.clone(),
-        zero.clone(),
-        zero.clone(),
-    ];
-    let v_hout = compute_hasher_message::<AB>(
+    // Digest from RATE0 (state[0..4]) encoded as a 4-lane word using alphas[4..7].
+    let result_word: [AB::Expr; 4] =
+        [state[0].clone(), state[1].clone(), state[2].clone(), state[3].clone()];
+    let v_hout = compute_hasher_word_message::<AB>(
         alphas,
         label_hout,
         addr_next.clone(),
         node_index.clone(),
-        &result_state,
+        &result_word,
     );
 
     // v_abp: Absorption message (for f_abp) - uses NEXT row's rate (8 elements)
-    // Rate from state_next[0..8] goes to message positions 4-11
-    let abp_state: [AB::Expr; 12] = [
-        zero.clone(),
-        zero.clone(),
-        zero.clone(),
-        zero.clone(),
+    // Rate from state_next[0..8] is encoded using alphas[4..11].
+    let rate_next: [AB::Expr; 8] = [
         state_next[0].clone(),
         state_next[1].clone(),
         state_next[2].clone(),
@@ -1012,12 +985,12 @@ fn compute_hasher_response<AB: MidenAirBuilder<F = Felt>>(
         state_next[6].clone(),
         state_next[7].clone(),
     ];
-    let v_abp = compute_hasher_message::<AB>(
+    let v_abp = compute_hasher_rate_message::<AB>(
         alphas,
         label_abp,
         addr_next.clone(),
         node_index.clone(),
-        &abp_state,
+        &rate_next,
     );
 
     // Sum of all hasher response flags
@@ -1210,6 +1183,46 @@ fn compute_hasher_message<AB: MidenAirBuilder<F = Felt>>(
     }
 
     header + state_sum
+}
+
+/// Computes a hasher message for a 4-lane word (uses alphas[4..7]).
+fn compute_hasher_word_message<AB: MidenAirBuilder<F = Felt>>(
+    alphas: &[AB::ExprEF],
+    transition_label: AB::Expr,
+    addr: AB::Expr,
+    node_index: AB::Expr,
+    word: &[AB::Expr; 4],
+) -> AB::ExprEF {
+    let header = alphas[0].clone()
+        + alphas[1].clone() * transition_label
+        + alphas[2].clone() * addr
+        + alphas[3].clone() * node_index;
+
+    header
+        + alphas[4].clone() * word[0].clone()
+        + alphas[5].clone() * word[1].clone()
+        + alphas[6].clone() * word[2].clone()
+        + alphas[7].clone() * word[3].clone()
+}
+
+/// Computes a hasher message for an 8-lane rate (uses alphas[4..11]).
+fn compute_hasher_rate_message<AB: MidenAirBuilder<F = Felt>>(
+    alphas: &[AB::ExprEF],
+    transition_label: AB::Expr,
+    addr: AB::Expr,
+    node_index: AB::Expr,
+    rate: &[AB::Expr; 8],
+) -> AB::ExprEF {
+    let header = alphas[0].clone()
+        + alphas[1].clone() * transition_label
+        + alphas[2].clone() * addr
+        + alphas[3].clone() * node_index;
+
+    let mut acc = header;
+    for i in 0..8 {
+        acc += alphas[4 + i].clone() * rate[i].clone();
+    }
+    acc
 }
 
 // ACE MESSAGE HELPERS
@@ -1522,7 +1535,7 @@ fn compute_span_request<AB: MidenAirBuilder<F = Felt>>(
 
 /// Computes the RESPAN block request message value.
 ///
-/// Rate goes to message positions 4-11, which uses alphas[8..16].
+/// Rate goes to alphas[4..12].
 fn compute_respan_request<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
@@ -1539,22 +1552,18 @@ fn compute_respan_request<AB: MidenAirBuilder<F = Felt>>(
     let hasher_state: [AB::Expr; 8] =
         core::array::from_fn(|i| local.decoder[HASHER_STATE_RANGE.start + i].clone().into());
 
-    // Header: alphas[0] + alphas[1] * transition_label + alphas[2] * (addr_next - 1)
-    let header =
-        alphas[0].clone() + alphas[1].clone() * transition_label + alphas[2].clone() * addr_for_msg;
-
-    // Rate goes to message positions 4-11, uses alphas[8..16]
-    let mut state_sum = AB::ExprEF::ZERO;
-    for i in 0..8 {
-        state_sum += alphas[8 + i].clone() * hasher_state[i].clone();
-    }
-
-    header + state_sum
+    compute_hasher_rate_message::<AB>(
+        alphas,
+        transition_label,
+        addr_for_msg,
+        AB::Expr::ZERO,
+        &hasher_state,
+    )
 }
 
 /// Computes the END block request message value.
 ///
-/// Digest goes to message positions 4-7, which uses alphas[8..12].
+/// Digest goes to alphas[4..8].
 fn compute_end_request<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     alphas: &[AB::ExprEF],
@@ -1570,16 +1579,7 @@ fn compute_end_request<AB: MidenAirBuilder<F = Felt>>(
     let digest: [AB::Expr; 4] =
         core::array::from_fn(|i| local.decoder[HASHER_STATE_RANGE.start + i].clone().into());
 
-    // Header
-    let header =
-        alphas[0].clone() + alphas[1].clone() * transition_label + alphas[2].clone() * addr;
-
-    // Digest goes to message positions 4-7, uses alphas[8..12]
-    header
-        + alphas[8].clone() * digest[0].clone()
-        + alphas[9].clone() * digest[1].clone()
-        + alphas[10].clone() * digest[2].clone()
-        + alphas[11].clone() * digest[3].clone()
+    compute_hasher_word_message::<AB>(alphas, transition_label, addr, AB::Expr::ZERO, &digest)
 }
 
 /// Computes control block request with zeros for hasher state (for DYN/DYNCALL).
@@ -1694,57 +1694,20 @@ fn compute_mpverify_request<AB: MidenAirBuilder<F = Felt>>(
     let node_index: AB::Expr = local.stack[5].clone().into();
     let root: [AB::Expr; 4] = core::array::from_fn(|i| local.stack[6 + i].clone().into());
 
-    // Node value goes to message positions 4-7 (maps to alphas[8..12])
-    let input_state: [AB::Expr; 12] = [
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        node_value[0].clone(),
-        node_value[1].clone(),
-        node_value[2].clone(),
-        node_value[3].clone(),
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-    ];
-
     let input_label: AB::Expr = AB::Expr::from_u16(MP_VERIFY_LABEL as u16 + 16);
-    let input_msg = compute_hasher_message::<AB>(
+    let input_msg = compute_hasher_word_message::<AB>(
         alphas,
         input_label,
         helper_0.clone(),
         node_index.clone(),
-        &input_state,
+        &node_value,
     );
-
-    // Root value goes to message positions 4-7 (maps to alphas[8..12])
-    let output_state: [AB::Expr; 12] = [
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        root[0].clone(),
-        root[1].clone(),
-        root[2].clone(),
-        root[3].clone(),
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-    ];
 
     // addr_next = helper_0 + node_depth * merkle_cycle_len - 1
     let output_addr = helper_0 + node_depth * merkle_cycle_len - AB::Expr::ONE;
     let output_label: AB::Expr = AB::Expr::from_u16(RETURN_HASH_LABEL as u16 + 32);
-    let output_msg = compute_hasher_message::<AB>(
-        alphas,
-        output_label,
-        output_addr,
-        AB::Expr::ZERO,
-        &output_state,
-    );
+    let output_msg =
+        compute_hasher_word_message::<AB>(alphas, output_label, output_addr, AB::Expr::ZERO, &root);
 
     input_msg * output_msg
 }
@@ -1776,103 +1739,43 @@ fn compute_mrupdate_request<AB: MidenAirBuilder<F = Felt>>(
     // New root is at next.stack[0..4]
     let new_root: [AB::Expr; 4] = core::array::from_fn(|i| next.stack[i].clone().into());
 
-    // Old node goes to message positions 4-7
-    let old_node_state: [AB::Expr; 12] = [
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        old_node[0].clone(),
-        old_node[1].clone(),
-        old_node[2].clone(),
-        old_node[3].clone(),
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-    ];
     let input_old_label: AB::Expr = AB::Expr::from_u16(MR_UPDATE_OLD_LABEL as u16 + 16);
-    let input_old_msg = compute_hasher_message::<AB>(
+    let input_old_msg = compute_hasher_word_message::<AB>(
         alphas,
         input_old_label,
         helper_0.clone(),
         index.clone(),
-        &old_node_state,
+        &old_node,
     );
 
-    // Old root goes to message positions 4-7
-    let old_root_state: [AB::Expr; 12] = [
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        old_root[0].clone(),
-        old_root[1].clone(),
-        old_root[2].clone(),
-        old_root[3].clone(),
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-    ];
     let output_old_addr =
         helper_0.clone() + depth.clone() * merkle_cycle_len.clone() - AB::Expr::ONE;
     let output_old_label: AB::Expr = AB::Expr::from_u16(RETURN_HASH_LABEL as u16 + 32);
-    let output_old_msg = compute_hasher_message::<AB>(
+    let output_old_msg = compute_hasher_word_message::<AB>(
         alphas,
         output_old_label.clone(),
         output_old_addr,
         AB::Expr::ZERO,
-        &old_root_state,
+        &old_root,
     );
 
-    // New node goes to message positions 4-7
-    let new_node_state: [AB::Expr; 12] = [
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        new_node[0].clone(),
-        new_node[1].clone(),
-        new_node[2].clone(),
-        new_node[3].clone(),
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-    ];
     let input_new_addr = helper_0.clone() + depth.clone() * merkle_cycle_len.clone();
     let input_new_label: AB::Expr = AB::Expr::from_u16(MR_UPDATE_NEW_LABEL as u16 + 16);
-    let input_new_msg = compute_hasher_message::<AB>(
+    let input_new_msg = compute_hasher_word_message::<AB>(
         alphas,
         input_new_label,
         input_new_addr,
         index,
-        &new_node_state,
+        &new_node,
     );
 
-    // New root goes to message positions 4-7
-    let new_root_state: [AB::Expr; 12] = [
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        new_root[0].clone(),
-        new_root[1].clone(),
-        new_root[2].clone(),
-        new_root[3].clone(),
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-        AB::Expr::ZERO,
-    ];
     let output_new_addr = helper_0 + depth * two_merkle_cycles - AB::Expr::ONE;
-    let output_new_msg = compute_hasher_message::<AB>(
+    let output_new_msg = compute_hasher_word_message::<AB>(
         alphas,
         output_old_label,
         output_new_addr,
         AB::Expr::ZERO,
-        &new_root_state,
+        &new_root,
     );
 
     input_old_msg * output_old_msg * input_new_msg * output_new_msg
