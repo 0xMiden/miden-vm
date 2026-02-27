@@ -28,12 +28,11 @@
 //! | m0        | Wire bus multiplicity for node 0               |
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::MidenAirBuilder;
 
 use super::selectors::{ace_chiplet_flag, memory_chiplet_flag};
 use crate::{
     Felt, MainTraceRow,
-    constraints::tagging::TaggingAirBuilderExt,
+    constraints::tagging::{TagGroup, TaggingAirBuilderExt, tagged_assert_zero_integrity},
     trace::chiplets::ace::{
         CLK_IDX, CTX_IDX, EVAL_OP_IDX, ID_0_IDX, ID_1_IDX, PTR_IDX, READ_NUM_EVAL_IDX,
         SELECTOR_BLOCK_IDX, SELECTOR_START_IDX, V_0_0_IDX, V_0_1_IDX, V_1_0_IDX, V_1_1_IDX,
@@ -72,6 +71,53 @@ const ACE_EVAL_RESULT_NAMESPACE: &str = "chiplets.ace.eval.result";
 const ACE_FINAL_NAMESPACE: &str = "chiplets.ace.final.zero";
 const ACE_FIRST_ROW_NAMESPACE: &str = "chiplets.ace.first_row.start";
 
+const ACE_BINARY_NAMES: [&str; 2] = [ACE_BINARY_NAMESPACE; 2];
+const ACE_SECTION_NAMES: [&str; 5] = [ACE_SECTION_NAMESPACE; 5];
+const ACE_WITHIN_SECTION_NAMES: [&str; 4] = [ACE_WITHIN_SECTION_NAMESPACE; 4];
+const ACE_READ_ID_NAMES: [&str; 1] = [ACE_READ_ID_NAMESPACE; 1];
+const ACE_READ_TO_EVAL_NAMES: [&str; 1] = [ACE_READ_TO_EVAL_NAMESPACE; 1];
+const ACE_EVAL_OP_NAMES: [&str; 1] = [ACE_EVAL_OP_NAMESPACE; 1];
+const ACE_EVAL_RESULT_NAMES: [&str; 2] = [ACE_EVAL_RESULT_NAMESPACE; 2];
+const ACE_FINAL_NAMES: [&str; 3] = [ACE_FINAL_NAMESPACE; 3];
+const ACE_FIRST_ROW_NAMES: [&str; 1] = [ACE_FIRST_ROW_NAMESPACE; 1];
+
+const ACE_BINARY_TAGS: TagGroup = TagGroup {
+    base: ACE_BINARY_BASE_ID,
+    names: &ACE_BINARY_NAMES,
+};
+const ACE_SECTION_TAGS: TagGroup = TagGroup {
+    base: ACE_SECTION_BASE_ID,
+    names: &ACE_SECTION_NAMES,
+};
+const ACE_WITHIN_SECTION_TAGS: TagGroup = TagGroup {
+    base: ACE_WITHIN_SECTION_BASE_ID,
+    names: &ACE_WITHIN_SECTION_NAMES,
+};
+const ACE_READ_ID_TAGS: TagGroup = TagGroup {
+    base: ACE_READ_ID_ID,
+    names: &ACE_READ_ID_NAMES,
+};
+const ACE_READ_TO_EVAL_TAGS: TagGroup = TagGroup {
+    base: ACE_READ_TO_EVAL_ID,
+    names: &ACE_READ_TO_EVAL_NAMES,
+};
+const ACE_EVAL_OP_TAGS: TagGroup = TagGroup {
+    base: ACE_EVAL_OP_ID,
+    names: &ACE_EVAL_OP_NAMES,
+};
+const ACE_EVAL_RESULT_TAGS: TagGroup = TagGroup {
+    base: ACE_EVAL_RESULT_BASE_ID,
+    names: &ACE_EVAL_RESULT_NAMES,
+};
+const ACE_FINAL_TAGS: TagGroup = TagGroup {
+    base: ACE_FINAL_BASE_ID,
+    names: &ACE_FINAL_NAMES,
+};
+const ACE_FIRST_ROW_TAGS: TagGroup = TagGroup {
+    base: ACE_FIRST_ROW_ID,
+    names: &ACE_FIRST_ROW_NAMES,
+};
+
 // ENTRY POINTS
 // ================================================================================================
 
@@ -81,7 +127,7 @@ pub fn enforce_ace_constraints<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: TaggingAirBuilderExt<F = Felt>,
 {
     // Load selectors
     let s0: AB::Expr = local.chiplets[0].clone().into();
@@ -116,7 +162,7 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: TaggingAirBuilderExt<F = Felt>,
 {
     // Compute ACE active flag from top-level selectors
     let s0: AB::Expr = local.chiplets[0].clone().into();
@@ -170,13 +216,19 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     // BINARY CONSTRAINTS
     // ==========================================================================
 
-    let binary_ids: [usize; 2] = core::array::from_fn(|i| ACE_BINARY_BASE_ID + i);
-    builder.tagged_list(binary_ids, ACE_BINARY_NAMESPACE, |builder| {
-        builder.assert_zeros([
-            ace_flag.clone() * sstart.clone() * (sstart.clone() - one.clone()),
-            ace_flag.clone() * sblock.clone() * (sblock.clone() - one.clone()),
-        ]);
-    });
+    let mut idx = 0;
+    tagged_assert_zero_integrity(
+        builder,
+        &ACE_BINARY_TAGS,
+        &mut idx,
+        ace_flag.clone() * sstart.clone() * (sstart.clone() - one.clone()),
+    );
+    tagged_assert_zero_integrity(
+        builder,
+        &ACE_BINARY_TAGS,
+        &mut idx,
+        ace_flag.clone() * sblock.clone() * (sblock.clone() - one.clone()),
+    );
 
     // ==========================================================================
     // SECTION/BLOCK FLAGS CONSTRAINTS
@@ -190,36 +242,46 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     // OR(t*a, t*b) = t*OR(a, b) when t is binary.
     let f_end = binary_or((one.clone() - s3_next.clone()) * sstart_next.clone(), s3_next.clone());
 
-    let section_ids: [usize; 5] = core::array::from_fn(|i| ACE_SECTION_BASE_ID + i);
-    builder.tagged_list(section_ids, ACE_SECTION_NAMESPACE, |builder| {
-        // Last row of ACE chiplet cannot be section start
-        builder.assert_zero(ace_flag.clone() * flag_ace_last.clone() * sstart.clone());
-
-        // Prevent consecutive section starts within ACE chiplet
-        builder.assert_zero(
-            ace_flag.clone() * flag_ace_next.clone() * sstart.clone() * sstart_next.clone(),
-        );
-
-        // Sections must start with READ blocks (not EVAL): f_eval = 0 when f_start
-        builder.assert_zero(ace_flag.clone() * sstart.clone() * sblock.clone());
-
-        // EVAL blocks cannot be followed by READ blocks within same section
-        builder.assert_zero(
-            ace_flag.clone()
-                * flag_ace_next.clone()
-                * f_next.clone()
-                * sblock.clone()
-                * (one.clone() - sblock_next.clone()),
-        );
-
-        // Sections must end with EVAL blocks (not READ)
-        builder.assert_zero(
-            ace_flag.clone()
-                * is_transition.clone()
-                * f_end.clone()
-                * (one.clone() - sblock.clone()),
-        );
-    });
+    let mut idx = 0;
+    // Last row of ACE chiplet cannot be section start
+    tagged_assert_zero_integrity(
+        builder,
+        &ACE_SECTION_TAGS,
+        &mut idx,
+        ace_flag.clone() * flag_ace_last.clone() * sstart.clone(),
+    );
+    // Prevent consecutive section starts within ACE chiplet
+    tagged_assert_zero_integrity(
+        builder,
+        &ACE_SECTION_TAGS,
+        &mut idx,
+        ace_flag.clone() * flag_ace_next.clone() * sstart.clone() * sstart_next.clone(),
+    );
+    // Sections must start with READ blocks (not EVAL): f_eval = 0 when f_start
+    tagged_assert_zero_integrity(
+        builder,
+        &ACE_SECTION_TAGS,
+        &mut idx,
+        ace_flag.clone() * sstart.clone() * sblock.clone(),
+    );
+    // EVAL blocks cannot be followed by READ blocks within same section
+    tagged_assert_zero_integrity(
+        builder,
+        &ACE_SECTION_TAGS,
+        &mut idx,
+        ace_flag.clone()
+            * flag_ace_next.clone()
+            * f_next.clone()
+            * sblock.clone()
+            * (one.clone() - sblock_next.clone()),
+    );
+    // Sections must end with EVAL blocks (not READ)
+    tagged_assert_zero_integrity(
+        builder,
+        &ACE_SECTION_TAGS,
+        &mut idx,
+        ace_flag.clone() * is_transition.clone() * f_end.clone() * (one.clone() - sblock.clone()),
+    );
 
     // ==========================================================================
     // SECTION CONSTRAINTS (within section)
@@ -242,26 +304,44 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     // Node ID decrements: -2 in READ, -1 in EVAL
     // id0 = id0' + 2 * f_read + f_eval
     let expected_id0 = id0_next.clone() + f_read.clone().double() + f_eval.clone();
-    let within_section_ids: [usize; 4] = core::array::from_fn(|i| ACE_WITHIN_SECTION_BASE_ID + i);
-    builder.tagged_list(within_section_ids, ACE_WITHIN_SECTION_NAMESPACE, |builder| {
-        builder.when(within_section_gate.clone()).assert_zeros([
-            ctx_next.clone() - ctx.clone(),
-            clk_next.clone() - clk.clone(),
-            ptr_next.clone() - expected_ptr,
-            id0.clone() - expected_id0,
-        ]);
-    });
+    let mut idx = 0;
+    tagged_assert_zero_integrity(
+        builder,
+        &ACE_WITHIN_SECTION_TAGS,
+        &mut idx,
+        within_section_gate.clone() * (ctx_next.clone() - ctx.clone()),
+    );
+    tagged_assert_zero_integrity(
+        builder,
+        &ACE_WITHIN_SECTION_TAGS,
+        &mut idx,
+        within_section_gate.clone() * (clk_next.clone() - clk.clone()),
+    );
+    tagged_assert_zero_integrity(
+        builder,
+        &ACE_WITHIN_SECTION_TAGS,
+        &mut idx,
+        within_section_gate.clone() * (ptr_next.clone() - expected_ptr),
+    );
+    tagged_assert_zero_integrity(
+        builder,
+        &ACE_WITHIN_SECTION_TAGS,
+        &mut idx,
+        within_section_gate * (id0.clone() - expected_id0),
+    );
 
     // ==========================================================================
     // READ BLOCK CONSTRAINTS
     // ==========================================================================
 
     // In READ block, the two node IDs should be consecutive (id1 = id0 - 1)
-    builder.tagged(ACE_READ_ID_ID, ACE_READ_ID_NAMESPACE, |builder| {
-        builder.assert_zero(
-            ace_flag.clone() * f_read.clone() * (id1.clone() - id0.clone() + one.clone()),
-        );
-    });
+    let mut idx = 0;
+    tagged_assert_zero_integrity(
+        builder,
+        &ACE_READ_ID_TAGS,
+        &mut idx,
+        ace_flag.clone() * f_read.clone() * (id1.clone() - id0.clone() + one.clone()),
+    );
 
     // READ→EVAL transition occurs when n_eval matches the first EVAL id0.
     // n_eval is constant across READ rows and encodes (num_eval_rows - 1).
@@ -269,35 +349,47 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     let f_read_next = one.clone() - sblock_next.clone();
     let f_eval_next = sblock_next.clone();
     let selected = f_read_next * n_eval_next.clone() + f_eval_next * id0_next.clone();
-    builder.tagged(ACE_READ_TO_EVAL_ID, ACE_READ_TO_EVAL_NAMESPACE, |builder| {
-        builder
-            .when_transition()
-            .assert_zero(ace_flag.clone() * f_read.clone() * (selected - n_eval));
-    });
+    let mut idx = 0;
+    tagged_assert_zero_integrity(
+        builder,
+        &ACE_READ_TO_EVAL_TAGS,
+        &mut idx,
+        is_transition.clone() * ace_flag.clone() * f_read.clone() * (selected - n_eval),
+    );
 
     // ==========================================================================
     // EVAL BLOCK CONSTRAINTS
     // ==========================================================================
 
     // op must be -1, 0, or 1: op * (op - 1) * (op + 1) = 0
-    builder.tagged(ACE_EVAL_OP_ID, ACE_EVAL_OP_NAMESPACE, |builder| {
-        builder.assert_zero(
-            ace_flag.clone()
-                * f_eval.clone()
-                * op.clone()
-                * (op.clone() - one.clone())
-                * (op.clone() + one.clone()),
-        );
-    });
+    let mut idx = 0;
+    tagged_assert_zero_integrity(
+        builder,
+        &ACE_EVAL_OP_TAGS,
+        &mut idx,
+        ace_flag.clone()
+            * f_eval.clone()
+            * op.clone()
+            * (op.clone() - one.clone())
+            * (op.clone() + one.clone()),
+    );
 
     // Arithmetic operation constraints
     let eval_gate = ace_flag.clone() * f_eval.clone();
     let (expected_0, expected_1) = compute_arithmetic_expected::<AB>(op, v1_0, v1_1, v2_0, v2_1);
-    let eval_ids: [usize; 2] = core::array::from_fn(|i| ACE_EVAL_RESULT_BASE_ID + i);
-    builder.tagged_list(eval_ids, ACE_EVAL_RESULT_NAMESPACE, |builder| {
-        builder.assert_zero(eval_gate.clone() * (expected_0 - v0_0.clone()));
-        builder.assert_zero(eval_gate.clone() * (expected_1 - v0_1.clone()));
-    });
+    let mut idx = 0;
+    tagged_assert_zero_integrity(
+        builder,
+        &ACE_EVAL_RESULT_TAGS,
+        &mut idx,
+        eval_gate.clone() * (expected_0 - v0_0.clone()),
+    );
+    tagged_assert_zero_integrity(
+        builder,
+        &ACE_EVAL_RESULT_TAGS,
+        &mut idx,
+        eval_gate.clone() * (expected_1 - v0_1.clone()),
+    );
 
     // ==========================================================================
     // FINALIZATION CONSTRAINTS
@@ -307,10 +399,10 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     // Use a combined gate to share `ace_flag * is_transition * f_end` across all finalization
     // constraints.
     let gate = ace_flag * is_transition * f_end;
-    let final_ids: [usize; 3] = core::array::from_fn(|i| ACE_FINAL_BASE_ID + i);
-    builder.tagged_list(final_ids, ACE_FINAL_NAMESPACE, |builder| {
-        builder.when(gate.clone()).assert_zeros([v0_0, v0_1, id0]);
-    });
+    let mut idx = 0;
+    tagged_assert_zero_integrity(builder, &ACE_FINAL_TAGS, &mut idx, gate.clone() * v0_0);
+    tagged_assert_zero_integrity(builder, &ACE_FINAL_TAGS, &mut idx, gate.clone() * v0_1);
+    tagged_assert_zero_integrity(builder, &ACE_FINAL_TAGS, &mut idx, gate * id0);
 }
 
 /// Enforce ACE first row constraints.
@@ -322,15 +414,19 @@ pub fn enforce_ace_constraints_first_row<AB>(
     next: &MainTraceRow<AB::Var>,
     flag_next_row_first_ace: AB::Expr,
 ) where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: TaggingAirBuilderExt<F = Felt>,
 {
     let sstart_next: AB::Expr = load_ace_col::<AB>(next, SELECTOR_START_IDX);
     let one: AB::Expr = AB::Expr::ONE;
 
     // First row of ACE must have sstart' = 1
-    builder.tagged(ACE_FIRST_ROW_ID, ACE_FIRST_ROW_NAMESPACE, |builder| {
-        builder.assert_zero(flag_next_row_first_ace * (sstart_next - one));
-    });
+    let mut idx = 0;
+    tagged_assert_zero_integrity(
+        builder,
+        &ACE_FIRST_ROW_TAGS,
+        &mut idx,
+        flag_next_row_first_ace * (sstart_next - one),
+    );
 }
 
 // INTERNAL HELPERS
@@ -339,7 +435,7 @@ pub fn enforce_ace_constraints_first_row<AB>(
 /// Load a column from the ACE section of chiplets.
 fn load_ace_col<AB>(row: &MainTraceRow<AB::Var>, ace_col_idx: usize) -> AB::Expr
 where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: TaggingAirBuilderExt<F = Felt>,
 {
     // ACE columns start after s0, s1, s2, s3 (4 selectors)
     let local_idx = ACE_OFFSET + ace_col_idx;
@@ -360,7 +456,7 @@ fn compute_arithmetic_expected<AB>(
     v2_1: AB::Expr,
 ) -> (AB::Expr, AB::Expr)
 where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: TaggingAirBuilderExt<F = Felt>,
 {
     // Linear operation: v1 + op * v2 (works for ADD when op=1, SUB when op=-1)
     let linear_0 = v1_0.clone() + op.clone() * v2_0.clone();
