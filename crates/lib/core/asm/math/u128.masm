@@ -1,3 +1,5 @@
+const U32_MAX = 0xFFFFFFFF
+
 # ===== ADDITION ==================================================================================
 
 #! Performs addition of two unsigned 128 bit integers preserving the overflow.
@@ -526,7 +528,7 @@ end
 pub proc gt(b: u128, a: u128) -> i1
     # a > b iff b < a
     # Swap a and b, then check if b < a (underflow)
-    movup.7 movup.7 movup.7 movup.7
+    swapw
     # Stack: [a0, a1, a2, a3, b0, b1, b2, b3, ...] - now b is "a" and a is "b" for sub
     exec.overflowing_sub
     # This computes b - a, underflow means b < a, i.e., a > b
@@ -561,28 +563,9 @@ pub proc min(b: u128, a: u128) -> u128
     dupw.1                      # [a0, a1, a2, a3, b0, b1, b2, b3, a0, a1, a2, a3, ...]
     dupw.1                      # [b0, b1, b2, b3, a0, a1, a2, a3, b0, b1, b2, b3, a0, a1, a2, a3, ...]
     exec.gt                     # [a>b, b0, b1, b2, b3, a0, a1, a2, a3, ...]
-    # If a > b, keep b (first), else keep a (second)
-    # cdrop: [cond, a, b] -> [a if cond else b]
-    # We need to select between two u128 values
-    dup                         # [a>b, a>b, b0, b1, b2, b3, a0, a1, a2, a3]
-    movdn.5                     # [a>b, b0, b1, b2, b3, a>b, a0, a1, a2, a3]
-    movup.6                     # [a0, a>b, b0, b1, b2, b3, a>b, a1, a2, a3]
-    movup.2                     # [b0, a0, a>b, b1, b2, b3, a>b, a1, a2, a3]
-    dup.2 cdrop                 # [c0, a>b, b1, b2, b3, a>b, a1, a2, a3]
-    movdn.8                     # [a>b, b1, b2, b3, a>b, a1, a2, a3, c0]
-    movup.5                     # [a1, a>b, b1, b2, b3, a>b, a2, a3, c0]
-    movup.2                     # [b1, a1, a>b, b2, b3, a>b, a2, a3, c0]
-    dup.2 cdrop                 # [c1, a>b, b2, b3, a>b, a2, a3, c0]
-    movdn.7                     # [a>b, b2, b3, a>b, a2, a3, c0, c1]
-    movup.4                     # [a2, a>b, b2, b3, a>b, a3, c0, c1]
-    movup.2                     # [b2, a2, a>b, b3, a>b, a3, c0, c1]
-    dup.2 cdrop                 # [c2, a>b, b3, a>b, a3, c0, c1]
-    movdn.6                     # [a>b, b3, a>b, a3, c0, c1, c2]
-    drop                        # [b3, a>b, a3, c0, c1, c2]
-    movup.2                     # [a3, b3, a>b, c0, c1, c2]
-    swap                        # [b3, a3, a>b, c0, c1, c2]
-    movup.2 cdrop               # [c3, c0, c1, c2]
-    movdn.3                     # [c0, c1, c2, c3]
+    # cdropw: [c, B, A, ...] -> [B if c=1, A if c=0]
+    # If a > b (c=1), select b; otherwise select a
+    cdropw                      # [c0, c1, c2, c3, ...]
 end
 
 #! Compares two unsigned 128 bit integers and drops the smaller one from the stack.
@@ -594,26 +577,9 @@ pub proc max(b: u128, a: u128) -> u128
     dupw.1                      # [a0, a1, a2, a3, b0, b1, b2, b3, a0, a1, a2, a3, ...]
     dupw.1                      # [b0, b1, b2, b3, a0, a1, a2, a3, b0, b1, b2, b3, a0, a1, a2, a3, ...]
     exec.lt                     # [a<b, b0, b1, b2, b3, a0, a1, a2, a3, ...]
-    # If a < b, keep b (first), else keep a (second)
-    dup                         # [a<b, a<b, b0, b1, b2, b3, a0, a1, a2, a3]
-    movdn.5                     # [a<b, b0, b1, b2, b3, a<b, a0, a1, a2, a3]
-    movup.6                     # [a0, a<b, b0, b1, b2, b3, a<b, a1, a2, a3]
-    movup.2                     # [b0, a0, a<b, b1, b2, b3, a<b, a1, a2, a3]
-    dup.2 cdrop                 # [c0, a<b, b1, b2, b3, a<b, a1, a2, a3]
-    movdn.8                     # [a<b, b1, b2, b3, a<b, a1, a2, a3, c0]
-    movup.5                     # [a1, a<b, b1, b2, b3, a<b, a2, a3, c0]
-    movup.2                     # [b1, a1, a<b, b2, b3, a<b, a2, a3, c0]
-    dup.2 cdrop                 # [c1, a<b, b2, b3, a<b, a2, a3, c0]
-    movdn.7                     # [a<b, b2, b3, a<b, a2, a3, c0, c1]
-    movup.4                     # [a2, a<b, b2, b3, a<b, a3, c0, c1]
-    movup.2                     # [b2, a2, a<b, b3, a<b, a3, c0, c1]
-    dup.2 cdrop                 # [c2, a<b, b3, a<b, a3, c0, c1]
-    movdn.6                     # [a<b, b3, a<b, a3, c0, c1, c2]
-    drop                        # [b3, a<b, a3, c0, c1, c2]
-    movup.2                     # [a3, b3, a<b, c0, c1, c2]
-    swap                        # [b3, a3, a<b, c0, c1, c2]
-    movup.2 cdrop               # [c3, c0, c1, c2]
-    movdn.3                     # [c0, c1, c2, c3]
+    # cdropw: [c, B, A, ...] -> [B if c=1, A if c=0]
+    # If a < b (c=1), select b; otherwise select a
+    cdropw                      # [c0, c1, c2, c3, ...]
 end
 
 # ===== BITWISE OPERATIONS ========================================================================
@@ -635,9 +601,7 @@ pub proc and(b: u128, a: u128) -> u128
     movup.4         # [a3, c2, c1, c0, b3]
     movup.4         # [b3, a3, c2, c1, c0]
     u32and          # [c3, c2, c1, c0]
-    movdn.3         # [c2, c1, c0, c3]
-    movdn.2         # [c1, c0, c2, c3]
-    swap            # [c0, c1, c2, c3]
+    reversew        # [c0, c1, c2, c3]
 end
 
 #! Performs bitwise OR of two unsigned 128-bit integers.
@@ -657,9 +621,7 @@ pub proc or(b: u128, a: u128) -> u128
     movup.4         # [a3, c2, c1, c0, b3]
     movup.4         # [b3, a3, c2, c1, c0]
     u32or           # [c3, c2, c1, c0]
-    movdn.3         # [c2, c1, c0, c3]
-    movdn.2         # [c1, c0, c2, c3]
-    swap            # [c0, c1, c2, c3]
+    reversew        # [c0, c1, c2, c3]
 end
 
 #! Performs bitwise XOR of two unsigned 128-bit integers.
@@ -679,9 +641,7 @@ pub proc xor(b: u128, a: u128) -> u128
     movup.4         # [a3, c2, c1, c0, b3]
     movup.4         # [b3, a3, c2, c1, c0]
     u32xor          # [c3, c2, c1, c0]
-    movdn.3         # [c2, c1, c0, c3]
-    movdn.2         # [c1, c0, c2, c3]
-    swap            # [c0, c1, c2, c3]
+    reversew        # [c0, c1, c2, c3]
 end
 
 #! Performs bitwise NOT of one unsigned 128-bit integer.
@@ -690,16 +650,11 @@ end
 #! [a0, a1, a2, a3, ...] -> [c0, c1, c2, c3, ...], where c = NOT a.
 pub proc not(a: u128) -> u128
     # Input: [a0, a1, a2, a3, ...]
-    u32not          # [c0, a1, a2, a3]
-    swap            # [a1, c0, a2, a3]
-    u32not          # [c1, c0, a2, a3]
-    swap            # [c0, c1, a2, a3]
-    movup.2         # [a2, c0, c1, a3]
-    u32not          # [c2, c0, c1, a3]
-    movdn.2         # [c0, c1, c2, a3]
-    movup.3         # [a3, c0, c1, c2]
-    u32not          # [c3, c0, c1, c2]
-    movdn.3         # [c0, c1, c2, c3]
+    # Process from highest limb to lowest using movup.3 u32not pattern
+    movup.3 u32not  # [c3, a0, a1, a2, ...]
+    movup.3 u32not  # [c2, c3, a0, a1, ...]
+    movup.3 u32not  # [c1, c2, c3, a0, ...]
+    movup.3 u32not  # [c0, c1, c2, c3, ...]
 end
 
 #! Counts the number of leading zeros of one unsigned 128-bit integer.
@@ -792,22 +747,21 @@ end
 pub proc clo(a: u128) -> u8
     # Input: [a0, a1, a2, a3, ...]
     # Leading ones start from the most significant limb (a3)
-    # 0xFFFFFFFF = 4294967295
     movup.3         # [a3, a0, a1, a2, ...]
     dup.0
-    eq.4294967295
+    eq.U32_MAX
 
     if.true         # a3 == 0xFFFFFFFF
         drop        # [a0, a1, a2, ...]
         movup.2     # [a2, a0, a1, ...]
         dup.0
-        eq.4294967295
+        eq.U32_MAX
 
         if.true     # a2 == 0xFFFFFFFF
             drop    # [a0, a1, ...]
             swap    # [a1, a0, ...]
             dup.0
-            eq.4294967295
+            eq.U32_MAX
 
             if.true # a1 == 0xFFFFFFFF
                 drop        # [a0, ...]
@@ -836,19 +790,18 @@ end
 pub proc cto(a: u128) -> u8
     # Input: [a0, a1, a2, a3, ...]
     # Trailing ones start from the least significant limb (a0)
-    # 0xFFFFFFFF = 4294967295
     dup.0
-    eq.4294967295
+    eq.U32_MAX
 
     if.true         # a0 == 0xFFFFFFFF
         drop        # [a1, a2, a3, ...]
         dup.0
-        eq.4294967295
+        eq.U32_MAX
 
         if.true     # a1 == 0xFFFFFFFF
             drop    # [a2, a3, ...]
             dup.0
-            eq.4294967295
+            eq.U32_MAX
 
             if.true # a2 == 0xFFFFFFFF
                 drop        # [a3, ...]
@@ -979,7 +932,8 @@ end
 #! Helper for shr with k=0 (shift by m bits, 0 < m < 32)
 #! Input: [m, a0, a1, a2, a3, ...]
 #! Output: [c0, c1, c2, c3, ...]
-#! c_i = (a_i >> m) | (a_{i+1} << (32-m)), c3 = a3 >> m
+#! For i in {0, 1, 2}: c_i = a_i / 2^m + (a_{i+1} mod 2^m) * 2^(32-m)
+#! c_3 = a_3 / 2^m
 proc shr_k0
     # Compute 2^(32-m) for left shift operations
     push.32 dup.1 u32wrapping_sub pow2
@@ -991,31 +945,33 @@ proc shr_k0
     #                             0    1         2   3   4   5   6
 
     # Compute c2 = (a2 >> m) | (a3 << (32-m))
+    # Step 1: right-shift a2 by m
     dup.5 dup.3 u32shr          # [a2>>m, c3, 2^(32-m), m, a0, a1, a2, a3, ...]
-    #                             0      1   2         3   4   5   6   7
-    dup.7 dup.3 u32widening_mul swap drop  # u32widening_mul: [lo, hi], swap drop keeps lo
+    # Step 2: left-shift a3 by (32-m) using multiply by 2^(32-m), keep low 32 bits
+    dup.7 dup.3 u32widening_mul swap drop
+    # Step 3: combine
     u32or                       # [c2, c3, 2^(32-m), m, a0, a1, a2, a3, ...]
-    #                             0    1   2         3   4   5   6   7
 
     # Compute c1 = (a1 >> m) | (a2 << (32-m))
+    # Step 1: right-shift a1 by m
     dup.5 dup.4 u32shr          # [a1>>m, c2, c3, 2^(32-m), m, a0, a1, a2, a3, ...]
-    #                             0      1   2   3         4   5   6   7   8
-    dup.7 dup.4 u32widening_mul swap drop  # u32widening_mul: [lo, hi], swap drop keeps lo
+    # Step 2: left-shift a2 by (32-m)
+    dup.7 dup.4 u32widening_mul swap drop
+    # Step 3: combine
     u32or                       # [c1, c2, c3, 2^(32-m), m, a0, a1, a2, a3, ...]
-    #                             0    1   2   3         4   5   6   7   8
 
     # Compute c0 = (a0 >> m) | (a1 << (32-m))
+    # Step 1: right-shift a0 by m
     dup.5 dup.5 u32shr          # [a0>>m, c1, c2, c3, 2^(32-m), m, a0, a1, a2, a3, ...]
-    #                             0      1   2   3   4         5   6   7   8   9
-    dup.7 dup.5 u32widening_mul swap drop  # u32widening_mul: [lo, hi], swap drop keeps lo
+    # Step 2: left-shift a1 by (32-m)
+    dup.7 dup.5 u32widening_mul swap drop
+    # Step 3: combine
     u32or                       # [c0, c1, c2, c3, 2^(32-m), m, a0, a1, a2, a3, ...]
-    #                             0    1   2   3   4         5   6   7   8   9
 
-    # Clean up: move c values to final position, drop temporaries
+    # Clean up: drop temporaries past the result word
     # Stack: [c0, c1, c2, c3, 2^(32-m), m, a0, a1, a2, a3, ...]
-    movdn.9 movdn.9 movdn.9 movdn.9
-    # Stack: [2^(32-m), m, a0, a1, a2, a3, c0, c1, c2, c3, ...]
-    drop drop drop drop drop drop
+    movup.4 drop movup.4 drop movup.4 drop
+    movup.4 drop movup.4 drop movup.4 drop
     # Stack: [c0, c1, c2, c3, ...]
 end
 
@@ -1042,13 +998,19 @@ proc shr_k1
         dup.5 dup.2 u32shr
 
         # c1 = (a2 >> m) | (a3 << (32-m))
+        # Step 1: right-shift a2 by m
         dup.5 dup.3 u32shr
+        # Step 2: left-shift a3 by (32-m)
         dup.7 dup.3 u32widening_mul swap drop
+        # Step 3: combine
         u32or
 
         # c0 = (a1 >> m) | (a2 << (32-m))
+        # Step 1: right-shift a1 by m
         dup.5 dup.4 u32shr
+        # Step 2: left-shift a2 by (32-m)
         dup.7 dup.4 u32widening_mul swap drop
+        # Step 3: combine
         u32or
 
         # Clean up
@@ -1079,8 +1041,11 @@ proc shr_k2
         dup.5 dup.2 u32shr
 
         # c0 = (a2 >> m) | (a3 << (32-m))
+        # Step 1: right-shift a2 by m
         dup.5 dup.3 u32shr
+        # Step 2: left-shift a3 by (32-m)
         dup.7 dup.3 u32widening_mul swap drop
+        # Step 3: combine
         u32or
 
         # Clean up
@@ -1099,7 +1064,7 @@ proc shr_k3
     # c0 = a3 >> m
     movup.4 swap u32shr         # [c0, a0, a1, a2, ...]
     # Clean up: drop a0, a1, a2
-    swap drop swap drop swap drop
+    movdn.3 drop drop drop
     # c0, c1=c2=c3=0 (explicit zeros inserted by caller)
 end
 
@@ -1110,41 +1075,36 @@ end
 #! [n, a0, a1, a2, a3, ...] -> [c0, c1, c2, c3, ...], where c = a <<< n (rotate left).
 #!
 #! rotl(n, a) = (a << n) | (a >> (128-n))
-@locals(4)
 pub proc rotl(n: u32, a: u128) -> u128
     # Handle n == 0: no rotation needed, value unchanged
     dup eq.0
     if.true
         drop        # [a0, a1, a2, a3, ...]
     else
-        # For rotation, we need: (a << n) | (a >> (128-n))
-        # Duplicate inputs for both shifts
-        dup             # [n, n, a0, a1, a2, a3, ...]
+        # rotl(n, a) = (a << n) | (a >> (128-n))
+        # Duplicate n and a for both shifts
+        dup                         # [n, n, a0, a1, a2, a3, ...]
         dup.5 dup.5 dup.5 dup.5     # [a0, a1, a2, a3, n, n, a0, a1, a2, a3, ...]
-        movup.5         # [n, a0, a1, a2, a3, n, a0, a1, a2, a3, ...]
-        exec.shl        # [shl0, shl1, shl2, shl3, n, a0, a1, a2, a3, ...]
+        movup.4                     # [n, a0, a1, a2, a3, n, a0, a1, a2, a3, ...]
+        exec.shl                    # [shl0, shl1, shl2, shl3, n, a0, a1, a2, a3, ...]
 
-        # Save shl values to local memory so shr can use proper stack padding
-        loc_store.0     # store shl0, [shl1, shl2, shl3, n, a0, a1, a2, a3, ...]
-        loc_store.1     # store shl1, [shl2, shl3, n, a0, a1, a2, a3, ...]
-        loc_store.2     # store shl2, [shl3, n, a0, a1, a2, a3, ...]
-        loc_store.3     # store shl3, [n, a0, a1, a2, a3, ...]
+        # Move shl results below the remaining [n, a, ...] for the shr computation
+        movdn.8 movdn.8 movdn.8 movdn.8
+        # Stack: [n, a0, a1, a2, a3, shl0, shl1, shl2, shl3, ...]
 
-        # Now compute a >> (128-n)
-        push.128 swap u32wrapping_sub   # [128-n, a0, a1, a2, a3, ...]
-        exec.shr        # [shr0, shr1, shr2, shr3, ...]
+        # Compute a >> (128-n)
+        push.128 swap u32wrapping_sub
+        # Stack: [128-n, a0, a1, a2, a3, shl0, shl1, shl2, shl3, ...]
+        exec.shr                    # [shr0, shr1, shr2, shr3, shl0, shl1, shl2, shl3, ...]
 
-        # OR with shl values from local memory
-        loc_load.0 u32or   # [c0, shr1, shr2, shr3, ...]
-        swap
-        loc_load.1 u32or   # [c1, c0, shr2, shr3, ...]
-        swap               # [c0, c1, shr2, shr3, ...]
-        movup.2
-        loc_load.2 u32or   # [c2, c0, c1, shr3, ...]
-        movdn.2            # [c0, c1, c2, shr3, ...]
-        movup.3
-        loc_load.3 u32or   # [c3, c0, c1, c2, ...]
-        movdn.3            # [c0, c1, c2, c3, ...]
+        # OR the two results limb by limb
+        movup.4 u32or               # [c0, shr1, shr2, shr3, shl1, shl2, shl3, ...]
+        swap movup.4 u32or          # [c1, c0, shr2, shr3, shl2, shl3, ...]
+        swap                        # [c0, c1, shr2, shr3, shl2, shl3, ...]
+        movup.2 movup.4 u32or       # [c2, c0, c1, shr3, shl3, ...]
+        movdn.2                     # [c0, c1, c2, shr3, shl3, ...]
+        movup.3 movup.4 u32or       # [c3, c0, c1, c2, ...]
+        movdn.3                     # [c0, c1, c2, c3, ...]
     end
 end
 
@@ -1155,43 +1115,35 @@ end
 #! [n, a0, a1, a2, a3, ...] -> [c0, c1, c2, c3, ...], where c = a >>> n (rotate right).
 #!
 #! rotr(n, a) = (a >> n) | (a << (128-n))
-@locals(5)
 pub proc rotr(n: u32, a: u128) -> u128
     # Handle n == 0: no rotation needed, value unchanged
     dup eq.0
     if.true
         drop        # [a0, a1, a2, a3, ...]
     else
-        # For rotation, we need: (a >> n) | (a << (128-n))
-        # Save n and a to local memory for later shl computation
-        dup loc_store.0      # save n
-        dup.1 loc_store.1    # save a0
-        dup.2 loc_store.2    # save a1
-        dup.3 loc_store.3    # save a2
-        dup.4 loc_store.4    # save a3
-        # Stack unchanged: [n, a0, a1, a2, a3, ...]
+        # rotr(n, a) = (a >> n) | (a << (128-n))
+        # Duplicate n and a for both shifts
+        dup                         # [n, n, a0, a1, a2, a3, ...]
+        dup.5 dup.5 dup.5 dup.5     # [a0, a1, a2, a3, n, n, a0, a1, a2, a3, ...]
+        movup.4                     # [n, a0, a1, a2, a3, n, a0, a1, a2, a3, ...]
+        exec.shr                    # [shr0, shr1, shr2, shr3, n, a0, a1, a2, a3, ...]
 
-        # Compute shr(n, a) - now stack has proper padding below
-        exec.shr        # [shr0, shr1, shr2, shr3, ...]
+        # Move shr results below the remaining [n, a, ...] for the shl computation
+        movdn.8 movdn.8 movdn.8 movdn.8
+        # Stack: [n, a0, a1, a2, a3, shr0, shr1, shr2, shr3, ...]
 
-        # Compute 128-n and prepare for shl
-        loc_load.0 push.128 swap u32wrapping_sub  # [128-n, shr0, shr1, shr2, shr3, ...]
+        # Compute a << (128-n)
+        push.128 swap u32wrapping_sub
+        # Stack: [128-n, a0, a1, a2, a3, shr0, shr1, shr2, shr3, ...]
+        exec.shl                    # [shl0, shl1, shl2, shl3, shr0, shr1, shr2, shr3, ...]
 
-        # Load a from memory (in reverse order so they end up in correct position)
-        loc_load.4 loc_load.3 loc_load.2 loc_load.1
-        # Stack: [a0, a1, a2, a3, 128-n, shr0, shr1, shr2, shr3, ...]
-        movup.4         # [128-n, a0, a1, a2, a3, shr0, shr1, shr2, shr3, ...]
-
-        # Compute shl(128-n, a)
-        exec.shl        # [shl0, shl1, shl2, shl3, shr0, shr1, shr2, shr3, ...]
-
-        # OR the two results
-        movup.4 u32or   # [c0, shl1, shl2, shl3, shr1, shr2, shr3, ...]
-        swap movup.4 u32or  # [c1, c0, shl2, shl3, shr2, shr3, ...]
-        swap            # [c0, c1, shl2, shl3, shr2, shr3, ...]
-        movup.2 movup.4 u32or   # [c2, c0, c1, shl3, shr3, ...]
-        movdn.2         # [c0, c1, c2, shl3, shr3, ...]
-        movup.3 movup.4 u32or   # [c3, c0, c1, c2, ...]
-        movdn.3         # [c0, c1, c2, c3, ...]
+        # OR the two results limb by limb
+        movup.4 u32or               # [c0, shl1, shl2, shl3, shr1, shr2, shr3, ...]
+        swap movup.4 u32or          # [c1, c0, shl2, shl3, shr2, shr3, ...]
+        swap                        # [c0, c1, shl2, shl3, shr2, shr3, ...]
+        movup.2 movup.4 u32or       # [c2, c0, c1, shl3, shr3, ...]
+        movdn.2                     # [c0, c1, c2, shl3, shr3, ...]
+        movup.3 movup.4 u32or       # [c3, c0, c1, c2, ...]
+        movdn.3                     # [c0, c1, c2, c3, ...]
     end
 end
