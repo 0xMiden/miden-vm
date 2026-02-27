@@ -99,7 +99,7 @@ pub fn build_trace(
         core_trace_contexts,
         program_info.kernel().clone(),
         fragment_size,
-    );
+    )?;
 
     // Calculate trace length
     let core_trace_len = core_trace_columns[0].len();
@@ -180,7 +180,7 @@ fn generate_core_trace_columns(
     core_trace_contexts: Vec<CoreTraceFragmentContext>,
     kernel: Kernel,
     fragment_size: usize,
-) -> Vec<Vec<Felt>> {
+) -> Result<Vec<Vec<Felt>>, ExecutionError> {
     let mut core_trace_columns: Vec<Vec<Felt>> =
         unsafe { vec![uninit_vector(core_trace_contexts.len() * fragment_size); CORE_TRACE_WIDTH] };
 
@@ -194,21 +194,27 @@ fn generate_core_trace_columns(
     let mut fragments = create_fragments_from_trace_columns(&mut core_trace_columns, fragment_size);
 
     // Build the core trace fragments in parallel
-    let fragment_results: Vec<([Felt; STACK_TRACE_WIDTH], [Felt; SYS_TRACE_WIDTH], usize)> =
-        core_trace_contexts
-            .into_par_iter()
-            .zip(fragments.par_iter_mut())
-            .map(|(trace_state, fragment)| {
-                let (mut processor, mut tracer, mut continuation_stack, mut current_forest) =
-                    split_trace_fragment_context(trace_state, fragment, fragment_size);
+    let fragment_results: Result<
+        Vec<([Felt; STACK_TRACE_WIDTH], [Felt; SYS_TRACE_WIDTH], usize)>,
+        ExecutionError,
+    > = core_trace_contexts
+        .into_par_iter()
+        .zip(fragments.par_iter_mut())
+        .map(|(trace_state, fragment)| {
+            let (mut processor, mut tracer, mut continuation_stack, mut current_forest) =
+                split_trace_fragment_context(trace_state, fragment, fragment_size);
 
-                processor
-                    .execute(&mut continuation_stack, &mut current_forest, &kernel, &mut tracer)
-                    .expect("fragment execution failed");
+            processor.execute(
+                &mut continuation_stack,
+                &mut current_forest,
+                &kernel,
+                &mut tracer,
+            )?;
 
-                tracer.into_parts()
-            })
-            .collect();
+            Ok(tracer.into_parts())
+        })
+        .collect();
+    let fragment_results = fragment_results?;
 
     // Separate fragments, stack_rows, and system_rows
     let mut stack_rows = Vec::new();
@@ -245,15 +251,15 @@ fn generate_core_trace_columns(
 
     push_halt_opcode_row(
         &mut core_trace_columns,
-        system_rows.last().expect(
-            "system_rows should not be empty, which indicates that there are no trace fragments",
-        ),
-        stack_rows.last().expect(
-            "stack_rows should not be empty, which indicates that there are no trace fragments",
-        ),
+        system_rows.last().ok_or(ExecutionError::Internal(
+            "no trace fragments provided in the trace generation context",
+        ))?,
+        stack_rows.last().ok_or(ExecutionError::Internal(
+            "no trace fragments provided in the trace generation context",
+        ))?,
     );
 
-    core_trace_columns
+    Ok(core_trace_columns)
 }
 
 /// Splits the core trace columns into fragments of the specified size, returning a vector of

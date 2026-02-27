@@ -419,10 +419,7 @@ impl Processor for ReplayProcessor {
     }
 
     fn restore_context(&mut self) -> Result<(), OperationError> {
-        let ctx_info = self
-            .execution_context_replay
-            .replay_execution_context()
-            .expect("invalid trace generation context: no execution context recorded");
+        let ctx_info = self.execution_context_replay.replay_execution_context()?;
 
         // Restore system state
         self.system_mut().set_ctx(ctx_info.parent_ctx);

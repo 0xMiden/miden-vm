@@ -2,6 +2,7 @@ use miden_air::{Felt, trace::decoder::NUM_OP_BITS};
 use miden_core::{mast::BasicBlockNode, operations::OPCODE_PUSH};
 
 use super::CORE_TRACE_WIDTH;
+use crate::errors::OperationError;
 
 #[cfg(test)]
 mod tests;
@@ -69,11 +70,11 @@ impl BasicBlockContext {
         basic_block_node: &BasicBlockNode,
         batch_index: usize,
         op_idx_in_batch: usize,
-    ) -> Self {
+    ) -> Result<Self, OperationError> {
         let op_batches = basic_block_node.op_batches();
         let (current_op_group_idx, op_idx_in_group) = op_batches[batch_index]
             .op_idx_in_batch_to_group(op_idx_in_batch)
-            .expect("invalid batch");
+            .ok_or(OperationError::Internal("invalid op index in batch"))?;
 
         let current_op_group = {
             // Note: this here relies on NOOP's opcode to be 0, since `current_op_group_idx` could
@@ -126,7 +127,7 @@ impl BasicBlockContext {
             Felt::from_u32((total_groups - groups_consumed) as u32)
         };
 
-        Self { current_op_group, group_count_in_block }
+        Ok(Self { current_op_group, group_count_in_block })
     }
 
     /// Removes the operation that was just executed from the current operation group.

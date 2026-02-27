@@ -309,10 +309,10 @@ impl ExecutionContextReplay {
     /// Replays the next recorded execution context system info.
     pub fn replay_execution_context(
         &mut self,
-    ) -> Result<ExecutionContextSystemInfo, ExecutionError> {
+    ) -> Result<ExecutionContextSystemInfo, OperationError> {
         self.execution_contexts
             .pop_front()
-            .ok_or(ExecutionError::Internal("no execution context recorded"))
+            .ok_or(OperationError::Internal("no execution context recorded"))
     }
 }
 

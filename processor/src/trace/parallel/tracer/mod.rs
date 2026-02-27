@@ -17,6 +17,7 @@ use super::{
 use crate::{
     ExecutionError, Felt, ONE, Word, ZERO,
     continuation_stack::{Continuation, ContinuationStack},
+    errors::MapExecErrNoCtx,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
     tracer::{OperationHelperRegisters, Tracer},
 };
@@ -407,7 +408,8 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
                         basic_block_node,
                         *batch_index,
                         *op_idx_in_batch,
-                    );
+                    )
+                    .map_exec_err_no_ctx()?;
                     let current_batch = &basic_block_node.op_batches()[*batch_index];
                     let operation = current_batch.ops()[*op_idx_in_batch];
                     let (_, op_idx_in_group) = current_batch
