@@ -26,7 +26,7 @@ use crate::{
     Felt,
     constraints::tagging::{
         TagGroup, TaggingAirBuilderExt, tagged_assert_zero, tagged_assert_zero_integrity,
-        tagged_assert_zeros,
+        tagged_assert_zeros, tagged_assert_zeros_integrity,
     },
 };
 
@@ -142,7 +142,7 @@ pub fn enforce_selector_booleanity<AB>(
     let s1: AB::Expr = s1.into();
     let s2: AB::Expr = s2.into();
     let mut idx = 0;
-    tagged_assert_zeros(
+    tagged_assert_zeros_integrity(
         builder,
         &SELECTOR_BOOL_TAGS,
         &mut idx,
