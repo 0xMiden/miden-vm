@@ -75,6 +75,7 @@ pub fn prove<A, B, SC>(
     air: &A,
     trace: &RowMajorMatrix<Felt>,
     public_values: &[Felt],
+    var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
     aux_builder: &B,
 ) -> Result<Vec<u8>, String>
 where
@@ -91,6 +92,7 @@ where
         air,
         trace,
         public_values,
+        var_len_public_inputs,
         aux_builder,
         &mut channel,
     )
@@ -187,7 +189,7 @@ mod tests {
         let aux = EmptyAuxBuilder;
 
         let config = super::create_poseidon2_config();
-        let proof = super::prove(&config, &air, &trace, &pv, &aux).expect("prove");
+        let proof = super::prove(&config, &air, &trace, &pv, &[], &aux).expect("prove");
 
         let log_h = trace.height().trailing_zeros() as usize;
         super::verify(&config, &air, log_h, &pv, &[], &proof).expect("verify");
@@ -201,7 +203,7 @@ mod tests {
         let aux = EmptyAuxBuilder;
 
         let config = super::create_blake3_256_config();
-        let proof = super::prove(&config, &air, &trace, &pv, &aux).expect("prove");
+        let proof = super::prove(&config, &air, &trace, &pv, &[], &aux).expect("prove");
 
         let log_h = trace.height().trailing_zeros() as usize;
         super::verify(&config, &air, log_h, &pv, &[], &proof).expect("verify");
@@ -215,7 +217,7 @@ mod tests {
         let aux = EmptyAuxBuilder;
 
         let config = super::create_keccak_config();
-        let proof = super::prove(&config, &air, &trace, &pv, &aux).expect("prove");
+        let proof = super::prove(&config, &air, &trace, &pv, &[], &aux).expect("prove");
 
         let log_h = trace.height().trailing_zeros() as usize;
         super::verify(&config, &air, log_h, &pv, &[], &proof).expect("verify");
@@ -252,7 +254,7 @@ mod tests {
         let pv: Vec<Felt> = vec![];
         let aux = EmptyAuxBuilder;
 
-        let proof = super::prove(&config, &air, &trace, &pv, &aux).expect("prove");
+        let proof = super::prove(&config, &air, &trace, &pv, &[], &aux).expect("prove");
 
         let log_h = trace.height().trailing_zeros() as usize;
         super::verify(&config, &air, log_h, &pv, &[], &proof).expect("verify");

@@ -138,8 +138,8 @@ fn verify_stark(
     let (public_values, kernel_digests) = pub_inputs.to_air_inputs();
 
     // Build var-len public inputs from kernel digests.
-    let kernel_group_refs: Vec<&[Felt]> = kernel_digests.iter().map(|d| d.as_slice()).collect();
-    let var_len_public_inputs: [&[&[Felt]]; 1] = [&kernel_group_refs];
+    // Each kernel digest (Word = 4 Felts) is one entry in var_len_public_inputs.
+    let var_len_public_inputs: Vec<&[Felt]> = kernel_digests.iter().map(|d| &**d as &[_]).collect();
 
     let air = ProcessorAir;
     let log_height = log_trace_height as usize;
