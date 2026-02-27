@@ -75,6 +75,7 @@ pub const TAG_DECODER_BUS_COUNT: usize = 3;
 /// Base ID for the wiring bus constraint.
 pub const TAG_WIRING_BUS_BASE: usize = TAG_DECODER_BUS_BASE + TAG_DECODER_BUS_COUNT;
 /// Number of wiring bus constraints in this group.
+#[cfg(all(test, feature = "std"))]
 pub const TAG_WIRING_BUS_COUNT: usize = 1;
 
 /// Total number of tagged constraints in the current group set.
