@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::{CHIPLETS_WIDTH, chiplets::hasher::HasherState};
-use miden_core::{mast::OpBatch, precompile::PrecompileTranscriptState, program::Kernel};
+use miden_core::{mast::OpBatch, program::Kernel};
 
 use crate::{
     Felt, ONE, Word, ZERO,
@@ -217,14 +217,8 @@ impl Chiplets {
 
     /// Returns an execution trace of the chiplets containing the stacked traces of the
     /// Hasher, Bitwise, ACE, Memory chiplets, and kernel ROM chiplet.
-    pub fn into_trace(
-        self,
-        trace_len: usize,
-        pc_transcript_state: PrecompileTranscriptState,
-    ) -> ChipletsTrace {
+    pub fn into_trace(self, trace_len: usize) -> ChipletsTrace {
         assert!(self.trace_len() <= trace_len, "target trace length too small");
-
-        let kernel = self.kernel_rom.kernel().clone();
 
         // Allocate columns for the trace of the chiplets.
         let mut trace = (0..CHIPLETS_WIDTH)
@@ -236,7 +230,7 @@ impl Chiplets {
 
         ChipletsTrace {
             trace,
-            aux_builder: AuxTraceBuilder::new(kernel, ace_hint, pc_transcript_state),
+            aux_builder: AuxTraceBuilder::new(ace_hint),
         }
     }
 

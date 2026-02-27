@@ -29,15 +29,6 @@ use crate::debug::BusDebugger;
 pub struct BlockHashTableColumnBuilder {}
 
 impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BlockHashTableColumnBuilder {
-    fn init_responses(
-        &self,
-        main_trace: &MainTrace,
-        alphas: &[E],
-        _debugger: &mut BusDebugger<E>,
-    ) -> E {
-        BlockHashTableRow::table_init(main_trace).collapse(alphas)
-    }
-
     /// Removes a row from the block hash table.
     fn get_requests_at(
         &self,
@@ -109,18 +100,6 @@ pub struct BlockHashTableRow {
 impl BlockHashTableRow {
     // CONSTRUCTORS
     // ----------------------------------------------------------------------------------------------
-
-    // Instantiates the initial row in the block hash table.
-    pub fn table_init(main_trace: &MainTrace) -> Self {
-        let program_hash =
-            main_trace.decoder_hasher_state_first_half(main_trace.last_program_row());
-        Self {
-            parent_block_id: ZERO,
-            child_block_hash: program_hash,
-            is_first_child: false,
-            is_loop_body: false,
-        }
-    }
 
     /// Computes the row to be removed from the block hash table when encountering an `END`
     /// operation.

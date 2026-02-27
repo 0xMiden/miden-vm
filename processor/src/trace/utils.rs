@@ -241,35 +241,29 @@ pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
     // PROVIDED METHODS
     // --------------------------------------------------------------------------------------------
 
-    fn init_requests(
-        &self,
-        _main_trace: &MainTrace,
-        _alphas: &[E],
-        _debugger: &mut BusDebugger<E>,
-    ) -> E {
-        E::ONE
+    /// Whether the bus debugger should assert that requests and responses are balanced.
+    ///
+    /// Returns `true` by default. Override to `false` for buses whose balance is checked
+    /// via `reduced_aux_values` (aux-finals) rather than by the bus debugger.
+    fn enforce_bus_balance(&self) -> bool {
+        true
     }
 
-    fn init_responses(
-        &self,
-        _main_trace: &MainTrace,
-        _alphas: &[E],
-        _debugger: &mut BusDebugger<E>,
-    ) -> E {
-        E::ONE
-    }
-
-    /// Builds the chiplets bus auxiliary trace column.
+    /// Builds the auxiliary trace column for this bus.
+    ///
+    /// All columns start at identity (`E::ONE`). Public-input-dependent init terms that
+    /// were previously seeded via `init_requests`/`init_responses` are now handled by the
+    /// verifier in `reduced_aux_values`.
     fn build_aux_column(&self, main_trace: &MainTrace, alphas: &[E]) -> Vec<E> {
         let mut bus_debugger = BusDebugger::new("chiplets bus".to_string());
 
         let mut requests: Vec<E> = unsafe { uninit_vector(main_trace.num_rows()) };
-        requests[0] = self.init_requests(main_trace, alphas, &mut bus_debugger);
+        requests[0] = E::ONE;
 
         let mut responses_prod: Vec<E> = unsafe { uninit_vector(main_trace.num_rows()) };
-        responses_prod[0] = self.init_responses(main_trace, alphas, &mut bus_debugger);
+        responses_prod[0] = E::ONE;
 
-        let mut requests_running_prod = requests[0];
+        let mut requests_running_prod = E::ONE;
 
         // Product of all requests to be inverted, used to compute inverses of requests.
         for row_idx in 0..main_trace.num_rows() - 1 {
@@ -292,7 +286,9 @@ pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
         }
 
         #[cfg(any(test, feature = "bus-debugger"))]
-        assert!(bus_debugger.is_empty(), "{bus_debugger}");
+        if self.enforce_bus_balance() {
+            assert!(bus_debugger.is_empty(), "{bus_debugger}");
+        }
 
         result_aux_column
     }

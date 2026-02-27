@@ -75,33 +75,65 @@ pub async fn prove(
         execution_trace_to_row_major(&trace)
     };
 
-    // Build public values
-    let public_values = trace.to_public_values();
+    // Build public inputs/values
+    let public_inputs = miden_air::PublicInputs::new(
+        trace.program_info().clone(),
+        trace.init_stack_state(),
+        *trace.stack_outputs(),
+        trace.final_precompile_transcript().state(),
+    );
+    let (public_values, _kernel_digests) = public_inputs.to_air_inputs();
 
     // Create AIR and aux trace builder adapter
-    let air = ProcessorAir::new();
+    let air = ProcessorAir;
     let aux_builder = miden_air::trace::AuxTraceAdapter(trace.aux_trace_builders().clone());
 
     // Compute log2 of trace height (needed by verifier)
     let log_trace_height = trace_matrix.height().trailing_zeros() as u32;
 
     // Generate STARK proof using lifted prover
+    let err = ExecutionError::ProofSerializationError;
     let proof_bytes = match hash_fn {
-        HashFunction::Blake3_256 => config::create_blake3_256_config()
-            .prove(&air, &trace_matrix, &public_values, &aux_builder)
-            .map_err(|e| ExecutionError::ProofSerializationError(e))?,
-        HashFunction::Keccak => config::create_keccak_config()
-            .prove(&air, &trace_matrix, &public_values, &aux_builder)
-            .map_err(|e| ExecutionError::ProofSerializationError(e))?,
-        HashFunction::Rpo256 => config::create_rpo_config()
-            .prove(&air, &trace_matrix, &public_values, &aux_builder)
-            .map_err(|e| ExecutionError::ProofSerializationError(e))?,
-        HashFunction::Poseidon2 => config::create_poseidon2_config()
-            .prove(&air, &trace_matrix, &public_values, &aux_builder)
-            .map_err(|e| ExecutionError::ProofSerializationError(e))?,
-        HashFunction::Rpx256 => config::create_rpx_config()
-            .prove(&air, &trace_matrix, &public_values, &aux_builder)
-            .map_err(|e| ExecutionError::ProofSerializationError(e))?,
+        HashFunction::Blake3_256 => config::prove(
+            &config::create_blake3_256_config(),
+            &air,
+            &trace_matrix,
+            &public_values,
+            &aux_builder,
+        )
+        .map_err(err)?,
+        HashFunction::Keccak => config::prove(
+            &config::create_keccak_config(),
+            &air,
+            &trace_matrix,
+            &public_values,
+            &aux_builder,
+        )
+        .map_err(err)?,
+        HashFunction::Rpo256 => config::prove(
+            &config::create_rpo_config(),
+            &air,
+            &trace_matrix,
+            &public_values,
+            &aux_builder,
+        )
+        .map_err(err)?,
+        HashFunction::Poseidon2 => config::prove(
+            &config::create_poseidon2_config(),
+            &air,
+            &trace_matrix,
+            &public_values,
+            &aux_builder,
+        )
+        .map_err(err)?,
+        HashFunction::Rpx256 => config::prove(
+            &config::create_rpx_config(),
+            &air,
+            &trace_matrix,
+            &public_values,
+            &aux_builder,
+        )
+        .map_err(err)?,
     };
 
     let proof = ExecutionProof::new(proof_bytes, hash_fn, log_trace_height, precompile_requests);

@@ -3,15 +3,16 @@
 //! This module provides a STARK configuration using the Rescue Prime eXtension (RPX)
 //! hash function, which is Miden's native algebraic hash function with extension field rounds.
 
+use miden_core::field::QuadFelt;
 use miden_crypto::hash::rpx::RpxPermutation256;
 use p3_challenger::DuplexChallenger;
 use p3_field::Field;
-use p3_miden_lifted_stark::StarkConfig;
+use p3_miden_lifted_stark::GenericStarkConfig;
 use p3_miden_lmcs::LmcsConfig;
 use p3_miden_stateful_hasher::StatefulSponge;
 use p3_symmetric::TruncatedPermutation;
 
-use super::{Dft, LiftedConfig, PCS_PARAMS};
+use super::{Dft, PCS_PARAMS};
 use crate::Felt;
 
 const WIDTH: usize = 12;
@@ -37,6 +38,9 @@ type LmcsType = LmcsConfig<PackedFelt, PackedFelt, Sponge, Compress, WIDTH, DIGE
 /// Challenger for Fiat-Shamir using RPX (duplex sponge)
 type Challenger = DuplexChallenger<Felt, Perm, WIDTH, RATE>;
 
+/// Complete STARK configuration type for RPX.
+pub type RpxConfig = GenericStarkConfig<Felt, QuadFelt, LmcsType, Dft, Challenger>;
+
 /// Creates an RPX-based STARK configuration.
 ///
 /// This configuration uses:
@@ -45,30 +49,13 @@ type Challenger = DuplexChallenger<Felt, Perm, WIDTH, RATE>;
 /// - 27 query repetitions
 /// - 16 bits of proof-of-work
 /// - Binary folding (arity 2)
-///
-/// # Advantages of RPX over RPO
-///
-/// - **Enhanced security**: RPX uses extension field rounds (E-rounds) that provide additional
-///   algebraic structure and resistance to certain attacks.
-/// - **Native to Miden VM**: Like RPO, RPX is an algebraic hash function that can be efficiently
-///   verified within the Miden VM for recursive proof verification.
-/// - **STARK-friendly**: The extension field operations are optimized for STARK circuits, providing
-///   efficient constraint representation.
-/// - **128-bit security**: Targets the same security level as RPO with improved cryptographic
-///   properties.
-///
-/// # Returns
-///
-/// A `LiftedConfig` instance configured for RPX-based proving.
-pub fn create_rpx_config() -> LiftedConfig<LmcsType, Challenger> {
+pub fn create_rpx_config() -> RpxConfig {
     let perm = RpxPermutation256;
     let sponge = Sponge::new(perm);
     let compress = Compress::new(perm);
     let lmcs = LmcsType::new(sponge, compress);
     let dft = Dft::default();
-
-    let config = StarkConfig { pcs: PCS_PARAMS, lmcs, dft };
     let challenger = Challenger::new(perm);
 
-    LiftedConfig { config, challenger }
+    GenericStarkConfig::new(PCS_PARAMS, lmcs, dft, challenger)
 }

@@ -3,15 +3,16 @@
 //! This module provides a STARK configuration using the Rescue Prime Optimized (RPO)
 //! hash function, which is Miden's native algebraic hash function.
 
+use miden_core::field::QuadFelt;
 use miden_crypto::hash::rpo::RpoPermutation256;
 use p3_challenger::DuplexChallenger;
 use p3_field::Field;
-use p3_miden_lifted_stark::StarkConfig;
+use p3_miden_lifted_stark::GenericStarkConfig;
 use p3_miden_lmcs::LmcsConfig;
 use p3_miden_stateful_hasher::StatefulSponge;
 use p3_symmetric::TruncatedPermutation;
 
-use super::{Dft, LiftedConfig, PCS_PARAMS};
+use super::{Dft, PCS_PARAMS};
 use crate::Felt;
 
 const WIDTH: usize = 12;
@@ -37,6 +38,9 @@ type LmcsType = LmcsConfig<PackedFelt, PackedFelt, Sponge, Compress, WIDTH, DIGE
 /// Challenger for Fiat-Shamir using RPO (duplex sponge)
 type Challenger = DuplexChallenger<Felt, Perm, WIDTH, RATE>;
 
+/// Complete STARK configuration type for RPO.
+pub type RpoConfig = GenericStarkConfig<Felt, QuadFelt, LmcsType, Dft, Challenger>;
+
 /// Creates an RPO-based STARK configuration.
 ///
 /// This configuration uses:
@@ -45,28 +49,13 @@ type Challenger = DuplexChallenger<Felt, Perm, WIDTH, RATE>;
 /// - 27 query repetitions
 /// - 16 bits of proof-of-work
 /// - Binary folding (arity 2)
-///
-/// # Advantages of RPO over Blake3
-///
-/// - **Native to Miden VM**: RPO is an algebraic hash function that can be efficiently verified
-///   within the Miden VM itself, enabling recursive proof verification.
-/// - **STARK-friendly**: Being algebraic (defined over the same field as the trace), RPO
-///   constraints are more efficient to represent and verify.
-/// - **Smaller proof size**: RPO's algebraic nature typically results in more compact Merkle
-///   authentication paths.
-///
-/// # Returns
-///
-/// A `LiftedConfig` instance configured for RPO-based proving.
-pub fn create_rpo_config() -> LiftedConfig<LmcsType, Challenger> {
+pub fn create_rpo_config() -> RpoConfig {
     let perm = RpoPermutation256;
     let sponge = Sponge::new(perm);
     let compress = Compress::new(perm);
     let lmcs = LmcsType::new(sponge, compress);
     let dft = Dft::default();
-
-    let config = StarkConfig { pcs: PCS_PARAMS, lmcs, dft };
     let challenger = Challenger::new(perm);
 
-    LiftedConfig { config, challenger }
+    GenericStarkConfig::new(PCS_PARAMS, lmcs, dft, challenger)
 }
