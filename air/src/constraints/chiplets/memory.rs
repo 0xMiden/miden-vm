@@ -50,9 +50,8 @@ use crate::{
 // TAGGING IDS
 // ================================================================================================
 
-pub(super) const MEMORY_BASE_ID: usize =
-    super::bitwise::BITWISE_BASE_ID + super::bitwise::BITWISE_COUNT;
-pub(super) const MEMORY_COUNT: usize = 21;
+pub const MEMORY_BASE_ID: usize = super::bitwise::BITWISE_BASE_ID + super::bitwise::BITWISE_COUNT;
+pub const MEMORY_COUNT: usize = 21;
 const MEMORY_BINARY_BASE_ID: usize = MEMORY_BASE_ID;
 const MEMORY_WORD_IDX_BASE_ID: usize = MEMORY_BASE_ID + 4;
 const MEMORY_FIRST_ROW_BASE_ID: usize = MEMORY_BASE_ID + 6;
