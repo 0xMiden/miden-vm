@@ -80,6 +80,7 @@ pub const TAG_HASH_KERNEL_BUS_COUNT: usize = 1;
 /// Base ID for the wiring bus constraint.
 pub const TAG_WIRING_BUS_BASE: usize = TAG_HASH_KERNEL_BUS_BASE + TAG_HASH_KERNEL_BUS_COUNT;
 /// Number of wiring bus constraints in this group.
+#[cfg(all(test, feature = "std"))]
 pub const TAG_WIRING_BUS_COUNT: usize = 1;
 
 /// Total number of tagged constraints in the current group set.
