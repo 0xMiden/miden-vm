@@ -70,6 +70,7 @@ pub const TAG_STACK_OVERFLOW_BUS_COUNT: usize = 1;
 /// Base ID for the decoder bus constraint group.
 pub const TAG_DECODER_BUS_BASE: usize = TAG_STACK_OVERFLOW_BUS_BASE + TAG_STACK_OVERFLOW_BUS_COUNT;
 /// Number of decoder bus constraints in this group.
+#[cfg(all(test, feature = "std"))]
 pub const TAG_DECODER_BUS_COUNT: usize = 3;
 
 /// Total number of tagged constraints in the current group set.
