@@ -82,7 +82,12 @@ pub async fn prove(
         *trace.stack_outputs(),
         trace.final_precompile_transcript().state(),
     );
-    let (public_values, _kernel_digests) = public_inputs.to_air_inputs();
+    let (public_values, kernel_digests) = public_inputs.to_air_inputs();
+
+    // Build variable-length public inputs from kernel procedure digests.
+    // Each Word (4 Felts) is one entry in the var-len inputs slice.
+    let kernel_slices: alloc::vec::Vec<&[miden_core::Felt]> =
+        kernel_digests.iter().map(|w| &**w as &[_]).collect();
 
     // Create AIR and aux trace builder adapter
     let air = ProcessorAir;
@@ -99,6 +104,7 @@ pub async fn prove(
             &air,
             &trace_matrix,
             &public_values,
+            &kernel_slices,
             &aux_builder,
         )
         .map_err(err)?,
@@ -107,6 +113,7 @@ pub async fn prove(
             &air,
             &trace_matrix,
             &public_values,
+            &kernel_slices,
             &aux_builder,
         )
         .map_err(err)?,
@@ -115,6 +122,7 @@ pub async fn prove(
             &air,
             &trace_matrix,
             &public_values,
+            &kernel_slices,
             &aux_builder,
         )
         .map_err(err)?,
@@ -123,6 +131,7 @@ pub async fn prove(
             &air,
             &trace_matrix,
             &public_values,
+            &kernel_slices,
             &aux_builder,
         )
         .map_err(err)?,
@@ -131,6 +140,7 @@ pub async fn prove(
             &air,
             &trace_matrix,
             &public_values,
+            &kernel_slices,
             &aux_builder,
         )
         .map_err(err)?,

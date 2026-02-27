@@ -16,7 +16,7 @@ use miden_core::{
     program::{MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs},
 };
 use p3_matrix::Matrix;
-use p3_miden_lifted_air::{ReducedAuxValues, VarLenPublicInputs};
+use p3_miden_lifted_air::{ReducedAuxValues, ReductionError, VarLenPublicInputs};
 
 pub mod config;
 mod constraints;
@@ -221,7 +221,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
         challenges: &[EF],
         public_values: &[Felt],
         var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
-    ) -> ReducedAuxValues<EF>
+    ) -> Result<ReducedAuxValues<EF>, ReductionError>
     where
         EF: ExtensionField<Felt>,
     {
@@ -289,7 +289,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
         // LogUp: all columns should end at 0.
         let sum = b_range + v_wiring;
 
-        ReducedAuxValues { prod, sum }
+        Ok(ReducedAuxValues { prod, sum })
     }
 
     fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
@@ -339,19 +339,14 @@ fn kernel_proc_message<EF: ExtensionField<Felt>>(alphas: &[EF], digest: &Word) -
 }
 
 /// Reduces kernel procedure digests from var-len public inputs into a multiset product.
+///
+/// Each entry in `var_len_public_inputs` is one kernel procedure digest (4 Felts).
 fn kernel_reduced_from_var_len<EF: ExtensionField<Felt>>(
     alphas: &[EF],
     var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
 ) -> EF {
-    // Kernel procedure digests are provided as the first (and only) var-len group.
-    let kernel_digests = if var_len_public_inputs.is_empty() {
-        &[] as &[&[Felt]]
-    } else {
-        var_len_public_inputs[0]
-    };
-
     let mut acc = EF::ONE;
-    for digest in kernel_digests.iter() {
+    for digest in var_len_public_inputs.iter() {
         debug_assert_eq!(digest.len(), WORD_SIZE);
         let word: Word = [digest[0], digest[1], digest[2], digest[3]].into();
         acc *= kernel_proc_message(alphas, &word);
