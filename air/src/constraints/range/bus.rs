@@ -74,48 +74,43 @@ where
         (b_local, b_next, alpha)
     };
 
-    // LogUp denominators: alpha + <trace column>
-    let mv0: AB::ExprEF =
-        alpha.clone() + AB::ExprEF::from(local.chiplets[MEMORY_D0_IDX].clone().into());
-    let mv1: AB::ExprEF =
-        alpha.clone() + AB::ExprEF::from(local.chiplets[MEMORY_D1_IDX].clone().into());
-    let sv0: AB::ExprEF =
-        alpha.clone() + AB::ExprEF::from(local.decoder[STACK_LOOKUP_BASE].clone().into());
-    let sv1: AB::ExprEF =
-        alpha.clone() + AB::ExprEF::from(local.decoder[STACK_LOOKUP_BASE + 1].clone().into());
-    let sv2: AB::ExprEF =
-        alpha.clone() + AB::ExprEF::from(local.decoder[STACK_LOOKUP_BASE + 2].clone().into());
-    let sv3: AB::ExprEF =
-        alpha.clone() + AB::ExprEF::from(local.decoder[STACK_LOOKUP_BASE + 3].clone().into());
-    let range_check: AB::ExprEF =
-        alpha + AB::ExprEF::from(local.range[RANGE_V_COL_IDX].clone().into());
+    // Denominators for LogUp
+    // Memory lookups: mv0 = alpha + chiplets[MEMORY_D0], mv1 = alpha + chiplets[MEMORY_D1]
+    let mv0: AB::ExprEF = alpha.clone() + local.chiplets[MEMORY_D0_IDX].clone().into();
+    let mv1: AB::ExprEF = alpha.clone() + local.chiplets[MEMORY_D1_IDX].clone().into();
+
+    // Stack lookups: sv0-sv3 = alpha + decoder helper columns
+    let sv0: AB::ExprEF = alpha.clone() + local.decoder[STACK_LOOKUP_BASE].clone().into();
+    let sv1: AB::ExprEF = alpha.clone() + local.decoder[STACK_LOOKUP_BASE + 1].clone().into();
+    let sv2: AB::ExprEF = alpha.clone() + local.decoder[STACK_LOOKUP_BASE + 2].clone().into();
+    let sv3: AB::ExprEF = alpha.clone() + local.decoder[STACK_LOOKUP_BASE + 3].clone().into();
+
+    // Range check value: alpha + range V column
+    let range_check: AB::ExprEF = alpha + local.range[RANGE_V_COL_IDX].clone().into();
 
     // Combined lookup denominators
     let memory_lookups = mv0.clone() * mv1.clone();
     let stack_lookups = sv0.clone() * sv1.clone() * sv2.clone() * sv3.clone();
     let lookups = range_check.clone() * stack_lookups.clone() * memory_lookups.clone();
 
-    // Flags (base field, then lifted to EF)
+    // Flags for conditional inclusion
     // u32_rc_op = op_bit[6] * (1 - op_bit[5]) * (1 - op_bit[4])
     let not_4: AB::Expr = AB::Expr::ONE - local.decoder[OP_BIT_4_COL_IDX].clone().into();
     let not_5: AB::Expr = AB::Expr::ONE - local.decoder[OP_BIT_5_COL_IDX].clone().into();
     let u32_rc_op: AB::Expr = local.decoder[OP_BIT_6_COL_IDX].clone().into() * not_5 * not_4;
-    let sflag_rc_mem = range_check.clone() * memory_lookups.clone() * AB::ExprEF::from(u32_rc_op);
+    let sflag_rc_mem = range_check.clone() * memory_lookups.clone() * u32_rc_op;
 
     // chiplets_memory_flag = s0 * s1 * (1 - s2)
     let s_0: AB::Expr = local.chiplets[CHIPLET_S0_IDX].clone().into();
     let s_1: AB::Expr = local.chiplets[CHIPLET_S1_IDX].clone().into();
     let s_2: AB::Expr = local.chiplets[CHIPLET_S2_IDX].clone().into();
     let chiplets_memory_flag: AB::Expr = s_0 * s_1 * (AB::Expr::ONE - s_2);
-    let mflag_rc_stack =
-        range_check * stack_lookups.clone() * AB::ExprEF::from(chiplets_memory_flag);
+    let mflag_rc_stack = range_check * stack_lookups.clone() * chiplets_memory_flag;
 
     // LogUp transition constraint terms
     let b_next_term = b_next.into() * lookups.clone();
     let b_term = b_local.into() * lookups;
-    let rc_term = stack_lookups
-        * memory_lookups
-        * AB::ExprEF::from(local.range[RANGE_M_COL_IDX].clone().into());
+    let rc_term = stack_lookups * memory_lookups * local.range[RANGE_M_COL_IDX].clone().into();
 
     // Stack lookup removal terms
     let s0_term = sflag_rc_mem.clone() * sv1.clone() * sv2.clone() * sv3.clone();
