@@ -48,7 +48,7 @@ impl ExecutionOptions {
     /// # Errors
     /// Returns an error if:
     /// - `max_cycles` is outside the valid range
-    /// - `expected_cycles` exceeds `max_cycles`
+    /// - after rounding up to the next power of two, `expected_cycles` exceeds `max_cycles`
     /// - `core_trace_fragment_size` is zero
     pub fn new(
         max_cycles: Option<u32>,
@@ -75,16 +75,16 @@ impl ExecutionOptions {
         } else {
             Self::MAX_CYCLES
         };
-        // Validate expected cycles.
+        // Round up the expected number of cycles to the next power of two. If it is smaller than
+        // MIN_TRACE_LEN -- pad expected number to it.
+        let expected_cycles = expected_cycles.next_power_of_two().max(MIN_TRACE_LEN as u32);
+        // Validate expected cycles (after rounding) against max_cycles.
         if max_cycles < expected_cycles {
             return Err(ExecutionOptionsError::ExpectedCyclesTooBig {
                 max_cycles,
                 expected_cycles,
             });
         }
-        // Round up the expected number of cycles to the next power of two. If it is smaller than
-        // MIN_TRACE_LEN -- pad expected number to it.
-        let expected_cycles = expected_cycles.next_power_of_two().max(MIN_TRACE_LEN as u32);
 
         // Validate core trace fragment size.
         if core_trace_fragment_size == 0 {
@@ -222,5 +222,23 @@ mod tests {
         // Zero should fail
         let result = ExecutionOptions::default().with_core_trace_fragment_size(0);
         assert!(matches!(result, Err(ExecutionOptionsError::CoreTraceFragmentSizeTooSmall)));
+    }
+
+    #[test]
+    fn expected_cycles_validated_after_rounding() {
+        // expected_cycles=65 rounds to 128; max_cycles=100 -> must fail (128 > 100).
+        let opts = ExecutionOptions::new(Some(100), 65, 1024, false, false);
+        assert!(matches!(
+            opts,
+            Err(ExecutionOptionsError::ExpectedCyclesTooBig {
+                max_cycles: 100,
+                expected_cycles: 128
+            })
+        ));
+
+        // expected_cycles=64 rounds to 64; max_cycles=100 -> ok.
+        let opts = ExecutionOptions::new(Some(100), 64, 1024, false, false);
+        assert!(opts.is_ok());
+        assert_eq!(opts.unwrap().expected_cycles(), 64);
     }
 }
