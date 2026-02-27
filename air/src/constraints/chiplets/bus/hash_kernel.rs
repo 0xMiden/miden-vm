@@ -20,7 +20,9 @@ use crate::{
         bus::{alphas_from_challenges, indices::B_HASH_KERNEL},
         chiplets::hasher::{flags, periodic},
         op_flags::OpFlags,
-        tagging::{TaggingAirBuilderExt, ids::TAG_HASH_KERNEL_BUS_BASE},
+        tagging::{
+            TagGroup, TaggingAirBuilderExt, ids::TAG_HASH_KERNEL_BUS_BASE, tagged_assert_zero_ext,
+        },
     },
     trace::{
         CHIPLETS_OFFSET, LOG_PRECOMPILE_LABEL,
@@ -50,6 +52,11 @@ const IDX_COL: usize = HASHER_NODE_INDEX_COL_IDX - CHIPLETS_OFFSET;
 /// Tag ID and namespace for the hash-kernel (virtual table) bus transition constraint.
 const HASH_KERNEL_BUS_ID: usize = TAG_HASH_KERNEL_BUS_BASE;
 const HASH_KERNEL_BUS_NAMESPACE: &str = "chiplets.bus.hash_kernel.transition";
+const HASH_KERNEL_BUS_NAMES: [&str; 1] = [HASH_KERNEL_BUS_NAMESPACE; 1];
+const HASH_KERNEL_BUS_TAGS: TagGroup = TagGroup {
+    base: HASH_KERNEL_BUS_ID,
+    names: &HASH_KERNEL_BUS_NAMES,
+};
 
 // ENTRY POINTS
 // ================================================================================================
@@ -66,7 +73,7 @@ pub fn enforce_hash_kernel_constraint<AB>(
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: TaggingAirBuilderExt<F = Felt>,
 {
     // =========================================================================
     // AUXILIARY TRACE ACCESS
@@ -258,11 +265,13 @@ pub fn enforce_hash_kernel_constraint<AB>(
     let p_local_ef: AB::ExprEF = p_local.into();
     let p_next_ef: AB::ExprEF = p_next.into();
 
-    builder.tagged(HASH_KERNEL_BUS_ID, HASH_KERNEL_BUS_NAMESPACE, |builder| {
-        builder
-            .when_transition()
-            .assert_zero_ext(p_next_ef * requests - p_local_ef * responses);
-    });
+    let mut idx = 0;
+    tagged_assert_zero_ext(
+        builder,
+        &HASH_KERNEL_BUS_TAGS,
+        &mut idx,
+        p_next_ef * requests - p_local_ef * responses,
+    );
 }
 
 // INTERNAL HELPERS

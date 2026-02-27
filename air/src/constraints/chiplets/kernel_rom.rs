@@ -23,10 +23,14 @@
 //! 3. First row: when entering kernel ROM, sfirst' must be 1
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::MidenAirBuilder;
 
 use super::selectors::{ace_chiplet_flag, kernel_rom_chiplet_flag};
-use crate::{Felt, MainTraceRow, constraints::tagging::TaggingAirBuilderExt};
+use crate::{
+    Felt, MainTraceRow,
+    constraints::tagging::{
+        TagGroup, TaggingAirBuilderExt, tagged_assert_zero, tagged_assert_zero_integrity,
+    },
+};
 
 // CONSTANTS
 // ================================================================================================
@@ -54,6 +58,23 @@ const KERNEL_ROM_SFIRST_NAMESPACE: &str = "chiplets.kernel_rom.sfirst.binary";
 const KERNEL_ROM_DIGEST_NAMESPACE: &str = "chiplets.kernel_rom.digest.contiguity";
 const KERNEL_ROM_FIRST_ROW_NAMESPACE: &str = "chiplets.kernel_rom.first_row.start";
 
+const KERNEL_ROM_SFIRST_NAMES: [&str; 1] = [KERNEL_ROM_SFIRST_NAMESPACE; 1];
+const KERNEL_ROM_DIGEST_NAMES: [&str; 4] = [KERNEL_ROM_DIGEST_NAMESPACE; 4];
+const KERNEL_ROM_FIRST_ROW_NAMES: [&str; 1] = [KERNEL_ROM_FIRST_ROW_NAMESPACE; 1];
+
+const KERNEL_ROM_SFIRST_TAGS: TagGroup = TagGroup {
+    base: KERNEL_ROM_SFIRST_ID,
+    names: &KERNEL_ROM_SFIRST_NAMES,
+};
+const KERNEL_ROM_DIGEST_TAGS: TagGroup = TagGroup {
+    base: KERNEL_ROM_DIGEST_BASE_ID,
+    names: &KERNEL_ROM_DIGEST_NAMES,
+};
+const KERNEL_ROM_FIRST_ROW_TAGS: TagGroup = TagGroup {
+    base: KERNEL_ROM_FIRST_ROW_ID,
+    names: &KERNEL_ROM_FIRST_ROW_NAMES,
+};
+
 // ENTRY POINTS
 // ================================================================================================
 
@@ -63,7 +84,7 @@ pub fn enforce_kernel_rom_constraints<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: TaggingAirBuilderExt<F = Felt>,
 {
     // Chiplet selector columns; kernel ROM rows are selected by (s0..s4).
     let s0: AB::Expr = local.chiplets[0].clone().into();
@@ -93,17 +114,18 @@ pub fn enforce_kernel_rom_constraints<AB>(
     let one: AB::Expr = AB::Expr::ONE;
 
     // Gate transition constraints by is_transition() to avoid last-row access.
-    let is_transition: AB::Expr = builder.is_transition();
-
     // ==========================================================================
     // SELECTOR CONSTRAINT
     // ==========================================================================
 
     // sfirst must be binary
-    builder.tagged(KERNEL_ROM_SFIRST_ID, KERNEL_ROM_SFIRST_NAMESPACE, |builder| {
-        builder
-            .assert_zero(kernel_rom_flag.clone() * sfirst.clone() * (sfirst.clone() - one.clone()));
-    });
+    let mut idx = 0;
+    tagged_assert_zero_integrity(
+        builder,
+        &KERNEL_ROM_SFIRST_TAGS,
+        &mut idx,
+        kernel_rom_flag.clone() * sfirst.clone() * (sfirst.clone() - one.clone()),
+    );
 
     // ==========================================================================
     // DIGEST CONTIGUITY CONSTRAINTS
@@ -113,19 +135,15 @@ pub fn enforce_kernel_rom_constraints<AB>(
     // the digest values must remain unchanged.
     let not_exiting = one.clone() - s4_next.clone();
     let not_new_block = one.clone() - sfirst_next.clone();
-    let contiguity_condition = is_transition.clone() * not_exiting * not_new_block;
+    let contiguity_condition = not_exiting * not_new_block;
 
     // Use a combined gate to share `kernel_rom_flag * contiguity_condition` across all 4 lanes.
     let gate = kernel_rom_flag * contiguity_condition;
-    let digest_ids: [usize; 4] = core::array::from_fn(|i| KERNEL_ROM_DIGEST_BASE_ID + i);
-    builder.tagged_list(digest_ids, KERNEL_ROM_DIGEST_NAMESPACE, |builder| {
-        builder.when(gate.clone()).assert_zeros([
-            r0_next - r0,
-            r1_next - r1,
-            r2_next - r2,
-            r3_next - r3,
-        ]);
-    });
+    let mut idx = 0;
+    tagged_assert_zero(builder, &KERNEL_ROM_DIGEST_TAGS, &mut idx, gate.clone() * (r0_next - r0));
+    tagged_assert_zero(builder, &KERNEL_ROM_DIGEST_TAGS, &mut idx, gate.clone() * (r1_next - r1));
+    tagged_assert_zero(builder, &KERNEL_ROM_DIGEST_TAGS, &mut idx, gate.clone() * (r2_next - r2));
+    tagged_assert_zero(builder, &KERNEL_ROM_DIGEST_TAGS, &mut idx, gate * (r3_next - r3));
 
     // ==========================================================================
     // FIRST ROW CONSTRAINT
@@ -134,12 +152,16 @@ pub fn enforce_kernel_rom_constraints<AB>(
     // s0..s2 are stable once 1 (selector constraints), so ACE -> kernel ROM transition is
     // determined by s3' = 1 and s4' = 0.
     let kernel_rom_next = s3_next * (one.clone() - s4_next.clone());
-    let flag_next_row_first_kernel_rom = is_transition.clone() * ace_flag * kernel_rom_next;
+    let flag_next_row_first_kernel_rom = ace_flag * kernel_rom_next;
 
     // First row of kernel ROM must have sfirst' = 1.
-    builder.tagged(KERNEL_ROM_FIRST_ROW_ID, KERNEL_ROM_FIRST_ROW_NAMESPACE, |builder| {
-        builder.assert_zero(flag_next_row_first_kernel_rom * (sfirst_next - one));
-    });
+    let mut idx = 0;
+    tagged_assert_zero(
+        builder,
+        &KERNEL_ROM_FIRST_ROW_TAGS,
+        &mut idx,
+        flag_next_row_first_kernel_rom * (sfirst_next - one),
+    );
 }
 
 // INTERNAL HELPERS
@@ -148,7 +170,7 @@ pub fn enforce_kernel_rom_constraints<AB>(
 /// Load a column from the kernel ROM section of chiplets.
 fn load_kernel_rom_col<AB>(row: &MainTraceRow<AB::Var>, col_idx: usize) -> AB::Expr
 where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: TaggingAirBuilderExt<F = Felt>,
 {
     // Kernel ROM columns start after s0, s1, s2, s3, s4 (5 selectors)
     let local_idx = KERNEL_ROM_OFFSET + col_idx;

@@ -94,3 +94,19 @@ pub fn tagged_assert_zeros_integrity<AB: TaggingAirBuilderExt, const N: usize>(
     });
     *idx += N;
 }
+
+/// Tag and assert a single extension-field constraint, advancing the per-group index.
+pub fn tagged_assert_zero_ext<AB: TaggingAirBuilderExt>(
+    builder: &mut AB,
+    group: &TagGroup,
+    idx: &mut usize,
+    expr: AB::ExprEF,
+) {
+    debug_assert!(*idx < group.names.len(), "tag index out of bounds");
+    let id = group.base + *idx;
+    let name = group.names[*idx];
+    builder.tagged(id, name, |builder| {
+        builder.when_transition().assert_zero_ext(expr);
+    });
+    *idx += 1;
+}
