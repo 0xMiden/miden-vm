@@ -11,7 +11,7 @@ use crate::{
     MainTraceRow,
     constraints::{
         op_flags::OpFlags,
-        tagging::{TAG_STACK_ARITH_BASE, TaggingAirBuilderExt},
+        tagging::{TaggingAirBuilderExt, ids::TAG_STACK_ARITH_BASE},
     },
     trace::decoder::USER_OP_HELPERS_OFFSET,
 };
