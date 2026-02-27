@@ -10,7 +10,10 @@ use crate::{
     MainTraceRow,
     constraints::{
         op_flags::OpFlags,
-        tagging::{TaggingAirBuilderExt, ids::TAG_STACK_CRYPTO_BASE},
+        tagging::{
+            TagGroup, TaggingAirBuilderExt, ids::TAG_STACK_CRYPTO_BASE, tagged_assert_zero,
+            tagged_assert_zero_integrity,
+        },
     },
     trace::decoder::USER_OP_HELPERS_OFFSET,
 };
@@ -78,6 +81,12 @@ const STACK_CRYPTO_NAMES: [&str; NUM_CONSTRAINTS] = [
     "stack.crypto.hornerext",
 ];
 
+/// Tag metadata for this constraint group.
+const STACK_CRYPTO_TAGS: TagGroup = TagGroup {
+    base: STACK_CRYPTO_BASE_ID,
+    names: &STACK_CRYPTO_NAMES,
+};
+
 // ENTRY POINTS
 // ================================================================================================
 
@@ -115,43 +124,43 @@ fn enforce_cryptostream_constraints<AB>(
     let eight: AB::Expr = AB::Expr::from_u16(8);
     let gate = op_flags.cryptostream();
 
-    emit(
+    assert_zero(
         builder,
         idx,
         gate.clone() * (next.stack[8].clone().into() - local.stack[8].clone().into()),
     );
-    emit(
+    assert_zero(
         builder,
         idx,
         gate.clone() * (next.stack[9].clone().into() - local.stack[9].clone().into()),
     );
-    emit(
+    assert_zero(
         builder,
         idx,
         gate.clone() * (next.stack[10].clone().into() - local.stack[10].clone().into()),
     );
-    emit(
+    assert_zero(
         builder,
         idx,
         gate.clone() * (next.stack[11].clone().into() - local.stack[11].clone().into()),
     );
-    emit(
+    assert_zero(
         builder,
         idx,
         gate.clone()
             * (next.stack[12].clone().into() - (local.stack[12].clone().into() + eight.clone())),
     );
-    emit(
+    assert_zero(
         builder,
         idx,
         gate.clone() * (next.stack[13].clone().into() - (local.stack[13].clone().into() + eight)),
     );
-    emit(
+    assert_zero(
         builder,
         idx,
         gate.clone() * (next.stack[14].clone().into() - local.stack[14].clone().into()),
     );
-    emit(
+    assert_zero(
         builder,
         idx,
         gate * (next.stack[15].clone().into() - local.stack[15].clone().into()),
@@ -177,7 +186,7 @@ fn enforce_hornerbase_constraints<AB>(
 
     // The lower 14 stack registers remain unchanged during HORNERBASE.
     for i in 0..14 {
-        emit(
+        assert_zero(
             builder,
             idx,
             gate.clone() * (next.stack[i].clone().into() - local.stack[i].clone().into()),
@@ -283,12 +292,12 @@ fn enforce_hornerbase_constraints<AB>(
         + c5.clone() * alpha_sq_1
         + c6 * a1;
 
-    emit_integrity(builder, idx, gate.clone() * (tmp0_0 - expected_tmp0_0));
-    emit_integrity(builder, idx, gate.clone() * (tmp0_1 - expected_tmp0_1));
-    emit_integrity(builder, idx, gate.clone() * (tmp1_0 - expected_tmp1_0));
-    emit_integrity(builder, idx, gate.clone() * (tmp1_1 - expected_tmp1_1));
-    emit(builder, idx, gate.clone() * (acc0_next - expected_acc0));
-    emit(builder, idx, gate * (acc1_next - expected_acc1));
+    assert_zero_integrity(builder, idx, gate.clone() * (tmp0_0 - expected_tmp0_0));
+    assert_zero_integrity(builder, idx, gate.clone() * (tmp0_1 - expected_tmp0_1));
+    assert_zero_integrity(builder, idx, gate.clone() * (tmp1_0 - expected_tmp1_0));
+    assert_zero_integrity(builder, idx, gate.clone() * (tmp1_1 - expected_tmp1_1));
+    assert_zero(builder, idx, gate.clone() * (acc0_next - expected_acc0));
+    assert_zero(builder, idx, gate * (acc1_next - expected_acc1));
 }
 
 fn enforce_hornerext_constraints<AB>(
@@ -308,7 +317,7 @@ fn enforce_hornerext_constraints<AB>(
 
     // The lower 14 stack registers are unchanged by HORNEREXT.
     for i in 0..14 {
-        emit(
+        assert_zero(
             builder,
             idx,
             gate.clone() * (next.stack[i].clone().into() - local.stack[i].clone().into()),
@@ -387,30 +396,20 @@ fn enforce_hornerext_constraints<AB>(
         + c2_0.clone() * a1
         + c3_1;
 
-    emit_integrity(builder, idx, gate.clone() * (tmp0 - expected_tmp0));
-    emit_integrity(builder, idx, gate.clone() * (tmp1 - expected_tmp1));
-    emit(builder, idx, gate.clone() * (acc0_next - expected_acc0));
-    emit(builder, idx, gate * (acc1_next - expected_acc1));
+    assert_zero_integrity(builder, idx, gate.clone() * (tmp0 - expected_tmp0));
+    assert_zero_integrity(builder, idx, gate.clone() * (tmp1 - expected_tmp1));
+    assert_zero(builder, idx, gate.clone() * (acc0_next - expected_acc0));
+    assert_zero(builder, idx, gate * (acc1_next - expected_acc1));
 }
 
-fn emit<AB: MidenAirBuilder>(builder: &mut AB, idx: &mut usize, expr: AB::Expr) {
-    // Each call emits one tagged transition constraint and advances the tag index.
-    // The order of calls must match STACK_CRYPTO_NAMES so ids and names stay aligned.
-    let id = STACK_CRYPTO_BASE_ID + *idx;
-    let name = STACK_CRYPTO_NAMES[*idx];
-    builder.tagged(id, name, |builder| {
-        builder.when_transition().assert_zero(expr);
-    });
-    *idx += 1;
+fn assert_zero<AB: TaggingAirBuilderExt>(builder: &mut AB, idx: &mut usize, expr: AB::Expr) {
+    tagged_assert_zero(builder, &STACK_CRYPTO_TAGS, idx, expr);
 }
 
-fn emit_integrity<AB: MidenAirBuilder>(builder: &mut AB, idx: &mut usize, expr: AB::Expr) {
-    // Each call emits one tagged integrity constraint and advances the tag index.
-    // The order of calls must match STACK_CRYPTO_NAMES so ids and names stay aligned.
-    let id = STACK_CRYPTO_BASE_ID + *idx;
-    let name = STACK_CRYPTO_NAMES[*idx];
-    builder.tagged(id, name, |builder| {
-        builder.assert_zero(expr);
-    });
-    *idx += 1;
+fn assert_zero_integrity<AB: TaggingAirBuilderExt>(
+    builder: &mut AB,
+    idx: &mut usize,
+    expr: AB::Expr,
+) {
+    tagged_assert_zero_integrity(builder, &STACK_CRYPTO_TAGS, idx, expr);
 }
