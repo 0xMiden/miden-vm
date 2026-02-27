@@ -18,7 +18,7 @@
 
 use alloc::vec::Vec;
 
-use miden_core::{chiplets::hasher::Hasher, field::PrimeCharacteristicRing};
+use miden_core::chiplets::hasher::Hasher;
 
 use crate::Felt;
 

@@ -3,6 +3,8 @@
 //! This module dispatches to the full tagging implementation in test/`testing` builds
 //! and a no-op fallback in production/no-std builds.
 
+use miden_crypto::stark::air::MidenAirBuilder;
+
 pub mod ids;
 
 #[cfg(all(any(test, feature = "testing"), feature = "std"))]

@@ -6,11 +6,10 @@ use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
-use crate::constraints::chiplets::hasher::periodic;
 use miden_crypto::stark::{air::MidenAirBuilder, matrix::RowMajorMatrix};
 
-use super::{ids::TAG_TOTAL_COUNT, state};
-use crate::constraints::chiplets::hasher::periodic;
+use super::state;
+use crate::constraints::{chiplets::hasher::periodic, tagging::ids::TAG_TOTAL_COUNT};
 
 /// Captured evaluation for a single tagged constraint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -259,10 +258,12 @@ mod tests {
     use miden_crypto::stark::air::MidenAir;
 
     use super::{
-        super::fixtures::{OOD_SEED, active_expected_ood_evals},
+        super::{
+            fixtures::{OOD_SEED, active_expected_ood_evals},
+            ids::TAG_TOTAL_COUNT,
+        },
         EvalRecord, OodEvalAirBuilder,
     };
-    use super::ids::TAG_TOTAL_COUNT;
     use crate::ProcessorAir;
 
     fn run_group_parity_test(expected: Vec<EvalRecord>) {
