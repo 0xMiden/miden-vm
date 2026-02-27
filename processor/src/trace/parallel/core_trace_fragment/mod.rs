@@ -39,10 +39,13 @@ impl BasicBlockContext {
     pub(crate) fn new_at_batch_start(
         basic_block_node: &BasicBlockNode,
         batch_index: usize,
-    ) -> Self {
-        let current_batch = &basic_block_node.op_batches()[batch_index];
+    ) -> Result<Self, OperationError> {
+        let current_batch = basic_block_node
+            .op_batches()
+            .get(batch_index)
+            .ok_or(OperationError::Internal("batch index out of bounds"))?;
 
-        Self {
+        Ok(Self {
             current_op_group: current_batch.groups()[0],
             group_count_in_block: Felt::new(
                 basic_block_node
@@ -52,7 +55,7 @@ impl BasicBlockContext {
                     .map(|batch| batch.num_groups())
                     .sum::<usize>() as u64,
             ),
-        }
+        })
     }
 
     /// Given that a trace fragment can start executing from the middle of a basic block, we need to
@@ -72,7 +75,10 @@ impl BasicBlockContext {
         op_idx_in_batch: usize,
     ) -> Result<Self, OperationError> {
         let op_batches = basic_block_node.op_batches();
-        let (current_op_group_idx, op_idx_in_group) = op_batches[batch_index]
+        let current_batch = op_batches
+            .get(batch_index)
+            .ok_or(OperationError::Internal("batch index out of bounds"))?;
+        let (current_op_group_idx, op_idx_in_group) = current_batch
             .op_idx_in_batch_to_group(op_idx_in_batch)
             .ok_or(OperationError::Internal("invalid op index in batch"))?;
 
@@ -82,7 +88,10 @@ impl BasicBlockContext {
             // padding at the end of the batch), and hence not encoded in the basic
             // block directly. But since NOOP's opcode is 0, this works out correctly
             // (since empty groups are also represented by 0).
-            let current_op_group = op_batches[batch_index].groups()[current_op_group_idx];
+            let current_op_group = *current_batch
+                .groups()
+                .get(current_op_group_idx)
+                .ok_or(OperationError::Internal("op group index out of bounds"))?;
 
             // Shift out all operations that are already executed in this group.
             //
@@ -107,8 +116,11 @@ impl BasicBlockContext {
             {
                 // Note: This is a hacky way of doing this because `OpBatch` doesn't store the
                 // information of which operation belongs to which group.
-                let mut current_op_group =
-                    op_batches[batch_index].groups()[current_op_group_idx].as_canonical_u64();
+                let mut current_op_group = current_batch
+                    .groups()
+                    .get(current_op_group_idx)
+                    .ok_or(OperationError::Internal("op group index out of bounds"))?
+                    .as_canonical_u64();
                 for _ in 0..op_idx_in_group {
                     let current_op = (current_op_group & 0b1111111) as u8;
                     if current_op == OPCODE_PUSH {
@@ -124,7 +136,10 @@ impl BasicBlockContext {
             // *after* being done with the current group)
             groups_consumed += current_op_group_idx + 1;
 
-            Felt::from_u32((total_groups - groups_consumed) as u32)
+            let groups_left = total_groups
+                .checked_sub(groups_consumed)
+                .ok_or(OperationError::Internal("groups consumed exceeds total groups"))?;
+            Felt::from_u32(groups_left as u32)
         };
 
         Ok(Self { current_op_group, group_count_in_block })

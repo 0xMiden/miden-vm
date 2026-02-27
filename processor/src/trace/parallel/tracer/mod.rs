@@ -372,7 +372,13 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
 
                     if loop_condition {
                         // Loop body is about to be re-executed, so fill in a REPEAT row.
-                        let loop_node = get_node_in_forest(current_forest, *node_id)?.unwrap_loop();
+                        let MastNode::Loop(loop_node) =
+                            get_node_in_forest(current_forest, *node_id)?
+                        else {
+                            return Err(ExecutionError::Internal(
+                                "expected loop node in FinishLoop continuation",
+                            ));
+                        };
                         let current_addr = self.decoder_state.current_addr;
 
                         self.fill_loop_repeat_trace_row(
@@ -401,8 +407,13 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
                     self.fill_end_trace_row(&processor.system, &processor.stack, node.digest())?;
                 },
                 ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
-                    let basic_block_node =
-                        get_node_in_forest(current_forest, *node_id)?.unwrap_basic_block();
+                    let MastNode::Block(basic_block_node) =
+                        get_node_in_forest(current_forest, *node_id)?
+                    else {
+                        return Err(ExecutionError::Internal(
+                            "expected basic block node in ResumeBasicBlock continuation",
+                        ));
+                    };
 
                     let mut basic_block_context = BasicBlockContext::new_at_op(
                         basic_block_node,
@@ -410,8 +421,14 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
                         *op_idx_in_batch,
                     )
                     .map_exec_err_no_ctx()?;
-                    let current_batch = &basic_block_node.op_batches()[*batch_index];
-                    let operation = current_batch.ops()[*op_idx_in_batch];
+                    let current_batch = basic_block_node
+                        .op_batches()
+                        .get(*batch_index)
+                        .ok_or(ExecutionError::Internal("batch index out of bounds"))?;
+                    let operation = *current_batch
+                        .ops()
+                        .get(*op_idx_in_batch)
+                        .ok_or(ExecutionError::Internal("op index in batch out of bounds"))?;
                     let (_, op_idx_in_group) = current_batch
                         .op_idx_in_batch_to_group(*op_idx_in_batch)
                         .ok_or(ExecutionError::Internal("invalid op index in batch"))?;
@@ -426,23 +443,37 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
                     );
                 },
                 Respan { node_id, batch_index } => {
-                    let basic_block_node =
-                        get_node_in_forest(current_forest, *node_id)?.unwrap_basic_block();
+                    let MastNode::Block(basic_block_node) =
+                        get_node_in_forest(current_forest, *node_id)?
+                    else {
+                        return Err(ExecutionError::Internal(
+                            "expected basic block node in Respan continuation",
+                        ));
+                    };
 
                     let mut basic_block_context =
-                        BasicBlockContext::new_at_batch_start(basic_block_node, *batch_index);
-                    let current_batch = &basic_block_node.op_batches()[*batch_index];
+                        BasicBlockContext::new_at_batch_start(basic_block_node, *batch_index)
+                            .map_exec_err_no_ctx()?;
+                    let current_batch = basic_block_node
+                        .op_batches()
+                        .get(*batch_index)
+                        .ok_or(ExecutionError::Internal("batch index out of bounds"))?;
 
                     self.fill_respan_trace_row(
                         &processor.system,
                         &processor.stack,
                         current_batch,
                         &mut basic_block_context,
-                    );
+                    )?;
                 },
                 FinishBasicBlock(node_id) => {
-                    let basic_block_node =
-                        get_node_in_forest(current_forest, *node_id)?.unwrap_basic_block();
+                    let MastNode::Block(basic_block_node) =
+                        get_node_in_forest(current_forest, *node_id)?
+                    else {
+                        return Err(ExecutionError::Internal(
+                            "expected basic block node in FinishBasicBlock continuation",
+                        ));
+                    };
 
                     self.fill_basic_block_end_trace_row(
                         &processor.system,

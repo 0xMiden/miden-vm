@@ -18,7 +18,7 @@ use miden_air::{
 use miden_core::{
     ONE, Word, ZERO,
     field::batch_inversion_allow_zeros,
-    mast::MastForest,
+    mast::{MastForest, MastNode},
     operations::Operation,
     program::{Kernel, MIN_STACK_DEPTH, ProgramInfo},
     utils::{ColMatrix, uninit_vector},
@@ -471,7 +471,15 @@ fn initialize_chiplets(
                 let _ = chiplets.hasher.hash_control_block(h1, h2, domain, expected_hash);
             },
             HasherOp::HashBasicBlock((forest, node_id, expected_hash)) => {
-                let op_batches = forest[node_id].unwrap_basic_block().op_batches();
+                let node = forest
+                    .get_node_by_id(node_id)
+                    .ok_or(ExecutionError::Internal("invalid node ID in hasher replay"))?;
+                let MastNode::Block(basic_block_node) = node else {
+                    return Err(ExecutionError::Internal(
+                        "expected basic block node in hasher replay",
+                    ));
+                };
+                let op_batches = basic_block_node.op_batches();
                 let _ = chiplets.hasher.hash_basic_block(op_batches, expected_hash);
             },
             HasherOp::BuildMerkleRoot((value, path, index)) => {

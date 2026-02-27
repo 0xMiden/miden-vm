@@ -74,7 +74,7 @@ impl DecoderRow {
         op_batch: &OpBatch,
         addr: Felt,
         group_count: Felt,
-    ) -> Self {
+    ) -> Result<Self, ExecutionError> {
         debug_assert!(
             operation == Operation::Span || operation == Operation::Respan,
             "operation must be SPAN or RESPAN"
@@ -85,15 +85,15 @@ impl DecoderRow {
             op_batch.groups()[4..8].try_into().expect("slice with incorrect length"),
         );
 
-        Self {
+        Ok(Self {
             opcode: operation.op_code(),
             hasher_state,
             addr,
             in_basic_block: false,
             group_count,
             op_index: ZERO,
-            op_batch_flags: get_op_batch_flags(group_count),
-        }
+            op_batch_flags: get_op_batch_flags(group_count)?,
+        })
     }
 
     /// Creates a new `DecoderRow` for an operation within a basic block.
@@ -155,7 +155,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
             first_op_batch,
             self.decoder_state.parent_addr,
             group_count_for_block,
-        );
+        )?;
         self.fill_trace_row(system, stack, decoder_row);
         Ok(())
     }
@@ -197,7 +197,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         stack: &StackState,
         op_batch: &OpBatch,
         basic_block_context: &mut BasicBlockContext,
-    ) {
+    ) -> Result<(), ExecutionError> {
         // Add RESPAN trace row
         {
             let decoder_row = DecoderRow::new_basic_block_batch(
@@ -205,7 +205,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
                 op_batch,
                 self.decoder_state.current_addr,
                 basic_block_context.group_count_in_block,
-            );
+            )?;
             self.fill_trace_row(system, stack, decoder_row);
         }
 
@@ -215,6 +215,8 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         // Update basic block context
         basic_block_context.group_count_in_block -= ONE;
         basic_block_context.current_op_group = op_batch.groups()[0];
+
+        Ok(())
     }
 
     /// Writes a trace row for an operation within a basic block.
@@ -595,7 +597,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
 // ===============================================================================================
 
 /// Returns op batch flags for the specified group count.
-fn get_op_batch_flags(num_groups_left: Felt) -> [Felt; 3] {
+fn get_op_batch_flags(num_groups_left: Felt) -> Result<[Felt; 3], ExecutionError> {
     use miden_air::trace::decoder::{
         OP_BATCH_1_GROUPS, OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS,
     };
@@ -603,10 +605,12 @@ fn get_op_batch_flags(num_groups_left: Felt) -> [Felt; 3] {
 
     let num_groups = core::cmp::min(num_groups_left.as_canonical_u64() as usize, OP_BATCH_SIZE);
     match num_groups {
-        8 => OP_BATCH_8_GROUPS,
-        4 => OP_BATCH_4_GROUPS,
-        2 => OP_BATCH_2_GROUPS,
-        1 => OP_BATCH_1_GROUPS,
-        _ => panic!("invalid number of groups in a batch: {num_groups}, must be 1, 2, 4, or 8"),
+        8 => Ok(OP_BATCH_8_GROUPS),
+        4 => Ok(OP_BATCH_4_GROUPS),
+        2 => Ok(OP_BATCH_2_GROUPS),
+        1 => Ok(OP_BATCH_1_GROUPS),
+        _ => Err(ExecutionError::Internal(
+            "invalid number of groups in a batch, must be 1, 2, 4, or 8",
+        )),
     }
 }
