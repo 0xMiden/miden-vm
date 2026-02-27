@@ -199,12 +199,7 @@ pub fn enforce_bitwise_constraints<AB>(
     let gate_first = k_first.clone() * bitwise_flag.clone();
     let mut idx = 0;
     for expr in [cols.a.clone() - a_agg, cols.b.clone() - b_agg, cols.prev_output.clone()] {
-        tagged_assert_zero_integrity(
-            builder,
-            &FIRST_ROW_TAGS,
-            &mut idx,
-            gate_first.clone() * expr,
-        );
+        tagged_assert_zero_integrity(builder, &FIRST_ROW_TAGS, &mut idx, gate_first.clone() * expr);
     }
 
     // Transition rows (k1=1): a' = 16*a + agg(a'_bits), b' = 16*b + agg(b'_bits)
