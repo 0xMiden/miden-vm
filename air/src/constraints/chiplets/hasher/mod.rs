@@ -42,7 +42,7 @@ pub use periodic::{STATE_WIDTH, periodic_columns};
 
 use crate::{
     Felt, MainTraceRow,
-    constraints::tagging::ids::TAG_CHIPLETS_BASE,
+    constraints::tagging::{TaggingAirBuilderExt, ids::TAG_CHIPLETS_BASE},
     trace::{
         CHIPLETS_OFFSET,
         chiplets::{HASHER_NODE_INDEX_COL_IDX, HASHER_SELECTOR_COL_RANGE, HASHER_STATE_COL_RANGE},
@@ -175,18 +175,17 @@ impl<E: Clone> HasherColumns<E> {
     }
 }
 
-struct HasherContext<AB: MidenAirBuilder<F = Felt>> {
+struct HasherContext<AB: TaggingAirBuilderExt<F = Felt>> {
     pub cols: HasherColumns<AB::Expr>,
     pub cols_next: HasherColumns<AB::Expr>,
     pub flags: HasherFlags<AB::Expr>,
     pub hasher_flag: AB::Expr,
-    pub transition_flag: AB::Expr,
     pub periodic: [AB::PeriodicVal; periodic::NUM_PERIODIC_COLUMNS],
 }
 
 impl<AB> HasherContext<AB>
 where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: TaggingAirBuilderExt<F = Felt>,
 {
     pub fn new(
         builder: &mut AB,
@@ -203,8 +202,6 @@ where
         };
 
         let hasher_flag: AB::Expr = AB::Expr::ONE - local.chiplets[0].clone().into();
-        let transition_flag = hasher_flag.clone() * builder.is_transition();
-
         let cols: HasherColumns<AB::Expr> = HasherColumns::from_row(local);
         let cols_next: HasherColumns<AB::Expr> = HasherColumns::from_row(next);
         let flags = compute_hasher_flags::<AB>(&periodic, &cols, &cols_next);
@@ -214,7 +211,6 @@ where
             cols_next,
             flags,
             hasher_flag,
-            transition_flag,
             periodic,
         }
     }
@@ -239,7 +235,7 @@ pub fn enforce_hasher_constraints<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: TaggingAirBuilderExt<F = Felt>,
 {
     let ctx = HasherContext::<AB>::new(builder, local, next);
 
@@ -248,7 +244,7 @@ pub fn enforce_hasher_constraints<AB>(
     let cols_var: HasherColumns<AB::Var> = HasherColumns::<AB::Var>::from_row(local);
     selectors::enforce_selector_booleanity(
         builder,
-        ctx.transition_flag.clone(),
+        ctx.hasher_flag.clone(),
         cols_var.s0,
         cols_var.s1,
         cols_var.s2,
@@ -266,12 +262,12 @@ pub fn enforce_hasher_constraints<AB>(
 /// Delegates to [`state::enforce_permutation_steps`] with proper column extraction.
 fn enforce_permutation<AB>(builder: &mut AB, ctx: &HasherContext<AB>)
 where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: TaggingAirBuilderExt<F = Felt>,
 {
     // Enforce permutation steps
     state::enforce_permutation_steps(
         builder,
-        ctx.transition_flag.clone(),
+        ctx.hasher_flag.clone(),
         &ctx.cols.state,
         &ctx.cols_next.state,
         &ctx.periodic,
@@ -283,11 +279,10 @@ where
 /// Delegates to [`selectors::enforce_selector_consistency`] with proper column extraction.
 fn enforce_selector_consistency<AB>(builder: &mut AB, ctx: &HasherContext<AB>)
 where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: TaggingAirBuilderExt<F = Felt>,
 {
     selectors::enforce_selector_consistency(
         builder,
-        ctx.transition_flag.clone(),
         ctx.hasher_flag.clone(),
         &ctx.cols,
         &ctx.cols_next,
@@ -298,11 +293,11 @@ where
 /// Enforce ABP capacity preservation on row 31 of the cycle.
 fn enforce_abp_capacity<AB>(builder: &mut AB, ctx: &HasherContext<AB>)
 where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: TaggingAirBuilderExt<F = Felt>,
 {
     state::enforce_abp_capacity_preservation(
         builder,
-        ctx.transition_flag.clone(),
+        ctx.hasher_flag.clone(),
         ctx.flags.f_abp.clone(),
         &ctx.cols.capacity(),
         &ctx.cols_next.capacity(),
@@ -314,13 +309,12 @@ where
 /// Delegates to [`merkle`] module functions for index and state constraints.
 fn enforce_merkle_constraints<AB>(builder: &mut AB, ctx: &HasherContext<AB>)
 where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: TaggingAirBuilderExt<F = Felt>,
 {
     // Node index constraints
     merkle::enforce_node_index_constraints(
         builder,
         ctx.hasher_flag.clone(),
-        ctx.transition_flag.clone(),
         &ctx.cols,
         &ctx.cols_next,
         &ctx.flags,
@@ -329,7 +323,7 @@ where
     // Merkle absorb state constraints
     merkle::enforce_merkle_absorb_state(
         builder,
-        ctx.transition_flag.clone(),
+        ctx.hasher_flag.clone(),
         &ctx.cols,
         &ctx.cols_next,
         &ctx.flags,
