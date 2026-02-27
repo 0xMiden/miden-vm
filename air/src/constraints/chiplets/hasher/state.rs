@@ -21,7 +21,10 @@ use miden_crypto::stark::air::MidenAirBuilder;
 use super::periodic::{
     P_ARK_EXT_START, P_ARK_INT, P_CYCLE_ROW_0, P_IS_EXTERNAL, P_IS_INTERNAL, STATE_WIDTH,
 };
-use crate::{Felt, constraints::tagging::TaggingAirBuilderExt};
+use crate::{
+    Felt,
+    constraints::tagging::{TagGroup, TaggingAirBuilderExt, tagged_assert_zeros},
+};
 
 // TAGGING NAMESPACES
 // ================================================================================================
@@ -30,6 +33,28 @@ const PERM_INIT_NAMESPACE: &str = "chiplets.hasher.permutation.init";
 const PERM_EXT_NAMESPACE: &str = "chiplets.hasher.permutation.external";
 const PERM_INT_NAMESPACE: &str = "chiplets.hasher.permutation.internal";
 const ABP_CAP_NAMESPACE: &str = "chiplets.hasher.abp.capacity";
+
+const PERM_INIT_NAMES: [&str; STATE_WIDTH] = [PERM_INIT_NAMESPACE; STATE_WIDTH];
+const PERM_EXT_NAMES: [&str; STATE_WIDTH] = [PERM_EXT_NAMESPACE; STATE_WIDTH];
+const PERM_INT_NAMES: [&str; STATE_WIDTH] = [PERM_INT_NAMESPACE; STATE_WIDTH];
+const ABP_CAP_NAMES: [&str; 4] = [ABP_CAP_NAMESPACE; 4];
+
+const PERM_INIT_TAGS: TagGroup = TagGroup {
+    base: super::HASHER_PERM_INIT_BASE_ID,
+    names: &PERM_INIT_NAMES,
+};
+const PERM_EXT_TAGS: TagGroup = TagGroup {
+    base: super::HASHER_PERM_EXT_BASE_ID,
+    names: &PERM_EXT_NAMES,
+};
+const PERM_INT_TAGS: TagGroup = TagGroup {
+    base: super::HASHER_PERM_INT_BASE_ID,
+    names: &PERM_INT_NAMES,
+};
+const ABP_CAP_TAGS: TagGroup = TagGroup {
+    base: super::HASHER_ABP_BASE_ID,
+    names: &ABP_CAP_NAMES,
+};
 
 // CONSTRAINT HELPERS
 // ================================================================================================
@@ -44,12 +69,12 @@ const ABP_CAP_NAMESPACE: &str = "chiplets.hasher.abp.capacity";
 /// 4. **Boundary (row 31)**: No constraint
 pub fn enforce_permutation_steps<AB>(
     builder: &mut AB,
-    step_gate: AB::Expr,
+    hasher_flag: AB::Expr,
     h: &[AB::Expr; STATE_WIDTH],
     h_next: &[AB::Expr; STATE_WIDTH],
     periodic: &[AB::PeriodicVal],
 ) where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: TaggingAirBuilderExt<F = Felt>,
 {
     // Cycle markers and step selectors
     let cycle_row_0: AB::Expr = periodic[P_CYCLE_ROW_0].into();
@@ -87,42 +112,42 @@ pub fn enforce_permutation_steps<AB>(
     // Enforce step constraints
     // -------------------------------------------------------------------------
 
-    // Use combined gates to share `step_gate * step_type` across all lanes.
-    let gate_init = step_gate.clone() * is_init_linear;
-    let init_ids: [usize; STATE_WIDTH] =
-        core::array::from_fn(|i| super::HASHER_PERM_INIT_BASE_ID + i);
+    // Use combined gates to share `hasher_flag * step_type` across all lanes.
+    let gate_init = hasher_flag.clone() * is_init_linear;
+    let mut idx = 0;
+    tagged_assert_zeros(
+        builder,
+        &PERM_INIT_TAGS,
+        &mut idx,
+        PERM_INIT_NAMESPACE,
+        core::array::from_fn::<_, STATE_WIDTH, _>(|i| {
+            gate_init.clone() * (h_next[i].clone() - expected_init[i].clone())
+        }),
+    );
 
-    builder.tagged_list(init_ids, PERM_INIT_NAMESPACE, |builder| {
-        builder
-            .when(gate_init)
-            .assert_zeros(core::array::from_fn::<_, STATE_WIDTH, _>(|i| {
-                h_next[i].clone() - expected_init[i].clone()
-            }));
-    });
+    let gate_ext = hasher_flag.clone() * is_external;
+    let mut idx = 0;
+    tagged_assert_zeros(
+        builder,
+        &PERM_EXT_TAGS,
+        &mut idx,
+        PERM_EXT_NAMESPACE,
+        core::array::from_fn::<_, STATE_WIDTH, _>(|i| {
+            gate_ext.clone() * (h_next[i].clone() - expected_ext[i].clone())
+        }),
+    );
 
-    let gate_ext = step_gate.clone() * is_external;
-    let ext_ids: [usize; STATE_WIDTH] =
-        core::array::from_fn(|i| super::HASHER_PERM_EXT_BASE_ID + i);
-
-    builder.tagged_list(ext_ids, PERM_EXT_NAMESPACE, |builder| {
-        builder
-            .when(gate_ext)
-            .assert_zeros(core::array::from_fn::<_, STATE_WIDTH, _>(|i| {
-                h_next[i].clone() - expected_ext[i].clone()
-            }));
-    });
-
-    let gate_int = step_gate * is_internal;
-    let int_ids: [usize; STATE_WIDTH] =
-        core::array::from_fn(|i| super::HASHER_PERM_INT_BASE_ID + i);
-
-    builder.tagged_list(int_ids, PERM_INT_NAMESPACE, |builder| {
-        builder
-            .when(gate_int)
-            .assert_zeros(core::array::from_fn::<_, STATE_WIDTH, _>(|i| {
-                h_next[i].clone() - expected_int[i].clone()
-            }));
-    });
+    let gate_int = hasher_flag * is_internal;
+    let mut idx = 0;
+    tagged_assert_zeros(
+        builder,
+        &PERM_INT_TAGS,
+        &mut idx,
+        PERM_INT_NAMESPACE,
+        core::array::from_fn::<_, STATE_WIDTH, _>(|i| {
+            gate_int.clone() * (h_next[i].clone() - expected_int[i].clone())
+        }),
+    );
 }
 
 /// Enforces ABP capacity preservation constraint.
@@ -131,21 +156,25 @@ pub fn enforce_permutation_steps<AB>(
 /// the capacity portion `h[8..12]` is preserved unchanged.
 pub fn enforce_abp_capacity_preservation<AB>(
     builder: &mut AB,
-    transition_flag: AB::Expr,
+    hasher_flag: AB::Expr,
     f_abp: AB::Expr,
     h_cap: &[AB::Expr; 4],
     h_cap_next: &[AB::Expr; 4],
 ) where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: TaggingAirBuilderExt<F = Felt>,
 {
-    // Use a combined gate to share `transition_flag * f_abp` across all 4 lanes.
-    let gate = transition_flag * f_abp;
-    let abp_ids: [usize; 4] = core::array::from_fn(|i| super::HASHER_ABP_BASE_ID + i);
-    builder.tagged_list(abp_ids, ABP_CAP_NAMESPACE, |builder| {
-        builder.when(gate).assert_zeros(core::array::from_fn::<_, 4, _>(|i| {
-            h_cap_next[i].clone() - h_cap[i].clone()
-        }));
-    });
+    // Use a combined gate to share `hasher_flag * f_abp` across all 4 lanes.
+    let gate = hasher_flag * f_abp;
+    let mut idx = 0;
+    tagged_assert_zeros(
+        builder,
+        &ABP_CAP_TAGS,
+        &mut idx,
+        ABP_CAP_NAMESPACE,
+        core::array::from_fn::<_, 4, _>(|i| {
+            gate.clone() * (h_cap_next[i].clone() - h_cap[i].clone())
+        }),
+    );
 }
 
 // =============================================================================
