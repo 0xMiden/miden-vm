@@ -121,3 +121,15 @@ impl StringTableBuilder {
         StringTable::new(self.table, self.strings_data)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_str_offset_out_of_bounds() {
+        let table = StringTable::new(vec![99], vec![1, 2, 3]);
+        let result = table.read_arc_str(0);
+        assert!(matches!(result, Err(DeserializationError::InvalidValue(_))));
+    }
+}

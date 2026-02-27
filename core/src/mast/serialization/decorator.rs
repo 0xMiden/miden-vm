@@ -267,3 +267,20 @@ impl DecoratorDataBuilder {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_decorator_data_offset_out_of_bounds() {
+        let info = DecoratorInfo {
+            variant: EncodedDecoratorVariant::DebugOptionsStackTop,
+            decorator_data_offset: 99,
+        };
+        let data: Vec<u8> = vec![1, 2, 3];
+        let string_table = StringTable::new(vec![], vec![]);
+        let result = info.try_into_decorator(&string_table, &data);
+        assert!(matches!(result, Err(DeserializationError::InvalidValue(_))));
+    }
+}
