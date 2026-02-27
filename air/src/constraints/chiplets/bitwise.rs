@@ -24,7 +24,6 @@
 use alloc::vec::Vec;
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::MidenAirBuilder;
 
 // CONSTANTS
 // ================================================================================================
@@ -32,7 +31,7 @@ use super::hasher::periodic::NUM_PERIODIC_COLUMNS as HASHER_NUM_PERIODIC_COLUMNS
 use super::selectors::bitwise_chiplet_flag;
 use crate::{
     Felt, MainTraceRow,
-    constraints::tagging::TaggingAirBuilderExt,
+    constraints::tagging::{TagGroup, TaggingAirBuilderExt, tagged_assert_zero_integrity},
     trace::{
         CHIPLETS_OFFSET,
         chiplets::{
@@ -57,7 +56,6 @@ const NUM_BITS_PER_ROW: usize = 4;
 
 const BITWISE_BASE_ID: usize = super::hasher::HASHER_MERKLE_ABSORB_BASE_ID + 12;
 const BITWISE_OP_BINARY_ID: usize = BITWISE_BASE_ID;
-const BITWISE_OP_STABILITY_ID: usize = BITWISE_BASE_ID + 1;
 const BITWISE_A_BITS_BINARY_BASE_ID: usize = BITWISE_BASE_ID + 2;
 const BITWISE_B_BITS_BINARY_BASE_ID: usize = BITWISE_A_BITS_BINARY_BASE_ID + NUM_BITS_PER_ROW;
 const BITWISE_FIRST_ROW_BASE_ID: usize = BITWISE_B_BITS_BINARY_BASE_ID + NUM_BITS_PER_ROW;
@@ -74,6 +72,43 @@ const INPUT_TRANSITION_NAMESPACE: &str = "chiplets.bitwise.input.transition";
 const OUTPUT_PREV_NAMESPACE: &str = "chiplets.bitwise.output.prev";
 const OUTPUT_AGG_NAMESPACE: &str = "chiplets.bitwise.output.aggregate";
 
+const OP_NAMES: [&str; 2] = [OP_BINARY_NAMESPACE, OP_STABILITY_NAMESPACE];
+const A_BITS_NAMES: [&str; NUM_BITS_PER_ROW] = [A_BITS_BINARY_NAMESPACE; NUM_BITS_PER_ROW];
+const B_BITS_NAMES: [&str; NUM_BITS_PER_ROW] = [B_BITS_BINARY_NAMESPACE; NUM_BITS_PER_ROW];
+const FIRST_ROW_NAMES: [&str; 3] = [FIRST_ROW_NAMESPACE; 3];
+const INPUT_TRANSITION_NAMES: [&str; 2] = [INPUT_TRANSITION_NAMESPACE; 2];
+const OUTPUT_PREV_NAMES: [&str; 1] = [OUTPUT_PREV_NAMESPACE; 1];
+const OUTPUT_AGG_NAMES: [&str; 1] = [OUTPUT_AGG_NAMESPACE; 1];
+
+const OP_TAGS: TagGroup = TagGroup {
+    base: BITWISE_OP_BINARY_ID,
+    names: &OP_NAMES,
+};
+const A_BITS_TAGS: TagGroup = TagGroup {
+    base: BITWISE_A_BITS_BINARY_BASE_ID,
+    names: &A_BITS_NAMES,
+};
+const B_BITS_TAGS: TagGroup = TagGroup {
+    base: BITWISE_B_BITS_BINARY_BASE_ID,
+    names: &B_BITS_NAMES,
+};
+const FIRST_ROW_TAGS: TagGroup = TagGroup {
+    base: BITWISE_FIRST_ROW_BASE_ID,
+    names: &FIRST_ROW_NAMES,
+};
+const INPUT_TRANSITION_TAGS: TagGroup = TagGroup {
+    base: BITWISE_INPUT_TRANSITION_BASE_ID,
+    names: &INPUT_TRANSITION_NAMES,
+};
+const OUTPUT_PREV_TAGS: TagGroup = TagGroup {
+    base: BITWISE_OUTPUT_PREV_ID,
+    names: &OUTPUT_PREV_NAMES,
+};
+const OUTPUT_AGG_TAGS: TagGroup = TagGroup {
+    base: BITWISE_OUTPUT_AGG_ID,
+    names: &OUTPUT_AGG_NAMES,
+};
+
 // ENTRY POINTS
 // ================================================================================================
 
@@ -88,7 +123,7 @@ pub fn enforce_bitwise_constraints<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: TaggingAirBuilderExt<F = Felt>,
 {
     let (k_first, k_transition) = {
         // Clone out what we need to avoid holding a borrow of `builder` while asserting
@@ -115,19 +150,22 @@ pub fn enforce_bitwise_constraints<AB>(
     // ==========================================================================
 
     // op_flag must be binary (0 for AND, 1 for XOR)
-    builder.tagged(BITWISE_OP_BINARY_ID, OP_BINARY_NAMESPACE, |builder| {
-        builder.assert_zero(
-            bitwise_flag.clone() * cols.op_flag.clone() * (cols.op_flag.clone() - one.clone()),
-        );
-    });
+    let mut idx = 0;
+    tagged_assert_zero_integrity(
+        builder,
+        &OP_TAGS,
+        &mut idx,
+        bitwise_flag.clone() * cols.op_flag.clone() * (cols.op_flag.clone() - one.clone()),
+    );
 
     // op_flag must remain constant within the 8-row cycle (can only change when k1=0)
     let gate_transition = k_transition.clone() * bitwise_flag.clone();
-    builder.tagged(BITWISE_OP_STABILITY_ID, OP_STABILITY_NAMESPACE, |builder| {
-        builder
-            .when(gate_transition.clone())
-            .assert_zero(cols.op_flag.clone() - cols_next.op_flag.clone());
-    });
+    tagged_assert_zero_integrity(
+        builder,
+        &OP_TAGS,
+        &mut idx,
+        gate_transition.clone() * (cols.op_flag.clone() - cols_next.op_flag.clone()),
+    );
 
     // ==========================================================================
     // INPUT DECOMPOSITION CONSTRAINTS
@@ -135,56 +173,68 @@ pub fn enforce_bitwise_constraints<AB>(
 
     // Bit decomposition columns must be binary
     let gate = bitwise_flag.clone();
-    let a_bits_ids: [usize; NUM_BITS_PER_ROW] =
-        core::array::from_fn(|i| BITWISE_A_BITS_BINARY_BASE_ID + i);
-    builder.tagged_list(a_bits_ids, A_BITS_BINARY_NAMESPACE, |builder| {
-        builder.assert_zeros(core::array::from_fn::<_, NUM_BITS_PER_ROW, _>(|i| {
-            gate.clone() * cols.a_bits[i].clone() * (cols.a_bits[i].clone() - one.clone())
-        }));
-    });
+    let mut idx = 0;
+    for i in 0..NUM_BITS_PER_ROW {
+        tagged_assert_zero_integrity(
+            builder,
+            &A_BITS_TAGS,
+            &mut idx,
+            gate.clone() * cols.a_bits[i].clone() * (cols.a_bits[i].clone() - one.clone()),
+        );
+    }
 
-    let b_bits_ids: [usize; NUM_BITS_PER_ROW] =
-        core::array::from_fn(|i| BITWISE_B_BITS_BINARY_BASE_ID + i);
-    builder.tagged_list(b_bits_ids, B_BITS_BINARY_NAMESPACE, |builder| {
-        builder.assert_zeros(core::array::from_fn::<_, NUM_BITS_PER_ROW, _>(|i| {
-            gate.clone() * cols.b_bits[i].clone() * (cols.b_bits[i].clone() - one.clone())
-        }));
-    });
+    let mut idx = 0;
+    for i in 0..NUM_BITS_PER_ROW {
+        tagged_assert_zero_integrity(
+            builder,
+            &B_BITS_TAGS,
+            &mut idx,
+            gate.clone() * cols.b_bits[i].clone() * (cols.b_bits[i].clone() - one.clone()),
+        );
+    }
 
     // First row of cycle (k0=1): a = aggregated bits, b = aggregated bits
     let a_agg = aggregate_limbs(&cols.a_bits);
     let b_agg = aggregate_limbs(&cols.b_bits);
     let gate_first = k_first.clone() * bitwise_flag.clone();
-    let first_row_ids: [usize; 3] = core::array::from_fn(|i| BITWISE_FIRST_ROW_BASE_ID + i);
-    builder.tagged_list(first_row_ids, FIRST_ROW_NAMESPACE, |builder| {
-        builder.when(gate_first).assert_zeros([
-            cols.a.clone() - a_agg,
-            cols.b.clone() - b_agg,
-            cols.prev_output.clone(),
-        ]);
-    });
+    let mut idx = 0;
+    for expr in [cols.a.clone() - a_agg, cols.b.clone() - b_agg, cols.prev_output.clone()] {
+        tagged_assert_zero_integrity(
+            builder,
+            &FIRST_ROW_TAGS,
+            &mut idx,
+            gate_first.clone() * expr,
+        );
+    }
 
     // Transition rows (k1=1): a' = 16*a + agg(a'_bits), b' = 16*b + agg(b'_bits)
     let a_agg_next = aggregate_limbs(&cols_next.a_bits);
     let b_agg_next = aggregate_limbs(&cols_next.b_bits);
-    let transition_ids: [usize; 2] = core::array::from_fn(|i| BITWISE_INPUT_TRANSITION_BASE_ID + i);
-    builder.tagged_list(transition_ids, INPUT_TRANSITION_NAMESPACE, |builder| {
-        builder.when(gate_transition.clone()).assert_zeros([
-            cols_next.a.clone() - (cols.a.clone() * sixteen.clone() + a_agg_next),
-            cols_next.b.clone() - (cols.b.clone() * sixteen.clone() + b_agg_next),
-        ]);
-    });
+    let mut idx = 0;
+    for expr in [
+        cols_next.a.clone() - (cols.a.clone() * sixteen.clone() + a_agg_next),
+        cols_next.b.clone() - (cols.b.clone() * sixteen.clone() + b_agg_next),
+    ] {
+        tagged_assert_zero_integrity(
+            builder,
+            &INPUT_TRANSITION_TAGS,
+            &mut idx,
+            gate_transition.clone() * expr,
+        );
+    }
 
     // ==========================================================================
     // OUTPUT AGGREGATION CONSTRAINTS
     // ==========================================================================
 
     // Transition rows (k1=1): output_prev' = output
-    builder.tagged(BITWISE_OUTPUT_PREV_ID, OUTPUT_PREV_NAMESPACE, |builder| {
-        builder
-            .when(gate_transition)
-            .assert_zero(cols_next.prev_output.clone() - cols.output.clone());
-    });
+    let mut idx = 0;
+    tagged_assert_zero_integrity(
+        builder,
+        &OUTPUT_PREV_TAGS,
+        &mut idx,
+        gate_transition * (cols_next.prev_output.clone() - cols.output.clone()),
+    );
 
     // Every row: output = 16*output_prev + bitwise_result
     let a_and_b = compute_limb_and(&cols.a_bits, &cols.b_bits);
@@ -196,9 +246,13 @@ pub fn enforce_bitwise_constraints<AB>(
         + a_and_b.clone()
         + cols.op_flag.clone() * (a_xor_b.clone() - a_and_b);
 
-    builder.tagged(BITWISE_OUTPUT_AGG_ID, OUTPUT_AGG_NAMESPACE, |builder| {
-        builder.assert_zero(bitwise_flag * (cols.output.clone() - expected_z));
-    });
+    let mut idx = 0;
+    tagged_assert_zero_integrity(
+        builder,
+        &OUTPUT_AGG_TAGS,
+        &mut idx,
+        bitwise_flag * (cols.output.clone() - expected_z),
+    );
 }
 
 // INTERNAL HELPERS
