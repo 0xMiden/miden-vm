@@ -19,10 +19,15 @@
 //! | MUA  | Merkle Update Absorb | Absorb next sibling (new path) |
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::MidenAirBuilder;
 
 use super::{HasherColumns, HasherFlags};
-use crate::{Felt, constraints::tagging::TaggingAirBuilderExt};
+use crate::{
+    Felt,
+    constraints::tagging::{
+        TagGroup, TaggingAirBuilderExt, tagged_assert_zero, tagged_assert_zero_integrity,
+        tagged_assert_zeros,
+    },
+};
 
 // TAGGING NAMESPACES
 // ================================================================================================
@@ -32,6 +37,37 @@ const MERKLE_INDEX_STABILITY_NAMESPACE: &str = "chiplets.hasher.merkle.index.sta
 const MERKLE_CAP_NAMESPACE: &str = "chiplets.hasher.merkle.capacity";
 const MERKLE_RATE0_NAMESPACE: &str = "chiplets.hasher.merkle.digest.rate0";
 const MERKLE_RATE1_NAMESPACE: &str = "chiplets.hasher.merkle.digest.rate1";
+
+const OUTPUT_INDEX_NAMES: [&str; 1] = [super::OUTPUT_INDEX_NAMESPACE];
+const MERKLE_INDEX_NAMES: [&str; 2] =
+    [MERKLE_INDEX_BINARY_NAMESPACE, MERKLE_INDEX_STABILITY_NAMESPACE];
+const MERKLE_ABSORB_NAMES: [&str; 12] = [
+    MERKLE_CAP_NAMESPACE,
+    MERKLE_CAP_NAMESPACE,
+    MERKLE_CAP_NAMESPACE,
+    MERKLE_CAP_NAMESPACE,
+    MERKLE_RATE0_NAMESPACE,
+    MERKLE_RATE0_NAMESPACE,
+    MERKLE_RATE0_NAMESPACE,
+    MERKLE_RATE0_NAMESPACE,
+    MERKLE_RATE1_NAMESPACE,
+    MERKLE_RATE1_NAMESPACE,
+    MERKLE_RATE1_NAMESPACE,
+    MERKLE_RATE1_NAMESPACE,
+];
+
+const OUTPUT_INDEX_TAGS: TagGroup = TagGroup {
+    base: super::HASHER_OUTPUT_IDX_ID,
+    names: &OUTPUT_INDEX_NAMES,
+};
+const MERKLE_INDEX_TAGS: TagGroup = TagGroup {
+    base: super::HASHER_MERKLE_INDEX_BASE_ID,
+    names: &MERKLE_INDEX_NAMES,
+};
+const MERKLE_ABSORB_TAGS: TagGroup = TagGroup {
+    base: super::HASHER_MERKLE_ABSORB_BASE_ID,
+    names: &MERKLE_ABSORB_NAMES,
+};
 
 // CONSTRAINT HELPERS
 // ================================================================================================
@@ -51,12 +87,11 @@ const MERKLE_RATE1_NAMESPACE: &str = "chiplets.hasher.merkle.digest.rate1";
 pub(super) fn enforce_node_index_constraints<AB>(
     builder: &mut AB,
     hasher_flag: AB::Expr,
-    transition_flag: AB::Expr,
     cols: &HasherColumns<AB::Expr>,
     cols_next: &HasherColumns<AB::Expr>,
     flags: &HasherFlags<AB::Expr>,
 ) where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: TaggingAirBuilderExt<F = Felt>,
 {
     let one: AB::Expr = AB::Expr::ONE;
 
@@ -65,9 +100,13 @@ pub(super) fn enforce_node_index_constraints<AB>(
     // -------------------------------------------------------------------------
 
     // Constraint 1: Index must be 0 on output rows.
-    builder.tagged(super::HASHER_OUTPUT_IDX_ID, super::OUTPUT_INDEX_NAMESPACE, |builder| {
-        builder.assert_zero(hasher_flag * flags.f_out.clone() * cols.node_index.clone());
-    });
+    let mut idx = 0;
+    tagged_assert_zero_integrity(
+        builder,
+        &OUTPUT_INDEX_TAGS,
+        &mut idx,
+        hasher_flag.clone() * flags.f_out.clone() * cols.node_index.clone(),
+    );
 
     // -------------------------------------------------------------------------
     // Index Shift Constraint
@@ -81,11 +120,9 @@ pub(super) fn enforce_node_index_constraints<AB>(
     let b = cols.node_index.clone() - AB::Expr::TWO * cols_next.node_index.clone();
 
     // Constraint 2: b must be binary when shifting (b^2 - b = 0)
-    builder.tagged(super::HASHER_MERKLE_INDEX_BASE_ID, MERKLE_INDEX_BINARY_NAMESPACE, |builder| {
-        builder
-            .when(transition_flag.clone())
-            .assert_zero(f_shift.clone() * (b.square() - b.clone()));
-    });
+    let gate = hasher_flag.clone() * f_shift.clone();
+    let mut idx = 0;
+    tagged_assert_zero(builder, &MERKLE_INDEX_TAGS, &mut idx, gate * (b.square() - b.clone()));
 
     // -------------------------------------------------------------------------
     // Index Stability Constraint
@@ -94,14 +131,12 @@ pub(super) fn enforce_node_index_constraints<AB>(
     // Constraint 3: Index unchanged when not shifting or outputting
     // keep = 1 - f_out - f_shift
     let keep = one.clone() - f_out - f_shift;
-    builder.tagged(
-        super::HASHER_MERKLE_INDEX_BASE_ID + 1,
-        MERKLE_INDEX_STABILITY_NAMESPACE,
-        |builder| {
-            builder
-                .when(transition_flag.clone())
-                .assert_zero(keep * (cols_next.node_index.clone() - cols.node_index.clone()));
-        },
+    let gate = hasher_flag.clone() * keep;
+    tagged_assert_zero(
+        builder,
+        &MERKLE_INDEX_TAGS,
+        &mut idx,
+        gate * (cols_next.node_index.clone() - cols.node_index.clone()),
     );
 }
 
@@ -118,12 +153,12 @@ pub(super) fn enforce_node_index_constraints<AB>(
 /// - If `b=1`: digest goes to rate1 (`h'[4..8] = h[0..4]`), sibling to rate0 (witness)
 pub(super) fn enforce_merkle_absorb_state<AB>(
     builder: &mut AB,
-    transition_flag: AB::Expr,
+    hasher_flag: AB::Expr,
     cols: &HasherColumns<AB::Expr>,
     cols_next: &HasherColumns<AB::Expr>,
     flags: &HasherFlags<AB::Expr>,
 ) where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: TaggingAirBuilderExt<F = Felt>,
 {
     let one: AB::Expr = AB::Expr::ONE;
     let f_absorb = flags.f_merkle_absorb();
@@ -141,14 +176,16 @@ pub(super) fn enforce_merkle_absorb_state<AB>(
     // -------------------------------------------------------------------------
 
     // Constraint 1: Capacity reset to zero (batched).
-    // Use a combined gate to share `transition_flag * f_absorb` across all 4 lanes.
-    let gate_absorb = transition_flag.clone() * f_absorb.clone();
-    let cap_ids: [usize; 4] = core::array::from_fn(|i| super::HASHER_MERKLE_ABSORB_BASE_ID + i);
-    builder.tagged_list(cap_ids, MERKLE_CAP_NAMESPACE, |builder| {
-        builder
-            .when(gate_absorb)
-            .assert_zeros(core::array::from_fn::<_, 4, _>(|i| cap_next[i].clone()));
-    });
+    // Use a combined gate to share `hasher_flag * f_absorb` across all 4 lanes.
+    let gate_absorb = hasher_flag.clone() * f_absorb.clone();
+    let mut idx = 0;
+    tagged_assert_zeros(
+        builder,
+        &MERKLE_ABSORB_TAGS,
+        &mut idx,
+        MERKLE_CAP_NAMESPACE,
+        core::array::from_fn::<_, 4, _>(|i| gate_absorb.clone() * cap_next[i].clone()),
+    );
 
     // -------------------------------------------------------------------------
     // Digest Placement Constraints
@@ -156,23 +193,27 @@ pub(super) fn enforce_merkle_absorb_state<AB>(
 
     // Constraint 2: If b=0, digest goes to rate0 (h'[0..4] = h[0..4])
     let f_b0 = f_absorb.clone() * (one.clone() - b.clone());
-    let gate_b0 = transition_flag.clone() * f_b0;
-    let rate0_ids: [usize; 4] =
-        core::array::from_fn(|i| super::HASHER_MERKLE_ABSORB_BASE_ID + 4 + i);
-    builder.tagged_list(rate0_ids, MERKLE_RATE0_NAMESPACE, |builder| {
-        builder.when(gate_b0).assert_zeros(core::array::from_fn::<_, 4, _>(|i| {
-            rate0_next[i].clone() - digest[i].clone()
-        }));
-    });
+    let gate_b0 = hasher_flag.clone() * f_b0;
+    tagged_assert_zeros(
+        builder,
+        &MERKLE_ABSORB_TAGS,
+        &mut idx,
+        MERKLE_RATE0_NAMESPACE,
+        core::array::from_fn::<_, 4, _>(|i| {
+            gate_b0.clone() * (rate0_next[i].clone() - digest[i].clone())
+        }),
+    );
 
     // Constraint 3: If b=1, digest goes to rate1 (h'[4..8] = h[0..4])
     let f_b1 = f_absorb * b;
-    let gate_b1 = transition_flag * f_b1;
-    let rate1_ids: [usize; 4] =
-        core::array::from_fn(|i| super::HASHER_MERKLE_ABSORB_BASE_ID + 8 + i);
-    builder.tagged_list(rate1_ids, MERKLE_RATE1_NAMESPACE, |builder| {
-        builder.when(gate_b1).assert_zeros(core::array::from_fn::<_, 4, _>(|i| {
-            rate1_next[i].clone() - digest[i].clone()
-        }));
-    });
+    let gate_b1 = hasher_flag * f_b1;
+    tagged_assert_zeros(
+        builder,
+        &MERKLE_ABSORB_TAGS,
+        &mut idx,
+        MERKLE_RATE1_NAMESPACE,
+        core::array::from_fn::<_, 4, _>(|i| {
+            gate_b1.clone() * (rate1_next[i].clone() - digest[i].clone())
+        }),
+    );
 }
