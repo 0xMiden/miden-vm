@@ -321,7 +321,12 @@ where
         )?,
 
         // ----- cryptographic operations -----------------------------------------------------
-        Operation::HPerm => crypto_ops::op_hperm(processor, tracer),
+        Operation::HPerm => crypto_ops::op_hperm(processor, tracer).map_exec_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            op_idx,
+        )?,
         Operation::MpVerify(err_code) => {
             crypto_ops::op_mpverify(processor, *err_code, current_forest, tracer)
                 .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?
@@ -347,7 +352,8 @@ where
             )?;
             OperationHelperRegisters::Empty
         },
-        Operation::LogPrecompile => crypto_ops::op_log_precompile(processor, tracer),
+        Operation::LogPrecompile => crypto_ops::op_log_precompile(processor, tracer)
+            .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?,
         Operation::CryptoStream => crypto_ops::op_crypto_stream(processor, tracer)
             .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?,
     };

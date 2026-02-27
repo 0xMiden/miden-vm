@@ -40,7 +40,7 @@ mod tests;
 pub(super) fn op_hperm<P: Processor, T: Tracer>(
     processor: &mut P,
     tracer: &mut T,
-) -> OperationHelperRegisters {
+) -> Result<OperationHelperRegisters, OperationError> {
     // Build sponge state from stack: state[i] = stack.get(i)
     // Read first 8 elements using get_double_word, then remaining 4 elements
     let double_word: [Felt; 8] = processor.stack().get_double_word(0);
@@ -61,7 +61,7 @@ pub(super) fn op_hperm<P: Processor, T: Tracer>(
     ];
 
     // Apply Poseidon2 permutation
-    let (addr, output_state) = processor.hasher().permute(input_state);
+    let (addr, output_state) = processor.hasher().permute(input_state)?;
 
     // Write result back to stack (state[0] at top).
     let r0: Word = output_state[STATE_RATE_0_RANGE].try_into().expect("r0 slice has length 4");
@@ -72,7 +72,7 @@ pub(super) fn op_hperm<P: Processor, T: Tracer>(
     processor.stack_mut().set_word(8, &cap);
 
     tracer.record_hasher_permute(input_state, output_state);
-    OperationHelperRegisters::HPerm { addr }
+    Ok(OperationHelperRegisters::HPerm { addr })
 }
 
 /// Verifies that a Merkle path from the specified node resolves to the specified root. The
@@ -463,7 +463,7 @@ pub(super) fn op_horner_eval_ext<P: Processor, T: Tracer>(
 pub(super) fn op_log_precompile<P: Processor, T: Tracer>(
     processor: &mut P,
     tracer: &mut T,
-) -> OperationHelperRegisters {
+) -> Result<OperationHelperRegisters, OperationError> {
     // Read COMM and TAG from the stack
     let comm: Word = processor.stack().get_word(0);
     let tag: Word = processor.stack().get_word(4);
@@ -479,7 +479,7 @@ pub(super) fn op_log_precompile<P: Processor, T: Tracer>(
     hasher_state[STATE_CAP_RANGE].copy_from_slice(cap_prev.as_slice());
 
     // Perform the Poseidon2 permutation
-    let (addr, output_state) = processor.hasher().permute(hasher_state);
+    let (addr, output_state) = processor.hasher().permute(hasher_state)?;
 
     // Extract R0, R1 and CAP_NEXT from the output state
     let r0: Word = output_state[STATE_RATE_0_RANGE.clone()]
@@ -504,7 +504,7 @@ pub(super) fn op_log_precompile<P: Processor, T: Tracer>(
     tracer.record_hasher_permute(hasher_state, output_state);
 
     // Return helper registers containing the hasher address and CAP_PREV
-    OperationHelperRegisters::LogPrecompile { addr, cap_prev }
+    Ok(OperationHelperRegisters::LogPrecompile { addr, cap_prev })
 }
 
 // STREAM CIPHER OPERATION

@@ -346,7 +346,7 @@ pub(crate) trait HasherInterface {
     ///
     /// The address is only needed for operation helpers in trace generation, and thus an
     /// implementation might choose to return a default/invalid address if it is not needed.
-    fn permute(&mut self, state: HasherState) -> (Felt, HasherState);
+    fn permute(&mut self, state: HasherState) -> Result<(Felt, HasherState), OperationError>;
 
     /// Verifies that the `claimed_root` is indeed the root of a Merkle tree containing `value` at
     /// the specified `index`.

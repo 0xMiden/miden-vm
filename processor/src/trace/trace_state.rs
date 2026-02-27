@@ -936,31 +936,30 @@ impl HasherResponseReplay {
     // --------------------------------------------------------------------------------------------
 
     /// Replays a `Hasher::permute` operation, returning its address and result
-    pub fn replay_permute(&mut self) -> Result<(Felt, [Felt; 12]), ExecutionError> {
+    pub fn replay_permute(&mut self) -> Result<(Felt, [Felt; 12]), OperationError> {
         self.permutation_operations
             .pop_front()
-            .ok_or(ExecutionError::Internal("no permutation operations recorded"))
+            .ok_or(OperationError::Internal("no permutation operations recorded"))
     }
 
     /// Replays a Merkle path verification, returning the pre-recorded address and computed root
-    pub fn replay_build_merkle_root(&mut self) -> Result<(Felt, Word), ExecutionError> {
+    pub fn replay_build_merkle_root(&mut self) -> Result<(Felt, Word), OperationError> {
         self.build_merkle_root_operations
             .pop_front()
-            .ok_or(ExecutionError::Internal("no build merkle root operations recorded"))
+            .ok_or(OperationError::Internal("no build merkle root operations recorded"))
     }
 
     /// Replays a Merkle root update, returning the pre-recorded address, old root, and new root
-    pub fn replay_update_merkle_root(&mut self) -> Result<(Felt, Word, Word), ExecutionError> {
+    pub fn replay_update_merkle_root(&mut self) -> Result<(Felt, Word, Word), OperationError> {
         self.mrupdate_operations
             .pop_front()
-            .ok_or(ExecutionError::Internal("no mrupdate operations recorded"))
+            .ok_or(OperationError::Internal("no mrupdate operations recorded"))
     }
 }
 
 impl HasherInterface for HasherResponseReplay {
-    fn permute(&mut self, _state: HasherState) -> (Felt, HasherState) {
+    fn permute(&mut self, _state: HasherState) -> Result<(Felt, HasherState), OperationError> {
         self.replay_permute()
-            .expect("invalid trace generation context: no permutation operations recorded")
     }
 
     fn verify_merkle_root(
@@ -971,9 +970,7 @@ impl HasherInterface for HasherResponseReplay {
         _index: Felt,
         on_err: impl FnOnce() -> OperationError,
     ) -> Result<Felt, OperationError> {
-        let (addr, computed_root) = self
-            .replay_build_merkle_root()
-            .expect("invalid trace generation context: no build merkle root operations recorded");
+        let (addr, computed_root) = self.replay_build_merkle_root()?;
         if claimed_root == computed_root {
             Ok(addr)
         } else {
@@ -992,9 +989,7 @@ impl HasherInterface for HasherResponseReplay {
         _index: Felt,
         on_err: impl FnOnce() -> OperationError,
     ) -> Result<(Felt, Word), OperationError> {
-        let (address, old_root, new_root) = self
-            .replay_update_merkle_root()
-            .expect("invalid trace generation context: no mrupdate operations recorded");
+        let (address, old_root, new_root) = self.replay_update_merkle_root()?;
 
         if claimed_old_root == old_root {
             Ok((address, new_root))

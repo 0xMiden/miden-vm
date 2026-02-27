@@ -326,6 +326,8 @@ pub enum OperationError {
     NotU32Values { values: Vec<Felt> },
     #[error("syscall failed: procedure with root {proc_root} was not found in the kernel")]
     SyscallTargetNotInKernel { proc_root: Word },
+    #[error("failed to execute the operation for internal reason: {0}")]
+    Internal(&'static str),
 }
 
 impl OperationError {
