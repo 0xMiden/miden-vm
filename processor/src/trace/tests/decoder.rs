@@ -357,8 +357,8 @@ fn decoder_p2_span_with_respan() {
     let row_values =
         [BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&alphas)];
 
-    // make sure the first entry is initialized to program hash
-    let mut expected_value = row_values[0];
+    // p2 starts at identity (no init seeding); program hash binding is checked via aux_finals.
+    let mut expected_value = ONE;
     assert_eq!(expected_value, p2[0]);
 
     // as operations inside the span execute (including RESPAN), the table is not affected
@@ -368,9 +368,10 @@ fn decoder_p2_span_with_respan() {
 
     // at cycle 22, the END operation is executed and the table is cleared
     expected_value *= row_values[0].inverse();
-    assert_eq!(expected_value, ONE);
+    let final_expected = row_values[0].inverse();
+    assert_eq!(expected_value, final_expected);
     for i in 22..(p2.len()) {
-        assert_eq!(ONE, p2[i]);
+        assert_eq!(final_expected, p2[i]);
     }
 }
 
@@ -407,8 +408,8 @@ fn decoder_p2_join() {
         BlockHashTableRow::new_test(ONE, basic_block_2.digest(), false, false).collapse(&alphas),
     ];
 
-    // make sure the first entry is initialized to program hash
-    let mut expected_value = row_values[0];
+    // p2 starts at identity (no init seeding); program hash binding is checked via aux_finals.
+    let mut expected_value = ONE;
     assert_eq!(expected_value, p2[0]);
 
     // when JOIN operation is executed, entries for both children are added to the table
@@ -435,10 +436,11 @@ fn decoder_p2_join() {
     expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, p2[8]);
 
-    // at this point the table should be empty, and thus, all subsequent values must be ONE
-    assert_eq!(expected_value, ONE);
+    // the final value encodes the missing program hash init: 1/program_hash_msg
+    let final_expected = row_values[0].inverse();
+    assert_eq!(expected_value, final_expected);
     for i in 9..(p2.len()) {
-        assert_eq!(ONE, p2[i]);
+        assert_eq!(final_expected, p2[i]);
     }
 }
 
@@ -474,8 +476,8 @@ fn decoder_p2_split_true() {
         BlockHashTableRow::new_test(ONE, basic_block_1.digest(), false, false).collapse(&alphas),
     ];
 
-    // make sure the first entry is initialized to program hash
-    let mut expected_value = row_values[0];
+    // p2 starts at identity (no init seeding); program hash binding is checked via aux_finals.
+    let mut expected_value = ONE;
     assert_eq!(expected_value, p2[0]);
 
     // when SPLIT operation is executed, entry for the true branch is added to the table
@@ -494,10 +496,11 @@ fn decoder_p2_split_true() {
     expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, p2[5]);
 
-    // at this point the table should be empty, and thus, all subsequent values must be ONE
-    assert_eq!(expected_value, ONE);
+    // the final value encodes the missing program hash init: 1/program_hash_msg
+    let final_expected = row_values[0].inverse();
+    assert_eq!(expected_value, final_expected);
     for i in 6..(p2.len()) {
-        assert_eq!(ONE, p2[i]);
+        assert_eq!(final_expected, p2[i]);
     }
 }
 
@@ -534,8 +537,8 @@ fn decoder_p2_split_false() {
         BlockHashTableRow::new_test(ONE, basic_block_2.digest(), false, false).collapse(&alphas),
     ];
 
-    // make sure the first entry is initialized to program hash
-    let mut expected_value = row_values[0];
+    // p2 starts at identity (no init seeding); program hash binding is checked via aux_finals.
+    let mut expected_value = ONE;
     assert_eq!(expected_value, p2[0]);
 
     // when SPLIT operation is executed, entry for the false branch is added to the table
@@ -554,10 +557,11 @@ fn decoder_p2_split_false() {
     expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, p2[5]);
 
-    // at this point the table should be empty, and thus, all subsequent values must be ONE
-    assert_eq!(expected_value, ONE);
+    // the final value encodes the missing program hash init: 1/program_hash_msg
+    let final_expected = row_values[0].inverse();
+    assert_eq!(expected_value, final_expected);
     for i in 6..(p2.len()) {
-        assert_eq!(ONE, p2[i]);
+        assert_eq!(final_expected, p2[i]);
     }
 }
 
@@ -606,8 +610,8 @@ fn decoder_p2_loop_with_repeat() {
         BlockHashTableRow::new_test(a_129, basic_block_2.digest(), false, false).collapse(&alphas),
     ];
 
-    // make sure the first entry is initialized to program hash
-    let mut expected_value = row_values[0];
+    // p2 starts at identity (no init seeding); program hash binding is checked via aux_finals.
+    let mut expected_value = ONE;
     assert_eq!(expected_value, p2[0]);
 
     // --- first iteration ----------------------------------------------------
@@ -674,10 +678,11 @@ fn decoder_p2_loop_with_repeat() {
     expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, p2[19]);
 
-    // at this point the table should be empty, and thus, all subsequent values must be ONE
-    assert_eq!(expected_value, ONE);
+    // the final value encodes the missing program hash init: 1/program_hash_msg
+    let final_expected = row_values[0].inverse();
+    assert_eq!(expected_value, final_expected);
     for i in 20..(p2.len()) {
-        assert_eq!(ONE, p2[i]);
+        assert_eq!(final_expected, p2[i]);
     }
 }
 

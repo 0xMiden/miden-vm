@@ -7,7 +7,7 @@ use tracing::instrument;
 
 use crate::{
     Felt,
-    field::{ExtensionField, PrimeCharacteristicRing},
+    field::ExtensionField,
     utils::{ColMatrix, Matrix, RowMajorMatrix},
 };
 

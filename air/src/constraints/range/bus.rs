@@ -14,9 +14,8 @@
 //! responses come from the range table (V column with multiplicity).
 
 use miden_core::field::PrimeCharacteristicRing;
-use p3_air::ExtensionBuilder;
 use p3_matrix::Matrix;
-use p3_miden_lifted_air::LiftedAirBuilder;
+use p3_miden_lifted_air::{ExtensionBuilder, LiftedAirBuilder};
 
 use crate::{
     MainTraceRow,
@@ -48,18 +47,10 @@ const RANGE_V_COL_IDX: usize = range::V_COL_IDX - RANGE_CHECK_TRACE_OFFSET;
 /// Enforces the range checker bus constraint for LogUp checks.
 ///
 /// This constraint tracks range check requests from other components (stack and memory)
-/// using the LogUp protocol. The bus accumulator b_range must start and end at 0,
-/// and transition according to the LogUp update rule.
-///
-/// ## Constraint Degree
+/// using the LogUp protocol. The expected final value is enforced via aux-finals; this
+/// function enforces only transitions.
 ///
 /// This is a degree-9 constraint.
-///
-/// ## Lookups
-///
-/// - Stack lookups (4): decoder helper columns (USER_OP_HELPERS_OFFSET..+4)
-/// - Memory lookups (2): memory delta limbs (MEMORY_D0, MEMORY_D1)
-/// - Range response: range V column with multiplicity range M column
 pub fn enforce_bus<AB>(builder: &mut AB, local: &MainTraceRow<AB::Var>)
 where
     AB: LiftedAirBuilder,
@@ -82,10 +73,6 @@ where
         let alpha: AB::ExprEF = challenges[0].into();
         (b_local, b_next, alpha)
     };
-
-    // Boundary constraints: b_range must start and end at 0
-    builder.when_first_row().assert_zero_ext(b_local.into());
-    builder.when_last_row().assert_zero_ext(b_local.into());
 
     // LogUp denominators: alpha + <trace column>
     let mv0: AB::ExprEF =

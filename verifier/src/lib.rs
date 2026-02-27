@@ -7,7 +7,7 @@ extern crate std;
 
 use alloc::{string::String, vec::Vec};
 
-use miden_air::{ProcessorAir, PublicInputs, config};
+use miden_air::{Felt, ProcessorAir, PublicInputs, config};
 
 // RE-EXPORTS
 // ================================================================================================
@@ -132,29 +132,65 @@ fn verify_stark(
     proof_bytes: Vec<u8>,
 ) -> Result<(), VerificationError> {
     let program_hash = *program_info.program_hash();
+
     let pub_inputs =
         PublicInputs::new(program_info, stack_inputs, stack_outputs, pc_transcript_state);
-    let public_values = pub_inputs.to_elements();
-    let air = ProcessorAir::new();
+    let (public_values, kernel_digests) = pub_inputs.to_air_inputs();
+
+    // Build var-len public inputs from kernel digests.
+    let kernel_group_refs: Vec<&[Felt]> = kernel_digests.iter().map(|d| d.as_slice()).collect();
+    let var_len_public_inputs: [&[&[Felt]]; 1] = [&kernel_group_refs];
+
+    let air = ProcessorAir;
     let log_height = log_trace_height as usize;
     let err = |reason| VerificationError::ProgramVerificationError { program_hash, reason };
 
     match hash_fn {
-        HashFunction::Blake3_256 => config::create_blake3_256_config()
-            .verify(&air, log_height, &public_values, &proof_bytes)
-            .map_err(err),
-        HashFunction::Rpo256 => config::create_rpo_config()
-            .verify(&air, log_height, &public_values, &proof_bytes)
-            .map_err(err),
-        HashFunction::Rpx256 => config::create_rpx_config()
-            .verify(&air, log_height, &public_values, &proof_bytes)
-            .map_err(err),
-        HashFunction::Poseidon2 => config::create_poseidon2_config()
-            .verify(&air, log_height, &public_values, &proof_bytes)
-            .map_err(err),
-        HashFunction::Keccak => config::create_keccak_config()
-            .verify(&air, log_height, &public_values, &proof_bytes)
-            .map_err(err),
+        HashFunction::Blake3_256 => config::verify(
+            &config::create_blake3_256_config(),
+            &air,
+            log_height,
+            &public_values,
+            &var_len_public_inputs,
+            &proof_bytes,
+        )
+        .map_err(err),
+        HashFunction::Rpo256 => config::verify(
+            &config::create_rpo_config(),
+            &air,
+            log_height,
+            &public_values,
+            &var_len_public_inputs,
+            &proof_bytes,
+        )
+        .map_err(err),
+        HashFunction::Rpx256 => config::verify(
+            &config::create_rpx_config(),
+            &air,
+            log_height,
+            &public_values,
+            &var_len_public_inputs,
+            &proof_bytes,
+        )
+        .map_err(err),
+        HashFunction::Poseidon2 => config::verify(
+            &config::create_poseidon2_config(),
+            &air,
+            log_height,
+            &public_values,
+            &var_len_public_inputs,
+            &proof_bytes,
+        )
+        .map_err(err),
+        HashFunction::Keccak => config::verify(
+            &config::create_keccak_config(),
+            &air,
+            log_height,
+            &public_values,
+            &var_len_public_inputs,
+            &proof_bytes,
+        )
+        .map_err(err),
     }
 }
 

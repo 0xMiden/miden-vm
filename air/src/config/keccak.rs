@@ -2,14 +2,15 @@
 
 use alloc::vec;
 
+use miden_core::field::QuadFelt;
 use p3_challenger::{HashChallenger, SerializingChallenger64};
 use p3_keccak::{Keccak256Hash, KeccakF, VECTOR_LEN};
-use p3_miden_lifted_stark::StarkConfig;
+use p3_miden_lifted_stark::GenericStarkConfig;
 use p3_miden_lmcs::LmcsConfig;
 use p3_miden_stateful_hasher::{SerializingStatefulSponge, StatefulSponge};
 use p3_symmetric::{CompressionFunctionFromHasher, PaddingFreeSponge};
 
-use super::{Dft, LiftedConfig, PCS_PARAMS};
+use super::{Dft, PCS_PARAMS};
 use crate::Felt;
 
 const WIDTH: usize = 25;
@@ -36,6 +37,9 @@ type LmcsType = LmcsConfig<[Felt; VECTOR_LEN], [u64; VECTOR_LEN], Sponge, Compre
 /// Challenger for Fiat-Shamir using Keccak256
 type Challenger = SerializingChallenger64<Felt, HashChallenger<u8, Keccak256Hash, 32>>;
 
+/// Complete STARK configuration type for Keccak.
+pub type KeccakConfig = GenericStarkConfig<Felt, QuadFelt, LmcsType, Dft, Challenger>;
+
 /// Creates a Keccak-based STARK configuration.
 ///
 /// This configuration uses:
@@ -45,19 +49,13 @@ type Challenger = SerializingChallenger64<Felt, HashChallenger<u8, Keccak256Hash
 /// - 27 query repetitions
 /// - 16 bits of proof-of-work
 /// - Binary folding (arity 2)
-///
-/// # Returns
-///
-/// A `LiftedConfig` instance configured for Keccak-based proving.
-pub fn create_keccak_config() -> LiftedConfig<LmcsType, Challenger> {
+pub fn create_keccak_config() -> KeccakConfig {
     let sponge = Sponge::new(StatefulSponge::new(KeccakF {}));
     let inner = KeccakMmcsSponge::new(KeccakF {});
     let compress = Compress::new(inner);
     let lmcs = LmcsType::new(sponge, compress);
     let dft = Dft::default();
-
-    let config = StarkConfig { pcs: PCS_PARAMS, lmcs, dft };
     let challenger = Challenger::from_hasher(vec![], Keccak256Hash {});
 
-    LiftedConfig { config, challenger }
+    GenericStarkConfig::new(PCS_PARAMS, lmcs, dft, challenger)
 }

@@ -4,12 +4,9 @@ use core::ops::Range;
 
 #[cfg(feature = "std")]
 use miden_air::trace::PADDED_TRACE_WIDTH;
-use miden_air::{
-    PublicInputs,
-    trace::{
-        AuxTraceBuilder, DECODER_TRACE_OFFSET, MainTrace, STACK_TRACE_OFFSET,
-        decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
-    },
+use miden_air::trace::{
+    AuxTraceBuilder, DECODER_TRACE_OFFSET, MainTrace, STACK_TRACE_OFFSET,
+    decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
 };
 
 use crate::{
@@ -103,17 +100,6 @@ impl ExecutionTrace {
     /// Returns outputs of the program execution which resulted in this execution trace.
     pub fn stack_outputs(&self) -> &StackOutputs {
         &self.stack_outputs
-    }
-
-    /// Returns the public values for this execution trace.
-    pub fn to_public_values(&self) -> Vec<Felt> {
-        let public_inputs = PublicInputs::new(
-            self.program_info.clone(),
-            self.init_stack_state(),
-            self.stack_outputs,
-            self.final_pc_transcript.state(),
-        );
-        public_inputs.to_elements()
     }
 
     /// Returns a clone of the auxiliary trace builders.

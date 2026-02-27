@@ -4,39 +4,12 @@ use miden_air::trace::{
     MainTrace, RowIndex,
     chiplets::kernel_rom::{KERNEL_PROC_CALL_LABEL, KERNEL_PROC_INIT_LABEL},
 };
-use miden_core::{Felt, Word, field::ExtensionField};
+use miden_core::{Felt, field::ExtensionField};
 
 use crate::{
     debug::{BusDebugger, BusMessage},
     trace::chiplets::aux_trace::build_value,
 };
-
-// REQUESTS
-// ================================================================================================
-
-/// Builds the requests for each unique kernel procedure digest, to be provided via public inputs.
-pub(super) fn build_kernel_init_requests<E>(
-    proc_hashes: &[Word],
-    alphas: &[E],
-    _debugger: &mut BusDebugger<E>,
-) -> E
-where
-    E: ExtensionField<Felt>,
-{
-    let mut requests = E::ONE;
-    // Initialize the bus with the kernel rom hashes provided by the public inputs.
-    // The verifier computes this value, and is enforced with a boundary constraint in the
-    // first row.
-    for proc_hash in proc_hashes {
-        let message = KernelRomInitMessage { kernel_proc_digest: proc_hash.into() };
-
-        requests *= message.value(alphas);
-
-        #[cfg(any(test, feature = "bus-debugger"))]
-        _debugger.add_request(alloc::boxed::Box::new(message), alphas);
-    }
-    requests
-}
 
 // RESPONSES
 // ================================================================================================
