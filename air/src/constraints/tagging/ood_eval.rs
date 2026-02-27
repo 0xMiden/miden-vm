@@ -9,10 +9,7 @@ use miden_core::{
 use miden_crypto::stark::{air::MidenAirBuilder, matrix::RowMajorMatrix};
 
 use super::state;
-use crate::constraints::{
-    chiplets::{bitwise, hasher::periodic},
-    tagging::ids::TAG_TOTAL_COUNT,
-};
+use crate::constraints::{chiplets::bitwise, tagging::ids::TAG_TOTAL_COUNT};
 
 /// Captured evaluation for a single tagged constraint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
