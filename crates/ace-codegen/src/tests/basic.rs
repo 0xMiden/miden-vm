@@ -157,7 +157,7 @@ fn test_emitted_circuit_matches_dag_eval() {
 
     let circuit = emit_circuit(&artifacts.dag, layout.clone()).unwrap();
     let dag_value = eval_dag(&artifacts.dag.nodes, artifacts.dag.root, &inputs, &layout);
-    let circuit_value = circuit.eval(&inputs);
+    let circuit_value = circuit.eval(&inputs).expect("circuit eval");
     assert_eq!(circuit_value, dag_value);
 }
 
