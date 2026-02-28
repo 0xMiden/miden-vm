@@ -36,13 +36,7 @@ pub fn input_key_for_symbolic<T>(var: &SymbolicVariable<T>) -> InputKey {
         Entry::AuxBusBoundary => InputKey::AuxBusBoundary(var.index),
         Entry::Public => InputKey::Public(var.index),
         Entry::Challenge => {
-            if var.index == 0 {
-                InputKey::AuxRandAlpha
-            } else if var.index == 1 {
-                InputKey::AuxRandBeta
-            } else {
-                panic!("unsupported randomness index {0} in test", var.index)
-            }
+            panic!("challenge variables should be handled in eval_expr for test evaluation")
         },
     }
 }
@@ -94,6 +88,26 @@ pub fn eval_expr(
                     acc += basis * value;
                 }
                 acc
+            },
+            Entry::Challenge => {
+                if layout.counts.num_randomness_inputs == layout.counts.num_randomness {
+                    let key = InputKey::Randomness(v.index);
+                    inputs[layout.index(key).unwrap()]
+                } else {
+                    let alpha = inputs[layout.index(InputKey::AuxRandAlpha).unwrap()];
+                    let beta = inputs[layout.index(InputKey::AuxRandBeta).unwrap()];
+                    match v.index {
+                        0 => alpha,
+                        1 => QuadFelt::ONE,
+                        _ => {
+                            let mut power = beta;
+                            for _ in 2..v.index {
+                                power *= beta;
+                            }
+                            power
+                        },
+                    }
+                }
             },
             Entry::Periodic => periodic_values[v.index],
             _ => {

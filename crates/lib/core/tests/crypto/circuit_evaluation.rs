@@ -1,6 +1,9 @@
+use miden_ace_codegen::{AceConfig, InputKey, LayoutKind, build_ace_circuit_for_air};
+use miden_air::ProcessorAir;
 use miden_core::{
     Felt, ONE, ZERO,
-    field::{BasedVectorSpace, PrimeCharacteristicRing, QuadFelt},
+    advice::AdviceStackBuilder,
+    field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
 };
 use miden_utils_testing::rand::rand_quad_felt;
 
@@ -80,4 +83,125 @@ fn circuit_evaluation_prove_verify() {
     let test = miden_utils_testing::build_test!(source, &[], &adv_stack);
     test.expect_stack(&[]);
     test.prove_and_verify(vec![], false)
+}
+
+#[test]
+fn processor_air_eval_circuit_masm() {
+    let air = ProcessorAir::default();
+    let config = AceConfig {
+        num_quotient_chunks: 8,
+        num_aux_inputs: 14,
+        layout: LayoutKind::Masm,
+    };
+    let circuit = build_ace_circuit_for_air::<_, Felt, QuadFelt>(&air, config).unwrap();
+    let layout = circuit.layout().clone();
+
+    let mut inputs = fill_inputs(&layout);
+    // The ACE output is linear in each quotient coordinate. We can zero the circuit by
+    // nudging a single quotient coordinate by delta = -root / slope.
+    adjust_quotient_to_zero(&circuit, &layout, &mut inputs);
+    assert_eq!(circuit.eval(&inputs), QuadFelt::ZERO);
+
+    // Encode the circuit.
+    let encoded = circuit.to_ace().unwrap();
+    let mut memory_felts = Vec::with_capacity(inputs.len() * 2 + encoded.size_in_felt());
+    for value in &inputs {
+        memory_felts.extend_from_slice(value.as_basis_coefficients_slice());
+    }
+    memory_felts.extend_from_slice(encoded.instructions());
+
+    let padded_len = memory_felts.len().next_multiple_of(8);
+    memory_felts.resize(padded_len, ZERO);
+    let num_adv_pipe = padded_len / 8;
+
+    let mut advice_builder = AdviceStackBuilder::new();
+    advice_builder.push_for_adv_pipe(&memory_felts);
+    let adv_stack = advice_builder.build_vec_u64();
+
+    // Place the circuit in memory at a fixed address.
+    let pointer = 1 << 16;
+    let num_read = encoded.num_vars();
+    let num_eval = encoded.num_eval_rows();
+    let source = format!(
+        "
+    const NUM_ADV_PIPE = {num_adv_pipe}
+    const NUM_READ = {num_read}
+    const NUM_EVAL = {num_eval}
+
+    begin
+        push.{pointer}
+        padw padw padw
+
+        repeat.NUM_ADV_PIPE
+            adv_pipe
+        end
+
+        push.NUM_EVAL push.NUM_READ push.{pointer}
+        eval_circuit
+
+        drop drop drop
+        repeat.3 dropw end
+        drop
+    end
+    "
+    );
+
+    let test = miden_utils_testing::build_test!(source, &[], &adv_stack);
+    test.expect_stack(&[]);
+    test.prove_and_verify(vec![], false)
+}
+
+fn fill_inputs(layout: &miden_ace_codegen::InputLayout) -> Vec<QuadFelt> {
+    let mut values = Vec::with_capacity(layout.total_inputs);
+    let mut state = 0x9e37_79b9_7f4a_7c15u64;
+    for _ in 0..layout.total_inputs {
+        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let lo = Felt::new(state);
+        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let hi = Felt::new(state);
+        values.push(QuadFelt::new([lo, hi]));
+    }
+    values
+}
+
+fn adjust_quotient_to_zero(
+    circuit: &miden_ace_codegen::AceCircuit<QuadFelt>,
+    layout: &miden_ace_codegen::InputLayout,
+    inputs: &mut [QuadFelt],
+) {
+    let root = circuit.eval(inputs);
+    if root == QuadFelt::ZERO {
+        return;
+    }
+    let (idx, slope) =
+        find_nonzero_quotient_slope(circuit, layout, inputs, root).expect("non-zero slope");
+    // Because the output is linear in the chosen quotient coordinate:
+    // root + slope * delta = 0 => delta = -root / slope.
+    let delta = -root * slope.inverse();
+    inputs[idx] += delta;
+}
+
+fn find_nonzero_quotient_slope(
+    circuit: &miden_ace_codegen::AceCircuit<QuadFelt>,
+    layout: &miden_ace_codegen::InputLayout,
+    inputs: &mut [QuadFelt],
+    root: QuadFelt,
+) -> Option<(usize, QuadFelt)> {
+    // Search for a quotient coordinate that has a non-zero influence on the output.
+    // We do this by bumping a coordinate by +1 and re-evaluating to get the slope.
+    for chunk in 0..layout.counts.num_quotient_chunks {
+        for coord in 0..layout.counts.ext_degree {
+            let idx = layout
+                .index(InputKey::QuotientChunkCoord { offset: 0, chunk, coord })
+                .expect("quotient coord exists");
+            let original = inputs[idx];
+            inputs[idx] = original + QuadFelt::ONE;
+            let slope = circuit.eval(inputs) - root;
+            inputs[idx] = original;
+            if slope != QuadFelt::ZERO {
+                return Some((idx, slope));
+            }
+        }
+    }
+    None
 }

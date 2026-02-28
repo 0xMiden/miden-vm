@@ -55,7 +55,7 @@ impl MidenAir<F, EF> for MockAir {
         builder.when_transition().assert_zero(b - a.clone());
         let a_expr: AB::Expr = a.into();
         let a_ext: AB::ExprEF = a_expr.into();
-        let per_expr: AB::ExprEF = per0.into();
+        let per_expr: AB::ExprEF = per0.into().into();
         builder.assert_zero_ext(per_expr - a_ext);
     }
 }
