@@ -8,7 +8,8 @@ use miden_core::{
 };
 use miden_crypto::stark::{air::MidenAirBuilder, matrix::RowMajorMatrix};
 
-use super::{ids::TAG_TOTAL_COUNT, state};
+use super::state;
+use crate::constraints::{chiplets::hasher::periodic, tagging::ids::TAG_TOTAL_COUNT};
 
 /// Captured evaluation for a single tagged constraint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,9 +83,8 @@ impl OodEvalAirBuilder {
         let first_row = rng.next_felt();
         let last_row = rng.next_felt();
         let transition = rng.next_felt();
-        // Minimal constraints in this branch do not use periodic values.
-        // When chiplet constraints are added, update this to seed the full periodic set.
-        let periodic_values = Vec::new();
+        let periodic_values =
+            (0..periodic::NUM_PERIODIC_COLUMNS).map(|_| rng.next_felt()).collect();
 
         Self {
             main,
@@ -258,8 +258,11 @@ mod tests {
     use miden_crypto::stark::air::MidenAir;
 
     use super::{
-        super::fixtures::{OOD_SEED, active_expected_ood_evals},
-        EvalRecord, OodEvalAirBuilder, TAG_TOTAL_COUNT,
+        super::{
+            fixtures::{OOD_SEED, active_expected_ood_evals},
+            ids::TAG_TOTAL_COUNT,
+        },
+        EvalRecord, OodEvalAirBuilder,
     };
     use crate::ProcessorAir;
 

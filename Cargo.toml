@@ -95,3 +95,9 @@ getrandom = { version = "0.2", default-features = false, features = ["js"] }
 
 [workspace.lints.rust]
 unexpected_cfgs = { check-cfg = ['cfg(fuzzing)'], level = "warn" }
+
+[patch.crates-io]
+p3-miden-air = { git = "https://github.com/0xMiden/p3-miden", branch = "main" }
+p3-miden-fri = { git = "https://github.com/0xMiden/p3-miden", branch = "main" }
+p3-miden-prover = { git = "https://github.com/0xMiden/p3-miden", branch = "main" }
+p3-miden-uni-stark = { git = "https://github.com/0xMiden/p3-miden", branch = "main" }
