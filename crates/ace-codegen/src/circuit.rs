@@ -54,8 +54,13 @@ impl<EF: PrimeCharacteristicRing + Copy> AceCircuit<EF> {
     }
 
     /// Evaluate the circuit against the provided input vector.
-    pub fn eval(&self, inputs: &[EF]) -> EF {
-        assert_eq!(inputs.len(), self.layout.total_inputs);
+    pub fn eval(&self, inputs: &[EF]) -> Result<EF, AceError> {
+        if inputs.len() != self.layout.total_inputs {
+            return Err(AceError::InvalidInputLength {
+                expected: self.layout.total_inputs,
+                got: inputs.len(),
+            });
+        }
         let mut op_values = vec![EF::ZERO; self.operations.len()];
         for (idx, op) in self.operations.iter().enumerate() {
             let lhs = self.node_value(op.lhs, inputs, &op_values);
@@ -66,7 +71,7 @@ impl<EF: PrimeCharacteristicRing + Copy> AceCircuit<EF> {
                 AceOp::Mul => lhs * rhs,
             };
         }
-        self.node_value(self.root, inputs, &op_values)
+        Ok(self.node_value(self.root, inputs, &op_values))
     }
 
     /// Total number of nodes (inputs + constants + ops).
