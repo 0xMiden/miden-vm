@@ -2,6 +2,7 @@
 members = [
     "air",
     "core",
+    "crates/ace-codegen",
     "crates/assembly",
     "crates/assembly-syntax",
     "crates/debug-types",

@@ -1238,6 +1238,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
+name = "miden-ace-codegen"
+version = "0.21.0"
+dependencies = [
+ "miden-air",
+ "miden-core",
+ "p3-dft",
+ "p3-field",
+ "p3-miden-air",
+ "p3-miden-uni-stark",
+ "thiserror",
+]
+
+[[package]]
 name = "miden-air"
 version = "0.22.0"
 dependencies = [
@@ -1325,6 +1338,7 @@ dependencies = [
  "criterion",
  "env_logger",
  "fs-err",
+ "miden-ace-codegen",
  "miden-air",
  "miden-assembly",
  "miden-core",

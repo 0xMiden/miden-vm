@@ -42,6 +42,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+miden-ace-codegen = { path = "../../ace-codegen" }
 miden-air.workspace = true
 miden-processor = { workspace = true, features = ["testing"] }
 miden-prover.workspace = true
