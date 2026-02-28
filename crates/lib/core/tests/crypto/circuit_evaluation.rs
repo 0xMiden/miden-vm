@@ -100,7 +100,7 @@ fn processor_air_eval_circuit_masm() {
     // The ACE output is linear in each quotient coordinate. We can zero the circuit by
     // nudging a single quotient coordinate by delta = -root / slope.
     adjust_quotient_to_zero(&circuit, &layout, &mut inputs);
-    assert_eq!(circuit.eval(&inputs), QuadFelt::ZERO);
+    assert_eq!(circuit.eval(&inputs).expect("circuit eval"), QuadFelt::ZERO);
 
     // Encode the circuit.
     let encoded = circuit.to_ace().unwrap();
@@ -169,7 +169,7 @@ fn adjust_quotient_to_zero(
     layout: &miden_ace_codegen::InputLayout,
     inputs: &mut [QuadFelt],
 ) {
-    let root = circuit.eval(inputs);
+    let root = circuit.eval(inputs).expect("circuit eval");
     if root == QuadFelt::ZERO {
         return;
     }
@@ -196,7 +196,7 @@ fn find_nonzero_quotient_slope(
                 .expect("quotient coord exists");
             let original = inputs[idx];
             inputs[idx] = original + QuadFelt::ONE;
-            let slope = circuit.eval(inputs) - root;
+            let slope = circuit.eval(inputs).expect("circuit eval") - root;
             inputs[idx] = original;
             if slope != QuadFelt::ZERO {
                 return Some((idx, slope));

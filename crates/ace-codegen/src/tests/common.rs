@@ -9,6 +9,7 @@ use crate::{
     InputKey, InputLayout,
     dag::{NodeId, NodeKind},
     quotient,
+    randomness::RandomnessPlan,
 };
 
 /// Deterministic input filler for layout-sized buffers.
@@ -90,23 +91,27 @@ pub fn eval_expr(
                 acc
             },
             Entry::Challenge => {
-                if layout.counts.num_randomness_inputs == layout.counts.num_randomness {
-                    let key = InputKey::Randomness(v.index);
-                    inputs[layout.index(key).unwrap()]
-                } else {
-                    let alpha = inputs[layout.index(InputKey::AuxRandAlpha).unwrap()];
-                    let beta = inputs[layout.index(InputKey::AuxRandBeta).unwrap()];
-                    match v.index {
-                        0 => alpha,
-                        1 => QuadFelt::ONE,
-                        _ => {
-                            let mut power = beta;
-                            for _ in 2..v.index {
-                                power *= beta;
-                            }
-                            power
-                        },
-                    }
+                let plan = RandomnessPlan::from_layout(layout).expect("valid randomness plan");
+                match plan {
+                    RandomnessPlan::Direct { .. } => {
+                        let key = InputKey::Randomness(v.index);
+                        inputs[layout.index(key).unwrap()]
+                    },
+                    RandomnessPlan::AlphaBeta { .. } => {
+                        let alpha = inputs[layout.index(InputKey::AuxRandAlpha).unwrap()];
+                        let beta = inputs[layout.index(InputKey::AuxRandBeta).unwrap()];
+                        match v.index {
+                            0 => alpha,
+                            1 => QuadFelt::ONE,
+                            _ => {
+                                let mut power = beta;
+                                for _ in 2..v.index {
+                                    power *= beta;
+                                }
+                                power
+                            },
+                        }
+                    },
                 }
             },
             Entry::Periodic => periodic_values[v.index],

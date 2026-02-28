@@ -64,7 +64,7 @@ fn ace_simple_circuit_matches_hand_eval() {
         ],
     );
 
-    let result = circuit.eval(&inputs);
+    let result = circuit.eval(&inputs).expect("circuit eval");
     assert!(result.is_zero());
 }
 
@@ -102,6 +102,6 @@ fn ace_simple_circuit_with_shared_terms() {
         ],
     );
 
-    let result = circuit.eval(&inputs);
+    let result = circuit.eval(&inputs).expect("circuit eval");
     assert!(result.is_zero());
 }

@@ -26,7 +26,7 @@ fn synthetic_ood_adjusts_quotient_to_zero() {
     let circuit = emit_circuit(&artifacts.dag, artifacts.layout.clone()).expect("ace circuit");
 
     let mut inputs = fill_inputs(&artifacts.layout);
-    let root = circuit.eval(&inputs);
+    let root = circuit.eval(&inputs).expect("circuit eval");
 
     let zps_0 = zps_for_chunk(&artifacts.layout, &inputs, 0);
     let delta = root * zps_0.inverse();
@@ -37,7 +37,7 @@ fn synthetic_ood_adjusts_quotient_to_zero() {
         .unwrap();
     inputs[idx] += delta;
 
-    let result = circuit.eval(&inputs);
+    let result = circuit.eval(&inputs).expect("circuit eval");
     assert!(result.is_zero(), "ACE circuit must evaluate to zero");
 
     // Sanity check: recomposition is well-defined and stable.
@@ -59,7 +59,7 @@ fn quotient_next_inputs_do_not_affect_eval() {
 
     let mut inputs = fill_inputs(&artifacts.layout);
 
-    let root = circuit.eval(&inputs);
+    let root = circuit.eval(&inputs).expect("circuit eval");
     let zps_0 = zps_for_chunk(&artifacts.layout, &inputs, 0);
     let delta = root * zps_0.inverse();
     let idx = artifacts
@@ -67,7 +67,10 @@ fn quotient_next_inputs_do_not_affect_eval() {
         .index(InputKey::QuotientChunkCoord { offset: 0, chunk: 0, coord: 0 })
         .unwrap();
     inputs[idx] += delta;
-    assert!(circuit.eval(&inputs).is_zero(), "precondition: zero root");
+    assert!(
+        circuit.eval(&inputs).expect("circuit eval").is_zero(),
+        "precondition: zero root"
+    );
 
     // Mutate all quotient_next inputs; evaluation should remain zero.
     for chunk in 0..artifacts.layout.counts.num_quotient_chunks {
@@ -80,6 +83,6 @@ fn quotient_next_inputs_do_not_affect_eval() {
         }
     }
 
-    let result = circuit.eval(&inputs);
+    let result = circuit.eval(&inputs).expect("circuit eval");
     assert!(result.is_zero(), "quotient_next should not affect ACE eval");
 }
