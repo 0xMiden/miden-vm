@@ -1890,6 +1890,11 @@ pub fn current_group_expected() -> Vec<EvalRecord> {
         },
         EvalRecord {
             id: 373,
+            namespace: "chiplets.bus.chiplets.transition",
+            value: QuadFelt::new([Felt::new(7990980974626587792), Felt::new(5675027937982935418)]),
+        },
+        EvalRecord {
+            id: 374,
             namespace: "chiplets.bus.wiring.transition",
             value: QuadFelt::new([Felt::new(7613678356270986878), Felt::new(10445474671979834467)]),
         },
