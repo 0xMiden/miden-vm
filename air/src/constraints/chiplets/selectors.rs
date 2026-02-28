@@ -28,7 +28,7 @@ use crate::{
     constraints::tagging::{TaggingAirBuilderExt, ids::TAG_CHIPLETS_BASE},
 };
 
-// CONSTRAINT TAGGING
+// TAGGING IDS
 // ================================================================================================
 
 /// Base ID for chiplet selector constraints.
@@ -172,4 +172,10 @@ pub fn enforce_chiplet_selectors<AB>(
 #[inline]
 pub fn bitwise_chiplet_flag<E: PrimeCharacteristicRing>(s0: E, s1: E) -> E {
     s0 * (E::ONE - s1)
+}
+
+/// Memory chiplet active flag: `s0 * s1 * !s2`.
+#[inline]
+pub fn memory_chiplet_flag<E: PrimeCharacteristicRing>(s0: E, s1: E, s2: E) -> E {
+    s0 * s1 * (E::ONE - s2)
 }

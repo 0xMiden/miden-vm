@@ -9,7 +9,7 @@
 //! - `k_first`: [1, 0, 0, 0, 0, 0, 0, 0] - marks first row of cycle
 //! - `k_transition`: [1, 1, 1, 1, 1, 1, 1, 0] - marks non-last rows
 //!
-//! ## Column Layout (within chiplet, offset by chiplet selectors)
+//! ## Column Layout (within chiplet, offset by selectors)
 //!
 //! | Column    | Purpose                           |
 //! |-----------|-----------------------------------|
@@ -25,10 +25,10 @@ use alloc::vec::Vec;
 
 use miden_core::field::PrimeCharacteristicRing;
 
-// CONSTANTS
-// ================================================================================================
-use super::hasher::periodic::NUM_PERIODIC_COLUMNS as HASHER_NUM_PERIODIC_COLUMNS;
-use super::selectors::bitwise_chiplet_flag;
+use super::{
+    hasher::periodic::NUM_PERIODIC_COLUMNS as HASHER_NUM_PERIODIC_COLUMNS,
+    selectors::bitwise_chiplet_flag,
+};
 use crate::{
     Felt, MainTraceRow,
     constraints::tagging::{TagGroup, TaggingAirBuilderExt, tagged_assert_zero_integrity},
@@ -41,6 +41,9 @@ use crate::{
     },
 };
 
+// CONSTANTS
+// ================================================================================================
+
 /// Index of k_first periodic column (marks first row of 8-row cycle).
 /// Placed after hasher periodic columns.
 pub const P_BITWISE_K_FIRST: usize = HASHER_NUM_PERIODIC_COLUMNS;
@@ -51,10 +54,11 @@ pub const P_BITWISE_K_TRANSITION: usize = HASHER_NUM_PERIODIC_COLUMNS + 1;
 /// Number of bits processed per row.
 const NUM_BITS_PER_ROW: usize = 4;
 
-// TAGGING CONSTANTS
+// TAGGING IDS
 // ================================================================================================
 
-const BITWISE_BASE_ID: usize = super::hasher::HASHER_MERKLE_ABSORB_BASE_ID + 12;
+pub(super) const BITWISE_BASE_ID: usize = super::hasher::HASHER_MERKLE_ABSORB_BASE_ID + 12;
+pub(super) const BITWISE_COUNT: usize = 17;
 const BITWISE_OP_BINARY_ID: usize = BITWISE_BASE_ID;
 const BITWISE_A_BITS_BINARY_BASE_ID: usize = BITWISE_BASE_ID + 2;
 const BITWISE_B_BITS_BINARY_BASE_ID: usize = BITWISE_A_BITS_BINARY_BASE_ID + NUM_BITS_PER_ROW;
