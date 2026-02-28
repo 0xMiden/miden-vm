@@ -81,7 +81,8 @@ where
     F: Field,
     EF: ExtensionField<F> + BasedVectorSpace<F>,
 {
-    let counts = input_counts_for_air::<A, F, EF>(air, config)?;
+    let num_periodic = air.periodic_table().len();
+    let counts = input_counts_for_air::<A, F, EF>(air, config, num_periodic)?;
     let layout = match config.layout {
         LayoutKind::Native => InputLayout::new(counts),
         LayoutKind::Masm => InputLayout::new_masm(counts),
@@ -104,7 +105,8 @@ where
     EF: ExtensionField<F> + BasedVectorSpace<F> + PrimeCharacteristicRing + Copy + Eq + Hash,
     SymbolicExpression<EF>: Algebra<SymbolicExpression<F>> + From<SymbolicExpression<F>>,
 {
-    let counts = input_counts_for_air::<A, F, EF>(air, config)?;
+    let periodic_table = air.periodic_table();
+    let counts = input_counts_for_air::<A, F, EF>(air, config, periodic_table.len())?;
     let layout = match config.layout {
         LayoutKind::Native => InputLayout::new(counts),
         LayoutKind::Masm => InputLayout::new_masm(counts),
@@ -119,7 +121,6 @@ where
         counts.num_periodic,
     );
     air.eval(&mut builder);
-    let periodic_table = air.periodic_table();
     let periodic_data = (!periodic_table.is_empty())
         .then(|| build_periodic_data::<F, EF>(periodic_table))
         .transpose()?;
@@ -128,7 +129,11 @@ where
     Ok(AceArtifacts { layout, dag })
 }
 
-fn input_counts_for_air<A, F, EF>(air: &A, config: AceConfig) -> Result<InputCounts, AceError>
+fn input_counts_for_air<A, F, EF>(
+    air: &A,
+    config: AceConfig,
+    num_periodic: usize,
+) -> Result<InputCounts, AceError>
 where
     A: MidenAir<F, EF>,
     F: Field,
@@ -154,7 +159,7 @@ where
         num_public: air.num_public_values(),
         num_randomness,
         num_randomness_inputs,
-        num_periodic: air.periodic_table().len(),
+        num_periodic,
         num_aux_inputs: config.num_aux_inputs,
         num_quotient_chunks: config.num_quotient_chunks,
         ext_degree: <EF as BasedVectorSpace<F>>::DIMENSION,
