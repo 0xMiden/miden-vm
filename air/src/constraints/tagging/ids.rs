@@ -53,7 +53,7 @@ pub const TAG_DECODER_COUNT: usize = 57;
 /// Base ID for the chiplets constraint group.
 pub const TAG_CHIPLETS_BASE: usize = TAG_DECODER_BASE + TAG_DECODER_COUNT;
 /// Number of chiplets constraints in this group.
-pub const TAG_CHIPLETS_COUNT: usize = 110;
+pub const TAG_CHIPLETS_COUNT: usize = 130;
 
 /// Base ID for the range bus constraint.
 ///
@@ -70,9 +70,14 @@ pub const TAG_STACK_OVERFLOW_BUS_COUNT: usize = 1;
 /// Base ID for the decoder bus constraint group.
 pub const TAG_DECODER_BUS_BASE: usize = TAG_STACK_OVERFLOW_BUS_BASE + TAG_STACK_OVERFLOW_BUS_COUNT;
 /// Number of decoder bus constraints in this group.
-#[cfg(all(test, feature = "std"))]
 pub const TAG_DECODER_BUS_COUNT: usize = 3;
+
+/// Base ID for the wiring bus constraint.
+pub const TAG_WIRING_BUS_BASE: usize = TAG_DECODER_BUS_BASE + TAG_DECODER_BUS_COUNT;
+/// Number of wiring bus constraints in this group.
+#[cfg(all(test, feature = "std"))]
+pub const TAG_WIRING_BUS_COUNT: usize = 1;
 
 /// Total number of tagged constraints in the current group set.
 #[cfg(all(test, feature = "std"))]
-pub const TAG_TOTAL_COUNT: usize = TAG_DECODER_BUS_BASE + TAG_DECODER_BUS_COUNT;
+pub const TAG_TOTAL_COUNT: usize = TAG_WIRING_BUS_BASE + TAG_WIRING_BUS_COUNT;
