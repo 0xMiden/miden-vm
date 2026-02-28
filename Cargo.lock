@@ -1338,6 +1338,7 @@ dependencies = [
  "criterion",
  "env_logger",
  "fs-err",
+ "miden-ace-codegen",
  "miden-air",
  "miden-assembly",
  "miden-core",
