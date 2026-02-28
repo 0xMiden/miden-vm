@@ -48,7 +48,9 @@ use crate::{
         bus::{MessageEncoder, alphas_from_challenges, indices::B_CHIPLETS},
         chiplets::hasher,
         op_flags::OpFlags,
-        tagging::{TaggingAirBuilderExt, ids::TAG_CHIPLETS_BUS_BASE},
+        tagging::{
+            TagGroup, TaggingAirBuilderExt, ids::TAG_CHIPLETS_BUS_BASE, tagged_assert_zero_ext,
+        },
     },
     trace::{
         chiplets::{
@@ -79,6 +81,11 @@ use crate::{
 /// Tag ID and namespace for the main chiplets bus transition constraint.
 const CHIPLET_BUS_ID: usize = TAG_CHIPLETS_BUS_BASE;
 const CHIPLET_BUS_NAMESPACE: &str = "chiplets.bus.chiplets.transition";
+const CHIPLET_BUS_NAMES: [&str; 1] = [CHIPLET_BUS_NAMESPACE; 1];
+const CHIPLET_BUS_TAGS: TagGroup = TagGroup {
+    base: CHIPLET_BUS_ID,
+    names: &CHIPLET_BUS_NAMES,
+};
 
 // ENTRY POINTS
 // ================================================================================================
@@ -99,7 +106,7 @@ pub fn enforce_chiplets_bus_constraint<AB>(
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: TaggingAirBuilderExt<F = Felt>,
 {
     // Auxiliary trace must be present.
     debug_assert!(
@@ -339,9 +346,8 @@ pub fn enforce_chiplets_bus_constraint<AB>(
 
     let lhs: AB::ExprEF = b_next_val.into() * requests;
     let rhs: AB::ExprEF = b_local_val.into() * responses;
-    builder.tagged(CHIPLET_BUS_ID, CHIPLET_BUS_NAMESPACE, |builder| {
-        builder.when_transition().assert_zero_ext(lhs - rhs);
-    });
+    let mut idx = 0;
+    tagged_assert_zero_ext(builder, &CHIPLET_BUS_TAGS, &mut idx, lhs - rhs);
 }
 
 // MESSAGE HELPERS
