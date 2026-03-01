@@ -8,6 +8,7 @@
 - [BREAKING] `Processor` and `FastProcessor` decorator execution is now immutable ([#2718](https://github.com/0xMiden/miden-vm/pull/2718)).
 - [BREAKING] `Tracer` API significantly refactored ([#2720](https://github.com/0xMiden/miden-vm/pull/2720)).
 - Added optional tagging instrumentation for AIR constraints (test-only; enables stable ID tracking and OOD parity checks) ([#2713](https://github.com/0xMiden/miden-vm/pull/2713)).
+- Added `math::u128` comparison (`lt`, `lte`, `gt`, `gte`), bitwise (`and`, `or`, `xor`, `not`), and shift (`shl`, `shr`, `rotl`, `rotr`) operations ([#2624](https://github.com/0xMiden/miden-vm/pull/2624)).
 
 #### Fixes
 
