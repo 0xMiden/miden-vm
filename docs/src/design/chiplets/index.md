@@ -7,7 +7,7 @@ sidebar_position: 1
 
 The Chiplets module contains specialized components dedicated to accelerating complex computations. Each chiplet specializes in executing a specific type of computation and is responsible for proving both the correctness of its computations and its own internal consistency.
 
-Currently, Miden VM relies on 4 chiplets:
+Currently, Miden VM relies on 5 chiplets:
 
 - The [Hash Chiplet](./hasher.md) (also referred to as the Hasher), used to compute Poseidon2 hashes both for sequential hashing and for Merkle tree hashing.
 - The [Bitwise Chiplet](./bitwise.md), used to compute bitwise operations (e.g., `AND`, `XOR`) over 32-bit integers.
@@ -158,11 +158,11 @@ The following constraints ensure that selector values are binary.
 The following constraints ensure that the chiplets are stacked correctly by restricting selector values so they can only change from $0 \rightarrow 1$.
 
 > $$
-> s_0 \cdot (s_0 - s'_0) = 0 \text{ | degree} = 2
-> s_0 \cdot s_1 \cdot (s_1 - s'_1) \text{ | degree} = 3
-> s_0 \cdot s_1 \cdot s_2 \cdot (s_2 - s'_2) \text{ | degree} = 4
-> s_0 \cdot s_1 \cdot s_2 \cdot s_3 \cdot (s_3 - s'_3) \text{ | degree} = 5
-> s_0 \cdot s_1 \cdot s_2 \cdot s_3 \cdot s_4 \cdot (s_4 - s'_4) \text{ | degree} = 6
+> s_0 \cdot (s'_0 - s_0) = 0 \text{ | degree} = 2
+> s_0 \cdot s_1 \cdot (s'_1 - s_1) \text{ | degree} = 3
+> s_0 \cdot s_1 \cdot s_2 \cdot (s'_2 - s_2) \text{ | degree} = 4
+> s_0 \cdot s_1 \cdot s_2 \cdot s_3 \cdot (s'_3 - s_3) \text{ | degree} = 5
+> s_0 \cdot s_1 \cdot s_2 \cdot s_3 \cdot s_4 \cdot (s'_4 - s_4) \text{ | degree} = 6
 > $$
 
 In other words, the above constraints enforce that if a selector is $0$ in the current row, then it must be either $0$ or $1$ in the next row; if it is $1$ in the current row, it must be $1$ in the next row.
@@ -178,16 +178,25 @@ The bus is implemented as a single [running product column](../lookups/multiset.
 - Each request is “sent” by computing an operation-specific lookup value from an [operation-specific label](#operation-labels), the operation inputs, and the operation outputs, and then dividing it out of the $b_{chip}$ running product column.
 - Each chiplet response is “sent” by computing the same operation-specific lookup value from the label, inputs, and outputs, and then multiplying it into the $b_{chip}$ running product column.
 
-Thus, if the requests and responses match, then the bus column $b_{chip}$ will start and end with the value $1$. This condition is enforced by boundary constraints on the $b_{chip}$ column.
-It is also possible to invoke chiplet computations through public inputs, by initializing the bus with requests that must be responded to by the chiplets.
-In this case, the verifier computes the product of all randomness-reduced requests, treating it as a constant when evaluating the boundary constraint for the initial value of the bus column.
-Currently, this is only used to request the initialization of kernel procedure digests for the kernel ROM chiplet.
+Thus, if the requests and responses match, then the bus column $b_{chip}$ starts at $1$ and ends at the product of randomness-reduced kernel procedure digests. The initial value is enforced by a first-row boundary constraint, while the final value is verified via `aux_finals`.
 
 Note that the order of the requests and responses does not matter, as long as they are all included in $b_{chip}$. In fact, requests and responses for the same operation will generally occur at different cycles.
 
 ### Chiplets bus constraints
 
-The chiplets bus constraints are defined by the components that use it to communicate.
+The running product constraint is
+
+$$
+(b'_{chip} \cdot req - b_{chip} \cdot resp) = 0
+$$
+
+Here, $\mathit{req}$ and $\mathit{resp}$ are the request/response multipliers formed by combining
+randomness-reduced messages with their selector flags. In addition, the first row is fixed to
+$b_{chip} = 1$.
+
+$$
+f_{first} \cdot (b_{chip} - 1) = 0
+$$
 
 Lookup requests are sent to the chiplets bus by the following components:
 
@@ -198,13 +207,8 @@ Lookup requests are sent to the chiplets bus by the following components:
 
 Responses are provided by the [hash](./hasher.md#chiplets-bus-constraints), [bitwise](./bitwise.md#chiplets-bus-constraints), [memory](./memory.md#chiplets-bus-constraints), and [kernel ROM](./kernel_rom.md#chiplets-bus-constraints) chiplets.
 
-The chiplet bus can be initialized with randomness-reduced requests $v_0, v_1, \ldots$ by computing their product $v_{init} = \prod_i v_i$, and enforcing the boundary constraint in the first row to ensure
-$b_{chip} = \frac{1}{v_{init}}$.
-Note that $v_{init}$ is a constant, and therefore does not contribute to the constraint degree.
-
-> $$
-> b_{chip} \cdot v_{init} - 1 = 0 \text{ | degree} = 1
-> $$
+The verifier computes the expected final value of $b_{chip}$ from public inputs and checks it
+against `aux_finals`. There is no explicit last-row boundary constraint in the chiplets bus.
 
 ## Chiplets virtual table
 
@@ -227,23 +231,33 @@ Instead, a chiplet can make a request through the $vt_{chip}$ bus, with the rece
 At the moment, this feature is only used by the [ACE](./ace.md) allowing it to read inputs and circuit instructions stored in the memory chiplet.
 Note that the [memory](./memory.md#chiplets-bus-constraints) chiplet responds via the chiplet bus $b_{chip}$.
 
-To combine these correctly, the [running product column](../lookups/multiset.md) for this table must be constrained not only at the beginning and the end of the trace, but also where the hash chiplet ends.
-
 ### Chiplets virtual table constraints
 
-Although the [hasher chiplet](./hasher.md#sibling-table-constraints) ensures the sibling table is empty between any Merkle tree update computation,
-we must also enforce this property at the boundary of the chiplet itself.
-Using the hasher chiplet's selector $s_0$, the following constraint ensures the bus equals one whenever $s_0$ transitions.
+The hash-kernel virtual table bus uses a running product constraint similar to the chiplets bus:
+
+$$
+(p' \cdot req - p \cdot resp) = 0
+$$
+
+To combine these correctly, the running product column must be constrained not only at the
+beginning and the end of the trace, but also where the hash chiplet ends. Using the hasher chiplet's
+selector $s_0$, the following constraint ensures the bus equals one whenever $s_0$ transitions:
 
 > $$
 > (s'_0 - s_0) \cdot (1 - vt_{chip}) = 0 \text{ | degree} = 2
 > $$
 
-To connect the chiplet virtual table and the bus, we enforce the following constraint in the last row, ensuring the product of both their running products is 1.
+To connect the chiplet virtual table and the bus, we enforce the following constraint in the last
+row, ensuring the product of both their running products is 1:
 
 > $$
 > vt_{chip} \cdot b_{chip} - 1 = 0 \text{ | degree} = 2.
 > $$
+
+TODO: today we enforce that this bus is empty (equals 1) at Merkle path verification boundaries.
+This is sound but cumbersome and interferes with log_precompile state tracking. We plan to replace
+it with a construction that supports multiple Merkle path verifications without forcing a boundary
+reset.
 
 ## Chiplet logUp bus
 

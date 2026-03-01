@@ -3,7 +3,7 @@ use crate::{
     errors::OperationError,
     mast::MastForest,
     processor::{Processor, StackInterface, SystemInterface},
-    tracer::{OperationHelperRegisters, Tracer},
+    tracer::OperationHelperRegisters,
 };
 
 #[cfg(test)]
@@ -17,39 +17,31 @@ mod tests;
 /// # Errors
 /// Returns an error if the popped value is not ONE.
 #[inline(always)]
-pub(super) fn op_assert<P, T>(
+pub(super) fn op_assert<P>(
     processor: &mut P,
     err_code: Felt,
     program: &MastForest,
-    tracer: &mut T,
 ) -> Result<OperationHelperRegisters, OperationError>
 where
     P: Processor,
-    T: Tracer<Processor = P>,
 {
     if processor.stack().get(0) != ONE {
         let err_msg = program.resolve_error_message(err_code);
         return Err(OperationError::FailedAssertion { err_code, err_msg });
     }
     processor.stack_mut().decrement_size();
-    tracer.decrement_stack_size();
     Ok(OperationHelperRegisters::Empty)
 }
 
 /// Writes the current stack depth to the top of the stack.
 #[inline(always)]
-pub(super) fn op_sdepth<P, T>(
-    processor: &mut P,
-    tracer: &mut T,
-) -> Result<OperationHelperRegisters, ExecutionError>
+pub(super) fn op_sdepth<P>(processor: &mut P) -> Result<OperationHelperRegisters, ExecutionError>
 where
     P: Processor,
-    T: Tracer<Processor = P>,
 {
     let depth = processor.stack().depth();
     processor.stack_mut().increment_size()?;
     processor.stack_mut().set(0, Felt::from_u32(depth));
-    tracer.increment_stack_size(processor);
 
     Ok(OperationHelperRegisters::Empty)
 }
@@ -71,18 +63,13 @@ pub(super) fn op_caller<P: Processor>(
 
 /// Writes the current clock value to the top of the stack.
 #[inline(always)]
-pub(super) fn op_clk<P, T>(
-    processor: &mut P,
-    tracer: &mut T,
-) -> Result<OperationHelperRegisters, ExecutionError>
+pub(super) fn op_clk<P>(processor: &mut P) -> Result<OperationHelperRegisters, ExecutionError>
 where
     P: Processor,
-    T: Tracer<Processor = P>,
 {
     let clk: Felt = processor.system().clock().into();
     processor.stack_mut().increment_size()?;
     processor.stack_mut().set(0, clk);
-    tracer.increment_stack_size(processor);
 
     Ok(OperationHelperRegisters::Empty)
 }

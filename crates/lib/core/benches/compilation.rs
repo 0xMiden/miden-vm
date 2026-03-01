@@ -14,7 +14,7 @@ fn core_lib(c: &mut Criterion) {
 
             let manifest_dir = env!("CARGO_MANIFEST_DIR");
             let asm_dir = Path::new(manifest_dir).join("asm");
-            let namespace = LibraryPath::new("std").expect("invalid base namespace");
+            let namespace = "::miden::core".parse::<LibraryPath>().expect("invalid base namespace");
             assembler.assemble_library_from_dir(asm_dir, namespace).unwrap();
         });
     });

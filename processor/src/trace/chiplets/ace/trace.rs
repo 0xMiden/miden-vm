@@ -115,16 +115,22 @@ impl CircuitEvaluation {
     /// and inserts a new wire with the result.
     pub fn do_eval(&mut self, ptr: Felt, instruction: Felt) -> Result<(), AceError> {
         // Decode instruction, ensuring it is valid
-        let (id_l, id_r, op) =
-            decode_instruction(instruction).ok_or(AceError::FailedDecodeInstruction)?;
+        let (id_l, id_r, op) = decode_instruction(instruction)
+            .ok_or(AceError("failed to decode instruction".into()))?;
 
         // Read value of id_l from wire bus, increasing its multiplicity
-        let v_l = self.wire_bus.read_value(id_l).ok_or(AceError::FailedWireBusRead)?;
+        let v_l = self
+            .wire_bus
+            .read_value(id_l)
+            .ok_or(AceError("failed to read from the wiring bus".into()))?;
         let id_l = Felt::from_u32(id_l);
         self.col_wire_left.push(id_l, v_l);
 
         // Read value of id_r from wire bus, increasing its multiplicity
-        let v_r = self.wire_bus.read_value(id_r).ok_or(AceError::FailedWireBusRead)?;
+        let v_r = self
+            .wire_bus
+            .read_value(id_r)
+            .ok_or(AceError("failed to read from the wiring bus".into()))?;
         let id_r = Felt::from_u32(id_r);
         self.col_wire_right.push(id_r, v_r);
 

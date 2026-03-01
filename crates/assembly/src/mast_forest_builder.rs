@@ -100,7 +100,7 @@ impl MastForestBuilder {
         // All statically-linked libraries are merged into a single MastForest.
         let forests = static_libraries.into_iter().map(|lib| lib.mast_forest().as_ref());
         let (statically_linked_mast, _remapping) = MastForest::merge(forests).into_diagnostic()?;
-        // The AdviceMap of the statically-linkeed forest is copied to the forest being built.
+        // The AdviceMap of the statically-linked forest is copied to the forest being built.
         //
         // This might include excess advice map data in the built MastForest, but we currently do
         // not do any analysis to determine what advice map data is actually required by parts of

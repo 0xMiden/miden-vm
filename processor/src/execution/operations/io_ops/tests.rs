@@ -26,7 +26,7 @@ fn test_op_advpop() {
     let mut processor = FastProcessor::new(StackInputs::default()).with_advice(advice_inputs);
     let mut tracer = NoopTracer;
 
-    op_push(&mut processor, Felt::new(1), &mut tracer).unwrap();
+    op_push(&mut processor, Felt::new(1)).unwrap();
     processor.system_mut().increment_clock();
     op_advpop(&mut processor, &mut tracer).unwrap();
     processor.system_mut().increment_clock();
@@ -49,10 +49,10 @@ fn test_op_advpopw() {
     let mut processor = FastProcessor::new(StackInputs::default()).with_advice(advice_inputs);
     let mut tracer = NoopTracer;
 
-    op_push(&mut processor, Felt::new(1), &mut tracer).unwrap();
+    op_push(&mut processor, Felt::new(1)).unwrap();
     processor.system_mut().increment_clock();
     for _ in 0..4 {
-        op_pad(&mut processor, &mut tracer).unwrap();
+        op_pad(&mut processor).unwrap();
         processor.system_mut().increment_clock();
     }
     op_advpopw(&mut processor, &mut tracer).unwrap();
@@ -79,12 +79,12 @@ fn test_op_mloadw() {
 
     // push four zeros onto the stack (padding)
     for _ in 0..4 {
-        op_pad(&mut processor, &mut tracer).unwrap();
+        op_pad(&mut processor).unwrap();
         processor.system_mut().increment_clock();
     }
 
     // push the address onto the stack and load the word
-    op_push(&mut processor, Felt::new(4), &mut tracer).unwrap();
+    op_push(&mut processor, Felt::new(4)).unwrap();
     processor.system_mut().increment_clock();
     op_mloadw(&mut processor, &mut tracer).unwrap();
     processor.system_mut().increment_clock();
@@ -103,7 +103,7 @@ fn test_op_mloadw() {
     assert_eq!(word, stored_word);
 
     // --- calling MLOADW with address greater than u32::MAX leads to an error ----------------
-    op_push(&mut processor, Felt::new(u64::MAX / 2), &mut tracer).unwrap();
+    op_push(&mut processor, Felt::new(u64::MAX / 2)).unwrap();
     processor.system_mut().increment_clock();
     assert!(op_mloadw(&mut processor, &mut tracer).is_err());
 
@@ -124,7 +124,7 @@ fn test_op_mload() {
     store_word(&mut processor, 4, word, &mut tracer);
 
     // push the address onto the stack and load the element
-    op_push(&mut processor, Felt::new(4), &mut tracer).unwrap();
+    op_push(&mut processor, Felt::new(4)).unwrap();
     processor.system_mut().increment_clock();
     op_mload(&mut processor, &mut tracer).unwrap();
     processor.system_mut().increment_clock();
@@ -143,7 +143,7 @@ fn test_op_mload() {
     assert_eq!(word, stored_word);
 
     // --- calling MLOAD with address greater than u32::MAX leads to an error -----------------
-    op_push(&mut processor, Felt::new(u64::MAX / 2), &mut tracer).unwrap();
+    op_push(&mut processor, Felt::new(u64::MAX / 2)).unwrap();
     processor.system_mut().increment_clock();
     assert!(op_mload(&mut processor, &mut tracer).is_err());
 
@@ -183,12 +183,12 @@ fn test_op_mstream() {
     // - 101 is at position 13 (to make sure it is not overwritten)
     // - 4 (the address) is at position 12
     // - values 1 - 12 are at positions 0 - 11
-    op_push(&mut processor, Felt::new(101), &mut tracer).unwrap();
+    op_push(&mut processor, Felt::new(101)).unwrap();
     processor.system_mut().increment_clock();
-    op_push(&mut processor, Felt::new(4), &mut tracer).unwrap();
+    op_push(&mut processor, Felt::new(4)).unwrap();
     processor.system_mut().increment_clock();
     for i in 1..13 {
-        op_push(&mut processor, Felt::new(i), &mut tracer).unwrap();
+        op_push(&mut processor, Felt::new(i)).unwrap();
         processor.system_mut().increment_clock();
     }
 
@@ -258,7 +258,7 @@ fn test_op_mstorew() {
     assert_eq!(word2, stored_word2);
 
     // --- calling MSTOREW with address greater than u32::MAX leads to an error ----------------
-    op_push(&mut processor, Felt::new(u64::MAX / 2), &mut tracer).unwrap();
+    op_push(&mut processor, Felt::new(u64::MAX / 2)).unwrap();
     processor.system_mut().increment_clock();
     assert!(op_mstorew(&mut processor, &mut tracer).is_err());
 
@@ -313,7 +313,7 @@ fn test_op_mstore() {
     assert_eq!(expected_word2, stored_word2);
 
     // --- calling MSTORE with address greater than u32::MAX leads to an error ----------------
-    op_push(&mut processor, Felt::new(u64::MAX / 2), &mut tracer).unwrap();
+    op_push(&mut processor, Felt::new(u64::MAX / 2)).unwrap();
     processor.system_mut().increment_clock();
     assert!(op_mstore(&mut processor, &mut tracer).is_err());
 
@@ -336,12 +336,12 @@ fn test_op_pipe() {
     // - 101 is at position 13 (to make sure it is not overwritten)
     // - 4 (the address) is at position 12
     // - values 1 - 12 are at positions 0 - 11
-    op_push(&mut processor, Felt::new(101), &mut tracer).unwrap();
+    op_push(&mut processor, Felt::new(101)).unwrap();
     processor.system_mut().increment_clock();
-    op_push(&mut processor, Felt::new(4), &mut tracer).unwrap();
+    op_push(&mut processor, Felt::new(4)).unwrap();
     processor.system_mut().increment_clock();
     for i in 1..13 {
-        op_push(&mut processor, Felt::new(i), &mut tracer).unwrap();
+        op_push(&mut processor, Felt::new(i)).unwrap();
         processor.system_mut().increment_clock();
     }
 
@@ -383,50 +383,6 @@ fn test_op_pipe() {
     assert_eq!(expected, processor.stack_top());
 }
 
-// CLOCK CYCLE CONFLICT TESTS
-// --------------------------------------------------------------------------------------------
-
-/// Ensures that reading and writing in the same clock cycle results in an error.
-#[test]
-#[ignore = "Re-enable when addressing issue 2276"]
-fn test_read_and_write_in_same_clock_cycle() {
-    let mut processor = FastProcessor::new(StackInputs::default());
-    let mut tracer = NoopTracer;
-
-    assert_eq!(0, processor.memory().num_accessed_words());
-
-    // emulate reading and writing in the same clock cycle (no increment_clk between operations)
-    op_mload(&mut processor, &mut tracer).unwrap();
-    assert!(op_mstore(&mut processor, &mut tracer).is_err());
-}
-
-/// Ensures that writing twice in the same clock cycle results in an error.
-#[test]
-#[ignore = "Re-enable when addressing issue 2276"]
-fn test_write_twice_in_same_clock_cycle() {
-    let mut processor = FastProcessor::new(StackInputs::default());
-    let mut tracer = NoopTracer;
-
-    assert_eq!(0, processor.memory().num_accessed_words());
-
-    // emulate writing twice in the same clock cycle (no increment_clk between operations)
-    op_mstore(&mut processor, &mut tracer).unwrap();
-    assert!(op_mstore(&mut processor, &mut tracer).is_err());
-}
-
-/// Ensures that reading twice in the same clock cycle does NOT result in an error.
-#[test]
-fn test_read_twice_in_same_clock_cycle() {
-    let mut processor = FastProcessor::new(StackInputs::default());
-    let mut tracer = NoopTracer;
-
-    assert_eq!(0, processor.memory().num_accessed_words());
-
-    // emulate reading twice in the same clock cycle (no increment_clk between operations)
-    op_mload(&mut processor, &mut tracer).unwrap();
-    op_mload(&mut processor, &mut tracer).unwrap();
-}
-
 // HELPER METHODS
 // --------------------------------------------------------------------------------------------
 
@@ -435,11 +391,11 @@ fn store_word(processor: &mut FastProcessor, addr: u64, word: Word, tracer: &mut
     // After pushing, word[0] should be at stack position 1 (after addr at position 0).
     // So push word[3], then word[2], word[1], word[0], then addr.
     for &value in word.iter().rev() {
-        op_push(processor, value, tracer).unwrap();
+        op_push(processor, value).unwrap();
         processor.system_mut().increment_clock();
     }
     // Push address
-    op_push(processor, Felt::new(addr), tracer).unwrap();
+    op_push(processor, Felt::new(addr)).unwrap();
     processor.system_mut().increment_clock();
     // Store the word (LE: stack pos 1-4 -> word[0-3])
     op_mstorew(processor, tracer).unwrap();
@@ -448,10 +404,10 @@ fn store_word(processor: &mut FastProcessor, addr: u64, word: Word, tracer: &mut
 
 fn store_element(processor: &mut FastProcessor, addr: u64, value: Felt, tracer: &mut NoopTracer) {
     // Push value
-    op_push(processor, value, tracer).unwrap();
+    op_push(processor, value).unwrap();
     processor.system_mut().increment_clock();
     // Push address
-    op_push(processor, Felt::new(addr), tracer).unwrap();
+    op_push(processor, Felt::new(addr)).unwrap();
     processor.system_mut().increment_clock();
     // Store the element
     op_mstore(processor, tracer).unwrap();

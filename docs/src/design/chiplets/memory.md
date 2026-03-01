@@ -156,7 +156,7 @@ We can then define the following constraints to make sure values in columns `d0`
 We can combine the above constraints as follows:
 
 $$
-\left(n_0 \cdot (c' - c) + (1 - n_0) \cdot \left(n_1 \cdot (a - a') + (1 - n_1) \cdot (i' - i - 1) \right) \right) - (2^{16} \cdot d_1' + d_0') = 0
+\left(n_0 \cdot (c' - c) + (1 - n_0) \cdot \left(n_1 \cdot (a' - a) + (1 - n_1) \cdot (i' - i - 1) \right) \right) - (2^{16} \cdot d_1' + d_0') = 0
 $$
 
 The above constraint, in combination with $16$-bit range checks against columns `d0` and `d1` ensure that values in `ctx`, `addr`, and `clk` columns always increase monotonically, and also that columns `ctx` and `addr` may contain duplicates, while the values in column `clk` must be unique for a given combination of `ctx` and `addr`.
@@ -214,7 +214,7 @@ $$
 - $f_{mem\_fr}$ is set to 1 when the next row is the first row of the memory chiplet.
 
 $$
-f_{mem\_fr} = (1 - s_1) \cdot f_{mem}' \text{ | degree} = 4
+f_{mem\_fr} = (1 - s_1) \cdot s_0 \cdot s_1' \cdot (1 - s_2') \text{ | degree} = 4
 $$
 
 To simplify description of constraints, we'll define two variables $n_0$ and $n_1$ as follows:
@@ -224,7 +224,7 @@ n_0 = \Delta ctx \cdot t'
 n_1 = \Delta a \cdot t'
 $$
 
-Where $\Delta ctx = ctx' - ctx$ and $\Delta a = a' - a$.
+Where $\Delta ctx = ctx' - ctx$, $\Delta a = a' - a$, and $\Delta clk = clk' - clk$.
 
 To make sure the prover sets the value of column `t` correctly, we'll need to impose the following constraints:
 
@@ -233,7 +233,7 @@ f_{mem\_nl} \cdot (n_0^2 - n_0) = 0 \text{ | degree} = 7
 $$
 
 $$
-f_{mem\_nl} \cdot (1 - n_0) \cdot  \Delta ctx = 0 \text{ | degree} = 7
+f_{mem\_nl} \cdot (1 - n_0) \cdot  \Delta ctx = 0 \text{ | degree} = 6
 $$
 
 $$
@@ -262,6 +262,16 @@ $$
 
 $$
 f_{mem} \cdot (idx1^2 - idx1) = 0 \text{ | degree} = 5
+$$
+
+For word access, the element index bits are zero:
+
+$$
+f_{mem} \cdot ew \cdot idx0 = 0 \text{ | degree} = 5
+$$
+
+$$
+f_{mem} \cdot ew \cdot idx1 = 0 \text{ | degree} = 5
 $$
 
 
@@ -327,7 +337,7 @@ That is, if $v_i$ is not written to, then either its value needs to be copied ov
 
 #### Chiplets bus constraints {#chiplets-bus-constraints}
 
-Communication between the memory chiplet and the stack is accomplished via the chiplets bus $b_{chip}$. To respond to memory access requests from the stack, we need to divide the current value in $b_{chip}$ by the value representing a row in the memory table.
+Communication between the memory chiplet and the stack is accomplished via the chiplets bus $b_{chip}$. To respond to memory access requests from the stack, we need to multiply the current value in $b_{chip}$ by the value representing a row in the memory table.
 
 ##### Memory row value {#memory-row-value}
 
@@ -339,7 +349,7 @@ v_{mem} = \alpha_0 + \alpha_1 \cdot op_{mem} + \alpha_2 \cdot ctx + \alpha_3 \cd
 \end{align*}
 $$
 
-where
+where $a = word\_addr + 2 \cdot idx1 + idx0$ and
 
 $$
 \begin{align*}

@@ -176,7 +176,7 @@ Instructions for moving data between the stack and other sources like program co
 | -------------- | ------------ | ------------ | ------ | --------------------------------------------------------------------------------------------------------------------------- |
 | `clk`          | `[ ... ]`    | `[t, ... ]`  | 1      | Pushes current clock cycle `t`.                                                                                             |
 | `sdepth`       | `[ ... ]`    | `[d, ... ]`  | 1      | Pushes current stack depth `d`.                                                                                             |
-| `caller`       | `[A, b,...]` | `[H, b,...]` | 1      | In context 0, overwrites the top 4 stack items with hash `H` of the function that syscall'd into the current context, or `[0, 0, 0, 0]` when not servicing a `SYSCALL`. In any other context, `H` corresponds to the hash of the function that entered the current context. |
+| `caller`       | `[A, ...]`   | `[H, ...]`   | 1      | In context 0, overwrites the top 4 stack items with hash `H` of the function that syscall'd into the current context, or `[0, 0, 0, 0]` when not servicing a `SYSCALL`. In any other context, `H` corresponds to the hash of the function that entered the current context. |
 | `locaddr.i`    | `[ ... ]`    | `[a, ... ]`  | 2      | Pushes absolute memory address `a` of local memory at index `i`.                                                            |
 | `procref.name` | `[ ... ]`    | `[A, ... ]`  | 4      | Pushes MAST root `A` of procedure `name`.                                                                                   |
 

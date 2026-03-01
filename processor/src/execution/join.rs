@@ -3,8 +3,8 @@ use core::ops::ControlFlow;
 
 use crate::{
     BreakReason, Host, Stopper,
-    continuation_stack::{Continuation, ContinuationStack},
-    execution::{finalize_clock_cycle, finalize_clock_cycle_with_continuation},
+    continuation_stack::Continuation,
+    execution::{ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation},
     mast::{JoinNode, MastForest, MastNodeId},
     processor::Processor,
     tracer::Tracer,
@@ -15,70 +15,68 @@ use crate::{
 
 /// Executes a Join node from the start.
 #[inline(always)]
-pub(super) fn start_join_node<P, S, T>(
-    processor: &mut P,
+pub(super) fn start_join_node<P, H, S, T>(
+    state: &mut ExecutionState<'_, P, H, S, T>,
     join_node: &JoinNode,
     node_id: MastNodeId,
     current_forest: &Arc<MastForest>,
-    continuation_stack: &mut ContinuationStack,
-    host: &mut impl Host,
-    tracer: &mut T,
-    stopper: &S,
 ) -> ControlFlow<BreakReason>
 where
     P: Processor,
+    H: Host,
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
-    tracer.start_clock_cycle(
-        processor,
+    state.tracer.start_clock_cycle(
+        state.processor,
         Continuation::StartNode(node_id),
-        continuation_stack,
+        state.continuation_stack,
         current_forest,
     );
 
     // Execute decorators that should be executed before entering the node
-    processor.execute_before_enter_decorators(node_id, current_forest, host)?;
+    state
+        .processor
+        .execute_before_enter_decorators(node_id, current_forest, state.host)?;
 
-    continuation_stack.push_finish_join(node_id);
-    continuation_stack.push_start_node(join_node.second());
-    continuation_stack.push_start_node(join_node.first());
+    state.continuation_stack.push_finish_join(node_id);
+    state.continuation_stack.push_start_node(join_node.second());
+    state.continuation_stack.push_start_node(join_node.first());
 
     // Finalize the clock cycle corresponding to the JOIN operation.
-    finalize_clock_cycle(processor, tracer, stopper, current_forest)
+    finalize_clock_cycle(state.processor, state.tracer, state.stopper, current_forest)
 }
 
 /// Executes the finish phase of a Join node.
 #[inline(always)]
-pub(super) fn finish_join_node<P, S, T>(
-    processor: &mut P,
+pub(super) fn finish_join_node<P, H, S, T>(
+    state: &mut ExecutionState<'_, P, H, S, T>,
     node_id: MastNodeId,
     current_forest: &Arc<MastForest>,
-    continuation_stack: &mut ContinuationStack,
-    host: &mut impl Host,
-    tracer: &mut T,
-    stopper: &S,
 ) -> ControlFlow<BreakReason>
 where
     P: Processor,
+    H: Host,
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
-    tracer.start_clock_cycle(
-        processor,
+    state.tracer.start_clock_cycle(
+        state.processor,
         Continuation::FinishJoin(node_id),
-        continuation_stack,
+        state.continuation_stack,
         current_forest,
     );
 
     // Finalize the clock cycle corresponding to the END operation.
     finalize_clock_cycle_with_continuation(
-        processor,
-        tracer,
-        stopper,
+        state.processor,
+        state.tracer,
+        state.stopper,
         || Some(Continuation::AfterExitDecorators(node_id)),
         current_forest,
     )?;
 
-    processor.execute_after_exit_decorators(node_id, current_forest, host)
+    state
+        .processor
+        .execute_after_exit_decorators(node_id, current_forest, state.host)
 }

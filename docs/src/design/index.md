@@ -30,10 +30,11 @@ Miden VM consists of several interconnected components, each providing a specifi
 * **Program decoder**, which is responsible for computing a commitment to the executing program and converting the program into a sequence of operations executed by the VM.
 * **Operand stack**, which is a push-down stack which provides operands for all operations executed by the VM.
 * **Range checker**, which is responsible for providing 16-bit range checks needed by other components.
-* **Chiplets**, which is a set of specialized circuits used to accelerate commonly-used complex computations. Currently, the VM relies on 4 chiplets:
+* **Chiplets**, which is a set of specialized circuits used to accelerate commonly-used complex computations. Currently, the VM relies on 5 chiplets:
   - Hash chiplet, used to compute Poseidon2 hashes both for sequential hashing and for Merkle tree hashing.
   - Bitwise chiplet, used to compute bitwise operations (e.g., `AND`, `XOR`) over 32-bit integers.
   - Memory chiplet, used to support random-access memory in the VM.
+  - ACE chiplet, used to evaluate arithmetic circuits.
   - Kernel ROM chiplet, used to enable calling predefined kernel procedures which are provided before execution begins.
 
 The above components are connected via **buses**, which are implemented using [lookup arguments](./lookups/index.md). We also use [multiset check lookups](./lookups/multiset.md) internally within components to describe **virtual tables**.

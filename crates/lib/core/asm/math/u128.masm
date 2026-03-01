@@ -1,3 +1,5 @@
+const U32_MAX = 0xFFFFFFFF
+
 # ===== ADDITION ==================================================================================
 
 #! Performs addition of two unsigned 128 bit integers preserving the overflow.
@@ -6,36 +8,36 @@
 #! Stack transition is as follows:
 #! [b0, b1, b2, b3, a0, a1, a2, a3, ...] -> [overflow, c0, c1, c2, c3, ...], where c = (a + b) % 2^128
 pub proc overflowing_add(b: u128, a: u128) -> (i1, u128)
-    # Input: [b0, b1, b2, b3, a0, a1, a2, a3, ...]
-    # Output: [overflow, c0, c1, c2, c3, ...]
+    # input: [b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    # output: [overflow, c0, c1, c2, c3, ...]
     #
-    # Following u64 pattern: keep sums at bottom, carries at top
+    # following u64 pattern: keep sums at bottom, carries at top
 
-    # Step 1: a0 + b0
+    # step 1: a0 + b0
     movup.4                     # [a0, b0, b1, b2, b3, a1, a2, a3]
     u32widening_add             # [c0, carry1, b1, b2, b3, a1, a2, a3]
     movdn.7                     # [carry1, b1, b2, b3, a1, a2, a3, c0]
 
-    # Step 2: carry1 + a1 + b1
+    # step 2: carry1 + a1 + b1
     movup.4                     # [a1, carry1, b1, b2, b3, a2, a3, c0]
     movup.2                     # [b1, a1, carry1, b2, b3, a2, a3, c0]
     u32widening_add3            # [c1, carry2, b2, b3, a2, a3, c0]
     movdn.6                     # [carry2, b2, b3, a2, a3, c0, c1]
 
-    # Step 3: carry2 + a2 + b2
+    # step 3: carry2 + a2 + b2
     movup.3                     # [a2, carry2, b2, b3, a3, c0, c1]
     movup.2                     # [b2, a2, carry2, b3, a3, c0, c1]
     u32widening_add3            # [c2, carry3, b3, a3, c0, c1]
     movdn.5                     # [carry3, b3, a3, c0, c1, c2]
 
-    # Step 4: carry3 + a3 + b3
+    # step 4: carry3 + a3 + b3
     movup.2                     # [a3, carry3, b3, c0, c1, c2]
     movup.2                     # [b3, a3, carry3, c0, c1, c2]
     u32widening_add3            # [c3, overflow, c0, c1, c2]
 
-    # Current: [c3, overflow, c0, c1, c2]
-    # Target:  [overflow, c0, c1, c2, c3]
-    # Move c3 from position 0 to position 4
+    # current: [c3, overflow, c0, c1, c2]
+    # target:  [overflow, c0, c1, c2, c3]
+    # move c3 from position 0 to position 4
     movdn.4                     # [overflow, c0, c1, c2, c3]
 end
 
@@ -67,20 +69,20 @@ end
 #! Stack transition is as follows:
 #! [b0, b1, b2, b3, a0, a1, a2, a3, ...] -> [underflow, c0, c1, c2, c3, ...], where c = (a - b) % 2^128
 pub proc overflowing_sub(b: u128, a: u128) -> (i1, u128)
-    # Input: [b0, b1, b2, b3, a0, a1, a2, a3, ...]
-    # Following u64 pattern: move a limbs to front, then subtract limb by limb
+    # input: [b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    # following u64 pattern: move a limbs to front, then subtract limb by limb
     # u32overflowing_sub computes: second - top = [borrow, result]
 
-    # Move a to front: [b...] [a...] -> [a...] [b...]
+    # move a to front: [b...] [a...] -> [a...] [b...]
     movup.7 movup.7 movup.7 movup.7
                                 # [a0, a1, a2, a3, b0, b1, b2, b3]
 
-    # Step 1: a0 - b0
+    # step 1: a0 - b0
     movup.4                     # [b0, a0, a1, a2, a3, b1, b2, b3]
     u32overflowing_sub          # [borrow1, c0, a1, a2, a3, b1, b2, b3]
     movdn.7                     # [c0, a1, a2, a3, b1, b2, b3, borrow1]
 
-    # Step 2: a1 - b1 - borrow1
+    # step 2: a1 - b1 - borrow1
     movup.4                     # [b1, c0, a1, a2, a3, b2, b3, borrow1]
     movup.2                     # [a1, b1, c0, a2, a3, b2, b3, borrow1]
     swap                        # [b1, a1, c0, a2, a3, b2, b3, borrow1]
@@ -93,7 +95,7 @@ pub proc overflowing_sub(b: u128, a: u128) -> (i1, u128)
     or                          # [borrow2, c1, c0, a2, a3, b2, b3]
     movdn.6                     # [c1, c0, a2, a3, b2, b3, borrow2]
 
-    # Step 3: a2 - b2 - borrow2
+    # step 3: a2 - b2 - borrow2
     movup.4                     # [b2, c1, c0, a2, a3, b3, borrow2]
     movup.3                     # [a2, b2, c1, c0, a3, b3, borrow2]
     swap                        # [b2, a2, c1, c0, a3, b3, borrow2]
@@ -106,7 +108,7 @@ pub proc overflowing_sub(b: u128, a: u128) -> (i1, u128)
     or                          # [borrow3, c2, c1, c0, a3, b3]
     movdn.5                     # [c2, c1, c0, a3, b3, borrow3]
 
-    # Step 4: a3 - b3 - borrow3
+    # step 4: a3 - b3 - borrow3
     movup.4                     # [b3, c2, c1, c0, a3, borrow3]
     movup.4                     # [a3, b3, c2, c1, c0, borrow3]
     swap                        # [b3, a3, c2, c1, c0, borrow3]
@@ -118,7 +120,7 @@ pub proc overflowing_sub(b: u128, a: u128) -> (i1, u128)
     movup.2                     # [borrow4a, borrow4b, c3, c2, c1, c0]
     or                          # [underflow, c3, c2, c1, c0]
 
-    # Rearrange: [underflow, c3, c2, c1, c0] -> [underflow, c0, c1, c2, c3]
+    # rearrange: [underflow, c3, c2, c1, c0] -> [underflow, c0, c1, c2, c3]
     movdn.4                     # [c3, c2, c1, c0, underflow]
     movdn.3                     # [c2, c1, c0, c3, underflow]
     movdn.2                     # [c1, c0, c2, c3, underflow]
@@ -161,26 +163,26 @@ end
 #!                    + a3*b3 (pos 6)
 #!
 pub proc overflowing_mul(b: u128, a: u128) -> (i1, u128)
-    # Input: [b0, b1, b2, b3, a0, a1, a2, a3, ...]
-    # Position:  0     1     2     3     4     5     6     7
+    # input: [b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    # position:  0     1     2     3     4     5     6     7
     #
     # u32widening_mul: [b, a] -> [lo, hi] computes a*b
     # u32widening_madd: [c, b, a] -> [lo, hi] computes a*b+c
 
-    # Move a limbs to front for easier access
+    # move a limbs to front for easier access
     movup.7 movup.7 movup.7 movup.7
-    # Now: [a0, a1, a2, a3, b0, b1, b2, b3, ...]
-    # Position: 0     1     2     3     4     5     6     7
+    # now: [a0, a1, a2, a3, b0, b1, b2, b3, ...]
+    # position: 0     1     2     3     4     5     6     7
 
-    # === Column 0: c0 ===
+    # === column 0: c0 ===
     # a0 * b0
     dup.4 dup.1                 # [a0, b0, a0, a1, a2, a3, b0, b1, b2, b3]
     u32widening_mul             # [c0, o0, a0, a1, a2, a3, b0, b1, b2, b3]
     movdn.9                     # [o0, a0, a1, a2, a3, b0, b1, b2, b3, c0]
-    # Stack: [o0, a0, a1, a2, a3, b0, b1, b2, b3, c0]
-    # Position: 0   1     2     3     4     5     6     7     8     9
+    # stack: [o0, a0, a1, a2, a3, b0, b1, b2, b3, c0]
+    # position: 0   1     2     3     4     5     6     7     8     9
 
-    # === Column 1: c1 ===
+    # === column 1: c1 ===
     # a1 * b0 + o0: [c, b, a] for madd where c=o0, b=b0, a=a1
     dup.5 dup.3                 # [a1, b0, o0, a0, a1, a2, a3, b0, b1, b2, b3, c0]
     u32widening_madd            # [p1, o1a, a0, a1, a2, a3, b0, b1, b2, b3, c0]
@@ -189,13 +191,13 @@ pub proc overflowing_mul(b: u128, a: u128) -> (i1, u128)
     dup.7 dup.3                 # [a0, b1, p1, o1a, a0, a1, a2, a3, b0, b1, b2, b3, c0]
     u32widening_madd            # [c1, o1b, o1a, a0, a1, a2, a3, b0, b1, b2, b3, c0]
     movdn.11                    # [o1b, o1a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1]
-    # Sum o1a + o1b, tracking carry for column 2
+    # sum o1a + o1b, tracking carry for column 2
     u32widening_add             # [o1_sum, o1_carry, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1]
     swap movdn.11               # [o1_sum, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
-    # Stack: [o1_sum, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
-    # Position:   0      1     2     3     4     5     6     7     8     9    10        11
+    # stack: [o1_sum, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
+    # position:   0      1     2     3     4     5     6     7     8     9    10        11
 
-    # === Column 2: c2 ===
+    # === column 2: c2 ===
     # a2 * b0 + o1_sum: [c, b, a] where c=o1_sum, b=b0, a=a2
     dup.5 dup.4                 # [a2, b0, o1_sum, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
     u32widening_madd            # [p2a, o2a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
@@ -208,20 +210,20 @@ pub proc overflowing_mul(b: u128, a: u128) -> (i1, u128)
     dup.9 dup.4                 # [a0, b2, p2b, o2b, o2a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
     u32widening_madd            # [c2, o2c, o2b, o2a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
     movdn.13                    # [o2c, o2b, o2a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2, o1_carry]
-    # Stack has 15 elements: o1_carry at position 14, c2 at position 13
-    # Sum o2a + o2b + o2c + o1_carry for carry into column 3
+    # stack has 15 elements: o1_carry at position 14, c2 at position 13
+    # sum o2a + o2b + o2c + o1_carry for carry into column 3
     u32widening_add3            # [o2_partial, o2_carry1, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2, o1_carry]
-    # Stack has 14 elements: o1_carry at position 13, c2 at position 12
+    # stack has 14 elements: o1_carry at position 13, c2 at position 12
     movup.13                    # [o1_carry, o2_partial, o2_carry1, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2] (14 elements)
     u32widening_add             # [o2_sum, o2_carry2, o2_carry1, a0, ...] (13 elements)
     swap movup.2 add            # [o2_total_carry, o2_sum, a0, ...] (12 elements)
     swap                        # [o2_sum, o2_total_carry, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    # Stack: [o2_sum, o2_carry, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    # Position:   0        1      2     3     4     5     6     7     8     9    10    11    12
+    # stack: [o2_sum, o2_carry, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
+    # position:   0        1      2     3     4     5     6     7     8     9    10    11    12
 
-    # === Column 3: c3 ===
-    # Stack: [o2_sum, o2_carry, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    # Position:   0        1      2     3     4     5     6     7     8     9    10    11    12
+    # === column 3: c3 ===
+    # stack: [o2_sum, o2_carry, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
+    # position:   0        1      2     3     4     5     6     7     8     9    10    11    12
     # a3 * b0 + o2_sum: [c, b, a] where c=o2_sum, b=b0, a=a3
     dup.6 dup.6                 # [a3, b0, o2_sum, o2_carry, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
     u32widening_madd            # [p3a, o3a, o2_carry, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
@@ -238,34 +240,34 @@ pub proc overflowing_mul(b: u128, a: u128) -> (i1, u128)
     dup.12 dup.6                # [a0, b3, p3c, o3c, o3b, o3a, o2_carry, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
     u32widening_madd            # [c3, o3d, o3c, o3b, o3a, o2_carry, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
 
-    # Stack: [c3, o3d, o3c, o3b, o3a, o2_carry, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    # Position: 0     1    2    3    4      5       6     7     8     9    10    11    12    13    14    15    16
+    # stack: [c3, o3d, o3c, o3b, o3a, o2_carry, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
+    # position: 0     1    2    3    4      5       6     7     8     9    10    11    12    13    14    15    16
     # 17 elements
 
-    # === Column 4+ (overflow): compute products that go directly to overflow ===
-    # Products for position 4: a3*b1, a2*b2, a1*b3
-    # Products for position 5: a3*b2, a2*b3
-    # Products for position 6: a3*b3
-    # We only need to detect if overflow is non-zero.
-    # Note: the `or` instruction requires binary operands, so we convert each term to boolean.
+    # === column 4+ (overflow): compute products that go directly to overflow ===
+    # products for position 4: a3*b1, a2*b2, a1*b3
+    # products for position 5: a3*b2, a2*b3
+    # products for position 6: a3*b3
+    # we only need to detect if overflow is non-zero.
+    # note: the `or` instruction requires binary operands, so we convert each term to boolean.
 
-    # Stack: [c3, o3d, o3c, o3b, o3a, o2_carry, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    # Position: 0     1    2    3    4      5       6     7     8     9    10    11    12    13    14    15    16
+    # stack: [c3, o3d, o3c, o3b, o3a, o2_carry, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
+    # position: 0     1    2    3    4      5       6     7     8     9    10    11    12    13    14    15    16
 
-    # Start with carries from column 3: (o3a + o3b + o3c + o3d + o2_carry) != 0
+    # start with carries from column 3: (o3a + o3b + o3c + o3d + o2_carry) != 0
     swap                        # [o3d, c3, o3c, o3b, o3a, o2_carry, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
     movup.2 add                 # [o3d+o3c, c3, o3b, o3a, o2_carry, ...] 16 elements
     movup.2 add                 # [sum1, c3, o3a, o2_carry, ...] 15 elements
     movup.2 add                 # [sum2, c3, o2_carry, a0, ...] 14 elements
     movup.2 add                 # [carry_sum, c3, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
     neq.0                       # [overflow_acc, c3, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    # Stack: [overflow_acc (bool), c3, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    # Position:        0          1     2     3     4     5     6     7     8     9    10    11    12
+    # stack: [overflow_acc (bool), c3, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
+    # position:        0          1     2     3     4     5     6     7     8     9    10    11    12
     # 13 elements
 
-    # Now compute the direct overflow products, converting each to boolean before OR
-    # Stack: [overflow_acc, c3, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    # Position:    0          1     2     3     4     5     6     7     8     9    10    11    12
+    # now compute the direct overflow products, converting each to boolean before OR
+    # stack: [overflow_acc, c3, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
+    # position:    0          1     2     3     4     5     6     7     8     9    10    11    12
 
     # a3 * b1 (position 4): a3 at pos 5, b1 at pos 7
     dup.7 dup.6                 # [a3, b1, overflow_acc, c3, ...]
@@ -298,7 +300,7 @@ pub proc overflowing_mul(b: u128, a: u128) -> (i1, u128)
     u32widening_mul             # [lo, hi, overflow_acc, c3, ...]
     add neq.0 or                # [overflow, c3, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
 
-    # Clean up: remove a and b limbs, keep only overflow, c3, c0, c1, c2
+    # clean up: remove a and b limbs, keep only overflow, c3, c0, c1, c2
     movup.2 drop                # [overflow, c3, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
     movup.2 drop                # [overflow, c3, a2, a3, b0, b1, b2, b3, c0, c1, c2]
     movup.2 drop                # [overflow, c3, a3, b0, b1, b2, b3, c0, c1, c2]
@@ -308,7 +310,7 @@ pub proc overflowing_mul(b: u128, a: u128) -> (i1, u128)
     movup.2 drop                # [overflow, c3, b3, c0, c1, c2]
     movup.2 drop                # [overflow, c3, c0, c1, c2]
 
-    # Rearrange: [overflow, c3, c0, c1, c2] -> [overflow, c0, c1, c2, c3]
+    # rearrange: [overflow, c3, c0, c1, c2] -> [overflow, c0, c1, c2, c3]
     swap                        # [c3, overflow, c0, c1, c2]
     movdn.4                     # [overflow, c0, c1, c2, c3]
 end
@@ -330,26 +332,26 @@ end
 #! Uses schoolbook multiplication with u32wrapping_madd for products contributing to c3
 #! since overflow there doesn't affect the result.
 pub proc wrapping_mul(b: u128, a: u128) -> u128
-    # Input: [b0, b1, b2, b3, a0, a1, a2, a3, ...]
-    # Position:  0     1     2     3     4     5     6     7
+    # input: [b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    # position:  0     1     2     3     4     5     6     7
     #
     # u32widening_mul: [b, a] -> [lo, hi] computes a*b
     # u32widening_madd: [c, b, a] -> [lo, hi] computes a*b+c
 
-    # Move a limbs to front for easier access
+    # move a limbs to front for easier access
     movup.7 movup.7 movup.7 movup.7
-    # Now: [a0, a1, a2, a3, b0, b1, b2, b3, ...]
-    # Position: 0     1     2     3     4     5     6     7
+    # now: [a0, a1, a2, a3, b0, b1, b2, b3, ...]
+    # position: 0     1     2     3     4     5     6     7
 
-    # === Column 0: c0 ===
+    # === column 0: c0 ===
     # a0 * b0
     dup.4 dup.1                 # [a0, b0, a0, a1, a2, a3, b0, b1, b2, b3]
     u32widening_mul             # [c0, o0, a0, a1, a2, a3, b0, b1, b2, b3]
     movdn.9                     # [o0, a0, a1, a2, a3, b0, b1, b2, b3, c0]
-    # Stack: [o0, a0, a1, a2, a3, b0, b1, b2, b3, c0]
-    # Position: 0   1     2     3     4     5     6     7     8     9
+    # stack: [o0, a0, a1, a2, a3, b0, b1, b2, b3, c0]
+    # position: 0   1     2     3     4     5     6     7     8     9
 
-    # === Column 1: c1 ===
+    # === column 1: c1 ===
     # a1 * b0 + o0: [c, b, a] for madd where c=o0, b=b0, a=a1
     dup.5 dup.3                 # [a1, b0, o0, a0, a1, a2, a3, b0, b1, b2, b3, c0]
     u32widening_madd            # [p1, o1a, a0, a1, a2, a3, b0, b1, b2, b3, c0]
@@ -358,13 +360,13 @@ pub proc wrapping_mul(b: u128, a: u128) -> u128
     dup.7 dup.3                 # [a0, b1, p1, o1a, a0, a1, a2, a3, b0, b1, b2, b3, c0]
     u32widening_madd            # [c1, o1b, o1a, a0, a1, a2, a3, b0, b1, b2, b3, c0]
     movdn.11                    # [o1b, o1a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1]
-    # Sum o1a + o1b, tracking carry for column 2
+    # sum o1a + o1b, tracking carry for column 2
     u32widening_add             # [o1_sum, o1_carry, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1]
     swap movdn.11               # [o1_sum, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
-    # Stack: [o1_sum, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
-    # Position:   0      1     2     3     4     5     6     7     8     9    10        11
+    # stack: [o1_sum, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
+    # position:   0      1     2     3     4     5     6     7     8     9    10        11
 
-    # === Column 2: c2 ===
+    # === column 2: c2 ===
     # a2 * b0 + o1_sum: [c, b, a] where c=o1_sum, b=b0, a=a2
     dup.5 dup.4                 # [a2, b0, o1_sum, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
     u32widening_madd            # [p2a, o2a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
@@ -377,34 +379,34 @@ pub proc wrapping_mul(b: u128, a: u128) -> u128
     dup.9 dup.4                 # [a0, b2, p2b, o2b, o2a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
     u32widening_madd            # [c2, o2c, o2b, o2a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, o1_carry]
     movdn.13                    # [o2c, o2b, o2a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2, o1_carry]
-    # Stack has 15 elements: o1_carry at position 14, c2 at position 13
-    # Sum o2a + o2b + o2c + o1_carry for carry into column 3
+    # stack has 15 elements: o1_carry at position 14, c2 at position 13
+    # sum o2a + o2b + o2c + o1_carry for carry into column 3
     u32widening_add3            # [o2_partial, o2_carry1, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2, o1_carry]
-    # Stack has 14 elements: o1_carry at position 13, c2 at position 12
+    # stack has 14 elements: o1_carry at position 13, c2 at position 12
     movup.13                    # [o1_carry, o2_partial, o2_carry1, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
     u32widening_add             # [o2_sum, o2_carry2, o2_carry1, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    # Combine carries: o2_carry1 + o2_carry2 (will be at most 2, fits in u32)
+    # combine carries: o2_carry1 + o2_carry2 (will be at most 2, fits in u32)
     swap movup.2 add            # [o2_total_carry, o2_sum, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
     swap                        # [o2_sum, o2_total_carry, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    # Stack: [o2_sum, o2_carry, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    # Position:   0        1      2     3     4     5     6     7     8     9    10    11    12
+    # stack: [o2_sum, o2_carry, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
+    # position:   0        1      2     3     4     5     6     7     8     9    10    11    12
 
-    # === Column 3: c3 (overflow discarded) ===
-    # Stack: [o2_sum, o2_carry, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    # Position:   0        1      2     3     4     5     6     7     8     9    10    11    12
+    # === column 3: c3 (overflow discarded) ===
+    # stack: [o2_sum, o2_carry, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
+    # position:   0        1      2     3     4     5     6     7     8     9    10    11    12
     # 13 elements
-    # For wrapping_mul, o2_carry represents overflow beyond 128 bits - discard it now
+    # for wrapping_mul, o2_carry represents overflow beyond 128 bits - discard it now
     swap drop                   # [o2_sum, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    # Stack: [o2_sum, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    # Position:   0      1     2     3     4     5     6     7     8     9    10    11
+    # stack: [o2_sum, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
+    # position:   0      1     2     3     4     5     6     7     8     9    10    11
     # 12 elements
 
     # a3 * b0 + o2_sum
     dup.5 dup.5                 # dup.5 gets b0, then dup.5 gets a3
                                 # [a3, b0, o2_sum, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
     u32wrapping_madd            # [p3a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    # Stack: [p3a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    # Position:  0    1     2     3     4     5     6     7     8     9    10    11
+    # stack: [p3a, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
+    # position:  0    1     2     3     4     5     6     7     8     9    10    11
     # 12 elements
 
     # a2 * b1 + p3a
@@ -421,23 +423,996 @@ pub proc wrapping_mul(b: u128, a: u128) -> u128
     dup.8 dup.2                 # dup.8 gets b3, then dup.2 gets a0
                                 # [a0, b3, p3c, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
     u32wrapping_madd            # [c3, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    # Stack: [c3, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
-    # Position: 0     1     2     3     4     5     6     7     8     9    10    11
+    # stack: [c3, a0, a1, a2, a3, b0, b1, b2, b3, c0, c1, c2]
+    # position: 0     1     2     3     4     5     6     7     8     9    10    11
     # 12 elements; extract c0, c1, c2 from positions 9, 10, 11
     movup.9                     # [c0, c3, a0, a1, a2, a3, b0, b1, b2, b3, c1, c2]
     movup.10                    # [c1, c0, c3, a0, a1, a2, a3, b0, b1, b2, b3, c2]
     movup.11                    # [c2, c1, c0, c3, a0, a1, a2, a3, b0, b1, b2, b3]
     movup.3                     # [c3, c2, c1, c0, a0, a1, a2, a3, b0, b1, b2, b3]
-    # Stack: [c3, c2, c1, c0, a0, a1, a2, a3, b0, b1, b2, b3]
-    # Position: 0     1     2     3     4     5     6     7     8     9    10    11
+    # stack: [c3, c2, c1, c0, a0, a1, a2, a3, b0, b1, b2, b3]
+    # position: 0     1     2     3     4     5     6     7     8     9    10    11
     # 12 elements; need to drop 8 elements (a and b limbs)
     swapw                       # [a0, a1, a2, a3, c3, c2, c1, c0, b0, b1, b2, b3]
     dropw                       # [c3, c2, c1, c0, b0, b1, b2, b3]
     swapw                       # [b0, b1, b2, b3, c3, c2, c1, c0]
     dropw                       # [c3, c2, c1, c0]
 
-    # Rearrange from [c3, c2, c1, c0] to [c0, c1, c2, c3]
+    # rearrange from [c3, c2, c1, c0] to [c0, c1, c2, c3]
     movdn.3                     # [c2, c1, c0, c3]
     movdn.2                     # [c1, c0, c2, c3]
     swap                        # [c0, c1, c2, c3]
+end
+
+# ===== COMPARISONS ===============================================================================
+
+#! Compares two unsigned 128-bit integers for equality.
+#!
+#! Inputs:  [b0, b1, b2, b3, a0, a1, a2, a3]
+#! Outputs: [result]
+#!
+#! Where:
+#! - a0 is the least significant 32-bit limb of a.
+#! - a1 is the second 32-bit limb of a.
+#! - a2 is the third 32-bit limb of a.
+#! - a3 is the most significant 32-bit limb of a.
+#! - b0 is the least significant 32-bit limb of b.
+#! - b1 is the second 32-bit limb of b.
+#! - b2 is the third 32-bit limb of b.
+#! - b3 is the most significant 32-bit limb of b.
+#! - result is 1 if a == b, and 0 otherwise.
+#!
+#! Invocation: exec
+pub proc eq(b: u128, a: u128) -> i1
+    # input: [b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    movup.4         # [a0, b0, b1, b2, b3, a1, a2, a3]
+    eq              # [a0==b0, b1, b2, b3, a1, a2, a3]
+    movup.4         # [a1, a0==b0, b1, b2, b3, a2, a3]
+    movup.2         # [b1, a1, a0==b0, b2, b3, a2, a3]
+    eq              # [a1==b1, a0==b0, b2, b3, a2, a3]
+    and             # [eq01, b2, b3, a2, a3]
+    movup.3         # [a2, eq01, b2, b3, a3]
+    movup.2         # [b2, a2, eq01, b3, a3]
+    eq              # [a2==b2, eq01, b3, a3]
+    and             # [eq012, b3, a3]
+    movup.2         # [a3, eq012, b3]
+    movup.2         # [b3, a3, eq012]
+    eq              # [a3==b3, eq012]
+    and             # [result]
+end
+
+#! Compares two unsigned 128-bit integers for inequality.
+#!
+#! Inputs:  [b0, b1, b2, b3, a0, a1, a2, a3]
+#! Outputs: [result]
+#!
+#! Where:
+#! - a0 is the least significant 32-bit limb of a.
+#! - a1 is the second 32-bit limb of a.
+#! - a2 is the third 32-bit limb of a.
+#! - a3 is the most significant 32-bit limb of a.
+#! - b0 is the least significant 32-bit limb of b.
+#! - b1 is the second 32-bit limb of b.
+#! - b2 is the third 32-bit limb of b.
+#! - b3 is the most significant 32-bit limb of b.
+#! - result is 1 if a != b, and 0 otherwise.
+#!
+#! Invocation: exec
+pub proc neq(b: u128, a: u128) -> i1
+    # input: [b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    movup.4         # [a0, b0, b1, b2, b3, a1, a2, a3]
+    neq             # [a0!=b0, b1, b2, b3, a1, a2, a3]
+    movup.4         # [a1, a0!=b0, b1, b2, b3, a2, a3]
+    movup.2         # [b1, a1, a0!=b0, b2, b3, a2, a3]
+    neq             # [a1!=b1, a0!=b0, b2, b3, a2, a3]
+    or              # [neq01, b2, b3, a2, a3]
+    movup.3         # [a2, neq01, b2, b3, a3]
+    movup.2         # [b2, a2, neq01, b3, a3]
+    neq             # [a2!=b2, neq01, b3, a3]
+    or              # [neq012, b3, a3]
+    movup.2         # [a3, neq012, b3]
+    movup.2         # [b3, a3, neq012]
+    neq             # [a3!=b3, neq012]
+    or              # [result]
+end
+
+#! Compares an unsigned 128-bit integer to zero.
+#!
+#! Inputs:  [a0, a1, a2, a3]
+#! Outputs: [result]
+#!
+#! Where:
+#! - a0 is the least significant 32-bit limb of a.
+#! - a1 is the second 32-bit limb of a.
+#! - a2 is the third 32-bit limb of a.
+#! - a3 is the most significant 32-bit limb of a.
+#! - result is 1 if a == 0, and 0 otherwise.
+#!
+#! Invocation: exec
+pub proc eqz(a: u128) -> i1
+    # input: [a0, a1, a2, a3, ...]
+    eq.0            # [a0==0, a1, a2, a3]
+    swap            # [a1, a0==0, a2, a3]
+    eq.0            # [a1==0, a0==0, a2, a3]
+    and             # [eq01, a2, a3]
+    swap            # [a2, eq01, a3]
+    eq.0            # [a2==0, eq01, a3]
+    and             # [eq012, a3]
+    swap            # [a3, eq012]
+    eq.0            # [a3==0, eq012]
+    and             # [result]
+end
+
+#! Compares two unsigned 128-bit integers for a < b.
+#!
+#! Inputs:  [b0, b1, b2, b3, a0, a1, a2, a3]
+#! Outputs: [result]
+#!
+#! Where:
+#! - a0 is the least significant 32-bit limb of a.
+#! - a1 is the second 32-bit limb of a.
+#! - a2 is the third 32-bit limb of a.
+#! - a3 is the most significant 32-bit limb of a.
+#! - b0 is the least significant 32-bit limb of b.
+#! - b1 is the second 32-bit limb of b.
+#! - b2 is the third 32-bit limb of b.
+#! - b3 is the most significant 32-bit limb of b.
+#! - result is 1 if a < b, and 0 otherwise.
+#!
+#! Invocation: exec
+pub proc lt(b: u128, a: u128) -> i1
+    # use subtraction: a < b iff (a - b) underflows
+    exec.overflowing_sub
+    # stack: [underflow, c0, c1, c2, c3, ...]
+    # drop the result, keep only underflow flag
+    movdn.4                     # [c0, c1, c2, c3, underflow]
+    drop drop drop drop         # [underflow]
+end
+
+#! Compares two unsigned 128-bit integers for a > b.
+#!
+#! Inputs:  [b0, b1, b2, b3, a0, a1, a2, a3]
+#! Outputs: [result]
+#!
+#! Where:
+#! - a0 is the least significant 32-bit limb of a.
+#! - a1 is the second 32-bit limb of a.
+#! - a2 is the third 32-bit limb of a.
+#! - a3 is the most significant 32-bit limb of a.
+#! - b0 is the least significant 32-bit limb of b.
+#! - b1 is the second 32-bit limb of b.
+#! - b2 is the third 32-bit limb of b.
+#! - b3 is the most significant 32-bit limb of b.
+#! - result is 1 if a > b, and 0 otherwise.
+#!
+#! Invocation: exec
+pub proc gt(b: u128, a: u128) -> i1
+    # a > b iff b < a
+    # swap a and b, then check if b < a (underflow)
+    swapw
+    # stack: [a0, a1, a2, a3, b0, b1, b2, b3, ...] - now b is "a" and a is "b" for sub
+    exec.overflowing_sub
+    # this computes b - a, underflow means b < a, i.e., a > b
+    movdn.4
+    drop drop drop drop
+end
+
+#! Compares two unsigned 128-bit integers for a <= b.
+#!
+#! Inputs:  [b0, b1, b2, b3, a0, a1, a2, a3]
+#! Outputs: [result]
+#!
+#! Where:
+#! - a0 is the least significant 32-bit limb of a.
+#! - a1 is the second 32-bit limb of a.
+#! - a2 is the third 32-bit limb of a.
+#! - a3 is the most significant 32-bit limb of a.
+#! - b0 is the least significant 32-bit limb of b.
+#! - b1 is the second 32-bit limb of b.
+#! - b2 is the third 32-bit limb of b.
+#! - b3 is the most significant 32-bit limb of b.
+#! - result is 1 if a <= b, and 0 otherwise.
+#!
+#! Invocation: exec
+pub proc lte(b: u128, a: u128) -> i1
+    exec.gt
+    not
+end
+
+#! Compares two unsigned 128-bit integers for a >= b.
+#!
+#! Inputs:  [b0, b1, b2, b3, a0, a1, a2, a3]
+#! Outputs: [result]
+#!
+#! Where:
+#! - a0 is the least significant 32-bit limb of a.
+#! - a1 is the second 32-bit limb of a.
+#! - a2 is the third 32-bit limb of a.
+#! - a3 is the most significant 32-bit limb of a.
+#! - b0 is the least significant 32-bit limb of b.
+#! - b1 is the second 32-bit limb of b.
+#! - b2 is the third 32-bit limb of b.
+#! - b3 is the most significant 32-bit limb of b.
+#! - result is 1 if a >= b, and 0 otherwise.
+#!
+#! Invocation: exec
+pub proc gte(b: u128, a: u128) -> i1
+    exec.lt
+    not
+end
+
+#! Computes the minimum of two unsigned 128-bit integers.
+#!
+#! Inputs:  [b0, b1, b2, b3, a0, a1, a2, a3]
+#! Outputs: [c0, c1, c2, c3]
+#!
+#! Where:
+#! - a0 is the least significant 32-bit limb of a.
+#! - a1 is the second 32-bit limb of a.
+#! - a2 is the third 32-bit limb of a.
+#! - a3 is the most significant 32-bit limb of a.
+#! - b0 is the least significant 32-bit limb of b.
+#! - b1 is the second 32-bit limb of b.
+#! - b2 is the third 32-bit limb of b.
+#! - b3 is the most significant 32-bit limb of b.
+#! - c0 is the least significant 32-bit limb of min(a, b).
+#! - c1 is the second 32-bit limb of min(a, b).
+#! - c2 is the third 32-bit limb of min(a, b).
+#! - c3 is the most significant 32-bit limb of min(a, b).
+#!
+#! Invocation: exec
+pub proc min(b: u128, a: u128) -> u128
+    # duplicate both values for comparison
+    dupw.1                      # [a0, a1, a2, a3, b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    dupw.1                      # [b0, b1, b2, b3, a0, a1, a2, a3, b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    exec.gt                     # [a>b, b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    # cdropw: [c, B, A, ...] -> [B if c=1, A if c=0]
+    # if a > b (c=1), select b; otherwise select a
+    cdropw                      # [c0, c1, c2, c3, ...]
+end
+
+#! Computes the maximum of two unsigned 128-bit integers.
+#!
+#! Inputs:  [b0, b1, b2, b3, a0, a1, a2, a3]
+#! Outputs: [c0, c1, c2, c3]
+#!
+#! Where:
+#! - a0 is the least significant 32-bit limb of a.
+#! - a1 is the second 32-bit limb of a.
+#! - a2 is the third 32-bit limb of a.
+#! - a3 is the most significant 32-bit limb of a.
+#! - b0 is the least significant 32-bit limb of b.
+#! - b1 is the second 32-bit limb of b.
+#! - b2 is the third 32-bit limb of b.
+#! - b3 is the most significant 32-bit limb of b.
+#! - c0 is the least significant 32-bit limb of max(a, b).
+#! - c1 is the second 32-bit limb of max(a, b).
+#! - c2 is the third 32-bit limb of max(a, b).
+#! - c3 is the most significant 32-bit limb of max(a, b).
+#!
+#! Invocation: exec
+pub proc max(b: u128, a: u128) -> u128
+    # duplicate both values for comparison
+    dupw.1                      # [a0, a1, a2, a3, b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    dupw.1                      # [b0, b1, b2, b3, a0, a1, a2, a3, b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    exec.lt                     # [a<b, b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    # cdropw: [c, B, A, ...] -> [B if c=1, A if c=0]
+    # if a < b (c=1), select b; otherwise select a
+    cdropw                      # [c0, c1, c2, c3, ...]
+end
+
+# ===== BITWISE OPERATIONS ========================================================================
+
+#! Computes bitwise AND of two unsigned 128-bit integers.
+#!
+#! Inputs:  [b0, b1, b2, b3, a0, a1, a2, a3]
+#! Outputs: [c0, c1, c2, c3]
+#!
+#! Where:
+#! - a0 is the least significant 32-bit limb of a.
+#! - a1 is the second 32-bit limb of a.
+#! - a2 is the third 32-bit limb of a.
+#! - a3 is the most significant 32-bit limb of a.
+#! - b0 is the least significant 32-bit limb of b.
+#! - b1 is the second 32-bit limb of b.
+#! - b2 is the third 32-bit limb of b.
+#! - b3 is the most significant 32-bit limb of b.
+#! - c0 is the least significant 32-bit limb of (a AND b).
+#! - c1 is the second 32-bit limb of (a AND b).
+#! - c2 is the third 32-bit limb of (a AND b).
+#! - c3 is the most significant 32-bit limb of (a AND b).
+#!
+#! Invocation: exec
+pub proc and(b: u128, a: u128) -> u128
+    # input: [b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    movup.4         # [a0, b0, b1, b2, b3, a1, a2, a3]
+    u32and          # [c0, b1, b2, b3, a1, a2, a3]
+    movup.4         # [a1, c0, b1, b2, b3, a2, a3]
+    movup.2         # [b1, a1, c0, b2, b3, a2, a3]
+    u32and          # [c1, c0, b2, b3, a2, a3]
+    movup.4         # [a2, c1, c0, b2, b3, a3]
+    movup.3         # [b2, a2, c1, c0, b3, a3]
+    u32and          # [c2, c1, c0, b3, a3]
+    movup.4         # [a3, c2, c1, c0, b3]
+    movup.4         # [b3, a3, c2, c1, c0]
+    u32and          # [c3, c2, c1, c0]
+    reversew        # [c0, c1, c2, c3]
+end
+
+#! Computes bitwise OR of two unsigned 128-bit integers.
+#!
+#! Inputs:  [b0, b1, b2, b3, a0, a1, a2, a3]
+#! Outputs: [c0, c1, c2, c3]
+#!
+#! Where:
+#! - a0 is the least significant 32-bit limb of a.
+#! - a1 is the second 32-bit limb of a.
+#! - a2 is the third 32-bit limb of a.
+#! - a3 is the most significant 32-bit limb of a.
+#! - b0 is the least significant 32-bit limb of b.
+#! - b1 is the second 32-bit limb of b.
+#! - b2 is the third 32-bit limb of b.
+#! - b3 is the most significant 32-bit limb of b.
+#! - c0 is the least significant 32-bit limb of (a OR b).
+#! - c1 is the second 32-bit limb of (a OR b).
+#! - c2 is the third 32-bit limb of (a OR b).
+#! - c3 is the most significant 32-bit limb of (a OR b).
+#!
+#! Invocation: exec
+pub proc or(b: u128, a: u128) -> u128
+    # input: [b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    movup.4         # [a0, b0, b1, b2, b3, a1, a2, a3]
+    u32or           # [c0, b1, b2, b3, a1, a2, a3]
+    movup.4         # [a1, c0, b1, b2, b3, a2, a3]
+    movup.2         # [b1, a1, c0, b2, b3, a2, a3]
+    u32or           # [c1, c0, b2, b3, a2, a3]
+    movup.4         # [a2, c1, c0, b2, b3, a3]
+    movup.3         # [b2, a2, c1, c0, b3, a3]
+    u32or           # [c2, c1, c0, b3, a3]
+    movup.4         # [a3, c2, c1, c0, b3]
+    movup.4         # [b3, a3, c2, c1, c0]
+    u32or           # [c3, c2, c1, c0]
+    reversew        # [c0, c1, c2, c3]
+end
+
+#! Computes bitwise XOR of two unsigned 128-bit integers.
+#!
+#! Inputs:  [b0, b1, b2, b3, a0, a1, a2, a3]
+#! Outputs: [c0, c1, c2, c3]
+#!
+#! Where:
+#! - a0 is the least significant 32-bit limb of a.
+#! - a1 is the second 32-bit limb of a.
+#! - a2 is the third 32-bit limb of a.
+#! - a3 is the most significant 32-bit limb of a.
+#! - b0 is the least significant 32-bit limb of b.
+#! - b1 is the second 32-bit limb of b.
+#! - b2 is the third 32-bit limb of b.
+#! - b3 is the most significant 32-bit limb of b.
+#! - c0 is the least significant 32-bit limb of (a XOR b).
+#! - c1 is the second 32-bit limb of (a XOR b).
+#! - c2 is the third 32-bit limb of (a XOR b).
+#! - c3 is the most significant 32-bit limb of (a XOR b).
+#!
+#! Invocation: exec
+pub proc xor(b: u128, a: u128) -> u128
+    # input: [b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    movup.4         # [a0, b0, b1, b2, b3, a1, a2, a3]
+    u32xor          # [c0, b1, b2, b3, a1, a2, a3]
+    movup.4         # [a1, c0, b1, b2, b3, a2, a3]
+    movup.2         # [b1, a1, c0, b2, b3, a2, a3]
+    u32xor          # [c1, c0, b2, b3, a2, a3]
+    movup.4         # [a2, c1, c0, b2, b3, a3]
+    movup.3         # [b2, a2, c1, c0, b3, a3]
+    u32xor          # [c2, c1, c0, b3, a3]
+    movup.4         # [a3, c2, c1, c0, b3]
+    movup.4         # [b3, a3, c2, c1, c0]
+    u32xor          # [c3, c2, c1, c0]
+    reversew        # [c0, c1, c2, c3]
+end
+
+#! Computes bitwise NOT of an unsigned 128-bit integer.
+#!
+#! Inputs:  [a0, a1, a2, a3]
+#! Outputs: [c0, c1, c2, c3]
+#!
+#! Where:
+#! - a0 is the least significant 32-bit limb of a.
+#! - a1 is the second 32-bit limb of a.
+#! - a2 is the third 32-bit limb of a.
+#! - a3 is the most significant 32-bit limb of a.
+#! - c0 is the least significant 32-bit limb of NOT(a).
+#! - c1 is the second 32-bit limb of NOT(a).
+#! - c2 is the third 32-bit limb of NOT(a).
+#! - c3 is the most significant 32-bit limb of NOT(a).
+#!
+#! Invocation: exec
+pub proc not(a: u128) -> u128
+    # input: [a0, a1, a2, a3, ...]
+    # process from highest limb to lowest using movup.3 u32not pattern
+    movup.3 u32not  # [c3, a0, a1, a2, ...]
+    movup.3 u32not  # [c2, c3, a0, a1, ...]
+    movup.3 u32not  # [c1, c2, c3, a0, ...]
+    movup.3 u32not  # [c0, c1, c2, c3, ...]
+end
+
+#! Computes the number of leading zeros in an unsigned 128-bit integer.
+#!
+#! Inputs:  [a0, a1, a2, a3]
+#! Outputs: [count]
+#!
+#! Where:
+#! - a0 is the least significant 32-bit limb of a.
+#! - a1 is the second 32-bit limb of a.
+#! - a2 is the third 32-bit limb of a.
+#! - a3 is the most significant 32-bit limb of a.
+#! - count is the number of leading zero bits in a (0..=128).
+#!
+#! Invocation: exec
+pub proc clz(a: u128) -> u8
+    # input: [a0, a1, a2, a3, ...]
+    # leading zeros start from the most significant limb (a3)
+    movup.3         # [a3, a0, a1, a2, ...]
+    dup.0
+    eq.0
+
+    if.true         # a3 == 0
+        drop        # [a0, a1, a2, ...]
+        movup.2     # [a2, a0, a1, ...]
+        dup.0
+        eq.0
+
+        if.true     # a2 == 0
+            drop    # [a0, a1, ...]
+            swap    # [a1, a0, ...]
+            dup.0
+            eq.0
+
+            if.true # a1 == 0
+                drop        # [a0, ...]
+                u32clz
+                add.96      # clz(a0) + 96
+            else
+                swap drop   # [a1, ...]
+                u32clz
+                add.64      # clz(a1) + 64
+            end
+        else
+            movdn.2 drop drop   # [a2, ...]
+            u32clz
+            add.32              # clz(a2) + 32
+        end
+    else
+        movdn.3 drop drop drop  # [a3, ...]
+        u32clz                  # clz(a3)
+    end
+end
+
+#! Computes the number of trailing zeros in an unsigned 128-bit integer.
+#!
+#! Inputs:  [a0, a1, a2, a3]
+#! Outputs: [count]
+#!
+#! Where:
+#! - a0 is the least significant 32-bit limb of a.
+#! - a1 is the second 32-bit limb of a.
+#! - a2 is the third 32-bit limb of a.
+#! - a3 is the most significant 32-bit limb of a.
+#! - count is the number of trailing zero bits in a (0..=128).
+#!
+#! Invocation: exec
+pub proc ctz(a: u128) -> u8
+    # input: [a0, a1, a2, a3, ...]
+    # trailing zeros start from the least significant limb (a0)
+    dup.0
+    eq.0
+
+    if.true         # a0 == 0
+        drop        # [a1, a2, a3, ...]
+        dup.0
+        eq.0
+
+        if.true     # a1 == 0
+            drop    # [a2, a3, ...]
+            dup.0
+            eq.0
+
+            if.true # a2 == 0
+                drop        # [a3, ...]
+                u32ctz
+                add.96      # ctz(a3) + 96
+            else
+                swap drop   # [a2, ...]
+                u32ctz
+                add.64      # ctz(a2) + 64
+            end
+        else
+            movdn.2 drop drop   # [a1, ...]
+            u32ctz
+            add.32              # ctz(a1) + 32
+        end
+    else
+        movdn.3 drop drop drop  # [a0, ...]
+        u32ctz                  # ctz(a0)
+    end
+end
+
+#! Computes the number of leading ones in an unsigned 128-bit integer.
+#!
+#! Inputs:  [a0, a1, a2, a3]
+#! Outputs: [count]
+#!
+#! Where:
+#! - a0 is the least significant 32-bit limb of a.
+#! - a1 is the second 32-bit limb of a.
+#! - a2 is the third 32-bit limb of a.
+#! - a3 is the most significant 32-bit limb of a.
+#! - count is the number of leading one bits in a (0..=128).
+#!
+#! Invocation: exec
+pub proc clo(a: u128) -> u8
+    # input: [a0, a1, a2, a3, ...]
+    # leading ones start from the most significant limb (a3)
+    movup.3         # [a3, a0, a1, a2, ...]
+    dup.0
+    eq.U32_MAX
+
+    if.true         # a3 == 0xFFFFFFFF
+        drop        # [a0, a1, a2, ...]
+        movup.2     # [a2, a0, a1, ...]
+        dup.0
+        eq.U32_MAX
+
+        if.true     # a2 == 0xFFFFFFFF
+            drop    # [a0, a1, ...]
+            swap    # [a1, a0, ...]
+            dup.0
+            eq.U32_MAX
+
+            if.true # a1 == 0xFFFFFFFF
+                drop        # [a0, ...]
+                u32clo
+                add.96      # clo(a0) + 96
+            else
+                swap drop   # [a1, ...]
+                u32clo
+                add.64      # clo(a1) + 64
+            end
+        else
+            movdn.2 drop drop   # [a2, ...]
+            u32clo
+            add.32              # clo(a2) + 32
+        end
+    else
+        movdn.3 drop drop drop  # [a3, ...]
+        u32clo                  # clo(a3)
+    end
+end
+
+#! Computes the number of trailing ones in an unsigned 128-bit integer.
+#!
+#! Inputs:  [a0, a1, a2, a3]
+#! Outputs: [count]
+#!
+#! Where:
+#! - a0 is the least significant 32-bit limb of a.
+#! - a1 is the second 32-bit limb of a.
+#! - a2 is the third 32-bit limb of a.
+#! - a3 is the most significant 32-bit limb of a.
+#! - count is the number of trailing one bits in a (0..=128).
+#!
+#! Invocation: exec
+pub proc cto(a: u128) -> u8
+    # input: [a0, a1, a2, a3, ...]
+    # trailing ones start from the least significant limb (a0)
+    dup.0
+    eq.U32_MAX
+
+    if.true         # a0 == 0xFFFFFFFF
+        drop        # [a1, a2, a3, ...]
+        dup.0
+        eq.U32_MAX
+
+        if.true     # a1 == 0xFFFFFFFF
+            drop    # [a2, a3, ...]
+            dup.0
+            eq.U32_MAX
+
+            if.true # a2 == 0xFFFFFFFF
+                drop        # [a3, ...]
+                u32cto
+                add.96      # cto(a3) + 96
+            else
+                swap drop   # [a2, ...]
+                u32cto
+                add.64      # cto(a2) + 64
+            end
+        else
+            movdn.2 drop drop   # [a1, ...]
+            u32cto
+            add.32              # cto(a1) + 32
+        end
+    else
+        movdn.3 drop drop drop  # [a0, ...]
+        u32cto                  # cto(a0)
+    end
+end
+
+# ===== SHIFT OPERATIONS ==========================================================================
+
+#! Computes a left shift of an unsigned 128-bit integer.
+#!
+#! Inputs:  [n, a0, a1, a2, a3]
+#! Outputs: [c0, c1, c2, c3]
+#!
+#! Where:
+#! - n is the shift amount in bits.
+#! - a0 is the least significant 32-bit limb of a.
+#! - a1 is the second 32-bit limb of a.
+#! - a2 is the third 32-bit limb of a.
+#! - a3 is the most significant 32-bit limb of a.
+#! - c0 is the least significant 32-bit limb of (a << n) mod 2^128.
+#! - c1 is the second 32-bit limb of (a << n) mod 2^128.
+#! - c2 is the third 32-bit limb of (a << n) mod 2^128.
+#! - c3 is the most significant 32-bit limb of (a << n) mod 2^128.
+#!
+#! Panics if:
+#! - n is not in the range [0, 128).
+#!
+#! Invocation: exec
+pub proc shl(n: u32, a: u128) -> u128
+    # validate shift amount is in [0, 128)
+    dup u32lt.128 assert.err="shift amount must be in the range [0, 128)"
+
+    # strategy: compute 2^n as u128, then use wrapping_mul
+    # for n < 64: 2^n fits in lower 64 bits
+    # for n >= 64: 2^n is in upper 64 bits
+
+    dup             # [n, n, a0, a1, a2, a3, ...]
+    push.64
+    u32lt           # [n<64, n, a0, a1, a2, a3, ...]
+
+    if.true
+        # n < 64: 2^n = [pow_lo, pow_hi, 0, 0]
+        pow2            # [2^n, a0, a1, a2, a3, ...]
+        u32split        # [pow_lo, pow_hi, a0, a1, a2, a3, ...]
+        push.0 push.0   # [0, 0, pow_lo, pow_hi, a0, a1, a2, a3, ...]
+        movup.3         # [pow_hi, 0, 0, pow_lo, a0, a1, a2, a3, ...]
+        movup.3         # [pow_lo, pow_hi, 0, 0, a0, a1, a2, a3, ...]
+        # stack: [pow_lo, pow_hi, 0, 0, a0, a1, a2, a3, ...] - this is 2^n in u128 format
+        # but wait, we need [b0, b1, b2, b3, a0, a1, a2, a3] for wrapping_mul
+        # pow_lo=b0, pow_hi=b1, 0=b2, 0=b3
+        # current: [pow_lo, pow_hi, 0, 0, a0, a1, a2, a3] = [b0, b1, b2, b3, a0, a1, a2, a3]
+        exec.wrapping_mul
+    else
+        # n >= 64: 2^n = [0, 0, pow_lo, pow_hi] where pow = 2^(n-64)
+        push.64
+        u32wrapping_sub # [n-64, a0, a1, a2, a3, ...]
+        pow2            # [2^(n-64), a0, a1, a2, a3, ...]
+        u32split        # [pow_lo, pow_hi, a0, a1, a2, a3, ...]
+        # need [0, 0, pow_lo, pow_hi, a0, a1, a2, a3]
+        push.0 push.0   # [0, 0, pow_lo, pow_hi, a0, a1, a2, a3, ...]
+        # stack: [0, 0, pow_lo, pow_hi, a0, a1, a2, a3, ...] = [b0, b1, b2, b3, a0, a1, a2, a3]
+        exec.wrapping_mul
+    end
+end
+
+#! Computes a right shift of an unsigned 128-bit integer.
+#!
+#! Inputs:  [n, a0, a1, a2, a3]
+#! Outputs: [c0, c1, c2, c3]
+#!
+#! Where:
+#! - n is the shift amount in bits.
+#! - a0 is the least significant 32-bit limb of a.
+#! - a1 is the second 32-bit limb of a.
+#! - a2 is the third 32-bit limb of a.
+#! - a3 is the most significant 32-bit limb of a.
+#! - c0 is the least significant 32-bit limb of (a >> n).
+#! - c1 is the second 32-bit limb of (a >> n).
+#! - c2 is the third 32-bit limb of (a >> n).
+#! - c3 is the most significant 32-bit limb of (a >> n).
+#!
+#! Panics if:
+#! - n is not in the range [0, 128).
+#!
+#! Invocation: exec
+pub proc shr(n: u32, a: u128) -> u128
+    # stack: [n, a0, a1, a2, a3, ...] (5 elements + padding)
+    # output: [c0, c1, c2, c3, ...] (4 elements + padding)
+    #
+    # algorithm: k = n / 32 (limb shift), m = n % 32 (bit shift)
+    # for each c_i = (a_{i+k} >> m) | (a_{i+k+1} << (32-m))
+
+    # validate shift amount is in [0, 128)
+    dup u32lt.128 assert.err="shift amount must be in the range [0, 128)"
+
+    # handle n == 0: no shift needed
+    dup eq.0
+    if.true
+        drop            # [a0, a1, a2, a3, ...]
+    else
+        # compute k = n / 32 and m = n % 32
+        # stack: [n, a0, a1, a2, a3, ...]
+        dup push.31 u32and      # [m, n, a0, a1, a2, a3, ...]
+        swap push.5 u32shr      # [k, m, a0, a1, a2, a3, ...]
+
+        # branch based on k (0, 1, 2, or 3)
+        # k < 4 is guaranteed by the assertion above (n < 128 => k = n/32 <= 3)
+        dup eq.0
+        if.true
+            # k=0: n in [1, 31], shift by m bits within limbs
+            drop        # [m, a0, a1, a2, a3, ...]
+            exec.shr_k0
+        else
+            dup eq.1
+            if.true
+                # k=1: n in [32, 63]
+                drop    # [m, a0, a1, a2, a3, ...]
+                # insert explicit zero for c3 (shr_k1 produces only 3 result limbs)
+                push.0 movdn.5
+                exec.shr_k1
+            else
+                dup eq.2
+                if.true
+                    # k=2: n in [64, 95]
+                    drop    # [m, a0, a1, a2, a3, ...]
+                    # insert explicit zeros for c2, c3 (shr_k2 produces only 2 result limbs)
+                    push.0 movdn.5 push.0 movdn.5
+                    exec.shr_k2
+                else
+                    # k=3: n in [96, 127]
+                    drop    # [m, a0, a1, a2, a3, ...]
+                    # insert explicit zeros for c1, c2, c3 (shr_k3 produces only 1 result limb)
+                    push.0 movdn.5 push.0 movdn.5 push.0 movdn.5
+                    exec.shr_k3
+                end
+            end
+        end
+    end
+end
+
+#! Helper for shr with k=0 (shift by m bits, 0 < m < 32)
+#! Input: [m, a0, a1, a2, a3, ...]
+#! Output: [c0, c1, c2, c3, ...]
+#! For i in {0, 1, 2}: c_i = a_i / 2^m + (a_{i+1} mod 2^m) * 2^(32-m)
+#! c_3 = a_3 / 2^m
+proc shr_k0
+    # compute 2^(32-m) for left shift operations
+    push.32 dup.1 u32wrapping_sub pow2
+    # stack: [2^(32-m), m, a0, a1, a2, a3, ...]
+    # index:  0         1   2   3   4   5
+
+    # compute c3 = a3 >> m
+    dup.5 dup.2 u32shr          # [c3, 2^(32-m), m, a0, a1, a2, a3, ...]
+    #                             0    1         2   3   4   5   6
+
+    # compute c2 = (a2 >> m) | (a3 << (32-m))
+    # step 1: right-shift a2 by m
+    dup.5 dup.3 u32shr          # [a2>>m, c3, 2^(32-m), m, a0, a1, a2, a3, ...]
+    # step 2: left-shift a3 by (32-m) using multiply by 2^(32-m), keep low 32 bits
+    dup.7 dup.3 u32widening_mul swap drop
+    # step 3: combine
+    u32or                       # [c2, c3, 2^(32-m), m, a0, a1, a2, a3, ...]
+
+    # compute c1 = (a1 >> m) | (a2 << (32-m))
+    # step 1: right-shift a1 by m
+    dup.5 dup.4 u32shr          # [a1>>m, c2, c3, 2^(32-m), m, a0, a1, a2, a3, ...]
+    # step 2: left-shift a2 by (32-m)
+    dup.7 dup.4 u32widening_mul swap drop
+    # step 3: combine
+    u32or                       # [c1, c2, c3, 2^(32-m), m, a0, a1, a2, a3, ...]
+
+    # compute c0 = (a0 >> m) | (a1 << (32-m))
+    # step 1: right-shift a0 by m
+    dup.5 dup.5 u32shr          # [a0>>m, c1, c2, c3, 2^(32-m), m, a0, a1, a2, a3, ...]
+    # step 2: left-shift a1 by (32-m)
+    dup.7 dup.5 u32widening_mul swap drop
+    # step 3: combine
+    u32or                       # [c0, c1, c2, c3, 2^(32-m), m, a0, a1, a2, a3, ...]
+
+    # clean up: drop temporaries past the result word
+    # stack: [c0, c1, c2, c3, 2^(32-m), m, a0, a1, a2, a3, ...]
+    movup.4 drop movup.4 drop movup.4 drop
+    movup.4 drop movup.4 drop movup.4 drop
+    # stack: [c0, c1, c2, c3, ...]
+end
+
+#! Helper for shr with k=1 (shift by 32+m bits)
+#! Input: [m, a0, a1, a2, a3, ...]
+#! Output: [c0, c1, c2, c3, ...] where c = a >> (32+m)
+#! c0 = (a1 >> m) | (a2 << (32-m))
+#! c1 = (a2 >> m) | (a3 << (32-m))
+#! c2 = a3 >> m
+#! c3 = 0
+proc shr_k1
+    # handle m=0 case (shift by exactly 32)
+    dup eq.0
+    if.true
+        drop                    # [a0, a1, a2, a3, 0, ...]
+        drop                    # [a1, a2, a3, 0, ...]
+        # c0=a1, c1=a2, c2=a3, c3=0 (explicit zero inserted by caller)
+    else
+        # compute 2^(32-m) for left shift operations
+        push.32 dup.1 u32wrapping_sub pow2
+        # stack: [2^(32-m), m, a0, a1, a2, a3, ...]
+
+        # c2 = a3 >> m
+        dup.5 dup.2 u32shr
+
+        # c1 = (a2 >> m) | (a3 << (32-m))
+        # step 1: right-shift a2 by m
+        dup.5 dup.3 u32shr
+        # step 2: left-shift a3 by (32-m)
+        dup.7 dup.3 u32widening_mul swap drop
+        # step 3: combine
+        u32or
+
+        # c0 = (a1 >> m) | (a2 << (32-m))
+        # step 1: right-shift a1 by m
+        dup.5 dup.4 u32shr
+        # step 2: left-shift a2 by (32-m)
+        dup.7 dup.4 u32widening_mul swap drop
+        # step 3: combine
+        u32or
+
+        # clean up
+        movdn.8 movdn.8 movdn.8
+        drop drop drop drop drop drop
+        # c0, c1, c2, c3=0 (explicit zero inserted by caller)
+    end
+end
+
+#! Helper for shr with k=2 (shift by 64+m bits)
+#! Input: [m, a0, a1, a2, a3, ...]
+#! Output: [c0, c1, c2, c3, ...] where c = a >> (64+m)
+#! c0 = (a2 >> m) | (a3 << (32-m))
+#! c1 = a3 >> m
+#! c2 = 0, c3 = 0
+proc shr_k2
+    # handle m=0 case (shift by exactly 64)
+    dup eq.0
+    if.true
+        drop                    # [a0, a1, a2, a3, ...]
+        drop drop               # [a2, a3, ...]
+        # c0=a2, c1=a3, c2=c3=0 (explicit zeros inserted by caller)
+    else
+        # compute 2^(32-m) for left shift operations
+        push.32 dup.1 u32wrapping_sub pow2
+
+        # c1 = a3 >> m
+        dup.5 dup.2 u32shr
+
+        # c0 = (a2 >> m) | (a3 << (32-m))
+        # step 1: right-shift a2 by m
+        dup.5 dup.3 u32shr
+        # step 2: left-shift a3 by (32-m)
+        dup.7 dup.3 u32widening_mul swap drop
+        # step 3: combine
+        u32or
+
+        # clean up
+        movdn.7 movdn.7
+        drop drop drop drop drop drop
+        # c0, c1, c2=c3=0 (explicit zeros inserted by caller)
+    end
+end
+
+#! Helper for shr with k=3 (shift by 96+m bits)
+#! Input: [m, a0, a1, a2, a3, ...]
+#! Output: [c0, c1, c2, c3, ...] where c = a >> (96+m)
+#! c0 = a3 >> m
+#! c1 = 0, c2 = 0, c3 = 0
+proc shr_k3
+    # c0 = a3 >> m
+    movup.4 swap u32shr         # [c0, a0, a1, a2, ...]
+    # clean up: drop a0, a1, a2
+    movdn.3 drop drop drop
+    # c0, c1=c2=c3=0 (explicit zeros inserted by caller)
+end
+
+#! Computes a left rotation of an unsigned 128-bit integer.
+#!
+#! Inputs:  [n, a0, a1, a2, a3]
+#! Outputs: [c0, c1, c2, c3]
+#!
+#! Where:
+#! - n is the rotation amount in bits.
+#! - a0 is the least significant 32-bit limb of a.
+#! - a1 is the second 32-bit limb of a.
+#! - a2 is the third 32-bit limb of a.
+#! - a3 is the most significant 32-bit limb of a.
+#! - c0 is the least significant 32-bit limb of rotl(a, n).
+#! - c1 is the second 32-bit limb of rotl(a, n).
+#! - c2 is the third 32-bit limb of rotl(a, n).
+#! - c3 is the most significant 32-bit limb of rotl(a, n).
+#!
+#! Panics if:
+#! - n is not in the range [0, 128).
+#!
+#! Invocation: exec
+pub proc rotl(n: u32, a: u128) -> u128
+    # handle n == 0: no rotation needed, value unchanged
+    dup eq.0
+    if.true
+        drop        # [a0, a1, a2, a3, ...]
+    else
+        # rotl(n, a) = (a << n) | (a >> (128-n))
+        # duplicate n and a for both shifts
+        dup                         # [n, n, a0, a1, a2, a3, ...]
+        dup.5 dup.5 dup.5 dup.5     # [a0, a1, a2, a3, n, n, a0, a1, a2, a3, ...]
+        movup.4                     # [n, a0, a1, a2, a3, n, a0, a1, a2, a3, ...]
+        exec.shl                    # [shl0, shl1, shl2, shl3, n, a0, a1, a2, a3, ...]
+
+        # move shl results below the remaining [n, a, ...] for the shr computation
+        movdn.8 movdn.8 movdn.8 movdn.8
+        # stack: [n, a0, a1, a2, a3, shl0, shl1, shl2, shl3, ...]
+
+        # compute a >> (128-n)
+        push.128 swap u32wrapping_sub
+        # stack: [128-n, a0, a1, a2, a3, shl0, shl1, shl2, shl3, ...]
+        exec.shr                    # [shr0, shr1, shr2, shr3, shl0, shl1, shl2, shl3, ...]
+
+        # oR the two results limb by limb
+        movup.4 u32or               # [c0, shr1, shr2, shr3, shl1, shl2, shl3, ...]
+        swap movup.4 u32or          # [c1, c0, shr2, shr3, shl2, shl3, ...]
+        swap                        # [c0, c1, shr2, shr3, shl2, shl3, ...]
+        movup.2 movup.4 u32or       # [c2, c0, c1, shr3, shl3, ...]
+        movdn.2                     # [c0, c1, c2, shr3, shl3, ...]
+        movup.3 movup.4 u32or       # [c3, c0, c1, c2, ...]
+        movdn.3                     # [c0, c1, c2, c3, ...]
+    end
+end
+
+#! Computes a right rotation of an unsigned 128-bit integer.
+#!
+#! Inputs:  [n, a0, a1, a2, a3]
+#! Outputs: [c0, c1, c2, c3]
+#!
+#! Where:
+#! - n is the rotation amount in bits.
+#! - a0 is the least significant 32-bit limb of a.
+#! - a1 is the second 32-bit limb of a.
+#! - a2 is the third 32-bit limb of a.
+#! - a3 is the most significant 32-bit limb of a.
+#! - c0 is the least significant 32-bit limb of rotr(a, n).
+#! - c1 is the second 32-bit limb of rotr(a, n).
+#! - c2 is the third 32-bit limb of rotr(a, n).
+#! - c3 is the most significant 32-bit limb of rotr(a, n).
+#!
+#! Panics if:
+#! - n is not in the range [0, 128).
+#!
+#! Invocation: exec
+pub proc rotr(n: u32, a: u128) -> u128
+    # handle n == 0: no rotation needed, value unchanged
+    dup eq.0
+    if.true
+        drop        # [a0, a1, a2, a3, ...]
+    else
+        # rotr(n, a) = (a >> n) | (a << (128-n))
+        # duplicate n and a for both shifts
+        dup                         # [n, n, a0, a1, a2, a3, ...]
+        dup.5 dup.5 dup.5 dup.5     # [a0, a1, a2, a3, n, n, a0, a1, a2, a3, ...]
+        movup.4                     # [n, a0, a1, a2, a3, n, a0, a1, a2, a3, ...]
+        exec.shr                    # [shr0, shr1, shr2, shr3, n, a0, a1, a2, a3, ...]
+
+        # move shr results below the remaining [n, a, ...] for the shl computation
+        movdn.8 movdn.8 movdn.8 movdn.8
+        # stack: [n, a0, a1, a2, a3, shr0, shr1, shr2, shr3, ...]
+
+        # compute a << (128-n)
+        push.128 swap u32wrapping_sub
+        # stack: [128-n, a0, a1, a2, a3, shr0, shr1, shr2, shr3, ...]
+        exec.shl                    # [shl0, shl1, shl2, shl3, shr0, shr1, shr2, shr3, ...]
+
+        # oR the two results limb by limb
+        movup.4 u32or               # [c0, shl1, shl2, shl3, shr1, shr2, shr3, ...]
+        swap movup.4 u32or          # [c1, c0, shl2, shl3, shr2, shr3, ...]
+        swap                        # [c0, c1, shl2, shl3, shr2, shr3, ...]
+        movup.2 movup.4 u32or       # [c2, c0, c1, shl3, shr3, ...]
+        movdn.2                     # [c0, c1, c2, shl3, shr3, ...]
+        movup.3 movup.4 u32or       # [c3, c0, c1, c2, ...]
+        movdn.3                     # [c0, c1, c2, c3, ...]
+    end
 end

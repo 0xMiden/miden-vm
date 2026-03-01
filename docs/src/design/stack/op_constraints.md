@@ -30,7 +30,7 @@ It is easy to notice that while the first constraint changed, the second constra
 In fact, for most operations it makes sense to make a distinction between constraints unique to the operation vs. more general constraints which enforce correct behavior for the stack items not affected by the operation. In the subsequent sections we describe in detail only the former constraints, and provide high-level descriptions of the more general constraints. Specifically, we indicate how the operation affects the rest of the stack (e.g., shifts right starting from position $0$).
 
 ## Operation flags
-As mentioned above, operation flags are used as selectors to enforce operation-specific constraints. That is, they turn on relevant constraints for a given operation. In total, the VM provides $88$ unique operations, and thus, there are $88$ operation flags (not all of them currently used).
+As mentioned above, operation flags are used as selectors to enforce operation-specific constraints. That is, they turn on relevant constraints for a given operation. The VM defines operation flags over all 7-bit opcodes (with some combinations not valid due to the need for degree reduction of some op flags), though several opcodes are currently unused.
 
 Operation flags are mutually exclusive. That is, if one flag is set to $1$, all other flags are set to $0$. Also, one of the flags is always guaranteed to be set to $1$.
 
@@ -73,7 +73,7 @@ This group contains $32$ operations which do not shift the stack (this is almost
 | Operation | Opcode value | Binary encoding |        Operation group        | Flag degree |
 |-----------|:------------:|:---------------:|:-----------------------------:|:-----------:|
 | `NOOP`    |     $0$      |   `000_0000`    | [System ops](./system_ops.md) |     $7$     |
-| `EQZ `    |     $1$      |   `000_0001`    |  [Field ops](./field_ops.md)  |     $7$     |
+| `EQZ`     |     $1$      |   `000_0001`    |  [Field ops](./field_ops.md)  |     $7$     |
 | `NEG`     |     $2$      |   `000_0010`    |  [Field ops](./field_ops.md)  |     $7$     |
 | `INV`     |     $3$      |   `000_0011`    |  [Field ops](./field_ops.md)  |     $7$     |
 | `INCR`    |     $4$      |   `000_0100`    |  [Field ops](./field_ops.md)  |     $7$     |
@@ -216,7 +216,7 @@ This group contains operations which require constraints with degree up to $5$.
 | Operation    | Opcode value | Binary encoding |            Operation group             | Flag degree |
 | ------------ | :----------: | :-------------: | :------------------------------------: | :---------: |
 | `MRUPDATE`   |     $96$     |   `110_0000`    |     [Crypto ops](./crypto_ops.md)      |     $4$     |
-| `<unused>`   |    $100$     |   `110_0100`    |                                        |     $4$     |
+| `CRYPTOSTREAM` |    $100$     |   `110_0100`    |     [Crypto ops](./crypto_ops.md)      |     $4$     |
 | `SYSCALL`    |    $104$     |   `110_1000`    | [Flow control ops](../decoder/index.md) |     $4$     |
 | `CALL`       |    $108$     |   `110_1100`    | [Flow control ops](../decoder/index.md) |     $4$     |
 | `END`        |    $112$     |   `111_0000`    | [Flow control ops](../decoder/index.md) |     $4$     |

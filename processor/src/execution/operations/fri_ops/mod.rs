@@ -3,7 +3,7 @@ use crate::{
     errors::OperationError,
     field::{BasedVectorSpace, Field, QuadFelt},
     processor::{Processor, StackInterface},
-    tracer::{OperationHelperRegisters, Tracer},
+    tracer::OperationHelperRegisters,
 };
 
 #[cfg(test)]
@@ -41,13 +41,11 @@ mod tests;
 /// operation has been executed, the top 10 elements of the stack can be considered to be
 /// "garbage".
 #[inline(always)]
-pub(super) fn op_fri_ext2fold4<P, T>(
+pub(super) fn op_fri_ext2fold4<P>(
     processor: &mut P,
-    tracer: &mut T,
 ) -> Result<OperationHelperRegisters, OperationError>
 where
     P: Processor,
-    T: Tracer<Processor = P>,
 {
     // --- read all relevant variables from the stack ---------------------
     let query_values = get_query_values(processor);
@@ -57,7 +55,7 @@ where
     // the power of the domain generator which can be used to determine current domain value x
     let poe = processor.stack().get(10);
     if poe.is_zero() {
-        return Err(OperationError::InvalidFriDomainGenerator);
+        return Err(OperationError::FriError("domain size was 0".into()));
     }
     // the result of the previous layer folding
     let prev_value = {
@@ -76,12 +74,17 @@ where
 
     // --- make sure the previous folding was done correctly --------------
     if domain_segment > 3 {
-        return Err(OperationError::InvalidFriDomainSegment(domain_segment));
+        return Err(OperationError::FriError(format!(
+            "domain segment value cannot exceed 3, but was {domain_segment}"
+        )));
     }
 
     let d_seg = domain_segment as usize;
     if query_values[d_seg] != prev_value {
-        return Err(OperationError::InvalidFriLayerFolding(prev_value, query_values[d_seg]));
+        return Err(OperationError::FriError(format!(
+            "degree-respecting projection is inconsistent: expected {} but was {}",
+            prev_value, query_values[d_seg]
+        )));
     }
 
     // --- fold query values ----------------------------------------------
@@ -102,7 +105,6 @@ where
     let poe4 = poe2 * poe2;
 
     processor.stack_mut().decrement_size();
-    tracer.decrement_stack_size();
 
     processor.stack_mut().set(0, tmp0[1]);
     processor.stack_mut().set(1, tmp0[0]);

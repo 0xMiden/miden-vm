@@ -66,7 +66,6 @@ where
 
     processor.stack_mut().increment_size()?;
     processor.stack_mut().set(0, top_lo);
-    tracer.increment_stack_size(processor);
 
     processor.stack_mut().set(1, top_hi);
 
@@ -122,7 +121,6 @@ where
 
     // write sum to the new top of the stack, and carry after
     processor.stack_mut().decrement_size();
-    tracer.decrement_stack_size();
     processor.stack_mut().set(0, sum);
     processor.stack_mut().set(1, carry);
 
@@ -199,7 +197,6 @@ where
 
     // write lo to the new top of the stack, and hi after
     processor.stack_mut().decrement_size();
-    tracer.decrement_stack_size();
     processor.stack_mut().set(0, lo);
     processor.stack_mut().set(1, hi);
 
@@ -268,7 +265,6 @@ where
 
     // Update stack
     processor.stack_mut().decrement_size();
-    tracer.decrement_stack_size();
     processor.stack_mut().set(0, Felt::new(result));
     Ok(OperationHelperRegisters::Empty)
 }
@@ -294,7 +290,6 @@ where
 
     // Update stack
     processor.stack_mut().decrement_size();
-    tracer.decrement_stack_size();
     processor.stack_mut().set(0, Felt::new(result));
     Ok(OperationHelperRegisters::Empty)
 }

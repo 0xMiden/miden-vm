@@ -47,7 +47,7 @@ Since constraints must be expressed without division, the actual constraint whic
 
 In general, we will write constraints within these docs using the previous form, since it's clearer and more readable.
 
-Additionally, boundary constraints must be enforced against $b$ to ensure that its initial and final values are $1$. This will enforce that the logarithmic derivatives for $X$ and $T$ were equal.
+Additionally, boundary constraints must be enforced against $b$ to ensure that its initial and final values are equal (in Miden VM we commonly use $0$ or $1$ depending on the bus). This enforces that the logarithmic derivatives for $X$ and $T$ were equal.
 
 ### Extending the construction to multiple components
 

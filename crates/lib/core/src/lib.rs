@@ -29,10 +29,61 @@ use crate::handlers::{
     u64_div::{U64_DIV_EVENT_NAME, handle_u64_div},
 };
 
-// STANDARD LIBRARY
+// CORE LIBRARY
 // ================================================================================================
 
-/// TODO: add docs
+/// The Miden core library, providing a set of optimized procedures for Miden programs.
+///
+/// This library wraps a [`Library`] containing highly-optimized and battle-tested implementations
+/// of commonly-used primitives. When the core library is dynamically linked during assembly time,
+/// procedures can be called from any Miden program and are serialized as 32 bytes, reducing the
+/// amount of code that needs to be shared between parties for proving and verifying program
+/// execution.
+///
+/// # Contents
+///
+/// The core library provides several categories of functionality:
+///
+/// - **Cryptographic primitives**: Hash functions (Keccak256, SHA-512), digital signature
+///   verification (ECDSA, EdDSA-Ed25519, Falcon), and authenticated encryption (AEAD decryption).
+/// - **Mathematical operations**: Division operations for u64, u128, and u256.
+/// - **Data structures**: Sparse Merkle Tree operations, Merkle Mountain Range (MMR), and sorted
+///   array utilities with lower-bound search capabilities.
+/// - **Memory operations**: Efficient hashing and "un-hashing" of large amounts of data.
+///
+/// Many of these operations are implemented as **precompiles** - special procedures that execute
+/// outside the Miden VM but are verified as part of the proof. Precompiles allow for efficient
+/// execution of complex operations that would be expensive to compute directly in the VM, while
+/// maintaining the security guarantees of the Miden proof system. The core library includes
+/// precompiles for cryptographic operations like hash functions and signature verification.
+///
+/// # Usage
+///
+/// The core library is typically used with an [`Assembler`] to enable core library procedures
+/// in compiled programs:
+///
+/// ```rust,ignore
+/// use miden_assembly::Assembler;
+/// use miden_core_lib::CoreLibrary;
+///
+/// let assembler = Assembler::new(source_manager)
+///     .with_dynamic_library(&CoreLibrary::default())
+///     .unwrap();
+/// ```
+///
+/// For program execution, you'll also need to register the event handlers:
+///
+/// ```rust,ignore
+/// let core_lib = CoreLibrary::default();
+/// let handlers = core_lib.handlers();
+/// // Register handlers with your host...
+/// ```
+///
+/// For proof verification, use [`verifier_registry()`](Self::verifier_registry) to get the
+/// precompile verifiers required to validate core library precompile requests.
+///
+/// [`Library`]: miden_assembly::Library
+/// [`Assembler`]: miden_assembly::Assembler
 #[derive(Clone)]
 pub struct CoreLibrary(Library);
 
@@ -101,12 +152,12 @@ impl CoreLibrary {
 
 impl Default for CoreLibrary {
     fn default() -> Self {
-        static STDLIB: LazyLock<CoreLibrary> = LazyLock::new(|| {
+        static CORELIB: LazyLock<CoreLibrary> = LazyLock::new(|| {
             let contents = Library::read_from_bytes(CoreLibrary::SERIALIZED)
-                .expect("failed to read std masl!");
+                .expect("failed to read core masl!");
             CoreLibrary(contents)
         });
-        STDLIB.clone()
+        CORELIB.clone()
     }
 }
 

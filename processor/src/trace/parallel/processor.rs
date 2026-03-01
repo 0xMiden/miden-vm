@@ -428,7 +428,7 @@ impl Processor for ReplayProcessor {
     }
 
     fn execute_before_enter_decorators(
-        &mut self,
+        &self,
         _node_id: MastNodeId,
         _current_forest: &MastForest,
         _host: &mut impl Host,
@@ -438,7 +438,7 @@ impl Processor for ReplayProcessor {
     }
 
     fn execute_after_exit_decorators(
-        &mut self,
+        &self,
         _node_id: MastNodeId,
         _current_forest: &MastForest,
         _host: &mut impl Host,
@@ -448,7 +448,7 @@ impl Processor for ReplayProcessor {
     }
 
     fn execute_decorators_for_op(
-        &mut self,
+        &self,
         _node_id: MastNodeId,
         _op_idx_in_block: usize,
         _current_forest: &MastForest,
@@ -459,7 +459,7 @@ impl Processor for ReplayProcessor {
     }
 
     fn execute_end_of_block_decorators(
-        &mut self,
+        &self,
         _basic_block_node: &BasicBlockNode,
         _node_id: MastNodeId,
         _current_forest: &Arc<MastForest>,
