@@ -39,14 +39,14 @@ const N: usize = 512;
 const J: u64 = (N * M as usize * M as usize) as u64;
 
 const PROBABILISTIC_PRODUCT_SOURCE: &str = "
-    use miden::core::crypto::dsa::falcon512poseidon2
+    use miden::core::crypto::dsa::falcon512_poseidon2
 
     begin
         #=> [PK, ...]
         push.0
         #=> [h_ptr, PK, ...]
 
-        exec.falcon512poseidon2::load_h_s2_and_product
+        exec.falcon512_poseidon2::load_h_s2_and_product
         #=> [...]
     end
     ";
@@ -107,10 +107,10 @@ pub enum FalconError {
 #[test]
 fn test_falcon512_norm_sq() {
     let source = "
-    use miden::core::crypto::dsa::falcon512poseidon2
+    use miden::core::crypto::dsa::falcon512_poseidon2
 
     begin
-        exec.falcon512poseidon2::norm_sq
+        exec.falcon512_poseidon2::norm_sq
     end
     ";
 
@@ -127,10 +127,10 @@ fn test_falcon512_norm_sq() {
 #[test]
 fn test_falcon512_diff_mod_m() {
     let source = "
-    use miden::core::crypto::dsa::falcon512poseidon2
+    use miden::core::crypto::dsa::falcon512_poseidon2
 
     begin
-        exec.falcon512poseidon2::diff_mod_M
+        exec.falcon512_poseidon2::diff_mod_M
     end
     ";
     let v = Felt::ORDER_U64 - 1;
@@ -170,10 +170,10 @@ proptest! {
     fn diff_mod_m_proptest(v in 0..Felt::ORDER_U64, w in 0..J, u in 0..J) {
 
           let source = "
-    use miden::core::crypto::dsa::falcon512poseidon2
+    use miden::core::crypto::dsa::falcon512_poseidon2
 
     begin
-        exec.falcon512poseidon2::diff_mod_M
+        exec.falcon512_poseidon2::diff_mod_M
     end
     ";
 
@@ -262,11 +262,11 @@ fn test_move_sig_to_adv_stack() {
     let message = random_word();
 
     let source = "
-    use miden::core::crypto::dsa::falcon512poseidon2
+    use miden::core::crypto::dsa::falcon512_poseidon2
 
     begin
-        exec.falcon512poseidon2::move_sig_from_map_to_adv_stack
-        exec.falcon512poseidon2::verify
+        exec.falcon512_poseidon2::move_sig_from_map_to_adv_stack
+        exec.falcon512_poseidon2::verify
     end
     ";
 
@@ -307,10 +307,10 @@ fn falcon_execution() {
 fn test_mod_12289_simple() {
     // Simple test to debug mod_12289 with a known input
     let source = "
-        use miden::core::crypto::dsa::falcon512poseidon2
+        use miden::core::crypto::dsa::falcon512_poseidon2
 
         begin
-            exec.falcon512poseidon2::mod_12289
+            exec.falcon512_poseidon2::mod_12289
         end
     ";
 
@@ -326,10 +326,10 @@ fn test_mod_12289_simple() {
 fn test_mod_12289_larger_value() {
     // Test with a larger value that requires the higher 32 bits
     let source = "
-        use miden::core::crypto::dsa::falcon512poseidon2
+        use miden::core::crypto::dsa::falcon512_poseidon2
 
         begin
-            exec.falcon512poseidon2::mod_12289
+            exec.falcon512_poseidon2::mod_12289
         end
     ";
 
@@ -381,11 +381,11 @@ fn generate_test(
 ) -> (String, Vec<u64>, Vec<u64>, MerkleStore, Vec<(Word, Vec<Felt>)>) {
     let source = format!(
         "
-    use miden::core::crypto::dsa::falcon512poseidon2
+    use miden::core::crypto::dsa::falcon512_poseidon2
 
     begin
         emit.event(\"{EVENT_FALCON_SIG_TO_STACK}\")
-        exec.falcon512poseidon2::verify
+        exec.falcon512_poseidon2::verify
     end
     "
     );

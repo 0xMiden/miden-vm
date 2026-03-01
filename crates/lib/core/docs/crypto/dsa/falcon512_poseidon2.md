@@ -1,5 +1,5 @@
 
-## miden::core::crypto::dsa::falcon512poseidon2
+## miden::core::crypto::dsa::falcon512_poseidon2
 | Procedure | Description |
 | ----------- | ------------- |
 | mod_12289 | Given dividend ( i.e. a u64 given by its lower and higher u32 decomposition ) on the stack,<br />this routine computes c = a % M where M = 12289<br /><br />Expected stack state<br /><br />[a_hi, a_lo, ...]<br /><br />Output stack state looks like<br /><br />[c, ...] \| c = a % M<br /><br />Note that it is the responsibility of the calling procedure to ensure that `a_hi` and `a_lo` are<br />within the appropriate range i.e., they are u32-s.<br /><br />Cycles: 27<br /> |
