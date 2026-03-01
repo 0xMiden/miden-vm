@@ -44,7 +44,6 @@ where
 
     // drop the condition from the stack
     state.processor.stack_mut().decrement_size();
-    state.tracer.decrement_stack_size();
 
     // execute the loop body as long as the condition is true
     if condition == ONE {
@@ -128,7 +127,6 @@ where
         // Drop the condition from the stack (we know the loop was entered since condition is
         // ONE).
         state.processor.stack_mut().decrement_size();
-        state.tracer.decrement_stack_size();
 
         state.continuation_stack.push_finish_loop_entered(current_node_id);
         state.continuation_stack.push_start_node(loop_node.body());
@@ -154,7 +152,6 @@ where
         // the END instruction must drop it.
         if loop_was_entered {
             state.processor.stack_mut().decrement_size();
-            state.tracer.decrement_stack_size();
         }
 
         // Finalize the clock cycle corresponding to the END operation.

@@ -381,7 +381,7 @@ proptest! {
         prop_assert_eq!(stack[2], Felt::new(ALPHA_ADDR), "alpha_addr at position 13");
 
         // Check that the accumulator was updated correctly (LE: low at lower position)
-        let acc_new_base = acc_new.as_basis_coefficients_slice();
+        let acc_new_base: &[Felt] = acc_new.as_basis_coefficients_slice();
         prop_assert_eq!(stack[1], acc_new_base[0], "acc_low at position 14");
         prop_assert_eq!(stack[0], acc_new_base[1], "acc_high at position 15");
     }
@@ -496,7 +496,7 @@ proptest! {
         prop_assert_eq!(stack[2], Felt::new(ALPHA_ADDR), "alpha_addr at position 13");
 
         // Check that the accumulator was updated correctly (LE: low at lower position)
-        let acc_new_base = acc_new.as_basis_coefficients_slice();
+        let acc_new_base: &[Felt] = acc_new.as_basis_coefficients_slice();
         prop_assert_eq!(stack[1], acc_new_base[0], "acc_low at position 14");
         prop_assert_eq!(stack[0], acc_new_base[1], "acc_high at position 15");
     }

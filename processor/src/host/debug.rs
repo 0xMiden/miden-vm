@@ -6,7 +6,7 @@ use core::{fmt, ops::RangeInclusive};
 
 use miden_core::{FMP_ADDR, Felt, operations::DebugOptions};
 
-use crate::{DebugError, PrimeField64, ProcessorState, TraceError, host::handlers::DebugHandler};
+use crate::{DebugError, ProcessorState, TraceError, host::handlers::DebugHandler};
 
 // WRITER IMPLEMENTATIONS
 // ================================================================================================
@@ -17,9 +17,6 @@ pub struct StdoutWriter;
 
 impl fmt::Write for StdoutWriter {
     fn write_str(&mut self, _s: &str) -> fmt::Result {
-        // When the `std` feature is disabled, the parameter `_s` is unused because
-        // the std::print! macro is not available. We prefix with underscore to
-        // indicate this intentional unused state and suppress warnings.
         #[cfg(feature = "std")]
         std::print!("{}", _s);
         Ok(())

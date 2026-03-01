@@ -2,7 +2,7 @@ use miden_core::{
     Felt,
     field::{BasedVectorSpace, Field, QuadFelt},
 };
-use miden_utils_testing::{PrimeField64, build_op_test, rand::rand_quad_felt};
+use miden_utils_testing::{build_op_test, rand::rand_quad_felt};
 
 // EXT2 OPS ASSERTIONS - MANUAL TESTS
 // ================================================================================================

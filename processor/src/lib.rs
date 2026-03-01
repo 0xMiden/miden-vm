@@ -25,7 +25,6 @@ mod tracer;
 use crate::{
     advice::{AdviceInputs, AdviceProvider},
     errors::MapExecErr,
-    field::{PrimeCharacteristicRing, PrimeField64},
     processor::{Processor, SystemInterface},
     trace::{ExecutionTrace, RowIndex},
 };

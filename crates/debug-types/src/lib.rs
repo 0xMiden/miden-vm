@@ -13,6 +13,9 @@ mod span;
 
 use alloc::{string::String, sync::Arc};
 
+use miden_crypto::utils::{
+    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "serde")]
@@ -30,6 +33,9 @@ pub use self::{
     source_manager::{DefaultSourceManager, SourceId, SourceManager, SourceManagerSync},
     span::{SourceSpan, Span, Spanned},
 };
+
+// URI
+// ================================================================================================
 
 /// A [URI reference](https://datatracker.ietf.org/doc/html/rfc3986#section-4.1) that specifies
 /// the location of a source file, whether on disk, on the network, or elsewhere.
@@ -67,7 +73,7 @@ impl Uri {
         }
     }
 
-    /// Returns the scheme portion of this URI, if present.
+    /// Returns the authority portion of this URI, if present.
     pub fn authority(&self) -> Option<&str> {
         let uri = self.0.as_ref();
         let (_, rest) = uri.split_once("//")?;
@@ -161,6 +167,18 @@ impl<'a> From<&'a std::path::Path> for Uri {
     }
 }
 
+impl Serializable for Uri {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.as_str().write_into(target);
+    }
+}
+
+impl Deserializable for Uri {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        String::read_from(source).map(Self::from)
+    }
+}
+
 impl core::str::FromStr for Uri {
     type Err = ();
 
@@ -168,6 +186,9 @@ impl core::str::FromStr for Uri {
         Ok(Self::from(s))
     }
 }
+
+// TESTS
+// ================================================================================================
 
 #[cfg(test)]
 mod tests {

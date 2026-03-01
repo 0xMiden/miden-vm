@@ -11,7 +11,7 @@ use super::{
     op_fri_ext2fold4,
 };
 use crate::{
-    fast::{FastProcessor, NoopTracer},
+    fast::FastProcessor,
     processor::{Processor, SystemInterface},
 };
 
@@ -110,16 +110,15 @@ proptest! {
         ];
 
         let mut processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
-        let mut tracer = NoopTracer;
 
         // Push v0 to the top of the stack
         // This shifts everything down by one position, moving end_ptr to overflow
         let v0 = query_values[0].as_basis_coefficients_slice()[0];
-        op_push(&mut processor, v0, &mut tracer).unwrap();
+        op_push(&mut processor, v0).unwrap();
         processor.system_mut().increment_clock();
 
         // Execute the operation
-        let result = op_fri_ext2fold4(&mut processor, &mut tracer);
+        let result = op_fri_ext2fold4(&mut processor);
         prop_assert!(result.is_ok(), "op_fri_ext2fold4 failed: {:?}", result.err());
         processor.system_mut().increment_clock();
 
@@ -131,10 +130,10 @@ proptest! {
         let (ev, es) = compute_evaluation_points(alpha, x_inv);
         let (folded_value, tmp0, tmp1) = fri_fold4(query_values, ev, es);
 
-        let tmp0_base = tmp0.as_basis_coefficients_slice();
-        let tmp1_base = tmp1.as_basis_coefficients_slice();
+        let tmp0_base: &[Felt] = tmp0.as_basis_coefficients_slice();
+        let tmp1_base: &[Felt] = tmp1.as_basis_coefficients_slice();
         let ds = get_domain_segment_flags(d_seg as usize);
-        let folded_value_base = folded_value.as_basis_coefficients_slice();
+        let folded_value_base: &[Felt] = folded_value.as_basis_coefficients_slice();
         let poe2 = poe.square();
         let poe4 = poe2.square();
 

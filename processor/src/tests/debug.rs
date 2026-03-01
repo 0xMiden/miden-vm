@@ -1,4 +1,4 @@
-use miden_core::{FMP_INIT_VALUE, field::PrimeField64};
+use miden_core::FMP_INIT_VALUE;
 use miden_utils_testing::build_debug_test;
 
 // STACK DEBUGGING TESTS

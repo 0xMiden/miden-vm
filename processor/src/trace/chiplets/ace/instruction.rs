@@ -1,4 +1,4 @@
-use crate::{Felt, PrimeField64};
+use crate::Felt;
 
 /// Number of bits used to represent the ID of a node in the evaluation graph.
 /// Define as 30 bits to ensure two indices and the operation can be encoded in a single `Felt`

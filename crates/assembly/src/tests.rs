@@ -9,7 +9,6 @@ use miden_assembly_syntax::{ast::Path, diagnostics::WrapErr, library::LibraryExp
 use miden_core::{
     Felt, Word, assert_matches,
     events::EventId,
-    field::PrimeCharacteristicRing,
     mast::{MastNodeExt, MastNodeId},
     operations::Operation,
     program::Program,

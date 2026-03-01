@@ -9,7 +9,7 @@ use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
 use crate::{
     ContextId, Felt, MemoryError, ONE, RowIndex, Word, ZERO,
     errors::{CryptoError, MerklePathVerificationFailedInner, OperationError},
-    field::{BasedVectorSpace, PrimeField64, QuadFelt},
+    field::{BasedVectorSpace, QuadFelt},
     mast::MastForest,
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, StackInterface,
@@ -292,9 +292,14 @@ pub(super) fn op_horner_eval_base<P: Processor, T: Tracer>(
         let eval_point_0 = processor.memory_mut().read_element(ctx, addr)?;
         let eval_point_1 = processor.memory_mut().read_element(ctx, addr + ONE)?;
 
-        tracer.record_memory_read_element(eval_point_0, addr, ctx, clk);
-
-        tracer.record_memory_read_element(eval_point_1, addr + ONE, ctx, clk);
+        tracer.record_memory_read_element_pair(
+            eval_point_0,
+            addr,
+            eval_point_1,
+            addr + ONE,
+            ctx,
+            clk,
+        );
 
         QuadFelt::from_basis_coefficients_fn(|i: usize| [eval_point_0, eval_point_1][i])
     };
@@ -540,10 +545,7 @@ pub(super) fn op_crypto_stream<P: Processor, T: Tracer>(
     // Load plaintext from source memory (2 words = 8 elements)
     let src_addr_word2 = src_addr + WORD_SIZE_FELT;
     let plaintext_word1 = processor.memory_mut().read_word(ctx, src_addr, clk)?;
-    tracer.record_memory_read_word(plaintext_word1, src_addr, ctx, clk);
-
     let plaintext_word2 = processor.memory_mut().read_word(ctx, src_addr_word2, clk)?;
-    tracer.record_memory_read_word(plaintext_word2, src_addr_word2, ctx, clk);
 
     // Get rate (keystream) from stack[0..7]
     let rate: [Felt; 8] = processor.stack().get_double_word(0);
@@ -567,10 +569,16 @@ pub(super) fn op_crypto_stream<P: Processor, T: Tracer>(
     // Write ciphertext to destination memory
     let dst_addr_word2 = dst_addr + WORD_SIZE_FELT;
     processor.memory_mut().write_word(ctx, dst_addr, clk, ciphertext_word1)?;
-    tracer.record_memory_write_word(ciphertext_word1, dst_addr, ctx, clk);
-
     processor.memory_mut().write_word(ctx, dst_addr_word2, clk, ciphertext_word2)?;
-    tracer.record_memory_write_word(ciphertext_word2, dst_addr_word2, ctx, clk);
+
+    tracer.record_crypto_stream(
+        [plaintext_word1, plaintext_word2],
+        src_addr,
+        [ciphertext_word1, ciphertext_word2],
+        dst_addr,
+        ctx,
+        clk,
+    );
 
     // Update stack[0..7] with ciphertext (becomes new rate for next hperm)
     processor.stack_mut().set_word(0, &ciphertext_word1);

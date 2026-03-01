@@ -1,9 +1,8 @@
 use crate::{
     ExecutionError, Felt, ZERO,
-    field::PrimeField64,
     operation::OperationError,
     processor::{Processor, StackInterface},
-    tracer::{OperationHelperRegisters, Tracer},
+    tracer::OperationHelperRegisters,
 };
 
 #[cfg(test)]
@@ -14,34 +13,26 @@ mod tests;
 
 /// Pushes a new element onto the stack.
 #[inline(always)]
-pub(super) fn op_push<P, T>(
+pub(super) fn op_push<P>(
     processor: &mut P,
     element: Felt,
-    tracer: &mut T,
 ) -> Result<OperationHelperRegisters, ExecutionError>
 where
     P: Processor,
-    T: Tracer<Processor = P>,
 {
     processor.stack_mut().increment_size()?;
     processor.stack_mut().set(0, element);
-    tracer.increment_stack_size(processor);
     Ok(OperationHelperRegisters::Empty)
 }
 
 /// Pushes a `ZERO` on top of the stack.
 #[inline(always)]
-pub(super) fn op_pad<P, T>(
-    processor: &mut P,
-    tracer: &mut T,
-) -> Result<OperationHelperRegisters, ExecutionError>
+pub(super) fn op_pad<P>(processor: &mut P) -> Result<OperationHelperRegisters, ExecutionError>
 where
     P: Processor,
-    T: Tracer<Processor = P>,
 {
     processor.stack_mut().increment_size()?;
     processor.stack_mut().set(0, ZERO);
-    tracer.increment_stack_size(processor);
     Ok(OperationHelperRegisters::Empty)
 }
 
@@ -70,19 +61,16 @@ pub(super) fn op_swap_double_word<P: Processor>(processor: &mut P) -> OperationH
 ///
 /// The size of the stack is incremented by 1.
 #[inline(always)]
-pub(super) fn dup_nth<P, T>(
+pub(super) fn dup_nth<P>(
     processor: &mut P,
     n: usize,
-    tracer: &mut T,
 ) -> Result<OperationHelperRegisters, ExecutionError>
 where
     P: Processor,
-    T: Tracer<Processor = P>,
 {
     let to_dup = processor.stack().get(n);
     processor.stack_mut().increment_size()?;
     processor.stack_mut().set(0, to_dup);
-    tracer.increment_stack_size(processor);
 
     Ok(OperationHelperRegisters::Empty)
 }
@@ -93,17 +81,12 @@ where
 /// # Errors
 /// Returns an error if the top element of the stack is neither 0 nor 1.
 #[inline(always)]
-pub(super) fn op_cswap<P, T>(
-    processor: &mut P,
-    tracer: &mut T,
-) -> Result<OperationHelperRegisters, OperationError>
+pub(super) fn op_cswap<P>(processor: &mut P) -> Result<OperationHelperRegisters, OperationError>
 where
     P: Processor,
-    T: Tracer<Processor = P>,
 {
     let condition = processor.stack().get(0);
     processor.stack_mut().decrement_size();
-    tracer.decrement_stack_size();
 
     match condition.as_canonical_u64() {
         0 => {
@@ -126,17 +109,12 @@ where
 /// # Errors
 /// Returns an error if the top element of the stack is neither 0 nor 1.
 #[inline(always)]
-pub(super) fn op_cswapw<P, T>(
-    processor: &mut P,
-    tracer: &mut T,
-) -> Result<OperationHelperRegisters, OperationError>
+pub(super) fn op_cswapw<P>(processor: &mut P) -> Result<OperationHelperRegisters, OperationError>
 where
     P: Processor,
-    T: Tracer<Processor = P>,
 {
     let condition = processor.stack().get(0);
     processor.stack_mut().decrement_size();
-    tracer.decrement_stack_size();
 
     match condition.as_canonical_u64() {
         0 => {

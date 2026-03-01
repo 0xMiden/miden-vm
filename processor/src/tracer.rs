@@ -4,7 +4,7 @@ use miden_air::trace::{RowIndex, chiplets::hasher::STATE_WIDTH, decoder::NUM_USE
 use miden_core::{
     Felt, Word, ZERO,
     crypto::merkle::MerklePath,
-    field::{BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField64, QuadFelt},
+    field::{BasedVectorSpace, Field, QuadFelt},
     mast::{MastForest, MastNodeId},
 };
 
@@ -28,6 +28,35 @@ use crate::{
 /// - Processor: maintains and mutates the state of the VM components (system, stack, memory, etc)
 ///   as execution progresses
 /// - Tracer: records auxiliary information *derived from* the processor state
+///
+/// # Methods overview
+///
+/// The main methods of this trait are [`start_clock_cycle`] and [`finalize_clock_cycle`], which are
+/// called at the start and end of each clock cycle, respectively. These methods are the only
+/// methods for which a reference to the processor is passed in, due to the fact that the state that
+/// the processor is in at that point is completely unambiguous (i.e. either before all mutations
+/// for the clock cycle, or after all mutations except the clock register for the clock cycle).
+///
+/// We refer to all other methods as "in-cycle methods". These methods are called at some point
+/// during the execution of the clock cycle, with the following guarantee:
+///
+/// *At most one in-cycle method is called between [`start_clock_cycle`] and
+/// [`finalize_clock_cycle`] for each clock cycle.*
+///
+/// This guarantee is designed to prevent implementations from relying on undocumented ordering
+/// between in-cycle methods, which may be subject to change in future versions of the processor.
+///
+/// Note 1: The only exception to the above rule is the method [`record_mast_forest_resolution`],
+/// which is called at the point of resolving a MAST forest (i.e. when execution encounters an
+/// external node or a dyn node with an unknown callee). This method is special in that we expect
+/// implementations to simply record the resolved MAST forest, without performing any other logic
+/// that depends on the timing of the call.
+///
+/// Note 2: The in-cycle methods are included in the trait for performance reasons; technically,
+/// implementations *could* only use [`start_clock_cycle`] and [`finalize_clock_cycle`] to record
+/// any auxiliary information they need by accessing the processor state before or after each clock
+/// cycle. However, experiments show that this requires redoing too much work in the tracer already
+/// performed by the processor, which degrades performance.
 pub trait Tracer {
     type Processor;
 
@@ -73,7 +102,12 @@ pub trait Tracer {
         current_forest: &Arc<MastForest>,
     );
 
-    /// Records and replays the resolutions of [crate::host::Host::get_mast_forest].
+    // MAST FOREST RESOLUTION
+    // --------------------------------------------------------------------------------------------
+
+    /// Records and replays the resolutions of [crate::host::Host::get_mast_forest], either due to
+    /// an [miden_core::mast::ExternalNode] or a [miden_core::mast::DynNode] for which the callee
+    /// digest is not found in the current MAST forest.
     ///
     /// Note that when execution encounters a [miden_core::mast::ExternalNode], the external node
     /// gets resolved to the MAST node it refers to in the new MAST forest, without consuming the
@@ -82,137 +116,199 @@ pub trait Tracer {
     /// [Tracer::start_clock_cycle] is called on the resolved node (i.e. *not* the external node).
     /// This method is called on the external node before it is resolved, and hence is guaranteed to
     /// be called before [Tracer::start_clock_cycle] for clock cycles involving an external node.
-    fn record_mast_forest_resolution(&mut self, node_id: MastNodeId, forest: &Arc<MastForest>);
+    fn record_mast_forest_resolution(&mut self, _node_id: MastNodeId, _forest: &Arc<MastForest>) {}
 
-    // HASHER METHODS
+    // IN-CYCLE METHODS
     // --------------------------------------------------------------------------------------------
 
     /// Records the result of a call to `Hasher::permute()`.
+    ///
+    /// Called by: `HPERM`, `LOG_PRECOMPILE`.
     fn record_hasher_permute(
         &mut self,
-        input_state: [Felt; STATE_WIDTH],
-        output_state: [Felt; STATE_WIDTH],
-    );
+        _input_state: [Felt; STATE_WIDTH],
+        _output_state: [Felt; STATE_WIDTH],
+    ) {
+    }
 
     /// Records the result of a call to `Hasher::build_merkle_root()`.
     ///
     /// The `path` is an `Option` to support environments where the `Hasher` is not present, such as
     /// in the context of parallel trace generation.
+    ///
+    /// Called by: `MPVERIFY`.
     fn record_hasher_build_merkle_root(
         &mut self,
-        node: Word,
-        path: Option<&MerklePath>,
-        index: Felt,
-        output_root: Word,
-    );
+        _node: Word,
+        _path: Option<&MerklePath>,
+        _index: Felt,
+        _output_root: Word,
+    ) {
+    }
 
     /// Records the result of a call to `Hasher::update_merkle_root()`.
     ///
     /// The `path` is an `Option` to support environments where the `Hasher` is not present, such as
     /// in the context of parallel trace generation.
+    ///
+    /// Called by: `MRUPDATE`.
     fn record_hasher_update_merkle_root(
         &mut self,
-        old_value: Word,
-        new_value: Word,
-        path: Option<&MerklePath>,
-        index: Felt,
-        old_root: Word,
-        new_root: Word,
-    );
-
-    // MEMORY METHODS
-    // --------------------------------------------------------------------------------------------
+        _old_value: Word,
+        _new_value: Word,
+        _path: Option<&MerklePath>,
+        _index: Felt,
+        _old_root: Word,
+        _new_root: Word,
+    ) {
+    }
 
     /// Records the element read from memory at the given address.
+    ///
+    /// Called by: `MLOAD`.
     fn record_memory_read_element(
         &mut self,
-        element: Felt,
-        addr: Felt,
-        ctx: ContextId,
-        clk: RowIndex,
-    );
+        _element: Felt,
+        _addr: Felt,
+        _ctx: ContextId,
+        _clk: RowIndex,
+    ) {
+    }
 
     /// Records the word read from memory at the given address.
-    fn record_memory_read_word(&mut self, word: Word, addr: Felt, ctx: ContextId, clk: RowIndex);
+    ///
+    /// Called by: `MLOADW`, `HORNER_EVAL_EXT`, `DYN`.
+    fn record_memory_read_word(
+        &mut self,
+        _word: Word,
+        _addr: Felt,
+        _ctx: ContextId,
+        _clk: RowIndex,
+    ) {
+    }
 
     /// Records the element written to memory at the given address.
+    ///
+    /// Called by: `MSTORE`, `CALL` (non-syscall, for FMP initialization).
     fn record_memory_write_element(
         &mut self,
-        element: Felt,
-        addr: Felt,
-        ctx: ContextId,
-        clk: RowIndex,
-    );
+        _element: Felt,
+        _addr: Felt,
+        _ctx: ContextId,
+        _clk: RowIndex,
+    ) {
+    }
 
     /// Records the word written to memory at the given address.
-    fn record_memory_write_word(&mut self, word: Word, addr: Felt, ctx: ContextId, clk: RowIndex);
+    ///
+    /// Called by: `MSTOREW`.
+    fn record_memory_write_word(
+        &mut self,
+        _word: Word,
+        _addr: Felt,
+        _ctx: ContextId,
+        _clk: RowIndex,
+    ) {
+    }
 
-    // ADVICE PROVIDER METHODS
-    // --------------------------------------------------------------------------------------------
+    /// Records two element reads at the given addresses.
+    ///
+    /// Called by: `HORNER_EVAL_BASE`.
+    fn record_memory_read_element_pair(
+        &mut self,
+        _element_0: Felt,
+        _addr_0: Felt,
+        _element_1: Felt,
+        _addr_1: Felt,
+        _ctx: ContextId,
+        _clk: RowIndex,
+    ) {
+    }
+
+    /// Records two consecutive word reads (a "dword" read) starting at the given address.
+    ///
+    /// Called by: `MSTREAM`.
+    fn record_memory_read_dword(
+        &mut self,
+        _words: [Word; 2],
+        _addr: Felt,
+        _ctx: ContextId,
+        _clk: RowIndex,
+    ) {
+    }
+
+    /// Records a `DYNCALL`'s memory operations: reading the callee hash from memory and writing
+    /// the initial FMP value to the new context's memory.
+    ///
+    /// Called by: `DYNCALL`.
+    fn record_dyncall_memory(
+        &mut self,
+        _callee_hash: Word,
+        _read_addr: Felt,
+        _read_ctx: ContextId,
+        _fmp_ctx: ContextId,
+        _clk: RowIndex,
+    ) {
+    }
+
+    /// Records a `CRYPTO_STREAM` operation: reading 2 plaintext words from source memory and
+    /// writing 2 ciphertext words to destination memory.
+    ///
+    /// Called by: `CRYPTO_STREAM`.
+    fn record_crypto_stream(
+        &mut self,
+        _plaintext: [Word; 2],
+        _src_addr: Felt,
+        _ciphertext: [Word; 2],
+        _dst_addr: Felt,
+        _ctx: ContextId,
+        _clk: RowIndex,
+    ) {
+    }
+
+    /// Records a `PIPE` operation: popping a dword from the advice stack and writing it to two
+    /// consecutive memory words.
+    ///
+    /// Called by: `PIPE`.
+    fn record_pipe(&mut self, _words: [Word; 2], _addr: Felt, _ctx: ContextId, _clk: RowIndex) {}
 
     /// Records the value returned by a [crate::host::advice::AdviceProvider::pop_stack] operation.
-    fn record_advice_pop_stack(&mut self, value: Felt);
+    ///
+    /// Called by: `ADVPOP`.
+    fn record_advice_pop_stack(&mut self, _value: Felt) {}
+
     /// Records the value returned by a [crate::host::advice::AdviceProvider::pop_stack_word]
     /// operation.
-    fn record_advice_pop_stack_word(&mut self, word: Word);
-    /// Records the value returned by a [crate::host::advice::AdviceProvider::pop_stack_dword]
-    /// operation.
-    fn record_advice_pop_stack_dword(&mut self, words: [Word; 2]);
-
-    // U32 METHODS
-    // --------------------------------------------------------------------------------------------
+    ///
+    /// Called by: `ADVPOPW`.
+    fn record_advice_pop_stack_word(&mut self, _word: Word) {}
 
     /// Records the operands of a u32and operation.
-    fn record_u32and(&mut self, a: Felt, b: Felt);
+    ///
+    /// Called by: `U32AND`.
+    fn record_u32and(&mut self, _a: Felt, _b: Felt) {}
 
     /// Records the operands of a u32xor operation.
-    fn record_u32xor(&mut self, a: Felt, b: Felt);
+    ///
+    /// Called by: `U32XOR`.
+    fn record_u32xor(&mut self, _a: Felt, _b: Felt) {}
 
     /// Records the high and low 32-bit limbs of the result of a u32 operation for the purposes of
     /// the range checker. This is expected to result in four 16-bit range checks.
-    fn record_u32_range_checks(&mut self, clk: RowIndex, u32_lo: Felt, u32_hi: Felt);
-
-    // KERNEL METHODS
-    // --------------------------------------------------------------------------------------------
+    ///
+    /// Called by: `U32SPLIT`, `U32ADD`, `U32ADD3`, `U32SUB`, `U32MUL`, `U32MADD`, `U32DIV`,
+    /// `U32ASSERT2`.
+    fn record_u32_range_checks(&mut self, _clk: RowIndex, _u32_lo: Felt, _u32_hi: Felt) {}
 
     /// Records the procedure hash of a syscall.
-    fn record_kernel_proc_access(&mut self, proc_hash: Word);
-
-    // ACE CHIPLET METHODS
-    // --------------------------------------------------------------------------------------------
+    ///
+    /// Called by: `SYSCALL`.
+    fn record_kernel_proc_access(&mut self, _proc_hash: Word) {}
 
     /// Records the evaluation of a circuit.
-    fn record_circuit_evaluation(&mut self, circuit_evaluation: CircuitEvaluation);
-
-    // MISCELLANEOUS
-    // --------------------------------------------------------------------------------------------
-
-    /// Signals that the stack depth is incremented as a result of pushing a new element.
     ///
-    /// This method is guaranteed to be called *after* the stack size is incremented, and a valid
-    /// value is written to the new top of the stack.
-    fn increment_stack_size(&mut self, processor: &Self::Processor);
-
-    /// Signals that the stack depth is decremented as a result of popping an element off the stack.
-    ///
-    /// This method is guaranteed to be called *after* the stack size is decremented.
-    ///
-    /// Note that if the stack depth is already [miden_core::program::MIN_STACK_DEPTH], then the
-    /// stack depth is unchanged; the top element is popped off, and a ZERO is shifted in at the
-    /// bottom.
-    fn decrement_stack_size(&mut self);
-
-    /// Signals the start of a new execution context, as a result of a CALL, SYSCALL or DYNCALL
-    /// operation being executed.
-    ///
-    /// This method is guaranteed to be called *before* the context is actually started.
-    fn start_context(&mut self);
-
-    /// Signals the end of an execution context, as a result of an END operation associated with a
-    /// CALL, SYSCALL or DYNCALL.
-    ///
-    /// This method is guaranteed to be called *after* the context is actually restored.
-    fn restore_context(&mut self);
+    /// Called by: `EVAL_CIRCUIT`.
+    fn record_circuit_evaluation(&mut self, _circuit_evaluation: CircuitEvaluation) {}
 }
 
 // OPERATION HELPER REGISTERS

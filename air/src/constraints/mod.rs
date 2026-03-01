@@ -8,30 +8,24 @@
 //!
 //! ### Main Trace Constraints
 //! - system: clock, ctx, fn_hash transitions
-//! - decoder: op bits, batch flags, control flow
 //! - range: range checker V column transitions
-//! - chiplets: hasher, bitwise, memory, ACE, kernel ROM
-//! - stack: op flags, overflow, field ops, etc.
 //!
 //! ### Bus Constraints (Auxiliary Trace)
-//! - decoder::bus, stack::bus, range::bus, chiplets::bus
-//! - bus: shared auxiliary trace indices and utils
+//! - range::bus
 //!
 //! Bus constraints access the auxiliary trace via `builder.permutation()` and use
 //! random challenges from `builder.permutation_randomness()` for multiset/LogUp verification.
 //!
-//! ## Kernel Verification
-//!
-//! The chiplets bus uses aux_finals for kernel verification:
-//! - First row: b_chiplets[0] = 1 (AIR boundary constraint)
-//! - Last row: b_chiplets[last] = reduced_kernel_digests (verified via aux_finals)
+//! Additional components (decoder, stack, chiplets) are introduced in later constraint chunks.
 
 use miden_crypto::stark::air::MidenAirBuilder;
 
 use crate::MainTraceRow;
 
+mod op_flags;
 pub mod range;
 pub mod system;
+pub mod tagging;
 
 // ENTRY POINTS
 // ================================================================================================

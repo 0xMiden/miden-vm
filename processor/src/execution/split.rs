@@ -44,7 +44,6 @@ where
 
     // drop the condition from the stack
     state.processor.stack_mut().decrement_size();
-    state.tracer.decrement_stack_size();
 
     // execute the appropriate branch
     state.continuation_stack.push_finish_split(node_id);

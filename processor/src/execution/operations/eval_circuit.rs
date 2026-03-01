@@ -1,5 +1,5 @@
 use miden_air::trace::RowIndex;
-use miden_core::field::{PrimeCharacteristicRing, PrimeField64, QuadFelt};
+use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
 
 use crate::{
     ContextId, Felt,
@@ -40,7 +40,7 @@ where
     let clk = processor.system().clock();
 
     let circuit_evaluation =
-        eval_circuit_impl(ctx, ptr, clk, num_read, num_eval, processor.memory_mut(), tracer)?;
+        eval_circuit_impl(ctx, ptr, clk, num_read, num_eval, processor.memory_mut())?;
     tracer.record_circuit_evaluation(circuit_evaluation);
 
     Ok(())
@@ -58,7 +58,6 @@ pub(crate) fn eval_circuit_impl(
     num_vars: Felt,
     num_eval: Felt,
     mem: &mut impl MemoryInterface,
-    tracer: &mut impl Tracer,
 ) -> Result<CircuitEvaluation, AceEvalError> {
     let num_vars = num_vars.as_canonical_u64();
     let num_eval = num_eval.as_canonical_u64();
@@ -98,18 +97,14 @@ pub(crate) fn eval_circuit_impl(
 
     let mut ptr = ptr;
     // perform READ operations
-    // Note: we pass in a `NoopTracer`, because the parallel trace generation skips the circuit
-    // evaluation completely
     for _ in 0..num_read_rows {
         let word = mem.read_word(ctx, ptr, clk)?;
-        tracer.record_memory_read_word(word, ptr, ctx, clk);
         evaluation_context.do_read(ptr, word);
         ptr += PTR_OFFSET_WORD;
     }
     // perform EVAL operations
     for _ in 0..num_eval_rows {
         let instruction = mem.read_element(ctx, ptr)?;
-        tracer.record_memory_read_element(instruction, ptr, ctx, clk);
         evaluation_context.do_eval(ptr, instruction)?;
         ptr += PTR_OFFSET_ELEM;
     }

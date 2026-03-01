@@ -1,5 +1,8 @@
 use core::{fmt, ops::Range};
 
+use miden_crypto::utils::{
+    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -82,5 +85,22 @@ impl FileLineCol {
 impl fmt::Display for FileLineCol {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "[{}@{}:{}]", &self.uri, self.line, self.column)
+    }
+}
+
+impl Serializable for FileLineCol {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.uri.write_into(target);
+        self.line.write_into(target);
+        self.column.write_into(target);
+    }
+}
+
+impl Deserializable for FileLineCol {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let uri = Uri::read_from(source)?;
+        let line = LineNumber::read_from(source)?;
+        let column = ColumnNumber::read_from(source)?;
+        Ok(Self::new(uri, line, column))
     }
 }

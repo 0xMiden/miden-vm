@@ -1,6 +1,4 @@
-use miden_core::{
-    Felt, chiplets::hasher::apply_permutation, field::PrimeField64, utils::ToElements,
-};
+use miden_core::{Felt, chiplets::hasher::apply_permutation, utils::ToElements};
 use miden_processor::{ExecutionError, advice::AdviceError};
 use miden_utils_testing::expect_exec_error_matches;
 

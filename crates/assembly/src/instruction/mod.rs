@@ -8,7 +8,6 @@ use miden_assembly_syntax::{
 };
 use miden_core::{
     Felt, WORD_SIZE, ZERO,
-    field::PrimeCharacteristicRing,
     mast::MastNodeId,
     operations::{Decorator, Operation},
 };
@@ -586,6 +585,10 @@ impl Assembler {
             Instruction::Debug(options) => {
                 block_builder
                     .push_decorator(Decorator::Debug(debug::compile_options(options, proc_ctx)?))?;
+            },
+
+            Instruction::DebugVar(debug_var_info) => {
+                block_builder.push_debug_var(debug_var_info.clone())?;
             },
 
             // ----- emit instruction -------------------------------------------------------------

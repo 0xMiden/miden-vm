@@ -13,7 +13,7 @@ use miden_core::{
 use rstest::rstest;
 
 use super::{Felt, build_trace_from_ops_with_inputs, rand_array};
-use crate::{AdviceInputs, PrimeField64, StackInputs};
+use crate::{AdviceInputs, StackInputs};
 
 // SIBLING TABLE TESTS
 // ================================================================================================

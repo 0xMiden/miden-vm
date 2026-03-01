@@ -56,8 +56,7 @@ pub use node::{
 use crate::{
     Felt, LexicographicWord, Word,
     advice::AdviceMap,
-    field::PrimeField64,
-    operations::{AssemblyOp, Decorator},
+    operations::{AssemblyOp, DebugVarInfo, Decorator},
     serde::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         SliceReader,
@@ -67,8 +66,8 @@ use crate::{
 
 mod debuginfo;
 pub use debuginfo::{
-    AsmOpIndexError, DebugInfo, DecoratedLinks, DecoratedLinksIter, DecoratorIndexError,
-    NodeToDecoratorIds, OpToAsmOpId, OpToDecoratorIds,
+    AsmOpIndexError, DebugInfo, DebugVarId, DecoratedLinks, DecoratedLinksIter,
+    DecoratorIndexError, NodeToDecoratorIds, OpToAsmOpId, OpToDebugVarIds, OpToDecoratorIds,
 };
 
 mod serialization;
@@ -575,6 +574,28 @@ impl MastForest {
     /// Adds a decorator to the forest, and returns the associated [`DecoratorId`].
     pub fn add_decorator(&mut self, decorator: Decorator) -> Result<DecoratorId, MastForestError> {
         self.debug_info.add_decorator(decorator)
+    }
+
+    /// Adds a debug variable to the forest, and returns the associated [`DebugVarId`].
+    pub fn add_debug_var(
+        &mut self,
+        debug_var: DebugVarInfo,
+    ) -> Result<DebugVarId, MastForestError> {
+        self.debug_info.add_debug_var(debug_var)
+    }
+
+    /// Returns debug variable IDs for a specific operation within a node.
+    pub fn debug_vars_for_operation(
+        &self,
+        node_id: MastNodeId,
+        local_op_idx: usize,
+    ) -> &[DebugVarId] {
+        self.debug_info.debug_vars_for_operation(node_id, local_op_idx)
+    }
+
+    /// Returns the debug variable with the given ID, if it exists.
+    pub fn debug_var(&self, debug_var_id: DebugVarId) -> Option<&DebugVarInfo> {
+        self.debug_info.debug_var(debug_var_id)
     }
 
     /// Adds decorator IDs for a node to the storage.

@@ -101,8 +101,6 @@ impl StackOutputs {
     /// Converts the [`StackOutputs`] into the vector of `u64` values.
     #[cfg(any(test, feature = "testing"))]
     pub fn as_int_vec(&self) -> Vec<u64> {
-        use miden_crypto::field::PrimeField64;
-
         self.elements.iter().map(|e| (*e).as_canonical_u64()).collect()
     }
 }

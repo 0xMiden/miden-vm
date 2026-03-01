@@ -2,7 +2,6 @@ use alloc::{string::String, sync::Arc};
 
 use miden_core::{
     Felt,
-    field::PrimeCharacteristicRing,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
         JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor, MastNodeExt,

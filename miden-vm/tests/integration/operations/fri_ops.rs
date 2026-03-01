@@ -1,7 +1,4 @@
-use miden_core::field::PrimeCharacteristicRing;
-use miden_utils_testing::{
-    Felt, PrimeField64, TRUNCATE_STACK_PROC, build_test, push_inputs, rand::rand_array,
-};
+use miden_utils_testing::{Felt, TRUNCATE_STACK_PROC, build_test, push_inputs, rand::rand_array};
 
 // FRI_EXT2FOLD4
 // ================================================================================================

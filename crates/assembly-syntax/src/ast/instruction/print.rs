@@ -8,6 +8,10 @@ impl PrettyPrint for Instruction {
     fn render(&self) -> Document {
         use crate::prettier::*;
 
+        if !self.has_textual_representation() {
+            return Document::Empty;
+        }
+
         match self {
             Self::Nop => const_text("nop"),
             Self::Assert => const_text("assert"),
@@ -331,6 +335,9 @@ impl PrettyPrint for Instruction {
             Self::Emit => const_text("emit"),
             Self::EmitImm(value) => inst_with_felt_imm("emit", value),
             Self::Trace(value) => inst_with_imm("trace", value),
+
+            // Handled by the early return for !has_textual_representation()
+            Self::DebugVar(_) => unreachable!(),
         }
     }
 }

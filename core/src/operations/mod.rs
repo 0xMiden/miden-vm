@@ -1,11 +1,12 @@
 use core::fmt;
 
-use miden_crypto::field::PrimeField64;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 mod decorators;
-pub use decorators::{AssemblyOp, DebugOptions, Decorator, DecoratorList};
+pub use decorators::{
+    AssemblyOp, DebugOptions, DebugVarInfo, DebugVarLocation, Decorator, DecoratorList,
+};
 pub use opcode_constants::*;
 
 use crate::{
@@ -674,6 +675,63 @@ impl Operation {
                 | Self::Halt
                 | Self::Call
                 | Self::SysCall
+        )
+    }
+
+    /// Returns true if this basic block operation increases the stack depth by one.
+    ///
+    /// Note: this only applies to operations within basic blocks (i.e. those executed via
+    /// `ResumeBasicBlock` continuations). Control flow operations that affect stack size
+    /// (e.g. Split, Loop, Dyn) are handled separately.
+    pub fn increments_stack_size(&self) -> bool {
+        matches!(
+            self,
+            Self::Push(_)
+                | Self::Pad
+                | Self::Dup0
+                | Self::Dup1
+                | Self::Dup2
+                | Self::Dup3
+                | Self::Dup4
+                | Self::Dup5
+                | Self::Dup6
+                | Self::Dup7
+                | Self::Dup9
+                | Self::Dup11
+                | Self::Dup13
+                | Self::Dup15
+                | Self::U32split
+                | Self::SDepth
+                | Self::Clk
+                | Self::AdvPop
+        )
+    }
+
+    /// Returns true if this basic block operation decreases the stack depth by one.
+    ///
+    /// Note: this only applies to operations within basic blocks (i.e. those executed via
+    /// `ResumeBasicBlock` continuations). Control flow operations that affect stack size
+    /// (e.g. Split, Loop, Dyn) are handled separately.
+    pub fn decrements_stack_size(&self) -> bool {
+        matches!(
+            self,
+            Self::Drop
+                | Self::Assert(_)
+                | Self::Add
+                | Self::Mul
+                | Self::And
+                | Self::Or
+                | Self::Eq
+                | Self::U32add3
+                | Self::U32madd
+                | Self::U32and
+                | Self::U32xor
+                | Self::CSwap
+                | Self::CSwapW
+                | Self::MLoadW
+                | Self::MStoreW
+                | Self::MStore
+                | Self::FriE2F4
         )
     }
 }

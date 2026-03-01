@@ -12,6 +12,9 @@ pub use assembly_op::AssemblyOp;
 mod debug;
 pub use debug::DebugOptions;
 
+mod debug_var;
+pub use debug_var::{DebugVarInfo, DebugVarLocation};
+
 use crate::mast::{DecoratedOpLink, DecoratorFingerprint};
 
 // DECORATORS

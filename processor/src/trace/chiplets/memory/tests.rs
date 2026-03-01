@@ -8,17 +8,14 @@ use miden_air::trace::{
         MEMORY_WRITE, TRACE_WIDTH as MEMORY_TRACE_WIDTH,
     },
 };
-use miden_core::{
-    ONE, WORD_SIZE, Word, ZERO, assert_matches,
-    field::{Field, PrimeCharacteristicRing},
-};
+use miden_core::{ONE, WORD_SIZE, Word, ZERO, assert_matches, field::Field};
 
 use super::{
     CLK_COL_IDX, CTX_COL_IDX, D_INV_COL_IDX, D0_COL_IDX, D1_COL_IDX, EMPTY_WORD, Felt, Memory,
     TraceFragment, V_COL_RANGE, WORD_COL_IDX,
     segment::{MemoryAccessType, MemoryOperation},
 };
-use crate::{ContextId, MemoryAddress, MemoryError, PrimeField64};
+use crate::{ContextId, MemoryAddress, MemoryError};
 
 #[test]
 fn mem_init() {

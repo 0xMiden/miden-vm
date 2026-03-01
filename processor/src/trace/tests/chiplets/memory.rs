@@ -11,16 +11,12 @@ use miden_air::trace::{
         },
     },
 };
-use miden_core::{
-    WORD_SIZE,
-    field::{Field, PrimeCharacteristicRing},
-};
+use miden_core::{WORD_SIZE, field::Field};
 
 use super::{
     AUX_TRACE_RAND_ELEMENTS, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, HASH_CYCLE_LEN,
     LAST_CYCLE_ROW, ONE, Operation, Word, ZERO, build_trace_from_ops, rand_array,
 };
-use crate::PrimeField64;
 
 /// Tests the generation of the `b_chip` bus column when only memory lookups are included. It
 /// ensures that trace generation is correct when all of the following are true.
