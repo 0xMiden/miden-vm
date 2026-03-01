@@ -46,11 +46,14 @@ impl DecoratorInfo {
         _string_table: &StringTable,
         decorator_data: &[u8],
     ) -> Result<Decorator, DeserializationError> {
-        // This is safe because for decorators that don't use the offset, `0` is used (and hence
-        // will never access an element outside). Note that in this implementation, we trust the
-        // encoder.
-        let mut data_reader =
-            SliceReader::new(&decorator_data[self.decorator_data_offset as usize..]);
+        let offset = self.decorator_data_offset as usize;
+        if offset > decorator_data.len() {
+            return Err(DeserializationError::InvalidValue(format!(
+                "decorator data offset {offset} is out of bounds (data length: {})",
+                decorator_data.len()
+            )));
+        }
+        let mut data_reader = SliceReader::new(&decorator_data[offset..]);
         match self.variant {
             EncodedDecoratorVariant::DebugOptionsStackAll => {
                 Ok(Decorator::Debug(DebugOptions::StackAll))
@@ -262,5 +265,22 @@ impl DecoratorDataBuilder {
             self.decorator_infos,
             self.string_table_builder.into_table(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_decorator_data_offset_out_of_bounds() {
+        let info = DecoratorInfo {
+            variant: EncodedDecoratorVariant::DebugOptionsStackTop,
+            decorator_data_offset: 99,
+        };
+        let data: Vec<u8> = vec![1, 2, 3];
+        let string_table = StringTable::new(vec![], vec![]);
+        let result = info.try_into_decorator(&string_table, &data);
+        assert!(matches!(result, Err(DeserializationError::InvalidValue(_))));
     }
 }
