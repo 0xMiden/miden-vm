@@ -43,12 +43,15 @@ pub fn enforce_main<AB>(
 }
 
 /// Enforces all auxiliary (bus) constraints.
+///
+/// `challenges` is the full derived challenge array (`DERIVED_CHALLENGE_LEN` elements).
 pub fn enforce_bus<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,
     _next: &MainTraceRow<AB::Var>,
+    challenges: &[AB::ExprEF],
 ) where
     AB: LiftedAirBuilder,
 {
-    range::bus::enforce_bus(builder, local);
+    range::bus::enforce_bus(builder, local, challenges);
 }

@@ -56,8 +56,11 @@ const RANGE_BUS_NAME: &str = "range.bus.transition";
 /// using the LogUp protocol. The expected final value is enforced via aux-finals; this
 /// function enforces only transitions.
 ///
+/// `challenges` is the full derived challenge array. Only `challenges[0]` (alpha) is used
+/// for the LogUp denominators (`alpha + value`).
+///
 /// This is a degree-9 constraint.
-pub fn enforce_bus<AB>(builder: &mut AB, local: &MainTraceRow<AB::Var>)
+pub fn enforce_bus<AB>(builder: &mut AB, local: &MainTraceRow<AB::Var>, challenges: &[AB::ExprEF])
 where
     AB: LiftedAirBuilder,
 {
@@ -74,8 +77,7 @@ where
     let b_local = aux_local[range::B_RANGE_COL_IDX];
     let b_next = aux_next[range::B_RANGE_COL_IDX];
 
-    let challenges = builder.permutation_randomness();
-    let alpha: AB::ExprEF = challenges[0].into();
+    let alpha: AB::ExprEF = challenges[0].clone();
 
     // Denominators for LogUp
     // Memory lookups: mv0 = alpha + chiplets[MEMORY_D0], mv1 = alpha + chiplets[MEMORY_D1]

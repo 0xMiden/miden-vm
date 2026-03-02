@@ -10,7 +10,10 @@
 
 use alloc::vec::Vec;
 
-use miden_core::{field::ExtensionField, utils::RowMajorMatrix};
+use miden_core::{
+    field::ExtensionField,
+    utils::{Matrix, RowMajorMatrix},
+};
 use p3_miden_lifted_air::AuxBuilder;
 
 use crate::Felt;
@@ -60,15 +63,19 @@ where
         challenges: &[EF],
     ) -> (RowMajorMatrix<EF>, Vec<EF>) {
         let _span = tracing::info_span!("build_aux_trace").entered();
-        let aux_trace = self.0.build_aux_columns(main, challenges);
+        // The prover samples only 2 independent challenges (c0, c1). Derive the
+        // full 16-element array before passing to the processor's aux builders.
+        let derived = super::derive_challenges(challenges);
+        let aux_trace = self.0.build_aux_columns(main, &derived);
         // The prover sends aux_values into the Fiat-Shamir transcript, and the
         // verifier reads back exactly `aux_width()` extension field elements.
         // We use the last row of the aux trace as aux_values. These are used by
         // reduced_aux_values() for cross-AIR identity checking in multi-table
-        // proofs. Currently reduced_aux_values() returns identity, so the actual
-        // values don't affect correctness — but the count must match aux_width().
-        let width = aux_trace.width;
-        let last_row = aux_trace.values[aux_trace.values.len() - width..].to_vec();
+        // proofs.
+        let last_row: Vec<EF> = aux_trace
+            .row_slice(aux_trace.height() - 1)
+            .expect("aux trace has at least one row")
+            .to_vec();
         (aux_trace, last_row)
     }
 }

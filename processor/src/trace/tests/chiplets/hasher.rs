@@ -26,7 +26,7 @@ use miden_core::{
 use miden_utils_testing::stack;
 
 use super::{
-    AUX_TRACE_RAND_ELEMENTS, AdviceInputs, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt,
+    DERIVED_CHALLENGE_LEN, AdviceInputs, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt,
     ONE, Operation, ZERO, build_span_with_respan_ops, build_trace_from_ops_with_inputs,
     build_trace_from_program, init_state_from_words, rand_array,
 };
@@ -66,7 +66,7 @@ pub fn b_chip_span() {
 
     let trace = build_trace_from_program(&program, &[]);
 
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
+    let alphas = rand_array::<Felt, DERIVED_CHALLENGE_LEN>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
 
@@ -140,7 +140,7 @@ pub fn b_chip_span_with_respan() {
     };
     let trace = build_trace_from_program(&program, &[]);
 
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
+    let alphas = rand_array::<Felt, DERIVED_CHALLENGE_LEN>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
 
@@ -255,7 +255,7 @@ pub fn b_chip_merge() {
 
     let trace = build_trace_from_program(&program, &[]);
 
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
+    let alphas = rand_array::<Felt, DERIVED_CHALLENGE_LEN>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
 
@@ -378,7 +378,7 @@ pub fn b_chip_permutation() {
         .collect::<Vec<_>>()
         .try_into()
         .expect("failed to convert vector to array");
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
+    let alphas = rand_array::<Felt, DERIVED_CHALLENGE_LEN>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
 
@@ -491,7 +491,7 @@ pub fn b_chip_log_precompile() {
     let stack_inputs = stack![5, 6, 7, 8, 1, 2, 3, 4];
     let trace = build_trace_from_program(&program, &stack_inputs);
 
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
+    let alphas = rand_array::<Felt, DERIVED_CHALLENGE_LEN>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
 
@@ -617,7 +617,7 @@ fn b_chip_mpverify() {
         stack_inputs,
         advice_inputs,
     );
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
+    let alphas = rand_array::<Felt, DERIVED_CHALLENGE_LEN>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
 
@@ -739,7 +739,7 @@ fn b_chip_mrupdate() {
 
     let trace =
         build_trace_from_ops_with_inputs(vec![Operation::MrUpdate], stack_inputs, advice_inputs);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
+    let alphas = rand_array::<Felt, DERIVED_CHALLENGE_LEN>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
 

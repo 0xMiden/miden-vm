@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_air::trace::{AUX_TRACE_RAND_ELEMENTS, STACK_AUX_TRACE_OFFSET};
+use miden_air::trace::{DERIVED_CHALLENGE_LEN, STACK_AUX_TRACE_OFFSET};
 use miden_core::{ONE, ZERO, field::Field, operations::Operation};
 
 use super::{super::stack::OverflowTableRow, Felt, build_trace_from_ops, rand_array};
@@ -32,7 +32,7 @@ fn p1_trace() {
     ];
     let init_stack = (1..17).rev().collect::<Vec<_>>();
     let trace = build_trace_from_ops(ops, &init_stack);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
+    let alphas = rand_array::<Felt, DERIVED_CHALLENGE_LEN>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 

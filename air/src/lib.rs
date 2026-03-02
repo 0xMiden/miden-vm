@@ -225,6 +225,9 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
     where
         EF: ExtensionField<Felt>,
     {
+        // Derive the full challenge array from the 2 independent random elements.
+        let alphas = trace::derive_challenges(challenges);
+
         // Extract final aux column values.
         let p1 = aux_values[trace::DECODER_AUX_TRACE_OFFSET];
         let p2 = aux_values[trace::DECODER_AUX_TRACE_OFFSET + 1];
@@ -236,16 +239,23 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
         let v_wiring = aux_values[trace::ACE_CHIPLET_WIRING_BUS_OFFSET];
 
         // Parse fixed-length public values (see `NUM_PUBLIC_VALUES` for layout).
-        debug_assert_eq!(public_values.len(), NUM_PUBLIC_VALUES);
+        if public_values.len() != NUM_PUBLIC_VALUES {
+            return Err(format!(
+                "expected {} public values, got {}",
+                NUM_PUBLIC_VALUES,
+                public_values.len()
+            )
+            .into());
+        }
         let program_hash: Word = public_values[PV_PROGRAM_HASH..PV_PROGRAM_HASH + WORD_SIZE]
             .try_into()
-            .expect("program hash is 4 felts");
+            .map_err(|_| -> ReductionError { "invalid program hash slice".into() })?;
         let pc_transcript_state: PrecompileTranscriptState = public_values
             [PV_TRANSCRIPT_STATE..PV_TRANSCRIPT_STATE + WORD_SIZE]
             .try_into()
-            .expect("transcript state is 4 felts");
+            .map_err(|_| -> ReductionError { "invalid transcript state slice".into() })?;
 
-        // Compute expected bus messages from public inputs and challenges.
+        // Compute expected bus messages from public inputs and derived challenges.
         //
         // Running products accumulate response/request (responses in numerator).
         // Without init seeding, columns that previously started at identity now end at
@@ -257,16 +267,16 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
         // - b_chiplets ends at kernel_reduced (bus missing kernel ROM init requests)
         //
         // The product is constructed so that it equals 1 for valid executions.
-        let ph_msg = program_hash_message(challenges, &program_hash);
+        let ph_msg = program_hash_message(&alphas, &program_hash);
 
         let default_transcript_msg = trace::log_precompile::transcript_message(
-            challenges,
+            &alphas,
             PrecompileTranscriptState::default(),
         );
         let final_transcript_msg =
-            trace::log_precompile::transcript_message(challenges, pc_transcript_state);
+            trace::log_precompile::transcript_message(&alphas, pc_transcript_state);
 
-        let kernel_reduced = kernel_reduced_from_var_len(challenges, var_len_public_inputs);
+        let kernel_reduced = kernel_reduced_from_var_len(&alphas, var_len_public_inputs);
 
         // Combine: for valid execution, prod = 1.
         //   p1 = 1, p3 = 1, s_aux = 1  (balanced buses)
@@ -274,7 +284,9 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
         //   b_hash_kernel * default_transcript_msg / final_transcript_msg = 1
         //   b_chiplets / kernel_reduced = 1
         let expected_denom = final_transcript_msg * kernel_reduced;
-        let expected_denom_inv = expected_denom.try_inverse().unwrap_or(EF::ONE);
+        let expected_denom_inv = expected_denom
+            .try_inverse()
+            .ok_or_else(|| -> ReductionError { "zero denominator in reduced_aux_values".into() })?;
 
         let prod = p1
             * p2
@@ -308,8 +320,16 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
         // Main trace constraints.
         constraints::enforce_main(builder, local, next);
 
+        // Derive the full challenge array from the 2 independent random elements.
+        let raw_challenges = builder.permutation_randomness();
+        let challenges: Vec<AB::ExprEF> = {
+            let c0: AB::ExprEF = raw_challenges[0].into();
+            let c1: AB::ExprEF = raw_challenges[1].into();
+            trace::derive_challenges(&[c0, c1])
+        };
+
         // Auxiliary (bus) constraints.
-        constraints::enforce_bus(builder, local, next);
+        constraints::enforce_bus(builder, local, next, &challenges);
     }
 }
 
