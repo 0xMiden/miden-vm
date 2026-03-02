@@ -86,7 +86,7 @@ where
     P: Processor,
 {
     let condition = processor.stack().get(0);
-    processor.stack_mut().decrement_size();
+    processor.stack_mut().decrement_size()?;
 
     match condition.as_canonical_u64() {
         0 => {
@@ -114,7 +114,7 @@ where
     P: Processor,
 {
     let condition = processor.stack().get(0);
-    processor.stack_mut().decrement_size();
+    processor.stack_mut().decrement_size()?;
 
     match condition.as_canonical_u64() {
         0 => {

@@ -19,9 +19,10 @@ use miden_core::{
     operations::Operation,
 };
 
-use super::{ExecutionContextInfo, StackState, SystemState};
-use crate::trace::parallel::{
-    core_trace_fragment::BasicBlockContext, tracer::CoreTraceGenerationTracer,
+use super::{ExecutionContextInfo, StackState, SystemState, get_node_in_forest};
+use crate::{
+    ExecutionError,
+    trace::parallel::{core_trace_fragment::BasicBlockContext, tracer::CoreTraceGenerationTracer},
 };
 
 // DECODER ROW
@@ -73,7 +74,7 @@ impl DecoderRow {
         op_batch: &OpBatch,
         addr: Felt,
         group_count: Felt,
-    ) -> Self {
+    ) -> Result<Self, ExecutionError> {
         debug_assert!(
             operation == Operation::Span || operation == Operation::Respan,
             "operation must be SPAN or RESPAN"
@@ -84,15 +85,15 @@ impl DecoderRow {
             op_batch.groups()[4..8].try_into().expect("slice with incorrect length"),
         );
 
-        Self {
+        Ok(Self {
             opcode: operation.op_code(),
             hasher_state,
             addr,
             in_basic_block: false,
             group_count,
             op_index: ZERO,
-            op_batch_flags: get_op_batch_flags(group_count),
-        }
+            op_batch_flags: get_op_batch_flags(group_count)?,
+        })
     }
 
     /// Creates a new `DecoderRow` for an operation within a basic block.
@@ -142,20 +143,21 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         system: &SystemState,
         stack: &StackState,
         basic_block_node: &BasicBlockNode,
-    ) {
+    ) -> Result<(), ExecutionError> {
         let group_count_for_block = Felt::from_u32(basic_block_node.num_op_groups() as u32);
         let first_op_batch = basic_block_node
             .op_batches()
             .first()
-            .expect("Basic block should have at least one op batch");
+            .ok_or(ExecutionError::Internal("basic block should have at least one op batch"))?;
 
         let decoder_row = DecoderRow::new_basic_block_batch(
             Operation::Span,
             first_op_batch,
             self.decoder_state.parent_addr,
             group_count_for_block,
-        );
-        self.fill_trace_row(system, stack, decoder_row)
+        )?;
+        self.fill_trace_row(system, stack, decoder_row);
+        Ok(())
     }
 
     /// Fills a trace row for SPAN end operation to the main trace fragment.
@@ -167,9 +169,9 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         system: &SystemState,
         stack: &StackState,
         basic_block_node: &BasicBlockNode,
-    ) {
+    ) -> Result<(), ExecutionError> {
         let (ended_node_addr, flags) =
-            self.decoder_state.replay_node_end(&mut self.block_stack_replay);
+            self.decoder_state.replay_node_end(&mut self.block_stack_replay)?;
 
         let decoder_row = DecoderRow::new_control_flow(
             Operation::End.op_code(),
@@ -177,7 +179,8 @@ impl<'a> CoreTraceGenerationTracer<'a> {
             ended_node_addr,
         );
 
-        self.fill_trace_row(system, stack, decoder_row)
+        self.fill_trace_row(system, stack, decoder_row);
+        Ok(())
     }
 
     // RESPAN
@@ -194,7 +197,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         stack: &StackState,
         op_batch: &OpBatch,
         basic_block_context: &mut BasicBlockContext,
-    ) {
+    ) -> Result<(), ExecutionError> {
         // Add RESPAN trace row
         {
             let decoder_row = DecoderRow::new_basic_block_batch(
@@ -202,7 +205,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
                 op_batch,
                 self.decoder_state.current_addr,
                 basic_block_context.group_count_in_block,
-            );
+            )?;
             self.fill_trace_row(system, stack, decoder_row);
         }
 
@@ -212,6 +215,8 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         // Update basic block context
         basic_block_context.group_count_in_block -= ONE;
         basic_block_context.current_op_group = op_batch.groups()[0];
+
+        Ok(())
     }
 
     /// Writes a trace row for an operation within a basic block.
@@ -257,14 +262,11 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         stack: &StackState,
         call_node: &CallNode,
         current_forest: &MastForest,
-    ) {
+    ) -> Result<(), ExecutionError> {
         // For CALL/SYSCALL operations, the hasher state in start operations contains the callee
         // hash in the first half, and zeros in the second half (since CALL only has one
         // child)
-        let callee_hash: Word = current_forest
-            .get_node_by_id(call_node.callee())
-            .expect("callee should exist")
-            .digest();
+        let callee_hash: Word = get_node_in_forest(current_forest, call_node.callee())?.digest();
         let zero_hash = Word::default();
 
         let decoder_row = DecoderRow::new_control_flow(
@@ -277,7 +279,8 @@ impl<'a> CoreTraceGenerationTracer<'a> {
             self.decoder_state.parent_addr,
         );
 
-        self.fill_trace_row(system, stack, decoder_row)
+        self.fill_trace_row(system, stack, decoder_row);
+        Ok(())
     }
 
     // DYN operations
@@ -338,16 +341,10 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         stack: &StackState,
         join_node: &JoinNode,
         current_forest: &MastForest,
-    ) {
+    ) -> Result<(), ExecutionError> {
         // Get the child hashes for the hasher state
-        let child1_hash: Word = current_forest
-            .get_node_by_id(join_node.first())
-            .expect("first child should exist")
-            .digest();
-        let child2_hash: Word = current_forest
-            .get_node_by_id(join_node.second())
-            .expect("second child should exist")
-            .digest();
+        let child1_hash: Word = get_node_in_forest(current_forest, join_node.first())?.digest();
+        let child2_hash: Word = get_node_in_forest(current_forest, join_node.second())?.digest();
 
         let decoder_row = DecoderRow::new_control_flow(
             Operation::Join.op_code(),
@@ -355,7 +352,8 @@ impl<'a> CoreTraceGenerationTracer<'a> {
             self.decoder_state.parent_addr,
         );
 
-        self.fill_trace_row(system, stack, decoder_row)
+        self.fill_trace_row(system, stack, decoder_row);
+        Ok(())
     }
 
     // LOOP operations
@@ -368,13 +366,10 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         stack: &StackState,
         loop_node: &LoopNode,
         current_forest: &MastForest,
-    ) {
+    ) -> Result<(), ExecutionError> {
         // For LOOP operations, the hasher state in start operations contains the loop body hash in
         // the first half.
-        let body_hash: Word = current_forest
-            .get_node_by_id(loop_node.body())
-            .expect("loop body should exist")
-            .digest();
+        let body_hash: Word = get_node_in_forest(current_forest, loop_node.body())?.digest();
         let zero_hash = Word::default();
 
         let decoder_row = DecoderRow::new_control_flow(
@@ -383,7 +378,8 @@ impl<'a> CoreTraceGenerationTracer<'a> {
             self.decoder_state.parent_addr,
         );
 
-        self.fill_trace_row(system, stack, decoder_row)
+        self.fill_trace_row(system, stack, decoder_row);
+        Ok(())
     }
 
     /// Fills a trace row for the start of a REPEAT operation.
@@ -394,13 +390,10 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         loop_node: &LoopNode,
         current_forest: &MastForest,
         current_addr: Felt,
-    ) {
+    ) -> Result<(), ExecutionError> {
         // For REPEAT operations, the hasher state in start operations contains the loop body hash
         // in the first half.
-        let body_hash: Word = current_forest
-            .get_node_by_id(loop_node.body())
-            .expect("loop body should exist")
-            .digest();
+        let body_hash: Word = get_node_in_forest(current_forest, loop_node.body())?.digest();
 
         let decoder_row = DecoderRow::new_control_flow(
             Operation::Repeat.op_code(),
@@ -409,7 +402,8 @@ impl<'a> CoreTraceGenerationTracer<'a> {
             current_addr,
         );
 
-        self.fill_trace_row(system, stack, decoder_row)
+        self.fill_trace_row(system, stack, decoder_row);
+        Ok(())
     }
 
     // SPLIT operations
@@ -422,16 +416,11 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         stack: &StackState,
         split_node: &SplitNode,
         current_forest: &MastForest,
-    ) {
+    ) -> Result<(), ExecutionError> {
         // Get the child hashes for the hasher state
-        let on_true_hash: Word = current_forest
-            .get_node_by_id(split_node.on_true())
-            .expect("on_true child should exist")
-            .digest();
-        let on_false_hash: Word = current_forest
-            .get_node_by_id(split_node.on_false())
-            .expect("on_false child should exist")
-            .digest();
+        let on_true_hash: Word = get_node_in_forest(current_forest, split_node.on_true())?.digest();
+        let on_false_hash: Word =
+            get_node_in_forest(current_forest, split_node.on_false())?.digest();
 
         let decoder_row = DecoderRow::new_control_flow(
             Operation::Split.op_code(),
@@ -439,7 +428,8 @@ impl<'a> CoreTraceGenerationTracer<'a> {
             self.decoder_state.parent_addr,
         );
 
-        self.fill_trace_row(system, stack, decoder_row)
+        self.fill_trace_row(system, stack, decoder_row);
+        Ok(())
     }
 
     /// Fills a trace row for the end of a control block.
@@ -450,10 +440,10 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         system: &SystemState,
         stack: &StackState,
         node_digest: Word,
-    ) {
+    ) -> Result<(), ExecutionError> {
         // Pop the block from stack and use its info for END operations
         let (ended_node_addr, flags) =
-            self.decoder_state.replay_node_end(&mut self.block_stack_replay);
+            self.decoder_state.replay_node_end(&mut self.block_stack_replay)?;
 
         let decoder_row = DecoderRow::new_control_flow(
             Operation::End.op_code(),
@@ -461,7 +451,8 @@ impl<'a> CoreTraceGenerationTracer<'a> {
             ended_node_addr,
         );
 
-        self.fill_trace_row(system, stack, decoder_row)
+        self.fill_trace_row(system, stack, decoder_row);
+        Ok(())
     }
 }
 
@@ -606,7 +597,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
 // ===============================================================================================
 
 /// Returns op batch flags for the specified group count.
-fn get_op_batch_flags(num_groups_left: Felt) -> [Felt; 3] {
+fn get_op_batch_flags(num_groups_left: Felt) -> Result<[Felt; 3], ExecutionError> {
     use miden_air::trace::decoder::{
         OP_BATCH_1_GROUPS, OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS,
     };
@@ -614,10 +605,12 @@ fn get_op_batch_flags(num_groups_left: Felt) -> [Felt; 3] {
 
     let num_groups = core::cmp::min(num_groups_left.as_canonical_u64() as usize, OP_BATCH_SIZE);
     match num_groups {
-        8 => OP_BATCH_8_GROUPS,
-        4 => OP_BATCH_4_GROUPS,
-        2 => OP_BATCH_2_GROUPS,
-        1 => OP_BATCH_1_GROUPS,
-        _ => panic!("invalid number of groups in a batch: {num_groups}, must be 1, 2, 4, or 8"),
+        8 => Ok(OP_BATCH_8_GROUPS),
+        4 => Ok(OP_BATCH_4_GROUPS),
+        2 => Ok(OP_BATCH_2_GROUPS),
+        1 => Ok(OP_BATCH_1_GROUPS),
+        _ => Err(ExecutionError::Internal(
+            "invalid number of groups in a batch, must be 1, 2, 4, or 8",
+        )),
     }
 }

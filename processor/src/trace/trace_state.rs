@@ -1,4 +1,4 @@
-use alloc::{collections::VecDeque, sync::Arc};
+use alloc::{collections::VecDeque, string::ToString, sync::Arc};
 
 use miden_air::trace::{
     RowIndex,
@@ -6,7 +6,7 @@ use miden_air::trace::{
 };
 
 use crate::{
-    ContextId, Felt, MIN_STACK_DEPTH, ONE, Word, ZERO,
+    ContextId, ExecutionError, Felt, MIN_STACK_DEPTH, MemoryError, ONE, Word, ZERO,
     advice::AdviceError,
     continuation_stack::ContinuationStack,
     crypto::merkle::MerklePath,
@@ -120,9 +120,10 @@ impl DecoderState {
         &mut self,
         block_address_replay: &mut BlockAddressReplay,
         block_stack_replay: &mut BlockStackReplay,
-    ) {
-        self.current_addr = block_address_replay.replay_block_address();
-        self.parent_addr = block_stack_replay.replay_node_start_parent_addr();
+    ) -> Result<(), ExecutionError> {
+        self.current_addr = block_address_replay.replay_block_address()?;
+        self.parent_addr = block_stack_replay.replay_node_start_parent_addr()?;
+        Ok(())
     }
 
     /// This function is called when we hit an `END` operation, signaling the end of execution for a
@@ -132,13 +133,13 @@ impl DecoderState {
     pub fn replay_node_end(
         &mut self,
         block_stack_replay: &mut BlockStackReplay,
-    ) -> (Felt, NodeFlags) {
-        let node_end_data = block_stack_replay.replay_node_end();
+    ) -> Result<(Felt, NodeFlags), ExecutionError> {
+        let node_end_data = block_stack_replay.replay_node_end()?;
 
         self.current_addr = node_end_data.prev_addr;
         self.parent_addr = node_end_data.prev_parent_addr;
 
-        (node_end_data.ended_node_addr, node_end_data.flags)
+        Ok((node_end_data.ended_node_addr, node_end_data.flags))
     }
 }
 
@@ -220,17 +221,17 @@ impl StackState {
     pub fn pop_overflow(
         &mut self,
         stack_overflow_replay: &mut StackOverflowReplay,
-    ) -> Option<Felt> {
+    ) -> Result<Option<Felt>, OperationError> {
         debug_assert!(self.stack_depth >= MIN_STACK_DEPTH);
 
         if self.stack_depth > MIN_STACK_DEPTH {
-            let (stack_value, new_overflow_addr) = stack_overflow_replay.replay_pop_overflow();
+            let (stack_value, new_overflow_addr) = stack_overflow_replay.replay_pop_overflow()?;
             self.stack_depth -= 1;
             self.last_overflow_addr = new_overflow_addr;
-            Some(stack_value)
+            Ok(Some(stack_value))
         } else {
             self.last_overflow_addr = ZERO;
-            None
+            Ok(None)
         }
     }
 
@@ -256,13 +257,17 @@ impl StackState {
     /// Restores the prior context for this stack.
     ///
     /// This has the effect bringing back items previously hidden from the overflow table.
-    pub fn restore_context(&mut self, stack_overflow_replay: &mut StackOverflowReplay) {
+    pub fn restore_context(
+        &mut self,
+        stack_overflow_replay: &mut StackOverflowReplay,
+    ) -> Result<(), OperationError> {
         let (stack_depth, last_overflow_addr) =
-            stack_overflow_replay.replay_restore_context_overflow_addr();
+            stack_overflow_replay.replay_restore_context_overflow_addr()?;
         // Restore stack depth to the value from before the context switch (parallel to Process
         // Stack behavior)
         self.stack_depth = stack_depth;
         self.last_overflow_addr = last_overflow_addr;
+        Ok(())
     }
 }
 
@@ -302,8 +307,12 @@ impl ExecutionContextReplay {
     }
 
     /// Replays the next recorded execution context system info.
-    pub fn replay_execution_context(&mut self) -> ExecutionContextSystemInfo {
-        self.execution_contexts.pop_front().expect("No execution context recorded")
+    pub fn replay_execution_context(
+        &mut self,
+    ) -> Result<ExecutionContextSystemInfo, OperationError> {
+        self.execution_contexts
+            .pop_front()
+            .ok_or(OperationError::Internal("no execution context recorded"))
     }
 }
 
@@ -352,15 +361,17 @@ impl BlockStackReplay {
     }
 
     /// Replays the node's parent address
-    pub fn replay_node_start_parent_addr(&mut self) -> Felt {
+    pub fn replay_node_start_parent_addr(&mut self) -> Result<Felt, ExecutionError> {
         self.node_start_parent_addr
             .pop_front()
-            .expect("No node start parent address recorded")
+            .ok_or(ExecutionError::Internal("no node start parent address recorded"))
     }
 
     /// Replays the data needed to recover the state on an END operation.
-    pub fn replay_node_end(&mut self) -> NodeEndData {
-        self.node_end.pop_front().expect("No node address and flags recorded")
+    pub fn replay_node_end(&mut self) -> Result<NodeEndData, ExecutionError> {
+        self.node_end
+            .pop_front()
+            .ok_or(ExecutionError::Internal("no node address and flags recorded"))
     }
 }
 
@@ -461,10 +472,10 @@ impl MastForestResolutionReplay {
     }
 
     /// Replays the next recorded MastForest resolution, returning both the node ID and forest
-    pub fn replay_resolution(&mut self) -> (MastNodeId, Arc<MastForest>) {
+    pub fn replay_resolution(&mut self) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
         self.mast_forest_resolutions
             .pop_front()
-            .expect("No MastForest resolutions recorded")
+            .ok_or(ExecutionError::Internal("no MastForest resolutions recorded"))
     }
 }
 
@@ -511,18 +522,22 @@ impl MemoryReadsReplay {
     // ACCESSORS
     // --------------------------------------------------------------------------------
 
-    pub fn replay_read_element(&mut self, addr: Felt) -> Felt {
-        let (element, stored_addr, _ctx, _clk) =
-            self.elements_read.pop_front().expect("No elements read from memory");
+    pub fn replay_read_element(&mut self, addr: Felt) -> Result<Felt, MemoryError> {
+        let (element, stored_addr, _ctx, _clk) = self
+            .elements_read
+            .pop_front()
+            .ok_or(MemoryError::MemoryReadFailed("memory elements replay is empty".to_string()))?;
         debug_assert_eq!(stored_addr, addr, "Address mismatch: expected {addr}, got {stored_addr}");
-        element
+        Ok(element)
     }
 
-    pub fn replay_read_word(&mut self, addr: Felt) -> Word {
-        let (word, stored_addr, _ctx, _clk) =
-            self.words_read.pop_front().expect("No words read from memory");
+    pub fn replay_read_word(&mut self, addr: Felt) -> Result<Word, MemoryError> {
+        let (word, stored_addr, _ctx, _clk) = self
+            .words_read
+            .pop_front()
+            .ok_or(MemoryError::MemoryReadFailed("memory words replay is empty".to_string()))?;
         debug_assert_eq!(stored_addr, addr, "Address mismatch: expected {addr}, got {stored_addr}");
-        word
+        Ok(word)
     }
 
     /// Returns an iterator over all recorded memory element reads, yielding tuples of
@@ -582,8 +597,8 @@ impl MemoryWritesReplay {
 }
 
 impl MemoryInterface for MemoryReadsReplay {
-    fn read_element(&mut self, _ctx: ContextId, addr: Felt) -> Result<Felt, crate::MemoryError> {
-        Ok(self.replay_read_element(addr))
+    fn read_element(&mut self, _ctx: ContextId, addr: Felt) -> Result<Felt, MemoryError> {
+        self.replay_read_element(addr)
     }
 
     fn read_word(
@@ -591,8 +606,8 @@ impl MemoryInterface for MemoryReadsReplay {
         _ctx: ContextId,
         addr: Felt,
         _clk: RowIndex,
-    ) -> Result<Word, crate::MemoryError> {
-        Ok(self.replay_read_word(addr))
+    ) -> Result<Word, MemoryError> {
+        self.replay_read_word(addr)
     }
 
     fn write_element(
@@ -600,7 +615,7 @@ impl MemoryInterface for MemoryReadsReplay {
         _ctx: ContextId,
         _addr: Felt,
         _element: Felt,
-    ) -> Result<(), crate::MemoryError> {
+    ) -> Result<(), MemoryError> {
         Ok(())
     }
 
@@ -610,7 +625,7 @@ impl MemoryInterface for MemoryReadsReplay {
         _addr: Felt,
         _clk: RowIndex,
         _word: Word,
-    ) -> Result<(), crate::MemoryError> {
+    ) -> Result<(), MemoryError> {
         Ok(())
     }
 }
@@ -660,34 +675,38 @@ impl AdviceReplay {
     // --------------------------------------------------------------------------------
 
     /// Replays a pop_stack operation, returning the previously recorded value
-    pub fn replay_pop_stack(&mut self) -> Felt {
-        self.stack_pops.pop_front().expect("No stack pop operations recorded")
+    pub fn replay_pop_stack(&mut self) -> Result<Felt, ExecutionError> {
+        self.stack_pops
+            .pop_front()
+            .ok_or(ExecutionError::Internal("no stack pop operations recorded"))
     }
 
     /// Replays a pop_stack_word operation, returning the previously recorded word
-    pub fn replay_pop_stack_word(&mut self) -> Word {
-        self.stack_word_pops.pop_front().expect("No stack word pop operations recorded")
+    pub fn replay_pop_stack_word(&mut self) -> Result<Word, ExecutionError> {
+        self.stack_word_pops
+            .pop_front()
+            .ok_or(ExecutionError::Internal("no stack word pop operations recorded"))
     }
 
     /// Replays a pop_stack_dword operation, returning the previously recorded double word
-    pub fn replay_pop_stack_dword(&mut self) -> [Word; 2] {
+    pub fn replay_pop_stack_dword(&mut self) -> Result<[Word; 2], ExecutionError> {
         self.stack_dword_pops
             .pop_front()
-            .expect("No stack dword pop operations recorded")
+            .ok_or(ExecutionError::Internal("no stack dword pop operations recorded"))
     }
 }
 
 impl AdviceProviderInterface for AdviceReplay {
     fn pop_stack(&mut self) -> Result<Felt, AdviceError> {
-        Ok(self.replay_pop_stack())
+        self.replay_pop_stack().map_err(|_| AdviceError::StackReadFailed)
     }
 
     fn pop_stack_word(&mut self) -> Result<Word, AdviceError> {
-        Ok(self.replay_pop_stack_word())
+        self.replay_pop_stack_word().map_err(|_| AdviceError::StackReadFailed)
     }
 
     fn pop_stack_dword(&mut self) -> Result<[Word; 2], AdviceError> {
-        Ok(self.replay_pop_stack_dword())
+        self.replay_pop_stack_dword().map_err(|_| AdviceError::StackReadFailed)
     }
 
     /// Returns an empty Merkle path, as Merkle paths are ignored in parallel trace generation.
@@ -861,8 +880,10 @@ impl BlockAddressReplay {
 
     /// Replays a `Hasher::hash_control_block` or `Hasher::hash_basic_block` operation, returning
     /// the pre-recorded address
-    pub fn replay_block_address(&mut self) -> Felt {
-        self.block_addresses.pop_front().expect("No block address operations recorded")
+    pub fn replay_block_address(&mut self) -> Result<Felt, ExecutionError> {
+        self.block_addresses
+            .pop_front()
+            .ok_or(ExecutionError::Internal("no block address operations recorded"))
     }
 }
 
@@ -916,27 +937,29 @@ impl HasherResponseReplay {
     // --------------------------------------------------------------------------------------------
 
     /// Replays a `Hasher::permute` operation, returning its address and result
-    pub fn replay_permute(&mut self) -> (Felt, [Felt; 12]) {
+    pub fn replay_permute(&mut self) -> Result<(Felt, [Felt; 12]), OperationError> {
         self.permutation_operations
             .pop_front()
-            .expect("No permutation operations recorded")
+            .ok_or(OperationError::Internal("no permutation operations recorded"))
     }
 
     /// Replays a Merkle path verification, returning the pre-recorded address and computed root
-    pub fn replay_build_merkle_root(&mut self) -> (Felt, Word) {
+    pub fn replay_build_merkle_root(&mut self) -> Result<(Felt, Word), OperationError> {
         self.build_merkle_root_operations
             .pop_front()
-            .expect("No build merkle root operations recorded")
+            .ok_or(OperationError::Internal("no build merkle root operations recorded"))
     }
 
     /// Replays a Merkle root update, returning the pre-recorded address, old root, and new root
-    pub fn replay_update_merkle_root(&mut self) -> (Felt, Word, Word) {
-        self.mrupdate_operations.pop_front().expect("No mrupdate operations recorded")
+    pub fn replay_update_merkle_root(&mut self) -> Result<(Felt, Word, Word), OperationError> {
+        self.mrupdate_operations
+            .pop_front()
+            .ok_or(OperationError::Internal("no mrupdate operations recorded"))
     }
 }
 
 impl HasherInterface for HasherResponseReplay {
-    fn permute(&mut self, _state: HasherState) -> (Felt, HasherState) {
+    fn permute(&mut self, _state: HasherState) -> Result<(Felt, HasherState), OperationError> {
         self.replay_permute()
     }
 
@@ -948,7 +971,7 @@ impl HasherInterface for HasherResponseReplay {
         _index: Felt,
         on_err: impl FnOnce() -> OperationError,
     ) -> Result<Felt, OperationError> {
-        let (addr, computed_root) = self.replay_build_merkle_root();
+        let (addr, computed_root) = self.replay_build_merkle_root()?;
         if claimed_root == computed_root {
             Ok(addr)
         } else {
@@ -967,7 +990,7 @@ impl HasherInterface for HasherResponseReplay {
         _index: Felt,
         on_err: impl FnOnce() -> OperationError,
     ) -> Result<(Felt, Word), OperationError> {
-        let (address, old_root, new_root) = self.replay_update_merkle_root();
+        let (address, old_root, new_root) = self.replay_update_merkle_root()?;
 
         if claimed_old_root == old_root {
             Ok((address, new_root))
@@ -1140,14 +1163,18 @@ impl StackOverflowReplay {
     /// is, don't call if the stack depth is 16.
     ///
     /// See [Self::record_pop_overflow] for more details.
-    pub fn replay_pop_overflow(&mut self) -> (Felt, Felt) {
-        self.overflow_values.pop_front().expect("No overflow pop operations recorded")
+    pub fn replay_pop_overflow(&mut self) -> Result<(Felt, Felt), OperationError> {
+        self.overflow_values
+            .pop_front()
+            .ok_or(OperationError::Internal("no overflow pop operations recorded"))
     }
 
     /// Replays the overflow address when restoring a context
-    pub fn replay_restore_context_overflow_addr(&mut self) -> (usize, Felt) {
+    pub fn replay_restore_context_overflow_addr(
+        &mut self,
+    ) -> Result<(usize, Felt), OperationError> {
         self.restore_context_info
             .pop_front()
-            .expect("No overflow address operations recorded")
+            .ok_or(OperationError::Internal("no overflow address operations recorded"))
     }
 }

@@ -31,12 +31,15 @@ where
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::StartNode(current_node_id),
-        state.continuation_stack,
-        current_forest,
-    );
+    state
+        .tracer
+        .start_clock_cycle(
+            state.processor,
+            Continuation::StartNode(current_node_id),
+            state.continuation_stack,
+            current_forest,
+        )
+        .map_break(|err| InternalBreakReason::from(BreakReason::Err(err)))?;
 
     // Execute decorators that should be executed before entering the node
     state
@@ -64,7 +67,13 @@ where
     };
 
     // Drop the memory address from the stack. This needs to be done before saving the context.
-    state.processor.stack_mut().decrement_size();
+    if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err(
+        current_forest,
+        current_node_id,
+        state.host,
+    ) {
+        return ControlFlow::Break(InternalBreakReason::from(BreakReason::Err(err)));
+    }
 
     // For dyncall,
     // - save the context and reset it,
@@ -174,12 +183,15 @@ where
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::FinishDyn(node_id),
-        state.continuation_stack,
-        current_forest,
-    );
+    state
+        .tracer
+        .start_clock_cycle(
+            state.processor,
+            Continuation::FinishDyn(node_id),
+            state.continuation_stack,
+            current_forest,
+        )
+        .map_break(BreakReason::Err)?;
 
     let dyn_node = current_forest[node_id].unwrap_dyn();
     // For dyncall, restore the context.

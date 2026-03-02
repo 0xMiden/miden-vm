@@ -23,7 +23,7 @@ fn test_op_add() {
     let mut processor = FastProcessor::new(StackInputs::new(&[a, b, c]).unwrap());
 
     // add the top two values
-    op_add(&mut processor);
+    op_add(&mut processor).unwrap();
     let expected = build_expected(&[a + b, c]);
 
     assert_eq!(MIN_STACK_DEPTH as u32, processor.stack_depth());
@@ -31,7 +31,7 @@ fn test_op_add() {
 
     // calling add with a stack of minimum depth is ok
     let mut processor = FastProcessor::new(StackInputs::default());
-    op_add(&mut processor);
+    op_add(&mut processor).unwrap();
 }
 
 #[test]
@@ -55,7 +55,7 @@ fn test_op_mul() {
     let mut processor = FastProcessor::new(StackInputs::new(&[a, b, c]).unwrap());
 
     // multiply the top two values
-    op_mul(&mut processor);
+    op_mul(&mut processor).unwrap();
     let expected = build_expected(&[a * b, c]);
 
     assert_eq!(MIN_STACK_DEPTH as u32, processor.stack_depth());
@@ -63,7 +63,7 @@ fn test_op_mul() {
 
     // calling mul with a stack of minimum depth is ok
     let mut processor = FastProcessor::new(StackInputs::default());
-    op_mul(&mut processor);
+    op_mul(&mut processor).unwrap();
 }
 
 #[test]

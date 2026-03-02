@@ -141,11 +141,14 @@ impl Processor for FastProcessor {
 
 impl HasherInterface for FastProcessor {
     #[inline(always)]
-    fn permute(&mut self, mut input_state: HasherState) -> (Felt, HasherState) {
+    fn permute(
+        &mut self,
+        mut input_state: HasherState,
+    ) -> Result<(Felt, HasherState), OperationError> {
         Poseidon2::apply_permutation(&mut input_state);
 
         // Return a default value for the address, as it is not needed in trace generation.
-        (ZERO, input_state)
+        Ok((ZERO, input_state))
     }
 
     #[inline(always)]
@@ -315,7 +318,8 @@ impl StackInterface for FastProcessor {
     }
 
     #[inline(always)]
-    fn decrement_size(&mut self) {
-        self.decrement_stack_size()
+    fn decrement_size(&mut self) -> Result<(), OperationError> {
+        self.decrement_stack_size();
+        Ok(())
     }
 }

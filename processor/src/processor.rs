@@ -246,7 +246,7 @@ pub(crate) trait StackInterface {
     /// Concretely, this decrements the stack top pointer by one (removing the top element), and
     /// pushes a `ZERO` at the bottom of the stack if the stack size is already at 16 elements
     /// (since the stack size can never be less than 16).
-    fn decrement_size(&mut self);
+    fn decrement_size(&mut self) -> Result<(), OperationError>;
 }
 
 // ADVICE PROVIDER INTERFACE
@@ -346,7 +346,7 @@ pub(crate) trait HasherInterface {
     ///
     /// The address is only needed for operation helpers in trace generation, and thus an
     /// implementation might choose to return a default/invalid address if it is not needed.
-    fn permute(&mut self, state: HasherState) -> (Felt, HasherState);
+    fn permute(&mut self, state: HasherState) -> Result<(Felt, HasherState), OperationError>;
 
     /// Verifies that the `claimed_root` is indeed the root of a Merkle tree containing `value` at
     /// the specified `index`.

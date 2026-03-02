@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use crate::{
-    BreakReason, Host, ONE, Stopper, ZERO,
+    BreakReason, Host, MapExecErr, ONE, Stopper, ZERO,
     continuation_stack::Continuation,
     execution::{ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation},
     mast::{LoopNode, MastForest, MastNodeId},
@@ -28,12 +28,15 @@ where
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
-    state.tracer.start_clock_cycle(
-        state.processor,
-        Continuation::StartNode(current_node_id),
-        state.continuation_stack,
-        current_forest,
-    );
+    state
+        .tracer
+        .start_clock_cycle(
+            state.processor,
+            Continuation::StartNode(current_node_id),
+            state.continuation_stack,
+            current_forest,
+        )
+        .map_break(BreakReason::Err)?;
 
     // Execute decorators that should be executed before entering the node
     state
@@ -43,7 +46,13 @@ where
     let condition = state.processor.stack().get(0);
 
     // drop the condition from the stack
-    state.processor.stack_mut().decrement_size();
+    if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err(
+        current_forest,
+        current_node_id,
+        state.host,
+    ) {
+        return ControlFlow::Break(BreakReason::Err(err));
+    }
 
     // execute the loop body as long as the condition is true
     if condition == ONE {
@@ -114,19 +123,28 @@ where
     if condition == ONE {
         // Start the clock cycle corresponding to the REPEAT operation, before re-entering the loop
         // body.
-        state.tracer.start_clock_cycle(
-            state.processor,
-            Continuation::FinishLoop {
-                node_id: current_node_id,
-                was_entered: true,
-            },
-            state.continuation_stack,
-            current_forest,
-        );
+        state
+            .tracer
+            .start_clock_cycle(
+                state.processor,
+                Continuation::FinishLoop {
+                    node_id: current_node_id,
+                    was_entered: true,
+                },
+                state.continuation_stack,
+                current_forest,
+            )
+            .map_break(BreakReason::Err)?;
 
         // Drop the condition from the stack (we know the loop was entered since condition is
         // ONE).
-        state.processor.stack_mut().decrement_size();
+        if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err(
+            current_forest,
+            current_node_id,
+            state.host,
+        ) {
+            return ControlFlow::Break(BreakReason::Err(err));
+        }
 
         state.continuation_stack.push_finish_loop_entered(current_node_id);
         state.continuation_stack.push_start_node(loop_node.body());
@@ -135,15 +153,18 @@ where
         finalize_clock_cycle(state.processor, state.tracer, state.stopper, current_forest)
     } else if condition == ZERO {
         // Exit the loop - start the clock cycle corresponding to the END operation.
-        state.tracer.start_clock_cycle(
-            state.processor,
-            Continuation::FinishLoop {
-                node_id: current_node_id,
-                was_entered: loop_was_entered,
-            },
-            state.continuation_stack,
-            current_forest,
-        );
+        state
+            .tracer
+            .start_clock_cycle(
+                state.processor,
+                Continuation::FinishLoop {
+                    node_id: current_node_id,
+                    was_entered: loop_was_entered,
+                },
+                state.continuation_stack,
+                current_forest,
+            )
+            .map_break(BreakReason::Err)?;
 
         // The END operation only drops the condition from the stack if the loop was entered. This
         // is because if the loop was never entered, then the condition will have already been
@@ -151,7 +172,13 @@ where
         // the loop body is responsible for pushing the condition back onto the stack, and therefore
         // the END instruction must drop it.
         if loop_was_entered {
-            state.processor.stack_mut().decrement_size();
+            if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err(
+                current_forest,
+                current_node_id,
+                state.host,
+            ) {
+                return ControlFlow::Break(BreakReason::Err(err));
+            }
         }
 
         // Finalize the clock cycle corresponding to the END operation.
