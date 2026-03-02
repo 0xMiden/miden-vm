@@ -348,12 +348,14 @@ impl<'a> SerializedMastForest<'a> {
 
         let node_info_size = MastNodeInfo::min_serialized_size();
         let node_info_offset = offset;
-        let total_node_info_bytes = node_count
-            .checked_mul(node_info_size)
-            .ok_or_else(|| {
-                DeserializationError::InvalidValue("node info length overflow".to_string())
+        let total_node_info_bytes = node_count.checked_mul(node_info_size).ok_or_else(|| {
+            DeserializationError::InvalidValue("node info length overflow".to_string())
+        })?;
+        let node_info_end =
+            node_info_offset.checked_add(total_node_info_bytes).ok_or_else(|| {
+                DeserializationError::InvalidValue("node info offset overflow".to_string())
             })?;
-        if node_info_offset + total_node_info_bytes > bytes.len() {
+        if node_info_end > bytes.len() {
             return Err(DeserializationError::UnexpectedEOF);
         }
 
@@ -400,8 +402,20 @@ impl<'a> SerializedMastForest<'a> {
             )));
         }
 
-        let offset = self.node_info_offset + index * self.node_info_size;
-        let mut reader = SliceReader::new(&self.bytes[offset..offset + self.node_info_size]);
+        let entry_offset = index
+            .checked_mul(self.node_info_size)
+            .and_then(|delta| self.node_info_offset.checked_add(delta))
+            .ok_or_else(|| {
+                DeserializationError::InvalidValue("node info offset overflow".to_string())
+            })?;
+        let entry_end = entry_offset.checked_add(self.node_info_size).ok_or_else(|| {
+            DeserializationError::InvalidValue("node info length overflow".to_string())
+        })?;
+        if entry_end > self.bytes.len() {
+            return Err(DeserializationError::UnexpectedEOF);
+        }
+
+        let mut reader = SliceReader::new(&self.bytes[entry_offset..entry_end]);
         MastNodeInfo::read_from(&mut reader)
     }
 }
@@ -425,14 +439,18 @@ fn read_slice_at<'a>(
     offset: &mut usize,
     len: usize,
 ) -> Result<&'a [u8], DeserializationError> {
-    if *offset + len > bytes.len() {
+    let end = offset
+        .checked_add(len)
+        .ok_or_else(|| DeserializationError::InvalidValue("offset overflow".to_string()))?;
+    if end > bytes.len() {
         return Err(DeserializationError::UnexpectedEOF);
     }
-    let slice = &bytes[*offset..*offset + len];
-    *offset += len;
+    let slice = &bytes[*offset..end];
+    *offset = end;
     Ok(slice)
 }
 
+// NOTE: Mirrors ByteReader::read_usize (vint64) decoding to preserve wire compatibility.
 fn read_usize_at(bytes: &[u8], offset: &mut usize) -> Result<usize, DeserializationError> {
     if *offset >= bytes.len() {
         return Err(DeserializationError::UnexpectedEOF);

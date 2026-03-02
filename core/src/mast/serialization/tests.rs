@@ -339,19 +339,7 @@ fn test_operation_encoded_size_matches_serialized_len() {
     }
 }
 
-#[test]
-fn test_serialized_mast_forest_random_access_node_info() {
-    let mut forest = MastForest::new();
-
-    let block1 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
-        .add_to_forest(&mut forest)
-        .unwrap();
-    let block2 = BasicBlockNodeBuilder::new(vec![Operation::U32div], Vec::new())
-        .add_to_forest(&mut forest)
-        .unwrap();
-    let join = JoinNodeBuilder::new([block1, block2]).add_to_forest(&mut forest).unwrap();
-    forest.make_root(join);
-
+fn assert_serialized_view_matches_forest(forest: &MastForest) {
     let mut bytes = Vec::new();
     forest.write_stripped(&mut bytes);
 
@@ -369,6 +357,68 @@ fn test_serialized_mast_forest_random_access_node_info() {
         let actual = view.node_info_at(idx).unwrap();
         assert_eq!(expected.to_bytes(), actual.to_bytes());
     }
+}
+
+#[test]
+fn test_serialized_mast_forest_random_access_node_info() {
+    let mut forest = MastForest::new();
+
+    let block1 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let block2 = BasicBlockNodeBuilder::new(vec![Operation::U32div], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let join = JoinNodeBuilder::new([block1, block2]).add_to_forest(&mut forest).unwrap();
+    forest.make_root(join);
+
+    assert_serialized_view_matches_forest(&forest);
+}
+
+#[test]
+fn test_serialized_mast_forest_random_access_all_node_types() {
+    let mut forest = MastForest::new();
+
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let call_id = CallNodeBuilder::new(block_id).add_to_forest(&mut forest).unwrap();
+    let syscall_id = CallNodeBuilder::new_syscall(block_id).add_to_forest(&mut forest).unwrap();
+    let loop_id = LoopNodeBuilder::new(block_id).add_to_forest(&mut forest).unwrap();
+    let join_id = JoinNodeBuilder::new([block_id, call_id]).add_to_forest(&mut forest).unwrap();
+    let split_id = SplitNodeBuilder::new([block_id, call_id]).add_to_forest(&mut forest).unwrap();
+    let dyn_id = DynNodeBuilder::new_dyn().add_to_forest(&mut forest).unwrap();
+    let dyncall_id = DynNodeBuilder::new_dyncall().add_to_forest(&mut forest).unwrap();
+    let external_id = ExternalNodeBuilder::new(Word::default()).add_to_forest(&mut forest).unwrap();
+
+    forest.make_root(join_id);
+    forest.make_root(syscall_id);
+    forest.make_root(loop_id);
+    forest.make_root(split_id);
+    forest.make_root(dyn_id);
+    forest.make_root(dyncall_id);
+    forest.make_root(external_id);
+
+    assert_serialized_view_matches_forest(&forest);
+}
+
+#[test]
+fn test_serialized_mast_forest_large_counts() {
+    let mut forest = MastForest::new();
+    let mut roots = Vec::new();
+
+    for _ in 0..300 {
+        let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+            .add_to_forest(&mut forest)
+            .unwrap();
+        roots.push(block_id);
+    }
+
+    for root in roots.iter().take(200) {
+        forest.make_root(*root);
+    }
+
+    assert_serialized_view_matches_forest(&forest);
 }
 
 #[test]
