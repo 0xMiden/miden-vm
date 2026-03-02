@@ -155,15 +155,15 @@ pub fn enforce_main<AB>(
     emit(builder, &mut idx, is_inv * (s0_next.clone() * s0.clone() - AB::Expr::ONE));
     emit(builder, &mut idx, is_incr * (s0_next.clone() - s0.clone() - AB::Expr::ONE));
 
-    emit(builder, &mut idx, is_not.clone() * (s0.clone() * (s0.clone() - AB::Expr::ONE)));
+    emit_integrity(builder, &mut idx, is_not.clone() * (s0.clone() * (s0.clone() - AB::Expr::ONE)));
     emit(builder, &mut idx, is_not * (s0.clone() + s0_next.clone() - AB::Expr::ONE));
 
-    emit(builder, &mut idx, is_and.clone() * (s0.clone() * (s0.clone() - AB::Expr::ONE)));
-    emit(builder, &mut idx, is_and.clone() * (s1.clone() * (s1.clone() - AB::Expr::ONE)));
+    emit_integrity(builder, &mut idx, is_and.clone() * (s0.clone() * (s0.clone() - AB::Expr::ONE)));
+    emit_integrity(builder, &mut idx, is_and.clone() * (s1.clone() * (s1.clone() - AB::Expr::ONE)));
     emit(builder, &mut idx, is_and * (s0_next.clone() - s0.clone() * s1.clone()));
 
-    emit(builder, &mut idx, is_or.clone() * (s0.clone() * (s0.clone() - AB::Expr::ONE)));
-    emit(builder, &mut idx, is_or.clone() * (s1.clone() * (s1.clone() - AB::Expr::ONE)));
+    emit_integrity(builder, &mut idx, is_or.clone() * (s0.clone() * (s0.clone() - AB::Expr::ONE)));
+    emit_integrity(builder, &mut idx, is_or.clone() * (s1.clone() * (s1.clone() - AB::Expr::ONE)));
     emit(
         builder,
         &mut idx,
@@ -255,7 +255,7 @@ pub fn enforce_main<AB>(
     // Element validity check for u32split/u32mul/u32madd.
     let u32_split_mul_madd = is_u32split.clone() + is_u32mul.clone() + is_u32madd.clone();
     let u32_v_hi_comp = AB::Expr::ONE - uop_h4.clone() * (two_pow_32_minus_one - u32_v_hi.clone());
-    emit(builder, &mut idx, u32_split_mul_madd * (u32_v_hi_comp * u32_v_lo.clone()));
+    emit_integrity(builder, &mut idx, u32_split_mul_madd * (u32_v_hi_comp * u32_v_lo.clone()));
 
     let u32_two_outputs = is_u32split.clone()
         + is_u32add.clone()
@@ -269,9 +269,9 @@ pub fn enforce_main<AB>(
     );
     emit(builder, &mut idx, u32_two_outputs * (s1_next.clone() - u32_v_hi.clone()));
 
-    emit(builder, &mut idx, is_u32split * (s0.clone() - u32_v64.clone()));
-    emit(builder, &mut idx, is_u32add * (s0.clone() + s1.clone() - u32_v48.clone()));
-    emit(
+    emit_integrity(builder, &mut idx, is_u32split * (s0.clone() - u32_v64.clone()));
+    emit_integrity(builder, &mut idx, is_u32add * (s0.clone() + s1.clone() - u32_v48.clone()));
+    emit_integrity(
         builder,
         &mut idx,
         is_u32add3 * (s0.clone() + s1.clone() + s2.clone() - u32_v48.clone()),
@@ -290,8 +290,12 @@ pub fn enforce_main<AB>(
     );
     emit(builder, &mut idx, is_u32sub * (s1_next.clone() - u32_v_lo.clone()));
 
-    emit(builder, &mut idx, is_u32mul * (s0.clone() * s1.clone() - u32_v64.clone()));
-    emit(builder, &mut idx, is_u32madd * (s0.clone() * s1.clone() + s2 - u32_v64.clone()));
+    emit_integrity(builder, &mut idx, is_u32mul * (s0.clone() * s1.clone() - u32_v64.clone()));
+    emit_integrity(
+        builder,
+        &mut idx,
+        is_u32madd * (s0.clone() * s1.clone() + s2 - u32_v64.clone()),
+    );
 
     emit(
         builder,
@@ -321,6 +325,15 @@ fn emit<AB: MidenAirBuilder>(builder: &mut AB, idx: &mut usize, expr: AB::Expr) 
     let name = STACK_ARITH_NAMES[*idx];
     builder.tagged(id, name, |builder| {
         builder.when_transition().assert_zero(expr);
+    });
+    *idx += 1;
+}
+
+fn emit_integrity<AB: MidenAirBuilder>(builder: &mut AB, idx: &mut usize, expr: AB::Expr) {
+    let id = STACK_ARITH_BASE_ID + *idx;
+    let name = STACK_ARITH_NAMES[*idx];
+    builder.tagged(id, name, |builder| {
+        builder.assert_zero(expr);
     });
     *idx += 1;
 }
