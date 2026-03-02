@@ -876,6 +876,25 @@ fn test_header_backward_compatible() {
     assert_eq!(&bytes[5..8], &[0, 0, 3], "Version should be [0, 0, 3]");
 }
 
+/// Test that legacy version headers are rejected.
+#[test]
+fn test_legacy_version_is_rejected() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let mut bytes = forest.to_bytes();
+    bytes[5..8].copy_from_slice(&[0, 0, 2]);
+
+    let result = MastForest::read_from_bytes(&bytes);
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg)) if msg.contains("Unsupported version")
+    );
+}
+
 /// Test that stripped serialization produces smaller output than full serialization.
 #[test]
 fn test_stripped_serialization_smaller_than_full() {
