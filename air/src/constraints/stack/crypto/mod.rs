@@ -9,6 +9,7 @@ use miden_crypto::stark::air::MidenAirBuilder;
 use crate::{
     MainTraceRow,
     constraints::{
+        ext_field::QuadFeltExpr,
         op_flags::OpFlags,
         tagging::{
             TagGroup, TaggingAirBuilderExt, ids::TAG_STACK_CRYPTO_BASE, tagged_assert_zero,
@@ -209,95 +210,47 @@ fn enforce_hornerbase_constraints<AB>(
     let acc1_next: AB::Expr = next.stack[15].clone().into();
 
     // Coefficients are read from the bottom of the stack.
-    let c0: AB::Expr = local.stack[0].clone().into();
-    let c1: AB::Expr = local.stack[1].clone().into();
-    let c2: AB::Expr = local.stack[2].clone().into();
-    let c3: AB::Expr = local.stack[3].clone().into();
-    let c4: AB::Expr = local.stack[4].clone().into();
-    let c5: AB::Expr = local.stack[5].clone().into();
-    let c6: AB::Expr = local.stack[6].clone().into();
-    let c7: AB::Expr = local.stack[7].clone().into();
+    let c: [AB::Expr; 8] = core::array::from_fn(|i| local.stack[i].clone().into());
 
-    // Field constants used in the quadratic extension arithmetic.
-    let two: AB::Expr = AB::Expr::from_u16(2);
-    let three: AB::Expr = AB::Expr::from_u16(3);
-    let seven: AB::Expr = AB::Expr::from_u16(7);
-    let twenty_one: AB::Expr = AB::Expr::from_u16(21);
-    let a0_sq = a0.clone() * a0.clone();
-    let a1_sq = a1.clone() * a1.clone();
-    let a0_a1 = a0.clone() * a1.clone();
-    let a0_cu = a0_sq.clone() * a0.clone();
-    let a1_cu = a1_sq.clone() * a1.clone();
-
-    let alpha_sq_0 = a0_sq.clone() + seven.clone() * a1_sq.clone();
-    let alpha_sq_1 = two.clone() * a0_a1.clone();
-
-    // alpha^3 in the quadratic extension.
-    let alpha_cu_0 = a0_cu.clone() + twenty_one.clone() * a0.clone() * a1_sq.clone();
-    let alpha_cu_1 = three.clone() * a0_sq.clone() * a1.clone() + seven.clone() * a1_cu.clone();
-
-    // Two-stage evaluation:
-    // - tmp0_* combines the current accumulator with (c0, c1) using alpha^2.
-    // - tmp1_* combines tmp0_* with (c2, c3, c4) using alpha^3 and alpha^2.
-    // - acc*_next combines tmp1_* with (c5, c6, c7) to produce the next accumulator.
-    //
-    // Each expected_* expression is the algebraic value the helper or accumulator
-    // must equal on this row.
-    //
-    // Quadratic extension view (Fp2 with u^2 = 7, element (x0, x1) = x0 + x1 * u):
+    // Quadratic extension view (Fp2 with u^2 = 7):
     // - alpha = (a0, a1), acc = (acc0, acc1)
     // - tmp0 = (tmp0_0, tmp0_1), tmp1 = (tmp1_0, tmp1_1)
-    // - c0..c7 are base-field scalars embedded as (c, 0)
+    // - c[0..7] are base-field scalars
     //
     // Horner form:
     //   tmp0 = acc * alpha^2 + (c0 * alpha + c1)
     //   tmp1 = tmp0 * alpha^3 + (c2 * alpha^2 + c3 * alpha + c4)
     //   acc' = tmp1 * alpha^3 + (c5 * alpha^2 + c6 * alpha + c7)
+    let alpha: QuadFeltExpr<AB::Expr> = QuadFeltExpr::new(&a0, &a1);
+    let alpha2 = alpha.clone().square();
+    let alpha3 = alpha2.clone() * alpha.clone();
+    let acc: QuadFeltExpr<AB::Expr> = QuadFeltExpr::new(&acc0, &acc1);
+    let acc_alpha2: QuadFeltExpr<AB::Expr> = acc * alpha2.clone();
+    let tmp0: QuadFeltExpr<AB::Expr> = QuadFeltExpr::new(&tmp0_0, &tmp0_1);
+    let tmp0_alpha3: QuadFeltExpr<AB::Expr> = tmp0.clone() * alpha3.clone();
+    let tmp1: QuadFeltExpr<AB::Expr> = QuadFeltExpr::new(&tmp1_0, &tmp1_1);
 
-    // tmp0_0 = acc0 * alpha^2_0 + acc1 * (7 * alpha^2_1) + c0 * a0 + c1
-    let expected_tmp0_0 = acc0.clone() * alpha_sq_0.clone()
-        + acc1.clone() * (seven.clone() * alpha_sq_1.clone())
-        + c0.clone() * a0.clone()
-        + c1.clone();
-    // tmp0_1 = acc0 * alpha^2_1 + acc1 * alpha^2_0 + c0 * a1
-    let expected_tmp0_1 = acc0.clone() * alpha_sq_1.clone()
-        + acc1.clone() * alpha_sq_0.clone()
-        + c0.clone() * a1.clone();
+    // tmp0 = acc * alpha^2 + (c0 * alpha + c1)
+    let tmp0_expected: QuadFeltExpr<AB::Expr> =
+        acc_alpha2 + alpha.clone() * c[0].clone() + c[1].clone();
+    let [tmp0_exp_0, tmp0_exp_1] = tmp0_expected.into_parts();
 
-    // tmp1_0 = tmp0_0 * alpha^3_0 + tmp0_1 * (7 * alpha^3_1)
-    //        + c2 * alpha^2_0 + c3 * a0 + c4
-    let expected_tmp1_0 = tmp0_0.clone() * alpha_cu_0.clone()
-        + tmp0_1.clone() * (seven.clone() * alpha_cu_1.clone())
-        + c2.clone() * alpha_sq_0.clone()
-        + c3.clone() * a0.clone()
-        + c4.clone();
-    // tmp1_1 = tmp0_0 * alpha^3_1 + tmp0_1 * alpha^3_0
-    //        + c2 * alpha^2_1 + c3 * a1
-    let expected_tmp1_1 = tmp0_0.clone() * alpha_cu_1.clone()
-        + tmp0_1.clone() * alpha_cu_0.clone()
-        + c2.clone() * alpha_sq_1.clone()
-        + c3.clone() * a1.clone();
+    // tmp1 = tmp0 * alpha^3 + (c2 * alpha^2 + c3 * alpha + c4)
+    let tmp1_expected: QuadFeltExpr<AB::Expr> =
+        tmp0_alpha3 + alpha2.clone() * c[2].clone() + alpha.clone() * c[3].clone() + c[4].clone();
+    let [tmp1_exp_0, tmp1_exp_1] = tmp1_expected.into_parts();
 
-    // acc0' = tmp1_0 * alpha^3_0 + tmp1_1 * (7 * alpha^3_1)
-    //       + c5 * alpha^2_0 + c6 * a0 + c7
-    let expected_acc0 = tmp1_0.clone() * alpha_cu_0.clone()
-        + tmp1_1.clone() * (seven.clone() * alpha_cu_1.clone())
-        + c5.clone() * alpha_sq_0.clone()
-        + c6.clone() * a0.clone()
-        + c7.clone();
-    // acc1' = tmp1_0 * alpha^3_1 + tmp1_1 * alpha^3_0
-    //       + c5 * alpha^2_1 + c6 * a1
-    let expected_acc1 = tmp1_0.clone() * alpha_cu_1
-        + tmp1_1.clone() * alpha_cu_0
-        + c5.clone() * alpha_sq_1
-        + c6 * a1;
+    // acc' = tmp1 * alpha^3 + (alpha^2 * c5 + alpha * c6 + c7)
+    let acc_expected: QuadFeltExpr<AB::Expr> =
+        tmp1 * alpha3 + alpha2.clone() * c[5].clone() + alpha.clone() * c[6].clone() + c[7].clone();
+    let [acc_exp_0, acc_exp_1] = acc_expected.into_parts();
 
-    assert_zero_integrity(builder, idx, gate.clone() * (tmp0_0 - expected_tmp0_0));
-    assert_zero_integrity(builder, idx, gate.clone() * (tmp0_1 - expected_tmp0_1));
-    assert_zero_integrity(builder, idx, gate.clone() * (tmp1_0 - expected_tmp1_0));
-    assert_zero_integrity(builder, idx, gate.clone() * (tmp1_1 - expected_tmp1_1));
-    assert_zero(builder, idx, gate.clone() * (acc0_next - expected_acc0));
-    assert_zero(builder, idx, gate * (acc1_next - expected_acc1));
+    assert_zero_integrity(builder, idx, gate.clone() * (tmp0_0 - tmp0_exp_0));
+    assert_zero_integrity(builder, idx, gate.clone() * (tmp0_1 - tmp0_exp_1));
+    assert_zero_integrity(builder, idx, gate.clone() * (tmp1_0 - tmp1_exp_0));
+    assert_zero_integrity(builder, idx, gate.clone() * (tmp1_1 - tmp1_exp_1));
+    assert_zero(builder, idx, gate.clone() * (acc0_next - acc_exp_0));
+    assert_zero(builder, idx, gate * (acc1_next - acc_exp_1));
 }
 
 fn enforce_hornerext_constraints<AB>(
@@ -337,69 +290,40 @@ fn enforce_hornerext_constraints<AB>(
     let acc1_next: AB::Expr = next.stack[15].clone().into();
 
     // Coefficients live at the bottom of the stack.
-    let c0_0: AB::Expr = local.stack[0].clone().into();
-    let c0_1: AB::Expr = local.stack[1].clone().into();
-    let c1_0: AB::Expr = local.stack[2].clone().into();
-    let c1_1: AB::Expr = local.stack[3].clone().into();
-    let c2_0: AB::Expr = local.stack[4].clone().into();
-    let c2_1: AB::Expr = local.stack[5].clone().into();
-    let c3_0: AB::Expr = local.stack[6].clone().into();
-    let c3_1: AB::Expr = local.stack[7].clone().into();
+    let s: [AB::Expr; 8] = core::array::from_fn(|i| local.stack[i].clone().into());
 
-    // Field constants and alpha^2 decomposition.
-    let two: AB::Expr = AB::Expr::from_u16(2);
-    let seven: AB::Expr = AB::Expr::from_u16(7);
-
-    let a0_sq = a0.clone() * a0.clone();
-    let a1_sq = a1.clone() * a1.clone();
-    let a0_a1 = a0.clone() * a1.clone();
-
-    let alpha_sq_0 = a0_sq.clone() + seven.clone() * a1_sq.clone();
-    let alpha_sq_1 = two.clone() * a0_a1.clone();
-
-    // Expected intermediate and accumulator updates (current row relationships).
-    //
-    // Quadratic extension view (Fp2 with u^2 = 7, element (x0, x1) = x0 + x1 * u):
+    // Quadratic extension view (Fp2 with u^2 = 7):
     // - alpha = (a0, a1), acc = (acc0, acc1), tmp = (tmp0, tmp1)
-    // - c0..c3 are extension elements: c0=(c0_0,c0_1), c1=(c1_0,c1_1), etc.
+    // - extension coefficients use the stack pairs: c0 = (s0, s1), c1 = (s2, s3), c2 = (s4, s5), c3
+    //   = (s6, s7)
     //
     // Horner form:
     //   tmp  = acc * alpha^2 + (c0 * alpha + c1)
     //   acc' = tmp * alpha^2 + (c2 * alpha + c3)
-    // tmp0 = acc0 * alpha^2_0 + acc1 * (7 * alpha^2_1)
-    //      + c0_0 * a0 + 7 * c0_1 * a1 + c1_0
-    let expected_tmp0 = acc0.clone() * alpha_sq_0.clone()
-        + acc1.clone() * (seven.clone() * alpha_sq_1.clone())
-        + c0_0.clone() * a0.clone()
-        + seven.clone() * c0_1.clone() * a1.clone()
-        + c1_0.clone();
-    // tmp1 = acc1 * alpha^2_0 + acc0 * alpha^2_1
-    //      + c0_1 * a0 + c0_0 * a1 + c1_1
-    let expected_tmp1 = acc1.clone() * alpha_sq_0.clone()
-        + acc0.clone() * alpha_sq_1.clone()
-        + c0_1.clone() * a0.clone()
-        + c0_0.clone() * a1.clone()
-        + c1_1.clone();
+    let alpha: QuadFeltExpr<AB::Expr> = QuadFeltExpr::new(&a0, &a1);
+    let alpha2 = alpha.clone().square();
+    let acc: QuadFeltExpr<AB::Expr> = QuadFeltExpr::new(&acc0, &acc1);
+    let acc_alpha2: QuadFeltExpr<AB::Expr> = acc * alpha2.clone();
+    let tmp: QuadFeltExpr<AB::Expr> = QuadFeltExpr::new(&tmp0, &tmp1);
+    let tmp_alpha2: QuadFeltExpr<AB::Expr> = tmp * alpha2;
 
-    // acc0' = tmp0 * alpha^2_0 + tmp1 * (7 * alpha^2_1)
-    //       + c2_0 * a0 + 7 * c2_1 * a1 + c3_0
-    let expected_acc0 = tmp0.clone() * alpha_sq_0.clone()
-        + tmp1.clone() * (seven.clone() * alpha_sq_1.clone())
-        + c2_0.clone() * a0.clone()
-        + seven * c2_1.clone() * a1.clone()
-        + c3_0.clone();
-    // acc1' = tmp1 * alpha^2_0 + tmp0 * alpha^2_1
-    //       + c2_1 * a0 + c2_0 * a1 + c3_1
-    let expected_acc1 = tmp1.clone() * alpha_sq_0.clone()
-        + tmp0.clone() * alpha_sq_1
-        + c2_1.clone() * a0
-        + c2_0.clone() * a1
-        + c3_1;
+    let c0 = QuadFeltExpr::new(&s[0], &s[1]);
+    let c1 = QuadFeltExpr::new(&s[2], &s[3]);
+    let c2 = QuadFeltExpr::new(&s[4], &s[5]);
+    let c3 = QuadFeltExpr::new(&s[6], &s[7]);
 
-    assert_zero_integrity(builder, idx, gate.clone() * (tmp0 - expected_tmp0));
-    assert_zero_integrity(builder, idx, gate.clone() * (tmp1 - expected_tmp1));
-    assert_zero(builder, idx, gate.clone() * (acc0_next - expected_acc0));
-    assert_zero(builder, idx, gate * (acc1_next - expected_acc1));
+    // tmp  = acc * alpha^2 + (c0 * alpha + c1)
+    let tmp_expected: QuadFeltExpr<AB::Expr> = acc_alpha2 + alpha.clone() * c0 + c1;
+    let [tmp_exp_0, tmp_exp_1] = tmp_expected.into_parts();
+
+    // acc' = tmp * alpha^2 + (c2 * alpha + c3)
+    let acc_expected: QuadFeltExpr<AB::Expr> = tmp_alpha2 + alpha * c2 + c3;
+    let [acc_exp_0, acc_exp_1] = acc_expected.into_parts();
+
+    assert_zero_integrity(builder, idx, gate.clone() * (tmp0 - tmp_exp_0));
+    assert_zero_integrity(builder, idx, gate.clone() * (tmp1 - tmp_exp_1));
+    assert_zero(builder, idx, gate.clone() * (acc0_next - acc_exp_0));
+    assert_zero(builder, idx, gate * (acc1_next - acc_exp_1));
 }
 
 fn assert_zero<AB: TaggingAirBuilderExt>(builder: &mut AB, idx: &mut usize, expr: AB::Expr) {
