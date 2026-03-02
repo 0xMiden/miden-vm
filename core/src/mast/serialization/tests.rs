@@ -129,102 +129,106 @@ fn confirm_operation_and_decorator_structure() {
     };
 }
 
+fn sample_operations_all_variants() -> Vec<Operation> {
+    vec![
+        Operation::Noop,
+        Operation::Assert(Felt::from_u32(42)),
+        Operation::SDepth,
+        Operation::Caller,
+        Operation::Clk,
+        Operation::Join,
+        Operation::Split,
+        Operation::Loop,
+        Operation::Call,
+        Operation::Dyn,
+        Operation::SysCall,
+        Operation::Span,
+        Operation::End,
+        Operation::Repeat,
+        Operation::Respan,
+        Operation::Halt,
+        Operation::Add,
+        Operation::Neg,
+        Operation::Mul,
+        Operation::Inv,
+        Operation::Incr,
+        Operation::And,
+        Operation::Or,
+        Operation::Not,
+        Operation::Eq,
+        Operation::Eqz,
+        Operation::Expacc,
+        Operation::Ext2Mul,
+        Operation::U32split,
+        Operation::U32add,
+        Operation::U32assert2(Felt::from_u32(222)),
+        Operation::U32add3,
+        Operation::U32sub,
+        Operation::U32mul,
+        Operation::U32madd,
+        Operation::U32div,
+        Operation::U32and,
+        Operation::U32xor,
+        Operation::Pad,
+        Operation::Drop,
+        Operation::Dup0,
+        Operation::Dup1,
+        Operation::Dup2,
+        Operation::Dup3,
+        Operation::Dup4,
+        Operation::Dup5,
+        Operation::Dup6,
+        Operation::Dup7,
+        Operation::Dup9,
+        Operation::Dup11,
+        Operation::Dup13,
+        Operation::Dup15,
+        Operation::Swap,
+        Operation::SwapW,
+        Operation::SwapW2,
+        Operation::SwapW3,
+        Operation::SwapDW,
+        Operation::MovUp2,
+        Operation::MovUp3,
+        Operation::MovUp4,
+        Operation::MovUp5,
+        Operation::MovUp6,
+        Operation::MovUp7,
+        Operation::MovUp8,
+        Operation::MovDn2,
+        Operation::MovDn3,
+        Operation::MovDn4,
+        Operation::MovDn5,
+        Operation::MovDn6,
+        Operation::MovDn7,
+        Operation::MovDn8,
+        Operation::CSwap,
+        Operation::CSwapW,
+        Operation::Push(Felt::new(45)),
+        Operation::AdvPop,
+        Operation::AdvPopW,
+        Operation::MLoadW,
+        Operation::MStoreW,
+        Operation::MLoad,
+        Operation::MStore,
+        Operation::MStream,
+        Operation::Pipe,
+        Operation::HPerm,
+        Operation::MpVerify(Felt::from_u32(1022)),
+        Operation::MrUpdate,
+        Operation::FriE2F4,
+        Operation::HornerBase,
+        Operation::HornerExt,
+        Operation::Emit,
+    ]
+}
+
 #[test]
 fn serialize_deserialize_all_nodes() {
     let mut mast_forest = MastForest::new();
 
     let basic_block_id = {
-        let operations = vec![
-            Operation::Noop,
-            Operation::Assert(Felt::from_u32(42)),
-            Operation::SDepth,
-            Operation::Caller,
-            Operation::Clk,
-            Operation::Join,
-            Operation::Split,
-            Operation::Loop,
-            Operation::Call,
-            Operation::Dyn,
-            Operation::SysCall,
-            Operation::Span,
-            Operation::End,
-            Operation::Repeat,
-            Operation::Respan,
-            Operation::Halt,
-            Operation::Add,
-            Operation::Neg,
-            Operation::Mul,
-            Operation::Inv,
-            Operation::Incr,
-            Operation::And,
-            Operation::Or,
-            Operation::Not,
-            Operation::Eq,
-            Operation::Eqz,
-            Operation::Expacc,
-            Operation::Ext2Mul,
-            Operation::U32split,
-            Operation::U32add,
-            Operation::U32assert2(Felt::from_u32(222)),
-            Operation::U32add3,
-            Operation::U32sub,
-            Operation::U32mul,
-            Operation::U32madd,
-            Operation::U32div,
-            Operation::U32and,
-            Operation::U32xor,
-            Operation::Pad,
-            Operation::Drop,
-            Operation::Dup0,
-            Operation::Dup1,
-            Operation::Dup2,
-            Operation::Dup3,
-            Operation::Dup4,
-            Operation::Dup5,
-            Operation::Dup6,
-            Operation::Dup7,
-            Operation::Dup9,
-            Operation::Dup11,
-            Operation::Dup13,
-            Operation::Dup15,
-            Operation::Swap,
-            Operation::SwapW,
-            Operation::SwapW2,
-            Operation::SwapW3,
-            Operation::SwapDW,
-            Operation::MovUp2,
-            Operation::MovUp3,
-            Operation::MovUp4,
-            Operation::MovUp5,
-            Operation::MovUp6,
-            Operation::MovUp7,
-            Operation::MovUp8,
-            Operation::MovDn2,
-            Operation::MovDn3,
-            Operation::MovDn4,
-            Operation::MovDn5,
-            Operation::MovDn6,
-            Operation::MovDn7,
-            Operation::MovDn8,
-            Operation::CSwap,
-            Operation::CSwapW,
-            Operation::Push(Felt::new(45)),
-            Operation::AdvPop,
-            Operation::AdvPopW,
-            Operation::MLoadW,
-            Operation::MStoreW,
-            Operation::MLoad,
-            Operation::MStore,
-            Operation::MStream,
-            Operation::Pipe,
-            Operation::HPerm,
-            Operation::MpVerify(Felt::from_u32(1022)),
-            Operation::MrUpdate,
-            Operation::FriE2F4,
-            Operation::HornerBase,
-            Operation::HornerExt,
-            Operation::Emit,
-        ];
+        let operations = sample_operations_all_variants();
 
         let num_operations = operations.len();
 
@@ -326,6 +330,13 @@ fn serialize_deserialize_all_nodes() {
     let deserialized_mast_forest = MastForest::read_from_bytes(&serialized_mast_forest).unwrap();
 
     assert_eq!(mast_forest, deserialized_mast_forest);
+}
+
+#[test]
+fn test_operation_encoded_size_matches_serialized_len() {
+    for operation in sample_operations_all_variants() {
+        assert_eq!(operation.encoded_size(), operation.to_bytes().len());
+    }
 }
 
 /// Test that a forest with a node whose child ids are larger than its own id serializes and
@@ -986,6 +997,40 @@ fn test_stripped_size_hint_matches_serialized_len() {
     forest.make_root(join);
 
     forest.advice_map_mut().insert(Word::default(), vec![ONE, Felt::new(2)]);
+
+    let mut bytes = Vec::new();
+    forest.write_stripped(&mut bytes);
+
+    assert_eq!(forest.stripped_size_hint(), bytes.len());
+}
+
+/// Test stripped size hint with large counts and multiple advice-map entries.
+#[test]
+fn test_stripped_size_hint_large_counts() {
+    let mut forest = MastForest::new();
+
+    let mut operations = Vec::with_capacity(304);
+    for _ in 0..300 {
+        operations.push(Operation::Add);
+    }
+    operations.push(Operation::Push(Felt::new(7)));
+    operations.push(Operation::Assert(Felt::new(9)));
+    operations.push(Operation::U32assert2(Felt::new(11)));
+    operations.push(Operation::MpVerify(Felt::new(13)));
+
+    let block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let key_a = Word::new([Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
+    let key_b = Word::new([Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)]);
+
+    let values_a: Vec<Felt> = (0..200).map(|i| Felt::new(i as u64)).collect();
+    let values_b: Vec<Felt> = (0..5).map(|i| Felt::new((i + 10) as u64)).collect();
+
+    forest.advice_map_mut().insert(key_a, values_a);
+    forest.advice_map_mut().insert(key_b, values_b);
 
     let mut bytes = Vec::new();
     forest.write_stripped(&mut bytes);

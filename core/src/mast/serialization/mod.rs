@@ -133,9 +133,6 @@ const FLAGS_RESERVED_MASK: u8 = 0xfc;
 ///   rejects HASHLESS.
 const VERSION: [u8; 3] = [0, 0, 3];
 
-/// Fixed serialized size of `MastNodeInfo` in bytes (8-byte tag + 32-byte digest).
-const MAST_NODE_INFO_SIZE: usize = 40;
-
 // MAST FOREST SERIALIZATION/DESERIALIZATION
 // ================================================================================================
 
@@ -227,7 +224,8 @@ pub(super) fn stripped_size_hint(forest: &MastForest) -> usize {
     }
     size += basic_block_len.get_size_hint() + basic_block_len;
 
-    size += node_count * MAST_NODE_INFO_SIZE;
+    let node_info_size = MastNodeInfo::min_serialized_size();
+    size += node_count * node_info_size;
     size += forest.advice_map.serialized_size_hint();
 
     size
