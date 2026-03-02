@@ -11,7 +11,10 @@ use crate::{
     MainTraceRow,
     constraints::{
         op_flags::OpFlags,
-        tagging::{TaggingAirBuilderExt, ids::TAG_STACK_ARITH_BASE},
+        tagging::{
+            TagGroup, TaggingAirBuilderExt, ids::TAG_STACK_ARITH_BASE, tagged_assert_zero,
+            tagged_assert_zero_integrity,
+        },
     },
     trace::decoder::USER_OP_HELPERS_OFFSET,
 };
@@ -86,6 +89,11 @@ const STACK_ARITH_NAMES: [&str; NUM_CONSTRAINTS] = [
     "stack.arith.u32.assert2",
 ];
 
+const STACK_ARITH_TAGS: TagGroup = TagGroup {
+    base: STACK_ARITH_BASE_ID,
+    names: &STACK_ARITH_NAMES,
+};
+
 // ENTRY POINTS
 // ================================================================================================
 
@@ -149,22 +157,42 @@ pub fn enforce_main<AB>(
     // -------------------------------------------------------------------------
     // Field ops
     // -------------------------------------------------------------------------
-    emit(builder, &mut idx, is_add * (s0_next.clone() - (s0.clone() + s1.clone())));
-    emit(builder, &mut idx, is_neg * (s0_next.clone() + s0.clone()));
-    emit(builder, &mut idx, is_mul * (s0_next.clone() - s0.clone() * s1.clone()));
-    emit(builder, &mut idx, is_inv * (s0_next.clone() * s0.clone() - AB::Expr::ONE));
-    emit(builder, &mut idx, is_incr * (s0_next.clone() - s0.clone() - AB::Expr::ONE));
+    assert_zero(builder, &mut idx, is_add * (s0_next.clone() - (s0.clone() + s1.clone())));
+    assert_zero(builder, &mut idx, is_neg * (s0_next.clone() + s0.clone()));
+    assert_zero(builder, &mut idx, is_mul * (s0_next.clone() - s0.clone() * s1.clone()));
+    assert_zero(builder, &mut idx, is_inv * (s0_next.clone() * s0.clone() - AB::Expr::ONE));
+    assert_zero(builder, &mut idx, is_incr * (s0_next.clone() - s0.clone() - AB::Expr::ONE));
 
-    emit_integrity(builder, &mut idx, is_not.clone() * (s0.clone() * (s0.clone() - AB::Expr::ONE)));
-    emit(builder, &mut idx, is_not * (s0.clone() + s0_next.clone() - AB::Expr::ONE));
+    assert_zero_integrity(
+        builder,
+        &mut idx,
+        is_not.clone() * (s0.clone() * (s0.clone() - AB::Expr::ONE)),
+    );
+    assert_zero(builder, &mut idx, is_not * (s0.clone() + s0_next.clone() - AB::Expr::ONE));
 
-    emit_integrity(builder, &mut idx, is_and.clone() * (s0.clone() * (s0.clone() - AB::Expr::ONE)));
-    emit_integrity(builder, &mut idx, is_and.clone() * (s1.clone() * (s1.clone() - AB::Expr::ONE)));
-    emit(builder, &mut idx, is_and * (s0_next.clone() - s0.clone() * s1.clone()));
+    assert_zero_integrity(
+        builder,
+        &mut idx,
+        is_and.clone() * (s0.clone() * (s0.clone() - AB::Expr::ONE)),
+    );
+    assert_zero_integrity(
+        builder,
+        &mut idx,
+        is_and.clone() * (s1.clone() * (s1.clone() - AB::Expr::ONE)),
+    );
+    assert_zero(builder, &mut idx, is_and * (s0_next.clone() - s0.clone() * s1.clone()));
 
-    emit_integrity(builder, &mut idx, is_or.clone() * (s0.clone() * (s0.clone() - AB::Expr::ONE)));
-    emit_integrity(builder, &mut idx, is_or.clone() * (s1.clone() * (s1.clone() - AB::Expr::ONE)));
-    emit(
+    assert_zero_integrity(
+        builder,
+        &mut idx,
+        is_or.clone() * (s0.clone() * (s0.clone() - AB::Expr::ONE)),
+    );
+    assert_zero_integrity(
+        builder,
+        &mut idx,
+        is_or.clone() * (s1.clone() * (s1.clone() - AB::Expr::ONE)),
+    );
+    assert_zero(
         builder,
         &mut idx,
         is_or * (s0_next.clone() - (s0.clone() + s1.clone() - s0.clone() * s1.clone())),
@@ -172,16 +200,16 @@ pub fn enforce_main<AB>(
 
     // EQ: if s0 != s1, h0 acts as 1/(s0 - s1) and forces s0' = 0; if equal, s0' = 1.
     let eq_diff = s0.clone() - s1.clone();
-    emit(builder, &mut idx, is_eq.clone() * (eq_diff.clone() * s0_next.clone()));
-    emit(
+    assert_zero(builder, &mut idx, is_eq.clone() * (eq_diff.clone() * s0_next.clone()));
+    assert_zero(
         builder,
         &mut idx,
         is_eq * (s0_next.clone() - (AB::Expr::ONE - eq_diff * uop_h0.clone())),
     );
 
     // EQZ: if s0 != 0, h0 acts as 1/s0 and forces s0' = 0; if zero, s0' = 1.
-    emit(builder, &mut idx, is_eqz.clone() * (s0.clone() * s0_next.clone()));
-    emit(
+    assert_zero(builder, &mut idx, is_eqz.clone() * (s0.clone() * s0_next.clone()));
+    assert_zero(
         builder,
         &mut idx,
         is_eqz * (s0_next.clone() - (AB::Expr::ONE - s0.clone() * uop_h0.clone())),
@@ -198,20 +226,20 @@ pub fn enforce_main<AB>(
     let exp_val = uop_h0.clone();
     let two: AB::Expr = AB::Expr::from_u16(2);
 
-    emit(builder, &mut idx, is_expacc.clone() * (exp_next - exp.clone() * exp.clone()));
-    emit(
+    assert_zero(builder, &mut idx, is_expacc.clone() * (exp_next - exp.clone() * exp.clone()));
+    assert_zero(
         builder,
         &mut idx,
         is_expacc.clone()
             * (exp_val.clone() - AB::Expr::ONE - (exp - AB::Expr::ONE) * exp_bit.clone()),
     );
-    emit(builder, &mut idx, is_expacc.clone() * (acc_next - acc * exp_val));
-    emit(
+    assert_zero(builder, &mut idx, is_expacc.clone() * (acc_next - acc * exp_val));
+    assert_zero(
         builder,
         &mut idx,
         is_expacc.clone() * (exp_b - exp_b_next * two - exp_bit.clone()),
     );
-    emit(builder, &mut idx, is_expacc * (exp_bit.clone() * (exp_bit - AB::Expr::ONE)));
+    assert_zero(builder, &mut idx, is_expacc * (exp_bit.clone() * (exp_bit - AB::Expr::ONE)));
 
     let ext_b0 = s0.clone();
     let ext_b1 = s1.clone();
@@ -225,14 +253,14 @@ pub fn enforce_main<AB>(
     let ext_a1_b1 = ext_a1.clone() * ext_b1.clone();
 
     let seven: AB::Expr = AB::Expr::from_u16(7);
-    emit(builder, &mut idx, is_ext2mul.clone() * (ext_d0 - ext_b0.clone()));
-    emit(builder, &mut idx, is_ext2mul.clone() * (ext_d1 - ext_b1.clone()));
-    emit(
+    assert_zero(builder, &mut idx, is_ext2mul.clone() * (ext_d0 - ext_b0.clone()));
+    assert_zero(builder, &mut idx, is_ext2mul.clone() * (ext_d1 - ext_b1.clone()));
+    assert_zero(
         builder,
         &mut idx,
         is_ext2mul.clone() * (ext_c0 - (ext_a0_b0.clone() + seven.clone() * ext_a1_b1.clone())),
     );
-    emit(
+    assert_zero(
         builder,
         &mut idx,
         is_ext2mul * (ext_c1 - ((ext_a0 + ext_a1) * (ext_b0 + ext_b1) - ext_a0_b0 - ext_a1_b1)),
@@ -255,85 +283,91 @@ pub fn enforce_main<AB>(
     // Element validity check for u32split/u32mul/u32madd.
     let u32_split_mul_madd = is_u32split.clone() + is_u32mul.clone() + is_u32madd.clone();
     let u32_v_hi_comp = AB::Expr::ONE - uop_h4.clone() * (two_pow_32_minus_one - u32_v_hi.clone());
-    emit_integrity(builder, &mut idx, u32_split_mul_madd * (u32_v_hi_comp * u32_v_lo.clone()));
+    assert_zero_integrity(
+        builder,
+        &mut idx,
+        u32_split_mul_madd * (u32_v_hi_comp * u32_v_lo.clone()),
+    );
 
     let u32_two_outputs = is_u32split.clone()
         + is_u32add.clone()
         + is_u32add3.clone()
         + is_u32mul.clone()
         + is_u32madd.clone();
-    emit(
+    assert_zero(
         builder,
         &mut idx,
         u32_two_outputs.clone() * (s0_next.clone() - u32_v_lo.clone()),
     );
-    emit(builder, &mut idx, u32_two_outputs * (s1_next.clone() - u32_v_hi.clone()));
+    assert_zero(builder, &mut idx, u32_two_outputs * (s1_next.clone() - u32_v_hi.clone()));
 
-    emit_integrity(builder, &mut idx, is_u32split * (s0.clone() - u32_v64.clone()));
-    emit_integrity(builder, &mut idx, is_u32add * (s0.clone() + s1.clone() - u32_v48.clone()));
-    emit_integrity(
+    assert_zero_integrity(builder, &mut idx, is_u32split * (s0.clone() - u32_v64.clone()));
+    assert_zero_integrity(
+        builder,
+        &mut idx,
+        is_u32add * (s0.clone() + s1.clone() - u32_v48.clone()),
+    );
+    assert_zero_integrity(
         builder,
         &mut idx,
         is_u32add3 * (s0.clone() + s1.clone() + s2.clone() - u32_v48.clone()),
     );
 
-    emit(
+    assert_zero(
         builder,
         &mut idx,
         is_u32sub.clone()
             * (s1.clone() - (s0.clone() + s1_next.clone() - s0_next.clone() * two_pow_32.clone())),
     );
-    emit(
+    assert_zero(
         builder,
         &mut idx,
         is_u32sub.clone() * (s0_next.clone() * (s0_next.clone() - AB::Expr::ONE)),
     );
-    emit(builder, &mut idx, is_u32sub * (s1_next.clone() - u32_v_lo.clone()));
+    assert_zero(builder, &mut idx, is_u32sub * (s1_next.clone() - u32_v_lo.clone()));
 
-    emit_integrity(builder, &mut idx, is_u32mul * (s0.clone() * s1.clone() - u32_v64.clone()));
-    emit_integrity(
+    assert_zero_integrity(
+        builder,
+        &mut idx,
+        is_u32mul * (s0.clone() * s1.clone() - u32_v64.clone()),
+    );
+    assert_zero_integrity(
         builder,
         &mut idx,
         is_u32madd * (s0.clone() * s1.clone() + s2 - u32_v64.clone()),
     );
 
-    emit(
+    assert_zero(
         builder,
         &mut idx,
         is_u32div.clone() * (s1.clone() - (s0.clone() * s1_next.clone() + s0_next.clone())),
     );
-    emit(
+    assert_zero(
         builder,
         &mut idx,
         is_u32div.clone() * (s1.clone() - s1_next.clone() - u32_v_lo.clone()),
     );
-    emit(
+    assert_zero(
         builder,
         &mut idx,
         is_u32div * (s0.clone() - s0_next.clone() - (u32_v_hi.clone() + AB::Expr::ONE)),
     );
 
-    emit(builder, &mut idx, is_u32assert2.clone() * (s0_next - u32_v_hi.clone()));
-    emit(builder, &mut idx, is_u32assert2 * (s1_next - u32_v_lo));
+    assert_zero(builder, &mut idx, is_u32assert2.clone() * (s0_next - u32_v_hi.clone()));
+    assert_zero(builder, &mut idx, is_u32assert2 * (s1_next - u32_v_lo));
 }
 
 // CONSTRAINT HELPERS
 // ================================================================================================
 
-fn emit<AB: MidenAirBuilder>(builder: &mut AB, idx: &mut usize, expr: AB::Expr) {
-    let id = STACK_ARITH_BASE_ID + *idx;
-    let name = STACK_ARITH_NAMES[*idx];
-    builder.tagged(id, name, |builder| {
-        builder.when_transition().assert_zero(expr);
-    });
-    *idx += 1;
+fn assert_zero<AB: TaggingAirBuilderExt>(builder: &mut AB, idx: &mut usize, expr: AB::Expr) {
+    tagged_assert_zero(builder, &STACK_ARITH_TAGS, idx, expr);
 }
 
-fn emit_integrity<AB: MidenAirBuilder>(builder: &mut AB, idx: &mut usize, expr: AB::Expr) {
-    let id = STACK_ARITH_BASE_ID + *idx;
-    let name = STACK_ARITH_NAMES[*idx];
-    builder.tagged(id, name, |builder| {
-        builder.assert_zero(expr);
-    });
-    *idx += 1;
+fn assert_zero_integrity<AB: TaggingAirBuilderExt>(
+    builder: &mut AB,
+    idx: &mut usize,
+    expr: AB::Expr,
+) {
+    tagged_assert_zero_integrity(builder, &STACK_ARITH_TAGS, idx, expr);
 }
