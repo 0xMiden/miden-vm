@@ -52,9 +52,15 @@ runs:
       shell: bash
       run: cargo install cargo-msrv
 
+    - name: Install Rust 1.91 for MSRV check
+      shell: bash
+      run: rustup toolchain install 1.91
+
     # Keep your existing MSRV check
     - name: Check MSRV
       shell: bash
+      env:
+        RUSTUP_TOOLCHAIN: "1.91"
       run: |
         chmod +x scripts/check-msrv.sh
         ./scripts/check-msrv.sh
