@@ -6,7 +6,11 @@ use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
-use miden_crypto::stark::{air::MidenAirBuilder, matrix::RowMajorMatrix};
+use p3_air::{AirBuilder, AirBuilderWithPublicValues};
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
+use p3_miden_lifted_air::{
+    ExtensionBuilder, LiftedAirBuilder, PeriodicAirBuilder, PermutationAirBuilder,
+};
 
 use super::{ids::TAG_TOTAL_COUNT, state};
 
@@ -143,18 +147,11 @@ impl Drop for OodEvalAirBuilder {
     }
 }
 
-impl MidenAirBuilder for OodEvalAirBuilder {
+impl AirBuilder for OodEvalAirBuilder {
     type F = Felt;
     type Expr = Felt;
     type Var = Felt;
     type M = RowMajorMatrix<Felt>;
-    type PublicVar = Felt;
-    type PeriodicVal = Felt;
-    type EF = QuadFelt;
-    type ExprEF = QuadFelt;
-    type VarEF = QuadFelt;
-    type MP = RowMajorMatrix<QuadFelt>;
-    type RandomVar = QuadFelt;
 
     fn main(&self) -> Self::M {
         self.main.clone()
@@ -181,6 +178,20 @@ impl MidenAirBuilder for OodEvalAirBuilder {
         let value = QuadFelt::from(x.into());
         self.record(id, namespace, value);
     }
+}
+
+impl AirBuilderWithPublicValues for OodEvalAirBuilder {
+    type PublicVar = Felt;
+
+    fn public_values(&self) -> &[Self::PublicVar] {
+        &self.public_values
+    }
+}
+
+impl ExtensionBuilder for OodEvalAirBuilder {
+    type EF = QuadFelt;
+    type ExprEF = QuadFelt;
+    type VarEF = QuadFelt;
 
     fn assert_zero_ext<I>(&mut self, x: I)
     where
@@ -190,18 +201,11 @@ impl MidenAirBuilder for OodEvalAirBuilder {
         let value = x.into();
         self.record(id, namespace, value);
     }
+}
 
-    fn public_values(&self) -> &[Self::PublicVar] {
-        &self.public_values
-    }
-
-    fn periodic_evals(&self) -> &[Self::PeriodicVal] {
-        &self.periodic_values
-    }
-
-    fn preprocessed(&self) -> Self::M {
-        self.preprocessed.clone()
-    }
+impl PermutationAirBuilder for OodEvalAirBuilder {
+    type MP = RowMajorMatrix<QuadFelt>;
+    type RandomVar = QuadFelt;
 
     fn permutation(&self) -> Self::MP {
         self.permutation.clone()
@@ -210,8 +214,18 @@ impl MidenAirBuilder for OodEvalAirBuilder {
     fn permutation_randomness(&self) -> &[Self::RandomVar] {
         &self.permutation_randomness
     }
+}
 
-    fn aux_bus_boundary_values(&self) -> &[Self::VarEF] {
+impl PeriodicAirBuilder for OodEvalAirBuilder {
+    type PeriodicVar = Felt;
+
+    fn periodic_values(&self) -> &[Self::PeriodicVar] {
+        &self.periodic_values
+    }
+}
+
+impl LiftedAirBuilder for OodEvalAirBuilder {
+    fn aux_values(&self) -> &[Self::VarEF] {
         &self.aux_bus_boundary_values
     }
 }
@@ -255,7 +269,7 @@ mod tests {
     use alloc::vec::Vec;
 
     use miden_core::{Felt, field::QuadFelt};
-    use miden_crypto::stark::air::MidenAir;
+    use p3_miden_lifted_air::LiftedAir;
 
     use super::{
         super::fixtures::{OOD_SEED, active_expected_ood_evals},
@@ -266,8 +280,8 @@ mod tests {
     fn run_group_parity_test(expected: Vec<EvalRecord>) {
         assert_eq!(expected.len(), TAG_TOTAL_COUNT);
         let mut builder = OodEvalAirBuilder::new(OOD_SEED);
-        let air = ProcessorAir::new();
-        MidenAir::<Felt, QuadFelt>::eval(&air, &mut builder);
+        let air = ProcessorAir;
+        LiftedAir::<Felt, QuadFelt>::eval(&air, &mut builder);
         builder.assert_complete();
 
         let actual = builder.records();

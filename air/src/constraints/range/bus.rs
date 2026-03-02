@@ -75,7 +75,7 @@ where
     let b_next = aux_next[range::B_RANGE_COL_IDX];
 
     let challenges = builder.permutation_randomness();
-    let alpha = challenges[0];
+    let alpha: AB::ExprEF = challenges[0].into();
 
     // Denominators for LogUp
     // Memory lookups: mv0 = alpha + chiplets[MEMORY_D0], mv1 = alpha + chiplets[MEMORY_D1]
