@@ -965,6 +965,34 @@ fn test_stripped_serialization_roundtrip() {
     assert_eq!(restored.procedure_name(&digest), None);
 }
 
+/// Test that stripped size hint matches actual serialized length.
+#[test]
+fn test_stripped_size_hint_matches_serialized_len() {
+    let mut forest = MastForest::new();
+
+    let block1 =
+        BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Push(Felt::new(3))], Vec::new())
+            .add_to_forest(&mut forest)
+            .unwrap();
+
+    let block2 = BasicBlockNodeBuilder::new(
+        vec![Operation::U32div, Operation::Assert(Felt::new(1))],
+        Vec::new(),
+    )
+    .add_to_forest(&mut forest)
+    .unwrap();
+
+    let join = JoinNodeBuilder::new([block1, block2]).add_to_forest(&mut forest).unwrap();
+    forest.make_root(join);
+
+    forest.advice_map_mut().insert(Word::default(), vec![ONE, Felt::new(2)]);
+
+    let mut bytes = Vec::new();
+    forest.write_stripped(&mut bytes);
+
+    assert_eq!(forest.stripped_size_hint(), bytes.len());
+}
+
 /// Test that stripped serialization sets the correct header flags.
 #[test]
 fn test_stripped_header_flags() {

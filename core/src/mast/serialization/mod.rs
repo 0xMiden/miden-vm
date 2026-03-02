@@ -56,7 +56,7 @@ mod info;
 use info::MastNodeInfo;
 
 mod basic_blocks;
-use basic_blocks::{BasicBlockDataBuilder, BasicBlockDataDecoder};
+use basic_blocks::{BasicBlockDataBuilder, BasicBlockDataDecoder, basic_block_data_len};
 
 pub(crate) mod string_table;
 pub(crate) use string_table::StringTable;
@@ -133,6 +133,9 @@ const FLAGS_RESERVED_MASK: u8 = 0xfc;
 ///   rejects HASHLESS.
 const VERSION: [u8; 3] = [0, 0, 3];
 
+/// Fixed serialized size of `MastNodeInfo` in bytes (8-byte tag + 32-byte digest).
+const MAST_NODE_INFO_SIZE: usize = 40;
+
 // MAST FOREST SERIALIZATION/DESERIALIZATION
 // ================================================================================================
 
@@ -203,6 +206,31 @@ impl MastForest {
             self.debug_info.write_into(target);
         }
     }
+}
+
+pub(super) fn stripped_size_hint(forest: &MastForest) -> usize {
+    let node_count = forest.nodes.len();
+
+    let mut size = MAGIC.len() + 1 + VERSION.len();
+    size += node_count.get_size_hint();
+    size += 0usize.get_size_hint(); // decorator count (always 0 in stripped)
+
+    let roots_len = forest.roots.len();
+    size += roots_len.get_size_hint();
+    size += roots_len * core::mem::size_of::<u32>();
+
+    let mut basic_block_len = 0usize;
+    for node in forest.nodes.iter() {
+        if let MastNode::Block(block) = node {
+            basic_block_len += basic_block_data_len(block);
+        }
+    }
+    size += basic_block_len.get_size_hint() + basic_block_len;
+
+    size += node_count * MAST_NODE_INFO_SIZE;
+    size += forest.advice_map.serialized_size_hint();
+
+    size
 }
 
 impl Deserializable for MastForest {
@@ -404,6 +432,10 @@ impl Serializable for StrippedMastForest<'_> {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.0.write_into_with_options(target, true, false);
     }
+
+    fn get_size_hint(&self) -> usize {
+        stripped_size_hint(self.0)
+    }
 }
 
 /// Wrapper for serializing a [`MastForest`] with the HASHLESS flag set.
@@ -412,5 +444,9 @@ pub(super) struct HashlessMastForest<'a>(pub(super) &'a MastForest);
 impl Serializable for HashlessMastForest<'_> {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.0.write_into_with_options(target, true, true);
+    }
+
+    fn get_size_hint(&self) -> usize {
+        stripped_size_hint(self.0)
     }
 }

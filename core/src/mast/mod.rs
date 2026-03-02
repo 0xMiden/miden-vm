@@ -512,6 +512,13 @@ impl MastForest {
         use serialization::HashlessMastForest;
         HashlessMastForest(self).write_into(target);
     }
+
+    /// Returns the exact size of stripped serialization in bytes.
+    ///
+    /// Hashless serialization has the same size as stripped serialization.
+    pub fn stripped_size_hint(&self) -> usize {
+        serialization::stripped_size_hint(self)
+    }
 }
 
 // ------------------------------------------------------------------------------------------------
