@@ -32,55 +32,36 @@ pub mod indices {
 
 use miden_crypto::stark::air::MidenAirBuilder;
 
-/// Converts permutation challenges into `ExprEF` alphas for bus encoding.
+/// Builds message coefficients from permutation challenges.
+///
+/// The returned array length `N` includes the constant term at index 0.
 #[inline]
-#[allow(dead_code)]
-pub(crate) fn alphas_from_challenges<AB, const N: usize>(
+pub(crate) fn coeffs_from_challenges<AB, const N: usize>(
     challenges: &[AB::RandomVar],
 ) -> [AB::ExprEF; N]
 where
     AB: MidenAirBuilder,
 {
+    debug_assert!(challenges.len() >= N);
     core::array::from_fn(|i| challenges[i].into())
 }
 
-/// Encodes grand-product (multiset) and LogUp messages as `alpha + sum_i beta[i] * elem[i]`.
+/// Encodes grand-product (multiset) and LogUp messages as
+/// `coeffs[0] + sum_i coeffs[i+1] * elem[i]`.
 ///
-/// `alpha` and `beta` are derived from the permutation challenges as:
-/// - `alpha = challenges[0]`
-/// - `beta[i] = challenges[i + 1]`
-pub(crate) struct MessageEncoder<AB, const N: usize>
+/// `coeffs[0]` is the constant term, and `coeffs[1..]` correspond to message elements.
+#[inline]
+pub(crate) fn encode_message<AB, const N: usize>(
+    coeffs: &[AB::ExprEF],
+    elems: [AB::Expr; N],
+) -> AB::ExprEF
 where
     AB: MidenAirBuilder,
 {
-    alpha: AB::ExprEF,
-    betas: [AB::ExprEF; N],
-}
-
-impl<AB, const N: usize> MessageEncoder<AB, N>
-where
-    AB: MidenAirBuilder,
-{
-    /// Builds a message encoder from challenge-like coefficients.
-    ///
-    /// The slice must contain at least `N + 1` elements: `[alpha, beta[0], .., beta[N-1]]`.
-    #[inline]
-    pub fn from_challenges<C>(challenges: &[C]) -> Self
-    where
-        C: Clone + Into<AB::ExprEF>,
-    {
-        let alpha = challenges[0].clone().into();
-        let betas = core::array::from_fn(|i| challenges[i + 1].clone().into());
-        Self { alpha, betas }
+    debug_assert!(coeffs.len() > N);
+    let mut acc = coeffs[0].clone();
+    for (coeff, elem) in coeffs[1..].iter().zip(elems) {
+        acc += coeff.clone() * elem;
     }
-
-    /// Encodes a message using the encoder's alpha and betas.
-    #[inline]
-    pub fn encode(&self, elems: [AB::Expr; N]) -> AB::ExprEF {
-        let mut acc = self.alpha.clone();
-        for (beta, elem) in self.betas.iter().zip(elems) {
-            acc += beta.clone() * elem;
-        }
-        acc
-    }
+    acc
 }

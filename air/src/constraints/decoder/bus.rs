@@ -15,9 +15,9 @@
 //!   constraints here.
 //!
 //! ## Message encoding
-//! Each table message is encoded as a linear combination of its elements with a shared
-//! challenge vector: `sum(alpha[i] * element[i])`, where the implicit constant term is 1.
-//! This matches the multiset protocol used by the processor.
+//! Each table message is encoded as `coeffs[0] + sum_i coeffs[i+1] * element[i]`. The constant
+//! term is `coeffs[0]`, and the remaining coefficients correspond to the message fields. This
+//! matches the multiset protocol used by the processor.
 //!
 //! ## References
 //! - Processor tables: `processor/src/decoder/aux_trace/block_stack_table.rs` (p1),
@@ -31,7 +31,7 @@ use miden_crypto::stark::{air::MidenAirBuilder, matrix::Matrix};
 use crate::{
     MainTraceRow,
     constraints::{
-        bus::{MessageEncoder, indices::P1_BLOCK_STACK},
+        bus::{coeffs_from_challenges, encode_message, indices::P1_BLOCK_STACK},
         op_flags::OpFlags,
         tagging::{TaggingAirBuilderExt, ids::TAG_DECODER_BUS_BASE},
     },
@@ -52,119 +52,6 @@ const DECODER_BUS_NAMES: [&str; 3] = [
 
 /// Weights for opcode bit decoding: b0 + 2*b1 + ... + 64*b6.
 const OP_BIT_WEIGHTS: [u16; 7] = [1, 2, 4, 8, 16, 32, 64];
-
-/// Encoders for block stack table (p1) messages.
-struct BlockStackEncoders<AB>
-where
-    AB: MidenAirBuilder,
-{
-    simple: MessageEncoder<AB, 3>,
-    full: MessageEncoder<AB, 10>,
-}
-
-impl<AB> BlockStackEncoders<AB>
-where
-    AB: MidenAirBuilder,
-{
-    fn new(challenges: &[AB::RandomVar]) -> Self {
-        Self {
-            simple: MessageEncoder::<AB, 3>::from_challenges(challenges),
-            full: MessageEncoder::<AB, 10>::from_challenges(challenges),
-        }
-    }
-
-    /// Encodes `[block_id, parent_id, is_loop]`.
-    fn simple(&self, block_id: &AB::Expr, parent_id: &AB::Expr, is_loop: &AB::Expr) -> AB::ExprEF {
-        self.simple.encode([block_id.clone(), parent_id.clone(), is_loop.clone()])
-    }
-
-    /// Encodes `[block_id, parent_id, is_loop, ctx, depth, overflow, fn_hash[0..4]]`.
-    fn full(
-        &self,
-        block_id: &AB::Expr,
-        parent_id: &AB::Expr,
-        is_loop: &AB::Expr,
-        ctx: &AB::Expr,
-        depth: &AB::Expr,
-        overflow: &AB::Expr,
-        fh: &[AB::Expr; 4],
-    ) -> AB::ExprEF {
-        self.full.encode([
-            block_id.clone(),
-            parent_id.clone(),
-            is_loop.clone(),
-            ctx.clone(),
-            depth.clone(),
-            overflow.clone(),
-            fh[0].clone(),
-            fh[1].clone(),
-            fh[2].clone(),
-            fh[3].clone(),
-        ])
-    }
-}
-
-/// Encoder for block hash table (p2) messages.
-struct BlockHashEncoder<AB>
-where
-    AB: MidenAirBuilder,
-{
-    encoder: MessageEncoder<AB, 7>,
-}
-
-impl<AB> BlockHashEncoder<AB>
-where
-    AB: MidenAirBuilder,
-{
-    fn new(challenges: &[AB::RandomVar]) -> Self {
-        Self {
-            encoder: MessageEncoder::<AB, 7>::from_challenges(challenges),
-        }
-    }
-
-    /// Encodes `[parent_id, hash[0..4], is_first_child, is_loop_body]`.
-    fn encode(
-        &self,
-        parent: &AB::Expr,
-        hash: [&AB::Expr; 4],
-        first_child: &AB::Expr,
-        loop_body: &AB::Expr,
-    ) -> AB::ExprEF {
-        self.encoder.encode([
-            parent.clone(),
-            hash[0].clone(),
-            hash[1].clone(),
-            hash[2].clone(),
-            hash[3].clone(),
-            first_child.clone(),
-            loop_body.clone(),
-        ])
-    }
-}
-
-/// Encoder for op group table (p3) messages.
-struct OpGroupEncoder<AB>
-where
-    AB: MidenAirBuilder,
-{
-    encoder: MessageEncoder<AB, 3>,
-}
-
-impl<AB> OpGroupEncoder<AB>
-where
-    AB: MidenAirBuilder,
-{
-    fn new(challenges: &[AB::RandomVar]) -> Self {
-        Self {
-            encoder: MessageEncoder::<AB, 3>::from_challenges(challenges),
-        }
-    }
-
-    /// Encodes `[block_id, group_count, op_value]`.
-    fn encode(&self, block_id: &AB::Expr, group_count: &AB::Expr, value: &AB::Expr) -> AB::ExprEF {
-        self.encoder.encode([block_id.clone(), group_count.clone(), value.clone()])
-    }
-}
 
 /// Decoder column indices (relative to decoder trace).
 mod decoder_cols {
@@ -272,7 +159,7 @@ pub fn enforce_bus<AB>(
 ///
 /// ## Message Format
 ///
-/// Messages are linear combinations: `alpha[0]*1 + alpha[1]*block_id + alpha[2]*parent_id + ...`
+/// Messages are linear combinations: `coeffs[0] + coeffs[1]*block_id + coeffs[2]*parent_id + ...`
 /// - Simple blocks: 4 elements `[1, block_id, parent_id, is_loop]`
 /// - CALL/SYSCALL/DYNCALL: 11 elements with context `[..., ctx, fmp, b0, b1, fn_hash[0..4]]`
 pub fn enforce_block_stack_table_constraint<AB>(
@@ -299,6 +186,7 @@ pub fn enforce_block_stack_table_constraint<AB>(
 
     // Get challenges for message encoding.
     let challenges = builder.permutation_randomness();
+    let coeffs: [AB::ExprEF; 11] = coeffs_from_challenges::<AB, 11>(challenges);
 
     let one = AB::Expr::ONE;
     let zero = AB::Expr::ZERO;
@@ -353,10 +241,38 @@ pub fn enforce_block_stack_table_constraint<AB>(
     ];
 
     // =========================================================================
-    // MESSAGE BUILDERS
+    // MESSAGE ENCODERS
     // =========================================================================
 
-    let encoders = BlockStackEncoders::<AB>::new(challenges);
+    let encode_simple =
+        |block_id: &AB::Expr, parent_id: &AB::Expr, is_loop: &AB::Expr| -> AB::ExprEF {
+            encode_message::<AB, 3>(&coeffs, [block_id.clone(), parent_id.clone(), is_loop.clone()])
+        };
+
+    let encode_full = |block_id: &AB::Expr,
+                       parent_id: &AB::Expr,
+                       is_loop: &AB::Expr,
+                       ctx: &AB::Expr,
+                       b0: &AB::Expr,
+                       b1: &AB::Expr,
+                       fn_hash: &[AB::Expr; 4]|
+     -> AB::ExprEF {
+        encode_message::<AB, 10>(
+            &coeffs,
+            [
+                block_id.clone(),
+                parent_id.clone(),
+                is_loop.clone(),
+                ctx.clone(),
+                b0.clone(),
+                b1.clone(),
+                fn_hash[0].clone(),
+                fn_hash[1].clone(),
+                fn_hash[2].clone(),
+                fn_hash[3].clone(),
+            ],
+        )
+    };
 
     // =========================================================================
     // INSERTION CONTRIBUTIONS (v_xxx = f_xxx * message)
@@ -375,22 +291,22 @@ pub fn enforce_block_stack_table_constraint<AB>(
     let is_end = op_flags.end();
 
     // JOIN/SPLIT/SPAN/DYN: insert(addr', addr, 0, 0, 0, 0, 0, 0, 0, 0)
-    let msg_simple = encoders.simple(&addr_next, &addr_local, &zero);
+    let msg_simple = encode_simple(&addr_next, &addr_local, &zero);
     let v_join = msg_simple.clone() * is_join.clone();
     let v_split = msg_simple.clone() * is_split.clone();
     let v_span = msg_simple.clone() * is_span.clone();
     let v_dyn = msg_simple.clone() * is_dyn.clone();
 
     // LOOP: insert(addr', addr, s0, 0, 0, 0, 0, 0, 0, 0)
-    let msg_loop = encoders.simple(&addr_next, &addr_local, &s0);
+    let msg_loop = encode_simple(&addr_next, &addr_local, &s0);
     let v_loop = msg_loop * is_loop.clone();
 
     // RESPAN: insert(addr', h1', 0, 0, 0, 0, 0, 0, 0, 0)
-    let msg_respan_insert = encoders.simple(&addr_next, &h1_next, &zero);
+    let msg_respan_insert = encode_simple(&addr_next, &h1_next, &zero);
     let v_respan = msg_respan_insert * is_respan.clone();
 
     // CALL/SYSCALL: insert(addr', addr, 0, ctx, fmp, b0, b1, fn_hash[0..4])
-    let msg_call = encoders.full(
+    let msg_call = encode_full(
         &addr_next,
         &addr_local,
         &zero,
@@ -403,7 +319,7 @@ pub fn enforce_block_stack_table_constraint<AB>(
     let v_syscall = msg_call * is_syscall.clone();
 
     // DYNCALL: insert(addr', addr, 0, ctx, h4, h5, fn_hash[0..4])
-    let msg_dyncall = encoders.full(
+    let msg_dyncall = encode_full(
         &addr_next,
         &addr_local,
         &zero,
@@ -437,12 +353,12 @@ pub fn enforce_block_stack_table_constraint<AB>(
     // =========================================================================
 
     // RESPAN removal: remove(addr, h1', 0, 0, 0, 0, 0, 0, 0, 0)
-    let msg_respan_remove = encoders.simple(&addr_local, &h1_next, &zero);
+    let msg_respan_remove = encode_simple(&addr_local, &h1_next, &zero);
     let u_respan = msg_respan_remove * is_respan.clone();
 
     // END for simple blocks: remove(addr, addr', is_loop_flag, 0, 0, 0, 0, 0, 0, 0)
     let is_simple_end = one.clone() - is_call_flag.clone() - is_syscall_flag.clone();
-    let msg_end_simple = encoders.simple(&addr_local, &addr_next, &is_loop_flag);
+    let msg_end_simple = encode_simple(&addr_local, &addr_next, &is_loop_flag);
     let end_simple_gate = is_end.clone() * is_simple_end;
     let u_end_simple = msg_end_simple * end_simple_gate;
 
@@ -450,7 +366,7 @@ pub fn enforce_block_stack_table_constraint<AB>(
     // Note: The is_loop value is the is_loop_flag from the current row (same as simple END)
     // Context values come from the next row's dedicated columns (not hasher state)
     let is_call_or_syscall = is_call_flag.clone() + is_syscall_flag.clone();
-    let msg_end_call = encoders.full(
+    let msg_end_call = encode_full(
         &addr_local,
         &addr_next,
         &is_loop_flag,
@@ -550,8 +466,9 @@ pub fn enforce_block_hash_table_constraint<AB>(
         )
     };
 
-    // Get challenges for message encoding (8 alphas for p2)
+    // Get challenges for message encoding (coeffs for p2)
     let challenges = builder.permutation_randomness();
+    let coeffs: [AB::ExprEF; 11] = coeffs_from_challenges::<AB, 11>(challenges);
 
     let one = AB::Expr::ONE;
     let zero = AB::Expr::ZERO;
@@ -612,10 +529,27 @@ pub fn enforce_block_hash_table_constraint<AB>(
     let is_first_child = one.clone() - is_not_first_child;
 
     // =========================================================================
-    // MESSAGE BUILDERS
+    // MESSAGE ENCODER
     // =========================================================================
 
-    let encoder = BlockHashEncoder::<AB>::new(challenges);
+    let encode_hash = |parent_id: &AB::Expr,
+                       hash: [&AB::Expr; 4],
+                       is_first_child: &AB::Expr,
+                       is_loop_body: &AB::Expr|
+     -> AB::ExprEF {
+        encode_message::<AB, 7>(
+            &coeffs,
+            [
+                parent_id.clone(),
+                hash[0].clone(),
+                hash[1].clone(),
+                hash[2].clone(),
+                hash[3].clone(),
+                is_first_child.clone(),
+                is_loop_body.clone(),
+            ],
+        )
+    };
 
     // =========================================================================
     // OPERATION FLAGS
@@ -637,9 +571,9 @@ pub fn enforce_block_hash_table_constraint<AB>(
 
     // JOIN: Insert both children
     // Left child (is_first_child=1): hash from first half
-    let msg_join_left = encoder.encode(&parent_id, [&h0, &h1, &h2, &h3], &one, &zero);
+    let msg_join_left = encode_hash(&parent_id, [&h0, &h1, &h2, &h3], &one, &zero);
     // Right child (is_first_child=0): hash from second half
-    let msg_join_right = encoder.encode(&parent_id, [&h4, &h5, &h6, &h7], &zero, &zero);
+    let msg_join_right = encode_hash(&parent_id, [&h4, &h5, &h6, &h7], &zero, &zero);
     let v_join = (msg_join_left * msg_join_right) * is_join.clone();
 
     // SPLIT: Insert selected child based on s0
@@ -649,20 +583,20 @@ pub fn enforce_block_hash_table_constraint<AB>(
     let split_h2 = s0.clone() * h2.clone() + (one.clone() - s0.clone()) * h6.clone();
     let split_h3 = s0.clone() * h3.clone() + (one.clone() - s0.clone()) * h7.clone();
     let msg_split =
-        encoder.encode(&parent_id, [&split_h0, &split_h1, &split_h2, &split_h3], &zero, &zero);
+        encode_hash(&parent_id, [&split_h0, &split_h1, &split_h2, &split_h3], &zero, &zero);
     let v_split = msg_split * is_split.clone();
 
     // LOOP: Conditionally insert body if s0=1
-    let msg_loop = encoder.encode(&parent_id, [&h0, &h1, &h2, &h3], &zero, &one);
+    let msg_loop = encode_hash(&parent_id, [&h0, &h1, &h2, &h3], &zero, &one);
     // When s0=1: insert msg_loop; when s0=0: multiply by 1 (no insertion)
     let v_loop = (msg_loop * s0.clone() + (one_ef.clone() - s0.clone())) * is_loop.clone();
 
     // REPEAT: Insert loop body
-    let msg_repeat = encoder.encode(&parent_id, [&h0, &h1, &h2, &h3], &zero, &one);
+    let msg_repeat = encode_hash(&parent_id, [&h0, &h1, &h2, &h3], &zero, &one);
     let v_repeat = msg_repeat * is_repeat.clone();
 
     // DYN/DYNCALL/CALL/SYSCALL: Insert child hash from first half
-    let msg_call_like = encoder.encode(&parent_id, [&h0, &h1, &h2, &h3], &zero, &zero);
+    let msg_call_like = encode_hash(&parent_id, [&h0, &h1, &h2, &h3], &zero, &zero);
     let v_dyn = msg_call_like.clone() * is_dyn.clone();
     let v_dyncall = msg_call_like.clone() * is_dyncall.clone();
     let v_call = msg_call_like.clone() * is_call.clone();
@@ -695,7 +629,7 @@ pub fn enforce_block_hash_table_constraint<AB>(
 
     // END: Remove the block
     // is_first_child is computed above from next row's opcode flags
-    let msg_end = encoder.encode(
+    let msg_end = encode_hash(
         &end_parent_id,
         [&end_hash_0, &end_hash_1, &end_hash_2, &end_hash_3],
         &is_first_child,
@@ -745,7 +679,7 @@ pub fn enforce_block_hash_table_constraint<AB>(
 ///
 /// ## Message Format
 ///
-/// `[1, block_id, group_count, op_value]`
+/// `[block_id, group_count, op_value]` (implicit constant term 1)
 ///
 /// ## Constraint Structure (from docs/src/design/decoder/constraints.md)
 ///
@@ -791,8 +725,9 @@ pub fn enforce_op_group_table_constraint<AB>(
         )
     };
 
-    // Get challenges for message encoding (4 alphas for p3)
+    // Get challenges for message encoding (coeffs for p3)
     let challenges = builder.permutation_randomness();
+    let coeffs: [AB::ExprEF; 11] = coeffs_from_challenges::<AB, 11>(challenges);
 
     let one = AB::Expr::ONE;
     let one_ef = AB::ExprEF::ONE;
@@ -834,10 +769,15 @@ pub fn enforce_op_group_table_constraint<AB>(
     let sp = to_expr(local.decoder[op_group_cols::IS_IN_SPAN].clone());
 
     // =========================================================================
-    // MESSAGE BUILDER
+    // MESSAGE ENCODER
     // =========================================================================
 
-    let encoder = OpGroupEncoder::<AB>::new(challenges);
+    let encode_group = |block_id: &AB::Expr,
+                        group_count: &AB::Expr,
+                        op_value: &AB::Expr|
+     -> AB::ExprEF {
+        encode_message::<AB, 3>(&coeffs, [block_id.clone(), group_count.clone(), op_value.clone()])
+    };
 
     // =========================================================================
     // OPERATION FLAGS
@@ -876,13 +816,13 @@ pub fn enforce_op_group_table_constraint<AB>(
     // =========================================================================
 
     // Build messages for each group: v_i = msg(block_id', gc - i, h_i)
-    let v_1 = encoder.encode(&block_id_insert, &(gc.clone() - one.clone()), &h1);
-    let v_2 = encoder.encode(&block_id_insert, &(gc.clone() - two.clone()), &h2);
-    let v_3 = encoder.encode(&block_id_insert, &(gc.clone() - three.clone()), &h3);
-    let v_4 = encoder.encode(&block_id_insert, &(gc.clone() - four.clone()), &h4);
-    let v_5 = encoder.encode(&block_id_insert, &(gc.clone() - five.clone()), &h5);
-    let v_6 = encoder.encode(&block_id_insert, &(gc.clone() - six.clone()), &h6);
-    let v_7 = encoder.encode(&block_id_insert, &(gc.clone() - seven.clone()), &h7);
+    let v_1 = encode_group(&block_id_insert, &(gc.clone() - one.clone()), &h1);
+    let v_2 = encode_group(&block_id_insert, &(gc.clone() - two.clone()), &h2);
+    let v_3 = encode_group(&block_id_insert, &(gc.clone() - three.clone()), &h3);
+    let v_4 = encode_group(&block_id_insert, &(gc.clone() - four.clone()), &h4);
+    let v_5 = encode_group(&block_id_insert, &(gc.clone() - five.clone()), &h5);
+    let v_6 = encode_group(&block_id_insert, &(gc.clone() - six.clone()), &h6);
+    let v_7 = encode_group(&block_id_insert, &(gc.clone() - seven.clone()), &h7);
 
     // Compute products for each batch size
     let prod_3 = v_1.clone() * v_2.clone() * v_3.clone();
@@ -921,7 +861,7 @@ pub fn enforce_op_group_table_constraint<AB>(
     let group_value = is_push.clone() * s0_next + (one.clone() - is_push) * group_value_non_push;
 
     // Removal message: u = msg(block_id, gc, group_value)
-    let u = encoder.encode(&block_id_remove, &gc, &group_value);
+    let u = encode_group(&block_id_remove, &gc, &group_value);
 
     // Request formula: f_dg * u + (1 - f_dg)
     let request = u * f_dg.clone() + (one_ef.clone() - f_dg);
