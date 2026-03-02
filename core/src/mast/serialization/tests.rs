@@ -240,21 +240,18 @@ fn serialize_deserialize_all_nodes() {
             (num_operations, Decorator::Trace(55)),
         ];
 
-        {
-            // Convert raw decorators to decorator list by adding them to the forest first
-            let decorator_list: Vec<(usize, crate::mast::DecoratorId)> = decorators
+        // Convert raw decorators to decorator list by adding them to the forest first
+        let decorator_list: Vec<(usize, crate::mast::DecoratorId)> = decorators
             .into_iter()
-            .map(|(idx, decorator)| -> Result<(usize, crate::mast::DecoratorId), MastForestError> {
-                let decorator_id = mast_forest.add_decorator(decorator)?;
-                Ok((idx, decorator_id))
+            .map(|(idx, decorator)| {
+                mast_forest.add_decorator(decorator).map(|decorator_id| (idx, decorator_id))
             })
             .collect::<Result<Vec<_>, MastForestError>>()
             .unwrap();
 
-            BasicBlockNodeBuilder::new(operations, decorator_list)
-                .add_to_forest(&mut mast_forest)
-                .unwrap()
-        }
+        BasicBlockNodeBuilder::new(operations, decorator_list)
+            .add_to_forest(&mut mast_forest)
+            .unwrap()
     };
 
     // Decorators to add to following nodes
@@ -745,7 +742,7 @@ fn test_raw_vs_batched_construction_equivalence() {
     let mut forest2 = MastForest::new();
 
     let decorator_id1 = forest1.add_decorator(Decorator::Trace(1)).unwrap();
-    let _decorator_id2 = forest2.add_decorator(Decorator::Trace(1)).unwrap();
+    let _ = forest2.add_decorator(Decorator::Trace(1)).unwrap();
 
     let operations =
         vec![Operation::Add, Operation::Mul, Operation::Push(Felt::new(100)), Operation::Drop];
@@ -877,22 +874,6 @@ fn test_header_backward_compatible() {
     assert_eq!(bytes[4], 0x00, "Flags should be 0x00 for full serialization");
     // Version [0, 0, 3] includes: HASHLESS flag addition
     assert_eq!(&bytes[5..8], &[0, 0, 3], "Version should be [0, 0, 3]");
-}
-
-/// Test that legacy version headers are accepted for the unchanged wire format.
-#[test]
-fn test_legacy_version_is_accepted() {
-    let mut forest = MastForest::new();
-    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
-        .add_to_forest(&mut forest)
-        .unwrap();
-    forest.make_root(block_id);
-
-    let mut bytes = forest.to_bytes();
-    bytes[5..8].copy_from_slice(&[0, 0, 2]);
-
-    let restored = MastForest::read_from_bytes(&bytes).unwrap();
-    assert_eq!(forest.num_nodes(), restored.num_nodes());
 }
 
 /// Test that stripped serialization produces smaller output than full serialization.

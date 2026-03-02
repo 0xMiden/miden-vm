@@ -131,8 +131,7 @@ const FLAGS_RESERVED_MASK: u8 = 0xfc;
 ///   Removed `breakpoint` instruction (#2655).
 /// - [0, 0, 3]: Added HASHLESS flag (bit 1). HASHLESS implies STRIPPED. Trusted deserialization
 ///   rejects HASHLESS.
-const VERSION: [u8; 3] = [0, 0, 4];
-const VERSION_LEGACY: [u8; 3] = [0, 0, 2];
+const VERSION: [u8; 3] = [0, 0, 3];
 
 // MAST FOREST SERIALIZATION/DESERIALIZATION
 // ================================================================================================
@@ -158,13 +157,8 @@ impl MastForest {
 
         // magic & flags
         target.write_bytes(MAGIC);
-        let mut flags = 0u8;
-        if stripped || hashless {
-            flags |= FLAG_STRIPPED;
-        }
-        if hashless {
-            flags |= FLAG_HASHLESS;
-        }
+        let flags = if stripped || hashless { FLAG_STRIPPED } else { 0 }
+            | if hashless { FLAG_HASHLESS } else { 0 };
         target.write_u8(flags);
 
         // version
@@ -236,8 +230,7 @@ fn read_body_with_flags<R: ByteReader>(
     flags: u8,
 ) -> Result<MastForest, DeserializationError> {
     let is_stripped = flags & FLAG_STRIPPED != 0;
-    let is_hashless = flags & FLAG_HASHLESS != 0;
-    if is_hashless && !is_stripped {
+    if flags & FLAG_HASHLESS != 0 && !is_stripped {
         return Err(DeserializationError::InvalidValue(
             "HASHLESS flag requires STRIPPED flag to be set".to_string(),
         ));
@@ -337,22 +330,17 @@ fn read_and_validate_header<R: ByteReader>(
 
     // Read and validate version
     let version: [u8; 3] = source.read_array()?;
-    if version != VERSION && version != VERSION_LEGACY {
+    if version != VERSION {
         return Err(DeserializationError::InvalidValue(format!(
-            "Unsupported version. Got '{version:?}', but only '{VERSION:?}' and '{VERSION_LEGACY:?}' are supported",
+            "Unsupported version. Got '{version:?}', but only '{VERSION:?}' is supported",
         )));
     }
 
-    // Validate flags per-version
-    let reserved_mask = if version == VERSION_LEGACY {
-        0xfe
-    } else {
-        FLAGS_RESERVED_MASK
-    };
-    if flags & reserved_mask != 0 {
+    // Validate flags
+    if flags & FLAGS_RESERVED_MASK != 0 {
         return Err(DeserializationError::InvalidValue(format!(
             "Unknown flags set in MAST header: {:#04x}. Reserved bits must be zero.",
-            flags & reserved_mask
+            flags & FLAGS_RESERVED_MASK
         )));
     }
 
@@ -366,14 +354,7 @@ fn node_infos_iter<'a, R>(
 where
     R: ByteReader + 'a,
 {
-    let mut remaining = node_count;
-    core::iter::from_fn(move || {
-        if remaining == 0 {
-            return None;
-        }
-        remaining -= 1;
-        Some(MastNodeInfo::read_from(source))
-    })
+    (0..node_count).map(move |_| MastNodeInfo::read_from(source))
 }
 
 // UNTRUSTED DESERIALIZATION
