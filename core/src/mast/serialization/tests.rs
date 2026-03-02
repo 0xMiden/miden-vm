@@ -875,8 +875,24 @@ fn test_header_backward_compatible() {
     // Check header structure: MAST (4 bytes) + flags (1 byte) + version (3 bytes)
     assert_eq!(&bytes[0..4], b"MAST", "Magic should be MAST");
     assert_eq!(bytes[4], 0x00, "Flags should be 0x00 for full serialization");
-    // Version [0, 0, 2] includes: AssemblyOp removed from Decorator enum serialization
-    assert_eq!(&bytes[5..8], &[0, 0, 2], "Version should be [0, 0, 2]");
+    // Version [0, 0, 3] includes: HASHLESS flag addition
+    assert_eq!(&bytes[5..8], &[0, 0, 3], "Version should be [0, 0, 3]");
+}
+
+/// Test that legacy version headers are accepted for the unchanged wire format.
+#[test]
+fn test_legacy_version_is_accepted() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let mut bytes = forest.to_bytes();
+    bytes[5..8].copy_from_slice(&[0, 0, 2]);
+
+    let restored = MastForest::read_from_bytes(&bytes).unwrap();
+    assert_eq!(forest.num_nodes(), restored.num_nodes());
 }
 
 /// Test that stripped serialization produces smaller output than full serialization.
@@ -964,8 +980,8 @@ fn test_stripped_header_flags() {
     // Check header structure
     assert_eq!(&stripped_bytes[0..4], b"MAST", "Magic should be MAST");
     assert_eq!(stripped_bytes[4], 0x01, "Flags should be 0x01 for stripped serialization");
-    // Version [0, 0, 2] includes: AssemblyOp removed from Decorator enum serialization
-    assert_eq!(&stripped_bytes[5..8], &[0, 0, 2], "Version should be [0, 0, 2]");
+    // Version [0, 0, 3] includes: HASHLESS flag addition
+    assert_eq!(&stripped_bytes[5..8], &[0, 0, 3], "Version should be [0, 0, 3]");
 }
 
 /// Test that node digests are preserved in stripped serialization.
@@ -1008,14 +1024,103 @@ fn test_deserialize_rejects_unknown_flags() {
 
     let mut bytes = forest.to_bytes();
 
-    // Set an unknown flag (bit 1)
-    bytes[4] = 0x02;
+    // Set an unknown flag (bit 2)
+    bytes[4] = 0x04;
 
     let result = MastForest::read_from_bytes(&bytes);
     assert_matches!(
         result,
         Err(DeserializationError::InvalidValue(msg)) if msg.contains("reserved") || msg.contains("flags")
     );
+}
+
+/// Test that hashless serialization sets the correct header flags.
+#[test]
+fn test_hashless_header_flags() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let mut hashless_bytes = Vec::new();
+    forest.write_hashless(&mut hashless_bytes);
+
+    assert_eq!(&hashless_bytes[0..4], b"MAST", "Magic should be MAST");
+    assert_eq!(
+        hashless_bytes[4], 0x03,
+        "Flags should be 0x03 for hashless serialization (STRIPPED + HASHLESS)"
+    );
+    assert_eq!(&hashless_bytes[5..8], &[0, 0, 3], "Version should be [0, 0, 3]");
+}
+
+/// Test that trusted deserialization rejects hashless inputs.
+#[test]
+fn test_trusted_rejects_hashless() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let mut hashless_bytes = Vec::new();
+    forest.write_hashless(&mut hashless_bytes);
+
+    let result = MastForest::read_from_bytes(&hashless_bytes);
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg)) if msg.contains("HASHLESS")
+    );
+}
+
+/// Test that hashless without stripped is rejected.
+#[test]
+fn test_hashless_requires_stripped() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let mut bytes = forest.to_bytes();
+    // Set HASHLESS without STRIPPED
+    bytes[4] = 0x02;
+
+    let result = UntrustedMastForest::read_from_bytes(&bytes);
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg)) if msg.contains("HASHLESS") && msg.contains("STRIPPED")
+    );
+}
+
+/// Test that flag-returning APIs expose the correct header flags.
+#[test]
+fn test_untrusted_read_with_flags() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let full_bytes = forest.to_bytes();
+    let (full_untrusted, full_flags) =
+        UntrustedMastForest::read_from_bytes_with_flags(&full_bytes).unwrap();
+    assert_eq!(full_flags, 0x00);
+    assert_eq!(full_untrusted.validate().unwrap().num_nodes(), forest.num_nodes());
+
+    let mut stripped_bytes = Vec::new();
+    forest.write_stripped(&mut stripped_bytes);
+    let (stripped_untrusted, stripped_flags) =
+        UntrustedMastForest::read_from_bytes_with_flags(&stripped_bytes).unwrap();
+    assert_eq!(stripped_flags, 0x01);
+    assert_eq!(stripped_untrusted.validate().unwrap().num_nodes(), forest.num_nodes());
+
+    let mut hashless_bytes = Vec::new();
+    forest.write_hashless(&mut hashless_bytes);
+    let (hashless_untrusted, hashless_flags) =
+        UntrustedMastForest::read_from_bytes_with_flags(&hashless_bytes).unwrap();
+    assert_eq!(hashless_flags, 0x03);
+    assert_eq!(hashless_untrusted.validate().unwrap().num_nodes(), forest.num_nodes());
 }
 
 mod proptests {

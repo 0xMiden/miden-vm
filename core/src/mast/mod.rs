@@ -501,6 +501,17 @@ impl MastForest {
         use serialization::StrippedMastForest;
         StrippedMastForest(self).write_into(target);
     }
+
+    /// Serializes this MastForest with the HASHLESS flag set.
+    ///
+    /// Hashless implies stripped: debug info is omitted, and digests must be recomputed during
+    /// validation. Trusted deserialization rejects this flag.
+    ///
+    /// Use this when producing data for untrusted validation.
+    pub fn write_hashless<W: ByteWriter>(&self, target: &mut W) {
+        use serialization::HashlessMastForest;
+        HashlessMastForest(self).write_into(target);
+    }
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1361,6 +1372,14 @@ impl UntrustedMastForest {
         Self::read_from_bytes_with_budget(bytes, bytes.len())
     }
 
+    /// Deserializes an [`UntrustedMastForest`] from bytes and returns the header flags.
+    ///
+    /// This enables callers to inspect intent flags (e.g., HASHLESS) without affecting the
+    /// deserialization path.
+    pub fn read_from_bytes_with_flags(bytes: &[u8]) -> Result<(Self, u8), DeserializationError> {
+        Self::read_from_bytes_with_budget_and_flags(bytes, bytes.len())
+    }
+
     /// Deserializes an [`UntrustedMastForest`] from bytes with a byte budget.
     ///
     /// This method uses a [`BudgetedReader`] to limit memory consumption during deserialization,
@@ -1397,5 +1416,15 @@ impl UntrustedMastForest {
     ) -> Result<Self, DeserializationError> {
         let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
         Self::read_from(&mut reader)
+    }
+
+    /// Deserializes an [`UntrustedMastForest`] from bytes with a byte budget and returns flags.
+    pub fn read_from_bytes_with_budget_and_flags(
+        bytes: &[u8],
+        budget: usize,
+    ) -> Result<(Self, u8), DeserializationError> {
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
+        let (forest, flags) = serialization::read_from_with_flags(&mut reader)?;
+        Ok((Self(forest), flags))
     }
 }
