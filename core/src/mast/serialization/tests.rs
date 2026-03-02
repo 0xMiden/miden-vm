@@ -339,6 +339,51 @@ fn test_operation_encoded_size_matches_serialized_len() {
     }
 }
 
+#[test]
+fn test_serialized_mast_forest_random_access_node_info() {
+    let mut forest = MastForest::new();
+
+    let block1 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let block2 = BasicBlockNodeBuilder::new(vec![Operation::U32div], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let join = JoinNodeBuilder::new([block1, block2]).add_to_forest(&mut forest).unwrap();
+    forest.make_root(join);
+
+    let mut bytes = Vec::new();
+    forest.write_stripped(&mut bytes);
+
+    let view = SerializedMastForest::new(&bytes).unwrap();
+    assert_eq!(view.node_count(), forest.nodes().len());
+
+    let mut bb_builder = super::basic_blocks::BasicBlockDataBuilder::new();
+    for (idx, node) in forest.nodes().iter().enumerate() {
+        let ops_offset = if let MastNode::Block(block) = node {
+            bb_builder.encode_basic_block(block)
+        } else {
+            0
+        };
+        let expected = MastNodeInfo::new(node, ops_offset);
+        let actual = view.node_info_at(idx).unwrap();
+        assert_eq!(expected.to_bytes(), actual.to_bytes());
+    }
+}
+
+#[test]
+fn test_serialized_mast_forest_rejects_full_format() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let bytes = forest.to_bytes();
+    let result = SerializedMastForest::new(&bytes);
+    assert_matches!(result, Err(DeserializationError::InvalidValue(_)));
+}
+
 /// Test that a forest with a node whose child ids are larger than its own id serializes and
 /// deserializes successfully.
 #[test]

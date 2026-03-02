@@ -71,6 +71,7 @@ pub use debuginfo::{
 };
 
 mod serialization;
+pub use serialization::SerializedMastForest;
 
 mod merger;
 pub(crate) use merger::MastForestMerger;

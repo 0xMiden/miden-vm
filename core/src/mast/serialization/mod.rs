@@ -46,14 +46,16 @@ use alloc::{string::ToString, vec::Vec};
 use super::{MastForest, MastNode, MastNodeId};
 use crate::{
     advice::AdviceMap,
-    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
+    },
 };
 
 pub(crate) mod asm_op;
 pub(crate) mod decorator;
 
 mod info;
-use info::MastNodeInfo;
+pub use info::MastNodeInfo;
 
 mod basic_blocks;
 use basic_blocks::{BasicBlockDataBuilder, BasicBlockDataDecoder, basic_block_data_len};
@@ -229,6 +231,235 @@ pub(super) fn stripped_size_hint(forest: &MastForest) -> usize {
     size += forest.advice_map.serialized_size_hint();
 
     size
+}
+
+/// A zero-copy view over a stripped, serialized MAST forest.
+///
+/// This is intended for trusted inputs and supports random access to `MastNodeInfo`
+/// entries without deserializing the full forest.
+///
+/// # Examples
+///
+/// ```
+/// use miden_core::{
+///     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, SerializedMastForest},
+///     operations::Operation,
+/// };
+///
+/// let mut forest = MastForest::new();
+/// let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+///     .add_to_forest(&mut forest)
+///     .unwrap();
+/// forest.make_root(block_id);
+///
+/// let mut bytes = Vec::new();
+/// forest.write_stripped(&mut bytes);
+///
+/// let view = SerializedMastForest::new(&bytes).unwrap();
+/// assert_eq!(view.node_count(), forest.nodes().len());
+/// assert!(view.node_info_at(0).is_ok());
+/// ```
+#[derive(Debug)]
+pub struct SerializedMastForest<'a> {
+    bytes: &'a [u8],
+    node_count: usize,
+    node_info_offset: usize,
+    node_info_size: usize,
+}
+
+impl<'a> SerializedMastForest<'a> {
+    /// Creates a new view from serialized bytes.
+    ///
+    /// The input must be in stripped format (including hashless, which implies stripped).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use miden_core::{
+    ///     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, SerializedMastForest},
+    ///     operations::Operation,
+    /// };
+    ///
+    /// let mut forest = MastForest::new();
+    /// let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    ///     .add_to_forest(&mut forest)
+    ///     .unwrap();
+    /// forest.make_root(block_id);
+    ///
+    /// let mut bytes = Vec::new();
+    /// forest.write_stripped(&mut bytes);
+    ///
+    /// let view = SerializedMastForest::new(&bytes).unwrap();
+    /// assert_eq!(view.node_count(), 1);
+    /// ```
+    pub fn new(bytes: &'a [u8]) -> Result<Self, DeserializationError> {
+        let mut offset = 0usize;
+
+        // header
+        let magic = read_array_at::<4>(bytes, &mut offset)?;
+        if magic != *MAGIC {
+            return Err(DeserializationError::InvalidValue(format!(
+                "Invalid magic bytes. Expected '{:?}', got '{:?}'",
+                *MAGIC, magic
+            )));
+        }
+
+        let flags = read_u8_at(bytes, &mut offset)?;
+        if flags & FLAGS_RESERVED_MASK != 0 {
+            return Err(DeserializationError::InvalidValue(format!(
+                "Unknown flags set in MAST header: {:#04x}. Reserved bits must be zero.",
+                flags & FLAGS_RESERVED_MASK
+            )));
+        }
+        if flags & FLAG_STRIPPED == 0 {
+            return Err(DeserializationError::InvalidValue(
+                "SerializedMastForest requires stripped format".to_string(),
+            ));
+        }
+
+        let version = read_array_at::<3>(bytes, &mut offset)?;
+        if version != VERSION {
+            return Err(DeserializationError::InvalidValue(format!(
+                "Unsupported version. Got '{version:?}', but only '{VERSION:?}' is supported",
+            )));
+        }
+
+        // counts
+        let node_count = read_usize_at(bytes, &mut offset)?;
+        if node_count > MastForest::MAX_NODES {
+            return Err(DeserializationError::InvalidValue(format!(
+                "node count {} exceeds maximum allowed {}",
+                node_count,
+                MastForest::MAX_NODES
+            )));
+        }
+        let _decorator_count = read_usize_at(bytes, &mut offset)?;
+
+        // roots
+        let roots_len = read_usize_at(bytes, &mut offset)?;
+        let roots_bytes = roots_len.checked_mul(core::mem::size_of::<u32>()).ok_or_else(|| {
+            DeserializationError::InvalidValue("roots length overflow".to_string())
+        })?;
+        read_slice_at(bytes, &mut offset, roots_bytes)?;
+
+        // basic block data
+        let basic_block_len = read_usize_at(bytes, &mut offset)?;
+        read_slice_at(bytes, &mut offset, basic_block_len)?;
+
+        let node_info_size = MastNodeInfo::min_serialized_size();
+        let node_info_offset = offset;
+        let total_node_info_bytes = node_count
+            .checked_mul(node_info_size)
+            .ok_or_else(|| {
+                DeserializationError::InvalidValue("node info length overflow".to_string())
+            })?;
+        if node_info_offset + total_node_info_bytes > bytes.len() {
+            return Err(DeserializationError::UnexpectedEOF);
+        }
+
+        Ok(Self {
+            bytes,
+            node_count,
+            node_info_offset,
+            node_info_size,
+        })
+    }
+
+    /// Returns the number of nodes in the serialized forest.
+    pub fn node_count(&self) -> usize {
+        self.node_count
+    }
+
+    /// Returns the `MastNodeInfo` at the specified index.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use miden_core::{
+    ///     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, SerializedMastForest},
+    ///     operations::Operation,
+    /// };
+    ///
+    /// let mut forest = MastForest::new();
+    /// let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    ///     .add_to_forest(&mut forest)
+    ///     .unwrap();
+    /// forest.make_root(block_id);
+    ///
+    /// let mut bytes = Vec::new();
+    /// forest.write_stripped(&mut bytes);
+    ///
+    /// let view = SerializedMastForest::new(&bytes).unwrap();
+    /// assert!(view.node_info_at(0).is_ok());
+    /// ```
+    pub fn node_info_at(&self, index: usize) -> Result<MastNodeInfo, DeserializationError> {
+        if index >= self.node_count {
+            return Err(DeserializationError::InvalidValue(format!(
+                "node index {} out of bounds for {} nodes",
+                index, self.node_count
+            )));
+        }
+
+        let offset = self.node_info_offset + index * self.node_info_size;
+        let mut reader = SliceReader::new(&self.bytes[offset..offset + self.node_info_size]);
+        MastNodeInfo::read_from(&mut reader)
+    }
+}
+
+fn read_u8_at(bytes: &[u8], offset: &mut usize) -> Result<u8, DeserializationError> {
+    read_slice_at(bytes, offset, 1).map(|slice| slice[0])
+}
+
+fn read_array_at<const N: usize>(
+    bytes: &[u8],
+    offset: &mut usize,
+) -> Result<[u8; N], DeserializationError> {
+    let slice = read_slice_at(bytes, offset, N)?;
+    let mut result = [0u8; N];
+    result.copy_from_slice(slice);
+    Ok(result)
+}
+
+fn read_slice_at<'a>(
+    bytes: &'a [u8],
+    offset: &mut usize,
+    len: usize,
+) -> Result<&'a [u8], DeserializationError> {
+    if *offset + len > bytes.len() {
+        return Err(DeserializationError::UnexpectedEOF);
+    }
+    let slice = &bytes[*offset..*offset + len];
+    *offset += len;
+    Ok(slice)
+}
+
+fn read_usize_at(bytes: &[u8], offset: &mut usize) -> Result<usize, DeserializationError> {
+    if *offset >= bytes.len() {
+        return Err(DeserializationError::UnexpectedEOF);
+    }
+    let first_byte = bytes[*offset];
+    let length = first_byte.trailing_zeros() as usize + 1;
+
+    let result = if length == 9 {
+        let _marker = read_u8_at(bytes, offset)?;
+        let value = read_array_at::<8>(bytes, offset)?;
+        u64::from_le_bytes(value)
+    } else {
+        let mut encoded = [0u8; 8];
+        let value = read_slice_at(bytes, offset, length)?;
+        encoded[..length].copy_from_slice(value);
+        u64::from_le_bytes(encoded) >> length
+    };
+
+    if result > usize::MAX as u64 {
+        return Err(DeserializationError::InvalidValue(format!(
+            "Encoded value must be less than {}, but {} was provided",
+            usize::MAX,
+            result
+        )));
+    }
+
+    Ok(result as usize)
 }
 
 impl Deserializable for MastForest {
