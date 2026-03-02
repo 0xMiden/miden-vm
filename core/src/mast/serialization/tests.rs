@@ -1123,6 +1123,45 @@ fn test_untrusted_read_with_flags() {
     assert_eq!(hashless_untrusted.validate().unwrap().num_nodes(), forest.num_nodes());
 }
 
+/// Test that budgeted flag-returning APIs expose the correct header flags.
+#[test]
+fn test_untrusted_read_with_budget_and_flags() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let full_bytes = forest.to_bytes();
+    let (full_untrusted, full_flags) =
+        UntrustedMastForest::read_from_bytes_with_budget_and_flags(&full_bytes, full_bytes.len())
+            .unwrap();
+    assert_eq!(full_flags, 0x00);
+    assert_eq!(full_untrusted.validate().unwrap().num_nodes(), forest.num_nodes());
+
+    let mut stripped_bytes = Vec::new();
+    forest.write_stripped(&mut stripped_bytes);
+    let (stripped_untrusted, stripped_flags) =
+        UntrustedMastForest::read_from_bytes_with_budget_and_flags(
+            &stripped_bytes,
+            stripped_bytes.len(),
+        )
+        .unwrap();
+    assert_eq!(stripped_flags, 0x01);
+    assert_eq!(stripped_untrusted.validate().unwrap().num_nodes(), forest.num_nodes());
+
+    let mut hashless_bytes = Vec::new();
+    forest.write_hashless(&mut hashless_bytes);
+    let (hashless_untrusted, hashless_flags) =
+        UntrustedMastForest::read_from_bytes_with_budget_and_flags(
+            &hashless_bytes,
+            hashless_bytes.len(),
+        )
+        .unwrap();
+    assert_eq!(hashless_flags, 0x03);
+    assert_eq!(hashless_untrusted.validate().unwrap().num_nodes(), forest.num_nodes());
+}
+
 mod proptests {
     use proptest::{prelude::*, strategy::Just};
 
