@@ -28,15 +28,12 @@ where
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
-    state
-        .tracer
-        .start_clock_cycle(
-            state.processor,
-            Continuation::StartNode(node_id),
-            state.continuation_stack,
-            current_forest,
-        )
-        .map_break(BreakReason::Err)?;
+    state.tracer.start_clock_cycle(
+        state.processor,
+        Continuation::StartNode(node_id),
+        state.continuation_stack,
+        current_forest,
+    );
 
     // Execute decorators that should be executed before entering the node
     state
@@ -86,15 +83,12 @@ where
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
-    state
-        .tracer
-        .start_clock_cycle(
-            state.processor,
-            Continuation::FinishSplit(node_id),
-            state.continuation_stack,
-            current_forest,
-        )
-        .map_break(BreakReason::Err)?;
+    state.tracer.start_clock_cycle(
+        state.processor,
+        Continuation::FinishSplit(node_id),
+        state.continuation_stack,
+        current_forest,
+    );
 
     // Finalize the clock cycle corresponding to the END operation.
     finalize_clock_cycle_with_continuation(

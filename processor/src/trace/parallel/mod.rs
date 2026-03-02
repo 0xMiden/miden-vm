@@ -194,10 +194,7 @@ fn generate_core_trace_columns(
     let mut fragments = create_fragments_from_trace_columns(&mut core_trace_columns, fragment_size);
 
     // Build the core trace fragments in parallel
-    let fragment_results: Result<
-        Vec<([Felt; STACK_TRACE_WIDTH], [Felt; SYS_TRACE_WIDTH], usize)>,
-        ExecutionError,
-    > = core_trace_contexts
+    let fragment_results: Result<Vec<_>, ExecutionError> = core_trace_contexts
         .into_par_iter()
         .zip(fragments.par_iter_mut())
         .map(|(trace_state, fragment)| {
@@ -211,7 +208,7 @@ fn generate_core_trace_columns(
                 &mut tracer,
             )?;
 
-            Ok(tracer.into_parts())
+            tracer.into_final_state()
         })
         .collect();
     let fragment_results = fragment_results?;
@@ -221,10 +218,10 @@ fn generate_core_trace_columns(
     let mut system_rows = Vec::new();
     let mut total_core_trace_rows = 0;
 
-    for (stack_row, system_row, num_rows_written) in fragment_results {
-        stack_rows.push(stack_row);
-        system_rows.push(system_row);
-        total_core_trace_rows += num_rows_written;
+    for final_state in fragment_results {
+        stack_rows.push(final_state.last_stack_row);
+        system_rows.push(final_state.last_system_row);
+        total_core_trace_rows += final_state.num_rows_written;
     }
 
     // Fix up stack and system rows

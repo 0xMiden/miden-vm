@@ -1,5 +1,4 @@
 use alloc::sync::Arc;
-use core::ops::ControlFlow;
 
 use miden_air::trace::{RowIndex, chiplets::hasher::STATE_WIDTH, decoder::NUM_USER_OP_HELPERS};
 use miden_core::{
@@ -10,7 +9,7 @@ use miden_core::{
 };
 
 use crate::{
-    ContextId, ExecutionError,
+    ContextId,
     continuation_stack::{Continuation, ContinuationStack},
     trace::{chiplets::CircuitEvaluation, utils::split_u32_into_u16},
 };
@@ -86,7 +85,7 @@ pub trait Tracer {
         continuation: Continuation,
         continuation_stack: &ContinuationStack,
         current_forest: &Arc<MastForest>,
-    ) -> ControlFlow<ExecutionError>;
+    );
 
     /// Signals the end of a clock cycle, guaranteed to be called before incrementing the system
     /// clock, and after all mutations to the processor state have been applied.
@@ -101,7 +100,7 @@ pub trait Tracer {
         processor: &Self::Processor,
         op_helper_registers: OperationHelperRegisters,
         current_forest: &Arc<MastForest>,
-    ) -> ControlFlow<ExecutionError>;
+    );
 
     // MAST FOREST RESOLUTION
     // --------------------------------------------------------------------------------------------

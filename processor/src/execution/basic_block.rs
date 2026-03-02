@@ -31,15 +31,12 @@ where
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
-    state
-        .tracer
-        .start_clock_cycle(
-            state.processor,
-            Continuation::StartNode(node_id),
-            state.continuation_stack,
-            current_forest,
-        )
-        .map_break(|err| InternalBreakReason::from(BreakReason::Err(err)))?;
+    state.tracer.start_clock_cycle(
+        state.processor,
+        Continuation::StartNode(node_id),
+        state.continuation_stack,
+        current_forest,
+    );
 
     // Execute decorators that should be executed before entering the node
     state
@@ -145,15 +142,12 @@ where
     {
         {
             // Start clock cycle corresponding to the RESPAN operation before the batch.
-            state
-                .tracer
-                .start_clock_cycle(
-                    state.processor,
-                    Continuation::Respan { node_id, batch_index },
-                    state.continuation_stack,
-                    current_forest,
-                )
-                .map_break(|err| InternalBreakReason::from(BreakReason::Err(err)))?;
+            state.tracer.start_clock_cycle(
+                state.processor,
+                Continuation::Respan { node_id, batch_index },
+                state.continuation_stack,
+                current_forest,
+            );
 
             // Finalize the clock cycle corresponding to the RESPAN operation.
             //
@@ -208,15 +202,12 @@ where
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
-    state
-        .tracer
-        .start_clock_cycle(
-            state.processor,
-            Continuation::FinishBasicBlock(node_id),
-            state.continuation_stack,
-            current_forest,
-        )
-        .map_break(BreakReason::Err)?;
+    state.tracer.start_clock_cycle(
+        state.processor,
+        Continuation::FinishBasicBlock(node_id),
+        state.continuation_stack,
+        current_forest,
+    );
 
     // Finalize the clock cycle corresponding to the END operation.
     finalize_clock_cycle_with_continuation(
@@ -269,15 +260,12 @@ where
     for (op_idx_in_batch, op) in batch.ops().iter().enumerate().skip(start_op_idx) {
         let op_idx_in_block = batch_offset_in_block + op_idx_in_batch;
 
-        state
-            .tracer
-            .start_clock_cycle(
-                state.processor,
-                Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch },
-                state.continuation_stack,
-                current_forest,
-            )
-            .map_break(|err| InternalBreakReason::from(BreakReason::Err(err)))?;
+        state.tracer.start_clock_cycle(
+            state.processor,
+            Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch },
+            state.continuation_stack,
+            current_forest,
+        );
 
         state
             .processor

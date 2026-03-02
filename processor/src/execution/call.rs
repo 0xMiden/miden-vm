@@ -33,15 +33,12 @@ where
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
-    state
-        .tracer
-        .start_clock_cycle(
-            state.processor,
-            Continuation::StartNode(current_node_id),
-            state.continuation_stack,
-            current_forest,
-        )
-        .map_break(BreakReason::Err)?;
+    state.tracer.start_clock_cycle(
+        state.processor,
+        Continuation::StartNode(current_node_id),
+        state.continuation_stack,
+        current_forest,
+    );
 
     // Execute decorators that should be executed before entering the node
     state
@@ -111,15 +108,12 @@ where
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
-    state
-        .tracer
-        .start_clock_cycle(
-            state.processor,
-            Continuation::FinishCall(node_id),
-            state.continuation_stack,
-            current_forest,
-        )
-        .map_break(BreakReason::Err)?;
+    state.tracer.start_clock_cycle(
+        state.processor,
+        Continuation::FinishCall(node_id),
+        state.continuation_stack,
+        current_forest,
+    );
 
     // When returning from a call or a syscall, restore the context of the system registers and the
     // operand stack to what it was prior to the call.

@@ -1,5 +1,4 @@
 use alloc::sync::Arc;
-use core::ops::ControlFlow;
 
 use miden_air::trace::{STACK_TRACE_WIDTH, SYS_TRACE_WIDTH};
 use miden_core::program::MIN_STACK_DEPTH;
@@ -24,6 +23,20 @@ use crate::{
 
 mod trace_row;
 
+// TRACER FINAL STATE
+// ================================================================================================
+
+/// The final state of a [`CoreTraceGenerationTracer`] after trace generation completes.
+///
+/// Contains the last stack and system trace rows (or zeros if none were written), which are needed
+/// to initialize the first row of the next fragment, as well as the number of trace rows that were
+/// built.
+pub(crate) struct TracerFinalState {
+    pub last_stack_row: [Felt; STACK_TRACE_WIDTH],
+    pub last_system_row: [Felt; SYS_TRACE_WIDTH],
+    pub num_rows_written: usize,
+}
+
 // CORE TRACE GENERATION TRACER
 // ================================================================================================
 
@@ -32,6 +45,11 @@ mod trace_row;
 /// This tracer is used in conjunction with the [`ReplayProcessor`] to fill in trace rows for a
 /// fragment of the execution. Trace rows are written in [`Tracer::finalize_clock_cycle`] after
 /// collecting the necessary state in [`Tracer::start_clock_cycle`].
+///
+/// The tracer handles errors internally; if an error is encountered during execution, it is stored
+/// and all subsequent calls to these methods become no-ops. The error is returned by
+/// `into_final_state()`, which should be called after trace generation completes to retrieve the
+/// final state of the tracer (or the error, if one was encountered).
 #[derive(Debug)]
 pub(crate) struct CoreTraceGenerationTracer<'a> {
     /// The trace fragment being populated with rows by this tracer.
@@ -72,6 +90,11 @@ pub(crate) struct CoreTraceGenerationTracer<'a> {
     /// [`start_clock_cycle`](Tracer::start_clock_cycle)), describing what is being executed at
     /// this cycle.
     continuation: Option<Continuation>,
+
+    /// If an error is encountered during trace generation, it is stored here. Once set, all
+    /// subsequent `start_clock_cycle` and `finalize_clock_cycle` calls become no-ops, and the
+    /// error is returned by [`into_parts`](Self::into_parts).
+    error_encountered: Option<ExecutionError>,
 }
 
 impl<'a> CoreTraceGenerationTracer<'a> {
@@ -93,23 +116,22 @@ impl<'a> CoreTraceGenerationTracer<'a> {
             finish_loop_condition: None,
             dyn_callee_hash: None,
             continuation: None,
+            error_encountered: None,
         }
     }
 
-    /// Consumes this tracer and returns its final state.
-    ///
-    /// Returns a tuple containing:
-    /// - The final stack trace row (or zeros if none was written).
-    /// - The final system trace row (or zeros if none was written).
-    /// - The number of trace rows that were built.
-    pub fn into_parts(self) -> ([Felt; STACK_TRACE_WIDTH], [Felt; SYS_TRACE_WIDTH], usize) {
-        let num_rows_built = self.row_write_index;
+    /// Consumes this tracer and returns its final state, or an error if one was encountered
+    /// during trace generation.
+    pub fn into_final_state(self) -> Result<TracerFinalState, ExecutionError> {
+        if let Some(err) = self.error_encountered {
+            return Err(err);
+        }
 
-        (
-            self.stack_rows.unwrap_or([ZERO; STACK_TRACE_WIDTH]),
-            self.system_rows.unwrap_or([ZERO; SYS_TRACE_WIDTH]),
-            num_rows_built,
-        )
+        Ok(TracerFinalState {
+            last_stack_row: self.stack_rows.unwrap_or([ZERO; STACK_TRACE_WIDTH]),
+            last_system_row: self.system_rows.unwrap_or([ZERO; SYS_TRACE_WIDTH]),
+            num_rows_written: self.row_write_index,
+        })
     }
 
     // HELPER METHODS
@@ -309,28 +331,29 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
         continuation: Continuation,
         _continuation_stack: &ContinuationStack,
         current_forest: &Arc<MastForest>,
-    ) -> ControlFlow<ExecutionError> {
-        // If this is a DYNCALL node, store execution context info needed when writing the trace
-        // row in finalize_clock_cycle.
-        self.ctx_info = match self.get_execution_context_for_dyncall(
-            current_forest,
-            &continuation,
-            processor,
-        ) {
-            Ok(v) => v,
-            Err(e) => return ControlFlow::Break(e),
-        };
-        self.finish_loop_condition = self.get_finish_loop_condition(&continuation, processor);
-        self.dyn_callee_hash =
-            match self.get_dyn_callee_hash(&continuation, processor, current_forest) {
-                Ok(v) => v,
-                Err(e) => return ControlFlow::Break(e),
-            };
+    ) {
+        if self.error_encountered.is_some() {
+            return;
+        }
 
-        // Store state for finalizing the clock cycle later.
-        self.continuation = Some(continuation);
+        let result = (|| -> Result<(), ExecutionError> {
+            // If this is a DYNCALL node, store execution context info needed when writing the trace
+            // row in finalize_clock_cycle.
+            self.ctx_info =
+                self.get_execution_context_for_dyncall(current_forest, &continuation, processor)?;
+            self.finish_loop_condition = self.get_finish_loop_condition(&continuation, processor);
+            self.dyn_callee_hash =
+                self.get_dyn_callee_hash(&continuation, processor, current_forest)?;
 
-        ControlFlow::Continue(())
+            // Store state for finalizing the clock cycle later.
+            self.continuation = Some(continuation);
+
+            Ok(())
+        })();
+
+        if let Err(e) = result {
+            self.error_encountered = Some(e);
+        }
     }
 
     fn finalize_clock_cycle(
@@ -338,7 +361,11 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
         processor: &ReplayProcessor,
         op_helper_registers: OperationHelperRegisters,
         current_forest: &Arc<MastForest>,
-    ) -> ControlFlow<ExecutionError> {
+    ) {
+        if self.error_encountered.is_some() {
+            return;
+        }
+
         use Continuation::*;
 
         let result = (|| -> Result<(), ExecutionError> {
@@ -494,9 +521,8 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
             Ok(())
         })();
 
-        match result {
-            Ok(()) => ControlFlow::Continue(()),
-            Err(e) => ControlFlow::Break(e),
+        if let Err(e) = result {
+            self.error_encountered = Some(e);
         }
     }
 }

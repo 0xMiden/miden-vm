@@ -440,9 +440,7 @@ where
     T: Tracer<Processor = P>,
 {
     // Signal the end of clock cycle to tracer (before incrementing processor clock).
-    tracer
-        .finalize_clock_cycle(processor, op_helper_registers, current_forest)
-        .map_break(BreakReason::Err)?;
+    tracer.finalize_clock_cycle(processor, op_helper_registers, current_forest);
 
     // Increment the processor clock.
     processor.system_mut().increment_clock();
