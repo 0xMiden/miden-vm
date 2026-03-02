@@ -145,10 +145,10 @@ mod tests {
 
     use miden_core::Felt;
     use p3_air::{AirBuilder, BaseAir, BaseAirWithPublicValues};
-    use p3_field::ExtensionField;
+    use p3_field::{ExtensionField, Field};
     use p3_matrix::{Matrix, dense::RowMajorMatrix};
     use p3_miden_lifted_air::{
-        AirWithPeriodicColumns, EmptyAuxBuilder, LiftedAir, LiftedAirBuilder,
+        AirWithPeriodicColumns, AuxBuilder, LiftedAir, LiftedAirBuilder,
     };
 
     /// Trivial AIR: single column, constrain next == local (constant trace).
@@ -166,12 +166,39 @@ mod tests {
         }
     }
     impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ConstantAir {
+        fn num_randomness(&self) -> usize {
+            1
+        }
+
+        fn aux_width(&self) -> usize {
+            1
+        }
+
+        fn num_aux_values(&self) -> usize {
+            0
+        }
+
         fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
             let main = builder.main();
             let local = main.row_slice(0).unwrap();
             let next = main.row_slice(1).unwrap();
             let diff: AB::Expr = next[0].clone().into() - local[0].clone().into();
             builder.when_transition().assert_zero(diff);
+        }
+    }
+
+    /// Dummy aux builder producing a 1-column all-zero auxiliary trace.
+    struct DummyAuxBuilder;
+
+    impl<F: Field, EF: ExtensionField<F>> AuxBuilder<F, EF> for DummyAuxBuilder {
+        fn build_aux_trace(
+            &self,
+            main: &RowMajorMatrix<F>,
+            _challenges: &[EF],
+        ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+            let height = main.height();
+            let aux_trace = RowMajorMatrix::new(EF::zero_vec(height), 1);
+            (aux_trace, vec![])
         }
     }
 
@@ -186,7 +213,7 @@ mod tests {
         let trace = constant_trace();
         let air = ConstantAir;
         let pv: Vec<Felt> = vec![];
-        let aux = EmptyAuxBuilder;
+        let aux = DummyAuxBuilder;
 
         let config = super::create_poseidon2_config();
         let proof = super::prove(&config, &air, &trace, &pv, &[], &aux).expect("prove");
@@ -200,7 +227,7 @@ mod tests {
         let trace = constant_trace();
         let air = ConstantAir;
         let pv: Vec<Felt> = vec![];
-        let aux = EmptyAuxBuilder;
+        let aux = DummyAuxBuilder;
 
         let config = super::create_blake3_256_config();
         let proof = super::prove(&config, &air, &trace, &pv, &[], &aux).expect("prove");
@@ -214,7 +241,7 @@ mod tests {
         let trace = constant_trace();
         let air = ConstantAir;
         let pv: Vec<Felt> = vec![];
-        let aux = EmptyAuxBuilder;
+        let aux = DummyAuxBuilder;
 
         let config = super::create_keccak_config();
         let proof = super::prove(&config, &air, &trace, &pv, &[], &aux).expect("prove");
@@ -252,7 +279,7 @@ mod tests {
         let trace = constant_trace();
         let air = ConstantAir;
         let pv: Vec<Felt> = vec![];
-        let aux = EmptyAuxBuilder;
+        let aux = DummyAuxBuilder;
 
         let proof = super::prove(&config, &air, &trace, &pv, &[], &aux).expect("prove");
 
