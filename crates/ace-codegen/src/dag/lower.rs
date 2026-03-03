@@ -1,8 +1,8 @@
 use std::{collections::HashMap, hash::Hash};
 
+use crate::symbolic::{Entry, SymExpr, SymVar};
 use p3_dft::{Radix2DitParallel, TwoAdicSubgroupDft};
 use p3_field::{BasedVectorSpace, PrimeCharacteristicRing, TwoAdicField};
-use p3_miden_uni_stark::{Entry, SymbolicExpression, SymbolicVariable};
 
 use super::{
     builder::DagBuilder,
@@ -15,7 +15,7 @@ use crate::{
 
 /// Lower a symbolic expression into DAG nodes using the provided layout.
 pub fn lower_expr<F, EF>(
-    expr: &SymbolicExpression<EF>,
+    expr: &SymExpr<EF>,
     builder: &mut DagBuilder<EF>,
     layout: &crate::layout::InputLayout,
     periodic_nodes: &[NodeId],
@@ -25,7 +25,7 @@ where
     EF: PrimeCharacteristicRing + BasedVectorSpace<F> + Copy + Eq + Hash,
 {
     match expr {
-        SymbolicExpression::Variable(v) => match v.entry {
+        SymExpr::Variable(v) => match v.entry {
             Entry::Challenge => {
                 let plan = RandomnessPlan::from_layout(layout)?;
                 plan.lower_challenge(builder, v.index)
@@ -51,42 +51,42 @@ where
             },
             _ => Ok(builder.input(input_key_for_symbolic(v)?)),
         },
-        SymbolicExpression::IsFirstRow => {
+        SymExpr::IsFirstRow => {
             let z_pow_n = builder.input(InputKey::ZPowN);
             let one = builder.constant(EF::ONE);
             let numerator = builder.sub(z_pow_n, one);
             let inv = builder.input(InputKey::InvZMinusOne);
             Ok(builder.mul(numerator, inv))
         },
-        SymbolicExpression::IsLastRow => {
+        SymExpr::IsLastRow => {
             let z_pow_n = builder.input(InputKey::ZPowN);
             let one = builder.constant(EF::ONE);
             let numerator = builder.sub(z_pow_n, one);
             let inv = builder.input(InputKey::InvZMinusGInv);
             Ok(builder.mul(numerator, inv))
         },
-        SymbolicExpression::IsTransition => {
+        SymExpr::IsTransition => {
             let z = builder.input(InputKey::Z);
             let g_inv = builder.input(InputKey::GInv);
             Ok(builder.sub(z, g_inv))
         },
-        SymbolicExpression::Constant(c) => Ok(builder.constant(*c)),
-        SymbolicExpression::Add { x, y, .. } => {
+        SymExpr::Constant(c) => Ok(builder.constant(*c)),
+        SymExpr::Add(x, y) => {
             let lx = lower_expr::<F, EF>(x, builder, layout, periodic_nodes)?;
             let ly = lower_expr::<F, EF>(y, builder, layout, periodic_nodes)?;
             Ok(builder.add(lx, ly))
         },
-        SymbolicExpression::Sub { x, y, .. } => {
+        SymExpr::Sub(x, y) => {
             let lx = lower_expr::<F, EF>(x, builder, layout, periodic_nodes)?;
             let ly = lower_expr::<F, EF>(y, builder, layout, periodic_nodes)?;
             Ok(builder.sub(lx, ly))
         },
-        SymbolicExpression::Mul { x, y, .. } => {
+        SymExpr::Mul(x, y) => {
             let lx = lower_expr::<F, EF>(x, builder, layout, periodic_nodes)?;
             let ly = lower_expr::<F, EF>(y, builder, layout, periodic_nodes)?;
             Ok(builder.mul(lx, ly))
         },
-        SymbolicExpression::Neg { x, .. } => {
+        SymExpr::Neg(x) => {
             let lx = lower_expr::<F, EF>(x, builder, layout, periodic_nodes)?;
             Ok(builder.neg(lx))
         },
@@ -99,7 +99,7 @@ where
 /// polynomial, recomposes the quotient, and subtracts both sides to yield the
 /// root expression evaluated by the ACE circuit.
 pub fn build_verifier_dag<F, EF>(
-    constraints: &[SymbolicExpression<EF>],
+    constraints: &[SymExpr<EF>],
     layout: &crate::layout::InputLayout,
     periodic: Option<&PeriodicColumnData<EF>>,
 ) -> Result<AceDag<EF>, AceError>
@@ -248,7 +248,7 @@ where
     acc
 }
 
-fn input_key_for_symbolic<F>(var: &SymbolicVariable<F>) -> Result<InputKey, AceError> {
+fn input_key_for_symbolic<EF>(var: &SymVar<EF>) -> Result<InputKey, AceError> {
     let index = var.index;
     let key = match var.entry {
         Entry::Preprocessed { .. } => {

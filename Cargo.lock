@@ -1246,7 +1246,6 @@ dependencies = [
  "p3-dft",
  "p3-field",
  "p3-miden-air",
- "p3-miden-uni-stark",
  "thiserror",
 ]
 

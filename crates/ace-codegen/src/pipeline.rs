@@ -7,11 +7,8 @@
 
 use core::hash::Hash;
 
-use p3_field::{
-    Algebra, BasedVectorSpace, ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField,
-};
+use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
 use p3_miden_air::MidenAir;
-use p3_miden_uni_stark::SymbolicExpression;
 
 use crate::{
     AceError,
@@ -66,7 +63,6 @@ where
     A: MidenAir<F, EF>,
     F: TwoAdicField + Ord,
     EF: ExtensionField<F> + BasedVectorSpace<F> + PrimeCharacteristicRing + Copy + Eq + Hash,
-    SymbolicExpression<EF>: Algebra<SymbolicExpression<F>> + From<SymbolicExpression<F>>,
 {
     let artifacts = build_ace_dag_for_air::<A, F, EF>(air, config)?;
     emit_circuit(&artifacts.dag, artifacts.layout)
@@ -103,7 +99,6 @@ where
     A: MidenAir<F, EF>,
     F: TwoAdicField + Ord,
     EF: ExtensionField<F> + BasedVectorSpace<F> + PrimeCharacteristicRing + Copy + Eq + Hash,
-    SymbolicExpression<EF>: Algebra<SymbolicExpression<F>> + From<SymbolicExpression<F>>,
 {
     let periodic_table = air.periodic_table();
     let counts = input_counts_for_air::<A, F, EF>(air, config, periodic_table.len())?;
