@@ -1,8 +1,15 @@
 use miden_air::trace::RowIndex;
-use miden_core::{Word, ZERO, field::ExtensionField, operations::opcodes};
+use miden_core::{
+    Word, ZERO,
+    field::ExtensionField,
+    operations::{
+        OPCODE_CALL, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END, OPCODE_HALT, OPCODE_JOIN, OPCODE_LOOP,
+        OPCODE_REPEAT, OPCODE_SPLIT, OPCODE_SYSCALL,
+    },
+};
 
 use super::{AuxColumnBuilder, Felt, MainTrace, ONE};
-use crate::debug::BusDebugger;
+use crate::{debug::BusDebugger, trace::utils::AuxChallenges};
 
 // BLOCK HASH TABLE COLUMN BUILDER
 // ================================================================================================
@@ -25,24 +32,24 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BlockHashTableColumnBuilde
     fn init_responses(
         &self,
         main_trace: &MainTrace,
-        alphas: &[E],
+        challenges: &AuxChallenges<E>,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
-        BlockHashTableRow::table_init(main_trace).collapse(alphas)
+        BlockHashTableRow::table_init(main_trace).collapse(challenges)
     }
 
     /// Removes a row from the block hash table.
     fn get_requests_at(
         &self,
         main_trace: &MainTrace,
-        alphas: &[E],
+        challenges: &AuxChallenges<E>,
         row: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         let op_code = main_trace.get_op_code(row).as_canonical_u64() as u8;
 
         match op_code {
-            opcodes::END => BlockHashTableRow::from_end(main_trace, row).collapse(alphas),
+            OPCODE_END => BlockHashTableRow::from_end(main_trace, row).collapse(challenges),
             _ => E::ONE,
         }
     }
@@ -51,27 +58,27 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BlockHashTableColumnBuilde
     fn get_responses_at(
         &self,
         main_trace: &MainTrace,
-        alphas: &[E],
+        challenges: &AuxChallenges<E>,
         row: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         let op_code = main_trace.get_op_code(row).as_canonical_u64() as u8;
 
         match op_code {
-            opcodes::JOIN => {
+            OPCODE_JOIN => {
                 let left_child_row = BlockHashTableRow::from_join(main_trace, row, true);
                 let right_child_row = BlockHashTableRow::from_join(main_trace, row, false);
 
-                // Note: this adds the 2 rows separately to the block hash table.
-                left_child_row.collapse(alphas) * right_child_row.collapse(alphas)
+                left_child_row.collapse(challenges) * right_child_row.collapse(challenges)
             },
-            opcodes::SPLIT => BlockHashTableRow::from_split(main_trace, row).collapse(alphas),
-            opcodes::LOOP => BlockHashTableRow::from_loop(main_trace, row)
-                .map(|row| row.collapse(alphas))
+            OPCODE_SPLIT => BlockHashTableRow::from_split(main_trace, row).collapse(challenges),
+            OPCODE_LOOP => BlockHashTableRow::from_loop(main_trace, row)
+                .map(|row| row.collapse(challenges))
                 .unwrap_or(E::ONE),
-            opcodes::REPEAT => BlockHashTableRow::from_repeat(main_trace, row).collapse(alphas),
-            opcodes::DYN | opcodes::DYNCALL | opcodes::CALL | opcodes::SYSCALL => {
-                BlockHashTableRow::from_dyn_dyncall_call_syscall(main_trace, row).collapse(alphas)
+            OPCODE_REPEAT => BlockHashTableRow::from_repeat(main_trace, row).collapse(challenges),
+            OPCODE_DYN | OPCODE_DYNCALL | OPCODE_CALL | OPCODE_SYSCALL => {
+                BlockHashTableRow::from_dyn_dyncall_call_syscall(main_trace, row)
+                    .collapse(challenges)
             },
             _ => E::ONE,
         }
@@ -131,9 +138,9 @@ impl BlockHashTableRow {
         //   "second child"
         // - HALT: The end of the program, which a first child can't find itself in (since the
         //   second child needs to execute first)
-        let is_first_child = op_code_next != opcodes::END
-            && op_code_next != opcodes::REPEAT
-            && op_code_next != opcodes::HALT;
+        let is_first_child = op_code_next != OPCODE_END
+            && op_code_next != OPCODE_REPEAT
+            && op_code_next != OPCODE_HALT;
 
         let is_loop_body = match main_trace.is_loop_body_flag(row).as_canonical_u64() {
             0 => false,
@@ -245,17 +252,18 @@ impl BlockHashTableRow {
     /// Collapses this row to a single field element in the field specified by E by taking a random
     /// linear combination of all the columns. This requires 8 alpha values, which are assumed to
     /// have been drawn randomly.
-    pub fn collapse<E: ExtensionField<Felt>>(&self, alphas: &[E]) -> E {
+    pub fn collapse<E: ExtensionField<Felt>>(&self, challenges: &AuxChallenges<E>) -> E {
         let is_first_child = if self.is_first_child { ONE } else { ZERO };
         let is_loop_body = if self.is_loop_body { ONE } else { ZERO };
-        alphas[0]
-            + alphas[1] * self.parent_block_id
-            + alphas[2] * self.child_block_hash[0]
-            + alphas[3] * self.child_block_hash[1]
-            + alphas[4] * self.child_block_hash[2]
-            + alphas[5] * self.child_block_hash[3]
-            + alphas[6] * is_first_child
-            + alphas[7] * is_loop_body
+        challenges.encode([
+            self.parent_block_id,
+            self.child_block_hash[0],
+            self.child_block_hash[1],
+            self.child_block_hash[2],
+            self.child_block_hash[3],
+            is_first_child,
+            is_loop_body,
+        ])
     }
 
     // TEST

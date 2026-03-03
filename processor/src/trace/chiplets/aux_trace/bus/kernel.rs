@@ -8,7 +8,7 @@ use miden_core::{Felt, Word, field::ExtensionField};
 
 use crate::{
     debug::{BusDebugger, BusMessage},
-    trace::chiplets::aux_trace::build_value,
+    trace::utils::AuxChallenges,
 };
 
 // REQUESTS
@@ -17,7 +17,7 @@ use crate::{
 /// Builds the requests for each unique kernel procedure digest, to be provided via public inputs.
 pub(super) fn build_kernel_init_requests<E>(
     proc_hashes: &[Word],
-    alphas: &[E],
+    challenges: &AuxChallenges<E>,
     _debugger: &mut BusDebugger<E>,
 ) -> E
 where
@@ -30,10 +30,10 @@ where
     for proc_hash in proc_hashes {
         let message = KernelRomInitMessage { kernel_proc_digest: proc_hash.into() };
 
-        requests *= message.value(alphas);
+        requests *= message.value(challenges);
 
         #[cfg(any(test, feature = "bus-debugger"))]
-        _debugger.add_request(alloc::boxed::Box::new(message), alphas);
+        _debugger.add_request(alloc::boxed::Box::new(message), challenges);
     }
     requests
 }
@@ -56,7 +56,7 @@ where
 pub(super) fn build_kernel_chiplet_responses<E>(
     main_trace: &MainTrace,
     row: RowIndex,
-    alphas: &[E],
+    challenges: &AuxChallenges<E>,
     _debugger: &mut BusDebugger<E>,
 ) -> E
 where
@@ -75,10 +75,10 @@ where
         let message = KernelRomInitMessage {
             kernel_proc_digest: [root0, root1, root2, root3],
         };
-        let value = message.value(alphas);
+        let value = message.value(challenges);
 
         #[cfg(any(test, feature = "bus-debugger"))]
-        _debugger.add_response(alloc::boxed::Box::new(message), alphas);
+        _debugger.add_response(alloc::boxed::Box::new(message), challenges);
 
         value
     } else {
@@ -86,10 +86,10 @@ where
         let message = KernelRomMessage {
             kernel_proc_digest: [root0, root1, root2, root3],
         };
-        let value = message.value(alphas);
+        let value = message.value(challenges);
 
         #[cfg(any(test, feature = "bus-debugger"))]
-        _debugger.add_response(alloc::boxed::Box::new(message), alphas);
+        _debugger.add_response(alloc::boxed::Box::new(message), challenges);
         value
     }
 }
@@ -108,18 +108,14 @@ where
     E: ExtensionField<Felt>,
 {
     #[inline(always)]
-    fn value(&self, alphas: &[E]) -> E {
-        alphas[0]
-            + build_value(
-                &alphas[1..6],
-                [
-                    KERNEL_PROC_CALL_LABEL,
-                    self.kernel_proc_digest[0],
-                    self.kernel_proc_digest[1],
-                    self.kernel_proc_digest[2],
-                    self.kernel_proc_digest[3],
-                ],
-            )
+    fn value(&self, challenges: &AuxChallenges<E>) -> E {
+        challenges.encode([
+            KERNEL_PROC_CALL_LABEL,
+            self.kernel_proc_digest[0],
+            self.kernel_proc_digest[1],
+            self.kernel_proc_digest[2],
+            self.kernel_proc_digest[3],
+        ])
     }
 
     fn source(&self) -> &str {
@@ -144,18 +140,14 @@ where
     E: ExtensionField<Felt>,
 {
     #[inline(always)]
-    fn value(&self, alphas: &[E]) -> E {
-        alphas[0]
-            + build_value(
-                &alphas[1..6],
-                [
-                    KERNEL_PROC_INIT_LABEL,
-                    self.kernel_proc_digest[0],
-                    self.kernel_proc_digest[1],
-                    self.kernel_proc_digest[2],
-                    self.kernel_proc_digest[3],
-                ],
-            )
+    fn value(&self, challenges: &AuxChallenges<E>) -> E {
+        challenges.encode([
+            KERNEL_PROC_INIT_LABEL,
+            self.kernel_proc_digest[0],
+            self.kernel_proc_digest[1],
+            self.kernel_proc_digest[2],
+            self.kernel_proc_digest[3],
+        ])
     }
 
     fn source(&self) -> &str {

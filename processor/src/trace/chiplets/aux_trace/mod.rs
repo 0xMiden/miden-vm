@@ -5,7 +5,7 @@ use miden_core::{field::ExtensionField, precompile::PrecompileTranscriptState, p
 use wiring_bus::WiringBusBuilder;
 
 use super::{Felt, ace::AceHints};
-use crate::trace::AuxColumnBuilder;
+use crate::trace::{AuxColumnBuilder, utils::AuxChallenges};
 
 mod bus;
 pub use bus::{
@@ -54,17 +54,17 @@ impl AuxTraceBuilder {
     ///    - a virtual table for the sibling table used by the hasher chiplet,
     ///    - a bus between the memory chiplet and the ACE chiplet.
     /// 3. A column used as a bus to wire the gates of the ACE chiplet.
-    pub fn build_aux_columns<E: ExtensionField<Felt>>(
+    pub(crate) fn build_aux_columns<E: ExtensionField<Felt>>(
         &self,
         main_trace: &MainTrace,
-        rand_elements: &[E],
+        challenges: &AuxChallenges<E>,
     ) -> [Vec<E>; 3] {
         let v_table_col_builder = ChipletsVTableColBuilder::new(self.final_transcript_state);
         let bus_col_builder = BusColumnBuilder::new(&self.kernel);
         let wiring_bus_builder = WiringBusBuilder::new(&self.ace_hints);
-        let t_chip = v_table_col_builder.build_aux_column(main_trace, rand_elements);
-        let b_chip = bus_col_builder.build_aux_column(main_trace, rand_elements);
-        let wiring_bus = wiring_bus_builder.build_aux_column(main_trace, rand_elements);
+        let t_chip = v_table_col_builder.build_aux_column(main_trace, challenges);
+        let b_chip = bus_col_builder.build_aux_column(main_trace, challenges);
+        let wiring_bus = wiring_bus_builder.build_aux_column(main_trace, challenges);
 
         // When debugging, check that all multi-set and logUp interactions are valid.
         let v_table_final_value = t_chip.last().copied().unwrap_or(E::ONE);
@@ -76,21 +76,4 @@ impl AuxTraceBuilder {
 
         [t_chip, b_chip, wiring_bus]
     }
-}
-
-// HELPER FUNCTIONS
-// ================================================================================================
-
-/// Runs an inner product between the alphas and the elements.
-#[inline(always)]
-fn build_value<E, const N: usize>(alphas: &[E], elements: [Felt; N]) -> E
-where
-    E: ExtensionField<Felt>,
-{
-    debug_assert_eq!(alphas.len(), elements.len());
-    let mut value = alphas[0] * elements[0];
-    for i in 1..N {
-        value += alphas[i] * elements[i];
-    }
-    value
 }

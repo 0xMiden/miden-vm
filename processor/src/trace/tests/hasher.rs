@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::{
-    AUX_TRACE_RAND_CHALLENGES, MAX_MESSAGE_WIDTH, MainTrace,
+    AUX_TRACE_RAND_CHALLENGES, MainTrace,
     chiplets::hasher::{HASH_CYCLE_LEN, P1_COL_IDX},
 };
 use miden_core::{
@@ -75,12 +75,13 @@ fn hasher_p1_mr_update(#[case] index: u64) {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
-    let coeffs = AuxChallenges::<Felt, MAX_MESSAGE_WIDTH>::new(&alphas);
-    let coeffs = coeffs.coeffs();
+    let challenges = AuxChallenges::<Felt>::new(&alphas);
     let row_values = [
-        SiblingTableRow::new(Felt::new(index), path[0]).to_value(&trace.main_trace, coeffs),
-        SiblingTableRow::new(Felt::new(index >> 1), path[1]).to_value(&trace.main_trace, coeffs),
-        SiblingTableRow::new(Felt::new(index >> 2), path[2]).to_value(&trace.main_trace, coeffs),
+        SiblingTableRow::new(Felt::new(index), path[0]).to_value(&trace.main_trace, &challenges),
+        SiblingTableRow::new(Felt::new(index >> 1), path[1])
+            .to_value(&trace.main_trace, &challenges),
+        SiblingTableRow::new(Felt::new(index >> 2), path[2])
+            .to_value(&trace.main_trace, &challenges),
     ];
 
     // Make sure the first entry is ONE.
@@ -193,26 +194,30 @@ impl SiblingTableRow {
 
     /// Reduces this row to a single field element in the field specified by E. This requires
     /// at least 12 coefficients.
-    pub fn to_value<E: ExtensionField<Felt>>(&self, _main_trace: &MainTrace, coeffs: &[E]) -> E {
+    pub fn to_value<E: ExtensionField<Felt>>(
+        &self,
+        _main_trace: &MainTrace,
+        challenges: &AuxChallenges<E>,
+    ) -> E {
         // when the least significant bit of the index is 0, the sibling will be in the 3rd word
         // of the hasher state, and when the least significant bit is 1, it will be in the 2nd
         // word. we compute the value in this way to make constraint evaluation a bit easier since
         // we need to compute the 2nd and the 3rd word values for other purposes as well.
         let lsb = self.index.as_canonical_u64() & 1;
         if lsb == 0 {
-            coeffs[0]
-                + coeffs[3] * self.index
-                + coeffs[8] * self.sibling[0]
-                + coeffs[9] * self.sibling[1]
-                + coeffs[10] * self.sibling[2]
-                + coeffs[11] * self.sibling[3]
+            challenges[0]
+                + challenges[3] * self.index
+                + challenges[8] * self.sibling[0]
+                + challenges[9] * self.sibling[1]
+                + challenges[10] * self.sibling[2]
+                + challenges[11] * self.sibling[3]
         } else {
-            coeffs[0]
-                + coeffs[3] * self.index
-                + coeffs[4] * self.sibling[0]
-                + coeffs[5] * self.sibling[1]
-                + coeffs[6] * self.sibling[2]
-                + coeffs[7] * self.sibling[3]
+            challenges[0]
+                + challenges[3] * self.index
+                + challenges[4] * self.sibling[0]
+                + challenges[5] * self.sibling[1]
+                + challenges[6] * self.sibling[2]
+                + challenges[7] * self.sibling[3]
         }
     }
 }

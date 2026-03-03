@@ -5,7 +5,7 @@ use miden_core::{Felt, ONE, field::ExtensionField};
 
 use crate::{
     debug::{BusDebugger, BusMessage},
-    trace::chiplets::aux_trace::build_value,
+    trace::utils::AuxChallenges,
 };
 
 // REQUESTS
@@ -14,7 +14,7 @@ use crate::{
 /// Builds requests made to the arithmetic circuit evaluation chiplet.
 pub fn build_ace_chiplet_requests<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    alphas: &[E],
+    challenges: &AuxChallenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -34,10 +34,10 @@ pub fn build_ace_chiplet_requests<E: ExtensionField<Felt>>(
         source: "ace request",
     };
 
-    let value = ace_request_message.value(alphas);
+    let value = ace_request_message.value(challenges);
 
     #[cfg(any(test, feature = "bus-debugger"))]
-    _debugger.add_request(alloc::boxed::Box::new(ace_request_message), alphas);
+    _debugger.add_request(alloc::boxed::Box::new(ace_request_message), challenges);
 
     value
 }
@@ -49,7 +49,7 @@ pub fn build_ace_chiplet_requests<E: ExtensionField<Felt>>(
 pub fn build_ace_chiplet_responses<E>(
     main_trace: &MainTrace,
     row: RowIndex,
-    alphas: &[E],
+    challenges: &AuxChallenges<E>,
     _debugger: &mut BusDebugger<E>,
 ) -> E
 where
@@ -73,10 +73,10 @@ where
             num_eval_rows,
             source: "ace response",
         };
-        let value = ace_message.value(alphas);
+        let value = ace_message.value(challenges);
 
         #[cfg(any(test, feature = "bus-debugger"))]
-        _debugger.add_response(alloc::boxed::Box::new(ace_message), alphas);
+        _debugger.add_response(alloc::boxed::Box::new(ace_message), challenges);
 
         value
     } else {
@@ -102,19 +102,15 @@ impl<E> BusMessage<E> for AceMessage
 where
     E: ExtensionField<Felt>,
 {
-    fn value(&self, alphas: &[E]) -> E {
-        alphas[0]
-            + build_value(
-                &alphas[1..7],
-                [
-                    self.op_label,
-                    self.clk,
-                    self.ctx,
-                    self.ptr,
-                    self.num_read_rows,
-                    self.num_eval_rows,
-                ],
-            )
+    fn value(&self, challenges: &AuxChallenges<E>) -> E {
+        challenges.encode([
+            self.op_label,
+            self.clk,
+            self.ctx,
+            self.ptr,
+            self.num_read_rows,
+            self.num_eval_rows,
+        ])
     }
 
     fn source(&self) -> &str {

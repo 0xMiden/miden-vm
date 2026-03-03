@@ -15,8 +15,7 @@ use miden_core::{WORD_SIZE, field::Field};
 
 use super::{
     AUX_TRACE_RAND_CHALLENGES, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, HASH_CYCLE_LEN,
-    LAST_CYCLE_ROW, MAX_MESSAGE_WIDTH, ONE, Operation, Word, ZERO, build_trace_from_ops,
-    rand_array,
+    LAST_CYCLE_ROW, ONE, Operation, Word, ZERO, build_trace_from_ops, rand_array,
 };
 use crate::trace::utils::AuxChallenges;
 
@@ -57,8 +56,7 @@ fn b_chip_trace_mem() {
     let rand_elements = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
     let aux_columns = trace.build_aux_trace(&rand_elements).unwrap();
     let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
-    let coeffs = AuxChallenges::<Felt, MAX_MESSAGE_WIDTH>::new(&rand_elements);
-    let coeffs = coeffs.coeffs();
+    let challenges = AuxChallenges::<Felt>::new(&rand_elements);
     assert_eq!(trace.length(), b_chip.len());
     assert_eq!(ONE, b_chip[0]);
 
@@ -68,8 +66,14 @@ fn b_chip_trace_mem() {
 
     // The first memory request from the stack is sent when the `MStoreW` operation is executed, at
     // cycle 1, so the request is included in the next row. (The trace begins by executing `span`).
-    let value =
-        build_expected_bus_word_msg(coeffs, MEMORY_WRITE_WORD_LABEL, ZERO, ZERO, ONE, word.into());
+    let value = build_expected_bus_word_msg(
+        &challenges,
+        MEMORY_WRITE_WORD_LABEL,
+        ZERO,
+        ZERO,
+        ONE,
+        word.into(),
+    );
     let mut expected = value.inverse();
     assert_eq!(expected, b_chip[2]);
 
@@ -81,7 +85,7 @@ fn b_chip_trace_mem() {
     // The next memory request from the stack is sent when `MLoad` is executed at cycle 6 and
     // included at row 7
     let value = build_expected_bus_element_msg(
-        coeffs,
+        &challenges,
         MEMORY_READ_ELEMENT_LABEL,
         ZERO,
         ZERO,
@@ -94,7 +98,7 @@ fn b_chip_trace_mem() {
     // Nothing changes until the next memory request from the stack: `MLoadW` executed at cycle 8
     // and included at row 9.
     let value = build_expected_bus_word_msg(
-        coeffs,
+        &challenges,
         MEMORY_READ_WORD_LABEL,
         ZERO,
         ZERO,
@@ -109,7 +113,7 @@ fn b_chip_trace_mem() {
 
     // At cycle 11, `MStore` is requested by the stack and included at row 12.
     let value = build_expected_bus_element_msg(
-        coeffs,
+        &challenges,
         MEMORY_WRITE_ELEMENT_LABEL,
         ZERO,
         FOUR,
@@ -125,7 +129,7 @@ fn b_chip_trace_mem() {
     // At cycle 13, `MStream` is requested by the stack, and the second read of `MStream` is
     // requested for inclusion at row 14.
     let value1 = build_expected_bus_word_msg(
-        coeffs,
+        &challenges,
         MEMORY_READ_WORD_LABEL,
         ZERO,
         ZERO,
@@ -133,7 +137,7 @@ fn b_chip_trace_mem() {
         word.into(),
     );
     let value2 = build_expected_bus_word_msg(
-        coeffs,
+        &challenges,
         MEMORY_READ_WORD_LABEL,
         ZERO,
         Felt::new(4),
@@ -165,27 +169,27 @@ fn b_chip_trace_mem() {
     // rows, corresponding to the 5 memory operations (MStream requires 2 rows).
 
     // At cycle 8 `MLoadW` was requested by the stack; `MStoreW` is provided by memory here.
-    expected *= build_expected_bus_msg_from_trace(&trace, coeffs, memory_start.into());
+    expected *= build_expected_bus_msg_from_trace(&trace, &challenges, memory_start.into());
     assert_eq!(expected, b_chip[memory_start + 1]);
 
     // At cycle 9, `MLoad` is provided by memory.
-    expected *= build_expected_bus_msg_from_trace(&trace, coeffs, (memory_start + 1).into());
+    expected *= build_expected_bus_msg_from_trace(&trace, &challenges, (memory_start + 1).into());
     assert_eq!(expected, b_chip[memory_start + 2]);
 
     // At cycle 10,  `MLoadW` is provided by memory.
-    expected *= build_expected_bus_msg_from_trace(&trace, coeffs, (memory_start + 2).into());
+    expected *= build_expected_bus_msg_from_trace(&trace, &challenges, (memory_start + 2).into());
     assert_eq!(expected, b_chip[memory_start + 3]);
 
     // At cycle 11, `MStore` is provided by the memory.
-    expected *= build_expected_bus_msg_from_trace(&trace, coeffs, (memory_start + 3).into());
+    expected *= build_expected_bus_msg_from_trace(&trace, &challenges, (memory_start + 3).into());
     assert_eq!(expected, b_chip[memory_start + 4]);
 
     // At cycle 12, the first read of `MStream` is provided by the memory.
-    expected *= build_expected_bus_msg_from_trace(&trace, coeffs, (memory_start + 4).into());
+    expected *= build_expected_bus_msg_from_trace(&trace, &challenges, (memory_start + 4).into());
     assert_eq!(expected, b_chip[memory_start + 5]);
 
     // At cycle 13, the second read of `MStream` is provided by the memory.
-    expected *= build_expected_bus_msg_from_trace(&trace, coeffs, (memory_start + 5).into());
+    expected *= build_expected_bus_msg_from_trace(&trace, &challenges, (memory_start + 5).into());
     assert_eq!(expected, b_chip[memory_start + 6]);
 
     // The value in b_chip should be ONE now and for the rest of the trace.
@@ -198,7 +202,7 @@ fn b_chip_trace_mem() {
 // ================================================================================================
 
 fn build_expected_bus_element_msg(
-    coeffs: &[Felt],
+    challenges: &AuxChallenges<Felt>,
     op_label: u8,
     ctx: Felt,
     addr: Felt,
@@ -207,16 +211,11 @@ fn build_expected_bus_element_msg(
 ) -> Felt {
     assert!(op_label == MEMORY_READ_ELEMENT_LABEL || op_label == MEMORY_WRITE_ELEMENT_LABEL);
 
-    coeffs[0]
-        + coeffs[1] * Felt::from_u8(op_label)
-        + coeffs[2] * ctx
-        + coeffs[3] * addr
-        + coeffs[4] * clk
-        + coeffs[5] * value
+    challenges.encode([Felt::from_u8(op_label), ctx, addr, clk, value])
 }
 
 fn build_expected_bus_word_msg(
-    coeffs: &[Felt],
+    challenges: &AuxChallenges<Felt>,
     op_label: u8,
     ctx: Felt,
     addr: Felt,
@@ -225,20 +224,12 @@ fn build_expected_bus_word_msg(
 ) -> Felt {
     assert!(op_label == MEMORY_READ_WORD_LABEL || op_label == MEMORY_WRITE_WORD_LABEL);
 
-    coeffs[0]
-        + coeffs[1] * Felt::from_u8(op_label)
-        + coeffs[2] * ctx
-        + coeffs[3] * addr
-        + coeffs[4] * clk
-        + coeffs[5] * word[0]
-        + coeffs[6] * word[1]
-        + coeffs[7] * word[2]
-        + coeffs[8] * word[3]
+    challenges.encode([Felt::from_u8(op_label), ctx, addr, clk, word[0], word[1], word[2], word[3]])
 }
 
 fn build_expected_bus_msg_from_trace(
     trace: &ExecutionTrace,
-    coeffs: &[Felt],
+    challenges: &AuxChallenges<Felt>,
     row: RowIndex,
 ) -> Felt {
     // get the memory access operation
@@ -282,9 +273,9 @@ fn build_expected_bus_msg_from_trace(
         let idx0 = trace.main_trace.get_column(MEMORY_IDX0_COL_IDX)[row].as_canonical_u64();
         let idx = idx1 * 2 + idx0;
 
-        build_expected_bus_element_msg(coeffs, op_label, ctx, addr, clk, word[idx as usize])
+        build_expected_bus_element_msg(challenges, op_label, ctx, addr, clk, word[idx as usize])
     } else if element_or_word == MEMORY_ACCESS_WORD {
-        build_expected_bus_word_msg(coeffs, op_label, ctx, addr, clk, word.into())
+        build_expected_bus_word_msg(challenges, op_label, ctx, addr, clk, word.into())
     } else {
         panic!("invalid element_or_word value: {element_or_word}");
     }
