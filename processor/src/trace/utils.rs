@@ -225,7 +225,7 @@ pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
     fn get_requests_at(
         &self,
         main_trace: &MainTrace,
-        alphas: &[E],
+        challenges: &AuxChallenges<E>,
         row: RowIndex,
         debugger: &mut BusDebugger<E>,
     ) -> E;
@@ -233,7 +233,7 @@ pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
     fn get_responses_at(
         &self,
         main_trace: &MainTrace,
-        alphas: &[E],
+        challenges: &AuxChallenges<E>,
         row: RowIndex,
         debugger: &mut BusDebugger<E>,
     ) -> E;
@@ -244,7 +244,7 @@ pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
     fn init_requests(
         &self,
         _main_trace: &MainTrace,
-        _alphas: &[E],
+        _challenges: &AuxChallenges<E>,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         E::ONE
@@ -253,24 +253,21 @@ pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
     fn init_responses(
         &self,
         _main_trace: &MainTrace,
-        _alphas: &[E],
+        _challenges: &AuxChallenges<E>,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         E::ONE
     }
 
     /// Builds the chiplets bus auxiliary trace column.
-    fn build_aux_column(&self, main_trace: &MainTrace, alphas: &[E]) -> Vec<E> {
+    fn build_aux_column(&self, main_trace: &MainTrace, challenges: &AuxChallenges<E>) -> Vec<E> {
         let mut bus_debugger = BusDebugger::new("chiplets bus".to_string());
 
-        let coeffs = AuxChallenges::<E, MAX_MESSAGE_WIDTH>::new(alphas);
-        let coeffs = coeffs.coeffs();
-
         let mut requests: Vec<E> = unsafe { uninit_vector(main_trace.num_rows()) };
-        requests[0] = self.init_requests(main_trace, coeffs, &mut bus_debugger);
+        requests[0] = self.init_requests(main_trace, challenges, &mut bus_debugger);
 
         let mut responses_prod: Vec<E> = unsafe { uninit_vector(main_trace.num_rows()) };
-        responses_prod[0] = self.init_responses(main_trace, coeffs, &mut bus_debugger);
+        responses_prod[0] = self.init_responses(main_trace, challenges, &mut bus_debugger);
 
         let mut requests_running_prod = requests[0];
 
@@ -278,10 +275,10 @@ pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
         for row_idx in 0..main_trace.num_rows() - 1 {
             let row = row_idx.into();
 
-            let response = self.get_responses_at(main_trace, coeffs, row, &mut bus_debugger);
+            let response = self.get_responses_at(main_trace, challenges, row, &mut bus_debugger);
             responses_prod[row_idx + 1] = responses_prod[row_idx] * response;
 
-            let request = self.get_requests_at(main_trace, coeffs, row, &mut bus_debugger);
+            let request = self.get_requests_at(main_trace, challenges, row, &mut bus_debugger);
             requests[row_idx + 1] = request;
             requests_running_prod *= request;
         }
@@ -304,18 +301,44 @@ pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
 // AUX CHALLENGES
 // ================================================================================================
 
+/// A sparse encoding layout: indices into the `coeffs` array for non-contiguous element positions.
+///
+/// Each index `idx[i]` maps to a coefficient in the expanded `AuxChallenges` array.
+/// This is useful when encoding messages where not all coefficient positions are needed
+/// (e.g., the sibling table uses only node_index and sibling_word elements, skipping other
+/// coefficient positions like label, addr, and unused rate elements).
+pub(crate) struct MessageLayout<const K: usize> {
+    idx: [usize; K],
+}
+
+impl<const K: usize> MessageLayout<K> {
+    pub const fn new(idx: [usize; K]) -> Self {
+        Self { idx }
+    }
+}
+
 /// Expands two random challenges (alpha, beta) into the coefficient array
 /// used for bus message encoding in auxiliary trace builders.
 ///
 /// Layout: `coeffs[0] = alpha`, `coeffs[i] = beta^(i-1)` for `i >= 1`.
 ///
-/// This matches the AIR-side `Challenges::encode_dense` encoding:
+/// This matches the AIR-side `Challenges::encode` encoding:
 /// `alpha + beta^0 * elem[0] + beta^1 * elem[1] + ... + beta^(K-1) * elem[K-1]`
-pub(crate) struct AuxChallenges<E: ExtensionField<Felt>, const N: usize> {
-    coeffs: [E; N],
+pub(crate) struct AuxChallenges<E: ExtensionField<Felt>> {
+    coeffs: [E; MAX_MESSAGE_WIDTH],
 }
 
-impl<E: ExtensionField<Felt>, const N: usize> AuxChallenges<E, N> {
+impl<E: ExtensionField<Felt>> AuxChallenges<E> {
+    // Coefficient index constants for common message positions
+    // These prevent fragile hardcoded indices and make encoding patterns explicit
+    pub const ALPHA_IDX: usize = 0;
+    pub const LABEL_IDX: usize = 1;
+    pub const ADDR_IDX: usize = 2;
+    pub const NODE_INDEX_IDX: usize = 3;
+    pub const STATE_START_IDX: usize = 4;
+    pub const CAPACITY_START_IDX: usize = 12;
+    pub const CAPACITY_DOMAIN_IDX: usize = Self::CAPACITY_START_IDX + 1; // Second capacity element, used for op_code
+
     pub fn new(challenges: &[E]) -> Self {
         debug_assert!(challenges.len() >= 2, "need at least alpha and beta");
         let alpha = challenges[0];
@@ -324,13 +347,44 @@ impl<E: ExtensionField<Felt>, const N: usize> AuxChallenges<E, N> {
         let mut coeffs = core::array::from_fn(|_| E::ONE);
         coeffs[0] = alpha;
         // coeffs[1] = E::ONE  (beta^0) — already set by from_fn
-        for i in 2..N {
+        for i in 2..MAX_MESSAGE_WIDTH {
             coeffs[i] = coeffs[i - 1] * beta;
         }
         Self { coeffs }
     }
 
-    pub fn coeffs(&self) -> &[E] {
+    /// Encodes a dense message: `coeffs[0] + coeffs[1]*elems[0] + ... + coeffs[K]*elems[K-1]`.
+    #[inline(always)]
+    pub fn encode<const K: usize>(&self, elems: [Felt; K]) -> E {
+        debug_assert!(K < MAX_MESSAGE_WIDTH);
+        let mut acc = self.coeffs[0];
+        for (i, &elem) in elems.iter().enumerate() {
+            acc += self.coeffs[i + 1] * elem;
+        }
+        acc
+    }
+
+    /// Encodes a sparse message using a layout that specifies which coefficient indices to use.
+    #[inline(always)]
+    pub fn encode_layout<const K: usize>(&self, layout: &MessageLayout<K>, elems: [Felt; K]) -> E {
+        let mut acc = self.coeffs[0];
+        for (&idx, &elem) in layout.idx.iter().zip(elems.iter()) {
+            debug_assert!(
+                idx < MAX_MESSAGE_WIDTH,
+                "MessageLayout index {} exceeds MAX_MESSAGE_WIDTH ({})",
+                idx,
+                MAX_MESSAGE_WIDTH
+            );
+            acc += self.coeffs[idx] * elem;
+        }
+        acc
+    }
+}
+
+impl<E: ExtensionField<Felt>> core::ops::Deref for AuxChallenges<E> {
+    type Target = [E];
+
+    fn deref(&self) -> &[E] {
         &self.coeffs
     }
 }
