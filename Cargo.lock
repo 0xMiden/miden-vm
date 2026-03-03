@@ -1245,7 +1245,6 @@ dependencies = [
  "miden-crypto",
  "miden-utils-indexing",
  "proptest",
- "serde",
  "thiserror",
  "tracing",
 ]
