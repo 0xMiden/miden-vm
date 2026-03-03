@@ -24,8 +24,8 @@ use miden_crypto::stark::air::MidenAirBuilder;
 use crate::MainTraceRow;
 
 pub mod bus;
-pub mod ext_field;
 pub mod decoder;
+pub mod ext_field;
 mod op_flags;
 pub mod range;
 pub mod stack;
