@@ -31,6 +31,9 @@
 //! - `randomness`: challenge input planning for layouts + DAG lowering.
 //! - `quotient`: barycentric quotient recomposition helpers (used by DAG + tests).
 
+// Symbolic types (Entry, SymVar, SymExpr).
+mod symbolic;
+
 // Core IR and lowering.
 mod builder;
 mod circuit;
@@ -45,7 +48,7 @@ mod randomness;
 // High-level orchestration.
 mod pipeline;
 
-use p3_miden_uni_stark::Entry;
+use crate::symbolic::Entry;
 
 #[cfg(test)]
 mod tests;
