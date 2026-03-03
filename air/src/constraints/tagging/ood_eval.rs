@@ -83,8 +83,7 @@ impl OodEvalAirBuilder {
         let first_row = rng.next_felt();
         let last_row = rng.next_felt();
         let transition = rng.next_felt();
-        let periodic_values =
-            (0..=bitwise::P_BITWISE_K_TRANSITION).map(|_| rng.next_felt()).collect();
+        let periodic_values = (0..bitwise::NUM_PERIODIC_COLUMNS).map(|_| rng.next_felt()).collect();
 
         Self {
             main,
