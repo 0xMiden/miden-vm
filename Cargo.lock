@@ -22,12 +22,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "allocator-api2"
-version = "0.2.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
-
-[[package]]
 name = "anes"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -754,12 +748,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
-name = "foldhash"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
-
-[[package]]
 name = "fs-err"
 version = "3.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -945,7 +933,7 @@ version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 dependencies = [
- "foldhash 0.1.5",
+ "foldhash",
 ]
 
 [[package]]
@@ -953,14 +941,6 @@ name = "hashbrown"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
-dependencies = [
- "allocator-api2",
- "equivalent",
- "foldhash 0.2.0",
- "rayon",
- "serde",
- "serde_core",
-]
 
 [[package]]
 name = "heck"
@@ -1245,7 +1225,6 @@ dependencies = [
  "miden-crypto",
  "miden-utils-indexing",
  "proptest",
- "serde",
  "thiserror",
  "tracing",
 ]
@@ -1346,9 +1325,8 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto"
-version = "0.22.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3cfbecd3d91ece4489b78ca2ea67b31a7b635164285c1a828b7386d691c7ec72"
+version = "0.23.0"
+source = "git+https://github.com/0xMiden/crypto?branch=tracking-migration-work#8845823e010da424938c16f15b3830564507ea4d"
 dependencies = [
  "blake3",
  "cc",
@@ -1357,7 +1335,6 @@ dependencies = [
  "ed25519-dalek",
  "flume",
  "glob",
- "hashbrown 0.16.1",
  "hkdf",
  "k256",
  "miden-crypto-derive",
@@ -1396,9 +1373,8 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto-derive"
-version = "0.22.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab6757c8a32e2e42e95ee39ca21d1f362c099cf938f482f69ba518771b773222"
+version = "0.23.0"
+source = "git+https://github.com/0xMiden/crypto?branch=tracking-migration-work#8845823e010da424938c16f15b3830564507ea4d"
 dependencies = [
  "quote",
  "syn 2.0.117",
@@ -1422,9 +1398,8 @@ dependencies = [
 
 [[package]]
 name = "miden-field"
-version = "0.22.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "764dd20d71bf30c09981d6223963d3d633956e9dc252932540c089f94dee5981"
+version = "0.23.0"
+source = "git+https://github.com/0xMiden/crypto?branch=tracking-migration-work#8845823e010da424938c16f15b3830564507ea4d"
 dependencies = [
  "miden-serde-utils",
  "num-bigint",
@@ -1434,6 +1409,7 @@ dependencies = [
  "paste",
  "rand",
  "serde",
+ "subtle",
  "thiserror",
 ]
 
@@ -1538,9 +1514,8 @@ dependencies = [
 
 [[package]]
 name = "miden-serde-utils"
-version = "0.22.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a8f83e29603783ff4effc90c3c56579cc979960ac2a647f05554dc27a7faf6a"
+version = "0.23.0"
+source = "git+https://github.com/0xMiden/crypto?branch=tracking-migration-work#8845823e010da424938c16f15b3830564507ea4d"
 dependencies = [
  "p3-field",
  "p3-goldilocks",

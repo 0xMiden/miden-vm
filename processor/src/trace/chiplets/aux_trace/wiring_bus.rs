@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_air::trace::{MAX_MESSAGE_WIDTH, MainTrace};
+use miden_air::trace::MainTrace;
 use miden_core::{Felt, field::ExtensionField};
 
 use super::super::ace::{AceHints, NUM_ACE_LOGUP_FRACTIONS_EVAL, NUM_ACE_LOGUP_FRACTIONS_READ};
@@ -19,14 +19,12 @@ impl<'a> WiringBusBuilder<'a> {
     pub fn build_aux_column<E: ExtensionField<Felt>>(
         &self,
         main_trace: &MainTrace,
-        rand_elements: &[E],
+        challenges: &AuxChallenges<E>,
     ) -> Vec<E> {
-        let challenges = AuxChallenges::<E, MAX_MESSAGE_WIDTH>::new(rand_elements);
-        let coeffs = challenges.coeffs();
         let mut wiring_bus = vec![E::ZERO; main_trace.num_rows()];
 
         // compute divisors
-        let total_divisors = self.ace_hints.build_divisors(main_trace, coeffs);
+        let total_divisors = self.ace_hints.build_divisors(main_trace, challenges);
 
         // fill only the portion relevant to ACE chiplet
         let mut trace_offset = self.ace_hints.offset();
