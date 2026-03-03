@@ -234,8 +234,6 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     // SECTION/BLOCK FLAGS CONSTRAINTS
     // ==========================================================================
 
-    // EVAL blocks cannot be followed by READ blocks within same section
-    // (when sstart' = 0 and sblock = 1, then sblock' = 1)
     let f_next = one.clone() - sstart_next.clone();
 
     // Sections must end with EVAL blocks (not READ).
@@ -299,7 +297,7 @@ pub fn enforce_ace_constraints_all_rows<AB>(
 
     // Memory pointer increments: +4 in READ, +1 in EVAL
     // ptr' = ptr + 4 * f_read + f_eval
-    let expected_ptr = ptr.clone() + four.clone() * f_read.clone() + f_eval.clone();
+    let expected_ptr_next = ptr.clone() + four.clone() * f_read.clone() + f_eval.clone();
 
     // Node ID decrements: -2 in READ, -1 in EVAL
     // id0 = id0' + 2 * f_read + f_eval
@@ -321,7 +319,7 @@ pub fn enforce_ace_constraints_all_rows<AB>(
         builder,
         &ACE_WITHIN_SECTION_TAGS,
         &mut idx,
-        within_section_gate.clone() * (ptr_next.clone() - expected_ptr),
+        within_section_gate.clone() * (ptr_next.clone() - expected_ptr_next),
     );
     tagged_assert_zero_integrity(
         builder,
@@ -458,28 +456,26 @@ fn compute_arithmetic_expected<AB>(
 where
     AB: TaggingAirBuilderExt<F = Felt>,
 {
-    // Linear operation: v1 + op * v2 (works for ADD when op=1, SUB when op=-1)
-    let linear_0 = v1_0.clone() + op.clone() * v2_0.clone();
-    let linear_1 = v1_1.clone() + op.clone() * v2_1.clone();
+    use crate::constraints::ext_field::QuadFeltExpr;
 
-    // Non-linear operation (multiplication in extension field):
-    // (a0 + a1*α) * (b0 + b1*α) where α² = 7
-    // = a0*b0 + a0*b1*α + a1*b0*α + a1*b1*α²
-    // = a0*b0 + (a0*b1 + a1*b0)*α + a1*b1*7
-    // = (a0*b0 + 7*a1*b1) + (a0*b1 + a1*b0)*α
-    let a0b0 = v1_0.clone() * v2_0.clone();
-    let a1b1 = v1_1.clone() * v2_1.clone();
-    let seven: AB::Expr = AB::Expr::from_u32(7);
-    let nonlinear_0 = a0b0.clone() + seven * a1b1;
-    let nonlinear_1 = v1_0 * v2_1.clone() + v1_1 * v2_0;
+    let v1 = QuadFeltExpr(v1_0, v1_1);
+    let v2 = QuadFeltExpr(v2_0, v2_1);
+
+    // Linear operation: v1 + op * v2 (works for ADD when op=1, SUB when op=-1)
+    let linear = v1.clone() + v2.clone() * op.clone();
+
+    // Non-linear operation: multiplication in extension field (α² = 7)
+    let nonlinear = v1 * v2;
 
     // Select based on op²: if op² = 1, use linear; if op² = 0, use nonlinear
     // op_square * (linear - nonlinear) + nonlinear = v0
     let op_square = op.clone() * op;
-    let expected_0 =
-        op_square.clone() * (linear_0.clone() - nonlinear_0.clone()) + nonlinear_0.clone();
-    let expected_1 = op_square * (linear_1.clone() - nonlinear_1.clone()) + nonlinear_1;
-    (expected_0, expected_1)
+    let expected = QuadFeltExpr(
+        op_square.clone() * (linear.0.clone() - nonlinear.0.clone()) + nonlinear.0,
+        op_square * (linear.1.clone() - nonlinear.1.clone()) + nonlinear.1,
+    );
+
+    expected.into_parts().into()
 }
 
 /// Computes binary OR: `a + b - a * b`
