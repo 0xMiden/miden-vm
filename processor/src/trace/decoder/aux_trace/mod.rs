@@ -5,7 +5,7 @@ use miden_core::field::ExtensionField;
 
 use crate::{
     Felt, ONE, ZERO,
-    trace::{AuxColumnBuilder, utils::AuxChallenges},
+    trace::{AuxColumnBuilder, utils::Challenges},
 };
 
 mod block_hash_table;
@@ -33,7 +33,7 @@ impl AuxTraceBuilder {
     pub fn build_aux_columns<E: ExtensionField<Felt>>(
         &self,
         main_trace: &MainTrace,
-        challenges: &AuxChallenges<E>,
+        challenges: &Challenges<E>,
     ) -> Vec<Vec<E>> {
         let block_stack_column_builder = BlockStackColumnBuilder::default();
         let block_hash_column_builder = BlockHashTableColumnBuilder::default();

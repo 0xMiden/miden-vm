@@ -5,7 +5,7 @@ use miden_core::{Felt, ONE, field::ExtensionField};
 
 use crate::{
     debug::{BusDebugger, BusMessage},
-    trace::utils::AuxChallenges,
+    trace::utils::Challenges,
 };
 
 // REQUESTS
@@ -14,7 +14,7 @@ use crate::{
 /// Builds requests made to the arithmetic circuit evaluation chiplet.
 pub fn build_ace_chiplet_requests<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -49,7 +49,7 @@ pub fn build_ace_chiplet_requests<E: ExtensionField<Felt>>(
 pub fn build_ace_chiplet_responses<E>(
     main_trace: &MainTrace,
     row: RowIndex,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     _debugger: &mut BusDebugger<E>,
 ) -> E
 where
@@ -102,7 +102,7 @@ impl<E> BusMessage<E> for AceMessage
 where
     E: ExtensionField<Felt>,
 {
-    fn value(&self, challenges: &AuxChallenges<E>) -> E {
+    fn value(&self, challenges: &Challenges<E>) -> E {
         challenges.encode([
             self.op_label,
             self.clk,

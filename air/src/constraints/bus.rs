@@ -36,8 +36,19 @@ use miden_crypto::stark::air::MidenAirBuilder;
 /// Message-layout helper for sparse encodings.
 ///
 /// `idx` holds the positions in the full message vector which are present in the sparse message.
-pub(crate) struct MessageLayout<const K: usize> {
-    idx: [usize; K],
+///
+/// This is used by both AIR constraints (symbolic expressions) and processor aux trace builders
+/// (witness values) to encode sparse bus messages where not all coefficient positions are used.
+///
+/// # Example
+///
+/// Sibling table entry encoding `node_index` at position 2 and `sibling_word` at positions 7-10:
+/// ```ignore
+/// const LAYOUT: MessageLayout<5> = MessageLayout::new([2, 7, 8, 9, 10]);
+/// let encoded = challenges.encode_layout(&LAYOUT, [index, sib[0], sib[1], sib[2], sib[3]]);
+/// ```
+pub struct MessageLayout<const K: usize> {
+    pub idx: [usize; K],
 }
 
 impl<const K: usize> MessageLayout<K> {
@@ -46,17 +57,23 @@ impl<const K: usize> MessageLayout<K> {
     }
 }
 
-/// Encodes multiset/LogUp messages as `alpha + sum_i beta^i * elem[i]`.
+/// Encodes multiset/LogUp contributions as **alpha + <beta, message>**
 ///
-/// `alpha` and `beta` are derived from the permutation challenges:
+/// Structure:
+/// - `alpha`: randomness base (alpha)
+/// - `beta_powers`: powers of beta [beta^0, beta^1, beta^2, ..., beta^(N-1)]
+///
+/// The challenges are derived from permutation randomness:
 /// - `alpha = challenges[0]`
 /// - `beta  = challenges[1]`
+///
+/// This structure is shared with the processor's `Challenges<E>` for trace generation.
 pub(crate) struct Challenges<AB, const N: usize>
 where
     AB: MidenAirBuilder,
 {
     alpha: AB::ExprEF,
-    beta_pows: [AB::ExprEF; N],
+    beta_powers: [AB::ExprEF; N],
 }
 
 impl<AB, const N: usize> Challenges<AB, N>
@@ -69,25 +86,25 @@ where
         debug_assert!(challenges.len() >= 2);
         let alpha: AB::ExprEF = challenges[0].into();
         let beta: AB::ExprEF = challenges[1].into();
-        let mut beta_pows = core::array::from_fn(|_| AB::ExprEF::ONE);
+        let mut beta_powers = core::array::from_fn(|_| AB::ExprEF::ONE);
         for i in 1..N {
-            beta_pows[i] = beta_pows[i - 1].clone() * beta.clone();
+            beta_powers[i] = beta_powers[i - 1].clone() * beta.clone();
         }
-        Self { alpha, beta_pows }
+        Self { alpha, beta_powers }
     }
 
-    /// Encodes a dense message where elements occupy the first K positions.
+    /// Encodes as **alpha + <beta, message>** with K consecutive elements.
     #[inline]
     pub fn encode_dense<const K: usize>(&self, elems: [AB::Expr; K]) -> AB::ExprEF {
-        debug_assert!(K <= N);
+        debug_assert!(K <= N, "Message length {} exceeds beta_powers capacity ({})", K, N);
         let mut acc = self.alpha.clone();
         for (i, elem) in elems.iter().enumerate() {
-            acc += self.beta_pows[i].clone() * elem.clone();
+            acc += self.beta_powers[i].clone() * elem.clone();
         }
         acc
     }
 
-    /// Encodes a sparse message defined by a layout of indices into the full message vector.
+    /// Encodes as **alpha + <beta, message>** using sparse layout.
     #[inline]
     pub fn encode_layout<const K: usize>(
         &self,
@@ -97,7 +114,13 @@ where
         let mut acc = self.alpha.clone();
         for (i, elem) in elems.iter().enumerate() {
             let idx = layout.idx[i];
-            acc += self.beta_pows[idx].clone() * elem.clone();
+            debug_assert!(
+                idx < self.beta_powers.len(),
+                "MessageLayout index {} exceeds beta_powers length ({})",
+                idx,
+                self.beta_powers.len()
+            );
+            acc += self.beta_powers[idx].clone() * elem.clone();
         }
         acc
     }

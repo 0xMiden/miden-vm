@@ -13,7 +13,7 @@ use miden_core::{
 use rstest::rstest;
 
 use super::{Felt, build_trace_from_ops_with_inputs, rand_array};
-use crate::{AdviceInputs, StackInputs, trace::utils::AuxChallenges};
+use crate::{AdviceInputs, StackInputs, trace::utils::Challenges};
 
 // SIBLING TABLE TESTS
 // ================================================================================================
@@ -75,7 +75,7 @@ fn hasher_p1_mr_update(#[case] index: u64) {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
-    let challenges = AuxChallenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(&alphas);
     let row_values = [
         SiblingTableRow::new(Felt::new(index), path[0]).to_value(&trace.main_trace, &challenges),
         SiblingTableRow::new(Felt::new(index >> 1), path[1])
@@ -197,7 +197,7 @@ impl SiblingTableRow {
     pub fn to_value<E: ExtensionField<Felt>>(
         &self,
         _main_trace: &MainTrace,
-        challenges: &AuxChallenges<E>,
+        challenges: &Challenges<E>,
     ) -> E {
         // when the least significant bit of the index is 0, the sibling will be in the 3rd word
         // of the hasher state, and when the least significant bit is 1, it will be in the 2nd
@@ -205,19 +205,19 @@ impl SiblingTableRow {
         // we need to compute the 2nd and the 3rd word values for other purposes as well.
         let lsb = self.index.as_canonical_u64() & 1;
         if lsb == 0 {
-            challenges[0]
-                + challenges[3] * self.index
-                + challenges[8] * self.sibling[0]
-                + challenges[9] * self.sibling[1]
-                + challenges[10] * self.sibling[2]
-                + challenges[11] * self.sibling[3]
+            challenges.alpha
+                + challenges.beta_powers[2] * self.index
+                + challenges.beta_powers[7] * self.sibling[0]
+                + challenges.beta_powers[8] * self.sibling[1]
+                + challenges.beta_powers[9] * self.sibling[2]
+                + challenges.beta_powers[10] * self.sibling[3]
         } else {
-            challenges[0]
-                + challenges[3] * self.index
-                + challenges[4] * self.sibling[0]
-                + challenges[5] * self.sibling[1]
-                + challenges[6] * self.sibling[2]
-                + challenges[7] * self.sibling[3]
+            challenges.alpha
+                + challenges.beta_powers[2] * self.index
+                + challenges.beta_powers[3] * self.sibling[0]
+                + challenges.beta_powers[4] * self.sibling[1]
+                + challenges.beta_powers[5] * self.sibling[2]
+                + challenges.beta_powers[6] * self.sibling[3]
         }
     }
 }
