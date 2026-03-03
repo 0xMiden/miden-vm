@@ -2048,7 +2048,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-lifted-air"
 version = "0.4.2"
-source = "git+https://github.com/0xMiden/p3-miden.git?branch=lifted-stark-aux#5c0171d72864f848d24644e6e3061a58369e8603"
+source = "git+https://github.com/0xMiden/p3-miden.git?branch=lifted-stark-aux#cd8b30ed232a401ee9e8ead1855465e5f1d35ced"
 dependencies = [
  "p3-air",
  "p3-field",
@@ -2061,7 +2061,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-lifted-fri"
 version = "0.4.2"
-source = "git+https://github.com/0xMiden/p3-miden.git?branch=lifted-stark-aux#5c0171d72864f848d24644e6e3061a58369e8603"
+source = "git+https://github.com/0xMiden/p3-miden.git?branch=lifted-stark-aux#cd8b30ed232a401ee9e8ead1855465e5f1d35ced"
 dependencies = [
  "p3-challenger",
  "p3-commit",
@@ -2080,7 +2080,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-lifted-prover"
 version = "0.4.2"
-source = "git+https://github.com/0xMiden/p3-miden.git?branch=lifted-stark-aux#5c0171d72864f848d24644e6e3061a58369e8603"
+source = "git+https://github.com/0xMiden/p3-miden.git?branch=lifted-stark-aux#cd8b30ed232a401ee9e8ead1855465e5f1d35ced"
 dependencies = [
  "p3-challenger",
  "p3-dft",
@@ -2101,7 +2101,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-lifted-stark"
 version = "0.4.2"
-source = "git+https://github.com/0xMiden/p3-miden.git?branch=lifted-stark-aux#5c0171d72864f848d24644e6e3061a58369e8603"
+source = "git+https://github.com/0xMiden/p3-miden.git?branch=lifted-stark-aux#cd8b30ed232a401ee9e8ead1855465e5f1d35ced"
 dependencies = [
  "p3-challenger",
  "p3-dft",
@@ -2116,7 +2116,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-lifted-verifier"
 version = "0.4.2"
-source = "git+https://github.com/0xMiden/p3-miden.git?branch=lifted-stark-aux#5c0171d72864f848d24644e6e3061a58369e8603"
+source = "git+https://github.com/0xMiden/p3-miden.git?branch=lifted-stark-aux#cd8b30ed232a401ee9e8ead1855465e5f1d35ced"
 dependencies = [
  "p3-dft",
  "p3-field",
@@ -2133,7 +2133,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-lmcs"
 version = "0.4.2"
-source = "git+https://github.com/0xMiden/p3-miden.git?branch=lifted-stark-aux#5c0171d72864f848d24644e6e3061a58369e8603"
+source = "git+https://github.com/0xMiden/p3-miden.git?branch=lifted-stark-aux#cd8b30ed232a401ee9e8ead1855465e5f1d35ced"
 dependencies = [
  "p3-commit",
  "p3-field",
@@ -2173,7 +2173,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-stateful-hasher"
 version = "0.4.2"
-source = "git+https://github.com/0xMiden/p3-miden.git?branch=lifted-stark-aux#5c0171d72864f848d24644e6e3061a58369e8603"
+source = "git+https://github.com/0xMiden/p3-miden.git?branch=lifted-stark-aux#cd8b30ed232a401ee9e8ead1855465e5f1d35ced"
 dependencies = [
  "p3-field",
  "p3-symmetric",
@@ -2182,7 +2182,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-transcript"
 version = "0.4.2"
-source = "git+https://github.com/0xMiden/p3-miden.git?branch=lifted-stark-aux#5c0171d72864f848d24644e6e3061a58369e8603"
+source = "git+https://github.com/0xMiden/p3-miden.git?branch=lifted-stark-aux#cd8b30ed232a401ee9e8ead1855465e5f1d35ced"
 dependencies = [
  "p3-challenger",
  "p3-field",

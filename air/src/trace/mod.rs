@@ -221,8 +221,8 @@ pub const DERIVED_CHALLENGE_LEN: usize = 16;
 ///
 /// - `c0` (index 0): used as the alpha challenge in LogUp denominators (`alpha + value`)
 /// - `1` (index 1): identity placeholder
-/// - `c1^k` (indices 2..16): powers of beta used for linear-combination coefficients in bus
-///   message collapse functions
+/// - `c1^k` (indices 2..16): powers of beta used for linear-combination coefficients in bus message
+///   collapse functions
 pub fn derive_challenges<T: PrimeCharacteristicRing + Clone>(raw: &[T]) -> Vec<T> {
     assert!(raw.len() >= 2, "derive_challenges requires at least 2 random elements");
     let c0 = raw[0].clone();
@@ -233,7 +233,7 @@ pub fn derive_challenges<T: PrimeCharacteristicRing + Clone>(raw: &[T]) -> Vec<T
     let mut power = c1.clone();
     for _ in 2..DERIVED_CHALLENGE_LEN {
         out.push(power.clone());
-        power = power * c1.clone();
+        power *= c1.clone();
     }
     out
 }

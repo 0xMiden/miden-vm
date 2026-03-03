@@ -14,7 +14,7 @@ use miden_air::trace::{
 use miden_core::{WORD_SIZE, field::Field};
 
 use super::{
-    DERIVED_CHALLENGE_LEN, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, HASH_CYCLE_LEN,
+    CHIPLETS_BUS_AUX_TRACE_OFFSET, DERIVED_CHALLENGE_LEN, ExecutionTrace, Felt, HASH_CYCLE_LEN,
     LAST_CYCLE_ROW, ONE, Operation, Word, ZERO, build_trace_from_ops, rand_array,
 };
 

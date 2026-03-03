@@ -26,8 +26,8 @@ use miden_core::{
 use miden_utils_testing::stack;
 
 use super::{
-    DERIVED_CHALLENGE_LEN, AdviceInputs, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt,
-    ONE, Operation, ZERO, build_span_with_respan_ops, build_trace_from_ops_with_inputs,
+    AdviceInputs, CHIPLETS_BUS_AUX_TRACE_OFFSET, DERIVED_CHALLENGE_LEN, ExecutionTrace, Felt, ONE,
+    Operation, ZERO, build_span_with_respan_ops, build_trace_from_ops_with_inputs,
     build_trace_from_program, init_state_from_words, rand_array,
 };
 use crate::StackInputs;

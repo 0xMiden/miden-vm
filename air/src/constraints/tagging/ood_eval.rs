@@ -28,7 +28,6 @@ pub struct EvalRecord {
 /// for a given seed. Each constraint's evaluation is recorded in ID order.
 pub struct OodEvalAirBuilder {
     main: RowMajorMatrix<Felt>,
-    preprocessed: RowMajorMatrix<Felt>,
     permutation: RowMajorMatrix<QuadFelt>,
     permutation_randomness: Vec<QuadFelt>,
     aux_bus_boundary_values: Vec<QuadFelt>,
@@ -55,7 +54,6 @@ impl OodEvalAirBuilder {
             (0..crate::trace::TRACE_WIDTH * 2).map(|_| rng.next_felt()).collect(),
             crate::trace::TRACE_WIDTH,
         );
-        let preprocessed = RowMajorMatrix::new(Vec::new(), 1);
         let permutation = RowMajorMatrix::new(
             (0..crate::trace::AUX_TRACE_WIDTH * 2).map(|_| rng.next_quad()).collect(),
             crate::trace::AUX_TRACE_WIDTH,
@@ -77,7 +75,6 @@ impl OodEvalAirBuilder {
 
         Self {
             main,
-            preprocessed,
             permutation,
             permutation_randomness,
             aux_bus_boundary_values,
@@ -282,5 +279,4 @@ mod tests {
     fn ood_system_range_matches_expected() {
         run_group_parity_test(active_expected_ood_evals());
     }
-
 }

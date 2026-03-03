@@ -147,9 +147,7 @@ mod tests {
     use p3_air::{AirBuilder, BaseAir, BaseAirWithPublicValues};
     use p3_field::{ExtensionField, Field};
     use p3_matrix::{Matrix, dense::RowMajorMatrix};
-    use p3_miden_lifted_air::{
-        AirWithPeriodicColumns, AuxBuilder, LiftedAir, LiftedAirBuilder,
-    };
+    use p3_miden_lifted_air::{AirWithPeriodicColumns, AuxBuilder, LiftedAir, LiftedAirBuilder};
 
     /// Trivial AIR: single column, constrain next == local (constant trace).
     struct ConstantAir;
