@@ -2,7 +2,13 @@
 
 use alloc::vec::Vec;
 
-use miden_core::{Felt, ONE, ZERO, operations::Operation};
+use miden_core::{
+    Felt, ONE, ZERO,
+    operations::{
+        OPCODE_CALL, OPCODE_END, OPCODE_HALT, OPCODE_JOIN, OPCODE_LOOP, OPCODE_REPEAT,
+        OPCODE_RESPAN, OPCODE_SPAN, OPCODE_SPLIT, OPCODE_SYSCALL, Operation,
+    },
+};
 use proptest::prelude::*;
 
 use super::{
@@ -141,10 +147,10 @@ fn test_get_op_index_degree5() {
     // Degree 5 operations have opcodes 80-95
     assert_eq!(get_op_index(Operation::HPerm.op_code()), 0);
     assert_eq!(get_op_index(Operation::MpVerify(Felt::ZERO).op_code()), 1);
-    assert_eq!(get_op_index(Operation::Split.op_code()), 4);
-    assert_eq!(get_op_index(Operation::Loop.op_code()), 5);
-    assert_eq!(get_op_index(Operation::Span.op_code()), 6);
-    assert_eq!(get_op_index(Operation::Join.op_code()), 7);
+    assert_eq!(get_op_index(OPCODE_SPLIT), 4);
+    assert_eq!(get_op_index(OPCODE_LOOP), 5);
+    assert_eq!(get_op_index(OPCODE_SPAN), 6);
+    assert_eq!(get_op_index(OPCODE_JOIN), 7);
     assert_eq!(get_op_index(Operation::Push(Felt::ONE).op_code()), 11);
 }
 
@@ -153,12 +159,12 @@ fn test_get_op_index_degree4() {
     // Degree 4 operations have opcodes 96-127, only every 4th opcode is used
     assert_eq!(get_op_index(Operation::MrUpdate.op_code()), 0);
     assert_eq!(get_op_index(Operation::CryptoStream.op_code()), 1);
-    assert_eq!(get_op_index(Operation::SysCall.op_code()), 2);
-    assert_eq!(get_op_index(Operation::Call.op_code()), 3);
-    assert_eq!(get_op_index(Operation::End.op_code()), 4);
-    assert_eq!(get_op_index(Operation::Repeat.op_code()), 5);
-    assert_eq!(get_op_index(Operation::Respan.op_code()), 6);
-    assert_eq!(get_op_index(Operation::Halt.op_code()), 7);
+    assert_eq!(get_op_index(OPCODE_SYSCALL), 2);
+    assert_eq!(get_op_index(OPCODE_CALL), 3);
+    assert_eq!(get_op_index(OPCODE_END), 4);
+    assert_eq!(get_op_index(OPCODE_REPEAT), 5);
+    assert_eq!(get_op_index(OPCODE_RESPAN), 6);
+    assert_eq!(get_op_index(OPCODE_HALT), 7);
 }
 
 #[test]
@@ -392,20 +398,24 @@ fn degree_4_op_flags() {
 #[test]
 fn composite_no_shift_flags() {
     // Operations where all 16 positions remain unchanged
-    let no_shift_ops =
-        [Operation::MpVerify(ZERO), Operation::Span, Operation::Halt, Operation::Emit];
+    let no_shift_opcodes: [u8; 4] = [
+        Operation::MpVerify(ZERO).op_code(),
+        OPCODE_SPAN,
+        OPCODE_HALT,
+        Operation::Emit.op_code(),
+    ];
 
-    for op in no_shift_ops {
-        let op_flags = op_flags_for_opcode(op.op_code().into());
+    for opcode in no_shift_opcodes {
+        let op_flags = op_flags_for_opcode(opcode.into());
 
         // All positions should have no_shift = ONE
         for i in 0..16 {
             assert_eq!(
                 op_flags.no_shift_at(i),
                 ONE,
-                "no_shift_at({}) should be ONE for {:?}",
+                "no_shift_at({}) should be ONE for opcode {:?}",
                 i,
-                op
+                opcode
             );
         }
 
@@ -464,7 +474,7 @@ fn composite_hperm_flags() {
 /// Tests left shift composite flags for LOOP operation.
 #[test]
 fn composite_loop_left_shift() {
-    let op_flags = op_flags_for_opcode(Operation::Loop.op_code().into());
+    let op_flags = op_flags_for_opcode(OPCODE_LOOP.into());
 
     assert_eq!(op_flags.left_shift_at(0), ZERO);
     // LOOP shifts the stack left
@@ -531,7 +541,7 @@ fn composite_push_right_shift() {
 #[test]
 fn composite_end_flags() {
     // END without loop flag: no shift
-    let op_flags = op_flags_for_opcode(Operation::End.op_code().into());
+    let op_flags = op_flags_for_opcode(OPCODE_END.into());
 
     for i in 0..16 {
         assert_eq!(
@@ -545,7 +555,7 @@ fn composite_end_flags() {
     assert_eq!(op_flags.control_flow(), ONE);
 
     // END with loop flag: left shift (need to modify the row)
-    let mut row = generate_test_row(Operation::End.op_code().into());
+    let mut row = generate_test_row(OPCODE_END.into());
     row.decoder[IS_LOOP_FLAG_COL_IDX] = ONE;
     let op_flags_loop = OpFlags::new(&row);
 
@@ -590,22 +600,22 @@ fn composite_swapw2_flags() {
 #[test]
 fn control_flow_flag() {
     // Control flow operations
-    let cf_ops = [
-        Operation::Span,
-        Operation::Join,
-        Operation::Split,
-        Operation::Loop,
-        Operation::End,
-        Operation::Repeat,
-        Operation::Respan,
-        Operation::Halt,
-        Operation::Call,
-        Operation::SysCall,
+    let cf_opcodes: [u8; 10] = [
+        OPCODE_SPAN,
+        OPCODE_JOIN,
+        OPCODE_SPLIT,
+        OPCODE_LOOP,
+        OPCODE_END,
+        OPCODE_REPEAT,
+        OPCODE_RESPAN,
+        OPCODE_HALT,
+        OPCODE_CALL,
+        OPCODE_SYSCALL,
     ];
 
-    for op in cf_ops {
-        let op_flags = op_flags_for_opcode(op.op_code().into());
-        assert_eq!(op_flags.control_flow(), ONE, "control_flow should be ONE for {:?}", op);
+    for opcode in cf_opcodes {
+        let op_flags = op_flags_for_opcode(opcode.into());
+        assert_eq!(op_flags.control_flow(), ONE, "control_flow should be ONE for opcode {opcode}");
     }
 
     // Non-control flow operations
