@@ -8,10 +8,7 @@
 //! The [`prove`] and [`verify`] free functions handle transcript management
 //! (Fiat-Shamir seeding, serialization) on top of the upstream prover/verifier.
 
-use alloc::{
-    string::{String, ToString},
-    vec::Vec,
-};
+use alloc::vec::Vec;
 
 use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
 use p3_challenger::CanObserve;
@@ -63,6 +60,27 @@ pub const PCS_PARAMS: PcsParams = PcsParams {
     query_pow_bits: 0,
 };
 
+// ERRORS
+// ================================================================================================
+
+/// Errors that can occur during STARK proof generation.
+#[derive(Debug, thiserror::Error)]
+pub enum ProvingError {
+    #[error(transparent)]
+    Prover(#[from] p3_miden_lifted_prover::ProverError),
+    #[error("failed to serialize proof: {0}")]
+    Serialization(#[from] bincode::Error),
+}
+
+/// Errors that can occur during STARK proof verification.
+#[derive(Debug, thiserror::Error)]
+pub enum VerificationError {
+    #[error("failed to deserialize proof: {0}")]
+    Deserialization(#[from] bincode::Error),
+    #[error(transparent)]
+    Verifier(#[from] p3_miden_lifted_verifier::VerifierError),
+}
+
 // PROVE / VERIFY
 // ================================================================================================
 
@@ -77,7 +95,7 @@ pub fn prove<A, B, SC>(
     public_values: &[Felt],
     var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
     aux_builder: &B,
-) -> Result<Vec<u8>, String>
+) -> Result<Vec<u8>, ProvingError>
 where
     A: LiftedAir<Felt, QuadFelt>,
     B: AuxBuilder<Felt, QuadFelt>,
@@ -95,9 +113,8 @@ where
         var_len_public_inputs,
         aux_builder,
         &mut channel,
-    )
-    .map_err(|e| e.to_string())?;
-    bincode::serialize(&channel.into_data()).map_err(|e| e.to_string())
+    )?;
+    Ok(bincode::serialize(&channel.into_data())?)
 }
 
 /// Verifies a STARK proof for the given AIR and public values.
@@ -112,7 +129,7 @@ pub fn verify<A, SC>(
     public_values: &[Felt],
     var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
     proof_bytes: &[u8],
-) -> Result<(), String>
+) -> Result<(), VerificationError>
 where
     A: LiftedAir<Felt, QuadFelt>,
     SC: StarkConfig<Felt, QuadFelt>,
@@ -121,7 +138,7 @@ where
     let transcript_data: p3_miden_transcript::TranscriptData<
         Felt,
         <SC::Lmcs as p3_miden_lmcs::Lmcs>::Commitment,
-    > = bincode::deserialize(proof_bytes).map_err(|e| e.to_string())?;
+    > = bincode::deserialize(proof_bytes)?;
     let mut challenger = config.challenger();
     challenger.observe_slice(public_values);
     let mut channel =
@@ -135,8 +152,8 @@ where
         config,
         &[(air, instance)],
         &mut channel,
-    )
-    .map_err(|e| e.to_string())
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]

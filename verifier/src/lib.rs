@@ -5,7 +5,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::{string::String, vec::Vec};
+use alloc::vec::Vec;
 
 use miden_air::{Felt, ProcessorAir, PublicInputs, config};
 
@@ -143,8 +143,6 @@ fn verify_stark(
 
     let air = ProcessorAir;
     let log_height = log_trace_height as usize;
-    let err = |reason| VerificationError::ProgramVerificationError { program_hash, reason };
-
     match hash_fn {
         HashFunction::Blake3_256 => config::verify(
             &config::create_blake3_256_config(),
@@ -153,8 +151,7 @@ fn verify_stark(
             &public_values,
             &var_len_public_inputs,
             &proof_bytes,
-        )
-        .map_err(err),
+        ),
         HashFunction::Rpo256 => config::verify(
             &config::create_rpo_config(),
             &air,
@@ -162,8 +159,7 @@ fn verify_stark(
             &public_values,
             &var_len_public_inputs,
             &proof_bytes,
-        )
-        .map_err(err),
+        ),
         HashFunction::Rpx256 => config::verify(
             &config::create_rpx_config(),
             &air,
@@ -171,8 +167,7 @@ fn verify_stark(
             &public_values,
             &var_len_public_inputs,
             &proof_bytes,
-        )
-        .map_err(err),
+        ),
         HashFunction::Poseidon2 => config::verify(
             &config::create_poseidon2_config(),
             &air,
@@ -180,8 +175,7 @@ fn verify_stark(
             &public_values,
             &var_len_public_inputs,
             &proof_bytes,
-        )
-        .map_err(err),
+        ),
         HashFunction::Keccak => config::verify(
             &config::create_keccak_config(),
             &air,
@@ -189,9 +183,9 @@ fn verify_stark(
             &public_values,
             &var_len_public_inputs,
             &proof_bytes,
-        )
-        .map_err(err),
+        ),
     }
+    .map_err(|reason| VerificationError::ProgramVerificationError { program_hash, reason })
 }
 
 // ERRORS
@@ -200,8 +194,12 @@ fn verify_stark(
 /// Errors that can occur during proof verification.
 #[derive(Debug, thiserror::Error)]
 pub enum VerificationError {
-    #[error("failed to verify proof for program with hash {program_hash}: {reason}")]
-    ProgramVerificationError { program_hash: Word, reason: String },
+    #[error("failed to verify proof for program with hash {program_hash}")]
+    ProgramVerificationError {
+        program_hash: Word,
+        #[source]
+        reason: miden_air::config::VerificationError,
+    },
     #[error("failed to verify precompile calls")]
     PrecompileVerificationError(#[source] PrecompileVerificationError),
 }

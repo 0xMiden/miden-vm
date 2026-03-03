@@ -97,7 +97,6 @@ pub async fn prove(
     let log_trace_height = trace_matrix.height().trailing_zeros() as u32;
 
     // Generate STARK proof using lifted prover
-    let err = ExecutionError::ProofSerializationError;
     let proof_bytes = match hash_fn {
         HashFunction::Blake3_256 => config::prove(
             &config::create_blake3_256_config(),
@@ -106,8 +105,7 @@ pub async fn prove(
             &public_values,
             &kernel_slices,
             &aux_builder,
-        )
-        .map_err(err)?,
+        ),
         HashFunction::Keccak => config::prove(
             &config::create_keccak_config(),
             &air,
@@ -115,8 +113,7 @@ pub async fn prove(
             &public_values,
             &kernel_slices,
             &aux_builder,
-        )
-        .map_err(err)?,
+        ),
         HashFunction::Rpo256 => config::prove(
             &config::create_rpo_config(),
             &air,
@@ -124,8 +121,7 @@ pub async fn prove(
             &public_values,
             &kernel_slices,
             &aux_builder,
-        )
-        .map_err(err)?,
+        ),
         HashFunction::Poseidon2 => config::prove(
             &config::create_poseidon2_config(),
             &air,
@@ -133,8 +129,7 @@ pub async fn prove(
             &public_values,
             &kernel_slices,
             &aux_builder,
-        )
-        .map_err(err)?,
+        ),
         HashFunction::Rpx256 => config::prove(
             &config::create_rpx_config(),
             &air,
@@ -142,9 +137,8 @@ pub async fn prove(
             &public_values,
             &kernel_slices,
             &aux_builder,
-        )
-        .map_err(err)?,
-    };
+        ),
+    }?;
 
     let proof = ExecutionProof::new(proof_bytes, hash_fn, log_trace_height, precompile_requests);
 
