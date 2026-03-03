@@ -14,7 +14,7 @@ use crate::{
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
-// OPERATIONS OP CODES
+// OPERATIONS AND CONTROL FLOW OPCODES
 // ================================================================================================
 
 /// Opcode patterns have the following meanings:
@@ -135,7 +135,12 @@ mod opcode_constants {
 // OPERATIONS
 // ================================================================================================
 
-/// A set of native VM operations which take exactly one cycle to execute.
+/// The set of native VM basic block operations executable which take exactly one cycle to execute.
+///
+/// Specifically, the operations encoded here are only those which can be executed within basic
+/// blocks, i.e., they exclude all control flow operations (e.g., `Loop`, `Span`, `Join`, etc.).
+/// Note though that those operations have their own unique opcode which lives in the same 7-bit
+/// opcode space as the basic block operations.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(u8)]
@@ -176,45 +181,6 @@ pub enum Operation {
     ///
     /// This operation does not change the state of the user stack aside from reading the value.
     Emit = OPCODE_EMIT,
-
-    // ----- flow control operations -------------------------------------------------------------
-    /// Marks the beginning of a join block.
-    Join = OPCODE_JOIN,
-
-    /// Marks the beginning of a split block.
-    Split = OPCODE_SPLIT,
-
-    /// Marks the beginning of a loop block.
-    Loop = OPCODE_LOOP,
-
-    /// Marks the beginning of a function call.
-    Call = OPCODE_CALL,
-
-    /// Marks the beginning of a dynamic code block, where the target is specified by the stack.
-    Dyn = OPCODE_DYN,
-
-    /// Marks the beginning of a dynamic function call, where the target is specified by the stack.
-    Dyncall = OPCODE_DYNCALL,
-
-    /// Marks the beginning of a kernel call.
-    SysCall = OPCODE_SYSCALL,
-
-    /// Marks the beginning of a span code block.
-    Span = OPCODE_SPAN,
-
-    /// Marks the end of a program block.
-    End = OPCODE_END,
-
-    /// Indicates that body of an executing loop should be executed again.
-    Repeat = OPCODE_REPEAT,
-
-    /// Starts processing a new operation batch.
-    Respan = OPCODE_RESPAN,
-
-    /// Indicates the end of the program. This is used primarily to pad the execution trace to
-    /// the required length. Once HALT operation is executed, no other operations can be executed
-    /// by the VM (HALT operation itself excepted).
-    Halt = OPCODE_HALT,
 
     // ----- field operations --------------------------------------------------------------------
     /// Pops two elements off the stack, adds them, and pushes the result back onto the stack.
@@ -659,25 +625,6 @@ impl Operation {
         }
     }
 
-    /// Returns true if this operation writes any data to the decoder hasher registers.
-    ///
-    /// In other words, if so, then the user op helper registers are not available.
-    pub fn populates_decoder_hasher_registers(&self) -> bool {
-        matches!(
-            self,
-            Self::End
-                | Self::Join
-                | Self::Split
-                | Self::Loop
-                | Self::Repeat
-                | Self::Respan
-                | Self::Span
-                | Self::Halt
-                | Self::Call
-                | Self::SysCall
-        )
-    }
-
     /// Returns true if this basic block operation increases the stack depth by one.
     ///
     /// Note: this only applies to operations within basic blocks (i.e. those executed via
@@ -753,20 +700,6 @@ impl fmt::Display for Operation {
             Self::Caller => write!(f, "caller"),
 
             Self::Clk => write!(f, "clk"),
-
-            // ----- flow control operations ------------------------------------------------------
-            Self::Join => write!(f, "join"),
-            Self::Split => write!(f, "split"),
-            Self::Loop => write!(f, "loop"),
-            Self::Call => writeln!(f, "call"),
-            Self::Dyncall => writeln!(f, "dyncall"),
-            Self::SysCall => writeln!(f, "syscall"),
-            Self::Dyn => writeln!(f, "dyn"),
-            Self::Span => write!(f, "span"),
-            Self::End => write!(f, "end"),
-            Self::Repeat => write!(f, "repeat"),
-            Self::Respan => write!(f, "respan"),
-            Self::Halt => write!(f, "halt"),
 
             // ----- field operations -------------------------------------------------------------
             Self::Add => write!(f, "add"),
@@ -895,18 +828,6 @@ impl Serializable for Operation {
             | Operation::SDepth
             | Operation::Caller
             | Operation::Clk
-            | Operation::Join
-            | Operation::Split
-            | Operation::Loop
-            | Operation::Call
-            | Operation::Dyn
-            | Operation::Dyncall
-            | Operation::SysCall
-            | Operation::Span
-            | Operation::End
-            | Operation::Repeat
-            | Operation::Respan
-            | Operation::Halt
             | Operation::Add
             | Operation::Neg
             | Operation::Mul
@@ -1069,12 +990,6 @@ impl Deserializable for Operation {
             OPCODE_PIPE => Self::Pipe,
             OPCODE_MSTREAM => Self::MStream,
             OPCODE_CRYPTOSTREAM => Self::CryptoStream,
-            OPCODE_SPLIT => Self::Split,
-            OPCODE_LOOP => Self::Loop,
-            OPCODE_SPAN => Self::Span,
-            OPCODE_JOIN => Self::Join,
-            OPCODE_DYN => Self::Dyn,
-            OPCODE_DYNCALL => Self::Dyncall,
             OPCODE_HORNERBASE => Self::HornerBase,
             OPCODE_HORNEREXT => Self::HornerExt,
             OPCODE_LOGPRECOMPILE => Self::LogPrecompile,
@@ -1082,12 +997,6 @@ impl Deserializable for Operation {
 
             OPCODE_MRUPDATE => Self::MrUpdate,
             OPCODE_PUSH => Self::Push(Felt::read_from(source)?),
-            OPCODE_SYSCALL => Self::SysCall,
-            OPCODE_CALL => Self::Call,
-            OPCODE_END => Self::End,
-            OPCODE_REPEAT => Self::Repeat,
-            OPCODE_RESPAN => Self::Respan,
-            OPCODE_HALT => Self::Halt,
             _ => {
                 return Err(DeserializationError::InvalidValue(format!(
                     "Invalid opcode '{op_code}'"
