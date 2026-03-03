@@ -33,23 +33,32 @@
 //! When serializing with [`MastForest::write_stripped`], the FLAGS byte has bit 0 set
 //! and the entire DebugInfo section is omitted. Deserialization auto-detects the format
 //! and creates an empty `DebugInfo` with valid CSR structures when reading stripped files.
+//!
+//! # Hashless Format
+//!
+//! When serializing with [`MastForest::write_hashless`], the FLAGS byte has bit 1 set, and
+//! bit 0 is also set (hashless implies stripped). This does not change the wire format.
+//! It is a declaration of intent that stored digests must be recomputed during validation.
+//! The trusted deserializer rejects hashless inputs; use [`UntrustedMastForest`] instead.
 
-use alloc::vec::Vec;
+use alloc::{string::ToString, vec::Vec};
 
 use super::{MastForest, MastNode, MastNodeId};
 use crate::{
     advice::AdviceMap,
-    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
+    },
 };
 
 pub(crate) mod asm_op;
 pub(crate) mod decorator;
 
 mod info;
-use info::MastNodeInfo;
+pub use info::MastNodeInfo;
 
 mod basic_blocks;
-use basic_blocks::{BasicBlockDataBuilder, BasicBlockDataDecoder};
+use basic_blocks::{BasicBlockDataBuilder, BasicBlockDataDecoder, basic_block_data_len};
 
 pub(crate) mod string_table;
 pub(crate) use string_table::StringTable;
@@ -95,10 +104,17 @@ const MAGIC: &[u8; 4] = b"MAST";
 /// The deserializer will create an empty `DebugInfo` with valid CSR structures.
 const FLAG_STRIPPED: u8 = 0x01;
 
+/// Flag indicating the serialized MastForest should be treated as hashless.
+///
+/// This flag does not affect the wire format; digests are still serialized. It declares that
+/// digests must be recomputed during validation, so trusted deserialization rejects it.
+/// This flag implies [`FLAG_STRIPPED`].
+const FLAG_HASHLESS: u8 = 0x02;
+
 /// Mask for reserved flag bits that must be zero.
 ///
-/// Bits 1-7 are reserved for future use. If any are set, deserialization fails.
-const FLAGS_RESERVED_MASK: u8 = 0xfe;
+/// Bits 2-7 are reserved for future use. If any are set, deserialization fails.
+const FLAGS_RESERVED_MASK: u8 = 0xfc;
 
 /// The format version.
 ///
@@ -115,14 +131,16 @@ const FLAGS_RESERVED_MASK: u8 = 0xfe;
 /// - [0, 0, 2]: Removed AssemblyOp from Decorator enum serialization. AssemblyOps are now stored
 ///   separately in DebugInfo. Removed `should_break` field from AssemblyOp serialization (#2646).
 ///   Removed `breakpoint` instruction (#2655).
-const VERSION: [u8; 3] = [0, 0, 2];
+/// - [0, 0, 3]: Added HASHLESS flag (bit 1). HASHLESS implies STRIPPED. Trusted deserialization
+///   rejects HASHLESS.
+const VERSION: [u8; 3] = [0, 0, 3];
 
 // MAST FOREST SERIALIZATION/DESERIALIZATION
 // ================================================================================================
 
 impl Serializable for MastForest {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.write_into_with_options(target, false);
+        self.write_into_with_options(target, false, false);
     }
 }
 
@@ -131,12 +149,19 @@ impl MastForest {
     ///
     /// When `stripped` is true, the DebugInfo section is omitted and the FLAGS byte
     /// has bit 0 set.
-    fn write_into_with_options<W: ByteWriter>(&self, target: &mut W, stripped: bool) {
+    fn write_into_with_options<W: ByteWriter>(
+        &self,
+        target: &mut W,
+        stripped: bool,
+        hashless: bool,
+    ) {
         let mut basic_block_data_builder = BasicBlockDataBuilder::new();
 
         // magic & flags
         target.write_bytes(MAGIC);
-        target.write_u8(if stripped { FLAG_STRIPPED } else { 0x00 });
+        let flags = if stripped || hashless { FLAG_STRIPPED } else { 0 }
+            | if hashless { FLAG_HASHLESS } else { 0 };
+        target.write_u8(flags);
 
         // version
         target.write_bytes(&VERSION);
@@ -182,13 +207,125 @@ impl MastForest {
     }
 }
 
-impl Deserializable for MastForest {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let flags = read_and_validate_header(source)?;
-        let is_stripped = flags & FLAG_STRIPPED != 0;
+pub(super) fn stripped_size_hint(forest: &MastForest) -> usize {
+    let node_count = forest.nodes.len();
 
-        // Reading sections metadata
-        let node_count = source.read_usize()?;
+    let mut size = MAGIC.len() + 1 + VERSION.len();
+    size += node_count.get_size_hint();
+    size += 0usize.get_size_hint(); // decorator count (always 0 in stripped)
+
+    let roots_len = forest.roots.len();
+    size += roots_len.get_size_hint();
+    size += roots_len * core::mem::size_of::<u32>();
+
+    let mut basic_block_len = 0usize;
+    for node in forest.nodes.iter() {
+        if let MastNode::Block(block) = node {
+            basic_block_len += basic_block_data_len(block);
+        }
+    }
+    size += basic_block_len.get_size_hint() + basic_block_len;
+
+    let node_info_size = MastNodeInfo::min_serialized_size();
+    size += node_count * node_info_size;
+    size += forest.advice_map.serialized_size_hint();
+
+    size
+}
+
+/// A zero-copy view over a stripped, serialized MAST forest.
+///
+/// This is intended for trusted inputs and supports random access to `MastNodeInfo`
+/// entries without deserializing the full forest.
+///
+/// # Examples
+///
+/// ```
+/// use miden_core::{
+///     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, SerializedMastForest},
+///     operations::Operation,
+/// };
+///
+/// let mut forest = MastForest::new();
+/// let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+///     .add_to_forest(&mut forest)
+///     .unwrap();
+/// forest.make_root(block_id);
+///
+/// let mut bytes = Vec::new();
+/// forest.write_stripped(&mut bytes);
+///
+/// let view = SerializedMastForest::new(&bytes).unwrap();
+/// assert_eq!(view.node_count(), forest.nodes().len());
+/// assert!(view.node_info_at(0).is_ok());
+/// ```
+#[derive(Debug)]
+pub struct SerializedMastForest<'a> {
+    bytes: &'a [u8],
+    node_count: usize,
+    node_info_offset: usize,
+    node_info_size: usize,
+}
+
+impl<'a> SerializedMastForest<'a> {
+    /// Creates a new view from serialized bytes.
+    ///
+    /// The input must be in stripped format (including hashless, which implies stripped).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use miden_core::{
+    ///     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, SerializedMastForest},
+    ///     operations::Operation,
+    /// };
+    ///
+    /// let mut forest = MastForest::new();
+    /// let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    ///     .add_to_forest(&mut forest)
+    ///     .unwrap();
+    /// forest.make_root(block_id);
+    ///
+    /// let mut bytes = Vec::new();
+    /// forest.write_stripped(&mut bytes);
+    ///
+    /// let view = SerializedMastForest::new(&bytes).unwrap();
+    /// assert_eq!(view.node_count(), 1);
+    /// ```
+    pub fn new(bytes: &'a [u8]) -> Result<Self, DeserializationError> {
+        let mut offset = 0usize;
+
+        // header
+        let magic = read_array_at::<4>(bytes, &mut offset)?;
+        if magic != *MAGIC {
+            return Err(DeserializationError::InvalidValue(format!(
+                "Invalid magic bytes. Expected '{:?}', got '{:?}'",
+                *MAGIC, magic
+            )));
+        }
+
+        let flags = read_u8_at(bytes, &mut offset)?;
+        if flags & FLAGS_RESERVED_MASK != 0 {
+            return Err(DeserializationError::InvalidValue(format!(
+                "Unknown flags set in MAST header: {:#04x}. Reserved bits must be zero.",
+                flags & FLAGS_RESERVED_MASK
+            )));
+        }
+        if flags & FLAG_STRIPPED == 0 {
+            return Err(DeserializationError::InvalidValue(
+                "SerializedMastForest requires stripped format".to_string(),
+            ));
+        }
+
+        let version = read_array_at::<3>(bytes, &mut offset)?;
+        if version != VERSION {
+            return Err(DeserializationError::InvalidValue(format!(
+                "Unsupported version. Got '{version:?}', but only '{VERSION:?}' is supported",
+            )));
+        }
+
+        // counts
+        let node_count = read_usize_at(bytes, &mut offset)?;
         if node_count > MastForest::MAX_NODES {
             return Err(DeserializationError::InvalidValue(format!(
                 "node count {} exceeds maximum allowed {}",
@@ -196,76 +333,264 @@ impl Deserializable for MastForest {
                 MastForest::MAX_NODES
             )));
         }
-        let _decorator_count = source.read_usize()?; // Read for wire format compatibility
+        let _decorator_count = read_usize_at(bytes, &mut offset)?;
 
-        // Reading procedure roots
-        let roots: Vec<u32> = Deserializable::read_from(source)?;
+        // roots
+        let roots_len = read_usize_at(bytes, &mut offset)?;
+        let roots_bytes = roots_len.checked_mul(core::mem::size_of::<u32>()).ok_or_else(|| {
+            DeserializationError::InvalidValue("roots length overflow".to_string())
+        })?;
+        read_slice_at(bytes, &mut offset, roots_bytes)?;
 
-        // Reading nodes
-        let basic_block_data: Vec<u8> = Deserializable::read_from(source)?;
-        let mast_node_infos: Vec<MastNodeInfo> = node_infos_iter(source, node_count)
-            .collect::<Result<Vec<MastNodeInfo>, DeserializationError>>()?;
+        // basic block data
+        let basic_block_len = read_usize_at(bytes, &mut offset)?;
+        read_slice_at(bytes, &mut offset, basic_block_len)?;
 
-        let advice_map = AdviceMap::read_from(source)?;
+        let node_info_size = MastNodeInfo::min_serialized_size();
+        let node_info_offset = offset;
+        let total_node_info_bytes = node_count.checked_mul(node_info_size).ok_or_else(|| {
+            DeserializationError::InvalidValue("node info length overflow".to_string())
+        })?;
+        let node_info_end =
+            node_info_offset.checked_add(total_node_info_bytes).ok_or_else(|| {
+                DeserializationError::InvalidValue("node info offset overflow".to_string())
+            })?;
+        if node_info_end > bytes.len() {
+            return Err(DeserializationError::UnexpectedEOF);
+        }
 
-        // Deserialize DebugInfo or create empty one if stripped
-        let debug_info = if is_stripped {
-            super::DebugInfo::empty_for_nodes(node_count)
-        } else {
-            super::DebugInfo::read_from(source)?
-        };
-
-        // Constructing MastForest
-        let mast_forest = {
-            let mut mast_forest = MastForest::new();
-
-            // Set the fully deserialized debug_info - it already contains all mappings
-            mast_forest.debug_info = debug_info;
-
-            // Convert node infos to builders
-            let basic_block_data_decoder = BasicBlockDataDecoder::new(&basic_block_data);
-            let mast_builders = mast_node_infos
-                .into_iter()
-                .map(|node_info| {
-                    node_info.try_into_mast_node_builder(node_count, &basic_block_data_decoder)
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-
-            // Add all builders to forest using relaxed validation
-            for mast_node_builder in mast_builders {
-                mast_node_builder.add_to_forest_relaxed(&mut mast_forest).map_err(|e| {
-                    DeserializationError::InvalidValue(format!(
-                        "failed to add node to MAST forest while deserializing: {e}",
-                    ))
-                })?;
-            }
-
-            // roots
-            for root in roots {
-                // make sure the root is valid in the context of the MAST forest
-                let root = MastNodeId::from_u32_safe(root, &mast_forest)?;
-                mast_forest.make_root(root);
-            }
-
-            mast_forest.advice_map = advice_map;
-
-            mast_forest
-        };
-
-        // Note: Full validation of deserialized MastForests (e.g., checking that procedure name
-        // digests correspond to procedure roots) is intentionally not performed here.
-        // The serialized format is expected to come from a trusted source (e.g., the assembler
-        // or a verified package). Callers should use MastForest::validate() if validation of
-        // untrusted input is needed.
-
-        Ok(mast_forest)
+        Ok(Self {
+            bytes,
+            node_count,
+            node_info_offset,
+            node_info_size,
+        })
     }
+
+    /// Returns the number of nodes in the serialized forest.
+    pub fn node_count(&self) -> usize {
+        self.node_count
+    }
+
+    /// Returns the `MastNodeInfo` at the specified index.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use miden_core::{
+    ///     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, SerializedMastForest},
+    ///     operations::Operation,
+    /// };
+    ///
+    /// let mut forest = MastForest::new();
+    /// let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+    ///     .add_to_forest(&mut forest)
+    ///     .unwrap();
+    /// forest.make_root(block_id);
+    ///
+    /// let mut bytes = Vec::new();
+    /// forest.write_stripped(&mut bytes);
+    ///
+    /// let view = SerializedMastForest::new(&bytes).unwrap();
+    /// assert!(view.node_info_at(0).is_ok());
+    /// ```
+    pub fn node_info_at(&self, index: usize) -> Result<MastNodeInfo, DeserializationError> {
+        if index >= self.node_count {
+            return Err(DeserializationError::InvalidValue(format!(
+                "node index {} out of bounds for {} nodes",
+                index, self.node_count
+            )));
+        }
+
+        let entry_offset = index
+            .checked_mul(self.node_info_size)
+            .and_then(|delta| self.node_info_offset.checked_add(delta))
+            .ok_or_else(|| {
+                DeserializationError::InvalidValue("node info offset overflow".to_string())
+            })?;
+        let entry_end = entry_offset.checked_add(self.node_info_size).ok_or_else(|| {
+            DeserializationError::InvalidValue("node info length overflow".to_string())
+        })?;
+        if entry_end > self.bytes.len() {
+            return Err(DeserializationError::UnexpectedEOF);
+        }
+
+        let mut reader = SliceReader::new(&self.bytes[entry_offset..entry_end]);
+        MastNodeInfo::read_from(&mut reader)
+    }
+}
+
+fn read_u8_at(bytes: &[u8], offset: &mut usize) -> Result<u8, DeserializationError> {
+    read_slice_at(bytes, offset, 1).map(|slice| slice[0])
+}
+
+fn read_array_at<const N: usize>(
+    bytes: &[u8],
+    offset: &mut usize,
+) -> Result<[u8; N], DeserializationError> {
+    let slice = read_slice_at(bytes, offset, N)?;
+    let mut result = [0u8; N];
+    result.copy_from_slice(slice);
+    Ok(result)
+}
+
+fn read_slice_at<'a>(
+    bytes: &'a [u8],
+    offset: &mut usize,
+    len: usize,
+) -> Result<&'a [u8], DeserializationError> {
+    let end = offset
+        .checked_add(len)
+        .ok_or_else(|| DeserializationError::InvalidValue("offset overflow".to_string()))?;
+    if end > bytes.len() {
+        return Err(DeserializationError::UnexpectedEOF);
+    }
+    let slice = &bytes[*offset..end];
+    *offset = end;
+    Ok(slice)
+}
+
+// NOTE: Mirrors ByteReader::read_usize (vint64) decoding to preserve wire compatibility.
+fn read_usize_at(bytes: &[u8], offset: &mut usize) -> Result<usize, DeserializationError> {
+    if *offset >= bytes.len() {
+        return Err(DeserializationError::UnexpectedEOF);
+    }
+    let first_byte = bytes[*offset];
+    let length = first_byte.trailing_zeros() as usize + 1;
+
+    let result = if length == 9 {
+        let _marker = read_u8_at(bytes, offset)?;
+        let value = read_array_at::<8>(bytes, offset)?;
+        u64::from_le_bytes(value)
+    } else {
+        let mut encoded = [0u8; 8];
+        let value = read_slice_at(bytes, offset, length)?;
+        encoded[..length].copy_from_slice(value);
+        u64::from_le_bytes(encoded) >> length
+    };
+
+    if result > usize::MAX as u64 {
+        return Err(DeserializationError::InvalidValue(format!(
+            "Encoded value must be less than {}, but {} was provided",
+            usize::MAX,
+            result
+        )));
+    }
+
+    Ok(result as usize)
+}
+
+impl Deserializable for MastForest {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let (flags, _version) = read_and_validate_header(source)?;
+        if flags & FLAG_HASHLESS != 0 {
+            return Err(DeserializationError::InvalidValue(
+                "HASHLESS flag is set; use UntrustedMastForest for untrusted input".to_string(),
+            ));
+        }
+        read_body_with_flags(source, flags)
+    }
+}
+
+pub(super) fn read_from_with_flags<R: ByteReader>(
+    source: &mut R,
+) -> Result<(MastForest, u8), DeserializationError> {
+    let (flags, _version) = read_and_validate_header(source)?;
+    let forest = read_body_with_flags(source, flags)?;
+    Ok((forest, flags))
+}
+
+fn read_body_with_flags<R: ByteReader>(
+    source: &mut R,
+    flags: u8,
+) -> Result<MastForest, DeserializationError> {
+    let is_stripped = flags & FLAG_STRIPPED != 0;
+    if flags & FLAG_HASHLESS != 0 && !is_stripped {
+        return Err(DeserializationError::InvalidValue(
+            "HASHLESS flag requires STRIPPED flag to be set".to_string(),
+        ));
+    }
+
+    // Reading sections metadata
+    let node_count = source.read_usize()?;
+    if node_count > MastForest::MAX_NODES {
+        return Err(DeserializationError::InvalidValue(format!(
+            "node count {} exceeds maximum allowed {}",
+            node_count,
+            MastForest::MAX_NODES
+        )));
+    }
+    let _decorator_count = source.read_usize()?; // Read for wire format compatibility
+
+    // Reading procedure roots
+    let roots: Vec<u32> = Deserializable::read_from(source)?;
+
+    // Reading nodes
+    let basic_block_data: Vec<u8> = Deserializable::read_from(source)?;
+    let mast_node_infos: Vec<MastNodeInfo> = node_infos_iter(source, node_count)
+        .collect::<Result<Vec<MastNodeInfo>, DeserializationError>>()?;
+
+    let advice_map = AdviceMap::read_from(source)?;
+
+    // Deserialize DebugInfo or create empty one if stripped
+    let debug_info = if is_stripped {
+        super::DebugInfo::empty_for_nodes(node_count)
+    } else {
+        super::DebugInfo::read_from(source)?
+    };
+
+    // Constructing MastForest
+    let mast_forest = {
+        let mut mast_forest = MastForest::new();
+
+        // Set the fully deserialized debug_info - it already contains all mappings
+        mast_forest.debug_info = debug_info;
+
+        // Convert node infos to builders
+        let basic_block_data_decoder = BasicBlockDataDecoder::new(&basic_block_data);
+        let mast_builders = mast_node_infos
+            .into_iter()
+            .map(|node_info| {
+                node_info.try_into_mast_node_builder(node_count, &basic_block_data_decoder)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // Add all builders to forest using relaxed validation
+        for mast_node_builder in mast_builders {
+            mast_node_builder.add_to_forest_relaxed(&mut mast_forest).map_err(|e| {
+                DeserializationError::InvalidValue(format!(
+                    "failed to add node to MAST forest while deserializing: {e}",
+                ))
+            })?;
+        }
+
+        // roots
+        for root in roots {
+            // make sure the root is valid in the context of the MAST forest
+            let root = MastNodeId::from_u32_safe(root, &mast_forest)?;
+            mast_forest.make_root(root);
+        }
+
+        mast_forest.advice_map = advice_map;
+
+        mast_forest
+    };
+
+    // Note: Full validation of deserialized MastForests (e.g., checking that procedure name
+    // digests correspond to procedure roots) is intentionally not performed here.
+    // The serialized format is expected to come from a trusted source (e.g., the assembler
+    // or a verified package). Callers should use MastForest::validate() if validation of
+    // untrusted input is needed.
+
+    Ok(mast_forest)
 }
 
 /// Reads and validates the MAST header (magic, flags, version).
 ///
 /// Returns the flags byte on success.
-fn read_and_validate_header<R: ByteReader>(source: &mut R) -> Result<u8, DeserializationError> {
+fn read_and_validate_header<R: ByteReader>(
+    source: &mut R,
+) -> Result<(u8, [u8; 3]), DeserializationError> {
     // Read magic
     let magic: [u8; 4] = source.read_array()?;
     if magic != *MAGIC {
@@ -275,14 +600,8 @@ fn read_and_validate_header<R: ByteReader>(source: &mut R) -> Result<u8, Deseria
         )));
     }
 
-    // Read and validate flags
+    // Read flags
     let flags: u8 = source.read_u8()?;
-    if flags & FLAGS_RESERVED_MASK != 0 {
-        return Err(DeserializationError::InvalidValue(format!(
-            "Unknown flags set in MAST header: {:#04x}. Reserved bits must be zero.",
-            flags & FLAGS_RESERVED_MASK
-        )));
-    }
 
     // Read and validate version
     let version: [u8; 3] = source.read_array()?;
@@ -292,7 +611,15 @@ fn read_and_validate_header<R: ByteReader>(source: &mut R) -> Result<u8, Deseria
         )));
     }
 
-    Ok(flags)
+    // Validate flags
+    if flags & FLAGS_RESERVED_MASK != 0 {
+        return Err(DeserializationError::InvalidValue(format!(
+            "Unknown flags set in MAST header: {:#04x}. Reserved bits must be zero.",
+            flags & FLAGS_RESERVED_MASK
+        )));
+    }
+
+    Ok((flags, version))
 }
 
 fn node_infos_iter<'a, R>(
@@ -302,14 +629,7 @@ fn node_infos_iter<'a, R>(
 where
     R: ByteReader + 'a,
 {
-    let mut remaining = node_count;
-    core::iter::from_fn(move || {
-        if remaining == 0 {
-            return None;
-        }
-        remaining -= 1;
-        Some(MastNodeInfo::read_from(source))
-    })
+    (0..node_count).map(move |_| MastNodeInfo::read_from(source))
 }
 
 // UNTRUSTED DESERIALIZATION
@@ -325,7 +645,7 @@ impl Deserializable for super::UntrustedMastForest {
     /// to verify structural integrity and recompute all node hashes before using
     /// the forest.
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let forest = MastForest::read_from(source)?;
+        let (forest, _) = read_from_with_flags(source)?;
         Ok(super::UntrustedMastForest(forest))
     }
 
@@ -357,6 +677,23 @@ pub(super) struct StrippedMastForest<'a>(pub(super) &'a MastForest);
 
 impl Serializable for StrippedMastForest<'_> {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.0.write_into_with_options(target, true);
+        self.0.write_into_with_options(target, true, false);
+    }
+
+    fn get_size_hint(&self) -> usize {
+        stripped_size_hint(self.0)
+    }
+}
+
+/// Wrapper for serializing a [`MastForest`] with the HASHLESS flag set.
+pub(super) struct HashlessMastForest<'a>(pub(super) &'a MastForest);
+
+impl Serializable for HashlessMastForest<'_> {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.0.write_into_with_options(target, true, true);
+    }
+
+    fn get_size_hint(&self) -> usize {
+        stripped_size_hint(self.0)
     }
 }

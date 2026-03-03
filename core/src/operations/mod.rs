@@ -984,6 +984,25 @@ impl Serializable for Operation {
     }
 }
 
+impl Operation {
+    /// Returns the serialized size of this operation in bytes.
+    pub(crate) fn encoded_size(&self) -> usize {
+        let mut size = core::mem::size_of::<u8>();
+        match self {
+            Operation::Assert(err_code)
+            | Operation::MpVerify(err_code)
+            | Operation::U32assert2(err_code) => {
+                size += err_code.get_size_hint();
+            },
+            Operation::Push(value) => {
+                size += value.as_canonical_u64().get_size_hint();
+            },
+            _ => (),
+        }
+        size
+    }
+}
+
 impl Deserializable for Operation {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let op_code = source.read_u8()?;

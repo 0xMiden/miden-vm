@@ -129,102 +129,106 @@ fn confirm_operation_and_decorator_structure() {
     };
 }
 
+fn sample_operations_all_variants() -> Vec<Operation> {
+    vec![
+        Operation::Noop,
+        Operation::Assert(Felt::from_u32(42)),
+        Operation::SDepth,
+        Operation::Caller,
+        Operation::Clk,
+        Operation::Join,
+        Operation::Split,
+        Operation::Loop,
+        Operation::Call,
+        Operation::Dyn,
+        Operation::SysCall,
+        Operation::Span,
+        Operation::End,
+        Operation::Repeat,
+        Operation::Respan,
+        Operation::Halt,
+        Operation::Add,
+        Operation::Neg,
+        Operation::Mul,
+        Operation::Inv,
+        Operation::Incr,
+        Operation::And,
+        Operation::Or,
+        Operation::Not,
+        Operation::Eq,
+        Operation::Eqz,
+        Operation::Expacc,
+        Operation::Ext2Mul,
+        Operation::U32split,
+        Operation::U32add,
+        Operation::U32assert2(Felt::from_u32(222)),
+        Operation::U32add3,
+        Operation::U32sub,
+        Operation::U32mul,
+        Operation::U32madd,
+        Operation::U32div,
+        Operation::U32and,
+        Operation::U32xor,
+        Operation::Pad,
+        Operation::Drop,
+        Operation::Dup0,
+        Operation::Dup1,
+        Operation::Dup2,
+        Operation::Dup3,
+        Operation::Dup4,
+        Operation::Dup5,
+        Operation::Dup6,
+        Operation::Dup7,
+        Operation::Dup9,
+        Operation::Dup11,
+        Operation::Dup13,
+        Operation::Dup15,
+        Operation::Swap,
+        Operation::SwapW,
+        Operation::SwapW2,
+        Operation::SwapW3,
+        Operation::SwapDW,
+        Operation::MovUp2,
+        Operation::MovUp3,
+        Operation::MovUp4,
+        Operation::MovUp5,
+        Operation::MovUp6,
+        Operation::MovUp7,
+        Operation::MovUp8,
+        Operation::MovDn2,
+        Operation::MovDn3,
+        Operation::MovDn4,
+        Operation::MovDn5,
+        Operation::MovDn6,
+        Operation::MovDn7,
+        Operation::MovDn8,
+        Operation::CSwap,
+        Operation::CSwapW,
+        Operation::Push(Felt::new(45)),
+        Operation::AdvPop,
+        Operation::AdvPopW,
+        Operation::MLoadW,
+        Operation::MStoreW,
+        Operation::MLoad,
+        Operation::MStore,
+        Operation::MStream,
+        Operation::Pipe,
+        Operation::HPerm,
+        Operation::MpVerify(Felt::from_u32(1022)),
+        Operation::MrUpdate,
+        Operation::FriE2F4,
+        Operation::HornerBase,
+        Operation::HornerExt,
+        Operation::Emit,
+    ]
+}
+
 #[test]
 fn serialize_deserialize_all_nodes() {
     let mut mast_forest = MastForest::new();
 
     let basic_block_id = {
-        let operations = vec![
-            Operation::Noop,
-            Operation::Assert(Felt::from_u32(42)),
-            Operation::SDepth,
-            Operation::Caller,
-            Operation::Clk,
-            Operation::Join,
-            Operation::Split,
-            Operation::Loop,
-            Operation::Call,
-            Operation::Dyn,
-            Operation::SysCall,
-            Operation::Span,
-            Operation::End,
-            Operation::Repeat,
-            Operation::Respan,
-            Operation::Halt,
-            Operation::Add,
-            Operation::Neg,
-            Operation::Mul,
-            Operation::Inv,
-            Operation::Incr,
-            Operation::And,
-            Operation::Or,
-            Operation::Not,
-            Operation::Eq,
-            Operation::Eqz,
-            Operation::Expacc,
-            Operation::Ext2Mul,
-            Operation::U32split,
-            Operation::U32add,
-            Operation::U32assert2(Felt::from_u32(222)),
-            Operation::U32add3,
-            Operation::U32sub,
-            Operation::U32mul,
-            Operation::U32madd,
-            Operation::U32div,
-            Operation::U32and,
-            Operation::U32xor,
-            Operation::Pad,
-            Operation::Drop,
-            Operation::Dup0,
-            Operation::Dup1,
-            Operation::Dup2,
-            Operation::Dup3,
-            Operation::Dup4,
-            Operation::Dup5,
-            Operation::Dup6,
-            Operation::Dup7,
-            Operation::Dup9,
-            Operation::Dup11,
-            Operation::Dup13,
-            Operation::Dup15,
-            Operation::Swap,
-            Operation::SwapW,
-            Operation::SwapW2,
-            Operation::SwapW3,
-            Operation::SwapDW,
-            Operation::MovUp2,
-            Operation::MovUp3,
-            Operation::MovUp4,
-            Operation::MovUp5,
-            Operation::MovUp6,
-            Operation::MovUp7,
-            Operation::MovUp8,
-            Operation::MovDn2,
-            Operation::MovDn3,
-            Operation::MovDn4,
-            Operation::MovDn5,
-            Operation::MovDn6,
-            Operation::MovDn7,
-            Operation::MovDn8,
-            Operation::CSwap,
-            Operation::CSwapW,
-            Operation::Push(Felt::new(45)),
-            Operation::AdvPop,
-            Operation::AdvPopW,
-            Operation::MLoadW,
-            Operation::MStoreW,
-            Operation::MLoad,
-            Operation::MStore,
-            Operation::MStream,
-            Operation::Pipe,
-            Operation::HPerm,
-            Operation::MpVerify(Felt::from_u32(1022)),
-            Operation::MrUpdate,
-            Operation::FriE2F4,
-            Operation::HornerBase,
-            Operation::HornerExt,
-            Operation::Emit,
-        ];
+        let operations = sample_operations_all_variants();
 
         let num_operations = operations.len();
 
@@ -240,21 +244,18 @@ fn serialize_deserialize_all_nodes() {
             (num_operations, Decorator::Trace(55)),
         ];
 
-        {
-            // Convert raw decorators to decorator list by adding them to the forest first
-            let decorator_list: Vec<(usize, crate::mast::DecoratorId)> = decorators
+        // Convert raw decorators to decorator list by adding them to the forest first
+        let decorator_list: Vec<(usize, crate::mast::DecoratorId)> = decorators
             .into_iter()
-            .map(|(idx, decorator)| -> Result<(usize, crate::mast::DecoratorId), MastForestError> {
-                let decorator_id = mast_forest.add_decorator(decorator)?;
-                Ok((idx, decorator_id))
+            .map(|(idx, decorator)| {
+                mast_forest.add_decorator(decorator).map(|decorator_id| (idx, decorator_id))
             })
             .collect::<Result<Vec<_>, MastForestError>>()
             .unwrap();
 
-            BasicBlockNodeBuilder::new(operations, decorator_list)
-                .add_to_forest(&mut mast_forest)
-                .unwrap()
-        }
+        BasicBlockNodeBuilder::new(operations, decorator_list)
+            .add_to_forest(&mut mast_forest)
+            .unwrap()
     };
 
     // Decorators to add to following nodes
@@ -329,6 +330,108 @@ fn serialize_deserialize_all_nodes() {
     let deserialized_mast_forest = MastForest::read_from_bytes(&serialized_mast_forest).unwrap();
 
     assert_eq!(mast_forest, deserialized_mast_forest);
+}
+
+#[test]
+fn test_operation_encoded_size_matches_serialized_len() {
+    for operation in sample_operations_all_variants() {
+        assert_eq!(operation.encoded_size(), operation.to_bytes().len());
+    }
+}
+
+fn assert_serialized_view_matches_forest(forest: &MastForest) {
+    let mut bytes = Vec::new();
+    forest.write_stripped(&mut bytes);
+
+    let view = SerializedMastForest::new(&bytes).unwrap();
+    assert_eq!(view.node_count(), forest.nodes().len());
+
+    let mut bb_builder = super::basic_blocks::BasicBlockDataBuilder::new();
+    for (idx, node) in forest.nodes().iter().enumerate() {
+        let ops_offset = if let MastNode::Block(block) = node {
+            bb_builder.encode_basic_block(block)
+        } else {
+            0
+        };
+        let expected = MastNodeInfo::new(node, ops_offset);
+        let actual = view.node_info_at(idx).unwrap();
+        assert_eq!(expected.to_bytes(), actual.to_bytes());
+    }
+}
+
+#[test]
+fn test_serialized_mast_forest_random_access_node_info() {
+    let mut forest = MastForest::new();
+
+    let block1 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let block2 = BasicBlockNodeBuilder::new(vec![Operation::U32div], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let join = JoinNodeBuilder::new([block1, block2]).add_to_forest(&mut forest).unwrap();
+    forest.make_root(join);
+
+    assert_serialized_view_matches_forest(&forest);
+}
+
+#[test]
+fn test_serialized_mast_forest_random_access_all_node_types() {
+    let mut forest = MastForest::new();
+
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let call_id = CallNodeBuilder::new(block_id).add_to_forest(&mut forest).unwrap();
+    let syscall_id = CallNodeBuilder::new_syscall(block_id).add_to_forest(&mut forest).unwrap();
+    let loop_id = LoopNodeBuilder::new(block_id).add_to_forest(&mut forest).unwrap();
+    let join_id = JoinNodeBuilder::new([block_id, call_id]).add_to_forest(&mut forest).unwrap();
+    let split_id = SplitNodeBuilder::new([block_id, call_id]).add_to_forest(&mut forest).unwrap();
+    let dyn_id = DynNodeBuilder::new_dyn().add_to_forest(&mut forest).unwrap();
+    let dyncall_id = DynNodeBuilder::new_dyncall().add_to_forest(&mut forest).unwrap();
+    let external_id = ExternalNodeBuilder::new(Word::default()).add_to_forest(&mut forest).unwrap();
+
+    forest.make_root(join_id);
+    forest.make_root(syscall_id);
+    forest.make_root(loop_id);
+    forest.make_root(split_id);
+    forest.make_root(dyn_id);
+    forest.make_root(dyncall_id);
+    forest.make_root(external_id);
+
+    assert_serialized_view_matches_forest(&forest);
+}
+
+#[test]
+fn test_serialized_mast_forest_large_counts() {
+    let mut forest = MastForest::new();
+    let mut roots = Vec::new();
+
+    for _ in 0..300 {
+        let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+            .add_to_forest(&mut forest)
+            .unwrap();
+        roots.push(block_id);
+    }
+
+    for root in roots.iter().take(200) {
+        forest.make_root(*root);
+    }
+
+    assert_serialized_view_matches_forest(&forest);
+}
+
+#[test]
+fn test_serialized_mast_forest_rejects_full_format() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let bytes = forest.to_bytes();
+    let result = SerializedMastForest::new(&bytes);
+    assert_matches!(result, Err(DeserializationError::InvalidValue(_)));
 }
 
 /// Test that a forest with a node whose child ids are larger than its own id serializes and
@@ -745,7 +848,7 @@ fn test_raw_vs_batched_construction_equivalence() {
     let mut forest2 = MastForest::new();
 
     let decorator_id1 = forest1.add_decorator(Decorator::Trace(1)).unwrap();
-    let _decorator_id2 = forest2.add_decorator(Decorator::Trace(1)).unwrap();
+    let _ = forest2.add_decorator(Decorator::Trace(1)).unwrap();
 
     let operations =
         vec![Operation::Add, Operation::Mul, Operation::Push(Felt::new(100)), Operation::Drop];
@@ -875,8 +978,27 @@ fn test_header_backward_compatible() {
     // Check header structure: MAST (4 bytes) + flags (1 byte) + version (3 bytes)
     assert_eq!(&bytes[0..4], b"MAST", "Magic should be MAST");
     assert_eq!(bytes[4], 0x00, "Flags should be 0x00 for full serialization");
-    // Version [0, 0, 2] includes: AssemblyOp removed from Decorator enum serialization
-    assert_eq!(&bytes[5..8], &[0, 0, 2], "Version should be [0, 0, 2]");
+    // Version [0, 0, 3] includes: HASHLESS flag addition
+    assert_eq!(&bytes[5..8], &[0, 0, 3], "Version should be [0, 0, 3]");
+}
+
+/// Test that legacy version headers are rejected.
+#[test]
+fn test_legacy_version_is_rejected() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let mut bytes = forest.to_bytes();
+    bytes[5..8].copy_from_slice(&[0, 0, 2]);
+
+    let result = MastForest::read_from_bytes(&bytes);
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg)) if msg.contains("Unsupported version")
+    );
 }
 
 /// Test that stripped serialization produces smaller output than full serialization.
@@ -949,6 +1071,68 @@ fn test_stripped_serialization_roundtrip() {
     assert_eq!(restored.procedure_name(&digest), None);
 }
 
+/// Test that stripped size hint matches actual serialized length.
+#[test]
+fn test_stripped_size_hint_matches_serialized_len() {
+    let mut forest = MastForest::new();
+
+    let block1 =
+        BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Push(Felt::new(3))], Vec::new())
+            .add_to_forest(&mut forest)
+            .unwrap();
+
+    let block2 = BasicBlockNodeBuilder::new(
+        vec![Operation::U32div, Operation::Assert(Felt::new(1))],
+        Vec::new(),
+    )
+    .add_to_forest(&mut forest)
+    .unwrap();
+
+    let join = JoinNodeBuilder::new([block1, block2]).add_to_forest(&mut forest).unwrap();
+    forest.make_root(join);
+
+    forest.advice_map_mut().insert(Word::default(), vec![ONE, Felt::new(2)]);
+
+    let mut bytes = Vec::new();
+    forest.write_stripped(&mut bytes);
+
+    assert_eq!(forest.stripped_size_hint(), bytes.len());
+}
+
+/// Test stripped size hint with large counts and multiple advice-map entries.
+#[test]
+fn test_stripped_size_hint_large_counts() {
+    let mut forest = MastForest::new();
+
+    let mut operations = Vec::with_capacity(304);
+    for _ in 0..300 {
+        operations.push(Operation::Add);
+    }
+    operations.push(Operation::Push(Felt::new(7)));
+    operations.push(Operation::Assert(Felt::new(9)));
+    operations.push(Operation::U32assert2(Felt::new(11)));
+    operations.push(Operation::MpVerify(Felt::new(13)));
+
+    let block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let key_a = Word::new([Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
+    let key_b = Word::new([Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)]);
+
+    let values_a: Vec<Felt> = (0..200).map(|i| Felt::new(i as u64)).collect();
+    let values_b: Vec<Felt> = (0..5).map(|i| Felt::new((i + 10) as u64)).collect();
+
+    forest.advice_map_mut().insert(key_a, values_a);
+    forest.advice_map_mut().insert(key_b, values_b);
+
+    let mut bytes = Vec::new();
+    forest.write_stripped(&mut bytes);
+
+    assert_eq!(forest.stripped_size_hint(), bytes.len());
+}
+
 /// Test that stripped serialization sets the correct header flags.
 #[test]
 fn test_stripped_header_flags() {
@@ -964,8 +1148,8 @@ fn test_stripped_header_flags() {
     // Check header structure
     assert_eq!(&stripped_bytes[0..4], b"MAST", "Magic should be MAST");
     assert_eq!(stripped_bytes[4], 0x01, "Flags should be 0x01 for stripped serialization");
-    // Version [0, 0, 2] includes: AssemblyOp removed from Decorator enum serialization
-    assert_eq!(&stripped_bytes[5..8], &[0, 0, 2], "Version should be [0, 0, 2]");
+    // Version [0, 0, 3] includes: HASHLESS flag addition
+    assert_eq!(&stripped_bytes[5..8], &[0, 0, 3], "Version should be [0, 0, 3]");
 }
 
 /// Test that node digests are preserved in stripped serialization.
@@ -1008,14 +1192,142 @@ fn test_deserialize_rejects_unknown_flags() {
 
     let mut bytes = forest.to_bytes();
 
-    // Set an unknown flag (bit 1)
-    bytes[4] = 0x02;
+    // Set an unknown flag (bit 2)
+    bytes[4] = 0x04;
 
     let result = MastForest::read_from_bytes(&bytes);
     assert_matches!(
         result,
         Err(DeserializationError::InvalidValue(msg)) if msg.contains("reserved") || msg.contains("flags")
     );
+}
+
+/// Test that hashless serialization sets the correct header flags.
+#[test]
+fn test_hashless_header_flags() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let mut hashless_bytes = Vec::new();
+    forest.write_hashless(&mut hashless_bytes);
+
+    assert_eq!(&hashless_bytes[0..4], b"MAST", "Magic should be MAST");
+    assert_eq!(
+        hashless_bytes[4], 0x03,
+        "Flags should be 0x03 for hashless serialization (STRIPPED + HASHLESS)"
+    );
+    assert_eq!(&hashless_bytes[5..8], &[0, 0, 3], "Version should be [0, 0, 3]");
+}
+
+/// Test that trusted deserialization rejects hashless inputs.
+#[test]
+fn test_trusted_rejects_hashless() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let mut hashless_bytes = Vec::new();
+    forest.write_hashless(&mut hashless_bytes);
+
+    let result = MastForest::read_from_bytes(&hashless_bytes);
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg)) if msg.contains("HASHLESS")
+    );
+}
+
+/// Test that hashless without stripped is rejected.
+#[test]
+fn test_hashless_requires_stripped() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let mut bytes = forest.to_bytes();
+    // Set HASHLESS without STRIPPED
+    bytes[4] = 0x02;
+
+    let result = UntrustedMastForest::read_from_bytes(&bytes);
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg)) if msg.contains("HASHLESS") && msg.contains("STRIPPED")
+    );
+}
+
+/// Test that flag-returning APIs expose the correct header flags.
+#[test]
+fn test_untrusted_read_with_flags() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let full_bytes = forest.to_bytes();
+    let (full_untrusted, full_flags) =
+        UntrustedMastForest::read_from_bytes_with_flags(&full_bytes).unwrap();
+    assert_eq!(full_flags, 0x00);
+    assert_eq!(full_untrusted.validate().unwrap().num_nodes(), forest.num_nodes());
+
+    let mut stripped_bytes = Vec::new();
+    forest.write_stripped(&mut stripped_bytes);
+    let (stripped_untrusted, stripped_flags) =
+        UntrustedMastForest::read_from_bytes_with_flags(&stripped_bytes).unwrap();
+    assert_eq!(stripped_flags, 0x01);
+    assert_eq!(stripped_untrusted.validate().unwrap().num_nodes(), forest.num_nodes());
+
+    let mut hashless_bytes = Vec::new();
+    forest.write_hashless(&mut hashless_bytes);
+    let (hashless_untrusted, hashless_flags) =
+        UntrustedMastForest::read_from_bytes_with_flags(&hashless_bytes).unwrap();
+    assert_eq!(hashless_flags, 0x03);
+    assert_eq!(hashless_untrusted.validate().unwrap().num_nodes(), forest.num_nodes());
+}
+
+/// Test that budgeted flag-returning APIs expose the correct header flags.
+#[test]
+fn test_untrusted_read_with_budget_and_flags() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let full_bytes = forest.to_bytes();
+    let (full_untrusted, full_flags) =
+        UntrustedMastForest::read_from_bytes_with_budget_and_flags(&full_bytes, full_bytes.len())
+            .unwrap();
+    assert_eq!(full_flags, 0x00);
+    assert_eq!(full_untrusted.validate().unwrap().num_nodes(), forest.num_nodes());
+
+    let mut stripped_bytes = Vec::new();
+    forest.write_stripped(&mut stripped_bytes);
+    let (stripped_untrusted, stripped_flags) =
+        UntrustedMastForest::read_from_bytes_with_budget_and_flags(
+            &stripped_bytes,
+            stripped_bytes.len(),
+        )
+        .unwrap();
+    assert_eq!(stripped_flags, 0x01);
+    assert_eq!(stripped_untrusted.validate().unwrap().num_nodes(), forest.num_nodes());
+
+    let mut hashless_bytes = Vec::new();
+    forest.write_hashless(&mut hashless_bytes);
+    let (hashless_untrusted, hashless_flags) =
+        UntrustedMastForest::read_from_bytes_with_budget_and_flags(
+            &hashless_bytes,
+            hashless_bytes.len(),
+        )
+        .unwrap();
+    assert_eq!(hashless_flags, 0x03);
+    assert_eq!(hashless_untrusted.validate().unwrap().num_nodes(), forest.num_nodes());
 }
 
 mod proptests {
