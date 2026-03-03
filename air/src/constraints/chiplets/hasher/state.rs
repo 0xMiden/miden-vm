@@ -232,8 +232,8 @@ fn matmul_m4<AB: MidenAirBuilder<F = Felt>>(input: &[AB::Expr; 4]) -> [AB::Expr;
     let t1 = c.clone() + d.clone();
     let t2 = b.clone() + b.clone() + t1.clone(); // 2b + t1
     let t3 = d.clone() + d.clone() + t0.clone(); // 2d + t0
-    let t4 = t1.clone() + t1.clone() + t1.clone() + t1.clone() + t3.clone(); // 4*t1 + t3
-    let t5 = t0.clone() + t0.clone() + t0.clone() + t0.clone() + t2.clone(); // 4*t0 + t2
+    let t4 = t1.clone().double() + t1.clone().double() + t3.clone(); // 4*t1 + t3
+    let t5 = t0.clone().double() + t0.clone().double() + t2.clone(); // 4*t0 + t2
 
     let out0 = t3.clone() + t5.clone();
     let out1 = t5;
