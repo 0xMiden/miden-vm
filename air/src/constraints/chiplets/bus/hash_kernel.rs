@@ -145,8 +145,7 @@ pub fn enforce_hash_kernel_constraint<AB>(
 
     // Compute sibling values based on bit b (LSB of node index).
     // The hasher constraints enforce that b is binary on shift rows.
-    let two = AB::Expr::from_u16(2);
-    let b: AB::Expr = node_index.clone() - two * node_index_next.clone();
+    let b: AB::Expr = node_index.clone() - node_index_next.clone().double();
     let is_b_zero = one.clone() - b.clone();
     let is_b_one = b;
 
