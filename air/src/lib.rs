@@ -170,7 +170,7 @@ where
     }
 
     fn num_randomness(&self) -> usize {
-        trace::AUX_TRACE_RAND_ELEMENTS
+        trace::AUX_TRACE_RAND_CHALLENGES
     }
 
     fn periodic_table(&self) -> Vec<Vec<Felt>> {

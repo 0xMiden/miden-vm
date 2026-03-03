@@ -1,5 +1,5 @@
 use miden_air::trace::{
-    AUX_TRACE_RAND_ELEMENTS, CHIPLETS_BUS_AUX_TRACE_OFFSET,
+    AUX_TRACE_RAND_CHALLENGES, CHIPLETS_BUS_AUX_TRACE_OFFSET, MAX_MESSAGE_WIDTH,
     chiplets::hasher::{HASH_CYCLE_LEN, LAST_CYCLE_ROW},
 };
 use miden_core::{ONE, Word, ZERO, operations::Operation};

@@ -30,6 +30,7 @@ pub mod indices {
     pub const V_WIRING: usize = 7;
 }
 
+use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::MidenAirBuilder;
 
 /// Message-layout helper for sparse encodings.
@@ -45,9 +46,11 @@ impl<const K: usize> MessageLayout<K> {
     }
 }
 
-/// Encodes multiset/LogUp messages as `alpha + sum_i coeff[i] * elem[i]`.
+/// Encodes multiset/LogUp messages as `alpha + sum_i beta^i * elem[i]`.
 ///
-/// `alpha` is `challenges[0]`, and per-element coefficients are `challenges[1..]`.
+/// `alpha` and `beta` are derived from the permutation challenges:
+/// - `alpha = challenges[0]`
+/// - `beta  = challenges[1]`
 pub(crate) struct Challenges<AB, const N: usize>
 where
     AB: MidenAirBuilder,
@@ -60,12 +63,16 @@ impl<AB, const N: usize> Challenges<AB, N>
 where
     AB: MidenAirBuilder,
 {
-    /// Builds `alpha` and per-element coefficients from permutation challenges.
+    /// Builds `alpha` and `beta` powers from permutation challenges.
     #[inline]
     pub fn from_randomness(challenges: &[AB::RandomVar]) -> Self {
-        debug_assert!(challenges.len() > N);
+        debug_assert!(challenges.len() >= 2);
         let alpha: AB::ExprEF = challenges[0].into();
-        let beta_pows = core::array::from_fn(|i| challenges[i + 1].into());
+        let beta: AB::ExprEF = challenges[1].into();
+        let mut beta_pows = core::array::from_fn(|_| AB::ExprEF::ONE);
+        for i in 1..N {
+            beta_pows[i] = beta_pows[i - 1].clone() * beta.clone();
+        }
         Self { alpha, beta_pows }
     }
 

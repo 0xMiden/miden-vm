@@ -183,6 +183,8 @@ pub const ACE_CHIPLET_WIRING_BUS_RANGE: Range<usize> =
 /// Auxiliary trace segment width.
 pub const AUX_TRACE_WIDTH: usize = ACE_CHIPLET_WIRING_BUS_RANGE.end;
 
-/// Number of random elements available to the prover after the commitment to the main trace
-/// segment.
-pub const AUX_TRACE_RAND_ELEMENTS: usize = 16;
+/// Number of random challenges used for auxiliary trace constraints.
+pub const AUX_TRACE_RAND_CHALLENGES: usize = 2;
+
+/// Maximum number of coefficients used in bus message encodings.
+pub const MAX_MESSAGE_WIDTH: usize = 16;
