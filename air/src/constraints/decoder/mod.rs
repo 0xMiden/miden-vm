@@ -204,10 +204,6 @@ const BATCH_FLAGS_BASE: usize = OP_INDEX_BASE + 4;
 const ADDR_BASE: usize = BATCH_FLAGS_BASE + 9;
 const CONTROL_FLOW_BASE: usize = ADDR_BASE + 3;
 
-// Global tag base IDs by constraint group (decoder IDs are contiguous from TAG_DECODER_BASE).
-const GENERAL_BASE_ID: usize = DECODER_BASE_ID + GENERAL_BASE;
-const BATCH_FLAGS_BASE_ID: usize = DECODER_BASE_ID + BATCH_FLAGS_BASE;
-
 /// The degrees of the decoder constraints.
 #[allow(dead_code)]
 pub const CONSTRAINT_DEGREES: [usize; NUM_CONSTRAINTS] = [
@@ -365,6 +361,53 @@ impl<E: Clone> DecoderColumns<E> {
 // CONSTRAINT HELPERS
 // ================================================================================================
 
+/// Enforces in-span (sp) constraints.
+///
+/// The in-span flag indicates whether we're inside a basic block:
+/// - sp = 1 when executing operations inside a basic block
+/// - sp = 0 for SPAN, RESPAN, END, and control-flow operations
+///
+/// This is the entry point to the decoder state machine. Once sp is set by SPAN/RESPAN,
+/// the rest of the decoder constraints (gc, ox, batch flags) are interpreted relative to
+/// being inside that span.
+///
+/// Constraints:
+/// 1. sp is binary: sp * (sp - 1) = 0
+/// 2. After SPAN operation, sp' = 1: span_flag * (1 - sp') = 0
+/// 3. After RESPAN operation, sp' = 1: respan_flag * (1 - sp') = 0
+fn enforce_in_span_constraints<AB>(
+    builder: &mut AB,
+    cols: &DecoderColumns<AB::Expr>,
+    cols_next: &DecoderColumns<AB::Expr>,
+    op_flags: &OpFlags<AB::Expr>,
+) where
+    AB: TaggingAirBuilderExt,
+{
+    let sp = cols.in_span.clone();
+    let sp_next = cols_next.in_span.clone();
+
+    // Boundary: execution starts outside any basic block.
+    assert_zero_first_row(builder, IN_SPAN_BASE, sp.clone());
+
+    // Constraint 1: sp is binary, so span state is well-formed.
+    let sp_binary = sp.clone() * (sp - AB::Expr::ONE);
+    assert_zero_integrity(builder, IN_SPAN_BASE + 1, sp_binary);
+
+    // Constraint 2: After SPAN, the next row must be inside a span.
+    // span_flag * (1 - sp') = 0
+    let span_flag = op_flags.span();
+    assert_zero_transition(
+        builder,
+        IN_SPAN_BASE + 2,
+        span_flag * (AB::Expr::ONE - sp_next.clone()),
+    );
+
+    // Constraint 3: After RESPAN, the next row must be inside a span.
+    // respan_flag * (1 - sp') = 0
+    let respan_flag = op_flags.respan();
+    assert_zero_transition(builder, IN_SPAN_BASE + 3, respan_flag * (AB::Expr::ONE - sp_next));
+}
+
 /// Enforces that all operation bits (b0-b6) are binary (0 or 1).
 ///
 /// For each bit bi: bi * (bi - 1) = 0
@@ -444,53 +487,6 @@ where
         // Batch flags are selectors; they must be boolean.
         assert_binary(builder, BATCH_FLAGS_BINARY_BASE + i, cols.batch_flags[i].clone());
     }
-}
-
-/// Enforces in-span (sp) constraints.
-///
-/// The in-span flag indicates whether we're inside a basic block:
-/// - sp = 1 when executing operations inside a basic block
-/// - sp = 0 for SPAN, RESPAN, END, and control-flow operations
-///
-/// This is the entry point to the decoder state machine. Once sp is set by SPAN/RESPAN,
-/// the rest of the decoder constraints (gc, ox, batch flags) are interpreted relative to
-/// being inside that span.
-///
-/// Constraints:
-/// 1. sp is binary: sp * (sp - 1) = 0
-/// 2. After SPAN operation, sp' = 1: span_flag * (1 - sp') = 0
-/// 3. After RESPAN operation, sp' = 1: respan_flag * (1 - sp') = 0
-fn enforce_in_span_constraints<AB>(
-    builder: &mut AB,
-    cols: &DecoderColumns<AB::Expr>,
-    cols_next: &DecoderColumns<AB::Expr>,
-    op_flags: &OpFlags<AB::Expr>,
-) where
-    AB: TaggingAirBuilderExt,
-{
-    let sp = cols.in_span.clone();
-    let sp_next = cols_next.in_span.clone();
-
-    // Boundary: execution starts outside any basic block.
-    assert_zero_first_row(builder, IN_SPAN_BASE, sp.clone());
-
-    // Constraint 1: sp is binary, so span state is well-formed.
-    let sp_binary = sp.clone() * (sp - AB::Expr::ONE);
-    assert_zero_integrity(builder, IN_SPAN_BASE + 1, sp_binary);
-
-    // Constraint 2: After SPAN, the next row must be inside a span.
-    // span_flag * (1 - sp') = 0
-    let span_flag = op_flags.span();
-    assert_zero_transition(
-        builder,
-        IN_SPAN_BASE + 2,
-        span_flag * (AB::Expr::ONE - sp_next.clone()),
-    );
-
-    // Constraint 3: After RESPAN, the next row must be inside a span.
-    // respan_flag * (1 - sp') = 0
-    let respan_flag = op_flags.respan();
-    assert_zero_transition(builder, IN_SPAN_BASE + 3, respan_flag * (AB::Expr::ONE - sp_next));
 }
 
 /// Enforces group count (gc) constraints.
@@ -749,8 +745,6 @@ fn enforce_general_constraints<AB>(
     let f_dyn = op_flags.dyn_op();
     for i in 0..4 {
         let hi: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 4 + i].clone().into();
-        let _id = GENERAL_BASE_ID + 1 + i;
-        let _namespace = DECODER_NAMES[GENERAL_BASE + 1 + i];
         assert_zero_integrity(builder, GENERAL_BASE + 1 + i, f_dyn.clone() * hi);
     }
 
@@ -774,8 +768,6 @@ fn enforce_general_constraints<AB>(
     for i in 0..5 {
         let hi: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + i].clone().into();
         let hi_next: AB::Expr = next.decoder[decoder_cols::HASHER_STATE_OFFSET + i].clone().into();
-        let _id = GENERAL_BASE_ID + 8 + i;
-        let _namespace = DECODER_NAMES[GENERAL_BASE + 8 + i];
         assert_zero_transition(
             builder,
             GENERAL_BASE + 8 + i,
@@ -889,8 +881,6 @@ fn enforce_batch_flags_constraints<AB>(
     let small_batch = f_g1.clone() + f_g2.clone() + f_g4.clone();
     for i in 0..4 {
         let hi: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 4 + i].clone().into();
-        let _id = BATCH_FLAGS_BASE_ID + 2 + i;
-        let _namespace = DECODER_NAMES[BATCH_FLAGS_BASE + 2 + i];
         assert_zero_integrity(builder, BATCH_FLAGS_BASE + 2 + i, small_batch.clone() * hi);
     }
 
@@ -898,8 +888,6 @@ fn enforce_batch_flags_constraints<AB>(
     let tiny_batch = f_g1.clone() + f_g2.clone();
     for i in 0..2 {
         let hi: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 2 + i].clone().into();
-        let _id = BATCH_FLAGS_BASE_ID + 6 + i;
-        let _namespace = DECODER_NAMES[BATCH_FLAGS_BASE + 6 + i];
         assert_zero_integrity(builder, BATCH_FLAGS_BASE + 6 + i, tiny_batch.clone() * hi);
     }
 
