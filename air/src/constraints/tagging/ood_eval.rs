@@ -2,10 +2,7 @@
 
 use alloc::vec::Vec;
 
-use miden_core::{
-    Felt,
-    field::{PrimeCharacteristicRing, QuadFelt},
-};
+use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::stark::{air::MidenAirBuilder, matrix::RowMajorMatrix};
 
 use super::state;
@@ -60,24 +57,11 @@ impl OodEvalAirBuilder {
             (0..crate::trace::AUX_TRACE_WIDTH * 2).map(|_| rng.next_quad()).collect(),
             crate::trace::AUX_TRACE_WIDTH,
         );
-        let raw_randomness: Vec<QuadFelt> =
-            (0..crate::trace::AUX_TRACE_RAND_ELEMENTS).map(|_| rng.next_quad()).collect();
-        let alpha = raw_randomness.first().copied().expect("aux randomness missing alpha");
-        let beta = raw_randomness.get(1).copied().expect("aux randomness missing beta");
-        let mut permutation_randomness = Vec::with_capacity(crate::trace::AUX_TRACE_RAND_ELEMENTS);
-        if crate::trace::AUX_TRACE_RAND_ELEMENTS > 0 {
-            permutation_randomness.push(alpha);
-        }
-        if crate::trace::AUX_TRACE_RAND_ELEMENTS > 1 {
-            permutation_randomness.push(QuadFelt::ONE);
-        }
-        if crate::trace::AUX_TRACE_RAND_ELEMENTS > 2 {
-            let mut beta_power = beta;
-            for _ in 2..crate::trace::AUX_TRACE_RAND_ELEMENTS {
-                permutation_randomness.push(beta_power);
-                beta_power *= beta;
-            }
-        }
+        // Generate MAX_MESSAGE_WIDTH QuadFelts to keep the RNG state stable (only
+        // AUX_TRACE_RAND_CHALLENGES are used, but we consume the same number of values as
+        // before so that we ensure that the fixtures remain unchanged).
+        let permutation_randomness: Vec<QuadFelt> =
+            (0..crate::trace::MAX_MESSAGE_WIDTH).map(|_| rng.next_quad()).collect();
         let aux_bus_boundary_values =
             (0..crate::trace::AUX_TRACE_WIDTH).map(|_| rng.next_quad()).collect();
         let first_row = rng.next_felt();
