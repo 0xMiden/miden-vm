@@ -9,7 +9,7 @@ use miden_air::trace::{
 use crate::{
     Felt, ZERO,
     field::ExtensionField,
-    trace::utils::AuxChallenges,
+    trace::utils::Challenges,
     utils::{assume_init_vec, uninit_vector},
 };
 
@@ -55,7 +55,7 @@ impl AuxTraceBuilder {
     pub fn build_aux_columns<E: ExtensionField<Felt>>(
         &self,
         main_trace: &MainTrace,
-        challenges: &AuxChallenges<E>,
+        challenges: &Challenges<E>,
     ) -> Vec<Vec<E>> {
         let b_range = self.build_aux_col_b_range(main_trace, challenges);
         vec![b_range]
@@ -66,10 +66,10 @@ impl AuxTraceBuilder {
     fn build_aux_col_b_range<E: ExtensionField<Felt>>(
         &self,
         main_trace: &MainTrace,
-        challenges: &AuxChallenges<E>,
+        challenges: &Challenges<E>,
     ) -> Vec<E> {
         // run batch inversion on the lookup values
-        let divisors = get_divisors(&self.lookup_values, challenges[0]);
+        let divisors = get_divisors(&self.lookup_values, challenges.alpha);
 
         // allocate memory for the running sum column and set the initial value to ZERO
         let mut b_range: Vec<MaybeUninit<E>> = uninit_vector(main_trace.num_rows());

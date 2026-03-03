@@ -21,7 +21,7 @@ use crate::{
 };
 
 pub(crate) mod utils;
-use utils::{AuxChallenges, AuxColumnBuilder, TraceFragment};
+use utils::{AuxColumnBuilder, Challenges, TraceFragment};
 
 pub mod chiplets;
 pub mod execution_tracer;
@@ -264,7 +264,7 @@ impl AuxTraceBuilders {
     {
         // Expand raw challenges (alpha, beta) into coefficient array once, then pass
         // the expanded challenges to all sub-builders.
-        let challenges = AuxChallenges::<E>::new(challenges);
+        let challenges = Challenges::<E>::new(challenges);
 
         let decoder_cols = self.decoder.build_aux_columns(main_trace, &challenges);
         let stack_cols = self.stack.build_aux_columns(main_trace, &challenges);

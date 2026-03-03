@@ -8,7 +8,7 @@ use miden_core::{Felt, ONE, ZERO, field::ExtensionField};
 use super::get_op_label;
 use crate::{
     debug::{BusDebugger, BusMessage},
-    trace::utils::AuxChallenges,
+    trace::utils::Challenges,
 };
 
 // REQUESTS
@@ -19,7 +19,7 @@ use crate::{
 pub(super) fn build_bitwise_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     is_xor: Felt,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -46,7 +46,7 @@ pub(super) fn build_bitwise_request<E: ExtensionField<Felt>>(
 pub(super) fn build_bitwise_chiplet_responses<E>(
     main_trace: &MainTrace,
     row: RowIndex,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     _debugger: &mut BusDebugger<E>,
 ) -> E
 where
@@ -88,7 +88,7 @@ impl<E> BusMessage<E> for BitwiseMessage
 where
     E: ExtensionField<Felt>,
 {
-    fn value(&self, challenges: &AuxChallenges<E>) -> E {
+    fn value(&self, challenges: &Challenges<E>) -> E {
         challenges.encode([self.op_label, self.a, self.b, self.z])
     }
 

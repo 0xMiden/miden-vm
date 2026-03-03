@@ -16,7 +16,7 @@ use miden_core::{
 
 use crate::{
     debug::{BusDebugger, BusMessage},
-    trace::utils::AuxChallenges,
+    trace::utils::Challenges,
 };
 
 // CONSTANTS
@@ -30,7 +30,7 @@ const FOUR: Felt = Felt::new(4);
 /// Builds ACE chiplet read requests as part of the `READ` section made to the memory chiplet.
 pub fn build_ace_memory_read_word_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -65,7 +65,7 @@ pub fn build_ace_memory_read_word_request<E: ExtensionField<Felt>>(
 /// Builds ACE chiplet read requests as part of the `EVAL` section made to the memory chiplet.
 pub fn build_ace_memory_read_element_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -100,7 +100,7 @@ pub fn build_ace_memory_read_element_request<E: ExtensionField<Felt>>(
 pub(super) fn build_dyn_dyncall_callee_hash_read_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     op_code_felt: Felt,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -131,7 +131,7 @@ pub(super) fn build_dyn_dyncall_callee_hash_read_request<E: ExtensionField<Felt>
 /// Currently, this is done with `CALL` and `DYNCALL`.
 pub(super) fn build_fmp_initialization_write_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -158,7 +158,7 @@ pub(super) fn build_fmp_initialization_write_request<E: ExtensionField<Felt>>(
 pub(super) fn build_mem_mloadw_mstorew_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     op_label: u8,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -200,7 +200,7 @@ pub(super) fn build_mem_mloadw_mstorew_request<E: ExtensionField<Felt>>(
 pub(super) fn build_mem_mload_mstore_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     op_label: u8,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -231,7 +231,7 @@ pub(super) fn build_mem_mload_mstore_request<E: ExtensionField<Felt>>(
 /// Builds `MSTREAM` requests made to the memory chiplet.
 pub(super) fn build_mstream_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -283,7 +283,7 @@ pub(super) fn build_mstream_request<E: ExtensionField<Felt>>(
 /// Builds `PIPE` requests made to the memory chiplet.
 pub(super) fn build_pipe_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -335,7 +335,7 @@ pub(super) fn build_pipe_request<E: ExtensionField<Felt>>(
 /// Builds `HORNERBASE` requests made to the memory chiplet.
 pub(super) fn build_hornerbase_eval_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -376,7 +376,7 @@ pub(super) fn build_hornerbase_eval_request<E: ExtensionField<Felt>>(
 /// Builds `HORNEREXT` requests made to the memory chiplet.
 pub(super) fn build_hornerext_eval_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -416,7 +416,7 @@ pub(super) fn build_hornerext_eval_request<E: ExtensionField<Felt>>(
 pub(super) fn build_memory_chiplet_responses<E>(
     main_trace: &MainTrace,
     row: RowIndex,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     _debugger: &mut BusDebugger<E>,
 ) -> E
 where
@@ -523,7 +523,7 @@ impl<E> BusMessage<E> for MemoryWordMessage
 where
     E: ExtensionField<Felt>,
 {
-    fn value(&self, challenges: &AuxChallenges<E>) -> E {
+    fn value(&self, challenges: &Challenges<E>) -> E {
         challenges.encode([
             self.op_label,
             self.ctx,
@@ -563,7 +563,7 @@ impl<E> BusMessage<E> for MemoryElementMessage
 where
     E: ExtensionField<Felt>,
 {
-    fn value(&self, challenges: &AuxChallenges<E>) -> E {
+    fn value(&self, challenges: &Challenges<E>) -> E {
         challenges.encode([self.op_label, self.ctx, self.addr, self.clk, self.element])
     }
 

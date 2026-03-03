@@ -4,7 +4,7 @@ use miden_air::trace::MainTrace;
 use miden_core::{Felt, field::ExtensionField};
 
 use super::super::ace::{AceHints, NUM_ACE_LOGUP_FRACTIONS_EVAL, NUM_ACE_LOGUP_FRACTIONS_READ};
-use crate::trace::utils::AuxChallenges;
+use crate::trace::utils::Challenges;
 
 /// Describes how to construct the execution trace of the ACE chiplet wiring bus column.
 pub struct WiringBusBuilder<'a> {
@@ -19,7 +19,7 @@ impl<'a> WiringBusBuilder<'a> {
     pub fn build_aux_column<E: ExtensionField<Felt>>(
         &self,
         main_trace: &MainTrace,
-        challenges: &AuxChallenges<E>,
+        challenges: &Challenges<E>,
     ) -> Vec<E> {
         let mut wiring_bus = vec![E::ZERO; main_trace.num_rows()];
 

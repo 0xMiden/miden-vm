@@ -4,7 +4,7 @@ use miden_air::trace::{AUX_TRACE_RAND_CHALLENGES, STACK_AUX_TRACE_OFFSET};
 use miden_core::{ONE, ZERO, field::Field, operations::Operation};
 
 use super::{super::stack::OverflowTableRow, Felt, build_trace_from_ops, rand_array};
-use crate::trace::utils::AuxChallenges;
+use crate::trace::utils::Challenges;
 
 // CONSTANTS
 // ================================================================================================
@@ -37,7 +37,7 @@ fn p1_trace() {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
-    let challenges = AuxChallenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(&alphas);
     let row_values = [
         OverflowTableRow::new(Felt::new(2), ONE, ZERO).to_value(&challenges),
         OverflowTableRow::new(Felt::new(3), TWO, TWO).to_value(&challenges),

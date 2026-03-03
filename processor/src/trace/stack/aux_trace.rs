@@ -6,7 +6,7 @@ use miden_core::{field::ExtensionField, operations::opcodes};
 use super::Felt;
 use crate::{
     debug::BusDebugger,
-    trace::{AuxColumnBuilder, utils::AuxChallenges},
+    trace::{AuxColumnBuilder, utils::Challenges},
 };
 
 // AUXILIARY TRACE BUILDER
@@ -23,7 +23,7 @@ impl AuxTraceBuilder {
     pub fn build_aux_columns<E: ExtensionField<Felt>>(
         &self,
         main_trace: &MainTrace,
-        challenges: &AuxChallenges<E>,
+        challenges: &Challenges<E>,
     ) -> Vec<Vec<E>> {
         let p1 = self.build_aux_column(main_trace, challenges);
 
@@ -37,7 +37,7 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for AuxTraceBuilder {
     fn get_requests_at(
         &self,
         main_trace: &MainTrace,
-        challenges: &AuxChallenges<E>,
+        challenges: &Challenges<E>,
         i: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
@@ -66,7 +66,7 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for AuxTraceBuilder {
     fn get_responses_at(
         &self,
         main_trace: &MainTrace,
-        challenges: &AuxChallenges<E>,
+        challenges: &Challenges<E>,
         i: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
@@ -109,7 +109,7 @@ impl OverflowTableRow {
 impl OverflowTableRow {
     /// Reduces this row to a single field element in the field specified by E. This requires
     /// at least 4 alpha values.
-    pub fn to_value<E: ExtensionField<Felt>>(&self, challenges: &AuxChallenges<E>) -> E {
+    pub fn to_value<E: ExtensionField<Felt>>(&self, challenges: &Challenges<E>) -> E {
         challenges.encode([self.clk, self.val, self.prev])
     }
 }
