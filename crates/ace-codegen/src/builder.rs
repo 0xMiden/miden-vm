@@ -4,9 +4,11 @@
 //! capture the exact constraint expressions and their ordering. This keeps the
 //! generated DAG stable and aligned with the verifier logic.
 
-use p3_field::{Algebra, ExtensionField, Field};
+use core::marker::PhantomData;
+
+use crate::symbolic::{Entry, SymExpr, SymVar};
+use p3_field::{ExtensionField, Field};
 use p3_miden_air::{MidenAirBuilder, RowMajorMatrix};
-use p3_miden_uni_stark::{Entry, SymbolicExpression, SymbolicVariable};
 
 /// Transition constraints are defined over a 2-row window.
 const TRANSITION_WINDOW_SIZE: usize = 2;
@@ -18,21 +20,21 @@ where
     F: Field,
     EF: ExtensionField<F>,
 {
-    preprocessed: RowMajorMatrix<SymbolicVariable<F>>,
-    main: RowMajorMatrix<SymbolicVariable<F>>,
-    aux: RowMajorMatrix<SymbolicVariable<F>>,
-    aux_randomness: Vec<SymbolicVariable<F>>,
-    aux_bus_boundary_values: Vec<SymbolicVariable<F>>,
-    public_values: Vec<SymbolicVariable<F>>,
-    periodic_values: Vec<SymbolicVariable<F>>,
-    constraints: Vec<SymbolicExpression<EF>>,
+    preprocessed: RowMajorMatrix<SymVar<EF>>,
+    main: RowMajorMatrix<SymVar<EF>>,
+    aux: RowMajorMatrix<SymVar<EF>>,
+    aux_randomness: Vec<SymVar<EF>>,
+    aux_bus_boundary_values: Vec<SymVar<EF>>,
+    public_values: Vec<SymVar<EF>>,
+    periodic_values: Vec<SymVar<EF>>,
+    constraints: Vec<SymExpr<EF>>,
+    _phantom: PhantomData<F>,
 }
 
 impl<F, EF> RecordingAirBuilder<F, EF>
 where
     F: Field,
     EF: ExtensionField<F>,
-    SymbolicExpression<EF>: From<SymbolicExpression<F>>,
 {
     /// Create a recording builder with the given widths and counts.
     pub fn new(
@@ -47,33 +49,33 @@ where
             .into_iter()
             .flat_map(|offset| {
                 (0..preprocessed_width)
-                    .map(move |index| SymbolicVariable::new(Entry::Preprocessed { offset }, index))
+                    .map(move |index| SymVar::new(Entry::Preprocessed { offset }, index))
             })
             .collect();
         let main_values = [0, 1]
             .into_iter()
             .flat_map(|offset| {
-                (0..width).map(move |index| SymbolicVariable::new(Entry::Main { offset }, index))
+                (0..width).map(move |index| SymVar::new(Entry::Main { offset }, index))
             })
             .collect();
         let aux_values = [0, 1]
             .into_iter()
             .flat_map(|offset| {
-                (0..aux_width).map(move |index| SymbolicVariable::new(Entry::Aux { offset }, index))
+                (0..aux_width).map(move |index| SymVar::new(Entry::Aux { offset }, index))
             })
             .collect();
         let aux = RowMajorMatrix::new(aux_values, aux_width);
         let aux_randomness = (0..num_randomness)
-            .map(|index| SymbolicVariable::new(Entry::Challenge, index))
+            .map(|index| SymVar::new(Entry::Challenge, index))
             .collect();
         let aux_bus_boundary_values = (0..aux_width)
-            .map(|index| SymbolicVariable::new(Entry::AuxBusBoundary, index))
+            .map(|index| SymVar::new(Entry::AuxBusBoundary, index))
             .collect();
         let public_values = (0..num_public_values)
-            .map(|index| SymbolicVariable::new(Entry::Public, index))
+            .map(|index| SymVar::new(Entry::Public, index))
             .collect();
         let periodic_values = (0..num_periodic_values)
-            .map(|index| SymbolicVariable::new(Entry::Periodic, index))
+            .map(|index| SymVar::new(Entry::Periodic, index))
             .collect();
         Self {
             preprocessed: RowMajorMatrix::new(prep_values, preprocessed_width),
@@ -84,57 +86,55 @@ where
             public_values,
             periodic_values,
             constraints: Vec::new(),
+            _phantom: PhantomData,
         }
     }
 
     /// Return the recorded constraint list in evaluation order.
-    pub fn constraints(&self) -> &[SymbolicExpression<EF>] {
+    pub fn constraints(&self) -> &[SymExpr<EF>] {
         &self.constraints
     }
 }
 
 impl<F, EF> MidenAirBuilder for RecordingAirBuilder<F, EF>
 where
-    F: Field,
+    F: Field + Sync,
     EF: ExtensionField<F>,
-    SymbolicExpression<EF>: Algebra<SymbolicExpression<F>> + From<SymbolicExpression<F>>,
 {
     type F = F;
-    type Expr = SymbolicExpression<F>;
-    type Var = SymbolicVariable<F>;
+    type Expr = SymExpr<EF>;
+    type Var = SymVar<EF>;
     type M = RowMajorMatrix<Self::Var>;
-    type PublicVar = SymbolicVariable<F>;
+    type PublicVar = SymVar<EF>;
     type EF = EF;
-    type ExprEF = SymbolicExpression<EF>;
-    type VarEF = SymbolicVariable<F>;
+    type ExprEF = SymExpr<EF>;
+    type VarEF = SymVar<EF>;
     type MP = RowMajorMatrix<Self::VarEF>;
-    type RandomVar = SymbolicVariable<F>;
-    type PeriodicVal = SymbolicVariable<F>;
+    type RandomVar = SymVar<EF>;
+    type PeriodicVal = SymVar<EF>;
 
     fn main(&self) -> Self::M {
         self.main.clone()
     }
 
     fn is_first_row(&self) -> Self::Expr {
-        SymbolicExpression::IsFirstRow
+        SymExpr::IsFirstRow
     }
 
     fn is_last_row(&self) -> Self::Expr {
-        SymbolicExpression::IsLastRow
+        SymExpr::IsLastRow
     }
 
     fn is_transition_window(&self, size: usize) -> Self::Expr {
         if size == TRANSITION_WINDOW_SIZE {
-            SymbolicExpression::IsTransition
+            SymExpr::IsTransition
         } else {
             panic!("ace-codegen only supports a window size of {TRANSITION_WINDOW_SIZE}")
         }
     }
 
     fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
-        let expr: SymbolicExpression<F> = x.into();
-        let expr_ef: SymbolicExpression<EF> = SymbolicExpression::<EF>::from(expr);
-        self.constraints.push(expr_ef);
+        self.constraints.push(x.into());
     }
 
     fn assert_zero_ext<I>(&mut self, x: I)

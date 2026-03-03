@@ -1,9 +1,9 @@
 #![allow(dead_code)]
 
+use crate::symbolic::{Entry, SymExpr, SymVar};
 use miden_core::{Felt, field::QuadFelt};
 use p3_dft::{Radix2DitParallel, TwoAdicSubgroupDft};
 use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
-use p3_miden_uni_stark::{Entry, SymbolicExpression, SymbolicVariable};
 
 use crate::{
     InputKey, InputLayout,
@@ -26,7 +26,7 @@ pub fn fill_inputs(layout: &InputLayout) -> Vec<QuadFelt> {
     values
 }
 
-pub fn input_key_for_symbolic<T>(var: &SymbolicVariable<T>) -> InputKey {
+pub fn input_key_for_symbolic<EF>(var: &SymVar<EF>) -> InputKey {
     match var.entry {
         Entry::Preprocessed { .. } => panic!("preprocessed not supported in test"),
         Entry::Main { offset } => InputKey::Main { offset, index: var.index },
@@ -72,13 +72,13 @@ pub fn eval_periodic_values(periodic_table: &[Vec<Felt>], z_k: QuadFelt) -> Vec<
 }
 
 pub fn eval_expr(
-    expr: &SymbolicExpression<QuadFelt>,
+    expr: &SymExpr<QuadFelt>,
     inputs: &[QuadFelt],
     layout: &InputLayout,
     periodic_values: &[QuadFelt],
 ) -> QuadFelt {
     match expr {
-        SymbolicExpression::Variable(v) => match v.entry {
+        SymExpr::Variable(v) => match v.entry {
             Entry::Aux { offset } | Entry::Permutation { offset } => {
                 let mut acc = QuadFelt::ZERO;
                 for coord in 0..layout.counts.ext_degree {
@@ -120,35 +120,35 @@ pub fn eval_expr(
                 inputs[layout.index(key).unwrap()]
             },
         },
-        SymbolicExpression::IsFirstRow => {
+        SymExpr::IsFirstRow => {
             let z_pow_n = inputs[layout.index(InputKey::ZPowN).unwrap()];
             let inv = inputs[layout.index(InputKey::InvZMinusOne).unwrap()];
             (z_pow_n - QuadFelt::ONE) * inv
         },
-        SymbolicExpression::IsLastRow => {
+        SymExpr::IsLastRow => {
             let z_pow_n = inputs[layout.index(InputKey::ZPowN).unwrap()];
             let inv = inputs[layout.index(InputKey::InvZMinusGInv).unwrap()];
             (z_pow_n - QuadFelt::ONE) * inv
         },
-        SymbolicExpression::IsTransition => {
+        SymExpr::IsTransition => {
             let z = inputs[layout.index(InputKey::Z).unwrap()];
             let g_inv = inputs[layout.index(InputKey::GInv).unwrap()];
             z - g_inv
         },
-        SymbolicExpression::Constant(c) => *c,
-        SymbolicExpression::Add { x, y, .. } => {
+        SymExpr::Constant(c) => *c,
+        SymExpr::Add(x, y) => {
             eval_expr(x, inputs, layout, periodic_values)
                 + eval_expr(y, inputs, layout, periodic_values)
         },
-        SymbolicExpression::Sub { x, y, .. } => {
+        SymExpr::Sub(x, y) => {
             eval_expr(x, inputs, layout, periodic_values)
                 - eval_expr(y, inputs, layout, periodic_values)
         },
-        SymbolicExpression::Mul { x, y, .. } => {
+        SymExpr::Mul(x, y) => {
             eval_expr(x, inputs, layout, periodic_values)
                 * eval_expr(y, inputs, layout, periodic_values)
         },
-        SymbolicExpression::Neg { x, .. } => -eval_expr(x, inputs, layout, periodic_values),
+        SymExpr::Neg(x) => -eval_expr(x, inputs, layout, periodic_values),
     }
 }
 
