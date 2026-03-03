@@ -74,6 +74,12 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BlockHashTableColumnBuilde
             _ => E::ONE,
         }
     }
+
+    /// The block hash table ends at `1/program_hash_msg` (not 1) because the program hash
+    /// init row is verified via `reduced_aux_values` (aux-finals), not seeded into the table.
+    fn enforce_bus_balance(&self) -> bool {
+        false
+    }
 }
 
 // BLOCK HASH TABLE ROW

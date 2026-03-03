@@ -156,6 +156,12 @@ where
             E::ONE
         }
     }
+
+    /// The chiplets bus ends at `kernel_reduced` (not 1) when kernel procedures are present.
+    /// Balance is verified via `reduced_aux_values` (aux-finals), not the bus debugger.
+    fn enforce_bus_balance(&self) -> bool {
+        false
+    }
 }
 
 // CHIPLETS REQUESTS TO MORE THAN ONE CHIPLET
