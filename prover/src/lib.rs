@@ -91,7 +91,7 @@ pub async fn prove(
 
     // Create AIR and aux trace builder adapter
     let air = ProcessorAir;
-    let aux_builder = miden_air::trace::AuxTraceAdapter(trace.aux_trace_builders().clone());
+    let aux_builder = trace.aux_trace_builders().clone();
 
     // Compute log2 of trace height (needed by verifier)
     let log_trace_height = trace_matrix.height().trailing_zeros() as u32;

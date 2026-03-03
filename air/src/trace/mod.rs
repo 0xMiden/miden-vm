@@ -13,9 +13,7 @@ pub use rows::{RowIndex, RowIndexError};
 
 mod main_trace;
 pub use main_trace::{MainTrace, MainTraceRow};
-
-mod aux_trace;
-pub use aux_trace::{AuxTraceAdapter, AuxTraceBuilder};
+pub use p3_miden_lifted_air::AuxBuilder;
 
 // CONSTANTS
 // ================================================================================================
