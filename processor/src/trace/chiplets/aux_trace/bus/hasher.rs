@@ -1,7 +1,7 @@
 use core::fmt::{Display, Formatter, Result as FmtResult};
 
 use miden_air::trace::{
-    MainTrace, RowIndex,
+    MainTrace, RowIndex, bus_message,
     chiplets::{
         hasher,
         hasher::{
@@ -25,31 +25,32 @@ use super::get_op_label;
 use crate::{
     Word,
     debug::{BusDebugger, BusMessage},
-    trace::utils::AuxChallenges,
+    trace::utils::Challenges,
 };
 
 // HASHER MESSAGE ENCODING LAYOUT
 // ================================================================================================
 //
-// All hasher chiplet bus messages use a common coefficient layout:
+// All hasher chiplet bus messages use a common encoding structure:
 //
-//   coeffs[0]  = alpha (randomness base)
-//   coeffs[1]  = label (transition type: LINEAR_HASH, RETURN_HASH, MP_VERIFY, etc.)
-//   coeffs[2]  = addr (hasher chiplet address)
-//   coeffs[3]  = node_index (Merkle tree path position for MPVERIFY/MRUPDATE, ZERO for all other
-// ops)   coeffs[4..11] = state[0..7] (rate portion: RATE0 || RATE1 in sponge order)
-//   coeffs[12..15] = capacity[0..3] (capacity portion, used for domain separation)
+//   challenges.alpha                     = alpha (randomness base, accessed directly)
+//   challenges.beta_powers[0]            = beta^0 (label: transition type)
+//   challenges.beta_powers[1]            = beta^1 (addr: hasher chiplet address)
+//   challenges.beta_powers[2]            = beta^2 (node_index: Merkle path position, 0 for
+// non-Merkle ops)   challenges.beta_powers[3..10]        = beta^3..beta^10 (state[0..7]: RATE0 ||
+// RATE1 in sponge order)   challenges.beta_powers[11..14]       = beta^11..beta^14 (capacity[0..3]:
+// domain separation)
 //
 // Message encoding: alpha + beta^0*label + beta^1*addr + beta^2*node_index
 //                   + beta^3*state[0] + ... + beta^10*state[7]
 //                   + beta^11*capacity[0] + ... + beta^14*capacity[3]
 //
 // Different message types use different subsets of this layout:
-// - Full state messages (HPERM, LOG_PRECOMPILE): use all 12 state elements (rate + capacity)
-// - Rate-only messages (SPAN, RESPAN): use coeffs[1,2,4..11] (skip node_index and capacity)
-// - Digest messages (END block): use coeffs[1,2,4..7] (only label, addr, and RATE0 digest)
-// - Control block messages: use coeffs[1,2,4..11,13] (rate + one capacity element for op_code)
-// - Tree operation messages (MPVERIFY, MRUPDATE): include node_index at coeffs[3]
+// - Full state messages (HPERM, LOG_PRECOMPILE): all 12 state elements (rate + capacity)
+// - Rate-only messages (SPAN, RESPAN): skip node_index and capacity, use label + addr + state[0..7]
+// - Digest messages (END block): label + addr + RATE0 digest (state[0..3])
+// - Control block messages: rate + one capacity element (beta_powers[12]) for op_code
+// - Tree operation messages (MPVERIFY, MRUPDATE): include node_index
 
 // HASHER MESSAGE CONSTANTS AND HELPERS
 // ================================================================================================
@@ -64,16 +65,12 @@ const MP_VERIFY_LABEL_START: Felt = Felt::new((MP_VERIFY_LABEL + 16) as u64);
 const MR_UPDATE_OLD_LABEL_START: Felt = Felt::new((MR_UPDATE_OLD_LABEL + 16) as u64);
 const MR_UPDATE_NEW_LABEL_START: Felt = Felt::new((MR_UPDATE_NEW_LABEL + 16) as u64);
 
-/// Encodes a hasher message with full header (label, addr, node_index) and variable-length state.
+/// Encodes hasher message as **alpha + <beta, [label, addr, node_index, state...]>**
 ///
-/// Layout: `alpha + beta^0*label + beta^1*addr + beta^2*node_index + beta^3*state[0] + ... +
-/// beta^(3+N-1)*state[N-1]`
-///
-/// This is the canonical encoding for tree operations (MPVERIFY, MRUPDATE) and generic hasher
-/// messages that include the node_index field.
+/// Used for tree operations (MPVERIFY, MRUPDATE) and generic hasher messages with node_index.
 #[inline(always)]
 fn hasher_message_value<E, const N: usize>(
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     transition_label: Felt,
     addr_next: Felt,
     node_index: Felt,
@@ -82,26 +79,20 @@ fn hasher_message_value<E, const N: usize>(
 where
     E: ExtensionField<Felt>,
 {
-    use crate::trace::utils::AuxChallenges as AC;
-
-    let mut acc = challenges[AC::<E>::ALPHA_IDX]
-        + challenges[AC::<E>::LABEL_IDX] * transition_label
-        + challenges[AC::<E>::ADDR_IDX] * addr_next
-        + challenges[AC::<E>::NODE_INDEX_IDX] * node_index;
-    for i in 0..N {
-        acc += challenges[AC::<E>::STATE_START_IDX + i] * state[i];
+    let mut acc = challenges.alpha
+        + challenges.beta_powers[bus_message::LABEL_IDX] * transition_label
+        + challenges.beta_powers[bus_message::ADDR_IDX] * addr_next
+        + challenges.beta_powers[bus_message::NODE_INDEX_IDX] * node_index;
+    for (i, &elem) in state.iter().enumerate() {
+        acc += challenges.beta_powers[bus_message::STATE_START_IDX + i] * elem;
     }
     acc
 }
 
-/// Encodes a hasher message with header (label, addr) and rate-length state.
-///
-/// Layout: `alpha + beta^0*label + beta^1*addr + beta^3*state[0] + ... + beta^10*state[7]`
-///
-/// **Note:** Skips node_index (coeffs[3]) since SPAN and RESPAN blocks don't use it.
+/// Encodes hasher message as **alpha + <beta, [label, addr, _, state[0..7]]>** (skips node_index).
 #[inline(always)]
 fn header_rate_value<E>(
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     transition_label: Felt,
     addr: Felt,
     state: [Felt; hasher::RATE_LEN],
@@ -109,26 +100,20 @@ fn header_rate_value<E>(
 where
     E: ExtensionField<Felt>,
 {
-    use crate::trace::utils::AuxChallenges as AC;
-
-    let mut acc = challenges[AC::<E>::ALPHA_IDX]
-        + challenges[AC::<E>::LABEL_IDX] * transition_label
-        + challenges[AC::<E>::ADDR_IDX] * addr;
-    for i in 0..hasher::RATE_LEN {
-        acc += challenges[AC::<E>::STATE_START_IDX + i] * state[i];
+    let mut acc = challenges.alpha
+        + challenges.beta_powers[bus_message::LABEL_IDX] * transition_label
+        + challenges.beta_powers[bus_message::ADDR_IDX] * addr;
+    for (i, &elem) in state.iter().enumerate() {
+        acc += challenges.beta_powers[bus_message::STATE_START_IDX + i] * elem;
     }
     acc
 }
 
-/// Encodes a hasher message with header (label, addr) and digest (RATE0 word only).
-///
-/// Layout: `alpha + beta^0*label + beta^1*addr + beta^3*digest[0] + ... + beta^6*digest[3]`
-///
-/// **Note:** Skips node_index (coeffs[3]) and uses only RATE0 portion (coeffs[4..7]) since
-/// END blocks only return the hash digest.
+/// Encodes hasher message as **alpha + <beta, [label, addr, _, digest]>** (skips node_index, digest
+/// is RATE0 only).
 #[inline(always)]
 fn header_digest_value<E>(
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     transition_label: Felt,
     addr: Felt,
     digest: [Felt; WORD_SIZE],
@@ -136,13 +121,11 @@ fn header_digest_value<E>(
 where
     E: ExtensionField<Felt>,
 {
-    use crate::trace::utils::AuxChallenges as AC;
-
-    let mut acc = challenges[AC::<E>::ALPHA_IDX]
-        + challenges[AC::<E>::LABEL_IDX] * transition_label
-        + challenges[AC::<E>::ADDR_IDX] * addr;
-    for i in 0..WORD_SIZE {
-        acc += challenges[AC::<E>::STATE_START_IDX + i] * digest[i];
+    let mut acc = challenges.alpha
+        + challenges.beta_powers[bus_message::LABEL_IDX] * transition_label
+        + challenges.beta_powers[bus_message::ADDR_IDX] * addr;
+    for (i, &elem) in digest.iter().enumerate() {
+        acc += challenges.beta_powers[bus_message::STATE_START_IDX + i] * elem;
     }
     acc
 }
@@ -155,7 +138,7 @@ pub(super) fn build_control_block_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     decoder_hasher_state: [Felt; 8],
     op_code_felt: Felt,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -177,7 +160,7 @@ pub(super) fn build_control_block_request<E: ExtensionField<Felt>>(
 /// Builds requests made to the hasher chiplet at the start of a span block.
 pub(super) fn build_span_block_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -198,7 +181,7 @@ pub(super) fn build_span_block_request<E: ExtensionField<Felt>>(
 /// Builds requests made to the hasher chiplet at the start of a respan block.
 pub(super) fn build_respan_block_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -219,7 +202,7 @@ pub(super) fn build_respan_block_request<E: ExtensionField<Felt>>(
 /// Builds requests made to the hasher chiplet at the end of a block.
 pub(super) fn build_end_block_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -242,7 +225,7 @@ pub(super) fn build_end_block_request<E: ExtensionField<Felt>>(
 /// Builds `HPERM` requests made to the hash chiplet.
 pub(super) fn build_hperm_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -322,7 +305,7 @@ pub(super) fn build_hperm_request<E: ExtensionField<Felt>>(
 /// - `s8..s11`: `CAP_NEXT[0..3]`
 pub(super) fn build_log_precompile_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -385,7 +368,7 @@ pub(super) fn build_log_precompile_request<E: ExtensionField<Felt>>(
 /// Builds `MPVERIFY` requests made to the hash chiplet.
 pub(super) fn build_mpverify_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -451,7 +434,7 @@ pub(super) fn build_mpverify_request<E: ExtensionField<Felt>>(
 /// Builds `MRUPDATE` requests made to the hash chiplet.
 pub(super) fn build_mrupdate_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -566,7 +549,7 @@ pub(super) fn build_mrupdate_request<E: ExtensionField<Felt>>(
 pub(super) fn build_hasher_chiplet_responses<E>(
     main_trace: &MainTrace,
     row: RowIndex,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     _debugger: &mut BusDebugger<E>,
 ) -> E
 where
@@ -759,19 +742,9 @@ impl<E> BusMessage<E> for ControlBlockRequestMessage
 where
     E: ExtensionField<Felt>,
 {
-    /// Encodes a control block request message.
-    ///
-    /// Layout: `alpha + beta^0*label + beta^1*addr + beta^3*state[0..7] + beta^12*op_code`
-    ///
-    /// This combines:
-    /// - Header: label (LINEAR_HASH_LABEL+16), addr (next address)
-    /// - Rate: decoder_hasher_state[0..7] (8 elements at coeffs[4..11])
-    /// - Capacity domain: op_code at coeffs[CAPACITY_DOMAIN_IDX] (coefficient index 13 = beta^12)
-    ///
-    /// Skips node_index (coeffs[3], not used by control blocks).
-    fn value(&self, challenges: &AuxChallenges<E>) -> E {
-        use crate::trace::utils::AuxChallenges as AC;
-
+    /// Encodes as **alpha + <beta, [label, addr, _, state[0..7], ..., op_code]>** (skips
+    /// node_index).
+    fn value(&self, challenges: &Challenges<E>) -> E {
         // Header + rate portion + capacity domain element for op_code
         let mut acc = header_rate_value(
             challenges,
@@ -779,7 +752,7 @@ where
             self.addr_next,
             self.decoder_hasher_state,
         );
-        acc += challenges[AC::<E>::CAPACITY_DOMAIN_IDX] * self.op_code;
+        acc += challenges.beta_powers[bus_message::CAPACITY_DOMAIN_IDX] * self.op_code;
         acc
     }
 
@@ -820,7 +793,7 @@ impl<E> BusMessage<E> for HasherMessage
 where
     E: ExtensionField<Felt>,
 {
-    fn value(&self, challenges: &AuxChallenges<E>) -> E {
+    fn value(&self, challenges: &Challenges<E>) -> E {
         hasher_message_value(
             challenges,
             self.transition_label,
@@ -858,7 +831,7 @@ impl<E> BusMessage<E> for SpanBlockMessage
 where
     E: ExtensionField<Felt>,
 {
-    fn value(&self, challenges: &AuxChallenges<E>) -> E {
+    fn value(&self, challenges: &Challenges<E>) -> E {
         header_rate_value(challenges, self.transition_label, self.addr_next, self.state)
     }
 
@@ -890,7 +863,7 @@ impl<E> BusMessage<E> for RespanBlockMessage
 where
     E: ExtensionField<Felt>,
 {
-    fn value(&self, challenges: &AuxChallenges<E>) -> E {
+    fn value(&self, challenges: &Challenges<E>) -> E {
         header_rate_value(challenges, self.transition_label, self.addr_next - ONE, self.state)
     }
 
@@ -922,7 +895,7 @@ impl<E> BusMessage<E> for EndBlockMessage
 where
     E: ExtensionField<Felt>,
 {
-    fn value(&self, challenges: &AuxChallenges<E>) -> E {
+    fn value(&self, challenges: &Challenges<E>) -> E {
         header_digest_value(challenges, self.transition_label, self.addr, self.digest)
     }
 

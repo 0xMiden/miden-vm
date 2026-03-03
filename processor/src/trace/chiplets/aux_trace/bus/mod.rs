@@ -39,7 +39,7 @@ use miden_core::{
 use super::Felt;
 use crate::{
     debug::{BusDebugger, BusMessage},
-    trace::{AuxColumnBuilder, utils::AuxChallenges},
+    trace::{AuxColumnBuilder, utils::Challenges},
 };
 
 mod ace;
@@ -73,7 +73,7 @@ where
     fn get_requests_at(
         &self,
         main_trace: &MainTrace,
-        challenges: &AuxChallenges<E>,
+        challenges: &Challenges<E>,
         row: RowIndex,
         debugger: &mut BusDebugger<E>,
     ) -> E {
@@ -151,7 +151,7 @@ where
     fn get_responses_at(
         &self,
         main_trace: &MainTrace,
-        challenges: &AuxChallenges<E>,
+        challenges: &Challenges<E>,
         row: RowIndex,
         debugger: &mut BusDebugger<E>,
     ) -> E {
@@ -173,7 +173,7 @@ where
     fn init_requests(
         &self,
         _main_trace: &MainTrace,
-        challenges: &AuxChallenges<E>,
+        challenges: &Challenges<E>,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         build_kernel_init_requests(self.kernel.proc_hashes(), challenges, _debugger)
@@ -191,27 +191,23 @@ where
 /// Encoding: `alpha + beta^0*label + beta^1*addr + beta^12*op_code`
 /// where beta^12 is the capacity domain element at coeffs[13].
 #[inline(always)]
-fn encode_control_block_without_state<E>(
-    challenges: &AuxChallenges<E>,
-    addr: Felt,
-    op_code: Felt,
-) -> E
+fn encode_control_block_without_state<E>(challenges: &Challenges<E>, addr: Felt, op_code: Felt) -> E
 where
     E: ExtensionField<Felt>,
 {
-    use crate::trace::utils::AuxChallenges;
+    use miden_air::trace::bus_message;
 
-    challenges[AuxChallenges::<E>::ALPHA_IDX]
-        + challenges[AuxChallenges::<E>::LABEL_IDX] * Felt::from_u8(LINEAR_HASH_LABEL + 16)
-        + challenges[AuxChallenges::<E>::ADDR_IDX] * addr
-        + challenges[AuxChallenges::<E>::CAPACITY_DOMAIN_IDX] * op_code
+    challenges.alpha
+        + challenges.beta_powers[bus_message::LABEL_IDX] * Felt::from_u8(LINEAR_HASH_LABEL + 16)
+        + challenges.beta_powers[bus_message::ADDR_IDX] * addr
+        + challenges.beta_powers[bus_message::CAPACITY_DOMAIN_IDX] * op_code
 }
 
 /// Builds requests made on a `DYN` operation.
 fn build_dyn_request<E>(
     main_trace: &MainTrace,
     op_code_felt: Felt,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E
@@ -236,7 +232,7 @@ where
 fn build_dyncall_request<E>(
     main_trace: &MainTrace,
     op_code_felt: Felt,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E
@@ -263,7 +259,7 @@ where
 fn build_call_request<E>(
     main_trace: &MainTrace,
     op_code_felt: Felt,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E
@@ -289,7 +285,7 @@ where
 fn build_syscall_block_request<E>(
     main_trace: &MainTrace,
     op_code_felt: Felt,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E

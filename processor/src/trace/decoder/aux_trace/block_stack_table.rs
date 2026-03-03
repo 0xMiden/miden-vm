@@ -8,7 +8,7 @@ use miden_core::{
 };
 
 use super::{AuxColumnBuilder, Felt, MainTrace, ONE, ZERO};
-use crate::{debug::BusDebugger, trace::utils::AuxChallenges};
+use crate::{debug::BusDebugger, trace::utils::Challenges};
 
 // BLOCK STACK TABLE COLUMN BUILDER
 // ================================================================================================
@@ -23,7 +23,7 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BlockStackColumnBuilder {
     fn get_requests_at(
         &self,
         main_trace: &MainTrace,
-        challenges: &AuxChallenges<E>,
+        challenges: &Challenges<E>,
         i: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
@@ -41,7 +41,7 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BlockStackColumnBuilder {
     fn get_responses_at(
         &self,
         main_trace: &MainTrace,
-        challenges: &AuxChallenges<E>,
+        challenges: &Challenges<E>,
         i: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
@@ -66,7 +66,7 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BlockStackColumnBuilder {
 fn get_block_stack_table_respan_multiplicand<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     i: RowIndex,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
 ) -> E {
     let block_id = main_trace.addr(i);
     let parent_id = main_trace.decoder_hasher_state_element(1, i + 1);
@@ -80,7 +80,7 @@ fn get_block_stack_table_respan_multiplicand<E: ExtensionField<Felt>>(
 fn get_block_stack_table_end_multiplicand<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     i: RowIndex,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
 ) -> E {
     let block_id = main_trace.addr(i);
     let parent_id = main_trace.addr(i + 1);
@@ -113,7 +113,7 @@ fn get_block_stack_table_end_multiplicand<E: ExtensionField<Felt>>(
 fn get_block_stack_table_inclusion_multiplicand<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     i: RowIndex,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     op_code: u8,
 ) -> E {
     let block_id = main_trace.addr(i + 1);

@@ -31,7 +31,7 @@ use super::{
     ONE, Operation, ZERO, build_span_with_respan_ops, build_trace_from_ops_with_inputs,
     build_trace_from_program, init_state_from_words, rand_array,
 };
-use crate::{StackInputs, trace::utils::AuxChallenges};
+use crate::{StackInputs, trace::utils::Challenges};
 
 // CONSTANTS
 // ================================================================================================
@@ -71,7 +71,7 @@ pub fn b_chip_span() {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
 
-    let challenges = AuxChallenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(&alphas);
 
     assert_eq!(trace.length(), b_chip.len());
     assert_eq!(ONE, b_chip[0]);
@@ -147,7 +147,7 @@ pub fn b_chip_span_with_respan() {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
 
-    let challenges = AuxChallenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(&alphas);
 
     assert_eq!(trace.length(), b_chip.len());
     assert_eq!(ONE, b_chip[0]);
@@ -264,7 +264,7 @@ pub fn b_chip_merge() {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
 
-    let challenges = AuxChallenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(&alphas);
 
     assert_eq!(trace.length(), b_chip.len());
     assert_eq!(ONE, b_chip[0]);
@@ -389,7 +389,7 @@ pub fn b_chip_permutation() {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
 
-    let challenges = AuxChallenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(&alphas);
 
     assert_eq!(trace.length(), b_chip.len());
     assert_eq!(ONE, b_chip[0]);
@@ -504,7 +504,7 @@ pub fn b_chip_log_precompile() {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
 
-    let challenges = AuxChallenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(&alphas);
 
     assert_eq!(trace.length(), b_chip.len());
     assert_eq!(ONE, b_chip[0]);
@@ -632,7 +632,7 @@ fn b_chip_mpverify() {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
 
-    let challenges = AuxChallenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(&alphas);
 
     assert_eq!(trace.length(), b_chip.len());
     assert_eq!(ONE, b_chip[0]);
@@ -756,7 +756,7 @@ fn b_chip_mrupdate() {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
 
-    let challenges = AuxChallenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(&alphas);
 
     assert_eq!(trace.length(), b_chip.len());
     assert_eq!(ONE, b_chip[0]);
@@ -907,7 +907,7 @@ fn b_chip_mrupdate() {
 
 /// Reduces the provided hasher row information to an expected value.
 fn build_expected(
-    challenges: &AuxChallenges<Felt>,
+    challenges: &Challenges<Felt>,
     label: u8,
     state: HasherState,
     next_state: HasherState,
@@ -916,22 +916,22 @@ fn build_expected(
 ) -> Felt {
     let first_cycle_row = addr_to_cycle_row(addr) == 0;
     let transition_label = if first_cycle_row { label + 16_u8 } else { label + 32_u8 };
-    let header = challenges[0]
-        + challenges[1] * Felt::from_u8(transition_label)
-        + challenges[2] * addr
-        + challenges[3] * index;
+    let header = challenges.alpha
+        + challenges.beta_powers[0] * Felt::from_u8(transition_label)
+        + challenges.beta_powers[1] * addr
+        + challenges.beta_powers[2] * index;
     let mut value = header;
 
     if (first_cycle_row && label == LINEAR_HASH_LABEL) || label == RETURN_STATE_LABEL {
         // include the entire state (words a, b, c)
-        value += build_value(&challenges[4..16], &state);
+        value += build_value(&challenges.beta_powers[3..15], &state);
     } else if label == LINEAR_HASH_LABEL {
         // Include the next absorbed rate portion of the state (RATE0 || RATE1).
         // With LE sponge layout [RATE0, RATE1, CAP], rate is at indices 0..8.
-        value += build_value(&challenges[4..12], &next_state[0..RATE_LEN]);
+        value += build_value(&challenges.beta_powers[3..11], &next_state[0..RATE_LEN]);
     } else if label == RETURN_HASH_LABEL {
         // include the digest (word b)
-        value += build_value(&challenges[4..8], &state[DIGEST_RANGE]);
+        value += build_value(&challenges.beta_powers[3..7], &state[DIGEST_RANGE]);
     } else {
         assert!(
             label == MP_VERIFY_LABEL
@@ -941,8 +941,8 @@ fn build_expected(
         let bit = index.as_canonical_u64() & 1;
         // For Merkle operations, RATE0 and RATE1 hold the two child digests.
         // With LE sponge layout [RATE0, RATE1, CAP], they are at indices 0..4 and 4..8.
-        let left_word = build_value(&challenges[4..8], &state[0..4]);
-        let right_word = build_value(&challenges[4..8], &state[4..8]);
+        let left_word = build_value(&challenges.beta_powers[3..7], &state[0..4]);
+        let right_word = build_value(&challenges.beta_powers[3..7], &state[4..8]);
 
         value += Felt::new(1 - bit) * left_word + Felt::new(bit) * right_word;
     }
@@ -954,7 +954,7 @@ fn build_expected(
 /// operation lookup.
 fn build_expected_from_trace(
     trace: &ExecutionTrace,
-    challenges: &AuxChallenges<Felt>,
+    challenges: &Challenges<Felt>,
     row: RowIndex,
 ) -> Felt {
     let s0 = trace.main_trace.get_column(HASHER_TRACE_OFFSET)[row];

@@ -17,7 +17,7 @@ use super::{
     AUX_TRACE_RAND_CHALLENGES, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, HASH_CYCLE_LEN,
     LAST_CYCLE_ROW, ONE, Operation, Word, ZERO, build_trace_from_ops, rand_array,
 };
-use crate::trace::utils::AuxChallenges;
+use crate::trace::utils::Challenges;
 
 /// Tests the generation of the `b_chip` bus column when only memory lookups are included. It
 /// ensures that trace generation is correct when all of the following are true.
@@ -56,7 +56,7 @@ fn b_chip_trace_mem() {
     let rand_elements = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
     let aux_columns = trace.build_aux_trace(&rand_elements).unwrap();
     let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
-    let challenges = AuxChallenges::<Felt>::new(&rand_elements);
+    let challenges = Challenges::<Felt>::new(&rand_elements);
     assert_eq!(trace.length(), b_chip.len());
     assert_eq!(ONE, b_chip[0]);
 
@@ -202,7 +202,7 @@ fn b_chip_trace_mem() {
 // ================================================================================================
 
 fn build_expected_bus_element_msg(
-    challenges: &AuxChallenges<Felt>,
+    challenges: &Challenges<Felt>,
     op_label: u8,
     ctx: Felt,
     addr: Felt,
@@ -215,7 +215,7 @@ fn build_expected_bus_element_msg(
 }
 
 fn build_expected_bus_word_msg(
-    challenges: &AuxChallenges<Felt>,
+    challenges: &Challenges<Felt>,
     op_label: u8,
     ctx: Felt,
     addr: Felt,
@@ -229,7 +229,7 @@ fn build_expected_bus_word_msg(
 
 fn build_expected_bus_msg_from_trace(
     trace: &ExecutionTrace,
-    challenges: &AuxChallenges<Felt>,
+    challenges: &Challenges<Felt>,
     row: RowIndex,
 ) -> Felt {
     // get the memory access operation

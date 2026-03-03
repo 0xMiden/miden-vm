@@ -13,7 +13,7 @@ use crate::{
     debug::{BusDebugger, BusMessage},
     trace::{
         AuxColumnBuilder,
-        utils::{AuxChallenges, MessageLayout},
+        utils::{Challenges, MessageLayout},
     },
 };
 
@@ -63,7 +63,7 @@ where
     fn get_requests_at(
         &self,
         main_trace: &MainTrace,
-        challenges: &AuxChallenges<E>,
+        challenges: &Challenges<E>,
         row: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
@@ -88,7 +88,7 @@ where
     fn get_responses_at(
         &self,
         main_trace: &MainTrace,
-        challenges: &AuxChallenges<E>,
+        challenges: &Challenges<E>,
         row: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
@@ -105,7 +105,7 @@ where
     fn init_requests(
         &self,
         _main_trace: &MainTrace,
-        challenges: &AuxChallenges<E>,
+        challenges: &Challenges<E>,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         let message = LogPrecompileMessage { state: self.final_transcript_state };
@@ -120,7 +120,7 @@ where
     fn init_responses(
         &self,
         _main_trace: &MainTrace,
-        challenges: &AuxChallenges<E>,
+        challenges: &Challenges<E>,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         let message = LogPrecompileMessage {
@@ -143,17 +143,17 @@ const RATE0_RANGE: core::ops::Range<usize> = 0..DIGEST_LEN;
 /// Range for RATE1 (second rate word) in sponge state.
 const RATE1_RANGE: core::ops::Range<usize> = DIGEST_LEN..(2 * DIGEST_LEN);
 
-/// Node is left child (lsb=0), sibling is right child at RATE1: alpha + coeffs[3]*index +
-/// coeffs[8..11]*sibling
-const SIBLING_RATE1_LAYOUT: MessageLayout<5> = MessageLayout::new([3, 8, 9, 10, 11]);
-/// Node is right child (lsb=1), sibling is left child at RATE0: alpha + coeffs[3]*index +
-/// coeffs[4..7]*sibling
-const SIBLING_RATE0_LAYOUT: MessageLayout<5> = MessageLayout::new([3, 4, 5, 6, 7]);
+/// Node is left child (lsb=0), sibling is right child at RATE1: alpha + beta_powers[2]*index +
+/// beta_powers[7..10]*sibling
+const SIBLING_RATE1_LAYOUT: MessageLayout<5> = MessageLayout::new([2, 7, 8, 9, 10]);
+/// Node is right child (lsb=1), sibling is left child at RATE0: alpha + beta_powers[2]*index +
+/// beta_powers[3..6]*sibling
+const SIBLING_RATE0_LAYOUT: MessageLayout<5> = MessageLayout::new([2, 3, 4, 5, 6]);
 
 /// Encodes a sibling table entry given the node index and sibling word.
 #[inline(always)]
 fn encode_sibling<E: ExtensionField<Felt>>(
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     index: Felt,
     sibling: &[Felt],
 ) -> E {
@@ -177,7 +177,7 @@ fn encode_sibling<E: ExtensionField<Felt>>(
 /// computing the new Merkle root.
 fn chiplets_vtable_remove_sibling<E>(
     main_trace: &MainTrace,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     row: RowIndex,
 ) -> E
 where
@@ -216,7 +216,7 @@ where
 /// computing the old Merkle root.
 fn chiplets_vtable_add_sibling<E>(
     main_trace: &MainTrace,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     row: RowIndex,
 ) -> E
 where
@@ -260,7 +260,7 @@ impl<E> BusMessage<E> for LogPrecompileMessage
 where
     E: ExtensionField<Felt>,
 {
-    fn value(&self, challenges: &AuxChallenges<E>) -> E {
+    fn value(&self, challenges: &Challenges<E>) -> E {
         let state_elements: [Felt; 4] = self.state.into();
         challenges.encode([
             Felt::from_u8(LOG_PRECOMPILE_LABEL),
@@ -289,7 +289,7 @@ impl core::fmt::Display for LogPrecompileMessage {
 fn build_log_precompile_capacity_remove<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     row: RowIndex,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
     let state = PrecompileTranscriptState::from([
@@ -312,7 +312,7 @@ fn build_log_precompile_capacity_remove<E: ExtensionField<Felt>>(
 fn build_log_precompile_capacity_insert<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     row: RowIndex,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
     let state: PrecompileTranscriptState = [

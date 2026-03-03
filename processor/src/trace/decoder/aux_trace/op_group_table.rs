@@ -8,7 +8,7 @@ use miden_core::{
 };
 
 use super::{AuxColumnBuilder, Felt, MainTrace, ONE};
-use crate::{debug::BusDebugger, trace::utils::AuxChallenges};
+use crate::{debug::BusDebugger, trace::utils::Challenges};
 
 // OP GROUP TABLE COLUMN
 // ================================================================================================
@@ -23,7 +23,7 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for OpGroupTableColumnBuilder 
     fn get_requests_at(
         &self,
         main_trace: &MainTrace,
-        challenges: &AuxChallenges<E>,
+        challenges: &Challenges<E>,
         i: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
@@ -40,7 +40,7 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for OpGroupTableColumnBuilder 
     fn get_responses_at(
         &self,
         main_trace: &MainTrace,
-        challenges: &AuxChallenges<E>,
+        challenges: &Challenges<E>,
         i: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
@@ -63,7 +63,7 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for OpGroupTableColumnBuilder 
 fn get_op_group_table_inclusion_multiplicand<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     i: RowIndex,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
 ) -> E {
     let block_id = main_trace.addr(i + 1);
     let group_count = main_trace.group_count(i);
@@ -91,7 +91,7 @@ fn get_op_group_table_inclusion_multiplicand<E: ExtensionField<Felt>>(
 fn get_op_group_table_removal_multiplicand<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     i: RowIndex,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
 ) -> E {
     let group_count = main_trace.group_count(i);
     let block_id = main_trace.addr(i);

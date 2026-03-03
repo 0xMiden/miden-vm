@@ -3,7 +3,7 @@ use alloc::{collections::BTreeMap, vec::Vec};
 use miden_air::trace::{MainTrace, RowIndex, chiplets::ace::ACE_CHIPLET_NUM_COLS};
 use miden_core::{Felt, ZERO, field::ExtensionField};
 
-use crate::trace::{TraceFragment, utils::AuxChallenges};
+use crate::trace::{TraceFragment, utils::Challenges};
 
 mod trace;
 pub use trace::{CircuitEvaluation, NUM_ACE_LOGUP_FRACTIONS_EVAL, NUM_ACE_LOGUP_FRACTIONS_READ};
@@ -142,7 +142,7 @@ impl AceHints {
     /// Layout: `alpha + beta^0*clk + beta^1*ctx + beta^2*wire[0] + beta^3*wire[1] + beta^4*wire[2]`
     #[inline(always)]
     fn encode_ace_wire_value<E: ExtensionField<Felt>>(
-        challenges: &AuxChallenges<E>,
+        challenges: &Challenges<E>,
         clk: u32,
         ctx: u32,
         wire: [Felt; 3],
@@ -153,7 +153,7 @@ impl AceHints {
     pub(crate) fn build_divisors<E: ExtensionField<Felt>>(
         &self,
         main_trace: &MainTrace,
-        challenges: &AuxChallenges<E>,
+        challenges: &Challenges<E>,
     ) -> Vec<E> {
         let num_fractions = self.num_fractions();
         let mut total_values = vec![E::ZERO; num_fractions];

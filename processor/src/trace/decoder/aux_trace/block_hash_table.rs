@@ -9,7 +9,7 @@ use miden_core::{
 };
 
 use super::{AuxColumnBuilder, Felt, MainTrace, ONE};
-use crate::{debug::BusDebugger, trace::utils::AuxChallenges};
+use crate::{debug::BusDebugger, trace::utils::Challenges};
 
 // BLOCK HASH TABLE COLUMN BUILDER
 // ================================================================================================
@@ -32,7 +32,7 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BlockHashTableColumnBuilde
     fn init_responses(
         &self,
         main_trace: &MainTrace,
-        challenges: &AuxChallenges<E>,
+        challenges: &Challenges<E>,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         BlockHashTableRow::table_init(main_trace).collapse(challenges)
@@ -42,7 +42,7 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BlockHashTableColumnBuilde
     fn get_requests_at(
         &self,
         main_trace: &MainTrace,
-        challenges: &AuxChallenges<E>,
+        challenges: &Challenges<E>,
         row: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
@@ -58,7 +58,7 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BlockHashTableColumnBuilde
     fn get_responses_at(
         &self,
         main_trace: &MainTrace,
-        challenges: &AuxChallenges<E>,
+        challenges: &Challenges<E>,
         row: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
@@ -252,7 +252,7 @@ impl BlockHashTableRow {
     /// Collapses this row to a single field element in the field specified by E by taking a random
     /// linear combination of all the columns. This requires 8 alpha values, which are assumed to
     /// have been drawn randomly.
-    pub fn collapse<E: ExtensionField<Felt>>(&self, challenges: &AuxChallenges<E>) -> E {
+    pub fn collapse<E: ExtensionField<Felt>>(&self, challenges: &Challenges<E>) -> E {
         let is_first_child = if self.is_first_child { ONE } else { ZERO };
         let is_loop_body = if self.is_loop_body { ONE } else { ZERO };
         challenges.encode([

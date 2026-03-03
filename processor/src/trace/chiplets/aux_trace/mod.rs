@@ -5,7 +5,7 @@ use miden_core::{field::ExtensionField, precompile::PrecompileTranscriptState, p
 use wiring_bus::WiringBusBuilder;
 
 use super::{Felt, ace::AceHints};
-use crate::trace::{AuxColumnBuilder, utils::AuxChallenges};
+use crate::trace::{AuxColumnBuilder, utils::Challenges};
 
 mod bus;
 pub use bus::{
@@ -57,7 +57,7 @@ impl AuxTraceBuilder {
     pub(crate) fn build_aux_columns<E: ExtensionField<Felt>>(
         &self,
         main_trace: &MainTrace,
-        challenges: &AuxChallenges<E>,
+        challenges: &Challenges<E>,
     ) -> [Vec<E>; 3] {
         let v_table_col_builder = ChipletsVTableColBuilder::new(self.final_transcript_state);
         let bus_col_builder = BusColumnBuilder::new(&self.kernel);

@@ -11,7 +11,7 @@ use super::{
     AUX_TRACE_RAND_CHALLENGES, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, HASH_CYCLE_LEN,
     LAST_CYCLE_ROW, ONE, Operation, build_trace_from_ops, rand_array, rand_value,
 };
-use crate::trace::utils::AuxChallenges;
+use crate::trace::utils::Challenges;
 
 /// Tests the generation of the `b_chip` bus column when only bitwise lookups are included. It
 /// ensures that trace generation is correct when all of the following are true.
@@ -57,7 +57,7 @@ fn b_chip_trace_bitwise() {
     let rand_elements = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
     let aux_columns = trace.build_aux_trace(&rand_elements).unwrap();
     let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
-    let challenges = AuxChallenges::<Felt>::new(&rand_elements);
+    let challenges = Challenges::<Felt>::new(&rand_elements);
 
     assert_eq!(trace.length(), b_chip.len());
     assert_eq!(ONE, b_chip[0]);
@@ -186,7 +186,7 @@ fn b_chip_trace_bitwise() {
 // ================================================================================================
 
 fn build_expected_bitwise(
-    challenges: &AuxChallenges<Felt>,
+    challenges: &Challenges<Felt>,
     label: Felt,
     s0: Felt,
     s1: Felt,
@@ -197,7 +197,7 @@ fn build_expected_bitwise(
 
 fn build_expected_bitwise_from_trace(
     trace: &ExecutionTrace,
-    challenges: &AuxChallenges<Felt>,
+    challenges: &Challenges<Felt>,
     row: RowIndex,
 ) -> Felt {
     let selector = trace.main_trace.get_column(BITWISE_TRACE_OFFSET)[row];

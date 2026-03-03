@@ -20,7 +20,7 @@ use crate::{
         MastNodeExt, SplitNodeBuilder,
     },
     operation::Operation,
-    trace::utils::AuxChallenges,
+    trace::utils::Challenges,
 };
 
 // BLOCK STACK TABLE TESTS
@@ -35,7 +35,7 @@ fn decoder_p1_span_with_respan() {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
-    let challenges = AuxChallenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(&alphas);
     let row_values = [
         BlockStackTableRow::new(ONE, ZERO, false).to_value(&challenges),
         BlockStackTableRow::new(ONE + HASH_CYCLE_LEN_FELT, ZERO, false).to_value(&challenges),
@@ -95,7 +95,7 @@ fn decoder_p1_join() {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
-    let challenges = AuxChallenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(&alphas);
     let a_33 = ONE + HASH_CYCLE_LEN_FELT;
     let a_65 = a_33 + HASH_CYCLE_LEN_FELT;
     let row_values = [
@@ -169,7 +169,7 @@ fn decoder_p1_split() {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
-    let challenges = AuxChallenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(&alphas);
     let a_33 = ONE + HASH_CYCLE_LEN_FELT;
     let row_values = [
         BlockStackTableRow::new(ONE, ZERO, false).to_value(&challenges),
@@ -234,7 +234,7 @@ fn decoder_p1_loop_with_repeat() {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
-    let challenges = AuxChallenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(&alphas);
     // The loop node consumes the first hasher cycle; join/span addresses follow sequentially.
     let a_33 = ONE + HASH_CYCLE_LEN_FELT; // address of the JOIN block in the first iteration
     let a_65 = a_33 + HASH_CYCLE_LEN_FELT; // address of the first SPAN block in the first iteration
@@ -359,7 +359,7 @@ fn decoder_p2_span_with_respan() {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
-    let challenges = AuxChallenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(&alphas);
     let row_values =
         [BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&challenges)];
 
@@ -407,7 +407,7 @@ fn decoder_p2_join() {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
-    let challenges = AuxChallenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(&alphas);
     let row_values = [
         BlockHashTableRow::new_test(ZERO, join.digest(), false, false).collapse(&challenges),
         BlockHashTableRow::new_test(ONE, basic_block_1.digest(), true, false).collapse(&challenges),
@@ -477,7 +477,7 @@ fn decoder_p2_split_true() {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
-    let challenges = AuxChallenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(&alphas);
     let row_values = [
         BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&challenges),
         BlockHashTableRow::new_test(ONE, basic_block_1.digest(), false, false)
@@ -539,7 +539,7 @@ fn decoder_p2_split_false() {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
-    let challenges = AuxChallenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(&alphas);
     let row_values = [
         BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&challenges),
         BlockHashTableRow::new_test(ONE, basic_block_2.digest(), false, false)
@@ -606,7 +606,7 @@ fn decoder_p2_loop_with_repeat() {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
-    let challenges = AuxChallenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(&alphas);
     // The loop node consumes the first hasher cycle; join/span addresses follow sequentially.
     let a_33 = ONE + HASH_CYCLE_LEN_FELT; // address of the JOIN block in the first iteration
     let a_129 = a_33 + HASH_CYCLE_LEN_FELT * Felt::new(3); // address of the JOIN block in the second iteration
@@ -741,7 +741,7 @@ fn decoder_p3_trace_one_batch() {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p3 = aux_columns.get_column(P3_COL_IDX);
 
-    let challenges = AuxChallenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(&alphas);
 
     // make sure the first entry is ONE
     assert_eq!(ONE, p3[0]);
@@ -795,7 +795,7 @@ fn decoder_p3_trace_two_batches() {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p3 = aux_columns.get_column(P3_COL_IDX);
 
-    let challenges = AuxChallenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(&alphas);
 
     // make sure the first entry is ONE
     assert_eq!(ONE, p3[0]);
@@ -899,20 +899,20 @@ impl BlockStackTableRow {
 impl BlockStackTableRow {
     /// Reduces this row to a single field element in the field specified by E. This requires
     /// at least 12 coefficients.
-    pub fn to_value<E: ExtensionField<Felt>>(&self, challenges: &AuxChallenges<E>) -> E {
+    pub fn to_value<E: ExtensionField<Felt>>(&self, challenges: &Challenges<E>) -> E {
         let is_loop = if self.is_loop { ONE } else { ZERO };
-        challenges[0]
-            + challenges[1] * self.block_id
-            + challenges[2] * self.parent_id
-            + challenges[3] * is_loop
-            + challenges[4] * Felt::from_u32(u32::from(self.parent_ctx))
-            + challenges[5] * self.parent_fmp
-            + challenges[6] * Felt::from_u32(self.parent_stack_depth)
-            + challenges[7] * self.parent_next_overflow_addr
-            + challenges[8] * self.parent_fn_hash[0]
-            + challenges[9] * self.parent_fn_hash[1]
-            + challenges[10] * self.parent_fn_hash[2]
-            + challenges[11] * self.parent_fn_hash[3]
+        challenges.alpha
+            + challenges.beta_powers[0] * self.block_id
+            + challenges.beta_powers[1] * self.parent_id
+            + challenges.beta_powers[2] * is_loop
+            + challenges.beta_powers[3] * Felt::from_u32(u32::from(self.parent_ctx))
+            + challenges.beta_powers[4] * self.parent_fmp
+            + challenges.beta_powers[5] * Felt::from_u32(self.parent_stack_depth)
+            + challenges.beta_powers[6] * self.parent_next_overflow_addr
+            + challenges.beta_powers[7] * self.parent_fn_hash[0]
+            + challenges.beta_powers[8] * self.parent_fn_hash[1]
+            + challenges.beta_powers[9] * self.parent_fn_hash[2]
+            + challenges.beta_powers[10] * self.parent_fn_hash[3]
     }
 }
 
@@ -935,10 +935,10 @@ impl OpGroupTableRow {
 impl OpGroupTableRow {
     /// Reduces this row to a single field element in the field specified by E. This requires
     /// at least 4 coefficients.
-    pub fn to_value<E: ExtensionField<Felt>>(&self, challenges: &AuxChallenges<E>) -> E {
-        challenges[0]
-            + challenges[1] * self.batch_id
-            + challenges[2] * self.group_pos
-            + challenges[3] * self.group_value
+    pub fn to_value<E: ExtensionField<Felt>>(&self, challenges: &Challenges<E>) -> E {
+        challenges.alpha
+            + challenges.beta_powers[0] * self.batch_id
+            + challenges.beta_powers[1] * self.group_pos
+            + challenges.beta_powers[2] * self.group_value
     }
 }

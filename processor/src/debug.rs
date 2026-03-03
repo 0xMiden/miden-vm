@@ -3,12 +3,12 @@ use core::fmt;
 
 use miden_core::field::ExtensionField;
 
-use crate::{Felt, trace::utils::AuxChallenges};
+use crate::{Felt, trace::utils::Challenges};
 
 /// A message that can be sent on a bus.
 pub(crate) trait BusMessage<E: ExtensionField<Felt>>: fmt::Display {
     /// The concrete value that this message evaluates to.
-    fn value(&self, challenges: &AuxChallenges<E>) -> E;
+    fn value(&self, challenges: &Challenges<E>) -> E;
 
     /// The source of this message (e.g. "mload" or "memory chiplet").
     fn source(&self) -> &str;
@@ -46,11 +46,7 @@ where
     /// is removed from the list of outstanding responses. Otherwise, the request is added to the
     /// list of outstanding requests.
     #[cfg(any(test, feature = "bus-debugger"))]
-    pub fn add_request(
-        &mut self,
-        request_msg: Box<dyn BusMessage<E>>,
-        challenges: &AuxChallenges<E>,
-    ) {
+    pub fn add_request(&mut self, request_msg: Box<dyn BusMessage<E>>, challenges: &Challenges<E>) {
         let msg_value = request_msg.value(challenges);
 
         if let Some(pos) =
@@ -69,7 +65,7 @@ where
     pub fn add_response(
         &mut self,
         response_msg: Box<dyn BusMessage<E>>,
-        challenges: &AuxChallenges<E>,
+        challenges: &Challenges<E>,
     ) {
         let msg_value = response_msg.value(challenges);
 

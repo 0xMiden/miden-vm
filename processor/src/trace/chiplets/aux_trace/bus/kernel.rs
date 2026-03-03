@@ -8,7 +8,7 @@ use miden_core::{Felt, Word, field::ExtensionField};
 
 use crate::{
     debug::{BusDebugger, BusMessage},
-    trace::utils::AuxChallenges,
+    trace::utils::Challenges,
 };
 
 // REQUESTS
@@ -17,7 +17,7 @@ use crate::{
 /// Builds the requests for each unique kernel procedure digest, to be provided via public inputs.
 pub(super) fn build_kernel_init_requests<E>(
     proc_hashes: &[Word],
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     _debugger: &mut BusDebugger<E>,
 ) -> E
 where
@@ -56,7 +56,7 @@ where
 pub(super) fn build_kernel_chiplet_responses<E>(
     main_trace: &MainTrace,
     row: RowIndex,
-    challenges: &AuxChallenges<E>,
+    challenges: &Challenges<E>,
     _debugger: &mut BusDebugger<E>,
 ) -> E
 where
@@ -108,7 +108,7 @@ where
     E: ExtensionField<Felt>,
 {
     #[inline(always)]
-    fn value(&self, challenges: &AuxChallenges<E>) -> E {
+    fn value(&self, challenges: &Challenges<E>) -> E {
         challenges.encode([
             KERNEL_PROC_CALL_LABEL,
             self.kernel_proc_digest[0],
@@ -140,7 +140,7 @@ where
     E: ExtensionField<Felt>,
 {
     #[inline(always)]
-    fn value(&self, challenges: &AuxChallenges<E>) -> E {
+    fn value(&self, challenges: &Challenges<E>) -> E {
         challenges.encode([
             KERNEL_PROC_INIT_LABEL,
             self.kernel_proc_digest[0],
