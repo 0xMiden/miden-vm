@@ -90,31 +90,34 @@ pub fn enforce_chiplet_selectors<AB>(
 
     // s1 is binary when s0 = 1 (bitwise, memory, ACE, or kernel ROM could be active)
     builder.tagged(CHIPLET_SELECTORS_BASE_ID + 1, CHIPLET_SELECTORS_NAMES[1], |builder| {
-        builder.assert_zero(s0.clone() * s1.clone() * (s1.clone() - one.clone()));
+        builder.when(s0.clone()).assert_zero(s1.clone() * (s1.clone() - one.clone()));
     });
 
     // s2 is binary when s0 = 1 and s1 = 1 (memory, ACE, or kernel ROM could be active)
     builder.tagged(CHIPLET_SELECTORS_BASE_ID + 2, CHIPLET_SELECTORS_NAMES[2], |builder| {
-        builder.assert_zero(s0.clone() * s1.clone() * s2.clone() * (s2.clone() - one.clone()));
+        builder
+            .when(s0.clone())
+            .when(s1.clone())
+            .assert_zero(s2.clone() * (s2.clone() - one.clone()));
     });
 
     // s3 is binary when s0 = s1 = s2 = 1 (ACE or kernel ROM could be active)
     builder.tagged(CHIPLET_SELECTORS_BASE_ID + 3, CHIPLET_SELECTORS_NAMES[3], |builder| {
-        builder.assert_zero(
-            s0.clone() * s1.clone() * s2.clone() * s3.clone() * (s3.clone() - one.clone()),
-        );
+        builder
+            .when(s0.clone())
+            .when(s1.clone())
+            .when(s2.clone())
+            .assert_zero(s3.clone() * (s3.clone() - one.clone()));
     });
 
     // s4 is binary when s0 = s1 = s2 = s3 = 1 (kernel ROM could be active)
     builder.tagged(CHIPLET_SELECTORS_BASE_ID + 4, CHIPLET_SELECTORS_NAMES[4], |builder| {
-        builder.assert_zero(
-            s0.clone()
-                * s1.clone()
-                * s2.clone()
-                * s3.clone()
-                * s4.clone()
-                * (s4.clone() - one.clone()),
-        );
+        builder
+            .when(s0.clone())
+            .when(s1.clone())
+            .when(s2.clone())
+            .when(s3.clone())
+            .assert_zero(s4.clone() * (s4.clone() - one.clone()));
     });
 
     // ==========================================================================
@@ -122,45 +125,53 @@ pub fn enforce_chiplet_selectors<AB>(
     // ==========================================================================
     // Once a selector becomes 1, it must stay 1 (forbids 1→0 transitions)
 
-    let is_transition: AB::Expr = builder.is_transition();
-
     // s0' = s0 when s0 = 1
     builder.tagged(CHIPLET_SELECTORS_BASE_ID + 5, CHIPLET_SELECTORS_NAMES[5], |builder| {
-        builder.assert_zero(is_transition.clone() * s0.clone() * (s0_next.clone() - s0.clone()));
+        builder
+            .when_transition()
+            .when(s0.clone())
+            .assert_zero(s0_next.clone() - s0.clone());
     });
 
     // s1' = s1 when s0 = 1 and s1 = 1
     builder.tagged(CHIPLET_SELECTORS_BASE_ID + 6, CHIPLET_SELECTORS_NAMES[6], |builder| {
-        builder.assert_zero(
-            is_transition.clone() * s0.clone() * s1.clone() * (s1_next.clone() - s1.clone()),
-        );
+        builder
+            .when_transition()
+            .when(s0.clone())
+            .when(s1.clone())
+            .assert_zero(s1_next.clone() - s1.clone());
     });
 
     // s2' = s2 when s0 = s1 = s2 = 1
     builder.tagged(CHIPLET_SELECTORS_BASE_ID + 7, CHIPLET_SELECTORS_NAMES[7], |builder| {
-        builder.assert_zero(
-            is_transition.clone()
-                * s0.clone()
-                * s1.clone()
-                * s2.clone()
-                * (s2_next.clone() - s2.clone()),
-        );
+        builder
+            .when_transition()
+            .when(s0.clone())
+            .when(s1.clone())
+            .when(s2.clone())
+            .assert_zero(s2_next.clone() - s2.clone());
     });
 
     // s3' = s3 when s0 = s1 = s2 = s3 = 1
     builder.tagged(CHIPLET_SELECTORS_BASE_ID + 8, CHIPLET_SELECTORS_NAMES[8], |builder| {
-        builder.assert_zero(
-            is_transition.clone()
-                * s0.clone()
-                * s1.clone()
-                * s2.clone()
-                * s3.clone()
-                * (s3_next.clone() - s3.clone()),
-        );
+        builder
+            .when_transition()
+            .when(s0.clone())
+            .when(s1.clone())
+            .when(s2.clone())
+            .when(s3.clone())
+            .assert_zero(s3_next.clone() - s3.clone());
     });
 
     // s4' = s4 when s0 = s1 = s2 = s3 = s4 = 1
     builder.tagged(CHIPLET_SELECTORS_BASE_ID + 9, CHIPLET_SELECTORS_NAMES[9], |builder| {
-        builder.assert_zero(is_transition * s0 * s1 * s2 * s3 * s4.clone() * (s4_next - s4));
+        builder
+            .when_transition()
+            .when(s0)
+            .when(s1)
+            .when(s2)
+            .when(s3)
+            .when(s4.clone())
+            .assert_zero(s4_next - s4);
     });
 }
