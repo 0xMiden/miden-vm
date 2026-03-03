@@ -15,8 +15,8 @@
 //!   constraints here.
 //!
 //! ## Message encoding
-//! Each table message is encoded as a linear combination of its elements with a shared
-//! challenge vector: `sum(alpha[i] * element[i])`, where the implicit constant term is 1.
+//! Each table message is encoded as:
+//! `alpha + sum_i beta^i * element[i]`
 //! This matches the multiset protocol used by the processor.
 //!
 //! ## References
@@ -31,7 +31,7 @@ use miden_crypto::stark::{air::MidenAirBuilder, matrix::Matrix};
 use crate::{
     MainTraceRow,
     constraints::{
-        bus::{MessageEncoder, indices::P1_BLOCK_STACK},
+        bus::{Challenges, indices::P1_BLOCK_STACK},
         op_flags::OpFlags,
         tagging::{TaggingAirBuilderExt, ids::TAG_DECODER_BUS_BASE},
     },
@@ -58,8 +58,7 @@ struct BlockStackEncoders<AB>
 where
     AB: MidenAirBuilder,
 {
-    simple: MessageEncoder<AB, 3>,
-    full: MessageEncoder<AB, 10>,
+    challenges: Challenges<AB, 10>,
 }
 
 impl<AB> BlockStackEncoders<AB>
@@ -68,14 +67,14 @@ where
 {
     fn new(challenges: &[AB::RandomVar]) -> Self {
         Self {
-            simple: MessageEncoder::<AB, 3>::from_challenges(challenges),
-            full: MessageEncoder::<AB, 10>::from_challenges(challenges),
+            challenges: Challenges::<AB, 10>::from_randomness(challenges),
         }
     }
 
     /// Encodes `[block_id, parent_id, is_loop]`.
     fn simple(&self, block_id: &AB::Expr, parent_id: &AB::Expr, is_loop: &AB::Expr) -> AB::ExprEF {
-        self.simple.encode([block_id.clone(), parent_id.clone(), is_loop.clone()])
+        self.challenges
+            .encode_dense([block_id.clone(), parent_id.clone(), is_loop.clone()])
     }
 
     /// Encodes `[block_id, parent_id, is_loop, ctx, depth, overflow, fn_hash[0..4]]`.
@@ -89,7 +88,7 @@ where
         overflow: &AB::Expr,
         fh: &[AB::Expr; 4],
     ) -> AB::ExprEF {
-        self.full.encode([
+        self.challenges.encode_dense([
             block_id.clone(),
             parent_id.clone(),
             is_loop.clone(),
@@ -109,7 +108,7 @@ struct BlockHashEncoder<AB>
 where
     AB: MidenAirBuilder,
 {
-    encoder: MessageEncoder<AB, 7>,
+    challenges: Challenges<AB, 7>,
 }
 
 impl<AB> BlockHashEncoder<AB>
@@ -118,7 +117,7 @@ where
 {
     fn new(challenges: &[AB::RandomVar]) -> Self {
         Self {
-            encoder: MessageEncoder::<AB, 7>::from_challenges(challenges),
+            challenges: Challenges::<AB, 7>::from_randomness(challenges),
         }
     }
 
@@ -130,7 +129,7 @@ where
         first_child: &AB::Expr,
         loop_body: &AB::Expr,
     ) -> AB::ExprEF {
-        self.encoder.encode([
+        self.challenges.encode_dense([
             parent.clone(),
             hash[0].clone(),
             hash[1].clone(),
@@ -147,7 +146,7 @@ struct OpGroupEncoder<AB>
 where
     AB: MidenAirBuilder,
 {
-    encoder: MessageEncoder<AB, 3>,
+    challenges: Challenges<AB, 3>,
 }
 
 impl<AB> OpGroupEncoder<AB>
@@ -156,13 +155,14 @@ where
 {
     fn new(challenges: &[AB::RandomVar]) -> Self {
         Self {
-            encoder: MessageEncoder::<AB, 3>::from_challenges(challenges),
+            challenges: Challenges::<AB, 3>::from_randomness(challenges),
         }
     }
 
     /// Encodes `[block_id, group_count, op_value]`.
     fn encode(&self, block_id: &AB::Expr, group_count: &AB::Expr, value: &AB::Expr) -> AB::ExprEF {
-        self.encoder.encode([block_id.clone(), group_count.clone(), value.clone()])
+        self.challenges
+            .encode_dense([block_id.clone(), group_count.clone(), value.clone()])
     }
 }
 

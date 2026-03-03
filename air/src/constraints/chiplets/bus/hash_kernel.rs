@@ -8,8 +8,8 @@
 //! 3. **Log-precompile transcript** (capacity state transitions for LOGPRECOMPILE).
 //!
 //! Rows contribute either a request term, a response term, or the identity (when no flag is set).
-//! The request/response values use the standard linear-combination message format based on
-//! `alphas` (challenge powers).
+//! The request/response values use the standard message format:
+//! `alpha + sum_i beta^i * element[i]`.
 
 use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::{air::MidenAirBuilder, matrix::Matrix};
@@ -17,7 +17,7 @@ use miden_crypto::stark::{air::MidenAirBuilder, matrix::Matrix};
 use crate::{
     Felt, MainTraceRow,
     constraints::{
-        bus::{alphas_from_challenges, indices::B_HASH_KERNEL},
+        bus::{Challenges, MessageLayout, indices::B_HASH_KERNEL},
         chiplets::hasher::{flags, periodic},
         op_flags::OpFlags,
         tagging::{
@@ -79,7 +79,7 @@ pub fn enforce_hash_kernel_constraint<AB>(
     // AUXILIARY TRACE ACCESS
     // =========================================================================
 
-    let (p_local, p_next, alphas) = {
+    let (p_local, p_next, challenges) = {
         let aux = builder.permutation();
         let aux_local = aux.row_slice(0).expect("Matrix should have at least 1 row");
         let aux_next = aux.row_slice(1).expect("Matrix should have at least 2 rows");
@@ -87,8 +87,8 @@ pub fn enforce_hash_kernel_constraint<AB>(
         let p_next = aux_next[B_HASH_KERNEL];
 
         let challenges = builder.permutation_randomness();
-        let alphas: [AB::ExprEF; 16] = alphas_from_challenges::<AB, 16>(challenges);
-        (p_local, p_next, alphas)
+        let challenges = Challenges::<AB, HASH_KERNEL_MSG_LEN>::from_randomness(challenges);
+        (p_local, p_next, challenges)
     };
 
     let one = AB::Expr::ONE;
@@ -151,12 +151,12 @@ pub fn enforce_hash_kernel_constraint<AB>(
 
     // Sibling value for current row (uses current hasher state).
     // b selects which half of the rate holds the sibling.
-    let v_sibling_curr = compute_sibling_b0::<AB>(&alphas, &node_index, &h) * is_b_zero.clone()
-        + compute_sibling_b1::<AB>(&alphas, &node_index, &h) * is_b_one.clone();
+    let v_sibling_curr = compute_sibling_b0::<AB>(&challenges, &node_index, &h) * is_b_zero.clone()
+        + compute_sibling_b1::<AB>(&challenges, &node_index, &h) * is_b_one.clone();
 
     // Sibling value for next row (used by MVA/MUA on the transition row).
-    let v_sibling_next = compute_sibling_b0::<AB>(&alphas, &node_index, &h_next) * is_b_zero
-        + compute_sibling_b1::<AB>(&alphas, &node_index, &h_next) * is_b_one;
+    let v_sibling_next = compute_sibling_b0::<AB>(&challenges, &node_index, &h_next) * is_b_zero
+        + compute_sibling_b1::<AB>(&challenges, &node_index, &h_next) * is_b_one;
 
     // =========================================================================
     // ACE MEMORY FLAGS AND VALUES
@@ -190,11 +190,16 @@ pub fn enforce_hash_kernel_constraint<AB>(
         let v1_1: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + V_1_1_IDX].clone().into();
         let label: AB::Expr = AB::Expr::from(Felt::from_u8(MEMORY_READ_WORD_LABEL));
 
-        message_with_label::<AB>(
-            &alphas,
+        challenges.encode_dense([
             label,
-            &[ace_ctx.clone(), ace_ptr.clone(), ace_clk.clone(), v0_0, v0_1, v1_0, v1_1],
-        )
+            ace_ctx.clone(),
+            ace_ptr.clone(),
+            ace_clk.clone(),
+            v0_0,
+            v0_1,
+            v1_0,
+            v1_1,
+        ])
     };
 
     // Element read value: label + ctx + ptr + clk + element.
@@ -208,7 +213,7 @@ pub fn enforce_hash_kernel_constraint<AB>(
         let element = id_1 + id_2 * offset1 + (eval_op + one.clone()) * offset2;
         let label: AB::Expr = AB::Expr::from(Felt::from_u8(MEMORY_READ_ELEMENT_LABEL));
 
-        message_with_label::<AB>(&alphas, label, &[ace_ctx, ace_ptr, ace_clk, element])
+        challenges.encode_dense([label, ace_ctx, ace_ptr, ace_clk, element])
     };
 
     // =========================================================================
@@ -231,10 +236,22 @@ pub fn enforce_hash_kernel_constraint<AB>(
     let log_label: AB::Expr = AB::Expr::from(Felt::from_u8(LOG_PRECOMPILE_LABEL));
 
     // CAP_PREV value (request - removed).
-    let v_cap_prev = message_with_label::<AB>(&alphas, log_label.clone(), &cap_prev);
+    let v_cap_prev = challenges.encode_dense([
+        log_label.clone(),
+        cap_prev[0].clone(),
+        cap_prev[1].clone(),
+        cap_prev[2].clone(),
+        cap_prev[3].clone(),
+    ]);
 
     // CAP_NEXT value (response - inserted).
-    let v_cap_next = message_with_label::<AB>(&alphas, log_label, &cap_next);
+    let v_cap_next = challenges.encode_dense([
+        log_label,
+        cap_next[0].clone(),
+        cap_next[1].clone(),
+        cap_next[2].clone(),
+        cap_next[3].clone(),
+    ]);
 
     // =========================================================================
     // RUNNING PRODUCT CONSTRAINT
@@ -279,59 +296,38 @@ pub fn enforce_hash_kernel_constraint<AB>(
 /// Compute sibling value when b=0 (sibling at h[4..7]).
 ///
 /// Message layout: alpha[0] (constant) + alpha[3] * node_index + alpha[8..11] * h[4..7].
+const HASH_KERNEL_MSG_LEN: usize = 15;
+
+const SIBLING_B0_LAYOUT: MessageLayout<5> = MessageLayout::new([2, 7, 8, 9, 10]);
+const SIBLING_B1_LAYOUT: MessageLayout<5> = MessageLayout::new([2, 3, 4, 5, 6]);
+
 fn compute_sibling_b0<AB>(
-    alphas: &[AB::ExprEF; 16],
+    challenges: &Challenges<AB, HASH_KERNEL_MSG_LEN>,
     node_index: &AB::Expr,
     h: &[AB::Expr; 12],
 ) -> AB::ExprEF
 where
     AB: MidenAirBuilder<F = Felt>,
 {
-    alphas[0].clone()
-        + alphas[3].clone() * node_index.clone()
-        + alphas[8].clone() * h[4].clone()
-        + alphas[9].clone() * h[5].clone()
-        + alphas[10].clone() * h[6].clone()
-        + alphas[11].clone() * h[7].clone()
+    challenges.encode_layout(
+        &SIBLING_B0_LAYOUT,
+        [node_index.clone(), h[4].clone(), h[5].clone(), h[6].clone(), h[7].clone()],
+    )
 }
 
 /// Compute sibling value when b=1 (sibling at h[0..3]).
 ///
 /// Message layout: alpha[0] (constant) + alpha[3] * node_index + alpha[4..7] * h[0..3].
 fn compute_sibling_b1<AB>(
-    alphas: &[AB::ExprEF; 16],
+    challenges: &Challenges<AB, HASH_KERNEL_MSG_LEN>,
     node_index: &AB::Expr,
     h: &[AB::Expr; 12],
 ) -> AB::ExprEF
 where
     AB: MidenAirBuilder<F = Felt>,
 {
-    alphas[0].clone()
-        + alphas[3].clone() * node_index.clone()
-        + alphas[4].clone() * h[0].clone()
-        + alphas[5].clone() * h[1].clone()
-        + alphas[6].clone() * h[2].clone()
-        + alphas[7].clone() * h[3].clone()
-}
-
-/// Build a linear-combination message with a label and a variable number of fields.
-///
-/// Message layout:
-/// - alpha[0] is the constant term
-/// - alpha[1] multiplies the label
-/// - alpha[2..] multiply the provided fields in order
-fn message_with_label<AB>(
-    alphas: &[AB::ExprEF; 16],
-    label: AB::Expr,
-    fields: &[AB::Expr],
-) -> AB::ExprEF
-where
-    AB: MidenAirBuilder<F = Felt>,
-{
-    debug_assert!(fields.len() <= 14);
-    let mut acc = alphas[0].clone() + alphas[1].clone() * label;
-    for (idx, field) in fields.iter().enumerate() {
-        acc += alphas[idx + 2].clone() * field.clone();
-    }
-    acc
+    challenges.encode_layout(
+        &SIBLING_B1_LAYOUT,
+        [node_index.clone(), h[0].clone(), h[1].clone(), h[2].clone(), h[3].clone()],
+    )
 }

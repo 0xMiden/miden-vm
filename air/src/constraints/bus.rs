@@ -32,54 +32,65 @@ pub mod indices {
 
 use miden_crypto::stark::air::MidenAirBuilder;
 
-/// Converts permutation challenges into `ExprEF` alphas for bus encoding.
-#[inline]
-#[allow(dead_code)]
-pub(crate) fn alphas_from_challenges<AB, const N: usize>(
-    challenges: &[AB::RandomVar],
-) -> [AB::ExprEF; N]
-where
-    AB: MidenAirBuilder,
-{
-    core::array::from_fn(|i| challenges[i].into())
+/// Message-layout helper for sparse encodings.
+///
+/// `idx` holds the positions in the full message vector which are present in the sparse message.
+pub(crate) struct MessageLayout<const K: usize> {
+    idx: [usize; K],
 }
 
-/// Encodes grand-product (multiset) and LogUp messages as `alpha + sum_i beta[i] * elem[i]`.
+impl<const K: usize> MessageLayout<K> {
+    pub const fn new(idx: [usize; K]) -> Self {
+        Self { idx }
+    }
+}
+
+/// Encodes multiset/LogUp messages as `alpha + sum_i coeff[i] * elem[i]`.
 ///
-/// `alpha` and `beta` are derived from the permutation challenges as:
-/// - `alpha = challenges[0]`
-/// - `beta[i] = challenges[i + 1]`
-pub(crate) struct MessageEncoder<AB, const N: usize>
+/// `alpha` is `challenges[0]`, and per-element coefficients are `challenges[1..]`.
+pub(crate) struct Challenges<AB, const N: usize>
 where
     AB: MidenAirBuilder,
 {
     alpha: AB::ExprEF,
-    betas: [AB::ExprEF; N],
+    beta_pows: [AB::ExprEF; N],
 }
 
-impl<AB, const N: usize> MessageEncoder<AB, N>
+impl<AB, const N: usize> Challenges<AB, N>
 where
     AB: MidenAirBuilder,
 {
-    /// Builds a message encoder from challenge-like coefficients.
-    ///
-    /// The slice must contain at least `N + 1` elements: `[alpha, beta[0], .., beta[N-1]]`.
+    /// Builds `alpha` and per-element coefficients from permutation challenges.
     #[inline]
-    pub fn from_challenges<C>(challenges: &[C]) -> Self
-    where
-        C: Clone + Into<AB::ExprEF>,
-    {
-        let alpha = challenges[0].clone().into();
-        let betas = core::array::from_fn(|i| challenges[i + 1].clone().into());
-        Self { alpha, betas }
+    pub fn from_randomness(challenges: &[AB::RandomVar]) -> Self {
+        debug_assert!(challenges.len() > N);
+        let alpha: AB::ExprEF = challenges[0].into();
+        let beta_pows = core::array::from_fn(|i| challenges[i + 1].into());
+        Self { alpha, beta_pows }
     }
 
-    /// Encodes a message using the encoder's alpha and betas.
+    /// Encodes a dense message where elements occupy the first K positions.
     #[inline]
-    pub fn encode(&self, elems: [AB::Expr; N]) -> AB::ExprEF {
+    pub fn encode_dense<const K: usize>(&self, elems: [AB::Expr; K]) -> AB::ExprEF {
+        debug_assert!(K <= N);
         let mut acc = self.alpha.clone();
-        for (beta, elem) in self.betas.iter().zip(elems) {
-            acc += beta.clone() * elem;
+        for (i, elem) in elems.iter().enumerate() {
+            acc += self.beta_pows[i].clone() * elem.clone();
+        }
+        acc
+    }
+
+    /// Encodes a sparse message defined by a layout of indices into the full message vector.
+    #[inline]
+    pub fn encode_layout<const K: usize>(
+        &self,
+        layout: &MessageLayout<K>,
+        elems: [AB::Expr; K],
+    ) -> AB::ExprEF {
+        let mut acc = self.alpha.clone();
+        for (i, elem) in elems.iter().enumerate() {
+            let idx = layout.idx[i];
+            acc += self.beta_pows[idx].clone() * elem.clone();
         }
         acc
     }
