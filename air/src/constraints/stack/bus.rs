@@ -15,7 +15,7 @@
 //! ## Row Encoding
 //!
 //! Each row in the overflow table is encoded as:
-//! `alphas[0] + alphas[1] * clk + alphas[2] * val + alphas[3] * prev`
+//! `alpha + beta^0 * clk + beta^1 * val + beta^2 * prev`
 
 use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::{air::MidenAirBuilder, matrix::Matrix};
@@ -23,7 +23,7 @@ use miden_crypto::stark::{air::MidenAirBuilder, matrix::Matrix};
 use crate::{
     MainTraceRow,
     constraints::{
-        bus::{MessageEncoder, indices::P1_STACK},
+        bus::{Challenges, indices::P1_STACK},
         op_flags::OpFlags,
         tagging::{TaggingAirBuilderExt, ids::TAG_STACK_OVERFLOW_BUS_BASE},
     },
@@ -60,7 +60,7 @@ pub fn enforce_bus<AB>(
     );
 
     // Extract auxiliary trace values and randomness.
-    let (p1_local, p1_next, encoder) = {
+    let (p1_local, p1_next, challenges) = {
         let aux = builder.permutation();
         let aux_local = aux.row_slice(0).expect("Matrix should have at least 1 row");
         let aux_next = aux.row_slice(1).expect("Matrix should have at least 2 rows");
@@ -68,9 +68,9 @@ pub fn enforce_bus<AB>(
         let p1_next = aux_next[P1_STACK];
 
         let challenges = builder.permutation_randomness();
-        // We need 3 betas for row encoding: (clk, val, prev).
-        let encoder = MessageEncoder::<AB, 3>::from_challenges(challenges);
-        (p1_local, p1_next, encoder)
+        // We need 3 message elements: (clk, val, prev).
+        let challenges = Challenges::<AB, 3>::from_randomness(challenges);
+        (p1_local, p1_next, challenges)
     };
 
     let one_ef = AB::ExprEF::ONE;
@@ -113,18 +113,18 @@ pub fn enforce_bus<AB>(
     let dyncall = op_flags.dyncall();
 
     // -------------------------------------------------------------------------
-    // Row value encoding: alphas[0] + alphas[1] * clk + alphas[2] * val + alphas[3] * prev
+    // Row value encoding: alpha + beta^0 * clk + beta^1 * val + beta^2 * prev
     // -------------------------------------------------------------------------
 
     // Response row value (adding to table during right_shift):
-    let response_row = encoder.encode([clk.clone(), s15.clone(), b1.clone()]);
+    let response_row = challenges.encode_dense([clk.clone(), s15.clone(), b1.clone()]);
 
     // Request row value for left_shift (removing from table):
-    let request_row_left = encoder.encode([b1.clone(), s15_next.clone(), b1_next.clone()]);
+    let request_row_left = challenges.encode_dense([b1.clone(), s15_next.clone(), b1_next.clone()]);
 
     // Request row value for dyncall (removing from table):
     let request_row_dyncall =
-        encoder.encode([b1.clone(), s15_next.clone(), hasher_state_5.clone()]);
+        challenges.encode_dense([b1.clone(), s15_next.clone(), hasher_state_5.clone()]);
 
     // -------------------------------------------------------------------------
     // Compute response and request terms
