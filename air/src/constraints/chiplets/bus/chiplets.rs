@@ -16,17 +16,17 @@
 //!
 //! ## Message Types
 //!
-//! ### Hasher Chiplet Messages (16 alphas)
+//! ### Hasher Chiplet Messages (15 elements)
 //! Format: header + state where:
-//! - header = alphas[0] + alphas[1] * transition_label + alphas[2] * addr + alphas[3] * node_index
-//! - state = sum(alphas[4..16] * hasher_state[0..12])
+//! - header = alpha + beta^0 * transition_label + beta^1 * addr + beta^2 * node_index
+//! - state = sum(beta^(3+i) * hasher_state[i]) for i in 0..12
 //!
-//! ### Bitwise Chiplet Messages (5 alphas)
-//! Format: alphas[0] + alphas[1]*label + alphas[2]*a + alphas[3]*b + alphas[4]*z
+//! ### Bitwise Chiplet Messages (5 elements)
+//! Format: alpha + beta^0*label + beta^1*a + beta^2*b + beta^3*z
 //!
-//! ### Memory Chiplet Messages (6-9 alphas)
-//! Element format: alphas[0] + alphas[1]*label + ... + alphas[5]*element
-//! Word format: alphas[0] + alphas[1]*label + ... + alphas[8]*word[3]
+//! ### Memory Chiplet Messages (6-9 elements)
+//! Element format: alpha + beta^0*label + ... + beta^4*element
+//! Word format: alpha + beta^0*label + ... + beta^7*word[3]
 //!
 //! ## References
 //! - Air-script: ~/air-script/constraints/chiplets.air
@@ -45,7 +45,7 @@ use miden_crypto::stark::{air::MidenAirBuilder, matrix::Matrix};
 use crate::{
     Felt, MainTraceRow,
     constraints::{
-        bus::{MessageEncoder, alphas_from_challenges, indices::B_CHIPLETS},
+        bus::{Challenges, indices::B_CHIPLETS},
         chiplets::hasher,
         op_flags::OpFlags,
         tagging::{TaggingAirBuilderExt, ids::TAG_CHIPLETS_BUS_BASE},
@@ -79,6 +79,9 @@ use crate::{
 /// Tag ID and namespace for the main chiplets bus transition constraint.
 const CHIPLET_BUS_ID: usize = TAG_CHIPLETS_BUS_BASE;
 const CHIPLET_BUS_NAMESPACE: &str = "chiplets.bus.chiplets.transition";
+
+/// Number of message elements for chiplets bus encoding.
+const NUM_CHIPLETS_FIELDS: usize = 15;
 
 // ENTRY POINTS
 // ================================================================================================
@@ -115,10 +118,9 @@ pub fn enforce_chiplets_bus_constraint<AB>(
         (aux_local[B_CHIPLETS], aux_next[B_CHIPLETS])
     };
 
-    // Get challenges for message encoding and convert to ExprEF
-    let challenges = builder.permutation_randomness();
-    // We need 16 alphas for hasher messages (4 header + 12 state).
-    let alphas: [AB::ExprEF; 16] = alphas_from_challenges::<AB, 16>(challenges);
+    // Build alpha/beta powers once for this evaluation.
+    let challenges =
+        Challenges::<AB, NUM_CHIPLETS_FIELDS>::from_randomness(builder.permutation_randomness());
 
     // =========================================================================
     // COMPUTE REQUEST MULTIPLIER
@@ -161,40 +163,43 @@ pub fn enforce_chiplets_bus_constraint<AB>(
     let f_logprecompile: AB::Expr = op_flags.log_precompile();
 
     // --- Hasher request values ---
-    let v_hperm = compute_hperm_request::<AB>(local, next, &alphas);
-    let v_mpverify = compute_mpverify_request::<AB>(local, &alphas);
-    let v_mrupdate = compute_mrupdate_request::<AB>(local, next, &alphas);
+    let v_hperm = compute_hperm_request::<AB>(local, next, &challenges);
+    let v_mpverify = compute_mpverify_request::<AB>(local, &challenges);
+    let v_mrupdate = compute_mrupdate_request::<AB>(local, next, &challenges);
 
     // --- Control block request values ---
-    let v_join = compute_control_block_request::<AB>(local, next, &alphas, ControlBlockOp::Join);
-    let v_split = compute_control_block_request::<AB>(local, next, &alphas, ControlBlockOp::Split);
-    let v_loop = compute_control_block_request::<AB>(local, next, &alphas, ControlBlockOp::Loop);
-    let v_call = compute_call_request::<AB>(local, next, &alphas);
-    let v_dyn = compute_dyn_request::<AB>(local, next, &alphas);
-    let v_dyncall = compute_dyncall_request::<AB>(local, next, &alphas);
-    let v_syscall = compute_syscall_request::<AB>(local, next, &alphas);
-    let v_span = compute_span_request::<AB>(local, next, &alphas);
-    let v_respan = compute_respan_request::<AB>(local, next, &alphas);
-    let v_end = compute_end_request::<AB>(local, &alphas);
+    let v_join =
+        compute_control_block_request::<AB>(local, next, &challenges, ControlBlockOp::Join);
+    let v_split =
+        compute_control_block_request::<AB>(local, next, &challenges, ControlBlockOp::Split);
+    let v_loop =
+        compute_control_block_request::<AB>(local, next, &challenges, ControlBlockOp::Loop);
+    let v_call = compute_call_request::<AB>(local, next, &challenges);
+    let v_dyn = compute_dyn_request::<AB>(local, next, &challenges);
+    let v_dyncall = compute_dyncall_request::<AB>(local, next, &challenges);
+    let v_syscall = compute_syscall_request::<AB>(local, next, &challenges);
+    let v_span = compute_span_request::<AB>(local, next, &challenges);
+    let v_respan = compute_respan_request::<AB>(local, next, &challenges);
+    let v_end = compute_end_request::<AB>(local, &challenges);
 
     // --- Memory request values ---
-    let v_mload = compute_memory_element_request::<AB>(local, next, &alphas, true); // is_read = true
-    let v_mstore = compute_memory_element_request::<AB>(local, next, &alphas, false); // is_read = false
-    let v_mloadw = compute_memory_word_request::<AB>(local, next, &alphas, true); // is_read = true
-    let v_mstorew = compute_memory_word_request::<AB>(local, next, &alphas, false); // is_read = false
-    let v_hornerbase = compute_hornerbase_request::<AB>(local, &alphas);
-    let v_hornerext = compute_hornerext_request::<AB>(local, &alphas);
-    let v_mstream = compute_mstream_request::<AB>(local, next, &alphas);
-    let v_pipe = compute_pipe_request::<AB>(local, next, &alphas);
-    let v_cryptostream = compute_cryptostream_request::<AB>(local, next, &alphas);
+    let v_mload = compute_memory_element_request::<AB>(local, next, &challenges, true); // is_read = true
+    let v_mstore = compute_memory_element_request::<AB>(local, next, &challenges, false); // is_read = false
+    let v_mloadw = compute_memory_word_request::<AB>(local, next, &challenges, true); // is_read = true
+    let v_mstorew = compute_memory_word_request::<AB>(local, next, &challenges, false); // is_read = false
+    let v_hornerbase = compute_hornerbase_request::<AB>(local, &challenges);
+    let v_hornerext = compute_hornerext_request::<AB>(local, &challenges);
+    let v_mstream = compute_mstream_request::<AB>(local, next, &challenges);
+    let v_pipe = compute_pipe_request::<AB>(local, next, &challenges);
+    let v_cryptostream = compute_cryptostream_request::<AB>(local, next, &challenges);
 
     // --- Bitwise request values ---
-    let v_u32and = compute_bitwise_request::<AB>(local, next, &alphas, false); // is_xor = false
-    let v_u32xor = compute_bitwise_request::<AB>(local, next, &alphas, true); // is_xor = true
+    let v_u32and = compute_bitwise_request::<AB>(local, next, &challenges, false); // is_xor = false
+    let v_u32xor = compute_bitwise_request::<AB>(local, next, &challenges, true); // is_xor = true
 
     // --- ACE and log_precompile request values ---
-    let v_evalcircuit = compute_ace_request::<AB>(local, &alphas);
-    let v_logprecompile = compute_log_precompile_request::<AB>(local, next, &alphas);
+    let v_evalcircuit = compute_ace_request::<AB>(local, &challenges);
+    let v_logprecompile = compute_log_precompile_request::<AB>(local, next, &challenges);
 
     // Sum of request flags (hasher + control blocks + memory + bitwise + ACE + log_precompile)
     let request_flag_sum: AB::Expr = f_hperm.clone()
@@ -304,19 +309,19 @@ pub fn enforce_chiplets_bus_constraint<AB>(
 
     // --- Hasher response (complex, depends on cycle position and selectors) ---
     let hasher_response =
-        compute_hasher_response::<AB>(local, next, &alphas, cycle_row_0, cycle_row_31);
+        compute_hasher_response::<AB>(local, next, &challenges, cycle_row_0, cycle_row_31);
 
     // --- Bitwise response ---
-    let v_bitwise = compute_bitwise_response::<AB>(local, &alphas);
+    let v_bitwise = compute_bitwise_response::<AB>(local, &challenges);
 
     // --- Memory response ---
-    let v_memory = compute_memory_response::<AB>(local, &alphas);
+    let v_memory = compute_memory_response::<AB>(local, &challenges);
 
     // --- ACE response ---
-    let v_ace = compute_ace_response::<AB>(local, &alphas);
+    let v_ace = compute_ace_response::<AB>(local, &challenges);
 
     // --- Kernel ROM response ---
-    let v_kernel_rom = compute_kernel_rom_response::<AB>(local, &alphas);
+    let v_kernel_rom = compute_kernel_rom_response::<AB>(local, &challenges);
 
     // Convert flags to ExprEF
     // Responses: hasher + bitwise + memory + ACE + kernel ROM contributions, others return 1
@@ -344,21 +349,18 @@ pub fn enforce_chiplets_bus_constraint<AB>(
     });
 }
 
-// MESSAGE HELPERS
-// ================================================================================================
-
 // BITWISE MESSAGE HELPERS
 // ================================================================================================
 
 /// Computes the bitwise request message value.
 ///
-/// Format: alphas[0] + alphas[1]*label + alphas[2]*a + alphas[3]*b + alphas[4]*z
+/// Format: alpha + beta^0*label + beta^1*a + beta^2*b + beta^3*z
 ///
 /// Stack layout for U32AND/U32XOR: [a, b, ...] -> [z, ...]
 fn compute_bitwise_request<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
     is_xor: bool,
 ) -> AB::ExprEF {
     let label: Felt = if is_xor { BITWISE_XOR_LABEL } else { BITWISE_AND_LABEL };
@@ -369,16 +371,15 @@ fn compute_bitwise_request<AB: MidenAirBuilder<F = Felt>>(
     let b: AB::Expr = local.stack[1].clone().into();
     let z: AB::Expr = next.stack[0].clone().into();
 
-    let encoder = MessageEncoder::<AB, 4>::from_challenges(alphas);
-    encoder.encode([label, a, b, z])
+    challenges.encode_dense([label, a, b, z])
 }
 
 /// Computes the bitwise chiplet response message value.
 ///
-/// Format: alphas[0] + alphas[1]*label + alphas[2]*a + alphas[3]*b + alphas[4]*z
+/// Format: alpha + beta^0*label + beta^1*a + beta^2*b + beta^3*z
 fn compute_bitwise_response<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
 ) -> AB::ExprEF {
     use crate::trace::chiplets::NUM_BITWISE_SELECTORS;
 
@@ -398,8 +399,7 @@ fn compute_bitwise_response<AB: MidenAirBuilder<F = Felt>>(
     let b: AB::Expr = local.chiplets[bw_offset + bitwise::B_COL_IDX].clone().into();
     let z: AB::Expr = local.chiplets[bw_offset + bitwise::OUTPUT_COL_IDX].clone().into();
 
-    let encoder = MessageEncoder::<AB, 4>::from_challenges(alphas);
-    encoder.encode([label, a, b, z])
+    challenges.encode_dense([label, a, b, z])
 }
 
 // MEMORY MESSAGE HELPERS
@@ -407,15 +407,15 @@ fn compute_bitwise_response<AB: MidenAirBuilder<F = Felt>>(
 
 /// Computes the memory word request message value.
 ///
-/// Format: alphas[0] + alphas[1]*label + alphas[2]*ctx + alphas[3]*addr + alphas[4]*clk +
-/// alphas[5..9]*word
+/// Format: alpha + beta^0*label + beta^1*ctx + beta^2*addr + beta^3*clk +
+/// beta^4..beta^7 * word
 ///
 /// Stack layout for MLOADW: [addr, ...] -> [word[0], word[1], word[2], word[3], ...]
 /// Stack layout for MSTOREW: [addr, word[0], word[1], word[2], word[3], ...]
 fn compute_memory_word_request<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
     is_read: bool,
 ) -> AB::ExprEF {
     let label = if is_read {
@@ -451,18 +451,16 @@ fn compute_memory_word_request<AB: MidenAirBuilder<F = Felt>>(
         )
     };
 
-    let encoder = MessageEncoder::<AB, 8>::from_challenges(alphas);
-    encoder.encode([label, ctx, addr, clk, w0, w1, w2, w3])
+    challenges.encode_dense([label, ctx, addr, clk, w0, w1, w2, w3])
 }
 
 /// Computes the memory element request message value.
 ///
-/// Format: alphas[0] + alphas[1]*label + alphas[2]*ctx + alphas[3]*addr + alphas[4]*clk +
-/// alphas[5]*element
+/// Format: alpha + beta^0*label + beta^1*ctx + beta^2*addr + beta^3*clk + beta^4*element
 fn compute_memory_element_request<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
     is_read: bool,
 ) -> AB::ExprEF {
     let label = if is_read {
@@ -488,15 +486,14 @@ fn compute_memory_element_request<AB: MidenAirBuilder<F = Felt>>(
         local.stack[1].clone().into()
     };
 
-    let encoder = MessageEncoder::<AB, 5>::from_challenges(alphas);
-    encoder.encode([label, ctx, addr, clk, element])
+    challenges.encode_dense([label, ctx, addr, clk, element])
 }
 
 /// Computes the MSTREAM request message value (two word reads).
 fn compute_mstream_request<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
 ) -> AB::ExprEF {
     let label: AB::Expr = AB::Expr::from_u16(MEMORY_READ_WORD_LABEL as u16);
     let ctx: AB::Expr = local.ctx.clone().into();
@@ -520,8 +517,7 @@ fn compute_mstream_request<AB: MidenAirBuilder<F = Felt>>(
         next.stack[7].clone().into(),
     ];
 
-    let encoder = MessageEncoder::<AB, 8>::from_challenges(alphas);
-    let msg1 = encoder.encode([
+    let msg1 = challenges.encode_dense([
         label.clone(),
         ctx.clone(),
         addr.clone(),
@@ -532,7 +528,7 @@ fn compute_mstream_request<AB: MidenAirBuilder<F = Felt>>(
         word1[3].clone(),
     ]);
 
-    let msg2 = encoder.encode([
+    let msg2 = challenges.encode_dense([
         label,
         ctx,
         addr + four.clone(),
@@ -550,7 +546,7 @@ fn compute_mstream_request<AB: MidenAirBuilder<F = Felt>>(
 fn compute_pipe_request<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
 ) -> AB::ExprEF {
     let label: AB::Expr = AB::Expr::from_u16(MEMORY_WRITE_WORD_LABEL as u16);
     let ctx: AB::Expr = local.ctx.clone().into();
@@ -574,8 +570,7 @@ fn compute_pipe_request<AB: MidenAirBuilder<F = Felt>>(
         next.stack[7].clone().into(),
     ];
 
-    let encoder = MessageEncoder::<AB, 8>::from_challenges(alphas);
-    let msg1 = encoder.encode([
+    let msg1 = challenges.encode_dense([
         label.clone(),
         ctx.clone(),
         addr.clone(),
@@ -586,7 +581,7 @@ fn compute_pipe_request<AB: MidenAirBuilder<F = Felt>>(
         word1[3].clone(),
     ]);
 
-    let msg2 = encoder.encode([
+    let msg2 = challenges.encode_dense([
         label,
         ctx,
         addr + four.clone(),
@@ -604,7 +599,7 @@ fn compute_pipe_request<AB: MidenAirBuilder<F = Felt>>(
 fn compute_cryptostream_request<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
 ) -> AB::ExprEF {
     let read_label: AB::Expr = AB::Expr::from_u16(MEMORY_READ_WORD_LABEL as u16);
     let write_label: AB::Expr = AB::Expr::from_u16(MEMORY_WRITE_WORD_LABEL as u16);
@@ -618,8 +613,7 @@ fn compute_cryptostream_request<AB: MidenAirBuilder<F = Felt>>(
     let cipher: [AB::Expr; 8] = core::array::from_fn(|i| next.stack[i].clone().into());
     let plain: [AB::Expr; 8] = core::array::from_fn(|i| cipher[i].clone() - rate[i].clone());
 
-    let encoder = MessageEncoder::<AB, 8>::from_challenges(alphas);
-    let read_msg1 = encoder.encode([
+    let read_msg1 = challenges.encode_dense([
         read_label.clone(),
         ctx.clone(),
         src.clone(),
@@ -630,7 +624,7 @@ fn compute_cryptostream_request<AB: MidenAirBuilder<F = Felt>>(
         plain[3].clone(),
     ]);
 
-    let read_msg2 = encoder.encode([
+    let read_msg2 = challenges.encode_dense([
         read_label,
         ctx.clone(),
         src + four.clone(),
@@ -641,7 +635,7 @@ fn compute_cryptostream_request<AB: MidenAirBuilder<F = Felt>>(
         plain[7].clone(),
     ]);
 
-    let write_msg1 = encoder.encode([
+    let write_msg1 = challenges.encode_dense([
         write_label.clone(),
         ctx.clone(),
         dst.clone(),
@@ -652,7 +646,7 @@ fn compute_cryptostream_request<AB: MidenAirBuilder<F = Felt>>(
         cipher[3].clone(),
     ]);
 
-    let write_msg2 = encoder.encode([
+    let write_msg2 = challenges.encode_dense([
         write_label,
         ctx,
         dst + four,
@@ -669,7 +663,7 @@ fn compute_cryptostream_request<AB: MidenAirBuilder<F = Felt>>(
 /// Computes the HORNERBASE request value (two element reads).
 fn compute_hornerbase_request<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
 ) -> AB::ExprEF {
     let label: AB::Expr = AB::Expr::from_u16(MEMORY_READ_ELEMENT_LABEL as u16);
     let ctx: AB::Expr = local.ctx.clone().into();
@@ -683,10 +677,10 @@ fn compute_hornerbase_request<AB: MidenAirBuilder<F = Felt>>(
     let eval0: AB::Expr = local.decoder[helper0_idx].clone().into();
     let eval1: AB::Expr = local.decoder[helper1_idx].clone().into();
 
-    let encoder = MessageEncoder::<AB, 5>::from_challenges(alphas);
-    let msg0 = encoder.encode([label.clone(), ctx.clone(), addr.clone(), clk.clone(), eval0]);
+    let msg0 =
+        challenges.encode_dense([label.clone(), ctx.clone(), addr.clone(), clk.clone(), eval0]);
 
-    let msg1 = encoder.encode([label, ctx, addr + one, clk, eval1]);
+    let msg1 = challenges.encode_dense([label, ctx, addr + one, clk, eval1]);
 
     msg0 * msg1
 }
@@ -694,7 +688,7 @@ fn compute_hornerbase_request<AB: MidenAirBuilder<F = Felt>>(
 /// Computes the HORNEREXT request value (one word read).
 fn compute_hornerext_request<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
 ) -> AB::ExprEF {
     let label: AB::Expr = AB::Expr::from_u16(MEMORY_READ_WORD_LABEL as u16);
     let ctx: AB::Expr = local.ctx.clone().into();
@@ -710,8 +704,7 @@ fn compute_hornerext_request<AB: MidenAirBuilder<F = Felt>>(
         local.decoder[base + 3].clone().into(),
     ];
 
-    let encoder = MessageEncoder::<AB, 8>::from_challenges(alphas);
-    encoder.encode([
+    challenges.encode_dense([
         label,
         ctx,
         addr,
@@ -730,7 +723,7 @@ fn compute_hornerext_request<AB: MidenAirBuilder<F = Felt>>(
 /// For element access, the correct element is selected based on idx0, idx1.
 fn compute_memory_response<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
 ) -> AB::ExprEF {
     use crate::trace::chiplets::{NUM_MEMORY_SELECTORS, memory};
 
@@ -779,14 +772,12 @@ fn compute_memory_response<AB: MidenAirBuilder<F = Felt>>(
     // For word access, all v0..v3 are used
     let is_element = one.clone() - is_word.clone();
 
-    // Element access: include the selected element in alpha[5].
-    let element_encoder = MessageEncoder::<AB, 5>::from_challenges(alphas);
+    // Element access: include the selected element in the last slot.
     let element_msg =
-        element_encoder.encode([label.clone(), ctx.clone(), addr.clone(), clk.clone(), element]);
+        challenges.encode_dense([label.clone(), ctx.clone(), addr.clone(), clk.clone(), element]);
 
-    // Word access: include all 4 values in alpha[5..9].
-    let word_encoder = MessageEncoder::<AB, 8>::from_challenges(alphas);
-    let word_msg = word_encoder.encode([label, ctx, addr, clk, v0, v1, v2, v3]);
+    // Word access: include all 4 values.
+    let word_msg = challenges.encode_dense([label, ctx, addr, clk, v0, v1, v2, v3]);
 
     // Select based on is_word
     element_msg * is_element + word_msg * is_word
@@ -809,7 +800,7 @@ struct HasherResponse<EF, E> {
 fn compute_hasher_response<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
     cycle_row_0: AB::Expr,
     cycle_row_31: AB::Expr,
 ) -> HasherResponse<AB::ExprEF, AB::Expr> {
@@ -905,7 +896,7 @@ fn compute_hasher_response<AB: MidenAirBuilder<F = Felt>>(
 
     // v_bp: Full state message for f_bp (linear hash / 2-to-1 hash init)
     let v_bp = compute_hasher_message::<AB>(
-        alphas,
+        challenges,
         label_bp,
         addr_next.clone(),
         node_index.clone(),
@@ -914,7 +905,7 @@ fn compute_hasher_response<AB: MidenAirBuilder<F = Felt>>(
 
     // v_sout: Full state message for f_sout (return full state)
     let v_sout = compute_hasher_message::<AB>(
-        alphas,
+        challenges,
         label_sout,
         addr_next.clone(),
         node_index.clone(),
@@ -922,7 +913,7 @@ fn compute_hasher_response<AB: MidenAirBuilder<F = Felt>>(
     );
 
     // v_leaf: Leaf node message (for f_mp, f_mv, f_mu)
-    // The leaf is encoded as a 4-lane word using alphas[4..7], matching the processor.
+    // The leaf is encoded as a 4-lane word, matching the processor.
     // The bit determines which part of the trace state to use:
     // - bit=0: use RATE0 (state[0..4])
     // - bit=1: use RATE1 (state[4..8])
@@ -940,21 +931,21 @@ fn compute_hasher_response<AB: MidenAirBuilder<F = Felt>>(
         (one.clone() - bit.clone()) * state[3].clone() + bit.clone() * state[7].clone(),
     ];
     let v_mp = compute_hasher_word_message::<AB>(
-        alphas,
+        challenges,
         label_mp,
         addr_next.clone(),
         node_index.clone(),
         &leaf_word,
     );
     let v_mv = compute_hasher_word_message::<AB>(
-        alphas,
+        challenges,
         label_mv,
         addr_next.clone(),
         node_index.clone(),
         &leaf_word,
     );
     let v_mu = compute_hasher_word_message::<AB>(
-        alphas,
+        challenges,
         label_mu,
         addr_next.clone(),
         node_index.clone(),
@@ -962,11 +953,11 @@ fn compute_hasher_response<AB: MidenAirBuilder<F = Felt>>(
     );
 
     // v_hout: Hash output message (for f_hout)
-    // Digest from RATE0 (state[0..4]) encoded as a 4-lane word using alphas[4..7].
+    // Digest from RATE0 (state[0..4]) encoded as a 4-lane word.
     let result_word: [AB::Expr; 4] =
         [state[0].clone(), state[1].clone(), state[2].clone(), state[3].clone()];
     let v_hout = compute_hasher_word_message::<AB>(
-        alphas,
+        challenges,
         label_hout,
         addr_next.clone(),
         node_index.clone(),
@@ -974,7 +965,7 @@ fn compute_hasher_response<AB: MidenAirBuilder<F = Felt>>(
     );
 
     // v_abp: Absorption message (for f_abp) - uses NEXT row's rate (8 elements)
-    // Rate from state_next[0..8] is encoded using alphas[4..11].
+    // Rate from state_next[0..8] is encoded as an 8-lane rate message.
     let rate_next: [AB::Expr; 8] = [
         state_next[0].clone(),
         state_next[1].clone(),
@@ -986,7 +977,7 @@ fn compute_hasher_response<AB: MidenAirBuilder<F = Felt>>(
         state_next[7].clone(),
     ];
     let v_abp = compute_hasher_rate_message::<AB>(
-        alphas,
+        challenges,
         label_abp,
         addr_next.clone(),
         node_index.clone(),
@@ -1029,7 +1020,7 @@ fn compute_hasher_response<AB: MidenAirBuilder<F = Felt>>(
 fn compute_hperm_request<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
 ) -> AB::ExprEF {
     use crate::trace::decoder::USER_OP_HELPERS_OFFSET;
 
@@ -1047,7 +1038,7 @@ fn compute_hperm_request<AB: MidenAirBuilder<F = Felt>>(
     let node_index_zero: AB::Expr = AB::Expr::ZERO;
 
     let input_msg = compute_hasher_message::<AB>(
-        alphas,
+        challenges,
         input_label,
         addr.clone(),
         node_index_zero.clone(),
@@ -1061,7 +1052,7 @@ fn compute_hperm_request<AB: MidenAirBuilder<F = Felt>>(
     let addr_next = addr + addr_offset;
 
     let output_msg = compute_hasher_message::<AB>(
-        alphas,
+        challenges,
         output_label,
         addr_next,
         node_index_zero,
@@ -1079,7 +1070,7 @@ fn compute_hperm_request<AB: MidenAirBuilder<F = Felt>>(
 fn compute_log_precompile_request<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
 ) -> AB::ExprEF {
     // Helper registers
     let helper_base = USER_OP_HELPERS_OFFSET;
@@ -1137,7 +1128,7 @@ fn compute_log_precompile_request<AB: MidenAirBuilder<F = Felt>>(
     // Input message: LINEAR_HASH_LABEL + 16
     let input_label: AB::Expr = AB::Expr::from_u16(LINEAR_HASH_LABEL as u16 + 16);
     let input_msg = compute_hasher_message::<AB>(
-        alphas,
+        challenges,
         input_label,
         addr.clone(),
         AB::Expr::ZERO,
@@ -1148,7 +1139,7 @@ fn compute_log_precompile_request<AB: MidenAirBuilder<F = Felt>>(
     let output_label: AB::Expr = AB::Expr::from_u16(RETURN_STATE_LABEL as u16 + 32);
     let addr_offset: AB::Expr = AB::Expr::from_u16((HASH_CYCLE_LEN - 1) as u16);
     let output_msg = compute_hasher_message::<AB>(
-        alphas,
+        challenges,
         output_label,
         addr + addr_offset,
         AB::Expr::ZERO,
@@ -1161,68 +1152,74 @@ fn compute_log_precompile_request<AB: MidenAirBuilder<F = Felt>>(
 /// Computes a hasher message value.
 ///
 /// Format: header + state where:
-/// - header = alphas[0] + alphas[1] * transition_label + alphas[2] * addr + alphas[3] * node_index
-/// - state = sum(alphas[4..16] * hasher_state[0..12])
+/// - header = alpha + beta^0 * transition_label + beta^1 * addr + beta^2 * node_index
+/// - state = sum(beta^(3+i) * hasher_state[i]) for i in 0..12
 fn compute_hasher_message<AB: MidenAirBuilder<F = Felt>>(
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
     transition_label: AB::Expr,
     addr: AB::Expr,
     node_index: AB::Expr,
     state: &[AB::Expr; 12],
 ) -> AB::ExprEF {
-    // Header
-    let header = alphas[0].clone()
-        + alphas[1].clone() * transition_label
-        + alphas[2].clone() * addr
-        + alphas[3].clone() * node_index;
-
-    // State contribution
-    let mut state_sum = AB::ExprEF::ZERO;
-    for i in 0..12 {
-        state_sum += alphas[4 + i].clone() * state[i].clone();
-    }
-
-    header + state_sum
+    challenges.encode_dense([
+        transition_label,
+        addr,
+        node_index,
+        state[0].clone(),
+        state[1].clone(),
+        state[2].clone(),
+        state[3].clone(),
+        state[4].clone(),
+        state[5].clone(),
+        state[6].clone(),
+        state[7].clone(),
+        state[8].clone(),
+        state[9].clone(),
+        state[10].clone(),
+        state[11].clone(),
+    ])
 }
 
-/// Computes a hasher message for a 4-lane word (uses alphas[4..7]).
+/// Computes a hasher message for a 4-lane word.
 fn compute_hasher_word_message<AB: MidenAirBuilder<F = Felt>>(
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
     transition_label: AB::Expr,
     addr: AB::Expr,
     node_index: AB::Expr,
     word: &[AB::Expr; 4],
 ) -> AB::ExprEF {
-    let header = alphas[0].clone()
-        + alphas[1].clone() * transition_label
-        + alphas[2].clone() * addr
-        + alphas[3].clone() * node_index;
-
-    header
-        + alphas[4].clone() * word[0].clone()
-        + alphas[5].clone() * word[1].clone()
-        + alphas[6].clone() * word[2].clone()
-        + alphas[7].clone() * word[3].clone()
+    challenges.encode_dense([
+        transition_label,
+        addr,
+        node_index,
+        word[0].clone(),
+        word[1].clone(),
+        word[2].clone(),
+        word[3].clone(),
+    ])
 }
 
-/// Computes a hasher message for an 8-lane rate (uses alphas[4..11]).
+/// Computes a hasher message for an 8-lane rate.
 fn compute_hasher_rate_message<AB: MidenAirBuilder<F = Felt>>(
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
     transition_label: AB::Expr,
     addr: AB::Expr,
     node_index: AB::Expr,
     rate: &[AB::Expr; 8],
 ) -> AB::ExprEF {
-    let header = alphas[0].clone()
-        + alphas[1].clone() * transition_label
-        + alphas[2].clone() * addr
-        + alphas[3].clone() * node_index;
-
-    let mut acc = header;
-    for i in 0..8 {
-        acc += alphas[4 + i].clone() * rate[i].clone();
-    }
-    acc
+    challenges.encode_dense([
+        transition_label,
+        addr,
+        node_index,
+        rate[0].clone(),
+        rate[1].clone(),
+        rate[2].clone(),
+        rate[3].clone(),
+        rate[4].clone(),
+        rate[5].clone(),
+        rate[6].clone(),
+        rate[7].clone(),
+    ])
 }
 
 // ACE MESSAGE HELPERS
@@ -1230,13 +1227,13 @@ fn compute_hasher_rate_message<AB: MidenAirBuilder<F = Felt>>(
 
 /// Computes the ACE request message value.
 ///
-/// Format: alphas[0] + alphas[1]*label + alphas[2]*clk + alphas[3]*ctx + alphas[4]*ptr
-///         + alphas[5]*num_read_rows + alphas[6]*num_eval_rows
+/// Format: alpha + beta^0*label + beta^1*clk + beta^2*ctx + beta^3*ptr
+///         + beta^4*num_read_rows + beta^5*num_eval_rows
 ///
 /// Stack layout for EVALCIRCUIT: [ptr, num_read_rows, num_eval_rows, ...]
 fn compute_ace_request<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
 ) -> AB::ExprEF {
     // Label is ACE_INIT_LABEL
     let label: AB::Expr = AB::Expr::from(ACE_INIT_LABEL);
@@ -1250,14 +1247,13 @@ fn compute_ace_request<AB: MidenAirBuilder<F = Felt>>(
     let num_read_rows: AB::Expr = local.stack[1].clone().into();
     let num_eval_rows: AB::Expr = local.stack[2].clone().into();
 
-    let encoder = MessageEncoder::<AB, 6>::from_challenges(alphas);
-    encoder.encode([label, clk, ctx, ptr, num_read_rows, num_eval_rows])
+    challenges.encode_dense([label, clk, ctx, ptr, num_read_rows, num_eval_rows])
 }
 
 /// Computes the ACE chiplet response message value.
 ///
-/// Format: alphas[0] + alphas[1]*label + alphas[2]*clk + alphas[3]*ctx + alphas[4]*ptr
-///         + alphas[5]*num_read_rows + alphas[6]*num_eval_rows
+/// Format: alpha + beta^0*label + beta^1*clk + beta^2*ctx + beta^3*ptr
+///         + beta^4*num_read_rows + beta^5*num_eval_rows
 ///
 /// The chiplet reads from its internal columns:
 /// - clk from CLK_IDX
@@ -1267,7 +1263,7 @@ fn compute_ace_request<AB: MidenAirBuilder<F = Felt>>(
 /// - num_read_rows = id_0 + 1 - num_eval_rows
 fn compute_ace_response<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
 ) -> AB::ExprEF {
     // Label is ACE_INIT_LABEL
     let label: AB::Expr = AB::Expr::from(ACE_INIT_LABEL);
@@ -1288,8 +1284,7 @@ fn compute_ace_response<AB: MidenAirBuilder<F = Felt>>(
     // num_read_rows = id_0 + 1 - num_eval_rows
     let num_read_rows: AB::Expr = id_0 + AB::Expr::ONE - num_eval_rows.clone();
 
-    let encoder = MessageEncoder::<AB, 6>::from_challenges(alphas);
-    encoder.encode([label, clk, ctx, ptr, num_read_rows, num_eval_rows])
+    challenges.encode_dense([label, clk, ctx, ptr, num_read_rows, num_eval_rows])
 }
 
 // KERNEL ROM MESSAGE HELPERS
@@ -1297,15 +1292,15 @@ fn compute_ace_response<AB: MidenAirBuilder<F = Felt>>(
 
 /// Computes the kernel ROM chiplet response message value.
 ///
-/// Format: alphas[0] + alphas[1]*label + alphas[2]*digest[0] + alphas[3]*digest[1]
-///         + alphas[4]*digest[2] + alphas[5]*digest[3]
+/// Format: alpha + beta^0*label + beta^1*digest[0] + beta^2*digest[1]
+///         + beta^3*digest[2] + beta^4*digest[3]
 ///
 /// The label depends on s_first flag:
 /// - s_first=1: KERNEL_PROC_INIT_LABEL (responding to verifier/public input init request)
 /// - s_first=0: KERNEL_PROC_CALL_LABEL (responding to decoder SYSCALL request)
 fn compute_kernel_rom_response<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
 ) -> AB::ExprEF {
     // s_first flag is at CHIPLETS_OFFSET + 5 (after 5 selectors), which is chiplets[5]
     let s_first: AB::Expr = local.chiplets[NUM_KERNEL_ROM_SELECTORS].clone().into();
@@ -1323,8 +1318,7 @@ fn compute_kernel_rom_response<AB: MidenAirBuilder<F = Felt>>(
     let root2: AB::Expr = local.chiplets[NUM_KERNEL_ROM_SELECTORS + 3].clone().into();
     let root3: AB::Expr = local.chiplets[NUM_KERNEL_ROM_SELECTORS + 4].clone().into();
 
-    let encoder = MessageEncoder::<AB, 5>::from_challenges(alphas);
-    encoder.encode([label, root0, root1, root2, root3])
+    challenges.encode_dense([label, root0, root1, root2, root3])
 }
 
 // CONTROL BLOCK REQUEST HELPERS
@@ -1356,7 +1350,7 @@ impl ControlBlockOp {
 /// Computes the control block request message value for JOIN, SPLIT, LOOP, CALL, and SYSCALL.
 ///
 /// Format follows ControlBlockRequestMessage from processor:
-/// - header = alphas[0] + alphas[1] * transition_label + alphas[2] * addr_next
+/// - header = alpha + beta^0 * transition_label + beta^1 * addr_next
 /// - state = 12-lane sponge with 8-element decoder hasher state as rate + opcode as domain
 ///
 /// The message reconstructs:
@@ -1366,7 +1360,7 @@ impl ControlBlockOp {
 fn compute_control_block_request<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
     op: ControlBlockOp,
 ) -> AB::ExprEF {
     // transition_label = LINEAR_HASH_LABEL + 16 = 19
@@ -1400,7 +1394,7 @@ fn compute_control_block_request<AB: MidenAirBuilder<F = Felt>>(
         AB::Expr::ZERO,
     ];
 
-    compute_hasher_message::<AB>(alphas, transition_label, addr_next, AB::Expr::ZERO, &state)
+    compute_hasher_message::<AB>(challenges, transition_label, addr_next, AB::Expr::ZERO, &state)
 }
 
 /// Computes the CALL request message value.
@@ -1411,14 +1405,14 @@ fn compute_control_block_request<AB: MidenAirBuilder<F = Felt>>(
 fn compute_call_request<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
 ) -> AB::ExprEF {
     // Control block request
     let control_req =
-        compute_control_block_request::<AB>(local, next, alphas, ControlBlockOp::Call);
+        compute_control_block_request::<AB>(local, next, challenges, ControlBlockOp::Call);
 
     // FMP initialization write request
-    let fmp_req = compute_fmp_write_request::<AB>(local, next, alphas);
+    let fmp_req = compute_fmp_write_request::<AB>(local, next, challenges);
 
     control_req * fmp_req
 }
@@ -1431,13 +1425,14 @@ fn compute_call_request<AB: MidenAirBuilder<F = Felt>>(
 fn compute_dyn_request<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
 ) -> AB::ExprEF {
     // Control block request with zeros for hasher state (callee is dynamic)
-    let control_req = compute_control_block_request_zeros::<AB>(local, next, alphas, OPCODE_DYN);
+    let control_req =
+        compute_control_block_request_zeros::<AB>(local, next, challenges, OPCODE_DYN);
 
     // Memory read for callee hash (word read from stack[0] address)
-    let callee_hash_req = compute_dyn_callee_hash_read::<AB>(local, alphas);
+    let callee_hash_req = compute_dyn_callee_hash_read::<AB>(local, challenges);
 
     control_req * callee_hash_req
 }
@@ -1451,17 +1446,17 @@ fn compute_dyn_request<AB: MidenAirBuilder<F = Felt>>(
 fn compute_dyncall_request<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
 ) -> AB::ExprEF {
     // Control block request with zeros for hasher state (callee is dynamic)
     let control_req =
-        compute_control_block_request_zeros::<AB>(local, next, alphas, OPCODE_DYNCALL);
+        compute_control_block_request_zeros::<AB>(local, next, challenges, OPCODE_DYNCALL);
 
     // Memory read for callee hash (word read from stack[0] address)
-    let callee_hash_req = compute_dyn_callee_hash_read::<AB>(local, alphas);
+    let callee_hash_req = compute_dyn_callee_hash_read::<AB>(local, challenges);
 
     // FMP initialization write request
-    let fmp_req = compute_fmp_write_request::<AB>(local, next, alphas);
+    let fmp_req = compute_fmp_write_request::<AB>(local, next, challenges);
 
     control_req * callee_hash_req * fmp_req
 }
@@ -1474,11 +1469,11 @@ fn compute_dyncall_request<AB: MidenAirBuilder<F = Felt>>(
 fn compute_syscall_request<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
 ) -> AB::ExprEF {
     // Control block request
     let control_req =
-        compute_control_block_request::<AB>(local, next, alphas, ControlBlockOp::Syscall);
+        compute_control_block_request::<AB>(local, next, challenges, ControlBlockOp::Syscall);
 
     // Kernel ROM lookup request (digest from first 4 elements of decoder hasher state)
     let root0: AB::Expr = local.decoder[HASHER_STATE_RANGE.start].clone().into();
@@ -1486,12 +1481,8 @@ fn compute_syscall_request<AB: MidenAirBuilder<F = Felt>>(
     let root2: AB::Expr = local.decoder[HASHER_STATE_RANGE.start + 2].clone().into();
     let root3: AB::Expr = local.decoder[HASHER_STATE_RANGE.start + 3].clone().into();
 
-    let kernel_req = alphas[0].clone()
-        + alphas[1].clone() * AB::Expr::from(KERNEL_PROC_CALL_LABEL)
-        + alphas[2].clone() * root0
-        + alphas[3].clone() * root1
-        + alphas[4].clone() * root2
-        + alphas[5].clone() * root3;
+    let label: AB::Expr = AB::Expr::from(KERNEL_PROC_CALL_LABEL);
+    let kernel_req = challenges.encode_dense([label, root0, root1, root2, root3]);
 
     control_req * kernel_req
 }
@@ -1502,7 +1493,7 @@ fn compute_syscall_request<AB: MidenAirBuilder<F = Felt>>(
 fn compute_span_request<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
 ) -> AB::ExprEF {
     // transition_label = LINEAR_HASH_LABEL + 16 = 19
     let transition_label: AB::Expr = AB::Expr::from_u16(LINEAR_HASH_LABEL as u16 + 16);
@@ -1530,16 +1521,16 @@ fn compute_span_request<AB: MidenAirBuilder<F = Felt>>(
         AB::Expr::ZERO,
     ];
 
-    compute_hasher_message::<AB>(alphas, transition_label, addr_next, AB::Expr::ZERO, &state)
+    compute_hasher_message::<AB>(challenges, transition_label, addr_next, AB::Expr::ZERO, &state)
 }
 
 /// Computes the RESPAN block request message value.
 ///
-/// Rate goes to alphas[4..12].
+/// Rate occupies message positions 3..10 (after label/addr/node_index).
 fn compute_respan_request<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
 ) -> AB::ExprEF {
     // transition_label = LINEAR_HASH_LABEL + 32 = 35
     let transition_label: AB::Expr = AB::Expr::from_u16(LINEAR_HASH_LABEL as u16 + 32);
@@ -1553,7 +1544,7 @@ fn compute_respan_request<AB: MidenAirBuilder<F = Felt>>(
         core::array::from_fn(|i| local.decoder[HASHER_STATE_RANGE.start + i].clone().into());
 
     compute_hasher_rate_message::<AB>(
-        alphas,
+        challenges,
         transition_label,
         addr_for_msg,
         AB::Expr::ZERO,
@@ -1563,10 +1554,10 @@ fn compute_respan_request<AB: MidenAirBuilder<F = Felt>>(
 
 /// Computes the END block request message value.
 ///
-/// Digest goes to alphas[4..8].
+/// Digest occupies message positions 3..6 (after label/addr/node_index).
 fn compute_end_request<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
 ) -> AB::ExprEF {
     // transition_label = RETURN_HASH_LABEL + 32 = 1 + 32 = 33
     let transition_label: AB::Expr = AB::Expr::from_u16(RETURN_HASH_LABEL as u16 + 32);
@@ -1579,14 +1570,14 @@ fn compute_end_request<AB: MidenAirBuilder<F = Felt>>(
     let digest: [AB::Expr; 4] =
         core::array::from_fn(|i| local.decoder[HASHER_STATE_RANGE.start + i].clone().into());
 
-    compute_hasher_word_message::<AB>(alphas, transition_label, addr, AB::Expr::ZERO, &digest)
+    compute_hasher_word_message::<AB>(challenges, transition_label, addr, AB::Expr::ZERO, &digest)
 }
 
 /// Computes control block request with zeros for hasher state (for DYN/DYNCALL).
 fn compute_control_block_request_zeros<AB: MidenAirBuilder<F = Felt>>(
     _local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
     opcode: u8,
 ) -> AB::ExprEF {
     // transition_label = LINEAR_HASH_LABEL + 16 = 19
@@ -1614,7 +1605,7 @@ fn compute_control_block_request_zeros<AB: MidenAirBuilder<F = Felt>>(
         AB::Expr::ZERO,
     ];
 
-    compute_hasher_message::<AB>(alphas, transition_label, addr_next, AB::Expr::ZERO, &state)
+    compute_hasher_message::<AB>(challenges, transition_label, addr_next, AB::Expr::ZERO, &state)
 }
 
 /// Computes the FMP initialization write request.
@@ -1623,7 +1614,7 @@ fn compute_control_block_request_zeros<AB: MidenAirBuilder<F = Felt>>(
 fn compute_fmp_write_request<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
 ) -> AB::ExprEF {
     let label: AB::Expr = AB::Expr::from_u16(MEMORY_WRITE_ELEMENT_LABEL as u16);
 
@@ -1633,12 +1624,7 @@ fn compute_fmp_write_request<AB: MidenAirBuilder<F = Felt>>(
     let addr: AB::Expr = AB::Expr::from(FMP_ADDR);
     let element: AB::Expr = AB::Expr::from(FMP_INIT_VALUE);
 
-    alphas[0].clone()
-        + alphas[1].clone() * label
-        + alphas[2].clone() * ctx
-        + alphas[3].clone() * addr
-        + alphas[4].clone() * clk
-        + alphas[5].clone() * element
+    challenges.encode_dense([label, ctx, addr, clk, element])
 }
 
 /// Computes the callee hash read request for DYN/DYNCALL.
@@ -1646,7 +1632,7 @@ fn compute_fmp_write_request<AB: MidenAirBuilder<F = Felt>>(
 /// Reads a word from the address at stack[0] containing the callee hash.
 fn compute_dyn_callee_hash_read<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
 ) -> AB::ExprEF {
     let label: AB::Expr = AB::Expr::from_u16(MEMORY_READ_WORD_LABEL as u16);
 
@@ -1660,15 +1646,7 @@ fn compute_dyn_callee_hash_read<AB: MidenAirBuilder<F = Felt>>(
     let w2: AB::Expr = local.decoder[HASHER_STATE_RANGE.start + 2].clone().into();
     let w3: AB::Expr = local.decoder[HASHER_STATE_RANGE.start + 3].clone().into();
 
-    alphas[0].clone()
-        + alphas[1].clone() * label
-        + alphas[2].clone() * ctx
-        + alphas[3].clone() * addr
-        + alphas[4].clone() * clk
-        + alphas[5].clone() * w0
-        + alphas[6].clone() * w1
-        + alphas[7].clone() * w2
-        + alphas[8].clone() * w3
+    challenges.encode_dense([label, ctx, addr, clk, w0, w1, w2, w3])
 }
 
 // MPVERIFY/MRUPDATE REQUEST HELPERS
@@ -1681,7 +1659,7 @@ fn compute_dyn_callee_hash_read<AB: MidenAirBuilder<F = Felt>>(
 /// 2. Output: root value at RATE1 (indices 4..8)
 fn compute_mpverify_request<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
 ) -> AB::ExprEF {
     use crate::trace::decoder::USER_OP_HELPERS_OFFSET;
 
@@ -1696,7 +1674,7 @@ fn compute_mpverify_request<AB: MidenAirBuilder<F = Felt>>(
 
     let input_label: AB::Expr = AB::Expr::from_u16(MP_VERIFY_LABEL as u16 + 16);
     let input_msg = compute_hasher_word_message::<AB>(
-        alphas,
+        challenges,
         input_label,
         helper_0.clone(),
         node_index.clone(),
@@ -1706,8 +1684,13 @@ fn compute_mpverify_request<AB: MidenAirBuilder<F = Felt>>(
     // addr_next = helper_0 + node_depth * merkle_cycle_len - 1
     let output_addr = helper_0 + node_depth * merkle_cycle_len - AB::Expr::ONE;
     let output_label: AB::Expr = AB::Expr::from_u16(RETURN_HASH_LABEL as u16 + 32);
-    let output_msg =
-        compute_hasher_word_message::<AB>(alphas, output_label, output_addr, AB::Expr::ZERO, &root);
+    let output_msg = compute_hasher_word_message::<AB>(
+        challenges,
+        output_label,
+        output_addr,
+        AB::Expr::ZERO,
+        &root,
+    );
 
     input_msg * output_msg
 }
@@ -1722,7 +1705,7 @@ fn compute_mpverify_request<AB: MidenAirBuilder<F = Felt>>(
 fn compute_mrupdate_request<AB: MidenAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    alphas: &[AB::ExprEF],
+    challenges: &Challenges<AB, NUM_CHIPLETS_FIELDS>,
 ) -> AB::ExprEF {
     use crate::trace::decoder::USER_OP_HELPERS_OFFSET;
 
@@ -1741,7 +1724,7 @@ fn compute_mrupdate_request<AB: MidenAirBuilder<F = Felt>>(
 
     let input_old_label: AB::Expr = AB::Expr::from_u16(MR_UPDATE_OLD_LABEL as u16 + 16);
     let input_old_msg = compute_hasher_word_message::<AB>(
-        alphas,
+        challenges,
         input_old_label,
         helper_0.clone(),
         index.clone(),
@@ -1752,7 +1735,7 @@ fn compute_mrupdate_request<AB: MidenAirBuilder<F = Felt>>(
         helper_0.clone() + depth.clone() * merkle_cycle_len.clone() - AB::Expr::ONE;
     let output_old_label: AB::Expr = AB::Expr::from_u16(RETURN_HASH_LABEL as u16 + 32);
     let output_old_msg = compute_hasher_word_message::<AB>(
-        alphas,
+        challenges,
         output_old_label.clone(),
         output_old_addr,
         AB::Expr::ZERO,
@@ -1762,7 +1745,7 @@ fn compute_mrupdate_request<AB: MidenAirBuilder<F = Felt>>(
     let input_new_addr = helper_0.clone() + depth.clone() * merkle_cycle_len.clone();
     let input_new_label: AB::Expr = AB::Expr::from_u16(MR_UPDATE_NEW_LABEL as u16 + 16);
     let input_new_msg = compute_hasher_word_message::<AB>(
-        alphas,
+        challenges,
         input_new_label,
         input_new_addr,
         index,
@@ -1771,7 +1754,7 @@ fn compute_mrupdate_request<AB: MidenAirBuilder<F = Felt>>(
 
     let output_new_addr = helper_0 + depth * two_merkle_cycles - AB::Expr::ONE;
     let output_new_msg = compute_hasher_word_message::<AB>(
-        alphas,
+        challenges,
         output_old_label,
         output_new_addr,
         AB::Expr::ZERO,
