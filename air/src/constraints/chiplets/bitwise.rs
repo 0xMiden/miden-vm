@@ -48,6 +48,10 @@ pub const P_BITWISE_K_FIRST: usize = HASHER_NUM_PERIODIC_COLUMNS;
 /// Index of k_transition periodic column (marks non-last rows of 8-row cycle).
 pub const P_BITWISE_K_TRANSITION: usize = HASHER_NUM_PERIODIC_COLUMNS + 1;
 
+/// Total number of periodic columns (hasher + bitwise periodic columns).
+#[cfg(test)]
+pub const NUM_PERIODIC_COLUMNS: usize = HASHER_NUM_PERIODIC_COLUMNS + 2;
+
 /// Number of bits processed per row.
 const NUM_BITS_PER_ROW: usize = 4;
 
@@ -303,23 +307,35 @@ impl<E: Clone> BitwiseColumns<E> {
 /// Aggregate 4 bits into a value (little-endian): sum(2^i * limb[i])
 /// Uses Horner's method: ((b3*2 + b2)*2 + b1)*2 + b0
 fn aggregate_limbs<E: PrimeCharacteristicRing>(limbs: &[E; 4]) -> E {
-    limbs.iter().rev().fold(E::ZERO, |acc, bit| acc.double() + bit.clone())
+    limbs
+        .iter()
+        .rev()
+        .cloned()
+        .reduce(|acc, bit| acc.double() + bit)
+        .expect("non-empty array")
 }
 
 /// Compute AND of 4-bit limbs: sum(2^i * (a[i] * b[i]))
 /// Uses Horner's method for aggregation
 fn compute_limb_and<E: PrimeCharacteristicRing>(a: &[E; 4], b: &[E; 4]) -> E {
-    let and_bits: [E; 4] = core::array::from_fn(|i| a[i].clone() * b[i].clone());
-    and_bits.iter().rev().fold(E::ZERO, |acc, bit| acc.double() + bit.clone())
+    (0..4)
+        .rev()
+        .map(|i| a[i].clone() * b[i].clone())
+        .reduce(|acc, bit| acc.double() + bit)
+        .expect("non-empty range")
 }
 
 /// Compute XOR of 4-bit limbs: sum(2^i * (a[i] + b[i] - 2*a[i]*b[i]))
 /// Uses Horner's method for aggregation
 fn compute_limb_xor<E: PrimeCharacteristicRing>(a: &[E; 4], b: &[E; 4]) -> E {
-    let xor_bits: [E; 4] = core::array::from_fn(|i| {
-        a[i].clone() + b[i].clone() - (a[i].clone() * b[i].clone()).double()
-    });
-    xor_bits.iter().rev().fold(E::ZERO, |acc, bit| acc.double() + bit.clone())
+    (0..4)
+        .rev()
+        .map(|i| {
+            let and_bit = a[i].clone() * b[i].clone();
+            a[i].clone() + b[i].clone() - and_bit.double()
+        })
+        .reduce(|acc, bit| acc.double() + bit)
+        .expect("non-empty range")
 }
 
 // =============================================================================
