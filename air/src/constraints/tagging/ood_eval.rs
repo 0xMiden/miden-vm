@@ -58,12 +58,10 @@ impl OodEvalAirBuilder {
             (0..crate::trace::AUX_TRACE_WIDTH * 2).map(|_| rng.next_quad()).collect(),
             crate::trace::AUX_TRACE_WIDTH,
         );
-        // Generate exactly DERIVED_CHALLENGE_LEN independent pseudo-random challenges.
-        // Unlike the real prover (which samples only 2 and derives the rest), the OOD
-        // evaluator uses fully independent values so that constraint evaluations are
-        // non-degenerate. The test fixtures depend on this RNG sequence being stable.
+        // Generate AUX_TRACE_RAND_ELEMENTS independent pseudo-random challenges.
+        // The test fixtures depend on this RNG sequence being stable.
         let permutation_randomness: Vec<QuadFelt> =
-            (0..crate::trace::DERIVED_CHALLENGE_LEN).map(|_| rng.next_quad()).collect();
+            (0..crate::trace::AUX_TRACE_RAND_ELEMENTS).map(|_| rng.next_quad()).collect();
         let aux_bus_boundary_values =
             (0..crate::trace::AUX_TRACE_WIDTH).map(|_| rng.next_quad()).collect();
         let first_row = rng.next_felt();

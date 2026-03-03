@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::{
-    DERIVED_CHALLENGE_LEN, MainTrace,
+    AUX_TRACE_RAND_ELEMENTS, MainTrace,
     chiplets::hasher::{HASH_CYCLE_LEN, P1_COL_IDX},
 };
 use miden_core::{
@@ -38,7 +38,7 @@ fn hasher_p1_mp_verify(#[case] index: u64) {
     // build execution trace and extract the sibling table column from it
     let ops = vec![Operation::MpVerify(ZERO)];
     let trace = build_trace_from_ops_with_inputs(ops, stack_inputs, advice_inputs);
-    let alphas = rand_array::<Felt, DERIVED_CHALLENGE_LEN>();
+    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
@@ -71,7 +71,7 @@ fn hasher_p1_mr_update(#[case] index: u64) {
     // build execution trace and extract the sibling table column from it
     let ops = vec![Operation::MrUpdate];
     let trace = build_trace_from_ops_with_inputs(ops, stack_inputs, advice_inputs);
-    let alphas = rand_array::<Felt, DERIVED_CHALLENGE_LEN>();
+    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 

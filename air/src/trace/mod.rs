@@ -1,8 +1,7 @@
-use alloc::vec::Vec;
 use core::ops::Range;
 
 use chiplets::hasher::RATE_LEN;
-use miden_core::{field::PrimeCharacteristicRing, utils::range};
+use miden_core::utils::range;
 
 pub mod chiplets;
 pub mod decoder;
@@ -204,36 +203,5 @@ pub const ACE_CHIPLET_WIRING_BUS_RANGE: Range<usize> =
 pub const AUX_TRACE_WIDTH: usize = ACE_CHIPLET_WIRING_BUS_RANGE.end;
 
 /// Number of independent random elements sampled from the Fiat-Shamir transcript after the
-/// commitment to the main trace segment. These two elements (c0, c1) are expanded into the full
-/// challenge array via [`derive_challenges`].
-pub const AUX_TRACE_RAND_ELEMENTS: usize = 2;
-
-/// Length of the derived challenge array: `[c0, 1, c1, c1^2, ..., c1^14]`.
-///
-/// This is the number of challenge slots consumed by bus message collapse functions across all
-/// components (decoder, stack, range, chiplets). The maximum index used is 15 (hasher chiplet
-/// bus messages use `alphas[4..16]` for the full Poseidon2 state width of 12).
-pub const DERIVED_CHALLENGE_LEN: usize = 16;
-
-/// Derives the full challenge array from the two independent random elements `[c0, c1]`.
-///
-/// Layout: `[c0, 1, c1, c1^2, c1^3, ..., c1^14]`
-///
-/// - `c0` (index 0): used as the alpha challenge in LogUp denominators (`alpha + value`)
-/// - `1` (index 1): identity placeholder
-/// - `c1^k` (indices 2..16): powers of beta used for linear-combination coefficients in bus message
-///   collapse functions
-pub fn derive_challenges<T: PrimeCharacteristicRing + Clone>(raw: &[T]) -> Vec<T> {
-    assert!(raw.len() >= 2, "derive_challenges requires at least 2 random elements");
-    let c0 = raw[0].clone();
-    let c1 = raw[1].clone();
-    let mut out = Vec::with_capacity(DERIVED_CHALLENGE_LEN);
-    out.push(c0);
-    out.push(T::ONE);
-    let mut power = c1.clone();
-    for _ in 2..DERIVED_CHALLENGE_LEN {
-        out.push(power.clone());
-        power *= c1.clone();
-    }
-    out
-}
+/// commitment to the main trace segment.
+pub const AUX_TRACE_RAND_ELEMENTS: usize = 16;

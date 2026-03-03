@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::{
-    DERIVED_CHALLENGE_LEN,
+    AUX_TRACE_RAND_ELEMENTS,
     chiplets::hasher::HASH_CYCLE_LEN_FELT,
     decoder::{P1_COL_IDX, P2_COL_IDX, P3_COL_IDX},
 };
@@ -30,7 +30,7 @@ use crate::{
 fn decoder_p1_span_with_respan() {
     let (ops, _) = build_span_with_respan_ops();
     let trace = build_trace_from_ops(ops, &[]);
-    let alphas = rand_array::<Felt, DERIVED_CHALLENGE_LEN>();
+    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
@@ -89,7 +89,7 @@ fn decoder_p1_join() {
     };
 
     let trace = build_trace_from_program(&program, &[]);
-    let alphas = rand_array::<Felt, DERIVED_CHALLENGE_LEN>();
+    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
@@ -162,7 +162,7 @@ fn decoder_p1_split() {
     };
 
     let trace = build_trace_from_program(&program, &[1]);
-    let alphas = rand_array::<Felt, DERIVED_CHALLENGE_LEN>();
+    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
@@ -226,7 +226,7 @@ fn decoder_p1_loop_with_repeat() {
     // After Pad+Drop: position 0 = 1 (2nd iteration enters)
     // After Pad+Drop: position 0 = 0 (loop exits)
     let trace = build_trace_from_program(&program, &[1, 1, 0]);
-    let alphas = rand_array::<Felt, DERIVED_CHALLENGE_LEN>();
+    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
@@ -350,7 +350,7 @@ fn decoder_p2_span_with_respan() {
         Program::new(mast_forest.into(), basic_block_id)
     };
     let trace = build_trace_from_program(&program, &[]);
-    let alphas = rand_array::<Felt, DERIVED_CHALLENGE_LEN>();
+    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
@@ -398,7 +398,7 @@ fn decoder_p2_join() {
     let program = Program::new(mast_forest.into(), join_id);
 
     let trace = build_trace_from_program(&program, &[]);
-    let alphas = rand_array::<Felt, DERIVED_CHALLENGE_LEN>();
+    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
@@ -467,7 +467,7 @@ fn decoder_p2_split_true() {
 
     // build trace from program
     let trace = build_trace_from_program(&program, &[1]);
-    let alphas = rand_array::<Felt, DERIVED_CHALLENGE_LEN>();
+    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
@@ -528,7 +528,7 @@ fn decoder_p2_split_false() {
 
     // build trace from program
     let trace = build_trace_from_program(&program, &[0]);
-    let alphas = rand_array::<Felt, DERIVED_CHALLENGE_LEN>();
+    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
@@ -594,7 +594,7 @@ fn decoder_p2_loop_with_repeat() {
     // After Pad+Drop: position 0 = 1 (2nd iteration enters)
     // After Pad+Drop: position 0 = 0 (loop exits)
     let trace = build_trace_from_program(&program, &[1, 1, 0]);
-    let alphas = rand_array::<Felt, DERIVED_CHALLENGE_LEN>();
+    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
@@ -695,7 +695,7 @@ fn decoder_p3_trace_empty_table() {
     let operations = vec![Operation::Add];
     let trace = build_trace_from_ops(operations, &stack);
 
-    let rand_elements = rand_array::<Felt, DERIVED_CHALLENGE_LEN>();
+    let rand_elements = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&rand_elements).unwrap();
 
     // no rows should have been added or removed from the op group table, and thus, all values
@@ -725,7 +725,7 @@ fn decoder_p3_trace_one_batch() {
         Operation::Add,
     ];
     let trace = build_trace_from_ops(ops.clone(), &stack);
-    let alphas = rand_array::<Felt, DERIVED_CHALLENGE_LEN>();
+    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p3 = aux_columns.get_column(P3_COL_IDX);
 
@@ -777,7 +777,7 @@ fn decoder_p3_trace_one_batch() {
 fn decoder_p3_trace_two_batches() {
     let (ops, iv) = build_span_with_respan_ops();
     let trace = build_trace_from_ops(ops, &[]);
-    let alphas = rand_array::<Felt, DERIVED_CHALLENGE_LEN>();
+    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p3 = aux_columns.get_column(P3_COL_IDX);
 

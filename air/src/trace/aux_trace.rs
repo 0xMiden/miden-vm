@@ -63,10 +63,7 @@ where
         challenges: &[EF],
     ) -> (RowMajorMatrix<EF>, Vec<EF>) {
         let _span = tracing::info_span!("build_aux_trace").entered();
-        // The prover samples only 2 independent challenges (c0, c1). Derive the
-        // full 16-element array before passing to the processor's aux builders.
-        let derived = super::derive_challenges(challenges);
-        let aux_trace = self.0.build_aux_columns(main, &derived);
+        let aux_trace = self.0.build_aux_columns(main, challenges);
         // The prover sends aux_values into the Fiat-Shamir transcript, and the
         // verifier reads back exactly `aux_width()` extension field elements.
         // We use the last row of the aux trace as aux_values. These are used by

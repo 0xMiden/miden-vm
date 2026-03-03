@@ -225,9 +225,6 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
     where
         EF: ExtensionField<Felt>,
     {
-        // Derive the full challenge array from the 2 independent random elements.
-        let alphas = trace::derive_challenges(challenges);
-
         // Extract final aux column values.
         let p1 = aux_values[trace::DECODER_AUX_TRACE_OFFSET];
         let p2 = aux_values[trace::DECODER_AUX_TRACE_OFFSET + 1];
@@ -267,16 +264,16 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
         // - b_chiplets ends at kernel_reduced (bus missing kernel ROM init requests)
         //
         // The product is constructed so that it equals 1 for valid executions.
-        let ph_msg = program_hash_message(&alphas, &program_hash);
+        let ph_msg = program_hash_message(challenges, &program_hash);
 
         let default_transcript_msg = trace::log_precompile::transcript_message(
-            &alphas,
+            challenges,
             PrecompileTranscriptState::default(),
         );
         let final_transcript_msg =
-            trace::log_precompile::transcript_message(&alphas, pc_transcript_state);
+            trace::log_precompile::transcript_message(challenges, pc_transcript_state);
 
-        let kernel_reduced = kernel_reduced_from_var_len(&alphas, var_len_public_inputs);
+        let kernel_reduced = kernel_reduced_from_var_len(challenges, var_len_public_inputs);
 
         // Combine: for valid execution, prod = 1.
         //   p1 = 1, p3 = 1, s_aux = 1  (balanced buses)
@@ -320,16 +317,8 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
         // Main trace constraints.
         constraints::enforce_main(builder, local, next);
 
-        // Derive the full challenge array from the 2 independent random elements.
-        let raw_challenges = builder.permutation_randomness();
-        let challenges: Vec<AB::ExprEF> = {
-            let c0: AB::ExprEF = raw_challenges[0].into();
-            let c1: AB::ExprEF = raw_challenges[1].into();
-            trace::derive_challenges(&[c0, c1])
-        };
-
         // Auxiliary (bus) constraints.
-        constraints::enforce_bus(builder, local, next, &challenges);
+        constraints::enforce_bus(builder, local, next);
     }
 }
 
