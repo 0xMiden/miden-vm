@@ -1,7 +1,7 @@
 use alloc::{string::ToString, vec::Vec};
 use core::slice;
 
-use miden_air::trace::MainTrace;
+use miden_air::trace::{MAX_MESSAGE_WIDTH, MainTrace};
 
 use super::chiplets::Chiplets;
 use crate::{Felt, RowIndex, debug::BusDebugger, field::ExtensionField, utils::uninit_vector};
@@ -263,11 +263,14 @@ pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
     fn build_aux_column(&self, main_trace: &MainTrace, alphas: &[E]) -> Vec<E> {
         let mut bus_debugger = BusDebugger::new("chiplets bus".to_string());
 
+        let coeffs = AuxChallenges::<E, MAX_MESSAGE_WIDTH>::new(alphas);
+        let coeffs = coeffs.coeffs();
+
         let mut requests: Vec<E> = unsafe { uninit_vector(main_trace.num_rows()) };
-        requests[0] = self.init_requests(main_trace, alphas, &mut bus_debugger);
+        requests[0] = self.init_requests(main_trace, coeffs, &mut bus_debugger);
 
         let mut responses_prod: Vec<E> = unsafe { uninit_vector(main_trace.num_rows()) };
-        responses_prod[0] = self.init_responses(main_trace, alphas, &mut bus_debugger);
+        responses_prod[0] = self.init_responses(main_trace, coeffs, &mut bus_debugger);
 
         let mut requests_running_prod = requests[0];
 
@@ -275,10 +278,10 @@ pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
         for row_idx in 0..main_trace.num_rows() - 1 {
             let row = row_idx.into();
 
-            let response = self.get_responses_at(main_trace, alphas, row, &mut bus_debugger);
+            let response = self.get_responses_at(main_trace, coeffs, row, &mut bus_debugger);
             responses_prod[row_idx + 1] = responses_prod[row_idx] * response;
 
-            let request = self.get_requests_at(main_trace, alphas, row, &mut bus_debugger);
+            let request = self.get_requests_at(main_trace, coeffs, row, &mut bus_debugger);
             requests[row_idx + 1] = request;
             requests_running_prod *= request;
         }
@@ -295,6 +298,40 @@ pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
         assert!(bus_debugger.is_empty(), "{bus_debugger}");
 
         result_aux_column
+    }
+}
+
+// AUX CHALLENGES
+// ================================================================================================
+
+/// Expands two random challenges (alpha, beta) into the coefficient array
+/// used for bus message encoding in auxiliary trace builders.
+///
+/// Layout: `coeffs[0] = alpha`, `coeffs[i] = beta^(i-1)` for `i >= 1`.
+///
+/// This matches the AIR-side `Challenges::encode_dense` encoding:
+/// `alpha + beta^0 * elem[0] + beta^1 * elem[1] + ... + beta^(K-1) * elem[K-1]`
+pub(crate) struct AuxChallenges<E: ExtensionField<Felt>, const N: usize> {
+    coeffs: [E; N],
+}
+
+impl<E: ExtensionField<Felt>, const N: usize> AuxChallenges<E, N> {
+    pub fn new(challenges: &[E]) -> Self {
+        debug_assert!(challenges.len() >= 2, "need at least alpha and beta");
+        let alpha = challenges[0];
+        let beta = challenges[1];
+
+        let mut coeffs = core::array::from_fn(|_| E::ONE);
+        coeffs[0] = alpha;
+        // coeffs[1] = E::ONE  (beta^0) — already set by from_fn
+        for i in 2..N {
+            coeffs[i] = coeffs[i - 1] * beta;
+        }
+        Self { coeffs }
+    }
+
+    pub fn coeffs(&self) -> &[E] {
+        &self.coeffs
     }
 }
 

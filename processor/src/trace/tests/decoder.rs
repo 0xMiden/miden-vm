@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::{
-    AUX_TRACE_RAND_ELEMENTS,
+    AUX_TRACE_RAND_CHALLENGES, MAX_MESSAGE_WIDTH,
     chiplets::hasher::HASH_CYCLE_LEN_FELT,
     decoder::{P1_COL_IDX, P2_COL_IDX, P3_COL_IDX},
 };
@@ -20,6 +20,7 @@ use crate::{
         MastNodeExt, SplitNodeBuilder,
     },
     operation::Operation,
+    trace::utils::AuxChallenges,
 };
 
 // BLOCK STACK TABLE TESTS
@@ -30,13 +31,15 @@ use crate::{
 fn decoder_p1_span_with_respan() {
     let (ops, _) = build_span_with_respan_ops();
     let trace = build_trace_from_ops(ops, &[]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
+    let alphas = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
+    let coeffs = AuxChallenges::<Felt, MAX_MESSAGE_WIDTH>::new(&alphas);
+    let coeffs = coeffs.coeffs();
     let row_values = [
-        BlockStackTableRow::new(ONE, ZERO, false).to_value(&alphas),
-        BlockStackTableRow::new(ONE + HASH_CYCLE_LEN_FELT, ZERO, false).to_value(&alphas),
+        BlockStackTableRow::new(ONE, ZERO, false).to_value(coeffs),
+        BlockStackTableRow::new(ONE + HASH_CYCLE_LEN_FELT, ZERO, false).to_value(coeffs),
     ];
 
     // make sure the first entry is ONE
@@ -89,16 +92,18 @@ fn decoder_p1_join() {
     };
 
     let trace = build_trace_from_program(&program, &[]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
+    let alphas = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
+    let coeffs = AuxChallenges::<Felt, MAX_MESSAGE_WIDTH>::new(&alphas);
+    let coeffs = coeffs.coeffs();
     let a_33 = ONE + HASH_CYCLE_LEN_FELT;
     let a_65 = a_33 + HASH_CYCLE_LEN_FELT;
     let row_values = [
-        BlockStackTableRow::new(ONE, ZERO, false).to_value(&alphas),
-        BlockStackTableRow::new(a_33, ONE, false).to_value(&alphas),
-        BlockStackTableRow::new(a_65, ONE, false).to_value(&alphas),
+        BlockStackTableRow::new(ONE, ZERO, false).to_value(coeffs),
+        BlockStackTableRow::new(a_33, ONE, false).to_value(coeffs),
+        BlockStackTableRow::new(a_65, ONE, false).to_value(coeffs),
     ];
 
     // make sure the first entry is ONE
@@ -162,14 +167,16 @@ fn decoder_p1_split() {
     };
 
     let trace = build_trace_from_program(&program, &[1]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
+    let alphas = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
+    let coeffs = AuxChallenges::<Felt, MAX_MESSAGE_WIDTH>::new(&alphas);
+    let coeffs = coeffs.coeffs();
     let a_33 = ONE + HASH_CYCLE_LEN_FELT;
     let row_values = [
-        BlockStackTableRow::new(ONE, ZERO, false).to_value(&alphas),
-        BlockStackTableRow::new(a_33, ONE, false).to_value(&alphas),
+        BlockStackTableRow::new(ONE, ZERO, false).to_value(coeffs),
+        BlockStackTableRow::new(a_33, ONE, false).to_value(coeffs),
     ];
 
     // make sure the first entry is ONE
@@ -226,10 +233,12 @@ fn decoder_p1_loop_with_repeat() {
     // After Pad+Drop: position 0 = 1 (2nd iteration enters)
     // After Pad+Drop: position 0 = 0 (loop exits)
     let trace = build_trace_from_program(&program, &[1, 1, 0]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
+    let alphas = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
+    let coeffs = AuxChallenges::<Felt, MAX_MESSAGE_WIDTH>::new(&alphas);
+    let coeffs = coeffs.coeffs();
     // The loop node consumes the first hasher cycle; join/span addresses follow sequentially.
     let a_33 = ONE + HASH_CYCLE_LEN_FELT; // address of the JOIN block in the first iteration
     let a_65 = a_33 + HASH_CYCLE_LEN_FELT; // address of the first SPAN block in the first iteration
@@ -238,13 +247,13 @@ fn decoder_p1_loop_with_repeat() {
     let a_161 = a_129 + HASH_CYCLE_LEN_FELT; // address of the first SPAN block in the second iteration
     let a_193 = a_161 + HASH_CYCLE_LEN_FELT; // address of the second SPAN block in the second iteration
     let row_values = [
-        BlockStackTableRow::new(ONE, ZERO, true).to_value(&alphas),
-        BlockStackTableRow::new(a_33, ONE, false).to_value(&alphas),
-        BlockStackTableRow::new(a_65, a_33, false).to_value(&alphas),
-        BlockStackTableRow::new(a_97, a_33, false).to_value(&alphas),
-        BlockStackTableRow::new(a_129, ONE, false).to_value(&alphas),
-        BlockStackTableRow::new(a_161, a_129, false).to_value(&alphas),
-        BlockStackTableRow::new(a_193, a_129, false).to_value(&alphas),
+        BlockStackTableRow::new(ONE, ZERO, true).to_value(coeffs),
+        BlockStackTableRow::new(a_33, ONE, false).to_value(coeffs),
+        BlockStackTableRow::new(a_65, a_33, false).to_value(coeffs),
+        BlockStackTableRow::new(a_97, a_33, false).to_value(coeffs),
+        BlockStackTableRow::new(a_129, ONE, false).to_value(coeffs),
+        BlockStackTableRow::new(a_161, a_129, false).to_value(coeffs),
+        BlockStackTableRow::new(a_193, a_129, false).to_value(coeffs),
     ];
 
     // make sure the first entry is ONE
@@ -350,12 +359,14 @@ fn decoder_p2_span_with_respan() {
         Program::new(mast_forest.into(), basic_block_id)
     };
     let trace = build_trace_from_program(&program, &[]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
+    let alphas = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
+    let coeffs = AuxChallenges::<Felt, MAX_MESSAGE_WIDTH>::new(&alphas);
+    let coeffs = coeffs.coeffs();
     let row_values =
-        [BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&alphas)];
+        [BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(coeffs)];
 
     // make sure the first entry is initialized to program hash
     let mut expected_value = row_values[0];
@@ -397,14 +408,16 @@ fn decoder_p2_join() {
     let program = Program::new(mast_forest.into(), join_id);
 
     let trace = build_trace_from_program(&program, &[]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
+    let alphas = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
+    let coeffs = AuxChallenges::<Felt, MAX_MESSAGE_WIDTH>::new(&alphas);
+    let coeffs = coeffs.coeffs();
     let row_values = [
-        BlockHashTableRow::new_test(ZERO, join.digest(), false, false).collapse(&alphas),
-        BlockHashTableRow::new_test(ONE, basic_block_1.digest(), true, false).collapse(&alphas),
-        BlockHashTableRow::new_test(ONE, basic_block_2.digest(), false, false).collapse(&alphas),
+        BlockHashTableRow::new_test(ZERO, join.digest(), false, false).collapse(coeffs),
+        BlockHashTableRow::new_test(ONE, basic_block_1.digest(), true, false).collapse(coeffs),
+        BlockHashTableRow::new_test(ONE, basic_block_2.digest(), false, false).collapse(coeffs),
     ];
 
     // make sure the first entry is initialized to program hash
@@ -465,13 +478,15 @@ fn decoder_p2_split_true() {
 
     // build trace from program
     let trace = build_trace_from_program(&program, &[1]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
+    let alphas = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
+    let coeffs = AuxChallenges::<Felt, MAX_MESSAGE_WIDTH>::new(&alphas);
+    let coeffs = coeffs.coeffs();
     let row_values = [
-        BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&alphas),
-        BlockHashTableRow::new_test(ONE, basic_block_1.digest(), false, false).collapse(&alphas),
+        BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(coeffs),
+        BlockHashTableRow::new_test(ONE, basic_block_1.digest(), false, false).collapse(coeffs),
     ];
 
     // make sure the first entry is initialized to program hash
@@ -525,13 +540,15 @@ fn decoder_p2_split_false() {
 
     // build trace from program
     let trace = build_trace_from_program(&program, &[0]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
+    let alphas = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
+    let coeffs = AuxChallenges::<Felt, MAX_MESSAGE_WIDTH>::new(&alphas);
+    let coeffs = coeffs.coeffs();
     let row_values = [
-        BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&alphas),
-        BlockHashTableRow::new_test(ONE, basic_block_2.digest(), false, false).collapse(&alphas),
+        BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(coeffs),
+        BlockHashTableRow::new_test(ONE, basic_block_2.digest(), false, false).collapse(coeffs),
     ];
 
     // make sure the first entry is initialized to program hash
@@ -590,20 +607,22 @@ fn decoder_p2_loop_with_repeat() {
     // After Pad+Drop: position 0 = 1 (2nd iteration enters)
     // After Pad+Drop: position 0 = 0 (loop exits)
     let trace = build_trace_from_program(&program, &[1, 1, 0]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
+    let alphas = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
+    let coeffs = AuxChallenges::<Felt, MAX_MESSAGE_WIDTH>::new(&alphas);
+    let coeffs = coeffs.coeffs();
     // The loop node consumes the first hasher cycle; join/span addresses follow sequentially.
     let a_33 = ONE + HASH_CYCLE_LEN_FELT; // address of the JOIN block in the first iteration
     let a_129 = a_33 + HASH_CYCLE_LEN_FELT * Felt::new(3); // address of the JOIN block in the second iteration
     let row_values = [
-        BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&alphas),
-        BlockHashTableRow::new_test(ONE, join.digest(), false, true).collapse(&alphas),
-        BlockHashTableRow::new_test(a_33, basic_block_1.digest(), true, false).collapse(&alphas),
-        BlockHashTableRow::new_test(a_33, basic_block_2.digest(), false, false).collapse(&alphas),
-        BlockHashTableRow::new_test(a_129, basic_block_1.digest(), true, false).collapse(&alphas),
-        BlockHashTableRow::new_test(a_129, basic_block_2.digest(), false, false).collapse(&alphas),
+        BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(coeffs),
+        BlockHashTableRow::new_test(ONE, join.digest(), false, true).collapse(coeffs),
+        BlockHashTableRow::new_test(a_33, basic_block_1.digest(), true, false).collapse(coeffs),
+        BlockHashTableRow::new_test(a_33, basic_block_2.digest(), false, false).collapse(coeffs),
+        BlockHashTableRow::new_test(a_129, basic_block_1.digest(), true, false).collapse(coeffs),
+        BlockHashTableRow::new_test(a_129, basic_block_2.digest(), false, false).collapse(coeffs),
     ];
 
     // make sure the first entry is initialized to program hash
@@ -690,8 +709,8 @@ fn decoder_p3_trace_empty_table() {
     let operations = vec![Operation::Add];
     let trace = build_trace_from_ops(operations, &stack);
 
-    let rand_elements = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
-    let aux_columns = trace.build_aux_trace(&rand_elements).unwrap();
+    let alphas = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
 
     // no rows should have been added or removed from the op group table, and thus, all values
     // in the column must be ONE
@@ -720,18 +739,21 @@ fn decoder_p3_trace_one_batch() {
         Operation::Add,
     ];
     let trace = build_trace_from_ops(ops.clone(), &stack);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
+    let alphas = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p3 = aux_columns.get_column(P3_COL_IDX);
+
+    let coeffs = AuxChallenges::<Felt, MAX_MESSAGE_WIDTH>::new(&alphas);
+    let coeffs = coeffs.coeffs();
 
     // make sure the first entry is ONE
     assert_eq!(ONE, p3[0]);
 
     // make sure 3 groups were inserted at clock cycle 1; these entries are for the two immediate
     // values and the second operation group consisting of [SWAP, MUL, ADD]
-    let g1_value = OpGroupTableRow::new(ONE, Felt::new(3), ONE).to_value(&alphas);
-    let g2_value = OpGroupTableRow::new(ONE, Felt::new(2), Felt::new(2)).to_value(&alphas);
-    let g3_value = OpGroupTableRow::new(ONE, ONE, build_op_group(&ops[9..])).to_value(&alphas);
+    let g1_value = OpGroupTableRow::new(ONE, Felt::new(3), ONE).to_value(coeffs);
+    let g2_value = OpGroupTableRow::new(ONE, Felt::new(2), Felt::new(2)).to_value(coeffs);
+    let g3_value = OpGroupTableRow::new(ONE, ONE, build_op_group(&ops[9..])).to_value(coeffs);
     let expected_value = g1_value * g2_value * g3_value;
     assert_eq!(expected_value, p3[1]);
 
@@ -772,9 +794,12 @@ fn decoder_p3_trace_one_batch() {
 fn decoder_p3_trace_two_batches() {
     let (ops, iv) = build_span_with_respan_ops();
     let trace = build_trace_from_ops(ops, &[]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
+    let alphas = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p3 = aux_columns.get_column(P3_COL_IDX);
+
+    let coeffs = AuxChallenges::<Felt, MAX_MESSAGE_WIDTH>::new(&alphas);
+    let coeffs = coeffs.coeffs();
 
     // make sure the first entry is ONE
     assert_eq!(ONE, p3[0]);
@@ -782,13 +807,13 @@ fn decoder_p3_trace_two_batches() {
     // --- first batch ----------------------------------------------------------------------------
     // make sure entries for 7 groups were inserted at clock cycle 1
     let b0_values = [
-        OpGroupTableRow::new(ONE, Felt::new(11), iv[0]).to_value(&alphas),
-        OpGroupTableRow::new(ONE, Felt::new(10), iv[1]).to_value(&alphas),
-        OpGroupTableRow::new(ONE, Felt::new(9), iv[2]).to_value(&alphas),
-        OpGroupTableRow::new(ONE, Felt::new(8), iv[3]).to_value(&alphas),
-        OpGroupTableRow::new(ONE, Felt::new(7), iv[4]).to_value(&alphas),
-        OpGroupTableRow::new(ONE, Felt::new(6), iv[5]).to_value(&alphas),
-        OpGroupTableRow::new(ONE, Felt::new(5), iv[6]).to_value(&alphas),
+        OpGroupTableRow::new(ONE, Felt::new(11), iv[0]).to_value(coeffs),
+        OpGroupTableRow::new(ONE, Felt::new(10), iv[1]).to_value(coeffs),
+        OpGroupTableRow::new(ONE, Felt::new(9), iv[2]).to_value(coeffs),
+        OpGroupTableRow::new(ONE, Felt::new(8), iv[3]).to_value(coeffs),
+        OpGroupTableRow::new(ONE, Felt::new(7), iv[4]).to_value(coeffs),
+        OpGroupTableRow::new(ONE, Felt::new(6), iv[5]).to_value(coeffs),
+        OpGroupTableRow::new(ONE, Felt::new(5), iv[6]).to_value(coeffs),
     ];
     let mut expected_value: Felt = b0_values.iter().fold(ONE, |acc, &val| acc * val);
     assert_eq!(expected_value, p3[1]);
@@ -811,9 +836,9 @@ fn decoder_p3_trace_two_batches() {
     let batch1_addr = ONE + HASH_CYCLE_LEN_FELT;
     let op_group3 = build_op_group(&[Operation::Drop; 2]);
     let b1_values = [
-        OpGroupTableRow::new(batch1_addr, Felt::new(3), iv[7]).to_value(&alphas),
-        OpGroupTableRow::new(batch1_addr, Felt::new(2), iv[8]).to_value(&alphas),
-        OpGroupTableRow::new(batch1_addr, ONE, op_group3).to_value(&alphas),
+        OpGroupTableRow::new(batch1_addr, Felt::new(3), iv[7]).to_value(coeffs),
+        OpGroupTableRow::new(batch1_addr, Felt::new(2), iv[8]).to_value(coeffs),
+        OpGroupTableRow::new(batch1_addr, ONE, op_group3).to_value(coeffs),
     ];
     let mut expected_value: Felt = b1_values.iter().fold(ONE, |acc, &val| acc * val);
     assert_eq!(expected_value, p3[10]);
@@ -877,21 +902,21 @@ impl BlockStackTableRow {
 
 impl BlockStackTableRow {
     /// Reduces this row to a single field element in the field specified by E. This requires
-    /// at least 12 alpha values.
-    pub fn to_value<E: ExtensionField<Felt>>(&self, alphas: &[E]) -> E {
+    /// at least 12 coefficients.
+    pub fn to_value<E: ExtensionField<Felt>>(&self, coeffs: &[E]) -> E {
         let is_loop = if self.is_loop { ONE } else { ZERO };
-        alphas[0]
-            + alphas[1] * self.block_id
-            + alphas[2] * self.parent_id
-            + alphas[3] * is_loop
-            + alphas[4] * Felt::from_u32(u32::from(self.parent_ctx))
-            + alphas[5] * self.parent_fmp
-            + alphas[6] * Felt::from_u32(self.parent_stack_depth)
-            + alphas[7] * self.parent_next_overflow_addr
-            + alphas[8] * self.parent_fn_hash[0]
-            + alphas[9] * self.parent_fn_hash[1]
-            + alphas[10] * self.parent_fn_hash[2]
-            + alphas[11] * self.parent_fn_hash[3]
+        coeffs[0]
+            + coeffs[1] * self.block_id
+            + coeffs[2] * self.parent_id
+            + coeffs[3] * is_loop
+            + coeffs[4] * Felt::from_u32(u32::from(self.parent_ctx))
+            + coeffs[5] * self.parent_fmp
+            + coeffs[6] * Felt::from_u32(self.parent_stack_depth)
+            + coeffs[7] * self.parent_next_overflow_addr
+            + coeffs[8] * self.parent_fn_hash[0]
+            + coeffs[9] * self.parent_fn_hash[1]
+            + coeffs[10] * self.parent_fn_hash[2]
+            + coeffs[11] * self.parent_fn_hash[3]
     }
 }
 
@@ -913,11 +938,11 @@ impl OpGroupTableRow {
 
 impl OpGroupTableRow {
     /// Reduces this row to a single field element in the field specified by E. This requires
-    /// at least 4 alpha values.
-    pub fn to_value<E: ExtensionField<Felt>>(&self, alphas: &[E]) -> E {
-        alphas[0]
-            + alphas[1] * self.batch_id
-            + alphas[2] * self.group_pos
-            + alphas[3] * self.group_value
+    /// at least 4 coefficients.
+    pub fn to_value<E: ExtensionField<Felt>>(&self, coeffs: &[E]) -> E {
+        coeffs[0]
+            + coeffs[1] * self.batch_id
+            + coeffs[2] * self.group_pos
+            + coeffs[3] * self.group_value
     }
 }
