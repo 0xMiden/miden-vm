@@ -22,7 +22,6 @@ use p3_field::{Algebra, ExtensionField, Field, PrimeCharacteristicRing};
 pub enum Entry {
     Preprocessed { offset: usize },
     Main { offset: usize },
-    Permutation { offset: usize },
     Aux { offset: usize },
     Periodic,
     AuxBusBoundary,

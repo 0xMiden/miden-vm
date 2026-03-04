@@ -1,96 +1,93 @@
-use std::{collections::HashMap, hash::Hash};
+use std::collections::HashMap;
 
 use p3_dft::{Radix2DitParallel, TwoAdicSubgroupDft};
-use p3_field::{BasedVectorSpace, PrimeCharacteristicRing, TwoAdicField};
+use p3_field::{ExtensionField, Field, TwoAdicField};
 
 use super::{
     builder::DagBuilder,
     ir::{AceDag, NodeId, PeriodicColumnData},
 };
 use crate::{
-    AceError,
-    layout::InputKey,
+    EXT_DEGREE,
+    layout::{InputKey, InputLayout},
     quotient::build_quotient_recomposition_dag,
-    randomness::RandomnessPlan,
-    symbolic::{Entry, SymExpr, SymVar},
+    randomness,
+    symbolic::{Entry, SymExpr},
 };
 
 /// Lower a symbolic expression into DAG nodes using the provided layout.
 pub fn lower_expr<F, EF>(
     expr: &SymExpr<EF>,
     builder: &mut DagBuilder<EF>,
-    layout: &crate::layout::InputLayout,
+    layout: &InputLayout,
     periodic_nodes: &[NodeId],
-) -> Result<NodeId, AceError>
+) -> NodeId
 where
-    F: PrimeCharacteristicRing,
-    EF: PrimeCharacteristicRing + BasedVectorSpace<F> + Copy + Eq + Hash,
+    F: Field,
+    EF: ExtensionField<F> + Eq + std::hash::Hash,
 {
     match expr {
         SymExpr::Variable(v) => match v.entry {
-            Entry::Challenge => {
-                let plan = RandomnessPlan::from_layout(layout)?;
-                plan.lower_challenge(builder, v.index)
-            },
-            Entry::Aux { offset } | Entry::Permutation { offset } => {
+            Entry::Challenge => randomness::lower_challenge(builder, layout, v.index),
+            Entry::Aux { offset } => {
                 let index = v.index;
                 let mut acc = builder.constant(EF::ZERO);
-                for coord in 0..layout.counts.ext_degree {
+                for coord in 0..EXT_DEGREE {
                     let basis =
-                        EF::ith_basis_element(coord).ok_or(AceError::InvalidBasisIndex(coord))?;
+                        EF::ith_basis_element(coord).expect("basis index within extension degree");
                     let coord_node = builder.input(InputKey::AuxCoord { offset, index, coord });
                     let basis_node = builder.constant(basis);
                     let term = builder.mul(basis_node, coord_node);
                     acc = builder.add(acc, term);
                 }
-                Ok(acc)
+                acc
             },
-            Entry::Periodic => {
-                periodic_nodes.get(v.index).copied().ok_or(AceError::InvalidPeriodicColumn {
-                    index: v.index,
-                    count: periodic_nodes.len(),
-                })
+            Entry::Periodic => periodic_nodes[v.index],
+            Entry::Main { offset } => builder.input(InputKey::Main { offset, index: v.index }),
+            Entry::AuxBusBoundary => builder.input(InputKey::AuxBusBoundary(v.index)),
+            Entry::Public => builder.input(InputKey::Public(v.index)),
+            Entry::Preprocessed { .. } => {
+                panic!("preprocessed trace entries are not supported")
             },
-            _ => Ok(builder.input(input_key_for_symbolic(v)?)),
         },
         SymExpr::IsFirstRow => {
             let z_pow_n = builder.input(InputKey::ZPowN);
             let one = builder.constant(EF::ONE);
             let numerator = builder.sub(z_pow_n, one);
             let inv = builder.input(InputKey::InvZMinusOne);
-            Ok(builder.mul(numerator, inv))
+            builder.mul(numerator, inv)
         },
         SymExpr::IsLastRow => {
             let z_pow_n = builder.input(InputKey::ZPowN);
             let one = builder.constant(EF::ONE);
             let numerator = builder.sub(z_pow_n, one);
             let inv = builder.input(InputKey::InvZMinusGInv);
-            Ok(builder.mul(numerator, inv))
+            builder.mul(numerator, inv)
         },
         SymExpr::IsTransition => {
             let z = builder.input(InputKey::Z);
             let g_inv = builder.input(InputKey::GInv);
-            Ok(builder.sub(z, g_inv))
+            builder.sub(z, g_inv)
         },
-        SymExpr::Constant(c) => Ok(builder.constant(*c)),
+        SymExpr::Constant(c) => builder.constant(*c),
         SymExpr::Add(x, y) => {
-            let lx = lower_expr::<F, EF>(x, builder, layout, periodic_nodes)?;
-            let ly = lower_expr::<F, EF>(y, builder, layout, periodic_nodes)?;
-            Ok(builder.add(lx, ly))
+            let lx = lower_expr::<F, EF>(x, builder, layout, periodic_nodes);
+            let ly = lower_expr::<F, EF>(y, builder, layout, periodic_nodes);
+            builder.add(lx, ly)
         },
         SymExpr::Sub(x, y) => {
-            let lx = lower_expr::<F, EF>(x, builder, layout, periodic_nodes)?;
-            let ly = lower_expr::<F, EF>(y, builder, layout, periodic_nodes)?;
-            Ok(builder.sub(lx, ly))
+            let lx = lower_expr::<F, EF>(x, builder, layout, periodic_nodes);
+            let ly = lower_expr::<F, EF>(y, builder, layout, periodic_nodes);
+            builder.sub(lx, ly)
         },
         SymExpr::Mul(x, y) => {
-            let lx = lower_expr::<F, EF>(x, builder, layout, periodic_nodes)?;
-            let ly = lower_expr::<F, EF>(y, builder, layout, periodic_nodes)?;
-            Ok(builder.mul(lx, ly))
+            let lx = lower_expr::<F, EF>(x, builder, layout, periodic_nodes);
+            let ly = lower_expr::<F, EF>(y, builder, layout, periodic_nodes);
+            builder.mul(lx, ly)
         },
         SymExpr::Neg(x) => {
-            let lx = lower_expr::<F, EF>(x, builder, layout, periodic_nodes)?;
-            Ok(builder.neg(lx))
+            let lx = lower_expr::<F, EF>(x, builder, layout, periodic_nodes);
+            builder.neg(lx)
         },
     }
 }
@@ -102,30 +99,22 @@ where
 /// root expression evaluated by the ACE circuit.
 pub fn build_verifier_dag<F, EF>(
     constraints: &[SymExpr<EF>],
-    layout: &crate::layout::InputLayout,
+    layout: &InputLayout,
     periodic: Option<&PeriodicColumnData<EF>>,
-) -> Result<AceDag<EF>, AceError>
+) -> AceDag<EF>
 where
-    F: PrimeCharacteristicRing,
-    EF: PrimeCharacteristicRing + BasedVectorSpace<F> + Copy + Eq + Hash,
+    F: Field,
+    EF: ExtensionField<F> + Eq + std::hash::Hash,
 {
-    if layout.counts.ext_degree != EF::DIMENSION {
-        return Err(AceError::InvalidExtensionDegree {
-            expected: EF::DIMENSION,
-            got: layout.counts.ext_degree,
-        });
-    }
-
     let mut builder = DagBuilder::<EF>::new();
     let periodic_nodes = match periodic {
         Some(data) => {
-            if data.len() != layout.counts.num_periodic {
-                return Err(AceError::InvalidPeriodicColumn {
-                    index: data.len(),
-                    count: layout.counts.num_periodic,
-                });
-            }
-            build_periodic_nodes(&mut builder, layout, data)?
+            assert_eq!(
+                data.num_columns(),
+                layout.counts.num_periodic,
+                "periodic column count mismatch"
+            );
+            build_periodic_nodes(&mut builder, layout, data)
         },
         None => Vec::new(),
     };
@@ -134,95 +123,69 @@ where
 
     let mut acc = builder.constant(EF::ZERO);
     for constraint in constraints {
-        let node = lower_expr::<F, EF>(constraint, &mut builder, layout, &periodic_nodes)?;
+        let node = lower_expr::<F, EF>(constraint, &mut builder, layout, &periodic_nodes);
         let acc_mul = builder.mul(acc, alpha);
         acc = builder.add(acc_mul, node);
     }
     let folded = builder.mul(acc, inv_vanishing);
 
-    let quotient = build_quotient_recomposition_dag::<F, EF>(&mut builder, layout)?;
+    let quotient = build_quotient_recomposition_dag::<F, EF>(&mut builder, layout);
     let root = builder.sub(folded, quotient);
 
-    Ok(AceDag { nodes: builder.into_nodes(), root })
+    AceDag { nodes: builder.into_nodes(), root }
 }
 
-/// Convert periodic columns into evaluation coefficients for DAG building.
-///
-/// The periodic columns are provided as evaluations; this function applies an
-/// inverse DFT so the DAG can evaluate them at `z_k` inside the circuit.
-pub fn build_periodic_data<F, EF>(
-    periodic_table: Vec<Vec<F>>,
-) -> Result<PeriodicColumnData<EF>, AceError>
-where
-    F: TwoAdicField + Ord,
-    EF: PrimeCharacteristicRing + From<F>,
-{
-    if periodic_table.is_empty() {
-        return Ok(PeriodicColumnData { max_len: 0, coeffs: Vec::new() });
-    }
-
-    let max_len = periodic_table.iter().map(|col| col.len()).max().unwrap_or(0);
-    if max_len == 0 {
-        return Ok(PeriodicColumnData {
-            max_len,
-            coeffs: vec![Vec::new(); periodic_table.len()],
-        });
-    }
-    if !max_len.is_power_of_two() {
-        return Err(AceError::InvalidPeriodicColumn { index: 0, count: max_len });
-    }
-
-    let dft = Radix2DitParallel::<F>::default();
-    let mut coeffs = Vec::with_capacity(periodic_table.len());
-    for (idx, col) in periodic_table.into_iter().enumerate() {
-        if col.is_empty() {
-            coeffs.push(Vec::new());
-            continue;
+impl<EF> PeriodicColumnData<EF> {
+    /// Convert periodic columns (evaluations) into coefficient form for DAG building.
+    ///
+    /// Applies an inverse DFT so the DAG can evaluate them at `z_k` inside the circuit.
+    pub fn from_periodic_table<F>(periodic_table: Vec<Vec<F>>) -> Self
+    where
+        F: TwoAdicField + Ord,
+        EF: From<F>,
+    {
+        if periodic_table.is_empty() {
+            return Self { coeffs: Vec::new() };
         }
-        if !col.len().is_power_of_two() {
-            return Err(AceError::InvalidPeriodicColumn { index: idx, count: col.len() });
-        }
-        let values = dft.idft(col);
-        let coeff_row = values.into_iter().map(EF::from).collect();
-        coeffs.push(coeff_row);
-    }
 
-    Ok(PeriodicColumnData { max_len, coeffs })
+        let dft = Radix2DitParallel::<F>::default();
+        let mut coeffs = Vec::with_capacity(periodic_table.len());
+        for col in periodic_table {
+            assert!(!col.is_empty(), "periodic column must not be empty");
+            assert!(col.len().is_power_of_two(), "periodic column length must be a power of two");
+            let values = dft.idft(col);
+            let coeff_row = values.into_iter().map(EF::from).collect();
+            coeffs.push(coeff_row);
+        }
+
+        Self { coeffs }
+    }
 }
 
 fn build_periodic_nodes<EF>(
     builder: &mut DagBuilder<EF>,
-    layout: &crate::layout::InputLayout,
+    layout: &InputLayout,
     periodic: &PeriodicColumnData<EF>,
-) -> Result<Vec<NodeId>, AceError>
+) -> Vec<NodeId>
 where
-    EF: PrimeCharacteristicRing + Copy + Eq + Hash,
+    EF: Field + Eq + std::hash::Hash,
 {
     if periodic.coeffs.is_empty() {
-        return Ok(Vec::new());
+        return Vec::new();
     }
 
-    if layout.index(InputKey::ZK).is_none() {
-        return Err(AceError::InvalidPeriodicColumn { index: 0, count: periodic.coeffs.len() });
-    }
+    assert!(
+        layout.index(InputKey::ZK).is_some(),
+        "layout must include ZK for periodic columns"
+    );
 
-    let mut cache = HashMap::<usize, NodeId>::new();
+    let max_len = periodic.max_period();
+    let mut cache = HashMap::<u32, NodeId>::new();
     let mut nodes = Vec::with_capacity(periodic.coeffs.len());
-    for (idx, coeffs) in periodic.coeffs.iter().enumerate() {
-        if coeffs.is_empty() {
-            nodes.push(builder.constant(EF::ZERO));
-            continue;
-        }
+    for coeffs in &periodic.coeffs {
         let col_len = coeffs.len();
-        let max_len = periodic.max_len;
-        if !max_len.is_multiple_of(col_len) || !max_len.is_power_of_two() {
-            return Err(AceError::InvalidPeriodicColumn { index: idx, count: col_len });
-        }
         let ratio = max_len / col_len;
-        if !ratio.is_power_of_two() {
-            return Err(AceError::InvalidPeriodicColumn { index: idx, count: col_len });
-        }
-        let log_pow_col = ratio.ilog2() as usize;
+        let log_pow_col = ratio.ilog2();
         let z_col = *cache.entry(log_pow_col).or_insert_with(|| {
             let mut z_col = builder.input(InputKey::ZK);
             for _ in 0..log_pow_col {
@@ -235,12 +198,12 @@ where
         let value = horner_eval(builder, z_col, &coeff_nodes);
         nodes.push(value);
     }
-    Ok(nodes)
+    nodes
 }
 
 fn horner_eval<EF>(builder: &mut DagBuilder<EF>, point: NodeId, coeffs: &[NodeId]) -> NodeId
 where
-    EF: PrimeCharacteristicRing + Copy + Eq + Hash,
+    EF: Field + Eq + std::hash::Hash,
 {
     let mut acc = builder.constant(EF::ZERO);
     for coeff in coeffs.iter().rev() {
@@ -248,24 +211,4 @@ where
         acc = builder.add(*coeff, mul);
     }
     acc
-}
-
-fn input_key_for_symbolic<EF>(var: &SymVar<EF>) -> Result<InputKey, AceError> {
-    let index = var.index;
-    let key = match var.entry {
-        Entry::Preprocessed { .. } => {
-            return Err(AceError::UnsupportedEntry(var.entry));
-        },
-        Entry::Main { offset } => InputKey::Main { offset, index },
-        Entry::Permutation { .. } | Entry::Aux { .. } => {
-            return Err(AceError::UnsupportedEntry(var.entry));
-        },
-        Entry::Periodic => {
-            return Err(AceError::UnsupportedEntry(var.entry));
-        },
-        Entry::AuxBusBoundary => InputKey::AuxBusBoundary(index),
-        Entry::Public => InputKey::Public(index),
-        Entry::Challenge => InputKey::Randomness(index),
-    };
-    Ok(key)
 }

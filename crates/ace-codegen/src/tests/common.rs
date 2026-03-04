@@ -1,15 +1,12 @@
-#![allow(dead_code)]
-
 use miden_core::{Felt, field::QuadFelt};
 use p3_dft::{Radix2DitParallel, TwoAdicSubgroupDft};
 use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 
 use crate::{
-    InputKey, InputLayout,
+    EXT_DEGREE, InputKey, InputLayout,
     dag::{NodeId, NodeKind},
     quotient,
-    randomness::RandomnessPlan,
-    symbolic::{Entry, SymExpr, SymVar},
+    symbolic::{Entry, SymExpr},
 };
 
 /// Deterministic input filler for layout-sized buffers.
@@ -24,22 +21,6 @@ pub fn fill_inputs(layout: &InputLayout) -> Vec<QuadFelt> {
         values.push(QuadFelt::new([lo, hi]));
     }
     values
-}
-
-pub fn input_key_for_symbolic<EF>(var: &SymVar<EF>) -> InputKey {
-    match var.entry {
-        Entry::Preprocessed { .. } => panic!("preprocessed not supported in test"),
-        Entry::Main { offset } => InputKey::Main { offset, index: var.index },
-        Entry::Permutation { .. } | Entry::Aux { .. } => {
-            panic!("aux variables require coord merge in eval_expr");
-        },
-        Entry::Periodic => panic!("periodic variables are computed inside the circuit"),
-        Entry::AuxBusBoundary => InputKey::AuxBusBoundary(var.index),
-        Entry::Public => InputKey::Public(var.index),
-        Entry::Challenge => {
-            panic!("challenge variables should be handled in eval_expr for test evaluation")
-        },
-    }
 }
 
 pub fn eval_periodic_values(periodic_table: &[Vec<Felt>], z_k: QuadFelt) -> Vec<QuadFelt> {
@@ -79,9 +60,9 @@ pub fn eval_expr(
 ) -> QuadFelt {
     match expr {
         SymExpr::Variable(v) => match v.entry {
-            Entry::Aux { offset } | Entry::Permutation { offset } => {
+            Entry::Aux { offset } => {
                 let mut acc = QuadFelt::ZERO;
-                for coord in 0..layout.counts.ext_degree {
+                for coord in 0..EXT_DEGREE {
                     let basis =
                         <QuadFelt as BasedVectorSpace<Felt>>::ith_basis_element(coord).unwrap();
                     let key = InputKey::AuxCoord { offset, index: v.index, coord };
@@ -91,33 +72,35 @@ pub fn eval_expr(
                 acc
             },
             Entry::Challenge => {
-                let plan = RandomnessPlan::from_layout(layout).expect("valid randomness plan");
-                match plan {
-                    RandomnessPlan::Direct { .. } => {
-                        let key = InputKey::Randomness(v.index);
-                        inputs[layout.index(key).unwrap()]
-                    },
-                    RandomnessPlan::AlphaBeta { .. } => {
-                        let alpha = inputs[layout.index(InputKey::AuxRandAlpha).unwrap()];
-                        let beta = inputs[layout.index(InputKey::AuxRandBeta).unwrap()];
-                        match v.index {
-                            0 => alpha,
-                            1 => QuadFelt::ONE,
-                            _ => {
-                                let mut power = beta;
-                                for _ in 2..v.index {
-                                    power *= beta;
-                                }
-                                power
-                            },
+                let alpha = inputs[layout.index(InputKey::AuxRandAlpha).unwrap()];
+                let beta = inputs[layout.index(InputKey::AuxRandBeta).unwrap()];
+                match v.index {
+                    0 => alpha,
+                    1 => QuadFelt::ONE,
+                    _ => {
+                        let mut power = beta;
+                        for _ in 2..v.index {
+                            power *= beta;
                         }
+                        power
                     },
                 }
             },
             Entry::Periodic => periodic_values[v.index],
-            _ => {
-                let key = input_key_for_symbolic(v);
+            Entry::Main { offset } => {
+                let key = InputKey::Main { offset, index: v.index };
                 inputs[layout.index(key).unwrap()]
+            },
+            Entry::AuxBusBoundary => {
+                let key = InputKey::AuxBusBoundary(v.index);
+                inputs[layout.index(key).unwrap()]
+            },
+            Entry::Public => {
+                let key = InputKey::Public(v.index);
+                inputs[layout.index(key).unwrap()]
+            },
+            Entry::Preprocessed { .. } => {
+                panic!("preprocessed not supported in test")
             },
         },
         SymExpr::IsFirstRow => {
