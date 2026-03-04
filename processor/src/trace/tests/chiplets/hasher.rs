@@ -20,6 +20,7 @@ use miden_core::{
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
     field::Field,
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, SplitNodeBuilder},
+    operations::opcodes,
     program::Program,
     utils::range,
 };
@@ -1025,13 +1026,8 @@ fn extract_control_block_domain_from_trace(trace: &ExecutionTrace, row: RowIndex
     });
 
     // opcode values that represent control block initialization (excluding span)
-    let control_block_initializers = [
-        Operation::Call.op_code(),
-        Operation::Join.op_code(),
-        Operation::Loop.op_code(),
-        Operation::Split.op_code(),
-        Operation::SysCall.op_code(),
-    ];
+    let control_block_initializers =
+        [opcodes::CALL, opcodes::JOIN, opcodes::LOOP, opcodes::SPLIT, opcodes::SYSCALL];
 
     if control_block_initializers.contains(&opcode_value) {
         Felt::from_u8(opcode_value)

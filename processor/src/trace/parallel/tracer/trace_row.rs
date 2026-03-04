@@ -16,7 +16,7 @@ use miden_core::{
     mast::{
         BasicBlockNode, CallNode, JoinNode, LoopNode, MastForest, MastNodeExt, OpBatch, SplitNode,
     },
-    operations::Operation,
+    operations::{Operation, opcodes},
 };
 
 use super::{ExecutionContextInfo, StackState, SystemState};
@@ -69,15 +69,15 @@ impl DecoderRow {
     ///
     /// This corresponds either to the SPAN or RESPAN operations.
     pub fn new_basic_block_batch(
-        operation: Operation,
+        start_op: BasicBlockStartOperation,
         op_batch: &OpBatch,
         addr: Felt,
         group_count: Felt,
     ) -> Self {
-        debug_assert!(
-            operation == Operation::Span || operation == Operation::Respan,
-            "operation must be SPAN or RESPAN"
-        );
+        let opcode = match start_op {
+            BasicBlockStartOperation::Span => opcodes::SPAN,
+            BasicBlockStartOperation::Respan => opcodes::RESPAN,
+        };
 
         let hasher_state = (
             op_batch.groups()[0..4].try_into().expect("slice with incorrect length"),
@@ -85,7 +85,7 @@ impl DecoderRow {
         );
 
         Self {
-            opcode: operation.op_code(),
+            opcode,
             hasher_state,
             addr,
             in_basic_block: false,
@@ -129,6 +129,13 @@ impl DecoderRow {
     }
 }
 
+/// Enum representing the type of operation that starts a basic block.
+#[derive(Debug)]
+enum BasicBlockStartOperation {
+    Span,
+    Respan,
+}
+
 // BASIC BLOCK TRACE ROW METHODS
 // ================================================================================================
 
@@ -150,7 +157,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
             .expect("Basic block should have at least one op batch");
 
         let decoder_row = DecoderRow::new_basic_block_batch(
-            Operation::Span,
+            BasicBlockStartOperation::Span,
             first_op_batch,
             self.decoder_state.parent_addr,
             group_count_for_block,
@@ -172,7 +179,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
             self.decoder_state.replay_node_end(&mut self.block_stack_replay);
 
         let decoder_row = DecoderRow::new_control_flow(
-            Operation::End.op_code(),
+            opcodes::END,
             (basic_block_node.digest(), flags.to_hasher_state_second_word()),
             ended_node_addr,
         );
@@ -198,7 +205,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         // Add RESPAN trace row
         {
             let decoder_row = DecoderRow::new_basic_block_batch(
-                Operation::Respan,
+                BasicBlockStartOperation::Respan,
                 op_batch,
                 self.decoder_state.current_addr,
                 basic_block_context.group_count_in_block,
@@ -269,9 +276,9 @@ impl<'a> CoreTraceGenerationTracer<'a> {
 
         let decoder_row = DecoderRow::new_control_flow(
             if call_node.is_syscall() {
-                Operation::SysCall.op_code()
+                opcodes::SYSCALL
             } else {
-                Operation::Call.op_code()
+                opcodes::CALL
             },
             (callee_hash, zero_hash),
             self.decoder_state.parent_addr,
@@ -291,7 +298,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         callee_hash: Word,
     ) {
         let decoder_row = DecoderRow::new_control_flow(
-            Operation::Dyn.op_code(),
+            opcodes::DYN,
             (callee_hash, Word::default()),
             self.decoder_state.parent_addr,
         );
@@ -321,7 +328,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         .into();
 
         let decoder_row = DecoderRow::new_control_flow(
-            Operation::Dyncall.op_code(),
+            opcodes::DYNCALL,
             (callee_hash, second_hasher_state),
             self.decoder_state.parent_addr,
         );
@@ -350,7 +357,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
             .digest();
 
         let decoder_row = DecoderRow::new_control_flow(
-            Operation::Join.op_code(),
+            opcodes::JOIN,
             (child1_hash, child2_hash),
             self.decoder_state.parent_addr,
         );
@@ -378,7 +385,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         let zero_hash = Word::default();
 
         let decoder_row = DecoderRow::new_control_flow(
-            Operation::Loop.op_code(),
+            opcodes::LOOP,
             (body_hash, zero_hash),
             self.decoder_state.parent_addr,
         );
@@ -403,7 +410,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
             .digest();
 
         let decoder_row = DecoderRow::new_control_flow(
-            Operation::Repeat.op_code(),
+            opcodes::REPEAT,
             // We set hasher[4] (is_loop_body) to 1
             (body_hash, [ONE, ZERO, ZERO, ZERO].into()),
             current_addr,
@@ -434,7 +441,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
             .digest();
 
         let decoder_row = DecoderRow::new_control_flow(
-            Operation::Split.op_code(),
+            opcodes::SPLIT,
             (on_true_hash, on_false_hash),
             self.decoder_state.parent_addr,
         );
@@ -456,7 +463,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
             self.decoder_state.replay_node_end(&mut self.block_stack_replay);
 
         let decoder_row = DecoderRow::new_control_flow(
-            Operation::End.op_code(),
+            opcodes::END,
             (node_digest, flags.to_hasher_state_second_word()),
             ended_node_addr,
         );

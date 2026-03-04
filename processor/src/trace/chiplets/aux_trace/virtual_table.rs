@@ -4,8 +4,7 @@ use miden_air::trace::{
     log_precompile::{HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE},
 };
 use miden_core::{
-    Felt, field::ExtensionField, operations::OPCODE_LOGPRECOMPILE,
-    precompile::PrecompileTranscriptState,
+    Felt, field::ExtensionField, operations::opcodes, precompile::PrecompileTranscriptState,
 };
 
 use super::{build_ace_memory_read_element_request, build_ace_memory_read_word_request};
@@ -65,7 +64,7 @@ where
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         let op_code = main_trace.get_op_code(row).as_canonical_u64() as u8;
-        let log_pc_request = if op_code == OPCODE_LOGPRECOMPILE {
+        let log_pc_request = if op_code == opcodes::LOGPRECOMPILE {
             build_log_precompile_capacity_remove(main_trace, row, alphas, _debugger)
         } else {
             E::ONE
@@ -90,7 +89,7 @@ where
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         let op_code = main_trace.get_op_code(row).as_canonical_u64() as u8;
-        let log_pc_response = if op_code == OPCODE_LOGPRECOMPILE {
+        let log_pc_response = if op_code == opcodes::LOGPRECOMPILE {
             build_log_precompile_capacity_insert(main_trace, row, alphas, _debugger)
         } else {
             E::ONE
