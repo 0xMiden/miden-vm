@@ -11,10 +11,7 @@ use miden_core::{
 use super::{build_ace_memory_read_element_request, build_ace_memory_read_word_request};
 use crate::{
     debug::{BusDebugger, BusMessage},
-    trace::{
-        AuxColumnBuilder,
-        utils::{Challenges, MessageLayout},
-    },
+    trace::{AuxColumnBuilder, utils::Challenges},
 };
 
 // CHIPLETS VIRTUAL TABLE
@@ -145,10 +142,10 @@ const RATE1_RANGE: core::ops::Range<usize> = DIGEST_LEN..(2 * DIGEST_LEN);
 
 /// Node is left child (lsb=0), sibling is right child at RATE1: alpha + beta_powers[2]*index +
 /// beta_powers[7..10]*sibling
-const SIBLING_RATE1_LAYOUT: MessageLayout<5> = MessageLayout::new([2, 7, 8, 9, 10]);
+const SIBLING_RATE1_LAYOUT: [usize; 5] = [2, 7, 8, 9, 10];
 /// Node is right child (lsb=1), sibling is left child at RATE0: alpha + beta_powers[2]*index +
 /// beta_powers[3..6]*sibling
-const SIBLING_RATE0_LAYOUT: MessageLayout<5> = MessageLayout::new([2, 3, 4, 5, 6]);
+const SIBLING_RATE0_LAYOUT: [usize; 5] = [2, 3, 4, 5, 6];
 
 /// Encodes a sibling table entry given the node index and sibling word.
 #[inline(always)]
@@ -158,19 +155,14 @@ fn encode_sibling<E: ExtensionField<Felt>>(
     sibling: &[Felt],
 ) -> E {
     let lsb = index.as_canonical_u64() & 1;
-    if lsb == 0 {
+    let layout = if lsb == 0 {
         // Node is left child, sibling is right child at RATE1
-        challenges.encode_layout(
-            &SIBLING_RATE1_LAYOUT,
-            [index, sibling[0], sibling[1], sibling[2], sibling[3]],
-        )
+        SIBLING_RATE1_LAYOUT
     } else {
         // Node is right child, sibling is left child at RATE0
-        challenges.encode_layout(
-            &SIBLING_RATE0_LAYOUT,
-            [index, sibling[0], sibling[1], sibling[2], sibling[3]],
-        )
-    }
+        SIBLING_RATE0_LAYOUT
+    };
+    challenges.encode_sparse(layout, [index, sibling[0], sibling[1], sibling[2], sibling[3]])
 }
 
 /// Constructs the removals from the table when the hasher absorbs a new sibling node while

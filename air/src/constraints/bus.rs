@@ -33,30 +33,6 @@ pub mod indices {
 use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::MidenAirBuilder;
 
-/// Message-layout helper for sparse encodings.
-///
-/// `idx` holds the positions in the full message vector which are present in the sparse message.
-///
-/// This is used by both AIR constraints (symbolic expressions) and processor aux trace builders
-/// (witness values) to encode sparse bus messages where not all coefficient positions are used.
-///
-/// # Example
-///
-/// Sibling table entry encoding `node_index` at position 2 and `sibling_word` at positions 7-10:
-/// ```ignore
-/// const LAYOUT: MessageLayout<5> = MessageLayout::new([2, 7, 8, 9, 10]);
-/// let encoded = challenges.encode_layout(&LAYOUT, [index, sib[0], sib[1], sib[2], sib[3]]);
-/// ```
-pub struct MessageLayout<const K: usize> {
-    pub idx: [usize; K],
-}
-
-impl<const K: usize> MessageLayout<K> {
-    pub const fn new(idx: [usize; K]) -> Self {
-        Self { idx }
-    }
-}
-
 /// Encodes multiset/LogUp contributions as **alpha + <beta, message>**
 ///
 /// Structure:
@@ -104,23 +80,25 @@ where
         acc
     }
 
-    /// Encodes as **alpha + <beta, message>** using sparse layout.
+    /// Encodes as **alpha + <beta, message>** using a layout array and separate values.
+    ///
+    /// `layout[i]` gives the beta-power position for `values[i]`.
     #[inline]
-    pub fn encode_layout<const K: usize>(
+    pub fn encode_sparse<const K: usize>(
         &self,
-        layout: &MessageLayout<K>,
-        elems: [AB::Expr; K],
+        layout: [usize; K],
+        values: [AB::Expr; K],
     ) -> AB::ExprEF {
         let mut acc = self.alpha.clone();
-        for (i, elem) in elems.iter().enumerate() {
-            let idx = layout.idx[i];
+        for i in 0..K {
+            let idx = layout[i];
             debug_assert!(
                 idx < self.beta_powers.len(),
-                "MessageLayout index {} exceeds beta_powers length ({})",
+                "encode_sparse index {} exceeds beta_powers length ({})",
                 idx,
                 self.beta_powers.len()
             );
-            acc += self.beta_powers[idx].clone() * elem.clone();
+            acc += self.beta_powers[idx].clone() * values[i].clone();
         }
         acc
     }

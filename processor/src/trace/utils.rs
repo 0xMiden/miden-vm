@@ -1,7 +1,6 @@
 use alloc::{string::ToString, vec::Vec};
 use core::{mem::MaybeUninit, slice};
 
-pub(crate) use miden_air::trace::MessageLayout;
 use miden_air::trace::{MAX_MESSAGE_WIDTH, MainTrace};
 
 use super::chiplets::Chiplets;
@@ -359,18 +358,21 @@ impl<E: ExtensionField<Felt>> Challenges<E> {
         acc
     }
 
-    /// Encodes as **alpha + <beta, message>** using sparse layout.
+    /// Encodes as **alpha + <beta, message>** using a layout array and separate values.
+    ///
+    /// `layout[i]` gives the beta-power position for `values[i]`.
     #[inline(always)]
-    pub fn encode_layout<const K: usize>(&self, layout: &MessageLayout<K>, elems: [Felt; K]) -> E {
+    pub fn encode_sparse<const K: usize>(&self, layout: [usize; K], values: [Felt; K]) -> E {
         let mut acc = self.alpha;
-        for (&idx, &elem) in layout.idx.iter().zip(elems.iter()) {
+        for i in 0..K {
+            let idx = layout[i];
             debug_assert!(
                 idx < self.beta_powers.len(),
-                "MessageLayout index {} exceeds beta_powers length ({})",
+                "encode_sparse index {} exceeds beta_powers length ({})",
                 idx,
                 self.beta_powers.len()
             );
-            acc += self.beta_powers[idx] * elem;
+            acc += self.beta_powers[idx] * values[i];
         }
         acc
     }

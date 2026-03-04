@@ -17,9 +17,6 @@ pub use main_trace::{MainTrace, MainTraceRow};
 mod aux_trace;
 pub use aux_trace::AuxTraceBuilder;
 
-// Re-export MessageLayout from constraints module for processor use
-pub use crate::constraints::bus::MessageLayout;
-
 // CONSTANTS
 // ================================================================================================
 
