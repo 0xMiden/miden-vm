@@ -17,13 +17,13 @@
 //! 4. Merkle path verification
 //! 5. Merkle root update
 //!
-//! ## Column Layout
+//! ## Column Layout (within chiplet, offset by selectors)
 //!
-//! | Columns | Purpose |
-//! |---------|---------|
-//! | s[0..2] | Selector flags |
+//! | Column   | Purpose |
+//! |----------|---------|
+//! | s[0..2]  | Selector flags |
 //! | h[0..12) | Hasher state (RATE0, RATE1, CAP) |
-//! | i       | Node index (for Merkle operations) |
+//! | i        | Node index (for Merkle operations) |
 //!
 //! ## References
 //!

@@ -9,7 +9,7 @@ use miden_core::{
 use miden_crypto::stark::{air::MidenAirBuilder, matrix::RowMajorMatrix};
 
 use super::state;
-use crate::constraints::{chiplets::hasher::periodic, tagging::ids::TAG_TOTAL_COUNT};
+use crate::constraints::{chiplets::bitwise, tagging::ids::TAG_TOTAL_COUNT};
 
 /// Captured evaluation for a single tagged constraint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,8 +83,7 @@ impl OodEvalAirBuilder {
         let first_row = rng.next_felt();
         let last_row = rng.next_felt();
         let transition = rng.next_felt();
-        let periodic_values =
-            (0..periodic::NUM_PERIODIC_COLUMNS).map(|_| rng.next_felt()).collect();
+        let periodic_values = (0..bitwise::NUM_PERIODIC_COLUMNS).map(|_| rng.next_felt()).collect();
 
         Self {
             main,
