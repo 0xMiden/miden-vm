@@ -1491,7 +1491,7 @@ end
 #! ### Condition (2): strict remainder bound
 #!
 #! An inline lexicographic comparison verifies r < b (strict), cascading from LSB to MSB.
-#! Combined with u32assertw on r (ensuring r >= 0), this gives 0 <= r < b.
+#! Combined with u32assertw on r (ensuring each limb is a valid u32), this gives 0 <= r < b.
 pub proc divmod(b: u128, a: u128) -> (remainder: u128, quotient: u128)
     emit.U128_DIV_EVENT
     # Advice stack (top to bottom): [r0, r1, r2, r3, q0, q1, q2, q3]
@@ -1553,7 +1553,7 @@ pub proc divmod(b: u128, a: u128) -> (remainder: u128, quotient: u128)
     movup.15 assert_eq.err="u128 divmod: col 1"
     # => [carry_r, carry_hi, q0..q3, r0..r3, b0..b3, a2, a3]
 
-    # carry1 = carry_r + carry_hi. Max: 1 + 2*(2^32-2) = 2^33-3. May exceed u32.
+    # carry1 = carry_r + carry_hi. Max: 1 + 2*(2^32-1) = 2^33-1. May exceed u32.
     add
     # => [carry1, q0, q1, q2, q3, r0, r1, r2, r3, b0, b1, b2, b3, a2, a3]
 

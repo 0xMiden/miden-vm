@@ -1068,6 +1068,18 @@ fn divmod_simple() {
 }
 
 #[test]
+fn divmod_large_typical() {
+    // Both operands have all 4 limbs non-trivial
+    let a: u128 = 0xdeadbeef_cafebabe_12345678_9abcdef0;
+    let b: u128 = 0x01234567_89abcdef_fedcba98_76543210;
+    let q = a / b;
+    let r = a % b;
+    let (q3, q2, q1, q0) = split_u128(q);
+    let (r3, r2, r1, r0) = split_u128(r);
+    test_u128_div_op("divmod", a, b, &[r0, r1, r2, r3, q0, q1, q2, q3]);
+}
+
+#[test]
 fn divmod_exact() {
     // 100 / 10 = 10 remainder 0
     let a: u128 = 100;
@@ -1132,6 +1144,21 @@ fn divmod_zero_dividend() {
     // 0 / anything = 0 remainder 0
     test_u128_div_op("divmod", 0, 42, &[0, 0, 0, 0, 0, 0, 0, 0]);
     test_u128_div_op("divmod", 0, u128::MAX, &[0, 0, 0, 0, 0, 0, 0, 0]);
+}
+
+#[test]
+fn divmod_divide_by_zero() {
+    let source = "
+        use miden::core::math::u128
+        begin
+            exec.u128::divmod
+        end
+    ";
+
+    // b = 0, a = 42
+    build_test!(source, &[0, 0, 0, 0, 42, 0, 0, 0])
+        .execute()
+        .expect_err("division by zero");
 }
 
 #[test]
