@@ -18,7 +18,7 @@
 //!
 //! Additional components (decoder, stack, chiplets) are introduced in later constraint chunks.
 
-use miden_crypto::stark::air::MidenAirBuilder;
+use p3_miden_lifted_air::LiftedAirBuilder;
 
 use crate::MainTraceRow;
 
@@ -36,7 +36,7 @@ pub fn enforce_main<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     system::enforce_main(builder, local, next);
     range::enforce_main(builder, local, next);
@@ -48,7 +48,7 @@ pub fn enforce_bus<AB>(
     local: &MainTraceRow<AB::Var>,
     _next: &MainTraceRow<AB::Var>,
 ) where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     range::bus::enforce_bus(builder, local);
 }

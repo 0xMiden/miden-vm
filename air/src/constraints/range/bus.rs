@@ -14,7 +14,8 @@
 //! responses come from the range table (V column with multiplicity).
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::{air::MidenAirBuilder, matrix::Matrix};
+use p3_matrix::Matrix;
+use p3_miden_lifted_air::{ExtensionBuilder, LiftedAirBuilder};
 
 use crate::{
     MainTraceRow,
@@ -52,21 +53,13 @@ const RANGE_BUS_NAME: &str = "range.bus.transition";
 /// Enforces the range checker bus constraint for LogUp checks.
 ///
 /// This constraint tracks range check requests from other components (stack and memory)
-/// using the LogUp protocol. The bus accumulator b_range must start and end at 0,
-/// and transition according to the LogUp update rule.
-///
-/// ## Constraint Degree
+/// using the LogUp protocol. The expected final value is enforced via aux-finals; this
+/// function enforces only transitions.
 ///
 /// This is a degree-9 constraint.
-///
-/// ## Lookups
-///
-/// - Stack lookups (4): decoder helper columns (USER_OP_HELPERS_OFFSET..+4)
-/// - Memory lookups (2): memory delta limbs (MEMORY_D0, MEMORY_D1)
-/// - Range response: range V column with multiplicity range M column
 pub fn enforce_bus<AB>(builder: &mut AB, local: &MainTraceRow<AB::Var>)
 where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     // In Miden VM, auxiliary trace is always present
     debug_assert!(
@@ -81,22 +74,21 @@ where
     let b_local = aux_local[range::B_RANGE_COL_IDX];
     let b_next = aux_next[range::B_RANGE_COL_IDX];
 
-    let challenges = builder.permutation_randomness();
-    let alpha = challenges[0];
+    let alpha: AB::ExprEF = builder.permutation_randomness()[0].into();
 
     // Denominators for LogUp
     // Memory lookups: mv0 = alpha + chiplets[MEMORY_D0], mv1 = alpha + chiplets[MEMORY_D1]
-    let mv0: AB::ExprEF = alpha.into() + local.chiplets[MEMORY_D0_IDX].clone().into();
-    let mv1: AB::ExprEF = alpha.into() + local.chiplets[MEMORY_D1_IDX].clone().into();
+    let mv0: AB::ExprEF = alpha.clone() + local.chiplets[MEMORY_D0_IDX].clone().into();
+    let mv1: AB::ExprEF = alpha.clone() + local.chiplets[MEMORY_D1_IDX].clone().into();
 
     // Stack lookups: sv0-sv3 = alpha + decoder helper columns
-    let sv0: AB::ExprEF = alpha.into() + local.decoder[STACK_LOOKUP_BASE].clone().into();
-    let sv1: AB::ExprEF = alpha.into() + local.decoder[STACK_LOOKUP_BASE + 1].clone().into();
-    let sv2: AB::ExprEF = alpha.into() + local.decoder[STACK_LOOKUP_BASE + 2].clone().into();
-    let sv3: AB::ExprEF = alpha.into() + local.decoder[STACK_LOOKUP_BASE + 3].clone().into();
+    let sv0: AB::ExprEF = alpha.clone() + local.decoder[STACK_LOOKUP_BASE].clone().into();
+    let sv1: AB::ExprEF = alpha.clone() + local.decoder[STACK_LOOKUP_BASE + 1].clone().into();
+    let sv2: AB::ExprEF = alpha.clone() + local.decoder[STACK_LOOKUP_BASE + 2].clone().into();
+    let sv3: AB::ExprEF = alpha.clone() + local.decoder[STACK_LOOKUP_BASE + 3].clone().into();
 
     // Range check value: alpha + range V column
-    let range_check: AB::ExprEF = alpha.into() + local.range[RANGE_V_COL_IDX].clone().into();
+    let range_check: AB::ExprEF = alpha + local.range[RANGE_V_COL_IDX].clone().into();
 
     // Combined lookup denominators
     let memory_lookups = mv0.clone() * mv1.clone();

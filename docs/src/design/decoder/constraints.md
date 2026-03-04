@@ -470,9 +470,7 @@ We need to add $1$ and subtract the sum of the relevant operation flags from eac
 
 The degree of this constraint is $9$.
 
-In addition to the above transition constraint, the last value in the column is $1$
-(i.e., the block hash table is empty). The initial program-hash boundary constraint
-is planned but not enforced yet.
+In addition to the above transition constraint, $p_2$ starts at $1$ (the table begins empty) and its final value encodes the program hash binding: the verifier checks $p_2 \cdot \text{ph\_msg} = 1$ at the last row via `reduced_aux_values`, where $\text{ph\_msg}$ is the randomness-reduced program hash.
 
 ## Basic block
 Basic block constraints ensure proper decoding of basic blocks. In addition to the block stack table constraints and block hash table constraints described previously, decoding of basic blocks requires constraints described below.

@@ -5,10 +5,8 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::{string::ToString, vec::Vec};
-
-use ::serde::Serialize;
 use miden_processor::{FastProcessor, Program, trace::build_trace};
+use p3_matrix::Matrix;
 use tracing::instrument;
 
 // Trace conversion utilities
@@ -20,13 +18,12 @@ mod proving_options;
 // ================================================================================================
 pub use miden_air::{DeserializationError, ProcessorAir, config};
 pub use miden_core::proof::{ExecutionProof, HashFunction};
-use miden_crypto::stark;
 pub use miden_processor::{
     ExecutionError, Host, InputError, StackInputs, StackOutputs, Word, advice::AdviceInputs,
     crypto, field, serde, utils,
 };
 pub use proving_options::ProvingOptions;
-pub use trace_adapter::{aux_trace_to_row_major, execution_trace_to_row_major};
+pub use trace_adapter::execution_trace_to_row_major;
 
 // PROVER
 // ================================================================================================
@@ -78,42 +75,72 @@ pub async fn prove(
         execution_trace_to_row_major(&trace)
     };
 
-    // Build public values
-    let public_values = trace.to_public_values();
+    // Build public inputs/values
+    let public_inputs = miden_air::PublicInputs::new(
+        trace.program_info().clone(),
+        trace.init_stack_state(),
+        *trace.stack_outputs(),
+        trace.final_precompile_transcript().state(),
+    );
+    let (public_values, kernel_digests) = public_inputs.to_air_inputs();
 
-    // Create AIR with aux trace builders
-    let air = ProcessorAir::with_aux_builder(trace.aux_trace_builders().clone());
+    // Build variable-length public inputs from kernel procedure digests.
+    // Each Word (4 Felts) is one entry in the var-len inputs slice.
+    let kernel_slices: alloc::vec::Vec<&[miden_core::Felt]> =
+        kernel_digests.iter().map(|w| &**w as &[_]).collect();
 
-    // Generate STARK proof using unified miden-prover
+    // Create AIR and aux trace builder adapter
+    let air = ProcessorAir;
+    let aux_builder = trace.aux_trace_builders().clone();
+
+    // Compute log2 of trace height (needed by verifier)
+    let log_trace_height = trace_matrix.height().trailing_zeros() as u32;
+
+    // Generate STARK proof using lifted prover
     let proof_bytes = match hash_fn {
-        HashFunction::Blake3_256 => {
-            let config = miden_air::config::create_blake3_256_config();
-            let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
-            serialize_proof(&proof)?
-        },
-        HashFunction::Keccak => {
-            let config = miden_air::config::create_keccak_config();
-            let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
-            serialize_proof(&proof)?
-        },
-        HashFunction::Rpo256 => {
-            let config = miden_air::config::create_rpo_config();
-            let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
-            serialize_proof(&proof)?
-        },
-        HashFunction::Poseidon2 => {
-            let config = miden_air::config::create_poseidon2_config();
-            let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
-            serialize_proof(&proof)?
-        },
-        HashFunction::Rpx256 => {
-            let config = miden_air::config::create_rpx_config();
-            let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
-            serialize_proof(&proof)?
-        },
-    };
+        HashFunction::Blake3_256 => config::prove(
+            &config::create_blake3_256_config(),
+            &air,
+            &trace_matrix,
+            &public_values,
+            &kernel_slices,
+            &aux_builder,
+        ),
+        HashFunction::Keccak => config::prove(
+            &config::create_keccak_config(),
+            &air,
+            &trace_matrix,
+            &public_values,
+            &kernel_slices,
+            &aux_builder,
+        ),
+        HashFunction::Rpo256 => config::prove(
+            &config::create_rpo_config(),
+            &air,
+            &trace_matrix,
+            &public_values,
+            &kernel_slices,
+            &aux_builder,
+        ),
+        HashFunction::Poseidon2 => config::prove(
+            &config::create_poseidon2_config(),
+            &air,
+            &trace_matrix,
+            &public_values,
+            &kernel_slices,
+            &aux_builder,
+        ),
+        HashFunction::Rpx256 => config::prove(
+            &config::create_rpx_config(),
+            &air,
+            &trace_matrix,
+            &public_values,
+            &kernel_slices,
+            &aux_builder,
+        ),
+    }?;
 
-    let proof = ExecutionProof::new(proof_bytes, hash_fn, precompile_requests);
+    let proof = ExecutionProof::new(proof_bytes, hash_fn, log_trace_height, precompile_requests);
 
     Ok((stack_outputs, proof))
 }
@@ -151,12 +178,4 @@ pub fn prove_sync(
             rt.block_on(prove(program, stack_inputs, advice_inputs, host, options))
         },
     }
-}
-
-// HELPER FUNCTIONS
-// ================================================================================================
-
-/// Serializes a proof to bytes, converting serialization errors to ExecutionError.
-fn serialize_proof<T: Serialize>(proof: &T) -> Result<Vec<u8>, ExecutionError> {
-    bincode::serialize(proof).map_err(|e| ExecutionError::ProofSerializationError(e.to_string()))
 }

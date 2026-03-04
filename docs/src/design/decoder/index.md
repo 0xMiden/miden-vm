@@ -242,9 +242,7 @@ $$
 
 Where $\alpha_0, ..., \alpha_7$ are the random values provided by the verifier.
 
-Unlike other virtual tables, block hash table does not start out in an empty state. Specifically, it is initialized with a single row containing the hash of the program's root block. This needs to be done because the root block does not have a parent and, thus, otherwise it would never be added to the block hash table.
-
-Initialization of the block hash table is done by setting the initial value of $p_2$ to the value of the row containing the hash of a program's root block.
+Unlike other virtual tables, the block hash table has an asymmetry: the program's root block is removed (via `END`) but never added, because the root has no parent to insert it. To account for this, the verifier checks the expected final value of $p_2$ via `reduced_aux_values`, which incorporates the program hash. Concretely, a valid execution satisfies $p_2 \cdot \text{ph\_msg} = 1$ at the last row, where $\text{ph\_msg}$ is the randomness-reduced program hash.
 
 #### Op group table
 *Op group* table is used in decoding of *basic* blocks, which are leaves in a program's MAST. As described [here](../programs.md#basic-block), a *basic* block can contain one or more operation batches, each batch containing up to $8$ operation groups.

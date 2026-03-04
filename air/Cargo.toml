@@ -29,7 +29,26 @@ miden-core = { workspace = true, features = ["serde"] }
 miden-crypto.workspace = true
 miden-utils-indexing.workspace = true
 
+# Lifted STARK dependencies
+p3-miden-lifted-air.workspace = true
+p3-miden-lifted-stark.workspace = true
+p3-miden-lifted-prover.workspace = true
+p3-miden-lifted-verifier.workspace = true
+p3-miden-lifted-fri.workspace = true
+p3-miden-lmcs.workspace = true
+p3-miden-stateful-hasher.workspace = true
+p3-miden-transcript.workspace = true
+p3-air.workspace = true
+p3-field.workspace = true
+p3-matrix.workspace = true
+p3-challenger.workspace = true
+p3-dft.workspace = true
+p3-symmetric.workspace = true
+p3-blake3.workspace = true
+p3-keccak.workspace = true
+
 # External dependencies
+bincode = "1.3"
 thiserror.workspace = true
 tracing.workspace = true
 serde.workspace = true

@@ -2,11 +2,12 @@
 
 use alloc::vec::Vec;
 
-use miden_core::{
-    Felt,
-    field::{PrimeCharacteristicRing, QuadFelt},
+use miden_core::{Felt, field::QuadFelt};
+use p3_air::{AirBuilder, AirBuilderWithPublicValues};
+use p3_matrix::dense::RowMajorMatrix;
+use p3_miden_lifted_air::{
+    ExtensionBuilder, LiftedAirBuilder, PeriodicAirBuilder, PermutationAirBuilder,
 };
-use miden_crypto::stark::{air::MidenAirBuilder, matrix::RowMajorMatrix};
 
 use super::{ids::TAG_TOTAL_COUNT, state};
 
@@ -27,7 +28,6 @@ pub struct EvalRecord {
 /// for a given seed. Each constraint's evaluation is recorded in ID order.
 pub struct OodEvalAirBuilder {
     main: RowMajorMatrix<Felt>,
-    preprocessed: RowMajorMatrix<Felt>,
     permutation: RowMajorMatrix<QuadFelt>,
     permutation_randomness: Vec<QuadFelt>,
     aux_bus_boundary_values: Vec<QuadFelt>,
@@ -54,29 +54,14 @@ impl OodEvalAirBuilder {
             (0..crate::trace::TRACE_WIDTH * 2).map(|_| rng.next_felt()).collect(),
             crate::trace::TRACE_WIDTH,
         );
-        let preprocessed = RowMajorMatrix::new(Vec::new(), 1);
         let permutation = RowMajorMatrix::new(
             (0..crate::trace::AUX_TRACE_WIDTH * 2).map(|_| rng.next_quad()).collect(),
             crate::trace::AUX_TRACE_WIDTH,
         );
-        let raw_randomness: Vec<QuadFelt> =
+        // Generate AUX_TRACE_RAND_ELEMENTS independent pseudo-random challenges.
+        // The test fixtures depend on this RNG sequence being stable.
+        let permutation_randomness: Vec<QuadFelt> =
             (0..crate::trace::AUX_TRACE_RAND_ELEMENTS).map(|_| rng.next_quad()).collect();
-        let alpha = raw_randomness.first().copied().expect("aux randomness missing alpha");
-        let beta = raw_randomness.get(1).copied().expect("aux randomness missing beta");
-        let mut permutation_randomness = Vec::with_capacity(crate::trace::AUX_TRACE_RAND_ELEMENTS);
-        if crate::trace::AUX_TRACE_RAND_ELEMENTS > 0 {
-            permutation_randomness.push(alpha);
-        }
-        if crate::trace::AUX_TRACE_RAND_ELEMENTS > 1 {
-            permutation_randomness.push(QuadFelt::ONE);
-        }
-        if crate::trace::AUX_TRACE_RAND_ELEMENTS > 2 {
-            let mut beta_power = beta;
-            for _ in 2..crate::trace::AUX_TRACE_RAND_ELEMENTS {
-                permutation_randomness.push(beta_power);
-                beta_power *= beta;
-            }
-        }
         let aux_bus_boundary_values =
             (0..crate::trace::AUX_TRACE_WIDTH).map(|_| rng.next_quad()).collect();
         let first_row = rng.next_felt();
@@ -88,7 +73,6 @@ impl OodEvalAirBuilder {
 
         Self {
             main,
-            preprocessed,
             permutation,
             permutation_randomness,
             aux_bus_boundary_values,
@@ -143,18 +127,11 @@ impl Drop for OodEvalAirBuilder {
     }
 }
 
-impl MidenAirBuilder for OodEvalAirBuilder {
+impl AirBuilder for OodEvalAirBuilder {
     type F = Felt;
     type Expr = Felt;
     type Var = Felt;
     type M = RowMajorMatrix<Felt>;
-    type PublicVar = Felt;
-    type PeriodicVal = Felt;
-    type EF = QuadFelt;
-    type ExprEF = QuadFelt;
-    type VarEF = QuadFelt;
-    type MP = RowMajorMatrix<QuadFelt>;
-    type RandomVar = QuadFelt;
 
     fn main(&self) -> Self::M {
         self.main.clone()
@@ -181,6 +158,20 @@ impl MidenAirBuilder for OodEvalAirBuilder {
         let value = QuadFelt::from(x.into());
         self.record(id, namespace, value);
     }
+}
+
+impl AirBuilderWithPublicValues for OodEvalAirBuilder {
+    type PublicVar = Felt;
+
+    fn public_values(&self) -> &[Self::PublicVar] {
+        &self.public_values
+    }
+}
+
+impl ExtensionBuilder for OodEvalAirBuilder {
+    type EF = QuadFelt;
+    type ExprEF = QuadFelt;
+    type VarEF = QuadFelt;
 
     fn assert_zero_ext<I>(&mut self, x: I)
     where
@@ -190,18 +181,11 @@ impl MidenAirBuilder for OodEvalAirBuilder {
         let value = x.into();
         self.record(id, namespace, value);
     }
+}
 
-    fn public_values(&self) -> &[Self::PublicVar] {
-        &self.public_values
-    }
-
-    fn periodic_evals(&self) -> &[Self::PeriodicVal] {
-        &self.periodic_values
-    }
-
-    fn preprocessed(&self) -> Self::M {
-        self.preprocessed.clone()
-    }
+impl PermutationAirBuilder for OodEvalAirBuilder {
+    type MP = RowMajorMatrix<QuadFelt>;
+    type RandomVar = QuadFelt;
 
     fn permutation(&self) -> Self::MP {
         self.permutation.clone()
@@ -210,8 +194,18 @@ impl MidenAirBuilder for OodEvalAirBuilder {
     fn permutation_randomness(&self) -> &[Self::RandomVar] {
         &self.permutation_randomness
     }
+}
 
-    fn aux_bus_boundary_values(&self) -> &[Self::VarEF] {
+impl PeriodicAirBuilder for OodEvalAirBuilder {
+    type PeriodicVar = Felt;
+
+    fn periodic_values(&self) -> &[Self::PeriodicVar] {
+        &self.periodic_values
+    }
+}
+
+impl LiftedAirBuilder for OodEvalAirBuilder {
+    fn aux_values(&self) -> &[Self::VarEF] {
         &self.aux_bus_boundary_values
     }
 }
@@ -255,7 +249,7 @@ mod tests {
     use alloc::vec::Vec;
 
     use miden_core::{Felt, field::QuadFelt};
-    use miden_crypto::stark::air::MidenAir;
+    use p3_miden_lifted_air::LiftedAir;
 
     use super::{
         super::fixtures::{OOD_SEED, active_expected_ood_evals},
@@ -266,8 +260,8 @@ mod tests {
     fn run_group_parity_test(expected: Vec<EvalRecord>) {
         assert_eq!(expected.len(), TAG_TOTAL_COUNT);
         let mut builder = OodEvalAirBuilder::new(OOD_SEED);
-        let air = ProcessorAir::new();
-        MidenAir::<Felt, QuadFelt>::eval(&air, &mut builder);
+        let air = ProcessorAir;
+        LiftedAir::<Felt, QuadFelt>::eval(&air, &mut builder);
         builder.assert_complete();
 
         let actual = builder.records();

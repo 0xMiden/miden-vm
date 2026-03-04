@@ -13,9 +13,7 @@ pub use rows::{RowIndex, RowIndexError};
 
 mod main_trace;
 pub use main_trace::{MainTrace, MainTraceRow};
-
-mod aux_trace;
-pub use aux_trace::AuxTraceBuilder;
+pub use p3_miden_lifted_air::AuxBuilder;
 
 // CONSTANTS
 // ================================================================================================
@@ -60,9 +58,14 @@ pub const LOG_PRECOMPILE_LABEL: u8 = miden_core::operations::OPCODE_LOGPRECOMPIL
 pub mod log_precompile {
     use core::ops::Range;
 
-    use miden_core::utils::range;
+    use miden_core::{
+        Felt, field::ExtensionField, precompile::PrecompileTranscriptState, utils::range,
+    };
 
-    use super::chiplets::hasher::{CAPACITY_LEN, DIGEST_LEN};
+    use super::{
+        LOG_PRECOMPILE_LABEL,
+        chiplets::hasher::{CAPACITY_LEN, DIGEST_LEN},
+    };
 
     // HELPER REGISTER LAYOUT
     // --------------------------------------------------------------------------------------------
@@ -108,6 +111,20 @@ pub mod log_precompile {
     pub const STATE_RATE_0_RANGE: Range<usize> = range(0, DIGEST_LEN);
     pub const STATE_RATE_1_RANGE: Range<usize> = range(STATE_RATE_0_RANGE.end, DIGEST_LEN);
     pub const STATE_CAP_RANGE: Range<usize> = range(STATE_RATE_1_RANGE.end, CAPACITY_LEN);
+
+    /// Encodes a transcript state message for the log_precompile virtual table bus.
+    pub fn transcript_message<E: ExtensionField<Felt>>(
+        alphas: &[E],
+        state: PrecompileTranscriptState,
+    ) -> E {
+        let state_elements: [Felt; 4] = state.into();
+        alphas[0]
+            + alphas[1] * Felt::new(LOG_PRECOMPILE_LABEL as u64)
+            + alphas[2] * state_elements[0]
+            + alphas[3] * state_elements[1]
+            + alphas[4] * state_elements[2]
+            + alphas[5] * state_elements[3]
+    }
 }
 
 // Range check trace
@@ -183,6 +200,6 @@ pub const ACE_CHIPLET_WIRING_BUS_RANGE: Range<usize> =
 /// Auxiliary trace segment width.
 pub const AUX_TRACE_WIDTH: usize = ACE_CHIPLET_WIRING_BUS_RANGE.end;
 
-/// Number of random elements available to the prover after the commitment to the main trace
-/// segment.
+/// Number of independent random elements sampled from the Fiat-Shamir transcript after the
+/// commitment to the main trace segment.
 pub const AUX_TRACE_RAND_ELEMENTS: usize = 16;

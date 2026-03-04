@@ -200,20 +200,20 @@ mod fast_parallel {
     use alloc::sync::Arc;
 
     use miden_assembly::{Assembler, DefaultSourceManager};
-    use miden_core::proof::{ExecutionProof, HashFunction};
-    use miden_crypto::stark;
-    use miden_processor::{
-        ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs, trace::build_trace,
-    };
-    use miden_prover::{ProcessorAir, config, execution_trace_to_row_major};
+    use miden_processor::ExecutionOptions;
+    use miden_prover::{AdviceInputs, ProvingOptions, StackInputs, prove_sync};
     use miden_verifier::verify;
-    use miden_vm::DefaultHost;
+    use miden_vm::{DefaultHost, HashFunction};
 
     /// Default fragment size for parallel trace generation
     const FRAGMENT_SIZE: usize = 1024;
 
     /// Test that proves and verifies using the fast processor + parallel trace generation path.
     /// This verifies the complete code path works end-to-end.
+    ///
+    /// Internally, `prove_sync` uses `FastProcessor` with the configured fragment size,
+    /// builds the trace via parallel trace generation, converts to row-major format,
+    /// constructs the AIR with aux trace builders, and generates a STARK proof.
     ///
     /// Note: We only test one hash function here since
     /// `test_trace_equivalence_slow_vs_fast_parallel` verifies trace equivalence, and the slow
@@ -235,38 +235,19 @@ mod fast_parallel {
         let mut host =
             DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
 
-        let options = ExecutionOptions::default()
+        // Configure proving with Blake3_256 and parallel trace generation
+        let execution_options = ExecutionOptions::default()
             .with_core_trace_fragment_size(FRAGMENT_SIZE)
             .unwrap();
-        let fast_processor =
-            FastProcessor::new_with_options(stack_inputs, advice_inputs.clone(), options);
-        let (execution_output, trace_context) = fast_processor
-            .execute_for_trace_sync(&program, &mut host)
-            .expect("Fast processor execution failed");
+        let options = ProvingOptions::with_96_bit_security(HashFunction::Blake3_256)
+            .with_execution_options(execution_options);
 
-        let fast_stack_outputs = execution_output.stack;
-
-        // Build trace using parallel trace generation
-        let trace = build_trace(execution_output, trace_context, program.to_info());
-
-        // Convert trace to row-major format for proving
-        let trace_matrix = execution_trace_to_row_major(&trace);
-        let public_values = trace.to_public_values();
-
-        // Create AIR with aux trace builders
-        let air = ProcessorAir::with_aux_builder(trace.aux_trace_builders().clone());
-
-        // Generate proof using Blake3_256
-        let config = config::create_blake3_256_config();
-        let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
-        let proof_bytes = bincode::serialize(&proof).expect("Failed to serialize proof");
-
-        let precompile_requests = trace.precompile_requests().to_vec();
-
-        let proof = ExecutionProof::new(proof_bytes, HashFunction::Blake3_256, precompile_requests);
+        // Prove using fast processor + parallel trace generation
+        let (stack_outputs, proof) =
+            prove_sync(&program, stack_inputs, advice_inputs, &mut host, options)
+                .expect("Fast processor proving failed");
 
         // Verify the proof
-        verify(program.into(), stack_inputs, fast_stack_outputs, proof)
-            .expect("Verification failed");
+        verify(program.into(), stack_inputs, stack_outputs, proof).expect("Verification failed");
     }
 }
