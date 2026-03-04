@@ -147,55 +147,41 @@ const SIBLING_RATE1_LAYOUT: [usize; 5] = [2, 7, 8, 9, 10];
 /// beta_powers[3..6]*sibling
 const SIBLING_RATE0_LAYOUT: [usize; 5] = [2, 3, 4, 5, 6];
 
-/// Encodes a sibling table entry given the node index and sibling word.
+/// Extracts the node index and sibling word from the trace and encodes a sibling table entry.
+///
+/// The node index comes from `row`, while the sibling state comes from `state_row`
+/// (which may be `row` or `row + 1` depending on whether this is an absorb or
+/// absorb-next cycle).
 #[inline(always)]
-fn encode_sibling<E: ExtensionField<Felt>>(
+fn encode_sibling_from_trace<E: ExtensionField<Felt>>(
+    main_trace: &MainTrace,
     challenges: &Challenges<E>,
-    index: Felt,
-    sibling: &[Felt],
+    row: RowIndex,
+    state_row: RowIndex,
 ) -> E {
+    let index = main_trace.chiplet_node_index(row);
     let lsb = index.as_canonical_u64() & 1;
-    let layout = if lsb == 0 {
+    let (layout, sibling) = if lsb == 0 {
         // Node is left child, sibling is right child at RATE1
-        SIBLING_RATE1_LAYOUT
+        (SIBLING_RATE1_LAYOUT, &main_trace.chiplet_hasher_state(state_row)[RATE1_RANGE])
     } else {
         // Node is right child, sibling is left child at RATE0
-        SIBLING_RATE0_LAYOUT
+        (SIBLING_RATE0_LAYOUT, &main_trace.chiplet_hasher_state(state_row)[RATE0_RANGE])
     };
     challenges.encode_sparse(layout, [index, sibling[0], sibling[1], sibling[2], sibling[3]])
 }
 
 /// Constructs the removals from the table when the hasher absorbs a new sibling node while
 /// computing the new Merkle root.
-fn chiplets_vtable_remove_sibling<E>(
+fn chiplets_vtable_remove_sibling<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     challenges: &Challenges<E>,
     row: RowIndex,
-) -> E
-where
-    E: ExtensionField<Felt>,
-{
-    let f_mu: bool = main_trace.f_mu(row);
-    let f_mua: bool = main_trace.f_mua(row);
-
-    if f_mu {
-        let index = main_trace.chiplet_node_index(row);
-        let lsb = index.as_canonical_u64() & 1;
-        let sibling = if lsb == 0 {
-            &main_trace.chiplet_hasher_state(row)[RATE1_RANGE]
-        } else {
-            &main_trace.chiplet_hasher_state(row)[RATE0_RANGE]
-        };
-        encode_sibling(challenges, index, sibling)
-    } else if f_mua {
-        let index = main_trace.chiplet_node_index(row);
-        let lsb = index.as_canonical_u64() & 1;
-        let sibling = if lsb == 0 {
-            &main_trace.chiplet_hasher_state(row + 1)[RATE1_RANGE]
-        } else {
-            &main_trace.chiplet_hasher_state(row + 1)[RATE0_RANGE]
-        };
-        encode_sibling(challenges, index, sibling)
+) -> E {
+    if main_trace.f_mu(row) {
+        encode_sibling_from_trace(main_trace, challenges, row, row)
+    } else if main_trace.f_mua(row) {
+        encode_sibling_from_trace(main_trace, challenges, row, row + 1)
     } else {
         E::ONE
     }
@@ -206,35 +192,15 @@ where
 
 /// Constructs the inclusions to the table when the hasher absorbs a new sibling node while
 /// computing the old Merkle root.
-fn chiplets_vtable_add_sibling<E>(
+fn chiplets_vtable_add_sibling<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     challenges: &Challenges<E>,
     row: RowIndex,
-) -> E
-where
-    E: ExtensionField<Felt>,
-{
-    let f_mv: bool = main_trace.f_mv(row);
-    let f_mva: bool = main_trace.f_mva(row);
-
-    if f_mv {
-        let index = main_trace.chiplet_node_index(row);
-        let lsb = index.as_canonical_u64() & 1;
-        let sibling = if lsb == 0 {
-            &main_trace.chiplet_hasher_state(row)[RATE1_RANGE]
-        } else {
-            &main_trace.chiplet_hasher_state(row)[RATE0_RANGE]
-        };
-        encode_sibling(challenges, index, sibling)
-    } else if f_mva {
-        let index = main_trace.chiplet_node_index(row);
-        let lsb = index.as_canonical_u64() & 1;
-        let sibling = if lsb == 0 {
-            &main_trace.chiplet_hasher_state(row + 1)[RATE1_RANGE]
-        } else {
-            &main_trace.chiplet_hasher_state(row + 1)[RATE0_RANGE]
-        };
-        encode_sibling(challenges, index, sibling)
+) -> E {
+    if main_trace.f_mv(row) {
+        encode_sibling_from_trace(main_trace, challenges, row, row)
+    } else if main_trace.f_mva(row) {
+        encode_sibling_from_trace(main_trace, challenges, row, row + 1)
     } else {
         E::ONE
     }
