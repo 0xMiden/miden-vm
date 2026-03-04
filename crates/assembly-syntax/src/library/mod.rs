@@ -834,6 +834,15 @@ pub struct FunctionTypeDeserializer(pub FunctionType);
 
 impl Deserializable for FunctionTypeDeserializer {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Self::read_from_with_depth(source, MAX_TYPE_NESTING)
+    }
+}
+
+impl FunctionTypeDeserializer {
+    fn read_from_with_depth<R: ByteReader>(
+        source: &mut R,
+        depth: usize,
+    ) -> Result<Self, DeserializationError> {
         use midenc_hir_type::CallConv;
 
         let abi = match source.read_u8()? {
@@ -860,7 +869,7 @@ impl Deserializable for FunctionTypeDeserializer {
         }
         let mut params = SmallVec::<[Type; 4]>::with_capacity(arity);
         for _ in 0..arity {
-            let ty = TypeDeserializer::read_from(source)?.0;
+            let ty = TypeDeserializer::read_from_with_depth(source, depth)?.0;
             params.push(ty);
         }
 
@@ -874,7 +883,7 @@ impl Deserializable for FunctionTypeDeserializer {
         }
         let mut results = SmallVec::<[Type; 1]>::with_capacity(num_results);
         for _ in 0..num_results {
-            let ty = TypeDeserializer::read_from(source)?.0;
+            let ty = TypeDeserializer::read_from_with_depth(source, depth)?.0;
             results.push(ty);
         }
 
@@ -970,19 +979,20 @@ impl TypeDeserializer {
         source: &mut R,
         depth: usize,
     ) -> Result<Self, DeserializationError> {
-        if depth == 0 {
-            return Err(DeserializationError::InvalidValue(String::from(
-                "type nesting exceeds limit",
-            )));
-        }
-
         use alloc::string::ToString;
         use core::num::NonZeroU16;
 
         use midenc_hir_type::{AddressSpace, ArrayType, PointerType, StructType, TypeRepr};
 
-        let next_depth = depth - 1;
-        let ty = match source.read_u8()? {
+        let tag = source.read_u8()?;
+        let is_recursive = matches!(tag, 16..=20);
+        if is_recursive && depth == 0 {
+            return Err(DeserializationError::InvalidValue(String::from(
+                "type nesting exceeds limit",
+            )));
+        }
+        let next_depth = depth.saturating_sub(1);
+        let ty = match tag {
             0 => Type::Unknown,
             1 => Type::Never,
             2 => Type::I1,
@@ -1056,7 +1066,9 @@ impl TypeDeserializer {
                 let ty = TypeDeserializer::read_from_with_depth(source, next_depth)?.0;
                 Type::List(Arc::new(ty))
             },
-            20 => Type::Function(Arc::new(FunctionTypeDeserializer::read_from(source)?.0)),
+            20 => Type::Function(Arc::new(
+                FunctionTypeDeserializer::read_from_with_depth(source, next_depth)?.0,
+            )),
             invalid => {
                 return Err(DeserializationError::InvalidValue(format!(
                     "invalid Type tag: {invalid}"
@@ -1194,6 +1206,42 @@ mod tests {
             bytes.write_u8(0);
         }
         bytes.write_u8(15);
+
+        let err = TypeDeserializer::read_from(&mut SliceReader::new(&bytes)).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("type nesting exceeds limit"));
+    }
+
+    #[test]
+    fn type_deserializer_allows_max_nesting() {
+        let mut bytes = Vec::new();
+        for _ in 0..MAX_TYPE_NESTING {
+            bytes.write_u8(16);
+            bytes.write_u8(0);
+        }
+        bytes.write_u8(15);
+
+        let ty = TypeDeserializer::read_from(&mut SliceReader::new(&bytes)).unwrap();
+        matches!(ty.0, Type::Ptr(_));
+    }
+
+    #[test]
+    fn function_type_rejects_nested_over_limit() {
+        let mut nested = Vec::new();
+        for _ in 0..=MAX_TYPE_NESTING {
+            nested.write_u8(16);
+            nested.write_u8(0);
+        }
+        nested.write_u8(15);
+
+        let mut bytes = Vec::new();
+        bytes.write_u8(20);
+        bytes.write_u8(0);
+        bytes.write_usize(1);
+        bytes.write_bytes(&nested);
+        bytes.write_usize(0);
 
         let err = TypeDeserializer::read_from(&mut SliceReader::new(&bytes)).unwrap_err();
         let DeserializationError::InvalidValue(message) = err else {
