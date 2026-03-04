@@ -35,16 +35,19 @@ pub enum NodeKind<EF> {
 /// Precomputed periodic column data for DAG construction.
 #[derive(Debug, Clone)]
 pub struct PeriodicColumnData<EF> {
-    /// Maximum periodic column length (used to align powers).
-    pub max_len: usize,
     /// Per-column coefficient vectors (highest-degree first).
-    pub coeffs: Vec<Vec<EF>>,
+    pub(crate) coeffs: Vec<Vec<EF>>,
 }
 
 impl<EF> PeriodicColumnData<EF> {
     /// Number of periodic columns.
-    pub fn len(&self) -> usize {
+    pub fn num_columns(&self) -> usize {
         self.coeffs.len()
+    }
+
+    /// Maximum periodic column length (used to align powers).
+    pub fn max_period(&self) -> usize {
+        self.coeffs.iter().map(|c| c.len()).max().unwrap_or(0)
     }
 }
 

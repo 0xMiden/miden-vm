@@ -1,15 +1,11 @@
 use super::InputLayout;
+use crate::EXT_DEGREE;
 
 /// Logical inputs required by the ACE circuit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum InputKey {
     /// Public input at the given index.
     Public(usize),
-    /// Randomness challenge at the given index.
-    ///
-    /// This variant is used when randomness is supplied directly; MASM layouts
-    /// typically use `AuxRandAlpha`/`AuxRandBeta` instead.
-    Randomness(usize),
     /// Aux randomness α supplied as an input.
     AuxRandAlpha,
     /// Aux randomness β supplied as an input.
@@ -69,25 +65,18 @@ impl InputKeyMapper<'_> {
         let layout = self.layout;
         match key {
             InputKey::Public(i) => layout.regions.public_values.index(i),
-            InputKey::Randomness(i) => {
-                if layout.counts.num_randomness_inputs == layout.counts.num_randomness {
-                    layout.regions.randomness.index(i)
-                } else {
-                    None
-                }
-            },
-            InputKey::AuxRandAlpha => layout.aux_rand_alpha,
-            InputKey::AuxRandBeta => layout.aux_rand_beta,
+            InputKey::AuxRandAlpha => Some(layout.aux_rand_alpha),
+            InputKey::AuxRandBeta => Some(layout.aux_rand_beta),
             InputKey::Main { offset, index } => match offset {
                 0 => layout.regions.main_curr.index(index),
                 1 => layout.regions.main_next.index(index),
                 _ => None,
             },
             InputKey::AuxCoord { offset, index, coord } => {
-                if index >= layout.counts.aux_width || coord >= layout.counts.ext_degree {
+                if index >= layout.counts.aux_width || coord >= EXT_DEGREE {
                     return None;
                 }
-                let local = index * layout.counts.ext_degree + coord;
+                let local = index * EXT_DEGREE + coord;
                 match offset {
                     0 => layout.regions.aux_curr.index(local),
                     1 => layout.regions.aux_next.index(local),
@@ -108,10 +97,10 @@ impl InputKeyMapper<'_> {
             InputKey::InvZMinusOne => Some(layout.stark.inv_z_minus_one),
             InputKey::InvVanishing => Some(layout.stark.inv_vanishing),
             InputKey::QuotientChunkCoord { offset, chunk, coord } => {
-                if chunk >= layout.counts.num_quotient_chunks || coord >= layout.counts.ext_degree {
+                if chunk >= layout.counts.num_quotient_chunks || coord >= EXT_DEGREE {
                     return None;
                 }
-                let idx = chunk * layout.counts.ext_degree + coord;
+                let idx = chunk * EXT_DEGREE + coord;
                 match offset {
                     0 => layout.regions.quotient_curr.index(idx),
                     1 => layout.regions.quotient_next.index(idx),

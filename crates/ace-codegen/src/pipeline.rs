@@ -5,16 +5,14 @@
 //! - choose a READ layout for inputs,
 //! - emit a circuit that mirrors verifier evaluation.
 
-use core::hash::Hash;
-
-use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
+use p3_field::{ExtensionField, Field, TwoAdicField};
 use p3_miden_air::MidenAir;
 
 use crate::{
     AceError,
     builder::RecordingAirBuilder,
     circuit::{AceCircuit, emit_circuit},
-    dag::{AceDag, build_periodic_data, build_verifier_dag},
+    dag::{AceDag, PeriodicColumnData, build_verifier_dag},
     layout::{InputCounts, InputLayout},
 };
 
@@ -62,7 +60,7 @@ pub fn build_ace_circuit_for_air<A, F, EF>(
 where
     A: MidenAir<F, EF>,
     F: TwoAdicField + Ord,
-    EF: ExtensionField<F> + BasedVectorSpace<F> + PrimeCharacteristicRing + Copy + Eq + Hash,
+    EF: ExtensionField<F> + Eq + std::hash::Hash,
 {
     let artifacts = build_ace_dag_for_air::<A, F, EF>(air, config)?;
     emit_circuit(&artifacts.dag, artifacts.layout)
@@ -71,20 +69,20 @@ where
 /// Build the input layout for the provided AIR.
 ///
 /// The returned `InputLayout` is validated and ready for input assembly.
-pub fn build_layout_for_air<A, F, EF>(air: &A, config: AceConfig) -> Result<InputLayout, AceError>
+pub fn build_layout_for_air<A, F, EF>(air: &A, config: AceConfig) -> InputLayout
 where
     A: MidenAir<F, EF>,
     F: Field,
-    EF: ExtensionField<F> + BasedVectorSpace<F>,
+    EF: ExtensionField<F>,
 {
     let num_periodic = air.periodic_table().len();
-    let counts = input_counts_for_air::<A, F, EF>(air, config, num_periodic)?;
+    let counts = input_counts_for_air::<A, F, EF>(air, config, num_periodic);
     let layout = match config.layout {
         LayoutKind::Native => InputLayout::new(counts),
         LayoutKind::Masm => InputLayout::new_masm(counts),
     };
-    layout.validate()?;
-    Ok(layout)
+    layout.validate();
+    layout
 }
 
 /// Build a verifier-equivalent DAG and layout for the provided AIR.
@@ -98,15 +96,15 @@ pub(crate) fn build_ace_dag_for_air<A, F, EF>(
 where
     A: MidenAir<F, EF>,
     F: TwoAdicField + Ord,
-    EF: ExtensionField<F> + BasedVectorSpace<F> + PrimeCharacteristicRing + Copy + Eq + Hash,
+    EF: ExtensionField<F> + Eq + std::hash::Hash,
 {
     let periodic_table = air.periodic_table();
-    let counts = input_counts_for_air::<A, F, EF>(air, config, periodic_table.len())?;
+    let counts = input_counts_for_air::<A, F, EF>(air, config, periodic_table.len());
     let layout = match config.layout {
         LayoutKind::Native => InputLayout::new(counts),
         LayoutKind::Masm => InputLayout::new_masm(counts),
     };
-    layout.validate()?;
+    layout.validate();
     let mut builder = RecordingAirBuilder::<F, EF>::new(
         0,
         counts.width,
@@ -117,46 +115,34 @@ where
     );
     air.eval(&mut builder);
     let periodic_data = (!periodic_table.is_empty())
-        .then(|| build_periodic_data::<F, EF>(periodic_table))
-        .transpose()?;
-    let dag = build_verifier_dag::<F, EF>(builder.constraints(), &layout, periodic_data.as_ref())?;
+        .then(|| PeriodicColumnData::from_periodic_table::<F>(periodic_table));
+    let dag = build_verifier_dag::<F, EF>(builder.constraints(), &layout, periodic_data.as_ref());
 
     Ok(AceArtifacts { layout, dag })
 }
 
-fn input_counts_for_air<A, F, EF>(
-    air: &A,
-    config: AceConfig,
-    num_periodic: usize,
-) -> Result<InputCounts, AceError>
+fn input_counts_for_air<A, F, EF>(air: &A, config: AceConfig, num_periodic: usize) -> InputCounts
 where
     A: MidenAir<F, EF>,
     F: Field,
-    EF: ExtensionField<F> + BasedVectorSpace<F>,
+    EF: ExtensionField<F>,
 {
-    if config.num_quotient_chunks == 0 {
-        return Err(AceError::InvalidQuotientChunks { got: config.num_quotient_chunks });
-    }
-
-    if air.preprocessed_trace().is_some() {
-        return Err(AceError::PreprocessedTraceUnsupported);
-    }
+    assert!(config.num_quotient_chunks > 0, "num_quotient_chunks must be > 0");
+    assert!(
+        air.preprocessed_trace().is_none(),
+        "preprocessed trace inputs are not supported"
+    );
 
     let num_randomness = air.num_randomness();
-    if num_randomness == 0 {
-        return Err(AceError::InvalidRandomnessInputs { num_randomness, num_randomness_inputs: 0 });
-    }
-    let num_randomness_inputs = 2;
+    assert!(num_randomness > 0, "AIR must declare at least one randomness challenge");
 
-    Ok(InputCounts {
+    InputCounts {
         width: air.width(),
         aux_width: air.aux_width(),
         num_public: air.num_public_values(),
         num_randomness,
-        num_randomness_inputs,
         num_periodic,
         num_aux_inputs: config.num_aux_inputs,
         num_quotient_chunks: config.num_quotient_chunks,
-        ext_degree: <EF as BasedVectorSpace<F>>::DIMENSION,
-    })
+    }
 }

@@ -10,7 +10,8 @@ use p3_field::Field;
 
 use super::common::{eval_quotient, fill_inputs, zps_for_chunk};
 use crate::{
-    AceConfig, InputKey, LayoutKind, circuit::emit_circuit, pipeline::build_ace_dag_for_air,
+    AceConfig, EXT_DEGREE, InputKey, LayoutKind, circuit::emit_circuit,
+    pipeline::build_ace_dag_for_air,
 };
 
 #[test]
@@ -74,7 +75,7 @@ fn quotient_next_inputs_do_not_affect_eval() {
 
     // Mutate all quotient_next inputs; evaluation should remain zero.
     for chunk in 0..artifacts.layout.counts.num_quotient_chunks {
-        for coord in 0..artifacts.layout.counts.ext_degree {
+        for coord in 0..EXT_DEGREE {
             let idx = artifacts
                 .layout
                 .index(InputKey::QuotientChunkCoord { offset: 1, chunk, coord })

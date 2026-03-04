@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use p3_field::PrimeCharacteristicRing;
+use p3_field::Field;
 
 use crate::{
     AceError, InputLayout,
@@ -47,7 +47,7 @@ pub struct AceCircuit<EF> {
     pub(crate) root: AceNode,
 }
 
-impl<EF: PrimeCharacteristicRing + Copy> AceCircuit<EF> {
+impl<EF: Field + Copy> AceCircuit<EF> {
     /// Return the input layout for this circuit.
     pub fn layout(&self) -> &InputLayout {
         &self.layout
@@ -94,7 +94,7 @@ pub(crate) fn emit_circuit<EF>(
     layout: InputLayout,
 ) -> Result<AceCircuit<EF>, AceError>
 where
-    EF: PrimeCharacteristicRing + Copy + Eq + std::hash::Hash,
+    EF: Field + Eq + std::hash::Hash,
 {
     let mut constants = Vec::new();
     let mut constant_map = HashMap::<EF, usize>::new();
@@ -104,7 +104,7 @@ where
     for (idx, node) in dag.nodes.iter().enumerate() {
         let ace_node = match node {
             NodeKind::Input(key) => {
-                let input_idx = layout.index(*key).ok_or(AceError::InvalidInputKey(*key))?;
+                let input_idx = layout.index(*key).expect("input key must be present in layout");
                 AceNode::Input(input_idx)
             },
             NodeKind::Constant(value) => {

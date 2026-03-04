@@ -1,9 +1,9 @@
 use super::{InputCounts, InputLayout, InputRegion, LayoutRegions, StarkVarIndices};
-use crate::randomness::RandomnessPlan;
+use crate::{EXT_DEGREE, randomness};
 
 #[derive(Clone, Copy)]
 enum Alignment {
-    None = 1,
+    Unaligned = 1,
     Word = 2,
     DoubleWord = 4,
     QuadWord = 8,
@@ -24,13 +24,13 @@ struct LayoutPolicy {
 impl LayoutPolicy {
     fn native() -> Self {
         Self {
-            public_values: Alignment::None,
-            randomness: Alignment::None,
-            main: Alignment::None,
-            aux: Alignment::None,
-            quotient: Alignment::None,
-            aux_bus_boundary: Alignment::None,
-            stark_vars: Alignment::None,
+            public_values: Alignment::Unaligned,
+            randomness: Alignment::Unaligned,
+            main: Alignment::Unaligned,
+            aux: Alignment::Unaligned,
+            quotient: Alignment::Unaligned,
+            aux_bus_boundary: Alignment::Unaligned,
+            stark_vars: Alignment::Unaligned,
             end_align: None,
         }
     }
@@ -88,18 +88,17 @@ impl InputLayout {
         let mut builder = LayoutBuilder::new();
 
         let public_values = builder.alloc(counts.num_public, policy.public_values);
-        let randomness = builder.alloc(counts.num_randomness_inputs, policy.randomness);
-        let (_plan, aux_rand_alpha, aux_rand_beta) =
-            RandomnessPlan::from_counts(&counts, randomness);
+        /// Number of randomness inputs (alpha + beta).
+        const NUM_RANDOMNESS_INPUTS: usize = 2;
+        let randomness = builder.alloc(NUM_RANDOMNESS_INPUTS, policy.randomness);
+        let (aux_rand_alpha, aux_rand_beta) = randomness::aux_rand_indices(randomness);
         let main_curr = builder.alloc(counts.width, policy.main);
-        let aux_coord_width = counts.aux_width * counts.ext_degree;
+        let aux_coord_width = counts.aux_width * EXT_DEGREE;
         let aux_curr = builder.alloc(aux_coord_width, policy.aux);
-        let quotient_curr =
-            builder.alloc(counts.num_quotient_chunks * counts.ext_degree, policy.quotient);
+        let quotient_curr = builder.alloc(counts.num_quotient_chunks * EXT_DEGREE, policy.quotient);
         let main_next = builder.alloc(counts.width, policy.main);
         let aux_next = builder.alloc(aux_coord_width, policy.aux);
-        let quotient_next =
-            builder.alloc(counts.num_quotient_chunks * counts.ext_degree, policy.quotient);
+        let quotient_next = builder.alloc(counts.num_quotient_chunks * EXT_DEGREE, policy.quotient);
         let aux_bus_boundary = builder.alloc(counts.aux_width, policy.aux_bus_boundary);
 
         let stark_base_width = counts.num_aux_inputs.max(STARK_BASE_VARS);
@@ -141,7 +140,6 @@ impl InputLayout {
             aux_rand_alpha,
             aux_rand_beta,
             stark: StarkVarIndices {
-                base_width: stark_base_width,
                 z,
                 alpha,
                 g_inv,
