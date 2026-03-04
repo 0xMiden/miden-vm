@@ -250,7 +250,7 @@ fn apply_matmul_internal<AB: MidenAirBuilder<F = Felt>>(
     state: &[AB::Expr; STATE_WIDTH],
 ) -> [AB::Expr; STATE_WIDTH] {
     // Sum of all state elements
-    let sum: AB::Expr = state.iter().cloned().reduce(|a, b| a + b).unwrap();
+    let sum: AB::Expr = state.iter().cloned().reduce(|a, b| a + b).expect("STATE_WIDTH > 0");
 
     // result[i] = state[i] * MAT_DIAG[i] + sum
     core::array::from_fn(|i| state[i].clone() * AB::Expr::from(Hasher::MAT_DIAG[i]) + sum.clone())

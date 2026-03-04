@@ -59,7 +59,7 @@ where
     /// Builds `alpha` and `beta` powers from permutation challenges.
     #[inline]
     pub fn from_randomness(challenges: &[AB::RandomVar]) -> Self {
-        debug_assert!(challenges.len() >= 2);
+        assert!(challenges.len() >= 2, "need at least alpha and beta challenges");
         let alpha: AB::ExprEF = challenges[0].into();
         let beta: AB::ExprEF = challenges[1].into();
         let mut beta_powers = core::array::from_fn(|_| AB::ExprEF::ONE);
