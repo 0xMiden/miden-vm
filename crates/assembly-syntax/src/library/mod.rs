@@ -1224,7 +1224,7 @@ mod tests {
         bytes.write_u8(15);
 
         let ty = TypeDeserializer::read_from(&mut SliceReader::new(&bytes)).unwrap();
-        matches!(ty.0, Type::Ptr(_));
+        assert!(matches!(ty.0, Type::Ptr(_)));
     }
 
     #[test]
@@ -1248,5 +1248,25 @@ mod tests {
             panic!("expected InvalidValue error");
         };
         assert!(message.contains("type nesting exceeds limit"));
+    }
+
+    #[test]
+    fn function_type_allows_nested_at_limit() {
+        let mut nested = Vec::new();
+        for _ in 0..(MAX_TYPE_NESTING - 1) {
+            nested.write_u8(16);
+            nested.write_u8(0);
+        }
+        nested.write_u8(15);
+
+        let mut bytes = Vec::new();
+        bytes.write_u8(20);
+        bytes.write_u8(0);
+        bytes.write_usize(1);
+        bytes.write_bytes(&nested);
+        bytes.write_usize(0);
+
+        let ty = TypeDeserializer::read_from(&mut SliceReader::new(&bytes)).unwrap();
+        assert!(matches!(ty.0, Type::Function(_)));
     }
 }
