@@ -40,7 +40,7 @@ where
     // Copy public values into local arrays to release the immutable borrow on builder.
     let pv = builder.public_values();
     let n = pv.len();
-    debug_assert!(n >= TAIL_LEN, "public values too short: {n} < {TAIL_LEN}");
+    assert!(n >= TAIL_LEN, "public values too short: {n} < {TAIL_LEN}");
     let si: [AB::PublicVar; STACK_DEPTH] = core::array::from_fn(|i| pv[n - TAIL_LEN + i]);
     let so: [AB::PublicVar; STACK_DEPTH] =
         core::array::from_fn(|i| pv[n - TAIL_LEN + STACK_DEPTH + i]);

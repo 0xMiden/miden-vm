@@ -330,7 +330,7 @@ pub(crate) struct Challenges<E: ExtensionField<Felt>> {
 
 impl<E: ExtensionField<Felt>> Challenges<E> {
     pub fn new(challenges: &[E]) -> Self {
-        debug_assert!(challenges.len() >= 2, "need at least alpha and beta");
+        assert!(challenges.len() >= 2, "need at least alpha and beta");
         let alpha = challenges[0];
         let beta = challenges[1];
 

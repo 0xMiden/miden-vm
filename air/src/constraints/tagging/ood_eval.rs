@@ -57,11 +57,13 @@ impl OodEvalAirBuilder {
             (0..crate::trace::AUX_TRACE_WIDTH * 2).map(|_| rng.next_quad()).collect(),
             crate::trace::AUX_TRACE_WIDTH,
         );
-        // Generate MAX_MESSAGE_WIDTH QuadFelts to keep the RNG state stable (only
-        // AUX_TRACE_RAND_CHALLENGES are used, but we consume the same number of values as
-        // before so that we ensure that the fixtures remain unchanged).
-        let permutation_randomness: Vec<QuadFelt> =
+        // Only store the actually used (alpha and beta), but consume MAX_MESSAGE_WIDTH
+        // from the RNG to keep the seed state stable and ensure that the fixtures
+        // remain unchanged.
+        let all_randomness: Vec<QuadFelt> =
             (0..crate::trace::MAX_MESSAGE_WIDTH).map(|_| rng.next_quad()).collect();
+        let permutation_randomness: Vec<QuadFelt> =
+            all_randomness[..crate::trace::AUX_TRACE_RAND_CHALLENGES].to_vec();
         let aux_bus_boundary_values =
             (0..crate::trace::AUX_TRACE_WIDTH).map(|_| rng.next_quad()).collect();
         let first_row = rng.next_felt();
