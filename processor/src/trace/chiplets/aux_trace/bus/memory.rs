@@ -11,7 +11,7 @@ use miden_air::trace::{
     },
 };
 use miden_core::{
-    FMP_ADDR, FMP_INIT_VALUE, Felt, ONE, ZERO, field::ExtensionField, operations::OPCODE_DYNCALL,
+    FMP_ADDR, FMP_INIT_VALUE, Felt, ONE, ZERO, field::ExtensionField, operations::opcodes,
 };
 
 use crate::{
@@ -110,7 +110,7 @@ pub(super) fn build_dyn_dyncall_callee_hash_read_request<E: ExtensionField<Felt>
         addr: main_trace.stack_element(0, row),
         clk: main_trace.clk(row),
         word: main_trace.decoder_hasher_state_first_half(row).into(),
-        source: if op_code_felt == Felt::from_u8(OPCODE_DYNCALL) {
+        source: if op_code_felt == Felt::from_u8(opcodes::DYNCALL) {
             "dyncall"
         } else {
             "dyn"

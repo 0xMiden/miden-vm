@@ -17,10 +17,7 @@ use miden_core::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, JoinNodeBuilder, LoopNodeBuilder,
         MastForest, MastForestContributor, MastNodeExt, OP_BATCH_SIZE, SplitNodeBuilder,
     },
-    operations::{
-        OPCODE_CALL, OPCODE_DYN, OPCODE_END, OPCODE_HALT, OPCODE_JOIN, OPCODE_LOOP, OPCODE_REPEAT,
-        OPCODE_RESPAN, OPCODE_SPAN, OPCODE_SPLIT, OPCODE_SYSCALL, Operation,
-    },
+    operations::{Operation, opcodes},
     program::{Kernel, Program, StackInputs},
 };
 use miden_utils_testing::rand::rand_value;
@@ -68,12 +65,12 @@ fn test_basic_block_one_group_decoding() {
     let (trace, trace_len) = build_trace_helper(&[], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
-    check_op_decoding(&trace, 0, ZERO, OPCODE_SPAN, 1, 0, 0);
-    check_op_decoding(&trace, 1, INIT_ADDR, Operation::Pad.op_code(), 0, 0, 1);
-    check_op_decoding(&trace, 2, INIT_ADDR, Operation::Add.op_code(), 0, 1, 1);
-    check_op_decoding(&trace, 3, INIT_ADDR, Operation::Mul.op_code(), 0, 2, 1);
-    check_op_decoding(&trace, 4, INIT_ADDR, OPCODE_END, 0, 0, 0);
-    check_op_decoding(&trace, 5, ZERO, OPCODE_HALT, 0, 0, 0);
+    check_op_decoding(&trace, 0, ZERO, opcodes::SPAN, 1, 0, 0);
+    check_op_decoding(&trace, 1, INIT_ADDR, opcodes::PAD, 0, 0, 1);
+    check_op_decoding(&trace, 2, INIT_ADDR, opcodes::ADD, 0, 1, 1);
+    check_op_decoding(&trace, 3, INIT_ADDR, opcodes::MUL, 0, 2, 1);
+    check_op_decoding(&trace, 4, INIT_ADDR, opcodes::END, 0, 0, 0);
+    check_op_decoding(&trace, 5, ZERO, opcodes::HALT, 0, 0, 0);
 
     // --- check hasher state columns -------------------------------------------------------------
     let program_hash = program.hash();
@@ -90,7 +87,7 @@ fn test_basic_block_one_group_decoding() {
 
     // HALT opcode and program hash gets propagated to the last row
     for i in 6..trace_len {
-        assert!(contains_op(&trace, i, OPCODE_HALT));
+        assert!(contains_op(&trace, i, opcodes::HALT));
         assert_eq!(ZERO, trace[OP_BITS_EXTRA_COLS_RANGE.start][i]);
         assert_eq!(ONE, trace[OP_BITS_EXTRA_COLS_RANGE.start + 1][i]);
         assert_eq!(program_hash, get_hasher_state1(&trace, i));
@@ -122,18 +119,18 @@ fn test_basic_block_small_decoding() {
     let (trace, trace_len) = build_trace_helper(&[], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
-    check_op_decoding(&trace, 0, ZERO, OPCODE_SPAN, 4, 0, 0);
+    check_op_decoding(&trace, 0, ZERO, opcodes::SPAN, 4, 0, 0);
     check_op_decoding_with_imm(&trace, 1, INIT_ADDR, ONE, 1, 3, 0, 1);
     check_op_decoding_with_imm(&trace, 2, INIT_ADDR, TWO, 2, 2, 1, 1);
-    check_op_decoding(&trace, 3, INIT_ADDR, Operation::Add.op_code(), 1, 2, 1);
-    check_op_decoding(&trace, 4, INIT_ADDR, Operation::Swap.op_code(), 1, 3, 1);
-    check_op_decoding(&trace, 5, INIT_ADDR, Operation::Drop.op_code(), 1, 4, 1);
+    check_op_decoding(&trace, 3, INIT_ADDR, opcodes::ADD, 1, 2, 1);
+    check_op_decoding(&trace, 4, INIT_ADDR, opcodes::SWAP, 1, 3, 1);
+    check_op_decoding(&trace, 5, INIT_ADDR, opcodes::DROP, 1, 4, 1);
 
     // starting new group: NOOP group is inserted by the processor to make sure number of groups
     // is a power of two
-    check_op_decoding(&trace, 6, INIT_ADDR, Operation::Noop.op_code(), 0, 0, 1);
-    check_op_decoding(&trace, 7, INIT_ADDR, OPCODE_END, 0, 0, 0);
-    check_op_decoding(&trace, 8, ZERO, OPCODE_HALT, 0, 0, 0);
+    check_op_decoding(&trace, 6, INIT_ADDR, opcodes::NOOP, 0, 0, 1);
+    check_op_decoding(&trace, 7, INIT_ADDR, opcodes::END, 0, 0, 0);
+    check_op_decoding(&trace, 8, ZERO, opcodes::HALT, 0, 0, 0);
 
     // --- check hasher state columns -------------------------------------------------------------
     let program_hash = program.hash();
@@ -154,7 +151,7 @@ fn test_basic_block_small_decoding() {
 
     // HALT opcode and program hash gets propagated to the last row
     for i in 8..trace_len {
-        assert!(contains_op(&trace, i, OPCODE_HALT));
+        assert!(contains_op(&trace, i, opcodes::HALT));
         assert_eq!(ZERO, trace[OP_BITS_EXTRA_COLS_RANGE.start][i]);
         assert_eq!(ONE, trace[OP_BITS_EXTRA_COLS_RANGE.start + 1][i]);
         assert_eq!(program_hash, get_hasher_state1(&trace, i));
@@ -186,17 +183,17 @@ fn test_basic_block_small_with_emit_decoding() {
     let (trace, trace_len) = build_trace_helper(&[], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
-    check_op_decoding(&trace, 0, ZERO, OPCODE_SPAN, 4, 0, 0);
+    check_op_decoding(&trace, 0, ZERO, opcodes::SPAN, 4, 0, 0);
     check_op_decoding_with_imm(&trace, 1, INIT_ADDR, ONE, 1, 3, 0, 1);
     check_op_decoding_with_imm(&trace, 2, INIT_ADDR, emit_event_felt, 2, 2, 1, 1);
-    check_op_decoding(&trace, 3, INIT_ADDR, Operation::Emit.op_code(), 1, 2, 1);
-    check_op_decoding(&trace, 4, INIT_ADDR, Operation::Drop.op_code(), 1, 3, 1);
-    check_op_decoding(&trace, 5, INIT_ADDR, Operation::Add.op_code(), 1, 4, 1);
+    check_op_decoding(&trace, 3, INIT_ADDR, opcodes::EMIT, 1, 2, 1);
+    check_op_decoding(&trace, 4, INIT_ADDR, opcodes::DROP, 1, 3, 1);
+    check_op_decoding(&trace, 5, INIT_ADDR, opcodes::ADD, 1, 4, 1);
     // starting new group: NOOP group is inserted by the processor to make sure number of groups
     // is a power of two
-    check_op_decoding(&trace, 6, INIT_ADDR, Operation::Noop.op_code(), 0, 0, 1);
-    check_op_decoding(&trace, 7, INIT_ADDR, OPCODE_END, 0, 0, 0);
-    check_op_decoding(&trace, 8, ZERO, OPCODE_HALT, 0, 0, 0);
+    check_op_decoding(&trace, 6, INIT_ADDR, opcodes::NOOP, 0, 0, 1);
+    check_op_decoding(&trace, 7, INIT_ADDR, opcodes::END, 0, 0, 0);
+    check_op_decoding(&trace, 8, ZERO, opcodes::HALT, 0, 0, 0);
 
     // --- check hasher state columns -------------------------------------------------------------
     let program_hash = program.hash();
@@ -216,7 +213,7 @@ fn test_basic_block_small_with_emit_decoding() {
 
     // HALT opcode and program hash gets propagated to the last row
     for i in 8..trace_len {
-        assert!(contains_op(&trace, i, OPCODE_HALT));
+        assert!(contains_op(&trace, i, opcodes::HALT));
         assert_eq!(ZERO, trace[OP_BITS_EXTRA_COLS_RANGE.start][i]);
         assert_eq!(ONE, trace[OP_BITS_EXTRA_COLS_RANGE.start + 1][i]);
         assert_eq!(program_hash, get_hasher_state1(&trace, i));
@@ -256,29 +253,29 @@ fn test_basic_block_decoding() {
     let (trace, trace_len) = build_trace_helper(&[], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
-    check_op_decoding(&trace, 0, ZERO, OPCODE_SPAN, 8, 0, 0);
+    check_op_decoding(&trace, 0, ZERO, opcodes::SPAN, 8, 0, 0);
     check_op_decoding_with_imm(&trace, 1, INIT_ADDR, iv[0], 1, 7, 0, 1);
     check_op_decoding_with_imm(&trace, 2, INIT_ADDR, iv[1], 2, 6, 1, 1);
     check_op_decoding_with_imm(&trace, 3, INIT_ADDR, iv[2], 3, 5, 2, 1);
-    check_op_decoding(&trace, 4, INIT_ADDR, Operation::Pad.op_code(), 4, 3, 1);
-    check_op_decoding(&trace, 5, INIT_ADDR, Operation::Mul.op_code(), 4, 4, 1);
-    check_op_decoding(&trace, 6, INIT_ADDR, Operation::Add.op_code(), 4, 5, 1);
-    check_op_decoding(&trace, 7, INIT_ADDR, Operation::Drop.op_code(), 4, 6, 1);
+    check_op_decoding(&trace, 4, INIT_ADDR, opcodes::PAD, 4, 3, 1);
+    check_op_decoding(&trace, 5, INIT_ADDR, opcodes::MUL, 4, 4, 1);
+    check_op_decoding(&trace, 6, INIT_ADDR, opcodes::ADD, 4, 5, 1);
+    check_op_decoding(&trace, 7, INIT_ADDR, opcodes::DROP, 4, 6, 1);
     check_op_decoding_with_imm(&trace, 8, INIT_ADDR, iv[3], 4, 4, 7, 1);
     // NOOP inserted by the processor to make sure the group doesn't end with a PUSH
-    check_op_decoding(&trace, 9, INIT_ADDR, Operation::Noop.op_code(), 3, 8, 1);
+    check_op_decoding(&trace, 9, INIT_ADDR, opcodes::NOOP, 3, 8, 1);
     // starting new operation group
     check_op_decoding_with_imm(&trace, 10, INIT_ADDR, iv[4], 6, 2, 0, 1);
-    check_op_decoding(&trace, 11, INIT_ADDR, Operation::Mul.op_code(), 1, 1, 1);
-    check_op_decoding(&trace, 12, INIT_ADDR, Operation::Add.op_code(), 1, 2, 1);
-    check_op_decoding(&trace, 13, INIT_ADDR, Operation::Inv.op_code(), 1, 3, 1);
-    check_op_decoding(&trace, 14, INIT_ADDR, Operation::Swap.op_code(), 1, 4, 1);
-    check_op_decoding(&trace, 15, INIT_ADDR, Operation::Drop.op_code(), 1, 5, 1);
+    check_op_decoding(&trace, 11, INIT_ADDR, opcodes::MUL, 1, 1, 1);
+    check_op_decoding(&trace, 12, INIT_ADDR, opcodes::ADD, 1, 2, 1);
+    check_op_decoding(&trace, 13, INIT_ADDR, opcodes::INV, 1, 3, 1);
+    check_op_decoding(&trace, 14, INIT_ADDR, opcodes::SWAP, 1, 4, 1);
+    check_op_decoding(&trace, 15, INIT_ADDR, opcodes::DROP, 1, 5, 1);
 
     // NOOP inserted by the processor to make sure the number of groups is a power of two
-    check_op_decoding(&trace, 16, INIT_ADDR, Operation::Noop.op_code(), 0, 0, 1);
-    check_op_decoding(&trace, 17, INIT_ADDR, OPCODE_END, 0, 0, 0);
-    check_op_decoding(&trace, 18, ZERO, OPCODE_HALT, 0, 0, 0);
+    check_op_decoding(&trace, 16, INIT_ADDR, opcodes::NOOP, 0, 0, 1);
+    check_op_decoding(&trace, 17, INIT_ADDR, opcodes::END, 0, 0, 0);
+    check_op_decoding(&trace, 18, ZERO, opcodes::HALT, 0, 0, 0);
 
     // --- check hasher state columns -------------------------------------------------------------
     let program_hash = program.hash();
@@ -308,7 +305,7 @@ fn test_basic_block_decoding() {
 
     // HALT opcode and program hash gets propagated to the last row
     for i in 18..trace_len {
-        assert!(contains_op(&trace, i, OPCODE_HALT));
+        assert!(contains_op(&trace, i, opcodes::HALT));
         assert_eq!(ZERO, trace[OP_BITS_EXTRA_COLS_RANGE.start][i]);
         assert_eq!(ONE, trace[OP_BITS_EXTRA_COLS_RANGE.start + 1][i]);
         assert_eq!(program_hash, get_hasher_state1(&trace, i));
@@ -364,7 +361,7 @@ fn test_basic_block_with_respan_decoding() {
     let (trace, trace_len) = build_trace_helper(&[], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
-    check_op_decoding(&trace, 0, ZERO, OPCODE_SPAN, 12, 0, 0);
+    check_op_decoding(&trace, 0, ZERO, opcodes::SPAN, 12, 0, 0);
     check_op_decoding_with_imm(&trace, 1, INIT_ADDR, iv[0], 1, 11, 0, 1);
     check_op_decoding_with_imm(&trace, 2, INIT_ADDR, iv[1], 2, 10, 1, 1);
     check_op_decoding_with_imm(&trace, 3, INIT_ADDR, iv[2], 3, 9, 2, 1);
@@ -373,26 +370,26 @@ fn test_basic_block_with_respan_decoding() {
     check_op_decoding_with_imm(&trace, 6, INIT_ADDR, iv[5], 6, 6, 5, 1);
     check_op_decoding_with_imm(&trace, 7, INIT_ADDR, iv[6], 7, 5, 6, 1);
     // NOOP inserted by the processor to make sure the group doesn't end with a PUSH
-    check_op_decoding(&trace, 8, INIT_ADDR, Operation::Noop.op_code(), 4, 7, 1);
+    check_op_decoding(&trace, 8, INIT_ADDR, opcodes::NOOP, 4, 7, 1);
     // RESPAN since the previous batch is full
     let batch1_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
-    check_op_decoding(&trace, 9, INIT_ADDR, OPCODE_RESPAN, 4, 0, 0);
+    check_op_decoding(&trace, 9, INIT_ADDR, opcodes::RESPAN, 4, 0, 0);
     check_op_decoding_with_imm(&trace, 10, batch1_addr, iv[7], 1, 3, 0, 1);
-    check_op_decoding(&trace, 11, batch1_addr, Operation::Add.op_code(), 2, 1, 1);
+    check_op_decoding(&trace, 11, batch1_addr, opcodes::ADD, 2, 1, 1);
     check_op_decoding_with_imm(&trace, 12, batch1_addr, iv[8], 2, 2, 2, 1);
 
-    check_op_decoding(&trace, 13, batch1_addr, Operation::SwapDW.op_code(), 1, 3, 1);
-    check_op_decoding(&trace, 14, batch1_addr, Operation::Drop.op_code(), 1, 4, 1);
-    check_op_decoding(&trace, 15, batch1_addr, Operation::Drop.op_code(), 1, 5, 1);
-    check_op_decoding(&trace, 16, batch1_addr, Operation::Drop.op_code(), 1, 6, 1);
-    check_op_decoding(&trace, 17, batch1_addr, Operation::Drop.op_code(), 1, 7, 1);
-    check_op_decoding(&trace, 18, batch1_addr, Operation::Drop.op_code(), 1, 8, 1);
-    check_op_decoding(&trace, 19, batch1_addr, Operation::Drop.op_code(), 0, 0, 1);
-    check_op_decoding(&trace, 20, batch1_addr, Operation::Drop.op_code(), 0, 1, 1);
-    check_op_decoding(&trace, 21, batch1_addr, Operation::Drop.op_code(), 0, 2, 1);
+    check_op_decoding(&trace, 13, batch1_addr, opcodes::SWAPDW, 1, 3, 1);
+    check_op_decoding(&trace, 14, batch1_addr, opcodes::DROP, 1, 4, 1);
+    check_op_decoding(&trace, 15, batch1_addr, opcodes::DROP, 1, 5, 1);
+    check_op_decoding(&trace, 16, batch1_addr, opcodes::DROP, 1, 6, 1);
+    check_op_decoding(&trace, 17, batch1_addr, opcodes::DROP, 1, 7, 1);
+    check_op_decoding(&trace, 18, batch1_addr, opcodes::DROP, 1, 8, 1);
+    check_op_decoding(&trace, 19, batch1_addr, opcodes::DROP, 0, 0, 1);
+    check_op_decoding(&trace, 20, batch1_addr, opcodes::DROP, 0, 1, 1);
+    check_op_decoding(&trace, 21, batch1_addr, opcodes::DROP, 0, 2, 1);
 
-    check_op_decoding(&trace, 22, batch1_addr, OPCODE_END, 0, 0, 0);
-    check_op_decoding(&trace, 23, ZERO, OPCODE_HALT, 0, 0, 0);
+    check_op_decoding(&trace, 22, batch1_addr, opcodes::END, 0, 0, 0);
+    check_op_decoding(&trace, 23, ZERO, opcodes::HALT, 0, 0, 0);
 
     // --- check hasher state columns -------------------------------------------------------------
     let program_hash = program.hash();
@@ -428,7 +425,7 @@ fn test_basic_block_with_respan_decoding() {
 
     // HALT opcode and program hash gets propagated to the last row
     for i in 23..trace_len {
-        assert!(contains_op(&trace, i, OPCODE_HALT));
+        assert!(contains_op(&trace, i, opcodes::HALT));
         assert_eq!(ZERO, trace[OP_BITS_EXTRA_COLS_RANGE.start][i]);
         assert_eq!(ONE, trace[OP_BITS_EXTRA_COLS_RANGE.start + 1][i]);
         assert_eq!(program_hash, get_hasher_state1(&trace, i));
@@ -463,19 +460,19 @@ fn test_join_node_decoding() {
     let (trace, trace_len) = build_trace_helper(&[], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
-    check_op_decoding(&trace, 0, ZERO, OPCODE_JOIN, 0, 0, 0);
+    check_op_decoding(&trace, 0, ZERO, opcodes::JOIN, 0, 0, 0);
     // starting first span
     let span1_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
-    check_op_decoding(&trace, 1, INIT_ADDR, OPCODE_SPAN, 1, 0, 0);
-    check_op_decoding(&trace, 2, span1_addr, Operation::Mul.op_code(), 0, 0, 1);
-    check_op_decoding(&trace, 3, span1_addr, OPCODE_END, 0, 0, 0);
+    check_op_decoding(&trace, 1, INIT_ADDR, opcodes::SPAN, 1, 0, 0);
+    check_op_decoding(&trace, 2, span1_addr, opcodes::MUL, 0, 0, 1);
+    check_op_decoding(&trace, 3, span1_addr, opcodes::END, 0, 0, 0);
     // starting second span
     let span2_addr = span1_addr + HASH_CYCLE_LEN_FELT;
-    check_op_decoding(&trace, 4, INIT_ADDR, OPCODE_SPAN, 1, 0, 0);
-    check_op_decoding(&trace, 5, span2_addr, Operation::Add.op_code(), 0, 0, 1);
-    check_op_decoding(&trace, 6, span2_addr, OPCODE_END, 0, 0, 0);
-    check_op_decoding(&trace, 7, INIT_ADDR, OPCODE_END, 0, 0, 0);
-    check_op_decoding(&trace, 8, ZERO, OPCODE_HALT, 0, 0, 0);
+    check_op_decoding(&trace, 4, INIT_ADDR, opcodes::SPAN, 1, 0, 0);
+    check_op_decoding(&trace, 5, span2_addr, opcodes::ADD, 0, 0, 1);
+    check_op_decoding(&trace, 6, span2_addr, opcodes::END, 0, 0, 0);
+    check_op_decoding(&trace, 7, INIT_ADDR, opcodes::END, 0, 0, 0);
+    check_op_decoding(&trace, 8, ZERO, opcodes::HALT, 0, 0, 0);
 
     // --- check hasher state columns -------------------------------------------------------------
 
@@ -500,7 +497,7 @@ fn test_join_node_decoding() {
 
     // HALT opcode and program hash gets propagated to the last row
     for i in 9..trace_len {
-        assert!(contains_op(&trace, i, OPCODE_HALT));
+        assert!(contains_op(&trace, i, opcodes::HALT));
         assert_eq!(ZERO, trace[OP_BITS_EXTRA_COLS_RANGE.start][i]);
         assert_eq!(ONE, trace[OP_BITS_EXTRA_COLS_RANGE.start + 1][i]);
         assert_eq!(program_hash, get_hasher_state1(&trace, i));
@@ -536,12 +533,12 @@ fn test_split_node_true_decoding() {
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     let basic_block_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
-    check_op_decoding(&trace, 0, ZERO, OPCODE_SPLIT, 0, 0, 0);
-    check_op_decoding(&trace, 1, INIT_ADDR, OPCODE_SPAN, 1, 0, 0);
-    check_op_decoding(&trace, 2, basic_block_addr, Operation::Mul.op_code(), 0, 0, 1);
-    check_op_decoding(&trace, 3, basic_block_addr, OPCODE_END, 0, 0, 0);
-    check_op_decoding(&trace, 4, INIT_ADDR, OPCODE_END, 0, 0, 0);
-    check_op_decoding(&trace, 5, ZERO, OPCODE_HALT, 0, 0, 0);
+    check_op_decoding(&trace, 0, ZERO, opcodes::SPLIT, 0, 0, 0);
+    check_op_decoding(&trace, 1, INIT_ADDR, opcodes::SPAN, 1, 0, 0);
+    check_op_decoding(&trace, 2, basic_block_addr, opcodes::MUL, 0, 0, 1);
+    check_op_decoding(&trace, 3, basic_block_addr, opcodes::END, 0, 0, 0);
+    check_op_decoding(&trace, 4, INIT_ADDR, opcodes::END, 0, 0, 0);
+    check_op_decoding(&trace, 5, ZERO, opcodes::HALT, 0, 0, 0);
 
     // --- check hasher state columns -------------------------------------------------------------
 
@@ -562,7 +559,7 @@ fn test_split_node_true_decoding() {
 
     // HALT opcode and program hash gets propagated to the last row
     for i in 6..trace_len {
-        assert!(contains_op(&trace, i, OPCODE_HALT));
+        assert!(contains_op(&trace, i, opcodes::HALT));
         assert_eq!(ZERO, trace[OP_BITS_EXTRA_COLS_RANGE.start][i]);
         assert_eq!(ONE, trace[OP_BITS_EXTRA_COLS_RANGE.start + 1][i]);
         assert_eq!(program_hash, get_hasher_state1(&trace, i));
@@ -595,12 +592,12 @@ fn test_split_node_false_decoding() {
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     let basic_block_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
-    check_op_decoding(&trace, 0, ZERO, OPCODE_SPLIT, 0, 0, 0);
-    check_op_decoding(&trace, 1, INIT_ADDR, OPCODE_SPAN, 1, 0, 0);
-    check_op_decoding(&trace, 2, basic_block_addr, Operation::Add.op_code(), 0, 0, 1);
-    check_op_decoding(&trace, 3, basic_block_addr, OPCODE_END, 0, 0, 0);
-    check_op_decoding(&trace, 4, INIT_ADDR, OPCODE_END, 0, 0, 0);
-    check_op_decoding(&trace, 5, ZERO, OPCODE_HALT, 0, 0, 0);
+    check_op_decoding(&trace, 0, ZERO, opcodes::SPLIT, 0, 0, 0);
+    check_op_decoding(&trace, 1, INIT_ADDR, opcodes::SPAN, 1, 0, 0);
+    check_op_decoding(&trace, 2, basic_block_addr, opcodes::ADD, 0, 0, 1);
+    check_op_decoding(&trace, 3, basic_block_addr, opcodes::END, 0, 0, 0);
+    check_op_decoding(&trace, 4, INIT_ADDR, opcodes::END, 0, 0, 0);
+    check_op_decoding(&trace, 5, ZERO, opcodes::HALT, 0, 0, 0);
 
     // --- check hasher state columns -------------------------------------------------------------
 
@@ -621,7 +618,7 @@ fn test_split_node_false_decoding() {
 
     // HALT opcode and program hash gets propagated to the last row
     for i in 6..trace_len {
-        assert!(contains_op(&trace, i, OPCODE_HALT));
+        assert!(contains_op(&trace, i, opcodes::HALT));
         assert_eq!(ZERO, trace[OP_BITS_EXTRA_COLS_RANGE.start][i]);
         assert_eq!(ONE, trace[OP_BITS_EXTRA_COLS_RANGE.start + 1][i]);
         assert_eq!(program_hash, get_hasher_state1(&trace, i));
@@ -653,13 +650,13 @@ fn test_loop_node_decoding() {
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     let body_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
-    check_op_decoding(&trace, 0, ZERO, OPCODE_LOOP, 0, 0, 0);
-    check_op_decoding(&trace, 1, INIT_ADDR, OPCODE_SPAN, 1, 0, 0);
-    check_op_decoding(&trace, 2, body_addr, Operation::Pad.op_code(), 0, 0, 1);
-    check_op_decoding(&trace, 3, body_addr, Operation::Drop.op_code(), 0, 1, 1);
-    check_op_decoding(&trace, 4, body_addr, OPCODE_END, 0, 0, 0);
-    check_op_decoding(&trace, 5, INIT_ADDR, OPCODE_END, 0, 0, 0);
-    check_op_decoding(&trace, 6, ZERO, OPCODE_HALT, 0, 0, 0);
+    check_op_decoding(&trace, 0, ZERO, opcodes::LOOP, 0, 0, 0);
+    check_op_decoding(&trace, 1, INIT_ADDR, opcodes::SPAN, 1, 0, 0);
+    check_op_decoding(&trace, 2, body_addr, opcodes::PAD, 0, 0, 1);
+    check_op_decoding(&trace, 3, body_addr, opcodes::DROP, 0, 1, 1);
+    check_op_decoding(&trace, 4, body_addr, opcodes::END, 0, 0, 0);
+    check_op_decoding(&trace, 5, INIT_ADDR, opcodes::END, 0, 0, 0);
+    check_op_decoding(&trace, 6, ZERO, opcodes::HALT, 0, 0, 0);
 
     // --- check hasher state columns -------------------------------------------------------------
 
@@ -681,7 +678,7 @@ fn test_loop_node_decoding() {
 
     // HALT opcode and program hash gets propagated to the last row
     for i in 7..trace_len {
-        assert!(contains_op(&trace, i, OPCODE_HALT));
+        assert!(contains_op(&trace, i, opcodes::HALT));
         assert_eq!(ZERO, trace[OP_BITS_EXTRA_COLS_RANGE.start][i]);
         assert_eq!(ONE, trace[OP_BITS_EXTRA_COLS_RANGE.start + 1][i]);
         assert_eq!(program_hash, get_hasher_state1(&trace, i));
@@ -708,9 +705,9 @@ fn test_loop_node_skip_decoding() {
     let (trace, trace_len) = build_trace_helper(&[0], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
-    check_op_decoding(&trace, 0, ZERO, OPCODE_LOOP, 0, 0, 0);
-    check_op_decoding(&trace, 1, INIT_ADDR, OPCODE_END, 0, 0, 0);
-    check_op_decoding(&trace, 2, ZERO, OPCODE_HALT, 0, 0, 0);
+    check_op_decoding(&trace, 0, ZERO, opcodes::LOOP, 0, 0, 0);
+    check_op_decoding(&trace, 1, INIT_ADDR, opcodes::END, 0, 0, 0);
+    check_op_decoding(&trace, 2, ZERO, opcodes::HALT, 0, 0, 0);
 
     // --- check hasher state columns -------------------------------------------------------------
 
@@ -727,7 +724,7 @@ fn test_loop_node_skip_decoding() {
 
     // HALT opcode and program hash gets propagated to the last row
     for i in 3..trace_len {
-        assert!(contains_op(&trace, i, OPCODE_HALT));
+        assert!(contains_op(&trace, i, opcodes::HALT));
         assert_eq!(ZERO, trace[OP_BITS_EXTRA_COLS_RANGE.start][i]);
         assert_eq!(ONE, trace[OP_BITS_EXTRA_COLS_RANGE.start + 1][i]);
         assert_eq!(program_hash, get_hasher_state1(&trace, i));
@@ -760,19 +757,19 @@ fn test_loop_node_repeat_decoding() {
     let iter1_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
     let iter2_addr = iter1_addr + HASH_CYCLE_LEN_FELT;
 
-    check_op_decoding(&trace, 0, ZERO, OPCODE_LOOP, 0, 0, 0);
-    check_op_decoding(&trace, 1, INIT_ADDR, OPCODE_SPAN, 1, 0, 0);
-    check_op_decoding(&trace, 2, iter1_addr, Operation::Pad.op_code(), 0, 0, 1);
-    check_op_decoding(&trace, 3, iter1_addr, Operation::Drop.op_code(), 0, 1, 1);
-    check_op_decoding(&trace, 4, iter1_addr, OPCODE_END, 0, 0, 0);
+    check_op_decoding(&trace, 0, ZERO, opcodes::LOOP, 0, 0, 0);
+    check_op_decoding(&trace, 1, INIT_ADDR, opcodes::SPAN, 1, 0, 0);
+    check_op_decoding(&trace, 2, iter1_addr, opcodes::PAD, 0, 0, 1);
+    check_op_decoding(&trace, 3, iter1_addr, opcodes::DROP, 0, 1, 1);
+    check_op_decoding(&trace, 4, iter1_addr, opcodes::END, 0, 0, 0);
     // start second iteration
-    check_op_decoding(&trace, 5, INIT_ADDR, OPCODE_REPEAT, 0, 0, 0);
-    check_op_decoding(&trace, 6, INIT_ADDR, OPCODE_SPAN, 1, 0, 0);
-    check_op_decoding(&trace, 7, iter2_addr, Operation::Pad.op_code(), 0, 0, 1);
-    check_op_decoding(&trace, 8, iter2_addr, Operation::Drop.op_code(), 0, 1, 1);
-    check_op_decoding(&trace, 9, iter2_addr, OPCODE_END, 0, 0, 0);
-    check_op_decoding(&trace, 10, INIT_ADDR, OPCODE_END, 0, 0, 0);
-    check_op_decoding(&trace, 11, ZERO, OPCODE_HALT, 0, 0, 0);
+    check_op_decoding(&trace, 5, INIT_ADDR, opcodes::REPEAT, 0, 0, 0);
+    check_op_decoding(&trace, 6, INIT_ADDR, opcodes::SPAN, 1, 0, 0);
+    check_op_decoding(&trace, 7, iter2_addr, opcodes::PAD, 0, 0, 1);
+    check_op_decoding(&trace, 8, iter2_addr, opcodes::DROP, 0, 1, 1);
+    check_op_decoding(&trace, 9, iter2_addr, opcodes::END, 0, 0, 0);
+    check_op_decoding(&trace, 10, INIT_ADDR, opcodes::END, 0, 0, 0);
+    check_op_decoding(&trace, 11, ZERO, opcodes::HALT, 0, 0, 0);
 
     // --- check hasher state columns -------------------------------------------------------------
 
@@ -803,7 +800,7 @@ fn test_loop_node_repeat_decoding() {
 
     // HALT opcode and program hash gets propagated to the last row
     for i in 12..trace_len {
-        assert!(contains_op(&trace, i, OPCODE_HALT));
+        assert!(contains_op(&trace, i, opcodes::HALT));
         assert_eq!(ZERO, trace[OP_BITS_EXTRA_COLS_RANGE.start][i]);
         assert_eq!(ONE, trace[OP_BITS_EXTRA_COLS_RANGE.start + 1][i]);
         assert_eq!(program_hash, get_hasher_state1(&trace, i));
@@ -892,85 +889,85 @@ fn test_call_decoding() {
 
     let mut row_idx = 0;
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
-    check_op_decoding(&dec_trace, row_idx, ZERO, OPCODE_JOIN, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, ZERO, opcodes::JOIN, 0, 0, 0);
     row_idx += 1;
     // starting the internal JOIN block
     let inner_join_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
-    check_op_decoding(&dec_trace, row_idx, INIT_ADDR, OPCODE_JOIN, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, INIT_ADDR, opcodes::JOIN, 0, 0, 0);
     row_idx += 1;
     // starting first SPAN block
     let first_basic_block_addr = inner_join_addr + HASH_CYCLE_LEN_FELT;
-    check_op_decoding(&dec_trace, row_idx, inner_join_addr, OPCODE_SPAN, 4, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, inner_join_addr, opcodes::SPAN, 4, 0, 0);
     row_idx += 1;
     check_op_decoding_with_imm(&dec_trace, row_idx, first_basic_block_addr, ONE, 1, 3, 0, 1);
     row_idx += 1;
     check_op_decoding_with_imm(&dec_trace, row_idx, first_basic_block_addr, TWO, 2, 2, 1, 1);
     row_idx += 1;
-    check_op_decoding(&dec_trace, row_idx, first_basic_block_addr, Operation::Noop.op_code(), 1, 2, 1);
+    check_op_decoding(&dec_trace, row_idx, first_basic_block_addr, opcodes::NOOP, 1, 2, 1);
     row_idx += 1;
-    check_op_decoding(&dec_trace, row_idx, first_basic_block_addr, Operation::Noop.op_code(), 0, 0, 1);
+    check_op_decoding(&dec_trace, row_idx, first_basic_block_addr, opcodes::NOOP, 0, 0, 1);
     row_idx += 1;
-    check_op_decoding(&dec_trace, row_idx, first_basic_block_addr, OPCODE_END, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, first_basic_block_addr, opcodes::END, 0, 0, 0);
     row_idx += 1;
 
     // starting CALL block for bar
     let call_addr = first_basic_block_addr + HASH_CYCLE_LEN_FELT;
-    check_op_decoding(&dec_trace, row_idx, inner_join_addr, OPCODE_CALL, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, inner_join_addr, opcodes::CALL, 0, 0, 0);
     row_idx += 1;
     // starting JOIN block inside bar
     let bar_join_addr = call_addr + HASH_CYCLE_LEN_FELT;
-    check_op_decoding(&dec_trace, row_idx, call_addr, OPCODE_JOIN, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, call_addr, opcodes::JOIN, 0, 0, 0);
     row_idx += 1;
     // starting SPAN block inside bar
     let bar_basic_block_addr = bar_join_addr + HASH_CYCLE_LEN_FELT;
-    check_op_decoding(&dec_trace, row_idx, bar_join_addr, OPCODE_SPAN, 1, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, bar_join_addr, opcodes::SPAN, 1, 0, 0);
     row_idx += 1;
-    check_op_decoding(&dec_trace, row_idx, bar_basic_block_addr, Operation::Mul.op_code(), 0, 0, 1);
+    check_op_decoding(&dec_trace, row_idx, bar_basic_block_addr, opcodes::MUL, 0, 0, 1);
     row_idx += 1;
-    check_op_decoding(&dec_trace, row_idx, bar_basic_block_addr, OPCODE_END, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, bar_basic_block_addr, opcodes::END, 0, 0, 0);
     row_idx += 1;
 
     // starting CALL to foo
     let syscall_addr = bar_basic_block_addr + HASH_CYCLE_LEN_FELT;
-    check_op_decoding(&dec_trace, row_idx, bar_join_addr, OPCODE_CALL, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, bar_join_addr, opcodes::CALL, 0, 0, 0);
     row_idx += 1;
     // starting SPAN block within syscall
     let syscall_basic_block_addr = syscall_addr + HASH_CYCLE_LEN_FELT;
-    check_op_decoding(&dec_trace, row_idx, syscall_addr, OPCODE_SPAN, 1, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, syscall_addr, opcodes::SPAN, 1, 0, 0);
     row_idx += 1;
-    check_op_decoding(&dec_trace, row_idx, syscall_basic_block_addr, Operation::Add.op_code(), 0, 0, 1);
+    check_op_decoding(&dec_trace, row_idx, syscall_basic_block_addr, opcodes::ADD, 0, 0, 1);
     row_idx += 1;
-    check_op_decoding(&dec_trace, row_idx, syscall_basic_block_addr, OPCODE_END, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, syscall_basic_block_addr, opcodes::END, 0, 0, 0);
     row_idx += 1;
     // ending SYSCALL block
-    check_op_decoding(&dec_trace, row_idx, syscall_addr, OPCODE_END, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, syscall_addr, opcodes::END, 0, 0, 0);
     row_idx += 1;
 
     // ending CALL block
-    check_op_decoding(&dec_trace, row_idx, bar_join_addr, OPCODE_END, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, bar_join_addr, opcodes::END, 0, 0, 0);
     row_idx += 1;
-    check_op_decoding(&dec_trace, row_idx, call_addr, OPCODE_END, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, call_addr, opcodes::END, 0, 0, 0);
     row_idx += 1;
 
     // ending the inner JOIN block
-    check_op_decoding(&dec_trace, row_idx, inner_join_addr, OPCODE_END, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, inner_join_addr, opcodes::END, 0, 0, 0);
     row_idx += 1;
 
     // starting the last SPAN block
     let last_basic_block_addr = syscall_basic_block_addr + HASH_CYCLE_LEN_FELT;
-    check_op_decoding(&dec_trace, row_idx, INIT_ADDR, OPCODE_SPAN, 1, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, INIT_ADDR, opcodes::SPAN, 1, 0, 0);
     row_idx += 1;
-    check_op_decoding(&dec_trace, row_idx, last_basic_block_addr, Operation::Drop.op_code(), 0, 0, 1);
+    check_op_decoding(&dec_trace, row_idx, last_basic_block_addr, opcodes::DROP, 0, 0, 1);
     row_idx += 1;
-    check_op_decoding(&dec_trace, row_idx, last_basic_block_addr, Operation::Drop.op_code(), 0, 1, 1);
+    check_op_decoding(&dec_trace, row_idx, last_basic_block_addr, opcodes::DROP, 0, 1, 1);
     row_idx += 1;
-    check_op_decoding(&dec_trace, row_idx, last_basic_block_addr, OPCODE_END, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, last_basic_block_addr, opcodes::END, 0, 0, 0);
     row_idx += 1;
 
     // ending the program
-    check_op_decoding(&dec_trace, row_idx, INIT_ADDR, OPCODE_END, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, INIT_ADDR, opcodes::END, 0, 0, 0);
     row_idx += 1;
-    check_op_decoding(&dec_trace, row_idx, ZERO, OPCODE_HALT, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, ZERO, opcodes::HALT, 0, 0, 0);
 
     // --- check hasher state columns -------------------------------------------------------------
     // in the first row, the hasher state is set to hashes of (inner_join, last_span)
@@ -1042,7 +1039,7 @@ fn test_call_decoding() {
 
     // HALT opcode and program hash gets propagated to the last row
     for i in 26..trace_len {
-        assert!(contains_op(&dec_trace, i, OPCODE_HALT));
+        assert!(contains_op(&dec_trace, i, opcodes::HALT));
         assert_eq!(ZERO, dec_trace[OP_BITS_EXTRA_COLS_RANGE.start][i]);
         assert_eq!(ONE, dec_trace[OP_BITS_EXTRA_COLS_RANGE.start + 1][i]);
         assert_eq!(program_hash, get_hasher_state1(&dec_trace, i));
@@ -1194,85 +1191,85 @@ fn test_syscall_decoding() {
 
     let mut row_idx = 0;
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
-    check_op_decoding(&dec_trace, row_idx, ZERO, OPCODE_JOIN, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, ZERO, opcodes::JOIN, 0, 0, 0);
     row_idx += 1;
     // starting the internal JOIN block
     let inner_join_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
-    check_op_decoding(&dec_trace, row_idx, INIT_ADDR, OPCODE_JOIN, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, INIT_ADDR, opcodes::JOIN, 0, 0, 0);
     row_idx += 1;
     // starting first SPAN block
     let first_basic_block_addr = inner_join_addr + HASH_CYCLE_LEN_FELT;
-    check_op_decoding(&dec_trace, row_idx, inner_join_addr, OPCODE_SPAN, 4, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, inner_join_addr, opcodes::SPAN, 4, 0, 0);
     row_idx += 1;
     check_op_decoding_with_imm(&dec_trace, row_idx, first_basic_block_addr, ONE, 1, 3, 0, 1);
     row_idx += 1;
     check_op_decoding_with_imm(&dec_trace, row_idx, first_basic_block_addr, TWO, 2, 2, 1, 1);
     row_idx += 1;
-    check_op_decoding(&dec_trace, row_idx, first_basic_block_addr, Operation::Noop.op_code(), 1, 2, 1);
+    check_op_decoding(&dec_trace, row_idx, first_basic_block_addr, opcodes::NOOP, 1, 2, 1);
     row_idx += 1;
-    check_op_decoding(&dec_trace, row_idx, first_basic_block_addr, Operation::Noop.op_code(), 0, 0, 1);
+    check_op_decoding(&dec_trace, row_idx, first_basic_block_addr, opcodes::NOOP, 0, 0, 1);
     row_idx += 1;
-    check_op_decoding(&dec_trace, row_idx, first_basic_block_addr, OPCODE_END, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, first_basic_block_addr, opcodes::END, 0, 0, 0);
     row_idx += 1;
 
     // starting CALL block for bar
     let call_addr = first_basic_block_addr + HASH_CYCLE_LEN_FELT;
-    check_op_decoding(&dec_trace, row_idx, inner_join_addr, OPCODE_CALL, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, inner_join_addr, opcodes::CALL, 0, 0, 0);
     row_idx += 1;
     // starting JOIN block inside bar
     let bar_join_addr = call_addr + HASH_CYCLE_LEN_FELT;
-    check_op_decoding(&dec_trace, row_idx, call_addr, OPCODE_JOIN, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, call_addr, opcodes::JOIN, 0, 0, 0);
     row_idx += 1;
     // starting SPAN block inside bar
     let bar_basic_block_addr = bar_join_addr + HASH_CYCLE_LEN_FELT;
-    check_op_decoding(&dec_trace, row_idx, bar_join_addr, OPCODE_SPAN, 1, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, bar_join_addr, opcodes::SPAN, 1, 0, 0);
     row_idx += 1;
-    check_op_decoding(&dec_trace, row_idx, bar_basic_block_addr, Operation::Mul.op_code(), 0, 0, 1);
+    check_op_decoding(&dec_trace, row_idx, bar_basic_block_addr, opcodes::MUL, 0, 0, 1);
     row_idx += 1;
-    check_op_decoding(&dec_trace, row_idx, bar_basic_block_addr, OPCODE_END, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, bar_basic_block_addr, opcodes::END, 0, 0, 0);
     row_idx += 1;
 
     // starting SYSCALL block for bar
     let syscall_addr = bar_basic_block_addr + HASH_CYCLE_LEN_FELT;
-    check_op_decoding(&dec_trace, row_idx, bar_join_addr, OPCODE_SYSCALL, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, bar_join_addr, opcodes::SYSCALL, 0, 0, 0);
     row_idx += 1;
     // starting SPAN block within syscall
     let syscall_basic_block_addr = syscall_addr + HASH_CYCLE_LEN_FELT;
-    check_op_decoding(&dec_trace, row_idx, syscall_addr, OPCODE_SPAN, 1, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, syscall_addr, opcodes::SPAN, 1, 0, 0);
     row_idx += 1;
-    check_op_decoding(&dec_trace, row_idx, syscall_basic_block_addr, Operation::Add.op_code(), 0, 0, 1);
+    check_op_decoding(&dec_trace, row_idx, syscall_basic_block_addr, opcodes::ADD, 0, 0, 1);
     row_idx += 1;
-    check_op_decoding(&dec_trace, row_idx, syscall_basic_block_addr, OPCODE_END, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, syscall_basic_block_addr, opcodes::END, 0, 0, 0);
     row_idx += 1;
     // ending SYSCALL block
-    check_op_decoding(&dec_trace, row_idx, syscall_addr, OPCODE_END, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, syscall_addr, opcodes::END, 0, 0, 0);
     row_idx += 1;
 
     // ending CALL block
-    check_op_decoding(&dec_trace, row_idx, bar_join_addr, OPCODE_END, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, bar_join_addr, opcodes::END, 0, 0, 0);
     row_idx += 1;
-    check_op_decoding(&dec_trace, row_idx, call_addr, OPCODE_END, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, call_addr, opcodes::END, 0, 0, 0);
     row_idx += 1;
 
     // ending the inner JOIN block
-    check_op_decoding(&dec_trace, row_idx, inner_join_addr, OPCODE_END, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, inner_join_addr, opcodes::END, 0, 0, 0);
     row_idx += 1;
 
     // starting the last SPAN block
     let last_basic_block_addr = syscall_basic_block_addr + HASH_CYCLE_LEN_FELT;
-    check_op_decoding(&dec_trace, row_idx, INIT_ADDR, OPCODE_SPAN, 1, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, INIT_ADDR, opcodes::SPAN, 1, 0, 0);
     row_idx += 1;
-    check_op_decoding(&dec_trace, row_idx, last_basic_block_addr, Operation::Drop.op_code(), 0, 0, 1);
+    check_op_decoding(&dec_trace, row_idx, last_basic_block_addr, opcodes::DROP, 0, 0, 1);
     row_idx += 1;
-    check_op_decoding(&dec_trace, row_idx, last_basic_block_addr, Operation::Drop.op_code(), 0, 1, 1);
+    check_op_decoding(&dec_trace, row_idx, last_basic_block_addr, opcodes::DROP, 0, 1, 1);
     row_idx += 1;
-    check_op_decoding(&dec_trace, row_idx, last_basic_block_addr, OPCODE_END, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, last_basic_block_addr, opcodes::END, 0, 0, 0);
     row_idx += 1;
 
     // ending the program
-    check_op_decoding(&dec_trace, row_idx, INIT_ADDR, OPCODE_END, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, INIT_ADDR, opcodes::END, 0, 0, 0);
     row_idx += 1;
-    check_op_decoding(&dec_trace, row_idx, ZERO, OPCODE_HALT, 0, 0, 0);
+    check_op_decoding(&dec_trace, row_idx, ZERO, opcodes::HALT, 0, 0, 0);
 
     // --- check hasher state columns -------------------------------------------------------------
     // in the first row, the hasher state is set to hashes of (inner_join, last_span)
@@ -1344,7 +1341,7 @@ fn test_syscall_decoding() {
 
     // HALT opcode and program hash gets propagated to the last row
     for i in 26..trace_len {
-        assert!(contains_op(&dec_trace, i, OPCODE_HALT));
+        assert!(contains_op(&dec_trace, i, opcodes::HALT));
         assert_eq!(ZERO, dec_trace[OP_BITS_EXTRA_COLS_RANGE.start][i]);
         assert_eq!(ONE, dec_trace[OP_BITS_EXTRA_COLS_RANGE.start + 1][i]);
         assert_eq!(program_hash, get_hasher_state1(&dec_trace, i));
@@ -1466,36 +1463,36 @@ fn test_dyn_node_decoding() {
     );
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
-    check_op_decoding(&trace, 0, ZERO, OPCODE_JOIN, 0, 0, 0);
+    check_op_decoding(&trace, 0, ZERO, opcodes::JOIN, 0, 0, 0);
     // starting inner join
     let join_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
-    check_op_decoding(&trace, 1, INIT_ADDR, OPCODE_JOIN, 0, 0, 0);
+    check_op_decoding(&trace, 1, INIT_ADDR, opcodes::JOIN, 0, 0, 0);
     // starting first span
     let mstorew_basic_block_addr = join_addr + HASH_CYCLE_LEN_FELT;
-    check_op_decoding(&trace, 2, join_addr, OPCODE_SPAN, 1, 0, 0);
-    check_op_decoding(&trace, 3, mstorew_basic_block_addr, Operation::MStoreW.op_code(), 0, 0, 1);
-    check_op_decoding(&trace, 4, mstorew_basic_block_addr, OPCODE_END, 0, 0, 0);
+    check_op_decoding(&trace, 2, join_addr, opcodes::SPAN, 1, 0, 0);
+    check_op_decoding(&trace, 3, mstorew_basic_block_addr, opcodes::MSTOREW, 0, 0, 1);
+    check_op_decoding(&trace, 4, mstorew_basic_block_addr, opcodes::END, 0, 0, 0);
     // starting second span
     let push_basic_block_addr = mstorew_basic_block_addr + HASH_CYCLE_LEN_FELT;
-    check_op_decoding(&trace, 5, join_addr, OPCODE_SPAN, 2, 0, 0);
+    check_op_decoding(&trace, 5, join_addr, opcodes::SPAN, 2, 0, 0);
     check_op_decoding(&trace, 6, push_basic_block_addr, PUSH_40_OP.op_code(), 1, 0, 1);
-    check_op_decoding(&trace, 7, push_basic_block_addr, Operation::Noop.op_code(), 0, 1, 1);
-    check_op_decoding(&trace, 8, push_basic_block_addr, OPCODE_END, 0, 0, 0);
+    check_op_decoding(&trace, 7, push_basic_block_addr, opcodes::NOOP, 0, 1, 1);
+    check_op_decoding(&trace, 8, push_basic_block_addr, opcodes::END, 0, 0, 0);
     // end inner join
-    check_op_decoding(&trace, 9, join_addr, OPCODE_END, 0, 0, 0);
+    check_op_decoding(&trace, 9, join_addr, opcodes::END, 0, 0, 0);
     // dyn
-    check_op_decoding(&trace, 10, INIT_ADDR, OPCODE_DYN, 0, 0, 0);
+    check_op_decoding(&trace, 10, INIT_ADDR, opcodes::DYN, 0, 0, 0);
     // starting foo span
     let dyn_addr = push_basic_block_addr + HASH_CYCLE_LEN_FELT;
     let add_basic_block_addr = dyn_addr + HASH_CYCLE_LEN_FELT;
-    check_op_decoding(&trace, 11, dyn_addr, OPCODE_SPAN, 2, 0, 0);
+    check_op_decoding(&trace, 11, dyn_addr, opcodes::SPAN, 2, 0, 0);
     check_op_decoding_with_imm(&trace, 12, add_basic_block_addr, ONE, 1, 1, 0, 1);
-    check_op_decoding(&trace, 13, add_basic_block_addr, Operation::Add.op_code(), 0, 1, 1);
-    check_op_decoding(&trace, 14, add_basic_block_addr, OPCODE_END, 0, 0, 0);
+    check_op_decoding(&trace, 13, add_basic_block_addr, opcodes::ADD, 0, 1, 1);
+    check_op_decoding(&trace, 14, add_basic_block_addr, opcodes::END, 0, 0, 0);
     // end dyn
-    check_op_decoding(&trace, 15, dyn_addr, OPCODE_END, 0, 0, 0);
+    check_op_decoding(&trace, 15, dyn_addr, opcodes::END, 0, 0, 0);
     // end outer join
-    check_op_decoding(&trace, 16, INIT_ADDR, OPCODE_END, 0, 0, 0);
+    check_op_decoding(&trace, 16, INIT_ADDR, opcodes::END, 0, 0, 0);
 
     // --- check hasher state columns -------------------------------------------------------------
 
@@ -1541,7 +1538,7 @@ fn test_dyn_node_decoding() {
 
     // the HALT opcode and program hash get propagated to the last row
     for i in 17..trace_len {
-        assert!(contains_op(&trace, i, OPCODE_HALT));
+        assert!(contains_op(&trace, i, opcodes::HALT));
         assert_eq!(ZERO, trace[OP_BITS_EXTRA_COLS_RANGE.start][i]);
         assert_eq!(ONE, trace[OP_BITS_EXTRA_COLS_RANGE.start + 1][i]);
         assert_eq!(program_hash, get_hasher_state1(&trace, i));
@@ -1695,13 +1692,13 @@ fn check_op_decoding(
     );
     assert_eq!(trace[OP_INDEX_COL_IDX][row_idx], Felt::new(op_idx), "op index mismatch");
 
-    let expected_batch_flags = if expected_opcode == OPCODE_SPAN || expected_opcode == OPCODE_RESPAN
-    {
-        let num_groups = core::cmp::min(OP_BATCH_SIZE, group_count as usize);
-        build_op_batch_flags(num_groups)
-    } else {
-        [ZERO, ZERO, ZERO]
-    };
+    let expected_batch_flags =
+        if expected_opcode == opcodes::SPAN || expected_opcode == opcodes::RESPAN {
+            let num_groups = core::cmp::min(OP_BATCH_SIZE, group_count as usize);
+            build_op_batch_flags(num_groups)
+        } else {
+            [ZERO, ZERO, ZERO]
+        };
 
     for (i, flag_value) in OP_BATCH_FLAGS_RANGE.zip(expected_batch_flags) {
         assert_eq!(trace[i][row_idx], flag_value, "op batch flag mismatch at column {}", i);
@@ -1735,21 +1732,13 @@ fn check_op_decoding_with_imm(
     in_span: u64,
 ) {
     // first, check standard decoding expectations
-    check_op_decoding(
-        trace,
-        row_idx,
-        addr,
-        Operation::Push(imm).op_code(),
-        group_count,
-        op_idx,
-        in_span,
-    );
+    check_op_decoding(trace, row_idx, addr, opcodes::PUSH, group_count, op_idx, in_span);
 
     // then, ensure the immediate value is present in the hasher state of the most recent
     // SPAN/RESPAN row (immediates are absorbed into hasher state as separate groups)
     let mut basic_block_row = None;
     for r in (0..=row_idx).rev() {
-        if contains_op(trace, r, OPCODE_SPAN) || contains_op(trace, r, OPCODE_RESPAN) {
+        if contains_op(trace, r, opcodes::SPAN) || contains_op(trace, r, opcodes::RESPAN) {
             basic_block_row = Some(r);
             break;
         }

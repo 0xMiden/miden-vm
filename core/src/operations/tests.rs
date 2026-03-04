@@ -4,10 +4,7 @@ use proptest::prelude::*;
 
 use crate::{
     mast::arbitrary::op_non_control_strategy,
-    operations::{
-        OPCODE_CALL, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END, OPCODE_HALT, OPCODE_JOIN, OPCODE_LOOP,
-        OPCODE_REPEAT, OPCODE_RESPAN, OPCODE_SPAN, OPCODE_SPLIT, OPCODE_SYSCALL, Operation,
-    },
+    operations::{Operation, opcodes},
     serde::{Deserializable, DeserializationError, Serializable, SliceReader},
 };
 
@@ -21,18 +18,18 @@ enum OpKind {
 /// Strategy for control-flow opcodes (not representable as `Operation`).
 fn op_control_flow_opcode_strategy() -> impl Strategy<Value = u8> {
     prop_oneof![
-        Just(OPCODE_JOIN),
-        Just(OPCODE_SPLIT),
-        Just(OPCODE_LOOP),
-        Just(OPCODE_CALL),
-        Just(OPCODE_DYN),
-        Just(OPCODE_DYNCALL),
-        Just(OPCODE_SYSCALL),
-        Just(OPCODE_SPAN),
-        Just(OPCODE_END),
-        Just(OPCODE_REPEAT),
-        Just(OPCODE_RESPAN),
-        Just(OPCODE_HALT),
+        Just(opcodes::JOIN),
+        Just(opcodes::SPLIT),
+        Just(opcodes::LOOP),
+        Just(opcodes::CALL),
+        Just(opcodes::DYN),
+        Just(opcodes::DYNCALL),
+        Just(opcodes::SYSCALL),
+        Just(opcodes::SPAN),
+        Just(opcodes::END),
+        Just(opcodes::REPEAT),
+        Just(opcodes::RESPAN),
+        Just(opcodes::HALT),
     ]
 }
 
