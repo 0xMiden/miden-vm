@@ -8,6 +8,9 @@ permissions:
 
 on:
   pull_request:
+    branches:
+      - main
+      - next
     types: [opened, reopened, synchronize, labeled, unlabeled]
 
 jobs:
