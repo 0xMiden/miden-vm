@@ -61,11 +61,16 @@ impl<AB, const N: usize> MessageEncoder<AB, N>
 where
     AB: MidenAirBuilder,
 {
-    /// Builds a message encoder from the permutation challenges.
+    /// Builds a message encoder from challenge-like coefficients.
+    ///
+    /// The slice must contain at least `N + 1` elements: `[alpha, beta[0], .., beta[N-1]]`.
     #[inline]
-    pub fn from_challenges(challenges: &[AB::RandomVar]) -> Self {
-        let alpha = challenges[0].into();
-        let betas = core::array::from_fn(|i| challenges[i + 1].into());
+    pub fn from_challenges<C>(challenges: &[C]) -> Self
+    where
+        C: Clone + Into<AB::ExprEF>,
+    {
+        let alpha = challenges[0].clone().into();
+        let betas = core::array::from_fn(|i| challenges[i + 1].clone().into());
         Self { alpha, betas }
     }
 
