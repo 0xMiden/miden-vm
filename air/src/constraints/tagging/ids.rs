@@ -45,8 +45,13 @@ pub const TAG_STACK_CRYPTO_BASE: usize = TAG_STACK_OPS_BASE + TAG_STACK_OPS_COUN
 /// Number of stack crypto constraints in this group.
 pub const TAG_STACK_CRYPTO_COUNT: usize = 46;
 
+/// Base ID for the stack arith/u32 constraint group.
+pub const TAG_STACK_ARITH_BASE: usize = TAG_STACK_CRYPTO_BASE + TAG_STACK_CRYPTO_COUNT;
+/// Number of stack arith/u32 constraints in this group.
+pub const TAG_STACK_ARITH_COUNT: usize = 42;
+
 /// Base ID for the decoder constraint group.
-pub const TAG_DECODER_BASE: usize = TAG_STACK_CRYPTO_BASE + TAG_STACK_CRYPTO_COUNT;
+pub const TAG_DECODER_BASE: usize = TAG_STACK_ARITH_BASE + TAG_STACK_ARITH_COUNT;
 /// Number of decoder constraints in this group.
 pub const TAG_DECODER_COUNT: usize = 57;
 
@@ -77,8 +82,13 @@ pub const TAG_HASH_KERNEL_BUS_BASE: usize = TAG_DECODER_BUS_BASE + TAG_DECODER_B
 /// Number of hash-kernel bus constraints in this group.
 pub const TAG_HASH_KERNEL_BUS_COUNT: usize = 1;
 
+/// Base ID for the chiplets bus constraint.
+pub const TAG_CHIPLETS_BUS_BASE: usize = TAG_HASH_KERNEL_BUS_BASE + TAG_HASH_KERNEL_BUS_COUNT;
+/// Number of chiplets bus constraints in this group.
+pub const TAG_CHIPLETS_BUS_COUNT: usize = 1;
+
 /// Base ID for the wiring bus constraint.
-pub const TAG_WIRING_BUS_BASE: usize = TAG_HASH_KERNEL_BUS_BASE + TAG_HASH_KERNEL_BUS_COUNT;
+pub const TAG_WIRING_BUS_BASE: usize = TAG_CHIPLETS_BUS_BASE + TAG_CHIPLETS_BUS_COUNT;
 /// Number of wiring bus constraints in this group.
 #[cfg(all(test, feature = "std"))]
 pub const TAG_WIRING_BUS_COUNT: usize = 1;
