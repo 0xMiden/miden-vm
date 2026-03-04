@@ -52,7 +52,7 @@ pub const P_BITWISE_K_FIRST: usize = HASHER_NUM_PERIODIC_COLUMNS;
 pub const P_BITWISE_K_TRANSITION: usize = HASHER_NUM_PERIODIC_COLUMNS + 1;
 
 /// Total number of periodic columns (hasher + bitwise periodic columns).
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 pub const NUM_PERIODIC_COLUMNS: usize = HASHER_NUM_PERIODIC_COLUMNS + 2;
 
 /// Number of bits processed per row.
