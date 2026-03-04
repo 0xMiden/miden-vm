@@ -37,6 +37,8 @@ jobs:
           - operation_deserialize
           - execution_proof_deserialize
           - precompile_request_deserialize
+          - library_deserialize
+          - package_deserialize
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4

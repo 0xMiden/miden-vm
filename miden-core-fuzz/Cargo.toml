@@ -18,6 +18,14 @@ libfuzzer-sys = "0.4"
 path = "../core"
 features = ["std"]
 
+[dependencies.miden-assembly-syntax]
+path = "../crates/assembly-syntax"
+features = ["std"]
+
+[dependencies.miden-mast-package]
+path = "../crates/mast-package"
+features = ["std"]
+
 # Fuzz targets - each is a separate binary
 [[bin]]
 name = "mast_forest_deserialize"
@@ -99,6 +107,20 @@ bench = false
 [[bin]]
 name = "precompile_request_deserialize"
 path = "fuzz_targets/precompile_request_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "library_deserialize"
+path = "fuzz_targets/library_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "package_deserialize"
+path = "fuzz_targets/package_deserialize.rs"
 test = false
 doc = false
 bench = false

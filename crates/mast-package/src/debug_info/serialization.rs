@@ -519,7 +519,10 @@ mod tests {
 
     impl<'a> FixedBudgetReader<'a> {
         fn new(bytes: &'a [u8], max_bytes: usize) -> Self {
-            Self { inner: miden_core::serde::SliceReader::new(bytes), max_bytes }
+            Self {
+                inner: miden_core::serde::SliceReader::new(bytes),
+                max_bytes,
+            }
         }
     }
 
@@ -552,7 +555,7 @@ mod tests {
             if element_size == 0 {
                 usize::MAX
             } else {
-                self.max_bytes / element_size
+                self.max_bytes.checked_div(element_size).unwrap_or(0)
             }
         }
     }
