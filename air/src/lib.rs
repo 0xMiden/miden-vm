@@ -173,6 +173,15 @@ where
         trace::AUX_TRACE_RAND_ELEMENTS
     }
 
+    fn periodic_table(&self) -> Vec<Vec<Felt>> {
+        let mut cols = constraints::chiplets::hasher::periodic_columns();
+        let [k_first, k_transition] = constraints::chiplets::bitwise::periodic_columns();
+
+        cols.push(k_first);
+        cols.push(k_transition);
+        cols
+    }
+
     fn build_aux_trace(
         &self,
         main: &RowMajorMatrix<Felt>,
