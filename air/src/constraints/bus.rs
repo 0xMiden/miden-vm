@@ -72,7 +72,7 @@ where
     /// Encodes as **alpha + <beta, message>** with K consecutive elements.
     #[inline]
     pub fn encode_dense<const K: usize>(&self, elems: [AB::Expr; K]) -> AB::ExprEF {
-        debug_assert!(K <= N, "Message length {} exceeds beta_powers capacity ({})", K, N);
+        const { assert!(K <= N, "Message length exceeds beta_powers capacity") };
         let mut acc = self.alpha.clone();
         for (i, elem) in elems.iter().enumerate() {
             acc += self.beta_powers[i].clone() * elem.clone();
