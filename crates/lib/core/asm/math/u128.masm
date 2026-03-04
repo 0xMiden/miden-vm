@@ -1416,3 +1416,160 @@ pub proc rotr(n: u32, a: u128) -> u128
         movdn.3                     # [c0, c1, c2, c3, ...]
     end
 end
+
+# ===== DIVISION =================================================================================
+
+const U128_DIV_EVENT = event("miden::core::math::u128::u128_div")
+
+#! Performs division of two unsigned 128 bit integers discarding the remainder.
+#!
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition is as follows:
+#! [b0, b1, b2, b3, a0, a1, a2, a3, ...] -> [q0, q1, q2, q3, ...], where q = a / b
+#!
+#! Traps on divide by zero.
+pub proc div(b: u128, a: u128) -> u128
+    exec.divmod
+    # divmod returns [r0..r3, q0..q3, ...]; drop r (top word), keep q
+    dropw
+end
+
+#! Performs modulo operation of two unsigned 128 bit integers.
+#!
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition is as follows:
+#! [b0, b1, b2, b3, a0, a1, a2, a3, ...] -> [r0, r1, r2, r3, ...], where r = a % b
+#!
+#! Traps on divide by zero.
+pub proc mod(b: u128, a: u128) -> u128
+    exec.divmod
+    # divmod returns [r0..r3, q0..q3, ...]; swap q to top, drop q, keep r
+    swapw dropw
+end
+
+#! Performs divmod operation of two unsigned 128 bit integers.
+#!
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition is as follows:
+#! [b0, b1, b2, b3, a0, a1, a2, a3, ...] -> [r0, r1, r2, r3, q0, q1, q2, q3, ...]
+#! where q = a / b, r = a % b.
+#!
+#! Traps on divide by zero.
+#!
+#! Uses procedure locals to store intermediate values (Approach B).
+#! Verification: a = q * b + r, with q * b fitting in u128, and r < b.
+@locals(20)
+pub proc divmod(b: u128, a: u128) -> (remainder: u128, quotient: u128)
+    # Input:  [b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    # Output: [r0, r1, r2, r3, q0, q1, q2, q3, ...]
+
+    emit.U128_DIV_EVENT
+    # Advice stack now has: [q0, q1, q2, q3, r0, r1, r2, r3]
+
+    # ---- Save a to locals 0..3 ----
+    # a is at positions 4-7: [b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    movup.7 movup.7 movup.7 movup.7
+    # => [a0, a1, a2, a3, b0, b1, b2, b3, ...]
+    loc_storew_le.0
+    # => [a0, a1, a2, a3, b0, b1, b2, b3, ...]
+    dropw
+    # => [b0, b1, b2, b3, ...]
+
+    # ---- Save b to locals 4..7 ----
+    loc_storew_le.4
+    # => [b0, b1, b2, b3, ...]
+
+    # ---- Get q from advice ----
+    padw adv_loadw
+    # => [q0, q1, q2, q3, b0, b1, b2, b3, ...]
+    u32assert2
+    movup.3 movup.3
+    u32assert2
+    movup.3 movup.3
+
+    # ---- Save q to locals 8..11 ----
+    loc_storew_le.8
+    # => [q0, q1, q2, q3, b0, b1, b2, b3, ...]
+
+    # ---- Verify q * b fits in u128 ----
+    # [q0, q1, q2, q3, b0, b1, b2, b3, ...] — mul is commutative, no swap needed
+    exec.overflowing_mul
+    # => [overflow, prod0, prod1, prod2, prod3, ...]
+
+    # Verify no overflow
+    assertz.err="u128 divmod: q*b overflow"
+    # => [prod0, prod1, prod2, prod3, ...]
+
+    # ---- Save prod to locals 12..15 ----
+    loc_storew_le.12
+    # => [prod0, prod1, prod2, prod3, ...]
+    dropw
+    # => [...]
+
+    # ---- Get r from advice ----
+    padw adv_loadw
+    # => [r0, r1, r2, r3, ...]
+    u32assert2
+    movup.3 movup.3
+    u32assert2
+    movup.3 movup.3
+
+    # ---- Save r to locals 16..19 ----
+    loc_storew_le.16
+    # => [r0, r1, r2, r3, ...]
+
+    # ---- Verify r < b ----
+    # lt expects: [b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    # and checks a < b. Here we want r < b, so a=r, b=b.
+    # Need: [b0..b3, r0..r3] on stack
+    # Currently: [r0, r1, r2, r3, ...]
+    # Load b from locals 4..7
+    padw loc_loadw_le.4
+    # => [b0, b1, b2, b3, r0, r1, r2, r3, ...]
+
+    # lt checks a < b where stack is [b0..b3, a0..a3].
+    # a = r (positions 4-7), b = b (positions 0-3). This is correct.
+    exec.lt
+    # => [result, ...]
+    assert.err="u128 divmod: remainder >= divisor"
+    # => [...]
+
+    # ---- Verify prod + r = a ----
+    # Load prod from locals 12..15
+    padw loc_loadw_le.12
+    # => [prod0, prod1, prod2, prod3, ...]
+
+    # Load r from locals 16..19
+    padw loc_loadw_le.16
+    # => [r0, r1, r2, r3, prod0, prod1, prod2, prod3, ...]
+
+    # overflowing_add expects: [b0..b3, a0..a3] and computes a + b
+    # We want prod + r. a = prod, b = r.
+    # Stack: [r0..r3, prod0..prod3] which is [b0..b3, a0..a3]. Good.
+    exec.overflowing_add
+    # => [carry, sum0, sum1, sum2, sum3, ...]
+
+    # Verify no carry (prod + r must fit in u128; since prod = q*b and r < b, sum = a < 2^128)
+    assertz.err="u128 divmod: prod+r overflow"
+    # => [sum0, sum1, sum2, sum3, ...]
+
+    # Load a from locals 0..3 and verify equality
+    padw loc_loadw_le.0
+    # => [a0, a1, a2, a3, sum0, sum1, sum2, sum3, ...]
+
+    # Check a == sum limb by limb
+    movup.4 assert_eq.err="u128 divmod: identity check limb 0"
+    # => [a1, a2, a3, sum1, sum2, sum3, ...]
+    movup.3 assert_eq.err="u128 divmod: identity check limb 1"
+    # => [a2, a3, sum2, sum3, ...]
+    movup.2 assert_eq.err="u128 divmod: identity check limb 2"
+    # => [a3, sum3, ...]
+    assert_eq.err="u128 divmod: identity check limb 3"
+    # => [...]
+
+    # ---- Build output: [r0..r3, q0..q3] ----
+    padw loc_loadw_le.8
+    # => [q0, q1, q2, q3, ...]
+    padw loc_loadw_le.16
+    # => [r0, r1, r2, r3, q0, q1, q2, q3, ...]
+end
