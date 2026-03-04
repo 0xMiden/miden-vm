@@ -137,6 +137,10 @@ fn unpack_indptr_deltas(packed: &[u8; 4]) -> Result<[usize; 9], DeserializationE
 // BASIC BLOCK DATA DECODER
 // ================================================================================================
 
+const INDPTR_BYTES_PER_BATCH: usize = 4;
+const PADDING_BYTES_PER_BATCH: usize = 1;
+const BATCH_METADATA_BYTES_PER_BATCH: usize = INDPTR_BYTES_PER_BATCH + PADDING_BYTES_PER_BATCH;
+
 pub struct BasicBlockDataDecoder<'a> {
     node_data: &'a [u8],
 }
@@ -178,7 +182,7 @@ impl BasicBlockDataDecoder<'_> {
         // Read batch count
         let num_batches: u32 = ops_data_reader.read()?;
         let num_batches = num_batches as usize;
-        let max_batches = ops_data_reader.max_alloc(5);
+        let max_batches = ops_data_reader.max_alloc(BATCH_METADATA_BYTES_PER_BATCH);
         if num_batches > max_batches {
             return Err(DeserializationError::InvalidValue(format!(
                 "batch count {} exceeds remaining data capacity {}",
@@ -313,6 +317,43 @@ mod tests {
         let operations: Vec<Operation> = Vec::new();
         operations.write_into(&mut bytes);
         bytes.write_u32(u32::MAX);
+
+        let decoder = BasicBlockDataDecoder::new(&bytes);
+        let err = decoder.decode_operations(0).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("batch count"));
+    }
+
+    #[test]
+    fn decode_operations_allows_exact_batch_budget() {
+        let mut bytes = Vec::new();
+        let operations: Vec<Operation> = Vec::new();
+        operations.write_into(&mut bytes);
+
+        bytes.write_u32(2);
+        for _ in 0..2 {
+            bytes.write_bytes(&[0u8; INDPTR_BYTES_PER_BATCH]);
+        }
+        for _ in 0..2 {
+            bytes.write_u8(0);
+        }
+
+        let decoder = BasicBlockDataDecoder::new(&bytes);
+        let op_batches = decoder.decode_operations(0).unwrap();
+        assert_eq!(op_batches.len(), 2);
+    }
+
+    #[test]
+    fn decode_operations_rejects_over_budget_with_ops_consumed() {
+        let mut bytes = Vec::new();
+        let operations: Vec<Operation> = vec![Operation::Noop];
+        operations.write_into(&mut bytes);
+
+        bytes.write_u32(2);
+        bytes.write_bytes(&[0u8; INDPTR_BYTES_PER_BATCH]);
+        bytes.write_u8(0);
 
         let decoder = BasicBlockDataDecoder::new(&bytes);
         let err = decoder.decode_operations(0).unwrap_err();
