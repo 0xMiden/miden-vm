@@ -146,6 +146,8 @@ impl<EF: Field, T: Into<Self>> Add<T> for SymExpr<EF> {
     fn add(self, rhs: T) -> Self {
         match (self, rhs.into()) {
             (Self::Constant(a), Self::Constant(b)) => Self::Constant(a + b),
+            (Self::Constant(z), rhs) if z == EF::ZERO => rhs,
+            (lhs, Self::Constant(z)) if z == EF::ZERO => lhs,
             (lhs, rhs) => Self::Add(Arc::new(lhs), Arc::new(rhs)),
         }
     }
@@ -171,6 +173,7 @@ impl<EF: Field, T: Into<Self>> Sub<T> for SymExpr<EF> {
     fn sub(self, rhs: T) -> Self {
         match (self, rhs.into()) {
             (Self::Constant(a), Self::Constant(b)) => Self::Constant(a - b),
+            (lhs, Self::Constant(z)) if z == EF::ZERO => lhs,
             (lhs, rhs) => Self::Sub(Arc::new(lhs), Arc::new(rhs)),
         }
     }
@@ -190,6 +193,7 @@ impl<EF: Field> Neg for SymExpr<EF> {
     fn neg(self) -> Self {
         match self {
             Self::Constant(c) => Self::Constant(-c),
+            Self::Neg(inner) => Arc::unwrap_or_clone(inner),
             expr => Self::Neg(Arc::new(expr)),
         }
     }
@@ -203,6 +207,11 @@ impl<EF: Field, T: Into<Self>> Mul<T> for SymExpr<EF> {
     fn mul(self, rhs: T) -> Self {
         match (self, rhs.into()) {
             (Self::Constant(a), Self::Constant(b)) => Self::Constant(a * b),
+            (Self::Constant(z), _) | (_, Self::Constant(z)) if z == EF::ZERO => {
+                Self::Constant(EF::ZERO)
+            },
+            (Self::Constant(o), rhs) if o == EF::ONE => rhs,
+            (lhs, Self::Constant(o)) if o == EF::ONE => lhs,
             (lhs, rhs) => Self::Mul(Arc::new(lhs), Arc::new(rhs)),
         }
     }

@@ -65,15 +65,12 @@ where
             })
             .collect();
         let aux = RowMajorMatrix::new(aux_values, aux_width);
-        let aux_randomness = (0..num_randomness)
-            .map(|index| SymVar::new(Entry::Challenge, index))
-            .collect();
-        let aux_bus_boundary_values = (0..aux_width)
-            .map(|index| SymVar::new(Entry::AuxBusBoundary, index))
-            .collect();
-        let public_values = (0..num_public_values)
-            .map(|index| SymVar::new(Entry::Public, index))
-            .collect();
+        let aux_randomness =
+            (0..num_randomness).map(|index| SymVar::new(Entry::Challenge, index)).collect();
+        let aux_bus_boundary_values =
+            (0..aux_width).map(|index| SymVar::new(Entry::AuxBusBoundary, index)).collect();
+        let public_values =
+            (0..num_public_values).map(|index| SymVar::new(Entry::Public, index)).collect();
         let periodic_values = (0..num_periodic_values)
             .map(|index| SymVar::new(Entry::Periodic, index))
             .collect();
