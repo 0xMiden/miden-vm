@@ -120,12 +120,12 @@ fn processor_air_eval_circuit_masm() {
 
     // Place the circuit in memory at a fixed address.
     let pointer = 1 << 16;
-    let num_read = encoded.num_vars();
+    let num_vars = encoded.num_vars();
     let num_eval = encoded.num_eval_rows();
     let source = format!(
         "
     const NUM_ADV_PIPE = {num_adv_pipe}
-    const NUM_READ = {num_read}
+    const NUM_VARS = {num_vars}
     const NUM_EVAL = {num_eval}
 
     begin
@@ -136,7 +136,7 @@ fn processor_air_eval_circuit_masm() {
             adv_pipe
         end
 
-        push.NUM_EVAL push.NUM_READ push.{pointer}
+        push.NUM_EVAL push.NUM_VARS push.{pointer}
         eval_circuit
 
         drop drop drop
@@ -190,7 +190,7 @@ fn find_nonzero_quotient_slope(
     // Search for a quotient coordinate that has a non-zero influence on the output.
     // We do this by bumping a coordinate by +1 and re-evaluating to get the slope.
     for chunk in 0..layout.counts.num_quotient_chunks {
-        for coord in 0..layout.counts.ext_degree {
+        for coord in 0..miden_ace_codegen::EXT_DEGREE {
             let idx = layout
                 .index(InputKey::QuotientChunkCoord { offset: 0, chunk, coord })
                 .expect("quotient coord exists");

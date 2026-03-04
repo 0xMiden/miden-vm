@@ -4,12 +4,12 @@
 //! chunks. They are intentionally centralized to keep DAG lowering and tests
 //! aligned.
 
-use core::hash::Hash;
+use p3_field::{ExtensionField, Field};
 
-use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
-
+#[cfg(test)]
+use crate::AceError;
 use crate::{
-    AceError,
+    EXT_DEGREE,
     dag::{DagBuilder, NodeId},
     layout::{InputKey, InputLayout},
 };
@@ -18,17 +18,21 @@ use crate::{
 #[cfg(test)]
 pub fn eval_quotient<F, EF>(layout: &InputLayout, inputs: &[EF]) -> Result<EF, AceError>
 where
-    F: PrimeCharacteristicRing,
-    EF: PrimeCharacteristicRing + BasedVectorSpace<F> + Copy,
+    F: Field,
+    EF: ExtensionField<F>,
 {
-    ensure_input_len(layout, inputs)?;
+    if inputs.len() != layout.total_inputs {
+        return Err(AceError::InvalidInputLength {
+            expected: layout.total_inputs,
+            got: inputs.len(),
+        });
+    }
 
     let k = layout.counts.num_quotient_chunks;
-    let d = layout.counts.ext_degree;
-    let z_pow_n = input_value(layout, inputs, InputKey::ZPowN)?;
-    let s0 = input_value(layout, inputs, InputKey::S0)?;
-    let g = input_value(layout, inputs, InputKey::G)?;
-    let weight0 = input_value(layout, inputs, InputKey::Weight0)?;
+    let z_pow_n = inputs[layout.index(InputKey::ZPowN).expect("ZPowN in layout")];
+    let s0 = inputs[layout.index(InputKey::S0).expect("S0 in layout")];
+    let g = inputs[layout.index(InputKey::G).expect("G in layout")];
+    let weight0 = inputs[layout.index(InputKey::Weight0).expect("Weight0 in layout")];
 
     let (deltas, weights) = {
         let mut ops = FieldOps;
@@ -38,13 +42,11 @@ where
     let mut chunk_values = Vec::with_capacity(k);
     for chunk in 0..k {
         let mut value = EF::ZERO;
-        for coord in 0..d {
-            let basis = EF::ith_basis_element(coord).ok_or(AceError::InvalidBasisIndex(coord))?;
-            let coord_value = input_value(
-                layout,
-                inputs,
-                InputKey::QuotientChunkCoord { offset: 0, chunk, coord },
-            )?;
+        for coord in 0..EXT_DEGREE {
+            let basis = EF::ith_basis_element(coord).expect("basis index within extension degree");
+            let coord_value = inputs[layout
+                .index(InputKey::QuotientChunkCoord { offset: 0, chunk, coord })
+                .expect("quotient chunk coord in layout")];
             value += basis * coord_value;
         }
         chunk_values.push(value);
@@ -69,21 +71,22 @@ where
 #[cfg(test)]
 pub fn zps_for_chunk<EF>(layout: &InputLayout, inputs: &[EF], chunk: usize) -> Result<EF, AceError>
 where
-    EF: PrimeCharacteristicRing + Copy,
+    EF: Field,
 {
-    ensure_input_len(layout, inputs)?;
-
-    let k = layout.counts.num_quotient_chunks;
-    if chunk >= k {
-        return Err(AceError::InvalidInputLayout {
-            message: format!("quotient chunk {chunk} out of range"),
+    if inputs.len() != layout.total_inputs {
+        return Err(AceError::InvalidInputLength {
+            expected: layout.total_inputs,
+            got: inputs.len(),
         });
     }
 
-    let z_pow_n = input_value(layout, inputs, InputKey::ZPowN)?;
-    let s0 = input_value(layout, inputs, InputKey::S0)?;
-    let g = input_value(layout, inputs, InputKey::G)?;
-    let weight0 = input_value(layout, inputs, InputKey::Weight0)?;
+    let k = layout.counts.num_quotient_chunks;
+    assert!(chunk < k, "quotient chunk {chunk} out of range (k={k})");
+
+    let z_pow_n = inputs[layout.index(InputKey::ZPowN).expect("ZPowN in layout")];
+    let s0 = inputs[layout.index(InputKey::S0).expect("S0 in layout")];
+    let g = inputs[layout.index(InputKey::G).expect("G in layout")];
+    let weight0 = inputs[layout.index(InputKey::Weight0).expect("Weight0 in layout")];
 
     let (deltas, weights) = {
         let mut ops = FieldOps;
@@ -104,13 +107,12 @@ where
 pub(crate) fn build_quotient_recomposition_dag<F, EF>(
     builder: &mut DagBuilder<EF>,
     layout: &InputLayout,
-) -> Result<NodeId, AceError>
+) -> NodeId
 where
-    F: PrimeCharacteristicRing,
-    EF: PrimeCharacteristicRing + BasedVectorSpace<F> + Copy + Eq + Hash,
+    F: Field,
+    EF: ExtensionField<F> + Eq + std::hash::Hash,
 {
     let k = layout.counts.num_quotient_chunks;
-    let d = layout.counts.ext_degree;
     let z_pow_n = builder.input(InputKey::ZPowN);
     let s0 = builder.input(InputKey::S0);
     let g = builder.input(InputKey::G);
@@ -124,8 +126,8 @@ where
     let mut chunk_values = Vec::with_capacity(k);
     for chunk in 0..k {
         let mut value = builder.constant(EF::ZERO);
-        for coord in 0..d {
-            let basis = EF::ith_basis_element(coord).ok_or(AceError::InvalidBasisIndex(coord))?;
+        for coord in 0..EXT_DEGREE {
+            let basis = EF::ith_basis_element(coord).expect("basis index within extension degree");
             let coord_node =
                 builder.input(InputKey::QuotientChunkCoord { offset: 0, chunk, coord });
             let basis_node = builder.constant(basis);
@@ -148,35 +150,7 @@ where
         quotient = builder.add(quotient, term);
     }
 
-    Ok(quotient)
-}
-
-#[cfg(test)]
-fn ensure_input_len<EF>(layout: &InputLayout, inputs: &[EF]) -> Result<(), AceError> {
-    if inputs.len() != layout.total_inputs {
-        return Err(AceError::InvalidInputLength {
-            expected: layout.total_inputs,
-            got: inputs.len(),
-        });
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-fn input_value<EF>(layout: &InputLayout, inputs: &[EF], key: InputKey) -> Result<EF, AceError>
-where
-    EF: Copy,
-{
-    let idx = layout.index(key).ok_or(AceError::InvalidInputKey(key))?;
-    inputs.get(idx).copied().ok_or(AceError::InvalidInputLength {
-        expected: layout.total_inputs,
-        got: inputs.len(),
-    })
-}
-
-trait Ops<T> {
-    fn sub(&mut self, a: T, b: T) -> T;
-    fn mul(&mut self, a: T, b: T) -> T;
+    quotient
 }
 
 #[cfg(test)]
@@ -185,7 +159,7 @@ struct FieldOps;
 #[cfg(test)]
 impl<EF> Ops<EF> for FieldOps
 where
-    EF: PrimeCharacteristicRing + Copy,
+    EF: Field,
 {
     fn sub(&mut self, a: EF, b: EF) -> EF {
         a - b
@@ -202,7 +176,7 @@ struct DagOps<'a, EF> {
 
 impl<'a, EF> Ops<NodeId> for DagOps<'a, EF>
 where
-    EF: PrimeCharacteristicRing + Copy + Eq + Hash,
+    EF: Field + Eq + std::hash::Hash,
 {
     fn sub(&mut self, a: NodeId, b: NodeId) -> NodeId {
         self.builder.sub(a, b)
@@ -211,6 +185,11 @@ where
     fn mul(&mut self, a: NodeId, b: NodeId) -> NodeId {
         self.builder.mul(a, b)
     }
+}
+
+trait Ops<T> {
+    fn sub(&mut self, a: T, b: T) -> T;
+    fn mul(&mut self, a: T, b: T) -> T;
 }
 
 fn compute_deltas_and_weights<T>(

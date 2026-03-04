@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use p3_field::PrimeCharacteristicRing;
+use p3_field::Field;
 
 use super::ir::{NodeId, NodeKind};
 use crate::layout::InputKey;
@@ -17,7 +17,7 @@ pub struct DagBuilder<EF> {
 
 impl<EF> DagBuilder<EF>
 where
-    EF: PrimeCharacteristicRing + Copy + Eq + std::hash::Hash,
+    EF: Field + Eq + std::hash::Hash,
 {
     /// Create an empty, hash-consed DAG builder.
     pub fn new() -> Self {
@@ -119,7 +119,7 @@ where
 
 impl<EF> Default for DagBuilder<EF>
 where
-    EF: PrimeCharacteristicRing + Copy + Eq + std::hash::Hash,
+    EF: Field + Eq + std::hash::Hash,
 {
     fn default() -> Self {
         Self::new()

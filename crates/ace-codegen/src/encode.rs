@@ -10,7 +10,7 @@
 //! (base-field), then pads to an `adv_pipe` block boundary.
 
 use miden_core::{Felt, Word, crypto::hash::Poseidon2};
-use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
+use p3_field::BasedVectorSpace;
 
 use crate::{
     AceError,
@@ -20,10 +20,8 @@ use crate::{
 // NOTE: `num_vars`/`num_const_nodes` count extension-field (EF) nodes, while the
 // instruction stream (`instructions.len()`) is measured in base field elements.
 
-/// ACE chiplet expects quadratic extension elements.
-const EXPECTED_EXTENSION_DEGREE: usize = 2;
 /// Number of base field elements per extension field element.
-const BASE_FELTS_PER_EF: usize = EXPECTED_EXTENSION_DEGREE;
+const BASE_FELTS_PER_EF: usize = crate::EXT_DEGREE;
 /// Number of EF nodes read per ACE READ row (two EF per row).
 const ACE_READ_ROW_EF_NODES: usize = 2;
 /// Constants are padded to an even number of EF nodes (full READ rows).
@@ -68,7 +66,7 @@ impl EncodedCircuit {
 
     /// Number of constants encoded into the circuit stream, counted in EF nodes.
     pub fn num_constants(&self) -> usize {
-        (self.instructions.len() - self.num_ops) / ACE_READ_ROW_EF_NODES
+        (self.instructions.len() - self.num_ops) / BASE_FELTS_PER_EF
     }
 
     /// Total number of nodes (inputs + constants + ops).
@@ -94,18 +92,12 @@ impl EncodedCircuit {
 
 impl<EF> AceCircuit<EF>
 where
-    EF: PrimeCharacteristicRing + BasedVectorSpace<Felt> + Copy + Eq + std::hash::Hash,
+    EF: BasedVectorSpace<Felt> + Copy + Eq + std::hash::Hash,
 {
     /// Encode the circuit into the ACE chiplet format.
     pub fn to_ace(&self) -> Result<EncodedCircuit, AceError> {
         const MAX_NODE_ID: u64 = (1 << 30) - 1;
 
-        if EF::DIMENSION != EXPECTED_EXTENSION_DEGREE {
-            return Err(AceError::InvalidExtensionDegree {
-                expected: EXPECTED_EXTENSION_DEGREE,
-                got: EF::DIMENSION,
-            });
-        }
         if !self.layout.total_inputs.is_multiple_of(ACE_READ_ROW_EF_NODES) {
             return Err(AceError::InvalidInputLayout {
                 message: "ACE READ layout must be aligned to two EF nodes (use LayoutKind::Masm or pad inputs)"

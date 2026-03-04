@@ -1,5 +1,5 @@
 use super::InputKey;
-use crate::{AceError, randomness::RandomnessPlan};
+use crate::EXT_DEGREE;
 
 /// A contiguous region of inputs within the ACE READ layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,18 +26,12 @@ pub struct InputCounts {
     pub num_public: usize,
     /// Number of randomness challenges used by the AIR.
     pub num_randomness: usize,
-    /// Number of randomness values supplied as inputs.
-    ///
-    /// Use `num_randomness` for direct randomness, or `2` for alpha/beta seeds.
-    pub num_randomness_inputs: usize,
     /// Number of periodic columns.
     pub num_periodic: usize,
     /// Number of auxiliary (stark var) inputs reserved.
     pub num_aux_inputs: usize,
     /// Number of quotient chunks.
     pub num_quotient_chunks: usize,
-    /// Extension field degree.
-    pub ext_degree: usize,
 }
 
 /// Grouped regions for the ACE input layout.
@@ -45,7 +39,7 @@ pub struct InputCounts {
 pub(crate) struct LayoutRegions {
     /// Region containing fixed-length public values.
     pub public_values: InputRegion,
-    /// Region containing randomness inputs (alpha/beta or expanded).
+    /// Region containing randomness inputs (alpha, beta).
     pub randomness: InputRegion,
     /// Main trace OOD values at `zeta`.
     pub main_curr: InputRegion,
@@ -68,8 +62,6 @@ pub(crate) struct LayoutRegions {
 /// Indexes of canonical verifier scalars inside the stark-vars block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct StarkVarIndices {
-    /// Width of the base-field portion of the stark-vars block.
-    pub base_width: usize,
     /// Index of `zeta` in the stark-vars block.
     pub z: usize,
     /// Index of the composition challenge `alpha`.
@@ -104,10 +96,10 @@ pub(crate) struct StarkVarIndices {
 pub struct InputLayout {
     /// Grouped regions for the ACE input layout.
     pub(crate) regions: LayoutRegions,
-    /// Input index for aux randomness alpha (if provided directly).
-    pub(crate) aux_rand_alpha: Option<usize>,
-    /// Input index for aux randomness beta (if provided directly).
-    pub(crate) aux_rand_beta: Option<usize>,
+    /// Input index for aux randomness alpha.
+    pub(crate) aux_rand_alpha: usize,
+    /// Input index for aux randomness beta.
+    pub(crate) aux_rand_beta: usize,
     /// Indexes into the stark-vars region.
     pub(crate) stark: StarkVarIndices,
     /// Total number of inputs (length of the READ section).
@@ -127,7 +119,7 @@ impl InputLayout {
     }
 
     /// Validate internal invariants for this layout (region sizes, key ranges, randomness inputs).
-    pub(crate) fn validate(&self) -> Result<(), AceError> {
+    pub(crate) fn validate(&self) {
         let mut max_end = 0usize;
         for region in [
             self.regions.public_values,
@@ -144,43 +136,25 @@ impl InputLayout {
             max_end = max_end.max(region.offset.saturating_add(region.width));
         }
 
-        if max_end > self.total_inputs {
-            return Err(AceError::InvalidInputLayout {
-                message: "regions exceed total_inputs".to_string(),
-            });
-        }
+        assert!(max_end <= self.total_inputs, "regions exceed total_inputs");
 
-        let aux_coord_width =
-            self.counts.aux_width.checked_mul(self.counts.ext_degree).ok_or_else(|| {
-                AceError::InvalidInputLayout {
-                    message: "aux_coord_width overflow".to_string(),
-                }
-            })?;
-        if self.regions.aux_curr.width != aux_coord_width
-            || self.regions.aux_next.width != aux_coord_width
-        {
-            return Err(AceError::InvalidInputLayout {
-                message: "aux region width mismatch".to_string(),
-            });
-        }
-        let quotient_width =
-            self.counts.num_quotient_chunks.checked_mul(self.counts.ext_degree).ok_or_else(
-                || AceError::InvalidInputLayout {
-                    message: "quotient_width overflow".to_string(),
-                },
-            )?;
-        if self.regions.quotient_curr.width != quotient_width
-            || self.regions.quotient_next.width != quotient_width
-        {
-            return Err(AceError::InvalidInputLayout {
-                message: "quotient region width mismatch".to_string(),
-            });
-        }
-        if self.regions.aux_bus_boundary.width != self.counts.aux_width {
-            return Err(AceError::InvalidInputLayout {
-                message: "aux bus boundary width mismatch".to_string(),
-            });
-        }
+        let aux_coord_width = self.counts.aux_width * EXT_DEGREE;
+        assert_eq!(self.regions.aux_curr.width, aux_coord_width, "aux_curr width mismatch");
+        assert_eq!(self.regions.aux_next.width, aux_coord_width, "aux_next width mismatch");
+
+        let quotient_width = self.counts.num_quotient_chunks * EXT_DEGREE;
+        assert_eq!(
+            self.regions.quotient_curr.width, quotient_width,
+            "quotient_curr width mismatch"
+        );
+        assert_eq!(
+            self.regions.quotient_next.width, quotient_width,
+            "quotient_next width mismatch"
+        );
+        assert_eq!(
+            self.regions.aux_bus_boundary.width, self.counts.aux_width,
+            "aux bus boundary width mismatch"
+        );
 
         let stark_end = self.regions.stark_vars.offset + self.regions.stark_vars.width;
         for (name, idx) in [
@@ -197,32 +171,21 @@ impl InputLayout {
             ("inv_z_minus_one", self.stark.inv_z_minus_one),
             ("inv_vanishing", self.stark.inv_vanishing),
         ] {
-            if idx < self.regions.stark_vars.offset || idx >= stark_end {
-                return Err(AceError::InvalidInputLayout {
-                    message: format!("stark var {name} out of range"),
-                });
-            }
+            assert!(
+                idx >= self.regions.stark_vars.offset && idx < stark_end,
+                "stark var {name} out of range"
+            );
         }
 
-        if let Some(idx) = self.aux_rand_alpha
-            && (idx < self.regions.randomness.offset
-                || idx >= self.regions.randomness.offset + self.regions.randomness.width)
-        {
-            return Err(AceError::InvalidInputLayout {
-                message: "aux_rand_alpha out of randomness region".to_string(),
-            });
-        }
-        if let Some(idx) = self.aux_rand_beta
-            && (idx < self.regions.randomness.offset
-                || idx >= self.regions.randomness.offset + self.regions.randomness.width)
-        {
-            return Err(AceError::InvalidInputLayout {
-                message: "aux_rand_beta out of randomness region".to_string(),
-            });
-        }
-
-        RandomnessPlan::from_layout(self)?;
-
-        Ok(())
+        let rand_start = self.regions.randomness.offset;
+        let rand_end = rand_start + self.regions.randomness.width;
+        assert!(
+            self.aux_rand_alpha >= rand_start && self.aux_rand_alpha < rand_end,
+            "aux_rand_alpha out of randomness region"
+        );
+        assert!(
+            self.aux_rand_beta >= rand_start && self.aux_rand_beta < rand_end,
+            "aux_rand_beta out of randomness region"
+        );
     }
 }

@@ -10,7 +10,7 @@
 //! elements. One EF element occupies two base-field elements.
 //!
 //! Besides the AIR constraints themselves, the ACE circuit computes:
-//! - Randomness expansion from `(alpha, beta)` into the full challenge vector `[alpha, 1, beta,
+//! - Randomness expansion from `(alpha, beta)` into the full coefficient vector `[alpha, 1, beta,
 //!   beta^2, ...]`.
 //! - Auxiliary/quotient coordinate merges to recover extension-field values.
 //! - Periodic column evaluations from `z_k`.
@@ -34,7 +34,7 @@
 //!
 //! Layout order (both Native and Masm):
 //! 1) public_values
-//! 2) randomness (direct or expanded alpha/beta)
+//! 2) aux randomness (alpha/beta)
 //! 3) main_curr
 //! 4) aux_curr
 //! 5) quotient_curr

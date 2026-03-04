@@ -7,11 +7,9 @@ fn masm_layout_aligns_and_maps_aux_inputs() {
         aux_width: 2,
         num_public: 5,
         num_randomness: 16,
-        num_randomness_inputs: 2,
         num_periodic: 1,
         num_aux_inputs: 14,
         num_quotient_chunks: 2,
-        ext_degree: 2,
     };
     let layout = InputLayout::new_masm(counts);
 
@@ -41,7 +39,6 @@ fn masm_layout_aligns_and_maps_aux_inputs() {
     assert_eq!(stark_base % 2, 0);
     assert_eq!(layout.index(InputKey::AuxRandBeta), Some(rand_base));
     assert_eq!(layout.index(InputKey::AuxRandAlpha), Some(rand_base + 1));
-    assert_eq!(layout.index(InputKey::Randomness(0)), None);
 
     let base = layout.index(InputKey::Z).unwrap();
     assert_eq!(layout.index(InputKey::Z), Some(base));

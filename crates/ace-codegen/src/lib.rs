@@ -48,45 +48,21 @@ mod randomness;
 // High-level orchestration.
 mod pipeline;
 
-use crate::symbolic::Entry;
-
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod unit_tests;
 
+/// Extension field degree (quadratic extension for Miden VM).
+pub const EXT_DEGREE: usize = 2;
+
 /// Errors returned by ACE codegen.
 #[derive(Debug, thiserror::Error)]
 pub enum AceError {
-    #[error("unsupported entry: {0:?}")]
-    UnsupportedEntry(Entry),
-    #[error("invalid extension degree: expected {expected}, got {got}")]
-    InvalidExtensionDegree { expected: usize, got: usize },
-    #[error("invalid basis index: {0}")]
-    InvalidBasisIndex(usize),
-    #[error("preprocessed trace inputs are not supported yet")]
-    PreprocessedTraceUnsupported,
-    #[error("invalid number of quotient chunks: {got}")]
-    InvalidQuotientChunks { got: usize },
-    #[error("invalid input key: {0:?}")]
-    InvalidInputKey(crate::layout::InputKey),
     #[error("invalid input length: expected {expected}, got {got}")]
     InvalidInputLength { expected: usize, got: usize },
     #[error("invalid input layout: {message}")]
     InvalidInputLayout { message: String },
-    #[error("duplicate input key: {0:?}")]
-    DuplicateInputKey(crate::layout::InputKey),
-    #[error("missing required input keys: {keys:?}")]
-    MissingInputKeys { keys: Vec<crate::layout::InputKey> },
-    #[error("invalid periodic column: index={index}, count={count}")]
-    InvalidPeriodicColumn { index: usize, count: usize },
-    #[error(
-        "invalid randomness inputs: num_randomness={num_randomness}, num_randomness_inputs={num_randomness_inputs}"
-    )]
-    InvalidRandomnessInputs {
-        num_randomness: usize,
-        num_randomness_inputs: usize,
-    },
 }
 
 pub use crate::{
