@@ -1,3 +1,6 @@
+use p3_dft::{NaiveDft, TwoAdicSubgroupDft};
+use p3_field::TwoAdicField;
+
 use crate::layout::InputKey;
 
 /// Identifier for a node in the DAG.
@@ -36,10 +39,35 @@ pub enum NodeKind<EF> {
 #[derive(Debug, Clone)]
 pub struct PeriodicColumnData<EF> {
     /// Per-column coefficient vectors (highest-degree first).
-    pub(crate) coeffs: Vec<Vec<EF>>,
+    coeffs: Vec<Vec<EF>>,
 }
 
 impl<EF> PeriodicColumnData<EF> {
+    /// Convert periodic columns (evaluations) into coefficient form for DAG building.
+    ///
+    /// Applies an inverse DFT so the DAG can evaluate them at `z_k` inside the circuit.
+    pub fn from_periodic_table<F>(periodic_table: Vec<Vec<F>>) -> Self
+    where
+        F: TwoAdicField,
+        EF: From<F>,
+    {
+        if periodic_table.is_empty() {
+            return Self { coeffs: Vec::new() };
+        }
+
+        let dft = NaiveDft;
+        let mut coeffs = Vec::with_capacity(periodic_table.len());
+        for col in periodic_table {
+            assert!(!col.is_empty(), "periodic column must not be empty");
+            assert!(col.len().is_power_of_two(), "periodic column length must be a power of two");
+            let values = dft.idft(col);
+            let coeff_row = values.into_iter().map(EF::from).collect();
+            coeffs.push(coeff_row);
+        }
+
+        Self { coeffs }
+    }
+
     /// Number of periodic columns.
     pub fn num_columns(&self) -> usize {
         self.coeffs.len()
@@ -48,6 +76,11 @@ impl<EF> PeriodicColumnData<EF> {
     /// Maximum periodic column length (used to align powers).
     pub fn max_period(&self) -> usize {
         self.coeffs.iter().map(|c| c.len()).max().unwrap_or(0)
+    }
+
+    /// Iterate over the per-column coefficient vectors.
+    pub fn columns(&self) -> &[Vec<EF>] {
+        &self.coeffs
     }
 }
 

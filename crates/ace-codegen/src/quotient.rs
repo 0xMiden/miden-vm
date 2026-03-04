@@ -9,7 +9,6 @@ use p3_field::{ExtensionField, Field};
 #[cfg(test)]
 use crate::AceError;
 use crate::{
-    EXT_DEGREE,
     dag::{DagBuilder, NodeId},
     layout::{InputKey, InputLayout},
 };
@@ -42,7 +41,7 @@ where
     let mut chunk_values = Vec::with_capacity(k);
     for chunk in 0..k {
         let mut value = EF::ZERO;
-        for coord in 0..EXT_DEGREE {
+        for coord in 0..EF::DIMENSION {
             let basis = EF::ith_basis_element(coord).expect("basis index within extension degree");
             let coord_value = inputs[layout
                 .index(InputKey::QuotientChunkCoord { offset: 0, chunk, coord })
@@ -110,7 +109,7 @@ pub(crate) fn build_quotient_recomposition_dag<F, EF>(
 ) -> NodeId
 where
     F: Field,
-    EF: ExtensionField<F> + Eq + std::hash::Hash,
+    EF: ExtensionField<F>,
 {
     let k = layout.counts.num_quotient_chunks;
     let z_pow_n = builder.input(InputKey::ZPowN);
@@ -126,7 +125,7 @@ where
     let mut chunk_values = Vec::with_capacity(k);
     for chunk in 0..k {
         let mut value = builder.constant(EF::ZERO);
-        for coord in 0..EXT_DEGREE {
+        for coord in 0..EF::DIMENSION {
             let basis = EF::ith_basis_element(coord).expect("basis index within extension degree");
             let coord_node =
                 builder.input(InputKey::QuotientChunkCoord { offset: 0, chunk, coord });
@@ -176,7 +175,7 @@ struct DagOps<'a, EF> {
 
 impl<'a, EF> Ops<NodeId> for DagOps<'a, EF>
 where
-    EF: Field + Eq + std::hash::Hash,
+    EF: Field,
 {
     fn sub(&mut self, a: NodeId, b: NodeId) -> NodeId {
         self.builder.sub(a, b)

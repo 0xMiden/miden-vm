@@ -1,14 +1,12 @@
 use std::collections::HashMap;
 
-use p3_dft::{Radix2DitParallel, TwoAdicSubgroupDft};
-use p3_field::{ExtensionField, Field, TwoAdicField};
+use p3_field::{ExtensionField, Field};
 
 use super::{
     builder::DagBuilder,
     ir::{AceDag, NodeId, PeriodicColumnData},
 };
 use crate::{
-    EXT_DEGREE,
     layout::{InputKey, InputLayout},
     quotient::build_quotient_recomposition_dag,
     randomness,
@@ -24,7 +22,7 @@ pub fn lower_expr<F, EF>(
 ) -> NodeId
 where
     F: Field,
-    EF: ExtensionField<F> + Eq + std::hash::Hash,
+    EF: ExtensionField<F>,
 {
     match expr {
         SymExpr::Variable(v) => match v.entry {
@@ -32,7 +30,7 @@ where
             Entry::Aux { offset } => {
                 let index = v.index;
                 let mut acc = builder.constant(EF::ZERO);
-                for coord in 0..EXT_DEGREE {
+                for coord in 0..EF::DIMENSION {
                     let basis =
                         EF::ith_basis_element(coord).expect("basis index within extension degree");
                     let coord_node = builder.input(InputKey::AuxCoord { offset, index, coord });
@@ -104,7 +102,7 @@ pub fn build_verifier_dag<F, EF>(
 ) -> AceDag<EF>
 where
     F: Field,
-    EF: ExtensionField<F> + Eq + std::hash::Hash,
+    EF: ExtensionField<F>,
 {
     let mut builder = DagBuilder::<EF>::new();
     let periodic_nodes = match periodic {
@@ -134,43 +132,15 @@ where
 
     AceDag { nodes: builder.into_nodes(), root }
 }
-
-impl<EF> PeriodicColumnData<EF> {
-    /// Convert periodic columns (evaluations) into coefficient form for DAG building.
-    ///
-    /// Applies an inverse DFT so the DAG can evaluate them at `z_k` inside the circuit.
-    pub fn from_periodic_table<F>(periodic_table: Vec<Vec<F>>) -> Self
-    where
-        F: TwoAdicField + Ord,
-        EF: From<F>,
-    {
-        if periodic_table.is_empty() {
-            return Self { coeffs: Vec::new() };
-        }
-
-        let dft = Radix2DitParallel::<F>::default();
-        let mut coeffs = Vec::with_capacity(periodic_table.len());
-        for col in periodic_table {
-            assert!(!col.is_empty(), "periodic column must not be empty");
-            assert!(col.len().is_power_of_two(), "periodic column length must be a power of two");
-            let values = dft.idft(col);
-            let coeff_row = values.into_iter().map(EF::from).collect();
-            coeffs.push(coeff_row);
-        }
-
-        Self { coeffs }
-    }
-}
-
 fn build_periodic_nodes<EF>(
     builder: &mut DagBuilder<EF>,
     layout: &InputLayout,
     periodic: &PeriodicColumnData<EF>,
 ) -> Vec<NodeId>
 where
-    EF: Field + Eq + std::hash::Hash,
+    EF: Field,
 {
-    if periodic.coeffs.is_empty() {
+    if periodic.num_columns() == 0 {
         return Vec::new();
     }
 
@@ -181,8 +151,8 @@ where
 
     let max_len = periodic.max_period();
     let mut cache = HashMap::<u32, NodeId>::new();
-    let mut nodes = Vec::with_capacity(periodic.coeffs.len());
-    for coeffs in &periodic.coeffs {
+    let mut nodes = Vec::with_capacity(periodic.num_columns());
+    for coeffs in periodic.columns() {
         let col_len = coeffs.len();
         let ratio = max_len / col_len;
         let log_pow_col = ratio.ilog2();
@@ -203,7 +173,7 @@ where
 
 fn horner_eval<EF>(builder: &mut DagBuilder<EF>, point: NodeId, coeffs: &[NodeId]) -> NodeId
 where
-    EF: Field + Eq + std::hash::Hash,
+    EF: Field,
 {
     let mut acc = builder.constant(EF::ZERO);
     for coeff in coeffs.iter().rev() {

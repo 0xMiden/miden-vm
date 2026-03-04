@@ -17,7 +17,7 @@ pub struct DagBuilder<EF> {
 
 impl<EF> DagBuilder<EF>
 where
-    EF: Field + Eq + std::hash::Hash,
+    EF: Field,
 {
     /// Create an empty, hash-consed DAG builder.
     pub fn new() -> Self {
@@ -119,7 +119,7 @@ where
 
 impl<EF> Default for DagBuilder<EF>
 where
-    EF: Field + Eq + std::hash::Hash,
+    EF: Field,
 {
     fn default() -> Self {
         Self::new()

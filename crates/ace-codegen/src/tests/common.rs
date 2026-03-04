@@ -1,9 +1,9 @@
 use miden_core::{Felt, field::QuadFelt};
 use p3_dft::{Radix2DitParallel, TwoAdicSubgroupDft};
-use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
+use p3_field::{ExtensionField, Field, PrimeCharacteristicRing};
 
 use crate::{
-    EXT_DEGREE, InputKey, InputLayout,
+    InputKey, InputLayout,
     dag::{NodeId, NodeKind},
     quotient,
     symbolic::{Entry, SymExpr},
@@ -52,19 +52,22 @@ pub fn eval_periodic_values(periodic_table: &[Vec<Felt>], z_k: QuadFelt) -> Vec<
         .collect()
 }
 
-pub fn eval_expr(
-    expr: &SymExpr<QuadFelt>,
-    inputs: &[QuadFelt],
+pub fn eval_expr<F, EF>(
+    expr: &SymExpr<EF>,
+    inputs: &[EF],
     layout: &InputLayout,
-    periodic_values: &[QuadFelt],
-) -> QuadFelt {
+    periodic_values: &[EF],
+) -> EF
+where
+    F: Field,
+    EF: ExtensionField<F>,
+{
     match expr {
         SymExpr::Variable(v) => match v.entry {
             Entry::Aux { offset } => {
-                let mut acc = QuadFelt::ZERO;
-                for coord in 0..EXT_DEGREE {
-                    let basis =
-                        <QuadFelt as BasedVectorSpace<Felt>>::ith_basis_element(coord).unwrap();
+                let mut acc = EF::ZERO;
+                for coord in 0..EF::DIMENSION {
+                    let basis = EF::ith_basis_element(coord).unwrap();
                     let key = InputKey::AuxCoord { offset, index: v.index, coord };
                     let value = inputs[layout.index(key).unwrap()];
                     acc += basis * value;
@@ -76,7 +79,7 @@ pub fn eval_expr(
                 let beta = inputs[layout.index(InputKey::AuxRandBeta).unwrap()];
                 match v.index {
                     0 => alpha,
-                    1 => QuadFelt::ONE,
+                    1 => EF::ONE,
                     _ => {
                         let mut power = beta;
                         for _ in 2..v.index {
@@ -106,12 +109,12 @@ pub fn eval_expr(
         SymExpr::IsFirstRow => {
             let z_pow_n = inputs[layout.index(InputKey::ZPowN).unwrap()];
             let inv = inputs[layout.index(InputKey::InvZMinusOne).unwrap()];
-            (z_pow_n - QuadFelt::ONE) * inv
+            (z_pow_n - EF::ONE) * inv
         },
         SymExpr::IsLastRow => {
             let z_pow_n = inputs[layout.index(InputKey::ZPowN).unwrap()];
             let inv = inputs[layout.index(InputKey::InvZMinusGInv).unwrap()];
-            (z_pow_n - QuadFelt::ONE) * inv
+            (z_pow_n - EF::ONE) * inv
         },
         SymExpr::IsTransition => {
             let z = inputs[layout.index(InputKey::Z).unwrap()];
@@ -120,18 +123,18 @@ pub fn eval_expr(
         },
         SymExpr::Constant(c) => *c,
         SymExpr::Add(x, y) => {
-            eval_expr(x, inputs, layout, periodic_values)
-                + eval_expr(y, inputs, layout, periodic_values)
+            eval_expr::<F, EF>(x, inputs, layout, periodic_values)
+                + eval_expr::<F, EF>(y, inputs, layout, periodic_values)
         },
         SymExpr::Sub(x, y) => {
-            eval_expr(x, inputs, layout, periodic_values)
-                - eval_expr(y, inputs, layout, periodic_values)
+            eval_expr::<F, EF>(x, inputs, layout, periodic_values)
+                - eval_expr::<F, EF>(y, inputs, layout, periodic_values)
         },
         SymExpr::Mul(x, y) => {
-            eval_expr(x, inputs, layout, periodic_values)
-                * eval_expr(y, inputs, layout, periodic_values)
+            eval_expr::<F, EF>(x, inputs, layout, periodic_values)
+                * eval_expr::<F, EF>(y, inputs, layout, periodic_values)
         },
-        SymExpr::Neg(x) => -eval_expr(x, inputs, layout, periodic_values),
+        SymExpr::Neg(x) => -eval_expr::<F, EF>(x, inputs, layout, periodic_values),
     }
 }
 

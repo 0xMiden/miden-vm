@@ -40,7 +40,7 @@ fn processor_air_dag_matches_manual_eval() {
 
     let mut acc = QuadFelt::ZERO;
     for c in builder.constraints() {
-        let val = eval_expr(c, &inputs, &layout, &periodic_values);
+        let val = eval_expr::<Felt, QuadFelt>(c, &inputs, &layout, &periodic_values);
         acc = acc * alpha + val;
     }
     let folded = acc * inv_vanishing;

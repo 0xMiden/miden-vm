@@ -47,7 +47,7 @@ pub struct AceCircuit<EF> {
     pub(crate) root: AceNode,
 }
 
-impl<EF: Field + Copy> AceCircuit<EF> {
+impl<EF: Field> AceCircuit<EF> {
     /// Return the input layout for this circuit.
     pub fn layout(&self) -> &InputLayout {
         &self.layout
@@ -94,7 +94,7 @@ pub(crate) fn emit_circuit<EF>(
     layout: InputLayout,
 ) -> Result<AceCircuit<EF>, AceError>
 where
-    EF: Field + Eq + std::hash::Hash,
+    EF: Field,
 {
     let mut constants = Vec::new();
     let mut constant_map = HashMap::<EF, usize>::new();

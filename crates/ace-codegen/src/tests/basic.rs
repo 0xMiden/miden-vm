@@ -132,7 +132,7 @@ fn test_verifier_dag_matches_manual_eval() {
 
     let mut acc = EF::ZERO;
     for c in builder.constraints() {
-        let val = eval_expr(c, &inputs, &layout, &periodic_values);
+        let val = eval_expr::<F, EF>(c, &inputs, &layout, &periodic_values);
         acc = acc * alpha + val;
     }
     let folded = acc * inv_vanishing;

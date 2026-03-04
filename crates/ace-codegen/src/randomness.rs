@@ -32,7 +32,7 @@ pub(crate) fn lower_challenge<EF>(
     index: usize,
 ) -> NodeId
 where
-    EF: Field + Eq + std::hash::Hash,
+    EF: Field,
 {
     let num = layout.counts.num_randomness;
     assert!(index < num, "challenge index {index} out of range (num={num})");

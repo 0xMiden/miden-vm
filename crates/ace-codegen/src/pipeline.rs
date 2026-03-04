@@ -59,8 +59,8 @@ pub fn build_ace_circuit_for_air<A, F, EF>(
 ) -> Result<AceCircuit<EF>, AceError>
 where
     A: MidenAir<F, EF>,
-    F: TwoAdicField + Ord,
-    EF: ExtensionField<F> + Eq + std::hash::Hash,
+    F: TwoAdicField,
+    EF: ExtensionField<F>,
 {
     let artifacts = build_ace_dag_for_air::<A, F, EF>(air, config)?;
     emit_circuit(&artifacts.dag, artifacts.layout)
@@ -95,8 +95,8 @@ pub(crate) fn build_ace_dag_for_air<A, F, EF>(
 ) -> Result<AceArtifacts<EF>, AceError>
 where
     A: MidenAir<F, EF>,
-    F: TwoAdicField + Ord,
-    EF: ExtensionField<F> + Eq + std::hash::Hash,
+    F: TwoAdicField,
+    EF: ExtensionField<F>,
 {
     let periodic_table = air.periodic_table();
     let counts = input_counts_for_air::<A, F, EF>(air, config, periodic_table.len());
