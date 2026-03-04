@@ -173,6 +173,11 @@ where
         trace::AUX_TRACE_RAND_CHALLENGES
     }
 
+    fn num_public_values(&self) -> usize {
+        // ProgramInfo(8) + StackInputs(16) + StackOutputs(16) + PcTranscriptState(4) = 44.
+        44
+    }
+
     fn periodic_table(&self) -> Vec<Vec<Felt>> {
         let mut cols = constraints::chiplets::hasher::periodic_columns();
         let [k_first, k_transition] = constraints::chiplets::bitwise::periodic_columns();
