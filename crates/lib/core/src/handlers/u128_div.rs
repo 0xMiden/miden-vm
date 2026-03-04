@@ -25,14 +25,14 @@ pub const U128_DIV_EVENT_NAME: EventName = EventName::new("miden::core::math::u1
 ///   Advice stack: [...]
 ///
 /// Outputs:
-///   Advice stack: [q0, q1, q2, q3, r0, r1, r2, r3, ...]
+///   Advice stack: [r0, r1, r2, r3, q0, q1, q2, q3, ...]
 ///
 /// Where (b0..b3) and (a0..a3) are the 32-bit limbs of the divisor and dividend respectively,
 /// with b0/a0 being the least significant limb.
 ///
 /// After two `padw adv_loadw` in MASM:
-///   First:  loads [q0, q1, q2, q3] onto operand stack
-///   Second: loads [r0, r1, r2, r3] onto operand stack
+///   First:  loads [r0, r1, r2, r3] onto operand stack
+///   Second: loads [q0, q1, q2, q3] onto operand stack
 ///
 /// # Errors
 /// Returns an error if the divisor is ZERO or any limb is not a valid u32.
@@ -51,7 +51,7 @@ pub fn handle_u128_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, 
     let (q0, q1, q2, q3) = u128_to_u32_felts(quotient);
     let (r0, r1, r2, r3) = u128_to_u32_felts(remainder);
 
-    let mutation = AdviceMutation::extend_stack([q0, q1, q2, q3, r0, r1, r2, r3]);
+    let mutation = AdviceMutation::extend_stack([r0, r1, r2, r3, q0, q1, q2, q3]);
     Ok(vec![mutation])
 }
 
