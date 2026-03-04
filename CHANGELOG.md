@@ -1,8 +1,12 @@
 # Changelog
 
+## 0.21.2 (tbd)
+
+- Removes `features = serde` from `miden-core` in `miden-air` to avoid unconditionally enabling the `serde` dependency  ([#2767](https://github.com/0xMiden/miden-vm/pull/2767)).
+
 ## 0.21.1 (2026-02-24)
 
-- Added debug variable tracking for source-level variables via dedicated `DebugVarStorage` (CSR format) in `DebugInfo`, with `DebugVarInfo` describing variable name, type, location, and value location (stack, memory, local, constant, or expression). Also added `debug_types`, `debug_sources`, and `debug_functions` sections in MASP packages for storing type definitions, source file paths, and function metadata respectively, each with its own string table, to support source-level debugging (#[2471](https://github.com/0xMiden/miden-vm/pull/2471)).
+- Added debug variable tracking for source-level variables via dedicated `DebugVarStorage` (CSR format) in `DebugInfo`, with `DebugVarInfo` describing variable name, type, location, and value location (stack, memory, local, constant, or expression). Also added `debug_types`, `debug_sources`, and `debug_functions` sections in MASP packages for storing type definitions, source file paths, and function metadata respectively, each with its own string table, to support source-level debugging ([#2471](https://github.com/0xMiden/miden-vm/pull/2471)).
 - Updated `miden-crypto` to v0.22.3 (with unified `Felt` type) ([#2649](https://github.com/0xMiden/miden-vm/pull/2649))
 - Re-exported `Continuation` from `miden-processor` to support the external debugger ([#2683](https://github.com/0xMiden/miden-vm/pull/2683)).
 - Fixed `mtree_merge` advice-store root ordering to match `hmerge` operand stack semantics ([#2729](https://github.com/0xMiden/miden-vm/pull/2729)).
