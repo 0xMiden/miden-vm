@@ -10,7 +10,7 @@
 //! (base-field), then pads to an `adv_pipe` block boundary.
 
 use miden_core::{Felt, Word, crypto::hash::Poseidon2};
-use p3_field::BasedVectorSpace;
+use p3_field::ExtensionField;
 
 use crate::{
     AceError,
@@ -92,7 +92,7 @@ impl EncodedCircuit {
 
 impl<EF> AceCircuit<EF>
 where
-    EF: BasedVectorSpace<Felt> + Copy + Eq + std::hash::Hash,
+    EF: ExtensionField<Felt>,
 {
     /// Encode the circuit into the ACE chiplet format.
     pub fn to_ace(&self) -> Result<EncodedCircuit, AceError> {
