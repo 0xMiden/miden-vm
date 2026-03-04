@@ -37,7 +37,9 @@ use crate::{
     constraints::{
         bus::{MessageEncoder, alphas_from_challenges, indices::V_WIRING},
         chiplets::selectors::ace_chiplet_flag,
-        tagging::{TaggingAirBuilderExt, ids::TAG_WIRING_BUS_BASE},
+        tagging::{
+            TagGroup, TaggingAirBuilderExt, ids::TAG_WIRING_BUS_BASE, tagged_assert_zero_ext,
+        },
     },
     trace::chiplets::ace::{
         CLK_IDX, CTX_IDX, ID_0_IDX, ID_1_IDX, ID_2_IDX, M_0_IDX, M_1_IDX, SELECTOR_BLOCK_IDX,
@@ -58,6 +60,11 @@ const NUM_WIRING_ALPHAS: usize = 6;
 /// Tag IDs and namespaces for wiring bus constraints.
 const WIRING_BUS_BASE_ID: usize = TAG_WIRING_BUS_BASE;
 const WIRING_BUS_NAME: &str = "chiplets.bus.wiring.transition";
+const WIRING_BUS_NAMES: [&str; 1] = [WIRING_BUS_NAME; 1];
+const WIRING_BUS_TAGS: TagGroup = TagGroup {
+    base: WIRING_BUS_BASE_ID,
+    names: &WIRING_BUS_NAMES,
+};
 
 // ENTRY POINTS
 // ================================================================================================
@@ -68,7 +75,7 @@ pub fn enforce_wiring_bus_constraint<AB>(
     local: &MainTraceRow<AB::Var>,
     _next: &MainTraceRow<AB::Var>,
 ) where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: TaggingAirBuilderExt<F = Felt>,
 {
     // ---------------------------------------------------------------------
     // Auxiliary trace access.
@@ -163,9 +170,8 @@ pub fn enforce_wiring_bus_constraint<AB>(
     let rhs = read_terms * read_gate + eval_terms * eval_gate;
     let wiring_constraint = delta * common_den - rhs;
 
-    builder.tagged(WIRING_BUS_BASE_ID, WIRING_BUS_NAME, |builder| {
-        builder.when_transition().assert_zero_ext(wiring_constraint);
-    });
+    let mut idx = 0;
+    tagged_assert_zero_ext(builder, &WIRING_BUS_TAGS, &mut idx, wiring_constraint);
 }
 
 // INTERNAL HELPERS
