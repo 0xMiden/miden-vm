@@ -139,11 +139,8 @@ impl Deserializable for Package {
 
         // Read custom sections
         let num_sections = source.read_usize()?;
-        let mut sections = Vec::with_capacity(num_sections);
-        for _ in 0..num_sections {
-            let section = Section::read_from(source)?;
-            sections.push(section);
-        }
+        let sections: Vec<Section> =
+            source.read_many_iter(num_sections)?.collect::<Result<_, _>>()?;
 
         Ok(Self {
             name,
@@ -328,10 +325,8 @@ impl Deserializable for PackageManifest {
 
         // Read dependencies
         let deps_len = source.read_usize()?;
-        let mut dependencies = Vec::with_capacity(deps_len);
-        for _ in 0..deps_len {
-            dependencies.push(Dependency::read_from(source)?);
-        }
+        let dependencies: Vec<Dependency> =
+            source.read_many_iter(deps_len)?.collect::<Result<_, _>>()?;
 
         Ok(Self { exports, dependencies })
     }

@@ -46,6 +46,13 @@ impl Deserializable for DebugTypesSection {
         }
 
         let strings_len = source.read_usize()?;
+        // each string is at least 1 byte (varint length prefix)
+        let max_strings = source.max_alloc(1);
+        if strings_len > max_strings {
+            return Err(DeserializationError::InvalidValue(alloc::format!(
+                "debug_types strings count {strings_len} exceeds budget {max_strings}"
+            )));
+        }
         let mut strings = alloc::vec::Vec::with_capacity(strings_len);
         for _ in 0..strings_len {
             strings.push(read_string(source)?);
@@ -89,6 +96,13 @@ impl Deserializable for DebugSourcesSection {
         }
 
         let strings_len = source.read_usize()?;
+        // each string is at least 1 byte (varint length prefix)
+        let max_strings = source.max_alloc(1);
+        if strings_len > max_strings {
+            return Err(DeserializationError::InvalidValue(alloc::format!(
+                "debug_sources strings count {strings_len} exceeds budget {max_strings}"
+            )));
+        }
         let mut strings = alloc::vec::Vec::with_capacity(strings_len);
         for _ in 0..strings_len {
             strings.push(read_string(source)?);
@@ -132,6 +146,13 @@ impl Deserializable for DebugFunctionsSection {
         }
 
         let strings_len = source.read_usize()?;
+        // each string is at least 1 byte (varint length prefix)
+        let max_strings = source.max_alloc(1);
+        if strings_len > max_strings {
+            return Err(DeserializationError::InvalidValue(alloc::format!(
+                "debug_functions strings count {strings_len} exceeds budget {max_strings}"
+            )));
+        }
         let mut strings = alloc::vec::Vec::with_capacity(strings_len);
         for _ in 0..strings_len {
             strings.push(read_string(source)?);
@@ -239,6 +260,13 @@ impl Deserializable for DebugTypeInfo {
                     None
                 };
                 let params_len = source.read_usize()?;
+                // each param index is a u32 (4 bytes)
+                let max_params = source.max_alloc(4);
+                if params_len > max_params {
+                    return Err(DeserializationError::InvalidValue(alloc::format!(
+                        "function params count {params_len} exceeds budget {max_params}"
+                    )));
+                }
                 let mut param_type_indices = alloc::vec::Vec::with_capacity(params_len);
                 for _ in 0..params_len {
                     param_type_indices.push(DebugTypeIdx::from(source.read_u32()?));
