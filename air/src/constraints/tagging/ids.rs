@@ -90,9 +90,15 @@ pub const TAG_CHIPLETS_BUS_COUNT: usize = 1;
 /// Base ID for the wiring bus constraint.
 pub const TAG_WIRING_BUS_BASE: usize = TAG_CHIPLETS_BUS_BASE + TAG_CHIPLETS_BUS_COUNT;
 /// Number of wiring bus constraints in this group.
-#[cfg(all(test, feature = "std"))]
 pub const TAG_WIRING_BUS_COUNT: usize = 1;
+
+/// Base ID for the public inputs boundary constraint group.
+pub const TAG_PUBLIC_INPUTS_BASE: usize = TAG_WIRING_BUS_BASE + TAG_WIRING_BUS_COUNT;
+/// Number of public input boundary constraints.
+/// 16 stack input first-row + 16 stack output last-row = 32.
+#[cfg(all(test, feature = "std"))]
+pub const TAG_PUBLIC_INPUTS_COUNT: usize = 32;
 
 /// Total number of tagged constraints in the current group set.
 #[cfg(all(test, feature = "std"))]
-pub const TAG_TOTAL_COUNT: usize = TAG_WIRING_BUS_BASE + TAG_WIRING_BUS_COUNT;
+pub const TAG_TOTAL_COUNT: usize = TAG_PUBLIC_INPUTS_BASE + TAG_PUBLIC_INPUTS_COUNT;
