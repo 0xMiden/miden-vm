@@ -345,12 +345,7 @@ impl<E: ExtensionField<Felt>> Challenges<E> {
     /// Encodes as **alpha + <beta, message>** with K consecutive elements.
     #[inline(always)]
     pub fn encode<const K: usize>(&self, elems: [Felt; K]) -> E {
-        debug_assert!(
-            K <= self.beta_powers.len(),
-            "Message length {} exceeds beta_powers length ({})",
-            K,
-            self.beta_powers.len()
-        );
+        const { assert!(K < MAX_MESSAGE_WIDTH, "Message length exceeds beta_powers capacity") };
         let mut acc = self.alpha;
         for (i, &elem) in elems.iter().enumerate() {
             acc += self.beta_powers[i] * elem;
