@@ -45,8 +45,10 @@ impl Deserializable for DebugTypesSection {
             )));
         }
 
+        // Manual bounds check required: read_string is a local helper, not Deserializable,
+        // so we can't use read_many_iter. Each string serializes to at least 1 byte (the
+        // varint length prefix), so max_alloc(1) bounds the vector pre-allocation.
         let strings_len = source.read_usize()?;
-        // each string is at least 1 byte (varint length prefix)
         let max_strings = source.max_alloc(1);
         if strings_len > max_strings {
             return Err(DeserializationError::InvalidValue(alloc::format!(
@@ -95,8 +97,10 @@ impl Deserializable for DebugSourcesSection {
             )));
         }
 
+        // Manual bounds check required: read_string is a local helper, not Deserializable,
+        // so we can't use read_many_iter. Each string serializes to at least 1 byte (the
+        // varint length prefix), so max_alloc(1) bounds the vector pre-allocation.
         let strings_len = source.read_usize()?;
-        // each string is at least 1 byte (varint length prefix)
         let max_strings = source.max_alloc(1);
         if strings_len > max_strings {
             return Err(DeserializationError::InvalidValue(alloc::format!(
@@ -145,8 +149,10 @@ impl Deserializable for DebugFunctionsSection {
             )));
         }
 
+        // Manual bounds check required: read_string is a local helper, not Deserializable,
+        // so we can't use read_many_iter. Each string serializes to at least 1 byte (the
+        // varint length prefix), so max_alloc(1) bounds the vector pre-allocation.
         let strings_len = source.read_usize()?;
-        // each string is at least 1 byte (varint length prefix)
         let max_strings = source.max_alloc(1);
         if strings_len > max_strings {
             return Err(DeserializationError::InvalidValue(alloc::format!(
@@ -259,8 +265,9 @@ impl Deserializable for DebugTypeInfo {
                 } else {
                     None
                 };
+                // Manual bounds check: DebugTypeIdx is read via read_u32, not Deserializable,
+                // so we can't use read_many_iter. Each param index is 4 bytes (u32).
                 let params_len = source.read_usize()?;
-                // each param index is a u32 (4 bytes)
                 let max_params = source.max_alloc(4);
                 if params_len > max_params {
                     return Err(DeserializationError::InvalidValue(alloc::format!(
