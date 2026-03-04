@@ -21,7 +21,7 @@ use crate::{
 };
 
 pub(crate) mod utils;
-use utils::{AuxColumnBuilder, TraceFragment};
+use utils::{AuxColumnBuilder, Challenges, TraceFragment};
 
 pub mod chiplets;
 pub mod execution_tracer;
@@ -262,10 +262,14 @@ impl AuxTraceBuilders {
     where
         E: ExtensionField<Felt>,
     {
-        let decoder_cols = self.decoder.build_aux_columns(main_trace, challenges);
-        let stack_cols = self.stack.build_aux_columns(main_trace, challenges);
-        let range_cols = self.range.build_aux_columns(main_trace, challenges);
-        let chiplets_cols = self.chiplets.build_aux_columns(main_trace, challenges);
+        // Expand raw challenges (alpha, beta) into coefficient array once, then pass
+        // the expanded challenges to all sub-builders.
+        let challenges = Challenges::<E>::new(challenges);
+
+        let decoder_cols = self.decoder.build_aux_columns(main_trace, &challenges);
+        let stack_cols = self.stack.build_aux_columns(main_trace, &challenges);
+        let range_cols = self.range.build_aux_columns(main_trace, &challenges);
+        let chiplets_cols = self.chiplets.build_aux_columns(main_trace, &challenges);
 
         decoder_cols
             .into_iter()

@@ -11,7 +11,7 @@ use miden_core::{
 use super::{build_ace_memory_read_element_request, build_ace_memory_read_word_request};
 use crate::{
     debug::{BusDebugger, BusMessage},
-    trace::{AuxColumnBuilder, chiplets::aux_trace::build_value},
+    trace::{AuxColumnBuilder, utils::Challenges},
 };
 
 // CHIPLETS VIRTUAL TABLE
@@ -60,56 +60,56 @@ where
     fn get_requests_at(
         &self,
         main_trace: &MainTrace,
-        alphas: &[E],
+        challenges: &Challenges<E>,
         row: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         let op_code = main_trace.get_op_code(row).as_canonical_u64() as u8;
         let log_pc_request = if op_code == OPCODE_LOGPRECOMPILE {
-            build_log_precompile_capacity_remove(main_trace, row, alphas, _debugger)
+            build_log_precompile_capacity_remove(main_trace, row, challenges, _debugger)
         } else {
             E::ONE
         };
 
         let request_ace = if main_trace.chiplet_ace_is_read_row(row) {
-            build_ace_memory_read_word_request(main_trace, alphas, row, _debugger)
+            build_ace_memory_read_word_request(main_trace, challenges, row, _debugger)
         } else if main_trace.chiplet_ace_is_eval_row(row) {
-            build_ace_memory_read_element_request(main_trace, alphas, row, _debugger)
+            build_ace_memory_read_element_request(main_trace, challenges, row, _debugger)
         } else {
             E::ONE
         };
 
-        chiplets_vtable_remove_sibling(main_trace, alphas, row) * request_ace * log_pc_request
+        chiplets_vtable_remove_sibling(main_trace, challenges, row) * request_ace * log_pc_request
     }
 
     fn get_responses_at(
         &self,
         main_trace: &MainTrace,
-        alphas: &[E],
+        challenges: &Challenges<E>,
         row: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         let op_code = main_trace.get_op_code(row).as_canonical_u64() as u8;
         let log_pc_response = if op_code == OPCODE_LOGPRECOMPILE {
-            build_log_precompile_capacity_insert(main_trace, row, alphas, _debugger)
+            build_log_precompile_capacity_insert(main_trace, row, challenges, _debugger)
         } else {
             E::ONE
         };
 
-        chiplets_vtable_add_sibling(main_trace, alphas, row) * log_pc_response
+        chiplets_vtable_add_sibling(main_trace, challenges, row) * log_pc_response
     }
 
     fn init_requests(
         &self,
         _main_trace: &MainTrace,
-        alphas: &[E],
+        challenges: &Challenges<E>,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         let message = LogPrecompileMessage { state: self.final_transcript_state };
-        let value = message.value(alphas);
+        let value = message.value(challenges);
 
         #[cfg(any(test, feature = "bus-debugger"))]
-        _debugger.add_request(alloc::boxed::Box::new(message), alphas);
+        _debugger.add_request(alloc::boxed::Box::new(message), challenges);
 
         value
     }
@@ -117,16 +117,16 @@ where
     fn init_responses(
         &self,
         _main_trace: &MainTrace,
-        alphas: &[E],
+        challenges: &Challenges<E>,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         let message = LogPrecompileMessage {
             state: PrecompileTranscriptState::default(),
         };
-        let value = message.value(alphas);
+        let value = message.value(challenges);
 
         #[cfg(any(test, feature = "bus-debugger"))]
-        _debugger.add_response(alloc::boxed::Box::new(message), alphas);
+        _debugger.add_response(alloc::boxed::Box::new(message), challenges);
 
         value
     }
@@ -140,9 +140,38 @@ const RATE0_RANGE: core::ops::Range<usize> = 0..DIGEST_LEN;
 /// Range for RATE1 (second rate word) in sponge state.
 const RATE1_RANGE: core::ops::Range<usize> = DIGEST_LEN..(2 * DIGEST_LEN);
 
+/// Node is left child (lsb=0), sibling is right child at RATE1: alpha + beta_powers[2]*index +
+/// beta_powers[7..10]*sibling
+const SIBLING_RATE1_LAYOUT: [usize; 5] = [2, 7, 8, 9, 10];
+/// Node is right child (lsb=1), sibling is left child at RATE0: alpha + beta_powers[2]*index +
+/// beta_powers[3..6]*sibling
+const SIBLING_RATE0_LAYOUT: [usize; 5] = [2, 3, 4, 5, 6];
+
+/// Encodes a sibling table entry given the node index and sibling word.
+#[inline(always)]
+fn encode_sibling<E: ExtensionField<Felt>>(
+    challenges: &Challenges<E>,
+    index: Felt,
+    sibling: &[Felt],
+) -> E {
+    let lsb = index.as_canonical_u64() & 1;
+    let layout = if lsb == 0 {
+        // Node is left child, sibling is right child at RATE1
+        SIBLING_RATE1_LAYOUT
+    } else {
+        // Node is right child, sibling is left child at RATE0
+        SIBLING_RATE0_LAYOUT
+    };
+    challenges.encode_sparse(layout, [index, sibling[0], sibling[1], sibling[2], sibling[3]])
+}
+
 /// Constructs the removals from the table when the hasher absorbs a new sibling node while
 /// computing the new Merkle root.
-fn chiplets_vtable_remove_sibling<E>(main_trace: &MainTrace, alphas: &[E], row: RowIndex) -> E
+fn chiplets_vtable_remove_sibling<E>(
+    main_trace: &MainTrace,
+    challenges: &Challenges<E>,
+    row: RowIndex,
+) -> E
 where
     E: ExtensionField<Felt>,
 {
@@ -152,47 +181,21 @@ where
     if f_mu {
         let index = main_trace.chiplet_node_index(row);
         let lsb = index.as_canonical_u64() & 1;
-        if lsb == 0 {
-            // Node is left child at RATE0, sibling is right child at RATE1
-            let sibling = &main_trace.chiplet_hasher_state(row)[RATE1_RANGE];
-            alphas[0]
-                + alphas[3] * index
-                + alphas[8] * sibling[0]
-                + alphas[9] * sibling[1]
-                + alphas[10] * sibling[2]
-                + alphas[11] * sibling[3]
+        let sibling = if lsb == 0 {
+            &main_trace.chiplet_hasher_state(row)[RATE1_RANGE]
         } else {
-            // Node is right child at RATE1, sibling is left child at RATE0
-            let sibling = &main_trace.chiplet_hasher_state(row)[RATE0_RANGE];
-            alphas[0]
-                + alphas[3] * index
-                + alphas[4] * sibling[0]
-                + alphas[5] * sibling[1]
-                + alphas[6] * sibling[2]
-                + alphas[7] * sibling[3]
-        }
+            &main_trace.chiplet_hasher_state(row)[RATE0_RANGE]
+        };
+        encode_sibling(challenges, index, sibling)
     } else if f_mua {
         let index = main_trace.chiplet_node_index(row);
         let lsb = index.as_canonical_u64() & 1;
-        if lsb == 0 {
-            // Node is left child at RATE0, sibling is right child at RATE1
-            let sibling = &main_trace.chiplet_hasher_state(row + 1)[RATE1_RANGE];
-            alphas[0]
-                + alphas[3] * index
-                + alphas[8] * sibling[0]
-                + alphas[9] * sibling[1]
-                + alphas[10] * sibling[2]
-                + alphas[11] * sibling[3]
+        let sibling = if lsb == 0 {
+            &main_trace.chiplet_hasher_state(row + 1)[RATE1_RANGE]
         } else {
-            // Node is right child at RATE1, sibling is left child at RATE0
-            let sibling = &main_trace.chiplet_hasher_state(row + 1)[RATE0_RANGE];
-            alphas[0]
-                + alphas[3] * index
-                + alphas[4] * sibling[0]
-                + alphas[5] * sibling[1]
-                + alphas[6] * sibling[2]
-                + alphas[7] * sibling[3]
-        }
+            &main_trace.chiplet_hasher_state(row + 1)[RATE0_RANGE]
+        };
+        encode_sibling(challenges, index, sibling)
     } else {
         E::ONE
     }
@@ -203,7 +206,11 @@ where
 
 /// Constructs the inclusions to the table when the hasher absorbs a new sibling node while
 /// computing the old Merkle root.
-fn chiplets_vtable_add_sibling<E>(main_trace: &MainTrace, alphas: &[E], row: RowIndex) -> E
+fn chiplets_vtable_add_sibling<E>(
+    main_trace: &MainTrace,
+    challenges: &Challenges<E>,
+    row: RowIndex,
+) -> E
 where
     E: ExtensionField<Felt>,
 {
@@ -213,47 +220,21 @@ where
     if f_mv {
         let index = main_trace.chiplet_node_index(row);
         let lsb = index.as_canonical_u64() & 1;
-        if lsb == 0 {
-            // Node is left child at RATE0, sibling is right child at RATE1
-            let sibling = &main_trace.chiplet_hasher_state(row)[RATE1_RANGE];
-            alphas[0]
-                + alphas[3] * index
-                + alphas[8] * sibling[0]
-                + alphas[9] * sibling[1]
-                + alphas[10] * sibling[2]
-                + alphas[11] * sibling[3]
+        let sibling = if lsb == 0 {
+            &main_trace.chiplet_hasher_state(row)[RATE1_RANGE]
         } else {
-            // Node is right child at RATE1, sibling is left child at RATE0
-            let sibling = &main_trace.chiplet_hasher_state(row)[RATE0_RANGE];
-            alphas[0]
-                + alphas[3] * index
-                + alphas[4] * sibling[0]
-                + alphas[5] * sibling[1]
-                + alphas[6] * sibling[2]
-                + alphas[7] * sibling[3]
-        }
+            &main_trace.chiplet_hasher_state(row)[RATE0_RANGE]
+        };
+        encode_sibling(challenges, index, sibling)
     } else if f_mva {
         let index = main_trace.chiplet_node_index(row);
         let lsb = index.as_canonical_u64() & 1;
-        if lsb == 0 {
-            // Node is left child at RATE0, sibling is right child at RATE1
-            let sibling = &main_trace.chiplet_hasher_state(row + 1)[RATE1_RANGE];
-            alphas[0]
-                + alphas[3] * index
-                + alphas[8] * sibling[0]
-                + alphas[9] * sibling[1]
-                + alphas[10] * sibling[2]
-                + alphas[11] * sibling[3]
+        let sibling = if lsb == 0 {
+            &main_trace.chiplet_hasher_state(row + 1)[RATE1_RANGE]
         } else {
-            // Node is right child at RATE1, sibling is left child at RATE0
-            let sibling = &main_trace.chiplet_hasher_state(row + 1)[RATE0_RANGE];
-            alphas[0]
-                + alphas[3] * index
-                + alphas[4] * sibling[0]
-                + alphas[5] * sibling[1]
-                + alphas[6] * sibling[2]
-                + alphas[7] * sibling[3]
-        }
+            &main_trace.chiplet_hasher_state(row + 1)[RATE0_RANGE]
+        };
+        encode_sibling(challenges, index, sibling)
     } else {
         E::ONE
     }
@@ -271,11 +252,15 @@ impl<E> BusMessage<E> for LogPrecompileMessage
 where
     E: ExtensionField<Felt>,
 {
-    fn value(&self, alphas: &[E]) -> E {
+    fn value(&self, challenges: &Challenges<E>) -> E {
         let state_elements: [Felt; 4] = self.state.into();
-        alphas[0]
-            + alphas[1] * Felt::from_u8(LOG_PRECOMPILE_LABEL)
-            + build_value(&alphas[2..6], state_elements)
+        challenges.encode([
+            Felt::from_u8(LOG_PRECOMPILE_LABEL),
+            state_elements[0],
+            state_elements[1],
+            state_elements[2],
+            state_elements[3],
+        ])
     }
 
     fn source(&self) -> &str {
@@ -296,11 +281,9 @@ impl core::fmt::Display for LogPrecompileMessage {
 fn build_log_precompile_capacity_remove<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     row: RowIndex,
-    alphas: &[E],
+    challenges: &Challenges<E>,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
-    // The previous transcript state is the capacity word provided non-deterministically in the
-    // helper registers, offset by 1 to account for the hasher address
     let state = PrecompileTranscriptState::from([
         main_trace.helper_register(HELPER_CAP_PREV_RANGE.start, row),
         main_trace.helper_register(HELPER_CAP_PREV_RANGE.start + 1, row),
@@ -309,10 +292,10 @@ fn build_log_precompile_capacity_remove<E: ExtensionField<Felt>>(
     ]);
 
     let message = LogPrecompileMessage { state };
-    let value = message.value(alphas);
+    let value = message.value(challenges);
 
     #[cfg(any(test, feature = "bus-debugger"))]
-    _debugger.add_request(alloc::boxed::Box::new(message), alphas);
+    _debugger.add_request(alloc::boxed::Box::new(message), challenges);
 
     value
 }
@@ -321,11 +304,9 @@ fn build_log_precompile_capacity_remove<E: ExtensionField<Felt>>(
 fn build_log_precompile_capacity_insert<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     row: RowIndex,
-    alphas: &[E],
+    challenges: &Challenges<E>,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
-    // The next transcript state was written in the next row as a Word at
-    // `STACK_CAP_NEXT_RANGE.start..STACK_CAP_NEXT_RANGE.end` in element order.
     let state: PrecompileTranscriptState = [
         main_trace.stack_element(STACK_CAP_NEXT_RANGE.start, row + 1),
         main_trace.stack_element(STACK_CAP_NEXT_RANGE.start + 1, row + 1),
@@ -335,10 +316,10 @@ fn build_log_precompile_capacity_insert<E: ExtensionField<Felt>>(
     .into();
 
     let message = LogPrecompileMessage { state };
-    let value = message.value(alphas);
+    let value = message.value(challenges);
 
     #[cfg(any(test, feature = "bus-debugger"))]
-    _debugger.add_response(alloc::boxed::Box::new(message), alphas);
+    _debugger.add_response(alloc::boxed::Box::new(message), challenges);
 
     value
 }

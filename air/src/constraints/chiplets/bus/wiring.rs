@@ -8,7 +8,7 @@
 //! ## Wire message format
 //!
 //! Each wire is encoded as:
-//! `alpha[0] + alpha[1] * clk + alpha[2] * ctx + alpha[3] * id + alpha[4] * v0 + alpha[5] * v1`
+//! `alpha + beta^0 * clk + beta^1 * ctx + beta^2 * id + beta^3 * v0 + beta^4 * v1`
 //!
 //! Where:
 //! - clk: memory access clock cycle
@@ -35,7 +35,7 @@ use miden_crypto::stark::{air::MidenAirBuilder, matrix::Matrix};
 use crate::{
     Felt, MainTraceRow,
     constraints::{
-        bus::{MessageEncoder, alphas_from_challenges, indices::V_WIRING},
+        bus::{Challenges, indices::V_WIRING},
         chiplets::selectors::ace_chiplet_flag,
         tagging::{
             TagGroup, TaggingAirBuilderExt, ids::TAG_WIRING_BUS_BASE, tagged_assert_zero_ext,
@@ -53,9 +53,8 @@ use crate::{
 // ACE chiplet offset from CHIPLETS_OFFSET (after s0, s1, s2, s3).
 const ACE_OFFSET: usize = 4;
 
-/// Number of random challenges needed for wiring bus.
-/// Format: alpha[0] + alpha[1]*clk + alpha[2]*ctx + alpha[3]*id + alpha[4]*v0 + alpha[5]*v1
-const NUM_WIRING_ALPHAS: usize = 6;
+/// Number of message elements for wiring bus: (clk, ctx, id, v0, v1).
+const NUM_WIRING_FIELDS: usize = 5;
 
 /// Tag IDs and namespaces for wiring bus constraints.
 const WIRING_BUS_BASE_ID: usize = TAG_WIRING_BUS_BASE;
@@ -81,7 +80,7 @@ pub fn enforce_wiring_bus_constraint<AB>(
     // Auxiliary trace access.
     // ---------------------------------------------------------------------
 
-    let (v_local, v_next, alphas) = {
+    let (v_local, v_next, challenges) = {
         let aux = builder.permutation();
         let aux_local = aux.row_slice(0).expect("Matrix should have at least 1 row");
         let aux_next = aux.row_slice(1).expect("Matrix should have at least 2 rows");
@@ -89,9 +88,8 @@ pub fn enforce_wiring_bus_constraint<AB>(
         let v_next = aux_next[V_WIRING];
 
         let challenges = builder.permutation_randomness();
-        let alphas: [AB::ExprEF; NUM_WIRING_ALPHAS] =
-            alphas_from_challenges::<AB, NUM_WIRING_ALPHAS>(challenges);
-        (v_local, v_next, alphas)
+        let challenges = Challenges::<AB, NUM_WIRING_FIELDS>::from_randomness(challenges);
+        (v_local, v_next, challenges)
     };
 
     // ---------------------------------------------------------------------
@@ -128,10 +126,9 @@ pub fn enforce_wiring_bus_constraint<AB>(
     // Wire value computation.
     // ---------------------------------------------------------------------
 
-    let encoder = MessageEncoder::<AB, 5>::from_challenges(&alphas);
-    let wire_0: AB::ExprEF = encode_wire::<AB>(&encoder, &clk, &ctx, &wire_0);
-    let wire_1: AB::ExprEF = encode_wire::<AB>(&encoder, &clk, &ctx, &wire_1);
-    let wire_2: AB::ExprEF = encode_wire::<AB>(&encoder, &clk, &ctx, &wire_2);
+    let wire_0: AB::ExprEF = encode_wire::<AB>(&challenges, &clk, &ctx, &wire_0);
+    let wire_1: AB::ExprEF = encode_wire::<AB>(&challenges, &clk, &ctx, &wire_1);
+    let wire_2: AB::ExprEF = encode_wire::<AB>(&challenges, &clk, &ctx, &wire_2);
 
     // ---------------------------------------------------------------------
     // Transition constraint.
@@ -203,7 +200,7 @@ where
 
 /// Encode an ACE wire using the wiring-bus challenge vector.
 fn encode_wire<AB>(
-    encoder: &MessageEncoder<AB, 5>,
+    challenges: &Challenges<AB, NUM_WIRING_FIELDS>,
     clk: &AB::Expr,
     ctx: &AB::Expr,
     wire: &AceWire<AB::Expr>,
@@ -211,7 +208,13 @@ fn encode_wire<AB>(
 where
     AB: MidenAirBuilder<F = Felt>,
 {
-    encoder.encode([clk.clone(), ctx.clone(), wire.id.clone(), wire.v0.clone(), wire.v1.clone()])
+    challenges.encode_dense([
+        clk.clone(),
+        ctx.clone(),
+        wire.id.clone(),
+        wire.v0.clone(),
+        wire.v1.clone(),
+    ])
 }
 
 /// Load a column from the ACE section of chiplets.
