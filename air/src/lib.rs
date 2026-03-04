@@ -212,5 +212,8 @@ where
 
         // Auxiliary (bus) constraints.
         constraints::enforce_bus(builder, local, next);
+
+        // Public inputs boundary constraints.
+        constraints::public_inputs::enforce_main(builder, local);
     }
 }
