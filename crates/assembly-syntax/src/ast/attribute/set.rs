@@ -272,3 +272,20 @@ impl Deserializable for AttributeSet {
         Ok(Self { attrs })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use miden_core::serde::{BudgetedReader, ByteWriter, SliceReader};
+
+    use super::*;
+
+    #[test]
+    fn attribute_set_rejects_over_budget_len() {
+        let mut bytes = Vec::new();
+        bytes.write_usize(2);
+
+        let mut reader = BudgetedReader::new(SliceReader::new(&bytes), 2);
+        let err = AttributeSet::read_from(&mut reader).unwrap_err();
+        assert!(matches!(err, DeserializationError::InvalidValue(_)));
+    }
+}

@@ -422,3 +422,121 @@ impl Deserializable for TypeExport {
         Ok(Self { path, ty })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use alloc::{
+        collections::BTreeMap,
+        string::{String, ToString},
+        sync::Arc,
+        vec,
+        vec::Vec,
+    };
+
+    use miden_assembly_syntax::{
+        Library,
+        ast::{AttributeSet, Path as AstPath, PathBuf},
+        library::{LibraryExport, ProcedureExport as LibraryProcedureExport},
+    };
+    use miden_core::{
+        mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt, MastNodeId},
+        operations::Operation,
+        serde::{
+            BudgetedReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+            SliceReader,
+        },
+    };
+
+    use super::{
+        MAGIC_PACKAGE, MastArtifact, Package, PackageExport, PackageKind, PackageManifest, VERSION,
+    };
+    use crate::package::manifest::ProcedureExport as PackageProcedureExport;
+
+    fn build_forest() -> (MastForest, MastNodeId) {
+        let mut forest = MastForest::new();
+        let node_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+            .add_to_forest(&mut forest)
+            .expect("failed to build basic block");
+        forest.make_root(node_id);
+        (forest, node_id)
+    }
+
+    fn absolute_path(name: &str) -> Arc<AstPath> {
+        let path = PathBuf::new(name).expect("invalid path");
+        let path = path.as_path().to_absolute().into_owned();
+        Arc::from(path.into_boxed_path())
+    }
+
+    fn build_library() -> Library {
+        let (forest, node_id) = build_forest();
+        let path = absolute_path("test::proc");
+        let export = LibraryProcedureExport::new(node_id, Arc::clone(&path));
+
+        let mut exports = BTreeMap::new();
+        exports.insert(path, LibraryExport::Procedure(export));
+
+        Library::new(Arc::new(forest), exports).expect("failed to build library")
+    }
+
+    fn build_package() -> Package {
+        let library = build_library();
+        let path = absolute_path("test::proc");
+        let node_id = library.get_export_node_id(path.as_ref());
+        let digest = library.mast_forest()[node_id].digest();
+
+        let export = PackageExport::Procedure(PackageProcedureExport {
+            path: Arc::clone(&path),
+            digest,
+            signature: None,
+            attributes: AttributeSet::default(),
+        });
+
+        let manifest = PackageManifest::new([export]);
+
+        Package {
+            name: String::from("test_pkg"),
+            version: None,
+            description: None,
+            kind: PackageKind::Library,
+            mast: MastArtifact::Library(Arc::new(library)),
+            manifest,
+            sections: Vec::new(),
+        }
+    }
+
+    fn package_bytes_with_sections_count(count: usize) -> Vec<u8> {
+        let package = build_package();
+        let mut bytes = Vec::new();
+
+        bytes.write_bytes(MAGIC_PACKAGE);
+        bytes.write_bytes(&VERSION);
+        package.name.write_into(&mut bytes);
+        package.version.as_ref().map(|v| v.to_string()).write_into(&mut bytes);
+        package.description.write_into(&mut bytes);
+        bytes.write_u8(package.kind.into());
+        package.mast.write_into(&mut bytes);
+        package.manifest.write_into(&mut bytes);
+        bytes.write_usize(count);
+
+        bytes
+    }
+
+    #[test]
+    fn package_manifest_rejects_over_budget_dependencies() {
+        let mut bytes = Vec::new();
+        bytes.write_usize(0);
+        bytes.write_usize(2);
+
+        let mut reader = BudgetedReader::new(SliceReader::new(&bytes), 2);
+        let err = PackageManifest::read_from(&mut reader).unwrap_err();
+        assert!(matches!(err, DeserializationError::InvalidValue(_)));
+    }
+
+    #[test]
+    fn package_rejects_over_budget_sections() {
+        let bytes = package_bytes_with_sections_count(2);
+        let mut reader = BudgetedReader::new(SliceReader::new(&bytes), bytes.len());
+        let err = Package::read_from(&mut reader).unwrap_err();
+        assert!(matches!(err, DeserializationError::InvalidValue(_)));
+    }
+}
