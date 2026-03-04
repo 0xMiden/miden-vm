@@ -46,7 +46,7 @@ use crate::{
     Felt, MainTraceRow,
     constraints::{
         bus::{Challenges, indices::B_CHIPLETS},
-        chiplets::hasher,
+        chiplets::{bitwise::P_BITWISE_K_TRANSITION, hasher},
         op_flags::OpFlags,
         tagging::{TaggingAirBuilderExt, ids::TAG_CHIPLETS_BUS_BASE},
     },
@@ -270,7 +270,7 @@ pub fn enforce_chiplets_bus_constraint<AB>(
         let p = builder.periodic_evals();
         let cycle_row_0: AB::Expr = p[hasher::periodic::P_CYCLE_ROW_0].into();
         let cycle_row_31: AB::Expr = p[hasher::periodic::P_CYCLE_ROW_31].into();
-        let k_transition: AB::Expr = p[hasher::periodic::NUM_PERIODIC_COLUMNS + 1].into();
+        let k_transition: AB::Expr = p[P_BITWISE_K_TRANSITION].into();
         (cycle_row_0, cycle_row_31, k_transition)
     };
 
