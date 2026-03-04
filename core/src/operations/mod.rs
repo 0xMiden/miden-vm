@@ -1015,3 +1015,6 @@ impl Deserializable for Operation {
         1
     }
 }
+
+#[cfg(test)]
+mod tests;
