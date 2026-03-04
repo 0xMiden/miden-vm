@@ -17,7 +17,7 @@ use miden_crypto::stark::{air::MidenAirBuilder, matrix::Matrix};
 use crate::{
     Felt, MainTraceRow,
     constraints::{
-        bus::{Challenges, MessageLayout, indices::B_HASH_KERNEL},
+        bus::{Challenges, indices::B_HASH_KERNEL},
         chiplets::hasher::{flags, periodic},
         op_flags::OpFlags,
         tagging::{
@@ -298,8 +298,10 @@ pub fn enforce_hash_kernel_constraint<AB>(
 /// Message layout: alpha[0] (constant) + alpha[3] * node_index + alpha[8..11] * h[4..7].
 const HASH_KERNEL_MSG_LEN: usize = 15;
 
-const SIBLING_B0_LAYOUT: MessageLayout<5> = MessageLayout::new([2, 7, 8, 9, 10]);
-const SIBLING_B1_LAYOUT: MessageLayout<5> = MessageLayout::new([2, 3, 4, 5, 6]);
+/// Sibling at h[4..7]: positions [2, 7, 8, 9, 10].
+const SIBLING_B0_LAYOUT: [usize; 5] = [2, 7, 8, 9, 10];
+/// Sibling at h[0..3]: positions [2, 3, 4, 5, 6].
+const SIBLING_B1_LAYOUT: [usize; 5] = [2, 3, 4, 5, 6];
 
 fn compute_sibling_b0<AB>(
     challenges: &Challenges<AB, HASH_KERNEL_MSG_LEN>,
@@ -309,8 +311,8 @@ fn compute_sibling_b0<AB>(
 where
     AB: MidenAirBuilder<F = Felt>,
 {
-    challenges.encode_layout(
-        &SIBLING_B0_LAYOUT,
+    challenges.encode_sparse(
+        SIBLING_B0_LAYOUT,
         [node_index.clone(), h[4].clone(), h[5].clone(), h[6].clone(), h[7].clone()],
     )
 }
@@ -326,8 +328,8 @@ fn compute_sibling_b1<AB>(
 where
     AB: MidenAirBuilder<F = Felt>,
 {
-    challenges.encode_layout(
-        &SIBLING_B1_LAYOUT,
+    challenges.encode_sparse(
+        SIBLING_B1_LAYOUT,
         [node_index.clone(), h[0].clone(), h[1].clone(), h[2].clone(), h[3].clone()],
     )
 }
