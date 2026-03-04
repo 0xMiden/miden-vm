@@ -1,6 +1,5 @@
 use std::{collections::HashMap, hash::Hash};
 
-use crate::symbolic::{Entry, SymExpr, SymVar};
 use p3_dft::{Radix2DitParallel, TwoAdicSubgroupDft};
 use p3_field::{BasedVectorSpace, PrimeCharacteristicRing, TwoAdicField};
 
@@ -9,8 +8,11 @@ use super::{
     ir::{AceDag, NodeId, PeriodicColumnData},
 };
 use crate::{
-    AceError, layout::InputKey, quotient::build_quotient_recomposition_dag,
+    AceError,
+    layout::InputKey,
+    quotient::build_quotient_recomposition_dag,
     randomness::RandomnessPlan,
+    symbolic::{Entry, SymExpr, SymVar},
 };
 
 /// Lower a symbolic expression into DAG nodes using the provided layout.

@@ -6,9 +6,10 @@
 
 use core::marker::PhantomData;
 
-use crate::symbolic::{Entry, SymExpr, SymVar};
 use p3_field::{ExtensionField, Field};
 use p3_miden_air::{MidenAirBuilder, RowMajorMatrix};
+
+use crate::symbolic::{Entry, SymExpr, SymVar};
 
 /// Transition constraints are defined over a 2-row window.
 const TRANSITION_WINDOW_SIZE: usize = 2;

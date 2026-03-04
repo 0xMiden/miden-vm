@@ -1,6 +1,5 @@
 #![allow(dead_code)]
 
-use crate::symbolic::{Entry, SymExpr, SymVar};
 use miden_core::{Felt, field::QuadFelt};
 use p3_dft::{Radix2DitParallel, TwoAdicSubgroupDft};
 use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
@@ -10,6 +9,7 @@ use crate::{
     dag::{NodeId, NodeKind},
     quotient,
     randomness::RandomnessPlan,
+    symbolic::{Entry, SymExpr, SymVar},
 };
 
 /// Deterministic input filler for layout-sized buffers.

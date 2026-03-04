@@ -3,11 +3,12 @@
 //! All expressions live in the extension field (`EF`), eliminating the need
 //! for base-to-extension conversions.
 
-use core::fmt::Debug;
-use core::iter::{Product, Sum};
-use core::marker::PhantomData;
-use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
-
+use core::{
+    fmt::Debug,
+    iter::{Product, Sum},
+    marker::PhantomData,
+    ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign},
+};
 use std::sync::Arc;
 
 use p3_field::{Algebra, ExtensionField, Field, PrimeCharacteristicRing};
