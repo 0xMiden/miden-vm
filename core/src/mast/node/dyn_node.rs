@@ -5,11 +5,12 @@ use core::fmt;
 use serde::{Deserialize, Serialize};
 
 use super::{MastForestContributor, MastNodeExt};
+#[cfg(debug_assertions)]
+use crate::mast::MastNode;
 use crate::{
     Felt, Word,
     mast::{
-        DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode, MastNodeFingerprint,
-        MastNodeId,
+        DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeFingerprint, MastNodeId,
     },
     operations::{OPCODE_DYN, OPCODE_DYNCALL},
     prettier::{Document, PrettyPrint, const_text, nl},
