@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.21.2 (tbd)
+## 0.21.2 (2026-03-04)
 
 - Removes `features = serde` from `miden-core` in `miden-air` to avoid unconditionally enabling the `serde` dependency  ([#2767](https://github.com/0xMiden/miden-vm/pull/2767)).
 
