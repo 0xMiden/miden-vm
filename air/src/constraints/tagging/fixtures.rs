@@ -2108,6 +2108,166 @@ pub fn current_group_expected() -> Vec<EvalRecord> {
             namespace: "chiplets.bus.wiring.transition",
             value: QuadFelt::new([Felt::new(7613678356270986878), Felt::new(10445474671979834467)]),
         },
+        EvalRecord {
+            id: 417,
+            namespace: "public_inputs.stack_input",
+            value: QuadFelt::new([Felt::new(15272471560572797098), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 418,
+            namespace: "public_inputs.stack_input",
+            value: QuadFelt::new([Felt::new(6210121216967517740), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 419,
+            namespace: "public_inputs.stack_input",
+            value: QuadFelt::new([Felt::new(6183121070077706579), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 420,
+            namespace: "public_inputs.stack_input",
+            value: QuadFelt::new([Felt::new(9532591940374591279), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 421,
+            namespace: "public_inputs.stack_input",
+            value: QuadFelt::new([Felt::new(6543026845990824540), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 422,
+            namespace: "public_inputs.stack_input",
+            value: QuadFelt::new([Felt::new(12968646586941648028), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 423,
+            namespace: "public_inputs.stack_input",
+            value: QuadFelt::new([Felt::new(15417838146196464330), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 424,
+            namespace: "public_inputs.stack_input",
+            value: QuadFelt::new([Felt::new(13833104913151358010), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 425,
+            namespace: "public_inputs.stack_input",
+            value: QuadFelt::new([Felt::new(16618206067970158350), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 426,
+            namespace: "public_inputs.stack_input",
+            value: QuadFelt::new([Felt::new(4151771141262045661), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 427,
+            namespace: "public_inputs.stack_input",
+            value: QuadFelt::new([Felt::new(10573320072889417521), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 428,
+            namespace: "public_inputs.stack_input",
+            value: QuadFelt::new([Felt::new(10186179372804063393), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 429,
+            namespace: "public_inputs.stack_input",
+            value: QuadFelt::new([Felt::new(4590904619046098580), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 430,
+            namespace: "public_inputs.stack_input",
+            value: QuadFelt::new([Felt::new(4720108777520454648), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 431,
+            namespace: "public_inputs.stack_input",
+            value: QuadFelt::new([Felt::new(1104703905961606104), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 432,
+            namespace: "public_inputs.stack_input",
+            value: QuadFelt::new([Felt::new(4555570289354185559), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 433,
+            namespace: "public_inputs.stack_output",
+            value: QuadFelt::new([Felt::new(4934304800106382014), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 434,
+            namespace: "public_inputs.stack_output",
+            value: QuadFelt::new([Felt::new(5378514856609319392), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 435,
+            namespace: "public_inputs.stack_output",
+            value: QuadFelt::new([Felt::new(17190327489693035335), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 436,
+            namespace: "public_inputs.stack_output",
+            value: QuadFelt::new([Felt::new(12600879734326452251), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 437,
+            namespace: "public_inputs.stack_output",
+            value: QuadFelt::new([Felt::new(5557099402378706294), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 438,
+            namespace: "public_inputs.stack_output",
+            value: QuadFelt::new([Felt::new(13124668006842155196), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 439,
+            namespace: "public_inputs.stack_output",
+            value: QuadFelt::new([Felt::new(17115224159882577972), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 440,
+            namespace: "public_inputs.stack_output",
+            value: QuadFelt::new([Felt::new(329687429495640731), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 441,
+            namespace: "public_inputs.stack_output",
+            value: QuadFelt::new([Felt::new(17291436379366401128), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 442,
+            namespace: "public_inputs.stack_output",
+            value: QuadFelt::new([Felt::new(6803320890344610422), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 443,
+            namespace: "public_inputs.stack_output",
+            value: QuadFelt::new([Felt::new(11244089584150196777), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 444,
+            namespace: "public_inputs.stack_output",
+            value: QuadFelt::new([Felt::new(4009248599872349722), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 445,
+            namespace: "public_inputs.stack_output",
+            value: QuadFelt::new([Felt::new(16110944964025361102), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 446,
+            namespace: "public_inputs.stack_output",
+            value: QuadFelt::new([Felt::new(15140047176671544897), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 447,
+            namespace: "public_inputs.stack_output",
+            value: QuadFelt::new([Felt::new(16756664313597184040), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 448,
+            namespace: "public_inputs.stack_output",
+            value: QuadFelt::new([Felt::new(2298685071572703448), Felt::new(0)]),
+        },
     ]
 }
 

@@ -69,13 +69,17 @@ impl OodEvalAirBuilder {
         let transition = rng.next_felt();
         let periodic_values = (0..bitwise::NUM_PERIODIC_COLUMNS).map(|_| rng.next_felt()).collect();
 
+        // Generate enough random public values for the boundary constraints.
+        // Minimum tail: 36 elements (16 SI + 16 SO + 4 PC transcript state) + 4 program hash.
+        let public_values = (0..40).map(|_| rng.next_felt()).collect();
+
         Self {
             main,
             preprocessed,
             permutation,
             permutation_randomness,
             aux_bus_boundary_values,
-            public_values: Vec::new(),
+            public_values,
             periodic_values,
             first_row,
             last_row,
