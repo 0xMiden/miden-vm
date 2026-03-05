@@ -15,11 +15,7 @@ use miden_air::trace::{
         STACK_R0_RANGE, STACK_R1_RANGE, STACK_TAG_RANGE,
     },
 };
-use miden_core::{
-    Felt, ONE, WORD_SIZE, ZERO,
-    field::ExtensionField,
-    operations::{OPCODE_CALL, OPCODE_JOIN, OPCODE_LOOP, OPCODE_SPLIT},
-};
+use miden_core::{Felt, ONE, WORD_SIZE, ZERO, field::ExtensionField, operations::opcodes};
 
 use super::get_op_label;
 use crate::{
@@ -759,10 +755,10 @@ where
     fn source(&self) -> &str {
         let op_code = self.op_code.as_canonical_u64() as u8;
         match op_code {
-            OPCODE_JOIN => "join",
-            OPCODE_SPLIT => "split",
-            OPCODE_LOOP => "loop",
-            OPCODE_CALL => "call",
+            opcodes::JOIN => "join",
+            opcodes::SPLIT => "split",
+            opcodes::LOOP => "loop",
+            opcodes::CALL => "call",
             _ => panic!("unexpected opcode: {op_code}"),
         }
     }
