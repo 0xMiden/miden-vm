@@ -350,6 +350,12 @@ proptest! {
             assert!(batch.num_groups <= BATCH_SIZE);
             assert!(batch.num_groups.is_power_of_two());
         }
+        // All non-final batches must be full.
+        for (idx, batch) in batches.iter().enumerate() {
+            if idx + 1 < batches.len() {
+                assert_eq!(batch.num_groups, BATCH_SIZE);
+            }
+        }
 
         // The total number of operations should be preserved, modulo padding
         let total_ops_from_batches: usize = batches.iter().map(|batch| {
