@@ -4,6 +4,7 @@ use miden_air::trace::MIN_TRACE_LEN;
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_core::{
     ONE, assert_matches,
+    events::SystemEvent,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
         MastForestContributor,
@@ -22,6 +23,39 @@ mod all_ops;
 mod fast_decorator_execution_tests;
 mod masm_consistency;
 mod memory;
+
+#[test]
+fn stack_get_word_out_of_bounds_read() {
+    // This event reads a word whose last felt is at index 16, which we will set to be out of bounds
+    // in the stack buffer.
+    const SYS_HQWORD_TO_MAP_EVENT_ID: u64 = SystemEvent::HqwordToMap.event_id().as_u64();
+
+    let program_source = format!(
+        "
+    begin
+        repeat.{} drop end
+
+        push.{SYS_HQWORD_TO_MAP_EVENT_ID}
+        swap
+        drop
+
+        emit
+    end
+    ",
+        INITIAL_STACK_TOP_IDX - MIN_STACK_DEPTH
+    );
+
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let program = Assembler::new(source_manager)
+        .assemble_program(program_source)
+        .expect("program should assemble");
+
+    let mut host = DefaultHost::default();
+    let processor = FastProcessor::new(StackInputs::default());
+
+    // Should not panic
+    processor.execute_sync(&program, &mut host).unwrap();
+}
 
 /// Ensures that the stack is correctly reset in the buffer when the stack is reset in the buffer
 /// as a result of underflow.
