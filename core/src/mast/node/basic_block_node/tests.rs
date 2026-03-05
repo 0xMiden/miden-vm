@@ -329,6 +329,13 @@ fn build_group_chunks(batches: &[OpBatch]) -> impl Iterator<Item = &[Operation]>
     batches.iter().flat_map(|opbatch| opbatch.group_chunks())
 }
 
+fn basic_block_from_batch(batch: OpBatch) -> BasicBlockNode {
+    let digest = hasher::hash_elements(batch.groups());
+    BasicBlockNodeBuilder::from_op_batches(vec![batch], Vec::new(), digest)
+        .build()
+        .expect("basic block should build")
+}
+
 // PROPTESTS FOR BATCH CREATION INVARIANTS
 // ================================================================================================
 
@@ -415,6 +422,62 @@ proptest! {
             }
         }
     }
+}
+
+#[test]
+fn test_validate_immediate_commitment_rejects_opcode_group_mismatch() {
+    let ops = vec![Operation::Add];
+    let indptr = [0usize, 1, 1, 1, 1, 1, 1, 1, 1];
+    let mut groups = [ZERO; BATCH_SIZE];
+    groups[0] = ZERO;
+    let batch = OpBatch::new_from_parts(ops, indptr, [false; BATCH_SIZE], groups, 1);
+
+    let node = basic_block_from_batch(batch);
+    let err = node.validate_batch_invariants().unwrap_err();
+    assert!(err.contains("committed opcode group"));
+}
+
+#[test]
+fn test_validate_immediate_commitment_rejects_immediate_value_mismatch() {
+    let imm = Felt::new(1);
+    let ops = vec![Operation::Push(imm), Operation::Add];
+    let indptr = [0usize, 2, 2, 2, 2, 2, 2, 2, 2];
+    let mut groups = [ZERO; BATCH_SIZE];
+    groups[0] = build_group(&ops);
+    groups[1] = Felt::new(2);
+    let batch = OpBatch::new_from_parts(ops, indptr, [false; BATCH_SIZE], groups, 2);
+
+    let node = basic_block_from_batch(batch);
+    let err = node.validate_batch_invariants().unwrap_err();
+    assert!(err.contains("push immediate value mismatch"));
+}
+
+#[test]
+fn test_validate_immediate_commitment_rejects_overlap_with_op_group() {
+    let ops = vec![Operation::Push(ONE), Operation::Add, Operation::Add];
+    let indptr = [0usize, 2, 3, 3, 3, 3, 3, 3, 3];
+    let mut groups = [ZERO; BATCH_SIZE];
+    groups[0] = build_group(&ops[..2]);
+    groups[1] = build_group(&ops[2..3]);
+    let batch = OpBatch::new_from_parts(ops, indptr, [false; BATCH_SIZE], groups, 2);
+
+    let node = basic_block_from_batch(batch);
+    let err = node.validate_batch_invariants().unwrap_err();
+    assert!(err.contains("overlaps operation group"));
+}
+
+#[test]
+fn test_validate_immediate_commitment_rejects_nonzero_empty_group() {
+    let ops = vec![Operation::Add];
+    let indptr = [0usize, 1, 1, 1, 1, 1, 1, 1, 1];
+    let mut groups = [ZERO; BATCH_SIZE];
+    groups[0] = build_group(&ops);
+    groups[1] = Felt::new(9);
+    let batch = OpBatch::new_from_parts(ops, indptr, [false; BATCH_SIZE], groups, 2);
+
+    let node = basic_block_from_batch(batch);
+    let err = node.validate_batch_invariants().unwrap_err();
+    assert!(err.contains("empty group must be zero"));
 }
 
 fn decorator_strategy(
