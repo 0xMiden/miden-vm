@@ -90,7 +90,9 @@ pub async fn prove(
         kernel_digests.iter().map(|w| &**w as &[_]).collect();
 
     // Create AIR and aux trace builder adapter
-    let air = ProcessorAir;
+    let air = ProcessorAir {
+        num_kernel_procedures: kernel_digests.len(),
+    };
     let aux_builder = trace.aux_trace_builders().clone();
 
     // Compute log2 of trace height (needed by verifier)

@@ -3,10 +3,9 @@
 use alloc::vec::Vec;
 
 use miden_core::{Felt, field::QuadFelt};
-use p3_air::{AirBuilder, AirBuilderWithPublicValues};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_miden_lifted_air::{
-    ExtensionBuilder, LiftedAirBuilder, PeriodicAirBuilder, PermutationAirBuilder,
+    AirBuilder, ExtensionBuilder, PeriodicAirBuilder, PermutationAirBuilder,
 };
 
 use super::{ids::TAG_TOTAL_COUNT, state};
@@ -132,6 +131,7 @@ impl AirBuilder for OodEvalAirBuilder {
     type Expr = Felt;
     type Var = Felt;
     type M = RowMajorMatrix<Felt>;
+    type PublicVar = Felt;
 
     fn main(&self) -> Self::M {
         self.main.clone()
@@ -158,10 +158,6 @@ impl AirBuilder for OodEvalAirBuilder {
         let value = QuadFelt::from(x.into());
         self.record(id, namespace, value);
     }
-}
-
-impl AirBuilderWithPublicValues for OodEvalAirBuilder {
-    type PublicVar = Felt;
 
     fn public_values(&self) -> &[Self::PublicVar] {
         &self.public_values
@@ -186,6 +182,7 @@ impl ExtensionBuilder for OodEvalAirBuilder {
 impl PermutationAirBuilder for OodEvalAirBuilder {
     type MP = RowMajorMatrix<QuadFelt>;
     type RandomVar = QuadFelt;
+    type PermutationVal = QuadFelt;
 
     fn permutation(&self) -> Self::MP {
         self.permutation.clone()
@@ -194,6 +191,10 @@ impl PermutationAirBuilder for OodEvalAirBuilder {
     fn permutation_randomness(&self) -> &[Self::RandomVar] {
         &self.permutation_randomness
     }
+
+    fn permutation_values(&self) -> &[Self::PermutationVal] {
+        &self.aux_bus_boundary_values
+    }
 }
 
 impl PeriodicAirBuilder for OodEvalAirBuilder {
@@ -201,12 +202,6 @@ impl PeriodicAirBuilder for OodEvalAirBuilder {
 
     fn periodic_values(&self) -> &[Self::PeriodicVar] {
         &self.periodic_values
-    }
-}
-
-impl LiftedAirBuilder for OodEvalAirBuilder {
-    fn aux_values(&self) -> &[Self::VarEF] {
-        &self.aux_bus_boundary_values
     }
 }
 
@@ -260,7 +255,7 @@ mod tests {
     fn run_group_parity_test(expected: Vec<EvalRecord>) {
         assert_eq!(expected.len(), TAG_TOTAL_COUNT);
         let mut builder = OodEvalAirBuilder::new(OOD_SEED);
-        let air = ProcessorAir;
+        let air = ProcessorAir { num_kernel_procedures: 0 };
         LiftedAir::<Felt, QuadFelt>::eval(&air, &mut builder);
         builder.assert_complete();
 

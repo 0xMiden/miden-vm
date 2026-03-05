@@ -283,11 +283,8 @@ impl<EF: ExtensionField<Felt>> AuxBuilder<Felt, EF> for AuxTraceBuilders {
         let main_trace_col_major = {
             let num_rows = main.height();
             let transposed = main.transpose();
-            let columns: Vec<Vec<Felt>> = transposed
-                .values
-                .chunks_exact(num_rows)
-                .map(|c| c.to_vec())
-                .collect();
+            let columns: Vec<Vec<Felt>> =
+                transposed.values.chunks_exact(num_rows).map(|c| c.to_vec()).collect();
             let col_matrix = ColMatrix::new(columns);
             let last_program_row = (1..num_rows)
                 .find(|&i| {

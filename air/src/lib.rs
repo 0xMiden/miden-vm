@@ -32,9 +32,8 @@ mod export {
         serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
         utils::ToElements,
     };
-    pub use p3_air::{AirBuilder, BaseAir, BaseAirWithPublicValues};
     pub use p3_miden_lifted_air::{
-        AirWithPeriodicColumns, AuxBuilder, LiftedAir, LiftedAirBuilder,
+        AirBuilder, AirWithPeriodicColumns, AuxBuilder, BaseAir, LiftedAir, LiftedAirBuilder,
     };
 }
 
@@ -176,7 +175,10 @@ const PV_TRANSCRIPT_STATE: usize = NUM_PUBLIC_VALUES - WORD_SIZE;
 /// Auxiliary trace building is handled separately via [`AuxBuilder`].
 /// Public-input-dependent checks are performed in [`LiftedAir::reduced_aux_values`]
 /// by parsing the `public_values` slice directly.
-pub struct ProcessorAir;
+pub struct ProcessorAir {
+    /// Number of kernel procedure digests (variable-length public inputs).
+    pub num_kernel_procedures: usize,
+}
 
 // --- Upstream trait impls for ProcessorAir ---
 
@@ -184,9 +186,7 @@ impl BaseAir<Felt> for ProcessorAir {
     fn width(&self) -> usize {
         TRACE_WIDTH
     }
-}
 
-impl BaseAirWithPublicValues<Felt> for ProcessorAir {
     fn num_public_values(&self) -> usize {
         NUM_PUBLIC_VALUES
     }
@@ -213,6 +213,10 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
 
     fn num_aux_values(&self) -> usize {
         AUX_TRACE_WIDTH
+    }
+
+    fn num_var_len_public_inputs(&self) -> usize {
+        self.num_kernel_procedures
     }
 
     fn reduced_aux_values(

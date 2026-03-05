@@ -141,7 +141,9 @@ fn verify_stark(
     // Each kernel digest (Word = 4 Felts) is one entry in var_len_public_inputs.
     let var_len_public_inputs: Vec<&[Felt]> = kernel_digests.iter().map(|d| &**d as &[_]).collect();
 
-    let air = ProcessorAir;
+    let air = ProcessorAir {
+        num_kernel_procedures: kernel_digests.len(),
+    };
     let log_height = log_trace_height as usize;
     match hash_fn {
         HashFunction::Blake3_256 => config::verify(

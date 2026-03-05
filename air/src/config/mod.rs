@@ -161,10 +161,11 @@ mod tests {
     use alloc::{vec, vec::Vec};
 
     use miden_core::Felt;
-    use p3_air::{AirBuilder, BaseAir, BaseAirWithPublicValues};
     use p3_field::{ExtensionField, Field};
     use p3_matrix::{Matrix, dense::RowMajorMatrix};
-    use p3_miden_lifted_air::{AirWithPeriodicColumns, AuxBuilder, LiftedAir, LiftedAirBuilder};
+    use p3_miden_lifted_air::{
+        AirBuilder, AirWithPeriodicColumns, AuxBuilder, BaseAir, LiftedAir, LiftedAirBuilder,
+    };
 
     /// Trivial AIR: single column, constrain next == local (constant trace).
     struct ConstantAir;
@@ -173,8 +174,11 @@ mod tests {
         fn width(&self) -> usize {
             1
         }
+
+        fn num_public_values(&self) -> usize {
+            0
+        }
     }
-    impl BaseAirWithPublicValues<Felt> for ConstantAir {}
     impl AirWithPeriodicColumns<Felt> for ConstantAir {
         fn periodic_columns(&self) -> &[Vec<Felt>] {
             &[]
@@ -197,7 +201,7 @@ mod tests {
             let main = builder.main();
             let local = main.row_slice(0).unwrap();
             let next = main.row_slice(1).unwrap();
-            let diff: AB::Expr = next[0].clone().into() - local[0].clone().into();
+            let diff: AB::Expr = next[0].into() - local[0].into();
             builder.when_transition().assert_zero(diff);
         }
     }
