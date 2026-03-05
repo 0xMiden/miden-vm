@@ -1,5 +1,5 @@
 use miden_air::{Felt, trace::decoder::NUM_OP_BITS};
-use miden_core::{mast::BasicBlockNode, operations::OPCODE_PUSH};
+use miden_core::{mast::BasicBlockNode, operations::opcodes};
 
 use super::CORE_TRACE_WIDTH;
 
@@ -110,7 +110,7 @@ impl BasicBlockContext {
                     op_batches[batch_index].groups()[current_op_group_idx].as_canonical_u64();
                 for _ in 0..op_idx_in_group {
                     let current_op = (current_op_group & 0b1111111) as u8;
-                    if current_op == OPCODE_PUSH {
+                    if current_op == opcodes::PUSH {
                         groups_consumed += 1;
                     }
 

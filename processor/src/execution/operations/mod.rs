@@ -64,21 +64,6 @@ where
             panic!("emit instruction requires async, so is not supported by execute_op()")
         },
 
-        // ----- flow control operations ------------------------------------------------------
-        // control flow operations are never executed directly
-        Operation::Join => unreachable!("control flow operation"),
-        Operation::Split => unreachable!("control flow operation"),
-        Operation::Loop => unreachable!("control flow operation"),
-        Operation::Call => unreachable!("control flow operation"),
-        Operation::SysCall => unreachable!("control flow operation"),
-        Operation::Dyn => unreachable!("control flow operation"),
-        Operation::Dyncall => unreachable!("control flow operation"),
-        Operation::Span => unreachable!("control flow operation"),
-        Operation::Repeat => unreachable!("control flow operation"),
-        Operation::Respan => unreachable!("control flow operation"),
-        Operation::End => unreachable!("control flow operation"),
-        Operation::Halt => unreachable!("control flow operation"),
-
         // ----- field operations -------------------------------------------------------------
         Operation::Add => field_ops::op_add(processor),
         Operation::Neg => field_ops::op_neg(processor),

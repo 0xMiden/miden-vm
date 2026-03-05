@@ -19,7 +19,7 @@ use miden_core::{
     ONE, Word, ZERO,
     field::batch_inversion_allow_zeros,
     mast::MastForest,
-    operations::Operation,
+    operations::opcodes,
     program::{Kernel, MIN_STACK_DEPTH, ProgramInfo},
     utils::{ColMatrix, uninit_vector},
 };
@@ -380,7 +380,7 @@ fn push_halt_opcode_row(
     core_trace_columns[DECODER_TRACE_OFFSET + ADDR_COL_IDX].push(ZERO);
 
     // Pad op_bits columns with HALT opcode bits
-    let halt_opcode = Operation::Halt.op_code();
+    let halt_opcode = opcodes::HALT;
     for bit_idx in 0..NUM_OP_BITS {
         let bit_value = Felt::from_u8((halt_opcode >> bit_idx) & 1);
         core_trace_columns[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + bit_idx].push(bit_value);
@@ -620,7 +620,7 @@ fn pad_trace_columns(trace_columns: &mut [Vec<Felt>], main_trace_len: usize) {
     trace_columns[DECODER_TRACE_OFFSET + ADDR_COL_IDX].resize(main_trace_len, ZERO);
 
     // Pad op_bits columns with HALT opcode bits
-    let halt_opcode = Operation::Halt.op_code();
+    let halt_opcode = opcodes::HALT;
     for i in 0..NUM_OP_BITS {
         let bit_value = Felt::from_u8((halt_opcode >> i) & 1);
         trace_columns[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + i].resize(main_trace_len, bit_value);
