@@ -1,12 +1,5 @@
 use miden_air::trace::RowIndex;
-use miden_core::{
-    Word, ZERO,
-    field::ExtensionField,
-    operations::{
-        OPCODE_CALL, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END, OPCODE_HALT, OPCODE_JOIN, OPCODE_LOOP,
-        OPCODE_REPEAT, OPCODE_SPLIT, OPCODE_SYSCALL,
-    },
-};
+use miden_core::{Word, ZERO, field::ExtensionField, operations::opcodes};
 
 use super::{AuxColumnBuilder, Felt, MainTrace, ONE};
 use crate::{debug::BusDebugger, trace::utils::Challenges};
@@ -49,7 +42,7 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BlockHashTableColumnBuilde
         let op_code = main_trace.get_op_code(row).as_canonical_u64() as u8;
 
         match op_code {
-            OPCODE_END => BlockHashTableRow::from_end(main_trace, row).collapse(challenges),
+            opcodes::END => BlockHashTableRow::from_end(main_trace, row).collapse(challenges),
             _ => E::ONE,
         }
     }
@@ -65,18 +58,18 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BlockHashTableColumnBuilde
         let op_code = main_trace.get_op_code(row).as_canonical_u64() as u8;
 
         match op_code {
-            OPCODE_JOIN => {
+            opcodes::JOIN => {
                 let left_child_row = BlockHashTableRow::from_join(main_trace, row, true);
                 let right_child_row = BlockHashTableRow::from_join(main_trace, row, false);
 
                 left_child_row.collapse(challenges) * right_child_row.collapse(challenges)
             },
-            OPCODE_SPLIT => BlockHashTableRow::from_split(main_trace, row).collapse(challenges),
-            OPCODE_LOOP => BlockHashTableRow::from_loop(main_trace, row)
+            opcodes::SPLIT => BlockHashTableRow::from_split(main_trace, row).collapse(challenges),
+            opcodes::LOOP => BlockHashTableRow::from_loop(main_trace, row)
                 .map(|row| row.collapse(challenges))
                 .unwrap_or(E::ONE),
-            OPCODE_REPEAT => BlockHashTableRow::from_repeat(main_trace, row).collapse(challenges),
-            OPCODE_DYN | OPCODE_DYNCALL | OPCODE_CALL | OPCODE_SYSCALL => {
+            opcodes::REPEAT => BlockHashTableRow::from_repeat(main_trace, row).collapse(challenges),
+            opcodes::DYN | opcodes::DYNCALL | opcodes::CALL | opcodes::SYSCALL => {
                 BlockHashTableRow::from_dyn_dyncall_call_syscall(main_trace, row)
                     .collapse(challenges)
             },
@@ -138,9 +131,9 @@ impl BlockHashTableRow {
         //   "second child"
         // - HALT: The end of the program, which a first child can't find itself in (since the
         //   second child needs to execute first)
-        let is_first_child = op_code_next != OPCODE_END
-            && op_code_next != OPCODE_REPEAT
-            && op_code_next != OPCODE_HALT;
+        let is_first_child = op_code_next != opcodes::END
+            && op_code_next != opcodes::REPEAT
+            && op_code_next != opcodes::HALT;
 
         let is_loop_body = match main_trace.is_loop_body_flag(row).as_canonical_u64() {
             0 => false,

@@ -32,14 +32,7 @@
 //! - Air-script: ~/air-script/constraints/chiplets.air
 //! - Processor: processor/src/chiplets/aux_trace/bus/
 
-use miden_core::{
-    FMP_ADDR, FMP_INIT_VALUE,
-    field::PrimeCharacteristicRing,
-    operations::{
-        OPCODE_CALL, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_JOIN, OPCODE_LOOP, OPCODE_SPLIT,
-        OPCODE_SYSCALL,
-    },
-};
+use miden_core::{FMP_ADDR, FMP_INIT_VALUE, field::PrimeCharacteristicRing, operations::opcodes};
 use miden_crypto::stark::{air::MidenAirBuilder, matrix::Matrix};
 
 use crate::{
@@ -1338,11 +1331,11 @@ impl ControlBlockOp {
     /// Returns the opcode value for this control block operation.
     fn opcode(&self) -> u8 {
         match self {
-            ControlBlockOp::Join => OPCODE_JOIN,
-            ControlBlockOp::Split => OPCODE_SPLIT,
-            ControlBlockOp::Loop => OPCODE_LOOP,
-            ControlBlockOp::Call => OPCODE_CALL,
-            ControlBlockOp::Syscall => OPCODE_SYSCALL,
+            ControlBlockOp::Join => opcodes::JOIN,
+            ControlBlockOp::Split => opcodes::SPLIT,
+            ControlBlockOp::Loop => opcodes::LOOP,
+            ControlBlockOp::Call => opcodes::CALL,
+            ControlBlockOp::Syscall => opcodes::SYSCALL,
         }
     }
 }
@@ -1429,7 +1422,7 @@ fn compute_dyn_request<AB: MidenAirBuilder<F = Felt>>(
 ) -> AB::ExprEF {
     // Control block request with zeros for hasher state (callee is dynamic)
     let control_req =
-        compute_control_block_request_zeros::<AB>(local, next, challenges, OPCODE_DYN);
+        compute_control_block_request_zeros::<AB>(local, next, challenges, opcodes::DYN);
 
     // Memory read for callee hash (word read from stack[0] address)
     let callee_hash_req = compute_dyn_callee_hash_read::<AB>(local, challenges);
@@ -1450,7 +1443,7 @@ fn compute_dyncall_request<AB: MidenAirBuilder<F = Felt>>(
 ) -> AB::ExprEF {
     // Control block request with zeros for hasher state (callee is dynamic)
     let control_req =
-        compute_control_block_request_zeros::<AB>(local, next, challenges, OPCODE_DYNCALL);
+        compute_control_block_request_zeros::<AB>(local, next, challenges, opcodes::DYNCALL);
 
     // Memory read for callee hash (word read from stack[0] address)
     let callee_hash_req = compute_dyn_callee_hash_read::<AB>(local, challenges);
