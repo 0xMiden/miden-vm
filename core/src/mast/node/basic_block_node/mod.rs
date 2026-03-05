@@ -627,6 +627,8 @@ impl BasicBlockNode {
             let ops = batch.ops();
             let groups = batch.groups();
 
+            let mut immediate_slots = [false; BATCH_SIZE];
+
             for group_idx in 0..num_groups {
                 let group_start = indptr[group_idx];
                 let group_end = indptr[group_idx + 1];
@@ -675,8 +677,21 @@ impl BasicBlockNode {
                                 batch_idx, next_group_idx
                             ));
                         }
+                        immediate_slots[next_group_idx] = true;
                         next_group_idx += 1;
                     }
+                }
+            }
+
+            for group_idx in 0..num_groups {
+                if indptr[group_idx] == indptr[group_idx + 1]
+                    && !immediate_slots[group_idx]
+                    && groups[group_idx] != ZERO
+                {
+                    return Err(format!(
+                        "Batch {}, group {}: empty group must be zero",
+                        batch_idx, group_idx
+                    ));
                 }
             }
         }
