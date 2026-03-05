@@ -1539,17 +1539,42 @@ fn test_untrusted_forest_rejects_basic_block_indptr_that_breaks_push_immediate_c
 
     let validated_a = match UntrustedMastForest::read_from_bytes(&bytes_a) {
         Ok(untrusted) => untrusted.validate(),
-        Err(_) => return,
+        Err(DeserializationError::InvalidValue(msg)) => {
+            assert!(msg.contains("push immediate"));
+            return;
+        },
+        Err(err) => panic!("unexpected deserialization error: {err:?}"),
     };
     let validated_b = match UntrustedMastForest::read_from_bytes(&bytes_b) {
         Ok(untrusted) => untrusted.validate(),
-        Err(_) => return,
+        Err(DeserializationError::InvalidValue(msg)) => {
+            assert!(msg.contains("push immediate"));
+            return;
+        },
+        Err(err) => panic!("unexpected deserialization error: {err:?}"),
     };
 
     // A fix may choose to reject this encoding at validation time. Either (or both) being `Err`
     // is an acceptable outcome: it prevents the commitment gap.
-    let (Ok(forest_a), Ok(forest_b)) = (validated_a, validated_b) else {
-        return;
+    let (forest_a, forest_b) = match (validated_a, validated_b) {
+        (Ok(forest_a), Ok(forest_b)) => (forest_a, forest_b),
+        (validated_a, validated_b) => {
+            match validated_a {
+                Err(MastForestError::InvalidBatchPadding(_, msg)) => {
+                    assert!(msg.contains("push immediate"));
+                },
+                Err(err) => panic!("unexpected validation error: {err:?}"),
+                Ok(_) => {},
+            }
+            match validated_b {
+                Err(MastForestError::InvalidBatchPadding(_, msg)) => {
+                    assert!(msg.contains("push immediate"));
+                },
+                Err(err) => panic!("unexpected validation error: {err:?}"),
+                Ok(_) => {},
+            }
+            return;
+        },
     };
 
     // If both validate successfully, then their digests must bind to their executed semantics.
