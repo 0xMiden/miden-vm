@@ -17,6 +17,7 @@ use crate::{
 mod op_batch;
 pub use op_batch::OpBatch;
 use op_batch::OpBatchAccumulator;
+pub(crate) use op_batch::collect_immediate_placements;
 
 use super::{MastForestContributor, MastNodeExt};
 
@@ -636,37 +637,23 @@ impl BasicBlockNode {
                     ));
                 }
 
-                let mut next_group_idx = group_idx + 1;
+                let (placements, _next_group_idx) = collect_immediate_placements(
+                    ops,
+                    indptr,
+                    group_idx,
+                    BATCH_SIZE,
+                    Some(num_groups),
+                )
+                .map_err(|err| format!("Batch {}: {}", batch_idx, err))?;
 
-                for op in &ops[group_start..group_end] {
-                    if let Some(imm) = op.imm_value() {
-                        if next_group_idx >= BATCH_SIZE {
-                            return Err(format!(
-                                "Batch {}: push immediate exceeds group slots",
-                                batch_idx
-                            ));
-                        }
-                        if next_group_idx >= num_groups {
-                            return Err(format!(
-                                "Batch {}: push immediate index {} exceeds num_groups {}",
-                                batch_idx, next_group_idx, num_groups
-                            ));
-                        }
-                        if indptr[next_group_idx] != indptr[next_group_idx + 1] {
-                            return Err(format!(
-                                "Batch {}: push immediate overlaps operation group at index {}",
-                                batch_idx, next_group_idx
-                            ));
-                        }
-                        if groups[next_group_idx] != imm {
-                            return Err(format!(
-                                "Batch {}: push immediate value mismatch at index {}",
-                                batch_idx, next_group_idx
-                            ));
-                        }
-                        immediate_slots[next_group_idx] = true;
-                        next_group_idx += 1;
+                for (imm_group_idx, imm_value) in placements {
+                    if groups[imm_group_idx] != imm_value {
+                        return Err(format!(
+                            "Batch {}: push immediate value mismatch at index {}",
+                            batch_idx, imm_group_idx
+                        ));
                     }
+                    immediate_slots[imm_group_idx] = true;
                 }
             }
 
