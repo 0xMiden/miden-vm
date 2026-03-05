@@ -1162,6 +1162,22 @@ fn divmod_divide_by_zero() {
 }
 
 #[test]
+fn divmod_non_u32_limb() {
+    let source = "
+        use miden::core::math::u128
+        begin
+            exec.u128::divmod
+        end
+    ";
+
+    // b has a non-u32 limb (b1 = 2^32 + 1)
+    let non_u32: u64 = (1u64 << 32) + 1;
+    build_test!(source, &[1, non_u32, 0, 0, 42, 0, 0, 0])
+        .execute()
+        .expect_err("not a valid u32");
+}
+
+#[test]
 fn divmod_max_remainder() {
     // a = 2*b - 1 => q = 1, r = b - 1 (maximum possible remainder for this b)
     let b: u128 = 0xffffffff_ffffffff_00000001;

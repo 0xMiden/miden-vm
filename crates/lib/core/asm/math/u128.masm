@@ -1421,40 +1421,61 @@ end
 
 const U128_DIV_EVENT = event("miden::core::math::u128::u128_div")
 
-#! Performs division of two unsigned 128 bit integers discarding the remainder.
+#! Performs division of two unsigned 128-bit integers discarding the remainder.
 #!
-#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
-#! Stack transition is as follows:
-#! [b0, b1, b2, b3, a0, a1, a2, a3, ...] -> [q0, q1, q2, q3, ...], where q = a / b
+#! Inputs:  [b0, b1, b2, b3, a0, a1, a2, a3, ...]
+#! Outputs: [q0, q1, q2, q3, ...]
 #!
-#! Traps on divide by zero.
+#! Where:
+#! - a0..a3 are the 32-bit limbs of the dividend (a0 least significant).
+#! - b0..b3 are the 32-bit limbs of the divisor (b0 least significant).
+#! - q0..q3 are the 32-bit limbs of a / b (q0 least significant).
+#!
+#! Panics if:
+#! - b is zero (divide by zero).
+#!
+#! Invocation: exec
 pub proc div(b: u128, a: u128) -> u128
     exec.divmod
     # divmod returns [r0..r3, q0..q3, ...]; drop r (top word), keep q
     dropw
 end
 
-#! Performs modulo operation of two unsigned 128 bit integers.
+#! Performs modulo operation of two unsigned 128-bit integers.
 #!
-#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
-#! Stack transition is as follows:
-#! [b0, b1, b2, b3, a0, a1, a2, a3, ...] -> [r0, r1, r2, r3, ...], where r = a % b
+#! Inputs:  [b0, b1, b2, b3, a0, a1, a2, a3, ...]
+#! Outputs: [r0, r1, r2, r3, ...]
 #!
-#! Traps on divide by zero.
+#! Where:
+#! - a0..a3 are the 32-bit limbs of the dividend (a0 least significant).
+#! - b0..b3 are the 32-bit limbs of the divisor (b0 least significant).
+#! - r0..r3 are the 32-bit limbs of a % b (r0 least significant).
+#!
+#! Panics if:
+#! - b is zero (divide by zero).
+#!
+#! Invocation: exec
 pub proc mod(b: u128, a: u128) -> u128
     exec.divmod
     # divmod returns [r0..r3, q0..q3, ...]; swap q to top, drop q, keep r
     swapw dropw
 end
 
-#! Performs divmod operation of two unsigned 128 bit integers.
+#! Performs divmod operation of two unsigned 128-bit integers.
 #!
-#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
-#! Stack transition is as follows:
-#! [b0, b1, b2, b3, a0, a1, a2, a3, ...] -> [r0, r1, r2, r3, q0, q1, q2, q3, ...]
-#! where q = a / b, r = a % b.
+#! Inputs:  [b0, b1, b2, b3, a0, a1, a2, a3, ...]
+#! Outputs: [r0, r1, r2, r3, q0, q1, q2, q3, ...]
 #!
-#! Traps on divide by zero.
+#! Where:
+#! - a0..a3 are the 32-bit limbs of the dividend (a0 least significant).
+#! - b0..b3 are the 32-bit limbs of the divisor (b0 least significant).
+#! - q0..q3 are the 32-bit limbs of a / b (q0 least significant).
+#! - r0..r3 are the 32-bit limbs of a % b (r0 least significant).
+#!
+#! Panics if:
+#! - b is zero (divide by zero).
+#!
+#! Invocation: exec
 #!
 #! ## Verification strategy
 #!
