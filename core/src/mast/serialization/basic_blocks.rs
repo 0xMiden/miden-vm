@@ -9,11 +9,11 @@
 //!
 //! **Total**: `ops_size + 4 + (5 * num_batches)` bytes
 
-use alloc::{string::String, vec::Vec};
+use alloc::vec::Vec;
 
 use super::NodeDataOffset;
 use crate::{
-    mast::{BasicBlockNode, OP_GROUP_SIZE},
+    mast::{BasicBlockNode, OP_BATCH_SIZE, OP_GROUP_SIZE, collect_immediate_placements},
     operations::Operation,
     serde::{BudgetedReader, ByteReader, DeserializationError, Serializable, SliceReader},
 };
@@ -249,27 +249,21 @@ impl BasicBlockDataDecoder<'_> {
                         group_value |= opcode << (Operation::OP_BITS * local_op_idx);
                     }
                     groups[array_idx] = Felt::new(group_value);
-                    next_group_idx = array_idx + 1;
 
-                    // Store immediate values from this operation group.
-                    // Indptr is authoritative: immediates must map to empty groups.
-                    for op in &batch_ops[start..end] {
-                        if let Some(imm) = op.imm_value() {
-                            if next_group_idx >= 8 {
-                                return Err(DeserializationError::InvalidValue(String::from(
-                                    "push immediate exceeds group slots",
-                                )));
-                            }
-                            if indptr[next_group_idx] != indptr[next_group_idx + 1] {
-                                return Err(DeserializationError::InvalidValue(format!(
-                                    "push immediate overlaps operation group at index {}",
-                                    next_group_idx
-                                )));
-                            }
-                            groups[next_group_idx] = imm;
-                            next_group_idx += 1;
-                        }
+                    let (placements, next_group_idx_after) = collect_immediate_placements(
+                        &batch_ops,
+                        indptr,
+                        array_idx,
+                        OP_BATCH_SIZE,
+                        None,
+                    )
+                    .map_err(DeserializationError::InvalidValue)?;
+
+                    for (imm_group_idx, imm_value) in placements {
+                        groups[imm_group_idx] = imm_value;
                     }
+
+                    next_group_idx = next_group_idx_after;
                 }
             }
 
