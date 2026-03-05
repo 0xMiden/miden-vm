@@ -616,14 +616,14 @@ fn test_smt_leaf_hash_matches_merkle_store() {
 
     for (leaf_index, leaf) in smt.leaves() {
         let leaf_hash = leaf.hash();
-        let node_index = NodeIndex::new(SMT_DEPTH, leaf_index.value()).unwrap();
+        let node_index = NodeIndex::new(SMT_DEPTH, leaf_index.position()).unwrap();
 
         let node_hash = store.get_node(root, node_index).unwrap();
         assert_eq!(
             node_hash,
             leaf_hash,
             "leaf hash mismatch at index {}: expected {:?}, got {:?}",
-            leaf_index.value(),
+            leaf_index.position(),
             leaf_hash,
             node_hash
         );
