@@ -247,7 +247,7 @@ mod fast_parallel {
         let fast_stack_outputs = execution_output.stack;
 
         // Build trace using parallel trace generation
-        let trace = build_trace(execution_output, trace_context, program.to_info());
+        let trace = build_trace(execution_output, trace_context, program.to_info()).unwrap();
 
         // Convert trace to row-major format for proving
         let trace_matrix = execution_trace_to_row_major(&trace);
