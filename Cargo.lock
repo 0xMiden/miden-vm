@@ -1218,6 +1218,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
+name = "miden-ace-codegen"
+version = "0.21.0"
+dependencies = [
+ "miden-air",
+ "miden-core",
+ "p3-dft",
+ "p3-field",
+ "p3-miden-air",
+ "thiserror",
+]
+
+[[package]]
 name = "miden-air"
 version = "0.22.0"
 dependencies = [
@@ -1304,6 +1316,7 @@ dependencies = [
  "criterion",
  "env_logger",
  "fs-err",
+ "miden-ace-codegen",
  "miden-air",
  "miden-assembly",
  "miden-core",
@@ -1977,7 +1990,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-air"
 version = "0.4.2"
-source = "git+https://github.com/0xMiden/p3-miden?branch=main#ea0588cdc7265f9d754726ce17f6e326fead81d3"
+source = "git+https://github.com/0xMiden/p3-miden?branch=main#32fba20abd9bc099e0342abeb06e5df46002fbe7"
 dependencies = [
  "p3-air",
  "p3-field",
@@ -1987,7 +2000,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-fri"
 version = "0.4.2"
-source = "git+https://github.com/0xMiden/p3-miden?branch=main#ea0588cdc7265f9d754726ce17f6e326fead81d3"
+source = "git+https://github.com/0xMiden/p3-miden?branch=main#32fba20abd9bc099e0342abeb06e5df46002fbe7"
 dependencies = [
  "itertools 0.14.0",
  "p3-challenger",
@@ -2006,7 +2019,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-prover"
 version = "0.4.2"
-source = "git+https://github.com/0xMiden/p3-miden?branch=main#ea0588cdc7265f9d754726ce17f6e326fead81d3"
+source = "git+https://github.com/0xMiden/p3-miden?branch=main#32fba20abd9bc099e0342abeb06e5df46002fbe7"
 dependencies = [
  "itertools 0.14.0",
  "p3-challenger",
@@ -2026,7 +2039,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-uni-stark"
 version = "0.4.2"
-source = "git+https://github.com/0xMiden/p3-miden?branch=main#ea0588cdc7265f9d754726ce17f6e326fead81d3"
+source = "git+https://github.com/0xMiden/p3-miden?branch=main#32fba20abd9bc099e0342abeb06e5df46002fbe7"
 dependencies = [
  "itertools 0.14.0",
  "p3-air",

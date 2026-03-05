@@ -1,7 +1,7 @@
 use alloc::{string::ToString, vec::Vec};
 use core::{mem::MaybeUninit, slice};
 
-use miden_air::trace::MainTrace;
+use miden_air::trace::{MAX_MESSAGE_WIDTH, MainTrace};
 
 use super::chiplets::Chiplets;
 use crate::{
@@ -230,7 +230,7 @@ pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
     fn get_requests_at(
         &self,
         main_trace: &MainTrace,
-        alphas: &[E],
+        challenges: &Challenges<E>,
         row: RowIndex,
         debugger: &mut BusDebugger<E>,
     ) -> E;
@@ -238,7 +238,7 @@ pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
     fn get_responses_at(
         &self,
         main_trace: &MainTrace,
-        alphas: &[E],
+        challenges: &Challenges<E>,
         row: RowIndex,
         debugger: &mut BusDebugger<E>,
     ) -> E;
@@ -249,7 +249,7 @@ pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
     fn init_requests(
         &self,
         _main_trace: &MainTrace,
-        _alphas: &[E],
+        _challenges: &Challenges<E>,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         E::ONE
@@ -258,22 +258,22 @@ pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
     fn init_responses(
         &self,
         _main_trace: &MainTrace,
-        _alphas: &[E],
+        _challenges: &Challenges<E>,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         E::ONE
     }
 
     /// Builds the chiplets bus auxiliary trace column.
-    fn build_aux_column(&self, main_trace: &MainTrace, alphas: &[E]) -> Vec<E> {
+    fn build_aux_column(&self, main_trace: &MainTrace, challenges: &Challenges<E>) -> Vec<E> {
         let mut bus_debugger = BusDebugger::new("chiplets bus".to_string());
 
         let mut requests: Vec<MaybeUninit<E>> = uninit_vector(main_trace.num_rows());
-        let init_req = self.init_requests(main_trace, alphas, &mut bus_debugger);
+        let init_req = self.init_requests(main_trace, challenges, &mut bus_debugger);
         requests[0].write(init_req);
 
         let mut responses_prod: Vec<MaybeUninit<E>> = uninit_vector(main_trace.num_rows());
-        let mut prev_prod = self.init_responses(main_trace, alphas, &mut bus_debugger);
+        let mut prev_prod = self.init_responses(main_trace, challenges, &mut bus_debugger);
         responses_prod[0].write(prev_prod);
 
         let mut requests_running_prod = init_req;
@@ -282,11 +282,11 @@ pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
         for row_idx in 0..main_trace.num_rows() - 1 {
             let row = row_idx.into();
 
-            let response = self.get_responses_at(main_trace, alphas, row, &mut bus_debugger);
+            let response = self.get_responses_at(main_trace, challenges, row, &mut bus_debugger);
             prev_prod *= response;
             responses_prod[row_idx + 1].write(prev_prod);
 
-            let request = self.get_requests_at(main_trace, alphas, row, &mut bus_debugger);
+            let request = self.get_requests_at(main_trace, challenges, row, &mut bus_debugger);
             requests[row_idx + 1].write(request);
             requests_running_prod *= request;
         }
@@ -306,6 +306,70 @@ pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
         assert!(bus_debugger.is_empty(), "{bus_debugger}");
 
         result_aux_column
+    }
+}
+
+// AUX CHALLENGES
+// ================================================================================================
+
+/// Encodes multiset/LogUp contributions as **alpha + <beta, message>**
+///
+/// Structure:
+/// - `alpha`: randomness base (alpha)
+/// - `beta_powers`: powers of beta [beta^0, beta^1, beta^2, ..., beta^(MAX_MESSAGE_WIDTH-2)]
+///
+/// The challenges are derived from permutation randomness:
+/// - `alpha = challenges[0]`
+/// - `beta  = challenges[1]`
+///
+/// This structure is shared with the AIR's `Challenges<AB, N>` for constraint evaluation.
+pub(crate) struct Challenges<E: ExtensionField<Felt>> {
+    pub(crate) alpha: E,
+    pub(crate) beta_powers: [E; MAX_MESSAGE_WIDTH - 1],
+}
+
+impl<E: ExtensionField<Felt>> Challenges<E> {
+    pub fn new(challenges: &[E]) -> Self {
+        assert!(challenges.len() >= 2, "need at least alpha and beta");
+        let alpha = challenges[0];
+        let beta = challenges[1];
+
+        let mut beta_powers = core::array::from_fn(|_| E::ONE);
+        // beta_powers[0] = E::ONE  (beta^0) — already set by from_fn
+        for i in 1..beta_powers.len() {
+            beta_powers[i] = beta_powers[i - 1] * beta;
+        }
+        Self { alpha, beta_powers }
+    }
+
+    /// Encodes as **alpha + <beta, message>** with K consecutive elements.
+    #[inline(always)]
+    pub fn encode<const K: usize>(&self, elems: [Felt; K]) -> E {
+        const { assert!(K < MAX_MESSAGE_WIDTH, "Message length exceeds beta_powers capacity") };
+        let mut acc = self.alpha;
+        for (i, &elem) in elems.iter().enumerate() {
+            acc += self.beta_powers[i] * elem;
+        }
+        acc
+    }
+
+    /// Encodes as **alpha + <beta, message>** using a layout array and separate values.
+    ///
+    /// `layout[i]` gives the beta-power position for `values[i]`.
+    #[inline(always)]
+    pub fn encode_sparse<const K: usize>(&self, layout: [usize; K], values: [Felt; K]) -> E {
+        let mut acc = self.alpha;
+        for i in 0..K {
+            let idx = layout[i];
+            debug_assert!(
+                idx < self.beta_powers.len(),
+                "encode_sparse index {} exceeds beta_powers length ({})",
+                idx,
+                self.beta_powers.len()
+            );
+            acc += self.beta_powers[idx] * values[i];
+        }
+        acc
     }
 }
 

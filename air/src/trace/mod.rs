@@ -183,6 +183,56 @@ pub const ACE_CHIPLET_WIRING_BUS_RANGE: Range<usize> =
 /// Auxiliary trace segment width.
 pub const AUX_TRACE_WIDTH: usize = ACE_CHIPLET_WIRING_BUS_RANGE.end;
 
-/// Number of random elements available to the prover after the commitment to the main trace
-/// segment.
-pub const AUX_TRACE_RAND_ELEMENTS: usize = 16;
+/// Number of random challenges used for auxiliary trace constraints.
+pub const AUX_TRACE_RAND_CHALLENGES: usize = 2;
+
+/// Maximum number of coefficients used in bus message encodings.
+pub const MAX_MESSAGE_WIDTH: usize = 16;
+
+/// Bus message coefficient indices.
+///
+/// These define the standard positions for encoding bus messages using the pattern:
+/// `alpha + sum(beta_powers[i] * elem[i])` where:
+/// - `alpha` is the randomness base (accessed directly as `.alpha`)
+/// - `beta_powers[i] = beta^i` are the powers of beta
+///
+/// These indices refer to positions in the `beta_powers` array, not including alpha.
+///
+/// This layout is shared between:
+/// - AIR constraint builders (symbolic expressions): `Challenges<AB, N>`
+/// - Processor auxiliary trace builders (concrete field elements): `Challenges<E>`
+pub mod bus_message {
+    /// Label coefficient index: `beta_powers[0] = beta^0`.
+    ///
+    /// Used for transition type/operation label.
+    pub const LABEL_IDX: usize = 0;
+
+    /// Address coefficient index: `beta_powers[1] = beta^1`.
+    ///
+    /// Used for chiplet address.
+    pub const ADDR_IDX: usize = 1;
+
+    /// Node index coefficient index: `beta_powers[2] = beta^2`.
+    ///
+    /// Used for Merkle path position. Set to 0 for non-Merkle operations (SPAN, RESPAN, HPERM,
+    /// etc.).
+    pub const NODE_INDEX_IDX: usize = 2;
+
+    /// State start coefficient index: `beta_powers[3] = beta^3`.
+    ///
+    /// Beginning of hasher state. Hasher state occupies 8 consecutive coefficients:
+    /// `beta_powers[3..11]` (beta^3..beta^10) for `state[0..7]` (rate portion: RATE0 || RATE1).
+    pub const STATE_START_IDX: usize = 3;
+
+    /// Capacity start coefficient index: `beta_powers[11] = beta^11`.
+    ///
+    /// Beginning of hasher capacity. Hasher capacity occupies 4 consecutive coefficients:
+    /// `beta_powers[11..15]` (beta^11..beta^14) for `capacity[0..3]`.
+    pub const CAPACITY_START_IDX: usize = 11;
+
+    /// Capacity domain coefficient index: `beta_powers[12] = beta^12`.
+    ///
+    /// Second capacity element. Used for encoding operation-specific data (e.g., op_code in control
+    /// block messages).
+    pub const CAPACITY_DOMAIN_IDX: usize = CAPACITY_START_IDX + 1;
+}

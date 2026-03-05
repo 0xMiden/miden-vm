@@ -2,13 +2,11 @@
 
 use alloc::vec::Vec;
 
-use miden_core::{
-    Felt,
-    field::{PrimeCharacteristicRing, QuadFelt},
-};
+use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::stark::{air::MidenAirBuilder, matrix::RowMajorMatrix};
 
-use super::{ids::TAG_TOTAL_COUNT, state};
+use super::state;
+use crate::constraints::{chiplets::bitwise, tagging::ids::TAG_TOTAL_COUNT};
 
 /// Captured evaluation for a single tagged constraint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,32 +57,23 @@ impl OodEvalAirBuilder {
             (0..crate::trace::AUX_TRACE_WIDTH * 2).map(|_| rng.next_quad()).collect(),
             crate::trace::AUX_TRACE_WIDTH,
         );
-        let raw_randomness: Vec<QuadFelt> =
-            (0..crate::trace::AUX_TRACE_RAND_ELEMENTS).map(|_| rng.next_quad()).collect();
-        let alpha = raw_randomness.first().copied().expect("aux randomness missing alpha");
-        let beta = raw_randomness.get(1).copied().expect("aux randomness missing beta");
-        let mut permutation_randomness = Vec::with_capacity(crate::trace::AUX_TRACE_RAND_ELEMENTS);
-        if crate::trace::AUX_TRACE_RAND_ELEMENTS > 0 {
-            permutation_randomness.push(alpha);
-        }
-        if crate::trace::AUX_TRACE_RAND_ELEMENTS > 1 {
-            permutation_randomness.push(QuadFelt::ONE);
-        }
-        if crate::trace::AUX_TRACE_RAND_ELEMENTS > 2 {
-            let mut beta_power = beta;
-            for _ in 2..crate::trace::AUX_TRACE_RAND_ELEMENTS {
-                permutation_randomness.push(beta_power);
-                beta_power *= beta;
-            }
-        }
+        // Only store the actually used (alpha and beta), but consume MAX_MESSAGE_WIDTH
+        // from the RNG to keep the seed state stable and ensure that the fixtures
+        // remain unchanged.
+        let all_randomness: Vec<QuadFelt> =
+            (0..crate::trace::MAX_MESSAGE_WIDTH).map(|_| rng.next_quad()).collect();
+        let permutation_randomness: Vec<QuadFelt> =
+            all_randomness[..crate::trace::AUX_TRACE_RAND_CHALLENGES].to_vec();
         let aux_bus_boundary_values =
             (0..crate::trace::AUX_TRACE_WIDTH).map(|_| rng.next_quad()).collect();
         let first_row = rng.next_felt();
         let last_row = rng.next_felt();
         let transition = rng.next_felt();
-        // Minimal constraints in this branch do not use periodic values.
-        // When chiplet constraints are added, update this to seed the full periodic set.
-        let periodic_values = Vec::new();
+        let periodic_values = (0..bitwise::NUM_PERIODIC_COLUMNS).map(|_| rng.next_felt()).collect();
+
+        // Generate enough random public values for the boundary constraints.
+        // Minimum tail: 36 elements (16 SI + 16 SO + 4 PC transcript state) + 4 program hash.
+        let public_values = (0..40).map(|_| rng.next_felt()).collect();
 
         Self {
             main,
@@ -92,7 +81,7 @@ impl OodEvalAirBuilder {
             permutation,
             permutation_randomness,
             aux_bus_boundary_values,
-            public_values: Vec::new(),
+            public_values,
             periodic_values,
             first_row,
             last_row,
@@ -258,8 +247,11 @@ mod tests {
     use miden_crypto::stark::air::MidenAir;
 
     use super::{
-        super::fixtures::{OOD_SEED, active_expected_ood_evals},
-        EvalRecord, OodEvalAirBuilder, TAG_TOTAL_COUNT,
+        super::{
+            fixtures::{OOD_SEED, active_expected_ood_evals},
+            ids::TAG_TOTAL_COUNT,
+        },
+        EvalRecord, OodEvalAirBuilder,
     };
     use crate::ProcessorAir;
 
@@ -280,7 +272,7 @@ mod tests {
     }
 
     #[test]
-    fn ood_system_range_matches_expected() {
+    fn test_miden_vm_ood_evals_match() {
         run_group_parity_test(active_expected_ood_evals());
     }
 }
