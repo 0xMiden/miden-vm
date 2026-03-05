@@ -21,7 +21,7 @@ use miden_core::{
     mast::{MastForest, MastNode},
     operations::opcodes,
     program::{Kernel, MIN_STACK_DEPTH, ProgramInfo},
-    utils::{ColMatrix, uninit_vector},
+    utils::ColMatrix,
 };
 use rayon::prelude::*;
 use tracing::instrument;
@@ -228,7 +228,7 @@ fn generate_core_trace_columns(
     fragment_size: usize,
 ) -> Result<Vec<Vec<Felt>>, ExecutionError> {
     let mut core_trace_columns: Vec<Vec<Felt>> =
-        unsafe { vec![uninit_vector(core_trace_contexts.len() * fragment_size); CORE_TRACE_WIDTH] };
+        vec![vec![ZERO; core_trace_contexts.len() * fragment_size]; CORE_TRACE_WIDTH];
 
     // Save the first stack top for initialization
     let first_stack_top = if let Some(first_context) = core_trace_contexts.first() {
@@ -287,7 +287,7 @@ fn generate_core_trace_columns(
         h0_column.par_chunks_mut(fragment_size).for_each(batch_inversion_allow_zeros);
     }
 
-    // Truncate the core trace columns. After this point, there is no more uninitialized memory.
+    // Truncate the core trace columns to the actual number of rows written.
     for col in core_trace_columns.iter_mut() {
         col.truncate(total_core_trace_rows);
     }

@@ -1,11 +1,16 @@
 use alloc::{collections::BTreeMap, vec::Vec};
+use core::mem::MaybeUninit;
 
 use miden_air::trace::{
     MainTrace, RowIndex,
     range::{M_COL_IDX, V_COL_IDX},
 };
 
-use crate::{Felt, ZERO, field::ExtensionField, utils::uninit_vector};
+use crate::{
+    Felt, ZERO,
+    field::ExtensionField,
+    utils::{assume_init_vec, uninit_vector},
+};
 
 // AUXILIARY TRACE BUILDER
 // ================================================================================================
@@ -66,12 +71,14 @@ impl AuxTraceBuilder {
         let divisors = get_divisors(&self.lookup_values, rand_elements[0]);
 
         // allocate memory for the running sum column and set the initial value to ZERO
-        let mut b_range = unsafe { uninit_vector(main_trace.num_rows()) };
-        b_range[0] = E::ZERO;
+        let mut b_range: Vec<MaybeUninit<E>> = uninit_vector(main_trace.num_rows());
+        b_range[0].write(E::ZERO);
 
         // keep track of the last updated row in the `b_range` running sum column. `b_range` is
         // filled with result values that are added to the next row after the operation's execution.
         let mut b_range_idx = 0_usize;
+        // track the current running sum value to avoid reading from MaybeUninit
+        let mut current_value = E::ZERO;
 
         // the first half of the trace only includes values from the operations.
         for (clk, range_checks) in
@@ -82,26 +89,26 @@ impl AuxTraceBuilder {
             // if we skipped some cycles since the last update was processed, values in the last
             // updated row should be copied over until the current cycle.
             if b_range_idx < clk {
-                let last_value = b_range[b_range_idx];
-                b_range[(b_range_idx + 1)..=clk].fill(last_value);
+                b_range[(b_range_idx + 1)..=clk].fill(MaybeUninit::new(current_value));
             }
 
             // move the column pointer to the next row.
             b_range_idx = clk + 1;
 
-            b_range[b_range_idx] = b_range[clk];
+            let mut new_value = current_value;
             // include the operation lookups
             for lookup in range_checks.iter() {
                 let value = divisors.get(lookup).expect("invalid lookup value");
-                b_range[b_range_idx] -= *value;
+                new_value -= *value;
             }
+            b_range[b_range_idx].write(new_value);
+            current_value = new_value;
         }
 
         // if we skipped some cycles since the last update was processed, values in the last
         // updated row should by copied over until the current cycle.
         if b_range_idx < self.values_start {
-            let last_value = b_range[b_range_idx];
-            b_range[(b_range_idx + 1)..=self.values_start].fill(last_value);
+            b_range[(b_range_idx + 1)..=self.values_start].fill(MaybeUninit::new(current_value));
         }
 
         // after the padded section of the range checker table, include the lookup value specified
@@ -120,34 +127,37 @@ impl AuxTraceBuilder {
         {
             b_range_idx = row_idx + 1;
 
+            let mut new_value = current_value;
             if *multiplicity != ZERO {
                 // add the value in the range checker: multiplicity / (alpha + lookup)
                 let value = divisors
                     .get(&(lookup.as_canonical_u64() as u16))
                     .expect("invalid lookup value");
-                b_range[b_range_idx] = b_range[row_idx] + *value * *multiplicity;
-            } else {
-                b_range[b_range_idx] = b_range[row_idx];
+                new_value = current_value + *value * *multiplicity;
             }
 
             // subtract the range checks requested by operations
             if let Some(range_checks) = self.cycle_lookups.get(&(row_idx as u32).into()) {
                 for lookup in range_checks.iter() {
                     let value = divisors.get(lookup).expect("invalid lookup value");
-                    b_range[b_range_idx] -= *value;
+                    new_value -= *value;
                 }
             }
+
+            b_range[b_range_idx].write(new_value);
+            current_value = new_value;
         }
 
         // at this point, all range checks from user operations and the range checker should be
         // matched - so, the last value must be ZERO;
-        assert_eq!(b_range[b_range_idx], E::ZERO);
+        assert_eq!(current_value, E::ZERO);
 
         if b_range_idx < b_range.len() - 1 {
-            b_range[(b_range_idx + 1)..].fill(E::ZERO);
+            b_range[(b_range_idx + 1)..].fill(MaybeUninit::new(E::ZERO));
         }
 
-        b_range
+        // all elements are now initialized
+        unsafe { assume_init_vec(b_range) }
     }
 }
 
@@ -156,22 +166,27 @@ impl AuxTraceBuilder {
 /// mappings of x to 1/(alpha + x).
 fn get_divisors<E: ExtensionField<Felt>>(lookup_values: &[u16], alpha: E) -> BTreeMap<u16, E> {
     // run batch inversion on the lookup values
-    let mut values = unsafe { uninit_vector(lookup_values.len()) };
-    let mut inv_values = unsafe { uninit_vector(lookup_values.len()) };
-    let mut log_values = BTreeMap::new();
+    let mut values: Vec<MaybeUninit<E>> = uninit_vector(lookup_values.len());
+    let mut inv_values: Vec<MaybeUninit<E>> = uninit_vector(lookup_values.len());
 
     let mut acc = E::ONE;
     for (i, (value, inv_value)) in values.iter_mut().zip(inv_values.iter_mut()).enumerate() {
-        *inv_value = acc;
-        *value = alpha + E::from_u16(lookup_values[i]);
-        acc *= *value;
+        inv_value.write(acc);
+        let v = alpha + E::from_u16(lookup_values[i]);
+        value.write(v);
+        acc *= v;
     }
+
+    // all elements are now initialized
+    let values = unsafe { assume_init_vec(values) };
+    let mut inv_values = unsafe { assume_init_vec(inv_values) };
 
     // invert the accumulated product
     acc = acc.inverse();
 
     // multiply the accumulated product by the original values to compute the inverses, then
     // build a map of inverses for the lookup values
+    let mut log_values = BTreeMap::new();
     for i in (0..lookup_values.len()).rev() {
         inv_values[i] *= acc;
         acc *= values[i];

@@ -12,22 +12,11 @@ pub use col_matrix::ColMatrix;
 pub use miden_crypto::utils::ReadAdapter;
 pub use miden_crypto::{
     stark::matrix::{Matrix, RowMajorMatrix},
-    utils::{flatten_slice_elements, flatten_vector_elements, group_slice_elements},
+    utils::{
+        assume_init_vec, flatten_slice_elements, flatten_vector_elements, group_slice_elements,
+        uninit_vector,
+    },
 };
-
-/// Returns a vector of the specified length with un-initialized memory.
-///
-/// TODO: remove this workaround and migrate call sites to use `uninit_vector` + `assume_init_vec`
-/// directly.
-///
-/// # Safety
-/// All elements must be initialized before the vector is read.
-#[inline]
-pub unsafe fn uninit_vector<T>(length: usize) -> Vec<T> {
-    let uninit = miden_crypto::utils::uninit_vector::<T>(length);
-    unsafe { miden_crypto::utils::assume_init_vec(uninit) }
-}
-
 pub use miden_formatting::hex::{DisplayHex, ToHex, to_hex};
 pub use miden_utils_indexing::{
     CsrMatrix, CsrValidationError, DenseIdMap, Idx, IndexVec, IndexedVecError, LookupByIdx,
