@@ -9,7 +9,7 @@
 //!
 //! **Total**: `ops_size + 4 + (5 * num_batches)` bytes
 
-use alloc::vec::Vec;
+use alloc::{string::String, vec::Vec};
 
 use super::NodeDataOffset;
 use crate::{
@@ -251,11 +251,21 @@ impl BasicBlockDataDecoder<'_> {
                     groups[array_idx] = Felt::new(group_value);
                     next_group_idx = array_idx + 1;
 
-                    // Store immediate values from this operation group
+                    // Store immediate values from this operation group.
+                    // Indptr is authoritative: immediates must map to empty groups.
                     for op in &batch_ops[start..end] {
-                        if let Some(imm) = op.imm_value()
-                            && next_group_idx < 8
-                        {
+                        if let Some(imm) = op.imm_value() {
+                            if next_group_idx >= 8 {
+                                return Err(DeserializationError::InvalidValue(String::from(
+                                    "push immediate exceeds group slots",
+                                )));
+                            }
+                            if indptr[next_group_idx] != indptr[next_group_idx + 1] {
+                                return Err(DeserializationError::InvalidValue(format!(
+                                    "push immediate overlaps operation group at index {}",
+                                    next_group_idx
+                                )));
+                            }
                             groups[next_group_idx] = imm;
                             next_group_idx += 1;
                         }
