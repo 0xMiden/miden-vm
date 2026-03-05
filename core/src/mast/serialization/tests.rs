@@ -3,10 +3,11 @@ use std::string::ToString;
 use super::*;
 use crate::{
     Felt, ONE, Word,
+    chiplets::hasher,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
         JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastForestError, MastNodeExt,
-        SplitNodeBuilder, UntrustedMastForest,
+        OP_BATCH_SIZE, OpBatch, SplitNodeBuilder, UntrustedMastForest,
     },
     operations::{DebugOptions, Decorator, Operation},
     serde::SliceReader,
@@ -1525,6 +1526,83 @@ fn test_untrusted_forest_detects_hash_mismatch() {
     let result = untrusted.validate();
 
     assert_matches!(result, Err(MastForestError::HashMismatch { .. }));
+}
+
+/// Build a packed operation group from op codes.
+fn build_group(ops: &[Operation]) -> Felt {
+    let mut group = 0u64;
+    for (i, op) in ops.iter().enumerate() {
+        group |= (op.op_code() as u64) << (Operation::OP_BITS * i);
+    }
+    Felt::new(group)
+}
+
+fn make_batch(num_groups: usize, op: Operation) -> OpBatch {
+    let ops: Vec<Operation> = (0..num_groups).map(|_| op).collect();
+    let mut indptr = [0usize; OP_BATCH_SIZE + 1];
+
+    for i in 0..num_groups {
+        indptr[i + 1] = i + 1;
+    }
+    for i in (num_groups + 1)..=OP_BATCH_SIZE {
+        indptr[i] = indptr[i - 1];
+    }
+
+    // Only the prefix [0..num_groups] is semantically valid; mark unused entries padded.
+    let mut padding = [false; OP_BATCH_SIZE];
+    for pad in padding.iter_mut().skip(num_groups) {
+        *pad = true;
+    }
+    let mut groups = [Felt::new(0); OP_BATCH_SIZE];
+    for group in groups.iter_mut().take(num_groups) {
+        *group = build_group(&[op]);
+    }
+
+    OpBatch::new_from_parts(ops, indptr, padding, groups, num_groups)
+}
+
+/// Test that UntrustedMastForest::validate rejects a non-full batch before the last batch.
+#[test]
+fn test_untrusted_forest_rejects_non_full_prefix_batch() {
+    let op_batches = vec![make_batch(4, Operation::Add), make_batch(2, Operation::Mul)];
+
+    let op_groups: Vec<Felt> =
+        op_batches.iter().flat_map(|batch| batch.groups()).copied().collect();
+    let digest = hasher::hash_elements(&op_groups);
+
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::from_op_batches(op_batches, Vec::new(), digest)
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let bytes = forest.to_bytes();
+    let untrusted = UntrustedMastForest::read_from_bytes(&bytes).unwrap();
+    let result = untrusted.validate();
+
+    assert_matches!(result, Err(MastForestError::InvalidBatchPadding(_, _)));
+}
+
+/// Test that UntrustedMastForest::validate accepts full prefix batches and a power-of-two last.
+#[test]
+fn test_untrusted_forest_accepts_full_prefix_batch() {
+    let op_batches = vec![make_batch(OP_BATCH_SIZE, Operation::Add), make_batch(4, Operation::Mul)];
+
+    let op_groups: Vec<Felt> =
+        op_batches.iter().flat_map(|batch| batch.groups()).copied().collect();
+    let digest = hasher::hash_elements(&op_groups);
+
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::from_op_batches(op_batches, Vec::new(), digest)
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let bytes = forest.to_bytes();
+    let untrusted = UntrustedMastForest::read_from_bytes(&bytes).unwrap();
+    let result = untrusted.validate();
+
+    assert!(result.is_ok(), "full prefix batches should validate");
 }
 
 /// Test that UntrustedMastForest::validate succeeds for forests with all node types.

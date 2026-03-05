@@ -34,6 +34,7 @@ pub const GROUP_SIZE: usize = 9;
 
 /// Maximum number of groups per batch.
 pub const BATCH_SIZE: usize = 8;
+const _: [(); 1] = [(); ((BATCH_SIZE & (BATCH_SIZE - 1)) == 0) as usize];
 
 // BASIC BLOCK NODE
 // ================================================================================================
@@ -439,7 +440,7 @@ impl BasicBlockNode {
 
 impl BasicBlockNode {
     /// Validates that this BasicBlockNode satisfies the core invariants:
-    /// 1. Power-of-two number of groups in each batch
+    /// 1. Non-final batches must be full (BATCH_SIZE groups), final batch must be power-of-two
     /// 2. No operation group ends with an operation requiring an immediate value
     /// 3. The last operation group in a batch cannot contain operations requiring immediate values
     /// 4. OpBatch structural consistency (num_groups <= BATCH_SIZE, group size <= GROUP_SIZE)
@@ -458,11 +459,22 @@ impl BasicBlockNode {
         Ok(())
     }
 
-    /// Validates that each batch has a power-of-two number of groups.
+    /// Validates that non-final batches are full and the final batch is power-of-two.
+    ///
+    /// This invariant is required by trace generation (see `num_op_groups`) and is expected to
+    /// hold for all serialized forests produced by the assembler; violations indicate corrupted
+    /// or malformed input.
     fn validate_power_of_two_groups(&self) -> Result<(), String> {
         for (batch_idx, batch) in self.op_batches.iter().enumerate() {
             let num_groups = batch.num_groups();
-            if !num_groups.is_power_of_two() {
+            if batch_idx + 1 < self.op_batches.len() {
+                if num_groups != BATCH_SIZE {
+                    return Err(format!(
+                        "Batch {}: {} groups is not full batch size {}",
+                        batch_idx, num_groups, BATCH_SIZE
+                    ));
+                }
+            } else if !num_groups.is_power_of_two() {
                 return Err(format!(
                     "Batch {}: {} groups is not power of two",
                     batch_idx, num_groups
