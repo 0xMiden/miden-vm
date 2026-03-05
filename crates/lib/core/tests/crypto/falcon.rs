@@ -13,7 +13,7 @@ use miden_core_lib::{CoreLibrary, dsa::falcon512_poseidon2};
 use miden_processor::{
     DefaultHost, ExecutionError, ProcessorState, Program, ProgramInfo, StackInputs,
     advice::{AdviceInputs, AdviceMutation},
-    crypto::random::RpoRandomCoin,
+    crypto::random::RandomCoin,
     event::EventError,
     operation::OperationError,
 };
@@ -195,9 +195,9 @@ proptest! {
 #[test]
 fn test_falcon512_probabilistic_product_deterministic() {
     // Use a fixed seed to make the test deterministic
-    use miden_crypto::rand::RpoRandomCoin;
+    use miden_crypto::rand::RandomCoin;
     let seed = Word::default();
-    let mut rng = RpoRandomCoin::new(seed);
+    let mut rng = RandomCoin::new(seed);
 
     // Generate deterministic coefficients
     let mut h_coeffs = Vec::new();
@@ -257,7 +257,7 @@ fn test_falcon512_probabilistic_product_failure() {
 #[test]
 fn test_move_sig_to_adv_stack() {
     let seed = Word::default();
-    let mut rng = RpoRandomCoin::new(seed);
+    let mut rng = RandomCoin::new(seed);
     let secret_key = SecretKey::with_rng(&mut rng);
     let message = random_word();
 
@@ -293,7 +293,7 @@ fn test_move_sig_to_adv_stack() {
 #[test]
 fn falcon_execution() {
     let seed = Word::default();
-    let mut rng = RpoRandomCoin::new(seed);
+    let mut rng = RandomCoin::new(seed);
     let sk = SecretKey::with_rng(&mut rng);
     let message = random_word();
     let (source, op_stack, adv_stack, store, advice_map) = generate_test(sk, message);
