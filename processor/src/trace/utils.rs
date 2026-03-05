@@ -1,10 +1,15 @@
 use alloc::{string::ToString, vec::Vec};
-use core::slice;
+use core::{mem::MaybeUninit, slice};
 
 use miden_air::trace::MainTrace;
 
 use super::chiplets::Chiplets;
-use crate::{Felt, RowIndex, debug::BusDebugger, field::ExtensionField, utils::uninit_vector};
+use crate::{
+    Felt, RowIndex,
+    debug::BusDebugger,
+    field::ExtensionField,
+    utils::{assume_init_vec, uninit_vector},
+};
 #[cfg(test)]
 use crate::{operation::Operation, utils::ToElements};
 
@@ -263,28 +268,34 @@ pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
     fn build_aux_column(&self, main_trace: &MainTrace, alphas: &[E]) -> Vec<E> {
         let mut bus_debugger = BusDebugger::new("chiplets bus".to_string());
 
-        let mut requests: Vec<E> = unsafe { uninit_vector(main_trace.num_rows()) };
-        requests[0] = self.init_requests(main_trace, alphas, &mut bus_debugger);
+        let mut requests: Vec<MaybeUninit<E>> = uninit_vector(main_trace.num_rows());
+        let init_req = self.init_requests(main_trace, alphas, &mut bus_debugger);
+        requests[0].write(init_req);
 
-        let mut responses_prod: Vec<E> = unsafe { uninit_vector(main_trace.num_rows()) };
-        responses_prod[0] = self.init_responses(main_trace, alphas, &mut bus_debugger);
+        let mut responses_prod: Vec<MaybeUninit<E>> = uninit_vector(main_trace.num_rows());
+        let mut prev_prod = self.init_responses(main_trace, alphas, &mut bus_debugger);
+        responses_prod[0].write(prev_prod);
 
-        let mut requests_running_prod = requests[0];
+        let mut requests_running_prod = init_req;
 
         // Product of all requests to be inverted, used to compute inverses of requests.
         for row_idx in 0..main_trace.num_rows() - 1 {
             let row = row_idx.into();
 
             let response = self.get_responses_at(main_trace, alphas, row, &mut bus_debugger);
-            responses_prod[row_idx + 1] = responses_prod[row_idx] * response;
+            prev_prod *= response;
+            responses_prod[row_idx + 1].write(prev_prod);
 
             let request = self.get_requests_at(main_trace, alphas, row, &mut bus_debugger);
-            requests[row_idx + 1] = request;
+            requests[row_idx + 1].write(request);
             requests_running_prod *= request;
         }
 
+        // all elements are now initialized
+        let requests = unsafe { assume_init_vec(requests) };
+        let mut result_aux_column = unsafe { assume_init_vec(responses_prod) };
+
         // Use batch-inversion method to compute running product of `response[i]/request[i]`.
-        let mut result_aux_column = responses_prod;
         let mut requests_running_divisor = requests_running_prod.inverse();
         for i in (0..main_trace.num_rows()).rev() {
             result_aux_column[i] *= requests_running_divisor;
