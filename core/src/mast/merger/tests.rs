@@ -2,7 +2,8 @@ use super::*;
 use crate::{
     Felt, ONE, Word,
     mast::{
-        BasicBlockNodeBuilder, CallNodeBuilder, DecoratorId, ExternalNodeBuilder, LoopNodeBuilder,
+        BasicBlockNodeBuilder, CallNodeBuilder, DecoratorId, DynNodeBuilder, ExternalNodeBuilder,
+        LoopNodeBuilder,
         node::{MastForestContributor, MastNodeExt},
     },
     operations::{DebugOptions, Decorator, Operation},
@@ -102,6 +103,37 @@ fn assert_child_id_lt_parent_id(forest: &MastForest) -> Result<(), &str> {
     }
 
     Ok(())
+}
+
+#[test]
+fn mast_forest_merge_preserves_dyn_callness_and_digest() {
+    let mut forest = MastForest::new();
+
+    let dynexec_id = DynNodeBuilder::new_dyn().add_to_forest(&mut forest).unwrap();
+    let dyncall_id = DynNodeBuilder::new_dyncall().add_to_forest(&mut forest).unwrap();
+    forest.make_root(dynexec_id);
+    forest.make_root(dyncall_id);
+
+    let dynexec_digest = forest[dynexec_id].digest();
+    let dyncall_digest = forest[dyncall_id].digest();
+
+    let (merged, root_maps) = MastForest::merge([&forest]).unwrap();
+
+    let merged_dynexec_id = root_maps.map_root(0, &dynexec_id).unwrap();
+    let merged_dyncall_id = root_maps.map_root(0, &dyncall_id).unwrap();
+
+    assert_ne!(
+        merged_dynexec_id, merged_dyncall_id,
+        "dynexec and dyncall nodes should not be deduplicated"
+    );
+
+    let merged_dynexec = merged[merged_dynexec_id].unwrap_dyn();
+    let merged_dyncall = merged[merged_dyncall_id].unwrap_dyn();
+
+    assert!(!merged_dynexec.is_dyncall(), "dynexec node should remain dynexec after merge");
+    assert!(merged_dyncall.is_dyncall(), "dyncall node should remain dyncall after merge");
+    assert_eq!(merged_dynexec.digest(), dynexec_digest, "dynexec digest should be preserved");
+    assert_eq!(merged_dyncall.digest(), dyncall_digest, "dyncall digest should be preserved");
 }
 
 /// Tests that Call(bar) still correctly calls the remapped bar block.
