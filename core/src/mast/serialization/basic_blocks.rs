@@ -294,7 +294,10 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::serde::{ByteWriter, DeserializationError};
+    use crate::{
+        Felt,
+        serde::{ByteWriter, DeserializationError, Serializable},
+    };
 
     #[rstest]
     #[case::all_empty([0, 0, 0, 0, 0, 0, 0, 0, 0])]
@@ -371,5 +374,29 @@ mod tests {
             panic!("expected InvalidValue error");
         };
         assert!(message.contains("batch count"));
+    }
+
+    #[test]
+    fn test_decode_operations_rejects_push_immediate_group_overflow() {
+        let operations = vec![Operation::Push(Felt::new(1))];
+
+        let mut bytes = Vec::new();
+        operations.write_into(&mut bytes);
+        1u32.write_into(&mut bytes);
+
+        let indptr = [0usize, 0, 0, 0, 0, 0, 0, 0, 1];
+        let packed = pack_indptr_deltas(&indptr);
+        packed.write_into(&mut bytes);
+        0u8.write_into(&mut bytes);
+
+        let decoder = BasicBlockDataDecoder::new(&bytes);
+        let err = decoder.decode_operations(0).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                DeserializationError::InvalidValue(ref msg) if msg.contains("exceeds group slots")
+            ),
+            "unexpected error: {err}"
+        );
     }
 }
