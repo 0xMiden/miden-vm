@@ -201,6 +201,46 @@ fn b_chip_trace_mem() {
     }
 }
 
+#[test]
+fn crypto_stream_missing_chiplets_bus_requests() {
+    // `crypto_stream` stack layout: [rate(8), cap(4), src_ptr, dst_ptr, ...]
+    let stack = [
+        1, 2, 3, 4, 5, 6, 7, 8, // rate(8)
+        0, 0, 0, 0, // cap(4)
+        0, // src_ptr
+        8, // dst_ptr
+        0, 0, // unused
+    ];
+
+    let trace = build_trace_from_ops(vec![Operation::CryptoStream], &stack);
+    let alphas: [Felt; AUX_TRACE_RAND_ELEMENTS] = [
+        Felt::new(2),
+        Felt::new(3),
+        Felt::new(4),
+        Felt::new(5),
+        Felt::new(6),
+        Felt::new(7),
+        Felt::new(8),
+        Felt::new(9),
+        Felt::new(10),
+        Felt::new(11),
+        Felt::new(12),
+        Felt::new(13),
+        Felt::new(14),
+        Felt::new(15),
+        Felt::new(16),
+        Felt::new(17),
+    ];
+
+    // Aux trace construction should succeed now that OPCODE_CRYPTOSTREAM emits
+    // the four matching memory chiplet bus requests.
+    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
+    let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
+
+    // The chiplets bus should be balanced: final value must be ONE.
+    assert_eq!(*b_chip.last().unwrap(), ONE);
+}
+
 // TEST HELPERS
 // ================================================================================================
 
