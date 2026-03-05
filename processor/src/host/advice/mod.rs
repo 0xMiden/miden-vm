@@ -52,6 +52,11 @@ pub struct AdviceProvider {
 }
 
 impl AdviceProvider {
+    #[cfg(test)]
+    pub(crate) fn merkle_store(&self) -> &MerkleStore {
+        &self.store
+    }
+
     /// Applies the mutations given in order to the `AdviceProvider`.
     pub fn apply_mutations(
         &mut self,
