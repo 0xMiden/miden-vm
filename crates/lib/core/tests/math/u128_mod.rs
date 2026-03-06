@@ -1031,3 +1031,357 @@ fn rotr_out_of_range_errors() {
     let test = build_test!(source, &[200u64, a0, a1, a2, a3]);
     expect_assert_error_message!(test);
 }
+
+// =================================================================================================
+// DIVISION TESTS
+// =================================================================================================
+
+/// Helper for division ops testing.
+fn test_u128_div_op(op: &str, a: u128, b: u128, expected: &[u64]) {
+    let (a3, a2, a1, a0) = split_u128(a);
+    let (b3, b2, b1, b0) = split_u128(b);
+
+    let source = format!(
+        "
+        use miden::core::math::u128
+        use miden::core::sys
+        begin
+            exec.u128::{op}
+            exec.sys::truncate_stack
+        end
+        "
+    );
+
+    build_test!(&source, &[b0, b1, b2, b3, a0, a1, a2, a3]).expect_stack(expected);
+}
+
+#[test]
+fn divmod_simple() {
+    // 10 / 3 = 3 remainder 1
+    let a: u128 = 10;
+    let b: u128 = 3;
+    let q = a / b;
+    let r = a % b;
+    let (q3, q2, q1, q0) = split_u128(q);
+    let (r3, r2, r1, r0) = split_u128(r);
+    test_u128_div_op("divmod", a, b, &[r0, r1, r2, r3, q0, q1, q2, q3]);
+}
+
+#[test]
+fn divmod_large_typical() {
+    // Both operands have all 4 limbs non-trivial
+    let a: u128 = 0xdeadbeef_cafebabe_12345678_9abcdef0;
+    let b: u128 = 0x01234567_89abcdef_fedcba98_76543210;
+    let q = a / b;
+    let r = a % b;
+    let (q3, q2, q1, q0) = split_u128(q);
+    let (r3, r2, r1, r0) = split_u128(r);
+    test_u128_div_op("divmod", a, b, &[r0, r1, r2, r3, q0, q1, q2, q3]);
+}
+
+#[test]
+fn divmod_exact() {
+    // 100 / 10 = 10 remainder 0
+    let a: u128 = 100;
+    let b: u128 = 10;
+    let q = a / b;
+    let r = a % b;
+    let (q3, q2, q1, q0) = split_u128(q);
+    let (r3, r2, r1, r0) = split_u128(r);
+    test_u128_div_op("divmod", a, b, &[r0, r1, r2, r3, q0, q1, q2, q3]);
+}
+
+#[test]
+fn divmod_a_less_than_b() {
+    // 5 / 10 = 0 remainder 5
+    let a: u128 = 5;
+    let b: u128 = 10;
+    let q = a / b;
+    let r = a % b;
+    let (q3, q2, q1, q0) = split_u128(q);
+    let (r3, r2, r1, r0) = split_u128(r);
+    test_u128_div_op("divmod", a, b, &[r0, r1, r2, r3, q0, q1, q2, q3]);
+}
+
+#[test]
+fn divmod_large_values() {
+    let a: u128 = u128::MAX;
+    let b: u128 = u128::MAX / 2 + 1;
+    let q = a / b;
+    let r = a % b;
+    let (q3, q2, q1, q0) = split_u128(q);
+    let (r3, r2, r1, r0) = split_u128(r);
+    test_u128_div_op("divmod", a, b, &[r0, r1, r2, r3, q0, q1, q2, q3]);
+}
+
+#[test]
+fn divmod_divide_by_one() {
+    let a: u128 = 0x12345678_9abcdef0_12345678_9abcdef0u128;
+    let b: u128 = 1;
+    let q = a / b;
+    let r = a % b;
+    let (q3, q2, q1, q0) = split_u128(q);
+    let (r3, r2, r1, r0) = split_u128(r);
+    test_u128_div_op("divmod", a, b, &[r0, r1, r2, r3, q0, q1, q2, q3]);
+}
+
+#[test]
+fn divmod_divide_by_self() {
+    let a: u128 = 0x12345678_9abcdef0_12345678_9abcdef0u128;
+    let b = a;
+    test_u128_div_op("divmod", a, b, &[0, 0, 0, 0, 1, 0, 0, 0]);
+}
+
+#[test]
+fn divmod_max_by_max() {
+    let a = u128::MAX;
+    let b = u128::MAX;
+    test_u128_div_op("divmod", a, b, &[0, 0, 0, 0, 1, 0, 0, 0]);
+}
+
+#[test]
+fn divmod_zero_dividend() {
+    // 0 / anything = 0 remainder 0
+    test_u128_div_op("divmod", 0, 42, &[0, 0, 0, 0, 0, 0, 0, 0]);
+    test_u128_div_op("divmod", 0, u128::MAX, &[0, 0, 0, 0, 0, 0, 0, 0]);
+}
+
+#[test]
+fn divmod_divide_by_zero() {
+    let source = "
+        use miden::core::math::u128
+        begin
+            exec.u128::divmod
+        end
+    ";
+
+    // b = 0, a = 42
+    build_test!(source, &[0, 0, 0, 0, 42, 0, 0, 0])
+        .execute()
+        .expect_err("division by zero");
+}
+
+#[test]
+fn divmod_non_u32_limb() {
+    let source = "
+        use miden::core::math::u128
+        begin
+            exec.u128::divmod
+        end
+    ";
+
+    // b has a non-u32 limb (b1 = 2^32 + 1)
+    let non_u32: u64 = (1u64 << 32) + 1;
+    build_test!(source, &[1, non_u32, 0, 0, 42, 0, 0, 0])
+        .execute()
+        .expect_err("not a valid u32");
+}
+
+#[test]
+fn divmod_max_remainder() {
+    // a = 2*b - 1 => q = 1, r = b - 1 (maximum possible remainder for this b)
+    let b: u128 = 0xffffffff_ffffffff_00000001;
+    let a = 2 * b - 1;
+    let q = a / b;
+    let r = a % b;
+    assert_eq!(q, 1);
+    assert_eq!(r, b - 1);
+    let (q3, q2, q1, q0) = split_u128(q);
+    let (r3, r2, r1, r0) = split_u128(r);
+    test_u128_div_op("divmod", a, b, &[r0, r1, r2, r3, q0, q1, q2, q3]);
+}
+
+#[test]
+fn divmod_limb_boundary_divisors() {
+    let a = u128::MAX;
+
+    // b = u32::MAX (single limb max)
+    let b = u32::MAX as u128;
+    let q = a / b;
+    let r = a % b;
+    let (q3, q2, q1, q0) = split_u128(q);
+    let (r3, r2, r1, r0) = split_u128(r);
+    test_u128_div_op("divmod", a, b, &[r0, r1, r2, r3, q0, q1, q2, q3]);
+
+    // b = u32::MAX + 1 (exactly 2^32, minimal second limb)
+    let b = (u32::MAX as u128) + 1;
+    let q = a / b;
+    let r = a % b;
+    let (q3, q2, q1, q0) = split_u128(q);
+    let (r3, r2, r1, r0) = split_u128(r);
+    test_u128_div_op("divmod", a, b, &[r0, r1, r2, r3, q0, q1, q2, q3]);
+
+    // b = 2^64 (power-of-2 at 64-bit boundary)
+    let b = 1u128 << 64;
+    let q = a / b;
+    let r = a % b;
+    let (q3, q2, q1, q0) = split_u128(q);
+    let (r3, r2, r1, r0) = split_u128(r);
+    test_u128_div_op("divmod", a, b, &[r0, r1, r2, r3, q0, q1, q2, q3]);
+
+    // b = 2^96
+    let b = 1u128 << 96;
+    let q = a / b;
+    let r = a % b;
+    let (q3, q2, q1, q0) = split_u128(q);
+    let (r3, r2, r1, r0) = split_u128(r);
+    test_u128_div_op("divmod", a, b, &[r0, r1, r2, r3, q0, q1, q2, q3]);
+}
+
+#[test]
+fn divmod_near_overflow_product() {
+    // q * b close to u128::MAX, testing the multiplication overflow check
+    // a = u128::MAX, b = 2 => q = u128::MAX/2, r = 1
+    // q * b = u128::MAX - 1, which is close to overflow
+    let a = u128::MAX;
+    let b = 2u128;
+    let q = a / b;
+    let r = a % b;
+    let (q3, q2, q1, q0) = split_u128(q);
+    let (r3, r2, r1, r0) = split_u128(r);
+    test_u128_div_op("divmod", a, b, &[r0, r1, r2, r3, q0, q1, q2, q3]);
+
+    // a = u128::MAX, b = 3 => q has all limbs set
+    let b = 3u128;
+    let q = a / b;
+    let r = a % b;
+    let (q3, q2, q1, q0) = split_u128(q);
+    let (r3, r2, r1, r0) = split_u128(r);
+    test_u128_div_op("divmod", a, b, &[r0, r1, r2, r3, q0, q1, q2, q3]);
+}
+
+#[test]
+fn divmod_large_quotient_spanning_limbs() {
+    // Small divisor, large dividend => quotient spans multiple limbs
+    let a = u128::MAX;
+    let b = 1u128;
+    let q = a / b;
+    let r = a % b;
+    let (q3, q2, q1, q0) = split_u128(q);
+    let (r3, r2, r1, r0) = split_u128(r);
+    test_u128_div_op("divmod", a, b, &[r0, r1, r2, r3, q0, q1, q2, q3]);
+
+    // Quotient that spans exactly 2 limbs
+    let a: u128 = 0x1_ffffffff_00000000;
+    let b: u128 = 2;
+    let q = a / b;
+    let r = a % b;
+    let (q3, q2, q1, q0) = split_u128(q);
+    let (r3, r2, r1, r0) = split_u128(r);
+    test_u128_div_op("divmod", a, b, &[r0, r1, r2, r3, q0, q1, q2, q3]);
+
+    // Quotient that spans exactly 3 limbs
+    let a: u128 = 0x1_ffffffff_ffffffff_00000000;
+    let b: u128 = 2;
+    let q = a / b;
+    let r = a % b;
+    let (q3, q2, q1, q0) = split_u128(q);
+    let (r3, r2, r1, r0) = split_u128(r);
+    test_u128_div_op("divmod", a, b, &[r0, r1, r2, r3, q0, q1, q2, q3]);
+}
+
+#[test]
+fn div_simple() {
+    let a: u128 = 100;
+    let b: u128 = 7;
+    let q = a / b;
+    let (q3, q2, q1, q0) = split_u128(q);
+    test_u128_div_op("div", a, b, &[q0, q1, q2, q3]);
+}
+
+#[test]
+fn mod_simple() {
+    let a: u128 = 100;
+    let b: u128 = 7;
+    let r = a % b;
+    let (r3, r2, r1, r0) = split_u128(r);
+    test_u128_div_op("mod", a, b, &[r0, r1, r2, r3]);
+}
+
+/// Strategy that generates u128 values biased toward limb boundaries.
+/// Mixes uniform random with values near 0, u32::MAX, u64::MAX, u96::MAX, and u128::MAX.
+fn u128_with_limb_boundaries() -> impl Strategy<Value = u128> {
+    prop_oneof![
+        3 => any::<u128>(),                                   // uniform random
+        1 => 0u128..=0xFFu128 ,                              // small values
+        1 => 0xFFFFFF00u128..=0x1_00000100u128 ,             // near u32 boundary
+        1 => 0xFFFFFFFF_FFFFFF00u128..=0x1_00000000_00000100u128 , // near u64 boundary
+        1 => 0xFFFFFFFF_FFFFFFFF_FFFFFF00u128..=0x1_00000000_00000000_00000100u128 , // near u96 boundary
+        1 => (u128::MAX - 0xFF)..=u128::MAX ,                // near u128::MAX
+    ]
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(512))]
+
+    #[test]
+    fn divmod_proptest(
+        a in u128_with_limb_boundaries(),
+        b in u128_with_limb_boundaries().prop_filter("non-zero", |b| *b != 0),
+    ) {
+        let q = a / b;
+        let r = a % b;
+        let (a3, a2, a1, a0) = split_u128(a);
+        let (b3, b2, b1, b0) = split_u128(b);
+        let (q3, q2, q1, q0) = split_u128(q);
+        let (r3, r2, r1, r0) = split_u128(r);
+
+        let source = "
+            use miden::core::math::u128
+            use miden::core::sys
+            begin
+                exec.u128::divmod
+                exec.sys::truncate_stack
+            end
+        ";
+
+        build_test!(source, &[b0, b1, b2, b3, a0, a1, a2, a3])
+            .expect_stack(&[r0, r1, r2, r3, q0, q1, q2, q3]);
+    }
+
+    #[test]
+    fn div_proptest(
+        a in u128_with_limb_boundaries(),
+        b in u128_with_limb_boundaries().prop_filter("non-zero", |b| *b != 0),
+    ) {
+        let q = a / b;
+        let (a3, a2, a1, a0) = split_u128(a);
+        let (b3, b2, b1, b0) = split_u128(b);
+        let (q3, q2, q1, q0) = split_u128(q);
+
+        let source = "
+            use miden::core::math::u128
+            use miden::core::sys
+            begin
+                exec.u128::div
+                exec.sys::truncate_stack
+            end
+        ";
+
+        build_test!(source, &[b0, b1, b2, b3, a0, a1, a2, a3])
+            .expect_stack(&[q0, q1, q2, q3]);
+    }
+
+    #[test]
+    fn mod_proptest(
+        a in u128_with_limb_boundaries(),
+        b in u128_with_limb_boundaries().prop_filter("non-zero", |b| *b != 0),
+    ) {
+        let r = a % b;
+        let (a3, a2, a1, a0) = split_u128(a);
+        let (b3, b2, b1, b0) = split_u128(b);
+        let (r3, r2, r1, r0) = split_u128(r);
+
+        let source = "
+            use miden::core::math::u128
+            use miden::core::sys
+            begin
+                exec.u128::mod
+                exec.sys::truncate_stack
+            end
+        ";
+
+        build_test!(source, &[b0, b1, b2, b3, a0, a1, a2, a3])
+            .expect_stack(&[r0, r1, r2, r3]);
+    }
+}
