@@ -1416,3 +1416,335 @@ pub proc rotr(n: u32, a: u128) -> u128
         movdn.3                     # [c0, c1, c2, c3, ...]
     end
 end
+
+# ===== DIVISION =================================================================================
+
+const U128_DIV_EVENT = event("miden::core::math::u128::u128_div")
+
+#! Performs division of two unsigned 128-bit integers discarding the remainder.
+#!
+#! Inputs:  [b0, b1, b2, b3, a0, a1, a2, a3, ...]
+#! Outputs: [q0, q1, q2, q3, ...]
+#!
+#! Where:
+#! - a0..a3 are the 32-bit limbs of the dividend (a0 least significant).
+#! - b0..b3 are the 32-bit limbs of the divisor (b0 least significant).
+#! - q0..q3 are the 32-bit limbs of a / b (q0 least significant).
+#!
+#! Panics if:
+#! - b is zero (divide by zero).
+#!
+#! Invocation: exec
+pub proc div(b: u128, a: u128) -> u128
+    exec.divmod
+    # divmod returns [r0..r3, q0..q3, ...]; drop r (top word), keep q
+    dropw
+end
+
+#! Performs modulo operation of two unsigned 128-bit integers.
+#!
+#! Inputs:  [b0, b1, b2, b3, a0, a1, a2, a3, ...]
+#! Outputs: [r0, r1, r2, r3, ...]
+#!
+#! Where:
+#! - a0..a3 are the 32-bit limbs of the dividend (a0 least significant).
+#! - b0..b3 are the 32-bit limbs of the divisor (b0 least significant).
+#! - r0..r3 are the 32-bit limbs of a % b (r0 least significant).
+#!
+#! Panics if:
+#! - b is zero (divide by zero).
+#!
+#! Invocation: exec
+pub proc mod(b: u128, a: u128) -> u128
+    exec.divmod
+    # divmod returns [r0..r3, q0..q3, ...]; swap q to top, drop q, keep r
+    swapw dropw
+end
+
+#! Performs divmod operation of two unsigned 128-bit integers.
+#!
+#! Inputs:  [b0, b1, b2, b3, a0, a1, a2, a3, ...]
+#! Outputs: [r0, r1, r2, r3, q0, q1, q2, q3, ...]
+#!
+#! Where:
+#! - a0..a3 are the 32-bit limbs of the dividend (a0 least significant).
+#! - b0..b3 are the 32-bit limbs of the divisor (b0 least significant).
+#! - q0..q3 are the 32-bit limbs of a / b (q0 least significant).
+#! - r0..r3 are the 32-bit limbs of a % b (r0 least significant).
+#!
+#! Panics if:
+#! - b is zero (divide by zero).
+#!
+#! Invocation: exec
+#!
+#! ## Verification strategy
+#!
+#! The prover computes q and r natively and pushes them onto the advice stack. The verifier
+#! checks two conditions that, by uniqueness of Euclidean division, guarantee correctness:
+#!
+#!   (1) q * b + r = a   (as integers)
+#!   (2) 0 <= r < b
+#!
+#! ### Condition (1): column-by-column schoolbook verification
+#!
+#! The 256-bit product q * b (4 limbs x 4 limbs) has contributions to columns 0-6,
+#! where column k = sum of q_i * b_j for all i+j=k:
+#!
+#!   col 0: q0*b0
+#!   col 1: q1*b0 + q0*b1
+#!   col 2: q2*b0 + q1*b1 + q0*b2
+#!   col 3: q3*b0 + q2*b1 + q1*b2 + q0*b3
+#!   col 4: q3*b1 + q2*b2 + q1*b3
+#!   col 5: q3*b2 + q2*b3
+#!   col 6: q3*b3
+#!
+#! For each column k in 0..3, we compute: sum_k = (column_k products) + r_k + carry_{k-1},
+#! then assert sum_k mod 2^32 = a_k, and propagate carry_k = sum_k / 2^32 to the next column.
+#!
+#! After column 3, we assert carry_3 = 0 (no carry out of the lower 128 bits).
+#! We also assert that all 6 products in columns 4-6 are individually zero.
+#!
+#! Together: carry_3 = 0 means no carry flows from column 3 into column 4, and zero products
+#! in columns 4-6 means no direct contributions there either. So q*b + r has zero upper bits,
+#! i.e., q*b + r < 2^128. Combined with the per-column a_k assertions, this proves
+#! q*b + r = a as integers.
+#!
+#! ### Condition (2): strict remainder bound
+#!
+#! An inline lexicographic comparison verifies r < b (strict), cascading from LSB to MSB.
+#! Combined with u32assertw on r (ensuring each limb is a valid u32), this gives 0 <= r < b.
+pub proc divmod(b: u128, a: u128) -> (remainder: u128, quotient: u128)
+    emit.U128_DIV_EVENT
+    # Advice stack (top to bottom): [r0, r1, r2, r3, q0, q1, q2, q3]
+
+    # ==== Phase 0: Load r and q from advice ====
+
+    padw adv_loadw u32assertw
+    # => [r0, r1, r2, r3, b0, b1, b2, b3, a0, a1, a2, a3]
+
+    padw adv_loadw u32assertw
+    # => [q0, q1, q2, q3, r0, r1, r2, r3, b0, b1, b2, b3, a0, a1, a2, a3]
+    #      0   1   2   3   4   5   6   7   8   9  10  11  12  13  14  15
+
+    # ==== Phase 1: Column-by-column verify q*b + r = a ====
+
+    # ---- Column 0 (1 product: q0*b0) ----
+
+    dup.8 dup.1
+    # => [q0, b0, ...]
+    u32widening_mul
+    # => [p0_lo, p0_hi, q0..q3, r0..r3, b0..b3, a0..a3]
+
+    # Add r0 (at pos 6)
+    dup.6 u32widening_add
+    # => [sum0, carry_a, p0_hi, q0..q3, r0..r3, b0..b3, a0..a3]
+
+    # Assert sum0 == a0 (a0 at pos 15)
+    movup.15 assert_eq.err="u128 divmod: col 0"
+    # => [carry_a, p0_hi, q0..q3, r0..r3, b0..b3, a1, a2, a3]
+
+    # carry0 = carry_a + p0_hi. Max: 1 + (2^32-2) = 2^32-1. Fits u32.
+    add
+    # => [carry0, q0, q1, q2, q3, r0, r1, r2, r3, b0, b1, b2, b3, a1, a2, a3]
+    #       0      1   2   3   4   5   6   7   8   9  10  11  12  13  14  15
+
+    # ---- Column 1 (2 products: q1*b0, q0*b1) ----
+
+    # Product 1: q1*b0 + carry0
+    dup.9 dup.3
+    # => [q1, b0, carry0, ...]
+    u32widening_madd
+    # => [p1a_lo, p1a_hi, q0..q3, r0..r3, b0..b3, a1, a2, a3]
+
+    # Product 2: q0*b1 + p1a_lo
+    dup.11 dup.3
+    # => [q0, b1, p1a_lo, ...]
+    u32widening_madd
+    # => [p1_lo, p1b_hi, p1a_hi, q0..q3, r0..r3, b0..b3, a1, a2, a3]
+
+    # Eager carry combine: p1b_hi + p1a_hi
+    swap movup.2 add swap
+    # => [p1_lo, carry_hi, q0..q3, r0..r3, b0..b3, a1, a2, a3]
+
+    # Add r1 (at pos 7)
+    dup.7 u32widening_add
+    # => [sum1, carry_r, carry_hi, q0..q3, r0..r3, b0..b3, a1, a2, a3]
+
+    # Assert sum1 == a1 (a1 at pos 15)
+    movup.15 assert_eq.err="u128 divmod: col 1"
+    # => [carry_r, carry_hi, q0..q3, r0..r3, b0..b3, a2, a3]
+
+    # carry1 = carry_r + carry_hi. Max: 1 + 2*(2^32-1) = 2^33-1. May exceed u32.
+    add
+    # => [carry1, q0, q1, q2, q3, r0, r1, r2, r3, b0, b1, b2, b3, a2, a3]
+
+    # Split carry into u32 part (for next madd) + extra (accumulated later)
+    u32split
+    # => [carry1_lo, carry1_hi, q0, q1, q2, q3, r0, r1, r2, r3, b0, b1, b2, b3, a2, a3]
+    #        0          1        2   3   4   5   6   7   8   9  10  11  12  13  14  15
+
+    # ---- Column 2 (3 products: q2*b0, q1*b1, q0*b2) ----
+
+    # Product 1: q2*b0 + carry1_lo
+    dup.10 dup.5
+    # => [q2, b0, carry1_lo, carry1_hi, ...]
+    u32widening_madd
+    # => [p2a_lo, p2a_hi, carry1_hi, q0..q3, r0..r3, b0..b3, a2, a3]
+
+    # Product 2: q1*b1 + p2a_lo
+    dup.12 dup.5
+    # => [q1, b1, p2a_lo, p2a_hi, carry1_hi, ...]
+    u32widening_madd
+    # => [p2b_lo, p2b_hi, p2a_hi, carry1_hi, q0..q3, r0..r3, b0..b3, a2, a3]
+
+    # Eager carry combine: p2b_hi + p2a_hi + carry1_hi (3 values at pos 1,2,3)
+    swap movup.2 movup.3 add add swap
+    # => [p2b_lo, carry_sum, q0..q3, r0..r3, b0..b3, a2, a3]
+
+    # Product 3: q0*b2 + p2b_lo
+    dup.12 dup.3
+    # => [q0, b2, p2b_lo, carry_sum, ...]
+    u32widening_madd
+    # => [p2_lo, p2c_hi, carry_sum, q0..q3, r0..r3, b0..b3, a2, a3]
+
+    # Eager carry combine: p2c_hi + carry_sum
+    swap movup.2 add swap
+    # => [p2_lo, carry_total, q0..q3, r0..r3, b0..b3, a2, a3]
+
+    # Add r2 (at pos 8)
+    dup.8 u32widening_add
+    # => [sum2, carry_r, carry_total, q0..q3, r0..r3, b0..b3, a2, a3]
+
+    # Assert sum2 == a2 (a2 at pos 15)
+    movup.15 assert_eq.err="u128 divmod: col 2"
+    # => [carry_r, carry_total, q0..q3, r0..r3, b0..b3, a3]
+
+    # carry2 = carry_r + carry_total. May exceed u32.
+    add
+    # => [carry2, q0, q1, q2, q3, r0, r1, r2, r3, b0, b1, b2, b3, a3]
+
+    # Split carry for next column
+    u32split
+    # => [carry2_lo, carry2_hi, q0, q1, q2, q3, r0, r1, r2, r3, b0, b1, b2, b3, a3]
+    #        0          1        2   3   4   5   6   7   8   9  10  11  12  13  14
+
+    # ---- Column 3 (4 products: q3*b0, q2*b1, q1*b2, q0*b3) ----
+
+    # Product 1: q3*b0 + carry2_lo
+    dup.10 dup.6
+    # => [q3, b0, carry2_lo, carry2_hi, ...]
+    u32widening_madd
+    # => [p3a_lo, p3a_hi, carry2_hi, q0..q3, r0..r3, b0..b3, a3]
+
+    # Product 2: q2*b1 + p3a_lo
+    dup.12 dup.6
+    # => [q2, b1, p3a_lo, p3a_hi, carry2_hi, ...]
+    u32widening_madd
+    # => [p3b_lo, p3b_hi, p3a_hi, carry2_hi, q0..q3, r0..r3, b0..b3, a3]
+
+    # Eager carry combine: p3b_hi + p3a_hi + carry2_hi (3 values at pos 1,2,3)
+    swap movup.2 movup.3 add add swap
+    # => [p3b_lo, carry_sum, q0..q3, r0..r3, b0..b3, a3]
+
+    # Product 3: q1*b2 + p3b_lo
+    dup.12 dup.4
+    # => [q1, b2, p3b_lo, carry_sum, ...]
+    u32widening_madd
+    # => [p3c_lo, p3c_hi, carry_sum, q0..q3, r0..r3, b0..b3, a3]
+
+    # Eager carry combine: p3c_hi + carry_sum
+    swap movup.2 add swap
+    # => [p3c_lo, carry_sum2, q0..q3, r0..r3, b0..b3, a3]
+
+    # Product 4: q0*b3 + p3c_lo
+    dup.13 dup.3
+    # => [q0, b3, p3c_lo, carry_sum2, ...]
+    u32widening_madd
+    # => [p3_lo, p3d_hi, carry_sum2, q0..q3, r0..r3, b0..b3, a3]
+
+    # Eager carry combine: p3d_hi + carry_sum2
+    swap movup.2 add swap
+    # => [p3_lo, carry_sum3, q0..q3, r0..r3, b0..b3, a3]
+
+    # Add r3 (at pos 9)
+    dup.9 u32widening_add
+    # => [sum3, carry_r, carry_sum3, q0..q3, r0..r3, b0..b3, a3]
+
+    # Assert sum3 == a3 (a3 at pos 15)
+    movup.15 assert_eq.err="u128 divmod: col 3"
+    # => [carry_r, carry_sum3, q0..q3, r0..r3, b0..b3]
+
+    # carry3 = carry_r + carry_sum3. Must be 0 for valid divmod.
+    add
+    # => [carry3, q0, q1, q2, q3, r0, r1, r2, r3, b0, b1, b2, b3]
+
+    assertz.err="u128 divmod: carry overflow"
+    # => [q0, q1, q2, q3, r0, r1, r2, r3, b0, b1, b2, b3]
+    #      0   1   2   3   4   5   6   7   8   9  10  11
+
+    # ==== Phase 2: Overflow check (columns 4-6 cross-products must all be zero) ====
+
+    push.0
+    # => [0, q0, q1, q2, q3, r0, r1, r2, r3, b0, b1, b2, b3]
+    #     0   1   2   3   4   5   6   7   8   9  10  11  12
+
+    # q3*b1
+    dup.10 dup.5 u32widening_mul add neq.0 or
+    # q2*b2
+    dup.11 dup.4 u32widening_mul add neq.0 or
+    # q1*b3
+    dup.12 dup.3 u32widening_mul add neq.0 or
+    # q3*b2
+    dup.11 dup.5 u32widening_mul add neq.0 or
+    # q2*b3
+    dup.12 dup.4 u32widening_mul add neq.0 or
+    # q3*b3
+    dup.12 dup.5 u32widening_mul add neq.0 or
+
+    assertz.err="u128 divmod: q*b overflow"
+    # => [q0, q1, q2, q3, r0, r1, r2, r3, b0, b1, b2, b3]
+    #      0   1   2   3   4   5   6   7   8   9  10  11
+
+    # ==== Phase 3: r < b check (inline lexicographic comparison) ====
+    #
+    # Cascade from LSB to MSB:
+    #   result = borrow3 OR (diff3==0 AND (borrow2 OR (diff2==0 AND
+    #              (borrow1 OR (diff1==0 AND borrow0)))))
+    # u32overflowing_sub: [b, a] -> [borrow, diff] computes a-b, borrow=1 if a<b
+
+    # Limb 0 (LSB): r0 at 4, b0 at 8
+    dup.4 dup.9
+    # => [b0, r0, ...]
+    u32overflowing_sub swap drop
+    # => [borrow0, q0..q3, r0..r3, b0..b3]
+
+    # Limb 1: r1 at 6, b1 at 10
+    dup.6 dup.11
+    # => [b1, r1, borrow0, ...]
+    u32overflowing_sub
+    # => [borrow1, diff1, borrow0, ...]
+    swap eq.0 movup.2 and or
+    # => [result01, q0..q3, r0..r3, b0..b3]
+
+    # Limb 2: r2 at 7, b2 at 11
+    dup.7 dup.12
+    # => [b2, r2, result01, ...]
+    u32overflowing_sub
+    swap eq.0 movup.2 and or
+    # => [result012, q0..q3, r0..r3, b0..b3]
+
+    # Limb 3 (MSB): r3 at 8, b3 at 12
+    dup.8 dup.13
+    # => [b3, r3, result012, ...]
+    u32overflowing_sub
+    swap eq.0 movup.2 and or
+    # => [result, q0..q3, r0..r3, b0..b3]
+
+    assert.err="u128 divmod: remainder >= divisor"
+    # => [q0, q1, q2, q3, r0, r1, r2, r3, b0, b1, b2, b3]
+
+    # ==== Phase 4: Cleanup ====
+
+    swapw.2 dropw
+    # => [r0, r1, r2, r3, q0, q1, q2, q3]
+end
