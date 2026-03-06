@@ -167,7 +167,7 @@ fn insert_hqword_into_adv_map(processor: &mut FastProcessor) -> Result<(), Syste
     let a = processor.stack_get_word(1);
     let b = processor.stack_get_word(5);
     let c = processor.stack_get_word(9);
-    let d = processor.stack_get_word(13);
+    let d = processor.stack_get_word_safe(13);
 
     // Hash in natural stack order [A, B, C, D].
     let key = Poseidon2::hash_elements(&[*a, *b, *c, *d].concat());
