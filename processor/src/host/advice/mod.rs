@@ -286,7 +286,7 @@ impl AdviceProvider {
         let index = NodeIndex::from_elements(&depth, &index)
             .map_err(|_| AdviceError::InvalidMerkleTreeNodeIndex { depth, index })?;
 
-        // TODO: switch to `MerkleStore::has_path()` once this method is implemented
+        // TODO: switch to `MerkleStore::has_path()` once this method is implemented (#2795)
         match self.store.get_path(root, index) {
             Ok(_) => Ok(true),
             Err(MerkleError::RootNotInStore(..)) => Ok(false),
