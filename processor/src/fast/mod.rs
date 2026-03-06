@@ -298,12 +298,37 @@ impl FastProcessor {
     }
 
     /// Returns the element on the stack at index `idx`.
+    ///
+    /// This method is only meant to be used to access the stack top by operation handlers, and
+    /// system event handlers.
+    ///
+    /// # Preconditions
+    /// - `idx` must be less than or equal to 15.
     #[inline(always)]
     pub fn stack_get(&self, idx: usize) -> Felt {
         self.stack[self.stack_top_idx - idx - 1]
     }
 
+    /// Same as [`Self::stack_get()`], but returns [`ZERO`] if `idx` falls below index 0 in the
+    /// stack buffer.
+    ///
+    /// Use this instead of `stack_get()` when `idx` may exceed 15.
+    #[inline(always)]
+    pub fn stack_get_safe(&self, idx: usize) -> Felt {
+        if idx < self.stack_top_idx {
+            self.stack[self.stack_top_idx - idx - 1]
+        } else {
+            ZERO
+        }
+    }
+
     /// Mutable variant of `stack_get()`.
+    ///
+    /// This method is only meant to be used to access the stack top by operation handlers, and
+    /// system event handlers.
+    ///
+    /// # Preconditions
+    /// - `idx` must be less than or equal to 15.
     #[inline(always)]
     pub fn stack_get_mut(&mut self, idx: usize) -> &mut Felt {
         &mut self.stack[self.stack_top_idx - idx - 1]
@@ -323,6 +348,12 @@ impl FastProcessor {
     /// - `stack_get_word(0)` returns `[a, b, c, d]`,
     /// - `stack_get_word(1)` returns `[b, c, d, e]`,
     /// - etc.
+    ///
+    /// This method is only meant to be used to access the stack top by operation handlers, and
+    /// system event handlers.
+    ///
+    /// # Preconditions
+    /// - `start_idx` must be less than or equal to 12.
     #[inline(always)]
     pub fn stack_get_word(&self, start_idx: usize) -> Word {
         // Ensure we have enough elements to form a complete word
@@ -336,6 +367,30 @@ impl FastProcessor {
             self.stack[range(word_start_idx, WORD_SIZE)].try_into().unwrap();
         // Reverse so top of stack (idx 0) goes to word[0]
         result.reverse();
+        result.into()
+    }
+
+    /// Same as [`Self::stack_get_word()`], but returns [`ZERO`] for any element that falls below
+    /// index 0 in the stack buffer.
+    ///
+    /// Use this instead of `stack_get_word()` when `start_idx + WORD_SIZE` may exceed
+    /// `stack_top_idx`.
+    #[inline(always)]
+    pub fn stack_get_word_safe(&self, start_idx: usize) -> Word {
+        let buf_end = self.stack_top_idx.saturating_sub(start_idx);
+        let buf_start = self.stack_top_idx.saturating_sub(start_idx.saturating_add(WORD_SIZE));
+        let num_elements_to_read_from_buf = buf_end - buf_start;
+
+        let mut result = [ZERO; WORD_SIZE];
+        if num_elements_to_read_from_buf == WORD_SIZE {
+            result.copy_from_slice(&self.stack[range(buf_start, WORD_SIZE)]);
+        } else if num_elements_to_read_from_buf > 0 {
+            let offset = WORD_SIZE - num_elements_to_read_from_buf;
+            result[offset..]
+                .copy_from_slice(&self.stack[range(buf_start, num_elements_to_read_from_buf)]);
+        }
+        result.reverse();
+
         result.into()
     }
 
