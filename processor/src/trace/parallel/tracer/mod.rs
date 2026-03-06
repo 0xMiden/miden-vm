@@ -45,14 +45,14 @@ pub(crate) struct CoreTraceGenerationTracer<'a> {
     /// initial execution.
     block_stack_replay: BlockStackReplay,
 
-    /// Buffered stack trace row from the current clock cycle. Written to the fragment on the
-    /// *next* clock cycle (since stack columns are one row behind), and returned via
+    /// Buffered stack trace column data from the current clock cycle. Written to the fragment on
+    /// the *next* clock cycle (since stack columns are one row behind), and returned via
     /// [`into_parts`](Self::into_parts) so the next fragment can continue from this state.
-    stack_rows: Option<[Felt; STACK_TRACE_WIDTH]>,
-    /// Buffered system trace row from the current clock cycle. Written to the fragment on the
-    /// *next* clock cycle (since system columns are one row behind), and returned via
+    stack_cols: Option<[Felt; STACK_TRACE_WIDTH]>,
+    /// Buffered system trace column data from the current clock cycle. Written to the fragment on
+    /// the *next* clock cycle (since system columns are one row behind), and returned via
     /// [`into_parts`](Self::into_parts) so the next fragment can continue from this state.
-    system_rows: Option<[Felt; SYS_TRACE_WIDTH]>,
+    system_cols: Option<[Felt; SYS_TRACE_WIDTH]>,
 
     /// Execution context info captured at the beginning of a DYNCALL clock cycle (in
     /// [`start_clock_cycle`](Tracer::start_clock_cycle)) to be used when finalizing it.
@@ -85,8 +85,8 @@ impl<'a> CoreTraceGenerationTracer<'a> {
             decoder_state,
             block_address_replay,
             block_stack_replay,
-            stack_rows: None,
-            system_rows: None,
+            stack_cols: None,
+            system_cols: None,
             ctx_info: None,
             finish_loop_condition: None,
             dyn_callee_hash: None,
@@ -104,8 +104,8 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         let num_rows_built = self.row_write_index;
 
         (
-            self.stack_rows.unwrap_or([ZERO; STACK_TRACE_WIDTH]),
-            self.system_rows.unwrap_or([ZERO; SYS_TRACE_WIDTH]),
+            self.stack_cols.unwrap_or([ZERO; STACK_TRACE_WIDTH]),
+            self.system_cols.unwrap_or([ZERO; SYS_TRACE_WIDTH]),
             num_rows_built,
         )
     }
