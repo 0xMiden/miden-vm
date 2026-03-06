@@ -14,6 +14,12 @@ use crate::{
     parser::{IntValue, ParsingError, WordValue},
 };
 
+/// Maximum allowed nesting depth for constant-expression folding.
+///
+/// This limit is intended to prevent stack overflows from maliciously deep constant expressions
+/// while remaining far above typical constant-expression complexity.
+const MAX_CONST_EXPR_FOLD_DEPTH: usize = 256;
+
 // CONSTANT EXPRESSION
 // ================================================================================================
 
@@ -127,19 +133,30 @@ impl ConstantExpr {
     /// # Errors
     /// Returns an error if an invalid expression is found while folding, such as division by zero.
     pub fn try_fold(self) -> Result<Self, ParsingError> {
+        self.try_fold_with_depth(0)
+    }
+
+    fn try_fold_with_depth(self, depth: usize) -> Result<Self, ParsingError> {
+        if depth > MAX_CONST_EXPR_FOLD_DEPTH {
+            return Err(ParsingError::ConstExprDepthExceeded {
+                span: self.span(),
+                max_depth: MAX_CONST_EXPR_FOLD_DEPTH,
+            });
+        }
+
         match self {
             Self::String(_) | Self::Word(_) | Self::Int(_) | Self::Var(_) | Self::Hash(..) => {
                 Ok(self)
             },
             Self::BinaryOp { span, op, lhs, rhs } => {
                 if rhs.is_literal() {
-                    let rhs = Self::into_inner(rhs).try_fold()?;
+                    let rhs = Self::into_inner(rhs).try_fold_with_depth(depth + 1)?;
                     match rhs {
                         Self::String(ident) => {
                             Err(ParsingError::StringInArithmeticExpression { span: ident.span() })
                         },
                         Self::Int(rhs) => {
-                            let lhs = Self::into_inner(lhs).try_fold()?;
+                            let lhs = Self::into_inner(lhs).try_fold_with_depth(depth + 1)?;
                             match lhs {
                                 Self::String(ident) => {
                                     Err(ParsingError::StringInArithmeticExpression {
@@ -182,7 +199,7 @@ impl ConstantExpr {
                             }
                         },
                         rhs => {
-                            let lhs = Self::into_inner(lhs).try_fold()?;
+                            let lhs = Self::into_inner(lhs).try_fold_with_depth(depth + 1)?;
                             Ok(Self::BinaryOp {
                                 span,
                                 op,
@@ -192,7 +209,7 @@ impl ConstantExpr {
                         },
                     }
                 } else {
-                    let lhs = Self::into_inner(lhs).try_fold()?;
+                    let lhs = Self::into_inner(lhs).try_fold_with_depth(depth + 1)?;
                     Ok(Self::BinaryOp { span, op, lhs: Box::new(lhs), rhs })
                 }
             },
@@ -533,5 +550,34 @@ impl Deserializable for HashKind {
                 "unexpected HashKind tag: '{invalid}'"
             ))),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn nested_add_expr(depth: usize) -> ConstantExpr {
+        let mut expr = ConstantExpr::Int(Span::unknown(IntValue::from(1u8)));
+        for _ in 0..depth {
+            expr = ConstantExpr::BinaryOp {
+                span: SourceSpan::UNKNOWN,
+                op: ConstantOp::Add,
+                lhs: Box::new(expr),
+                rhs: Box::new(ConstantExpr::Int(Span::unknown(IntValue::from(1u8)))),
+            };
+        }
+        expr
+    }
+
+    #[test]
+    fn const_expr_fold_depth_boundary() {
+        let ok_expr = nested_add_expr(MAX_CONST_EXPR_FOLD_DEPTH);
+        assert!(ok_expr.try_fold().is_ok());
+
+        let err_expr = nested_add_expr(MAX_CONST_EXPR_FOLD_DEPTH + 1);
+        let err = err_expr.try_fold().expect_err("expected depth-exceeded error");
+        assert!(matches!(err, ParsingError::ConstExprDepthExceeded { max_depth, .. }
+                if max_depth == MAX_CONST_EXPR_FOLD_DEPTH));
     }
 }

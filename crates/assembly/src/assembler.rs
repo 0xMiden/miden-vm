@@ -6,8 +6,8 @@ use miden_assembly_syntax::{
         self, Ident, InvocationTarget, InvokeKind, ItemIndex, ModuleKind, SymbolResolution,
         Visibility, types::FunctionType,
     },
-    debuginfo::{DefaultSourceManager, SourceManager, SourceSpan, Spanned},
-    diagnostics::{IntoDiagnostic, RelatedLabel, Report},
+    debuginfo::{DefaultSourceManager, SourceFile, SourceManager, SourceSpan, Spanned},
+    diagnostics::{Diagnostic, IntoDiagnostic, RelatedLabel, Report, miette},
     library::{ConstantExport, ItemInfo, LibraryExport, ProcedureExport, TypeExport},
 };
 use miden_core::{
@@ -30,6 +30,25 @@ use crate::{
     },
     mast_forest_builder::MastForestBuilder,
 };
+
+/// Maximum allowed nesting of control-flow blocks during compilation.
+///
+/// This limit is intended to prevent stack overflows from maliciously deep block nesting while
+/// remaining far above typical program structure depth.
+pub(crate) const MAX_CONTROL_FLOW_NESTING: usize = 256;
+
+#[derive(Debug, thiserror::Error, Diagnostic)]
+enum AssemblerError {
+    #[error("control-flow nesting depth exceeded")]
+    #[diagnostic(help("control-flow nesting exceeded the maximum depth of {max_depth}"))]
+    ControlFlowNestingDepthExceeded {
+        #[label("control-flow nesting exceeded the configured depth limit here")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        max_depth: usize,
+    },
+}
 
 // ASSEMBLER
 // ================================================================================================
@@ -877,7 +896,7 @@ impl Assembler {
         };
 
         let proc_body_id =
-            self.compile_body(proc.iter(), &mut proc_ctx, body_wrapper, mast_forest_builder)?;
+            self.compile_body(proc.iter(), &mut proc_ctx, body_wrapper, mast_forest_builder, 0)?;
 
         let proc_body_node = mast_forest_builder
             .get_mast_node(proc_body_id)
@@ -904,6 +923,7 @@ impl Assembler {
         proc_ctx: &mut ProcedureContext,
         wrapper: Option<BodyWrapper>,
         mast_forest_builder: &mut MastForestBuilder,
+        nesting_depth: usize,
     ) -> Result<MastNodeId, Report>
     where
         I: Iterator<Item = &'a ast::Op>,
@@ -937,17 +957,28 @@ impl Assembler {
                         body_node_ids.push(basic_block_id);
                     }
 
+                    let next_depth = nesting_depth + 1;
+                    if next_depth > MAX_CONTROL_FLOW_NESTING {
+                        return Err(Report::new(AssemblerError::ControlFlowNestingDepthExceeded {
+                            span: *span,
+                            source_file: proc_ctx.source_manager().get(span.source_id()).ok(),
+                            max_depth: MAX_CONTROL_FLOW_NESTING,
+                        }));
+                    }
+
                     let then_blk = self.compile_body(
                         then_blk.iter(),
                         proc_ctx,
                         None,
                         block_builder.mast_forest_builder_mut(),
+                        next_depth,
                     )?;
                     let else_blk = self.compile_body(
                         else_blk.iter(),
                         proc_ctx,
                         None,
                         block_builder.mast_forest_builder_mut(),
+                        next_depth,
                     )?;
 
                     let mut split_builder = SplitNodeBuilder::new([then_blk, else_blk]);
@@ -967,9 +998,18 @@ impl Assembler {
                     body_node_ids.push(split_node_id);
                 },
 
-                Op::Repeat { count, body, .. } => {
+                Op::Repeat { count, body, span } => {
                     if let Some(basic_block_id) = block_builder.make_basic_block()? {
                         body_node_ids.push(basic_block_id);
+                    }
+
+                    let next_depth = nesting_depth + 1;
+                    if next_depth > MAX_CONTROL_FLOW_NESTING {
+                        return Err(Report::new(AssemblerError::ControlFlowNestingDepthExceeded {
+                            span: *span,
+                            source_file: proc_ctx.source_manager().get(span.source_id()).ok(),
+                            max_depth: MAX_CONTROL_FLOW_NESTING,
+                        }));
                     }
 
                     let repeat_node_id = self.compile_body(
@@ -977,6 +1017,7 @@ impl Assembler {
                         proc_ctx,
                         None,
                         block_builder.mast_forest_builder_mut(),
+                        next_depth,
                     )?;
 
                     let iteration_count = (*count).expect_value();
@@ -1008,11 +1049,21 @@ impl Assembler {
                         body_node_ids.push(basic_block_id);
                     }
 
+                    let next_depth = nesting_depth + 1;
+                    if next_depth > MAX_CONTROL_FLOW_NESTING {
+                        return Err(Report::new(AssemblerError::ControlFlowNestingDepthExceeded {
+                            span: *span,
+                            source_file: proc_ctx.source_manager().get(span.source_id()).ok(),
+                            max_depth: MAX_CONTROL_FLOW_NESTING,
+                        }));
+                    }
+
                     let loop_body_node_id = self.compile_body(
                         body.iter(),
                         proc_ctx,
                         None,
                         block_builder.mast_forest_builder_mut(),
+                        next_depth,
                     )?;
                     let mut loop_builder = LoopNodeBuilder::new(loop_body_node_id);
                     if let Some(decorator_ids) = block_builder.drain_decorators() {
