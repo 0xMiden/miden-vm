@@ -16,7 +16,7 @@
 //! - S-box: x^7
 
 use miden_core::{chiplets::hasher::Hasher, field::PrimeCharacteristicRing};
-use miden_crypto::stark::air::MidenAirBuilder;
+use miden_crypto::stark::air::LiftedAirBuilder;
 
 use super::periodic::{
     P_ARK_EXT_START, P_ARK_INT, P_CYCLE_ROW_0, P_IS_EXTERNAL, P_IS_INTERNAL, STATE_WIDTH,
@@ -72,7 +72,7 @@ pub fn enforce_permutation_steps<AB>(
     hasher_flag: AB::Expr,
     h: &[AB::Expr; STATE_WIDTH],
     h_next: &[AB::Expr; STATE_WIDTH],
-    periodic: &[AB::PeriodicVal],
+    periodic: &[AB::PeriodicVar],
 ) where
     AB: TaggingAirBuilderExt<F = Felt>,
 {
@@ -186,7 +186,7 @@ pub fn enforce_abp_capacity_preservation<AB>(
 /// The external layer consists of:
 /// 1. Apply M4 to each 4-element block
 /// 2. Add cross-block sums to each element
-fn apply_matmul_external<AB: MidenAirBuilder<F = Felt>>(
+fn apply_matmul_external<AB: LiftedAirBuilder<F = Felt>>(
     state: &[AB::Expr; STATE_WIDTH],
 ) -> [AB::Expr; STATE_WIDTH] {
     // Apply M4 to each block
@@ -225,7 +225,7 @@ fn apply_matmul_external<AB: MidenAirBuilder<F = Felt>>(
 }
 
 /// Applies the 4x4 MDS matrix M4.
-fn matmul_m4<AB: MidenAirBuilder<F = Felt>>(input: &[AB::Expr; 4]) -> [AB::Expr; 4] {
+fn matmul_m4<AB: LiftedAirBuilder<F = Felt>>(input: &[AB::Expr; 4]) -> [AB::Expr; 4] {
     let [a, b, c, d] = input.clone();
 
     let t0 = a.clone() + b.clone();
@@ -246,7 +246,7 @@ fn matmul_m4<AB: MidenAirBuilder<F = Felt>>(input: &[AB::Expr; 4]) -> [AB::Expr;
 /// Applies the internal linear layer M_I to the state.
 ///
 /// M_I = I + diag(MAT_DIAG) where all rows share the same sum.
-fn apply_matmul_internal<AB: MidenAirBuilder<F = Felt>>(
+fn apply_matmul_internal<AB: LiftedAirBuilder<F = Felt>>(
     state: &[AB::Expr; STATE_WIDTH],
 ) -> [AB::Expr; STATE_WIDTH] {
     // Sum of all state elements

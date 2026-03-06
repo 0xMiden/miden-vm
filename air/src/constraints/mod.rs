@@ -19,7 +19,7 @@
 //!
 //! Additional components (decoder, chiplets) are introduced in later constraint chunks.
 
-use miden_crypto::stark::air::MidenAirBuilder;
+use miden_crypto::stark::air::LiftedAirBuilder;
 
 use crate::{Felt, MainTraceRow};
 
@@ -43,7 +43,7 @@ pub fn enforce_main<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: LiftedAirBuilder<F = Felt>,
 {
     system::enforce_main(builder, local, next);
     range::enforce_main(builder, local, next);
@@ -60,7 +60,7 @@ pub fn enforce_bus<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: LiftedAirBuilder<F = Felt>,
 {
     range::bus::enforce_bus(builder, local);
     let op_flags = op_flags::OpFlags::new(op_flags::ExprDecoderAccess::<_, AB::Expr>::new(local));

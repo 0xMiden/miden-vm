@@ -10,7 +10,7 @@ pub mod ops;
 pub mod overflow;
 pub mod stack_arith;
 
-use miden_crypto::stark::air::MidenAirBuilder;
+use miden_crypto::stark::air::LiftedAirBuilder;
 
 use crate::{MainTraceRow, constraints::op_flags::OpFlags};
 
@@ -24,7 +24,7 @@ pub fn enforce_main<AB>(
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     general::enforce_main(builder, local, next, op_flags);
     overflow::enforce_main(builder, local, next, op_flags);

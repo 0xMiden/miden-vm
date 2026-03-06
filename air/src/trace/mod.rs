@@ -14,8 +14,7 @@ pub use rows::{RowIndex, RowIndexError};
 mod main_trace;
 pub use main_trace::{MainTrace, MainTraceRow};
 
-mod aux_trace;
-pub use aux_trace::AuxTraceBuilder;
+pub use miden_crypto::stark::air::AuxBuilder;
 
 // CONSTANTS
 // ================================================================================================
@@ -60,9 +59,32 @@ pub const LOG_PRECOMPILE_LABEL: u8 = miden_core::operations::opcodes::LOGPRECOMP
 pub mod log_precompile {
     use core::ops::Range;
 
-    use miden_core::utils::range;
+    use miden_core::{Felt, field::ExtensionField, precompile::PrecompileTranscriptState, utils::range};
 
     use super::chiplets::hasher::{CAPACITY_LEN, DIGEST_LEN};
+
+    /// Encodes a precompile transcript capacity state as a bus message.
+    ///
+    /// The encoding is: `alpha + beta^0 * label + beta^1 * cap[0] + ... + beta^4 * cap[3]`
+    /// where `label = LOG_PRECOMPILE_LABEL`.
+    pub fn transcript_message<EF: ExtensionField<Felt>>(
+        challenges: &[EF],
+        state: PrecompileTranscriptState,
+    ) -> EF {
+        let alpha = challenges[0];
+        let beta = challenges[1];
+
+        let label = EF::from(Felt::from_u8(super::LOG_PRECOMPILE_LABEL));
+        let cap: &[Felt] = state.as_ref();
+
+        let mut acc = alpha + label;
+        let mut beta_power = beta;
+        for &elem in cap.iter() {
+            acc += beta_power * EF::from(elem);
+            beta_power *= beta;
+        }
+        acc
+    }
 
     // HELPER REGISTER LAYOUT
     // --------------------------------------------------------------------------------------------

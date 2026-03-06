@@ -31,7 +31,7 @@ pub mod indices {
 }
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::MidenAirBuilder;
+use miden_crypto::stark::air::LiftedAirBuilder;
 
 /// Encodes multiset/LogUp contributions as **alpha + <beta, message>**
 ///
@@ -46,7 +46,7 @@ use miden_crypto::stark::air::MidenAirBuilder;
 /// This structure is shared with the processor's `Challenges<E>` for trace generation.
 pub(crate) struct Challenges<AB, const N: usize>
 where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     alpha: AB::ExprEF,
     beta_powers: [AB::ExprEF; N],
@@ -54,7 +54,7 @@ where
 
 impl<AB, const N: usize> Challenges<AB, N>
 where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     /// Builds `alpha` and `beta` powers from permutation challenges.
     #[inline]

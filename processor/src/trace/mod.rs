@@ -5,9 +5,10 @@ use core::ops::Range;
 #[cfg(feature = "std")]
 use miden_air::trace::PADDED_TRACE_WIDTH;
 use miden_air::{
+    AuxBuilder,
     PublicInputs,
     trace::{
-        AuxTraceBuilder, DECODER_TRACE_OFFSET, MainTrace, STACK_TRACE_OFFSET,
+        DECODER_TRACE_OFFSET, MainTrace, STACK_TRACE_OFFSET,
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     },
 };
@@ -292,17 +293,17 @@ impl AuxTraceBuilders {
 // column-major format. This impl adapts between the two by converting the main trace from
 // row-major to column-major, delegating to the existing logic, and converting the result back.
 
-impl<EF: ExtensionField<Felt>> AuxTraceBuilder<EF> for AuxTraceBuilders {
-    /// Builds auxiliary trace columns from a row-major main trace.
+impl<EF: ExtensionField<Felt>> AuxBuilder<Felt, EF> for AuxTraceBuilders {
+    /// Builds auxiliary trace from a row-major main trace.
     ///
-    /// This adapts the column-major `build_aux_columns` method to work with Plonky3's
-    /// row-major format by converting the input and output accordingly.
-    fn build_aux_columns(
+    /// This adapts the column-major `build_aux_columns` method to work with the upstream
+    /// `AuxBuilder` trait by converting formats and extracting aux values.
+    fn build_aux_trace(
         &self,
         main_trace: &RowMajorMatrix<Felt>,
         challenges: &[EF],
-    ) -> RowMajorMatrix<Felt> {
-        let _span = tracing::info_span!("build_aux_columns_wrapper").entered();
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        let _span = tracing::info_span!("build_aux_trace_wrapper").entered();
 
         // Convert row-major to column-major MainTrace
         let main_trace_col_major = row_major_adapter::row_major_to_main_trace(main_trace);
@@ -310,7 +311,15 @@ impl<EF: ExtensionField<Felt>> AuxTraceBuilder<EF> for AuxTraceBuilders {
         // Build auxiliary columns using column-major logic
         let aux_columns = self.build_aux_columns(&main_trace_col_major, challenges);
 
-        // Convert column-major aux columns back to row-major
-        row_major_adapter::aux_columns_to_row_major(aux_columns, main_trace.height())
+        // Convert column-major aux columns to row-major EF matrix
+        let aux_trace =
+            row_major_adapter::aux_columns_to_row_major_ef(&aux_columns, main_trace.height());
+
+        // Extract aux values: last row of each auxiliary column
+        let trace_len = main_trace.height();
+        let aux_values: Vec<EF> =
+            aux_columns.iter().map(|col| col[trace_len - 1]).collect();
+
+        (aux_trace, aux_values)
     }
 }

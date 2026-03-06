@@ -30,7 +30,7 @@
 //! Boundary constraints for v_wiring are handled by the wrapper AIR (aux_finals).
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::{air::MidenAirBuilder, matrix::Matrix};
+use miden_crypto::stark::air::{LiftedAirBuilder, WindowAccess};
 
 use crate::{
     Felt, MainTraceRow,
@@ -82,8 +82,8 @@ pub fn enforce_wiring_bus_constraint<AB>(
 
     let (v_local, v_next, challenges) = {
         let aux = builder.permutation();
-        let aux_local = aux.row_slice(0).expect("Matrix should have at least 1 row");
-        let aux_next = aux.row_slice(1).expect("Matrix should have at least 2 rows");
+        let aux_local = aux.current_slice();
+        let aux_next = aux.next_slice();
         let v_local = aux_local[V_WIRING];
         let v_next = aux_next[V_WIRING];
 
@@ -189,7 +189,7 @@ fn load_ace_wire<AB>(
     v1_idx: usize,
 ) -> AceWire<AB::Expr>
 where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: LiftedAirBuilder<F = Felt>,
 {
     AceWire {
         id: load_ace_col::<AB>(row, id_idx),
@@ -206,7 +206,7 @@ fn encode_wire<AB>(
     wire: &AceWire<AB::Expr>,
 ) -> AB::ExprEF
 where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: LiftedAirBuilder<F = Felt>,
 {
     challenges.encode_dense([
         clk.clone(),
@@ -220,7 +220,7 @@ where
 /// Load a column from the ACE section of chiplets.
 fn load_ace_col<AB>(row: &MainTraceRow<AB::Var>, ace_col_idx: usize) -> AB::Expr
 where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: LiftedAirBuilder<F = Felt>,
 {
     let local_idx = ACE_OFFSET + ace_col_idx;
     row.chiplets[local_idx].clone().into()

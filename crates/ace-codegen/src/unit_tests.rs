@@ -1,7 +1,7 @@
 //! Unit tests for internal DAG + circuit helpers.
 
 use miden_core::{Felt, field::QuadFelt};
-use p3_field::{Field, PrimeCharacteristicRing};
+use miden_crypto::stark::field::{Field, PrimeCharacteristicRing};
 
 use crate::{
     AceCircuit, InputCounts, InputKey, InputLayout,

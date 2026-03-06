@@ -10,7 +10,7 @@
 //! (base-field), then pads to an `adv_pipe` block boundary.
 
 use miden_core::{Felt, Word, crypto::hash::Poseidon2};
-use p3_field::ExtensionField;
+use miden_crypto::stark::field::ExtensionField;
 
 use crate::{
     AceError,
