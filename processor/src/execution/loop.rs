@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use crate::{
-    BreakReason, Host, ONE, Stopper, ZERO,
+    BreakReason, Host, MapExecErr, ONE, Stopper, ZERO,
     continuation_stack::Continuation,
     execution::{ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation},
     mast::{LoopNode, MastForest, MastNodeId},
@@ -43,7 +43,13 @@ where
     let condition = state.processor.stack().get(0);
 
     // drop the condition from the stack
-    state.processor.stack_mut().decrement_size();
+    if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err(
+        current_forest,
+        current_node_id,
+        state.host,
+    ) {
+        return ControlFlow::Break(BreakReason::Err(err));
+    }
 
     // execute the loop body as long as the condition is true
     if condition == ONE {
@@ -126,7 +132,13 @@ where
 
         // Drop the condition from the stack (we know the loop was entered since condition is
         // ONE).
-        state.processor.stack_mut().decrement_size();
+        if let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err(
+            current_forest,
+            current_node_id,
+            state.host,
+        ) {
+            return ControlFlow::Break(BreakReason::Err(err));
+        }
 
         state.continuation_stack.push_finish_loop_entered(current_node_id);
         state.continuation_stack.push_start_node(loop_node.body());
@@ -150,8 +162,14 @@ where
         // dropped by the LOOP operation. Compare this with when the loop body *is* entered, then
         // the loop body is responsible for pushing the condition back onto the stack, and therefore
         // the END instruction must drop it.
-        if loop_was_entered {
-            state.processor.stack_mut().decrement_size();
+        if loop_was_entered
+            && let Err(err) = state.processor.stack_mut().decrement_size().map_exec_err(
+                current_forest,
+                current_node_id,
+                state.host,
+            )
+        {
+            return ControlFlow::Break(BreakReason::Err(err));
         }
 
         // Finalize the clock cycle corresponding to the END operation.

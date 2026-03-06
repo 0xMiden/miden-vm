@@ -169,6 +169,9 @@ pub enum IoError {
     Advice(#[from] AdviceError),
     #[error(transparent)]
     Memory(#[from] MemoryError),
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Operation(#[from] OperationError),
     /// Stack operation error (increment/decrement size failures).
     ///
     /// These are internal execution errors that don't need additional context
@@ -209,6 +212,8 @@ pub enum MemoryError {
         "ensure that the memory address accessed is aligned to a word boundary (it is a multiple of 4)"
     ))]
     UnalignedWordAccess { addr: u32, ctx: ContextId },
+    #[error("failed to read from memory: {0}")]
+    MemoryReadFailed(String),
 }
 
 // CRYPTO ERROR
@@ -324,6 +329,8 @@ pub enum OperationError {
     NotU32Values { values: Vec<Felt> },
     #[error("syscall failed: procedure with root {proc_root} was not found in the kernel")]
     SyscallTargetNotInKernel { proc_root: Word },
+    #[error("failed to execute the operation for internal reason: {0}")]
+    Internal(&'static str),
 }
 
 impl OperationError {
@@ -507,6 +514,20 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, OperationError> {
     }
 }
 
+impl<T> MapExecErrNoCtx<T> for Result<T, OperationError> {
+    #[inline(always)]
+    fn map_exec_err_no_ctx(self) -> Result<T, ExecutionError> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(err) => Err(ExecutionError::OperationError {
+                label: SourceSpan::UNKNOWN,
+                source_file: None,
+                err,
+            }),
+        }
+    }
+}
+
 // AdviceError implementations
 impl<T> MapExecErr<T> for Result<T, AdviceError> {
     #[inline(always)]
@@ -655,6 +676,9 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, IoError> {
                 Err(match err {
                     IoError::Advice(err) => ExecutionError::AdviceError { label, source_file, err },
                     IoError::Memory(err) => ExecutionError::MemoryError { label, source_file, err },
+                    IoError::Operation(err) => {
+                        ExecutionError::OperationError { label, source_file, err }
+                    },
                     // Execution errors are already fully formed with their own message.
                     IoError::Execution(boxed_err) => *boxed_err,
                 })

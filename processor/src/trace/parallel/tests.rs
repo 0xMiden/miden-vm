@@ -15,7 +15,10 @@ use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
 
 use super::*;
-use crate::{AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, HostLibrary};
+use crate::{
+    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, HostLibrary,
+    trace::trace_state::MemoryReadsReplay,
+};
 
 const DEFAULT_STACK: &[Felt] = &[Felt::new(1), Felt::new(2), Felt::new(3)];
 
@@ -326,7 +329,7 @@ fn test_trace_generation_at_fragment_boundaries(
         let (execution_output, trace_fragment_contexts) =
             processor.execute_for_trace_sync(&program, &mut host).unwrap();
 
-        build_trace(execution_output, trace_fragment_contexts, program.to_info())
+        build_trace(execution_output, trace_fragment_contexts, program.to_info()).unwrap()
     };
 
     let trace_from_single_fragment = {
@@ -343,7 +346,7 @@ fn test_trace_generation_at_fragment_boundaries(
             processor.execute_for_trace_sync(&program, &mut host).unwrap();
         assert!(trace_fragment_contexts.core_trace_contexts.len() == 1);
 
-        build_trace(execution_output, trace_fragment_contexts, program.to_info())
+        build_trace(execution_output, trace_fragment_contexts, program.to_info()).unwrap()
     };
 
     // Ensure that the trace generated from multiple fragments is identical to the one generated
@@ -717,6 +720,81 @@ fn external_program() -> Program {
 
     program.make_root(root_join_node);
     Program::new(Arc::new(program), root_join_node)
+}
+
+/// Verifies that `build_trace` returns `Err` (instead of panicking) when a
+/// `CoreTraceFragmentContext` has an empty memory-reads replay for a program that actually reads
+/// memory (the DYN program reads the callee hash from memory).
+#[test]
+fn test_build_trace_returns_err_on_empty_memory_reads_replay() {
+    const MAX_FRAGMENT_SIZE: usize = 1 << 20;
+
+    let program = dyn_program();
+    let stack_inputs = dyn_target_proc_hash();
+
+    let processor = FastProcessor::new_with_options(
+        StackInputs::new(stack_inputs).unwrap(),
+        AdviceInputs::default(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
+            .unwrap(),
+    );
+    let mut host = DefaultHost::default();
+    let (execution_output, mut trace_generation_context) =
+        processor.execute_for_trace_sync(&program, &mut host).unwrap();
+
+    // Clear the memory reads replay so the replay processor will fail when the DYN node tries to
+    // read the callee hash from memory.
+    for ctx in &mut trace_generation_context.core_trace_contexts {
+        ctx.replay.memory_reads = MemoryReadsReplay::default();
+    }
+
+    let result = build_trace(execution_output, trace_generation_context, program.to_info());
+    assert!(
+        result.is_err(),
+        "build_trace should return Err when hasher replay has bad node ID"
+    );
+}
+
+/// Verifies that `build_trace` returns `Err` (instead of panicking) when the hasher chiplet replay
+/// contains a `HashBasicBlock` entry whose `MastNodeId` does not exist in the associated
+/// `MastForest`.
+#[test]
+fn test_build_trace_returns_err_on_bad_node_id_in_hasher_replay() {
+    const MAX_FRAGMENT_SIZE: usize = 1 << 20;
+
+    let program = basic_block_program_small();
+
+    let processor = FastProcessor::new_with_options(
+        StackInputs::new(DEFAULT_STACK).unwrap(),
+        AdviceInputs::default(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
+            .unwrap(),
+    );
+    let mut host = DefaultHost::default();
+    let (execution_output, mut trace_generation_context) =
+        processor.execute_for_trace_sync(&program, &mut host).unwrap();
+
+    // Inject a HashBasicBlock entry with a node ID that points to a non-existent node in an empty
+    // forest.
+    let empty_forest = Arc::new(MastForest::new());
+    // Build a small forest just to get a valid MastNodeId, then pair it with the empty forest.
+    let mut temp_forest = MastForest::new();
+    let valid_id = BasicBlockNodeBuilder::new(vec![Operation::Noop], Vec::new())
+        .add_to_forest(&mut temp_forest)
+        .unwrap();
+    trace_generation_context.hasher_for_chiplet.record_hash_basic_block(
+        empty_forest,
+        valid_id,
+        [ZERO; 4].into(),
+    );
+
+    let result = build_trace(execution_output, trace_generation_context, program.to_info());
+    assert!(
+        result.is_err(),
+        "build_trace should return Err when hasher replay has bad node ID"
+    );
 }
 
 // Workaround to make insta and rstest work together.
