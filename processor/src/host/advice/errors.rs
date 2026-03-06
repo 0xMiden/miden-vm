@@ -23,6 +23,12 @@ pub enum AdviceError {
     #[error("advice stack read failed")]
     StackReadFailed,
     #[error(
+        "advice stack size exceeded: pushing {push_count} elements would exceed the maximum of {max}"
+    )]
+    StackSizeExceeded { push_count: usize, max: usize },
+    #[error("advice map value size of {size} exceeds the maximum of {max}")]
+    AdvMapValueSizeExceeded { size: usize, max: usize },
+    #[error(
         "provided merkle tree {depth} is out of bounds and cannot be represented as an unsigned 8-bit integer"
     )]
     InvalidMerkleTreeDepth { depth: Felt },

@@ -100,13 +100,21 @@ fn insert_mem_values_into_adv_map(processor: &mut FastProcessor) -> Result<(), S
     }
 
     let addr_range = start_addr as u32..end_addr as u32;
+
+    let max_value_size = processor.options.max_adv_map_value_size();
+    if addr_range.len() > max_value_size {
+        return Err(AdviceError::AdvMapValueSizeExceeded {
+            size: addr_range.len(),
+            max: max_value_size,
+        }
+        .into());
+    }
+
     let ctx = processor.ctx;
 
-    let mut values = Vec::with_capacity(addr_range.len() * WORD_SIZE);
-    for addr in addr_range {
-        let mem_value = processor.memory().read_element_impl(ctx, addr).unwrap_or(ZERO);
-        values.push(mem_value);
-    }
+    let values: Vec<Felt> = addr_range
+        .map(|addr| processor.memory().read_element_impl(ctx, addr).unwrap_or(ZERO))
+        .collect();
 
     let key = processor.stack_get_word(1);
     processor.advice.insert_into_map(key, values)?;
@@ -291,7 +299,7 @@ fn copy_merkle_node_to_adv_stack(processor: &mut FastProcessor) -> Result<(), Sy
 
     // push_stack_word pushes in reverse order so that node[0] ends up on top of advice stack.
     // AdvPopW then pops the word maintaining structural order on the operand stack.
-    processor.advice.push_stack_word(&node);
+    processor.advice.push_stack_word(&node)?;
 
     Ok(())
 }
@@ -360,7 +368,7 @@ fn copy_map_value_length_to_adv_stack(
     // Note: we assume values_len fits within the field modulus. This is always true
     // in practice since the field modulus (2^64 - 2^32 + 1) is much larger than any
     // practical vector length that could fit in memory.
-    processor.advice.push_stack(Felt::new(values_len as u64));
+    processor.advice.push_stack(Felt::new(values_len as u64))?;
 
     Ok(())
 }
@@ -381,7 +389,7 @@ pub fn push_key_presence_flag(processor: &mut FastProcessor) -> Result<(), Syste
     let map_key = processor.stack_get_word(1);
 
     let presence_flag = processor.advice.contains_map_key(&map_key);
-    processor.advice.push_stack(Felt::from_bool(presence_flag));
+    processor.advice.push_stack(Felt::from_bool(presence_flag))?;
 
     Ok(())
 }
@@ -421,8 +429,8 @@ fn push_ext2_inv_result(processor: &mut FastProcessor) -> Result<(), SystemEvent
     // AdvPop pops from advice top, so push result[0] first (goes to bottom), result[1] second (on
     // top) After AdvPop #1: gets result[1], stack becomes [result[1], b0, b1, ...]
     // After AdvPop #2: gets result[0], stack becomes [result[0], result[1], b0, b1, ...]
-    processor.advice.push_stack(result[0]);
-    processor.advice.push_stack(result[1]);
+    processor.advice.push_stack(result[0])?;
+    processor.advice.push_stack(result[1])?;
     Ok(())
 }
 
@@ -501,7 +509,7 @@ fn push_ilog2(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
         return Err(OperationError::LogArgumentZero.into());
     }
     let ilog2 = Felt::from_u32(n.ilog2());
-    processor.advice.push_stack(ilog2);
+    processor.advice.push_stack(ilog2)?;
 
     Ok(())
 }
@@ -521,7 +529,7 @@ fn push_transformed_stack_top(
         .try_into()
         .map_err(|_| OperationError::NotU32Values { values: vec![stack_top] })?;
     let transformed_stack_top = f(stack_top);
-    processor.advice.push_stack(transformed_stack_top);
+    processor.advice.push_stack(transformed_stack_top)?;
     Ok(())
 }
 
