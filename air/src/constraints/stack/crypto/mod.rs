@@ -4,7 +4,7 @@
 //! CRYPTOSTREAM, HORNERBASE, and HORNEREXT.
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::MidenAirBuilder;
+use miden_crypto::stark::air::LiftedAirBuilder;
 
 use crate::{
     MainTraceRow,
@@ -98,7 +98,7 @@ pub fn enforce_main<AB>(
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     let mut idx = 0usize;
     enforce_cryptostream_constraints(builder, local, next, op_flags, &mut idx);
@@ -116,7 +116,7 @@ fn enforce_cryptostream_constraints<AB>(
     op_flags: &OpFlags<AB::Expr>,
     idx: &mut usize,
 ) where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     // CRYPTOSTREAM keeps the top of the stack stable except for the two counters
     // that track the stream offset. Those counters advance by 8 (one word) per row.
@@ -175,7 +175,7 @@ fn enforce_hornerbase_constraints<AB>(
     op_flags: &OpFlags<AB::Expr>,
     idx: &mut usize,
 ) where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     // HORNERBASE evaluates a degree-7 polynomial over the quadratic extension.
     // The accumulator lives in stack[14..16] and is updated using helper values
@@ -260,7 +260,7 @@ fn enforce_hornerext_constraints<AB>(
     op_flags: &OpFlags<AB::Expr>,
     idx: &mut usize,
 ) where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     // HORNEREXT evaluates a degree-3 polynomial over the quadratic extension with
     // a smaller helper set. As with HORNERBASE, helper values are supplied via

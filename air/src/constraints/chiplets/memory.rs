@@ -30,7 +30,7 @@
 use core::ops::{Add, Mul, Sub};
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::MidenAirBuilder;
+use miden_crypto::stark::air::LiftedAirBuilder;
 
 use super::selectors::memory_chiplet_flag;
 use crate::{
@@ -400,7 +400,7 @@ where
 {
     fn new<AB>(cols: &MemoryColumns<E>, cols_next: &MemoryColumns<E>, one: E) -> Self
     where
-        AB: MidenAirBuilder<F = Felt>,
+        AB: LiftedAirBuilder<F = Felt>,
         AB::Expr: Into<E>,
     {
         let ctx_delta = cols_next.ctx.clone() - cols.ctx.clone();
@@ -468,7 +468,7 @@ impl<E: Clone> MemoryColumns<E> {
     /// Extract memory columns from a main trace row.
     pub fn from_row<AB>(row: &MainTraceRow<AB::Var>) -> Self
     where
-        AB: MidenAirBuilder<F = Felt>,
+        AB: LiftedAirBuilder<F = Felt>,
         AB::Var: Into<E> + Clone,
     {
         let load = |global_idx: usize| {

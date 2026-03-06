@@ -1,11 +1,11 @@
 //! No-op tagging helpers for non-testing or no-std builds.
 
-use miden_crypto::stark::air::MidenAirBuilder;
+use miden_crypto::stark::air::LiftedAirBuilder;
 /// No-op tagging extension for non-testing builds.
 ///
 /// The methods call the provided closure directly so they have no runtime overhead beyond
 /// the call itself (which the optimizer should inline away).
-pub trait TaggingAirBuilderExt: MidenAirBuilder {
+pub trait TaggingAirBuilderExt: LiftedAirBuilder {
     fn tagged<R>(
         &mut self,
         _id: usize,
@@ -25,4 +25,4 @@ pub trait TaggingAirBuilderExt: MidenAirBuilder {
     }
 }
 
-impl<T: MidenAirBuilder> TaggingAirBuilderExt for T {}
+impl<T: LiftedAirBuilder> TaggingAirBuilderExt for T {}

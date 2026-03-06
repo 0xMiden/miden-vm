@@ -5,9 +5,8 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::{string::ToString, vec::Vec};
+use alloc::vec::Vec;
 
-use ::serde::Serialize;
 use miden_processor::{FastProcessor, Program, trace::build_trace};
 use tracing::instrument;
 
@@ -18,9 +17,8 @@ mod proving_options;
 
 // EXPORTS
 // ================================================================================================
-pub use miden_air::{DeserializationError, ProcessorAir, config};
+pub use miden_air::{DeserializationError, ProcessorAir, PublicInputs, config};
 pub use miden_core::proof::{ExecutionProof, HashFunction};
-use miden_crypto::stark;
 pub use miden_processor::{
     ExecutionError, Host, InputError, StackInputs, StackOutputs, Word, advice::AdviceInputs,
     crypto, field, serde, utils,
@@ -78,42 +76,59 @@ pub async fn prove(
         execution_trace_to_row_major(&trace)
     };
 
-    // Build public values
-    let public_values = trace.to_public_values();
+    // Build public inputs and extract fixed/variable-length components
+    let pub_inputs = PublicInputs::new(
+        trace.program_info().clone(),
+        trace.init_stack_state(),
+        *trace.stack_outputs(),
+        trace.final_precompile_transcript().state(),
+    );
+    let (public_values, kernel_digests) = pub_inputs.to_air_inputs();
+    let var_len_refs: Vec<&[_]> =
+        kernel_digests.iter().map(|w| w.as_ref()).collect();
+    let var_len_public_inputs: &[&[_]] = &var_len_refs;
 
-    // Create AIR with aux trace builders
-    let air = ProcessorAir::with_aux_builder(trace.aux_trace_builders().clone());
+    // Create AIR
+    let air = ProcessorAir {
+        num_kernel_procedures: kernel_digests.len(),
+    };
 
-    // Generate STARK proof using unified miden-prover
+    // Get aux trace builders
+    let aux_builder = trace.aux_trace_builders();
+
+    // Compute log_trace_height
+    let log_trace_height = trace.trace_len_summary().padded_trace_len().ilog2();
+
+    // Generate STARK proof using lifted prover
     let proof_bytes = match hash_fn {
         HashFunction::Blake3_256 => {
-            let config = miden_air::config::create_blake3_256_config();
-            let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
-            serialize_proof(&proof)?
+            let config = config::create_blake3_256_config();
+            config::prove(&config, &air, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
+                .map_err(|e| ExecutionError::ProofSerializationError(alloc::format!("{e}")))?
         },
         HashFunction::Keccak => {
-            let config = miden_air::config::create_keccak_config();
-            let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
-            serialize_proof(&proof)?
+            let config = config::create_keccak_config();
+            config::prove(&config, &air, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
+                .map_err(|e| ExecutionError::ProofSerializationError(alloc::format!("{e}")))?
         },
         HashFunction::Rpo256 => {
-            let config = miden_air::config::create_rpo_config();
-            let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
-            serialize_proof(&proof)?
+            let config = config::create_rpo_config();
+            config::prove(&config, &air, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
+                .map_err(|e| ExecutionError::ProofSerializationError(alloc::format!("{e}")))?
         },
         HashFunction::Poseidon2 => {
-            let config = miden_air::config::create_poseidon2_config();
-            let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
-            serialize_proof(&proof)?
+            let config = config::create_poseidon2_config();
+            config::prove(&config, &air, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
+                .map_err(|e| ExecutionError::ProofSerializationError(alloc::format!("{e}")))?
         },
         HashFunction::Rpx256 => {
-            let config = miden_air::config::create_rpx_config();
-            let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
-            serialize_proof(&proof)?
+            let config = config::create_rpx_config();
+            config::prove(&config, &air, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
+                .map_err(|e| ExecutionError::ProofSerializationError(alloc::format!("{e}")))?
         },
     };
 
-    let proof = ExecutionProof::new(proof_bytes, hash_fn, precompile_requests);
+    let proof = ExecutionProof::new(proof_bytes, hash_fn, log_trace_height, precompile_requests);
 
     Ok((stack_outputs, proof))
 }
@@ -151,12 +166,4 @@ pub fn prove_sync(
             rt.block_on(prove(program, stack_inputs, advice_inputs, host, options))
         },
     }
-}
-
-// HELPER FUNCTIONS
-// ================================================================================================
-
-/// Serializes a proof to bytes, converting serialization errors to ExecutionError.
-fn serialize_proof<T: Serialize>(proof: &T) -> Result<Vec<u8>, ExecutionError> {
-    bincode::serialize(proof).map_err(|e| ExecutionError::ProofSerializationError(e.to_string()))
 }

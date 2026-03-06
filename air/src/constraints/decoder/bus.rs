@@ -26,7 +26,7 @@
 //! - air‑script constraints: `constraints/decoder.air`.
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::{air::MidenAirBuilder, matrix::Matrix};
+use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess};
 
 use crate::{
     MainTraceRow,
@@ -56,14 +56,14 @@ const OP_BIT_WEIGHTS: [u16; 7] = [1, 2, 4, 8, 16, 32, 64];
 /// Encoders for block stack table (p1) messages.
 struct BlockStackEncoders<AB>
 where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     challenges: Challenges<AB, 10>,
 }
 
 impl<AB> BlockStackEncoders<AB>
 where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     fn new(challenges: &[AB::RandomVar]) -> Self {
         Self {
@@ -106,14 +106,14 @@ where
 /// Encoder for block hash table (p2) messages.
 struct BlockHashEncoder<AB>
 where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     challenges: Challenges<AB, 7>,
 }
 
 impl<AB> BlockHashEncoder<AB>
 where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     fn new(challenges: &[AB::RandomVar]) -> Self {
         Self {
@@ -144,14 +144,14 @@ where
 /// Encoder for op group table (p3) messages.
 struct OpGroupEncoder<AB>
 where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     challenges: Challenges<AB, 3>,
 }
 
 impl<AB> OpGroupEncoder<AB>
 where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     fn new(challenges: &[AB::RandomVar]) -> Self {
         Self {
@@ -215,7 +215,7 @@ mod op_group_cols {
 /// Decodes opcode bits from a trace row into an opcode value.
 fn opcode_from_row<AB>(row: &MainTraceRow<AB::Var>) -> AB::Expr
 where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     OP_BIT_WEIGHTS.iter().enumerate().fold(AB::Expr::ZERO, |acc, (i, weight)| {
         let bit: AB::Expr = row.decoder[1 + i].clone().into();
@@ -233,7 +233,7 @@ pub fn enforce_bus<AB>(
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     enforce_block_stack_table_constraint(builder, local, next, op_flags);
     enforce_block_hash_table_constraint(builder, local, next, op_flags);
@@ -281,19 +281,15 @@ pub fn enforce_block_stack_table_constraint<AB>(
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     // Auxiliary trace must be present
-    debug_assert!(
-        builder.permutation().height() > 0,
-        "Auxiliary trace must be present for block stack table constraint"
-    );
 
     // Extract auxiliary trace values
     let (p1_local, p1_next) = {
         let aux = builder.permutation();
-        let aux_local = aux.row_slice(0).expect("Matrix should have at least 1 row");
-        let aux_next = aux.row_slice(1).expect("Matrix should have at least 2 rows");
+        let aux_local = aux.current_slice();
+        let aux_next = aux.next_slice();
         (aux_local[P1_BLOCK_STACK], aux_next[P1_BLOCK_STACK])
     };
 
@@ -531,19 +527,15 @@ pub fn enforce_block_hash_table_constraint<AB>(
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     // Auxiliary trace must be present
-    debug_assert!(
-        builder.permutation().height() > 0,
-        "Auxiliary trace must be present for block hash table constraint"
-    );
 
     // Extract auxiliary trace values
     let (p2_local, p2_next) = {
         let aux = builder.permutation();
-        let aux_local = aux.row_slice(0).expect("Matrix should have at least 1 row");
-        let aux_next = aux.row_slice(1).expect("Matrix should have at least 2 rows");
+        let aux_local = aux.current_slice();
+        let aux_next = aux.next_slice();
         (
             aux_local[crate::constraints::bus::indices::P2_BLOCK_HASH],
             aux_next[crate::constraints::bus::indices::P2_BLOCK_HASH],
@@ -772,19 +764,15 @@ pub fn enforce_op_group_table_constraint<AB>(
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     // Auxiliary trace must be present
-    debug_assert!(
-        builder.permutation().height() > 0,
-        "Auxiliary trace must be present for op group table constraint"
-    );
 
     // Extract auxiliary trace values
     let (p3_local, p3_next) = {
         let aux = builder.permutation();
-        let aux_local = aux.row_slice(0).expect("Matrix should have at least 1 row");
-        let aux_next = aux.row_slice(1).expect("Matrix should have at least 2 rows");
+        let aux_local = aux.current_slice();
+        let aux_next = aux.next_slice();
         (
             aux_local[crate::constraints::bus::indices::P3_OP_GROUP],
             aux_next[crate::constraints::bus::indices::P3_OP_GROUP],

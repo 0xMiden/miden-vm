@@ -27,6 +27,7 @@ use crate::{
 pub struct ExecutionProof {
     pub proof: Vec<u8>,
     pub hash_fn: HashFunction,
+    pub log_trace_height: u32,
     pub pc_requests: Vec<PrecompileRequest>,
 }
 
@@ -39,9 +40,10 @@ impl ExecutionProof {
     pub const fn new(
         proof: Vec<u8>,
         hash_fn: HashFunction,
+        log_trace_height: u32,
         pc_requests: Vec<PrecompileRequest>,
     ) -> Self {
-        Self { proof, hash_fn, pc_requests }
+        Self { proof, hash_fn, log_trace_height, pc_requests }
     }
 
     // PUBLIC ACCESSORS
@@ -95,8 +97,13 @@ impl ExecutionProof {
     // --------------------------------------------------------------------------------------------
 
     /// Returns components of this execution proof.
-    pub fn into_parts(self) -> (HashFunction, Vec<u8>, Vec<PrecompileRequest>) {
-        (self.hash_fn, self.proof, self.pc_requests)
+    /// Returns the log2 of the trace height used during proof generation.
+    pub const fn log_trace_height(&self) -> u32 {
+        self.log_trace_height
+    }
+
+    pub fn into_parts(self) -> (HashFunction, Vec<u8>, u32, Vec<PrecompileRequest>) {
+        (self.hash_fn, self.proof, self.log_trace_height, self.pc_requests)
     }
 }
 
@@ -184,6 +191,7 @@ impl Serializable for ExecutionProof {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.proof.write_into(target);
         self.hash_fn.write_into(target);
+        target.write_u32(self.log_trace_height);
         self.pc_requests.write_into(target);
     }
 }
@@ -192,9 +200,10 @@ impl Deserializable for ExecutionProof {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let proof = Vec::<u8>::read_from(source)?;
         let hash_fn = HashFunction::read_from(source)?;
+        let log_trace_height = source.read_u32()?;
         let pc_requests = Vec::<PrecompileRequest>::read_from(source)?;
 
-        Ok(ExecutionProof { proof, hash_fn, pc_requests })
+        Ok(ExecutionProof { proof, hash_fn, log_trace_height, pc_requests })
     }
 }
 
@@ -222,6 +231,7 @@ impl ExecutionProof {
         ExecutionProof {
             proof: Vec::new(),
             hash_fn: HashFunction::Blake3_256,
+            log_trace_height: 0,
             pc_requests: Vec::new(),
         }
     }

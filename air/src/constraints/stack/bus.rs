@@ -18,7 +18,7 @@
 //! `alpha + beta^0 * clk + beta^1 * val + beta^2 * prev`
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::{air::MidenAirBuilder, matrix::Matrix};
+use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess};
 
 use crate::{
     MainTraceRow,
@@ -51,19 +51,15 @@ pub fn enforce_bus<AB>(
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     // Auxiliary trace must be present.
-    debug_assert!(
-        builder.permutation().height() > 0,
-        "Auxiliary trace must be present for stack overflow bus constraint"
-    );
 
     // Extract auxiliary trace values and randomness.
     let (p1_local, p1_next, challenges) = {
         let aux = builder.permutation();
-        let aux_local = aux.row_slice(0).expect("Matrix should have at least 1 row");
-        let aux_next = aux.row_slice(1).expect("Matrix should have at least 2 rows");
+        let aux_local = aux.current_slice();
+        let aux_next = aux.next_slice();
         let p1_local = aux_local[P1_STACK];
         let p1_next = aux_next[P1_STACK];
 

@@ -3,7 +3,7 @@
 //! This module dispatches to the full tagging implementation in test/`testing` builds
 //! and a no-op fallback in production/no-std builds.
 
-use miden_crypto::stark::air::MidenAirBuilder;
+use miden_crypto::stark::air::{AirBuilder, ExtensionBuilder};
 
 pub mod ids;
 

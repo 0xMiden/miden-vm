@@ -36,7 +36,7 @@ pub mod selectors;
 pub mod state;
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::MidenAirBuilder;
+use miden_crypto::stark::air::LiftedAirBuilder;
 // Re-export commonly used items
 pub use periodic::{STATE_WIDTH, periodic_columns};
 
@@ -180,7 +180,7 @@ struct HasherContext<AB: TaggingAirBuilderExt<F = Felt>> {
     pub cols_next: HasherColumns<AB::Expr>,
     pub flags: HasherFlags<AB::Expr>,
     pub hasher_flag: AB::Expr,
-    pub periodic: [AB::PeriodicVal; periodic::NUM_PERIODIC_COLUMNS],
+    pub periodic: [AB::PeriodicVar; periodic::NUM_PERIODIC_COLUMNS],
 }
 
 impl<AB> HasherContext<AB>
@@ -192,8 +192,8 @@ where
         local: &MainTraceRow<AB::Var>,
         next: &MainTraceRow<AB::Var>,
     ) -> Self {
-        let periodic: [AB::PeriodicVal; periodic::NUM_PERIODIC_COLUMNS] = {
-            let periodic = builder.periodic_evals();
+        let periodic: [AB::PeriodicVar; periodic::NUM_PERIODIC_COLUMNS] = {
+            let periodic = builder.periodic_values();
             debug_assert!(
                 periodic.len() >= periodic::NUM_PERIODIC_COLUMNS,
                 "not enough periodic values for hasher constraints"
@@ -331,12 +331,12 @@ where
 }
 
 fn compute_hasher_flags<AB>(
-    periodic: &[AB::PeriodicVal],
+    periodic: &[AB::PeriodicVar],
     cols: &HasherColumns<AB::Expr>,
     cols_next: &HasherColumns<AB::Expr>,
 ) -> HasherFlags<AB::Expr>
 where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: LiftedAirBuilder<F = Felt>,
 {
     let cycle_row_31: AB::Expr = periodic[periodic::P_CYCLE_ROW_31].into();
 

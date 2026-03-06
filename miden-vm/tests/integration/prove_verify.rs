@@ -201,11 +201,10 @@ mod fast_parallel {
 
     use miden_assembly::{Assembler, DefaultSourceManager};
     use miden_core::proof::{ExecutionProof, HashFunction};
-    use miden_crypto::stark;
     use miden_processor::{
         ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs, trace::build_trace,
     };
-    use miden_prover::{ProcessorAir, config, execution_trace_to_row_major};
+    use miden_prover::{ProcessorAir, PublicInputs, config, execution_trace_to_row_major};
     use miden_verifier::verify;
     use miden_vm::DefaultHost;
 
@@ -251,19 +250,36 @@ mod fast_parallel {
 
         // Convert trace to row-major format for proving
         let trace_matrix = execution_trace_to_row_major(&trace);
-        let public_values = trace.to_public_values();
 
-        // Create AIR with aux trace builders
-        let air = ProcessorAir::with_aux_builder(trace.aux_trace_builders().clone());
+        // Build public inputs
+        let pub_inputs = PublicInputs::new(
+            trace.program_info().clone(),
+            trace.init_stack_state(),
+            *trace.stack_outputs(),
+            trace.final_precompile_transcript().state(),
+        );
+        let (public_values, kernel_digests) = pub_inputs.to_air_inputs();
+        let var_len_refs: Vec<&[_]> = kernel_digests.iter().map(|w| w.as_ref()).collect();
+        let var_len_public_inputs: &[&[_]] = &var_len_refs;
+
+        let air = ProcessorAir {
+            num_kernel_procedures: kernel_digests.len(),
+        };
+        let aux_builder = trace.aux_trace_builders();
 
         // Generate proof using Blake3_256
-        let config = config::create_blake3_256_config();
-        let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
-        let proof_bytes = bincode::serialize(&proof).expect("Failed to serialize proof");
+        let blake3_config = config::create_blake3_256_config();
+        let proof_bytes = config::prove(
+            &blake3_config, &air, &trace_matrix, &public_values,
+            var_len_public_inputs, &aux_builder,
+        ).expect("Proving failed");
 
         let precompile_requests = trace.precompile_requests().to_vec();
+        let log_trace_height = trace.trace_len_summary().padded_trace_len().ilog2();
 
-        let proof = ExecutionProof::new(proof_bytes, HashFunction::Blake3_256, precompile_requests);
+        let proof = ExecutionProof::new(
+            proof_bytes, HashFunction::Blake3_256, log_trace_height, precompile_requests,
+        );
 
         // Verify the proof
         verify(program.into(), stack_inputs, fast_stack_outputs, proof)
