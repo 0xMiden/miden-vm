@@ -9,6 +9,12 @@ use super::{
     SymbolResolutionError, Visibility,
 };
 
+/// Maximum allowed nesting depth of type expressions during resolution.
+///
+/// This limit is intended to prevent stack overflows from maliciously deep type expressions while
+/// remaining far above typical type nesting in real programs.
+const MAX_TYPE_EXPR_NESTING: usize = 256;
+
 /// Abstracts over resolving an item to a concrete [Type], using one of:
 ///
 /// * A [GlobalItemIndex]
@@ -263,6 +269,25 @@ impl TypeExpr {
     where
         R: ?Sized + TypeResolver<E>,
     {
+        self.resolve_type_with_depth(resolver, 0)
+    }
+
+    // TODO: consider the stacksafe crate to guard deep recursion here.
+    fn resolve_type_with_depth<E, R>(&self, resolver: &R, depth: usize) -> Result<Option<Type>, E>
+    where
+        R: ?Sized + TypeResolver<E>,
+    {
+        if depth > MAX_TYPE_EXPR_NESTING {
+            let source_manager = resolver.source_manager();
+            return Err(resolver.resolve_local_failed(
+                SymbolResolutionError::type_expression_depth_exceeded(
+                    self.span(),
+                    MAX_TYPE_EXPR_NESTING,
+                    source_manager.as_ref(),
+                ),
+            ));
+        }
+
         match self {
             TypeExpr::Ref(path) => {
                 let mut current_path = path.clone();
@@ -307,16 +332,16 @@ impl TypeExpr {
             TypeExpr::Primitive(t) => Ok(Some(t.inner().clone())),
             TypeExpr::Array(t) => Ok(t
                 .elem
-                .resolve_type(resolver)?
+                .resolve_type_with_depth(resolver, depth + 1)?
                 .map(|elem| types::Type::Array(Arc::new(types::ArrayType::new(elem, t.arity))))),
             TypeExpr::Ptr(ty) => Ok(ty
                 .pointee
-                .resolve_type(resolver)?
+                .resolve_type_with_depth(resolver, depth + 1)?
                 .map(|pointee| types::Type::Ptr(Arc::new(types::PointerType::new(pointee))))),
             TypeExpr::Struct(t) => {
                 let mut fields = Vec::with_capacity(t.fields.len());
                 for field in t.fields.iter() {
-                    let field_ty = field.ty.resolve_type(resolver)?;
+                    let field_ty = field.ty.resolve_type_with_depth(resolver, depth + 1)?;
                     if let Some(field_ty) = field_ty {
                         fields.push(field_ty);
                     } else {

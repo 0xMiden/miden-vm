@@ -8,6 +8,12 @@ use crate::{
     ast::{AliasTarget, Ident, ItemIndex},
 };
 
+/// Maximum number of alias expansion steps permitted during symbol resolution.
+///
+/// This limit is intended to prevent stack overflows from maliciously deep or cyclic
+/// alias graphs while remaining far above normal usage patterns.
+const MAX_ALIAS_EXPANSION_DEPTH: usize = 128;
+
 /// This trait abstracts over any type which acts as a symbol table, e.g. a [crate::ast::Module].
 pub trait SymbolTable {
     /// The concrete iterator type for the container.
@@ -239,80 +245,125 @@ impl LocalSymbolTable {
     where
         F: Fn(&str) -> Option<AliasTarget>,
     {
-        let (module_name, rest) = path.split_first().unwrap();
-        if let Some(target) = get_import(module_name) {
-            match target {
-                AliasTarget::MastRoot(digest) if rest.is_empty() => {
-                    Ok(SymbolResolution::MastRoot(digest))
-                },
-                AliasTarget::MastRoot(digest) => Err(SymbolResolutionError::invalid_alias_target(
-                    digest.span(),
-                    path.span(),
-                    source_manager,
-                )),
-                // If we have an import like `use lib::lib`, we cannot refer to the base `lib` any
-                // longer, as it has been shadowed; any attempt to further expand the path will
-                // recurse infinitely.
-                //
-                // For now, we handle this by simply stopping further expansion. In the future, we
-                // may want to refine module.get_import to allow passing an exclusion list, so that
-                // we can avoid recursing on the same import in an infinite loop.
-                AliasTarget::Path(shadowed) if shadowed.as_deref() == path => {
-                    Ok(SymbolResolution::External(shadowed))
-                },
-                AliasTarget::Path(path) => {
-                    let resolved = Self::expand(get_import, path.as_deref(), source_manager)?;
-                    match resolved {
-                        SymbolResolution::Module { id, path } => {
-                            // We can consider this path fully-resolved, and mark it absolute, if it
-                            // is not already
-                            if rest.is_empty() {
-                                Ok(SymbolResolution::Module { id, path })
-                            } else {
-                                Ok(SymbolResolution::External(path.map(|p| p.join(rest).into())))
-                            }
-                        },
-                        SymbolResolution::External(resolved) => {
-                            // We can consider this path fully-resolved, and mark it absolute, if it
-                            // is not already
-                            Ok(SymbolResolution::External(
-                                resolved.map(|p| p.to_absolute().join(rest).into()),
-                            ))
-                        },
-                        res @ (SymbolResolution::MastRoot(_)
-                        | SymbolResolution::Local(_)
-                        | SymbolResolution::Exact { .. })
-                            if rest.is_empty() =>
-                        {
-                            Ok(res)
-                        },
-                        SymbolResolution::MastRoot(digest) => {
-                            Err(SymbolResolutionError::invalid_alias_target(
-                                digest.span(),
-                                path.span(),
-                                source_manager,
-                            ))
-                        },
-                        SymbolResolution::Exact { path: item_path, .. } => {
-                            Err(SymbolResolutionError::invalid_alias_target(
-                                item_path.span(),
-                                path.span(),
-                                source_manager,
-                            ))
-                        },
-                        SymbolResolution::Local(item) => {
-                            Err(SymbolResolutionError::invalid_alias_target(
-                                item.span(),
-                                path.span(),
-                                source_manager,
-                            ))
-                        },
-                    }
-                },
-            }
-        } else {
-            // We can consider this path fully-resolved, and mark it absolute, if it is not already
-            Ok(SymbolResolution::External(path.map(|p| p.to_absolute().into_owned().into())))
+        let mut expansion_stack = Vec::new();
+        Self::expand_with_guard(get_import, path, source_manager, &mut expansion_stack)
+    }
+
+    // TODO: consider the stacksafe crate to guard deep recursion here.
+    fn expand_with_guard<F>(
+        get_import: F,
+        path: Span<&Path>,
+        source_manager: &dyn SourceManager,
+        expansion_stack: &mut Vec<Arc<Path>>,
+    ) -> Result<SymbolResolution, SymbolResolutionError>
+    where
+        F: Fn(&str) -> Option<AliasTarget>,
+    {
+        if expansion_stack.len() > MAX_ALIAS_EXPANSION_DEPTH {
+            return Err(SymbolResolutionError::alias_expansion_depth_exceeded(
+                path.span(),
+                MAX_ALIAS_EXPANSION_DEPTH,
+                source_manager,
+            ));
         }
+
+        let path_ref: &Path = *path;
+        if expansion_stack.iter().any(|entry| entry.as_ref() == path_ref) {
+            return Err(SymbolResolutionError::alias_expansion_cycle(path.span(), source_manager));
+        }
+
+        expansion_stack.push(Arc::from(path_ref));
+
+        let result = {
+            let (module_name, rest) = path.split_first().unwrap();
+            if let Some(target) = get_import(module_name) {
+                match target {
+                    AliasTarget::MastRoot(digest) if rest.is_empty() => {
+                        Ok(SymbolResolution::MastRoot(digest))
+                    },
+                    AliasTarget::MastRoot(digest) => {
+                        Err(SymbolResolutionError::invalid_alias_target(
+                            digest.span(),
+                            path.span(),
+                            source_manager,
+                        ))
+                    },
+                    // If we have an import like `use lib::lib`, we cannot refer to the base `lib`
+                    // any longer, as it has been shadowed; any attempt to
+                    // further expand the path will recurse infinitely.
+                    //
+                    // For now, we handle this by simply stopping further expansion. In the future,
+                    // we may want to refine module.get_import to allow passing
+                    // an exclusion list, so that we can avoid recursing on the
+                    // same import in an infinite loop.
+                    AliasTarget::Path(shadowed) if shadowed.as_deref() == path => {
+                        Ok(SymbolResolution::External(shadowed))
+                    },
+                    AliasTarget::Path(path) => {
+                        let resolved = Self::expand_with_guard(
+                            get_import,
+                            path.as_deref(),
+                            source_manager,
+                            expansion_stack,
+                        )?;
+                        match resolved {
+                            SymbolResolution::Module { id, path } => {
+                                // We can consider this path fully-resolved, and mark it absolute,
+                                // if it is not already
+                                if rest.is_empty() {
+                                    Ok(SymbolResolution::Module { id, path })
+                                } else {
+                                    Ok(SymbolResolution::External(
+                                        path.map(|p| p.join(rest).into()),
+                                    ))
+                                }
+                            },
+                            SymbolResolution::External(resolved) => {
+                                // We can consider this path fully-resolved, and mark it absolute,
+                                // if it is not already
+                                Ok(SymbolResolution::External(
+                                    resolved.map(|p| p.to_absolute().join(rest).into()),
+                                ))
+                            },
+                            res @ (SymbolResolution::MastRoot(_)
+                            | SymbolResolution::Local(_)
+                            | SymbolResolution::Exact { .. })
+                                if rest.is_empty() =>
+                            {
+                                Ok(res)
+                            },
+                            SymbolResolution::MastRoot(digest) => {
+                                Err(SymbolResolutionError::invalid_alias_target(
+                                    digest.span(),
+                                    path.span(),
+                                    source_manager,
+                                ))
+                            },
+                            SymbolResolution::Exact { path: item_path, .. } => {
+                                Err(SymbolResolutionError::invalid_alias_target(
+                                    item_path.span(),
+                                    path.span(),
+                                    source_manager,
+                                ))
+                            },
+                            SymbolResolution::Local(item) => {
+                                Err(SymbolResolutionError::invalid_alias_target(
+                                    item.span(),
+                                    path.span(),
+                                    source_manager,
+                                ))
+                            },
+                        }
+                    },
+                }
+            } else {
+                // We can consider this path fully-resolved, and mark it absolute, if it is not
+                // already
+                Ok(SymbolResolution::External(path.map(|p| p.to_absolute().into_owned().into())))
+            }
+        };
+
+        expansion_stack.pop();
+        result
     }
 }

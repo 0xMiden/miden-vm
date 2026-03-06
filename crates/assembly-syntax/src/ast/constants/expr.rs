@@ -14,6 +14,12 @@ use crate::{
     parser::{IntValue, ParsingError, WordValue},
 };
 
+/// Maximum allowed nesting depth for constant-expression folding.
+///
+/// This limit is intended to prevent stack overflows from maliciously deep constant expressions
+/// while remaining far above typical constant-expression complexity.
+const MAX_CONST_EXPR_FOLD_DEPTH: usize = 256;
+
 // CONSTANT EXPRESSION
 // ================================================================================================
 
@@ -127,19 +133,31 @@ impl ConstantExpr {
     /// # Errors
     /// Returns an error if an invalid expression is found while folding, such as division by zero.
     pub fn try_fold(self) -> Result<Self, ParsingError> {
+        self.try_fold_with_depth(0)
+    }
+
+    // TODO: consider the stacksafe crate to guard deep recursion here.
+    fn try_fold_with_depth(self, depth: usize) -> Result<Self, ParsingError> {
+        if depth > MAX_CONST_EXPR_FOLD_DEPTH {
+            return Err(ParsingError::ConstExprDepthExceeded {
+                span: self.span(),
+                max_depth: MAX_CONST_EXPR_FOLD_DEPTH,
+            });
+        }
+
         match self {
             Self::String(_) | Self::Word(_) | Self::Int(_) | Self::Var(_) | Self::Hash(..) => {
                 Ok(self)
             },
             Self::BinaryOp { span, op, lhs, rhs } => {
                 if rhs.is_literal() {
-                    let rhs = Self::into_inner(rhs).try_fold()?;
+                    let rhs = Self::into_inner(rhs).try_fold_with_depth(depth + 1)?;
                     match rhs {
                         Self::String(ident) => {
                             Err(ParsingError::StringInArithmeticExpression { span: ident.span() })
                         },
                         Self::Int(rhs) => {
-                            let lhs = Self::into_inner(lhs).try_fold()?;
+                            let lhs = Self::into_inner(lhs).try_fold_with_depth(depth + 1)?;
                             match lhs {
                                 Self::String(ident) => {
                                     Err(ParsingError::StringInArithmeticExpression {
@@ -182,7 +200,7 @@ impl ConstantExpr {
                             }
                         },
                         rhs => {
-                            let lhs = Self::into_inner(lhs).try_fold()?;
+                            let lhs = Self::into_inner(lhs).try_fold_with_depth(depth + 1)?;
                             Ok(Self::BinaryOp {
                                 span,
                                 op,
@@ -192,7 +210,7 @@ impl ConstantExpr {
                         },
                     }
                 } else {
-                    let lhs = Self::into_inner(lhs).try_fold()?;
+                    let lhs = Self::into_inner(lhs).try_fold_with_depth(depth + 1)?;
                     Ok(Self::BinaryOp { span, op, lhs: Box::new(lhs), rhs })
                 }
             },
