@@ -279,7 +279,7 @@ From these common selectors, we derive the following binary flags which indicate
 > \begin{aligned}
 > f_{prev} &\gets (1 - s_{d-1}) \cdot \prod_{i=1}^{d-2} s_{i} && | \deg = d-1
 > f_{ace} &\gets (1 - s_{d}) \cdot \prod_{i=1}^{d-1} s_{i} && | \deg = d
-> f_{ace, first}' &\gets f_{prev} \cdot (1 - s_{d-1}') && | \deg = d 
+> f_{ace, first}' &\gets f_{prev} \cdot s_{d-1}' \cdot (1 - s_d') && | \deg = d + 1
 > f_{ace, next} &\gets f_{ace} \cdot (1 - s_{d}') && | \deg = d + 1
 > f_{ace, last} &\gets f_{ace} \cdot s_{d}' && | \deg = d + 1
 > \end{aligned}
@@ -349,18 +349,18 @@ In particular, we can infer from the above that
 - each section contains at least two rows (a READ and an EVAL row), and,
 - a row following a READ is always in the same section.
 
-A READ row checks whether $id_0'$ in the next row is equal to $n_{eval} - 1$ provided by the caller at initialization,
+A READ row checks whether $id_0'$ in the next row is equal to $n_{eval}$ provided by the caller at initialization,
 in which case we ensure the following row is an EVAL.
 Otherwise, $n_{eval}$ remains the same.
 
 > $$
 > f_{ace} \cdot f_{read} \cdot
-> \big[f_{read}' \cdot n_{eval}' + f_{eval}' \cdot (id_0' + 1) - n_{eval}\big] = 0 \quad | \deg = d + 3.
+> \big[f_{read}' \cdot n_{eval}' + f_{eval}' \cdot id_0' - n_{eval}\big] = 0 \quad | \deg = d + 3.
 > $$
 
 ### Section constraints
 
-These constraints apply to all rows within the same section/
+These constraints apply to all rows within the same section:
 
 - Across the section, $ctx$ and $clk$ are constant.
 - A READ/EVAL block requests a word/element from memory, so the $ptr$ increases by 4/1, respectively in the next row.
@@ -370,8 +370,8 @@ These constraints apply to all rows within the same section/
 > \begin{aligned}
 > f_{next} \cdot (ctx' - ctx) &= 0 && | \deg = d + 3
 > f_{next} \cdot (clk' - clk) &= 0 && | \deg = d + 3
-> f_{next} \cdot \big[ptr' - ptr + 4 \cdot f_{read} + f_{eval}\big] &= 0 && | \deg = d + 3
-> f_{next} \cdot \big[id_0 - id_0' + 2 \cdot f_{read} + f_{eval}\big] &= 0 && | \deg = d + 3
+> f_{next} \cdot \big[ptr' - ptr - 4 \cdot f_{read} - f_{eval}\big] &= 0 && | \deg = d + 3
+> f_{next} \cdot \big[id_0 - id_0' - 2 \cdot f_{read} - f_{eval}\big] &= 0 && | \deg = d + 3
 > \end{aligned}
 > $$
 

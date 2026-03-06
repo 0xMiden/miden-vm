@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.22.0 (TBD)
+
+#### Major breaking changes
+- [BREAKING] `build_trace()` no longer assumes valid user input ([#2747](https://github.com/0xMiden/miden-vm/pull/2747)).
+
+#### Changes
+
+- Consolidated error variants: simplified `AceError` and FRI errors to string-based types, merged `DynamicNodeNotFound`/`NoMastForestWithProcedure` into `ProcedureNotFound`, introduced `HostError` for handler-related variants ([#2675](https://github.com/0xMiden/miden-vm/pull/2675)).
+- [BREAKING] `Processor` and `FastProcessor` decorator execution is now immutable ([#2718](https://github.com/0xMiden/miden-vm/pull/2718)).
+- [BREAKING] `Tracer` API significantly refactored ([#2720](https://github.com/0xMiden/miden-vm/pull/2720)).
+- Added optional tagging instrumentation for AIR constraints (test-only; enables stable ID tracking and OOD parity checks) ([#2713](https://github.com/0xMiden/miden-vm/pull/2713)).
+- Fix a possible panic in decorator serialization ([#2742](https://github.com/0xMiden/miden-vm/pull/2742)).
+- Added `math::u128` comparison (`lt`, `lte`, `gt`, `gte`), bitwise (`and`, `or`, `xor`, `not`), and shift (`shl`, `shr`, `rotl`, `rotr`) operations ([#2624](https://github.com/0xMiden/miden-vm/pull/2624)).
+- [BREAKING] `Operation` enum now only encodes basic block operations ([#2771](https://github.com/0xMiden/miden-vm/pull/2771)).
+- Added `math::u128` division operations ([#2776](https://github.com/0xMiden/miden-vm/pull/2776)).
+
+#### Fixes
+
+- Fixed `Constant::PartialEq` to include `visibility` field in equality comparison, making it consistent with other exportable items (`Procedure`, `TypeAlias`, `EnumType`).
+
 ## 0.21.2 (2026-03-04)
 
 - Removes `features = serde` from `miden-core` in `miden-air` to avoid unconditionally enabling the `serde` dependency  ([#2767](https://github.com/0xMiden/miden-vm/pull/2767)).

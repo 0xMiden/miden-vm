@@ -40,7 +40,7 @@ where
     let clk = processor.system().clock();
 
     let circuit_evaluation =
-        eval_circuit_impl(ctx, ptr, clk, num_read, num_eval, processor.memory_mut(), tracer)?;
+        eval_circuit_impl(ctx, ptr, clk, num_read, num_eval, processor.memory_mut())?;
     tracer.record_circuit_evaluation(circuit_evaluation);
 
     Ok(())
@@ -58,24 +58,35 @@ pub(crate) fn eval_circuit_impl(
     num_vars: Felt,
     num_eval: Felt,
     mem: &mut impl MemoryInterface,
-    tracer: &mut impl Tracer,
 ) -> Result<CircuitEvaluation, AceEvalError> {
     let num_vars = num_vars.as_canonical_u64();
     let num_eval = num_eval.as_canonical_u64();
 
     let num_wires = num_vars + num_eval;
     if num_wires > MAX_NUM_ACE_WIRES as u64 {
-        return Err(AceError::TooManyWires(num_wires).into());
+        const {
+            // If this fails, update the error message below
+            assert!(MAX_NUM_ACE_WIRES == (1_u32 << 30) - 1);
+        }
+        return Err(
+            AceError(format!("num of wires must be less than 2^30 but was {num_wires}")).into()
+        );
     }
 
     // Ensure vars and instructions are word-aligned and non-empty. Note that variables are
     // quadratic extension field elements while instructions are encoded as base field elements.
     // Hence we can pack 2 variables and 4 instructions per word.
     if !num_vars.is_multiple_of(2) || num_vars == 0 {
-        return Err(AceError::NumVarIsNotWordAlignedOrIsEmpty(num_vars).into());
+        return Err(AceError(format!(
+            "num of variables should be word aligned and non-zero but was {num_vars}"
+        ))
+        .into());
     }
     if !num_eval.is_multiple_of(4) || num_eval == 0 {
-        return Err(AceError::NumEvalIsNotWordAlignedOrIsEmpty(num_eval).into());
+        return Err(AceError(format!(
+            "num of evaluation gates should be word aligned and non-zero but was {num_eval}"
+        ))
+        .into());
     }
 
     // Ensure instructions are word-aligned and non-empty
@@ -86,25 +97,21 @@ pub(crate) fn eval_circuit_impl(
 
     let mut ptr = ptr;
     // perform READ operations
-    // Note: we pass in a `NoopTracer`, because the parallel trace generation skips the circuit
-    // evaluation completely
     for _ in 0..num_read_rows {
         let word = mem.read_word(ctx, ptr, clk)?;
-        tracer.record_memory_read_word(word, ptr, ctx, clk);
         evaluation_context.do_read(ptr, word);
         ptr += PTR_OFFSET_WORD;
     }
     // perform EVAL operations
     for _ in 0..num_eval_rows {
         let instruction = mem.read_element(ctx, ptr)?;
-        tracer.record_memory_read_element(instruction, ptr, ctx, clk);
         evaluation_context.do_eval(ptr, instruction)?;
         ptr += PTR_OFFSET_ELEM;
     }
 
     // Ensure the circuit evaluated to zero.
     if evaluation_context.output_value().is_none_or(|eval| eval != QuadFelt::ZERO) {
-        return Err(AceError::CircuitNotEvaluateZero.into());
+        return Err(AceError("circuit does not evaluate to zero".into()).into());
     }
 
     Ok(evaluation_context)

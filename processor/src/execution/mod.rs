@@ -27,6 +27,23 @@ pub(crate) use external::finish_load_mast_forest_from_external;
 pub(crate) use operations::eval_circuit_impl;
 use operations::execute_op;
 
+// EXECUTION STATE
+// ================================================================================================
+
+/// Bundles the common state threaded through all execution functions.
+///
+/// Note: `current_forest` is intentionally excluded from this struct. Including it would prevent
+/// passing node references (obtained from the forest) alongside `&mut ExecutionState` to
+/// functions, since both would borrow the same struct.
+pub(crate) struct ExecutionState<'a, P, H, S, T> {
+    pub processor: &'a mut P,
+    pub continuation_stack: &'a mut ContinuationStack,
+    pub kernel: &'a Kernel,
+    pub host: &'a mut H,
+    pub tracer: &'a mut T,
+    pub stopper: &'a S,
+}
+
 // MAIN EXECUTION FUNCTION
 // ================================================================================================
 
@@ -124,7 +141,16 @@ where
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
-    while let Some(continuation) = continuation_stack.pop_continuation() {
+    let mut state = ExecutionState {
+        processor,
+        continuation_stack,
+        kernel,
+        host,
+        tracer,
+        stopper,
+    };
+
+    while let Some(continuation) = state.continuation_stack.pop_continuation() {
         match continuation {
             Continuation::StartNode(node_id) => {
                 let node = current_forest.get_node_by_id(node_id).unwrap();
@@ -132,131 +158,63 @@ where
                 match node {
                     MastNode::Block(basic_block_node) => {
                         basic_block::execute_basic_block_node_from_start(
-                            processor,
+                            &mut state,
                             basic_block_node,
                             node_id,
-                            host,
-                            continuation_stack,
                             current_forest,
-                            tracer,
-                            stopper,
                         )?
                     },
-                    MastNode::Join(join_node) => join::start_join_node(
-                        processor,
-                        join_node,
-                        node_id,
-                        current_forest,
-                        continuation_stack,
-                        host,
-                        tracer,
-                        stopper,
-                    )
-                    .map_break(InternalBreakReason::from)?,
-                    MastNode::Split(split_node) => split::start_split_node(
-                        processor,
-                        split_node,
-                        node_id,
-                        current_forest,
-                        continuation_stack,
-                        host,
-                        tracer,
-                        stopper,
-                    )
-                    .map_break(InternalBreakReason::from)?,
-                    MastNode::Loop(loop_node) => r#loop::start_loop_node(
-                        processor,
-                        loop_node,
-                        node_id,
-                        current_forest,
-                        continuation_stack,
-                        host,
-                        tracer,
-                        stopper,
-                    )
-                    .map_break(InternalBreakReason::from)?,
-                    MastNode::Call(call_node) => call::start_call_node(
-                        processor,
-                        call_node,
-                        node_id,
-                        kernel,
-                        current_forest,
-                        continuation_stack,
-                        host,
-                        tracer,
-                        stopper,
-                    )
-                    .map_break(InternalBreakReason::from)?,
-                    MastNode::Dyn(_) => r#dyn::start_dyn_node(
-                        processor,
-                        node_id,
-                        current_forest,
-                        continuation_stack,
-                        host,
-                        tracer,
-                        stopper,
-                    )?,
-                    MastNode::External(_) => {
-                        external::execute_external_node(processor, node_id, current_forest, host)?
+                    MastNode::Join(join_node) => {
+                        join::start_join_node(&mut state, join_node, node_id, current_forest)
+                            .map_break(InternalBreakReason::from)?
                     },
+                    MastNode::Split(split_node) => {
+                        split::start_split_node(&mut state, split_node, node_id, current_forest)
+                            .map_break(InternalBreakReason::from)?
+                    },
+                    MastNode::Loop(loop_node) => {
+                        r#loop::start_loop_node(&mut state, loop_node, node_id, current_forest)
+                            .map_break(InternalBreakReason::from)?
+                    },
+                    MastNode::Call(call_node) => {
+                        call::start_call_node(&mut state, call_node, node_id, current_forest)
+                            .map_break(InternalBreakReason::from)?
+                    },
+                    MastNode::Dyn(_) => r#dyn::start_dyn_node(&mut state, node_id, current_forest)?,
+                    MastNode::External(_) => external::execute_external_node(
+                        state.processor,
+                        node_id,
+                        current_forest,
+                        state.host,
+                    )?,
                 }
             },
-            Continuation::FinishJoin(node_id) => join::finish_join_node(
-                processor,
-                node_id,
-                current_forest,
-                continuation_stack,
-                host,
-                tracer,
-                stopper,
-            )
-            .map_break(InternalBreakReason::from)?,
-            Continuation::FinishSplit(node_id) => split::finish_split_node(
-                processor,
-                node_id,
-                current_forest,
-                continuation_stack,
-                host,
-                tracer,
-                stopper,
-            )
-            .map_break(InternalBreakReason::from)?,
-            Continuation::FinishLoop { node_id, was_entered } => r#loop::finish_loop_node(
-                processor,
-                was_entered,
-                node_id,
-                current_forest,
-                continuation_stack,
-                host,
-                tracer,
-                stopper,
-            )
-            .map_break(InternalBreakReason::from)?,
-            Continuation::FinishCall(node_id) => call::finish_call_node(
-                processor,
-                node_id,
-                current_forest,
-                continuation_stack,
-                host,
-                tracer,
-                stopper,
-            )
-            .map_break(InternalBreakReason::from)?,
-            Continuation::FinishDyn(node_id) => r#dyn::finish_dyn_node(
-                processor,
-                node_id,
-                current_forest,
-                continuation_stack,
-                host,
-                tracer,
-                stopper,
-            )
-            .map_break(InternalBreakReason::from)?,
+            Continuation::FinishJoin(node_id) => {
+                join::finish_join_node(&mut state, node_id, current_forest)
+                    .map_break(InternalBreakReason::from)?
+            },
+            Continuation::FinishSplit(node_id) => {
+                split::finish_split_node(&mut state, node_id, current_forest)
+                    .map_break(InternalBreakReason::from)?
+            },
+            Continuation::FinishLoop { node_id, was_entered } => {
+                r#loop::finish_loop_node(&mut state, was_entered, node_id, current_forest)
+                    .map_break(InternalBreakReason::from)?
+            },
+            Continuation::FinishCall(node_id) => {
+                call::finish_call_node(&mut state, node_id, current_forest)
+                    .map_break(InternalBreakReason::from)?
+            },
+            Continuation::FinishDyn(node_id) => {
+                r#dyn::finish_dyn_node(&mut state, node_id, current_forest)
+                    .map_break(InternalBreakReason::from)?
+            },
             Continuation::FinishExternal(node_id) => {
                 // Execute after_exit decorators when returning from an external node
                 // Note: current_forest should already be restored by EnterForest continuation
-                processor
-                    .execute_after_exit_decorators(node_id, current_forest, host)
+                state
+                    .processor
+                    .execute_after_exit_decorators(node_id, current_forest, state.host)
                     .map_break(InternalBreakReason::from)?;
             },
             Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
@@ -264,16 +222,12 @@ where
                     current_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
 
                 basic_block::execute_basic_block_node_from_op_idx(
-                    processor,
+                    &mut state,
                     basic_block_node,
                     node_id,
                     batch_index,
                     op_idx_in_batch,
-                    host,
-                    continuation_stack,
                     current_forest,
-                    tracer,
-                    stopper,
                 )?
             },
             Continuation::Respan { node_id, batch_index } => {
@@ -281,15 +235,11 @@ where
                     current_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
 
                 basic_block::execute_basic_block_node_from_batch(
-                    processor,
+                    &mut state,
                     basic_block_node,
                     node_id,
                     batch_index,
-                    host,
-                    continuation_stack,
                     current_forest,
-                    tracer,
-                    stopper,
                 )?
             },
             Continuation::FinishBasicBlock(node_id) => {
@@ -297,14 +247,10 @@ where
                     current_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
 
                 basic_block::finish_basic_block(
-                    processor,
+                    &mut state,
                     basic_block_node,
                     node_id,
                     current_forest,
-                    host,
-                    continuation_stack,
-                    tracer,
-                    stopper,
                 )
                 .map_break(InternalBreakReason::from)?
             },
@@ -312,23 +258,26 @@ where
                 // Restore the previous forest
                 *current_forest = previous_forest;
             },
-            Continuation::AfterExitDecorators(node_id) => processor
-                .execute_after_exit_decorators(node_id, current_forest, host)
+            Continuation::AfterExitDecorators(node_id) => state
+                .processor
+                .execute_after_exit_decorators(node_id, current_forest, state.host)
                 .map_break(InternalBreakReason::from)?,
             Continuation::AfterExitDecoratorsBasicBlock(node_id) => {
                 let basic_block_node =
                     current_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
 
-                processor
+                state
+                    .processor
                     .execute_end_of_block_decorators(
                         basic_block_node,
                         node_id,
                         current_forest,
-                        host,
+                        state.host,
                     )
                     .map_break(InternalBreakReason::from)?;
-                processor
-                    .execute_after_exit_decorators(node_id, current_forest, host)
+                state
+                    .processor
+                    .execute_after_exit_decorators(node_id, current_forest, state.host)
                     .map_break(InternalBreakReason::from)?;
             },
         }

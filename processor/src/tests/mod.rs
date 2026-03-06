@@ -207,11 +207,11 @@ fn test_diagnostic_divide_by_zero_2() {
     );
 }
 
-// DynamicNodeNotFound
+// ProcedureNotFound (dynexec/dyncall)
 // ------------------------------------------------------------------------------------------------
 
 #[test]
-fn test_diagnostic_dynamic_node_not_found_1() {
+fn test_diagnostic_procedure_not_found_dynexec() {
     let source = "
         begin
             trace.2 dynexec
@@ -221,7 +221,7 @@ fn test_diagnostic_dynamic_node_not_found_1() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "  x failed to execute dynamic code block; block with root 0x0000000000000000000000000000000000000000000000000000000000000000 could not be found",
+        "procedure with root digest 0x0000000000000000000000000000000000000000000000000000000000000000 could not be found",
         regex!(r#",-\[test[\d]+:3:21\]"#),
         " 2 |         begin",
         " 3 |             trace.2 dynexec",
@@ -232,7 +232,7 @@ fn test_diagnostic_dynamic_node_not_found_1() {
 }
 
 #[test]
-fn test_diagnostic_dynamic_node_not_found_2() {
+fn test_diagnostic_procedure_not_found_dyncall() {
     let source = "
         begin
             trace.2 dyncall
@@ -242,7 +242,7 @@ fn test_diagnostic_dynamic_node_not_found_2() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "  x failed to execute dynamic code block; block with root 0x0000000000000000000000000000000000000000000000000000000000000000 could not be found",
+        "procedure with root digest 0x0000000000000000000000000000000000000000000000000000000000000000 could not be found",
         regex!(r#",-\[test[\d]+:3:21\]"#),
         " 2 |         begin",
         " 3 |             trace.2 dyncall",
@@ -696,11 +696,11 @@ fn test_diagnostic_merkle_store_lookup_failed() {
     );
 }
 
-// NoMastForestWithProcedure
+// ProcedureNotFound (external node resolution)
 // -------------------------------------------------------------------------------------------------
 
 #[test]
-fn test_diagnostic_no_mast_forest_with_procedure_call() {
+fn test_diagnostic_procedure_not_found_call() {
     let source_manager = Arc::new(DefaultSourceManager::default());
 
     let lib_module = {
@@ -747,7 +747,7 @@ fn test_diagnostic_no_mast_forest_with_procedure_call() {
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
-        "no MAST forest contains the procedure with root digest 0x21458fd12b211505c36fe477314b3149bd4b2214f3304cbafa04ea80579d4328",
+        "procedure with root digest 0x21458fd12b211505c36fe477314b3149bd4b2214f3304cbafa04ea80579d4328 could not be found",
         regex!(r#",-\[::\$exec:5:13\]"#),
         " 4 |         begin",
         " 5 |             call.bar::dummy_proc",
@@ -758,7 +758,7 @@ fn test_diagnostic_no_mast_forest_with_procedure_call() {
 }
 
 #[test]
-fn test_diagnostic_no_mast_forest_with_procedure_join() {
+fn test_diagnostic_procedure_not_found_join() {
     let source_manager = Arc::new(DefaultSourceManager::default());
 
     let lib_module = {
@@ -806,7 +806,7 @@ fn test_diagnostic_no_mast_forest_with_procedure_join() {
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
-        "no MAST forest contains the procedure with root digest 0x21458fd12b211505c36fe477314b3149bd4b2214f3304cbafa04ea80579d4328",
+        "procedure with root digest 0x21458fd12b211505c36fe477314b3149bd4b2214f3304cbafa04ea80579d4328 could not be found",
         regex!(r#",-\[::\$exec:4:9\]"#),
         " 3 |",
         " 4 | ,->         begin",
@@ -819,7 +819,7 @@ fn test_diagnostic_no_mast_forest_with_procedure_join() {
 }
 
 #[test]
-fn test_diagnostic_no_mast_forest_with_procedure_loop() {
+fn test_diagnostic_procedure_not_found_loop() {
     let source_manager = Arc::new(DefaultSourceManager::default());
 
     let lib_module = {
@@ -869,7 +869,7 @@ fn test_diagnostic_no_mast_forest_with_procedure_loop() {
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
-        "no MAST forest contains the procedure with root digest 0x21458fd12b211505c36fe477314b3149bd4b2214f3304cbafa04ea80579d4328",
+        "procedure with root digest 0x21458fd12b211505c36fe477314b3149bd4b2214f3304cbafa04ea80579d4328 could not be found",
         regex!(r#",-\[::\$exec:6:13\]"#),
         "  5 |                 push.1",
         "  6 | ,->             while.true",
@@ -881,7 +881,7 @@ fn test_diagnostic_no_mast_forest_with_procedure_loop() {
 }
 
 #[test]
-fn test_diagnostic_no_mast_forest_with_procedure_split() {
+fn test_diagnostic_procedure_not_found_split() {
     let source_manager = Arc::new(DefaultSourceManager::default());
 
     let lib_module = {
@@ -933,7 +933,7 @@ fn test_diagnostic_no_mast_forest_with_procedure_split() {
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
-        "no MAST forest contains the procedure with root digest 0x21458fd12b211505c36fe477314b3149bd4b2214f3304cbafa04ea80579d4328",
+        "procedure with root digest 0x21458fd12b211505c36fe477314b3149bd4b2214f3304cbafa04ea80579d4328 could not be found",
         regex!(r#",-\[::\$exec:6:13\]"#),
         "  5 |                 push.1",
         "  6 | ,->             if.true",

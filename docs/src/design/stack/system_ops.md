@@ -34,6 +34,23 @@ $$
 The effect on the rest of the stack is:
 * **Left shift** starting from position $1$.
 
+## CALLER
+The `CALLER` operation overwrites the top four stack elements with the caller's function hash.
+
+Stack transition for this operation must satisfy the following constraints:
+
+$$
+\begin{aligned}
+s_0' - h_0 = 0 \text{ | degree} = 1 \\
+s_1' - h_1 = 0 \text{ | degree} = 1 \\
+s_2' - h_2 = 0 \text{ | degree} = 1 \\
+s_3' - h_3 = 0 \text{ | degree} = 1
+\end{aligned}
+$$
+
+The effect on the rest of the stack is:
+* **No change** starting from position $4$.
+
 ## CLK
 The `CLK` operation pushes the current value of the clock cycle onto the stack. The diagram below illustrates this graphically.
 

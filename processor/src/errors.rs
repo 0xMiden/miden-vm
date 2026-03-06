@@ -12,7 +12,6 @@ use crate::{
     advice::AdviceError,
     event::{EventError, EventId, EventName},
     fast::SystemEventError,
-    field::QuadFelt,
     mast::{MastForest, MastNodeId},
     utils::to_hex,
 };
@@ -42,13 +41,6 @@ pub enum ExecutionError {
     },
     #[error("exceeded the allowed number of max cycles {0}")]
     CycleLimitExceeded(u32),
-    #[error("debug handler error: {err}")]
-    DebugHandlerError {
-        #[source]
-        err: DebugError,
-    },
-    #[error("attempted to add event handler for '{event}' (already registered)")]
-    DuplicateEventHandler { event: EventName },
     #[error("error during processing of event {}", match event_name {
         Some(name) => format!("'{}' (ID: {})", name, event_id),
         None => format!("with ID: {}", event_id),
@@ -96,16 +88,19 @@ pub enum ExecutionError {
     },
     #[error("stack should have at most {MIN_STACK_DEPTH} elements at the end of program execution, but had {} elements", MIN_STACK_DEPTH + .0)]
     OutputStackOverflow(usize),
+    #[error("procedure with root digest {root_digest} could not be found")]
+    #[diagnostic()]
+    ProcedureNotFound {
+        #[label]
+        label: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        root_digest: Word,
+    },
     #[error("failed to serialize proof: {0}")]
     ProofSerializationError(String),
-    #[error("attempted to add event handler for '{event}' (reserved system event)")]
-    ReservedEventNamespace { event: EventName },
-    #[error("trace handler error for trace ID {trace_id}: {err}")]
-    TraceHandlerError {
-        trace_id: u32,
-        #[source]
-        err: TraceError,
-    },
+    #[error(transparent)]
+    HostError(#[from] HostError),
 }
 
 impl AsRef<dyn Diagnostic> for ExecutionError {
@@ -118,22 +113,8 @@ impl AsRef<dyn Diagnostic> for ExecutionError {
 // ================================================================================================
 
 #[derive(Debug, thiserror::Error)]
-pub enum AceError {
-    #[error("num of variables should be word aligned and non-zero but was {0}")]
-    NumVarIsNotWordAlignedOrIsEmpty(u64),
-    #[error("num of evaluation gates should be word aligned and non-zero but was {0}")]
-    NumEvalIsNotWordAlignedOrIsEmpty(u64),
-    #[error("circuit does not evaluate to zero")]
-    CircuitNotEvaluateZero,
-    #[error("failed to read from memory")]
-    FailedMemoryRead,
-    #[error("failed to decode instruction")]
-    FailedDecodeInstruction,
-    #[error("failed to read from the wiring bus")]
-    FailedWireBusRead,
-    #[error("num of wires must be less than 2^30 but was {0}")]
-    TooManyWires(u64),
-}
+#[error("ace circuit evaluation failed: {0}")]
+pub struct AceError(pub String);
 
 // ACE EVAL ERROR
 // ================================================================================================
@@ -151,6 +132,29 @@ pub enum AceEvalError {
     Memory(#[from] MemoryError),
 }
 
+// HOST ERROR
+// ================================================================================================
+
+/// Error type for host-related operations (event handlers, debug handlers, trace handlers).
+#[derive(Debug, thiserror::Error)]
+pub enum HostError {
+    #[error("attempted to add event handler for '{event}' (already registered)")]
+    DuplicateEventHandler { event: EventName },
+    #[error("attempted to add event handler for '{event}' (reserved system event)")]
+    ReservedEventNamespace { event: EventName },
+    #[error("debug handler error: {err}")]
+    DebugHandlerError {
+        #[source]
+        err: DebugError,
+    },
+    #[error("trace handler error for trace ID {trace_id}: {err}")]
+    TraceHandlerError {
+        trace_id: u32,
+        #[source]
+        err: TraceError,
+    },
+}
+
 // IO ERROR
 // ================================================================================================
 
@@ -165,6 +169,9 @@ pub enum IoError {
     Advice(#[from] AdviceError),
     #[error(transparent)]
     Memory(#[from] MemoryError),
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Operation(#[from] OperationError),
     /// Stack operation error (increment/decrement size failures).
     ///
     /// These are internal execution errors that don't need additional context
@@ -205,6 +212,8 @@ pub enum MemoryError {
         "ensure that the memory address accessed is aligned to a word boundary (it is a multiple of 4)"
     ))]
     UnalignedWordAccess { addr: u32, ctx: ContextId },
+    #[error("failed to read from memory: {0}")]
+    MemoryReadFailed(String),
 }
 
 // CRYPTO ERROR
@@ -266,8 +275,6 @@ pub enum OperationError {
         "ensure the divisor (second stack element) is non-zero before division or modulo operations"
     ))]
     DivideByZero,
-    #[error("failed to execute dynamic code block; block with root {digest} could not be found")]
-    DynamicNodeNotFound { digest: Word },
     #[error(
         "assertion failed with error {}",
         match err_msg {
@@ -282,12 +289,8 @@ pub enum OperationError {
         err_code: Felt,
         err_msg: Option<Arc<str>>,
     },
-    #[error("FRI domain size was 0")]
-    InvalidFriDomainGenerator,
-    #[error("FRI domain segment value cannot exceed 3, but was {0}")]
-    InvalidFriDomainSegment(u64),
-    #[error("degree-respecting projection is inconsistent: expected {0} but was {1}")]
-    InvalidFriLayerFolding(QuadFelt, QuadFelt),
+    #[error("FRI operation failed: {0}")]
+    FriError(String),
     #[error(
         "invalid crypto operation: Merkle path length {path_len} does not match expected depth {depth}"
     )]
@@ -313,8 +316,6 @@ pub enum OperationError {
     MerklePathVerificationFailed {
         inner: Box<MerklePathVerificationFailedInner>,
     },
-    #[error("no MAST forest contains the procedure with root digest {root_digest}")]
-    NoMastForestWithProcedure { root_digest: Word },
     #[error("operation expected a binary value, but got {value}")]
     NotBinaryValue { value: Felt },
     #[error("if statement expected a binary value on top of the stack, but got {value}")]
@@ -328,6 +329,8 @@ pub enum OperationError {
     NotU32Values { values: Vec<Felt> },
     #[error("syscall failed: procedure with root {proc_root} was not found in the kernel")]
     SyscallTargetNotInKernel { proc_root: Word },
+    #[error("failed to execute the operation for internal reason: {0}")]
+    Internal(&'static str),
 }
 
 impl OperationError {
@@ -417,6 +420,17 @@ pub fn event_error_with_context(
     }
 }
 
+/// Creates a `ProcedureNotFound` error with execution context.
+pub fn procedure_not_found_with_context(
+    root_digest: Word,
+    mast_forest: &MastForest,
+    node_id: MastNodeId,
+    host: &impl Host,
+) -> ExecutionError {
+    let (label, source_file) = get_label_and_source_file(None, mast_forest, node_id, host);
+    ExecutionError::ProcedureNotFound { label, source_file, root_digest }
+}
+
 // CONSOLIDATED EXTENSION TRAITS (plafer's approach)
 // ================================================================================================
 //
@@ -496,6 +510,20 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, OperationError> {
                     get_label_and_source_file(Some(op_idx), mast_forest, node_id, host);
                 Err(ExecutionError::OperationError { label, source_file, err })
             },
+        }
+    }
+}
+
+impl<T> MapExecErrNoCtx<T> for Result<T, OperationError> {
+    #[inline(always)]
+    fn map_exec_err_no_ctx(self) -> Result<T, ExecutionError> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(err) => Err(ExecutionError::OperationError {
+                label: SourceSpan::UNKNOWN,
+                source_file: None,
+                err,
+            }),
         }
     }
 }
@@ -648,6 +676,9 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, IoError> {
                 Err(match err {
                     IoError::Advice(err) => ExecutionError::AdviceError { label, source_file, err },
                     IoError::Memory(err) => ExecutionError::MemoryError { label, source_file, err },
+                    IoError::Operation(err) => {
+                        ExecutionError::OperationError { label, source_file, err }
+                    },
                     // Execution errors are already fully formed with their own message.
                     IoError::Execution(boxed_err) => *boxed_err,
                 })

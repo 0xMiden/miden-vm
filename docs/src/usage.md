@@ -129,7 +129,7 @@ After a program finishes executing, the elements that remain on the stack become
 
 ## Fibonacci example
 
-In the `miden/masm-examples/fib` directory, we provide a very simple Fibonacci calculator example. This example computes the 1001st term of the Fibonacci sequence. You can execute this example on Miden VM like so:
+In the `miden-vm/masm-examples/fib` directory, we provide a very simple Fibonacci calculator example. This example computes the 1001st term of the Fibonacci sequence. You can execute this example on Miden VM like so:
 
 ```shell
 ./target/optimized/miden-vm run miden-vm/masm-examples/fib/fib.masm

@@ -41,7 +41,7 @@ mod tests;
 // ================================================================================================
 
 pub use continuation_stack::Continuation;
-pub use errors::{ExecutionError, MemoryError};
+pub use errors::{ExecutionError, HostError, MemoryError};
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
 pub use fast::{BreakReason, ExecutionOutput, FastProcessor, ResumeContext};
 pub use host::{
@@ -108,7 +108,7 @@ pub async fn execute(
     let (execution_output, trace_generation_context) =
         processor.execute_for_trace(program, host).await?;
 
-    let trace = trace::build_trace(execution_output, trace_generation_context, program.to_info());
+    let trace = trace::build_trace(execution_output, trace_generation_context, program.to_info())?;
 
     assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
     Ok(trace)
@@ -157,7 +157,7 @@ pub fn execute_sync(
 /// advice provider, and execution context information.
 #[derive(Debug)]
 pub struct ProcessorState<'a> {
-    processor: &'a mut FastProcessor,
+    processor: &'a FastProcessor,
 }
 
 impl<'a> ProcessorState<'a> {
@@ -165,12 +165,6 @@ impl<'a> ProcessorState<'a> {
     #[inline(always)]
     pub fn advice_provider(&self) -> &AdviceProvider {
         self.processor.advice_provider()
-    }
-
-    /// Returns a mutable reference to the advice provider.
-    #[inline(always)]
-    pub fn advice_provider_mut(&mut self) -> &mut AdviceProvider {
-        self.processor.advice_provider_mut()
     }
 
     /// Returns the current clock cycle of a process.
@@ -270,11 +264,21 @@ impl<'a> ProcessorState<'a> {
 // STOPPER
 // ===============================================================================================
 
-/// A trait for types that determine whether execution should be stopped at a given point.
+/// A trait for types that determine whether execution should be stopped after each clock cycle.
+///
+/// This allows for flexible control over the execution process, enabling features such as stepping
+/// through execution (see [`crate::FastProcessor::step`]) or limiting execution to a certain number
+/// of clock cycles (used in parallel trace generation to fill the trace for a predetermined trace
+/// fragment).
 pub trait Stopper {
     type Processor;
 
-    /// Determines whether execution should be stopped.
+    /// Determines whether execution should be stopped at the end of each clock cycle.
+    ///
+    /// This method is guaranteed to be called at the end of each clock cycle, *after* the processor
+    /// state has been updated to reflect the effects of the operations executed during that cycle
+    /// (*including* the processor clock). Hence, a processor clock of `N` indicates that clock
+    /// cycle `N - 1` has just completed.
     ///
     /// The `continuation_after_stop` is provided in cases where simply resuming execution from the
     /// top of the continuation stack is not sufficient to continue execution correctly. For

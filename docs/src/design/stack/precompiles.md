@@ -19,16 +19,16 @@ coordinate to maintain a sequential commitment to every precompile invocation.
 3. **Wrapper constructs commitment** – The wrapper pops result(s) from advice, computes `(TAG, COMM)` per the precompile’s convention, and prepares to log the operation.
 4. **`log_precompile` records the commitment** – The wrapper invokes `log_precompile` with `[COMM, TAG, PAD, ...]`. The instruction:
    - Reads the previous transcript capacity `CAP_PREV` (non‑deterministically via helper registers).
-   - Applies the Poseidon2 permutation to `[CAP_PREV, TAG, COMM]`, producing `[CAP_NEXT, R0, R1]`.
-   - Writes `[R1, R0, CAP_NEXT]` back onto the stack; programs typically drop these words immediately.
+   - Applies the Poseidon2 permutation to `[COMM, TAG, CAP_PREV]`, producing `[R0, R1, CAP_NEXT]`.
+   - Writes `[R0, R1, CAP_NEXT]` back onto the stack; programs typically drop these words immediately.
 5. **Capacity tracking via vtable** – Capacity is tracked inside the VM via the chiplets’ virtual table; the host never tracks capacity. The table always stores the current capacity (the transcript state). On each `log_precompile`:
    - The previous capacity is removed from the table.
-   - The permutation links `CAP_PREV --[TAG,COMM]--> CAP_NEXT`.
+   - The permutation links `CAP_PREV --[COMM, TAG]--> CAP_NEXT`.
    - The next capacity is inserted back into the table.
    This enforces that updates can only occur by applying the permutation.
 6. **Trace output and proof** – The capacity state is used to construct the vtable auxiliary column, while the prover stores only the ordered `PrecompileRequest`s in the proof.
 7. **Verifier reconstruction** – The verifier replays each request via a `PrecompileVerifier` to recompute `(TAG, COMM)`, records them into a fresh transcript, and enforces the initial/final capacity via public inputs. To check correct linking, the verifier initializes the column with an initial insertion of the empty capacity and a removal of the final capacity; the final capacity is provided as a public input to the AIR.
-8. **Finalization convention** – When a digest is needed, finalize the transcript by absorbing two empty words (zeros in the rate) and permuting once. The transcript digests the ordered sequence of `[TAG, COMM]` words for all requests; `log_precompile` discards rate outputs (`R0`, `R1`), so only the capacity persists.
+8. **Finalization convention** – When a digest is needed, finalize the transcript by absorbing two empty words (zeros in the rate) and permuting once. The transcript digests the ordered sequence of `[COMM, TAG]` words for all requests; `log_precompile` discards rate outputs (`R0`, `R1`), so only the capacity persists.
 
 ## Responsibilities
 
@@ -50,8 +50,8 @@ coordinate to maintain a sequential commitment to every precompile invocation.
   - Typically commits to inputs.
   - May also include outputs when results are long, so that `(TAG, COMM)` together represent the full request (inputs + outputs).
   - The exact composition is precompile‑specific and defined by its verifier specification.
-- `log_precompile` stack effect: `[COMM, TAG, PAD, ...] -> [R1, R0, CAP_NEXT, ...]` where
-  `Poseidon2([CAP_PREV, TAG, COMM]) = [CAP_NEXT, R0, R1]`.
+- `log_precompile` stack effect: `[COMM, TAG, PAD, ...] -> [R0, R1, CAP_NEXT, ...]` where
+  `Poseidon2([COMM, TAG, CAP_PREV]) = [R0, R1, CAP_NEXT]`.
 
 - Input encoding:
   - By convention, inputs are encoded as packed u32 values in field elements (4 bytes per element, little‑endian). If the input length is not a multiple of 4, the final u32 is zero‑padded. Because of this packing, wrappers commonly include the byte length in `TAG` to distinguish data bytes from padding.

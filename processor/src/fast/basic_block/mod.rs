@@ -17,14 +17,12 @@ pub use sys_event_handlers::SystemEventError;
 use sys_event_handlers::handle_system_event;
 
 impl FastProcessor {
-    // Executes any decorators which have not been executed during span ops execution; this can
-    // happen for decorators appearing after all operations in a block. these decorators are
-    // executed after BASIC BLOCK is closed to make sure the VM clock cycle advances beyond the last
-    // clock cycle of the BASIC BLOCK ops. For the linked case, check for decorators at an operation
-    // index beyond the last operation
+    /// Executes any decorator in a basic block that is to be executed after all operations in the
+    /// block. This only differs from [`Self::execute_after_exit_decorators`] in that these
+    /// decorators are stored in the basic block node itself.
     #[inline(always)]
     pub(super) fn execute_end_of_block_decorators(
-        &mut self,
+        &self,
         basic_block_node: &BasicBlockNode,
         node_id: MastNodeId,
         current_forest: &Arc<MastForest>,
@@ -51,18 +49,21 @@ impl FastProcessor {
         node_id: MastNodeId,
         op_idx: usize,
     ) -> ControlFlow<BreakReason> {
-        let mut process = self.state();
-        let event_id = EventId::from_felt(process.get_stack_item(0));
+        let event_id = EventId::from_felt(self.stack_get(0));
 
         // If it's a system event, handle it directly. Otherwise, forward it to the host.
         if let Some(system_event) = SystemEvent::from_event_id(event_id) {
-            if let Err(err) = handle_system_event(&mut process, system_event)
-                .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)
-            {
+            if let Err(err) = handle_system_event(self, system_event).map_exec_err_with_op_idx(
+                current_forest,
+                node_id,
+                host,
+                op_idx,
+            ) {
                 return ControlFlow::Break(BreakReason::Err(err));
             }
         } else {
-            let mutations = match host.on_event(&process).await {
+            let processor_state = self.state();
+            let mutations = match host.on_event(&processor_state).await {
                 Ok(m) => m,
                 Err(err) => {
                     let event_name = host.resolve_event(event_id).cloned();

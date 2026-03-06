@@ -200,17 +200,17 @@ impl SiblingTableRow {
         if lsb == 0 {
             alphas[0]
                 + alphas[3] * self.index
-                + alphas[12] * self.sibling[0]
-                + alphas[13] * self.sibling[1]
-                + alphas[14] * self.sibling[2]
-                + alphas[15] * self.sibling[3]
-        } else {
-            alphas[0]
-                + alphas[3] * self.index
                 + alphas[8] * self.sibling[0]
                 + alphas[9] * self.sibling[1]
                 + alphas[10] * self.sibling[2]
                 + alphas[11] * self.sibling[3]
+        } else {
+            alphas[0]
+                + alphas[3] * self.index
+                + alphas[4] * self.sibling[0]
+                + alphas[5] * self.sibling[1]
+                + alphas[6] * self.sibling[2]
+                + alphas[7] * self.sibling[3]
         }
     }
 }

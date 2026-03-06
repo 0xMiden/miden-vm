@@ -16,8 +16,8 @@ Err(
             ),
         },
         source_file: None,
-        error: NumVarIsNotWordAlignedOrIsEmpty(
-            0,
+        error: AceError(
+            "num of variables should be word aligned and non-zero but was 0",
         ),
     },
 )

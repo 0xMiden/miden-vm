@@ -104,11 +104,17 @@ impl Circuit {
         nodes.extend(self.constants.iter().map(|c| QuadFelt::from(*c)));
 
         for instruction in &self.instructions {
-            let id_l = layout.node_index(&instruction.node_l).expect("TODO");
-            let v_l = *nodes.get(id_l).expect("TODO");
+            let id_l = layout
+                .node_index(&instruction.node_l)
+                .expect("left operand node not found in circuit layout");
+            let v_l =
+                *nodes.get(id_l).expect("left operand index out of bounds in evaluated nodes");
 
-            let id_r = layout.node_index(&instruction.node_r).expect("TODO");
-            let v_r = *nodes.get(id_r).expect("TODO");
+            let id_r = layout
+                .node_index(&instruction.node_r)
+                .expect("right operand node not found in circuit layout");
+            let v_r =
+                *nodes.get(id_r).expect("right operand index out of bounds in evaluated nodes");
 
             let v_out = match instruction.op {
                 Op::Sub => v_l - v_r,
