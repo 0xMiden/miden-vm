@@ -367,3 +367,116 @@ impl LocalSymbolTable {
         result
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use alloc::{
+        collections::BTreeMap,
+        string::{String, ToString},
+        sync::Arc,
+    };
+    use core::str::FromStr;
+
+    use miden_debug_types::DefaultSourceManager;
+
+    use super::*;
+    use crate::PathBuf;
+
+    fn path_arc(path: &str) -> Arc<Path> {
+        let path = PathBuf::from_str(path).expect("valid path");
+        Arc::from(path.as_path())
+    }
+
+    #[test]
+    fn alias_expansion_detects_cycle() {
+        let source_manager = DefaultSourceManager::default();
+        let mut imports = BTreeMap::<String, AliasTarget>::new();
+        imports.insert("a".to_string(), AliasTarget::Path(Span::unknown(path_arc("b"))));
+        imports.insert("b".to_string(), AliasTarget::Path(Span::unknown(path_arc("a"))));
+
+        let path = PathBuf::from_str("a").expect("valid path");
+        let result = LocalSymbolTable::expand(
+            |name| imports.get(name).cloned(),
+            Span::unknown(path.as_path()),
+            &source_manager,
+        );
+
+        assert!(matches!(result, Err(SymbolResolutionError::AliasExpansionCycle { .. })));
+    }
+
+    #[test]
+    fn alias_expansion_depth_boundary() {
+        let source_manager = DefaultSourceManager::default();
+        let mut imports = BTreeMap::<String, AliasTarget>::new();
+        let max_depth = MAX_ALIAS_EXPANSION_DEPTH;
+        for i in 0..max_depth {
+            let current = format!("a{i}");
+            let next = format!("a{}", i + 1);
+            imports.insert(current, AliasTarget::Path(Span::unknown(path_arc(&next))));
+        }
+
+        let path = PathBuf::from_str("a0").expect("valid path");
+        let result = LocalSymbolTable::expand(
+            |name| imports.get(name).cloned(),
+            Span::unknown(path.as_path()),
+            &source_manager,
+        )
+        .expect("expected depth boundary to resolve");
+
+        match result {
+            SymbolResolution::External(resolved) => {
+                let expected = format!("a{max_depth}");
+                let expected = PathBuf::from_str(&expected).expect("valid path");
+                let expected = expected.as_path().to_absolute().into_owned();
+                assert_eq!(resolved.as_deref(), expected.as_path());
+            },
+            other => panic!("expected external resolution, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn alias_expansion_depth_exceeded() {
+        let source_manager = DefaultSourceManager::default();
+        let mut imports = BTreeMap::<String, AliasTarget>::new();
+        for i in 0..=MAX_ALIAS_EXPANSION_DEPTH {
+            let current = format!("a{i}");
+            let next = format!("a{}", i + 1);
+            imports.insert(current, AliasTarget::Path(Span::unknown(path_arc(&next))));
+        }
+
+        let path = PathBuf::from_str("a0").expect("valid path");
+        let result = LocalSymbolTable::expand(
+            |name| imports.get(name).cloned(),
+            Span::unknown(path.as_path()),
+            &source_manager,
+        );
+
+        assert!(matches!(
+            result,
+            Err(SymbolResolutionError::AliasExpansionDepthExceeded { max_depth, .. })
+                if max_depth == MAX_ALIAS_EXPANSION_DEPTH
+        ));
+    }
+
+    #[test]
+    fn alias_expansion_handles_shadowed_import() {
+        let source_manager = DefaultSourceManager::default();
+        let mut imports = BTreeMap::<String, AliasTarget>::new();
+        imports.insert("lib".to_string(), AliasTarget::Path(Span::unknown(path_arc("lib"))));
+
+        let path = PathBuf::from_str("lib").expect("valid path");
+        let result = LocalSymbolTable::expand(
+            |name| imports.get(name).cloned(),
+            Span::unknown(path.as_path()),
+            &source_manager,
+        )
+        .expect("shadowed import should resolve");
+
+        match result {
+            SymbolResolution::External(resolved) => {
+                assert_eq!(resolved.as_deref(), path.as_path());
+            },
+            other => panic!("expected external resolution, got {other:?}"),
+        }
+    }
+}

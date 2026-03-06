@@ -1125,3 +1125,92 @@ impl crate::prettier::PrettyPrint for Variant {
         doc + display(&self.name) + const_text(" = ") + self.discriminant.render()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use alloc::sync::Arc;
+    use core::str::FromStr;
+
+    use miden_debug_types::DefaultSourceManager;
+
+    use super::*;
+
+    struct DummyResolver {
+        source_manager: Arc<dyn SourceManager>,
+    }
+
+    impl DummyResolver {
+        fn new() -> Self {
+            Self {
+                source_manager: Arc::new(DefaultSourceManager::default()),
+            }
+        }
+    }
+
+    impl TypeResolver<SymbolResolutionError> for DummyResolver {
+        fn source_manager(&self) -> Arc<dyn SourceManager> {
+            self.source_manager.clone()
+        }
+
+        fn resolve_local_failed(&self, err: SymbolResolutionError) -> SymbolResolutionError {
+            err
+        }
+
+        fn get_type(
+            &self,
+            context: SourceSpan,
+            _gid: GlobalItemIndex,
+        ) -> Result<Type, SymbolResolutionError> {
+            Err(SymbolResolutionError::undefined(context, self.source_manager.as_ref()))
+        }
+
+        fn get_local_type(
+            &self,
+            _context: SourceSpan,
+            _id: ItemIndex,
+        ) -> Result<Option<Type>, SymbolResolutionError> {
+            Ok(None)
+        }
+
+        fn resolve_type_ref(
+            &self,
+            ty: Span<&Path>,
+        ) -> Result<SymbolResolution, SymbolResolutionError> {
+            Err(SymbolResolutionError::undefined(ty.span(), self.source_manager.as_ref()))
+        }
+    }
+
+    fn nested_type_expr(depth: usize) -> TypeExpr {
+        let mut expr = TypeExpr::Primitive(Span::unknown(Type::Felt));
+        for i in 0..depth {
+            expr = match i % 3 {
+                0 => TypeExpr::Ptr(PointerType::new(expr)),
+                1 => TypeExpr::Array(ArrayType::new(expr, 1)),
+                _ => {
+                    let field = StructField {
+                        span: SourceSpan::UNKNOWN,
+                        name: Ident::from_str("field").expect("valid ident"),
+                        ty: expr,
+                    };
+                    TypeExpr::Struct(StructType::new([field]))
+                },
+            };
+        }
+        expr
+    }
+
+    #[test]
+    fn type_expr_depth_boundary() {
+        let resolver = DummyResolver::new();
+
+        let ok_expr = nested_type_expr(MAX_TYPE_EXPR_NESTING);
+        assert!(ok_expr.resolve_type(&resolver).is_ok());
+
+        let err_expr = nested_type_expr(MAX_TYPE_EXPR_NESTING + 1);
+        let err = err_expr.resolve_type(&resolver).expect_err("expected depth-exceeded error");
+        assert!(
+            matches!(err, SymbolResolutionError::TypeExpressionDepthExceeded { max_depth, .. }
+                if max_depth == MAX_TYPE_EXPR_NESTING)
+        );
+    }
+}

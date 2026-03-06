@@ -553,3 +553,32 @@ impl Deserializable for HashKind {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn nested_add_expr(depth: usize) -> ConstantExpr {
+        let mut expr = ConstantExpr::Int(Span::unknown(IntValue::from(1u8)));
+        for _ in 0..depth {
+            expr = ConstantExpr::BinaryOp {
+                span: SourceSpan::UNKNOWN,
+                op: ConstantOp::Add,
+                lhs: Box::new(expr),
+                rhs: Box::new(ConstantExpr::Int(Span::unknown(IntValue::from(1u8)))),
+            };
+        }
+        expr
+    }
+
+    #[test]
+    fn const_expr_fold_depth_boundary() {
+        let ok_expr = nested_add_expr(MAX_CONST_EXPR_FOLD_DEPTH);
+        assert!(ok_expr.try_fold().is_ok());
+
+        let err_expr = nested_add_expr(MAX_CONST_EXPR_FOLD_DEPTH + 1);
+        let err = err_expr.try_fold().expect_err("expected depth-exceeded error");
+        assert!(matches!(err, ParsingError::ConstExprDepthExceeded { max_depth, .. }
+                if max_depth == MAX_CONST_EXPR_FOLD_DEPTH));
+    }
+}
