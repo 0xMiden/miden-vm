@@ -8,10 +8,10 @@ use hasher::{
 };
 use kernel::{KernelRomMessage, build_kernel_chiplet_responses};
 use memory::{
-    build_dyn_dyncall_callee_hash_read_request, build_fmp_initialization_write_request,
-    build_hornerbase_eval_request, build_hornerext_eval_request, build_mem_mload_mstore_request,
-    build_mem_mloadw_mstorew_request, build_memory_chiplet_responses, build_mstream_request,
-    build_pipe_request,
+    build_crypto_stream_request, build_dyn_dyncall_callee_hash_read_request,
+    build_fmp_initialization_write_request, build_hornerbase_eval_request,
+    build_hornerext_eval_request, build_mem_mload_mstore_request, build_mem_mloadw_mstorew_request,
+    build_memory_chiplet_responses, build_mstream_request, build_pipe_request,
 };
 use miden_air::trace::{
     MainTrace, RowIndex,
@@ -27,11 +27,11 @@ use miden_core::{
     ONE, ZERO,
     field::ExtensionField,
     operations::{
-        OPCODE_CALL, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END, OPCODE_EVALCIRCUIT, OPCODE_HORNERBASE,
-        OPCODE_HORNEREXT, OPCODE_HPERM, OPCODE_JOIN, OPCODE_LOGPRECOMPILE, OPCODE_LOOP,
-        OPCODE_MLOAD, OPCODE_MLOADW, OPCODE_MPVERIFY, OPCODE_MRUPDATE, OPCODE_MSTORE,
-        OPCODE_MSTOREW, OPCODE_MSTREAM, OPCODE_PIPE, OPCODE_RESPAN, OPCODE_SPAN, OPCODE_SPLIT,
-        OPCODE_SYSCALL, OPCODE_U32AND, OPCODE_U32XOR,
+        OPCODE_CALL, OPCODE_CRYPTOSTREAM, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END,
+        OPCODE_EVALCIRCUIT, OPCODE_HORNERBASE, OPCODE_HORNEREXT, OPCODE_HPERM, OPCODE_JOIN,
+        OPCODE_LOGPRECOMPILE, OPCODE_LOOP, OPCODE_MLOAD, OPCODE_MLOADW, OPCODE_MPVERIFY,
+        OPCODE_MRUPDATE, OPCODE_MSTORE, OPCODE_MSTOREW, OPCODE_MSTREAM, OPCODE_PIPE, OPCODE_RESPAN,
+        OPCODE_SPAN, OPCODE_SPLIT, OPCODE_SYSCALL, OPCODE_U32AND, OPCODE_U32XOR,
     },
     program::Kernel,
 };
@@ -133,6 +133,7 @@ where
             OPCODE_HORNERBASE => build_hornerbase_eval_request(main_trace, alphas, row, debugger),
             OPCODE_HORNEREXT => build_hornerext_eval_request(main_trace, alphas, row, debugger),
             OPCODE_MSTREAM => build_mstream_request(main_trace, alphas, row, debugger),
+            OPCODE_CRYPTOSTREAM => build_crypto_stream_request(main_trace, alphas, row, debugger),
             OPCODE_HPERM => build_hperm_request(main_trace, alphas, row, debugger),
             OPCODE_LOGPRECOMPILE => build_log_precompile_request(main_trace, alphas, row, debugger),
             OPCODE_MPVERIFY => build_mpverify_request(main_trace, alphas, row, debugger),
