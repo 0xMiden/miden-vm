@@ -258,6 +258,15 @@ fuzz-mast-validate: ## Run fuzzing for UntrustedMastForest validation
 fuzz-all: ## Run all fuzz targets (in sequence)
 	-@cargo +nightly fuzz run mast_forest_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
 	-@cargo +nightly fuzz run mast_forest_validate --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run program_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run kernel_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run stack_io_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run advice_inputs_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run operation_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run execution_proof_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run precompile_request_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run library_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run package_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
 
 .PHONY: fuzz-list
 fuzz-list: ## List available fuzz targets
@@ -271,3 +280,4 @@ fuzz-coverage: ## Generate coverage report for fuzz targets
 .PHONY: fuzz-seeds
 fuzz-seeds: ## Generate seed corpus files for fuzzing
 	cargo test -p miden-core generate_fuzz_seeds -- --ignored --nocapture
+	cargo test -p miden-mast-package generate_fuzz_seeds -- --ignored --nocapture

@@ -12,7 +12,7 @@ use libfuzzer_sys::fuzz_target;
 // Note: MastNodeInfo is pub(crate), so we test via the full deserialization path
 // with crafted inputs that exercise node info parsing specifically.
 
-use miden_core::{mast::MastForest, utils::Deserializable};
+use miden_core::{mast::MastForest, serde::Deserializable};
 
 fuzz_target!(|data: &[u8]| {
     // MastNodeInfo is internal, but we can exercise it through MastForest
