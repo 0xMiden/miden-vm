@@ -127,6 +127,20 @@ fn test_syscall_fail() {
     );
 }
 
+#[test]
+fn test_stack_write_word_max_start_idx() {
+    let stack_inputs = StackInputs::new(&[]).unwrap();
+    let mut processor = FastProcessor::new(stack_inputs);
+
+    let word =
+        Word::from([Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4)]);
+    let start_idx = MIN_STACK_DEPTH - WORD_SIZE;
+
+    processor.stack_write_word(start_idx, &word);
+
+    assert_eq!(processor.stack_get_word(start_idx), word);
+}
+
 /// Tests that `ExecutionError::CycleLimitExceeded` is correctly emitted when a program exceeds the
 /// number of allowed cycles.
 #[test]

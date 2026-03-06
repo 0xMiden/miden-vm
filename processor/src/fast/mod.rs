@@ -370,7 +370,7 @@ impl FastProcessor {
     /// `word[0]` goes to stack position start_idx (top), `word[1]` to start_idx+1, etc.
     #[inline(always)]
     pub fn stack_write_word(&mut self, start_idx: usize, word: &Word) {
-        debug_assert!(start_idx < MIN_STACK_DEPTH);
+        debug_assert!(start_idx <= MIN_STACK_DEPTH - WORD_SIZE);
 
         let word_start_idx = self.stack_top_idx - start_idx - 4;
         let mut source: [Felt; WORD_SIZE] = (*word).into();
