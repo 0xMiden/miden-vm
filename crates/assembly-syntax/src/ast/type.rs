@@ -272,7 +272,6 @@ impl TypeExpr {
         self.resolve_type_with_depth(resolver, 0)
     }
 
-    // TODO: consider the stacksafe crate to guard deep recursion here.
     fn resolve_type_with_depth<E, R>(&self, resolver: &R, depth: usize) -> Result<Option<Type>, E>
     where
         R: ?Sized + TypeResolver<E>,

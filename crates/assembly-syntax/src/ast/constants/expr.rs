@@ -136,7 +136,6 @@ impl ConstantExpr {
         self.try_fold_with_depth(0)
     }
 
-    // TODO: consider the stacksafe crate to guard deep recursion here.
     fn try_fold_with_depth(self, depth: usize) -> Result<Self, ParsingError> {
         if depth > MAX_CONST_EXPR_FOLD_DEPTH {
             return Err(ParsingError::ConstExprDepthExceeded {

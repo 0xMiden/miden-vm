@@ -917,7 +917,6 @@ impl Assembler {
         AssemblyOp::new(location, context_name, num_cycles, op_name.to_string())
     }
 
-    // TODO: consider the stacksafe crate to guard deep recursion here.
     fn compile_body<'a, I>(
         &self,
         body: I,

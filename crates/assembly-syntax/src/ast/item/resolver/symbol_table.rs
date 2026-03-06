@@ -249,7 +249,6 @@ impl LocalSymbolTable {
         Self::expand_with_guard(get_import, path, source_manager, &mut expansion_stack)
     }
 
-    // TODO: consider the stacksafe crate to guard deep recursion here.
     fn expand_with_guard<F>(
         get_import: F,
         path: Span<&Path>,
