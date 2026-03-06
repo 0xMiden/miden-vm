@@ -4,7 +4,7 @@
 //! chunks. They are intentionally centralized to keep DAG lowering and tests
 //! aligned.
 
-use p3_field::{ExtensionField, Field};
+use miden_crypto::stark::field::{ExtensionField, Field};
 
 #[cfg(test)]
 use crate::AceError;

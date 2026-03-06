@@ -5,8 +5,8 @@
 //! - choose a READ layout for inputs,
 //! - emit a circuit that mirrors verifier evaluation.
 
-use p3_field::{ExtensionField, Field, TwoAdicField};
-use p3_miden_air::MidenAir;
+use miden_crypto::stark::field::{ExtensionField, Field, TwoAdicField};
+use miden_crypto::stark::air::LiftedAir;
 
 use crate::{
     AceError,
@@ -58,7 +58,7 @@ pub fn build_ace_circuit_for_air<A, F, EF>(
     config: AceConfig,
 ) -> Result<AceCircuit<EF>, AceError>
 where
-    A: MidenAir<F, EF>,
+    A: LiftedAir<F, EF>,
     F: TwoAdicField,
     EF: ExtensionField<F>,
 {
@@ -71,11 +71,11 @@ where
 /// The returned `InputLayout` is validated and ready for input assembly.
 pub fn build_layout_for_air<A, F, EF>(air: &A, config: AceConfig) -> InputLayout
 where
-    A: MidenAir<F, EF>,
+    A: LiftedAir<F, EF>,
     F: Field,
     EF: ExtensionField<F>,
 {
-    let num_periodic = air.periodic_table().len();
+    let num_periodic = air.periodic_columns().len();
     let counts = input_counts_for_air::<A, F, EF>(air, config, num_periodic);
     let layout = match config.layout {
         LayoutKind::Native => InputLayout::new(counts),
@@ -94,12 +94,12 @@ pub(crate) fn build_ace_dag_for_air<A, F, EF>(
     config: AceConfig,
 ) -> Result<AceArtifacts<EF>, AceError>
 where
-    A: MidenAir<F, EF>,
+    A: LiftedAir<F, EF>,
     F: TwoAdicField,
     EF: ExtensionField<F>,
 {
-    let periodic_table = air.periodic_table();
-    let counts = input_counts_for_air::<A, F, EF>(air, config, periodic_table.len());
+    let periodic_columns = air.periodic_columns();
+    let counts = input_counts_for_air::<A, F, EF>(air, config, periodic_columns.len());
     let layout = match config.layout {
         LayoutKind::Native => InputLayout::new(counts),
         LayoutKind::Masm => InputLayout::new_masm(counts),
@@ -114,8 +114,8 @@ where
         counts.num_periodic,
     );
     air.eval(&mut builder);
-    let periodic_data = (!periodic_table.is_empty())
-        .then(|| PeriodicColumnData::from_periodic_table::<F>(periodic_table));
+    let periodic_data = (!periodic_columns.is_empty())
+        .then(|| PeriodicColumnData::from_periodic_columns::<F>(periodic_columns.to_vec()));
     let dag = build_verifier_dag::<F, EF>(builder.constraints(), &layout, periodic_data.as_ref());
 
     Ok(AceArtifacts { layout, dag })
@@ -123,7 +123,7 @@ where
 
 fn input_counts_for_air<A, F, EF>(air: &A, config: AceConfig, num_periodic: usize) -> InputCounts
 where
-    A: MidenAir<F, EF>,
+    A: LiftedAir<F, EF>,
     F: Field,
     EF: ExtensionField<F>,
 {

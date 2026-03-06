@@ -21,7 +21,7 @@
 //! 2. **Stability constraints**: Once a selector becomes 1, it stays 1 (no 1→0 transitions)
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::MidenAirBuilder;
+use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 
 use crate::{
     Felt, MainTraceRow,
@@ -61,7 +61,7 @@ pub fn enforce_chiplet_selectors<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: LiftedAirBuilder<F = Felt>,
 {
     // Load selector columns (chiplets[0..5] are the selectors)
     let s0: AB::Expr = local.chiplets[0].clone().into();

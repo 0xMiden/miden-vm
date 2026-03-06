@@ -38,7 +38,7 @@
 //! - `e0, e1`: Extra columns for degree reduction
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::MidenAirBuilder;
+use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 
 use crate::{
     MainTraceRow,
@@ -255,7 +255,7 @@ where
 /// Computes the opcode value from op bits: `b0 + 2*b1 + ... + 64*b6`.
 fn op_bits_to_value<AB>(bits: &[AB::Expr; NUM_OP_BITS]) -> AB::Expr
 where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     bits.iter().enumerate().fold(AB::Expr::ZERO, |acc, (i, bit)| {
         acc + bit.clone() * AB::Expr::from_u16(1u16 << i)
@@ -341,7 +341,7 @@ impl<E: Clone> DecoderColumns<E> {
     /// Extract decoder columns from a main trace row.
     pub fn from_row<AB>(row: &MainTraceRow<AB::Var>) -> Self
     where
-        AB: MidenAirBuilder,
+        AB: LiftedAirBuilder,
         AB::Var: Into<E> + Clone,
     {
         DecoderColumns {

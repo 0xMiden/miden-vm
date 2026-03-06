@@ -1,5 +1,5 @@
-use p3_dft::{NaiveDft, TwoAdicSubgroupDft};
-use p3_field::TwoAdicField;
+use miden_crypto::stark::dft::{NaiveDft, TwoAdicSubgroupDft};
+use miden_crypto::stark::field::TwoAdicField;
 
 use crate::layout::InputKey;
 
@@ -46,18 +46,18 @@ impl<EF> PeriodicColumnData<EF> {
     /// Convert periodic columns (evaluations) into coefficient form for DAG building.
     ///
     /// Applies an inverse DFT so the DAG can evaluate them at `z_k` inside the circuit.
-    pub fn from_periodic_table<F>(periodic_table: Vec<Vec<F>>) -> Self
+    pub fn from_periodic_columns<F>(periodic_columns: Vec<Vec<F>>) -> Self
     where
         F: TwoAdicField,
         EF: From<F>,
     {
-        if periodic_table.is_empty() {
+        if periodic_columns.is_empty() {
             return Self { coeffs: Vec::new() };
         }
 
         let dft = NaiveDft;
-        let mut coeffs = Vec::with_capacity(periodic_table.len());
-        for col in periodic_table {
+        let mut coeffs = Vec::with_capacity(periodic_columns.len());
+        for col in periodic_columns {
             assert!(!col.is_empty(), "periodic column must not be empty");
             assert!(col.len().is_power_of_two(), "periodic column length must be a power of two");
             let values = dft.idft(col);

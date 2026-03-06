@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use p3_field::{ExtensionField, Field};
+use miden_crypto::stark::field::{ExtensionField, Field};
 
 use super::{
     builder::DagBuilder,

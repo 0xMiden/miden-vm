@@ -103,6 +103,31 @@ pub fn aux_columns_to_row_major<EF: ExtensionField<Felt>>(
     row_major_ef_matrix.flatten_to_base()
 }
 
+/// Converts column-major extension field columns to row-major extension field matrix.
+///
+/// Similar to `aux_columns_to_row_major` but returns `RowMajorMatrix<EF>` instead of
+/// flattening to base field.
+#[instrument(skip_all, fields(num_cols = aux_columns.len(), trace_len))]
+pub fn aux_columns_to_row_major_ef<EF: ExtensionField<Felt>>(
+    aux_columns: &[Vec<EF>],
+    trace_len: usize,
+) -> RowMajorMatrix<EF> {
+    if aux_columns.is_empty() {
+        return RowMajorMatrix::new(Vec::new(), 0);
+    }
+
+    let num_ef_cols = aux_columns.len();
+
+    // Flatten column-major data into a contiguous buffer for transposition
+    let mut col_major_ef_data = Vec::with_capacity(trace_len * num_ef_cols);
+    for col in aux_columns {
+        col_major_ef_data.extend_from_slice(col);
+    }
+
+    // Transpose: column-major EF -> row-major EF
+    RowMajorMatrix::new(col_major_ef_data, trace_len).transpose()
+}
+
 /// Builds auxiliary trace columns from a row-major main trace.
 ///
 /// This function handles the format conversion between Plonky3's row-major format and

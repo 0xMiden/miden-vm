@@ -30,6 +30,8 @@ miden-crypto.workspace = true
 miden-utils-indexing.workspace = true
 
 # External dependencies
+bincode.workspace = true
+serde.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 
