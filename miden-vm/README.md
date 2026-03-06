@@ -299,7 +299,7 @@ For example:
 
 ### Fibonacci example
 
-In the `miden/masm-examples/fib` directory, we provide a very simple Fibonacci calculator example. This example computes the 1000th term of the Fibonacci sequence. You can execute this example on Miden VM like so:
+In the `miden-vm/masm-examples/fib` directory, we provide a very simple Fibonacci calculator example. This example computes the 1000th term of the Fibonacci sequence. You can execute this example on Miden VM like so:
 
 ```shell
 ./target/optimized/miden-vm run miden-vm/masm-examples/fib/fib.masm -n 1
