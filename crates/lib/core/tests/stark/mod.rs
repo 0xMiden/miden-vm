@@ -7,7 +7,7 @@ use miden_core::{
 };
 use miden_processor::{
     DefaultHost, Program, ProgramInfo,
-    crypto::{RandomCoin, RpoRandomCoin},
+    crypto::RandomCoin,
 };
 use miden_utils_testing::{
     AdviceInputs, ProvingOptions, StackInputs, VerifierError, proptest::proptest, prove,
@@ -235,7 +235,7 @@ fn generate_query_indices() {
     let input_stack = vec![num_queries as u64, lde_log_size as u64, lde_size as u64];
 
     let seed = Word::default();
-    let mut coin = RpoRandomCoin::new(seed);
+    let mut coin = RandomCoin::new(seed);
     let indices = coin
         .draw_integers(num_queries, lde_size, 0)
         .expect("should not fail to generate the indices");
@@ -254,7 +254,7 @@ proptest! {
         let lde_size = 1 << lde_log_size;
 
         let seed = Word::default();
-        let mut coin = RpoRandomCoin::new(seed);
+        let mut coin = RandomCoin::new(seed);
         let indices = coin
             .draw_integers(num_queries, lde_size, 0)
             .expect("should not fail to generate the indices");

@@ -1578,7 +1578,7 @@ impl MastForestContributor for BasicBlockNodeBuilder {
         let before_enter_bytes: Vec<[u8; 32]> = self
             .before_enter
             .iter()
-            .map(|&id| forest[id].fingerprint().as_bytes())
+            .map(|&id| *forest[id].fingerprint().as_bytes())
             .collect();
 
         // Collect op-indexed decorator data (using raw indices)
@@ -1588,12 +1588,12 @@ impl MastForestContributor for BasicBlockNodeBuilder {
         let mut op_decorator_data = Vec::with_capacity(adjusted_decorators.len() * 33);
         for (raw_op_idx, decorator_id) in &adjusted_decorators {
             op_decorator_data.extend_from_slice(&raw_op_idx.to_le_bytes());
-            op_decorator_data.extend_from_slice(&forest[*decorator_id].fingerprint().as_bytes());
+            op_decorator_data.extend_from_slice(forest[*decorator_id].fingerprint().as_bytes());
         }
 
         // Collect after_exit decorator fingerprints
         let after_exit_bytes: Vec<[u8; 32]> =
-            self.after_exit.iter().map(|&id| forest[id].fingerprint().as_bytes()).collect();
+            self.after_exit.iter().map(|&id| *forest[id].fingerprint().as_bytes()).collect();
 
         // Collect assert operation data
         let mut assert_data = Vec::new();
