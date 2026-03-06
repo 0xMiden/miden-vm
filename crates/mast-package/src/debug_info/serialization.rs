@@ -25,7 +25,7 @@ impl Serializable for DebugTypesSection {
         // Write string table
         target.write_usize(self.strings.len());
         for s in &self.strings {
-            write_string(target, s);
+            s.as_ref().write_into(target);
         }
 
         // Write type table
@@ -77,7 +77,7 @@ impl Serializable for DebugSourcesSection {
         // Write string table
         target.write_usize(self.strings.len());
         for s in &self.strings {
-            write_string(target, s);
+            s.as_ref().write_into(target);
         }
 
         // Write file table
@@ -129,7 +129,7 @@ impl Serializable for DebugFunctionsSection {
         // Write string table
         target.write_usize(self.strings.len());
         for s in &self.strings {
-            write_string(target, s);
+            s.as_ref().write_into(target);
         }
 
         // Write function table
@@ -265,19 +265,7 @@ impl Deserializable for DebugTypeInfo {
                 } else {
                     None
                 };
-                // Manual bounds check: DebugTypeIdx is read via read_u32, not Deserializable,
-                // so we can't use read_many_iter. Each param index is 4 bytes (u32).
-                let params_len = source.read_usize()?;
-                let max_params = source.max_alloc(4);
-                if params_len > max_params {
-                    return Err(DeserializationError::InvalidValue(alloc::format!(
-                        "function params count {params_len} exceeds budget {max_params}"
-                    )));
-                }
-                let mut param_type_indices = alloc::vec::Vec::with_capacity(params_len);
-                for _ in 0..params_len {
-                    param_type_indices.push(DebugTypeIdx::from(source.read_u32()?));
-                }
+                let param_type_indices = alloc::vec::Vec::<DebugTypeIdx>::read_from(source)?;
                 Ok(Self::Function { return_type_idx, param_type_indices })
             },
             TYPE_TAG_UNKNOWN => Ok(Self::Unknown),
@@ -493,12 +481,6 @@ impl Deserializable for DebugInlinedCallInfo {
 // HELPER FUNCTIONS
 // ================================================================================================
 
-fn write_string<W: ByteWriter>(target: &mut W, s: &str) {
-    let bytes = s.as_bytes();
-    target.write_usize(bytes.len());
-    target.write_bytes(bytes);
-}
-
 fn read_string<R: ByteReader>(source: &mut R) -> Result<Arc<str>, DeserializationError> {
     let len = source.read_usize()?;
     let bytes = source.read_slice(len)?;
@@ -565,7 +547,7 @@ mod tests {
         bytes.write_u8(version);
         bytes.write_usize(strings_len);
         for _ in 0..strings_len {
-            write_string(&mut bytes, "");
+            "".write_into(&mut bytes);
         }
         bytes.write_usize(0);
         bytes
@@ -794,10 +776,7 @@ mod tests {
         let too_many = function_type_bytes(2);
         let mut reader = FixedBudgetReader::new(&too_many, 4);
         let err = DebugTypeInfo::read_from(&mut reader).unwrap_err();
-        let DeserializationError::InvalidValue(message) = err else {
-            panic!("expected InvalidValue error");
-        };
-        assert!(message.contains("exceeds budget"));
+        assert!(matches!(err, DeserializationError::InvalidValue(_)));
 
         let ok = function_type_bytes(1);
         let mut reader = FixedBudgetReader::new(&ok, 4);

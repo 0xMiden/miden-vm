@@ -972,6 +972,8 @@ impl Serializable for TypeSerializer<'_> {
 #[derive(Debug)]
 pub struct TypeDeserializer(pub Type);
 
+// Bounds recursive type nesting during deserialization to prevent adversarially deep types from
+// exhausting stack or budgets; 256 is far beyond realistic type depth while keeping parsing safe.
 const MAX_TYPE_NESTING: usize = 256;
 
 impl TypeDeserializer {

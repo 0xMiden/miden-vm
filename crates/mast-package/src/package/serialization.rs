@@ -324,9 +324,7 @@ impl Deserializable for PackageManifest {
         }
 
         // Read dependencies
-        let deps_len = source.read_usize()?;
-        let dependencies: Vec<Dependency> =
-            source.read_many_iter(deps_len)?.collect::<Result<_, _>>()?;
+        let dependencies = Vec::<Dependency>::read_from(source)?;
 
         Ok(Self { exports, dependencies })
     }
