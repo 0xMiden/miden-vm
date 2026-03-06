@@ -399,8 +399,7 @@ impl OpToDecoratorIds {
         }
         // Create empty nodes for gaps in node indices
         for idx in expected.0..node.0 {
-            self.add_decorator_info_for_node(MastNodeId::new_unchecked(idx), vec![])
-                .unwrap();
+            self.add_decorator_info_for_node(MastNodeId::new_unchecked(idx), vec![])?;
         }
 
         // Start of this node's operations is the current length (do NOT reuse previous sentinel)
