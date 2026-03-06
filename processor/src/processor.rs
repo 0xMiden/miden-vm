@@ -149,10 +149,13 @@ pub(crate) trait StackInterface {
     /// index of the returned slice.
     fn top(&self) -> &[Felt];
 
-    /// Returns the element on the stack at index `idx`.
+    /// Returns the element on the stack at index `idx`. `idx` is guaranteed to be less than or
+    /// equal to 15.
     fn get(&self, idx: usize) -> Felt;
 
     /// Mutable variant of `stack_get()`.
+    ///
+    /// `idx` is guaranteed to be less than or equal to 15.
     fn get_mut(&mut self, idx: usize) -> &mut Felt;
 
     /// Returns the word on the stack starting at index `start_idx` in "stack order".
@@ -172,6 +175,8 @@ pub(crate) trait StackInterface {
     /// - etc.
     ///
     /// Word\[0\] corresponds to the top of stack.
+    ///
+    /// `start_idx` is guaranteed to be less than or equal to 12.
     fn get_word(&self, start_idx: usize) -> Word;
 
     /// Returns two words (8 elements) from the stack starting at index `start_idx`.
@@ -186,6 +191,8 @@ pub(crate) trait StackInterface {
     /// a | b | c | d | e | f | g | h | i | j | k | l | m | n | o | p
     ///
     /// Then `get_double_word(0)` returns `[a, b, c, d, e, f, g, h]`.
+    ///
+    /// `start_idx` is guaranteed to be less than or equal to 8.
     fn get_double_word(&self, start_idx: usize) -> [Felt; 8] {
         core::array::from_fn(|i| self.get(start_idx + i))
     }
@@ -194,14 +201,20 @@ pub(crate) trait StackInterface {
     fn depth(&self) -> u32;
 
     /// Writes an element to the stack at the given index.
+    ///
+    /// `idx` is guaranteed to be less than or equal to 15.
     fn set(&mut self, idx: usize, element: Felt);
 
     /// Writes a word to the stack starting at the given index.
     ///
     /// Word\[0\] goes to stack position start_idx (top), word\[1\] to start_idx+1, etc.
+    ///
+    /// `start_idx` is guaranteed to be less than or equal to 12.
     fn set_word(&mut self, start_idx: usize, word: &Word);
 
     /// Swaps the elements at the given indices on the stack.
+    ///
+    /// `idx1` and `idx2` are guaranteed to be less than or equal to 15.
     fn swap(&mut self, idx1: usize, idx2: usize);
 
     /// Swaps the nth word from the top of the stack with the top word of the stack.
