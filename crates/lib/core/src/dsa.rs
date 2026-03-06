@@ -103,7 +103,7 @@ pub mod eddsa_ed25519 {
 /// Falcon-512 with Poseidon2 hashing signature helpers.
 ///
 /// Functions in this module generate data for the
-/// `miden::core::crypto::dsa::falcon512poseidon2::verify` MASM procedure.
+/// `miden::core::crypto::dsa::falcon512_poseidon2::verify` MASM procedure.
 pub mod falcon512_poseidon2 {
     extern crate alloc;
 
@@ -117,7 +117,7 @@ pub mod falcon512_poseidon2 {
     };
 
     /// Signs the provided message with the provided secret key and returns the resulting signature
-    /// encoded in the format required by the `falcon512poseidon2::verify` procedure, or `None` if
+    /// encoded in the format required by the `falcon512_poseidon2::verify` procedure, or `None` if
     /// the secret key is malformed due to either incorrect length or failed decoding.
     ///
     /// This is equivalent to calling [`encode_signature`] on the result of signing the message.
@@ -129,7 +129,7 @@ pub mod falcon512_poseidon2 {
     }
 
     /// Encodes the provided Falcon public key and signature into a vector of field elements in the
-    /// format expected by `miden::core::crypto::dsa::falcon512poseidon2::verify` procedure.
+    /// format expected by `miden::core::crypto::dsa::falcon512_poseidon2::verify` procedure.
     ///
     /// The encoding format is (in reverse order on the advice stack):
     ///
@@ -143,7 +143,7 @@ pub mod falcon512_poseidon2 {
     /// 5. The nonce represented as 8 field elements.
     ///
     /// The result can be streamed straight to the advice provider before invoking
-    /// `falcon512poseidon2::verify`.
+    /// `falcon512_poseidon2::verify`.
     pub fn encode_signature(pk: &PublicKey, sig: &Signature) -> Vec<Felt> {
         use alloc::vec;
 
