@@ -12,7 +12,7 @@ use crate::{
         DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode, MastNodeFingerprint,
         MastNodeId,
     },
-    operations::OPCODE_SPLIT,
+    operations::opcodes,
     prettier::PrettyPrint,
     utils::{Idx, LookupByIdx},
 };
@@ -38,7 +38,7 @@ pub struct SplitNode {
 /// Constants
 impl SplitNode {
     /// The domain of the split node (used for control block hashing).
-    pub const DOMAIN: Felt = Felt::new(OPCODE_SPLIT as u64);
+    pub const DOMAIN: Felt = Felt::new(opcodes::SPLIT as u64);
 }
 
 /// Public accessors

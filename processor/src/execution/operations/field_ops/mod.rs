@@ -15,12 +15,12 @@ mod tests;
 /// Pops two elements off the stack, adds them together, and pushes the result back onto the
 /// stack.
 #[inline(always)]
-pub(super) fn op_add<P>(processor: &mut P) -> OperationHelperRegisters
+pub(super) fn op_add<P>(processor: &mut P) -> Result<OperationHelperRegisters, OperationError>
 where
     P: Processor,
 {
-    pop2_applyfn_push(processor, |a, b| a + b);
-    OperationHelperRegisters::Empty
+    pop2_applyfn_push(processor, |a, b| a + b)?;
+    Ok(OperationHelperRegisters::Empty)
 }
 
 /// Pops an element off the stack, computes its additive inverse, and pushes the result back
@@ -35,12 +35,12 @@ pub(super) fn op_neg<P: Processor>(processor: &mut P) -> OperationHelperRegister
 /// Pops two elements off the stack, multiplies them, and pushes the result back onto the
 /// stack.
 #[inline(always)]
-pub(super) fn op_mul<P>(processor: &mut P) -> OperationHelperRegisters
+pub(super) fn op_mul<P>(processor: &mut P) -> Result<OperationHelperRegisters, OperationError>
 where
     P: Processor,
 {
-    pop2_applyfn_push(processor, |a, b| a * b);
-    OperationHelperRegisters::Empty
+    pop2_applyfn_push(processor, |a, b| a * b)?;
+    Ok(OperationHelperRegisters::Empty)
 }
 
 /// Pops an element off the stack, computes its multiplicative inverse, and pushes the result
@@ -130,7 +130,7 @@ pub(super) fn op_not<P: Processor>(
 /// Pops two elements off the stack and compares them. If the elements are equal, pushes ONE
 /// onto the stack, otherwise pushes ZERO onto the stack.
 #[inline(always)]
-pub(super) fn op_eq<P>(processor: &mut P) -> OperationHelperRegisters
+pub(super) fn op_eq<P>(processor: &mut P) -> Result<OperationHelperRegisters, OperationError>
 where
     P: Processor,
 {
@@ -139,12 +139,12 @@ where
 
     // Directly manipulate the stack instead of using pop2_applyfn_push() since we need
     // to return user op helpers, which makes the abstraction less suitable here.
-    processor.stack_mut().decrement_size();
+    processor.stack_mut().decrement_size()?;
 
     let result = if a == b { ONE } else { ZERO };
     processor.stack_mut().set(0, result);
 
-    OperationHelperRegisters::Eq { stack_second: a, stack_first: b }
+    Ok(OperationHelperRegisters::Eq { stack_second: a, stack_first: b })
 }
 
 /// Pops an element off the stack and compares it to ZERO. If the element is ZERO, pushes ONE
@@ -246,16 +246,20 @@ pub(super) fn op_ext2mul<P: Processor>(processor: &mut P) -> OperationHelperRegi
 ///
 /// The size of the stack is decremented by 1.
 #[inline(always)]
-fn pop2_applyfn_push<P>(processor: &mut P, f: impl FnOnce(Felt, Felt) -> Felt)
+fn pop2_applyfn_push<P>(
+    processor: &mut P,
+    f: impl FnOnce(Felt, Felt) -> Felt,
+) -> Result<(), OperationError>
 where
     P: Processor,
 {
     let b = processor.stack().get(0);
     let a = processor.stack().get(1);
 
-    processor.stack_mut().decrement_size();
+    processor.stack_mut().decrement_size()?;
 
     processor.stack_mut().set(0, f(a, b));
+    Ok(())
 }
 
 /// Pops the top two elements from the stack, applies the given function to them, and pushes the
@@ -273,7 +277,7 @@ where
     let b = processor.stack().get(0);
     let a = processor.stack().get(1);
 
-    processor.stack_mut().decrement_size();
+    processor.stack_mut().decrement_size()?;
 
     processor.stack_mut().set(0, f(a, b)?);
 

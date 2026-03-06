@@ -11,7 +11,7 @@ use crate::{
         DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode, MastNodeFingerprint,
         MastNodeId,
     },
-    operations::{OPCODE_DYN, OPCODE_DYNCALL},
+    operations::opcodes,
     prettier::{Document, PrettyPrint, const_text, nl},
     utils::LookupByIdx,
 };
@@ -32,10 +32,10 @@ pub struct DynNode {
 /// Constants
 impl DynNode {
     /// The domain of the Dyn block (used for control block hashing).
-    pub const DYN_DOMAIN: Felt = Felt::new(OPCODE_DYN as u64);
+    pub const DYN_DOMAIN: Felt = Felt::new(opcodes::DYN as u64);
 
     /// The domain of the Dyncall block (used for control block hashing).
-    pub const DYNCALL_DOMAIN: Felt = Felt::new(OPCODE_DYNCALL as u64);
+    pub const DYNCALL_DOMAIN: Felt = Felt::new(opcodes::DYNCALL as u64);
 }
 
 /// Default digest constants

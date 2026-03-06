@@ -25,14 +25,13 @@ testing = []
 
 [dependencies]
 # Miden dependencies
-miden-core = { workspace = true, features = ["serde"] }
+miden-core.workspace = true
 miden-crypto.workspace = true
 miden-utils-indexing.workspace = true
 
 # External dependencies
 thiserror.workspace = true
 tracing.workspace = true
-serde.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true

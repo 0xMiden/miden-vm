@@ -7,14 +7,13 @@ mod decorators;
 pub use decorators::{
     AssemblyOp, DebugOptions, DebugVarInfo, DebugVarLocation, Decorator, DecoratorList,
 };
-pub use opcode_constants::*;
 
 use crate::{
     Felt,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
-// OPERATIONS OP CODES
+// OPERATIONS AND CONTROL FLOW OPCODES
 // ================================================================================================
 
 /// Opcode patterns have the following meanings:
@@ -28,139 +27,144 @@ use crate::{
 /// - 11xxx--: operations where constraint degree can be up to 5. These include control flow
 ///   operations and some other operations requiring very high degree constraints.
 #[rustfmt::skip]
-mod opcode_constants {
-    pub const OPCODE_NOOP: u8           = 0b0000_0000;
-    pub const OPCODE_EQZ: u8            = 0b0000_0001;
-    pub const OPCODE_NEG: u8            = 0b0000_0010;
-    pub const OPCODE_INV: u8            = 0b0000_0011;
-    pub const OPCODE_INCR: u8           = 0b0000_0100;
-    pub const OPCODE_NOT: u8            = 0b0000_0101;
-    /* unused                             0b0000_0110 */
-    pub const OPCODE_MLOAD: u8          = 0b0000_0111;
-    pub const OPCODE_SWAP: u8           = 0b0000_1000;
-    pub const OPCODE_CALLER: u8         = 0b0000_1001;
-    pub const OPCODE_MOVUP2: u8         = 0b0000_1010;
-    pub const OPCODE_MOVDN2: u8         = 0b0000_1011;
-    pub const OPCODE_MOVUP3: u8         = 0b0000_1100;
-    pub const OPCODE_MOVDN3: u8         = 0b0000_1101;
-    pub const OPCODE_ADVPOPW: u8        = 0b0000_1110;
-    pub const OPCODE_EXPACC: u8         = 0b0000_1111;
+pub mod opcodes {
+    pub const NOOP: u8           = 0b0000_0000;
+    pub const EQZ: u8            = 0b0000_0001;
+    pub const NEG: u8            = 0b0000_0010;
+    pub const INV: u8            = 0b0000_0011;
+    pub const INCR: u8           = 0b0000_0100;
+    pub const NOT: u8            = 0b0000_0101;
+    /* unused                      0b0000_0110 */
+    pub const MLOAD: u8          = 0b0000_0111;
+    pub const SWAP: u8           = 0b0000_1000;
+    pub const CALLER: u8         = 0b0000_1001;
+    pub const MOVUP2: u8         = 0b0000_1010;
+    pub const MOVDN2: u8         = 0b0000_1011;
+    pub const MOVUP3: u8         = 0b0000_1100;
+    pub const MOVDN3: u8         = 0b0000_1101;
+    pub const ADVPOPW: u8        = 0b0000_1110;
+    pub const EXPACC: u8         = 0b0000_1111;
 
-    pub const OPCODE_MOVUP4: u8         = 0b0001_0000;
-    pub const OPCODE_MOVDN4: u8         = 0b0001_0001;
-    pub const OPCODE_MOVUP5: u8         = 0b0001_0010;
-    pub const OPCODE_MOVDN5: u8         = 0b0001_0011;
-    pub const OPCODE_MOVUP6: u8         = 0b0001_0100;
-    pub const OPCODE_MOVDN6: u8         = 0b0001_0101;
-    pub const OPCODE_MOVUP7: u8         = 0b0001_0110;
-    pub const OPCODE_MOVDN7: u8         = 0b0001_0111;
-    pub const OPCODE_SWAPW: u8          = 0b0001_1000;
-    pub const OPCODE_EXT2MUL: u8        = 0b0001_1001;
-    pub const OPCODE_MOVUP8: u8         = 0b0001_1010;
-    pub const OPCODE_MOVDN8: u8         = 0b0001_1011;
-    pub const OPCODE_SWAPW2: u8         = 0b0001_1100;
-    pub const OPCODE_SWAPW3: u8         = 0b0001_1101;
-    pub const OPCODE_SWAPDW: u8         = 0b0001_1110;
-    pub const OPCODE_EMIT: u8           = 0b0001_1111;
+    pub const MOVUP4: u8         = 0b0001_0000;
+    pub const MOVDN4: u8         = 0b0001_0001;
+    pub const MOVUP5: u8         = 0b0001_0010;
+    pub const MOVDN5: u8         = 0b0001_0011;
+    pub const MOVUP6: u8         = 0b0001_0100;
+    pub const MOVDN6: u8         = 0b0001_0101;
+    pub const MOVUP7: u8         = 0b0001_0110;
+    pub const MOVDN7: u8         = 0b0001_0111;
+    pub const SWAPW: u8          = 0b0001_1000;
+    pub const EXT2MUL: u8        = 0b0001_1001;
+    pub const MOVUP8: u8         = 0b0001_1010;
+    pub const MOVDN8: u8         = 0b0001_1011;
+    pub const SWAPW2: u8         = 0b0001_1100;
+    pub const SWAPW3: u8         = 0b0001_1101;
+    pub const SWAPDW: u8         = 0b0001_1110;
+    pub const EMIT: u8           = 0b0001_1111;
 
-    pub const OPCODE_ASSERT: u8         = 0b0010_0000;
-    pub const OPCODE_EQ: u8             = 0b0010_0001;
-    pub const OPCODE_ADD: u8            = 0b0010_0010;
-    pub const OPCODE_MUL: u8            = 0b0010_0011;
-    pub const OPCODE_AND: u8            = 0b0010_0100;
-    pub const OPCODE_OR: u8             = 0b0010_0101;
-    pub const OPCODE_U32AND: u8         = 0b0010_0110;
-    pub const OPCODE_U32XOR: u8         = 0b0010_0111;
-    pub const OPCODE_FRIE2F4: u8        = 0b0010_1000;
-    pub const OPCODE_DROP: u8           = 0b0010_1001;
-    pub const OPCODE_CSWAP: u8          = 0b0010_1010;
-    pub const OPCODE_CSWAPW: u8         = 0b0010_1011;
-    pub const OPCODE_MLOADW: u8         = 0b0010_1100;
-    pub const OPCODE_MSTORE: u8         = 0b0010_1101;
-    pub const OPCODE_MSTOREW: u8        = 0b0010_1110;
-    /* unused                             0b0010_1111 */
+    pub const ASSERT: u8         = 0b0010_0000;
+    pub const EQ: u8             = 0b0010_0001;
+    pub const ADD: u8            = 0b0010_0010;
+    pub const MUL: u8            = 0b0010_0011;
+    pub const AND: u8            = 0b0010_0100;
+    pub const OR: u8             = 0b0010_0101;
+    pub const U32AND: u8         = 0b0010_0110;
+    pub const U32XOR: u8         = 0b0010_0111;
+    pub const FRIE2F4: u8        = 0b0010_1000;
+    pub const DROP: u8           = 0b0010_1001;
+    pub const CSWAP: u8          = 0b0010_1010;
+    pub const CSWAPW: u8         = 0b0010_1011;
+    pub const MLOADW: u8         = 0b0010_1100;
+    pub const MSTORE: u8         = 0b0010_1101;
+    pub const MSTOREW: u8        = 0b0010_1110;
+    /* unused                      0b0010_1111 */
 
-    pub const OPCODE_PAD: u8            = 0b0011_0000;
-    pub const OPCODE_DUP0: u8           = 0b0011_0001;
-    pub const OPCODE_DUP1: u8           = 0b0011_0010;
-    pub const OPCODE_DUP2: u8           = 0b0011_0011;
-    pub const OPCODE_DUP3: u8           = 0b0011_0100;
-    pub const OPCODE_DUP4: u8           = 0b0011_0101;
-    pub const OPCODE_DUP5: u8           = 0b0011_0110;
-    pub const OPCODE_DUP6: u8           = 0b0011_0111;
-    pub const OPCODE_DUP7: u8           = 0b0011_1000;
-    pub const OPCODE_DUP9: u8           = 0b0011_1001;
-    pub const OPCODE_DUP11: u8          = 0b0011_1010;
-    pub const OPCODE_DUP13: u8          = 0b0011_1011;
-    pub const OPCODE_DUP15: u8          = 0b0011_1100;
-    pub const OPCODE_ADVPOP: u8         = 0b0011_1101;
-    pub const OPCODE_SDEPTH: u8         = 0b0011_1110;
-    pub const OPCODE_CLK: u8            = 0b0011_1111;
+    pub const PAD: u8            = 0b0011_0000;
+    pub const DUP0: u8           = 0b0011_0001;
+    pub const DUP1: u8           = 0b0011_0010;
+    pub const DUP2: u8           = 0b0011_0011;
+    pub const DUP3: u8           = 0b0011_0100;
+    pub const DUP4: u8           = 0b0011_0101;
+    pub const DUP5: u8           = 0b0011_0110;
+    pub const DUP6: u8           = 0b0011_0111;
+    pub const DUP7: u8           = 0b0011_1000;
+    pub const DUP9: u8           = 0b0011_1001;
+    pub const DUP11: u8          = 0b0011_1010;
+    pub const DUP13: u8          = 0b0011_1011;
+    pub const DUP15: u8          = 0b0011_1100;
+    pub const ADVPOP: u8         = 0b0011_1101;
+    pub const SDEPTH: u8         = 0b0011_1110;
+    pub const CLK: u8            = 0b0011_1111;
 
-    pub const OPCODE_U32ADD: u8         = 0b0100_0000;
-    pub const OPCODE_U32SUB: u8         = 0b0100_0010;
-    pub const OPCODE_U32MUL: u8         = 0b0100_0100;
-    pub const OPCODE_U32DIV: u8         = 0b0100_0110;
-    pub const OPCODE_U32SPLIT: u8       = 0b0100_1000;
-    pub const OPCODE_U32ASSERT2: u8     = 0b0100_1010;
-    pub const OPCODE_U32ADD3: u8        = 0b0100_1100;
-    pub const OPCODE_U32MADD: u8        = 0b0100_1110;
+    pub const U32ADD: u8         = 0b0100_0000;
+    pub const U32SUB: u8         = 0b0100_0010;
+    pub const U32MUL: u8         = 0b0100_0100;
+    pub const U32DIV: u8         = 0b0100_0110;
+    pub const U32SPLIT: u8       = 0b0100_1000;
+    pub const U32ASSERT2: u8     = 0b0100_1010;
+    pub const U32ADD3: u8        = 0b0100_1100;
+    pub const U32MADD: u8        = 0b0100_1110;
 
-    pub const OPCODE_HPERM: u8          = 0b0101_0000;
-    pub const OPCODE_MPVERIFY: u8       = 0b0101_0001;
-    pub const OPCODE_PIPE: u8           = 0b0101_0010;
-    pub const OPCODE_MSTREAM: u8        = 0b0101_0011;
-    pub const OPCODE_SPLIT: u8          = 0b0101_0100;
-    pub const OPCODE_LOOP: u8           = 0b0101_0101;
-    pub const OPCODE_SPAN: u8           = 0b0101_0110;
-    pub const OPCODE_JOIN: u8           = 0b0101_0111;
-    pub const OPCODE_DYN: u8            = 0b0101_1000;
-    pub const OPCODE_HORNERBASE: u8     = 0b0101_1001;
-    pub const OPCODE_HORNEREXT: u8      = 0b0101_1010;
-    pub const OPCODE_PUSH: u8           = 0b0101_1011;
-    pub const OPCODE_DYNCALL: u8        = 0b0101_1100;
-    pub const OPCODE_EVALCIRCUIT: u8    = 0b0101_1101;
-    pub const OPCODE_LOGPRECOMPILE: u8  = 0b0101_1110;
+    pub const HPERM: u8          = 0b0101_0000;
+    pub const MPVERIFY: u8       = 0b0101_0001;
+    pub const PIPE: u8           = 0b0101_0010;
+    pub const MSTREAM: u8        = 0b0101_0011;
+    pub const SPLIT: u8          = 0b0101_0100;
+    pub const LOOP: u8           = 0b0101_0101;
+    pub const SPAN: u8           = 0b0101_0110;
+    pub const JOIN: u8           = 0b0101_0111;
+    pub const DYN: u8            = 0b0101_1000;
+    pub const HORNERBASE: u8     = 0b0101_1001;
+    pub const HORNEREXT: u8      = 0b0101_1010;
+    pub const PUSH: u8           = 0b0101_1011;
+    pub const DYNCALL: u8        = 0b0101_1100;
+    pub const EVALCIRCUIT: u8    = 0b0101_1101;
+    pub const LOGPRECOMPILE: u8  = 0b0101_1110;
 
-    pub const OPCODE_MRUPDATE: u8       = 0b0110_0000;
-    pub const OPCODE_CRYPTOSTREAM: u8   = 0b0110_0100;
-    pub const OPCODE_SYSCALL: u8        = 0b0110_1000;
-    pub const OPCODE_CALL: u8           = 0b0110_1100;
-    pub const OPCODE_END: u8            = 0b0111_0000;
-    pub const OPCODE_REPEAT: u8         = 0b0111_0100;
-    pub const OPCODE_RESPAN: u8         = 0b0111_1000;
-    pub const OPCODE_HALT: u8           = 0b0111_1100;
+    pub const MRUPDATE: u8       = 0b0110_0000;
+    pub const CRYPTOSTREAM: u8   = 0b0110_0100;
+    pub const SYSCALL: u8        = 0b0110_1000;
+    pub const CALL: u8           = 0b0110_1100;
+    pub const END: u8            = 0b0111_0000;
+    pub const REPEAT: u8         = 0b0111_0100;
+    pub const RESPAN: u8         = 0b0111_1000;
+    pub const HALT: u8           = 0b0111_1100;
 }
 
 // OPERATIONS
 // ================================================================================================
 
-/// A set of native VM operations which take exactly one cycle to execute.
+/// The set of native VM basic block operations executable which take exactly one cycle to execute.
+///
+/// Specifically, the operations encoded here are only those which can be executed within basic
+/// blocks, i.e., they exclude all control flow operations (e.g., `Loop`, `Span`, `Join`, etc.).
+/// Note though that those operations have their own unique opcode which lives in the same 7-bit
+/// opcode space as the basic block operations.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(u8)]
 pub enum Operation {
     // ----- system operations -------------------------------------------------------------------
     /// Advances cycle counter, but does not change the state of user stack.
-    Noop = OPCODE_NOOP,
+    Noop = opcodes::NOOP,
 
     /// Pops the stack; if the popped value is not 1, execution fails.
     ///
     /// The internal value specifies an error code associated with the error in case when the
     /// execution fails.
-    Assert(Felt) = OPCODE_ASSERT,
+    Assert(Felt) = opcodes::ASSERT,
 
     /// Pushes the current depth of the stack onto the stack.
-    SDepth = OPCODE_SDEPTH,
+    SDepth = opcodes::SDEPTH,
 
     /// Overwrites the top four stack items with the hash of a function which initiated the current
     /// SYSCALL. Thus, this operation can be executed only inside a SYSCALL code block.
-    Caller = OPCODE_CALLER,
+    Caller = opcodes::CALLER,
 
     /// Pushes the current value of the clock cycle onto the stack. This operation can be used to
     /// measure the number of cycles it has taken to execute the program up to the current
     /// instruction.
-    Clk = OPCODE_CLK,
+    Clk = opcodes::CLK,
 
     /// Emits an event to the host.
     ///
@@ -175,91 +179,52 @@ pub enum Operation {
     ///   event to the host.
     ///
     /// This operation does not change the state of the user stack aside from reading the value.
-    Emit = OPCODE_EMIT,
-
-    // ----- flow control operations -------------------------------------------------------------
-    /// Marks the beginning of a join block.
-    Join = OPCODE_JOIN,
-
-    /// Marks the beginning of a split block.
-    Split = OPCODE_SPLIT,
-
-    /// Marks the beginning of a loop block.
-    Loop = OPCODE_LOOP,
-
-    /// Marks the beginning of a function call.
-    Call = OPCODE_CALL,
-
-    /// Marks the beginning of a dynamic code block, where the target is specified by the stack.
-    Dyn = OPCODE_DYN,
-
-    /// Marks the beginning of a dynamic function call, where the target is specified by the stack.
-    Dyncall = OPCODE_DYNCALL,
-
-    /// Marks the beginning of a kernel call.
-    SysCall = OPCODE_SYSCALL,
-
-    /// Marks the beginning of a span code block.
-    Span = OPCODE_SPAN,
-
-    /// Marks the end of a program block.
-    End = OPCODE_END,
-
-    /// Indicates that body of an executing loop should be executed again.
-    Repeat = OPCODE_REPEAT,
-
-    /// Starts processing a new operation batch.
-    Respan = OPCODE_RESPAN,
-
-    /// Indicates the end of the program. This is used primarily to pad the execution trace to
-    /// the required length. Once HALT operation is executed, no other operations can be executed
-    /// by the VM (HALT operation itself excepted).
-    Halt = OPCODE_HALT,
+    Emit = opcodes::EMIT,
 
     // ----- field operations --------------------------------------------------------------------
     /// Pops two elements off the stack, adds them, and pushes the result back onto the stack.
-    Add = OPCODE_ADD,
+    Add = opcodes::ADD,
 
     /// Pops an element off the stack, negates it, and pushes the result back onto the stack.
-    Neg = OPCODE_NEG,
+    Neg = opcodes::NEG,
 
     /// Pops two elements off the stack, multiplies them, and pushes the result back onto the
     /// stack.
-    Mul = OPCODE_MUL,
+    Mul = opcodes::MUL,
 
     /// Pops an element off the stack, computes its multiplicative inverse, and pushes the result
     /// back onto the stack.
-    Inv = OPCODE_INV,
+    Inv = opcodes::INV,
 
     /// Pops an element off the stack, adds 1 to it, and pushes the result back onto the stack.
-    Incr = OPCODE_INCR,
+    Incr = opcodes::INCR,
 
     /// Pops two elements off the stack, multiplies them, and pushes the result back onto the
     /// stack.
     ///
     /// If either of the elements is greater than 1, execution fails. This operation is equivalent
     /// to boolean AND.
-    And = OPCODE_AND,
+    And = opcodes::AND,
 
     /// Pops two elements off the stack and subtracts their product from their sum.
     ///
     /// If either of the elements is greater than 1, execution fails. This operation is equivalent
     /// to boolean OR.
-    Or = OPCODE_OR,
+    Or = opcodes::OR,
 
     /// Pops an element off the stack and subtracts it from 1.
     ///
     /// If the element is greater than one, the execution fails. This operation is equivalent to
     /// boolean NOT.
-    Not = OPCODE_NOT,
+    Not = opcodes::NOT,
 
     /// Pops two elements off the stack and compares them. If the elements are equal, pushes 1
     /// onto the stack, otherwise pushes 0 onto the stack.
-    Eq = OPCODE_EQ,
+    Eq = opcodes::EQ,
 
     /// Pops an element off the stack and compares it to 0. If the element is 0, pushes 1 onto
     /// the stack, otherwise pushes 0 onto the stack.
-    Eqz = OPCODE_EQZ,
+    Eqz = opcodes::EQZ,
 
     /// Computes a single turn of exponent accumulation for the given inputs. This operation can be
     /// be used to compute a single turn of power of a field element.
@@ -274,7 +239,7 @@ pub enum Operation {
     /// At the end of the operation, exponent is replaced with its square, current value of power
     /// of base number `a` on exponent is incorporated into the accumulator and the number is
     /// shifted to the right by one bit.
-    Expacc = OPCODE_EXPACC,
+    Expacc = opcodes::EXPACC,
 
     // ----- ext2 operations ---------------------------------------------------------------------
     /// Computes the product of two elements in the extension field of degree 2 and pushes the
@@ -283,30 +248,30 @@ pub enum Operation {
     ///
     /// The extension field is defined as 𝔽ₚ\[x\]/(x² - x + 2), i.e. using the
     /// irreducible quadratic polynomial x² - x + 2 over the base field.
-    Ext2Mul = OPCODE_EXT2MUL,
+    Ext2Mul = opcodes::EXT2MUL,
 
     // ----- u32 operations ----------------------------------------------------------------------
     /// Pops an element off the stack, splits it into upper and lower 32-bit values, and pushes
     /// these values back onto the stack.
-    U32split = OPCODE_U32SPLIT,
+    U32split = opcodes::U32SPLIT,
 
     /// Pops two elements off the stack, adds them, and splits the result into upper and lower
     /// 32-bit values. Then pushes these values back onto the stack.
     ///
     /// If either of these elements is greater than or equal to 2^32, the result of this
     /// operation is undefined.
-    U32add = OPCODE_U32ADD,
+    U32add = opcodes::U32ADD,
 
     /// Pops two elements off the stack and checks if each of them represents a 32-bit value.
     /// If both of them are, they are pushed back onto the stack, otherwise an error is returned.
     ///
     /// The internal value specifies an error code associated with the error in case when the
     /// assertion fails.
-    U32assert2(Felt) = OPCODE_U32ASSERT2,
+    U32assert2(Felt) = opcodes::U32ASSERT2,
 
     /// Pops three elements off the stack, adds them together, and splits the result into upper
     /// and lower 32-bit values. Then pushes the result back onto the stack.
-    U32add3 = OPCODE_U32ADD3,
+    U32add3 = opcodes::U32ADD3,
 
     /// Pops two elements off the stack and subtracts the first element from the second. Then,
     /// the result, together with a flag indicating whether subtraction underflowed is pushed
@@ -314,14 +279,14 @@ pub enum Operation {
     ///
     /// If their of the values is greater than or equal to 2^32, the result of this operation is
     /// undefined.
-    U32sub = OPCODE_U32SUB,
+    U32sub = opcodes::U32SUB,
 
     /// Pops two elements off the stack, multiplies them, and splits the result into upper and
     /// lower 32-bit values. Then pushes these values back onto the stack.
     ///
     /// If their of the values is greater than or equal to 2^32, the result of this operation is
     /// undefined.
-    U32mul = OPCODE_U32MUL,
+    U32mul = opcodes::U32MUL,
 
     /// Pops two elements off the stack and multiplies them. Then pops the third element off the
     /// stack, and adds it to the result. Finally, splits the result into upper and lower 32-bit
@@ -329,170 +294,170 @@ pub enum Operation {
     ///
     /// If any of the three values is greater than or equal to 2^32, the result of this operation
     /// is undefined.
-    U32madd = OPCODE_U32MADD,
+    U32madd = opcodes::U32MADD,
 
     /// Pops two elements off the stack and divides the second element by the first. Then pushes
     /// the integer result of the division, together with the remainder, onto the stack.
     ///
     /// If their of the values is greater than or equal to 2^32, the result of this operation is
     /// undefined.
-    U32div = OPCODE_U32DIV,
+    U32div = opcodes::U32DIV,
 
     /// Pops two elements off the stack, computes their binary AND, and pushes the result back
     /// onto the stack.
     ///
     /// If either of the elements is greater than or equal to 2^32, execution fails.
-    U32and = OPCODE_U32AND,
+    U32and = opcodes::U32AND,
 
     /// Pops two elements off the stack, computes their binary XOR, and pushes the result back
     /// onto the stack.
     ///
     /// If either of the elements is greater than or equal to 2^32, execution fails.
-    U32xor = OPCODE_U32XOR,
+    U32xor = opcodes::U32XOR,
 
     // ----- stack manipulation ------------------------------------------------------------------
     /// Pushes 0 onto the stack.
-    Pad = OPCODE_PAD,
+    Pad = opcodes::PAD,
 
     /// Removes to element from the stack.
-    Drop = OPCODE_DROP,
+    Drop = opcodes::DROP,
 
     /// Pushes a copy of stack element 0 onto the stack.
-    Dup0 = OPCODE_DUP0,
+    Dup0 = opcodes::DUP0,
 
     /// Pushes a copy of stack element 1 onto the stack.
-    Dup1 = OPCODE_DUP1,
+    Dup1 = opcodes::DUP1,
 
     /// Pushes a copy of stack element 2 onto the stack.
-    Dup2 = OPCODE_DUP2,
+    Dup2 = opcodes::DUP2,
 
     /// Pushes a copy of stack element 3 onto the stack.
-    Dup3 = OPCODE_DUP3,
+    Dup3 = opcodes::DUP3,
 
     /// Pushes a copy of stack element 4 onto the stack.
-    Dup4 = OPCODE_DUP4,
+    Dup4 = opcodes::DUP4,
 
     /// Pushes a copy of stack element 5 onto the stack.
-    Dup5 = OPCODE_DUP5,
+    Dup5 = opcodes::DUP5,
 
     /// Pushes a copy of stack element 6 onto the stack.
-    Dup6 = OPCODE_DUP6,
+    Dup6 = opcodes::DUP6,
 
     /// Pushes a copy of stack element 7 onto the stack.
-    Dup7 = OPCODE_DUP7,
+    Dup7 = opcodes::DUP7,
 
     /// Pushes a copy of stack element 9 onto the stack.
-    Dup9 = OPCODE_DUP9,
+    Dup9 = opcodes::DUP9,
 
     /// Pushes a copy of stack element 11 onto the stack.
-    Dup11 = OPCODE_DUP11,
+    Dup11 = opcodes::DUP11,
 
     /// Pushes a copy of stack element 13 onto the stack.
-    Dup13 = OPCODE_DUP13,
+    Dup13 = opcodes::DUP13,
 
     /// Pushes a copy of stack element 15 onto the stack.
-    Dup15 = OPCODE_DUP15,
+    Dup15 = opcodes::DUP15,
 
     /// Swaps stack elements 0 and 1.
-    Swap = OPCODE_SWAP,
+    Swap = opcodes::SWAP,
 
     /// Swaps stack elements 0, 1, 2, and 3 with elements 4, 5, 6, and 7.
-    SwapW = OPCODE_SWAPW,
+    SwapW = opcodes::SWAPW,
 
     /// Swaps stack elements 0, 1, 2, and 3 with elements 8, 9, 10, and 11.
-    SwapW2 = OPCODE_SWAPW2,
+    SwapW2 = opcodes::SWAPW2,
 
     /// Swaps stack elements 0, 1, 2, and 3, with elements 12, 13, 14, and 15.
-    SwapW3 = OPCODE_SWAPW3,
+    SwapW3 = opcodes::SWAPW3,
 
     /// Swaps the top two words pair wise.
     ///
     /// Input: [D, C, B, A, ...]
     /// Output: [B, A, D, C, ...]
-    SwapDW = OPCODE_SWAPDW,
+    SwapDW = opcodes::SWAPDW,
 
     /// Moves stack element 2 to the top of the stack.
-    MovUp2 = OPCODE_MOVUP2,
+    MovUp2 = opcodes::MOVUP2,
 
     /// Moves stack element 3 to the top of the stack.
-    MovUp3 = OPCODE_MOVUP3,
+    MovUp3 = opcodes::MOVUP3,
 
     /// Moves stack element 4 to the top of the stack.
-    MovUp4 = OPCODE_MOVUP4,
+    MovUp4 = opcodes::MOVUP4,
 
     /// Moves stack element 5 to the top of the stack.
-    MovUp5 = OPCODE_MOVUP5,
+    MovUp5 = opcodes::MOVUP5,
 
     /// Moves stack element 6 to the top of the stack.
-    MovUp6 = OPCODE_MOVUP6,
+    MovUp6 = opcodes::MOVUP6,
 
     /// Moves stack element 7 to the top of the stack.
-    MovUp7 = OPCODE_MOVUP7,
+    MovUp7 = opcodes::MOVUP7,
 
     /// Moves stack element 8 to the top of the stack.
-    MovUp8 = OPCODE_MOVUP8,
+    MovUp8 = opcodes::MOVUP8,
 
     /// Moves the top stack element to position 2 on the stack.
-    MovDn2 = OPCODE_MOVDN2,
+    MovDn2 = opcodes::MOVDN2,
 
     /// Moves the top stack element to position 3 on the stack.
-    MovDn3 = OPCODE_MOVDN3,
+    MovDn3 = opcodes::MOVDN3,
 
     /// Moves the top stack element to position 4 on the stack.
-    MovDn4 = OPCODE_MOVDN4,
+    MovDn4 = opcodes::MOVDN4,
 
     /// Moves the top stack element to position 5 on the stack.
-    MovDn5 = OPCODE_MOVDN5,
+    MovDn5 = opcodes::MOVDN5,
 
     /// Moves the top stack element to position 6 on the stack.
-    MovDn6 = OPCODE_MOVDN6,
+    MovDn6 = opcodes::MOVDN6,
 
     /// Moves the top stack element to position 7 on the stack.
-    MovDn7 = OPCODE_MOVDN7,
+    MovDn7 = opcodes::MOVDN7,
 
     /// Moves the top stack element to position 8 on the stack.
-    MovDn8 = OPCODE_MOVDN8,
+    MovDn8 = opcodes::MOVDN8,
 
     /// Pops an element off the stack, and if the element is 1, swaps the top two remaining
     /// elements on the stack. If the popped element is 0, the stack remains unchanged.
     ///
     /// If the popped element is neither 0 nor 1, execution fails.
-    CSwap = OPCODE_CSWAP,
+    CSwap = opcodes::CSWAP,
 
     /// Pops an element off the stack, and if the element is 1, swaps the remaining elements
     /// 0, 1, 2, and 3 with elements 4, 5, 6, and 7. If the popped element is 0, the stack
     /// remains unchanged.
     ///
     /// If the popped element is neither 0 nor 1, execution fails.
-    CSwapW = OPCODE_CSWAPW,
+    CSwapW = opcodes::CSWAPW,
 
     // ----- input / output ----------------------------------------------------------------------
     /// Pushes the immediate value onto the stack.
-    Push(Felt) = OPCODE_PUSH,
+    Push(Felt) = opcodes::PUSH,
 
     /// Removes the next element from the advice stack and pushes it onto the operand stack.
-    AdvPop = OPCODE_ADVPOP,
+    AdvPop = opcodes::ADVPOP,
 
     /// Removes a word (4 elements) from the advice stack and overwrites the top four operand
     /// stack elements with it.
-    AdvPopW = OPCODE_ADVPOPW,
+    AdvPopW = opcodes::ADVPOPW,
 
     /// Pops an element off the stack, interprets it as a memory address, and replaces the
     /// remaining 4 elements at the top of the stack with values located at the specified address.
-    MLoadW = OPCODE_MLOADW,
+    MLoadW = opcodes::MLOADW,
 
     /// Pops an element off the stack, interprets it as a memory address, and writes the remaining
     /// 4 elements at the top of the stack into memory at the specified address.
-    MStoreW = OPCODE_MSTOREW,
+    MStoreW = opcodes::MSTOREW,
 
     /// Pops an element off the stack, interprets it as a memory address, and pushes the first
     /// element of the word located at the specified address to the stack.
-    MLoad = OPCODE_MLOAD,
+    MLoad = opcodes::MLOAD,
 
     /// Pops an element off the stack, interprets it as a memory address, and writes the remaining
     /// element at the top of the stack into the first element of the word located at the specified
     /// memory address. The remaining 3 elements of the word are not affected.
-    MStore = OPCODE_MSTORE,
+    MStore = opcodes::MSTORE,
 
     /// Loads two words from memory, and replaces the top 8 elements of the stack with them,
     /// element-wise, in stack order.
@@ -504,7 +469,7 @@ pub enum Operation {
     ///   order).
     /// - Memory address (in position 12) is incremented by 2.
     /// - All other stack elements remain the same.
-    MStream = OPCODE_MSTREAM,
+    MStream = opcodes::MSTREAM,
 
     /// Pops two words from the advice stack, writes them to memory, and replaces the top 8
     /// elements of the stack with them, element-wise, in stack order.
@@ -518,7 +483,7 @@ pub enum Operation {
     ///   order).
     /// - Memory address (in position 12) is incremented by 2.
     /// - All other stack elements remain the same.
-    Pipe = OPCODE_PIPE,
+    Pipe = opcodes::PIPE,
 
     /// Encrypts data from source memory to destination memory using the Poseidon2 sponge keystream.
     ///
@@ -536,7 +501,7 @@ pub enum Operation {
     /// where `ct = mem[src..src+8] + rate`, where addition is element-wise.
     ///
     /// After this operation, `hperm` should be applied to refresh the keystream for the next block.
-    CryptoStream = OPCODE_CRYPTOSTREAM,
+    CryptoStream = opcodes::CRYPTOSTREAM,
 
     // ----- cryptographic operations ------------------------------------------------------------
     /// Performs a Poseidon2 permutation on the top 3 words of the operand stack,
@@ -545,7 +510,7 @@ pub enum Operation {
     ///
     /// Stack transition:
     /// [C, B, A, ...] -> [F, E, D, ...]
-    HPerm = OPCODE_HPERM,
+    HPerm = opcodes::HPERM,
 
     /// Verifies that a Merkle path from the specified node resolves to the specified root. This
     /// operation can be used to prove that the prover knows a path in the specified Merkle tree
@@ -563,7 +528,7 @@ pub enum Operation {
     ///
     /// The internal value specifies an error code associated with the error in case when the
     /// assertion fails.
-    MpVerify(Felt) = OPCODE_MPVERIFY,
+    MpVerify(Felt) = opcodes::MPVERIFY,
 
     /// Computes a new root of a Merkle tree where a node at the specified position is updated to
     /// the specified value.
@@ -582,7 +547,7 @@ pub enum Operation {
     ///
     /// The tree will always be copied into a new instance, meaning the advice provider will keep
     /// track of both the old and new Merkle trees.
-    MrUpdate = OPCODE_MRUPDATE,
+    MrUpdate = opcodes::MRUPDATE,
 
     /// Performs FRI (Fast Reed-Solomon Interactive Oracle Proofs) layer folding by a factor of 4
     /// for FRI protocol executed in a degree 2 extension of the base field.
@@ -599,7 +564,7 @@ pub enum Operation {
     /// Output: [t1, t0, s1, s0, df3, df2, df1, df0, poe^2, f_tau, cptr+2, poe^4, f_pos, ne1, ne0,
     /// eptr, ...] where eptr is moved from the stack overflow table and is the address of the
     /// final FRI layer.
-    FriE2F4 = OPCODE_FRIE2F4,
+    FriE2F4 = opcodes::FRIE2F4,
 
     /// Performs 8 steps of the Horner evaluation method on a polynomial with coefficients over
     /// the base field, i.e., it computes
@@ -614,7 +579,7 @@ pub enum Operation {
     /// In other words, the intsruction computes the evaluation at alpha of the polynomial
     ///
     /// P(X) := c7 * X^7 + c6 * X^6 + ... + c1 * X + c0
-    HornerBase = OPCODE_HORNERBASE,
+    HornerBase = opcodes::HORNERBASE,
 
     /// Performs 4 steps of the Horner evaluation method on a polynomial with coefficients over
     /// the extension field, i.e., it computes
@@ -624,15 +589,15 @@ pub enum Operation {
     /// In other words, the intsruction computes the evaluation at alpha of the polynomial
     ///
     /// P(X) := c3 * X^3 + c2 * X^2 + c1 * X + c0
-    HornerExt = OPCODE_HORNEREXT,
+    HornerExt = opcodes::HORNEREXT,
 
     /// Evaluates an arithmetic circuit given a pointer to its description in memory, the number
     /// of arithmetic gates, and the sum of the input and constant gates.
-    EvalCircuit = OPCODE_EVALCIRCUIT,
+    EvalCircuit = opcodes::EVALCIRCUIT,
 
     /// Logs a precompile event. This instruction is used to signal that a precompile computation
     /// was requested.
-    LogPrecompile = OPCODE_LOGPRECOMPILE,
+    LogPrecompile = opcodes::LOGPRECOMPILE,
 }
 
 impl Operation {
@@ -657,25 +622,6 @@ impl Operation {
             Self::Push(imm) => Some(imm),
             _ => None,
         }
-    }
-
-    /// Returns true if this operation writes any data to the decoder hasher registers.
-    ///
-    /// In other words, if so, then the user op helper registers are not available.
-    pub fn populates_decoder_hasher_registers(&self) -> bool {
-        matches!(
-            self,
-            Self::End
-                | Self::Join
-                | Self::Split
-                | Self::Loop
-                | Self::Repeat
-                | Self::Respan
-                | Self::Span
-                | Self::Halt
-                | Self::Call
-                | Self::SysCall
-        )
     }
 
     /// Returns true if this basic block operation increases the stack depth by one.
@@ -753,20 +699,6 @@ impl fmt::Display for Operation {
             Self::Caller => write!(f, "caller"),
 
             Self::Clk => write!(f, "clk"),
-
-            // ----- flow control operations ------------------------------------------------------
-            Self::Join => write!(f, "join"),
-            Self::Split => write!(f, "split"),
-            Self::Loop => write!(f, "loop"),
-            Self::Call => writeln!(f, "call"),
-            Self::Dyncall => writeln!(f, "dyncall"),
-            Self::SysCall => writeln!(f, "syscall"),
-            Self::Dyn => writeln!(f, "dyn"),
-            Self::Span => write!(f, "span"),
-            Self::End => write!(f, "end"),
-            Self::Repeat => write!(f, "repeat"),
-            Self::Respan => write!(f, "respan"),
-            Self::Halt => write!(f, "halt"),
 
             // ----- field operations -------------------------------------------------------------
             Self::Add => write!(f, "add"),
@@ -895,18 +827,6 @@ impl Serializable for Operation {
             | Operation::SDepth
             | Operation::Caller
             | Operation::Clk
-            | Operation::Join
-            | Operation::Split
-            | Operation::Loop
-            | Operation::Call
-            | Operation::Dyn
-            | Operation::Dyncall
-            | Operation::SysCall
-            | Operation::Span
-            | Operation::End
-            | Operation::Repeat
-            | Operation::Respan
-            | Operation::Halt
             | Operation::Add
             | Operation::Neg
             | Operation::Mul
@@ -989,105 +909,93 @@ impl Deserializable for Operation {
         let op_code = source.read_u8()?;
 
         let operation = match op_code {
-            OPCODE_NOOP => Self::Noop,
-            OPCODE_EQZ => Self::Eqz,
-            OPCODE_NEG => Self::Neg,
-            OPCODE_INV => Self::Inv,
-            OPCODE_INCR => Self::Incr,
-            OPCODE_NOT => Self::Not,
-            OPCODE_MLOAD => Self::MLoad,
-            OPCODE_SWAP => Self::Swap,
-            OPCODE_CALLER => Self::Caller,
-            OPCODE_MOVUP2 => Self::MovUp2,
-            OPCODE_MOVDN2 => Self::MovDn2,
-            OPCODE_MOVUP3 => Self::MovUp3,
-            OPCODE_MOVDN3 => Self::MovDn3,
-            OPCODE_ADVPOPW => Self::AdvPopW,
-            OPCODE_EXPACC => Self::Expacc,
+            opcodes::NOOP => Self::Noop,
+            opcodes::EQZ => Self::Eqz,
+            opcodes::NEG => Self::Neg,
+            opcodes::INV => Self::Inv,
+            opcodes::INCR => Self::Incr,
+            opcodes::NOT => Self::Not,
+            opcodes::MLOAD => Self::MLoad,
+            opcodes::SWAP => Self::Swap,
+            opcodes::CALLER => Self::Caller,
+            opcodes::MOVUP2 => Self::MovUp2,
+            opcodes::MOVDN2 => Self::MovDn2,
+            opcodes::MOVUP3 => Self::MovUp3,
+            opcodes::MOVDN3 => Self::MovDn3,
+            opcodes::ADVPOPW => Self::AdvPopW,
+            opcodes::EXPACC => Self::Expacc,
 
-            OPCODE_MOVUP4 => Self::MovUp4,
-            OPCODE_MOVDN4 => Self::MovDn4,
-            OPCODE_MOVUP5 => Self::MovUp5,
-            OPCODE_MOVDN5 => Self::MovDn5,
-            OPCODE_MOVUP6 => Self::MovUp6,
-            OPCODE_MOVDN6 => Self::MovDn6,
-            OPCODE_MOVUP7 => Self::MovUp7,
-            OPCODE_MOVDN7 => Self::MovDn7,
-            OPCODE_SWAPW => Self::SwapW,
-            OPCODE_EXT2MUL => Self::Ext2Mul,
-            OPCODE_MOVUP8 => Self::MovUp8,
-            OPCODE_MOVDN8 => Self::MovDn8,
-            OPCODE_SWAPW2 => Self::SwapW2,
-            OPCODE_SWAPW3 => Self::SwapW3,
-            OPCODE_SWAPDW => Self::SwapDW,
-            OPCODE_EMIT => Self::Emit,
+            opcodes::MOVUP4 => Self::MovUp4,
+            opcodes::MOVDN4 => Self::MovDn4,
+            opcodes::MOVUP5 => Self::MovUp5,
+            opcodes::MOVDN5 => Self::MovDn5,
+            opcodes::MOVUP6 => Self::MovUp6,
+            opcodes::MOVDN6 => Self::MovDn6,
+            opcodes::MOVUP7 => Self::MovUp7,
+            opcodes::MOVDN7 => Self::MovDn7,
+            opcodes::SWAPW => Self::SwapW,
+            opcodes::EXT2MUL => Self::Ext2Mul,
+            opcodes::MOVUP8 => Self::MovUp8,
+            opcodes::MOVDN8 => Self::MovDn8,
+            opcodes::SWAPW2 => Self::SwapW2,
+            opcodes::SWAPW3 => Self::SwapW3,
+            opcodes::SWAPDW => Self::SwapDW,
+            opcodes::EMIT => Self::Emit,
 
-            OPCODE_ASSERT => Self::Assert(Felt::read_from(source)?),
-            OPCODE_EQ => Self::Eq,
-            OPCODE_ADD => Self::Add,
-            OPCODE_MUL => Self::Mul,
-            OPCODE_AND => Self::And,
-            OPCODE_OR => Self::Or,
-            OPCODE_U32AND => Self::U32and,
-            OPCODE_U32XOR => Self::U32xor,
-            OPCODE_FRIE2F4 => Self::FriE2F4,
-            OPCODE_DROP => Self::Drop,
-            OPCODE_CSWAP => Self::CSwap,
-            OPCODE_CSWAPW => Self::CSwapW,
-            OPCODE_MLOADW => Self::MLoadW,
-            OPCODE_MSTORE => Self::MStore,
-            OPCODE_MSTOREW => Self::MStoreW,
+            opcodes::ASSERT => Self::Assert(Felt::read_from(source)?),
+            opcodes::EQ => Self::Eq,
+            opcodes::ADD => Self::Add,
+            opcodes::MUL => Self::Mul,
+            opcodes::AND => Self::And,
+            opcodes::OR => Self::Or,
+            opcodes::U32AND => Self::U32and,
+            opcodes::U32XOR => Self::U32xor,
+            opcodes::FRIE2F4 => Self::FriE2F4,
+            opcodes::DROP => Self::Drop,
+            opcodes::CSWAP => Self::CSwap,
+            opcodes::CSWAPW => Self::CSwapW,
+            opcodes::MLOADW => Self::MLoadW,
+            opcodes::MSTORE => Self::MStore,
+            opcodes::MSTOREW => Self::MStoreW,
 
-            OPCODE_PAD => Self::Pad,
-            OPCODE_DUP0 => Self::Dup0,
-            OPCODE_DUP1 => Self::Dup1,
-            OPCODE_DUP2 => Self::Dup2,
-            OPCODE_DUP3 => Self::Dup3,
-            OPCODE_DUP4 => Self::Dup4,
-            OPCODE_DUP5 => Self::Dup5,
-            OPCODE_DUP6 => Self::Dup6,
-            OPCODE_DUP7 => Self::Dup7,
-            OPCODE_DUP9 => Self::Dup9,
-            OPCODE_DUP11 => Self::Dup11,
-            OPCODE_DUP13 => Self::Dup13,
-            OPCODE_DUP15 => Self::Dup15,
-            OPCODE_ADVPOP => Self::AdvPop,
-            OPCODE_SDEPTH => Self::SDepth,
-            OPCODE_CLK => Self::Clk,
+            opcodes::PAD => Self::Pad,
+            opcodes::DUP0 => Self::Dup0,
+            opcodes::DUP1 => Self::Dup1,
+            opcodes::DUP2 => Self::Dup2,
+            opcodes::DUP3 => Self::Dup3,
+            opcodes::DUP4 => Self::Dup4,
+            opcodes::DUP5 => Self::Dup5,
+            opcodes::DUP6 => Self::Dup6,
+            opcodes::DUP7 => Self::Dup7,
+            opcodes::DUP9 => Self::Dup9,
+            opcodes::DUP11 => Self::Dup11,
+            opcodes::DUP13 => Self::Dup13,
+            opcodes::DUP15 => Self::Dup15,
+            opcodes::ADVPOP => Self::AdvPop,
+            opcodes::SDEPTH => Self::SDepth,
+            opcodes::CLK => Self::Clk,
 
-            OPCODE_U32ADD => Self::U32add,
-            OPCODE_U32SUB => Self::U32sub,
-            OPCODE_U32MUL => Self::U32mul,
-            OPCODE_U32DIV => Self::U32div,
-            OPCODE_U32SPLIT => Self::U32split,
-            OPCODE_U32ASSERT2 => Self::U32assert2(Felt::read_from(source)?),
-            OPCODE_U32ADD3 => Self::U32add3,
-            OPCODE_U32MADD => Self::U32madd,
+            opcodes::U32ADD => Self::U32add,
+            opcodes::U32SUB => Self::U32sub,
+            opcodes::U32MUL => Self::U32mul,
+            opcodes::U32DIV => Self::U32div,
+            opcodes::U32SPLIT => Self::U32split,
+            opcodes::U32ASSERT2 => Self::U32assert2(Felt::read_from(source)?),
+            opcodes::U32ADD3 => Self::U32add3,
+            opcodes::U32MADD => Self::U32madd,
 
-            OPCODE_HPERM => Self::HPerm,
-            OPCODE_MPVERIFY => Self::MpVerify(Felt::read_from(source)?),
-            OPCODE_PIPE => Self::Pipe,
-            OPCODE_MSTREAM => Self::MStream,
-            OPCODE_CRYPTOSTREAM => Self::CryptoStream,
-            OPCODE_SPLIT => Self::Split,
-            OPCODE_LOOP => Self::Loop,
-            OPCODE_SPAN => Self::Span,
-            OPCODE_JOIN => Self::Join,
-            OPCODE_DYN => Self::Dyn,
-            OPCODE_DYNCALL => Self::Dyncall,
-            OPCODE_HORNERBASE => Self::HornerBase,
-            OPCODE_HORNEREXT => Self::HornerExt,
-            OPCODE_LOGPRECOMPILE => Self::LogPrecompile,
-            OPCODE_EVALCIRCUIT => Self::EvalCircuit,
+            opcodes::HPERM => Self::HPerm,
+            opcodes::MPVERIFY => Self::MpVerify(Felt::read_from(source)?),
+            opcodes::PIPE => Self::Pipe,
+            opcodes::MSTREAM => Self::MStream,
+            opcodes::CRYPTOSTREAM => Self::CryptoStream,
+            opcodes::HORNERBASE => Self::HornerBase,
+            opcodes::HORNEREXT => Self::HornerExt,
+            opcodes::LOGPRECOMPILE => Self::LogPrecompile,
+            opcodes::EVALCIRCUIT => Self::EvalCircuit,
 
-            OPCODE_MRUPDATE => Self::MrUpdate,
-            OPCODE_PUSH => Self::Push(Felt::read_from(source)?),
-            OPCODE_SYSCALL => Self::SysCall,
-            OPCODE_CALL => Self::Call,
-            OPCODE_END => Self::End,
-            OPCODE_REPEAT => Self::Repeat,
-            OPCODE_RESPAN => Self::Respan,
-            OPCODE_HALT => Self::Halt,
+            opcodes::MRUPDATE => Self::MrUpdate,
+            opcodes::PUSH => Self::Push(Felt::read_from(source)?),
             _ => {
                 return Err(DeserializationError::InvalidValue(format!(
                     "Invalid opcode '{op_code}'"
@@ -1106,3 +1014,6 @@ impl Deserializable for Operation {
         1
     }
 }
+
+#[cfg(test)]
+mod tests;
