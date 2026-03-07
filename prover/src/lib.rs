@@ -77,13 +77,7 @@ pub async fn prove(
     };
 
     // Build public inputs and extract fixed/variable-length components
-    let pub_inputs = PublicInputs::new(
-        trace.program_info().clone(),
-        trace.init_stack_state(),
-        *trace.stack_outputs(),
-        trace.final_precompile_transcript().state(),
-    );
-    let (public_values, kernel_digests) = pub_inputs.to_air_inputs();
+    let (public_values, kernel_digests) = trace.public_inputs().to_air_inputs();
     let var_len_refs: Vec<&[_]> = kernel_digests.iter().map(|w| w.as_ref()).collect();
     let var_len_public_inputs: &[&[_]] = &var_len_refs;
 

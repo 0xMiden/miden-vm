@@ -204,7 +204,7 @@ mod fast_parallel {
     use miden_processor::{
         ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs, trace::build_trace,
     };
-    use miden_prover::{ProcessorAir, PublicInputs, config, execution_trace_to_row_major};
+    use miden_prover::{ProcessorAir, config, execution_trace_to_row_major};
     use miden_verifier::verify;
     use miden_vm::DefaultHost;
 
@@ -252,13 +252,7 @@ mod fast_parallel {
         let trace_matrix = execution_trace_to_row_major(&trace);
 
         // Build public inputs
-        let pub_inputs = PublicInputs::new(
-            trace.program_info().clone(),
-            trace.init_stack_state(),
-            *trace.stack_outputs(),
-            trace.final_precompile_transcript().state(),
-        );
-        let (public_values, kernel_digests) = pub_inputs.to_air_inputs();
+        let (public_values, kernel_digests) = trace.public_inputs().to_air_inputs();
         let var_len_refs: Vec<&[_]> = kernel_digests.iter().map(|w| w.as_ref()).collect();
         let var_len_public_inputs: &[&[_]] = &var_len_refs;
 
