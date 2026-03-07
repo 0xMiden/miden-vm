@@ -16,6 +16,7 @@
 - Fixed `Constant::PartialEq` to include `visibility` field in equality comparison, making it consistent with other exportable items (`Procedure`, `TypeAlias`, `EnumType`).
 - Hardened untrusted deserialization by enforcing budgets and depth limits, plus expanded fuzzing coverage ([#2777](https://github.com/0xMiden/miden-vm/pull/2777)).
 - Hardened AEAD decrypt size calculations ([#2789](https://github.com/0xMiden/miden-vm/pull/2789)).
+- Hardened MASM parsing and constants handling (lexer invalid-token spans, repeat count bounds, constant range checks, field division folding, and `push.WORD[...]` index validation) ([#2803](https://github.com/0xMiden/miden-vm/pull/2803)).
 
 ## 0.21.1 (2026-02-24)
 
