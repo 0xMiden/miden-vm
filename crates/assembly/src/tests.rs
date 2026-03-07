@@ -3597,6 +3597,84 @@ end
 }
 
 #[test]
+fn push_word_slice_u64_max_must_not_panic_and_must_error() {
+    let program_src = r#"
+const WORD = [1,2,3,4]
+
+begin
+    push.WORD[18446744073709551615]
+end
+"#;
+
+    let assembled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        Assembler::default().assemble_program(program_src)
+    }));
+
+    assert!(
+        assembled.is_ok(),
+        "assembler panicked while parsing push.WORD[...] with an out-of-range index"
+    );
+
+    let assembled = assembled.unwrap();
+    assert!(
+        assembled.is_err(),
+        "expected push.WORD[...] with an out-of-range index to be rejected with an error"
+    );
+}
+
+#[test]
+fn push_word_slice_range_u64_max_end_must_not_panic_and_must_error() {
+    let program_src = r#"
+const WORD = [1,2,3,4]
+
+begin
+    push.WORD[0..18446744073709551615]
+end
+"#;
+
+    let assembled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        Assembler::default().assemble_program(program_src)
+    }));
+
+    assert!(
+        assembled.is_ok(),
+        "assembler panicked while parsing push.WORD[0..] with an out-of-range index"
+    );
+
+    let assembled = assembled.unwrap();
+    assert!(
+        assembled.is_err(),
+        "expected push.WORD[0..] with an out-of-range index to be rejected with an error"
+    );
+}
+
+#[test]
+fn push_word_slice_range_u64_max_start_must_not_panic_and_must_error() {
+    let program_src = r#"
+const WORD = [1,2,3,4]
+
+begin
+    push.WORD[18446744073709551615..0]
+end
+"#;
+
+    let assembled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        Assembler::default().assemble_program(program_src)
+    }));
+
+    assert!(
+        assembled.is_ok(),
+        "assembler panicked while parsing push.WORD[..0] with an out-of-range index"
+    );
+
+    let assembled = assembled.unwrap();
+    assert!(
+        assembled.is_err(),
+        "expected push.WORD[..0] with an out-of-range index to be rejected with an error"
+    );
+}
+
+#[test]
 fn invalid_while() -> TestResult {
     let context = TestContext::default();
 
