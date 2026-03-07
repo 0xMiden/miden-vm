@@ -1,3 +1,6 @@
+// `AB::Var: Copy` but clippy flags `.clone()` on it
+#![allow(clippy::clone_on_copy)]
+
 //! Miden VM Constraints
 //!
 //! This module contains the constraint functions for the Miden VM processor.

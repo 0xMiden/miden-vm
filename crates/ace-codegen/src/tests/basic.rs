@@ -49,16 +49,16 @@ impl LiftedAir<F, EF> for MockAir {
 
     fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
         let main = builder.main();
-        let a = main.current_slice()[0].clone();
-        let b = main.next_slice()[0].clone();
+        let a = main.current_slice()[0];
+        let b = main.next_slice()[0];
         let pub0 = builder.public_values()[0];
         let rand0 = builder.permutation_randomness()[0];
         let aux0 = builder.permutation().current_slice()[0];
         let per0 = builder.periodic_values()[0];
 
-        builder.assert_zero(a.clone().into() + pub0.into());
+        builder.assert_zero(a.into() + pub0.into());
         builder.assert_zero_ext(rand0.into() + aux0.into());
-        builder.when_transition().assert_zero(b - a.clone());
+        builder.when_transition().assert_zero(b - a);
         let a_expr: AB::Expr = a.into();
         let a_ext: AB::ExprEF = a_expr.into();
         let per_expr: AB::ExprEF = per0.into().into();
@@ -120,7 +120,7 @@ fn test_verifier_dag_matches_manual_eval() {
     let inputs = build_inputs(&layout);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
     let periodic_values =
-        eval_periodic_values(&<MockAir as AirWithPeriodicColumns<F>>::periodic_columns(&air), z_k);
+        eval_periodic_values(<MockAir as AirWithPeriodicColumns<F>>::periodic_columns(&air), z_k);
 
     let mut builder = RecordingAirBuilder::<F, EF>::new(
         0,

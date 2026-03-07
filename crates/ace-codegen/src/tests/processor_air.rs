@@ -21,7 +21,7 @@ fn processor_air_dag_matches_manual_eval() {
     let inputs = fill_inputs(&layout);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
     let periodic_values = eval_periodic_values(
-        &<ProcessorAir as AirWithPeriodicColumns<Felt>>::periodic_columns(&air),
+        <ProcessorAir as AirWithPeriodicColumns<Felt>>::periodic_columns(&air),
         z_k,
     );
 
