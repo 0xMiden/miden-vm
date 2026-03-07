@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     Felt, Path,
     ast::{ConstantValue, Ident},
-    parser::{IntValue, ParsingError, WordValue},
+    parser::{IntValue, LiteralErrorKind, ParsingError, WordValue},
 };
 
 // CONSTANT EXPRESSION
@@ -155,23 +155,21 @@ impl ConstantExpr {
                                     if is_division_by_zero {
                                         return Err(ParsingError::DivisionByZero { span });
                                     }
-                                    match op {
-                                        ConstantOp::Add => {
-                                            Ok(Self::Int(Span::new(span, lhs + rhs)))
-                                        },
-                                        ConstantOp::Sub => {
-                                            Ok(Self::Int(Span::new(span, lhs - rhs)))
-                                        },
-                                        ConstantOp::Mul => {
-                                            Ok(Self::Int(Span::new(span, lhs * rhs)))
-                                        },
-                                        ConstantOp::Div => {
-                                            Ok(Self::Int(Span::new(span, lhs / rhs)))
-                                        },
-                                        ConstantOp::IntDiv => {
-                                            Ok(Self::Int(Span::new(span, lhs / rhs)))
+                                    let result = match op {
+                                        ConstantOp::Add => lhs.checked_add(rhs),
+                                        ConstantOp::Sub => lhs.checked_sub(rhs),
+                                        ConstantOp::Mul => lhs.checked_mul(rhs),
+                                        ConstantOp::Div | ConstantOp::IntDiv => {
+                                            lhs.checked_div(rhs)
                                         },
                                     }
+                                    .ok_or(
+                                        ParsingError::InvalidLiteral {
+                                            span,
+                                            kind: LiteralErrorKind::FeltOverflow,
+                                        },
+                                    )?;
+                                    Ok(Self::Int(Span::new(span, result)))
                                 },
                                 lhs => Ok(Self::BinaryOp {
                                     span,

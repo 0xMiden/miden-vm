@@ -3466,6 +3466,85 @@ fn repeat_count_constant_at_limit_allowed() -> TestResult {
 }
 
 #[test]
+fn const_folding_modulus_aliasing_must_be_rejected() {
+    let program_src = r#"
+const ALIAS = 18446744069414584320+1
+
+begin
+    push.ALIAS
+end
+"#;
+
+    let assembled = Assembler::default().assemble_program(program_src);
+    assert!(
+        assembled.is_err(),
+        "expected constants >= field modulus to be rejected (must not silently alias to 0)"
+    );
+}
+
+#[test]
+fn const_evaluator_modulus_aliasing_must_be_rejected() {
+    let program_src = r#"
+const X = 18446744069414584320
+const Y = 1
+const ALIAS = X+Y
+
+begin
+    push.ALIAS
+end
+"#;
+
+    let assembled = Assembler::default().assemble_program(program_src);
+    assert!(
+        assembled.is_err(),
+        "expected out-of-range constant results to be rejected (must not silently alias via `Felt::new`)"
+    );
+}
+
+#[test]
+fn const_folding_u64_overflow_must_not_panic_and_must_error() {
+    let program_src = r#"
+const WRAP = 18446744069414584320+18446744069414584320
+
+begin
+    push.WRAP
+end
+"#;
+
+    let assembled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        Assembler::default().assemble_program(program_src)
+    }));
+
+    assert!(
+        assembled.is_ok(),
+        "assembler panicked while folding a constant expression with u64 overflow"
+    );
+
+    let assembled = assembled.unwrap();
+    assert!(
+        assembled.is_err(),
+        "expected the assembler to reject constant expressions which overflow u64 during folding"
+    );
+}
+
+#[test]
+fn const_folding_subtraction_underflow_must_be_rejected() {
+    let program_src = r#"
+const UNDERFLOW = 0-1
+
+begin
+    push.UNDERFLOW
+end
+"#;
+
+    let assembled = Assembler::default().assemble_program(program_src);
+    assert!(
+        assembled.is_err(),
+        "expected subtraction underflow in constant expressions to be rejected"
+    );
+}
+
+#[test]
 fn invalid_while() -> TestResult {
     let context = TestContext::default();
 
