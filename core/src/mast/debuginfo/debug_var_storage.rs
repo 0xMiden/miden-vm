@@ -331,8 +331,7 @@ impl OpToDebugVarIds {
         }
         // Create empty nodes for gaps
         for idx in expected.0..node.0 {
-            self.add_debug_var_info_for_node(MastNodeId::new_unchecked(idx), vec![])
-                .unwrap();
+            self.add_debug_var_info_for_node(MastNodeId::new_unchecked(idx), vec![])?;
         }
 
         let op_start = self.op_indptr_for_var_ids.len();
