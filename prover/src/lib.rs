@@ -88,9 +88,7 @@ pub async fn prove(
     let var_len_public_inputs: &[&[_]] = &var_len_refs;
 
     // Create AIR
-    let air = ProcessorAir {
-        num_kernel_procedures: kernel_digests.len(),
-    };
+    let air = ProcessorAir::new(kernel_digests.len());
 
     // Get aux trace builders
     let aux_builder = trace.aux_trace_builders();
