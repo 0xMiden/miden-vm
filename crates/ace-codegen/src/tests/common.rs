@@ -1,6 +1,8 @@
 use miden_core::{Felt, field::QuadFelt};
-use miden_crypto::stark::dft::{Radix2DitParallel, TwoAdicSubgroupDft};
-use miden_crypto::stark::field::{ExtensionField, Field, PrimeCharacteristicRing};
+use miden_crypto::stark::{
+    dft::{Radix2DitParallel, TwoAdicSubgroupDft},
+    field::{ExtensionField, Field, PrimeCharacteristicRing},
+};
 
 use crate::{
     InputKey, InputLayout,

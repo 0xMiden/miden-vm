@@ -174,8 +174,11 @@ const PV_TRANSCRIPT_STATE: usize = NUM_PUBLIC_VALUES - WORD_SIZE;
 /// Miden VM Processor AIR implementation.
 ///
 /// Auxiliary trace building is handled separately via [`AuxBuilder`].
-/// Public-input-dependent checks are performed in [`LiftedAir::reduced_aux_values`]
-/// by parsing the `public_values` slice directly.
+///
+/// Public-input-dependent boundary checks are performed in [`LiftedAir::reduced_aux_values`].
+/// Aux columns are NOT initialized with boundary terms -- they start at identity. The verifier
+/// independently computes expected boundary messages from variable length public values and checks
+/// them against the final column values.
 #[derive(Default)]
 pub struct ProcessorAir {
     /// Number of kernel procedure digests (variable-length public inputs).
@@ -276,7 +279,41 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
 
         let kernel_reduced = kernel_reduced_from_var_len(challenges, var_len_public_inputs);
 
-        // Combine: for valid execution, prod = 1.
+        // Combine all multiset column finals with reduced variable length public-inputs.
+        //
+        // Running-product columns accumulate `responses / requests` at each row, so
+        // their final value is product(responses) / product(requests) over the entire trace.
+        //
+        // Columns whose requests and responses fully cancel end at 1:
+        //   p1  (block stack table) -- every block pushed is later popped
+        //   p3  (op group table)    -- every op group pushed is later consumed
+        //   s_aux (stack overflow)  -- every overflow push has a matching pop
+        //
+        // Columns with public-input-dependent boundary terms end at non-unity values:
+        //
+        //   p2 (block hash table):
+        //     The root block's hash is removed from the table at END, but was never
+        //     added (the root has no parent that would add it). This leaves one
+        //     unmatched removal: p2_final = 1 / ph_msg.
+        //
+        //   b_hash_kernel (chiplets virtual table: sibling table + transcript state):
+        //     The log_precompile transcript tracking chain starts by removing
+        //     default_transcript_msg (initial capacity state) and ends by inserting
+        //     final_transcript_msg (final capacity state). On the other hand, dibling table
+        //     entries cancel out. Net: b_hk_final = final_transcript_msg / default_transcript_msg.
+        //
+        //   b_chiplets (chiplets bus):
+        //     Each unique kernel procedure produces a KernelRomInitMessage response
+        //     from the kernel ROM chiplet These init messages are matched by the verifier
+        //     via public inputs. Net: b_ch_final = product(kernel_init_msgs) = kernel_reduced.
+        //
+        // Multiplying all finals with correction terms:
+        //   prod = (p1 * p3 * s_aux)                               -- each is 1
+        //        * (p2 * ph_msg)                                   -- (1/ph_msg) * ph_msg = 1
+        //        * (b_hk * default_msg / final_msg)                -- cancels to 1
+        //        * (b_ch / kernel_reduced)                         -- cancels to 1
+        //
+        // Rearranged: prod = all_finals * ph_msg * default_msg / (final_msg * kernel_reduced) (= 1)
         let expected_denom = final_transcript_msg * kernel_reduced;
         let expected_denom_inv = expected_denom
             .try_inverse()
@@ -322,59 +359,53 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
     }
 }
 
-// AUX FINALS HELPERS
+// REDUCED AUX VALUES HELPERS
 // ================================================================================================
 
-/// Builds the program-hash bus message for the initial block-hash table row.
+/// Builds the program-hash bus message for the block-hash table boundary term.
 ///
-/// This must match `BlockHashTableRow::table_init().collapse()` on the prover side,
-/// which encodes `[parent_id=0, hash[0..4], is_first_child=0, is_loop_body=0]`
-/// as `alpha + beta^0*0 + beta^1*h0 + beta^2*h1 + beta^3*h2 + beta^4*h3 + beta^5*0 + beta^6*0`.
-/// Since parent_id and the two flags are zero, this simplifies to:
-/// `alpha + beta*h0 + beta^2*h1 + beta^3*h2 + beta^4*h3`.
+/// Must match `BlockHashTableRow::from_end().collapse()` on the prover side for the
+/// root block, which encodes `[parent_id=0, hash[0..4], is_first_child=0, is_loop_body=0]`.
 fn program_hash_message<EF: ExtensionField<Felt>>(challenges: &[EF], program_hash: &Word) -> EF {
-    let alpha = challenges[0];
-    let beta = challenges[1];
-
-    let mut acc = alpha;
-    let mut beta_power = beta;
-    for &elem in program_hash.iter() {
-        acc += beta_power * EF::from(elem);
-        beta_power *= beta;
-    }
-    acc
+    use trace::Challenges;
+    let c = Challenges::<EF, 7>::from_raw(challenges);
+    c.encode([
+        Felt::ZERO, // parent_id = 0 (root block)
+        program_hash[0],
+        program_hash[1],
+        program_hash[2],
+        program_hash[3],
+        Felt::ZERO, // is_first_child = false
+        Felt::ZERO, // is_loop_body = false
+    ])
 }
 
 /// Builds the kernel procedure init message for the kernel ROM bus.
 ///
 /// Must match `KernelRomInitMessage::value()` on the prover side, which encodes
-/// `[KERNEL_PROC_INIT_LABEL, digest[0..4]]` as
-/// `alpha + beta^0*label + beta^1*d0 + beta^2*d1 + beta^3*d2 + beta^4*d3`.
+/// `[KERNEL_PROC_INIT_LABEL, digest[0..4]]`.
 fn kernel_proc_message<EF: ExtensionField<Felt>>(challenges: &[EF], digest: &Word) -> EF {
-    let alpha = challenges[0];
-    let beta = challenges[1];
-
-    let label = EF::from(trace::chiplets::kernel_rom::KERNEL_PROC_INIT_LABEL);
-    let mut acc = alpha + label;
-    let mut beta_power = beta;
-    for &elem in digest.iter() {
-        acc += beta_power * EF::from(elem);
-        beta_power *= beta;
-    }
-    acc
+    use trace::Challenges;
+    let c = Challenges::<EF, 5>::from_raw(challenges);
+    c.encode([
+        trace::chiplets::kernel_rom::KERNEL_PROC_INIT_LABEL,
+        digest[0],
+        digest[1],
+        digest[2],
+        digest[3],
+    ])
 }
 
 /// Reduces kernel procedure digests from var-len public inputs into a multiset product.
 fn kernel_reduced_from_var_len<EF: ExtensionField<Felt>>(
-    alphas: &[EF],
+    challenges: &[EF],
     var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
 ) -> EF {
     let mut acc = EF::ONE;
     for digest in var_len_public_inputs.iter() {
         debug_assert_eq!(digest.len(), WORD_SIZE);
         let word: Word = [digest[0], digest[1], digest[2], digest[3]].into();
-        acc *= kernel_proc_message(alphas, &word);
+        acc *= kernel_proc_message(challenges, &word);
     }
-
     acc
 }

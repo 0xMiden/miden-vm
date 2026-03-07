@@ -1,7 +1,6 @@
 use miden_air::{LiftedAir, ProcessorAir};
-use miden_crypto::stark::air::AirWithPeriodicColumns;
 use miden_core::{Felt, field::QuadFelt};
-use miden_crypto::stark::field::PrimeCharacteristicRing;
+use miden_crypto::stark::{air::AirWithPeriodicColumns, field::PrimeCharacteristicRing};
 
 use super::common::{eval_dag, eval_expr, eval_periodic_values, eval_quotient, fill_inputs};
 use crate::{
@@ -33,6 +32,7 @@ fn processor_air_dag_matches_manual_eval() {
         layout.counts.num_randomness,
         layout.counts.num_public,
         layout.counts.num_periodic,
+        LiftedAir::<Felt, QuadFelt>::num_aux_values(&air),
     );
     LiftedAir::<Felt, QuadFelt>::eval(&air, &mut builder);
 

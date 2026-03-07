@@ -58,7 +58,7 @@ struct BlockStackEncoders<AB>
 where
     AB: LiftedAirBuilder,
 {
-    challenges: Challenges<AB, 10>,
+    challenges: Challenges<AB::ExprEF, 10>,
 }
 
 impl<AB> BlockStackEncoders<AB>
@@ -67,7 +67,7 @@ where
 {
     fn new(challenges: &[AB::RandomVar]) -> Self {
         Self {
-            challenges: Challenges::<AB, 10>::from_randomness(challenges),
+            challenges: Challenges::<AB::ExprEF, 10>::from_randomness(challenges),
         }
     }
 
@@ -108,7 +108,7 @@ struct BlockHashEncoder<AB>
 where
     AB: LiftedAirBuilder,
 {
-    challenges: Challenges<AB, 7>,
+    challenges: Challenges<AB::ExprEF, 7>,
 }
 
 impl<AB> BlockHashEncoder<AB>
@@ -117,7 +117,7 @@ where
 {
     fn new(challenges: &[AB::RandomVar]) -> Self {
         Self {
-            challenges: Challenges::<AB, 7>::from_randomness(challenges),
+            challenges: Challenges::<AB::ExprEF, 7>::from_randomness(challenges),
         }
     }
 
@@ -146,7 +146,7 @@ struct OpGroupEncoder<AB>
 where
     AB: LiftedAirBuilder,
 {
-    challenges: Challenges<AB, 3>,
+    challenges: Challenges<AB::ExprEF, 3>,
 }
 
 impl<AB> OpGroupEncoder<AB>
@@ -155,7 +155,7 @@ where
 {
     fn new(challenges: &[AB::RandomVar]) -> Self {
         Self {
-            challenges: Challenges::<AB, 3>::from_randomness(challenges),
+            challenges: Challenges::<AB::ExprEF, 3>::from_randomness(challenges),
         }
     }
 

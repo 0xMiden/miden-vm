@@ -103,7 +103,6 @@ pub fn build_trace_with_max_len(
         kernel_replay,
         hasher_for_chiplet,
         ace_replay,
-        final_pc_transcript,
         fragment_size,
     } = trace_generation_context;
 
@@ -165,7 +164,7 @@ pub fn build_trace_with_max_len(
         || {
             rayon::join(
                 || range_checker.into_trace_with_table(range_table_len, main_trace_len),
-                || chiplets.into_trace(main_trace_len, final_pc_transcript.state()),
+                || chiplets.into_trace(main_trace_len),
             )
         },
     );

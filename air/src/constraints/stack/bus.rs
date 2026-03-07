@@ -65,7 +65,7 @@ pub fn enforce_bus<AB>(
 
         let challenges = builder.permutation_randomness();
         // We need 3 message elements: (clk, val, prev).
-        let challenges = Challenges::<AB, 3>::from_randomness(challenges);
+        let challenges = Challenges::<AB::ExprEF, 3>::from_randomness(challenges);
         (p1_local, p1_next, challenges)
     };
 

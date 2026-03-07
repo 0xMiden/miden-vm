@@ -145,28 +145,63 @@ fn verify_stark(
     match hash_fn {
         HashFunction::Blake3_256 => {
             let config = config::create_blake3_256_config();
-            config::verify(&config, &air, log_trace_height as usize, &public_values, var_len_public_inputs, &proof_bytes)
-                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
+            config::verify(
+                &config,
+                &air,
+                log_trace_height as usize,
+                &public_values,
+                var_len_public_inputs,
+                &proof_bytes,
+            )
+            .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
         HashFunction::Rpo256 => {
             let config = config::create_rpo_config();
-            config::verify(&config, &air, log_trace_height as usize, &public_values, var_len_public_inputs, &proof_bytes)
-                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
+            config::verify(
+                &config,
+                &air,
+                log_trace_height as usize,
+                &public_values,
+                var_len_public_inputs,
+                &proof_bytes,
+            )
+            .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
         HashFunction::Rpx256 => {
             let config = config::create_rpx_config();
-            config::verify(&config, &air, log_trace_height as usize, &public_values, var_len_public_inputs, &proof_bytes)
-                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
+            config::verify(
+                &config,
+                &air,
+                log_trace_height as usize,
+                &public_values,
+                var_len_public_inputs,
+                &proof_bytes,
+            )
+            .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
         HashFunction::Poseidon2 => {
             let config = config::create_poseidon2_config();
-            config::verify(&config, &air, log_trace_height as usize, &public_values, var_len_public_inputs, &proof_bytes)
-                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
+            config::verify(
+                &config,
+                &air,
+                log_trace_height as usize,
+                &public_values,
+                var_len_public_inputs,
+                &proof_bytes,
+            )
+            .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
         HashFunction::Keccak => {
             let config = config::create_keccak_config();
-            config::verify(&config, &air, log_trace_height as usize, &public_values, var_len_public_inputs, &proof_bytes)
-                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
+            config::verify(
+                &config,
+                &air,
+                log_trace_height as usize,
+                &public_values,
+                var_len_public_inputs,
+                &proof_bytes,
+            )
+            .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
     }?;
 

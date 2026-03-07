@@ -23,7 +23,7 @@ use miden_air::trace::{
         },
     },
 };
-use miden_core::{ONE, ZERO, field::ExtensionField, operations::opcodes, program::Kernel};
+use miden_core::{ONE, ZERO, field::ExtensionField, operations::opcodes};
 
 use super::Felt;
 use crate::{
@@ -37,27 +37,25 @@ mod hasher;
 mod kernel;
 mod memory;
 
-use kernel::build_kernel_init_requests;
 pub use memory::{build_ace_memory_read_element_request, build_ace_memory_read_word_request};
 
 // BUS COLUMN BUILDER
 // ================================================================================================
 
 /// Describes how to construct the execution trace of the chiplets bus auxiliary trace column.
-pub struct BusColumnBuilder<'a> {
-    kernel: &'a Kernel,
-}
+pub struct BusColumnBuilder;
 
-impl<'a> BusColumnBuilder<'a> {
-    pub(super) fn new(kernel: &'a Kernel) -> Self {
-        Self { kernel }
-    }
-}
-
-impl<E> AuxColumnBuilder<E> for BusColumnBuilder<'_>
+impl<E> AuxColumnBuilder<E> for BusColumnBuilder
 where
     E: ExtensionField<Felt>,
 {
+    #[cfg(any(test, feature = "bus-debugger"))]
+    fn enforce_bus_balance(&self) -> bool {
+        // The chiplets bus final value encodes kernel procedure digest boundary terms,
+        // which are checked via reduced_aux_values. It does not balance to identity.
+        false
+    }
+
     /// Constructs the requests made by the VM-components to the chiplets at `row`.
     fn get_requests_at(
         &self,
@@ -164,15 +162,6 @@ where
         } else {
             E::ONE
         }
-    }
-
-    fn init_requests(
-        &self,
-        _main_trace: &MainTrace,
-        challenges: &Challenges<E>,
-        _debugger: &mut BusDebugger<E>,
-    ) -> E {
-        build_kernel_init_requests(self.kernel.proc_hashes(), challenges, _debugger)
     }
 }
 
