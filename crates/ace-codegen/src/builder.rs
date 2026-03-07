@@ -28,6 +28,7 @@ where
     main: RowMajorMatrix<SymVar<EF>>,
     aux: RowMajorMatrix<SymVar<EF>>,
     aux_randomness: Vec<SymVar<EF>>,
+    aux_values: Vec<SymVar<EF>>,
     public_values: Vec<SymVar<EF>>,
     periodic_values: Vec<SymVar<EF>>,
     constraints: Vec<SymExpr<EF>>,
@@ -47,6 +48,7 @@ where
         num_randomness: usize,
         num_public_values: usize,
         num_periodic_values: usize,
+        num_aux_values: usize,
     ) -> Self {
         let prep_values = [0, 1]
             .into_iter()
@@ -70,6 +72,9 @@ where
         let aux = RowMajorMatrix::new(aux_values, aux_width);
         let aux_randomness =
             (0..num_randomness).map(|index| SymVar::new(Entry::Challenge, index)).collect();
+        let aux_values = (0..num_aux_values)
+            .map(|index| SymVar::new(Entry::AuxBusBoundary, index))
+            .collect();
         let public_values =
             (0..num_public_values).map(|index| SymVar::new(Entry::Public, index)).collect();
         let periodic_values = (0..num_periodic_values)
@@ -80,6 +85,7 @@ where
             main: RowMajorMatrix::new(main_values, width),
             aux,
             aux_randomness,
+            aux_values,
             public_values,
             periodic_values,
             constraints: Vec::new(),
@@ -178,8 +184,7 @@ where
     }
 
     fn permutation_values(&self) -> &[Self::PermutationVar] {
-        // ACE codegen does not use permutation values; return empty.
-        &[]
+        &self.aux_values
     }
 }
 

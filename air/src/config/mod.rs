@@ -144,10 +144,6 @@ where
         public_values,
         var_len_public_inputs,
     };
-    miden_crypto::stark::verify_multi(
-        config,
-        &[(air, instance)],
-        &mut channel,
-    )?;
+    miden_crypto::stark::verify_multi(config, &[(air, instance)], &mut channel)?;
     Ok(())
 }

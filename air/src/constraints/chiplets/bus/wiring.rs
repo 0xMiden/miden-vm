@@ -88,7 +88,7 @@ pub fn enforce_wiring_bus_constraint<AB>(
         let v_next = aux_next[V_WIRING];
 
         let challenges = builder.permutation_randomness();
-        let challenges = Challenges::<AB, NUM_WIRING_FIELDS>::from_randomness(challenges);
+        let challenges = Challenges::<AB::ExprEF, NUM_WIRING_FIELDS>::from_randomness(challenges);
         (v_local, v_next, challenges)
     };
 
@@ -200,7 +200,7 @@ where
 
 /// Encode an ACE wire using the wiring-bus challenge vector.
 fn encode_wire<AB>(
-    challenges: &Challenges<AB, NUM_WIRING_FIELDS>,
+    challenges: &Challenges<AB::ExprEF, NUM_WIRING_FIELDS>,
     clk: &AB::Expr,
     ctx: &AB::Expr,
     wire: &AceWire<AB::Expr>,

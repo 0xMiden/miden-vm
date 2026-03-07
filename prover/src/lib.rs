@@ -84,8 +84,7 @@ pub async fn prove(
         trace.final_precompile_transcript().state(),
     );
     let (public_values, kernel_digests) = pub_inputs.to_air_inputs();
-    let var_len_refs: Vec<&[_]> =
-        kernel_digests.iter().map(|w| w.as_ref()).collect();
+    let var_len_refs: Vec<&[_]> = kernel_digests.iter().map(|w| w.as_ref()).collect();
     let var_len_public_inputs: &[&[_]] = &var_len_refs;
 
     // Create AIR
@@ -103,28 +102,63 @@ pub async fn prove(
     let proof_bytes = match hash_fn {
         HashFunction::Blake3_256 => {
             let config = config::create_blake3_256_config();
-            config::prove(&config, &air, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
-                .map_err(|e| ExecutionError::ProofSerializationError(alloc::format!("{e}")))?
+            config::prove(
+                &config,
+                &air,
+                &trace_matrix,
+                &public_values,
+                var_len_public_inputs,
+                &aux_builder,
+            )
+            .map_err(|e| ExecutionError::ProofSerializationError(alloc::format!("{e}")))?
         },
         HashFunction::Keccak => {
             let config = config::create_keccak_config();
-            config::prove(&config, &air, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
-                .map_err(|e| ExecutionError::ProofSerializationError(alloc::format!("{e}")))?
+            config::prove(
+                &config,
+                &air,
+                &trace_matrix,
+                &public_values,
+                var_len_public_inputs,
+                &aux_builder,
+            )
+            .map_err(|e| ExecutionError::ProofSerializationError(alloc::format!("{e}")))?
         },
         HashFunction::Rpo256 => {
             let config = config::create_rpo_config();
-            config::prove(&config, &air, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
-                .map_err(|e| ExecutionError::ProofSerializationError(alloc::format!("{e}")))?
+            config::prove(
+                &config,
+                &air,
+                &trace_matrix,
+                &public_values,
+                var_len_public_inputs,
+                &aux_builder,
+            )
+            .map_err(|e| ExecutionError::ProofSerializationError(alloc::format!("{e}")))?
         },
         HashFunction::Poseidon2 => {
             let config = config::create_poseidon2_config();
-            config::prove(&config, &air, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
-                .map_err(|e| ExecutionError::ProofSerializationError(alloc::format!("{e}")))?
+            config::prove(
+                &config,
+                &air,
+                &trace_matrix,
+                &public_values,
+                var_len_public_inputs,
+                &aux_builder,
+            )
+            .map_err(|e| ExecutionError::ProofSerializationError(alloc::format!("{e}")))?
         },
         HashFunction::Rpx256 => {
             let config = config::create_rpx_config();
-            config::prove(&config, &air, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
-                .map_err(|e| ExecutionError::ProofSerializationError(alloc::format!("{e}")))?
+            config::prove(
+                &config,
+                &air,
+                &trace_matrix,
+                &public_values,
+                var_len_public_inputs,
+                &aux_builder,
+            )
+            .map_err(|e| ExecutionError::ProofSerializationError(alloc::format!("{e}")))?
         },
     };
 

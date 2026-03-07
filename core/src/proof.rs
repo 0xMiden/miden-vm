@@ -43,7 +43,12 @@ impl ExecutionProof {
         log_trace_height: u32,
         pc_requests: Vec<PrecompileRequest>,
     ) -> Self {
-        Self { proof, hash_fn, log_trace_height, pc_requests }
+        Self {
+            proof,
+            hash_fn,
+            log_trace_height,
+            pc_requests,
+        }
     }
 
     // PUBLIC ACCESSORS
@@ -203,7 +208,12 @@ impl Deserializable for ExecutionProof {
         let log_trace_height = source.read_u32()?;
         let pc_requests = Vec::<PrecompileRequest>::read_from(source)?;
 
-        Ok(ExecutionProof { proof, hash_fn, log_trace_height, pc_requests })
+        Ok(ExecutionProof {
+            proof,
+            hash_fn,
+            log_trace_height,
+            pc_requests,
+        })
     }
 }
 

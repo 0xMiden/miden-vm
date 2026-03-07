@@ -30,6 +30,7 @@ pub struct OodEvalAirBuilder {
     main: RowMajorMatrix<Felt>,
     permutation: RowMajorMatrix<QuadFelt>,
     permutation_randomness: Vec<QuadFelt>,
+    permutation_values: Vec<QuadFelt>,
     public_values: Vec<Felt>,
     periodic_values: Vec<Felt>,
     first_row: Felt,
@@ -64,8 +65,7 @@ impl OodEvalAirBuilder {
             (0..crate::trace::MAX_MESSAGE_WIDTH).map(|_| rng.next_quad()).collect();
         let permutation_randomness: Vec<QuadFelt> =
             all_randomness[..crate::trace::AUX_TRACE_RAND_CHALLENGES].to_vec();
-        // Consume aux_bus_boundary_values from RNG to keep seed state stable.
-        let _aux_bus_boundary_values: Vec<QuadFelt> =
+        let permutation_values: Vec<QuadFelt> =
             (0..crate::trace::AUX_TRACE_WIDTH).map(|_| rng.next_quad()).collect();
         let first_row = rng.next_felt();
         let last_row = rng.next_felt();
@@ -80,6 +80,7 @@ impl OodEvalAirBuilder {
             main,
             permutation,
             permutation_randomness,
+            permutation_values,
             public_values,
             periodic_values,
             first_row,
@@ -207,7 +208,7 @@ impl PermutationAirBuilder for OodEvalAirBuilder {
     }
 
     fn permutation_values(&self) -> &[Self::PermutationVar] {
-        &[]
+        &self.permutation_values
     }
 }
 

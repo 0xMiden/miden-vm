@@ -3,6 +3,9 @@ use core::ops::Range;
 use chiplets::hasher::RATE_LEN;
 use miden_core::utils::range;
 
+mod challenges;
+pub use challenges::Challenges;
+
 pub mod chiplets;
 pub mod decoder;
 pub mod range;
@@ -13,7 +16,6 @@ pub use rows::{RowIndex, RowIndexError};
 
 mod main_trace;
 pub use main_trace::{MainTrace, MainTraceRow};
-
 pub use miden_crypto::stark::air::AuxBuilder;
 
 // CONSTANTS
@@ -59,7 +61,9 @@ pub const LOG_PRECOMPILE_LABEL: u8 = miden_core::operations::opcodes::LOGPRECOMP
 pub mod log_precompile {
     use core::ops::Range;
 
-    use miden_core::{Felt, field::ExtensionField, precompile::PrecompileTranscriptState, utils::range};
+    use miden_core::{
+        Felt, field::ExtensionField, precompile::PrecompileTranscriptState, utils::range,
+    };
 
     use super::chiplets::hasher::{CAPACITY_LEN, DIGEST_LEN};
 
@@ -71,19 +75,9 @@ pub mod log_precompile {
         challenges: &[EF],
         state: PrecompileTranscriptState,
     ) -> EF {
-        let alpha = challenges[0];
-        let beta = challenges[1];
-
-        let label = EF::from(Felt::from_u8(super::LOG_PRECOMPILE_LABEL));
+        let c = super::Challenges::<EF, 5>::from_raw(challenges);
         let cap: &[Felt] = state.as_ref();
-
-        let mut acc = alpha + label;
-        let mut beta_power = beta;
-        for &elem in cap.iter() {
-            acc += beta_power * EF::from(elem);
-            beta_power *= beta;
-        }
-        acc
+        c.encode([Felt::from_u8(super::LOG_PRECOMPILE_LABEL), cap[0], cap[1], cap[2], cap[3]])
     }
 
     // HELPER REGISTER LAYOUT

@@ -270,15 +270,23 @@ mod fast_parallel {
         // Generate proof using Blake3_256
         let blake3_config = config::create_blake3_256_config();
         let proof_bytes = config::prove(
-            &blake3_config, &air, &trace_matrix, &public_values,
-            var_len_public_inputs, &aux_builder,
-        ).expect("Proving failed");
+            &blake3_config,
+            &air,
+            &trace_matrix,
+            &public_values,
+            var_len_public_inputs,
+            &aux_builder,
+        )
+        .expect("Proving failed");
 
         let precompile_requests = trace.precompile_requests().to_vec();
         let log_trace_height = trace.trace_len_summary().padded_trace_len().ilog2();
 
         let proof = ExecutionProof::new(
-            proof_bytes, HashFunction::Blake3_256, log_trace_height, precompile_requests,
+            proof_bytes,
+            HashFunction::Blake3_256,
+            log_trace_height,
+            precompile_requests,
         );
 
         // Verify the proof

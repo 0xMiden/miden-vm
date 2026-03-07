@@ -48,11 +48,9 @@ impl AuxTraceBuilder {
             E::ONE,
             "block stack table is not empty at the end of program execution"
         );
-        debug_assert_eq!(
-            *p2.last().unwrap(),
-            E::ONE,
-            "block hash table is not empty at the end of program execution"
-        );
+        // p2 (block hash table) does NOT end at 1: the program hash boundary response
+        // is unmatched, so p2 ends at 1/program_hash_msg. This is verified by the
+        // verifier in reduced_aux_values.
         debug_assert_eq!(
             *p3.last().unwrap(),
             E::ONE,

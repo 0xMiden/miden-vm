@@ -1357,12 +1357,14 @@ dependencies = [
  "p3-air",
  "p3-blake3",
  "p3-challenger",
+ "p3-commit",
  "p3-dft",
  "p3-field",
  "p3-goldilocks",
  "p3-keccak",
  "p3-matrix",
  "p3-maybe-rayon",
+ "p3-merkle-tree",
  "p3-miden-lifted-air",
  "p3-miden-lifted-fri",
  "p3-miden-lifted-stark",
@@ -1840,6 +1842,8 @@ version = "0.4.2"
 source = "git+https://github.com/Plonky3/Plonky3?rev=637f6239#637f623932b6ef78a39e3492512557bf49f2b88a"
 dependencies = [
  "itertools 0.14.0",
+ "p3-challenger",
+ "p3-dft",
  "p3-field",
  "p3-matrix",
  "p3-util",
@@ -1935,6 +1939,24 @@ dependencies = [
  "p3-symmetric",
  "p3-util",
  "rand 0.10.0",
+]
+
+[[package]]
+name = "p3-merkle-tree"
+version = "0.4.2"
+source = "git+https://github.com/Plonky3/Plonky3?rev=637f6239#637f623932b6ef78a39e3492512557bf49f2b88a"
+dependencies = [
+ "itertools 0.14.0",
+ "p3-commit",
+ "p3-field",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-symmetric",
+ "p3-util",
+ "rand 0.10.0",
+ "serde",
+ "thiserror",
+ "tracing",
 ]
 
 [[package]]
