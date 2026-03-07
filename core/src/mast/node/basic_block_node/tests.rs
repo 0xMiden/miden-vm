@@ -336,6 +336,35 @@ fn basic_block_from_batch(batch: OpBatch) -> BasicBlockNode {
         .expect("basic block should build")
 }
 
+fn basic_block_from_batches(op_batches: Vec<OpBatch>) -> BasicBlockNode {
+    BasicBlockNode {
+        op_batches,
+        digest: Word::default(),
+        decorators: DecoratorStore::Owned {
+            decorators: DecoratorList::new(),
+            before_enter: Vec::new(),
+            after_exit: Vec::new(),
+        },
+    }
+}
+
+fn control_flow_operation_strategy() -> impl Strategy<Value = Operation> {
+    prop_oneof![
+        Just(Operation::Join),
+        Just(Operation::Split),
+        Just(Operation::Loop),
+        Just(Operation::Call),
+        Just(Operation::SysCall),
+        Just(Operation::Dyn),
+        Just(Operation::Dyncall),
+        Just(Operation::Span),
+        Just(Operation::Repeat),
+        Just(Operation::Respan),
+        Just(Operation::End),
+        Just(Operation::Halt),
+    ]
+}
+
 // PROPTESTS FOR BATCH CREATION INVARIANTS
 // ================================================================================================
 
@@ -478,6 +507,91 @@ fn test_validate_immediate_commitment_rejects_nonzero_empty_group() {
     let node = basic_block_from_batch(batch);
     let err = node.validate_batch_invariants().unwrap_err();
     assert!(err.contains("empty group must be zero"));
+}
+
+#[test]
+fn validate_batch_invariants_rejects_padded_empty_group() {
+    let ops = vec![Operation::Add];
+    let indptr = [0, 0, 1, 1, 1, 1, 1, 1, 1];
+    let mut padding = [false; BATCH_SIZE];
+    padding[0] = true;
+    let groups = [ZERO; BATCH_SIZE];
+    let batch = OpBatch::new_from_parts(ops, indptr, padding, groups, 2);
+
+    let block = basic_block_from_batches(vec![batch]);
+    let result = block.validate_batch_invariants();
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn validate_batch_invariants_rejects_padded_group_without_noop() {
+    let ops = vec![Operation::Add];
+    let indptr = [0, 1, 1, 1, 1, 1, 1, 1, 1];
+    let mut padding = [false; BATCH_SIZE];
+    padding[0] = true;
+    let groups = [ZERO; BATCH_SIZE];
+    let batch = OpBatch::new_from_parts(ops, indptr, padding, groups, 1);
+
+    let block = basic_block_from_batches(vec![batch]);
+    let result = block.validate_batch_invariants();
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn validate_batch_invariants_accepts_padded_group_with_noop() {
+    let ops = vec![Operation::Add, Operation::Noop];
+    let indptr = [0, 2, 2, 2, 2, 2, 2, 2, 2];
+    let mut padding = [false; BATCH_SIZE];
+    padding[0] = true;
+    let groups = [ZERO; BATCH_SIZE];
+    let batch = OpBatch::new_from_parts(ops, indptr, padding, groups, 1);
+
+    let block = basic_block_from_batches(vec![batch]);
+    let result = block.validate_batch_invariants();
+
+    assert!(result.is_ok());
+}
+
+#[test]
+fn validate_batch_invariants_rejects_malformed_indptr_without_panicking() {
+    let ops = vec![Operation::Add];
+    let mut indptr = [0usize; BATCH_SIZE + 1];
+    indptr[1] = 2;
+    let batch = OpBatch {
+        ops,
+        indptr,
+        padding: [false; BATCH_SIZE],
+        groups: [ZERO; BATCH_SIZE],
+        num_groups: 1,
+    };
+
+    let block = basic_block_from_batches(vec![batch]);
+    let result = block.validate_batch_invariants();
+
+    assert!(result.is_err());
+}
+
+proptest! {
+    #[test]
+    fn validate_batch_invariants_rejects_control_flow_opcode(
+        op in control_flow_operation_strategy(),
+    ) {
+        let ops = vec![op];
+        let mut indptr = [0usize; BATCH_SIZE + 1];
+        for slot in indptr.iter_mut().skip(1) {
+            *slot = 1;
+        }
+        let padding = [false; BATCH_SIZE];
+        let groups = [ZERO; BATCH_SIZE];
+        let batch = OpBatch::new_from_parts(ops, indptr, padding, groups, 1);
+
+        let block = basic_block_from_batches(vec![batch]);
+        let result = block.validate_batch_invariants();
+
+        prop_assert!(result.is_err());
+    }
 }
 
 fn decorator_strategy(

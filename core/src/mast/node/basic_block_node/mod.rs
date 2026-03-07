@@ -9,7 +9,7 @@ use crate::{
         DecoratedLinksIter, DecoratedOpLink, DecoratorId, DecoratorStore, MastForest,
         MastForestError, MastNode, MastNodeFingerprint, MastNodeId,
     },
-    operations::{DecoratorList, Operation},
+    operations::{DecoratorList, Operation, is_control_flow_opcode},
     prettier::PrettyPrint,
     utils::LookupByIdx,
 };
@@ -442,24 +442,60 @@ impl BasicBlockNode {
 impl BasicBlockNode {
     /// Validates that this BasicBlockNode satisfies the core invariants:
     /// 1. Non-final batches must be full (BATCH_SIZE groups), final batch must be power-of-two
-    /// 2. No operation group ends with an operation requiring an immediate value
-    /// 3. The last operation group in a batch cannot contain operations requiring immediate values
-    /// 4. OpBatch structural consistency (num_groups <= BATCH_SIZE, group size <= GROUP_SIZE)
+    /// 2. No control-flow operations appear in batches
+    /// 3. No operation group ends with an operation requiring an immediate value
+    /// 4. The last operation group in a batch cannot contain operations requiring immediate values
+    /// 5. OpBatch structural consistency (num_groups <= BATCH_SIZE, group size <= GROUP_SIZE)
+    /// 6. Immediate values are committed to empty groups and match group contents
+    /// 7. OpBatch padding semantics (no padding on empty groups; padded groups end with NOOP)
     ///
     /// Returns an error string describing which invariant was violated if validation fails.
     pub fn validate_batch_invariants(&self) -> Result<(), String> {
         // Check invariant 1: Power-of-two groups in each batch
         self.validate_power_of_two_groups()?;
 
-        // Check invariant 2: No batch ends with immediate operation
-        self.validate_no_immediate_endings()?;
-
-        // Check invariant 3: OpBatch structural consistency
+        // Check invariant 5: OpBatch structural consistency
+        // This needs to be done early on as it will validate indptr indexes used in later checks.
         self.validate_batch_structure()?;
 
-        // Check invariant 4: Immediate values must be committed to empty groups
+        // Check invariant 2: No control-flow operations in batches
+        self.validate_no_control_flow_ops()?;
+
+        // Check invariants 3 and 4: immediate-ending constraints
+        self.validate_no_immediate_endings()?;
+
+        // Check invariant 6: Immediate values must be committed to empty groups
         self.validate_immediate_commitment()?;
 
+        // Check invariant 7: OpBatch padding semantics
+        self.validate_padding_semantics()?;
+
+        Ok(())
+    }
+
+    /// Validates that no batch contains control-flow operations.
+    fn validate_no_control_flow_ops(&self) -> Result<(), String> {
+        for (batch_idx, batch) in self.op_batches.iter().enumerate() {
+            for (op_idx, op) in batch.ops().iter().enumerate() {
+                let opcode = op.op_code();
+                Self::validate_control_flow_opcode(opcode, batch_idx, op_idx)?;
+            }
+        }
+        Ok(())
+    }
+
+    #[inline]
+    fn validate_control_flow_opcode(
+        opcode: u8,
+        batch_idx: usize,
+        op_idx: usize,
+    ) -> Result<(), String> {
+        if is_control_flow_opcode(opcode) {
+            return Err(format!(
+                "Batch {}: operation at index {} is control-flow opcode {}",
+                batch_idx, op_idx, opcode
+            ));
+        }
         Ok(())
     }
 
@@ -664,6 +700,54 @@ impl BasicBlockNode {
                 {
                     return Err(format!(
                         "Batch {}, group {}: empty group must be zero",
+                        batch_idx, group_idx
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validates that padding metadata matches batch contents.
+    /// - Empty groups cannot be marked as padded.
+    /// - Padded groups must end with a NOOP operation.
+    fn validate_padding_semantics(&self) -> Result<(), String> {
+        for (batch_idx, batch) in self.op_batches.iter().enumerate() {
+            let num_groups = batch.num_groups();
+            let indptr = batch.indptr();
+            let padding = batch.padding();
+            let ops = batch.ops();
+
+            for group_idx in 0..num_groups {
+                let group_start = *indptr.get(group_idx).ok_or_else(|| {
+                    format!("Batch {}, group {}: missing group start index", batch_idx, group_idx)
+                })?;
+                let group_end = *indptr.get(group_idx + 1).ok_or_else(|| {
+                    format!("Batch {}, group {}: missing group end index", batch_idx, group_idx)
+                })?;
+                let is_padded = *padding.get(group_idx).ok_or_else(|| {
+                    format!("Batch {}, group {}: missing padding flag", batch_idx, group_idx)
+                })?;
+
+                if !is_padded {
+                    continue;
+                }
+
+                if group_start == group_end {
+                    return Err(format!(
+                        "Batch {}, group {}: empty group cannot be marked as padded",
+                        batch_idx, group_idx
+                    ));
+                }
+
+                let last_op = ops.get(group_end - 1).ok_or_else(|| {
+                    format!("Batch {}, group {}: invalid group bounds", batch_idx, group_idx)
+                })?;
+
+                if *last_op != Operation::Noop {
+                    return Err(format!(
+                        "Batch {}, group {}: padded group must end with NOOP",
                         batch_idx, group_idx
                     ));
                 }
