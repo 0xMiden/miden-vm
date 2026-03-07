@@ -179,10 +179,25 @@ const PV_TRANSCRIPT_STATE: usize = NUM_PUBLIC_VALUES - WORD_SIZE;
 /// Aux columns are NOT initialized with boundary terms -- they start at identity. The verifier
 /// independently computes expected boundary messages from variable length public values and checks
 /// them against the final column values.
-#[derive(Default)]
 pub struct ProcessorAir {
     /// Number of kernel procedure digests (variable-length public inputs).
     pub num_kernel_procedures: usize,
+    /// Periodic columns.
+    periodic_columns: Vec<Vec<Felt>>,
+}
+
+impl ProcessorAir {
+    pub fn new(num_kernel_procedures: usize) -> Self {
+        let mut periodic_columns = constraints::chiplets::hasher::periodic_columns();
+        periodic_columns.extend(constraints::chiplets::bitwise::periodic_columns());
+        Self { num_kernel_procedures, periodic_columns }
+    }
+}
+
+impl Default for ProcessorAir {
+    fn default() -> Self {
+        Self::new(0)
+    }
 }
 
 // --- Upstream trait impls for ProcessorAir ---
@@ -199,15 +214,7 @@ impl BaseAir<Felt> for ProcessorAir {
 
 impl AirWithPeriodicColumns<Felt> for ProcessorAir {
     fn periodic_columns(&self) -> &[Vec<Felt>] {
-        use std::sync::LazyLock;
-        static COLUMNS: LazyLock<Vec<Vec<Felt>>> = LazyLock::new(|| {
-            let hasher_cols = constraints::chiplets::hasher::periodic_columns();
-            let bitwise_cols = constraints::chiplets::bitwise::periodic_columns();
-            let mut all = hasher_cols;
-            all.extend(bitwise_cols);
-            all
-        });
-        &COLUMNS
+        &self.periodic_columns
     }
 }
 

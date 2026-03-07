@@ -138,9 +138,7 @@ fn verify_stark(
     let var_len_refs: Vec<&[_]> = kernel_digests.iter().map(|w| w.as_ref()).collect();
     let var_len_public_inputs: &[&[_]] = &var_len_refs;
 
-    let air = ProcessorAir {
-        num_kernel_procedures: kernel_digests.len(),
-    };
+    let air = ProcessorAir::new(kernel_digests.len());
 
     match hash_fn {
         HashFunction::Blake3_256 => {

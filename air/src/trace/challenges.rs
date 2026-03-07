@@ -51,7 +51,7 @@ impl<EF: PrimeCharacteristicRing, const N: usize> Challenges<EF, N> {
         Self::new(challenges[0].into(), challenges[1].into())
     }
 
-    /// Encodes as **alpha + sum(beta_powers[i] * elem[i])** with K consecutive elements.
+    /// Encodes as **alpha + sum(beta_powers\[i\] * elem\[i\])** with K consecutive elements.
     #[inline(always)]
     pub fn encode<BF, const K: usize>(&self, elems: [BF; K]) -> EF
     where
@@ -76,7 +76,7 @@ impl<EF: PrimeCharacteristicRing, const N: usize> Challenges<EF, N> {
         self.encode(elems)
     }
 
-    /// Encodes as **alpha + sum(beta_powers[layout[i]] * values[i])** using sparse positions.
+    /// Encodes as **alpha + sum(beta_powers\[layout\[i\]\] * values\[i\])** using sparse positions.
     #[inline(always)]
     pub fn encode_sparse<BF, const K: usize>(&self, layout: [usize; K], values: [BF; K]) -> EF
     where

@@ -262,9 +262,7 @@ mod fast_parallel {
         let var_len_refs: Vec<&[_]> = kernel_digests.iter().map(|w| w.as_ref()).collect();
         let var_len_public_inputs: &[&[_]] = &var_len_refs;
 
-        let air = ProcessorAir {
-            num_kernel_procedures: kernel_digests.len(),
-        };
+        let air = ProcessorAir::new(kernel_digests.len());
         let aux_builder = trace.aux_trace_builders();
 
         // Generate proof using Blake3_256
