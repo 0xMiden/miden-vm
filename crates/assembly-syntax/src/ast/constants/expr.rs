@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     Felt, Path,
     ast::{ConstantValue, Ident},
-    parser::{IntValue, ParsingError, WordValue},
+    parser::{IntValue, LiteralErrorKind, ParsingError, WordValue},
 };
 
 /// Maximum allowed nesting depth for constant-expression folding.
@@ -168,27 +168,28 @@ impl ConstantExpr {
                                     let rhs = rhs.into_inner();
                                     let is_division =
                                         matches!(op, ConstantOp::Div | ConstantOp::IntDiv);
-                                    let is_division_by_zero = is_division && rhs == Felt::ZERO;
+                                    let is_division_by_zero = is_division && rhs.as_int() == 0;
                                     if is_division_by_zero {
                                         return Err(ParsingError::DivisionByZero { span });
                                     }
-                                    match op {
-                                        ConstantOp::Add => {
-                                            Ok(Self::Int(Span::new(span, lhs + rhs)))
-                                        },
-                                        ConstantOp::Sub => {
-                                            Ok(Self::Int(Span::new(span, lhs - rhs)))
-                                        },
-                                        ConstantOp::Mul => {
-                                            Ok(Self::Int(Span::new(span, lhs * rhs)))
-                                        },
+                                    let result = match op {
+                                        ConstantOp::Add => lhs.checked_add(rhs),
+                                        ConstantOp::Sub => lhs.checked_sub(rhs),
+                                        ConstantOp::Mul => lhs.checked_mul(rhs),
+                                        ConstantOp::IntDiv => lhs.checked_div(rhs),
                                         ConstantOp::Div => {
-                                            Ok(Self::Int(Span::new(span, lhs / rhs)))
-                                        },
-                                        ConstantOp::IntDiv => {
-                                            Ok(Self::Int(Span::new(span, lhs / rhs)))
+                                            let lhs = Felt::new(lhs.as_int());
+                                            let rhs = Felt::new(rhs.as_int());
+                                            Some(IntValue::from(lhs / rhs))
                                         },
                                     }
+                                    .ok_or(
+                                        ParsingError::InvalidLiteral {
+                                            span,
+                                            kind: LiteralErrorKind::FeltOverflow,
+                                        },
+                                    )?;
+                                    Ok(Self::Int(Span::new(span, result)))
                                 },
                                 lhs => Ok(Self::BinaryOp {
                                     span,
