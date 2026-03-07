@@ -22,12 +22,7 @@ pub use miden_crypto::stark::air::AuxBuilder;
 // ================================================================================================
 
 /// The minimum length of the execution trace. This is the minimum required to support range checks.
-/// Minimum trace length required by FRI parameters.
-///
-/// FRI requires: log2(MIN_TRACE_LEN) > log_final_poly_len + log_blowup
-/// With log_final_poly_len=7 and log_blowup=3, we need: log2(MIN_TRACE_LEN) > 10
-/// Therefore: MIN_TRACE_LEN >= 2048
-pub const MIN_TRACE_LEN: usize = 2048;
+pub const MIN_TRACE_LEN: usize = 64;
 
 // MAIN TRACE LAYOUT
 // ------------------------------------------------------------------------------------------------
