@@ -35,5 +35,8 @@ pub use self::{
     sema::SemanticAnalysisError,
 };
 
+/// Maximum allowed iteration count for `repeat.<count>` blocks.
+pub const MAX_REPEAT_COUNT: u32 = 1_000_000;
+
 /// The modulus of the Miden field as a raw u64 integer
 pub(crate) const FIELD_MODULUS: u64 = miden_core::Felt::ORDER_U64;

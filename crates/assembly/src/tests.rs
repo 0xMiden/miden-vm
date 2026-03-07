@@ -5,7 +5,9 @@ use std::{
     sync::{Arc, LazyLock},
 };
 
-use miden_assembly_syntax::{ast::Path, diagnostics::WrapErr, library::LibraryExport};
+use miden_assembly_syntax::{
+    MAX_REPEAT_COUNT, ast::Path, diagnostics::WrapErr, library::LibraryExport,
+};
 use miden_core::{
     Felt, Word, assert_matches,
     events::EventId,
@@ -3365,6 +3367,101 @@ fn invalid_repeat() -> TestResult {
         "4 |                     add",
         "  `----"
     );
+    Ok(())
+}
+
+#[test]
+fn invalid_repeat_count_zero() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(&context, "begin repeat.0 nop end end");
+    let error = context.assemble(source).expect_err("expected repeat.0 to be rejected");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+    assert!(rendered.contains("invalid repeat count"));
+    Ok(())
+}
+
+#[test]
+fn invalid_repeat_count_zero_with_decorator() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "\
+proc foo
+    trace.1
+    repeat.0
+        nop
+    end
+end
+
+begin
+    call.foo
+end"
+    );
+    let error = context
+        .assemble(source)
+        .expect_err("expected repeat.0 with decorator to be rejected");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+    assert!(rendered.contains("invalid repeat count"));
+    Ok(())
+}
+
+#[test]
+fn invalid_repeat_count_too_large() -> TestResult {
+    let context = TestContext::default();
+    let repeat_count = MAX_REPEAT_COUNT + 1;
+    let source = source_file!(&context, format!("begin repeat.{repeat_count} nop end end"));
+    let error = context
+        .assemble(source)
+        .expect_err("expected repeat count above limit to be rejected");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+    assert!(rendered.contains("invalid repeat count"));
+    Ok(())
+}
+
+#[test]
+fn invalid_repeat_count_constant_zero() -> TestResult {
+    let context = TestContext::default();
+    let source =
+        source_file!(&context, "const REPEAT_COUNT = 0\nbegin repeat.REPEAT_COUNT nop end end");
+    let error = context
+        .assemble(source)
+        .expect_err("expected repeat.0 from constant to be rejected");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+    assert!(rendered.contains("invalid repeat count"));
+    Ok(())
+}
+
+#[test]
+fn invalid_repeat_count_constant_too_large() -> TestResult {
+    let context = TestContext::default();
+    let repeat_count = MAX_REPEAT_COUNT + 1;
+    let source = source_file!(
+        &context,
+        format!("const REPEAT_COUNT = {repeat_count}\nbegin repeat.REPEAT_COUNT nop end end")
+    );
+    let error = context
+        .assemble(source)
+        .expect_err("expected repeat count above limit from constant to be rejected");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+    assert!(rendered.contains("invalid repeat count"));
+    Ok(())
+}
+
+#[test]
+fn repeat_count_constant_at_limit_allowed() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        format!("const REPEAT_COUNT = {MAX_REPEAT_COUNT}\nbegin repeat.REPEAT_COUNT nop end end")
+    );
+    context
+        .assemble(source)
+        .expect("expected repeat count at limit from constant to be accepted");
     Ok(())
 }
 
