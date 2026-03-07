@@ -306,7 +306,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
         //   b_hash_kernel (chiplets virtual table: sibling table + transcript state):
         //     The log_precompile transcript tracking chain starts by removing
         //     default_transcript_msg (initial capacity state) and ends by inserting
-        //     final_transcript_msg (final capacity state). On the other hand, dibling table
+        //     final_transcript_msg (final capacity state). On the other hand, sibling table
         //     entries cancel out. Net: b_hk_final = final_transcript_msg / default_transcript_msg.
         //
         //   b_chiplets (chiplets bus):
