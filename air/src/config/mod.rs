@@ -104,6 +104,10 @@ where
 {
     let mut challenger = config.challenger();
     challenger.observe_slice(public_values);
+    // TODO: observe var_len_public_inputs in the transcript for Fiat-Shamir binding.
+    //   This also requires updating the recursive verifier to absorb both fixed and
+    //   variable-length public inputs.
+    // TODO: observe ACE commitment once ACE verification is integrated.
     let mut channel = ProverTranscript::new(challenger);
     miden_crypto::stark::prove_single(
         config,
@@ -138,6 +142,10 @@ where
         bincode::deserialize(proof_bytes)?;
     let mut challenger = config.challenger();
     challenger.observe_slice(public_values);
+    // TODO: observe var_len_public_inputs in the transcript for Fiat-Shamir binding.
+    //   This also requires updating the recursive verifier to absorb both fixed and
+    //   variable-length public inputs.
+    // TODO: observe ACE commitment once ACE verification is integrated.
     let mut channel = VerifierTranscript::from_data(challenger, &transcript_data);
     let instance = AirInstance {
         log_trace_height,
