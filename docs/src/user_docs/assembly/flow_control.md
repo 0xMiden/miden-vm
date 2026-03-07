@@ -75,7 +75,7 @@ end
 where:
 
 - `instructions` can be a sequence of any instructions, including nested control structures.
-- `count` is the number of times the `instructions` sequence should be repeated (e.g. `repeat.10`). `count` must be an integer or a [constant](./code_organization.md#constants) greater than $0$.
+- `count` is the number of times the `instructions` sequence should be repeated (e.g. `repeat.10`). `count` must be an integer or a [constant](./code_organization.md#constants) in the range 1..=1,000,000.
 
 > **Note**: During compilation the `repeat.<count>` blocks are unrolled and expanded into `<count>` copies of its inner block, there is no additional cost for counting variables in this case.
 

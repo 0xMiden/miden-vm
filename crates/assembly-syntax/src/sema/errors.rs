@@ -167,6 +167,14 @@ pub enum SemanticAnalysisError {
         #[label]
         span: SourceSpan,
     },
+    #[error("invalid repeat count")]
+    #[diagnostic(help("repeat count must be in the range {min}..={max}"))]
+    InvalidRepeatCount {
+        #[label]
+        span: SourceSpan,
+        min: u32,
+        max: u32,
+    },
     #[error("invalid immediate: value is larger than expected range")]
     #[diagnostic()]
     ImmediateOverflow {

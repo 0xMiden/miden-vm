@@ -1,7 +1,7 @@
 use alloc::{collections::BTreeMap, string::ToString, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{
-    KernelLibrary, Library, Parse, ParseOptions, SemanticAnalysisError,
+    KernelLibrary, Library, MAX_REPEAT_COUNT, Parse, ParseOptions, SemanticAnalysisError,
     ast::{
         self, Ident, InvocationTarget, InvokeKind, ItemIndex, ModuleKind, SymbolResolution,
         Visibility, types::FunctionType,
@@ -1021,6 +1021,29 @@ impl Assembler {
                     )?;
 
                     let iteration_count = (*count).expect_value();
+                    if iteration_count == 0 {
+                        return Err(RelatedLabel::error("invalid repeat count")
+                            .with_help("repeat count must be greater than 0")
+                            .with_labeled_span(count.span(), "repeat count must be at least 1")
+                            .with_source_file(
+                                proc_ctx.source_manager().get(proc_ctx.span().source_id()).ok(),
+                            )
+                            .into());
+                    }
+                    if iteration_count > MAX_REPEAT_COUNT {
+                        return Err(RelatedLabel::error("invalid repeat count")
+                            .with_help(format!(
+                                "repeat count must be less than or equal to {MAX_REPEAT_COUNT}",
+                            ))
+                            .with_labeled_span(
+                                count.span(),
+                                format!("repeat count exceeds {MAX_REPEAT_COUNT}"),
+                            )
+                            .with_source_file(
+                                proc_ctx.source_manager().get(proc_ctx.span().source_id()).ok(),
+                            )
+                            .into());
+                    }
 
                     if let Some(decorator_ids) = block_builder.drain_decorators() {
                         // Attach the decorators before the first instance of the repeated node
@@ -1034,7 +1057,24 @@ impl Assembler {
                             .ensure_node(first_repeat_builder)?;
 
                         body_node_ids.push(first_repeat_node_id);
-                        for _ in 0..(iteration_count - 1) {
+                        let remaining_iterations =
+                            iteration_count.checked_sub(1).ok_or_else(|| {
+                                Report::new(
+                                    RelatedLabel::error("invalid repeat count")
+                                        .with_help("repeat count must be greater than 0")
+                                        .with_labeled_span(
+                                            count.span(),
+                                            "repeat count must be at least 1",
+                                        )
+                                        .with_source_file(
+                                            proc_ctx
+                                                .source_manager()
+                                                .get(proc_ctx.span().source_id())
+                                                .ok(),
+                                        ),
+                                )
+                            })?;
+                        for _ in 0..remaining_iterations {
                             body_node_ids.push(repeat_node_id);
                         }
                     } else {
