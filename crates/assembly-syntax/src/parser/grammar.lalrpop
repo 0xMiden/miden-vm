@@ -1680,24 +1680,27 @@ InstWithBitSizeImmediate: Instruction = {
 }
 
 Push: SmallOpsVec = {
-    <l:@L> "push" "." <imm_value:WordImm> "[" <i:uint> "]" <r:@R> => {
-        smallvec![Op::Inst(Span::new(
+    <l:@L> "push" "." <imm_value:WordImm> "[" <i:UsizeIndex> "]" <r:@R> =>? {
+        let end = i.checked_add(1).ok_or_else(|| ParseError::User {
+            error: ParsingError::ImmediateOutOfRange {
+                span: span!(source_id, l, r),
+                range: 0..usize::MAX,
+            }
+        })?;
+        Ok(smallvec![Op::Inst(Span::new(
             span!(source_id, l, r),
-            Instruction::PushSlice(
-                imm_value,
-                Range { start: i as usize, end: i as usize + 1 }
-            )
-        ))]
+            Instruction::PushSlice(imm_value, Range { start: i, end })
+        ))])
     },
 
-    <l:@L> "push" "." <imm_value:WordImm> "[" <l_range:uint> ".." <r_range:uint> "]" <r:@R> => {
-        smallvec![Op::Inst(Span::new(
+    <l:@L> "push" "." <imm_value:WordImm> "[" <l_range:UsizeIndex> ".." <r_range:UsizeIndex> "]" <r:@R> =>? {
+        Ok(smallvec![Op::Inst(Span::new(
             span!(source_id, l, r),
             Instruction::PushSlice(
                 imm_value,
-                Range { start: l_range as usize, end: r_range as usize }
+                Range { start: l_range, end: r_range }
             )
-        ))]
+        ))])
     },
 
     <l:@L> "push" "." <imm_value:WordLiteral> <r:@R> => {
@@ -1814,6 +1817,17 @@ U32: u32 = {
             BinEncodedValue::U16(v) => Ok(v as u32),
             BinEncodedValue::U32(v) => Ok(v),
         }
+    }
+}
+
+UsizeIndex: usize = {
+    <l:@L> <n:uint> <r:@R> =>? {
+        usize::try_from(n).map_err(|error| ParseError::User {
+            error: ParsingError::ImmediateOutOfRange {
+                span: span!(source_id, l, r),
+                range: 0..usize::MAX,
+            },
+        })
     }
 }
 
