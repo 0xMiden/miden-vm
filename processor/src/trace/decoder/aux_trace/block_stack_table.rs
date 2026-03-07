@@ -57,6 +57,11 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BlockStackColumnBuilder {
             _ => E::ONE,
         }
     }
+
+    #[cfg(any(test, feature = "bus-debugger"))]
+    fn enforce_bus_balance(&self) -> bool {
+        true
+    }
 }
 
 // HELPER FUNCTIONS

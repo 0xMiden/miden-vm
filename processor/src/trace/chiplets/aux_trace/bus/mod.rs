@@ -49,13 +49,6 @@ impl<E> AuxColumnBuilder<E> for BusColumnBuilder
 where
     E: ExtensionField<Felt>,
 {
-    #[cfg(any(test, feature = "bus-debugger"))]
-    fn enforce_bus_balance(&self) -> bool {
-        // The chiplets bus final value encodes kernel procedure digest boundary terms,
-        // which are checked via reduced_aux_values. It does not balance to identity.
-        false
-    }
-
     /// Constructs the requests made by the VM-components to the chiplets at `row`.
     fn get_requests_at(
         &self,
@@ -162,6 +155,13 @@ where
         } else {
             E::ONE
         }
+    }
+
+    #[cfg(any(test, feature = "bus-debugger"))]
+    fn enforce_bus_balance(&self) -> bool {
+        // The chiplets bus final value encodes kernel procedure digest boundary terms,
+        // which are checked via reduced_aux_values. It does not balance to identity.
+        false
     }
 }
 

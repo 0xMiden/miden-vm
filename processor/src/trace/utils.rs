@@ -247,17 +247,15 @@ pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
         debugger: &mut BusDebugger<E>,
     ) -> E;
 
-    // PROVIDED METHODS
-    // --------------------------------------------------------------------------------------------
-
     /// Whether to assert that all requests/responses balance in debug mode.
     ///
     /// Buses whose final value encodes a public-input-dependent boundary term (checked
     /// via `reduced_aux_values`) will NOT balance to identity and should return `false`.
     #[cfg(any(test, feature = "bus-debugger"))]
-    fn enforce_bus_balance(&self) -> bool {
-        true
-    }
+    fn enforce_bus_balance(&self) -> bool;
+
+    // PROVIDED METHODS
+    // --------------------------------------------------------------------------------------------
 
     /// Builds an auxiliary bus trace column as a running product of responses over requests.
     ///

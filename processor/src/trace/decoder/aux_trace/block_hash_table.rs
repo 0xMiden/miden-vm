@@ -23,13 +23,6 @@ use crate::{debug::BusDebugger, trace::utils::Challenges};
 pub struct BlockHashTableColumnBuilder {}
 
 impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BlockHashTableColumnBuilder {
-    #[cfg(any(test, feature = "bus-debugger"))]
-    fn enforce_bus_balance(&self) -> bool {
-        // The block hash table's final value encodes the program hash boundary term,
-        // which is checked via reduced_aux_values. It does not balance to identity.
-        false
-    }
-
     /// Removes a row from the block hash table.
     fn get_requests_at(
         &self,
@@ -74,6 +67,13 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BlockHashTableColumnBuilde
             },
             _ => E::ONE,
         }
+    }
+
+    #[cfg(any(test, feature = "bus-debugger"))]
+    fn enforce_bus_balance(&self) -> bool {
+        // The block hash table's final value encodes the program hash boundary term,
+        // which is checked via reduced_aux_values. It does not balance to identity.
+        false
     }
 }
 
