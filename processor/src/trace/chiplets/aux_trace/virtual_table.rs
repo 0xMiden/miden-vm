@@ -41,13 +41,6 @@ impl<E> AuxColumnBuilder<E> for ChipletsVTableColBuilder
 where
     E: ExtensionField<Felt>,
 {
-    #[cfg(any(test, feature = "bus-debugger"))]
-    fn enforce_bus_balance(&self) -> bool {
-        // The chiplets vtable final value encodes transcript state boundary terms,
-        // which are checked via reduced_aux_values. It does not balance to identity.
-        false
-    }
-
     fn get_requests_at(
         &self,
         main_trace: &MainTrace,
@@ -88,6 +81,13 @@ where
         };
 
         chiplets_vtable_add_sibling(main_trace, challenges, row) * log_pc_response
+    }
+
+    #[cfg(any(test, feature = "bus-debugger"))]
+    fn enforce_bus_balance(&self) -> bool {
+        // The chiplets vtable final value encodes transcript state boundary terms,
+        // which are checked via reduced_aux_values. It does not balance to identity.
+        false
     }
 }
 

@@ -83,6 +83,11 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for AuxTraceBuilder {
             E::ONE
         }
     }
+
+    #[cfg(any(test, feature = "bus-debugger"))]
+    fn enforce_bus_balance(&self) -> bool {
+        true
+    }
 }
 
 // OVERFLOW STACK ROW

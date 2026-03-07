@@ -51,6 +51,11 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for OpGroupTableColumnBuilder 
             _ => E::ONE,
         }
     }
+
+    #[cfg(any(test, feature = "bus-debugger"))]
+    fn enforce_bus_balance(&self) -> bool {
+        true
+    }
 }
 
 // HELPER FUNCTIONS
