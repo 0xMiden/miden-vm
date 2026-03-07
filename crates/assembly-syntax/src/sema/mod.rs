@@ -1,6 +1,8 @@
 mod context;
 mod errors;
 mod passes;
+#[cfg(test)]
+mod tests;
 
 use alloc::{
     boxed::Box,
@@ -16,7 +18,7 @@ use smallvec::SmallVec;
 pub use self::{
     context::AnalysisContext,
     errors::{SemanticAnalysisError, SyntaxError},
-    passes::{ConstEvalVisitor, VerifyInvokeTargets},
+    passes::{ConstEvalVisitor, VerifyInvokeTargets, VerifyRepeatCounts},
 };
 use crate::{ast::*, parser::WordValue};
 
@@ -194,6 +196,13 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) -> Result<()
                             analyzer.error(err);
                         }
                     }
+                }
+
+                // Ensure repeat counts are within acceptable bounds.
+                log::debug!(target: "verify-repeat", "visiting procedure {}", procedure.name());
+                {
+                    let mut visitor = VerifyRepeatCounts::new(analyzer);
+                    let _ = visitor.visit_mut_procedure(&mut procedure);
                 }
 
                 // Next, verify invoke targets:
