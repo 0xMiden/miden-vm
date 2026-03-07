@@ -1,7 +1,7 @@
 use miden_core::{Felt, field::QuadFelt};
-use miden_crypto::stark::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::{
-    AirBuilder, AirWithPeriodicColumns, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess,
+use miden_crypto::stark::{
+    air::{AirBuilder, AirWithPeriodicColumns, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess},
+    field::PrimeCharacteristicRing,
 };
 
 use super::common::{eval_dag, eval_expr, eval_periodic_values, eval_quotient};
@@ -129,6 +129,7 @@ fn test_verifier_dag_matches_manual_eval() {
         layout.counts.num_randomness,
         layout.counts.num_public,
         layout.counts.num_periodic,
+        air.num_aux_values(),
     );
     air.eval(&mut builder);
     let dag = artifacts.dag;

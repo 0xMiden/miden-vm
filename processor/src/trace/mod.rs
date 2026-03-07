@@ -5,8 +5,7 @@ use core::ops::Range;
 #[cfg(feature = "std")]
 use miden_air::trace::PADDED_TRACE_WIDTH;
 use miden_air::{
-    AuxBuilder,
-    PublicInputs,
+    AuxBuilder, PublicInputs,
     trace::{
         DECODER_TRACE_OFFSET, MainTrace, STACK_TRACE_OFFSET,
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
@@ -317,8 +316,7 @@ impl<EF: ExtensionField<Felt>> AuxBuilder<Felt, EF> for AuxTraceBuilders {
 
         // Extract aux values: last row of each auxiliary column
         let trace_len = main_trace.height();
-        let aux_values: Vec<EF> =
-            aux_columns.iter().map(|col| col[trace_len - 1]).collect();
+        let aux_values: Vec<EF> = aux_columns.iter().map(|col| col[trace_len - 1]).collect();
 
         (aux_trace, aux_values)
     }

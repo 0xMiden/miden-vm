@@ -9,7 +9,9 @@ use miden_core::field::QuadFelt;
 use miden_crypto::stark::{
     GenericStarkConfig,
     challenger::{HashChallenger, SerializingChallenger64},
-    crypto::{CompressionFunctionFromHasher, p3_blake3::Blake3, p3_miden_stateful_hasher::ChainingHasher},
+    crypto::{
+        CompressionFunctionFromHasher, p3_blake3::Blake3, p3_miden_stateful_hasher::ChainingHasher,
+    },
     lmcs::LmcsConfig,
 };
 

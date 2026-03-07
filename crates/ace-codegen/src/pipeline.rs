@@ -5,8 +5,10 @@
 //! - choose a READ layout for inputs,
 //! - emit a circuit that mirrors verifier evaluation.
 
-use miden_crypto::stark::field::{ExtensionField, Field, TwoAdicField};
-use miden_crypto::stark::air::LiftedAir;
+use miden_crypto::stark::{
+    air::LiftedAir,
+    field::{ExtensionField, Field, TwoAdicField},
+};
 
 use crate::{
     AceError,
@@ -112,6 +114,7 @@ where
         counts.num_randomness,
         counts.num_public,
         counts.num_periodic,
+        air.num_aux_values(),
     );
     air.eval(&mut builder);
     let periodic_data = (!periodic_columns.is_empty())
