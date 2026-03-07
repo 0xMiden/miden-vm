@@ -360,11 +360,11 @@ fn decoder_p2_span_with_respan() {
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
     let challenges = Challenges::<Felt>::new(&alphas);
-    let row_values =
-        [BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&challenges)];
+    let program_hash_msg =
+        BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&challenges);
 
-    // make sure the first entry is initialized to program hash
-    let mut expected_value = row_values[0];
+    // p2 starts at identity (1)
+    let mut expected_value = ONE;
     assert_eq!(expected_value, p2[0]);
 
     // as operations inside the span execute (including RESPAN), the table is not affected
@@ -372,11 +372,10 @@ fn decoder_p2_span_with_respan() {
         assert_eq!(expected_value, p2[i]);
     }
 
-    // at cycle 22, the END operation is executed and the table is cleared
-    expected_value *= row_values[0].inverse();
-    assert_eq!(expected_value, ONE);
+    // at cycle 22, the END operation removes the root block hash (unmatched by any add)
+    expected_value *= program_hash_msg.inverse();
     for i in 22..(p2.len()) {
-        assert_eq!(ONE, p2[i]);
+        assert_eq!(expected_value, p2[i]);
     }
 }
 
@@ -408,19 +407,19 @@ fn decoder_p2_join() {
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
     let challenges = Challenges::<Felt>::new(&alphas);
-    let row_values = [
-        BlockHashTableRow::new_test(ZERO, join.digest(), false, false).collapse(&challenges),
-        BlockHashTableRow::new_test(ONE, basic_block_1.digest(), true, false).collapse(&challenges),
-        BlockHashTableRow::new_test(ONE, basic_block_2.digest(), false, false)
-            .collapse(&challenges),
-    ];
+    let program_hash_msg =
+        BlockHashTableRow::new_test(ZERO, join.digest(), false, false).collapse(&challenges);
+    let child1_msg =
+        BlockHashTableRow::new_test(ONE, basic_block_1.digest(), true, false).collapse(&challenges);
+    let child2_msg = BlockHashTableRow::new_test(ONE, basic_block_2.digest(), false, false)
+        .collapse(&challenges);
 
-    // make sure the first entry is initialized to program hash
-    let mut expected_value = row_values[0];
+    // p2 starts at identity (1)
+    let mut expected_value = ONE;
     assert_eq!(expected_value, p2[0]);
 
     // when JOIN operation is executed, entries for both children are added to the table
-    expected_value *= row_values[1] * row_values[2];
+    expected_value *= child1_msg * child2_msg;
     assert_eq!(expected_value, p2[1]);
 
     // for the next 2 cycles, the table is not affected
@@ -428,7 +427,7 @@ fn decoder_p2_join() {
     assert_eq!(expected_value, p2[3]);
 
     // when the first SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[1].inverse();
+    expected_value *= child1_msg.inverse();
     assert_eq!(expected_value, p2[4]);
 
     // for the next 2 cycles, the table is not affected
@@ -436,17 +435,16 @@ fn decoder_p2_join() {
     assert_eq!(expected_value, p2[6]);
 
     // when the second SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[2].inverse();
+    expected_value *= child2_msg.inverse();
     assert_eq!(expected_value, p2[7]);
 
-    // when the JOIN block ends, its entry is removed from the table
-    expected_value *= row_values[0].inverse();
+    // when the JOIN block ends, its entry (the root hash) is removed (unmatched by any add)
+    expected_value *= program_hash_msg.inverse();
     assert_eq!(expected_value, p2[8]);
 
-    // at this point the table should be empty, and thus, all subsequent values must be ONE
-    assert_eq!(expected_value, ONE);
+    // the final value is 1/program_hash_msg
     for i in 9..(p2.len()) {
-        assert_eq!(ONE, p2[i]);
+        assert_eq!(expected_value, p2[i]);
     }
 }
 
@@ -478,18 +476,17 @@ fn decoder_p2_split_true() {
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
     let challenges = Challenges::<Felt>::new(&alphas);
-    let row_values = [
-        BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&challenges),
-        BlockHashTableRow::new_test(ONE, basic_block_1.digest(), false, false)
-            .collapse(&challenges),
-    ];
+    let program_hash_msg =
+        BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&challenges);
+    let child_msg = BlockHashTableRow::new_test(ONE, basic_block_1.digest(), false, false)
+        .collapse(&challenges);
 
-    // make sure the first entry is initialized to program hash
-    let mut expected_value = row_values[0];
+    // p2 starts at identity (1)
+    let mut expected_value = ONE;
     assert_eq!(expected_value, p2[0]);
 
     // when SPLIT operation is executed, entry for the true branch is added to the table
-    expected_value *= row_values[1];
+    expected_value *= child_msg;
     assert_eq!(expected_value, p2[1]);
 
     // for the next 2 cycles, the table is not affected
@@ -497,17 +494,16 @@ fn decoder_p2_split_true() {
     assert_eq!(expected_value, p2[3]);
 
     // when the SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[1].inverse();
+    expected_value *= child_msg.inverse();
     assert_eq!(expected_value, p2[4]);
 
-    // when the SPLIT block ends, its entry is removed from the table
-    expected_value *= row_values[0].inverse();
+    // when the SPLIT block ends, its entry (the root hash) is removed (unmatched by any add)
+    expected_value *= program_hash_msg.inverse();
     assert_eq!(expected_value, p2[5]);
 
-    // at this point the table should be empty, and thus, all subsequent values must be ONE
-    assert_eq!(expected_value, ONE);
+    // the final value is 1/program_hash_msg
     for i in 6..(p2.len()) {
-        assert_eq!(ONE, p2[i]);
+        assert_eq!(expected_value, p2[i]);
     }
 }
 
@@ -540,18 +536,17 @@ fn decoder_p2_split_false() {
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
     let challenges = Challenges::<Felt>::new(&alphas);
-    let row_values = [
-        BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&challenges),
-        BlockHashTableRow::new_test(ONE, basic_block_2.digest(), false, false)
-            .collapse(&challenges),
-    ];
+    let program_hash_msg =
+        BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&challenges);
+    let child_msg = BlockHashTableRow::new_test(ONE, basic_block_2.digest(), false, false)
+        .collapse(&challenges);
 
-    // make sure the first entry is initialized to program hash
-    let mut expected_value = row_values[0];
+    // p2 starts at identity (1)
+    let mut expected_value = ONE;
     assert_eq!(expected_value, p2[0]);
 
     // when SPLIT operation is executed, entry for the false branch is added to the table
-    expected_value *= row_values[1];
+    expected_value *= child_msg;
     assert_eq!(expected_value, p2[1]);
 
     // for the next 2 cycles, the table is not affected
@@ -559,17 +554,16 @@ fn decoder_p2_split_false() {
     assert_eq!(expected_value, p2[3]);
 
     // when the SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[1].inverse();
+    expected_value *= child_msg.inverse();
     assert_eq!(expected_value, p2[4]);
 
-    // when the SPLIT block ends, its entry is removed from the table
-    expected_value *= row_values[0].inverse();
+    // when the SPLIT block ends, its entry (the root hash) is removed (unmatched by any add)
+    expected_value *= program_hash_msg.inverse();
     assert_eq!(expected_value, p2[5]);
 
-    // at this point the table should be empty, and thus, all subsequent values must be ONE
-    assert_eq!(expected_value, ONE);
+    // the final value is 1/program_hash_msg
     for i in 6..(p2.len()) {
-        assert_eq!(ONE, p2[i]);
+        assert_eq!(expected_value, p2[i]);
     }
 }
 
@@ -610,31 +604,31 @@ fn decoder_p2_loop_with_repeat() {
     // The loop node consumes the first hasher cycle; join/span addresses follow sequentially.
     let a_33 = ONE + HASH_CYCLE_LEN_FELT; // address of the JOIN block in the first iteration
     let a_129 = a_33 + HASH_CYCLE_LEN_FELT * Felt::new(3); // address of the JOIN block in the second iteration
-    let row_values = [
-        BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&challenges),
-        BlockHashTableRow::new_test(ONE, join.digest(), false, true).collapse(&challenges),
-        BlockHashTableRow::new_test(a_33, basic_block_1.digest(), true, false)
-            .collapse(&challenges),
-        BlockHashTableRow::new_test(a_33, basic_block_2.digest(), false, false)
-            .collapse(&challenges),
-        BlockHashTableRow::new_test(a_129, basic_block_1.digest(), true, false)
-            .collapse(&challenges),
-        BlockHashTableRow::new_test(a_129, basic_block_2.digest(), false, false)
-            .collapse(&challenges),
-    ];
+    let program_hash_msg =
+        BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&challenges);
+    let loop_body_msg =
+        BlockHashTableRow::new_test(ONE, join.digest(), false, true).collapse(&challenges);
+    let child1_iter1 = BlockHashTableRow::new_test(a_33, basic_block_1.digest(), true, false)
+        .collapse(&challenges);
+    let child2_iter1 = BlockHashTableRow::new_test(a_33, basic_block_2.digest(), false, false)
+        .collapse(&challenges);
+    let child1_iter2 = BlockHashTableRow::new_test(a_129, basic_block_1.digest(), true, false)
+        .collapse(&challenges);
+    let child2_iter2 = BlockHashTableRow::new_test(a_129, basic_block_2.digest(), false, false)
+        .collapse(&challenges);
 
-    // make sure the first entry is initialized to program hash
-    let mut expected_value = row_values[0];
+    // p2 starts at identity (1)
+    let mut expected_value = ONE;
     assert_eq!(expected_value, p2[0]);
 
     // --- first iteration ----------------------------------------------------
 
     // when LOOP operation is executed, entry for loop body is added to the table
-    expected_value *= row_values[1];
+    expected_value *= loop_body_msg;
     assert_eq!(expected_value, p2[1]);
 
     // when JOIN operation is executed, entries for both children are added to the table
-    expected_value *= row_values[2] * row_values[3];
+    expected_value *= child1_iter1 * child2_iter1;
     assert_eq!(expected_value, p2[2]);
 
     // for the next 2 cycles, the table is not affected
@@ -642,7 +636,7 @@ fn decoder_p2_loop_with_repeat() {
     assert_eq!(expected_value, p2[4]);
 
     // when the first SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[2].inverse();
+    expected_value *= child1_iter1.inverse();
     assert_eq!(expected_value, p2[5]);
 
     // for the next 2 cycles, the table is not affected
@@ -650,21 +644,21 @@ fn decoder_p2_loop_with_repeat() {
     assert_eq!(expected_value, p2[7]);
 
     // when the second SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[3].inverse();
+    expected_value *= child2_iter1.inverse();
     assert_eq!(expected_value, p2[8]);
 
     // when the JOIN block ends, its entry is removed from the table
-    expected_value *= row_values[1].inverse();
+    expected_value *= loop_body_msg.inverse();
     assert_eq!(expected_value, p2[9]);
 
     // --- second iteration ---------------------------------------------------
 
     // when REPEAT operation is executed, entry for loop body is again added to the table
-    expected_value *= row_values[1];
+    expected_value *= loop_body_msg;
     assert_eq!(expected_value, p2[10]);
 
     // when JOIN operation is executed, entries for both children are added to the table
-    expected_value *= row_values[4] * row_values[5];
+    expected_value *= child1_iter2 * child2_iter2;
     assert_eq!(expected_value, p2[11]);
 
     // for the next 2 cycles, the table is not affected
@@ -672,7 +666,7 @@ fn decoder_p2_loop_with_repeat() {
     assert_eq!(expected_value, p2[13]);
 
     // when the first SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[4].inverse();
+    expected_value *= child1_iter2.inverse();
     assert_eq!(expected_value, p2[14]);
 
     // for the next 2 cycles, the table is not affected
@@ -680,21 +674,20 @@ fn decoder_p2_loop_with_repeat() {
     assert_eq!(expected_value, p2[16]);
 
     // when the second SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[5].inverse();
+    expected_value *= child2_iter2.inverse();
     assert_eq!(expected_value, p2[17]);
 
     // when the JOIN block ends, its entry is removed from the table
-    expected_value *= row_values[1].inverse();
+    expected_value *= loop_body_msg.inverse();
     assert_eq!(expected_value, p2[18]);
 
-    // when the LOOP block ends, its entry is removed from the table
-    expected_value *= row_values[0].inverse();
+    // when the LOOP block ends, its entry (the root hash) is removed (unmatched by any add)
+    expected_value *= program_hash_msg.inverse();
     assert_eq!(expected_value, p2[19]);
 
-    // at this point the table should be empty, and thus, all subsequent values must be ONE
-    assert_eq!(expected_value, ONE);
+    // the final value is 1/program_hash_msg
     for i in 20..(p2.len()) {
-        assert_eq!(ONE, p2[i]);
+        assert_eq!(expected_value, p2[i]);
     }
 }
 

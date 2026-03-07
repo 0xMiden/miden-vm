@@ -1,7 +1,7 @@
 use alloc::{string::ToString, vec::Vec};
 use core::{mem::MaybeUninit, slice};
 
-use miden_air::trace::{MAX_MESSAGE_WIDTH, MainTrace};
+use miden_air::trace::{MAX_MESSAGE_WIDTH, MIN_TRACE_LEN, MainTrace};
 
 use super::chiplets::Chiplets;
 use crate::{
@@ -137,9 +137,9 @@ impl TraceLenSummary {
             .max(self.chiplets_trace_len.trace_len())
     }
 
-    /// Returns `trace_len` rounded up to the next power of two.
+    /// Returns `trace_len` rounded up to the next power of two, clamped to `MIN_TRACE_LEN`.
     pub fn padded_trace_len(&self) -> usize {
-        self.trace_len().next_power_of_two()
+        self.trace_len().next_power_of_two().max(MIN_TRACE_LEN)
     }
 
     /// Returns the percent (0 - 100) of the steps that were added to the trace to pad it to the
@@ -221,8 +221,12 @@ impl ChipletsLengths {
 // AUXILIARY COLUMN BUILDER
 // ================================================================================================
 
-/// Defines a builder responsible for building a single column in an auxiliary segment of the
-/// execution trace.
+/// Defines a builder responsible for building a single auxiliary bus column in the execution
+/// trace.
+///
+/// Columns are initialized to the multiset identity. Public-input-dependent boundary
+/// terms are used in the check by the verifier in `reduced_aux_values` for the final values of
+/// the auxiliary columns.
 pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
     // REQUIRED METHODS
     // --------------------------------------------------------------------------------------------
@@ -243,40 +247,31 @@ pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
         debugger: &mut BusDebugger<E>,
     ) -> E;
 
+    /// Whether to assert that all requests/responses balance in debug mode.
+    ///
+    /// Buses whose final value encodes a public-input-dependent boundary term (checked
+    /// via `reduced_aux_values`) will NOT balance to identity and should return `false`.
+    #[cfg(any(test, feature = "bus-debugger"))]
+    fn enforce_bus_balance(&self) -> bool;
+
     // PROVIDED METHODS
     // --------------------------------------------------------------------------------------------
 
-    fn init_requests(
-        &self,
-        _main_trace: &MainTrace,
-        _challenges: &Challenges<E>,
-        _debugger: &mut BusDebugger<E>,
-    ) -> E {
-        E::ONE
-    }
-
-    fn init_responses(
-        &self,
-        _main_trace: &MainTrace,
-        _challenges: &Challenges<E>,
-        _debugger: &mut BusDebugger<E>,
-    ) -> E {
-        E::ONE
-    }
-
-    /// Builds the chiplets bus auxiliary trace column.
+    /// Builds an auxiliary bus trace column as a running product of responses over requests.
+    ///
+    /// The column is initialized to 1; boundary terms are checked via `reduced_aux_values`
+    /// in the verifier.
     fn build_aux_column(&self, main_trace: &MainTrace, challenges: &Challenges<E>) -> Vec<E> {
-        let mut bus_debugger = BusDebugger::new("chiplets bus".to_string());
+        let mut bus_debugger = BusDebugger::new("aux bus".to_string());
 
         let mut requests: Vec<MaybeUninit<E>> = uninit_vector(main_trace.num_rows());
-        let init_req = self.init_requests(main_trace, challenges, &mut bus_debugger);
-        requests[0].write(init_req);
+        requests[0].write(E::ONE);
 
         let mut responses_prod: Vec<MaybeUninit<E>> = uninit_vector(main_trace.num_rows());
-        let mut prev_prod = self.init_responses(main_trace, challenges, &mut bus_debugger);
-        responses_prod[0].write(prev_prod);
+        responses_prod[0].write(E::ONE);
 
-        let mut requests_running_prod = init_req;
+        let mut requests_running_prod = E::ONE;
+        let mut prev_prod = E::ONE;
 
         // Product of all requests to be inverted, used to compute inverses of requests.
         for row_idx in 0..main_trace.num_rows() - 1 {
@@ -303,7 +298,9 @@ pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
         }
 
         #[cfg(any(test, feature = "bus-debugger"))]
-        assert!(bus_debugger.is_empty(), "{bus_debugger}");
+        if self.enforce_bus_balance() {
+            assert!(bus_debugger.is_empty(), "{bus_debugger}");
+        }
 
         result_aux_column
     }

@@ -136,7 +136,7 @@ pub fn enforce_bitwise_constraints<AB>(
     let (k_first, k_transition) = {
         // Clone out what we need to avoid holding a borrow of `builder` while asserting
         // constraints.
-        let periodic = builder.periodic_evals();
+        let periodic = builder.periodic_values();
         debug_assert!(periodic.len() > P_BITWISE_K_TRANSITION);
         (periodic[P_BITWISE_K_FIRST].into(), periodic[P_BITWISE_K_TRANSITION].into())
     };

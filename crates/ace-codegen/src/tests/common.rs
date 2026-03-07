@@ -1,6 +1,8 @@
 use miden_core::{Felt, field::QuadFelt};
-use p3_dft::{Radix2DitParallel, TwoAdicSubgroupDft};
-use p3_field::{ExtensionField, Field, PrimeCharacteristicRing};
+use miden_crypto::stark::{
+    dft::{Radix2DitParallel, TwoAdicSubgroupDft},
+    field::{ExtensionField, Field, PrimeCharacteristicRing},
+};
 
 use crate::{
     InputKey, InputLayout,
@@ -23,14 +25,14 @@ pub fn fill_inputs(layout: &InputLayout) -> Vec<QuadFelt> {
     values
 }
 
-pub fn eval_periodic_values(periodic_table: &[Vec<Felt>], z_k: QuadFelt) -> Vec<QuadFelt> {
-    if periodic_table.is_empty() {
+pub fn eval_periodic_values(periodic_columns: &[Vec<Felt>], z_k: QuadFelt) -> Vec<QuadFelt> {
+    if periodic_columns.is_empty() {
         return Vec::new();
     }
-    let max_len = periodic_table.iter().map(|col| col.len()).max().unwrap_or(0);
+    let max_len = periodic_columns.iter().map(|col| col.len()).max().unwrap_or(0);
     let dft = Radix2DitParallel::<Felt>::default();
 
-    periodic_table
+    periodic_columns
         .iter()
         .map(|col| {
             if col.is_empty() {

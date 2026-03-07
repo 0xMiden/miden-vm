@@ -6,8 +6,11 @@
 
 use core::marker::PhantomData;
 
-use p3_field::{ExtensionField, Field};
-use p3_miden_air::{MidenAirBuilder, RowMajorMatrix};
+use miden_crypto::stark::{
+    air::{AirBuilder, ExtensionBuilder, PeriodicAirBuilder, PermutationAirBuilder},
+    field::{ExtensionField, Field},
+    matrix::RowMajorMatrix,
+};
 
 use crate::symbolic::{Entry, SymExpr, SymVar};
 
@@ -25,7 +28,7 @@ where
     main: RowMajorMatrix<SymVar<EF>>,
     aux: RowMajorMatrix<SymVar<EF>>,
     aux_randomness: Vec<SymVar<EF>>,
-    aux_bus_boundary_values: Vec<SymVar<EF>>,
+    aux_values: Vec<SymVar<EF>>,
     public_values: Vec<SymVar<EF>>,
     periodic_values: Vec<SymVar<EF>>,
     constraints: Vec<SymExpr<EF>>,
@@ -45,6 +48,7 @@ where
         num_randomness: usize,
         num_public_values: usize,
         num_periodic_values: usize,
+        num_aux_values: usize,
     ) -> Self {
         let prep_values = [0, 1]
             .into_iter()
@@ -68,8 +72,9 @@ where
         let aux = RowMajorMatrix::new(aux_values, aux_width);
         let aux_randomness =
             (0..num_randomness).map(|index| SymVar::new(Entry::Challenge, index)).collect();
-        let aux_bus_boundary_values =
-            (0..aux_width).map(|index| SymVar::new(Entry::AuxBusBoundary, index)).collect();
+        let aux_values = (0..num_aux_values)
+            .map(|index| SymVar::new(Entry::AuxBusBoundary, index))
+            .collect();
         let public_values =
             (0..num_public_values).map(|index| SymVar::new(Entry::Public, index)).collect();
         let periodic_values = (0..num_periodic_values)
@@ -80,7 +85,7 @@ where
             main: RowMajorMatrix::new(main_values, width),
             aux,
             aux_randomness,
-            aux_bus_boundary_values,
+            aux_values,
             public_values,
             periodic_values,
             constraints: Vec::new(),
@@ -94,7 +99,9 @@ where
     }
 }
 
-impl<F, EF> MidenAirBuilder for RecordingAirBuilder<F, EF>
+// --- AirBuilder impl ---
+
+impl<F, EF> AirBuilder for RecordingAirBuilder<F, EF>
 where
     F: Field + Sync,
     EF: ExtensionField<F>,
@@ -104,15 +111,13 @@ where
     type Var = SymVar<EF>;
     type M = RowMajorMatrix<Self::Var>;
     type PublicVar = SymVar<EF>;
-    type EF = EF;
-    type ExprEF = SymExpr<EF>;
-    type VarEF = SymVar<EF>;
-    type MP = RowMajorMatrix<Self::VarEF>;
-    type RandomVar = SymVar<EF>;
-    type PeriodicVal = SymVar<EF>;
 
     fn main(&self) -> Self::M {
         self.main.clone()
+    }
+
+    fn preprocessed(&self) -> &Self::M {
+        &self.preprocessed
     }
 
     fn is_first_row(&self) -> Self::Expr {
@@ -135,20 +140,40 @@ where
         self.constraints.push(x.into());
     }
 
+    fn public_values(&self) -> &[Self::PublicVar] {
+        &self.public_values
+    }
+}
+
+// --- ExtensionBuilder impl ---
+
+impl<F, EF> ExtensionBuilder for RecordingAirBuilder<F, EF>
+where
+    F: Field + Sync,
+    EF: ExtensionField<F>,
+{
+    type EF = EF;
+    type ExprEF = SymExpr<EF>;
+    type VarEF = SymVar<EF>;
+
     fn assert_zero_ext<I>(&mut self, x: I)
     where
         I: Into<Self::ExprEF>,
     {
         self.constraints.push(x.into());
     }
+}
 
-    fn public_values(&self) -> &[Self::PublicVar] {
-        &self.public_values
-    }
+// --- PermutationAirBuilder impl ---
 
-    fn preprocessed(&self) -> Self::M {
-        self.preprocessed.clone()
-    }
+impl<F, EF> PermutationAirBuilder for RecordingAirBuilder<F, EF>
+where
+    F: Field + Sync,
+    EF: ExtensionField<F>,
+{
+    type MP = RowMajorMatrix<Self::VarEF>;
+    type RandomVar = SymVar<EF>;
+    type PermutationVar = SymVar<EF>;
 
     fn permutation(&self) -> Self::MP {
         self.aux.clone()
@@ -158,11 +183,21 @@ where
         &self.aux_randomness
     }
 
-    fn aux_bus_boundary_values(&self) -> &[Self::VarEF] {
-        &self.aux_bus_boundary_values
+    fn permutation_values(&self) -> &[Self::PermutationVar] {
+        &self.aux_values
     }
+}
 
-    fn periodic_evals(&self) -> &[Self::PeriodicVal] {
+// --- PeriodicAirBuilder impl ---
+
+impl<F, EF> PeriodicAirBuilder for RecordingAirBuilder<F, EF>
+where
+    F: Field + Sync,
+    EF: ExtensionField<F>,
+{
+    type PeriodicVar = SymVar<EF>;
+
+    fn periodic_values(&self) -> &[Self::PeriodicVar] {
         &self.periodic_values
     }
 }

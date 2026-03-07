@@ -30,27 +30,12 @@ use crate::{
 ///
 /// Since the hasher chip is in the first position, the other chiplets can treat it as a shared bus.
 /// However, this prevents any bus initialization via public inputs using boundary constraints
-/// in the first row. If such constraints are required, they must be enforced in the last row of
-/// the trace.
+/// in the first row. If such constraints are required, they must be enforced via
+/// `reduced_aux_values` in the last row of the trace.
 ///
 /// If public inputs are required for other chiplets, it is also possible to use the chiplet bus,
 /// as is done for the kernel ROM chiplet.
-pub struct ChipletsVTableColBuilder {
-    /// Final precompile transcript state supplied as a public input to the bus.
-    final_transcript_state: PrecompileTranscriptState,
-}
-
-impl ChipletsVTableColBuilder {
-    /// Auxiliary column builder for the virtual table.
-    ///
-    /// The `final_transcript_state` argument is the state of the transcript after having recorded
-    /// all precompile request. It is used to initialize the multi-set with the initial (empty) and
-    /// final state of the transcript. An AIR constraint enforces the boundary constraint
-    /// referencing the final state provided as a public input by the verifier.
-    pub fn new(final_transcript_state: PrecompileTranscriptState) -> Self {
-        Self { final_transcript_state }
-    }
-}
+pub struct ChipletsVTableColBuilder;
 
 impl<E> AuxColumnBuilder<E> for ChipletsVTableColBuilder
 where
@@ -98,36 +83,11 @@ where
         chiplets_vtable_add_sibling(main_trace, challenges, row) * log_pc_response
     }
 
-    fn init_requests(
-        &self,
-        _main_trace: &MainTrace,
-        challenges: &Challenges<E>,
-        _debugger: &mut BusDebugger<E>,
-    ) -> E {
-        let message = LogPrecompileMessage { state: self.final_transcript_state };
-        let value = message.value(challenges);
-
-        #[cfg(any(test, feature = "bus-debugger"))]
-        _debugger.add_request(alloc::boxed::Box::new(message), challenges);
-
-        value
-    }
-
-    fn init_responses(
-        &self,
-        _main_trace: &MainTrace,
-        challenges: &Challenges<E>,
-        _debugger: &mut BusDebugger<E>,
-    ) -> E {
-        let message = LogPrecompileMessage {
-            state: PrecompileTranscriptState::default(),
-        };
-        let value = message.value(challenges);
-
-        #[cfg(any(test, feature = "bus-debugger"))]
-        _debugger.add_response(alloc::boxed::Box::new(message), challenges);
-
-        value
+    #[cfg(any(test, feature = "bus-debugger"))]
+    fn enforce_bus_balance(&self) -> bool {
+        // The chiplets vtable final value encodes transcript state boundary terms,
+        // which are checked via reduced_aux_values. It does not balance to identity.
+        false
     }
 }
 

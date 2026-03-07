@@ -51,8 +51,9 @@ deny = [
 skip = [
     # Allow duplicate spin versions - transitively pulled by p3-dft and flume
     { name = "spin" },
-    # Allow duplicate itertools versions - different dependencies use different versions
-    { name = "itertools" },
+    # Allow duplicate rand versions - miden-field uses 0.10, miden-vm uses 0.9
+    { name = "rand" },
+    { name = "rand_core" },
 ]
 skip-tree = [
     # Allow getrandom v0.2.x for now - will be phased out with nanorand
@@ -75,4 +76,8 @@ skip-tree = [
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = ["https://github.com/0xMiden/p3-miden"]
+allow-git = [
+    "https://github.com/0xMiden/crypto",
+    "https://github.com/Nashtare/p3-miden",
+    "https://github.com/Plonky3/Plonky3",
+]

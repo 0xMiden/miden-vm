@@ -4,7 +4,7 @@
 //! - First row: stack[0..16] == stack_inputs[0..16]
 //! - Last row:  stack[0..16] == stack_outputs[0..16]
 
-use miden_crypto::stark::air::MidenAirBuilder;
+use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 
 use crate::{
     MainTraceRow,
@@ -35,7 +35,7 @@ const STACK_OUTPUT_NAMESPACE: &str = "public_inputs.stack_output";
 /// - Last row:  `stack[i] == stack_outputs[i]` for i in 0..16
 pub fn enforce_main<AB>(builder: &mut AB, local: &MainTraceRow<AB::Var>)
 where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     // Copy public values into local arrays to release the immutable borrow on builder.
     let pv = builder.public_values();

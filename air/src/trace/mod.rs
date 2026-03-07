@@ -3,6 +3,9 @@ use core::ops::Range;
 use chiplets::hasher::RATE_LEN;
 use miden_core::utils::range;
 
+mod challenges;
+pub use challenges::Challenges;
+
 pub mod chiplets;
 pub mod decoder;
 pub mod range;
@@ -13,20 +16,13 @@ pub use rows::{RowIndex, RowIndexError};
 
 mod main_trace;
 pub use main_trace::{MainTrace, MainTraceRow};
-
-mod aux_trace;
-pub use aux_trace::AuxTraceBuilder;
+pub use miden_crypto::stark::air::AuxBuilder;
 
 // CONSTANTS
 // ================================================================================================
 
 /// The minimum length of the execution trace. This is the minimum required to support range checks.
-/// Minimum trace length required by FRI parameters.
-///
-/// FRI requires: log2(MIN_TRACE_LEN) > log_final_poly_len + log_blowup
-/// With log_final_poly_len=7 and log_blowup=3, we need: log2(MIN_TRACE_LEN) > 10
-/// Therefore: MIN_TRACE_LEN >= 2048
-pub const MIN_TRACE_LEN: usize = 2048;
+pub const MIN_TRACE_LEN: usize = 64;
 
 // MAIN TRACE LAYOUT
 // ------------------------------------------------------------------------------------------------
@@ -60,9 +56,24 @@ pub const LOG_PRECOMPILE_LABEL: u8 = miden_core::operations::opcodes::LOGPRECOMP
 pub mod log_precompile {
     use core::ops::Range;
 
-    use miden_core::utils::range;
+    use miden_core::{
+        Felt, field::ExtensionField, precompile::PrecompileTranscriptState, utils::range,
+    };
 
     use super::chiplets::hasher::{CAPACITY_LEN, DIGEST_LEN};
+
+    /// Encodes a precompile transcript capacity state as a bus message.
+    ///
+    /// The encoding is: `alpha + beta^0 * label + beta^1 * cap[0] + ... + beta^4 * cap[3]`
+    /// where `label = LOG_PRECOMPILE_LABEL`.
+    pub fn transcript_message<EF: ExtensionField<Felt>>(
+        challenges: &[EF],
+        state: PrecompileTranscriptState,
+    ) -> EF {
+        let c = super::Challenges::<EF, 5>::from_raw(challenges);
+        let cap: &[Felt] = state.as_ref();
+        c.encode([Felt::from_u8(super::LOG_PRECOMPILE_LABEL), cap[0], cap[1], cap[2], cap[3]])
+    }
 
     // HELPER REGISTER LAYOUT
     // --------------------------------------------------------------------------------------------
@@ -192,9 +203,9 @@ pub const MAX_MESSAGE_WIDTH: usize = 16;
 /// Bus message coefficient indices.
 ///
 /// These define the standard positions for encoding bus messages using the pattern:
-/// `alpha + sum(beta_powers[i] * elem[i])` where:
+/// `alpha + sum(beta_powers\[i\] * elem\[i\])` where:
 /// - `alpha` is the randomness base (accessed directly as `.alpha`)
-/// - `beta_powers[i] = beta^i` are the powers of beta
+/// - `beta_powers\[i\] = beta^i` are the powers of beta
 ///
 /// These indices refer to positions in the `beta_powers` array, not including alpha.
 ///

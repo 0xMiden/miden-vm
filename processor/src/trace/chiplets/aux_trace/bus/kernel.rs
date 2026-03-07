@@ -4,39 +4,12 @@ use miden_air::trace::{
     MainTrace, RowIndex,
     chiplets::kernel_rom::{KERNEL_PROC_CALL_LABEL, KERNEL_PROC_INIT_LABEL},
 };
-use miden_core::{Felt, Word, field::ExtensionField};
+use miden_core::{Felt, field::ExtensionField};
 
 use crate::{
     debug::{BusDebugger, BusMessage},
     trace::utils::Challenges,
 };
-
-// REQUESTS
-// ================================================================================================
-
-/// Builds the requests for each unique kernel procedure digest, to be provided via public inputs.
-pub(super) fn build_kernel_init_requests<E>(
-    proc_hashes: &[Word],
-    challenges: &Challenges<E>,
-    _debugger: &mut BusDebugger<E>,
-) -> E
-where
-    E: ExtensionField<Felt>,
-{
-    let mut requests = E::ONE;
-    // Initialize the bus with the kernel rom hashes provided by the public inputs.
-    // The verifier computes this value, and is enforced with a boundary constraint in the
-    // first row.
-    for proc_hash in proc_hashes {
-        let message = KernelRomInitMessage { kernel_proc_digest: proc_hash.into() };
-
-        requests *= message.value(challenges);
-
-        #[cfg(any(test, feature = "bus-debugger"))]
-        _debugger.add_request(alloc::boxed::Box::new(message), challenges);
-    }
-    requests
-}
 
 // RESPONSES
 // ================================================================================================
@@ -44,15 +17,10 @@ where
 /// Builds the response from the kernel chiplet at `row`.
 ///
 /// # Details
-/// Each row responds to either
-/// - requests made by the verifier for checking that the ROM contains exactly the hashes given by
-///   public inputs, or,
-/// - requests by the decoder when it performs a SYSCALL.
-///
-/// If a kernel procedure digest is requested `n` times by the decoder, it is repeated
-/// `n+1` times in the trace.
-/// In the first row, the chiplet responds to a request made via public inputs.
-/// The remaining `n` rows respond to decoder requests.
+/// Each kernel procedure digest appears `n+1` times in the trace when requested `n` times by
+/// the decoder (via SYSCALL). The first row for each unique digest produces a
+/// `KernelRomInitMessage` response; the remaining `n` rows produce `KernelRomMessage` responses
+/// matching decoder requests.
 pub(super) fn build_kernel_chiplet_responses<E>(
     main_trace: &MainTrace,
     row: RowIndex,

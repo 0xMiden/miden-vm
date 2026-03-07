@@ -3,7 +3,7 @@
 //! The ACE circuit expands (alpha, beta) into the full coefficient
 //! vector `[alpha, 1, beta, beta^2, ...]` used by the constraint system.
 
-use p3_field::Field;
+use miden_crypto::stark::field::Field;
 
 use crate::{
     dag::{DagBuilder, NodeId},

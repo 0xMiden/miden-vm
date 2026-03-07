@@ -1,6 +1,6 @@
-use miden_air::{MidenAir, ProcessorAir};
+use miden_air::{LiftedAir, ProcessorAir};
 use miden_core::{Felt, field::QuadFelt};
-use p3_field::PrimeCharacteristicRing;
+use miden_crypto::stark::{air::AirWithPeriodicColumns, field::PrimeCharacteristicRing};
 
 use super::common::{eval_dag, eval_expr, eval_periodic_values, eval_quotient, fill_inputs};
 use crate::{
@@ -21,7 +21,7 @@ fn processor_air_dag_matches_manual_eval() {
     let inputs = fill_inputs(&layout);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
     let periodic_values = eval_periodic_values(
-        &<ProcessorAir as MidenAir<Felt, QuadFelt>>::periodic_table(&air),
+        <ProcessorAir as AirWithPeriodicColumns<Felt>>::periodic_columns(&air),
         z_k,
     );
 
@@ -32,8 +32,9 @@ fn processor_air_dag_matches_manual_eval() {
         layout.counts.num_randomness,
         layout.counts.num_public,
         layout.counts.num_periodic,
+        LiftedAir::<Felt, QuadFelt>::num_aux_values(&air),
     );
-    MidenAir::<Felt, QuadFelt>::eval(&air, &mut builder);
+    LiftedAir::<Felt, QuadFelt>::eval(&air, &mut builder);
 
     let alpha = inputs[layout.index(InputKey::Alpha).unwrap()];
     let inv_vanishing = inputs[layout.index(InputKey::InvVanishing).unwrap()];

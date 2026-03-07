@@ -60,10 +60,16 @@ pub const TAG_CHIPLETS_BASE: usize = TAG_DECODER_BASE + TAG_DECODER_COUNT;
 /// Number of chiplets constraints in this group.
 pub const TAG_CHIPLETS_COUNT: usize = 136;
 
+/// Base ID for the bus boundary constraint group.
+/// 8 first-row (aux columns pinned to identity) + 8 last-row (aux columns bound to finals) = 16.
+pub const TAG_BUS_BOUNDARY_BASE: usize = TAG_CHIPLETS_BASE + TAG_CHIPLETS_COUNT;
+pub const TAG_BUS_BOUNDARY_FIRST_ROW_COUNT: usize = 8;
+pub const TAG_BUS_BOUNDARY_LAST_ROW_COUNT: usize = 8;
+pub const TAG_BUS_BOUNDARY_COUNT: usize =
+    TAG_BUS_BOUNDARY_FIRST_ROW_COUNT + TAG_BUS_BOUNDARY_LAST_ROW_COUNT;
+
 /// Base ID for the range bus constraint.
-///
-/// Bus constraints are emitted after all main-trace constraints, so bus tags come last.
-pub const TAG_RANGE_BUS_BASE: usize = TAG_CHIPLETS_BASE + TAG_CHIPLETS_COUNT;
+pub const TAG_RANGE_BUS_BASE: usize = TAG_BUS_BOUNDARY_BASE + TAG_BUS_BOUNDARY_COUNT;
 /// Number of range bus constraints in this group.
 pub const TAG_RANGE_BUS_COUNT: usize = 1;
 

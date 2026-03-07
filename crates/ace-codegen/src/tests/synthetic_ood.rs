@@ -6,7 +6,7 @@
 
 use miden_air::ProcessorAir;
 use miden_core::{Felt, field::QuadFelt};
-use p3_field::Field;
+use miden_crypto::stark::field::Field;
 
 use super::common::{eval_quotient, fill_inputs, zps_for_chunk};
 use crate::{

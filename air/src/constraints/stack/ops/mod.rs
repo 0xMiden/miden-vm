@@ -8,7 +8,7 @@
 //! rewrites of stack positions for these op groups.
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::MidenAirBuilder;
+use miden_crypto::stark::air::LiftedAirBuilder;
 
 use crate::{
     MainTraceRow,
@@ -153,7 +153,7 @@ pub fn enforce_main<AB>(
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     let s0: AB::Expr = local.stack[0].clone().into();
     let s1: AB::Expr = local.stack[1].clone().into();

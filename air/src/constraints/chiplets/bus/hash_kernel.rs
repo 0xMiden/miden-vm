@@ -12,7 +12,7 @@
 //! `alpha + sum_i beta^i * element[i]`.
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::{air::MidenAirBuilder, matrix::Matrix};
+use miden_crypto::stark::air::{LiftedAirBuilder, WindowAccess};
 
 use crate::{
     Felt, MainTraceRow,
@@ -81,13 +81,13 @@ pub fn enforce_hash_kernel_constraint<AB>(
 
     let (p_local, p_next, challenges) = {
         let aux = builder.permutation();
-        let aux_local = aux.row_slice(0).expect("Matrix should have at least 1 row");
-        let aux_next = aux.row_slice(1).expect("Matrix should have at least 2 rows");
+        let aux_local = aux.current_slice();
+        let aux_next = aux.next_slice();
         let p_local = aux_local[B_HASH_KERNEL];
         let p_next = aux_next[B_HASH_KERNEL];
 
         let challenges = builder.permutation_randomness();
-        let challenges = Challenges::<AB, HASH_KERNEL_MSG_LEN>::from_randomness(challenges);
+        let challenges = Challenges::<AB::ExprEF, HASH_KERNEL_MSG_LEN>::from_randomness(challenges);
         (p_local, p_next, challenges)
     };
 
@@ -100,7 +100,7 @@ pub fn enforce_hash_kernel_constraint<AB>(
 
     let (cycle_row_0, cycle_row_31) = {
         // Clone only the periodic values we need (avoids per-eval `to_vec()` allocation).
-        let p = builder.periodic_evals();
+        let p = builder.periodic_values();
         let cycle_row_0: AB::Expr = p[periodic::P_CYCLE_ROW_0].into();
         let cycle_row_31: AB::Expr = p[periodic::P_CYCLE_ROW_31].into();
         (cycle_row_0, cycle_row_31)
@@ -304,12 +304,12 @@ const SIBLING_B0_LAYOUT: [usize; 5] = [2, 7, 8, 9, 10];
 const SIBLING_B1_LAYOUT: [usize; 5] = [2, 3, 4, 5, 6];
 
 fn compute_sibling_b0<AB>(
-    challenges: &Challenges<AB, HASH_KERNEL_MSG_LEN>,
+    challenges: &Challenges<AB::ExprEF, HASH_KERNEL_MSG_LEN>,
     node_index: &AB::Expr,
     h: &[AB::Expr; 12],
 ) -> AB::ExprEF
 where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: LiftedAirBuilder<F = Felt>,
 {
     challenges.encode_sparse(
         SIBLING_B0_LAYOUT,
@@ -321,12 +321,12 @@ where
 ///
 /// Message layout: alpha[0] (constant) + alpha[3] * node_index + alpha[4..7] * h[0..3].
 fn compute_sibling_b1<AB>(
-    challenges: &Challenges<AB, HASH_KERNEL_MSG_LEN>,
+    challenges: &Challenges<AB::ExprEF, HASH_KERNEL_MSG_LEN>,
     node_index: &AB::Expr,
     h: &[AB::Expr; 12],
 ) -> AB::ExprEF
 where
-    AB: MidenAirBuilder<F = Felt>,
+    AB: LiftedAirBuilder<F = Felt>,
 {
     challenges.encode_sparse(
         SIBLING_B1_LAYOUT,

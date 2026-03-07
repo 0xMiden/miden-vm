@@ -11,7 +11,7 @@ use core::{
 };
 use std::sync::Arc;
 
-use p3_field::{Algebra, ExtensionField, Field, PrimeCharacteristicRing};
+use miden_crypto::stark::field::{Algebra, ExtensionField, Field, PrimeCharacteristicRing};
 
 // ================================================================================================
 // Entry
@@ -19,6 +19,7 @@ use p3_field::{Algebra, ExtensionField, Field, PrimeCharacteristicRing};
 
 /// Identifies which section of the trace a symbolic variable refers to.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[allow(dead_code)]
 pub enum Entry {
     Preprocessed { offset: usize },
     Main { offset: usize },
