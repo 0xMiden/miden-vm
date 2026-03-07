@@ -44,14 +44,14 @@ pub type Dft = miden_crypto::stark::dft::Radix2DitParallel<Felt>;
 /// PCS parameters shared by all hash function configurations.
 ///
 /// - FRI with 8x blowup (log_blowup = 3)
-/// - Binary folding (arity 2)
+/// - Arity-4 folding
 /// - Final polynomial degree 2^7 = 128
 /// - 16 bits of folding proof-of-work
 /// - 27 query repetitions
 pub const PCS_PARAMS: PcsParams = PcsParams {
     fri: FriParams {
         log_blowup: 3,
-        fold: FriFold::ARITY_2,
+        fold: FriFold::ARITY_4,
         log_final_degree: 7,
         folding_pow_bits: 16,
     },
