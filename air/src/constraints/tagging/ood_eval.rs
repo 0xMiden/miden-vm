@@ -272,7 +272,7 @@ mod tests {
     fn run_group_parity_test(expected: Vec<EvalRecord>) {
         assert_eq!(expected.len(), TAG_TOTAL_COUNT);
         let mut builder = OodEvalAirBuilder::new(OOD_SEED);
-        let air = ProcessorAir { num_kernel_procedures: 0 };
+        let air = ProcessorAir::default();
         LiftedAir::<Felt, QuadFelt>::eval(&air, &mut builder);
         builder.assert_complete();
 

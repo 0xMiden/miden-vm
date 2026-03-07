@@ -203,9 +203,9 @@ pub const MAX_MESSAGE_WIDTH: usize = 16;
 /// Bus message coefficient indices.
 ///
 /// These define the standard positions for encoding bus messages using the pattern:
-/// `alpha + sum(beta_powers[i] * elem[i])` where:
+/// `alpha + sum(beta_powers\[i\] * elem\[i\])` where:
 /// - `alpha` is the randomness base (accessed directly as `.alpha`)
-/// - `beta_powers[i] = beta^i` are the powers of beta
+/// - `beta_powers\[i\] = beta^i` are the powers of beta
 ///
 /// These indices refer to positions in the `beta_powers` array, not including alpha.
 ///
