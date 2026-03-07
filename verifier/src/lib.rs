@@ -5,7 +5,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 
 use miden_air::{ProcessorAir, PublicInputs, config};
 
@@ -151,7 +151,6 @@ fn verify_stark(
                 var_len_public_inputs,
                 &proof_bytes,
             )
-            .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
         HashFunction::Rpo256 => {
             let config = config::create_rpo_config();
@@ -163,7 +162,6 @@ fn verify_stark(
                 var_len_public_inputs,
                 &proof_bytes,
             )
-            .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
         HashFunction::Rpx256 => {
             let config = config::create_rpx_config();
@@ -175,7 +173,6 @@ fn verify_stark(
                 var_len_public_inputs,
                 &proof_bytes,
             )
-            .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
         HashFunction::Poseidon2 => {
             let config = config::create_poseidon2_config();
@@ -187,7 +184,6 @@ fn verify_stark(
                 var_len_public_inputs,
                 &proof_bytes,
             )
-            .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
         HashFunction::Keccak => {
             let config = config::create_keccak_config();
@@ -199,9 +195,9 @@ fn verify_stark(
                 var_len_public_inputs,
                 &proof_bytes,
             )
-            .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
-    }?;
+    }
+    .map_err(|e| VerificationError::StarkVerificationError(program_hash, Box::new(e)))?;
 
     Ok(())
 }
@@ -212,8 +208,8 @@ fn verify_stark(
 /// Errors that can occur during proof verification.
 #[derive(Debug, thiserror::Error)]
 pub enum VerificationError {
-    #[error("failed to verify proof for program with hash {0}")]
-    ProgramVerificationError(Word),
+    #[error("failed to verify STARK proof for program with hash {0}")]
+    StarkVerificationError(Word, #[source] Box<config::VerificationError>),
     #[error("failed to verify precompile calls")]
     PrecompileVerificationError(#[source] PrecompileVerificationError),
 }

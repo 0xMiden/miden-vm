@@ -5,7 +5,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 
 use miden_processor::{FastProcessor, Program, trace::build_trace};
 use tracing::instrument;
@@ -108,7 +108,6 @@ pub async fn prove(
                 var_len_public_inputs,
                 &aux_builder,
             )
-            .map_err(|e| ExecutionError::ProofSerializationError(alloc::format!("{e}")))?
         },
         HashFunction::Keccak => {
             let config = config::create_keccak_config();
@@ -120,7 +119,6 @@ pub async fn prove(
                 var_len_public_inputs,
                 &aux_builder,
             )
-            .map_err(|e| ExecutionError::ProofSerializationError(alloc::format!("{e}")))?
         },
         HashFunction::Rpo256 => {
             let config = config::create_rpo_config();
@@ -132,7 +130,6 @@ pub async fn prove(
                 var_len_public_inputs,
                 &aux_builder,
             )
-            .map_err(|e| ExecutionError::ProofSerializationError(alloc::format!("{e}")))?
         },
         HashFunction::Poseidon2 => {
             let config = config::create_poseidon2_config();
@@ -144,7 +141,6 @@ pub async fn prove(
                 var_len_public_inputs,
                 &aux_builder,
             )
-            .map_err(|e| ExecutionError::ProofSerializationError(alloc::format!("{e}")))?
         },
         HashFunction::Rpx256 => {
             let config = config::create_rpx_config();
@@ -156,9 +152,9 @@ pub async fn prove(
                 var_len_public_inputs,
                 &aux_builder,
             )
-            .map_err(|e| ExecutionError::ProofSerializationError(alloc::format!("{e}")))?
         },
-    };
+    }
+    .map_err(|e| ExecutionError::ProvingError(Box::new(e)))?;
 
     let proof = ExecutionProof::new(proof_bytes, hash_fn, log_trace_height, precompile_requests);
 
