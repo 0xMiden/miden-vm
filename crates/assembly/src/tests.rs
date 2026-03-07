@@ -3545,6 +3545,58 @@ end
 }
 
 #[test]
+fn const_division_slash_must_not_match_int_division() {
+    let program_src = r#"
+const A1 = 3/2
+const B1 = 3//2
+
+const X = 3
+const Y = 2
+const A2 = X/Y
+const B2 = X//Y
+
+begin
+    push.A1
+    push.B1
+    push.A2
+    push.B2
+end
+"#;
+
+    let program = Assembler::default()
+        .assemble_program(program_src)
+        .expect("program assembly must succeed");
+
+    let entry = program.get_node_by_id(program.entrypoint()).expect("missing entrypoint node");
+    let mast = format!("{}", entry.to_display(program.mast_forest()));
+
+    let toks: Vec<&str> = mast.split_whitespace().collect();
+    let pad_incr_pairs = toks.windows(2).filter(|w| w[0] == "pad" && w[1] == "incr").count();
+
+    assert_eq!(
+        pad_incr_pairs, 2,
+        "expected `/` (field division) to not fold to the same value as `//` (integer division)"
+    );
+}
+
+#[test]
+fn const_division_by_zero_must_error() {
+    let program_src = r#"
+const BAD = 1/0
+
+begin
+    push.BAD
+end
+"#;
+
+    let assembled = Assembler::default().assemble_program(program_src);
+    assert!(
+        assembled.is_err(),
+        "expected division by zero in constant expressions to be rejected"
+    );
+}
+
+#[test]
 fn invalid_while() -> TestResult {
     let context = TestContext::default();
 

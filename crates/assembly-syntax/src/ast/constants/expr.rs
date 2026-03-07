@@ -151,7 +151,7 @@ impl ConstantExpr {
                                     let rhs = rhs.into_inner();
                                     let is_division =
                                         matches!(op, ConstantOp::Div | ConstantOp::IntDiv);
-                                    let is_division_by_zero = is_division && rhs == Felt::ZERO;
+                                    let is_division_by_zero = is_division && rhs.as_int() == 0;
                                     if is_division_by_zero {
                                         return Err(ParsingError::DivisionByZero { span });
                                     }
@@ -159,8 +159,11 @@ impl ConstantExpr {
                                         ConstantOp::Add => lhs.checked_add(rhs),
                                         ConstantOp::Sub => lhs.checked_sub(rhs),
                                         ConstantOp::Mul => lhs.checked_mul(rhs),
-                                        ConstantOp::Div | ConstantOp::IntDiv => {
-                                            lhs.checked_div(rhs)
+                                        ConstantOp::IntDiv => lhs.checked_div(rhs),
+                                        ConstantOp::Div => {
+                                            let lhs = Felt::new(lhs.as_int());
+                                            let rhs = Felt::new(rhs.as_int());
+                                            Some(IntValue::from(lhs / rhs))
                                         },
                                     }
                                     .ok_or(

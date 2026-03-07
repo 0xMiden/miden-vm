@@ -6,9 +6,11 @@ use alloc::{sync::Arc, vec::Vec};
 use smallvec::SmallVec;
 
 use crate::{
+    Felt,
     ast::*,
     debuginfo::{SourceFile, SourceSpan, Span, Spanned},
     diagnostics::{Diagnostic, RelatedLabel, miette},
+    parser::IntValue,
 };
 
 /// An error raised during evaluation of a constant expression
@@ -351,12 +353,24 @@ where
                                     source_file: env.get_source_file_for(span),
                                 }
                             })?,
-                            ConstantOp::Div | ConstantOp::IntDiv => lhs
-                                .checked_div(rhs)
-                                .ok_or_else(|| ConstEvalError::DivisionByZero {
+                            ConstantOp::IntDiv => lhs.checked_div(rhs).ok_or_else(|| {
+                                ConstEvalError::DivisionByZero {
                                     span,
                                     source_file: env.get_source_file_for(span),
-                                })?,
+                                }
+                            })?,
+                            ConstantOp::Div => {
+                                if rhs.as_int() == 0 {
+                                    return Err(ConstEvalError::DivisionByZero {
+                                        span,
+                                        source_file: env.get_source_file_for(span),
+                                    }
+                                    .into());
+                                }
+                                let lhs = Felt::new(lhs.as_int());
+                                let rhs = Felt::new(rhs.as_int());
+                                IntValue::from(lhs / rhs)
+                            },
                         };
                         stack.push(ConstantExpr::Int(Span::new(span, result)));
                     },
