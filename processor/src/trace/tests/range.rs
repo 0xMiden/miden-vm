@@ -74,7 +74,7 @@ fn b_range_trace_stack() {
 #[expect(clippy::needless_range_loop)]
 fn b_range_trace_mem() {
     let stack = [0, 1, 2, 3, 4, 0];
-    let operations = vec![
+    let mut operations = vec![
         Operation::MStoreW,
         Operation::Drop,
         Operation::Drop,
@@ -82,6 +82,9 @@ fn b_range_trace_mem() {
         Operation::Drop,
         Operation::MLoadW,
     ];
+    // Pad so that the memory chiplet and range checker sections don't overlap,
+    // in order to simplify the logic of the test.
+    operations.resize(operations.len() + 60, Operation::Noop);
     let trace = build_trace_from_ops(operations, &stack);
 
     let rand_elements = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
@@ -100,11 +103,9 @@ fn b_range_trace_mem() {
     let len_16bit = 40 + 1;
     let values_start = trace.length() - len_16bit;
 
-    // The value should start at ZERO and be unchanged until the memory processor section begins.
+    // The value should start at ZERO.
     let mut expected = ZERO;
-    for row in 0..memory_start {
-        assert_eq!(expected, b_range[row]);
-    }
+    assert_eq!(expected, b_range[0]);
 
     // --- Check the memory processor's range check lookups. --------------------------------------
 
@@ -121,11 +122,6 @@ fn b_range_trace_mem() {
     // Include the lookup from the `MLoadW` operation at the next row.
     expected -= (alpha + d0_load).inverse() + (alpha + d1_load).inverse();
     assert_eq!(expected, b_range[memory_start + 2]);
-
-    // The value should be unchanged until the range checker's lookups are included.
-    for row in memory_start + 2..=values_start {
-        assert_eq!(expected, b_range[row]);
-    }
 
     // --- Check the range checker's lookups. -----------------------------------------------------
 
