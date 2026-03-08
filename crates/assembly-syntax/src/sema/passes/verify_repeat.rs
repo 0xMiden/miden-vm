@@ -4,7 +4,7 @@ use miden_debug_types::Spanned;
 
 use crate::{
     MAX_REPEAT_COUNT,
-    ast::{Immediate, Op, VisitMut, visit::visit_mut_op},
+    ast::{Immediate, Op, Visit, visit::visit_op},
     sema::{AnalysisContext, SemanticAnalysisError},
 };
 
@@ -18,8 +18,8 @@ impl<'a> VerifyRepeatCounts<'a> {
     }
 }
 
-impl VisitMut for VerifyRepeatCounts<'_> {
-    fn visit_mut_op(&mut self, op: &mut Op) -> ControlFlow<()> {
+impl Visit for VerifyRepeatCounts<'_> {
+    fn visit_op(&mut self, op: &Op) -> ControlFlow<()> {
         if let Op::Repeat { count, .. } = op
             && let Immediate::Value(value) = count
         {
@@ -33,6 +33,6 @@ impl VisitMut for VerifyRepeatCounts<'_> {
             }
         }
 
-        visit_mut_op(self, op)
+        visit_op(self, op)
     }
 }

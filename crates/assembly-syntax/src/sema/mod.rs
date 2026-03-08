@@ -202,7 +202,7 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) -> Result<()
                 log::debug!(target: "verify-repeat", "visiting procedure {}", procedure.name());
                 {
                     let mut visitor = VerifyRepeatCounts::new(analyzer);
-                    let _ = visitor.visit_mut_procedure(&mut procedure);
+                    let _ = visitor.visit_procedure(&procedure);
                 }
 
                 // Next, verify invoke targets:
