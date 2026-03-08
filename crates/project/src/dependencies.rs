@@ -194,38 +194,15 @@ impl DependencyVersionScheme {
                     .source_file
                     .as_ref()
                     .map(|file| Path::new(file.content().uri().path()));
-                let workspace_member = if uri.scheme().is_none_or(|scheme| scheme == "file") {
-                    let path = Path::new(uri.path());
-                    if path.is_relative() {
-                        workspace
-                            .workspace
-                            .members
-                            .iter()
-                            .find(|uri| path.starts_with(uri.path()))
-                            .cloned()
-                    } else if let Some(workspace_path) =
-                        workspace_path.and_then(|p| p.canonicalize().ok())
-                    {
-                        let relative_path = path.strip_prefix(workspace_path).ok();
-                        if let Some(relative_path) = relative_path {
-                            workspace
-                                .workspace
-                                .members
-                                .iter()
-                                .find(|uri| relative_path.starts_with(uri.path()))
-                                .cloned()
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
+                if uri.scheme().is_none_or(|scheme| scheme == "file")
+                    && let Some(workspace_path) = workspace_path.and_then(|p| p.canonicalize().ok())
+                    && let Some(workspace_root) = workspace_path.parent()
+                    && let Ok(resolved_uri) = workspace_root.canonicalize()
+                    && resolved_uri.strip_prefix(workspace_root).is_ok()
+                {
+                    Ok(Self::Workspace { member: uri.clone() })
                 } else {
-                    None
-                };
-                match workspace_member {
-                    Some(member) => Ok(Self::Workspace { member }),
-                    None => Ok(Self::Path { path: uri, version }),
+                    Ok(Self::Path { path: uri, version })
                 }
             },
             scheme => Ok(scheme),

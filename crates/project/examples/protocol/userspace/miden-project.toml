@@ -1,0 +1,11 @@
+[package]
+name = "miden-protocol"
+version = "0.1.0"
+
+[[target]]
+kind = "library"
+namespace = "miden::protocol"
+
+[dependencies]
+miden-core.workspace = true
+miden-tx.workspace = true

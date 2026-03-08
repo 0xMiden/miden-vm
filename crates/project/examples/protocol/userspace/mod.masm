@@ -1,9 +1,9 @@
 pub proc panic
-    push.0
+    push.1
     syscall.system_call
 end
 
 pub proc println(message: ptr<u8, addrspace(byte)>)
-    push.1
+    push.2
     syscall.system_call
 end
