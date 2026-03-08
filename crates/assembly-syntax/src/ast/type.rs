@@ -840,7 +840,10 @@ impl EnumType {
         ty: Type,
         variants: impl IntoIterator<Item = Variant>,
     ) -> Self {
-        assert!(ty.is_integer(), "only integer types are allowed in enum type definitions");
+        assert!(
+            ty.is_integer() || ty == Type::Felt,
+            "only integer or felt types are allowed in enum type definitions"
+        );
         Self {
             span: name.span(),
             docs: None,
@@ -1049,6 +1052,15 @@ impl Variant {
         };
 
         match ty {
+            Type::Felt if value >= FIELD_MODULUS => {
+                Err(SemanticAnalysisError::InvalidEnumDiscriminant {
+                    span: self.discriminant.span(),
+                    repr: ty.clone(),
+                })
+            },
+            // IntValue is represented as an unsigned integer, so negative discriminants
+            // are rejected during constant evaluation.
+            Type::Felt => Ok(()),
             Type::I1 if value > 1 => Err(SemanticAnalysisError::InvalidEnumDiscriminant {
                 span: self.discriminant.span(),
                 repr: ty.clone(),

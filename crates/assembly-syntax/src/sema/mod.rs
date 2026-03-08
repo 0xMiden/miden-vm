@@ -69,16 +69,13 @@ pub fn analyze(
                 // Ensure the constants defined by the enum are made known to the analyzer
                 for variant in ty.variants() {
                     let Variant { span, name, discriminant, .. } = variant;
-                    analyzer.define_constant(
-                        &mut module,
-                        Constant {
-                            span: *span,
-                            docs: None,
-                            visibility: ty.visibility(),
-                            name: name.clone(),
-                            value: discriminant.clone(),
-                        },
-                    );
+                    analyzer.register_constant(Constant {
+                        span: *span,
+                        docs: None,
+                        visibility: ty.visibility(),
+                        name: name.clone(),
+                        value: discriminant.clone(),
+                    });
                 }
 
                 // Defer definition of the enum until we discover all constants

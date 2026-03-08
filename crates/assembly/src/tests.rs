@@ -15,6 +15,7 @@ use miden_assembly_syntax::{
 use miden_core::{
     Felt, Word, assert_matches,
     events::EventId,
+    field::PrimeField64,
     mast::{MastNodeExt, MastNodeId},
     operations::Operation,
     program::Program,
@@ -713,6 +714,135 @@ fn simple_constant() -> TestResult {
     );
     let program = context.assemble(source)?;
     insta::assert_snapshot!(program);
+    Ok(())
+}
+
+#[test]
+fn enum_explicit_discriminants() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        r#"
+enum Status : u16 {
+    OK = 200,
+    NOT_FOUND = 404,
+    SERVER_ERROR = 500,
+}
+
+begin
+    push.OK
+    push.NOT_FOUND
+    push.SERVER_ERROR
+end
+"#
+    );
+    let _program = context.assemble(source)?;
+    Ok(())
+}
+
+#[test]
+fn enum_discriminants_can_reference_constants() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        r#"
+const BASE = 10
+
+enum Status : u16 {
+    OK = BASE,
+    NOT_FOUND = OK + 1,
+}
+
+begin
+    push.OK
+    push.NOT_FOUND
+end
+"#
+    );
+    let _program = context.assemble(source)?;
+    Ok(())
+}
+
+#[test]
+fn enum_felt_repr_variants() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        r#"
+enum Status : felt {
+    OK = 1,
+}
+
+begin
+    push.OK
+end
+"#
+    );
+    let _program = context.assemble(source)?;
+    Ok(())
+}
+
+#[test]
+fn enum_felt_discriminant_negative_is_rejected() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        r#"
+enum Status : felt {
+    BAD = 0 - 1,
+}
+
+begin
+    push.BAD
+end
+"#
+    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected negative discriminant to be rejected");
+    assert_diagnostic!(err, "invalid constant expression: value is larger than expected range");
+    Ok(())
+}
+
+#[test]
+fn enum_felt_discriminant_too_large_is_rejected() -> TestResult {
+    let context = TestContext::default();
+    let modulus = miden_core::Felt::ORDER_U64;
+    let source = source_file!(
+        &context,
+        format!(
+            r#"
+enum Status : felt {{
+    BAD = {modulus},
+}}
+
+begin
+    push.BAD
+end
+"#
+        )
+    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected out-of-range felt discriminant to be rejected");
+    assert_diagnostic!(err, "invalid literal: value overflowed the field modulus");
+    Ok(())
+}
+
+#[test]
+fn constant_expression_overflow_is_rejected() -> TestResult {
+    let context = TestContext::default();
+    let modulus_minus_one = miden_core::Felt::ORDER_U64 - 1;
+    let source = source_file!(
+        &context,
+        format!(
+            "const TOO_BIG = {modulus_minus_one} + {modulus_minus_one}\nbegin\n    push.TOO_BIG\nend\n"
+        )
+    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected constant expression overflow to be rejected");
+    assert_diagnostic!(err, "invalid constant expression: value is larger than expected range");
     Ok(())
 }
 

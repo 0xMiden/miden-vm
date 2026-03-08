@@ -242,7 +242,7 @@ impl Module {
     pub fn define_enum(&mut self, ty: EnumType) -> Result<(), SemanticAnalysisError> {
         let repr = ty.ty().clone();
 
-        if !repr.is_integer() {
+        if !repr.is_integer() && repr != ast::types::Type::Felt {
             return Err(SemanticAnalysisError::InvalidEnumRepr { span: ty.span() });
         }
 

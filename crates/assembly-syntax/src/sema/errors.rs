@@ -79,7 +79,7 @@ pub enum SemanticAnalysisError {
         #[label]
         span: SourceSpan,
     },
-    #[error("invalid enum type representation: underlying type must be an integral type")]
+    #[error("invalid enum type representation: underlying type must be an integral or felt type")]
     #[diagnostic()]
     InvalidEnumRepr {
         #[label]
