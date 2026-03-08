@@ -4683,6 +4683,32 @@ fn can_assemble_a_multi_module_kernel() -> Result<(), Report> {
     Ok(())
 }
 
+#[test]
+fn regression_empty_kernel_library_should_not_panic_when_installed() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let context = TestContext::default();
+    let source_manager = context.source_manager();
+
+    // A kernel module with no exported procedures should not be able to crash the assembler when
+    // installed.
+    let kernel_masm = "pub const FOO = 1\n";
+    let kernel_lib = match Assembler::new(source_manager.clone()).assemble_kernel(kernel_masm) {
+        Ok(kernel_lib) => kernel_lib,
+        // Rejecting such kernels early is an acceptable fix.
+        Err(err) => {
+            assert_diagnostic_lines!(err, "library must contain at least one exported procedure");
+            return;
+        },
+    };
+
+    let installed = catch_unwind(AssertUnwindSafe(|| {
+        let _ = Assembler::with_kernel(source_manager, kernel_lib);
+    }));
+
+    assert!(installed.is_ok(), "installing an empty kernel library panicked");
+}
+
 /// Test for issue #1644: verify that single-forest merge doesn't preserves node digests
 #[test]
 fn issue_1644_single_forest_merge_identity() -> TestResult {
