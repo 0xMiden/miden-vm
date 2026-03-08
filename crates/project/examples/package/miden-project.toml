@@ -1,0 +1,20 @@
+[package]
+name = "example"
+version = "0.1.0"
+
+[[target]]
+kind = "library"
+path = "lib/mod.masm"
+
+[dependencies]
+my-kernel = { path = "../multi_target/userspace" }
+
+[profile.test]
+inherits = "dev"
+network = "local"
+
+[lints.miden]
+unused = "error"
+
+[package.metadata.network.local]
+endpoint = "tcp://127.0.0.1"
