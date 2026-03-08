@@ -51,6 +51,32 @@ pub enum SymbolResolutionError {
         #[related]
         actual: Option<RelatedLabel>,
     },
+    #[error("type expression nesting depth exceeded")]
+    #[diagnostic(help("type expression nesting exceeded the maximum depth of {max_depth}"))]
+    TypeExpressionDepthExceeded {
+        #[label("type expression nesting exceeded the configured depth limit")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        max_depth: usize,
+    },
+    #[error("alias expansion cycle detected")]
+    #[diagnostic(help("alias expansion encountered a cycle"))]
+    AliasExpansionCycle {
+        #[label("this alias expansion is part of a cycle")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+    },
+    #[error("alias expansion depth exceeded")]
+    #[diagnostic(help("alias expansion exceeded the maximum depth of {max_depth}"))]
+    AliasExpansionDepthExceeded {
+        #[label("alias expansion exceeded the configured depth limit")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        max_depth: usize,
+    },
 }
 
 impl SymbolResolutionError {
@@ -117,6 +143,37 @@ impl SymbolResolutionError {
                     .with_labeled_span(actual, "but the symbol resolved to this item")
                     .with_source_file(actual_source_file),
             ),
+        }
+    }
+
+    pub fn type_expression_depth_exceeded(
+        span: SourceSpan,
+        max_depth: usize,
+        source_manager: &dyn SourceManager,
+    ) -> Self {
+        Self::TypeExpressionDepthExceeded {
+            span,
+            source_file: source_manager.get(span.source_id()).ok(),
+            max_depth,
+        }
+    }
+
+    pub fn alias_expansion_cycle(span: SourceSpan, source_manager: &dyn SourceManager) -> Self {
+        Self::AliasExpansionCycle {
+            span,
+            source_file: source_manager.get(span.source_id()).ok(),
+        }
+    }
+
+    pub fn alias_expansion_depth_exceeded(
+        span: SourceSpan,
+        max_depth: usize,
+        source_manager: &dyn SourceManager,
+    ) -> Self {
+        Self::AliasExpansionDepthExceeded {
+            span,
+            source_file: source_manager.get(span.source_id()).ok(),
+            max_depth,
         }
     }
 }
