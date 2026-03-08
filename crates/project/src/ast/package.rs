@@ -198,12 +198,11 @@ impl Validate for PackageFile {
             })
         })?;
 
-        // 2. All build targets must have unique paths and namespaces (and namespaces must be valid)
+        // 2. All build targets must have unique paths and names (and namespaces must be valid)
         let mut invalid_config = Vec::<RelatedError>::default();
         let mut kernel = None;
         let mut target_paths = BTreeMap::<Span<Uri>, Option<TargetConflictError>>::default();
-        let mut target_namespaces =
-            BTreeMap::<Span<Arc<str>>, Option<TargetConflictError>>::default();
+        let mut target_names = BTreeMap::<Span<Arc<str>>, Option<TargetConflictError>>::default();
         for target in self.targets.iter() {
             use alloc::collections::btree_map::Entry;
 
@@ -254,8 +253,10 @@ impl Validate for PackageFile {
                 TargetType::Executable => ast::Path::ABSOLUTE_EXEC_PATH,
                 _ => self.package.name.inner(),
             };
-            let target_ns =
-                target.namespace.as_deref().cloned().unwrap_or_else(|| Arc::from(default_ns));
+            let target_ns = match target.kind {
+                TargetType::Kernel | TargetType::Executable => Arc::from(default_ns),
+                _ => target.namespace.as_deref().cloned().unwrap_or_else(|| Arc::from(default_ns)),
+            };
 
             // 2c. Check for namespace validity
             if let Err(err) = ast::Path::validate(&target_ns) {
@@ -270,12 +271,14 @@ impl Validate for PackageFile {
             }
 
             // 2b. Check for conflicting namespace
-            match target_namespaces.entry(Span::new(span, target_ns)) {
+            let name =
+                target.name().unwrap_or_else(|| Span::new(target.span(), Arc::from(default_ns)));
+            match target_names.entry(name) {
                 Entry::Vacant(entry) => {
                     entry.insert(None);
                 },
                 Entry::Occupied(mut entry) => {
-                    let ns_span = target.namespace.as_ref().map(|ns| ns.span()).unwrap_or(span);
+                    let ns_span = target.name().map(|ns| ns.span()).unwrap_or(span);
                     let conflict_label = Label::new(ns_span, "conflict occurs here");
                     let ns = entry.key().clone();
                     match entry.get_mut() {
@@ -298,7 +301,7 @@ impl Validate for PackageFile {
         }
 
         invalid_config.extend(target_paths.into_values().flatten().map(RelatedError::wrap));
-        invalid_config.extend(target_namespaces.into_values().flatten().map(RelatedError::wrap));
+        invalid_config.extend(target_names.into_values().flatten().map(RelatedError::wrap));
 
         if !invalid_config.is_empty() {
             return Err(ProjectFileError::InvalidBuildTargets {

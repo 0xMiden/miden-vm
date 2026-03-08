@@ -1,6 +1,0 @@
-[package]
-name = "my-account"
-version = "0.1.0"
-
-[[target]]
-kind = "account-component"

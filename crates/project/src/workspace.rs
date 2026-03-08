@@ -27,9 +27,34 @@ impl Workspace {
         self.manifest_path.as_deref()
     }
 
+    /// Return the path of the directory containing the workspace manifest
+    #[cfg(feature = "std")]
+    pub fn workspace_root(&self) -> Option<&Path> {
+        self.manifest_path()?.parent()
+    }
+
     /// Get the set of packages which are members of this workspace
     pub fn members(&self) -> &[Arc<Package>] {
         &self.members
+    }
+
+    /// Look up a workspace member by its package name
+    pub fn get_member_by_name(&self, name: impl AsRef<str>) -> Option<Arc<Package>> {
+        let name = name.as_ref();
+        self.members().iter().find(|member| &**member.name().inner() == name).cloned()
+    }
+
+    /// Look up a workspace member by its workspace-relative path
+    #[cfg(feature = "std")]
+    pub fn get_member_by_relative_path(&self, path: impl AsRef<Path>) -> Option<Arc<Package>> {
+        let path = path.as_ref();
+        let path = self.workspace_root()?.join(path);
+        self.members()
+            .iter()
+            .find(|member| {
+                member.manifest_path().is_some_and(|p| p.parent() == Some(path.as_path()))
+            })
+            .cloned()
     }
 }
 
@@ -58,13 +83,17 @@ impl Workspace {
         let members = core::mem::take(&mut file.workspace.members);
 
         let mut workspace = Box::new(Workspace {
-            manifest_path,
+            manifest_path: manifest_path.clone(),
             members: Vec::with_capacity(members.len()),
         });
 
         for member in members {
-            let manifest_path = Path::new(member.as_str());
-            let member_manifest = source_manager.load_file(manifest_path).map_err(|err| {
+            let relative_path = Path::new(member.as_str());
+            let manifest_path = workspace
+                .workspace_root()
+                .map(|root| root.join(relative_path).join("miden-project.toml"))
+                .unwrap_or_else(|| relative_path.join("miden-project.toml"));
+            let member_manifest = source_manager.load_file(&manifest_path).map_err(|err| {
                 ProjectFileError::LoadWorkspaceMemberFailed {
                     source_file: source.clone(),
                     span: Label::new(member.span(), err.to_string()),

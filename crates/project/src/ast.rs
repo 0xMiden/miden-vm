@@ -9,6 +9,8 @@ mod package;
 pub(crate) mod parsing;
 mod profile;
 mod target;
+#[cfg(all(test, feature = "std", feature = "serde"))]
+mod tests;
 mod workspace;
 
 use alloc::{
@@ -121,6 +123,20 @@ pub(crate) enum ProjectFileError {
         #[related]
         related: Vec<RelatedError>,
     },
+    #[error("invalid build target requirement")]
+    InvalidTargetRequirement {
+        #[source_code]
+        source_file: Arc<SourceFile>,
+        #[label(primary)]
+        label: Label,
+    },
+    #[error("invalid build target option")]
+    InvalidTargetOption {
+        #[source_code]
+        source_file: Arc<SourceFile>,
+        #[label(primary)]
+        label: Label,
+    },
     #[error("package is not a member of a workspace")]
     NotAWorkspace {
         #[source_code]
@@ -128,7 +144,7 @@ pub(crate) enum ProjectFileError {
         #[label(primary)]
         span: SourceSpan,
     },
-    #[error("failed to load workspace member")]
+    #[error("failed to load workspace member: {}", span.label().unwrap_or("unknown"))]
     LoadWorkspaceMemberFailed {
         #[source_code]
         source_file: Arc<SourceFile>,

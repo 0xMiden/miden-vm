@@ -82,8 +82,15 @@ version = "0.1.0"
 # in this file, also known as the _default target_.
 [[target]]
 kind = "lib"       # the type of artifact we're producing
+name = "target-id" # a unique name to use when referring to this target
+                   # for multi-target projects this must be unique - defaults to
+                   # the namespace for this target if unspecified
 path = "mod.masm"  # the relative path to the root module
 namespace = "name" # the root namespace of modules parsed for this target
+requires = ["foo"] # for multi-target projects, this indicates that the target
+                   # whose namespace is 'foo' must be linked against when 
+                   # building this target. The required target(s) may only be
+                   # library or kernel targets
 ```
 
 As noted above, we've added a target definition that is equivalent to the default target that is inferred if no targets are explicitly declared: a library, whose root module is expected to be found in `mod.masm`, and whose modules will all belong to the `name` namespace (individual modules will have
@@ -97,7 +104,7 @@ There are other types of targets though, currently the available kinds are:
 * `note-script` - produce a package which is a valid note script in the Miden protocol, and exports the necessary metadata and procedures to construct and execute the note. This type is only valid in conjunction with the Miden transaction kernel.
 * `tx-script` - produce a package which is a valid transaction script in the Miden protocol, and exports the necessary metadata and procedures to construct and execute the script. This type is only valid in conjunction with the Miden transaction kernel.
 
-As noted earlier, you may define multiple targets in a single Miden project - however you must then request a specific target when assembling the project.
+As noted earlier, you may define multiple targets in a single Miden project - however you must then request a specific target when assembling the project. Additionally, all targets in a project share the same dependency set.
 
 ### Dependency management
 

@@ -324,30 +324,66 @@ impl Package {
         let mut targets = Vec::with_capacity(package_ast.targets.len());
         for target in package_ast.targets.iter() {
             let span = target.span();
+            let kind = target.kind;
+            let name = target.name().unwrap_or_else(|| package_ast.package.name.clone());
             let namespace = target
                 .namespace
                 .as_ref()
                 .map(|ns| Span::new(ns.span(), MasmPath::new(ns.inner()).to_absolute().into()))
-                .unwrap_or_else(|| {
-                    Span::new(
+                .unwrap_or_else(|| match kind {
+                    TargetType::Kernel => Span::new(
+                        package_ast.package.name.span(),
+                        Arc::from(MasmPath::kernel_path()),
+                    ),
+                    TargetType::Executable => {
+                        Span::new(package_ast.package.name.span(), Arc::from(MasmPath::exec_path()))
+                    },
+                    _ => Span::new(
                         package_ast.package.name.span(),
                         MasmPath::new(package_ast.package.name.inner()).to_absolute().into(),
-                    )
+                    ),
                 });
             let path =
                 Span::new(target.path.as_ref().map(|p| p.span()).unwrap_or(span), target.path());
-            targets.push(Span::new(span, Target { ty: target.kind, namespace, path }));
+            let requires = target.requires.clone();
+            targets.push(Span::new(
+                span,
+                Target {
+                    ty: target.kind,
+                    name,
+                    namespace,
+                    path,
+                    requires,
+                },
+            ));
         }
 
         if targets.is_empty() {
-            let name = &package_ast.package.name;
-            let span = name.span();
+            let project_name = &package_ast.package.name;
+            let span = project_name.span();
+            let namespace: Span<Arc<MasmPath>> =
+                Span::new(span, MasmPath::new(project_name.inner()).to_absolute().into());
+            let name = project_name.clone();
             let target = Target {
                 ty: TargetType::Library,
-                namespace: Span::new(span, MasmPath::new(name.inner()).to_absolute().into()),
+                name,
+                namespace,
                 path: Span::new(span, Uri::new("mod.masm")),
+                requires: Default::default(),
             };
             targets.push(Span::new(span, target));
+        }
+
+        for target in targets.iter() {
+            for required in target.requires.iter() {
+                if !targets.iter().any(|t| t.name.inner() == required.inner()) {
+                    return Err(ProjectFileError::InvalidTargetRequirement {
+                        source_file: source,
+                        label: Label::new(required.span(), "this target does not exist"),
+                    }
+                    .into());
+                }
+            }
         }
 
         Ok(Box::new(Self {

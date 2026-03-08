@@ -1,0 +1,7 @@
+[package]
+name = "miden-core"
+version = "0.1.0"
+
+[[target]]
+kind = "library"
+namespace = "miden::core"

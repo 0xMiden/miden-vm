@@ -7,7 +7,7 @@ kind = "library"
 path = "lib/mod.masm"
 
 [dependencies]
-my-kernel = { path = "../multi_target/userspace" }
+miden-protocol = { path = "../protocol/userspace" }
 
 [profile.test]
 inherits = "dev"
