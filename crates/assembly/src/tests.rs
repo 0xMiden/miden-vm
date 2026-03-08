@@ -5386,6 +5386,87 @@ fn test_syscall_resolution_to_non_kernel_path_is_checked() -> TestResult {
 }
 
 #[test]
+fn syscall_validation_does_not_panic_on_same_digest_userspace_procedure() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let context = TestContext::default();
+    let source_manager = context.source_manager();
+
+    let kernel_src = r#"
+pub proc k1
+    push.1
+end
+"#;
+
+    let kernel_lib = Assembler::new(source_manager.clone())
+        .assemble_kernel(kernel_src)
+        .expect("kernel assembly must succeed");
+
+    let assembler = Assembler::with_kernel(source_manager, kernel_lib);
+
+    let program_src = r#"
+proc dup
+    push.1
+end
+
+begin
+    exec.dup
+    syscall.k1
+end
+"#;
+
+    let assembled = catch_unwind(AssertUnwindSafe(|| assembler.assemble_program(program_src)));
+    assert!(assembled.is_ok(), "assembler panicked while assembling a valid program");
+    assert!(assembled.unwrap().is_ok(), "expected program assembly to succeed");
+}
+
+#[test]
+fn syscall_by_unknown_digest_is_rejected_at_assembly_time_when_kernel_is_configured() {
+    let context = TestContext::default();
+    let source_manager = context.source_manager();
+
+    let kernel_src = r#"
+pub proc k1
+    push.1
+end
+"#;
+
+    let kernel_lib = Assembler::new(source_manager.clone())
+        .assemble_kernel(kernel_src)
+        .expect("kernel assembly must succeed");
+
+    let assembler = Assembler::with_kernel(source_manager, kernel_lib);
+
+    let program_src = r#"
+begin
+    syscall.0x0000000000000000000000000000000000000000000000000000000000000000
+end
+"#;
+
+    let err = assembler
+        .assemble_program(program_src)
+        .expect_err("expected unknown digest syscall to be rejected");
+    assert_diagnostic!(err, "invalid syscall");
+}
+
+#[test]
+fn syscall_without_kernel_is_rejected_at_assembly_time() {
+    let context = TestContext::default();
+    let assembler = Assembler::new(context.source_manager());
+
+    let program_src = r#"
+begin
+    syscall.0x0000000000000000000000000000000000000000000000000000000000000000
+end
+"#;
+
+    let err = assembler
+        .assemble_program(program_src)
+        .expect_err("expected syscall without kernel to be rejected");
+    assert_diagnostic!(err, "invalid syscall");
+}
+
+#[test]
 fn test_linking_imported_symbols_with_duplicate_prefix_components() -> TestResult {
     let context = TestContext::default();
 
