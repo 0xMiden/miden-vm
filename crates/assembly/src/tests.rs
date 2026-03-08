@@ -4684,29 +4684,16 @@ fn can_assemble_a_multi_module_kernel() -> Result<(), Report> {
 }
 
 #[test]
-fn regression_empty_kernel_library_should_not_panic_when_installed() {
-    use std::panic::{AssertUnwindSafe, catch_unwind};
-
+fn regression_empty_kernel_library_is_rejected() {
     let context = TestContext::default();
     let source_manager = context.source_manager();
 
-    // A kernel module with no exported procedures should not be able to crash the assembler when
-    // installed.
+    // A kernel module with no exported procedures should be rejected.
     let kernel_masm = "pub const FOO = 1\n";
-    let kernel_lib = match Assembler::new(source_manager.clone()).assemble_kernel(kernel_masm) {
-        Ok(kernel_lib) => kernel_lib,
-        // Rejecting such kernels early is an acceptable fix.
-        Err(err) => {
-            assert_diagnostic_lines!(err, "library must contain at least one exported procedure");
-            return;
-        },
-    };
-
-    let installed = catch_unwind(AssertUnwindSafe(|| {
-        let _ = Assembler::with_kernel(source_manager, kernel_lib);
-    }));
-
-    assert!(installed.is_ok(), "installing an empty kernel library panicked");
+    let err = Assembler::new(source_manager)
+        .assemble_kernel(kernel_masm)
+        .expect_err("expected empty kernel to be rejected");
+    assert_diagnostic_lines!(err, "library must contain at least one exported procedure");
 }
 
 /// Test for issue #1644: verify that single-forest merge doesn't preserves node digests
@@ -4811,6 +4798,57 @@ fn issue_1644_single_forest_merge_identity() -> TestResult {
 
     eprintln!("Merge identity test passed - no violations detected");
     Ok(())
+}
+
+#[test]
+fn overlong_total_path_is_rejected_without_panic() {
+    use std::{
+        panic::{AssertUnwindSafe, catch_unwind},
+        sync::Arc,
+    };
+
+    use miden_assembly_syntax::ast::Path;
+
+    use crate::{Parse, ParseOptions, ast::ModuleKind, testing::TestContext};
+
+    // Build a valid path where each component is within the per-component limit (255 bytes),
+    // but the total byte length exceeds u16::MAX (the binary serialization length prefix).
+    let component = "a".repeat(255);
+    let num_components: usize = 300;
+    let mut path_str = alloc::string::String::with_capacity(num_components * (component.len() + 2));
+    for i in 0..num_components {
+        if i > 0 {
+            path_str.push_str("::");
+        }
+        path_str.push_str(&component);
+    }
+
+    let context = TestContext::default();
+    let source_manager = context.source_manager();
+
+    let lib_src = r#"
+pub proc add
+    add.1
+end
+"#;
+
+    let parsed = catch_unwind(AssertUnwindSafe(|| {
+        let path = Path::new(&path_str);
+        let options = ParseOptions {
+            kind: ModuleKind::Library,
+            warnings_as_errors: false,
+            path: Some(Arc::<Path>::from(path)),
+        };
+        <&str as Parse>::parse_with_options(lib_src, source_manager.clone(), options)
+    }));
+
+    assert!(
+        parsed.is_ok(),
+        "overlong total path caused a panic; expected a structured error"
+    );
+    let parsed = parsed.unwrap();
+    let err = parsed.expect_err("expected overlong path to be rejected");
+    assert_diagnostic!(err, "invalid item path: too long");
 }
 
 #[test]

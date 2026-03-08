@@ -67,6 +67,12 @@ pub enum SemanticAnalysisError {
         #[label]
         prev_span: SourceSpan,
     },
+    #[error("invalid invocation target")]
+    #[diagnostic(help("path contains an invalid component"))]
+    InvalidInvokePath {
+        #[label]
+        span: SourceSpan,
+    },
     #[error("invalid program: procedure exports are not allowed")]
     #[diagnostic(help("perhaps you meant to use `proc` instead of `export`?"))]
     UnexpectedExport {
