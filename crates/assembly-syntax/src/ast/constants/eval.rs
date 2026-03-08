@@ -186,19 +186,10 @@ pub trait ConstEnvironment {
     /// returned by `get` evaluates to an error string, returning that string, or raising an error
     /// if invalid.
     fn get_error(&self, name: &Ident) -> Result<Option<Arc<str>>, Self::Error> {
+        let mut seen = Vec::new();
+        let start = name.span();
         match self.get(name)? {
-            Some(expr) => match expr {
-                CachedConstantValue::Hit(ConstantValue::String(spanned)) => {
-                    Ok(Some(spanned.clone().into_inner()))
-                },
-                CachedConstantValue::Miss(ConstantExpr::String(spanned)) => {
-                    Ok(Some(spanned.clone().into_inner()))
-                },
-                CachedConstantValue::Miss(ConstantExpr::Var(_)) => Ok(None),
-                other => {
-                    Err(ConstEvalError::invalid_constant(other.span(), "a string", self).into())
-                },
-            },
+            Some(expr) => resolve_error_expr(self, expr, start, &mut seen),
             None => Ok(None),
         }
     }
@@ -207,19 +198,10 @@ pub trait ConstEnvironment {
     /// expression returned by `get_by_path` evaluates to an error string, returning that string,
     /// or raising an error if invalid.
     fn get_error_by_path(&self, path: Span<&Path>) -> Result<Option<Arc<str>>, Self::Error> {
+        let mut seen = Vec::new();
+        let start = path.span();
         match self.get_by_path(path)? {
-            Some(expr) => match expr {
-                CachedConstantValue::Hit(ConstantValue::String(spanned)) => {
-                    Ok(Some(spanned.clone().into_inner()))
-                },
-                CachedConstantValue::Miss(ConstantExpr::String(spanned)) => {
-                    Ok(Some(spanned.clone().into_inner()))
-                },
-                CachedConstantValue::Miss(ConstantExpr::Var(_)) => Ok(None),
-                other => {
-                    Err(ConstEvalError::invalid_constant(other.span(), "a string", self).into())
-                },
-            },
+            Some(expr) => resolve_error_expr(self, expr, start, &mut seen),
             None => Ok(None),
         }
     }
@@ -235,6 +217,56 @@ pub trait ConstEnvironment {
     #[inline]
     #[allow(unused_variables)]
     fn on_eval_completed(&mut self, name: Span<&Path>, value: &ConstantExpr) {}
+}
+
+fn resolve_error_expr<Env>(
+    env: &Env,
+    expr: CachedConstantValue<'_>,
+    start: SourceSpan,
+    seen: &mut Vec<Arc<Path>>,
+) -> Result<Option<Arc<str>>, <Env as ConstEnvironment>::Error>
+where
+    Env: ?Sized + ConstEnvironment,
+    <Env as ConstEnvironment>::Error: From<ConstEvalError>,
+{
+    match expr {
+        CachedConstantValue::Hit(ConstantValue::String(spanned)) => {
+            Ok(Some(spanned.clone().into_inner()))
+        },
+        CachedConstantValue::Miss(ConstantExpr::String(spanned)) => {
+            Ok(Some(spanned.clone().into_inner()))
+        },
+        CachedConstantValue::Miss(ConstantExpr::Var(path)) => {
+            let path_ref = path.inner().as_ref();
+            let path_span = path.span();
+            resolve_error_path(env, Span::new(path_span, path_ref), start, seen)
+        },
+        other => Err(ConstEvalError::invalid_constant(other.span(), "a string", env).into()),
+    }
+}
+
+fn resolve_error_path<Env>(
+    env: &Env,
+    path: Span<&Path>,
+    start: SourceSpan,
+    seen: &mut Vec<Arc<Path>>,
+) -> Result<Option<Arc<str>>, <Env as ConstEnvironment>::Error>
+where
+    Env: ?Sized + ConstEnvironment,
+    <Env as ConstEnvironment>::Error: From<ConstEvalError>,
+{
+    let path_span = path.span();
+    let path_ref = path.into_inner();
+    if seen.iter().any(|seen_path| seen_path.as_ref() == path_ref) {
+        return Err(ConstEvalError::eval_cycle(start, path_span, env).into());
+    }
+    seen.push(Arc::<Path>::from(path_ref));
+
+    let path = Span::new(path_span, path_ref);
+    match env.get_by_path(path)? {
+        Some(expr) => resolve_error_expr(env, expr, start, seen),
+        None => Ok(None),
+    }
 }
 
 /// Evaluate `expr` in `env`, producing a new [ConstantExpr] representing the value produced as the

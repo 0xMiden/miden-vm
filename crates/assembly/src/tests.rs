@@ -4852,6 +4852,49 @@ end
 }
 
 #[test]
+fn imported_error_message_alias_is_rejected_without_panicking() {
+    use std::{
+        panic::{AssertUnwindSafe, catch_unwind},
+        sync::Arc,
+    };
+
+    use crate::{Assembler, DefaultSourceManager, Parse, ParseOptions, ast::ModuleKind};
+
+    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+
+    // Library module `b` exports a string constant and an alias to it.
+    let module_b_src = r#"
+pub const ERR1 = "oops"
+pub const ERR2 = ERR1
+"#;
+    let module_b = module_b_src
+        .parse_with_options(source_manager.clone(), ParseOptions::new(ModuleKind::Library, "b"))
+        .expect("module b parsing must succeed");
+
+    // Executable module imports `ERR2` and uses it as an assertion error message.
+    let module_a_src = r#"
+use b::ERR2
+
+begin
+    assert.err=ERR2
+end
+"#;
+
+    let assembled = catch_unwind(AssertUnwindSafe(|| {
+        let mut assembler = Assembler::new(source_manager);
+        assembler
+            .compile_and_statically_link(module_b)
+            .expect("linking module b must succeed");
+        assembler.assemble_program(module_a_src)
+    }));
+
+    assert!(assembled.is_ok(), "assembler panicked during assembly");
+    let assembled = assembled.unwrap();
+    let err = assembled.expect_err("expected assembly to return an error");
+    assert_diagnostic!(err, "undefined symbol reference");
+}
+
+#[test]
 fn test_issue_2181_locaddr_bug_assembly() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(
