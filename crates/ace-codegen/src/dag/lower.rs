@@ -1,6 +1,12 @@
 use std::collections::HashMap;
 
-use miden_crypto::stark::field::{ExtensionField, Field};
+use miden_crypto::{
+    field::{ExtensionField, Field},
+    stark::air::symbolic::{
+        BaseEntry, BaseLeaf, ConstraintLayout, ExtEntry, ExtLeaf, SymbolicExpression,
+        SymbolicExpressionExt,
+    },
+};
 
 use super::{
     builder::DagBuilder,
@@ -10,12 +16,76 @@ use crate::{
     layout::{InputKey, InputLayout},
     quotient::build_quotient_recomposition_dag,
     randomness,
-    symbolic::{Entry, SymExpr},
 };
 
-/// Lower a symbolic expression into DAG nodes using the provided layout.
-pub fn lower_expr<F, EF>(
-    expr: &SymExpr<EF>,
+/// Lower a base-field symbolic expression into DAG nodes.
+fn lower_base_expr<F, EF>(
+    expr: &SymbolicExpression<F>,
+    builder: &mut DagBuilder<EF>,
+    periodic_nodes: &[NodeId],
+) -> NodeId
+where
+    F: Field,
+    EF: ExtensionField<F>,
+{
+    match expr {
+        SymbolicExpression::Leaf(leaf) => match leaf {
+            BaseLeaf::Variable(v) => match v.entry {
+                BaseEntry::Main { offset } => {
+                    builder.input(InputKey::Main { offset, index: v.index })
+                },
+                BaseEntry::Public => builder.input(InputKey::Public(v.index)),
+                BaseEntry::Periodic => periodic_nodes[v.index],
+                BaseEntry::Preprocessed { .. } => {
+                    panic!("preprocessed trace entries are not supported")
+                },
+            },
+            BaseLeaf::IsFirstRow => {
+                let z_pow_n = builder.input(InputKey::ZPowN);
+                let one = builder.constant(EF::ONE);
+                let numerator = builder.sub(z_pow_n, one);
+                let inv = builder.input(InputKey::InvZMinusOne);
+                builder.mul(numerator, inv)
+            },
+            BaseLeaf::IsLastRow => {
+                let z_pow_n = builder.input(InputKey::ZPowN);
+                let one = builder.constant(EF::ONE);
+                let numerator = builder.sub(z_pow_n, one);
+                let inv = builder.input(InputKey::InvZMinusGInv);
+                builder.mul(numerator, inv)
+            },
+            BaseLeaf::IsTransition => {
+                let z = builder.input(InputKey::Z);
+                let g_inv = builder.input(InputKey::GInv);
+                builder.sub(z, g_inv)
+            },
+            BaseLeaf::Constant(c) => builder.constant(EF::from(*c)),
+        },
+        SymbolicExpression::Add { x, y, .. } => {
+            let lx = lower_base_expr::<F, EF>(x, builder, periodic_nodes);
+            let ly = lower_base_expr::<F, EF>(y, builder, periodic_nodes);
+            builder.add(lx, ly)
+        },
+        SymbolicExpression::Sub { x, y, .. } => {
+            let lx = lower_base_expr::<F, EF>(x, builder, periodic_nodes);
+            let ly = lower_base_expr::<F, EF>(y, builder, periodic_nodes);
+            builder.sub(lx, ly)
+        },
+        SymbolicExpression::Mul { x, y, .. } => {
+            let lx = lower_base_expr::<F, EF>(x, builder, periodic_nodes);
+            let ly = lower_base_expr::<F, EF>(y, builder, periodic_nodes);
+            builder.mul(lx, ly)
+        },
+        SymbolicExpression::Neg { x, .. } => {
+            let lx = lower_base_expr::<F, EF>(x, builder, periodic_nodes);
+            builder.neg(lx)
+        },
+    }
+}
+
+/// Lower an extension-field symbolic expression into DAG nodes.
+fn lower_ext_expr<F, EF>(
+    expr: &SymbolicExpressionExt<F, EF>,
     builder: &mut DagBuilder<EF>,
     layout: &InputLayout,
     periodic_nodes: &[NodeId],
@@ -25,66 +95,46 @@ where
     EF: ExtensionField<F>,
 {
     match expr {
-        SymExpr::Variable(v) => match v.entry {
-            Entry::Challenge => randomness::lower_challenge(builder, layout, v.index),
-            Entry::Aux { offset } => {
-                let index = v.index;
-                let mut acc = builder.constant(EF::ZERO);
-                for coord in 0..EF::DIMENSION {
-                    let basis =
-                        EF::ith_basis_element(coord).expect("basis index within extension degree");
-                    let coord_node = builder.input(InputKey::AuxCoord { offset, index, coord });
-                    let basis_node = builder.constant(basis);
-                    let term = builder.mul(basis_node, coord_node);
-                    acc = builder.add(acc, term);
-                }
-                acc
+        SymbolicExpressionExt::Leaf(leaf) => match leaf {
+            ExtLeaf::Base(base_expr) => {
+                lower_base_expr::<F, EF>(base_expr, builder, periodic_nodes)
             },
-            Entry::Periodic => periodic_nodes[v.index],
-            Entry::Main { offset } => builder.input(InputKey::Main { offset, index: v.index }),
-            Entry::AuxBusBoundary => builder.input(InputKey::AuxBusBoundary(v.index)),
-            Entry::Public => builder.input(InputKey::Public(v.index)),
-            Entry::Preprocessed { .. } => {
-                panic!("preprocessed trace entries are not supported")
+            ExtLeaf::ExtVariable(v) => match v.entry {
+                ExtEntry::Permutation { offset } => {
+                    let index = v.index;
+                    let mut acc = builder.constant(EF::ZERO);
+                    for coord in 0..EF::DIMENSION {
+                        let basis = EF::ith_basis_element(coord)
+                            .expect("basis index within extension degree");
+                        let coord_node = builder.input(InputKey::AuxCoord { offset, index, coord });
+                        let basis_node = builder.constant(basis);
+                        let term = builder.mul(basis_node, coord_node);
+                        acc = builder.add(acc, term);
+                    }
+                    acc
+                },
+                ExtEntry::Challenge => randomness::lower_challenge(builder, layout, v.index),
+                ExtEntry::PermutationValue => builder.input(InputKey::AuxBusBoundary(v.index)),
             },
+            ExtLeaf::ExtConstant(c) => builder.constant(*c),
         },
-        SymExpr::IsFirstRow => {
-            let z_pow_n = builder.input(InputKey::ZPowN);
-            let one = builder.constant(EF::ONE);
-            let numerator = builder.sub(z_pow_n, one);
-            let inv = builder.input(InputKey::InvZMinusOne);
-            builder.mul(numerator, inv)
-        },
-        SymExpr::IsLastRow => {
-            let z_pow_n = builder.input(InputKey::ZPowN);
-            let one = builder.constant(EF::ONE);
-            let numerator = builder.sub(z_pow_n, one);
-            let inv = builder.input(InputKey::InvZMinusGInv);
-            builder.mul(numerator, inv)
-        },
-        SymExpr::IsTransition => {
-            let z = builder.input(InputKey::Z);
-            let g_inv = builder.input(InputKey::GInv);
-            builder.sub(z, g_inv)
-        },
-        SymExpr::Constant(c) => builder.constant(*c),
-        SymExpr::Add(x, y) => {
-            let lx = lower_expr::<F, EF>(x, builder, layout, periodic_nodes);
-            let ly = lower_expr::<F, EF>(y, builder, layout, periodic_nodes);
+        SymbolicExpressionExt::Add { x, y, .. } => {
+            let lx = lower_ext_expr::<F, EF>(x, builder, layout, periodic_nodes);
+            let ly = lower_ext_expr::<F, EF>(y, builder, layout, periodic_nodes);
             builder.add(lx, ly)
         },
-        SymExpr::Sub(x, y) => {
-            let lx = lower_expr::<F, EF>(x, builder, layout, periodic_nodes);
-            let ly = lower_expr::<F, EF>(y, builder, layout, periodic_nodes);
+        SymbolicExpressionExt::Sub { x, y, .. } => {
+            let lx = lower_ext_expr::<F, EF>(x, builder, layout, periodic_nodes);
+            let ly = lower_ext_expr::<F, EF>(y, builder, layout, periodic_nodes);
             builder.sub(lx, ly)
         },
-        SymExpr::Mul(x, y) => {
-            let lx = lower_expr::<F, EF>(x, builder, layout, periodic_nodes);
-            let ly = lower_expr::<F, EF>(y, builder, layout, periodic_nodes);
+        SymbolicExpressionExt::Mul { x, y, .. } => {
+            let lx = lower_ext_expr::<F, EF>(x, builder, layout, periodic_nodes);
+            let ly = lower_ext_expr::<F, EF>(y, builder, layout, periodic_nodes);
             builder.mul(lx, ly)
         },
-        SymExpr::Neg(x) => {
-            let lx = lower_expr::<F, EF>(x, builder, layout, periodic_nodes);
+        SymbolicExpressionExt::Neg { x, .. } => {
+            let lx = lower_ext_expr::<F, EF>(x, builder, layout, periodic_nodes);
             builder.neg(lx)
         },
     }
@@ -96,7 +146,9 @@ where
 /// polynomial, recomposes the quotient, and subtracts both sides to yield the
 /// root expression evaluated by the ACE circuit.
 pub fn build_verifier_dag<F, EF>(
-    constraints: &[SymExpr<EF>],
+    base_constraints: &[SymbolicExpression<F>],
+    ext_constraints: &[SymbolicExpressionExt<F, EF>],
+    constraint_layout: &ConstraintLayout,
     layout: &InputLayout,
     periodic: Option<&PeriodicColumnData<EF>>,
 ) -> AceDag<EF>
@@ -119,9 +171,24 @@ where
     let alpha = builder.input(InputKey::Alpha);
     let inv_vanishing = builder.input(InputKey::InvVanishing);
 
+    // Merge base and extension constraints in evaluation order using the layout.
+    let total = constraint_layout.base_indices.len() + constraint_layout.ext_indices.len();
+    let mut ordered: Vec<(usize, bool, usize)> = Vec::with_capacity(total);
+    for (i, &pos) in constraint_layout.base_indices.iter().enumerate() {
+        ordered.push((pos, false, i));
+    }
+    for (i, &pos) in constraint_layout.ext_indices.iter().enumerate() {
+        ordered.push((pos, true, i));
+    }
+    ordered.sort_by_key(|(pos, ..)| *pos);
+
     let mut acc = builder.constant(EF::ZERO);
-    for constraint in constraints {
-        let node = lower_expr::<F, EF>(constraint, &mut builder, layout, &periodic_nodes);
+    for &(_, is_ext, idx) in &ordered {
+        let node = if is_ext {
+            lower_ext_expr::<F, EF>(&ext_constraints[idx], &mut builder, layout, &periodic_nodes)
+        } else {
+            lower_base_expr::<F, EF>(&base_constraints[idx], &mut builder, &periodic_nodes)
+        };
         let acc_mul = builder.mul(acc, alpha);
         acc = builder.add(acc_mul, node);
     }
@@ -132,6 +199,7 @@ where
 
     AceDag { nodes: builder.into_nodes(), root }
 }
+
 fn build_periodic_nodes<EF>(
     builder: &mut DagBuilder<EF>,
     layout: &InputLayout,

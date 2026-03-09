@@ -12,12 +12,12 @@ use alloc::vec::Vec;
 
 use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
 use miden_crypto::stark::{
-    AirInstance, StarkConfig, TranscriptData,
-    air::{AuxBuilder, VarLenPublicInputs},
+    StarkConfig,
+    air::{AirInstance, AuxBuilder, VarLenPublicInputs},
     challenger::CanObserve,
     fri::{DeepParams, FriFold, FriParams, PcsParams},
     lmcs::Lmcs,
-    transcript::{ProverTranscript, VerifierTranscript},
+    transcript::{ProverTranscript, TranscriptData, VerifierTranscript},
 };
 use serde::{Serialize, de::DeserializeOwned};
 
@@ -67,7 +67,7 @@ pub const PCS_PARAMS: PcsParams = PcsParams {
 #[derive(Debug, thiserror::Error)]
 pub enum ProvingError {
     #[error(transparent)]
-    Prover(#[from] miden_crypto::stark::ProverError),
+    Prover(#[from] miden_crypto::stark::prover::ProverError),
     #[error("failed to serialize proof: {0}")]
     Serialization(#[from] bincode::Error),
 }
@@ -78,7 +78,7 @@ pub enum VerificationError {
     #[error("failed to deserialize proof: {0}")]
     Deserialization(#[from] bincode::Error),
     #[error(transparent)]
-    Verifier(#[from] miden_crypto::stark::VerifierError),
+    Verifier(#[from] miden_crypto::stark::verifier::VerifierError),
 }
 
 // PROVE / VERIFY
@@ -109,7 +109,7 @@ where
     //   variable-length public inputs.
     // TODO: observe ACE commitment once ACE verification is integrated.
     let mut channel = ProverTranscript::new(challenger);
-    miden_crypto::stark::prove_single(
+    miden_crypto::stark::prover::prove_single(
         config,
         air,
         trace,
@@ -152,6 +152,6 @@ where
         public_values,
         var_len_public_inputs,
     };
-    miden_crypto::stark::verify_multi(config, &[(air, instance)], &mut channel)?;
+    miden_crypto::stark::verifier::verify_multi(config, &[(air, instance)], &mut channel)?;
     Ok(())
 }

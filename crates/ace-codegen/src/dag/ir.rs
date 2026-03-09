@@ -1,6 +1,6 @@
-use miden_crypto::stark::{
-    dft::{NaiveDft, TwoAdicSubgroupDft},
+use miden_crypto::{
     field::TwoAdicField,
+    stark::dft::{NaiveDft, TwoAdicSubgroupDft},
 };
 
 use crate::layout::InputKey;

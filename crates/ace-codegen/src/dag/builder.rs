@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use miden_crypto::stark::field::Field;
+use miden_crypto::field::Field;
 
 use super::ir::{NodeId, NodeKind};
 use crate::layout::InputKey;

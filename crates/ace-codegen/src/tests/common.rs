@@ -1,14 +1,19 @@
 use miden_core::{Felt, field::QuadFelt};
-use miden_crypto::stark::{
-    dft::{Radix2DitParallel, TwoAdicSubgroupDft},
+use miden_crypto::{
     field::{ExtensionField, Field, PrimeCharacteristicRing},
+    stark::{
+        air::symbolic::{
+            BaseEntry, BaseLeaf, ConstraintLayout, ExtEntry, ExtLeaf, SymbolicExpression,
+            SymbolicExpressionExt,
+        },
+        dft::{Radix2DitParallel, TwoAdicSubgroupDft},
+    },
 };
 
 use crate::{
     InputKey, InputLayout,
     dag::{NodeId, NodeKind},
     quotient,
-    symbolic::{Entry, SymExpr},
 };
 
 /// Deterministic input filler for layout-sized buffers.
@@ -54,8 +59,9 @@ pub fn eval_periodic_values(periodic_columns: &[Vec<Felt>], z_k: QuadFelt) -> Ve
         .collect()
 }
 
-pub fn eval_expr<F, EF>(
-    expr: &SymExpr<EF>,
+/// Evaluate a base-field symbolic expression at concrete inputs.
+pub fn eval_base_expr<F, EF>(
+    expr: &SymbolicExpression<F>,
     inputs: &[EF],
     layout: &InputLayout,
     periodic_values: &[EF],
@@ -65,79 +71,157 @@ where
     EF: ExtensionField<F>,
 {
     match expr {
-        SymExpr::Variable(v) => match v.entry {
-            Entry::Aux { offset } => {
-                let mut acc = EF::ZERO;
-                for coord in 0..EF::DIMENSION {
-                    let basis = EF::ith_basis_element(coord).unwrap();
-                    let key = InputKey::AuxCoord { offset, index: v.index, coord };
-                    let value = inputs[layout.index(key).unwrap()];
-                    acc += basis * value;
-                }
-                acc
+        SymbolicExpression::Leaf(leaf) => match leaf {
+            BaseLeaf::Variable(v) => match v.entry {
+                BaseEntry::Main { offset } => {
+                    let key = InputKey::Main { offset, index: v.index };
+                    inputs[layout.index(key).unwrap()]
+                },
+                BaseEntry::Public => {
+                    let key = InputKey::Public(v.index);
+                    inputs[layout.index(key).unwrap()]
+                },
+                BaseEntry::Periodic => periodic_values[v.index],
+                BaseEntry::Preprocessed { .. } => {
+                    panic!("preprocessed not supported in test")
+                },
             },
-            Entry::Challenge => {
-                let alpha = inputs[layout.index(InputKey::AuxRandAlpha).unwrap()];
-                let beta = inputs[layout.index(InputKey::AuxRandBeta).unwrap()];
-                match v.index {
-                    0 => alpha,
-                    1 => EF::ONE,
-                    _ => {
-                        let mut power = beta;
-                        for _ in 2..v.index {
-                            power *= beta;
-                        }
-                        power
-                    },
-                }
+            BaseLeaf::IsFirstRow => {
+                let z_pow_n = inputs[layout.index(InputKey::ZPowN).unwrap()];
+                let inv = inputs[layout.index(InputKey::InvZMinusOne).unwrap()];
+                (z_pow_n - EF::ONE) * inv
             },
-            Entry::Periodic => periodic_values[v.index],
-            Entry::Main { offset } => {
-                let key = InputKey::Main { offset, index: v.index };
-                inputs[layout.index(key).unwrap()]
+            BaseLeaf::IsLastRow => {
+                let z_pow_n = inputs[layout.index(InputKey::ZPowN).unwrap()];
+                let inv = inputs[layout.index(InputKey::InvZMinusGInv).unwrap()];
+                (z_pow_n - EF::ONE) * inv
             },
-            Entry::AuxBusBoundary => {
-                let key = InputKey::AuxBusBoundary(v.index);
-                inputs[layout.index(key).unwrap()]
+            BaseLeaf::IsTransition => {
+                let z = inputs[layout.index(InputKey::Z).unwrap()];
+                let g_inv = inputs[layout.index(InputKey::GInv).unwrap()];
+                z - g_inv
             },
-            Entry::Public => {
-                let key = InputKey::Public(v.index);
-                inputs[layout.index(key).unwrap()]
-            },
-            Entry::Preprocessed { .. } => {
-                panic!("preprocessed not supported in test")
-            },
+            BaseLeaf::Constant(c) => EF::from(*c),
         },
-        SymExpr::IsFirstRow => {
-            let z_pow_n = inputs[layout.index(InputKey::ZPowN).unwrap()];
-            let inv = inputs[layout.index(InputKey::InvZMinusOne).unwrap()];
-            (z_pow_n - EF::ONE) * inv
+        SymbolicExpression::Add { x, y, .. } => {
+            eval_base_expr::<F, EF>(x, inputs, layout, periodic_values)
+                + eval_base_expr::<F, EF>(y, inputs, layout, periodic_values)
         },
-        SymExpr::IsLastRow => {
-            let z_pow_n = inputs[layout.index(InputKey::ZPowN).unwrap()];
-            let inv = inputs[layout.index(InputKey::InvZMinusGInv).unwrap()];
-            (z_pow_n - EF::ONE) * inv
+        SymbolicExpression::Sub { x, y, .. } => {
+            eval_base_expr::<F, EF>(x, inputs, layout, periodic_values)
+                - eval_base_expr::<F, EF>(y, inputs, layout, periodic_values)
         },
-        SymExpr::IsTransition => {
-            let z = inputs[layout.index(InputKey::Z).unwrap()];
-            let g_inv = inputs[layout.index(InputKey::GInv).unwrap()];
-            z - g_inv
+        SymbolicExpression::Mul { x, y, .. } => {
+            eval_base_expr::<F, EF>(x, inputs, layout, periodic_values)
+                * eval_base_expr::<F, EF>(y, inputs, layout, periodic_values)
         },
-        SymExpr::Constant(c) => *c,
-        SymExpr::Add(x, y) => {
-            eval_expr::<F, EF>(x, inputs, layout, periodic_values)
-                + eval_expr::<F, EF>(y, inputs, layout, periodic_values)
+        SymbolicExpression::Neg { x, .. } => {
+            -eval_base_expr::<F, EF>(x, inputs, layout, periodic_values)
         },
-        SymExpr::Sub(x, y) => {
-            eval_expr::<F, EF>(x, inputs, layout, periodic_values)
-                - eval_expr::<F, EF>(y, inputs, layout, periodic_values)
-        },
-        SymExpr::Mul(x, y) => {
-            eval_expr::<F, EF>(x, inputs, layout, periodic_values)
-                * eval_expr::<F, EF>(y, inputs, layout, periodic_values)
-        },
-        SymExpr::Neg(x) => -eval_expr::<F, EF>(x, inputs, layout, periodic_values),
     }
+}
+
+/// Evaluate an extension-field symbolic expression at concrete inputs.
+pub fn eval_ext_expr<F, EF>(
+    expr: &SymbolicExpressionExt<F, EF>,
+    inputs: &[EF],
+    layout: &InputLayout,
+    periodic_values: &[EF],
+) -> EF
+where
+    F: Field,
+    EF: ExtensionField<F>,
+{
+    match expr {
+        SymbolicExpressionExt::Leaf(leaf) => match leaf {
+            ExtLeaf::Base(base_expr) => {
+                eval_base_expr::<F, EF>(base_expr, inputs, layout, periodic_values)
+            },
+            ExtLeaf::ExtVariable(v) => match v.entry {
+                ExtEntry::Permutation { offset } => {
+                    let mut acc = EF::ZERO;
+                    for coord in 0..EF::DIMENSION {
+                        let basis = EF::ith_basis_element(coord).unwrap();
+                        let key = InputKey::AuxCoord { offset, index: v.index, coord };
+                        let value = inputs[layout.index(key).unwrap()];
+                        acc += basis * value;
+                    }
+                    acc
+                },
+                ExtEntry::Challenge => {
+                    let alpha = inputs[layout.index(InputKey::AuxRandAlpha).unwrap()];
+                    let beta = inputs[layout.index(InputKey::AuxRandBeta).unwrap()];
+                    match v.index {
+                        0 => alpha,
+                        1 => EF::ONE,
+                        _ => {
+                            let mut power = beta;
+                            for _ in 2..v.index {
+                                power *= beta;
+                            }
+                            power
+                        },
+                    }
+                },
+                ExtEntry::PermutationValue => {
+                    let key = InputKey::AuxBusBoundary(v.index);
+                    inputs[layout.index(key).unwrap()]
+                },
+            },
+            ExtLeaf::ExtConstant(c) => *c,
+        },
+        SymbolicExpressionExt::Add { x, y, .. } => {
+            eval_ext_expr::<F, EF>(x, inputs, layout, periodic_values)
+                + eval_ext_expr::<F, EF>(y, inputs, layout, periodic_values)
+        },
+        SymbolicExpressionExt::Sub { x, y, .. } => {
+            eval_ext_expr::<F, EF>(x, inputs, layout, periodic_values)
+                - eval_ext_expr::<F, EF>(y, inputs, layout, periodic_values)
+        },
+        SymbolicExpressionExt::Mul { x, y, .. } => {
+            eval_ext_expr::<F, EF>(x, inputs, layout, periodic_values)
+                * eval_ext_expr::<F, EF>(y, inputs, layout, periodic_values)
+        },
+        SymbolicExpressionExt::Neg { x, .. } => {
+            -eval_ext_expr::<F, EF>(x, inputs, layout, periodic_values)
+        },
+    }
+}
+
+/// Evaluate all constraints (base + extension) folded with alpha in evaluation order.
+pub fn eval_folded_constraints<F, EF>(
+    base_constraints: &[SymbolicExpression<F>],
+    ext_constraints: &[SymbolicExpressionExt<F, EF>],
+    constraint_layout: &ConstraintLayout,
+    alpha: EF,
+    inputs: &[EF],
+    layout: &InputLayout,
+    periodic_values: &[EF],
+) -> EF
+where
+    F: Field,
+    EF: ExtensionField<F>,
+{
+    let total = constraint_layout.base_indices.len() + constraint_layout.ext_indices.len();
+    let mut ordered: Vec<(usize, bool, usize)> = Vec::with_capacity(total);
+    for (i, &pos) in constraint_layout.base_indices.iter().enumerate() {
+        ordered.push((pos, false, i));
+    }
+    for (i, &pos) in constraint_layout.ext_indices.iter().enumerate() {
+        ordered.push((pos, true, i));
+    }
+    ordered.sort_by_key(|(pos, ..)| *pos);
+
+    let mut acc = EF::ZERO;
+    for &(_, is_ext, idx) in &ordered {
+        let val = if is_ext {
+            eval_ext_expr::<F, EF>(&ext_constraints[idx], inputs, layout, periodic_values)
+        } else {
+            eval_base_expr::<F, EF>(&base_constraints[idx], inputs, layout, periodic_values)
+        };
+        acc = acc * alpha + val;
+    }
+    acc
 }
 
 pub fn eval_dag(

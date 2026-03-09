@@ -3,14 +3,15 @@
 use alloc::vec;
 
 use miden_core::field::QuadFelt;
-use miden_crypto::stark::{
-    GenericStarkConfig,
-    challenger::{HashChallenger, SerializingChallenger64},
-    crypto::{
-        CompressionFunctionFromHasher, p3_keccak::Keccak256Hash,
-        p3_miden_stateful_hasher::ChainingHasher,
+use miden_crypto::{
+    hash::keccak::Keccak256Hash,
+    stark::{
+        GenericStarkConfig,
+        challenger::{HashChallenger, SerializingChallenger64},
+        hasher::ChainingHasher,
+        lmcs::LmcsConfig,
+        symmetric::CompressionFunctionFromHasher,
     },
-    lmcs::LmcsConfig,
 };
 
 use super::{Dft, PCS_PARAMS};

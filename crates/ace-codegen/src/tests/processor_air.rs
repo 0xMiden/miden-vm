@@ -1,11 +1,12 @@
 use miden_air::{LiftedAir, ProcessorAir};
 use miden_core::{Felt, field::QuadFelt};
-use miden_crypto::stark::{air::AirWithPeriodicColumns, field::PrimeCharacteristicRing};
+use miden_crypto::stark::air::symbolic::{AirLayout, SymbolicAirBuilder};
 
-use super::common::{eval_dag, eval_expr, eval_periodic_values, eval_quotient, fill_inputs};
+use super::common::{
+    eval_dag, eval_folded_constraints, eval_periodic_values, eval_quotient, fill_inputs,
+};
 use crate::{
-    AceConfig, InputKey, LayoutKind, build_ace_circuit_for_air, builder::RecordingAirBuilder,
-    pipeline::build_ace_dag_for_air,
+    AceConfig, InputKey, LayoutKind, build_ace_circuit_for_air, pipeline::build_ace_dag_for_air,
 };
 
 #[test]
@@ -20,30 +21,36 @@ fn processor_air_dag_matches_manual_eval() {
     let layout = artifacts.layout.clone();
     let inputs = fill_inputs(&layout);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
-    let periodic_values = eval_periodic_values(
-        <ProcessorAir as AirWithPeriodicColumns<Felt>>::periodic_columns(&air),
-        z_k,
-    );
+    let periodic_values =
+        eval_periodic_values(&LiftedAir::<Felt, QuadFelt>::periodic_columns(&air), z_k);
 
-    let mut builder = RecordingAirBuilder::<Felt, QuadFelt>::new(
-        0,
-        layout.counts.width,
-        layout.counts.aux_width,
-        layout.counts.num_randomness,
-        layout.counts.num_public,
-        layout.counts.num_periodic,
-        LiftedAir::<Felt, QuadFelt>::num_aux_values(&air),
-    );
+    let air_layout = AirLayout {
+        preprocessed_width: 0,
+        main_width: layout.counts.width,
+        num_public_values: layout.counts.num_public,
+        permutation_width: layout.counts.aux_width,
+        num_permutation_challenges: layout.counts.num_randomness,
+        num_permutation_values: LiftedAir::<Felt, QuadFelt>::num_aux_values(&air),
+        num_periodic_columns: layout.counts.num_periodic,
+    };
+    let mut builder = SymbolicAirBuilder::<Felt, QuadFelt>::new(air_layout);
     LiftedAir::<Felt, QuadFelt>::eval(&air, &mut builder);
+    let constraint_layout = builder.constraint_layout();
+    let base_constraints = builder.base_constraints();
+    let ext_constraints = builder.extension_constraints();
 
     let alpha = inputs[layout.index(InputKey::Alpha).unwrap()];
     let inv_vanishing = inputs[layout.index(InputKey::InvVanishing).unwrap()];
 
-    let mut acc = QuadFelt::ZERO;
-    for c in builder.constraints() {
-        let val = eval_expr::<Felt, QuadFelt>(c, &inputs, &layout, &periodic_values);
-        acc = acc * alpha + val;
-    }
+    let acc = eval_folded_constraints::<Felt, QuadFelt>(
+        &base_constraints,
+        &ext_constraints,
+        &constraint_layout,
+        alpha,
+        &inputs,
+        &layout,
+        &periodic_values,
+    );
     let folded = acc * inv_vanishing;
     let quotient = eval_quotient(&layout, &inputs);
     let expected = folded - quotient;

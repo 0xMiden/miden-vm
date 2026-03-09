@@ -16,7 +16,7 @@ use miden_core::{
     program::{MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs},
 };
 use miden_crypto::stark::air::{
-    AirWithPeriodicColumns, ReducedAuxValues, ReductionError, VarLenPublicInputs, WindowAccess,
+    ReducedAuxValues, ReductionError, VarLenPublicInputs, WindowAccess,
 };
 
 pub mod config;
@@ -212,15 +212,13 @@ impl BaseAir<Felt> for ProcessorAir {
     }
 }
 
-impl AirWithPeriodicColumns<Felt> for ProcessorAir {
-    fn periodic_columns(&self) -> &[Vec<Felt>] {
-        &self.periodic_columns
-    }
-}
-
 // --- LiftedAir impl ---
 
 impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
+    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
+        self.periodic_columns.clone()
+    }
+
     fn num_randomness(&self) -> usize {
         trace::AUX_TRACE_RAND_CHALLENGES
     }

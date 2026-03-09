@@ -882,19 +882,19 @@ checksum = "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd"
 dependencies = [
  "cfg-if",
  "libc",
- "r-efi",
+ "r-efi 5.3.0",
  "wasip2",
 ]
 
 [[package]]
 name = "getrandom"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "139ef39800118c7683f2fd3c98c1b23c09ae076556b435f8e9064ae108aaeeec"
+checksum = "0de51e6874e94e7bf76d726fc5d13ba782deca734ff60d5bb2fb2607c7406555"
 dependencies = [
  "cfg-if",
  "libc",
- "r-efi",
+ "r-efi 6.0.0",
  "wasip2",
  "wasip3",
 ]
@@ -1049,9 +1049,9 @@ checksum = "92ecc6618181def0457392ccd0ee51198e065e016d1d527a7ac1b6dc7c1f09d2"
 
 [[package]]
 name = "jiff"
-version = "0.2.21"
+version = "0.2.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3e3d65f018c6ae946ab16e80944b97096ed73c35b221d1c478a6c81d8f57940"
+checksum = "1a3546dc96b6d42c5f24902af9e2538e82e39ad350b0c766eb3fbf2d8f3d8359"
 dependencies = [
  "jiff-static",
  "log",
@@ -1062,9 +1062,9 @@ dependencies = [
 
 [[package]]
 name = "jiff-static"
-version = "0.2.21"
+version = "0.2.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a17c2b211d863c7fde02cbea8a3c1a439b98e109286554f2860bdded7ff83818"
+checksum = "2a8c8b344124222efd714b73bb41f8b5120b27a7cc1c75593a6ff768d9d05aa4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1083,9 +1083,9 @@ dependencies = [
 
 [[package]]
 name = "js-sys"
-version = "0.3.89"
+version = "0.3.91"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4eacb0641a310445a4c513f2a5e23e19952e269c6a38887254d5f837a305506"
+checksum = "b49715b7073f385ba4bc528e5747d02e66cb39c6146efb66b781f131f0fb399c"
 dependencies = [
  "once_cell",
  "wasm-bindgen",
@@ -1339,7 +1339,7 @@ dependencies = [
 [[package]]
 name = "miden-crypto"
 version = "0.23.0"
-source = "git+https://github.com/0xMiden/crypto?branch=tracking-migration-work#87e63e6a92e0e88cfff4230e8cd8fdad2cfa8752"
+source = "git+https://github.com/0xMiden/crypto.git?rev=450a7bd116d24617526c1336000164f29d476ca0#450a7bd116d24617526c1336000164f29d476ca0"
 dependencies = [
  "blake3",
  "cc",
@@ -1381,7 +1381,7 @@ dependencies = [
 [[package]]
 name = "miden-crypto-derive"
 version = "0.23.0"
-source = "git+https://github.com/0xMiden/crypto?branch=tracking-migration-work#87e63e6a92e0e88cfff4230e8cd8fdad2cfa8752"
+source = "git+https://github.com/0xMiden/crypto.git?rev=450a7bd116d24617526c1336000164f29d476ca0#450a7bd116d24617526c1336000164f29d476ca0"
 dependencies = [
  "quote",
  "syn 2.0.117",
@@ -1406,7 +1406,7 @@ dependencies = [
 [[package]]
 name = "miden-field"
 version = "0.23.0"
-source = "git+https://github.com/0xMiden/crypto?branch=tracking-migration-work#87e63e6a92e0e88cfff4230e8cd8fdad2cfa8752"
+source = "git+https://github.com/0xMiden/crypto.git?rev=450a7bd116d24617526c1336000164f29d476ca0#450a7bd116d24617526c1336000164f29d476ca0"
 dependencies = [
  "miden-serde-utils",
  "num-bigint",
@@ -1520,7 +1520,7 @@ dependencies = [
 [[package]]
 name = "miden-serde-utils"
 version = "0.23.0"
-source = "git+https://github.com/0xMiden/crypto?branch=tracking-migration-work#87e63e6a92e0e88cfff4230e8cd8fdad2cfa8752"
+source = "git+https://github.com/0xMiden/crypto.git?rev=450a7bd116d24617526c1336000164f29d476ca0#450a7bd116d24617526c1336000164f29d476ca0"
 dependencies = [
  "p3-field",
  "p3-goldilocks",
@@ -1800,9 +1800,8 @@ checksum = "d211803b9b6b570f68772237e415a029d5a50c65d382910b879fb19d3271f94d"
 
 [[package]]
 name = "p3-air"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "091da36040f5a4e974f8254884859d335559fef75ec287eb6a7467dfd83501de"
+version = "0.4.2"
+source = "git+https://github.com/Plonky3/Plonky3?rev=4341702be337f95d1f8f7f7e9188199b98726d92#4341702be337f95d1f8f7f7e9188199b98726d92"
 dependencies = [
  "p3-field",
  "p3-matrix",
@@ -1811,9 +1810,8 @@ dependencies = [
 
 [[package]]
 name = "p3-blake3"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5bb4e967e9af91413233d8b252c620228cab168c398b8887ad84a7bcee16015a"
+version = "0.4.2"
+source = "git+https://github.com/Plonky3/Plonky3?rev=4341702be337f95d1f8f7f7e9188199b98726d92#4341702be337f95d1f8f7f7e9188199b98726d92"
 dependencies = [
  "blake3",
  "p3-symmetric",
@@ -1822,9 +1820,8 @@ dependencies = [
 
 [[package]]
 name = "p3-challenger"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "685fe948f1c038881f814556d3d9658ea47766e4d16a687aa09e001df2f3b126"
+version = "0.4.2"
+source = "git+https://github.com/Plonky3/Plonky3?rev=4341702be337f95d1f8f7f7e9188199b98726d92#4341702be337f95d1f8f7f7e9188199b98726d92"
 dependencies = [
  "p3-field",
  "p3-maybe-rayon",
@@ -1836,9 +1833,8 @@ dependencies = [
 
 [[package]]
 name = "p3-commit"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f10c38c88fd90dedb4cd66eb7ba7d4ce43f3adf46d82aee40178a5bbf7e71589"
+version = "0.4.2"
+source = "git+https://github.com/Plonky3/Plonky3?rev=4341702be337f95d1f8f7f7e9188199b98726d92#4341702be337f95d1f8f7f7e9188199b98726d92"
 dependencies = [
  "itertools 0.14.0",
  "p3-field",
@@ -1849,9 +1845,8 @@ dependencies = [
 
 [[package]]
 name = "p3-dft"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e08de44b5c241e7a4c038df1540e37038c83767e2f4b9fa4f5fd627c2916879"
+version = "0.4.2"
+source = "git+https://github.com/Plonky3/Plonky3?rev=4341702be337f95d1f8f7f7e9188199b98726d92#4341702be337f95d1f8f7f7e9188199b98726d92"
 dependencies = [
  "itertools 0.14.0",
  "p3-field",
@@ -1864,9 +1859,8 @@ dependencies = [
 
 [[package]]
 name = "p3-field"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fdb3bfc3a1ba51a757e9a7a7bd753a27886e8c05c38c4b6a43d59cd86c20a53f"
+version = "0.4.2"
+source = "git+https://github.com/Plonky3/Plonky3?rev=4341702be337f95d1f8f7f7e9188199b98726d92#4341702be337f95d1f8f7f7e9188199b98726d92"
 dependencies = [
  "itertools 0.14.0",
  "num-bigint",
@@ -1880,16 +1874,15 @@ dependencies = [
 
 [[package]]
 name = "p3-goldilocks"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a40340068bada658dc42df69bf9409f0faed1940d6494f3cf9ca20f8fe54dc3a"
+version = "0.4.2"
+source = "git+https://github.com/Plonky3/Plonky3?rev=4341702be337f95d1f8f7f7e9188199b98726d92#4341702be337f95d1f8f7f7e9188199b98726d92"
 dependencies = [
  "num-bigint",
  "p3-challenger",
  "p3-dft",
  "p3-field",
  "p3-mds",
- "p3-poseidon1",
+ "p3-poseidon",
  "p3-poseidon2",
  "p3-symmetric",
  "p3-util",
@@ -1900,9 +1893,8 @@ dependencies = [
 
 [[package]]
 name = "p3-keccak"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b880adadc200c8d1bef00ec6eab61766c743647afbc06bc1cdafc7d87a2fe1d"
+version = "0.4.2"
+source = "git+https://github.com/Plonky3/Plonky3?rev=4341702be337f95d1f8f7f7e9188199b98726d92#4341702be337f95d1f8f7f7e9188199b98726d92"
 dependencies = [
  "p3-symmetric",
  "p3-util",
@@ -1911,9 +1903,8 @@ dependencies = [
 
 [[package]]
 name = "p3-matrix"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fbb6f8655e789cf8eebd5ef821311f97030e39d00ca59bd085aa66aca297d35a"
+version = "0.4.2"
+source = "git+https://github.com/Plonky3/Plonky3?rev=4341702be337f95d1f8f7f7e9188199b98726d92#4341702be337f95d1f8f7f7e9188199b98726d92"
 dependencies = [
  "itertools 0.14.0",
  "p3-field",
@@ -1926,18 +1917,16 @@ dependencies = [
 
 [[package]]
 name = "p3-maybe-rayon"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3494f57fb29307865df3cda8974dbff9a21a2dfe67309ff9b8f4397e05dce67"
+version = "0.4.2"
+source = "git+https://github.com/Plonky3/Plonky3?rev=4341702be337f95d1f8f7f7e9188199b98726d92#4341702be337f95d1f8f7f7e9188199b98726d92"
 dependencies = [
  "rayon",
 ]
 
 [[package]]
 name = "p3-mds"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "712356f8cb7ee1a44004f7d31960a3ab28728f5da6b41acb373844ff477a78dd"
+version = "0.4.2"
+source = "git+https://github.com/Plonky3/Plonky3?rev=4341702be337f95d1f8f7f7e9188199b98726d92#4341702be337f95d1f8f7f7e9188199b98726d92"
 dependencies = [
  "p3-dft",
  "p3-field",
@@ -1949,8 +1938,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-lifted-air"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5c31c65fdc88952d7b301546add9670676e5b878aa0066dd929f107c203b006"
+source = "git+https://github.com/Nashtare/p3-miden?rev=0cf9192#0cf919228f6a050af37da53b1fb99afde1f62da2"
 dependencies = [
  "p3-air",
  "p3-field",
@@ -1962,8 +1950,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-lifted-fri"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab9932f1b0a16609a45cd4ee10a4d35412728bc4b38837c7979d7c85d8dcc9fc"
+source = "git+https://github.com/Nashtare/p3-miden?rev=0cf9192#0cf919228f6a050af37da53b1fb99afde1f62da2"
 dependencies = [
  "p3-challenger",
  "p3-commit",
@@ -1982,8 +1969,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-lifted-stark"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c3956ab7270c3cdd53ca9796d39ae1821984eb977415b0672110f9666bff5d8"
+source = "git+https://github.com/Nashtare/p3-miden?rev=0cf9192#0cf919228f6a050af37da53b1fb99afde1f62da2"
 dependencies = [
  "p3-challenger",
  "p3-dft",
@@ -2003,8 +1989,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-lmcs"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48c46791c983e772136db3d48f102431457451447abb9087deb6c8ce3c1efc86"
+source = "git+https://github.com/Nashtare/p3-miden?rev=0cf9192#0cf919228f6a050af37da53b1fb99afde1f62da2"
 dependencies = [
  "p3-commit",
  "p3-field",
@@ -2023,8 +2008,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-stateful-hasher"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec47a9d9615eb3d9d2a59b00d19751d9ad85384b55886827913d680d912eac6a"
+source = "git+https://github.com/Nashtare/p3-miden?rev=0cf9192#0cf919228f6a050af37da53b1fb99afde1f62da2"
 dependencies = [
  "p3-field",
  "p3-symmetric",
@@ -2033,8 +2017,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-transcript"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40c565647487e4a949f67e6f115b0391d6cb82ac8e561165789939bab23d0ae7"
+source = "git+https://github.com/Nashtare/p3-miden?rev=0cf9192#0cf919228f6a050af37da53b1fb99afde1f62da2"
 dependencies = [
  "p3-challenger",
  "p3-field",
@@ -2044,9 +2027,8 @@ dependencies = [
 
 [[package]]
 name = "p3-monty-31"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "136c964a854ff2c466a8c3d37b9575e0ef39ba6592e31c134f2557a777039094"
+version = "0.4.2"
+source = "git+https://github.com/Plonky3/Plonky3?rev=4341702be337f95d1f8f7f7e9188199b98726d92#4341702be337f95d1f8f7f7e9188199b98726d92"
 dependencies = [
  "itertools 0.14.0",
  "num-bigint",
@@ -2055,7 +2037,7 @@ dependencies = [
  "p3-matrix",
  "p3-maybe-rayon",
  "p3-mds",
- "p3-poseidon1",
+ "p3-poseidon",
  "p3-poseidon2",
  "p3-symmetric",
  "p3-util",
@@ -2067,10 +2049,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "p3-poseidon1"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ffe427e925ad0e85fd0e36ba53a3ab162dbeadc8507c31b7a513531df42d73e9"
+name = "p3-poseidon"
+version = "0.4.2"
+source = "git+https://github.com/Plonky3/Plonky3?rev=4341702be337f95d1f8f7f7e9188199b98726d92#4341702be337f95d1f8f7f7e9188199b98726d92"
 dependencies = [
  "p3-field",
  "p3-symmetric",
@@ -2079,9 +2060,8 @@ dependencies = [
 
 [[package]]
 name = "p3-poseidon2"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "530f98868eeb1c776cabba3f96d363142f90745f53fe508c86edce8ba11f3c5a"
+version = "0.4.2"
+source = "git+https://github.com/Plonky3/Plonky3?rev=4341702be337f95d1f8f7f7e9188199b98726d92#4341702be337f95d1f8f7f7e9188199b98726d92"
 dependencies = [
  "p3-field",
  "p3-mds",
@@ -2092,9 +2072,8 @@ dependencies = [
 
 [[package]]
 name = "p3-symmetric"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "631318d0025f045682a8508ccfd9227604b62fe76b7ebb7d0e5cf9c43e3d590c"
+version = "0.4.2"
+source = "git+https://github.com/Plonky3/Plonky3?rev=4341702be337f95d1f8f7f7e9188199b98726d92#4341702be337f95d1f8f7f7e9188199b98726d92"
 dependencies = [
  "itertools 0.14.0",
  "p3-field",
@@ -2104,9 +2083,8 @@ dependencies = [
 
 [[package]]
 name = "p3-util"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46ae22dbaa5e923be05afc0cc57f4b27ef80cdcabad5bfbc62250a9672151211"
+version = "0.4.2"
+source = "git+https://github.com/Plonky3/Plonky3?rev=4341702be337f95d1f8f7f7e9188199b98726d92#4341702be337f95d1f8f7f7e9188199b98726d92"
 dependencies = [
  "rayon",
  "serde",
@@ -2163,9 +2141,9 @@ dependencies = [
 
 [[package]]
 name = "pin-project-lite"
-version = "0.2.16"
+version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b3cff922bd51709b605d9ead9aa71031d81447142d828eb4a6eba76fe619f9b"
+checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
 name = "pkcs8"
@@ -2298,9 +2276,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro-crate"
-version = "3.4.0"
+version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "219cb19e96be00ab2e37d6e299658a0cfa83e52429179969b0f0121b4ac46983"
+checksum = "e67ba7e9b2b56446f1d419b1d807906278ffa1a658a8a5d8a39dcb1f5a78614f"
 dependencies = [
  "toml_edit",
 ]
@@ -2342,9 +2320,9 @@ dependencies = [
 
 [[package]]
 name = "quote"
-version = "1.0.44"
+version = "1.0.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21b2ebcf727b7760c461f091f9f0f539b77b8e87f2fd88131e7f1b433b3cece4"
+checksum = "41f2619966050689382d2b44f664f4bc593e129785a36d6ee376ddf37259b924"
 dependencies = [
  "proc-macro2",
 ]
@@ -2354,6 +2332,12 @@ name = "r-efi"
 version = "5.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
+
+[[package]]
+name = "r-efi"
+version = "6.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rand"
@@ -2870,7 +2854,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "82a72c767771b47409d2345987fda8628641887d5466101319899796367354a0"
 dependencies = [
  "fastrand",
- "getrandom 0.4.1",
+ "getrandom 0.4.2",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -2994,9 +2978,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.49.0"
+version = "1.50.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72a2903cd7736441aac9df9d7688bd0ce48edccaadf181c3b90be801e81d3d86"
+checksum = "27ad5e34374e03cfffefc301becb44e9dc3c17584f414349ebe29ed26661822d"
 dependencies = [
  "pin-project-lite",
  "tokio-macros",
@@ -3004,9 +2988,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-macros"
-version = "2.6.0"
+version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af407857209536a95c8e56f8231ef2c2e2aff839b22e07a1ffcbc617e9db9fa5"
+checksum = "5c55a2eff8b69ce66c84f85e1da1c233edc36ceb85a2058d11b0d6a3c7e7569c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3015,26 +2999,17 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "1.0.3+spec-1.1.0"
+version = "1.0.6+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7614eaf19ad818347db24addfa201729cf2a9b6fdfd9eb0ab870fcacc606c0c"
+checksum = "399b1124a3c9e16766831c6bba21e50192572cdd98706ea114f9502509686ffc"
 dependencies = [
  "indexmap",
  "serde_core",
  "serde_spanned",
- "toml_datetime 1.0.0+spec-1.1.0",
+ "toml_datetime",
  "toml_parser",
  "toml_writer",
  "winnow",
-]
-
-[[package]]
-name = "toml_datetime"
-version = "0.7.5+spec-1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92e1cfed4a3038bc5a127e35a2d360f145e1f4b971b551a2ba5fd7aedf7e1347"
-dependencies = [
- "serde_core",
 ]
 
 [[package]]
@@ -3048,12 +3023,12 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
-version = "0.23.10+spec-1.0.0"
+version = "0.25.4+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "84c8b9f757e028cee9fa244aea147aab2a9ec09d5325a9b01e0a49730c2b5269"
+checksum = "7193cbd0ce53dc966037f54351dbbcf0d5a642c7f0038c382ef9e677ce8c13f2"
 dependencies = [
  "indexmap",
- "toml_datetime 0.7.5+spec-1.1.0",
+ "toml_datetime",
  "toml_parser",
  "winnow",
 ]
@@ -3297,9 +3272,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen"
-version = "0.2.112"
+version = "0.2.114"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05d7d0fce354c88b7982aec4400b3e7fcf723c32737cef571bd165f7613557ee"
+checksum = "6532f9a5c1ece3798cb1c2cfdba640b9b3ba884f5db45973a6f442510a87d38e"
 dependencies = [
  "cfg-if",
  "once_cell",
@@ -3310,9 +3285,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro"
-version = "0.2.112"
+version = "0.2.114"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55839b71ba921e4f75b674cb16f843f4b1f3b26ddfcb3454de1cf65cc021ec0f"
+checksum = "18a2d50fcf105fb33bb15f00e7a77b772945a2ee45dcf454961fd843e74c18e6"
 dependencies = [
  "quote",
  "wasm-bindgen-macro-support",
@@ -3320,9 +3295,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro-support"
-version = "0.2.112"
+version = "0.2.114"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "caf2e969c2d60ff52e7e98b7392ff1588bffdd1ccd4769eba27222fd3d621571"
+checksum = "03ce4caeaac547cdf713d280eda22a730824dd11e6b8c3ca9e42247b25c631e3"
 dependencies = [
  "bumpalo",
  "proc-macro2",
@@ -3333,9 +3308,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-shared"
-version = "0.2.112"
+version = "0.2.114"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0861f0dcdf46ea819407495634953cdcc8a8c7215ab799a7a7ce366be71c7b30"
+checksum = "75a326b8c223ee17883a4251907455a2431acc2791c98c26279376490c378c16"
 dependencies = [
  "unicode-ident",
 ]
@@ -3376,9 +3351,9 @@ dependencies = [
 
 [[package]]
 name = "web-sys"
-version = "0.3.89"
+version = "0.3.91"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10053fbf9a374174094915bbce141e87a6bf32ecd9a002980db4b638405e8962"
+checksum = "854ba17bb104abfb26ba36da9729addc7ce7f06f5c0f90f3c391f8461cca21f9"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
@@ -3514,9 +3489,9 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
 name = "winnow"
-version = "0.7.14"
+version = "0.7.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a5364e9d77fcdeeaa6062ced926ee3381faa2ee02d3eb83a5c27a8825540829"
+checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
 dependencies = [
  "memchr",
 ]
@@ -3627,18 +3602,18 @@ checksum = "cfe53a6657fd280eaa890a3bc59152892ffa3e30101319d168b781ed6529b049"
 
 [[package]]
 name = "zerocopy"
-version = "0.8.39"
+version = "0.8.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db6d35d663eadb6c932438e763b262fe1a70987f9ae936e60158176d710cae4a"
+checksum = "a789c6e490b576db9f7e6b6d661bcc9799f7c0ac8352f56ea20193b2681532e5"
 dependencies = [
  "zerocopy-derive",
 ]
 
 [[package]]
 name = "zerocopy-derive"
-version = "0.8.39"
+version = "0.8.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4122cd3169e94605190e77839c9a40d40ed048d305bfdc146e7df40ab0f3e517"
+checksum = "f65c489a7071a749c849713807783f70672b28094011623e200cb86dcb835953"
 dependencies = [
  "proc-macro2",
  "quote",

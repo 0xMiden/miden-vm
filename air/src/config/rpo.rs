@@ -2,13 +2,11 @@
 
 use miden_core::field::QuadFelt;
 use miden_crypto::{
+    field::Field,
     hash::rpo::RpoPermutation256,
     stark::{
-        GenericStarkConfig,
-        challenger::DuplexChallenger,
-        crypto::{StatefulSponge, TruncatedPermutation},
-        field::Field,
-        lmcs::LmcsConfig,
+        GenericStarkConfig, challenger::DuplexChallenger, hasher::StatefulSponge, lmcs::LmcsConfig,
+        symmetric::TruncatedPermutation,
     },
 };
 
