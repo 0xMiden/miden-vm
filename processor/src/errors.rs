@@ -58,6 +58,8 @@ pub enum ExecutionError {
     },
     #[error("failed to execute the program for internal reason: {0}")]
     Internal(&'static str),
+    #[error("trace length exceeded the maximum of {0} rows")]
+    TraceLenExceeded(usize),
     /// Memory error with source context for diagnostics.
     ///
     /// Use `MemoryResultExt::map_mem_err` to convert `Result<T, MemoryError>` with context.

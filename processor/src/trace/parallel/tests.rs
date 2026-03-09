@@ -1,5 +1,6 @@
 use alloc::{string::String, sync::Arc};
 
+use miden_air::trace::chiplets::hasher::HASH_CYCLE_LEN;
 use miden_core::{
     Felt,
     mast::{
@@ -794,6 +795,187 @@ fn test_build_trace_returns_err_on_bad_node_id_in_hasher_replay() {
     assert!(
         result.is_err(),
         "build_trace should return Err when hasher replay has bad node ID"
+    );
+}
+
+/// Tests `build_trace_with_max_len` behavior at various `max_trace_len` boundaries relative to the
+/// core trace length. `core_trace_len` is the number of core trace rows including the HALT row
+/// appended by `build_trace_with_max_len`.
+///
+/// `max_trace_len_offset_from_core_trace_len` is added to `core_trace_len` to compute
+/// `max_trace_len`.
+#[rstest]
+// Case 1: max_trace_len is 1 less than core_trace_len, so the core trace check should fail.
+#[case(-1, false)]
+// Case 2: max_trace_len is equal to core_trace_len, so the core trace check should pass (not
+// strictly greater), and the function should succeed.
+#[case(0, true)]
+fn test_build_trace_with_max_len_corner_cases(
+    #[case] max_trace_len_offset_from_core_trace_len: isize,
+    #[case] build_trace_succeeds: bool,
+) {
+    const MAX_FRAGMENT_SIZE: usize = 1 << 20;
+
+    let program = basic_block_program_small();
+
+    let processor = FastProcessor::new_with_options(
+        StackInputs::new(DEFAULT_STACK).unwrap(),
+        AdviceInputs::default(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
+            .unwrap(),
+    );
+    let mut host = DefaultHost::default();
+    let (execution_output, trace_generation_context) =
+        processor.execute_for_trace_sync(&program, &mut host).unwrap();
+
+    // Compute the number of core trace rows generated, which includes the HALT row inserted by
+    // `build_trace_with_max_len`.
+    let core_trace_len = trace_generation_context.core_trace_contexts.len()
+        * trace_generation_context.fragment_size
+        + 1;
+
+    let max_trace_len = core_trace_len
+        .checked_add_signed(max_trace_len_offset_from_core_trace_len)
+        .unwrap();
+    let result = build_trace_with_max_len(
+        execution_output,
+        trace_generation_context,
+        program.to_info(),
+        max_trace_len,
+    );
+
+    assert_eq!(
+        result.is_ok(),
+        build_trace_succeeds,
+        "with max_trace_len={max_trace_len} (core_trace_len={core_trace_len}), \
+         expected build_trace_succeeds={build_trace_succeeds}"
+    );
+
+    // Additionally, if we expect an error, verify that it's the expected `TraceLenExceeded` error
+    // with the correct `max_len`.
+    if !build_trace_succeeds {
+        assert!(
+            matches!(result, Err(ExecutionError::TraceLenExceeded(max_len)) if max_len == max_trace_len),
+            "expected TraceLenExceeded({max_trace_len}), got: {result:?}"
+        );
+    }
+}
+
+/// Verifies that `build_trace_with_max_len` returns `TraceLenExceeded` (instead of panicking due
+/// to arithmetic overflow) when `core_trace_contexts.len() * fragment_size` overflows `usize`.
+#[test]
+fn test_build_trace_returns_err_on_fragment_size_overflow() {
+    const MAX_FRAGMENT_SIZE: usize = 1 << 20;
+
+    let program = basic_block_program_small();
+
+    let processor = FastProcessor::new_with_options(
+        StackInputs::new(DEFAULT_STACK).unwrap(),
+        AdviceInputs::default(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
+            .unwrap(),
+    );
+    let mut host = DefaultHost::default();
+    let (execution_output, mut trace_generation_context) =
+        processor.execute_for_trace_sync(&program, &mut host).unwrap();
+
+    // Set fragment_size to usize::MAX so that `len() * fragment_size` overflows.
+    trace_generation_context.fragment_size = usize::MAX;
+
+    let result = build_trace_with_max_len(
+        execution_output,
+        trace_generation_context,
+        program.to_info(),
+        usize::MAX,
+    );
+
+    assert!(
+        matches!(result, Err(ExecutionError::TraceLenExceeded(_))),
+        "expected TraceLenExceeded on overflow, got: {result:?}"
+    );
+}
+
+/// Verifies that `build_trace_with_max_len` returns `TraceLenExceeded` when the chiplets trace
+/// (hasher + memory rows) exceeds `max_trace_len`, even though the core trace rows fit.
+#[test]
+fn test_build_trace_returns_err_when_chiplets_trace_exceeds_max_len() {
+    const MAX_FRAGMENT_SIZE: usize = 1 << 20;
+
+    // Use the DYN program because it exercises both hasher and memory chiplets.
+    let program = dyn_program();
+    let stack_inputs = dyn_target_proc_hash();
+
+    let processor = FastProcessor::new_with_options(
+        StackInputs::new(stack_inputs).unwrap(),
+        AdviceInputs::default(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
+            .unwrap(),
+    );
+    let mut host = DefaultHost::default();
+    let (execution_output, mut trace_generation_context) =
+        processor.execute_for_trace_sync(&program, &mut host).unwrap();
+
+    // Note: the last fragment may have fewer rows than the fragment size, so this is really an
+    // upper bound on the number of core trace rows
+    let core_trace_rows =
+        trace_generation_context.core_trace_contexts.len() * trace_generation_context.fragment_size;
+
+    // Inject enough hasher permutations so the chiplets trace exceeds core_trace_rows.
+    // Each permute adds HASH_CYCLE_LEN rows to the hasher chiplet trace, so we need
+    // core_trace_rows / HASH_CYCLE_LEN + 1 permutations to guarantee the chiplets trace exceeds the
+    // limit.
+    let num_permutations = core_trace_rows / HASH_CYCLE_LEN + 1;
+    for _ in 0..num_permutations {
+        trace_generation_context.hasher_for_chiplet.record_permute_input([ZERO; 12]);
+    }
+
+    // Set max_trace_len equal to core_trace_rows. The core trace check passes (not strictly
+    // greater), but the inflated chiplets trace will exceed it.
+    let max_trace_len = core_trace_rows;
+
+    let result = build_trace_with_max_len(
+        execution_output,
+        trace_generation_context,
+        program.to_info(),
+        max_trace_len,
+    );
+
+    assert!(
+        matches!(result, Err(ExecutionError::TraceLenExceeded(_))),
+        "expected TraceLenExceeded, got: {result:?}"
+    );
+}
+
+/// Verifies that `build_trace` returns `ExecutionError::Internal` when `core_trace_contexts` is
+/// empty, since `push_halt_opcode_row` expects at least one fragment to have been processed.
+#[test]
+fn test_build_trace_returns_err_on_empty_core_trace_contexts() {
+    const MAX_FRAGMENT_SIZE: usize = 1 << 20;
+
+    let program = basic_block_program_small();
+
+    let processor = FastProcessor::new_with_options(
+        StackInputs::new(DEFAULT_STACK).unwrap(),
+        AdviceInputs::default(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
+            .unwrap(),
+    );
+    let mut host = DefaultHost::default();
+    let (execution_output, mut trace_generation_context) =
+        processor.execute_for_trace_sync(&program, &mut host).unwrap();
+
+    // Clear core_trace_contexts to simulate an empty trace.
+    trace_generation_context.core_trace_contexts.clear();
+
+    let result = build_trace(execution_output, trace_generation_context, program.to_info());
+
+    assert!(
+        matches!(result, Err(ExecutionError::Internal(_))),
+        "expected ExecutionError::Internal, got: {result:?}"
     );
 }
 

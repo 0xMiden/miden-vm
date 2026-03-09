@@ -40,6 +40,9 @@ use crate::{
 
 pub const CORE_TRACE_WIDTH: usize = SYS_TRACE_WIDTH + DECODER_TRACE_WIDTH + STACK_TRACE_WIDTH;
 
+/// Maximum allowed trace length (2^29 rows).
+const MAX_TRACE_LEN: usize = 1 << 29;
+
 pub(crate) mod core_trace_fragment;
 use core_trace_fragment::CoreTraceFragment;
 
@@ -71,6 +74,21 @@ pub fn build_trace(
     trace_generation_context: TraceGenerationContext,
     program_info: ProgramInfo,
 ) -> Result<ExecutionTrace, ExecutionError> {
+    build_trace_with_max_len(
+        execution_output,
+        trace_generation_context,
+        program_info,
+        MAX_TRACE_LEN,
+    )
+}
+
+/// Same as [`build_trace`], but with a configurable maximum trace length.
+pub fn build_trace_with_max_len(
+    execution_output: ExecutionOutput,
+    trace_generation_context: TraceGenerationContext,
+    program_info: ProgramInfo,
+    max_trace_len: usize,
+) -> Result<ExecutionTrace, ExecutionError> {
     let TraceGenerationContext {
         core_trace_contexts,
         range_checker_replay,
@@ -83,6 +101,27 @@ pub fn build_trace(
         fragment_size,
     } = trace_generation_context;
 
+    // Before any trace generation, check that the number of core trace rows doesn't exceed the
+    // maximum trace length. This is a necessary check to avoid OOM panics during trace generation,
+    // which can occur if the execution produces an extremely large number of steps.
+    //
+    // Note that we add 1 to the total core trace rows to account for the additional HALT opcode row
+    // that is pushed at the end of the last fragment.
+    let total_core_trace_rows = core_trace_contexts
+        .len()
+        .checked_mul(fragment_size)
+        .and_then(|n| n.checked_add(1))
+        .ok_or(ExecutionError::TraceLenExceeded(max_trace_len))?;
+    if total_core_trace_rows > max_trace_len {
+        return Err(ExecutionError::TraceLenExceeded(max_trace_len));
+    }
+
+    if core_trace_contexts.is_empty() {
+        return Err(ExecutionError::Internal(
+            "no trace fragments provided in the trace generation context",
+        ));
+    }
+
     let chiplets = initialize_chiplets(
         program_info.kernel().clone(),
         &core_trace_contexts,
@@ -91,6 +130,7 @@ pub fn build_trace(
         kernel_replay,
         hasher_for_chiplet,
         ace_replay,
+        max_trace_len,
     )?;
 
     let range_checker = initialize_range_checker(range_checker_replay, &chiplets);
@@ -428,6 +468,11 @@ fn push_halt_opcode_row(
     core_trace_columns[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + 1].push(ONE);
 }
 
+/// Initializes the ranger checker from the recorded range checks during execution and returns it.
+///
+/// Note that the maximum number of rows that the range checker can produce is 2^16, which is less
+/// than the maximum trace length (2^29). Hence, we can safely generate the entire range checker
+/// trace and then pad it to the final trace length, without worrying about hitting memory limits.
 fn initialize_range_checker(
     range_checker_replay: RangeCheckerReplay,
     chiplets: &Chiplets,
@@ -455,7 +500,15 @@ fn initialize_chiplets(
     kernel_replay: KernelReplay,
     hasher_for_chiplet: HasherRequestReplay,
     ace_replay: AceReplay,
+    max_trace_len: usize,
 ) -> Result<Chiplets, ExecutionError> {
+    let check_chiplets_trace_len = |chiplets: &Chiplets| -> Result<(), ExecutionError> {
+        if chiplets.trace_len() > max_trace_len {
+            return Err(ExecutionError::TraceLenExceeded(max_trace_len));
+        }
+        Ok(())
+    };
+
     let mut chiplets = Chiplets::new(kernel);
 
     // populate hasher chiplet
@@ -463,9 +516,11 @@ fn initialize_chiplets(
         match hasher_op {
             HasherOp::Permute(input_state) => {
                 let _ = chiplets.hasher.permute(input_state);
+                check_chiplets_trace_len(&chiplets)?;
             },
             HasherOp::HashControlBlock((h1, h2, domain, expected_hash)) => {
                 let _ = chiplets.hasher.hash_control_block(h1, h2, domain, expected_hash);
+                check_chiplets_trace_len(&chiplets)?;
             },
             HasherOp::HashBasicBlock((forest, node_id, expected_hash)) => {
                 let node = forest
@@ -478,12 +533,15 @@ fn initialize_chiplets(
                 };
                 let op_batches = basic_block_node.op_batches();
                 let _ = chiplets.hasher.hash_basic_block(op_batches, expected_hash);
+                check_chiplets_trace_len(&chiplets)?;
             },
             HasherOp::BuildMerkleRoot((value, path, index)) => {
                 let _ = chiplets.hasher.build_merkle_root(value, &path, index);
+                check_chiplets_trace_len(&chiplets)?;
             },
             HasherOp::UpdateMerkleRoot((old_value, new_value, path, index)) => {
                 chiplets.hasher.update_merkle_root(old_value, new_value, &path, index);
+                check_chiplets_trace_len(&chiplets)?;
             },
         }
     }
@@ -493,9 +551,11 @@ fn initialize_chiplets(
         match bitwise_op {
             BitwiseOp::U32And => {
                 chiplets.bitwise.u32and(a, b).map_exec_err_no_ctx()?;
+                check_chiplets_trace_len(&chiplets)?;
             },
             BitwiseOp::U32Xor => {
                 chiplets.bitwise.u32xor(a, b).map_exec_err_no_ctx()?;
+                check_chiplets_trace_len(&chiplets)?;
             },
         }
     }
@@ -533,25 +593,28 @@ fn initialize_chiplets(
         [elements_written, words_written, elements_read, words_read]
             .into_iter()
             .kmerge_by(|a, b| a.clk() < b.clk())
-            .try_for_each(|mem_access| match mem_access {
-                MemoryAccess::ReadElement(addr, ctx, clk) => chiplets
-                    .memory
-                    .read(ctx, addr, clk)
-                    .map(|_| ())
-                    .map_err(ExecutionError::MemoryErrorNoCtx),
-                MemoryAccess::WriteElement(addr, element, ctx, clk) => chiplets
-                    .memory
-                    .write(ctx, addr, clk, element)
-                    .map_err(ExecutionError::MemoryErrorNoCtx),
-                MemoryAccess::ReadWord(addr, ctx, clk) => chiplets
-                    .memory
-                    .read_word(ctx, addr, clk)
-                    .map(|_| ())
-                    .map_err(ExecutionError::MemoryErrorNoCtx),
-                MemoryAccess::WriteWord(addr, word, ctx, clk) => chiplets
-                    .memory
-                    .write_word(ctx, addr, clk, word)
-                    .map_err(ExecutionError::MemoryErrorNoCtx),
+            .try_for_each(|mem_access| {
+                match mem_access {
+                    MemoryAccess::ReadElement(addr, ctx, clk) => chiplets
+                        .memory
+                        .read(ctx, addr, clk)
+                        .map(|_| ())
+                        .map_err(ExecutionError::MemoryErrorNoCtx)?,
+                    MemoryAccess::WriteElement(addr, element, ctx, clk) => chiplets
+                        .memory
+                        .write(ctx, addr, clk, element)
+                        .map_err(ExecutionError::MemoryErrorNoCtx)?,
+                    MemoryAccess::ReadWord(addr, ctx, clk) => chiplets
+                        .memory
+                        .read_word(ctx, addr, clk)
+                        .map(|_| ())
+                        .map_err(ExecutionError::MemoryErrorNoCtx)?,
+                    MemoryAccess::WriteWord(addr, word, ctx, clk) => chiplets
+                        .memory
+                        .write_word(ctx, addr, clk, word)
+                        .map_err(ExecutionError::MemoryErrorNoCtx)?,
+                }
+                check_chiplets_trace_len(&chiplets)
             })?;
 
         enum MemoryAccess {
@@ -576,11 +639,13 @@ fn initialize_chiplets(
     // populate ACE chiplet
     for (clk, circuit_eval) in ace_replay.into_iter() {
         chiplets.ace.add_circuit_evaluation(clk, circuit_eval);
+        check_chiplets_trace_len(&chiplets)?;
     }
 
     // populate kernel ROM
     for proc_hash in kernel_replay.into_iter() {
         chiplets.kernel_rom.access_proc(proc_hash).map_exec_err_no_ctx()?;
+        check_chiplets_trace_len(&chiplets)?;
     }
 
     Ok(chiplets)
