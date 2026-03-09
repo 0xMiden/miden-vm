@@ -89,10 +89,14 @@ where
             .with_after_exit(after_exit_decorators);
             MastNodeBuilder::BasicBlock(builder)
         },
-        MastNode::Dyn(_) => {
-            let builder = DynNodeBuilder::new_dyn()
-                .with_before_enter(before_enter_decorators)
-                .with_after_exit(after_exit_decorators);
+        MastNode::Dyn(dyn_node) => {
+            let builder = if dyn_node.is_dyncall() {
+                DynNodeBuilder::new_dyncall()
+            } else {
+                DynNodeBuilder::new_dyn()
+            }
+            .with_before_enter(before_enter_decorators)
+            .with_after_exit(after_exit_decorators);
             MastNodeBuilder::Dyn(builder)
         },
         MastNode::External(external_node) => {
