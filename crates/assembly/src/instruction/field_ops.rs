@@ -272,7 +272,7 @@ fn perform_exp_for_small_power(span_builder: &mut BasicBlockBuilder, pow: u64) {
 /// Appends a sequence of operations to calculate the base 2 integer logarithm of the stack top
 /// element, using non-deterministic technique (i.e. it takes help of advice provider).
 ///
-/// This operation takes 44 VM cycles.
+/// This operation takes 66 VM cycles.
 ///
 /// # Errors
 /// Returns an error if the logarithm argument (top stack element) equals ZERO.
@@ -285,28 +285,26 @@ pub fn ilog2(block_builder: &mut BasicBlockBuilder) {
     append_pow2_op(block_builder);
     // => [pow2, ilog2, n, ...]
 
-    #[rustfmt::skip]
-    let ops = [
-        // split the words into u32 halves to use the bitwise operations (4 cycles)
-        MovUp2, U32split, MovUp2, U32split,
-        // => [pow2_high, pow2_low, n_high, n_low, ilog2, ...]
+    // enforce lower bound n >= 2^ilog2 using full 64-bit comparison to avoid limb-order ambiguity
+    // in the half-selection path below.
+    block_builder.push_ops([MovUp2, Dup1, Dup1, Swap]);
+    // => [pow2, n, n, pow2, ilog2, ...]
+    gte(block_builder);
+    // => [n >= pow2, n, pow2, ilog2, ...]
+    block_builder.push_ops([Assert(ZERO), MovDn2]);
+    // => [pow2, ilog2, n, ...]
 
-        // only one of the two halves in pow2 has a bit set, drop the other (9 cycles)
-        Dup1, Eqz, Dup0, MovDn3,
-        // => [drop_low, pow2_high, pow2_low, drop_low, n_high, n_low, ilog2, ...]
-        CSwap, Drop, MovDn3, CSwap, Drop,
-        // => [n_half, pow2_half, ilog2, ...]
-
-        // set all bits to 1 lower than pow2_half (00010000 -> 00011111)
-        Swap, Pad, Incr, Incr, Mul, Pad, Incr, Neg, Add,
-        // => [pow2_half * 2 - 1, n_half, ilog2, ...]
-        Dup1, U32and,
-        // => [m, n_half, ilog2, ...] if ilog2 calculation was correct, m should be equal to n_half
-        Eq, Assert(ZERO),
-        // => [ilog2, ...]
-    ];
-
-    block_builder.push_ops(ops);
+    // enforce upper bound n < 2^(ilog2 + 1).
+    //
+    // For ilog2 == 63, 2^(ilog2 + 1) = 2^64 is out of u64 range, and all valid field elements
+    // are already < 2^64; thus upper bound is vacuously true in that case. For all other values,
+    // we enforce n < 2 * pow2 via a full-width comparison.
+    block_builder.push_ops([MovUp2, Swap, Push(Felt::from_u8(2)), Mul]);
+    // => [2 * pow2, n, ilog2, ...]
+    lt(block_builder);
+    // => [n < 2 * pow2, ilog2, ...]
+    block_builder.push_ops([Dup1, Push(Felt::from_u8(63)), Eq, Or, Assert(ZERO)]);
+    // => [ilog2, ...]
 }
 
 // COMPARISON OPERATIONS
