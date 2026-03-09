@@ -840,10 +840,7 @@ impl EnumType {
         ty: Type,
         variants: impl IntoIterator<Item = Variant>,
     ) -> Self {
-        assert!(
-            ty.is_integer() || ty == Type::Felt,
-            "only integer or felt types are allowed in enum type definitions"
-        );
+        assert!(ty.is_integer(), "only integer types are allowed in enum type definitions");
         Self {
             span: name.span(),
             docs: None,
