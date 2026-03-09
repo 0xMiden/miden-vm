@@ -201,6 +201,97 @@ fn b_chip_trace_mem() {
     }
 }
 
+#[test]
+fn crypto_stream_missing_chiplets_bus_requests() {
+    // `crypto_stream` stack layout: [rate(8), cap(4), src_ptr, dst_ptr, ...]
+    let stack = [
+        1, 2, 3, 4, 5, 6, 7, 8, // rate(8)
+        0, 0, 0, 0, // cap(4)
+        0, // src_ptr
+        8, // dst_ptr
+        0, 0, // unused
+    ];
+
+    let trace = build_trace_from_ops(vec![Operation::CryptoStream], &stack);
+    let alphas: [Felt; AUX_TRACE_RAND_ELEMENTS] = [
+        Felt::new(2),
+        Felt::new(3),
+        Felt::new(4),
+        Felt::new(5),
+        Felt::new(6),
+        Felt::new(7),
+        Felt::new(8),
+        Felt::new(9),
+        Felt::new(10),
+        Felt::new(11),
+        Felt::new(12),
+        Felt::new(13),
+        Felt::new(14),
+        Felt::new(15),
+        Felt::new(16),
+        Felt::new(17),
+    ];
+
+    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
+    let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
+
+    // --- Assert exact bus requests for the four CryptoStream memory operations. ---
+
+    // CryptoStream with src_ptr=0, dst_ptr=8, rate=[1..8], and uninitialized (zero) memory:
+    //   - reads  word at addr 0: plaintext = [0, 0, 0, 0]
+    //   - reads  word at addr 4: plaintext = [0, 0, 0, 0]
+    //   - writes word at addr 8: ciphertext = plaintext + rate = [1, 2, 3, 4]
+    //   - writes word at addr 12: ciphertext = [5, 6, 7, 8]
+    let ctx = ZERO;
+    let clk = ONE; // CryptoStream executes at cycle 1 (cycle 0 is SPAN)
+
+    let read1 = build_expected_bus_word_msg(
+        &alphas,
+        MEMORY_READ_WORD_LABEL,
+        ctx,
+        ZERO, // src_ptr = 0
+        clk,
+        [ZERO, ZERO, ZERO, ZERO].into(),
+    );
+    let read2 = build_expected_bus_word_msg(
+        &alphas,
+        MEMORY_READ_WORD_LABEL,
+        ctx,
+        Felt::new(4), // src_ptr + 4
+        clk,
+        [ZERO, ZERO, ZERO, ZERO].into(),
+    );
+    let write1 = build_expected_bus_word_msg(
+        &alphas,
+        MEMORY_WRITE_WORD_LABEL,
+        ctx,
+        Felt::new(8), // dst_ptr = 8
+        clk,
+        [ONE, Felt::new(2), Felt::new(3), Felt::new(4)].into(),
+    );
+    let write2 = build_expected_bus_word_msg(
+        &alphas,
+        MEMORY_WRITE_WORD_LABEL,
+        ctx,
+        Felt::new(12), // dst_ptr + 4
+        clk,
+        [Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)].into(),
+    );
+
+    // All four requests are emitted at the same cycle, so they multiply together.
+    let combined_request = (read1 * read2 * write1 * write2).inverse();
+
+    // b_chip[0] and b_chip[1] should be ONE (span hash init at cycle 0).
+    assert_eq!(ONE, b_chip[0]);
+    assert_eq!(ONE, b_chip[1]);
+
+    // At cycle 1, CryptoStream issues 4 memory requests; included at row 2.
+    assert_eq!(combined_request, b_chip[2]);
+
+    // The chiplets bus should be balanced: final value must be ONE.
+    assert_eq!(*b_chip.last().unwrap(), ONE);
+}
+
 // TEST HELPERS
 // ================================================================================================
 
