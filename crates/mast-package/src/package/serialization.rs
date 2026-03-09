@@ -138,9 +138,7 @@ impl Deserializable for Package {
         let manifest = PackageManifest::read_from(source)?;
 
         // Read custom sections
-        let num_sections = source.read_usize()?;
-        let sections: Vec<Section> =
-            source.read_many_iter(num_sections)?.collect::<Result<_, _>>()?;
+        let sections = Vec::<Section>::read_from(source)?;
 
         Ok(Self {
             name,
