@@ -17,7 +17,10 @@
 
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
-use miden_core::Word;
+use miden_core::{
+    Word,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+};
 use miden_debug_types::{ColumnNumber, LineNumber};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -50,6 +53,26 @@ impl From<u32> for DebugTypeIdx {
 impl From<DebugTypeIdx> for u32 {
     fn from(value: DebugTypeIdx) -> Self {
         value.0
+    }
+}
+
+impl Serializable for DebugTypeIdx {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write_u32(self.0);
+    }
+
+    fn get_size_hint(&self) -> usize {
+        4
+    }
+}
+
+impl Deserializable for DebugTypeIdx {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        Ok(Self(source.read_u32()?))
+    }
+
+    fn min_serialized_size() -> usize {
+        4
     }
 }
 

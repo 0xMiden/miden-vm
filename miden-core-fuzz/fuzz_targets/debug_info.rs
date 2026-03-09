@@ -13,7 +13,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use miden_core::{mast::MastForest, utils::Deserializable};
+use miden_core::{mast::MastForest, serde::Deserializable};
 
 fuzz_target!(|data: &[u8]| {
     // DebugInfo is deserialized as part of MastForest (when flags byte is 0x00)

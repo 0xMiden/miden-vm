@@ -9,12 +9,13 @@ use miden_formatting::{
 use serde::{Deserialize, Serialize};
 
 use super::{MastForestContributor, MastNodeExt};
+#[cfg(debug_assertions)]
+use crate::mast::MastNode;
 use crate::{
     Felt, Word,
     chiplets::hasher,
     mast::{
-        DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode, MastNodeFingerprint,
-        MastNodeId,
+        DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeFingerprint, MastNodeId,
     },
     operations::{OPCODE_CALL, OPCODE_SYSCALL},
     utils::{Idx, LookupByIdx},

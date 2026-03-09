@@ -1,6 +1,8 @@
 mod kind;
 mod manifest;
 mod section;
+#[cfg(test)]
+mod seed_gen;
 mod serialization;
 
 use alloc::{format, string::String, sync::Arc, vec::Vec};

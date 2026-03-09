@@ -62,7 +62,7 @@ pub(crate) fn eval_circuit_impl(
     let num_vars = num_vars.as_canonical_u64();
     let num_eval = num_eval.as_canonical_u64();
 
-    let num_wires = num_vars + num_eval;
+    let num_wires = num_vars.saturating_add(num_eval);
     if num_wires > MAX_NUM_ACE_WIRES as u64 {
         const {
             // If this fails, update the error message below
@@ -90,7 +90,7 @@ pub(crate) fn eval_circuit_impl(
     }
 
     // Ensure instructions are word-aligned and non-empty
-    let num_read_rows = num_vars as u32 / 2;
+    let num_read_rows = (num_vars / 2) as u32;
     let num_eval_rows = num_eval as u32;
 
     let mut evaluation_context = CircuitEvaluation::new(ctx, clk, num_read_rows, num_eval_rows);

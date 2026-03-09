@@ -12,7 +12,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use miden_core::{mast::MastForest, utils::Deserializable};
+use miden_core::{mast::MastForest, serde::Deserializable};
 
 fuzz_target!(|data: &[u8]| {
     // BasicBlockData is internal, exercised through MastForest deserialization

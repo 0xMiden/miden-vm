@@ -173,6 +173,13 @@ pub enum ParsingError {
         #[label]
         span: SourceSpan,
     },
+    #[error("constant expression nesting depth exceeded")]
+    #[diagnostic(help("constant expression folding exceeded the maximum depth of {max_depth}"))]
+    ConstExprDepthExceeded {
+        #[label]
+        span: SourceSpan,
+        max_depth: usize,
+    },
     #[error("unexpected string in an arithmetic expression")]
     #[diagnostic()]
     StringInArithmeticExpression {

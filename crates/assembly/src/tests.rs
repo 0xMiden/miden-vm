@@ -1,4 +1,8 @@
-use alloc::{collections::BTreeSet, string::ToString, vec::Vec};
+use alloc::{
+    collections::BTreeSet,
+    string::{String, ToString},
+    vec::Vec,
+};
 use core::str::FromStr;
 use std::{
     eprintln,
@@ -24,12 +28,15 @@ use proptest::{
 
 use crate::{
     Assembler, Library, ModuleParser, PathBuf,
+    assembler::MAX_CONTROL_FLOW_NESTING,
     ast::{Module, ModuleKind, ProcedureName, QualifiedProcedureName},
     diagnostics::{IntoDiagnostic, Report},
     fmp::fmp_initialization_sequence,
     mast_forest_builder::MastForestBuilder,
     report,
-    testing::{TestContext, assert_diagnostic_lines, parse_module, regex, source_file},
+    testing::{
+        TestContext, assert_diagnostic, assert_diagnostic_lines, parse_module, regex, source_file,
+    },
 };
 
 type TestResult = Result<(), Report>;
@@ -2132,6 +2139,40 @@ fn nested_control_blocks() -> TestResult {
     );
     let program = context.assemble(source)?;
     insta::assert_snapshot!(program);
+    Ok(())
+}
+
+fn nested_if_source(depth: usize) -> String {
+    let mut source = String::from("begin\n");
+    for _ in 0..depth {
+        source.push_str("push.1\nif.true\n");
+    }
+    source.push_str("push.1\n");
+    for _ in 0..depth {
+        source.push_str("end\n");
+    }
+    source.push_str("end\n");
+    source
+}
+
+#[test]
+fn control_flow_nesting_depth_boundary() -> TestResult {
+    let context = TestContext::default();
+    let source = nested_if_source(MAX_CONTROL_FLOW_NESTING);
+    let source = source_file!(&context, source.as_str());
+    context.assemble(source)?;
+    Ok(())
+}
+
+#[test]
+fn control_flow_nesting_depth_exceeded() -> TestResult {
+    let context = TestContext::default();
+    let source = nested_if_source(MAX_CONTROL_FLOW_NESTING + 1);
+    let source = source_file!(&context, source.as_str());
+    let error = context
+        .assemble(source)
+        .expect_err("expected diagnostic to be raised, but compilation succeeded");
+    assert_diagnostic!(&error, "control-flow nesting depth exceeded");
     Ok(())
 }
 

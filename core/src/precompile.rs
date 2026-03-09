@@ -204,6 +204,30 @@ pub struct PrecompileVerifierRegistry {
     verifiers: BTreeMap<EventId, (EventName, Arc<dyn PrecompileVerifier>)>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        events::EventId,
+        serde::{BudgetedReader, ByteWriter, DeserializationError, SliceReader},
+    };
+
+    #[test]
+    fn precompile_request_rejects_over_budget_calldata_len() {
+        let mut bytes = Vec::new();
+        EventId::from_u64(0).write_into(&mut bytes);
+        bytes.write_usize(2);
+
+        let budget = bytes.len() + 1;
+        let mut reader = BudgetedReader::new(SliceReader::new(&bytes), budget);
+        let err = PrecompileRequest::read_from(&mut reader).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("requested 2 elements"));
+    }
+}
+
 impl PrecompileVerifierRegistry {
     /// Creates a new empty precompile verifiers registry.
     pub fn new() -> Self {

@@ -65,8 +65,9 @@ pub fn handle_aead_decrypt(process: &ProcessorState) -> Result<Vec<AdviceMutatio
     let src_ptr = process.get_stack_item(9).as_canonical_u64();
     let num_blocks = process.get_stack_item(11).as_canonical_u64();
 
+    let (num_ciphertext_elements, tag_ptr, data_blocks_count) = compute_sizes(num_blocks, src_ptr)?;
+
     // Read ciphertext from memory: (num_blocks + 1) * 8 elements (data + padding)
-    let num_ciphertext_elements = (num_blocks + 1) * 8;
     let ciphertext = read_memory_region(process, src_ptr, num_ciphertext_elements).ok_or(
         AeadDecryptError::MemoryReadFailed {
             addr: src_ptr,
@@ -75,7 +76,6 @@ pub fn handle_aead_decrypt(process: &ProcessorState) -> Result<Vec<AdviceMutatio
     )?;
 
     // Read authentication tag: 4 elements (1 word) immediately after ciphertext
-    let tag_ptr = src_ptr + num_ciphertext_elements;
     let tag_addr: u32 = tag_ptr
         .try_into()
         .ok()
@@ -104,7 +104,6 @@ pub fn handle_aead_decrypt(process: &ProcessorState) -> Result<Vec<AdviceMutatio
 
     // Extract only the data blocks (without padding) to push onto advice stack
     // The MASM encrypt procedure will add padding automatically during re-encryption
-    let data_blocks_count = (num_blocks * 8) as usize;
     let mut plaintext_data = plaintext_with_padding;
     plaintext_data.truncate(data_blocks_count);
 
@@ -114,6 +113,22 @@ pub fn handle_aead_decrypt(process: &ProcessorState) -> Result<Vec<AdviceMutatio
     let advice_stack_mutation = AdviceMutation::extend_stack(plaintext_data);
 
     Ok(vec![advice_stack_mutation])
+}
+
+fn compute_sizes(num_blocks: u64, src_ptr: u64) -> Result<(u64, u64, usize), AeadDecryptError> {
+    let num_ciphertext_elements = num_blocks
+        .checked_add(1)
+        .and_then(|blocks| blocks.checked_mul(8))
+        .ok_or(AeadDecryptError::SizeOverflow)?;
+    let tag_ptr = src_ptr
+        .checked_add(num_ciphertext_elements)
+        .ok_or(AeadDecryptError::SizeOverflow)?;
+    let data_blocks_count = num_blocks
+        .checked_mul(8)
+        .and_then(|count| count.try_into().ok())
+        .ok_or(AeadDecryptError::SizeOverflow)?;
+
+    Ok((num_ciphertext_elements, tag_ptr, data_blocks_count))
 }
 
 // ERROR HANDLING
@@ -126,6 +141,10 @@ enum AeadDecryptError {
     #[error("failed to read memory region at addr={addr}, len={len}")]
     MemoryReadFailed { addr: u64, len: u64 },
 
+    /// Size or address computation overflowed.
+    #[error("size overflow in AEAD decrypt handler")]
+    SizeOverflow,
+
     /// Decryption failed (wraps EncryptionError from miden-crypto).
     #[error(transparent)]
     DecryptionFailed(#[from] EncryptionError),
@@ -136,10 +155,39 @@ enum AeadDecryptError {
 
 #[cfg(test)]
 mod tests {
-    use crate::handlers::aead_decrypt::AEAD_DECRYPT_EVENT_NAME;
+    use crate::handlers::aead_decrypt::{AEAD_DECRYPT_EVENT_NAME, AeadDecryptError, compute_sizes};
 
     #[test]
     fn test_event_name() {
         assert_eq!(AEAD_DECRYPT_EVENT_NAME.as_str(), "miden::core::crypto::aead::decrypt");
+    }
+
+    #[test]
+    fn test_compute_sizes_happy_path() {
+        let (num_ciphertext_elements, tag_ptr, data_blocks_count) =
+            compute_sizes(1, 0).expect("sizes should fit");
+        assert_eq!(num_ciphertext_elements, 16);
+        assert_eq!(tag_ptr, 16);
+        assert_eq!(data_blocks_count, 8);
+    }
+
+    #[test]
+    fn test_compute_sizes_overflow_num_blocks() {
+        let err = compute_sizes(u64::MAX, 0).expect_err("should overflow");
+        assert!(matches!(err, AeadDecryptError::SizeOverflow));
+    }
+
+    #[test]
+    fn test_compute_sizes_overflow_tag_ptr() {
+        let err = compute_sizes(0, u64::MAX).expect_err("should overflow tag ptr");
+        assert!(matches!(err, AeadDecryptError::SizeOverflow));
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    #[test]
+    fn test_compute_sizes_overflow_data_blocks_count() {
+        let num_blocks = (usize::MAX as u64 / 8) + 1;
+        let err = compute_sizes(num_blocks, 0).expect_err("should overflow usize");
+        assert!(matches!(err, AeadDecryptError::SizeOverflow));
     }
 }
