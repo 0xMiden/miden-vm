@@ -17,6 +17,7 @@
 - Fixed `Constant::PartialEq` to include `visibility` field in equality comparison, making it consistent with other exportable items (`Procedure`, `TypeAlias`, `EnumType`).
 - Hardened untrusted deserialization by enforcing budgets and depth limits, plus expanded fuzzing coverage ([#2777](https://github.com/0xMiden/miden-vm/pull/2777)).
 - Hardened AEAD decrypt size calculations ([#2789](https://github.com/0xMiden/miden-vm/pull/2789)).
+- `SystemEvent::HpermToMap` handler now computes the correct permutation ([#2801](https://github.com/0xMiden/miden-vm/pull/2801)).
 - Fixes an possible u64 overflow issue in `op_eval_circuit()` [#2799](https://github.com/0xMiden/miden-vm/pull/2799)
 - Preserved dynexec/dyncall distinction (and digests) when remapping or merging MAST forests ([#2784](https://github.com/0xMiden/miden-vm/pull/2784)).
 

@@ -200,20 +200,19 @@ fn insert_hqword_into_adv_map(processor: &mut FastProcessor) -> Result<(), Syste
 fn insert_hperm_into_adv_map(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
     // Read the 12-element state from stack positions 1-12.
     // State layout: [RATE1, RATE2, CAP] where RATE1 is at positions 1-4.
-    // We read in reverse order to build the state array.
     let mut state = [
-        processor.stack_get(12),
-        processor.stack_get(11),
-        processor.stack_get(10),
-        processor.stack_get(9),
-        processor.stack_get(8),
-        processor.stack_get(7),
-        processor.stack_get(6),
-        processor.stack_get(5),
-        processor.stack_get(4),
-        processor.stack_get(3),
-        processor.stack_get(2),
         processor.stack_get(1),
+        processor.stack_get(2),
+        processor.stack_get(3),
+        processor.stack_get(4),
+        processor.stack_get(5),
+        processor.stack_get(6),
+        processor.stack_get(7),
+        processor.stack_get(8),
+        processor.stack_get(9),
+        processor.stack_get(10),
+        processor.stack_get(11),
+        processor.stack_get(12),
     ];
 
     // Extract the rate portion (first 8 elements) as values to store.
@@ -524,4 +523,51 @@ fn push_transformed_stack_top(
     let transformed_stack_top = f(stack_top);
     processor.advice.push_stack(transformed_stack_top);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec;
+
+    use miden_core::{Felt, ZERO, crypto::hash::Poseidon2};
+
+    use super::*;
+    use crate::{StackInputs, fast::FastProcessor};
+
+    /// Tests that `insert_hperm_into_adv_map` produces the same key as applying
+    /// `Poseidon2::apply_permutation` directly to the same state, and stores the rate portion
+    /// (first 8 elements) as the values.
+    #[test]
+    fn insert_hperm_into_adv_map_consistent_with_permutation() {
+        // Build a 12-element state with distinct values.
+        let state_felts: [Felt; 12] = core::array::from_fn(|i| Felt::new((i + 1) as u64));
+
+        // The stack for the system event has event_id at position 0, then state[0..12] at
+        // positions 1..13. StackInputs takes elements top-first, so position 0 is the first
+        // element in the slice.
+        let mut stack_values = vec![ZERO]; // event_id at position 0
+        stack_values.extend_from_slice(&state_felts); // positions 1..12
+
+        let mut processor = FastProcessor::new(StackInputs::new(&stack_values).unwrap());
+
+        // Call the handler under test.
+        insert_hperm_into_adv_map(&mut processor).unwrap();
+
+        // Compute expected key by applying the permutation to the same state.
+        let mut expected_state_after_perm = state_felts;
+        Poseidon2::apply_permutation(&mut expected_state_after_perm);
+        let expected_key = miden_core::Word::new(
+            expected_state_after_perm[Poseidon2::DIGEST_RANGE].try_into().unwrap(),
+        );
+
+        // The expected values are the rate portion (first 8 elements) of the *input* state.
+        let expected_values = state_felts[Poseidon2::RATE_RANGE].to_vec();
+
+        // Verify the advice map contains the correct entry.
+        let stored_values = processor
+            .advice
+            .get_mapped_values(&expected_key)
+            .expect("key should be present in advice map");
+        assert_eq!(stored_values, expected_values.as_slice());
+    }
 }
