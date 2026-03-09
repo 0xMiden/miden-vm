@@ -9,7 +9,9 @@ use std::{
     sync::{Arc, LazyLock},
 };
 
-use miden_assembly_syntax::{ast::Path, diagnostics::WrapErr, library::LibraryExport};
+use miden_assembly_syntax::{
+    MAX_REPEAT_COUNT, ast::Path, diagnostics::WrapErr, library::LibraryExport,
+};
 use miden_core::{
     Felt, Word, assert_matches,
     events::EventId,
@@ -3407,6 +3409,310 @@ fn invalid_repeat() -> TestResult {
         "  `----"
     );
     Ok(())
+}
+
+#[test]
+fn invalid_repeat_count_zero() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(&context, "begin repeat.0 nop end end");
+    let error = context.assemble(source).expect_err("expected repeat.0 to be rejected");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+    assert!(rendered.contains("invalid repeat count"));
+    Ok(())
+}
+
+#[test]
+fn invalid_repeat_count_zero_with_decorator() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "\
+proc foo
+    trace.1
+    repeat.0
+        nop
+    end
+end
+
+begin
+    call.foo
+end"
+    );
+    let error = context
+        .assemble(source)
+        .expect_err("expected repeat.0 with decorator to be rejected");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+    assert!(rendered.contains("invalid repeat count"));
+    Ok(())
+}
+
+#[test]
+fn invalid_repeat_count_too_large() -> TestResult {
+    let context = TestContext::default();
+    let repeat_count = MAX_REPEAT_COUNT + 1;
+    let source = source_file!(&context, format!("begin repeat.{repeat_count} nop end end"));
+    let error = context
+        .assemble(source)
+        .expect_err("expected repeat count above limit to be rejected");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+    assert!(rendered.contains("invalid repeat count"));
+    Ok(())
+}
+
+#[test]
+fn invalid_repeat_count_constant_zero() -> TestResult {
+    let context = TestContext::default();
+    let source =
+        source_file!(&context, "const REPEAT_COUNT = 0\nbegin repeat.REPEAT_COUNT nop end end");
+    let error = context
+        .assemble(source)
+        .expect_err("expected repeat.0 from constant to be rejected");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+    assert!(rendered.contains("invalid repeat count"));
+    Ok(())
+}
+
+#[test]
+fn invalid_repeat_count_constant_too_large() -> TestResult {
+    let context = TestContext::default();
+    let repeat_count = MAX_REPEAT_COUNT + 1;
+    let source = source_file!(
+        &context,
+        format!("const REPEAT_COUNT = {repeat_count}\nbegin repeat.REPEAT_COUNT nop end end")
+    );
+    let error = context
+        .assemble(source)
+        .expect_err("expected repeat count above limit from constant to be rejected");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+    assert!(rendered.contains("invalid repeat count"));
+    Ok(())
+}
+
+#[test]
+fn repeat_count_constant_at_limit_allowed() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        format!("const REPEAT_COUNT = {MAX_REPEAT_COUNT}\nbegin repeat.REPEAT_COUNT nop end end")
+    );
+    context
+        .assemble(source)
+        .expect("expected repeat count at limit from constant to be accepted");
+    Ok(())
+}
+
+#[test]
+fn const_folding_modulus_aliasing_must_be_rejected() {
+    let program_src = r#"
+const ALIAS = 18446744069414584320+1
+
+begin
+    push.ALIAS
+end
+"#;
+
+    let assembled = Assembler::default().assemble_program(program_src);
+    assert!(
+        assembled.is_err(),
+        "expected constants >= field modulus to be rejected (must not silently alias to 0)"
+    );
+}
+
+#[test]
+fn const_evaluator_modulus_aliasing_must_be_rejected() {
+    let program_src = r#"
+const X = 18446744069414584320
+const Y = 1
+const ALIAS = X+Y
+
+begin
+    push.ALIAS
+end
+"#;
+
+    let assembled = Assembler::default().assemble_program(program_src);
+    assert!(
+        assembled.is_err(),
+        "expected out-of-range constant results to be rejected (must not silently alias via `Felt::new`)"
+    );
+}
+
+#[test]
+fn const_folding_u64_overflow_must_not_panic_and_must_error() {
+    let program_src = r#"
+const WRAP = 18446744069414584320+18446744069414584320
+
+begin
+    push.WRAP
+end
+"#;
+
+    let assembled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        Assembler::default().assemble_program(program_src)
+    }));
+
+    assert!(
+        assembled.is_ok(),
+        "assembler panicked while folding a constant expression with u64 overflow"
+    );
+
+    let assembled = assembled.unwrap();
+    assert!(
+        assembled.is_err(),
+        "expected the assembler to reject constant expressions which overflow u64 during folding"
+    );
+}
+
+#[test]
+fn const_folding_subtraction_underflow_must_be_rejected() {
+    let program_src = r#"
+const UNDERFLOW = 0-1
+
+begin
+    push.UNDERFLOW
+end
+"#;
+
+    let assembled = Assembler::default().assemble_program(program_src);
+    assert!(
+        assembled.is_err(),
+        "expected subtraction underflow in constant expressions to be rejected"
+    );
+}
+
+#[test]
+fn const_division_slash_must_not_match_int_division() {
+    let program_src = r#"
+const A1 = 3/2
+const B1 = 3//2
+
+const X = 3
+const Y = 2
+const A2 = X/Y
+const B2 = X//Y
+
+begin
+    push.A1
+    push.B1
+    push.A2
+    push.B2
+end
+"#;
+
+    let program = Assembler::default()
+        .assemble_program(program_src)
+        .expect("program assembly must succeed");
+
+    let entry = program.get_node_by_id(program.entrypoint()).expect("missing entrypoint node");
+    let mast = format!("{}", entry.to_display(program.mast_forest()));
+
+    let toks: Vec<&str> = mast.split_whitespace().collect();
+    let pad_incr_pairs = toks.windows(2).filter(|w| w[0] == "pad" && w[1] == "incr").count();
+
+    assert_eq!(
+        pad_incr_pairs, 2,
+        "expected `/` (field division) to not fold to the same value as `//` (integer division)"
+    );
+}
+
+#[test]
+fn const_division_by_zero_must_error() {
+    let program_src = r#"
+const BAD = 1/0
+
+begin
+    push.BAD
+end
+"#;
+
+    let assembled = Assembler::default().assemble_program(program_src);
+    assert!(
+        assembled.is_err(),
+        "expected division by zero in constant expressions to be rejected"
+    );
+}
+
+#[test]
+fn push_word_slice_u64_max_must_not_panic_and_must_error() {
+    let program_src = r#"
+const WORD = [1,2,3,4]
+
+begin
+    push.WORD[18446744073709551615]
+end
+"#;
+
+    let assembled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        Assembler::default().assemble_program(program_src)
+    }));
+
+    assert!(
+        assembled.is_ok(),
+        "assembler panicked while parsing push.WORD[...] with an out-of-range index"
+    );
+
+    let assembled = assembled.unwrap();
+    assert!(
+        assembled.is_err(),
+        "expected push.WORD[...] with an out-of-range index to be rejected with an error"
+    );
+}
+
+#[test]
+fn push_word_slice_range_u64_max_end_must_not_panic_and_must_error() {
+    let program_src = r#"
+const WORD = [1,2,3,4]
+
+begin
+    push.WORD[0..18446744073709551615]
+end
+"#;
+
+    let assembled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        Assembler::default().assemble_program(program_src)
+    }));
+
+    assert!(
+        assembled.is_ok(),
+        "assembler panicked while parsing push.WORD[0..] with an out-of-range index"
+    );
+
+    let assembled = assembled.unwrap();
+    assert!(
+        assembled.is_err(),
+        "expected push.WORD[0..] with an out-of-range index to be rejected with an error"
+    );
+}
+
+#[test]
+fn push_word_slice_range_u64_max_start_must_not_panic_and_must_error() {
+    let program_src = r#"
+const WORD = [1,2,3,4]
+
+begin
+    push.WORD[18446744073709551615..0]
+end
+"#;
+
+    let assembled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        Assembler::default().assemble_program(program_src)
+    }));
+
+    assert!(
+        assembled.is_ok(),
+        "assembler panicked while parsing push.WORD[..0] with an out-of-range index"
+    );
+
+    let assembled = assembled.unwrap();
+    assert!(
+        assembled.is_err(),
+        "expected push.WORD[..0] with an out-of-range index to be rejected with an error"
+    );
 }
 
 #[test]

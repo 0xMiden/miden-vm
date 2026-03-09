@@ -174,6 +174,7 @@ impl<'input> Lexer<'input> {
         }
 
         self.token_start = position;
+        self.token_end = position;
     }
 
     #[inline]
@@ -213,6 +214,12 @@ impl<'input> Lexer<'input> {
         assert!(self.token_start <= self.token_end, "invalid range");
         assert!(self.token_end <= u32::MAX as usize, "file too large");
         SourceSpan::new(self.source_id, (self.token_start as u32)..(self.token_end as u32))
+    }
+
+    #[inline]
+    fn char_span(&self, pos: usize, c: char) -> SourceSpan {
+        let end = pos + c.len_utf8();
+        SourceSpan::new(self.source_id, (pos as u32)..(end as u32))
     }
 
     #[inline]
@@ -272,7 +279,9 @@ impl<'input> Lexer<'input> {
             self.skip_whitespace();
         }
 
-        match self.read() {
+        let pos = self.token_start;
+        let c = self.read();
+        match c {
             '@' => pop!(self, Token::At),
             '!' => pop!(self, Token::Bang),
             ':' => match self.peek() {
@@ -325,9 +334,9 @@ impl<'input> Lexer<'input> {
             'A'..='Z' => self.lex_identifier(),
             '_' => match self.peek() {
                 c if c.is_ascii_alphanumeric() => self.lex_identifier(),
-                _ => Err(ParsingError::InvalidToken { span: self.span() }),
+                _ => Err(ParsingError::InvalidToken { span: self.char_span(pos, c) }),
             },
-            _ => Err(ParsingError::InvalidToken { span: self.span() }),
+            _ => Err(ParsingError::InvalidToken { span: self.char_span(pos, c) }),
         }
     }
 

@@ -416,4 +416,40 @@ end
         assert_matches!(lexer.next(), Some(Ok(Token::End)));
         assert_matches!(lexer.next(), Some(Ok(Token::Eof)));
     }
+
+    #[test]
+    fn lex_invalid_token_after_whitespace_returns_error() {
+        let source_id = SourceId::default();
+        let scanner = Scanner::new("begin \u{0001}\nend\n");
+        let mut lexer = Lexer::new(source_id, scanner).map(|result| result.map(|(_, t, _)| t));
+
+        assert_matches!(lexer.next(), Some(Ok(Token::Begin)));
+        assert_matches!(
+            lexer.next(),
+            Some(Err(ParsingError::InvalidToken { span })) if span.into_range() == (6..7)
+        );
+    }
+
+    #[test]
+    fn lex_invalid_underscore_token_span() {
+        let source_id = SourceId::default();
+        let scanner = Scanner::new("begin _-\nend\n");
+        let mut lexer = Lexer::new(source_id, scanner).map(|result| result.map(|(_, t, _)| t));
+
+        assert_matches!(lexer.next(), Some(Ok(Token::Begin)));
+        assert_matches!(
+            lexer.next(),
+            Some(Err(ParsingError::InvalidToken { span })) if span.into_range() == (6..7)
+        );
+    }
+
+    #[test]
+    fn lex_single_char_token_and_ident_spans() {
+        let source_id = SourceId::default();
+        let scanner = Scanner::new("@\nA\n");
+        let mut lexer = Lexer::new(source_id, scanner);
+
+        assert_matches!(lexer.next(), Some(Ok((0, Token::At, 1))));
+        assert_matches!(lexer.next(), Some(Ok((2, Token::ConstantIdent("A"), 3))));
+    }
 }
