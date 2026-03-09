@@ -13,11 +13,11 @@ use alloc::vec::Vec;
 use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
 use miden_crypto::stark::{
     StarkConfig,
-    air::{AirInstance, AuxBuilder, VarLenPublicInputs},
+    air::{AuxBuilder, VarLenPublicInputs},
     challenger::CanObserve,
     fri::{DeepParams, FriFold, FriParams, PcsParams},
     lmcs::Lmcs,
-    transcript::{ProverTranscript, TranscriptData, VerifierTranscript},
+    proof::{StarkOutput, StarkProof},
 };
 use serde::{Serialize, de::DeserializeOwned};
 
@@ -108,17 +108,16 @@ where
     //   This also requires updating the recursive verifier to absorb both fixed and
     //   variable-length public inputs.
     // TODO: observe ACE commitment once ACE verification is integrated.
-    let mut channel = ProverTranscript::new(challenger);
-    miden_crypto::stark::prover::prove_single(
+    let output: StarkOutput<Felt, QuadFelt, SC> = miden_crypto::stark::prover::prove_single(
         config,
         air,
         trace,
         public_values,
         var_len_public_inputs,
         aux_builder,
-        &mut channel,
+        challenger,
     )?;
-    Ok(bincode::serialize(&channel.into_data())?)
+    Ok(bincode::serialize(&output.proof)?)
 }
 
 /// Verifies a STARK proof for the given AIR and public values.
@@ -138,20 +137,21 @@ where
     SC: StarkConfig<Felt, QuadFelt>,
     <SC::Lmcs as Lmcs>::Commitment: DeserializeOwned,
 {
-    let transcript_data: TranscriptData<Felt, <SC::Lmcs as Lmcs>::Commitment> =
-        bincode::deserialize(proof_bytes)?;
+    let proof: StarkProof<Felt, QuadFelt, SC> = bincode::deserialize(proof_bytes)?;
     let mut challenger = config.challenger();
     challenger.observe_slice(public_values);
     // TODO: observe var_len_public_inputs in the transcript for Fiat-Shamir binding.
     //   This also requires updating the recursive verifier to absorb both fixed and
     //   variable-length public inputs.
     // TODO: observe ACE commitment once ACE verification is integrated.
-    let mut channel = VerifierTranscript::from_data(challenger, &transcript_data);
-    let instance = AirInstance {
+    miden_crypto::stark::verifier::verify_single(
+        config,
+        air,
         log_trace_height,
         public_values,
         var_len_public_inputs,
-    };
-    miden_crypto::stark::verifier::verify_multi(config, &[(air, instance)], &mut channel)?;
+        &proof,
+        challenger,
+    )?;
     Ok(())
 }

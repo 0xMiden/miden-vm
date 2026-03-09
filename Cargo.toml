@@ -64,7 +64,7 @@ miden-utils-testing = { path = "./crates/test-utils", package = "miden-test-util
 miden-verifier = { path = "./verifier", version = "0.22", default-features = false }
 
 # Miden crates
-miden-crypto = { version = "0.23", default-features = false, git = "https://github.com/0xMiden/crypto.git", rev = "450a7bd116d24617526c1336000164f29d476ca0" }
+miden-crypto = { version = "0.23", default-features = false, git = "https://github.com/0xMiden/crypto.git", rev = "f931d8499" }
 miden-formatting = { version = "0.1", default-features = false }
 midenc-hir-type = { version = "0.4", default-features = false }
 
