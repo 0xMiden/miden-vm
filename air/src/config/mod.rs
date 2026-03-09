@@ -10,7 +10,11 @@
 
 use alloc::vec::Vec;
 
-use miden_core::{Felt, field::QuadFelt, utils::RowMajorMatrix};
+use miden_core::{
+    Felt,
+    field::{QuadFelt, TwoAdicField},
+    utils::RowMajorMatrix,
+};
 use miden_crypto::stark::{
     StarkConfig,
     air::{AuxBuilder, VarLenPublicInputs},
@@ -77,6 +81,8 @@ pub enum ProvingError {
 pub enum VerificationError {
     #[error("failed to deserialize proof: {0}")]
     Deserialization(#[from] bincode::Error),
+    #[error("log_trace_height {0} exceeds the two-adic order of the field")]
+    InvalidTraceHeight(u32),
     #[error(transparent)]
     Verifier(#[from] miden_crypto::stark::verifier::VerifierError),
 }
@@ -104,6 +110,7 @@ where
 {
     let mut challenger = config.challenger();
     challenger.observe_slice(public_values);
+    // TODO: observe log_trace_height in the transcript for Fiat-Shamir binding.
     // TODO: observe var_len_public_inputs in the transcript for Fiat-Shamir binding.
     //   This also requires updating the recursive verifier to absorb both fixed and
     //   variable-length public inputs.
@@ -127,7 +134,7 @@ where
 pub fn verify<A, SC>(
     config: &SC,
     air: &A,
-    log_trace_height: usize,
+    log_trace_height: u32,
     public_values: &[Felt],
     var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
     proof_bytes: &[u8],
@@ -137,9 +144,14 @@ where
     SC: StarkConfig<Felt, QuadFelt>,
     <SC::Lmcs as Lmcs>::Commitment: DeserializeOwned,
 {
+    if log_trace_height as usize > Felt::TWO_ADICITY {
+        return Err(VerificationError::InvalidTraceHeight(log_trace_height));
+    }
+
     let proof: StarkProof<Felt, QuadFelt, SC> = bincode::deserialize(proof_bytes)?;
     let mut challenger = config.challenger();
     challenger.observe_slice(public_values);
+    // TODO: observe log_trace_height in the transcript for Fiat-Shamir binding.
     // TODO: observe var_len_public_inputs in the transcript for Fiat-Shamir binding.
     //   This also requires updating the recursive verifier to absorb both fixed and
     //   variable-length public inputs.
@@ -147,7 +159,7 @@ where
     miden_crypto::stark::verifier::verify_single(
         config,
         air,
-        log_trace_height,
+        log_trace_height as usize,
         public_values,
         var_len_public_inputs,
         &proof,
