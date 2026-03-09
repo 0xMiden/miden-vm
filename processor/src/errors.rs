@@ -101,6 +101,8 @@ pub enum ExecutionError {
     },
     #[error("failed to serialize proof: {0}")]
     ProofSerializationError(String),
+    #[error("execution trace length exceeds the maximum allowed {max_trace_len} rows")]
+    TraceLenExceeded { max_trace_len: usize },
     #[error(transparent)]
     HostError(#[from] HostError),
 }
