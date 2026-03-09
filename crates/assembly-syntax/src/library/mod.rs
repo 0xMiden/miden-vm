@@ -550,6 +550,10 @@ impl TryFrom<Library> for KernelLibrary {
             }
         }
 
+        if proc_digests.is_empty() {
+            return Err(LibraryError::NoExport);
+        }
+
         let kernel = Kernel::new(&proc_digests).map_err(LibraryError::KernelConversion)?;
 
         Ok(Self {

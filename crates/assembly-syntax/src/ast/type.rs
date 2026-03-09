@@ -1049,6 +1049,15 @@ impl Variant {
         };
 
         match ty {
+            Type::Felt if value >= FIELD_MODULUS => {
+                Err(SemanticAnalysisError::InvalidEnumDiscriminant {
+                    span: self.discriminant.span(),
+                    repr: ty.clone(),
+                })
+            },
+            // IntValue is represented as an unsigned integer, so negative discriminants
+            // are rejected during constant evaluation.
+            Type::Felt => Ok(()),
             Type::I1 if value > 1 => Err(SemanticAnalysisError::InvalidEnumDiscriminant {
                 span: self.discriminant.span(),
                 repr: ty.clone(),

@@ -172,15 +172,36 @@ impl ConstantExpr {
                                     if is_division_by_zero {
                                         return Err(ParsingError::DivisionByZero { span });
                                     }
-                                    let result = match op {
-                                        ConstantOp::Add => lhs.checked_add(rhs),
-                                        ConstantOp::Sub => lhs.checked_sub(rhs),
-                                        ConstantOp::Mul => lhs.checked_mul(rhs),
-                                        ConstantOp::IntDiv => lhs.checked_div(rhs),
+                                    match op {
+                                        ConstantOp::Add => {
+                                            let value = lhs
+                                                .checked_add(rhs)
+                                                .ok_or(ParsingError::ConstantOverflow { span })?;
+                                            Some(Self::Int(Span::new(span, value)))
+                                        },
+                                        ConstantOp::Sub => {
+                                            let value = lhs
+                                                .checked_sub(rhs)
+                                                .ok_or(ParsingError::ConstantOverflow { span })?;
+                                            Some(Self::Int(Span::new(span, value)))
+                                        },
+                                        ConstantOp::Mul => {
+                                            let value = lhs
+                                                .checked_mul(rhs)
+                                                .ok_or(ParsingError::ConstantOverflow { span })?;
+                                            Some(Self::Int(Span::new(span, value)))
+                                        },
+                                        ConstantOp::IntDiv => {
+                                            let value = lhs
+                                                .checked_div(rhs)
+                                                .ok_or(ParsingError::ConstantOverflow { span })?;
+                                            Some(Self::Int(Span::new(span, value)))
+                                        },
                                         ConstantOp::Div => {
                                             let lhs = Felt::new(lhs.as_int());
                                             let rhs = Felt::new(rhs.as_int());
-                                            Some(IntValue::from(lhs / rhs))
+                                            let value = IntValue::from(lhs / rhs);
+                                            Some(Self::Int(Span::new(span, value)))
                                         },
                                     }
                                     .ok_or(
@@ -188,8 +209,7 @@ impl ConstantExpr {
                                             span,
                                             kind: LiteralErrorKind::FeltOverflow,
                                         },
-                                    )?;
-                                    Ok(Self::Int(Span::new(span, result)))
+                                    )
                                 },
                                 lhs => Ok(Self::BinaryOp {
                                     span,

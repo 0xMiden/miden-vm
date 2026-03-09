@@ -1255,49 +1255,24 @@ impl Assembler {
         // Get the procedure from the assembler
         let current_source_file = self.source_manager.get(span.source_id()).ok();
 
-        // If the procedure is cached and is a system call, ensure that the call is valid.
-        match mast_forest_builder.find_procedure_by_mast_root(&mast_root) {
-            Some(proc) if matches!(kind, InvokeKind::SysCall) => {
-                // Verify if this is a syscall, that the callee is a kernel procedure
-                //
-                // NOTE: The assembler is expected to know the full set of all kernel
-                // procedures at this point, so if we can't identify the callee as a
-                // kernel procedure, it is a definite error.
-                assert!(
-                    proc.is_syscall(),
-                    "linker failed to validate syscall correctly: {}",
-                    Report::new(LinkerError::InvalidSysCallTarget {
-                        span,
-                        source_file: current_source_file,
-                        callee: proc.path().clone(),
-                    })
-                );
-                let maybe_kernel_path = proc.module();
-                let module = self.linker.find_module(maybe_kernel_path).unwrap_or_else(|| {
-                    panic!(
-                        "linker failed to validate syscall correctly: {}",
-                        Report::new(LinkerError::InvalidSysCallTarget {
-                            span,
-                            source_file: current_source_file.clone(),
-                            callee: proc.path().clone(),
-                        })
-                    )
-                });
-                // Note: this module is guaranteed to be of AST variant, since we have the
-                // AST of a procedure contained in it (i.e. `proc`). Hence, it must be that
-                // the entire module is in AST representation as well.
-                if module.kind().is_kernel() || module.path().is_kernel_path() {
-                    panic!(
-                        "linker failed to validate syscall correctly: {}",
-                        Report::new(LinkerError::InvalidSysCallTarget {
-                            span,
-                            source_file: current_source_file.clone(),
-                            callee: proc.path().clone(),
-                        })
-                    )
-                }
-            },
-            Some(_) | None => (),
+        if matches!(kind, InvokeKind::SysCall) && self.linker.has_nonempty_kernel() {
+            // NOTE: The assembler is expected to know the full set of all kernel
+            // procedures at this point, so if the digest is not present in the kernel,
+            // it is a definite error.
+            if !self.linker.kernel().contains_proc(mast_root) {
+                let callee = mast_forest_builder
+                    .find_procedure_by_mast_root(&mast_root)
+                    .map(|proc| proc.path().clone())
+                    .unwrap_or_else(|| {
+                        let digest_path = format!("{mast_root}");
+                        Arc::<Path>::from(Path::new(&digest_path))
+                    });
+                return Err(Report::new(LinkerError::InvalidSysCallTarget {
+                    span,
+                    source_file: current_source_file,
+                    callee,
+                }));
+            }
         }
 
         mast_forest_builder.ensure_external_link(mast_root)

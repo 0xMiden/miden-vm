@@ -180,6 +180,11 @@ pub enum ParsingError {
         span: SourceSpan,
         max_depth: usize,
     },
+    #[error("invalid constant expression: value is larger than expected range")]
+    ConstantOverflow {
+        #[label]
+        span: SourceSpan,
+    },
     #[error("unexpected string in an arithmetic expression")]
     #[diagnostic()]
     StringInArithmeticExpression {

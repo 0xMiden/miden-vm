@@ -15,6 +15,7 @@ use miden_assembly_syntax::{
 use miden_core::{
     Felt, Word, assert_matches,
     events::EventId,
+    field::PrimeField64,
     mast::{MastNodeExt, MastNodeId},
     operations::Operation,
     program::Program,
@@ -713,6 +714,135 @@ fn simple_constant() -> TestResult {
     );
     let program = context.assemble(source)?;
     insta::assert_snapshot!(program);
+    Ok(())
+}
+
+#[test]
+fn enum_explicit_discriminants() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        r#"
+enum Status : u16 {
+    OK = 200,
+    NOT_FOUND = 404,
+    SERVER_ERROR = 500,
+}
+
+begin
+    push.OK
+    push.NOT_FOUND
+    push.SERVER_ERROR
+end
+"#
+    );
+    let _program = context.assemble(source)?;
+    Ok(())
+}
+
+#[test]
+fn enum_discriminants_can_reference_constants() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        r#"
+const BASE = 10
+
+enum Status : u16 {
+    OK = BASE,
+    NOT_FOUND = OK + 1,
+}
+
+begin
+    push.OK
+    push.NOT_FOUND
+end
+"#
+    );
+    let _program = context.assemble(source)?;
+    Ok(())
+}
+
+#[test]
+fn enum_felt_repr_variants() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        r#"
+enum Status : felt {
+    OK = 1,
+}
+
+begin
+    push.OK
+end
+"#
+    );
+    let _program = context.assemble(source)?;
+    Ok(())
+}
+
+#[test]
+fn enum_felt_discriminant_negative_is_rejected() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        r#"
+enum Status : felt {
+    BAD = 0 - 1,
+}
+
+begin
+    push.BAD
+end
+"#
+    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected negative discriminant to be rejected");
+    assert_diagnostic!(err, "invalid constant expression: value is larger than expected range");
+    Ok(())
+}
+
+#[test]
+fn enum_felt_discriminant_too_large_is_rejected() -> TestResult {
+    let context = TestContext::default();
+    let modulus = miden_core::Felt::ORDER_U64;
+    let source = source_file!(
+        &context,
+        format!(
+            r#"
+enum Status : felt {{
+    BAD = {modulus},
+}}
+
+begin
+    push.BAD
+end
+"#
+        )
+    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected out-of-range felt discriminant to be rejected");
+    assert_diagnostic!(err, "invalid literal: value overflowed the field modulus");
+    Ok(())
+}
+
+#[test]
+fn constant_expression_overflow_is_rejected() -> TestResult {
+    let context = TestContext::default();
+    let modulus_minus_one = miden_core::Felt::ORDER_U64 - 1;
+    let source = source_file!(
+        &context,
+        format!(
+            "const TOO_BIG = {modulus_minus_one} + {modulus_minus_one}\nbegin\n    push.TOO_BIG\nend\n"
+        )
+    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected constant expression overflow to be rejected");
+    assert_diagnostic!(err, "invalid constant expression: value is larger than expected range");
     Ok(())
 }
 
@@ -4683,6 +4813,19 @@ fn can_assemble_a_multi_module_kernel() -> Result<(), Report> {
     Ok(())
 }
 
+#[test]
+fn regression_empty_kernel_library_is_rejected() {
+    let context = TestContext::default();
+    let source_manager = context.source_manager();
+
+    // A kernel module with no exported procedures should be rejected.
+    let kernel_masm = "pub const FOO = 1\n";
+    let err = Assembler::new(source_manager)
+        .assemble_kernel(kernel_masm)
+        .expect_err("expected empty kernel to be rejected");
+    assert_diagnostic_lines!(err, "library must contain at least one exported procedure");
+}
+
 /// Test for issue #1644: verify that single-forest merge doesn't preserves node digests
 #[test]
 fn issue_1644_single_forest_merge_identity() -> TestResult {
@@ -4785,6 +4928,100 @@ fn issue_1644_single_forest_merge_identity() -> TestResult {
 
     eprintln!("Merge identity test passed - no violations detected");
     Ok(())
+}
+
+#[test]
+fn overlong_total_path_is_rejected_without_panic() {
+    use std::{
+        panic::{AssertUnwindSafe, catch_unwind},
+        sync::Arc,
+    };
+
+    use miden_assembly_syntax::ast::Path;
+
+    use crate::{Parse, ParseOptions, ast::ModuleKind, testing::TestContext};
+
+    // Build a valid path where each component is within the per-component limit (255 bytes),
+    // but the total byte length exceeds u16::MAX (the binary serialization length prefix).
+    let component = "a".repeat(255);
+    let num_components: usize = 300;
+    let mut path_str = alloc::string::String::with_capacity(num_components * (component.len() + 2));
+    for i in 0..num_components {
+        if i > 0 {
+            path_str.push_str("::");
+        }
+        path_str.push_str(&component);
+    }
+
+    let context = TestContext::default();
+    let source_manager = context.source_manager();
+
+    let lib_src = r#"
+pub proc add
+    add.1
+end
+"#;
+
+    let parsed = catch_unwind(AssertUnwindSafe(|| {
+        let path = Path::new(&path_str);
+        let options = ParseOptions {
+            kind: ModuleKind::Library,
+            warnings_as_errors: false,
+            path: Some(Arc::<Path>::from(path)),
+        };
+        <&str as Parse>::parse_with_options(lib_src, source_manager.clone(), options)
+    }));
+
+    assert!(
+        parsed.is_ok(),
+        "overlong total path caused a panic; expected a structured error"
+    );
+    let parsed = parsed.unwrap();
+    let err = parsed.expect_err("expected overlong path to be rejected");
+    assert_diagnostic!(err, "invalid item path: too long");
+}
+
+#[test]
+fn imported_error_message_alias_is_rejected_without_panicking() {
+    use std::{
+        panic::{AssertUnwindSafe, catch_unwind},
+        sync::Arc,
+    };
+
+    use crate::{Assembler, DefaultSourceManager, Parse, ParseOptions, ast::ModuleKind};
+
+    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+
+    // Library module `b` exports a string constant and an alias to it.
+    let module_b_src = r#"
+pub const ERR1 = "oops"
+pub const ERR2 = ERR1
+"#;
+    let module_b = module_b_src
+        .parse_with_options(source_manager.clone(), ParseOptions::new(ModuleKind::Library, "b"))
+        .expect("module b parsing must succeed");
+
+    // Executable module imports `ERR2` and uses it as an assertion error message.
+    let module_a_src = r#"
+use b::ERR2
+
+begin
+    assert.err=ERR2
+end
+"#;
+
+    let assembled = catch_unwind(AssertUnwindSafe(|| {
+        let mut assembler = Assembler::new(source_manager);
+        assembler
+            .compile_and_statically_link(module_b)
+            .expect("linking module b must succeed");
+        assembler.assemble_program(module_a_src)
+    }));
+
+    assert!(assembled.is_ok(), "assembler panicked during assembly");
+    let assembled = assembled.unwrap();
+    let err = assembled.expect_err("expected assembly to return an error");
+    assert_diagnostic!(err, "undefined symbol reference");
 }
 
 #[test]
@@ -5146,6 +5383,87 @@ fn test_syscall_resolution_to_non_kernel_path_is_checked() -> TestResult {
     );
 
     Ok(())
+}
+
+#[test]
+fn syscall_validation_does_not_panic_on_same_digest_userspace_procedure() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let context = TestContext::default();
+    let source_manager = context.source_manager();
+
+    let kernel_src = r#"
+pub proc k1
+    push.1
+end
+"#;
+
+    let kernel_lib = Assembler::new(source_manager.clone())
+        .assemble_kernel(kernel_src)
+        .expect("kernel assembly must succeed");
+
+    let assembler = Assembler::with_kernel(source_manager, kernel_lib);
+
+    let program_src = r#"
+proc dup
+    push.1
+end
+
+begin
+    exec.dup
+    syscall.k1
+end
+"#;
+
+    let assembled = catch_unwind(AssertUnwindSafe(|| assembler.assemble_program(program_src)));
+    assert!(assembled.is_ok(), "assembler panicked while assembling a valid program");
+    assert!(assembled.unwrap().is_ok(), "expected program assembly to succeed");
+}
+
+#[test]
+fn syscall_by_unknown_digest_is_rejected_at_assembly_time_when_kernel_is_configured() {
+    let context = TestContext::default();
+    let source_manager = context.source_manager();
+
+    let kernel_src = r#"
+pub proc k1
+    push.1
+end
+"#;
+
+    let kernel_lib = Assembler::new(source_manager.clone())
+        .assemble_kernel(kernel_src)
+        .expect("kernel assembly must succeed");
+
+    let assembler = Assembler::with_kernel(source_manager, kernel_lib);
+
+    let program_src = r#"
+begin
+    syscall.0x0000000000000000000000000000000000000000000000000000000000000000
+end
+"#;
+
+    let err = assembler
+        .assemble_program(program_src)
+        .expect_err("expected unknown digest syscall to be rejected");
+    assert_diagnostic!(err, "invalid syscall");
+}
+
+#[test]
+fn syscall_without_kernel_is_rejected_at_assembly_time() {
+    let context = TestContext::default();
+    let assembler = Assembler::new(context.source_manager());
+
+    let program_src = r#"
+begin
+    syscall.0x0000000000000000000000000000000000000000000000000000000000000000
+end
+"#;
+
+    let err = assembler
+        .assemble_program(program_src)
+        .expect_err("expected syscall without kernel to be rejected");
+    assert_diagnostic!(err, "invalid syscall");
 }
 
 #[test]

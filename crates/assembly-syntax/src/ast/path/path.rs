@@ -164,6 +164,10 @@ impl Path {
             _ => (),
         }
 
+        if path.len() > u16::MAX as usize {
+            return Err(PathError::TooLong { max: u16::MAX as usize });
+        }
+
         for result in Iter::new(path) {
             result?;
         }

@@ -93,6 +93,9 @@ impl ModuleParser {
         source_manager: Arc<dyn SourceManager>,
     ) -> Result<Box<ast::Module>, Report> {
         let path = path.as_ref();
+        if let Err(err) = Path::validate(path.as_str()) {
+            return Err(Report::msg(err.to_string()).with_source_code(source.clone()));
+        }
         let forms = parse_forms_internal(source.clone(), &mut self.interned)
             .map_err(|err| Report::new(err).with_source_code(source.clone()))?;
         sema::analyze(source, self.kind, path, forms, self.warnings_as_errors, source_manager)
@@ -451,5 +454,30 @@ end
 
         assert_matches!(lexer.next(), Some(Ok((0, Token::At, 1))));
         assert_matches!(lexer.next(), Some(Ok((2, Token::ConstantIdent("A"), 3))));
+    }
+
+    #[test]
+    fn overlong_path_component_is_rejected_without_panic() {
+        use std::{
+            panic::{AssertUnwindSafe, catch_unwind},
+            sync::Arc,
+        };
+
+        use crate::{
+            debuginfo::DefaultSourceManager,
+            parse::{Parse, ParseOptions},
+        };
+
+        let big_component = "a".repeat(256);
+        let source = format!("begin\n    exec.{big_component}::x::foo\nend\n");
+
+        let source_manager = Arc::new(DefaultSourceManager::default());
+        let parsed = catch_unwind(AssertUnwindSafe(|| {
+            source.parse_with_options(source_manager, ParseOptions::default())
+        }));
+
+        assert!(parsed.is_ok(), "parsing panicked, expected a structured error");
+        let err = parsed.unwrap().expect_err("parsing succeeded, expected an error");
+        crate::assert_diagnostic!(err, "this reference is invalid without a corresponding import");
     }
 }
