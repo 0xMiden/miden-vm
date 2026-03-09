@@ -184,7 +184,7 @@ impl<'a> ProcessorState<'a> {
     /// This method can access elements beyond the top 16 positions by using the overflow table.
     #[inline(always)]
     pub fn get_stack_item(&self, pos: usize) -> Felt {
-        self.processor.stack_get(pos)
+        self.processor.stack_get_safe(pos)
     }
 
     /// Returns a word starting at the specified element index on the stack.
@@ -200,7 +200,7 @@ impl<'a> ProcessorState<'a> {
     /// Creating a word does not change the state of the stack.
     #[inline(always)]
     pub fn get_stack_word(&self, start_idx: usize) -> Word {
-        self.processor.stack_get_word(start_idx)
+        self.processor.stack_get_word_safe(start_idx)
     }
 
     /// Returns stack state at the current clock cycle. This includes the top 16 items of the
