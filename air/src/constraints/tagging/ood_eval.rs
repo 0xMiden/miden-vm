@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::stark::{
-    air::{AirBuilder, ExtensionBuilder, PeriodicAirBuilder, PermutationAirBuilder},
+    air::{AirBuilder, EmptyWindow, ExtensionBuilder, PeriodicAirBuilder, PermutationAirBuilder},
     matrix::RowMajorMatrix,
 };
 
@@ -138,18 +138,16 @@ impl AirBuilder for OodEvalAirBuilder {
     type F = Felt;
     type Expr = Felt;
     type Var = Felt;
-    type M = RowMajorMatrix<Felt>;
+    type PreprocessedWindow = EmptyWindow<Felt>;
+    type MainWindow = RowMajorMatrix<Felt>;
     type PublicVar = Felt;
 
-    fn main(&self) -> Self::M {
+    fn main(&self) -> Self::MainWindow {
         self.main.clone()
     }
 
-    fn preprocessed(&self) -> &Self::M {
-        use std::sync::LazyLock;
-        static EMPTY: LazyLock<RowMajorMatrix<Felt>> =
-            LazyLock::new(|| RowMajorMatrix::new(Vec::new(), 0));
-        &EMPTY
+    fn preprocessed(&self) -> &Self::PreprocessedWindow {
+        EmptyWindow::empty_ref()
     }
 
     fn is_first_row(&self) -> Self::Expr {

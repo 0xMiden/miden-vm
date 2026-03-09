@@ -1,7 +1,7 @@
 //! ACE circuit codegen for Plonky3-based Miden AIRs.
 //!
 //! The pipeline is:
-//! 1. Record AIR constraints with `RecordingAirBuilder`.
+//! 1. Capture AIR constraints via plonky3's `SymbolicAirBuilder`.
 //! 2. Lower symbolic expressions into a DAG that mirrors verifier constraints evaluation.
 //! 3. Emit an ACE circuit plus an `InputLayout` describing the MASM ACE-READ section order.
 //!
@@ -23,7 +23,6 @@
 //!
 //! Module map (data flow):
 //! - `pipeline`: public entry points that orchestrate layout + DAG + circuit emission.
-//! - `builder`: AIR recorder that captures symbolic constraints.
 //! - `dag`: verifier-style DAG IR and lowering helpers.
 //! - `circuit`: off-VM circuit representation (inputs/constants/ops/root).
 //! - `layout`: READ-section layout and index mapping.
@@ -31,11 +30,7 @@
 //! - `randomness`: challenge input planning for layouts + DAG lowering.
 //! - `quotient`: barycentric quotient recomposition helpers (used by DAG + tests).
 
-// Symbolic types (Entry, SymVar, SymExpr).
-mod symbolic;
-
 // Core IR and lowering.
-mod builder;
 mod circuit;
 mod dag;
 

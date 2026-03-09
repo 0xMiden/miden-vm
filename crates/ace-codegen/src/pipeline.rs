@@ -5,14 +5,16 @@
 //! - choose a READ layout for inputs,
 //! - emit a circuit that mirrors verifier evaluation.
 
-use miden_crypto::stark::{
-    air::LiftedAir,
-    field::{ExtensionField, Field, TwoAdicField},
+use miden_crypto::{
+    field::{Algebra, ExtensionField, Field, TwoAdicField},
+    stark::air::{
+        LiftedAir,
+        symbolic::{AirLayout, SymbolicAirBuilder, SymbolicExpressionExt},
+    },
 };
 
 use crate::{
     AceError,
-    builder::RecordingAirBuilder,
     circuit::{AceCircuit, emit_circuit},
     dag::{AceDag, PeriodicColumnData, build_verifier_dag},
     layout::{InputCounts, InputLayout},
@@ -63,6 +65,7 @@ where
     A: LiftedAir<F, EF>,
     F: TwoAdicField,
     EF: ExtensionField<F>,
+    SymbolicExpressionExt<F, EF>: Algebra<EF>,
 {
     let artifacts = build_ace_dag_for_air::<A, F, EF>(air, config)?;
     emit_circuit(&artifacts.dag, artifacts.layout)
@@ -76,6 +79,7 @@ where
     A: LiftedAir<F, EF>,
     F: Field,
     EF: ExtensionField<F>,
+    SymbolicExpressionExt<F, EF>: Algebra<EF>,
 {
     let num_periodic = air.periodic_columns().len();
     let counts = input_counts_for_air::<A, F, EF>(air, config, num_periodic);
@@ -99,6 +103,7 @@ where
     A: LiftedAir<F, EF>,
     F: TwoAdicField,
     EF: ExtensionField<F>,
+    SymbolicExpressionExt<F, EF>: Algebra<EF>,
 {
     let periodic_columns = air.periodic_columns();
     let counts = input_counts_for_air::<A, F, EF>(air, config, periodic_columns.len());
@@ -107,19 +112,31 @@ where
         LayoutKind::Masm => InputLayout::new_masm(counts),
     };
     layout.validate();
-    let mut builder = RecordingAirBuilder::<F, EF>::new(
-        0,
-        counts.width,
-        counts.aux_width,
-        counts.num_randomness,
-        counts.num_public,
-        counts.num_periodic,
-        air.num_aux_values(),
-    );
+
+    let air_layout = AirLayout {
+        preprocessed_width: 0,
+        main_width: counts.width,
+        num_public_values: counts.num_public,
+        permutation_width: counts.aux_width,
+        num_permutation_challenges: counts.num_randomness,
+        num_permutation_values: air.num_aux_values(),
+        num_periodic_columns: counts.num_periodic,
+    };
+    let mut builder = SymbolicAirBuilder::<F, EF>::new(air_layout);
     air.eval(&mut builder);
+    let constraint_layout = builder.constraint_layout();
+    let base_constraints = builder.base_constraints();
+    let ext_constraints = builder.extension_constraints();
+
     let periodic_data = (!periodic_columns.is_empty())
         .then(|| PeriodicColumnData::from_periodic_columns::<F>(periodic_columns.to_vec()));
-    let dag = build_verifier_dag::<F, EF>(builder.constraints(), &layout, periodic_data.as_ref());
+    let dag = build_verifier_dag::<F, EF>(
+        &base_constraints,
+        &ext_constraints,
+        &constraint_layout,
+        &layout,
+        periodic_data.as_ref(),
+    );
 
     Ok(AceArtifacts { layout, dag })
 }

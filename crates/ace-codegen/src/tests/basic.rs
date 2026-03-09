@@ -1,13 +1,16 @@
 use miden_core::{Felt, field::QuadFelt};
-use miden_crypto::stark::{
-    air::{AirBuilder, AirWithPeriodicColumns, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess},
+use miden_crypto::{
     field::PrimeCharacteristicRing,
+    stark::air::{
+        AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess,
+        symbolic::{AirLayout, SymbolicAirBuilder},
+    },
 };
 
-use super::common::{eval_dag, eval_expr, eval_periodic_values, eval_quotient};
+use super::common::{eval_dag, eval_folded_constraints, eval_periodic_values, eval_quotient};
 use crate::{
-    AceConfig, InputKey, InputLayout, LayoutKind, builder::RecordingAirBuilder,
-    circuit::emit_circuit, pipeline::build_ace_dag_for_air,
+    AceConfig, InputKey, InputLayout, LayoutKind, circuit::emit_circuit,
+    pipeline::build_ace_dag_for_air,
 };
 
 // Base and extension field types for tests.
@@ -26,15 +29,11 @@ impl BaseAir<F> for MockAir {
     }
 }
 
-impl AirWithPeriodicColumns<F> for MockAir {
-    fn periodic_columns(&self) -> &[Vec<F>] {
-        use std::sync::LazyLock;
-        static COLS: LazyLock<[Vec<Felt>; 1]> = LazyLock::new(|| [vec![Felt::ONE]]);
-        &*COLS
-    }
-}
-
 impl LiftedAir<F, EF> for MockAir {
+    fn periodic_columns(&self) -> Vec<Vec<F>> {
+        vec![vec![Felt::ONE]]
+    }
+
     fn num_randomness(&self) -> usize {
         1
     }
@@ -45,6 +44,10 @@ impl LiftedAir<F, EF> for MockAir {
 
     fn num_aux_values(&self) -> usize {
         1
+    }
+
+    fn num_var_len_public_inputs(&self) -> usize {
+        0
     }
 
     fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
@@ -119,29 +122,36 @@ fn test_verifier_dag_matches_manual_eval() {
     let layout = artifacts.layout.clone();
     let inputs = build_inputs(&layout);
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
-    let periodic_values =
-        eval_periodic_values(<MockAir as AirWithPeriodicColumns<F>>::periodic_columns(&air), z_k);
+    let periodic_values = eval_periodic_values(&air.periodic_columns(), z_k);
 
-    let mut builder = RecordingAirBuilder::<F, EF>::new(
-        0,
-        layout.counts.width,
-        layout.counts.aux_width,
-        layout.counts.num_randomness,
-        layout.counts.num_public,
-        layout.counts.num_periodic,
-        air.num_aux_values(),
-    );
+    let air_layout = AirLayout {
+        preprocessed_width: 0,
+        main_width: layout.counts.width,
+        num_public_values: layout.counts.num_public,
+        permutation_width: layout.counts.aux_width,
+        num_permutation_challenges: layout.counts.num_randomness,
+        num_permutation_values: air.num_aux_values(),
+        num_periodic_columns: layout.counts.num_periodic,
+    };
+    let mut builder = SymbolicAirBuilder::<F, EF>::new(air_layout);
     air.eval(&mut builder);
+    let constraint_layout = builder.constraint_layout();
+    let base_constraints = builder.base_constraints();
+    let ext_constraints = builder.extension_constraints();
     let dag = artifacts.dag;
 
     let alpha = inputs[layout.index(InputKey::Alpha).unwrap()];
     let inv_vanishing = inputs[layout.index(InputKey::InvVanishing).unwrap()];
 
-    let mut acc = EF::ZERO;
-    for c in builder.constraints() {
-        let val = eval_expr::<F, EF>(c, &inputs, &layout, &periodic_values);
-        acc = acc * alpha + val;
-    }
+    let acc = eval_folded_constraints::<F, EF>(
+        &base_constraints,
+        &ext_constraints,
+        &constraint_layout,
+        alpha,
+        &inputs,
+        &layout,
+        &periodic_values,
+    );
     let folded = acc * inv_vanishing;
     let quotient = eval_quotient(&layout, &inputs);
     let expected = folded - quotient;
