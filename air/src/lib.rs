@@ -170,7 +170,21 @@ where
     }
 
     fn num_randomness(&self) -> usize {
-        trace::AUX_TRACE_RAND_ELEMENTS
+        trace::AUX_TRACE_RAND_CHALLENGES
+    }
+
+    fn num_public_values(&self) -> usize {
+        // ProgramInfo(8) + StackInputs(16) + StackOutputs(16) + PcTranscriptState(4) = 44.
+        44
+    }
+
+    fn periodic_table(&self) -> Vec<Vec<Felt>> {
+        let mut cols = constraints::chiplets::hasher::periodic_columns();
+        let [k_first, k_transition] = constraints::chiplets::bitwise::periodic_columns();
+
+        cols.push(k_first);
+        cols.push(k_transition);
+        cols
     }
 
     fn build_aux_trace(
@@ -203,5 +217,8 @@ where
 
         // Auxiliary (bus) constraints.
         constraints::enforce_bus(builder, local, next);
+
+        // Public inputs boundary constraints.
+        constraints::public_inputs::enforce_main(builder, local);
     }
 }

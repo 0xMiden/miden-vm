@@ -1,7 +1,6 @@
 //! No-op tagging helpers for non-testing or no-std builds.
 
 use miden_crypto::stark::air::MidenAirBuilder;
-
 /// No-op tagging extension for non-testing builds.
 ///
 /// The methods call the provided closure directly so they have no runtime overhead beyond

@@ -2,7 +2,7 @@ use miden_air::trace::RowIndex;
 use miden_core::{Word, ZERO, field::ExtensionField, operations::opcodes};
 
 use super::{AuxColumnBuilder, Felt, MainTrace, ONE};
-use crate::debug::BusDebugger;
+use crate::{debug::BusDebugger, trace::utils::Challenges};
 
 // BLOCK HASH TABLE COLUMN BUILDER
 // ================================================================================================
@@ -25,24 +25,24 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BlockHashTableColumnBuilde
     fn init_responses(
         &self,
         main_trace: &MainTrace,
-        alphas: &[E],
+        challenges: &Challenges<E>,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
-        BlockHashTableRow::table_init(main_trace).collapse(alphas)
+        BlockHashTableRow::table_init(main_trace).collapse(challenges)
     }
 
     /// Removes a row from the block hash table.
     fn get_requests_at(
         &self,
         main_trace: &MainTrace,
-        alphas: &[E],
+        challenges: &Challenges<E>,
         row: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         let op_code = main_trace.get_op_code(row).as_canonical_u64() as u8;
 
         match op_code {
-            opcodes::END => BlockHashTableRow::from_end(main_trace, row).collapse(alphas),
+            opcodes::END => BlockHashTableRow::from_end(main_trace, row).collapse(challenges),
             _ => E::ONE,
         }
     }
@@ -51,7 +51,7 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BlockHashTableColumnBuilde
     fn get_responses_at(
         &self,
         main_trace: &MainTrace,
-        alphas: &[E],
+        challenges: &Challenges<E>,
         row: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
@@ -62,16 +62,16 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BlockHashTableColumnBuilde
                 let left_child_row = BlockHashTableRow::from_join(main_trace, row, true);
                 let right_child_row = BlockHashTableRow::from_join(main_trace, row, false);
 
-                // Note: this adds the 2 rows separately to the block hash table.
-                left_child_row.collapse(alphas) * right_child_row.collapse(alphas)
+                left_child_row.collapse(challenges) * right_child_row.collapse(challenges)
             },
-            opcodes::SPLIT => BlockHashTableRow::from_split(main_trace, row).collapse(alphas),
+            opcodes::SPLIT => BlockHashTableRow::from_split(main_trace, row).collapse(challenges),
             opcodes::LOOP => BlockHashTableRow::from_loop(main_trace, row)
-                .map(|row| row.collapse(alphas))
+                .map(|row| row.collapse(challenges))
                 .unwrap_or(E::ONE),
-            opcodes::REPEAT => BlockHashTableRow::from_repeat(main_trace, row).collapse(alphas),
+            opcodes::REPEAT => BlockHashTableRow::from_repeat(main_trace, row).collapse(challenges),
             opcodes::DYN | opcodes::DYNCALL | opcodes::CALL | opcodes::SYSCALL => {
-                BlockHashTableRow::from_dyn_dyncall_call_syscall(main_trace, row).collapse(alphas)
+                BlockHashTableRow::from_dyn_dyncall_call_syscall(main_trace, row)
+                    .collapse(challenges)
             },
             _ => E::ONE,
         }
@@ -245,17 +245,18 @@ impl BlockHashTableRow {
     /// Collapses this row to a single field element in the field specified by E by taking a random
     /// linear combination of all the columns. This requires 8 alpha values, which are assumed to
     /// have been drawn randomly.
-    pub fn collapse<E: ExtensionField<Felt>>(&self, alphas: &[E]) -> E {
+    pub fn collapse<E: ExtensionField<Felt>>(&self, challenges: &Challenges<E>) -> E {
         let is_first_child = if self.is_first_child { ONE } else { ZERO };
         let is_loop_body = if self.is_loop_body { ONE } else { ZERO };
-        alphas[0]
-            + alphas[1] * self.parent_block_id
-            + alphas[2] * self.child_block_hash[0]
-            + alphas[3] * self.child_block_hash[1]
-            + alphas[4] * self.child_block_hash[2]
-            + alphas[5] * self.child_block_hash[3]
-            + alphas[6] * is_first_child
-            + alphas[7] * is_loop_body
+        challenges.encode([
+            self.parent_block_id,
+            self.child_block_hash[0],
+            self.child_block_hash[1],
+            self.child_block_hash[2],
+            self.child_block_hash[3],
+            is_first_child,
+            is_loop_body,
+        ])
     }
 
     // TEST
