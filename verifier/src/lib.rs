@@ -146,7 +146,7 @@ fn verify_stark(
             config::verify(
                 &config,
                 &air,
-                log_trace_height as usize,
+                log_trace_height,
                 &public_values,
                 var_len_public_inputs,
                 &proof_bytes,
@@ -157,7 +157,7 @@ fn verify_stark(
             config::verify(
                 &config,
                 &air,
-                log_trace_height as usize,
+                log_trace_height,
                 &public_values,
                 var_len_public_inputs,
                 &proof_bytes,
@@ -168,7 +168,7 @@ fn verify_stark(
             config::verify(
                 &config,
                 &air,
-                log_trace_height as usize,
+                log_trace_height,
                 &public_values,
                 var_len_public_inputs,
                 &proof_bytes,
@@ -179,7 +179,7 @@ fn verify_stark(
             config::verify(
                 &config,
                 &air,
-                log_trace_height as usize,
+                log_trace_height,
                 &public_values,
                 var_len_public_inputs,
                 &proof_bytes,
@@ -190,7 +190,7 @@ fn verify_stark(
             config::verify(
                 &config,
                 &air,
-                log_trace_height as usize,
+                log_trace_height,
                 &public_values,
                 var_len_public_inputs,
                 &proof_bytes,
