@@ -404,7 +404,10 @@ impl MastForestBuilder {
             // check if the block should be merged with other blocks
             if should_merge(
                 self.mast_forest.is_procedure_root(basic_block_id),
-                self.mast_forest[basic_block_id].get_basic_block().unwrap().num_op_batches(),
+                self.mast_forest[basic_block_id]
+                    .get_basic_block()
+                    .expect("merge_basic_blocks: expected BasicBlockNode")
+                    .num_op_batches(),
             ) {
                 // Collect decorators and operations from the block (while still borrowing)
                 // We need owned copies so we can drop the borrow before mutating self
@@ -421,8 +424,6 @@ impl MastForestBuilder {
                     (block_decorators, block_ops)
                 };
                 let ops_offset = operations.len();
-
-                // basic_block_node borrow ends here since we collected owned data above
 
                 // Transfer any pending asm_ops for this block to the merged result
                 self.transfer_asm_ops_for_merge(basic_block_id, ops_offset, &mut merged_asm_ops);

@@ -331,7 +331,7 @@ impl FastProcessor {
             "Not enough elements on stack to read word starting at index {start_idx}"
         );
 
-        let word_start_idx = self.stack_top_idx - start_idx - 4;
+        let word_start_idx = self.stack_top_idx - start_idx - WORD_SIZE;
         let mut result: [Felt; WORD_SIZE] =
             self.stack[range(word_start_idx, WORD_SIZE)].try_into().unwrap();
         // Reverse so top of stack (idx 0) goes to word[0]
