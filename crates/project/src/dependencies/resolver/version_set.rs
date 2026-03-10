@@ -20,7 +20,9 @@ use crate::{SemVer, Version, VersionReq, VersionRequirement};
 ///   digest filter, equivalent to the semantic versioning constraint `*`
 /// * Set intersection is performed by finding the overlap in the ranges of the two sets, and then
 ///   if either set has a content digest filter, only permitting content digests that are present in
-///   both sets
+///   both sets. It is not guaranteed that a given content digest is included in the semantic
+///   version intersection, rather _either_ the digest or the semantic version of the intersection
+///   is used for matching a package.
 /// * Set complement is performed by negating the range of versions included in the set. The
 ///   resulting set will always have an empty content digest filter.
 /// * Set containment for a version `v` is determined as follows:
@@ -187,9 +189,16 @@ impl pubgrub::VersionSet for VersionSet {
 
         let ldigests = BTreeSet::from_iter(self.digests.iter());
         let rdigests = BTreeSet::from_iter(other.digests.iter());
-        let digests = ldigests.intersection(&rdigests).map(|d| **d).collect();
-        let range = self.range.intersection(&other.range);
-        Self { range, digests }
+        let digests = ldigests.intersection(&rdigests).map(|d| **d).collect::<SmallVec<[_; _]>>();
+        // If either set contained specific digests, but the intersection does not, then we must
+        // return an empty set, as the expectation would be that at least one digest remains in a
+        // non-empty intersection.
+        if digests.is_empty() && !(self.digests.is_empty() || other.digests.is_empty()) {
+            Self::empty()
+        } else {
+            let range = self.range.intersection(&other.range);
+            Self { range, digests }
+        }
     }
 
     fn contains(&self, v: &Self::V) -> bool {
