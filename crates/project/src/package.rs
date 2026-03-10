@@ -397,7 +397,7 @@ impl Package {
             description,
             dependencies,
             lints: workspace.map(|ws| ws.workspace.config.lints.clone()).unwrap_or_default(),
-            metadata: workspace.map(|ws| ws.workspace.config.lints.clone()).unwrap_or_default(),
+            metadata: workspace.map(|ws| ws.workspace.package.metadata.clone()).unwrap_or_default(),
             profiles,
             lib,
             bins,
