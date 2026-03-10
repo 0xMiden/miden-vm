@@ -39,6 +39,85 @@ fn test_encrypt_zero_blocks_roundtrip() {
 }
 
 #[test]
+fn test_encrypt_documented_stack_contract() {
+    let sentinels = [0xdead_beef_u64, 0xface_cafe, 0xabad_1dea, 0xbeef_c0de];
+    let source = r#"
+    use miden::core::crypto::aead
+
+    begin
+        push.0
+        push.2000
+        push.1000
+        push.[1,2,3,4]
+        push.[5,6,7,8]
+        exec.aead::encrypt
+        dropw
+    end
+    "#;
+
+    let output = build_test!(source, &sentinels).execute().expect("encryption must succeed");
+    let stack = output.stack_outputs();
+    for (idx, sentinel) in sentinels.iter().enumerate() {
+        assert_eq!(stack.get_element(idx), Some(Felt::new(*sentinel)));
+    }
+}
+
+#[test]
+fn test_decrypt_documented_stack_contract() {
+    let sentinel: u64 = 0xface_cafe;
+    let seed = [13_u8; 32];
+    let mut rng = ChaCha20Rng::from_seed(seed);
+
+    let key = SecretKey::with_rng(&mut rng);
+    let nonce = Nonce::with_rng(&mut rng);
+    let plaintext = vec![
+        Felt::new(10),
+        Felt::new(11),
+        Felt::new(12),
+        Felt::new(13),
+        Felt::new(14),
+        Felt::new(15),
+        Felt::new(16),
+        Felt::new(17),
+    ];
+    let encrypted = key
+        .encrypt_elements_with_nonce(&plaintext, &[], nonce)
+        .expect("encryption failed");
+
+    let expected_tag = encrypted.auth_tag().to_elements();
+    let key_elements = key.to_elements();
+    let nonce_elements: [Felt; 4] = encrypted.nonce().clone().into();
+    let ciphertext = encrypted.ciphertext();
+
+    let source = format!(
+        "
+    use miden::core::crypto::aead
+
+    begin
+        push.{ciphertext_0:?} push.1000 mem_storew_le dropw
+        push.{ciphertext_1:?} push.1004 mem_storew_le dropw
+        push.{ciphertext_2:?} push.1008 mem_storew_le dropw
+        push.{ciphertext_3:?} push.1012 mem_storew_le dropw
+        push.{expected_tag:?} push.1016 mem_storew_le dropw
+
+        push.1
+        push.2000
+        push.1000
+        push.{nonce_elements:?}
+        push.{key_elements:?}
+        exec.aead::decrypt
+    end
+    ",
+        ciphertext_0 = &ciphertext[0..4],
+        ciphertext_1 = &ciphertext[4..8],
+        ciphertext_2 = &ciphertext[8..12],
+        ciphertext_3 = &ciphertext[12..16],
+    );
+
+    build_test!(source.as_str(), &[sentinel]).expect_stack(&[sentinel]);
+}
+
+#[test]
 fn test_encrypt_with_known_values() {
     let seed = [2_u8; 32];
     let mut rng = ChaCha20Rng::from_seed(seed);

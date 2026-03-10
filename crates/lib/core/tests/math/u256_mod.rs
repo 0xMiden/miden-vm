@@ -13,7 +13,6 @@ fn mul_unsafe() {
         use miden::core::math::u256
         begin
             exec.u256::wrapping_mul
-            swapdw dropw dropw
         end";
 
     // Stack layout: [b_lo..b_hi, a_lo..a_hi] with b's low limb on top (LE format)
@@ -23,6 +22,23 @@ fn mul_unsafe() {
     let result = u256_to_le_limbs(&((a * b) & max_u256()));
 
     build_test!(source, &operands).expect_stack(&result);
+}
+
+#[test]
+fn wrapping_mul_documented_stack_contract() {
+    let source = "
+        use miden::core::math::u256
+        begin
+            exec.u256::wrapping_mul
+            sdepth push.16 assert_eq
+        end";
+
+    let a = u256_from_limbs([11, 22, 33, 44, 55, 66, 77, 88]);
+    let b = u256_from_limbs([101, 202, 303, 404, 505, 606, 707, 808]);
+    let operands = [u256_to_le_limbs(&b), u256_to_le_limbs(&a)].concat();
+    let expected = u256_to_le_limbs(&((a * b) & max_u256()));
+
+    build_test!(source, &operands).expect_stack(&expected);
 }
 
 // SUBTRACTION

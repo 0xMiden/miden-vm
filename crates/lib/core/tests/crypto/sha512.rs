@@ -141,3 +141,31 @@ fn test_sha512_hash_memory(bytes: &[u8]) {
     let digest: Vec<u64> = preimage.digest().as_ref().iter().map(Felt::as_canonical_u64).collect();
     test.expect_stack(&digest);
 }
+
+#[test]
+fn test_sha512_hash_bytes_documented_stack_contract() {
+    let bytes = vec![1_u8, 2, 3, 4, 5];
+    let len_bytes = bytes.len();
+    let preimage = Sha512Preimage::new(bytes);
+    let input_felts = preimage.as_felts();
+    let memory_stores = masm_store_felts(&input_felts, INPUT_MEMORY_ADDR);
+    let sentinels = [0x11_u64, 0x22, 0x33, 0x44];
+
+    let source = format!(
+        r#"
+            use miden::core::crypto::hashes::sha512
+
+            begin
+                {memory_stores}
+
+                push.{len_bytes}.{INPUT_MEMORY_ADDR}
+                exec.sha512::hash_bytes
+
+                # drop the digest and ensure caller stack words are preserved
+                dropw dropw dropw dropw
+            end
+        "#
+    );
+
+    build_debug_test!(source, &sentinels).expect_stack(&sentinels);
+}
