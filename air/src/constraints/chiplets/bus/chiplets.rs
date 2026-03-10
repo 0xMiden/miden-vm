@@ -38,12 +38,13 @@ use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess}
 use crate::{
     Felt, MainTraceRow,
     constraints::{
-        bus::{Challenges, indices::B_CHIPLETS},
+        bus::indices::B_CHIPLETS,
         chiplets::{bitwise::P_BITWISE_K_TRANSITION, hasher},
         op_flags::OpFlags,
         tagging::{TaggingAirBuilderExt, ids::TAG_CHIPLETS_BUS_BASE},
     },
     trace::{
+        Challenges,
         chiplets::{
             NUM_ACE_SELECTORS, NUM_KERNEL_ROM_SELECTORS,
             ace::{
@@ -73,9 +74,6 @@ use crate::{
 const CHIPLET_BUS_ID: usize = TAG_CHIPLETS_BUS_BASE;
 const CHIPLET_BUS_NAMESPACE: &str = "chiplets.bus.chiplets.transition";
 
-/// Number of message elements for chiplets bus encoding.
-const NUM_CHIPLETS_FIELDS: usize = 15;
-
 // ENTRY POINTS
 // ================================================================================================
 
@@ -94,6 +92,7 @@ pub fn enforce_chiplets_bus_constraint<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
+    challenges: &Challenges<AB::ExprEF>,
 ) where
     AB: LiftedAirBuilder<F = Felt>,
 {
@@ -106,11 +105,6 @@ pub fn enforce_chiplets_bus_constraint<AB>(
         let aux_next = aux.next_slice();
         (aux_local[B_CHIPLETS], aux_next[B_CHIPLETS])
     };
-
-    // Build alpha/beta powers once for this evaluation.
-    let challenges = Challenges::<AB::ExprEF, NUM_CHIPLETS_FIELDS>::from_randomness(
-        builder.permutation_randomness(),
-    );
 
     // =========================================================================
     // COMPUTE REQUEST MULTIPLIER
@@ -153,43 +147,41 @@ pub fn enforce_chiplets_bus_constraint<AB>(
     let f_logprecompile: AB::Expr = op_flags.log_precompile();
 
     // --- Hasher request values ---
-    let v_hperm = compute_hperm_request::<AB>(local, next, &challenges);
-    let v_mpverify = compute_mpverify_request::<AB>(local, &challenges);
-    let v_mrupdate = compute_mrupdate_request::<AB>(local, next, &challenges);
+    let v_hperm = compute_hperm_request::<AB>(local, next, challenges);
+    let v_mpverify = compute_mpverify_request::<AB>(local, challenges);
+    let v_mrupdate = compute_mrupdate_request::<AB>(local, next, challenges);
 
     // --- Control block request values ---
-    let v_join =
-        compute_control_block_request::<AB>(local, next, &challenges, ControlBlockOp::Join);
+    let v_join = compute_control_block_request::<AB>(local, next, challenges, ControlBlockOp::Join);
     let v_split =
-        compute_control_block_request::<AB>(local, next, &challenges, ControlBlockOp::Split);
-    let v_loop =
-        compute_control_block_request::<AB>(local, next, &challenges, ControlBlockOp::Loop);
-    let v_call = compute_call_request::<AB>(local, next, &challenges);
-    let v_dyn = compute_dyn_request::<AB>(local, next, &challenges);
-    let v_dyncall = compute_dyncall_request::<AB>(local, next, &challenges);
-    let v_syscall = compute_syscall_request::<AB>(local, next, &challenges);
-    let v_span = compute_span_request::<AB>(local, next, &challenges);
-    let v_respan = compute_respan_request::<AB>(local, next, &challenges);
-    let v_end = compute_end_request::<AB>(local, &challenges);
+        compute_control_block_request::<AB>(local, next, challenges, ControlBlockOp::Split);
+    let v_loop = compute_control_block_request::<AB>(local, next, challenges, ControlBlockOp::Loop);
+    let v_call = compute_call_request::<AB>(local, next, challenges);
+    let v_dyn = compute_dyn_request::<AB>(local, next, challenges);
+    let v_dyncall = compute_dyncall_request::<AB>(local, next, challenges);
+    let v_syscall = compute_syscall_request::<AB>(local, next, challenges);
+    let v_span = compute_span_request::<AB>(local, next, challenges);
+    let v_respan = compute_respan_request::<AB>(local, next, challenges);
+    let v_end = compute_end_request::<AB>(local, challenges);
 
     // --- Memory request values ---
-    let v_mload = compute_memory_element_request::<AB>(local, next, &challenges, true); // is_read = true
-    let v_mstore = compute_memory_element_request::<AB>(local, next, &challenges, false); // is_read = false
-    let v_mloadw = compute_memory_word_request::<AB>(local, next, &challenges, true); // is_read = true
-    let v_mstorew = compute_memory_word_request::<AB>(local, next, &challenges, false); // is_read = false
-    let v_hornerbase = compute_hornerbase_request::<AB>(local, &challenges);
-    let v_hornerext = compute_hornerext_request::<AB>(local, &challenges);
-    let v_mstream = compute_mstream_request::<AB>(local, next, &challenges);
-    let v_pipe = compute_pipe_request::<AB>(local, next, &challenges);
-    let v_cryptostream = compute_cryptostream_request::<AB>(local, next, &challenges);
+    let v_mload = compute_memory_element_request::<AB>(local, next, challenges, true); // is_read = true
+    let v_mstore = compute_memory_element_request::<AB>(local, next, challenges, false); // is_read = false
+    let v_mloadw = compute_memory_word_request::<AB>(local, next, challenges, true); // is_read = true
+    let v_mstorew = compute_memory_word_request::<AB>(local, next, challenges, false); // is_read = false
+    let v_hornerbase = compute_hornerbase_request::<AB>(local, challenges);
+    let v_hornerext = compute_hornerext_request::<AB>(local, challenges);
+    let v_mstream = compute_mstream_request::<AB>(local, next, challenges);
+    let v_pipe = compute_pipe_request::<AB>(local, next, challenges);
+    let v_cryptostream = compute_cryptostream_request::<AB>(local, next, challenges);
 
     // --- Bitwise request values ---
-    let v_u32and = compute_bitwise_request::<AB>(local, next, &challenges, false); // is_xor = false
-    let v_u32xor = compute_bitwise_request::<AB>(local, next, &challenges, true); // is_xor = true
+    let v_u32and = compute_bitwise_request::<AB>(local, next, challenges, false); // is_xor = false
+    let v_u32xor = compute_bitwise_request::<AB>(local, next, challenges, true); // is_xor = true
 
     // --- ACE and log_precompile request values ---
-    let v_evalcircuit = compute_ace_request::<AB>(local, &challenges);
-    let v_logprecompile = compute_log_precompile_request::<AB>(local, next, &challenges);
+    let v_evalcircuit = compute_ace_request::<AB>(local, challenges);
+    let v_logprecompile = compute_log_precompile_request::<AB>(local, next, challenges);
 
     // Sum of request flags (hasher + control blocks + memory + bitwise + ACE + log_precompile)
     let request_flag_sum: AB::Expr = f_hperm.clone()
@@ -299,19 +291,19 @@ pub fn enforce_chiplets_bus_constraint<AB>(
 
     // --- Hasher response (complex, depends on cycle position and selectors) ---
     let hasher_response =
-        compute_hasher_response::<AB>(local, next, &challenges, cycle_row_0, cycle_row_31);
+        compute_hasher_response::<AB>(local, next, challenges, cycle_row_0, cycle_row_31);
 
     // --- Bitwise response ---
-    let v_bitwise = compute_bitwise_response::<AB>(local, &challenges);
+    let v_bitwise = compute_bitwise_response::<AB>(local, challenges);
 
     // --- Memory response ---
-    let v_memory = compute_memory_response::<AB>(local, &challenges);
+    let v_memory = compute_memory_response::<AB>(local, challenges);
 
     // --- ACE response ---
-    let v_ace = compute_ace_response::<AB>(local, &challenges);
+    let v_ace = compute_ace_response::<AB>(local, challenges);
 
     // --- Kernel ROM response ---
-    let v_kernel_rom = compute_kernel_rom_response::<AB>(local, &challenges);
+    let v_kernel_rom = compute_kernel_rom_response::<AB>(local, challenges);
 
     // Convert flags to ExprEF
     // Responses: hasher + bitwise + memory + ACE + kernel ROM contributions, others return 1
@@ -350,7 +342,7 @@ pub fn enforce_chiplets_bus_constraint<AB>(
 fn compute_bitwise_request<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
     is_xor: bool,
 ) -> AB::ExprEF {
     let label: Felt = if is_xor { BITWISE_XOR_LABEL } else { BITWISE_AND_LABEL };
@@ -369,7 +361,7 @@ fn compute_bitwise_request<AB: LiftedAirBuilder<F = Felt>>(
 /// Format: alpha + beta^0*label + beta^1*a + beta^2*b + beta^3*z
 fn compute_bitwise_response<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     use crate::trace::chiplets::NUM_BITWISE_SELECTORS;
 
@@ -405,7 +397,7 @@ fn compute_bitwise_response<AB: LiftedAirBuilder<F = Felt>>(
 fn compute_memory_word_request<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
     is_read: bool,
 ) -> AB::ExprEF {
     let label = if is_read {
@@ -450,7 +442,7 @@ fn compute_memory_word_request<AB: LiftedAirBuilder<F = Felt>>(
 fn compute_memory_element_request<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
     is_read: bool,
 ) -> AB::ExprEF {
     let label = if is_read {
@@ -483,7 +475,7 @@ fn compute_memory_element_request<AB: LiftedAirBuilder<F = Felt>>(
 fn compute_mstream_request<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     let label: AB::Expr = AB::Expr::from_u16(MEMORY_READ_WORD_LABEL as u16);
     let ctx: AB::Expr = local.ctx.clone().into();
@@ -536,7 +528,7 @@ fn compute_mstream_request<AB: LiftedAirBuilder<F = Felt>>(
 fn compute_pipe_request<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     let label: AB::Expr = AB::Expr::from_u16(MEMORY_WRITE_WORD_LABEL as u16);
     let ctx: AB::Expr = local.ctx.clone().into();
@@ -589,7 +581,7 @@ fn compute_pipe_request<AB: LiftedAirBuilder<F = Felt>>(
 fn compute_cryptostream_request<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     let read_label: AB::Expr = AB::Expr::from_u16(MEMORY_READ_WORD_LABEL as u16);
     let write_label: AB::Expr = AB::Expr::from_u16(MEMORY_WRITE_WORD_LABEL as u16);
@@ -653,7 +645,7 @@ fn compute_cryptostream_request<AB: LiftedAirBuilder<F = Felt>>(
 /// Computes the HORNERBASE request value (two element reads).
 fn compute_hornerbase_request<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     let label: AB::Expr = AB::Expr::from_u16(MEMORY_READ_ELEMENT_LABEL as u16);
     let ctx: AB::Expr = local.ctx.clone().into();
@@ -678,7 +670,7 @@ fn compute_hornerbase_request<AB: LiftedAirBuilder<F = Felt>>(
 /// Computes the HORNEREXT request value (one word read).
 fn compute_hornerext_request<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     let label: AB::Expr = AB::Expr::from_u16(MEMORY_READ_WORD_LABEL as u16);
     let ctx: AB::Expr = local.ctx.clone().into();
@@ -713,7 +705,7 @@ fn compute_hornerext_request<AB: LiftedAirBuilder<F = Felt>>(
 /// For element access, the correct element is selected based on idx0, idx1.
 fn compute_memory_response<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     use crate::trace::chiplets::{NUM_MEMORY_SELECTORS, memory};
 
@@ -790,7 +782,7 @@ struct HasherResponse<EF, E> {
 fn compute_hasher_response<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
     cycle_row_0: AB::Expr,
     cycle_row_31: AB::Expr,
 ) -> HasherResponse<AB::ExprEF, AB::Expr> {
@@ -1010,7 +1002,7 @@ fn compute_hasher_response<AB: LiftedAirBuilder<F = Felt>>(
 fn compute_hperm_request<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     use crate::trace::decoder::USER_OP_HELPERS_OFFSET;
 
@@ -1060,7 +1052,7 @@ fn compute_hperm_request<AB: LiftedAirBuilder<F = Felt>>(
 fn compute_log_precompile_request<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     // Helper registers
     let helper_base = USER_OP_HELPERS_OFFSET;
@@ -1145,7 +1137,7 @@ fn compute_log_precompile_request<AB: LiftedAirBuilder<F = Felt>>(
 /// - header = alpha + beta^0 * transition_label + beta^1 * addr + beta^2 * node_index
 /// - state = sum(beta^(3+i) * hasher_state[i]) for i in 0..12
 fn compute_hasher_message<AB: LiftedAirBuilder<F = Felt>>(
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
     transition_label: AB::Expr,
     addr: AB::Expr,
     node_index: AB::Expr,
@@ -1172,7 +1164,7 @@ fn compute_hasher_message<AB: LiftedAirBuilder<F = Felt>>(
 
 /// Computes a hasher message for a 4-lane word.
 fn compute_hasher_word_message<AB: LiftedAirBuilder<F = Felt>>(
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
     transition_label: AB::Expr,
     addr: AB::Expr,
     node_index: AB::Expr,
@@ -1191,7 +1183,7 @@ fn compute_hasher_word_message<AB: LiftedAirBuilder<F = Felt>>(
 
 /// Computes a hasher message for an 8-lane rate.
 fn compute_hasher_rate_message<AB: LiftedAirBuilder<F = Felt>>(
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
     transition_label: AB::Expr,
     addr: AB::Expr,
     node_index: AB::Expr,
@@ -1223,7 +1215,7 @@ fn compute_hasher_rate_message<AB: LiftedAirBuilder<F = Felt>>(
 /// Stack layout for EVALCIRCUIT: [ptr, num_read_rows, num_eval_rows, ...]
 fn compute_ace_request<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     // Label is ACE_INIT_LABEL
     let label: AB::Expr = AB::Expr::from(ACE_INIT_LABEL);
@@ -1253,7 +1245,7 @@ fn compute_ace_request<AB: LiftedAirBuilder<F = Felt>>(
 /// - num_read_rows = id_0 + 1 - num_eval_rows
 fn compute_ace_response<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     // Label is ACE_INIT_LABEL
     let label: AB::Expr = AB::Expr::from(ACE_INIT_LABEL);
@@ -1290,7 +1282,7 @@ fn compute_ace_response<AB: LiftedAirBuilder<F = Felt>>(
 /// - s_first=0: KERNEL_PROC_CALL_LABEL (responding to decoder SYSCALL request)
 fn compute_kernel_rom_response<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     // s_first flag is at CHIPLETS_OFFSET + 5 (after 5 selectors), which is chiplets[5]
     let s_first: AB::Expr = local.chiplets[NUM_KERNEL_ROM_SELECTORS].clone().into();
@@ -1350,7 +1342,7 @@ impl ControlBlockOp {
 fn compute_control_block_request<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
     op: ControlBlockOp,
 ) -> AB::ExprEF {
     // transition_label = LINEAR_HASH_LABEL + 16 = 19
@@ -1395,7 +1387,7 @@ fn compute_control_block_request<AB: LiftedAirBuilder<F = Felt>>(
 fn compute_call_request<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     // Control block request
     let control_req =
@@ -1415,7 +1407,7 @@ fn compute_call_request<AB: LiftedAirBuilder<F = Felt>>(
 fn compute_dyn_request<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     // Control block request with zeros for hasher state (callee is dynamic)
     let control_req =
@@ -1436,7 +1428,7 @@ fn compute_dyn_request<AB: LiftedAirBuilder<F = Felt>>(
 fn compute_dyncall_request<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     // Control block request with zeros for hasher state (callee is dynamic)
     let control_req =
@@ -1459,7 +1451,7 @@ fn compute_dyncall_request<AB: LiftedAirBuilder<F = Felt>>(
 fn compute_syscall_request<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     // Control block request
     let control_req =
@@ -1483,7 +1475,7 @@ fn compute_syscall_request<AB: LiftedAirBuilder<F = Felt>>(
 fn compute_span_request<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     // transition_label = LINEAR_HASH_LABEL + 16 = 19
     let transition_label: AB::Expr = AB::Expr::from_u16(LINEAR_HASH_LABEL as u16 + 16);
@@ -1520,7 +1512,7 @@ fn compute_span_request<AB: LiftedAirBuilder<F = Felt>>(
 fn compute_respan_request<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     // transition_label = LINEAR_HASH_LABEL + 32 = 35
     let transition_label: AB::Expr = AB::Expr::from_u16(LINEAR_HASH_LABEL as u16 + 32);
@@ -1547,7 +1539,7 @@ fn compute_respan_request<AB: LiftedAirBuilder<F = Felt>>(
 /// Digest occupies message positions 3..6 (after label/addr/node_index).
 fn compute_end_request<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     // transition_label = RETURN_HASH_LABEL + 32 = 1 + 32 = 33
     let transition_label: AB::Expr = AB::Expr::from_u16(RETURN_HASH_LABEL as u16 + 32);
@@ -1567,7 +1559,7 @@ fn compute_end_request<AB: LiftedAirBuilder<F = Felt>>(
 fn compute_control_block_request_zeros<AB: LiftedAirBuilder<F = Felt>>(
     _local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
     opcode: u8,
 ) -> AB::ExprEF {
     // transition_label = LINEAR_HASH_LABEL + 16 = 19
@@ -1604,7 +1596,7 @@ fn compute_control_block_request_zeros<AB: LiftedAirBuilder<F = Felt>>(
 fn compute_fmp_write_request<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     let label: AB::Expr = AB::Expr::from_u16(MEMORY_WRITE_ELEMENT_LABEL as u16);
 
@@ -1622,7 +1614,7 @@ fn compute_fmp_write_request<AB: LiftedAirBuilder<F = Felt>>(
 /// Reads a word from the address at stack[0] containing the callee hash.
 fn compute_dyn_callee_hash_read<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     let label: AB::Expr = AB::Expr::from_u16(MEMORY_READ_WORD_LABEL as u16);
 
@@ -1649,7 +1641,7 @@ fn compute_dyn_callee_hash_read<AB: LiftedAirBuilder<F = Felt>>(
 /// 2. Output: root value at RATE1 (indices 4..8)
 fn compute_mpverify_request<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     use crate::trace::decoder::USER_OP_HELPERS_OFFSET;
 
@@ -1695,7 +1687,7 @@ fn compute_mpverify_request<AB: LiftedAirBuilder<F = Felt>>(
 fn compute_mrupdate_request<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    challenges: &Challenges<AB::ExprEF, NUM_CHIPLETS_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     use crate::trace::decoder::USER_OP_HELPERS_OFFSET;
 

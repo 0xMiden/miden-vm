@@ -31,10 +31,11 @@ use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess}
 use crate::{
     MainTraceRow,
     constraints::{
-        bus::{Challenges, indices::P1_BLOCK_STACK},
+        bus::indices::P1_BLOCK_STACK,
         op_flags::OpFlags,
         tagging::{TaggingAirBuilderExt, ids::TAG_DECODER_BUS_BASE},
     },
+    trace::Challenges,
 };
 
 // CONSTANTS
@@ -54,21 +55,13 @@ const DECODER_BUS_NAMES: [&str; 3] = [
 const OP_BIT_WEIGHTS: [u16; 7] = [1, 2, 4, 8, 16, 32, 64];
 
 /// Encoders for block stack table (p1) messages.
-struct BlockStackEncoders<AB>
-where
-    AB: LiftedAirBuilder,
-{
-    challenges: Challenges<AB::ExprEF, 10>,
+struct BlockStackEncoders<'a, AB: LiftedAirBuilder> {
+    challenges: &'a Challenges<AB::ExprEF>,
 }
 
-impl<AB> BlockStackEncoders<AB>
-where
-    AB: LiftedAirBuilder,
-{
-    fn new(challenges: &[AB::RandomVar]) -> Self {
-        Self {
-            challenges: Challenges::<AB::ExprEF, 10>::from_randomness(challenges),
-        }
+impl<'a, AB: LiftedAirBuilder> BlockStackEncoders<'a, AB> {
+    fn new(challenges: &'a Challenges<AB::ExprEF>) -> Self {
+        Self { challenges }
     }
 
     /// Encodes `[block_id, parent_id, is_loop]`.
@@ -104,21 +97,13 @@ where
 }
 
 /// Encoder for block hash table (p2) messages.
-struct BlockHashEncoder<AB>
-where
-    AB: LiftedAirBuilder,
-{
-    challenges: Challenges<AB::ExprEF, 7>,
+struct BlockHashEncoder<'a, AB: LiftedAirBuilder> {
+    challenges: &'a Challenges<AB::ExprEF>,
 }
 
-impl<AB> BlockHashEncoder<AB>
-where
-    AB: LiftedAirBuilder,
-{
-    fn new(challenges: &[AB::RandomVar]) -> Self {
-        Self {
-            challenges: Challenges::<AB::ExprEF, 7>::from_randomness(challenges),
-        }
+impl<'a, AB: LiftedAirBuilder> BlockHashEncoder<'a, AB> {
+    fn new(challenges: &'a Challenges<AB::ExprEF>) -> Self {
+        Self { challenges }
     }
 
     /// Encodes `[parent_id, hash[0..4], is_first_child, is_loop_body]`.
@@ -142,21 +127,13 @@ where
 }
 
 /// Encoder for op group table (p3) messages.
-struct OpGroupEncoder<AB>
-where
-    AB: LiftedAirBuilder,
-{
-    challenges: Challenges<AB::ExprEF, 3>,
+struct OpGroupEncoder<'a, AB: LiftedAirBuilder> {
+    challenges: &'a Challenges<AB::ExprEF>,
 }
 
-impl<AB> OpGroupEncoder<AB>
-where
-    AB: LiftedAirBuilder,
-{
-    fn new(challenges: &[AB::RandomVar]) -> Self {
-        Self {
-            challenges: Challenges::<AB::ExprEF, 3>::from_randomness(challenges),
-        }
+impl<'a, AB: LiftedAirBuilder> OpGroupEncoder<'a, AB> {
+    fn new(challenges: &'a Challenges<AB::ExprEF>) -> Self {
+        Self { challenges }
     }
 
     /// Encodes `[block_id, group_count, op_value]`.
@@ -232,12 +209,13 @@ pub fn enforce_bus<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
+    challenges: &Challenges<AB::ExprEF>,
 ) where
     AB: LiftedAirBuilder,
 {
-    enforce_block_stack_table_constraint(builder, local, next, op_flags);
-    enforce_block_hash_table_constraint(builder, local, next, op_flags);
-    enforce_op_group_table_constraint(builder, local, next, op_flags);
+    enforce_block_stack_table_constraint(builder, local, next, op_flags, challenges);
+    enforce_block_hash_table_constraint(builder, local, next, op_flags, challenges);
+    enforce_op_group_table_constraint(builder, local, next, op_flags, challenges);
 }
 
 // CONSTRAINT HELPERS
@@ -280,6 +258,7 @@ pub fn enforce_block_stack_table_constraint<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
+    challenges: &Challenges<AB::ExprEF>,
 ) where
     AB: LiftedAirBuilder,
 {
@@ -292,9 +271,6 @@ pub fn enforce_block_stack_table_constraint<AB>(
         let aux_next = aux.next_slice();
         (aux_local[P1_BLOCK_STACK], aux_next[P1_BLOCK_STACK])
     };
-
-    // Get challenges for message encoding.
-    let challenges = builder.permutation_randomness();
 
     let one = AB::Expr::ONE;
     let zero = AB::Expr::ZERO;
@@ -526,6 +502,7 @@ pub fn enforce_block_hash_table_constraint<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
+    challenges: &Challenges<AB::ExprEF>,
 ) where
     AB: LiftedAirBuilder,
 {
@@ -541,9 +518,6 @@ pub fn enforce_block_hash_table_constraint<AB>(
             aux_next[crate::constraints::bus::indices::P2_BLOCK_HASH],
         )
     };
-
-    // Get challenges for message encoding (8 alphas for p2)
-    let challenges = builder.permutation_randomness();
 
     let one = AB::Expr::ONE;
     let zero = AB::Expr::ZERO;
@@ -763,6 +737,7 @@ pub fn enforce_op_group_table_constraint<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
+    challenges: &Challenges<AB::ExprEF>,
 ) where
     AB: LiftedAirBuilder,
 {
@@ -778,9 +753,6 @@ pub fn enforce_op_group_table_constraint<AB>(
             aux_next[crate::constraints::bus::indices::P3_OP_GROUP],
         )
     };
-
-    // Get challenges for message encoding (4 alphas for p3)
-    let challenges = builder.permutation_randomness();
 
     let one = AB::Expr::ONE;
     let one_ef = AB::ExprEF::ONE;

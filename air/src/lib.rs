@@ -272,17 +272,16 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
             .try_into()
             .map_err(|_| -> ReductionError { "invalid transcript state slice".into() })?;
 
+        // Precompute challenge powers once for all bus message encodings below.
+        let challenges = trace::Challenges::<EF>::from_raw(challenges);
+
         // Compute expected bus messages from public inputs and derived challenges.
-        let ph_msg = program_hash_message(challenges, &program_hash);
+        let ph_msg = program_hash_message(&challenges, &program_hash);
 
-        let default_transcript_msg = trace::log_precompile::transcript_message(
-            challenges,
-            PrecompileTranscriptState::default(),
-        );
-        let final_transcript_msg =
-            trace::log_precompile::transcript_message(challenges, pc_transcript_state);
+        let (default_transcript_msg, final_transcript_msg) =
+            transcript_messages(&challenges, pc_transcript_state);
 
-        let kernel_reduced = kernel_reduced_from_var_len(challenges, var_len_public_inputs)?;
+        let kernel_reduced = kernel_reduced_from_var_len(&challenges, var_len_public_inputs)?;
 
         // Combine all multiset column finals with reduced variable length public-inputs.
         //
@@ -371,10 +370,11 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
 ///
 /// Must match `BlockHashTableRow::from_end().collapse()` on the prover side for the
 /// root block, which encodes `[parent_id=0, hash[0..4], is_first_child=0, is_loop_body=0]`.
-fn program_hash_message<EF: ExtensionField<Felt>>(challenges: &[EF], program_hash: &Word) -> EF {
-    use trace::Challenges;
-    let c = Challenges::<EF, 7>::from_raw(challenges);
-    c.encode([
+fn program_hash_message<EF: ExtensionField<Felt>>(
+    challenges: &trace::Challenges<EF>,
+    program_hash: &Word,
+) -> EF {
+    challenges.encode([
         Felt::ZERO, // parent_id = 0 (root block)
         program_hash[0],
         program_hash[1],
@@ -385,14 +385,37 @@ fn program_hash_message<EF: ExtensionField<Felt>>(challenges: &[EF], program_has
     ])
 }
 
+/// Returns the pair of (initial, final) log-precompile transcript messages for the
+/// virtual-table bus boundary term.
+///
+/// The initial message uses the default (zero) capacity state; the final message uses
+/// the public-input transcript state.
+fn transcript_messages<EF: ExtensionField<Felt>>(
+    challenges: &trace::Challenges<EF>,
+    final_state: PrecompileTranscriptState,
+) -> (EF, EF) {
+    let encode = |state: PrecompileTranscriptState| {
+        let cap: &[Felt] = state.as_ref();
+        challenges.encode([
+            Felt::from_u8(trace::LOG_PRECOMPILE_LABEL),
+            cap[0],
+            cap[1],
+            cap[2],
+            cap[3],
+        ])
+    };
+    (encode(PrecompileTranscriptState::default()), encode(final_state))
+}
+
 /// Builds the kernel procedure init message for the kernel ROM bus.
 ///
 /// Must match `KernelRomInitMessage::value()` on the prover side, which encodes
 /// `[KERNEL_PROC_INIT_LABEL, digest[0..4]]`.
-fn kernel_proc_message<EF: ExtensionField<Felt>>(challenges: &[EF], digest: &Word) -> EF {
-    use trace::Challenges;
-    let c = Challenges::<EF, 5>::from_raw(challenges);
-    c.encode([
+fn kernel_proc_message<EF: ExtensionField<Felt>>(
+    challenges: &trace::Challenges<EF>,
+    digest: &Word,
+) -> EF {
+    challenges.encode([
         trace::chiplets::kernel_rom::KERNEL_PROC_INIT_LABEL,
         digest[0],
         digest[1],
@@ -403,7 +426,7 @@ fn kernel_proc_message<EF: ExtensionField<Felt>>(challenges: &[EF], digest: &Wor
 
 /// Reduces kernel procedure digests from var-len public inputs into a multiset product.
 fn kernel_reduced_from_var_len<EF: ExtensionField<Felt>>(
-    challenges: &[EF],
+    challenges: &trace::Challenges<EF>,
     var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
 ) -> Result<EF, ReductionError> {
     let mut acc = EF::ONE;
