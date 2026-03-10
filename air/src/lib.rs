@@ -282,7 +282,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
         let final_transcript_msg =
             trace::log_precompile::transcript_message(challenges, pc_transcript_state);
 
-        let kernel_reduced = kernel_reduced_from_var_len(challenges, var_len_public_inputs);
+        let kernel_reduced = kernel_reduced_from_var_len(challenges, var_len_public_inputs)?;
 
         // Combine all multiset column finals with reduced variable length public-inputs.
         //
@@ -405,12 +405,19 @@ fn kernel_proc_message<EF: ExtensionField<Felt>>(challenges: &[EF], digest: &Wor
 fn kernel_reduced_from_var_len<EF: ExtensionField<Felt>>(
     challenges: &[EF],
     var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
-) -> EF {
+) -> Result<EF, ReductionError> {
     let mut acc = EF::ONE;
     for digest in var_len_public_inputs.iter() {
-        debug_assert_eq!(digest.len(), WORD_SIZE);
+        if digest.len() != WORD_SIZE {
+            return Err(format!(
+                "invalid kernel digest length: expected {}, got {}",
+                WORD_SIZE,
+                digest.len()
+            )
+            .into());
+        }
         let word: Word = [digest[0], digest[1], digest[2], digest[3]].into();
         acc *= kernel_proc_message(challenges, &word);
     }
-    acc
+    Ok(acc)
 }
