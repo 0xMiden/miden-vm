@@ -118,7 +118,7 @@ impl Profile {
     /// Returns true if this profile is configured so that we should trim file paths in debug
     /// information to be relative to the current working directory.
     pub const fn should_trim_paths(&self) -> bool {
-        self.debug
+        self.trim_paths
     }
 
     /// Returns true if `key` is defined in the custom metadata associated with this profile.
