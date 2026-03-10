@@ -27,9 +27,9 @@ use serde::{Deserialize, Serialize};
 
 pub use self::{
     dependency::DependencySpec,
-    package::{PackageConfig, PackageDetail, PackageFile},
+    package::{PackageConfig, PackageDetail, ProjectFile},
     profile::Profile,
-    target::Target,
+    target::{BinTarget, LibTarget},
     workspace::WorkspaceFile,
 };
 use crate::{Diagnostic, Label, RelatedError, Report, SourceFile, SourceSpan, miette};
@@ -48,7 +48,7 @@ pub enum MidenProject {
     ///
     /// A `miden-project.toml` of this variety defines a package, and may reference/override any
     /// workspace-level dependencies, lints, or build profiles.
-    Package(Box<PackageFile>),
+    Package(Box<ProjectFile>),
 }
 
 /// Accessors
@@ -77,7 +77,7 @@ impl MidenProject {
         if source.as_str().contains("[workspace") {
             Ok(Self::Workspace(Box::new(WorkspaceFile::parse(source)?)))
         } else {
-            Ok(Self::Package(Box::new(PackageFile::parse(source)?)))
+            Ok(Self::Package(Box::new(ProjectFile::parse(source)?)))
         }
     }
 }
@@ -122,20 +122,6 @@ pub(crate) enum ProjectFileError {
         source_file: Arc<SourceFile>,
         #[related]
         related: Vec<RelatedError>,
-    },
-    #[error("invalid build target requirement")]
-    InvalidTargetRequirement {
-        #[source_code]
-        source_file: Arc<SourceFile>,
-        #[label(primary)]
-        label: Label,
-    },
-    #[error("invalid build target option")]
-    InvalidTargetOption {
-        #[source_code]
-        source_file: Arc<SourceFile>,
-        #[label(primary)]
-        label: Label,
     },
     #[error("package is not a member of a workspace")]
     NotAWorkspace {
