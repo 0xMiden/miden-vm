@@ -1,5 +1,6 @@
 use alloc::{string::String, sync::Arc};
 
+use miden_air::trace::AUX_TRACE_RAND_CHALLENGES;
 use miden_core::{
     Felt,
     mast::{
@@ -10,7 +11,7 @@ use miden_core::{
     operations::Operation,
     program::{Kernel, Program, StackInputs},
 };
-use miden_utils_testing::get_column_name;
+use miden_utils_testing::{get_column_name, rand::rand_array};
 use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
 
@@ -386,6 +387,46 @@ fn test_trace_generation_at_fragment_boundaries(
 
     // Verify stack outputs match.
     assert_eq!(trace_from_fragments.stack_outputs(), trace_from_single_fragment.stack_outputs(),);
+
+    // Verify program info and trace length summary match.
+    assert_eq!(trace_from_fragments.program_info(), trace_from_single_fragment.program_info(),);
+    assert_eq!(
+        trace_from_fragments.trace_len_summary(),
+        trace_from_single_fragment.trace_len_summary(),
+    );
+
+    // Verify merkle store data match deterministically.
+    let merkle_nodes_from_fragments: alloc::collections::BTreeMap<_, _> = trace_from_fragments
+        .advice_provider()
+        .merkle_store()
+        .inner_nodes()
+        .map(|info| (info.value, (info.left, info.right)))
+        .collect();
+    let merkle_nodes_from_single: alloc::collections::BTreeMap<_, _> = trace_from_single_fragment
+        .advice_provider()
+        .merkle_store()
+        .inner_nodes()
+        .map(|info| (info.value, (info.left, info.right)))
+        .collect();
+    assert_eq!(merkle_nodes_from_fragments, merkle_nodes_from_single,);
+
+    // Verify aux trace columns match.
+    let rand_elements = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_from_fragments = trace_from_fragments.build_aux_trace(&rand_elements).unwrap();
+    let aux_from_single_fragment =
+        trace_from_single_fragment.build_aux_trace(&rand_elements).unwrap();
+    let aux_from_fragments =
+        aux_from_fragments.columns().map(|col| col.to_vec()).collect::<Vec<_>>();
+    let aux_from_single_fragment =
+        aux_from_single_fragment.columns().map(|col| col.to_vec()).collect::<Vec<_>>();
+    assert_eq!(aux_from_fragments, aux_from_single_fragment,);
+
+    // Compare deterministic traces as a compact sanity check and to keep the snapshot stable.
+    assert_eq!(
+        format!("{:?}", DeterministicTrace(&trace_from_fragments)),
+        format!("{:?}", DeterministicTrace(&trace_from_single_fragment)),
+        "Deterministic trace mismatch between fragments and single fragment"
+    );
 
     // Snapshot testing to ensure that future changes don't unexpectedly change the trace.
     // We use DeterministicTrace to produce stable Debug output, since ExecutionTrace contains
