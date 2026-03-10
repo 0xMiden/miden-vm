@@ -167,6 +167,12 @@ impl<'a> ProcessorState<'a> {
         self.processor.advice_provider()
     }
 
+    /// Returns the execution options.
+    #[inline(always)]
+    pub fn execution_options(&self) -> &ExecutionOptions {
+        self.processor.execution_options()
+    }
+
     /// Returns the current clock cycle of a process.
     #[inline(always)]
     pub fn clock(&self) -> RowIndex {

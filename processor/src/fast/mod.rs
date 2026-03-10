@@ -405,6 +405,11 @@ impl FastProcessor {
         &self.memory
     }
 
+    /// Returns a reference to the execution options.
+    pub fn execution_options(&self) -> &ExecutionOptions {
+        &self.options
+    }
+
     /// Returns a narrowed interface for reading and updating the processor state.
     #[inline(always)]
     pub fn state(&self) -> ProcessorState<'_> {
