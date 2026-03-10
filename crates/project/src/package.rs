@@ -5,7 +5,7 @@ use std::{boxed::Box, path::Path};
 use miden_assembly_syntax::debuginfo::Spanned;
 
 #[cfg(feature = "std")]
-use crate::ast::{ProjectFileError, WorkspaceFile, parsing::MaybeInherit};
+use crate::ast::{ProjectFileError, WorkspaceFile};
 use crate::*;
 
 /// The representation of an individual package in a Miden project
@@ -119,11 +119,6 @@ impl Package {
         source: Arc<SourceFile>,
         workspace: Option<&WorkspaceFile>,
     ) -> Result<Box<Self>, Report> {
-        use alloc::format;
-        use core::num::NonZeroU32;
-
-        use miden_assembly_syntax::Path as MasmPath;
-
         let manifest_path = Path::new(source.uri().path());
         let manifest_path = if manifest_path.try_exists().is_ok_and(|exists| exists) {
             Some(manifest_path.to_path_buf().into_boxed_path())
@@ -131,144 +126,29 @@ impl Package {
             None
         };
 
+        // Parse the manifest into an AST for further processing
         let package_ast = ast::ProjectFile::parse(source.clone())?;
 
-        let Some(version) = package_ast.package.detail.version.as_ref() else {
-            let one = NonZeroU32::new(1).unwrap();
-            let span = source
-                .line_column_to_span(one.into(), one.into())
-                .unwrap_or(source.source_span());
-            return Err(ProjectFileError::MissingVersion { source_file: source, span }.into());
-        };
-        let version = match version.inner() {
-            MaybeInherit::Value(value) => Span::new(version.span(), value.clone()),
-            MaybeInherit::Inherit => match workspace {
-                Some(workspace) => {
-                    if let Some(version) = workspace.workspace.package.version.as_ref() {
-                        version.as_ref().map(|inherit| inherit.unwrap_value().clone())
-                    } else {
-                        return Err(ProjectFileError::MissingWorkspaceVersion {
-                            source_file: source,
-                            span: version.span(),
-                        }
-                        .into());
-                    }
-                },
-                None => {
-                    return Err(ProjectFileError::NotAWorkspace {
-                        source_file: source,
-                        span: version.span(),
-                    }
-                    .into());
-                },
-            },
-        };
+        // Extract metadata that can be inherited from the workspace manifest (if present)
+        let version = package_ast.get_or_inherit_version(source.clone(), workspace)?;
+        let description = package_ast.get_or_inherit_description(source.clone(), workspace)?;
 
-        let description = package_ast.package.detail.description.as_ref();
-        let description = match description {
-            None => None,
-            Some(desc) => match desc.inner() {
-                MaybeInherit::Value(value) => Some(value.clone()),
-                MaybeInherit::Inherit => match workspace {
-                    Some(workspace) => workspace
-                        .workspace
-                        .package
-                        .description
-                        .as_ref()
-                        .map(|d| d.inner().unwrap_value().clone()),
-                    None => {
-                        return Err(ProjectFileError::NotAWorkspace {
-                            source_file: source,
-                            span: desc.span(),
-                        }
-                        .into());
-                    },
-                },
-            },
-        };
-
+        // Compute the set of initial profiles inheritable from the workspace level
         let mut profiles = Vec::default();
         profiles.push(Profile::default());
         profiles.push(Profile::release());
         if let Some(workspace) = workspace {
             for ast in workspace.profiles.iter() {
-                let ast::Profile {
-                    inherits,
-                    name,
-                    debug,
-                    trim_paths,
-                    metadata,
-                } = ast;
-
-                let mut profile = match inherits.as_ref() {
-                    Some(parent) => {
-                        if let Some(parent) = profiles.iter().find(|p| p.name() == parent.inner()) {
-                            Profile::inherit(name.clone(), parent)
-                        } else {
-                            return Err(ProjectFileError::UnknownProfile {
-                                name: parent.inner().clone(),
-                                source_file: source,
-                                span: parent.span(),
-                            }
-                            .into());
-                        }
-                    },
-                    None => Profile::new(name.clone()),
-                };
-
-                if let Some(debug) = *debug {
-                    profile.enable_debug_info(debug);
-                }
-
-                if let Some(trim_paths) = *trim_paths {
-                    profile.enable_trim_paths(trim_paths);
-                }
-
-                if !metadata.is_empty() {
-                    profile.extend(metadata.iter().map(|(k, v)| (k.clone(), v.clone())));
-                }
-
-                profiles.push(profile);
+                profiles.push(Profile::from_ast(ast, source.clone(), &profiles)?);
             }
         }
 
+        // Compute the effective profiles for this project, merging over the top of workspace-level
+        // profiles, but raising an error if the same profile is mentioned twice in the current
+        // project file.
         let package_profiles_start = profiles.len();
         for ast in package_ast.profiles.iter() {
-            let ast::Profile {
-                inherits,
-                name,
-                debug,
-                trim_paths,
-                metadata,
-            } = ast;
-
-            let mut profile = match inherits.as_ref() {
-                Some(parent) => {
-                    if let Some(parent) = profiles.iter().find(|p| p.name() == parent.inner()) {
-                        Profile::inherit(name.clone(), parent)
-                    } else {
-                        return Err(ProjectFileError::UnknownProfile {
-                            name: parent.inner().clone(),
-                            source_file: source,
-                            span: parent.span(),
-                        }
-                        .into());
-                    }
-                },
-                None => Profile::new(name.clone()),
-            };
-
-            if let Some(debug) = *debug {
-                profile.enable_debug_info(debug);
-            }
-
-            if let Some(trim_paths) = *trim_paths {
-                profile.enable_trim_paths(trim_paths);
-            }
-
-            if !metadata.is_empty() {
-                profile.extend(metadata.iter().map(|(k, v)| (k.clone(), v.clone())));
-            }
+            let profile = Profile::from_ast(ast, source.clone(), &profiles)?;
 
             if let Some(prev_index) = profiles.iter().position(|p| p.name() == profile.name()) {
                 if prev_index < package_profiles_start {
@@ -288,107 +168,13 @@ impl Package {
             }
         }
 
-        let mut dependencies = Vec::with_capacity(package_ast.config.dependencies.len());
-        for dependency in package_ast.config.dependencies.values() {
-            if dependency.inherits_workspace_version() {
-                if let Some(workspace) = workspace {
-                    match workspace.workspace.config.dependencies.get(&dependency.name) {
-                        Some(dep) => {
-                            debug_assert!(!dep.inherits_workspace_version());
+        // Extract project dependencies, using the workspace to resolve workspace-relative
+        // dependencies
+        let dependencies = package_ast.extract_dependencies(source.clone(), workspace)?;
 
-                            let version = DependencyVersionScheme::try_from_in_workspace(
-                                dep.as_ref(),
-                                workspace,
-                            )?;
-                            dependencies.push(Dependency::new(dep.name.clone(), version));
-                        },
-                        None => {
-                            return Err(ProjectFileError::InvalidPackageDependency {
-                                source_file: source,
-                                label: Label::new(
-                                    dependency.span(),
-                                    format!("'{}' is not a workspace dependency", &dependency.name),
-                                ),
-                            }
-                            .into());
-                        },
-                    }
-                } else {
-                    return Err(ProjectFileError::InvalidPackageDependency {
-                        source_file: source,
-                        label: Label::new(dependency.span(), "this package is not in a workspace"),
-                    }
-                    .into());
-                }
-            } else {
-                dependencies.push(Dependency::new(
-                    dependency.name.clone(),
-                    DependencyVersionScheme::try_from(dependency.as_ref())?,
-                ));
-            }
-        }
-
-        let mut lib = if let Some(lib) = package_ast.lib.as_ref() {
-            let kind = lib.kind.as_deref().copied().unwrap_or(TargetType::Library);
-            let name = lib
-                .namespace
-                .clone()
-                .unwrap_or_else(|| Span::new(lib.span(), package_ast.package.name.inner().clone()));
-            let namespace = match kind {
-                TargetType::Kernel => Span::new(lib.span(), MasmPath::kernel_path().into()),
-                _ => {
-                    let ns = lib.namespace.clone().unwrap_or_else(|| {
-                        Span::new(lib.span(), package_ast.package.name.inner().clone())
-                    });
-                    ns.map(|ns| MasmPath::new(&ns).to_absolute().into())
-                },
-            };
-            Some(Span::new(
-                lib.span(),
-                Target {
-                    ty: kind,
-                    name,
-                    namespace,
-                    path: lib.path.clone(),
-                },
-            ))
-        } else {
-            None
-        };
-        let mut bins = Vec::with_capacity(package_ast.bins.len());
-        for target in package_ast.bins.iter() {
-            let span = target.span();
-            let name = target.name.clone().unwrap_or_else(|| {
-                Span::new(target.span(), package_ast.package.name.inner().clone())
-            });
-            let namespace = Span::new(target.span(), Arc::from(MasmPath::exec_path()));
-            bins.push(Span::new(
-                span,
-                Target {
-                    ty: TargetType::Executable,
-                    name,
-                    namespace,
-                    path: target.path.clone(),
-                },
-            ));
-        }
-
-        if lib.is_none() && bins.is_empty() {
-            let project_name = &package_ast.package.name;
-            let span = project_name.span();
-            let namespace: Span<Arc<MasmPath>> =
-                Span::new(span, MasmPath::new(project_name.inner()).to_absolute().into());
-            let name = project_name.clone();
-            lib = Some(Span::new(
-                span,
-                Target {
-                    ty: TargetType::Library,
-                    name,
-                    namespace,
-                    path: Some(Span::new(span, Uri::new("mod.masm"))),
-                },
-            ));
-        }
+        // Extract the build targets for this project
+        let lib = package_ast.extract_library_target()?;
+        let bins = package_ast.extract_executable_targets();
 
         Ok(Box::new(Self {
             manifest_path,
