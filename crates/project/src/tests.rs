@@ -48,30 +48,35 @@ fn can_load_protocol_example_project() -> Result<(), Report> {
             .expect("failed to locate 'miden-core' project by relative path")
     ));
 
-    assert_eq!(core_project.targets().len(), 1);
-    assert_eq!(core_project.targets()[0].ty, TargetType::Library);
-    assert_eq!(&**core_project.targets()[0].namespace.inner(), MasmPath::new("::miden::core"));
+    let core_lib = core_project.library_target().unwrap();
+    assert_eq!(core_lib.ty, TargetType::Library);
+    assert_eq!(&**core_lib.name.inner(), "miden::core");
+    assert_eq!(&**core_lib.namespace.inner(), MasmPath::new("::miden::core"));
+    assert_eq!(core_project.executable_targets().len(), 0);
 
     let kernel_project = workspace
         .get_member_by_name("miden-tx")
         .expect("failed to locate 'miden-tx' project");
 
-    assert_eq!(kernel_project.targets().len(), 3);
-    assert_eq!(kernel_project.targets()[0].ty, TargetType::Kernel);
-    assert_eq!(&**kernel_project.targets()[0].name.inner(), "kernel");
-    assert_eq!(&**kernel_project.targets()[0].namespace.inner(), MasmPath::kernel_path());
+    let kernel_lib = kernel_project.library_target().unwrap();
+    assert_eq!(kernel_lib.ty, TargetType::Kernel);
+    assert_eq!(&**kernel_lib.name.inner(), "miden-tx");
+    assert_eq!(&**kernel_lib.namespace.inner(), MasmPath::kernel_path());
+    assert_eq!(kernel_project.executable_targets().len(), 2);
 
-    assert_eq!(kernel_project.targets()[1].ty, TargetType::Executable);
-    assert_eq!(&**kernel_project.targets()[1].name.inner(), "entry");
-    assert_eq!(&**kernel_project.targets()[1].namespace.inner(), MasmPath::exec_path());
-    assert_eq!(kernel_project.targets()[1].requires.len(), 1);
-    assert_eq!(&**kernel_project.targets()[1].requires[0].inner(), "kernel");
+    assert_eq!(kernel_project.executable_targets()[0].ty, TargetType::Executable);
+    assert_eq!(&**kernel_project.executable_targets()[0].name.inner(), "entry");
+    assert_eq!(
+        &**kernel_project.executable_targets()[0].namespace.inner(),
+        MasmPath::exec_path()
+    );
 
-    assert_eq!(kernel_project.targets()[2].ty, TargetType::Executable);
-    assert_eq!(&**kernel_project.targets()[2].name.inner(), "entry-alt");
-    assert_eq!(&**kernel_project.targets()[2].namespace.inner(), MasmPath::exec_path());
-    assert_eq!(kernel_project.targets()[2].requires.len(), 1);
-    assert_eq!(&**kernel_project.targets()[2].requires[0].inner(), "kernel");
+    assert_eq!(kernel_project.executable_targets()[1].ty, TargetType::Executable);
+    assert_eq!(&**kernel_project.executable_targets()[1].name.inner(), "entry-alt");
+    assert_eq!(
+        &**kernel_project.executable_targets()[1].namespace.inner(),
+        MasmPath::exec_path()
+    );
 
     assert_eq!(kernel_project.dependencies().len(), 1);
     assert_eq!(&**kernel_project.dependencies()[0].name(), "miden-core");
@@ -81,12 +86,11 @@ fn can_load_protocol_example_project() -> Result<(), Report> {
         .get_member_by_name("miden-protocol")
         .expect("failed to locate 'miden-protocol' project");
 
-    assert_eq!(userspace_project.targets().len(), 1);
-    assert_eq!(userspace_project.targets()[0].ty, TargetType::Library);
-    assert_eq!(
-        &**userspace_project.targets()[0].namespace.inner(),
-        MasmPath::new("::miden::protocol")
-    );
+    let userspace_lib = userspace_project.library_target().unwrap();
+    assert_eq!(userspace_lib.ty, TargetType::Library);
+    assert_eq!(&**userspace_lib.name.inner(), "miden::protocol");
+    assert_eq!(&**userspace_lib.namespace.inner(), MasmPath::new("::miden::protocol"));
+    assert_eq!(userspace_project.executable_targets().len(), 0);
 
     assert_eq!(userspace_project.dependencies().len(), 2);
     assert_eq!(&**userspace_project.dependencies()[0].name(), "miden-core");

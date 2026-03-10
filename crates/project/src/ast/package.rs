@@ -7,7 +7,7 @@ use super::{
     parsing::{MaybeInherit, SetSourceId, Validate},
     *,
 };
-use crate::{Map, MetadataSet, RelatedLabel, SemVer, SourceId, Span, TargetType, Uri};
+use crate::{Map, MetadataSet, RelatedLabel, SemVer, SourceId, Span, Uri};
 
 /// Represents the contents of the `[package]` table
 #[derive(Debug, Clone)]
@@ -90,7 +90,7 @@ impl SetSourceId for PackageConfig {
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
-pub struct PackageFile {
+pub struct ProjectFile {
     /// The original source file this was parsed from, if applicable/known
     #[cfg_attr(feature = "serde", serde(skip, default))]
     pub source_file: Option<Arc<SourceFile>>,
@@ -100,12 +100,15 @@ pub struct PackageFile {
     /// and `[lints]`
     #[cfg_attr(feature = "serde", serde(flatten))]
     pub config: PackageConfig,
-    /// The set of build targets defined in this file
+    /// The library target of this project, if applicable
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
+    pub lib: Option<Span<LibTarget>>,
+    /// The binary targets of this project, if applicable
     #[cfg_attr(
         feature = "serde",
-        serde(default, rename = "target", skip_serializing_if = "Vec::is_empty")
+        serde(default, rename = "bin", skip_serializing_if = "Vec::is_empty")
     )]
-    pub targets: Vec<Span<Target>>,
+    pub bins: Vec<Span<BinTarget>>,
     /// The set of build profiles defined in this file
     #[cfg_attr(
         feature = "serde",
@@ -121,8 +124,8 @@ pub struct PackageFile {
 
 /// Parsing
 #[cfg(feature = "serde")]
-impl PackageFile {
-    /// Parse a [PackageFile] from the provided TOML source file, generally `miden-project.toml`
+impl ProjectFile {
+    /// Parse a [ProjectFile] from the provided TOML source file, generally `miden-project.toml`
     ///
     /// If successful, the contents of the manifest are semantically valid, with the following
     /// caveats:
@@ -159,18 +162,22 @@ impl PackageFile {
     }
 }
 
-impl SetSourceId for PackageFile {
+impl SetSourceId for ProjectFile {
     fn set_source_id(&mut self, source_id: SourceId) {
         let Self {
             source_file: _,
             package,
             config,
-            targets,
+            lib,
+            bins,
             profiles,
         } = self;
         package.set_source_id(source_id);
         config.set_source_id(source_id);
-        targets.set_source_id(source_id);
+        if let Some(lib) = lib.as_mut() {
+            lib.set_source_id(source_id);
+        }
+        bins.set_source_id(source_id);
         profiles.set_source_id(source_id);
     }
 }
@@ -185,7 +192,7 @@ struct TargetConflictError {
     conflicts: Vec<Label>,
 }
 
-impl Validate for PackageFile {
+impl Validate for ProjectFile {
     fn validate(&self, source: Arc<SourceFile>) -> Result<(), Report> {
         use miden_assembly_syntax::ast;
 
@@ -201,31 +208,31 @@ impl Validate for PackageFile {
         // 2. All build targets must have unique paths (if present) and names (and namespaces must
         //    be valid)
         let mut invalid_config = Vec::<RelatedError>::default();
-        let mut kernel = None;
+
         let mut target_paths = BTreeMap::<Span<Uri>, Option<TargetConflictError>>::default();
         let mut target_names = BTreeMap::<Span<Arc<str>>, Option<TargetConflictError>>::default();
-        for target in self.targets.iter() {
+        if let Some(lib) = self.lib.as_ref() {
+            if let Some(kind) = lib.kind.as_ref()
+                && !kind.is_library()
+            {
+                invalid_config.push(RelatedError::wrap(RelatedLabel::error("invalid library target")
+                    .with_labeled_span(kind.span(), "this is not a valid target type for a library")
+                    .with_help("Library targets may only be of kind 'library', 'kernel', 'account-component', 'note-script', or 'tx-script'")
+                    .with_source_file(Some(source.clone()))));
+            }
+            if let Some(path) = lib.path.clone() {
+                target_paths.insert(path, None);
+            }
+        }
+
+        for target in self.bins.iter() {
             use alloc::collections::btree_map::Entry;
 
             // 2a. Check for conflicting paths
             let span = target.span();
-            if let Some(path) = target.path() {
-                match target_paths.entry(Span::new(span, path)) {
+            if let Some(path) = target.path.clone() {
+                match target_paths.entry(path) {
                     Entry::Vacant(entry) => {
-                        if matches!(target.kind, TargetType::Kernel)
-                            && let Some(prev) = kernel.replace(span)
-                        {
-                            invalid_config.push(RelatedError::wrap(
-                                RelatedLabel::error("duplicate kernel target")
-                                    .with_labeled_span(span, "duplicate found here")
-                                    .with_labeled_span(
-                                        prev,
-                                        "conflicts with this previously-defined target",
-                                    )
-                                    .with_help("Packages may only define a single kernel target")
-                                    .with_source_file(Some(source.clone())),
-                            ));
-                        }
                         entry.insert(None);
                     },
                     Entry::Occupied(mut entry) => {
@@ -251,37 +258,17 @@ impl Validate for PackageFile {
                 }
             }
 
-            let default_ns = match target.kind {
-                TargetType::Kernel => ast::Path::ABSOLUTE_KERNEL_PATH,
-                TargetType::Executable => ast::Path::ABSOLUTE_EXEC_PATH,
-                _ => self.package.name.inner(),
-            };
-            let target_ns = match target.kind {
-                TargetType::Kernel | TargetType::Executable => Arc::from(default_ns),
-                _ => target.namespace.as_deref().cloned().unwrap_or_else(|| Arc::from(default_ns)),
-            };
-
-            // 2c. Check for namespace validity
-            if let Err(err) = ast::Path::validate(&target_ns) {
-                let target_ns_span =
-                    target.namespace.as_ref().map(|ns| ns.span()).unwrap_or(target.span());
-                invalid_config.push(RelatedError::wrap(
-                    RelatedLabel::error("invalid namespace")
-                        .with_labeled_span(target_ns_span, err.to_string())
-                        .with_help("Namespaces must be valid Miden Assembly namespace identifiers")
-                        .with_source_file(Some(source.clone())),
-                ));
-            }
-
-            // 2b. Check for conflicting namespace
-            let name =
-                target.name().unwrap_or_else(|| Span::new(target.span(), Arc::from(default_ns)));
+            // 2b. Check for name conflicts
+            let name = target
+                .name
+                .clone()
+                .unwrap_or_else(|| Span::new(target.span(), Arc::from(ast::Path::EXEC_PATH)));
             match target_names.entry(name) {
                 Entry::Vacant(entry) => {
                     entry.insert(None);
                 },
                 Entry::Occupied(mut entry) => {
-                    let ns_span = target.name().map(|ns| ns.span()).unwrap_or(span);
+                    let ns_span = target.name.as_ref().map(|ns| ns.span()).unwrap_or(span);
                     let conflict_label = Label::new(ns_span, "conflict occurs here");
                     let ns = entry.key().clone();
                     match entry.get_mut() {
@@ -292,7 +279,7 @@ impl Validate for PackageFile {
                             let label = Label::new(
                                 ns.span(),
                                 format!(
-                                    "the namespace for this target, `{ns}`, conflicts with other targets"
+                                    "the name for this target, `{ns}`, conflicts with other targets"
                                 ),
                             );
                             let conflicts = vec![conflict_label];

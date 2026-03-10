@@ -54,7 +54,7 @@ pub struct WorkspaceFile {
 
 /// Parsing
 impl WorkspaceFile {
-    /// Parse a [PackageFile] from the provided TOML source file, generally `miden-project.toml`
+    /// Parse a [ProjectFile] from the provided TOML source file, generally `miden-project.toml`
     ///
     /// If successful, the contents of the manifest are semantically valid, with the following
     /// caveats:

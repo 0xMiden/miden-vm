@@ -30,8 +30,10 @@ pub struct Package {
     ///
     /// By default, this is empty.
     metadata: MetadataSet,
-    /// The build targets available for this package.
-    targets: Vec<Span<Target>>,
+    /// The library target for this package, if specified.
+    lib: Option<Span<Target>>,
+    /// The executable targets available for this package.
+    bins: Vec<Span<Target>>,
     /// The build profiles configured for this package.
     profiles: Vec<Profile>,
 }
@@ -78,9 +80,14 @@ impl Package {
         &self.profiles
     }
 
-    /// Get a reference to the build targets provided by this package
-    pub fn targets(&self) -> &[Span<Target>] {
-        &self.targets
+    /// Get a reference to the library build target provided by this package
+    pub fn library_target(&self) -> Option<&Span<Target>> {
+        self.lib.as_ref()
+    }
+
+    /// Get a reference to the executable build targets provided by this package
+    pub fn executable_targets(&self) -> &[Span<Target>] {
+        &self.bins
     }
 
     /// Get the location of the manifest this package was loaded from, if known/applicable.
@@ -124,7 +131,7 @@ impl Package {
             None
         };
 
-        let package_ast = ast::PackageFile::parse(source.clone())?;
+        let package_ast = ast::ProjectFile::parse(source.clone())?;
 
         let Some(version) = package_ast.package.detail.version.as_ref() else {
             let one = NonZeroU32::new(1).unwrap();
@@ -321,67 +328,66 @@ impl Package {
             }
         }
 
-        let mut targets = Vec::with_capacity(package_ast.targets.len());
-        for target in package_ast.targets.iter() {
-            let span = target.span();
-            let kind = target.kind;
-            let name = target.name().unwrap_or_else(|| package_ast.package.name.clone());
-            let namespace = target
+        let mut lib = if let Some(lib) = package_ast.lib.as_ref() {
+            let kind = lib.kind.as_deref().copied().unwrap_or(TargetType::Library);
+            let name = lib
                 .namespace
-                .as_ref()
-                .map(|ns| Span::new(ns.span(), MasmPath::new(ns.inner()).to_absolute().into()))
-                .unwrap_or_else(|| match kind {
-                    TargetType::Kernel => Span::new(
-                        package_ast.package.name.span(),
-                        Arc::from(MasmPath::kernel_path()),
-                    ),
-                    TargetType::Executable => {
-                        Span::new(package_ast.package.name.span(), Arc::from(MasmPath::exec_path()))
-                    },
-                    _ => Span::new(
-                        package_ast.package.name.span(),
-                        MasmPath::new(package_ast.package.name.inner()).to_absolute().into(),
-                    ),
-                });
-            let requires = target.requires.clone();
-            targets.push(Span::new(
+                .clone()
+                .unwrap_or_else(|| Span::new(lib.span(), package_ast.package.name.inner().clone()));
+            let namespace = match kind {
+                TargetType::Kernel => Span::new(lib.span(), MasmPath::kernel_path().into()),
+                _ => {
+                    let ns = lib.namespace.clone().unwrap_or_else(|| {
+                        Span::new(lib.span(), package_ast.package.name.inner().clone())
+                    });
+                    ns.map(|ns| MasmPath::new(&ns).to_absolute().into())
+                },
+            };
+            Some(Span::new(
+                lib.span(),
+                Target {
+                    ty: kind,
+                    name,
+                    namespace,
+                    path: lib.path.clone(),
+                },
+            ))
+        } else {
+            None
+        };
+        let mut bins = Vec::with_capacity(package_ast.bins.len());
+        for target in package_ast.bins.iter() {
+            let span = target.span();
+            let name = target.name.clone().unwrap_or_else(|| {
+                Span::new(target.span(), package_ast.package.name.inner().clone())
+            });
+            let namespace = Span::new(target.span(), Arc::from(MasmPath::exec_path()));
+            bins.push(Span::new(
                 span,
                 Target {
-                    ty: target.kind,
+                    ty: TargetType::Executable,
                     name,
                     namespace,
                     path: target.path.clone(),
-                    requires,
                 },
             ));
         }
 
-        if targets.is_empty() {
+        if lib.is_none() && bins.is_empty() {
             let project_name = &package_ast.package.name;
             let span = project_name.span();
             let namespace: Span<Arc<MasmPath>> =
                 Span::new(span, MasmPath::new(project_name.inner()).to_absolute().into());
             let name = project_name.clone();
-            let target = Target {
-                ty: TargetType::Library,
-                name,
-                namespace,
-                path: Some(Span::new(span, Uri::new("mod.masm"))),
-                requires: Default::default(),
-            };
-            targets.push(Span::new(span, target));
-        }
-
-        for target in targets.iter() {
-            for required in target.requires.iter() {
-                if !targets.iter().any(|t| t.name.inner() == required.inner()) {
-                    return Err(ProjectFileError::InvalidTargetRequirement {
-                        source_file: source,
-                        label: Label::new(required.span(), "this target does not exist"),
-                    }
-                    .into());
-                }
-            }
+            lib = Some(Span::new(
+                span,
+                Target {
+                    ty: TargetType::Library,
+                    name,
+                    namespace,
+                    path: Some(Span::new(span, Uri::new("mod.masm"))),
+                },
+            ));
         }
 
         Ok(Box::new(Self {
@@ -393,7 +399,8 @@ impl Package {
             lints: workspace.map(|ws| ws.workspace.config.lints.clone()).unwrap_or_default(),
             metadata: workspace.map(|ws| ws.workspace.config.lints.clone()).unwrap_or_default(),
             profiles,
-            targets,
+            lib,
+            bins,
         }))
     }
 }

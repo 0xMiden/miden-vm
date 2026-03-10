@@ -20,6 +20,4 @@ pub struct Target {
     /// through other means. For example, `midenc` will compile Rust code to MASM, and then provide
     /// the MASM modules to an instantiated assembler when assembling this project.
     pub path: Option<Span<Uri>>,
-    /// The set of other targets in the same project which are required to build this one
-    pub requires: Vec<Span<Arc<str>>>,
 }
