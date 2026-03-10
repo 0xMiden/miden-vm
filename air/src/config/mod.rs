@@ -124,6 +124,7 @@ where
         aux_builder,
         challenger,
     )?;
+    // Proof serialization via bincode; see https://github.com/0xMiden/miden-vm/issues/2550
     Ok(bincode::serialize(&output.proof)?)
 }
 
@@ -148,6 +149,7 @@ where
         return Err(VerificationError::InvalidTraceHeight(log_trace_height));
     }
 
+    // Proof deserialization via bincode; see https://github.com/0xMiden/miden-vm/issues/2550
     let proof: StarkProof<Felt, QuadFelt, SC> = bincode::deserialize(proof_bytes)?;
     let mut challenger = config.challenger();
     challenger.observe_slice(public_values);
