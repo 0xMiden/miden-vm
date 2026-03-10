@@ -70,6 +70,8 @@ mod serialization {
                     profiles.iter_mut().find(|p| p.name.inner() == value.name.inner())
                 {
                     *prev = value;
+                } else {
+                    profiles.push(value);
                 }
             }
 
