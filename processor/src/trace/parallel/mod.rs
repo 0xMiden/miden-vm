@@ -40,7 +40,10 @@ use crate::{
 
 pub const CORE_TRACE_WIDTH: usize = SYS_TRACE_WIDTH + DECODER_TRACE_WIDTH + STACK_TRACE_WIDTH;
 
-/// Maximum allowed trace length (2^29 rows).
+/// `build_trace()` uses this as a hard cap on trace rows.
+///
+/// The code checks `core_trace_contexts.len() * fragment_size` before allocation. It checks the
+/// same cap again while replaying chiplet activity. This keeps memory use bounded.
 const MAX_TRACE_LEN: usize = 1 << 29;
 
 pub(crate) mod core_trace_fragment;
@@ -82,7 +85,10 @@ pub fn build_trace(
     )
 }
 
-/// Same as [`build_trace`], but with a configurable maximum trace length.
+/// Same as [`build_trace`], but with a custom hard cap.
+///
+/// When the trace would go over `max_trace_len`, this returns
+/// [`ExecutionError::TraceLenExceeded`].
 pub fn build_trace_with_max_len(
     execution_output: ExecutionOutput,
     trace_generation_context: TraceGenerationContext,
