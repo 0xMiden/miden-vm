@@ -15,7 +15,11 @@ pub struct Target {
     /// The namespace root for this target
     pub namespace: Span<Arc<Path>>,
     /// The path from the project manifest to the root source file for this target
-    pub path: Span<Uri>,
+    ///
+    /// If not provided, it is expected that source modules will be provided to the assembler
+    /// through other means. For example, `midenc` will compile Rust code to MASM, and then provide
+    /// the MASM modules to an instantiated assembler when assembling this project.
+    pub path: Option<Span<Uri>>,
     /// The set of other targets in the same project which are required to build this one
     pub requires: Vec<Span<Arc<str>>>,
 }

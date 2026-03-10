@@ -31,8 +31,8 @@ impl Target {
     }
 
     /// Get the relative path from the project manifest to the root source file for this target
-    pub fn path(&self) -> Uri {
-        self.path.as_ref().map(|p| p.inner().clone()).unwrap_or(Uri::new("mod.masm"))
+    pub fn path(&self) -> Option<Uri> {
+        self.path.as_ref().map(|p| p.inner().clone())
     }
 }
 

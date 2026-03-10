@@ -343,8 +343,6 @@ impl Package {
                         MasmPath::new(package_ast.package.name.inner()).to_absolute().into(),
                     ),
                 });
-            let path =
-                Span::new(target.path.as_ref().map(|p| p.span()).unwrap_or(span), target.path());
             let requires = target.requires.clone();
             targets.push(Span::new(
                 span,
@@ -352,7 +350,7 @@ impl Package {
                     ty: target.kind,
                     name,
                     namespace,
-                    path,
+                    path: target.path.clone(),
                     requires,
                 },
             ));
@@ -368,7 +366,7 @@ impl Package {
                 ty: TargetType::Library,
                 name,
                 namespace,
-                path: Span::new(span, Uri::new("mod.masm")),
+                path: Some(Span::new(span, Uri::new("mod.masm"))),
                 requires: Default::default(),
             };
             targets.push(Span::new(span, target));
