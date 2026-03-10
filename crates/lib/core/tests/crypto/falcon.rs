@@ -31,6 +31,7 @@ use miden_utils_testing::{
 };
 use rand::{Rng, SeedableRng, rng};
 use rand_chacha::ChaCha20Rng;
+use rstest::rstest;
 
 /// Modulus used for Falcon512-Poseidon2.
 const M: u64 = 12289;
@@ -344,8 +345,13 @@ fn test_mod_12289_larger_value() {
     test.expect_stack(&[expected]);
 }
 
-#[test]
-fn test_mod_12289_rejects_forged_remainder_zero() {
+#[rstest]
+#[case(0, 100_000)]
+#[case(2, 0)]
+#[case(0, 12_290)]
+#[case(1, 1)]
+#[case(0xffff_ffff, 0xffff_fffe)]
+fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo: u64) {
     const FALCON_DIV: EventName =
         EventName::new("miden::core::crypto::dsa::falcon512poseidon2::falcon_div");
 
@@ -374,35 +380,28 @@ fn test_mod_12289_rejects_forged_remainder_zero() {
         end
     ";
 
-    // Inputs are (a_hi, a_lo). Every case has a non-zero true remainder.
-    let test_cases: [(u64, u64); 5] =
-        [(0, 100_000), (2, 0), (0, 12_290), (1, 1), (0xffff_ffff, 0xffff_fffe)];
+    let a = (a_hi << 32) | a_lo;
+    let true_remainder = a % M;
+    assert_ne!(true_remainder, 0, "test expects inputs with non-zero true remainder");
 
-    for (a_hi, a_lo) in test_cases {
-        let a = (a_hi << 32) | a_lo;
-        let true_remainder = a % M;
-        assert_ne!(true_remainder, 0, "test expects inputs with non-zero true remainder");
+    let op_stack = vec![a_hi, a_lo];
+    let adv_stack: Vec<u64> = vec![];
 
-        let op_stack = vec![a_hi, a_lo];
-        let adv_stack: Vec<u64> = vec![];
+    // Use the upstream test builder directly so we do not auto-register the honest
+    // falcon_div handler from CoreLibrary.
+    let core_lib = miden_core_lib::CoreLibrary::default();
+    let mut test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack);
+    test.libraries.push(core_lib.library().clone());
+    test.add_event_handler(FALCON_DIV, malicious_falcon_div);
 
-        // Use the upstream test builder directly so we do not auto-register the honest
-        // falcon_div handler from CoreLibrary.
-        let core_lib = miden_core_lib::CoreLibrary::default();
-        let mut test =
-            miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack);
-        test.libraries.push(core_lib.library().clone());
-        test.add_event_handler(FALCON_DIV, malicious_falcon_div);
-
-        // Hardened mod_12289 must reject forged advice.
-        expect_exec_error_matches!(
-            test,
-            ExecutionError::OperationError {
-                err: OperationError::FailedAssertion { err_msg, .. },
-                ..
-            } if err_msg.as_deref() == Some("comparison failed: quotient overflow")
-        );
-    }
+    // Hardened mod_12289 must reject forged advice.
+    expect_exec_error_matches!(
+        test,
+        ExecutionError::OperationError {
+            err: OperationError::FailedAssertion { err_msg, .. },
+            ..
+        } if err_msg.as_deref() == Some("comparison failed: quotient overflow")
+    );
 }
 
 #[test]

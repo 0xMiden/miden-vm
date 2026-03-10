@@ -1231,6 +1231,30 @@ fn clz() {
 }
 
 #[test]
+fn u32clz_zero_boundary_regression() {
+    let source = "begin u32clz end";
+
+    // Pre-seed a forged value to ensure u32clz uses the system event value for n = 0.
+    build_test!(source, &stack![0], &[31]).expect_stack(&[32]);
+}
+
+#[test]
+fn u32clz_nonzero_boundary_regression() {
+    let source = "begin u32clz end";
+
+    // Pre-seed a forged value to ensure u32clz does not accept clz = 32 for non-zero input.
+    build_test!(source, &stack![1], &[32]).expect_stack(&[31]);
+}
+
+proptest! {
+    #[test]
+    fn u32clz_matches_rust_leading_zeros(n in any::<u32>()) {
+        let source = "begin u32clz end";
+        build_test!(source, &stack![n as u64]).expect_stack(&[n.leading_zeros() as u64]);
+    }
+}
+
+#[test]
 fn ctz() {
     let source = "
     use miden::core::math::u64
