@@ -2,22 +2,17 @@
 name = "miden-tx"
 version = "1.0.0"
 
-[[target]]
+[lib]
 kind = "kernel"
-name = "kernel"
-path = "lib/mod.masm"
+path = "kernel/mod.masm"
 
-[[target]]
-kind = "executable"
+[[bin]]
 name = "entry"
-path = "main.masm"
-requires = ["kernel"]
+path = "bin/main.masm"
 
-[[target]]
-kind = "executable"
+[[bin]]
 name = "entry-alt"
-path = "main-alt.masm"
-requires = ["kernel"]
+path = "bin/main-alt.masm"
 
 [dependencies]
 miden-core.workspace = true
