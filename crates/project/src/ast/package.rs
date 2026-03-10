@@ -198,7 +198,8 @@ impl Validate for PackageFile {
             })
         })?;
 
-        // 2. All build targets must have unique paths and names (and namespaces must be valid)
+        // 2. All build targets must have unique paths (if present) and names (and namespaces must
+        //    be valid)
         let mut invalid_config = Vec::<RelatedError>::default();
         let mut kernel = None;
         let mut target_paths = BTreeMap::<Span<Uri>, Option<TargetConflictError>>::default();
@@ -208,44 +209,46 @@ impl Validate for PackageFile {
 
             // 2a. Check for conflicting paths
             let span = target.span();
-            match target_paths.entry(Span::new(span, target.path())) {
-                Entry::Vacant(entry) => {
-                    if matches!(target.kind, TargetType::Kernel)
-                        && let Some(prev) = kernel.replace(span)
-                    {
-                        invalid_config.push(RelatedError::wrap(
-                            RelatedLabel::error("duplicate kernel target")
-                                .with_labeled_span(span, "duplicate found here")
-                                .with_labeled_span(
-                                    prev,
-                                    "conflicts with this previously-defined target",
-                                )
-                                .with_help("Packages may only define a single kernel target")
-                                .with_source_file(Some(source.clone())),
-                        ));
-                    }
-                    entry.insert(None);
-                },
-                Entry::Occupied(mut entry) => {
-                    let path_span = target.path.as_ref().map(|p| p.span()).unwrap_or(span);
-                    let conflict_label = Label::new(path_span, "conflict occurs here");
-                    let path = entry.key().clone();
-                    match entry.get_mut() {
-                        Some(error) => {
-                            error.conflicts.push(conflict_label);
-                        },
-                        opt => {
-                            let label = Label::new(
-                                path.span(),
-                                format!(
-                                    "the path for this target, `{path}`, conflicts with other targets"
-                                ),
-                            );
-                            let conflicts = vec![conflict_label];
-                            *opt = Some(TargetConflictError { label, conflicts });
-                        },
-                    }
-                },
+            if let Some(path) = target.path() {
+                match target_paths.entry(Span::new(span, path)) {
+                    Entry::Vacant(entry) => {
+                        if matches!(target.kind, TargetType::Kernel)
+                            && let Some(prev) = kernel.replace(span)
+                        {
+                            invalid_config.push(RelatedError::wrap(
+                                RelatedLabel::error("duplicate kernel target")
+                                    .with_labeled_span(span, "duplicate found here")
+                                    .with_labeled_span(
+                                        prev,
+                                        "conflicts with this previously-defined target",
+                                    )
+                                    .with_help("Packages may only define a single kernel target")
+                                    .with_source_file(Some(source.clone())),
+                            ));
+                        }
+                        entry.insert(None);
+                    },
+                    Entry::Occupied(mut entry) => {
+                        let path_span = target.path.as_ref().map(|p| p.span()).unwrap_or(span);
+                        let conflict_label = Label::new(path_span, "conflict occurs here");
+                        let path = entry.key().clone();
+                        match entry.get_mut() {
+                            Some(error) => {
+                                error.conflicts.push(conflict_label);
+                            },
+                            opt => {
+                                let label = Label::new(
+                                    path.span(),
+                                    format!(
+                                        "the path for this target, `{path}`, conflicts with other targets"
+                                    ),
+                                );
+                                let conflicts = vec![conflict_label];
+                                *opt = Some(TargetConflictError { label, conflicts });
+                            },
+                        }
+                    },
+                }
             }
 
             let default_ns = match target.kind {
