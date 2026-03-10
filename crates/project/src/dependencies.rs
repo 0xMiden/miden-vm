@@ -197,7 +197,7 @@ impl DependencyVersionScheme {
                 if uri.scheme().is_none_or(|scheme| scheme == "file")
                     && let Some(workspace_path) = workspace_path.and_then(|p| p.canonicalize().ok())
                     && let Some(workspace_root) = workspace_path.parent()
-                    && let Ok(resolved_uri) = workspace_root.canonicalize()
+                    && let Ok(resolved_uri) = absolutize_path(Path::new(uri.path()), workspace_root)
                     && resolved_uri.strip_prefix(workspace_root).is_ok()
                 {
                     Ok(Self::Workspace { member: uri.clone() })
@@ -207,5 +207,17 @@ impl DependencyVersionScheme {
             },
             scheme => Ok(scheme),
         }
+    }
+}
+
+#[cfg(all(feature = "std", feature = "serde"))]
+fn absolutize_path(
+    path: &std::path::Path,
+    workspace_root: &std::path::Path,
+) -> Result<std::path::PathBuf, std::io::Error> {
+    if path.is_absolute() {
+        path.canonicalize()
+    } else {
+        workspace_root.join(path).canonicalize()
     }
 }
