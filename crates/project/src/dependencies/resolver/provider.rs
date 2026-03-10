@@ -225,7 +225,6 @@ impl<'a> DependencyProvider for PackageResolver<'a> {
         package: &Self::P,
         range: &Self::VS,
     ) -> Result<Option<Self::V>, Self::Err> {
-        std::dbg!(package, range);
         let Some(versions) = self.index.get(package) else {
             return Ok(None);
         };
