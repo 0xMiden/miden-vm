@@ -156,9 +156,200 @@ impl ProjectFile {
 
         package.source_file = Some(source.clone());
         package.set_source_id(source_id);
+
         package.validate(source)?;
 
         Ok(package)
+    }
+
+    pub fn get_or_inherit_version(
+        &self,
+        source: Arc<SourceFile>,
+        workspace: Option<&WorkspaceFile>,
+    ) -> Result<Span<SemVer>, Report> {
+        use core::num::NonZeroU32;
+
+        let Some(version) = self.package.detail.version.as_ref() else {
+            let one = NonZeroU32::new(1).unwrap();
+            let span = source
+                .line_column_to_span(one.into(), one.into())
+                .unwrap_or(source.source_span());
+            return Err(ProjectFileError::MissingVersion { source_file: source, span }.into());
+        };
+        match version.inner() {
+            MaybeInherit::Value(value) => Ok(Span::new(version.span(), value.clone())),
+            MaybeInherit::Inherit => match workspace {
+                Some(workspace) => {
+                    if let Some(version) = workspace.workspace.package.version.as_ref() {
+                        Ok(version.as_ref().map(|inherit| inherit.unwrap_value().clone()))
+                    } else {
+                        Err(ProjectFileError::MissingWorkspaceVersion {
+                            source_file: source,
+                            span: version.span(),
+                        }
+                        .into())
+                    }
+                },
+                None => Err(ProjectFileError::NotAWorkspace {
+                    source_file: source,
+                    span: version.span(),
+                }
+                .into()),
+            },
+        }
+    }
+
+    pub fn get_or_inherit_description(
+        &self,
+        source: Arc<SourceFile>,
+        workspace: Option<&WorkspaceFile>,
+    ) -> Result<Option<Arc<str>>, Report> {
+        match self.package.detail.description.as_ref() {
+            None => Ok(None),
+            Some(desc) => match desc.inner() {
+                MaybeInherit::Value(value) => Ok(Some(value.clone())),
+                MaybeInherit::Inherit => match workspace {
+                    Some(workspace) => Ok(workspace
+                        .workspace
+                        .package
+                        .description
+                        .as_ref()
+                        .map(|d| d.inner().unwrap_value().clone())),
+                    None => Err(ProjectFileError::NotAWorkspace {
+                        source_file: source,
+                        span: desc.span(),
+                    }
+                    .into()),
+                },
+            },
+        }
+    }
+
+    pub fn extract_dependencies(
+        &self,
+        source: Arc<SourceFile>,
+        workspace: Option<&WorkspaceFile>,
+    ) -> Result<Vec<crate::Dependency>, Report> {
+        use crate::{Dependency, DependencyVersionScheme};
+
+        let mut dependencies = Vec::with_capacity(self.config.dependencies.len());
+        for dependency in self.config.dependencies.values() {
+            if dependency.inherits_workspace_version() {
+                if let Some(workspace) = workspace {
+                    match workspace.workspace.config.dependencies.get(&dependency.name) {
+                        Some(dep) => {
+                            debug_assert!(!dep.inherits_workspace_version());
+
+                            let version = DependencyVersionScheme::try_from_in_workspace(
+                                dep.as_ref(),
+                                workspace,
+                            )?;
+                            dependencies.push(Dependency::new(dep.name.clone(), version));
+                        },
+                        None => {
+                            return Err(ProjectFileError::InvalidPackageDependency {
+                                source_file: source,
+                                label: Label::new(
+                                    dependency.span(),
+                                    format!("'{}' is not a workspace dependency", &dependency.name),
+                                ),
+                            }
+                            .into());
+                        },
+                    }
+                } else {
+                    return Err(ProjectFileError::InvalidPackageDependency {
+                        source_file: source,
+                        label: Label::new(dependency.span(), "this package is not in a workspace"),
+                    }
+                    .into());
+                }
+            } else {
+                dependencies.push(Dependency::new(
+                    dependency.name.clone(),
+                    DependencyVersionScheme::try_from(dependency.as_ref())?,
+                ));
+            }
+        }
+
+        Ok(dependencies)
+    }
+
+    pub fn extract_library_target(&self) -> Result<Option<Span<crate::Target>>, Report> {
+        use crate::TargetType;
+        use miden_assembly_syntax::Path as MasmPath;
+
+        if self.lib.is_none() && self.bins.is_empty() {
+            let project_name = &self.package.name;
+            let span = project_name.span();
+            let namespace: Span<Arc<MasmPath>> =
+                Span::new(span, MasmPath::new(project_name.inner()).to_absolute().into());
+            let name = project_name.clone();
+            return Ok(Some(Span::new(
+                span,
+                crate::Target {
+                    ty: TargetType::Library,
+                    name,
+                    namespace,
+                    path: Some(Span::new(span, Uri::new("mod.masm"))),
+                },
+            )));
+        }
+
+        let Some(lib) = self.lib.as_ref() else {
+            return Ok(None);
+        };
+
+        let kind = lib.kind.as_deref().copied().unwrap_or(TargetType::Library);
+        let name = lib
+            .namespace
+            .clone()
+            .unwrap_or_else(|| Span::new(lib.span(), self.package.name.inner().clone()));
+        let namespace = match kind {
+            TargetType::Kernel => Span::new(lib.span(), MasmPath::kernel_path().into()),
+            _ => {
+                let ns = lib
+                    .namespace
+                    .clone()
+                    .unwrap_or_else(|| Span::new(lib.span(), self.package.name.inner().clone()));
+                ns.map(|ns| MasmPath::new(&ns).to_absolute().into())
+            },
+        };
+        Ok(Some(Span::new(
+            lib.span(),
+            crate::Target {
+                ty: kind,
+                name,
+                namespace,
+                path: lib.path.clone(),
+            },
+        )))
+    }
+
+    pub fn extract_executable_targets(&self) -> Vec<Span<crate::Target>> {
+        use crate::TargetType;
+        use miden_assembly_syntax::Path as MasmPath;
+
+        let mut bins = Vec::with_capacity(self.bins.len());
+        for target in self.bins.iter() {
+            let span = target.span();
+            let name = target
+                .name
+                .clone()
+                .unwrap_or_else(|| Span::new(target.span(), self.package.name.inner().clone()));
+            let namespace = Span::new(target.span(), Arc::from(MasmPath::exec_path()));
+            bins.push(Span::new(
+                span,
+                crate::Target {
+                    ty: TargetType::Executable,
+                    name,
+                    namespace,
+                    path: target.path.clone(),
+                },
+            ));
+        }
+
+        bins
     }
 }
 

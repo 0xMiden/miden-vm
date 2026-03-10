@@ -3,7 +3,7 @@ use core::borrow::Borrow;
 
 use miden_assembly_syntax::debuginfo::Spanned;
 
-use crate::*;
+use crate::{ast::ProjectFileError, *};
 
 /// Represents configuration options for a specific build profile, e.g. `release`
 #[derive(Debug, Clone)]
@@ -58,6 +58,50 @@ impl Profile {
             trim_paths: true,
             metadata: Default::default(),
         }
+    }
+
+    pub fn from_ast(
+        ast: &ast::Profile,
+        source: Arc<SourceFile>,
+        inheritable: &[Profile],
+    ) -> Result<Self, Report> {
+        let ast::Profile {
+            inherits,
+            name,
+            debug,
+            trim_paths,
+            metadata,
+        } = ast;
+
+        let mut profile = match inherits.as_ref() {
+            Some(parent) => {
+                if let Some(parent) = inheritable.iter().find(|p| p.name() == parent.inner()) {
+                    Profile::inherit(name.clone(), parent)
+                } else {
+                    return Err(ProjectFileError::UnknownProfile {
+                        name: parent.inner().clone(),
+                        source_file: source,
+                        span: parent.span(),
+                    }
+                    .into());
+                }
+            },
+            None => Profile::new(name.clone()),
+        };
+
+        if let Some(debug) = *debug {
+            profile.enable_debug_info(debug);
+        }
+
+        if let Some(trim_paths) = *trim_paths {
+            profile.enable_trim_paths(trim_paths);
+        }
+
+        if !metadata.is_empty() {
+            profile.extend(metadata.iter().map(|(k, v)| (k.clone(), v.clone())));
+        }
+
+        Ok(profile)
     }
 
     /// Merge configuration from `other` into `self`.
