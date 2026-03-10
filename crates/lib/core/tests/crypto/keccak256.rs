@@ -209,6 +209,30 @@ fn test_keccak_hash() {
 }
 
 #[test]
+fn test_keccak_hash_documented_stack_contract() {
+    let input_u8: Vec<u8> = (0..32).collect();
+    let preimage = KeccakPreimage::new(input_u8);
+    let sentinels = [0x101_u64, 0x202, 0x303, 0x404];
+
+    let input_felts = preimage.as_felts();
+    let stack_stores_source = masm_push_felts(&input_felts);
+
+    let source = format!(
+        r#"
+            use miden::core::crypto::hashes::keccak256
+
+            begin
+                {stack_stores_source}
+                exec.keccak256::hash
+                dropw dropw
+            end
+            "#,
+    );
+
+    build_debug_test!(source, &sentinels).expect_stack(&sentinels);
+}
+
+#[test]
 fn test_keccak_merge() {
     let input_u8: Vec<u8> = (0..64).collect();
     let preimage = KeccakPreimage::new(input_u8);
@@ -255,6 +279,30 @@ fn test_keccak_max_hash_len_over_boundary() {
     let err = run_keccak_with_max_hash_len(&input, (max_len + 1) as u64, max_len).unwrap_err();
     let msg = format!("{err:?}");
     assert!(msg.contains("exceeds maximum"), "expected limit error, got: {msg}");
+}
+
+#[test]
+fn test_keccak_merge_documented_stack_contract() {
+    let input_u8: Vec<u8> = (0..64).collect();
+    let preimage = KeccakPreimage::new(input_u8);
+    let sentinels = [0x707_u64, 0x808, 0x909, 0xa0a];
+
+    let input_felts = preimage.as_felts();
+    let stack_stores_source = masm_push_felts(&input_felts);
+
+    let source = format!(
+        r#"
+            use miden::core::crypto::hashes::keccak256
+
+            begin
+                {stack_stores_source}
+                exec.keccak256::merge
+                dropw dropw
+            end
+            "#,
+    );
+
+    build_debug_test!(source, &sentinels).expect_stack(&sentinels);
 }
 
 // HELPERS

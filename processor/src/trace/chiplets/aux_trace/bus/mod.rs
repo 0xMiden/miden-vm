@@ -23,18 +23,7 @@ use miden_air::trace::{
         },
     },
 };
-use miden_core::{
-    ONE, ZERO,
-    field::ExtensionField,
-    operations::{
-        OPCODE_CALL, OPCODE_CRYPTOSTREAM, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END,
-        OPCODE_EVALCIRCUIT, OPCODE_HORNERBASE, OPCODE_HORNEREXT, OPCODE_HPERM, OPCODE_JOIN,
-        OPCODE_LOGPRECOMPILE, OPCODE_LOOP, OPCODE_MLOAD, OPCODE_MLOADW, OPCODE_MPVERIFY,
-        OPCODE_MRUPDATE, OPCODE_MSTORE, OPCODE_MSTOREW, OPCODE_MSTREAM, OPCODE_PIPE, OPCODE_RESPAN,
-        OPCODE_SPAN, OPCODE_SPLIT, OPCODE_SYSCALL, OPCODE_U32AND, OPCODE_U32XOR,
-    },
-    program::Kernel,
-};
+use miden_core::{ONE, ZERO, field::ExtensionField, operations::opcodes, program::Kernel};
 
 use super::Felt;
 use crate::{
@@ -81,7 +70,7 @@ where
         let op_code = op_code_felt.as_canonical_u64() as u8;
 
         match op_code {
-            OPCODE_JOIN | OPCODE_SPLIT | OPCODE_LOOP => build_control_block_request(
+            opcodes::JOIN | opcodes::SPLIT | opcodes::LOOP => build_control_block_request(
                 main_trace,
                 main_trace.decoder_hasher_state(row),
                 op_code_felt,
@@ -89,57 +78,59 @@ where
                 row,
                 debugger,
             ),
-            OPCODE_CALL => build_call_request(main_trace, op_code_felt, alphas, row, debugger),
-            OPCODE_DYN => build_dyn_request(main_trace, op_code_felt, alphas, row, debugger),
-            OPCODE_DYNCALL => {
+            opcodes::CALL => build_call_request(main_trace, op_code_felt, alphas, row, debugger),
+            opcodes::DYN => build_dyn_request(main_trace, op_code_felt, alphas, row, debugger),
+            opcodes::DYNCALL => {
                 build_dyncall_request(main_trace, op_code_felt, alphas, row, debugger)
             },
-            OPCODE_SYSCALL => {
+            opcodes::SYSCALL => {
                 build_syscall_block_request(main_trace, op_code_felt, alphas, row, debugger)
             },
-            OPCODE_SPAN => build_span_block_request(main_trace, alphas, row, debugger),
-            OPCODE_RESPAN => build_respan_block_request(main_trace, alphas, row, debugger),
-            OPCODE_END => build_end_block_request(main_trace, alphas, row, debugger),
-            OPCODE_U32AND => build_bitwise_request(main_trace, ZERO, alphas, row, debugger),
-            OPCODE_U32XOR => build_bitwise_request(main_trace, ONE, alphas, row, debugger),
-            OPCODE_MLOADW => build_mem_mloadw_mstorew_request(
+            opcodes::SPAN => build_span_block_request(main_trace, alphas, row, debugger),
+            opcodes::RESPAN => build_respan_block_request(main_trace, alphas, row, debugger),
+            opcodes::END => build_end_block_request(main_trace, alphas, row, debugger),
+            opcodes::U32AND => build_bitwise_request(main_trace, ZERO, alphas, row, debugger),
+            opcodes::U32XOR => build_bitwise_request(main_trace, ONE, alphas, row, debugger),
+            opcodes::MLOADW => build_mem_mloadw_mstorew_request(
                 main_trace,
                 MEMORY_READ_WORD_LABEL,
                 alphas,
                 row,
                 debugger,
             ),
-            OPCODE_MSTOREW => build_mem_mloadw_mstorew_request(
+            opcodes::MSTOREW => build_mem_mloadw_mstorew_request(
                 main_trace,
                 MEMORY_WRITE_WORD_LABEL,
                 alphas,
                 row,
                 debugger,
             ),
-            OPCODE_MLOAD => build_mem_mload_mstore_request(
+            opcodes::MLOAD => build_mem_mload_mstore_request(
                 main_trace,
                 MEMORY_READ_ELEMENT_LABEL,
                 alphas,
                 row,
                 debugger,
             ),
-            OPCODE_MSTORE => build_mem_mload_mstore_request(
+            opcodes::MSTORE => build_mem_mload_mstore_request(
                 main_trace,
                 MEMORY_WRITE_ELEMENT_LABEL,
                 alphas,
                 row,
                 debugger,
             ),
-            OPCODE_HORNERBASE => build_hornerbase_eval_request(main_trace, alphas, row, debugger),
-            OPCODE_HORNEREXT => build_hornerext_eval_request(main_trace, alphas, row, debugger),
-            OPCODE_MSTREAM => build_mstream_request(main_trace, alphas, row, debugger),
-            OPCODE_CRYPTOSTREAM => build_crypto_stream_request(main_trace, alphas, row, debugger),
-            OPCODE_HPERM => build_hperm_request(main_trace, alphas, row, debugger),
-            OPCODE_LOGPRECOMPILE => build_log_precompile_request(main_trace, alphas, row, debugger),
-            OPCODE_MPVERIFY => build_mpverify_request(main_trace, alphas, row, debugger),
-            OPCODE_MRUPDATE => build_mrupdate_request(main_trace, alphas, row, debugger),
-            OPCODE_PIPE => build_pipe_request(main_trace, alphas, row, debugger),
-            OPCODE_EVALCIRCUIT => build_ace_chiplet_requests(main_trace, alphas, row, debugger),
+            opcodes::HORNERBASE => build_hornerbase_eval_request(main_trace, alphas, row, debugger),
+            opcodes::HORNEREXT => build_hornerext_eval_request(main_trace, alphas, row, debugger),
+            opcodes::MSTREAM => build_mstream_request(main_trace, alphas, row, debugger),
+            opcodes::CRYPTOSTREAM => build_crypto_stream_request(main_trace, alphas, row, debugger),
+            opcodes::HPERM => build_hperm_request(main_trace, alphas, row, debugger),
+            opcodes::LOGPRECOMPILE => {
+                build_log_precompile_request(main_trace, alphas, row, debugger)
+            },
+            opcodes::MPVERIFY => build_mpverify_request(main_trace, alphas, row, debugger),
+            opcodes::MRUPDATE => build_mrupdate_request(main_trace, alphas, row, debugger),
+            opcodes::PIPE => build_pipe_request(main_trace, alphas, row, debugger),
+            opcodes::EVALCIRCUIT => build_ace_chiplet_requests(main_trace, alphas, row, debugger),
             _ => E::ONE,
         }
     }

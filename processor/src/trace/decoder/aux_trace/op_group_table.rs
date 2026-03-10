@@ -2,10 +2,7 @@ use miden_air::trace::{
     RowIndex,
     decoder::{OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS},
 };
-use miden_core::{
-    field::ExtensionField,
-    operations::{OPCODE_PUSH, OPCODE_RESPAN, OPCODE_SPAN},
-};
+use miden_core::{field::ExtensionField, operations::opcodes};
 
 use super::{AuxColumnBuilder, Felt, MainTrace, ONE};
 use crate::debug::BusDebugger;
@@ -48,7 +45,7 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for OpGroupTableColumnBuilder 
         let op_code = op_code_felt.as_canonical_u64() as u8;
 
         match op_code {
-            OPCODE_SPAN | OPCODE_RESPAN => {
+            opcodes::SPAN | opcodes::RESPAN => {
                 get_op_group_table_inclusion_multiplicand(main_trace, i, alphas)
             },
             _ => E::ONE,
@@ -104,7 +101,7 @@ fn get_op_group_table_removal_multiplicand<E: ExtensionField<Felt>>(
     let group_value = {
         let op_code = main_trace.get_op_code(i);
 
-        if op_code == Felt::from_u8(OPCODE_PUSH) {
+        if op_code == Felt::from_u8(opcodes::PUSH) {
             main_trace.stack_element(0, i + 1)
         } else {
             let h0 = main_trace.decoder_hasher_state_first_half(i + 1)[0];

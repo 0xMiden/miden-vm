@@ -89,7 +89,7 @@ impl RangeChecker {
         }
 
         // track the range check requests at each cycle
-        // TODO: optimize this to use a struct instead of vectors, e.g.:
+        // TODO: optimize this to use a struct instead of vectors, e.g. (#2793):
         // struct MemoryLookupValues {
         //   num_lookups: u8,
         //   lookup_values: [u16; 6],

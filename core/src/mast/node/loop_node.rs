@@ -13,7 +13,7 @@ use crate::{
     mast::{
         DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeFingerprint, MastNodeId,
     },
-    operations::OPCODE_LOOP,
+    operations::opcodes,
     prettier::PrettyPrint,
     utils::{Idx, LookupByIdx},
 };
@@ -39,7 +39,7 @@ pub struct LoopNode {
 /// Constants
 impl LoopNode {
     /// The domain of the loop node (used for control block hashing).
-    pub const DOMAIN: Felt = Felt::new(OPCODE_LOOP as u64);
+    pub const DOMAIN: Felt = Felt::new(opcodes::LOOP as u64);
 }
 
 impl LoopNode {
