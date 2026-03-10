@@ -2,6 +2,6 @@
 name = "miden-core"
 version = "0.1.0"
 
-[[target]]
-kind = "library"
+[lib]
 namespace = "miden::core"
+path = "mod.masm"

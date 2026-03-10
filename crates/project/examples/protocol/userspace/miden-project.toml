@@ -2,9 +2,9 @@
 name = "miden-protocol"
 version = "0.1.0"
 
-[[target]]
-kind = "library"
+[lib]
 namespace = "miden::protocol"
+path = "mod.masm"
 
 [dependencies]
 miden-core.workspace = true

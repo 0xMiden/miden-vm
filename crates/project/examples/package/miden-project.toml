@@ -2,8 +2,7 @@
 name = "example"
 version = "0.1.0"
 
-[[target]]
-kind = "library"
+[lib]
 path = "lib/mod.masm"
 
 [dependencies]
