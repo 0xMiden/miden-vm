@@ -29,6 +29,3 @@ pub mod indices {
     /// Wiring bus for ACE circuit connections
     pub const V_WIRING: usize = 7;
 }
-
-/// Re-export the unified Challenges type.
-pub(crate) use crate::trace::Challenges;

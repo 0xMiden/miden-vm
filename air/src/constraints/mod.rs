@@ -70,13 +70,16 @@ pub fn enforce_bus<AB>(
 ) where
     AB: LiftedAirBuilder<F = Felt>,
 {
+    let challenges =
+        crate::trace::Challenges::<AB::ExprEF>::from_randomness(builder.permutation_randomness());
+    let op_flags = op_flags::OpFlags::new(op_flags::ExprDecoderAccess::<_, AB::Expr>::new(local));
+
     enforce_bus_boundary(builder);
 
-    let op_flags = op_flags::OpFlags::new(op_flags::ExprDecoderAccess::<_, AB::Expr>::new(local));
     range::bus::enforce_bus(builder, local);
-    stack::bus::enforce_bus(builder, local, next, &op_flags);
-    decoder::bus::enforce_bus(builder, local, next, &op_flags);
-    chiplets::bus::enforce_bus(builder, local, next, &op_flags);
+    stack::bus::enforce_bus(builder, local, next, &op_flags, &challenges);
+    decoder::bus::enforce_bus(builder, local, next, &op_flags, &challenges);
+    chiplets::bus::enforce_bus(builder, local, next, &op_flags, &challenges);
 }
 
 /// Enforces boundary constraints on all auxiliary columns.

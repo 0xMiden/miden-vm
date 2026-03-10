@@ -17,7 +17,7 @@ use miden_crypto::stark::air::{LiftedAirBuilder, WindowAccess};
 use crate::{
     Felt, MainTraceRow,
     constraints::{
-        bus::{Challenges, indices::B_HASH_KERNEL},
+        bus::indices::B_HASH_KERNEL,
         chiplets::hasher::{flags, periodic},
         op_flags::OpFlags,
         tagging::{
@@ -25,7 +25,7 @@ use crate::{
         },
     },
     trace::{
-        CHIPLETS_OFFSET, LOG_PRECOMPILE_LABEL,
+        CHIPLETS_OFFSET, Challenges, LOG_PRECOMPILE_LABEL,
         chiplets::{
             HASHER_NODE_INDEX_COL_IDX, HASHER_SELECTOR_COL_RANGE, HASHER_STATE_COL_RANGE,
             NUM_ACE_SELECTORS,
@@ -72,6 +72,7 @@ pub fn enforce_hash_kernel_constraint<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
+    challenges: &Challenges<AB::ExprEF>,
 ) where
     AB: TaggingAirBuilderExt<F = Felt>,
 {
@@ -79,16 +80,11 @@ pub fn enforce_hash_kernel_constraint<AB>(
     // AUXILIARY TRACE ACCESS
     // =========================================================================
 
-    let (p_local, p_next, challenges) = {
+    let (p_local, p_next) = {
         let aux = builder.permutation();
         let aux_local = aux.current_slice();
         let aux_next = aux.next_slice();
-        let p_local = aux_local[B_HASH_KERNEL];
-        let p_next = aux_next[B_HASH_KERNEL];
-
-        let challenges = builder.permutation_randomness();
-        let challenges = Challenges::<AB::ExprEF, HASH_KERNEL_MSG_LEN>::from_randomness(challenges);
-        (p_local, p_next, challenges)
+        (aux_local[B_HASH_KERNEL], aux_next[B_HASH_KERNEL])
     };
 
     let one = AB::Expr::ONE;
@@ -151,12 +147,12 @@ pub fn enforce_hash_kernel_constraint<AB>(
 
     // Sibling value for current row (uses current hasher state).
     // b selects which half of the rate holds the sibling.
-    let v_sibling_curr = compute_sibling_b0::<AB>(&challenges, &node_index, &h) * is_b_zero.clone()
-        + compute_sibling_b1::<AB>(&challenges, &node_index, &h) * is_b_one.clone();
+    let v_sibling_curr = compute_sibling_b0::<AB>(challenges, &node_index, &h) * is_b_zero.clone()
+        + compute_sibling_b1::<AB>(challenges, &node_index, &h) * is_b_one.clone();
 
     // Sibling value for next row (used by MVA/MUA on the transition row).
-    let v_sibling_next = compute_sibling_b0::<AB>(&challenges, &node_index, &h_next) * is_b_zero
-        + compute_sibling_b1::<AB>(&challenges, &node_index, &h_next) * is_b_one;
+    let v_sibling_next = compute_sibling_b0::<AB>(challenges, &node_index, &h_next) * is_b_zero
+        + compute_sibling_b1::<AB>(challenges, &node_index, &h_next) * is_b_one;
 
     // =========================================================================
     // ACE MEMORY FLAGS AND VALUES
@@ -293,18 +289,13 @@ pub fn enforce_hash_kernel_constraint<AB>(
 // INTERNAL HELPERS
 // ================================================================================================
 
-/// Compute sibling value when b=0 (sibling at h[4..7]).
-///
-/// Message layout: alpha[0] (constant) + alpha[3] * node_index + alpha[8..11] * h[4..7].
-const HASH_KERNEL_MSG_LEN: usize = 15;
-
 /// Sibling at h[4..7]: positions [2, 7, 8, 9, 10].
 const SIBLING_B0_LAYOUT: [usize; 5] = [2, 7, 8, 9, 10];
 /// Sibling at h[0..3]: positions [2, 3, 4, 5, 6].
 const SIBLING_B1_LAYOUT: [usize; 5] = [2, 3, 4, 5, 6];
 
 fn compute_sibling_b0<AB>(
-    challenges: &Challenges<AB::ExprEF, HASH_KERNEL_MSG_LEN>,
+    challenges: &Challenges<AB::ExprEF>,
     node_index: &AB::Expr,
     h: &[AB::Expr; 12],
 ) -> AB::ExprEF
@@ -321,7 +312,7 @@ where
 ///
 /// Message layout: alpha[0] (constant) + alpha[3] * node_index + alpha[4..7] * h[0..3].
 fn compute_sibling_b1<AB>(
-    challenges: &Challenges<AB::ExprEF, HASH_KERNEL_MSG_LEN>,
+    challenges: &Challenges<AB::ExprEF>,
     node_index: &AB::Expr,
     h: &[AB::Expr; 12],
 ) -> AB::ExprEF

@@ -56,24 +56,9 @@ pub const LOG_PRECOMPILE_LABEL: u8 = miden_core::operations::opcodes::LOGPRECOMP
 pub mod log_precompile {
     use core::ops::Range;
 
-    use miden_core::{
-        Felt, field::ExtensionField, precompile::PrecompileTranscriptState, utils::range,
-    };
+    use miden_core::utils::range;
 
     use super::chiplets::hasher::{CAPACITY_LEN, DIGEST_LEN};
-
-    /// Encodes a precompile transcript capacity state as a bus message.
-    ///
-    /// The encoding is: `alpha + beta^0 * label + beta^1 * cap[0] + ... + beta^4 * cap[3]`
-    /// where `label = LOG_PRECOMPILE_LABEL`.
-    pub fn transcript_message<EF: ExtensionField<Felt>>(
-        challenges: &[EF],
-        state: PrecompileTranscriptState,
-    ) -> EF {
-        let c = super::Challenges::<EF, 5>::from_raw(challenges);
-        let cap: &[Felt] = state.as_ref();
-        c.encode([Felt::from_u8(super::LOG_PRECOMPILE_LABEL), cap[0], cap[1], cap[2], cap[3]])
-    }
 
     // HELPER REGISTER LAYOUT
     // --------------------------------------------------------------------------------------------

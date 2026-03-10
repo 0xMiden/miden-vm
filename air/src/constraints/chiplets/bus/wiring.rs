@@ -35,15 +35,18 @@ use miden_crypto::stark::air::{LiftedAirBuilder, WindowAccess};
 use crate::{
     Felt, MainTraceRow,
     constraints::{
-        bus::{Challenges, indices::V_WIRING},
+        bus::indices::V_WIRING,
         chiplets::selectors::ace_chiplet_flag,
         tagging::{
             TagGroup, TaggingAirBuilderExt, ids::TAG_WIRING_BUS_BASE, tagged_assert_zero_ext,
         },
     },
-    trace::chiplets::ace::{
-        CLK_IDX, CTX_IDX, ID_0_IDX, ID_1_IDX, ID_2_IDX, M_0_IDX, M_1_IDX, SELECTOR_BLOCK_IDX,
-        V_0_0_IDX, V_0_1_IDX, V_1_0_IDX, V_1_1_IDX, V_2_0_IDX, V_2_1_IDX,
+    trace::{
+        Challenges,
+        chiplets::ace::{
+            CLK_IDX, CTX_IDX, ID_0_IDX, ID_1_IDX, ID_2_IDX, M_0_IDX, M_1_IDX, SELECTOR_BLOCK_IDX,
+            V_0_0_IDX, V_0_1_IDX, V_1_0_IDX, V_1_1_IDX, V_2_0_IDX, V_2_1_IDX,
+        },
     },
 };
 
@@ -52,9 +55,6 @@ use crate::{
 
 // ACE chiplet offset from CHIPLETS_OFFSET (after s0, s1, s2, s3).
 const ACE_OFFSET: usize = 4;
-
-/// Number of message elements for wiring bus: (clk, ctx, id, v0, v1).
-const NUM_WIRING_FIELDS: usize = 5;
 
 /// Tag IDs and namespaces for wiring bus constraints.
 const WIRING_BUS_BASE_ID: usize = TAG_WIRING_BUS_BASE;
@@ -73,6 +73,7 @@ pub fn enforce_wiring_bus_constraint<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,
     _next: &MainTraceRow<AB::Var>,
+    challenges: &Challenges<AB::ExprEF>,
 ) where
     AB: TaggingAirBuilderExt<F = Felt>,
 {
@@ -80,16 +81,11 @@ pub fn enforce_wiring_bus_constraint<AB>(
     // Auxiliary trace access.
     // ---------------------------------------------------------------------
 
-    let (v_local, v_next, challenges) = {
+    let (v_local, v_next) = {
         let aux = builder.permutation();
         let aux_local = aux.current_slice();
         let aux_next = aux.next_slice();
-        let v_local = aux_local[V_WIRING];
-        let v_next = aux_next[V_WIRING];
-
-        let challenges = builder.permutation_randomness();
-        let challenges = Challenges::<AB::ExprEF, NUM_WIRING_FIELDS>::from_randomness(challenges);
-        (v_local, v_next, challenges)
+        (aux_local[V_WIRING], aux_next[V_WIRING])
     };
 
     // ---------------------------------------------------------------------
@@ -126,9 +122,9 @@ pub fn enforce_wiring_bus_constraint<AB>(
     // Wire value computation.
     // ---------------------------------------------------------------------
 
-    let wire_0: AB::ExprEF = encode_wire::<AB>(&challenges, &clk, &ctx, &wire_0);
-    let wire_1: AB::ExprEF = encode_wire::<AB>(&challenges, &clk, &ctx, &wire_1);
-    let wire_2: AB::ExprEF = encode_wire::<AB>(&challenges, &clk, &ctx, &wire_2);
+    let wire_0: AB::ExprEF = encode_wire::<AB>(challenges, &clk, &ctx, &wire_0);
+    let wire_1: AB::ExprEF = encode_wire::<AB>(challenges, &clk, &ctx, &wire_1);
+    let wire_2: AB::ExprEF = encode_wire::<AB>(challenges, &clk, &ctx, &wire_2);
 
     // ---------------------------------------------------------------------
     // Transition constraint.
@@ -200,7 +196,7 @@ where
 
 /// Encode an ACE wire using the wiring-bus challenge vector.
 fn encode_wire<AB>(
-    challenges: &Challenges<AB::ExprEF, NUM_WIRING_FIELDS>,
+    challenges: &Challenges<AB::ExprEF>,
     clk: &AB::Expr,
     ctx: &AB::Expr,
     wire: &AceWire<AB::Expr>,

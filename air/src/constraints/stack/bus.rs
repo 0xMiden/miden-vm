@@ -23,11 +23,12 @@ use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess}
 use crate::{
     MainTraceRow,
     constraints::{
-        bus::{Challenges, indices::P1_STACK},
+        bus::indices::P1_STACK,
         op_flags::OpFlags,
         tagging::{TaggingAirBuilderExt, ids::TAG_STACK_OVERFLOW_BUS_BASE},
     },
     trace::{
+        Challenges,
         decoder::HASHER_STATE_RANGE,
         stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX},
     },
@@ -50,23 +51,18 @@ pub fn enforce_bus<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
+    challenges: &Challenges<AB::ExprEF>,
 ) where
     AB: LiftedAirBuilder,
 {
     // Auxiliary trace must be present.
 
-    // Extract auxiliary trace values and randomness.
-    let (p1_local, p1_next, challenges) = {
+    // Extract auxiliary trace values.
+    let (p1_local, p1_next) = {
         let aux = builder.permutation();
         let aux_local = aux.current_slice();
         let aux_next = aux.next_slice();
-        let p1_local = aux_local[P1_STACK];
-        let p1_next = aux_next[P1_STACK];
-
-        let challenges = builder.permutation_randomness();
-        // We need 3 message elements: (clk, val, prev).
-        let challenges = Challenges::<AB::ExprEF, 3>::from_randomness(challenges);
-        (p1_local, p1_next, challenges)
+        (aux_local[P1_STACK], aux_next[P1_STACK])
     };
 
     let one_ef = AB::ExprEF::ONE;
