@@ -92,7 +92,13 @@ where
     state.continuation_stack.push_start_node(call_node.callee());
 
     // Finalize the clock cycle corresponding to the CALL or SYSCALL operation.
-    finalize_clock_cycle(state.processor, state.tracer, state.stopper, current_forest)
+    finalize_clock_cycle(
+        state.processor,
+        state.tracer,
+        state.stopper,
+        state.continuation_stack,
+        current_forest,
+    )
 }
 
 /// Executes the finish phase of a Call node.
@@ -129,6 +135,7 @@ where
         state.processor,
         state.tracer,
         state.stopper,
+        state.continuation_stack,
         || Some(Continuation::AfterExitDecorators(node_id)),
         current_forest,
     )?;

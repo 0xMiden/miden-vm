@@ -119,8 +119,14 @@ where
     }
 
     // Finalize the clock cycle corresponding to the DYN or DYNCALL operation.
-    finalize_clock_cycle(state.processor, state.tracer, state.stopper, current_forest)
-        .map_break(InternalBreakReason::from)
+    finalize_clock_cycle(
+        state.processor,
+        state.tracer,
+        state.stopper,
+        state.continuation_stack,
+        current_forest,
+    )
+    .map_break(InternalBreakReason::from)
 }
 
 /// Function to be called after [`InternalBreakReason::LoadMastForestFromDyn`] is handled. See the
@@ -154,7 +160,7 @@ where
     // Finalize the clock cycle corresponding to the DYN or DYNCALL operation. We pass the old
     // forest because the continuation was set during start_clock_cycle, which referenced the old
     // forest.
-    finalize_clock_cycle(processor, tracer, stopper, &old_forest)?;
+    finalize_clock_cycle(processor, tracer, stopper, continuation_stack, &old_forest)?;
 
     tracer.record_mast_forest_resolution(root_id, current_forest);
 
@@ -198,6 +204,7 @@ where
         state.processor,
         state.tracer,
         state.stopper,
+        state.continuation_stack,
         || Some(Continuation::AfterExitDecorators(node_id)),
         current_forest,
     )?;

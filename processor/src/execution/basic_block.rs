@@ -49,6 +49,7 @@ where
         state.processor,
         state.tracer,
         state.stopper,
+        state.continuation_stack,
         || {
             Some(Continuation::ResumeBasicBlock {
                 node_id,
@@ -160,6 +161,7 @@ where
                 state.processor,
                 state.tracer,
                 state.stopper,
+                state.continuation_stack,
                 || {
                     Some(Continuation::ResumeBasicBlock {
                         node_id,
@@ -214,6 +216,7 @@ where
         state.processor,
         state.tracer,
         state.stopper,
+        state.continuation_stack,
         || Some(Continuation::AfterExitDecoratorsBasicBlock(node_id)),
         current_forest,
     )?;
@@ -315,6 +318,7 @@ where
             state.processor,
             state.tracer,
             state.stopper,
+            state.continuation_stack,
             || {
                 Some(get_continuation_after_executing_operation(
                     basic_block,
@@ -402,6 +406,7 @@ where
         processor,
         tracer,
         stopper,
+        continuation_stack,
         {
             let post_emit_continuation = post_emit_continuation.clone();
             || Some(post_emit_continuation)

@@ -61,7 +61,13 @@ where
     };
 
     // Finalize the clock cycle corresponding to the SPLIT operation.
-    finalize_clock_cycle(state.processor, state.tracer, state.stopper, current_forest)
+    finalize_clock_cycle(
+        state.processor,
+        state.tracer,
+        state.stopper,
+        state.continuation_stack,
+        current_forest,
+    )
 }
 
 /// Executes the finish phase of a Split node.
@@ -89,6 +95,7 @@ where
         state.processor,
         state.tracer,
         state.stopper,
+        state.continuation_stack,
         || Some(Continuation::AfterExitDecorators(node_id)),
         current_forest,
     )?;
