@@ -115,6 +115,7 @@ where
     //   This also requires updating the recursive verifier to absorb both fixed and
     //   variable-length public inputs.
     // TODO: observe ACE commitment once ACE verification is integrated.
+    // See https://github.com/0xMiden/miden-vm/issues/2822
     let output: StarkOutput<Felt, QuadFelt, SC> = miden_crypto::stark::prover::prove_single(
         config,
         air,
@@ -158,6 +159,7 @@ where
     //   This also requires updating the recursive verifier to absorb both fixed and
     //   variable-length public inputs.
     // TODO: observe ACE commitment once ACE verification is integrated.
+    // See https://github.com/0xMiden/miden-vm/issues/2822
     miden_crypto::stark::verifier::verify_single(
         config,
         air,
