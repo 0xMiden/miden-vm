@@ -7,8 +7,9 @@ This crate defines the interfaces for working with `miden-project.toml` files an
 The following document uses some terminology that may be easier to reason about if you understand the specific definitions we're using for those terms in this context:
 
 - *Package*, a single library, program, or component that can be assembled, linked against, and distributed. A package in binary form is considered _assembled_. We also refer to packages as an organizational unit, i.e. before they are assembled, we organize source code into units that correspond to the packages we intend to produce from that source code. Typically the type of package we're referring to will be clear from context, but if we need to distinguish between them, then we use _assembled package_ to refer to the binary form. For an intuition about packages, you can consider a Miden package roughly equivalent to a Rust crate.
-- *Project*, refers to the meta-organization of one or more packages into a single unit. See the definition for _Workspace_ for more details on multi-package projects.
-- *Workspace*, refers to a project that contains multiple packages, and can share/inherit dependencies and configuration defined at the workspace level. These work just like Cargo workspaces, if you are familiar with their semantics.
+- *Project*, refers to the meta-organization of one or more packages into a single unit (i.e. defined by a single `miden-project.toml`). It may also be used as an umbrella term for either a single project, or a _workspace_ (see below).
+- *Workspace*, refers to the meta-organization of one or more projects into a single hierarchy, i.e. a project-of-projects. Workspaces are useful when multiple projects would benefit from sharing dependencies and other configuration. This concept is based on Cargo workspaces from Rust.
+- *Target*, refers to a specific package artifact that is derivable from a project
 - *Version*, refers to the semantic version of a project/package
 - *Digest*, refers to the content digest/hash associated with a specific assembled package. Only assembled packages have content digests. When available for a specific package, the content digest becomes an extension of its _version_, and is taken into account during dependency resolution when a specific digest is required by a dependency spec.
 
@@ -61,7 +62,7 @@ To define a new project, all you need is a new directory containing the source c
 
 ```toml
 [package]
-name = "name"
+name = "foo"
 version = "0.1.0" # or whatever semantic version you like
 ```
 
@@ -75,31 +76,61 @@ Let's add a target to the `miden-project.toml` of the project we created in the 
 
 ```toml
 [package]
-name = "name"
+name = "foo"
 version = "0.1.0"
 
 # The following target is what would be inferred if no targets were declared
 # in this file, also known as the _default target_.
-[[target]]
-kind = "lib"       # the type of artifact we're producing
-name = "target-id" # a unique name to use when referring to this target
-                   # for multi-target projects this must be unique - defaults to
-                   # the namespace for this target if unspecified
-path = "mod.masm"  # the relative path to the root module
-namespace = "name" # the root namespace of modules parsed for this target
-requires = ["foo"] # for multi-target projects, this indicates that the target
-                   # whose namespace is 'foo' must be linked against when 
-                   # building this target. The required target(s) may only be
-                   # library or kernel targets
+# 
+# Only one `[lib]` section can be present per-project.
+[lib]
+# The type of artifact we're producing
+# 
+# For `[lib]` the default kind is `library`, but other valid library kinds are:
+# 
+# * `kernel`
+# * `account-component`
+# * `note-script`
+# * `tx-script`
+kind = "library"
+# The relative path to the root module, if the project is written in Miden 
+# Assembly. Other languages, such as Rust, will omit this entirely.
+path = "mod.masm" 
+# The root namespace of modules parsed for this target
+namespace = "name"
 ```
 
-As noted above, we've added a target definition that is equivalent to the default target that is inferred if no targets are explicitly declared: a library, whose root module is expected to be found in `mod.masm`, and whose modules will all belong to the `name` namespace (individual modules will have
-their path derived from the directory structure).
+It is also possible to define one or more executable targets from a single
+package. Expanding on the example above, lets add two executables that share the same code as the library, but with a different root module:
 
-There are other types of targets though, currently the available kinds are:
+```toml
+[[bin]]
+# The `name` field is required when multiple `[[bin]]` targets are present, in
+# order to disambiguate them as targets.
+name = "primary"
+# The `path` field is required, and must specify the path to the module 
+# containing the executable entrypoint.
+path = "main.masm"
+
+[[bin]]
+name = "alternate"
+path = "main2.masm"
+```
+
+When assembling an executable/bin target, all modules in the same directory as 
+`path` are provided to the assembler, _except_ the root modules of other executable targets. This allows the executable targets to build on top of the `[lib]` target easily. If you _don't_ want this behavior, simply ensure that the `[lib]` target and any `[[bin]]` targets locate their sources in separate subdirectories, e.g. `lib/mod.masm` and `primary/main.masm`/`alternate/main.masm` for the example above.
+
+There is a special caveat to be aware of when requesting assembly of an executable target from a project with multiple targets (either a `[lib]` and a `[[bin]]`, multiple `[[bin]]` targets, or both): the name of the package produced for the executable targets must be disambiguated, and so the name of the executable target is appended to the project name. For example, in our example project defined above, assembling the `primary` target would produce a package named `foo#primary`.
+
+
+### Default target
+
+As noted in the previous section, the `[lib]` target we defined is equivalent to the default target that would have been inferred if no targets had been specified at all, i.e. the default target is a library, whose root module is expected to be `mod.masm`, found in the same directory as the manifest, and whose modules will all belong to the `foo` namespace (individual modules will have their path derived from the directory structure).
+
+To recap, there are two categories of target, _library_ and _executable_, and _library_ targets have multiple flavors/kinds, listed below, and which are specified using `lib.kind`:
 
 * `library`, `lib` - produce a package which exports one or more procedures that can be called from other artifacts, but cannot be executed by the Miden VM without additional setup. Libraries have no implicit dependency on any particular kernel.
-* `executable`, `bin`, or `program` - produce a package which has a single entrypoint, and can be executed by the Miden VM directly. Executables have no dependency on any particular kernel. 
+* `kernel` - a special library type that provides core functionality in conjunction with an executable program. This is the only artifact type whose exports can be called using `syscall`, and that can be installed as a kernel when instantiating the VM.
 * `account-component` - produce a package which is a valid account component in the Miden protocol, and contains all metadata needed to construct that component. This type is only valid in conjunction with the Miden transaction kernel.
 * `note-script` - produce a package which is a valid note script in the Miden protocol, and exports the necessary metadata and procedures to construct and execute the note. This type is only valid in conjunction with the Miden transaction kernel.
 * `tx-script` - produce a package which is a valid transaction script in the Miden protocol, and exports the necessary metadata and procedures to construct and execute the script. This type is only valid in conjunction with the Miden transaction kernel.
