@@ -58,6 +58,9 @@ pub enum ExecutionError {
     },
     #[error("failed to execute the program for internal reason: {0}")]
     Internal(&'static str),
+    /// This means trace generation would go over the configured row limit.
+    ///
+    /// In parallel trace building, this is used for core-row prechecks and chiplet overflow.
     #[error("trace length exceeded the maximum of {0} rows")]
     TraceLenExceeded(usize),
     /// Memory error with source context for diagnostics.
