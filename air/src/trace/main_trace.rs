@@ -1,4 +1,3 @@
-#[cfg(any(test, feature = "testing"))]
 use alloc::vec::Vec;
 use core::{
     borrow::{Borrow, BorrowMut},
@@ -8,7 +7,7 @@ use core::{
 use miden_core::{
     Felt, ONE, WORD_SIZE, Word, ZERO,
     field::PrimeCharacteristicRing,
-    utils::{ColMatrix, range},
+    utils::{ColMatrix, RowMajorMatrix, range},
 };
 
 use super::{
@@ -108,6 +107,18 @@ impl Deref for MainTrace {
 impl MainTrace {
     pub fn new(main_trace: ColMatrix<Felt>, last_program_row: RowIndex) -> Self {
         Self { columns: main_trace, last_program_row }
+    }
+
+    /// Converts this column-major `MainTrace` into a row-major matrix.
+    pub fn to_row_major(&self) -> RowMajorMatrix<Felt> {
+        let num_rows = self.columns.num_rows();
+        let mut col_major_data = Vec::with_capacity(num_rows * self.columns.num_cols());
+        for col in self.columns.columns() {
+            col_major_data.extend_from_slice(col);
+        }
+        // Treat the flat column-major data as a "row-major" matrix with width = num_rows
+        // (i.e. each "row" is one original column), then transpose to get true row-major.
+        RowMajorMatrix::new(col_major_data, num_rows).transpose()
     }
 
     pub fn num_rows(&self) -> usize {
