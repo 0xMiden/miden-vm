@@ -759,6 +759,9 @@ where
             opcodes::SPLIT => "split",
             opcodes::LOOP => "loop",
             opcodes::CALL => "call",
+            opcodes::DYN => "dyn",
+            opcodes::DYNCALL => "dyncall",
+            opcodes::SYSCALL => "syscall",
             _ => panic!("unexpected opcode: {op_code}"),
         }
     }

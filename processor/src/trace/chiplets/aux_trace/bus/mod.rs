@@ -213,6 +213,18 @@ where
     let control_block_req_value =
         encode_control_block_without_state(challenges, main_trace.addr(row + 1), op_code_felt);
 
+    #[cfg(any(test, feature = "bus-debugger"))]
+    {
+        let control_block_req = ControlBlockRequestMessage {
+            transition_label: Felt::from_u8(LINEAR_HASH_LABEL + 16),
+            addr_next: main_trace.addr(row + 1),
+            op_code: op_code_felt,
+            // DYN encodes without state; keep it zeroed to match the request encoding.
+            decoder_hasher_state: [ZERO; 8],
+        };
+        _debugger.add_request(alloc::boxed::Box::new(control_block_req), challenges);
+    }
+
     let callee_hash_read_req_value = build_dyn_dyncall_callee_hash_read_request(
         main_trace,
         op_code_felt,
@@ -237,6 +249,18 @@ where
 {
     let control_block_req_value =
         encode_control_block_without_state(challenges, main_trace.addr(row + 1), op_code_felt);
+
+    #[cfg(any(test, feature = "bus-debugger"))]
+    {
+        let control_block_req = ControlBlockRequestMessage {
+            transition_label: Felt::from_u8(LINEAR_HASH_LABEL + 16),
+            addr_next: main_trace.addr(row + 1),
+            op_code: op_code_felt,
+            // DYNCALL encodes without state; keep it zeroed to match the request encoding.
+            decoder_hasher_state: [ZERO; 8],
+        };
+        _debugger.add_request(alloc::boxed::Box::new(control_block_req), challenges);
+    }
 
     let callee_hash_read_req_value = build_dyn_dyncall_callee_hash_read_request(
         main_trace,

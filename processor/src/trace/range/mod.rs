@@ -147,6 +147,8 @@ impl RangeChecker {
         // the "current" row of the main trace but placed into the "next" row of the bus column.)
         write_trace_row(&mut trace, &mut i, 0, (u16::MAX).into());
 
+        assert_eq!(i, target_len, "range checker trace not fully initialized; trace_len mismatch");
+
         // all elements are now initialized
         let [t0, t1] = trace;
         let trace = unsafe { [assume_init_vec(t0), assume_init_vec(t1)] };
