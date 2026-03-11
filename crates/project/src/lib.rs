@@ -52,3 +52,18 @@ pub type Metadata = Map<Span<Arc<str>>, Span<Value>>;
 ///
 /// This representation provides spans for the table name, and each entry in that table's metadata.
 pub type MetadataSet = Map<Span<Arc<str>>, Metadata>;
+
+/// A utility function for making a path absolute and canonical.
+///
+/// Relative paths are made absolute relative to `workspace_root`.
+#[cfg(all(feature = "std", feature = "serde"))]
+pub(crate) fn absolutize_path(
+    path: &std::path::Path,
+    workspace_root: &std::path::Path,
+) -> Result<std::path::PathBuf, std::io::Error> {
+    if path.is_absolute() {
+        path.canonicalize()
+    } else {
+        workspace_root.join(path).canonicalize()
+    }
+}

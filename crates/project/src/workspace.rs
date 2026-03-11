@@ -88,11 +88,35 @@ impl Workspace {
         });
 
         for member in members {
+            let Some(workspace_root) = workspace.workspace_root() else {
+                return Err(ProjectFileError::LoadWorkspaceMemberFailed {
+                    source_file: source.clone(),
+                    span: Label::new(
+                        member.span(),
+                        "cannot load workspace members for virtual workspace manifest: manifest path must be resolvable",
+                    ),
+                }
+                .into());
+            };
             let relative_path = Path::new(member.as_str());
-            let manifest_path = workspace
-                .workspace_root()
-                .map(|root| root.join(relative_path).join("miden-project.toml"))
-                .unwrap_or_else(|| relative_path.join("miden-project.toml"));
+            let member_dir =
+                crate::absolutize_path(relative_path, workspace_root).map_err(|err| {
+                    ProjectFileError::LoadWorkspaceMemberFailed {
+                        source_file: source.clone(),
+                        span: Label::new(member.span(), err.to_string()),
+                    }
+                })?;
+            if member_dir.strip_prefix(workspace_root).is_err() {
+                return Err(ProjectFileError::LoadWorkspaceMemberFailed {
+                    source_file: source.clone(),
+                    span: Label::new(
+                        member.span(),
+                        "workspace members must be located within the workspace root",
+                    ),
+                }
+                .into());
+            }
+            let manifest_path = member_dir.join("miden-project.toml");
             let member_manifest = source_manager.load_file(&manifest_path).map_err(|err| {
                 ProjectFileError::LoadWorkspaceMemberFailed {
                     source_file: source.clone(),
