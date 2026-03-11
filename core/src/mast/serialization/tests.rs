@@ -1528,6 +1528,9 @@ fn test_untrusted_forest_detects_hash_mismatch() {
     assert_matches!(result, Err(MastForestError::HashMismatch { .. }));
 }
 
+// UNTRUSTED VALIDATION TEST HELPERS
+// --------------------------------------------------------------------------------------------
+
 /// Build a packed operation group from op codes.
 fn build_group(ops: &[Operation]) -> Felt {
     let mut group = 0u64;
@@ -1559,135 +1562,6 @@ fn make_batch(num_groups: usize, op: Operation) -> OpBatch {
     }
 
     OpBatch::new_from_parts(ops, indptr, padding, groups, num_groups)
-}
-
-/// Test that UntrustedMastForest::validate rejects a non-full batch before the last batch.
-#[test]
-fn test_untrusted_forest_rejects_non_full_prefix_batch() {
-    let op_batches = vec![make_batch(4, Operation::Add), make_batch(2, Operation::Mul)];
-
-    let op_groups: Vec<Felt> =
-        op_batches.iter().flat_map(|batch| batch.groups()).copied().collect();
-    let digest = hasher::hash_elements(&op_groups);
-
-    let mut forest = MastForest::new();
-    let block_id = BasicBlockNodeBuilder::from_op_batches(op_batches, Vec::new(), digest)
-        .add_to_forest(&mut forest)
-        .unwrap();
-    forest.make_root(block_id);
-
-    let bytes = forest.to_bytes();
-    let untrusted = UntrustedMastForest::read_from_bytes(&bytes).unwrap();
-    let result = untrusted.validate();
-
-    assert_matches!(result, Err(MastForestError::InvalidBatchPadding(_, _)));
-}
-
-/// Test that UntrustedMastForest::validate accepts full prefix batches and a power-of-two last.
-#[test]
-fn test_untrusted_forest_accepts_full_prefix_batch() {
-    let op_batches = vec![make_batch(OP_BATCH_SIZE, Operation::Add), make_batch(4, Operation::Mul)];
-
-    let op_groups: Vec<Felt> =
-        op_batches.iter().flat_map(|batch| batch.groups()).copied().collect();
-    let digest = hasher::hash_elements(&op_groups);
-
-    let mut forest = MastForest::new();
-    let block_id = BasicBlockNodeBuilder::from_op_batches(op_batches, Vec::new(), digest)
-        .add_to_forest(&mut forest)
-        .unwrap();
-    forest.make_root(block_id);
-
-    let bytes = forest.to_bytes();
-    let untrusted = UntrustedMastForest::read_from_bytes(&bytes).unwrap();
-    let result = untrusted.validate();
-
-    assert!(result.is_ok(), "full prefix batches should validate");
-}
-
-#[test]
-fn test_untrusted_forest_rejects_basic_block_indptr_that_breaks_push_immediate_commitment() {
-    // Two distinct immediates. Using large values reduces the chance of accidental equality with a
-    // packed opcode group value.
-    let imm_a = Felt::new(0xdead_beef_dead_beef);
-    let imm_b = Felt::new(0xfeed_face_feed_face);
-
-    let bytes_a = build_malicious_single_block_forest_bytes(imm_a);
-    let bytes_b = build_malicious_single_block_forest_bytes(imm_b);
-
-    let validated_a = match UntrustedMastForest::read_from_bytes(&bytes_a) {
-        Ok(untrusted) => untrusted.validate(),
-        Err(DeserializationError::InvalidValue(msg)) => {
-            assert!(msg.contains("push immediate"));
-            return;
-        },
-        Err(err) => panic!("unexpected deserialization error: {err:?}"),
-    };
-    let validated_b = match UntrustedMastForest::read_from_bytes(&bytes_b) {
-        Ok(untrusted) => untrusted.validate(),
-        Err(DeserializationError::InvalidValue(msg)) => {
-            assert!(msg.contains("push immediate"));
-            return;
-        },
-        Err(err) => panic!("unexpected deserialization error: {err:?}"),
-    };
-
-    // A fix may choose to reject this encoding at validation time. Either (or both) being `Err`
-    // is an acceptable outcome: it prevents the commitment gap.
-    let (forest_a, forest_b) = match (validated_a, validated_b) {
-        (Ok(forest_a), Ok(forest_b)) => (forest_a, forest_b),
-        (validated_a, validated_b) => {
-            match validated_a {
-                Err(MastForestError::InvalidBatchPadding(_, msg)) => {
-                    assert!(msg.contains("push immediate"));
-                },
-                Err(err) => panic!("unexpected validation error: {err:?}"),
-                Ok(_) => {},
-            }
-            match validated_b {
-                Err(MastForestError::InvalidBatchPadding(_, msg)) => {
-                    assert!(msg.contains("push immediate"));
-                },
-                Err(err) => panic!("unexpected validation error: {err:?}"),
-                Ok(_) => {},
-            }
-            return;
-        },
-    };
-
-    // If both validate successfully, then their digests must bind to their executed semantics.
-    // Concretely: changing the `Push` immediate must change the committed digest.
-    let block_a = forest_a[MastNodeId::new_unchecked(0)].unwrap_basic_block().clone();
-    let block_b = forest_b[MastNodeId::new_unchecked(0)].unwrap_basic_block().clone();
-
-    let ops_a: Vec<Operation> = block_a.operations().copied().collect();
-    let ops_b: Vec<Operation> = block_b.operations().copied().collect();
-
-    assert!(
-        matches!(ops_a.as_slice(), [Operation::Push(v), ..] if *v == imm_a),
-        "unexpected ops in forest_a: {ops_a:?}"
-    );
-    assert!(
-        matches!(ops_b.as_slice(), [Operation::Push(v), ..] if *v == imm_b),
-        "unexpected ops in forest_b: {ops_b:?}"
-    );
-
-    // If this assert fails, it demonstrates the issue: a `Push` immediate can be changed
-    // without changing the basic-block digest and without failing untrusted validation.
-    assert_ne!(
-        block_a.digest(),
-        block_b.digest(),
-        "BUG: UntrustedMastForest::validate() accepted two basic blocks with different Push immediates \
-         but identical digests.\n\
-         digest={:?}\n\
-         ops_a={ops_a:?}\n\
-         ops_b={ops_b:?}\n\
-         groups_a={:?}\n\
-         groups_b={:?}\n",
-        block_a.digest(),
-        block_a.op_batches()[0].groups(),
-        block_b.op_batches()[0].groups(),
-    );
 }
 
 fn build_malicious_single_block_forest_bytes(push_imm: Felt) -> Vec<u8> {
@@ -1848,6 +1722,135 @@ fn compute_single_block_digest_from_decoded_groups(bytes: &[u8]) -> Option<Word>
         block.op_batches().iter().flat_map(|batch| *batch.groups()).collect();
 
     Some(hasher::hash_elements(&op_groups))
+}
+
+/// Test that UntrustedMastForest::validate rejects a non-full batch before the last batch.
+#[test]
+fn test_untrusted_forest_rejects_non_full_prefix_batch() {
+    let op_batches = vec![make_batch(4, Operation::Add), make_batch(2, Operation::Mul)];
+
+    let op_groups: Vec<Felt> =
+        op_batches.iter().flat_map(|batch| batch.groups()).copied().collect();
+    let digest = hasher::hash_elements(&op_groups);
+
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::from_op_batches(op_batches, Vec::new(), digest)
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let bytes = forest.to_bytes();
+    let untrusted = UntrustedMastForest::read_from_bytes(&bytes).unwrap();
+    let result = untrusted.validate();
+
+    assert_matches!(result, Err(MastForestError::InvalidBatchPadding(_, _)));
+}
+
+/// Test that UntrustedMastForest::validate accepts full prefix batches and a power-of-two last.
+#[test]
+fn test_untrusted_forest_accepts_full_prefix_batch() {
+    let op_batches = vec![make_batch(OP_BATCH_SIZE, Operation::Add), make_batch(4, Operation::Mul)];
+
+    let op_groups: Vec<Felt> =
+        op_batches.iter().flat_map(|batch| batch.groups()).copied().collect();
+    let digest = hasher::hash_elements(&op_groups);
+
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::from_op_batches(op_batches, Vec::new(), digest)
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let bytes = forest.to_bytes();
+    let untrusted = UntrustedMastForest::read_from_bytes(&bytes).unwrap();
+    let result = untrusted.validate();
+
+    assert!(result.is_ok(), "full prefix batches should validate");
+}
+
+#[test]
+fn test_untrusted_forest_rejects_basic_block_indptr_that_breaks_push_immediate_commitment() {
+    // Two distinct immediates. Using large values reduces the chance of accidental equality with a
+    // packed opcode group value.
+    let imm_a = Felt::new(0xdead_beef_dead_beef);
+    let imm_b = Felt::new(0xfeed_face_feed_face);
+
+    let bytes_a = build_malicious_single_block_forest_bytes(imm_a);
+    let bytes_b = build_malicious_single_block_forest_bytes(imm_b);
+
+    let validated_a = match UntrustedMastForest::read_from_bytes(&bytes_a) {
+        Ok(untrusted) => untrusted.validate(),
+        Err(DeserializationError::InvalidValue(msg)) => {
+            assert!(msg.contains("push immediate"));
+            return;
+        },
+        Err(err) => panic!("unexpected deserialization error: {err:?}"),
+    };
+    let validated_b = match UntrustedMastForest::read_from_bytes(&bytes_b) {
+        Ok(untrusted) => untrusted.validate(),
+        Err(DeserializationError::InvalidValue(msg)) => {
+            assert!(msg.contains("push immediate"));
+            return;
+        },
+        Err(err) => panic!("unexpected deserialization error: {err:?}"),
+    };
+
+    // A fix may choose to reject this encoding at validation time. Either (or both) being `Err`
+    // is an acceptable outcome: it prevents the commitment gap.
+    let (forest_a, forest_b) = match (validated_a, validated_b) {
+        (Ok(forest_a), Ok(forest_b)) => (forest_a, forest_b),
+        (validated_a, validated_b) => {
+            match validated_a {
+                Err(MastForestError::InvalidBatchPadding(_, msg)) => {
+                    assert!(msg.contains("push immediate"));
+                },
+                Err(err) => panic!("unexpected validation error: {err:?}"),
+                Ok(_) => {},
+            }
+            match validated_b {
+                Err(MastForestError::InvalidBatchPadding(_, msg)) => {
+                    assert!(msg.contains("push immediate"));
+                },
+                Err(err) => panic!("unexpected validation error: {err:?}"),
+                Ok(_) => {},
+            }
+            return;
+        },
+    };
+
+    // If both validate successfully, then their digests must bind to their executed semantics.
+    // Concretely: changing the `Push` immediate must change the committed digest.
+    let block_a = forest_a[MastNodeId::new_unchecked(0)].unwrap_basic_block().clone();
+    let block_b = forest_b[MastNodeId::new_unchecked(0)].unwrap_basic_block().clone();
+
+    let ops_a: Vec<Operation> = block_a.operations().copied().collect();
+    let ops_b: Vec<Operation> = block_b.operations().copied().collect();
+
+    assert!(
+        matches!(ops_a.as_slice(), [Operation::Push(v), ..] if *v == imm_a),
+        "unexpected ops in forest_a: {ops_a:?}"
+    );
+    assert!(
+        matches!(ops_b.as_slice(), [Operation::Push(v), ..] if *v == imm_b),
+        "unexpected ops in forest_b: {ops_b:?}"
+    );
+
+    // If this assert fails, it demonstrates the issue: a `Push` immediate can be changed
+    // without changing the basic-block digest and without failing untrusted validation.
+    assert_ne!(
+        block_a.digest(),
+        block_b.digest(),
+        "BUG: UntrustedMastForest::validate() accepted two basic blocks with different Push immediates \
+         but identical digests.\n\
+         digest={:?}\n\
+         ops_a={ops_a:?}\n\
+         ops_b={ops_b:?}\n\
+         groups_a={:?}\n\
+         groups_b={:?}\n",
+        block_a.digest(),
+        block_a.op_batches()[0].groups(),
+        block_b.op_batches()[0].groups(),
+    );
 }
 
 /// Test that UntrustedMastForest::validate succeeds for forests with all node types.
