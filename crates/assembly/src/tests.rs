@@ -5391,8 +5391,7 @@ fn test_cross_module_quoted_identifier_resolution() -> TestResult {
 }
 
 #[test]
-fn regression_symbol_resolution_quoted_and_unquoted_module_paths_are_not_ambiguous_during_resolution()
- {
+fn regression_symbol_resolution_duplicate_module_paths_are_rejected_during_linking() {
     use crate::{Parse, ParseOptions};
 
     fn parse_library_module(
@@ -5438,16 +5437,8 @@ end
 "#,
     );
 
-    let attacker_mod = parse_library_module(
-        source_manager.clone(),
-        r#"::foo::"bar""#,
-        r#"
-pub proc add
-    add.1
-    add.1
-end
-"#,
-    );
+    let attacker_mod =
+        parse_library_module(source_manager.clone(), "::foo::bar", "pub proc add add.2 end");
 
     let legit_lib = Assembler::new(source_manager.clone())
         .assemble_library([legit_mod])
@@ -5457,12 +5448,12 @@ end
         .expect("library assembly must succeed");
 
     let err = try_assemble_program_with_link_order(&[legit_lib.clone(), attacker_lib.clone()])
-        .expect_err("expected ambiguous quoted path shadowing to be rejected");
-    assert_diagnostic!(err, "ambiguous module path resolution for '::foo::bar::add'");
+        .expect_err("expected duplicate canonical module namespace to be rejected");
+    assert_diagnostic!(err, "duplicate definition found for module '::foo::bar'");
 
     let err = try_assemble_program_with_link_order(&[attacker_lib, legit_lib])
-        .expect_err("expected ambiguous quoted path shadowing to be rejected");
-    assert_diagnostic!(err, "ambiguous module path resolution for '::foo::bar::add'");
+        .expect_err("expected duplicate canonical module namespace to be rejected");
+    assert_diagnostic!(err, "duplicate definition found for module '::foo::bar'");
 }
 
 #[test]
