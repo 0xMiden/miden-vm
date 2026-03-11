@@ -1,4 +1,6 @@
+use miden_assembly::Assembler;
 use miden_core::Felt;
+use miden_processor::{ExecutionOptions, StackInputs, advice::AdviceInputs};
 use miden_prover::Word;
 use miden_utils_testing::{build_test, crypto::MerkleStore};
 
@@ -398,4 +400,65 @@ fn advice_insert_hqword() {
     let test = build_test!(source, &stack_inputs);
     // Values retrieved from advice map in LIFO order
     test.expect_stack(&[11, 12, 13, 14, 21, 22, 23, 24, 31, 32, 33, 34, 41, 42, 43, 44]);
+}
+
+/// Inserting exactly `max_adv_map_value_size` elements must succeed.
+#[test]
+fn test_adv_insert_mem_at_boundary() {
+    let max_size = 8;
+    run_insert_mem_with_max_size(max_size as u32, max_size).unwrap();
+}
+
+/// Inserting one element over `max_adv_map_value_size` must be rejected.
+#[test]
+fn test_adv_insert_mem_over_boundary() {
+    let max_size = 8;
+    let err = run_insert_mem_with_max_size((max_size + 1) as u32, max_size).unwrap_err();
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("AdvMapValueSizeExceeded"),
+        "expected size-exceeded error, got: {msg}"
+    );
+}
+
+// HELPERS
+// ================================================================================================
+
+/// Helper that runs `adv.insert_mem` with a memory range of `range_len` elements and a custom
+/// `max_adv_map_value_size`.
+fn run_insert_mem_with_max_size(
+    range_len: u32,
+    max_adv_map_value_size: usize,
+) -> Result<(), miden_processor::ExecutionError> {
+    let start_addr: u32 = 0;
+    let end_addr = start_addr + range_len;
+
+    // Write `range_len` elements to memory, then call adv.insert_mem with a dummy key.
+    let mem_stores: String = (start_addr..end_addr)
+        .map(|addr| format!("push.1 push.{addr} mem_store"))
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let source = format!(
+        r#"begin
+            {mem_stores}
+            push.{end_addr} push.{start_addr}
+            push.1.2.3.4
+            adv.insert_mem
+            dropw drop drop
+        end"#,
+    );
+
+    let program = Assembler::default().assemble_program(&source).unwrap();
+    let mut host = super::TestHost::default();
+    let options = ExecutionOptions::default().with_max_adv_map_value_size(max_adv_map_value_size);
+
+    miden_processor::execute_sync(
+        &program,
+        StackInputs::default(),
+        AdviceInputs::default(),
+        &mut host,
+        options,
+    )?;
+    Ok(())
 }

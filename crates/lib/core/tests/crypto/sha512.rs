@@ -12,6 +12,7 @@ use miden_core::{
 use miden_core_lib::handlers::sha512::{
     SHA512_HASH_BYTES_EVENT_NAME, Sha512Precompile, Sha512Preimage,
 };
+use miden_processor::ExecutionError;
 
 use crate::helpers::masm_store_felts;
 
@@ -142,6 +143,24 @@ fn test_sha512_hash_memory(bytes: &[u8]) {
     test.expect_stack(&digest);
 }
 
+/// Input at exactly `max_hash_len_bytes` must succeed.
+#[test]
+fn test_sha512_max_hash_len_at_boundary() {
+    let max_len = 20;
+    let input: Vec<u8> = (0..max_len as u8).collect();
+    run_sha512_with_max_hash_len(&input, max_len as u64, max_len).unwrap();
+}
+
+/// Input one byte over `max_hash_len_bytes` must be rejected.
+#[test]
+fn test_sha512_max_hash_len_over_boundary() {
+    let max_len = 20;
+    let input: Vec<u8> = (0..=max_len as u8).collect();
+    let err = run_sha512_with_max_hash_len(&input, (max_len + 1) as u64, max_len).unwrap_err();
+    let msg = format!("{err:?}");
+    assert!(msg.contains("exceeds maximum"), "expected limit error, got: {msg}");
+}
+
 #[test]
 fn test_sha512_hash_bytes_documented_stack_contract() {
     let bytes = vec![1_u8, 2, 3, 4, 5];
@@ -168,4 +187,55 @@ fn test_sha512_hash_bytes_documented_stack_contract() {
     );
 
     build_debug_test!(source, &sentinels).expect_stack(&sentinels);
+}
+
+// HELPERS
+// ================================================================================
+
+/// Helper that compiles and runs a sha512 event with a given `len_bytes` on the stack and a
+/// custom `max_hash_len_bytes` execution option.
+fn run_sha512_with_max_hash_len(
+    input_u8: &[u8],
+    len_bytes_on_stack: u64,
+    max_hash_len_bytes: usize,
+) -> Result<(), ExecutionError> {
+    use miden_assembly::Assembler;
+    use miden_processor::{
+        DefaultHost, ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs,
+    };
+
+    let preimage = Sha512Preimage::new(input_u8.to_vec());
+    let input_felts = preimage.as_felts();
+    let memory_stores = masm_store_felts(&input_felts, INPUT_MEMORY_ADDR);
+
+    let source = format!(
+        r#"
+        begin
+            {memory_stores}
+            push.{len_bytes_on_stack}.{INPUT_MEMORY_ADDR}
+            emit.event("{SHA512_HASH_BYTES_EVENT_NAME}")
+            drop drop
+        end
+        "#,
+    );
+
+    let core_lib = miden_core_lib::CoreLibrary::default();
+    let program = Assembler::default()
+        .with_static_library(core_lib.library())
+        .unwrap()
+        .assemble_program(&source)
+        .unwrap();
+
+    let mut host = DefaultHost::default();
+    host.load_library(core_lib.library().mast_forest()).unwrap();
+    for (event_name, handler) in core_lib.handlers() {
+        host.register_handler(event_name, handler).unwrap();
+    }
+
+    let options = ExecutionOptions::default().with_max_hash_len_bytes(max_hash_len_bytes);
+    let processor =
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options);
+
+    processor.execute_sync(&program, &mut host)?;
+    Ok(())
 }

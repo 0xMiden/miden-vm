@@ -265,8 +265,8 @@ fn generate_core_trace_columns(
     let mut total_core_trace_rows = 0;
 
     for final_state in fragment_results {
-        stack_rows.push(final_state.last_stack_row);
-        system_rows.push(final_state.last_system_row);
+        stack_rows.push(final_state.last_stack_cols);
+        system_rows.push(final_state.last_system_cols);
         total_core_trace_rows += final_state.num_rows_written;
     }
 

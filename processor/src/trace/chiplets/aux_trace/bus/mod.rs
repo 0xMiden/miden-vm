@@ -8,10 +8,10 @@ use hasher::{
 };
 use kernel::{KernelRomMessage, build_kernel_chiplet_responses};
 use memory::{
-    build_dyn_dyncall_callee_hash_read_request, build_fmp_initialization_write_request,
-    build_hornerbase_eval_request, build_hornerext_eval_request, build_mem_mload_mstore_request,
-    build_mem_mloadw_mstorew_request, build_memory_chiplet_responses, build_mstream_request,
-    build_pipe_request,
+    build_crypto_stream_request, build_dyn_dyncall_callee_hash_read_request,
+    build_fmp_initialization_write_request, build_hornerbase_eval_request,
+    build_hornerext_eval_request, build_mem_mload_mstore_request, build_mem_mloadw_mstorew_request,
+    build_memory_chiplet_responses, build_mstream_request, build_pipe_request,
 };
 use miden_air::trace::{
     MainTrace, RowIndex,
@@ -122,6 +122,7 @@ where
             opcodes::HORNERBASE => build_hornerbase_eval_request(main_trace, alphas, row, debugger),
             opcodes::HORNEREXT => build_hornerext_eval_request(main_trace, alphas, row, debugger),
             opcodes::MSTREAM => build_mstream_request(main_trace, alphas, row, debugger),
+            opcodes::CRYPTOSTREAM => build_crypto_stream_request(main_trace, alphas, row, debugger),
             opcodes::HPERM => build_hperm_request(main_trace, alphas, row, debugger),
             opcodes::LOGPRECOMPILE => {
                 build_log_precompile_request(main_trace, alphas, row, debugger)

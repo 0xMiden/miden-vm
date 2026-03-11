@@ -495,7 +495,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
     /// Populates the system trace columns
     fn populate_system_trace_columns(&mut self, system: &SystemState, row_idx: usize) {
         // If we have buffered system rows from the previous call, write them to the trace
-        if let Some(system_rows) = self.system_rows {
+        if let Some(system_rows) = self.system_cols {
             // Write buffered system rows to the trace at current row
             for (i, &value) in system_rows.iter().enumerate() {
                 self.fragment.columns[i][row_idx] = value;
@@ -513,7 +513,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         new_system_rows[FN_HASH_OFFSET + 3] = system.fn_hash[3];
 
         // Store the buffer for the next call
-        self.system_rows = Some(new_system_rows);
+        self.system_cols = Some(new_system_rows);
     }
 
     /// Populates the decoder trace columns with operation-specific data
@@ -574,7 +574,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         use miden_air::trace::STACK_TRACE_WIDTH;
 
         // If we have buffered stack rows from the previous call, write them to the trace
-        if let Some(stack_rows) = self.stack_rows {
+        if let Some(stack_rows) = self.stack_cols {
             // Write buffered stack rows to the trace at current row
             for (i, &value) in stack_rows.iter().enumerate() {
                 self.fragment.columns[STACK_TRACE_OFFSET + i][row_idx] = value;
@@ -596,7 +596,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         new_stack_rows[H0_COL_IDX] = stack.overflow_helper(); // h0
 
         // Store the buffer for the next call
-        self.stack_rows = Some(new_stack_rows);
+        self.stack_cols = Some(new_stack_rows);
     }
 }
 

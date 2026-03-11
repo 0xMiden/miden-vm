@@ -110,6 +110,22 @@ impl AnalysisContext {
         }
     }
 
+    /// Register a constant for semantic analysis without defining it in the module.
+    ///
+    /// This is used for enum variants so we can fold discriminants without
+    /// attempting to define the same constant twice.
+    pub fn register_constant(&mut self, constant: Constant) {
+        let name = constant.name.clone();
+        if let Some(prev) = self.constants.get(&name) {
+            self.errors.push(SemanticAnalysisError::SymbolConflict {
+                span: constant.span,
+                prev_span: prev.span,
+            });
+        } else {
+            self.constants.insert(name, constant);
+        }
+    }
+
     /// Rewrite all constant declarations by performing const evaluation of their expressions.
     ///
     /// This also has the effect of validating that the constant expressions themselves are valid.
