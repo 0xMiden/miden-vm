@@ -1,7 +1,7 @@
 //! STARK configuration factories for different hash functions.
 //!
-//! Each factory creates a [`StarkConfig`] bundling the PCS parameters, LMCS
-//! commitment scheme, and Fiat-Shamir challenger for proving and verification.
+//! Each factory creates a [`StarkConfig`](miden_crypto::stark::StarkConfig) bundling the
+//! PCS parameters, LMCS commitment scheme, and Fiat-Shamir challenger for proving and verification.
 
 use alloc::vec;
 
