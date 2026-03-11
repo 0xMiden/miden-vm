@@ -184,6 +184,7 @@ impl DependencyVersionScheme {
         spec: Span<&crate::ast::DependencySpec>,
         workspace: &crate::ast::WorkspaceFile,
     ) -> Result<Self, InvalidDependencySpecError> {
+        use crate::absolutize_path;
         use std::path::Path;
 
         // If the dependency is a path dependency, check if the path refers to any of the workspace
@@ -232,17 +233,5 @@ impl DependencyVersionScheme {
             },
             scheme => Ok(scheme),
         }
-    }
-}
-
-#[cfg(all(feature = "std", feature = "serde"))]
-fn absolutize_path(
-    path: &std::path::Path,
-    workspace_root: &std::path::Path,
-) -> Result<std::path::PathBuf, std::io::Error> {
-    if path.is_absolute() {
-        path.canonicalize()
-    } else {
-        workspace_root.join(path).canonicalize()
     }
 }
