@@ -276,8 +276,9 @@ impl ProjectFile {
     }
 
     pub fn extract_library_target(&self) -> Result<Option<Span<crate::Target>>, Report> {
-        use crate::TargetType;
         use miden_assembly_syntax::Path as MasmPath;
+
+        use crate::TargetType;
 
         if self.lib.is_none() && self.bins.is_empty() {
             let project_name = &self.package.name;
@@ -327,8 +328,9 @@ impl ProjectFile {
     }
 
     pub fn extract_executable_targets(&self) -> Vec<Span<crate::Target>> {
-        use crate::TargetType;
         use miden_assembly_syntax::Path as MasmPath;
+
+        use crate::TargetType;
 
         let mut bins = Vec::with_capacity(self.bins.len());
         for target in self.bins.iter() {

@@ -184,8 +184,9 @@ impl DependencyVersionScheme {
         spec: Span<&crate::ast::DependencySpec>,
         workspace: &crate::ast::WorkspaceFile,
     ) -> Result<Self, InvalidDependencySpecError> {
-        use crate::absolutize_path;
         use std::path::Path;
+
+        use crate::absolutize_path;
 
         // If the dependency is a path dependency, check if the path refers to any of the workspace
         // members, and if so, convert the dependency version scheme to `Workspace` to aid in
