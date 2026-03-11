@@ -89,12 +89,8 @@ pub async fn prove(
     };
 
     // Build public inputs and extract fixed/variable-length components
-    let (public_values, kernel_digests) = trace.public_inputs().to_air_inputs();
-    let var_len_refs: Vec<&[_]> = kernel_digests.iter().map(|w| w.as_ref()).collect();
-    let var_len_public_inputs: &[&[_]] = &var_len_refs;
-
-    // Create AIR
-    let air = ProcessorAir::new(kernel_digests.len());
+    let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();
+    let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
 
     // Get aux trace builders
     let aux_builder = trace.aux_trace_builders();
@@ -103,58 +99,23 @@ pub async fn prove(
     let proof_bytes = match hash_fn {
         HashFunction::Blake3_256 => {
             let config = config::create_blake3_256_config();
-            prove_stark(
-                &config,
-                &air,
-                &trace_matrix,
-                &public_values,
-                var_len_public_inputs,
-                &aux_builder,
-            )
+            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
         },
         HashFunction::Keccak => {
             let config = config::create_keccak_config();
-            prove_stark(
-                &config,
-                &air,
-                &trace_matrix,
-                &public_values,
-                var_len_public_inputs,
-                &aux_builder,
-            )
+            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
         },
         HashFunction::Rpo256 => {
             let config = config::create_rpo_config();
-            prove_stark(
-                &config,
-                &air,
-                &trace_matrix,
-                &public_values,
-                var_len_public_inputs,
-                &aux_builder,
-            )
+            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
         },
         HashFunction::Poseidon2 => {
             let config = config::create_poseidon2_config();
-            prove_stark(
-                &config,
-                &air,
-                &trace_matrix,
-                &public_values,
-                var_len_public_inputs,
-                &aux_builder,
-            )
+            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
         },
         HashFunction::Rpx256 => {
             let config = config::create_rpx_config();
-            prove_stark(
-                &config,
-                &air,
-                &trace_matrix,
-                &public_values,
-                var_len_public_inputs,
-                &aux_builder,
-            )
+            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
         },
     }?;
 
@@ -201,13 +162,12 @@ pub fn prove_sync(
 // STARK PROOF GENERATION
 // ================================================================================================
 
-/// Generates a STARK proof for the given AIR, trace, and public values.
+/// Generates a STARK proof for the given trace and public values.
 ///
 /// Pre-seeds the challenger with `public_values`, then delegates to the lifted
 /// prover. Returns the serialized proof bytes.
 pub fn prove_stark<SC>(
     config: &SC,
-    air: &ProcessorAir,
     trace: &RowMajorMatrix<Felt>,
     public_values: &[Felt],
     var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
@@ -217,6 +177,7 @@ where
     SC: StarkConfig<Felt, QuadFelt>,
     <SC::Lmcs as Lmcs>::Commitment: Serialize,
 {
+    let air = ProcessorAir::default();
     let log_trace_height = trace.height().ilog2() as u8;
 
     let mut challenger = config.challenger();
@@ -229,7 +190,7 @@ where
     // See https://github.com/0xMiden/miden-vm/issues/2822
     let output: StarkOutput<Felt, QuadFelt, SC> = miden_crypto::stark::prover::prove_single(
         config,
-        air,
+        &air,
         trace,
         public_values,
         var_len_public_inputs,

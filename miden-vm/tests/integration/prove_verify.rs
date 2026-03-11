@@ -200,11 +200,11 @@ mod fast_parallel {
     use alloc::sync::Arc;
 
     use miden_assembly::{Assembler, DefaultSourceManager};
-    use miden_core::proof::{ExecutionProof, HashFunction};
+    use miden_core::{Felt, proof::{ExecutionProof, HashFunction}};
     use miden_processor::{
         ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs, trace::build_trace,
     };
-    use miden_prover::{ProcessorAir, config, execution_trace_to_row_major, prove_stark};
+    use miden_prover::{config, execution_trace_to_row_major, prove_stark};
     use miden_verifier::verify;
     use miden_vm::DefaultHost;
 
@@ -252,18 +252,15 @@ mod fast_parallel {
         let trace_matrix = execution_trace_to_row_major(&trace);
 
         // Build public inputs
-        let (public_values, kernel_digests) = trace.public_inputs().to_air_inputs();
-        let var_len_refs: Vec<&[_]> = kernel_digests.iter().map(|w| w.as_ref()).collect();
-        let var_len_public_inputs: &[&[_]] = &var_len_refs;
+        let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();
+        let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
 
-        let air = ProcessorAir::new(kernel_digests.len());
         let aux_builder = trace.aux_trace_builders();
 
         // Generate proof using Blake3_256
         let blake3_config = config::create_blake3_256_config();
         let proof_bytes = prove_stark(
             &blake3_config,
-            &air,
             &trace_matrix,
             &public_values,
             var_len_public_inputs,
