@@ -1,6 +1,6 @@
 use alloc::{string::String, sync::Arc};
 
-use miden_air::trace::{chiplets::hasher::HASH_CYCLE_LEN, AUX_TRACE_RAND_CHALLENGES};
+use miden_air::trace::{AUX_TRACE_RAND_CHALLENGES, chiplets::hasher::HASH_CYCLE_LEN};
 use miden_core::{
     Felt,
     mast::{

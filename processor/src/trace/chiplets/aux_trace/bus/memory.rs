@@ -337,7 +337,7 @@ pub(super) fn build_pipe_request<E: ExtensionField<Felt>>(
 /// `ciphertext - rate`.
 pub(super) fn build_crypto_stream_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    alphas: &[E],
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -393,17 +393,17 @@ pub(super) fn build_crypto_stream_request<E: ExtensionField<Felt>>(
         source: "crypto_stream write 2",
     };
 
-    let combined_value = read_req_1.value(alphas)
-        * read_req_2.value(alphas)
-        * write_req_1.value(alphas)
-        * write_req_2.value(alphas);
+    let combined_value = read_req_1.value(challenges)
+        * read_req_2.value(challenges)
+        * write_req_1.value(challenges)
+        * write_req_2.value(challenges);
 
     #[cfg(any(test, feature = "bus-debugger"))]
     {
-        _debugger.add_request(alloc::boxed::Box::new(read_req_1), alphas);
-        _debugger.add_request(alloc::boxed::Box::new(read_req_2), alphas);
-        _debugger.add_request(alloc::boxed::Box::new(write_req_1), alphas);
-        _debugger.add_request(alloc::boxed::Box::new(write_req_2), alphas);
+        _debugger.add_request(alloc::boxed::Box::new(read_req_1), challenges);
+        _debugger.add_request(alloc::boxed::Box::new(read_req_2), challenges);
+        _debugger.add_request(alloc::boxed::Box::new(write_req_1), challenges);
+        _debugger.add_request(alloc::boxed::Box::new(write_req_2), challenges);
     }
 
     combined_value

@@ -209,27 +209,10 @@ fn crypto_stream_missing_chiplets_bus_requests() {
     ];
 
     let trace = build_trace_from_ops(vec![Operation::CryptoStream], &stack);
-    let alphas: [Felt; AUX_TRACE_RAND_ELEMENTS] = [
-        Felt::new(2),
-        Felt::new(3),
-        Felt::new(4),
-        Felt::new(5),
-        Felt::new(6),
-        Felt::new(7),
-        Felt::new(8),
-        Felt::new(9),
-        Felt::new(10),
-        Felt::new(11),
-        Felt::new(12),
-        Felt::new(13),
-        Felt::new(14),
-        Felt::new(15),
-        Felt::new(16),
-        Felt::new(17),
-    ];
-
-    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
+    let rand_challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&rand_challenges).unwrap();
     let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
+    let challenges = Challenges::<Felt>::new(rand_challenges[0], rand_challenges[1]);
 
     // --- Assert exact bus requests for the four CryptoStream memory operations. ---
 
@@ -242,7 +225,7 @@ fn crypto_stream_missing_chiplets_bus_requests() {
     let clk = ONE; // CryptoStream executes at cycle 1 (cycle 0 is SPAN)
 
     let read1 = build_expected_bus_word_msg(
-        &alphas,
+        &challenges,
         MEMORY_READ_WORD_LABEL,
         ctx,
         ZERO, // src_ptr = 0
@@ -250,7 +233,7 @@ fn crypto_stream_missing_chiplets_bus_requests() {
         [ZERO, ZERO, ZERO, ZERO].into(),
     );
     let read2 = build_expected_bus_word_msg(
-        &alphas,
+        &challenges,
         MEMORY_READ_WORD_LABEL,
         ctx,
         Felt::new(4), // src_ptr + 4
@@ -258,7 +241,7 @@ fn crypto_stream_missing_chiplets_bus_requests() {
         [ZERO, ZERO, ZERO, ZERO].into(),
     );
     let write1 = build_expected_bus_word_msg(
-        &alphas,
+        &challenges,
         MEMORY_WRITE_WORD_LABEL,
         ctx,
         Felt::new(8), // dst_ptr = 8
@@ -266,7 +249,7 @@ fn crypto_stream_missing_chiplets_bus_requests() {
         [ONE, Felt::new(2), Felt::new(3), Felt::new(4)].into(),
     );
     let write2 = build_expected_bus_word_msg(
-        &alphas,
+        &challenges,
         MEMORY_WRITE_WORD_LABEL,
         ctx,
         Felt::new(12), // dst_ptr + 4

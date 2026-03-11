@@ -119,7 +119,9 @@ where
                 build_hornerext_eval_request(main_trace, challenges, row, debugger)
             },
             opcodes::MSTREAM => build_mstream_request(main_trace, challenges, row, debugger),
-            opcodes::CRYPTOSTREAM => build_crypto_stream_request(main_trace, challenges, row, debugger),
+            opcodes::CRYPTOSTREAM => {
+                build_crypto_stream_request(main_trace, challenges, row, debugger)
+            },
             opcodes::HPERM => build_hperm_request(main_trace, challenges, row, debugger),
             opcodes::LOGPRECOMPILE => {
                 build_log_precompile_request(main_trace, challenges, row, debugger)
