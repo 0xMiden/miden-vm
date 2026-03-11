@@ -5,9 +5,21 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{string::ToString, vec::Vec};
 
-use miden_processor::{FastProcessor, Program, trace::build_trace};
+use ::serde::Serialize;
+use miden_core::{
+    Felt,
+    field::QuadFelt,
+    utils::{Matrix, RowMajorMatrix},
+};
+use miden_crypto::stark::{
+    StarkConfig, air::VarLenPublicInputs, challenger::CanObserve, lmcs::Lmcs, proof::StarkOutput,
+};
+use miden_processor::{
+    FastProcessor, Program,
+    trace::{AuxTraceBuilders, build_trace},
+};
 use tracing::instrument;
 
 // Trace conversion utilities
@@ -87,14 +99,11 @@ pub async fn prove(
     // Get aux trace builders
     let aux_builder = trace.aux_trace_builders();
 
-    // Compute log_trace_height
-    let log_trace_height = trace.trace_len_summary().padded_trace_len().ilog2();
-
     // Generate STARK proof using lifted prover
     let proof_bytes = match hash_fn {
         HashFunction::Blake3_256 => {
             let config = config::create_blake3_256_config();
-            config::prove(
+            prove_stark(
                 &config,
                 &air,
                 &trace_matrix,
@@ -105,7 +114,7 @@ pub async fn prove(
         },
         HashFunction::Keccak => {
             let config = config::create_keccak_config();
-            config::prove(
+            prove_stark(
                 &config,
                 &air,
                 &trace_matrix,
@@ -116,7 +125,7 @@ pub async fn prove(
         },
         HashFunction::Rpo256 => {
             let config = config::create_rpo_config();
-            config::prove(
+            prove_stark(
                 &config,
                 &air,
                 &trace_matrix,
@@ -127,7 +136,7 @@ pub async fn prove(
         },
         HashFunction::Poseidon2 => {
             let config = config::create_poseidon2_config();
-            config::prove(
+            prove_stark(
                 &config,
                 &air,
                 &trace_matrix,
@@ -138,7 +147,7 @@ pub async fn prove(
         },
         HashFunction::Rpx256 => {
             let config = config::create_rpx_config();
-            config::prove(
+            prove_stark(
                 &config,
                 &air,
                 &trace_matrix,
@@ -147,10 +156,9 @@ pub async fn prove(
                 &aux_builder,
             )
         },
-    }
-    .map_err(|e| ExecutionError::ProvingError(Box::new(e)))?;
+    }?;
 
-    let proof = ExecutionProof::new(proof_bytes, hash_fn, log_trace_height, precompile_requests);
+    let proof = ExecutionProof::new(proof_bytes, hash_fn, precompile_requests);
 
     Ok((stack_outputs, proof))
 }
@@ -188,4 +196,51 @@ pub fn prove_sync(
             rt.block_on(prove(program, stack_inputs, advice_inputs, host, options))
         },
     }
+}
+
+// STARK PROOF GENERATION
+// ================================================================================================
+
+/// Generates a STARK proof for the given AIR, trace, and public values.
+///
+/// Pre-seeds the challenger with `public_values`, then delegates to the lifted
+/// prover. Returns the serialized proof bytes.
+pub fn prove_stark<SC>(
+    config: &SC,
+    air: &ProcessorAir,
+    trace: &RowMajorMatrix<Felt>,
+    public_values: &[Felt],
+    var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
+    aux_builder: &AuxTraceBuilders,
+) -> Result<Vec<u8>, ExecutionError>
+where
+    SC: StarkConfig<Felt, QuadFelt>,
+    <SC::Lmcs as Lmcs>::Commitment: Serialize,
+{
+    let log_trace_height = trace.height().ilog2() as u8;
+
+    let mut challenger = config.challenger();
+    challenger.observe_slice(public_values);
+    // TODO: observe log_trace_height in the transcript for Fiat-Shamir binding.
+    // TODO: observe var_len_public_inputs in the transcript for Fiat-Shamir binding.
+    //   This also requires updating the recursive verifier to absorb both fixed and
+    //   variable-length public inputs.
+    // TODO: observe ACE commitment once ACE verification is integrated.
+    // See https://github.com/0xMiden/miden-vm/issues/2822
+    let output: StarkOutput<Felt, QuadFelt, SC> = miden_crypto::stark::prover::prove_single(
+        config,
+        air,
+        trace,
+        public_values,
+        var_len_public_inputs,
+        aux_builder,
+        challenger,
+    )
+    .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
+    // Proof serialization via bincode; see https://github.com/0xMiden/miden-vm/issues/2550
+    // We serialize `(log_trace_height, proof)` as a tuple; this is a temporary approach until
+    // the lifted STARK integrates trace height on its side.
+    let proof_bytes = bincode::serialize(&(log_trace_height, &output.proof))
+        .map_err(|e| ExecutionError::ProvingError(e.to_string()))?;
+    Ok(proof_bytes)
 }
