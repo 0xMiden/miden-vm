@@ -484,6 +484,7 @@ impl Stopper for ReplayStopper {
     fn should_stop(
         &self,
         processor: &ReplayProcessor,
+        _continuation_stack: &ContinuationStack,
         continuation_after_stop: impl FnOnce() -> Option<Continuation>,
     ) -> ControlFlow<BreakReason> {
         if processor.system().clock() >= processor.maximum_clock {

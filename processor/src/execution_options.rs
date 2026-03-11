@@ -19,6 +19,9 @@ pub struct ExecutionOptions {
     max_adv_map_value_size: usize,
     /// Maximum number of input bytes allowed for a single hash precompile invocation.
     max_hash_len_bytes: usize,
+    /// Maximum number of continuations allowed on the continuation stack at any point during
+    /// execution.
+    max_num_continuations: usize,
 }
 
 impl Default for ExecutionOptions {
@@ -31,6 +34,7 @@ impl Default for ExecutionOptions {
             enable_debugging: false,
             max_adv_map_value_size: Self::DEFAULT_MAX_ADV_MAP_VALUE_SIZE,
             max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
+            max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
         }
     }
 }
@@ -52,6 +56,10 @@ impl ExecutionOptions {
     /// Default maximum number of input bytes for a single hash precompile invocation (e.g.
     /// keccak256, sha512, etc.). Set to 2^20 (1 MB).
     pub const DEFAULT_MAX_HASH_LEN_BYTES: usize = 1 << 20;
+
+    /// Default maximum number of continuations allowed on the continuation stack.
+    /// Set to 2^16 (65536).
+    pub const DEFAULT_MAX_NUM_CONTINUATIONS: usize = 1 << 16;
 
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
@@ -114,6 +122,7 @@ impl ExecutionOptions {
             enable_debugging,
             max_adv_map_value_size: Self::DEFAULT_MAX_ADV_MAP_VALUE_SIZE,
             max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
+            max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
         })
     }
 
@@ -207,6 +216,18 @@ impl ExecutionOptions {
     /// Sets the maximum number of input bytes allowed for a single hash precompile invocation.
     pub fn with_max_hash_len_bytes(mut self, size: usize) -> Self {
         self.max_hash_len_bytes = size;
+        self
+    }
+
+    /// Returns the maximum number of continuations allowed on the continuation stack.
+    #[inline]
+    pub fn max_num_continuations(&self) -> usize {
+        self.max_num_continuations
+    }
+
+    /// Sets the maximum number of continuations allowed on the continuation stack.
+    pub fn with_max_num_continuations(mut self, max_num_continuations: usize) -> Self {
+        self.max_num_continuations = max_num_continuations;
         self
     }
 }

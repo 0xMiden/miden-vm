@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.23.0 (TBD)
+
+#### Fixes
+- Set a bound on `ContinuationStack` size, checked during execution ([#2824](https://github.com/0xMiden/miden-vm/pull/2824)).
+
 ## 0.22.0 (TBD)
 
 #### Changes

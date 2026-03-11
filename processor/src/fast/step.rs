@@ -53,9 +53,11 @@ impl Stopper for NeverStopper {
     fn should_stop(
         &self,
         processor: &FastProcessor,
+        continuation_stack: &ContinuationStack,
         _continuation_after_stop: impl FnOnce() -> Option<Continuation>,
     ) -> ControlFlow<BreakReason> {
-        check_if_max_cycles_exceeded(processor)
+        check_if_max_cycles_exceeded(processor)?;
+        check_if_continuation_stack_too_large(processor, continuation_stack)
     }
 }
 
@@ -70,9 +72,11 @@ impl Stopper for StepStopper {
     fn should_stop(
         &self,
         processor: &FastProcessor,
+        continuation_stack: &ContinuationStack,
         continuation_after_stop: impl FnOnce() -> Option<Continuation>,
     ) -> ControlFlow<BreakReason> {
         check_if_max_cycles_exceeded(processor)?;
+        check_if_continuation_stack_too_large(processor, continuation_stack)?;
 
         ControlFlow::Break(BreakReason::Stopped(continuation_after_stop()))
     }
@@ -84,6 +88,22 @@ fn check_if_max_cycles_exceeded(processor: &FastProcessor) -> ControlFlow<BreakR
     if processor.clk > processor.options.max_cycles() as usize {
         ControlFlow::Break(BreakReason::Err(ExecutionError::CycleLimitExceeded(
             processor.options.max_cycles(),
+        )))
+    } else {
+        ControlFlow::Continue(())
+    }
+}
+
+/// Checks if the continuation stack size exceeds the maximum allowed, returning a
+/// `BreakReason::Err` if so.
+#[inline(always)]
+fn check_if_continuation_stack_too_large(
+    processor: &FastProcessor,
+    continuation_stack: &ContinuationStack,
+) -> ControlFlow<BreakReason> {
+    if continuation_stack.len() > processor.options.max_num_continuations() {
+        ControlFlow::Break(BreakReason::Err(ExecutionError::Internal(
+            "continuation stack size exceeded the allowed maximum",
         )))
     } else {
         ControlFlow::Continue(())
