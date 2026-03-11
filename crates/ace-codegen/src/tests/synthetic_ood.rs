@@ -16,14 +16,14 @@ use crate::{
 
 #[test]
 fn synthetic_ood_adjusts_quotient_to_zero() {
-    let air = ProcessorAir::default();
     let config = AceConfig {
         num_quotient_chunks: 8,
         num_aux_inputs: 14,
         layout: LayoutKind::Masm,
     };
 
-    let artifacts = build_ace_dag_for_air::<_, Felt, QuadFelt>(&air, config).expect("ace dag");
+    let artifacts =
+        build_ace_dag_for_air::<_, Felt, QuadFelt>(&ProcessorAir, config).expect("ace dag");
     let circuit = emit_circuit(&artifacts.dag, artifacts.layout.clone()).expect("ace circuit");
 
     let mut inputs = fill_inputs(&artifacts.layout);
@@ -48,14 +48,14 @@ fn synthetic_ood_adjusts_quotient_to_zero() {
 
 #[test]
 fn quotient_next_inputs_do_not_affect_eval() {
-    let air = ProcessorAir::default();
     let config = AceConfig {
         num_quotient_chunks: 8,
         num_aux_inputs: 14,
         layout: LayoutKind::Masm,
     };
 
-    let artifacts = build_ace_dag_for_air::<_, Felt, QuadFelt>(&air, config).expect("ace dag");
+    let artifacts =
+        build_ace_dag_for_air::<_, Felt, QuadFelt>(&ProcessorAir, config).expect("ace dag");
     let circuit = emit_circuit(&artifacts.dag, artifacts.layout.clone()).expect("ace circuit");
 
     let mut inputs = fill_inputs(&artifacts.layout);

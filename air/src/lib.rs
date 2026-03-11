@@ -427,7 +427,7 @@ fn kernel_reduced_from_var_len<EF: ExtensionField<Felt>>(
         .into());
     }
     let kernel_felts = var_len_public_inputs[0];
-    if kernel_felts.len() % WORD_SIZE != 0 {
+    if !kernel_felts.len().is_multiple_of(WORD_SIZE) {
         return Err(format!(
             "kernel digest felts length {} is not a multiple of {}",
             kernel_felts.len(),
