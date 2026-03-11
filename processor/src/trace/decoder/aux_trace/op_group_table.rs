@@ -1,11 +1,11 @@
 use miden_air::trace::{
-    RowIndex,
+    Challenges, RowIndex,
     decoder::{OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS},
 };
 use miden_core::{field::ExtensionField, operations::opcodes};
 
 use super::{AuxColumnBuilder, Felt, MainTrace, ONE};
-use crate::{debug::BusDebugger, trace::utils::Challenges};
+use crate::debug::BusDebugger;
 
 // OP GROUP TABLE COLUMN
 // ================================================================================================

@@ -24,7 +24,7 @@
 
 use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess};
 
-use crate::{Felt, MainTraceRow};
+use crate::{Felt, MainTraceRow, trace::Challenges};
 
 pub mod bus;
 pub mod chiplets;
@@ -70,8 +70,8 @@ pub fn enforce_bus<AB>(
 ) where
     AB: LiftedAirBuilder<F = Felt>,
 {
-    let challenges =
-        crate::trace::Challenges::<AB::ExprEF>::from_randomness(builder.permutation_randomness());
+    let r = builder.permutation_randomness();
+    let challenges = Challenges::<AB::ExprEF>::new(r[0].into(), r[1].into());
     let op_flags = op_flags::OpFlags::new(op_flags::ExprDecoderAccess::<_, AB::Expr>::new(local));
 
     enforce_bus_boundary(builder);

@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::{
-    AUX_TRACE_RAND_CHALLENGES,
+    AUX_TRACE_RAND_CHALLENGES, Challenges,
     chiplets::hasher::HASH_CYCLE_LEN_FELT,
     decoder::{P1_COL_IDX, P2_COL_IDX, P3_COL_IDX},
 };
@@ -20,7 +20,6 @@ use crate::{
         MastNodeExt, SplitNodeBuilder,
     },
     operation::Operation,
-    trace::utils::Challenges,
 };
 
 // BLOCK STACK TABLE TESTS
@@ -31,11 +30,11 @@ use crate::{
 fn decoder_p1_span_with_respan() {
     let (ops, _) = build_span_with_respan_ops();
     let trace = build_trace_from_ops(ops, &[]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
+    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
-    let challenges = Challenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
     let row_values = [
         BlockStackTableRow::new(ONE, ZERO, false).to_value(&challenges),
         BlockStackTableRow::new(ONE + HASH_CYCLE_LEN_FELT, ZERO, false).to_value(&challenges),
@@ -91,11 +90,11 @@ fn decoder_p1_join() {
     };
 
     let trace = build_trace_from_program(&program, &[]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
+    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
-    let challenges = Challenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
     let a_33 = ONE + HASH_CYCLE_LEN_FELT;
     let a_65 = a_33 + HASH_CYCLE_LEN_FELT;
     let row_values = [
@@ -165,11 +164,11 @@ fn decoder_p1_split() {
     };
 
     let trace = build_trace_from_program(&program, &[1]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
+    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
-    let challenges = Challenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
     let a_33 = ONE + HASH_CYCLE_LEN_FELT;
     let row_values = [
         BlockStackTableRow::new(ONE, ZERO, false).to_value(&challenges),
@@ -230,11 +229,11 @@ fn decoder_p1_loop_with_repeat() {
     // After Pad+Drop: position 0 = 1 (2nd iteration enters)
     // After Pad+Drop: position 0 = 0 (loop exits)
     let trace = build_trace_from_program(&program, &[1, 1, 0]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
+    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
-    let challenges = Challenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
     // The loop node consumes the first hasher cycle; join/span addresses follow sequentially.
     let a_33 = ONE + HASH_CYCLE_LEN_FELT; // address of the JOIN block in the first iteration
     let a_65 = a_33 + HASH_CYCLE_LEN_FELT; // address of the first SPAN block in the first iteration
@@ -355,11 +354,11 @@ fn decoder_p2_span_with_respan() {
         Program::new(mast_forest.into(), basic_block_id)
     };
     let trace = build_trace_from_program(&program, &[]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
+    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
-    let challenges = Challenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
     let program_hash_msg =
         BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&challenges);
 
@@ -402,11 +401,11 @@ fn decoder_p2_join() {
     let program = Program::new(mast_forest.into(), join_id);
 
     let trace = build_trace_from_program(&program, &[]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
+    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
-    let challenges = Challenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
     let program_hash_msg =
         BlockHashTableRow::new_test(ZERO, join.digest(), false, false).collapse(&challenges);
     let child1_msg =
@@ -471,11 +470,11 @@ fn decoder_p2_split_true() {
 
     // build trace from program
     let trace = build_trace_from_program(&program, &[1]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
+    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
-    let challenges = Challenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
     let program_hash_msg =
         BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&challenges);
     let child_msg = BlockHashTableRow::new_test(ONE, basic_block_1.digest(), false, false)
@@ -531,11 +530,11 @@ fn decoder_p2_split_false() {
 
     // build trace from program
     let trace = build_trace_from_program(&program, &[0]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
+    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
-    let challenges = Challenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
     let program_hash_msg =
         BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&challenges);
     let child_msg = BlockHashTableRow::new_test(ONE, basic_block_2.digest(), false, false)
@@ -596,11 +595,11 @@ fn decoder_p2_loop_with_repeat() {
     // After Pad+Drop: position 0 = 1 (2nd iteration enters)
     // After Pad+Drop: position 0 = 0 (loop exits)
     let trace = build_trace_from_program(&program, &[1, 1, 0]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
+    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
-    let challenges = Challenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
     // The loop node consumes the first hasher cycle; join/span addresses follow sequentially.
     let a_33 = ONE + HASH_CYCLE_LEN_FELT; // address of the JOIN block in the first iteration
     let a_129 = a_33 + HASH_CYCLE_LEN_FELT * Felt::new(3); // address of the JOIN block in the second iteration
@@ -700,8 +699,8 @@ fn decoder_p3_trace_empty_table() {
     let operations = vec![Operation::Add];
     let trace = build_trace_from_ops(operations, &stack);
 
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
+    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
 
     // no rows should have been added or removed from the op group table, and thus, all values
     // in the column must be ONE
@@ -730,11 +729,11 @@ fn decoder_p3_trace_one_batch() {
         Operation::Add,
     ];
     let trace = build_trace_from_ops(ops.clone(), &stack);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
+    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
     let p3 = aux_columns.get_column(P3_COL_IDX);
 
-    let challenges = Challenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
 
     // make sure the first entry is ONE
     assert_eq!(ONE, p3[0]);
@@ -784,11 +783,11 @@ fn decoder_p3_trace_one_batch() {
 fn decoder_p3_trace_two_batches() {
     let (ops, iv) = build_span_with_respan_ops();
     let trace = build_trace_from_ops(ops, &[]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
+    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
     let p3 = aux_columns.get_column(P3_COL_IDX);
 
-    let challenges = Challenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
 
     // make sure the first entry is ONE
     assert_eq!(ONE, p3[0]);

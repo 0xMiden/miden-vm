@@ -4,7 +4,7 @@
 //! as `alpha + <beta, message>`. This type is used by:
 //!
 //! - **AIR constraints** (symbolic expressions): `Challenges<AB::ExprEF>`
-//! - **Processor aux trace builders** (concrete field elements): see processor's `Challenges<E>`
+//! - **Processor aux trace builders** (concrete field elements): `Challenges<E>`
 //! - **Verifier** (`reduced_aux_values`): `Challenges<EF>`
 //!
 //! See [`super::bus_message`] for the standard coefficient index layout.
@@ -40,21 +40,6 @@ impl<EF: PrimeCharacteristicRing> Challenges<EF> {
         Self { alpha, beta_powers }
     }
 
-    /// Builds from a raw challenges slice where `[0] = alpha`, `[1] = beta`.
-    pub fn from_raw(challenges: &[EF]) -> Self {
-        assert!(challenges.len() >= 2, "need at least alpha and beta");
-        Self::new(challenges[0].clone(), challenges[1].clone())
-    }
-
-    /// Builds from a permutation randomness slice where elements convert into `EF`.
-    ///
-    /// This is the primary constructor for AIR constraint builders, where randomness
-    /// is provided as `&[AB::RandomVar]` and each element converts `Into<AB::ExprEF>`.
-    pub fn from_randomness<R: Into<EF> + Copy>(challenges: &[R]) -> Self {
-        assert!(challenges.len() >= 2, "need at least alpha and beta challenges");
-        Self::new(challenges[0].into(), challenges[1].into())
-    }
-
     /// Encodes as **alpha + sum(beta_powers\[i\] * elem\[i\])** with K consecutive elements.
     #[inline(always)]
     pub fn encode<BF, const K: usize>(&self, elems: [BF; K]) -> EF
@@ -68,16 +53,6 @@ impl<EF: PrimeCharacteristicRing> Challenges<EF> {
             acc += self.beta_powers[i].clone() * elem.clone();
         }
         acc
-    }
-
-    /// Alias for [`Self::encode`] used by AIR constraint builders.
-    #[inline(always)]
-    pub fn encode_dense<BF, const K: usize>(&self, elems: [BF; K]) -> EF
-    where
-        EF: Mul<BF, Output = EF> + AddAssign,
-        BF: Clone,
-    {
-        self.encode(elems)
     }
 
     /// Encodes as **alpha + sum(beta_powers\[layout\[i\]\] * values\[i\])** using sparse positions.

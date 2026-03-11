@@ -353,7 +353,7 @@ fn compute_bitwise_request<AB: LiftedAirBuilder<F = Felt>>(
     let b: AB::Expr = local.stack[1].clone().into();
     let z: AB::Expr = next.stack[0].clone().into();
 
-    challenges.encode_dense([label, a, b, z])
+    challenges.encode([label, a, b, z])
 }
 
 /// Computes the bitwise chiplet response message value.
@@ -381,7 +381,7 @@ fn compute_bitwise_response<AB: LiftedAirBuilder<F = Felt>>(
     let b: AB::Expr = local.chiplets[bw_offset + bitwise::B_COL_IDX].clone().into();
     let z: AB::Expr = local.chiplets[bw_offset + bitwise::OUTPUT_COL_IDX].clone().into();
 
-    challenges.encode_dense([label, a, b, z])
+    challenges.encode([label, a, b, z])
 }
 
 // MEMORY MESSAGE HELPERS
@@ -433,7 +433,7 @@ fn compute_memory_word_request<AB: LiftedAirBuilder<F = Felt>>(
         )
     };
 
-    challenges.encode_dense([label, ctx, addr, clk, w0, w1, w2, w3])
+    challenges.encode([label, ctx, addr, clk, w0, w1, w2, w3])
 }
 
 /// Computes the memory element request message value.
@@ -468,7 +468,7 @@ fn compute_memory_element_request<AB: LiftedAirBuilder<F = Felt>>(
         local.stack[1].clone().into()
     };
 
-    challenges.encode_dense([label, ctx, addr, clk, element])
+    challenges.encode([label, ctx, addr, clk, element])
 }
 
 /// Computes the MSTREAM request message value (two word reads).
@@ -499,7 +499,7 @@ fn compute_mstream_request<AB: LiftedAirBuilder<F = Felt>>(
         next.stack[7].clone().into(),
     ];
 
-    let msg1 = challenges.encode_dense([
+    let msg1 = challenges.encode([
         label.clone(),
         ctx.clone(),
         addr.clone(),
@@ -510,7 +510,7 @@ fn compute_mstream_request<AB: LiftedAirBuilder<F = Felt>>(
         word1[3].clone(),
     ]);
 
-    let msg2 = challenges.encode_dense([
+    let msg2 = challenges.encode([
         label,
         ctx,
         addr + four.clone(),
@@ -552,7 +552,7 @@ fn compute_pipe_request<AB: LiftedAirBuilder<F = Felt>>(
         next.stack[7].clone().into(),
     ];
 
-    let msg1 = challenges.encode_dense([
+    let msg1 = challenges.encode([
         label.clone(),
         ctx.clone(),
         addr.clone(),
@@ -563,7 +563,7 @@ fn compute_pipe_request<AB: LiftedAirBuilder<F = Felt>>(
         word1[3].clone(),
     ]);
 
-    let msg2 = challenges.encode_dense([
+    let msg2 = challenges.encode([
         label,
         ctx,
         addr + four.clone(),
@@ -595,7 +595,7 @@ fn compute_cryptostream_request<AB: LiftedAirBuilder<F = Felt>>(
     let cipher: [AB::Expr; 8] = core::array::from_fn(|i| next.stack[i].clone().into());
     let plain: [AB::Expr; 8] = core::array::from_fn(|i| cipher[i].clone() - rate[i].clone());
 
-    let read_msg1 = challenges.encode_dense([
+    let read_msg1 = challenges.encode([
         read_label.clone(),
         ctx.clone(),
         src.clone(),
@@ -606,7 +606,7 @@ fn compute_cryptostream_request<AB: LiftedAirBuilder<F = Felt>>(
         plain[3].clone(),
     ]);
 
-    let read_msg2 = challenges.encode_dense([
+    let read_msg2 = challenges.encode([
         read_label,
         ctx.clone(),
         src + four.clone(),
@@ -617,7 +617,7 @@ fn compute_cryptostream_request<AB: LiftedAirBuilder<F = Felt>>(
         plain[7].clone(),
     ]);
 
-    let write_msg1 = challenges.encode_dense([
+    let write_msg1 = challenges.encode([
         write_label.clone(),
         ctx.clone(),
         dst.clone(),
@@ -628,7 +628,7 @@ fn compute_cryptostream_request<AB: LiftedAirBuilder<F = Felt>>(
         cipher[3].clone(),
     ]);
 
-    let write_msg2 = challenges.encode_dense([
+    let write_msg2 = challenges.encode([
         write_label,
         ctx,
         dst + four,
@@ -659,10 +659,9 @@ fn compute_hornerbase_request<AB: LiftedAirBuilder<F = Felt>>(
     let eval0: AB::Expr = local.decoder[helper0_idx].clone().into();
     let eval1: AB::Expr = local.decoder[helper1_idx].clone().into();
 
-    let msg0 =
-        challenges.encode_dense([label.clone(), ctx.clone(), addr.clone(), clk.clone(), eval0]);
+    let msg0 = challenges.encode([label.clone(), ctx.clone(), addr.clone(), clk.clone(), eval0]);
 
-    let msg1 = challenges.encode_dense([label, ctx, addr + one, clk, eval1]);
+    let msg1 = challenges.encode([label, ctx, addr + one, clk, eval1]);
 
     msg0 * msg1
 }
@@ -686,7 +685,7 @@ fn compute_hornerext_request<AB: LiftedAirBuilder<F = Felt>>(
         local.decoder[base + 3].clone().into(),
     ];
 
-    challenges.encode_dense([
+    challenges.encode([
         label,
         ctx,
         addr,
@@ -756,10 +755,10 @@ fn compute_memory_response<AB: LiftedAirBuilder<F = Felt>>(
 
     // Element access: include the selected element in the last slot.
     let element_msg =
-        challenges.encode_dense([label.clone(), ctx.clone(), addr.clone(), clk.clone(), element]);
+        challenges.encode([label.clone(), ctx.clone(), addr.clone(), clk.clone(), element]);
 
     // Word access: include all 4 values.
-    let word_msg = challenges.encode_dense([label, ctx, addr, clk, v0, v1, v2, v3]);
+    let word_msg = challenges.encode([label, ctx, addr, clk, v0, v1, v2, v3]);
 
     // Select based on is_word
     element_msg * is_element + word_msg * is_word
@@ -1143,7 +1142,7 @@ fn compute_hasher_message<AB: LiftedAirBuilder<F = Felt>>(
     node_index: AB::Expr,
     state: &[AB::Expr; 12],
 ) -> AB::ExprEF {
-    challenges.encode_dense([
+    challenges.encode([
         transition_label,
         addr,
         node_index,
@@ -1170,7 +1169,7 @@ fn compute_hasher_word_message<AB: LiftedAirBuilder<F = Felt>>(
     node_index: AB::Expr,
     word: &[AB::Expr; 4],
 ) -> AB::ExprEF {
-    challenges.encode_dense([
+    challenges.encode([
         transition_label,
         addr,
         node_index,
@@ -1189,7 +1188,7 @@ fn compute_hasher_rate_message<AB: LiftedAirBuilder<F = Felt>>(
     node_index: AB::Expr,
     rate: &[AB::Expr; 8],
 ) -> AB::ExprEF {
-    challenges.encode_dense([
+    challenges.encode([
         transition_label,
         addr,
         node_index,
@@ -1229,7 +1228,7 @@ fn compute_ace_request<AB: LiftedAirBuilder<F = Felt>>(
     let num_read_rows: AB::Expr = local.stack[1].clone().into();
     let num_eval_rows: AB::Expr = local.stack[2].clone().into();
 
-    challenges.encode_dense([label, clk, ctx, ptr, num_read_rows, num_eval_rows])
+    challenges.encode([label, clk, ctx, ptr, num_read_rows, num_eval_rows])
 }
 
 /// Computes the ACE chiplet response message value.
@@ -1266,7 +1265,7 @@ fn compute_ace_response<AB: LiftedAirBuilder<F = Felt>>(
     // num_read_rows = id_0 + 1 - num_eval_rows
     let num_read_rows: AB::Expr = id_0 + AB::Expr::ONE - num_eval_rows.clone();
 
-    challenges.encode_dense([label, clk, ctx, ptr, num_read_rows, num_eval_rows])
+    challenges.encode([label, clk, ctx, ptr, num_read_rows, num_eval_rows])
 }
 
 // KERNEL ROM MESSAGE HELPERS
@@ -1300,7 +1299,7 @@ fn compute_kernel_rom_response<AB: LiftedAirBuilder<F = Felt>>(
     let root2: AB::Expr = local.chiplets[NUM_KERNEL_ROM_SELECTORS + 3].clone().into();
     let root3: AB::Expr = local.chiplets[NUM_KERNEL_ROM_SELECTORS + 4].clone().into();
 
-    challenges.encode_dense([label, root0, root1, root2, root3])
+    challenges.encode([label, root0, root1, root2, root3])
 }
 
 // CONTROL BLOCK REQUEST HELPERS
@@ -1464,7 +1463,7 @@ fn compute_syscall_request<AB: LiftedAirBuilder<F = Felt>>(
     let root3: AB::Expr = local.decoder[HASHER_STATE_RANGE.start + 3].clone().into();
 
     let label: AB::Expr = AB::Expr::from(KERNEL_PROC_CALL_LABEL);
-    let kernel_req = challenges.encode_dense([label, root0, root1, root2, root3]);
+    let kernel_req = challenges.encode([label, root0, root1, root2, root3]);
 
     control_req * kernel_req
 }
@@ -1606,7 +1605,7 @@ fn compute_fmp_write_request<AB: LiftedAirBuilder<F = Felt>>(
     let addr: AB::Expr = AB::Expr::from(FMP_ADDR);
     let element: AB::Expr = AB::Expr::from(FMP_INIT_VALUE);
 
-    challenges.encode_dense([label, ctx, addr, clk, element])
+    challenges.encode([label, ctx, addr, clk, element])
 }
 
 /// Computes the callee hash read request for DYN/DYNCALL.
@@ -1628,7 +1627,7 @@ fn compute_dyn_callee_hash_read<AB: LiftedAirBuilder<F = Felt>>(
     let w2: AB::Expr = local.decoder[HASHER_STATE_RANGE.start + 2].clone().into();
     let w3: AB::Expr = local.decoder[HASHER_STATE_RANGE.start + 3].clone().into();
 
-    challenges.encode_dense([label, ctx, addr, clk, w0, w1, w2, w3])
+    challenges.encode([label, ctx, addr, clk, w0, w1, w2, w3])
 }
 
 // MPVERIFY/MRUPDATE REQUEST HELPERS

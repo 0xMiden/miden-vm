@@ -14,7 +14,7 @@ use memory::{
     build_pipe_request,
 };
 use miden_air::trace::{
-    MainTrace, RowIndex,
+    Challenges, MainTrace, RowIndex,
     chiplets::{
         hasher::LINEAR_HASH_LABEL,
         memory::{
@@ -28,7 +28,7 @@ use miden_core::{ONE, ZERO, field::ExtensionField, operations::opcodes};
 use super::Felt;
 use crate::{
     debug::{BusDebugger, BusMessage},
-    trace::{AuxColumnBuilder, utils::Challenges},
+    trace::AuxColumnBuilder,
 };
 
 mod ace;

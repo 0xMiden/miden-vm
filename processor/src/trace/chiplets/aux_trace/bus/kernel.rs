@@ -1,15 +1,12 @@
 use core::fmt::{Display, Formatter, Result as FmtResult};
 
 use miden_air::trace::{
-    MainTrace, RowIndex,
+    Challenges, MainTrace, RowIndex,
     chiplets::kernel_rom::{KERNEL_PROC_CALL_LABEL, KERNEL_PROC_INIT_LABEL},
 };
 use miden_core::{Felt, field::ExtensionField};
 
-use crate::{
-    debug::{BusDebugger, BusMessage},
-    trace::utils::Challenges,
-};
+use crate::debug::{BusDebugger, BusMessage};
 
 // RESPONSES
 // ================================================================================================

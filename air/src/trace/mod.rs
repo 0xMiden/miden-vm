@@ -195,7 +195,7 @@ pub const MAX_MESSAGE_WIDTH: usize = 16;
 /// These indices refer to positions in the `beta_powers` array, not including alpha.
 ///
 /// This layout is shared between:
-/// - AIR constraint builders (symbolic expressions): `Challenges<AB, N>`
+/// - AIR constraint builders (symbolic expressions): `Challenges<AB::ExprEF>`
 /// - Processor auxiliary trace builders (concrete field elements): `Challenges<E>`
 pub mod bus_message {
     /// Label coefficient index: `beta_powers[0] = beta^0`.

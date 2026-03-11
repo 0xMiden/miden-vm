@@ -1,11 +1,11 @@
 use alloc::vec::Vec;
 
-use miden_air::trace::MainTrace;
+use miden_air::trace::{Challenges, MainTrace};
 use miden_core::field::ExtensionField;
 use wiring_bus::WiringBusBuilder;
 
 use super::{Felt, ace::AceHints};
-use crate::trace::{AuxColumnBuilder, utils::Challenges};
+use crate::trace::AuxColumnBuilder;
 
 mod bus;
 pub use bus::{

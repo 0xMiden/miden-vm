@@ -204,13 +204,7 @@ fn encode_wire<AB>(
 where
     AB: LiftedAirBuilder<F = Felt>,
 {
-    challenges.encode_dense([
-        clk.clone(),
-        ctx.clone(),
-        wire.id.clone(),
-        wire.v0.clone(),
-        wire.v1.clone(),
-    ])
+    challenges.encode([clk.clone(), ctx.clone(), wire.id.clone(), wire.v0.clone(), wire.v1.clone()])
 }
 
 /// Load a column from the ACE section of chiplets.

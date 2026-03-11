@@ -1,12 +1,9 @@
 use core::fmt::{Display, Formatter, Result as FmtResult};
 
-use miden_air::trace::{MainTrace, RowIndex, chiplets::ace::ACE_INIT_LABEL};
+use miden_air::trace::{Challenges, MainTrace, RowIndex, chiplets::ace::ACE_INIT_LABEL};
 use miden_core::{Felt, ONE, field::ExtensionField};
 
-use crate::{
-    debug::{BusDebugger, BusMessage},
-    trace::utils::Challenges,
-};
+use crate::debug::{BusDebugger, BusMessage};
 
 // REQUESTS
 // ==============================================================================================

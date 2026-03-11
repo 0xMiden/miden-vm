@@ -1,10 +1,9 @@
 use alloc::vec::Vec;
 
-use miden_air::trace::MainTrace;
+use miden_air::trace::{Challenges, MainTrace};
 use miden_core::{Felt, field::ExtensionField};
 
 use super::super::ace::{AceHints, NUM_ACE_LOGUP_FRACTIONS_EVAL, NUM_ACE_LOGUP_FRACTIONS_READ};
-use crate::trace::utils::Challenges;
 
 /// Describes how to construct the execution trace of the ACE chiplet wiring bus column.
 pub struct WiringBusBuilder<'a> {
