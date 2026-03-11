@@ -175,10 +175,11 @@ impl TryFrom<Span<&crate::ast::DependencySpec>> for DependencyVersionScheme {
     }
 }
 
-#[cfg(all(feature = "std", feature = "serde"))]
+#[cfg(feature = "serde")]
 impl DependencyVersionScheme {
     /// Parse a dependency spec into [DependencyVersionScheme], taking into account workspace
     /// context.
+    #[cfg(feature = "std")]
     pub fn try_from_in_workspace(
         spec: Span<&crate::ast::DependencySpec>,
         workspace: &crate::ast::WorkspaceFile,
@@ -199,6 +200,30 @@ impl DependencyVersionScheme {
                     && let Some(workspace_root) = workspace_path.parent()
                     && let Ok(resolved_uri) = absolutize_path(Path::new(uri.path()), workspace_root)
                     && resolved_uri.strip_prefix(workspace_root).is_ok()
+                {
+                    Ok(Self::Workspace { member: uri.clone() })
+                } else {
+                    Ok(Self::Path { path: uri, version })
+                }
+            },
+            scheme => Ok(scheme),
+        }
+    }
+
+    #[cfg(not(feature = "std"))]
+    pub fn try_from_in_workspace(
+        spec: Span<&crate::ast::DependencySpec>,
+        workspace: &crate::ast::WorkspaceFile,
+    ) -> Result<Self, InvalidDependencySpecError> {
+        match Self::try_from(spec)? {
+            Self::Path { path: uri, version } => {
+                let workspace_path =
+                    workspace.source_file.as_ref().map(|file| file.content().uri().path());
+                if uri.scheme().is_none_or(|scheme| scheme == "file") &&
+                    let Some(workspace_root) = workspace_path.and_then(|p| p.strip_suffix("miden-project.toml")) &&
+                    uri.path().strip_prefix(workspace_root).is_some() &&
+                    // Make sure the uri is relative to workspace root
+                    (!workspace_root.is_empty() || !uri.path().starts_with('/') || !uri.path().starts_with(".."))
                 {
                     Ok(Self::Workspace { member: uri.clone() })
                 } else {
