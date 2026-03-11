@@ -3,7 +3,7 @@ use core::borrow::Borrow;
 
 use miden_assembly_syntax::debuginfo::Spanned;
 
-use crate::{ast::ProjectFileError, *};
+use crate::*;
 
 /// Represents configuration options for a specific build profile, e.g. `release`
 #[derive(Debug, Clone)]
@@ -60,11 +60,14 @@ impl Profile {
         }
     }
 
+    #[cfg(feature = "serde")]
     pub fn from_ast(
         ast: &ast::Profile,
         source: Arc<SourceFile>,
         inheritable: &[Profile],
     ) -> Result<Self, Report> {
+        use crate::ast::ProjectFileError;
+
         let ast::Profile {
             inherits,
             name,
