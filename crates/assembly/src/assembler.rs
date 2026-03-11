@@ -510,7 +510,12 @@ impl Assembler {
                         if !symbol.visibility().is_public() {
                             continue;
                         }
-                        module_path.join(symbol.name()).into()
+                        module_path
+                            .join(symbol.name())
+                            .canonicalize()
+                            .into_diagnostic()?
+                            .into_boxed_path()
+                            .into()
                     };
                     let export = self.export_symbol(
                         gid,

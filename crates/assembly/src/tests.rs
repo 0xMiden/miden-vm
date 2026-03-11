@@ -5438,7 +5438,7 @@ end
     );
 
     let attacker_mod =
-        parse_library_module(source_manager.clone(), "::foo::bar", "pub proc add add.2 end");
+        parse_library_module(source_manager.clone(), r#"::foo::"bar""#, "pub proc add add.2 end");
 
     let legit_lib = Assembler::new(source_manager.clone())
         .assemble_library([legit_mod])
