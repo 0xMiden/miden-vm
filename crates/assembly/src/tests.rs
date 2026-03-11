@@ -5457,6 +5457,38 @@ end
 }
 
 #[test]
+fn regression_symbol_resolution_in_library_canonical_export_collision_is_rejected() {
+    use crate::{Parse, ParseOptions};
+
+    fn parse_library_module(
+        source_manager: Arc<dyn crate::SourceManager>,
+        path_str: &str,
+        source: &str,
+    ) -> alloc::boxed::Box<Module> {
+        let path = Path::validate(path_str).expect("path must validate");
+        let options = ParseOptions {
+            kind: ModuleKind::Library,
+            warnings_as_errors: false,
+            path: Some(Arc::<Path>::from(path)),
+        };
+        <&str as Parse>::parse_with_options(source, source_manager, options)
+            .expect("module must parse and analyse")
+    }
+
+    let context = TestContext::default();
+    let source_manager = context.source_manager();
+    let legit_mod =
+        parse_library_module(source_manager.clone(), "::foo::bar", "pub proc add add.1 end");
+    let attacker_mod =
+        parse_library_module(source_manager.clone(), r#"::foo::"bar""#, "pub proc add add.2 end");
+
+    let err = Assembler::new(source_manager)
+        .assemble_library([legit_mod, attacker_mod])
+        .expect_err("expected duplicate canonical export paths to be rejected during assembly");
+    assert_diagnostic!(err, "duplicate definition found for export path '::foo::bar::add'");
+}
+
+#[test]
 fn regression_symbol_resolution_export_leaf_name_collision_should_be_rejected() {
     let base = Assembler::default()
         .assemble_library([r#"
