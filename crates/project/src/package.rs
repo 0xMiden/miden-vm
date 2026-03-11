@@ -176,14 +176,21 @@ impl Package {
         let lib = package_ast.extract_library_target()?;
         let bins = package_ast.extract_executable_targets();
 
+        let mut lints = workspace.map(|ws| ws.workspace.config.lints.clone()).unwrap_or_default();
+        lints.extend(package_ast.config.lints.clone());
+
+        let mut metadata =
+            workspace.map(|ws| ws.workspace.package.metadata.clone()).unwrap_or_default();
+        metadata.extend(package_ast.package.detail.metadata.clone());
+
         Ok(Box::new(Self {
             manifest_path,
             name: package_ast.package.name.clone(),
             version,
             description,
             dependencies,
-            lints: workspace.map(|ws| ws.workspace.config.lints.clone()).unwrap_or_default(),
-            metadata: workspace.map(|ws| ws.workspace.package.metadata.clone()).unwrap_or_default(),
+            lints,
+            metadata,
             profiles,
             lib,
             bins,
