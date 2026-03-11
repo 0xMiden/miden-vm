@@ -1,4 +1,8 @@
-use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+    vec::Vec,
+};
 
 use miden_debug_types::{SourceManager, Span, Spanned};
 
@@ -117,6 +121,7 @@ impl LocalSymbol {
 pub(super) struct LocalSymbolTable {
     source_manager: Arc<dyn SourceManager>,
     symbols: BTreeMap<Arc<str>, ItemIndex>,
+    duplicate_symbols: BTreeSet<Arc<str>>,
     items: Vec<LocalSymbol>,
 }
 
@@ -135,6 +140,7 @@ impl LocalSymbolTable {
         S: SymbolTable,
     {
         let mut symbols = BTreeMap::default();
+        let mut duplicate_symbols = BTreeSet::default();
         let mut items = Vec::with_capacity(16);
 
         for (i, symbol) in iter.symbols(source_manager.clone()).enumerate() {
@@ -149,11 +155,18 @@ impl LocalSymbolTable {
                 LocalSymbol::Import { name, .. } => name.clone().into_inner(),
             };
 
-            symbols.insert(name, id);
+            if symbols.insert(name.clone(), id).is_some() {
+                duplicate_symbols.insert(name);
+            }
             items.push(symbol);
         }
 
-        Self { source_manager, symbols, items }
+        Self {
+            source_manager,
+            symbols,
+            duplicate_symbols,
+            items,
+        }
     }
 
     #[inline(always)]
@@ -180,6 +193,13 @@ impl LocalSymbolTable {
     pub fn get(&self, name: Span<&str>) -> Result<SymbolResolution, SymbolResolutionError> {
         log::debug!(target: "symbol-table", "attempting to resolve '{name}'");
         let (span, name) = name.into_parts();
+        if self.duplicate_symbols.contains(name) {
+            return Err(SymbolResolutionError::duplicate_symbol(
+                span,
+                Arc::from(name),
+                &self.source_manager,
+            ));
+        }
         let Some(item) = self.symbols.get(name).copied() else {
             return Err(SymbolResolutionError::undefined(span, &self.source_manager));
         };

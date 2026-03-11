@@ -301,8 +301,19 @@ impl<'a> SymbolResolver<'a> {
 
                     if path.starts_with_exactly(module_path.as_ref()) {
                         if let Some((_, prev)) = longest_prefix.as_ref() {
-                            if prev.components().count() < module_path.components().count() {
+                            let prev_len = prev.components().count();
+                            let module_len = module_path.components().count();
+                            if prev_len < module_len {
                                 longest_prefix = Some((module.id(), module_path));
+                            } else if prev_len == module_len && prev != &module_path {
+                                return Err(LinkerError::AmbiguousModulePath {
+                                    span,
+                                    source_file: self.source_manager().get(span.source_id()).ok(),
+                                    path: path.to_path_buf().into_boxed_path().into(),
+                                    matches:
+                                        alloc::vec![prev.to_string(), module_path.to_string(),]
+                                            .into_boxed_slice(),
+                                });
                             }
                         } else {
                             longest_prefix = Some((module.id(), module_path));

@@ -18,6 +18,15 @@ pub enum SymbolResolutionError {
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
     },
+    #[error("ambiguous symbol reference: duplicate definition for '{symbol}'")]
+    #[diagnostic(help("this symbol name is defined more than once in the same scope"))]
+    DuplicateSymbol {
+        #[label("ambiguous symbol reference")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        symbol: Arc<str>,
+    },
     #[error("invalid symbol reference")]
     #[diagnostic(help(
         "references to a subpath of an imported symbol require the imported item to be a module"
@@ -84,6 +93,18 @@ impl SymbolResolutionError {
         Self::UndefinedSymbol {
             span,
             source_file: source_manager.get(span.source_id()).ok(),
+        }
+    }
+
+    pub fn duplicate_symbol(
+        span: SourceSpan,
+        symbol: Arc<str>,
+        source_manager: &dyn SourceManager,
+    ) -> Self {
+        Self::DuplicateSymbol {
+            span,
+            source_file: source_manager.get(span.source_id()).ok(),
+            symbol,
         }
     }
 
