@@ -116,8 +116,8 @@ impl Profile {
 
         *debug = other.debug;
         *trim_paths = other.trim_paths;
-        for (k, v) in metadata.iter_mut() {
-            if let Some(v2) = other.metadata.get(k) {
+        for (k, v2) in other.metadata.iter() {
+            if let Some(v) = metadata.get_mut(k) {
                 match &mut **v {
                     Value::Table(table) => {
                         if let Value::Table(table2) = v2.inner() {
@@ -130,6 +130,8 @@ impl Profile {
                         *v = v2.clone();
                     },
                 }
+            } else {
+                metadata.insert(k.clone(), v2.clone());
             }
         }
     }
