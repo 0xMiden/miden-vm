@@ -225,7 +225,7 @@ impl DependencyVersionScheme {
                     let Some(workspace_root) = workspace_path.and_then(|p| p.strip_suffix("miden-project.toml")) &&
                     uri.path().strip_prefix(workspace_root).is_some() &&
                     // Make sure the uri is relative to workspace root
-                    (!workspace_root.is_empty() || !uri.path().starts_with('/') || !uri.path().starts_with(".."))
+                    (!workspace_root.is_empty() && !(uri.path().starts_with('/') || uri.path().starts_with("..")))
                 {
                     Ok(Self::Workspace { member: uri.clone() })
                 } else {
