@@ -272,8 +272,8 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
             .try_into()
             .map_err(|_| -> ReductionError { "invalid transcript state slice".into() })?;
 
-        // Precompute challenge powers once for all bus message encodings below.
-        let challenges = trace::Challenges::<EF>::from_raw(challenges);
+        // Precompute challenge powers once for all bus message encodings.
+        let challenges = trace::Challenges::<EF>::new(challenges[0], challenges[1]);
 
         // Compute expected bus messages from public inputs and derived challenges.
         let ph_msg = program_hash_message(&challenges, &program_hash);

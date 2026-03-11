@@ -1,7 +1,7 @@
 use core::fmt::{Display, Formatter, Result as FmtResult};
 
 use miden_air::trace::{
-    MainTrace, RowIndex, bus_message,
+    Challenges, MainTrace, RowIndex, bus_message,
     chiplets::{
         hasher,
         hasher::{
@@ -21,7 +21,6 @@ use super::get_op_label;
 use crate::{
     Word,
     debug::{BusDebugger, BusMessage},
-    trace::utils::Challenges,
 };
 
 // HASHER MESSAGE ENCODING LAYOUT

@@ -66,8 +66,7 @@ impl<'a, AB: LiftedAirBuilder> BlockStackEncoders<'a, AB> {
 
     /// Encodes `[block_id, parent_id, is_loop]`.
     fn simple(&self, block_id: &AB::Expr, parent_id: &AB::Expr, is_loop: &AB::Expr) -> AB::ExprEF {
-        self.challenges
-            .encode_dense([block_id.clone(), parent_id.clone(), is_loop.clone()])
+        self.challenges.encode([block_id.clone(), parent_id.clone(), is_loop.clone()])
     }
 
     /// Encodes `[block_id, parent_id, is_loop, ctx, depth, overflow, fn_hash[0..4]]`.
@@ -81,7 +80,7 @@ impl<'a, AB: LiftedAirBuilder> BlockStackEncoders<'a, AB> {
         overflow: &AB::Expr,
         fh: &[AB::Expr; 4],
     ) -> AB::ExprEF {
-        self.challenges.encode_dense([
+        self.challenges.encode([
             block_id.clone(),
             parent_id.clone(),
             is_loop.clone(),
@@ -114,7 +113,7 @@ impl<'a, AB: LiftedAirBuilder> BlockHashEncoder<'a, AB> {
         first_child: &AB::Expr,
         loop_body: &AB::Expr,
     ) -> AB::ExprEF {
-        self.challenges.encode_dense([
+        self.challenges.encode([
             parent.clone(),
             hash[0].clone(),
             hash[1].clone(),
@@ -138,8 +137,7 @@ impl<'a, AB: LiftedAirBuilder> OpGroupEncoder<'a, AB> {
 
     /// Encodes `[block_id, group_count, op_value]`.
     fn encode(&self, block_id: &AB::Expr, group_count: &AB::Expr, value: &AB::Expr) -> AB::ExprEF {
-        self.challenges
-            .encode_dense([block_id.clone(), group_count.clone(), value.clone()])
+        self.challenges.encode([block_id.clone(), group_count.clone(), value.clone()])
     }
 }
 

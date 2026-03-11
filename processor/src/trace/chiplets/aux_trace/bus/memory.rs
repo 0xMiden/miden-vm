@@ -1,7 +1,7 @@
 use core::fmt::{Display, Formatter, Result as FmtResult};
 
 use miden_air::trace::{
-    MainTrace, RowIndex,
+    Challenges, MainTrace, RowIndex,
     chiplets::{
         ace::{ACE_INSTRUCTION_ID1_OFFSET, ACE_INSTRUCTION_ID2_OFFSET},
         memory::{
@@ -14,10 +14,7 @@ use miden_core::{
     FMP_ADDR, FMP_INIT_VALUE, Felt, ONE, ZERO, field::ExtensionField, operations::opcodes,
 };
 
-use crate::{
-    debug::{BusDebugger, BusMessage},
-    trace::utils::Challenges,
-};
+use crate::debug::{BusDebugger, BusMessage};
 
 // CONSTANTS
 // ================================================================================================

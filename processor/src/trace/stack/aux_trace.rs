@@ -1,13 +1,10 @@
 use alloc::vec::Vec;
 
-use miden_air::trace::{MainTrace, RowIndex};
+use miden_air::trace::{Challenges, MainTrace, RowIndex};
 use miden_core::{field::ExtensionField, operations::opcodes};
 
 use super::Felt;
-use crate::{
-    debug::BusDebugger,
-    trace::{AuxColumnBuilder, utils::Challenges},
-};
+use crate::{debug::BusDebugger, trace::AuxColumnBuilder};
 
 // AUXILIARY TRACE BUILDER
 // ================================================================================================

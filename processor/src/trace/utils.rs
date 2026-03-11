@@ -1,7 +1,7 @@
 use alloc::{string::ToString, vec::Vec};
 use core::{mem::MaybeUninit, slice};
 
-use miden_air::trace::{MAX_MESSAGE_WIDTH, MIN_TRACE_LEN, MainTrace};
+use miden_air::trace::{Challenges, MIN_TRACE_LEN, MainTrace};
 
 use super::chiplets::Chiplets;
 use crate::{
@@ -303,70 +303,6 @@ pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
         }
 
         result_aux_column
-    }
-}
-
-// AUX CHALLENGES
-// ================================================================================================
-
-/// Encodes multiset/LogUp contributions as **alpha + <beta, message>**
-///
-/// Structure:
-/// - `alpha`: randomness base (alpha)
-/// - `beta_powers`: powers of beta [beta^0, beta^1, beta^2, ..., beta^(MAX_MESSAGE_WIDTH-2)]
-///
-/// The challenges are derived from permutation randomness:
-/// - `alpha = challenges[0]`
-/// - `beta  = challenges[1]`
-///
-/// This structure is shared with the AIR's `Challenges<AB, N>` for constraint evaluation.
-pub(crate) struct Challenges<E: ExtensionField<Felt>> {
-    pub(crate) alpha: E,
-    pub(crate) beta_powers: [E; MAX_MESSAGE_WIDTH - 1],
-}
-
-impl<E: ExtensionField<Felt>> Challenges<E> {
-    pub fn new(challenges: &[E]) -> Self {
-        assert!(challenges.len() >= 2, "need at least alpha and beta");
-        let alpha = challenges[0];
-        let beta = challenges[1];
-
-        let mut beta_powers = core::array::from_fn(|_| E::ONE);
-        // beta_powers[0] = E::ONE  (beta^0) — already set by from_fn
-        for i in 1..beta_powers.len() {
-            beta_powers[i] = beta_powers[i - 1] * beta;
-        }
-        Self { alpha, beta_powers }
-    }
-
-    /// Encodes as **alpha + <beta, message>** with K consecutive elements.
-    #[inline(always)]
-    pub fn encode<const K: usize>(&self, elems: [Felt; K]) -> E {
-        const { assert!(K < MAX_MESSAGE_WIDTH, "Message length exceeds beta_powers capacity") };
-        let mut acc = self.alpha;
-        for (i, &elem) in elems.iter().enumerate() {
-            acc += self.beta_powers[i] * elem;
-        }
-        acc
-    }
-
-    /// Encodes as **alpha + <beta, message>** using a layout array and separate values.
-    ///
-    /// `layout[i]` gives the beta-power position for `values[i]`.
-    #[inline(always)]
-    pub fn encode_sparse<const K: usize>(&self, layout: [usize; K], values: [Felt; K]) -> E {
-        let mut acc = self.alpha;
-        for i in 0..K {
-            let idx = layout[i];
-            debug_assert!(
-                idx < self.beta_powers.len(),
-                "encode_sparse index {} exceeds beta_powers length ({})",
-                idx,
-                self.beta_powers.len()
-            );
-            acc += self.beta_powers[idx] * values[i];
-        }
-        acc
     }
 }
 

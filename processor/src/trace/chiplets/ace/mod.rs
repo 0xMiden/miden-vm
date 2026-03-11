@@ -1,9 +1,9 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use miden_air::trace::{MainTrace, RowIndex, chiplets::ace::ACE_CHIPLET_NUM_COLS};
+use miden_air::trace::{Challenges, MainTrace, RowIndex, chiplets::ace::ACE_CHIPLET_NUM_COLS};
 use miden_core::{Felt, ZERO, field::ExtensionField};
 
-use crate::trace::{TraceFragment, utils::Challenges};
+use crate::trace::TraceFragment;
 
 mod trace;
 pub use trace::{CircuitEvaluation, NUM_ACE_LOGUP_FRACTIONS_EVAL, NUM_ACE_LOGUP_FRACTIONS_READ};

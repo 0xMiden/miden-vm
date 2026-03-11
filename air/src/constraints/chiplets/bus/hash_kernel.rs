@@ -186,7 +186,7 @@ pub fn enforce_hash_kernel_constraint<AB>(
         let v1_1: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + V_1_1_IDX].clone().into();
         let label: AB::Expr = AB::Expr::from(Felt::from_u8(MEMORY_READ_WORD_LABEL));
 
-        challenges.encode_dense([
+        challenges.encode([
             label,
             ace_ctx.clone(),
             ace_ptr.clone(),
@@ -209,7 +209,7 @@ pub fn enforce_hash_kernel_constraint<AB>(
         let element = id_1 + id_2 * offset1 + (eval_op + one.clone()) * offset2;
         let label: AB::Expr = AB::Expr::from(Felt::from_u8(MEMORY_READ_ELEMENT_LABEL));
 
-        challenges.encode_dense([label, ace_ctx, ace_ptr, ace_clk, element])
+        challenges.encode([label, ace_ctx, ace_ptr, ace_clk, element])
     };
 
     // =========================================================================
@@ -232,7 +232,7 @@ pub fn enforce_hash_kernel_constraint<AB>(
     let log_label: AB::Expr = AB::Expr::from(Felt::from_u8(LOG_PRECOMPILE_LABEL));
 
     // CAP_PREV value (request - removed).
-    let v_cap_prev = challenges.encode_dense([
+    let v_cap_prev = challenges.encode([
         log_label.clone(),
         cap_prev[0].clone(),
         cap_prev[1].clone(),
@@ -241,7 +241,7 @@ pub fn enforce_hash_kernel_constraint<AB>(
     ]);
 
     // CAP_NEXT value (response - inserted).
-    let v_cap_next = challenges.encode_dense([
+    let v_cap_next = challenges.encode([
         log_label,
         cap_next[0].clone(),
         cap_next[1].clone(),

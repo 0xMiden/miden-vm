@@ -1,15 +1,12 @@
 use core::fmt::{Display, Formatter, Result as FmtResult};
 
 use miden_air::trace::{
-    MainTrace, RowIndex, chiplets::bitwise::OP_CYCLE_LEN as BITWISE_OP_CYCLE_LEN,
+    Challenges, MainTrace, RowIndex, chiplets::bitwise::OP_CYCLE_LEN as BITWISE_OP_CYCLE_LEN,
 };
 use miden_core::{Felt, ONE, ZERO, field::ExtensionField};
 
 use super::get_op_label;
-use crate::{
-    debug::{BusDebugger, BusMessage},
-    trace::utils::Challenges,
-};
+use crate::debug::{BusDebugger, BusMessage};
 
 // REQUESTS
 // ==============================================================================================

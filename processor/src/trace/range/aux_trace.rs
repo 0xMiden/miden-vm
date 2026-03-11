@@ -2,14 +2,13 @@ use alloc::{collections::BTreeMap, vec::Vec};
 use core::mem::MaybeUninit;
 
 use miden_air::trace::{
-    MainTrace, RowIndex,
+    Challenges, MainTrace, RowIndex,
     range::{M_COL_IDX, V_COL_IDX},
 };
 
 use crate::{
     Felt, ZERO,
     field::ExtensionField,
-    trace::utils::Challenges,
     utils::{assume_init_vec, uninit_vector},
 };
 

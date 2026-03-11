@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::{
-    AUX_TRACE_RAND_CHALLENGES, MainTrace,
+    AUX_TRACE_RAND_CHALLENGES, Challenges, MainTrace,
     chiplets::hasher::{HASH_CYCLE_LEN, P1_COL_IDX},
 };
 use miden_core::{
@@ -13,7 +13,7 @@ use miden_core::{
 use rstest::rstest;
 
 use super::{Felt, build_trace_from_ops_with_inputs, rand_array};
-use crate::{AdviceInputs, StackInputs, trace::utils::Challenges};
+use crate::{AdviceInputs, StackInputs};
 
 // SIBLING TABLE TESTS
 // ================================================================================================
@@ -38,8 +38,8 @@ fn hasher_p1_mp_verify(#[case] index: u64) {
     // build execution trace and extract the sibling table column from it
     let ops = vec![Operation::MpVerify(ZERO)];
     let trace = build_trace_from_ops_with_inputs(ops, stack_inputs, advice_inputs);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
+    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
     // executing MPVERIFY does not affect the sibling table - so, all values in the column must be
@@ -71,11 +71,11 @@ fn hasher_p1_mr_update(#[case] index: u64) {
     // build execution trace and extract the sibling table column from it
     let ops = vec![Operation::MrUpdate];
     let trace = build_trace_from_ops_with_inputs(ops, stack_inputs, advice_inputs);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
+    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
-    let challenges = Challenges::<Felt>::new(&alphas);
+    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
     let row_values = [
         SiblingTableRow::new(Felt::new(index), path[0]).to_value(&trace.main_trace, &challenges),
         SiblingTableRow::new(Felt::new(index >> 1), path[1])

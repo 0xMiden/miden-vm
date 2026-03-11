@@ -1,8 +1,8 @@
-use miden_air::trace::RowIndex;
+use miden_air::trace::{Challenges, RowIndex};
 use miden_core::{field::ExtensionField, operations::opcodes};
 
 use super::{AuxColumnBuilder, Felt, MainTrace, ONE, ZERO};
-use crate::{debug::BusDebugger, trace::utils::Challenges};
+use crate::debug::BusDebugger;
 
 // BLOCK STACK TABLE COLUMN BUILDER
 // ================================================================================================

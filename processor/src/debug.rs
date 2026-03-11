@@ -1,9 +1,10 @@
 use alloc::{boxed::Box, string::String, vec::Vec};
 use core::fmt;
 
+use miden_air::trace::Challenges;
 use miden_core::field::ExtensionField;
 
-use crate::{Felt, trace::utils::Challenges};
+use crate::Felt;
 
 /// A message that can be sent on a bus.
 pub(crate) trait BusMessage<E: ExtensionField<Felt>>: fmt::Display {

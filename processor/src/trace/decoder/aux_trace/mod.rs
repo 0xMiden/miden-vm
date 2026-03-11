@@ -1,12 +1,9 @@
 use alloc::vec::Vec;
 
-use miden_air::trace::MainTrace;
+use miden_air::trace::{Challenges, MainTrace};
 use miden_core::field::ExtensionField;
 
-use crate::{
-    Felt, ONE, ZERO,
-    trace::{AuxColumnBuilder, utils::Challenges},
-};
+use crate::{Felt, ONE, ZERO, trace::AuxColumnBuilder};
 
 mod block_hash_table;
 use block_hash_table::BlockHashTableColumnBuilder;
