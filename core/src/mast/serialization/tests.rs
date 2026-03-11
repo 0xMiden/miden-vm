@@ -7,10 +7,10 @@ use crate::{
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
         JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastForestError, MastNodeExt,
-        OP_BATCH_SIZE, OpBatch, SplitNodeBuilder, UntrustedMastForest,
+        MastNodeId, OP_BATCH_SIZE, OpBatch, SplitNodeBuilder, UntrustedMastForest,
     },
     operations::{DebugOptions, Decorator, Operation},
-    serde::SliceReader,
+    serde::{ByteReader, DeserializationError, SliceReader},
     utils::Idx,
 };
 
@@ -1528,6 +1528,9 @@ fn test_untrusted_forest_detects_hash_mismatch() {
     assert_matches!(result, Err(MastForestError::HashMismatch { .. }));
 }
 
+// UNTRUSTED VALIDATION TEST HELPERS
+// --------------------------------------------------------------------------------------------
+
 /// Build a packed operation group from op codes.
 fn build_group(ops: &[Operation]) -> Felt {
     let mut group = 0u64;
@@ -1559,6 +1562,166 @@ fn make_batch(num_groups: usize, op: Operation) -> OpBatch {
     }
 
     OpBatch::new_from_parts(ops, indptr, padding, groups, num_groups)
+}
+
+fn build_malicious_single_block_forest_bytes(push_imm: Felt) -> Vec<u8> {
+    // Build a minimal forest containing a single basic-block procedure root.
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(
+        vec![Operation::Push(push_imm), Operation::Noop, Operation::Add],
+        Vec::new(),
+    )
+    .add_to_forest(&mut forest)
+    .unwrap();
+    forest.make_root(block_id);
+
+    // Serialize using the standard format.
+    let mut bytes = forest.to_bytes();
+
+    // Patch the batch indptr metadata inside basic_block_data to a malformed layout which causes
+    // the decoder to overwrite the `Push` immediate slot with a later opcode group.
+    //
+    // Desired indptr after unpacking: [0, 2, 3, 3, 3, 3, 3, 3, 3]
+    // Deltas: [2, 1, 0, 0, 0, 0, 0, 0] -> packed nibbles: 0x12, 0x00, 0x00, 0x00.
+    let malicious_packed_indptr = [0x12, 0x00, 0x00, 0x00];
+
+    let (indptr_offset, digest_offset) = locate_single_block_indptr_and_digest_offsets(&bytes);
+
+    // Sanity-check that the original indptr matches the honest encoding for this block.
+    // Honest indptr is [0, 3, 3, 3, 3, 3, 3, 3, 3] -> deltas [3, 0, 0, 0, 0, 0, 0, 0] -> 0x03.
+    assert_eq!(
+        &bytes[indptr_offset..indptr_offset + 4],
+        &[0x03, 0x00, 0x00, 0x00],
+        "unexpected original packed indptr (offset computation likely wrong)"
+    );
+
+    bytes[indptr_offset..indptr_offset + 4].copy_from_slice(&malicious_packed_indptr);
+
+    // Recompute the correct digest for the now-malformed decoding and patch it into node info, so
+    // that `UntrustedMastForest::validate()` will accept it if the issue exists.
+    if let Some(digest) = compute_single_block_digest_from_decoded_groups(&bytes) {
+        bytes[digest_offset..digest_offset + 32].copy_from_slice(&digest.to_bytes());
+    }
+
+    bytes
+}
+
+struct OffsetReader<'a> {
+    source: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> OffsetReader<'a> {
+    fn new(source: &'a [u8]) -> Self {
+        Self { source, pos: 0 }
+    }
+
+    fn position(&self) -> usize {
+        self.pos
+    }
+}
+
+impl ByteReader for OffsetReader<'_> {
+    fn read_u8(&mut self) -> Result<u8, DeserializationError> {
+        self.check_eor(1)?;
+        let result = self.source[self.pos];
+        self.pos += 1;
+        Ok(result)
+    }
+
+    fn peek_u8(&self) -> Result<u8, DeserializationError> {
+        self.check_eor(1)?;
+        Ok(self.source[self.pos])
+    }
+
+    fn read_slice(&mut self, len: usize) -> Result<&[u8], DeserializationError> {
+        self.check_eor(len)?;
+        let result = &self.source[self.pos..self.pos + len];
+        self.pos += len;
+        Ok(result)
+    }
+
+    fn read_array<const N: usize>(&mut self) -> Result<[u8; N], DeserializationError> {
+        self.check_eor(N)?;
+        let mut result = [0_u8; N];
+        result.copy_from_slice(&self.source[self.pos..self.pos + N]);
+        self.pos += N;
+        Ok(result)
+    }
+
+    fn check_eor(&self, num_bytes: usize) -> Result<(), DeserializationError> {
+        if self.pos + num_bytes > self.source.len() {
+            return Err(DeserializationError::UnexpectedEOF);
+        }
+        Ok(())
+    }
+
+    fn has_more_bytes(&self) -> bool {
+        self.pos < self.source.len()
+    }
+}
+
+fn locate_single_block_indptr_and_digest_offsets(bytes: &[u8]) -> (usize, usize) {
+    // Parse the MastForest wire format, but track offsets so we can patch in-place.
+    // We assume the forest contains exactly 1 node which is a Block node.
+    let mut cursor = OffsetReader::new(bytes);
+
+    // header: MAGIC (4) + FLAGS (1) + VERSION (3)
+    let _header: [u8; 8] = cursor.read_array().unwrap();
+
+    let node_count: usize = cursor.read().unwrap();
+    assert_eq!(node_count, 1);
+
+    let _decorator_count: usize = cursor.read().unwrap();
+    let _roots: Vec<u32> = Deserializable::read_from(&mut cursor).unwrap();
+
+    // basic block data section: Vec<u8>
+    let bb_data_len: usize = cursor.read().unwrap();
+    let bb_payload_start = cursor.position();
+    let bb_payload_end = bb_payload_start + bb_data_len;
+
+    // node infos start immediately after basic block data payload
+    let node_infos_start = bb_payload_end;
+
+    // node info: MastNodeType (8 bytes) + digest Word (32 bytes)
+    let node_type_u64 = u64::from_le_bytes(
+        bytes[node_infos_start..node_infos_start + 8]
+            .try_into()
+            .expect("node type bytes"),
+    );
+    let discriminant = (node_type_u64 >> 60) as u8;
+    assert_eq!(discriminant, 3, "expected a Block node");
+
+    let payload = node_type_u64 & 0x0f_ff_ff_ff_ff_ff_ff_ff;
+    assert!(payload <= u32::MAX as u64, "Block ops_offset payload must fit in u32");
+    let ops_offset = payload as usize;
+
+    let digest_offset = node_infos_start + 8;
+
+    // Locate the start of the packed indptr for the first (and only) batch.
+    let block_start = bb_payload_start + ops_offset;
+    assert!(block_start < bb_payload_end);
+
+    let mut block_cursor = OffsetReader::new(&bytes[block_start..bb_payload_end]);
+    let _ops: Vec<Operation> = Deserializable::read_from(&mut block_cursor).unwrap();
+    let num_batches: u32 = block_cursor.read().unwrap();
+    assert_eq!(num_batches, 1);
+
+    let indptr_offset = block_start + block_cursor.position();
+
+    (indptr_offset, digest_offset)
+}
+
+fn compute_single_block_digest_from_decoded_groups(bytes: &[u8]) -> Option<Word> {
+    use crate::chiplets::hasher;
+
+    let forest = MastForest::read_from_bytes(bytes).ok()?;
+    let block = forest[MastNodeId::new_unchecked(0)].unwrap_basic_block().clone();
+
+    let op_groups: Vec<Felt> =
+        block.op_batches().iter().flat_map(|batch| *batch.groups()).collect();
+
+    Some(hasher::hash_elements(&op_groups))
 }
 
 /// Test that UntrustedMastForest::validate rejects a non-full batch before the last batch.
@@ -1603,6 +1766,91 @@ fn test_untrusted_forest_accepts_full_prefix_batch() {
     let result = untrusted.validate();
 
     assert!(result.is_ok(), "full prefix batches should validate");
+}
+
+#[test]
+fn test_untrusted_forest_rejects_basic_block_indptr_that_breaks_push_immediate_commitment() {
+    // Two distinct immediates. Using large values reduces the chance of accidental equality with a
+    // packed opcode group value.
+    let imm_a = Felt::new(0xdead_beef_dead_beef);
+    let imm_b = Felt::new(0xfeed_face_feed_face);
+
+    let bytes_a = build_malicious_single_block_forest_bytes(imm_a);
+    let bytes_b = build_malicious_single_block_forest_bytes(imm_b);
+
+    let validated_a = match UntrustedMastForest::read_from_bytes(&bytes_a) {
+        Ok(untrusted) => untrusted.validate(),
+        Err(DeserializationError::InvalidValue(msg)) => {
+            assert!(msg.contains("push immediate"));
+            return;
+        },
+        Err(err) => panic!("unexpected deserialization error: {err:?}"),
+    };
+    let validated_b = match UntrustedMastForest::read_from_bytes(&bytes_b) {
+        Ok(untrusted) => untrusted.validate(),
+        Err(DeserializationError::InvalidValue(msg)) => {
+            assert!(msg.contains("push immediate"));
+            return;
+        },
+        Err(err) => panic!("unexpected deserialization error: {err:?}"),
+    };
+
+    // A fix may choose to reject this encoding at validation time. Either (or both) being `Err`
+    // is an acceptable outcome: it prevents the commitment gap.
+    let (forest_a, forest_b) = match (validated_a, validated_b) {
+        (Ok(forest_a), Ok(forest_b)) => (forest_a, forest_b),
+        (validated_a, validated_b) => {
+            match validated_a {
+                Err(MastForestError::InvalidBatchPadding(_, msg)) => {
+                    assert!(msg.contains("push immediate"));
+                },
+                Err(err) => panic!("unexpected validation error: {err:?}"),
+                Ok(_) => {},
+            }
+            match validated_b {
+                Err(MastForestError::InvalidBatchPadding(_, msg)) => {
+                    assert!(msg.contains("push immediate"));
+                },
+                Err(err) => panic!("unexpected validation error: {err:?}"),
+                Ok(_) => {},
+            }
+            return;
+        },
+    };
+
+    // If both validate successfully, then their digests must bind to their executed semantics.
+    // Concretely: changing the `Push` immediate must change the committed digest.
+    let block_a = forest_a[MastNodeId::new_unchecked(0)].unwrap_basic_block().clone();
+    let block_b = forest_b[MastNodeId::new_unchecked(0)].unwrap_basic_block().clone();
+
+    let ops_a: Vec<Operation> = block_a.operations().copied().collect();
+    let ops_b: Vec<Operation> = block_b.operations().copied().collect();
+
+    assert!(
+        matches!(ops_a.as_slice(), [Operation::Push(v), ..] if *v == imm_a),
+        "unexpected ops in forest_a: {ops_a:?}"
+    );
+    assert!(
+        matches!(ops_b.as_slice(), [Operation::Push(v), ..] if *v == imm_b),
+        "unexpected ops in forest_b: {ops_b:?}"
+    );
+
+    // If this assert fails, it demonstrates the issue: a `Push` immediate can be changed
+    // without changing the basic-block digest and without failing untrusted validation.
+    assert_ne!(
+        block_a.digest(),
+        block_b.digest(),
+        "BUG: UntrustedMastForest::validate() accepted two basic blocks with different Push immediates \
+         but identical digests.\n\
+         digest={:?}\n\
+         ops_a={ops_a:?}\n\
+         ops_b={ops_b:?}\n\
+         groups_a={:?}\n\
+         groups_b={:?}\n",
+        block_a.digest(),
+        block_a.op_batches()[0].groups(),
+        block_b.op_batches()[0].groups(),
+    );
 }
 
 /// Test that UntrustedMastForest::validate succeeds for forests with all node types.
