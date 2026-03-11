@@ -128,6 +128,11 @@ pub enum InvalidDependencySpecError {
         #[label(primary)]
         span: SourceSpan,
     },
+    #[error("missing version: expected one of 'version', 'git', or 'digest' to be provided")]
+    MissingVersion {
+        #[label(primary)]
+        span: SourceSpan,
+    },
 }
 
 #[cfg(feature = "serde")]
@@ -140,7 +145,10 @@ impl TryFrom<Span<&crate::ast::DependencySpec>> for DependencyVersionScheme {
         }
 
         if ast.is_host_resolved() {
-            Ok(Self::Registry(ast.version().unwrap().clone()))
+            ast.version()
+                .cloned()
+                .map(Self::Registry)
+                .ok_or(InvalidDependencySpecError::MissingVersion { span: ast.span() })
         } else if ast.is_git() {
             let version = match ast.version() {
                 Some(VersionRequirement::Digest(digest)) => {
