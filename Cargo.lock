@@ -1231,12 +1231,10 @@ dependencies = [
 name = "miden-air"
 version = "0.22.0"
 dependencies = [
- "bincode",
  "miden-core",
  "miden-crypto",
  "miden-utils-indexing",
  "proptest",
- "serde",
  "thiserror",
  "tracing",
 ]
@@ -1508,11 +1506,14 @@ dependencies = [
 name = "miden-prover"
 version = "0.22.0"
 dependencies = [
+ "bincode",
  "miden-air",
  "miden-core",
  "miden-crypto",
  "miden-debug-types",
  "miden-processor",
+ "serde",
+ "thiserror",
  "tokio",
  "tracing",
 ]
@@ -1603,6 +1604,7 @@ dependencies = [
  "miden-air",
  "miden-core",
  "miden-crypto",
+ "serde",
  "thiserror",
  "tracing",
 ]

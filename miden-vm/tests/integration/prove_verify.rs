@@ -204,7 +204,7 @@ mod fast_parallel {
     use miden_processor::{
         ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs, trace::build_trace,
     };
-    use miden_prover::{ProcessorAir, config, execution_trace_to_row_major};
+    use miden_prover::{ProcessorAir, config, execution_trace_to_row_major, prove_stark};
     use miden_verifier::verify;
     use miden_vm::DefaultHost;
 
@@ -261,7 +261,7 @@ mod fast_parallel {
 
         // Generate proof using Blake3_256
         let blake3_config = config::create_blake3_256_config();
-        let proof_bytes = config::prove(
+        let proof_bytes = prove_stark(
             &blake3_config,
             &air,
             &trace_matrix,
@@ -272,14 +272,8 @@ mod fast_parallel {
         .expect("Proving failed");
 
         let precompile_requests = trace.precompile_requests().to_vec();
-        let log_trace_height = trace.trace_len_summary().padded_trace_len().ilog2();
 
-        let proof = ExecutionProof::new(
-            proof_bytes,
-            HashFunction::Blake3_256,
-            log_trace_height,
-            precompile_requests,
-        );
+        let proof = ExecutionProof::new(proof_bytes, HashFunction::Blake3_256, precompile_requests);
 
         // Verify the proof
         verify(program.into(), stack_inputs, fast_stack_outputs, proof)

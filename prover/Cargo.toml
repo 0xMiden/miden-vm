@@ -27,6 +27,9 @@ miden-processor.workspace = true
 miden-crypto.workspace = true
 
 # External dependencies
+bincode.workspace = true
+serde.workspace = true
+thiserror.workspace = true
 tracing.workspace = true
 
 # Platform-specific tokio dependencies
