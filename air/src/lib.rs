@@ -86,7 +86,8 @@ impl PublicInputs {
         self.pc_transcript_state
     }
 
-    /// Returns the fixed-length public values and the variable-length kernel procedure digests.
+    /// Returns the fixed-length public values and the variable-length kernel procedure digests
+    /// as a flat slice of `Felt`s.
     ///
     /// The fixed-length public values layout is:
     ///   [0..4]   program hash
@@ -94,23 +95,19 @@ impl PublicInputs {
     ///   [20..36] stack outputs
     ///   [36..40] precompile transcript state
     ///
-    /// The kernel procedure digests are returned separately as `Word`s, to be passed
-    /// as `var_len_public_inputs` to the verifier.
-    pub fn to_air_inputs(&self) -> (Vec<Felt>, Vec<Word>) {
+    /// The kernel procedure digests are returned as a single flat `Vec<Felt>` (concatenated
+    /// words), to be passed as a single variable-length public input slice to the verifier.
+    pub fn to_air_inputs(&self) -> (Vec<Felt>, Vec<Felt>) {
         let mut public_values = Vec::with_capacity(NUM_PUBLIC_VALUES);
         public_values.extend_from_slice(self.program_info.program_hash().as_elements());
         public_values.extend_from_slice(self.stack_inputs.as_ref());
         public_values.extend_from_slice(self.stack_outputs.as_ref());
         public_values.extend_from_slice(self.pc_transcript_state.as_ref());
 
-        let kernel_digests: Vec<Word> = self
-            .program_info
-            .kernel_procedures()
-            .iter()
-            .map(|d| [d[0], d[1], d[2], d[3]].into())
-            .collect();
+        let kernel_felts: Vec<Felt> =
+            Word::words_as_elements(self.program_info.kernel_procedures()).to_vec();
 
-        (public_values, kernel_digests)
+        (public_values, kernel_felts)
     }
 
     /// Converts public inputs into a vector of field elements (Felt) in the canonical order:
@@ -179,26 +176,8 @@ const PV_TRANSCRIPT_STATE: usize = NUM_PUBLIC_VALUES - WORD_SIZE;
 /// Aux columns are NOT initialized with boundary terms -- they start at identity. The verifier
 /// independently computes expected boundary messages from variable length public values and checks
 /// them against the final column values.
-pub struct ProcessorAir {
-    /// Number of kernel procedure digests (variable-length public inputs).
-    pub num_kernel_procedures: usize,
-    /// Periodic columns.
-    periodic_columns: Vec<Vec<Felt>>,
-}
-
-impl ProcessorAir {
-    pub fn new(num_kernel_procedures: usize) -> Self {
-        let mut periodic_columns = constraints::chiplets::hasher::periodic_columns();
-        periodic_columns.extend(constraints::chiplets::bitwise::periodic_columns());
-        Self { num_kernel_procedures, periodic_columns }
-    }
-}
-
-impl Default for ProcessorAir {
-    fn default() -> Self {
-        Self::new(0)
-    }
-}
+#[derive(Copy, Clone, Debug, Default)]
+pub struct ProcessorAir;
 
 // --- Upstream trait impls for ProcessorAir ---
 
@@ -216,7 +195,9 @@ impl BaseAir<Felt> for ProcessorAir {
 
 impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
     fn periodic_columns(&self) -> Vec<Vec<Felt>> {
-        self.periodic_columns.clone()
+        let mut cols = constraints::chiplets::hasher::periodic_columns();
+        cols.extend(constraints::chiplets::bitwise::periodic_columns());
+        cols
     }
 
     fn num_randomness(&self) -> usize {
@@ -231,8 +212,14 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
         AUX_TRACE_WIDTH
     }
 
+    /// Returns the number of variable-length public input slices.
+    ///
+    /// The Miden VM AIR uses a single variable-length slice that contains all kernel
+    /// procedure digests as concatenated field elements (each digest is `WORD_SIZE`
+    /// elements). The verifier framework uses this count to validate that the correct
+    /// number of slices is provided.
     fn num_var_len_public_inputs(&self) -> usize {
-        self.num_kernel_procedures
+        1
     }
 
     fn reduced_aux_values(
@@ -425,20 +412,31 @@ fn kernel_proc_message<EF: ExtensionField<Felt>>(
 }
 
 /// Reduces kernel procedure digests from var-len public inputs into a multiset product.
+///
+/// Expects exactly one variable-length public input slice containing all kernel digests
+/// as concatenated `Felt`s (i.e. `len % WORD_SIZE == 0`).
 fn kernel_reduced_from_var_len<EF: ExtensionField<Felt>>(
     challenges: &trace::Challenges<EF>,
     var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
 ) -> Result<EF, ReductionError> {
+    if var_len_public_inputs.len() != 1 {
+        return Err(format!(
+            "expected 1 var-len public input slice, got {}",
+            var_len_public_inputs.len()
+        )
+        .into());
+    }
+    let kernel_felts = var_len_public_inputs[0];
+    if kernel_felts.len() % WORD_SIZE != 0 {
+        return Err(format!(
+            "kernel digest felts length {} is not a multiple of {}",
+            kernel_felts.len(),
+            WORD_SIZE
+        )
+        .into());
+    }
     let mut acc = EF::ONE;
-    for digest in var_len_public_inputs.iter() {
-        if digest.len() != WORD_SIZE {
-            return Err(format!(
-                "invalid kernel digest length: expected {}, got {}",
-                WORD_SIZE,
-                digest.len()
-            )
-            .into());
-        }
+    for digest in kernel_felts.chunks_exact(WORD_SIZE) {
         let word: Word = [digest[0], digest[1], digest[2], digest[3]].into();
         acc *= kernel_proc_message(challenges, &word);
     }

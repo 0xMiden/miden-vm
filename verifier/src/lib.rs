@@ -7,7 +7,7 @@ extern crate std;
 
 use alloc::{boxed::Box, vec::Vec};
 
-use miden_air::{LiftedAir, ProcessorAir, PublicInputs, config};
+use miden_air::{ProcessorAir, PublicInputs, config};
 use miden_core::{
     Felt,
     field::{QuadFelt, TwoAdicField},
@@ -141,32 +141,29 @@ fn verify_stark(
 
     let pub_inputs =
         PublicInputs::new(program_info, stack_inputs, stack_outputs, pc_transcript_state);
-    let (public_values, kernel_digests) = pub_inputs.to_air_inputs();
-    let var_len_refs: Vec<&[_]> = kernel_digests.iter().map(|w| w.as_ref()).collect();
-    let var_len_public_inputs: &[&[_]] = &var_len_refs;
-
-    let air = ProcessorAir::new(kernel_digests.len());
+    let (public_values, kernel_felts) = pub_inputs.to_air_inputs();
+    let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
 
     match hash_fn {
         HashFunction::Blake3_256 => {
             let config = config::create_blake3_256_config();
-            verify_stark_proof(&config, &air, &public_values, var_len_public_inputs, &proof_bytes)
+            verify_stark_proof(&config, &public_values, var_len_public_inputs, &proof_bytes)
         },
         HashFunction::Rpo256 => {
             let config = config::create_rpo_config();
-            verify_stark_proof(&config, &air, &public_values, var_len_public_inputs, &proof_bytes)
+            verify_stark_proof(&config, &public_values, var_len_public_inputs, &proof_bytes)
         },
         HashFunction::Rpx256 => {
             let config = config::create_rpx_config();
-            verify_stark_proof(&config, &air, &public_values, var_len_public_inputs, &proof_bytes)
+            verify_stark_proof(&config, &public_values, var_len_public_inputs, &proof_bytes)
         },
         HashFunction::Poseidon2 => {
             let config = config::create_poseidon2_config();
-            verify_stark_proof(&config, &air, &public_values, var_len_public_inputs, &proof_bytes)
+            verify_stark_proof(&config, &public_values, var_len_public_inputs, &proof_bytes)
         },
         HashFunction::Keccak => {
             let config = config::create_keccak_config();
-            verify_stark_proof(&config, &air, &public_values, var_len_public_inputs, &proof_bytes)
+            verify_stark_proof(&config, &public_values, var_len_public_inputs, &proof_bytes)
         },
     }
     .map_err(|e| VerificationError::StarkVerificationError(program_hash, Box::new(e)))?;
@@ -200,22 +197,22 @@ pub enum StarkVerificationError {
     Verifier(#[from] miden_crypto::stark::verifier::VerifierError),
 }
 
-/// Verifies a STARK proof for the given AIR and public values.
+/// Verifies a STARK proof for the given public values.
 ///
 /// Pre-seeds the challenger with `public_values`, then delegates to the lifted
 /// verifier.
-fn verify_stark_proof<A, SC>(
+fn verify_stark_proof<SC>(
     config: &SC,
-    air: &A,
     public_values: &[Felt],
     var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
     proof_bytes: &[u8],
 ) -> Result<(), StarkVerificationError>
 where
-    A: LiftedAir<Felt, QuadFelt>,
     SC: StarkConfig<Felt, QuadFelt>,
     <SC::Lmcs as Lmcs>::Commitment: DeserializeOwned,
 {
+    let air = ProcessorAir::default();
+
     // Proof deserialization via bincode; see https://github.com/0xMiden/miden-vm/issues/2550
     // The proof is serialized as a `(log_trace_height, stark_proof)` tuple; this is a temporary
     // approach until the lifted STARK integrates trace height on its side.
@@ -236,7 +233,7 @@ where
     // See https://github.com/0xMiden/miden-vm/issues/2822
     miden_crypto::stark::verifier::verify_single(
         config,
-        air,
+        &air,
         log_trace_height as usize,
         public_values,
         var_len_public_inputs,
