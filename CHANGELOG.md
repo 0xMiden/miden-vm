@@ -4,6 +4,7 @@
 
 #### Major breaking changes
 - [BREAKING] `build_trace()` no longer assumes valid user input ([#2747](https://github.com/0xMiden/miden-vm/pull/2747)).
+- [BREAKING] Migrate to lifted-STARK backend and `miden-crypto` to v0.23 ([#2783](https://github.com/0xMiden/miden-vm/pull/2783)).
 
 #### Changes
 
