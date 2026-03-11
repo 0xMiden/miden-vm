@@ -545,7 +545,8 @@ fn validate_batch_invariants_accepts_padded_group_with_noop() {
     let indptr = [0, 2, 2, 2, 2, 2, 2, 2, 2];
     let mut padding = [false; BATCH_SIZE];
     padding[0] = true;
-    let groups = [ZERO; BATCH_SIZE];
+    let mut groups = [ZERO; BATCH_SIZE];
+    groups[0] = build_group(&ops);
     let batch = OpBatch::new_from_parts(ops, indptr, padding, groups, 1);
 
     let block = basic_block_from_batches(vec![batch]);
