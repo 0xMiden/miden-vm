@@ -144,25 +144,26 @@ fn verify_stark(
     let (public_values, kernel_felts) = pub_inputs.to_air_inputs();
     let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
 
+    let params = config::pcs_params();
     match hash_fn {
         HashFunction::Blake3_256 => {
-            let config = config::create_blake3_256_config();
+            let config = config::blake3_256_config(params);
             verify_stark_proof(&config, &public_values, var_len_public_inputs, &proof_bytes)
         },
         HashFunction::Rpo256 => {
-            let config = config::create_rpo_config();
+            let config = config::rpo_config(params);
             verify_stark_proof(&config, &public_values, var_len_public_inputs, &proof_bytes)
         },
         HashFunction::Rpx256 => {
-            let config = config::create_rpx_config();
+            let config = config::rpx_config(params);
             verify_stark_proof(&config, &public_values, var_len_public_inputs, &proof_bytes)
         },
         HashFunction::Poseidon2 => {
-            let config = config::create_poseidon2_config();
+            let config = config::poseidon2_config(params);
             verify_stark_proof(&config, &public_values, var_len_public_inputs, &proof_bytes)
         },
         HashFunction::Keccak => {
-            let config = config::create_keccak_config();
+            let config = config::keccak_config(params);
             verify_stark_proof(&config, &public_values, var_len_public_inputs, &proof_bytes)
         },
     }
@@ -211,8 +212,6 @@ where
     SC: StarkConfig<Felt, QuadFelt>,
     <SC::Lmcs as Lmcs>::Commitment: DeserializeOwned,
 {
-    let air = ProcessorAir::default();
-
     // Proof deserialization via bincode; see https://github.com/0xMiden/miden-vm/issues/2550
     // The proof is serialized as a `(log_trace_height, stark_proof)` tuple; this is a temporary
     // approach until the lifted STARK integrates trace height on its side.
@@ -233,8 +232,8 @@ where
     // See https://github.com/0xMiden/miden-vm/issues/2822
     miden_crypto::stark::verifier::verify_single(
         config,
-        &air,
-        log_trace_height as usize,
+        &ProcessorAir,
+        log_trace_height,
         public_values,
         var_len_public_inputs,
         &proof,

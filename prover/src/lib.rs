@@ -96,25 +96,26 @@ pub async fn prove(
     let aux_builder = trace.aux_trace_builders();
 
     // Generate STARK proof using lifted prover
+    let params = config::pcs_params();
     let proof_bytes = match hash_fn {
         HashFunction::Blake3_256 => {
-            let config = config::create_blake3_256_config();
+            let config = config::blake3_256_config(params);
             prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
         },
         HashFunction::Keccak => {
-            let config = config::create_keccak_config();
+            let config = config::keccak_config(params);
             prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
         },
         HashFunction::Rpo256 => {
-            let config = config::create_rpo_config();
+            let config = config::rpo_config(params);
             prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
         },
         HashFunction::Poseidon2 => {
-            let config = config::create_poseidon2_config();
+            let config = config::poseidon2_config(params);
             prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
         },
         HashFunction::Rpx256 => {
-            let config = config::create_rpx_config();
+            let config = config::rpx_config(params);
             prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
         },
     }?;
@@ -177,7 +178,6 @@ where
     SC: StarkConfig<Felt, QuadFelt>,
     <SC::Lmcs as Lmcs>::Commitment: Serialize,
 {
-    let air = ProcessorAir::default();
     let log_trace_height = trace.height().ilog2() as u8;
 
     let mut challenger = config.challenger();
@@ -190,7 +190,7 @@ where
     // See https://github.com/0xMiden/miden-vm/issues/2822
     let output: StarkOutput<Felt, QuadFelt, SC> = miden_crypto::stark::prover::prove_single(
         config,
-        &air,
+        &ProcessorAir,
         trace,
         public_values,
         var_len_public_inputs,

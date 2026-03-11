@@ -16,9 +16,8 @@
 //! use miden_air::ProcessorAir;
 //! use miden_core::{Felt, field::QuadFelt};
 //!
-//! let air = ProcessorAir::new();
 //! let config = AceConfig { num_quotient_chunks: 8, num_aux_inputs: 14, layout: LayoutKind::Masm };
-//! let circuit = build_ace_circuit_for_air::<_, Felt, QuadFelt>(&air, config)?;
+//! let circuit = build_ace_circuit_for_air::<_, Felt, QuadFelt>(&ProcessorAir, config)?;
 //! ```
 //!
 //! Module map (data flow):

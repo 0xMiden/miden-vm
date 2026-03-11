@@ -11,7 +11,7 @@ use crate::{
 
 #[test]
 fn processor_air_dag_matches_manual_eval() {
-    let air = ProcessorAir::default();
+    let air = ProcessorAir;
     let config = AceConfig {
         num_quotient_chunks: 2,
         num_aux_inputs: 14,
@@ -62,7 +62,7 @@ fn processor_air_dag_matches_manual_eval() {
 #[test]
 #[allow(clippy::print_stdout)]
 fn processor_air_chiplet_rows() {
-    let air = ProcessorAir::default();
+    let air = ProcessorAir;
     let config = AceConfig {
         num_quotient_chunks: 8,
         num_aux_inputs: 14,

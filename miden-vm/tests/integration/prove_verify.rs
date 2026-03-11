@@ -200,7 +200,10 @@ mod fast_parallel {
     use alloc::sync::Arc;
 
     use miden_assembly::{Assembler, DefaultSourceManager};
-    use miden_core::{Felt, proof::{ExecutionProof, HashFunction}};
+    use miden_core::{
+        Felt,
+        proof::{ExecutionProof, HashFunction},
+    };
     use miden_processor::{
         ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs, trace::build_trace,
     };
@@ -258,7 +261,7 @@ mod fast_parallel {
         let aux_builder = trace.aux_trace_builders();
 
         // Generate proof using Blake3_256
-        let blake3_config = config::create_blake3_256_config();
+        let blake3_config = config::blake3_256_config(config::pcs_params());
         let proof_bytes = prove_stark(
             &blake3_config,
             &trace_matrix,

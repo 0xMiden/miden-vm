@@ -87,7 +87,7 @@ fn circuit_evaluation_prove_verify() {
 
 #[test]
 fn processor_air_eval_circuit_masm() {
-    let air = ProcessorAir::default();
+    let air = ProcessorAir;
     let config = AceConfig {
         num_quotient_chunks: 8,
         num_aux_inputs: 14,
