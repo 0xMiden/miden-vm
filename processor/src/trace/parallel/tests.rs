@@ -388,6 +388,65 @@ fn test_trace_generation_at_fragment_boundaries(
     insta::assert_compact_debug_snapshot!(testname, trace_from_fragments);
 }
 
+#[test]
+fn test_partial_last_fragment_exists_for_h0_inversion_path() {
+    // Keep this > 1 and non-dividing for join_program() to guarantee a short final fragment.
+    const FRAGMENT_SIZE: usize = 11;
+
+    let program = join_program();
+    let processor = FastProcessor::new_with_options(
+        StackInputs::new(DEFAULT_STACK).unwrap(),
+        AdviceInputs::default(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(FRAGMENT_SIZE)
+            .unwrap(),
+    );
+    let mut host = DefaultHost::default();
+    host.load_library(create_simple_library()).unwrap();
+
+    let (execution_output, trace_fragment_contexts) =
+        processor.execute_for_trace_sync(&program, &mut host).unwrap();
+
+    assert!(
+        trace_fragment_contexts.core_trace_contexts.len() > 1,
+        "repro precondition requires multiple fragments"
+    );
+
+    let trace = build_trace(execution_output, trace_fragment_contexts, program.to_info());
+    let total_rows_without_halt = trace.main_trace().num_rows() - 1;
+
+    assert_ne!(
+        total_rows_without_halt % FRAGMENT_SIZE,
+        0,
+        "repro precondition requires a short final fragment"
+    );
+}
+
+#[cfg(miri)]
+#[test]
+fn miri_repro_uninitialized_tail_read_during_h0_inversion() {
+    // This reproducer intentionally constructs a short final fragment. Before the fix in
+    // generate_core_trace_columns(), miri should flag an uninitialized read in the inversion pass.
+    const FRAGMENT_SIZE: usize = 11;
+
+    let program = join_program();
+    let processor = FastProcessor::new_with_options(
+        StackInputs::new(DEFAULT_STACK).unwrap(),
+        AdviceInputs::default(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(FRAGMENT_SIZE)
+            .unwrap(),
+    );
+    let mut host = DefaultHost::default();
+    host.load_library(create_simple_library()).unwrap();
+    let (execution_output, trace_fragment_contexts) =
+        processor.execute_for_trace_sync(&program, &mut host).unwrap();
+
+    assert!(trace_fragment_contexts.core_trace_contexts.len() > 1);
+
+    let _ = build_trace(execution_output, trace_fragment_contexts, program.to_info());
+}
+
 /// Creates a library with a single procedure containing just a SWAP operation.
 fn create_simple_library() -> HostLibrary {
     let mut mast_forest = MastForest::new();
