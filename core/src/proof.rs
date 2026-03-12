@@ -226,3 +226,39 @@ impl ExecutionProof {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::serde::{BudgetedReader, ByteWriter, DeserializationError, SliceReader};
+
+    #[test]
+    fn execution_proof_rejects_over_budget_proof_len() {
+        let mut bytes = Vec::new();
+        bytes.write_usize(5);
+
+        let budget = bytes.len() + 4;
+        let mut reader = BudgetedReader::new(SliceReader::new(&bytes), budget);
+        let err = ExecutionProof::read_from(&mut reader).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("requested 5 elements"));
+    }
+
+    #[test]
+    fn execution_proof_rejects_over_budget_pc_requests_len() {
+        let mut bytes = Vec::new();
+        bytes.write_usize(0);
+        bytes.write_u8(HashFunction::Blake3_256 as u8);
+        bytes.write_usize(2);
+
+        let budget = bytes.len() + 1;
+        let mut reader = BudgetedReader::new(SliceReader::new(&bytes), budget);
+        let err = ExecutionProof::read_from(&mut reader).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("requested 2 elements"));
+    }
+}

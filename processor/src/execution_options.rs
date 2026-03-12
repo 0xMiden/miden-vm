@@ -14,6 +14,11 @@ pub struct ExecutionOptions {
     core_trace_fragment_size: usize,
     enable_tracing: bool,
     enable_debugging: bool,
+    /// Maximum number of field elements that can be inserted into the advice map in a single
+    /// `adv.insert_mem` operation.
+    max_adv_map_value_size: usize,
+    /// Maximum number of input bytes allowed for a single hash precompile invocation.
+    max_hash_len_bytes: usize,
 }
 
 impl Default for ExecutionOptions {
@@ -24,6 +29,8 @@ impl Default for ExecutionOptions {
             core_trace_fragment_size: Self::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
             enable_tracing: false,
             enable_debugging: false,
+            max_adv_map_value_size: Self::DEFAULT_MAX_ADV_MAP_VALUE_SIZE,
+            max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
         }
     }
 }
@@ -37,6 +44,14 @@ impl ExecutionOptions {
 
     /// Default fragment size for core trace generation.
     pub const DEFAULT_CORE_TRACE_FRAGMENT_SIZE: usize = 4096; // 2^12
+
+    /// Default maximum number of field elements in a single advice map value inserted via
+    /// `adv.insert_mem`. Set to 2^17 (~1 MB given 8-byte field elements).
+    pub const DEFAULT_MAX_ADV_MAP_VALUE_SIZE: usize = 1 << 17;
+
+    /// Default maximum number of input bytes for a single hash precompile invocation (e.g.
+    /// keccak256, sha512, etc.). Set to 2^20 (1 MB).
+    pub const DEFAULT_MAX_HASH_LEN_BYTES: usize = 1 << 20;
 
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
@@ -97,6 +112,8 @@ impl ExecutionOptions {
             core_trace_fragment_size,
             enable_tracing,
             enable_debugging,
+            max_adv_map_value_size: Self::DEFAULT_MAX_ADV_MAP_VALUE_SIZE,
+            max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
         })
     }
 
@@ -165,6 +182,32 @@ impl ExecutionOptions {
     #[inline]
     pub fn enable_debugging(&self) -> bool {
         self.enable_debugging
+    }
+
+    /// Returns the maximum number of field elements allowed in a single advice map value
+    /// inserted via `adv.insert_mem`.
+    #[inline]
+    pub fn max_adv_map_value_size(&self) -> usize {
+        self.max_adv_map_value_size
+    }
+
+    /// Returns the maximum number of input bytes allowed for a single hash precompile invocation.
+    #[inline]
+    pub fn max_hash_len_bytes(&self) -> usize {
+        self.max_hash_len_bytes
+    }
+
+    /// Sets the maximum number of field elements allowed in a single advice map value
+    /// inserted via `adv.insert_mem`.
+    pub fn with_max_adv_map_value_size(mut self, size: usize) -> Self {
+        self.max_adv_map_value_size = size;
+        self
+    }
+
+    /// Sets the maximum number of input bytes allowed for a single hash precompile invocation.
+    pub fn with_max_hash_len_bytes(mut self, size: usize) -> Self {
+        self.max_hash_len_bytes = size;
+        self
     }
 }
 

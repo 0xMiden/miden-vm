@@ -104,7 +104,7 @@ where
     let poe2 = poe * poe;
     let poe4 = poe2 * poe2;
 
-    processor.stack_mut().decrement_size();
+    processor.stack_mut().decrement_size()?;
 
     processor.stack_mut().set(0, tmp0[1]);
     processor.stack_mut().set(1, tmp0[0]);

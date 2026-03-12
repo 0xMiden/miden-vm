@@ -57,13 +57,22 @@ FEATURES_verifier        :=
 # -- linting --------------------------------------------------------------------------------------
 
 .PHONY: clippy
-clippy: ## Runs Clippy with configs
-	cargo +nightly clippy --workspace --all-targets ${ALL_FEATURES} -- -D warnings
+clippy: ## Runs Clippy with configs (alias for xclippy)
+	cargo +nightly xclippy
+
+
+.PHONY: xclippy
+xclippy: ## Runs Clippy with custom lint config from .cargo/config.toml
+	cargo +nightly xclippy
 
 
 .PHONY: fix
-fix: ## Runs Fix with configs
-	cargo +nightly fix --allow-staged --allow-dirty --all-targets ${ALL_FEATURES}
+fix: ## Runs Fix with configs (alias for xclippy-fix)
+	cargo +nightly xclippy-fix
+
+.PHONY: xclippy-fix
+xclippy-fix: ## Runs Clippy with --fix using the same lints as xclippy
+	cargo +nightly xclippy-fix
 
 
 .PHONY: format
@@ -77,7 +86,7 @@ format-check: ## Runs Format using nightly toolchain but only in check mode
 
 
 .PHONY: lint
-lint: format fix clippy ## Runs all linting tasks at once (Clippy, fixing, formatting)
+lint: xclippy xclippy-fix format ## Runs all linting tasks: check with xclippy, fix issues, then format
 
 # --- docs ----------------------------------------------------------------------------------------
 
@@ -258,6 +267,15 @@ fuzz-mast-validate: ## Run fuzzing for UntrustedMastForest validation
 fuzz-all: ## Run all fuzz targets (in sequence)
 	-@cargo +nightly fuzz run mast_forest_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
 	-@cargo +nightly fuzz run mast_forest_validate --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run program_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run kernel_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run stack_io_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run advice_inputs_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run operation_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run execution_proof_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run precompile_request_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run library_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run package_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
 
 .PHONY: fuzz-list
 fuzz-list: ## List available fuzz targets
@@ -271,3 +289,4 @@ fuzz-coverage: ## Generate coverage report for fuzz targets
 .PHONY: fuzz-seeds
 fuzz-seeds: ## Generate seed corpus files for fuzzing
 	cargo test -p miden-core generate_fuzz_seeds -- --ignored --nocapture
+	cargo test -p miden-mast-package generate_fuzz_seeds -- --ignored --nocapture

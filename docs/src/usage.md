@@ -109,6 +109,8 @@ You can use the run command with `--debug` parameter to enable debugging with th
 ./target/optimized/miden-vm run [path_to.masm] --debug
 ```
 
+If trace building would exceed the VM trace row limit, `run` returns a trace length error instead of trying to build a larger trace.
+
 ### Inputs
 
 As described [here](https://docs.miden.xyz/miden-vm/overview#inputs-and-outputs) the Miden VM can consume public and secret inputs.
@@ -129,7 +131,7 @@ After a program finishes executing, the elements that remain on the stack become
 
 ## Fibonacci example
 
-In the `miden/masm-examples/fib` directory, we provide a very simple Fibonacci calculator example. This example computes the 1001st term of the Fibonacci sequence. You can execute this example on Miden VM like so:
+In the `miden-vm/masm-examples/fib` directory, we provide a very simple Fibonacci calculator example. This example computes the 1001st term of the Fibonacci sequence. You can execute this example on Miden VM like so:
 
 ```shell
 ./target/optimized/miden-vm run miden-vm/masm-examples/fib/fib.masm

@@ -50,6 +50,8 @@ runs:
     # Install cargo-msrv for MSRV checks
     - name: Install cargo-msrv
       shell: bash
+      env:
+        RUSTUP_TOOLCHAIN: "1.91"
       run: cargo install cargo-msrv
 
     - name: Install Rust 1.91 for MSRV check

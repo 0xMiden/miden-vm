@@ -9,7 +9,7 @@ use crate::serde::{ByteReader, ByteWriter, Deserializable, DeserializationError,
 // KERNEL
 // ================================================================================================
 
-/// A list of procedure hashes defining a VM kernel.
+/// A list of exported kernel procedure hashes defining a VM kernel.
 ///
 /// The internally-stored list always has a consistent order, regardless of the order of procedure
 /// list used to instantiate a kernel.
@@ -50,6 +50,8 @@ impl Kernel {
     }
 
     /// Returns true if a procedure with the specified hash belongs to this kernel.
+    ///
+    /// Note: the kernel is constructed from exported kernel procedures only.
     pub fn contains_proc(&self, proc_hash: Word) -> bool {
         // Note: we can't use `binary_search()` here because the hashes were sorted using a
         // different key that the `binary_search` algorithm uses.

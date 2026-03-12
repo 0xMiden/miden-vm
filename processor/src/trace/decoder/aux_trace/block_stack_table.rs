@@ -1,11 +1,5 @@
 use miden_air::trace::RowIndex;
-use miden_core::{
-    field::ExtensionField,
-    operations::{
-        OPCODE_CALL, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END, OPCODE_JOIN, OPCODE_LOOP,
-        OPCODE_RESPAN, OPCODE_SPAN, OPCODE_SPLIT, OPCODE_SYSCALL,
-    },
-};
+use miden_core::{field::ExtensionField, operations::opcodes};
 
 use super::{AuxColumnBuilder, Felt, MainTrace, ONE, ZERO};
 use crate::debug::BusDebugger;
@@ -31,8 +25,8 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BlockStackColumnBuilder {
         let op_code = op_code_felt.as_canonical_u64() as u8;
 
         match op_code {
-            OPCODE_RESPAN => get_block_stack_table_respan_multiplicand(main_trace, i, alphas),
-            OPCODE_END => get_block_stack_table_end_multiplicand(main_trace, i, alphas),
+            opcodes::RESPAN => get_block_stack_table_respan_multiplicand(main_trace, i, alphas),
+            opcodes::END => get_block_stack_table_end_multiplicand(main_trace, i, alphas),
             _ => E::ONE,
         }
     }
@@ -49,8 +43,15 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BlockStackColumnBuilder {
         let op_code = op_code_felt.as_canonical_u64() as u8;
 
         match op_code {
-            OPCODE_JOIN | OPCODE_SPLIT | OPCODE_SPAN | OPCODE_DYN | OPCODE_DYNCALL
-            | OPCODE_LOOP | OPCODE_RESPAN | OPCODE_CALL | OPCODE_SYSCALL => {
+            opcodes::JOIN
+            | opcodes::SPLIT
+            | opcodes::SPAN
+            | opcodes::DYN
+            | opcodes::DYNCALL
+            | opcodes::LOOP
+            | opcodes::RESPAN
+            | opcodes::CALL
+            | opcodes::SYSCALL => {
                 get_block_stack_table_inclusion_multiplicand(main_trace, i, alphas, op_code)
             },
             _ => E::ONE,
@@ -136,17 +137,17 @@ fn get_block_stack_table_inclusion_multiplicand<E: ExtensionField<Felt>>(
     op_code: u8,
 ) -> E {
     let block_id = main_trace.addr(i + 1);
-    let parent_id = if op_code == OPCODE_RESPAN {
+    let parent_id = if op_code == opcodes::RESPAN {
         main_trace.decoder_hasher_state_element(1, i + 1)
     } else {
         main_trace.addr(i)
     };
-    let is_loop = if op_code == OPCODE_LOOP {
+    let is_loop = if op_code == opcodes::LOOP {
         main_trace.stack_element(0, i)
     } else {
         ZERO
     };
-    let elements = if op_code == OPCODE_CALL || op_code == OPCODE_SYSCALL {
+    let elements = if op_code == opcodes::CALL || op_code == opcodes::SYSCALL {
         let parent_ctx = main_trace.ctx(i);
         let parent_stack_depth = main_trace.stack_depth(i);
         let parent_next_overflow_addr = main_trace.parent_overflow_address(i);
@@ -164,7 +165,7 @@ fn get_block_stack_table_inclusion_multiplicand<E: ExtensionField<Felt>>(
             parent_fn_hash[2],
             parent_fn_hash[3],
         ]
-    } else if op_code == OPCODE_DYNCALL {
+    } else if op_code == opcodes::DYNCALL {
         // dyncall executes a left shift simultaneously with starting a new execution context. The
         // post-shift stack depth and next overflow address are placed in the decoder hasher state
         // registers. Note that these are different from what is written to the B0 and B1 registers

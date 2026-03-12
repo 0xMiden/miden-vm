@@ -39,6 +39,10 @@ use crate::{host::AdviceMutation, processor::AdviceProviderInterface};
 ///      or,
 ///    - used to produce a STARK proof using a precompile VM, which can be verified in the epilog of
 ///      the program.
+///
+/// Maximum number of elements allowed on the advice stack. Set to 2^17.
+const MAX_ADVICE_STACK_SIZE: usize = 1 << 17;
+
 #[derive(Debug, Clone, Default)]
 pub struct AdviceProvider {
     stack: VecDeque<Felt>,
@@ -59,7 +63,7 @@ impl AdviceProvider {
     fn apply_mutation(&mut self, mutation: AdviceMutation) -> Result<(), AdviceError> {
         match mutation {
             AdviceMutation::ExtendStack { values } => {
-                self.extend_stack(values);
+                self.extend_stack(values)?;
             },
             AdviceMutation::ExtendMap { other } => {
                 self.extend_map(&other)?;
@@ -120,16 +124,36 @@ impl AdviceProvider {
         Ok([word0, word1])
     }
 
+    /// Checks that pushing `count` elements would not exceed the advice stack size limit.
+    fn check_stack_capacity(&self, count: usize) -> Result<(), AdviceError> {
+        let resulting_size =
+            self.stack.len().checked_add(count).ok_or(AdviceError::StackSizeExceeded {
+                push_count: count,
+                max: MAX_ADVICE_STACK_SIZE,
+            })?;
+        if resulting_size > MAX_ADVICE_STACK_SIZE {
+            return Err(AdviceError::StackSizeExceeded {
+                push_count: count,
+                max: MAX_ADVICE_STACK_SIZE,
+            });
+        }
+        Ok(())
+    }
+
     /// Pushes a single value onto the advice stack.
-    pub fn push_stack(&mut self, value: Felt) {
-        self.stack.push_front(value)
+    pub fn push_stack(&mut self, value: Felt) -> Result<(), AdviceError> {
+        self.check_stack_capacity(1)?;
+        self.stack.push_front(value);
+        Ok(())
     }
 
     /// Pushes a word (4 elements) onto the stack.
-    pub fn push_stack_word(&mut self, word: &Word) {
+    pub fn push_stack_word(&mut self, word: &Word) -> Result<(), AdviceError> {
+        self.check_stack_capacity(4)?;
         for &value in word.iter().rev() {
             self.stack.push_front(value);
         }
+        Ok(())
     }
 
     /// Fetches a list of elements under the specified key from the advice map and pushes them onto
@@ -166,13 +190,26 @@ impl AdviceProvider {
     ) -> Result<(), AdviceError> {
         let values = self.map.get(&key).ok_or(AdviceError::MapKeyNotFound { key })?;
 
+        // Calculate total elements to push including padding and optional length prefix
+        let num_pad_elements = if pad_to != 0 {
+            values.len().next_multiple_of(pad_to as usize) - values.len()
+        } else {
+            0
+        };
+        let total_push = values
+            .len()
+            .checked_add(num_pad_elements)
+            .and_then(|n| n.checked_add(if include_len { 1 } else { 0 }))
+            .ok_or(AdviceError::StackSizeExceeded {
+                push_count: usize::MAX,
+                max: MAX_ADVICE_STACK_SIZE,
+            })?;
+        self.check_stack_capacity(total_push)?;
+
         // if pad_to was provided (not equal 0), push some zeros to the advice stack so that the
         // final (padded) elements list length will be the next multiple of pad_to
-        if pad_to != 0 {
-            let num_pad_elements = values.len().next_multiple_of(pad_to as usize) - values.len();
-            for _ in 0..num_pad_elements {
-                self.stack.push_front(Felt::default());
-            }
+        for _ in 0..num_pad_elements {
+            self.stack.push_front(Felt::default());
         }
 
         // Treat map values as already canonical sequences of FELTs.
@@ -193,14 +230,16 @@ impl AdviceProvider {
     }
 
     /// Extends the stack with the given elements.
-    pub fn extend_stack<I>(&mut self, iter: I)
+    pub fn extend_stack<I>(&mut self, iter: I) -> Result<(), AdviceError>
     where
         I: IntoIterator<Item = Felt>,
     {
         let values: Vec<Felt> = iter.into_iter().collect();
+        self.check_stack_capacity(values.len())?;
         for value in values.into_iter().rev() {
             self.stack.push_front(value);
         }
+        Ok(())
     }
 
     // ADVICE MAP
@@ -286,7 +325,7 @@ impl AdviceProvider {
         let index = NodeIndex::from_elements(&depth, &index)
             .map_err(|_| AdviceError::InvalidMerkleTreeNodeIndex { depth, index })?;
 
-        // TODO: switch to `MerkleStore::has_path()` once this method is implemented
+        // TODO: switch to `MerkleStore::has_path()` once this method is implemented (#2795)
         match self.store.get_path(root, index) {
             Ok(_) => Ok(true),
             Err(MerkleError::RootNotInStore(..)) => Ok(false),
@@ -403,7 +442,7 @@ impl AdviceProvider {
 
     /// Extends the contents of this instance with the contents of an `AdviceInputs`.
     pub fn extend_from_inputs(&mut self, inputs: &AdviceInputs) -> Result<(), AdviceError> {
-        self.extend_stack(inputs.stack.iter().cloned());
+        self.extend_stack(inputs.stack.iter().cloned())?;
         self.extend_merkle_store(inputs.store.inner_nodes());
         self.extend_map(&inputs.map)
     }

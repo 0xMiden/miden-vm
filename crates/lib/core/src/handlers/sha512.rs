@@ -5,7 +5,7 @@
 //! record calldata for deferred verification. Verification-time logic recomputes the digest and
 //! commits to both input and output using Poseidon2 hashing.
 
-use alloc::{vec, vec::Vec};
+use alloc::{format, vec, vec::Vec};
 use core::array;
 
 use miden_core::{
@@ -43,8 +43,21 @@ impl EventHandler for Sha512Precompile {
         let ptr = process.get_stack_item(1).as_canonical_u64();
         let len_bytes = process.get_stack_item(2).as_canonical_u64();
 
+        // Enforce the maximum precompile input size to prevent host-side resource exhaustion. Make
+        // sure to compare in u64 to avoid truncation on 32-bit targets.
+        let max = process.execution_options().max_hash_len_bytes();
+        if len_bytes > max as u64 {
+            return Err(format!(
+                "sha512 input length {len_bytes} bytes exceeds maximum of {max} bytes"
+            )
+            .into());
+        }
+        let len_bytes = usize::try_from(len_bytes).map_err(|_| {
+            EventError::from(format!("sha512 input length {len_bytes} exceeds addressable range"))
+        })?;
+
         // Read input bytes (u32-packed) from memory.
-        let input_bytes = read_memory_packed_u32(process, ptr, len_bytes as usize)?;
+        let input_bytes = read_memory_packed_u32(process, ptr, len_bytes)?;
         let preimage = Sha512Preimage::new(input_bytes);
         let digest = preimage.digest();
 

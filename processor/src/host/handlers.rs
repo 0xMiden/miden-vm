@@ -199,25 +199,20 @@ impl Debug for EventHandlerRegistry {
 /// Handler for debug and trace operations
 pub trait DebugHandler: Sync {
     /// This function is invoked when the `Debug` decorator is executed.
+    ///
+    /// The default implementation is a no-op.
     fn on_debug(
         &mut self,
-        process: &ProcessorState,
-        options: &DebugOptions,
+        _process: &ProcessorState,
+        _options: &DebugOptions,
     ) -> Result<(), DebugError> {
-        let mut handler = crate::host::debug::DefaultDebugHandler::default();
-        handler.on_debug(process, options)
+        Ok(())
     }
 
     /// This function is invoked when the `Trace` decorator is executed.
-    fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
-        let _ = (&process, trace_id);
-        #[cfg(feature = "std")]
-        std::println!(
-            "Trace with id {} emitted at step {} in context {}",
-            trace_id,
-            process.clock(),
-            process.ctx()
-        );
+    ///
+    /// The default implementation is a no-op.
+    fn on_trace(&mut self, _process: &ProcessorState, _trace_id: u32) -> Result<(), TraceError> {
         Ok(())
     }
 }
