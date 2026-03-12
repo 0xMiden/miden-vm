@@ -57,14 +57,18 @@ FEATURES_verifier        :=
 # -- linting --------------------------------------------------------------------------------------
 
 .PHONY: clippy
-clippy: ## Runs Clippy with configs
-	cargo +nightly clippy --workspace --all-targets ${ALL_FEATURES} -- -D warnings
+clippy: ## Runs Clippy with configs (alias for xclippy)
+	cargo +nightly xclippy
+
+
+.PHONY: xclippy
+xclippy: ## Runs Clippy with custom lint config from .cargo/config.toml
+	cargo +nightly xclippy
 
 
 .PHONY: fix
-fix: ## Runs Fix with configs
-	cargo +nightly fix --allow-staged --allow-dirty --all-targets ${ALL_FEATURES}
-
+fix: ## Runs Fix with configs (alias for xclippy-fix)
+	cargo +nightly xclippy-fix
 
 .PHONY: format
 format: ## Runs Format using nightly toolchain
