@@ -478,14 +478,14 @@ impl BasicBlockNode {
         for (batch_idx, batch) in self.op_batches.iter().enumerate() {
             for (op_idx, op) in batch.ops().iter().enumerate() {
                 let opcode = op.op_code();
-                Self::validate_control_flow_opcode(opcode, batch_idx, op_idx)?;
+                Self::ensure_not_control_flow_opcode(opcode, batch_idx, op_idx)?;
             }
         }
         Ok(())
     }
 
     #[inline]
-    fn validate_control_flow_opcode(
+    fn ensure_not_control_flow_opcode(
         opcode: u8,
         batch_idx: usize,
         op_idx: usize,
@@ -714,44 +714,9 @@ impl BasicBlockNode {
     /// - Padded groups must end with a NOOP operation.
     fn validate_padding_semantics(&self) -> Result<(), String> {
         for (batch_idx, batch) in self.op_batches.iter().enumerate() {
-            let num_groups = batch.num_groups();
-            let indptr = batch.indptr();
-            let padding = batch.padding();
-            let ops = batch.ops();
-
-            for group_idx in 0..num_groups {
-                let group_start = *indptr.get(group_idx).ok_or_else(|| {
-                    format!("Batch {}, group {}: missing group start index", batch_idx, group_idx)
-                })?;
-                let group_end = *indptr.get(group_idx + 1).ok_or_else(|| {
-                    format!("Batch {}, group {}: missing group end index", batch_idx, group_idx)
-                })?;
-                let is_padded = *padding.get(group_idx).ok_or_else(|| {
-                    format!("Batch {}, group {}: missing padding flag", batch_idx, group_idx)
-                })?;
-
-                if !is_padded {
-                    continue;
-                }
-
-                if group_start == group_end {
-                    return Err(format!(
-                        "Batch {}, group {}: empty group cannot be marked as padded",
-                        batch_idx, group_idx
-                    ));
-                }
-
-                let last_op = ops.get(group_end - 1).ok_or_else(|| {
-                    format!("Batch {}, group {}: invalid group bounds", batch_idx, group_idx)
-                })?;
-
-                if *last_op != Operation::Noop {
-                    return Err(format!(
-                        "Batch {}, group {}: padded group must end with NOOP",
-                        batch_idx, group_idx
-                    ));
-                }
-            }
+            batch
+                .validate_padding_semantics()
+                .map_err(|err| format!("Batch {}: {}", batch_idx, err))?;
         }
 
         Ok(())

@@ -270,41 +270,14 @@ impl BasicBlockDataDecoder<'_> {
             // num_groups is the next available index after all groups and immediates
             let num_groups = next_group_idx;
 
-            // Validate padding semantics: padded groups must be non-empty and end with NOOP.
-            for group_idx in 0..num_groups {
-                let group_start = indptr[group_idx];
-                let group_end = indptr[group_idx + 1];
-                let is_padded = padding[group_idx];
-
-                if !is_padded {
-                    continue;
-                }
-
-                if group_start == group_end {
-                    return Err(DeserializationError::InvalidValue(format!(
-                        "batch {} group {}: empty group cannot be padded",
-                        batch_idx, group_idx
-                    )));
-                }
-
-                let last_op = batch_ops.get(group_end - 1).ok_or_else(|| {
-                    DeserializationError::InvalidValue(format!(
-                        "batch {} group {}: invalid group bounds",
-                        batch_idx, group_idx
-                    ))
-                })?;
-
-                if *last_op != Operation::Noop {
-                    return Err(DeserializationError::InvalidValue(format!(
-                        "batch {} group {}: padded group must end with NOOP",
-                        batch_idx, group_idx
-                    )));
-                }
-            }
-
-            op_batches.push(crate::mast::OpBatch::new_from_parts(
+            let op_batch = crate::mast::OpBatch::new_from_parts(
                 batch_ops, *indptr, padding, groups, num_groups,
-            ));
+            );
+            op_batch.validate_padding_semantics().map_err(|err| {
+                DeserializationError::InvalidValue(format!("batch {}: {}", batch_idx, err))
+            })?;
+
+            op_batches.push(op_batch);
 
             global_op_offset = batch_ops_end;
         }
@@ -441,7 +414,7 @@ mod tests {
         let DeserializationError::InvalidValue(message) = err else {
             panic!("expected InvalidValue error");
         };
-        assert!(message.contains("empty group cannot be padded"));
+        assert!(message.contains("empty group cannot be marked as padded"));
     }
 
     #[test]
