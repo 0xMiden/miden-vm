@@ -70,6 +70,11 @@ xclippy: ## Runs Clippy with custom lint config from .cargo/config.toml
 fix: ## Runs Fix with configs (alias for xclippy-fix)
 	cargo +nightly xclippy-fix
 
+.PHONY: xclippy-fix
+xclippy-fix: ## Runs Clippy with --fix using the same lints as xclippy
+	cargo +nightly xclippy-fix
+
+
 .PHONY: format
 format: ## Runs Format using nightly toolchain
 	cargo +nightly fmt --all
@@ -81,7 +86,7 @@ format-check: ## Runs Format using nightly toolchain but only in check mode
 
 
 .PHONY: lint
-lint: format fix clippy ## Runs all linting tasks at once (Clippy, fixing, formatting)
+lint: xclippy xclippy-fix format ## Runs all linting tasks: check with xclippy, fix issues, then format
 
 # --- docs ----------------------------------------------------------------------------------------
 
