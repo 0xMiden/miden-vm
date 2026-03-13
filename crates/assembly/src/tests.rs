@@ -5392,23 +5392,6 @@ fn test_cross_module_quoted_identifier_resolution() -> TestResult {
 
 #[test]
 fn regression_symbol_resolution_duplicate_module_paths_are_rejected_during_linking() {
-    use crate::{Parse, ParseOptions};
-
-    fn parse_library_module(
-        source_manager: Arc<dyn crate::SourceManager>,
-        path_str: &str,
-        source: &str,
-    ) -> alloc::boxed::Box<Module> {
-        let path = Path::validate(path_str).expect("path must validate");
-        let options = ParseOptions {
-            kind: ModuleKind::Library,
-            warnings_as_errors: false,
-            path: Some(Arc::<Path>::from(path)),
-        };
-        <&str as Parse>::parse_with_options(source, source_manager, options)
-            .expect("module must parse and analyse")
-    }
-
     fn try_assemble_program_with_link_order(libs: &[Library]) -> Result<(), Report> {
         let program_source = r#"
 begin
@@ -5427,18 +5410,20 @@ end
     let context = TestContext::default();
     let source_manager = context.source_manager();
 
-    let legit_mod = parse_library_module(
-        source_manager.clone(),
-        "::foo::bar",
-        r#"
+    let legit_mod = context
+        .parse_module_with_path(
+            "::foo::bar",
+            r#"
 pub proc add
     add.1
 end
 "#,
-    );
+        )
+        .expect("module must parse and analyse");
 
-    let attacker_mod =
-        parse_library_module(source_manager.clone(), r#"::foo::"bar""#, "pub proc add add.2 end");
+    let attacker_mod = context
+        .parse_module_with_path(r#"::foo::"bar""#, "pub proc add add.2 end")
+        .expect("module must parse and analyse");
 
     let legit_lib = Assembler::new(source_manager.clone())
         .assemble_library([legit_mod])
@@ -5458,29 +5443,14 @@ end
 
 #[test]
 fn regression_symbol_resolution_in_library_canonical_export_collision_is_rejected() {
-    use crate::{Parse, ParseOptions};
-
-    fn parse_library_module(
-        source_manager: Arc<dyn crate::SourceManager>,
-        path_str: &str,
-        source: &str,
-    ) -> alloc::boxed::Box<Module> {
-        let path = Path::validate(path_str).expect("path must validate");
-        let options = ParseOptions {
-            kind: ModuleKind::Library,
-            warnings_as_errors: false,
-            path: Some(Arc::<Path>::from(path)),
-        };
-        <&str as Parse>::parse_with_options(source, source_manager, options)
-            .expect("module must parse and analyse")
-    }
-
     let context = TestContext::default();
     let source_manager = context.source_manager();
-    let legit_mod =
-        parse_library_module(source_manager.clone(), "::foo::bar", "pub proc add add.1 end");
-    let attacker_mod =
-        parse_library_module(source_manager.clone(), r#"::foo::"bar""#, "pub proc add add.2 end");
+    let legit_mod = context
+        .parse_module_with_path("::foo::bar", "pub proc add add.1 end")
+        .expect("module must parse and analyse");
+    let attacker_mod = context
+        .parse_module_with_path(r#"::foo::"bar""#, "pub proc add add.2 end")
+        .expect("module must parse and analyse");
 
     let err = Assembler::new(source_manager)
         .assemble_library([legit_mod, attacker_mod])
