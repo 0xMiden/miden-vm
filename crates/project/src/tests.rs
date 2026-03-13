@@ -39,19 +39,19 @@ fn can_load_protocol_example_project() -> Result<(), Report> {
     assert_eq!(workspace.members().len(), 3);
 
     let core_project = workspace
-        .get_member_by_name("miden-core")
-        .expect("failed to locate 'miden-core' project");
+        .get_member_by_name("miden-utils")
+        .expect("failed to locate 'miden-utils' project");
     assert!(Arc::ptr_eq(
         &core_project,
         &workspace
-            .get_member_by_relative_path("core")
-            .expect("failed to locate 'miden-core' project by relative path")
+            .get_member_by_relative_path("utils")
+            .expect("failed to locate 'miden-utils' project by relative path")
     ));
 
     let core_lib = core_project.library_target().unwrap();
     assert_eq!(core_lib.ty, TargetType::Library);
-    assert_eq!(&**core_lib.name.inner(), "miden::core");
-    assert_eq!(&**core_lib.namespace.inner(), MasmPath::new("::miden::core"));
+    assert_eq!(&**core_lib.name.inner(), "miden::utils");
+    assert_eq!(&**core_lib.namespace.inner(), MasmPath::new("::miden::utils"));
     assert_eq!(core_project.executable_targets().len(), 0);
 
     let kernel_project = workspace
@@ -79,8 +79,8 @@ fn can_load_protocol_example_project() -> Result<(), Report> {
     );
 
     assert_eq!(kernel_project.dependencies().len(), 1);
-    assert_eq!(&**kernel_project.dependencies()[0].name(), "miden-core");
-    assert_matches!(kernel_project.dependencies()[0].scheme(), DependencyVersionScheme::Workspace { member } if member.path() == "core");
+    assert_eq!(&**kernel_project.dependencies()[0].name(), "miden-utils");
+    assert_matches!(kernel_project.dependencies()[0].scheme(), DependencyVersionScheme::Workspace { member } if member.path() == "utils");
 
     let userspace_project = workspace
         .get_member_by_name("miden-protocol")
@@ -93,10 +93,10 @@ fn can_load_protocol_example_project() -> Result<(), Report> {
     assert_eq!(userspace_project.executable_targets().len(), 0);
 
     assert_eq!(userspace_project.dependencies().len(), 2);
-    assert_eq!(&**userspace_project.dependencies()[0].name(), "miden-core");
-    assert_matches!(userspace_project.dependencies()[0].scheme(), DependencyVersionScheme::Workspace { member } if member.path() == "core");
-    assert_eq!(&**userspace_project.dependencies()[1].name(), "miden-tx");
-    assert_matches!(userspace_project.dependencies()[1].scheme(), DependencyVersionScheme::Workspace { member } if member.path() == "kernel");
+    assert_eq!(&**userspace_project.dependencies()[0].name(), "miden-tx");
+    assert_matches!(userspace_project.dependencies()[0].scheme(), DependencyVersionScheme::Workspace { member } if member.path() == "kernel");
+    assert_eq!(&**userspace_project.dependencies()[1].name(), "miden-utils");
+    assert_matches!(userspace_project.dependencies()[1].scheme(), DependencyVersionScheme::Workspace { member } if member.path() == "utils");
 
     Ok(())
 }

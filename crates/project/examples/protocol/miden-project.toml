@@ -1,12 +1,12 @@
 [workspace]
 members = [
-    "core",
+    "utils",
     "kernel",
     "userspace",
 ]
 
 [workspace.dependencies]
-miden-core = { path = "core" }
+miden-utils = { path = "utils" }
 miden-tx = { path = "kernel" }
 
 [profile.test]

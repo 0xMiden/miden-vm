@@ -1,7 +1,7 @@
 [package]
-name = "miden-core"
+name = "miden-utils"
 version = "0.1.0"
 
 [lib]
-namespace = "miden::core"
+namespace = "miden::utils"
 path = "mod.masm"
