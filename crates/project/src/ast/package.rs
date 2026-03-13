@@ -455,7 +455,7 @@ impl Validate for ProjectFile {
             let name = target
                 .name
                 .clone()
-                .unwrap_or_else(|| Span::new(target.span(), Arc::from(ast::Path::EXEC_PATH)));
+                .unwrap_or_else(|| Span::new(target.span(), self.package.name.inner().clone()));
             match target_names.entry(name) {
                 Entry::Vacant(entry) => {
                     entry.insert(None);
