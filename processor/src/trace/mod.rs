@@ -5,9 +5,9 @@ use core::ops::Range;
 #[cfg(feature = "std")]
 use miden_air::trace::PADDED_TRACE_WIDTH;
 use miden_air::{
-    AuxBuilder, PublicInputs,
+    AirWitness, AuxBuilder, ProcessorAir, PublicInputs, debug,
     trace::{
-        DECODER_TRACE_OFFSET, MainTrace, STACK_TRACE_OFFSET,
+        DECODER_TRACE_OFFSET, MainTrace, STACK_TRACE_OFFSET, TRACE_WIDTH,
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     },
 };
@@ -15,7 +15,7 @@ use miden_air::{
 use crate::{
     AdviceProvider, Felt, MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
     fast::ExecutionOutput,
-    field::ExtensionField,
+    field::{ExtensionField, QuadFelt},
     precompile::{PrecompileRequest, PrecompileTranscript},
     utils::{ColMatrix, Matrix, RowMajorMatrix},
 };
@@ -205,6 +205,54 @@ impl ExecutionTrace {
     /// Destructures this execution trace into the process’s final stack and advice states.
     pub fn into_outputs(self) -> (StackOutputs, AdviceProvider) {
         (self.stack_outputs, self.advice)
+    }
+
+    // DEBUG CONSTRAINT CHECKING
+    // --------------------------------------------------------------------------------------------
+
+    /// Validates this execution trace against all AIR constraints without generating a STARK
+    /// proof.
+    ///
+    /// This is the recommended way to test trace correctness. It is much faster than full STARK
+    /// proving and provides better error diagnostics (panics on the first constraint violation
+    /// with the instance and row index).
+    ///
+    /// # Panics
+    ///
+    /// Panics if any AIR constraint evaluates to nonzero.
+    pub fn check_constraints(&self) {
+        let public_inputs = self.public_inputs();
+        let trace_matrix = self.to_row_major_matrix();
+
+        let (public_values, kernel_felts) = public_inputs.to_air_inputs();
+        let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
+
+        let aux_builder = self.aux_trace_builders();
+
+        // Derive deterministic challenges by hashing public values with Poseidon2.
+        // The 4-element digest maps directly to 2 QuadFelt challenges.
+        let digest = crate::crypto::hash::Poseidon2::hash_elements(&public_values);
+        let challenges =
+            [QuadFelt::new([digest[0], digest[1]]), QuadFelt::new([digest[2], digest[3]])];
+
+        let witness = AirWitness::new(&trace_matrix, &public_values, var_len_public_inputs);
+        debug::check_constraints(&ProcessorAir, witness, &aux_builder, &challenges);
+    }
+
+    /// Converts the main trace from column-major to row-major format.
+    ///
+    /// Only includes the first [`TRACE_WIDTH`] columns (excluding padding columns added for
+    /// Poseidon2 rate alignment), which is the width expected by the AIR.
+    // TODO: the padding columns can be removed once we use the lifted-stark's virtual trace
+    // alignment, which pads to the required rate width without materializing extra columns.
+    pub fn to_row_major_matrix(&self) -> RowMajorMatrix<Felt> {
+        let trace_len = self.get_trace_len();
+        let mut col_major_data = Vec::with_capacity(TRACE_WIDTH * trace_len);
+        for col_idx in 0..TRACE_WIDTH {
+            col_major_data.extend_from_slice(self.main_trace.get_column(col_idx));
+        }
+        let col_major_matrix = RowMajorMatrix::new(col_major_data, trace_len);
+        col_major_matrix.transpose()
     }
 
     // HELPER METHODS

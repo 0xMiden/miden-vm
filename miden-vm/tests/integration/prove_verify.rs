@@ -207,7 +207,7 @@ mod fast_parallel {
     use miden_processor::{
         ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs, trace::build_trace,
     };
-    use miden_prover::{config, execution_trace_to_row_major, prove_stark};
+    use miden_prover::{config, prove_stark};
     use miden_verifier::verify;
     use miden_vm::DefaultHost;
 
@@ -252,7 +252,7 @@ mod fast_parallel {
         let trace = build_trace(execution_output, trace_context, program.to_info()).unwrap();
 
         // Convert trace to row-major format for proving
-        let trace_matrix = execution_trace_to_row_major(&trace);
+        let trace_matrix = trace.to_row_major_matrix();
 
         // Build public inputs
         let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();

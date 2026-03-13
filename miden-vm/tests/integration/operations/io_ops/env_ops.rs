@@ -197,7 +197,7 @@ fn caller() {
     let bar_hash = build_bar_hash();
     test.expect_stack(&[bar_hash[0], bar_hash[1], bar_hash[2], bar_hash[3], 5]);
 
-    test.prove_and_verify(vec![1, 2, 3, 4, 5], false);
+    test.check_constraints();
 }
 
 fn build_bar_hash() -> [u64; 4] {

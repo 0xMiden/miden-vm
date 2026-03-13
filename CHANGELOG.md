@@ -25,6 +25,7 @@
 - Added recursion guards for assembly inputs and tests ([#2792](https://github.com/0xMiden/miden-vm/pull/2792)).
 - Introduced `build_trace_with_max_len()` which stops building the trace after a given max, and `build_trace()` no longer allocates more than 2^29 rows ([#2809](https://github.com/0xMiden/miden-vm/pull/2809)).
 - `DebugHandler`'s default method implementations are now no-ops (instead of prints) ([#2837](https://github.com/0xMiden/miden-vm/pull/2837)).
+- Added `ExecutionTrace::check_constraints()` for fast debug constraint checking without STARK proving, and migrated tests from `prove_and_verify` ([#2846](https://github.com/0xMiden/miden-vm/pull/2846)).
 
 #### Fixes
 

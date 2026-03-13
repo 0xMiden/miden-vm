@@ -20,7 +20,7 @@ fn simple_program() {
 #[test]
 fn multi_output_program() {
     let test = build_test!("begin mul movup.2 drop end", &[1, 2, 3]);
-    test.prove_and_verify(vec![1, 2, 3], false);
+    test.check_constraints();
 }
 
 #[test]
@@ -31,5 +31,5 @@ fn program_with_respan() {
         end";
     let pub_inputs = vec![];
 
-    build_op_test!(source, &pub_inputs).prove_and_verify(pub_inputs, false);
+    build_op_test!(source, &pub_inputs).check_constraints();
 }
