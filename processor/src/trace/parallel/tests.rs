@@ -1,6 +1,6 @@
 use alloc::{string::String, sync::Arc};
 
-use miden_air::trace::chiplets::hasher::HASH_CYCLE_LEN;
+use miden_air::trace::{AUX_TRACE_RAND_CHALLENGES, chiplets::hasher::HASH_CYCLE_LEN};
 use miden_core::{
     Felt,
     mast::{
@@ -11,7 +11,7 @@ use miden_core::{
     operations::Operation,
     program::{Kernel, Program, StackInputs},
 };
-use miden_utils_testing::get_column_name;
+use miden_utils_testing::{get_column_name, rand::rand_array};
 use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
 
@@ -385,11 +385,53 @@ fn test_trace_generation_at_fragment_boundaries(
         }
     }
 
-    // Sanity check to ensure that the traces are identical.
-    assert_eq!(format!("{trace_from_fragments:?}"), format!("{trace_from_single_fragment:?}"));
+    // Verify stack outputs match.
+    assert_eq!(trace_from_fragments.stack_outputs(), trace_from_single_fragment.stack_outputs(),);
+
+    // Verify program info and trace length summary match.
+    assert_eq!(trace_from_fragments.program_info(), trace_from_single_fragment.program_info(),);
+    assert_eq!(
+        trace_from_fragments.trace_len_summary(),
+        trace_from_single_fragment.trace_len_summary(),
+    );
+
+    // Verify merkle store data match deterministically.
+    let merkle_nodes_from_fragments: alloc::collections::BTreeMap<_, _> = trace_from_fragments
+        .advice_provider()
+        .merkle_store()
+        .inner_nodes()
+        .map(|info| (info.value, (info.left, info.right)))
+        .collect();
+    let merkle_nodes_from_single: alloc::collections::BTreeMap<_, _> = trace_from_single_fragment
+        .advice_provider()
+        .merkle_store()
+        .inner_nodes()
+        .map(|info| (info.value, (info.left, info.right)))
+        .collect();
+    assert_eq!(merkle_nodes_from_fragments, merkle_nodes_from_single,);
+
+    // Verify aux trace columns match.
+    let rand_elements = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_from_fragments = trace_from_fragments.build_aux_trace(&rand_elements).unwrap();
+    let aux_from_single_fragment =
+        trace_from_single_fragment.build_aux_trace(&rand_elements).unwrap();
+    let aux_from_fragments =
+        aux_from_fragments.columns().map(|col| col.to_vec()).collect::<Vec<_>>();
+    let aux_from_single_fragment =
+        aux_from_single_fragment.columns().map(|col| col.to_vec()).collect::<Vec<_>>();
+    assert_eq!(aux_from_fragments, aux_from_single_fragment,);
+
+    // Compare deterministic traces as a compact sanity check and to keep the snapshot stable.
+    assert_eq!(
+        format!("{:?}", DeterministicTrace(&trace_from_fragments)),
+        format!("{:?}", DeterministicTrace(&trace_from_single_fragment)),
+        "Deterministic trace mismatch between fragments and single fragment"
+    );
 
     // Snapshot testing to ensure that future changes don't unexpectedly change the trace.
-    insta::assert_compact_debug_snapshot!(testname, trace_from_fragments);
+    // We use DeterministicTrace to produce stable Debug output, since ExecutionTrace contains
+    // a MerkleStore backed by HashMap whose iteration order is non-deterministic.
+    insta::assert_compact_debug_snapshot!(testname, DeterministicTrace(&trace_from_fragments));
 }
 
 /// Creates a library with a single procedure containing just a SWAP operation.
@@ -986,4 +1028,33 @@ fn testname() -> String {
     // Replace `::` with `__` to make snapshot file names Windows-compatible.
     // Windows does not allow `:` in file names.
     std::thread::current().name().unwrap().replace("::", "__")
+}
+
+/// Wrapper around `ExecutionTrace` that produces deterministic `Debug` output.
+///
+/// `ExecutionTrace` contains a `MerkleStore` backed by `HashMap`, whose iteration order is
+/// non-deterministic. This wrapper formats the Merkle store nodes sorted by key, making the
+/// output stable across runs for snapshot testing.
+struct DeterministicTrace<'a>(&'a ExecutionTrace);
+
+impl core::fmt::Debug for DeterministicTrace<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let trace = self.0;
+
+        // Collect merkle store nodes into a sorted BTreeMap for deterministic output
+        let sorted_nodes: alloc::collections::BTreeMap<_, _> = trace
+            .advice_provider()
+            .merkle_store()
+            .inner_nodes()
+            .map(|info| (info.value, (info.left, info.right)))
+            .collect();
+
+        f.debug_struct("ExecutionTrace")
+            .field("main_trace", trace.main_trace())
+            .field("program_info", &trace.program_info())
+            .field("stack_outputs", &trace.stack_outputs())
+            .field("merkle_store_nodes", &sorted_nodes)
+            .field("trace_len_summary", &trace.trace_len_summary())
+            .finish()
+    }
 }

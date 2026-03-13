@@ -103,7 +103,7 @@ pub mod crypto {
     }
 
     pub mod random {
-        pub use miden_crypto::rand::{RpoRandomCoin, RpxRandomCoin};
+        pub use miden_crypto::rand::RandomCoin;
     }
 
     pub mod dsa {

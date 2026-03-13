@@ -1,9 +1,13 @@
 use alloc::{collections::BTreeMap, vec::Vec};
+use core::mem::MaybeUninit;
 
 use miden_air::trace::RANGE_CHECK_TRACE_WIDTH;
 
 use super::RowIndex;
-use crate::{Felt, ZERO, utils::uninit_vector};
+use crate::{
+    Felt, ZERO,
+    utils::{assume_init_vec, uninit_vector},
+};
 
 mod aux_trace;
 pub use aux_trace::AuxTraceBuilder;
@@ -119,15 +123,14 @@ impl RangeChecker {
         // checker, and make sure this length is smaller than or equal to the target trace length.
         assert!(trace_len <= target_len, "target trace length too small");
 
-        // allocated memory for the trace; this memory is un-initialized but this is not a problem
-        // because we'll overwrite all values in it anyway.
-        let mut trace = unsafe { [uninit_vector(target_len), uninit_vector(target_len)] };
+        // allocate memory for the trace
+        let mut trace = [uninit_vector(target_len), uninit_vector(target_len)];
 
         // determine the number of padding rows needed to get to target trace length and pad the
         // table with the required number of rows.
         let num_padding_rows = target_len - trace_len;
-        trace[0][..num_padding_rows].fill(ZERO);
-        trace[1][..num_padding_rows].fill(ZERO);
+        trace[0][..num_padding_rows].fill(MaybeUninit::new(ZERO));
+        trace[1][..num_padding_rows].fill(MaybeUninit::new(ZERO));
 
         // build the trace table
         let mut i = num_padding_rows;
@@ -143,6 +146,12 @@ impl RangeChecker {
         // one row longer than the main trace, since values in the bus column are based on data from
         // the "current" row of the main trace but placed into the "next" row of the bus column.)
         write_trace_row(&mut trace, &mut i, 0, (u16::MAX).into());
+
+        assert_eq!(i, target_len, "range checker trace not fully initialized; trace_len mismatch");
+
+        // all elements are now initialized
+        let [t0, t1] = trace;
+        let trace = unsafe { [assume_init_vec(t0), assume_init_vec(t1)] };
 
         RangeCheckTrace {
             trace,
@@ -228,7 +237,7 @@ pub fn get_num_bridge_rows(delta: u16) -> usize {
 /// Adds a row for the values to be range checked. In case the difference between the current and
 /// next value is not a power of 3, this function will add additional bridge rows to the trace.
 fn write_rows(
-    trace: &mut [Vec<Felt>],
+    trace: &mut [Vec<MaybeUninit<Felt>>],
     step: &mut usize,
     num_lookups: usize,
     value: u16,
@@ -250,8 +259,13 @@ fn write_rows(
 }
 
 /// Populates a single row at the specified step in the trace table.
-fn write_trace_row(trace: &mut [Vec<Felt>], step: &mut usize, num_lookups: usize, value: u64) {
-    trace[0][*step] = Felt::new(num_lookups as u64);
-    trace[1][*step] = Felt::new(value);
+fn write_trace_row(
+    trace: &mut [Vec<MaybeUninit<Felt>>],
+    step: &mut usize,
+    num_lookups: usize,
+    value: u64,
+) {
+    trace[0][*step].write(Felt::new(num_lookups as u64));
+    trace[1][*step].write(Felt::new(value));
     *step += 1;
 }

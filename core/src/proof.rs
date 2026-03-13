@@ -94,7 +94,7 @@ impl ExecutionProof {
     // DESTRUCTOR
     // --------------------------------------------------------------------------------------------
 
-    /// Returns components of this execution proof.
+    /// Returns the hash function, proof bytes, and precompile requests.
     pub fn into_parts(self) -> (HashFunction, Vec<u8>, Vec<PrecompileRequest>) {
         (self.hash_fn, self.proof, self.pc_requests)
     }
