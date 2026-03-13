@@ -74,7 +74,25 @@ impl MidenProject {
     ///   properties from the workspace-level are assumed to exist and be correct. It is up to the
     ///   caller to compute the concrete property values and validate them at that point.
     pub fn parse(source: Arc<SourceFile>) -> Result<Self, Report> {
-        if source.as_str().contains("[workspace") {
+        // We end up parsing the file twice here, which is wasteful, but since these files are
+        // small its of negligable impact, and this is a bit less fragile than searching for
+        // `[workspace]` in the source text.
+        let toml = toml::from_str::<toml::Table>(source.as_str()).map_err(|err| {
+            let span = err
+                .span()
+                .map(|span| {
+                    let start = span.start as u32;
+                    let end = span.end as u32;
+                    SourceSpan::new(source.id(), start..end)
+                })
+                .unwrap_or_default();
+            Report::from(ProjectFileError::ParseError {
+                message: err.message().to_string(),
+                source_file: source.clone(),
+                span,
+            })
+        })?;
+        if toml.contains_key("workspace") {
             Ok(Self::Workspace(Box::new(WorkspaceFile::parse(source)?)))
         } else {
             Ok(Self::Package(Box::new(ProjectFile::parse(source)?)))
