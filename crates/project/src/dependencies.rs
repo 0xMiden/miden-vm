@@ -128,6 +128,15 @@ pub enum InvalidDependencySpecError {
         #[label(primary)]
         span: SourceSpan,
     },
+    #[error(
+        "conflicting 'git' revisions: 'branch' and 'rev' may refer to different commits, you cannot specify both"
+    )]
+    ConflictingGitRevision {
+        #[label(primary)]
+        first: SourceSpan,
+        #[label]
+        second: SourceSpan,
+    },
     #[error("missing version: expected one of 'version', 'git', or 'digest' to be provided")]
     MissingVersion {
         #[label(primary)]
@@ -157,6 +166,14 @@ impl TryFrom<Span<&crate::ast::DependencySpec>> for DependencyVersionScheme {
                 Some(VersionRequirement::Semantic(v)) => Some(v.clone()),
                 None => None,
             };
+            if let Some(branch) = ast.branch.as_ref()
+                && let Some(rev) = ast.rev.as_ref()
+            {
+                return Err(InvalidDependencySpecError::ConflictingGitRevision {
+                    first: branch.span(),
+                    second: rev.span(),
+                });
+            }
             let revision = ast
                 .branch
                 .as_ref()
