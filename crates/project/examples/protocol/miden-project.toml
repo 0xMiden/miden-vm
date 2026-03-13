@@ -6,7 +6,7 @@ members = [
 ]
 
 [workspace.dependencies]
-miden-utils = { path = "utils" }
+miden-utils = { path = "utils", linkage = "static" }
 miden-tx = { path = "kernel" }
 
 [profile.test]

@@ -8,6 +8,7 @@ extern crate std;
 #[cfg(feature = "serde")]
 pub mod ast;
 mod dependencies;
+mod linkage;
 mod package;
 mod profile;
 mod target;
@@ -36,8 +37,8 @@ use serde::{Deserialize, Serialize};
 pub use toml::Value;
 
 pub use self::{
-    dependencies::*, package::Package, profile::Profile, target::Target, target_type::TargetType,
-    workspace::Workspace,
+    dependencies::*, linkage::Linkage, package::Package, profile::Profile, target::Target,
+    target_type::TargetType, workspace::Workspace,
 };
 
 /// An alias for [`alloc::collections::BTreeMap`].

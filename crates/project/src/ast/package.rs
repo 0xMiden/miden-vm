@@ -244,7 +244,16 @@ impl ProjectFile {
                                 dep.as_ref(),
                                 workspace,
                             )?;
-                            dependencies.push(Dependency::new(dep.name.clone(), version));
+                            // Prefer the linkage requested by the package, but defer to the
+                            // workspace if one is not specified at the package level. Use the
+                            // default linkage mode if non is specified
+                            let linkage = dependency
+                                .linkage
+                                .as_deref()
+                                .copied()
+                                .or(dep.linkage.as_deref().copied())
+                                .unwrap_or_default();
+                            dependencies.push(Dependency::new(dep.name.clone(), version, linkage));
                         },
                         None => {
                             return Err(ProjectFileError::InvalidPackageDependency {
@@ -265,9 +274,11 @@ impl ProjectFile {
                     .into());
                 }
             } else {
+                let linkage = dependency.linkage.as_deref().copied().unwrap_or_default();
                 dependencies.push(Dependency::new(
                     dependency.name.clone(),
                     DependencyVersionScheme::try_from(dependency.as_ref())?,
+                    linkage,
                 ));
             }
         }
