@@ -24,6 +24,10 @@ const MAX_TYPE_EXPR_NESTING: usize = 256;
 ///
 /// Since type resolution happens in two different contexts during assembly, this abstraction allows
 /// us to share more of the resolution logic in both places.
+///
+/// NOTE: Most methods of this trait take a mutable reference to the resolver, so that the resolver
+/// can mutate its own state as necessary during resolution (e.g. to manage a cache, or other side
+/// table-like data structures).
 pub trait TypeResolver<E> {
     fn source_manager(&self) -> Arc<dyn SourceManager>;
     /// Should be called by consumers of this resolver to convert a [SymbolResolutionError] to the
