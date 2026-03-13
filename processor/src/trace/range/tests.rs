@@ -62,6 +62,17 @@ fn range_checks_rand() {
     validate_trace(&trace, &values);
 }
 
+#[test]
+#[should_panic(expected = "range checker trace not fully initialized")]
+fn into_trace_with_table_panics_on_mismatched_len() {
+    let checker = RangeChecker::new();
+    let table_len = checker.get_number_range_checker_rows();
+    let target_len = table_len.next_power_of_two().saturating_mul(2);
+
+    // Pass an inconsistent table length on purpose; this should now panic before unsafe init.
+    let _ = checker.into_trace_with_table(table_len + 1, target_len);
+}
+
 // HELPER FUNCTIONS
 // ================================================================================================
 

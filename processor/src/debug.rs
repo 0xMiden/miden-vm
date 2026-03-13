@@ -1,6 +1,7 @@
 use alloc::{boxed::Box, string::String, vec::Vec};
 use core::fmt;
 
+use miden_air::trace::Challenges;
 use miden_core::field::ExtensionField;
 
 use crate::Felt;
@@ -8,7 +9,7 @@ use crate::Felt;
 /// A message that can be sent on a bus.
 pub(crate) trait BusMessage<E: ExtensionField<Felt>>: fmt::Display {
     /// The concrete value that this message evaluates to.
-    fn value(&self, alphas: &[E]) -> E;
+    fn value(&self, challenges: &Challenges<E>) -> E;
 
     /// The source of this message (e.g. "mload" or "memory chiplet").
     fn source(&self) -> &str;
@@ -46,8 +47,8 @@ where
     /// is removed from the list of outstanding responses. Otherwise, the request is added to the
     /// list of outstanding requests.
     #[cfg(any(test, feature = "bus-debugger"))]
-    pub fn add_request(&mut self, request_msg: Box<dyn BusMessage<E>>, alphas: &[E]) {
-        let msg_value = request_msg.value(alphas);
+    pub fn add_request(&mut self, request_msg: Box<dyn BusMessage<E>>, challenges: &Challenges<E>) {
+        let msg_value = request_msg.value(challenges);
 
         if let Some(pos) =
             self.outstanding_responses.iter().position(|(value, _)| *value == msg_value)
@@ -62,8 +63,12 @@ where
     /// removed from the list of outstanding requests. Otherwise, the response is added to the list
     /// of outstanding responses.
     #[cfg(any(test, feature = "bus-debugger"))]
-    pub fn add_response(&mut self, response_msg: Box<dyn BusMessage<E>>, alphas: &[E]) {
-        let msg_value = response_msg.value(alphas);
+    pub fn add_response(
+        &mut self,
+        response_msg: Box<dyn BusMessage<E>>,
+        challenges: &Challenges<E>,
+    ) {
+        let msg_value = response_msg.value(challenges);
 
         if let Some(pos) =
             self.outstanding_requests.iter().position(|(value, _)| *value == msg_value)

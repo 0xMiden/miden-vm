@@ -7,6 +7,7 @@ use miden_assembly_syntax::{
     },
     debuginfo::{SourceManager, SourceSpan, Span, Spanned},
 };
+use miden_core::Word;
 
 use crate::{GlobalItemIndex, LinkerError, ModuleIndex, linker::Linker};
 
@@ -87,6 +88,7 @@ impl<'a> SymbolResolver<'a> {
         match target {
             InvocationTarget::MastRoot(mast_root) => {
                 log::debug!(target: "name-resolver::invoke", "resolving {target}");
+                self.validate_syscall_digest(context, *mast_root)?;
                 match self.graph.get_procedure_index_by_digest(mast_root) {
                     None => Ok(SymbolResolution::MastRoot(*mast_root)),
                     Some(gid) if context.in_syscall() => {
@@ -162,6 +164,7 @@ impl<'a> SymbolResolver<'a> {
                     }
                 },
                 SymbolResolution::MastRoot(mast_root) => {
+                    self.validate_syscall_digest(context, mast_root)?;
                     match self.graph.get_procedure_index_by_digest(&mast_root) {
                         None => Ok(SymbolResolution::MastRoot(mast_root)),
                         Some(gid) if context.in_syscall() => {
@@ -193,6 +196,34 @@ impl<'a> SymbolResolver<'a> {
                 resolution => Ok(resolution),
             },
         }
+    }
+
+    fn validate_syscall_digest(
+        &self,
+        context: &SymbolResolutionContext,
+        mast_root: Span<Word>,
+    ) -> Result<(), LinkerError> {
+        if !context.in_syscall() {
+            return Ok(());
+        }
+        // Syscalls must be validated against an attached kernel at assembly time.
+        if !self.graph.has_nonempty_kernel() {
+            return Err(LinkerError::InvalidSysCallTarget {
+                span: context.span,
+                source_file: self.source_manager().get(context.span.source_id()).ok(),
+                callee: Arc::<Path>::from(Path::new("syscall")),
+            });
+        }
+        // Kernel digests only contain exported kernel procedures.
+        if !self.graph.kernel().contains_proc(*mast_root.inner()) {
+            let digest_path = format!("{mast_root}");
+            return Err(LinkerError::InvalidSysCallTarget {
+                span: context.span,
+                source_file: self.source_manager().get(context.span.source_id()).ok(),
+                callee: Arc::<Path>::from(Path::new(&digest_path)),
+            });
+        }
+        Ok(())
     }
 
     /// Resolve `target`, a possibly-resolved symbol reference, to a [SymbolResolution], using

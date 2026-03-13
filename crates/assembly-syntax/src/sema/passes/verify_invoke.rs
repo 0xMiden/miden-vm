@@ -56,7 +56,10 @@ impl VerifyInvokeTargets<'_> {
     }
     fn resolve_external(&mut self, span: SourceSpan, path: &Path) -> Option<InvocationTarget> {
         log::debug!(target: "verify-invoke", "resolving external symbol '{path}'");
-        let (module, rest) = path.split_first().unwrap();
+        let Some((module, rest)) = path.split_first() else {
+            self.analyzer.error(SemanticAnalysisError::InvalidInvokePath { span });
+            return None;
+        };
         log::debug!(target: "verify-invoke", "attempting to resolve '{module}' to local import");
         if let Some(import) = self.module.get_import_mut(module) {
             log::debug!(target: "verify-invoke", "found import '{}'", import.target());

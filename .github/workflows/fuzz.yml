@@ -30,6 +30,15 @@ jobs:
           - mast_node_info
           - basic_block_data
           - debug_info
+          - program_deserialize
+          - kernel_deserialize
+          - stack_io_deserialize
+          - advice_inputs_deserialize
+          - operation_deserialize
+          - execution_proof_deserialize
+          - precompile_request_deserialize
+          - library_deserialize
+          - package_deserialize
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4

@@ -41,7 +41,7 @@ mod tests;
 // ================================================================================================
 
 pub use continuation_stack::Continuation;
-pub use errors::{ExecutionError, HostError, MemoryError};
+pub use errors::{AceError, ExecutionError, HostError, MemoryError};
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
 pub use fast::{BreakReason, ExecutionOutput, FastProcessor, ResumeContext};
 pub use host::{
@@ -167,6 +167,12 @@ impl<'a> ProcessorState<'a> {
         self.processor.advice_provider()
     }
 
+    /// Returns the execution options.
+    #[inline(always)]
+    pub fn execution_options(&self) -> &ExecutionOptions {
+        self.processor.execution_options()
+    }
+
     /// Returns the current clock cycle of a process.
     #[inline(always)]
     pub fn clock(&self) -> RowIndex {
@@ -184,7 +190,7 @@ impl<'a> ProcessorState<'a> {
     /// This method can access elements beyond the top 16 positions by using the overflow table.
     #[inline(always)]
     pub fn get_stack_item(&self, pos: usize) -> Felt {
-        self.processor.stack_get(pos)
+        self.processor.stack_get_safe(pos)
     }
 
     /// Returns a word starting at the specified element index on the stack.
@@ -200,7 +206,7 @@ impl<'a> ProcessorState<'a> {
     /// Creating a word does not change the state of the stack.
     #[inline(always)]
     pub fn get_stack_word(&self, start_idx: usize) -> Word {
-        self.processor.stack_get_word(start_idx)
+        self.processor.stack_get_word_safe(start_idx)
     }
 
     /// Returns stack state at the current clock cycle. This includes the top 16 items of the

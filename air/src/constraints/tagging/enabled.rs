@@ -4,13 +4,13 @@
 //! Non-testing or no-std builds use a no-op stub. This keeps call sites clean and avoids `std`
 //! machinery in production.
 
-use miden_crypto::stark::air::MidenAirBuilder;
+use miden_crypto::stark::air::LiftedAirBuilder;
 
 /// Extension methods for tagging constraints.
 ///
 /// These helpers wrap blocks that should emit a fixed number of assertions. Each assertion
 /// consumes one ID from the active tagged block, and the block panics if the count mismatches.
-pub trait TaggingAirBuilderExt: MidenAirBuilder {
+pub trait TaggingAirBuilderExt: LiftedAirBuilder {
     /// Tag exactly one asserted constraint.
     ///
     /// Panics if the wrapped block emits zero or multiple assertions when tagging is enabled.
@@ -42,4 +42,4 @@ pub trait TaggingAirBuilderExt: MidenAirBuilder {
     }
 }
 
-impl<T: MidenAirBuilder> TaggingAirBuilderExt for T {}
+impl<T: LiftedAirBuilder> TaggingAirBuilderExt for T {}
