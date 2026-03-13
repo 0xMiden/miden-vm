@@ -636,8 +636,6 @@ impl Assembler {
             },
             SymbolItem::Type(item) => {
                 let ty = self.linker.resolve_type(item.span(), gid)?;
-                // TODO(pauls): Add export type for enums, and make sure we emit them
-                // here
                 LibraryExport::Type(TypeExport { path: symbol_path, ty })
             },
 

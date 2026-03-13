@@ -326,8 +326,9 @@ Doc: Form = {
 }
 
 TypeDecl: Form = {
-    <l:@L> <vis:Visibility> "type" <name:BareIdent> "=" <ty:TypeExpr> <r:@R> => {
+    <l:@L> <vis:Visibility> "type" <name:BareIdent> "=" <mut ty:TypeExpr> <r:@R> => {
         let span = span!(source_id, l, r);
+        ty.set_name(name.clone());
         Form::Type(TypeAlias::new(vis, name, ty).with_span(span))
     },
 
@@ -340,7 +341,7 @@ TypeDecl: Form = {
                 Some(discriminant) => {
                     match discriminant {
                         ConstantExpr::Int(value) => {
-                            vs.push(Variant::new(name.clone(), ConstantExpr::Int(value)).with_span(span));
+                            vs.push(Variant::new(name.clone(), ConstantExpr::Int(value), None).with_span(span));
                             next = ConstantExpr::BinaryOp {
                                 span,
                                 op: ConstantOp::Add,
@@ -349,7 +350,7 @@ TypeDecl: Form = {
                             };
                         }
                         expr => {
-                            vs.push(Variant::new(name.clone(), expr).with_span(span));
+                            vs.push(Variant::new(name.clone(), expr, None).with_span(span));
                             next = ConstantExpr::BinaryOp {
                                 span,
                                 op: ConstantOp::Add,
@@ -366,7 +367,7 @@ TypeDecl: Form = {
                         lhs: Box::new(ConstantExpr::Var(Span::new(span, PathBuf::from(name.clone()).into()))),
                         rhs: Box::new(ConstantExpr::Int(Span::new(span, IntValue::U8(1)))),
                     });
-                    vs.push(Variant::new(name, discriminant).with_span(span));
+                    vs.push(Variant::new(name, discriminant, None).with_span(span));
                 }
             }
         }
@@ -530,6 +531,7 @@ StructType: StructType = {
         };
         Ok(StructType {
             span,
+            name: None,
             repr,
             fields,
         })
@@ -680,22 +682,8 @@ Proc: Form = {
                     match attributes.entry(list.id()) {
                         AttributeSetEntry::Vacant(entry) => {
                             let valid_cc = match &list.as_slice()[0] {
-                                MetaExpr::Ident(cc) => match cc.as_str() {
-                                    "fast" => Some(types::CallConv::Fast),
-                                    "C" => Some(types::CallConv::SystemV),
-                                    "wasm" => Some(types::CallConv::Wasm),
-                                    "canon-lift" => Some(types::CallConv::CanonLift),
-                                    "canon-lower" => Some(types::CallConv::CanonLower),
-                                    _ => None,
-                                },
-                                MetaExpr::String(cc) => match cc.as_str() {
-                                    "fast" => Some(types::CallConv::Fast),
-                                    "C" => Some(types::CallConv::SystemV),
-                                    "wasm" => Some(types::CallConv::Wasm),
-                                    "canon-lift" => Some(types::CallConv::CanonLift),
-                                    "canon-lower" => Some(types::CallConv::CanonLower),
-                                    _ => None,
-                                },
+                                MetaExpr::Ident(cc) => cc.as_str().parse::<types::CallConv>().ok(),
+                                MetaExpr::String(cc) => cc.as_str().parse::<types::CallConv>().ok(),
                                 _ => None,
                             };
                             if valid_cc.is_some() {

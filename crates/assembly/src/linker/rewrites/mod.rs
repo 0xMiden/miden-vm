@@ -80,12 +80,15 @@ pub fn rewrite_symbol(
             resolver.cache.constants.insert(gid, value);
         },
         SymbolItem::Type(item) => {
-            let resolver = Resolver {
+            let mut resolver = Resolver {
                 resolver,
                 cache,
                 current_module: gid.module,
             };
-            let ty = item.ty().resolve_type(&resolver)?.expect("type or error to have been raised");
+            let ty = item
+                .ty()
+                .resolve_type(&mut resolver)?
+                .expect("type or error to have been raised");
             resolver.cache.types.insert(gid, ty);
         },
     }

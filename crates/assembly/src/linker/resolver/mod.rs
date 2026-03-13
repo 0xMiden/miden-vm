@@ -1,8 +1,9 @@
 mod symbol_resolver;
 
-use alloc::{collections::BTreeMap, sync::Arc};
+use alloc::{collections::BTreeMap, string::ToString, sync::Arc};
 
 use miden_assembly_syntax::{
+    Report,
     ast::{
         self, GlobalItemIndex, Ident, ItemIndex, ModuleIndex, Path, SymbolResolution,
         SymbolResolutionError,
@@ -10,8 +11,10 @@ use miden_assembly_syntax::{
         types,
     },
     debuginfo::{SourceFile, SourceManager, SourceSpan, Span, Spanned},
+    diagnostics::{LabeledSpan, RelatedError, Severity, diagnostic},
     library::ItemInfo,
 };
+use smallvec::SmallVec;
 
 pub use self::symbol_resolver::{SymbolResolutionContext, SymbolResolver};
 use super::SymbolItem;
@@ -160,13 +163,55 @@ impl<'a, 'b: 'a> ast::TypeResolver<LinkerError> for Resolver<'a, 'b> {
     }
 
     fn get_type(
-        &self,
+        &mut self,
         context: SourceSpan,
         gid: GlobalItemIndex,
     ) -> Result<types::Type, LinkerError> {
         match self.resolver.linker()[gid].item() {
             SymbolItem::Compiled(ItemInfo::Type(info)) => Ok(info.ty.clone()),
-            SymbolItem::Type(ast::TypeDecl::Enum(ty)) => Ok(ty.ty().clone()),
+            SymbolItem::Type(ast::TypeDecl::Enum(ty)) => {
+                let mut variants = SmallVec::<[types::Variant; 4]>::new_const();
+                for variant in ty.variants() {
+                    let discriminant_value = match self.resolver.linker().const_eval(
+                        gid,
+                        &variant.discriminant,
+                        self.cache,
+                    )? {
+                        ast::ConstantValue::Int(v) => Some(v.as_canonical_u64() as u128),
+                        invalid => {
+                            return Err(LinkerError::Related {
+                                errors: vec![RelatedError::new(Report::from(diagnostic!(
+                                    severity = Severity::Error,
+                                    labels = vec![LabeledSpan::at(
+                                        invalid.span(),
+                                        "invalid enum discriminant: expected an integer"
+                                    )],
+                                    "invalid enum type"
+                                )))]
+                                .into_boxed_slice(),
+                            });
+                        },
+                    };
+                    variants.push(types::Variant {
+                        name: variant.name.clone().into_inner(),
+                        value: match variant.value_ty.as_ref() {
+                            Some(t) => t.resolve_type(self)?,
+                            None => None,
+                        },
+                        discriminant_value,
+                    });
+                }
+                types::EnumType::new(ty.name().clone().into_inner(), ty.ty().clone(), variants)
+                    .map(|t| types::Type::Enum(Arc::new(t)))
+                    .map_err(|err| LinkerError::Related {
+                        errors: vec![RelatedError::from(Report::from(diagnostic!(
+                            severity = Severity::Error,
+                            labels = vec![LabeledSpan::at(context, err.to_string())],
+                            "invalid enum type"
+                        )))]
+                        .into_boxed_slice(),
+                    })
+            },
             SymbolItem::Type(ast::TypeDecl::Alias(ty)) => {
                 Ok(ty.ty.resolve_type(self)?.expect("unreachable"))
             },
@@ -181,14 +226,14 @@ impl<'a, 'b: 'a> ast::TypeResolver<LinkerError> for Resolver<'a, 'b> {
     }
 
     fn get_local_type(
-        &self,
+        &mut self,
         context: SourceSpan,
         id: ItemIndex,
     ) -> Result<Option<types::Type>, LinkerError> {
         self.get_type(context, self.current_module + id).map(Some)
     }
 
-    fn resolve_type_ref(&self, ty: Span<&Path>) -> Result<SymbolResolution, LinkerError> {
+    fn resolve_type_ref(&mut self, ty: Span<&Path>) -> Result<SymbolResolution, LinkerError> {
         let context = SymbolResolutionContext {
             span: ty.span(),
             module: self.current_module,
