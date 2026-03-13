@@ -170,6 +170,12 @@ impl<'a, 'b: 'a> ast::TypeResolver<LinkerError> for Resolver<'a, 'b> {
         match self.resolver.linker()[gid].item() {
             SymbolItem::Compiled(ItemInfo::Type(info)) => Ok(info.ty.clone()),
             SymbolItem::Type(ast::TypeDecl::Enum(ty)) => {
+                // When resolving an EnumType, we must do three things:
+                //
+                // * Resolve the discriminant type
+                // * Resolve the discriminant value and payload type for each variant
+                // * Construct the midenc_hir_type::EnumType, and validate that the enum is valid
+                //   according to the rules it enforces
                 let mut variants = SmallVec::<[types::Variant; 4]>::new_const();
                 for variant in ty.variants() {
                     let discriminant_value = match self.resolver.linker().const_eval(
