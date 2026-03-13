@@ -1,3 +1,5 @@
+use miden_debug_types::Span;
+
 use crate::{
     MAX_REPEAT_COUNT,
     ast::{Constant, Export, Module},
@@ -99,5 +101,55 @@ pub const ACCOUNT_ID_SUFFIX_OFFSET = ACCOUNT_ID_AND_NONCE_OFFSET + 2
     assert!(
         exported.value.references().is_empty(),
         "expected semantic analysis to remove private local constant references from exported constants",
+    );
+}
+
+#[test]
+fn alias_then_constant_name_conflict_can_reach_resolver_duplicate_error() {
+    let context = SyntaxTestContext::default();
+    let module = context
+        .parse_module(
+            r#"
+use ::dep::"EVENT_HASH"
+const EVENT_HASH = 1
+"#,
+        )
+        .expect("expected module to parse and pass semantic analysis");
+
+    let err = module
+        .resolve(Span::unknown("EVENT_HASH"), context.source_manager())
+        .expect_err("expected duplicate symbol to be caught by resolver lookup");
+    assert!(
+        matches!(
+            &err,
+            crate::ast::SymbolResolutionError::DuplicateSymbol { symbol, .. }
+                if symbol.as_ref() == "EVENT_HASH"
+        ),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn alias_then_type_name_conflict_can_reach_resolver_duplicate_error() {
+    let context = SyntaxTestContext::default();
+    let module = context
+        .parse_module(
+            r#"
+use ::dep::"Thing"
+type Thing = felt
+"#,
+        )
+        .expect("expected module to parse and pass semantic analysis");
+
+    let err = module
+        .resolve(Span::unknown("Thing"), context.source_manager())
+        .expect_err("expected duplicate symbol to be caught by resolver lookup");
+    assert!(
+        matches!(
+            &err,
+            crate::ast::SymbolResolutionError::DuplicateSymbol { symbol, .. }
+                if symbol.as_ref() == "Thing"
+        ),
+        "unexpected error: {err}"
     );
 }
