@@ -13,7 +13,7 @@ pub use self::{
     version::{SemVer, Version, VersionReq},
     version_requirement::VersionRequirement,
 };
-use crate::{Diagnostic, SourceSpan, Span, Uri, miette};
+use crate::{Diagnostic, Linkage, SourceSpan, Span, Uri, miette};
 
 /// Represents a project/package dependency declaration
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,12 +22,18 @@ pub struct Dependency {
     name: Span<Arc<str>>,
     /// The version requirement and resolution scheme for this dependency.
     version: DependencyVersionScheme,
+    /// The linkage for this dependency
+    linkage: Linkage,
 }
 
 impl Dependency {
     /// Construct a new [Dependency] with the given name and version scheme
-    pub const fn new(name: Span<Arc<str>>, version: DependencyVersionScheme) -> Self {
-        Self { name, version }
+    pub const fn new(
+        name: Span<Arc<str>>,
+        version: DependencyVersionScheme,
+        linkage: Linkage,
+    ) -> Self {
+        Self { name, version, linkage }
     }
 
     /// Get the name of this dependency
@@ -38,6 +44,11 @@ impl Dependency {
     /// Get the versioning scheme/requirement for this dependency
     pub fn scheme(&self) -> &DependencyVersionScheme {
         &self.version
+    }
+
+    /// Get the linkage mode for this dependency
+    pub const fn linkage(&self) -> Linkage {
+        self.linkage
     }
 
     /// Get the version requirement for this dependency, if one was given

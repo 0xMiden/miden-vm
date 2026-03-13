@@ -1,5 +1,5 @@
 use super::{parsing::SetSourceId, *};
-use crate::{SourceId, Span, Uri, VersionRequirement};
+use crate::{Linkage, SourceId, Span, Uri, VersionRequirement};
 
 /// Represents information about a project dependency needed to resolve it to a Miden package
 #[derive(Debug, Clone)]
@@ -42,6 +42,9 @@ pub struct DependencySpec {
     /// conjunction with `branch`.
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
     pub rev: Option<Span<Arc<str>>>,
+    /// If present, specifies the desired linkage for this dependency during assembly
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
+    pub linkage: Option<Span<Linkage>>,
 }
 
 #[inline(always)]

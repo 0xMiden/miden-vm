@@ -7,7 +7,7 @@ use miden_assembly_syntax::{
 };
 use miden_core::assert_matches;
 
-use crate::{DependencyVersionScheme, TargetType, Workspace};
+use crate::{DependencyVersionScheme, Linkage, TargetType, Workspace};
 
 struct TestContext {
     pub source_manager: Arc<dyn SourceManager>,
@@ -81,6 +81,7 @@ fn can_load_protocol_example_project() -> Result<(), Report> {
     assert_eq!(kernel_project.dependencies().len(), 1);
     assert_eq!(&**kernel_project.dependencies()[0].name(), "miden-utils");
     assert_matches!(kernel_project.dependencies()[0].scheme(), DependencyVersionScheme::Workspace { member } if member.path() == "utils");
+    assert_eq!(kernel_project.dependencies()[0].linkage(), Linkage::Static);
 
     let userspace_project = workspace
         .get_member_by_name("miden-protocol")
@@ -97,6 +98,7 @@ fn can_load_protocol_example_project() -> Result<(), Report> {
     assert_matches!(userspace_project.dependencies()[0].scheme(), DependencyVersionScheme::Workspace { member } if member.path() == "kernel");
     assert_eq!(&**userspace_project.dependencies()[1].name(), "miden-utils");
     assert_matches!(userspace_project.dependencies()[1].scheme(), DependencyVersionScheme::Workspace { member } if member.path() == "utils");
+    assert_eq!(userspace_project.dependencies()[1].linkage(), Linkage::Dynamic);
 
     Ok(())
 }

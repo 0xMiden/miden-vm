@@ -7,5 +7,5 @@ namespace = "miden::protocol"
 path = "mod.masm"
 
 [dependencies]
-miden-utils.workspace = true
+miden-utils = { workspace = true, linkage = "dynamic" }
 miden-tx.workspace = true
