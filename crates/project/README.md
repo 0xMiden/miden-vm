@@ -90,7 +90,7 @@ version = "0.1.0"
 # 
 # * `kernel`
 # * `account-component`
-# * `note-script`
+# * `note`
 # * `tx-script`
 kind = "library"
 # The relative path to the root module, if the project is written in Miden 
@@ -132,7 +132,7 @@ To recap, there are two categories of target, _library_ and _executable_, and _l
 * `library`, `lib` - produce a package which exports one or more procedures that can be called from other artifacts, but cannot be executed by the Miden VM without additional setup. Libraries have no implicit dependency on any particular kernel.
 * `kernel` - a special library type that provides core functionality in conjunction with an executable program. This is the only artifact type whose exports can be called using `syscall`, and that can be installed as a kernel when instantiating the VM.
 * `account-component` - produce a package which is a valid account component in the Miden protocol, and contains all metadata needed to construct that component. This type is only valid in conjunction with the Miden transaction kernel.
-* `note-script` - produce a package which is a valid note script in the Miden protocol, and exports the necessary metadata and procedures to construct and execute the note. This type is only valid in conjunction with the Miden transaction kernel.
+* `note` - produce a package which is a valid note script in the Miden protocol, and exports the necessary metadata and procedures to construct and execute the note. This type is only valid in conjunction with the Miden transaction kernel.
 * `tx-script` - produce a package which is a valid transaction script in the Miden protocol, and exports the necessary metadata and procedures to construct and execute the script. This type is only valid in conjunction with the Miden transaction kernel.
 
 As noted earlier, you may define multiple targets in a single Miden project - however you must then request a specific target when assembling the project. Additionally, all targets in a project share the same dependency set.
