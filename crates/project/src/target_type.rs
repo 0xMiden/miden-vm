@@ -52,7 +52,7 @@ impl TargetType {
             Self::Executable => "executable",
             Self::Kernel => "kernel",
             Self::AccountComponent => "account-component",
-            Self::NoteScript => "note-script",
+            Self::NoteScript => "note",
             Self::TransactionScript => "transaction-script",
         }
     }
@@ -99,7 +99,7 @@ impl core::str::FromStr for TargetType {
             "bin" | "program" | "executable" => Ok(Self::Executable),
             "kernel" => Ok(Self::Kernel),
             "account" | "account-component" => Ok(Self::AccountComponent),
-            "note" | "note-script" => Ok(Self::NoteScript),
+            "note" => Ok(Self::NoteScript),
             "tx-script" | "transaction-script" => Ok(Self::TransactionScript),
             s => Err(InvalidTargetTypeError::Name(s.to_string().into_boxed_str())),
         }
