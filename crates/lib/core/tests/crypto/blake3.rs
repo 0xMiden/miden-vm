@@ -24,8 +24,8 @@ fn blake3_hash_64_bytes() {
         .map(|&bytes| u32::from_le_bytes(bytes) as u64)
         .collect::<Vec<u64>>();
 
-    let obytes = Blake3_256::hash(&ibytes).as_bytes();
-    let ofelts = group_slice_elements::<u8, 4>(&obytes)
+    let ohash = Blake3_256::hash(&ibytes);
+    let ofelts = group_slice_elements::<u8, 4>(ohash.as_bytes())
         .iter()
         .map(|&bytes| u32::from_le_bytes(bytes) as u64)
         .collect::<Vec<u64>>();
@@ -51,8 +51,8 @@ fn blake3_hash_32_bytes() {
         .map(|&bytes| u32::from_le_bytes(bytes) as u64)
         .collect::<Vec<u64>>();
 
-    let obytes = Blake3_256::hash(&ibytes).as_bytes();
-    let ofelts = group_slice_elements::<u8, 4>(&obytes)
+    let ohash = Blake3_256::hash(&ibytes);
+    let ofelts = group_slice_elements::<u8, 4>(ohash.as_bytes())
         .iter()
         .map(|&bytes| u32::from_le_bytes(bytes) as u64)
         .collect::<Vec<u64>>();

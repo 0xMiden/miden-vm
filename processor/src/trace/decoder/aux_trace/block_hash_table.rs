@@ -1,4 +1,4 @@
-use miden_air::trace::RowIndex;
+use miden_air::trace::{Challenges, RowIndex};
 use miden_core::{Word, ZERO, field::ExtensionField, operations::opcodes};
 
 use super::{AuxColumnBuilder, Felt, MainTrace, ONE};
@@ -16,33 +16,25 @@ use crate::debug::BusDebugger;
 /// future. However, when we encounter the beginning of a SPLIT block, we only push the left or the
 /// right child, depending on the current value on the stack (since only one child gets executed in
 /// a SPLIT block). When we encounter an `END` operation, we remove the block from the table that
-/// corresponds to the block that just ended. The table is initialized with the root block's hash,
-/// since it doesn't have a parent, and so would never be added to the table otherwise.
+/// corresponds to the block that just ended. The root block's hash is checked via
+/// `reduced_aux_values`, since it doesn't have a parent and would never be added to the table
+/// otherwise.
 #[derive(Default)]
 pub struct BlockHashTableColumnBuilder {}
 
 impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BlockHashTableColumnBuilder {
-    fn init_responses(
-        &self,
-        main_trace: &MainTrace,
-        alphas: &[E],
-        _debugger: &mut BusDebugger<E>,
-    ) -> E {
-        BlockHashTableRow::table_init(main_trace).collapse(alphas)
-    }
-
     /// Removes a row from the block hash table.
     fn get_requests_at(
         &self,
         main_trace: &MainTrace,
-        alphas: &[E],
+        challenges: &Challenges<E>,
         row: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         let op_code = main_trace.get_op_code(row).as_canonical_u64() as u8;
 
         match op_code {
-            opcodes::END => BlockHashTableRow::from_end(main_trace, row).collapse(alphas),
+            opcodes::END => BlockHashTableRow::from_end(main_trace, row).collapse(challenges),
             _ => E::ONE,
         }
     }
@@ -51,7 +43,7 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BlockHashTableColumnBuilde
     fn get_responses_at(
         &self,
         main_trace: &MainTrace,
-        alphas: &[E],
+        challenges: &Challenges<E>,
         row: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
@@ -62,19 +54,26 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BlockHashTableColumnBuilde
                 let left_child_row = BlockHashTableRow::from_join(main_trace, row, true);
                 let right_child_row = BlockHashTableRow::from_join(main_trace, row, false);
 
-                // Note: this adds the 2 rows separately to the block hash table.
-                left_child_row.collapse(alphas) * right_child_row.collapse(alphas)
+                left_child_row.collapse(challenges) * right_child_row.collapse(challenges)
             },
-            opcodes::SPLIT => BlockHashTableRow::from_split(main_trace, row).collapse(alphas),
+            opcodes::SPLIT => BlockHashTableRow::from_split(main_trace, row).collapse(challenges),
             opcodes::LOOP => BlockHashTableRow::from_loop(main_trace, row)
-                .map(|row| row.collapse(alphas))
+                .map(|row| row.collapse(challenges))
                 .unwrap_or(E::ONE),
-            opcodes::REPEAT => BlockHashTableRow::from_repeat(main_trace, row).collapse(alphas),
+            opcodes::REPEAT => BlockHashTableRow::from_repeat(main_trace, row).collapse(challenges),
             opcodes::DYN | opcodes::DYNCALL | opcodes::CALL | opcodes::SYSCALL => {
-                BlockHashTableRow::from_dyn_dyncall_call_syscall(main_trace, row).collapse(alphas)
+                BlockHashTableRow::from_dyn_dyncall_call_syscall(main_trace, row)
+                    .collapse(challenges)
             },
             _ => E::ONE,
         }
+    }
+
+    #[cfg(any(test, feature = "bus-debugger"))]
+    fn enforce_bus_balance(&self) -> bool {
+        // The block hash table's final value encodes the program hash boundary term,
+        // which is checked via reduced_aux_values. It does not balance to identity.
+        false
     }
 }
 
@@ -102,18 +101,6 @@ pub struct BlockHashTableRow {
 impl BlockHashTableRow {
     // CONSTRUCTORS
     // ----------------------------------------------------------------------------------------------
-
-    // Instantiates the initial row in the block hash table.
-    pub fn table_init(main_trace: &MainTrace) -> Self {
-        let program_hash =
-            main_trace.decoder_hasher_state_first_half(main_trace.last_program_row());
-        Self {
-            parent_block_id: ZERO,
-            child_block_hash: program_hash,
-            is_first_child: false,
-            is_loop_body: false,
-        }
-    }
 
     /// Computes the row to be removed from the block hash table when encountering an `END`
     /// operation.
@@ -245,17 +232,18 @@ impl BlockHashTableRow {
     /// Collapses this row to a single field element in the field specified by E by taking a random
     /// linear combination of all the columns. This requires 8 alpha values, which are assumed to
     /// have been drawn randomly.
-    pub fn collapse<E: ExtensionField<Felt>>(&self, alphas: &[E]) -> E {
+    pub fn collapse<E: ExtensionField<Felt>>(&self, challenges: &Challenges<E>) -> E {
         let is_first_child = if self.is_first_child { ONE } else { ZERO };
         let is_loop_body = if self.is_loop_body { ONE } else { ZERO };
-        alphas[0]
-            + alphas[1] * self.parent_block_id
-            + alphas[2] * self.child_block_hash[0]
-            + alphas[3] * self.child_block_hash[1]
-            + alphas[4] * self.child_block_hash[2]
-            + alphas[5] * self.child_block_hash[3]
-            + alphas[6] * is_first_child
-            + alphas[7] * is_loop_body
+        challenges.encode([
+            self.parent_block_id,
+            self.child_block_hash[0],
+            self.child_block_hash[1],
+            self.child_block_hash[2],
+            self.child_block_hash[3],
+            is_first_child,
+            is_loop_body,
+        ])
     }
 
     // TEST
