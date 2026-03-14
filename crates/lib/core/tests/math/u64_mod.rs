@@ -1040,6 +1040,67 @@ fn unchecked_shr() {
     build_test!(source, &stack![b as u64, a0, a1, 5]).expect_stack(&[c0, c1, 5]);
 }
 
+/// POC: u64::shr produces wrong results when shift >= 32 and a_lo == 0xFFFF_FFFF.
+///
+/// Root cause: for n >= 32, pow_lo == 0, so the code substitutes adjusted_div = 0xFFFF_FFFF
+/// to avoid division by zero. But u32divmod(0xFFFF_FFFF, 0xFFFF_FFFF) yields quotient = 1,
+/// and this non-zero quotient leaks into the high limb of the result (which should be 0).
+#[test]
+fn shr_bug_shift_eq32_with_lo_all_ones() {
+    let source = "
+        use miden::core::math::u64
+        begin
+            exec.u64::shr
+        end";
+
+    // 0x0000_0005_FFFF_FFFF >> 32 = 5
+    let a: u64 = 0x0000_0005_ffff_ffff;
+    let (a1, a0) = split_u64(a);
+    let expected = a >> 32;
+    let (e1, e0) = split_u64(expected);
+    build_test!(source, &stack![32_u64, a0, a1, 99]).expect_stack(&[e0, e1, 99]);
+}
+
+#[test]
+fn shr_bug_shift_gt32_with_lo_all_ones() {
+    let source = "
+        use miden::core::math::u64
+        begin
+            exec.u64::shr
+        end";
+
+    // 0x0000_0007_FFFF_FFFF >> 33 = 3
+    let a: u64 = 0x0000_0007_ffff_ffff;
+    let (a1, a0) = split_u64(a);
+    let expected = a >> 33;
+    let (e1, e0) = split_u64(expected);
+    build_test!(source, &stack![33_u64, a0, a1, 99]).expect_stack(&[e0, e1, 99]);
+}
+
+#[test]
+fn shr_bug_shift_ge32_with_lo_all_ones_boundary_sweep() {
+    let source = "
+        use miden::core::math::u64
+        begin
+            exec.u64::shr
+        end";
+
+    // cover multiple shifts in [32, 63] with a_lo fixed at 0xFFFF_FFFF
+    let shifts = [32_u32, 33_u32, 47_u32, 63_u32];
+    let hi_values = [1_u32, 5_u32, u32::MAX];
+
+    for shift in shifts {
+        for hi in hi_values {
+            let a = ((hi as u64) << 32) | (u32::MAX as u64);
+            let (a1, a0) = split_u64(a);
+            let expected = a >> shift;
+            let (e1, e0) = split_u64(expected);
+
+            build_test!(source, &stack![shift as u64, a0, a1, 99]).expect_stack(&[e0, e1, 99]);
+        }
+    }
+}
+
 #[test]
 fn unchecked_rotl() {
     let source = "
@@ -1167,6 +1228,30 @@ fn clz() {
     build_test!(source, &stack![3941320520, 492665065]).expect_stack(&[3]);
     // Same case
     build_test!(source, &stack![492665065, 492665065]).expect_stack(&[3]);
+}
+
+#[test]
+fn u32clz_zero_boundary_regression() {
+    let source = "begin u32clz end";
+
+    // Pre-seed a forged value to ensure u32clz uses the system event value for n = 0.
+    build_test!(source, &stack![0], &[31]).expect_stack(&[32]);
+}
+
+#[test]
+fn u32clz_nonzero_boundary_regression() {
+    let source = "begin u32clz end";
+
+    // Pre-seed a forged value to ensure u32clz does not accept clz = 32 for non-zero input.
+    build_test!(source, &stack![1], &[32]).expect_stack(&[31]);
+}
+
+proptest! {
+    #[test]
+    fn u32clz_matches_rust_leading_zeros(n in any::<u32>()) {
+        let source = "begin u32clz end";
+        build_test!(source, &stack![n as u64]).expect_stack(&[n.leading_zeros() as u64]);
+    }
 }
 
 #[test]

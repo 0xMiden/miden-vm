@@ -31,6 +31,7 @@ use miden_utils_testing::{
 };
 use rand::{Rng, SeedableRng, rng};
 use rand_chacha::ChaCha20Rng;
+use rstest::rstest;
 
 /// Modulus used for Falcon512-Poseidon2.
 const M: u64 = 12289;
@@ -342,6 +343,111 @@ fn test_mod_12289_larger_value() {
     // Expected: 8589934592 % 12289 = 7507
     let expected = 8589934592u64 % 12289;
     test.expect_stack(&[expected]);
+}
+
+#[rstest]
+#[case(0, 100_000)]
+#[case(2, 0)]
+#[case(0, 12_290)]
+#[case(1, 1)]
+#[case(0xffff_ffff, 0xffff_fffe)]
+fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo: u64) {
+    const FALCON_DIV: EventName =
+        EventName::new("miden::core::crypto::dsa::falcon512poseidon2::falcon_div");
+
+    // M^(-1) mod 2^64. For any a, q = a * M_INV (mod 2^64) satisfies M*q ≡ a (mod 2^64).
+    const M_INV: u64 = 15010777177727684609;
+
+    // Malicious event handler that always returns remainder = 0.
+    fn malicious_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
+        let a_hi = process.get_stack_item(1).as_canonical_u64();
+        let a_lo = process.get_stack_item(2).as_canonical_u64();
+        let a = (a_hi << 32) | a_lo;
+
+        let q = a.wrapping_mul(M_INV);
+        let q_hi = Felt::new(q >> 32);
+        let q_lo = Felt::new(q & 0xffff_ffff);
+
+        let remainder = AdviceMutation::extend_stack([ZERO]);
+        let quotient = AdviceMutation::extend_stack([q_hi, q_lo]);
+        Ok(vec![remainder, quotient])
+    }
+
+    let source = "
+        use miden::core::crypto::dsa::falcon512poseidon2
+        begin
+            exec.falcon512poseidon2::mod_12289
+        end
+    ";
+
+    let a = (a_hi << 32) | a_lo;
+    let true_remainder = a % M;
+    assert_ne!(true_remainder, 0, "test expects inputs with non-zero true remainder");
+
+    let op_stack = vec![a_hi, a_lo];
+    let adv_stack: Vec<u64> = vec![];
+
+    // Use the upstream test builder directly so we do not auto-register the honest
+    // falcon_div handler from CoreLibrary.
+    let core_lib = miden_core_lib::CoreLibrary::default();
+    let mut test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack);
+    test.libraries.push(core_lib.library().clone());
+    test.add_event_handler(FALCON_DIV, malicious_falcon_div);
+
+    // Hardened mod_12289 must reject forged advice.
+    expect_exec_error_matches!(
+        test,
+        ExecutionError::OperationError {
+            err: OperationError::FailedAssertion { err_msg, .. },
+            ..
+        } if err_msg.as_deref() == Some("comparison failed: quotient overflow")
+    );
+}
+
+#[test]
+fn test_mod_12289_rejects_forged_addition_overflow() {
+    const FALCON_DIV: EventName =
+        EventName::new("miden::core::crypto::dsa::falcon512poseidon2::falcon_div");
+
+    // Largest q such that M * q fits into 64 bits. This guarantees quotient-overflow checks pass.
+    const FORGED_Q: u64 = u64::MAX / M;
+    // 5664 > u64::MAX - M * FORGED_Q, so (M * FORGED_Q + FORGED_R) overflows u64.
+    const FORGED_R: u64 = 5_664;
+
+    // Malicious event handler that forges q/r to trigger the addition-overflow assertion.
+    fn malicious_falcon_div(_process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
+        let q_hi = Felt::new(FORGED_Q >> 32);
+        let q_lo = Felt::new(FORGED_Q & 0xffff_ffff);
+
+        let remainder = AdviceMutation::extend_stack([Felt::new(FORGED_R)]);
+        let quotient = AdviceMutation::extend_stack([q_hi, q_lo]);
+        Ok(vec![remainder, quotient])
+    }
+
+    let source = "
+        use miden::core::crypto::dsa::falcon512poseidon2
+        begin
+            exec.falcon512poseidon2::mod_12289
+        end
+    ";
+
+    // Choose input equal to wrapping sum, so without the assertz this forged advice would pass.
+    let a = M.wrapping_mul(FORGED_Q).wrapping_add(FORGED_R);
+    let op_stack = vec![a >> 32, a & 0xffff_ffff];
+    let adv_stack: Vec<u64> = vec![];
+
+    let core_lib = miden_core_lib::CoreLibrary::default();
+    let mut test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack);
+    test.libraries.push(core_lib.library().clone());
+    test.add_event_handler(FALCON_DIV, malicious_falcon_div);
+
+    expect_exec_error_matches!(
+        test,
+        ExecutionError::OperationError {
+            err: OperationError::FailedAssertion { err_msg, .. },
+            ..
+        } if err_msg.as_deref() == Some("comparison failed: addition overflow")
+    );
 }
 
 #[test]

@@ -2,6 +2,7 @@ use alloc::vec::Vec;
 
 use miden_core::{
     Felt, ZERO,
+    mast::{MastForest, MastNodeId},
     program::{MIN_STACK_DEPTH, StackInputs},
 };
 use proptest::prelude::*;
@@ -10,7 +11,12 @@ use super::{
     op_u32add, op_u32add3, op_u32and, op_u32assert2, op_u32div, op_u32madd, op_u32mul, op_u32split,
     op_u32sub, op_u32xor,
 };
-use crate::fast::{FastProcessor, NoopTracer};
+use crate::{
+    DefaultHost, ExecutionError,
+    execution::operations::execute_op,
+    fast::{FastProcessor, NoopTracer},
+    operation::Operation,
+};
 
 // CASTING OPERATIONS
 // --------------------------------------------------------------------------------------------
@@ -305,6 +311,105 @@ fn test_op_u32xor_min_stack() {
     let mut processor = FastProcessor::new(StackInputs::default());
     let mut tracer = NoopTracer;
     assert!(op_u32xor(&mut processor, &mut tracer).is_ok());
+}
+
+// U32CLZ VERIFIER REGRESSIONS
+// --------------------------------------------------------------------------------------------
+
+fn run_verify_clz_gadget(n: u32, clz: u32) -> Result<FastProcessor, ExecutionError> {
+    use Operation::*;
+
+    let mut processor = FastProcessor::new(
+        StackInputs::new(&[Felt::new(clz as u64), Felt::new(n as u64)]).unwrap(),
+    );
+    let mut tracer = NoopTracer;
+    let mut host = DefaultHost::default();
+
+    let forest = MastForest::new();
+    let node_id = MastNodeId::new_unchecked(0);
+
+    let ops: &[Operation] = &[
+        // Group 1 from `verify_clz`
+        Push(Felt::from_u8(32)),
+        Dup1,
+        Neg,
+        Add,
+        // `append_pow2_op` from `crates/assembly/src/instruction/field_ops.rs`
+        Push(Felt::from_u8(2)),
+        Pad,
+        Incr,
+        Swap,
+        Pad,
+        Expacc,
+        Expacc,
+        Expacc,
+        Expacc,
+        Expacc,
+        Expacc,
+        Drop,
+        Drop,
+        Swap,
+        Eqz,
+        Assert(ZERO),
+        // Group 2 from `verify_clz`
+        Push(Felt::from_u8(1)),
+        Neg,
+        Add,
+        Push(Felt::from_u8(2)),
+        U32div,
+        Drop,
+        Dup0,
+        Incr,
+        Push(Felt::from_u32(u32::MAX)),
+        MovUp2,
+        Neg,
+        Add,
+        Dup3,
+        Eqz,
+        MovDn3,
+        MovUp4,
+        U32and,
+        Dup2,
+        Push(Felt::from_u8(32)),
+        Eq,
+        MovUp4,
+        Dup1,
+        Eq,
+        Assert(ZERO),
+        MovDn2,
+        Eq,
+        Or,
+        Assert(ZERO),
+    ];
+
+    for (op_idx, op) in ops.iter().enumerate() {
+        let _ = execute_op(&mut processor, op, op_idx, &forest, node_id, &mut host, &mut tracer)?;
+    }
+
+    Ok(processor)
+}
+
+#[test]
+fn verify_clz_rejects_incorrect_clz_for_zero_input() {
+    let n = 0u32;
+    let bad_clz = 31u32;
+
+    assert_ne!(n.leading_zeros(), bad_clz, "sanity: witness must be invalid");
+    assert!(run_verify_clz_gadget(n, bad_clz).is_err());
+}
+
+#[test]
+fn verify_clz_rejects_clz_32_for_nonzero_input() {
+    let n = 1u32;
+    let bad_clz = 32u32;
+
+    assert_ne!(n.leading_zeros(), bad_clz, "sanity: witness must be invalid");
+    assert!(run_verify_clz_gadget(n, bad_clz).is_err());
+}
+
+#[test]
+fn verify_clz_accepts_zero_with_clz_32() {
+    run_verify_clz_gadget(0, 32).expect("gadget should accept valid zero boundary witness");
 }
 
 // HELPER FUNCTIONS

@@ -571,7 +571,7 @@ end
 #! The shift value n should be in the range [0, 64), otherwise it will result in an error.
 #! Stack transition looks as follows:
 #! [n, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = a >> n.
-#! This takes 44 cycles.
+#! This takes 49 cycles.
 pub proc shr(n: u32, a: u64) -> u64
     # ==========================================================================
     # RIGHT SHIFT: Computes a >> n where a is 64-bit and n is shift amount
@@ -694,16 +694,22 @@ pub proc shr(n: u32, a: u64) -> u64
     # c_lo = rem1 * multiplier + quot2
 
     # --- STEP 9: Conditional swap to get final result ---
-    movup.2
-    # [!borrow, c_lo, quot1, ...]
+    dup.2
+    # [!borrow, c_lo, quot1, !borrow, ...]
 
     cswap
-    # If !borrow=1 (normal case): swap c_lo and quot1 -> [quot1, c_lo, ...]
-    # If !borrow=0 (b>=32 case): no swap -> [c_lo, quot1, ...]
-    # Result in BE format: [c_hi, c_lo, ...]
+    # if !borrow=1 (normal case): swap c_lo and quot1 -> [quot1, c_lo, !borrow, ...]
+    # if !borrow=0 (b>=32 case): no swap -> [c_lo, quot1, !borrow, ...]
+    # result in BE format with flag: [c_hi, c_lo, !borrow, ...]
 
-    # Convert BE output to LE: [c_hi, c_lo] -> [c_lo, c_hi]
+    # when n >= 32, c_hi must be zero. multiply c_hi by !borrow to enforce this:
+    # !borrow=1 keeps c_hi unchanged for n<32; !borrow=0 clears c_hi for n>=32.
+    movup.2
+    # [!borrow, c_hi, c_lo, ...]
+    mul
+    # [c_hi * !borrow, c_lo, ...]
     swap
+    # [c_lo, c_hi, ...]
 end
 
 #! Performs left rotation of one unsigned 64-bit integer.

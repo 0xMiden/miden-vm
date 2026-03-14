@@ -7,6 +7,7 @@
 - Prevented a trace-generation panic by validating op batch groups in basic blocks ([#2782](https://github.com/0xMiden/miden-vm/pull/2782)).
 - Validated push immediate group commitments and slot placement to reject invalid immediates ([#2779](https://github.com/0xMiden/miden-vm/pull/2779)).
 - Fixed undefined behavior in parallel trace generation by limiting H0 batch inversion to initialized rows ([#2842](https://github.com/0xMiden/miden-vm/pull/2842)).
+- Hardened boundary and overflow checks for `u64::shr`, `ilog2`, `u32clz`, and Falcon `mod_12289` ([#2808](https://github.com/0xMiden/miden-vm/pull/2808)).
 
 ## 0.22.0 (TBD)
 
