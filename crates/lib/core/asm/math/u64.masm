@@ -694,10 +694,7 @@ pub proc shr(n: u32, a: u64) -> u64
     # c_lo = rem1 * multiplier + quot2
 
     # --- STEP 9: Conditional swap to get final result ---
-    movup.2
-    # [!borrow, c_lo, quot1, ...]
-
-    dup movdn.3
+    dup.2
     # [!borrow, c_lo, quot1, !borrow, ...]
 
     cswap
@@ -709,15 +706,10 @@ pub proc shr(n: u32, a: u64) -> u64
     # !borrow=1 keeps c_hi unchanged for n<32; !borrow=0 clears c_hi for n>=32.
     movup.2
     # [!borrow, c_hi, c_lo, ...]
-
-    swap
-    # [c_hi, !borrow, c_lo, ...]
-
     mul
     # [c_hi * !borrow, c_lo, ...]
-
-    # Convert BE output to LE: [c_hi, c_lo] -> [c_lo, c_hi]
     swap
+    # [c_lo, c_hi, ...]
 end
 
 #! Performs left rotation of one unsigned 64-bit integer.
