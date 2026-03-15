@@ -1,5 +1,5 @@
 use miden_air::trace::{
-    RowIndex,
+    Challenges, RowIndex,
     decoder::{OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS},
 };
 use miden_core::{field::ExtensionField, operations::opcodes};
@@ -20,14 +20,14 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for OpGroupTableColumnBuilder 
     fn get_requests_at(
         &self,
         main_trace: &MainTrace,
-        alphas: &[E],
+        challenges: &Challenges<E>,
         i: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         let delete_group_flag = main_trace.delta_group_count(i) * main_trace.is_in_span(i);
 
         if delete_group_flag == ONE {
-            get_op_group_table_removal_multiplicand(main_trace, i, alphas)
+            get_op_group_table_removal_multiplicand(main_trace, i, challenges)
         } else {
             E::ONE
         }
@@ -37,7 +37,7 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for OpGroupTableColumnBuilder 
     fn get_responses_at(
         &self,
         main_trace: &MainTrace,
-        alphas: &[E],
+        challenges: &Challenges<E>,
         i: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
@@ -46,10 +46,15 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for OpGroupTableColumnBuilder 
 
         match op_code {
             opcodes::SPAN | opcodes::RESPAN => {
-                get_op_group_table_inclusion_multiplicand(main_trace, i, alphas)
+                get_op_group_table_inclusion_multiplicand(main_trace, i, challenges)
             },
             _ => E::ONE,
         }
+    }
+
+    #[cfg(any(test, feature = "bus-debugger"))]
+    fn enforce_bus_balance(&self) -> bool {
+        true
     }
 }
 
@@ -60,7 +65,7 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for OpGroupTableColumnBuilder 
 fn get_op_group_table_inclusion_multiplicand<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     i: RowIndex,
-    alphas: &[E],
+    challenges: &Challenges<E>,
 ) -> E {
     let block_id = main_trace.addr(i + 1);
     let group_count = main_trace.group_count(i);
@@ -69,22 +74,16 @@ fn get_op_group_table_inclusion_multiplicand<E: ExtensionField<Felt>>(
     if op_batch_flag == OP_BATCH_8_GROUPS {
         let h = main_trace.decoder_hasher_state(i);
         (1..8_u8).fold(E::ONE, |acc, k| {
-            acc * (alphas[0]
-                + alphas[1] * block_id
-                + alphas[2] * (group_count - Felt::from_u8(k))
-                + alphas[3] * (h[k as usize]))
+            acc * challenges.encode([block_id, group_count - Felt::from_u8(k), h[k as usize]])
         })
     } else if op_batch_flag == OP_BATCH_4_GROUPS {
         let h = main_trace.decoder_hasher_state_first_half(i);
         (1..4_u8).fold(E::ONE, |acc, k| {
-            acc * (alphas[0]
-                + alphas[1] * block_id
-                + alphas[2] * (group_count - Felt::from_u8(k))
-                + alphas[3] * (h[k as usize]))
+            acc * challenges.encode([block_id, group_count - Felt::from_u8(k), h[k as usize]])
         })
     } else if op_batch_flag == OP_BATCH_2_GROUPS {
         let h = main_trace.decoder_hasher_state_first_half(i);
-        alphas[0] + alphas[1] * block_id + alphas[2] * (group_count - ONE) + alphas[3] * h[1]
+        challenges.encode([block_id, group_count - ONE, h[1]])
     } else {
         E::ONE
     }
@@ -94,7 +93,7 @@ fn get_op_group_table_inclusion_multiplicand<E: ExtensionField<Felt>>(
 fn get_op_group_table_removal_multiplicand<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     i: RowIndex,
-    alphas: &[E],
+    challenges: &Challenges<E>,
 ) -> E {
     let group_count = main_trace.group_count(i);
     let block_id = main_trace.addr(i);
@@ -111,5 +110,5 @@ fn get_op_group_table_removal_multiplicand<E: ExtensionField<Felt>>(
         }
     };
 
-    alphas[0] + alphas[1] * block_id + alphas[2] * group_count + alphas[3] * group_value
+    challenges.encode([block_id, group_count, group_value])
 }

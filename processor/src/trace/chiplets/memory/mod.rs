@@ -355,7 +355,6 @@ impl Memory {
                     let (delta_hi, delta_lo) = split_element_u32_into_u16(delta);
                     trace.set(row, D0_COL_IDX, delta_lo);
                     trace.set(row, D1_COL_IDX, delta_hi);
-                    // TODO: switch to batch inversion to improve efficiency.
                     trace.set(row, D_INV_COL_IDX, delta.try_inverse().unwrap_or(ZERO));
 
                     if prev_ctx == ctx && prev_addr == felt_addr {

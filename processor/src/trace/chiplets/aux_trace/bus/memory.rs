@@ -1,7 +1,7 @@
 use core::fmt::{Display, Formatter, Result as FmtResult};
 
 use miden_air::trace::{
-    MainTrace, RowIndex,
+    Challenges, MainTrace, RowIndex,
     chiplets::{
         ace::{ACE_INSTRUCTION_ID1_OFFSET, ACE_INSTRUCTION_ID2_OFFSET},
         memory::{
@@ -14,10 +14,7 @@ use miden_core::{
     FMP_ADDR, FMP_INIT_VALUE, Felt, ONE, ZERO, field::ExtensionField, operations::opcodes,
 };
 
-use crate::{
-    debug::{BusDebugger, BusMessage},
-    trace::chiplets::aux_trace::build_value,
-};
+use crate::debug::{BusDebugger, BusMessage};
 
 // CONSTANTS
 // ================================================================================================
@@ -30,7 +27,7 @@ const FOUR: Felt = Felt::new(4);
 /// Builds ACE chiplet read requests as part of the `READ` section made to the memory chiplet.
 pub fn build_ace_memory_read_word_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    alphas: &[E],
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -54,10 +51,10 @@ pub fn build_ace_memory_read_word_request<E: ExtensionField<Felt>>(
         source: "read word ACE",
     };
 
-    let value = message.value(alphas);
+    let value = message.value(challenges);
 
     #[cfg(any(test, feature = "bus-debugger"))]
-    _debugger.add_request(alloc::boxed::Box::new(message), alphas);
+    _debugger.add_request(alloc::boxed::Box::new(message), challenges);
 
     value
 }
@@ -65,7 +62,7 @@ pub fn build_ace_memory_read_word_request<E: ExtensionField<Felt>>(
 /// Builds ACE chiplet read requests as part of the `EVAL` section made to the memory chiplet.
 pub fn build_ace_memory_read_element_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    alphas: &[E],
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -88,10 +85,10 @@ pub fn build_ace_memory_read_element_request<E: ExtensionField<Felt>>(
         element,
     };
 
-    let value = message.value(alphas);
+    let value = message.value(challenges);
 
     #[cfg(any(test, feature = "bus-debugger"))]
-    _debugger.add_request(alloc::boxed::Box::new(message), alphas);
+    _debugger.add_request(alloc::boxed::Box::new(message), challenges);
 
     value
 }
@@ -100,7 +97,7 @@ pub fn build_ace_memory_read_element_request<E: ExtensionField<Felt>>(
 pub(super) fn build_dyn_dyncall_callee_hash_read_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     op_code_felt: Felt,
-    alphas: &[E],
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -117,10 +114,10 @@ pub(super) fn build_dyn_dyncall_callee_hash_read_request<E: ExtensionField<Felt>
         },
     };
 
-    let value = memory_req.value(alphas);
+    let value = memory_req.value(challenges);
 
     #[cfg(any(test, feature = "bus-debugger"))]
-    _debugger.add_request(alloc::boxed::Box::new(memory_req), alphas);
+    _debugger.add_request(alloc::boxed::Box::new(memory_req), challenges);
 
     value
 }
@@ -131,7 +128,7 @@ pub(super) fn build_dyn_dyncall_callee_hash_read_request<E: ExtensionField<Felt>
 /// Currently, this is done with `CALL` and `DYNCALL`.
 pub(super) fn build_fmp_initialization_write_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    alphas: &[E],
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -146,10 +143,10 @@ pub(super) fn build_fmp_initialization_write_request<E: ExtensionField<Felt>>(
         element: FMP_INIT_VALUE,
     };
 
-    let value = memory_req.value(alphas);
+    let value = memory_req.value(challenges);
 
     #[cfg(any(test, feature = "bus-debugger"))]
-    _debugger.add_request(alloc::boxed::Box::new(memory_req), alphas);
+    _debugger.add_request(alloc::boxed::Box::new(memory_req), challenges);
 
     value
 }
@@ -158,7 +155,7 @@ pub(super) fn build_fmp_initialization_write_request<E: ExtensionField<Felt>>(
 pub(super) fn build_mem_mloadw_mstorew_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     op_label: u8,
-    alphas: &[E],
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -188,10 +185,10 @@ pub(super) fn build_mem_mloadw_mstorew_request<E: ExtensionField<Felt>>(
         },
     };
 
-    let value = message.value(alphas);
+    let value = message.value(challenges);
 
     #[cfg(any(test, feature = "bus-debugger"))]
-    _debugger.add_request(alloc::boxed::Box::new(message), alphas);
+    _debugger.add_request(alloc::boxed::Box::new(message), challenges);
 
     value
 }
@@ -200,7 +197,7 @@ pub(super) fn build_mem_mloadw_mstorew_request<E: ExtensionField<Felt>>(
 pub(super) fn build_mem_mload_mstore_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     op_label: u8,
-    alphas: &[E],
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -220,10 +217,10 @@ pub(super) fn build_mem_mload_mstore_request<E: ExtensionField<Felt>>(
         element,
     };
 
-    let value = message.value(alphas);
+    let value = message.value(challenges);
 
     #[cfg(any(test, feature = "bus-debugger"))]
-    _debugger.add_request(alloc::boxed::Box::new(message), alphas);
+    _debugger.add_request(alloc::boxed::Box::new(message), challenges);
 
     value
 }
@@ -231,7 +228,7 @@ pub(super) fn build_mem_mload_mstore_request<E: ExtensionField<Felt>>(
 /// Builds `MSTREAM` requests made to the memory chiplet.
 pub(super) fn build_mstream_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    alphas: &[E],
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -269,12 +266,12 @@ pub(super) fn build_mstream_request<E: ExtensionField<Felt>>(
         source: "mstream req 2",
     };
 
-    let combined_value = mem_req_1.value(alphas) * mem_req_2.value(alphas);
+    let combined_value = mem_req_1.value(challenges) * mem_req_2.value(challenges);
 
     #[cfg(any(test, feature = "bus-debugger"))]
     {
-        _debugger.add_request(alloc::boxed::Box::new(mem_req_1), alphas);
-        _debugger.add_request(alloc::boxed::Box::new(mem_req_2), alphas);
+        _debugger.add_request(alloc::boxed::Box::new(mem_req_1), challenges);
+        _debugger.add_request(alloc::boxed::Box::new(mem_req_2), challenges);
     }
 
     combined_value
@@ -283,7 +280,7 @@ pub(super) fn build_mstream_request<E: ExtensionField<Felt>>(
 /// Builds `PIPE` requests made to the memory chiplet.
 pub(super) fn build_pipe_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    alphas: &[E],
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -321,12 +318,92 @@ pub(super) fn build_pipe_request<E: ExtensionField<Felt>>(
         source: "pipe req 2",
     };
 
-    let combined_value = mem_req_1.value(alphas) * mem_req_2.value(alphas);
+    let combined_value = mem_req_1.value(challenges) * mem_req_2.value(challenges);
 
     #[cfg(any(test, feature = "bus-debugger"))]
     {
-        _debugger.add_request(alloc::boxed::Box::new(mem_req_1), alphas);
-        _debugger.add_request(alloc::boxed::Box::new(mem_req_2), alphas);
+        _debugger.add_request(alloc::boxed::Box::new(mem_req_1), challenges);
+        _debugger.add_request(alloc::boxed::Box::new(mem_req_2), challenges);
+    }
+
+    combined_value
+}
+
+/// Builds `CRYPTOSTREAM` requests made to the memory chiplet.
+///
+/// CryptoStream reads two words from `src_ptr` and `src_ptr + 4`, and writes two words (the
+/// ciphertext) to `dst_ptr` and `dst_ptr + 4`. The ciphertext is `plaintext + rate`, where
+/// rate is the stack top before the operation. We derive the read (plaintext) values as
+/// `ciphertext - rate`.
+pub(super) fn build_crypto_stream_request<E: ExtensionField<Felt>>(
+    main_trace: &MainTrace,
+    challenges: &Challenges<E>,
+    row: RowIndex,
+    _debugger: &mut BusDebugger<E>,
+) -> E {
+    let ctx = main_trace.ctx(row);
+    let clk = main_trace.clk(row);
+    let src_addr = main_trace.stack_element(12, row);
+    let dst_addr = main_trace.stack_element(13, row);
+
+    // Ciphertext is on the stack after the operation (row + 1), positions 0..7.
+    let ciphertext: [Felt; 8] = core::array::from_fn(|i| main_trace.stack_element(i, row + 1));
+
+    // Rate is on the stack before the operation (row), positions 0..7.
+    let rate: [Felt; 8] = core::array::from_fn(|i| main_trace.stack_element(i, row));
+
+    // Plaintext = ciphertext - rate.
+    let plaintext: [Felt; 8] = core::array::from_fn(|i| ciphertext[i] - rate[i]);
+
+    // Two read-word requests at src_addr and src_addr + 4.
+    let read_label = Felt::from_u8(MEMORY_READ_WORD_LABEL);
+    let read_req_1 = MemoryWordMessage {
+        op_label: read_label,
+        ctx,
+        addr: src_addr,
+        clk,
+        word: [plaintext[0], plaintext[1], plaintext[2], plaintext[3]],
+        source: "crypto_stream read 1",
+    };
+    let read_req_2 = MemoryWordMessage {
+        op_label: read_label,
+        ctx,
+        addr: src_addr + FOUR,
+        clk,
+        word: [plaintext[4], plaintext[5], plaintext[6], plaintext[7]],
+        source: "crypto_stream read 2",
+    };
+
+    // Two write-word requests at dst_addr and dst_addr + 4.
+    let write_label = Felt::from_u8(MEMORY_WRITE_WORD_LABEL);
+    let write_req_1 = MemoryWordMessage {
+        op_label: write_label,
+        ctx,
+        addr: dst_addr,
+        clk,
+        word: [ciphertext[0], ciphertext[1], ciphertext[2], ciphertext[3]],
+        source: "crypto_stream write 1",
+    };
+    let write_req_2 = MemoryWordMessage {
+        op_label: write_label,
+        ctx,
+        addr: dst_addr + FOUR,
+        clk,
+        word: [ciphertext[4], ciphertext[5], ciphertext[6], ciphertext[7]],
+        source: "crypto_stream write 2",
+    };
+
+    let combined_value = read_req_1.value(challenges)
+        * read_req_2.value(challenges)
+        * write_req_1.value(challenges)
+        * write_req_2.value(challenges);
+
+    #[cfg(any(test, feature = "bus-debugger"))]
+    {
+        _debugger.add_request(alloc::boxed::Box::new(read_req_1), challenges);
+        _debugger.add_request(alloc::boxed::Box::new(read_req_2), challenges);
+        _debugger.add_request(alloc::boxed::Box::new(write_req_1), challenges);
+        _debugger.add_request(alloc::boxed::Box::new(write_req_2), challenges);
     }
 
     combined_value
@@ -335,7 +412,7 @@ pub(super) fn build_pipe_request<E: ExtensionField<Felt>>(
 /// Builds `HORNERBASE` requests made to the memory chiplet.
 pub(super) fn build_hornerbase_eval_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    alphas: &[E],
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -362,12 +439,12 @@ pub(super) fn build_hornerbase_eval_request<E: ExtensionField<Felt>>(
         element: eval_point_1,
     };
 
-    let value = mem_req_0.value(alphas) * mem_req_1.value(alphas);
+    let value = mem_req_0.value(challenges) * mem_req_1.value(challenges);
 
     #[cfg(any(test, feature = "bus-debugger"))]
     {
-        _debugger.add_request(alloc::boxed::Box::new(mem_req_0), alphas);
-        _debugger.add_request(alloc::boxed::Box::new(mem_req_1), alphas);
+        _debugger.add_request(alloc::boxed::Box::new(mem_req_0), challenges);
+        _debugger.add_request(alloc::boxed::Box::new(mem_req_1), challenges);
     }
 
     value
@@ -376,7 +453,7 @@ pub(super) fn build_hornerbase_eval_request<E: ExtensionField<Felt>>(
 /// Builds `HORNEREXT` requests made to the memory chiplet.
 pub(super) fn build_hornerext_eval_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    alphas: &[E],
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -399,11 +476,11 @@ pub(super) fn build_hornerext_eval_request<E: ExtensionField<Felt>>(
         source: "hornerext_eval_* req",
     };
 
-    let value = mem_req.value(alphas);
+    let value = mem_req.value(challenges);
 
     #[cfg(any(test, feature = "bus-debugger"))]
     {
-        _debugger.add_request(alloc::boxed::Box::new(mem_req), alphas);
+        _debugger.add_request(alloc::boxed::Box::new(mem_req), challenges);
     }
 
     value
@@ -416,7 +493,7 @@ pub(super) fn build_hornerext_eval_request<E: ExtensionField<Felt>>(
 pub(super) fn build_memory_chiplet_responses<E>(
     main_trace: &MainTrace,
     row: RowIndex,
-    alphas: &[E],
+    challenges: &Challenges<E>,
     _debugger: &mut BusDebugger<E>,
 ) -> E
 where
@@ -455,10 +532,10 @@ where
 
         let message = MemoryElementMessage { op_label, ctx, addr, clk, element };
 
-        let value = message.value(alphas);
+        let value = message.value(challenges);
 
         #[cfg(any(test, feature = "bus-debugger"))]
-        _debugger.add_response(alloc::boxed::Box::new(message), alphas);
+        _debugger.add_response(alloc::boxed::Box::new(message), challenges);
 
         value
     } else if access_type == MEMORY_ACCESS_WORD {
@@ -476,10 +553,10 @@ where
             source: "memory chiplet",
         };
 
-        let value = message.value(alphas);
+        let value = message.value(challenges);
 
         #[cfg(any(test, feature = "bus-debugger"))]
-        _debugger.add_response(alloc::boxed::Box::new(message), alphas);
+        _debugger.add_response(alloc::boxed::Box::new(message), challenges);
 
         value
     } else {
@@ -523,21 +600,17 @@ impl<E> BusMessage<E> for MemoryWordMessage
 where
     E: ExtensionField<Felt>,
 {
-    fn value(&self, alphas: &[E]) -> E {
-        alphas[0]
-            + build_value(
-                &alphas[1..9],
-                [
-                    self.op_label,
-                    self.ctx,
-                    self.addr,
-                    self.clk,
-                    self.word[0],
-                    self.word[1],
-                    self.word[2],
-                    self.word[3],
-                ],
-            )
+    fn value(&self, challenges: &Challenges<E>) -> E {
+        challenges.encode([
+            self.op_label,
+            self.ctx,
+            self.addr,
+            self.clk,
+            self.word[0],
+            self.word[1],
+            self.word[2],
+            self.word[3],
+        ])
     }
 
     fn source(&self) -> &str {
@@ -567,12 +640,8 @@ impl<E> BusMessage<E> for MemoryElementMessage
 where
     E: ExtensionField<Felt>,
 {
-    fn value(&self, alphas: &[E]) -> E {
-        alphas[0]
-            + build_value(
-                &alphas[1..6],
-                [self.op_label, self.ctx, self.addr, self.clk, self.element],
-            )
+    fn value(&self, challenges: &Challenges<E>) -> E {
+        challenges.encode([self.op_label, self.ctx, self.addr, self.clk, self.element])
     }
 
     fn source(&self) -> &str {

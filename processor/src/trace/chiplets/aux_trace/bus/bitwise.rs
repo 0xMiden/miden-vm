@@ -1,15 +1,12 @@
 use core::fmt::{Display, Formatter, Result as FmtResult};
 
 use miden_air::trace::{
-    MainTrace, RowIndex, chiplets::bitwise::OP_CYCLE_LEN as BITWISE_OP_CYCLE_LEN,
+    Challenges, MainTrace, RowIndex, chiplets::bitwise::OP_CYCLE_LEN as BITWISE_OP_CYCLE_LEN,
 };
 use miden_core::{Felt, ONE, ZERO, field::ExtensionField};
 
 use super::get_op_label;
-use crate::{
-    debug::{BusDebugger, BusMessage},
-    trace::chiplets::aux_trace::build_value,
-};
+use crate::debug::{BusDebugger, BusMessage};
 
 // REQUESTS
 // ==============================================================================================
@@ -19,13 +16,10 @@ use crate::{
 pub(super) fn build_bitwise_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     is_xor: Felt,
-    alphas: &[E],
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
-    // NOTE: The processor calls chiplets.bitwise.u32and(stack[0], stack[1]), so
-    // the chiplet stores a_col = stack[0] (top) and b_col = stack[1] (second).
-    // The request must use the same order to match the chiplet's response.
     let bitwise_request_message = BitwiseMessage {
         op_label: get_op_label(ONE, ZERO, is_xor, ZERO),
         a: main_trace.stack_element(0, row),
@@ -34,10 +28,10 @@ pub(super) fn build_bitwise_request<E: ExtensionField<Felt>>(
         source: if is_xor == ONE { "u32xor" } else { "u32and" },
     };
 
-    let value = bitwise_request_message.value(alphas);
+    let value = bitwise_request_message.value(challenges);
 
     #[cfg(any(test, feature = "bus-debugger"))]
-    _debugger.add_request(alloc::boxed::Box::new(bitwise_request_message), alphas);
+    _debugger.add_request(alloc::boxed::Box::new(bitwise_request_message), challenges);
 
     value
 }
@@ -49,7 +43,7 @@ pub(super) fn build_bitwise_request<E: ExtensionField<Felt>>(
 pub(super) fn build_bitwise_chiplet_responses<E>(
     main_trace: &MainTrace,
     row: RowIndex,
-    alphas: &[E],
+    challenges: &Challenges<E>,
     _debugger: &mut BusDebugger<E>,
 ) -> E
 where
@@ -65,10 +59,10 @@ where
             source: "bitwise chiplet",
         };
 
-        let value = bitwise_message.value(alphas);
+        let value = bitwise_message.value(challenges);
 
         #[cfg(any(test, feature = "bus-debugger"))]
-        _debugger.add_response(alloc::boxed::Box::new(bitwise_message), alphas);
+        _debugger.add_response(alloc::boxed::Box::new(bitwise_message), challenges);
 
         value
     } else {
@@ -91,8 +85,8 @@ impl<E> BusMessage<E> for BitwiseMessage
 where
     E: ExtensionField<Felt>,
 {
-    fn value(&self, alphas: &[E]) -> E {
-        alphas[0] + build_value(&alphas[1..5], [self.op_label, self.a, self.b, self.z])
+    fn value(&self, challenges: &Challenges<E>) -> E {
+        challenges.encode([self.op_label, self.a, self.b, self.z])
     }
 
     fn source(&self) -> &str {

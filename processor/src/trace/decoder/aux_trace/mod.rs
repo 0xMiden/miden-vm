@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_air::trace::MainTrace;
+use miden_air::trace::{Challenges, MainTrace};
 use miden_core::field::ExtensionField;
 
 use crate::{Felt, ONE, ZERO, trace::AuxColumnBuilder};
@@ -30,26 +30,24 @@ impl AuxTraceBuilder {
     pub fn build_aux_columns<E: ExtensionField<Felt>>(
         &self,
         main_trace: &MainTrace,
-        rand_elements: &[E],
+        challenges: &Challenges<E>,
     ) -> Vec<Vec<E>> {
         let block_stack_column_builder = BlockStackColumnBuilder::default();
         let block_hash_column_builder = BlockHashTableColumnBuilder::default();
         let op_group_table_column_builder = OpGroupTableColumnBuilder::default();
 
-        let p1 = block_stack_column_builder.build_aux_column(main_trace, rand_elements);
-        let p2 = block_hash_column_builder.build_aux_column(main_trace, rand_elements);
-        let p3 = op_group_table_column_builder.build_aux_column(main_trace, rand_elements);
+        let p1 = block_stack_column_builder.build_aux_column(main_trace, challenges);
+        let p2 = block_hash_column_builder.build_aux_column(main_trace, challenges);
+        let p3 = op_group_table_column_builder.build_aux_column(main_trace, challenges);
 
         debug_assert_eq!(
             *p1.last().unwrap(),
             E::ONE,
             "block stack table is not empty at the end of program execution"
         );
-        debug_assert_eq!(
-            *p2.last().unwrap(),
-            E::ONE,
-            "block hash table is not empty at the end of program execution"
-        );
+        // p2 (block hash table) does NOT end at 1: the program hash boundary response
+        // is unmatched, so p2 ends at 1/program_hash_msg. This is verified by the
+        // verifier in reduced_aux_values.
         debug_assert_eq!(
             *p3.last().unwrap(),
             E::ONE,

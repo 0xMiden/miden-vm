@@ -290,7 +290,7 @@ High-level constructs for controlling the execution flow.
   ```
 - **Cycles:** No additional cost for counting; the block is unrolled `COUNT` times during compilation.
 - **Notes:**
-  - `COUNT` must be an integer or a named constant greater than 0.
+- `COUNT` must be an integer or a named constant in the range 1..=1,000,000.
   - Instructions inside can include nested control structures.
 
 ### Condition-Controlled Loops: `while.true ... end`

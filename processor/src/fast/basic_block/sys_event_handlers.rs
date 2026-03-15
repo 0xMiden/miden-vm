@@ -100,13 +100,21 @@ fn insert_mem_values_into_adv_map(processor: &mut FastProcessor) -> Result<(), S
     }
 
     let addr_range = start_addr as u32..end_addr as u32;
+
+    let max_value_size = processor.options.max_adv_map_value_size();
+    if addr_range.len() > max_value_size {
+        return Err(AdviceError::AdvMapValueSizeExceeded {
+            size: addr_range.len(),
+            max: max_value_size,
+        }
+        .into());
+    }
+
     let ctx = processor.ctx;
 
-    let mut values = Vec::with_capacity(addr_range.len() * WORD_SIZE);
-    for addr in addr_range {
-        let mem_value = processor.memory().read_element_impl(ctx, addr).unwrap_or(ZERO);
-        values.push(mem_value);
-    }
+    let values: Vec<Felt> = addr_range
+        .map(|addr| processor.memory().read_element_impl(ctx, addr).unwrap_or(ZERO))
+        .collect();
 
     let key = processor.stack_get_word(1);
     processor.advice.insert_into_map(key, values)?;
@@ -167,7 +175,7 @@ fn insert_hqword_into_adv_map(processor: &mut FastProcessor) -> Result<(), Syste
     let a = processor.stack_get_word(1);
     let b = processor.stack_get_word(5);
     let c = processor.stack_get_word(9);
-    let d = processor.stack_get_word(13);
+    let d = processor.stack_get_word_safe(13);
 
     // Hash in natural stack order [A, B, C, D].
     let key = Poseidon2::hash_elements(&[*a, *b, *c, *d].concat());
@@ -200,20 +208,19 @@ fn insert_hqword_into_adv_map(processor: &mut FastProcessor) -> Result<(), Syste
 fn insert_hperm_into_adv_map(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
     // Read the 12-element state from stack positions 1-12.
     // State layout: [RATE1, RATE2, CAP] where RATE1 is at positions 1-4.
-    // We read in reverse order to build the state array.
     let mut state = [
-        processor.stack_get(12),
-        processor.stack_get(11),
-        processor.stack_get(10),
-        processor.stack_get(9),
-        processor.stack_get(8),
-        processor.stack_get(7),
-        processor.stack_get(6),
-        processor.stack_get(5),
-        processor.stack_get(4),
-        processor.stack_get(3),
-        processor.stack_get(2),
         processor.stack_get(1),
+        processor.stack_get(2),
+        processor.stack_get(3),
+        processor.stack_get(4),
+        processor.stack_get(5),
+        processor.stack_get(6),
+        processor.stack_get(7),
+        processor.stack_get(8),
+        processor.stack_get(9),
+        processor.stack_get(10),
+        processor.stack_get(11),
+        processor.stack_get(12),
     ];
 
     // Extract the rate portion (first 8 elements) as values to store.
@@ -292,7 +299,7 @@ fn copy_merkle_node_to_adv_stack(processor: &mut FastProcessor) -> Result<(), Sy
 
     // push_stack_word pushes in reverse order so that node[0] ends up on top of advice stack.
     // AdvPopW then pops the word maintaining structural order on the operand stack.
-    processor.advice.push_stack_word(&node);
+    processor.advice.push_stack_word(&node)?;
 
     Ok(())
 }
@@ -361,7 +368,7 @@ fn copy_map_value_length_to_adv_stack(
     // Note: we assume values_len fits within the field modulus. This is always true
     // in practice since the field modulus (2^64 - 2^32 + 1) is much larger than any
     // practical vector length that could fit in memory.
-    processor.advice.push_stack(Felt::new(values_len as u64));
+    processor.advice.push_stack(Felt::new(values_len as u64))?;
 
     Ok(())
 }
@@ -382,7 +389,7 @@ pub fn push_key_presence_flag(processor: &mut FastProcessor) -> Result<(), Syste
     let map_key = processor.stack_get_word(1);
 
     let presence_flag = processor.advice.contains_map_key(&map_key);
-    processor.advice.push_stack(Felt::from_bool(presence_flag));
+    processor.advice.push_stack(Felt::from_bool(presence_flag))?;
 
     Ok(())
 }
@@ -422,8 +429,8 @@ fn push_ext2_inv_result(processor: &mut FastProcessor) -> Result<(), SystemEvent
     // AdvPop pops from advice top, so push result[0] first (goes to bottom), result[1] second (on
     // top) After AdvPop #1: gets result[1], stack becomes [result[1], b0, b1, ...]
     // After AdvPop #2: gets result[0], stack becomes [result[0], result[1], b0, b1, ...]
-    processor.advice.push_stack(result[0]);
-    processor.advice.push_stack(result[1]);
+    processor.advice.push_stack(result[0])?;
+    processor.advice.push_stack(result[1])?;
     Ok(())
 }
 
@@ -502,7 +509,7 @@ fn push_ilog2(processor: &mut FastProcessor) -> Result<(), SystemEventError> {
         return Err(OperationError::LogArgumentZero.into());
     }
     let ilog2 = Felt::from_u32(n.ilog2());
-    processor.advice.push_stack(ilog2);
+    processor.advice.push_stack(ilog2)?;
 
     Ok(())
 }
@@ -522,6 +529,53 @@ fn push_transformed_stack_top(
         .try_into()
         .map_err(|_| OperationError::NotU32Values { values: vec![stack_top] })?;
     let transformed_stack_top = f(stack_top);
-    processor.advice.push_stack(transformed_stack_top);
+    processor.advice.push_stack(transformed_stack_top)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec;
+
+    use miden_core::{Felt, ZERO, crypto::hash::Poseidon2};
+
+    use super::*;
+    use crate::{StackInputs, fast::FastProcessor};
+
+    /// Tests that `insert_hperm_into_adv_map` produces the same key as applying
+    /// `Poseidon2::apply_permutation` directly to the same state, and stores the rate portion
+    /// (first 8 elements) as the values.
+    #[test]
+    fn insert_hperm_into_adv_map_consistent_with_permutation() {
+        // Build a 12-element state with distinct values.
+        let state_felts: [Felt; 12] = core::array::from_fn(|i| Felt::new((i + 1) as u64));
+
+        // The stack for the system event has event_id at position 0, then state[0..12] at
+        // positions 1..13. StackInputs takes elements top-first, so position 0 is the first
+        // element in the slice.
+        let mut stack_values = vec![ZERO]; // event_id at position 0
+        stack_values.extend_from_slice(&state_felts); // positions 1..12
+
+        let mut processor = FastProcessor::new(StackInputs::new(&stack_values).unwrap());
+
+        // Call the handler under test.
+        insert_hperm_into_adv_map(&mut processor).unwrap();
+
+        // Compute expected key by applying the permutation to the same state.
+        let mut expected_state_after_perm = state_felts;
+        Poseidon2::apply_permutation(&mut expected_state_after_perm);
+        let expected_key = miden_core::Word::new(
+            expected_state_after_perm[Poseidon2::DIGEST_RANGE].try_into().unwrap(),
+        );
+
+        // The expected values are the rate portion (first 8 elements) of the *input* state.
+        let expected_values = state_felts[Poseidon2::RATE_RANGE].to_vec();
+
+        // Verify the advice map contains the correct entry.
+        let stored_values = processor
+            .advice
+            .get_mapped_values(&expected_key)
+            .expect("key should be present in advice map");
+        assert_eq!(stored_values, expected_values.as_slice());
+    }
 }
