@@ -5,9 +5,9 @@ use core::ops::Range;
 #[cfg(feature = "std")]
 use miden_air::trace::PADDED_TRACE_WIDTH;
 use miden_air::{
-    PublicInputs,
+    AuxBuilder, PublicInputs,
     trace::{
-        AuxTraceBuilder, DECODER_TRACE_OFFSET, MainTrace, STACK_TRACE_OFFSET,
+        DECODER_TRACE_OFFSET, MainTrace, STACK_TRACE_OFFSET,
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     },
 };
@@ -21,6 +21,7 @@ use crate::{
 };
 
 pub(crate) mod utils;
+use miden_air::trace::Challenges;
 use utils::{AuxColumnBuilder, TraceFragment};
 
 pub mod chiplets;
@@ -29,7 +30,6 @@ pub mod execution_tracer;
 mod decoder;
 mod parallel;
 mod range;
-mod row_major_adapter;
 mod stack;
 mod trace_state;
 
@@ -105,15 +105,19 @@ impl ExecutionTrace {
         &self.stack_outputs
     }
 
-    /// Returns the public values for this execution trace.
-    pub fn to_public_values(&self) -> Vec<Felt> {
-        let public_inputs = PublicInputs::new(
+    /// Returns the public inputs for this execution trace.
+    pub fn public_inputs(&self) -> PublicInputs {
+        PublicInputs::new(
             self.program_info.clone(),
             self.init_stack_state(),
             self.stack_outputs,
             self.final_pc_transcript.state(),
-        );
-        public_inputs.to_elements()
+        )
+    }
+
+    /// Returns the public values for this execution trace.
+    pub fn to_public_values(&self) -> Vec<Felt> {
+        self.public_inputs().to_elements()
     }
 
     /// Returns a clone of the auxiliary trace builders.
@@ -262,10 +266,14 @@ impl AuxTraceBuilders {
     where
         E: ExtensionField<Felt>,
     {
-        let decoder_cols = self.decoder.build_aux_columns(main_trace, challenges);
-        let stack_cols = self.stack.build_aux_columns(main_trace, challenges);
-        let range_cols = self.range.build_aux_columns(main_trace, challenges);
-        let chiplets_cols = self.chiplets.build_aux_columns(main_trace, challenges);
+        // Expand raw challenges (alpha, beta) into coefficient array once, then pass
+        // the expanded challenges to all sub-builders.
+        let challenges = Challenges::<E>::new(challenges[0], challenges[1]);
+
+        let decoder_cols = self.decoder.build_aux_columns(main_trace, &challenges);
+        let stack_cols = self.stack.build_aux_columns(main_trace, &challenges);
+        let range_cols = self.range.build_aux_columns(main_trace, &challenges);
+        let chiplets_cols = self.chiplets.build_aux_columns(main_trace, &challenges);
 
         decoder_cols
             .into_iter()
@@ -276,37 +284,59 @@ impl AuxTraceBuilders {
     }
 }
 
-// PLONKY3 AUX TRACE BUILDER ADAPTER
+// PLONKY3 AUX TRACE BUILDER
 // ================================================================================================
 //
-// The `AuxTraceBuilder` trait is defined in `miden-air` to avoid a circular dependency:
-// `miden-prover-p3` needs aux trace building logic from `miden-processor`, but `miden-processor`
-// already depends on `miden-air`. By defining the trait in `miden-air` and implementing it here,
-// `miden-prover-p3` can depend on both crates and use the trait without creating a cycle.
-//
-// Additionally, Plonky3 uses row-major matrices while our existing aux trace building logic uses
-// column-major format. This impl adapts between the two by converting the main trace from
+// Implements the upstream `AuxBuilder` trait from `p3_miden_lifted_air` directly on
+// `AuxTraceBuilders`. Plonky3 uses row-major matrices while our existing aux trace building logic
+// uses column-major format. This impl adapts between the two by converting the main trace from
 // row-major to column-major, delegating to the existing logic, and converting the result back.
 
-impl<EF: ExtensionField<Felt>> AuxTraceBuilder<EF> for AuxTraceBuilders {
-    /// Builds auxiliary trace columns from a row-major main trace.
-    ///
-    /// This adapts the column-major `build_aux_columns` method to work with Plonky3's
-    /// row-major format by converting the input and output accordingly.
-    fn build_aux_columns(
+impl<EF: ExtensionField<Felt>> AuxBuilder<Felt, EF> for AuxTraceBuilders {
+    fn build_aux_trace(
         &self,
-        main_trace: &RowMajorMatrix<Felt>,
+        main: &RowMajorMatrix<Felt>,
         challenges: &[EF],
-    ) -> RowMajorMatrix<Felt> {
-        let _span = tracing::info_span!("build_aux_columns_wrapper").entered();
+    ) -> (RowMajorMatrix<EF>, Vec<EF>) {
+        let _span = tracing::info_span!("build_aux_trace").entered();
 
-        // Convert row-major to column-major MainTrace
-        let main_trace_col_major = row_major_adapter::row_major_to_main_trace(main_trace);
+        // Transpose the row-major main trace into column-major `MainTrace` needed by the
+        // auxiliary trace builders. The last program row is the point where the clock
+        // (column 0) stops incrementing.
+        let main_trace_col_major = {
+            let num_rows = main.height();
+            // Detect last program row from row-major layout using column 0 (clock).
+            let last_program_row = (1..num_rows)
+                .find(|&i| {
+                    main.get(i, 0).expect("valid indices")
+                        != main.get(i - 1, 0).expect("valid indices") + Felt::ONE
+                })
+                .map_or(num_rows - 1, |i| i - 1);
+            let transposed = main.transpose();
+            let columns: Vec<Vec<Felt>> = transposed.row_slices().map(|row| row.to_vec()).collect();
+            MainTrace::new(ColMatrix::new(columns), last_program_row.into())
+        };
 
-        // Build auxiliary columns using column-major logic
+        // Build auxiliary columns in column-major format.
         let aux_columns = self.build_aux_columns(&main_trace_col_major, challenges);
+        assert!(!aux_columns.is_empty(), "aux columns should not be empty");
 
-        // Convert column-major aux columns back to row-major
-        row_major_adapter::aux_columns_to_row_major(aux_columns, main_trace.height())
+        // Flatten column-major aux columns into a contiguous buffer, then transpose
+        // to the row-major layout expected by the lifted prover.
+        let trace_len = main.height();
+        let num_ef_cols = aux_columns.len();
+        let mut col_major_data = Vec::with_capacity(trace_len * num_ef_cols);
+        for col in aux_columns {
+            col_major_data.extend_from_slice(&col);
+        }
+        let aux_trace = RowMajorMatrix::new(col_major_data, trace_len).transpose();
+
+        // Extract the last row from the row-major aux trace for Fiat-Shamir.
+        let last_row = aux_trace
+            .row_slice(trace_len - 1)
+            .expect("aux trace has at least one row")
+            .to_vec();
+
+        (aux_trace, last_row)
     }
 }

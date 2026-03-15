@@ -102,8 +102,8 @@ pub enum ExecutionError {
         source_file: Option<Arc<SourceFile>>,
         root_digest: Word,
     },
-    #[error("failed to serialize proof: {0}")]
-    ProofSerializationError(String),
+    #[error("failed to generate STARK proof: {0}")]
+    ProvingError(String),
     #[error(transparent)]
     HostError(#[from] HostError),
 }

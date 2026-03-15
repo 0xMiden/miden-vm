@@ -574,9 +574,9 @@ where
             + degree5_op_flags[11].clone() // PUSH
             + degree6_op_flags[4].clone(); // U32SPLIT
 
-        // Flag if stack shifted left (degree 5)
-        // Uses prefix_010 (degree 3) and add3_madd_prefix (degree 5) for controlled degree
-        // Note: DYNCALL not included, see docs
+        // Flag if stack shifted left (degree 5).
+        // Uses low-degree prefixes to keep left_shift at degree 5 (avoids degree growth).
+        // Note: DYNCALL is intentionally excluded; see stack overflow depth constraints.
         let left_shift = prefix_010.clone()
             + add3_madd_prefix.clone()
             + split_loop_flag

@@ -15,6 +15,12 @@ pub use errors::AdviceError;
 
 use crate::{host::AdviceMutation, processor::AdviceProviderInterface};
 
+// CONSTANTS
+// ================================================================================================
+
+/// Maximum number of elements allowed on the advice stack. Set to 2^17.
+const MAX_ADVICE_STACK_SIZE: usize = 1 << 17;
+
 // ADVICE PROVIDER
 // ================================================================================================
 
@@ -24,7 +30,8 @@ use crate::{host::AdviceMutation, processor::AdviceProviderInterface};
 ///
 /// An advice provider consists of the following components:
 /// 1. Advice stack, which is a LIFO data structure. The processor can move the elements from the
-///    advice stack onto the operand stack, as well as push new elements onto the advice stack.
+///    advice stack onto the operand stack, as well as push new elements onto the advice stack. The
+///    maximum number of elements that can be on the advice stack is 2^17.
 /// 2. Advice map, which is a key-value map where keys are words (4 field elements) and values are
 ///    vectors of field elements. The processor can push the values from the map onto the advice
 ///    stack, as well as insert new values into the map.
@@ -39,10 +46,6 @@ use crate::{host::AdviceMutation, processor::AdviceProviderInterface};
 ///      or,
 ///    - used to produce a STARK proof using a precompile VM, which can be verified in the epilog of
 ///      the program.
-///
-/// Maximum number of elements allowed on the advice stack. Set to 2^17.
-const MAX_ADVICE_STACK_SIZE: usize = 1 << 17;
-
 #[derive(Debug, Clone, Default)]
 pub struct AdviceProvider {
     stack: VecDeque<Felt>,
@@ -52,6 +55,11 @@ pub struct AdviceProvider {
 }
 
 impl AdviceProvider {
+    #[cfg(test)]
+    pub(crate) fn merkle_store(&self) -> &MerkleStore {
+        &self.store
+    }
+
     /// Applies the mutations given in order to the `AdviceProvider`.
     pub fn apply_mutations(
         &mut self,
