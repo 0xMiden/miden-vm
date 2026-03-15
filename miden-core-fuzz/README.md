@@ -37,6 +37,68 @@ cargo +nightly fuzz run mast_forest_deserialize --fuzz-dir miden-core-fuzz
 cargo +nightly fuzz run mast_forest_validate --fuzz-dir miden-core-fuzz
 ```
 
+### Core Deserialization Targets
+
+These targets exercise core deserializers directly.
+
+**`program_deserialize`** — Tests `Program::read_from_bytes`.
+
+```bash
+cargo +nightly fuzz run program_deserialize --fuzz-dir miden-core-fuzz
+```
+
+**`kernel_deserialize`** — Tests `Kernel::read_from_bytes`.
+
+```bash
+cargo +nightly fuzz run kernel_deserialize --fuzz-dir miden-core-fuzz
+```
+
+**`stack_io_deserialize`** — Tests `StackInputs` and `StackOutputs` deserialization.
+
+```bash
+cargo +nightly fuzz run stack_io_deserialize --fuzz-dir miden-core-fuzz
+```
+
+**`advice_inputs_deserialize`** — Tests `AdviceInputs` and `AdviceMap` deserialization.
+
+```bash
+cargo +nightly fuzz run advice_inputs_deserialize --fuzz-dir miden-core-fuzz
+```
+
+**`operation_deserialize`** — Tests `Operation::read_from_bytes`.
+
+```bash
+cargo +nightly fuzz run operation_deserialize --fuzz-dir miden-core-fuzz
+```
+
+**`execution_proof_deserialize`** — Tests `ExecutionProof::read_from_bytes`.
+
+```bash
+cargo +nightly fuzz run execution_proof_deserialize --fuzz-dir miden-core-fuzz
+```
+
+**`precompile_request_deserialize`** — Tests `PrecompileRequest::read_from_bytes`.
+
+```bash
+cargo +nightly fuzz run precompile_request_deserialize --fuzz-dir miden-core-fuzz
+```
+
+### Assembly/Package Deserialization Targets
+
+These targets exercise library and package deserializers used by `.masl` and `.masp`.
+
+**`library_deserialize`** — Tests `Library::read_from_bytes`.
+
+```bash
+cargo +nightly fuzz run library_deserialize --fuzz-dir miden-core-fuzz
+```
+
+**`package_deserialize`** — Tests `Package::read_from_bytes`.
+
+```bash
+cargo +nightly fuzz run package_deserialize --fuzz-dir miden-core-fuzz
+```
+
 ### Component Targets
 
 These fuzz internal structures through the MastForest deserialization path:

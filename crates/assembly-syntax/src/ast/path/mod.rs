@@ -25,6 +25,8 @@ pub enum PathError {
     InvalidComponent(crate::ast::IdentError),
     #[error("invalid item path: contains invalid utf8 byte sequences")]
     InvalidUtf8,
+    #[error("invalid item path: too long (max {max} bytes)")]
+    TooLong { max: usize },
     #[error(transparent)]
     InvalidNamespace(NamespaceError),
     #[error("cannot join a path with reserved name to other paths")]

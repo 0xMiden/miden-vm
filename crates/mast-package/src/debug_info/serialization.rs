@@ -25,7 +25,7 @@ impl Serializable for DebugTypesSection {
         // Write string table
         target.write_usize(self.strings.len());
         for s in &self.strings {
-            write_string(target, s);
+            s.as_ref().write_into(target);
         }
 
         // Write type table
@@ -45,7 +45,16 @@ impl Deserializable for DebugTypesSection {
             )));
         }
 
+        // Manual bounds check required: read_string is a local helper, not Deserializable,
+        // so we can't use read_many_iter. Each string serializes to at least 1 byte (the
+        // varint length prefix), so max_alloc(1) bounds the vector pre-allocation.
         let strings_len = source.read_usize()?;
+        let max_strings = source.max_alloc(1);
+        if strings_len > max_strings {
+            return Err(DeserializationError::InvalidValue(alloc::format!(
+                "debug_types strings count {strings_len} exceeds budget {max_strings}"
+            )));
+        }
         let mut strings = alloc::vec::Vec::with_capacity(strings_len);
         for _ in 0..strings_len {
             strings.push(read_string(source)?);
@@ -68,7 +77,7 @@ impl Serializable for DebugSourcesSection {
         // Write string table
         target.write_usize(self.strings.len());
         for s in &self.strings {
-            write_string(target, s);
+            s.as_ref().write_into(target);
         }
 
         // Write file table
@@ -88,7 +97,16 @@ impl Deserializable for DebugSourcesSection {
             )));
         }
 
+        // Manual bounds check required: read_string is a local helper, not Deserializable,
+        // so we can't use read_many_iter. Each string serializes to at least 1 byte (the
+        // varint length prefix), so max_alloc(1) bounds the vector pre-allocation.
         let strings_len = source.read_usize()?;
+        let max_strings = source.max_alloc(1);
+        if strings_len > max_strings {
+            return Err(DeserializationError::InvalidValue(alloc::format!(
+                "debug_sources strings count {strings_len} exceeds budget {max_strings}"
+            )));
+        }
         let mut strings = alloc::vec::Vec::with_capacity(strings_len);
         for _ in 0..strings_len {
             strings.push(read_string(source)?);
@@ -111,7 +129,7 @@ impl Serializable for DebugFunctionsSection {
         // Write string table
         target.write_usize(self.strings.len());
         for s in &self.strings {
-            write_string(target, s);
+            s.as_ref().write_into(target);
         }
 
         // Write function table
@@ -131,7 +149,16 @@ impl Deserializable for DebugFunctionsSection {
             )));
         }
 
+        // Manual bounds check required: read_string is a local helper, not Deserializable,
+        // so we can't use read_many_iter. Each string serializes to at least 1 byte (the
+        // varint length prefix), so max_alloc(1) bounds the vector pre-allocation.
         let strings_len = source.read_usize()?;
+        let max_strings = source.max_alloc(1);
+        if strings_len > max_strings {
+            return Err(DeserializationError::InvalidValue(alloc::format!(
+                "debug_functions strings count {strings_len} exceeds budget {max_strings}"
+            )));
+        }
         let mut strings = alloc::vec::Vec::with_capacity(strings_len);
         for _ in 0..strings_len {
             strings.push(read_string(source)?);
@@ -238,11 +265,7 @@ impl Deserializable for DebugTypeInfo {
                 } else {
                     None
                 };
-                let params_len = source.read_usize()?;
-                let mut param_type_indices = alloc::vec::Vec::with_capacity(params_len);
-                for _ in 0..params_len {
-                    param_type_indices.push(DebugTypeIdx::from(source.read_u32()?));
-                }
+                let param_type_indices = alloc::vec::Vec::<DebugTypeIdx>::read_from(source)?;
                 Ok(Self::Function { return_type_idx, param_type_indices })
             },
             TYPE_TAG_UNKNOWN => Ok(Self::Unknown),
@@ -458,12 +481,6 @@ impl Deserializable for DebugInlinedCallInfo {
 // HELPER FUNCTIONS
 // ================================================================================================
 
-fn write_string<W: ByteWriter>(target: &mut W, s: &str) {
-    let bytes = s.as_bytes();
-    target.write_usize(bytes.len());
-    target.write_bytes(bytes);
-}
-
 fn read_string<R: ByteReader>(source: &mut R) -> Result<Arc<str>, DeserializationError> {
     let len = source.read_usize()?;
     let bytes = source.read_slice(len)?;
@@ -476,6 +493,76 @@ fn read_string<R: ByteReader>(source: &mut R) -> Result<Arc<str>, Deserializatio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct FixedBudgetReader<'a> {
+        inner: miden_core::serde::SliceReader<'a>,
+        max_bytes: usize,
+    }
+
+    impl<'a> FixedBudgetReader<'a> {
+        fn new(bytes: &'a [u8], max_bytes: usize) -> Self {
+            Self {
+                inner: miden_core::serde::SliceReader::new(bytes),
+                max_bytes,
+            }
+        }
+    }
+
+    impl<'a> ByteReader for FixedBudgetReader<'a> {
+        fn read_u8(&mut self) -> Result<u8, DeserializationError> {
+            self.inner.read_u8()
+        }
+
+        fn peek_u8(&self) -> Result<u8, DeserializationError> {
+            self.inner.peek_u8()
+        }
+
+        fn read_slice(&mut self, len: usize) -> Result<&[u8], DeserializationError> {
+            self.inner.read_slice(len)
+        }
+
+        fn read_array<const N: usize>(&mut self) -> Result<[u8; N], DeserializationError> {
+            self.inner.read_array()
+        }
+
+        fn check_eor(&self, num_bytes: usize) -> Result<(), DeserializationError> {
+            self.inner.check_eor(num_bytes)
+        }
+
+        fn has_more_bytes(&self) -> bool {
+            self.inner.has_more_bytes()
+        }
+
+        fn max_alloc(&self, element_size: usize) -> usize {
+            if element_size == 0 {
+                usize::MAX
+            } else {
+                self.max_bytes.checked_div(element_size).unwrap_or(0)
+            }
+        }
+    }
+
+    fn section_with_strings(version: u8, strings_len: usize) -> alloc::vec::Vec<u8> {
+        let mut bytes = alloc::vec::Vec::new();
+        bytes.write_u8(version);
+        bytes.write_usize(strings_len);
+        for _ in 0..strings_len {
+            "".write_into(&mut bytes);
+        }
+        bytes.write_usize(0);
+        bytes
+    }
+
+    fn function_type_bytes(params_len: usize) -> alloc::vec::Vec<u8> {
+        let mut bytes = alloc::vec::Vec::new();
+        bytes.write_u8(TYPE_TAG_FUNCTION);
+        bytes.write_bool(false);
+        bytes.write_usize(params_len);
+        for _ in 0..params_len {
+            bytes.write_u32(0);
+        }
+        bytes
+    }
 
     fn roundtrip<T: Serializable + Deserializable + PartialEq + core::fmt::Debug>(value: &T) {
         let mut bytes = alloc::vec::Vec::new();
@@ -641,5 +728,64 @@ mod tests {
         func.add_inlined_call(DebugInlinedCallInfo::new(0, 0, call_line, call_col));
 
         roundtrip(&func);
+    }
+
+    #[test]
+    fn test_debug_section_string_bounds() {
+        let types_bytes = section_with_strings(DEBUG_TYPES_VERSION, 2);
+        let sources_bytes = section_with_strings(DEBUG_SOURCES_VERSION, 2);
+        let functions_bytes = section_with_strings(DEBUG_FUNCTIONS_VERSION, 2);
+
+        let mut reader = FixedBudgetReader::new(&types_bytes, 1);
+        let err = DebugTypesSection::read_from(&mut reader).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("exceeds budget"));
+
+        let mut reader = FixedBudgetReader::new(&sources_bytes, 1);
+        let err = DebugSourcesSection::read_from(&mut reader).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("exceeds budget"));
+
+        let mut reader = FixedBudgetReader::new(&functions_bytes, 1);
+        let err = DebugFunctionsSection::read_from(&mut reader).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("exceeds budget"));
+
+        let types_ok = section_with_strings(DEBUG_TYPES_VERSION, 1);
+        let sources_ok = section_with_strings(DEBUG_SOURCES_VERSION, 1);
+        let functions_ok = section_with_strings(DEBUG_FUNCTIONS_VERSION, 1);
+
+        let mut reader = FixedBudgetReader::new(&types_ok, 1);
+        assert_eq!(DebugTypesSection::read_from(&mut reader).unwrap().strings.len(), 1);
+
+        let mut reader = FixedBudgetReader::new(&sources_ok, 1);
+        assert_eq!(DebugSourcesSection::read_from(&mut reader).unwrap().strings.len(), 1);
+
+        let mut reader = FixedBudgetReader::new(&functions_ok, 1);
+        assert_eq!(DebugFunctionsSection::read_from(&mut reader).unwrap().strings.len(), 1);
+    }
+
+    #[test]
+    fn test_function_params_bounds() {
+        let too_many = function_type_bytes(2);
+        let mut reader = FixedBudgetReader::new(&too_many, 4);
+        let err = DebugTypeInfo::read_from(&mut reader).unwrap_err();
+        assert!(matches!(err, DeserializationError::InvalidValue(_)));
+
+        let ok = function_type_bytes(1);
+        let mut reader = FixedBudgetReader::new(&ok, 4);
+        let ty = DebugTypeInfo::read_from(&mut reader).unwrap();
+        match ty {
+            DebugTypeInfo::Function { param_type_indices, .. } => {
+                assert_eq!(param_type_indices.len(), 1);
+            },
+            _ => panic!("expected function type"),
+        }
     }
 }

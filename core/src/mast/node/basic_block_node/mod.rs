@@ -545,20 +545,6 @@ impl BasicBlockNode {
             let indptr = batch.indptr();
             let ops = batch.ops();
 
-            // indptr should be monotonic non-decreasing in valid prefix
-            for i in 0..batch.num_groups() {
-                if indptr[i] > indptr[i + 1] {
-                    return Err(format!(
-                        "Batch {}: indptr[{}] {} > indptr[{}] {} - array is not monotonic",
-                        batch_idx,
-                        i,
-                        indptr[i],
-                        i + 1,
-                        indptr[i + 1]
-                    ));
-                }
-            }
-
             // Full array must be monotonic for serialization (delta encoding)
             for i in 0..indptr.len() - 1 {
                 if indptr[i] > indptr[i + 1] {
@@ -573,10 +559,7 @@ impl BasicBlockNode {
                 }
             }
 
-            // All indptr values should be within ops bounds
             let ops_len = ops.len();
-
-            // Final indptr value must equal ops.len()
             if indptr[indptr.len() - 1] != ops_len {
                 return Err(format!(
                     "Batch {}: final indptr value {} doesn't match ops.len() {}",
@@ -584,14 +567,6 @@ impl BasicBlockNode {
                     indptr[indptr.len() - 1],
                     ops_len
                 ));
-            }
-            for (i, &indptr_val) in indptr.iter().enumerate().take(batch.num_groups() + 1) {
-                if indptr_val > ops_len {
-                    return Err(format!(
-                        "Batch {}: indptr[{}] {} exceeds ops length {}",
-                        batch_idx, i, indptr_val, ops_len
-                    ));
-                }
             }
 
             // Check that each group has at most GROUP_SIZE operations
@@ -1578,7 +1553,7 @@ impl MastForestContributor for BasicBlockNodeBuilder {
         let before_enter_bytes: Vec<[u8; 32]> = self
             .before_enter
             .iter()
-            .map(|&id| forest[id].fingerprint().as_bytes())
+            .map(|&id| *forest[id].fingerprint().as_bytes())
             .collect();
 
         // Collect op-indexed decorator data (using raw indices)
@@ -1588,12 +1563,12 @@ impl MastForestContributor for BasicBlockNodeBuilder {
         let mut op_decorator_data = Vec::with_capacity(adjusted_decorators.len() * 33);
         for (raw_op_idx, decorator_id) in &adjusted_decorators {
             op_decorator_data.extend_from_slice(&raw_op_idx.to_le_bytes());
-            op_decorator_data.extend_from_slice(&forest[*decorator_id].fingerprint().as_bytes());
+            op_decorator_data.extend_from_slice(forest[*decorator_id].fingerprint().as_bytes());
         }
 
         // Collect after_exit decorator fingerprints
         let after_exit_bytes: Vec<[u8; 32]> =
-            self.after_exit.iter().map(|&id| forest[id].fingerprint().as_bytes()).collect();
+            self.after_exit.iter().map(|&id| *forest[id].fingerprint().as_bytes()).collect();
 
         // Collect assert operation data
         let mut assert_data = Vec::new();

@@ -30,7 +30,7 @@
 //! not by these constraints. These constraints only handle the non-END cases.
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::MidenAirBuilder;
+use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 
 use crate::{
     MainTraceRow,
@@ -68,7 +68,7 @@ pub fn enforce_main<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     enforce_clock_constraint(builder, local, next);
     enforce_ctx_constraints(builder, local, next);
@@ -84,7 +84,7 @@ pub(crate) fn enforce_clock_constraint<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     builder.tagged(TAG_SYSTEM_CLK_BASE, SYSTEM_CLK_NAMES[0], |builder| {
         builder.when_first_row().assert_zero(local.clk.clone());
@@ -103,7 +103,7 @@ pub(crate) fn enforce_ctx_constraints<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     let ctx: AB::Expr = local.ctx.clone().into();
     let ctx_next: AB::Expr = next.ctx.clone().into();
@@ -140,7 +140,7 @@ pub(crate) fn enforce_fn_hash_constraints<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: MidenAirBuilder,
+    AB: LiftedAirBuilder,
 {
     let op_flags = OpFlags::new(ExprDecoderAccess::new(local));
     let f_call = op_flags.call();

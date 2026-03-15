@@ -6,7 +6,7 @@ use core::{fmt, ops::RangeInclusive};
 
 use miden_core::{FMP_ADDR, Felt, operations::DebugOptions};
 
-use crate::{DebugError, ProcessorState, TraceError, host::handlers::DebugHandler};
+use crate::{DebugError, ProcessorState, host::handlers::DebugHandler};
 
 // WRITER IMPLEMENTATIONS
 // ================================================================================================
@@ -79,17 +79,6 @@ impl<W: fmt::Write + Sync> DebugHandler for DefaultDebugHandler<W> {
             },
         }
         .map_err(DebugError::from)
-    }
-
-    fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
-        writeln!(
-            self.writer,
-            "Trace with id {} emitted at step {} in context {}",
-            trace_id,
-            process.clock(),
-            process.ctx()
-        )
-        .map_err(TraceError::from)
     }
 }
 

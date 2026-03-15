@@ -58,6 +58,11 @@ pub enum ExecutionError {
     },
     #[error("failed to execute the program for internal reason: {0}")]
     Internal(&'static str),
+    /// This means trace generation would go over the configured row limit.
+    ///
+    /// In parallel trace building, this is used for core-row prechecks and chiplet overflow.
+    #[error("trace length exceeded the maximum of {0} rows")]
+    TraceLenExceeded(usize),
     /// Memory error with source context for diagnostics.
     ///
     /// Use `MemoryResultExt::map_mem_err` to convert `Result<T, MemoryError>` with context.
@@ -97,8 +102,8 @@ pub enum ExecutionError {
         source_file: Option<Arc<SourceFile>>,
         root_digest: Word,
     },
-    #[error("failed to serialize proof: {0}")]
-    ProofSerializationError(String),
+    #[error("failed to generate STARK proof: {0}")]
+    ProvingError(String),
     #[error(transparent)]
     HostError(#[from] HostError),
 }
