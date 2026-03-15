@@ -12,7 +12,7 @@ Namespace `miden::core::crypto::dsa` contains a set of  digital signature scheme
 
 ## Poseidon2 Falcon512
 
-Module `miden::core::crypto::dsa::falcon512poseidon2` contains procedures for verifying `Poseidon2 Falcon512` signatures. These signatures differ from the standard Falcon signatures in that instead of using `SHAKE256` hash function in the *hash-to-point* algorithm we use `Poseidon2`. This makes the signature more efficient to verify in the Miden VM.
+Module `miden::core::crypto::dsa::falcon512_poseidon2` contains procedures for verifying `Poseidon2 Falcon512` signatures. These signatures differ from the standard Falcon signatures in that instead of using `SHAKE256` hash function in the *hash-to-point* algorithm we use `Poseidon2`. This makes the signature more efficient to verify in the Miden VM.
 
 The module exposes the following procedures:
 
