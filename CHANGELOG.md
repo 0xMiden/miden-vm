@@ -2,20 +2,52 @@
 
 ## 0.22.0 (TBD)
 
+#### Major breaking changes
+
+- [BREAKING] `build_trace()` no longer assumes valid user input ([#2747](https://github.com/0xMiden/miden-vm/pull/2747)).
+- [BREAKING] Migrate to lifted-STARK backend and `miden-crypto` to v0.23 ([#2783](https://github.com/0xMiden/miden-vm/pull/2783)).
+
 #### Changes
 
+- Added `math::u128` comparison (`lt`, `lte`, `gt`, `gte`), bitwise (`and`, `or`, `xor`, `not`), and shift (`shl`, `shr`, `rotl`, `rotr`) operations ([#2624](https://github.com/0xMiden/miden-vm/pull/2624)).
 - Consolidated error variants: simplified `AceError` and FRI errors to string-based types, merged `DynamicNodeNotFound`/`NoMastForestWithProcedure` into `ProcedureNotFound`, introduced `HostError` for handler-related variants ([#2675](https://github.com/0xMiden/miden-vm/pull/2675)).
+- Added optional tagging instrumentation for AIR constraints (test-only; enables stable ID tracking and OOD parity checks) ([#2713](https://github.com/0xMiden/miden-vm/pull/2713)).
 - [BREAKING] `Processor` and `FastProcessor` decorator execution is now immutable ([#2718](https://github.com/0xMiden/miden-vm/pull/2718)).
 - [BREAKING] `Tracer` API significantly refactored ([#2720](https://github.com/0xMiden/miden-vm/pull/2720)).
-- Added optional tagging instrumentation for AIR constraints (test-only; enables stable ID tracking and OOD parity checks) ([#2713](https://github.com/0xMiden/miden-vm/pull/2713)).
+- Added general stack transition constraints (shift/no‑shift) ([#2725](https://github.com/0xMiden/miden-vm/pull/2725)).
+- Added stack overflow table constraints ([#2735](https://github.com/0xMiden/miden-vm/pull/2735)).
+- Added stack shuffling ops constraints ([#2736](https://github.com/0xMiden/miden-vm/pull/2736)).
+- Fix a possible panic in decorator serialization ([#2742](https://github.com/0xMiden/miden-vm/pull/2742)).
+- Added `miden-ace-codegen` crate for lowering AIR constraints to ACE circuit format ([#2757](https://github.com/0xMiden/miden-vm/pull/2757)).
+- [BREAKING] `Operation` enum now only encodes basic block operations ([#2771](https://github.com/0xMiden/miden-vm/pull/2771)).
+- Added AIR constraints for system, range checker, stack, decoder, and chiplets components ([#2772](https://github.com/0xMiden/miden-vm/pull/2772)).
+- Added `math::u128` division operations ([#2776](https://github.com/0xMiden/miden-vm/pull/2776)).
+- Added recursion guards for assembly inputs and tests ([#2792](https://github.com/0xMiden/miden-vm/pull/2792)).
+- Introduced `build_trace_with_max_len()` which stops building the trace after a given max, and `build_trace()` no longer allocates more than 2^29 rows ([#2809](https://github.com/0xMiden/miden-vm/pull/2809)).
+- `DebugHandler`'s default method implementations are now no-ops (instead of prints) ([#2837](https://github.com/0xMiden/miden-vm/pull/2837)).
 
 #### Fixes
 
 - Fixed `Constant::PartialEq` to include `visibility` field in equality comparison, making it consistent with other exportable items (`Procedure`, `TypeAlias`, `EnumType`).
+- Cryptostream operation now correctly sends chiplets bus memory requests ([#2686](https://github.com/0xMiden/miden-vm/pull/2686)).
+- Hardened untrusted deserialization by enforcing budgets and depth limits, plus expanded fuzzing coverage ([#2777](https://github.com/0xMiden/miden-vm/pull/2777)).
+- Hardened AEAD decrypt size calculations ([#2789](https://github.com/0xMiden/miden-vm/pull/2789)).
+- `SystemEvent::HpermToMap` handler now computes the correct permutation ([#2801](https://github.com/0xMiden/miden-vm/pull/2801)).
+- Fixes an possible u64 overflow issue in `op_eval_circuit()` [#2799](https://github.com/0xMiden/miden-vm/pull/2799)
+- Preserved dynexec/dyncall distinction (and digests) when remapping or merging MAST forests ([#2784](https://github.com/0xMiden/miden-vm/pull/2784)).
+- Hardened MASM parsing and constants handling (lexer invalid-token spans, repeat count bounds, constant range checks, field division folding, and `push.WORD[...]` index validation) ([#2803](https://github.com/0xMiden/miden-vm/pull/2803)).
+- Introduced `FastProcessor` safe stack method accesses for event handlers ([#2797](https://github.com/0xMiden/miden-vm/pull/2797)).
+- Hardened syscall target validation to avoid panic paths and reject invalid digests at assembly time ([#2804](https://github.com/0xMiden/miden-vm/pull/2804)).
+- Add bounds to attacker-controlled allocation sizes in advice map and keccak256/sha512 precompiles ([#2805](https://github.com/0xMiden/miden-vm/pull/2805)).
+- `build_trace()` no longer panics when no core trace contexts are provided ([#2809](https://github.com/0xMiden/miden-vm/pull/2809)).
+
+## 0.21.2 (2026-03-04)
+
+- Removes `features = serde` from `miden-core` in `miden-air` to avoid unconditionally enabling the `serde` dependency  ([#2767](https://github.com/0xMiden/miden-vm/pull/2767)).
 
 ## 0.21.1 (2026-02-24)
 
-- Added debug variable tracking for source-level variables via dedicated `DebugVarStorage` (CSR format) in `DebugInfo`, with `DebugVarInfo` describing variable name, type, location, and value location (stack, memory, local, constant, or expression). Also added `debug_types`, `debug_sources`, and `debug_functions` sections in MASP packages for storing type definitions, source file paths, and function metadata respectively, each with its own string table, to support source-level debugging (#[2471](https://github.com/0xMiden/miden-vm/pull/2471)).
+- Added debug variable tracking for source-level variables via dedicated `DebugVarStorage` (CSR format) in `DebugInfo`, with `DebugVarInfo` describing variable name, type, location, and value location (stack, memory, local, constant, or expression). Also added `debug_types`, `debug_sources`, and `debug_functions` sections in MASP packages for storing type definitions, source file paths, and function metadata respectively, each with its own string table, to support source-level debugging ([#2471](https://github.com/0xMiden/miden-vm/pull/2471)).
 - Updated `miden-crypto` to v0.22.3 (with unified `Felt` type) ([#2649](https://github.com/0xMiden/miden-vm/pull/2649))
 - Re-exported `Continuation` from `miden-processor` to support the external debugger ([#2683](https://github.com/0xMiden/miden-vm/pull/2683)).
 - Fixed `mtree_merge` advice-store root ordering to match `hmerge` operand stack semantics ([#2729](https://github.com/0xMiden/miden-vm/pull/2729)).

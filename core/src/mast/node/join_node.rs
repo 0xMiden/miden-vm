@@ -5,14 +5,15 @@ use core::fmt;
 use serde::{Deserialize, Serialize};
 
 use super::{MastForestContributor, MastNodeExt};
+#[cfg(debug_assertions)]
+use crate::mast::MastNode;
 use crate::{
     Felt, Word,
     chiplets::hasher,
     mast::{
-        DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode, MastNodeFingerprint,
-        MastNodeId,
+        DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeFingerprint, MastNodeId,
     },
-    operations::OPCODE_JOIN,
+    operations::opcodes,
     prettier::PrettyPrint,
     utils::{Idx, LookupByIdx},
 };
@@ -34,7 +35,7 @@ pub struct JoinNode {
 /// Constants
 impl JoinNode {
     /// The domain of the join block (used for control block hashing).
-    pub const DOMAIN: Felt = Felt::new(OPCODE_JOIN as u64);
+    pub const DOMAIN: Felt = Felt::new(opcodes::JOIN as u64);
 }
 
 /// Public accessors

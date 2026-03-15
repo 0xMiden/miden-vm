@@ -401,27 +401,29 @@ impl MastForestBuilder {
         let mut merged_basic_blocks: Vec<MastNodeId> = Vec::new();
 
         for &basic_block_id in contiguous_basic_block_ids {
-            // It is safe to unwrap here, since we already checked that all IDs in
-            // `contiguous_basic_block_ids` are `BasicBlockNode`s
-            let basic_block_node = self.mast_forest[basic_block_id].get_basic_block().unwrap();
-
             // check if the block should be merged with other blocks
             if should_merge(
                 self.mast_forest.is_procedure_root(basic_block_id),
-                basic_block_node.num_op_batches(),
+                self.mast_forest[basic_block_id]
+                    .get_basic_block()
+                    .expect("merge_basic_blocks: expected BasicBlockNode")
+                    .num_op_batches(),
             ) {
                 // Collect decorators and operations from the block (while still borrowing)
                 // We need owned copies so we can drop the borrow before mutating self
-                let block_decorators: Vec<_> =
-                    basic_block_node.raw_decorator_iter(&self.mast_forest).collect();
-                let block_ops: Vec<Operation> = basic_block_node
-                    .op_batches()
-                    .iter()
-                    .flat_map(|b| b.raw_ops().copied())
-                    .collect();
+                let (block_decorators, block_ops) = {
+                    let basic_block_node =
+                        self.mast_forest[basic_block_id].get_basic_block().unwrap();
+                    let block_decorators: Vec<_> =
+                        basic_block_node.raw_decorator_iter(&self.mast_forest).collect();
+                    let block_ops: Vec<Operation> = basic_block_node
+                        .op_batches()
+                        .iter()
+                        .flat_map(|b| b.raw_ops().copied())
+                        .collect();
+                    (block_decorators, block_ops)
+                };
                 let ops_offset = operations.len();
-
-                // basic_block_node borrow ends here since we collected owned data above
 
                 // Transfer any pending asm_ops for this block to the merged result
                 self.transfer_asm_ops_for_merge(basic_block_id, ops_offset, &mut merged_asm_ops);
@@ -432,8 +434,8 @@ impl MastForestBuilder {
                 }
                 operations.extend(block_ops);
             } else {
-                // if we don't want to merge this block, we flush the buffer of operations into a
-                // new block, and add the un-merged block after it
+                // If we don't want to merge this block, flush the buffer of operations into a
+                // new block, and add the un-merged block after it.
                 if !operations.is_empty() {
                     let block_ops = core::mem::take(&mut operations);
                     let block_decorators = core::mem::take(&mut decorators);
@@ -1176,5 +1178,26 @@ mod tests {
 
         // Verify we found exactly 5 trace values
         assert_eq!(found_traces.len(), 5, "Should have found exactly 5 trace values");
+    }
+
+    #[test]
+    fn test_merge_basic_blocks_keeps_non_mergeable_block_standalone() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+
+        let num_ops = PROCEDURE_INLINING_THRESHOLD * 1024;
+        let large_ops = vec![Operation::Add; num_ops];
+        let large_block_id =
+            builder.ensure_block(large_ops, Vec::new(), vec![], vec![], vec![]).unwrap();
+        builder.mast_forest.make_root(large_block_id);
+
+        let small_block_id = builder
+            .ensure_block(vec![Operation::Add], Vec::new(), vec![], vec![], vec![])
+            .unwrap();
+
+        let merged_blocks = builder.merge_basic_blocks(&[large_block_id, small_block_id]).unwrap();
+
+        assert_eq!(merged_blocks.len(), 2);
+        assert_eq!(merged_blocks[0], large_block_id);
+        assert_eq!(merged_blocks[1], small_block_id);
     }
 }

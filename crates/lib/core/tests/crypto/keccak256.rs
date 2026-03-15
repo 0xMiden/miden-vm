@@ -15,6 +15,7 @@ use miden_core::{
 use miden_core_lib::handlers::keccak256::{
     KECCAK_HASH_BYTES_EVENT_NAME, KeccakPrecompile, KeccakPreimage,
 };
+use miden_processor::ExecutionError;
 
 use crate::helpers::{masm_push_felts, masm_store_felts};
 
@@ -208,6 +209,30 @@ fn test_keccak_hash() {
 }
 
 #[test]
+fn test_keccak_hash_documented_stack_contract() {
+    let input_u8: Vec<u8> = (0..32).collect();
+    let preimage = KeccakPreimage::new(input_u8);
+    let sentinels = [0x101_u64, 0x202, 0x303, 0x404];
+
+    let input_felts = preimage.as_felts();
+    let stack_stores_source = masm_push_felts(&input_felts);
+
+    let source = format!(
+        r#"
+            use miden::core::crypto::hashes::keccak256
+
+            begin
+                {stack_stores_source}
+                exec.keccak256::hash
+                dropw dropw
+            end
+            "#,
+    );
+
+    build_debug_test!(source, &sentinels).expect_stack(&sentinels);
+}
+
+#[test]
 fn test_keccak_merge() {
     let input_u8: Vec<u8> = (0..64).collect();
     let preimage = KeccakPreimage::new(input_u8);
@@ -236,4 +261,97 @@ fn test_keccak_merge() {
     let test = build_debug_test!(source, &[]);
     let digest: Vec<u64> = preimage.digest().as_ref().iter().map(Felt::as_canonical_u64).collect();
     test.expect_stack(&digest);
+}
+
+/// Input at exactly `max_hash_len_bytes` must succeed.
+#[test]
+fn test_keccak_max_hash_len_at_boundary() {
+    let max_len = 20;
+    let input: Vec<u8> = (0..max_len as u8).collect();
+    run_keccak_with_max_hash_len(&input, max_len as u64, max_len).unwrap();
+}
+
+/// Input one byte over `max_hash_len_bytes` must be rejected.
+#[test]
+fn test_keccak_max_hash_len_over_boundary() {
+    let max_len = 20;
+    let input: Vec<u8> = (0..=max_len as u8).collect();
+    let err = run_keccak_with_max_hash_len(&input, (max_len + 1) as u64, max_len).unwrap_err();
+    let msg = format!("{err:?}");
+    assert!(msg.contains("exceeds maximum"), "expected limit error, got: {msg}");
+}
+
+#[test]
+fn test_keccak_merge_documented_stack_contract() {
+    let input_u8: Vec<u8> = (0..64).collect();
+    let preimage = KeccakPreimage::new(input_u8);
+    let sentinels = [0x707_u64, 0x808, 0x909, 0xa0a];
+
+    let input_felts = preimage.as_felts();
+    let stack_stores_source = masm_push_felts(&input_felts);
+
+    let source = format!(
+        r#"
+            use miden::core::crypto::hashes::keccak256
+
+            begin
+                {stack_stores_source}
+                exec.keccak256::merge
+                dropw dropw
+            end
+            "#,
+    );
+
+    build_debug_test!(source, &sentinels).expect_stack(&sentinels);
+}
+
+// HELPERS
+// ================================================================================================
+
+/// Helper that compiles and runs a keccak256 event with a given `len_bytes` on the stack and a
+/// custom `max_hash_len_bytes` execution option.
+fn run_keccak_with_max_hash_len(
+    input_u8: &[u8],
+    len_bytes_on_stack: u64,
+    max_hash_len_bytes: usize,
+) -> Result<(), ExecutionError> {
+    use miden_assembly::Assembler;
+    use miden_processor::{
+        DefaultHost, ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs,
+    };
+
+    let preimage = KeccakPreimage::new(input_u8.to_vec());
+    let input_felts = preimage.as_felts();
+    let memory_stores = masm_store_felts(&input_felts, INPUT_MEMORY_ADDR);
+
+    let source = format!(
+        r#"
+        begin
+            {memory_stores}
+            push.{len_bytes_on_stack}.{INPUT_MEMORY_ADDR}
+            emit.event("{KECCAK_HASH_BYTES_EVENT_NAME}")
+            drop drop
+        end
+        "#,
+    );
+
+    let core_lib = miden_core_lib::CoreLibrary::default();
+    let program = Assembler::default()
+        .with_static_library(core_lib.library())
+        .unwrap()
+        .assemble_program(&source)
+        .unwrap();
+
+    let mut host = DefaultHost::default();
+    host.load_library(core_lib.library().mast_forest()).unwrap();
+    for (event_name, handler) in core_lib.handlers() {
+        host.register_handler(event_name, handler).unwrap();
+    }
+
+    let options = ExecutionOptions::default().with_max_hash_len_bytes(max_hash_len_bytes);
+    let processor =
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options);
+
+    processor.execute_sync(&program, &mut host)?;
+    Ok(())
 }

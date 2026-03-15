@@ -23,7 +23,7 @@
 //! A Keccak256 digest (256 bits) is represented as 8 field elements `[h0, ..., h7]`,
 //! each containing a u32 value where `hi = u32::from_le_bytes([b_{4i}, ..., b_{4i+3}])`.
 
-use alloc::{vec, vec::Vec};
+use alloc::{format, vec, vec::Vec};
 use core::array;
 
 use miden_core::{
@@ -67,8 +67,23 @@ impl EventHandler for KeccakPrecompile {
         let ptr = process.get_stack_item(1).as_canonical_u64();
         let len_bytes = process.get_stack_item(2).as_canonical_u64();
 
+        // Enforce the maximum precompile input size to prevent host-side resource exhaustion. Make
+        // sure to compare in u64 to avoid truncation on 32-bit targets.
+        let max = process.execution_options().max_hash_len_bytes();
+        if len_bytes > max as u64 {
+            return Err(format!(
+                "keccak256 input length {len_bytes} bytes exceeds maximum of {max} bytes"
+            )
+            .into());
+        }
+        let len_bytes = usize::try_from(len_bytes).map_err(|_| {
+            EventError::from(format!(
+                "keccak256 input length {len_bytes} exceeds addressable range"
+            ))
+        })?;
+
         // Read input bytes from memory using the shared helper (u32-packed, LE, zero-padded)
-        let input_bytes = read_memory_packed_u32(process, ptr, len_bytes as usize)?;
+        let input_bytes = read_memory_packed_u32(process, ptr, len_bytes)?;
 
         // Build preimage from bytes and compute digest
         let preimage = KeccakPreimage::new(input_bytes);
