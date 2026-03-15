@@ -728,13 +728,27 @@ Proc: Form = {
                                     error: ParsingError::InvalidLocalsAttr { span: other.span(), message: "expected an integer literal".into() },
                                 }),
                             };
-                            if valid_num_locals.is_some() {
-                                num_locals = valid_num_locals;
-                                entry.insert(Attribute::List(list));
-                            } else {
-                                return Err(ParseError::User {
-                                    error: ParsingError::ImmediateOutOfRange { span: list.span(), range: 0..((u16::MAX as usize) + 1) },
-                                });
+                            match valid_num_locals {
+                                // Reject values that would overflow the word-alignment
+                                // rounding (next_multiple_of(4) exceeds u16::MAX for
+                                // values above 65532)
+                                Some(n) if n > (u16::MAX / 4) * 4 => {
+                                    return Err(ParseError::User {
+                                        error: ParsingError::InvalidLocalsAttr {
+                                            span: list.span(),
+                                            message: "number of locals exceeds the maximum of 65532".to_string(),
+                                        },
+                                    });
+                                }
+                                Some(_) => {
+                                    num_locals = valid_num_locals;
+                                    entry.insert(Attribute::List(list));
+                                }
+                                None => {
+                                    return Err(ParseError::User {
+                                        error: ParsingError::ImmediateOutOfRange { span: list.span(), range: 0..((u16::MAX as usize) + 1) },
+                                    });
+                                }
                             }
                         }
                         AttributeSetEntry::Occupied(entry) => {
