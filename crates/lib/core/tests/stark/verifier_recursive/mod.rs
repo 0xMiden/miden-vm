@@ -2,7 +2,6 @@ use alloc::vec::Vec;
 
 use miden_air::ProcessorAir;
 use miden_core::{Felt, FieldElement, QuadFelt, ToElements, WORD_SIZE, Word};
-use miden_processor::crypto::RpoRandomCoin;
 use miden_utils_testing::{
     MIN_STACK_DEPTH, VerifierError,
     crypto::{MerkleStore, Poseidon2, RandomCoin},
@@ -72,7 +71,7 @@ pub fn generate_advice_inputs(
     // create AIR instance for the computation specified in the proof
     let air = ProcessorAir::new(proof.trace_info().to_owned(), pub_inputs, proof.options().clone());
     let seed_digest = Poseidon2::hash_elements(&public_coin_seed);
-    let mut public_coin: RpoRandomCoin = RpoRandomCoin::new(seed_digest);
+    let mut public_coin: RandomCoin = RandomCoin::new(seed_digest);
     let mut channel = VerifierChannel::new(&air, proof)?;
 
     // 1 ----- main segment trace -----------------------------------------------------------------
@@ -152,7 +151,7 @@ pub fn generate_advice_inputs(
 
     // reseed with FRI layer commitments
     let deep_coefficients = air
-        .get_deep_composition_coefficients::<QuadFelt, RpoRandomCoin>(&mut public_coin)
+        .get_deep_composition_coefficients::<QuadFelt, RandomCoin>(&mut public_coin)
         .map_err(|_| VerifierError::RandomCoinError)?;
 
     // since we are using Horner batching, the randomness will be located in the penultimate

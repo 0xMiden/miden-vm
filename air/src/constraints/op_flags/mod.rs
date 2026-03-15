@@ -21,7 +21,7 @@
 
 use core::marker::PhantomData;
 
-use miden_core::{field::PrimeCharacteristicRing, operations::Operation};
+use miden_core::{field::PrimeCharacteristicRing, operations::opcodes};
 
 #[cfg(test)]
 use crate::trace::decoder::NUM_OP_BITS;
@@ -230,7 +230,7 @@ macro_rules! op_flag_getters {
             $(#[$meta])*
             #[inline(always)]
             pub fn $name(&self) -> E {
-                self.$array[get_op_index($op.op_code())].clone()
+                self.$array[get_op_index($op)].clone()
             }
         )*
     };
@@ -574,9 +574,9 @@ where
             + degree5_op_flags[11].clone() // PUSH
             + degree6_op_flags[4].clone(); // U32SPLIT
 
-        // Flag if stack shifted left (degree 5)
-        // Uses prefix_010 (degree 3) and add3_madd_prefix (degree 5) for controlled degree
-        // Note: DYNCALL not included, see docs
+        // Flag if stack shifted left (degree 5).
+        // Uses low-degree prefixes to keep left_shift at degree 5 (avoids degree growth).
+        // Note: DYNCALL is intentionally excluded; see stack overflow depth constraints.
         let left_shift = prefix_010.clone()
             + add3_madd_prefix.clone()
             + split_loop_flag
@@ -635,208 +635,208 @@ where
     op_flag_getters!(degree7_op_flags,
         /// Operation Flag of NOOP operation.
         #[allow(dead_code)]
-        noop => Operation::Noop,
+        noop => opcodes::NOOP,
         /// Operation Flag of EQZ operation.
-        eqz => Operation::Eqz,
+        eqz => opcodes::EQZ,
         /// Operation Flag of NEG operation.
-        neg => Operation::Neg,
+        neg => opcodes::NEG,
         /// Operation Flag of INV operation.
-        inv => Operation::Inv,
+        inv => opcodes::INV,
         /// Operation Flag of INCR operation.
-        incr => Operation::Incr,
+        incr => opcodes::INCR,
         /// Operation Flag of NOT operation.
-        not => Operation::Not,
+        not => opcodes::NOT,
         /// Operation Flag of MLOAD operation.
-        mload => Operation::MLoad,
+        mload => opcodes::MLOAD,
         /// Operation Flag of SWAP operation.
-        swap => Operation::Swap,
+        swap => opcodes::SWAP,
         /// Operation Flag of CALLER operation.
         ///
         /// CALLER overwrites the top 4 stack elements with the hash of the function
         /// that initiated the current SYSCALL.
-        caller => Operation::Caller,
+        caller => opcodes::CALLER,
         /// Operation Flag of MOVUP2 operation.
-        movup2 => Operation::MovUp2,
+        movup2 => opcodes::MOVUP2,
         /// Operation Flag of MOVDN2 operation.
-        movdn2 => Operation::MovDn2,
+        movdn2 => opcodes::MOVDN2,
         /// Operation Flag of MOVUP3 operation.
-        movup3 => Operation::MovUp3,
+        movup3 => opcodes::MOVUP3,
         /// Operation Flag of MOVDN3 operation.
-        movdn3 => Operation::MovDn3,
+        movdn3 => opcodes::MOVDN3,
         /// Operation Flag of ADVPOPW operation.
         #[allow(dead_code)]
-        advpopw => Operation::AdvPopW,
+        advpopw => opcodes::ADVPOPW,
         /// Operation Flag of EXPACC operation.
-        expacc => Operation::Expacc,
+        expacc => opcodes::EXPACC,
         /// Operation Flag of MOVUP4 operation.
-        movup4 => Operation::MovUp4,
+        movup4 => opcodes::MOVUP4,
         /// Operation Flag of MOVDN4 operation.
-        movdn4 => Operation::MovDn4,
+        movdn4 => opcodes::MOVDN4,
         /// Operation Flag of MOVUP5 operation.
-        movup5 => Operation::MovUp5,
+        movup5 => opcodes::MOVUP5,
         /// Operation Flag of MOVDN5 operation.
-        movdn5 => Operation::MovDn5,
+        movdn5 => opcodes::MOVDN5,
         /// Operation Flag of MOVUP6 operation.
-        movup6 => Operation::MovUp6,
+        movup6 => opcodes::MOVUP6,
         /// Operation Flag of MOVDN6 operation.
-        movdn6 => Operation::MovDn6,
+        movdn6 => opcodes::MOVDN6,
         /// Operation Flag of MOVUP7 operation.
-        movup7 => Operation::MovUp7,
+        movup7 => opcodes::MOVUP7,
         /// Operation Flag of MOVDN7 operation.
-        movdn7 => Operation::MovDn7,
+        movdn7 => opcodes::MOVDN7,
         /// Operation Flag of SWAPW operation.
-        swapw => Operation::SwapW,
+        swapw => opcodes::SWAPW,
         /// Operation Flag of MOVUP8 operation.
-        movup8 => Operation::MovUp8,
+        movup8 => opcodes::MOVUP8,
         /// Operation Flag of MOVDN8 operation.
-        movdn8 => Operation::MovDn8,
+        movdn8 => opcodes::MOVDN8,
         /// Operation Flag of SWAPW2 operation.
-        swapw2 => Operation::SwapW2,
+        swapw2 => opcodes::SWAPW2,
         /// Operation Flag of SWAPW3 operation.
-        swapw3 => Operation::SwapW3,
+        swapw3 => opcodes::SWAPW3,
         /// Operation Flag of SWAPDW operation.
-        swapdw => Operation::SwapDW,
+        swapdw => opcodes::SWAPDW,
         /// Operation Flag of EXT2MUL operation.
-        ext2mul => Operation::Ext2Mul,
+        ext2mul => opcodes::EXT2MUL,
         /// Operation Flag of ASSERT operation.
-        assert_op => Operation::Assert(miden_core::ZERO),
+        assert_op => opcodes::ASSERT,
         /// Operation Flag of EQ operation.
-        eq => Operation::Eq,
+        eq => opcodes::EQ,
         /// Operation Flag of ADD operation.
-        add => Operation::Add,
+        add => opcodes::ADD,
         /// Operation Flag of MUL operation.
-        mul => Operation::Mul,
+        mul => opcodes::MUL,
         /// Operation Flag of AND operation.
-        and => Operation::And,
+        and => opcodes::AND,
         /// Operation Flag of OR operation.
-        or => Operation::Or,
+        or => opcodes::OR,
         /// Operation Flag of U32AND operation.
-        u32and => Operation::U32and,
+        u32and => opcodes::U32AND,
         /// Operation Flag of U32XOR operation.
-        u32xor => Operation::U32xor,
+        u32xor => opcodes::U32XOR,
         /// Operation Flag of DROP operation.
         #[allow(dead_code)]
-        drop => Operation::Drop,
+        drop => opcodes::DROP,
         /// Operation Flag of CSWAP operation.
-        cswap => Operation::CSwap,
+        cswap => opcodes::CSWAP,
         /// Operation Flag of CSWAPW operation.
-        cswapw => Operation::CSwapW,
+        cswapw => opcodes::CSWAPW,
         /// Operation Flag of MLOADW operation.
-        mloadw => Operation::MLoadW,
+        mloadw => opcodes::MLOADW,
         /// Operation Flag of MSTORE operation.
-        mstore => Operation::MStore,
+        mstore => opcodes::MSTORE,
         /// Operation Flag of MSTOREW operation.
-        mstorew => Operation::MStoreW,
+        mstorew => opcodes::MSTOREW,
         /// Operation Flag of PAD operation.
-        pad => Operation::Pad,
+        pad => opcodes::PAD,
         /// Operation Flag of DUP operation.
-        dup => Operation::Dup0,
+        dup => opcodes::DUP0,
         /// Operation Flag of DUP1 operation.
-        dup1 => Operation::Dup1,
+        dup1 => opcodes::DUP1,
         /// Operation Flag of DUP2 operation.
-        dup2 => Operation::Dup2,
+        dup2 => opcodes::DUP2,
         /// Operation Flag of DUP3 operation.
-        dup3 => Operation::Dup3,
+        dup3 => opcodes::DUP3,
         /// Operation Flag of DUP4 operation.
-        dup4 => Operation::Dup4,
+        dup4 => opcodes::DUP4,
         /// Operation Flag of DUP5 operation.
-        dup5 => Operation::Dup5,
+        dup5 => opcodes::DUP5,
         /// Operation Flag of DUP6 operation.
-        dup6 => Operation::Dup6,
+        dup6 => opcodes::DUP6,
         /// Operation Flag of DUP7 operation.
-        dup7 => Operation::Dup7,
+        dup7 => opcodes::DUP7,
         /// Operation Flag of DUP9 operation.
-        dup9 => Operation::Dup9,
+        dup9 => opcodes::DUP9,
         /// Operation Flag of DUP11 operation.
-        dup11 => Operation::Dup11,
+        dup11 => opcodes::DUP11,
         /// Operation Flag of DUP13 operation.
-        dup13 => Operation::Dup13,
+        dup13 => opcodes::DUP13,
         /// Operation Flag of DUP15 operation.
-        dup15 => Operation::Dup15,
+        dup15 => opcodes::DUP15,
         /// Operation Flag of ADVPOP operation.
         #[allow(dead_code)]
-        advpop => Operation::AdvPop,
+        advpop => opcodes::ADVPOP,
         /// Operation Flag of SDEPTH operation.
-        sdepth => Operation::SDepth,
+        sdepth => opcodes::SDEPTH,
         /// Operation Flag of CLK operation.
-        clk => Operation::Clk,
+        clk => opcodes::CLK,
     );
 
     // ------ Degree 6 u32 operations  ------------------------------------------------------------
 
     op_flag_getters!(degree6_op_flags,
         /// Operation Flag of U32ADD operation.
-        u32add => Operation::U32add,
+        u32add => opcodes::U32ADD,
         /// Operation Flag of U32SUB operation.
-        u32sub => Operation::U32sub,
+        u32sub => opcodes::U32SUB,
         /// Operation Flag of U32MUL operation.
-        u32mul => Operation::U32mul,
+        u32mul => opcodes::U32MUL,
         /// Operation Flag of U32DIV operation.
-        u32div => Operation::U32div,
+        u32div => opcodes::U32DIV,
         /// Operation Flag of U32SPLIT operation.
-        u32split => Operation::U32split,
+        u32split => opcodes::U32SPLIT,
         /// Operation Flag of U32ASSERT2 operation.
-        u32assert2 => Operation::U32assert2(miden_core::ZERO),
+        u32assert2 => opcodes::U32ASSERT2,
         /// Operation Flag of U32ADD3 operation.
-        u32add3 => Operation::U32add3,
+        u32add3 => opcodes::U32ADD3,
         /// Operation Flag of U32MADD operation.
-        u32madd => Operation::U32madd,
+        u32madd => opcodes::U32MADD,
     );
 
     // ------ Degree 5 operations  ----------------------------------------------------------------
 
     op_flag_getters!(degree5_op_flags,
         /// Operation Flag of HPERM operation.
-        hperm => Operation::HPerm,
+        hperm => opcodes::HPERM,
         /// Operation Flag of MPVERIFY operation.
-        mpverify => Operation::MpVerify(miden_core::ZERO),
+        mpverify => opcodes::MPVERIFY,
         /// Operation Flag of SPLIT operation.
-        split => Operation::Split,
+        split => opcodes::SPLIT,
         /// Operation Flag of LOOP operation.
-        loop_op => Operation::Loop,
+        loop_op => opcodes::LOOP,
         /// Operation Flag of SPAN operation.
-        span => Operation::Span,
+        span => opcodes::SPAN,
         /// Operation Flag of JOIN operation.
-        join => Operation::Join,
+        join => opcodes::JOIN,
         /// Operation Flag of PUSH operation.
-        push => Operation::Push(miden_core::ONE),
+        push => opcodes::PUSH,
         /// Operation Flag of DYN operation.
-        dyn_op => Operation::Dyn,
+        dyn_op => opcodes::DYN,
         /// Operation Flag of DYNCALL operation.
-        dyncall => Operation::Dyncall,
+        dyncall => opcodes::DYNCALL,
         /// Operation Flag of EVALCIRCUIT operation.
-        evalcircuit => Operation::EvalCircuit,
+        evalcircuit => opcodes::EVALCIRCUIT,
         /// Operation Flag of LOG_PRECOMPILE operation.
-        log_precompile => Operation::LogPrecompile,
+        log_precompile => opcodes::LOGPRECOMPILE,
         /// Operation Flag of HORNERBASE operation.
-        hornerbase => Operation::HornerBase,
+        hornerbase => opcodes::HORNERBASE,
         /// Operation Flag of HORNEREXT operation.
-        hornerext => Operation::HornerExt,
+        hornerext => opcodes::HORNEREXT,
         /// Operation Flag of MSTREAM operation.
-        mstream => Operation::MStream,
+        mstream => opcodes::MSTREAM,
         /// Operation Flag of PIPE operation.
-        pipe => Operation::Pipe,
+        pipe => opcodes::PIPE,
     );
 
     // ------ Degree 4 operations  ----------------------------------------------------------------
 
     op_flag_getters!(degree4_op_flags,
         /// Operation Flag of MRUPDATE operation.
-        mrupdate => Operation::MrUpdate,
+        mrupdate => opcodes::MRUPDATE,
         /// Operation Flag of CALL operation.
-        call => Operation::Call,
+        call => opcodes::CALL,
         /// Operation Flag of SYSCALL operation.
-        syscall => Operation::SysCall,
+        syscall => opcodes::SYSCALL,
         /// Operation Flag of END operation.
-        end => Operation::End,
+        end => opcodes::END,
         /// Operation Flag of REPEAT operation.
-        repeat => Operation::Repeat,
+        repeat => opcodes::REPEAT,
         /// Operation Flag of RESPAN operation.
-        respan => Operation::Respan,
+        respan => opcodes::RESPAN,
         /// Operation Flag of HALT operation.
-        halt => Operation::Halt,
+        halt => opcodes::HALT,
         /// Operation Flag of CRYPTOSTREAM operation.
-        cryptostream => Operation::CryptoStream,
+        cryptostream => opcodes::CRYPTOSTREAM,
     );
 
     // ------ Composite Flags ---------------------------------------------------------------------

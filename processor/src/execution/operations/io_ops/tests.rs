@@ -175,7 +175,7 @@ fn test_op_mstream() {
 
     // clear the stack (drop the 8 elements we pushed while storing)
     for _ in 0..8 {
-        Processor::stack_mut(&mut processor).decrement_size();
+        Processor::stack_mut(&mut processor).decrement_size().unwrap();
         processor.system_mut().increment_clock();
     }
 

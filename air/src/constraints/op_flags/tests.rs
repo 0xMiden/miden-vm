@@ -2,7 +2,10 @@
 
 use alloc::vec::Vec;
 
-use miden_core::{Felt, ONE, ZERO, operations::Operation};
+use miden_core::{
+    Felt, ONE, ZERO,
+    operations::{Operation, opcodes},
+};
 use proptest::prelude::*;
 
 use super::{
@@ -34,6 +37,7 @@ fn naive_flag(bits: &[Felt; 7], opcode: u8) -> Felt {
     acc
 }
 
+#[allow(clippy::iter_skip_zero)]
 fn naive_op_flags(bits: [Felt; 7]) -> ([Felt; 64], [Felt; 8], [Felt; 16], [Felt; 8]) {
     let mut deg7 = [ZERO; 64];
     let mut deg6 = [ZERO; 8];
@@ -118,47 +122,47 @@ fn valid_opcodes() -> Vec<usize> {
 #[test]
 fn test_get_op_index_degree7() {
     // Degree 7 operations have opcodes 0-63, index maps directly
-    assert_eq!(get_op_index(Operation::Noop.op_code()), 0);
-    assert_eq!(get_op_index(Operation::Swap.op_code()), Operation::Swap.op_code() as usize);
-    assert_eq!(get_op_index(Operation::Pad.op_code()), Operation::Pad.op_code() as usize);
+    assert_eq!(get_op_index(opcodes::NOOP), 0);
+    assert_eq!(get_op_index(opcodes::SWAP), opcodes::SWAP as usize);
+    assert_eq!(get_op_index(opcodes::PAD), opcodes::PAD as usize);
 }
 
 #[test]
 fn test_get_op_index_degree6() {
     // Degree 6 operations have opcodes 64-79, but only even opcodes are used
-    assert_eq!(get_op_index(Operation::U32add.op_code()), 0);
-    assert_eq!(get_op_index(Operation::U32sub.op_code()), 1);
-    assert_eq!(get_op_index(Operation::U32mul.op_code()), 2);
-    assert_eq!(get_op_index(Operation::U32div.op_code()), 3);
-    assert_eq!(get_op_index(Operation::U32split.op_code()), 4);
-    assert_eq!(get_op_index(Operation::U32assert2(Felt::ZERO).op_code()), 5);
-    assert_eq!(get_op_index(Operation::U32add3.op_code()), 6);
-    assert_eq!(get_op_index(Operation::U32madd.op_code()), 7);
+    assert_eq!(get_op_index(opcodes::U32ADD), 0);
+    assert_eq!(get_op_index(opcodes::U32SUB), 1);
+    assert_eq!(get_op_index(opcodes::U32MUL), 2);
+    assert_eq!(get_op_index(opcodes::U32DIV), 3);
+    assert_eq!(get_op_index(opcodes::U32SPLIT), 4);
+    assert_eq!(get_op_index(opcodes::U32ASSERT2), 5);
+    assert_eq!(get_op_index(opcodes::U32ADD3), 6);
+    assert_eq!(get_op_index(opcodes::U32MADD), 7);
 }
 
 #[test]
 fn test_get_op_index_degree5() {
     // Degree 5 operations have opcodes 80-95
-    assert_eq!(get_op_index(Operation::HPerm.op_code()), 0);
-    assert_eq!(get_op_index(Operation::MpVerify(Felt::ZERO).op_code()), 1);
-    assert_eq!(get_op_index(Operation::Split.op_code()), 4);
-    assert_eq!(get_op_index(Operation::Loop.op_code()), 5);
-    assert_eq!(get_op_index(Operation::Span.op_code()), 6);
-    assert_eq!(get_op_index(Operation::Join.op_code()), 7);
-    assert_eq!(get_op_index(Operation::Push(Felt::ONE).op_code()), 11);
+    assert_eq!(get_op_index(opcodes::HPERM), 0);
+    assert_eq!(get_op_index(opcodes::MPVERIFY), 1);
+    assert_eq!(get_op_index(opcodes::SPLIT), 4);
+    assert_eq!(get_op_index(opcodes::LOOP), 5);
+    assert_eq!(get_op_index(opcodes::SPAN), 6);
+    assert_eq!(get_op_index(opcodes::JOIN), 7);
+    assert_eq!(get_op_index(opcodes::PUSH), 11);
 }
 
 #[test]
 fn test_get_op_index_degree4() {
     // Degree 4 operations have opcodes 96-127, only every 4th opcode is used
-    assert_eq!(get_op_index(Operation::MrUpdate.op_code()), 0);
-    assert_eq!(get_op_index(Operation::CryptoStream.op_code()), 1);
-    assert_eq!(get_op_index(Operation::SysCall.op_code()), 2);
-    assert_eq!(get_op_index(Operation::Call.op_code()), 3);
-    assert_eq!(get_op_index(Operation::End.op_code()), 4);
-    assert_eq!(get_op_index(Operation::Repeat.op_code()), 5);
-    assert_eq!(get_op_index(Operation::Respan.op_code()), 6);
-    assert_eq!(get_op_index(Operation::Halt.op_code()), 7);
+    assert_eq!(get_op_index(opcodes::MRUPDATE), 0);
+    assert_eq!(get_op_index(opcodes::CRYPTOSTREAM), 1);
+    assert_eq!(get_op_index(opcodes::SYSCALL), 2);
+    assert_eq!(get_op_index(opcodes::CALL), 3);
+    assert_eq!(get_op_index(opcodes::END), 4);
+    assert_eq!(get_op_index(opcodes::REPEAT), 5);
+    assert_eq!(get_op_index(opcodes::RESPAN), 6);
+    assert_eq!(get_op_index(opcodes::HALT), 7);
 }
 
 #[test]
@@ -392,20 +396,20 @@ fn degree_4_op_flags() {
 #[test]
 fn composite_no_shift_flags() {
     // Operations where all 16 positions remain unchanged
-    let no_shift_ops =
-        [Operation::MpVerify(ZERO), Operation::Span, Operation::Halt, Operation::Emit];
+    let no_shift_opcodes: [u8; 4] =
+        [opcodes::MPVERIFY, opcodes::SPAN, opcodes::HALT, opcodes::EMIT];
 
-    for op in no_shift_ops {
-        let op_flags = op_flags_for_opcode(op.op_code().into());
+    for opcode in no_shift_opcodes {
+        let op_flags = op_flags_for_opcode(opcode.into());
 
         // All positions should have no_shift = ONE
         for i in 0..16 {
             assert_eq!(
                 op_flags.no_shift_at(i),
                 ONE,
-                "no_shift_at({}) should be ONE for {:?}",
+                "no_shift_at({}) should be ONE for opcode {:?}",
                 i,
-                op
+                opcode
             );
         }
 
@@ -418,7 +422,7 @@ fn composite_no_shift_flags() {
 /// Tests composite flags for INCR (no shift from position 1 onwards).
 #[test]
 fn composite_incr_flags() {
-    let op_flags = op_flags_for_opcode(Operation::Incr.op_code().into());
+    let op_flags = op_flags_for_opcode(opcodes::INCR.into());
 
     // Position 0 changes, positions 1-15 don't
     assert_eq!(op_flags.no_shift_at(0), ZERO);
@@ -433,7 +437,7 @@ fn composite_incr_flags() {
 /// Tests composite flags for SWAP (no shift from position 2 onwards).
 #[test]
 fn composite_swap_flags() {
-    let op_flags = op_flags_for_opcode(Operation::Swap.op_code().into());
+    let op_flags = op_flags_for_opcode(opcodes::SWAP.into());
 
     assert_eq!(op_flags.no_shift_at(0), ZERO);
     assert_eq!(op_flags.no_shift_at(1), ZERO);
@@ -448,7 +452,7 @@ fn composite_swap_flags() {
 /// Tests composite flags for HPERM (no shift from position 12 onwards).
 #[test]
 fn composite_hperm_flags() {
-    let op_flags = op_flags_for_opcode(Operation::HPerm.op_code().into());
+    let op_flags = op_flags_for_opcode(opcodes::HPERM.into());
 
     for i in 0..12 {
         assert_eq!(op_flags.no_shift_at(i), ZERO, "no_shift_at({}) should be ZERO for HPERM", i);
@@ -464,7 +468,7 @@ fn composite_hperm_flags() {
 /// Tests left shift composite flags for LOOP operation.
 #[test]
 fn composite_loop_left_shift() {
-    let op_flags = op_flags_for_opcode(Operation::Loop.op_code().into());
+    let op_flags = op_flags_for_opcode(opcodes::LOOP.into());
 
     assert_eq!(op_flags.left_shift_at(0), ZERO);
     // LOOP shifts the stack left
@@ -483,7 +487,7 @@ fn composite_loop_left_shift() {
 /// Tests left shift composite flags for AND operation (shifts from position 2).
 #[test]
 fn composite_and_left_shift() {
-    let op_flags = op_flags_for_opcode(Operation::And.op_code().into());
+    let op_flags = op_flags_for_opcode(opcodes::AND.into());
 
     // AND shifts left from position 2
     assert_eq!(op_flags.left_shift_at(0), ZERO);
@@ -499,7 +503,7 @@ fn composite_and_left_shift() {
 /// Tests right shift flags for DUP1.
 #[test]
 fn composite_dup1_right_shift() {
-    let op_flags = op_flags_for_opcode(Operation::Dup1.op_code().into());
+    let op_flags = op_flags_for_opcode(opcodes::DUP1.into());
 
     // DUP1 shifts the entire stack right
     for i in 0..=15 {
@@ -516,7 +520,7 @@ fn composite_dup1_right_shift() {
 /// Tests right shift flags for PUSH.
 #[test]
 fn composite_push_right_shift() {
-    let op_flags = op_flags_for_opcode(Operation::Push(ONE).op_code().into());
+    let op_flags = op_flags_for_opcode(opcodes::PUSH.into());
 
     // PUSH shifts the entire stack right
     for i in 0..=15 {
@@ -531,7 +535,7 @@ fn composite_push_right_shift() {
 #[test]
 fn composite_end_flags() {
     // END without loop flag: no shift
-    let op_flags = op_flags_for_opcode(Operation::End.op_code().into());
+    let op_flags = op_flags_for_opcode(opcodes::END.into());
 
     for i in 0..16 {
         assert_eq!(
@@ -545,7 +549,7 @@ fn composite_end_flags() {
     assert_eq!(op_flags.control_flow(), ONE);
 
     // END with loop flag: left shift (need to modify the row)
-    let mut row = generate_test_row(Operation::End.op_code().into());
+    let mut row = generate_test_row(opcodes::END.into());
     row.decoder[IS_LOOP_FLAG_COL_IDX] = ONE;
     let op_flags_loop = OpFlags::new(&row);
 
@@ -572,7 +576,7 @@ fn composite_end_flags() {
 /// Tests SWAPW2 flags (positions 4-7 and 12-15 remain, others swap).
 #[test]
 fn composite_swapw2_flags() {
-    let op_flags = op_flags_for_opcode(Operation::SwapW2.op_code().into());
+    let op_flags = op_flags_for_opcode(opcodes::SWAPW2.into());
 
     // Positions 4-7 and 12-15 should be no_shift (words that stay in place)
     for i in [0, 1, 2, 3, 8, 9, 10, 11] {
@@ -590,22 +594,22 @@ fn composite_swapw2_flags() {
 #[test]
 fn control_flow_flag() {
     // Control flow operations
-    let cf_ops = [
-        Operation::Span,
-        Operation::Join,
-        Operation::Split,
-        Operation::Loop,
-        Operation::End,
-        Operation::Repeat,
-        Operation::Respan,
-        Operation::Halt,
-        Operation::Call,
-        Operation::SysCall,
+    let cf_opcodes: [u8; 10] = [
+        opcodes::SPAN,
+        opcodes::JOIN,
+        opcodes::SPLIT,
+        opcodes::LOOP,
+        opcodes::END,
+        opcodes::REPEAT,
+        opcodes::RESPAN,
+        opcodes::HALT,
+        opcodes::CALL,
+        opcodes::SYSCALL,
     ];
 
-    for op in cf_ops {
-        let op_flags = op_flags_for_opcode(op.op_code().into());
-        assert_eq!(op_flags.control_flow(), ONE, "control_flow should be ONE for {:?}", op);
+    for opcode in cf_opcodes {
+        let op_flags = op_flags_for_opcode(opcode.into());
+        assert_eq!(op_flags.control_flow(), ONE, "control_flow should be ONE for opcode {opcode}");
     }
 
     // Non-control flow operations

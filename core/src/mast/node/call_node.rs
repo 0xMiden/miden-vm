@@ -9,14 +9,15 @@ use miden_formatting::{
 use serde::{Deserialize, Serialize};
 
 use super::{MastForestContributor, MastNodeExt};
+#[cfg(debug_assertions)]
+use crate::mast::MastNode;
 use crate::{
     Felt, Word,
     chiplets::hasher,
     mast::{
-        DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode, MastNodeFingerprint,
-        MastNodeId,
+        DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeFingerprint, MastNodeId,
     },
-    operations::{OPCODE_CALL, OPCODE_SYSCALL},
+    operations::opcodes,
     utils::{Idx, LookupByIdx},
 };
 
@@ -43,9 +44,9 @@ pub struct CallNode {
 /// Constants
 impl CallNode {
     /// The domain of the call block (used for control block hashing).
-    pub const CALL_DOMAIN: Felt = Felt::new(OPCODE_CALL as u64);
+    pub const CALL_DOMAIN: Felt = Felt::new(opcodes::CALL as u64);
     /// The domain of the syscall block (used for control block hashing).
-    pub const SYSCALL_DOMAIN: Felt = Felt::new(OPCODE_SYSCALL as u64);
+    pub const SYSCALL_DOMAIN: Felt = Felt::new(opcodes::SYSCALL as u64);
 }
 
 //-------------------------------------------------------------------------------------------------

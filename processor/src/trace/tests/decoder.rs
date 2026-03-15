@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::{
-    AUX_TRACE_RAND_ELEMENTS,
+    AUX_TRACE_RAND_CHALLENGES, Challenges,
     chiplets::hasher::HASH_CYCLE_LEN_FELT,
     decoder::{P1_COL_IDX, P2_COL_IDX, P3_COL_IDX},
 };
@@ -30,13 +30,14 @@ use crate::{
 fn decoder_p1_span_with_respan() {
     let (ops, _) = build_span_with_respan_ops();
     let trace = build_trace_from_ops(ops, &[]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
-    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
+    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
+    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
     let row_values = [
-        BlockStackTableRow::new(ONE, ZERO, false).to_value(&alphas),
-        BlockStackTableRow::new(ONE + HASH_CYCLE_LEN_FELT, ZERO, false).to_value(&alphas),
+        BlockStackTableRow::new(ONE, ZERO, false).to_value(&challenges),
+        BlockStackTableRow::new(ONE + HASH_CYCLE_LEN_FELT, ZERO, false).to_value(&challenges),
     ];
 
     // make sure the first entry is ONE
@@ -89,16 +90,17 @@ fn decoder_p1_join() {
     };
 
     let trace = build_trace_from_program(&program, &[]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
-    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
+    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
+    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
     let a_33 = ONE + HASH_CYCLE_LEN_FELT;
     let a_65 = a_33 + HASH_CYCLE_LEN_FELT;
     let row_values = [
-        BlockStackTableRow::new(ONE, ZERO, false).to_value(&alphas),
-        BlockStackTableRow::new(a_33, ONE, false).to_value(&alphas),
-        BlockStackTableRow::new(a_65, ONE, false).to_value(&alphas),
+        BlockStackTableRow::new(ONE, ZERO, false).to_value(&challenges),
+        BlockStackTableRow::new(a_33, ONE, false).to_value(&challenges),
+        BlockStackTableRow::new(a_65, ONE, false).to_value(&challenges),
     ];
 
     // make sure the first entry is ONE
@@ -162,14 +164,15 @@ fn decoder_p1_split() {
     };
 
     let trace = build_trace_from_program(&program, &[1]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
-    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
+    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
+    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
     let a_33 = ONE + HASH_CYCLE_LEN_FELT;
     let row_values = [
-        BlockStackTableRow::new(ONE, ZERO, false).to_value(&alphas),
-        BlockStackTableRow::new(a_33, ONE, false).to_value(&alphas),
+        BlockStackTableRow::new(ONE, ZERO, false).to_value(&challenges),
+        BlockStackTableRow::new(a_33, ONE, false).to_value(&challenges),
     ];
 
     // make sure the first entry is ONE
@@ -226,10 +229,11 @@ fn decoder_p1_loop_with_repeat() {
     // After Pad+Drop: position 0 = 1 (2nd iteration enters)
     // After Pad+Drop: position 0 = 0 (loop exits)
     let trace = build_trace_from_program(&program, &[1, 1, 0]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
-    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
+    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
+    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
     // The loop node consumes the first hasher cycle; join/span addresses follow sequentially.
     let a_33 = ONE + HASH_CYCLE_LEN_FELT; // address of the JOIN block in the first iteration
     let a_65 = a_33 + HASH_CYCLE_LEN_FELT; // address of the first SPAN block in the first iteration
@@ -238,13 +242,13 @@ fn decoder_p1_loop_with_repeat() {
     let a_161 = a_129 + HASH_CYCLE_LEN_FELT; // address of the first SPAN block in the second iteration
     let a_193 = a_161 + HASH_CYCLE_LEN_FELT; // address of the second SPAN block in the second iteration
     let row_values = [
-        BlockStackTableRow::new(ONE, ZERO, true).to_value(&alphas),
-        BlockStackTableRow::new(a_33, ONE, false).to_value(&alphas),
-        BlockStackTableRow::new(a_65, a_33, false).to_value(&alphas),
-        BlockStackTableRow::new(a_97, a_33, false).to_value(&alphas),
-        BlockStackTableRow::new(a_129, ONE, false).to_value(&alphas),
-        BlockStackTableRow::new(a_161, a_129, false).to_value(&alphas),
-        BlockStackTableRow::new(a_193, a_129, false).to_value(&alphas),
+        BlockStackTableRow::new(ONE, ZERO, true).to_value(&challenges),
+        BlockStackTableRow::new(a_33, ONE, false).to_value(&challenges),
+        BlockStackTableRow::new(a_65, a_33, false).to_value(&challenges),
+        BlockStackTableRow::new(a_97, a_33, false).to_value(&challenges),
+        BlockStackTableRow::new(a_129, ONE, false).to_value(&challenges),
+        BlockStackTableRow::new(a_161, a_129, false).to_value(&challenges),
+        BlockStackTableRow::new(a_193, a_129, false).to_value(&challenges),
     ];
 
     // make sure the first entry is ONE
@@ -350,15 +354,16 @@ fn decoder_p2_span_with_respan() {
         Program::new(mast_forest.into(), basic_block_id)
     };
     let trace = build_trace_from_program(&program, &[]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
-    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
+    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
-    let row_values =
-        [BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&alphas)];
+    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
+    let program_hash_msg =
+        BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&challenges);
 
-    // make sure the first entry is initialized to program hash
-    let mut expected_value = row_values[0];
+    // p2 starts at identity (1)
+    let mut expected_value = ONE;
     assert_eq!(expected_value, p2[0]);
 
     // as operations inside the span execute (including RESPAN), the table is not affected
@@ -366,11 +371,10 @@ fn decoder_p2_span_with_respan() {
         assert_eq!(expected_value, p2[i]);
     }
 
-    // at cycle 22, the END operation is executed and the table is cleared
-    expected_value *= row_values[0].inverse();
-    assert_eq!(expected_value, ONE);
+    // at cycle 22, the END operation removes the root block hash (unmatched by any add)
+    expected_value *= program_hash_msg.inverse();
     for i in 22..(p2.len()) {
-        assert_eq!(ONE, p2[i]);
+        assert_eq!(expected_value, p2[i]);
     }
 }
 
@@ -397,22 +401,24 @@ fn decoder_p2_join() {
     let program = Program::new(mast_forest.into(), join_id);
 
     let trace = build_trace_from_program(&program, &[]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
-    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
+    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
-    let row_values = [
-        BlockHashTableRow::new_test(ZERO, join.digest(), false, false).collapse(&alphas),
-        BlockHashTableRow::new_test(ONE, basic_block_1.digest(), true, false).collapse(&alphas),
-        BlockHashTableRow::new_test(ONE, basic_block_2.digest(), false, false).collapse(&alphas),
-    ];
+    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
+    let program_hash_msg =
+        BlockHashTableRow::new_test(ZERO, join.digest(), false, false).collapse(&challenges);
+    let child1_msg =
+        BlockHashTableRow::new_test(ONE, basic_block_1.digest(), true, false).collapse(&challenges);
+    let child2_msg = BlockHashTableRow::new_test(ONE, basic_block_2.digest(), false, false)
+        .collapse(&challenges);
 
-    // make sure the first entry is initialized to program hash
-    let mut expected_value = row_values[0];
+    // p2 starts at identity (1)
+    let mut expected_value = ONE;
     assert_eq!(expected_value, p2[0]);
 
     // when JOIN operation is executed, entries for both children are added to the table
-    expected_value *= row_values[1] * row_values[2];
+    expected_value *= child1_msg * child2_msg;
     assert_eq!(expected_value, p2[1]);
 
     // for the next 2 cycles, the table is not affected
@@ -420,7 +426,7 @@ fn decoder_p2_join() {
     assert_eq!(expected_value, p2[3]);
 
     // when the first SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[1].inverse();
+    expected_value *= child1_msg.inverse();
     assert_eq!(expected_value, p2[4]);
 
     // for the next 2 cycles, the table is not affected
@@ -428,17 +434,16 @@ fn decoder_p2_join() {
     assert_eq!(expected_value, p2[6]);
 
     // when the second SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[2].inverse();
+    expected_value *= child2_msg.inverse();
     assert_eq!(expected_value, p2[7]);
 
-    // when the JOIN block ends, its entry is removed from the table
-    expected_value *= row_values[0].inverse();
+    // when the JOIN block ends, its entry (the root hash) is removed (unmatched by any add)
+    expected_value *= program_hash_msg.inverse();
     assert_eq!(expected_value, p2[8]);
 
-    // at this point the table should be empty, and thus, all subsequent values must be ONE
-    assert_eq!(expected_value, ONE);
+    // the final value is 1/program_hash_msg
     for i in 9..(p2.len()) {
-        assert_eq!(ONE, p2[i]);
+        assert_eq!(expected_value, p2[i]);
     }
 }
 
@@ -465,21 +470,22 @@ fn decoder_p2_split_true() {
 
     // build trace from program
     let trace = build_trace_from_program(&program, &[1]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
-    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
+    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
-    let row_values = [
-        BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&alphas),
-        BlockHashTableRow::new_test(ONE, basic_block_1.digest(), false, false).collapse(&alphas),
-    ];
+    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
+    let program_hash_msg =
+        BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&challenges);
+    let child_msg = BlockHashTableRow::new_test(ONE, basic_block_1.digest(), false, false)
+        .collapse(&challenges);
 
-    // make sure the first entry is initialized to program hash
-    let mut expected_value = row_values[0];
+    // p2 starts at identity (1)
+    let mut expected_value = ONE;
     assert_eq!(expected_value, p2[0]);
 
     // when SPLIT operation is executed, entry for the true branch is added to the table
-    expected_value *= row_values[1];
+    expected_value *= child_msg;
     assert_eq!(expected_value, p2[1]);
 
     // for the next 2 cycles, the table is not affected
@@ -487,17 +493,16 @@ fn decoder_p2_split_true() {
     assert_eq!(expected_value, p2[3]);
 
     // when the SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[1].inverse();
+    expected_value *= child_msg.inverse();
     assert_eq!(expected_value, p2[4]);
 
-    // when the SPLIT block ends, its entry is removed from the table
-    expected_value *= row_values[0].inverse();
+    // when the SPLIT block ends, its entry (the root hash) is removed (unmatched by any add)
+    expected_value *= program_hash_msg.inverse();
     assert_eq!(expected_value, p2[5]);
 
-    // at this point the table should be empty, and thus, all subsequent values must be ONE
-    assert_eq!(expected_value, ONE);
+    // the final value is 1/program_hash_msg
     for i in 6..(p2.len()) {
-        assert_eq!(ONE, p2[i]);
+        assert_eq!(expected_value, p2[i]);
     }
 }
 
@@ -525,21 +530,22 @@ fn decoder_p2_split_false() {
 
     // build trace from program
     let trace = build_trace_from_program(&program, &[0]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
-    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
+    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
-    let row_values = [
-        BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&alphas),
-        BlockHashTableRow::new_test(ONE, basic_block_2.digest(), false, false).collapse(&alphas),
-    ];
+    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
+    let program_hash_msg =
+        BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&challenges);
+    let child_msg = BlockHashTableRow::new_test(ONE, basic_block_2.digest(), false, false)
+        .collapse(&challenges);
 
-    // make sure the first entry is initialized to program hash
-    let mut expected_value = row_values[0];
+    // p2 starts at identity (1)
+    let mut expected_value = ONE;
     assert_eq!(expected_value, p2[0]);
 
     // when SPLIT operation is executed, entry for the false branch is added to the table
-    expected_value *= row_values[1];
+    expected_value *= child_msg;
     assert_eq!(expected_value, p2[1]);
 
     // for the next 2 cycles, the table is not affected
@@ -547,17 +553,16 @@ fn decoder_p2_split_false() {
     assert_eq!(expected_value, p2[3]);
 
     // when the SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[1].inverse();
+    expected_value *= child_msg.inverse();
     assert_eq!(expected_value, p2[4]);
 
-    // when the SPLIT block ends, its entry is removed from the table
-    expected_value *= row_values[0].inverse();
+    // when the SPLIT block ends, its entry (the root hash) is removed (unmatched by any add)
+    expected_value *= program_hash_msg.inverse();
     assert_eq!(expected_value, p2[5]);
 
-    // at this point the table should be empty, and thus, all subsequent values must be ONE
-    assert_eq!(expected_value, ONE);
+    // the final value is 1/program_hash_msg
     for i in 6..(p2.len()) {
-        assert_eq!(ONE, p2[i]);
+        assert_eq!(expected_value, p2[i]);
     }
 }
 
@@ -590,34 +595,39 @@ fn decoder_p2_loop_with_repeat() {
     // After Pad+Drop: position 0 = 1 (2nd iteration enters)
     // After Pad+Drop: position 0 = 0 (loop exits)
     let trace = build_trace_from_program(&program, &[1, 1, 0]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
-    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
+    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
+    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
     // The loop node consumes the first hasher cycle; join/span addresses follow sequentially.
     let a_33 = ONE + HASH_CYCLE_LEN_FELT; // address of the JOIN block in the first iteration
     let a_129 = a_33 + HASH_CYCLE_LEN_FELT * Felt::new(3); // address of the JOIN block in the second iteration
-    let row_values = [
-        BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&alphas),
-        BlockHashTableRow::new_test(ONE, join.digest(), false, true).collapse(&alphas),
-        BlockHashTableRow::new_test(a_33, basic_block_1.digest(), true, false).collapse(&alphas),
-        BlockHashTableRow::new_test(a_33, basic_block_2.digest(), false, false).collapse(&alphas),
-        BlockHashTableRow::new_test(a_129, basic_block_1.digest(), true, false).collapse(&alphas),
-        BlockHashTableRow::new_test(a_129, basic_block_2.digest(), false, false).collapse(&alphas),
-    ];
+    let program_hash_msg =
+        BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&challenges);
+    let loop_body_msg =
+        BlockHashTableRow::new_test(ONE, join.digest(), false, true).collapse(&challenges);
+    let child1_iter1 = BlockHashTableRow::new_test(a_33, basic_block_1.digest(), true, false)
+        .collapse(&challenges);
+    let child2_iter1 = BlockHashTableRow::new_test(a_33, basic_block_2.digest(), false, false)
+        .collapse(&challenges);
+    let child1_iter2 = BlockHashTableRow::new_test(a_129, basic_block_1.digest(), true, false)
+        .collapse(&challenges);
+    let child2_iter2 = BlockHashTableRow::new_test(a_129, basic_block_2.digest(), false, false)
+        .collapse(&challenges);
 
-    // make sure the first entry is initialized to program hash
-    let mut expected_value = row_values[0];
+    // p2 starts at identity (1)
+    let mut expected_value = ONE;
     assert_eq!(expected_value, p2[0]);
 
     // --- first iteration ----------------------------------------------------
 
     // when LOOP operation is executed, entry for loop body is added to the table
-    expected_value *= row_values[1];
+    expected_value *= loop_body_msg;
     assert_eq!(expected_value, p2[1]);
 
     // when JOIN operation is executed, entries for both children are added to the table
-    expected_value *= row_values[2] * row_values[3];
+    expected_value *= child1_iter1 * child2_iter1;
     assert_eq!(expected_value, p2[2]);
 
     // for the next 2 cycles, the table is not affected
@@ -625,7 +635,7 @@ fn decoder_p2_loop_with_repeat() {
     assert_eq!(expected_value, p2[4]);
 
     // when the first SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[2].inverse();
+    expected_value *= child1_iter1.inverse();
     assert_eq!(expected_value, p2[5]);
 
     // for the next 2 cycles, the table is not affected
@@ -633,21 +643,21 @@ fn decoder_p2_loop_with_repeat() {
     assert_eq!(expected_value, p2[7]);
 
     // when the second SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[3].inverse();
+    expected_value *= child2_iter1.inverse();
     assert_eq!(expected_value, p2[8]);
 
     // when the JOIN block ends, its entry is removed from the table
-    expected_value *= row_values[1].inverse();
+    expected_value *= loop_body_msg.inverse();
     assert_eq!(expected_value, p2[9]);
 
     // --- second iteration ---------------------------------------------------
 
     // when REPEAT operation is executed, entry for loop body is again added to the table
-    expected_value *= row_values[1];
+    expected_value *= loop_body_msg;
     assert_eq!(expected_value, p2[10]);
 
     // when JOIN operation is executed, entries for both children are added to the table
-    expected_value *= row_values[4] * row_values[5];
+    expected_value *= child1_iter2 * child2_iter2;
     assert_eq!(expected_value, p2[11]);
 
     // for the next 2 cycles, the table is not affected
@@ -655,7 +665,7 @@ fn decoder_p2_loop_with_repeat() {
     assert_eq!(expected_value, p2[13]);
 
     // when the first SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[4].inverse();
+    expected_value *= child1_iter2.inverse();
     assert_eq!(expected_value, p2[14]);
 
     // for the next 2 cycles, the table is not affected
@@ -663,21 +673,20 @@ fn decoder_p2_loop_with_repeat() {
     assert_eq!(expected_value, p2[16]);
 
     // when the second SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[5].inverse();
+    expected_value *= child2_iter2.inverse();
     assert_eq!(expected_value, p2[17]);
 
     // when the JOIN block ends, its entry is removed from the table
-    expected_value *= row_values[1].inverse();
+    expected_value *= loop_body_msg.inverse();
     assert_eq!(expected_value, p2[18]);
 
-    // when the LOOP block ends, its entry is removed from the table
-    expected_value *= row_values[0].inverse();
+    // when the LOOP block ends, its entry (the root hash) is removed (unmatched by any add)
+    expected_value *= program_hash_msg.inverse();
     assert_eq!(expected_value, p2[19]);
 
-    // at this point the table should be empty, and thus, all subsequent values must be ONE
-    assert_eq!(expected_value, ONE);
+    // the final value is 1/program_hash_msg
     for i in 20..(p2.len()) {
-        assert_eq!(ONE, p2[i]);
+        assert_eq!(expected_value, p2[i]);
     }
 }
 
@@ -690,8 +699,8 @@ fn decoder_p3_trace_empty_table() {
     let operations = vec![Operation::Add];
     let trace = build_trace_from_ops(operations, &stack);
 
-    let rand_elements = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
-    let aux_columns = trace.build_aux_trace(&rand_elements).unwrap();
+    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
 
     // no rows should have been added or removed from the op group table, and thus, all values
     // in the column must be ONE
@@ -720,18 +729,20 @@ fn decoder_p3_trace_one_batch() {
         Operation::Add,
     ];
     let trace = build_trace_from_ops(ops.clone(), &stack);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
-    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
+    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
     let p3 = aux_columns.get_column(P3_COL_IDX);
+
+    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
 
     // make sure the first entry is ONE
     assert_eq!(ONE, p3[0]);
 
     // make sure 3 groups were inserted at clock cycle 1; these entries are for the two immediate
     // values and the second operation group consisting of [SWAP, MUL, ADD]
-    let g1_value = OpGroupTableRow::new(ONE, Felt::new(3), ONE).to_value(&alphas);
-    let g2_value = OpGroupTableRow::new(ONE, Felt::new(2), Felt::new(2)).to_value(&alphas);
-    let g3_value = OpGroupTableRow::new(ONE, ONE, build_op_group(&ops[9..])).to_value(&alphas);
+    let g1_value = OpGroupTableRow::new(ONE, Felt::new(3), ONE).to_value(&challenges);
+    let g2_value = OpGroupTableRow::new(ONE, Felt::new(2), Felt::new(2)).to_value(&challenges);
+    let g3_value = OpGroupTableRow::new(ONE, ONE, build_op_group(&ops[9..])).to_value(&challenges);
     let expected_value = g1_value * g2_value * g3_value;
     assert_eq!(expected_value, p3[1]);
 
@@ -772,9 +783,11 @@ fn decoder_p3_trace_one_batch() {
 fn decoder_p3_trace_two_batches() {
     let (ops, iv) = build_span_with_respan_ops();
     let trace = build_trace_from_ops(ops, &[]);
-    let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
-    let aux_columns = trace.build_aux_trace(&alphas).unwrap();
+    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
     let p3 = aux_columns.get_column(P3_COL_IDX);
+
+    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
 
     // make sure the first entry is ONE
     assert_eq!(ONE, p3[0]);
@@ -782,13 +795,13 @@ fn decoder_p3_trace_two_batches() {
     // --- first batch ----------------------------------------------------------------------------
     // make sure entries for 7 groups were inserted at clock cycle 1
     let b0_values = [
-        OpGroupTableRow::new(ONE, Felt::new(11), iv[0]).to_value(&alphas),
-        OpGroupTableRow::new(ONE, Felt::new(10), iv[1]).to_value(&alphas),
-        OpGroupTableRow::new(ONE, Felt::new(9), iv[2]).to_value(&alphas),
-        OpGroupTableRow::new(ONE, Felt::new(8), iv[3]).to_value(&alphas),
-        OpGroupTableRow::new(ONE, Felt::new(7), iv[4]).to_value(&alphas),
-        OpGroupTableRow::new(ONE, Felt::new(6), iv[5]).to_value(&alphas),
-        OpGroupTableRow::new(ONE, Felt::new(5), iv[6]).to_value(&alphas),
+        OpGroupTableRow::new(ONE, Felt::new(11), iv[0]).to_value(&challenges),
+        OpGroupTableRow::new(ONE, Felt::new(10), iv[1]).to_value(&challenges),
+        OpGroupTableRow::new(ONE, Felt::new(9), iv[2]).to_value(&challenges),
+        OpGroupTableRow::new(ONE, Felt::new(8), iv[3]).to_value(&challenges),
+        OpGroupTableRow::new(ONE, Felt::new(7), iv[4]).to_value(&challenges),
+        OpGroupTableRow::new(ONE, Felt::new(6), iv[5]).to_value(&challenges),
+        OpGroupTableRow::new(ONE, Felt::new(5), iv[6]).to_value(&challenges),
     ];
     let mut expected_value: Felt = b0_values.iter().fold(ONE, |acc, &val| acc * val);
     assert_eq!(expected_value, p3[1]);
@@ -811,9 +824,9 @@ fn decoder_p3_trace_two_batches() {
     let batch1_addr = ONE + HASH_CYCLE_LEN_FELT;
     let op_group3 = build_op_group(&[Operation::Drop; 2]);
     let b1_values = [
-        OpGroupTableRow::new(batch1_addr, Felt::new(3), iv[7]).to_value(&alphas),
-        OpGroupTableRow::new(batch1_addr, Felt::new(2), iv[8]).to_value(&alphas),
-        OpGroupTableRow::new(batch1_addr, ONE, op_group3).to_value(&alphas),
+        OpGroupTableRow::new(batch1_addr, Felt::new(3), iv[7]).to_value(&challenges),
+        OpGroupTableRow::new(batch1_addr, Felt::new(2), iv[8]).to_value(&challenges),
+        OpGroupTableRow::new(batch1_addr, ONE, op_group3).to_value(&challenges),
     ];
     let mut expected_value: Felt = b1_values.iter().fold(ONE, |acc, &val| acc * val);
     assert_eq!(expected_value, p3[10]);
@@ -877,21 +890,21 @@ impl BlockStackTableRow {
 
 impl BlockStackTableRow {
     /// Reduces this row to a single field element in the field specified by E. This requires
-    /// at least 12 alpha values.
-    pub fn to_value<E: ExtensionField<Felt>>(&self, alphas: &[E]) -> E {
+    /// at least 12 coefficients.
+    pub fn to_value<E: ExtensionField<Felt>>(&self, challenges: &Challenges<E>) -> E {
         let is_loop = if self.is_loop { ONE } else { ZERO };
-        alphas[0]
-            + alphas[1] * self.block_id
-            + alphas[2] * self.parent_id
-            + alphas[3] * is_loop
-            + alphas[4] * Felt::from_u32(u32::from(self.parent_ctx))
-            + alphas[5] * self.parent_fmp
-            + alphas[6] * Felt::from_u32(self.parent_stack_depth)
-            + alphas[7] * self.parent_next_overflow_addr
-            + alphas[8] * self.parent_fn_hash[0]
-            + alphas[9] * self.parent_fn_hash[1]
-            + alphas[10] * self.parent_fn_hash[2]
-            + alphas[11] * self.parent_fn_hash[3]
+        challenges.alpha
+            + challenges.beta_powers[0] * self.block_id
+            + challenges.beta_powers[1] * self.parent_id
+            + challenges.beta_powers[2] * is_loop
+            + challenges.beta_powers[3] * Felt::from_u32(u32::from(self.parent_ctx))
+            + challenges.beta_powers[4] * self.parent_fmp
+            + challenges.beta_powers[5] * Felt::from_u32(self.parent_stack_depth)
+            + challenges.beta_powers[6] * self.parent_next_overflow_addr
+            + challenges.beta_powers[7] * self.parent_fn_hash[0]
+            + challenges.beta_powers[8] * self.parent_fn_hash[1]
+            + challenges.beta_powers[9] * self.parent_fn_hash[2]
+            + challenges.beta_powers[10] * self.parent_fn_hash[3]
     }
 }
 
@@ -913,11 +926,11 @@ impl OpGroupTableRow {
 
 impl OpGroupTableRow {
     /// Reduces this row to a single field element in the field specified by E. This requires
-    /// at least 4 alpha values.
-    pub fn to_value<E: ExtensionField<Felt>>(&self, alphas: &[E]) -> E {
-        alphas[0]
-            + alphas[1] * self.batch_id
-            + alphas[2] * self.group_pos
-            + alphas[3] * self.group_value
+    /// at least 4 coefficients.
+    pub fn to_value<E: ExtensionField<Felt>>(&self, challenges: &Challenges<E>) -> E {
+        challenges.alpha
+            + challenges.beta_powers[0] * self.batch_id
+            + challenges.beta_powers[1] * self.group_pos
+            + challenges.beta_powers[2] * self.group_value
     }
 }

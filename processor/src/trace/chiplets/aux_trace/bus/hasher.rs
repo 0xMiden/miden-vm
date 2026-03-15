@@ -1,7 +1,7 @@
 use core::fmt::{Display, Formatter, Result as FmtResult};
 
 use miden_air::trace::{
-    MainTrace, RowIndex,
+    Challenges, MainTrace, RowIndex, bus_message,
     chiplets::{
         hasher,
         hasher::{
@@ -15,26 +15,41 @@ use miden_air::trace::{
         STACK_R0_RANGE, STACK_R1_RANGE, STACK_TAG_RANGE,
     },
 };
-use miden_core::{
-    Felt, ONE, WORD_SIZE, ZERO,
-    field::ExtensionField,
-    operations::{OPCODE_CALL, OPCODE_JOIN, OPCODE_LOOP, OPCODE_SPLIT},
-    utils::range,
-};
+use miden_core::{Felt, ONE, WORD_SIZE, ZERO, field::ExtensionField, operations::opcodes};
 
 use super::get_op_label;
 use crate::{
     Word,
     debug::{BusDebugger, BusMessage},
-    trace::chiplets::aux_trace::build_value,
 };
 
-// HASHER MESSAGE CONSTANTS AND HELPERS
-// ==============================================================================================
+// HASHER MESSAGE ENCODING LAYOUT
+// ================================================================================================
+//
+// All hasher chiplet bus messages use a common encoding structure:
+//
+//   challenges.alpha                     = alpha (randomness base, accessed directly)
+//   challenges.beta_powers[0]            = beta^0 (label: transition type)
+//   challenges.beta_powers[1]            = beta^1 (addr: hasher chiplet address)
+//   challenges.beta_powers[2]            = beta^2 (node_index: Merkle path position, 0 for
+// non-Merkle ops)   challenges.beta_powers[3..10]        = beta^3..beta^10 (state[0..7]: RATE0 ||
+// RATE1 in sponge order)   challenges.beta_powers[11..14]       = beta^11..beta^14 (capacity[0..3]:
+// domain separation)
+//
+// Message encoding: alpha + beta^0*label + beta^1*addr + beta^2*node_index
+//                   + beta^3*state[0] + ... + beta^10*state[7]
+//                   + beta^11*capacity[0] + ... + beta^14*capacity[3]
+//
+// Different message types use different subsets of this layout:
+// - Full state messages (HPERM, LOG_PRECOMPILE): all 12 state elements (rate + capacity)
+// - Rate-only messages (SPAN, RESPAN): skip node_index and capacity, use label + addr + state[0..7]
+// - Digest messages (END block): label + addr + RATE0 digest (state[0..3])
+// - Control block messages: rate + one capacity element (beta_powers[12]) for op_code
+// - Tree operation messages (MPVERIFY, MRUPDATE): include node_index
 
-const NUM_HEADER_ALPHAS: usize = 4;
-const CAPACITY_START_IDX: usize = hasher::RATE_LEN;
-const CAPACITY_DOMAIN_IDX: usize = CAPACITY_START_IDX + 1;
+// HASHER MESSAGE CONSTANTS AND HELPERS
+// ================================================================================================
+
 const LABEL_OFFSET_START: Felt = Felt::new(16);
 const LABEL_OFFSET_END: Felt = Felt::new(32);
 const LINEAR_HASH_LABEL_START: Felt = Felt::new((LINEAR_HASH_LABEL + 16) as u64);
@@ -45,9 +60,12 @@ const MP_VERIFY_LABEL_START: Felt = Felt::new((MP_VERIFY_LABEL + 16) as u64);
 const MR_UPDATE_OLD_LABEL_START: Felt = Felt::new((MR_UPDATE_OLD_LABEL + 16) as u64);
 const MR_UPDATE_NEW_LABEL_START: Felt = Felt::new((MR_UPDATE_NEW_LABEL + 16) as u64);
 
+/// Encodes hasher message as **alpha + <beta, [label, addr, node_index, state...]>**
+///
+/// Used for tree operations (MPVERIFY, MRUPDATE) and generic hasher messages with node_index.
 #[inline(always)]
 fn hasher_message_value<E, const N: usize>(
-    alphas: &[E],
+    challenges: &Challenges<E>,
     transition_label: Felt,
     addr_next: Felt,
     node_index: Felt,
@@ -56,34 +74,55 @@ fn hasher_message_value<E, const N: usize>(
 where
     E: ExtensionField<Felt>,
 {
-    let header =
-        alphas[0] + alphas[1] * transition_label + alphas[2] * addr_next + alphas[3] * node_index;
-
-    header + build_value(&alphas[range(NUM_HEADER_ALPHAS, N)], state)
+    let mut acc = challenges.alpha
+        + challenges.beta_powers[bus_message::LABEL_IDX] * transition_label
+        + challenges.beta_powers[bus_message::ADDR_IDX] * addr_next
+        + challenges.beta_powers[bus_message::NODE_INDEX_IDX] * node_index;
+    for (i, &elem) in state.iter().enumerate() {
+        acc += challenges.beta_powers[bus_message::STATE_START_IDX + i] * elem;
+    }
+    acc
 }
 
+/// Encodes hasher message as **alpha + <beta, [label, addr, _, state[0..7]]>** (skips node_index).
 #[inline(always)]
-fn header_value<E>(alphas: &[E], transition_label: Felt, addr: Felt) -> E
+fn header_rate_value<E>(
+    challenges: &Challenges<E>,
+    transition_label: Felt,
+    addr: Felt,
+    state: [Felt; hasher::RATE_LEN],
+) -> E
 where
     E: ExtensionField<Felt>,
 {
-    alphas[0] + alphas[1] * transition_label + alphas[2] * addr
+    let mut acc = challenges.alpha
+        + challenges.beta_powers[bus_message::LABEL_IDX] * transition_label
+        + challenges.beta_powers[bus_message::ADDR_IDX] * addr;
+    for (i, &elem) in state.iter().enumerate() {
+        acc += challenges.beta_powers[bus_message::STATE_START_IDX + i] * elem;
+    }
+    acc
 }
 
+/// Encodes hasher message as **alpha + <beta, [label, addr, _, digest]>** (skips node_index, digest
+/// is RATE0 only).
 #[inline(always)]
-fn rate_value<E>(alphas: &[E], state: [Felt; hasher::RATE_LEN]) -> E
+fn header_digest_value<E>(
+    challenges: &Challenges<E>,
+    transition_label: Felt,
+    addr: Felt,
+    digest: [Felt; WORD_SIZE],
+) -> E
 where
     E: ExtensionField<Felt>,
 {
-    build_value(&alphas[range(NUM_HEADER_ALPHAS, hasher::RATE_LEN)], state)
-}
-
-#[inline(always)]
-fn digest_value<E>(alphas: &[E], digest: [Felt; WORD_SIZE]) -> E
-where
-    E: ExtensionField<Felt>,
-{
-    build_value(&alphas[range(NUM_HEADER_ALPHAS, WORD_SIZE)], digest)
+    let mut acc = challenges.alpha
+        + challenges.beta_powers[bus_message::LABEL_IDX] * transition_label
+        + challenges.beta_powers[bus_message::ADDR_IDX] * addr;
+    for (i, &elem) in digest.iter().enumerate() {
+        acc += challenges.beta_powers[bus_message::STATE_START_IDX + i] * elem;
+    }
+    acc
 }
 
 // REQUESTS
@@ -94,7 +133,7 @@ pub(super) fn build_control_block_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     decoder_hasher_state: [Felt; 8],
     op_code_felt: Felt,
-    alphas: &[E],
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -105,10 +144,10 @@ pub(super) fn build_control_block_request<E: ExtensionField<Felt>>(
         decoder_hasher_state,
     };
 
-    let value = message.value(alphas);
+    let value = message.value(challenges);
 
     #[cfg(any(test, feature = "bus-debugger"))]
-    _debugger.add_request(alloc::boxed::Box::new(message), alphas);
+    _debugger.add_request(alloc::boxed::Box::new(message), challenges);
 
     value
 }
@@ -116,7 +155,7 @@ pub(super) fn build_control_block_request<E: ExtensionField<Felt>>(
 /// Builds requests made to the hasher chiplet at the start of a span block.
 pub(super) fn build_span_block_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    alphas: &[E],
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -126,10 +165,10 @@ pub(super) fn build_span_block_request<E: ExtensionField<Felt>>(
         state: main_trace.decoder_hasher_state(row),
     };
 
-    let value = span_block_message.value(alphas);
+    let value = span_block_message.value(challenges);
 
     #[cfg(any(test, feature = "bus-debugger"))]
-    _debugger.add_request(alloc::boxed::Box::new(span_block_message), alphas);
+    _debugger.add_request(alloc::boxed::Box::new(span_block_message), challenges);
 
     value
 }
@@ -137,7 +176,7 @@ pub(super) fn build_span_block_request<E: ExtensionField<Felt>>(
 /// Builds requests made to the hasher chiplet at the start of a respan block.
 pub(super) fn build_respan_block_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    alphas: &[E],
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -147,10 +186,10 @@ pub(super) fn build_respan_block_request<E: ExtensionField<Felt>>(
         state: main_trace.decoder_hasher_state(row),
     };
 
-    let value = respan_block_message.value(alphas);
+    let value = respan_block_message.value(challenges);
 
     #[cfg(any(test, feature = "bus-debugger"))]
-    _debugger.add_request(alloc::boxed::Box::new(respan_block_message), alphas);
+    _debugger.add_request(alloc::boxed::Box::new(respan_block_message), challenges);
 
     value
 }
@@ -158,7 +197,7 @@ pub(super) fn build_respan_block_request<E: ExtensionField<Felt>>(
 /// Builds requests made to the hasher chiplet at the end of a block.
 pub(super) fn build_end_block_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    alphas: &[E],
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -170,10 +209,10 @@ pub(super) fn build_end_block_request<E: ExtensionField<Felt>>(
             .expect("decoder_hasher_state[0..4] must be 4 field elements"),
     };
 
-    let value = end_block_message.value(alphas);
+    let value = end_block_message.value(challenges);
 
     #[cfg(any(test, feature = "bus-debugger"))]
-    _debugger.add_request(alloc::boxed::Box::new(end_block_message), alphas);
+    _debugger.add_request(alloc::boxed::Box::new(end_block_message), challenges);
 
     value
 }
@@ -181,7 +220,7 @@ pub(super) fn build_end_block_request<E: ExtensionField<Felt>>(
 /// Builds `HPERM` requests made to the hash chiplet.
 pub(super) fn build_hperm_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    alphas: &[E],
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -231,12 +270,12 @@ pub(super) fn build_hperm_request<E: ExtensionField<Felt>>(
         source: "hperm output",
     };
 
-    let combined_value = input_req.value(alphas) * output_req.value(alphas);
+    let combined_value = input_req.value(challenges) * output_req.value(challenges);
 
     #[cfg(any(test, feature = "bus-debugger"))]
     {
-        _debugger.add_request(alloc::boxed::Box::new(input_req), alphas);
-        _debugger.add_request(alloc::boxed::Box::new(output_req), alphas);
+        _debugger.add_request(alloc::boxed::Box::new(input_req), challenges);
+        _debugger.add_request(alloc::boxed::Box::new(output_req), challenges);
     }
 
     combined_value
@@ -261,7 +300,7 @@ pub(super) fn build_hperm_request<E: ExtensionField<Felt>>(
 /// - `s8..s11`: `CAP_NEXT[0..3]`
 pub(super) fn build_log_precompile_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    alphas: &[E],
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -310,12 +349,12 @@ pub(super) fn build_log_precompile_request<E: ExtensionField<Felt>>(
         source: "log_precompile output",
     };
 
-    let combined_value = input_req.value(alphas) * output_req.value(alphas);
+    let combined_value = input_req.value(challenges) * output_req.value(challenges);
 
     #[cfg(any(test, feature = "bus-debugger"))]
     {
-        _debugger.add_request(alloc::boxed::Box::new(input_req), alphas);
-        _debugger.add_request(alloc::boxed::Box::new(output_req), alphas);
+        _debugger.add_request(alloc::boxed::Box::new(input_req), challenges);
+        _debugger.add_request(alloc::boxed::Box::new(output_req), challenges);
     }
 
     combined_value
@@ -324,7 +363,7 @@ pub(super) fn build_log_precompile_request<E: ExtensionField<Felt>>(
 /// Builds `MPVERIFY` requests made to the hash chiplet.
 pub(super) fn build_mpverify_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    alphas: &[E],
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -345,9 +384,9 @@ pub(super) fn build_mpverify_request<E: ExtensionField<Felt>>(
         .expect("word must be 4 field elements");
 
     let input_value =
-        hasher_message_value(alphas, MP_VERIFY_LABEL_START, helper_0, node_index, node_word);
+        hasher_message_value(challenges, MP_VERIFY_LABEL_START, helper_0, node_index, node_word);
     let output_value = hasher_message_value(
-        alphas,
+        challenges,
         RETURN_HASH_LABEL_END,
         helper_0 + node_depth * hash_cycle_len - ONE,
         ZERO,
@@ -380,8 +419,8 @@ pub(super) fn build_mpverify_request<E: ExtensionField<Felt>>(
             source: "mpverify output",
         };
 
-        _debugger.add_request(alloc::boxed::Box::new(input), alphas);
-        _debugger.add_request(alloc::boxed::Box::new(output), alphas);
+        _debugger.add_request(alloc::boxed::Box::new(input), challenges);
+        _debugger.add_request(alloc::boxed::Box::new(output), challenges);
     }
 
     combined_value
@@ -390,7 +429,7 @@ pub(super) fn build_mpverify_request<E: ExtensionField<Felt>>(
 /// Builds `MRUPDATE` requests made to the hash chiplet.
 pub(super) fn build_mrupdate_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
-    alphas: &[E],
+    challenges: &Challenges<E>,
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
@@ -416,28 +455,28 @@ pub(super) fn build_mrupdate_request<E: ExtensionField<Felt>>(
         new_root.as_elements().try_into().expect("word must be 4 field elements");
 
     let input_old_value = hasher_message_value(
-        alphas,
+        challenges,
         MR_UPDATE_OLD_LABEL_START,
         helper_0,
         node_index,
         old_node_word,
     );
     let output_old_value = hasher_message_value(
-        alphas,
+        challenges,
         RETURN_HASH_LABEL_END,
         helper_0 + merkle_path_depth * hash_cycle_len - ONE,
         ZERO,
         old_root_word,
     );
     let input_new_value = hasher_message_value(
-        alphas,
+        challenges,
         MR_UPDATE_NEW_LABEL_START,
         helper_0 + merkle_path_depth * hash_cycle_len,
         node_index,
         new_node_word,
     );
     let output_new_value = hasher_message_value(
-        alphas,
+        challenges,
         RETURN_HASH_LABEL_END,
         helper_0 + merkle_path_depth * two_hash_cycles_len - ONE,
         ZERO,
@@ -489,10 +528,10 @@ pub(super) fn build_mrupdate_request<E: ExtensionField<Felt>>(
             source: "mrupdate output_new",
         };
 
-        _debugger.add_request(alloc::boxed::Box::new(input_old), alphas);
-        _debugger.add_request(alloc::boxed::Box::new(output_old), alphas);
-        _debugger.add_request(alloc::boxed::Box::new(input_new), alphas);
-        _debugger.add_request(alloc::boxed::Box::new(output_new), alphas);
+        _debugger.add_request(alloc::boxed::Box::new(input_old), challenges);
+        _debugger.add_request(alloc::boxed::Box::new(output_old), challenges);
+        _debugger.add_request(alloc::boxed::Box::new(input_new), challenges);
+        _debugger.add_request(alloc::boxed::Box::new(output_new), challenges);
     }
 
     combined_value
@@ -505,7 +544,7 @@ pub(super) fn build_mrupdate_request<E: ExtensionField<Felt>>(
 pub(super) fn build_hasher_chiplet_responses<E>(
     main_trace: &MainTrace,
     row: RowIndex,
-    alphas: &[E],
+    challenges: &Challenges<E>,
     _debugger: &mut BusDebugger<E>,
 ) -> E
 where
@@ -536,10 +575,10 @@ where
                 hasher_state: state,
                 source: "hasher",
             };
-            multiplicand = hasher_message.value(alphas);
+            multiplicand = hasher_message.value(challenges);
 
             #[cfg(any(test, feature = "bus-debugger"))]
-            _debugger.add_response(alloc::boxed::Box::new(hasher_message), alphas);
+            _debugger.add_response(alloc::boxed::Box::new(hasher_message), challenges);
         }
 
         // f_mp or f_mv or f_mu == 1
@@ -555,8 +594,13 @@ where
                     .expect("RATE1 word must be 4 field elements")
             };
 
-            multiplicand =
-                hasher_message_value(alphas, transition_label, addr_next, node_index, rate_word);
+            multiplicand = hasher_message_value(
+                challenges,
+                transition_label,
+                addr_next,
+                node_index,
+                rate_word,
+            );
 
             #[cfg(any(test, feature = "bus-debugger"))]
             {
@@ -578,7 +622,7 @@ where
                     hasher_state,
                     source: "hasher",
                 };
-                _debugger.add_response(alloc::boxed::Box::new(hasher_message), alphas);
+                _debugger.add_response(alloc::boxed::Box::new(hasher_message), challenges);
             }
         }
     }
@@ -596,8 +640,13 @@ where
         if selector1 == ZERO && selector2 == ZERO && selector3 == ZERO {
             let rate_word: [Felt; WORD_SIZE] =
                 state[..WORD_SIZE].try_into().expect("RATE0 word must be 4 field elements");
-            multiplicand =
-                hasher_message_value(alphas, transition_label, addr_next, node_index, rate_word);
+            multiplicand = hasher_message_value(
+                challenges,
+                transition_label,
+                addr_next,
+                node_index,
+                rate_word,
+            );
 
             #[cfg(any(test, feature = "bus-debugger"))]
             {
@@ -611,7 +660,7 @@ where
                     ],
                     source: "hasher",
                 };
-                _debugger.add_response(alloc::boxed::Box::new(hasher_message), alphas);
+                _debugger.add_response(alloc::boxed::Box::new(hasher_message), challenges);
             }
         }
 
@@ -626,10 +675,10 @@ where
                 source: "hasher",
             };
 
-            multiplicand = hasher_message.value(alphas);
+            multiplicand = hasher_message.value(challenges);
 
             #[cfg(any(test, feature = "bus-debugger"))]
-            _debugger.add_response(alloc::boxed::Box::new(hasher_message), alphas);
+            _debugger.add_response(alloc::boxed::Box::new(hasher_message), challenges);
         }
 
         // f_abp == 1
@@ -644,7 +693,7 @@ where
                 .expect("rate portion must be 8 field elements");
 
             multiplicand =
-                hasher_message_value(alphas, transition_label, addr_next, node_index, rate);
+                hasher_message_value(challenges, transition_label, addr_next, node_index, rate);
 
             #[cfg(any(test, feature = "bus-debugger"))]
             {
@@ -668,7 +717,7 @@ where
                     ],
                     source: "hasher",
                 };
-                _debugger.add_response(alloc::boxed::Box::new(hasher_message), alphas);
+                _debugger.add_response(alloc::boxed::Box::new(hasher_message), challenges);
             }
         }
     }
@@ -688,23 +737,30 @@ impl<E> BusMessage<E> for ControlBlockRequestMessage
 where
     E: ExtensionField<Felt>,
 {
-    fn value(&self, alphas: &[E]) -> E {
-        let header = header_value(alphas, self.transition_label, self.addr_next);
-
-        // Treat the decoder hasher state as the rate portion; capacity is zero
-        // except for the domain lane (second capacity element).
-        header
-            + rate_value(alphas, self.decoder_hasher_state)
-            + alphas[NUM_HEADER_ALPHAS + CAPACITY_DOMAIN_IDX] * self.op_code
+    /// Encodes as **alpha + <beta, [label, addr, _, state[0..7], ..., op_code]>** (skips
+    /// node_index).
+    fn value(&self, challenges: &Challenges<E>) -> E {
+        // Header + rate portion + capacity domain element for op_code
+        let mut acc = header_rate_value(
+            challenges,
+            self.transition_label,
+            self.addr_next,
+            self.decoder_hasher_state,
+        );
+        acc += challenges.beta_powers[bus_message::CAPACITY_DOMAIN_IDX] * self.op_code;
+        acc
     }
 
     fn source(&self) -> &str {
         let op_code = self.op_code.as_canonical_u64() as u8;
         match op_code {
-            OPCODE_JOIN => "join",
-            OPCODE_SPLIT => "split",
-            OPCODE_LOOP => "loop",
-            OPCODE_CALL => "call",
+            opcodes::JOIN => "join",
+            opcodes::SPLIT => "split",
+            opcodes::LOOP => "loop",
+            opcodes::CALL => "call",
+            opcodes::DYN => "dyn",
+            opcodes::DYNCALL => "dyncall",
+            opcodes::SYSCALL => "syscall",
             _ => panic!("unexpected opcode: {op_code}"),
         }
     }
@@ -735,9 +791,9 @@ impl<E> BusMessage<E> for HasherMessage
 where
     E: ExtensionField<Felt>,
 {
-    fn value(&self, alphas: &[E]) -> E {
+    fn value(&self, challenges: &Challenges<E>) -> E {
         hasher_message_value(
-            alphas,
+            challenges,
             self.transition_label,
             self.addr_next,
             self.node_index,
@@ -773,11 +829,8 @@ impl<E> BusMessage<E> for SpanBlockMessage
 where
     E: ExtensionField<Felt>,
 {
-    fn value(&self, alphas: &[E]) -> E {
-        let header = header_value(alphas, self.transition_label, self.addr_next);
-
-        // Treat the 8-lane decoder hasher state as the rate portion; capacity is implicitly zero.
-        header + rate_value(alphas, self.state)
+    fn value(&self, challenges: &Challenges<E>) -> E {
+        header_rate_value(challenges, self.transition_label, self.addr_next, self.state)
     }
 
     fn source(&self) -> &str {
@@ -808,11 +861,8 @@ impl<E> BusMessage<E> for RespanBlockMessage
 where
     E: ExtensionField<Felt>,
 {
-    fn value(&self, alphas: &[E]) -> E {
-        let header = header_value(alphas, self.transition_label, self.addr_next - ONE);
-
-        // Treat the 8-lane decoder hasher state as the rate portion; capacity is implicitly zero.
-        header + rate_value(alphas, self.state)
+    fn value(&self, challenges: &Challenges<E>) -> E {
+        header_rate_value(challenges, self.transition_label, self.addr_next - ONE, self.state)
     }
 
     fn source(&self) -> &str {
@@ -843,11 +893,8 @@ impl<E> BusMessage<E> for EndBlockMessage
 where
     E: ExtensionField<Felt>,
 {
-    fn value(&self, alphas: &[E]) -> E {
-        let header = header_value(alphas, self.transition_label, self.addr);
-
-        // Treat the digest as RATE0 (first 4 lanes); remaining lanes are implicitly zero.
-        header + digest_value(alphas, self.digest)
+    fn value(&self, challenges: &Challenges<E>) -> E {
+        header_digest_value(challenges, self.transition_label, self.addr, self.digest)
     }
 
     fn source(&self) -> &str {
