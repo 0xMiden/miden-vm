@@ -962,6 +962,37 @@ fn test_ast_parsing_simple_docs() -> Result<(), Report> {
 }
 
 #[test]
+fn locals_overflow_rejected() {
+    let context = SyntaxTestContext::new();
+    let source = source_file!(
+        &context,
+        r#"
+    @locals(65535)
+    pub proc foo
+        push.1
+    end"#
+    );
+
+    assert_parse_diagnostic!(source, "number of locals exceeds the maximum of 65532");
+}
+
+#[test]
+fn locals_max_valid_accepted() -> Result<(), Report> {
+    let context = SyntaxTestContext::new();
+    let source = source_file!(
+        &context,
+        r#"
+    @locals(65532)
+    pub proc foo
+        push.1
+    end"#
+    );
+
+    context.parse_forms(source)?;
+    Ok(())
+}
+
+#[test]
 fn test_ast_parsing_module_docs_valid() {
     let context = SyntaxTestContext::new();
 
