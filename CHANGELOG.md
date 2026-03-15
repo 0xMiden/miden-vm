@@ -17,6 +17,7 @@
 - Added general stack transition constraints (shift/no‑shift) ([#2725](https://github.com/0xMiden/miden-vm/pull/2725)).
 - Added stack overflow table constraints ([#2735](https://github.com/0xMiden/miden-vm/pull/2735)).
 - Added stack shuffling ops constraints ([#2736](https://github.com/0xMiden/miden-vm/pull/2736)).
+- [BREAKING] Renamed `miden::core::crypto::dsa::falcon512poseidon2` module to `falcon512_poseidon2` to align with snake_case naming convention ([#2740](https://github.com/0xMiden/miden-vm/issues/2740)).
 - Fix a possible panic in decorator serialization ([#2742](https://github.com/0xMiden/miden-vm/pull/2742)).
 - Added `miden-ace-codegen` crate for lowering AIR constraints to ACE circuit format ([#2757](https://github.com/0xMiden/miden-vm/pull/2757)).
 - [BREAKING] `Operation` enum now only encodes basic block operations ([#2771](https://github.com/0xMiden/miden-vm/pull/2771)).
