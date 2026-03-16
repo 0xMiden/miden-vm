@@ -30,7 +30,6 @@ use alloc::{
 use miden_assembly_syntax::{
     Library,
     ast::{AttributeSet, PathBuf},
-    library::{FunctionTypeDeserializer, FunctionTypeSerializer},
 };
 use miden_core::{
     Word,
@@ -361,7 +360,7 @@ impl Serializable for ProcedureExport {
         match self.signature.as_ref() {
             Some(sig) => {
                 target.write_bool(true);
-                FunctionTypeSerializer(sig).write_into(target);
+                sig.write_into(target);
             },
             None => {
                 target.write_bool(false);
@@ -373,10 +372,11 @@ impl Serializable for ProcedureExport {
 
 impl Deserializable for ProcedureExport {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        use miden_assembly_syntax::ast::types::FunctionType;
         let path = PathBuf::read_from(source)?.into_boxed_path().into();
         let digest = Word::read_from(source)?;
         let signature = if source.read_bool()? {
-            Some(FunctionTypeDeserializer::read_from(source)?.0)
+            Some(FunctionType::read_from(source)?)
         } else {
             None
         };
@@ -402,19 +402,16 @@ impl Deserializable for ConstantExport {
 
 impl Serializable for TypeExport {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        use miden_assembly_syntax::library::TypeSerializer;
-
         self.path.write_into(target);
-        TypeSerializer(&self.ty).write_into(target);
+        self.ty.write_into(target);
     }
 }
 
 impl Deserializable for TypeExport {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        use miden_assembly_syntax::library::TypeDeserializer;
-
+        use miden_assembly_syntax::ast::types::Type;
         let path = PathBuf::read_from(source)?.into_boxed_path().into();
-        let ty = TypeDeserializer::read_from(source)?.0;
+        let ty = Type::read_from(source)?;
         Ok(Self { path, ty })
     }
 }
