@@ -87,18 +87,6 @@ impl SymbolResolutionError {
         }
     }
 
-    pub fn duplicate_symbol(
-        span: SourceSpan,
-        symbol: Arc<str>,
-        source_manager: &dyn SourceManager,
-    ) -> Self {
-        Self::DuplicateSymbol {
-            span,
-            source_file: source_manager.get(span.source_id()).ok(),
-            symbol,
-        }
-    }
-
     pub fn invalid_alias_target(
         span: SourceSpan,
         referrer: SourceSpan,

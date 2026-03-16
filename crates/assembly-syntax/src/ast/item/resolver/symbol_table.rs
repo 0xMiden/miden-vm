@@ -149,10 +149,13 @@ impl LocalSymbolTable {
                 LocalSymbol::Import { name, .. } => name.clone().into_inner(),
             };
 
-            if let Some(prev) = symbols.insert(name.clone(), id) {
-                panic!(
+            if let Some(prev) = symbols.get(&name).copied() {
+                debug_assert!(
+                    false,
                     "duplicate symbol '{name}' reached local resolver construction (previous={prev:?}, current={id:?})"
                 );
+            } else {
+                symbols.insert(name.clone(), id);
             }
             items.push(symbol);
         }
@@ -503,10 +506,37 @@ mod tests {
         }
     }
 
+    #[cfg(debug_assertions)]
     #[test]
     #[should_panic(expected = "duplicate symbol 'dup' reached local resolver construction")]
     fn local_symbol_table_rejects_duplicate_symbols() {
         let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
         let _table = LocalSymbolTable::new(DuplicateSymbolsForInvariantTest, source_manager);
+    }
+
+    #[test]
+    fn local_symbol_table_duplicate_symbols_have_explicit_behavior() {
+        use std::panic::{AssertUnwindSafe, catch_unwind};
+
+        let source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            LocalSymbolTable::new(DuplicateSymbolsForInvariantTest, source_manager)
+        }));
+
+        if cfg!(debug_assertions) {
+            assert!(
+                result.is_err(),
+                "debug builds should panic when duplicates reach local resolver construction"
+            );
+        } else {
+            let table = result.expect("release builds should not panic on duplicate symbols");
+            let resolved = table
+                .get(Span::unknown("dup"))
+                .expect("release behavior should keep a deterministic symbol mapping");
+            match resolved {
+                SymbolResolution::Local(id) => assert_eq!(id.into_inner(), ItemIndex::new(0)),
+                other => panic!("expected local symbol resolution, got {other:?}"),
+            }
+        }
     }
 }

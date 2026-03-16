@@ -293,17 +293,18 @@ impl Module {
     pub fn define_procedure(
         &mut self,
         procedure: Procedure,
-        source_manager: Arc<dyn SourceManager>,
+        _source_manager: Arc<dyn SourceManager>,
     ) -> Result<(), SemanticAnalysisError> {
-        let name = procedure.name();
-        let name = Span::new(name.span(), name.as_str());
-        if let Ok(prev) = self.resolve(name, source_manager) {
-            let prev_span = prev.span();
-            Err(SemanticAnalysisError::SymbolConflict { span: procedure.span(), prev_span })
-        } else {
-            self.items.push(Export::Procedure(procedure));
-            Ok(())
+        if let Some(prev) =
+            self.items.iter().find(|item| item.name().as_str() == procedure.name().as_str())
+        {
+            return Err(SemanticAnalysisError::SymbolConflict {
+                span: procedure.span(),
+                prev_span: prev.name().span(),
+            });
         }
+        self.items.push(Export::Procedure(procedure));
+        Ok(())
     }
 
     /// Defines an item alias, raising an error if the alias is invalid, or conflicts with a
@@ -311,20 +312,23 @@ impl Module {
     pub fn define_alias(
         &mut self,
         item: Alias,
-        source_manager: Arc<dyn SourceManager>,
+        _source_manager: Arc<dyn SourceManager>,
     ) -> Result<(), SemanticAnalysisError> {
         if self.is_kernel() && item.visibility().is_public() {
             return Err(SemanticAnalysisError::ReexportFromKernel { span: item.span() });
         }
-        let name = item.name();
-        let name = Span::new(name.span(), name.as_str());
-        if let Ok(prev) = self.resolve(name, source_manager) {
-            let prev_span = prev.span();
-            Err(SemanticAnalysisError::SymbolConflict { span: item.span(), prev_span })
-        } else {
-            self.items.push(Export::Alias(item));
-            Ok(())
+        if let Some(prev) = self
+            .items
+            .iter()
+            .find(|existing| existing.name().as_str() == item.name().as_str())
+        {
+            return Err(SemanticAnalysisError::SymbolConflict {
+                span: item.name().span(),
+                prev_span: prev.name().span(),
+            });
         }
+        self.items.push(Export::Alias(item));
+        Ok(())
     }
 }
 
