@@ -351,7 +351,7 @@ fn test_mod_12289_larger_value() {
 #[case(0xffff_ffff, 0xffff_fffe)]
 fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo: u64) {
     const FALCON_DIV: EventName =
-        EventName::new("miden::core::crypto::dsa::falcon512poseidon2::falcon_div");
+        EventName::new("miden::core::crypto::dsa::falcon512_poseidon2::falcon_div");
 
     // M^(-1) mod 2^64. For any a, q = a * M_INV (mod 2^64) satisfies M*q ≡ a (mod 2^64).
     const M_INV: u64 = 15010777177727684609;
@@ -372,9 +372,9 @@ fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo:
     }
 
     let source = "
-        use miden::core::crypto::dsa::falcon512poseidon2
+        use miden::core::crypto::dsa::falcon512_poseidon2
         begin
-            exec.falcon512poseidon2::mod_12289
+            exec.falcon512_poseidon2::mod_12289
         end
     ";
 
@@ -405,7 +405,7 @@ fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo:
 #[test]
 fn test_mod_12289_rejects_forged_addition_overflow() {
     const FALCON_DIV: EventName =
-        EventName::new("miden::core::crypto::dsa::falcon512poseidon2::falcon_div");
+        EventName::new("miden::core::crypto::dsa::falcon512_poseidon2::falcon_div");
 
     // Largest q such that M * q fits into 64 bits. This guarantees quotient-overflow checks pass.
     const FORGED_Q: u64 = u64::MAX / M;
@@ -423,9 +423,9 @@ fn test_mod_12289_rejects_forged_addition_overflow() {
     }
 
     let source = "
-        use miden::core::crypto::dsa::falcon512poseidon2
+        use miden::core::crypto::dsa::falcon512_poseidon2
         begin
-            exec.falcon512poseidon2::mod_12289
+            exec.falcon512_poseidon2::mod_12289
         end
     ";
 
