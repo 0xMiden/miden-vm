@@ -33,9 +33,10 @@
 - Fixed `Constant::PartialEq` to include `visibility` field in equality comparison, making it consistent with other exportable items (`Procedure`, `TypeAlias`, `EnumType`).
 - Cryptostream operation now correctly sends chiplets bus memory requests ([#2686](https://github.com/0xMiden/miden-vm/pull/2686)).
 - Hardened untrusted deserialization by enforcing budgets and depth limits, plus expanded fuzzing coverage ([#2777](https://github.com/0xMiden/miden-vm/pull/2777)).
+- Added documentation for `math::u64` module operations ([#2781](https://github.com/0xMiden/miden-vm/pull/2781)).
 - Hardened AEAD decrypt size calculations ([#2789](https://github.com/0xMiden/miden-vm/pull/2789)).
-- `SystemEvent::HpermToMap` handler now computes the correct permutation ([#2801](https://github.com/0xMiden/miden-vm/pull/2801)).
 - Fixes an possible u64 overflow issue in `op_eval_circuit()` [#2799](https://github.com/0xMiden/miden-vm/pull/2799)
+- `SystemEvent::HpermToMap` handler now computes the correct permutation ([#2801](https://github.com/0xMiden/miden-vm/pull/2801)).
 - Preserved dynexec/dyncall distinction (and digests) when remapping or merging MAST forests ([#2784](https://github.com/0xMiden/miden-vm/pull/2784)).
 - Hardened MASM parsing and constants handling (lexer invalid-token spans, repeat count bounds, constant range checks, field division folding, and `push.WORD[...]` index validation) ([#2803](https://github.com/0xMiden/miden-vm/pull/2803)).
 - Introduced `FastProcessor` safe stack method accesses for event handlers ([#2797](https://github.com/0xMiden/miden-vm/pull/2797)).
