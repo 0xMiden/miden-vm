@@ -130,6 +130,7 @@ mod opcode_constants {
     pub const OPCODE_REPEAT: u8         = 0b0111_0100;
     pub const OPCODE_RESPAN: u8         = 0b0111_1000;
     pub const OPCODE_HALT: u8           = 0b0111_1100;
+
 }
 
 // OPERATIONS

@@ -445,20 +445,29 @@ impl BasicBlockNode {
     /// 2. No operation group ends with an operation requiring an immediate value
     /// 3. The last operation group in a batch cannot contain operations requiring immediate values
     /// 4. OpBatch structural consistency (num_groups <= BATCH_SIZE, group size <= GROUP_SIZE)
+    /// 5. Immediate values are committed to empty groups and match group contents
+    /// 6. OpBatch padding semantics (no padding on empty groups; padded groups end with NOOP)
     ///
     /// Returns an error string describing which invariant was violated if validation fails.
     pub fn validate_batch_invariants(&self) -> Result<(), String> {
         // Check invariant 1: Power-of-two groups in each batch
         self.validate_power_of_two_groups()?;
 
-        // Check invariant 2: No batch ends with immediate operation
-        self.validate_no_immediate_endings()?;
-
-        // Check invariant 3: OpBatch structural consistency
+        // Check invariant 4: OpBatch structural consistency
+        // This needs to be done early on as it will validate indptr indexes used in later checks.
         self.validate_batch_structure()?;
 
-        // Check invariant 4: Immediate values must be committed to empty groups
+        // Control-flow opcodes are expected to be filtered upstream and enforced centrally via
+        // MastForest::validate.
+
+        // Check invariants 2 and 3: immediate-ending constraints
+        self.validate_no_immediate_endings()?;
+
+        // Check invariant 5: Immediate values must be committed to empty groups
         self.validate_immediate_commitment()?;
+
+        // Check invariant 6: OpBatch padding semantics
+        self.validate_padding_semantics()?;
 
         Ok(())
     }
@@ -668,6 +677,19 @@ impl BasicBlockNode {
                     ));
                 }
             }
+        }
+
+        Ok(())
+    }
+
+    /// Validates that padding metadata matches batch contents.
+    /// - Empty groups cannot be marked as padded.
+    /// - Padded groups must end with a NOOP operation.
+    fn validate_padding_semantics(&self) -> Result<(), String> {
+        for (batch_idx, batch) in self.op_batches.iter().enumerate() {
+            batch
+                .validate_padding_semantics()
+                .map_err(|err| format!("Batch {}: {}", batch_idx, err))?;
         }
 
         Ok(())
