@@ -3,7 +3,8 @@ use miden_core::field::Field;
 use miden_processor::{ExecutionError, operation::OperationError};
 use miden_utils_testing::{
     Felt, ONE, PrimeField64, WORD_SIZE, ZERO, assert_assembler_diagnostic, assert_diagnostic_lines,
-    build_op_test, expect_exec_error_matches, prop_randw, proptest::prelude::*, rand::rand_value,
+    build_op_test, build_test, expect_exec_error_matches, prop_randw, proptest::prelude::*,
+    rand::rand_value,
 };
 
 // FIELD OPS ARITHMETIC - MANUAL TESTS
@@ -409,6 +410,106 @@ fn ilog2_fail() {
     expect_exec_error_matches!(
         test,
         ExecutionError::OperationError { err: OperationError::LogArgumentZero, .. }
+    );
+}
+
+#[test]
+fn ilog2_ignores_prefilled_advice_in_real_opcode_path() {
+    let asm_op = "ilog2";
+
+    // `ilog2` computes and pushes its own system advice, so prefilled values must be ignored.
+    build_op_test!(asm_op, &[5], &[50]).expect_stack(&[2]);
+
+    // Boundary poison attempt: `2^63 - 1` with prefilled `63` must still return `62`.
+    build_op_test!(asm_op, &[(1u64 << 63) - 1], &[63]).expect_stack(&[62]);
+}
+
+fn ilog2_bound_verification_source() -> &'static str {
+    "begin
+        # Pop claimed ilog2 from advice stack: [claimed_ilog2, n, ...]
+        adv_push.1
+
+        # Compute pow2 = 2^claimed_ilog2.
+        dup.0
+        pow2
+        # => [pow2, claimed_ilog2, n, ...]
+
+        # Enforce lower bound n >= 2^claimed_ilog2.
+        movup.2 dup.1 dup.1 swap
+        gte
+        assert
+        movdn.2
+        # => [pow2, claimed_ilog2, n, ...]
+
+        # Enforce upper bound n < 2^(claimed_ilog2 + 1),
+        # except for claimed_ilog2 == 63 where this bound is vacuously true.
+        movup.2 swap push.2 mul
+        lt
+        dup.1 eq.63 or
+        assert
+        # => [claimed_ilog2, ...]
+    end"
+}
+
+#[test]
+fn ilog2_rejects_forged_advice_too_high_claim() {
+    let source = ilog2_bound_verification_source();
+    let n = 5u64;
+    let forged_ilog2 = 50u64;
+
+    let test = build_test!(source, &[n], &[forged_ilog2]);
+    expect_exec_error_matches!(
+        test,
+        ExecutionError::OperationError{ err: OperationError::FailedAssertion{ err_code, err_msg }, .. }
+        if err_code == ZERO && err_msg.is_none()
+    );
+}
+
+#[test]
+fn ilog2_rejects_forged_advice_too_low_claim() {
+    let source = ilog2_bound_verification_source();
+    let n = 1u64 << 32;
+    let forged_ilog2 = 0u64;
+
+    let test = build_test!(source, &[n], &[forged_ilog2]);
+    expect_exec_error_matches!(
+        test,
+        ExecutionError::OperationError{ err: OperationError::FailedAssertion{ err_code, err_msg }, .. }
+        if err_code == ZERO && err_msg.is_none()
+    );
+}
+
+#[test]
+fn ilog2_accepts_boundary_claims_with_advice() {
+    let source = ilog2_bound_verification_source();
+
+    // n = 2^32 and n = 2^32 - 1
+    build_test!(source, &[1u64 << 32], &[32]).expect_stack(&[32]);
+    build_test!(source, &[(1u64 << 32) - 1], &[31]).expect_stack(&[31]);
+
+    // n = 2^63 and n = 2^63 - 1 (exercises the ilog2 == 63 upper-bound bypass path)
+    build_test!(source, &[1u64 << 63], &[63]).expect_stack(&[63]);
+    build_test!(source, &[(1u64 << 63) - 1], &[62]).expect_stack(&[62]);
+}
+
+#[test]
+fn ilog2_rejects_forged_boundary_claims_with_advice() {
+    let source = ilog2_bound_verification_source();
+
+    // Too high around the bypass edge: `2^63 - 1` cannot claim ilog2 = 63.
+    let test = build_test!(source, &[(1u64 << 63) - 1], &[63]);
+    expect_exec_error_matches!(
+        test,
+        ExecutionError::OperationError{ err: OperationError::FailedAssertion{ err_code, err_msg }, .. }
+        if err_code == ZERO && err_msg.is_none()
+    );
+
+    // Too low around the bypass edge: `2^63` cannot claim ilog2 = 62.
+    let test = build_test!(source, &[1u64 << 63], &[62]);
+    expect_exec_error_matches!(
+        test,
+        ExecutionError::OperationError{ err: OperationError::FailedAssertion{ err_code, err_msg }, .. }
+        if err_code == ZERO && err_msg.is_none()
     );
 }
 
