@@ -17,6 +17,7 @@ use crate::ast::{
 /// This maintains the state for semantic analysis of a single [Module].
 pub struct AnalysisContext {
     constants: BTreeMap<Ident, Constant>,
+    cached_constant_values: BTreeMap<Ident, ConstantValue>,
     imported: BTreeSet<Ident>,
     procedures: BTreeSet<ProcedureName>,
     errors: Vec<SemanticAnalysisError>,
@@ -37,7 +38,9 @@ impl constants::ConstEnvironment for AnalysisContext {
     }
     #[inline]
     fn get(&mut self, name: &Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
-        if let Some(constant) = self.constants.get(name) {
+        if let Some(value) = self.cached_constant_values.get(name) {
+            Ok(Some(CachedConstantValue::Hit(value)))
+        } else if let Some(constant) = self.constants.get(name) {
             Ok(Some(CachedConstantValue::Miss(&constant.value)))
         } else if self.imported.contains(name) {
             // We don't have the definition available yet
@@ -61,12 +64,25 @@ impl constants::ConstEnvironment for AnalysisContext {
             Ok(None)
         }
     }
+
+    #[inline]
+    fn on_eval_completed(&mut self, name: Span<&Path>, value: &ConstantExpr) {
+        let Some(name) = name.as_ident() else {
+            return;
+        };
+        if let Some(value) = value.as_value() {
+            self.cached_constant_values.insert(name, value);
+        } else {
+            self.cached_constant_values.remove(&name);
+        }
+    }
 }
 
 impl AnalysisContext {
     pub fn new(source_file: Arc<SourceFile>, source_manager: Arc<dyn SourceManager>) -> Self {
         Self {
             constants: Default::default(),
+            cached_constant_values: Default::default(),
             imported: Default::default(),
             procedures: Default::default(),
             errors: Default::default(),
@@ -116,6 +132,7 @@ impl AnalysisContext {
     /// attempting to define the same constant twice.
     pub fn register_constant(&mut self, constant: Constant) {
         let name = constant.name.clone();
+        self.cached_constant_values.remove(&name);
         if let Some(prev) = self.constants.get(&name) {
             self.errors.push(SemanticAnalysisError::SymbolConflict {
                 span: constant.span,
@@ -130,6 +147,7 @@ impl AnalysisContext {
     ///
     /// This also has the effect of validating that the constant expressions themselves are valid.
     pub fn simplify_constants(&mut self) {
+        self.cached_constant_values.clear();
         let constants = self.constants.keys().cloned().collect::<Vec<_>>();
 
         for constant in constants.iter() {
@@ -139,9 +157,15 @@ impl AnalysisContext {
             ));
             match crate::ast::constants::eval::expr(&expr, self) {
                 Ok(value) => {
+                    if let Some(cached) = value.as_value() {
+                        self.cached_constant_values.insert(constant.clone(), cached);
+                    } else {
+                        self.cached_constant_values.remove(constant);
+                    }
                     self.constants.get_mut(constant).unwrap().value = value;
                 },
                 Err(err) => {
+                    self.cached_constant_values.remove(constant);
                     self.errors.push(err);
                 },
             }
