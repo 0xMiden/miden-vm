@@ -63,6 +63,14 @@ impl Kernel {
         }
     }
 
+    /// Creates a kernel from raw hashes without enforcing constructor invariants.
+    ///
+    /// This is only intended for tests that need intentionally malformed kernels.
+    #[cfg(test)]
+    pub(crate) fn from_hashes_unchecked(hashes: Vec<Word>) -> Self {
+        Self(hashes)
+    }
+
     /// Returns true if this kernel does not contain any procedures.
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
