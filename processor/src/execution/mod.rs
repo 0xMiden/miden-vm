@@ -369,6 +369,7 @@ fn finalize_clock_cycle<P, S, T>(
     processor: &mut P,
     tracer: &mut T,
     stopper: &S,
+    continuation_stack: &ContinuationStack,
     current_forest: &Arc<MastForest>,
 ) -> ControlFlow<BreakReason>
 where
@@ -376,7 +377,14 @@ where
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
-    finalize_clock_cycle_with_continuation(processor, tracer, stopper, || None, current_forest)
+    finalize_clock_cycle_with_continuation(
+        processor,
+        tracer,
+        stopper,
+        continuation_stack,
+        || None,
+        current_forest,
+    )
 }
 
 /// This function marks the end of a clock cycle.
@@ -388,6 +396,7 @@ fn finalize_clock_cycle_with_continuation<P, S, T>(
     processor: &mut P,
     tracer: &mut T,
     stopper: &S,
+    continuation_stack: &ContinuationStack,
     continuation_after_stop: impl FnOnce() -> Option<Continuation>,
     current_forest: &Arc<MastForest>,
 ) -> ControlFlow<BreakReason>
@@ -400,6 +409,7 @@ where
         processor,
         tracer,
         stopper,
+        continuation_stack,
         continuation_after_stop,
         OperationHelperRegisters::Empty,
         current_forest,
@@ -430,6 +440,7 @@ fn finalize_clock_cycle_with_continuation_and_op_helpers<P, S, T>(
     processor: &mut P,
     tracer: &mut T,
     stopper: &S,
+    continuation_stack: &ContinuationStack,
     continuation_after_stop: impl FnOnce() -> Option<Continuation>,
     op_helper_registers: OperationHelperRegisters,
     current_forest: &Arc<MastForest>,
@@ -445,7 +456,7 @@ where
     // Increment the processor clock.
     processor.system_mut().increment_clock();
 
-    stopper.should_stop(processor, continuation_after_stop)
+    stopper.should_stop(processor, continuation_stack, continuation_after_stop)
 }
 
 /// Returns the next context ID that would be created given the current state.

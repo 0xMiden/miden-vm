@@ -24,6 +24,7 @@ mod tracer;
 
 use crate::{
     advice::{AdviceInputs, AdviceProvider},
+    continuation_stack::ContinuationStack,
     errors::MapExecErr,
     processor::{Processor, SystemInterface},
     trace::{ExecutionTrace, RowIndex},
@@ -296,6 +297,7 @@ pub trait Stopper {
     fn should_stop(
         &self,
         processor: &Self::Processor,
+        continuation_stack: &ContinuationStack,
         continuation_after_stop: impl FnOnce() -> Option<continuation_stack::Continuation>,
     ) -> ControlFlow<BreakReason>;
 }

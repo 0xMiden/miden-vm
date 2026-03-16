@@ -17,6 +17,7 @@ use crate::{
 mod op_batch;
 pub use op_batch::OpBatch;
 use op_batch::OpBatchAccumulator;
+pub(crate) use op_batch::collect_immediate_placements;
 
 use super::{MastForestContributor, MastNodeExt};
 
@@ -34,6 +35,7 @@ pub const GROUP_SIZE: usize = 9;
 
 /// Maximum number of groups per batch.
 pub const BATCH_SIZE: usize = 8;
+const _: [(); 1] = [(); ((BATCH_SIZE & (BATCH_SIZE - 1)) == 0) as usize];
 
 // BASIC BLOCK NODE
 // ================================================================================================
@@ -439,7 +441,7 @@ impl BasicBlockNode {
 
 impl BasicBlockNode {
     /// Validates that this BasicBlockNode satisfies the core invariants:
-    /// 1. Power-of-two number of groups in each batch
+    /// 1. Non-final batches must be full (BATCH_SIZE groups), final batch must be power-of-two
     /// 2. No operation group ends with an operation requiring an immediate value
     /// 3. The last operation group in a batch cannot contain operations requiring immediate values
     /// 4. OpBatch structural consistency (num_groups <= BATCH_SIZE, group size <= GROUP_SIZE)
@@ -455,14 +457,28 @@ impl BasicBlockNode {
         // Check invariant 3: OpBatch structural consistency
         self.validate_batch_structure()?;
 
+        // Check invariant 4: Immediate values must be committed to empty groups
+        self.validate_immediate_commitment()?;
+
         Ok(())
     }
 
-    /// Validates that each batch has a power-of-two number of groups.
+    /// Validates that non-final batches are full and the final batch is power-of-two.
+    ///
+    /// This invariant is required by trace generation (see `num_op_groups`) and is expected to
+    /// hold for all serialized forests produced by the assembler; violations indicate corrupted
+    /// or malformed input.
     fn validate_power_of_two_groups(&self) -> Result<(), String> {
         for (batch_idx, batch) in self.op_batches.iter().enumerate() {
             let num_groups = batch.num_groups();
-            if !num_groups.is_power_of_two() {
+            if batch_idx + 1 < self.op_batches.len() {
+                if num_groups != BATCH_SIZE {
+                    return Err(format!(
+                        "Batch {}: {} groups is not full batch size {}",
+                        batch_idx, num_groups, BATCH_SIZE
+                    ));
+                }
+            } else if !num_groups.is_power_of_two() {
                 return Err(format!(
                     "Batch {}: {} groups is not power of two",
                     batch_idx, num_groups
@@ -583,6 +599,77 @@ impl BasicBlockNode {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Validates that immediate values are committed to empty groups and match group contents.
+    /// Checks:
+    /// - operation group encodings match committed group values
+    /// - each immediate maps to an empty group slot
+    /// - immediate group values equal the push immediate
+    /// - immediate placement does not exceed num_groups or batch size
+    fn validate_immediate_commitment(&self) -> Result<(), String> {
+        for (batch_idx, batch) in self.op_batches.iter().enumerate() {
+            let num_groups = batch.num_groups();
+            let indptr = batch.indptr();
+            let ops = batch.ops();
+            let groups = batch.groups();
+
+            let mut immediate_slots = [false; BATCH_SIZE];
+
+            for group_idx in 0..num_groups {
+                let group_start = indptr[group_idx];
+                let group_end = indptr[group_idx + 1];
+
+                if group_start == group_end {
+                    continue;
+                }
+
+                let mut group_value: u64 = 0;
+                for (local_op_idx, op) in ops[group_start..group_end].iter().enumerate() {
+                    let opcode = op.op_code() as u64;
+                    group_value |= opcode << (Operation::OP_BITS * local_op_idx);
+                }
+                if groups[group_idx] != Felt::new(group_value) {
+                    return Err(format!(
+                        "Batch {}, group {}: committed opcode group does not match operations",
+                        batch_idx, group_idx
+                    ));
+                }
+
+                let (placements, _next_group_idx) = collect_immediate_placements(
+                    ops,
+                    indptr,
+                    group_idx,
+                    BATCH_SIZE,
+                    Some(num_groups),
+                )
+                .map_err(|err| format!("Batch {}: {}", batch_idx, err))?;
+
+                for (imm_group_idx, imm_value) in placements {
+                    if groups[imm_group_idx] != imm_value {
+                        return Err(format!(
+                            "Batch {}: push immediate value mismatch at index {}",
+                            batch_idx, imm_group_idx
+                        ));
+                    }
+                    immediate_slots[imm_group_idx] = true;
+                }
+            }
+
+            for group_idx in 0..num_groups {
+                if indptr[group_idx] == indptr[group_idx + 1]
+                    && !immediate_slots[group_idx]
+                    && groups[group_idx] != ZERO
+                {
+                    return Err(format!(
+                        "Batch {}, group {}: empty group must be zero",
+                        batch_idx, group_idx
+                    ));
+                }
+            }
+        }
+
         Ok(())
     }
 }

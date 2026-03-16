@@ -283,7 +283,9 @@ fn generate_core_trace_columns(
     // row of each fragment with non-inverted values.
     {
         let h0_column = &mut core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX];
-        h0_column.par_chunks_mut(fragment_size).for_each(batch_inversion_allow_zeros);
+        h0_column[..total_core_trace_rows]
+            .par_chunks_mut(fragment_size)
+            .for_each(batch_inversion_allow_zeros);
     }
 
     // Truncate the core trace columns to the actual number of rows written.

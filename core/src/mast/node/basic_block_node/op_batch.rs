@@ -1,4 +1,4 @@
-use alloc::vec::Vec;
+use alloc::{string::String, vec::Vec};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -255,6 +255,51 @@ impl OpBatch {
         ((after_this_group_index + 1)..self.num_groups())
             .find(|&candidate_group_index| is_op_group(candidate_group_index))
     }
+}
+
+// HELPERS
+// ================================================================================================
+
+/// Returns the immediate placements for the operation group at `group_idx`.
+///
+/// Validates that immediate values map to empty groups and remain in-bounds.
+pub(crate) fn collect_immediate_placements(
+    ops: &[Operation],
+    indptr: &[usize; BATCH_SIZE + 1],
+    group_idx: usize,
+    max_groups: usize,
+    num_groups: Option<usize>,
+) -> Result<(Vec<(usize, Felt)>, usize), String> {
+    let start = indptr[group_idx];
+    let end = indptr[group_idx + 1];
+    let mut next_group_idx = group_idx + 1;
+    let mut placements = Vec::new();
+
+    for op in &ops[start..end] {
+        if let Some(imm) = op.imm_value() {
+            if next_group_idx >= max_groups {
+                return Err(String::from("push immediate exceeds group slots"));
+            }
+            if let Some(num_groups) = num_groups
+                && next_group_idx >= num_groups
+            {
+                return Err(format!(
+                    "push immediate index {} exceeds num_groups {}",
+                    next_group_idx, num_groups
+                ));
+            }
+            if indptr[next_group_idx] != indptr[next_group_idx + 1] {
+                return Err(format!(
+                    "push immediate overlaps operation group at index {}",
+                    next_group_idx
+                ));
+            }
+            placements.push((next_group_idx, imm));
+            next_group_idx += 1;
+        }
+    }
+
+    Ok((placements, next_group_idx))
 }
 
 // OPERATION BATCH ACCUMULATOR

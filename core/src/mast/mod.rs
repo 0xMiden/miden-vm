@@ -45,6 +45,7 @@ use serde::{Deserialize, Serialize};
 mod node;
 #[cfg(any(test, feature = "arbitrary"))]
 pub use node::arbitrary;
+pub(crate) use node::collect_immediate_placements;
 pub use node::{
     BasicBlockNode, BasicBlockNodeBuilder, CallNode, CallNodeBuilder, DecoratedOpLink,
     DecoratorOpLinkIterator, DecoratorStore, DynNode, DynNodeBuilder, ExternalNode,

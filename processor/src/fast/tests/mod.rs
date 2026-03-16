@@ -570,6 +570,46 @@ fn test_external_node_decorator_sequencing() {
     );
 }
 
+/// Tests that `ExecutionError::Internal` is correctly emitted when the continuation stack grows
+/// past the maximum allowed size.
+#[test]
+fn test_continuation_stack_limit_exceeded() {
+    let mut host = DefaultHost::default();
+
+    // Build a program with deeply nested join nodes. Each join node pushes 2 continuations
+    // (FinishJoin + StartNode) onto the continuation stack before executing its first child.
+    // With `depth` levels of nesting, the continuation stack will grow to approximately
+    // `2 * depth` entries.
+    let program = {
+        let mut forest = MastForest::new();
+
+        // Create a simple leaf basic block (just a noop).
+        let leaf_id = BasicBlockNodeBuilder::new(vec![Operation::Noop], Vec::new())
+            .add_to_forest(&mut forest)
+            .unwrap();
+
+        // Nest join nodes: join(join(join(..., leaf), leaf), leaf)
+        // Each level adds ~2 continuations to the stack.
+        let depth = 10;
+        let mut current = leaf_id;
+        for _ in 0..depth {
+            current = JoinNodeBuilder::new([current, leaf_id]).add_to_forest(&mut forest).unwrap();
+        }
+
+        forest.make_root(current);
+        Program::new(forest.into(), current)
+    };
+
+    // Set a very small continuation stack limit that will be exceeded by the nested joins.
+    let options = ExecutionOptions::default().with_max_num_continuations(3);
+
+    let processor =
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options);
+    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+
+    assert_matches!(err, ExecutionError::Internal(msg) if msg.contains("continuation stack"));
+}
+
 // TEST HELPERS
 // -----------------------------------------------------------------------------------------------
 
