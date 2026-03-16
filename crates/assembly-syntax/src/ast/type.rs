@@ -892,6 +892,11 @@ impl EnumType {
         self
     }
 
+    /// Returns true if this is a C-style enum where the discriminant is the value
+    pub fn is_c_like(&self) -> bool {
+        !self.variants.is_empty() && self.variants.iter().all(|v| v.value_ty.is_none())
+    }
+
     /// Set the source span
     pub fn set_span(&mut self, span: SourceSpan) {
         self.span = span;

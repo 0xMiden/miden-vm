@@ -246,6 +246,12 @@ impl Module {
             return Err(SemanticAnalysisError::InvalidEnumRepr { span: ty.span() });
         }
 
+        // We only define constants for C-like enums
+        if ty.is_c_like() {
+            self.items.push(Export::Type(ty.into()));
+            return Ok(());
+        }
+
         let export = ty.clone();
 
         let (alias, variants) = ty.into_parts();
@@ -282,12 +288,13 @@ impl Module {
             // Validate that the discriminant is a valid instance of the `repr` type
             variant.assert_instance_of(&repr)?;
 
-            let Variant { span, docs, name, value_ty, discriminant } = variant;
-
-            assert!(
-                value_ty.is_none(),
-                "support for enums with heterogeneously-typed variants has not been implemented yet"
-            );
+            let Variant {
+                span,
+                docs,
+                name,
+                value_ty: _,
+                discriminant,
+            } = variant;
 
             self.define_constant(Constant {
                 span,
