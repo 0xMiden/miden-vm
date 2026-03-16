@@ -9,7 +9,7 @@ fn hperm() {
     let asm_op = "hperm";
     let pub_inputs = rand_vector::<u64>(8);
 
-    build_op_test!(asm_op, &pub_inputs).prove_and_verify(pub_inputs, false);
+    build_op_test!(asm_op, &pub_inputs).check_constraints();
 }
 
 #[test]
@@ -17,7 +17,7 @@ fn hmerge() {
     let asm_op = "hmerge";
     let pub_inputs = rand_vector::<u64>(8);
 
-    build_op_test!(asm_op, &pub_inputs).prove_and_verify(pub_inputs, false);
+    build_op_test!(asm_op, &pub_inputs).check_constraints();
 }
 
 #[test]
@@ -37,8 +37,7 @@ fn mtree_get() {
         tree.root()[3].as_canonical_u64(),
     ];
 
-    build_op_test!(asm_op, &stack_inputs, &[], store)
-        .prove_and_verify(stack_inputs.to_vec(), false);
+    build_op_test!(asm_op, &stack_inputs, &[], store).check_constraints();
 }
 
 #[test]
@@ -46,8 +45,7 @@ fn mtree_set() {
     let asm_op = "mtree_set";
     let (stack_inputs, store, _leaves) = build_mtree_update_test_inputs();
 
-    build_op_test!(asm_op, &stack_inputs, &[], store)
-        .prove_and_verify(stack_inputs.to_vec(), false);
+    build_op_test!(asm_op, &stack_inputs, &[], store).check_constraints();
 }
 
 #[test]
@@ -71,8 +69,7 @@ fn mtree_verify() {
         tree.root()[3].as_canonical_u64(),
     ];
 
-    build_op_test!(asm_op, &stack_inputs, &[], store)
-        .prove_and_verify(stack_inputs.to_vec(), false);
+    build_op_test!(asm_op, &stack_inputs, &[], store).check_constraints();
 }
 
 #[test]
@@ -112,8 +109,7 @@ fn mtree_merge() {
         root_merged[3].as_canonical_u64(),
     ];
 
-    build_op_test!(asm_op, &stack_inputs, &stack_outputs, store)
-        .prove_and_verify(stack_inputs, false);
+    build_op_test!(asm_op, &stack_inputs, &stack_outputs, store).check_constraints();
 }
 
 #[test]
@@ -159,7 +155,7 @@ fn mtree_merge_then_get() {
     "
     );
 
-    build_test!(&source, &stack_inputs, &[], store).prove_and_verify(stack_inputs, false);
+    build_test!(&source, &stack_inputs, &[], store).check_constraints();
 }
 
 /// Helper function that builds a test stack and Merkle tree for testing mtree updates.

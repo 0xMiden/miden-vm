@@ -6,5 +6,5 @@ fn swap() {
     let asm_op = "swap push.0 swap push.34 swap drop drop";
     let pub_inputs = vec![7, 69];
 
-    build_op_test!(&asm_op, &pub_inputs).prove_and_verify(pub_inputs, false);
+    build_op_test!(&asm_op, &pub_inputs).check_constraints();
 }

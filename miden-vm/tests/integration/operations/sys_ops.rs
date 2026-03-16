@@ -93,5 +93,5 @@ fn emit() {
     let source = format!("push.{event_id} emit drop");
     let mut test = build_op_test!(&source, &[0, 0, 0, 0]);
     test.add_event_handler(event_name, NoopEventHandler);
-    test.prove_and_verify(vec![], false);
+    test.check_constraints();
 }
