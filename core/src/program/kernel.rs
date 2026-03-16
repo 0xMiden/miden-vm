@@ -27,8 +27,40 @@ impl Kernel {
     pub const MAX_NUM_PROCEDURES: usize = u8::MAX as usize;
 
     /// Returns a new [Kernel] instantiated with the specified procedure hashes.
+    ///
+    /// Hashes are canonicalized into a consistent internal order.
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - `proc_hashes` contains duplicates.
+    /// - `proc_hashes.len()` exceeds [`MAX_NUM_PROCEDURES`](Self::MAX_NUM_PROCEDURES).
     pub fn new(proc_hashes: &[Word]) -> Result<Self, KernelError> {
         Self::from_hashes(proc_hashes.to_vec())
+    }
+
+    /// Returns a new [Kernel] from owned procedure hashes.
+    ///
+    /// Hashes are canonicalized into a consistent internal order.
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - `hashes` contains duplicates.
+    /// - `hashes.len()` exceeds [`MAX_NUM_PROCEDURES`](Self::MAX_NUM_PROCEDURES).
+    pub fn from_hashes(mut hashes: Vec<Word>) -> Result<Self, KernelError> {
+        if hashes.len() > Self::MAX_NUM_PROCEDURES {
+            return Err(KernelError::TooManyProcedures(Self::MAX_NUM_PROCEDURES, hashes.len()));
+        }
+
+        // Canonical ordering is a separate kernel invariant (not just a dedup side effect), so
+        // we sort first and then validate uniqueness over the canonical representation.
+        hashes.sort_by_key(|v| v.as_bytes()); // ensure consistent order
+        let duplicated = hashes.windows(2).any(|data| data[0] == data[1]);
+
+        if duplicated {
+            Err(KernelError::DuplicatedProcedures)
+        } else {
+            Ok(Self(hashes))
+        }
     }
 
     /// Returns true if this kernel does not contain any procedures.
@@ -48,21 +80,6 @@ impl Kernel {
     /// Returns a list of procedure hashes contained in this kernel.
     pub fn proc_hashes(&self) -> &[Word] {
         &self.0
-    }
-
-    fn from_hashes(mut hashes: Vec<Word>) -> Result<Self, KernelError> {
-        if hashes.len() > Self::MAX_NUM_PROCEDURES {
-            return Err(KernelError::TooManyProcedures(Self::MAX_NUM_PROCEDURES, hashes.len()));
-        }
-
-        hashes.sort_by_key(|v| v.as_bytes()); // ensure consistent order
-        let duplicated = hashes.windows(2).any(|data| data[0] == data[1]);
-
-        if duplicated {
-            Err(KernelError::DuplicatedProcedures)
-        } else {
-            Ok(Self(hashes))
-        }
     }
 }
 
