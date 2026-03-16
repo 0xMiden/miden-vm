@@ -113,7 +113,7 @@ pub(crate) trait SystemInterface {
     // --------------------------------------------------------------------------------------------
 
     /// Returns the value of the CALLER_HASH register, which is the hash of the procedure that
-    /// called the currently executing procedure.
+    /// initiated the most recent SYSCALL, or ZERO if not in a syscall context.
     fn caller_hash(&self) -> Word;
 
     /// Returns the current clock cycle.

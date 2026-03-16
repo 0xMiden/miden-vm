@@ -139,12 +139,6 @@ pub enum SemanticAnalysisError {
         #[label]
         span: SourceSpan,
     },
-    #[error("invalid instruction usage: 'caller' is only valid in kernel modules")]
-    #[diagnostic()]
-    CallerInKernel {
-        #[label]
-        span: SourceSpan,
-    },
     #[error("invalid syscall: callee must be resolvable to kernel module")]
     #[diagnostic()]
     InvalidSyscallTarget {
