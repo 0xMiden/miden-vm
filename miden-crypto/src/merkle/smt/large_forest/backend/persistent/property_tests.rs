@@ -217,7 +217,9 @@ proptest! {
         // And we should have the same number of entries in each.
         let backend_entries = backend
             .entries(target_lineage)?
-            .map(|e| (e.key, e.value))
+            .map(|e| e.map(|e| (e.key, e.value)))
+            .collect::<std::result::Result<Vec<_>, _>>()?
+            .into_iter()
             .sorted()
             .collect_vec();
         let tree_entries = tree.entries().copied().sorted().collect_vec();

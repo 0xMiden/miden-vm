@@ -22,6 +22,7 @@ use core::iter::Peekable;
 
 use miden_field::Word;
 
+use super::Result;
 use crate::{
     Set,
     merkle::smt::large_forest::{history::HistoryView, root::TreeEntry},
@@ -32,6 +33,12 @@ use crate::{
 
 /// An iterator over the entries of an arbitrary tree in the forest, yielding entries in an
 /// arbitrary order.
+///
+/// - If any error occurs during iteration, this is signaled to the user by the iterator yielding
+///   `Some(Err(...))`. The user should stop on first error, as the iterator will be in an
+///   inconsistent state afterward.
+/// - `None` is returned if the true end of the iterator is reached successfully, or at any point
+///   after an error has been yielded.
 ///
 /// It is split into two variants for performance, as iterating over a full tree is significantly
 /// simpler than iterating over a historical tree. While it would be nice to be able to return one
@@ -48,7 +55,8 @@ pub(super) enum EntriesIterator<'forest> {
         /// The iterator over the entries in the full tree.
         ///
         /// This iterator should never yield any entries where `value == EMPTY_WORD`.
-        full_tree_iter: Peekable<Box<dyn Iterator<Item = TreeEntry> + 'forest>>,
+        full_tree_iter:
+            Peekable<Box<dyn Iterator<Item = super::backend::Result<TreeEntry>> + 'forest>>,
 
         /// The view into the history at the correct point.
         history_view: HistoryView<'forest>,
@@ -64,7 +72,10 @@ pub(super) enum EntriesIterator<'forest> {
     /// An iterator over a tree in the forest that is simply an iterator over the full tree.
     WithoutHistory {
         /// The iterator over the entries in the full tree.
-        full_tree_iter: Box<dyn Iterator<Item = TreeEntry> + 'forest>,
+        full_tree_iter: Box<dyn Iterator<Item = super::backend::Result<TreeEntry>> + 'forest>,
+
+        /// Whether the iterator has encountered an error and should yield no more items.
+        faulted: bool,
     },
 }
 
@@ -74,7 +85,7 @@ impl<'forest> EntriesIterator<'forest> {
     ///
     /// Note that it _does not_ perform checks as to the correctness of the provided iterators.
     pub(super) fn new_with_history(
-        full_tree_iter: impl Iterator<Item = TreeEntry> + 'forest,
+        full_tree_iter: impl Iterator<Item = super::backend::Result<TreeEntry>> + 'forest,
         history_view: HistoryView<'forest>,
     ) -> Self {
         // This type gymnastics is unfortunately necessary to let us easily store the `Peekable`
@@ -95,10 +106,10 @@ impl<'forest> EntriesIterator<'forest> {
     /// Note that it _does not_ check whether `full_tree_iter` is actually an iterator over the
     /// full tree. If it is not, this iterator will yield invalid results.
     pub(super) fn new_without_history(
-        full_tree_iter: impl Iterator<Item = TreeEntry> + 'forest,
+        full_tree_iter: impl Iterator<Item = super::backend::Result<TreeEntry>> + 'forest,
     ) -> Self {
         let full_tree_iter = Box::new(full_tree_iter);
-        Self::WithoutHistory { full_tree_iter }
+        Self::WithoutHistory { full_tree_iter, faulted: false }
     }
 
     /// Advances the iterator and returns the next value in the case where it is iterating over a
@@ -108,7 +119,7 @@ impl<'forest> EntriesIterator<'forest> {
     ///
     /// - If the method is called with a `self` that is not in the [`Self::WithHistory`] variant.
     #[inline(always)] // To help the optimizer eliminate the redundant check in Iterator::next()
-    fn next_with_history(&mut self) -> Option<TreeEntry> {
+    fn next_with_history(&mut self) -> Option<Result<TreeEntry>> {
         let EntriesIterator::WithHistory {
             full_tree_iter,
             history_view,
@@ -121,6 +132,7 @@ impl<'forest> EntriesIterator<'forest> {
 
         loop {
             match state {
+                EntriesIteratorState::Faulted => return None,
                 EntriesIteratorState::Initial => {
                     // In the initial state we need to advance to the appropriate next state.
                     if full_tree_iter.peek().is_none() {
@@ -157,6 +169,13 @@ impl<'forest> EntriesIterator<'forest> {
                     let Some(entry) = full_tree_iter.next() else {
                         unreachable!("The iterator is known to have another item available");
                     };
+                    let entry = match entry {
+                        Ok(entry) => entry,
+                        Err(e) => {
+                            *state = EntriesIteratorState::Faulted;
+                            return Some(Err(e.into()));
+                        },
+                    };
 
                     let value = if let Some(v) = history_view.value(&entry.key) {
                         // If the history has a value for this key, then we need to return that
@@ -174,7 +193,7 @@ impl<'forest> EntriesIterator<'forest> {
                         entry
                     };
 
-                    return Some(value);
+                    return Some(Ok(value));
                 },
                 EntriesIteratorState::ReadingHistory { iterator } => {
                     // This is a terminal state. We cannot transition to any other state from here,
@@ -182,7 +201,7 @@ impl<'forest> EntriesIterator<'forest> {
                     // history items does.
                     for entry in iterator.by_ref() {
                         if !yielded_history_keys.contains(&entry.key) && !entry.value.is_empty() {
-                            return Some(entry);
+                            return Some(Ok(entry));
                         }
 
                         // Here we have already returned this entry, or it is empty. In both cases
@@ -201,12 +220,23 @@ impl<'forest> EntriesIterator<'forest> {
     ///
     /// - If the method is called with a `self` that is not the [`Self::WithoutHistory`] variant.
     #[inline(always)] // To help the optimizer eliminate the redundant check in Iterator::next()
-    fn next_without_history(&mut self) -> Option<TreeEntry> {
-        let EntriesIterator::WithoutHistory { full_tree_iter } = self else {
+    fn next_without_history(&mut self) -> Option<Result<TreeEntry>> {
+        // Note that the inner iterator yields items of type `backend::Result` while this one
+        // yields the outer result. Conversion happening via the standard `Into::into` conversion
+        // for Result.
+        let EntriesIterator::WithoutHistory { full_tree_iter, faulted } = self else {
             panic!("EntriesIterator::next_without_history called with history")
         };
 
-        full_tree_iter.next()
+        if *faulted {
+            return None;
+        }
+
+        let result = full_tree_iter.next().map(|e| e.map_err(Into::into));
+        if matches!(&result, Some(Err(_))) {
+            *faulted = true;
+        }
+        result
     }
 }
 
@@ -214,7 +244,7 @@ impl<'forest> EntriesIterator<'forest> {
 // ================================================================================================
 
 impl Iterator for EntriesIterator<'_> {
-    type Item = TreeEntry;
+    type Item = Result<TreeEntry>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
@@ -243,4 +273,7 @@ pub(super) enum EntriesIteratorState<'forest> {
         /// The iterator over the entries that are _added_ by the history.
         iterator: Box<dyn Iterator<Item = TreeEntry> + 'forest>,
     },
+
+    /// The iterator has encountered an error and will yield no more items.
+    Faulted,
 }

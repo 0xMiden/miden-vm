@@ -121,7 +121,17 @@ where
     ///
     /// The iterator may yield entries in any arbitrary order, but must not yield entries for which
     /// the value is the empty word.
-    fn entries(&self, lineage: LineageId) -> Result<impl Iterator<Item = TreeEntry>>;
+    ///
+    /// # Expected Behavior
+    ///
+    /// Implementations must guarantee the following behavior in addition to the global invariants:
+    ///
+    /// - If any kind of error occurs during iteration that should be signaled to the user, the
+    ///   iterator must return `Some(Err(...))`. The caller should stop iteration after receiving an
+    ///   error as the iterator state is no longer valid.
+    /// - `None` will be returned upon successful completion, or at any time after an error has been
+    ///   returned.
+    fn entries(&self, lineage: LineageId) -> Result<impl Iterator<Item = Result<TreeEntry>>>;
 
     // SINGLE-TREE MODIFIERS
     // ============================================================================================

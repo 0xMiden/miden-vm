@@ -340,7 +340,7 @@ impl Backend for PersistentBackend {
     ///
     /// - [`BackendError::UnknownLineage`] if the provided `lineage` is not one known by this
     ///   backend.
-    fn entries(&self, lineage: LineageId) -> Result<impl Iterator<Item = TreeEntry>> {
+    fn entries(&self, lineage: LineageId) -> Result<impl Iterator<Item = Result<TreeEntry>>> {
         if !self.lineages.contains_key(&lineage) {
             return Err(BackendError::UnknownLineage(lineage));
         }

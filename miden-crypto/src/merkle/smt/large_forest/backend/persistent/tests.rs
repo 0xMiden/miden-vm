@@ -5,6 +5,8 @@
 //! existing [`Smt`] implementation, comparing the results of the persistent backend against it
 //! wherever relevant.
 
+use alloc::vec::Vec;
+
 use assert_matches::assert_matches;
 use itertools::Itertools;
 use tempfile::{TempDir, tempdir};
@@ -126,7 +128,12 @@ fn load_extant() -> Result<()> {
     assert_eq!(l2_value, Some(t2_value));
 
     // ...and entries.
-    let l1_entries = backend.entries(lineage_1)?.sorted().collect_vec();
+    let l1_entries = backend
+        .entries(lineage_1)?
+        .collect::<std::result::Result<Vec<_>, _>>()?
+        .into_iter()
+        .sorted()
+        .collect_vec();
     let t1_entries = tree_1
         .entries()
         .sorted()
@@ -134,7 +141,12 @@ fn load_extant() -> Result<()> {
         .collect_vec();
     assert_eq!(l1_entries, t1_entries);
 
-    let l2_entries = backend.entries(lineage_2)?.sorted().collect_vec();
+    let l2_entries = backend
+        .entries(lineage_2)?
+        .collect::<std::result::Result<Vec<_>, _>>()?
+        .into_iter()
+        .sorted()
+        .collect_vec();
     let t2_entries = tree_2
         .entries()
         .sorted()
@@ -493,22 +505,11 @@ fn entries() -> Result<()> {
     backend.update_tree(lineage_1, version, operations)?;
 
     // Now, the iterator should yield the expected three items.
-    assert_eq!(backend.entries(lineage_1)?.count(), 3);
-    assert!(
-        backend
-            .entries(lineage_1)?
-            .contains(&TreeEntry { key: key_1_1, value: value_1_1 }),
-    );
-    assert!(
-        backend
-            .entries(lineage_1)?
-            .contains(&TreeEntry { key: key_1_2, value: value_1_2 }),
-    );
-    assert!(
-        backend
-            .entries(lineage_1)?
-            .contains(&TreeEntry { key: key_1_3, value: value_1_3 }),
-    );
+    let entries = backend.entries(lineage_1)?.collect::<Result<Vec<_>>>()?;
+    assert_eq!(entries.len(), 3);
+    assert!(entries.contains(&TreeEntry { key: key_1_1, value: value_1_1 }));
+    assert!(entries.contains(&TreeEntry { key: key_1_2, value: value_1_2 }));
+    assert!(entries.contains(&TreeEntry { key: key_1_3, value: value_1_3 }));
 
     Ok(())
 }

@@ -282,8 +282,8 @@
 //! assert!(forest.get(current_tree, key_1)?.is_none());
 //!
 //! // We can also get an iterator over all the entries in the tree.
-//! let entries_old: Vec<_> = forest.entries(old_tree)?.collect();
-//! let entries_current: Vec<_> = forest.entries(current_tree)?.collect();
+//! let entries_old = forest.entries(old_tree)?.collect::<Result<Vec<_>, _>>()?;
+//! let entries_current = forest.entries(current_tree)?.collect::<Result<Vec<_>, _>>()?;
 //! assert!(entries_old.contains(&TreeEntry { key: key_1, value: value_1 }));
 //! assert!(entries_old.contains(&TreeEntry { key: key_2, value: value_2 }));
 //! assert!(!entries_old.contains(&TreeEntry { key: key_3, value: value_3 }));
@@ -717,10 +717,26 @@ impl<B: Backend> LargeSmtForest<B> {
 
         // In the general case there is no faster path than doing the iteration to merge the
         // history with the full tree, so we just count the iterator.
-        Ok(EntriesIterator::new_with_history(self.backend.entries(tree.lineage())?, view).count())
+        //
+        // We have to do it this way to avoid silently swallowing errors during iteration.
+        let iterator =
+            EntriesIterator::new_with_history(self.backend.entries(tree.lineage())?, view);
+        let mut count = 0;
+        for entry in iterator {
+            entry?;
+            count += 1;
+        }
+
+        Ok(count)
     }
 
     /// Returns an iterator that yields the entries in the specified `tree`.
+    ///
+    /// - If any error occurs during iteration, this is signaled to the user by the iterator
+    ///   yielding `Some(Err(...))`. The user should stop on first error, as the iterator will be in
+    ///   an inconsistent state afterward.
+    /// - `None` is returned if the true end of the iterator is reached successfully, or at any
+    ///   point after an error has been yielded.
     ///
     /// # Performance
     ///
@@ -736,7 +752,7 @@ impl<B: Backend> LargeSmtForest<B> {
     ///   not one known by the forest.
     /// - [`LargeSmtForestError::UnknownTree`] if the provided `tree` refers to a tree that is not a
     ///   member of the forest.
-    pub fn entries(&self, tree: TreeId) -> Result<impl Iterator<Item = TreeEntry>> {
+    pub fn entries(&self, tree: TreeId) -> Result<impl Iterator<Item = Result<TreeEntry>>> {
         // We start by yielding an error if we cannot get the lineage data for the specified tree.
         let Some(lineage_data) = self.lineage_data.get(&tree.lineage()) else {
             return Err(LargeSmtForestError::UnknownLineage(tree.lineage()));

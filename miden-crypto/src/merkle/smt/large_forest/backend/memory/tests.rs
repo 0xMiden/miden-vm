@@ -5,6 +5,8 @@
 //! existing [`Smt`] implementation, comparing the results of the in-memory backend against it
 //! wherever relevant.
 
+use alloc::vec::Vec;
+
 use assert_matches::assert_matches;
 use itertools::Itertools;
 
@@ -385,22 +387,11 @@ fn entries() -> Result<()> {
     backend.update_tree(lineage_1, version, operations)?;
 
     // Now, the iterator should yield the expected three items.
-    assert_eq!(backend.entries(lineage_1)?.count(), 3);
-    assert!(
-        backend
-            .entries(lineage_1)?
-            .contains(&TreeEntry { key: key_1_1, value: value_1_1 }),
-    );
-    assert!(
-        backend
-            .entries(lineage_1)?
-            .contains(&TreeEntry { key: key_1_2, value: value_1_2 }),
-    );
-    assert!(
-        backend
-            .entries(lineage_1)?
-            .contains(&TreeEntry { key: key_1_3, value: value_1_3 }),
-    );
+    let entries = backend.entries(lineage_1)?.collect::<Result<Vec<_>>>()?;
+    assert_eq!(entries.len(), 3);
+    assert!(entries.contains(&TreeEntry { key: key_1_1, value: value_1_1 }));
+    assert!(entries.contains(&TreeEntry { key: key_1_2, value: value_1_2 }));
+    assert!(entries.contains(&TreeEntry { key: key_1_3, value: value_1_3 }));
 
     Ok(())
 }

@@ -134,6 +134,56 @@ benchmark_with_setup_data! {
     },
 }
 
+// Measures iteration over the latest version of a tree (the WithoutHistory fast path).
+benchmark_with_setup_data! {
+    large_smt_forest_persistent_entries_current_tree,
+    DEFAULT_MEASUREMENT_TIME,
+    DEFAULT_SAMPLE_SIZE,
+    "large_smt_forest_persistent_entries_current_tree",
+    || {
+        let mut setup = ForestSetup::new_persistent();
+        let batch = generate_tree_update_batch(BATCH_SIZE);
+        let lineage = LineageId::new([0x42; 32]);
+        let version = 0;
+        setup.forest.add_lineage(lineage, version, batch).unwrap();
+        let tree = TreeId::new(lineage, version);
+        (setup, tree)
+    },
+    |b: &mut criterion::Bencher, (setup, tree): &(ForestSetup<_>, TreeId)| {
+        b.iter(|| {
+            hint::black_box(
+                setup.forest.entries(*tree).unwrap().map(|e| e.unwrap()).collect::<Vec<_>>()
+            );
+        })
+    }
+}
+
+// Measures iteration over a historical version of a tree (the WithHistory state machine path).
+benchmark_with_setup_data! {
+    large_smt_forest_persistent_entries_historical_tree,
+    DEFAULT_MEASUREMENT_TIME,
+    DEFAULT_SAMPLE_SIZE,
+    "large_smt_forest_persistent_entries_historical_tree",
+    || {
+        let mut setup = ForestSetup::new_persistent();
+        let initial_batch = generate_tree_update_batch(BATCH_SIZE);
+        let lineage = LineageId::new([0x42; 32]);
+        let version = 0;
+        setup.forest.add_lineage(lineage, version, initial_batch).unwrap();
+        let update_batch = generate_tree_update_batch(BATCH_SIZE);
+        setup.forest.update_tree(lineage, version + 1, update_batch).unwrap();
+        let tree = TreeId::new(lineage, version);
+        (setup, tree)
+    },
+    |b: &mut criterion::Bencher, (setup, tree): &(ForestSetup<_>, TreeId)| {
+        b.iter(|| {
+            hint::black_box(
+                setup.forest.entries(*tree).unwrap().map(|e| e.unwrap()).collect::<Vec<_>>()
+            );
+        })
+    },
+}
+
 // Roughly equivalent to large_smt::large_smt_insert_batch_to_empty_tree in functionality.
 benchmark_batch! {
     large_smt_forest_persistent_add_lineage,
@@ -220,6 +270,8 @@ criterion_group!(
     large_smt_forest_persistent_group,
     large_smt_forest_persistent_open_full_tree,
     large_smt_forest_persistent_open_historical_tree,
+    large_smt_forest_persistent_entries_current_tree,
+    large_smt_forest_persistent_entries_historical_tree,
     large_smt_forest_persistent_add_lineage,
     large_smt_forest_persistent_update_tree,
     large_smt_forest_persistent_update_forest,

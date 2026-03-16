@@ -113,9 +113,9 @@ impl Backend for InMemoryBackend {
     ///
     /// - [`BackendError::UnknownLineage`] if the provided `lineage` is one not known by this
     ///   backend.
-    fn entries(&self, lineage: LineageId) -> Result<impl Iterator<Item = TreeEntry>> {
+    fn entries(&self, lineage: LineageId) -> Result<impl Iterator<Item = Result<TreeEntry>>> {
         let tree = self.trees.get(&lineage).ok_or(BackendError::UnknownLineage(lineage))?;
-        Ok(tree.tree.entries().map(|(k, v)| TreeEntry { key: *k, value: *v }))
+        Ok(tree.tree.entries().map(|(k, v)| Ok(TreeEntry { key: *k, value: *v })))
     }
 
     /// Adds the provided `lineage` to the forest.

@@ -11,7 +11,6 @@
 use alloc::vec::Vec;
 
 use assert_matches::assert_matches;
-use itertools::Itertools;
 
 use super::{Config, Result};
 use crate::{
@@ -25,6 +24,7 @@ use crate::{
                 LineageData,
                 history::{ChangedKeys, History, NodeChanges},
                 root::{LineageId, TreeEntry, TreeWithRoot},
+                test_utils::FallibleEntriesBackend,
             },
         },
     },
@@ -694,51 +694,21 @@ fn entries() -> Result<()> {
 
     // Grabbing the entries for the latest version in a lineage should do the right thing.
     let current_tree = TreeId::new(lineage_1, version_2);
-    assert_eq!(forest.entries(current_tree)?.count(), 3);
-    assert!(
-        forest
-            .entries(current_tree)?
-            .contains(&TreeEntry { key: key_1, value: value_1_v2 })
-    );
-    assert!(
-        forest
-            .entries(current_tree)?
-            .contains(&TreeEntry { key: key_2, value: value_2_v1 })
-    );
-    assert!(
-        forest
-            .entries(current_tree)?
-            .contains(&TreeEntry { key: key_4, value: value_4_v1 })
-    );
-    assert!(
-        !forest
-            .entries(current_tree)?
-            .contains(&TreeEntry { key: key_3, value: value_3_v1 })
-    );
+    let current_entries = forest.entries(current_tree)?.collect::<Result<Vec<_>>>()?;
+    assert_eq!(current_entries.len(), 3);
+    assert!(current_entries.contains(&TreeEntry { key: key_1, value: value_1_v2 }));
+    assert!(current_entries.contains(&TreeEntry { key: key_2, value: value_2_v1 }));
+    assert!(current_entries.contains(&TreeEntry { key: key_4, value: value_4_v1 }));
+    assert!(!current_entries.contains(&TreeEntry { key: key_3, value: value_3_v1 }));
 
     // If we ask for a historical version, things are more complex but should still work.
     let historical_tree = TreeId::new(lineage_1, version_1);
-    assert_eq!(forest.entries(historical_tree)?.count(), 3);
-    assert!(
-        forest
-            .entries(historical_tree)?
-            .contains(&TreeEntry { key: key_1, value: value_1_v1 })
-    );
-    assert!(
-        forest
-            .entries(historical_tree)?
-            .contains(&TreeEntry { key: key_2, value: value_2_v1 })
-    );
-    assert!(
-        forest
-            .entries(historical_tree)?
-            .contains(&TreeEntry { key: key_3, value: value_3_v1 })
-    );
-    assert!(
-        !forest
-            .entries(historical_tree)?
-            .contains(&TreeEntry { key: key_4, value: value_4_v1 })
-    );
+    let historical_entries = forest.entries(historical_tree)?.collect::<Result<Vec<_>>>()?;
+    assert_eq!(historical_entries.len(), 3);
+    assert!(historical_entries.contains(&TreeEntry { key: key_1, value: value_1_v1 }));
+    assert!(historical_entries.contains(&TreeEntry { key: key_2, value: value_2_v1 }));
+    assert!(historical_entries.contains(&TreeEntry { key: key_3, value: value_3_v1 }));
+    assert!(!historical_entries.contains(&TreeEntry { key: key_4, value: value_4_v1 }));
 
     Ok(())
 }
@@ -795,8 +765,8 @@ fn forest_overlays_correctly() -> Result<()> {
     assert!(forest.get(current_tree, key_1)?.is_none());
 
     // We can also get an iterator over all the entries in the tree.
-    let entries_old: Vec<_> = forest.entries(old_tree)?.collect();
-    let entries_current: Vec<_> = forest.entries(current_tree)?.collect();
+    let entries_old = forest.entries(old_tree)?.collect::<Result<Vec<_>>>()?;
+    let entries_current = forest.entries(current_tree)?.collect::<Result<Vec<_>>>()?;
     assert!(entries_old.contains(&TreeEntry { key: key_1, value: value_1 }));
     assert!(entries_old.contains(&TreeEntry { key: key_2, value: value_2 }));
     assert!(!entries_old.contains(&TreeEntry { key: key_3, value: value_3 }));
@@ -863,8 +833,9 @@ fn entries_never_returns_empty_entry() -> Result<()> {
     // Now, when we query for entries on the historical version, we should only see one entry, and
     // no entries should be the empty word.
     let historical_tree = TreeId::new(lineage_2, version_1);
-    assert_eq!(forest.entries(historical_tree)?.count(), 1);
-    assert!(forest.entries(historical_tree)?.all(|e| e.value != EMPTY_WORD));
+    let entries = forest.entries(historical_tree)?.collect::<Result<Vec<_>>>()?;
+    assert_eq!(entries.len(), 1);
+    assert!(entries.iter().all(|e| e.value != EMPTY_WORD));
 
     // The third scenario is where entries are added within a shared leaf, where we should only see
     // the historical leaf entries and not their reversions.
@@ -888,8 +859,9 @@ fn entries_never_returns_empty_entry() -> Result<()> {
 
     // Now when we query the historical version, we should only see one entry, and no reversions.
     let historical_tree = TreeId::new(lineage_3, version_1);
-    assert_eq!(forest.entries(historical_tree)?.count(), 1);
-    assert!(forest.entries(historical_tree)?.all(|e| e.value != EMPTY_WORD));
+    let entries = forest.entries(historical_tree)?.collect::<Result<Vec<_>>>()?;
+    assert_eq!(entries.len(), 1);
+    assert!(entries.iter().all(|e| e.value != EMPTY_WORD));
 
     Ok(())
 }
@@ -938,7 +910,7 @@ fn entries_history_empty_values_do_not_reorder() -> Result<()> {
     )?;
 
     let historical_tree = TreeId::new(lineage, version_1);
-    let entries: Vec<_> = forest.entries(historical_tree)?.collect();
+    let entries = forest.entries(historical_tree)?.collect::<Result<Vec<_>>>()?;
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0], TreeEntry { key: key_a, value: value_a });
     assert_eq!(entries[1], TreeEntry { key: key_c, value: value_c_v1 });
@@ -1328,4 +1300,105 @@ fn truncate_retains_non_empty_lineages_in_non_empty_histories() {
         forest.non_empty_histories.contains(&lineage),
         "lineage with remaining history must stay in non_empty_histories"
     );
+}
+
+// ENTRIES UNHAPPY PATH TESTS
+// ================================================================================================
+
+#[test]
+fn entries_with_fallible_backend() -> Result<()> {
+    let backend = FallibleEntriesBackend::new();
+    let mut forest = LargeSmtForest::new(backend)?;
+    let mut rng = ContinuousRng::new([0xfa; 32]);
+
+    // Add a lineage with more than 3 entries so we can verify that entries beyond the failure
+    // point are never returned.
+    let lineage: LineageId = rng.value();
+    let version: VersionId = rng.value();
+    let key_1: Word = rng.value();
+    let value_1: Word = rng.value();
+    let key_2: Word = rng.value();
+    let value_2: Word = rng.value();
+    let key_3: Word = rng.value();
+    let value_3: Word = rng.value();
+    let key_4: Word = rng.value();
+    let value_4: Word = rng.value();
+    let key_5: Word = rng.value();
+    let value_5: Word = rng.value();
+
+    let mut operations = SmtUpdateBatch::empty();
+    operations.add_insert(key_1, value_1);
+    operations.add_insert(key_2, value_2);
+    operations.add_insert(key_3, value_3);
+    operations.add_insert(key_4, value_4);
+    operations.add_insert(key_5, value_5);
+
+    forest.add_lineage(lineage, version, operations)?;
+
+    // Query entries on the current version (WithoutHistory path).
+    let tree_id = TreeId::new(lineage, version);
+    let mut iter = forest.entries(tree_id)?;
+
+    // First two items should be Ok.
+    let first = iter.next();
+    assert!(matches!(first, Some(Ok(_))), "expected first item to be Some(Ok(...))");
+    let second = iter.next();
+    assert!(matches!(second, Some(Ok(_))), "expected second item to be Some(Ok(...))");
+
+    // Third item should be the simulated error.
+    let third = iter.next();
+    assert_matches!(&third, Some(Err(LargeSmtForestError::Unspecified(msg))) if msg == "simulated read failure");
+
+    // After faulting, the iterator must yield None — the remaining entries (4th, 5th) are never
+    // returned.
+    assert!(iter.next().is_none(), "expected None after error");
+    assert!(iter.next().is_none(), "expected iterator to remain exhausted");
+
+    Ok(())
+}
+
+#[test]
+fn entry_count_with_fallible_backend() -> Result<()> {
+    let backend = FallibleEntriesBackend::new();
+    let mut forest = LargeSmtForest::new(backend)?;
+    let mut rng = ContinuousRng::new([0xfb; 32]);
+
+    // Add a lineage with more than 3 entries at version V1 so we can verify that the iteration
+    // stops at the failure point and does not silently count additional entries.
+    let lineage: LineageId = rng.value();
+    let version_1: VersionId = rng.value();
+    let key_1: Word = rng.value();
+    let value_1: Word = rng.value();
+    let key_2: Word = rng.value();
+    let value_2: Word = rng.value();
+    let key_3: Word = rng.value();
+    let value_3: Word = rng.value();
+    let key_4: Word = rng.value();
+    let value_4: Word = rng.value();
+    let key_5: Word = rng.value();
+    let value_5: Word = rng.value();
+
+    let mut operations = SmtUpdateBatch::empty();
+    operations.add_insert(key_1, value_1);
+    operations.add_insert(key_2, value_2);
+    operations.add_insert(key_3, value_3);
+    operations.add_insert(key_4, value_4);
+    operations.add_insert(key_5, value_5);
+
+    forest.add_lineage(lineage, version_1, operations)?;
+
+    // Update the tree at V2 so V1 becomes historical.
+    let version_2: VersionId = version_1 + 1;
+    let key_6: Word = rng.value();
+    let value_6: Word = rng.value();
+    let mut operations = SmtUpdateBatch::empty();
+    operations.add_insert(key_6, value_6);
+    forest.update_tree(lineage, version_2, operations)?;
+
+    // Query entry_count for the historical version V1.
+    // This takes the WithHistory iteration path, which will hit our fallible iterator.
+    let result = forest.entry_count(TreeId::new(lineage, version_1));
+    assert_matches!(result, Err(LargeSmtForestError::Unspecified(msg)) if msg == "simulated read failure");
+
+    Ok(())
 }

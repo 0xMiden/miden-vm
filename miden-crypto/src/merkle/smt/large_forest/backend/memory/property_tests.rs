@@ -226,7 +226,10 @@ proptest! {
         let backend_entries = backend
             .entries(target_lineage)
             .map_err(to_fail)?
-            .map(|e| (e.key, e.value))
+            .map(|e| e.map(|e| (e.key, e.value)))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(to_fail)?
+            .into_iter()
             .sorted()
             .collect_vec();
         let tree_entries = tree.entries().copied().sorted().collect_vec();

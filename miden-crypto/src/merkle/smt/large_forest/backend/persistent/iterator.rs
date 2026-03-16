@@ -39,7 +39,7 @@ impl<'db> PersistentBackendEntriesIterator<'db> {
     /// Constructs a new such iterator in the starting state.
     ///
     /// The provided `iterator` must yield items where the key decodes to a `LeafKey` and the value
-    /// decodes to an `SmtLeaf`. If this is not the case, iteration will panic.
+    /// decodes to an `SmtLeaf`. If this is not the case, iteration will yield an error.
     ///
     /// For performance, this iterator should be passed a prefix iterator over the database with the
     /// correct prefix (corresponding to the provided `lineage`) set, but it will still function
@@ -61,26 +61,38 @@ enum PersistentBackendEntriesIteratorState {
         /// The iterator over the current leaf's entries.
         leaf_entries: Box<dyn Iterator<Item = (Word, Word)>>,
     },
+
+    /// The iterator has encountered an error and will yield no further items.
+    Faulted,
 }
 
 impl<'db> Iterator for PersistentBackendEntriesIterator<'db> {
-    type Item = TreeEntry;
+    type Item = super::Result<TreeEntry>;
 
     /// Advances the iterator and returns the next item if present.
-    ///
-    /// # Panics
-    ///
-    /// - If unable to read from the underlying database.
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             match &mut self.state {
+                PersistentBackendEntriesIteratorState::Faulted => return None,
                 PersistentBackendEntriesIteratorState::NotInLeaf => {
                     // Here we are not in a leaf of the targeted tree, so we have to see if we _can_
                     // be.
                     if let Some(entry) = self.iterator.next() {
-                        let (key_bytes, value_bytes) = entry.expect("Able to read from the DB");
-                        let key = LeafKey::read_from_bytes(&key_bytes)
-                            .expect("Leaf key data read from disk is not corrupt");
+                        let (key_bytes, value_bytes) = match entry {
+                            Ok((key_bytes, value_bytes)) => (key_bytes, value_bytes),
+                            Err(e) => {
+                                self.state = PersistentBackendEntriesIteratorState::Faulted;
+                                return Some(Err(e.into()));
+                            },
+                        };
+
+                        let key = match LeafKey::read_from_bytes(&key_bytes) {
+                            Ok(key) => key,
+                            Err(e) => {
+                                self.state = PersistentBackendEntriesIteratorState::Faulted;
+                                return Some(Err(e.into()));
+                            },
+                        };
 
                         // If the key isn't for the correct lineage (which can happen even with the
                         // bloom filter), we need to advance by returning to the loop.
@@ -90,8 +102,13 @@ impl<'db> Iterator for PersistentBackendEntriesIterator<'db> {
 
                         // If the key is valid, we need to read out the leaf itself and then start
                         // iterating over that.
-                        let leaf = SmtLeaf::read_from_bytes(&value_bytes)
-                            .expect("Leaf data read from disk is not corrupt");
+                        let leaf = match SmtLeaf::read_from_bytes(&value_bytes) {
+                            Ok(leaf) => leaf,
+                            Err(e) => {
+                                self.state = PersistentBackendEntriesIteratorState::Faulted;
+                                return Some(Err(e.into()));
+                            },
+                        };
                         let mut leaf_entries = leaf.into_entries();
                         leaf_entries.sort_by_key(|(k, _)| *k);
 
@@ -106,7 +123,7 @@ impl<'db> Iterator for PersistentBackendEntriesIterator<'db> {
                 PersistentBackendEntriesIteratorState::InLeaf { leaf_entries } => {
                     if let Some((key, value)) = leaf_entries.next() {
                         // Here we have an entry in the leaf, so we simply need to return it.
-                        return Some(TreeEntry { key, value });
+                        return Some(Ok(TreeEntry { key, value }));
                     } else {
                         // If we've run out of entries in the leaf itself, we need to see if there
                         // is another valid leaf. We do this by changing state and looping to use
