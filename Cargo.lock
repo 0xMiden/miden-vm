@@ -1229,7 +1229,7 @@ dependencies = [
 
 [[package]]
 name = "miden-air"
-version = "0.22.0"
+version = "0.22.0-alpha.1"
 dependencies = [
  "miden-core",
  "miden-crypto",
@@ -1241,7 +1241,7 @@ dependencies = [
 
 [[package]]
 name = "miden-assembly"
-version = "0.22.0"
+version = "0.22.0-alpha.1"
 dependencies = [
  "env_logger",
  "insta",
@@ -1257,7 +1257,7 @@ dependencies = [
 
 [[package]]
 name = "miden-assembly-syntax"
-version = "0.22.0"
+version = "0.22.0-alpha.1"
 dependencies = [
  "aho-corasick",
  "env_logger",
@@ -1283,7 +1283,7 @@ dependencies = [
 
 [[package]]
 name = "miden-core"
-version = "0.22.0"
+version = "0.22.0-alpha.1"
 dependencies = [
  "criterion",
  "derive_more",
@@ -1309,7 +1309,7 @@ dependencies = [
 
 [[package]]
 name = "miden-core-lib"
-version = "0.22.0"
+version = "0.22.0-alpha.1"
 dependencies = [
  "criterion",
  "env_logger",
@@ -1389,7 +1389,7 @@ dependencies = [
 
 [[package]]
 name = "miden-debug-types"
-version = "0.22.0"
+version = "0.22.0-alpha.1"
 dependencies = [
  "memchr",
  "miden-crypto",
@@ -1432,7 +1432,7 @@ dependencies = [
 
 [[package]]
 name = "miden-mast-package"
-version = "0.22.0"
+version = "0.22.0-alpha.1"
 dependencies = [
  "derive_more",
  "miden-assembly-syntax",
@@ -1484,7 +1484,7 @@ dependencies = [
 
 [[package]]
 name = "miden-processor"
-version = "0.22.0"
+version = "0.22.0-alpha.1"
 dependencies = [
  "insta",
  "itertools 0.14.0",
@@ -1507,7 +1507,7 @@ dependencies = [
 
 [[package]]
 name = "miden-prover"
-version = "0.22.0"
+version = "0.22.0-alpha.1"
 dependencies = [
  "bincode",
  "miden-air",
@@ -1562,7 +1562,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-core-derive"
-version = "0.22.0"
+version = "0.22.0-alpha.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1571,7 +1571,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-diagnostics"
-version = "0.22.0"
+version = "0.22.0-alpha.1"
 dependencies = [
  "miden-crypto",
  "miden-debug-types",
@@ -1582,7 +1582,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-indexing"
-version = "0.22.0"
+version = "0.22.0-alpha.1"
 dependencies = [
  "miden-crypto",
  "serde",
@@ -1591,7 +1591,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-sync"
-version = "0.22.0"
+version = "0.22.0-alpha.1"
 dependencies = [
  "lock_api",
  "loom",
@@ -1602,7 +1602,7 @@ dependencies = [
 
 [[package]]
 name = "miden-verifier"
-version = "0.22.0"
+version = "0.22.0-alpha.1"
 dependencies = [
  "bincode",
  "miden-air",
@@ -1615,7 +1615,7 @@ dependencies = [
 
 [[package]]
 name = "miden-vm"
-version = "0.22.0"
+version = "0.22.0-alpha.1"
 dependencies = [
  "assert_cmd",
  "bincode",
