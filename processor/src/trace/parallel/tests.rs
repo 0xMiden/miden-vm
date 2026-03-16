@@ -458,7 +458,7 @@ fn test_partial_last_fragment_exists_for_h0_inversion_path() {
         "repro precondition requires multiple fragments"
     );
 
-    let trace = build_trace(execution_output, trace_fragment_contexts, program.to_info());
+    let trace = build_trace(execution_output, trace_fragment_contexts, program.to_info()).unwrap();
     let total_rows_without_halt = trace.main_trace().num_rows() - 1;
 
     assert_ne!(
