@@ -1,5 +1,3 @@
-use miden_debug_types::Span;
-
 use crate::{
     MAX_REPEAT_COUNT,
     ast::{Constant, Export, Module},
@@ -17,6 +15,48 @@ fn exported_constant<'a>(module: &'a Module, name: &str) -> &'a Constant {
         Some(item) => panic!("expected exported constant named {name}, found {item:?}"),
         None => panic!("expected exported constant named {name}"),
     }
+}
+
+fn assert_symbol_conflict(error: &miden_utils_diagnostics::Report, symbol: &str) {
+    let syntax_error = error
+        .downcast_ref::<crate::sema::SyntaxError>()
+        .expect("expected SyntaxError report");
+
+    let (span, prev_span) = syntax_error
+        .errors
+        .iter()
+        .find_map(|err| match err {
+            crate::sema::SemanticAnalysisError::SymbolConflict { span, prev_span } => {
+                Some((span, prev_span))
+            },
+            _ => None,
+        })
+        .expect("expected at least one SymbolConflict error");
+
+    assert_ne!(span, prev_span, "conflicting definitions should point at distinct spans");
+    assert_eq!(
+        span.source_id(),
+        prev_span.source_id(),
+        "conflict spans should refer to the same source file"
+    );
+
+    let span_text = syntax_error
+        .source_file
+        .source_slice(*span)
+        .expect("conflict span should be valid");
+    let prev_span_text = syntax_error
+        .source_file
+        .source_slice(*prev_span)
+        .expect("previous conflict span should be valid");
+
+    assert!(
+        span_text.contains(symbol),
+        "conflict span should include symbol '{symbol}', got: {span_text:?}"
+    );
+    assert!(
+        prev_span_text.contains(symbol),
+        "previous conflict span should include symbol '{symbol}', got: {prev_span_text:?}"
+    );
 }
 
 #[test]
@@ -105,51 +145,73 @@ pub const ACCOUNT_ID_SUFFIX_OFFSET = ACCOUNT_ID_AND_NONCE_OFFSET + 2
 }
 
 #[test]
-fn alias_then_constant_name_conflict_can_reach_resolver_duplicate_error() {
+fn define_alias_detects_cross_kind_duplicate_with_type() {
     let context = SyntaxTestContext::default();
-    let module = context
+    let error = context
         .parse_module(
             r#"
-use ::dep::"EVENT_HASH"
-const EVENT_HASH = 1
+type thing = felt
+use ::dep::thing
 "#,
         )
-        .expect("expected module to parse and pass semantic analysis");
-
-    let err = module
-        .resolve(Span::unknown("EVENT_HASH"), context.source_manager())
-        .expect_err("expected duplicate symbol to be caught by resolver lookup");
-    assert!(
-        matches!(
-            &err,
-            crate::ast::SymbolResolutionError::DuplicateSymbol { symbol, .. }
-                if symbol.as_ref() == "EVENT_HASH"
-        ),
-        "unexpected error: {err}"
-    );
+        .expect_err("expected conflicting type/alias names to be rejected during analysis");
+    assert_symbol_conflict(&error, "thing");
+    let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
+    assert!(rendered.contains("symbol conflict"));
+    assert!(rendered.contains("thing"));
 }
 
 #[test]
-fn alias_then_type_name_conflict_can_reach_resolver_duplicate_error() {
+fn define_procedure_detects_cross_kind_duplicate_with_type() {
     let context = SyntaxTestContext::default();
-    let module = context
+    let error = context
         .parse_module(
             r#"
-use ::dep::"Thing"
-type Thing = felt
+type thing = felt
+proc thing
+    nop
+end
 "#,
         )
-        .expect("expected module to parse and pass semantic analysis");
+        .expect_err("expected conflicting type/procedure names to be rejected during analysis");
+    assert_symbol_conflict(&error, "thing");
+    let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
+    assert!(rendered.contains("symbol conflict"));
+    assert!(rendered.contains("thing"));
+}
 
-    let err = module
-        .resolve(Span::unknown("Thing"), context.source_manager())
-        .expect_err("expected duplicate symbol to be caught by resolver lookup");
-    assert!(
-        matches!(
-            &err,
-            crate::ast::SymbolResolutionError::DuplicateSymbol { symbol, .. }
-                if symbol.as_ref() == "Thing"
-        ),
-        "unexpected error: {err}"
-    );
+#[test]
+fn define_constant_detects_cross_kind_duplicate_with_alias() {
+    let context = SyntaxTestContext::default();
+    let error = context
+        .parse_module(
+            r#"
+use ::dep::"THING"
+const THING = 1
+"#,
+        )
+        .expect_err("expected conflicting alias/constant names to be rejected during analysis");
+    assert_symbol_conflict(&error, "THING");
+    let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
+    assert!(rendered.contains("symbol conflict"));
+    assert!(rendered.contains("THING"));
+}
+
+#[test]
+fn define_type_detects_cross_kind_duplicate_with_procedure() {
+    let context = SyntaxTestContext::default();
+    let error = context
+        .parse_module(
+            r#"
+proc thing
+    nop
+end
+type thing = felt
+"#,
+        )
+        .expect_err("expected conflicting procedure/type names to be rejected during analysis");
+    assert_symbol_conflict(&error, "thing");
+    let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
+    assert!(rendered.contains("symbol conflict"));
+    assert!(rendered.contains("thing"));
 }

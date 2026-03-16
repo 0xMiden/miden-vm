@@ -200,15 +200,11 @@ impl Module {
 
     /// Defines a constant, raising an error if the constant conflicts with a previous definition
     pub fn define_constant(&mut self, constant: Constant) -> Result<(), SemanticAnalysisError> {
-        for item in self.items.iter() {
-            if let Export::Constant(c) = item
-                && c.name == constant.name
-            {
-                return Err(SemanticAnalysisError::SymbolConflict {
-                    span: constant.span,
-                    prev_span: c.span,
-                });
-            }
+        if let Some(prev) = self.items.iter().find(|item| item.name() == &constant.name) {
+            return Err(SemanticAnalysisError::SymbolConflict {
+                span: constant.span,
+                prev_span: prev.span(),
+            });
         }
         self.items.push(Export::Constant(constant));
         Ok(())
@@ -216,15 +212,11 @@ impl Module {
 
     /// Defines a type alias, raising an error if the alias conflicts with a previous definition
     pub fn define_type(&mut self, ty: TypeAlias) -> Result<(), SemanticAnalysisError> {
-        for item in self.items.iter() {
-            if let Export::Type(t) = item
-                && t.name() == ty.name()
-            {
-                return Err(SemanticAnalysisError::SymbolConflict {
-                    span: ty.span(),
-                    prev_span: t.span(),
-                });
-            }
+        if let Some(prev) = self.items.iter().find(|item| item.name() == ty.name()) {
+            return Err(SemanticAnalysisError::SymbolConflict {
+                span: ty.span(),
+                prev_span: prev.span(),
+            });
         }
         self.items.push(Export::Type(ty.into()));
         Ok(())
