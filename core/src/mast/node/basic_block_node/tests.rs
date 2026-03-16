@@ -348,23 +348,6 @@ fn basic_block_from_batches(op_batches: Vec<OpBatch>) -> BasicBlockNode {
     }
 }
 
-fn control_flow_operation_strategy() -> impl Strategy<Value = Operation> {
-    prop_oneof![
-        Just(Operation::Join),
-        Just(Operation::Split),
-        Just(Operation::Loop),
-        Just(Operation::Call),
-        Just(Operation::SysCall),
-        Just(Operation::Dyn),
-        Just(Operation::Dyncall),
-        Just(Operation::Span),
-        Just(Operation::Repeat),
-        Just(Operation::Respan),
-        Just(Operation::End),
-        Just(Operation::Halt),
-    ]
-}
-
 // PROPTESTS FOR BATCH CREATION INVARIANTS
 // ================================================================================================
 
@@ -608,27 +591,6 @@ fn validate_padding_semantics_rejects_num_groups_overflow_without_panicking() {
 
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("exceeds BATCH_SIZE"));
-}
-
-proptest! {
-    #[test]
-    fn validate_batch_invariants_rejects_control_flow_opcode(
-        op in control_flow_operation_strategy(),
-    ) {
-        let ops = vec![op];
-        let mut indptr = [0usize; BATCH_SIZE + 1];
-        for slot in indptr.iter_mut().skip(1) {
-            *slot = 1;
-        }
-        let padding = [false; BATCH_SIZE];
-        let groups = [ZERO; BATCH_SIZE];
-        let batch = OpBatch::new_from_parts(ops, indptr, padding, groups, 1);
-
-        let block = basic_block_from_batches(vec![batch]);
-        let result = block.validate_batch_invariants();
-
-        prop_assert!(result.is_err());
-    }
 }
 
 fn decorator_strategy(

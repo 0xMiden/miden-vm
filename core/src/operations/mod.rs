@@ -131,32 +131,6 @@ mod opcode_constants {
     pub const OPCODE_RESPAN: u8         = 0b0111_1000;
     pub const OPCODE_HALT: u8           = 0b0111_1100;
 
-    pub const CONTROL_FLOW_OPCODES: [u8; 12] = [
-        OPCODE_JOIN,
-        OPCODE_SPLIT,
-        OPCODE_LOOP,
-        OPCODE_CALL,
-        OPCODE_SYSCALL,
-        OPCODE_DYN,
-        OPCODE_DYNCALL,
-        OPCODE_SPAN,
-        OPCODE_REPEAT,
-        OPCODE_RESPAN,
-        OPCODE_END,
-        OPCODE_HALT,
-    ];
-
-    #[inline]
-    pub const fn is_control_flow_opcode(opcode: u8) -> bool {
-        let mut idx = 0;
-        while idx < CONTROL_FLOW_OPCODES.len() {
-            if CONTROL_FLOW_OPCODES[idx] == opcode {
-                return true;
-            }
-            idx += 1;
-        }
-        false
-    }
 }
 
 // OPERATIONS
