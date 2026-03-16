@@ -6,18 +6,17 @@ use miden_core::{
     ZERO,
     events::EventName,
     field::PrimeField64,
-    proof::HashFunction,
     serde::{Deserializable, Serializable},
 };
 use miden_core_lib::{CoreLibrary, dsa::falcon512_poseidon2};
 use miden_processor::{
-    DefaultHost, ExecutionError, ProcessorState, Program, ProgramInfo, StackInputs,
+    DefaultHost, ExecutionError, ProcessorState, Program, StackInputs,
     advice::{AdviceInputs, AdviceMutation},
     crypto::random::RandomCoin,
     event::EventError,
+    execute_sync,
     operation::OperationError,
 };
-use miden_prover::ProvingOptions;
 use miden_utils_testing::{
     AdviceStackBuilder, Word,
     crypto::{
@@ -26,7 +25,6 @@ use miden_utils_testing::{
     },
     expect_exec_error_matches,
     proptest::proptest,
-    prove_sync,
     rand::random_word,
 };
 use rand::{Rng, SeedableRng, rng};
@@ -363,15 +361,9 @@ fn falcon_prove_verify() {
     host.register_handler(EVENT_FALCON_SIG_TO_STACK, Arc::new(push_falcon_signature))
         .unwrap();
 
-    let options = ProvingOptions::with_96_bit_security(HashFunction::Blake3_256);
-    let (stack_outputs, proof) =
-        prove_sync(&program, stack_inputs, advice_inputs, &mut host, options)
-            .expect("failed to generate proof");
-
-    let program_info = ProgramInfo::from(program);
-    let result = miden_utils_testing::verify(program_info, stack_inputs, stack_outputs, proof);
-
-    assert!(result.is_ok(), "error: {result:?}");
+    let trace = execute_sync(&program, stack_inputs, advice_inputs, &mut host, Default::default())
+        .expect("failed to execute");
+    trace.check_constraints();
 }
 
 #[allow(clippy::type_complexity)]

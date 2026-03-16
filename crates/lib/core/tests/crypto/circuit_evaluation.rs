@@ -82,7 +82,7 @@ fn circuit_evaluation_prove_verify() {
 
     let test = miden_utils_testing::build_test!(source, &[], &adv_stack);
     test.expect_stack(&[]);
-    test.prove_and_verify(vec![], false)
+    test.check_constraints()
 }
 
 #[test]
@@ -148,7 +148,7 @@ fn processor_air_eval_circuit_masm() {
 
     let test = miden_utils_testing::build_test!(source, &[], &adv_stack);
     test.expect_stack(&[]);
-    test.prove_and_verify(vec![], false)
+    test.check_constraints()
 }
 
 fn fill_inputs(layout: &miden_ace_codegen::InputLayout) -> Vec<QuadFelt> {

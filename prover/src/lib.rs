@@ -22,9 +22,6 @@ use miden_processor::{
 };
 use tracing::instrument;
 
-// Trace conversion utilities
-mod trace_adapter;
-
 mod proving_options;
 
 // EXPORTS
@@ -36,7 +33,6 @@ pub use miden_processor::{
     crypto, field, serde, utils,
 };
 pub use proving_options::ProvingOptions;
-pub use trace_adapter::{aux_trace_to_row_major, execution_trace_to_row_major};
 
 // PROVER
 // ================================================================================================
@@ -84,8 +80,8 @@ pub async fn prove(
 
     // Convert trace to row-major format
     let trace_matrix = {
-        let _span = tracing::info_span!("execution_trace_to_row_major").entered();
-        execution_trace_to_row_major(&trace)
+        let _span = tracing::info_span!("to_row_major_matrix").entered();
+        trace.to_row_major_matrix()
     };
 
     // Build public inputs and extract fixed/variable-length components

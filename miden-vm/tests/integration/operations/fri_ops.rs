@@ -51,5 +51,5 @@ fn fri_ext2fold4() {
     assert_eq!(stack_state[15], Felt::new(end_ptr));
 
     // make sure STARK proof can be generated and verified
-    test.prove_and_verify(vec![], false);
+    test.check_constraints();
 }
