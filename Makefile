@@ -28,8 +28,8 @@ help:
 
 # -- environment toggles --------------------------------------------------------------------------
 BACKTRACE                := RUST_BACKTRACE=1
-WARNINGS                 := RUSTDOCFLAGS="-D warnings"
 BUILDDOCS                := MIDEN_BUILD_LIB_DOCS=1
+DOCS_NIGHTLY_TOOLCHAIN   ?= nightly
 
 # -- feature configuration ------------------------------------------------------------------------
 ALL_FEATURES             := --all-features
@@ -91,8 +91,9 @@ lint: xclippy xclippy-fix format ## Runs all linting tasks: check with xclippy, 
 # --- docs ----------------------------------------------------------------------------------------
 
 .PHONY: doc
-doc: ## Generates & checks documentation
-	$(WARNINGS) $(BUILDDOCS) cargo doc ${ALL_FEATURES} --keep-going --release
+doc: ## Generates & checks documentation for workspace crates only
+	rm -rf "$${CARGO_TARGET_DIR:-target}/doc"
+	$(BUILDDOCS) RUSTDOCFLAGS="--enable-index-page -Zunstable-options -D warnings" cargo +$(DOCS_NIGHTLY_TOOLCHAIN) doc ${ALL_FEATURES} --keep-going --release --no-deps
 
 .PHONY: serve-docs
 serve-docs: ## Serves the docs
