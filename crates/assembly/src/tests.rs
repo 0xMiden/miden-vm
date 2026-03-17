@@ -33,7 +33,7 @@ use proptest::{
 };
 
 use crate::{
-    Assembler, Library, ModuleParser, PathBuf,
+    Assembler, KernelLibrary, Library, ModuleParser, PathBuf,
     assembler::MAX_CONTROL_FLOW_NESTING,
     ast::{Module, ModuleKind, ProcedureName, QualifiedProcedureName},
     diagnostics::{IntoDiagnostic, Report},
@@ -409,6 +409,126 @@ fn library_serialization() -> Result<(), Report> {
     assert_eq!(bundle, deserialized);
 
     Ok(())
+}
+
+fn read_usize_vint64(bytes: &[u8], offset: &mut usize) -> usize {
+    // This test patches raw bytes in place, so it needs byte offsets that ByteReader::read_usize
+    // does not expose.
+    let first_byte = bytes.get(*offset).copied().expect("out-of-bounds vint64 peek");
+    let length = first_byte.trailing_zeros() as usize + 1;
+
+    if length == 9 {
+        *offset += 1;
+        let end = (*offset).checked_add(8).expect("offset overflow while reading vint64");
+        let chunk: [u8; 8] = bytes[*offset..end].try_into().expect("out-of-bounds vint64");
+        *offset = end;
+        let value = u64::from_le_bytes(chunk);
+        usize::try_from(value).expect("encoded usize does not fit host usize")
+    } else {
+        let end = (*offset).checked_add(length).expect("offset overflow while reading vint64");
+        let mut encoded = [0u8; 8];
+        encoded[..length].copy_from_slice(&bytes[*offset..end]);
+        *offset = end;
+        let value = u64::from_le_bytes(encoded) >> length;
+        usize::try_from(value).expect("encoded usize does not fit host usize")
+    }
+}
+
+fn locate_node_infos(bytes: &[u8]) -> (usize, usize) {
+    // Header: magic[4] + flags[1] + version[3]
+    let mut offset = 0usize;
+    offset += 4;
+    offset += 1;
+    offset += 3;
+
+    let node_count = read_usize_vint64(bytes, &mut offset);
+    let _decorator_count = read_usize_vint64(bytes, &mut offset);
+
+    // Roots: len (usize) + elements (u32 LE)
+    let roots_len = read_usize_vint64(bytes, &mut offset);
+    offset += roots_len * 4;
+
+    // Basic block data: len (usize) + bytes
+    let bb_len = read_usize_vint64(bytes, &mut offset);
+    offset += bb_len;
+
+    (offset, node_count)
+}
+
+fn build_library_bytes_with_spoofed_first_node_digest(lib: &Library, spoof_seed: &str) -> Vec<u8> {
+    use miden_core::serde::{ByteWriter, Serializable};
+
+    // Serialize the MastForest in stripped form so the byte layout is minimal and stable.
+    let forest = lib.mast_forest().as_ref();
+    let original_digest = forest[MastNodeId::new_unchecked(0)].digest();
+    let mut forest_bytes = Vec::new();
+    forest.write_stripped(&mut forest_bytes);
+
+    let (node_infos_start, node_count) = locate_node_infos(&forest_bytes);
+    assert!(node_count > 0, "expected at least one node info entry");
+
+    // Patch node 0 digest in-place.
+    let spoofed_digest = miden_core::utils::hash_string_to_word(spoof_seed);
+    assert_ne!(spoofed_digest, original_digest, "spoofed digest must differ");
+
+    let mut spoofed_digest_bytes = Vec::new();
+    spoofed_digest.write_into(&mut spoofed_digest_bytes);
+    assert_eq!(spoofed_digest_bytes.len(), 32, "Word must serialize to 32 bytes");
+
+    let node0_digest_offset = node_infos_start + 8;
+    forest_bytes[node0_digest_offset..node0_digest_offset + 32]
+        .copy_from_slice(&spoofed_digest_bytes);
+
+    // Re-encode a library byte stream using the spoofed forest bytes.
+    let mut bytes = forest_bytes;
+    bytes.write_usize(lib.exports().count());
+    for export in lib.exports() {
+        export.write_into(&mut bytes);
+    }
+    bytes
+}
+
+#[test]
+fn regression_library_deserialisation_rejects_spoofed_mast_node_digests() {
+    let lib_src = r#"
+pub proc p
+    push.1
+end
+"#;
+    let lib = Assembler::default()
+        .assemble_library([lib_src])
+        .expect("library assembly must succeed");
+
+    let bytes = build_library_bytes_with_spoofed_first_node_digest(&lib, "spoofed-library-digest");
+    let res = Library::read_from_bytes(&bytes);
+
+    assert!(
+        res.is_err(),
+        "expected library deserialization to reject forests with inconsistent node digests"
+    );
+}
+
+#[test]
+fn regression_kernel_library_deserialisation_rejects_spoofed_mast_node_digests() {
+    let kernel_src = r#"
+pub proc k1
+    push.1
+end
+"#;
+    let kernel_lib = Assembler::default()
+        .assemble_kernel(kernel_src)
+        .expect("kernel assembly must succeed");
+
+    let bytes = build_library_bytes_with_spoofed_first_node_digest(
+        kernel_lib.as_ref(),
+        "spoofed-kernel-digest",
+    );
+    let res = KernelLibrary::read_from_bytes(&bytes);
+
+    assert!(
+        res.is_err(),
+        "expected kernel library deserialization to reject forests with inconsistent node digests"
+    );
 }
 
 #[test]

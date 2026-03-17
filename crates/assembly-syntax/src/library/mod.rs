@@ -3,7 +3,7 @@ use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 use miden_core::{
     Word,
     advice::AdviceMap,
-    mast::{MastForest, MastNodeExt, MastNodeId},
+    mast::{MastForest, MastNodeExt, MastNodeId, UntrustedMastForest},
     program::Kernel,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
@@ -634,7 +634,12 @@ impl Serializable for Library {
 /// NOTE: Serialization of libraries is likely to be deprecated in a future release
 impl Deserializable for Library {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let mast_forest = Arc::new(MastForest::read_from(source)?);
+        let mast_forest =
+            Arc::new(UntrustedMastForest::read_from(source)?.validate().map_err(|err| {
+                DeserializationError::InvalidValue(format!(
+                    "library contains an invalid untrusted MAST forest: {err}"
+                ))
+            })?);
 
         let num_exports = source.read_usize()?;
         if num_exports == 0 {
