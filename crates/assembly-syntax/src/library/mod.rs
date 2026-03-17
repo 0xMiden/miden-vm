@@ -12,7 +12,6 @@ use midenc_hir_type::{FunctionType, Type};
 use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use smallvec::SmallVec;
 
 use crate::ast::{AttributeSet, Ident, Path, PathBuf, ProcedureName};
 
@@ -143,6 +142,7 @@ impl Arbitrary for ProcedureExport {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         use proptest::collection::vec as prop_vec;
+        use smallvec::SmallVec;
 
         // Generate a small set of simple types for params/results to keep strategies fast/stable
         let simple_type = prop_oneof![Just(Type::Felt), Just(Type::U32), Just(Type::U64),];
@@ -607,7 +607,7 @@ impl Deserializable for Library {
                 0 => {
                     let node = MastNodeId::from_u32_safe(source.read_u32()?, &mast_forest)?;
                     let signature = if source.read_bool()? {
-                        Some(FunctionTypeDeserializer::read_from(source)?.0)
+                        Some(FunctionType::read_from(source)?)
                     } else {
                         None
                     };
@@ -624,7 +624,7 @@ impl Deserializable for Library {
                     LibraryExport::Constant(ConstantExport { path: path.clone(), value })
                 },
                 2 => {
-                    let ty = TypeDeserializer::read_from(source)?.0;
+                    let ty = Type::read_from(source)?;
                     LibraryExport::Type(TypeExport { path: path.clone(), ty })
                 },
                 invalid => {
@@ -789,7 +789,7 @@ impl Serializable for LibraryExport {
                 target.write_u32(u32::from(*node));
                 if let Some(sig) = signature {
                     target.write_bool(true);
-                    FunctionTypeSerializer(sig).write_into(target);
+                    sig.write_into(target);
                 } else {
                     target.write_bool(false);
                 }
@@ -803,291 +803,9 @@ impl Serializable for LibraryExport {
             LibraryExport::Type(TypeExport { path: name, ty }) => {
                 target.write_u8(2);
                 name.write_into(target);
-                TypeSerializer(ty).write_into(target);
+                ty.write_into(target);
             },
         }
-    }
-}
-
-/// A wrapper type for [FunctionType] that provides serialization support via the miden-crypto
-/// serializer.
-///
-/// This is a temporary implementation to allow type information to be serialized with libraries,
-/// but in a future release we'll either rely on the `serde` serialization for these types, or
-/// provide the serialization implementation in midenc-hir-type instead
-pub struct FunctionTypeSerializer<'a>(pub &'a FunctionType);
-
-impl Serializable for FunctionTypeSerializer<'_> {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u8(self.0.abi as u8);
-        target.write_usize(self.0.params().len());
-        target.write_many(self.0.params().iter().map(TypeSerializer));
-        target.write_usize(self.0.results().len());
-        target.write_many(self.0.results().iter().map(TypeSerializer));
-    }
-}
-
-/// A wrapper type for [FunctionType] that provides deserialization support via the miden-crypto
-/// serializer.
-///
-/// This is a temporary implementation to allow type information to be serialized with libraries,
-/// but in a future release we'll either rely on the `serde` serialization for these types, or
-/// provide the serialization implementation in midenc-hir-type instead
-#[derive(Debug)]
-pub struct FunctionTypeDeserializer(pub FunctionType);
-
-impl Deserializable for FunctionTypeDeserializer {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        Self::read_from_with_depth(source, MAX_TYPE_NESTING)
-    }
-}
-
-impl FunctionTypeDeserializer {
-    fn read_from_with_depth<R: ByteReader>(
-        source: &mut R,
-        depth: usize,
-    ) -> Result<Self, DeserializationError> {
-        use midenc_hir_type::CallConv;
-
-        let abi = match source.read_u8()? {
-            0 => CallConv::Fast,
-            1 => CallConv::SystemV,
-            2 => CallConv::Wasm,
-            3 => CallConv::CanonLift,
-            4 => CallConv::CanonLower,
-            5 => CallConv::Kernel,
-            invalid => {
-                return Err(DeserializationError::InvalidValue(format!(
-                    "invalid CallConv tag: {invalid}"
-                )));
-            },
-        };
-
-        let arity = source.read_usize()?;
-        // Each type serializes to at least one byte (tag), so max_alloc(1) bounds pre-allocation.
-        let max_params = source.max_alloc(1);
-        if arity > max_params {
-            return Err(DeserializationError::InvalidValue(format!(
-                "function params count {arity} exceeds budget {max_params}"
-            )));
-        }
-        let mut params = SmallVec::<[Type; 4]>::with_capacity(arity);
-        for _ in 0..arity {
-            let ty = TypeDeserializer::read_from_with_depth(source, depth)?.0;
-            params.push(ty);
-        }
-
-        let num_results = source.read_usize()?;
-        // Each type serializes to at least one byte (tag), so max_alloc(1) bounds pre-allocation.
-        let max_results = source.max_alloc(1);
-        if num_results > max_results {
-            return Err(DeserializationError::InvalidValue(format!(
-                "function results count {num_results} exceeds budget {max_results}"
-            )));
-        }
-        let mut results = SmallVec::<[Type; 1]>::with_capacity(num_results);
-        for _ in 0..num_results {
-            let ty = TypeDeserializer::read_from_with_depth(source, depth)?.0;
-            results.push(ty);
-        }
-
-        Ok(Self(FunctionType { abi, params, results }))
-    }
-}
-
-/// A wrapper type for [Type] that provides serialization support via the miden-crypto serializer.
-///
-/// This is a temporary implementation to allow type information to be serialized with libraries,
-/// but in a future release we'll either rely on the `serde` serialization for these types, or
-/// provide the serialization implementation in midenc-hir-type instead
-pub struct TypeSerializer<'a>(pub &'a Type);
-
-impl Serializable for TypeSerializer<'_> {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        use midenc_hir_type::{AddressSpace, TypeRepr};
-
-        match self.0 {
-            Type::Unknown => target.write_u8(0),
-            Type::Never => target.write_u8(1),
-            Type::I1 => target.write_u8(2),
-            Type::I8 => target.write_u8(3),
-            Type::U8 => target.write_u8(4),
-            Type::I16 => target.write_u8(5),
-            Type::U16 => target.write_u8(6),
-            Type::I32 => target.write_u8(7),
-            Type::U32 => target.write_u8(8),
-            Type::I64 => target.write_u8(9),
-            Type::U64 => target.write_u8(10),
-            Type::I128 => target.write_u8(11),
-            Type::U128 => target.write_u8(12),
-            Type::U256 => target.write_u8(13),
-            Type::F64 => target.write_u8(14),
-            Type::Felt => target.write_u8(15),
-            Type::Ptr(ty) => {
-                target.write_u8(16);
-                match ty.addrspace {
-                    AddressSpace::Byte => target.write_u8(0),
-                    AddressSpace::Element => target.write_u8(1),
-                }
-                TypeSerializer(&ty.pointee).write_into(target);
-            },
-            Type::Struct(ty) => {
-                target.write_u8(17);
-                match ty.repr() {
-                    TypeRepr::Default => target.write_u8(0),
-                    TypeRepr::Align(align) => {
-                        target.write_u8(1);
-                        target.write_u16(align.get());
-                    },
-                    TypeRepr::Packed(align) => {
-                        target.write_u8(2);
-                        target.write_u16(align.get());
-                    },
-                    TypeRepr::Transparent => target.write_u8(3),
-                    TypeRepr::BigEndian => target.write_u8(4),
-                }
-                target.write_u8(ty.len() as u8);
-                for field in ty.fields() {
-                    TypeSerializer(&field.ty).write_into(target);
-                }
-            },
-            Type::Array(ty) => {
-                target.write_u8(18);
-                target.write_usize(ty.len);
-                TypeSerializer(&ty.ty).write_into(target);
-            },
-            Type::List(ty) => {
-                target.write_u8(19);
-                TypeSerializer(ty).write_into(target);
-            },
-            Type::Function(ty) => {
-                target.write_u8(20);
-                FunctionTypeSerializer(ty).write_into(target);
-            },
-        }
-    }
-}
-
-/// A wrapper type for [Type] that provides deserialization support via the miden-crypto serializer.
-///
-/// This is a temporary implementation to allow type information to be serialized with libraries,
-/// but in a future release we'll either rely on the `serde` serialization for these types, or
-/// provide the serialization implementation in midenc-hir-type instead
-#[derive(Debug)]
-pub struct TypeDeserializer(pub Type);
-
-// Bounds recursive type nesting during deserialization to prevent adversarially deep types from
-// exhausting stack or budgets; 256 is far beyond realistic type depth while keeping parsing safe.
-const MAX_TYPE_NESTING: usize = 256;
-
-impl TypeDeserializer {
-    fn read_from_with_depth<R: ByteReader>(
-        source: &mut R,
-        depth: usize,
-    ) -> Result<Self, DeserializationError> {
-        use alloc::string::ToString;
-        use core::num::NonZeroU16;
-
-        use midenc_hir_type::{AddressSpace, ArrayType, PointerType, StructType, TypeRepr};
-
-        let tag = source.read_u8()?;
-        let is_recursive = matches!(tag, 16..=20);
-        if is_recursive && depth == 0 {
-            return Err(DeserializationError::InvalidValue(String::from(
-                "type nesting exceeds limit",
-            )));
-        }
-        let next_depth = depth.saturating_sub(1);
-        let ty = match tag {
-            0 => Type::Unknown,
-            1 => Type::Never,
-            2 => Type::I1,
-            3 => Type::I8,
-            4 => Type::U8,
-            5 => Type::I16,
-            6 => Type::U16,
-            7 => Type::I32,
-            8 => Type::U32,
-            9 => Type::I64,
-            10 => Type::U64,
-            11 => Type::I128,
-            12 => Type::U128,
-            13 => Type::U256,
-            14 => Type::F64,
-            15 => Type::Felt,
-            16 => {
-                let addrspace = match source.read_u8()? {
-                    0 => AddressSpace::Byte,
-                    1 => AddressSpace::Element,
-                    invalid => {
-                        return Err(DeserializationError::InvalidValue(format!(
-                            "invalid AddressSpace tag: {invalid}"
-                        )));
-                    },
-                };
-                let pointee = TypeDeserializer::read_from_with_depth(source, next_depth)?.0;
-                Type::Ptr(Arc::new(PointerType { addrspace, pointee }))
-            },
-            17 => {
-                let repr = match source.read_u8()? {
-                    0 => TypeRepr::Default,
-                    1 => {
-                        let align = NonZeroU16::new(source.read_u16()?).ok_or_else(|| {
-                            DeserializationError::InvalidValue(
-                                "invalid type repr: alignment must be a non-zero value".to_string(),
-                            )
-                        })?;
-                        TypeRepr::Align(align)
-                    },
-                    2 => {
-                        let align = NonZeroU16::new(source.read_u16()?).ok_or_else(|| {
-                            DeserializationError::InvalidValue(
-                                "invalid type repr: packed alignment must be a non-zero value"
-                                    .to_string(),
-                            )
-                        })?;
-                        TypeRepr::Packed(align)
-                    },
-                    3 => TypeRepr::Transparent,
-                    invalid => {
-                        return Err(DeserializationError::InvalidValue(format!(
-                            "invalid TypeRepr tag: {invalid}"
-                        )));
-                    },
-                };
-                let num_fields = source.read_u8()?;
-                let mut fields = SmallVec::<[Type; 4]>::with_capacity(num_fields as usize);
-                for _ in 0..num_fields {
-                    let ty = TypeDeserializer::read_from_with_depth(source, next_depth)?.0;
-                    fields.push(ty);
-                }
-                Type::Struct(Arc::new(StructType::new_with_repr(repr, fields)))
-            },
-            18 => {
-                let arity = source.read_usize()?;
-                let ty = TypeDeserializer::read_from_with_depth(source, next_depth)?.0;
-                Type::Array(Arc::new(ArrayType { ty, len: arity }))
-            },
-            19 => {
-                let ty = TypeDeserializer::read_from_with_depth(source, next_depth)?.0;
-                Type::List(Arc::new(ty))
-            },
-            20 => Type::Function(Arc::new(
-                FunctionTypeDeserializer::read_from_with_depth(source, next_depth)?.0,
-            )),
-            invalid => {
-                return Err(DeserializationError::InvalidValue(format!(
-                    "invalid Type tag: {invalid}"
-                )));
-            },
-        };
-        Ok(Self(ty))
-    }
-}
-
-impl Deserializable for TypeDeserializer {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        Self::read_from_with_depth(source, MAX_TYPE_NESTING)
     }
 }
 
@@ -1169,110 +887,4 @@ impl proptest::prelude::Arbitrary for Library {
     }
 
     type Strategy = proptest::prelude::BoxedStrategy<Self>;
-}
-
-#[cfg(test)]
-mod tests {
-    use miden_core::serde::{BudgetedReader, ByteWriter, SliceReader};
-
-    use super::*;
-
-    #[test]
-    fn function_type_rejects_over_budget_params() {
-        let mut bytes = Vec::new();
-        bytes.write_u8(0);
-        bytes.write_usize(5);
-        let mut reader = BudgetedReader::new(SliceReader::new(&bytes), 6);
-        let err = FunctionTypeDeserializer::read_from(&mut reader).unwrap_err();
-        let DeserializationError::InvalidValue(message) = err else {
-            panic!("expected InvalidValue error");
-        };
-        assert!(message.contains("function params count"));
-    }
-
-    #[test]
-    fn function_type_rejects_over_budget_results() {
-        let mut bytes = Vec::new();
-        bytes.write_u8(0);
-        bytes.write_usize(0);
-        bytes.write_usize(4);
-        let mut reader = BudgetedReader::new(SliceReader::new(&bytes), 6);
-        let err = FunctionTypeDeserializer::read_from(&mut reader).unwrap_err();
-        let DeserializationError::InvalidValue(message) = err else {
-            panic!("expected InvalidValue error");
-        };
-        assert!(message.contains("function results count"));
-    }
-
-    #[test]
-    fn type_deserializer_rejects_excessive_nesting() {
-        let mut bytes = Vec::new();
-        for _ in 0..=MAX_TYPE_NESTING {
-            bytes.write_u8(16);
-            bytes.write_u8(0);
-        }
-        bytes.write_u8(15);
-
-        let err = TypeDeserializer::read_from(&mut SliceReader::new(&bytes)).unwrap_err();
-        let DeserializationError::InvalidValue(message) = err else {
-            panic!("expected InvalidValue error");
-        };
-        assert!(message.contains("type nesting exceeds limit"));
-    }
-
-    #[test]
-    fn type_deserializer_allows_max_nesting() {
-        let mut bytes = Vec::new();
-        for _ in 0..MAX_TYPE_NESTING {
-            bytes.write_u8(16);
-            bytes.write_u8(0);
-        }
-        bytes.write_u8(15);
-
-        let ty = TypeDeserializer::read_from(&mut SliceReader::new(&bytes)).unwrap();
-        assert!(matches!(ty.0, Type::Ptr(_)));
-    }
-
-    #[test]
-    fn function_type_rejects_nested_over_limit() {
-        let mut nested = Vec::new();
-        for _ in 0..=MAX_TYPE_NESTING {
-            nested.write_u8(16);
-            nested.write_u8(0);
-        }
-        nested.write_u8(15);
-
-        let mut bytes = Vec::new();
-        bytes.write_u8(20);
-        bytes.write_u8(0);
-        bytes.write_usize(1);
-        bytes.write_bytes(&nested);
-        bytes.write_usize(0);
-
-        let err = TypeDeserializer::read_from(&mut SliceReader::new(&bytes)).unwrap_err();
-        let DeserializationError::InvalidValue(message) = err else {
-            panic!("expected InvalidValue error");
-        };
-        assert!(message.contains("type nesting exceeds limit"));
-    }
-
-    #[test]
-    fn function_type_allows_nested_at_limit() {
-        let mut nested = Vec::new();
-        for _ in 0..(MAX_TYPE_NESTING - 1) {
-            nested.write_u8(16);
-            nested.write_u8(0);
-        }
-        nested.write_u8(15);
-
-        let mut bytes = Vec::new();
-        bytes.write_u8(20);
-        bytes.write_u8(0);
-        bytes.write_usize(1);
-        bytes.write_bytes(&nested);
-        bytes.write_usize(0);
-
-        let ty = TypeDeserializer::read_from(&mut SliceReader::new(&bytes)).unwrap();
-        assert!(matches!(ty.0, Type::Function(_)));
-    }
 }

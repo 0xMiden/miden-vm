@@ -246,7 +246,7 @@ impl ConstantExpr {
 
         while let Some(ty) = worklist.pop() {
             match ty {
-                Self::Int(_) | Self::Word(_) | Self::String(_) | Self::Hash(..) => continue,
+                Self::Int(_) | Self::Word(_) | Self::String(_) | Self::Hash(..) => {},
                 Self::Var(path) => {
                     references.insert(path.clone());
                 },

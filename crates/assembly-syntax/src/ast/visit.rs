@@ -392,12 +392,16 @@ where
     ControlFlow::Continue(())
 }
 
-#[inline(always)]
-pub fn visit_enum_variant<V, T>(_visitor: &mut V, _variant: &Variant) -> ControlFlow<T>
+pub fn visit_enum_variant<V, T>(visitor: &mut V, variant: &Variant) -> ControlFlow<T>
 where
     V: ?Sized + Visit<T>,
 {
-    ControlFlow::Continue(())
+    visitor.visit_constant_expr(&variant.discriminant)?;
+    if let Some(value_ty) = variant.value_ty.as_ref() {
+        visitor.visit_type_expr(value_ty)
+    } else {
+        ControlFlow::Continue(())
+    }
 }
 
 #[inline(always)]
@@ -980,12 +984,16 @@ where
     ControlFlow::Continue(())
 }
 
-#[inline(always)]
-pub fn visit_mut_enum_variant<V, T>(_visitor: &mut V, _variant: &mut Variant) -> ControlFlow<T>
+pub fn visit_mut_enum_variant<V, T>(visitor: &mut V, variant: &mut Variant) -> ControlFlow<T>
 where
     V: ?Sized + VisitMut<T>,
 {
-    ControlFlow::Continue(())
+    visitor.visit_mut_constant_expr(&mut variant.discriminant)?;
+    if let Some(value_ty) = variant.value_ty.as_mut() {
+        visitor.visit_mut_type_expr(value_ty)
+    } else {
+        ControlFlow::Continue(())
+    }
 }
 
 #[inline(always)]

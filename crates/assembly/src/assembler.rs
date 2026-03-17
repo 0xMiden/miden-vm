@@ -636,8 +636,6 @@ impl Assembler {
             },
             SymbolItem::Type(item) => {
                 let ty = self.linker.resolve_type(item.span(), gid)?;
-                // TODO(pauls): Add export type for enums, and make sure we emit them
-                // here
                 LibraryExport::Type(TypeExport { path: symbol_path, ty })
             },
 
@@ -832,7 +830,7 @@ impl Assembler {
                     // We must resolve aliases at this point to their real definition, in order to
                     // know whether we need to emit a MAST node for a foreign procedure item. If
                     // the aliased item is not a procedure, we can ignore the alias entirely.
-                    let Some(ResolvedProcedure { node: proc_node_id, signature, .. }) = self
+                    let Some(ResolvedProcedure { node: proc_node_id, signature }) = self
                         .resolve_target(
                             InvokeKind::ProcRef,
                             &alias.target().into(),
@@ -856,7 +854,6 @@ impl Assembler {
                 },
                 SymbolItem::Compiled(_) | SymbolItem::Constant(_) | SymbolItem::Type(_) => {
                     // There is nothing to do for other items that might have edges in the graph
-                    continue;
                 },
             }
         }

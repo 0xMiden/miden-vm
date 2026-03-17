@@ -10,6 +10,7 @@ macro_rules! span {
 
 lalrpop_util::lalrpop_mod!(
     #[expect(clippy::all)]
+    #[expect(unused_lifetimes)]
     grammar,
     "/parser/grammar.rs"
 );
@@ -326,7 +327,7 @@ mod module_walker {
                 match entry {
                     Ok((ref entry, ref file_type)) => {
                         match self.next_entry(entry, file_type).transpose() {
-                            None => continue,
+                            None => {},
                             result => break result,
                         }
                     },
