@@ -832,7 +832,7 @@ impl Assembler {
                     // We must resolve aliases at this point to their real definition, in order to
                     // know whether we need to emit a MAST node for a foreign procedure item. If
                     // the aliased item is not a procedure, we can ignore the alias entirely.
-                    let Some(ResolvedProcedure { node: proc_node_id, signature, .. }) = self
+                    let Some(ResolvedProcedure { node: proc_node_id, signature }) = self
                         .resolve_target(
                             InvokeKind::ProcRef,
                             &alias.target().into(),
