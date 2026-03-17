@@ -117,6 +117,8 @@ In the benchmarks below, the VM executes the same Blake3 example program for 2<s
 | Apple M4 Max (16 threads)      |     11.1 ms    |   5.9 sec    |    0.2%     |      170 KHz      |
 | Amazon Graviton 4 (64 threads) |     10.7 ms    |   5.7 sec    |    0.2%     |      175 KHz      |
 | AMD EPYC 9R45 (64 threads)     |     7.5 ms     |   4.5 sec    |    0.2%     |      220 KHz      |
+| AMD Ryzen 9 9950X (16 threads) |     7.6 ms     |   7.6 sec    |    0.1%     |      138 KHz      |
+| AMD Ryzen 9 9950X (32 threads) |     7.3 ms     |   6.8 sec    |    0.1%     |      154 KHz      |
 
 ### Recursing-friendly proofs
 
@@ -130,6 +132,8 @@ In the benchmarks below we execute the same Blake3 example program for 2<sup>20<
 | Apple M4 Max (16 threads)      |     11.1 ms    |   12.9 sec   |     2.2x           |
 | Amazon Graviton 4 (64 threads) |     10.7 ms    |   9.5 sec    |     1.7x           |
 | AMD EPYC 9R45 (64 threads)     |     7.5 ms     |   8.6 sec    |     1.9x           |
+| AMD Ryzen 9 9950X (16 threads) |     7.4 ms     |   18.9 sec   |     2.5x           |
+| AMD Ryzen 9 9950X (32 threads) |     7.3 ms     |   14.8 sec   |     2.2x           |
 
 ## References
 
