@@ -113,6 +113,15 @@ impl SetSourceId for crate::SemVer {
     fn set_source_id(&mut self, _source_id: SourceId) {}
 }
 
+impl SetSourceId for crate::VersionRequirement {
+    fn set_source_id(&mut self, source_id: SourceId) {
+        match self {
+            crate::VersionRequirement::Semantic(version) => version.set_source_id(source_id),
+            crate::VersionRequirement::Digest(digest) => digest.set_source_id(source_id),
+        }
+    }
+}
+
 impl SetSourceId for Uri {
     #[inline(always)]
     fn set_source_id(&mut self, _source_id: SourceId) {}

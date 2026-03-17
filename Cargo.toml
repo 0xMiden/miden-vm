@@ -8,6 +8,7 @@ members = [
     "crates/debug-types",
     "crates/lib/core",
     "crates/mast-package",
+    "crates/package-registry",
     "crates/project",
     "crates/test-serde-macros",
     "crates/test-utils",
@@ -53,6 +54,7 @@ miden-assembly-syntax   = { path = "./crates/assembly-syntax", version = "0.22.0
 miden-core              = { path = "./core", version = "0.22.0", default-features = false }
 miden-debug-types       = { path = "./crates/debug-types", version = "0.22.0", default-features = false }
 miden-mast-package      = { path = "./crates/mast-package", version = "0.22.0", default-features = false }
+miden-package-registry  = { path = "./crates/package-registry", version = "0.22.0", default-features = false }
 miden-processor         = { path = "./processor", version = "0.22.0", default-features = false }
 miden-test-serde-macros = { path = "./crates/test-serde-macros", default-features = false }
 miden-project           = { path = "./crates/project", version = "0.22.0", default-features = false }

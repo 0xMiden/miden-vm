@@ -1,0 +1,35 @@
+[package]
+name = "miden-package-registry"
+version.workspace = true
+description = "Package registry interfaces and dependency resolution for Miden packages"
+documentation = "https://docs.rs/miden-package-registry"
+readme = "README.md"
+categories = ["compilers", "data-structures"]
+keywords = ["miden", "package", "registry"]
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+
+[features]
+default = ["std", "serde"]
+resolver = ["std", "dep:pubgrub", "dep:smallvec"]
+std = ["miden-assembly-syntax/std", "miden-core/std", "serde/std"]
+serde = ["dep:serde", "miden-assembly-syntax/serde", "miden-core/serde"]
+
+[dependencies]
+miden-assembly-syntax.workspace = true
+miden-core.workspace = true
+pubgrub = { version = "0.3", optional = true }
+serde = { workspace = true, optional = true }
+smallvec = { workspace = true, optional = true }
+thiserror.workspace = true
+
+[dev-dependencies]
+miden-core.workspace = true
+serde_json.workspace = true
+
+[lints.rust]
+unused_assignments = "allow"

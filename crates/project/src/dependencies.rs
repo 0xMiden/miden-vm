@@ -1,18 +1,18 @@
+#[cfg(all(feature = "std", feature = "serde"))]
+mod graph;
 #[cfg(feature = "resolver")]
 mod resolver;
-mod version;
-mod version_requirement;
+
+use core::fmt;
 
 use alloc::{format, sync::Arc, vec};
 
 use miden_assembly_syntax::debuginfo::Spanned;
+pub use miden_package_registry::{SemVer, Version, VersionReq, VersionRequirement};
 
-#[cfg(feature = "resolver")]
-pub use self::resolver::*;
-pub use self::{
-    version::{SemVer, Version, VersionReq},
-    version_requirement::VersionRequirement,
-};
+#[cfg(all(feature = "std", feature = "serde"))]
+pub use self::graph::*;
+
 use crate::{Diagnostic, Linkage, SourceSpan, Span, Uri, miette};
 
 /// Represents a project/package dependency declaration
@@ -52,15 +52,16 @@ impl Dependency {
     }
 
     /// Get the version requirement for this dependency, if one was given
-    pub fn required_version(&self) -> Option<VersionRequirement> {
-        match &self.version {
-            DependencyVersionScheme::Registry(version) => Some(version.clone()),
+    pub fn required_version(&self) -> VersionRequirement {
+        let req = match &self.version {
+            DependencyVersionScheme::Registry(version) => return version.clone(),
             DependencyVersionScheme::Workspace { .. } => None,
             DependencyVersionScheme::Path { version, .. } => version.clone(),
             DependencyVersionScheme::Git { version, .. } => {
                 version.as_ref().map(|spanned| VersionRequirement::Semantic(spanned.clone()))
             },
-        }
+        };
+        req.unwrap_or_else(|| VersionRequirement::from(VersionReq::STAR.clone()))
     }
 }
 
@@ -117,6 +118,15 @@ pub enum GitRevision {
     Branch(Arc<str>),
     /// A reference to a specific revision with the given hash identifier
     Commit(Arc<str>),
+}
+
+impl fmt::Display for GitRevision {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Branch(name) => f.write_str(name.as_ref()),
+            Self::Commit(rev) => write!(f, "sha256:{rev}"),
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error, Diagnostic)]

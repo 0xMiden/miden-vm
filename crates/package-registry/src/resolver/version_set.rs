@@ -1,5 +1,4 @@
 use core::fmt;
-use std::collections::BTreeSet;
 
 use miden_core::{LexicographicWord, Word};
 use pubgrub::VersionSet as _;
@@ -183,6 +182,8 @@ impl pubgrub::VersionSet for VersionSet {
     }
 
     fn intersection(&self, other: &Self) -> Self {
+        use alloc::collections::BTreeSet;
+
         if self.digests.is_empty() && other.digests.is_empty() {
             return Self::from(self.range.intersection(&other.range));
         }

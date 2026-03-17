@@ -1,7 +1,9 @@
 use core::{borrow::Borrow, fmt, str::FromStr};
 
-pub use miden_assembly_syntax::semver::{Error as SemVerError, Version as SemVer, VersionReq};
+pub use miden_assembly_syntax::semver::{Error as SemVerError, Version as SemVer};
 use miden_core::{LexicographicWord, Word};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use super::VersionRequirement;
 
@@ -41,6 +43,29 @@ pub struct Version {
     /// This is the most precise version for a package, and is used to disambiguate multiple
     /// instances of a package with the same semantic version, but differing content.
     pub digest: Option<LexicographicWord>,
+}
+
+#[cfg(feature = "serde")]
+impl Serialize for Version {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use alloc::string::ToString;
+
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> Deserialize<'de> for Version {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = <alloc::string::String as Deserialize>::deserialize(deserializer)?;
+        value.parse().map_err(serde::de::Error::custom)
+    }
 }
 
 impl Version {
