@@ -246,6 +246,14 @@ impl Module {
             return Err(SemanticAnalysisError::InvalidEnumRepr { span: ty.span() });
         }
 
+        // We only define constants for C-like enums
+        if ty.is_c_like() {
+            self.items.push(Export::Type(ty.into()));
+            return Ok(());
+        }
+
+        let export = ty.clone();
+
         let (alias, variants) = ty.into_parts();
 
         if let Some(prev) = self.items.iter().find(|t| t.name() == &alias.name) {
@@ -280,7 +288,13 @@ impl Module {
             // Validate that the discriminant is a valid instance of the `repr` type
             variant.assert_instance_of(&repr)?;
 
-            let Variant { span, docs, name, discriminant } = variant;
+            let Variant {
+                span,
+                docs,
+                name,
+                value_ty: _,
+                discriminant,
+            } = variant;
 
             self.define_constant(Constant {
                 span,
@@ -291,7 +305,7 @@ impl Module {
             })?;
         }
 
-        self.items.push(Export::Type(alias.into()));
+        self.items.push(Export::Type(export.into()));
 
         Ok(())
     }
@@ -598,7 +612,7 @@ impl Module {
         ty: &ast::TypeExpr,
         source_manager: Arc<dyn SourceManager>,
     ) -> Result<Option<types::Type>, SymbolResolutionError> {
-        let type_resolver = ModuleTypeResolver::new(self, source_manager);
+        let mut type_resolver = ModuleTypeResolver::new(self, source_manager);
         type_resolver.resolve(ty)
     }
 
@@ -711,14 +725,14 @@ impl TypeResolver<SymbolResolutionError> for ModuleTypeResolver<'_> {
         self.resolver.source_manager()
     }
     fn get_type(
-        &self,
+        &mut self,
         context: SourceSpan,
         _gid: GlobalItemIndex,
     ) -> Result<ast::types::Type, SymbolResolutionError> {
         Err(SymbolResolutionError::undefined(context, &self.resolver.source_manager()))
     }
     fn get_local_type(
-        &self,
+        &mut self,
         context: SourceSpan,
         id: ItemIndex,
     ) -> Result<Option<ast::types::Type>, SymbolResolutionError> {
@@ -740,7 +754,7 @@ impl TypeResolver<SymbolResolutionError> for ModuleTypeResolver<'_> {
         err
     }
     fn resolve_type_ref(
-        &self,
+        &mut self,
         path: Span<&Path>,
     ) -> Result<SymbolResolution, SymbolResolutionError> {
         self.resolver.resolve_path(path)

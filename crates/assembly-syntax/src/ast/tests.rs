@@ -156,7 +156,21 @@ macro_rules! type_ref {
 
 macro_rules! struct_ty {
     ($($field_name:ident : $field_ty:expr),+) => {
-        TypeExpr::Struct(StructType::new([
+        __struct_ty!(None, $($field_name : $field_ty),*)
+    };
+
+    ($name:ident, $($field_name:ident : $field_ty:expr),+) => {
+        __struct_ty!(Some(id!($name)), $($field_name : $field_ty),*)
+    };
+
+    ($name:ty, $($field_name:ident : $field_ty:expr),+) => {
+        __struct_ty!(Some(id!($name)), $($field_name : $field_ty),*)
+    }
+}
+
+macro_rules! __struct_ty {
+    ($name:expr, $($field_name:ident : $field_ty:expr),+) => {
+        TypeExpr::Struct(StructType::new($name, [
             $(
                 StructField {
                     span: SourceSpan::UNKNOWN,
@@ -192,7 +206,7 @@ macro_rules! enum_ty {
 
 macro_rules! variant {
     ($name:ident, $discriminant:expr) => {
-        Variant::new(id!($name), $discriminant.into())
+        Variant::new(id!($name), $discriminant.into(), None)
     };
 }
 
@@ -1593,8 +1607,8 @@ type Hash = [u8; 32]
     let forms = module!(
         type_alias!(t, Type::Felt),
         type_alias!(Int8, Type::U8),
-        type_alias!(Int64, struct_ty!(hi: Type::U32, lo: Type::U32)),
-        type_alias!(Int128, struct_ty!(hi: type_ref!(Int64), lo: type_ref!(Int64))),
+        type_alias!(Int64, struct_ty!(Int64, hi: Type::U32, lo: Type::U32)),
+        type_alias!(Int128, struct_ty!(Int128, hi: type_ref!(Int64), lo: type_ref!(Int64))),
         type_alias!(Hash, array_ty!(Type::U8, 32))
     );
     assert_eq!(context.parse_forms(source)?, forms);
@@ -1655,7 +1669,7 @@ end
 
     let forms = module!(
         import!("miden::core::math::u64"),
-        type_alias!(Int64, struct_ty!(hi: Type::U32, lo: Type::U32)),
+        type_alias!(Int64, struct_ty!(Int64, hi: Type::U32, lo: Type::U32)),
         typed_export!(
             mul,
             0,
