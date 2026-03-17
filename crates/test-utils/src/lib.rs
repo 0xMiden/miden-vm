@@ -41,8 +41,6 @@ use miden_processor::{
     event::EventHandler,
     trace::{build_trace, execution_tracer::TraceGenerationContext},
 };
-#[cfg(not(target_arch = "wasm32"))]
-use miden_prover::utils::range;
 pub use miden_prover::{ProvingOptions, prove};
 pub use miden_verifier::verify;
 pub use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
@@ -283,8 +281,9 @@ impl Test {
         let execution_output = processor.execute(&program, &mut host).unwrap();
 
         // validate the memory state
-        for (addr, mem_value) in
-            (range(mem_start_addr as usize, expected_mem.len())).zip(expected_mem.iter())
+        for (addr, mem_value) in ((mem_start_addr as usize)
+            ..(mem_start_addr as usize + expected_mem.len()))
+            .zip(expected_mem.iter())
         {
             let mem_state = execution_output
                 .memory
@@ -701,33 +700,45 @@ pub fn get_column_name(col_idx: usize) -> String {
 
         // Decoder columns
         i if i == DECODER_TRACE_OFFSET + ADDR_COL_IDX => "decoder_addr".to_string(),
-        i if range(DECODER_TRACE_OFFSET + OP_BITS_OFFSET, NUM_OP_BITS).contains(&i) => {
+        i if (DECODER_TRACE_OFFSET + OP_BITS_OFFSET
+            ..DECODER_TRACE_OFFSET + OP_BITS_OFFSET + NUM_OP_BITS)
+            .contains(&i) =>
+        {
             format!("op_bits[{}]", i - (DECODER_TRACE_OFFSET + OP_BITS_OFFSET))
         },
-        i if range(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET, NUM_HASHER_COLUMNS).contains(&i) => {
+        i if (DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET
+            ..DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + NUM_HASHER_COLUMNS)
+            .contains(&i) =>
+        {
             format!("hasher_state[{}]", i - (DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET))
         },
         i if i == DECODER_TRACE_OFFSET + IN_SPAN_COL_IDX => "in_span".to_string(),
         i if i == DECODER_TRACE_OFFSET + GROUP_COUNT_COL_IDX => "group_count".to_string(),
         i if i == DECODER_TRACE_OFFSET + OP_INDEX_COL_IDX => "op_index".to_string(),
-        i if range(DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET, NUM_OP_BATCH_FLAGS)
+        i if (DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET
+            ..DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET + NUM_OP_BATCH_FLAGS)
             .contains(&i) =>
         {
             format!("op_batch_flag[{}]", i - (DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET))
         },
-        i if range(DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET, NUM_OP_BITS_EXTRA_COLS)
+        i if (DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET
+            ..DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + NUM_OP_BITS_EXTRA_COLS)
             .contains(&i) =>
         {
             format!("op_bits_extra[{}]", i - (DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET))
         },
-        i if range(DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET, NUM_OP_BITS_EXTRA_COLS)
+        i if (DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET
+            ..DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + NUM_OP_BITS_EXTRA_COLS)
             .contains(&i) =>
         {
             format!("op_bits_extra[{}]", i - (DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET))
         },
 
         // Stack columns
-        i if range(STACK_TRACE_OFFSET + STACK_TOP_OFFSET, MIN_STACK_DEPTH).contains(&i) => {
+        i if (STACK_TRACE_OFFSET + STACK_TOP_OFFSET
+            ..STACK_TRACE_OFFSET + STACK_TOP_OFFSET + MIN_STACK_DEPTH)
+            .contains(&i) =>
+        {
             format!("stack[{}]", i - (STACK_TRACE_OFFSET + STACK_TOP_OFFSET))
         },
         i if i == STACK_TRACE_OFFSET + B0_COL_IDX => "stack_b0".to_string(),

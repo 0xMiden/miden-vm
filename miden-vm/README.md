@@ -52,7 +52,7 @@ use std::sync::Arc;
 use miden_vm::{
     advice::AdviceInputs,
     assembly::DefaultSourceManager,
-    Assembler, execute_sync, ExecutionOptions, DefaultHost, Program, StackInputs
+    Assembler, execute, ExecutionOptions, DefaultHost, Program, StackInputs
 };
 
 // instantiate the assembler
@@ -74,7 +74,7 @@ let mut host = DefaultHost::default();
 let exec_options = ExecutionOptions::default();
 
 // execute the program with no inputs
-let trace = execute_sync(&program, stack_inputs, advice_inputs.clone(), &mut host, exec_options).unwrap();
+let trace = execute(&program, stack_inputs, advice_inputs.clone(), &mut host, exec_options).unwrap();
 ```
 
 ### Proving program execution
@@ -101,7 +101,7 @@ use miden_vm::{
     advice::AdviceInputs,
     assembly::DefaultSourceManager,
     field::PrimeField64,
-    Assembler, DefaultHost, ProvingOptions, Program, prove_sync, StackInputs
+    Assembler, DefaultHost, ProvingOptions, Program, prove, StackInputs
 };
 
 // instantiate the assembler
@@ -111,7 +111,7 @@ let mut assembler = Assembler::default();
 let program = assembler.assemble_program("begin push.3 push.5 add swap drop end").unwrap();
 
 // let's execute it and generate a STARK proof
-let (outputs, proof) = prove_sync(
+let (outputs, proof) = prove(
     &program,
     StackInputs::default(),       // we won't provide any inputs
     AdviceInputs::default(),      // we don't need any initial advice inputs
@@ -212,7 +212,7 @@ let mut host = DefaultHost::default();
 let stack_inputs = StackInputs::try_from_ints([1, 0]).unwrap();
 
 // execute the program
-let (outputs, proof) = miden_vm::prove_sync(
+let (outputs, proof) = miden_vm::prove(
     &program,
     stack_inputs,
     AdviceInputs::default(), // without initial advice inputs
