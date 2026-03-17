@@ -11,9 +11,9 @@ pub use miden_assembly::{
 };
 pub use miden_core::proof::{ExecutionProof, HashFunction};
 pub use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionOptions, Host, Kernel, Program, ProgramInfo, StackInputs,
-    ZERO, advice, crypto, execute, execute_async, field, operation::Operation, serde,
-    trace::ExecutionTrace, utils,
+    DefaultHost, ExecutionError, ExecutionOptions, FastProcessor, Host, Kernel, Program,
+    ProgramInfo, StackInputs, ZERO, advice, crypto, execute, execute_async, field,
+    operation::Operation, serde, trace, trace::ExecutionTrace, utils,
 };
 pub use miden_prover::{InputError, ProvingOptions, StackOutputs, Word, prove, prove_async};
 pub use miden_verifier::VerificationError;

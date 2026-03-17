@@ -1,4 +1,38 @@
 #![no_std]
+//! Utilities for Miden VM tests.
+//!
+//! # Two-step trace construction with `miden_processor`
+//! ```
+//! use miden_assembly::Assembler;
+//! use miden_processor::{DefaultHost, FastProcessor, StackInputs};
+//!
+//! let program = Assembler::default().assemble_program("begin push.1 drop end").unwrap();
+//! let mut host = DefaultHost::default();
+//!
+//! let (execution_output, ctx) = FastProcessor::new(StackInputs::default())
+//!     .execute_for_trace(&program, &mut host)
+//!     .unwrap();
+//! let trace =
+//!     miden_processor::trace::build_trace(execution_output, ctx, program.to_info()).unwrap();
+//!
+//! assert_eq!(*trace.program_hash(), program.hash());
+//! ```
+//!
+//! # The same flow from top-level `miden_vm` APIs
+//! ```
+//! use miden_assembly::Assembler;
+//! use miden_vm::{DefaultHost, FastProcessor, StackInputs};
+//!
+//! let program = Assembler::default().assemble_program("begin push.1 drop end").unwrap();
+//! let mut host = DefaultHost::default();
+//!
+//! let (execution_output, ctx) = FastProcessor::new(StackInputs::default())
+//!     .execute_for_trace(&program, &mut host)
+//!     .unwrap();
+//! let trace = miden_vm::trace::build_trace(execution_output, ctx, program.to_info()).unwrap();
+//!
+//! assert_eq!(*trace.program_hash(), program.hash());
+//! ```
 
 extern crate alloc;
 

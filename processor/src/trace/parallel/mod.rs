@@ -71,6 +71,23 @@ mod tests;
 // ================================================================================================
 
 /// Builds the main trace from the provided trace states in parallel.
+///
+/// # Example
+/// ```
+/// use miden_assembly::Assembler;
+/// use miden_processor::{DefaultHost, FastProcessor, StackInputs};
+///
+/// let program = Assembler::default().assemble_program("begin push.1 drop end").unwrap();
+/// let mut host = DefaultHost::default();
+///
+/// let (execution_output, ctx) = FastProcessor::new(StackInputs::default())
+///     .execute_for_trace(&program, &mut host)
+///     .unwrap();
+/// let trace =
+///     miden_processor::trace::build_trace(execution_output, ctx, program.to_info()).unwrap();
+///
+/// assert_eq!(*trace.program_hash(), program.hash());
+/// ```
 #[instrument(name = "build_trace", skip_all)]
 pub fn build_trace(
     execution_output: ExecutionOutput,

@@ -472,6 +472,23 @@ impl FastProcessor {
 
     /// Executes the given program and returns the stack outputs, the advice provider, and
     /// context necessary to build the trace.
+    ///
+    /// # Example
+    /// ```
+    /// use miden_assembly::Assembler;
+    /// use miden_processor::{DefaultHost, FastProcessor, StackInputs};
+    ///
+    /// let program = Assembler::default().assemble_program("begin push.1 drop end").unwrap();
+    /// let mut host = DefaultHost::default();
+    ///
+    /// let (execution_output, ctx) = FastProcessor::new(StackInputs::default())
+    ///     .execute_for_trace(&program, &mut host)
+    ///     .unwrap();
+    /// let trace =
+    ///     miden_processor::trace::build_trace(execution_output, ctx, program.to_info()).unwrap();
+    ///
+    /// assert_eq!(*trace.program_hash(), program.hash());
+    /// ```
     #[instrument(name = "execute_for_trace", skip_all)]
     pub fn execute_for_trace(
         self,
