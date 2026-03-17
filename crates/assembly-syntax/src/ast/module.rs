@@ -57,8 +57,6 @@ pub enum ModuleKind {
     ///
     /// * The procedures exported from the kernel may be the target of the `syscall` instruction,
     ///   and in fact _must_ be called that way.
-    ///
-    /// * Kernels may not use `syscall` or `call` instructions internally.
     Kernel = 2,
 }
 

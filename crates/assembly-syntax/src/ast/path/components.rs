@@ -362,7 +362,6 @@ impl<'a> DoubleEndedIterator for Components<'a> {
                         Some(("", "")) => {
                             self.back = State::Start;
                             self.back_pos -= 2;
-                            continue;
                         },
                         Some((prefix, component)) => {
                             self.back_pos -= component.len() + 2;

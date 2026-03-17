@@ -1134,12 +1134,10 @@ impl<'a> Iterator for OperationOrDecoratorIterator<'a> {
                             // Reset decorator index when moving to a new operation
                             self.decorator_list_next_index = 0;
                             return Some(OperationOrDecorator::Operation(op));
-                        } else {
-                            // advance to next batch and retry
-                            self.batch_index += 1;
-                            self.op_index_in_batch = 0;
-                            continue;
                         }
+                        // advance to next batch and retry
+                        self.batch_index += 1;
+                        self.op_index_in_batch = 0;
                     } else {
                         // no more ops, decorators flushed through the operation index
                         // and next_decorator_if_due

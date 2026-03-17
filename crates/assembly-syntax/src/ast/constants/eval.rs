@@ -406,9 +406,11 @@ where
                         };
                         stack.push(ConstantExpr::Int(Span::new(span, result)));
                     },
-                    operands @ ((ConstantExpr::Int(_), ConstantExpr::Var(_))
-                    | (ConstantExpr::Var(_), ConstantExpr::Int(_))
-                    | (ConstantExpr::Var(_), ConstantExpr::Var(_))) => {
+                    operands @ ((
+                        ConstantExpr::Int(_) | ConstantExpr::Var(_),
+                        ConstantExpr::Var(_),
+                    )
+                    | (ConstantExpr::Var(_), ConstantExpr::Int(_))) => {
                         let (lhs, rhs) = operands;
                         stack.push(ConstantExpr::BinaryOp {
                             span,
