@@ -13,6 +13,7 @@
 - Fixed constant evaluation across semantic analysis and linking so exported constants no longer retain private local dependencies and cross-module constant chains resolve in the defining module ([#2873](https://github.com/0xMiden/miden-vm/pull/2873)).
 - Memoized semantic constant evaluation in `AnalysisContext` to prevent exponential work from shared constant-dependency graphs during parsing and semantic analysis ([#2858](https://github.com/0xMiden/miden-vm/pull/2858)).
 - Fixed quote-equivalent path ambiguity in library deserialization and linker symbol resolution ([#2836](https://github.com/0xMiden/miden-vm/pull/2836)).
+- Treat serialized libraries and kernel libraries as untrusted MAST forests during deserialization, rejecting spoofed node digests ([#2863](https://github.com/0xMiden/miden-vm/pull/2863)).
 
 ## 0.22.0 (TBD)
 
