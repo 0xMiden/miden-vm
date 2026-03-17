@@ -500,11 +500,15 @@ end
         .expect("library assembly must succeed");
 
     let bytes = build_library_bytes_with_spoofed_first_node_digest(&lib, "spoofed-library-digest");
-    let res = Library::read_from_bytes(&bytes);
-
+    let err = Library::read_from_bytes(&bytes)
+        .expect_err("expected library deserialization to reject inconsistent node digests");
     assert!(
-        res.is_err(),
-        "expected library deserialization to reject forests with inconsistent node digests"
+        err.to_string().contains("invalid untrusted MAST forest"),
+        "expected untrusted-MAST validation failure, got: {err}"
+    );
+    assert!(
+        err.to_string().contains("hash mismatch for node"),
+        "expected digest mismatch failure, got: {err}"
     );
 }
 
@@ -523,11 +527,15 @@ end
         kernel_lib.as_ref(),
         "spoofed-kernel-digest",
     );
-    let res = KernelLibrary::read_from_bytes(&bytes);
-
+    let err = KernelLibrary::read_from_bytes(&bytes)
+        .expect_err("expected kernel library deserialization to reject inconsistent node digests");
     assert!(
-        res.is_err(),
-        "expected kernel library deserialization to reject forests with inconsistent node digests"
+        err.to_string().contains("invalid untrusted MAST forest"),
+        "expected untrusted-MAST validation failure, got: {err}"
+    );
+    assert!(
+        err.to_string().contains("hash mismatch for node"),
+        "expected digest mismatch failure, got: {err}"
     );
 }
 
