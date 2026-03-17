@@ -24,19 +24,23 @@ const MAX_TYPE_EXPR_NESTING: usize = 256;
 ///
 /// Since type resolution happens in two different contexts during assembly, this abstraction allows
 /// us to share more of the resolution logic in both places.
+///
+/// NOTE: Most methods of this trait take a mutable reference to the resolver, so that the resolver
+/// can mutate its own state as necessary during resolution (e.g. to manage a cache, or other side
+/// table-like data structures).
 pub trait TypeResolver<E> {
     fn source_manager(&self) -> Arc<dyn SourceManager>;
     /// Should be called by consumers of this resolver to convert a [SymbolResolutionError] to the
     /// error type used by the [TypeResolver] implementation.
     fn resolve_local_failed(&self, err: SymbolResolutionError) -> E;
     /// Get the [Type] corresponding to the item given by `gid`
-    fn get_type(&self, context: SourceSpan, gid: GlobalItemIndex) -> Result<Type, E>;
+    fn get_type(&mut self, context: SourceSpan, gid: GlobalItemIndex) -> Result<Type, E>;
     /// Get the [Type] corresponding to the item in the current module given by `id`
-    fn get_local_type(&self, context: SourceSpan, id: ItemIndex) -> Result<Option<Type>, E>;
+    fn get_local_type(&mut self, context: SourceSpan, id: ItemIndex) -> Result<Option<Type>, E>;
     /// Attempt to resolve a symbol path, given by a `TypeExpr::Ref`, to an item
-    fn resolve_type_ref(&self, ty: Span<&Path>) -> Result<SymbolResolution, E>;
+    fn resolve_type_ref(&mut self, ty: Span<&Path>) -> Result<SymbolResolution, E>;
     /// Resolve a [TypeExpr] to a concrete [Type]
-    fn resolve(&self, ty: &TypeExpr) -> Result<Option<Type>, E> {
+    fn resolve(&mut self, ty: &TypeExpr) -> Result<Option<Type>, E> {
         ty.resolve_type(self)
     }
 }
@@ -234,6 +238,19 @@ pub enum TypeExpr {
 }
 
 impl TypeExpr {
+    /// Set the name associated with this type expression, if applicable.
+    ///
+    /// Currently this just sets the name of struct types, but if we add other types with names in
+    /// the future, we can support them here.
+    pub fn set_name(&mut self, name: Ident) {
+        match self {
+            Self::Struct(struct_ty) => {
+                struct_ty.name = Some(name);
+            },
+            Self::Primitive(_) | Self::Ptr(_) | Self::Array(_) | Self::Ref(_) => (),
+        }
+    }
+
     /// Get any references to other types present in this expression
     pub fn references(&self) -> Vec<Span<Arc<Path>>> {
         use alloc::collections::BTreeSet;
@@ -265,14 +282,18 @@ impl TypeExpr {
     }
 
     /// Resolve this type expression to a concrete type, using `resolver`
-    pub fn resolve_type<E, R>(&self, resolver: &R) -> Result<Option<Type>, E>
+    pub fn resolve_type<E, R>(&self, resolver: &mut R) -> Result<Option<Type>, E>
     where
         R: ?Sized + TypeResolver<E>,
     {
         self.resolve_type_with_depth(resolver, 0)
     }
 
-    fn resolve_type_with_depth<E, R>(&self, resolver: &R, depth: usize) -> Result<Option<Type>, E>
+    fn resolve_type_with_depth<E, R>(
+        &self,
+        resolver: &mut R,
+        depth: usize,
+    ) -> Result<Option<Type>, E>
     where
         R: ?Sized + TypeResolver<E>,
     {
@@ -347,7 +368,11 @@ impl TypeExpr {
                         return Ok(None);
                     }
                 }
-                Ok(Some(Type::Struct(Arc::new(types::StructType::new(fields)))))
+                Ok(Some(Type::Struct(Arc::new(types::StructType::from_parts(
+                    t.name.clone().map(|id| id.into_inner()),
+                    t.repr.into_inner(),
+                    fields,
+                )))))
             },
         }
     }
@@ -357,16 +382,17 @@ impl From<Type> for TypeExpr {
     fn from(ty: Type) -> Self {
         match ty {
             Type::Array(t) => Self::Array(ArrayType::new(t.element_type().clone().into(), t.len())),
-            Type::Struct(t) => {
-                Self::Struct(StructType::new(t.fields().iter().enumerate().map(|(i, ft)| {
+            Type::Struct(t) => Self::Struct(StructType::new(
+                None,
+                t.fields().iter().enumerate().map(|(i, ft)| {
                     let name = Ident::new(format!("field{i}")).unwrap();
                     StructField {
                         span: SourceSpan::UNKNOWN,
                         name,
                         ty: ft.ty.clone().into(),
                     }
-                })))
-            },
+                }),
+            )),
             Type::Ptr(t) => Self::Ptr((*t).clone().into()),
             Type::Function(_) => {
                 Self::Ptr(PointerType::new(TypeExpr::Primitive(Span::unknown(Type::Felt))))
@@ -560,6 +586,7 @@ impl crate::prettier::PrettyPrint for ArrayType {
 #[derive(Debug, Clone)]
 pub struct StructType {
     pub span: SourceSpan,
+    pub name: Option<Ident>,
     pub repr: Span<TypeRepr>,
     pub fields: Vec<StructField>,
 }
@@ -568,12 +595,13 @@ impl Eq for StructType {}
 
 impl PartialEq for StructType {
     fn eq(&self, other: &Self) -> bool {
-        self.repr == other.repr && self.fields == other.fields
+        self.name == other.name && self.repr == other.repr && self.fields == other.fields
     }
 }
 
 impl core::hash::Hash for StructType {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
         self.repr.hash(state);
         self.fields.hash(state);
     }
@@ -586,9 +614,10 @@ impl Spanned for StructType {
 }
 
 impl StructType {
-    pub fn new(fields: impl IntoIterator<Item = StructField>) -> Self {
+    pub fn new(name: Option<Ident>, fields: impl IntoIterator<Item = StructField>) -> Self {
         Self {
             span: SourceSpan::UNKNOWN,
+            name,
             repr: Span::unknown(TypeRepr::Default),
             fields: fields.into_iter().collect(),
         }
@@ -863,6 +892,11 @@ impl EnumType {
         self
     }
 
+    /// Returns true if this is a C-style enum where the discriminant is the value
+    pub fn is_c_like(&self) -> bool {
+        !self.variants.is_empty() && self.variants.iter().all(|v| v.value_ty.is_none())
+    }
+
     /// Set the source span
     pub fn set_span(&mut self, span: SourceSpan) {
         self.span = span;
@@ -1001,17 +1035,23 @@ pub struct Variant {
     pub docs: Option<DocString>,
     /// The name of this enum variant
     pub name: Ident,
+    /// The payload value type of this variant
+    ///
+    /// NOTE: This is not supported in Miden Assembly text format yet, but can be set when lowering
+    /// directly to the AST.
+    pub value_ty: Option<TypeExpr>,
     /// The discriminant value associated with this variant
     pub discriminant: ConstantExpr,
 }
 
 impl Variant {
     /// Construct a new variant of an [EnumType], with the given name and discriminant value.
-    pub fn new(name: Ident, discriminant: ConstantExpr) -> Self {
+    pub fn new(name: Ident, discriminant: ConstantExpr, payload: Option<TypeExpr>) -> Self {
         Self {
             span: name.span(),
             docs: None,
             name,
+            value_ty: payload,
             discriminant,
         }
     }
@@ -1106,6 +1146,7 @@ impl Eq for Variant {}
 impl PartialEq for Variant {
     fn eq(&self, other: &Self) -> bool {
         self.name == other.name
+            && self.value_ty == other.value_ty
             && self.discriminant == other.discriminant
             && self.docs == other.docs
     }
@@ -1113,9 +1154,16 @@ impl PartialEq for Variant {
 
 impl core::hash::Hash for Variant {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        let Self { span: _, docs, name, discriminant } = self;
+        let Self {
+            span: _,
+            docs,
+            name,
+            value_ty,
+            discriminant,
+        } = self;
         docs.hash(state);
         name.hash(state);
+        value_ty.hash(state);
         discriminant.hash(state);
     }
 }
@@ -1130,7 +1178,13 @@ impl crate::prettier::PrettyPrint for Variant {
             .map(|docstring| docstring.render())
             .unwrap_or(Document::Empty);
 
-        doc + display(&self.name) + const_text(" = ") + self.discriminant.render()
+        let name = display(&self.name);
+        let name_and_payload = if let Some(value_ty) = self.value_ty.as_ref() {
+            name + const_text("(") + value_ty.render() + const_text(")")
+        } else {
+            name
+        };
+        doc + name_and_payload + const_text(" = ") + self.discriminant.render()
     }
 }
 
@@ -1165,7 +1219,7 @@ mod tests {
         }
 
         fn get_type(
-            &self,
+            &mut self,
             context: SourceSpan,
             _gid: GlobalItemIndex,
         ) -> Result<Type, SymbolResolutionError> {
@@ -1173,7 +1227,7 @@ mod tests {
         }
 
         fn get_local_type(
-            &self,
+            &mut self,
             _context: SourceSpan,
             _id: ItemIndex,
         ) -> Result<Option<Type>, SymbolResolutionError> {
@@ -1181,7 +1235,7 @@ mod tests {
         }
 
         fn resolve_type_ref(
-            &self,
+            &mut self,
             ty: Span<&Path>,
         ) -> Result<SymbolResolution, SymbolResolutionError> {
             Err(SymbolResolutionError::undefined(ty.span(), self.source_manager.as_ref()))
@@ -1200,7 +1254,7 @@ mod tests {
                         name: Ident::from_str("field").expect("valid ident"),
                         ty: expr,
                     };
-                    TypeExpr::Struct(StructType::new([field]))
+                    TypeExpr::Struct(StructType::new(None, [field]))
                 },
             };
         }
@@ -1209,13 +1263,13 @@ mod tests {
 
     #[test]
     fn type_expr_depth_boundary() {
-        let resolver = DummyResolver::new();
+        let mut resolver = DummyResolver::new();
 
         let ok_expr = nested_type_expr(MAX_TYPE_EXPR_NESTING);
-        assert!(ok_expr.resolve_type(&resolver).is_ok());
+        assert!(ok_expr.resolve_type(&mut resolver).is_ok());
 
         let err_expr = nested_type_expr(MAX_TYPE_EXPR_NESTING + 1);
-        let err = err_expr.resolve_type(&resolver).expect_err("expected depth-exceeded error");
+        let err = err_expr.resolve_type(&mut resolver).expect_err("expected depth-exceeded error");
         assert!(
             matches!(err, SymbolResolutionError::TypeExpressionDepthExceeded { max_depth, .. }
                 if max_depth == MAX_TYPE_EXPR_NESTING)

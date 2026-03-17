@@ -28,7 +28,6 @@ serde = [
     "dep:serde",
     "miden-core/serde",
     "miden-debug-types/serde",
-    "midenc-hir-type/serde",
     "semver/serde",
     "smallvec/serde",
 ]
@@ -41,7 +40,7 @@ logging = ["dep:env_logger"]
 miden-core.workspace = true
 miden-debug-types.workspace = true
 miden-utils-diagnostics.workspace = true
-midenc-hir-type.workspace = true
+midenc-hir-type = { workspace = true, features = ["serde"] }
 
 # External dependencies
 aho-corasick = { version = "1.1", default-features = false }
