@@ -4,7 +4,6 @@ use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{ExecutionOptions, FastProcessor, advice::AdviceInputs};
 use miden_vm::{Assembler, DefaultHost, StackInputs, internal::InputFile};
-use tokio::runtime::Runtime;
 use walkdir::WalkDir;
 
 /// The size of each trace fragment (in rows) when executing programs for trace generation.
@@ -56,7 +55,7 @@ fn program_execution_for_trace(c: &mut Criterion) {
                         .expect("Failed to compile test source.");
                     let stack_inputs_vec: Vec<_> = stack_inputs.iter().rev().copied().collect();
                     let stack_inputs = StackInputs::new(&stack_inputs_vec).unwrap();
-                    bench.to_async(Runtime::new().unwrap()).iter_batched(
+                    bench.iter_batched(
                         || {
                             let host = DefaultHost::default()
                                 .with_library(&CoreLibrary::default())
@@ -72,9 +71,8 @@ fn program_execution_for_trace(c: &mut Criterion) {
 
                             (host, program.clone(), processor)
                         },
-                        |(mut host, program, processor)| async move {
-                            let out =
-                                processor.execute_for_trace(&program, &mut host).await.unwrap();
+                        |(mut host, program, processor)| {
+                            let out = processor.execute_for_trace(&program, &mut host).unwrap();
                             black_box(out);
                         },
                         BatchSize::SmallInput,

@@ -81,7 +81,7 @@ fn test_diagnostic_advice_map_key_already_present() {
     let program = Program::new(mast_forest.into(), basic_block_id);
 
     let processor = FastProcessor::new(StackInputs::default());
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let err = processor.execute(&program, &mut host).unwrap_err();
 
     assert_diagnostic_lines!(
         err,
@@ -744,7 +744,7 @@ fn test_diagnostic_procedure_not_found_call() {
         .with_advice(AdviceInputs::default())
         .with_debugging(true)
         .with_tracing(true);
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let err = processor.execute(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
         "procedure with root digest 0x21458fd12b211505c36fe477314b3149bd4b2214f3304cbafa04ea80579d4328 could not be found",
@@ -803,7 +803,7 @@ fn test_diagnostic_procedure_not_found_join() {
         .with_advice(AdviceInputs::default())
         .with_debugging(true)
         .with_tracing(true);
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let err = processor.execute(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
         "procedure with root digest 0x21458fd12b211505c36fe477314b3149bd4b2214f3304cbafa04ea80579d4328 could not be found",
@@ -866,7 +866,7 @@ fn test_diagnostic_procedure_not_found_loop() {
         .with_advice(AdviceInputs::default())
         .with_debugging(true)
         .with_tracing(true);
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let err = processor.execute(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
         "procedure with root digest 0x21458fd12b211505c36fe477314b3149bd4b2214f3304cbafa04ea80579d4328 could not be found",
@@ -930,7 +930,7 @@ fn test_diagnostic_procedure_not_found_split() {
         .with_advice(AdviceInputs::default())
         .with_debugging(true)
         .with_tracing(true);
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let err = processor.execute(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
         "procedure with root digest 0x21458fd12b211505c36fe477314b3149bd4b2214f3304cbafa04ea80579d4328 could not be found",
@@ -1157,7 +1157,7 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
         .with_advice(AdviceInputs::default())
         .with_debugging(true)
         .with_tracing(true);
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let err = processor.execute(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
         "syscall failed: procedure with root 0x3b7651d5f57f0d3eb4eb69c7491cf16ca9f2f0010e32ed41cffadf9c8e18e61b was not found in the kernel",

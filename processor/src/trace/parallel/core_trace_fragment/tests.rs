@@ -1607,7 +1607,7 @@ fn build_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace,
     host.register_handler(EMIT_EVENT, Arc::new(NoopEventHandler)).unwrap();
 
     let (execution_output, trace_generation_context) =
-        processor.execute_for_trace_sync(program, &mut host).unwrap();
+        processor.execute_for_trace(program, &mut host).unwrap();
 
     let trace = build_trace(execution_output, trace_generation_context, program.to_info()).unwrap();
 
@@ -1638,7 +1638,7 @@ fn build_call_trace_helper(program: &Program) -> (SystemTrace, DecoderTrace, usi
     let mut host = DefaultHost::default();
 
     let (execution_output, trace_generation_context) =
-        processor.execute_for_trace_sync(program, &mut host).unwrap();
+        processor.execute_for_trace(program, &mut host).unwrap();
 
     let trace = build_trace(execution_output, trace_generation_context, program.to_info()).unwrap();
 

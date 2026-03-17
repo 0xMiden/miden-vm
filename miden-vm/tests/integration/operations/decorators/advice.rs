@@ -453,7 +453,7 @@ fn run_insert_mem_with_max_size(
     let mut host = super::TestHost::default();
     let options = ExecutionOptions::default().with_max_adv_map_value_size(max_adv_map_value_size);
 
-    miden_processor::execute_sync(
+    miden_processor::execute(
         &program,
         StackInputs::default(),
         AdviceInputs::default(),

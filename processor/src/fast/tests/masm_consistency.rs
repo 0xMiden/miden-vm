@@ -260,12 +260,12 @@ fn test_masm_consistency(
 
     // fast processor
     let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
-    let fast_stack_outputs = processor.execute_sync(&program, &mut host).unwrap().stack;
+    let fast_stack_outputs = processor.execute(&program, &mut host).unwrap().stack;
 
     // fast processor by step
     let stepped_stack_outputs = {
         let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
-        processor.execute_by_step_sync(&program, &mut host).unwrap()
+        processor.execute_by_step(&program, &mut host).unwrap()
     };
 
     assert_eq!(fast_stack_outputs, stepped_stack_outputs);
@@ -339,12 +339,12 @@ fn test_masm_errors_consistency(
 
     // fast processor
     let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
-    let fast_err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let fast_err = processor.execute(&program, &mut host).unwrap_err();
 
     // fast processor by step
     let fast_stepped_err = {
         let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
-        processor.execute_by_step_sync(&program, &mut host).unwrap_err()
+        processor.execute_by_step(&program, &mut host).unwrap_err()
     };
 
     assert_eq!(fast_err.to_string(), fast_stepped_err.to_string());
@@ -394,7 +394,7 @@ fn test_log_precompile_correctness() {
 
     let mut host = DefaultHost::default();
     let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
-    let execution_output = processor.execute_sync(&program, &mut host).unwrap();
+    let execution_output = processor.execute(&program, &mut host).unwrap();
 
     let actual_r0 = execution_output.stack.get_word(0).unwrap();
     let actual_r1 = execution_output.stack.get_word(4).unwrap();

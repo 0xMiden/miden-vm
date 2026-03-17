@@ -42,7 +42,7 @@ impl FastProcessor {
     }
 
     #[inline(always)]
-    pub(super) async fn op_emit(
+    pub(super) fn op_emit(
         &mut self,
         host: &mut impl Host,
         current_forest: &MastForest,
@@ -63,7 +63,7 @@ impl FastProcessor {
             }
         } else {
             let processor_state = self.state();
-            let mutations = match host.on_event(&processor_state).await {
+            let mutations = match host.on_event(&processor_state) {
                 Ok(m) => m,
                 Err(err) => {
                     let event_name = host.resolve_event(event_id).cloned();

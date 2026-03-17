@@ -11,8 +11,8 @@ use miden_debug_types::{
 };
 
 use crate::{
-    DebugError, DebugHandler, FutureMaybeSend, Host, MastForestStore, MemMastForestStore,
-    ProcessorState, TraceError, Word, advice::AdviceMutation, event::EventError, mast::MastForest,
+    DebugError, DebugHandler, Host, MastForestStore, MemMastForestStore, ProcessorState,
+    TraceError, Word, advice::AdviceMutation, event::EventError, mast::MastForest,
 };
 
 /// A snapshot of the processor state for consistency checking between processors.
@@ -165,18 +165,14 @@ where
         (span, maybe_file)
     }
 
-    fn get_mast_forest(&self, node_digest: &Word) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
-        let result = self.store.get(node_digest);
-        async move { result }
+    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
+        self.store.get(node_digest)
     }
 
-    fn on_event(
-        &mut self,
-        process: &ProcessorState,
-    ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
+    fn on_event(&mut self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         let event_id: u32 = process.get_stack_item(0).as_canonical_u64().try_into().unwrap();
         self.event_handler.push(event_id);
-        async move { Ok(Vec::new()) }
+        Ok(Vec::new())
     }
 
     fn on_debug(

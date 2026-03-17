@@ -150,7 +150,7 @@ fn test_advice_provider() {
         .with_advice(AdviceInputs::default())
         .with_debugging(true)
         .with_tracing(true);
-    let fast_stack_outputs = processor.execute_sync(&program, &mut fast_host).unwrap().stack;
+    let fast_stack_outputs = processor.execute(&program, &mut fast_host).unwrap().stack;
 
     // check outputs
     insta::assert_debug_snapshot!("stack_outputs", fast_stack_outputs);

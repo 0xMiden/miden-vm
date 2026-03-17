@@ -9,7 +9,6 @@ use miden_core::{
 use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
 
 use super::{
-    FutureMaybeSend,
     debug::DefaultDebugHandler,
     handlers::{EventError, EventHandler, EventHandlerRegistry},
 };
@@ -139,17 +138,16 @@ where
         (span, maybe_file)
     }
 
-    fn get_mast_forest(&self, node_digest: &Word) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
-        let result = self.store.get(node_digest);
-        async move { result }
+    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
+        self.store.get(node_digest)
     }
 
     fn on_event(
         &mut self,
         process: &ProcessorState<'_>,
-    ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
+    ) -> Result<Vec<AdviceMutation>, EventError> {
         let event_id = EventId::from_felt(process.get_stack_item(0));
-        let result = match self.event_handlers.handle_event(event_id, process) {
+        match self.event_handlers.handle_event(event_id, process) {
             Ok(Some(mutations)) => {
                 // the event was handled by the registered event handlers; just return
                 Ok(mutations)
@@ -163,8 +161,7 @@ where
                 Err(UnhandledEvent.into())
             },
             Err(e) => Err(e),
-        };
-        async move { result }
+        }
     }
 
     fn on_debug(
@@ -200,19 +197,16 @@ impl Host for NoopHost {
     }
 
     #[inline(always)]
-    fn get_mast_forest(
-        &self,
-        _node_digest: &Word,
-    ) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
-        async { None }
+    fn get_mast_forest(&self, _node_digest: &Word) -> Option<Arc<MastForest>> {
+        None
     }
 
     #[inline(always)]
     fn on_event(
         &mut self,
         _process: &ProcessorState<'_>,
-    ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
-        async { Ok(Vec::new()) }
+    ) -> Result<Vec<AdviceMutation>, EventError> {
+        Ok(Vec::new())
     }
 }
 

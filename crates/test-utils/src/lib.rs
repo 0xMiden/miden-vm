@@ -42,7 +42,6 @@ use miden_processor::{
     trace::{build_trace, execution_tracer::TraceGenerationContext},
 };
 #[cfg(not(target_arch = "wasm32"))]
-pub use miden_prover::prove_sync;
 use miden_prover::utils::range;
 pub use miden_prover::{ProvingOptions, prove};
 pub use miden_verifier::verify;
@@ -281,7 +280,7 @@ impl Test {
             .with_advice(self.advice_inputs.clone())
             .with_debugging(self.in_debug_mode)
             .with_tracing(self.in_debug_mode);
-        let execution_output = processor.execute_sync(&program, &mut host).unwrap();
+        let execution_output = processor.execute(&program, &mut host).unwrap();
 
         // validate the memory state
         for (addr, mem_value) in
@@ -392,7 +391,7 @@ impl Test {
                     .with_core_trace_fragment_size(FRAGMENT_SIZE)
                     .unwrap(),
             );
-            fast_processor.execute_for_trace_sync(&program, &mut host)
+            fast_processor.execute_for_trace(&program, &mut host)
         };
 
         // compare fast and slow processors' stack outputs
@@ -419,7 +418,7 @@ impl Test {
             .with_debugging(true)
             .with_tracing(true);
 
-        processor.execute_sync(&program, &mut host).map(|output| (output, host))
+        processor.execute(&program, &mut host).map(|output| (output, host))
     }
 
     /// Compiles the test's source to a Program and executes it with the tests inputs. Returns
@@ -440,7 +439,7 @@ impl Test {
             .with_debugging(true)
             .with_tracing(true);
 
-        let stack_result = processor.execute_sync(&program, &mut host);
+        let stack_result = processor.execute(&program, &mut host);
 
         let debug_output = host.debug_handler().writer().buffer.clone();
 
@@ -466,7 +465,7 @@ impl Test {
     pub fn prove_and_verify(&self, pub_inputs: Vec<u64>, test_fail: bool) {
         let (program, mut host) = self.get_program_and_host();
         let stack_inputs = StackInputs::try_from_ints(pub_inputs).unwrap();
-        let (mut stack_outputs, proof) = miden_prover::prove_sync(
+        let (mut stack_outputs, proof) = miden_prover::prove(
             &program,
             stack_inputs,
             self.advice_inputs.clone(),
@@ -602,7 +601,7 @@ impl Test {
                 .with_advice(self.advice_inputs.clone())
                 .with_debugging(self.in_debug_mode)
                 .with_tracing(self.in_debug_mode);
-            fast_process.execute_by_step_sync(&program, &mut host)
+            fast_process.execute_by_step(&program, &mut host)
         };
 
         compare_results(

@@ -1,5 +1,4 @@
 use alloc::{sync::Arc, vec::Vec};
-use core::future::Future;
 
 use miden_core::{
     Felt, Word,
@@ -74,12 +73,9 @@ pub trait Host {
         location: &Location,
     ) -> (SourceSpan, Option<Arc<SourceFile>>);
 
-    // Note: we don't use the `async` keyword in get_mast_forest and on_event, since we need to
-    // specify the `+ Send` bound to the returned Future, and `async` doesn't allow us to do that.
-
     /// Returns MAST forest corresponding to the specified digest, or None if the MAST forest for
     /// this digest could not be found in this host.
-    fn get_mast_forest(&self, node_digest: &Word) -> impl FutureMaybeSend<Option<Arc<MastForest>>>;
+    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>>;
 
     /// Handles the event emitted from the VM and provides advice mutations to be applied to
     /// the advice provider.
@@ -93,10 +89,8 @@ pub trait Host {
     /// - Return errors without event names or IDs - the caller will enrich them via
     ///   [`Host::resolve_event()`]
     /// - System events (IDs 0-255) are handled by the VM before calling this method
-    fn on_event(
-        &mut self,
-        process: &ProcessorState<'_>,
-    ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>>;
+    fn on_event(&mut self, process: &ProcessorState<'_>)
+    -> Result<Vec<AdviceMutation>, EventError>;
 
     // PROVIDED METHODS
     // --------------------------------------------------------------------------------------------
@@ -125,27 +119,3 @@ pub trait Host {
         None
     }
 }
-
-/// Alias for a `Future`
-///
-/// Unless the compilation target family is `wasm`, we add `Send` to the required bounds. For
-/// `wasm` compilation targets there is no `Send` bound.
-///
-/// We also provide a blank implementation of this trait for all features.
-#[cfg(target_family = "wasm")]
-pub trait FutureMaybeSend<O>: Future<Output = O> {}
-
-#[cfg(target_family = "wasm")]
-impl<T, O> FutureMaybeSend<O> for T where T: Future<Output = O> {}
-
-/// Alias for a `Future`
-///
-/// Unless the compilation target family is `wasm`, we add `Send` to the required bounds. For
-/// `wasm` compilation targets there is no `Send` bound.
-///
-/// We also provide a blank implementation of this trait for all features.
-#[cfg(not(target_family = "wasm"))]
-pub trait FutureMaybeSend<O>: Future<Output = O> + Send {}
-
-#[cfg(not(target_family = "wasm"))]
-impl<T, O> FutureMaybeSend<O> for T where T: Future<Output = O> + Send {}

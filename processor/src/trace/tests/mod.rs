@@ -39,7 +39,7 @@ pub fn build_trace_from_program(program: &Program, stack_inputs: &[u64]) -> Exec
             .unwrap(),
     );
     let (execution_output, trace_generation_context) =
-        processor.execute_for_trace_sync(program, &mut host).unwrap();
+        processor.execute_for_trace(program, &mut host).unwrap();
 
     build_trace(execution_output, trace_generation_context, program.to_info()).unwrap()
 }
@@ -83,7 +83,7 @@ pub fn build_trace_from_ops_with_inputs(
             .unwrap(),
     );
     let (execution_output, trace_generation_context) =
-        processor.execute_for_trace_sync(&program, &mut host).unwrap();
+        processor.execute_for_trace(&program, &mut host).unwrap();
 
     build_trace(execution_output, trace_generation_context, program.to_info()).unwrap()
 }
