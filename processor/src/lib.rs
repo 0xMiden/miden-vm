@@ -113,6 +113,18 @@ pub fn execute(
     Ok(trace)
 }
 
+/// Async compatibility wrapper for [`execute`].
+#[tracing::instrument("execute_program_async", skip_all)]
+pub async fn execute_async(
+    program: &Program,
+    stack_inputs: StackInputs,
+    advice_inputs: AdviceInputs,
+    host: &mut impl Host,
+    options: ExecutionOptions,
+) -> Result<ExecutionTrace, ExecutionError> {
+    execute(program, stack_inputs, advice_inputs, host, options)
+}
+
 // PROCESSOR STATE
 // ===============================================================================================
 

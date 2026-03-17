@@ -119,6 +119,18 @@ pub fn prove(
     Ok((stack_outputs, proof))
 }
 
+/// Async compatibility wrapper for [`prove`].
+#[instrument("prove_program_async", skip_all)]
+pub async fn prove_async(
+    program: &Program,
+    stack_inputs: StackInputs,
+    advice_inputs: AdviceInputs,
+    host: &mut impl Host,
+    options: ProvingOptions,
+) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
+    prove(program, stack_inputs, advice_inputs, host, options)
+}
+
 // STARK PROOF GENERATION
 // ================================================================================================
 

@@ -53,3 +53,4 @@ insta.workspace = true
 pretty_assertions = { version = "1.4" }
 proptest.workspace = true
 rstest = { version = "0.26" }
+tokio = { workspace = true, features = ["macros", "rt"] }

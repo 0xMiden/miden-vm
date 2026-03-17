@@ -460,6 +460,16 @@ impl FastProcessor {
         self.execute_with_tracer(program, host, &mut NoopTracer)
     }
 
+    /// Async compatibility wrapper for [`Self::execute`].
+    #[inline(always)]
+    pub async fn execute_async(
+        self,
+        program: &Program,
+        host: &mut impl Host,
+    ) -> Result<ExecutionOutput, ExecutionError> {
+        self.execute(program, host)
+    }
+
     /// Executes the given program and returns the stack outputs, the advice provider, and
     /// context necessary to build the trace.
     #[instrument(name = "execute_for_trace", skip_all)]
@@ -474,6 +484,17 @@ impl FastProcessor {
         let context = tracer.into_trace_generation_context();
 
         Ok((execution_output, context))
+    }
+
+    /// Async compatibility wrapper for [`Self::execute_for_trace`].
+    #[inline(always)]
+    #[instrument(name = "execute_for_trace_async", skip_all)]
+    pub async fn execute_for_trace_async(
+        self,
+        program: &Program,
+        host: &mut impl Host,
+    ) -> Result<(ExecutionOutput, TraceGenerationContext), ExecutionError> {
+        self.execute_for_trace(program, host)
     }
 
     /// Executes the given program with the provided tracer and returns the stack outputs, and the
@@ -552,6 +573,16 @@ impl FastProcessor {
                 },
             },
         }
+    }
+
+    /// Async compatibility wrapper for [`Self::step`].
+    #[inline(always)]
+    pub async fn step_async(
+        &mut self,
+        host: &mut impl Host,
+        resume_ctx: ResumeContext,
+    ) -> Result<Option<ResumeContext>, ExecutionError> {
+        self.step(host, resume_ctx)
     }
 
     /// Executes the given program with the provided tracer and returns the stack outputs.
@@ -873,6 +904,16 @@ impl FastProcessor {
         }
     }
 
+    /// Async compatibility wrapper for [`Self::execute_by_step`].
+    #[inline(always)]
+    pub async fn execute_by_step_async(
+        self,
+        program: &Program,
+        host: &mut impl Host,
+    ) -> Result<StackOutputs, ExecutionError> {
+        self.execute_by_step(program, host)
+    }
+
     /// Similar to [`Self::execute`], but allows mutable access to the processor.
     ///
     /// This is mainly meant to be used in tests.
@@ -904,6 +945,17 @@ impl FastProcessor {
                 },
             },
         }
+    }
+
+    /// Async compatibility wrapper for [`Self::execute_mut`].
+    #[cfg(any(test, feature = "testing"))]
+    #[inline(always)]
+    pub async fn execute_mut_async(
+        &mut self,
+        program: &Program,
+        host: &mut impl Host,
+    ) -> Result<StackOutputs, ExecutionError> {
+        self.execute_mut(program, host)
     }
 }
 
