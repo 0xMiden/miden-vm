@@ -53,8 +53,12 @@ where
 
     // execute the loop body as long as the condition is true
     if condition == ONE {
-        // Push the loop to check condition again after body
-        // executes
+        // Push the loop to check condition again after body executes.
+        //
+        // WARNING: if we eventually push another continuation in between the `FinishLoop` and the
+        // `StartNode` continuations, then the logic in `ExecutionTracer::start_clock_cycle()` that
+        // computes the value for the `is_loop_body` flag will be incorrect and needs to be
+        // adjusted.
         state.continuation_stack.push_finish_loop_entered(current_node_id);
         state.continuation_stack.push_start_node(loop_node.body());
 
