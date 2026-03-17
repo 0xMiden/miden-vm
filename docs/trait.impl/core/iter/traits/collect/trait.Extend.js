@@ -1,0 +1,9 @@
+(function() {
+    const implementors = Object.fromEntries([["miden_assembly_syntax",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.Extend.html\" title=\"trait core::iter::traits::collect::Extend\">Extend</a>&lt;<a class=\"enum\" href=\"miden_assembly_syntax/ast/enum.Attribute.html\" title=\"enum miden_assembly_syntax::ast::Attribute\">Attribute</a>&gt; for <a class=\"struct\" href=\"miden_assembly_syntax/ast/struct.AttributeSet.html\" title=\"struct miden_assembly_syntax::ast::AttributeSet\">AttributeSet</a>",0]]],["miden_core",[["impl&lt;V&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/iter/traits/collect/trait.Extend.html\" title=\"trait core::iter::traits::collect::Extend\">Extend</a>&lt;(<a class=\"struct\" href=\"miden_core/struct.Word.html\" title=\"struct miden_core::Word\">Word</a>, V)&gt; for <a class=\"struct\" href=\"miden_core/advice/struct.AdviceMap.html\" title=\"struct miden_core::advice::AdviceMap\">AdviceMap</a><div class=\"where\">where\n    V: <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/convert/trait.Into.html\" title=\"trait core::convert::Into\">Into</a>&lt;<a class=\"struct\" href=\"https://doc.rust-lang.org/nightly/alloc/sync/struct.Arc.html\" title=\"struct alloc::sync::Arc\">Arc</a>&lt;[<a class=\"struct\" href=\"miden_core/struct.Felt.html\" title=\"struct miden_core::Felt\">Felt</a>]&gt;&gt;,</div>",0]]]]);
+    if (window.register_implementors) {
+        window.register_implementors(implementors);
+    } else {
+        window.pending_implementors = implementors;
+    }
+})()
+//{"start":59,"fragment_lengths":[512,876]}

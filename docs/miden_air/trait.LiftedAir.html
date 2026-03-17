@@ -1,0 +1,143 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Super-trait for AIR definitions used by the lifted STARK prover/verifier."><title>LiftedAir in miden_air - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="miden_air" data-themes="" data-resource-suffix="" data-rustdoc-version="1.96.0-nightly (3645249d7 2026-03-16)" data-channel="nightly" data-search-js="search-63369b7b.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="sidebar-items.js"></script><script defer src="../static.files/main-5013f961.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc trait"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">LiftedAir</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../miden_air/index.html">miden_<wbr>air</a><span class="version">0.22.0-alpha.1</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Lifted<wbr>Air</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#type-parameters" title="Type Parameters">Type Parameters</a></li></ul><h3><a href="#required-methods">Required Methods</a></h3><ul class="block"><li><a href="#tymethod.aux_width" title="aux_width">aux_width</a></li><li><a href="#tymethod.eval" title="eval">eval</a></li><li><a href="#tymethod.num_aux_values" title="num_aux_values">num_aux_values</a></li><li><a href="#tymethod.num_randomness" title="num_randomness">num_randomness</a></li><li><a href="#tymethod.num_var_len_public_inputs" title="num_var_len_public_inputs">num_var_len_public_inputs</a></li></ul><h3><a href="#provided-methods">Provided Methods</a></h3><ul class="block"><li><a href="#method.air_layout" title="air_layout">air_layout</a></li><li><a href="#method.constraint_degree" title="constraint_degree">constraint_degree</a></li><li><a href="#method.is_valid_builder" title="is_valid_builder">is_valid_builder</a></li><li><a href="#method.log_quotient_degree" title="log_quotient_degree">log_quotient_degree</a></li><li><a href="#method.periodic_columns" title="periodic_columns">periodic_columns</a></li><li><a href="#method.periodic_columns_matrix" title="periodic_columns_matrix">periodic_columns_matrix</a></li><li><a href="#method.reduced_aux_values" title="reduced_aux_values">reduced_aux_values</a></li><li><a href="#method.validate" title="validate">validate</a></li></ul><h3><a href="#dyn-compatibility">Dyn Compatibility</a></h3><h3><a href="#implementors">Implementors</a></h3></section><div id="rustdoc-modnav"><h2 class="in-crate"><a href="index.html">In crate miden_<wbr>air</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="index.html">miden_air</a></div><h1>Trait <span class="trait">Lifted<wbr>Air</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"></span></div><pre class="rust item-decl"><code>pub trait LiftedAir&lt;F, EF&gt;: <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a> + <a class="trait" href="trait.BaseAir.html" title="trait miden_air::BaseAir">BaseAir</a>&lt;F&gt;<div class="where">where
+    F: Field,</div>{
+<details class="toggle type-contents-toggle"><summary class="hideme"><span>Show 13 methods</span></summary>    // Required methods
+    fn <a href="#tymethod.num_randomness" class="fn">num_randomness</a>(&amp;self) -&gt; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>;
+<span class="item-spacer"></span>    fn <a href="#tymethod.aux_width" class="fn">aux_width</a>(&amp;self) -&gt; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>;
+<span class="item-spacer"></span>    fn <a href="#tymethod.num_aux_values" class="fn">num_aux_values</a>(&amp;self) -&gt; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>;
+<span class="item-spacer"></span>    fn <a href="#tymethod.num_var_len_public_inputs" class="fn">num_var_len_public_inputs</a>(&amp;self) -&gt; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>;
+<span class="item-spacer"></span>    fn <a href="#tymethod.eval" class="fn">eval</a>&lt;AB&gt;(&amp;self, builder: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.reference.html">&amp;mut AB</a>)
+       <span class="where">where AB: <a class="trait" href="trait.LiftedAirBuilder.html" title="trait miden_air::LiftedAirBuilder">LiftedAirBuilder</a>&lt;F = F&gt;</span>;
+
+    // Provided methods
+    fn <a href="#method.periodic_columns" class="fn">periodic_columns</a>(&amp;self) -&gt; <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;F&gt;&gt; { ... }
+<span class="item-spacer"></span>    fn <a href="#method.periodic_columns_matrix" class="fn">periodic_columns_matrix</a>(&amp;self) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;DenseMatrix&lt;F&gt;&gt; { ... }
+<span class="item-spacer"></span>    fn <a href="#method.reduced_aux_values" class="fn">reduced_aux_values</a>(
+        &amp;self,
+        _aux_values: &amp;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.slice.html">[EF]</a>,
+        _challenges: &amp;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.slice.html">[EF]</a>,
+        _public_values: &amp;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.slice.html">[F]</a>,
+        _var_len_public_inputs: &amp;[&amp;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.slice.html">[F]</a>],
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;ReducedAuxValues&lt;EF&gt;, <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/boxed/struct.Box.html" title="struct alloc::boxed::Box">Box</a>&lt;dyn <a class="trait" href="https://doc.rust-lang.org/nightly/core/error/trait.Error.html" title="trait core::error::Error">Error</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a>&gt;&gt;
+       <span class="where">where EF: ExtensionField&lt;F&gt;</span> { ... }
+<span class="item-spacer"></span>    fn <a href="#method.air_layout" class="fn">air_layout</a>(&amp;self) -&gt; AirLayout { ... }
+<span class="item-spacer"></span>    fn <a href="#method.validate" class="fn">validate</a>(&amp;self) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, AirValidationError&gt; { ... }
+<span class="item-spacer"></span>    fn <a href="#method.log_quotient_degree" class="fn">log_quotient_degree</a>(&amp;self) -&gt; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>
+       <span class="where">where Self: <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sized.html" title="trait core::marker::Sized">Sized</a></span> { ... }
+<span class="item-spacer"></span>    fn <a href="#method.constraint_degree" class="fn">constraint_degree</a>(&amp;self) -&gt; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a>
+       <span class="where">where Self: <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sized.html" title="trait core::marker::Sized">Sized</a></span> { ... }
+<span class="item-spacer"></span>    fn <a href="#method.is_valid_builder" class="fn">is_valid_builder</a>&lt;AB&gt;(
+        &amp;self,
+        builder: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.reference.html">&amp;AB</a>,
+    ) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, AirValidationError&gt;
+       <span class="where">where AB: <a class="trait" href="trait.LiftedAirBuilder.html" title="trait miden_air::LiftedAirBuilder">LiftedAirBuilder</a>&lt;F = F&gt;</span> { ... }
+</details>}</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Super-trait for AIR definitions used by the lifted STARK prover/verifier.</p>
+<p>Inherits from upstream traits for width and public values.
+Adds Miden-specific auxiliary trace support and periodic column data.
+Every <code>LiftedAir</code> must provide an auxiliary trace (even if it is a minimal
+1-column dummy).</p>
+<h2 id="type-parameters"><a class="doc-anchor" href="#type-parameters">§</a>Type Parameters</h2>
+<ul>
+<li><code>F</code>: Base field</li>
+<li><code>EF</code>: Extension field (for aux trace challenges and aux values)</li>
+</ul>
+</div></details><h2 id="required-methods" class="section-header">Required Methods<a href="#required-methods" class="anchor">§</a></h2><div class="methods"><details class="toggle method-toggle" open><summary><section id="tymethod.num_randomness" class="method"><h4 class="code-header">fn <a href="#tymethod.num_randomness" class="fn">num_randomness</a>(&amp;self) -&gt; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a></h4></section></summary><div class="docblock"><p>Number of extension-field challenges required for the auxiliary trace.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.aux_width" class="method"><h4 class="code-header">fn <a href="#tymethod.aux_width" class="fn">aux_width</a>(&amp;self) -&gt; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a></h4></section></summary><div class="docblock"><p>Number of extension-field columns in the auxiliary trace.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.num_aux_values" class="method"><h4 class="code-header">fn <a href="#tymethod.num_aux_values" class="fn">num_aux_values</a>(&amp;self) -&gt; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a></h4></section></summary><div class="docblock"><p>Number of extension-field aux values committed to the Fiat-Shamir transcript.</p>
+<p>These are the values returned by <a href="trait.AuxBuilder.html#tymethod.build_aux_trace" title="method miden_air::AuxBuilder::build_aux_trace"><code>AuxBuilder::build_aux_trace</code></a>
+alongside the aux trace matrix. Their count may differ from <a href="trait.LiftedAir.html#tymethod.aux_width" title="method miden_air::LiftedAir::aux_width"><code>aux_width</code></a>
+(the number of aux trace columns).</p>
+<p>These values are exposed to AIR constraints as <em>permutation values</em> via
+<a href="trait.PermutationAirBuilder.html#tymethod.permutation_values" title="method miden_air::PermutationAirBuilder::permutation_values"><code>PermutationAirBuilder::permutation_values</code></a>.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.num_var_len_public_inputs" class="method"><h4 class="code-header">fn <a href="#tymethod.num_var_len_public_inputs" class="fn">num_var_len_public_inputs</a>(&amp;self) -&gt; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a></h4></section></summary><div class="docblock"><p>Number of variable-length public inputs this AIR expects.</p>
+<p>Each input is a slice of base-field elements that
+<a href="trait.LiftedAir.html#method.reduced_aux_values" title="method miden_air::LiftedAir::reduced_aux_values"><code>reduced_aux_values</code></a> reduces to a single value.
+The prover validates that witnesses provide exactly this many slices.</p>
+<p>Implementors of <a href="trait.LiftedAir.html#method.reduced_aux_values" title="method miden_air::LiftedAir::reduced_aux_values"><code>reduced_aux_values</code></a> should verify
+that <code>var_len_public_inputs</code> contains exactly this many slices, returning
+[<code>ReductionError</code>] otherwise.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.eval" class="method"><h4 class="code-header">fn <a href="#tymethod.eval" class="fn">eval</a>&lt;AB&gt;(&amp;self, builder: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.reference.html">&amp;mut AB</a>)<div class="where">where
+    AB: <a class="trait" href="trait.LiftedAirBuilder.html" title="trait miden_air::LiftedAirBuilder">LiftedAirBuilder</a>&lt;F = F&gt;,</div></h4></section></summary><div class="docblock"><p>Evaluate all AIR constraints using the provided builder.</p>
+</div></details></div><h2 id="provided-methods" class="section-header">Provided Methods<a href="#provided-methods" class="anchor">§</a></h2><div class="methods"><details class="toggle method-toggle" open><summary><section id="method.periodic_columns" class="method"><h4 class="code-header">fn <a href="#method.periodic_columns" class="fn">periodic_columns</a>(&amp;self) -&gt; <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;F&gt;&gt;</h4></section></summary><div class="docblock"><p>Return the periodic table data: a list of columns, each a <code>Vec&lt;F&gt;</code> of evaluations.</p>
+<p>Each inner <code>Vec&lt;F&gt;</code> represents one periodic column. Its length is the period of
+that column, and the entries are the evaluations over a subgroup of that order.</p>
+<p>Default: no periodic columns.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.periodic_columns_matrix" class="method"><h4 class="code-header">fn <a href="#method.periodic_columns_matrix" class="fn">periodic_columns_matrix</a>(&amp;self) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;DenseMatrix&lt;F&gt;&gt;</h4></section></summary><div class="docblock"><p>Return a matrix with all periodic columns extended to a common height.</p>
+<p>Columns with smaller periods are repeated cyclically to fill the extended domain.
+Returns <code>None</code> if there are no periodic columns.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.reduced_aux_values" class="method"><h4 class="code-header">fn <a href="#method.reduced_aux_values" class="fn">reduced_aux_values</a>(
+    &amp;self,
+    _aux_values: &amp;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.slice.html">[EF]</a>,
+    _challenges: &amp;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.slice.html">[EF]</a>,
+    _public_values: &amp;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.slice.html">[F]</a>,
+    _var_len_public_inputs: &amp;[&amp;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.slice.html">[F]</a>],
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;ReducedAuxValues&lt;EF&gt;, <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/boxed/struct.Box.html" title="struct alloc::boxed::Box">Box</a>&lt;dyn <a class="trait" href="https://doc.rust-lang.org/nightly/core/error/trait.Error.html" title="trait core::error::Error">Error</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a>&gt;&gt;<div class="where">where
+    EF: ExtensionField&lt;F&gt;,</div></h4></section></summary><div class="docblock"><p>Reduce this AIR’s aux values to a [<code>ReducedAuxValues</code>] contribution.</p>
+<p>Called by the verifier (with concrete field values, not symbolic expressions)
+to compute each AIR’s contribution to the global cross-AIR bus identity check.
+The verifier accumulates contributions across all AIRs and checks that the
+combined result is identity (prod=1, sum=0).</p>
+<h5 id="arguments"><a class="doc-anchor" href="#arguments">§</a>Arguments</h5>
+<ul>
+<li><code>aux_values</code>: prover-supplied aux values (from the proof)</li>
+<li><code>challenges</code>: extension-field challenges (same as used for aux trace building)</li>
+<li><code>public_values</code>: this AIR’s public values (base field)</li>
+<li><code>var_len_public_inputs</code>: reducible inputs for the cross-AIR identity check</li>
+</ul>
+<h5 id="errors"><a class="doc-anchor" href="#errors">§</a>Errors</h5>
+<p>The verifier validates instance dimensions (public values length,
+var-len public inputs count) before calling this method, so
+implementations can assume correct input counts. However, the
+<em>length of each individual var-len slice</em> is not validated upfront —
+implementations that index into these slices must check lengths
+themselves or use the <code>Result</code> return type to report errors.</p>
+<p>Default: returns identity (correct for AIRs without buses).</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.air_layout" class="method"><h4 class="code-header">fn <a href="#method.air_layout" class="fn">air_layout</a>(&amp;self) -&gt; AirLayout</h4></section></summary><div class="docblock"><p>Return the [<code>AirLayout</code>] describing this AIR’s dimensions.</p>
+<p>This is the single source of truth for building symbolic or layout builders.
+<code>preprocessed_width</code> is always 0 because lifted AIRs forbid preprocessed traces.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.validate" class="method"><h4 class="code-header">fn <a href="#method.validate" class="fn">validate</a>(&amp;self) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, AirValidationError&gt;</h4></section></summary><div class="docblock"><p>Validate that this AIR satisfies the <a href="trait.LiftedAir.html" title="trait miden_air::LiftedAir"><code>LiftedAir</code></a> contract.</p>
+<p>The lifted STARK protocol relies on several structural properties of the AIR
+that can be checked statically (i.e. without a witness). This method verifies
+the subset that is machine-checkable; the full list of trust assumptions is
+documented in the module docs of <code>p3-miden-lifted-stark</code>. Both the prover and
+verifier call this before proceeding, so a malformed AIR is caught early.</p>
+<h5 id="checked-properties"><a class="doc-anchor" href="#checked-properties">§</a>Checked properties</h5>
+<ul>
+<li><strong>No preprocessed trace</strong> — the lifted STARK protocol does not support
+preprocessed (fixed) columns; their presence is an error.</li>
+<li><strong>Positive auxiliary width</strong> — every lifted AIR must declare at least one
+auxiliary column (<code>aux_width() &gt; 0</code>).</li>
+<li><strong>Well-formed periodic columns</strong> — each periodic column must be non-empty
+and have a power-of-two length.</li>
+</ul>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.log_quotient_degree" class="method"><h4 class="code-header">fn <a href="#method.log_quotient_degree" class="fn">log_quotient_degree</a>(&amp;self) -&gt; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a><div class="where">where
+    Self: <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sized.html" title="trait core::marker::Sized">Sized</a>,</div></h4></section></summary><div class="docblock"><p>Log₂ of the number of quotient chunks, inferred from symbolic constraint analysis.</p>
+<p>Evaluates the AIR on a <a href="crate::symbolic::SymbolicAirBuilder"><code>SymbolicAirBuilder</code></a> to determine
+the maximum constraint degree M, then returns <code>log2_ceil(M - 1)</code> (padded so M ≥ 2).</p>
+<p>Uses <code>SymbolicAirBuilder&lt;F&gt;</code> (i.e. <code>EF = F</code>) which is sufficient for degree
+computation since extension-field operations have the same degree structure.</p>
+<h5 id="why-m--1-chunks"><a class="doc-anchor" href="#why-m--1-chunks">§</a>Why <code>M − 1</code> chunks?</h5>
+<p>Let N be the trace height (so trace columns are polynomials of degree &lt; N).
+Symbolic evaluation assigns each constraint a <em>degree multiple</em> M, meaning the
+resulting numerator polynomial C(X) has degree bounded by roughly M·(N − 1).</p>
+<p>In a STARK, the constraint numerator is divisible by the trace vanishing
+polynomial <code>Z_H(X) = Xᴺ − 1</code>, so the quotient polynomial
+<code>Q(X) = C(X) / Z_H(X)</code> has</p>
+<p><code>deg(Q) ≤ deg(C) − N ≤ M·(N − 1) − N &lt; (M − 1)·N</code>.</p>
+<p>We commit to Q(X) by splitting it into D chunks of degree &lt; N. The bound above
+shows that D = M − 1 chunks suffice; we then round D up to a power of two and
+return <code>log2(D)</code>.</p>
+<p>We clamp M ≥ 2 so that D ≥ 1. If M = 1 then <code>deg(C) &lt; N</code>, and divisibility by
+<code>Z_H</code> would force C(X) to be the zero polynomial (i.e. the constraint carries no
+information about the trace).</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.constraint_degree" class="method"><h4 class="code-header">fn <a href="#method.constraint_degree" class="fn">constraint_degree</a>(&amp;self) -&gt; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.usize.html">usize</a><div class="where">where
+    Self: <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sized.html" title="trait core::marker::Sized">Sized</a>,</div></h4></section></summary><div class="docblock"><p>Number of quotient chunks: <code>2^log_quotient_degree()</code>.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.is_valid_builder" class="method"><h4 class="code-header">fn <a href="#method.is_valid_builder" class="fn">is_valid_builder</a>&lt;AB&gt;(&amp;self, builder: <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.reference.html">&amp;AB</a>) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.unit.html">()</a>, AirValidationError&gt;<div class="where">where
+    AB: <a class="trait" href="trait.LiftedAirBuilder.html" title="trait miden_air::LiftedAirBuilder">LiftedAirBuilder</a>&lt;F = F&gt;,</div></h4></section></summary><div class="docblock"><p>Check that a builder’s dimensions match this AIR.</p>
+<p>Verifies every data-carrying accessor on <a href="trait.LiftedAirBuilder.html" title="trait miden_air::LiftedAirBuilder"><code>LiftedAirBuilder</code></a>: main trace,
+preprocessed trace, aux trace, public values, randomness, aux values, and
+periodic values.</p>
+<p>This guards the invariant that makes <a href="trait.LiftedAir.html#tymethod.eval" title="method miden_air::LiftedAir::eval"><code>eval</code></a> panic-free: if
+the symbolic evaluation in <a href="trait.LiftedAir.html#method.log_quotient_degree" title="method miden_air::LiftedAir::log_quotient_degree"><code>log_quotient_degree</code></a>
+succeeds and this check passes, then <code>eval()</code> cannot panic from
+out-of-bounds access on the builder’s accessors.</p>
+</div></details></div><h2 id="dyn-compatibility" class="section-header">Dyn Compatibility<a href="#dyn-compatibility" class="anchor">§</a></h2><div class="dyn-compatibility-info"><p>This trait is <b>not</b> <a href="https://doc.rust-lang.org/nightly/reference/items/traits.html#dyn-compatibility">dyn compatible</a>.</p><p><i>In older versions of Rust, dyn compatibility was called "object safety", so this trait is not object safe.</i></p></div><h2 id="implementors" class="section-header">Implementors<a href="#implementors" class="anchor">§</a></h2><div id="implementors-list"><div class="negative-marker"></div><section id="impl-LiftedAir%3CFelt,+EF%3E-for-ProcessorAir" class="impl"><a class="src rightside" href="../src/miden_air/lib.rs.html#199-354">Source</a><a href="#impl-LiftedAir%3CFelt,+EF%3E-for-ProcessorAir" class="anchor">§</a><h3 class="code-header">impl&lt;EF: ExtensionField&lt;<a class="struct" href="struct.Felt.html" title="struct miden_air::Felt">Felt</a>&gt;&gt; <a class="trait" href="trait.LiftedAir.html" title="trait miden_air::LiftedAir">LiftedAir</a>&lt;<a class="struct" href="struct.Felt.html" title="struct miden_air::Felt">Felt</a>, EF&gt; for <a class="struct" href="struct.ProcessorAir.html" title="struct miden_air::ProcessorAir">ProcessorAir</a></h3></section></div><script src="../trait.impl/p3_miden_lifted_air/air/trait.LiftedAir.js" async></script></section></div></main></body></html>

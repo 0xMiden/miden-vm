@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["SHA512_HASH_BYTES_EVENT_NAME"],"struct":["Sha512FeltDigest","Sha512Precompile","Sha512Preimage"]};

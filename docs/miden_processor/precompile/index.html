@@ -1,0 +1,58 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Precompile framework for deferred verification in the Miden VM."><title>miden_processor::precompile - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="miden_processor" data-themes="" data-resource-suffix="" data-rustdoc-version="1.96.0-nightly (3645249d7 2026-03-16)" data-channel="nightly" data-search-js="search-63369b7b.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../static.files/main-5013f961.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module precompile</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../miden_processor/index.html">miden_<wbr>processor</a><span class="version">0.22.0-alpha.1</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module precompile</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#overview" title="Overview">Overview</a></li><li><a href="#workflow" title="Workflow">Workflow</a></li><li><a href="#key-types" title="Key Types">Key Types</a></li><li><a href="#example-implementation" title="Example Implementation">Example Implementation</a></li><li><a href="#security-considerations" title="Security Considerations">Security Considerations</a></li></ul><h3><a href="#structs">Module Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li><li><a href="#traits" title="Traits">Traits</a></li><li><a href="#types" title="Type Aliases">Type Aliases</a></li></ul></section><div id="rustdoc-modnav"><h2 class="in-crate"><a href="../index.html">In crate miden_<wbr>processor</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../index.html">miden_processor</a></div><h1>Module <span>precompile</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"></span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Precompile framework for deferred verification in the Miden VM.</p>
+<p>This module provides the infrastructure for executing computationally expensive operations
+(precompiles) during VM execution while deferring their verification until proof generation.</p>
+<h2 id="overview"><a class="doc-anchor" href="#overview">§</a>Overview</h2>
+<p>Precompiles enable the Miden VM to efficiently handle operations like cryptographic hashing
+(e.g., Keccak256) that would be prohibitively expensive to prove directly in the VM. Instead
+of proving every step of these computations, the VM uses a deferred verification approach.</p>
+<h2 id="workflow"><a class="doc-anchor" href="#workflow">§</a>Workflow</h2>
+<p>The precompile system follows a four-stage lifecycle:</p>
+<ol>
+<li>
+<p><strong>VM Execution</strong>: When a program calls a precompile (via an event handler), the VM:</p>
+<ul>
+<li>Computes the result non-deterministically using the host</li>
+<li>Creates a <a href="struct.PrecompileCommitment.html" title="struct miden_processor::precompile::PrecompileCommitment"><code>PrecompileCommitment</code></a> binding inputs and outputs together</li>
+<li>Stores a <a href="struct.PrecompileRequest.html" title="struct miden_processor::precompile::PrecompileRequest"><code>PrecompileRequest</code></a> containing the raw input data for later verification</li>
+<li>Records the commitment into a <a href="struct.PrecompileTranscript.html" title="struct miden_processor::precompile::PrecompileTranscript"><code>PrecompileTranscript</code></a></li>
+</ul>
+</li>
+<li>
+<p><strong>Request Storage</strong>: All precompile requests are collected and included in the execution
+proof.</p>
+</li>
+<li>
+<p><strong>Proof Generation</strong>: The prover generates a STARK proof of the VM execution. The final
+<a href="struct.PrecompileTranscript.html" title="struct miden_processor::precompile::PrecompileTranscript"><code>PrecompileTranscript</code></a> state (sponge capacity) is a public input. The verifier enforces the
+initial (empty) and final state via variable‑length public inputs.</p>
+</li>
+<li>
+<p><strong>Verification</strong>: The verifier:</p>
+<ul>
+<li>Recomputes each precompile commitment using the stored requests via <a href="trait.PrecompileVerifier.html" title="trait miden_processor::precompile::PrecompileVerifier"><code>PrecompileVerifier</code></a></li>
+<li>Reconstructs the <a href="struct.PrecompileTranscript.html" title="struct miden_processor::precompile::PrecompileTranscript"><code>PrecompileTranscript</code></a> by recording all commitments in order</li>
+<li>Verifies the STARK proof with the final transcript state as public input.</li>
+<li>Accepts the proof only if precompile verification succeeds and the STARK proof is valid</li>
+</ul>
+</li>
+</ol>
+<h2 id="key-types"><a class="doc-anchor" href="#key-types">§</a>Key Types</h2>
+<ul>
+<li><a href="struct.PrecompileRequest.html" title="struct miden_processor::precompile::PrecompileRequest"><code>PrecompileRequest</code></a>: Stores the event ID and raw input bytes for a precompile call</li>
+<li><a href="struct.PrecompileCommitment.html" title="struct miden_processor::precompile::PrecompileCommitment"><code>PrecompileCommitment</code></a>: A cryptographic commitment to both inputs and outputs, consisting of
+a tag (with event ID and metadata) and a commitment to the request’s calldata.</li>
+<li><a href="trait.PrecompileVerifier.html" title="trait miden_processor::precompile::PrecompileVerifier"><code>PrecompileVerifier</code></a>: Trait for implementing verification logic for specific precompiles</li>
+<li><a href="struct.PrecompileVerifierRegistry.html" title="struct miden_processor::precompile::PrecompileVerifierRegistry"><code>PrecompileVerifierRegistry</code></a>: Registry mapping event IDs to their verifier implementations</li>
+<li><a href="struct.PrecompileTranscript.html" title="struct miden_processor::precompile::PrecompileTranscript"><code>PrecompileTranscript</code></a>: A transcript (implemented via a Poseidon2 sponge) that creates a
+sequential commitment to all precompile requests.</li>
+</ul>
+<h2 id="example-implementation"><a class="doc-anchor" href="#example-implementation">§</a>Example Implementation</h2>
+<p>See the Keccak256 precompile in <code>miden_core_lib::handlers::keccak256</code> for a complete reference
+implementation demonstrating both execution-time event handling and verification-time
+commitment recomputation.</p>
+<h2 id="security-considerations"><a class="doc-anchor" href="#security-considerations">§</a>Security Considerations</h2>
+<p><strong>⚠️ Alpha Status</strong>: This framework is under active development and subject to change. The
+security model assumes a fixed set of precompiles supported by the network. User-defined
+precompiles cannot be verified in the current architecture.</p>
+</div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.PrecompileCommitment.html" title="struct miden_processor::precompile::PrecompileCommitment">Precompile<wbr>Commitment</a></dt><dd>A commitment to the evaluation of <a href="struct.PrecompileRequest.html" title="struct miden_processor::precompile::PrecompileRequest"><code>PrecompileRequest</code></a>, representing both the input and result
+of the request.</dd><dt><a class="struct" href="struct.PrecompileRequest.html" title="struct miden_processor::precompile::PrecompileRequest">Precompile<wbr>Request</a></dt><dd>Represents a single precompile request consisting of an event ID and byte data.</dd><dt><a class="struct" href="struct.PrecompileTranscript.html" title="struct miden_processor::precompile::PrecompileTranscript">Precompile<wbr>Transcript</a></dt><dd>Precompile transcript implemented with a Poseidon2 sponge.</dd><dt><a class="struct" href="struct.PrecompileVerifierRegistry.html" title="struct miden_processor::precompile::PrecompileVerifierRegistry">Precompile<wbr>Verifier<wbr>Registry</a></dt><dd>Registry of precompile verifiers.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.PrecompileVerificationError.html" title="enum miden_processor::precompile::PrecompileVerificationError">Precompile<wbr>Verification<wbr>Error</a></dt></dl><h2 id="traits" class="section-header">Traits<a href="#traits" class="anchor">§</a></h2><dl class="item-table"><dt><a class="trait" href="trait.PrecompileVerifier.html" title="trait miden_processor::precompile::PrecompileVerifier">Precompile<wbr>Verifier</a></dt><dd>Trait for verifying precompile computations.</dd></dl><h2 id="types" class="section-header">Type Aliases<a href="#types" class="anchor">§</a></h2><dl class="item-table"><dt><a class="type" href="type.PrecompileError.html" title="type miden_processor::precompile::PrecompileError">Precompile<wbr>Error</a></dt><dd>Type alias for precompile errors.</dd><dt><a class="type" href="type.PrecompileTranscriptDigest.html" title="type miden_processor::precompile::PrecompileTranscriptDigest">Precompile<wbr>Transcript<wbr>Digest</a></dt><dd>Type alias representing the finalized transcript digest.</dd><dt><a class="type" href="type.PrecompileTranscriptState.html" title="type miden_processor::precompile::PrecompileTranscriptState">Precompile<wbr>Transcript<wbr>State</a></dt><dd>Type alias representing the precompile transcript state (sponge capacity word).</dd></dl></section></div></main></body></html>

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["NamespaceError","PathComponent","PathError"],"fn":["deserialize","deserialize_spanned","serialize"],"mod":["arbitrary"],"struct":["Iter","Path","PathBuf"],"trait":["Join","StartsWith"]};

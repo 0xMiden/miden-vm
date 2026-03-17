@@ -1,0 +1,508 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `processor/src/trace/chiplets/hasher/mod.rs`."><title>mod.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="miden_processor" data-themes="" data-resource-suffix="" data-rustdoc-version="1.96.0-nightly (3645249d7 2026-03-16)" data-channel="nightly" data-search-js="search-63369b7b.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-5013f961.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">miden_processor/trace/chiplets/hasher/</div>mod.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="kw">use </span>alloc::collections::BTreeMap;
+<a href=#2 id=2 data-nosnippet>2</a>
+<a href=#3 id=3 data-nosnippet>3</a><span class="kw">use </span>miden_air::trace::chiplets::hasher::{
+<a href=#4 id=4 data-nosnippet>4</a>    DIGEST_RANGE, LINEAR_HASH, MP_VERIFY, MR_UPDATE_NEW, MR_UPDATE_OLD, RATE_LEN, RETURN_HASH,
+<a href=#5 id=5 data-nosnippet>5</a>    RETURN_STATE, STATE_WIDTH, Selectors, TRACE_WIDTH,
+<a href=#6 id=6 data-nosnippet>6</a>};
+<a href=#7 id=7 data-nosnippet>7</a>
+<a href=#8 id=8 data-nosnippet>8</a><span class="kw">use </span>super::{
+<a href=#9 id=9 data-nosnippet>9</a>    Felt, HasherState, MerklePath, MerkleRootUpdate, ONE, OpBatch, TraceFragment, Word <span class="kw">as </span>Digest,
+<a href=#10 id=10 data-nosnippet>10</a>    ZERO,
+<a href=#11 id=11 data-nosnippet>11</a>};
+<a href=#12 id=12 data-nosnippet>12</a>
+<a href=#13 id=13 data-nosnippet>13</a><span class="kw">mod </span>trace;
+<a href=#14 id=14 data-nosnippet>14</a><span class="kw">use </span>trace::HasherTrace;
+<a href=#15 id=15 data-nosnippet>15</a>
+<a href=#16 id=16 data-nosnippet>16</a><span class="attr">#[cfg(test)]
+<a href=#17 id=17 data-nosnippet>17</a></span><span class="kw">mod </span>tests;
+<a href=#18 id=18 data-nosnippet>18</a>
+<a href=#19 id=19 data-nosnippet>19</a><span class="comment">// HASH PROCESSOR
+<a href=#20 id=20 data-nosnippet>20</a>// ================================================================================================
+<a href=#21 id=21 data-nosnippet>21</a>
+<a href=#22 id=22 data-nosnippet>22</a></span><span class="doccomment">/// Hash chiplet for the VM.
+<a href=#23 id=23 data-nosnippet>23</a>///
+<a href=#24 id=24 data-nosnippet>24</a>/// This component is responsible for performing all hash-related computations for the VM, as well
+<a href=#25 id=25 data-nosnippet>25</a>/// as building an execution trace for these computations. These computations include:
+<a href=#26 id=26 data-nosnippet>26</a>/// * Linear hashes, including simple 2-to-1 hashes, single and multiple permutations.
+<a href=#27 id=27 data-nosnippet>27</a>/// * Merkle path verification.
+<a href=#28 id=28 data-nosnippet>28</a>/// * Merkle root updates.
+<a href=#29 id=29 data-nosnippet>29</a>///
+<a href=#30 id=30 data-nosnippet>30</a>/// ## Execution trace
+<a href=#31 id=31 data-nosnippet>31</a>/// Hasher execution trace consists of 16 columns as illustrated below:
+<a href=#32 id=32 data-nosnippet>32</a>///
+<a href=#33 id=33 data-nosnippet>33</a>///   s0   s1   s2   h0   h1   h2   h3   h4   h5   h6   h7   h8   h9   h10   h11   idx
+<a href=#34 id=34 data-nosnippet>34</a>/// ├────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴─────┴─────┴─────┤
+<a href=#35 id=35 data-nosnippet>35</a>///
+<a href=#36 id=36 data-nosnippet>36</a>/// In the above, the meaning of the columns is as follows:
+<a href=#37 id=37 data-nosnippet>37</a>/// * Selector columns s0, s1, and s2 used to help select transition function for a given row.
+<a href=#38 id=38 data-nosnippet>38</a>/// * Hasher state columns h0 through h11 used to hold the hasher state for each round of hash
+<a href=#39 id=39 data-nosnippet>39</a>///   computation. The state is laid out as `[RATE0, RATE1, CAPACITY]`:
+<a href=#40 id=40 data-nosnippet>40</a>///   - The first eight columns (h0-h7) represent the rate elements of the state. These are used to
+<a href=#41 id=41 data-nosnippet>41</a>///     absorb the values to be hashed. Once a permutation is complete, hash output is located in
+<a href=#42 id=42 data-nosnippet>42</a>///     the first four rate columns (h0, h1, h2, h3).
+<a href=#43 id=43 data-nosnippet>43</a>///   - The last four columns (h8-h11) represent the capacity state of the sponge function.
+<a href=#44 id=44 data-nosnippet>44</a>/// * Node index column idx used to help with Merkle path verification and Merkle root update
+<a href=#45 id=45 data-nosnippet>45</a>///   computations. For all other computations the values in this column are set to 0s.
+<a href=#46 id=46 data-nosnippet>46</a>///
+<a href=#47 id=47 data-nosnippet>47</a>/// Each permutation of the hash function adds 8 rows to the execution trace. Thus, for Merkle
+<a href=#48 id=48 data-nosnippet>48</a>/// path verification, number of rows added to the trace is 8 * path.len(), and for Merkle root
+<a href=#49 id=49 data-nosnippet>49</a>/// update it is 16 * path.len(), since we need to perform two path verifications for each update.
+<a href=#50 id=50 data-nosnippet>50</a>///
+<a href=#51 id=51 data-nosnippet>51</a>/// In addition to the execution trace, the hash chiplet also maintains:
+<a href=#52 id=52 data-nosnippet>52</a>/// - an auxiliary trace builder, which can be used to construct a running product column describing
+<a href=#53 id=53 data-nosnippet>53</a>///   the state of the sibling table (used in Merkle root update operations).
+<a href=#54 id=54 data-nosnippet>54</a>/// - a map of memoized execution trace, which keeps track of start and end rows of the sections of
+<a href=#55 id=55 data-nosnippet>55</a>///   the trace of a control or span block that can be copied to be used later for program blocks
+<a href=#56 id=56 data-nosnippet>56</a>///   encountered with the same digest instead of building it from scratch everytime. The hash of
+<a href=#57 id=57 data-nosnippet>57</a>///   the block is used as the key here after converting it to a bytes array.
+<a href=#58 id=58 data-nosnippet>58</a></span><span class="attr">#[derive(Debug, Default)]
+<a href=#59 id=59 data-nosnippet>59</a></span><span class="kw">pub struct </span>Hasher {
+<a href=#60 id=60 data-nosnippet>60</a>    trace: HasherTrace,
+<a href=#61 id=61 data-nosnippet>61</a>    memoized_trace_map: BTreeMap&lt;[u8; <span class="number">32</span>], (usize, usize)&gt;,
+<a href=#62 id=62 data-nosnippet>62</a>}
+<a href=#63 id=63 data-nosnippet>63</a>
+<a href=#64 id=64 data-nosnippet>64</a><span class="kw">impl </span>Hasher {
+<a href=#65 id=65 data-nosnippet>65</a>    <span class="comment">// STATE ACCESSORS
+<a href=#66 id=66 data-nosnippet>66</a>    // --------------------------------------------------------------------------------------------
+<a href=#67 id=67 data-nosnippet>67</a>
+<a href=#68 id=68 data-nosnippet>68</a>    </span><span class="doccomment">/// Returns current length of the execution trace stored in this hasher.
+<a href=#69 id=69 data-nosnippet>69</a>    </span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>trace_len(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+<a href=#70 id=70 data-nosnippet>70</a>        <span class="self">self</span>.trace.trace_len()
+<a href=#71 id=71 data-nosnippet>71</a>    }
+<a href=#72 id=72 data-nosnippet>72</a>
+<a href=#73 id=73 data-nosnippet>73</a>    <span class="comment">// HASHING METHODS
+<a href=#74 id=74 data-nosnippet>74</a>    // --------------------------------------------------------------------------------------------
+<a href=#75 id=75 data-nosnippet>75</a>
+<a href=#76 id=76 data-nosnippet>76</a>    </span><span class="doccomment">/// Applies a single permutation of the hash function to the provided state and records the
+<a href=#77 id=77 data-nosnippet>77</a>    /// execution trace of this computation.
+<a href=#78 id=78 data-nosnippet>78</a>    ///
+<a href=#79 id=79 data-nosnippet>79</a>    /// The returned tuple contains the hasher state after the permutation and the row address of
+<a href=#80 id=80 data-nosnippet>80</a>    /// the execution trace at which the permutation started.
+<a href=#81 id=81 data-nosnippet>81</a>    </span><span class="kw">pub fn </span>permute(<span class="kw-2">&amp;mut </span><span class="self">self</span>, <span class="kw-2">mut </span>state: HasherState) -&gt; (Felt, HasherState) {
+<a href=#82 id=82 data-nosnippet>82</a>        <span class="kw">let </span>addr = <span class="self">self</span>.trace.next_row_addr();
+<a href=#83 id=83 data-nosnippet>83</a>
+<a href=#84 id=84 data-nosnippet>84</a>        <span class="comment">// perform the hash.
+<a href=#85 id=85 data-nosnippet>85</a>        </span><span class="self">self</span>.trace.append_permutation(<span class="kw-2">&amp;mut </span>state, LINEAR_HASH, RETURN_STATE);
+<a href=#86 id=86 data-nosnippet>86</a>
+<a href=#87 id=87 data-nosnippet>87</a>        (addr, state)
+<a href=#88 id=88 data-nosnippet>88</a>    }
+<a href=#89 id=89 data-nosnippet>89</a>
+<a href=#90 id=90 data-nosnippet>90</a>    <span class="doccomment">/// Computes the hash of the control block by computing hash(h1, h2) and returns the result.
+<a href=#91 id=91 data-nosnippet>91</a>    /// It also records the execution trace of this computation.
+<a href=#92 id=92 data-nosnippet>92</a>    ///
+<a href=#93 id=93 data-nosnippet>93</a>    /// The returned tuple also contains the row address of the execution trace at which the hash
+<a href=#94 id=94 data-nosnippet>94</a>    /// computation started.
+<a href=#95 id=95 data-nosnippet>95</a>    </span><span class="kw">pub fn </span>hash_control_block(
+<a href=#96 id=96 data-nosnippet>96</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#97 id=97 data-nosnippet>97</a>        h1: Digest,
+<a href=#98 id=98 data-nosnippet>98</a>        h2: Digest,
+<a href=#99 id=99 data-nosnippet>99</a>        domain: Felt,
+<a href=#100 id=100 data-nosnippet>100</a>        expected_hash: Digest,
+<a href=#101 id=101 data-nosnippet>101</a>    ) -&gt; (Felt, Digest) {
+<a href=#102 id=102 data-nosnippet>102</a>        <span class="kw">let </span>addr = <span class="self">self</span>.trace.next_row_addr();
+<a href=#103 id=103 data-nosnippet>103</a>        <span class="kw">let </span><span class="kw-2">mut </span>state = init_state_from_words_with_domain(<span class="kw-2">&amp;</span>h1, <span class="kw-2">&amp;</span>h2, domain);
+<a href=#104 id=104 data-nosnippet>104</a>
+<a href=#105 id=105 data-nosnippet>105</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>((start_row, end_row)) = <span class="self">self</span>.get_memoized_trace(expected_hash) {
+<a href=#106 id=106 data-nosnippet>106</a>            <span class="comment">// copy the trace of a block with same hash instead of building it again.
+<a href=#107 id=107 data-nosnippet>107</a>            </span><span class="self">self</span>.trace.copy_trace(<span class="kw-2">&amp;mut </span>state, <span class="kw-2">*</span>start_row..<span class="kw-2">*</span>end_row);
+<a href=#108 id=108 data-nosnippet>108</a>        } <span class="kw">else </span>{
+<a href=#109 id=109 data-nosnippet>109</a>            <span class="comment">// perform the hash.
+<a href=#110 id=110 data-nosnippet>110</a>            </span><span class="self">self</span>.trace.append_permutation(<span class="kw-2">&amp;mut </span>state, LINEAR_HASH, RETURN_HASH);
+<a href=#111 id=111 data-nosnippet>111</a>
+<a href=#112 id=112 data-nosnippet>112</a>            <span class="self">self</span>.insert_to_memoized_trace_map(addr, expected_hash);
+<a href=#113 id=113 data-nosnippet>113</a>        };
+<a href=#114 id=114 data-nosnippet>114</a>
+<a href=#115 id=115 data-nosnippet>115</a>        <span class="kw">let </span>result = get_digest(<span class="kw-2">&amp;</span>state);
+<a href=#116 id=116 data-nosnippet>116</a>
+<a href=#117 id=117 data-nosnippet>117</a>        (addr, result)
+<a href=#118 id=118 data-nosnippet>118</a>    }
+<a href=#119 id=119 data-nosnippet>119</a>
+<a href=#120 id=120 data-nosnippet>120</a>    <span class="doccomment">/// Computes a sequential hash of all operation batches in the list and returns the result. It
+<a href=#121 id=121 data-nosnippet>121</a>    /// also records the execution trace of this computation.
+<a href=#122 id=122 data-nosnippet>122</a>    ///
+<a href=#123 id=123 data-nosnippet>123</a>    /// The returned tuple also contains the row address of the execution trace at which the hash
+<a href=#124 id=124 data-nosnippet>124</a>    /// computation started.
+<a href=#125 id=125 data-nosnippet>125</a>    </span><span class="kw">pub fn </span>hash_basic_block(
+<a href=#126 id=126 data-nosnippet>126</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#127 id=127 data-nosnippet>127</a>        op_batches: <span class="kw-2">&amp;</span>[OpBatch],
+<a href=#128 id=128 data-nosnippet>128</a>        expected_hash: Digest,
+<a href=#129 id=129 data-nosnippet>129</a>    ) -&gt; (Felt, Digest) {
+<a href=#130 id=130 data-nosnippet>130</a>        <span class="kw">const </span>START: Selectors = LINEAR_HASH;
+<a href=#131 id=131 data-nosnippet>131</a>        <span class="kw">const </span>RETURN: Selectors = RETURN_HASH;
+<a href=#132 id=132 data-nosnippet>132</a>        <span class="comment">// absorb selectors are the same as linear hash selectors, but absorb selectors are
+<a href=#133 id=133 data-nosnippet>133</a>        // applied on the last row of a permutation cycle, while linear hash selectors are
+<a href=#134 id=134 data-nosnippet>134</a>        // applied on the first row of a permutation cycle.
+<a href=#135 id=135 data-nosnippet>135</a>        </span><span class="kw">const </span>ABSORB: Selectors = LINEAR_HASH;
+<a href=#136 id=136 data-nosnippet>136</a>        <span class="comment">// to continue linear hash we need retain the 2nd and 3rd selector flags and set the
+<a href=#137 id=137 data-nosnippet>137</a>        // 1st flag to ZERO.
+<a href=#138 id=138 data-nosnippet>138</a>        </span><span class="kw">const </span>CONTINUE: Selectors = [ZERO, LINEAR_HASH[<span class="number">1</span>], LINEAR_HASH[<span class="number">2</span>]];
+<a href=#139 id=139 data-nosnippet>139</a>
+<a href=#140 id=140 data-nosnippet>140</a>        <span class="kw">let </span>addr = <span class="self">self</span>.trace.next_row_addr();
+<a href=#141 id=141 data-nosnippet>141</a>
+<a href=#142 id=142 data-nosnippet>142</a>        <span class="comment">// initialize the state and absorb the first operation batch into it
+<a href=#143 id=143 data-nosnippet>143</a>        </span><span class="kw">let </span><span class="kw-2">mut </span>state = init_state(op_batches[<span class="number">0</span>].groups(), ZERO);
+<a href=#144 id=144 data-nosnippet>144</a>
+<a href=#145 id=145 data-nosnippet>145</a>        <span class="comment">// check if a span block with same hash has been encountered before in which case we can
+<a href=#146 id=146 data-nosnippet>146</a>        // directly copy it's trace.
+<a href=#147 id=147 data-nosnippet>147</a>        </span><span class="kw">let </span>(start_row, end_row, is_memoized) =
+<a href=#148 id=148 data-nosnippet>148</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>((start_row, end_row)) = <span class="self">self</span>.get_memoized_trace(expected_hash) {
+<a href=#149 id=149 data-nosnippet>149</a>                (<span class="kw-2">*</span>start_row, <span class="kw-2">*</span>end_row, <span class="bool-val">true</span>)
+<a href=#150 id=150 data-nosnippet>150</a>            } <span class="kw">else </span>{
+<a href=#151 id=151 data-nosnippet>151</a>                (<span class="number">0</span>, <span class="number">0</span>, <span class="bool-val">false</span>)
+<a href=#152 id=152 data-nosnippet>152</a>            };
+<a href=#153 id=153 data-nosnippet>153</a>
+<a href=#154 id=154 data-nosnippet>154</a>        <span class="kw">let </span>num_batches = op_batches.len();
+<a href=#155 id=155 data-nosnippet>155</a>
+<a href=#156 id=156 data-nosnippet>156</a>        <span class="comment">// if the span block is encountered for the first time and it's trace is not memoized,
+<a href=#157 id=157 data-nosnippet>157</a>        // we need to build the trace from scratch.
+<a href=#158 id=158 data-nosnippet>158</a>        </span><span class="kw">if </span>!is_memoized {
+<a href=#159 id=159 data-nosnippet>159</a>            <span class="kw">if </span>num_batches == <span class="number">1 </span>{
+<a href=#160 id=160 data-nosnippet>160</a>                <span class="comment">// if there is only one batch to hash, we need only one permutation
+<a href=#161 id=161 data-nosnippet>161</a>                </span><span class="self">self</span>.trace.append_permutation(<span class="kw-2">&amp;mut </span>state, START, RETURN);
+<a href=#162 id=162 data-nosnippet>162</a>            } <span class="kw">else </span>{
+<a href=#163 id=163 data-nosnippet>163</a>                <span class="comment">// if there is more than one batch, we need to process the first, the last, and the
+<a href=#164 id=164 data-nosnippet>164</a>                // middle permutations a bit differently. Specifically, selector flags for the
+<a href=#165 id=165 data-nosnippet>165</a>                // permutations need to be set as follows:
+<a href=#166 id=166 data-nosnippet>166</a>                // - first permutation: init linear hash on the first row, and absorb the next
+<a href=#167 id=167 data-nosnippet>167</a>                //   operation batch on the last row.
+<a href=#168 id=168 data-nosnippet>168</a>                // - middle permutations: continue hashing on the first row, and absorb the next
+<a href=#169 id=169 data-nosnippet>169</a>                //   operation batch on the last row.
+<a href=#170 id=170 data-nosnippet>170</a>                // - last permutation: continue hashing on the first row, and return the result on
+<a href=#171 id=171 data-nosnippet>171</a>                //   the last row.
+<a href=#172 id=172 data-nosnippet>172</a>                </span><span class="self">self</span>.trace.append_permutation(<span class="kw-2">&amp;mut </span>state, START, ABSORB);
+<a href=#173 id=173 data-nosnippet>173</a>
+<a href=#174 id=174 data-nosnippet>174</a>                <span class="kw">for </span>batch <span class="kw">in </span>op_batches.iter().take(num_batches - <span class="number">1</span>).skip(<span class="number">1</span>) {
+<a href=#175 id=175 data-nosnippet>175</a>                    absorb_into_state(<span class="kw-2">&amp;mut </span>state, batch.groups());
+<a href=#176 id=176 data-nosnippet>176</a>
+<a href=#177 id=177 data-nosnippet>177</a>                    <span class="self">self</span>.trace.append_permutation(<span class="kw-2">&amp;mut </span>state, CONTINUE, ABSORB);
+<a href=#178 id=178 data-nosnippet>178</a>                }
+<a href=#179 id=179 data-nosnippet>179</a>
+<a href=#180 id=180 data-nosnippet>180</a>                absorb_into_state(<span class="kw-2">&amp;mut </span>state, op_batches[num_batches - <span class="number">1</span>].groups());
+<a href=#181 id=181 data-nosnippet>181</a>
+<a href=#182 id=182 data-nosnippet>182</a>                <span class="self">self</span>.trace.append_permutation(<span class="kw-2">&amp;mut </span>state, CONTINUE, RETURN);
+<a href=#183 id=183 data-nosnippet>183</a>            }
+<a href=#184 id=184 data-nosnippet>184</a>            <span class="self">self</span>.insert_to_memoized_trace_map(addr, expected_hash);
+<a href=#185 id=185 data-nosnippet>185</a>        } <span class="kw">else </span>{
+<a href=#186 id=186 data-nosnippet>186</a>            <span class="self">self</span>.trace.copy_trace(<span class="kw-2">&amp;mut </span>state, start_row..end_row);
+<a href=#187 id=187 data-nosnippet>187</a>        }
+<a href=#188 id=188 data-nosnippet>188</a>
+<a href=#189 id=189 data-nosnippet>189</a>        <span class="kw">let </span>result = get_digest(<span class="kw-2">&amp;</span>state);
+<a href=#190 id=190 data-nosnippet>190</a>
+<a href=#191 id=191 data-nosnippet>191</a>        (addr, result)
+<a href=#192 id=192 data-nosnippet>192</a>    }
+<a href=#193 id=193 data-nosnippet>193</a>
+<a href=#194 id=194 data-nosnippet>194</a>    <span class="doccomment">/// Performs Merkle path verification computation and records its execution trace.
+<a href=#195 id=195 data-nosnippet>195</a>    ///
+<a href=#196 id=196 data-nosnippet>196</a>    /// The computation consists of computing a Merkle root of the specified path for a node with
+<a href=#197 id=197 data-nosnippet>197</a>    /// the specified value, located at the specified index.
+<a href=#198 id=198 data-nosnippet>198</a>    ///
+<a href=#199 id=199 data-nosnippet>199</a>    /// The returned tuple contains the root of the Merkle path and the row address of the
+<a href=#200 id=200 data-nosnippet>200</a>    /// execution trace at which the computation started.
+<a href=#201 id=201 data-nosnippet>201</a>    ///
+<a href=#202 id=202 data-nosnippet>202</a>    /// # Panics
+<a href=#203 id=203 data-nosnippet>203</a>    /// Panics if:
+<a href=#204 id=204 data-nosnippet>204</a>    /// - The provided path does not contain any nodes.
+<a href=#205 id=205 data-nosnippet>205</a>    /// - The provided index is out of range for the specified path.
+<a href=#206 id=206 data-nosnippet>206</a>    </span><span class="kw">pub fn </span>build_merkle_root(
+<a href=#207 id=207 data-nosnippet>207</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#208 id=208 data-nosnippet>208</a>        value: Digest,
+<a href=#209 id=209 data-nosnippet>209</a>        path: <span class="kw-2">&amp;</span>MerklePath,
+<a href=#210 id=210 data-nosnippet>210</a>        index: Felt,
+<a href=#211 id=211 data-nosnippet>211</a>    ) -&gt; (Felt, Digest) {
+<a href=#212 id=212 data-nosnippet>212</a>        <span class="kw">let </span>addr = <span class="self">self</span>.trace.next_row_addr();
+<a href=#213 id=213 data-nosnippet>213</a>
+<a href=#214 id=214 data-nosnippet>214</a>        <span class="kw">let </span>root = <span class="self">self</span>.verify_merkle_path(
+<a href=#215 id=215 data-nosnippet>215</a>            value,
+<a href=#216 id=216 data-nosnippet>216</a>            path,
+<a href=#217 id=217 data-nosnippet>217</a>            index.as_canonical_u64(),
+<a href=#218 id=218 data-nosnippet>218</a>            MerklePathContext::MpVerify,
+<a href=#219 id=219 data-nosnippet>219</a>        );
+<a href=#220 id=220 data-nosnippet>220</a>
+<a href=#221 id=221 data-nosnippet>221</a>        (addr, root)
+<a href=#222 id=222 data-nosnippet>222</a>    }
+<a href=#223 id=223 data-nosnippet>223</a>
+<a href=#224 id=224 data-nosnippet>224</a>    <span class="doccomment">/// Performs Merkle root update computation and records its execution trace.
+<a href=#225 id=225 data-nosnippet>225</a>    ///
+<a href=#226 id=226 data-nosnippet>226</a>    /// The computation consists of two Merkle path verifications, one for the old value of the
+<a href=#227 id=227 data-nosnippet>227</a>    /// node (value before the update), and another for the new value (value after the update).
+<a href=#228 id=228 data-nosnippet>228</a>    ///
+<a href=#229 id=229 data-nosnippet>229</a>    /// # Panics
+<a href=#230 id=230 data-nosnippet>230</a>    /// Panics if:
+<a href=#231 id=231 data-nosnippet>231</a>    /// - The provided path does not contain any nodes.
+<a href=#232 id=232 data-nosnippet>232</a>    /// - The provided index is out of range for the specified path.
+<a href=#233 id=233 data-nosnippet>233</a>    </span><span class="kw">pub fn </span>update_merkle_root(
+<a href=#234 id=234 data-nosnippet>234</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#235 id=235 data-nosnippet>235</a>        old_value: Digest,
+<a href=#236 id=236 data-nosnippet>236</a>        new_value: Digest,
+<a href=#237 id=237 data-nosnippet>237</a>        path: <span class="kw-2">&amp;</span>MerklePath,
+<a href=#238 id=238 data-nosnippet>238</a>        index: Felt,
+<a href=#239 id=239 data-nosnippet>239</a>    ) -&gt; MerkleRootUpdate {
+<a href=#240 id=240 data-nosnippet>240</a>        <span class="kw">let </span>address = <span class="self">self</span>.trace.next_row_addr();
+<a href=#241 id=241 data-nosnippet>241</a>        <span class="kw">let </span>index = index.as_canonical_u64();
+<a href=#242 id=242 data-nosnippet>242</a>
+<a href=#243 id=243 data-nosnippet>243</a>        <span class="kw">let </span>old_root =
+<a href=#244 id=244 data-nosnippet>244</a>            <span class="self">self</span>.verify_merkle_path(old_value, path, index, MerklePathContext::MrUpdateOld);
+<a href=#245 id=245 data-nosnippet>245</a>        <span class="kw">let </span>new_root =
+<a href=#246 id=246 data-nosnippet>246</a>            <span class="self">self</span>.verify_merkle_path(new_value, path, index, MerklePathContext::MrUpdateNew);
+<a href=#247 id=247 data-nosnippet>247</a>
+<a href=#248 id=248 data-nosnippet>248</a>        MerkleRootUpdate { address, old_root, new_root }
+<a href=#249 id=249 data-nosnippet>249</a>    }
+<a href=#250 id=250 data-nosnippet>250</a>
+<a href=#251 id=251 data-nosnippet>251</a>    <span class="comment">// TRACE GENERATION
+<a href=#252 id=252 data-nosnippet>252</a>    // --------------------------------------------------------------------------------------------
+<a href=#253 id=253 data-nosnippet>253</a>
+<a href=#254 id=254 data-nosnippet>254</a>    </span><span class="doccomment">/// Fills the provided trace fragment with trace data from this hasher trace instance. This
+<a href=#255 id=255 data-nosnippet>255</a>    /// also returns the trace builder for hasher-related auxiliary trace columns.
+<a href=#256 id=256 data-nosnippet>256</a>    </span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>fill_trace(<span class="self">self</span>, trace: <span class="kw-2">&amp;mut </span>TraceFragment) {
+<a href=#257 id=257 data-nosnippet>257</a>        <span class="self">self</span>.trace.fill_trace(trace)
+<a href=#258 id=258 data-nosnippet>258</a>    }
+<a href=#259 id=259 data-nosnippet>259</a>
+<a href=#260 id=260 data-nosnippet>260</a>    <span class="comment">// HELPER METHODS
+<a href=#261 id=261 data-nosnippet>261</a>    // --------------------------------------------------------------------------------------------
+<a href=#262 id=262 data-nosnippet>262</a>
+<a href=#263 id=263 data-nosnippet>263</a>    </span><span class="doccomment">/// Computes a root of the provided Merkle path in the specified context. The path is assumed
+<a href=#264 id=264 data-nosnippet>264</a>    /// to be for a node with the specified value at the specified index.
+<a href=#265 id=265 data-nosnippet>265</a>    ///
+<a href=#266 id=266 data-nosnippet>266</a>    /// This also records the execution trace of the Merkle path computation.
+<a href=#267 id=267 data-nosnippet>267</a>    ///
+<a href=#268 id=268 data-nosnippet>268</a>    /// # Panics
+<a href=#269 id=269 data-nosnippet>269</a>    /// Panics if:
+<a href=#270 id=270 data-nosnippet>270</a>    /// - The provided path does not contain any nodes.
+<a href=#271 id=271 data-nosnippet>271</a>    /// - The provided index is out of range for the specified path.
+<a href=#272 id=272 data-nosnippet>272</a>    </span><span class="kw">fn </span>verify_merkle_path(
+<a href=#273 id=273 data-nosnippet>273</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#274 id=274 data-nosnippet>274</a>        value: Digest,
+<a href=#275 id=275 data-nosnippet>275</a>        path: <span class="kw-2">&amp;</span>MerklePath,
+<a href=#276 id=276 data-nosnippet>276</a>        <span class="kw-2">mut </span>index: u64,
+<a href=#277 id=277 data-nosnippet>277</a>        context: MerklePathContext,
+<a href=#278 id=278 data-nosnippet>278</a>    ) -&gt; Digest {
+<a href=#279 id=279 data-nosnippet>279</a>        <span class="macro">assert!</span>(!path.is_empty(), <span class="string">"path is empty"</span>);
+<a href=#280 id=280 data-nosnippet>280</a>        <span class="macro">assert!</span>(
+<a href=#281 id=281 data-nosnippet>281</a>            index.checked_shr(path.len() <span class="kw">as </span>u32).unwrap_or(<span class="number">0</span>) == <span class="number">0</span>,
+<a href=#282 id=282 data-nosnippet>282</a>            <span class="string">"invalid index for the path"
+<a href=#283 id=283 data-nosnippet>283</a>        </span>);
+<a href=#284 id=284 data-nosnippet>284</a>        <span class="kw">let </span><span class="kw-2">mut </span>root = value;
+<a href=#285 id=285 data-nosnippet>285</a>
+<a href=#286 id=286 data-nosnippet>286</a>        <span class="comment">// determine selectors for the specified context
+<a href=#287 id=287 data-nosnippet>287</a>        </span><span class="kw">let </span>main_selectors = context.main_selectors();
+<a href=#288 id=288 data-nosnippet>288</a>        <span class="kw">let </span>part_selectors = context.part_selectors();
+<a href=#289 id=289 data-nosnippet>289</a>
+<a href=#290 id=290 data-nosnippet>290</a>        <span class="kw">if </span>path.len() == <span class="number">1 </span>{
+<a href=#291 id=291 data-nosnippet>291</a>            <span class="comment">// handle path of length 1 separately because pattern for init and final selectors
+<a href=#292 id=292 data-nosnippet>292</a>            // is different from other cases
+<a href=#293 id=293 data-nosnippet>293</a>            </span><span class="self">self</span>.verify_mp_leg(root, path[<span class="number">0</span>], <span class="kw-2">&amp;mut </span>index, main_selectors, RETURN_HASH)
+<a href=#294 id=294 data-nosnippet>294</a>        } <span class="kw">else </span>{
+<a href=#295 id=295 data-nosnippet>295</a>            <span class="comment">// process the first node of the path; for this node, init and final selectors are
+<a href=#296 id=296 data-nosnippet>296</a>            // the same
+<a href=#297 id=297 data-nosnippet>297</a>            </span><span class="kw">let </span>sibling = path[<span class="number">0</span>];
+<a href=#298 id=298 data-nosnippet>298</a>            root = <span class="self">self</span>.verify_mp_leg(root, sibling, <span class="kw-2">&amp;mut </span>index, main_selectors, main_selectors);
+<a href=#299 id=299 data-nosnippet>299</a>
+<a href=#300 id=300 data-nosnippet>300</a>            <span class="comment">// process all other nodes, except for the last one
+<a href=#301 id=301 data-nosnippet>301</a>            </span><span class="kw">for </span><span class="kw-2">&amp;</span>sibling <span class="kw">in </span><span class="kw-2">&amp;</span>path[<span class="number">1</span>..path.len() - <span class="number">1</span>] {
+<a href=#302 id=302 data-nosnippet>302</a>                root =
+<a href=#303 id=303 data-nosnippet>303</a>                    <span class="self">self</span>.verify_mp_leg(root, sibling, <span class="kw-2">&amp;mut </span>index, part_selectors, main_selectors);
+<a href=#304 id=304 data-nosnippet>304</a>            }
+<a href=#305 id=305 data-nosnippet>305</a>
+<a href=#306 id=306 data-nosnippet>306</a>            <span class="comment">// process the last node
+<a href=#307 id=307 data-nosnippet>307</a>            </span><span class="kw">let </span>sibling = path[path.len() - <span class="number">1</span>];
+<a href=#308 id=308 data-nosnippet>308</a>            <span class="self">self</span>.verify_mp_leg(root, sibling, <span class="kw-2">&amp;mut </span>index, part_selectors, RETURN_HASH)
+<a href=#309 id=309 data-nosnippet>309</a>        }
+<a href=#310 id=310 data-nosnippet>310</a>    }
+<a href=#311 id=311 data-nosnippet>311</a>
+<a href=#312 id=312 data-nosnippet>312</a>    <span class="doccomment">/// Verifies a single leg of a Merkle path.
+<a href=#313 id=313 data-nosnippet>313</a>    ///
+<a href=#314 id=314 data-nosnippet>314</a>    /// This function does the following:
+<a href=#315 id=315 data-nosnippet>315</a>    /// - Builds the initial hasher state based on the least significant bit of the index.
+<a href=#316 id=316 data-nosnippet>316</a>    /// - Applies a permutation to this state and records the resulting trace.
+<a href=#317 id=317 data-nosnippet>317</a>    /// - Returns the result of the permutation and updates the index by removing its least
+<a href=#318 id=318 data-nosnippet>318</a>    ///   significant bit.
+<a href=#319 id=319 data-nosnippet>319</a>    </span><span class="kw">fn </span>verify_mp_leg(
+<a href=#320 id=320 data-nosnippet>320</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#321 id=321 data-nosnippet>321</a>        root: Digest,
+<a href=#322 id=322 data-nosnippet>322</a>        sibling: Digest,
+<a href=#323 id=323 data-nosnippet>323</a>        index: <span class="kw-2">&amp;mut </span>u64,
+<a href=#324 id=324 data-nosnippet>324</a>        init_selectors: Selectors,
+<a href=#325 id=325 data-nosnippet>325</a>        final_selectors: Selectors,
+<a href=#326 id=326 data-nosnippet>326</a>    ) -&gt; Digest {
+<a href=#327 id=327 data-nosnippet>327</a>        <span class="comment">// build the hasher state based on the value of the least significant bit of the index
+<a href=#328 id=328 data-nosnippet>328</a>        </span><span class="kw">let </span>index_bit = <span class="kw-2">*</span>index &amp; <span class="number">1</span>;
+<a href=#329 id=329 data-nosnippet>329</a>        <span class="kw">let </span><span class="kw-2">mut </span>state = build_merge_state(<span class="kw-2">&amp;</span>root, <span class="kw-2">&amp;</span>sibling, index_bit);
+<a href=#330 id=330 data-nosnippet>330</a>
+<a href=#331 id=331 data-nosnippet>331</a>        <span class="comment">// determine values for the node index column for this permutation. if the first selector
+<a href=#332 id=332 data-nosnippet>332</a>        // of init_selectors is not ZERO (i.e., we are processing the first leg of the Merkle
+<a href=#333 id=333 data-nosnippet>333</a>        // path), the index for the first row is different from the index for the other rows;
+<a href=#334 id=334 data-nosnippet>334</a>        // otherwise, indexes are the same.
+<a href=#335 id=335 data-nosnippet>335</a>        </span><span class="kw">let </span>(init_index, rest_index) = <span class="kw">if </span>init_selectors[<span class="number">0</span>] == ZERO {
+<a href=#336 id=336 data-nosnippet>336</a>            (Felt::new(<span class="kw-2">*</span>index &gt;&gt; <span class="number">1</span>), Felt::new(<span class="kw-2">*</span>index &gt;&gt; <span class="number">1</span>))
+<a href=#337 id=337 data-nosnippet>337</a>        } <span class="kw">else </span>{
+<a href=#338 id=338 data-nosnippet>338</a>            (Felt::new(<span class="kw-2">*</span>index), Felt::new(<span class="kw-2">*</span>index &gt;&gt; <span class="number">1</span>))
+<a href=#339 id=339 data-nosnippet>339</a>        };
+<a href=#340 id=340 data-nosnippet>340</a>
+<a href=#341 id=341 data-nosnippet>341</a>        <span class="comment">// apply the permutation to the state and record its trace
+<a href=#342 id=342 data-nosnippet>342</a>        </span><span class="self">self</span>.trace.append_permutation_with_index(
+<a href=#343 id=343 data-nosnippet>343</a>            <span class="kw-2">&amp;mut </span>state,
+<a href=#344 id=344 data-nosnippet>344</a>            init_selectors,
+<a href=#345 id=345 data-nosnippet>345</a>            final_selectors,
+<a href=#346 id=346 data-nosnippet>346</a>            init_index,
+<a href=#347 id=347 data-nosnippet>347</a>            rest_index,
+<a href=#348 id=348 data-nosnippet>348</a>        );
+<a href=#349 id=349 data-nosnippet>349</a>
+<a href=#350 id=350 data-nosnippet>350</a>        <span class="comment">// remove the least significant bit from the index and return hash result
+<a href=#351 id=351 data-nosnippet>351</a>        </span><span class="kw-2">*</span>index &gt;&gt;= <span class="number">1</span>;
+<a href=#352 id=352 data-nosnippet>352</a>
+<a href=#353 id=353 data-nosnippet>353</a>        get_digest(<span class="kw-2">&amp;</span>state)
+<a href=#354 id=354 data-nosnippet>354</a>    }
+<a href=#355 id=355 data-nosnippet>355</a>
+<a href=#356 id=356 data-nosnippet>356</a>    <span class="doccomment">/// Checks if a trace for a program block already exists and returns the start and end rows
+<a href=#357 id=357 data-nosnippet>357</a>    /// of the memoized trace. Returns None otherwise.
+<a href=#358 id=358 data-nosnippet>358</a>    </span><span class="kw">fn </span>get_memoized_trace(<span class="kw-2">&amp;</span><span class="self">self</span>, hash: Digest) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>(usize, usize)&gt; {
+<a href=#359 id=359 data-nosnippet>359</a>        <span class="kw">let </span>key: [u8; <span class="number">32</span>] = hash.into();
+<a href=#360 id=360 data-nosnippet>360</a>        <span class="self">self</span>.memoized_trace_map.get(<span class="kw-2">&amp;</span>key)
+<a href=#361 id=361 data-nosnippet>361</a>    }
+<a href=#362 id=362 data-nosnippet>362</a>
+<a href=#363 id=363 data-nosnippet>363</a>    <span class="doccomment">/// Inserts start and end rows of trace for a program block to the memoized_trace_map.
+<a href=#364 id=364 data-nosnippet>364</a>    </span><span class="kw">fn </span>insert_to_memoized_trace_map(<span class="kw-2">&amp;mut </span><span class="self">self</span>, addr: Felt, hash: Digest) {
+<a href=#365 id=365 data-nosnippet>365</a>        <span class="kw">let </span>key: [u8; <span class="number">32</span>] = hash.into();
+<a href=#366 id=366 data-nosnippet>366</a>        <span class="kw">let </span>start_row = addr.as_canonical_u64() <span class="kw">as </span>usize - <span class="number">1</span>;
+<a href=#367 id=367 data-nosnippet>367</a>        <span class="kw">let </span>end_row = <span class="self">self</span>.trace.next_row_addr().as_canonical_u64() <span class="kw">as </span>usize - <span class="number">1</span>;
+<a href=#368 id=368 data-nosnippet>368</a>        <span class="self">self</span>.memoized_trace_map.insert(key, (start_row, end_row));
+<a href=#369 id=369 data-nosnippet>369</a>    }
+<a href=#370 id=370 data-nosnippet>370</a>}
+<a href=#371 id=371 data-nosnippet>371</a>
+<a href=#372 id=372 data-nosnippet>372</a><span class="comment">// MERKLE PATH CONTEXT
+<a href=#373 id=373 data-nosnippet>373</a>// ================================================================================================
+<a href=#374 id=374 data-nosnippet>374</a>
+<a href=#375 id=375 data-nosnippet>375</a></span><span class="doccomment">/// Specifies the context of a Merkle path computation.
+<a href=#376 id=376 data-nosnippet>376</a></span><span class="attr">#[derive(Debug, Clone, Copy)]
+<a href=#377 id=377 data-nosnippet>377</a></span><span class="kw">enum </span>MerklePathContext {
+<a href=#378 id=378 data-nosnippet>378</a>    <span class="doccomment">/// The computation is for verifying a Merkle path (MPVERIFY).
+<a href=#379 id=379 data-nosnippet>379</a>    </span>MpVerify,
+<a href=#380 id=380 data-nosnippet>380</a>    <span class="doccomment">/// The computation is for verifying a Merkle path to an old node during Merkle root update
+<a href=#381 id=381 data-nosnippet>381</a>    /// procedure (MRUPDATE).
+<a href=#382 id=382 data-nosnippet>382</a>    </span>MrUpdateOld,
+<a href=#383 id=383 data-nosnippet>383</a>    <span class="doccomment">/// The computation is for verifying a Merkle path to a new node during Merkle root update
+<a href=#384 id=384 data-nosnippet>384</a>    /// procedure (MRUPDATE).
+<a href=#385 id=385 data-nosnippet>385</a>    </span>MrUpdateNew,
+<a href=#386 id=386 data-nosnippet>386</a>}
+<a href=#387 id=387 data-nosnippet>387</a>
+<a href=#388 id=388 data-nosnippet>388</a><span class="kw">impl </span>MerklePathContext {
+<a href=#389 id=389 data-nosnippet>389</a>    <span class="doccomment">/// Returns selector values for this context.
+<a href=#390 id=390 data-nosnippet>390</a>    </span><span class="kw">pub fn </span>main_selectors(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Selectors {
+<a href=#391 id=391 data-nosnippet>391</a>        <span class="kw">match </span><span class="self">self </span>{
+<a href=#392 id=392 data-nosnippet>392</a>            <span class="self">Self</span>::MpVerify =&gt; MP_VERIFY,
+<a href=#393 id=393 data-nosnippet>393</a>            <span class="self">Self</span>::MrUpdateOld =&gt; MR_UPDATE_OLD,
+<a href=#394 id=394 data-nosnippet>394</a>            <span class="self">Self</span>::MrUpdateNew =&gt; MR_UPDATE_NEW,
+<a href=#395 id=395 data-nosnippet>395</a>        }
+<a href=#396 id=396 data-nosnippet>396</a>    }
+<a href=#397 id=397 data-nosnippet>397</a>
+<a href=#398 id=398 data-nosnippet>398</a>    <span class="doccomment">/// Returns partial selector values for this context. Partial selector values are derived
+<a href=#399 id=399 data-nosnippet>399</a>    /// from selector values by replacing the first selector with ZERO.
+<a href=#400 id=400 data-nosnippet>400</a>    </span><span class="kw">pub fn </span>part_selectors(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Selectors {
+<a href=#401 id=401 data-nosnippet>401</a>        <span class="kw">let </span>selectors = <span class="self">self</span>.main_selectors();
+<a href=#402 id=402 data-nosnippet>402</a>        [ZERO, selectors[<span class="number">1</span>], selectors[<span class="number">2</span>]]
+<a href=#403 id=403 data-nosnippet>403</a>    }
+<a href=#404 id=404 data-nosnippet>404</a>}
+<a href=#405 id=405 data-nosnippet>405</a>
+<a href=#406 id=406 data-nosnippet>406</a><span class="comment">// HELPER FUNCTIONS
+<a href=#407 id=407 data-nosnippet>407</a>// ================================================================================================
+<a href=#408 id=408 data-nosnippet>408</a>
+<a href=#409 id=409 data-nosnippet>409</a></span><span class="doccomment">/// Combines two words into a hasher state for Merkle path computation.
+<a href=#410 id=410 data-nosnippet>410</a>///
+<a href=#411 id=411 data-nosnippet>411</a>/// If index_bit = 0, the words are combined in the order (a, b), if index_bit = 1, the words are
+<a href=#412 id=412 data-nosnippet>412</a>/// combined in the order (b, a), otherwise, the function panics.
+<a href=#413 id=413 data-nosnippet>413</a></span><span class="attr">#[inline(always)]
+<a href=#414 id=414 data-nosnippet>414</a></span><span class="kw">fn </span>build_merge_state(a: <span class="kw-2">&amp;</span>Digest, b: <span class="kw-2">&amp;</span>Digest, index_bit: u64) -&gt; HasherState {
+<a href=#415 id=415 data-nosnippet>415</a>    <span class="kw">match </span>index_bit {
+<a href=#416 id=416 data-nosnippet>416</a>        <span class="number">0 </span>=&gt; init_state_from_words(a, b),
+<a href=#417 id=417 data-nosnippet>417</a>        <span class="number">1 </span>=&gt; init_state_from_words(b, a),
+<a href=#418 id=418 data-nosnippet>418</a>        <span class="kw">_ </span>=&gt; <span class="macro">panic!</span>(<span class="string">"index bit is not a binary value"</span>),
+<a href=#419 id=419 data-nosnippet>419</a>    }
+<a href=#420 id=420 data-nosnippet>420</a>}
+<a href=#421 id=421 data-nosnippet>421</a>
+<a href=#422 id=422 data-nosnippet>422</a><span class="comment">// TODO: Move these to another file.
+<a href=#423 id=423 data-nosnippet>423</a>
+<a href=#424 id=424 data-nosnippet>424</a>// HASHER STATE MUTATORS
+<a href=#425 id=425 data-nosnippet>425</a>// ================================================================================================
+<a href=#426 id=426 data-nosnippet>426</a>
+<a href=#427 id=427 data-nosnippet>427</a></span><span class="doccomment">/// Initializes hasher state with the first 8 elements to be absorbed. In accordance with the
+<a href=#428 id=428 data-nosnippet>428</a>/// Poseidon2 padding rule, the first capacity element is set with the provided padding flag, which
+<a href=#429 id=429 data-nosnippet>429</a>/// is assumed to be ZERO or ONE, depending on whether the number of elements to be absorbed is a
+<a href=#430 id=430 data-nosnippet>430</a>/// multiple of the rate or not. The remaining elements in the capacity portion of the state are set
+<a href=#431 id=431 data-nosnippet>431</a>/// to ZERO.
+<a href=#432 id=432 data-nosnippet>432</a>///
+<a href=#433 id=433 data-nosnippet>433</a>/// State layout: [R1, R2, CAP] where:
+<a href=#434 id=434 data-nosnippet>434</a>/// - state[0..8] = init_values (rate)
+<a href=#435 id=435 data-nosnippet>435</a>/// - state[8..12] = [padding_flag, ZERO, ZERO, ZERO] (capacity)
+<a href=#436 id=436 data-nosnippet>436</a></span><span class="attr">#[inline(always)]
+<a href=#437 id=437 data-nosnippet>437</a></span><span class="kw">pub fn </span>init_state(init_values: <span class="kw-2">&amp;</span>[Felt; RATE_LEN], padding_flag: Felt) -&gt; [Felt; STATE_WIDTH] {
+<a href=#438 id=438 data-nosnippet>438</a>    <span class="macro">debug_assert!</span>(
+<a href=#439 id=439 data-nosnippet>439</a>        padding_flag == ZERO || padding_flag == ONE,
+<a href=#440 id=440 data-nosnippet>440</a>        <span class="string">"first capacity element must be 0 or 1"
+<a href=#441 id=441 data-nosnippet>441</a>    </span>);
+<a href=#442 id=442 data-nosnippet>442</a>    [
+<a href=#443 id=443 data-nosnippet>443</a>        init_values[<span class="number">0</span>],
+<a href=#444 id=444 data-nosnippet>444</a>        init_values[<span class="number">1</span>],
+<a href=#445 id=445 data-nosnippet>445</a>        init_values[<span class="number">2</span>],
+<a href=#446 id=446 data-nosnippet>446</a>        init_values[<span class="number">3</span>],
+<a href=#447 id=447 data-nosnippet>447</a>        init_values[<span class="number">4</span>],
+<a href=#448 id=448 data-nosnippet>448</a>        init_values[<span class="number">5</span>],
+<a href=#449 id=449 data-nosnippet>449</a>        init_values[<span class="number">6</span>],
+<a href=#450 id=450 data-nosnippet>450</a>        init_values[<span class="number">7</span>],
+<a href=#451 id=451 data-nosnippet>451</a>        padding_flag,
+<a href=#452 id=452 data-nosnippet>452</a>        ZERO,
+<a href=#453 id=453 data-nosnippet>453</a>        ZERO,
+<a href=#454 id=454 data-nosnippet>454</a>        ZERO,
+<a href=#455 id=455 data-nosnippet>455</a>    ]
+<a href=#456 id=456 data-nosnippet>456</a>}
+<a href=#457 id=457 data-nosnippet>457</a>
+<a href=#458 id=458 data-nosnippet>458</a><span class="doccomment">/// Initializes hasher state with the elements from the provided words. Because the length of the
+<a href=#459 id=459 data-nosnippet>459</a>/// input is a multiple of the rate, all capacity elements are initialized to zero, as specified by
+<a href=#460 id=460 data-nosnippet>460</a>/// the Poseidon2 padding rule.
+<a href=#461 id=461 data-nosnippet>461</a>///
+<a href=#462 id=462 data-nosnippet>462</a>/// State layout: [RATE0, RATE1, CAP] where:
+<a href=#463 id=463 data-nosnippet>463</a>/// - state[0..4] = w1 (first rate word, also digest location)
+<a href=#464 id=464 data-nosnippet>464</a>/// - state[4..8] = w2 (second rate word)
+<a href=#465 id=465 data-nosnippet>465</a>/// - state[8..12] = capacity
+<a href=#466 id=466 data-nosnippet>466</a></span><span class="attr">#[inline(always)]
+<a href=#467 id=467 data-nosnippet>467</a></span><span class="kw">pub fn </span>init_state_from_words(w1: <span class="kw-2">&amp;</span>Digest, w2: <span class="kw-2">&amp;</span>Digest) -&gt; [Felt; STATE_WIDTH] {
+<a href=#468 id=468 data-nosnippet>468</a>    init_state_from_words_with_domain(w1, w2, ZERO)
+<a href=#469 id=469 data-nosnippet>469</a>}
+<a href=#470 id=470 data-nosnippet>470</a>
+<a href=#471 id=471 data-nosnippet>471</a><span class="doccomment">/// Initializes hasher state with elements from the provided words. Sets the second element of the
+<a href=#472 id=472 data-nosnippet>472</a>/// capacity register to the provided domain. All other elements of the capacity register are set
+<a href=#473 id=473 data-nosnippet>473</a>/// to 0.
+<a href=#474 id=474 data-nosnippet>474</a>///
+<a href=#475 id=475 data-nosnippet>475</a>/// State layout: [RATE0, RATE1, CAP] where:
+<a href=#476 id=476 data-nosnippet>476</a>/// - state[0..4] = w1 (first rate word, also digest location)
+<a href=#477 id=477 data-nosnippet>477</a>/// - state[4..8] = w2 (second rate word)
+<a href=#478 id=478 data-nosnippet>478</a>/// - state[8..12] = [ZERO, domain, ZERO, ZERO] (capacity)
+<a href=#479 id=479 data-nosnippet>479</a></span><span class="attr">#[inline(always)]
+<a href=#480 id=480 data-nosnippet>480</a></span><span class="kw">pub fn </span>init_state_from_words_with_domain(
+<a href=#481 id=481 data-nosnippet>481</a>    w1: <span class="kw-2">&amp;</span>Digest,
+<a href=#482 id=482 data-nosnippet>482</a>    w2: <span class="kw-2">&amp;</span>Digest,
+<a href=#483 id=483 data-nosnippet>483</a>    domain: Felt,
+<a href=#484 id=484 data-nosnippet>484</a>) -&gt; [Felt; STATE_WIDTH] {
+<a href=#485 id=485 data-nosnippet>485</a>    [w1[<span class="number">0</span>], w1[<span class="number">1</span>], w1[<span class="number">2</span>], w1[<span class="number">3</span>], w2[<span class="number">0</span>], w2[<span class="number">1</span>], w2[<span class="number">2</span>], w2[<span class="number">3</span>], ZERO, domain, ZERO, ZERO]
+<a href=#486 id=486 data-nosnippet>486</a>}
+<a href=#487 id=487 data-nosnippet>487</a>
+<a href=#488 id=488 data-nosnippet>488</a><span class="doccomment">/// Absorbs the specified values into the provided state by overwriting the corresponding elements
+<a href=#489 id=489 data-nosnippet>489</a>/// in the rate portion of the state.
+<a href=#490 id=490 data-nosnippet>490</a>///
+<a href=#491 id=491 data-nosnippet>491</a>/// State layout: rate is at state[0..8]
+<a href=#492 id=492 data-nosnippet>492</a></span><span class="attr">#[inline(always)]
+<a href=#493 id=493 data-nosnippet>493</a></span><span class="kw">pub fn </span>absorb_into_state(state: <span class="kw-2">&amp;mut </span>[Felt; STATE_WIDTH], values: <span class="kw-2">&amp;</span>[Felt; RATE_LEN]) {
+<a href=#494 id=494 data-nosnippet>494</a>    state[<span class="number">0</span>] = values[<span class="number">0</span>];
+<a href=#495 id=495 data-nosnippet>495</a>    state[<span class="number">1</span>] = values[<span class="number">1</span>];
+<a href=#496 id=496 data-nosnippet>496</a>    state[<span class="number">2</span>] = values[<span class="number">2</span>];
+<a href=#497 id=497 data-nosnippet>497</a>    state[<span class="number">3</span>] = values[<span class="number">3</span>];
+<a href=#498 id=498 data-nosnippet>498</a>    state[<span class="number">4</span>] = values[<span class="number">4</span>];
+<a href=#499 id=499 data-nosnippet>499</a>    state[<span class="number">5</span>] = values[<span class="number">5</span>];
+<a href=#500 id=500 data-nosnippet>500</a>    state[<span class="number">6</span>] = values[<span class="number">6</span>];
+<a href=#501 id=501 data-nosnippet>501</a>    state[<span class="number">7</span>] = values[<span class="number">7</span>];
+<a href=#502 id=502 data-nosnippet>502</a>}
+<a href=#503 id=503 data-nosnippet>503</a>
+<a href=#504 id=504 data-nosnippet>504</a><span class="doccomment">/// Returns elements representing the digest portion of the provided hasher's state.
+<a href=#505 id=505 data-nosnippet>505</a></span><span class="kw">pub fn </span>get_digest(state: <span class="kw-2">&amp;</span>[Felt; STATE_WIDTH]) -&gt; Digest {
+<a href=#506 id=506 data-nosnippet>506</a>    state[DIGEST_RANGE].try_into().expect(<span class="string">"failed to get digest from hasher state"</span>)
+<a href=#507 id=507 data-nosnippet>507</a>}
+</code></pre></div></section></main></body></html>

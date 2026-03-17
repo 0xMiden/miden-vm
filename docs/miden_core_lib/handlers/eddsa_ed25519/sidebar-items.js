@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["EDDSA25519_VERIFY_EVENT_NAME"],"struct":["EddsaPrecompile","EddsaRequest"]};

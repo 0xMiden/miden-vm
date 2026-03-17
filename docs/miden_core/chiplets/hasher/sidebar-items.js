@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["NUM_ROUNDS","RATE_LEN","STATE_WIDTH"],"fn":["apply_permutation","apply_round","hash_elements","merge","merge_in_domain"],"struct":["Hasher"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["AdviceError","AdviceMutation"],"struct":["AdviceInputs","AdviceMap","AdviceProvider","AdviceStackBuilder"]};

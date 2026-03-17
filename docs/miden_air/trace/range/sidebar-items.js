@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["B_RANGE_COL_IDX","M_COL_IDX","V_COL_IDX"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["bare_ident_any","bare_ident_any_random_length","builtin_type_any","const_ident_any","const_ident_any_random_length","ident_any","ident_any_random_length"]};

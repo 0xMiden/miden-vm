@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Document"],"fn":["concat","const_text","display","flatten","indent","nl","pretty_print_csv","split","text"],"macro":["pretty_via_display","pretty_via_to_string"],"trait":["PrettyPrint"]};

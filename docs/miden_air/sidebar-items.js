@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["NUM_PUBLIC_VALUES"],"enum":["DeserializationError"],"mod":["config","debug","trace"],"struct":["AirWitness","Felt","ProcessorAir","PublicInputs"],"trait":["AirBuilder","AuxBuilder","BaseAir","ByteReader","ByteWriter","Deserializable","ExtensionBuilder","LiftedAir","LiftedAirBuilder","PermutationAirBuilder","Serializable","ToElements"]};

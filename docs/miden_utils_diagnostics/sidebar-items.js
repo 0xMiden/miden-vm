@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"derive":["Diagnostic"],"enum":["Severity"],"macro":["diagnostic","report"],"mod":["reporting"],"struct":["Label","LabeledSpan","NamedSource","RelatedError","RelatedLabel","Report"],"trait":["Diagnostic","IntoDiagnostic","SourceCode","WrapErr"],"type":["Result"]};

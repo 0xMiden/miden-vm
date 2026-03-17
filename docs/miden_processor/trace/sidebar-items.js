@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CORE_TRACE_WIDTH"],"fn":["build_trace","build_trace_with_max_len"],"mod":["chiplets","execution_tracer"],"struct":["AuxTraceBuilders","ChipletsLengths","ExecutionTrace","RowIndex","TraceLenSummary"]};

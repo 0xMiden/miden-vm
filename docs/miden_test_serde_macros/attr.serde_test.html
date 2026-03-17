@@ -1,0 +1,61 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="This macro is used to generate round-trip serialization tests."><title>serde_test in miden_test_serde_macros - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="miden_test_serde_macros" data-themes="" data-resource-suffix="" data-rustdoc-version="1.96.0-nightly (3645249d7 2026-03-16)" data-channel="nightly" data-search-js="search-63369b7b.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="sidebar-items.js"></script><script defer src="../static.files/main-5013f961.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc attr"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">serde_test</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../miden_test_serde_macros/index.html">miden_<wbr>test_<wbr>serde_<wbr>macros</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">serde_<wbr>test</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#configuration-attributes" title="Configuration Attributes">Configuration Attributes</a><ul><li><a href="#usage-examples" title="Usage Examples">Usage Examples</a></li></ul></li><li><a href="#generated-test-names" title="Generated Test Names">Generated Test Names</a></li></ul></section><div id="rustdoc-modnav"><h2 class="in-crate"><a href="index.html">In crate miden_<wbr>test_<wbr>serde_<wbr>macros</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="index.html">miden_test_serde_macros</a></div><h1>Attribute Macro <span class="attr">serde_<wbr>test</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/miden_test_serde_macros/lib.rs.html#95-205">Source</a> </span></div><pre class="rust item-decl"><code>#[serde_test]</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>This macro is used to generate round-trip serialization tests.</p>
+<p>By appending <code>serde_test</code> to a struct or enum definition, you automatically derive
+serialization tests that employ Serde for round-trip testing. The procedure in the generated
+tests is:</p>
+<ol>
+<li>Instantiate the type being tested</li>
+<li>Serialize the instance, ensuring the operation’s success</li>
+<li>Deserialize the serialized data, comparing the resulting instance with the original one</li>
+</ol>
+<p>The type being tested must meet the following requirements:</p>
+<ul>
+<li>Implementations of <code>Debug</code> and <code>PartialEq</code> traits</li>
+<li>Implementation of <code>Arbitrary</code> trait</li>
+<li>Implementations of <code>Serialize</code> and <code>DeserializeOwned</code> traits</li>
+</ul>
+<p>When using the <code>binary_serde</code> annotation, the type must also implement the
+<code>Serializable</code> and <code>Deserializable</code> traits from <code>miden-crypto</code> (which provide
+<code>to_bytes()</code> and <code>read_from_bytes()</code> methods).</p>
+<h2 id="configuration-attributes"><a class="doc-anchor" href="#configuration-attributes">§</a>Configuration Attributes</h2>
+<p>The macro supports configuration attributes to control test generation:</p>
+<div><table><thead><tr><th>Attribute</th><th>Type</th><th>Default</th><th>Purpose</th><th>Features Required</th></tr></thead><tbody>
+<tr><td><code>serde_test</code></td><td><code>bool</code></td><td><code>true</code></td><td>Generate standard Serde (JSON) round-trip tests</td><td><code>arbitrary</code>, <code>serde</code>, <code>test</code></td></tr>
+<tr><td><code>binary_serde</code></td><td><code>bool</code></td><td><code>false</code></td><td>Generate binary serialization round-trip tests</td><td><code>arbitrary</code>, <code>test</code></td></tr>
+<tr><td><code>types(...)</code></td><td>-</td><td>none</td><td>Specify type parameters for generics</td><td>-</td></tr>
+</tbody></table>
+</div><h3 id="usage-examples"><a class="doc-anchor" href="#usage-examples">§</a>Usage Examples</h3>
+<p>Default (Serde tests only):</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="attr">#[serde_test]
+#[derive(Debug, PartialEq, Arbitrary, Serialize, Deserialize)]
+</span><span class="kw">struct </span>Simple {
+    value: u64,
+}</code></pre></div>
+<p>Binary serialization tests only:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="attr">#[serde_test(binary_serde(<span class="bool-val">true</span>), serde_test(<span class="bool-val">false</span>))]
+#[derive(Debug, PartialEq, Arbitrary)]
+</span><span class="kw">struct </span>BinaryTest {
+    data: [u8; <span class="number">32</span>],
+}</code></pre></div>
+<p>Both test types:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="attr">#[serde_test(binary_serde(<span class="bool-val">true</span>))]
+#[derive(Debug, PartialEq, Arbitrary, Serialize, Deserialize)]
+</span><span class="kw">struct </span>DualTest {
+    name: u32,
+    value: u64,
+}</code></pre></div>
+<p>Generic types:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="attr">#[serde_test(types(u64, <span class="string">"Vec&lt;u64&gt;"</span>), types(u32, bool))]
+#[derive(Debug, PartialEq, Arbitrary, Serialize, Deserialize)]
+</span><span class="kw">struct </span>Generic&lt;T1, T2&gt; {
+    t1: T1,
+    t2: T2,
+}</code></pre></div><h2 id="generated-test-names"><a class="doc-anchor" href="#generated-test-names">§</a>Generated Test Names</h2>
+<ul>
+<li>Serde tests: <code>test_serde_roundtrip_{struct_name}_{index}</code></li>
+<li>Binary tests: <code>test_binary_serde_roundtrip_{struct_name}_{index}</code></li>
+</ul>
+</div></details></section></div></main></body></html>

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MIN_STACK_DEPTH"],"enum":["InputError","KernelError","OutputError"],"struct":["Kernel","Program","ProgramInfo","StackInputs","StackOutputs"]};

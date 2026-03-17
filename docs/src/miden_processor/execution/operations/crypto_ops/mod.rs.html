@@ -1,0 +1,640 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `processor/src/execution/operations/crypto_ops/mod.rs`."><title>mod.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="miden_processor" data-themes="" data-resource-suffix="" data-rustdoc-version="1.96.0-nightly (3645249d7 2026-03-16)" data-channel="nightly" data-search-js="search-63369b7b.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-5013f961.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">miden_processor/execution/operations/crypto_ops/</div>mod.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="kw">use </span>alloc::boxed::Box;
+<a href=#2 id=2 data-nosnippet>2</a>
+<a href=#3 id=3 data-nosnippet>3</a><span class="kw">use </span>miden_air::trace::{
+<a href=#4 id=4 data-nosnippet>4</a>    chiplets::hasher::STATE_WIDTH,
+<a href=#5 id=5 data-nosnippet>5</a>    log_precompile::{STATE_CAP_RANGE, STATE_RATE_0_RANGE, STATE_RATE_1_RANGE},
+<a href=#6 id=6 data-nosnippet>6</a>};
+<a href=#7 id=7 data-nosnippet>7</a>
+<a href=#8 id=8 data-nosnippet>8</a><span class="kw">use </span>super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
+<a href=#9 id=9 data-nosnippet>9</a><span class="kw">use </span>crate::{
+<a href=#10 id=10 data-nosnippet>10</a>    ContextId, Felt, MemoryError, ONE, RowIndex, Word, ZERO,
+<a href=#11 id=11 data-nosnippet>11</a>    errors::{CryptoError, MerklePathVerificationFailedInner, OperationError},
+<a href=#12 id=12 data-nosnippet>12</a>    field::{BasedVectorSpace, QuadFelt},
+<a href=#13 id=13 data-nosnippet>13</a>    mast::MastForest,
+<a href=#14 id=14 data-nosnippet>14</a>    processor::{
+<a href=#15 id=15 data-nosnippet>15</a>        AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, StackInterface,
+<a href=#16 id=16 data-nosnippet>16</a>        SystemInterface,
+<a href=#17 id=17 data-nosnippet>17</a>    },
+<a href=#18 id=18 data-nosnippet>18</a>    tracer::{OperationHelperRegisters, Tracer},
+<a href=#19 id=19 data-nosnippet>19</a>};
+<a href=#20 id=20 data-nosnippet>20</a>
+<a href=#21 id=21 data-nosnippet>21</a><span class="attr">#[cfg(test)]
+<a href=#22 id=22 data-nosnippet>22</a></span><span class="kw">mod </span>tests;
+<a href=#23 id=23 data-nosnippet>23</a>
+<a href=#24 id=24 data-nosnippet>24</a><span class="comment">// CRYPTOGRAPHIC OPERATIONS
+<a href=#25 id=25 data-nosnippet>25</a>// ================================================================================================
+<a href=#26 id=26 data-nosnippet>26</a>
+<a href=#27 id=27 data-nosnippet>27</a></span><span class="doccomment">/// Performs a hash permutation operation.
+<a href=#28 id=28 data-nosnippet>28</a>/// Applies Poseidon2 permutation to the top 12 elements of the stack.
+<a href=#29 id=29 data-nosnippet>29</a>///
+<a href=#30 id=30 data-nosnippet>30</a>/// Stack layout:
+<a href=#31 id=31 data-nosnippet>31</a>/// ```text
+<a href=#32 id=32 data-nosnippet>32</a>/// stack[0..4]   = R1 word (rate word 1)      → state[0..4]
+<a href=#33 id=33 data-nosnippet>33</a>/// stack[4..8]   = R2 word (rate word 2)      → state[4..8]
+<a href=#34 id=34 data-nosnippet>34</a>/// stack[8..12]  = CAP word (capacity)        → state[8..12]
+<a href=#35 id=35 data-nosnippet>35</a>/// ```
+<a href=#36 id=36 data-nosnippet>36</a>///
+<a href=#37 id=37 data-nosnippet>37</a>/// The top of the stack (`get(0)`) maps to `state[0]`, giving the sponge state
+<a href=#38 id=38 data-nosnippet>38</a>/// `[R1, R2, CAP]` where R1[0] is at the top of the stack.
+<a href=#39 id=39 data-nosnippet>39</a></span><span class="attr">#[inline(always)]
+<a href=#40 id=40 data-nosnippet>40</a></span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>op_hperm&lt;P: Processor, T: Tracer&gt;(
+<a href=#41 id=41 data-nosnippet>41</a>    processor: <span class="kw-2">&amp;mut </span>P,
+<a href=#42 id=42 data-nosnippet>42</a>    tracer: <span class="kw-2">&amp;mut </span>T,
+<a href=#43 id=43 data-nosnippet>43</a>) -&gt; <span class="prelude-ty">Result</span>&lt;OperationHelperRegisters, OperationError&gt; {
+<a href=#44 id=44 data-nosnippet>44</a>    <span class="comment">// Build sponge state from stack: state[i] = stack.get(i)
+<a href=#45 id=45 data-nosnippet>45</a>    // Read first 8 elements using get_double_word, then remaining 4 elements
+<a href=#46 id=46 data-nosnippet>46</a>    </span><span class="kw">let </span>double_word: [Felt; <span class="number">8</span>] = processor.stack().get_double_word(<span class="number">0</span>);
+<a href=#47 id=47 data-nosnippet>47</a>    <span class="kw">let </span>word: Word = processor.stack().get_word(<span class="number">8</span>);
+<a href=#48 id=48 data-nosnippet>48</a>    <span class="kw">let </span>input_state: [Felt; STATE_WIDTH] = [
+<a href=#49 id=49 data-nosnippet>49</a>        double_word[<span class="number">0</span>],
+<a href=#50 id=50 data-nosnippet>50</a>        double_word[<span class="number">1</span>],
+<a href=#51 id=51 data-nosnippet>51</a>        double_word[<span class="number">2</span>],
+<a href=#52 id=52 data-nosnippet>52</a>        double_word[<span class="number">3</span>],
+<a href=#53 id=53 data-nosnippet>53</a>        double_word[<span class="number">4</span>],
+<a href=#54 id=54 data-nosnippet>54</a>        double_word[<span class="number">5</span>],
+<a href=#55 id=55 data-nosnippet>55</a>        double_word[<span class="number">6</span>],
+<a href=#56 id=56 data-nosnippet>56</a>        double_word[<span class="number">7</span>],
+<a href=#57 id=57 data-nosnippet>57</a>        word[<span class="number">0</span>],
+<a href=#58 id=58 data-nosnippet>58</a>        word[<span class="number">1</span>],
+<a href=#59 id=59 data-nosnippet>59</a>        word[<span class="number">2</span>],
+<a href=#60 id=60 data-nosnippet>60</a>        word[<span class="number">3</span>],
+<a href=#61 id=61 data-nosnippet>61</a>    ];
+<a href=#62 id=62 data-nosnippet>62</a>
+<a href=#63 id=63 data-nosnippet>63</a>    <span class="comment">// Apply Poseidon2 permutation
+<a href=#64 id=64 data-nosnippet>64</a>    </span><span class="kw">let </span>(addr, output_state) = processor.hasher().permute(input_state)<span class="question-mark">?</span>;
+<a href=#65 id=65 data-nosnippet>65</a>
+<a href=#66 id=66 data-nosnippet>66</a>    <span class="comment">// Write result back to stack (state[0] at top).
+<a href=#67 id=67 data-nosnippet>67</a>    </span><span class="kw">let </span>r0: Word = output_state[STATE_RATE_0_RANGE].try_into().expect(<span class="string">"r0 slice has length 4"</span>);
+<a href=#68 id=68 data-nosnippet>68</a>    <span class="kw">let </span>r1: Word = output_state[STATE_RATE_1_RANGE].try_into().expect(<span class="string">"r1 slice has length 4"</span>);
+<a href=#69 id=69 data-nosnippet>69</a>    <span class="kw">let </span>cap: Word = output_state[STATE_CAP_RANGE].try_into().expect(<span class="string">"cap slice has length 4"</span>);
+<a href=#70 id=70 data-nosnippet>70</a>    processor.stack_mut().set_word(<span class="number">0</span>, <span class="kw-2">&amp;</span>r0);
+<a href=#71 id=71 data-nosnippet>71</a>    processor.stack_mut().set_word(<span class="number">4</span>, <span class="kw-2">&amp;</span>r1);
+<a href=#72 id=72 data-nosnippet>72</a>    processor.stack_mut().set_word(<span class="number">8</span>, <span class="kw-2">&amp;</span>cap);
+<a href=#73 id=73 data-nosnippet>73</a>
+<a href=#74 id=74 data-nosnippet>74</a>    tracer.record_hasher_permute(input_state, output_state);
+<a href=#75 id=75 data-nosnippet>75</a>    <span class="prelude-val">Ok</span>(OperationHelperRegisters::HPerm { addr })
+<a href=#76 id=76 data-nosnippet>76</a>}
+<a href=#77 id=77 data-nosnippet>77</a>
+<a href=#78 id=78 data-nosnippet>78</a><span class="doccomment">/// Verifies that a Merkle path from the specified node resolves to the specified root. The
+<a href=#79 id=79 data-nosnippet>79</a>/// stack is expected to be arranged as follows (from the top):
+<a href=#80 id=80 data-nosnippet>80</a>/// - value of the node, 4 elements.
+<a href=#81 id=81 data-nosnippet>81</a>/// - depth of the node, 1 element; this is expected to be the depth of the Merkle tree
+<a href=#82 id=82 data-nosnippet>82</a>/// - index of the node, 1 element.
+<a href=#83 id=83 data-nosnippet>83</a>/// - root of the tree, 4 elements.
+<a href=#84 id=84 data-nosnippet>84</a>///
+<a href=#85 id=85 data-nosnippet>85</a>/// To perform the operation we do the following:
+<a href=#86 id=86 data-nosnippet>86</a>/// 1. Look up the Merkle path in the advice provider for the specified tree root.
+<a href=#87 id=87 data-nosnippet>87</a>/// 2. Use the hasher to compute the root of the Merkle path for the specified node.
+<a href=#88 id=88 data-nosnippet>88</a>/// 3. Verify that the computed root is equal to the root provided via the stack.
+<a href=#89 id=89 data-nosnippet>89</a>/// 4. Copy the stack state over to the next clock cycle with no changes.
+<a href=#90 id=90 data-nosnippet>90</a>///
+<a href=#91 id=91 data-nosnippet>91</a>/// # Errors
+<a href=#92 id=92 data-nosnippet>92</a>/// Returns an error if:
+<a href=#93 id=93 data-nosnippet>93</a>/// - Merkle tree for the specified root cannot be found in the advice provider.
+<a href=#94 id=94 data-nosnippet>94</a>/// - The specified depth is either zero or greater than the depth of the Merkle tree identified by
+<a href=#95 id=95 data-nosnippet>95</a>///   the specified root.
+<a href=#96 id=96 data-nosnippet>96</a>/// - Path to the node at the specified depth and index is not known to the advice provider.
+<a href=#97 id=97 data-nosnippet>97</a></span><span class="attr">#[inline(always)]
+<a href=#98 id=98 data-nosnippet>98</a></span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>op_mpverify&lt;P: Processor, T: Tracer&gt;(
+<a href=#99 id=99 data-nosnippet>99</a>    processor: <span class="kw-2">&amp;mut </span>P,
+<a href=#100 id=100 data-nosnippet>100</a>    err_code: Felt,
+<a href=#101 id=101 data-nosnippet>101</a>    program: <span class="kw-2">&amp;</span>MastForest,
+<a href=#102 id=102 data-nosnippet>102</a>    tracer: <span class="kw-2">&amp;mut </span>T,
+<a href=#103 id=103 data-nosnippet>103</a>) -&gt; <span class="prelude-ty">Result</span>&lt;OperationHelperRegisters, CryptoError&gt; {
+<a href=#104 id=104 data-nosnippet>104</a>    <span class="comment">// read node value, depth, index and root value from the stack
+<a href=#105 id=105 data-nosnippet>105</a>    </span><span class="kw">let </span>node = processor.stack().get_word(<span class="number">0</span>);
+<a href=#106 id=106 data-nosnippet>106</a>    <span class="kw">let </span>depth = processor.stack().get(<span class="number">4</span>);
+<a href=#107 id=107 data-nosnippet>107</a>    <span class="kw">let </span>index = processor.stack().get(<span class="number">5</span>);
+<a href=#108 id=108 data-nosnippet>108</a>    <span class="kw">let </span>root = processor.stack().get_word(<span class="number">6</span>);
+<a href=#109 id=109 data-nosnippet>109</a>
+<a href=#110 id=110 data-nosnippet>110</a>    <span class="comment">// get a Merkle path from the advice provider for the specified root and node index
+<a href=#111 id=111 data-nosnippet>111</a>    </span><span class="kw">let </span>path = processor.advice_provider().get_merkle_path(root, depth, index)<span class="question-mark">?</span>;
+<a href=#112 id=112 data-nosnippet>112</a>
+<a href=#113 id=113 data-nosnippet>113</a>    tracer.record_hasher_build_merkle_root(node, path.as_ref(), index, root);
+<a href=#114 id=114 data-nosnippet>114</a>
+<a href=#115 id=115 data-nosnippet>115</a>    <span class="comment">// verify the path
+<a href=#116 id=116 data-nosnippet>116</a>    </span><span class="kw">let </span>addr = processor.hasher().verify_merkle_root(root, node, path.as_ref(), index, || {
+<a href=#117 id=117 data-nosnippet>117</a>        <span class="comment">// If the hasher doesn't compute the same root (using the same path),
+<a href=#118 id=118 data-nosnippet>118</a>        // then it means that `node` is not the value currently in the tree at `index`
+<a href=#119 id=119 data-nosnippet>119</a>        </span><span class="kw">let </span>err_msg = program.resolve_error_message(err_code);
+<a href=#120 id=120 data-nosnippet>120</a>        OperationError::MerklePathVerificationFailed {
+<a href=#121 id=121 data-nosnippet>121</a>            inner: Box::new(MerklePathVerificationFailedInner {
+<a href=#122 id=122 data-nosnippet>122</a>                value: node,
+<a href=#123 id=123 data-nosnippet>123</a>                index,
+<a href=#124 id=124 data-nosnippet>124</a>                root,
+<a href=#125 id=125 data-nosnippet>125</a>                err_code,
+<a href=#126 id=126 data-nosnippet>126</a>                err_msg,
+<a href=#127 id=127 data-nosnippet>127</a>            }),
+<a href=#128 id=128 data-nosnippet>128</a>        }
+<a href=#129 id=129 data-nosnippet>129</a>    })<span class="question-mark">?</span>;
+<a href=#130 id=130 data-nosnippet>130</a>
+<a href=#131 id=131 data-nosnippet>131</a>    <span class="prelude-val">Ok</span>(OperationHelperRegisters::MerklePath { addr })
+<a href=#132 id=132 data-nosnippet>132</a>}
+<a href=#133 id=133 data-nosnippet>133</a>
+<a href=#134 id=134 data-nosnippet>134</a><span class="doccomment">/// Computes a new root of a Merkle tree where a node at the specified index is updated to
+<a href=#135 id=135 data-nosnippet>135</a>/// the specified value. The stack is expected to be arranged as follows (from the top):
+<a href=#136 id=136 data-nosnippet>136</a>/// - old value of the node, 4 elements.
+<a href=#137 id=137 data-nosnippet>137</a>/// - depth of the node, 1 element; this is expected to be the depth of the Merkle tree.
+<a href=#138 id=138 data-nosnippet>138</a>/// - index of the node, 1 element.
+<a href=#139 id=139 data-nosnippet>139</a>/// - current root of the tree, 4 elements.
+<a href=#140 id=140 data-nosnippet>140</a>/// - new value of the node, 4 elements.
+<a href=#141 id=141 data-nosnippet>141</a>///
+<a href=#142 id=142 data-nosnippet>142</a>/// To perform the operation we do the following:
+<a href=#143 id=143 data-nosnippet>143</a>/// 1. Update the node at the specified index in the Merkle tree with the specified root, and get
+<a href=#144 id=144 data-nosnippet>144</a>///    the Merkle path to it.
+<a href=#145 id=145 data-nosnippet>145</a>/// 2. Use the hasher to update the root of the Merkle path for the specified node. For this we need
+<a href=#146 id=146 data-nosnippet>146</a>///    to provide the old and the new node value.
+<a href=#147 id=147 data-nosnippet>147</a>/// 3. Verify that the computed old root is equal to the input root provided via the stack.
+<a href=#148 id=148 data-nosnippet>148</a>/// 4. Replace the old node value with the computed new root.
+<a href=#149 id=149 data-nosnippet>149</a>///
+<a href=#150 id=150 data-nosnippet>150</a>/// The Merkle path for the node is expected to be provided by the prover non-deterministically
+<a href=#151 id=151 data-nosnippet>151</a>/// (via the advice provider). At the end of the operation, the old node value is replaced with
+<a href=#152 id=152 data-nosnippet>152</a>/// the new roots value computed based on the provided path. Everything else on the stack
+<a href=#153 id=153 data-nosnippet>153</a>/// remains the same.
+<a href=#154 id=154 data-nosnippet>154</a>///
+<a href=#155 id=155 data-nosnippet>155</a>/// The original Merkle tree is cloned before the update is performed, and thus, after the
+<a href=#156 id=156 data-nosnippet>156</a>/// operation, the advice provider will keep track of both the old and the new trees.
+<a href=#157 id=157 data-nosnippet>157</a>///
+<a href=#158 id=158 data-nosnippet>158</a>/// # Errors
+<a href=#159 id=159 data-nosnippet>159</a>/// Returns an error if:
+<a href=#160 id=160 data-nosnippet>160</a>/// - Merkle tree for the specified root cannot be found in the advice provider.
+<a href=#161 id=161 data-nosnippet>161</a>/// - The specified depth is either zero or greater than the depth of the Merkle tree identified by
+<a href=#162 id=162 data-nosnippet>162</a>///   the specified root.
+<a href=#163 id=163 data-nosnippet>163</a>/// - Path to the node at the specified depth and index is not known to the advice provider.
+<a href=#164 id=164 data-nosnippet>164</a></span><span class="attr">#[inline(always)]
+<a href=#165 id=165 data-nosnippet>165</a></span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>op_mrupdate&lt;P: Processor, T: Tracer&gt;(
+<a href=#166 id=166 data-nosnippet>166</a>    processor: <span class="kw-2">&amp;mut </span>P,
+<a href=#167 id=167 data-nosnippet>167</a>    tracer: <span class="kw-2">&amp;mut </span>T,
+<a href=#168 id=168 data-nosnippet>168</a>) -&gt; <span class="prelude-ty">Result</span>&lt;OperationHelperRegisters, CryptoError&gt; {
+<a href=#169 id=169 data-nosnippet>169</a>    <span class="comment">// read old node value, depth, index, tree root and new node values from the stack
+<a href=#170 id=170 data-nosnippet>170</a>    </span><span class="kw">let </span>old_value = processor.stack().get_word(<span class="number">0</span>);
+<a href=#171 id=171 data-nosnippet>171</a>    <span class="kw">let </span>depth = processor.stack().get(<span class="number">4</span>);
+<a href=#172 id=172 data-nosnippet>172</a>    <span class="kw">let </span>index = processor.stack().get(<span class="number">5</span>);
+<a href=#173 id=173 data-nosnippet>173</a>    <span class="kw">let </span>claimed_old_root = processor.stack().get_word(<span class="number">6</span>);
+<a href=#174 id=174 data-nosnippet>174</a>    <span class="kw">let </span>new_value = processor.stack().get_word(<span class="number">10</span>);
+<a href=#175 id=175 data-nosnippet>175</a>
+<a href=#176 id=176 data-nosnippet>176</a>    <span class="comment">// update the node at the specified index in the Merkle tree specified by the old root, and
+<a href=#177 id=177 data-nosnippet>177</a>    // get a Merkle path to it. The length of the returned path is expected to match the
+<a href=#178 id=178 data-nosnippet>178</a>    // specified depth. If the new node is the root of a tree, this instruction will append the
+<a href=#179 id=179 data-nosnippet>179</a>    // whole sub-tree to this node.
+<a href=#180 id=180 data-nosnippet>180</a>    </span><span class="kw">let </span>path = processor.advice_provider_mut().update_merkle_node(
+<a href=#181 id=181 data-nosnippet>181</a>        claimed_old_root,
+<a href=#182 id=182 data-nosnippet>182</a>        depth,
+<a href=#183 id=183 data-nosnippet>183</a>        index,
+<a href=#184 id=184 data-nosnippet>184</a>        new_value,
+<a href=#185 id=185 data-nosnippet>185</a>    )<span class="question-mark">?</span>;
+<a href=#186 id=186 data-nosnippet>186</a>
+<a href=#187 id=187 data-nosnippet>187</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(path) = <span class="kw-2">&amp;</span>path
+<a href=#188 id=188 data-nosnippet>188</a>        &amp;&amp; path.len() != depth.as_canonical_u64() <span class="kw">as </span>usize
+<a href=#189 id=189 data-nosnippet>189</a>    {
+<a href=#190 id=190 data-nosnippet>190</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(OperationError::InvalidMerklePathLength { path_len: path.len(), depth }.into());
+<a href=#191 id=191 data-nosnippet>191</a>    }
+<a href=#192 id=192 data-nosnippet>192</a>
+<a href=#193 id=193 data-nosnippet>193</a>    <span class="kw">let </span>(addr, new_root) = processor.hasher().update_merkle_root(
+<a href=#194 id=194 data-nosnippet>194</a>        claimed_old_root,
+<a href=#195 id=195 data-nosnippet>195</a>        old_value,
+<a href=#196 id=196 data-nosnippet>196</a>        new_value,
+<a href=#197 id=197 data-nosnippet>197</a>        path.as_ref(),
+<a href=#198 id=198 data-nosnippet>198</a>        index,
+<a href=#199 id=199 data-nosnippet>199</a>        || OperationError::MerklePathVerificationFailed {
+<a href=#200 id=200 data-nosnippet>200</a>            inner: Box::new(MerklePathVerificationFailedInner {
+<a href=#201 id=201 data-nosnippet>201</a>                value: old_value,
+<a href=#202 id=202 data-nosnippet>202</a>                index,
+<a href=#203 id=203 data-nosnippet>203</a>                root: claimed_old_root,
+<a href=#204 id=204 data-nosnippet>204</a>                err_code: ZERO,
+<a href=#205 id=205 data-nosnippet>205</a>                err_msg: <span class="prelude-val">None</span>,
+<a href=#206 id=206 data-nosnippet>206</a>            }),
+<a href=#207 id=207 data-nosnippet>207</a>        },
+<a href=#208 id=208 data-nosnippet>208</a>    )<span class="question-mark">?</span>;
+<a href=#209 id=209 data-nosnippet>209</a>    tracer.record_hasher_update_merkle_root(
+<a href=#210 id=210 data-nosnippet>210</a>        old_value,
+<a href=#211 id=211 data-nosnippet>211</a>        new_value,
+<a href=#212 id=212 data-nosnippet>212</a>        path.as_ref(),
+<a href=#213 id=213 data-nosnippet>213</a>        index,
+<a href=#214 id=214 data-nosnippet>214</a>        claimed_old_root,
+<a href=#215 id=215 data-nosnippet>215</a>        new_root,
+<a href=#216 id=216 data-nosnippet>216</a>    );
+<a href=#217 id=217 data-nosnippet>217</a>
+<a href=#218 id=218 data-nosnippet>218</a>    <span class="comment">// Replace the old node value with computed new root.
+<a href=#219 id=219 data-nosnippet>219</a>    </span>processor.stack_mut().set_word(<span class="number">0</span>, <span class="kw-2">&amp;</span>new_root);
+<a href=#220 id=220 data-nosnippet>220</a>
+<a href=#221 id=221 data-nosnippet>221</a>    <span class="prelude-val">Ok</span>(OperationHelperRegisters::MerklePath { addr })
+<a href=#222 id=222 data-nosnippet>222</a>}
+<a href=#223 id=223 data-nosnippet>223</a>
+<a href=#224 id=224 data-nosnippet>224</a><span class="comment">// HORNER-BASED POLYNOMIAL EVALUATION OPERATIONS
+<a href=#225 id=225 data-nosnippet>225</a>// ================================================================================================
+<a href=#226 id=226 data-nosnippet>226</a>
+<a href=#227 id=227 data-nosnippet>227</a></span><span class="doccomment">/// Performs 8 steps of the Horner evaluation method on a polynomial with coefficients over
+<a href=#228 id=228 data-nosnippet>228</a>/// the base field using a 3-level computation to reduce constraint degree.
+<a href=#229 id=229 data-nosnippet>229</a>///
+<a href=#230 id=230 data-nosnippet>230</a>/// The computation processes 8 base field coefficients from the stack using Horner's method.
+<a href=#231 id=231 data-nosnippet>231</a>/// If we denote the values at stack positions 0..7 as `s[0]..s[7]`, the computation is:
+<a href=#232 id=232 data-nosnippet>232</a>///
+<a href=#233 id=233 data-nosnippet>233</a>/// - Level 1: tmp0 = (acc * α + s[0]) * α + s[1]
+<a href=#234 id=234 data-nosnippet>234</a>/// - Level 2: tmp1 = ((tmp0 * α + s[2]) * α + s[3]) * α + s[4]
+<a href=#235 id=235 data-nosnippet>235</a>/// - Level 3: acc' = ((tmp1 * α + s[5]) * α + s[6]) * α + s[7]
+<a href=#236 id=236 data-nosnippet>236</a>///
+<a href=#237 id=237 data-nosnippet>237</a>/// This evaluates the polynomial:
+<a href=#238 id=238 data-nosnippet>238</a>///
+<a href=#239 id=239 data-nosnippet>239</a>/// P(X) := s[0] * X^7 + s[1] * X^6 + s[2] * X^5 + s[3] * X^4 + s[4] * X^3 + s[5] * X^2 + s[6] * X +
+<a href=#240 id=240 data-nosnippet>240</a>/// s[7]
+<a href=#241 id=241 data-nosnippet>241</a>///
+<a href=#242 id=242 data-nosnippet>242</a>/// where s[0] is the highest-degree coefficient and s[7] is the constant term.
+<a href=#243 id=243 data-nosnippet>243</a>///
+<a href=#244 id=244 data-nosnippet>244</a>/// The instruction can be used to compute the evaluation of polynomials of arbitrary degree
+<a href=#245 id=245 data-nosnippet>245</a>/// by repeated invocations interleaved with any operation that loads the next batch of 8
+<a href=#246 id=246 data-nosnippet>246</a>/// coefficients on the top of the operand stack, i.e., `mem_stream` or `adv_pipe`.
+<a href=#247 id=247 data-nosnippet>247</a>///
+<a href=#248 id=248 data-nosnippet>248</a>/// The stack transition of the instruction can be visualized as follows:
+<a href=#249 id=249 data-nosnippet>249</a>///
+<a href=#250 id=250 data-nosnippet>250</a>/// Input:
+<a href=#251 id=251 data-nosnippet>251</a>///
+<a href=#252 id=252 data-nosnippet>252</a>/// +------+------+------+------+------+------+------+------+---+---+---+---+---+----------+------+------+
+<a href=#253 id=253 data-nosnippet>253</a>/// | s[0] | s[1] | s[2] | s[3] | s[4] | s[5] | s[6] | s[7] | - | - | - | - | - |alpha_addr| acc1 | acc0 |
+<a href=#254 id=254 data-nosnippet>254</a>/// +------+------+------+------+------+------+------+------+---+---+---+---+---+----------+------+------+
+<a href=#255 id=255 data-nosnippet>255</a>///   (X^7)  (X^6)  (X^5)  (X^4)  (X^3)  (X^2)  (X^1)  (X^0)
+<a href=#256 id=256 data-nosnippet>256</a>///
+<a href=#257 id=257 data-nosnippet>257</a>/// Output:
+<a href=#258 id=258 data-nosnippet>258</a>///
+<a href=#259 id=259 data-nosnippet>259</a>/// +------+------+------+------+------+------+------+------+---+---+---+---+---+----------+-------+-------+
+<a href=#260 id=260 data-nosnippet>260</a>/// | s[0] | s[1] | s[2] | s[3] | s[4] | s[5] | s[6] | s[7] | - | - | - | - | - |alpha_addr| acc1' | acc0' |
+<a href=#261 id=261 data-nosnippet>261</a>/// +------+------+------+------+------+------+------+------+---+---+---+---+---+----------+-------+-------+
+<a href=#262 id=262 data-nosnippet>262</a>///
+<a href=#263 id=263 data-nosnippet>263</a>/// Here:
+<a href=#264 id=264 data-nosnippet>264</a>///
+<a href=#265 id=265 data-nosnippet>265</a>/// 1. s[i] for i in 0..=7 is the coefficient at stack position i. s[0] is the highest-degree
+<a href=#266 id=266 data-nosnippet>266</a>///    coefficient (X^7) and s[7] is the constant term (X^0).
+<a href=#267 id=267 data-nosnippet>267</a>/// 2. (acc0, acc1) is a quadratic extension field element accumulating the Horner evaluation.
+<a href=#268 id=268 data-nosnippet>268</a>///    (acc0', acc1') is the updated accumulator after processing this batch.
+<a href=#269 id=269 data-nosnippet>269</a>/// 3. alpha_addr is the memory address of the evaluation point α = (α₀, α₁). The operation reads α₀
+<a href=#270 id=270 data-nosnippet>270</a>///    from alpha_addr and α₁ from alpha_addr + 1.
+<a href=#271 id=271 data-nosnippet>271</a>///
+<a href=#272 id=272 data-nosnippet>272</a>/// The instruction uses helper registers to store intermediate values:
+<a href=#273 id=273 data-nosnippet>273</a>/// - h₀, h₁: evaluation point α = (α₀, α₁)
+<a href=#274 id=274 data-nosnippet>274</a>/// - h₂, h₃: Level 2 intermediate result tmp1
+<a href=#275 id=275 data-nosnippet>275</a>/// - h₄, h₅: Level 1 intermediate result tmp0
+<a href=#276 id=276 data-nosnippet>276</a></span><span class="attr">#[inline(always)]
+<a href=#277 id=277 data-nosnippet>277</a></span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>op_horner_eval_base&lt;P: Processor, T: Tracer&gt;(
+<a href=#278 id=278 data-nosnippet>278</a>    processor: <span class="kw-2">&amp;mut </span>P,
+<a href=#279 id=279 data-nosnippet>279</a>    tracer: <span class="kw-2">&amp;mut </span>T,
+<a href=#280 id=280 data-nosnippet>280</a>) -&gt; <span class="prelude-ty">Result</span>&lt;OperationHelperRegisters, <span class="kw">crate</span>::MemoryError&gt; {
+<a href=#281 id=281 data-nosnippet>281</a>    <span class="comment">// Stack positions: low coefficient closer to top (lower index)
+<a href=#282 id=282 data-nosnippet>282</a>    </span><span class="kw">const </span>ALPHA_ADDR_INDEX: usize = <span class="number">13</span>;
+<a href=#283 id=283 data-nosnippet>283</a>    <span class="kw">const </span>ACC_LOW_INDEX: usize = <span class="number">14</span>;
+<a href=#284 id=284 data-nosnippet>284</a>    <span class="kw">const </span>ACC_HIGH_INDEX: usize = <span class="number">15</span>;
+<a href=#285 id=285 data-nosnippet>285</a>
+<a href=#286 id=286 data-nosnippet>286</a>    <span class="kw">let </span>clk = processor.system().clock();
+<a href=#287 id=287 data-nosnippet>287</a>    <span class="kw">let </span>ctx = processor.system().ctx();
+<a href=#288 id=288 data-nosnippet>288</a>
+<a href=#289 id=289 data-nosnippet>289</a>    <span class="comment">// Read the evaluation point alpha from memory
+<a href=#290 id=290 data-nosnippet>290</a>    </span><span class="kw">let </span>alpha = {
+<a href=#291 id=291 data-nosnippet>291</a>        <span class="kw">let </span>addr = processor.stack().get(ALPHA_ADDR_INDEX);
+<a href=#292 id=292 data-nosnippet>292</a>        <span class="kw">let </span>eval_point_0 = processor.memory_mut().read_element(ctx, addr)<span class="question-mark">?</span>;
+<a href=#293 id=293 data-nosnippet>293</a>        <span class="kw">let </span>eval_point_1 = processor.memory_mut().read_element(ctx, addr + ONE)<span class="question-mark">?</span>;
+<a href=#294 id=294 data-nosnippet>294</a>
+<a href=#295 id=295 data-nosnippet>295</a>        tracer.record_memory_read_element_pair(
+<a href=#296 id=296 data-nosnippet>296</a>            eval_point_0,
+<a href=#297 id=297 data-nosnippet>297</a>            addr,
+<a href=#298 id=298 data-nosnippet>298</a>            eval_point_1,
+<a href=#299 id=299 data-nosnippet>299</a>            addr + ONE,
+<a href=#300 id=300 data-nosnippet>300</a>            ctx,
+<a href=#301 id=301 data-nosnippet>301</a>            clk,
+<a href=#302 id=302 data-nosnippet>302</a>        );
+<a href=#303 id=303 data-nosnippet>303</a>
+<a href=#304 id=304 data-nosnippet>304</a>        QuadFelt::from_basis_coefficients_fn(|i: usize| [eval_point_0, eval_point_1][i])
+<a href=#305 id=305 data-nosnippet>305</a>    };
+<a href=#306 id=306 data-nosnippet>306</a>
+<a href=#307 id=307 data-nosnippet>307</a>    <span class="comment">// Read the coefficients from the stack (top 8 elements)
+<a href=#308 id=308 data-nosnippet>308</a>    </span><span class="kw">let </span>coef: [Felt; <span class="number">8</span>] = processor.stack().get_double_word(<span class="number">0</span>);
+<a href=#309 id=309 data-nosnippet>309</a>
+<a href=#310 id=310 data-nosnippet>310</a>    <span class="kw">let </span>c0 = QuadFelt::from(coef[<span class="number">0</span>]);
+<a href=#311 id=311 data-nosnippet>311</a>    <span class="kw">let </span>c1 = QuadFelt::from(coef[<span class="number">1</span>]);
+<a href=#312 id=312 data-nosnippet>312</a>    <span class="kw">let </span>c2 = QuadFelt::from(coef[<span class="number">2</span>]);
+<a href=#313 id=313 data-nosnippet>313</a>    <span class="kw">let </span>c3 = QuadFelt::from(coef[<span class="number">3</span>]);
+<a href=#314 id=314 data-nosnippet>314</a>    <span class="kw">let </span>c4 = QuadFelt::from(coef[<span class="number">4</span>]);
+<a href=#315 id=315 data-nosnippet>315</a>    <span class="kw">let </span>c5 = QuadFelt::from(coef[<span class="number">5</span>]);
+<a href=#316 id=316 data-nosnippet>316</a>    <span class="kw">let </span>c6 = QuadFelt::from(coef[<span class="number">6</span>]);
+<a href=#317 id=317 data-nosnippet>317</a>    <span class="kw">let </span>c7 = QuadFelt::from(coef[<span class="number">7</span>]);
+<a href=#318 id=318 data-nosnippet>318</a>
+<a href=#319 id=319 data-nosnippet>319</a>    <span class="comment">// Read the current accumulator (LE: low at lower index)
+<a href=#320 id=320 data-nosnippet>320</a>    </span><span class="kw">let </span>acc_low = processor.stack().get(ACC_LOW_INDEX);
+<a href=#321 id=321 data-nosnippet>321</a>    <span class="kw">let </span>acc_high = processor.stack().get(ACC_HIGH_INDEX);
+<a href=#322 id=322 data-nosnippet>322</a>    <span class="kw">let </span>acc = QuadFelt::from_basis_coefficients_fn(|i: usize| [acc_low, acc_high][i]);
+<a href=#323 id=323 data-nosnippet>323</a>
+<a href=#324 id=324 data-nosnippet>324</a>    <span class="comment">// Level 1: tmp0 = (acc * α + c₀) * α + c₁
+<a href=#325 id=325 data-nosnippet>325</a>    </span><span class="kw">let </span>tmp0 = (acc * alpha + c0) * alpha + c1;
+<a href=#326 id=326 data-nosnippet>326</a>
+<a href=#327 id=327 data-nosnippet>327</a>    <span class="comment">// Level 2: tmp1 = ((tmp0 * α + c₂) * α + c₃) * α + c₄
+<a href=#328 id=328 data-nosnippet>328</a>    </span><span class="kw">let </span>tmp1 = ((tmp0 * alpha + c2) * alpha + c3) * alpha + c4;
+<a href=#329 id=329 data-nosnippet>329</a>
+<a href=#330 id=330 data-nosnippet>330</a>    <span class="comment">// Level 3: acc' = ((tmp1 * α + c₅) * α + c₆) * α + c₇
+<a href=#331 id=331 data-nosnippet>331</a>    </span><span class="kw">let </span>acc_new = ((tmp1 * alpha + c5) * alpha + c6) * alpha + c7;
+<a href=#332 id=332 data-nosnippet>332</a>
+<a href=#333 id=333 data-nosnippet>333</a>    <span class="comment">// Update the accumulator values on the stack (LE: low at lower index)
+<a href=#334 id=334 data-nosnippet>334</a>    </span><span class="kw">let </span>acc_new_base_elements = acc_new.as_basis_coefficients_slice();
+<a href=#335 id=335 data-nosnippet>335</a>    processor.stack_mut().set(ACC_HIGH_INDEX, acc_new_base_elements[<span class="number">1</span>]);
+<a href=#336 id=336 data-nosnippet>336</a>    processor.stack_mut().set(ACC_LOW_INDEX, acc_new_base_elements[<span class="number">0</span>]);
+<a href=#337 id=337 data-nosnippet>337</a>
+<a href=#338 id=338 data-nosnippet>338</a>    <span class="comment">// Return the user operation helpers
+<a href=#339 id=339 data-nosnippet>339</a>    </span><span class="prelude-val">Ok</span>(OperationHelperRegisters::HornerEvalBase { alpha, tmp0, tmp1 })
+<a href=#340 id=340 data-nosnippet>340</a>}
+<a href=#341 id=341 data-nosnippet>341</a>
+<a href=#342 id=342 data-nosnippet>342</a><span class="doccomment">/// Performs 4 steps of the Horner evaluation method on a polynomial with coefficients over
+<a href=#343 id=343 data-nosnippet>343</a>/// the quadratic extension field.
+<a href=#344 id=344 data-nosnippet>344</a>///
+<a href=#345 id=345 data-nosnippet>345</a>/// The computation processes 4 extension field coefficients from the stack using Horner's method.
+<a href=#346 id=346 data-nosnippet>346</a>/// If we denote the QuadFelt values at stack positions (0,1), (2,3), (4,5), (6,7) as
+<a href=#347 id=347 data-nosnippet>347</a>/// `s[0]..s[3]`, the computation is:
+<a href=#348 id=348 data-nosnippet>348</a>///
+<a href=#349 id=349 data-nosnippet>349</a>/// - Level 1: acc_tmp = (acc * α + s[0]) * α + s[1]
+<a href=#350 id=350 data-nosnippet>350</a>/// - Level 2: acc' = ((acc_tmp * α + s[2]) * α + s[3]
+<a href=#351 id=351 data-nosnippet>351</a>///
+<a href=#352 id=352 data-nosnippet>352</a>/// This evaluates the polynomial:
+<a href=#353 id=353 data-nosnippet>353</a>///
+<a href=#354 id=354 data-nosnippet>354</a>/// P(X) := s[0] * X^3 + s[1] * X^2 + s[2] * X + s[3]
+<a href=#355 id=355 data-nosnippet>355</a>///
+<a href=#356 id=356 data-nosnippet>356</a>/// where s[0] is the highest-degree coefficient and s[3] is the constant term.
+<a href=#357 id=357 data-nosnippet>357</a>///
+<a href=#358 id=358 data-nosnippet>358</a>/// The instruction can be used to compute the evaluation of polynomials of arbitrary degree
+<a href=#359 id=359 data-nosnippet>359</a>/// by repeated invocations interleaved with any operation that loads the next batch of 4
+<a href=#360 id=360 data-nosnippet>360</a>/// coefficients on the top of the operand stack, i.e., `mem_stream` or `adv_pipe`.
+<a href=#361 id=361 data-nosnippet>361</a>///
+<a href=#362 id=362 data-nosnippet>362</a>/// The stack transition of the instruction can be visualized as follows:
+<a href=#363 id=363 data-nosnippet>363</a>///
+<a href=#364 id=364 data-nosnippet>364</a>/// Input:
+<a href=#365 id=365 data-nosnippet>365</a>///
+<a href=#366 id=366 data-nosnippet>366</a>/// +-------+-------+-------+-------+-------+-------+-------+-------+---+---+---+---+---+----------+------+------+
+<a href=#367 id=367 data-nosnippet>367</a>/// | s0_lo | s0_hi | s1_lo | s1_hi | s2_lo | s2_hi | s3_lo | s3_hi | - | - | - | - | - |alpha_addr| acc0 | acc1 |
+<a href=#368 id=368 data-nosnippet>368</a>/// +-------+-------+-------+-------+-------+-------+-------+-------+---+---+---+---+---+----------+------+------+
+<a href=#369 id=369 data-nosnippet>369</a>///   (X^3)           (X^2)           (X^1)           (X^0)
+<a href=#370 id=370 data-nosnippet>370</a>///
+<a href=#371 id=371 data-nosnippet>371</a>/// Output:
+<a href=#372 id=372 data-nosnippet>372</a>///
+<a href=#373 id=373 data-nosnippet>373</a>/// +-------+-------+-------+-------+-------+-------+-------+-------+---+---+---+---+---+----------+-------+-------+
+<a href=#374 id=374 data-nosnippet>374</a>/// | s0_lo | s0_hi | s1_lo | s1_hi | s2_lo | s2_hi | s3_lo | s3_hi | - | - | - | - | - |alpha_addr| acc0' | acc1' |
+<a href=#375 id=375 data-nosnippet>375</a>/// +-------+-------+-------+-------+-------+-------+-------+-------+---+---+---+---+---+----------+-------+-------+
+<a href=#376 id=376 data-nosnippet>376</a>///
+<a href=#377 id=377 data-nosnippet>377</a>/// Here:
+<a href=#378 id=378 data-nosnippet>378</a>///
+<a href=#379 id=379 data-nosnippet>379</a>/// 1. s[i] = (si_lo, si_hi) for i in 0..=3 is the extension field coefficient at stack position
+<a href=#380 id=380 data-nosnippet>380</a>///    2*i. s[0] is the highest-degree coefficient (X^3) and s[3] is the constant term (X^0).
+<a href=#381 id=381 data-nosnippet>381</a>/// 2. (acc0, acc1) is a quadratic extension field element accumulating the Horner evaluation.
+<a href=#382 id=382 data-nosnippet>382</a>///    (acc0', acc1') is the updated accumulator after processing this batch.
+<a href=#383 id=383 data-nosnippet>383</a>/// 3. alpha_addr is the memory address of the evaluation point α = (α₀, α₁).
+<a href=#384 id=384 data-nosnippet>384</a>///
+<a href=#385 id=385 data-nosnippet>385</a>/// The instruction uses helper registers to hold α and the intermediate value acc_tmp.
+<a href=#386 id=386 data-nosnippet>386</a></span><span class="attr">#[inline(always)]
+<a href=#387 id=387 data-nosnippet>387</a></span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>op_horner_eval_ext&lt;P: Processor, T: Tracer&gt;(
+<a href=#388 id=388 data-nosnippet>388</a>    processor: <span class="kw-2">&amp;mut </span>P,
+<a href=#389 id=389 data-nosnippet>389</a>    tracer: <span class="kw-2">&amp;mut </span>T,
+<a href=#390 id=390 data-nosnippet>390</a>) -&gt; <span class="prelude-ty">Result</span>&lt;OperationHelperRegisters, <span class="kw">crate</span>::MemoryError&gt; {
+<a href=#391 id=391 data-nosnippet>391</a>    <span class="comment">// Stack positions: low coefficient closer to top (lower index)
+<a href=#392 id=392 data-nosnippet>392</a>    </span><span class="kw">const </span>ALPHA_ADDR_INDEX: usize = <span class="number">13</span>;
+<a href=#393 id=393 data-nosnippet>393</a>    <span class="kw">const </span>ACC_LOW_INDEX: usize = <span class="number">14</span>;
+<a href=#394 id=394 data-nosnippet>394</a>    <span class="kw">const </span>ACC_HIGH_INDEX: usize = <span class="number">15</span>;
+<a href=#395 id=395 data-nosnippet>395</a>
+<a href=#396 id=396 data-nosnippet>396</a>    <span class="kw">let </span>clk = processor.system().clock();
+<a href=#397 id=397 data-nosnippet>397</a>    <span class="kw">let </span>ctx = processor.system().ctx();
+<a href=#398 id=398 data-nosnippet>398</a>
+<a href=#399 id=399 data-nosnippet>399</a>    <span class="comment">// Read the coefficients from the stack as extension field elements (4 QuadFelt elements)
+<a href=#400 id=400 data-nosnippet>400</a>    // Stack layout: [s0_lo, s0_hi, s1_lo, s1_hi, s2_lo, s2_hi, s3_lo, s3_hi, ...]
+<a href=#401 id=401 data-nosnippet>401</a>    // s[0] at stack[0,1] is highest degree (X^3), s[3] at stack[6,7] is constant (X^0)
+<a href=#402 id=402 data-nosnippet>402</a>    </span><span class="kw">let </span>coef: [QuadFelt; <span class="number">4</span>] = core::array::from_fn(|j| {
+<a href=#403 id=403 data-nosnippet>403</a>        <span class="kw">let </span>lo = processor.stack().get(<span class="number">2 </span>* j);
+<a href=#404 id=404 data-nosnippet>404</a>        <span class="kw">let </span>hi = processor.stack().get(<span class="number">2 </span>* j + <span class="number">1</span>);
+<a href=#405 id=405 data-nosnippet>405</a>        QuadFelt::from_basis_coefficients_fn(|i: usize| [lo, hi][i])
+<a href=#406 id=406 data-nosnippet>406</a>    });
+<a href=#407 id=407 data-nosnippet>407</a>
+<a href=#408 id=408 data-nosnippet>408</a>    <span class="comment">// Read the evaluation point alpha from memory
+<a href=#409 id=409 data-nosnippet>409</a>    </span><span class="kw">let </span>(alpha, k0, k1) = {
+<a href=#410 id=410 data-nosnippet>410</a>        <span class="kw">let </span>addr = processor.stack().get(ALPHA_ADDR_INDEX);
+<a href=#411 id=411 data-nosnippet>411</a>        <span class="kw">let </span>word = processor.memory_mut().read_word(ctx, addr, clk)<span class="question-mark">?</span>;
+<a href=#412 id=412 data-nosnippet>412</a>        tracer.record_memory_read_word(
+<a href=#413 id=413 data-nosnippet>413</a>            word,
+<a href=#414 id=414 data-nosnippet>414</a>            addr,
+<a href=#415 id=415 data-nosnippet>415</a>            processor.system().ctx(),
+<a href=#416 id=416 data-nosnippet>416</a>            processor.system().clock(),
+<a href=#417 id=417 data-nosnippet>417</a>        );
+<a href=#418 id=418 data-nosnippet>418</a>
+<a href=#419 id=419 data-nosnippet>419</a>        (
+<a href=#420 id=420 data-nosnippet>420</a>            QuadFelt::from_basis_coefficients_fn(|i: usize| [word[<span class="number">0</span>], word[<span class="number">1</span>]][i]),
+<a href=#421 id=421 data-nosnippet>421</a>            word[<span class="number">2</span>],
+<a href=#422 id=422 data-nosnippet>422</a>            word[<span class="number">3</span>],
+<a href=#423 id=423 data-nosnippet>423</a>        )
+<a href=#424 id=424 data-nosnippet>424</a>    };
+<a href=#425 id=425 data-nosnippet>425</a>
+<a href=#426 id=426 data-nosnippet>426</a>    <span class="comment">// Read the current accumulator (LE: low at lower index)
+<a href=#427 id=427 data-nosnippet>427</a>    </span><span class="kw">let </span>acc_low = processor.stack().get(ACC_LOW_INDEX);
+<a href=#428 id=428 data-nosnippet>428</a>    <span class="kw">let </span>acc_high = processor.stack().get(ACC_HIGH_INDEX);
+<a href=#429 id=429 data-nosnippet>429</a>    <span class="kw">let </span>acc_old = QuadFelt::from_basis_coefficients_fn(|i: usize| [acc_low, acc_high][i]);
+<a href=#430 id=430 data-nosnippet>430</a>
+<a href=#431 id=431 data-nosnippet>431</a>    <span class="comment">// Compute the temporary accumulator (first 2 coefficients from stack)
+<a href=#432 id=432 data-nosnippet>432</a>    // Process coef[0], coef[1] (highest degree coefficients)
+<a href=#433 id=433 data-nosnippet>433</a>    </span><span class="kw">let </span>acc_tmp = coef.iter().take(<span class="number">2</span>).fold(acc_old, |acc, coef| <span class="kw-2">*</span>coef + alpha * acc);
+<a href=#434 id=434 data-nosnippet>434</a>
+<a href=#435 id=435 data-nosnippet>435</a>    <span class="comment">// Compute the final accumulator (remaining 2 coefficients)
+<a href=#436 id=436 data-nosnippet>436</a>    // Process coef[2], coef[3] (lower degree coefficients)
+<a href=#437 id=437 data-nosnippet>437</a>    </span><span class="kw">let </span>acc_new = coef.iter().skip(<span class="number">2</span>).fold(acc_tmp, |acc, coef| <span class="kw-2">*</span>coef + alpha * acc);
+<a href=#438 id=438 data-nosnippet>438</a>
+<a href=#439 id=439 data-nosnippet>439</a>    <span class="comment">// Update the accumulator values on the stack (LE: low at lower index)
+<a href=#440 id=440 data-nosnippet>440</a>    </span><span class="kw">let </span>acc_new_base_elements = acc_new.as_basis_coefficients_slice();
+<a href=#441 id=441 data-nosnippet>441</a>    processor.stack_mut().set(ACC_HIGH_INDEX, acc_new_base_elements[<span class="number">1</span>]);
+<a href=#442 id=442 data-nosnippet>442</a>    processor.stack_mut().set(ACC_LOW_INDEX, acc_new_base_elements[<span class="number">0</span>]);
+<a href=#443 id=443 data-nosnippet>443</a>
+<a href=#444 id=444 data-nosnippet>444</a>    <span class="comment">// Return the user operation helpers
+<a href=#445 id=445 data-nosnippet>445</a>    </span><span class="prelude-val">Ok</span>(OperationHelperRegisters::HornerEvalExt { alpha, k0, k1, acc_tmp })
+<a href=#446 id=446 data-nosnippet>446</a>}
+<a href=#447 id=447 data-nosnippet>447</a>
+<a href=#448 id=448 data-nosnippet>448</a><span class="comment">// LOG PRECOMPILE OPERATION
+<a href=#449 id=449 data-nosnippet>449</a>// ================================================================================================
+<a href=#450 id=450 data-nosnippet>450</a>
+<a href=#451 id=451 data-nosnippet>451</a></span><span class="doccomment">/// Logs a precompile event by absorbing `TAG` and `COMM` into the precompile sponge
+<a href=#452 id=452 data-nosnippet>452</a>/// capacity.
+<a href=#453 id=453 data-nosnippet>453</a>///
+<a href=#454 id=454 data-nosnippet>454</a>/// Stack transition:
+<a href=#455 id=455 data-nosnippet>455</a>/// `[COMM, TAG, PAD, ...] -&gt; [R0, R1, CAP_NEXT, ...]`
+<a href=#456 id=456 data-nosnippet>456</a>///
+<a href=#457 id=457 data-nosnippet>457</a>/// Where:
+<a href=#458 id=458 data-nosnippet>458</a>/// - The hasher computes: `[R0, R1, CAP_NEXT] = Poseidon2([COMM, TAG, CAP_PREV])`
+<a href=#459 id=459 data-nosnippet>459</a>/// - `CAP_PREV` is the previous sponge capacity provided non-deterministically via helper
+<a href=#460 id=460 data-nosnippet>460</a>///   registers.
+<a href=#461 id=461 data-nosnippet>461</a>/// - Stack elements are in LSB-first order (structural order).
+<a href=#462 id=462 data-nosnippet>462</a></span><span class="attr">#[inline(always)]
+<a href=#463 id=463 data-nosnippet>463</a></span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>op_log_precompile&lt;P: Processor, T: Tracer&gt;(
+<a href=#464 id=464 data-nosnippet>464</a>    processor: <span class="kw-2">&amp;mut </span>P,
+<a href=#465 id=465 data-nosnippet>465</a>    tracer: <span class="kw-2">&amp;mut </span>T,
+<a href=#466 id=466 data-nosnippet>466</a>) -&gt; <span class="prelude-ty">Result</span>&lt;OperationHelperRegisters, OperationError&gt; {
+<a href=#467 id=467 data-nosnippet>467</a>    <span class="comment">// Read COMM and TAG from the stack
+<a href=#468 id=468 data-nosnippet>468</a>    </span><span class="kw">let </span>comm: Word = processor.stack().get_word(<span class="number">0</span>);
+<a href=#469 id=469 data-nosnippet>469</a>    <span class="kw">let </span>tag: Word = processor.stack().get_word(<span class="number">4</span>);
+<a href=#470 id=470 data-nosnippet>470</a>
+<a href=#471 id=471 data-nosnippet>471</a>    <span class="comment">// Get the current precompile sponge capacity
+<a href=#472 id=472 data-nosnippet>472</a>    </span><span class="kw">let </span>cap_prev = processor.precompile_transcript_state();
+<a href=#473 id=473 data-nosnippet>473</a>
+<a href=#474 id=474 data-nosnippet>474</a>    <span class="comment">// Build the full 12-element hasher state for Poseidon2 permutation
+<a href=#475 id=475 data-nosnippet>475</a>    // State layout: [RATE0 = COMM, RATE1 = TAG, CAPACITY = CAP_PREV]
+<a href=#476 id=476 data-nosnippet>476</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>hasher_state: [Felt; STATE_WIDTH] = [ZERO; <span class="number">12</span>];
+<a href=#477 id=477 data-nosnippet>477</a>    hasher_state[STATE_RATE_0_RANGE].copy_from_slice(comm.as_slice());
+<a href=#478 id=478 data-nosnippet>478</a>    hasher_state[STATE_RATE_1_RANGE].copy_from_slice(tag.as_slice());
+<a href=#479 id=479 data-nosnippet>479</a>    hasher_state[STATE_CAP_RANGE].copy_from_slice(cap_prev.as_slice());
+<a href=#480 id=480 data-nosnippet>480</a>
+<a href=#481 id=481 data-nosnippet>481</a>    <span class="comment">// Perform the Poseidon2 permutation
+<a href=#482 id=482 data-nosnippet>482</a>    </span><span class="kw">let </span>(addr, output_state) = processor.hasher().permute(hasher_state)<span class="question-mark">?</span>;
+<a href=#483 id=483 data-nosnippet>483</a>
+<a href=#484 id=484 data-nosnippet>484</a>    <span class="comment">// Extract R0, R1 and CAP_NEXT from the output state
+<a href=#485 id=485 data-nosnippet>485</a>    </span><span class="kw">let </span>r0: Word = output_state[STATE_RATE_0_RANGE.clone()]
+<a href=#486 id=486 data-nosnippet>486</a>        .try_into()
+<a href=#487 id=487 data-nosnippet>487</a>        .expect(<span class="string">"r0 slice has length 4"</span>);
+<a href=#488 id=488 data-nosnippet>488</a>    <span class="kw">let </span>r1: Word = output_state[STATE_RATE_1_RANGE.clone()]
+<a href=#489 id=489 data-nosnippet>489</a>        .try_into()
+<a href=#490 id=490 data-nosnippet>490</a>        .expect(<span class="string">"r1 slice has length 4"</span>);
+<a href=#491 id=491 data-nosnippet>491</a>    <span class="kw">let </span>cap_next: Word = output_state[STATE_CAP_RANGE.clone()]
+<a href=#492 id=492 data-nosnippet>492</a>        .try_into()
+<a href=#493 id=493 data-nosnippet>493</a>        .expect(<span class="string">"cap_next slice has length 4"</span>);
+<a href=#494 id=494 data-nosnippet>494</a>
+<a href=#495 id=495 data-nosnippet>495</a>    <span class="comment">// Update the processor's precompile sponge capacity
+<a href=#496 id=496 data-nosnippet>496</a>    </span>processor.set_precompile_transcript_state(cap_next);
+<a href=#497 id=497 data-nosnippet>497</a>
+<a href=#498 id=498 data-nosnippet>498</a>    <span class="comment">// Write the output to the stack (top 12 elements): [R0, R1, CAP_NEXT, ...].
+<a href=#499 id=499 data-nosnippet>499</a>    </span>processor.stack_mut().set_word(<span class="number">0</span>, <span class="kw-2">&amp;</span>r0);
+<a href=#500 id=500 data-nosnippet>500</a>    processor.stack_mut().set_word(<span class="number">4</span>, <span class="kw-2">&amp;</span>r1);
+<a href=#501 id=501 data-nosnippet>501</a>    processor.stack_mut().set_word(<span class="number">8</span>, <span class="kw-2">&amp;</span>cap_next);
+<a href=#502 id=502 data-nosnippet>502</a>
+<a href=#503 id=503 data-nosnippet>503</a>    <span class="comment">// Record the hasher permutation for trace generation
+<a href=#504 id=504 data-nosnippet>504</a>    </span>tracer.record_hasher_permute(hasher_state, output_state);
+<a href=#505 id=505 data-nosnippet>505</a>
+<a href=#506 id=506 data-nosnippet>506</a>    <span class="comment">// Return helper registers containing the hasher address and CAP_PREV
+<a href=#507 id=507 data-nosnippet>507</a>    </span><span class="prelude-val">Ok</span>(OperationHelperRegisters::LogPrecompile { addr, cap_prev })
+<a href=#508 id=508 data-nosnippet>508</a>}
+<a href=#509 id=509 data-nosnippet>509</a>
+<a href=#510 id=510 data-nosnippet>510</a><span class="comment">// STREAM CIPHER OPERATION
+<a href=#511 id=511 data-nosnippet>511</a>// ================================================================================================
+<a href=#512 id=512 data-nosnippet>512</a>
+<a href=#513 id=513 data-nosnippet>513</a></span><span class="doccomment">/// Encrypts data from source memory to destination memory using Poseidon2 sponge keystream.
+<a href=#514 id=514 data-nosnippet>514</a>///
+<a href=#515 id=515 data-nosnippet>515</a>/// This operation performs AEAD encryption by:
+<a href=#516 id=516 data-nosnippet>516</a>/// 1. Loading 8 elements (2 words) from source memory at stack[12]
+<a href=#517 id=517 data-nosnippet>517</a>/// 2. Adding each element to the corresponding rate element (stack[0..7])
+<a href=#518 id=518 data-nosnippet>518</a>/// 3. Writing the resulting ciphertext to destination memory at stack[13]
+<a href=#519 id=519 data-nosnippet>519</a>/// 4. Updating stack[0..7] with the ciphertext (becomes new rate for next hperm)
+<a href=#520 id=520 data-nosnippet>520</a>/// 5. Preserving capacity (stack[8..11])
+<a href=#521 id=521 data-nosnippet>521</a>/// 6. Incrementing both source and destination pointers by 8
+<a href=#522 id=522 data-nosnippet>522</a>///
+<a href=#523 id=523 data-nosnippet>523</a>/// Stack transition:
+<a href=#524 id=524 data-nosnippet>524</a>/// [rate(8), cap(4), src_ptr, dst_ptr, ...] -&gt; [ciphertext(8), cap(4), src_ptr+8, dst_ptr+8,
+<a href=#525 id=525 data-nosnippet>525</a>/// ...]
+<a href=#526 id=526 data-nosnippet>526</a></span><span class="attr">#[inline(always)]
+<a href=#527 id=527 data-nosnippet>527</a></span><span class="kw">pub</span>(<span class="kw">super</span>) <span class="kw">fn </span>op_crypto_stream&lt;P: Processor, T: Tracer&gt;(
+<a href=#528 id=528 data-nosnippet>528</a>    processor: <span class="kw-2">&amp;mut </span>P,
+<a href=#529 id=529 data-nosnippet>529</a>    tracer: <span class="kw-2">&amp;mut </span>T,
+<a href=#530 id=530 data-nosnippet>530</a>) -&gt; <span class="prelude-ty">Result</span>&lt;OperationHelperRegisters, <span class="kw">crate</span>::MemoryError&gt; {
+<a href=#531 id=531 data-nosnippet>531</a>    <span class="comment">// Stack layout: [rate(8), capacity(4), src_ptr, dst_ptr, ...]
+<a href=#532 id=532 data-nosnippet>532</a>    </span><span class="kw">const </span>SRC_PTR_IDX: usize = <span class="number">12</span>;
+<a href=#533 id=533 data-nosnippet>533</a>    <span class="kw">const </span>DST_PTR_IDX: usize = <span class="number">13</span>;
+<a href=#534 id=534 data-nosnippet>534</a>
+<a href=#535 id=535 data-nosnippet>535</a>    <span class="kw">let </span>ctx = processor.system().ctx();
+<a href=#536 id=536 data-nosnippet>536</a>    <span class="kw">let </span>clk = processor.system().clock();
+<a href=#537 id=537 data-nosnippet>537</a>
+<a href=#538 id=538 data-nosnippet>538</a>    <span class="comment">// Get source and destination pointers
+<a href=#539 id=539 data-nosnippet>539</a>    </span><span class="kw">let </span>src_addr = processor.stack().get(SRC_PTR_IDX);
+<a href=#540 id=540 data-nosnippet>540</a>    <span class="kw">let </span>dst_addr = processor.stack().get(DST_PTR_IDX);
+<a href=#541 id=541 data-nosnippet>541</a>
+<a href=#542 id=542 data-nosnippet>542</a>    <span class="comment">// Validate address ranges and check for overlap using half-open intervals.
+<a href=#543 id=543 data-nosnippet>543</a>    </span>validate_dual_word_stream_addrs(src_addr, dst_addr, ctx, clk)<span class="question-mark">?</span>;
+<a href=#544 id=544 data-nosnippet>544</a>
+<a href=#545 id=545 data-nosnippet>545</a>    <span class="comment">// Load plaintext from source memory (2 words = 8 elements)
+<a href=#546 id=546 data-nosnippet>546</a>    </span><span class="kw">let </span>src_addr_word2 = src_addr + WORD_SIZE_FELT;
+<a href=#547 id=547 data-nosnippet>547</a>    <span class="kw">let </span>plaintext_word1 = processor.memory_mut().read_word(ctx, src_addr, clk)<span class="question-mark">?</span>;
+<a href=#548 id=548 data-nosnippet>548</a>    <span class="kw">let </span>plaintext_word2 = processor.memory_mut().read_word(ctx, src_addr_word2, clk)<span class="question-mark">?</span>;
+<a href=#549 id=549 data-nosnippet>549</a>
+<a href=#550 id=550 data-nosnippet>550</a>    <span class="comment">// Get rate (keystream) from stack[0..7]
+<a href=#551 id=551 data-nosnippet>551</a>    </span><span class="kw">let </span>rate: [Felt; <span class="number">8</span>] = processor.stack().get_double_word(<span class="number">0</span>);
+<a href=#552 id=552 data-nosnippet>552</a>
+<a href=#553 id=553 data-nosnippet>553</a>    <span class="comment">// Encrypt: ciphertext = plaintext + rate (element-wise addition in field)
+<a href=#554 id=554 data-nosnippet>554</a>    </span><span class="kw">let </span>ciphertext_word1 = [
+<a href=#555 id=555 data-nosnippet>555</a>        plaintext_word1[<span class="number">0</span>] + rate[<span class="number">0</span>],
+<a href=#556 id=556 data-nosnippet>556</a>        plaintext_word1[<span class="number">1</span>] + rate[<span class="number">1</span>],
+<a href=#557 id=557 data-nosnippet>557</a>        plaintext_word1[<span class="number">2</span>] + rate[<span class="number">2</span>],
+<a href=#558 id=558 data-nosnippet>558</a>        plaintext_word1[<span class="number">3</span>] + rate[<span class="number">3</span>],
+<a href=#559 id=559 data-nosnippet>559</a>    ]
+<a href=#560 id=560 data-nosnippet>560</a>    .into();
+<a href=#561 id=561 data-nosnippet>561</a>    <span class="kw">let </span>ciphertext_word2 = [
+<a href=#562 id=562 data-nosnippet>562</a>        plaintext_word2[<span class="number">0</span>] + rate[<span class="number">4</span>],
+<a href=#563 id=563 data-nosnippet>563</a>        plaintext_word2[<span class="number">1</span>] + rate[<span class="number">5</span>],
+<a href=#564 id=564 data-nosnippet>564</a>        plaintext_word2[<span class="number">2</span>] + rate[<span class="number">6</span>],
+<a href=#565 id=565 data-nosnippet>565</a>        plaintext_word2[<span class="number">3</span>] + rate[<span class="number">7</span>],
+<a href=#566 id=566 data-nosnippet>566</a>    ]
+<a href=#567 id=567 data-nosnippet>567</a>    .into();
+<a href=#568 id=568 data-nosnippet>568</a>
+<a href=#569 id=569 data-nosnippet>569</a>    <span class="comment">// Write ciphertext to destination memory
+<a href=#570 id=570 data-nosnippet>570</a>    </span><span class="kw">let </span>dst_addr_word2 = dst_addr + WORD_SIZE_FELT;
+<a href=#571 id=571 data-nosnippet>571</a>    processor.memory_mut().write_word(ctx, dst_addr, clk, ciphertext_word1)<span class="question-mark">?</span>;
+<a href=#572 id=572 data-nosnippet>572</a>    processor.memory_mut().write_word(ctx, dst_addr_word2, clk, ciphertext_word2)<span class="question-mark">?</span>;
+<a href=#573 id=573 data-nosnippet>573</a>
+<a href=#574 id=574 data-nosnippet>574</a>    tracer.record_crypto_stream(
+<a href=#575 id=575 data-nosnippet>575</a>        [plaintext_word1, plaintext_word2],
+<a href=#576 id=576 data-nosnippet>576</a>        src_addr,
+<a href=#577 id=577 data-nosnippet>577</a>        [ciphertext_word1, ciphertext_word2],
+<a href=#578 id=578 data-nosnippet>578</a>        dst_addr,
+<a href=#579 id=579 data-nosnippet>579</a>        ctx,
+<a href=#580 id=580 data-nosnippet>580</a>        clk,
+<a href=#581 id=581 data-nosnippet>581</a>    );
+<a href=#582 id=582 data-nosnippet>582</a>
+<a href=#583 id=583 data-nosnippet>583</a>    <span class="comment">// Update stack[0..7] with ciphertext (becomes new rate for next hperm)
+<a href=#584 id=584 data-nosnippet>584</a>    </span>processor.stack_mut().set_word(<span class="number">0</span>, <span class="kw-2">&amp;</span>ciphertext_word1);
+<a href=#585 id=585 data-nosnippet>585</a>    processor.stack_mut().set_word(<span class="number">4</span>, <span class="kw-2">&amp;</span>ciphertext_word2);
+<a href=#586 id=586 data-nosnippet>586</a>
+<a href=#587 id=587 data-nosnippet>587</a>    <span class="comment">// Increment pointers by 8 (2 words)
+<a href=#588 id=588 data-nosnippet>588</a>    </span>processor.stack_mut().set(SRC_PTR_IDX, src_addr + DOUBLE_WORD_SIZE);
+<a href=#589 id=589 data-nosnippet>589</a>    processor.stack_mut().set(DST_PTR_IDX, dst_addr + DOUBLE_WORD_SIZE);
+<a href=#590 id=590 data-nosnippet>590</a>
+<a href=#591 id=591 data-nosnippet>591</a>    <span class="prelude-val">Ok</span>(OperationHelperRegisters::Empty)
+<a href=#592 id=592 data-nosnippet>592</a>}
+<a href=#593 id=593 data-nosnippet>593</a>
+<a href=#594 id=594 data-nosnippet>594</a><span class="comment">// Note: assert_binary now returns OperationError, imported via crate::OperationError in the
+<a href=#595 id=595 data-nosnippet>595</a>// function
+<a href=#596 id=596 data-nosnippet>596</a>
+<a href=#597 id=597 data-nosnippet>597</a></span><span class="doccomment">/// Validates that two 2-word (8-element) memory ranges starting at `src_addr` and `dst_addr`
+<a href=#598 id=598 data-nosnippet>598</a>/// are within u32 bounds and do not overlap in the same cycle.
+<a href=#599 id=599 data-nosnippet>599</a>///
+<a href=#600 id=600 data-nosnippet>600</a>/// Uses half-open intervals: [addr, addr+8). If ranges overlap, returns an IllegalMemoryAccess
+<a href=#601 id=601 data-nosnippet>601</a>/// error pointing at the first destination word that would be written.
+<a href=#602 id=602 data-nosnippet>602</a></span><span class="attr">#[inline(always)]
+<a href=#603 id=603 data-nosnippet>603</a></span><span class="kw">fn </span>validate_dual_word_stream_addrs(
+<a href=#604 id=604 data-nosnippet>604</a>    src_addr: Felt,
+<a href=#605 id=605 data-nosnippet>605</a>    dst_addr: Felt,
+<a href=#606 id=606 data-nosnippet>606</a>    ctx: ContextId,
+<a href=#607 id=607 data-nosnippet>607</a>    clk: RowIndex,
+<a href=#608 id=608 data-nosnippet>608</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(), MemoryError&gt; {
+<a href=#609 id=609 data-nosnippet>609</a>    <span class="comment">// Convert to u32 and check end-exclusive bounds
+<a href=#610 id=610 data-nosnippet>610</a>    </span><span class="kw">let </span>src_addr_u64 = src_addr.as_canonical_u64();
+<a href=#611 id=611 data-nosnippet>611</a>    <span class="kw">let </span>dst_addr_u64 = dst_addr.as_canonical_u64();
+<a href=#612 id=612 data-nosnippet>612</a>
+<a href=#613 id=613 data-nosnippet>613</a>    <span class="kw">let </span>src_addr_u32 = u32::try_from(src_addr_u64)
+<a href=#614 id=614 data-nosnippet>614</a>        .map_err(|<span class="kw">_</span>| MemoryError::AddressOutOfBounds { addr: src_addr_u64 })<span class="question-mark">?</span>;
+<a href=#615 id=615 data-nosnippet>615</a>    <span class="kw">let </span>src_end = src_addr_u32
+<a href=#616 id=616 data-nosnippet>616</a>        .checked_add(<span class="number">8</span>)
+<a href=#617 id=617 data-nosnippet>617</a>        .ok_or(MemoryError::AddressOutOfBounds { addr: src_addr_u64 })<span class="question-mark">?</span>;
+<a href=#618 id=618 data-nosnippet>618</a>
+<a href=#619 id=619 data-nosnippet>619</a>    <span class="kw">let </span>dst_addr_u32 = u32::try_from(dst_addr_u64)
+<a href=#620 id=620 data-nosnippet>620</a>        .map_err(|<span class="kw">_</span>| MemoryError::AddressOutOfBounds { addr: dst_addr_u64 })<span class="question-mark">?</span>;
+<a href=#621 id=621 data-nosnippet>621</a>    <span class="kw">let </span>dst_end = dst_addr_u32
+<a href=#622 id=622 data-nosnippet>622</a>        .checked_add(<span class="number">8</span>)
+<a href=#623 id=623 data-nosnippet>623</a>        .ok_or(MemoryError::AddressOutOfBounds { addr: dst_addr_u64 })<span class="question-mark">?</span>;
+<a href=#624 id=624 data-nosnippet>624</a>
+<a href=#625 id=625 data-nosnippet>625</a>    <span class="comment">// Check for overlap between [src, src+8) and [dst, dst+8)
+<a href=#626 id=626 data-nosnippet>626</a>    </span><span class="kw">if </span>src_addr_u32 &lt; dst_end &amp;&amp; dst_addr_u32 &lt; src_end {
+<a href=#627 id=627 data-nosnippet>627</a>        <span class="kw">let </span>dst_word2 = dst_addr_u32 + <span class="number">4</span>; <span class="comment">// safe since dst_end computed above
+<a href=#628 id=628 data-nosnippet>628</a>        // We write dst first, then dst+4. Use the first that overlaps.
+<a href=#629 id=629 data-nosnippet>629</a>        </span><span class="kw">let </span>overlap_first = (dst_addr_u32 &gt;= src_addr_u32) &amp;&amp; (dst_addr_u32 &lt; src_end);
+<a href=#630 id=630 data-nosnippet>630</a>        <span class="kw">let </span>offending_addr = <span class="kw">if </span>overlap_first { dst_addr_u32 } <span class="kw">else </span>{ dst_word2 };
+<a href=#631 id=631 data-nosnippet>631</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(MemoryError::IllegalMemoryAccess {
+<a href=#632 id=632 data-nosnippet>632</a>            ctx,
+<a href=#633 id=633 data-nosnippet>633</a>            addr: offending_addr,
+<a href=#634 id=634 data-nosnippet>634</a>            clk: Felt::from(clk),
+<a href=#635 id=635 data-nosnippet>635</a>        });
+<a href=#636 id=636 data-nosnippet>636</a>    }
+<a href=#637 id=637 data-nosnippet>637</a>
+<a href=#638 id=638 data-nosnippet>638</a>    <span class="prelude-val">Ok</span>(())
+<a href=#639 id=639 data-nosnippet>639</a>}
+</code></pre></div></section></main></body></html>

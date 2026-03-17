@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"trait":["ExtensionField","Field","PrimeField64","ToElements"],"type":["QuadFelt"]};

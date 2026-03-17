@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["PK_LEN","SK_LEN"],"struct":["Nonce","Polynomial","PublicKey","SecretKey","Signature","SignatureHeader","SignaturePoly"]};

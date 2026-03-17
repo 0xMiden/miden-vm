@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["DEBUG_FUNCTIONS_VERSION","DEBUG_SOURCES_VERSION","DEBUG_TYPES_VERSION"],"enum":["DebugPrimitiveType","DebugTypeInfo"],"struct":["DebugFieldInfo","DebugFileInfo","DebugFunctionInfo","DebugFunctionsSection","DebugInlinedCallInfo","DebugSourcesSection","DebugTypeIdx","DebugTypesSection","DebugVariableInfo"]};

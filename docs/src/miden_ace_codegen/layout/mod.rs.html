@@ -1,0 +1,61 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `crates/ace-codegen/src/layout/mod.rs`."><title>mod.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="miden_ace_codegen" data-themes="" data-resource-suffix="" data-rustdoc-version="1.96.0-nightly (3645249d7 2026-03-16)" data-channel="nightly" data-search-js="search-63369b7b.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-5013f961.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">miden_ace_codegen/layout/</div>mod.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-2"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Input layout definitions for ACE circuit evaluation.
+<a href=#2 id=2 data-nosnippet>2</a>//!
+<a href=#3 id=3 data-nosnippet>3</a>//! The layout mirrors the MASM verifier READ section: values are stored as
+<a href=#4 id=4 data-nosnippet>4</a>//! extension-field elements in point-major order (all openings at `zeta`
+<a href=#5 id=5 data-nosnippet>5</a>//! followed by all openings at `g * zeta`). Auxiliary trace and quotient
+<a href=#6 id=6 data-nosnippet>6</a>//! chunk openings are provided as base-field coordinates and merged into
+<a href=#7 id=7 data-nosnippet>7</a>//! extension elements inside the ACE circuit.
+<a href=#8 id=8 data-nosnippet>8</a>//!
+<a href=#9 id=9 data-nosnippet>9</a>//! All offsets and widths in this module are measured in extension-field (EF)
+<a href=#10 id=10 data-nosnippet>10</a>//! elements. One EF element occupies two base-field elements.
+<a href=#11 id=11 data-nosnippet>11</a>//!
+<a href=#12 id=12 data-nosnippet>12</a>//! Besides the AIR constraints themselves, the ACE circuit computes:
+<a href=#13 id=13 data-nosnippet>13</a>//! - Randomness expansion from `(alpha, beta)` into the full coefficient vector `[alpha, 1, beta,
+<a href=#14 id=14 data-nosnippet>14</a>//!   beta^2, ...]`.
+<a href=#15 id=15 data-nosnippet>15</a>//! - Auxiliary/quotient coordinate merges to recover extension-field values.
+<a href=#16 id=16 data-nosnippet>16</a>//! - Periodic column evaluations from `z_k`.
+<a href=#17 id=17 data-nosnippet>17</a>//! - Selector polynomial evaluations and vanishing inverses.
+<a href=#18 id=18 data-nosnippet>18</a>//! - Lagrange-kernel weights and shifts for quotient chunk recomposition.
+<a href=#19 id=19 data-nosnippet>19</a>//! - Constraint folding with the composition challenge and final root check.
+<a href=#20 id=20 data-nosnippet>20</a>//!
+<a href=#21 id=21 data-nosnippet>21</a>//! The current "stark vars" block is sufficient to derive both selector
+<a href=#22 id=22 data-nosnippet>22</a>//! polynomials and the Lagrange-kernel weights used in quotient chunk
+<a href=#23 id=23 data-nosnippet>23</a>//! recomposition:
+<a href=#24 id=24 data-nosnippet>24</a>//! - Selector evaluations:
+<a href=#25 id=25 data-nosnippet>25</a>//!   - `inv_vanishing = 1 / (z^N - 1)`
+<a href=#26 id=26 data-nosnippet>26</a>//!   - `is_first = (z^N - 1) * inv(z - 1)`
+<a href=#27 id=27 data-nosnippet>27</a>//!   - `is_last  = (z^N - 1) * inv(z - g^{-1})`
+<a href=#28 id=28 data-nosnippet>28</a>//!   - `is_transition = z - g^{-1}`
+<a href=#29 id=29 data-nosnippet>29</a>//! - Lagrange kernel inputs:
+<a href=#30 id=30 data-nosnippet>30</a>//!   - `s0 = offset^N` and `g = subgroup_gen^N` define the shifts `s_i = s0 * g^i`.
+<a href=#31 id=31 data-nosnippet>31</a>//!   - `weight0 = 1 / (k * s0^{k-1})` gives barycentric weights `weight_i = weight0 * g^i` for the
+<a href=#32 id=32 data-nosnippet>32</a>//!     chunk recomposition kernel.
+<a href=#33 id=33 data-nosnippet>33</a>//! - `z_k` is used to evaluate periodic columns inside the circuit.
+<a href=#34 id=34 data-nosnippet>34</a>//!
+<a href=#35 id=35 data-nosnippet>35</a>//! Layout order (both Native and Masm):
+<a href=#36 id=36 data-nosnippet>36</a>//! 1) public_values
+<a href=#37 id=37 data-nosnippet>37</a>//! 2) aux randomness (alpha/beta)
+<a href=#38 id=38 data-nosnippet>38</a>//! 3) main_curr
+<a href=#39 id=39 data-nosnippet>39</a>//! 4) aux_curr
+<a href=#40 id=40 data-nosnippet>40</a>//! 5) quotient_curr
+<a href=#41 id=41 data-nosnippet>41</a>//! 6) main_next
+<a href=#42 id=42 data-nosnippet>42</a>//! 7) aux_next
+<a href=#43 id=43 data-nosnippet>43</a>//! 8) quotient_next
+<a href=#44 id=44 data-nosnippet>44</a>//! 9) aux_bus_boundary
+<a href=#45 id=45 data-nosnippet>45</a>//! 10) stark_vars
+<a href=#46 id=46 data-nosnippet>46</a>//!
+<a href=#47 id=47 data-nosnippet>47</a>//! Notes:
+<a href=#48 id=48 data-nosnippet>48</a>//! - `quotient_next` is included in the READ layout and is mapped via
+<a href=#49 id=49 data-nosnippet>49</a>//!   `InputKey::QuotientChunkCoord` with `offset = 1`.
+<a href=#50 id=50 data-nosnippet>50</a>//! - `stark_vars` reserves at least 14 EF slots for the canonical verifier inputs. Extra slots are
+<a href=#51 id=51 data-nosnippet>51</a>//!   left available for future aux inputs.
+<a href=#52 id=52 data-nosnippet>52</a>
+<a href=#53 id=53 data-nosnippet>53</a></span><span class="kw">mod </span>keys;
+<a href=#54 id=54 data-nosnippet>54</a><span class="kw">mod </span>plan;
+<a href=#55 id=55 data-nosnippet>55</a><span class="kw">mod </span>policy;
+<a href=#56 id=56 data-nosnippet>56</a>
+<a href=#57 id=57 data-nosnippet>57</a><span class="kw">pub use </span>keys::InputKey;
+<a href=#58 id=58 data-nosnippet>58</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>keys::InputKeyMapper;
+<a href=#59 id=59 data-nosnippet>59</a><span class="kw">pub use </span>plan::{InputCounts, InputLayout};
+<a href=#60 id=60 data-nosnippet>60</a><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">use </span>plan::{InputRegion, LayoutRegions, StarkVarIndices};
+</code></pre></div></section></main></body></html>

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["HashFunction","PrecompileVerificationError","StarkVerificationError","VerificationError"],"fn":["verify","verify_with_precompiles"],"mod":["math"],"struct":["ExecutionProof","Kernel","PrecompileVerifierRegistry","ProgramInfo","StackInputs","StackOutputs","Word"],"type":["PrecompileTranscriptDigest","PrecompileTranscriptState"]};

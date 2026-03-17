@@ -1,0 +1,140 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Provides the `wrap_err()` method for `Result`."><title>WrapErr in miden_utils_diagnostics - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="miden_utils_diagnostics" data-themes="" data-resource-suffix="" data-rustdoc-version="1.96.0-nightly (3645249d7 2026-03-16)" data-channel="nightly" data-search-js="search-63369b7b.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="sidebar-items.js"></script><script defer src="../static.files/main-5013f961.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc trait"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">WrapErr</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../miden_utils_diagnostics/index.html">miden_<wbr>utils_<wbr>diagnostics</a><span class="version">0.22.0-alpha.1</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">WrapErr</a></h2><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#example" title="Example">Example</a></li><li><a href="#wrapping-types-that-do-not-implement-error" title="Wrapping Types That Do Not Implement `Error`">Wrapping Types That Do Not Implement <code>Error</code></a></li><li><a href="#effect-on-downcasting" title="Effect on Downcasting">Effect on Downcasting</a></li></ul><h3><a href="#required-methods">Required Methods</a></h3><ul class="block"><li><a href="#tymethod.context" title="context">context</a></li><li><a href="#tymethod.with_context" title="with_context">with_context</a></li><li><a href="#tymethod.wrap_err" title="wrap_err">wrap_err</a></li><li><a href="#tymethod.wrap_err_with" title="wrap_err_with">wrap_err_with</a></li></ul><h3><a href="#foreign-impls">Implementations on Foreign Types</a></h3><ul class="block"><li><a href="#impl-WrapErr%3CT,+E%3E-for-Result%3CT,+E%3E" title="Result&#60;T, E&#62;">Result&#60;T, E&#62;</a></li></ul><h3><a href="#dyn-compatibility">Dyn Compatibility</a></h3><h3><a href="#implementors">Implementors</a></h3></section><div id="rustdoc-modnav"><h2 class="in-crate"><a href="index.html">In crate miden_<wbr>utils_<wbr>diagnostics</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="index.html">miden_utils_diagnostics</a></div><h1>Trait <span class="trait">WrapErr</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"></span></div><pre class="rust item-decl"><code>pub trait WrapErr&lt;T, E&gt;: Sealed {
+    // Required methods
+    fn <a href="#tymethod.wrap_err" class="fn">wrap_err</a>&lt;D&gt;(self, msg: D) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;T, <a class="struct" href="struct.Report.html" title="struct miden_utils_diagnostics::Report">Report</a>&gt;
+       <span class="where">where D: <a class="trait" href="https://doc.rust-lang.org/nightly/core/fmt/trait.Display.html" title="trait core::fmt::Display">Display</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a> + 'static</span>;
+<span class="item-spacer"></span>    fn <a href="#tymethod.wrap_err_with" class="fn">wrap_err_with</a>&lt;D, F&gt;(self, f: F) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;T, <a class="struct" href="struct.Report.html" title="struct miden_utils_diagnostics::Report">Report</a>&gt;
+       <span class="where">where D: <a class="trait" href="https://doc.rust-lang.org/nightly/core/fmt/trait.Display.html" title="trait core::fmt::Display">Display</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a> + 'static,
+             F: <a class="trait" href="https://doc.rust-lang.org/nightly/core/ops/function/trait.FnOnce.html" title="trait core::ops::function::FnOnce">FnOnce</a>() -&gt; D</span>;
+<span class="item-spacer"></span>    fn <a href="#tymethod.context" class="fn">context</a>&lt;D&gt;(self, msg: D) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;T, <a class="struct" href="struct.Report.html" title="struct miden_utils_diagnostics::Report">Report</a>&gt;
+       <span class="where">where D: <a class="trait" href="https://doc.rust-lang.org/nightly/core/fmt/trait.Display.html" title="trait core::fmt::Display">Display</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a> + 'static</span>;
+<span class="item-spacer"></span>    fn <a href="#tymethod.with_context" class="fn">with_context</a>&lt;D, F&gt;(self, f: F) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;T, <a class="struct" href="struct.Report.html" title="struct miden_utils_diagnostics::Report">Report</a>&gt;
+       <span class="where">where D: <a class="trait" href="https://doc.rust-lang.org/nightly/core/fmt/trait.Display.html" title="trait core::fmt::Display">Display</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a> + 'static,
+             F: <a class="trait" href="https://doc.rust-lang.org/nightly/core/ops/function/trait.FnOnce.html" title="trait core::ops::function::FnOnce">FnOnce</a>() -&gt; D</span>;
+}</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Provides the <a href="trait.WrapErr.html#tymethod.wrap_err" title="method miden_utils_diagnostics::WrapErr::wrap_err"><code>wrap_err()</code></a> method for <a href="type.Result.html" title="type miden_utils_diagnostics::Result"><code>Result</code></a>.</p>
+<p>This trait is sealed and cannot be implemented for types outside of
+<code>miette</code>.</p>
+<h2 id="example"><a class="doc-anchor" href="#example">§</a>Example</h2>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>miette::{WrapErr, IntoDiagnostic, <span class="prelude-ty">Result</span>};
+<span class="kw">use </span>std::{fs, path::PathBuf};
+
+<span class="kw">pub struct </span>ImportantThing {
+    path: PathBuf,
+}
+
+<span class="kw">impl </span>ImportantThing {
+    <span class="kw">pub fn </span>detach(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {...}
+}
+
+<span class="kw">pub fn </span>do_it(<span class="kw-2">mut </span>it: ImportantThing) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;u8&gt;&gt; {
+    it.detach().wrap_err(<span class="string">"Failed to detach the important thing"</span>)<span class="question-mark">?</span>;
+
+    <span class="kw">let </span>path = <span class="kw-2">&amp;</span>it.path;
+    <span class="kw">let </span>content = fs::read(path)
+        .into_diagnostic()
+        .wrap_err_with(|| <span class="macro">format!</span>(
+            <span class="string">"Failed to read instrs from {}"</span>,
+            path.display())
+        )<span class="question-mark">?</span>;
+
+    <span class="prelude-val">Ok</span>(content)
+}</code></pre></div>
+<p>When printed, the outermost error would be printed first and the lower
+level underlying causes would be enumerated below.</p>
+<div class="example-wrap"><pre class="language-console"><code>Error: Failed to read instrs from ./path/to/instrs.json
+
+Caused by:
+    No such file or directory (os error 2)</code></pre></div><h2 id="wrapping-types-that-do-not-implement-error"><a class="doc-anchor" href="#wrapping-types-that-do-not-implement-error">§</a>Wrapping Types That Do Not Implement <code>Error</code></h2>
+<p>For example <code>&amp;str</code> and <code>Box&lt;dyn Error&gt;</code>.</p>
+<p>Due to restrictions for coherence <code>Report</code> cannot implement <code>From</code> for types
+that don’t implement <code>Error</code>. Attempts to do so will give <code>"this type might implement Error in the future"</code> as an error. As such, <code>wrap_err()</code>, which
+uses <code>From</code> under the hood, cannot be used to wrap these types. Instead we
+encourage you to use the combinators provided for <code>Result</code> in <code>std</code>/<code>core</code>.</p>
+<p>For example, instead of this:</p>
+
+<div class="example-wrap compile_fail"><a href="#" class="tooltip" title="This example deliberately fails to compile">ⓘ</a><pre class="rust rust-example-rendered"><code><span class="kw">use </span>std::error::Error;
+<span class="kw">use </span>miette::{WrapErr, Report};
+
+<span class="kw">fn </span>wrap_example(err: <span class="prelude-ty">Result</span>&lt;(), Box&lt;<span class="kw">dyn </span>Error + Send + Sync + <span class="lifetime">'static</span>&gt;&gt;)
+    -&gt; <span class="prelude-ty">Result</span>&lt;(), Report&gt;
+{
+    err.wrap_err(<span class="string">"saw a downstream error"</span>)
+}</code></pre></div>
+<p>We encourage you to write this:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>miette::{miette, Report, WrapErr};
+<span class="kw">use </span>std::error::Error;
+
+<span class="kw">fn </span>wrap_example(err: <span class="prelude-ty">Result</span>&lt;(), Box&lt;<span class="kw">dyn </span>Error + Send + Sync + <span class="lifetime">'static</span>&gt;&gt;) -&gt; <span class="prelude-ty">Result</span>&lt;(), Report&gt; {
+    err.map_err(|e| <span class="macro">miette!</span>(e))
+        .wrap_err(<span class="string">"saw a downstream error"</span>)
+}</code></pre></div><h2 id="effect-on-downcasting"><a class="doc-anchor" href="#effect-on-downcasting">§</a>Effect on Downcasting</h2>
+<p>After attaching a message of type <code>D</code> onto an error of type <code>E</code>, the
+resulting <code>miette::Error</code> may be downcast to <code>D</code> <strong>or</strong> to <code>E</code>.</p>
+<p>That is, in codebases that rely on downcasting, <code>miette</code>’s <code>wrap_err()</code>
+supports both of the following use cases:</p>
+<ul>
+<li>
+<p><strong>Attaching messages whose type is insignificant onto errors whose type
+is used in downcasts.</strong></p>
+<p>In other error libraries whose <code>wrap_err()</code> is not designed this way, it
+can be risky to introduce messages to existing code because new message
+might break existing working downcasts. In miette, any downcast that
+worked before adding the message will continue to work after you add a
+message, so you should freely wrap errors wherever it would be helpful.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>miette::{WrapErr, <span class="prelude-ty">Result</span>};
+
+<span class="kw">fn </span>do_it() -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
+    helper().wrap_err(<span class="string">"Failed to complete the work"</span>)<span class="question-mark">?</span>;
+    ...
+}
+
+<span class="kw">fn </span>main() {
+    <span class="kw">let </span>err = do_it().unwrap_err();
+    <span class="kw">if let </span><span class="prelude-val">Some</span>(e) = err.downcast_ref::&lt;SuspiciousError&gt;() {
+        <span class="comment">// If helper() returned SuspiciousError, this downcast will
+        // correctly succeed even with the message in between.
+    </span>}
+}</code></pre></div></li>
+<li>
+<p><strong>Attaching message whose type is used in downcasts onto errors whose
+type is insignificant.</strong></p>
+<p>Some codebases prefer to use machine-readable messages to categorize
+lower level errors in a way that will be actionable to higher levels of
+the application.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>miette::{WrapErr, <span class="prelude-ty">Result</span>};
+
+<span class="kw">fn </span>do_it() -&gt; <span class="prelude-ty">Result</span>&lt;()&gt; {
+    helper().wrap_err(HelperFailed)<span class="question-mark">?</span>;
+    ...
+}
+
+<span class="kw">fn </span>main() {
+    <span class="kw">let </span>err = do_it().unwrap_err();
+    <span class="kw">if let </span><span class="prelude-val">Some</span>(e) = err.downcast_ref::&lt;HelperFailed&gt;() {
+        <span class="comment">// If helper failed, this downcast will succeed because
+        // HelperFailed is the message that has been attached to
+        // that error.
+    </span>}
+}</code></pre></div></li>
+</ul>
+</div></details><h2 id="required-methods" class="section-header">Required Methods<a href="#required-methods" class="anchor">§</a></h2><div class="methods"><details class="toggle method-toggle" open><summary><section id="tymethod.wrap_err" class="method"><h4 class="code-header">fn <a href="#tymethod.wrap_err" class="fn">wrap_err</a>&lt;D&gt;(self, msg: D) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;T, <a class="struct" href="struct.Report.html" title="struct miden_utils_diagnostics::Report">Report</a>&gt;<div class="where">where
+    D: <a class="trait" href="https://doc.rust-lang.org/nightly/core/fmt/trait.Display.html" title="trait core::fmt::Display">Display</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a> + 'static,</div></h4></section></summary><div class="docblock"><p>Wrap the error value with a new adhoc error</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.wrap_err_with" class="method"><h4 class="code-header">fn <a href="#tymethod.wrap_err_with" class="fn">wrap_err_with</a>&lt;D, F&gt;(self, f: F) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;T, <a class="struct" href="struct.Report.html" title="struct miden_utils_diagnostics::Report">Report</a>&gt;<div class="where">where
+    D: <a class="trait" href="https://doc.rust-lang.org/nightly/core/fmt/trait.Display.html" title="trait core::fmt::Display">Display</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a> + 'static,
+    F: <a class="trait" href="https://doc.rust-lang.org/nightly/core/ops/function/trait.FnOnce.html" title="trait core::ops::function::FnOnce">FnOnce</a>() -&gt; D,</div></h4></section></summary><div class="docblock"><p>Wrap the error value with a new adhoc error that is evaluated lazily
+only once an error does occur.</p>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.context" class="method"><h4 class="code-header">fn <a href="#tymethod.context" class="fn">context</a>&lt;D&gt;(self, msg: D) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;T, <a class="struct" href="struct.Report.html" title="struct miden_utils_diagnostics::Report">Report</a>&gt;<div class="where">where
+    D: <a class="trait" href="https://doc.rust-lang.org/nightly/core/fmt/trait.Display.html" title="trait core::fmt::Display">Display</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a> + 'static,</div></h4></section></summary><div class="docblock"><p>Compatibility re-export of <code>wrap_err()</code> for interop with <code>anyhow</code></p>
+</div></details><details class="toggle method-toggle" open><summary><section id="tymethod.with_context" class="method"><h4 class="code-header">fn <a href="#tymethod.with_context" class="fn">with_context</a>&lt;D, F&gt;(self, f: F) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;T, <a class="struct" href="struct.Report.html" title="struct miden_utils_diagnostics::Report">Report</a>&gt;<div class="where">where
+    D: <a class="trait" href="https://doc.rust-lang.org/nightly/core/fmt/trait.Display.html" title="trait core::fmt::Display">Display</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a> + 'static,
+    F: <a class="trait" href="https://doc.rust-lang.org/nightly/core/ops/function/trait.FnOnce.html" title="trait core::ops::function::FnOnce">FnOnce</a>() -&gt; D,</div></h4></section></summary><div class="docblock"><p>Compatibility re-export of <code>wrap_err_with()</code> for interop with <code>anyhow</code></p>
+</div></details></div><h2 id="dyn-compatibility" class="section-header">Dyn Compatibility<a href="#dyn-compatibility" class="anchor">§</a></h2><div class="dyn-compatibility-info"><p>This trait is <b>not</b> <a href="https://doc.rust-lang.org/nightly/reference/items/traits.html#dyn-compatibility">dyn compatible</a>.</p><p><i>In older versions of Rust, dyn compatibility was called "object safety", so this trait is not object safe.</i></p></div><h2 id="foreign-impls" class="section-header">Implementations on Foreign Types<a href="#foreign-impls" class="anchor">§</a></h2><details class="toggle implementors-toggle"><summary><section id="impl-WrapErr%3CT,+E%3E-for-Result%3CT,+E%3E" class="impl"><a href="#impl-WrapErr%3CT,+E%3E-for-Result%3CT,+E%3E" class="anchor">§</a><h3 class="code-header">impl&lt;T, E&gt; <a class="trait" href="trait.WrapErr.html" title="trait miden_utils_diagnostics::WrapErr">WrapErr</a>&lt;T, E&gt; for <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;T, E&gt;<div class="where">where
+    E: Diag + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a> + 'static,</div></h3></section></summary><div class="impl-items"><section id="method.wrap_err" class="method trait-impl"><a href="#method.wrap_err" class="anchor">§</a><h4 class="code-header">fn <a href="#tymethod.wrap_err" class="fn">wrap_err</a>&lt;D&gt;(self, msg: D) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;T, <a class="struct" href="struct.Report.html" title="struct miden_utils_diagnostics::Report">Report</a>&gt;<div class="where">where
+    D: <a class="trait" href="https://doc.rust-lang.org/nightly/core/fmt/trait.Display.html" title="trait core::fmt::Display">Display</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a> + 'static,</div></h4></section><section id="method.wrap_err_with" class="method trait-impl"><a href="#method.wrap_err_with" class="anchor">§</a><h4 class="code-header">fn <a href="#tymethod.wrap_err_with" class="fn">wrap_err_with</a>&lt;D, F&gt;(self, msg: F) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;T, <a class="struct" href="struct.Report.html" title="struct miden_utils_diagnostics::Report">Report</a>&gt;<div class="where">where
+    D: <a class="trait" href="https://doc.rust-lang.org/nightly/core/fmt/trait.Display.html" title="trait core::fmt::Display">Display</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a> + 'static,
+    F: <a class="trait" href="https://doc.rust-lang.org/nightly/core/ops/function/trait.FnOnce.html" title="trait core::ops::function::FnOnce">FnOnce</a>() -&gt; D,</div></h4></section><section id="method.context" class="method trait-impl"><a href="#method.context" class="anchor">§</a><h4 class="code-header">fn <a href="#tymethod.context" class="fn">context</a>&lt;D&gt;(self, msg: D) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;T, <a class="struct" href="struct.Report.html" title="struct miden_utils_diagnostics::Report">Report</a>&gt;<div class="where">where
+    D: <a class="trait" href="https://doc.rust-lang.org/nightly/core/fmt/trait.Display.html" title="trait core::fmt::Display">Display</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a> + 'static,</div></h4></section><section id="method.with_context" class="method trait-impl"><a href="#method.with_context" class="anchor">§</a><h4 class="code-header">fn <a href="#tymethod.with_context" class="fn">with_context</a>&lt;D, F&gt;(self, msg: F) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;T, <a class="struct" href="struct.Report.html" title="struct miden_utils_diagnostics::Report">Report</a>&gt;<div class="where">where
+    D: <a class="trait" href="https://doc.rust-lang.org/nightly/core/fmt/trait.Display.html" title="trait core::fmt::Display">Display</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> + <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a> + 'static,
+    F: <a class="trait" href="https://doc.rust-lang.org/nightly/core/ops/function/trait.FnOnce.html" title="trait core::ops::function::FnOnce">FnOnce</a>() -&gt; D,</div></h4></section></div></details><h2 id="implementors" class="section-header">Implementors<a href="#implementors" class="anchor">§</a></h2><div id="implementors-list"></div><script src="../trait.impl/miden_miette/eyreish/trait.WrapErr.js" data-ignore-extern-crates="core" async></script></section></div></main></body></html>

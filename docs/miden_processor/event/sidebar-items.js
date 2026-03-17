@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["SystemEvent"],"struct":["EventHandlerRegistry","EventId","EventName","NoopEventHandler"],"trait":["EventHandler"],"type":["EventError"]};

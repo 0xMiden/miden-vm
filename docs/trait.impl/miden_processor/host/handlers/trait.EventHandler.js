@@ -1,0 +1,9 @@
+(function() {
+    const implementors = Object.fromEntries([["miden_core_lib",[["impl <a class=\"trait\" href=\"miden_processor/host/handlers/trait.EventHandler.html\" title=\"trait miden_processor::host::handlers::EventHandler\">EventHandler</a> for <a class=\"struct\" href=\"miden_core_lib/handlers/ecdsa/struct.EcdsaPrecompile.html\" title=\"struct miden_core_lib::handlers::ecdsa::EcdsaPrecompile\">EcdsaPrecompile</a>",0],["impl <a class=\"trait\" href=\"miden_processor/host/handlers/trait.EventHandler.html\" title=\"trait miden_processor::host::handlers::EventHandler\">EventHandler</a> for <a class=\"struct\" href=\"miden_core_lib/handlers/eddsa_ed25519/struct.EddsaPrecompile.html\" title=\"struct miden_core_lib::handlers::eddsa_ed25519::EddsaPrecompile\">EddsaPrecompile</a>",0],["impl <a class=\"trait\" href=\"miden_processor/host/handlers/trait.EventHandler.html\" title=\"trait miden_processor::host::handlers::EventHandler\">EventHandler</a> for <a class=\"struct\" href=\"miden_core_lib/handlers/keccak256/struct.KeccakPrecompile.html\" title=\"struct miden_core_lib::handlers::keccak256::KeccakPrecompile\">KeccakPrecompile</a>",0],["impl <a class=\"trait\" href=\"miden_processor/host/handlers/trait.EventHandler.html\" title=\"trait miden_processor::host::handlers::EventHandler\">EventHandler</a> for <a class=\"struct\" href=\"miden_core_lib/handlers/sha512/struct.Sha512Precompile.html\" title=\"struct miden_core_lib::handlers::sha512::Sha512Precompile\">Sha512Precompile</a>",0]]],["miden_processor",[]]]);
+    if (window.register_implementors) {
+        window.register_implementors(implementors);
+    } else {
+        window.pending_implementors = implementors;
+    }
+})()
+//{"start":59,"fragment_lengths":[1448,23]}

@@ -1,0 +1,2 @@
+window.ALL_CRATES = ["miden_ace_codegen","miden_air","miden_assembly","miden_assembly_syntax","miden_core","miden_core_lib","miden_debug_types","miden_mast_package","miden_processor","miden_prover","miden_test_serde_macros","miden_test_utils","miden_utils_core_derive","miden_utils_diagnostics","miden_utils_indexing","miden_utils_sync","miden_verifier","miden_vm"];
+//{"start":21,"fragment_lengths":[19,12,17,24,13,17,20,21,18,15,26,19,26,26,23,19,17,11]}

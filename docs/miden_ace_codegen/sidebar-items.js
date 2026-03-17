@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["EXT_DEGREE"],"enum":["AceError","InputKey","LayoutKind"],"fn":["build_ace_circuit_for_air","build_layout_for_air"],"struct":["AceCircuit","AceConfig","EncodedCircuit","InputCounts","InputLayout"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["set_hook","set_panic_hook"],"struct":["DebugReportHandler","GraphicalReportHandler","GraphicalTheme","JSONReportHandler","NarratableReportHandler","PrintDiagnostic"],"trait":["ReportHandler"],"type":["DefaultReportHandler","ReportHandlerOpts"]};

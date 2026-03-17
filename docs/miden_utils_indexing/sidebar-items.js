@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["CsrValidationError","IndexedVecError"],"macro":["newtype_id"],"struct":["CsrMatrix","DenseIdMap","IndexVec"],"trait":["Idx","LookupByIdx","LookupByKey"]};

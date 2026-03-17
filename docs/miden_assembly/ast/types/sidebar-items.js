@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["AddressSpace","CallConv","InvalidAddressSpaceError","InvalidEnumTypeError","Type","TypeRepr"],"struct":["ArrayType","EnumType","FunctionType","NameAndType","PointerType","StructField","StructType","Variant"],"trait":["Alignable"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["LinkLibraryKind","LinkStatus","LinkerError","SymbolItem"],"struct":["CallGraph","CycleError","LinkLibrary","Linker","ResolverCache","Symbol","SymbolResolutionContext","SymbolResolver"]};

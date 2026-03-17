@@ -1,0 +1,916 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `air/src/constraints/decoder/mod.rs`."><title>mod.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="miden_air" data-themes="" data-resource-suffix="" data-rustdoc-version="1.96.0-nightly (3645249d7 2026-03-16)" data-channel="nightly" data-search-js="search-63369b7b.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-5013f961.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">miden_air/constraints/decoder/</div>mod.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Decoder constraints module.
+<a href=#2 id=2 data-nosnippet>2</a>//!
+<a href=#3 id=3 data-nosnippet>3</a>//! This module contains constraints for the decoder component of the Miden VM.
+<a href=#4 id=4 data-nosnippet>4</a>//! The decoder handles instruction decoding, control flow, and basic block management.
+<a href=#5 id=5 data-nosnippet>5</a>//!
+<a href=#6 id=6 data-nosnippet>6</a>//! ## Constraint Categories
+<a href=#7 id=7 data-nosnippet>7</a>//!
+<a href=#8 id=8 data-nosnippet>8</a>//! 1. **Op Bit Constraints**: Ensure operation bits are binary
+<a href=#9 id=9 data-nosnippet>9</a>//! 2. **Op Bits Extra Columns**: Ensure degree reduction columns are correctly computed
+<a href=#10 id=10 data-nosnippet>10</a>//! 3. **Batch Flag Constraints**: Ensure batch flags are binary and properly set
+<a href=#11 id=11 data-nosnippet>11</a>//! 4. **In-Span Constraints**: Ensure in-span flag transitions correctly
+<a href=#12 id=12 data-nosnippet>12</a>//! 5. **Group Count Constraints**: Ensure group count transitions correctly
+<a href=#13 id=13 data-nosnippet>13</a>//!
+<a href=#14 id=14 data-nosnippet>14</a>//! ## Mental Model
+<a href=#15 id=15 data-nosnippet>15</a>//!
+<a href=#16 id=16 data-nosnippet>16</a>//! The decoder trace is the control-flow spine of the VM. Each row is either:
+<a href=#17 id=17 data-nosnippet>17</a>//! - **inside a basic block** (sp = 1) where ops execute and counters advance, or
+<a href=#18 id=18 data-nosnippet>18</a>//! - **a control-flow row** (sp = 0) that starts/ends/reshapes a block.
+<a href=#19 id=19 data-nosnippet>19</a>//!
+<a href=#20 id=20 data-nosnippet>20</a>//! The constraints below enforce three linked ideas:
+<a href=#21 id=21 data-nosnippet>21</a>//! 1. **Opcode decoding is well-formed** (op bits and degree-reduction columns are consistent).
+<a href=#22 id=22 data-nosnippet>22</a>//! 2. **Span state is coherent** (sp, group_count, op_index evolve exactly as control-flow allows).
+<a href=#23 id=23 data-nosnippet>23</a>//! 3. **Hasher lanes match batch semantics** (batch flags and h0..h7 encode the pending groups).
+<a href=#24 id=24 data-nosnippet>24</a>//!
+<a href=#25 id=25 data-nosnippet>25</a>//! Read the sections in that order: first the binary/format checks, then the span state machine,
+<a href=#26 id=26 data-nosnippet>26</a>//! then the counters and packing rules that make group decoding deterministic.
+<a href=#27 id=27 data-nosnippet>27</a>//!
+<a href=#28 id=28 data-nosnippet>28</a>//! ## Decoder Trace Layout
+<a href=#29 id=29 data-nosnippet>29</a>//!
+<a href=#30 id=30 data-nosnippet>30</a>//! The decoder trace consists of the following columns:
+<a href=#31 id=31 data-nosnippet>31</a>//! - `addr`: Block address (row address in hasher table)
+<a href=#32 id=32 data-nosnippet>32</a>//! - `b0-b6`: 7 operation bits encoding the opcode
+<a href=#33 id=33 data-nosnippet>33</a>//! - `h0-h7`: 8 hasher state columns (shared between decoding and program hashing)
+<a href=#34 id=34 data-nosnippet>34</a>//! - `sp`: In-span flag (1 when inside basic block, 0 otherwise)
+<a href=#35 id=35 data-nosnippet>35</a>//! - `gc`: Group count (remaining operation groups in current span)
+<a href=#36 id=36 data-nosnippet>36</a>//! - `ox`: Operation index (position within current operation group, 0-8)
+<a href=#37 id=37 data-nosnippet>37</a>//! - `c0, c1, c2`: Batch flags (encode number of groups in current batch)
+<a href=#38 id=38 data-nosnippet>38</a>//! - `e0, e1`: Extra columns for degree reduction
+<a href=#39 id=39 data-nosnippet>39</a>
+<a href=#40 id=40 data-nosnippet>40</a></span><span class="kw">use </span>miden_core::field::PrimeCharacteristicRing;
+<a href=#41 id=41 data-nosnippet>41</a><span class="kw">use </span>miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
+<a href=#42 id=42 data-nosnippet>42</a>
+<a href=#43 id=43 data-nosnippet>43</a><span class="kw">use </span>crate::{
+<a href=#44 id=44 data-nosnippet>44</a>    MainTraceRow,
+<a href=#45 id=45 data-nosnippet>45</a>    constraints::{
+<a href=#46 id=46 data-nosnippet>46</a>        op_flags::{ExprDecoderAccess, OpFlags},
+<a href=#47 id=47 data-nosnippet>47</a>        tagging::{
+<a href=#48 id=48 data-nosnippet>48</a>            TagGroup, TaggingAirBuilderExt, ids::TAG_DECODER_BASE, tagged_assert_zero,
+<a href=#49 id=49 data-nosnippet>49</a>            tagged_assert_zero_integrity,
+<a href=#50 id=50 data-nosnippet>50</a>        },
+<a href=#51 id=51 data-nosnippet>51</a>    },
+<a href=#52 id=52 data-nosnippet>52</a>    trace::decoder <span class="kw">as </span>decoder_cols,
+<a href=#53 id=53 data-nosnippet>53</a>};
+<a href=#54 id=54 data-nosnippet>54</a>
+<a href=#55 id=55 data-nosnippet>55</a><span class="kw">pub mod </span>bus;
+<a href=#56 id=56 data-nosnippet>56</a><span class="attr">#[cfg(test)]
+<a href=#57 id=57 data-nosnippet>57</a></span><span class="kw">pub mod </span>tests;
+<a href=#58 id=58 data-nosnippet>58</a>
+<a href=#59 id=59 data-nosnippet>59</a><span class="comment">// CONSTANTS
+<a href=#60 id=60 data-nosnippet>60</a>// ================================================================================================
+<a href=#61 id=61 data-nosnippet>61</a>
+<a href=#62 id=62 data-nosnippet>62</a></span><span class="doccomment">/// Index offset for block address column within decoder (column 0).
+<a href=#63 id=63 data-nosnippet>63</a></span><span class="kw">const </span>ADDR_OFFSET: usize = <span class="number">0</span>;
+<a href=#64 id=64 data-nosnippet>64</a>
+<a href=#65 id=65 data-nosnippet>65</a><span class="doccomment">/// Index offsets within the decoder array for op bits (b0-b6).
+<a href=#66 id=66 data-nosnippet>66</a>/// Op bits start at index 1 in the decoder (after addr at index 0).
+<a href=#67 id=67 data-nosnippet>67</a></span><span class="kw">const </span>OP_BITS_OFFSET: usize = <span class="number">1</span>;
+<a href=#68 id=68 data-nosnippet>68</a>
+<a href=#69 id=69 data-nosnippet>69</a><span class="doccomment">/// Hash cycle length for Poseidon2 (32 rows per permutation).
+<a href=#70 id=70 data-nosnippet>70</a></span><span class="kw">const </span>HASH_CYCLE_LEN: u64 = <span class="number">32</span>;
+<a href=#71 id=71 data-nosnippet>71</a>
+<a href=#72 id=72 data-nosnippet>72</a><span class="doccomment">/// Number of operation bits.
+<a href=#73 id=73 data-nosnippet>73</a></span><span class="kw">const </span>NUM_OP_BITS: usize = <span class="number">7</span>;
+<a href=#74 id=74 data-nosnippet>74</a>
+<a href=#75 id=75 data-nosnippet>75</a><span class="doccomment">/// Index offset for in-span column within decoder.
+<a href=#76 id=76 data-nosnippet>76</a></span><span class="kw">const </span>IN_SPAN_OFFSET: usize = <span class="number">16</span>;
+<a href=#77 id=77 data-nosnippet>77</a>
+<a href=#78 id=78 data-nosnippet>78</a><span class="doccomment">/// Index offset for group count column within decoder.
+<a href=#79 id=79 data-nosnippet>79</a></span><span class="kw">const </span>GROUP_COUNT_OFFSET: usize = <span class="number">17</span>;
+<a href=#80 id=80 data-nosnippet>80</a>
+<a href=#81 id=81 data-nosnippet>81</a><span class="doccomment">/// Index offset for operation index column within decoder.
+<a href=#82 id=82 data-nosnippet>82</a></span><span class="kw">const </span>OP_INDEX_OFFSET: usize = <span class="number">18</span>;
+<a href=#83 id=83 data-nosnippet>83</a>
+<a href=#84 id=84 data-nosnippet>84</a><span class="doccomment">/// Index offset for batch flags within decoder.
+<a href=#85 id=85 data-nosnippet>85</a></span><span class="kw">const </span>BATCH_FLAGS_OFFSET: usize = <span class="number">19</span>;
+<a href=#86 id=86 data-nosnippet>86</a>
+<a href=#87 id=87 data-nosnippet>87</a><span class="doccomment">/// Number of batch flag columns.
+<a href=#88 id=88 data-nosnippet>88</a></span><span class="kw">const </span>NUM_BATCH_FLAGS: usize = <span class="number">3</span>;
+<a href=#89 id=89 data-nosnippet>89</a>
+<a href=#90 id=90 data-nosnippet>90</a><span class="doccomment">/// Index offset for extra columns (e0, e1) within decoder.
+<a href=#91 id=91 data-nosnippet>91</a></span><span class="kw">const </span>EXTRA_COLS_OFFSET: usize = <span class="number">22</span>;
+<a href=#92 id=92 data-nosnippet>92</a>
+<a href=#93 id=93 data-nosnippet>93</a><span class="doccomment">/// Number of decoder constraints, in the order of `DECODER_NAMES`.
+<a href=#94 id=94 data-nosnippet>94</a>/// - 7 op bits binary constraints
+<a href=#95 id=95 data-nosnippet>95</a>/// - 2 extra columns constraints (e0, e1)
+<a href=#96 id=96 data-nosnippet>96</a>/// - 3 op-bit group constraints (u32 b0, very-high b0/b1)
+<a href=#97 id=97 data-nosnippet>97</a>/// - 3 batch flags binary constraints
+<a href=#98 id=98 data-nosnippet>98</a>/// - 14 general constraints
+<a href=#99 id=99 data-nosnippet>99</a>/// - 1 in-span boundary constraint (first row sp = 0)
+<a href=#100 id=100 data-nosnippet>100</a>/// - 1 in-span binary constraint
+<a href=#101 id=101 data-nosnippet>101</a>/// - 2 in-span transition constraints (after SPAN/RESPAN, sp' = 1)
+<a href=#102 id=102 data-nosnippet>102</a>/// - 5 group count constraints
+<a href=#103 id=103 data-nosnippet>103</a>/// - 2 op group decoding constraints
+<a href=#104 id=104 data-nosnippet>104</a>/// - 4 op index constraints
+<a href=#105 id=105 data-nosnippet>105</a>/// - 9 op batch flag constraints
+<a href=#106 id=106 data-nosnippet>106</a>/// - 3 block address constraints
+<a href=#107 id=107 data-nosnippet>107</a>/// - 1 control flow constraint (1 - sp - f_ctrl = 0)
+<a href=#108 id=108 data-nosnippet>108</a></span><span class="attr">#[allow(dead_code)]
+<a href=#109 id=109 data-nosnippet>109</a></span><span class="kw">pub const </span>NUM_CONSTRAINTS: usize = <span class="number">57</span>;
+<a href=#110 id=110 data-nosnippet>110</a>
+<a href=#111 id=111 data-nosnippet>111</a><span class="doccomment">/// Base ID for decoder constraints (inclusive).
+<a href=#112 id=112 data-nosnippet>112</a></span><span class="kw">const </span>DECODER_BASE_ID: usize = TAG_DECODER_BASE;
+<a href=#113 id=113 data-nosnippet>113</a>
+<a href=#114 id=114 data-nosnippet>114</a><span class="doccomment">/// Decoder constraint namespaces in assertion order.
+<a href=#115 id=115 data-nosnippet>115</a></span><span class="kw">const </span>DECODER_NAMES: [<span class="kw-2">&amp;</span>str; NUM_CONSTRAINTS] = [
+<a href=#116 id=116 data-nosnippet>116</a>    <span class="comment">// in-span constraints (boundary first, then transition rules)
+<a href=#117 id=117 data-nosnippet>117</a>    </span><span class="string">"decoder.in_span.first_row"</span>,
+<a href=#118 id=118 data-nosnippet>118</a>    <span class="string">"decoder.in_span.binary"</span>,
+<a href=#119 id=119 data-nosnippet>119</a>    <span class="string">"decoder.in_span.span"</span>,
+<a href=#120 id=120 data-nosnippet>120</a>    <span class="string">"decoder.in_span.respan"</span>,
+<a href=#121 id=121 data-nosnippet>121</a>    <span class="comment">// op bits binary (b0..b6)
+<a href=#122 id=122 data-nosnippet>122</a>    </span><span class="string">"decoder.op_bits.b0.binary"</span>,
+<a href=#123 id=123 data-nosnippet>123</a>    <span class="string">"decoder.op_bits.b1.binary"</span>,
+<a href=#124 id=124 data-nosnippet>124</a>    <span class="string">"decoder.op_bits.b2.binary"</span>,
+<a href=#125 id=125 data-nosnippet>125</a>    <span class="string">"decoder.op_bits.b3.binary"</span>,
+<a href=#126 id=126 data-nosnippet>126</a>    <span class="string">"decoder.op_bits.b4.binary"</span>,
+<a href=#127 id=127 data-nosnippet>127</a>    <span class="string">"decoder.op_bits.b5.binary"</span>,
+<a href=#128 id=128 data-nosnippet>128</a>    <span class="string">"decoder.op_bits.b6.binary"</span>,
+<a href=#129 id=129 data-nosnippet>129</a>    <span class="comment">// extra columns (e0, e1)
+<a href=#130 id=130 data-nosnippet>130</a>    </span><span class="string">"decoder.extra.e0"</span>,
+<a href=#131 id=131 data-nosnippet>131</a>    <span class="string">"decoder.extra.e1"</span>,
+<a href=#132 id=132 data-nosnippet>132</a>    <span class="comment">// op-bit group constraints
+<a href=#133 id=133 data-nosnippet>133</a>    </span><span class="string">"decoder.op_bits.u32_prefix.b0"</span>,
+<a href=#134 id=134 data-nosnippet>134</a>    <span class="string">"decoder.op_bits.very_high.b0"</span>,
+<a href=#135 id=135 data-nosnippet>135</a>    <span class="string">"decoder.op_bits.very_high.b1"</span>,
+<a href=#136 id=136 data-nosnippet>136</a>    <span class="comment">// batch flags binary (c0..c2)
+<a href=#137 id=137 data-nosnippet>137</a>    </span><span class="string">"decoder.batch_flags.c0.binary"</span>,
+<a href=#138 id=138 data-nosnippet>138</a>    <span class="string">"decoder.batch_flags.c1.binary"</span>,
+<a href=#139 id=139 data-nosnippet>139</a>    <span class="string">"decoder.batch_flags.c2.binary"</span>,
+<a href=#140 id=140 data-nosnippet>140</a>    <span class="comment">// general constraints
+<a href=#141 id=141 data-nosnippet>141</a>    </span><span class="string">"decoder.general.split_loop.s0.binary"</span>,
+<a href=#142 id=142 data-nosnippet>142</a>    <span class="string">"decoder.general.dyn.h4.zero"</span>,
+<a href=#143 id=143 data-nosnippet>143</a>    <span class="string">"decoder.general.dyn.h5.zero"</span>,
+<a href=#144 id=144 data-nosnippet>144</a>    <span class="string">"decoder.general.dyn.h6.zero"</span>,
+<a href=#145 id=145 data-nosnippet>145</a>    <span class="string">"decoder.general.dyn.h7.zero"</span>,
+<a href=#146 id=146 data-nosnippet>146</a>    <span class="string">"decoder.general.repeat.s0.one"</span>,
+<a href=#147 id=147 data-nosnippet>147</a>    <span class="string">"decoder.general.repeat.h4.one"</span>,
+<a href=#148 id=148 data-nosnippet>148</a>    <span class="string">"decoder.general.end.loop.s0.zero"</span>,
+<a href=#149 id=149 data-nosnippet>149</a>    <span class="string">"decoder.general.end_repeat.h0.carry"</span>,
+<a href=#150 id=150 data-nosnippet>150</a>    <span class="string">"decoder.general.end_repeat.h1.carry"</span>,
+<a href=#151 id=151 data-nosnippet>151</a>    <span class="string">"decoder.general.end_repeat.h2.carry"</span>,
+<a href=#152 id=152 data-nosnippet>152</a>    <span class="string">"decoder.general.end_repeat.h3.carry"</span>,
+<a href=#153 id=153 data-nosnippet>153</a>    <span class="string">"decoder.general.end_repeat.h4.carry"</span>,
+<a href=#154 id=154 data-nosnippet>154</a>    <span class="string">"decoder.general.halt.next"</span>,
+<a href=#155 id=155 data-nosnippet>155</a>    <span class="comment">// group count constraints
+<a href=#156 id=156 data-nosnippet>156</a>    </span><span class="string">"decoder.group_count.delta.binary"</span>,
+<a href=#157 id=157 data-nosnippet>157</a>    <span class="string">"decoder.group_count.decrement.h0_or_imm"</span>,
+<a href=#158 id=158 data-nosnippet>158</a>    <span class="string">"decoder.group_count.span_decrement"</span>,
+<a href=#159 id=159 data-nosnippet>159</a>    <span class="string">"decoder.group_count.end_or_respan.hold"</span>,
+<a href=#160 id=160 data-nosnippet>160</a>    <span class="string">"decoder.group_count.end.zero"</span>,
+<a href=#161 id=161 data-nosnippet>161</a>    <span class="comment">// op group decoding constraints
+<a href=#162 id=162 data-nosnippet>162</a>    </span><span class="string">"decoder.op_group.shift"</span>,
+<a href=#163 id=163 data-nosnippet>163</a>    <span class="string">"decoder.op_group.end_or_respan.h0.zero"</span>,
+<a href=#164 id=164 data-nosnippet>164</a>    <span class="comment">// op index constraints
+<a href=#165 id=165 data-nosnippet>165</a>    </span><span class="string">"decoder.op_index.span_respan.reset"</span>,
+<a href=#166 id=166 data-nosnippet>166</a>    <span class="string">"decoder.op_index.new_group.reset"</span>,
+<a href=#167 id=167 data-nosnippet>167</a>    <span class="string">"decoder.op_index.increment"</span>,
+<a href=#168 id=168 data-nosnippet>168</a>    <span class="string">"decoder.op_index.range"</span>,
+<a href=#169 id=169 data-nosnippet>169</a>    <span class="comment">// batch flag constraints and zeroing rules
+<a href=#170 id=170 data-nosnippet>170</a>    </span><span class="string">"decoder.batch_flags.span_sum"</span>,
+<a href=#171 id=171 data-nosnippet>171</a>    <span class="string">"decoder.batch_flags.zero_when_not_span"</span>,
+<a href=#172 id=172 data-nosnippet>172</a>    <span class="string">"decoder.batch_flags.h4.zero"</span>,
+<a href=#173 id=173 data-nosnippet>173</a>    <span class="string">"decoder.batch_flags.h5.zero"</span>,
+<a href=#174 id=174 data-nosnippet>174</a>    <span class="string">"decoder.batch_flags.h6.zero"</span>,
+<a href=#175 id=175 data-nosnippet>175</a>    <span class="string">"decoder.batch_flags.h7.zero"</span>,
+<a href=#176 id=176 data-nosnippet>176</a>    <span class="string">"decoder.batch_flags.h2.zero"</span>,
+<a href=#177 id=177 data-nosnippet>177</a>    <span class="string">"decoder.batch_flags.h3.zero"</span>,
+<a href=#178 id=178 data-nosnippet>178</a>    <span class="string">"decoder.batch_flags.h1.zero"</span>,
+<a href=#179 id=179 data-nosnippet>179</a>    <span class="comment">// block address constraints
+<a href=#180 id=180 data-nosnippet>180</a>    </span><span class="string">"decoder.addr.hold_in_span"</span>,
+<a href=#181 id=181 data-nosnippet>181</a>    <span class="string">"decoder.addr.respan.increment"</span>,
+<a href=#182 id=182 data-nosnippet>182</a>    <span class="string">"decoder.addr.halt.zero"</span>,
+<a href=#183 id=183 data-nosnippet>183</a>    <span class="comment">// control flow constraint
+<a href=#184 id=184 data-nosnippet>184</a>    </span><span class="string">"decoder.control_flow.sp_complement"</span>,
+<a href=#185 id=185 data-nosnippet>185</a>];
+<a href=#186 id=186 data-nosnippet>186</a>
+<a href=#187 id=187 data-nosnippet>187</a><span class="doccomment">/// Tag metadata for this constraint group.
+<a href=#188 id=188 data-nosnippet>188</a></span><span class="kw">const </span>DECODER_TAGS: TagGroup = TagGroup {
+<a href=#189 id=189 data-nosnippet>189</a>    base: DECODER_BASE_ID,
+<a href=#190 id=190 data-nosnippet>190</a>    names: <span class="kw-2">&amp;</span>DECODER_NAMES,
+<a href=#191 id=191 data-nosnippet>191</a>};
+<a href=#192 id=192 data-nosnippet>192</a>
+<a href=#193 id=193 data-nosnippet>193</a><span class="comment">// Relative offsets into DECODER_NAMES by constraint group.
+<a href=#194 id=194 data-nosnippet>194</a></span><span class="kw">const </span>IN_SPAN_BASE: usize = <span class="number">0</span>;
+<a href=#195 id=195 data-nosnippet>195</a><span class="kw">const </span>OP_BITS_BASE: usize = IN_SPAN_BASE + <span class="number">4</span>;
+<a href=#196 id=196 data-nosnippet>196</a><span class="kw">const </span>EXTRA_BASE: usize = OP_BITS_BASE + NUM_OP_BITS;
+<a href=#197 id=197 data-nosnippet>197</a><span class="kw">const </span>OP_BIT_GROUP_BASE: usize = EXTRA_BASE + <span class="number">2</span>;
+<a href=#198 id=198 data-nosnippet>198</a><span class="kw">const </span>BATCH_FLAGS_BINARY_BASE: usize = OP_BIT_GROUP_BASE + <span class="number">3</span>;
+<a href=#199 id=199 data-nosnippet>199</a><span class="kw">const </span>GENERAL_BASE: usize = BATCH_FLAGS_BINARY_BASE + NUM_BATCH_FLAGS;
+<a href=#200 id=200 data-nosnippet>200</a><span class="kw">const </span>GROUP_COUNT_BASE: usize = GENERAL_BASE + <span class="number">14</span>;
+<a href=#201 id=201 data-nosnippet>201</a><span class="kw">const </span>OP_GROUP_DECODING_BASE: usize = GROUP_COUNT_BASE + <span class="number">5</span>;
+<a href=#202 id=202 data-nosnippet>202</a><span class="kw">const </span>OP_INDEX_BASE: usize = OP_GROUP_DECODING_BASE + <span class="number">2</span>;
+<a href=#203 id=203 data-nosnippet>203</a><span class="kw">const </span>BATCH_FLAGS_BASE: usize = OP_INDEX_BASE + <span class="number">4</span>;
+<a href=#204 id=204 data-nosnippet>204</a><span class="kw">const </span>ADDR_BASE: usize = BATCH_FLAGS_BASE + <span class="number">9</span>;
+<a href=#205 id=205 data-nosnippet>205</a><span class="kw">const </span>CONTROL_FLOW_BASE: usize = ADDR_BASE + <span class="number">3</span>;
+<a href=#206 id=206 data-nosnippet>206</a>
+<a href=#207 id=207 data-nosnippet>207</a><span class="doccomment">/// The degrees of the decoder constraints.
+<a href=#208 id=208 data-nosnippet>208</a></span><span class="attr">#[allow(dead_code)]
+<a href=#209 id=209 data-nosnippet>209</a></span><span class="kw">pub const </span>CONSTRAINT_DEGREES: [usize; NUM_CONSTRAINTS] = [
+<a href=#210 id=210 data-nosnippet>210</a>    <span class="number">2</span>, <span class="number">2</span>, <span class="number">2</span>, <span class="number">2</span>, <span class="number">2</span>, <span class="number">2</span>, <span class="number">2</span>, <span class="comment">// op bits binary (degree 2)
+<a href=#211 id=211 data-nosnippet>211</a>    </span><span class="number">4</span>, <span class="number">3</span>, <span class="comment">// e0 (degree 4), e1 (degree 3)
+<a href=#212 id=212 data-nosnippet>212</a>    </span><span class="number">4</span>, <span class="number">3</span>, <span class="number">3</span>, <span class="comment">// u32 b0, very-high b0/b1
+<a href=#213 id=213 data-nosnippet>213</a>    </span><span class="number">2</span>, <span class="number">2</span>, <span class="number">2</span>, <span class="comment">// batch flags binary (degree 2)
+<a href=#214 id=214 data-nosnippet>214</a>    </span><span class="number">7</span>, <span class="number">6</span>, <span class="number">6</span>, <span class="number">6</span>, <span class="number">6</span>, <span class="comment">// general: split/loop top binary, dyn h4..h7 = 0
+<a href=#215 id=215 data-nosnippet>215</a>    </span><span class="number">5</span>, <span class="number">5</span>, <span class="comment">// general: repeat top=1, repeat in-loop
+<a href=#216 id=216 data-nosnippet>216</a>    </span><span class="number">6</span>, <span class="comment">// general: end + is_loop + s0
+<a href=#217 id=217 data-nosnippet>217</a>    </span><span class="number">9</span>, <span class="number">9</span>, <span class="number">9</span>, <span class="number">9</span>, <span class="number">9</span>, <span class="comment">// general: end + repeat' copies h0..h4
+<a href=#218 id=218 data-nosnippet>218</a>    </span><span class="number">8</span>, <span class="comment">// general: halt -&gt; halt'
+<a href=#219 id=219 data-nosnippet>219</a>    </span><span class="number">1</span>, <span class="comment">// sp first row (degree 1)
+<a href=#220 id=220 data-nosnippet>220</a>    </span><span class="number">2</span>, <span class="comment">// sp binary (degree 2)
+<a href=#221 id=221 data-nosnippet>221</a>    </span><span class="number">6</span>, <span class="number">5</span>, <span class="comment">// sp transition for SPAN (deg 5+1=6), RESPAN (deg 4+1=5)
+<a href=#222 id=222 data-nosnippet>222</a>    </span><span class="number">3</span>, <span class="comment">// gc delta bounded (degree 3: sp * delta * (delta - 1))
+<a href=#223 id=223 data-nosnippet>223</a>    </span><span class="number">8</span>, <span class="comment">// gc decrement implies (h0=0 or is_push=1)
+<a href=#224 id=224 data-nosnippet>224</a>    </span><span class="number">6</span>, <span class="comment">// gc decrement on SPAN/RESPAN/PUSH
+<a href=#225 id=225 data-nosnippet>225</a>    </span><span class="number">5</span>, <span class="comment">// gc stays when next is END or RESPAN
+<a href=#226 id=226 data-nosnippet>226</a>    </span><span class="number">5</span>, <span class="comment">// gc zero at END
+<a href=#227 id=227 data-nosnippet>227</a>    </span><span class="number">6</span>, <span class="comment">// op group decoding: h0 shift by op'
+<a href=#228 id=228 data-nosnippet>228</a>    </span><span class="number">6</span>, <span class="comment">// op group decoding: h0 must be 0 before END/RESPAN
+<a href=#229 id=229 data-nosnippet>229</a>    </span><span class="number">6</span>, <span class="comment">// ox reset on SPAN/RESPAN (degree 6)
+<a href=#230 id=230 data-nosnippet>230</a>    </span><span class="number">6</span>, <span class="comment">// ox reset on new group (degree 6: sp * ng * ox')
+<a href=#231 id=231 data-nosnippet>231</a>    </span><span class="number">7</span>, <span class="comment">// ox increment inside basic block (degree 7)
+<a href=#232 id=232 data-nosnippet>232</a>    </span><span class="number">9</span>, <span class="comment">// ox range [0,8] (degree 9)
+<a href=#233 id=233 data-nosnippet>233</a>    </span><span class="number">5</span>, <span class="comment">// batch flags sum (span/respan -&gt; one of g1/g2/g4/g8)
+<a href=#234 id=234 data-nosnippet>234</a>    </span><span class="number">6</span>, <span class="comment">// batch flags zero when not span/respan
+<a href=#235 id=235 data-nosnippet>235</a>    </span><span class="number">4</span>, <span class="number">4</span>, <span class="number">4</span>, <span class="number">4</span>, <span class="comment">// h4..h7 zero when &lt;=4 groups
+<a href=#236 id=236 data-nosnippet>236</a>    </span><span class="number">4</span>, <span class="number">4</span>, <span class="comment">// h2..h3 zero when &lt;=2 groups
+<a href=#237 id=237 data-nosnippet>237</a>    </span><span class="number">4</span>, <span class="comment">// h1 zero when &lt;=1 group
+<a href=#238 id=238 data-nosnippet>238</a>    </span><span class="number">2</span>, <span class="comment">// addr unchanged inside basic block (degree 2)
+<a href=#239 id=239 data-nosnippet>239</a>    </span><span class="number">5</span>, <span class="comment">// addr increment on RESPAN (degree 5)
+<a href=#240 id=240 data-nosnippet>240</a>    </span><span class="number">5</span>, <span class="comment">// addr zero at HALT (degree 5)
+<a href=#241 id=241 data-nosnippet>241</a>    </span><span class="number">5</span>, <span class="comment">// control flow: 1 - sp - f_ctrl = 0
+<a href=#242 id=242 data-nosnippet>242</a></span>];
+<a href=#243 id=243 data-nosnippet>243</a>
+<a href=#244 id=244 data-nosnippet>244</a><span class="comment">// SMALL HELPERS
+<a href=#245 id=245 data-nosnippet>245</a>// ================================================================================================
+<a href=#246 id=246 data-nosnippet>246</a>
+<a href=#247 id=247 data-nosnippet>247</a></span><span class="doccomment">/// Asserts a value is binary (0 or 1): `x * (x - 1) = 0`.
+<a href=#248 id=248 data-nosnippet>248</a></span><span class="kw">fn </span>assert_binary&lt;AB&gt;(builder: <span class="kw-2">&amp;mut </span>AB, idx: usize, value: AB::Expr)
+<a href=#249 id=249 data-nosnippet>249</a><span class="kw">where
+<a href=#250 id=250 data-nosnippet>250</a>    </span>AB: TaggingAirBuilderExt,
+<a href=#251 id=251 data-nosnippet>251</a>{
+<a href=#252 id=252 data-nosnippet>252</a>    assert_zero_integrity(builder, idx, value.clone() * (value - AB::Expr::ONE));
+<a href=#253 id=253 data-nosnippet>253</a>}
+<a href=#254 id=254 data-nosnippet>254</a>
+<a href=#255 id=255 data-nosnippet>255</a><span class="doccomment">/// Computes the opcode value from op bits: `b0 + 2*b1 + ... + 64*b6`.
+<a href=#256 id=256 data-nosnippet>256</a></span><span class="kw">fn </span>op_bits_to_value&lt;AB&gt;(bits: <span class="kw-2">&amp;</span>[AB::Expr; NUM_OP_BITS]) -&gt; AB::Expr
+<a href=#257 id=257 data-nosnippet>257</a><span class="kw">where
+<a href=#258 id=258 data-nosnippet>258</a>    </span>AB: LiftedAirBuilder,
+<a href=#259 id=259 data-nosnippet>259</a>{
+<a href=#260 id=260 data-nosnippet>260</a>    bits.iter().enumerate().fold(AB::Expr::ZERO, |acc, (i, bit)| {
+<a href=#261 id=261 data-nosnippet>261</a>        acc + bit.clone() * AB::Expr::from_u16(<span class="number">1u16 </span>&lt;&lt; i)
+<a href=#262 id=262 data-nosnippet>262</a>    })
+<a href=#263 id=263 data-nosnippet>263</a>}
+<a href=#264 id=264 data-nosnippet>264</a>
+<a href=#265 id=265 data-nosnippet>265</a><span class="comment">// ENTRY POINTS
+<a href=#266 id=266 data-nosnippet>266</a>// ================================================================================================
+<a href=#267 id=267 data-nosnippet>267</a>
+<a href=#268 id=268 data-nosnippet>268</a></span><span class="doccomment">/// Enforces decoder main-trace constraints (entry point).
+<a href=#269 id=269 data-nosnippet>269</a></span><span class="kw">pub fn </span>enforce_main&lt;AB&gt;(
+<a href=#270 id=270 data-nosnippet>270</a>    builder: <span class="kw-2">&amp;mut </span>AB,
+<a href=#271 id=271 data-nosnippet>271</a>    local: <span class="kw-2">&amp;</span>MainTraceRow&lt;AB::Var&gt;,
+<a href=#272 id=272 data-nosnippet>272</a>    next: <span class="kw-2">&amp;</span>MainTraceRow&lt;AB::Var&gt;,
+<a href=#273 id=273 data-nosnippet>273</a>    op_flags: <span class="kw-2">&amp;</span>OpFlags&lt;AB::Expr&gt;,
+<a href=#274 id=274 data-nosnippet>274</a>) <span class="kw">where
+<a href=#275 id=275 data-nosnippet>275</a>    </span>AB: TaggingAirBuilderExt,
+<a href=#276 id=276 data-nosnippet>276</a>{
+<a href=#277 id=277 data-nosnippet>277</a>    <span class="comment">// Load decoder columns using typed struct
+<a href=#278 id=278 data-nosnippet>278</a>    </span><span class="kw">let </span>cols: DecoderColumns&lt;AB::Expr&gt; = DecoderColumns::from_row::&lt;AB&gt;(local);
+<a href=#279 id=279 data-nosnippet>279</a>    <span class="kw">let </span>cols_next: DecoderColumns&lt;AB::Expr&gt; = DecoderColumns::from_row::&lt;AB&gt;(next);
+<a href=#280 id=280 data-nosnippet>280</a>    <span class="kw">let </span>op_flags_next = OpFlags::new(ExprDecoderAccess::&lt;AB::Var, AB::Expr&gt;::new(next));
+<a href=#281 id=281 data-nosnippet>281</a>
+<a href=#282 id=282 data-nosnippet>282</a>    enforce_in_span_constraints(builder, <span class="kw-2">&amp;</span>cols, <span class="kw-2">&amp;</span>cols_next, op_flags);
+<a href=#283 id=283 data-nosnippet>283</a>    enforce_op_bits_binary(builder, <span class="kw-2">&amp;</span>cols);
+<a href=#284 id=284 data-nosnippet>284</a>    enforce_extra_columns(builder, <span class="kw-2">&amp;</span>cols);
+<a href=#285 id=285 data-nosnippet>285</a>    enforce_op_bit_group_constraints(builder, <span class="kw-2">&amp;</span>cols);
+<a href=#286 id=286 data-nosnippet>286</a>    enforce_batch_flags_binary(builder, <span class="kw-2">&amp;</span>cols);
+<a href=#287 id=287 data-nosnippet>287</a>    enforce_general_constraints(builder, local, next, op_flags, <span class="kw-2">&amp;</span>op_flags_next);
+<a href=#288 id=288 data-nosnippet>288</a>    enforce_group_count_constraints(builder, <span class="kw-2">&amp;</span>cols, <span class="kw-2">&amp;</span>cols_next, local, op_flags, <span class="kw-2">&amp;</span>op_flags_next);
+<a href=#289 id=289 data-nosnippet>289</a>    enforce_op_group_decoding_constraints(
+<a href=#290 id=290 data-nosnippet>290</a>        builder,
+<a href=#291 id=291 data-nosnippet>291</a>        <span class="kw-2">&amp;</span>cols,
+<a href=#292 id=292 data-nosnippet>292</a>        <span class="kw-2">&amp;</span>cols_next,
+<a href=#293 id=293 data-nosnippet>293</a>        local,
+<a href=#294 id=294 data-nosnippet>294</a>        next,
+<a href=#295 id=295 data-nosnippet>295</a>        op_flags,
+<a href=#296 id=296 data-nosnippet>296</a>        <span class="kw-2">&amp;</span>op_flags_next,
+<a href=#297 id=297 data-nosnippet>297</a>    );
+<a href=#298 id=298 data-nosnippet>298</a>    enforce_op_index_constraints(builder, <span class="kw-2">&amp;</span>cols, <span class="kw-2">&amp;</span>cols_next, op_flags);
+<a href=#299 id=299 data-nosnippet>299</a>    enforce_batch_flags_constraints(builder, <span class="kw-2">&amp;</span>cols, local, op_flags);
+<a href=#300 id=300 data-nosnippet>300</a>    enforce_block_address_constraints(builder, <span class="kw-2">&amp;</span>cols, <span class="kw-2">&amp;</span>cols_next, op_flags);
+<a href=#301 id=301 data-nosnippet>301</a>    enforce_control_flow_constraints(builder, <span class="kw-2">&amp;</span>cols, op_flags);
+<a href=#302 id=302 data-nosnippet>302</a>}
+<a href=#303 id=303 data-nosnippet>303</a>
+<a href=#304 id=304 data-nosnippet>304</a><span class="comment">// INTERNAL HELPERS
+<a href=#305 id=305 data-nosnippet>305</a>// ================================================================================================
+<a href=#306 id=306 data-nosnippet>306</a>
+<a href=#307 id=307 data-nosnippet>307</a></span><span class="doccomment">/// Typed access to decoder columns.
+<a href=#308 id=308 data-nosnippet>308</a>///
+<a href=#309 id=309 data-nosnippet>309</a>/// This struct provides named access to decoder columns, eliminating error-prone
+<a href=#310 id=310 data-nosnippet>310</a>/// index arithmetic. Created from a `MainTraceRow` reference.
+<a href=#311 id=311 data-nosnippet>311</a>///
+<a href=#312 id=312 data-nosnippet>312</a>/// ## Layout
+<a href=#313 id=313 data-nosnippet>313</a>/// - `addr`: Block address (row address in hasher table)
+<a href=#314 id=314 data-nosnippet>314</a>/// - `op_bits[0..7]`: Operation bits b0-b6 encoding the opcode
+<a href=#315 id=315 data-nosnippet>315</a>/// - `in_span`: In-span flag (sp) - 1 when inside basic block
+<a href=#316 id=316 data-nosnippet>316</a>/// - `group_count`: Group count (gc) - remaining operation groups
+<a href=#317 id=317 data-nosnippet>317</a>/// - `op_index`: Operation index (ox) - position within group (0-8)
+<a href=#318 id=318 data-nosnippet>318</a>/// - `batch_flags[0..3]`: Batch flags c0, c1, c2
+<a href=#319 id=319 data-nosnippet>319</a>/// - `extra[0..2]`: Extra columns e0, e1 for degree reduction
+<a href=#320 id=320 data-nosnippet>320</a>///
+<a href=#321 id=321 data-nosnippet>321</a>/// Note: the 8 decoder hasher-state lanes live in the decoder trace but are not included here.
+<a href=#322 id=322 data-nosnippet>322</a>/// Constraints which depend on these lanes access them directly via `MainTraceRow` accessors.
+<a href=#323 id=323 data-nosnippet>323</a></span><span class="kw">pub struct </span>DecoderColumns&lt;E&gt; {
+<a href=#324 id=324 data-nosnippet>324</a>    <span class="doccomment">/// Block address (row address in hasher table)
+<a href=#325 id=325 data-nosnippet>325</a>    </span><span class="kw">pub </span>addr: E,
+<a href=#326 id=326 data-nosnippet>326</a>    <span class="doccomment">/// Operation bits b0-b6 (7 bits encoding the opcode)
+<a href=#327 id=327 data-nosnippet>327</a>    </span><span class="kw">pub </span>op_bits: [E; NUM_OP_BITS],
+<a href=#328 id=328 data-nosnippet>328</a>    <span class="doccomment">/// In-span flag (1 when inside basic block, 0 otherwise)
+<a href=#329 id=329 data-nosnippet>329</a>    </span><span class="kw">pub </span>in_span: E,
+<a href=#330 id=330 data-nosnippet>330</a>    <span class="doccomment">/// Group count (remaining operation groups in current span)
+<a href=#331 id=331 data-nosnippet>331</a>    </span><span class="kw">pub </span>group_count: E,
+<a href=#332 id=332 data-nosnippet>332</a>    <span class="doccomment">/// Operation index (position within current operation group, 0-8)
+<a href=#333 id=333 data-nosnippet>333</a>    </span><span class="kw">pub </span>op_index: E,
+<a href=#334 id=334 data-nosnippet>334</a>    <span class="doccomment">/// Batch flags c0, c1, c2 (encode number of groups in current batch)
+<a href=#335 id=335 data-nosnippet>335</a>    </span><span class="kw">pub </span>batch_flags: [E; NUM_BATCH_FLAGS],
+<a href=#336 id=336 data-nosnippet>336</a>    <span class="doccomment">/// Extra columns e0, e1 for degree reduction
+<a href=#337 id=337 data-nosnippet>337</a>    </span><span class="kw">pub </span>extra: [E; <span class="number">2</span>],
+<a href=#338 id=338 data-nosnippet>338</a>}
+<a href=#339 id=339 data-nosnippet>339</a>
+<a href=#340 id=340 data-nosnippet>340</a><span class="kw">impl</span>&lt;E: Clone&gt; DecoderColumns&lt;E&gt; {
+<a href=#341 id=341 data-nosnippet>341</a>    <span class="doccomment">/// Extract decoder columns from a main trace row.
+<a href=#342 id=342 data-nosnippet>342</a>    </span><span class="kw">pub fn </span>from_row&lt;AB&gt;(row: <span class="kw-2">&amp;</span>MainTraceRow&lt;AB::Var&gt;) -&gt; <span class="self">Self
+<a href=#343 id=343 data-nosnippet>343</a>    </span><span class="kw">where
+<a href=#344 id=344 data-nosnippet>344</a>        </span>AB: LiftedAirBuilder,
+<a href=#345 id=345 data-nosnippet>345</a>        AB::Var: Into&lt;E&gt; + Clone,
+<a href=#346 id=346 data-nosnippet>346</a>    {
+<a href=#347 id=347 data-nosnippet>347</a>        DecoderColumns {
+<a href=#348 id=348 data-nosnippet>348</a>            addr: row.decoder[ADDR_OFFSET].clone().into(),
+<a href=#349 id=349 data-nosnippet>349</a>            op_bits: core::array::from_fn(|i| row.decoder[OP_BITS_OFFSET + i].clone().into()),
+<a href=#350 id=350 data-nosnippet>350</a>            in_span: row.decoder[IN_SPAN_OFFSET].clone().into(),
+<a href=#351 id=351 data-nosnippet>351</a>            group_count: row.decoder[GROUP_COUNT_OFFSET].clone().into(),
+<a href=#352 id=352 data-nosnippet>352</a>            op_index: row.decoder[OP_INDEX_OFFSET].clone().into(),
+<a href=#353 id=353 data-nosnippet>353</a>            batch_flags: core::array::from_fn(|i| {
+<a href=#354 id=354 data-nosnippet>354</a>                row.decoder[BATCH_FLAGS_OFFSET + i].clone().into()
+<a href=#355 id=355 data-nosnippet>355</a>            }),
+<a href=#356 id=356 data-nosnippet>356</a>            extra: core::array::from_fn(|i| row.decoder[EXTRA_COLS_OFFSET + i].clone().into()),
+<a href=#357 id=357 data-nosnippet>357</a>        }
+<a href=#358 id=358 data-nosnippet>358</a>    }
+<a href=#359 id=359 data-nosnippet>359</a>}
+<a href=#360 id=360 data-nosnippet>360</a>
+<a href=#361 id=361 data-nosnippet>361</a><span class="comment">// CONSTRAINT HELPERS
+<a href=#362 id=362 data-nosnippet>362</a>// ================================================================================================
+<a href=#363 id=363 data-nosnippet>363</a>
+<a href=#364 id=364 data-nosnippet>364</a></span><span class="doccomment">/// Enforces in-span (sp) constraints.
+<a href=#365 id=365 data-nosnippet>365</a>///
+<a href=#366 id=366 data-nosnippet>366</a>/// The in-span flag indicates whether we're inside a basic block:
+<a href=#367 id=367 data-nosnippet>367</a>/// - sp = 1 when executing operations inside a basic block
+<a href=#368 id=368 data-nosnippet>368</a>/// - sp = 0 for SPAN, RESPAN, END, and control-flow operations
+<a href=#369 id=369 data-nosnippet>369</a>///
+<a href=#370 id=370 data-nosnippet>370</a>/// This is the entry point to the decoder state machine. Once sp is set by SPAN/RESPAN,
+<a href=#371 id=371 data-nosnippet>371</a>/// the rest of the decoder constraints (gc, ox, batch flags) are interpreted relative to
+<a href=#372 id=372 data-nosnippet>372</a>/// being inside that span.
+<a href=#373 id=373 data-nosnippet>373</a>///
+<a href=#374 id=374 data-nosnippet>374</a>/// Constraints:
+<a href=#375 id=375 data-nosnippet>375</a>/// 1. sp is binary: sp * (sp - 1) = 0
+<a href=#376 id=376 data-nosnippet>376</a>/// 2. After SPAN operation, sp' = 1: span_flag * (1 - sp') = 0
+<a href=#377 id=377 data-nosnippet>377</a>/// 3. After RESPAN operation, sp' = 1: respan_flag * (1 - sp') = 0
+<a href=#378 id=378 data-nosnippet>378</a></span><span class="kw">fn </span>enforce_in_span_constraints&lt;AB&gt;(
+<a href=#379 id=379 data-nosnippet>379</a>    builder: <span class="kw-2">&amp;mut </span>AB,
+<a href=#380 id=380 data-nosnippet>380</a>    cols: <span class="kw-2">&amp;</span>DecoderColumns&lt;AB::Expr&gt;,
+<a href=#381 id=381 data-nosnippet>381</a>    cols_next: <span class="kw-2">&amp;</span>DecoderColumns&lt;AB::Expr&gt;,
+<a href=#382 id=382 data-nosnippet>382</a>    op_flags: <span class="kw-2">&amp;</span>OpFlags&lt;AB::Expr&gt;,
+<a href=#383 id=383 data-nosnippet>383</a>) <span class="kw">where
+<a href=#384 id=384 data-nosnippet>384</a>    </span>AB: TaggingAirBuilderExt,
+<a href=#385 id=385 data-nosnippet>385</a>{
+<a href=#386 id=386 data-nosnippet>386</a>    <span class="kw">let </span>sp = cols.in_span.clone();
+<a href=#387 id=387 data-nosnippet>387</a>    <span class="kw">let </span>sp_next = cols_next.in_span.clone();
+<a href=#388 id=388 data-nosnippet>388</a>
+<a href=#389 id=389 data-nosnippet>389</a>    <span class="comment">// Boundary: execution starts outside any basic block.
+<a href=#390 id=390 data-nosnippet>390</a>    </span>assert_zero_first_row(builder, IN_SPAN_BASE, sp.clone());
+<a href=#391 id=391 data-nosnippet>391</a>
+<a href=#392 id=392 data-nosnippet>392</a>    <span class="comment">// Constraint 1: sp is binary, so span state is well-formed.
+<a href=#393 id=393 data-nosnippet>393</a>    </span><span class="kw">let </span>sp_binary = sp.clone() * (sp - AB::Expr::ONE);
+<a href=#394 id=394 data-nosnippet>394</a>    assert_zero_integrity(builder, IN_SPAN_BASE + <span class="number">1</span>, sp_binary);
+<a href=#395 id=395 data-nosnippet>395</a>
+<a href=#396 id=396 data-nosnippet>396</a>    <span class="comment">// Constraint 2: After SPAN, the next row must be inside a span.
+<a href=#397 id=397 data-nosnippet>397</a>    // span_flag * (1 - sp') = 0
+<a href=#398 id=398 data-nosnippet>398</a>    </span><span class="kw">let </span>span_flag = op_flags.span();
+<a href=#399 id=399 data-nosnippet>399</a>    assert_zero_transition(
+<a href=#400 id=400 data-nosnippet>400</a>        builder,
+<a href=#401 id=401 data-nosnippet>401</a>        IN_SPAN_BASE + <span class="number">2</span>,
+<a href=#402 id=402 data-nosnippet>402</a>        span_flag * (AB::Expr::ONE - sp_next.clone()),
+<a href=#403 id=403 data-nosnippet>403</a>    );
+<a href=#404 id=404 data-nosnippet>404</a>
+<a href=#405 id=405 data-nosnippet>405</a>    <span class="comment">// Constraint 3: After RESPAN, the next row must be inside a span.
+<a href=#406 id=406 data-nosnippet>406</a>    // respan_flag * (1 - sp') = 0
+<a href=#407 id=407 data-nosnippet>407</a>    </span><span class="kw">let </span>respan_flag = op_flags.respan();
+<a href=#408 id=408 data-nosnippet>408</a>    assert_zero_transition(builder, IN_SPAN_BASE + <span class="number">3</span>, respan_flag * (AB::Expr::ONE - sp_next));
+<a href=#409 id=409 data-nosnippet>409</a>}
+<a href=#410 id=410 data-nosnippet>410</a>
+<a href=#411 id=411 data-nosnippet>411</a><span class="doccomment">/// Enforces that all operation bits (b0-b6) are binary (0 or 1).
+<a href=#412 id=412 data-nosnippet>412</a>///
+<a href=#413 id=413 data-nosnippet>413</a>/// For each bit bi: bi * (bi - 1) = 0
+<a href=#414 id=414 data-nosnippet>414</a></span><span class="kw">fn </span>enforce_op_bits_binary&lt;AB&gt;(builder: <span class="kw-2">&amp;mut </span>AB, cols: <span class="kw-2">&amp;</span>DecoderColumns&lt;AB::Expr&gt;)
+<a href=#415 id=415 data-nosnippet>415</a><span class="kw">where
+<a href=#416 id=416 data-nosnippet>416</a>    </span>AB: TaggingAirBuilderExt,
+<a href=#417 id=417 data-nosnippet>417</a>{
+<a href=#418 id=418 data-nosnippet>418</a>    <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..NUM_OP_BITS {
+<a href=#419 id=419 data-nosnippet>419</a>        <span class="comment">// Each opcode bit must be 0 or 1 to make decoding deterministic.
+<a href=#420 id=420 data-nosnippet>420</a>        </span>assert_binary(builder, OP_BITS_BASE + i, cols.op_bits[i].clone());
+<a href=#421 id=421 data-nosnippet>421</a>    }
+<a href=#422 id=422 data-nosnippet>422</a>}
+<a href=#423 id=423 data-nosnippet>423</a>
+<a href=#424 id=424 data-nosnippet>424</a><span class="doccomment">/// Enforces that the extra columns (e0, e1) are correctly computed from op bits.
+<a href=#425 id=425 data-nosnippet>425</a>///
+<a href=#426 id=426 data-nosnippet>426</a>/// These columns are used for degree reduction in operation flag computation:
+<a href=#427 id=427 data-nosnippet>427</a>/// - e0 = b6 * (1 - b5) * b4
+<a href=#428 id=428 data-nosnippet>428</a>/// - e1 = b6 * b5
+<a href=#429 id=429 data-nosnippet>429</a></span><span class="kw">fn </span>enforce_extra_columns&lt;AB&gt;(builder: <span class="kw-2">&amp;mut </span>AB, cols: <span class="kw-2">&amp;</span>DecoderColumns&lt;AB::Expr&gt;)
+<a href=#430 id=430 data-nosnippet>430</a><span class="kw">where
+<a href=#431 id=431 data-nosnippet>431</a>    </span>AB: TaggingAirBuilderExt,
+<a href=#432 id=432 data-nosnippet>432</a>{
+<a href=#433 id=433 data-nosnippet>433</a>    <span class="kw">let </span>b4 = cols.op_bits[<span class="number">4</span>].clone();
+<a href=#434 id=434 data-nosnippet>434</a>    <span class="kw">let </span>b5 = cols.op_bits[<span class="number">5</span>].clone();
+<a href=#435 id=435 data-nosnippet>435</a>    <span class="kw">let </span>b6 = cols.op_bits[<span class="number">6</span>].clone();
+<a href=#436 id=436 data-nosnippet>436</a>
+<a href=#437 id=437 data-nosnippet>437</a>    <span class="kw">let </span>e0 = cols.extra[<span class="number">0</span>].clone();
+<a href=#438 id=438 data-nosnippet>438</a>    <span class="kw">let </span>e1 = cols.extra[<span class="number">1</span>].clone();
+<a href=#439 id=439 data-nosnippet>439</a>
+<a href=#440 id=440 data-nosnippet>440</a>    <span class="comment">// e0 = b6 * (1 - b5) * b4.
+<a href=#441 id=441 data-nosnippet>441</a>    // This extra register exists to reduce the degree of op-flag selectors for the
+<a href=#442 id=442 data-nosnippet>442</a>    // `101...` opcode group (see docs/src/design/stack/op_constraints.md).
+<a href=#443 id=443 data-nosnippet>443</a>    </span><span class="kw">let </span>expected_e0 = b6.clone() * (AB::Expr::ONE - b5.clone()) * b4;
+<a href=#444 id=444 data-nosnippet>444</a>    assert_zero_integrity(builder, EXTRA_BASE, e0 - expected_e0);
+<a href=#445 id=445 data-nosnippet>445</a>
+<a href=#446 id=446 data-nosnippet>446</a>    <span class="comment">// e1 = b6 * b5.
+<a href=#447 id=447 data-nosnippet>447</a>    // This extra register exists to reduce the degree of op-flag selectors for the
+<a href=#448 id=448 data-nosnippet>448</a>    // `11...` opcode group (see docs/src/design/stack/op_constraints.md).
+<a href=#449 id=449 data-nosnippet>449</a>    </span><span class="kw">let </span>expected_e1 = b6 * b5;
+<a href=#450 id=450 data-nosnippet>450</a>    assert_zero_integrity(builder, EXTRA_BASE + <span class="number">1</span>, e1 - expected_e1);
+<a href=#451 id=451 data-nosnippet>451</a>}
+<a href=#452 id=452 data-nosnippet>452</a>
+<a href=#453 id=453 data-nosnippet>453</a><span class="doccomment">/// Enforces opcode-bit constraints for grouped opcode families.
+<a href=#454 id=454 data-nosnippet>454</a>///
+<a href=#455 id=455 data-nosnippet>455</a>/// - U32 ops (prefix `100`) must have b0 = 0.
+<a href=#456 id=456 data-nosnippet>456</a>/// - Very-high-degree ops (prefix `11`) must have b0 = b1 = 0.
+<a href=#457 id=457 data-nosnippet>457</a></span><span class="kw">fn </span>enforce_op_bit_group_constraints&lt;AB&gt;(builder: <span class="kw-2">&amp;mut </span>AB, cols: <span class="kw-2">&amp;</span>DecoderColumns&lt;AB::Expr&gt;)
+<a href=#458 id=458 data-nosnippet>458</a><span class="kw">where
+<a href=#459 id=459 data-nosnippet>459</a>    </span>AB: TaggingAirBuilderExt,
+<a href=#460 id=460 data-nosnippet>460</a>{
+<a href=#461 id=461 data-nosnippet>461</a>    <span class="kw">let </span>b0 = cols.op_bits[<span class="number">0</span>].clone();
+<a href=#462 id=462 data-nosnippet>462</a>    <span class="kw">let </span>b1 = cols.op_bits[<span class="number">1</span>].clone();
+<a href=#463 id=463 data-nosnippet>463</a>    <span class="kw">let </span>b4 = cols.op_bits[<span class="number">4</span>].clone();
+<a href=#464 id=464 data-nosnippet>464</a>    <span class="kw">let </span>b5 = cols.op_bits[<span class="number">5</span>].clone();
+<a href=#465 id=465 data-nosnippet>465</a>    <span class="kw">let </span>b6 = cols.op_bits[<span class="number">6</span>].clone();
+<a href=#466 id=466 data-nosnippet>466</a>
+<a href=#467 id=467 data-nosnippet>467</a>    <span class="comment">// U32 prefix pattern: b6=1, b5=0, b4=0. Under this prefix, b0 must be 0 to
+<a href=#468 id=468 data-nosnippet>468</a>    // eliminate invalid opcodes in the U32 opcode subset.
+<a href=#469 id=469 data-nosnippet>469</a>    </span><span class="kw">let </span>u32_prefix = b6.clone() * (AB::Expr::ONE - b5.clone()) * (AB::Expr::ONE - b4);
+<a href=#470 id=470 data-nosnippet>470</a>    assert_zero_integrity(builder, OP_BIT_GROUP_BASE, u32_prefix * b0.clone());
+<a href=#471 id=471 data-nosnippet>471</a>
+<a href=#472 id=472 data-nosnippet>472</a>    <span class="comment">// Very-high prefix pattern: b6=1, b5=1. Under this prefix, b0 and b1 must be 0
+<a href=#473 id=473 data-nosnippet>473</a>    // to eliminate invalid opcodes in the very-high opcode subset.
+<a href=#474 id=474 data-nosnippet>474</a>    </span><span class="kw">let </span>very_high_prefix = b6 * b5;
+<a href=#475 id=475 data-nosnippet>475</a>    assert_zero_integrity(builder, OP_BIT_GROUP_BASE + <span class="number">1</span>, very_high_prefix.clone() * b0);
+<a href=#476 id=476 data-nosnippet>476</a>    assert_zero_integrity(builder, OP_BIT_GROUP_BASE + <span class="number">2</span>, very_high_prefix * b1);
+<a href=#477 id=477 data-nosnippet>477</a>}
+<a href=#478 id=478 data-nosnippet>478</a>
+<a href=#479 id=479 data-nosnippet>479</a><span class="doccomment">/// Enforces that batch flags (c0, c1, c2) are binary.
+<a href=#480 id=480 data-nosnippet>480</a>///
+<a href=#481 id=481 data-nosnippet>481</a>/// For each flag ci: ci * (ci - 1) = 0
+<a href=#482 id=482 data-nosnippet>482</a></span><span class="kw">fn </span>enforce_batch_flags_binary&lt;AB&gt;(builder: <span class="kw-2">&amp;mut </span>AB, cols: <span class="kw-2">&amp;</span>DecoderColumns&lt;AB::Expr&gt;)
+<a href=#483 id=483 data-nosnippet>483</a><span class="kw">where
+<a href=#484 id=484 data-nosnippet>484</a>    </span>AB: TaggingAirBuilderExt,
+<a href=#485 id=485 data-nosnippet>485</a>{
+<a href=#486 id=486 data-nosnippet>486</a>    <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..NUM_BATCH_FLAGS {
+<a href=#487 id=487 data-nosnippet>487</a>        <span class="comment">// Batch flags are selectors; they must be boolean.
+<a href=#488 id=488 data-nosnippet>488</a>        </span>assert_binary(builder, BATCH_FLAGS_BINARY_BASE + i, cols.batch_flags[i].clone());
+<a href=#489 id=489 data-nosnippet>489</a>    }
+<a href=#490 id=490 data-nosnippet>490</a>}
+<a href=#491 id=491 data-nosnippet>491</a>
+<a href=#492 id=492 data-nosnippet>492</a><span class="doccomment">/// Enforces general decoder constraints derived from opcode semantics.
+<a href=#493 id=493 data-nosnippet>493</a>///
+<a href=#494 id=494 data-nosnippet>494</a>/// These are the opcode-specific rules that aren't captured by the generic counters:
+<a href=#495 id=495 data-nosnippet>495</a>/// - SPLIT/LOOP: s0 must be binary (branch selector)
+<a href=#496 id=496 data-nosnippet>496</a>/// - DYN: upper hasher lanes are zero (callee hash lives in lower half)
+<a href=#497 id=497 data-nosnippet>497</a>/// - REPEAT: must be inside loop body and s0 = 1
+<a href=#498 id=498 data-nosnippet>498</a>/// - END + REPEAT': carry hasher state forward
+<a href=#499 id=499 data-nosnippet>499</a>/// - HALT: absorbing
+<a href=#500 id=500 data-nosnippet>500</a></span><span class="kw">fn </span>enforce_general_constraints&lt;AB&gt;(
+<a href=#501 id=501 data-nosnippet>501</a>    builder: <span class="kw-2">&amp;mut </span>AB,
+<a href=#502 id=502 data-nosnippet>502</a>    local: <span class="kw-2">&amp;</span>MainTraceRow&lt;AB::Var&gt;,
+<a href=#503 id=503 data-nosnippet>503</a>    next: <span class="kw-2">&amp;</span>MainTraceRow&lt;AB::Var&gt;,
+<a href=#504 id=504 data-nosnippet>504</a>    op_flags: <span class="kw-2">&amp;</span>OpFlags&lt;AB::Expr&gt;,
+<a href=#505 id=505 data-nosnippet>505</a>    op_flags_next: <span class="kw-2">&amp;</span>OpFlags&lt;AB::Expr&gt;,
+<a href=#506 id=506 data-nosnippet>506</a>) <span class="kw">where
+<a href=#507 id=507 data-nosnippet>507</a>    </span>AB: TaggingAirBuilderExt,
+<a href=#508 id=508 data-nosnippet>508</a>{
+<a href=#509 id=509 data-nosnippet>509</a>    <span class="kw">let </span>s0: AB::Expr = local.stack[<span class="number">0</span>].clone().into();
+<a href=#510 id=510 data-nosnippet>510</a>
+<a href=#511 id=511 data-nosnippet>511</a>    <span class="comment">// SPLIT/LOOP: top stack value must be binary (branch selector).
+<a href=#512 id=512 data-nosnippet>512</a>    </span><span class="kw">let </span>split_or_loop = op_flags.split() + op_flags.loop_op();
+<a href=#513 id=513 data-nosnippet>513</a>    <span class="kw">let </span>s0_binary = s0.clone() * (s0.clone() - AB::Expr::ONE);
+<a href=#514 id=514 data-nosnippet>514</a>    assert_zero_integrity(builder, GENERAL_BASE, split_or_loop * s0_binary);
+<a href=#515 id=515 data-nosnippet>515</a>
+<a href=#516 id=516 data-nosnippet>516</a>    <span class="comment">// DYN: the first half holds the callee digest; the second half must be zero.
+<a href=#517 id=517 data-nosnippet>517</a>    </span><span class="kw">let </span>f_dyn = op_flags.dyn_op();
+<a href=#518 id=518 data-nosnippet>518</a>    <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..<span class="number">4 </span>{
+<a href=#519 id=519 data-nosnippet>519</a>        <span class="kw">let </span>hi: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + <span class="number">4 </span>+ i].clone().into();
+<a href=#520 id=520 data-nosnippet>520</a>        assert_zero_integrity(builder, GENERAL_BASE + <span class="number">1 </span>+ i, f_dyn.clone() * hi);
+<a href=#521 id=521 data-nosnippet>521</a>    }
+<a href=#522 id=522 data-nosnippet>522</a>
+<a href=#523 id=523 data-nosnippet>523</a>    <span class="comment">// REPEAT: top stack must be 1 and we must be in a loop body (h4=1).
+<a href=#524 id=524 data-nosnippet>524</a>    </span><span class="kw">let </span>f_repeat = op_flags.repeat();
+<a href=#525 id=525 data-nosnippet>525</a>    <span class="kw">let </span>h4: AB::Expr = local.decoder[decoder_cols::IS_LOOP_BODY_FLAG_COL_IDX].clone().into();
+<a href=#526 id=526 data-nosnippet>526</a>    assert_zero_integrity(
+<a href=#527 id=527 data-nosnippet>527</a>        builder,
+<a href=#528 id=528 data-nosnippet>528</a>        GENERAL_BASE + <span class="number">5</span>,
+<a href=#529 id=529 data-nosnippet>529</a>        f_repeat.clone() * (AB::Expr::ONE - s0.clone()),
+<a href=#530 id=530 data-nosnippet>530</a>    );
+<a href=#531 id=531 data-nosnippet>531</a>    assert_zero_integrity(builder, GENERAL_BASE + <span class="number">6</span>, f_repeat * (AB::Expr::ONE - h4));
+<a href=#532 id=532 data-nosnippet>532</a>
+<a href=#533 id=533 data-nosnippet>533</a>    <span class="comment">// END inside a loop: if is_loop flag is set, top stack must be 0.
+<a href=#534 id=534 data-nosnippet>534</a>    </span><span class="kw">let </span>f_end = op_flags.end();
+<a href=#535 id=535 data-nosnippet>535</a>    <span class="kw">let </span>h5: AB::Expr = local.decoder[decoder_cols::IS_LOOP_FLAG_COL_IDX].clone().into();
+<a href=#536 id=536 data-nosnippet>536</a>    assert_zero_integrity(builder, GENERAL_BASE + <span class="number">7</span>, f_end.clone() * h5 * s0);
+<a href=#537 id=537 data-nosnippet>537</a>
+<a href=#538 id=538 data-nosnippet>538</a>    <span class="comment">// END followed by REPEAT: carry h0..h4 into the next row.
+<a href=#539 id=539 data-nosnippet>539</a>    </span><span class="kw">let </span>f_repeat_next = op_flags_next.repeat();
+<a href=#540 id=540 data-nosnippet>540</a>    <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..<span class="number">5 </span>{
+<a href=#541 id=541 data-nosnippet>541</a>        <span class="kw">let </span>hi: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + i].clone().into();
+<a href=#542 id=542 data-nosnippet>542</a>        <span class="kw">let </span>hi_next: AB::Expr = next.decoder[decoder_cols::HASHER_STATE_OFFSET + i].clone().into();
+<a href=#543 id=543 data-nosnippet>543</a>        assert_zero_transition(
+<a href=#544 id=544 data-nosnippet>544</a>            builder,
+<a href=#545 id=545 data-nosnippet>545</a>            GENERAL_BASE + <span class="number">8 </span>+ i,
+<a href=#546 id=546 data-nosnippet>546</a>            f_end.clone() * f_repeat_next.clone() * (hi_next - hi),
+<a href=#547 id=547 data-nosnippet>547</a>        );
+<a href=#548 id=548 data-nosnippet>548</a>    }
+<a href=#549 id=549 data-nosnippet>549</a>
+<a href=#550 id=550 data-nosnippet>550</a>    <span class="comment">// HALT is absorbing: it can only be followed by HALT.
+<a href=#551 id=551 data-nosnippet>551</a>    </span><span class="kw">let </span>f_halt = op_flags.halt();
+<a href=#552 id=552 data-nosnippet>552</a>    <span class="kw">let </span>f_halt_next = op_flags_next.halt();
+<a href=#553 id=553 data-nosnippet>553</a>    assert_zero_transition(builder, GENERAL_BASE + <span class="number">13</span>, f_halt * (AB::Expr::ONE - f_halt_next));
+<a href=#554 id=554 data-nosnippet>554</a>}
+<a href=#555 id=555 data-nosnippet>555</a>
+<a href=#556 id=556 data-nosnippet>556</a><span class="doccomment">/// Enforces group count (gc) constraints.
+<a href=#557 id=557 data-nosnippet>557</a>///
+<a href=#558 id=558 data-nosnippet>558</a>/// The group count tracks remaining operation groups in the current basic block:
+<a href=#559 id=559 data-nosnippet>559</a>/// - gc starts at the total number of groups when SPAN/RESPAN is executed
+<a href=#560 id=560 data-nosnippet>560</a>/// - gc decrements by 1 when processing SPAN, RESPAN, or completing a group
+<a href=#561 id=561 data-nosnippet>561</a>/// - gc must be 0 when END is executed
+<a href=#562 id=562 data-nosnippet>562</a>///
+<a href=#563 id=563 data-nosnippet>563</a>/// Intuition:
+<a href=#564 id=564 data-nosnippet>564</a>/// - `delta_gc = gc - gc'` is the number of groups consumed on this row.
+<a href=#565 id=565 data-nosnippet>565</a>/// - Inside a span, delta_gc can only be 0 or 1.
+<a href=#566 id=566 data-nosnippet>566</a>/// - SPAN/RESPAN/PUSH must consume a group immediately, so delta_gc must be 1.
+<a href=#567 id=567 data-nosnippet>567</a>///
+<a href=#568 id=568 data-nosnippet>568</a>/// Constraints:
+<a href=#569 id=569 data-nosnippet>569</a>/// 1. Inside basic block, gc can only stay same or decrement by 1: sp * delta_gc * (delta_gc - 1) =
+<a href=#570 id=570 data-nosnippet>570</a>///    0  (where delta_gc = gc - gc')
+<a href=#571 id=571 data-nosnippet>571</a>/// 2. When END is executed, gc must be 0: end_flag * gc = 0
+<a href=#572 id=572 data-nosnippet>572</a>/// 3. During SPAN/RESPAN, gc must decrement by 1: (span_flag + respan_flag) * (1 - delta_gc) = 0
+<a href=#573 id=573 data-nosnippet>573</a></span><span class="kw">fn </span>enforce_group_count_constraints&lt;AB&gt;(
+<a href=#574 id=574 data-nosnippet>574</a>    builder: <span class="kw-2">&amp;mut </span>AB,
+<a href=#575 id=575 data-nosnippet>575</a>    cols: <span class="kw-2">&amp;</span>DecoderColumns&lt;AB::Expr&gt;,
+<a href=#576 id=576 data-nosnippet>576</a>    cols_next: <span class="kw-2">&amp;</span>DecoderColumns&lt;AB::Expr&gt;,
+<a href=#577 id=577 data-nosnippet>577</a>    local: <span class="kw-2">&amp;</span>MainTraceRow&lt;AB::Var&gt;,
+<a href=#578 id=578 data-nosnippet>578</a>    op_flags: <span class="kw-2">&amp;</span>OpFlags&lt;AB::Expr&gt;,
+<a href=#579 id=579 data-nosnippet>579</a>    op_flags_next: <span class="kw-2">&amp;</span>OpFlags&lt;AB::Expr&gt;,
+<a href=#580 id=580 data-nosnippet>580</a>) <span class="kw">where
+<a href=#581 id=581 data-nosnippet>581</a>    </span>AB: TaggingAirBuilderExt,
+<a href=#582 id=582 data-nosnippet>582</a>{
+<a href=#583 id=583 data-nosnippet>583</a>    <span class="kw">let </span>sp = cols.in_span.clone();
+<a href=#584 id=584 data-nosnippet>584</a>    <span class="kw">let </span>gc = cols.group_count.clone();
+<a href=#585 id=585 data-nosnippet>585</a>    <span class="kw">let </span>gc_next = cols_next.group_count.clone();
+<a href=#586 id=586 data-nosnippet>586</a>    <span class="kw">let </span>h0: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET].clone().into();
+<a href=#587 id=587 data-nosnippet>587</a>
+<a href=#588 id=588 data-nosnippet>588</a>    <span class="comment">// delta_gc = gc - gc' (how much gc decrements; expected to be 0 or 1)
+<a href=#589 id=589 data-nosnippet>589</a>    </span><span class="kw">let </span>delta_gc = gc.clone() - gc_next;
+<a href=#590 id=590 data-nosnippet>590</a>
+<a href=#591 id=591 data-nosnippet>591</a>    <span class="comment">// is_push = push flag (PUSH is the only operation with immediate value)
+<a href=#592 id=592 data-nosnippet>592</a>    </span><span class="kw">let </span>is_push = op_flags.push();
+<a href=#593 id=593 data-nosnippet>593</a>
+<a href=#594 id=594 data-nosnippet>594</a>    <span class="comment">// Constraint 1: Inside a span, gc can only stay the same or decrement by 1.
+<a href=#595 id=595 data-nosnippet>595</a>    // sp * delta_gc * (delta_gc - 1) = 0
+<a href=#596 id=596 data-nosnippet>596</a>    // This ensures: if sp=1 and delta_gc != 0, then delta_gc must equal 1
+<a href=#597 id=597 data-nosnippet>597</a>    </span>assert_zero_transition(
+<a href=#598 id=598 data-nosnippet>598</a>        builder,
+<a href=#599 id=599 data-nosnippet>599</a>        GROUP_COUNT_BASE,
+<a href=#600 id=600 data-nosnippet>600</a>        sp.clone() * delta_gc.clone() * (delta_gc.clone() - AB::Expr::ONE),
+<a href=#601 id=601 data-nosnippet>601</a>    );
+<a href=#602 id=602 data-nosnippet>602</a>
+<a href=#603 id=603 data-nosnippet>603</a>    <span class="comment">// Constraint 2: If gc decrements and this is not a PUSH-immediate row,
+<a href=#604 id=604 data-nosnippet>604</a>    // then h0 must be zero (no immediate value packed into the group).
+<a href=#605 id=605 data-nosnippet>605</a>    // sp * delta_gc * (1 - is_push) * h0 = 0
+<a href=#606 id=606 data-nosnippet>606</a>    </span>assert_zero_transition(
+<a href=#607 id=607 data-nosnippet>607</a>        builder,
+<a href=#608 id=608 data-nosnippet>608</a>        GROUP_COUNT_BASE + <span class="number">1</span>,
+<a href=#609 id=609 data-nosnippet>609</a>        sp.clone() * delta_gc.clone() * (AB::Expr::ONE - is_push.clone()) * h0,
+<a href=#610 id=610 data-nosnippet>610</a>    );
+<a href=#611 id=611 data-nosnippet>611</a>
+<a href=#612 id=612 data-nosnippet>612</a>    <span class="comment">// Constraint 3: SPAN/RESPAN/PUSH must consume a group immediately.
+<a href=#613 id=613 data-nosnippet>613</a>    // (span_flag + respan_flag + is_push) * (delta_gc - 1) = 0
+<a href=#614 id=614 data-nosnippet>614</a>    </span><span class="kw">let </span>span_flag = op_flags.span();
+<a href=#615 id=615 data-nosnippet>615</a>    <span class="kw">let </span>respan_flag = op_flags.respan();
+<a href=#616 id=616 data-nosnippet>616</a>    assert_zero_transition(
+<a href=#617 id=617 data-nosnippet>617</a>        builder,
+<a href=#618 id=618 data-nosnippet>618</a>        GROUP_COUNT_BASE + <span class="number">2</span>,
+<a href=#619 id=619 data-nosnippet>619</a>        (span_flag + respan_flag + is_push) * (delta_gc.clone() - AB::Expr::ONE),
+<a href=#620 id=620 data-nosnippet>620</a>    );
+<a href=#621 id=621 data-nosnippet>621</a>
+<a href=#622 id=622 data-nosnippet>622</a>    <span class="comment">// Constraint 4: If the next op is END or RESPAN, gc cannot decrement on this row.
+<a href=#623 id=623 data-nosnippet>623</a>    // delta_gc * (end' + respan') = 0
+<a href=#624 id=624 data-nosnippet>624</a>    </span><span class="kw">let </span>end_next = op_flags_next.end();
+<a href=#625 id=625 data-nosnippet>625</a>    <span class="kw">let </span>respan_next = op_flags_next.respan();
+<a href=#626 id=626 data-nosnippet>626</a>    assert_zero_transition(
+<a href=#627 id=627 data-nosnippet>627</a>        builder,
+<a href=#628 id=628 data-nosnippet>628</a>        GROUP_COUNT_BASE + <span class="number">3</span>,
+<a href=#629 id=629 data-nosnippet>629</a>        delta_gc.clone() * (end_next + respan_next),
+<a href=#630 id=630 data-nosnippet>630</a>    );
+<a href=#631 id=631 data-nosnippet>631</a>
+<a href=#632 id=632 data-nosnippet>632</a>    <span class="comment">// Constraint 5: END closes the span, so gc must be 0.
+<a href=#633 id=633 data-nosnippet>633</a>    // end_flag * gc = 0
+<a href=#634 id=634 data-nosnippet>634</a>    </span><span class="kw">let </span>end_flag = op_flags.end();
+<a href=#635 id=635 data-nosnippet>635</a>    assert_zero_integrity(builder, GROUP_COUNT_BASE + <span class="number">4</span>, end_flag * gc);
+<a href=#636 id=636 data-nosnippet>636</a>}
+<a href=#637 id=637 data-nosnippet>637</a>
+<a href=#638 id=638 data-nosnippet>638</a><span class="doccomment">/// Enforces op group decoding constraints for the `h0` register.
+<a href=#639 id=639 data-nosnippet>639</a>///
+<a href=#640 id=640 data-nosnippet>640</a>/// `h0` is a packed buffer of pending op groups. When a group is started or continued,
+<a href=#641 id=641 data-nosnippet>641</a>/// the next opcode is shifted into `h0` (base 2^7, because opcodes fit in 7 bits).
+<a href=#642 id=642 data-nosnippet>642</a>/// When the next op is END or RESPAN, the buffer must be empty (h0 = 0).
+<a href=#643 id=643 data-nosnippet>643</a></span><span class="kw">fn </span>enforce_op_group_decoding_constraints&lt;AB&gt;(
+<a href=#644 id=644 data-nosnippet>644</a>    builder: <span class="kw-2">&amp;mut </span>AB,
+<a href=#645 id=645 data-nosnippet>645</a>    cols: <span class="kw-2">&amp;</span>DecoderColumns&lt;AB::Expr&gt;,
+<a href=#646 id=646 data-nosnippet>646</a>    cols_next: <span class="kw-2">&amp;</span>DecoderColumns&lt;AB::Expr&gt;,
+<a href=#647 id=647 data-nosnippet>647</a>    local: <span class="kw-2">&amp;</span>MainTraceRow&lt;AB::Var&gt;,
+<a href=#648 id=648 data-nosnippet>648</a>    next: <span class="kw-2">&amp;</span>MainTraceRow&lt;AB::Var&gt;,
+<a href=#649 id=649 data-nosnippet>649</a>    op_flags: <span class="kw-2">&amp;</span>OpFlags&lt;AB::Expr&gt;,
+<a href=#650 id=650 data-nosnippet>650</a>    op_flags_next: <span class="kw-2">&amp;</span>OpFlags&lt;AB::Expr&gt;,
+<a href=#651 id=651 data-nosnippet>651</a>) <span class="kw">where
+<a href=#652 id=652 data-nosnippet>652</a>    </span>AB: TaggingAirBuilderExt,
+<a href=#653 id=653 data-nosnippet>653</a>{
+<a href=#654 id=654 data-nosnippet>654</a>    <span class="kw">let </span>sp = cols.in_span.clone();
+<a href=#655 id=655 data-nosnippet>655</a>    <span class="kw">let </span>sp_next = cols_next.in_span.clone();
+<a href=#656 id=656 data-nosnippet>656</a>
+<a href=#657 id=657 data-nosnippet>657</a>    <span class="kw">let </span>gc = cols.group_count.clone();
+<a href=#658 id=658 data-nosnippet>658</a>    <span class="kw">let </span>gc_next = cols_next.group_count.clone();
+<a href=#659 id=659 data-nosnippet>659</a>    <span class="kw">let </span>delta_gc = gc - gc_next;
+<a href=#660 id=660 data-nosnippet>660</a>
+<a href=#661 id=661 data-nosnippet>661</a>    <span class="kw">let </span>f_span = op_flags.span();
+<a href=#662 id=662 data-nosnippet>662</a>    <span class="kw">let </span>f_respan = op_flags.respan();
+<a href=#663 id=663 data-nosnippet>663</a>    <span class="kw">let </span>is_push = op_flags.push();
+<a href=#664 id=664 data-nosnippet>664</a>
+<a href=#665 id=665 data-nosnippet>665</a>    <span class="comment">// f_sgc is set when gc stays the same inside a basic block.
+<a href=#666 id=666 data-nosnippet>666</a>    </span><span class="kw">let </span>f_sgc = sp.clone() * sp_next * (AB::Expr::ONE - delta_gc.clone());
+<a href=#667 id=667 data-nosnippet>667</a>
+<a href=#668 id=668 data-nosnippet>668</a>    <span class="kw">let </span>h0: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET].clone().into();
+<a href=#669 id=669 data-nosnippet>669</a>    <span class="kw">let </span>h0_next: AB::Expr = next.decoder[decoder_cols::HASHER_STATE_OFFSET].clone().into();
+<a href=#670 id=670 data-nosnippet>670</a>
+<a href=#671 id=671 data-nosnippet>671</a>    <span class="comment">// Compute op' from next-row op bits (b0' + 2*b1' + ... + 64*b6').
+<a href=#672 id=672 data-nosnippet>672</a>    </span><span class="kw">let </span>op_next = op_bits_to_value::&lt;AB&gt;(<span class="kw-2">&amp;</span>cols_next.op_bits);
+<a href=#673 id=673 data-nosnippet>673</a>
+<a href=#674 id=674 data-nosnippet>674</a>    <span class="comment">// When SPAN/RESPAN/PUSH or when gc doesn't change, shift h0 by op'.
+<a href=#675 id=675 data-nosnippet>675</a>    // (h0 - h0' * 2^7 - op') = 0 under the combined flag.
+<a href=#676 id=676 data-nosnippet>676</a>    </span><span class="kw">let </span>op_group_base = AB::Expr::from_u16(<span class="number">1u16 </span>&lt;&lt; <span class="number">7</span>);
+<a href=#677 id=677 data-nosnippet>677</a>    <span class="kw">let </span>h0_shift = h0.clone() - h0_next * op_group_base - op_next;
+<a href=#678 id=678 data-nosnippet>678</a>    assert_zero_transition(
+<a href=#679 id=679 data-nosnippet>679</a>        builder,
+<a href=#680 id=680 data-nosnippet>680</a>        OP_GROUP_DECODING_BASE,
+<a href=#681 id=681 data-nosnippet>681</a>        (f_span + f_respan + is_push + f_sgc) * h0_shift,
+<a href=#682 id=682 data-nosnippet>682</a>    );
+<a href=#683 id=683 data-nosnippet>683</a>
+<a href=#684 id=684 data-nosnippet>684</a>    <span class="comment">// If the next op is END or RESPAN, the current h0 must be 0 (no pending group).
+<a href=#685 id=685 data-nosnippet>685</a>    </span><span class="kw">let </span>end_next = op_flags_next.end();
+<a href=#686 id=686 data-nosnippet>686</a>    <span class="kw">let </span>respan_next = op_flags_next.respan();
+<a href=#687 id=687 data-nosnippet>687</a>    assert_zero_transition(builder, OP_GROUP_DECODING_BASE + <span class="number">1</span>, sp * (end_next + respan_next) * h0);
+<a href=#688 id=688 data-nosnippet>688</a>}
+<a href=#689 id=689 data-nosnippet>689</a>
+<a href=#690 id=690 data-nosnippet>690</a><span class="doccomment">/// Enforces op index (ox) constraints.
+<a href=#691 id=691 data-nosnippet>691</a>///
+<a href=#692 id=692 data-nosnippet>692</a>/// The op index tracks the position of the current operation within its operation group:
+<a href=#693 id=693 data-nosnippet>693</a>/// - ox ranges from 0 to 8 (9 operations per group)
+<a href=#694 id=694 data-nosnippet>694</a>/// - ox resets to 0 when entering a new group (SPAN, RESPAN, or group boundary)
+<a href=#695 id=695 data-nosnippet>695</a>/// - ox increments by 1 for each operation within a group
+<a href=#696 id=696 data-nosnippet>696</a>///
+<a href=#697 id=697 data-nosnippet>697</a>/// Intuition:
+<a href=#698 id=698 data-nosnippet>698</a>/// - `ng = delta_gc - is_push` is 1 when a new group starts (excluding PUSH-immediate rows).
+<a href=#699 id=699 data-nosnippet>699</a>/// - When a new group starts, ox' must be 0.
+<a href=#700 id=700 data-nosnippet>700</a>/// - Otherwise, ox increments by 1 while sp stays 1.
+<a href=#701 id=701 data-nosnippet>701</a>///
+<a href=#702 id=702 data-nosnippet>702</a>/// Constraints:
+<a href=#703 id=703 data-nosnippet>703</a>/// 1. After SPAN/RESPAN, ox' = 0: (span_flag + respan_flag) * ox' = 0
+<a href=#704 id=704 data-nosnippet>704</a>/// 2. When starting new group inside basic block (gc decrements), ox' = 0: sp * delta_gc * ox' = 0
+<a href=#705 id=705 data-nosnippet>705</a>/// 3. When inside basic block and not starting new group, ox increments by 1: sp * sp' * (1 -
+<a href=#706 id=706 data-nosnippet>706</a>///    delta_gc) * (ox' - ox - 1) = 0
+<a href=#707 id=707 data-nosnippet>707</a>/// 4. Op index must be in range [0, 8]: ox * (ox-1) * (ox-2) * (ox-3) * (ox-4) * (ox-5) * (ox-6) *
+<a href=#708 id=708 data-nosnippet>708</a>///    (ox-7) * (ox-8) = 0
+<a href=#709 id=709 data-nosnippet>709</a></span><span class="kw">fn </span>enforce_op_index_constraints&lt;AB&gt;(
+<a href=#710 id=710 data-nosnippet>710</a>    builder: <span class="kw-2">&amp;mut </span>AB,
+<a href=#711 id=711 data-nosnippet>711</a>    cols: <span class="kw-2">&amp;</span>DecoderColumns&lt;AB::Expr&gt;,
+<a href=#712 id=712 data-nosnippet>712</a>    cols_next: <span class="kw-2">&amp;</span>DecoderColumns&lt;AB::Expr&gt;,
+<a href=#713 id=713 data-nosnippet>713</a>    op_flags: <span class="kw-2">&amp;</span>OpFlags&lt;AB::Expr&gt;,
+<a href=#714 id=714 data-nosnippet>714</a>) <span class="kw">where
+<a href=#715 id=715 data-nosnippet>715</a>    </span>AB: TaggingAirBuilderExt,
+<a href=#716 id=716 data-nosnippet>716</a>{
+<a href=#717 id=717 data-nosnippet>717</a>    <span class="kw">let </span>sp = cols.in_span.clone();
+<a href=#718 id=718 data-nosnippet>718</a>    <span class="kw">let </span>sp_next = cols_next.in_span.clone();
+<a href=#719 id=719 data-nosnippet>719</a>    <span class="kw">let </span>gc = cols.group_count.clone();
+<a href=#720 id=720 data-nosnippet>720</a>    <span class="kw">let </span>gc_next = cols_next.group_count.clone();
+<a href=#721 id=721 data-nosnippet>721</a>    <span class="kw">let </span>ox = cols.op_index.clone();
+<a href=#722 id=722 data-nosnippet>722</a>    <span class="kw">let </span>ox_next = cols_next.op_index.clone();
+<a href=#723 id=723 data-nosnippet>723</a>
+<a href=#724 id=724 data-nosnippet>724</a>    <span class="comment">// delta_gc = gc - gc' (how much gc decrements; 1 when entering new group)
+<a href=#725 id=725 data-nosnippet>725</a>    </span><span class="kw">let </span>delta_gc = gc.clone() - gc_next;
+<a href=#726 id=726 data-nosnippet>726</a>
+<a href=#727 id=727 data-nosnippet>727</a>    <span class="comment">// is_push = push flag (PUSH is the only operation with immediate value)
+<a href=#728 id=728 data-nosnippet>728</a>    </span><span class="kw">let </span>is_push = op_flags.push();
+<a href=#729 id=729 data-nosnippet>729</a>
+<a href=#730 id=730 data-nosnippet>730</a>    <span class="comment">// ng = delta_gc - is_push
+<a href=#731 id=731 data-nosnippet>731</a>    // This equals 1 when we're starting a new operation group (not due to immediate op)
+<a href=#732 id=732 data-nosnippet>732</a>    </span><span class="kw">let </span>ng = delta_gc - is_push;
+<a href=#733 id=733 data-nosnippet>733</a>
+<a href=#734 id=734 data-nosnippet>734</a>    <span class="kw">let </span>span_flag = op_flags.span();
+<a href=#735 id=735 data-nosnippet>735</a>    <span class="kw">let </span>respan_flag = op_flags.respan();
+<a href=#736 id=736 data-nosnippet>736</a>
+<a href=#737 id=737 data-nosnippet>737</a>    <span class="comment">// Constraint 1: SPAN/RESPAN start a fresh group, so ox' = 0.
+<a href=#738 id=738 data-nosnippet>738</a>    // (span_flag + respan_flag) * ox' = 0
+<a href=#739 id=739 data-nosnippet>739</a>    </span>assert_zero_transition(builder, OP_INDEX_BASE, (span_flag + respan_flag) * ox_next.clone());
+<a href=#740 id=740 data-nosnippet>740</a>
+<a href=#741 id=741 data-nosnippet>741</a>    <span class="comment">// Constraint 2: When a new group starts inside a span, ox' = 0.
+<a href=#742 id=742 data-nosnippet>742</a>    // sp * ng * ox' = 0
+<a href=#743 id=743 data-nosnippet>743</a>    </span>assert_zero_transition(builder, OP_INDEX_BASE + <span class="number">1</span>, sp.clone() * ng.clone() * ox_next.clone());
+<a href=#744 id=744 data-nosnippet>744</a>
+<a href=#745 id=745 data-nosnippet>745</a>    <span class="comment">// Constraint 3: When staying in the same group, ox increments by 1.
+<a href=#746 id=746 data-nosnippet>746</a>    // sp * sp' * (1 - ng) * (ox' - ox - 1) = 0
+<a href=#747 id=747 data-nosnippet>747</a>    </span><span class="kw">let </span>delta_ox = ox_next - ox.clone() - AB::Expr::ONE;
+<a href=#748 id=748 data-nosnippet>748</a>    assert_zero_transition(
+<a href=#749 id=749 data-nosnippet>749</a>        builder,
+<a href=#750 id=750 data-nosnippet>750</a>        OP_INDEX_BASE + <span class="number">2</span>,
+<a href=#751 id=751 data-nosnippet>751</a>        sp * sp_next * (AB::Expr::ONE - ng) * delta_ox,
+<a href=#752 id=752 data-nosnippet>752</a>    );
+<a href=#753 id=753 data-nosnippet>753</a>
+<a href=#754 id=754 data-nosnippet>754</a>    <span class="comment">// Constraint 4: ox must be in range [0, 8] (9 ops per group).
+<a href=#755 id=755 data-nosnippet>755</a>    // ∏_{i=0}^{8}(ox - i) = 0
+<a href=#756 id=756 data-nosnippet>756</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>range_check = ox.clone();
+<a href=#757 id=757 data-nosnippet>757</a>    <span class="kw">for </span>i <span class="kw">in </span><span class="number">1</span>..=<span class="number">8u64 </span>{
+<a href=#758 id=758 data-nosnippet>758</a>        range_check <span class="kw-2">*</span>= ox.clone() - AB::Expr::from_u16(i <span class="kw">as </span>u16);
+<a href=#759 id=759 data-nosnippet>759</a>    }
+<a href=#760 id=760 data-nosnippet>760</a>    assert_zero_integrity(builder, OP_INDEX_BASE + <span class="number">3</span>, range_check);
+<a href=#761 id=761 data-nosnippet>761</a>}
+<a href=#762 id=762 data-nosnippet>762</a>
+<a href=#763 id=763 data-nosnippet>763</a><span class="doccomment">/// Enforces op batch flag constraints and associated hasher-state zeroing rules.
+<a href=#764 id=764 data-nosnippet>764</a>///
+<a href=#765 id=765 data-nosnippet>765</a>/// Batch flags encode how many groups were emitted by SPAN/RESPAN:
+<a href=#766 id=766 data-nosnippet>766</a>/// - g8, g4, g2, g1 correspond to batches of 8, 4, 2, or 1 groups. The hasher lanes h1..h7 store
+<a href=#767 id=767 data-nosnippet>767</a>///   the group values; unused lanes must be zeroed.
+<a href=#768 id=768 data-nosnippet>768</a></span><span class="kw">fn </span>enforce_batch_flags_constraints&lt;AB&gt;(
+<a href=#769 id=769 data-nosnippet>769</a>    builder: <span class="kw-2">&amp;mut </span>AB,
+<a href=#770 id=770 data-nosnippet>770</a>    cols: <span class="kw-2">&amp;</span>DecoderColumns&lt;AB::Expr&gt;,
+<a href=#771 id=771 data-nosnippet>771</a>    local: <span class="kw-2">&amp;</span>MainTraceRow&lt;AB::Var&gt;,
+<a href=#772 id=772 data-nosnippet>772</a>    op_flags: <span class="kw-2">&amp;</span>OpFlags&lt;AB::Expr&gt;,
+<a href=#773 id=773 data-nosnippet>773</a>) <span class="kw">where
+<a href=#774 id=774 data-nosnippet>774</a>    </span>AB: TaggingAirBuilderExt,
+<a href=#775 id=775 data-nosnippet>775</a>{
+<a href=#776 id=776 data-nosnippet>776</a>    <span class="kw">let </span>bc0 = cols.batch_flags[<span class="number">0</span>].clone();
+<a href=#777 id=777 data-nosnippet>777</a>    <span class="kw">let </span>bc1 = cols.batch_flags[<span class="number">1</span>].clone();
+<a href=#778 id=778 data-nosnippet>778</a>    <span class="kw">let </span>bc2 = cols.batch_flags[<span class="number">2</span>].clone();
+<a href=#779 id=779 data-nosnippet>779</a>
+<a href=#780 id=780 data-nosnippet>780</a>    <span class="comment">// Batch flag decoding matches trace::decoder batch encodings.
+<a href=#781 id=781 data-nosnippet>781</a>    </span><span class="kw">let </span>f_g8 = bc0.clone();
+<a href=#782 id=782 data-nosnippet>782</a>    <span class="kw">let </span>f_g4 = (AB::Expr::ONE - bc0.clone()) * bc1.clone() * (AB::Expr::ONE - bc2.clone());
+<a href=#783 id=783 data-nosnippet>783</a>    <span class="kw">let </span>f_g2 = (AB::Expr::ONE - bc0.clone()) * (AB::Expr::ONE - bc1.clone()) * bc2.clone();
+<a href=#784 id=784 data-nosnippet>784</a>    <span class="kw">let </span>f_g1 = (AB::Expr::ONE - bc0) * bc1 * bc2;
+<a href=#785 id=785 data-nosnippet>785</a>
+<a href=#786 id=786 data-nosnippet>786</a>    <span class="kw">let </span>f_span = op_flags.span();
+<a href=#787 id=787 data-nosnippet>787</a>    <span class="kw">let </span>f_respan = op_flags.respan();
+<a href=#788 id=788 data-nosnippet>788</a>    <span class="kw">let </span>span_or_respan = f_span + f_respan;
+<a href=#789 id=789 data-nosnippet>789</a>
+<a href=#790 id=790 data-nosnippet>790</a>    <span class="comment">// When SPAN or RESPAN, exactly one batch flag must be set.
+<a href=#791 id=791 data-nosnippet>791</a>    </span>assert_zero_integrity(
+<a href=#792 id=792 data-nosnippet>792</a>        builder,
+<a href=#793 id=793 data-nosnippet>793</a>        BATCH_FLAGS_BASE,
+<a href=#794 id=794 data-nosnippet>794</a>        span_or_respan.clone() - (f_g1.clone() + f_g2.clone() + f_g4.clone() + f_g8),
+<a href=#795 id=795 data-nosnippet>795</a>    );
+<a href=#796 id=796 data-nosnippet>796</a>
+<a href=#797 id=797 data-nosnippet>797</a>    <span class="comment">// When not SPAN/RESPAN, all batch flags must be zero.
+<a href=#798 id=798 data-nosnippet>798</a>    </span>assert_zero_integrity(
+<a href=#799 id=799 data-nosnippet>799</a>        builder,
+<a href=#800 id=800 data-nosnippet>800</a>        BATCH_FLAGS_BASE + <span class="number">1</span>,
+<a href=#801 id=801 data-nosnippet>801</a>        (AB::Expr::ONE - span_or_respan)
+<a href=#802 id=802 data-nosnippet>802</a>            * (cols.batch_flags[<span class="number">0</span>].clone()
+<a href=#803 id=803 data-nosnippet>803</a>                + cols.batch_flags[<span class="number">1</span>].clone()
+<a href=#804 id=804 data-nosnippet>804</a>                + cols.batch_flags[<span class="number">2</span>].clone()),
+<a href=#805 id=805 data-nosnippet>805</a>    );
+<a href=#806 id=806 data-nosnippet>806</a>
+<a href=#807 id=807 data-nosnippet>807</a>    <span class="comment">// When batch has &lt;=4 groups, h4..h7 must be zero (unused lanes).
+<a href=#808 id=808 data-nosnippet>808</a>    </span><span class="kw">let </span>small_batch = f_g1.clone() + f_g2.clone() + f_g4.clone();
+<a href=#809 id=809 data-nosnippet>809</a>    <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..<span class="number">4 </span>{
+<a href=#810 id=810 data-nosnippet>810</a>        <span class="kw">let </span>hi: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + <span class="number">4 </span>+ i].clone().into();
+<a href=#811 id=811 data-nosnippet>811</a>        assert_zero_integrity(builder, BATCH_FLAGS_BASE + <span class="number">2 </span>+ i, small_batch.clone() * hi);
+<a href=#812 id=812 data-nosnippet>812</a>    }
+<a href=#813 id=813 data-nosnippet>813</a>
+<a href=#814 id=814 data-nosnippet>814</a>    <span class="comment">// When batch has &lt;=2 groups, h2..h3 must be zero (unused lanes).
+<a href=#815 id=815 data-nosnippet>815</a>    </span><span class="kw">let </span>tiny_batch = f_g1.clone() + f_g2.clone();
+<a href=#816 id=816 data-nosnippet>816</a>    <span class="kw">for </span>i <span class="kw">in </span><span class="number">0</span>..<span class="number">2 </span>{
+<a href=#817 id=817 data-nosnippet>817</a>        <span class="kw">let </span>hi: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + <span class="number">2 </span>+ i].clone().into();
+<a href=#818 id=818 data-nosnippet>818</a>        assert_zero_integrity(builder, BATCH_FLAGS_BASE + <span class="number">6 </span>+ i, tiny_batch.clone() * hi);
+<a href=#819 id=819 data-nosnippet>819</a>    }
+<a href=#820 id=820 data-nosnippet>820</a>
+<a href=#821 id=821 data-nosnippet>821</a>    <span class="comment">// When batch has 1 group, h1 must be zero (unused lane).
+<a href=#822 id=822 data-nosnippet>822</a>    </span><span class="kw">let </span>h1: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + <span class="number">1</span>].clone().into();
+<a href=#823 id=823 data-nosnippet>823</a>    assert_zero_integrity(builder, BATCH_FLAGS_BASE + <span class="number">8</span>, f_g1 * h1);
+<a href=#824 id=824 data-nosnippet>824</a>}
+<a href=#825 id=825 data-nosnippet>825</a>
+<a href=#826 id=826 data-nosnippet>826</a><span class="doccomment">/// Enforces block address (addr) constraints.
+<a href=#827 id=827 data-nosnippet>827</a>///
+<a href=#828 id=828 data-nosnippet>828</a>/// The block address identifies the current code block in the hasher table:
+<a href=#829 id=829 data-nosnippet>829</a>/// - addr stays constant inside a basic block (sp = 1)
+<a href=#830 id=830 data-nosnippet>830</a>/// - addr increments by HASH_CYCLE_LEN (32) after RESPAN
+<a href=#831 id=831 data-nosnippet>831</a>/// - addr must be 0 when HALT is executed
+<a href=#832 id=832 data-nosnippet>832</a>///
+<a href=#833 id=833 data-nosnippet>833</a>/// This ties the span state to the hasher table position.
+<a href=#834 id=834 data-nosnippet>834</a>///
+<a href=#835 id=835 data-nosnippet>835</a>/// Constraints:
+<a href=#836 id=836 data-nosnippet>836</a>/// 1. Inside basic block, address unchanged: sp * (addr' - addr) = 0
+<a href=#837 id=837 data-nosnippet>837</a>/// 2. RESPAN increments address by HASH_CYCLE_LEN: respan_flag * (addr' - addr - HASH_CYCLE_LEN) =
+<a href=#838 id=838 data-nosnippet>838</a>///    0
+<a href=#839 id=839 data-nosnippet>839</a>/// 3. HALT has addr = 0: halt_flag * addr = 0
+<a href=#840 id=840 data-nosnippet>840</a></span><span class="kw">fn </span>enforce_block_address_constraints&lt;AB&gt;(
+<a href=#841 id=841 data-nosnippet>841</a>    builder: <span class="kw-2">&amp;mut </span>AB,
+<a href=#842 id=842 data-nosnippet>842</a>    cols: <span class="kw-2">&amp;</span>DecoderColumns&lt;AB::Expr&gt;,
+<a href=#843 id=843 data-nosnippet>843</a>    cols_next: <span class="kw-2">&amp;</span>DecoderColumns&lt;AB::Expr&gt;,
+<a href=#844 id=844 data-nosnippet>844</a>    op_flags: <span class="kw-2">&amp;</span>OpFlags&lt;AB::Expr&gt;,
+<a href=#845 id=845 data-nosnippet>845</a>) <span class="kw">where
+<a href=#846 id=846 data-nosnippet>846</a>    </span>AB: TaggingAirBuilderExt,
+<a href=#847 id=847 data-nosnippet>847</a>{
+<a href=#848 id=848 data-nosnippet>848</a>    <span class="kw">let </span>sp = cols.in_span.clone();
+<a href=#849 id=849 data-nosnippet>849</a>    <span class="kw">let </span>addr = cols.addr.clone();
+<a href=#850 id=850 data-nosnippet>850</a>    <span class="kw">let </span>addr_next = cols_next.addr.clone();
+<a href=#851 id=851 data-nosnippet>851</a>
+<a href=#852 id=852 data-nosnippet>852</a>    <span class="comment">// Constraint 1: Inside a span, address must stay the same.
+<a href=#853 id=853 data-nosnippet>853</a>    // sp * (addr' - addr) = 0
+<a href=#854 id=854 data-nosnippet>854</a>    </span>assert_zero_transition(builder, ADDR_BASE, sp * (addr_next.clone() - addr.clone()));
+<a href=#855 id=855 data-nosnippet>855</a>
+<a href=#856 id=856 data-nosnippet>856</a>    <span class="comment">// Constraint 2: RESPAN moves to the next hash block (Poseidon2 = 32 rows).
+<a href=#857 id=857 data-nosnippet>857</a>    // respan_flag * (addr' - addr - HASH_CYCLE_LEN) = 0
+<a href=#858 id=858 data-nosnippet>858</a>    </span><span class="kw">let </span>hash_cycle_len: AB::Expr = AB::Expr::from_u16(HASH_CYCLE_LEN <span class="kw">as </span>u16);
+<a href=#859 id=859 data-nosnippet>859</a>    <span class="kw">let </span>respan_flag = op_flags.respan();
+<a href=#860 id=860 data-nosnippet>860</a>    assert_zero_transition(
+<a href=#861 id=861 data-nosnippet>861</a>        builder,
+<a href=#862 id=862 data-nosnippet>862</a>        ADDR_BASE + <span class="number">1</span>,
+<a href=#863 id=863 data-nosnippet>863</a>        respan_flag * (addr_next - addr.clone() - hash_cycle_len),
+<a href=#864 id=864 data-nosnippet>864</a>    );
+<a href=#865 id=865 data-nosnippet>865</a>
+<a href=#866 id=866 data-nosnippet>866</a>    <span class="comment">// Constraint 3: HALT forces addr = 0.
+<a href=#867 id=867 data-nosnippet>867</a>    // halt_flag * addr = 0
+<a href=#868 id=868 data-nosnippet>868</a>    </span><span class="kw">let </span>halt_flag = op_flags.halt();
+<a href=#869 id=869 data-nosnippet>869</a>    assert_zero_integrity(builder, ADDR_BASE + <span class="number">2</span>, halt_flag * addr);
+<a href=#870 id=870 data-nosnippet>870</a>}
+<a href=#871 id=871 data-nosnippet>871</a>
+<a href=#872 id=872 data-nosnippet>872</a><span class="doccomment">/// Enforces control flow constraints.
+<a href=#873 id=873 data-nosnippet>873</a>///
+<a href=#874 id=874 data-nosnippet>874</a>/// When outside a basic block (sp = 0), only control flow operations can execute.
+<a href=#875 id=875 data-nosnippet>875</a>/// This is expressed as: fctrl = 1 - sp, or equivalently: (1 - sp) * (1 - fctrl) = 0
+<a href=#876 id=876 data-nosnippet>876</a>///
+<a href=#877 id=877 data-nosnippet>877</a>/// Control flow operations include:
+<a href=#878 id=878 data-nosnippet>878</a>/// - SPAN, JOIN, SPLIT, LOOP (block start operations)
+<a href=#879 id=879 data-nosnippet>879</a>/// - END, REPEAT, RESPAN, HALT (block transition operations)
+<a href=#880 id=880 data-nosnippet>880</a>/// - DYN, DYNCALL, CALL, SYSCALL (procedure invocations)
+<a href=#881 id=881 data-nosnippet>881</a>///
+<a href=#882 id=882 data-nosnippet>882</a>/// Constraints:
+<a href=#883 id=883 data-nosnippet>883</a>/// 1. When sp = 0, control_flow must be 1: (1 - sp) * (1 - fctrl) = 0
+<a href=#884 id=884 data-nosnippet>884</a></span><span class="kw">fn </span>enforce_control_flow_constraints&lt;AB&gt;(
+<a href=#885 id=885 data-nosnippet>885</a>    builder: <span class="kw-2">&amp;mut </span>AB,
+<a href=#886 id=886 data-nosnippet>886</a>    cols: <span class="kw-2">&amp;</span>DecoderColumns&lt;AB::Expr&gt;,
+<a href=#887 id=887 data-nosnippet>887</a>    op_flags: <span class="kw-2">&amp;</span>OpFlags&lt;AB::Expr&gt;,
+<a href=#888 id=888 data-nosnippet>888</a>) <span class="kw">where
+<a href=#889 id=889 data-nosnippet>889</a>    </span>AB: TaggingAirBuilderExt,
+<a href=#890 id=890 data-nosnippet>890</a>{
+<a href=#891 id=891 data-nosnippet>891</a>    <span class="kw">let </span>sp = cols.in_span.clone();
+<a href=#892 id=892 data-nosnippet>892</a>
+<a href=#893 id=893 data-nosnippet>893</a>    <span class="comment">// Constraint: sp and control_flow must be complementary.
+<a href=#894 id=894 data-nosnippet>894</a>    // 1 - sp - fctrl = 0
+<a href=#895 id=895 data-nosnippet>895</a>    </span><span class="kw">let </span>ctrl_flag = op_flags.control_flow();
+<a href=#896 id=896 data-nosnippet>896</a>    assert_zero_integrity(builder, CONTROL_FLOW_BASE, AB::Expr::ONE - sp - ctrl_flag);
+<a href=#897 id=897 data-nosnippet>897</a>}
+<a href=#898 id=898 data-nosnippet>898</a>
+<a href=#899 id=899 data-nosnippet>899</a><span class="kw">fn </span>assert_zero_transition&lt;AB: TaggingAirBuilderExt&gt;(builder: <span class="kw-2">&amp;mut </span>AB, idx: usize, expr: AB::Expr) {
+<a href=#900 id=900 data-nosnippet>900</a>    <span class="kw">let </span><span class="kw-2">mut </span>idx = idx;
+<a href=#901 id=901 data-nosnippet>901</a>    tagged_assert_zero(builder, <span class="kw-2">&amp;</span>DECODER_TAGS, <span class="kw-2">&amp;mut </span>idx, expr);
+<a href=#902 id=902 data-nosnippet>902</a>}
+<a href=#903 id=903 data-nosnippet>903</a>
+<a href=#904 id=904 data-nosnippet>904</a><span class="kw">fn </span>assert_zero_integrity&lt;AB: TaggingAirBuilderExt&gt;(builder: <span class="kw-2">&amp;mut </span>AB, idx: usize, expr: AB::Expr) {
+<a href=#905 id=905 data-nosnippet>905</a>    <span class="kw">let </span><span class="kw-2">mut </span>idx = idx;
+<a href=#906 id=906 data-nosnippet>906</a>    tagged_assert_zero_integrity(builder, <span class="kw-2">&amp;</span>DECODER_TAGS, <span class="kw-2">&amp;mut </span>idx, expr);
+<a href=#907 id=907 data-nosnippet>907</a>}
+<a href=#908 id=908 data-nosnippet>908</a>
+<a href=#909 id=909 data-nosnippet>909</a><span class="kw">fn </span>assert_zero_first_row&lt;AB: TaggingAirBuilderExt&gt;(builder: <span class="kw-2">&amp;mut </span>AB, idx: usize, expr: AB::Expr) {
+<a href=#910 id=910 data-nosnippet>910</a>    <span class="kw">let </span>id = DECODER_BASE_ID + idx;
+<a href=#911 id=911 data-nosnippet>911</a>    <span class="kw">let </span>name = DECODER_NAMES[idx];
+<a href=#912 id=912 data-nosnippet>912</a>    builder.tagged(id, name, |builder| {
+<a href=#913 id=913 data-nosnippet>913</a>        builder.when_first_row().assert_zero(expr);
+<a href=#914 id=914 data-nosnippet>914</a>    });
+<a href=#915 id=915 data-nosnippet>915</a>}
+</code></pre></div></section></main></body></html>

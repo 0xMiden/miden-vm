@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["MAX_NUM_ACE_WIRES","PTR_OFFSET_ELEM","PTR_OFFSET_WORD"],"struct":["Ace","AuxTraceBuilder","Chiplets","ChipletsTrace","CircuitEvaluation","MerkleRootUpdate"]};

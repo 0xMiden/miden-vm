@@ -1,0 +1,250 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Miden VM"><title>miden_vm - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="miden_vm" data-themes="" data-resource-suffix="" data-rustdoc-version="1.96.0-nightly (3645249d7 2026-03-16)" data-channel="nightly" data-search-js="search-63369b7b.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-5013f961.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Crate miden_vm</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../miden_vm/index.html">miden_<wbr>vm</a><span class="version">0.22.0-alpha.1</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#miden-vm" title="Miden VM">Miden VM</a><ul><li><a href="#basic-concepts" title="Basic concepts">Basic concepts</a></li><li><a href="#usage" title="Usage">Usage</a></li><li><a href="#fibonacci-calculator" title="Fibonacci calculator">Fibonacci calculator</a></li><li><a href="#cli-interface" title="CLI interface">CLI interface</a></li><li><a href="#crate-features" title="Crate features">Crate features</a></li><li><a href="#license" title="License">License</a></li></ul></li></ul><h3><a href="#reexports">Crate Items</a></h3><ul class="block"><li><a href="#reexports" title="Re-exports">Re-exports</a></li><li><a href="#modules" title="Modules">Modules</a></li><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li><li><a href="#constants" title="Constants">Constants</a></li><li><a href="#traits" title="Traits">Traits</a></li><li><a href="#functions" title="Functions">Functions</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1>Crate <span>miden_<wbr>vm</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/miden_vm/lib.rs.html#1-49">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="miden-vm"><a class="doc-anchor" href="#miden-vm">§</a>Miden VM</h2>
+<p>This crate aggregates all components of the Miden VM in a single place. Specifically, it re-exports functionality from <a href="../processor/">processor</a>, <a href="../prover/">prover</a>, and <a href="../verifier/">verifier</a> crates. Additionally, when compiled as an executable, this crate can be used via a <a href="#cli-interface">CLI interface</a> to execute Miden VM programs and to verify correctness of their execution.</p>
+<h3 id="basic-concepts"><a class="doc-anchor" href="#basic-concepts">§</a>Basic concepts</h3>
+<p>An in-depth description of Miden VM is available in the full Miden VM <a href="https://docs.miden.xyz/miden-vm/">documentation</a>. In this section we cover only the basics to make the included examples easier to understand.</p>
+<h4 id="writing-programs"><a class="doc-anchor" href="#writing-programs">§</a>Writing programs</h4>
+<p>Our goal is to make Miden VM an easy compilation target for high-level languages such as Rust, Move, Sway, and others. We believe it is important to let people write programs in the languages of their choice. However, compilers to help with this have not been developed yet. Thus, for now, the primary way to write programs for Miden VM is to use <a href="../assembly">Miden assembly</a>.</p>
+<p>Miden assembler compiles assembly source code in a <a href="https://docs.miden.xyz/miden-vm/design/programs">program MAST</a>, which is represented by a <code>Program</code> struct. It is possible to construct a <code>Program</code> struct manually, but we don’t recommend this approach because it is tedious, error-prone, and requires an in-depth understanding of VM internals. All examples throughout these docs use assembly syntax.</p>
+<h5 id="program-hash"><a class="doc-anchor" href="#program-hash">§</a>Program hash</h5>
+<p>All Miden programs can be reduced to a single 32-byte value, called program hash. Once a <code>Program</code> object is constructed, you can access this hash via <code>Program::hash()</code> method. This hash value is used by a verifier when they verify program execution. This ensures that the verifier verifies execution of a specific program (e.g. a program which the prover had committed to previously). The methodology for computing program hash is described <a href="https://docs.miden.xyz/miden-vm/design/programs#program-hash-computation">here</a>.</p>
+<h4 id="inputs--outputs"><a class="doc-anchor" href="#inputs--outputs">§</a>Inputs / outputs</h4>
+<p>Currently, there are 3 ways to get values onto the stack:</p>
+<ol>
+<li>You can use <code>push</code> instruction to push values onto the stack. These values become a part of the program itself, and, therefore, cannot be changed between program executions. You can think of them as constants.</li>
+<li>The stack can be initialized to some set of values at the beginning of the program. These inputs are public and must be shared with the verifier for them to verify a proof of the correct execution of a Miden program. At most 16 values could be provided for the stack initialization, attempts to provide more than 16 values will cause an error.</li>
+<li>The program may request nondeterministic advice inputs from the prover. These inputs are secret inputs. This means that the prover does not need to share them with the verifier. There are three types of advice inputs: (1) a single advice stack which can contain any number of elements; (2) a key-mapped element lists which can be pushed onto the advice stack; (3) a Merkle store, which is used to provide nondeterministic inputs for instructions which work with Merkle trees. There are no restrictions on the number of advice inputs a program can request.</li>
+</ol>
+<p>The stack is provided to Miden VM via <code>StackInputs</code> struct. These are public inputs of the execution, and should also be provided to the verifier. The secret inputs for the program are provided via the <code>Host</code> interface. The default implementation of the host relies on in-memory advice provider (<code>AdviceProvider</code>) that can be commonly used for operations that won’t require persistence.</p>
+<p>Values remaining on the stack after a program is executed can be returned as stack outputs. You can specify exactly how many values (from the top of the stack) should be returned. Notice, that, similar to stack inputs, at most 16 values can be returned via the stack. Attempts to return more than 16 values will cause an error.</p>
+<p>Having a small number elements to describe public inputs and outputs of a program may seem limiting, however, just 4 elements are sufficient to represent a root of a Merkle tree or a sequential hash of elements. Both of these can be expanded into an arbitrary number of values by supplying the actual values non-deterministically via the host interface.</p>
+<h3 id="usage"><a class="doc-anchor" href="#usage">§</a>Usage</h3>
+<p>Miden crate exposes several functions which can be used to execute programs, generate proofs of their correct execution, and verify the generated proofs. How to do this is explained below, but you can also take a look at working examples <a href="masm-examples/">here</a> and find instructions for running them via CLI <a href="#fibonacci-example">here</a>.</p>
+<h4 id="executing-programs"><a class="doc-anchor" href="#executing-programs">§</a>Executing programs</h4>
+<p>To execute a program on Miden VM, you can use <code>execute()</code> which takes the following arguments:</p>
+<ul>
+<li><code>program: &amp;Program</code> - a reference to a Miden program to be executed.</li>
+<li><code>stack_inputs: StackInputs</code> - a set of public inputs with which to execute the program.</li>
+<li><code>host: Host</code> - an instance of a <code>Host</code> which can be used to supply non-deterministic inputs to the VM and receive messages from the VM.</li>
+<li><code>options: ExecutionOptions</code> - a set of options for executing the specified program (e.g., max allowed number of cycles).</li>
+</ul>
+<p>The function returns a <code>Result&lt;ExecutionTrace, ExecutionError&gt;</code> which will contain the execution trace of the program if the execution was successful, or an error, if the execution failed. Internally, the VM then passes this execution trace to the prover to generate a proof of a correct execution of the program.</p>
+<p>For example:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>std::sync::Arc;
+<span class="kw">use </span>miden_vm::{
+    advice::AdviceInputs,
+    assembly::DefaultSourceManager,
+    Assembler, execute_sync, ExecutionOptions, DefaultHost, Program, StackInputs
+};
+
+<span class="comment">// instantiate the assembler
+</span><span class="kw">let </span><span class="kw-2">mut </span>assembler = Assembler::default();
+
+<span class="comment">// compile Miden assembly source code into a program
+</span><span class="kw">let </span>program = assembler.assemble_program(<span class="string">"begin push.3 push.5 add swap drop end"</span>).unwrap();
+
+<span class="comment">// use an empty list as initial stack
+</span><span class="kw">let </span>stack_inputs = StackInputs::default();
+
+<span class="comment">// do not include any initial advice data
+</span><span class="kw">let </span>advice_inputs = AdviceInputs::default();
+
+<span class="comment">// instantiate a default host (with an empty advice provider)
+</span><span class="kw">let </span><span class="kw-2">mut </span>host = DefaultHost::default();
+
+<span class="comment">// instantiate default execution options
+</span><span class="kw">let </span>exec_options = ExecutionOptions::default();
+
+<span class="comment">// execute the program with no inputs
+</span><span class="kw">let </span>trace = execute_sync(<span class="kw-2">&amp;</span>program, stack_inputs, advice_inputs.clone(), <span class="kw-2">&amp;mut </span>host, exec_options).unwrap();</code></pre></div><h4 id="proving-program-execution"><a class="doc-anchor" href="#proving-program-execution">§</a>Proving program execution</h4>
+<p>To execute a program on Miden VM and generate a proof that the program was executed correctly, you can use the <code>prove()</code> function. This function takes the following arguments:</p>
+<ul>
+<li><code>program: &amp;Program</code> - a reference to a Miden program to be executed.</li>
+<li><code>stack_inputs: StackInputs</code> - a set of public inputs with which to execute the program.</li>
+<li><code>host: Host</code> - an instance of a <code>Host</code> which can be used to supply non-deterministic inputs to the VM and receive messages from the VM.</li>
+<li><code>options: ProvingOptions</code> - config parameters for proof generation. The default options target 96-bit security level.</li>
+</ul>
+<p>If the program is executed successfully, the function returns a tuple with 2 elements:</p>
+<ul>
+<li><code>outputs: StackOutputs</code> - the outputs generated by the program.</li>
+<li><code>proof: ExecutionProof</code> - proof of program execution. <code>ExecutionProof</code> can be easily serialized and deserialized using <code>to_bytes()</code> and <code>from_bytes()</code> functions respectively.</li>
+</ul>
+<h5 id="proof-generation-example"><a class="doc-anchor" href="#proof-generation-example">§</a>Proof generation example</h5>
+<p>Here is a simple example of executing a program which pushes two numbers onto the stack and computes their sum:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>std::sync::Arc;
+<span class="kw">use </span>miden_vm::{
+    advice::AdviceInputs,
+    assembly::DefaultSourceManager,
+    field::PrimeField64,
+    Assembler, DefaultHost, ProvingOptions, Program, prove_sync, StackInputs
+};
+
+<span class="comment">// instantiate the assembler
+</span><span class="kw">let </span><span class="kw-2">mut </span>assembler = Assembler::default();
+
+<span class="comment">// this is our program, we compile it from assembly code
+</span><span class="kw">let </span>program = assembler.assemble_program(<span class="string">"begin push.3 push.5 add swap drop end"</span>).unwrap();
+
+<span class="comment">// let's execute it and generate a STARK proof
+</span><span class="kw">let </span>(outputs, proof) = prove_sync(
+    <span class="kw-2">&amp;</span>program,
+    StackInputs::default(),       <span class="comment">// we won't provide any inputs
+    </span>AdviceInputs::default(),      <span class="comment">// we don't need any initial advice inputs
+    </span><span class="kw-2">&amp;mut </span>DefaultHost::default(),  <span class="comment">// we'll be using a default host
+    </span>ProvingOptions::default(),    <span class="comment">// we'll be using default options
+</span>)
+.unwrap();
+
+<span class="comment">// the output should be 8
+</span><span class="macro">assert_eq!</span>(<span class="number">8</span>, outputs.first().unwrap().as_canonical_u64());</code></pre></div><h4 id="verifying-program-execution"><a class="doc-anchor" href="#verifying-program-execution">§</a>Verifying program execution</h4>
+<p>To verify program execution, you can use the <code>verify()</code> function. The function takes the following parameters:</p>
+<ul>
+<li><code>program_info: ProgramInfo</code> - a structure containing the hash of the program to be verified (represented as a 32-byte digest), and the hashes of the Kernel procedures used to execute the program.</li>
+<li><code>stack_inputs: StackInputs</code> - a list of the values with which the stack was initialized prior to the program’s execution..</li>
+<li><code>stack_outputs: StackOutputs</code> - a list of the values returned from the stack after the program completed execution.</li>
+<li><code>proof: ExecutionProof</code> - the proof generated during program execution.</li>
+</ul>
+<p>Stack inputs are expected to be ordered as if they would be pushed onto the stack one by one. Thus, their expected order on the stack will be the reverse of the order in which they are provided, and the last value in the <code>stack_inputs</code> is expected to be the value at the top of the stack.</p>
+<p>Stack outputs are expected to be ordered as if they would be popped off the stack one by one. Thus, the value at the top of the stack is expected to be in the first position of the <code>stack_outputs</code>, and the order of the rest of the output elements will also match the order on the stack. This is the reverse of the order of the <code>stack_inputs</code>.</p>
+<p>The function returns <code>Result&lt;u32, VerificationError&gt;</code> which will be <code>Ok(security_level)</code> if verification passes, or <code>Err(VerificationError)</code> if verification fails, with <code>VerificationError</code> describing the reason for the failure.</p>
+<blockquote>
+<p>If a program with the provided hash is executed against some secret inputs and the provided public inputs, it will produce the provided outputs.</p>
+</blockquote>
+<p>Notice how the verifier needs to know only the hash of the program - not what the actual program was.</p>
+<h5 id="proof-verification-example"><a class="doc-anchor" href="#proof-verification-example">§</a>Proof verification example</h5>
+<p>Here is a simple example of verifying execution of the program from the previous example:</p>
+
+<div class="example-wrap ignore"><a href="#" class="tooltip" title="This example is not tested">ⓘ</a><pre class="rust rust-example-rendered"><code><span class="kw">use </span>miden;
+
+<span class="kw">let </span>program =   <span class="comment">/* value from previous example */</span>;
+<span class="kw">let </span>proof =     <span class="comment">/* value from previous example */</span>;
+
+<span class="comment">// let's verify program execution
+</span><span class="kw">match </span>miden_vm::verify(program.hash(), StackInputs::default(), <span class="kw-2">&amp;</span>[<span class="number">8</span>], proof) {
+    <span class="prelude-val">Ok</span>(<span class="kw">_</span>) =&gt; <span class="macro">println!</span>(<span class="string">"Execution verified!"</span>),
+    <span class="prelude-val">Err</span>(msg) =&gt; <span class="macro">println!</span>(<span class="string">"Something went terribly wrong: {}"</span>, msg),
+}</code></pre></div><h3 id="fibonacci-calculator"><a class="doc-anchor" href="#fibonacci-calculator">§</a>Fibonacci calculator</h3>
+<p>Let’s write a simple program for Miden VM (using <a href="../assembly">Miden assembly</a>). Our program will compute the 5-th <a href="https://en.wikipedia.org/wiki/Fibonacci_number">Fibonacci number</a>:</p>
+<div class="example-wrap"><pre class="language-masm"><code>push.0      // stack state: 0
+push.1      // stack state: 1 0
+swap        // stack state: 0 1
+dup.1       // stack state: 1 0 1
+add         // stack state: 1 1
+swap        // stack state: 1 1
+dup.1       // stack state: 1 1 1
+add         // stack state: 2 1
+swap        // stack state: 1 2
+dup.1       // stack state: 2 1 2
+add         // stack state: 3 2</code></pre></div>
+<p>Notice that except for the first 2 operations which initialize the stack, the sequence of <code>swap dup.1 add</code> operations repeats over and over. In fact, we can repeat these operations an arbitrary number of times to compute an arbitrary Fibonacci number. In Rust, it would look like this:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>std::sync::Arc;
+<span class="kw">use </span>miden_vm::{
+    advice::AdviceInputs,
+    assembly::DefaultSourceManager,
+    field::PrimeField64,
+    Assembler, DefaultHost, Program, ProvingOptions, StackInputs
+};
+
+<span class="comment">// set the number of terms to compute
+</span><span class="kw">let </span>n = <span class="number">50</span>;
+
+<span class="comment">// instantiate the default assembler and compile the program
+</span><span class="kw">let </span>source = <span class="macro">format!</span>(
+    <span class="string">"
+    begin
+        repeat.{}
+            swap dup.1 add
+        end
+    end"</span>,
+    n - <span class="number">1
+</span>);
+<span class="kw">let </span><span class="kw-2">mut </span>assembler = Assembler::default();
+<span class="kw">let </span>program = assembler.assemble_program(<span class="kw-2">&amp;</span>source).unwrap();
+
+<span class="comment">// initialize a default host (with an empty advice provider)
+</span><span class="kw">let </span><span class="kw-2">mut </span>host = DefaultHost::default();
+
+<span class="comment">// initialize the stack with values 0 and 1
+</span><span class="kw">let </span>stack_inputs = StackInputs::try_from_ints([<span class="number">1</span>, <span class="number">0</span>]).unwrap();
+
+<span class="comment">// execute the program
+</span><span class="kw">let </span>(outputs, proof) = miden_vm::prove_sync(
+    <span class="kw-2">&amp;</span>program,
+    stack_inputs,
+    AdviceInputs::default(), <span class="comment">// without initial advice inputs
+    </span><span class="kw-2">&amp;mut </span>host,
+    ProvingOptions::default(), <span class="comment">// use default proving options
+</span>)
+.unwrap();
+
+<span class="comment">// fetch the stack outputs, truncating to the first element
+</span><span class="kw">let </span>stack = outputs.get_num_elements(<span class="number">1</span>);
+
+<span class="comment">// the output should be the 50th Fibonacci number
+</span><span class="macro">assert_eq!</span>(<span class="number">12586269025</span>, stack[<span class="number">0</span>].as_canonical_u64());</code></pre></div>
+<p>Above, we used public inputs to initialize the stack rather than using <code>push</code> operations. This makes the program a bit simpler, and also allows us to run the program from arbitrary starting points without changing program hash.</p>
+<h3 id="cli-interface"><a class="doc-anchor" href="#cli-interface">§</a>CLI interface</h3>
+<p>If you want to execute, prove, and verify programs on Miden VM, but don’t want to write Rust code, you can use Miden CLI. It also contains a number of useful tools to help analyze and debug programs.</p>
+<h4 id="compiling-miden-vm"><a class="doc-anchor" href="#compiling-miden-vm">§</a>Compiling Miden VM</h4>
+<p>First, make sure you have Rust <a href="https://www.rust-lang.org/tools/install">installed</a>. The current version of Miden VM requires Rust version <strong>1.90</strong> or later.</p>
+<p>Then, to compile Miden VM into a binary, run the following <code>make</code> command:</p>
+<div class="example-wrap"><pre class="language-shell"><code>make exec</code></pre></div>
+<p>This will place <code>miden-vm</code> executable in the <code>./target/optimized</code> directory.</p>
+<p>By default, the executable will be compiled in the multi-threaded mode. If you would like to enable single-threaded proof generation, you can compile Miden VM using the following command:</p>
+<div class="example-wrap"><pre class="language-shell"><code>make exec-single</code></pre></div>
+<p>We also provide a number of <code>make</code> commands to simplify building Miden VM for various targets:</p>
+<div class="example-wrap"><pre class="language-shell"><code># build an executable for a generic target (concurrent)
+make exec
+
+# build an executable for targets with AVX2 instructions (concurrent)
+make exec-avx2
+
+# build an executable for targets with SVE instructions (concurrent)
+make exec-sve
+
+# build an executable with log tree enabled
+make exec-info</code></pre></div><h4 id="running-miden-vm"><a class="doc-anchor" href="#running-miden-vm">§</a>Running Miden VM</h4>
+<p>Once the executable has been compiled, you can run Miden VM like so:</p>
+<div class="example-wrap"><pre class="language-shell"><code>./target/optimized/miden-vm [subcommand] [parameters]</code></pre></div>
+<p>Currently, Miden VM can be executed with the following subcommands:</p>
+<ul>
+<li><code>run</code> - this will execute a Miden assembly program and output the result, but will not generate a proof of execution.</li>
+<li><code>prove</code> - this will execute a Miden assembly program, and will also generate a STARK proof of execution.</li>
+<li><code>verify</code> - this will verify a previously generated proof of execution for a given program.</li>
+<li><code>compile</code> - this will compile a Miden assembly program and outputs stats about the compilation process.</li>
+<li><code>debug</code> - this will instantiate a CLI debugger against the specified Miden assembly program and inputs.</li>
+<li><code>analyze</code> - this will run a Miden assembly program against specific inputs and will output stats about its execution.</li>
+</ul>
+<p>All of the above subcommands require various parameters to be provided. To get more detailed help on what is needed for a given subcommand, you can run the following:</p>
+<div class="example-wrap"><pre class="language-shell"><code>./target/optimized/miden-vm [subcommand] --help</code></pre></div>
+<p>For example:</p>
+<div class="example-wrap"><pre class="language-shell"><code>./target/optimized/miden-vm prove --help</code></pre></div><h4 id="fibonacci-example"><a class="doc-anchor" href="#fibonacci-example">§</a>Fibonacci example</h4>
+<p>In the <code>miden-vm/masm-examples/fib</code> directory, we provide a very simple Fibonacci calculator example. This example computes the 1000th term of the Fibonacci sequence. You can execute this example on Miden VM like so:</p>
+<div class="example-wrap"><pre class="language-shell"><code>./target/optimized/miden-vm run miden-vm/masm-examples/fib/fib.masm -n 1</code></pre></div>
+<p>This will run the example code to completion and will output the top element remaining on the stack.</p>
+<h3 id="crate-features"><a class="doc-anchor" href="#crate-features">§</a>Crate features</h3>
+<p>Miden VM can be compiled with the following features:</p>
+<ul>
+<li><code>std</code> - enabled by default and relies on the Rust standard library.</li>
+<li><code>concurrent</code> - implies <code>std</code> and also enables multi-threaded proof generation.</li>
+<li><code>executable</code> - required for building Miden VM binary as described above. Implies <code>std</code>.</li>
+<li><code>metal</code> - enables <a href="https://en.wikipedia.org/wiki/Metal_(API)">Metal</a>-based acceleration of proof generation (for recursive proofs) on supported platforms (e.g., Apple silicon).</li>
+<li><code>no_std</code> does not rely on the Rust standard library and enables compilation to WebAssembly.
+<ul>
+<li>Only the <code>wasm32-unknown-unknown</code> and <code>wasm32-wasip1</code> targets are officially supported.</li>
+</ul>
+</li>
+</ul>
+<p>To compile with <code>no_std</code>, disable default features via <code>--no-default-features</code> flag.</p>
+<h4 id="concurrent-proof-generation"><a class="doc-anchor" href="#concurrent-proof-generation">§</a>Concurrent proof generation</h4>
+<p>When compiled with <code>concurrent</code> feature enabled, the VM will generate STARK proofs using multiple threads. For benefits of concurrent proof generation check out these <a href="../README.md#Performance">benchmarks</a>.</p>
+<p>Internally, we use <a href="https://github.com/rayon-rs/rayon">rayon</a> for parallel computations. To control the number of threads used to generate a STARK proof, you can use <code>RAYON_NUM_THREADS</code> environment variable.</p>
+<h3 id="license"><a class="doc-anchor" href="#license">§</a>License</h3>
+<p>This project is dual-licensed under the <a href="http://opensource.org/licenses/MIT">MIT</a> and <a href="https://opensource.org/license/apache-2-0">Apache 2.0</a> licenses.</p>
+</div></details><h2 id="reexports" class="section-header">Re-exports<a href="#reexports" class="anchor">§</a></h2><dl class="item-table reexports"><dt id="reexport.assembly"><code>pub use <a class="mod" href="../miden_assembly/index.html" title="mod miden_assembly">miden_assembly</a> as assembly;</code></dt><dt id="reexport.diagnostics"><code>pub use miden_assembly::<a class="mod" href="../miden_utils_diagnostics/index.html" title="mod miden_utils_diagnostics">diagnostics</a>;</code></dt></dl><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><dl class="item-table"><dt><a class="mod" href="advice/index.html" title="mod miden_vm::advice">advice</a></dt><dt><a class="mod" href="crypto/index.html" title="mod miden_vm::crypto">crypto</a></dt><dt><a class="mod" href="field/index.html" title="mod miden_vm::field">field</a></dt><dt><a class="mod" href="internal/index.html" title="mod miden_vm::internal">internal</a></dt><dt><a class="mod" href="serde/index.html" title="mod miden_vm::serde">serde</a></dt><dt><a class="mod" href="utils/index.html" title="mod miden_vm::utils">utils</a></dt></dl><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.Assembler.html" title="struct miden_vm::Assembler">Assembler</a></dt><dd>The <a href="struct.Assembler.html" title="struct miden_vm::Assembler">Assembler</a> produces a <em>Merkelized Abstract Syntax Tree (MAST)</em> from Miden Assembly sources,
+as an artifact of one of three types:</dd><dt><a class="struct" href="struct.DefaultHost.html" title="struct miden_vm::DefaultHost">Default<wbr>Host</a></dt><dd>A default Host implementation that provides the essential functionality required by the VM.</dd><dt><a class="struct" href="struct.ExecutionOptions.html" title="struct miden_vm::ExecutionOptions">Execution<wbr>Options</a></dt><dd>A set of parameters specifying execution parameters of the VM.</dd><dt><a class="struct" href="struct.ExecutionProof.html" title="struct miden_vm::ExecutionProof">Execution<wbr>Proof</a></dt><dd>A proof of correct execution of Miden VM.</dd><dt><a class="struct" href="struct.ExecutionTrace.html" title="struct miden_vm::ExecutionTrace">Execution<wbr>Trace</a></dt><dd>Execution trace which is generated when a program is executed on the VM.</dd><dt><a class="struct" href="struct.Kernel.html" title="struct miden_vm::Kernel">Kernel</a></dt><dd>A list of exported kernel procedure hashes defining a VM kernel.</dd><dt><a class="struct" href="struct.Module.html" title="struct miden_vm::Module">Module</a></dt><dd>The abstract syntax tree for a single Miden Assembly module.</dd><dt><a class="struct" href="struct.Program.html" title="struct miden_vm::Program">Program</a></dt><dd>An executable program for Miden VM.</dd><dt><a class="struct" href="struct.ProgramInfo.html" title="struct miden_vm::ProgramInfo">Program<wbr>Info</a></dt><dd>A program information set consisting of its MAST root and set of kernel procedure roots used
+for its compilation.</dd><dt><a class="struct" href="struct.ProvingOptions.html" title="struct miden_vm::ProvingOptions">Proving<wbr>Options</a></dt><dd>A set of parameters specifying how Miden VM execution proofs are to be generated.</dd><dt><a class="struct" href="struct.StackInputs.html" title="struct miden_vm::StackInputs">Stack<wbr>Inputs</a></dt><dd>Defines the initial state of the VM’s operand stack.</dd><dt><a class="struct" href="struct.StackOutputs.html" title="struct miden_vm::StackOutputs">Stack<wbr>Outputs</a></dt><dd>Defines the final state of the VM’s operand stack at the end of program execution.</dd><dt><a class="struct" href="struct.Word.html" title="struct miden_vm::Word">Word</a></dt><dd>A unit of data consisting of 4 field elements.</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.ExecutionError.html" title="enum miden_vm::ExecutionError">Execution<wbr>Error</a></dt><dt><a class="enum" href="enum.HashFunction.html" title="enum miden_vm::HashFunction">Hash<wbr>Function</a></dt><dd>A hash function used during STARK proof generation.</dd><dt><a class="enum" href="enum.InputError.html" title="enum miden_vm::InputError">Input<wbr>Error</a></dt><dt><a class="enum" href="enum.ModuleKind.html" title="enum miden_vm::ModuleKind">Module<wbr>Kind</a></dt><dd>Represents the kind of a <a href="struct.Module.html" title="struct miden_vm::Module">Module</a>.</dd><dt><a class="enum" href="enum.Operation.html" title="enum miden_vm::Operation">Operation</a></dt><dd>The set of native VM basic block operations executable which take exactly one cycle to execute.</dd><dt><a class="enum" href="enum.VerificationError.html" title="enum miden_vm::VerificationError">Verification<wbr>Error</a></dt><dd>Errors that can occur during proof verification.</dd></dl><h2 id="constants" class="section-header">Constants<a href="#constants" class="anchor">§</a></h2><dl class="item-table"><dt><a class="constant" href="constant.ZERO.html" title="constant miden_vm::ZERO">ZERO</a></dt><dd>Field element representing ZERO in the Miden base filed.</dd></dl><h2 id="traits" class="section-header">Traits<a href="#traits" class="anchor">§</a></h2><dl class="item-table"><dt><a class="trait" href="trait.Host.html" title="trait miden_vm::Host">Host</a></dt><dd>Defines an interface by which the VM can interact with the host.</dd></dl><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.execute.html" title="fn miden_vm::execute">execute</a></dt><dd>Returns an execution trace resulting from executing the provided program against the provided
+inputs.</dd><dt><a class="fn" href="fn.execute_sync.html" title="fn miden_vm::execute_sync">execute_<wbr>sync</a></dt><dd>Synchronous wrapper for the async <code>execute()</code> function.</dd><dt><a class="fn" href="fn.prove.html" title="fn miden_vm::prove">prove</a></dt><dd>Executes and proves the specified <code>program</code> and returns the result together with a STARK-based
+proof of the program’s execution.</dd><dt><a class="fn" href="fn.prove_sync.html" title="fn miden_vm::prove_sync">prove_<wbr>sync</a></dt><dd>Synchronous wrapper for the async <code>prove()</code> function.</dd><dt><a class="fn" href="fn.verify.html" title="fn miden_vm::verify">verify</a></dt><dd>Verifies a Miden proof.</dd></dl><script type="text/json" id="notable-traits-data">{"Powers<Self>":"<h3>Notable traits for <code><a class=\"struct\" href=\"field/struct.Powers.html\" title=\"struct miden_vm::field::Powers\">Powers</a>&lt;R&gt;</code></h3><pre><code><div class=\"where\">impl&lt;R&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html\" title=\"trait core::iter::traits::iterator::Iterator\">Iterator</a> for <a class=\"struct\" href=\"field/struct.Powers.html\" title=\"struct miden_vm::field::Powers\">Powers</a>&lt;R&gt;<div class=\"where\">where\n    R: <a class=\"trait\" href=\"field/trait.PrimeCharacteristicRing.html\" title=\"trait miden_vm::field::PrimeCharacteristicRing\">PrimeCharacteristicRing</a>,</div></div><div class=\"where\">    type <a href=\"https://doc.rust-lang.org/nightly/core/iter/traits/iterator/trait.Iterator.html#associatedtype.Item\" class=\"associatedtype\">Item</a> = R;</div>"}</script></section></div></main></body></html>
