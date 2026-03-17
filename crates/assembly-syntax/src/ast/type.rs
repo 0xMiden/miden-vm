@@ -243,7 +243,7 @@ impl TypeExpr {
 
         while let Some(ty) = worklist.pop() {
             match ty {
-                Self::Primitive(_) => continue,
+                Self::Primitive(_) => {},
                 Self::Ptr(ty) => {
                     worklist.push(&ty.pointee);
                 },

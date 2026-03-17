@@ -856,7 +856,6 @@ impl Assembler {
                 },
                 SymbolItem::Compiled(_) | SymbolItem::Constant(_) | SymbolItem::Type(_) => {
                     // There is nothing to do for other items that might have edges in the graph
-                    continue;
                 },
             }
         }

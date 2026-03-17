@@ -40,6 +40,7 @@ xclippy = [
     "-Wclippy::mut_mut",
     "-Wclippy::mutex_integer",
     "-Wclippy::needless_borrow",
+    "-Wclippy::needless_continue",
     "-Wclippy::path_buf_push_overwrite",
     "-Wclippy::rc_mutex",
     "-Wclippy::ref_option_ref",
@@ -55,7 +56,9 @@ xclippy = [
     "-Wclippy::zero_sized_map_values",
     "-Wfuture_incompatible",
     "-Wnonstandard_style",
+    "-Wtrivial_numeric_casts",
     "-Wunexpected_cfgs",
+    "-Wunused_lifetimes",
     # The following lints are disabled because they trigger warnings:
     # -Wclippy::checked_conversions        (12 warnings)
     # -Wclippy::debug_assert_with_mut_call (3 warnings)
@@ -72,7 +75,6 @@ xclippy = [
     # -Wclippy::match_same_arms            (287 warnings)
     # -Wclippy::match_wild_err_arm         (6 warnings)
     # -Wclippy::match_wildcard_for_single_variants (8 warnings)
-    # -Wclippy::needless_continue          (12 warnings)
     # -Wclippy::needless_for_each          (7 warnings)
     # -Wclippy::option_option              (6 warnings)
     # -Wclippy::ptr_as_ptr                 (15 warnings)
@@ -86,9 +88,7 @@ xclippy = [
     # -Wclippy::needless_pass_by_value     (43 warnings)
     # -Wclippy::unnecessary_wraps          (40 warnings)
     # -Wrust_2018_idioms                   (190 warnings)
-    # -Wunused_lifetimes                   (4 warnings)
     # -Wunreachable_pub                    (545 warnings)
-    # -Wtrivial_numeric_casts              (2 warnings)
 ]
 
 # Clippy fix with the same lints as xclippy
@@ -125,6 +125,7 @@ xclippy-fix = [
     "-Wclippy::mut_mut",
     "-Wclippy::mutex_integer",
     "-Wclippy::needless_borrow",
+    "-Wclippy::needless_continue",
     "-Wclippy::path_buf_push_overwrite",
     "-Wclippy::rc_mutex",
     "-Wclippy::ref_option_ref",
@@ -140,5 +141,7 @@ xclippy-fix = [
     "-Wclippy::zero_sized_map_values",
     "-Wfuture_incompatible",
     "-Wnonstandard_style",
+    "-Wtrivial_numeric_casts",
     "-Wunexpected_cfgs",
+    "-Wunused_lifetimes",
 ]

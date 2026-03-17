@@ -71,7 +71,6 @@ fn program_execution_fast(c: &mut Criterion) {
             // If we can't access the entry, just skip it
             Err(err) => {
                 eprintln!("Failed to access file: {entry:?} with error {err:?}");
-                continue;
             },
         }
     }

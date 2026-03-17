@@ -468,7 +468,7 @@ fn u32widening_mul() {
     let a = rand_value::<u32>();
     let b = rand_value::<u32>();
     let result = a as u64 * b as u64;
-    let lo = (result % U32_BOUND) as u64;
+    let lo = result % U32_BOUND;
     let hi = result / U32_BOUND;
     let test = build_op_test!(asm_op, &[b as u64, a as u64]);
     test.expect_stack(&[lo, hi]);
