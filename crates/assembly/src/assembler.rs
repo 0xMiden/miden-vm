@@ -1,4 +1,4 @@
-use alloc::{collections::BTreeMap, string::ToString, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeMap, string::ToString, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{
     KernelLibrary, Library, MAX_REPEAT_COUNT, Parse, ParseOptions, SemanticAnalysisError,
@@ -19,15 +19,18 @@ use miden_core::{
     operations::{AssemblyOp, Operation},
     program::{Kernel, Program},
 };
+use miden_mast_package::{
+    PackageManifest,
+    debug_info::{DebugFunctionsSection, DebugSourcesSection, DebugTypesSection},
+};
+use miden_project::{Linkage, TargetType};
 
 use crate::{
     GlobalItemIndex, ModuleIndex, Procedure, ProcedureContext,
     ast::Path,
     basic_block_builder::{BasicBlockBuilder, BasicBlockOrDecorators},
     fmp::{fmp_end_frame_sequence, fmp_initialization_sequence, fmp_start_frame_sequence},
-    linker::{
-        LinkLibrary, LinkLibraryKind, Linker, LinkerError, SymbolItem, SymbolResolutionContext,
-    },
+    linker::{LinkLibrary, Linker, LinkerError, SymbolItem, SymbolResolutionContext},
     mast_forest_builder::MastForestBuilder,
 };
 
@@ -48,6 +51,56 @@ enum AssemblerError {
         source_file: Option<Arc<SourceFile>>,
         max_depth: usize,
     },
+}
+
+pub(crate) struct AssemblyProduct {
+    // This is unused when the `std` feature is not present
+    #[allow(unused)]
+    kind: TargetType,
+    artifact: Arc<Library>,
+    kernel: Option<Kernel>,
+    // This is unused when the `std` feature is not present
+    #[allow(unused)]
+    manifest: PackageManifest,
+}
+
+impl AssemblyProduct {
+    fn new(
+        kind: TargetType,
+        artifact: Arc<Library>,
+        kernel: Option<Kernel>,
+        manifest: PackageManifest,
+    ) -> Self {
+        Self { kind, artifact, kernel, manifest }
+    }
+
+    #[cfg(feature = "std")]
+    pub fn kind(&self) -> TargetType {
+        self.kind
+    }
+
+    #[cfg(feature = "std")]
+    pub fn manifest(&self) -> &PackageManifest {
+        &self.manifest
+    }
+
+    pub fn into_artifact(self) -> Arc<Library> {
+        self.artifact
+    }
+
+    pub fn into_program(self) -> Result<Program, Report> {
+        let entry = ast::Path::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME);
+        let entrypoint = self.artifact.get_export_node_id(&entry);
+        Ok(if let Some(kernel) = self.kernel {
+            Program::with_kernel(self.artifact.mast_forest().clone(), entrypoint, kernel)
+        } else {
+            Program::new(self.artifact.mast_forest().clone(), entrypoint)
+        })
+    }
+
+    pub fn into_kernel_library(self) -> Result<KernelLibrary, Report> {
+        KernelLibrary::try_from(self.artifact).map_err(|error| Report::msg(error.to_string()))
+    }
 }
 
 // ASSEMBLER
@@ -103,19 +156,38 @@ pub struct Assembler {
     /// The source manager to use for compilation and source location information
     source_manager: Arc<dyn SourceManager>,
     /// The linker instance used internally to link assembler inputs
-    linker: Linker,
+    linker: Box<Linker>,
+    /// The debug information gathered during assembly
+    debug_info: DebugInfoSections,
     /// Whether to treat warning diagnostics as errors
     warnings_as_errors: bool,
+    /// Whether to preserve debug information in the assembled artifact.
+    emit_debug_info: bool,
+    /// Whether to trim source file paths in debug information.
+    trim_paths: bool,
+}
+
+#[derive(Default, Clone)]
+struct DebugInfoSections {
+    /// The debug function section maintained by the assembler during assembly
+    debug_functions_section: DebugFunctionsSection,
+    /// The debug type section maintained by the assembler during assembly
+    debug_types_section: DebugTypesSection,
+    /// The debug sources section maintained by the assembler during assembly
+    debug_sources_section: DebugSourcesSection,
 }
 
 impl Default for Assembler {
     fn default() -> Self {
         let source_manager = Arc::new(DefaultSourceManager::default());
-        let linker = Linker::new(source_manager.clone());
+        let linker = Box::new(Linker::new(source_manager.clone()));
         Self {
             source_manager,
             linker,
+            debug_info: Default::default(),
             warnings_as_errors: false,
+            emit_debug_info: true,
+            trim_paths: false,
         }
     }
 }
@@ -125,18 +197,21 @@ impl Default for Assembler {
 impl Assembler {
     /// Start building an [Assembler]
     pub fn new(source_manager: Arc<dyn SourceManager>) -> Self {
-        let linker = Linker::new(source_manager.clone());
+        let linker = Box::new(Linker::new(source_manager.clone()));
         Self {
             source_manager,
             linker,
+            debug_info: Default::default(),
             warnings_as_errors: false,
+            emit_debug_info: true,
+            trim_paths: false,
         }
     }
 
     /// Start building an [`Assembler`] with a kernel defined by the provided [KernelLibrary].
     pub fn with_kernel(source_manager: Arc<dyn SourceManager>, kernel_lib: KernelLibrary) -> Self {
         let (kernel, kernel_module, _) = kernel_lib.into_parts();
-        let linker = Linker::with_kernel(source_manager.clone(), kernel, kernel_module);
+        let linker = Box::new(Linker::with_kernel(source_manager.clone(), kernel, kernel_module));
         Self {
             source_manager,
             linker,
@@ -149,6 +224,18 @@ impl Assembler {
     /// When true, any warning diagnostics that are emitted will be promoted to errors.
     pub fn with_warnings_as_errors(mut self, yes: bool) -> Self {
         self.warnings_as_errors = yes;
+        self
+    }
+
+    #[cfg(feature = "std")]
+    pub(crate) fn with_emit_debug_info(mut self, yes: bool) -> Self {
+        self.emit_debug_info = yes;
+        self
+    }
+
+    #[cfg(feature = "std")]
+    pub(crate) fn with_trim_paths(mut self, yes: bool) -> Self {
+        self.trim_paths = yes;
         self
     }
 }
@@ -245,24 +332,21 @@ impl Assembler {
     /// The way in which procedures referenced in `library` will be linked by the final artifact is
     /// determined by `kind`:
     ///
-    /// * [`LinkLibraryKind::Dynamic`] inserts a reference to the procedure in the assembled MAST,
-    ///   but not the MAST of the procedure itself. Consequently, it is necessary to provide both
-    ///   the assembled artifact _and_ `library` to the VM when executing the program, otherwise the
+    /// * [`Linkage::Dynamic`] inserts a reference to the procedure in the assembled MAST, but not
+    ///   the MAST of the procedure itself. Consequently, it is necessary to provide both the
+    ///   assembled artifact _and_ `library` to the VM when executing the program, otherwise the
     ///   procedure reference will not be resolvable at runtime.
-    /// * [`LinkLibraryKind::Static`] includes the MAST of the referenced procedure in the final
-    ///   artifact, including any code reachable from that procedure contained in `library`. The
-    ///   resulting artifact does not require `library` to be provided to the VM when executing it,
-    ///   as all procedure references were resolved ahead of time.
+    /// * [`Linkage::Static`] includes the MAST of the referenced procedure in the final artifact,
+    ///   including any code reachable from that procedure contained in `library`. The resulting
+    ///   artifact does not require `library` to be provided to the VM when executing it, as all
+    ///   procedure references were resolved ahead of time.
     pub fn link_library(
         &mut self,
         library: impl AsRef<Library>,
-        kind: LinkLibraryKind,
+        linkage: Linkage,
     ) -> Result<(), Report> {
         self.linker
-            .link_library(LinkLibrary {
-                library: Arc::new(library.as_ref().clone()),
-                kind,
-            })
+            .link_library(LinkLibrary::from_library(library.as_ref()).with_linkage(linkage))
             .map_err(Report::from)
     }
 
@@ -292,9 +376,8 @@ impl Assembler {
     /// example, unexpected procedure paths or source locations in diagnostics - it could be due
     /// to this edge case.
     pub fn link_dynamic_library(&mut self, library: impl AsRef<Library>) -> Result<(), Report> {
-        self.linker
-            .link_library(LinkLibrary::dynamic(Arc::new(library.as_ref().clone())))
-            .map_err(Report::from)
+        let library = LinkLibrary::from_library(library.as_ref()).with_linkage(Linkage::Dynamic);
+        self.linker.link_library(library).map_err(Report::from)
     }
 
     /// Dynamically link against `library` during assembly.
@@ -314,9 +397,8 @@ impl Assembler {
     /// Static linking produces larger binaries, but allows you to produce self-contained artifacts
     /// that avoid the requirement that you provide `library` to the VM at runtime.
     pub fn link_static_library(&mut self, library: impl AsRef<Library>) -> Result<(), Report> {
-        self.linker
-            .link_library(LinkLibrary::r#static(Arc::new(library.as_ref().clone())))
-            .map_err(Report::from)
+        let library = LinkLibrary::from_library(library.as_ref()).with_linkage(Linkage::Static);
+        self.linker.link_library(library).map_err(Report::from)
     }
 
     /// Statically link against `library` during assembly.
@@ -325,6 +407,59 @@ impl Assembler {
     pub fn with_static_library(mut self, library: impl AsRef<Library>) -> Result<Self, Report> {
         self.link_static_library(library)?;
         Ok(self)
+    }
+
+    /// Link against `package` with the specified linkage mode during assembly.
+    pub fn link_package(
+        &mut self,
+        package: Arc<miden_mast_package::Package>,
+        linkage: Linkage,
+    ) -> Result<(), Report> {
+        use miden_mast_package::PackageExport;
+        match package.kind {
+            TargetType::Kernel => {
+                if !self.kernel().is_empty() {
+                    return Err(Report::msg(format!(
+                        "duplicate kernels present in the dependency graph: '{}@{
+    }' conflicts with another kernel we've already linked",
+                        &package.name, &package.version
+                    )));
+                }
+
+                let exports = package
+                    .manifest
+                    .exports()
+                    .filter_map(|export| {
+                        if export.path().is_kernel_path()
+                            && let PackageExport::Procedure(p) = export
+                        {
+                            Some(p.digest)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                let Some(kernel_module) =
+                    package.mast.module_infos().find(|mi| mi.path().is_kernel_path())
+                else {
+                    return Err(Report::msg(
+                        "invalid kernel package: does not contain kernel module",
+                    ));
+                };
+                let kernel = Kernel::new(&exports)
+                    .map_err(|err| Report::msg(format!("invalid kernel package: {err}")))?;
+                self.linker.link_with_kernel(kernel, kernel_module)?;
+                Ok(())
+            },
+            TargetType::Executable => {
+                Err(Report::msg("cannot add executable packages to an assembler"))
+            },
+            _ => {
+                self.linker
+                    .link_library(LinkLibrary::from_package(package).with_linkage(linkage))?;
+                Ok(())
+            },
+        }
     }
 }
 
@@ -343,6 +478,11 @@ impl Assembler {
         self.linker.kernel()
     }
 
+    #[cfg(any(test, feature = "std"))]
+    pub(crate) fn source_manager(&self) -> Arc<dyn SourceManager> {
+        self.source_manager.clone()
+    }
+
     #[cfg(any(test, feature = "testing"))]
     #[doc(hidden)]
     pub fn linker(&self) -> &Linker {
@@ -359,9 +499,9 @@ impl Assembler {
     ///
     /// Returns an error if parsing or compilation of the specified modules fails.
     pub fn assemble_library(
-        mut self,
+        self,
         modules: impl IntoIterator<Item = impl Parse>,
-    ) -> Result<Library, Report> {
+    ) -> Result<Arc<Library>, Report> {
         let modules = modules
             .into_iter()
             .map(|module| {
@@ -375,9 +515,7 @@ impl Assembler {
             })
             .collect::<Result<Vec<_>, Report>>()?;
 
-        let module_indices = self.linker.link(modules)?;
-
-        self.assemble_common(&module_indices)
+        Ok(self.assemble_library_modules(modules, TargetType::Library)?.into_artifact())
     }
 
     /// Assemble a [Library] from a standard Miden Assembly project layout, using the provided
@@ -419,7 +557,7 @@ impl Assembler {
         self,
         dir: impl AsRef<std::path::Path>,
         namespace: impl AsRef<Path>,
-    ) -> Result<Library, Report> {
+    ) -> Result<Arc<Library>, Report> {
         use miden_assembly_syntax::parser;
 
         let dir = dir.as_ref();
@@ -436,7 +574,7 @@ impl Assembler {
     /// # Errors
     ///
     /// Returns an error if parsing or compilation of the specified modules fails.
-    pub fn assemble_kernel(mut self, module: impl Parse) -> Result<KernelLibrary, Report> {
+    pub fn assemble_kernel(self, module: impl Parse) -> Result<KernelLibrary, Report> {
         let module = module.parse_with_options(
             self.source_manager.clone(),
             ParseOptions {
@@ -446,10 +584,7 @@ impl Assembler {
             },
         )?;
 
-        let module_indices = self.linker.link_kernel(module)?;
-
-        self.assemble_common(&module_indices)
-            .and_then(|lib| KernelLibrary::try_from(Arc::new(lib)).map_err(Report::new))
+        self.assemble_kernel_module(module)?.into_kernel_library()
     }
 
     /// Assemble a [KernelLibrary] from a standard Miden Assembly kernel project layout.
@@ -480,10 +615,14 @@ impl Assembler {
     }
 
     /// Shared code used by both [`Self::assemble_library`] and [`Self::assemble_kernel`].
-    fn assemble_common(mut self, module_indices: &[ModuleIndex]) -> Result<Library, Report> {
+    fn assemble_library_product(
+        mut self,
+        module_indices: &[ModuleIndex],
+        kind: TargetType,
+    ) -> Result<AssemblyProduct, Report> {
         let staticlibs = self.linker.libraries().filter_map(|lib| {
-            if matches!(lib.kind, LinkLibraryKind::Static) {
-                Some(lib.library.as_ref())
+            if matches!(lib.linkage, Linkage::Static) {
+                Some(lib.mast.as_ref())
             } else {
                 None
             }
@@ -537,7 +676,7 @@ impl Assembler {
             }
         }
 
-        Ok(Library::new(mast_forest.into(), exports)?)
+        self.finish_library_product(mast_forest, exports, kind)
     }
 
     /// The purpose of this function is, for any given symbol in the set of modules being compiled
@@ -658,7 +797,7 @@ impl Assembler {
     ///
     /// Returns an error if parsing or compilation of the specified program fails, or if the source
     /// doesn't have an entrypoint.
-    pub fn assemble_program(mut self, source: impl Parse) -> Result<Program, Report> {
+    pub fn assemble_program(self, source: impl Parse) -> Result<Program, Report> {
         let options = ParseOptions {
             kind: ModuleKind::Executable,
             warnings_as_errors: self.warnings_as_errors,
@@ -667,6 +806,33 @@ impl Assembler {
 
         let program = source.parse_with_options(self.source_manager.clone(), options)?;
         assert!(program.is_executable());
+
+        self.assemble_executable_modules(program, [])?.into_program()
+    }
+
+    pub(crate) fn assemble_library_modules(
+        mut self,
+        modules: impl IntoIterator<Item = Box<ast::Module>>,
+        kind: TargetType,
+    ) -> Result<AssemblyProduct, Report> {
+        let module_indices = self.linker.link(modules)?;
+        self.assemble_library_product(&module_indices, kind)
+    }
+
+    pub(crate) fn assemble_kernel_module(
+        mut self,
+        module: Box<ast::Module>,
+    ) -> Result<AssemblyProduct, Report> {
+        let module_indices = self.linker.link_kernel(module)?;
+        self.assemble_library_product(&module_indices, TargetType::Kernel)
+    }
+
+    pub(crate) fn assemble_executable_modules(
+        mut self,
+        program: Box<ast::Module>,
+        support_modules: impl IntoIterator<Item = Box<ast::Module>>,
+    ) -> Result<AssemblyProduct, Report> {
+        self.linker.link_modules(support_modules)?;
 
         // Recompute graph with executable module, and start compiling
         let module_index = self.linker.link([program])?[0];
@@ -681,8 +847,8 @@ impl Assembler {
 
         // Compile the linked module graph rooted at the entrypoint
         let staticlibs = self.linker.libraries().filter_map(|lib| {
-            if matches!(lib.kind, LinkLibraryKind::Static) {
-                Some(lib.library.as_ref())
+            if matches!(lib.linkage, Linkage::Static) {
+                Some(lib.mast.as_ref())
             } else {
                 None
             }
@@ -703,11 +869,56 @@ impl Assembler {
         let (mast_forest, id_remappings) = mast_forest_builder.build();
         let entry_node_id = *id_remappings.get(&entry_node_id).unwrap_or(&entry_node_id);
 
-        Ok(Program::with_kernel(
-            mast_forest.into(),
-            entry_node_id,
-            self.linker.kernel().clone(),
-        ))
+        self.finish_program_product(mast_forest, entry_node_id, self.linker.kernel().clone())
+    }
+
+    fn finish_library_product(
+        &self,
+        mut mast_forest: miden_core::mast::MastForest,
+        exports: BTreeMap<Arc<Path>, LibraryExport>,
+        kind: TargetType,
+    ) -> Result<AssemblyProduct, Report> {
+        self.apply_debug_options(&mut mast_forest);
+
+        let library = Library::new(Arc::new(mast_forest), exports)?;
+        let manifest = PackageManifest::from_library(&library);
+
+        Ok(AssemblyProduct::new(kind, Arc::new(library), None, manifest))
+    }
+
+    fn finish_program_product(
+        &self,
+        mut mast_forest: miden_core::mast::MastForest,
+        entrypoint: MastNodeId,
+        kernel: Kernel,
+    ) -> Result<AssemblyProduct, Report> {
+        self.apply_debug_options(&mut mast_forest);
+
+        let mast = Arc::new(mast_forest);
+        let entry: Arc<Path> =
+            ast::Path::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME).into();
+        let entrypoint = LibraryExport::Procedure(ProcedureExport {
+            node: entrypoint,
+            path: entry.clone(),
+            signature: None,
+            attributes: Default::default(),
+        });
+        let library = Arc::new(Library::new(mast, BTreeMap::from_iter([(entry, entrypoint)]))?);
+        let manifest = PackageManifest::from_library(&library);
+
+        Ok(AssemblyProduct::new(TargetType::Executable, library, Some(kernel), manifest))
+    }
+
+    fn apply_debug_options(&self, mast_forest: &mut miden_core::mast::MastForest) {
+        if !self.emit_debug_info {
+            mast_forest.clear_debug_info();
+            return;
+        }
+
+        if self.trim_paths {
+            // Package-level debug sections are introduced separately from core assembly artifacts,
+            // so there is nothing to rewrite here yet.
+        }
     }
 
     /// Compile the uncompiled procedure in the linked module graph which are members of the
@@ -770,7 +981,7 @@ impl Assembler {
                 SymbolItem::Procedure(proc) => {
                     let proc = proc.borrow();
                     let num_locals = proc.num_locals();
-                    let path = module_path.join(proc.name().as_str()).into();
+                    let path = Arc::<Path>::from(module_path.join(proc.name().as_str()));
                     let signature = self.linker.resolve_signature(procedure_gid)?;
                     let is_program_entrypoint =
                         root.is_program_entrypoint && root.proc_id == procedure_gid;
@@ -778,9 +989,9 @@ impl Assembler {
                     let pctx = ProcedureContext::new(
                         procedure_gid,
                         is_program_entrypoint,
-                        path,
+                        path.clone(),
                         proc.visibility(),
-                        signature,
+                        signature.clone(),
                         module_kind.is_kernel(),
                         self.source_manager.clone(),
                     )
@@ -794,6 +1005,44 @@ impl Assembler {
                     // MAST forest. This is because while we won't insert a duplicate node for the
                     // procedure body node itself, all nodes that make up the procedure body would
                     // be added to the forest.
+
+                    // Record the debug info for this procedure
+                    if let Ok(file_line_col) = self.source_manager.file_line_col(proc.span()) {
+                        let path_id = self
+                            .debug_info
+                            .debug_sources_section
+                            .add_string(Arc::from(file_line_col.uri.path()));
+                        let file_id = self
+                            .debug_info
+                            .debug_sources_section
+                            .add_file(miden_mast_package::debug_info::DebugFileInfo::new(path_id));
+                        let name = Arc::<str>::from(path.as_str());
+                        let name_id =
+                            self.debug_info.debug_functions_section.add_string(name.clone());
+                        let type_index = if let Some(signature) = signature {
+                            Some(register_debug_type(
+                                &mut self.debug_info.debug_types_section,
+                                Some(name),
+                                None,
+                                &ast::types::Type::Function(signature),
+                            )?)
+                        } else {
+                            None
+                        };
+                        let func_info = miden_mast_package::debug_info::DebugFunctionInfo::new(
+                            name_id,
+                            file_id,
+                            file_line_col.line,
+                            file_line_col.column,
+                        )
+                        .with_mast_root(procedure.mast_root());
+                        let func_info = if let Some(type_index) = type_index {
+                            func_info.with_type(type_index)
+                        } else {
+                            func_info
+                        };
+                        self.debug_info.debug_functions_section.add_function(func_info);
+                    }
 
                     // Cache the compiled procedure
                     drop(proc);
@@ -1308,4 +1557,240 @@ pub(crate) struct BodyWrapper {
 pub(super) struct ResolvedProcedure {
     pub node: MastNodeId,
     pub signature: Option<Arc<FunctionType>>,
+}
+
+fn register_debug_type(
+    debug_types_section: &mut miden_mast_package::debug_info::DebugTypesSection,
+    declared_name: Option<Arc<str>>,
+    declared_ty: Option<&ast::TypeExpr>,
+    ty: &ast::types::Type,
+) -> Result<miden_mast_package::debug_info::DebugTypeIdx, Report> {
+    use ast::types::Type;
+    use miden_mast_package::debug_info::{DebugPrimitiveType, DebugTypeInfo};
+    Ok(match ty {
+        Type::I1 => {
+            debug_types_section.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::Bool))
+        },
+        Type::I8 => debug_types_section.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::I8)),
+        Type::U8 => debug_types_section.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U8)),
+        Type::I16 => {
+            debug_types_section.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::I16))
+        },
+        Type::U16 => {
+            debug_types_section.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U16))
+        },
+        Type::I32 => {
+            debug_types_section.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::I32))
+        },
+        Type::U32 => {
+            debug_types_section.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U32))
+        },
+        Type::I64 => {
+            debug_types_section.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::I64))
+        },
+        Type::U64 => {
+            debug_types_section.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U64))
+        },
+        Type::I128 => {
+            debug_types_section.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::I128))
+        },
+        Type::U128 => {
+            debug_types_section.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U128))
+        },
+        Type::Felt => {
+            debug_types_section.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::Felt))
+        },
+        Type::F64 => {
+            debug_types_section.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::F64))
+        },
+        Type::U256 | Type::Unknown => debug_types_section.add_type(DebugTypeInfo::Unknown),
+        Type::Never => {
+            debug_types_section.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::Void))
+        },
+        Type::Ptr(ptr) => {
+            let pointee_name = declared_ty.and_then(|t| match t {
+                ast::TypeExpr::Ptr(p) => match p.pointee.as_ref() {
+                    ast::TypeExpr::Ref(p) => Some(Arc::from(p.inner().as_str())),
+                    _ => None,
+                },
+                _ => None,
+            });
+            let pointee_decl = declared_ty.and_then(|t| match t {
+                ast::TypeExpr::Ptr(p) => Some(p.pointee.as_ref()),
+                _ => None,
+            });
+            let pointee_type_idx = register_debug_type(
+                debug_types_section,
+                pointee_name,
+                pointee_decl,
+                ptr.pointee(),
+            )?;
+            debug_types_section.add_type(DebugTypeInfo::Pointer { pointee_type_idx })
+        },
+        Type::Array(array) => {
+            let element_name = declared_ty.and_then(|t| match t {
+                ast::TypeExpr::Array(array) => match array.elem.as_ref() {
+                    ast::TypeExpr::Ref(t) => Some(Arc::from(t.inner().as_str())),
+                    _ => None,
+                },
+                _ => None,
+            });
+            let element_decl = declared_ty.and_then(|t| match t {
+                ast::TypeExpr::Ptr(p) => Some(p.pointee.as_ref()),
+                _ => None,
+            });
+            let element_type_idx = register_debug_type(
+                debug_types_section,
+                element_name,
+                element_decl,
+                array.element_type(),
+            )?;
+            let count =
+                u32::try_from(array.len()).map_err(|_| Report::msg("array type is too large"))?;
+            debug_types_section
+                .add_type(DebugTypeInfo::Array { element_type_idx, count: Some(count) })
+        },
+        Type::List(ty) => {
+            let pointee_name = declared_ty.and_then(|t| match t {
+                ast::TypeExpr::Ptr(p) => match p.pointee.as_ref() {
+                    ast::TypeExpr::Ref(p) => Some(Arc::from(p.inner().as_str())),
+                    _ => None,
+                },
+                _ => None,
+            });
+            let pointee_decl = declared_ty.and_then(|t| match t {
+                ast::TypeExpr::Ptr(p) => Some(p.pointee.as_ref()),
+                _ => None,
+            });
+            let pointee_ty =
+                register_debug_type(debug_types_section, pointee_name, pointee_decl, ty)?;
+            let usize_ty =
+                debug_types_section.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::U32));
+            let pointer_ty = debug_types_section
+                .add_type(DebugTypeInfo::Pointer { pointee_type_idx: pointee_ty });
+            let name_idx = debug_types_section
+                .add_string(declared_name.unwrap_or_else(|| format!("list<{ty}>").into()));
+            let ptr = miden_mast_package::debug_info::DebugFieldInfo {
+                name_idx: debug_types_section.add_string("ptr".into()),
+                type_idx: pointer_ty,
+                offset: 0,
+            };
+            let len = miden_mast_package::debug_info::DebugFieldInfo {
+                name_idx: debug_types_section.add_string("len".into()),
+                type_idx: usize_ty,
+                offset: 4,
+            };
+            debug_types_section.add_type(DebugTypeInfo::Struct {
+                name_idx,
+                size: 8,
+                fields: vec![ptr, len],
+            })
+        },
+        Type::Struct(struct_ty) => {
+            let declared_field_tys = declared_ty.and_then(|t| match t {
+                ast::TypeExpr::Struct(t) => Some(&t.fields),
+                _ => None,
+            });
+            let mut fields = vec![];
+            for (i, field) in struct_ty.fields().iter().enumerate() {
+                let decl = declared_field_tys.and_then(|fields| fields.get(i));
+                let declared_name = decl.map(|decl| decl.name.clone().into_inner());
+                let declared_ty = decl.map(|decl| &decl.ty);
+                let type_idx = register_debug_type(
+                    debug_types_section,
+                    declared_name.clone(),
+                    declared_ty,
+                    &field.ty,
+                )?;
+                let name_idx = debug_types_section
+                    .add_string(declared_name.unwrap_or_else(|| format!("{i}").into()));
+                fields.push(miden_mast_package::debug_info::DebugFieldInfo {
+                    name_idx,
+                    type_idx,
+                    offset: field.offset,
+                });
+            }
+            let name_idx = debug_types_section
+                .add_string(declared_name.clone().unwrap_or_else(|| "<anon>".into()));
+            let size = u32::try_from(struct_ty.size()).map_err(|_| {
+                if let Some(declared_name) = declared_name.as_ref() {
+                    Report::msg(format!(
+                        "invalid struct type '{declared_name}': struct is too large"
+                    ))
+                } else {
+                    Report::msg("invalid struct type: struct is too large")
+                }
+            })?;
+            debug_types_section.add_type(miden_mast_package::debug_info::DebugTypeInfo::Struct {
+                name_idx,
+                size,
+                fields,
+            })
+        },
+        Type::Enum(enum_ty) => {
+            let discrim_ty =
+                register_debug_type(debug_types_section, None, None, enum_ty.discriminant())?;
+            if enum_ty.is_c_like() {
+                discrim_ty
+            } else {
+                // TODO(pauls): We need to figure out how best to represent this in terms of DWARF
+                // debug info
+                debug_types_section.add_type(miden_mast_package::debug_info::DebugTypeInfo::Unknown)
+            }
+        },
+        Type::Function(fty) => {
+            let return_type_index = match fty.results() {
+                [] => debug_types_section.add_type(
+                    miden_mast_package::debug_info::DebugTypeInfo::Primitive(
+                        miden_mast_package::debug_info::DebugPrimitiveType::Void,
+                    ),
+                ),
+                [ty] => register_debug_type(debug_types_section, None, None, ty)?,
+                types => {
+                    let ty = ast::types::StructType::new(types.iter().cloned());
+                    let size = u32::try_from(ty.size()).map_err(|_| {
+                        if let Some(declared_name) = declared_name.as_ref() {
+                            Report::msg(format!(
+                                "invalid signature for '{declared_name}': return type is too big"
+                            ))
+                        } else {
+                            Report::msg("invalid signature: return type is too big")
+                        }
+                    })?;
+                    let mut fields = vec![];
+                    for (i, field) in ty.fields().iter().enumerate() {
+                        let name_idx = debug_types_section.add_string(format!("{i}").into());
+                        let type_idx =
+                            register_debug_type(debug_types_section, None, None, &field.ty)?;
+                        fields.push(miden_mast_package::debug_info::DebugFieldInfo {
+                            name_idx,
+                            type_idx,
+                            offset: field.offset,
+                        });
+                    }
+                    let name_idx = debug_types_section.add_string("<anon>".into());
+                    debug_types_section.add_type(
+                        miden_mast_package::debug_info::DebugTypeInfo::Struct {
+                            name_idx,
+                            size,
+                            fields,
+                        },
+                    )
+                },
+            };
+            let mut param_type_indices = vec![];
+            for param in fty.params() {
+                param_type_indices.push(register_debug_type(
+                    debug_types_section,
+                    None,
+                    None,
+                    param,
+                )?);
+            }
+            debug_types_section.add_type(miden_mast_package::debug_info::DebugTypeInfo::Function {
+                return_type_idx: Some(return_type_index),
+                param_type_indices,
+            })
+        },
+    })
 }

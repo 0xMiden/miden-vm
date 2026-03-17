@@ -21,7 +21,6 @@ use miden_core::{
 
 use super::{GlobalItemIndex, LinkerError, Procedure};
 use crate::{
-    Library,
     diagnostics::{IntoDiagnostic, Report, WrapErr},
     report,
 };
@@ -95,10 +94,10 @@ impl MastForestBuilder {
     /// to be dynamically-linked, and are inserted as an external node. Dynamically-linked libraries
     /// must be provided separately to the processor at runtime.
     pub fn new<'a>(
-        static_libraries: impl IntoIterator<Item = &'a Library>,
+        static_libraries: impl IntoIterator<Item = &'a MastForest>,
     ) -> Result<Self, Report> {
         // All statically-linked libraries are merged into a single MastForest.
-        let forests = static_libraries.into_iter().map(|lib| lib.mast_forest().as_ref());
+        let forests = static_libraries.into_iter();
         let (statically_linked_mast, _remapping) = MastForest::merge(forests).into_diagnostic()?;
         // The AdviceMap of the statically-linked forest is copied to the forest being built.
         //

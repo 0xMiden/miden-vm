@@ -21,3 +21,47 @@ pub struct Target {
     /// the MASM modules to an instantiated assembler when assembling this project.
     pub path: Option<Span<Uri>>,
 }
+
+impl Target {
+    /// Construct a new virtual executable target named `name`
+    pub fn executable(name: impl Into<Arc<str>>) -> Self {
+        Self::r#virtual(TargetType::Executable, name.into(), Path::exec_path())
+    }
+
+    /// Construct a new virtual library target named `name` with namespace `namespace`
+    pub fn library(namespace: impl Into<Arc<Path>>) -> Self {
+        let namespace = namespace.into();
+        let name: Arc<str> = namespace.as_str().into();
+        Self::r#virtual(TargetType::Library, name, namespace)
+    }
+
+    /// Construct a new virtual target of type `ty`, with the given `name` and `namespace`
+    pub fn r#virtual(
+        ty: TargetType,
+        name: impl Into<Arc<str>>,
+        namespace: impl Into<Arc<Path>>,
+    ) -> Self {
+        Self {
+            ty,
+            name: Span::unknown(name.into()),
+            namespace: Span::unknown(namespace.into()),
+            path: None,
+        }
+    }
+
+    /// Construct this [Target] with the given root module [Uri].
+    pub fn with_path(mut self, path: impl Into<Uri>) -> Self {
+        self.path = Some(Span::unknown(path.into()));
+        self
+    }
+
+    /// Returns true if this target is an executable target
+    pub const fn is_executable(&self) -> bool {
+        matches!(self.ty, TargetType::Executable)
+    }
+
+    /// Returns true if this target is a non-executable target
+    pub const fn is_library(&self) -> bool {
+        !self.is_executable()
+    }
+}

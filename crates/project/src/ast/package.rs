@@ -115,7 +115,7 @@ pub struct ProjectFile {
         serde(
             default,
             rename = "profile",
-            deserialize_with = "super::profile::deserialize_profiles_table",
+            with = "super::profile::serialization",
             skip_serializing_if = "Vec::is_empty"
         )
     )]

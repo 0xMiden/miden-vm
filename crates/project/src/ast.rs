@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 
 pub use self::{
     dependency::DependencySpec,
-    package::{PackageConfig, PackageDetail, ProjectFile},
+    package::{PackageConfig, PackageDetail, PackageTable, ProjectFile},
     profile::Profile,
     target::{BinTarget, LibTarget},
     workspace::WorkspaceFile,

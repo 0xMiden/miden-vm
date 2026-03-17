@@ -5,7 +5,6 @@ extern crate alloc;
 #[cfg(any(test, feature = "std"))]
 extern crate std;
 
-mod package_id;
 #[cfg(feature = "resolver")]
 mod resolver;
 mod version;
@@ -13,23 +12,24 @@ mod version_requirement;
 
 use alloc::{collections::BTreeMap, sync::Arc};
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
+use miden_assembly_syntax::Report;
 pub use miden_assembly_syntax::{
     debuginfo::Span,
     semver,
     semver::{Version as SemVer, VersionReq},
 };
 pub use miden_core::{LexicographicWord, Word};
+use miden_mast_package::Package as MastPackage;
+pub use miden_mast_package::PackageId;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "resolver")]
 pub use self::resolver::{
-    DependencyResolutionError, InMemoryPackageRegistry, PackageIndex, PackagePriority,
-    PackageResolver, VersionSet,
+    DependencyResolutionError, InMemoryPackageRegistry, PackagePriority, PackageResolver,
+    VersionSet,
 };
 pub use self::{
-    package_id::PackageId,
     version::{InvalidVersionError, SemVerError, Version},
     version_requirement::VersionRequirement,
 };
@@ -152,4 +152,14 @@ pub trait PackageRegistry {
 
     /// Register a package `name` with `version`, using the provided package metadata
     fn register(&mut self, name: PackageId, version: Version, record: PackageRecord);
+}
+
+/// A read-only package artifact provider used to load assembled packages by resolved version.
+pub trait PackageProvider {
+    /// Load the concrete package artifact for `package` at `version`.
+    fn load_package(
+        &self,
+        package: &PackageId,
+        version: &Version,
+    ) -> Result<Arc<MastPackage>, Report>;
 }

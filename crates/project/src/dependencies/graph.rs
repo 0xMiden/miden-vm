@@ -24,6 +24,20 @@ use crate::{
     Workspace, ast,
 };
 
+/// The [ProjectDependencyGraph] represents a materialized dependency graph rooted at a specific
+/// package.
+///
+/// Each node in the graph corresponds to a specific package version, and describes:
+///
+/// * What packages it depends on, and with what linkage
+/// * The provenance of the package, i.e. whether the package was sourced from a pre-assembled
+///   artifact on the local filesystem; assembled from source that is present on the local
+///   filesystem (and where those sources came from); or was fetched from the package registry.
+///
+/// The assembler uses this dependency graph both for validation, and to ensure that all
+/// dependencies of a package are properly linked.
+///
+/// See [ProjectDependencyGraphBuilder] for more details on constructing a [ProjectDependencyGraph].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectDependencyGraph {
     root: PackageId,
@@ -31,14 +45,17 @@ pub struct ProjectDependencyGraph {
 }
 
 impl ProjectDependencyGraph {
+    /// Get the package identifier of the root package
     pub fn root(&self) -> &PackageId {
         &self.root
     }
 
+    /// Get the nodes of the underlying graph
     pub fn nodes(&self) -> &BTreeMap<PackageId, ProjectDependencyNode> {
         &self.nodes
     }
 
+    /// Get the node corresponding to `package`
     pub fn get(&self, package: &PackageId) -> Option<&ProjectDependencyNode> {
         self.nodes.get(package)
     }
@@ -71,15 +88,21 @@ impl ProjectDependencyGraph {
     }
 }
 
+/// Represents information about a single package in a [ProjectDependencyGraph]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectDependencyNode {
+    /// The name of the package
     pub name: PackageId,
+    /// The semantic version of the package
     pub version: SemVer,
+    /// Known dependencies of this package, which are also found in the graph.
     pub dependencies: Vec<ProjectDependencyEdge>,
+    /// The provenance of this package
     pub provenance: ProjectDependencyNodeProvenance,
 }
 
 impl ProjectDependencyNode {
+    /// Evaluates equality for nodes without consideration for dependencies
     fn same_identity(&self, other: &Self) -> bool {
         self.name == other.name
             && self.version == other.version
@@ -87,46 +110,82 @@ impl ProjectDependencyNode {
     }
 }
 
+/// Represents a dependency edge in the [ProjectDependencyGraph]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectDependencyEdge {
+    /// The package depended upon
     pub dependency: PackageId,
+    /// The linkage requested by the dependent package
     pub linkage: Linkage,
 }
 
+/// Represents provenance of a package in the [ProjectDependencyGraph], i.e. how it was obtained.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProjectDependencyNodeProvenance {
+    /// We have the sources for the package in question, rather than an already-assembled artifact.
     Source(ProjectSource),
+    /// The package was resolved from the registry
     Registry {
+        /// The version requirement expressed by the dependent
         requirement: VersionRequirement,
+        /// The selected version information resolved from the registry
         selected: Version,
     },
+    /// The package is an already assembled artifact referenced by path, bypassing the registry.
     Preassembled {
+        /// The path to the artifact, i.e. `.masp` file
         path: PathBuf,
+        /// The version of the preassembled package
         selected: Version,
     },
 }
 
+/// Represents information about a package whose provenance is a Miden project in source form.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProjectSource {
-    pub origin: ProjectSourceOrigin,
-    pub manifest_path: PathBuf,
-    pub project_root: PathBuf,
-    pub workspace_root: Option<PathBuf>,
-    pub library_path: Option<PathBuf>,
+pub enum ProjectSource {
+    Virtual {
+        origin: ProjectSourceOrigin,
+    },
+    Real {
+        /// Where the sources were obtained from
+        origin: ProjectSourceOrigin,
+        /// The path to the package manifest, or `None` if the manifest is virtual
+        manifest_path: PathBuf,
+        /// The directory containing the package
+        project_root: PathBuf,
+        /// The directory of the workspace containing the package, if applicable
+        workspace_root: Option<PathBuf>,
+        /// The path to the library target for this project
+        ///
+        /// This is `None` only when we're assembling an executable target of the root package, and
+        /// this is the source info for the root package itself.
+        library_path: Option<PathBuf>,
+    },
 }
 
+/// Represents the provenance of Miden project sources
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProjectSourceOrigin {
+    /// The sources are those of the root package being assembled
     Root,
+    /// The sources were referenced by path
     Path,
+    /// The sources were cloned from a Git repository into a locally-cached checkout
     Git {
+        /// The repository URI
         repo: Uri,
+        /// The revision that was checked out
         revision: GitRevision,
+        /// The path where the repo was checked-out locally
         checkout_path: PathBuf,
+        /// The resolved revision of the checkout as a commit hash.
+        ///
+        /// This is primarily relevant when the requested revision was a branch or tag.
         resolved_revision: Arc<str>,
     },
 }
 
+/// This type handles the details of constructing a [ProjectDependencyGraph] for a package.
 pub struct ProjectDependencyGraphBuilder<'a, R: PackageRegistry + ?Sized> {
     registry: &'a R,
     source_manager: Arc<dyn SourceManager>,
@@ -134,6 +193,8 @@ pub struct ProjectDependencyGraphBuilder<'a, R: PackageRegistry + ?Sized> {
 }
 
 impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
+    /// Construct a new [ProjectDependencyGraphBuilder] which will use the provided `registry` for
+    /// resolving packages.
     pub fn new(registry: &'a R) -> Self {
         let git_cache_root = std::env::var_os("MIDENUP_HOME")
             .map(PathBuf::from)
@@ -146,22 +207,44 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
         }
     }
 
+    /// Use the provided source manager for tracking source information of parsed files
     pub fn with_source_manager(mut self, source_manager: Arc<dyn SourceManager>) -> Self {
         self.source_manager = source_manager;
         self
     }
 
+    /// Override the default location of the Git checkout cache.
+    ///
+    /// By default, the cache is located in:
+    ///
+    /// * `$MIDENUP_HOME/git/checkouts`, if `$MIDENUP_HOME` is set.
+    /// * `$TMP_DIR/midenup/git/checkouts`, if `$MIDENUP_HOME` is _not_ set.
     pub fn with_git_cache_root(mut self, git_cache_root: impl AsRef<Path>) -> Self {
         self.git_cache_root = git_cache_root.as_ref().to_path_buf();
         self
     }
 
+    /// Build a [ProjectDependencyGraph] for the project whose manifest is located at
+    /// `manifest_path`
     pub fn build_from_path(
         &self,
         manifest_path: impl AsRef<Path>,
     ) -> Result<ProjectDependencyGraph, Report> {
         let loaded = self.load_package_from_manifest(manifest_path.as_ref())?;
-        let root = PackageId::from(loaded.package.name().into_inner().clone());
+        self.build_from_loaded_package(loaded)
+    }
+
+    /// Build a [ProjectDependencyGraph] for `package`
+    pub fn build(&self, package: Arc<Package>) -> Result<ProjectDependencyGraph, Report> {
+        let loaded = self.loaded_package_from_arc(package, None)?;
+        self.build_from_loaded_package(loaded)
+    }
+
+    fn build_from_loaded_package(
+        &self,
+        loaded: LoadedSourcePackage,
+    ) -> Result<ProjectDependencyGraph, Report> {
+        let root = loaded.package.name().into_inner();
         let mut graph = ProjectDependencyGraph {
             root: root.clone(),
             nodes: BTreeMap::new(),
@@ -185,21 +268,26 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
         origin: ProjectSourceOrigin,
         allow_missing_library: bool,
     ) -> Result<PackageId, Report> {
-        let package_id = PackageId::from(package.package.name().into_inner().clone());
+        let package_id = package.package.name().into_inner();
         let node = ProjectDependencyNode {
             dependencies: Vec::new(),
             name: package_id.clone(),
-            provenance: ProjectDependencyNodeProvenance::Source(ProjectSource {
-                library_path: self.library_path(
-                    &package.package,
-                    &package.manifest_path,
-                    allow_missing_library,
-                )?,
-                manifest_path: package.manifest_path.clone(),
-                origin,
-                project_root: package.project_root.clone(),
-                workspace_root: package.workspace_root.clone(),
-            }),
+            provenance: ProjectDependencyNodeProvenance::Source(
+                match package.manifest_path.as_ref() {
+                    Some(manifest_path) => ProjectSource::Real {
+                        library_path: self.library_path(
+                            &package.package,
+                            manifest_path,
+                            allow_missing_library,
+                        )?,
+                        manifest_path: manifest_path.to_path_buf(),
+                        origin,
+                        project_root: package.project_root.clone().unwrap(),
+                        workspace_root: package.workspace_root.clone(),
+                    },
+                    None => ProjectSource::Virtual { origin },
+                },
+            ),
             version: package.package.version().into_inner().clone(),
         };
 
@@ -272,7 +360,13 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
                 })
             },
             DependencyVersionScheme::Path { path, version } => {
-                let resolved_path = self.resolve_dependency_path(&parent.manifest_path, path)?;
+                let Some(parent_manifest_path) = parent.manifest_path.as_ref() else {
+                    return Err(Report::msg(format!(
+                        "package '{}' is missing a manifest path",
+                        parent.package.name().inner()
+                    )));
+                };
+                let resolved_path = self.resolve_dependency_path(parent_manifest_path, path)?;
                 if resolved_path.extension().is_some_and(|extension| extension == "masp") {
                     let node = self.load_preassembled_dependency(
                         &resolved_path,
@@ -303,7 +397,7 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
                 self.ensure_dependency_name(
                     dependency.name(),
                     package.package.name().into_inner().as_ref(),
-                    &checkout.manifest_path,
+                    Some(&checkout.manifest_path),
                 )?;
                 if let Some(requirement) = version.as_ref() {
                     self.ensure_version_req_matches(
@@ -334,7 +428,7 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
         self.ensure_dependency_name(
             expected_name,
             loaded.package.name().into_inner().as_ref(),
-            &loaded.manifest_path,
+            loaded.manifest_path.as_deref(),
         )?;
         Ok(loaded)
     }
@@ -439,24 +533,30 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
         package: Arc<Package>,
         workspace_root: Option<PathBuf>,
     ) -> Result<LoadedSourcePackage, Report> {
-        let manifest_path = package
-            .manifest_path()
-            .ok_or_else(|| {
-                Report::msg(format!(
-                    "package '{}' is missing a manifest path",
-                    package.name().inner()
-                ))
-            })?
-            .to_path_buf();
-        let project_root = manifest_path
-            .parent()
-            .ok_or_else(|| {
-                Report::msg(format!(
-                    "manifest '{}' has no parent directory",
-                    manifest_path.display()
-                ))
-            })?
-            .to_path_buf();
+        let manifest_path = package.manifest_path().map(|path| path.to_path_buf());
+        /*            .ok_or_else(|| {
+            Report::msg(format!(
+                "package '{}' is missing a manifest path",
+                package.name().inner()
+            ))
+        })?
+        .to_path_buf();
+
+        */
+        let project_root = match manifest_path.as_ref() {
+            Some(manifest_path) => Some(
+                manifest_path
+                    .parent()
+                    .ok_or_else(|| {
+                        Report::msg(format!(
+                            "manifest '{}' has no parent directory",
+                            manifest_path.display()
+                        ))
+                    })?
+                    .to_path_buf(),
+            ),
+            None => None,
+        };
 
         Ok(LoadedSourcePackage {
             manifest_path,
@@ -478,13 +578,8 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
         let bytes = std::fs::read(&path).map_err(|error| Report::msg(error.to_string()))?;
         let package =
             MastPackage::read_from_bytes(&bytes).map_err(|error| Report::msg(error.to_string()))?;
-        self.ensure_dependency_name(expected_name, package.name.as_str(), &path)?;
-        let semver = package.version.clone().ok_or_else(|| {
-            Report::msg(format!(
-                "preassembled package '{}' is missing semantic version metadata",
-                path.display()
-            ))
-        })?;
+        self.ensure_dependency_name(expected_name, &package.name, Some(&path))?;
+        let semver = package.version.clone();
         let selected = Version::new(semver, package.digest());
         if let Some(requirement) = requirement {
             self.ensure_version_satisfies(expected_name, requirement, selected.clone())?;
@@ -543,16 +638,21 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
         &self,
         expected_name: &str,
         actual_name: &str,
-        location: &Path,
+        location: Option<&Path>,
     ) -> Result<(), Report> {
         if expected_name == actual_name {
             Ok(())
-        } else {
+        } else if let Some(location) = location {
             Err(Report::msg(format!(
                 "dependency '{}' resolved to package '{}' at '{}'",
                 expected_name,
                 actual_name,
                 location.display()
+            )))
+        } else {
+            Err(Report::msg(format!(
+                "dependency '{}' resolved to package '{}'",
+                expected_name, actual_name,
             )))
         }
     }
@@ -718,18 +818,16 @@ enum ResolvedDependencyNode {
 impl ResolvedDependencyNode {
     fn name(&self) -> PackageId {
         match self {
-            Self::Source { package, .. } => {
-                PackageId::from(package.package.name().into_inner().clone())
-            },
+            Self::Source { package, .. } => package.package.name().into_inner(),
             Self::Leaf(node) => node.name.clone(),
         }
     }
 }
 
 struct LoadedSourcePackage {
-    manifest_path: PathBuf,
+    manifest_path: Option<PathBuf>,
     package: Arc<Package>,
-    project_root: PathBuf,
+    project_root: Option<PathBuf>,
     workspace_root: Option<PathBuf>,
 }
 
@@ -741,46 +839,22 @@ struct GitCheckout {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{borrow::ToOwned, format, string::ToString, vec, vec::Vec};
+    use alloc::{boxed::Box, string::ToString};
     use std::{collections::BTreeMap, fs, sync::Arc};
 
-    use miden_assembly_syntax::debuginfo::DefaultSourceManager;
     use miden_assembly_syntax::{
-        Library,
-        ast::{AttributeSet, Path as AstPath, PathBuf as MasmPathBuf, types::FunctionType},
-        library::{LibraryExport, ProcedureExport as LibraryProcedureExport},
+        ast::Path as AstPath,
+        debuginfo::{DefaultSourceManager, Span},
     };
-    use miden_core::{
-        mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt, MastNodeId},
-        operations::Operation,
-        serde::Serializable,
-        utils::hash_string_to_word,
-    };
-    use miden_mast_package::{
-        MastArtifact, Package as MastPackage, PackageExport, PackageKind, PackageManifest,
-        ProcedureExport as PackageProcedureExport,
-    };
+    use miden_core::{assert_matches, serde::Serializable, utils::hash_string_to_word};
+    use miden_mast_package::{Package as MastPackage, TargetType};
     use miden_package_registry::{PackageRecord, PackageRegistry, PackageVersions};
     use tempfile::TempDir;
 
     use super::*;
+    use crate::Target;
 
-    fn write_file(path: &Path, contents: &str) {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).unwrap();
-        }
-        fs::write(path, contents).unwrap();
-    }
-
-    fn builder<'a, R: PackageRegistry + ?Sized>(
-        registry: &'a R,
-        git_cache_root: &Path,
-    ) -> ProjectDependencyGraphBuilder<'a, R> {
-        ProjectDependencyGraphBuilder::new(registry)
-            .with_git_cache_root(git_cache_root)
-            .with_source_manager(Arc::new(DefaultSourceManager::default()))
-    }
-
+    /// A basic in-memory package registry
     #[derive(Default)]
     struct TestRegistry {
         packages: BTreeMap<PackageId, PackageVersions>,
@@ -811,110 +885,26 @@ mod tests {
         }
     }
 
-    fn absolute_path(name: &str) -> Arc<AstPath> {
-        let path = MasmPathBuf::new(name).expect("invalid path");
-        let path = path.as_path().to_absolute().into_owned();
-        Arc::from(path.into_boxed_path())
-    }
-
-    fn build_forest() -> (MastForest, MastNodeId) {
-        let mut forest = MastForest::new();
-        let node_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
-            .add_to_forest(&mut forest)
-            .expect("failed to build basic block");
-        forest.make_root(node_id);
-        (forest, node_id)
-    }
-
-    fn build_library() -> Library {
-        let (forest, node_id) = build_forest();
-        let path = absolute_path("test::proc");
-        let export = LibraryProcedureExport::new(node_id, Arc::clone(&path));
-
-        let mut exports = BTreeMap::new();
-        exports.insert(path, LibraryExport::Procedure(export));
-
-        Library::new(Arc::new(forest), exports).expect("failed to build library")
-    }
-
-    fn build_registry_test_package(name: &str, version: Option<&str>) -> MastPackage {
-        let library = build_library();
-        let path = absolute_path("test::proc");
-        let node_id = library.get_export_node_id(path.as_ref());
-        let digest = library.mast_forest()[node_id].digest();
-
-        let export = PackageExport::Procedure(PackageProcedureExport {
-            path: Arc::clone(&path),
-            digest,
-            signature: None::<FunctionType>,
-            attributes: AttributeSet::default(),
-        });
-
-        let manifest = PackageManifest::new([export]);
-
-        MastPackage {
-            name: name.to_owned(),
-            version: version.map(|version| version.parse().unwrap()),
-            description: None,
-            kind: PackageKind::Library,
-            mast: MastArtifact::Library(Arc::new(library)),
-            manifest,
-            sections: Vec::new(),
-        }
-    }
-
-    fn write_package(
-        dir: &Path,
-        name: &str,
-        version: &str,
-        body: &str,
-        dependencies: &str,
-    ) -> PathBuf {
-        let manifest = format!(
-            "[package]\nname = \"{name}\"\nversion = \"{version}\"\n\n[lib]\npath = \"lib/mod.masm\"\n\n{dependencies}\n"
-        );
-        write_file(&dir.join("miden-project.toml"), &manifest);
-        write_file(&dir.join("lib/mod.masm"), body);
-        dir.join("miden-project.toml")
-    }
-
-    fn write_package_without_lib_path(
-        dir: &Path,
-        name: &str,
-        version: &str,
-        dependencies: &str,
-    ) -> PathBuf {
-        let manifest = format!(
-            "[package]\nname = \"{name}\"\nversion = \"{version}\"\n\n[lib]\n\n{dependencies}\n"
-        );
-        write_file(&dir.join("miden-project.toml"), &manifest);
-        dir.join("miden-project.toml")
-    }
-
-    fn run_git(dir: &Path, args: &[&str]) {
-        let output = Command::new("git").current_dir(dir).args(args).output().unwrap();
-        assert!(
-            output.status.success(),
-            "git {} failed in '{}': {}",
-            args.join(" "),
-            dir.display(),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
     #[test]
     fn builds_path_dependency_graph() {
         let tempdir = TempDir::new().unwrap();
         let dependency_dir = tempdir.path().join("dep");
-        write_package(&dependency_dir, "dep", "1.0.0", "export.foo\nend\n", "");
+        write_package(&dependency_dir, "dep", "1.0.0", Some("export.foo\nend\n"), []);
 
         let root_dir = tempdir.path().join("root");
         let root_manifest = write_package(
             &root_dir,
             "root",
             "1.0.0",
-            "export.foo\nend\n",
-            "[dependencies]\ndep = { path = \"../dep\" }",
+            Some("export.foo\nend\n"),
+            [Dependency::new(
+                Span::unknown("dep".into()),
+                DependencyVersionScheme::Path {
+                    path: Span::unknown(Uri::new("../dep")),
+                    version: None,
+                },
+                Linkage::Dynamic,
+            )],
         );
 
         let registry = TestRegistry::default();
@@ -935,15 +925,22 @@ mod tests {
             &workspace_root.join("miden-project.toml"),
             "[workspace]\nmembers = [\"dep\"]\n",
         );
-        write_package(&workspace_root.join("dep"), "dep", "1.0.0", "export.foo\nend\n", "");
+        write_package(&workspace_root.join("dep"), "dep", "1.0.0", Some("export.foo\nend\n"), []);
 
         let root_dir = tempdir.path().join("root");
         let root_manifest = write_package(
             &root_dir,
             "root",
             "1.0.0",
-            "export.foo\nend\n",
-            "[dependencies]\ndep = { path = \"../workspace\" }",
+            Some("export.foo\nend\n"),
+            [Dependency::new(
+                Span::unknown("dep".into()),
+                DependencyVersionScheme::Path {
+                    path: Span::unknown(Uri::new("../workspace")),
+                    version: None,
+                },
+                Linkage::Dynamic,
+            )],
         );
 
         let registry = TestRegistry::default();
@@ -962,8 +959,14 @@ mod tests {
             &root_dir,
             "root",
             "1.0.0",
-            "export.foo\nend\n",
-            "[dependencies]\ndep = \"^1.0.0\"",
+            Some("export.foo\nend\n"),
+            [Dependency::new(
+                Span::unknown("dep".into()),
+                DependencyVersionScheme::Registry(VersionRequirement::Semantic(Span::unknown(
+                    "^1.0.0".parse().unwrap(),
+                ))),
+                Linkage::Dynamic,
+            )],
         );
 
         let mut registry = TestRegistry::default();
@@ -986,8 +989,14 @@ mod tests {
             &root_dir,
             "root",
             "1.0.0",
-            "export.foo\nend\n",
-            &format!("[dependencies]\ndep = \"{digest}\""),
+            Some("export.foo\nend\n"),
+            [Dependency::new(
+                Span::unknown("dep".into()),
+                DependencyVersionScheme::Registry(VersionRequirement::Digest(Span::unknown(
+                    digest,
+                ))),
+                Linkage::Dynamic,
+            )],
         );
 
         let mut registry = TestRegistry::default();
@@ -1004,15 +1013,22 @@ mod tests {
     fn records_missing_library_source_path() {
         let tempdir = TempDir::new().unwrap();
         let dependency_dir = tempdir.path().join("dep");
-        write_package_without_lib_path(&dependency_dir, "dep", "1.0.0", "");
+        write_package(&dependency_dir, "dep", "1.0.0", None, []);
 
         let root_dir = tempdir.path().join("root");
         let root_manifest = write_package(
             &root_dir,
             "root",
             "1.0.0",
-            "export.foo\nend\n",
-            "[dependencies]\ndep = { path = \"../dep\" }",
+            Some("export.foo\nend\n"),
+            [Dependency::new(
+                Span::unknown("dep".into()),
+                DependencyVersionScheme::Path {
+                    path: Span::unknown(Uri::new("../dep")),
+                    version: None,
+                },
+                Linkage::Dynamic,
+            )],
         );
 
         let registry = TestRegistry::default();
@@ -1022,7 +1038,7 @@ mod tests {
         let dep = graph.get(&PackageId::from("dep")).unwrap();
         match &dep.provenance {
             ProjectDependencyNodeProvenance::Source(source) => {
-                assert!(source.library_path.is_none())
+                assert_matches!(source, ProjectSource::Real { library_path, .. } if library_path.is_none());
             },
             _ => panic!("expected source provenance"),
         }
@@ -1031,7 +1047,7 @@ mod tests {
     #[test]
     fn path_to_masp_is_leaf() {
         let tempdir = TempDir::new().unwrap();
-        let package = build_registry_test_package("dep", Some("1.0.0"));
+        let package = build_registry_test_package("dep", "1.0.0");
         let package_path = tempdir.path().join("dep.masp");
         fs::write(&package_path, package.to_bytes()).unwrap();
 
@@ -1040,8 +1056,15 @@ mod tests {
             &root_dir,
             "root",
             "1.0.0",
-            "export.foo\nend\n",
-            &format!("[dependencies]\ndep = {{ path = \"{}\" }}", package_path.display()),
+            Some("export.foo\nend\n"),
+            [Dependency::new(
+                Span::unknown("dep".into()),
+                DependencyVersionScheme::Path {
+                    path: Span::unknown(Uri::from(package_path.as_path())),
+                    version: None,
+                },
+                Linkage::Dynamic,
+            )],
         );
 
         let registry = TestRegistry::default();
@@ -1073,7 +1096,7 @@ mod tests {
         let tempdir = TempDir::new().unwrap();
         let repo_dir = tempdir.path().join("repo");
         fs::create_dir_all(&repo_dir).unwrap();
-        write_package(&repo_dir, "dep", "1.0.0", "export.foo\nend\n", "");
+        write_package(&repo_dir, "dep", "1.0.0", Some("export.foo\nend\n"), []);
         run_git(&repo_dir, &["init", "-b", "main"]);
         run_git(&repo_dir, &["config", "user.email", "test@example.com"]);
         run_git(&repo_dir, &["config", "user.name", "Test"]);
@@ -1086,11 +1109,16 @@ mod tests {
             &root_dir,
             "root",
             "1.0.0",
-            "export.foo\nend\n",
-            &format!(
-                "[dependencies]\ndep = {{ git = \"{}\", branch = \"main\" }}",
-                repo_dir.display()
-            ),
+            Some("export.foo\nend\n"),
+            [Dependency::new(
+                Span::unknown("dep".into()),
+                DependencyVersionScheme::Git {
+                    repo: Span::unknown(Uri::from(repo_dir.as_path())),
+                    revision: Span::unknown(GitRevision::Branch("main".into())),
+                    version: None,
+                },
+                Linkage::Dynamic,
+            )],
         );
 
         let registry = TestRegistry::default();
@@ -1098,12 +1126,70 @@ mod tests {
             .build_from_path(&root_manifest)
             .unwrap();
         let dep = graph.get(&PackageId::from("dep")).unwrap();
-        assert!(matches!(
+        assert_matches!(
             dep.provenance,
-            ProjectDependencyNodeProvenance::Source(ProjectSource {
+            ProjectDependencyNodeProvenance::Source(ProjectSource::Real {
                 origin: ProjectSourceOrigin::Git { .. },
                 ..
             })
-        ));
+        );
+    }
+
+    // ------ TEST UTILS
+
+    fn build_registry_test_package(name: &str, version: &str) -> Box<MastPackage> {
+        MastPackage::generate(name.into(), version.parse().unwrap(), TargetType::Library, [])
+    }
+
+    fn write_package(
+        dir: &Path,
+        name: &str,
+        version: &str,
+        module_body: Option<&str>,
+        dependencies: impl IntoIterator<Item = Dependency>,
+    ) -> PathBuf {
+        let target = if module_body.is_some() {
+            Target::library(AstPath::new(name)).with_path("lib/mod.masm")
+        } else {
+            Target::library(AstPath::new(name))
+        };
+        let manifest = Package::new(name, target)
+            .with_version(version.parse().unwrap())
+            .with_dependencies(dependencies);
+
+        let manifest = manifest.to_toml().unwrap();
+        let manifest_path = dir.join("miden-project.toml");
+        write_file(&manifest_path, &manifest);
+        if let Some(module_body) = module_body {
+            write_file(&dir.join("lib/mod.masm"), module_body);
+        }
+        manifest_path
+    }
+
+    fn run_git(dir: &Path, args: &[&str]) {
+        let output = Command::new("git").current_dir(dir).args(args).output().unwrap();
+        assert!(
+            output.status.success(),
+            "git {} failed in '{}': {}",
+            args.join(" "),
+            dir.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn write_file(path: &Path, contents: &str) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(path, contents).unwrap();
+    }
+
+    fn builder<'a, R: PackageRegistry + ?Sized>(
+        registry: &'a R,
+        git_cache_root: &Path,
+    ) -> ProjectDependencyGraphBuilder<'a, R> {
+        ProjectDependencyGraphBuilder::new(registry)
+            .with_git_cache_root(git_cache_root)
+            .with_source_manager(Arc::new(DefaultSourceManager::default()))
     }
 }

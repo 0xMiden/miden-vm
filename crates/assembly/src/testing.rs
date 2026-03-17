@@ -17,6 +17,8 @@ pub use miden_assembly_syntax::{
 #[cfg(feature = "testing")]
 use miden_assembly_syntax::{ast::Form, debuginfo::SourceFile};
 use miden_core::program::Program;
+#[cfg(feature = "std")]
+use miden_project::TargetType;
 
 use crate::assembler::Assembler;
 #[cfg(feature = "std")]
@@ -32,6 +34,8 @@ use crate::diagnostics::reporting::set_panic_hook;
 pub struct TestContext {
     source_manager: Arc<dyn SourceManager>,
     assembler: Assembler,
+    #[cfg(feature = "std")]
+    registry: TestRegistry,
 }
 
 impl Default for TestContext {
@@ -63,7 +67,18 @@ impl TestContext {
         }
         let source_manager = Arc::new(DefaultSourceManager::default());
         let assembler = Assembler::new(source_manager.clone()).with_warnings_as_errors(true);
-        Self { source_manager, assembler }
+        #[cfg(feature = "std")]
+        {
+            Self {
+                source_manager,
+                assembler,
+                registry: Default::default(),
+            }
+        }
+        #[cfg(not(feature = "std"))]
+        {
+            Self { source_manager, assembler }
+        }
     }
 
     #[inline]
@@ -198,7 +213,7 @@ impl TestContext {
     pub fn assemble_library(
         &self,
         modules: impl IntoIterator<Item = Box<Module>>,
-    ) -> Result<Library, Report> {
+    ) -> Result<Arc<Library>, Report> {
         self.assembler().assemble_library(modules)
     }
 
@@ -212,5 +227,194 @@ impl TestContext {
     ) -> Result<Vec<Word>, Report> {
         // This API will change after we implement `Assembler::add_library()`
         unimplemented!()
+    }
+}
+
+#[cfg(feature = "std")]
+pub use self::package_features::TestRegistry;
+
+#[cfg(feature = "std")]
+mod package_features {
+    use std::{
+        collections::BTreeMap,
+        string::{String, ToString},
+        sync::{Arc, Mutex},
+    };
+
+    use miden_mast_package::{Package, PackageId};
+    use miden_package_registry::{
+        PackageProvider, PackageRecord, PackageRegistry, PackageVersions, Version,
+        VersionRequirement,
+    };
+
+    use super::*;
+    use crate::ProjectTargetSelector;
+
+    /// A simple in-memory package index/registry
+    #[derive(Default)]
+    pub struct TestRegistry {
+        index: BTreeMap<PackageId, PackageVersions>,
+        packages: BTreeMap<(PackageId, Version), Arc<Package>>,
+        loads: Mutex<Vec<String>>,
+    }
+
+    impl TestRegistry {
+        pub fn add_package(&mut self, package: Arc<Package>) -> Version {
+            let version =
+                miden_package_registry::Version::new(package.version.clone(), package.digest());
+            let id = package.name.clone();
+            let dependencies = package
+                .manifest
+                .dependencies()
+                .map(|dependency| {
+                    (dependency.name.clone(), VersionRequirement::from(dependency.digest))
+                })
+                .collect::<Vec<_>>();
+            let record = PackageRecord::new(version.clone(), dependencies)
+                .with_description(package.description.clone().unwrap_or_default());
+            self.index.entry(id.clone()).or_default().insert(version.clone(), record);
+            self.packages.insert((id, version.clone()), package);
+            version
+        }
+
+        pub fn loaded_packages(&self) -> Vec<String> {
+            self.loads.lock().unwrap().clone()
+        }
+    }
+
+    impl PackageRegistry for TestRegistry {
+        fn available_versions(&self, package: &PackageId) -> Option<&PackageVersions> {
+            self.index.get(package)
+        }
+
+        fn register(&mut self, name: PackageId, version: Version, record: PackageRecord) {
+            self.index.entry(name).or_default().insert(version, record);
+        }
+    }
+
+    impl PackageProvider for TestRegistry {
+        fn load_package(
+            &self,
+            package: &PackageId,
+            version: &Version,
+        ) -> Result<Arc<Package>, Report> {
+            self.loads.lock().unwrap().push(package.to_string());
+            self.packages.get(&(package.clone(), version.clone())).cloned().ok_or_else(|| {
+                Report::msg(format!("missing test package '{package}' at '{version}'"))
+            })
+        }
+    }
+
+    impl TestContext {
+        pub fn registry(&self) -> &TestRegistry {
+            &self.registry
+        }
+
+        pub fn registry_mut(&mut self) -> &mut TestRegistry {
+            &mut self.registry
+        }
+
+        pub fn project_assembler_for_path<'a>(
+            &'a self,
+            manifest_path: impl AsRef<std::path::Path>,
+        ) -> Result<crate::ProjectAssembler<'a, TestRegistry, TestRegistry>, Report> {
+            self.assembler()
+                .for_project_at_path(manifest_path, &self.registry, &self.registry)
+        }
+
+        pub fn project_assembler<'a>(
+            &'a self,
+            project: Arc<miden_project::Package>,
+        ) -> Result<crate::ProjectAssembler<'a, TestRegistry, TestRegistry>, Report> {
+            self.assembler().for_project(project, &self.registry, &self.registry)
+        }
+
+        /// Assembles the library target of the package at `manifest_path`, using `profile`.
+        ///
+        /// If `profile` is `None`, the `dev` profile will be used.
+        ///
+        /// This requires that the referenced package define a library target, or an error will be
+        /// raised.
+        pub fn assemble_library_package(
+            &self,
+            manifest_path: impl AsRef<std::path::Path>,
+            profile: Option<&str>,
+        ) -> Result<Arc<Package>, Report> {
+            let assembler = self.assembler();
+            let project_assembler =
+                assembler.for_project_at_path(manifest_path, &self.registry, &self.registry)?;
+            project_assembler.assemble(ProjectTargetSelector::Library, profile.unwrap_or("dev"))
+        }
+
+        /// Assembles the executable target `name` of the package from `manifest_path`, using
+        /// `profile`.
+        ///
+        /// If `name` is `None`, the default executable target name is selected.
+        ///
+        /// If `profile` is `None`, the `dev` profile will be used.
+        ///
+        /// This requires that the referenced package define the given executable target, or an
+        /// error will be raised.
+        pub fn assemble_executable_package(
+            &self,
+            manifest_path: impl AsRef<std::path::Path>,
+            name: Option<&str>,
+            profile: Option<&str>,
+        ) -> Result<Arc<Package>, Report> {
+            let assembler = self.assembler();
+            let project_assembler =
+                assembler.for_project_at_path(manifest_path, &self.registry, &self.registry)?;
+            project_assembler.assemble(
+                ProjectTargetSelector::Executable(name.unwrap_or(Path::EXEC_PATH)),
+                profile.unwrap_or("dev"),
+            )
+        }
+
+        /// Assembles a package named `name` with `version` and `dependencies`, containing a single
+        /// export whose path is `export`.
+        ///
+        /// The exported procedure is defined as follows, given an `export` path of `foo::bar`:
+        ///
+        /// ```text,ignore
+        /// pub proc bar
+        ///     add
+        /// end
+        /// ```
+        pub fn assemble_library_package_with_export(
+            &self,
+            name: &str,
+            version: &str,
+            export: &str,
+            dependencies: impl IntoIterator<Item = (&'static str, TargetType, Word)>,
+        ) -> Box<miden_mast_package::Package> {
+            use alloc::string::ToString;
+
+            use miden_assembly_syntax::source_file;
+            use miden_mast_package::Dependency;
+
+            let export_path = Path::new(export);
+            let (export_leaf, export_module) = export_path.split_last().unwrap();
+            let source_file = source_file!(self, format!("pub proc {export_leaf} add end"));
+            let module = Module::parse(
+                export_module,
+                ModuleKind::Library,
+                source_file,
+                self.source_manager(),
+            )
+            .unwrap();
+            let library = self.assemble_library([module]).expect("failed to assemble library");
+
+            Package::from_library(
+                name.into(),
+                version.parse().unwrap(),
+                TargetType::Library,
+                library,
+                dependencies.into_iter().map(|(name, kind, digest)| Dependency {
+                    name: name.into(),
+                    kind,
+                    digest,
+                }),
+            )
+        }
     }
 }

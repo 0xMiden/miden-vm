@@ -16,6 +16,8 @@ mod instruction;
 pub mod linker;
 mod mast_forest_builder;
 mod procedure;
+#[cfg(feature = "std")]
+mod project;
 
 #[cfg(test)]
 mod mast_forest_merger_tests;
@@ -41,6 +43,8 @@ pub use miden_core::{mast, serde, utils};
 
 #[doc(hidden)]
 pub use self::linker::{LinkLibraryKind, LinkerError};
+#[cfg(feature = "std")]
+pub use self::project::{ProjectAssembler, ProjectSourceInputs, ProjectTargetSelector};
 pub use self::{
     assembler::Assembler,
     procedure::{Procedure, ProcedureContext},

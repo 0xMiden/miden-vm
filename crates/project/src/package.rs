@@ -1,8 +1,10 @@
+use alloc::boxed::Box;
 #[cfg(feature = "std")]
-use std::{boxed::Box, path::Path};
+use std::path::Path;
 
 #[cfg(feature = "std")]
 use miden_assembly_syntax::debuginfo::Spanned;
+use miden_mast_package::PackageId;
 
 #[cfg(feature = "std")]
 use crate::ast::{ProjectFileError, WorkspaceFile};
@@ -15,7 +17,7 @@ pub struct Package {
     #[cfg(feature = "std")]
     manifest_path: Option<Box<Path>>,
     /// The name of the package
-    name: Span<Arc<str>>,
+    name: Span<PackageId>,
     /// The semantic version associated with the package
     version: Span<SemVer>,
     /// The optional package description
@@ -38,10 +40,114 @@ pub struct Package {
     profiles: Vec<Profile>,
 }
 
+/// Constructor
+impl Package {
+    /// Create a new [Package] named `name` with the given default target.
+    ///
+    /// The resulting package will have a default version of `0.0.0`, no dependencies, and an
+    /// initial set of profiles that consist of the default development and release profiles. The
+    /// project will have no other configuration set up - that must be done in subsequent steps.
+    pub fn new(name: impl Into<PackageId>, default_target: Target) -> Box<Self> {
+        let name = name.into();
+        let (lib, bins) = if default_target.is_library() {
+            (Some(Span::unknown(default_target)), vec![])
+        } else {
+            (None, vec![Span::unknown(default_target)])
+        };
+        let profiles = vec![Profile::default(), Profile::release()];
+        Box::new(Self {
+            #[cfg(feature = "std")]
+            manifest_path: None,
+            name: Span::unknown(name),
+            version: Span::unknown(SemVer::new(0, 0, 0)),
+            description: None,
+            dependencies: Default::default(),
+            lints: Default::default(),
+            metadata: Default::default(),
+            lib,
+            bins,
+            profiles,
+        })
+    }
+
+    /// Specify a version for this package during initial construction
+    pub fn with_version(mut self: Box<Self>, version: SemVer) -> Box<Self> {
+        *self.version = version;
+        self
+    }
+
+    /// Provide the lint configuration for this package during initial construction
+    pub fn with_lints(mut self: Box<Self>, lints: MetadataSet) -> Box<Self> {
+        self.lints = lints;
+        self
+    }
+
+    /// Provide the metadata for this package during initial construction
+    pub fn with_metadata(mut self: Box<Self>, metadata: MetadataSet) -> Box<Self> {
+        self.metadata = metadata;
+        self
+    }
+
+    /// Add targets to this package during initial construction
+    ///
+    /// This function will panic if any of the given targets conflict with existing targets or
+    /// each other.
+    pub fn with_targets(
+        mut self: Box<Self>,
+        targets: impl IntoIterator<Item = Target>,
+    ) -> Box<Self> {
+        for target in targets {
+            if target.is_library() {
+                assert!(self.lib.is_none(), "a package cannot have duplicate library targets");
+                self.lib = Some(Span::unknown(target));
+            } else {
+                if self.bins.iter().any(|t| t.name == target.name) {
+                    panic!("duplicate definitions of the same target '{}'", &target.name);
+                }
+                self.bins.push(Span::unknown(target));
+            }
+        }
+        self
+    }
+
+    /// Add a profile to this package during initial construction
+    ///
+    /// If the given profile matches an existing profile, it will be merged over the top of it.
+    pub fn with_profile(mut self: Box<Self>, profile: Profile) -> Box<Self> {
+        for existing in self.profiles.iter_mut() {
+            if existing.name() == profile.name() {
+                existing.merge(&profile);
+                return self;
+            }
+        }
+
+        self.profiles.push(profile);
+        self
+    }
+
+    /// Add dependencies to this package during initial construction
+    ///
+    /// This function will panic if any of the given dependencies conflict with existing deps or
+    /// each other.
+    pub fn with_dependencies(
+        mut self: Box<Self>,
+        dependencies: impl IntoIterator<Item = Dependency>,
+    ) -> Box<Self> {
+        for dependency in dependencies {
+            if self.dependencies().iter().any(|dep| dep.name() == dependency.name()) {
+                panic!("duplicate definitions of dependency '{}'", dependency.name());
+            }
+            self.dependencies.push(dependency);
+        }
+
+        self
+    }
+}
+
 /// Accessors
 impl Package {
     /// Get the name of this package
-    pub fn name(&self) -> Span<Arc<str>> {
+    pub fn name(&self) -> Span<PackageId> {
         self.name.clone()
     }
 
@@ -53,6 +159,11 @@ impl Package {
     /// Get the description of this package, if specified
     pub fn description(&self) -> Option<Arc<str>> {
         self.description.clone()
+    }
+
+    /// Set the description of this package, if specified
+    pub fn set_description(&mut self, description: impl Into<Arc<str>>) {
+        self.description = Some(description.into());
     }
 
     /// Get the set of dependencies this package requires
@@ -185,7 +296,7 @@ impl Package {
 
         Ok(Box::new(Self {
             manifest_path,
-            name: package_ast.package.name.clone(),
+            name: package_ast.package.name.clone().map(|id| id.into()),
             version,
             description,
             dependencies,
@@ -195,5 +306,140 @@ impl Package {
             lib,
             bins,
         }))
+    }
+}
+
+#[cfg(feature = "serde")]
+impl Package {
+    /// Pretty print this [Package] in TOML format.
+    ///
+    /// The output of this function is not guaranteed to be identical to the way the original
+    /// manifest (if one exists) was written, i.e. it may emit keys that are optional or that
+    /// contain default or inherited values.
+    pub fn to_toml(&self) -> Result<alloc::string::String, Report> {
+        let manifest_ast = ast::ProjectFile {
+            source_file: None,
+            package: ast::PackageTable {
+                name: self.name().map(|id| id.into_inner()),
+                detail: ast::PackageDetail {
+                    version: Some(
+                        self.version().map(|v| ast::parsing::MaybeInherit::Value(v.clone())),
+                    ),
+                    description: self
+                        .description()
+                        .map(ast::parsing::MaybeInherit::Value)
+                        .map(Span::unknown),
+                    metadata: self.metadata.clone(),
+                },
+            },
+            config: ast::PackageConfig {
+                dependencies: self
+                    .dependencies()
+                    .iter()
+                    .map(|dep| {
+                        let name = Span::unknown(dep.name().clone());
+                        let linkage = if matches!(dep.linkage(), Linkage::Dynamic) {
+                            None
+                        } else {
+                            Some(Span::unknown(dep.linkage()))
+                        };
+                        let spec = match dep.scheme() {
+                            DependencyVersionScheme::Workspace { .. } => ast::DependencySpec {
+                                name: name.clone(),
+                                version_or_digest: None,
+                                workspace: true,
+                                path: None,
+                                git: None,
+                                branch: None,
+                                rev: None,
+                                linkage,
+                            },
+                            DependencyVersionScheme::Registry(req) => ast::DependencySpec {
+                                name: name.clone(),
+                                version_or_digest: Some(req.clone()),
+                                workspace: false,
+                                path: None,
+                                git: None,
+                                branch: None,
+                                rev: None,
+                                linkage,
+                            },
+                            DependencyVersionScheme::Path { path, version } => {
+                                ast::DependencySpec {
+                                    name: name.clone(),
+                                    version_or_digest: version.clone(),
+                                    workspace: false,
+                                    path: Some(path.clone()),
+                                    git: None,
+                                    branch: None,
+                                    rev: None,
+                                    linkage,
+                                }
+                            },
+                            DependencyVersionScheme::Git { repo, revision, version } => {
+                                let (branch, rev) = match revision.inner() {
+                                    GitRevision::Branch(b) => {
+                                        (Some(Span::new(revision.span(), b.clone())), None)
+                                    },
+                                    GitRevision::Commit(c) => {
+                                        (None, Some(Span::new(revision.span(), c.clone())))
+                                    },
+                                };
+                                ast::DependencySpec {
+                                    name: name.clone(),
+                                    version_or_digest: version.as_ref().map(|spanned| {
+                                        VersionRequirement::from(spanned.inner().clone())
+                                    }),
+                                    workspace: false,
+                                    path: None,
+                                    git: Some(repo.clone()),
+                                    branch,
+                                    rev,
+                                    linkage,
+                                }
+                            },
+                        };
+
+                        (name, Span::unknown(spec))
+                    })
+                    .collect(),
+                lints: self.lints.clone(),
+            },
+            lib: self.lib.as_ref().map(|lib| {
+                Span::unknown(ast::LibTarget {
+                    kind: if matches!(lib.ty, TargetType::Library) {
+                        None
+                    } else {
+                        Some(Span::unknown(lib.ty))
+                    },
+                    namespace: Some(lib.namespace.as_ref().map(|path| path.as_str().into())),
+                    path: lib.path.clone(),
+                })
+            }),
+            bins: self
+                .bins
+                .iter()
+                .map(|bin| {
+                    Span::unknown(ast::BinTarget {
+                        name: Some(bin.name.clone()),
+                        path: bin.path.clone(),
+                    })
+                })
+                .collect(),
+            profiles: self
+                .profiles()
+                .iter()
+                .map(|profile| ast::Profile {
+                    inherits: None,
+                    name: Span::unknown(profile.name().clone()),
+                    debug: Some(profile.should_emit_debug_info()),
+                    trim_paths: Some(profile.should_trim_paths()),
+                    metadata: profile.metadata().clone(),
+                })
+                .collect(),
+        };
+
+        toml::to_string_pretty(&manifest_ast)
+            .map_err(|err| Report::msg(format!("failed to pretty print project manifest: {err}")))
     }
 }

@@ -5,7 +5,6 @@ use alloc::{
 };
 use core::str::FromStr;
 use std::{
-    collections::BTreeMap,
     eprintln,
     sync::{Arc, LazyLock},
 };
@@ -23,8 +22,8 @@ use miden_core::{
     serde::{Deserializable, Serializable},
 };
 use miden_mast_package::{
-    ConstantExport, MastForest, Package, PackageExport, PackageId, PackageManifest, TargetType,
-    TypeExport,
+    ConstantExport, MastForest, Package, PackageExport, PackageId, PackageManifest,
+    ProcedureExport, TargetType, TypeExport,
 };
 use proptest::{
     prelude::*,
@@ -32,7 +31,7 @@ use proptest::{
 };
 
 use crate::{
-    Assembler, Library, ModuleParser, PathBuf,
+    Assembler, Library, ModuleParser, PathBuf, ProjectSourceInputs, ProjectTargetSelector,
     assembler::MAX_CONTROL_FLOW_NESTING,
     ast::{Module, ModuleKind, ProcedureName, QualifiedProcedureName},
     diagnostics::{IntoDiagnostic, Report},
@@ -405,7 +404,7 @@ fn library_serialization() -> Result<(), Report> {
 
     let bytes = bundle.to_bytes();
     let deserialized = Library::read_from_bytes(&bytes).unwrap();
-    assert_eq!(bundle, deserialized);
+    assert_eq!(bundle.as_ref(), &deserialized);
 
     Ok(())
 }
@@ -541,52 +540,40 @@ fn simple_main_call() -> TestResult {
     Ok(())
 }
 
-// TODO: Fix test after we implement the new `Assembler::add_library()`
-#[ignore]
 #[test]
 fn call_without_path() -> TestResult {
     let context = TestContext::default();
 
-    // compile first module
-    context.assemble_module(
-        "account_code1",
-        source_file!(
-            &context,
-            "\
-    pub proc account_method_1
-        push.2.1 add
-    end
+    let project =
+        miden_project::Package::new("call_without_path", miden_project::Target::executable("main"));
 
-    pub proc account_method_2
-        push.3.1 sub
-    end
-    "
-        ),
-    )?;
+    let account_code1_src = source_file!(
+        &context,
+        "\
+pub proc account_method_1
+    push.2.1 add
+end
 
-    //---------------------------------------------------------------------------------------------
+pub proc account_method_2
+    push.3.1 sub
+end
+"
+    );
+    let account_code2_src = source_file!(
+        &context,
+        "\
+pub proc account_method_1
+    push.2.2 add
+end
 
-    // compile second module
-    context.assemble_module(
-        "account_code2",
-        source_file!(
-            &context,
-            "\
-    pub proc account_method_1
-        push.2.2 add
-    end
-
-    pub proc account_method_2
-        push.4.1 sub
-    end
-    "
-        ),
-    )?;
-
-    //---------------------------------------------------------------------------------------------
+pub proc account_method_2
+    push.4.1 sub
+end
+"
+    );
 
     // compile program in which functions from different modules but with equal names are called
-    context.assemble(source_file!(
+    let main_src = source_file!(
         &context,
         "
         begin
@@ -603,7 +590,37 @@ fn call_without_path() -> TestResult {
             call.0x1976bf72d457bd567036d3648b7e3f3c22eca4096936931e59796ec05c0ecb10
         end
         "
-    ))?;
+    );
+
+    let account_code1 = Module::parse(
+        "account_code1",
+        ModuleKind::Library,
+        account_code1_src,
+        context.source_manager(),
+    )?;
+    let account_code2 = Module::parse(
+        "account_code2",
+        ModuleKind::Library,
+        account_code2_src,
+        context.source_manager(),
+    )?;
+    let main = Module::parse(
+        Path::exec_path(),
+        ModuleKind::Executable,
+        main_src,
+        context.source_manager(),
+    )?;
+
+    let project_assembler = context.project_assembler(project.into())?;
+    project_assembler.assemble_with_sources(
+        ProjectTargetSelector::Executable("main"),
+        "dev",
+        ProjectSourceInputs {
+            root: main,
+            support: vec![account_code1, account_code2],
+        },
+    )?;
+
     Ok(())
 }
 
@@ -4222,7 +4239,6 @@ fn test_assert_diagnostic_lines() {
 
 prop_compose! {
     fn any_package()(name in ".*", artifact in any::<ArbitraryMastArtifact>(), manifest in any::<PackageManifest>()) -> Package {
-
         let ArbitraryMastArtifact { ty, lib } = artifact;
 
         // Ensure the manifest reflects exports of the actual MAST artifact
@@ -4231,7 +4247,7 @@ prop_compose! {
             match export {
                 LibraryExport::Procedure(export) => {
                     let digest = lib.mast_forest()[export.node].digest();
-                    exports.push(PackageExport::Procedure(miden_mast_package::ProcedureExport {
+                    exports.push(PackageExport::Procedure(ProcedureExport {
                         path: export.path.clone(),digest,
                         signature: export.signature.clone(),
                         attributes: export.attributes.clone(),
@@ -4326,11 +4342,10 @@ fn build_library_example() -> Arc<Library> {
     Assembler::new(context.source_manager())
         .assemble_library(modules.iter().cloned())
         .expect("failed to assemble library")
-        .into()
 }
 
 fn build_program_example() -> Arc<Library> {
-    use miden_assembly_syntax::library::ProcedureExport;
+    use crate::{Parse, ParseOptions};
     let source = "
     begin
         push.1.2
@@ -4340,26 +4355,14 @@ fn build_program_example() -> Arc<Library> {
     ";
     let assembler = Assembler::default();
 
-    // TODO: once the assembler supports assembling executable modules, replace with:
-    //
-    // let options = ParseOptions {
-    //    kind: ModuleKind::Executable,
-    //    warnings_as_errors: assembler.warnings_as_errors(),
-    //    path: Some(Path::exec_path().into()),
-    // };
-    //
-    // let program = source.parse_with_options(assembler.source_manager(), options).unwrap();
-    // assembler.assemble_executable_modules(program, []).unwrap().into_artifact()
+    let options = ParseOptions {
+        kind: ModuleKind::Executable,
+        warnings_as_errors: assembler.warnings_as_errors(),
+        path: Some(Path::exec_path().into()),
+    };
 
-    let program = assembler.assemble_program(source).unwrap();
-    let mast_forest = program.mast_forest().clone();
-    let entrypoint = program.entrypoint();
-    let mut exports = BTreeMap::new();
-    let export =
-        LibraryExport::Procedure(ProcedureExport::new(entrypoint, Path::exec_path().into()));
-    exports.insert(Path::exec_path().into(), export);
-
-    Library::new(mast_forest, exports).unwrap().into()
+    let program = source.parse_with_options(assembler.source_manager(), options).unwrap();
+    assembler.assemble_executable_modules(program, []).unwrap().into_artifact()
 }
 
 #[test]

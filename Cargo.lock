@@ -1285,8 +1285,11 @@ dependencies = [
  "miden-assembly-syntax",
  "miden-core",
  "miden-mast-package",
+ "miden-package-registry",
+ "miden-project",
  "proptest",
  "smallvec",
+ "tempfile",
  "thiserror",
 ]
 
@@ -1518,6 +1521,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "miden-package-registry"
+version = "0.22.0"
+dependencies = [
+ "miden-assembly-syntax",
+ "miden-core",
+ "miden-mast-package",
+ "pubgrub",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "thiserror",
+]
+
 [[package]]
 name = "miden-processor"
 version = "0.22.0"
@@ -1547,14 +1563,15 @@ version = "0.22.0"
 dependencies = [
  "miden-assembly-syntax",
  "miden-core",
+ "miden-mast-package",
+ "miden-package-registry",
  "miden-test-serde-macros",
  "proptest",
  "proptest-derive",
- "pubgrub",
  "serde",
  "serde-untagged",
  "serde_json",
- "smallvec",
+ "tempfile",
  "thiserror",
  "toml",
 ]

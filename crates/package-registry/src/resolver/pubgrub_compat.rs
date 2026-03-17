@@ -794,7 +794,7 @@ pub(crate) fn simplified_bounds_to_normal(
 
 #[cfg(test)]
 mod test {
-    use std::{collections::HashSet, dbg, eprintln, format, ops::RangeBounds};
+    use std::{collections::HashSet, eprintln, format, ops::RangeBounds};
 
     use super::*;
     use crate::semver;
@@ -828,7 +828,6 @@ mod test {
                 if mat != pver.contains(&ver) {
                     eprintln!("{}", ver);
                     eprintln!("{}", req);
-                    dbg!(&pver);
                     assert_eq!(mat, pver.contains(&ver));
                 }
 
@@ -869,7 +868,6 @@ mod test {
                     if mat != pver.contains(&ver) {
                         eprintln!("{}", ver);
                         eprintln!("{}", req);
-                        dbg!(&pver);
                         assert_eq!(mat, pver.contains(&ver));
                     }
 
@@ -913,7 +911,6 @@ mod test {
                 let raw_req = format!("{op}{psot}");
                 let req = semver::VersionReq::parse(&raw_req).unwrap();
                 let pver: SemverPubgrub = (&req).into();
-                dbg!(raw_req);
 
                 let set: HashSet<_> = vers
                     .iter()
@@ -922,7 +919,6 @@ mod test {
                         if mat != pver.contains(ver) {
                             eprintln!("{}", ver);
                             eprintln!("{}", req);
-                            dbg!(&pver);
                             assert_eq!(mat, pver.contains(ver));
                         }
                         let cap: SemverCompatibility = ver.into();
@@ -962,7 +958,6 @@ mod test {
             let set: HashSet<SemverCompatibility> =
                 vers.iter().filter(|ver| preq.contains(ver)).map(|ver| ver.into()).collect();
             let only_one_comp = preq.only_one_compatibility_range();
-            dbg!(&preq, &set, only_one_comp);
             assert_eq!(set.len() <= 1, only_one_comp.is_some());
             if only_one_comp.is_none() {
                 assert!(preq.as_singleton().is_none());

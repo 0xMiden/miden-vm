@@ -8,7 +8,7 @@ use super::pubgrub_compat::SemverPubgrub;
 use crate::{SemVer, Version, VersionReq, VersionRequirement};
 
 /// This type is an implementation detail of the dependency resolver provided by
-/// [`super::PackageIndex`].
+/// [`super::InMemoryPackageRegistry`].
 ///
 /// A [VersionSet], as implied by the name, provides set semantics for semantic versioning ranges
 /// that may also be further constrained by specific content digests that are considered to be part

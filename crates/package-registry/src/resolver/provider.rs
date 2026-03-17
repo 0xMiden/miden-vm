@@ -448,7 +448,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic = "because c =0.3.0 depends on d >= 1.0.0 and < 2.0.0, c depends on d >= 0.2.5 and < 0.2.6, or >= 1.0.0 and < 2.0.0"]
+    #[should_panic = "because c =0.3.0 depends on d >= 1.0.0 and < 2.0.0, c * depends on d >= 0.2.5 and < 0.2.6, or >= 1.0.0 and < 2.0.0"]
     fn resolver_resolve_package_conflict() {
         let index = InMemoryPackageRegistry::from_iter([
             ("a", vec![("0.1.0".parse().unwrap(), vec![("b", req("=1.0.0"))])]),

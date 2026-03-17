@@ -17,11 +17,12 @@ edition.workspace = true
 default = ["std", "serde"]
 resolver = ["std", "dep:pubgrub", "dep:smallvec"]
 std = ["miden-assembly-syntax/std", "miden-core/std", "serde/std"]
-serde = ["dep:serde", "miden-assembly-syntax/serde", "miden-core/serde"]
+serde = ["dep:serde", "miden-assembly-syntax/serde", "miden-core/serde", "miden-mast-package/serde"]
 
 [dependencies]
 miden-assembly-syntax.workspace = true
 miden-core.workspace = true
+miden-mast-package.workspace = true
 pubgrub = { version = "0.3", optional = true }
 serde = { workspace = true, optional = true }
 smallvec = { workspace = true, optional = true }

@@ -1,5 +1,6 @@
 #![no_std]
 
+#[macro_use]
 extern crate alloc;
 
 #[cfg(any(test, feature = "std"))]
@@ -12,7 +13,6 @@ mod linkage;
 mod package;
 mod profile;
 mod target;
-mod target_type;
 #[cfg(all(test, feature = "std", feature = "serde"))]
 mod tests;
 mod workspace;
@@ -32,13 +32,14 @@ use miden_assembly_syntax::{
     diagnostics::{Diagnostic, miette},
 };
 pub use miden_core::LexicographicWord;
+pub use miden_mast_package::TargetType;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 pub use toml::Value;
 
 pub use self::{
     dependencies::*, linkage::Linkage, package::Package, profile::Profile, target::Target,
-    target_type::TargetType, workspace::Workspace,
+    workspace::Workspace,
 };
 
 /// An alias for [`alloc::collections::BTreeMap`].

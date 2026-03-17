@@ -8,6 +8,3 @@ pub use self::{
     provider::{DependencyResolutionError, PackagePriority, PackageResolver},
     version_set::VersionSet,
 };
-
-/// Backwards-compatible alias for the in-memory registry implementation.
-pub type PackageIndex = InMemoryPackageRegistry;
