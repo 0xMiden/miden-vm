@@ -107,7 +107,7 @@ As can be seen from the above, proving time roughly doubles with every doubling 
 
 ### Multi-core prover performance
 
-STARK proof generation is massively parallelizable. Thus, by taking advantage of multiple CPU cores we can dramatically reduce proof generation time. For example, when executed on an 16-core CPU (Apple M4 Max), the current version of Miden VM operates at around 170 KHz. And when executed on a 64-core CPU (Amazon Graviton 4), the VM operates at around TBD KHz.
+STARK proof generation is massively parallelizable. Thus, by taking advantage of multiple CPU cores we can dramatically reduce proof generation time. For example, when executed on an 16-core CPU (Apple M4 Max), the current version of Miden VM operates at around 170 KHz. And when executed on a 64-core CPU (Amazon Graviton 4), the VM operates at around 200 KHz.
 
 In the benchmarks below, the VM executes the same Blake3 example program for 2<sup>20</sup> cycles at 96-bit target security level:
 
@@ -115,7 +115,8 @@ In the benchmarks below, the VM executes the same Blake3 example program for 2<s
 | ------------------------------ | :------------: | :----------: | :---------: | :---------------: |
 | Apple M1 Pro (16 threads)      |     14.5 ms    |   14.7 sec   |    0.1%     |      70 KHz       |
 | Apple M4 Max (16 threads)      |     11.1 ms    |   5.9 sec    |    0.2%     |      170 KHz      |
-| Amazon Graviton 4 (64 threads) |     TBD ms     |   TBD sec    |    TBD      |      TBD KHz      |
+| Amazon Graviton 4 (64 threads) |     10.7 ms    |   5.7 sec    |    0.2%     |      175 KHz      |
+| AMD EPYC 9R45 (64 threads)     |     7.5 ms     |   4.5 sec    |    0.2%     |      220 KHz      |
 
 ### Recursing-friendly proofs
 
@@ -127,7 +128,8 @@ In the benchmarks below we execute the same Blake3 example program for 2<sup>20<
 | ------------------------------ | :------------: | :----------: | :----------------: |
 | Apple M1 Pro (16 threads)      |     14.5 ms    |   31.9 sec   |     2.2x           |
 | Apple M4 Max (16 threads)      |     11.1 ms    |   12.9 sec   |     2.2x           |
-| Amazon Graviton 4 (64 threads) |     TBD ms     |   TBD sec    |     TBD            |
+| Amazon Graviton 4 (64 threads) |     10.7 ms    |   9.5 sec    |     1.7x           |
+| AMD EPYC 9R45 (64 threads)     |     7.5 ms     |   8.6 sec    |     1.9x           |
 
 ## References
 
