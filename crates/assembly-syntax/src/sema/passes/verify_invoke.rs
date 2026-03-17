@@ -13,9 +13,8 @@ use crate::{
 /// invocation target for that call is resolvable to the extent possible within the current
 /// module's context.
 ///
-/// This means that any reference to an external module must have a corresponding import, that
-/// the invocation kind is valid in the current module (e.g. `syscall` in a kernel module is
-/// _not_ valid, nor is `caller` outside of a kernel module).
+/// This means that any reference to an external module must have a corresponding import, and that
+/// the invocation kind is valid in the current module.
 ///
 /// We attempt to apply as many call-related validations as we can here, however we are limited
 /// until later stages of compilation on what we can know in the context of a single module.

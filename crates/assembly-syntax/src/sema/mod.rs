@@ -204,7 +204,6 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) -> Result<()
 
                 // Next, verify invoke targets:
                 //
-                // * Kernel procedures cannot use `syscall` or `call`
                 // * Mark imports as used if they have at least one call to a procedure defined in
                 //   that module
                 // * Verify that all external callees have a matching import
