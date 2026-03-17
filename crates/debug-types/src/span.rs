@@ -160,10 +160,7 @@ impl<T> Span<T> {
         U: ?Sized,
         T: Deref<Target = U>,
     {
-        Span {
-            span: self.span,
-            spanned: self.spanned.deref(),
-        }
+        Span { span: self.span, spanned: &*self.spanned }
     }
 
     /// Gets a new [Span] that borrows the inner value.
