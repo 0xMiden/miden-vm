@@ -27,6 +27,8 @@
 - Harden MerkleStore deserialization and fuzz coverage ([#878](https://github.com/0xMiden/crypto/pull/878)).
 - [BREAKING] Upgraded Plonky3 from 0.4.2 to 0.5.0 and replaced `p3-miden-air`, `p3-miden-fri`, and `p3-miden-prover` with the unified `p3-miden-lifted-stark` crate. The `stark` module now re-exports the Lifted STARK proving system from [p3-miden](https://github.com/0xMiden/p3-miden).
 - [BREAKING] Changed the `LargeSmtForest::entries` iterator to be fallible by explicitly returning `Result<TreeEntry>` as the iterator item.
+- [BREAKING] Updated `SparseMerkleTree` and its implementations to reject batches of key-value pairs that contain more than one instance of any given key. This may cause previously successful operations to now fail if your input batch is not de-duplicated.
+- [BREAKING] `SimpleSmt::compute_mutations` now returns a result so it can fail gracefully if the input batch contains duplicate keys.
 
 ## 0.22.4 (2026-03-03)
 

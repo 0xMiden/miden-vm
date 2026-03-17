@@ -104,13 +104,13 @@ impl<S: SmtStorage> LargeSmt<S> {
         &self,
         sorted_kv_pairs: &[(Word, Word)],
     ) -> Result<LoadedLeaves, LargeSmtError> {
-        // Collect the unique leaf indices
+        // Collect the unique leaf indices. If the input is truly sorted, then we can dedup
+        // directly.
         let mut leaf_indices: Vec<u64> = sorted_kv_pairs
             .iter()
             .map(|(key, _)| Self::key_to_leaf_index(key).position())
             .collect();
         leaf_indices.dedup();
-        leaf_indices.par_sort_unstable();
 
         // Get leaves from storage
         let leaves_from_storage = self.storage.get_leaves(&leaf_indices)?;
@@ -335,9 +335,12 @@ impl<S: SmtStorage> LargeSmt<S> {
     where
         Self: Sized + Sync,
     {
-        // Sort key-value pairs by leaf index
+        // Sort key-value pairs by their corresponding leaf index and then the key value itself.
         let mut sorted_kv_pairs: Vec<_> = kv_pairs.into_iter().collect();
-        sorted_kv_pairs.par_sort_by_key(|(key, _)| Self::key_to_leaf_index(key).position());
+        sorted_kv_pairs.par_sort_unstable_by_key(|(key, _)| *key);
+
+        // After sorting, check for duplicate keys which are adjacent after the sort.
+        Self::check_for_duplicate_keys(&sorted_kv_pairs)?;
 
         // Load leaves from storage
         let (_leaf_indices, leaf_map) = self.load_leaves_for_pairs(&sorted_kv_pairs)?;
@@ -501,15 +504,14 @@ impl<S: SmtStorage> LargeSmt<S> {
 
         // Collect and sort key-value pairs by their corresponding leaf index
         let mut sorted_kv_pairs: Vec<_> = new_pairs.iter().map(|(k, v)| (*k, *v)).collect();
-        sorted_kv_pairs
-            .par_sort_by_key(|(key, _)| LargeSmt::<S>::key_to_leaf_index(key).position());
+        sorted_kv_pairs.par_sort_unstable_by_key(|(key, _)| *key);
 
-        // Collect the unique leaf indices
+        // Collect the unique leaf indices, relying on the global sort order given by the above
+        // sort.
         let mut leaf_indices: Vec<u64> = sorted_kv_pairs
             .iter()
             .map(|(key, _)| LargeSmt::<S>::key_to_leaf_index(key).position())
             .collect();
-        leaf_indices.par_sort_unstable();
         leaf_indices.dedup();
 
         // Get leaves from storage
@@ -693,10 +695,12 @@ impl<S: SmtStorage> LargeSmt<S> {
     where
         Self: Sized + Sync,
     {
-        // Collect and sort key-value pairs by their corresponding leaf index
+        // Sort key-value pairs by their corresponding leaf index and then the key value itself.
         let mut sorted_kv_pairs: Vec<_> = kv_pairs.into_iter().collect();
-        sorted_kv_pairs
-            .par_sort_unstable_by_key(|(key, _)| LargeSmt::<S>::key_to_leaf_index(key).position());
+        sorted_kv_pairs.par_sort_unstable_by_key(|(key, _)| *key);
+
+        // After sorting, check for duplicate keys which are adjacent after the sort.
+        Self::check_for_duplicate_keys(&sorted_kv_pairs)?;
 
         // Load leaves from storage using helper
         let (_leaf_indices, leaf_map) = self.load_leaves_for_pairs(&sorted_kv_pairs)?;

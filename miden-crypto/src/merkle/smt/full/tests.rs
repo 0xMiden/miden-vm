@@ -489,9 +489,7 @@ fn test_prospective_insertion() {
 
     let mutations = smt.compute_mutations(vec![(key_2, value_2)]).unwrap();
     assert_eq!(mutations.root(), root_2, "prospective root 2 did not match actual root 2");
-    let mutations = smt
-        .compute_mutations(vec![(key_3, EMPTY_WORD), (key_2, value_2), (key_3, value_3)])
-        .unwrap();
+    let mutations = smt.compute_mutations(vec![(key_2, value_2), (key_3, value_3)]).unwrap();
     assert_eq!(mutations.root(), root_3, "mutations before and after apply did not match");
     let old_root = smt.root();
     let revert = apply_mutations(&mut smt, mutations);
@@ -503,23 +501,8 @@ fn test_prospective_insertion() {
         "reverse mutations pairs did not match"
     );
 
-    // Edge case: multiple values at the same key, where a later pair restores the original value.
-    let mutations = smt.compute_mutations(vec![(key_3, EMPTY_WORD), (key_3, value_3)]).unwrap();
-    assert_eq!(mutations.root(), root_3);
-    let old_root = smt.root();
-    let revert = apply_mutations(&mut smt, mutations);
-    assert_eq!(smt.root(), root_3);
-    assert_eq!(revert.old_root, smt.root(), "reverse mutations old root did not match");
-    assert_eq!(revert.root(), old_root, "reverse mutations new root did not match");
-    assert_eq!(
-        revert.new_pairs,
-        Map::from_iter([(key_3, value_3)]),
-        "reverse mutations pairs did not match"
-    );
-
     // Test batch updates, and that the order doesn't matter.
-    let pairs =
-        vec![(key_3, value_2), (key_2, EMPTY_WORD), (key_1, EMPTY_WORD), (key_3, EMPTY_WORD)];
+    let pairs = vec![(key_3, EMPTY_WORD), (key_2, EMPTY_WORD), (key_1, EMPTY_WORD)];
     let mutations = smt.compute_mutations(pairs).unwrap();
     assert_eq!(
         mutations.root(),
@@ -1062,6 +1045,116 @@ fn test_smt_leaf_try_from_elements_invalid_length() {
     let leaf_index = LeafIndex::new_max_depth(42);
     let result = SmtLeaf::try_from_elements(&elements, leaf_index);
     assert_matches!(result, Err(SmtLeafError::DecodingError(_)));
+}
+
+// DUPLICATE KEY DETECTION
+// --------------------------------------------------------------------------------------------
+
+/// Tests that `compute_mutations` rejects duplicate keys (same key, same value).
+#[test]
+fn test_compute_mutations_rejects_duplicate_keys() {
+    use crate::merkle::MerkleError;
+
+    let smt = Smt::default();
+    let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
+    let value = Word::new([ONE; WORD_SIZE]);
+
+    let result = smt.compute_mutations(vec![(key, value), (key, value)]);
+
+    let expected_pos = Smt::key_to_leaf_index(&key).position();
+    assert_matches!(result, Err(MerkleError::DuplicateValuesForIndex(pos)) if pos == expected_pos);
+}
+
+/// Tests that `compute_mutations` rejects duplicate keys even with different values.
+#[test]
+fn test_compute_mutations_rejects_duplicate_keys_different_values() {
+    use crate::merkle::MerkleError;
+
+    let smt = Smt::default();
+    let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
+    let value_1 = Word::new([ONE; WORD_SIZE]);
+    let value_2 = Word::new([Felt::from_u32(2_u32); WORD_SIZE]);
+
+    let result = smt.compute_mutations(vec![(key, value_1), (key, value_2)]);
+
+    let expected_pos = Smt::key_to_leaf_index(&key).position();
+    assert_matches!(result, Err(MerkleError::DuplicateValuesForIndex(pos)) if pos == expected_pos);
+}
+
+/// Tests that `compute_mutations` rejects duplicate keys even when interleaved with another key
+/// that shares the same leaf index: `[(k1, v1), (k2, v2), (k1, v3)]`.
+#[test]
+fn test_compute_mutations_rejects_interleaved_duplicate_keys() {
+    use crate::merkle::MerkleError;
+
+    let smt = Smt::default();
+
+    // Two different keys that map to the same leaf (same most significant felt)
+    let key_1 = Word::from([ONE, ONE, ONE, Felt::new(42)]);
+    let key_2 = Word::from([Felt::new(2), Felt::new(2), Felt::new(2), Felt::new(42)]);
+
+    let value_1 = Word::new([ONE; WORD_SIZE]);
+    let value_2 = Word::new([Felt::from_u32(2_u32); WORD_SIZE]);
+    let value_3 = Word::new([Felt::from_u32(3_u32); WORD_SIZE]);
+
+    // k1 appears at positions 0 and 2, interleaved with k2
+    let result = smt.compute_mutations(vec![(key_1, value_1), (key_2, value_2), (key_1, value_3)]);
+
+    let expected_pos = Smt::key_to_leaf_index(&key_1).position();
+    assert_matches!(result, Err(MerkleError::DuplicateValuesForIndex(pos)) if pos == expected_pos);
+}
+
+/// Tests that different keys mapping to the same leaf index do NOT trigger the duplicate error.
+#[test]
+fn test_compute_mutations_no_false_positives() {
+    let smt = Smt::default();
+
+    // Two different keys that map to the same leaf (same most significant felt)
+    let key_1 = Word::from([ONE, ONE, ONE, Felt::new(42)]);
+    let key_2 = Word::from([Felt::new(2), Felt::new(2), Felt::new(2), Felt::new(42)]);
+
+    let value_1 = Word::new([ONE; WORD_SIZE]);
+    let value_2 = Word::new([Felt::from_u32(2_u32); WORD_SIZE]);
+
+    // These are different keys (despite sharing a leaf index), so this should succeed.
+    let result = smt.compute_mutations(vec![(key_1, value_1), (key_2, value_2)]);
+
+    assert!(result.is_ok(), "Different keys at the same leaf index should not be rejected");
+}
+
+/// Tests that `Smt::with_entries` rejects duplicate keys.
+#[test]
+fn test_with_entries_rejects_duplicate_keys() {
+    use crate::merkle::MerkleError;
+
+    let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
+    let value_1 = Word::new([ONE; WORD_SIZE]);
+    let value_2 = Word::new([Felt::from_u32(2_u32); WORD_SIZE]);
+
+    let result = Smt::with_entries(vec![(key, value_1), (key, value_2)]);
+
+    let expected_pos = Smt::key_to_leaf_index(&key).position();
+    assert_matches!(result, Err(MerkleError::DuplicateValuesForIndex(pos)) if pos == expected_pos);
+}
+
+/// Tests that `Smt::with_entries` rejects interleaved duplicate keys.
+#[test]
+fn test_with_entries_rejects_interleaved_duplicate_keys() {
+    use crate::merkle::MerkleError;
+
+    // Two different keys that map to the same leaf (same most significant felt)
+    let key_1 = Word::from([ONE, ONE, ONE, Felt::new(42)]);
+    let key_2 = Word::from([Felt::new(2), Felt::new(2), Felt::new(2), Felt::new(42)]);
+
+    let value_1 = Word::new([ONE; WORD_SIZE]);
+    let value_2 = Word::new([Felt::from_u32(2_u32); WORD_SIZE]);
+    let value_3 = Word::new([Felt::from_u32(3_u32); WORD_SIZE]);
+
+    // k1 appears at positions 0 and 2, interleaved with k2
+    let result = Smt::with_entries(vec![(key_1, value_1), (key_2, value_2), (key_1, value_3)]);
+
+    let expected_pos = Smt::key_to_leaf_index(&key_1).position();
+    assert_matches!(result, Err(MerkleError::DuplicateValuesForIndex(pos)) if pos == expected_pos);
 }
 
 // HELPERS
