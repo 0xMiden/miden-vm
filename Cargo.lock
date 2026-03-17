@@ -1585,6 +1585,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "miden-package-registry-local"
+version = "0.23.0"
+dependencies = [
+ "clap",
+ "miden-assembly-syntax",
+ "miden-core",
+ "miden-mast-package",
+ "miden-package-registry",
+ "serde",
+ "tempfile",
+ "thiserror",
+ "toml",
+]
+
+[[package]]
 name = "miden-processor"
 version = "0.23.0"
 dependencies = [

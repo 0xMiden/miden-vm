@@ -10,6 +10,7 @@ members = [
     "crates/lib/core",
     "crates/mast-package",
     "crates/package-registry",
+    "crates/package-registry-local",
     "crates/project",
     "crates/test-serde-macros",
     "crates/test-utils",
