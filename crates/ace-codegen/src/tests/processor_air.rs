@@ -59,8 +59,8 @@ fn processor_air_chiplet_rows() {
         layout: LayoutKind::Masm,
     };
 
-    let artifacts = build_ace_dag_for_air::<_, Felt, QuadFelt>(&air, config).unwrap();
-    let circuit = crate::circuit::emit_circuit(&artifacts.dag, artifacts.layout.clone()).unwrap();
+    let circuit =
+        crate::pipeline::build_ace_circuit_for_air::<_, Felt, QuadFelt>(&air, config).unwrap();
     let encoded = circuit.to_ace().unwrap();
     let read_rows = encoded.num_read_rows();
     let eval_rows = encoded.num_eval_rows();

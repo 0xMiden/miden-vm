@@ -201,6 +201,7 @@ where
 
     AceDag { nodes: builder.into_nodes(), root }
 }
+
 fn build_periodic_nodes<EF>(
     builder: &mut DagBuilder<EF>,
     layout: &InputLayout,
