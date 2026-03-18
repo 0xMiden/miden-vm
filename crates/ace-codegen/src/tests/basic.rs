@@ -1,16 +1,13 @@
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::{
     field::PrimeCharacteristicRing,
-    stark::air::{
-        AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess,
-        symbolic::{AirLayout, SymbolicAirBuilder},
-    },
+    stark::air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess},
 };
 
-use super::common::{eval_dag, eval_folded_constraints, eval_periodic_values, eval_quotient};
+use super::common::{eval_dag, eval_expr, eval_periodic_values, eval_quotient};
 use crate::{
-    AceConfig, InputKey, InputLayout, LayoutKind, circuit::emit_circuit,
-    pipeline::build_ace_dag_for_air,
+    AceConfig, InputKey, InputLayout, LayoutKind, builder::RecordingAirBuilder,
+    circuit::emit_circuit, pipeline::build_ace_dag_for_air,
 };
 
 // Base and extension field types for tests.
@@ -34,8 +31,12 @@ impl LiftedAir<F, EF> for MockAir {
         vec![vec![Felt::ONE]]
     }
 
+    fn num_var_len_public_inputs(&self) -> usize {
+        0
+    }
+
     fn num_randomness(&self) -> usize {
-        2
+        1
     }
 
     fn aux_width(&self) -> usize {
@@ -44,10 +45,6 @@ impl LiftedAir<F, EF> for MockAir {
 
     fn num_aux_values(&self) -> usize {
         1
-    }
-
-    fn num_var_len_public_inputs(&self) -> usize {
-        0
     }
 
     fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
@@ -122,31 +119,31 @@ fn test_verifier_dag_matches_manual_eval() {
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
     let periodic_values = eval_periodic_values(&air.periodic_columns(), z_k);
 
-    let air_layout = AirLayout {
-        preprocessed_width: 0,
-        main_width: layout.counts.width,
-        num_public_values: layout.counts.num_public,
-        permutation_width: layout.counts.aux_width,
-        num_permutation_challenges: layout.counts.num_randomness,
-        num_permutation_values: air.num_aux_values(),
-        num_periodic_columns: layout.counts.num_periodic,
-    };
-    let mut builder = SymbolicAirBuilder::<F, EF>::new(air_layout);
-    air.eval(&mut builder);
-
-    let acc = eval_folded_constraints(
-        &builder.base_constraints(),
-        &builder.extension_constraints(),
-        &builder.constraint_layout(),
-        &inputs,
-        &layout,
-        &periodic_values,
+    let mut builder = RecordingAirBuilder::<F, EF>::new(
+        0,
+        layout.counts.width,
+        layout.counts.aux_width,
+        layout.counts.num_randomness,
+        layout.counts.num_public,
+        layout.counts.num_periodic,
+        air.num_aux_values(),
     );
-    let z_pow_n = inputs[layout.index(InputKey::ZPowN).unwrap()];
-    let vanishing = z_pow_n - EF::ONE;
-    let expected = acc - eval_quotient(&layout, &inputs) * vanishing;
+    air.eval(&mut builder);
+    let dag = artifacts.dag;
 
-    let actual = eval_dag(&artifacts.dag.nodes, artifacts.dag.root, &inputs, &layout);
+    let alpha = inputs[layout.index(InputKey::Alpha).unwrap()];
+    let z_pow_n = inputs[layout.index(InputKey::ZPowN).unwrap()];
+
+    let mut acc = EF::ZERO;
+    for c in builder.constraints() {
+        let val = eval_expr::<F, EF>(c, &inputs, &layout, &periodic_values);
+        acc = acc * alpha + val;
+    }
+    let vanishing = z_pow_n - EF::ONE;
+    let quotient = eval_quotient(&layout, &inputs);
+    let expected = acc - quotient * vanishing;
+
+    let actual = eval_dag(&dag.nodes, dag.root, &inputs, &layout);
     assert_eq!(actual, expected);
 }
 
