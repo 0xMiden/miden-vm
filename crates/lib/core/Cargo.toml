@@ -60,3 +60,4 @@ serde_json.workspace = true
 env_logger.workspace = true
 fs-err = { version = "3.1" }
 miden-assembly = { workspace = true, features = ["std"] }
+miden-package-registry = { workspace = true, features = ["resolver"] }

@@ -1,0 +1,11 @@
+[package]
+name = "miden-core"
+version = "0.22.0"
+
+[lib]
+namespace = "miden::core"
+path = "mod.masm"
+
+[profile.release]
+debug = true
+trim_paths = true

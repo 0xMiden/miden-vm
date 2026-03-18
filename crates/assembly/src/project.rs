@@ -61,17 +61,17 @@ impl Assembler {
         R: PackageRegistry + ?Sized,
         P: PackageProvider + ?Sized,
     {
-        let manifest_path = normalize_manifest_path(manifest_path.as_ref())?;
+        let manifest_path = manifest_path.as_ref();
         let source_manager = self.source_manager();
-        let source = source_manager.load_file(&manifest_path).map_err(Report::msg)?;
-        let project = Arc::from(ProjectPackage::load(source)?);
+        let project = miden_project::Project::load(manifest_path, &source_manager)?;
+        let package = project.package();
         let dependency_graph = ProjectDependencyGraphBuilder::new(registry)
             .with_source_manager(source_manager)
-            .build_from_path(&manifest_path)?;
+            .build_from_path(manifest_path)?;
 
         Ok(ProjectAssembler {
             assembler: self,
-            project,
+            project: package,
             dependency_graph,
             registry,
             provider,
@@ -517,17 +517,6 @@ struct LoadedTargetSources {
     root: Box<Module>,
     #[allow(clippy::vec_box)]
     support: Vec<Box<Module>>,
-}
-
-fn normalize_manifest_path(path: &FsPath) -> Result<PathBuf, Report> {
-    let manifest_path = if path.is_dir() {
-        path.join("miden-project.toml")
-    } else {
-        path.to_path_buf()
-    };
-    manifest_path.canonicalize().map_err(|error| {
-        Report::msg(format!("failed to resolve '{}': {error}", manifest_path.display()))
-    })
 }
 
 fn load_project_package(

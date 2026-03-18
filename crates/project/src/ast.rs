@@ -127,7 +127,7 @@ pub(crate) enum ProjectFileError {
         #[label(primary)]
         label: Label,
     },
-    #[error("invalid dependency specification")]
+    #[error("invalid dependency specification: {}", label.label().unwrap_or(""))]
     InvalidPackageDependency {
         #[source_code]
         source_file: Arc<SourceFile>,

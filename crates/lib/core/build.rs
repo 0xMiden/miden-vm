@@ -220,17 +220,36 @@ fn main() -> Result<(), Report> {
     let asm_dir = Path::new(manifest_dir).join(ASM_DIR_PATH);
 
     let assembler = Assembler::default();
-    let namespace = "::miden::core".parse::<masm::PathBuf>().expect("invalid base namespace");
-    let core_lib = assembler.assemble_library_from_dir(&asm_dir, namespace)?;
+    let registry = miden_package_registry::InMemoryPackageRegistry::default();
+    let provider = miden_package_registry::NoPackageProvider;
+    let project_assembler =
+        assembler.for_project_at_path(asm_dir.join("miden-project.toml"), &registry, &provider)?;
+
+    let package =
+        project_assembler.assemble(miden_assembly::ProjectTargetSelector::Library, "release")?;
+
+    let build_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+
+    // write the masp output
+    package
+        .write_to_file(
+            build_dir
+                .join(ASL_DIR_PATH)
+                .join("core")
+                .with_extension(miden_assembly::package::Package::EXTENSION),
+        )
+        .map_err(|err| io::Error::other(err.to_string()))
+        .into_diagnostic()?;
+
     // write the masl output
-    let build_dir = env::var("OUT_DIR").unwrap();
-    let build_dir = Path::new(&build_dir);
-    let output_file = build_dir
-        .join(ASL_DIR_PATH)
-        .join("core")
-        .with_extension(Library::LIBRARY_EXTENSION);
-    core_lib
-        .write_to_file(output_file)
+    package
+        .mast
+        .write_to_file(
+            build_dir
+                .join(ASL_DIR_PATH)
+                .join("core")
+                .with_extension(Library::LIBRARY_EXTENSION),
+        )
         .map_err(|e| io::Error::other(e.to_string()))
         .into_diagnostic()?;
 

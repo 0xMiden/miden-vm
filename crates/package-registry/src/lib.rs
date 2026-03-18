@@ -1,5 +1,6 @@
 #![no_std]
 
+#[macro_use]
 extern crate alloc;
 
 #[cfg(any(test, feature = "std"))]
@@ -162,4 +163,18 @@ pub trait PackageProvider {
         package: &PackageId,
         version: &Version,
     ) -> Result<Arc<MastPackage>, Report>;
+}
+
+/// An implementation of [PackageProvider] that always returns an error when asked to load a package
+#[derive(Default)]
+pub struct NoPackageProvider;
+
+impl PackageProvider for NoPackageProvider {
+    fn load_package(
+        &self,
+        package: &PackageId,
+        version: &Version,
+    ) -> Result<Arc<MastPackage>, Report> {
+        Err(Report::msg(format!("cannot load package {package}@{version}")))
+    }
 }

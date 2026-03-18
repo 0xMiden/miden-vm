@@ -13,7 +13,7 @@ use std::{
 
 use miden_assembly_syntax::{
     Report,
-    debuginfo::{DefaultSourceManager, SourceManager, SourceManagerExt, Uri},
+    debuginfo::{DefaultSourceManager, SourceManager, Uri},
 };
 use miden_core::utils::{DisplayHex, hash_string_to_word};
 use miden_mast_package::Package as MastPackage;
@@ -21,7 +21,6 @@ use miden_package_registry::{PackageId, PackageRegistry, Version};
 
 use crate::{
     Dependency, DependencyVersionScheme, GitRevision, Linkage, Package, SemVer, VersionRequirement,
-    Workspace, ast,
 };
 
 /// The [ProjectDependencyGraph] represents a materialized dependency graph rooted at a specific
@@ -438,31 +437,15 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
         path: &Path,
         expected_name: &str,
     ) -> Result<LoadedSourcePackage, Report> {
-        let manifest_path = if path.is_dir() {
-            path.join("miden-project.toml")
-        } else {
-            path.to_path_buf()
-        };
-        let manifest_path =
-            manifest_path.canonicalize().map_err(|error| Report::msg(error.to_string()))?;
-        let source = self.source_manager.load_file(&manifest_path).map_err(Report::msg)?;
+        let project =
+            crate::Project::load_project_reference(expected_name, path, &self.source_manager)?;
 
-        match ast::MidenProject::parse(source.clone())? {
-            ast::MidenProject::Workspace(_) => {
-                let workspace = Workspace::load(source, self.source_manager.as_ref())?;
-                let member = workspace.get_member_by_name(expected_name).ok_or_else(|| {
-                    Report::msg(format!(
-                        "workspace '{}' does not contain a member named '{}'",
-                        manifest_path.display(),
-                        expected_name
-                    ))
-                })?;
-                self.loaded_package_from_arc(
-                    member,
-                    workspace.workspace_root().map(Path::to_path_buf),
-                )
+        match project {
+            crate::Project::Package(package) => self.loaded_package_from_arc(package, None),
+            crate::Project::WorkspacePackage { package, workspace } => {
+                let workspace_root = workspace.workspace_root().map(|path| path.to_path_buf());
+                self.loaded_package_from_arc(package, workspace_root)
             },
-            ast::MidenProject::Package(_) => self.load_package_from_manifest(&manifest_path),
         }
     }
 
@@ -470,62 +453,15 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
         &self,
         manifest_path: &Path,
     ) -> Result<LoadedSourcePackage, Report> {
-        let manifest_path =
-            manifest_path.canonicalize().map_err(|error| Report::msg(error.to_string()))?;
-        if let Some(loaded) = self.try_load_workspace_member(&manifest_path)? {
-            return Ok(loaded);
+        let project = crate::Project::load(manifest_path, &self.source_manager)?;
+
+        match project {
+            crate::Project::Package(package) => self.loaded_package_from_arc(package, None),
+            crate::Project::WorkspacePackage { package, workspace } => {
+                let workspace_root = workspace.workspace_root().map(|path| path.to_path_buf());
+                self.loaded_package_from_arc(package, workspace_root)
+            },
         }
-
-        let source = self.source_manager.load_file(&manifest_path).map_err(Report::msg)?;
-        let package = Arc::from(Package::load(source)?);
-        self.loaded_package_from_arc(package, None)
-    }
-
-    fn try_load_workspace_member(
-        &self,
-        manifest_path: &Path,
-    ) -> Result<Option<LoadedSourcePackage>, Report> {
-        let mut ancestors = manifest_path
-            .parent()
-            .ok_or_else(|| {
-                Report::msg(format!(
-                    "manifest '{}' has no parent directory",
-                    manifest_path.display()
-                ))
-            })?
-            .ancestors();
-        let _ = ancestors.next();
-
-        for ancestor in ancestors {
-            let workspace_manifest = ancestor.join("miden-project.toml");
-            if !workspace_manifest.exists() {
-                continue;
-            }
-
-            let source = self.source_manager.load_file(&workspace_manifest).map_err(Report::msg)?;
-            let project = ast::MidenProject::parse(source.clone())?;
-            if !project.is_workspace() {
-                continue;
-            }
-
-            let workspace = Workspace::load(source, self.source_manager.as_ref())?;
-            let Some(member) = workspace
-                .members()
-                .iter()
-                .find(|member| member.manifest_path().is_some_and(|path| path == manifest_path))
-            else {
-                continue;
-            };
-
-            return self
-                .loaded_package_from_arc(
-                    member.clone(),
-                    workspace.workspace_root().map(Path::to_path_buf),
-                )
-                .map(Some);
-        }
-
-        Ok(None)
     }
 
     fn loaded_package_from_arc(
@@ -534,15 +470,6 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
         workspace_root: Option<PathBuf>,
     ) -> Result<LoadedSourcePackage, Report> {
         let manifest_path = package.manifest_path().map(|path| path.to_path_buf());
-        /*            .ok_or_else(|| {
-            Report::msg(format!(
-                "package '{}' is missing a manifest path",
-                package.name().inner()
-            ))
-        })?
-        .to_path_buf();
-
-        */
         let project_root = match manifest_path.as_ref() {
             Some(manifest_path) => Some(
                 manifest_path
@@ -844,7 +771,7 @@ mod tests {
 
     use miden_assembly_syntax::{
         ast::Path as AstPath,
-        debuginfo::{DefaultSourceManager, Span},
+        debuginfo::{DefaultSourceManager, SourceManagerExt, Span},
     };
     use miden_core::{assert_matches, serde::Serializable, utils::hash_string_to_word};
     use miden_mast_package::{Package as MastPackage, TargetType};
