@@ -34,10 +34,6 @@ impl LiftedAir<F, EF> for MockAir {
         vec![vec![Felt::ONE]]
     }
 
-    fn num_var_len_public_inputs(&self) -> usize {
-        0
-    }
-
     fn num_randomness(&self) -> usize {
         1
     }
@@ -48,6 +44,10 @@ impl LiftedAir<F, EF> for MockAir {
 
     fn num_aux_values(&self) -> usize {
         1
+    }
+
+    fn num_var_len_public_inputs(&self) -> usize {
+        0
     }
 
     fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {

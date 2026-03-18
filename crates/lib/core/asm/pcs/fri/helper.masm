@@ -158,11 +158,7 @@ pub proc load_fri_layer_commitments
         movup.2 drop
         movup.2 drop
         # => [lde_size / 4, log2(lde_size) - 2, a0, a1, num_layers, ptr_layer + 4, y, y, ...]
-        #swap
-        # => [log2(lde_size) - 2, lde_size / 4, a1, a0, num_layers, ptr_layer + 4, y, y, ...]
-        #movup.2 movup.3
-        # => [a0, a1, log2(lde_size) - 2, lde_size / 4, num_layers, ptr_layer + 4, y, y, ...]
-        # Save [a0, a1, log2(lde_size) - 2, lde_size / 4] in memory next to the layer commitment
+        # Save [lde_size / 4, log2(lde_size) - 2, a0, a1] in memory next to the layer commitment
         dup.5
         add.4
         swap.6

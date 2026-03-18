@@ -5,15 +5,15 @@ use miden::core::stark::verifier
 #! The purpose of the following verifier is to serve as a generic core around which a specific
 #! verifier can be built. It expects the following parameters on the stack from the caller:
 #!
-#! 1. `[D0, D1, D2, D3]` which are respectively the digests for dynamic execution of procedures
+#! 1. `[D0, D1, D2, D3, D4]` which are respectively the digests for dynamic execution of procedures
 #!   i. `compute_deep_composition_polynomial_queries`
 #!   ii. `execute_constraint_evaluation_check`
 #!   iii. `process_row_ood_evaluations`
 #!   iv. `process_public_inputs`
+#!   v. `observe_aux_trace`
 #! 2. Per-proof parameter: `log(trace_length)`
 #! 3. `[rd0, rd1, rd2, rd3]`: RELATION_DIGEST = hash(PROTOCOL_ID, CIRCUIT_COMMITMENT),
 #!    a compile-time constant that binds the Fiat-Shamir transcript to the AIR instance.
-#! 4. `is_aux_trace` flag indicating the existence of an auxiliary segment in this AIR
 #!
 #! Precondition: security parameters (num_queries, query_pow_bits, deep_pow_bits,
 #! folding_pow_bits) must already be stored in memory before calling this procedure.
@@ -27,6 +27,6 @@ use miden::core::stark::verifier
 #!   Similarly, elements of the auxiliary trace are quadratic extension field elements. The random
 #!   values for computing random linear combinations are also in this extension field.
 #!
-#! Inputs:  [D0, D1, D2, D3, log(trace_length), rd0, rd1, rd2, rd3, is_aux_trace]
+#! Inputs:  [D0, D1, D2, D3, D4, log(trace_length), rd0, rd1, rd2, rd3]
 #! Outputs: []
 pub use verifier::verify

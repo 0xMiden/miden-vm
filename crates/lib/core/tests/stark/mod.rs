@@ -166,16 +166,6 @@ const EXAMPLE_FIB_KERNEL_SMALL: &str = "begin
         u32split drop
     end";
 
-/// Like EXAMPLE_FIB_LARGE but with a syscall, for kernel-aware tests.
-#[allow(dead_code)]
-const EXAMPLE_FIB_KERNEL_LARGE: &str = "begin
-        syscall.foo
-        repeat.400
-            swap dup.1 add
-        end
-        u32split drop
-    end";
-
 fn fib_stack_inputs() -> Vec<u64> {
     let mut inputs = vec![0_u64; 16];
     inputs[15] = 0;
@@ -194,7 +184,11 @@ fn fib_stack_inputs() -> Vec<u64> {
 #[case(8)]
 #[case(1000)]
 fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
-    let initial_stack = vec![10_u64, 27, 16, 200, 0x50010810, 40];
+    // init_seed expects [log(trace_length), rd0, rd1, rd2, rd3, ...]
+    let log_trace_length = 10_u64;
+    // Relation digest values are arbitrary here; the test only validates VLPI reduction.
+    let rd = [1_u64, 2, 3, 4];
+    let initial_stack = vec![log_trace_length, rd[0], rd[1], rd[2], rd[3]];
 
     let seed = [0_u8; 32];
     let mut rng = ChaCha20Rng::from_seed(seed);

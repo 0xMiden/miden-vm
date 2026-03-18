@@ -254,7 +254,7 @@ end
 #! Input:  [poe, p, e0, e1, layer_ptr, rem_ptr, ...]
 #! Output: [x, x, x, x, x, x, x, x, x, x, x, x, ...] (12 "garbage" elements)
 #!
-#! - poe is g^p.
+#! - poe is g^rev(p).
 #! - p is a query index at the first layer.
 #! - (e0, e1) is an extension field element corresponding to the value of the first layer at index p.
 #! - layer_ptr is the memory address of the layer data (Merkle tree root, alpha etc.) for the next

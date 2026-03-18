@@ -59,6 +59,7 @@ pub fn eval_periodic_values(periodic_columns: &[Vec<Felt>], z_k: QuadFelt) -> Ve
         .collect()
 }
 
+/// Evaluate a base-field symbolic expression at concrete inputs.
 pub fn eval_base_expr<F, EF>(
     expr: &SymbolicExpression<F>,
     inputs: &[EF],
@@ -108,6 +109,7 @@ where
     }
 }
 
+/// Evaluate an extension-field symbolic expression at concrete inputs.
 pub fn eval_ext_expr<F, EF>(
     expr: &SymbolicExpressionExt<F, EF>,
     inputs: &[EF],

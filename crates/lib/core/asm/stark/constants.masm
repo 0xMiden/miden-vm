@@ -279,14 +279,6 @@ pub proc get_lde_domain_generator
     push.LDE_DOMAIN_GEN_PTR mem_load
 end
 
-pub proc set_lde_domain_log_size
-    push.LDE_DOMAIN_LOG_SIZE_PTR mem_store
-end
-
-pub proc get_lde_domain_log_size
-    push.LDE_DOMAIN_LOG_SIZE_PTR add.1 mem_load
-end
-
 pub proc set_lde_domain_size
     push.LDE_DOMAIN_SIZE_PTR mem_store
 end

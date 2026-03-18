@@ -1,4 +1,4 @@
-use crate::{InputKey, InputLayout, layout::InputCounts};
+use crate::{InputCounts, InputKey, InputLayout};
 
 #[test]
 fn masm_layout_aligns_and_maps_aux_inputs() {
