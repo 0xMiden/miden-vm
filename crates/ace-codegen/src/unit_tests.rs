@@ -4,9 +4,10 @@ use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::field::{Field, PrimeCharacteristicRing};
 
 use crate::{
-    AceCircuit, InputCounts, InputKey, InputLayout,
+    AceCircuit, InputKey, InputLayout,
     circuit::emit_circuit,
     dag::{AceDag, DagBuilder},
+    layout::InputCounts,
 };
 
 /// Minimal layout with only public inputs populated.
