@@ -5260,6 +5260,7 @@ fn test_cross_module_constant_cycle_in_procedure_scope_is_structured_error() {
     let err = assembled.unwrap().expect_err("expected cyclic constants to be rejected");
     assert_diagnostic!(&err, "constant evaluation terminated due to infinite recursion");
     assert_diagnostic!(&err, "pub const A = b::B + 1");
+    assert_diagnostic!(&err, "pub const B = a::A + 1");
 }
 
 #[test]
@@ -5301,6 +5302,7 @@ fn imported_error_message_cycle_is_rejected_without_panicking() {
         .expect_err("expected cyclic error message constants to be rejected");
     assert_diagnostic!(&err, "constant evaluation terminated due to infinite recursion");
     assert_diagnostic!(&err, "pub const ERR_A = b::ERR_B");
+    assert_diagnostic!(&err, "pub const ERR_B = a::ERR_A");
 }
 
 #[test]
