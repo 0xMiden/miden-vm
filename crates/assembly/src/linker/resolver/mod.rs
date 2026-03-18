@@ -6,7 +6,7 @@ use miden_assembly_syntax::{
     ast::{
         self, GlobalItemIndex, Ident, ItemIndex, ModuleIndex, Path, SymbolResolution,
         SymbolResolutionError,
-        constants::{ConstEnvironment, eval::CachedConstantValue},
+        constants::{ConstEnvironment, ConstEvalError, eval::CachedConstantValue},
         types,
     },
     debuginfo::{SourceFile, SourceManager, SourceSpan, Span, Spanned},
@@ -35,6 +35,71 @@ pub struct Resolver<'a, 'b: 'a> {
 pub struct ResolverCache {
     pub types: BTreeMap<GlobalItemIndex, ast::types::Type>,
     pub constants: BTreeMap<GlobalItemIndex, ast::ConstantValue>,
+    pub evaluating_constants: BTreeMap<GlobalItemIndex, SourceSpan>,
+}
+
+impl<'a, 'b: 'a> Resolver<'a, 'b> {
+    fn invalid_constant_ref(&self, span: SourceSpan) -> LinkerError {
+        LinkerError::InvalidConstantRef {
+            span,
+            source_file: self.get_source_file_for(span),
+        }
+    }
+
+    pub(super) fn materialize_constant_by_gid(
+        &mut self,
+        gid: GlobalItemIndex,
+        span: SourceSpan,
+    ) -> Result<(), LinkerError> {
+        if self.cache.constants.contains_key(&gid) {
+            return Ok(());
+        }
+
+        match self.resolver.linker()[gid].item() {
+            SymbolItem::Compiled(ItemInfo::Constant(_)) => return Ok(()),
+            SymbolItem::Constant(item) => {
+                let expr = item.value.clone();
+                if let Some(start) = self.cache.evaluating_constants.get(&gid).copied() {
+                    return Err(ConstEvalError::eval_cycle(start, span, self).into());
+                }
+
+                self.cache.evaluating_constants.insert(gid, span);
+                let value = self.resolver.linker().const_eval(gid, &expr, self.cache);
+                self.cache.evaluating_constants.remove(&gid);
+
+                let value = value?;
+                self.cache.constants.insert(gid, value);
+                return Ok(());
+            },
+            SymbolItem::Compiled(_) | SymbolItem::Procedure(_) | SymbolItem::Type(_) => (),
+            SymbolItem::Alias { .. } => unreachable!("resolver should have expanded all aliases"),
+        }
+
+        Err(self.invalid_constant_ref(span))
+    }
+
+    fn get_constant_by_gid(
+        &mut self,
+        gid: GlobalItemIndex,
+        span: SourceSpan,
+    ) -> Result<Option<CachedConstantValue<'_>>, LinkerError> {
+        self.materialize_constant_by_gid(gid, span)?;
+
+        if let Some(cached) = self.cache.constants.get(&gid) {
+            return Ok(Some(CachedConstantValue::Hit(cached)));
+        }
+
+        match self.resolver.linker()[gid].item() {
+            SymbolItem::Compiled(ItemInfo::Constant(info)) => {
+                Ok(Some(CachedConstantValue::Hit(&info.value)))
+            },
+            SymbolItem::Compiled(_)
+            | SymbolItem::Constant(_)
+            | SymbolItem::Procedure(_)
+            | SymbolItem::Type(_) => Err(self.invalid_constant_ref(span)),
+            SymbolItem::Alias { .. } => unreachable!("resolver should have expanded all aliases"),
+        }
+    }
 }
 
 impl<'a, 'b: 'a> ConstEnvironment for Resolver<'a, 'b> {
@@ -44,7 +109,7 @@ impl<'a, 'b: 'a> ConstEnvironment for Resolver<'a, 'b> {
         self.resolver.source_manager().get(span.source_id()).ok()
     }
 
-    fn get(&self, name: &Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
+    fn get(&mut self, name: &Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
         let context = SymbolResolutionContext {
             span: name.span(),
             module: self.current_module,
@@ -54,10 +119,7 @@ impl<'a, 'b: 'a> ConstEnvironment for Resolver<'a, 'b> {
             SymbolResolution::Exact { gid, .. } => gid,
             SymbolResolution::Local(index) => self.current_module + index.into_inner(),
             SymbolResolution::MastRoot(_) | SymbolResolution::Module { .. } => {
-                return Err(LinkerError::InvalidConstantRef {
-                    span: context.span,
-                    source_file: self.get_source_file_for(context.span),
-                });
+                return Err(self.invalid_constant_ref(context.span));
             },
             SymbolResolution::External(path) => {
                 return Err(LinkerError::UndefinedSymbol {
@@ -68,23 +130,11 @@ impl<'a, 'b: 'a> ConstEnvironment for Resolver<'a, 'b> {
             },
         };
 
-        match self.cache.constants.get(&gid).map(CachedConstantValue::Hit) {
-            some @ Some(_) => Ok(some),
-            None => match self.resolver.linker()[gid].item() {
-                SymbolItem::Compiled(ItemInfo::Constant(info)) => {
-                    Ok(Some(CachedConstantValue::Hit(&info.value)))
-                },
-                SymbolItem::Constant(item) => Ok(Some(CachedConstantValue::Miss(&item.value))),
-                _ => Err(LinkerError::InvalidConstantRef {
-                    span: name.span(),
-                    source_file: self.get_source_file_for(name.span()),
-                }),
-            },
-        }
+        self.get_constant_by_gid(gid, name.span())
     }
 
     fn get_by_path(
-        &self,
+        &mut self,
         path: Span<&Path>,
     ) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
         let context = SymbolResolutionContext {
@@ -96,10 +146,7 @@ impl<'a, 'b: 'a> ConstEnvironment for Resolver<'a, 'b> {
             SymbolResolution::Exact { gid, .. } => gid,
             SymbolResolution::Local(index) => self.current_module + index.into_inner(),
             SymbolResolution::MastRoot(_) | SymbolResolution::Module { .. } => {
-                return Err(LinkerError::InvalidConstantRef {
-                    span: context.span,
-                    source_file: self.get_source_file_for(context.span),
-                });
+                return Err(self.invalid_constant_ref(context.span));
             },
             SymbolResolution::External(path) => {
                 return Err(LinkerError::UndefinedSymbol {
@@ -109,24 +156,8 @@ impl<'a, 'b: 'a> ConstEnvironment for Resolver<'a, 'b> {
                 });
             },
         };
-        if let Some(cached) = self.cache.constants.get(&gid) {
-            return Ok(Some(CachedConstantValue::Hit(cached)));
-        }
-        match self.resolver.linker()[gid].item() {
-            SymbolItem::Compiled(ItemInfo::Constant(info)) => {
-                Ok(Some(CachedConstantValue::Hit(&info.value)))
-            },
-            SymbolItem::Constant(item) => Ok(Some(CachedConstantValue::Miss(&item.value))),
-            SymbolItem::Compiled(_) | SymbolItem::Procedure(_) | SymbolItem::Type(_) => {
-                Err(LinkerError::InvalidConstantRef {
-                    span: context.span,
-                    source_file: self.get_source_file_for(context.span),
-                })
-            },
-            SymbolItem::Alias { .. } => {
-                unreachable!("the resolver should have expanded all aliases")
-            },
-        }
+
+        self.get_constant_by_gid(gid, path.span())
     }
 
     /// Cache evaluated constants so long as they evaluated to a ConstantValue, and we can resolve

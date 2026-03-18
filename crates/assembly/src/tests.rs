@@ -4982,7 +4982,7 @@ end
 }
 
 #[test]
-fn imported_error_message_alias_is_rejected_without_panicking() {
+fn imported_error_message_alias_is_resolved_without_panicking() {
     use std::{
         panic::{AssertUnwindSafe, catch_unwind},
         sync::Arc,
@@ -5019,9 +5019,9 @@ end
     }));
 
     assert!(assembled.is_ok(), "assembler panicked during assembly");
-    let assembled = assembled.unwrap();
-    let err = assembled.expect_err("expected assembly to return an error");
-    assert_diagnostic!(err, "undefined symbol reference");
+    assembled
+        .unwrap()
+        .expect("expected imported error message alias to assemble successfully");
 }
 
 #[test]
@@ -5155,6 +5155,69 @@ fn test_cross_module_constant_resolution_as_local_definition() -> TestResult {
     let assembler = Assembler::new(context.source_manager());
 
     let _ = assembler.assemble_library([module_a, module_b])?;
+
+    Ok(())
+}
+
+#[test]
+fn test_cross_module_constant_reexport_chain_in_procedure_scope() -> TestResult {
+    let context = TestContext::new();
+
+    let a = parse_module!(
+        &context,
+        "dcrc::a",
+        r#"
+            pub const VAL = 99
+            pub proc use_val
+                push.VAL
+                drop
+            end
+        "#
+    );
+
+    let b = parse_module!(
+        &context,
+        "dcrc::b",
+        r#"
+            use dcrc::a
+            pub const STEP = a::VAL + 1
+            pub proc dummy
+                push.STEP
+                drop
+            end
+        "#
+    );
+
+    let c = parse_module!(
+        &context,
+        "dcrc::c",
+        r#"
+            use dcrc::b
+            pub const FINAL_VAL = b::STEP + 1
+            pub proc dummy
+                push.FINAL_VAL
+                drop
+            end
+        "#
+    );
+
+    let lib = Assembler::new(context.source_manager()).assemble_library([a, b, c])?;
+
+    let src = source_file!(
+        &context,
+        r#"
+            use dcrc::c
+            const LOCAL = c::FINAL_VAL
+            begin
+                push.LOCAL
+                drop
+            end
+        "#
+    );
+
+    let _program = Assembler::new(context.source_manager())
+        .with_dynamic_library(lib)?
+        .assemble_program(src)?;
 
     Ok(())
 }
