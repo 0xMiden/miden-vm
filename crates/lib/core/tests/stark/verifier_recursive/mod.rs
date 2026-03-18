@@ -137,10 +137,12 @@ fn build_advice(
     let mut advice_stack = Vec::new();
 
     // 0. Security parameters: [num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits].
-    //    Consumed first by load_security_params in the specific verifier.
-    let num_queries = pcs.tree_indices.len();
-    advice_stack.push(num_queries as u64);
+    //    Consumed first by load_security_params in the specific verifier. num_queries is the
+    //    configured protocol parameter, not the potentially deduplicated count (e.g.
+    //    tree_indices.len())
     let params = config::pcs_params();
+    let num_queries = params.num_queries();
+    advice_stack.push(num_queries as u64);
     advice_stack.push(params.query_pow_bits() as u64);
     // DEEP and folding PoW bits are not publicly exposed on PcsParams;
     // use the constants from air/src/config.rs directly.
