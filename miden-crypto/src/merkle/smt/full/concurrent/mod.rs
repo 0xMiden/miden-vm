@@ -6,7 +6,7 @@ use p3_maybe_rayon::prelude::*;
 
 use super::{
     EmptySubtreeRoots, InnerNode, InnerNodes, Leaves, MerkleError, MutationSet, NodeIndex,
-    SMT_DEPTH, Smt, SmtLeaf, SparseMerkleTree, Word, leaf,
+    SMT_DEPTH, Smt, SmtLeaf, SparseMerkleTree, Word,
 };
 use crate::merkle::smt::{Map, NodeMutation, NodeMutations, SmtLeafError};
 
@@ -279,7 +279,7 @@ impl Smt {
         assert!(!pairs.is_empty());
 
         if pairs.len() > 1 {
-            pairs.sort_by(|(key_1, _), (key_2, _)| leaf::cmp_keys(*key_1, *key_2));
+            pairs.sort_by(|(key_1, _), (key_2, _)| key_1.cmp(key_2));
             // Check for duplicates in a sorted list by comparing adjacent pairs
             Self::check_for_duplicate_keys(&pairs)?;
             Ok(Some(SmtLeaf::new_multiple(pairs).unwrap()))
