@@ -6,7 +6,7 @@ use alloc::{sync::Arc, vec::Vec};
 use std::println;
 
 use crate::{
-    Felt,
+    Felt, Word,
     advice::{AdviceInputs, AdviceMap},
     events::EventId,
     mast::{BasicBlockNodeBuilder, JoinNodeBuilder, MastForest, MastForestContributor},
@@ -93,10 +93,50 @@ fn generate_fuzz_seeds() {
         write_seed("program_deserialize", "minimal_program.bin", &program.to_bytes());
     }
 
+    // Program seed with invalid duplicate-kernel payload.
+    {
+        let mut forest = MastForest::new();
+        let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+            .add_to_forest(&mut forest)
+            .unwrap();
+        forest.make_root(block_id);
+
+        let a: Word = [Felt::new(9), Felt::new(10), Felt::new(11), Felt::new(12)].into();
+        let kernel = Kernel::from_hashes_unchecked(vec![a, a]);
+        let program = Program::with_kernel(Arc::new(forest), block_id, kernel);
+
+        write_seed("program_deserialize", "program_with_duplicate_kernel.bin", &program.to_bytes());
+    }
+
     // Kernel seed
     {
         let kernel = Kernel::default();
         write_seed("kernel_deserialize", "empty_kernel.bin", &kernel.to_bytes());
+
+        let a: Word = [Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)].into();
+        let b: Word = [Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)].into();
+
+        let non_empty = Kernel::new(&[a]).expect("failed to build non-empty kernel");
+        write_seed("kernel_deserialize", "single_kernel.bin", &non_empty.to_bytes());
+
+        let max_kernel: Vec<Word> = (0u64..=254)
+            .map(|n| [Felt::new(n), Felt::new(n + 1), Felt::new(n + 2), Felt::new(n + 3)].into())
+            .collect();
+        let max_kernel = Kernel::new(&max_kernel).expect("failed to build max-size kernel");
+        write_seed("kernel_deserialize", "max_kernel_255.bin", &max_kernel.to_bytes());
+
+        // Invalid seed: duplicate hashes should deserialize to Err (never panic).
+        let duplicate_kernel = Kernel::from_hashes_unchecked(vec![b, a, a]);
+        write_seed("kernel_deserialize", "duplicate_kernel.bin", &duplicate_kernel.to_bytes());
+
+        // Serde kernel seeds (JSON payloads) used by kernel_serde_deserialize fuzz target.
+        write_seed("kernel_serde_deserialize", "empty_kernel.json", b"[]");
+        write_seed("kernel_serde_deserialize", "duplicate_kernel.json", b"[[1,2,3,4],[1,2,3,4]]");
+        let too_many_hashes: Vec<[u64; 4]> =
+            (0u64..=255).map(|n| [n, n + 1, n + 2, n + 3]).collect();
+        let too_many_hashes_json =
+            serde_json::to_vec(&too_many_hashes).expect("failed to serialize too_many_hashes seed");
+        write_seed("kernel_serde_deserialize", "too_many_hashes.json", &too_many_hashes_json);
     }
 
     // Stack IO seeds

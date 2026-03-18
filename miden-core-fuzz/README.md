@@ -31,6 +31,12 @@ make fuzz-all
 cargo +nightly fuzz run mast_forest_deserialize --fuzz-dir miden-core-fuzz
 ```
 
+**`mast_forest_serde_deserialize`** — Tests `MastForest` JSON deserialization via `serde_json`.
+
+```bash
+cargo +nightly fuzz run mast_forest_serde_deserialize --fuzz-dir miden-core-fuzz
+```
+
 **`mast_forest_validate`** — Tests the full untrusted pipeline: deserialize then validate.
 
 ```bash
@@ -47,10 +53,22 @@ These targets exercise core deserializers directly.
 cargo +nightly fuzz run program_deserialize --fuzz-dir miden-core-fuzz
 ```
 
+**`program_serde_deserialize`** — Tests `Program` JSON deserialization via `serde_json`.
+
+```bash
+cargo +nightly fuzz run program_serde_deserialize --fuzz-dir miden-core-fuzz
+```
+
 **`kernel_deserialize`** — Tests `Kernel::read_from_bytes`.
 
 ```bash
 cargo +nightly fuzz run kernel_deserialize --fuzz-dir miden-core-fuzz
+```
+
+**`kernel_serde_deserialize`** — Tests `Kernel` JSON deserialization via `serde_json`.
+
+```bash
+cargo +nightly fuzz run kernel_serde_deserialize --fuzz-dir miden-core-fuzz
 ```
 
 **`stack_io_deserialize`** — Tests `StackInputs` and `StackOutputs` deserialization.
@@ -65,10 +83,22 @@ cargo +nightly fuzz run stack_io_deserialize --fuzz-dir miden-core-fuzz
 cargo +nightly fuzz run advice_inputs_deserialize --fuzz-dir miden-core-fuzz
 ```
 
+**`advice_map_serde_deserialize`** — Tests `AdviceMap` JSON deserialization via `serde_json`.
+
+```bash
+cargo +nightly fuzz run advice_map_serde_deserialize --fuzz-dir miden-core-fuzz
+```
+
 **`operation_deserialize`** — Tests `Operation::read_from_bytes`.
 
 ```bash
 cargo +nightly fuzz run operation_deserialize --fuzz-dir miden-core-fuzz
+```
+
+**`operation_serde_deserialize`** — Tests `Operation` JSON deserialization via `serde_json`.
+
+```bash
+cargo +nightly fuzz run operation_serde_deserialize --fuzz-dir miden-core-fuzz
 ```
 
 **`execution_proof_deserialize`** — Tests `ExecutionProof::read_from_bytes`.
@@ -77,10 +107,22 @@ cargo +nightly fuzz run operation_deserialize --fuzz-dir miden-core-fuzz
 cargo +nightly fuzz run execution_proof_deserialize --fuzz-dir miden-core-fuzz
 ```
 
+**`execution_proof_serde_deserialize`** — Tests `ExecutionProof` JSON deserialization via `serde_json`.
+
+```bash
+cargo +nightly fuzz run execution_proof_serde_deserialize --fuzz-dir miden-core-fuzz
+```
+
 **`precompile_request_deserialize`** — Tests `PrecompileRequest::read_from_bytes`.
 
 ```bash
 cargo +nightly fuzz run precompile_request_deserialize --fuzz-dir miden-core-fuzz
+```
+
+**`precompile_request_serde_deserialize`** — Tests `PrecompileRequest` JSON deserialization via `serde_json`.
+
+```bash
+cargo +nightly fuzz run precompile_request_serde_deserialize --fuzz-dir miden-core-fuzz
 ```
 
 ### Assembly/Package Deserialization Targets
@@ -93,10 +135,22 @@ These targets exercise library and package deserializers used by `.masl` and `.m
 cargo +nightly fuzz run library_deserialize --fuzz-dir miden-core-fuzz
 ```
 
+**`library_serde_deserialize`** — Tests `Library` JSON deserialization via `serde_json`.
+
+```bash
+cargo +nightly fuzz run library_serde_deserialize --fuzz-dir miden-core-fuzz
+```
+
 **`package_deserialize`** — Tests `Package::read_from_bytes`.
 
 ```bash
 cargo +nightly fuzz run package_deserialize --fuzz-dir miden-core-fuzz
+```
+
+**`package_serde_deserialize`** — Tests `Package` JSON deserialization via `serde_json`.
+
+```bash
+cargo +nightly fuzz run package_serde_deserialize --fuzz-dir miden-core-fuzz
 ```
 
 ### Component Targets
