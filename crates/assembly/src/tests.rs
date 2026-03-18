@@ -5223,6 +5223,37 @@ fn test_cross_module_constant_reexport_chain_in_procedure_scope() -> TestResult 
 }
 
 #[test]
+fn test_issue_2696_imported_constant_with_private_dependency() -> TestResult {
+    let context = TestContext::new();
+
+    let memory = parse_module!(
+        &context,
+        "wallet::memory",
+        r#"
+            const ACCOUNT_ID_AND_NONCE_OFFSET = 4
+            pub const ACCOUNT_ID_SUFFIX_OFFSET = ACCOUNT_ID_AND_NONCE_OFFSET + 2
+        "#
+    );
+
+    let account = parse_module!(
+        &context,
+        "wallet::account",
+        r#"
+            use wallet::memory::ACCOUNT_ID_SUFFIX_OFFSET
+
+            pub proc use_suffix
+                push.ACCOUNT_ID_SUFFIX_OFFSET
+                drop
+            end
+        "#
+    );
+
+    Assembler::new(context.source_manager()).assemble_library([memory, account])?;
+
+    Ok(())
+}
+
+#[test]
 fn test_cross_module_constant_cycle_in_procedure_scope_is_structured_error() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 
