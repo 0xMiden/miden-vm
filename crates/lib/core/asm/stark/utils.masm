@@ -53,42 +53,6 @@ pub proc validate_inputs
     u32lt.32 assert.err="folding_pow_bits must be less than 32"
 end
 
-#! Reverse the lowest `bits` bits of `index`.
-#!
-#! Input: [index, bits, ...]
-#! Output: [rev_index, ...]
-pub proc bit_reverse_len
-    u32assert
-    swap
-    u32assert
-    dup u32lte.32 assert
-    swap
-
-    push.0
-    swap.2
-    swap
-    # => [index, bits, rev, ...]
-
-    dup.1 push.0 neq
-    while.true
-        dup
-        push.1 u32and
-        movup.3
-        dup
-        u32wrapping_add
-        u32wrapping_add
-        swap
-        u32shr.1
-        movup.2
-        u32wrapping_sub.1
-        swap
-        dup.1 push.0 neq
-    end
-
-    drop
-    drop
-end
-
 #! Reverse the lowest `bits` bits of `index` using parallel bit-swap.
 #! `pow2_shift` must equal 2^(32 - bits); the caller pre-computes it once.
 #!

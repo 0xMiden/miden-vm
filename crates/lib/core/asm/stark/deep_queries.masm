@@ -47,7 +47,7 @@ end
 #! Computes the DEEP query.
 #!
 #! Input: [Z, X, Y, W, query_ptr, ...]
-#! Ouput: [eval0, eval1, Y, query_ptr, ...]
+#! Output: [eval0, eval1, Y, query_ptr, ...]
 #!
 #! where:
 #!

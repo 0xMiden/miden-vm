@@ -19,10 +19,7 @@
 use alloc::vec::Vec;
 
 use miden_air::{ProcessorAir, PublicInputs, config, config::InitTranscript};
-use miden_core::{
-    Felt, WORD_SIZE, Word,
-    field::{PrimeCharacteristicRing, QuadFelt},
-};
+use miden_core::{Felt, WORD_SIZE, Word, field::QuadFelt};
 use miden_crypto::{
     field::BasedVectorSpace,
     hash::poseidon2::Poseidon2Permutation256,
@@ -163,12 +160,13 @@ fn build_advice(
     advice_stack.extend_from_slice(&kernel_advice);
 
     // 4. Auxiliary randomness [beta0, beta1, alpha0, alpha1].
+    assert!(
+        stark.randomness.len() >= 2,
+        "expected at least 2 randomness challenges (alpha, beta), got {}",
+        stark.randomness.len()
+    );
     let alpha = stark.randomness[0];
-    let beta = if stark.randomness.len() > 1 {
-        stark.randomness[1]
-    } else {
-        Challenge::ZERO
-    };
+    let beta = stark.randomness[1];
     let beta_coeffs: &[Felt] = beta.as_basis_coefficients_slice();
     let alpha_coeffs: &[Felt] = alpha.as_basis_coefficients_slice();
     advice_stack.extend_from_slice(&[
