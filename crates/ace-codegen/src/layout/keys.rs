@@ -20,30 +20,29 @@ pub enum InputKey {
     },
     /// Aux bus boundary value at the given index.
     AuxBusBoundary(usize),
-    /// Out-of-domain evaluation point `zeta`.
-    Z,
+    /// Variable-length public input reduction at the given group index.
+    VlpiReduction(usize),
+    /// Batching challenge gamma for combining the constraint evaluation with the
+    /// auxiliary trace boundary checks.
+    Gamma,
     /// Composition challenge used to fold constraints.
     Alpha,
     /// `zeta^N`, where `N` is the trace length.
     ZPowN,
-    /// `g^{-1}`, inverse trace domain generator.
-    GInv,
-    /// `g^{-2}`, squared inverse trace domain generator.
-    GInv2,
     /// `zeta^(N / max_cycle_len)` for periodic columns.
     ZK,
+    /// Precomputed first-row selector: `(z^N - 1) / (z - 1)`.
+    IsFirst,
+    /// Precomputed last-row selector: `(z^N - 1) / (z - g^{-1})`.
+    IsLast,
+    /// Precomputed transition selector: `z - g^{-1}`.
+    IsTransition,
     /// First barycentric weight for quotient recomposition.
     Weight0,
-    /// `g = h^N`, the chunk shift ratio.
-    G,
+    /// `f = h^N`, the chunk shift ratio between cosets.
+    F,
     /// `s0 = offset^N`, the first chunk shift.
     S0,
-    /// `1 / (zeta - g^{-1})` (selector denominator).
-    InvZMinusGInv,
-    /// `1 / (zeta - 1)` (selector denominator).
-    InvZMinusOne,
-    /// `1 / (zeta^N - 1)` (vanishing inverse).
-    InvVanishing,
     /// Base-field coordinate for a quotient chunk opening at `offset`
     /// (0 = zeta, 1 = g * zeta).
     QuotientChunkCoord {
@@ -84,18 +83,19 @@ impl InputKeyMapper<'_> {
                 }
             },
             InputKey::AuxBusBoundary(i) => layout.regions.aux_bus_boundary.index(i),
-            InputKey::Z => Some(layout.stark.z),
+            InputKey::VlpiReduction(i) => layout.regions.vlpi_reductions.index(i),
+            // Extension-field stark vars.
             InputKey::Alpha => Some(layout.stark.alpha),
-            InputKey::GInv => Some(layout.stark.g_inv),
             InputKey::ZPowN => Some(layout.stark.z_pow_n),
-            InputKey::GInv2 => Some(layout.stark.g_inv2),
             InputKey::ZK => Some(layout.stark.z_k),
+            InputKey::IsFirst => Some(layout.stark.is_first),
+            InputKey::IsLast => Some(layout.stark.is_last),
+            InputKey::IsTransition => Some(layout.stark.is_transition),
+            InputKey::Gamma => Some(layout.stark.gamma),
+            // Base-field stark vars (stored as (val, 0) in the EF slot).
             InputKey::Weight0 => Some(layout.stark.weight0),
-            InputKey::G => Some(layout.stark.g),
+            InputKey::F => Some(layout.stark.f),
             InputKey::S0 => Some(layout.stark.s0),
-            InputKey::InvZMinusGInv => Some(layout.stark.inv_z_minus_g_inv),
-            InputKey::InvZMinusOne => Some(layout.stark.inv_z_minus_one),
-            InputKey::InvVanishing => Some(layout.stark.inv_vanishing),
             InputKey::QuotientChunkCoord { offset, chunk, coord } => {
                 if chunk >= layout.counts.num_quotient_chunks || coord >= EXT_DEGREE {
                     return None;

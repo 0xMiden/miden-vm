@@ -14,12 +14,12 @@ use miden_crypto::{
     },
     stark::{
         GenericStarkConfig,
-        challenger::{DuplexChallenger, HashChallenger, SerializingChallenger64},
+        challenger::{CanObserve, DuplexChallenger, HashChallenger, SerializingChallenger64},
         dft::Radix2DitParallel,
         fri::PcsParams,
         hasher::{ChainingHasher, StatefulSponge},
         lmcs::LmcsConfig,
-        symmetric::{CompressionFunctionFromHasher, TruncatedPermutation},
+        symmetric::{CompressionFunctionFromHasher, Permutation, TruncatedPermutation},
     },
 };
 
@@ -29,13 +29,13 @@ use miden_crypto::{
 /// Log2 of the FRI blowup factor (blowup = 8).
 const LOG_BLOWUP: u8 = 3;
 /// Log2 of the FRI folding arity (arity = 4).
-const LOG_FOLDING_ARITY: u8 = 2;
+pub const LOG_FOLDING_ARITY: u8 = 2;
 /// Log2 of the final polynomial degree (degree = 128).
 const LOG_FINAL_DEGREE: u8 = 7;
 /// Proof-of-work bits for FRI folding challenges.
-const FOLDING_POW_BITS: usize = 16;
+pub const FOLDING_POW_BITS: usize = 16;
 /// Proof-of-work bits for DEEP composition polynomial.
-const DEEP_POW_BITS: usize = 0;
+pub const DEEP_POW_BITS: usize = 0;
 /// Number of FRI query repetitions.
 const NUM_QUERIES: usize = 27;
 /// Proof-of-work bits for query phase.
@@ -166,4 +166,183 @@ pub fn rpx_config(
     let lmcs = LmcsConfig::new(StatefulSponge::new(perm), TruncatedPermutation::new(perm));
     let challenger = DuplexChallenger::new(perm);
     GenericStarkConfig::new(params, lmcs, Radix2DitParallel::default(), challenger)
+}
+
+// POSEIDON2 CONFIG TYPE ALIAS
+// ================================================================================================
+
+/// Concrete STARK configuration type for Poseidon2.
+pub type Poseidon2Config =
+    MidenStarkConfig<AlgLmcs<Poseidon2Permutation256>, AlgChallenger<Poseidon2Permutation256>>;
+
+// DOMAIN-SEPARATED FIAT-SHAMIR TRANSCRIPT
+// ================================================================================================
+
+/// RELATION_DIGEST = Poseidon2::hash_elements([PROTOCOL_ID, CIRCUIT_COMMITMENT]).
+///
+/// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR.
+/// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
+pub const RELATION_DIGEST: [Felt; 4] = [
+    Felt::new(9663888320842941557),
+    Felt::new(5569923100392661778),
+    Felt::new(10686243500486164404),
+    Felt::new(9017524969302659247),
+];
+
+/// Domain-separated Fiat-Shamir transcript initialization.
+///
+/// Constructs a fresh challenger whose internal state is cryptographically bound to:
+/// 1. The relation identity (RELATION_DIGEST)
+/// 2. The protocol parameters (num_queries, PoW bits, FRI config)
+/// 3. The per-proof trace height (log_trace_height)
+pub trait InitTranscript {
+    fn seeded(log_trace_height: u64) -> Self;
+}
+
+/// Sponge capacity (SPONGE_WIDTH - SPONGE_RATE).
+const SPONGE_CAPACITY: usize = SPONGE_WIDTH - SPONGE_RATE;
+
+/// Range of capacity slots within the sponge state array.
+const CAPACITY_RANGE: core::ops::Range<usize> = SPONGE_RATE..SPONGE_WIDTH;
+
+/// Computes the seeded sponge state for sponge-based challengers.
+///
+/// Returns a `[Felt; SPONGE_WIDTH]` with capacity = PROOF_SEED and rate zeroed.
+fn seed_sponge_state(
+    log_trace_height: u64,
+    permute: impl Fn(&mut [Felt; SPONGE_WIDTH]),
+) -> [Felt; SPONGE_WIDTH] {
+    let mut state = [Felt::ZERO; SPONGE_WIDTH];
+
+    // Phase 1: RELATION_DIGEST (capacity) + PCS_PARAMS (rate) -> INSTANCE_SEED
+    assert_eq!(RELATION_DIGEST.len(), SPONGE_CAPACITY);
+    state[CAPACITY_RANGE].copy_from_slice(&RELATION_DIGEST);
+    state[0] = Felt::new(NUM_QUERIES as u64);
+    state[1] = Felt::new(QUERY_POW_BITS as u64);
+    state[2] = Felt::new(DEEP_POW_BITS as u64);
+    state[3] = Felt::new(FOLDING_POW_BITS as u64);
+    state[4] = Felt::new(LOG_BLOWUP as u64);
+    state[5] = Felt::new(LOG_FINAL_DEGREE as u64);
+    state[6] = Felt::new(1_u64 << LOG_FOLDING_ARITY);
+    // state[7] already zero
+    permute(&mut state);
+
+    // Phase 2: INSTANCE_SEED (capacity) + [lth, 0, ..., 0] (rate) -> PROOF_SEED
+    state[..SPONGE_RATE].fill(Felt::ZERO);
+    state[0] = Felt::new(log_trace_height);
+    permute(&mut state);
+
+    // Zero the rate, keep capacity = PROOF_SEED
+    state[..SPONGE_RATE].fill(Felt::ZERO);
+
+    state
+}
+
+impl InitTranscript for AlgChallenger<Poseidon2Permutation256> {
+    fn seeded(log_trace_height: u64) -> Self {
+        let state = seed_sponge_state(log_trace_height, |s| {
+            Poseidon2Permutation256.permute_mut(s);
+        });
+        DuplexChallenger {
+            sponge_state: state,
+            input_buffer: vec![],
+            output_buffer: vec![],
+            permutation: Poseidon2Permutation256,
+        }
+    }
+}
+
+impl InitTranscript for AlgChallenger<RpoPermutation256> {
+    fn seeded(log_trace_height: u64) -> Self {
+        let state = seed_sponge_state(log_trace_height, |s| {
+            RpoPermutation256.permute_mut(s);
+        });
+        DuplexChallenger {
+            sponge_state: state,
+            input_buffer: vec![],
+            output_buffer: vec![],
+            permutation: RpoPermutation256,
+        }
+    }
+}
+
+impl InitTranscript for AlgChallenger<RpxPermutation256> {
+    fn seeded(log_trace_height: u64) -> Self {
+        let state = seed_sponge_state(log_trace_height, |s| {
+            RpxPermutation256.permute_mut(s);
+        });
+        DuplexChallenger {
+            sponge_state: state,
+            input_buffer: vec![],
+            output_buffer: vec![],
+            permutation: RpxPermutation256,
+        }
+    }
+}
+
+/// Helper for bit-oriented `InitTranscript` implementations.
+///
+/// Unlike the sponge-based algebraic challengers (RPO, Poseidon2, RPX) which seed the
+/// capacity directly via `seed_sponge_state`, bit-oriented challengers observe the
+/// RELATION_DIGEST, PCS parameters, and log_trace_height sequentially as a prefix.
+fn init_transcript_hash(challenger: &mut impl CanObserve<Felt>, log_trace_height: u64) {
+    challenger.observe_slice(&RELATION_DIGEST);
+    challenger.observe(Felt::new(NUM_QUERIES as u64));
+    challenger.observe(Felt::new(QUERY_POW_BITS as u64));
+    challenger.observe(Felt::new(DEEP_POW_BITS as u64));
+    challenger.observe(Felt::new(FOLDING_POW_BITS as u64));
+    challenger.observe(Felt::new(LOG_BLOWUP as u64));
+    challenger.observe(Felt::new(LOG_FINAL_DEGREE as u64));
+    challenger.observe(Felt::new(1_u64 << LOG_FOLDING_ARITY));
+    challenger.observe(Felt::new(log_trace_height));
+}
+
+impl InitTranscript for ByteChallenger<Blake3Hasher> {
+    fn seeded(log_trace_height: u64) -> Self {
+        let mut challenger = SerializingChallenger64::from_hasher(vec![], Blake3Hasher);
+        init_transcript_hash(&mut challenger, log_trace_height);
+        challenger
+    }
+}
+
+impl InitTranscript for ByteChallenger<Keccak256Hash> {
+    fn seeded(log_trace_height: u64) -> Self {
+        let mut challenger = SerializingChallenger64::from_hasher(vec![], Keccak256Hash {});
+        init_transcript_hash(&mut challenger, log_trace_height);
+        challenger
+    }
+}
+
+/// Absorbs variable-length public inputs into the challenger.
+///
+/// Each VLPI group is a flat slice of fixed-width messages. `message_widths[i]` gives the
+/// width of each message in group `i`. Every message is zero-padded to the next multiple
+/// of `SPONGE_RATE` and reversed before observation, matching the layout the MASM recursive
+/// verifier's `mem_stream` + `horner_eval_base` expects.
+pub fn observe_var_len_public_inputs<C: CanObserve<Felt>>(
+    challenger: &mut C,
+    var_len_public_inputs: &[&[Felt]],
+    message_widths: &[usize],
+) {
+    assert_eq!(
+        var_len_public_inputs.len(),
+        message_widths.len(),
+        "must provide one message width per VLPI group"
+    );
+    for (group, &msg_width) in var_len_public_inputs.iter().zip(message_widths) {
+        assert!(msg_width > 0, "VLPI message width must be positive");
+        let padded_width = msg_width.next_multiple_of(SPONGE_RATE);
+        for message in group.chunks(msg_width) {
+            assert_eq!(
+                message.len(),
+                msg_width,
+                "VLPI group has trailing elements that don't form a complete message"
+            );
+            let mut padded = vec![Felt::ZERO; padded_width];
+            for (i, &elem) in message.iter().enumerate() {
+                padded[padded_width - 1 - i] = elem;
+            }
+            challenger.observe_slice(&padded);
+        }
+    }
 }

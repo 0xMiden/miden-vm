@@ -12,6 +12,7 @@ enum Alignment {
 #[derive(Clone, Copy)]
 struct LayoutPolicy {
     public_values: Alignment,
+    vlpi: Alignment,
     randomness: Alignment,
     main: Alignment,
     aux: Alignment,
@@ -25,6 +26,7 @@ impl LayoutPolicy {
     fn native() -> Self {
         Self {
             public_values: Alignment::Unaligned,
+            vlpi: Alignment::Unaligned,
             randomness: Alignment::Unaligned,
             main: Alignment::Unaligned,
             aux: Alignment::Unaligned,
@@ -38,6 +40,7 @@ impl LayoutPolicy {
     fn masm() -> Self {
         Self {
             public_values: Alignment::QuadWord,
+            vlpi: Alignment::Word,
             randomness: Alignment::Word,
             main: Alignment::DoubleWord,
             aux: Alignment::DoubleWord,
@@ -82,12 +85,15 @@ impl InputLayout {
     }
 
     fn build_with_policy(counts: InputCounts, policy: LayoutPolicy) -> Self {
-        /// Minimum number of EF slots reserved for verifier "stark vars".
-        const STARK_BASE_VARS: usize = 14;
+        // Number of EF slots in the stark-vars block. Every ACE input slot is an
+        // extension-field element (QuadFelt). Some stark vars are base-field values
+        // embedded as (val, 0); see the slot table below for which is which.
+        const NUM_STARK_VARS: usize = 10;
 
         let mut builder = LayoutBuilder::new();
 
         let public_values = builder.alloc(counts.num_public, policy.public_values);
+        let vlpi_reductions = builder.alloc(counts.num_vlpi, policy.vlpi);
         /// Number of randomness inputs (alpha + beta).
         const NUM_RANDOMNESS_INPUTS: usize = 2;
         let randomness = builder.alloc(NUM_RANDOMNESS_INPUTS, policy.randomness);
@@ -101,24 +107,36 @@ impl InputLayout {
         let quotient_next = builder.alloc(counts.num_quotient_chunks * EXT_DEGREE, policy.quotient);
         let aux_bus_boundary = builder.alloc(counts.aux_width, policy.aux_bus_boundary);
 
-        let stark_base_width = counts.num_aux_inputs.max(STARK_BASE_VARS);
-        let stark_vars = builder.alloc(stark_base_width, policy.stark_vars);
+        let stark_vars = builder.alloc(NUM_STARK_VARS, policy.stark_vars);
 
-        // Matches utils::set_up_auxiliary_inputs_ace layout (EF slots):
-        // [z, alpha, g^-1, z^N, g^-2, z^k, weight0, g, s0, 0,
-        //  inv(z-g^-1), inv(z-1), inv(z^N-1), 0]
-        let z = stark_vars.offset;
-        let alpha = stark_vars.offset + 1;
-        let g_inv = stark_vars.offset + 2;
-        let z_pow_n = stark_vars.offset + 3;
-        let g_inv2 = stark_vars.offset + 4;
-        let z_k = stark_vars.offset + 5;
-        let weight0 = stark_vars.offset + 6;
-        let g = stark_vars.offset + 7;
-        let s0 = stark_vars.offset + 8;
-        let inv_z_minus_g_inv = stark_vars.offset + 10;
-        let inv_z_minus_one = stark_vars.offset + 11;
-        let inv_vanishing = stark_vars.offset + 12;
+        // Matches utils::set_up_auxiliary_inputs_ace layout (EF slots).
+        //
+        // Extension-field values are grouped first (slots 0-6), then base-field
+        // values stored as (val, 0) in EF slots (slots 7-9).
+        //
+        //  Slot  Value               Field
+        //  ----  ------------------  -----
+        //   0    alpha               EF      Composition challenge (Horner multiplier)
+        //   1    z^N                 EF      Trace-length power (quotient deltas + vanishing
+        //   2    z_k                 EF      Periodic column eval point
+        //   3    is_first            EF      Precomputed: (z^N - 1) / (z - 1)
+        //   4    is_last             EF      Precomputed: (z^N - 1) / (z - g^{-1})
+        //   5    is_transition       EF      Precomputed: z - g^{-1}
+        //   6    gamma               EF      Batching challenge
+        //   7    weight0             base    First barycentric weight
+        //   8    f                   base    Chunk shift ratio h^N
+        //   9    s0                  base    First coset shift offset^N
+        let b = stark_vars.offset;
+        let alpha = b;
+        let z_pow_n = b + 1;
+        let z_k = b + 2;
+        let is_first = b + 3;
+        let is_last = b + 4;
+        let is_transition = b + 5;
+        let gamma = b + 6;
+        let weight0 = b + 7;
+        let f = b + 8;
+        let s0 = b + 9;
 
         if let Some(end_align) = policy.end_align {
             builder.align(end_align);
@@ -127,6 +145,7 @@ impl InputLayout {
         Self {
             regions: LayoutRegions {
                 public_values,
+                vlpi_reductions,
                 randomness,
                 main_curr,
                 aux_curr,
@@ -140,18 +159,16 @@ impl InputLayout {
             aux_rand_alpha,
             aux_rand_beta,
             stark: StarkVarIndices {
-                z,
                 alpha,
-                g_inv,
                 z_pow_n,
-                g_inv2,
                 z_k,
+                is_first,
+                is_last,
+                is_transition,
+                gamma,
                 weight0,
-                g,
+                f,
                 s0,
-                inv_z_minus_g_inv,
-                inv_z_minus_one,
-                inv_vanishing,
             },
             total_inputs: builder.offset,
             counts,

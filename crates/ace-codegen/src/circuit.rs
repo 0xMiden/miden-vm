@@ -89,10 +89,7 @@ impl<EF: Field> AceCircuit<EF> {
 }
 
 /// Emit an ACE circuit from the DAG and input layout.
-pub(crate) fn emit_circuit<EF>(
-    dag: &AceDag<EF>,
-    layout: InputLayout,
-) -> Result<AceCircuit<EF>, AceError>
+pub fn emit_circuit<EF>(dag: &AceDag<EF>, layout: InputLayout) -> Result<AceCircuit<EF>, AceError>
 where
     EF: Field,
 {

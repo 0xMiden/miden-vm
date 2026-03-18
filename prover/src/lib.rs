@@ -8,8 +8,9 @@ extern crate std;
 use alloc::{string::ToString, vec::Vec};
 
 use ::serde::Serialize;
+use miden_air::config::InitTranscript;
 use miden_core::{
-    Felt,
+    Felt, WORD_SIZE,
     field::QuadFelt,
     utils::{Matrix, RowMajorMatrix},
 };
@@ -172,18 +173,14 @@ pub fn prove_stark<SC>(
 ) -> Result<Vec<u8>, ExecutionError>
 where
     SC: StarkConfig<Felt, QuadFelt>,
+    SC::Challenger: InitTranscript,
     <SC::Lmcs as Lmcs>::Commitment: Serialize,
 {
     let log_trace_height = trace.height().ilog2() as u8;
 
-    let mut challenger = config.challenger();
+    let mut challenger = SC::Challenger::seeded(log_trace_height as u64);
     challenger.observe_slice(public_values);
-    // TODO: observe log_trace_height in the transcript for Fiat-Shamir binding.
-    // TODO: observe var_len_public_inputs in the transcript for Fiat-Shamir binding.
-    //   This also requires updating the recursive verifier to absorb both fixed and
-    //   variable-length public inputs.
-    // TODO: observe ACE commitment once ACE verification is integrated.
-    // See https://github.com/0xMiden/miden-vm/issues/2822
+    config::observe_var_len_public_inputs(&mut challenger, var_len_public_inputs, &[WORD_SIZE]);
     let output: StarkOutput<Felt, QuadFelt, SC> = miden_crypto::stark::prover::prove_single(
         config,
         &ProcessorAir,

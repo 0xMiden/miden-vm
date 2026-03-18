@@ -1,4 +1,4 @@
-use crate::{InputCounts, InputKey, InputLayout};
+use crate::{InputKey, InputLayout, layout::InputCounts};
 
 #[test]
 fn masm_layout_aligns_and_maps_aux_inputs() {
@@ -6,9 +6,9 @@ fn masm_layout_aligns_and_maps_aux_inputs() {
         width: 3,
         aux_width: 2,
         num_public: 5,
+        num_vlpi: 0,
         num_randomness: 16,
         num_periodic: 1,
-        num_aux_inputs: 14,
         num_quotient_chunks: 2,
     };
     let layout = InputLayout::new_masm(counts);
@@ -35,24 +35,24 @@ fn masm_layout_aligns_and_maps_aux_inputs() {
     assert_eq!(quotient_next_base % 4, 0);
     let aux_bus_base = layout.index(InputKey::AuxBusBoundary(0)).unwrap();
     assert_eq!(aux_bus_base % 2, 0);
-    let stark_base = layout.index(InputKey::Z).unwrap();
+    let stark_base = layout.index(InputKey::Alpha).unwrap();
     assert_eq!(stark_base % 2, 0);
     assert_eq!(layout.index(InputKey::AuxRandBeta), Some(rand_base));
     assert_eq!(layout.index(InputKey::AuxRandAlpha), Some(rand_base + 1));
 
-    let base = layout.index(InputKey::Z).unwrap();
-    assert_eq!(layout.index(InputKey::Z), Some(base));
-    assert_eq!(layout.index(InputKey::Alpha), Some(base + 1));
-    assert_eq!(layout.index(InputKey::GInv), Some(base + 2));
-    assert_eq!(layout.index(InputKey::ZPowN), Some(base + 3));
-    assert_eq!(layout.index(InputKey::GInv2), Some(base + 4));
-    assert_eq!(layout.index(InputKey::ZK), Some(base + 5));
-    assert_eq!(layout.index(InputKey::Weight0), Some(base + 6));
-    assert_eq!(layout.index(InputKey::G), Some(base + 7));
-    assert_eq!(layout.index(InputKey::S0), Some(base + 8));
-    assert_eq!(layout.index(InputKey::InvZMinusGInv), Some(base + 10));
-    assert_eq!(layout.index(InputKey::InvZMinusOne), Some(base + 11));
-    assert_eq!(layout.index(InputKey::InvVanishing), Some(base + 12));
+    // EF values: slots 0-6
+    let base = layout.index(InputKey::Alpha).unwrap();
+    assert_eq!(layout.index(InputKey::Alpha), Some(base));
+    assert_eq!(layout.index(InputKey::ZPowN), Some(base + 1));
+    assert_eq!(layout.index(InputKey::ZK), Some(base + 2));
+    assert_eq!(layout.index(InputKey::IsFirst), Some(base + 3));
+    assert_eq!(layout.index(InputKey::IsLast), Some(base + 4));
+    assert_eq!(layout.index(InputKey::IsTransition), Some(base + 5));
+    assert_eq!(layout.index(InputKey::Gamma), Some(base + 6));
+    // Base-field values: slots 7-9
+    assert_eq!(layout.index(InputKey::Weight0), Some(base + 7));
+    assert_eq!(layout.index(InputKey::F), Some(base + 8));
+    assert_eq!(layout.index(InputKey::S0), Some(base + 9));
 
     let aux_base = layout.index(InputKey::AuxCoord { offset: 0, index: 0, coord: 0 }).unwrap();
     assert_eq!(

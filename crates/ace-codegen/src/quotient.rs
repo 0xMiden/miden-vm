@@ -30,12 +30,12 @@ where
     let k = layout.counts.num_quotient_chunks;
     let z_pow_n = inputs[layout.index(InputKey::ZPowN).expect("ZPowN in layout")];
     let s0 = inputs[layout.index(InputKey::S0).expect("S0 in layout")];
-    let g = inputs[layout.index(InputKey::G).expect("G in layout")];
+    let f = inputs[layout.index(InputKey::F).expect("F in layout")];
     let weight0 = inputs[layout.index(InputKey::Weight0).expect("Weight0 in layout")];
 
     let (deltas, weights) = {
         let mut ops = FieldOps;
-        compute_deltas_and_weights(k, z_pow_n, s0, g, weight0, &mut ops)
+        compute_deltas_and_weights(k, z_pow_n, s0, f, weight0, &mut ops)
     };
 
     let mut chunk_values = Vec::with_capacity(k);
@@ -84,12 +84,12 @@ where
 
     let z_pow_n = inputs[layout.index(InputKey::ZPowN).expect("ZPowN in layout")];
     let s0 = inputs[layout.index(InputKey::S0).expect("S0 in layout")];
-    let g = inputs[layout.index(InputKey::G).expect("G in layout")];
+    let f = inputs[layout.index(InputKey::F).expect("F in layout")];
     let weight0 = inputs[layout.index(InputKey::Weight0).expect("Weight0 in layout")];
 
     let (deltas, weights) = {
         let mut ops = FieldOps;
-        compute_deltas_and_weights(k, z_pow_n, s0, g, weight0, &mut ops)
+        compute_deltas_and_weights(k, z_pow_n, s0, f, weight0, &mut ops)
     };
 
     let mut prod = EF::ONE;
@@ -114,12 +114,12 @@ where
     let k = layout.counts.num_quotient_chunks;
     let z_pow_n = builder.input(InputKey::ZPowN);
     let s0 = builder.input(InputKey::S0);
-    let g = builder.input(InputKey::G);
+    let f = builder.input(InputKey::F);
     let weight0 = builder.input(InputKey::Weight0);
 
     let (deltas, weights) = {
         let mut ops = DagOps { builder };
-        compute_deltas_and_weights(k, z_pow_n, s0, g, weight0, &mut ops)
+        compute_deltas_and_weights(k, z_pow_n, s0, f, weight0, &mut ops)
     };
 
     let mut chunk_values = Vec::with_capacity(k);
@@ -195,7 +195,7 @@ fn compute_deltas_and_weights<T>(
     k: usize,
     z_pow_n: T,
     s0: T,
-    g: T,
+    f: T,
     weight0: T,
     ops: &mut impl Ops<T>,
 ) -> (Vec<T>, Vec<T>)
@@ -209,8 +209,8 @@ where
     for _ in 0..k {
         deltas.push(ops.sub(z_pow_n, shift));
         weights.push(weight);
-        shift = ops.mul(shift, g);
-        weight = ops.mul(weight, g);
+        shift = ops.mul(shift, f);
+        weight = ops.mul(weight, f);
     }
     (deltas, weights)
 }

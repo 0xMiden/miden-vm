@@ -6,15 +6,13 @@
 //! - emit a circuit that mirrors verifier evaluation.
 
 use miden_crypto::{
-    field::{Algebra, ExtensionField, Field, TwoAdicField},
-    stark::air::{
-        LiftedAir,
-        symbolic::{AirLayout, SymbolicAirBuilder, SymbolicExpressionExt},
-    },
+    field::{ExtensionField, Field, TwoAdicField},
+    stark::air::LiftedAir,
 };
 
 use crate::{
     AceError,
+    builder::RecordingAirBuilder,
     circuit::{AceCircuit, emit_circuit},
     dag::{AceDag, PeriodicColumnData, build_verifier_dag},
     layout::{InputCounts, InputLayout},
@@ -38,15 +36,18 @@ pub enum LayoutKind {
 pub struct AceConfig {
     /// Number of quotient chunks used by the AIR.
     pub num_quotient_chunks: usize,
-    /// Number of auxiliary inputs reserved in the stark-vars block.
-    pub num_aux_inputs: usize,
+    /// Number of variable-length public input groups.
+    /// Each group produces one reduced extension field element.
+    /// The layout policy handles alignment (e.g., MASM word-aligns each group to
+    /// 2 EF slots; Native uses 1 EF slot per group).
+    pub num_vlpi_groups: usize,
     /// Layout policy (Native vs Masm).
     pub layout: LayoutKind,
 }
 
 /// Output of the ACE codegen pipeline (layout + DAG).
 #[derive(Debug)]
-pub(crate) struct AceArtifacts<EF> {
+pub struct AceArtifacts<EF> {
     /// Input layout describing the READ section order.
     pub layout: InputLayout,
     /// DAG that mirrors the verifier evaluation.
@@ -55,8 +56,9 @@ pub(crate) struct AceArtifacts<EF> {
 
 /// Build a verifier-equivalent ACE circuit for the provided AIR.
 ///
-/// This is the highest-level entry point: it builds the DAG, validates layout
-/// invariants, and emits the off-VM circuit representation.
+/// This builds the constraint-evaluation DAG, validates layout invariants, and
+/// emits the off-VM circuit representation. The circuit performs the constraint
+/// evaluation check at the out-of-domain point z.
 pub fn build_ace_circuit_for_air<A, F, EF>(
     air: &A,
     config: AceConfig,
@@ -65,37 +67,13 @@ where
     A: LiftedAir<F, EF>,
     F: TwoAdicField,
     EF: ExtensionField<F>,
-    SymbolicExpressionExt<F, EF>: Algebra<EF>,
 {
     let artifacts = build_ace_dag_for_air::<A, F, EF>(air, config)?;
     emit_circuit(&artifacts.dag, artifacts.layout)
 }
 
-/// Build the input layout for the provided AIR.
-///
-/// The returned `InputLayout` is validated and ready for input assembly.
-pub fn build_layout_for_air<A, F, EF>(air: &A, config: AceConfig) -> InputLayout
-where
-    A: LiftedAir<F, EF>,
-    F: Field,
-    EF: ExtensionField<F>,
-    SymbolicExpressionExt<F, EF>: Algebra<EF>,
-{
-    let num_periodic = air.periodic_columns().len();
-    let counts = input_counts_for_air::<A, F, EF>(air, config, num_periodic);
-    let layout = match config.layout {
-        LayoutKind::Native => InputLayout::new(counts),
-        LayoutKind::Masm => InputLayout::new_masm(counts),
-    };
-    layout.validate();
-    layout
-}
-
 /// Build a verifier-equivalent DAG and layout for the provided AIR.
-///
-/// This is useful when you need the DAG for off-VM checks and want to
-/// assemble inputs separately.
-pub(crate) fn build_ace_dag_for_air<A, F, EF>(
+pub fn build_ace_dag_for_air<A, F, EF>(
     air: &A,
     config: AceConfig,
 ) -> Result<AceArtifacts<EF>, AceError>
@@ -103,7 +81,6 @@ where
     A: LiftedAir<F, EF>,
     F: TwoAdicField,
     EF: ExtensionField<F>,
-    SymbolicExpressionExt<F, EF>: Algebra<EF>,
 {
     let periodic_columns = air.periodic_columns();
     let counts = input_counts_for_air::<A, F, EF>(air, config, periodic_columns.len());
@@ -112,31 +89,19 @@ where
         LayoutKind::Masm => InputLayout::new_masm(counts),
     };
     layout.validate();
-
-    let air_layout = AirLayout {
-        preprocessed_width: 0,
-        main_width: counts.width,
-        num_public_values: counts.num_public,
-        permutation_width: counts.aux_width,
-        num_permutation_challenges: counts.num_randomness,
-        num_permutation_values: air.num_aux_values(),
-        num_periodic_columns: counts.num_periodic,
-    };
-    let mut builder = SymbolicAirBuilder::<F, EF>::new(air_layout);
+    let mut builder = RecordingAirBuilder::<F, EF>::new(
+        0,
+        counts.width,
+        counts.aux_width,
+        counts.num_randomness,
+        counts.num_public,
+        counts.num_periodic,
+        air.num_aux_values(),
+    );
     air.eval(&mut builder);
-    let constraint_layout = builder.constraint_layout();
-    let base_constraints = builder.base_constraints();
-    let ext_constraints = builder.extension_constraints();
-
     let periodic_data = (!periodic_columns.is_empty())
         .then(|| PeriodicColumnData::from_periodic_columns::<F>(periodic_columns.to_vec()));
-    let dag = build_verifier_dag::<F, EF>(
-        &base_constraints,
-        &ext_constraints,
-        &constraint_layout,
-        &layout,
-        periodic_data.as_ref(),
-    );
+    let dag = build_verifier_dag::<F, EF>(builder.constraints(), &layout, periodic_data.as_ref());
 
     Ok(AceArtifacts { layout, dag })
 }
@@ -156,13 +121,21 @@ where
     let num_randomness = air.num_randomness();
     assert!(num_randomness > 0, "AIR must declare at least one randomness challenge");
 
+    // Convert logical VLPI groups to EF slots based on layout policy.
+    // MASM word-aligns each group (4 base felts = 2 EF slots per group).
+    // Native uses 1 EF slot per group (no padding).
+    let num_vlpi = match config.layout {
+        LayoutKind::Masm => config.num_vlpi_groups * 2,
+        LayoutKind::Native => config.num_vlpi_groups,
+    };
+
     InputCounts {
         width: air.width(),
         aux_width: air.aux_width(),
         num_public: air.num_public_values(),
+        num_vlpi,
         num_randomness,
         num_periodic,
-        num_aux_inputs: config.num_aux_inputs,
         num_quotient_chunks: config.num_quotient_chunks,
     }
 }

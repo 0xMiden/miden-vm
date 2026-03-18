@@ -6,7 +6,7 @@
 
 use miden_air::ProcessorAir;
 use miden_core::{Felt, field::QuadFelt};
-use miden_crypto::field::Field;
+use miden_crypto::field::{Field, PrimeCharacteristicRing};
 
 use super::common::{eval_quotient, fill_inputs, zps_for_chunk};
 use crate::{
@@ -16,21 +16,23 @@ use crate::{
 
 #[test]
 fn synthetic_ood_adjusts_quotient_to_zero() {
+    let air = ProcessorAir;
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_aux_inputs: 14,
+        num_vlpi_groups: 0,
         layout: LayoutKind::Masm,
     };
 
-    let artifacts =
-        build_ace_dag_for_air::<_, Felt, QuadFelt>(&ProcessorAir, config).expect("ace dag");
+    let artifacts = build_ace_dag_for_air::<_, Felt, QuadFelt>(&air, config).expect("ace dag");
     let circuit = emit_circuit(&artifacts.dag, artifacts.layout.clone()).expect("ace circuit");
 
     let mut inputs = fill_inputs(&artifacts.layout);
     let root = circuit.eval(&inputs).expect("circuit eval");
 
+    let z_pow_n = inputs[artifacts.layout.index(InputKey::ZPowN).unwrap()];
+    let vanishing = z_pow_n - QuadFelt::ONE;
     let zps_0 = zps_for_chunk(&artifacts.layout, &inputs, 0);
-    let delta = root * zps_0.inverse();
+    let delta = root * (zps_0 * vanishing).inverse();
 
     let idx = artifacts
         .layout
@@ -48,21 +50,23 @@ fn synthetic_ood_adjusts_quotient_to_zero() {
 
 #[test]
 fn quotient_next_inputs_do_not_affect_eval() {
+    let air = ProcessorAir;
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_aux_inputs: 14,
+        num_vlpi_groups: 0,
         layout: LayoutKind::Masm,
     };
 
-    let artifacts =
-        build_ace_dag_for_air::<_, Felt, QuadFelt>(&ProcessorAir, config).expect("ace dag");
+    let artifacts = build_ace_dag_for_air::<_, Felt, QuadFelt>(&air, config).expect("ace dag");
     let circuit = emit_circuit(&artifacts.dag, artifacts.layout.clone()).expect("ace circuit");
 
     let mut inputs = fill_inputs(&artifacts.layout);
 
     let root = circuit.eval(&inputs).expect("circuit eval");
+    let z_pow_n = inputs[artifacts.layout.index(InputKey::ZPowN).unwrap()];
+    let vanishing = z_pow_n - QuadFelt::ONE;
     let zps_0 = zps_for_chunk(&artifacts.layout, &inputs, 0);
-    let delta = root * zps_0.inverse();
+    let delta = root * (zps_0 * vanishing).inverse();
     let idx = artifacts
         .layout
         .index(InputKey::QuotientChunkCoord { offset: 0, chunk: 0, coord: 0 })

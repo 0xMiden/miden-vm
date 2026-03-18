@@ -1,16 +1,13 @@
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::{
     field::PrimeCharacteristicRing,
-    stark::air::{
-        AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess,
-        symbolic::{AirLayout, SymbolicAirBuilder},
-    },
+    stark::air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess},
 };
 
-use super::common::{eval_dag, eval_folded_constraints, eval_periodic_values, eval_quotient};
+use super::common::{eval_dag, eval_expr, eval_periodic_values, eval_quotient};
 use crate::{
-    AceConfig, InputKey, InputLayout, LayoutKind, circuit::emit_circuit,
-    pipeline::build_ace_dag_for_air,
+    AceConfig, InputKey, InputLayout, LayoutKind, builder::RecordingAirBuilder,
+    circuit::emit_circuit, pipeline::build_ace_dag_for_air,
 };
 
 // Base and extension field types for tests.
@@ -34,6 +31,10 @@ impl LiftedAir<F, EF> for MockAir {
         vec![vec![Felt::ONE]]
     }
 
+    fn num_var_len_public_inputs(&self) -> usize {
+        0
+    }
+
     fn num_randomness(&self) -> usize {
         1
     }
@@ -44,10 +45,6 @@ impl LiftedAir<F, EF> for MockAir {
 
     fn num_aux_values(&self) -> usize {
         1
-    }
-
-    fn num_var_len_public_inputs(&self) -> usize {
-        0
     }
 
     fn eval<AB: LiftedAirBuilder<F = F>>(&self, builder: &mut AB) {
@@ -89,18 +86,16 @@ fn build_inputs(layout: &InputLayout) -> Vec<EF> {
     set(InputKey::AuxCoord { offset: 0, index: 0, coord: 1 }, ef(101));
     set(InputKey::AuxCoord { offset: 1, index: 0, coord: 0 }, ef(12));
     set(InputKey::AuxCoord { offset: 1, index: 0, coord: 1 }, ef(102));
-    set(InputKey::Z, ef(2));
     set(InputKey::Alpha, ef(17));
-    set(InputKey::GInv, ef(3));
     set(InputKey::ZPowN, ef(19));
-    set(InputKey::GInv2, ef(5));
     set(InputKey::ZK, ef(23));
+    set(InputKey::IsFirst, ef(47));
+    set(InputKey::IsLast, ef(43));
+    set(InputKey::IsTransition, ef(2) - ef(3));
+    set(InputKey::Gamma, ef(53));
     set(InputKey::Weight0, ef(31));
-    set(InputKey::G, ef(37));
+    set(InputKey::F, ef(37));
     set(InputKey::S0, ef(41));
-    set(InputKey::InvZMinusGInv, ef(43));
-    set(InputKey::InvZMinusOne, ef(47));
-    set(InputKey::InvVanishing, ef(2));
 
     set(InputKey::QuotientChunkCoord { offset: 0, chunk: 0, coord: 0 }, ef(2));
     set(InputKey::QuotientChunkCoord { offset: 0, chunk: 0, coord: 1 }, ef(3));
@@ -115,7 +110,7 @@ fn test_verifier_dag_matches_manual_eval() {
     let air = MockAir;
     let config = AceConfig {
         num_quotient_chunks: 2,
-        num_aux_inputs: 14,
+        num_vlpi_groups: 0,
         layout: LayoutKind::Native,
     };
     let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
@@ -124,37 +119,29 @@ fn test_verifier_dag_matches_manual_eval() {
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
     let periodic_values = eval_periodic_values(&air.periodic_columns(), z_k);
 
-    let air_layout = AirLayout {
-        preprocessed_width: 0,
-        main_width: layout.counts.width,
-        num_public_values: layout.counts.num_public,
-        permutation_width: layout.counts.aux_width,
-        num_permutation_challenges: layout.counts.num_randomness,
-        num_permutation_values: air.num_aux_values(),
-        num_periodic_columns: layout.counts.num_periodic,
-    };
-    let mut builder = SymbolicAirBuilder::<F, EF>::new(air_layout);
+    let mut builder = RecordingAirBuilder::<F, EF>::new(
+        0,
+        layout.counts.width,
+        layout.counts.aux_width,
+        layout.counts.num_randomness,
+        layout.counts.num_public,
+        layout.counts.num_periodic,
+        air.num_aux_values(),
+    );
     air.eval(&mut builder);
-    let constraint_layout = builder.constraint_layout();
-    let base_constraints = builder.base_constraints();
-    let ext_constraints = builder.extension_constraints();
     let dag = artifacts.dag;
 
     let alpha = inputs[layout.index(InputKey::Alpha).unwrap()];
-    let inv_vanishing = inputs[layout.index(InputKey::InvVanishing).unwrap()];
+    let z_pow_n = inputs[layout.index(InputKey::ZPowN).unwrap()];
 
-    let acc = eval_folded_constraints::<F, EF>(
-        &base_constraints,
-        &ext_constraints,
-        &constraint_layout,
-        alpha,
-        &inputs,
-        &layout,
-        &periodic_values,
-    );
-    let folded = acc * inv_vanishing;
+    let mut acc = EF::ZERO;
+    for c in builder.constraints() {
+        let val = eval_expr::<F, EF>(c, &inputs, &layout, &periodic_values);
+        acc = acc * alpha + val;
+    }
+    let vanishing = z_pow_n - EF::ONE;
     let quotient = eval_quotient(&layout, &inputs);
-    let expected = folded - quotient;
+    let expected = acc - quotient * vanishing;
 
     let actual = eval_dag(&dag.nodes, dag.root, &inputs, &layout);
     assert_eq!(actual, expected);
@@ -165,7 +152,7 @@ fn test_emitted_circuit_matches_dag_eval() {
     let air = MockAir;
     let config = AceConfig {
         num_quotient_chunks: 2,
-        num_aux_inputs: 14,
+        num_vlpi_groups: 0,
         layout: LayoutKind::Native,
     };
     let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
@@ -183,7 +170,7 @@ fn test_encoded_circuit_structure() {
     let air = MockAir;
     let config = AceConfig {
         num_quotient_chunks: 2,
-        num_aux_inputs: 14,
+        num_vlpi_groups: 0,
         layout: LayoutKind::Native,
     };
     let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();

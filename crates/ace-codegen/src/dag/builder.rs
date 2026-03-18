@@ -24,6 +24,15 @@ where
         Self { nodes: Vec::new(), cache: HashMap::new() }
     }
 
+    /// Resume building from existing nodes (e.g. from an [`AceDag`](super::AceDag)).
+    ///
+    /// Rebuilds the deduplication cache so that subsequent operations reuse
+    /// existing subexpressions.
+    pub fn from_nodes(nodes: Vec<NodeKind<EF>>) -> Self {
+        let cache = nodes.iter().enumerate().map(|(i, n)| (n.clone(), NodeId(i))).collect();
+        Self { nodes, cache }
+    }
+
     /// Consume the builder and return its node list.
     pub fn into_nodes(self) -> Vec<NodeKind<EF>> {
         self.nodes

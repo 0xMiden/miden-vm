@@ -1,22 +1,26 @@
 use miden::core::stark::constants
+use miden::core::stark::utils
 
 #! Takes a query index and computes x := offset * domain_gen^index. It also computes the denominators
 #! (x - z) and (x - gz).
 #!
-#! Input: [Y, Y, index, ...]
-#! Output: [Z, Y, x, index, ...]
+#! Input: [Y, Y, index, query_ptr, ...]
+#! Output: [Z, Y, x, index, query_ptr, ...]
 #!
 #! where:
-#! - Z := [-gz1, x -gz0, -z1, x - z0]
+#! - Z := [x - z0, -z1, x - gz0, -gz1]
+#! - x := offset * domain_gen^natural_index
 #! - Y is a "garbage" word
-#!
-#! Cycles: 58
 proc compute_denominators
-    # Compute x = offset * domain_gen^index
+    # Compute x = offset * domain_gen^natural_index
+    # The natural (un-reversed) index is stored at query_ptr + 2 in memory,
+    # placed there by generate_list_indices to avoid a costly bit_reverse_len call here.
     exec.constants::get_lde_domain_info_word
-    #=> [lde_size, depth, domain_gen, 0, Y, index, ...]
+    #=> [lde_size, depth, domain_gen, 0, Y, index, query_ptr, ...]
     movup.2
-    dup.8
+    #=> [domain_gen, lde_size, depth, 0, Y, index, query_ptr, ...]
+    dup.9 add.2 mem_load
+    #=> [natural_index, domain_gen, lde_size, depth, 0, Y, index, query_ptr, ...]
     exp.u32
     exec.constants::get_domain_offset mul
     #=> [x, lde_size, depth, 0, Y, index, ...]
@@ -25,62 +29,71 @@ proc compute_denominators
     movdn.3
     #=> [lde_size, depth, 0, x, Y, index, ...]
     push.0
-    exec.constants::tmp1 mem_loadw_be
-    #=> [-z0, -gz0, -gz1, -z1, x, Y, index, ...]
+    exec.constants::tmp1 mem_loadw_le
+    #=> [-z0, -z1, -gz0, -gz1, x, Y, index, ...]
 
+    # Compute denominators and place x after Y for word alignment.
+    # The movup.4 dup movdn.9 moves x past the Y word while keeping a copy on top.
     dup.4 add
-    #=> [x-z0, -gz0, -gz1, -z1, x, Y, index, ...]
-    movdn.3
-    #=> [-gz0, -gz1, -z1, x-z0, x, Y, index, ...]
-
+    #=> [x - z0, -z1, -gz0, -gz1, x, Y, index, ...]
     movup.4 dup movdn.9
-    #=> [x, -gz0, -gz1, -z1, x-z0, Y, x, index, ...]
-
-    add swap
-    #=> [-gz1, x - gz0, -z1, x-z0, Y, x, index, ...]
+    #=> [x, x - z0, -z1, -gz0, -gz1, Y, x, index, ...]
+    movup.3 add
+    #=> [x - gz0, x - z0, -z1, -gz1, Y, x, index, ...]
+    movdn.2
+    #=> [x - z0, -z1, x - gz0, -gz1, Y, x, index, ...]
 end
 
 #! Computes the DEEP query.
 #!
 #! Input: [Z, X, Y, W, query_ptr, ...]
-#! Ouput: [eval1, eval0, Y, query_ptr, ...]
+#! Ouput: [eval0, eval1, Y, query_ptr, ...]
 #!
 #! where:
 #!
-#! 1. X is [q_x_at_alpha_1, q_x_at_alpha_0, q_x_at_alpha_1, q_x_at_alpha_0]
-#! 2. W is [q_gz_1, q_gz_0, q_z_1, q_z_0]
+#! 1. X is [q_x_at_alpha_0, q_x_at_alpha_1, q_x_at_alpha_0, q_x_at_alpha_1]
+#! 2. W is [q_z_0, q_z_1, q_gz_0, q_gz_1]
 #!
-#! Cycles: 62
+#! Cycles: 54
 proc divide_and_add
     swapw
     #=> [X, Z, Y, W, query_ptr, ...]
     dupw.3
     #=> [W, X, Z, Y, query_ptr, ...]
-    #=> [q_gz_1, q_gz_0, q_z_1, q_z_0, q_x_at_alpha_1, q_x_at_alpha_0, q_x_at_alpha_1, q_x_at_alpha_0, Z, Y, query_ptr, ...]
+    #=> [q_z_0, q_z_1, q_gz_0, q_gz_1, q_x_at_alpha_0, q_x_at_alpha_1, q_x_at_alpha_0, q_x_at_alpha_1, Z, Y, query_ptr, ...]
 
-    movup.5 movup.5
-    movup.5 movup.5
-    #=> [q_z_1, q_z_0, q_x_at_alpha_1, q_x_at_alpha_0, p_gz_1, p_gz_0, q_x_at_alpha_1, q_x_at_alpha_0, Z, Y, query_ptr, ...]
-
-    ext2add
-    #=> [num0_1, num0_0, p_gz_1, p_gz_0, q_x_at_alpha_1, q_x_at_alpha_0, Z, Y, query_ptr, ...]
-
-    movdn.9 movdn.9
-    #=> [p_gz_1, p_gz_0, q_x_at_alpha_1, q_x_at_alpha_0, Z, num0_1, num0_0, Y, query_ptr, ...]
+    movdn.5 movdn.5
+    #=> [q_gz_0, q_gz_1, q_x_at_alpha_0, q_x_at_alpha_1, q_z_0, q_z_1, q_x_at_alpha_0, q_x_at_alpha_1, Z, Y, query_ptr, ...]
 
     ext2add
-    #=> [num1_1, num1_0, Z, num0_1, num0_0, Y, query_ptr, ...]
+    #=> [num_gz_0, num_gz_1, q_z_0, q_z_1, q_x_at_alpha_0, q_x_at_alpha_1, Z, Y, query_ptr, ...]
+
+    swap movdn.9 movdn.8
+    #=> [q_z_0, q_z_1, q_x_at_alpha_0, q_x_at_alpha_1, Z, num_gz_0, num_gz_1, Y, query_ptr, ...]
+
+    ext2add
+    #=> [num_z_0, num_z_1, Z, num_gz_0, num_gz_1, Y, query_ptr, ...]
 
     movup.3 movup.3
     ext2div
-    #=> [res1_1, res1_0, z0_1, z0_0, num0_1, num0_0, Y, query_ptr, ...]
+    #=> [res_z_0, res_z_1, gz0_0, gz0_1, num_gz_0, num_gz_1, Y, query_ptr, ...]
     movdn.5 movdn.5
-    #=> [z0_1, z0_0, num0_1, num0_0, res1_1, res1_0, Y, query_ptr, ...]
+    #=> [gz0_0, gz0_1, num_gz_0, num_gz_1, res_z_0, res_z_1, Y, query_ptr, ...]
     ext2div
-    #=> [res0_1, res0_0, res1_1, res1_0, Y, query_ptr, ...]
+    #=> [res_gz_0, res_gz_1, res_z_0, res_z_1, Y, query_ptr, ...]
+
+    # Multiply res_gz by challenge_points (beta) for point batching.
+    # DEEP formula: Q(X) = res_z + beta * res_gz
+    # beta is stored at deep_rand_coef_ptr (positions 0,1).
+    exec.constants::deep_rand_coef_ptr mem_load
+    exec.constants::deep_rand_coef_ptr add.1 mem_load
+    swap
+    #=> [beta0, beta1, res_gz_0, res_gz_1, res_z_0, res_z_1, Y, query_ptr, ...]
+    ext2mul
+    #=> [beta_res_gz_0, beta_res_gz_1, res_z_0, res_z_1, Y, query_ptr, ...]
 
     ext2add
-    # => [eval1, eval0, Y, query_ptr, ...]
+    # => [eval0, eval1, Y, query_ptr, ...]
 end
 
 #! Prepares the stack for the computation of the DEEP composition polynomial FRI queries.
@@ -103,9 +116,9 @@ pub proc prepare_stack_deep_queries_computation
     exec.constants::get_fri_queries_address
     # => [query_ptr, ...]
 
-    padw exec.constants::ood_fixed_term_horner_evaluations_ptr mem_loadw_be
-    # => [q_gz_1, q_gz_0, q_z_1, q_z_0, query_ptr, ...]
-    # => [W, query_ptr, ...] where W is [q_gz_1, q_gz_0, q_z_1, q_z_0]
+    padw exec.constants::ood_fixed_term_horner_evaluations_ptr mem_loadw_le
+    # => [q_z_0, q_z_1, q_gz_0, q_gz_1, query_ptr, ...]
+    # => [W, query_ptr, ...] where W is [q_z_0, q_z_1, q_gz_0, q_gz_1]
 
     # Get pointer to help test for the last query to be processed
     exec.constants::fri_com_ptr
@@ -118,25 +131,26 @@ pub proc prepare_stack_deep_queries_computation
     push.0.0
     exec.constants::deep_rand_alpha_nd_ptr
     exec.constants::current_trace_row_ptr
-    exec.constants::tmp2 mem_storew_be
+    exec.constants::tmp2 mem_storew_le
 
     # Compute the negations of z and gz where z is the OOD point
     # We do it here as this computation is common to all queries.
-    exec.constants::z_ptr mem_loadw_be
-    # => [zN_1, zN_0, z1, z0, query_ptr, query_end_ptr, W, query_ptr, ...]
+    exec.constants::z_ptr mem_loadw_le
+    # => [zN_0, zN_1, z0, z1, query_ptr, query_end_ptr, W, query_ptr, ...]
     drop drop
     neg swap neg
+    swap
     # => [-z0, -z1, query_ptr, query_end_ptr, W, query_ptr, ...]
-    dup.1 exec.constants::get_trace_domain_generator mul
-    # => [-gz1, -z0, -z1, query_ptr, query_end_ptr, W, query_ptr, ...]
-    swap
-    # => [-z0, -gz1, -z1, query_ptr, query_end_ptr, W, query_ptr, ...]
-    dup exec.constants::get_trace_domain_generator mul
-    # => [-gz0, -z0, -gz1, -z1, query_ptr, query_end_ptr, W, query_ptr, ...]
-    swap
-    # => [-z0, -gz0, -gz1, -z1, query_ptr, query_end_ptr, W, query_ptr, ...]
+    dup
+    exec.constants::get_trace_domain_generator mul
+    # => [-gz0, -z0, -z1, query_ptr, query_end_ptr, W, query_ptr, ...]
+    dup.2
+    exec.constants::get_trace_domain_generator mul
+    # => [-gz1, -gz0, -z0, -z1, query_ptr, query_end_ptr, W, query_ptr, ...]
+    movdn.3 movdn.2
+    # => [-z0, -z1, -gz0, -gz1, query_ptr, query_end_ptr, W, query_ptr, ...]
     # Save to temporary location `tmp1` for later use when computing the denominators
-    exec.constants::tmp1 mem_storew_be
+    exec.constants::tmp1 mem_storew_le
     # => [Y, query_ptr, query_end_ptr, W, query_ptr, ...]
 end
 
@@ -162,15 +176,15 @@ pub proc compute_deep_query
         #
         # Cycles: 58
         exec.compute_denominators
-        #=> [Z, X, x, index, query_ptr, query_end_ptr, W, query_ptr, ...] where Z := [-gz1, x - gz0, -z1, x - z0]
+        #=> [Z, X, x, index, query_ptr, query_end_ptr, W, query_ptr, ...]
 
         # 2) Compute final result
         #
         # Cycles: 62
         exec.divide_and_add
-        #=> [eval1, eval0, x, index, query_ptr, query_end_ptr, W, query_ptr, ...]
+        #=> [eval0, eval1, x, index, query_ptr, query_end_ptr, W, query_ptr, ...]
 
-        # 3) Store [poe, index, eval_1, eval_0] where poe := g^index = x / offset and prepare stack
+        # 3) Store [poe, index, eval0, eval1] where poe := g^index = x / offset and prepare stack
         # for next iteration.
 
         ## a) Compute poe
@@ -178,14 +192,14 @@ pub proc compute_deep_query
         ## Cycles: 4
         movup.3 movup.3
         exec.constants::get_domain_offset_inv mul
-        #=> [poe, index, eval1, eval0, query_ptr, query_end_ptr, W, query_ptr, ...]
+        #=> [poe, index, eval0, eval1, query_ptr, query_end_ptr, W, query_ptr, ...]
 
-        ## b) Store [eval0, eval1, index, poe]
+        ## b) Store [poe, index, eval0, eval1]
         ##
         ## Cycles: 5
         dup.4 add.4 swap.5
-        mem_storew_be
-        #=> [poe, index, eval1, eval0, query_ptr+1, query_end_ptr, W, query_ptr, ...]
+        mem_storew_le
+        #=> [poe, index, eval0, eval1, query_ptr+4, query_end_ptr, W, query_ptr, ...]
 
         ## c) Prepare stack for next iteration
         ##
