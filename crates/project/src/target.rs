@@ -64,4 +64,9 @@ impl Target {
     pub const fn is_library(&self) -> bool {
         !self.is_executable()
     }
+
+    /// Returns true if this target is a kernel target
+    pub const fn is_kernel(&self) -> bool {
+        matches!(self.ty, TargetType::Kernel)
+    }
 }

@@ -144,13 +144,25 @@ where
         sources: Option<ProjectSourceInputs>,
     ) -> Result<Arc<MastPackage>, Report> {
         let target = self.select_target(target_selector)?;
+
+        // When building an executable target from a project with a library target, we require
+        // that the executable target be linked statically against the library target
         let mut cache = BTreeMap::new();
         let root_id = self.dependency_graph.root().clone();
+        let lib = if target.is_executable() && self.project.library_target().is_some() {
+            let lib = self.assemble(ProjectTargetSelector::Library, profile_name)?;
+            cache.insert(self.project.name().into_inner(), lib.clone());
+            Some(lib)
+        } else {
+            None
+        };
+
         self.assemble_source_package(
             root_id,
             Arc::clone(&self.project),
             target,
             profile_name,
+            lib,
             sources,
             &mut cache,
         )
@@ -162,6 +174,7 @@ where
         project: Arc<ProjectPackage>,
         target: &Target,
         profile_name: &str,
+        required_lib: Option<Arc<MastPackage>>,
         sources: Option<ProjectSourceInputs>,
         cache: &mut BTreeMap<PackageId, Arc<MastPackage>>,
     ) -> Result<Arc<MastPackage>, Report> {
@@ -177,6 +190,10 @@ where
             .clone()
             .with_emit_debug_info(profile.should_emit_debug_info())
             .with_trim_paths(profile.should_trim_paths());
+        if let Some(required_lib) = required_lib {
+            assembler.link_package(required_lib, Linkage::Static)?;
+        }
+
         let mut runtime_dependencies = BTreeMap::<PackageId, PackageDependency>::new();
 
         let node = self.dependency_graph.get(&package_id).ok_or_else(|| {
@@ -318,6 +335,7 @@ where
                     project,
                     &target,
                     profile_name,
+                    None,
                     None,
                     cache,
                 )?
