@@ -10,6 +10,7 @@
 - Hardened boundary and overflow checks for `u64::shr`, `ilog2`, `u32clz`, and Falcon `mod_12289` ([#2808](https://github.com/0xMiden/miden-vm/pull/2808)).
 - Hardened basic-block batch validation and decode-time padding checks to reject inconsistent padded groups and prevent raw-helper underflow/panic paths on malformed forests ([#2839](https://github.com/0xMiden/miden-vm/pull/2839)).
 - Enforced canonical kernel procedure-hash validation on binary and serde deserialization paths, and expanded serde deserialization fuzz coverage for related artifact types ([#2849](https://github.com/0xMiden/miden-vm/pull/2849)).
+- Fixed linker constant evaluation to resolve cross-module constant chains in the defining module, including imported public constants with private local dependencies ([#2873](https://github.com/0xMiden/miden-vm/pull/2873)).
 
 ## 0.22.0 (TBD)
 
