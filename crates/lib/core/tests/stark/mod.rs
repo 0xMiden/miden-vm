@@ -15,6 +15,7 @@ use rand_chacha::ChaCha20Rng;
 use rstest::rstest;
 use verifier_recursive::{VerifierData, VerifierError, generate_advice_inputs};
 
+mod ace_read_check;
 mod batch_query_gen;
 mod verifier_recursive;
 
@@ -135,7 +136,10 @@ fn run_recursive_verifier(data: &VerifierData) {
         data.store.clone(),
         data.advice_map.clone()
     );
-    test.expect_stack(&[]);
+    let (output, _host) = test.execute_for_output().expect("recursive verifier execution failed");
+
+    // Cross-check: extract READ section, sanity-check values, evaluate circuit in Rust.
+    ace_read_check::cross_check_ace_circuit(&output);
 }
 
 // EXAMPLE PROGRAMS
