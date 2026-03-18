@@ -59,11 +59,12 @@ impl<'a, 'b: 'a> Resolver<'a, 'b> {
             SymbolItem::Compiled(ItemInfo::Constant(_)) => return Ok(()),
             SymbolItem::Constant(item) => {
                 let expr = item.value.clone();
+                let eval_span = item.value.span();
                 if let Some(start) = self.cache.evaluating_constants.get(&gid).copied() {
                     return Err(ConstEvalError::eval_cycle(start, span, self).into());
                 }
 
-                self.cache.evaluating_constants.insert(gid, span);
+                self.cache.evaluating_constants.insert(gid, eval_span);
                 let value = self.resolver.linker().const_eval(gid, &expr, self.cache);
                 self.cache.evaluating_constants.remove(&gid);
 

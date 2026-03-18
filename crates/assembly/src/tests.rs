@@ -5221,6 +5221,88 @@ fn test_cross_module_constant_reexport_chain_in_procedure_scope() -> TestResult 
 
     Ok(())
 }
+
+#[test]
+fn test_cross_module_constant_cycle_in_procedure_scope_is_structured_error() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let context = TestContext::new();
+
+    let a = parse_module!(
+        &context,
+        "cycle::a",
+        r#"
+            use cycle::b
+
+            pub proc use_cycle
+                push.A
+                drop
+            end
+
+            pub const A = b::B + 1
+        "#
+    );
+
+    let b = parse_module!(
+        &context,
+        "cycle::b",
+        r#"
+            use cycle::a
+            pub const B = a::A + 1
+        "#
+    );
+
+    let assembled = catch_unwind(AssertUnwindSafe(|| {
+        Assembler::new(context.source_manager()).assemble_library([a, b])
+    }));
+
+    assert!(assembled.is_ok(), "assembler panicked during assembly");
+    let err = assembled.unwrap().expect_err("expected cyclic constants to be rejected");
+    assert_diagnostic!(&err, "constant evaluation terminated due to infinite recursion");
+    assert_diagnostic!(&err, "pub const A = b::B + 1");
+}
+
+#[test]
+fn imported_error_message_cycle_is_rejected_without_panicking() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let context = TestContext::new();
+
+    let a = parse_module!(
+        &context,
+        "cycle::errs::a",
+        r#"
+            use cycle::errs::b
+
+            pub proc use_cycle
+                assert.err=ERR_A
+            end
+
+            pub const ERR_A = b::ERR_B
+        "#
+    );
+
+    let b = parse_module!(
+        &context,
+        "cycle::errs::b",
+        r#"
+            use cycle::errs::a
+            pub const ERR_B = a::ERR_A
+        "#
+    );
+
+    let assembled = catch_unwind(AssertUnwindSafe(|| {
+        Assembler::new(context.source_manager()).assemble_library([a, b])
+    }));
+
+    assert!(assembled.is_ok(), "assembler panicked during assembly");
+    let err = assembled
+        .unwrap()
+        .expect_err("expected cyclic error message constants to be rejected");
+    assert_diagnostic!(&err, "constant evaluation terminated due to infinite recursion");
+    assert_diagnostic!(&err, "pub const ERR_A = b::ERR_B");
+}
+
 #[test]
 fn test_cross_module_quoted_identifier_resolution() -> TestResult {
     let context = TestContext::default();

@@ -110,7 +110,7 @@ impl ConstEvalError {
         <Env as ConstEnvironment>::Error: From<Self>,
     {
         let start_file = env.get_source_file_for(start);
-        let detected_file = env.get_source_file_for(start);
+        let detected_file = env.get_source_file_for(detected);
         let detected = [RelatedLabel::error("related error")
             .with_labeled_span(
                 detected,
