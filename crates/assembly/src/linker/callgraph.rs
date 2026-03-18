@@ -209,10 +209,7 @@ impl CallGraph {
             }
         }
 
-        let has_cycle = graph
-            .nodes
-            .iter()
-            .any(|(n, out_edges)| output.contains(n) && !out_edges.is_empty());
+        let has_cycle = output.len() != graph.nodes.len();
         if has_cycle {
             let mut in_cycle = BTreeSet::default();
             for (n, edges) in graph.nodes.iter() {
