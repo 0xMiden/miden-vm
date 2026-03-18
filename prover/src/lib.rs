@@ -29,8 +29,8 @@ mod proving_options;
 pub use miden_air::{DeserializationError, ProcessorAir, PublicInputs, config};
 pub use miden_core::proof::{ExecutionProof, HashFunction};
 pub use miden_processor::{
-    ExecutionError, Host, InputError, StackInputs, StackOutputs, Word, advice::AdviceInputs,
-    crypto, field, serde, utils,
+    AsyncHost, ExecutionError, FutureMaybeSend, Host, InputError, StackInputs, StackOutputs, Word,
+    advice::AdviceInputs, crypto, field, serde, utils,
 };
 pub use proving_options::ProvingOptions;
 
@@ -125,10 +125,65 @@ pub async fn prove_async(
     program: &Program,
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
-    host: &mut impl Host,
+    host: &mut impl AsyncHost,
     options: ProvingOptions,
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
-    prove(program, stack_inputs, advice_inputs, host, options)
+    let processor =
+        FastProcessor::new_with_options(stack_inputs, advice_inputs, *options.execution_options());
+
+    let (execution_output, trace_generation_context) =
+        processor.execute_for_trace_async(program, host).await?;
+
+    let trace = build_trace(execution_output, trace_generation_context, program.to_info())?;
+
+    tracing::event!(
+        tracing::Level::INFO,
+        "Generated execution trace of {} columns and {} steps (padded from {})",
+        miden_air::trace::TRACE_WIDTH,
+        trace.trace_len_summary().padded_trace_len(),
+        trace.trace_len_summary().trace_len()
+    );
+
+    let stack_outputs = *trace.stack_outputs();
+    let precompile_requests = trace.precompile_requests().to_vec();
+    let hash_fn = options.hash_fn();
+
+    let trace_matrix = {
+        let _span = tracing::info_span!("to_row_major_matrix").entered();
+        trace.to_row_major_matrix()
+    };
+
+    let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();
+    let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
+    let aux_builder = trace.aux_trace_builders();
+
+    let params = config::pcs_params();
+    let proof_bytes = match hash_fn {
+        HashFunction::Blake3_256 => {
+            let config = config::blake3_256_config(params);
+            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
+        },
+        HashFunction::Keccak => {
+            let config = config::keccak_config(params);
+            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
+        },
+        HashFunction::Rpo256 => {
+            let config = config::rpo_config(params);
+            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
+        },
+        HashFunction::Poseidon2 => {
+            let config = config::poseidon2_config(params);
+            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
+        },
+        HashFunction::Rpx256 => {
+            let config = config::rpx_config(params);
+            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
+        },
+    }?;
+
+    let proof = ExecutionProof::new(proof_bytes, hash_fn, precompile_requests);
+
+    Ok((stack_outputs, proof))
 }
 
 // STARK PROOF GENERATION

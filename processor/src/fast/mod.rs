@@ -17,7 +17,7 @@ use miden_core::{
 use tracing::instrument;
 
 use crate::{
-    AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, Host,
+    AdviceInputs, AdviceProvider, AsyncHost, ContextId, ExecutionError, ExecutionOptions, Host,
     ProcessorState, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
     errors::{MapExecErr, MapExecErrNoCtx, OperationError},
@@ -44,6 +44,62 @@ use step::{NeverStopper, StepStopper};
 
 #[cfg(test)]
 mod tests;
+
+struct AsyncHostAdapter<'a, H> {
+    host: &'a mut H,
+}
+
+impl<'a, H> AsyncHostAdapter<'a, H> {
+    fn new(host: &'a mut H) -> Self {
+        Self { host }
+    }
+}
+
+impl<H> Host for AsyncHostAdapter<'_, H>
+where
+    H: AsyncHost,
+{
+    fn get_label_and_source_file(
+        &self,
+        location: &miden_debug_types::Location,
+    ) -> (miden_debug_types::SourceSpan, Option<Arc<miden_debug_types::SourceFile>>) {
+        self.host.get_label_and_source_file(location)
+    }
+
+    fn get_mast_forest(&self, _node_digest: &Word) -> Option<Arc<MastForest>> {
+        panic!("AsyncHostAdapter::get_mast_forest should not be called directly")
+    }
+
+    fn on_event(
+        &mut self,
+        _process: &ProcessorState<'_>,
+    ) -> Result<Vec<crate::advice::AdviceMutation>, crate::event::EventError> {
+        panic!("AsyncHostAdapter::on_event should not be called directly")
+    }
+
+    fn on_debug(
+        &mut self,
+        process: &ProcessorState,
+        options: &miden_core::operations::DebugOptions,
+    ) -> Result<(), crate::DebugError> {
+        self.host.on_debug(process, options)
+    }
+
+    fn on_trace(
+        &mut self,
+        process: &ProcessorState,
+        trace_id: u32,
+    ) -> Result<(), crate::TraceError> {
+        self.host.on_trace(process, trace_id)
+    }
+
+    fn resolve_event(
+        &self,
+        event_id: miden_core::events::EventId,
+    ) -> Option<&miden_core::events::EventName> {
+        self.host.resolve_event(event_id)
+    }
+}
 
 // CONSTANTS
 // ================================================================================================
@@ -465,9 +521,9 @@ impl FastProcessor {
     pub async fn execute_async(
         self,
         program: &Program,
-        host: &mut impl Host,
+        host: &mut impl AsyncHost,
     ) -> Result<ExecutionOutput, ExecutionError> {
-        self.execute(program, host)
+        self.execute_with_tracer_async(program, host, &mut NoopTracer).await
     }
 
     /// Executes the given program and returns the stack outputs, the advice provider, and
@@ -509,9 +565,56 @@ impl FastProcessor {
     pub async fn execute_for_trace_async(
         self,
         program: &Program,
-        host: &mut impl Host,
+        host: &mut impl AsyncHost,
     ) -> Result<(ExecutionOutput, TraceGenerationContext), ExecutionError> {
-        self.execute_for_trace(program, host)
+        let mut tracer = ExecutionTracer::new(self.options.core_trace_fragment_size());
+        let execution_output = self.execute_with_tracer_async(program, host, &mut tracer).await?;
+
+        let context = tracer.into_trace_generation_context();
+
+        Ok((execution_output, context))
+    }
+
+    /// Executes the given program with the provided tracer and returns the stack outputs, and the
+    /// advice provider using an async host.
+    pub async fn execute_with_tracer_async<T>(
+        mut self,
+        program: &Program,
+        host: &mut impl AsyncHost,
+        tracer: &mut T,
+    ) -> Result<ExecutionOutput, ExecutionError>
+    where
+        T: Tracer<Processor = Self>,
+    {
+        let mut continuation_stack = ContinuationStack::new(program);
+        let mut current_forest = program.mast_forest().clone();
+
+        self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
+
+        match self
+            .execute_impl_async(
+                &mut continuation_stack,
+                &mut current_forest,
+                program.kernel(),
+                host,
+                tracer,
+                &NeverStopper,
+            )
+            .await
+        {
+            ControlFlow::Continue(stack_outputs) => Ok(ExecutionOutput {
+                stack: stack_outputs,
+                advice: self.advice,
+                memory: self.memory,
+                final_pc_transcript: self.pc_transcript,
+            }),
+            ControlFlow::Break(break_reason) => match break_reason {
+                BreakReason::Err(err) => Err(err),
+                BreakReason::Stopped(_) => {
+                    unreachable!("Execution never stops prematurely with NeverStopper")
+                },
+            },
+        }
     }
 
     /// Executes the given program with the provided tracer and returns the stack outputs, and the
@@ -596,10 +699,42 @@ impl FastProcessor {
     #[inline(always)]
     pub async fn step_async(
         &mut self,
-        host: &mut impl Host,
+        host: &mut impl AsyncHost,
         resume_ctx: ResumeContext,
     ) -> Result<Option<ResumeContext>, ExecutionError> {
-        self.step(host, resume_ctx)
+        let ResumeContext {
+            mut current_forest,
+            mut continuation_stack,
+            kernel,
+        } = resume_ctx;
+
+        match self
+            .execute_impl_async(
+                &mut continuation_stack,
+                &mut current_forest,
+                &kernel,
+                host,
+                &mut NoopTracer,
+                &StepStopper,
+            )
+            .await
+        {
+            ControlFlow::Continue(_) => Ok(None),
+            ControlFlow::Break(break_reason) => match break_reason {
+                BreakReason::Err(err) => Err(err),
+                BreakReason::Stopped(maybe_continuation) => {
+                    if let Some(continuation) = maybe_continuation {
+                        continuation_stack.push_continuation(continuation);
+                    }
+
+                    Ok(Some(ResumeContext {
+                        current_forest,
+                        continuation_stack,
+                        kernel,
+                    }))
+                },
+            },
+        }
     }
 
     /// Executes the given program with the provided tracer and returns the stack outputs.
@@ -696,6 +831,123 @@ impl FastProcessor {
                         current_forest,
                         continuation_stack,
                         host,
+                        tracer,
+                    )?;
+                },
+            }
+        }
+
+        match StackOutputs::new(
+            &self.stack[self.stack_bot_idx..self.stack_top_idx]
+                .iter()
+                .rev()
+                .copied()
+                .collect::<Vec<_>>(),
+        ) {
+            Ok(stack_outputs) => ControlFlow::Continue(stack_outputs),
+            Err(_) => ControlFlow::Break(BreakReason::Err(ExecutionError::OutputStackOverflow(
+                self.stack_top_idx - self.stack_bot_idx - MIN_STACK_DEPTH,
+            ))),
+        }
+    }
+
+    async fn execute_impl_async<S, T>(
+        &mut self,
+        continuation_stack: &mut ContinuationStack,
+        current_forest: &mut Arc<MastForest>,
+        kernel: &Kernel,
+        host: &mut impl AsyncHost,
+        tracer: &mut T,
+        stopper: &S,
+    ) -> ControlFlow<BreakReason, StackOutputs>
+    where
+        S: Stopper<Processor = Self>,
+        T: Tracer<Processor = Self>,
+    {
+        while let ControlFlow::Break(internal_break_reason) = {
+            let mut host_adapter = AsyncHostAdapter::new(host);
+            execute_impl(
+                self,
+                continuation_stack,
+                current_forest,
+                kernel,
+                &mut host_adapter,
+                tracer,
+                stopper,
+            )
+        } {
+            match internal_break_reason {
+                InternalBreakReason::User(break_reason) => return ControlFlow::Break(break_reason),
+                InternalBreakReason::Emit {
+                    basic_block_node_id,
+                    op_idx,
+                    continuation,
+                } => {
+                    self.op_emit_async(host, current_forest, basic_block_node_id, op_idx).await?;
+
+                    finish_emit_op_execution(
+                        continuation,
+                        self,
+                        continuation_stack,
+                        current_forest,
+                        tracer,
+                        stopper,
+                    )?;
+                },
+                InternalBreakReason::LoadMastForestFromDyn { dyn_node_id, callee_hash } => {
+                    let (root_id, new_forest) = match self
+                        .load_mast_forest_async(callee_hash, host, current_forest, dyn_node_id)
+                        .await
+                    {
+                        Ok(result) => result,
+                        Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
+                    };
+
+                    finish_load_mast_forest_from_dyn_start(
+                        root_id,
+                        new_forest,
+                        self,
+                        current_forest,
+                        continuation_stack,
+                        tracer,
+                        stopper,
+                    )?;
+                },
+                InternalBreakReason::LoadMastForestFromExternal {
+                    external_node_id,
+                    procedure_hash,
+                } => {
+                    let (root_id, new_forest) = match self
+                        .load_mast_forest_async(
+                            procedure_hash,
+                            host,
+                            current_forest,
+                            external_node_id,
+                        )
+                        .await
+                    {
+                        Ok(result) => result,
+                        Err(err) => {
+                            let mut host_adapter = AsyncHostAdapter::new(host);
+                            let maybe_enriched_err = maybe_use_caller_error_context(
+                                err,
+                                current_forest,
+                                continuation_stack,
+                                &mut host_adapter,
+                            );
+
+                            return ControlFlow::Break(BreakReason::Err(maybe_enriched_err));
+                        },
+                    };
+
+                    let mut host_adapter = AsyncHostAdapter::new(host);
+                    finish_load_mast_forest_from_external(
+                        root_id,
+                        new_forest,
+                        external_node_id,
+                        current_forest,
+                        continuation_stack,
+                        &mut host_adapter,
                         tracer,
                     )?;
                 },
@@ -842,6 +1094,44 @@ impl FastProcessor {
         Ok((root_id, mast_forest))
     }
 
+    async fn load_mast_forest_async(
+        &mut self,
+        node_digest: Word,
+        host: &mut impl AsyncHost,
+        current_forest: &MastForest,
+        node_id: MastNodeId,
+    ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
+        let mast_forest = if let Some(mast_forest) = host.get_mast_forest(&node_digest).await {
+            mast_forest
+        } else {
+            let host_adapter = AsyncHostAdapter::new(host);
+            return Err(crate::errors::procedure_not_found_with_context(
+                node_digest,
+                current_forest,
+                node_id,
+                &host_adapter,
+            ));
+        };
+
+        let root_id = mast_forest.find_procedure_root(node_digest).ok_or_else(|| {
+            let host_adapter = AsyncHostAdapter::new(host);
+            Err::<(), _>(OperationError::MalformedMastForestInHost { root_digest: node_digest })
+                .map_exec_err(current_forest, node_id, &host_adapter)
+                .unwrap_err()
+        })?;
+
+        {
+            let host_adapter = AsyncHostAdapter::new(host);
+            self.advice.extend_map(mast_forest.advice_map()).map_exec_err(
+                current_forest,
+                node_id,
+                &host_adapter,
+            )?;
+        }
+
+        Ok((root_id, mast_forest))
+    }
+
     /// Increments the stack top pointer by 1.
     ///
     /// The bottom of the stack is never affected by this operation.
@@ -924,11 +1214,30 @@ impl FastProcessor {
     /// Async compatibility wrapper for [`Self::execute_by_step`].
     #[inline(always)]
     pub async fn execute_by_step_async(
-        self,
+        mut self,
         program: &Program,
-        host: &mut impl Host,
+        host: &mut impl AsyncHost,
     ) -> Result<StackOutputs, ExecutionError> {
-        self.execute_by_step(program, host)
+        let mut current_resume_ctx = self.get_initial_resume_context(program).unwrap();
+        let mut processor = self;
+
+        loop {
+            match processor.step_async(host, current_resume_ctx).await? {
+                Some(next_resume_ctx) => {
+                    current_resume_ctx = next_resume_ctx;
+                },
+                None => {
+                    break Ok(StackOutputs::new(
+                        &processor.stack[processor.stack_bot_idx..processor.stack_top_idx]
+                            .iter()
+                            .rev()
+                            .copied()
+                            .collect::<Vec<_>>(),
+                    )
+                    .unwrap());
+                },
+            }
+        }
     }
 
     /// Similar to [`Self::execute`], but allows mutable access to the processor.
@@ -970,9 +1279,32 @@ impl FastProcessor {
     pub async fn execute_mut_async(
         &mut self,
         program: &Program,
-        host: &mut impl Host,
+        host: &mut impl AsyncHost,
     ) -> Result<StackOutputs, ExecutionError> {
-        self.execute_mut(program, host)
+        let mut continuation_stack = ContinuationStack::new(program);
+        let mut current_forest = program.mast_forest().clone();
+
+        self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
+
+        match self
+            .execute_impl_async(
+                &mut continuation_stack,
+                &mut current_forest,
+                program.kernel(),
+                host,
+                &mut NoopTracer,
+                &NeverStopper,
+            )
+            .await
+        {
+            ControlFlow::Continue(stack_outputs) => Ok(stack_outputs),
+            ControlFlow::Break(break_reason) => match break_reason {
+                BreakReason::Err(err) => Err(err),
+                BreakReason::Stopped(_) => {
+                    unreachable!("Execution never stops prematurely with NeverStopper")
+                },
+            },
+        }
     }
 }
 

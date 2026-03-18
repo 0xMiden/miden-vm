@@ -1,7 +1,51 @@
+use std::sync::Arc;
+
 use miden_assembly::Assembler;
+use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_processor::{
-    DefaultHost, ExecutionOptions, FastProcessor, Felt, StackInputs, advice::AdviceInputs,
+    AsyncHost, DefaultHost, ExecutionOptions, FastProcessor, Felt, FutureMaybeSend, ProcessorState,
+    StackInputs, Word,
+    advice::{AdviceInputs, AdviceMutation},
+    event::{EventError, EventName},
+    mast::MastForest,
 };
+
+struct YieldingAsyncHost {
+    event_calls: usize,
+}
+
+impl YieldingAsyncHost {
+    fn new() -> Self {
+        Self { event_calls: 0 }
+    }
+}
+
+impl AsyncHost for YieldingAsyncHost {
+    fn get_label_and_source_file(
+        &self,
+        _location: &Location,
+    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
+        (SourceSpan::UNKNOWN, None)
+    }
+
+    fn get_mast_forest(
+        &self,
+        _node_digest: &Word,
+    ) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
+        async { None }
+    }
+
+    fn on_event(
+        &mut self,
+        _process: &ProcessorState<'_>,
+    ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
+        self.event_calls += 1;
+        async {
+            tokio::task::yield_now().await;
+            Ok(Vec::new())
+        }
+    }
+}
 
 fn simple_program() -> miden_processor::Program {
     Assembler::default()
@@ -65,4 +109,22 @@ async fn fast_processor_execute_for_trace_async_matches_sync() {
     assert_eq!(sync_output.stack, async_output.stack);
     assert_eq!(sync_ctx.fragment_size, async_ctx.fragment_size);
     assert_eq!(sync_ctx.core_trace_contexts.len(), async_ctx.core_trace_contexts.len());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn execute_async_supports_async_only_host_events() {
+    let event_name = EventName::new("test::async::emit");
+    let event_id = event_name.to_event_id().as_u64();
+    let program = Assembler::default()
+        .assemble_program(format!("begin push.{event_id} emit drop end"))
+        .expect("program should compile");
+
+    let mut host = YieldingAsyncHost::new();
+    let output = FastProcessor::new(StackInputs::default())
+        .execute_async(&program, &mut host)
+        .await
+        .expect("async execution should succeed");
+
+    assert_eq!(host.event_calls, 1);
+    assert_eq!(output.stack.get_num_elements(16).len(), 16);
 }

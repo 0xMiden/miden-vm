@@ -7,9 +7,9 @@ use miden_core::{
 };
 
 use crate::{
-    Host,
+    AsyncHost, Host,
     errors::{MapExecErrWithOpIdx, advice_error_with_context, event_error_with_context},
-    fast::{BreakReason, FastProcessor},
+    fast::{AsyncHostAdapter, BreakReason, FastProcessor},
 };
 
 mod sys_event_handlers;
@@ -83,6 +83,56 @@ impl FastProcessor {
                     current_forest,
                     node_id,
                     host,
+                )));
+            }
+        }
+        ControlFlow::Continue(())
+    }
+
+    #[inline(always)]
+    pub(super) async fn op_emit_async(
+        &mut self,
+        host: &mut impl AsyncHost,
+        current_forest: &MastForest,
+        node_id: MastNodeId,
+        op_idx: usize,
+    ) -> ControlFlow<BreakReason> {
+        let event_id = EventId::from_felt(self.stack_get(0));
+
+        if let Some(system_event) = SystemEvent::from_event_id(event_id) {
+            let host_adapter = AsyncHostAdapter::new(host);
+            if let Err(err) = handle_system_event(self, system_event).map_exec_err_with_op_idx(
+                current_forest,
+                node_id,
+                &host_adapter,
+                op_idx,
+            ) {
+                return ControlFlow::Break(BreakReason::Err(err));
+            }
+        } else {
+            let processor_state = self.state();
+            let mutations = match host.on_event(&processor_state).await {
+                Ok(m) => m,
+                Err(err) => {
+                    let host_adapter = AsyncHostAdapter::new(host);
+                    let event_name = Host::resolve_event(&host_adapter, event_id).cloned();
+                    return ControlFlow::Break(BreakReason::Err(event_error_with_context(
+                        err,
+                        current_forest,
+                        node_id,
+                        &host_adapter,
+                        event_id,
+                        event_name,
+                    )));
+                },
+            };
+            if let Err(err) = self.advice.apply_mutations(mutations) {
+                let host_adapter = AsyncHostAdapter::new(host);
+                return ControlFlow::Break(BreakReason::Err(advice_error_with_context(
+                    err,
+                    current_forest,
+                    node_id,
+                    &host_adapter,
                 )));
             }
         }

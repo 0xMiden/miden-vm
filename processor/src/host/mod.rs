@@ -1,4 +1,5 @@
 use alloc::{sync::Arc, vec::Vec};
+use core::future::Future;
 
 use miden_core::{
     Felt, Word,
@@ -119,3 +120,127 @@ pub trait Host {
         None
     }
 }
+
+/// Defines an async interface by which the VM can interact with the host during execution.
+///
+/// This mirrors the historic async host surface so async consumers can suspend at host
+/// boundaries without changing the sync-first core `Host` contract.
+pub trait AsyncHost {
+    // REQUIRED METHODS
+    // --------------------------------------------------------------------------------------------
+
+    /// Returns the [`SourceSpan`] and optional [`SourceFile`] for the provided location.
+    fn get_label_and_source_file(
+        &self,
+        location: &Location,
+    ) -> (SourceSpan, Option<Arc<SourceFile>>);
+
+    /// Returns MAST forest corresponding to the specified digest, or None if the MAST forest for
+    /// this digest could not be found in this host.
+    fn get_mast_forest(&self, node_digest: &Word) -> impl FutureMaybeSend<Option<Arc<MastForest>>>;
+
+    /// Handles the event emitted from the VM and provides advice mutations to be applied to
+    /// the advice provider.
+    ///
+    /// The event ID is available at the top of the stack (position 0) when this handler is called.
+    /// This allows the handler to access both the event ID and any additional context data that
+    /// may have been pushed onto the stack prior to the emit operation.
+    ///
+    /// ## Implementation notes
+    /// - Extract the event ID via `EventId::from_felt(process.get_stack_item(0))`
+    /// - Return errors without event names or IDs - the caller will enrich them via
+    ///   [`AsyncHost::resolve_event()`]
+    /// - System events (IDs 0-255) are handled by the VM before calling this method
+    fn on_event(
+        &mut self,
+        process: &ProcessorState<'_>,
+    ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>>;
+
+    // PROVIDED METHODS
+    // --------------------------------------------------------------------------------------------
+
+    /// Handles the debug request from the VM.
+    fn on_debug(
+        &mut self,
+        process: &ProcessorState,
+        options: &DebugOptions,
+    ) -> Result<(), DebugError> {
+        let mut handler = debug::DefaultDebugHandler::default();
+        handler.on_debug(process, options)
+    }
+
+    /// Handles the trace emitted from the VM.
+    fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
+        let mut handler = debug::DefaultDebugHandler::default();
+        handler.on_trace(process, trace_id)
+    }
+
+    /// Returns the [`EventName`] registered for the provided [`EventId`], if any.
+    ///
+    /// Hosts that maintain an event registry can override this method to surface human-readable
+    /// names for diagnostics. The default implementation returns `None`.
+    fn resolve_event(&self, _event_id: EventId) -> Option<&EventName> {
+        None
+    }
+}
+
+impl<T> AsyncHost for T
+where
+    T: Host,
+{
+    fn get_label_and_source_file(
+        &self,
+        location: &Location,
+    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
+        Host::get_label_and_source_file(self, location)
+    }
+
+    fn get_mast_forest(&self, node_digest: &Word) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
+        let result = Host::get_mast_forest(self, node_digest);
+        async move { result }
+    }
+
+    fn on_event(
+        &mut self,
+        process: &ProcessorState<'_>,
+    ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
+        let result = Host::on_event(self, process);
+        async move { result }
+    }
+
+    fn on_debug(
+        &mut self,
+        process: &ProcessorState,
+        options: &DebugOptions,
+    ) -> Result<(), DebugError> {
+        Host::on_debug(self, process, options)
+    }
+
+    fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
+        Host::on_trace(self, process, trace_id)
+    }
+
+    fn resolve_event(&self, event_id: EventId) -> Option<&EventName> {
+        Host::resolve_event(self, event_id)
+    }
+}
+
+/// Alias for a `Future`
+///
+/// Unless the compilation target family is `wasm`, we add `Send` to the required bounds. For
+/// `wasm` compilation targets there is no `Send` bound.
+#[cfg(target_family = "wasm")]
+pub trait FutureMaybeSend<O>: Future<Output = O> {}
+
+#[cfg(target_family = "wasm")]
+impl<T, O> FutureMaybeSend<O> for T where T: Future<Output = O> {}
+
+/// Alias for a `Future`
+///
+/// Unless the compilation target family is `wasm`, we add `Send` to the required bounds. For
+/// `wasm` compilation targets there is no `Send` bound.
+#[cfg(not(target_family = "wasm"))]
+pub trait FutureMaybeSend<O>: Future<Output = O> + Send {}
+
+#[cfg(not(target_family = "wasm"))]
+impl<T, O> FutureMaybeSend<O> for T where T: Future<Output = O> + Send {}

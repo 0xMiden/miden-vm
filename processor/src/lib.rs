@@ -46,7 +46,7 @@ pub use errors::{AceError, ExecutionError, HostError, MemoryError};
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
 pub use fast::{BreakReason, ExecutionOutput, FastProcessor, ResumeContext};
 pub use host::{
-    Host, MastForestStore, MemMastForestStore,
+    AsyncHost, FutureMaybeSend, Host, MastForestStore, MemMastForestStore,
     debug::DefaultDebugHandler,
     default::{DefaultHost, HostLibrary},
     handlers::{DebugError, DebugHandler, TraceError},
@@ -119,10 +119,17 @@ pub async fn execute_async(
     program: &Program,
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
-    host: &mut impl Host,
+    host: &mut impl AsyncHost,
     options: ExecutionOptions,
 ) -> Result<ExecutionTrace, ExecutionError> {
-    execute(program, stack_inputs, advice_inputs, host, options)
+    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, options);
+    let (execution_output, trace_generation_context) =
+        processor.execute_for_trace_async(program, host).await?;
+
+    let trace = trace::build_trace(execution_output, trace_generation_context, program.to_info())?;
+
+    assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
+    Ok(trace)
 }
 
 // PROCESSOR STATE
