@@ -15,6 +15,7 @@ use rand_chacha::ChaCha20Rng;
 use rstest::rstest;
 use verifier_recursive::{VerifierData, VerifierError, generate_advice_inputs};
 
+mod ace_circuit;
 mod ace_read_check;
 mod batch_query_gen;
 mod verifier_recursive;
