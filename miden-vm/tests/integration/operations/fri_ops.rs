@@ -13,6 +13,8 @@ fn fri_ext2fold4() {
     // inputs[7] -> stack[9] = p (bit-reversed tree index).
     // The instruction computes d_seg = p & 3 and f_pos = p >> 2.
     // We want d_seg=2, f_pos=inputs[8], so p = 4*f_pos + 2.
+    // f_pos must fit in u32 to avoid overflow when computing p.
+    inputs[8] = inputs[8] % ((u32::MAX as u64) >> 2);
     inputs[7] = 4 * inputs[8] + 2;
 
     // When d_seg=2, query_values[2] = (v4, v5) must equal prev_value = (pe0, pe1).
