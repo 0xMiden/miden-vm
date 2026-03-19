@@ -1062,6 +1062,41 @@ mod tests {
         );
     }
 
+    #[test]
+    fn workspace_dependency_stays_on_the_workspace_member_version() {
+        let tempdir = TempDir::new().unwrap();
+        let root_dir = tempdir.path().join("workspace-dep");
+        fs::create_dir_all(&root_dir).unwrap();
+        fs::create_dir_all(root_dir.join("dep")).unwrap();
+        fs::create_dir_all(root_dir.join("app")).unwrap();
+
+        write_file(
+            &root_dir.join("miden-project.toml"),
+            "[workspace]\nmembers = [\"dep\", \"app\"]\n\n[workspace.dependencies]\ndep = { path = \"dep\" }\n",
+        );
+        write_file(
+            &root_dir.join("dep").join("miden-project.toml"),
+            "[package]\nname = \"dep\"\nversion = \"0.2.0\"\n",
+        );
+        let app_manifest = root_dir.join("app").join("miden-project.toml");
+        write_file(
+            &app_manifest,
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\ndep.workspace = true\n",
+        );
+
+        let mut registry = TestRegistry::default();
+        let dep_id = PackageId::from("dep");
+        let version010 = "0.1.0".parse::<miden_package_registry::SemVer>().unwrap();
+        let version999 = "9.9.9".parse::<miden_package_registry::SemVer>().unwrap();
+        registry.insert(&dep_id, Version::from(version010.clone()));
+        registry.insert(&dep_id, Version::from(version999.clone()));
+        let graph = builder(&registry, &tempdir.path().join("git-cache"))
+            .build_from_path(&app_manifest)
+            .unwrap();
+        let dep = graph.get(&PackageId::from("dep")).unwrap();
+        assert_eq!(dep.version.to_string(), "0.2.0");
+    }
+
     // ------ TEST UTILS
 
     fn build_registry_test_package(name: &str, version: &str) -> Box<MastPackage> {

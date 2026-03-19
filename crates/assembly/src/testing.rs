@@ -237,7 +237,7 @@ pub use self::package_features::TestRegistry;
 mod package_features {
     use std::{
         collections::BTreeMap,
-        string::{String, ToString},
+        string::String,
         sync::{Arc, Mutex},
     };
 
@@ -298,7 +298,7 @@ mod package_features {
             package: &PackageId,
             version: &Version,
         ) -> Result<Arc<Package>, Report> {
-            self.loads.lock().unwrap().push(package.to_string());
+            self.loads.lock().unwrap().push(format!("{package}@{version}"));
             self.packages.get(&(package.clone(), version.clone())).cloned().ok_or_else(|| {
                 Report::msg(format!("missing test package '{package}' at '{version}'"))
             })

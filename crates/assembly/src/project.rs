@@ -1016,4 +1016,86 @@ end
             String::from_utf8_lossy(&output.stderr)
         );
     }
+
+    #[test]
+    fn workspace_dependency_stays_on_the_workspace_member_version() {
+        let tempdir = TempDir::new().unwrap();
+        let root_dir = tempdir.path().join("workspace-dep");
+        fs::create_dir_all(&root_dir).unwrap();
+        fs::create_dir_all(root_dir.join("dep")).unwrap();
+        fs::create_dir_all(root_dir.join("app")).unwrap();
+
+        write_file(
+            &root_dir.join("miden-project.toml"),
+            r#"[workspace]
+members = ["dep", "app"]
+
+[workspace.dependencies]
+dep = { path = "dep" }
+"#,
+        );
+        let dep_dir = root_dir.join("dep");
+        write_file(
+            &dep_dir.join("miden-project.toml"),
+            r#"[package]
+name = "dep"
+version = "0.2.0"
+
+[lib]
+path = "mod.masm"
+
+"#,
+        );
+        write_file(&dep_dir.join("mod.masm"), r#"pub proc foo add end"#);
+
+        let app_dir = root_dir.join("app");
+        let app_manifest = app_dir.join("miden-project.toml");
+        write_file(
+            &app_manifest,
+            r#"[package]
+name = "app"
+version = "0.1.0"
+
+[lib]
+path = "mod.masm"
+
+[dependencies]
+dep.workspace = true
+"#,
+        );
+        write_file(&app_dir.join("mod.masm"), r#"pub proc bar push.1 push.2 exec.::dep::foo end"#);
+
+        let mut context = TestContext::new();
+
+        // Add a pre-existing version of 'dep' that does not match the effective version requirement
+        let dep010 = Arc::<MastPackage>::from(context.assemble_library_package_with_export(
+            "dep",
+            "0.1.0",
+            "dep::foo",
+            [],
+        ));
+        context.registry_mut().add_package(dep010.clone());
+
+        let package = context
+            .assemble_library_package(&app_manifest, None)
+            .expect("failed to assemble 'app'");
+
+        assert_ne!(dep010.digest(), package.digest());
+        assert_ne!(
+            package
+                .manifest
+                .dependencies()
+                .map(|dep| format!("{}@{}", &dep.name, &dep.digest))
+                .collect::<Vec<_>>(),
+            vec![format!("dep@{}", dep010.digest())]
+        );
+        assert_eq!(
+            package
+                .manifest
+                .dependencies()
+                .map(|dep| format!("{}@{}", &dep.name, &dep.digest))
+                .collect::<Vec<_>>(),
+            vec![format!("dep@{}", package.digest())]
+        );
+    }
 }
