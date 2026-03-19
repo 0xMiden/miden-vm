@@ -17,7 +17,7 @@ edition.workspace = true
 default = ["std", "serde"]
 arbitrary = ["std", "dep:proptest-derive", "dep:proptest", "miden-assembly-syntax/arbitrary"]
 resolver = ["std", "miden-package-registry/resolver"]
-std = ["miden-assembly-syntax/std", "serde/std", "thiserror/std", "toml/std", "miden-package-registry/std"]
+std = ["miden-assembly-syntax/std", "serde/std", "thiserror/std", "toml/std", "miden-package-registry/std", "tempfile/getrandom"]
 serde = ["dep:serde", "dep:serde-untagged", "miden-assembly-syntax/serde", "miden-core/serde", "miden-package-registry/serde", "toml/serde", "toml/parse", "toml/display"]
 
 [dependencies]
@@ -37,7 +37,7 @@ miden-core.workspace = true
 miden-mast-package = { workspace = true, features = ["arbitrary"] }
 miden-test-serde-macros.workspace = true
 serde_json.workspace = true
-tempfile = "3.18"
+tempfile.workspace = true
 toml = { version = "1.0", default-features = false, features = ["std", "serde", "parse"] }
 
 [lints.rust]

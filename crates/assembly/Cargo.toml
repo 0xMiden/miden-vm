@@ -25,6 +25,7 @@ std = [
     "miden-core/std",
     "miden-mast-package/std",
     "miden-project/std",
+    "tempfile/getrandom",
     "thiserror/std",
 ]
 testing = ["logging", "miden-assembly-syntax/testing"]
@@ -53,4 +54,4 @@ miden-assembly = { path = ".", default-features = false, features = ["testing"] 
 miden-mast-package = { workspace = true, features = ["arbitrary"] }
 insta = { workspace = true }
 proptest = { workspace = true, features = ["std"] }
-tempfile = "3.18"
+tempfile.workspace = true

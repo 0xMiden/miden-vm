@@ -95,6 +95,7 @@ serde-untagged  = {version = "0.1" }
 semver          = { version = "1.0", default-features = false }
 smallvec        = { version = "1.15", default-features = false, features = ["union", "const_generics", "const_new"] }
 syn             = "1.0"
+tempfile        = { version = "3.18", default-features = false }
 thiserror       = { version = "2.0", default-features = false }
 tokio           = { version = "1.48", default-features = false }
 tracing         = { version = "0.1", default-features = false, features = ["attributes"] }
