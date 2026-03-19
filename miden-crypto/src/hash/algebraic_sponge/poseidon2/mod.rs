@@ -1,21 +1,51 @@
+use p3_goldilocks::Goldilocks;
+use p3_symmetric::Permutation;
+
 use super::{
     AlgebraicSponge, CAPACITY_RANGE, DIGEST_RANGE, Felt, RATE_RANGE, RATE0_RANGE, RATE1_RANGE,
-    Range, STATE_WIDTH, Word, ZERO,
+    Range, STATE_WIDTH, Word,
 };
 
 mod constants;
-use constants::{
-    ARK_EXT_INITIAL, ARK_EXT_TERMINAL, ARK_INT, MAT_DIAG, NUM_EXTERNAL_ROUNDS_HALF,
-    NUM_INTERNAL_ROUNDS,
-};
+use constants::{NUM_EXTERNAL_ROUNDS_HALF, NUM_INTERNAL_ROUNDS};
 
 #[cfg(test)]
 mod test;
 
+#[cfg(feature = "std")]
+static P3_POSEIDON2: std::sync::LazyLock<p3_goldilocks::Poseidon2Goldilocks<12>> =
+    std::sync::LazyLock::new(p3_goldilocks::default_goldilocks_poseidon2_12);
+
+/// Applies Plonky3's optimized Poseidon2 permutation to a `[Felt; 12]` state.
+///
+/// `Felt` is `#[repr(transparent)]` over `Goldilocks`, so the transmute is safe.
+/// With `std`, a static instance is used to avoid repeated allocation of round constants.
+/// Without `std`, the instance is constructed on each call.
+#[inline(always)]
+fn p3_permute(state: &mut [Felt; STATE_WIDTH]) {
+    // SAFETY: Felt is #[repr(transparent)] over Goldilocks.
+    let gl_state =
+        unsafe { &mut *(state as *mut [Felt; STATE_WIDTH] as *mut [Goldilocks; STATE_WIDTH]) };
+
+    #[cfg(feature = "std")]
+    {
+        P3_POSEIDON2.permute_mut(gl_state);
+    }
+
+    #[cfg(not(feature = "std"))]
+    {
+        let perm = p3_goldilocks::default_goldilocks_poseidon2_12();
+        perm.permute_mut(gl_state);
+    }
+}
+
 /// Implementation of the Poseidon2 hash function with 256-bit output.
 ///
-/// The implementation follows the original [specification](https://eprint.iacr.org/2023/323) and
-/// its accompanying reference [implementation](https://github.com/HorizenLabs/poseidon2).
+/// The permutation is delegated to Plonky3's optimized `Poseidon2Goldilocks<12>`, which provides
+/// hardware-accelerated implementations on aarch64 (NEON inline assembly) and an optimized generic
+/// implementation on other architectures. The internal MDS diagonal uses small special values
+/// (-2, 1, 2, 1/2, 3, 4, ...) that enable multiplication via shifts and halves rather than full
+/// field multiplications.
 ///
 /// The parameters used to instantiate the function are:
 /// * Field: 64-bit prime field with modulus 2^64 - 2^32 + 1.
@@ -75,17 +105,7 @@ pub struct Poseidon2();
 
 impl AlgebraicSponge for Poseidon2 {
     fn apply_permutation(state: &mut [Felt; STATE_WIDTH]) {
-        // 1. Apply (external) linear layer to the input
-        Self::apply_matmul_external(state);
-
-        // 2. Apply initial external rounds to the state
-        Self::initial_external_rounds(state);
-
-        // 3. Apply internal rounds to the state
-        Self::internal_rounds(state);
-
-        // 4. Apply terminal external rounds to the state
-        Self::terminal_external_rounds(state);
+        p3_permute(state);
     }
 }
 
@@ -120,14 +140,6 @@ impl Poseidon2 {
     /// The output of the hash function can be read from state elements 0, 1, 2, and 3 (the first
     /// word of the state).
     pub const DIGEST_RANGE: Range<usize> = DIGEST_RANGE;
-
-    /// Matrix used for computing the linear layers of internal rounds.
-    pub const MAT_DIAG: [Felt; STATE_WIDTH] = MAT_DIAG;
-
-    /// Round constants added to the hasher state.
-    pub const ARK_EXT_INITIAL: [[Felt; STATE_WIDTH]; NUM_EXTERNAL_ROUNDS_HALF] = ARK_EXT_INITIAL;
-    pub const ARK_EXT_TERMINAL: [[Felt; STATE_WIDTH]; NUM_EXTERNAL_ROUNDS_HALF] = ARK_EXT_TERMINAL;
-    pub const ARK_INT: [Felt; NUM_INTERNAL_ROUNDS] = ARK_INT;
 
     // HASH FUNCTIONS
     // --------------------------------------------------------------------------------------------
@@ -168,170 +180,18 @@ impl Poseidon2 {
     pub fn merge_in_domain(values: &[Word; 2], domain: Felt) -> Word {
         <Self as AlgebraicSponge>::merge_in_domain(values, domain)
     }
-
-    // POSEIDON2 PERMUTATION
-    // --------------------------------------------------------------------------------------------
-
-    /// Applies the initial external rounds of the permutation.
-    #[allow(clippy::needless_range_loop)]
-    #[inline(always)]
-    fn initial_external_rounds(state: &mut [Felt; STATE_WIDTH]) {
-        for r in 0..NUM_EXTERNAL_ROUNDS_HALF {
-            Self::add_rc(state, &ARK_EXT_INITIAL[r]);
-            Self::apply_sbox(state);
-            Self::apply_matmul_external(state);
-        }
-    }
-
-    /// Applies the internal rounds of the permutation.
-    #[allow(clippy::needless_range_loop)]
-    #[inline(always)]
-    fn internal_rounds(state: &mut [Felt; STATE_WIDTH]) {
-        for r in 0..NUM_INTERNAL_ROUNDS {
-            state[0] += ARK_INT[r];
-            state[0] = state[0].exp_const_u64::<7>();
-            Self::matmul_internal(state, MAT_DIAG);
-        }
-    }
-
-    /// Applies the terminal external rounds of the permutation.
-    #[inline(always)]
-    #[allow(clippy::needless_range_loop)]
-    fn terminal_external_rounds(state: &mut [Felt; STATE_WIDTH]) {
-        for r in 0..NUM_EXTERNAL_ROUNDS_HALF {
-            Self::add_rc(state, &ARK_EXT_TERMINAL[r]);
-            Self::apply_sbox(state);
-            Self::apply_matmul_external(state);
-        }
-    }
-
-    /// Applies the M_E (external) linear layer to the state in-place.
-    ///
-    /// This basically takes any 4 x 4 MDS matrix M and computes the matrix-vector product with
-    /// the matrix defined by `[[2M, M, ..., M], [M, 2M, ..., M], ..., [M, M, ..., 2M]]`.
-    ///
-    /// Given the structure of the above matrix, we can compute the product of the state with
-    /// matrix `[M, M, ..., M]` and compute the final result using a few addition.
-    #[inline(always)]
-    pub fn apply_matmul_external(state: &mut [Felt; STATE_WIDTH]) {
-        // multiply the state by `[M, M, ..., M]` block-wise
-        Self::matmul_m4(state);
-
-        // accumulate column-wise sums
-        let number_blocks = STATE_WIDTH / 4;
-        let mut stored = [ZERO; 4];
-        for j in 0..number_blocks {
-            let base = j * 4;
-            for l in 0..4 {
-                stored[l] += state[base + l];
-            }
-        }
-
-        // add stored column-sums to each element
-        for (i, val) in state.iter_mut().enumerate() {
-            *val += stored[i % 4];
-        }
-    }
-
-    /// Multiplies the state block-wise with a 4 x 4 MDS matrix.
-    #[inline(always)]
-    fn matmul_m4(state: &mut [Felt; STATE_WIDTH]) {
-        let t4 = STATE_WIDTH / 4;
-
-        for i in 0..t4 {
-            let idx = i * 4;
-
-            let a = state[idx];
-            let b = state[idx + 1];
-            let c = state[idx + 2];
-            let d = state[idx + 3];
-
-            let t0 = a + b;
-            let t1 = c + d;
-            let two_b = b.double();
-            let two_d = d.double();
-
-            let t2 = two_b + t1;
-            let t3 = two_d + t0;
-
-            let t4 = t1.double().double() + t3;
-            let t5 = t0.double().double() + t2;
-
-            let t6 = t3 + t5;
-            let t7 = t2 + t4;
-
-            state[idx] = t6;
-            state[idx + 1] = t5;
-            state[idx + 2] = t7;
-            state[idx + 3] = t4;
-        }
-    }
-
-    /// Applies the M_I (internal) linear layer to the state in-place.
-    ///
-    /// The matrix is given by its diagonal entries with the remaining entries set equal to 1.
-    /// Hence, given the sum of the state entries, the matrix-vector product is computed using
-    /// a multiply-and-add per state entry.
-    #[inline(always)]
-    pub fn matmul_internal(state: &mut [Felt; STATE_WIDTH], mat_diag: [Felt; 12]) {
-        let mut sum = ZERO;
-        for s in state.iter().take(STATE_WIDTH) {
-            sum += *s
-        }
-
-        for i in 0..state.len() {
-            state[i] = state[i] * mat_diag[i] + sum;
-        }
-    }
-
-    /// Adds the round constants to the state in-place.
-    #[inline(always)]
-    pub fn add_rc(state: &mut [Felt; STATE_WIDTH], ark: &[Felt; 12]) {
-        state.iter_mut().zip(ark).for_each(|(s, &k)| *s += k);
-    }
-
-    /// Applies the S-box (x^7) to each element of the state in-place.
-    #[inline(always)]
-    pub fn apply_sbox(state: &mut [Felt; STATE_WIDTH]) {
-        state[0] = state[0].exp_const_u64::<7>();
-        state[1] = state[1].exp_const_u64::<7>();
-        state[2] = state[2].exp_const_u64::<7>();
-        state[3] = state[3].exp_const_u64::<7>();
-        state[4] = state[4].exp_const_u64::<7>();
-        state[5] = state[5].exp_const_u64::<7>();
-        state[6] = state[6].exp_const_u64::<7>();
-        state[7] = state[7].exp_const_u64::<7>();
-        state[8] = state[8].exp_const_u64::<7>();
-        state[9] = state[9].exp_const_u64::<7>();
-        state[10] = state[10].exp_const_u64::<7>();
-        state[11] = state[11].exp_const_u64::<7>();
-    }
 }
 
 // PLONKY3 INTEGRATION
 // ================================================================================================
 
-/// Plonky3-compatible Poseidon2 permutation implementation.
-///
-/// This module provides a Plonky3-compatible interface to the Poseidon2 hash function,
-/// implementing the `Permutation` and `CryptographicPermutation` traits from Plonky3.
-///
-/// This allows Poseidon2 to be used with Plonky3's cryptographic infrastructure, including:
-/// - PaddingFreeSponge for hashing
-/// - TruncatedPermutation for compression
-/// - DuplexChallenger for Fiat-Shamir transforms
 use p3_challenger::DuplexChallenger;
-use p3_symmetric::{
-    CryptographicPermutation, PaddingFreeSponge, Permutation, TruncatedPermutation,
-};
-
-// POSEIDON2 PERMUTATION FOR PLONKY3
-// ================================================================================================
+use p3_symmetric::{CryptographicPermutation, PaddingFreeSponge, TruncatedPermutation};
 
 /// Plonky3-compatible Poseidon2 permutation.
 ///
-/// This struct wraps the Poseidon2 permutation and implements Plonky3's `Permutation` and
-/// `CryptographicPermutation` traits, allowing Poseidon2 to be used within the Plonky3 ecosystem.
+/// This zero-sized wrapper delegates to Plonky3's optimized `Poseidon2Goldilocks<12>` and
+/// implements the `Permutation` and `CryptographicPermutation` traits.
 ///
 /// The permutation operates on a state of 12 field elements (STATE_WIDTH = 12), with:
 /// - Rate: 8 elements (positions 0-7)
@@ -363,12 +223,6 @@ impl Poseidon2Permutation256 {
     /// The output of the hash function can be read from state elements 0, 1, 2, and 3.
     pub const DIGEST_RANGE: Range<usize> = Poseidon2::DIGEST_RANGE;
 
-    // POSEIDON2 PERMUTATION
-    // --------------------------------------------------------------------------------------------
-
-    /// Applies Poseidon2 permutation to the provided state.
-    ///
-    /// This delegates to the Poseidon2 implementation.
     #[inline(always)]
     pub fn apply_permutation(state: &mut [Felt; STATE_WIDTH]) {
         Poseidon2::apply_permutation(state);
@@ -380,7 +234,7 @@ impl Poseidon2Permutation256 {
 
 impl Permutation<[Felt; STATE_WIDTH]> for Poseidon2Permutation256 {
     fn permute_mut(&self, state: &mut [Felt; STATE_WIDTH]) {
-        Self::apply_permutation(state);
+        p3_permute(state);
     }
 }
 
