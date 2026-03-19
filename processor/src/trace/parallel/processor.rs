@@ -16,7 +16,7 @@ use super::super::trace_state::{
     MemoryReadsReplay, StackOverflowReplay, StackState, SystemState,
 };
 use crate::{
-    BreakReason, ContextId, ExecutionError, Host, Stopper,
+    BreakReason, ContextId, ExecutionError, Stopper, SyncHost,
     continuation_stack::{Continuation, ContinuationStack},
     errors::OperationError,
     execution::{
@@ -443,7 +443,7 @@ impl Processor for ReplayProcessor {
         &self,
         _node_id: MastNodeId,
         _current_forest: &MastForest,
-        _host: &mut impl Host,
+        _host: &mut impl SyncHost,
     ) -> ControlFlow<BreakReason> {
         // do nothing - we don't execute decorators in this processor
         ControlFlow::Continue(())
@@ -453,7 +453,7 @@ impl Processor for ReplayProcessor {
         &self,
         _node_id: MastNodeId,
         _current_forest: &MastForest,
-        _host: &mut impl Host,
+        _host: &mut impl SyncHost,
     ) -> ControlFlow<BreakReason> {
         // do nothing - we don't execute decorators in this processor
         ControlFlow::Continue(())
@@ -464,7 +464,7 @@ impl Processor for ReplayProcessor {
         _node_id: MastNodeId,
         _op_idx_in_block: usize,
         _current_forest: &MastForest,
-        _host: &mut impl Host,
+        _host: &mut impl SyncHost,
     ) -> ControlFlow<BreakReason> {
         // do nothing - we don't execute decorators in this processor
         ControlFlow::Continue(())
@@ -475,7 +475,7 @@ impl Processor for ReplayProcessor {
         _basic_block_node: &BasicBlockNode,
         _node_id: MastNodeId,
         _current_forest: &Arc<MastForest>,
-        _host: &mut impl Host,
+        _host: &mut impl SyncHost,
     ) -> ControlFlow<BreakReason> {
         // do nothing - we don't execute decorators in this processor
         ControlFlow::Continue(())

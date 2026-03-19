@@ -17,8 +17,8 @@ use miden_core::{
 use tracing::instrument;
 
 use crate::{
-    AdviceInputs, AdviceProvider, AsyncHost, ContextId, ExecutionError, ExecutionOptions, Host,
-    ProcessorState, Stopper,
+    AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, Host,
+    ProcessorState, Stopper, SyncHost,
     continuation_stack::{Continuation, ContinuationStack},
     errors::{MapExecErr, MapExecErrNoCtx, OperationError},
     execution::{
@@ -45,19 +45,19 @@ use step::{NeverStopper, StepStopper};
 #[cfg(test)]
 mod tests;
 
-struct AsyncHostAdapter<'a, H> {
+struct HostAdapter<'a, H> {
     host: &'a mut H,
 }
 
-impl<'a, H> AsyncHostAdapter<'a, H> {
+impl<'a, H> HostAdapter<'a, H> {
     fn new(host: &'a mut H) -> Self {
         Self { host }
     }
 }
 
-impl<H> Host for AsyncHostAdapter<'_, H>
+impl<H> SyncHost for HostAdapter<'_, H>
 where
-    H: AsyncHost,
+    H: Host,
 {
     fn get_label_and_source_file(
         &self,
@@ -67,14 +67,14 @@ where
     }
 
     fn get_mast_forest(&self, _node_digest: &Word) -> Option<Arc<MastForest>> {
-        panic!("AsyncHostAdapter::get_mast_forest should not be called directly")
+        panic!("HostAdapter::get_mast_forest should not be called directly")
     }
 
     fn on_event(
         &mut self,
         _process: &ProcessorState<'_>,
     ) -> Result<Vec<crate::advice::AdviceMutation>, crate::event::EventError> {
-        panic!("AsyncHostAdapter::on_event should not be called directly")
+        panic!("HostAdapter::on_event should not be called directly")
     }
 
     fn on_debug(
@@ -145,7 +145,7 @@ const INITIAL_STACK_TOP_IDX: usize = 250;
 ///   minimum number of operations required to reach a stack buffer boundary, whether at the top or
 ///   bottom.
 ///     - For example, if the stack top is 10 elements away from the top boundary, and the stack
-///       bottom is 15 elements away from the bottom boundary, then we can safely execute 10
+///       bottom is 15 elements away from the bottom boundary, then we can safely execute_sync 10
 ///       operations that modify the stack depth with no bounds check.
 /// - When switching contexts (e.g., during a call or syscall), all elements past the first 16 are
 ///   stored in an `ExecutionContextInfo` struct, and the stack is truncated to 16 elements. This
@@ -291,7 +291,7 @@ impl FastProcessor {
         }
     }
 
-    /// Returns the resume context to be used with the first call to `step()`.
+    /// Returns the resume context to be used with the first call to `step_sync()`.
     pub fn get_initial_resume_context(
         &mut self,
         program: &Program,
@@ -508,22 +508,22 @@ impl FastProcessor {
     // -------------------------------------------------------------------------------------------
 
     /// Executes the given program and returns the stack outputs as well as the advice provider.
-    pub fn execute(
+    pub fn execute_sync(
+        self,
+        program: &Program,
+        host: &mut impl SyncHost,
+    ) -> Result<ExecutionOutput, ExecutionError> {
+        self.execute_with_tracer_sync(program, host, &mut NoopTracer)
+    }
+
+    /// Async compatibility wrapper for [`Self::execute_sync`].
+    #[inline(always)]
+    pub async fn execute(
         self,
         program: &Program,
         host: &mut impl Host,
     ) -> Result<ExecutionOutput, ExecutionError> {
-        self.execute_with_tracer(program, host, &mut NoopTracer)
-    }
-
-    /// Async compatibility wrapper for [`Self::execute`].
-    #[inline(always)]
-    pub async fn execute_async(
-        self,
-        program: &Program,
-        host: &mut impl AsyncHost,
-    ) -> Result<ExecutionOutput, ExecutionError> {
-        self.execute_with_tracer_async(program, host, &mut NoopTracer).await
+        self.execute_with_tracer(program, host, &mut NoopTracer).await
     }
 
     /// Executes the given program and returns the stack outputs, the advice provider, and
@@ -538,37 +538,37 @@ impl FastProcessor {
     /// let mut host = DefaultHost::default();
     ///
     /// let (execution_output, ctx) = FastProcessor::new(StackInputs::default())
-    ///     .execute_for_trace(&program, &mut host)
+    ///     .execute_for_trace_sync(&program, &mut host)
     ///     .unwrap();
     /// let trace =
     ///     miden_processor::trace::build_trace(execution_output, ctx, program.to_info()).unwrap();
     ///
     /// assert_eq!(*trace.program_hash(), program.hash());
     /// ```
-    #[instrument(name = "execute_for_trace", skip_all)]
-    pub fn execute_for_trace(
+    #[instrument(name = "execute_for_trace_sync", skip_all)]
+    pub fn execute_for_trace_sync(
         self,
         program: &Program,
-        host: &mut impl Host,
+        host: &mut impl SyncHost,
     ) -> Result<(ExecutionOutput, TraceGenerationContext), ExecutionError> {
         let mut tracer = ExecutionTracer::new(self.options.core_trace_fragment_size());
-        let execution_output = self.execute_with_tracer(program, host, &mut tracer)?;
+        let execution_output = self.execute_with_tracer_sync(program, host, &mut tracer)?;
 
         let context = tracer.into_trace_generation_context();
 
         Ok((execution_output, context))
     }
 
-    /// Async compatibility wrapper for [`Self::execute_for_trace`].
+    /// Async compatibility wrapper for [`Self::execute_for_trace_sync`].
     #[inline(always)]
-    #[instrument(name = "execute_for_trace_async", skip_all)]
-    pub async fn execute_for_trace_async(
+    #[instrument(name = "execute_for_trace", skip_all)]
+    pub async fn execute_for_trace(
         self,
         program: &Program,
-        host: &mut impl AsyncHost,
+        host: &mut impl Host,
     ) -> Result<(ExecutionOutput, TraceGenerationContext), ExecutionError> {
         let mut tracer = ExecutionTracer::new(self.options.core_trace_fragment_size());
-        let execution_output = self.execute_with_tracer_async(program, host, &mut tracer).await?;
+        let execution_output = self.execute_with_tracer(program, host, &mut tracer).await?;
 
         let context = tracer.into_trace_generation_context();
 
@@ -577,10 +577,10 @@ impl FastProcessor {
 
     /// Executes the given program with the provided tracer and returns the stack outputs, and the
     /// advice provider using an async host.
-    pub async fn execute_with_tracer_async<T>(
+    pub async fn execute_with_tracer<T>(
         mut self,
         program: &Program,
-        host: &mut impl AsyncHost,
+        host: &mut impl Host,
         tracer: &mut T,
     ) -> Result<ExecutionOutput, ExecutionError>
     where
@@ -619,10 +619,10 @@ impl FastProcessor {
 
     /// Executes the given program with the provided tracer and returns the stack outputs, and the
     /// advice provider.
-    pub fn execute_with_tracer<T>(
+    pub fn execute_with_tracer_sync<T>(
         mut self,
         program: &Program,
-        host: &mut impl Host,
+        host: &mut impl SyncHost,
         tracer: &mut T,
     ) -> Result<ExecutionOutput, ExecutionError>
     where
@@ -658,9 +658,9 @@ impl FastProcessor {
     }
 
     /// Executes a single clock cycle
-    pub fn step(
+    pub fn step_sync(
         &mut self,
-        host: &mut impl Host,
+        host: &mut impl SyncHost,
         resume_ctx: ResumeContext,
     ) -> Result<Option<ResumeContext>, ExecutionError> {
         let ResumeContext {
@@ -695,11 +695,11 @@ impl FastProcessor {
         }
     }
 
-    /// Async compatibility wrapper for [`Self::step`].
+    /// Async compatibility wrapper for [`Self::step_sync`].
     #[inline(always)]
-    pub async fn step_async(
+    pub async fn step(
         &mut self,
-        host: &mut impl AsyncHost,
+        host: &mut impl Host,
         resume_ctx: ResumeContext,
     ) -> Result<Option<ResumeContext>, ExecutionError> {
         let ResumeContext {
@@ -739,15 +739,16 @@ impl FastProcessor {
 
     /// Executes the given program with the provided tracer and returns the stack outputs.
     ///
-    /// This function takes a `&mut self` (compared to `self` for the public execute functions) so
-    /// that the processor state may be accessed after execution. It is incorrect to execute a
-    /// second program using the same processor. This is mainly meant to be used in tests.
+    /// This function takes a `&mut self` (compared to `self` for the public execute_sync functions)
+    /// so that the processor state may be accessed after execution. It is incorrect to
+    /// execute_sync a second program using the same processor. This is mainly meant to be used
+    /// in tests.
     fn execute_impl<S, T>(
         &mut self,
         continuation_stack: &mut ContinuationStack,
         current_forest: &mut Arc<MastForest>,
         kernel: &Kernel,
-        host: &mut impl Host,
+        host: &mut impl SyncHost,
         tracer: &mut T,
         stopper: &S,
     ) -> ControlFlow<BreakReason, StackOutputs>
@@ -856,7 +857,7 @@ impl FastProcessor {
         continuation_stack: &mut ContinuationStack,
         current_forest: &mut Arc<MastForest>,
         kernel: &Kernel,
-        host: &mut impl AsyncHost,
+        host: &mut impl Host,
         tracer: &mut T,
         stopper: &S,
     ) -> ControlFlow<BreakReason, StackOutputs>
@@ -865,7 +866,7 @@ impl FastProcessor {
         T: Tracer<Processor = Self>,
     {
         while let ControlFlow::Break(internal_break_reason) = {
-            let mut host_adapter = AsyncHostAdapter::new(host);
+            let mut host_adapter = HostAdapter::new(host);
             execute_impl(
                 self,
                 continuation_stack,
@@ -928,7 +929,7 @@ impl FastProcessor {
                     {
                         Ok(result) => result,
                         Err(err) => {
-                            let mut host_adapter = AsyncHostAdapter::new(host);
+                            let mut host_adapter = HostAdapter::new(host);
                             let maybe_enriched_err = maybe_use_caller_error_context(
                                 err,
                                 current_forest,
@@ -940,7 +941,7 @@ impl FastProcessor {
                         },
                     };
 
-                    let mut host_adapter = AsyncHostAdapter::new(host);
+                    let mut host_adapter = HostAdapter::new(host);
                     finish_load_mast_forest_from_external(
                         root_id,
                         new_forest,
@@ -976,7 +977,7 @@ impl FastProcessor {
         &self,
         node_id: MastNodeId,
         current_forest: &MastForest,
-        host: &mut impl Host,
+        host: &mut impl SyncHost,
     ) -> ControlFlow<BreakReason> {
         if !self.should_execute_decorators() {
             return ControlFlow::Continue(());
@@ -1001,7 +1002,7 @@ impl FastProcessor {
         &self,
         node_id: MastNodeId,
         current_forest: &MastForest,
-        host: &mut impl Host,
+        host: &mut impl SyncHost,
     ) -> ControlFlow<BreakReason> {
         if !self.in_debug_mode() {
             return ControlFlow::Continue(());
@@ -1025,7 +1026,7 @@ impl FastProcessor {
     fn execute_decorator(
         &self,
         decorator: &Decorator,
-        host: &mut impl Host,
+        host: &mut impl SyncHost,
     ) -> ControlFlow<BreakReason> {
         match decorator {
             Decorator::Debug(options) => {
@@ -1059,7 +1060,7 @@ impl FastProcessor {
     fn load_mast_forest(
         &mut self,
         node_digest: Word,
-        host: &mut impl Host,
+        host: &mut impl SyncHost,
         current_forest: &MastForest,
         node_id: MastNodeId,
     ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
@@ -1097,14 +1098,14 @@ impl FastProcessor {
     async fn load_mast_forest_async(
         &mut self,
         node_digest: Word,
-        host: &mut impl AsyncHost,
+        host: &mut impl Host,
         current_forest: &MastForest,
         node_id: MastNodeId,
     ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
         let mast_forest = if let Some(mast_forest) = host.get_mast_forest(&node_digest).await {
             mast_forest
         } else {
-            let host_adapter = AsyncHostAdapter::new(host);
+            let host_adapter = HostAdapter::new(host);
             return Err(crate::errors::procedure_not_found_with_context(
                 node_digest,
                 current_forest,
@@ -1114,14 +1115,14 @@ impl FastProcessor {
         };
 
         let root_id = mast_forest.find_procedure_root(node_digest).ok_or_else(|| {
-            let host_adapter = AsyncHostAdapter::new(host);
+            let host_adapter = HostAdapter::new(host);
             Err::<(), _>(OperationError::MalformedMastForestInHost { root_digest: node_digest })
                 .map_exec_err(current_forest, node_id, &host_adapter)
                 .unwrap_err()
         })?;
 
         {
-            let host_adapter = AsyncHostAdapter::new(host);
+            let host_adapter = HostAdapter::new(host);
             self.advice.extend_map(mast_forest.advice_map()).map_exec_err(
                 current_forest,
                 node_id,
@@ -1182,17 +1183,17 @@ impl FastProcessor {
         self.stack_top_idx = new_stack_top_idx;
     }
 
-    /// Executes the given program step by step (calling [`Self::step`] repeatedly) and returns the
-    /// stack outputs.
-    pub fn execute_by_step(
+    /// Executes the given program step_sync by step_sync (calling [`Self::step_sync`] repeatedly)
+    /// and returns the stack outputs.
+    pub fn execute_by_step_sync(
         mut self,
         program: &Program,
-        host: &mut impl Host,
+        host: &mut impl SyncHost,
     ) -> Result<StackOutputs, ExecutionError> {
         let mut current_resume_ctx = self.get_initial_resume_context(program).unwrap();
 
         loop {
-            match self.step(host, current_resume_ctx)? {
+            match self.step_sync(host, current_resume_ctx)? {
                 Some(next_resume_ctx) => {
                     current_resume_ctx = next_resume_ctx;
                 },
@@ -1211,18 +1212,18 @@ impl FastProcessor {
         }
     }
 
-    /// Async compatibility wrapper for [`Self::execute_by_step`].
+    /// Async compatibility wrapper for [`Self::execute_by_step_sync`].
     #[inline(always)]
-    pub async fn execute_by_step_async(
+    pub async fn execute_by_step(
         mut self,
         program: &Program,
-        host: &mut impl AsyncHost,
+        host: &mut impl Host,
     ) -> Result<StackOutputs, ExecutionError> {
         let mut current_resume_ctx = self.get_initial_resume_context(program).unwrap();
         let mut processor = self;
 
         loop {
-            match processor.step_async(host, current_resume_ctx).await? {
+            match processor.step(host, current_resume_ctx).await? {
                 Some(next_resume_ctx) => {
                     current_resume_ctx = next_resume_ctx;
                 },
@@ -1240,14 +1241,14 @@ impl FastProcessor {
         }
     }
 
-    /// Similar to [`Self::execute`], but allows mutable access to the processor.
+    /// Similar to [`Self::execute_sync`], but allows mutable access to the processor.
     ///
     /// This is mainly meant to be used in tests.
     #[cfg(any(test, feature = "testing"))]
-    pub fn execute_mut(
+    pub fn execute_sync_mut(
         &mut self,
         program: &Program,
-        host: &mut impl Host,
+        host: &mut impl SyncHost,
     ) -> Result<StackOutputs, ExecutionError> {
         let mut continuation_stack = ContinuationStack::new(program);
         let mut current_forest = program.mast_forest().clone();
@@ -1273,13 +1274,13 @@ impl FastProcessor {
         }
     }
 
-    /// Async compatibility wrapper for [`Self::execute_mut`].
+    /// Async compatibility wrapper for [`Self::execute_sync_mut`].
     #[cfg(any(test, feature = "testing"))]
     #[inline(always)]
-    pub async fn execute_mut_async(
+    pub async fn execute_mut(
         &mut self,
         program: &Program,
-        host: &mut impl AsyncHost,
+        host: &mut impl Host,
     ) -> Result<StackOutputs, ExecutionError> {
         let mut continuation_stack = ContinuationStack::new(program);
         let mut current_forest = program.mast_forest().clone();

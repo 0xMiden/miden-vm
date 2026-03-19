@@ -25,7 +25,7 @@ fn advice_map_loaded_before_execution() {
     // Test `miden_processor::execute_sync` fails if no advice map provided with the program
     let mut host =
         DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
-    match miden_processor::execute(
+    match miden_processor::execute_sync(
         &program_without_advice_map,
         StackInputs::default(),
         AdviceInputs::default(),
@@ -56,7 +56,7 @@ fn advice_map_loaded_before_execution() {
         Program::new(mast_forest.into(), program_without_advice_map.entrypoint());
 
     let mut host = DefaultHost::default();
-    miden_processor::execute(
+    miden_processor::execute_sync(
         &program_with_advice_map,
         StackInputs::default(),
         AdviceInputs::default(),

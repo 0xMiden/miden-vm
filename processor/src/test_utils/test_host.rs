@@ -11,7 +11,7 @@ use miden_debug_types::{
 };
 
 use crate::{
-    DebugError, DebugHandler, Host, MastForestStore, MemMastForestStore, ProcessorState,
+    DebugError, DebugHandler, MastForestStore, MemMastForestStore, ProcessorState, SyncHost,
     TraceError, Word, advice::AdviceMutation, event::EventError, mast::MastForest,
 };
 
@@ -152,7 +152,7 @@ impl Default for TestHost {
     }
 }
 
-impl<S> Host for TestHost<S>
+impl<S> SyncHost for TestHost<S>
 where
     S: SourceManagerSync,
 {

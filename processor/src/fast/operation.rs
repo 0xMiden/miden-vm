@@ -14,7 +14,7 @@ use miden_core::{
 
 use super::step::BreakReason;
 use crate::{
-    AdviceProvider, ContextId, ExecutionError, Host,
+    AdviceProvider, ContextId, ExecutionError, SyncHost,
     errors::OperationError,
     fast::{FastProcessor, STACK_BUFFER_SIZE, memory::Memory},
     processor::{HasherInterface, Processor, StackInterface, SystemInterface},
@@ -92,7 +92,7 @@ impl Processor for FastProcessor {
         &self,
         node_id: MastNodeId,
         current_forest: &MastForest,
-        host: &mut impl Host,
+        host: &mut impl SyncHost,
     ) -> ControlFlow<BreakReason> {
         self.execute_before_enter_decorators(node_id, current_forest, host)
     }
@@ -102,7 +102,7 @@ impl Processor for FastProcessor {
         &self,
         node_id: MastNodeId,
         current_forest: &MastForest,
-        host: &mut impl Host,
+        host: &mut impl SyncHost,
     ) -> ControlFlow<BreakReason> {
         self.execute_after_exit_decorators(node_id, current_forest, host)
     }
@@ -113,7 +113,7 @@ impl Processor for FastProcessor {
         node_id: MastNodeId,
         op_idx_in_block: usize,
         current_forest: &MastForest,
-        host: &mut impl Host,
+        host: &mut impl SyncHost,
     ) -> ControlFlow<BreakReason> {
         if self.should_execute_decorators() {
             #[cfg(test)]
@@ -133,7 +133,7 @@ impl Processor for FastProcessor {
         basic_block_node: &BasicBlockNode,
         node_id: MastNodeId,
         current_forest: &Arc<MastForest>,
-        host: &mut impl Host,
+        host: &mut impl SyncHost,
     ) -> ControlFlow<BreakReason> {
         self.execute_end_of_block_decorators(basic_block_node, node_id, current_forest, host)
     }

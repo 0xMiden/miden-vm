@@ -332,7 +332,7 @@ fn test_trace_generation_at_fragment_boundaries(
         let mut host = DefaultHost::default();
         host.load_library(create_simple_library()).unwrap();
         let (execution_output, trace_fragment_contexts) =
-            processor.execute_for_trace(&program, &mut host).unwrap();
+            processor.execute_for_trace_sync(&program, &mut host).unwrap();
 
         build_trace(execution_output, trace_fragment_contexts, program.to_info()).unwrap()
     };
@@ -348,7 +348,7 @@ fn test_trace_generation_at_fragment_boundaries(
         let mut host = DefaultHost::default();
         host.load_library(create_simple_library()).unwrap();
         let (execution_output, trace_fragment_contexts) =
-            processor.execute_for_trace(&program, &mut host).unwrap();
+            processor.execute_for_trace_sync(&program, &mut host).unwrap();
         assert!(trace_fragment_contexts.core_trace_contexts.len() == 1);
 
         build_trace(execution_output, trace_fragment_contexts, program.to_info()).unwrap()
@@ -521,7 +521,7 @@ fn test_partial_last_fragment_exists_for_h0_inversion_path() {
     host.load_library(create_simple_library()).unwrap();
 
     let (execution_output, trace_fragment_contexts) =
-        processor.execute_for_trace(&program, &mut host).unwrap();
+        processor.execute_for_trace_sync(&program, &mut host).unwrap();
 
     assert!(
         trace_fragment_contexts.core_trace_contexts.len() > 1,
@@ -556,7 +556,7 @@ fn miri_repro_uninitialized_tail_read_during_h0_inversion() {
     let mut host = DefaultHost::default();
     host.load_library(create_simple_library()).unwrap();
     let (execution_output, trace_fragment_contexts) =
-        processor.execute_for_trace(&program, &mut host).unwrap();
+        processor.execute_for_trace_sync(&program, &mut host).unwrap();
 
     assert!(trace_fragment_contexts.core_trace_contexts.len() > 1);
 
@@ -932,7 +932,7 @@ fn test_build_trace_returns_err_on_empty_memory_reads_replay() {
     );
     let mut host = DefaultHost::default();
     let (execution_output, mut trace_generation_context) =
-        processor.execute_for_trace(&program, &mut host).unwrap();
+        processor.execute_for_trace_sync(&program, &mut host).unwrap();
 
     // Clear the memory reads replay so the replay processor will fail when the DYN node tries to
     // read the callee hash from memory.
@@ -965,7 +965,7 @@ fn test_build_trace_returns_err_on_bad_node_id_in_hasher_replay() {
     );
     let mut host = DefaultHost::default();
     let (execution_output, mut trace_generation_context) =
-        processor.execute_for_trace(&program, &mut host).unwrap();
+        processor.execute_for_trace_sync(&program, &mut host).unwrap();
 
     // Inject a HashBasicBlock entry with a node ID that points to a non-existent node in an empty
     // forest.
@@ -1017,7 +1017,7 @@ fn test_build_trace_with_max_len_corner_cases(
     );
     let mut host = DefaultHost::default();
     let (execution_output, trace_generation_context) =
-        processor.execute_for_trace(&program, &mut host).unwrap();
+        processor.execute_for_trace_sync(&program, &mut host).unwrap();
 
     // Compute the number of core trace rows generated, which includes the HALT row inserted by
     // `build_trace_with_max_len`.
@@ -1069,7 +1069,7 @@ fn test_build_trace_returns_err_on_fragment_size_overflow() {
     );
     let mut host = DefaultHost::default();
     let (execution_output, mut trace_generation_context) =
-        processor.execute_for_trace(&program, &mut host).unwrap();
+        processor.execute_for_trace_sync(&program, &mut host).unwrap();
 
     // Set fragment_size to usize::MAX so that `len() * fragment_size` overflows.
     trace_generation_context.fragment_size = usize::MAX;
@@ -1106,7 +1106,7 @@ fn test_build_trace_returns_err_when_chiplets_trace_exceeds_max_len() {
     );
     let mut host = DefaultHost::default();
     let (execution_output, mut trace_generation_context) =
-        processor.execute_for_trace(&program, &mut host).unwrap();
+        processor.execute_for_trace_sync(&program, &mut host).unwrap();
 
     // Note: the last fragment may have fewer rows than the fragment size, so this is really an
     // upper bound on the number of core trace rows
@@ -1156,7 +1156,7 @@ fn test_build_trace_returns_err_on_empty_core_trace_contexts() {
     );
     let mut host = DefaultHost::default();
     let (execution_output, mut trace_generation_context) =
-        processor.execute_for_trace(&program, &mut host).unwrap();
+        processor.execute_for_trace_sync(&program, &mut host).unwrap();
 
     // Clear core_trace_contexts to simulate an empty trace.
     trace_generation_context.core_trace_contexts.clear();

@@ -13,14 +13,14 @@ use super::{
     handlers::{EventError, EventHandler, EventHandlerRegistry},
 };
 use crate::{
-    DebugError, DebugHandler, ExecutionError, Host, MastForestStore, MemMastForestStore,
-    ProcessorState, TraceError, advice::AdviceMutation,
+    DebugError, DebugHandler, ExecutionError, MastForestStore, MemMastForestStore, ProcessorState,
+    SyncHost, TraceError, advice::AdviceMutation,
 };
 
 // DEFAULT HOST IMPLEMENTATION
 // ================================================================================================
 
-/// A default Host implementation that provides the essential functionality required by the VM.
+/// A default SyncHost implementation that provides the essential functionality required by the VM.
 #[derive(Debug)]
 pub struct DefaultHost<
     D: DebugHandler = DefaultDebugHandler,
@@ -124,7 +124,7 @@ where
     }
 }
 
-impl<D, S> Host for DefaultHost<D, S>
+impl<D, S> SyncHost for DefaultHost<D, S>
 where
     D: DebugHandler,
     S: SourceManager,
@@ -184,10 +184,10 @@ where
 // NOOPHOST
 // ================================================================================================
 
-/// A Host which does nothing.
+/// A SyncHost which does nothing.
 pub struct NoopHost;
 
-impl Host for NoopHost {
+impl SyncHost for NoopHost {
     #[inline(always)]
     fn get_label_and_source_file(
         &self,

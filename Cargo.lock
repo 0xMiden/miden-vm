@@ -425,6 +425,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tinytemplate",
+ "tokio",
  "walkdir",
 ]
 
@@ -1693,6 +1694,7 @@ dependencies = [
  "rand_chacha",
  "serde",
  "serde_json",
+ "tokio",
  "tracing",
  "tracing-forest",
  "tracing-subscriber",

@@ -55,7 +55,7 @@ fn test_before_enter_decorator_executed_once_fast() {
         .with_tracing(true);
 
     // Execute the program
-    let result = processor.execute(&program, &mut host);
+    let result = processor.execute_sync(&program, &mut host);
     assert!(result.is_ok(), "Execution failed: {:?}", result);
 
     // Verify decorator execution counts
@@ -85,7 +85,7 @@ fn test_multiple_before_enter_decorators_each_once_fast() {
         .with_tracing(true);
 
     // Execute the program
-    let result = processor.execute(&program, &mut host);
+    let result = processor.execute_sync(&program, &mut host);
     assert!(result.is_ok(), "Execution failed: {:?}", result);
 
     // Verify decorator execution counts
@@ -131,7 +131,7 @@ fn test_multiple_after_exit_decorators_each_once_fast() {
         .with_tracing(true);
 
     // Execute the program
-    let result = processor.execute(&program, &mut host);
+    let result = processor.execute_sync(&program, &mut host);
     assert!(result.is_ok(), "Execution failed: {:?}", result);
 
     // Verify decorator execution counts
@@ -183,7 +183,7 @@ fn test_decorator_execution_order_fast() {
         .with_tracing(true);
 
     // Execute the program
-    let result = processor.execute(&program, &mut host);
+    let result = processor.execute_sync(&program, &mut host);
     assert!(result.is_ok(), "Execution failed: {:?}", result);
 
     // Verify decorator execution counts
@@ -232,7 +232,7 @@ fn test_processor_decorator_execution() {
         .with_debugging(true)
         .with_tracing(true);
 
-    let execution_result = processor.execute(&program, &mut host);
+    let execution_result = processor.execute_sync(&program, &mut host);
     assert!(execution_result.is_ok(), "Execution failed: {:?}", execution_result);
 
     // Check decorator execution
@@ -276,7 +276,7 @@ fn test_no_duplication_between_inner_and_before_exit_decorators_fast() {
         .with_tracing(true);
 
     // Execute the program
-    let result = processor.execute(&program, &mut host);
+    let result = processor.execute_sync(&program, &mut host);
     assert!(result.is_ok(), "Execution failed: {:?}", result);
 
     // Verify each decorator executes exactly once (no duplication)
@@ -342,7 +342,7 @@ fn test_decorator_bypass_in_release_mode() {
     let counter = processor.decorator_retrieval_count.clone();
     let mut host = TestHost::new();
 
-    processor.execute(&program, &mut host).unwrap();
+    processor.execute_sync(&program, &mut host).unwrap();
     assert_eq!(counter.get(), 0, "decorators should not be retrieved in release mode");
 }
 
@@ -357,6 +357,6 @@ fn test_decorator_bypass_in_debug_mode() {
     let counter = processor.decorator_retrieval_count.clone();
     let mut host = TestHost::new();
 
-    processor.execute(&program, &mut host).unwrap();
+    processor.execute_sync(&program, &mut host).unwrap();
     assert!(counter.get() > 0, "decorators should be retrieved in debug mode");
 }

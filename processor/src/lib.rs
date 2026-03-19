@@ -46,7 +46,7 @@ pub use errors::{AceError, ExecutionError, HostError, MemoryError};
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
 pub use fast::{BreakReason, ExecutionOutput, FastProcessor, ResumeContext};
 pub use host::{
-    AsyncHost, FutureMaybeSend, Host, MastForestStore, MemMastForestStore,
+    FutureMaybeSend, Host, MastForestStore, MemMastForestStore, SyncHost,
     debug::DefaultDebugHandler,
     default::{DefaultHost, HostLibrary},
     handlers::{DebugError, DebugHandler, TraceError},
@@ -96,7 +96,7 @@ pub mod trace;
 /// # Errors
 /// Returns an error if program execution fails for any reason.
 #[tracing::instrument("execute_program", skip_all)]
-pub fn execute(
+pub async fn execute(
     program: &Program,
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
@@ -105,7 +105,7 @@ pub fn execute(
 ) -> Result<ExecutionTrace, ExecutionError> {
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, options);
     let (execution_output, trace_generation_context) =
-        processor.execute_for_trace(program, host)?;
+        processor.execute_for_trace(program, host).await?;
 
     let trace = trace::build_trace(execution_output, trace_generation_context, program.to_info())?;
 
@@ -113,18 +113,18 @@ pub fn execute(
     Ok(trace)
 }
 
-/// Async compatibility wrapper for [`execute`].
-#[tracing::instrument("execute_program_async", skip_all)]
-pub async fn execute_async(
+/// Synchronous wrapper for the async `execute()` function.
+#[tracing::instrument("execute_program_sync", skip_all)]
+pub fn execute_sync(
     program: &Program,
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
-    host: &mut impl AsyncHost,
+    host: &mut impl SyncHost,
     options: ExecutionOptions,
 ) -> Result<ExecutionTrace, ExecutionError> {
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, options);
     let (execution_output, trace_generation_context) =
-        processor.execute_for_trace_async(program, host).await?;
+        processor.execute_for_trace_sync(program, host)?;
 
     let trace = trace::build_trace(execution_output, trace_generation_context, program.to_info())?;
 

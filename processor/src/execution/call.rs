@@ -4,7 +4,7 @@ use core::ops::ControlFlow;
 use miden_core::{FMP_ADDR, FMP_INIT_VALUE};
 
 use crate::{
-    BreakReason, ContextId, Host, MapExecErr, Stopper,
+    BreakReason, ContextId, MapExecErr, Stopper, SyncHost,
     continuation_stack::Continuation,
     execution::{
         ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation,
@@ -29,7 +29,7 @@ pub(super) fn start_call_node<P, H, S, T>(
 ) -> ControlFlow<BreakReason>
 where
     P: Processor,
-    H: Host,
+    H: SyncHost,
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
@@ -110,7 +110,7 @@ pub(super) fn finish_call_node<P, H, S, T>(
 ) -> ControlFlow<BreakReason>
 where
     P: Processor,
-    H: Host,
+    H: SyncHost,
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {

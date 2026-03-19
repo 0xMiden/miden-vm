@@ -7,9 +7,9 @@ use miden_core::{
 };
 
 use crate::{
-    AsyncHost, Host,
+    Host, SyncHost,
     errors::{MapExecErrWithOpIdx, advice_error_with_context, event_error_with_context},
-    fast::{AsyncHostAdapter, BreakReason, FastProcessor},
+    fast::{BreakReason, FastProcessor, HostAdapter},
 };
 
 mod sys_event_handlers;
@@ -26,7 +26,7 @@ impl FastProcessor {
         basic_block_node: &BasicBlockNode,
         node_id: MastNodeId,
         current_forest: &Arc<MastForest>,
-        host: &mut impl Host,
+        host: &mut impl SyncHost,
     ) -> ControlFlow<BreakReason> {
         if self.should_execute_decorators() {
             #[cfg(test)]
@@ -44,7 +44,7 @@ impl FastProcessor {
     #[inline(always)]
     pub(super) fn op_emit(
         &mut self,
-        host: &mut impl Host,
+        host: &mut impl SyncHost,
         current_forest: &MastForest,
         node_id: MastNodeId,
         op_idx: usize,
@@ -92,7 +92,7 @@ impl FastProcessor {
     #[inline(always)]
     pub(super) async fn op_emit_async(
         &mut self,
-        host: &mut impl AsyncHost,
+        host: &mut impl Host,
         current_forest: &MastForest,
         node_id: MastNodeId,
         op_idx: usize,
@@ -100,7 +100,7 @@ impl FastProcessor {
         let event_id = EventId::from_felt(self.stack_get(0));
 
         if let Some(system_event) = SystemEvent::from_event_id(event_id) {
-            let host_adapter = AsyncHostAdapter::new(host);
+            let host_adapter = HostAdapter::new(host);
             if let Err(err) = handle_system_event(self, system_event).map_exec_err_with_op_idx(
                 current_forest,
                 node_id,
@@ -114,8 +114,8 @@ impl FastProcessor {
             let mutations = match host.on_event(&processor_state).await {
                 Ok(m) => m,
                 Err(err) => {
-                    let host_adapter = AsyncHostAdapter::new(host);
-                    let event_name = Host::resolve_event(&host_adapter, event_id).cloned();
+                    let host_adapter = HostAdapter::new(host);
+                    let event_name = SyncHost::resolve_event(&host_adapter, event_id).cloned();
                     return ControlFlow::Break(BreakReason::Err(event_error_with_context(
                         err,
                         current_forest,
@@ -127,7 +127,7 @@ impl FastProcessor {
                 },
             };
             if let Err(err) = self.advice.apply_mutations(mutations) {
-                let host_adapter = AsyncHostAdapter::new(host);
+                let host_adapter = HostAdapter::new(host);
                 return ControlFlow::Break(BreakReason::Err(advice_error_with_context(
                     err,
                     current_forest,

@@ -4,6 +4,7 @@ use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{ExecutionOptions, FastProcessor, advice::AdviceInputs, trace};
 use miden_vm::{Assembler, DefaultHost, StackInputs, execute, internal::InputFile};
+use tokio::runtime::Runtime;
 use walkdir::WalkDir;
 
 /// The size of each trace fragment (in rows) when executing programs for trace generation.
@@ -59,7 +60,7 @@ fn build_trace(c: &mut Criterion) {
                     let stack_inputs_vec: Vec<_> = stack_inputs.iter().rev().copied().collect();
                     let stack_inputs = StackInputs::new(&stack_inputs_vec).unwrap();
 
-                    bench.iter_batched(
+                    bench.to_async(Runtime::new().unwrap()).iter_batched(
                         || {
                             let host = DefaultHost::default()
                                 .with_library(&CoreLibrary::default())
@@ -75,9 +76,9 @@ fn build_trace(c: &mut Criterion) {
 
                             (host, program.clone(), processor)
                         },
-                        |(mut host, program, processor)| {
+                        |(mut host, program, processor)| async move {
                             let (execution_output, trace_generation_context) =
-                                processor.execute_for_trace(&program, &mut host).unwrap();
+                                processor.execute_for_trace(&program, &mut host).await.unwrap();
 
                             let trace = trace::build_trace(
                                 execution_output,
@@ -103,7 +104,7 @@ fn build_trace(c: &mut Criterion) {
                         .assemble_program(&source)
                         .expect("Failed to compile test source.");
 
-                    bench.iter_batched(
+                    bench.to_async(Runtime::new().unwrap()).iter_batched(
                         || {
                             let host = DefaultHost::default()
                                 .with_library(&CoreLibrary::default())
@@ -112,7 +113,7 @@ fn build_trace(c: &mut Criterion) {
 
                             (host, stack_inputs, advice_inputs, program.clone())
                         },
-                        |(mut host, stack_inputs, advice_inputs, program)| {
+                        |(mut host, stack_inputs, advice_inputs, program)| async move {
                             let trace = execute(
                                 &program,
                                 stack_inputs,
@@ -120,6 +121,7 @@ fn build_trace(c: &mut Criterion) {
                                 &mut host,
                                 ExecutionOptions::default(),
                             )
+                            .await
                             .unwrap();
                             black_box(trace);
                         },

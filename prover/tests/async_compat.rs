@@ -3,12 +3,12 @@ use std::sync::Arc;
 use miden_assembly::Assembler;
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_processor::{
-    AsyncHost, DefaultHost, Felt, FutureMaybeSend, ProcessorState, Word,
+    DefaultHost, Felt, FutureMaybeSend, Host, ProcessorState, Word,
     advice::AdviceMutation,
     event::{EventError, EventName},
     mast::MastForest,
 };
-use miden_prover::{AdviceInputs, ProvingOptions, StackInputs, prove, prove_async};
+use miden_prover::{AdviceInputs, ProvingOptions, StackInputs, prove, prove_sync};
 
 struct YieldingAsyncHost {
     event_calls: usize,
@@ -20,7 +20,7 @@ impl YieldingAsyncHost {
     }
 }
 
-impl AsyncHost for YieldingAsyncHost {
+impl Host for YieldingAsyncHost {
     fn get_label_and_source_file(
         &self,
         _location: &Location,
@@ -70,12 +70,12 @@ async fn prove_async_matches_prove() {
 
     let mut sync_host = DefaultHost::default();
     let (sync_outputs, sync_proof) =
-        prove(&program, stack_inputs, advice_inputs.clone(), &mut sync_host, options.clone())
+        prove_sync(&program, stack_inputs, advice_inputs.clone(), &mut sync_host, options.clone())
             .unwrap();
 
     let mut async_host = DefaultHost::default();
     let (async_outputs, async_proof) =
-        prove_async(&program, stack_inputs, advice_inputs, &mut async_host, options)
+        prove(&program, stack_inputs, advice_inputs, &mut async_host, options)
             .await
             .unwrap();
 
@@ -94,7 +94,7 @@ async fn prove_async_supports_async_only_host_events() {
         .expect("program should compile");
 
     let mut host = YieldingAsyncHost::new();
-    let (_outputs, proof) = prove_async(
+    let (_outputs, proof) = prove(
         &program,
         StackInputs::default(),
         AdviceInputs::default(),

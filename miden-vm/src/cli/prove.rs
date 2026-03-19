@@ -146,9 +146,14 @@ impl ProveCmd {
         let proving_options = self.get_proof_options()?;
 
         // execute program and generate proof
-        let (stack_outputs, proof) =
-            miden_prover::prove(&program, stack_inputs, advice_inputs, &mut host, proving_options)
-                .wrap_err("Failed to prove program")?;
+        let (stack_outputs, proof) = miden_prover::prove_sync(
+            &program,
+            stack_inputs,
+            advice_inputs,
+            &mut host,
+            proving_options,
+        )
+        .wrap_err("Failed to prove program")?;
 
         println!("Program proved in {} ms", now.elapsed().as_millis());
 

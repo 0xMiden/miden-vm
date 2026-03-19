@@ -3,7 +3,7 @@ use std::sync::Arc;
 use miden_assembly::Assembler;
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_processor::{
-    AsyncHost, DefaultHost, ExecutionOptions, FastProcessor, Felt, FutureMaybeSend, ProcessorState,
+    DefaultHost, ExecutionOptions, FastProcessor, Felt, FutureMaybeSend, Host, ProcessorState,
     StackInputs, Word,
     advice::{AdviceInputs, AdviceMutation},
     event::{EventError, EventName},
@@ -20,7 +20,7 @@ impl YieldingAsyncHost {
     }
 }
 
-impl AsyncHost for YieldingAsyncHost {
+impl Host for YieldingAsyncHost {
     fn get_label_and_source_file(
         &self,
         _location: &Location,
@@ -67,7 +67,7 @@ async fn execute_async_matches_execute() {
     let advice_inputs = AdviceInputs::default();
 
     let mut sync_host = DefaultHost::default();
-    let sync_trace = miden_processor::execute(
+    let sync_trace = miden_processor::execute_sync(
         &program,
         stack_inputs,
         advice_inputs.clone(),
@@ -77,7 +77,7 @@ async fn execute_async_matches_execute() {
     .unwrap();
 
     let mut async_host = DefaultHost::default();
-    let async_trace = miden_processor::execute_async(
+    let async_trace = miden_processor::execute(
         &program,
         stack_inputs,
         advice_inputs,
@@ -97,12 +97,12 @@ async fn fast_processor_execute_for_trace_async_matches_sync() {
 
     let mut sync_host = DefaultHost::default();
     let (sync_output, sync_ctx) = FastProcessor::new(stack_inputs)
-        .execute_for_trace(&program, &mut sync_host)
+        .execute_for_trace_sync(&program, &mut sync_host)
         .unwrap();
 
     let mut async_host = DefaultHost::default();
     let (async_output, async_ctx) = FastProcessor::new(stack_inputs)
-        .execute_for_trace_async(&program, &mut async_host)
+        .execute_for_trace(&program, &mut async_host)
         .await
         .unwrap();
 
@@ -121,7 +121,7 @@ async fn execute_async_supports_async_only_host_events() {
 
     let mut host = YieldingAsyncHost::new();
     let output = FastProcessor::new(StackInputs::default())
-        .execute_async(&program, &mut host)
+        .execute(&program, &mut host)
         .await
         .expect("async execution should succeed");
 

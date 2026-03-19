@@ -119,7 +119,8 @@ fn test_basic_block(
 
     let mut host = DefaultHost::default();
     let fast_processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
-    let fast_stack_outputs = fast_processor.execute(&program, &mut host).map(|output| output.stack);
+    let fast_stack_outputs =
+        fast_processor.execute_sync(&program, &mut host).map(|output| output.stack);
 
     // Make sure that we're not getting an output stack overflow error, as it indicates that
     // the sequence of operations makes the stack end with a non-16 depth, and doesn't tell

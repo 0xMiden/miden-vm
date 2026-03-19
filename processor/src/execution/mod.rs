@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use crate::{
-    BreakReason, ContextId, Host, Kernel, Stopper, Word,
+    BreakReason, ContextId, Kernel, Stopper, SyncHost, Word,
     continuation_stack::{Continuation, ContinuationStack},
     mast::{MastForest, MastNode, MastNodeId},
     processor::{Processor, SystemInterface},
@@ -101,7 +101,7 @@ pub(crate) struct ExecutionState<'a, P, H, S, T> {
 ///             // Handle user-initiated break (e.g., propagate break reason)
 ///         },
 ///         InternalBreakReason::Emit { basic_block_node_id, op_idx, continuation } => {
-///             // Handle Emit operation (e.g., call `Host::on_event`)
+///             // Handle Emit operation (e.g., call `SyncHost::on_event`)
 ///             self.op_emit(...);
 ///    
 ///             // As per `InternalBreakReason::Emit` documentation, we call `finish_emit_op_execution`
@@ -132,7 +132,7 @@ pub(crate) fn execute_impl<P, S, T>(
     continuation_stack: &mut ContinuationStack,
     current_forest: &mut Arc<MastForest>,
     kernel: &Kernel,
-    host: &mut impl Host,
+    host: &mut impl SyncHost,
     tracer: &mut T,
     stopper: &S,
 ) -> ControlFlow<InternalBreakReason>

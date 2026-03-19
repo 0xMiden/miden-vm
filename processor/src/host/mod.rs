@@ -64,7 +64,7 @@ impl AdviceMutation {
 /// 1. getting a library's MAST forest,
 /// 2. handling VM events (which can mutate the process' advice provider), and
 /// 3. handling debug and trace events.
-pub trait Host {
+pub trait SyncHost {
     // REQUIRED METHODS
     // --------------------------------------------------------------------------------------------
 
@@ -88,7 +88,7 @@ pub trait Host {
     /// ## Implementation notes
     /// - Extract the event ID via `EventId::from_felt(process.get_stack_item(0))`
     /// - Return errors without event names or IDs - the caller will enrich them via
-    ///   [`Host::resolve_event()`]
+    ///   [`SyncHost::resolve_event()`]
     /// - System events (IDs 0-255) are handled by the VM before calling this method
     fn on_event(&mut self, process: &ProcessorState<'_>)
     -> Result<Vec<AdviceMutation>, EventError>;
@@ -123,9 +123,9 @@ pub trait Host {
 
 /// Defines an async interface by which the VM can interact with the host during execution.
 ///
-/// This mirrors the historic async host surface so async consumers can suspend at host
-/// boundaries without changing the sync-first core `Host` contract.
-pub trait AsyncHost {
+/// This mirrors the historic async host surface while allowing the sync-first core to depend on
+/// [`SyncHost`].
+pub trait Host {
     // REQUIRED METHODS
     // --------------------------------------------------------------------------------------------
 
@@ -149,7 +149,7 @@ pub trait AsyncHost {
     /// ## Implementation notes
     /// - Extract the event ID via `EventId::from_felt(process.get_stack_item(0))`
     /// - Return errors without event names or IDs - the caller will enrich them via
-    ///   [`AsyncHost::resolve_event()`]
+    ///   [`Host::resolve_event()`]
     /// - System events (IDs 0-255) are handled by the VM before calling this method
     fn on_event(
         &mut self,
@@ -184,19 +184,19 @@ pub trait AsyncHost {
     }
 }
 
-impl<T> AsyncHost for T
+impl<T> Host for T
 where
-    T: Host,
+    T: SyncHost,
 {
     fn get_label_and_source_file(
         &self,
         location: &Location,
     ) -> (SourceSpan, Option<Arc<SourceFile>>) {
-        Host::get_label_and_source_file(self, location)
+        SyncHost::get_label_and_source_file(self, location)
     }
 
     fn get_mast_forest(&self, node_digest: &Word) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
-        let result = Host::get_mast_forest(self, node_digest);
+        let result = SyncHost::get_mast_forest(self, node_digest);
         async move { result }
     }
 
@@ -204,7 +204,7 @@ where
         &mut self,
         process: &ProcessorState<'_>,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
-        let result = Host::on_event(self, process);
+        let result = SyncHost::on_event(self, process);
         async move { result }
     }
 
@@ -213,15 +213,15 @@ where
         process: &ProcessorState,
         options: &DebugOptions,
     ) -> Result<(), DebugError> {
-        Host::on_debug(self, process, options)
+        SyncHost::on_debug(self, process, options)
     }
 
     fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
-        Host::on_trace(self, process, trace_id)
+        SyncHost::on_trace(self, process, trace_id)
     }
 
     fn resolve_event(&self, event_id: EventId) -> Option<&EventName> {
-        Host::resolve_event(self, event_id)
+        SyncHost::resolve_event(self, event_id)
     }
 }
 

@@ -14,7 +14,7 @@ use miden_processor::{
     advice::{AdviceInputs, AdviceMutation},
     crypto::random::RandomCoin,
     event::EventError,
-    execute,
+    execute_sync,
     operation::OperationError,
 };
 use miden_utils_testing::{
@@ -467,7 +467,7 @@ fn falcon_prove_verify() {
     host.register_handler(EVENT_FALCON_SIG_TO_STACK, Arc::new(push_falcon_signature))
         .unwrap();
 
-    let trace = execute(&program, stack_inputs, advice_inputs, &mut host, Default::default())
+    let trace = execute_sync(&program, stack_inputs, advice_inputs, &mut host, Default::default())
         .expect("failed to execute");
     trace.check_constraints();
 }

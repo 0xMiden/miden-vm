@@ -236,6 +236,6 @@ fn run_sha512_with_max_hash_len(
     let processor =
         FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options);
 
-    processor.execute(&program, &mut host)?;
+    processor.execute_sync(&program, &mut host)?;
     Ok(())
 }

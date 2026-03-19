@@ -54,7 +54,7 @@ fn stack_get_word_out_of_bounds_read() {
     let processor = FastProcessor::new(StackInputs::default());
 
     // Should not panic
-    processor.execute(&program, &mut host).unwrap();
+    processor.execute_sync(&program, &mut host).unwrap();
 }
 
 #[test]
@@ -186,7 +186,7 @@ fn test_syscall_fail() {
 
     let processor = FastProcessor::new(stack_inputs);
 
-    let err = processor.execute(&program, &mut host).unwrap_err();
+    let err = processor.execute_sync(&program, &mut host).unwrap_err();
 
     // Check that the error is due to the syscall target not being in the kernel
     assert_matches!(
@@ -233,7 +233,7 @@ fn test_cycle_limit_exceeded() {
 
     let processor =
         FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options);
-    let err = processor.execute(&program, &mut host).unwrap_err();
+    let err = processor.execute_sync(&program, &mut host).unwrap_err();
 
     assert_matches!(err, ExecutionError::CycleLimitExceeded(max_cycles) if max_cycles == MIN_TRACE_LEN as u32);
 }
@@ -266,7 +266,7 @@ fn test_cycle_limit_exactly_max_cycles_succeeds() {
 
     let processor =
         FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options);
-    let result = processor.execute(&program, &mut host);
+    let result = processor.execute_sync(&program, &mut host);
 
     // The program should succeed since it uses exactly max_cycles cycles.
     assert!(
@@ -285,7 +285,7 @@ fn test_assert() {
         let program = simple_program_with_ops(vec![Operation::Assert(ZERO)]);
 
         let processor = FastProcessor::new(stack_inputs);
-        let result = processor.execute(&program, &mut host);
+        let result = processor.execute_sync(&program, &mut host);
 
         // Check that the execution succeeds
         assert!(result.is_ok());
@@ -297,7 +297,7 @@ fn test_assert() {
         let program = simple_program_with_ops(vec![Operation::Assert(ZERO)]);
 
         let processor = FastProcessor::new(stack_inputs);
-        let err = processor.execute(&program, &mut host).unwrap_err();
+        let err = processor.execute_sync(&program, &mut host).unwrap_err();
 
         // Check that the error is due to a failed assertion
         assert_matches!(
@@ -324,7 +324,7 @@ fn test_valid_combinations_and(#[case] stack_inputs: Vec<Felt>, #[case] expected
 
     let mut host = DefaultHost::default();
     let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
-    let stack_outputs = processor.execute(&program, &mut host).unwrap().stack;
+    let stack_outputs = processor.execute_sync(&program, &mut host).unwrap().stack;
 
     assert_eq!(stack_outputs.get_num_elements(1)[0], expected_output);
 }
@@ -343,7 +343,7 @@ fn test_valid_combinations_or(#[case] stack_inputs: Vec<Felt>, #[case] expected_
 
     let mut host = DefaultHost::default();
     let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
-    let stack_outputs = processor.execute(&program, &mut host).unwrap().stack;
+    let stack_outputs = processor.execute_sync(&program, &mut host).unwrap().stack;
 
     assert_eq!(stack_outputs.get_num_elements(1)[0], expected_output);
 }
@@ -387,7 +387,7 @@ fn test_frie2f4() {
 
     // fast processor
     let fast_processor = FastProcessor::new(stack_inputs);
-    let stack_outputs = fast_processor.execute(&program, &mut host).unwrap().stack;
+    let stack_outputs = fast_processor.execute_sync(&program, &mut host).unwrap().stack;
 
     insta::assert_debug_snapshot!(stack_outputs);
 }
@@ -472,7 +472,7 @@ fn test_call_node_preserves_stack_overflow_table() {
     );
 
     // Execute the program
-    let result = processor.execute_mut(&program, &mut host).unwrap();
+    let result = processor.execute_sync_mut(&program, &mut host).unwrap();
 
     assert_eq!(
         result.get_num_elements(16),
@@ -540,7 +540,7 @@ fn test_external_node_decorator_sequencing() {
         .with_debugging(true)
         .with_tracing(true);
 
-    let result = processor.execute(&program, &mut host);
+    let result = processor.execute_sync(&program, &mut host);
     assert!(result.is_ok(), "Execution failed: {:?}", result);
 
     // Verify all decorators executed
@@ -605,7 +605,7 @@ fn test_continuation_stack_limit_exceeded() {
 
     let processor =
         FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options);
-    let err = processor.execute(&program, &mut host).unwrap_err();
+    let err = processor.execute_sync(&program, &mut host).unwrap_err();
 
     assert_matches!(err, ExecutionError::Internal(msg) if msg.contains("continuation stack"));
 }

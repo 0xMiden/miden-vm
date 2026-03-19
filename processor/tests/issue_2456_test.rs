@@ -49,6 +49,6 @@ fn test_issue_2456_statically_linked_library_call() {
     let options = ExecutionOptions::default();
 
     let result =
-        miden_processor::execute(&program, stack_inputs, advice_inputs, &mut host, options);
+        miden_processor::execute_sync(&program, stack_inputs, advice_inputs, &mut host, options);
     assert!(result.is_ok(), "Execution should succeed but got error: {:?}", result.err());
 }

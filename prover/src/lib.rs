@@ -29,7 +29,7 @@ mod proving_options;
 pub use miden_air::{DeserializationError, ProcessorAir, PublicInputs, config};
 pub use miden_core::proof::{ExecutionProof, HashFunction};
 pub use miden_processor::{
-    AsyncHost, ExecutionError, FutureMaybeSend, Host, InputError, StackInputs, StackOutputs, Word,
+    ExecutionError, FutureMaybeSend, Host, InputError, StackInputs, StackOutputs, SyncHost, Word,
     advice::AdviceInputs, crypto, field, serde, utils,
 };
 pub use proving_options::ProvingOptions;
@@ -48,7 +48,7 @@ pub use proving_options::ProvingOptions;
 /// # Errors
 /// Returns an error if program execution or STARK proof generation fails for any reason.
 #[instrument("prove_program", skip_all)]
-pub fn prove(
+pub async fn prove(
     program: &Program,
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
@@ -60,7 +60,7 @@ pub fn prove(
         FastProcessor::new_with_options(stack_inputs, advice_inputs, *options.execution_options());
 
     let (execution_output, trace_generation_context) =
-        processor.execute_for_trace(program, host)?;
+        processor.execute_for_trace(program, host).await?;
 
     let trace = build_trace(execution_output, trace_generation_context, program.to_info())?;
 
@@ -119,20 +119,20 @@ pub fn prove(
     Ok((stack_outputs, proof))
 }
 
-/// Async compatibility wrapper for [`prove`].
-#[instrument("prove_program_async", skip_all)]
-pub async fn prove_async(
+/// Synchronous wrapper for the async `prove()` function.
+#[instrument("prove_program_sync", skip_all)]
+pub fn prove_sync(
     program: &Program,
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
-    host: &mut impl AsyncHost,
+    host: &mut impl SyncHost,
     options: ProvingOptions,
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
     let processor =
         FastProcessor::new_with_options(stack_inputs, advice_inputs, *options.execution_options());
 
     let (execution_output, trace_generation_context) =
-        processor.execute_for_trace_async(program, host).await?;
+        processor.execute_for_trace_sync(program, host)?;
 
     let trace = build_trace(execution_output, trace_generation_context, program.to_info())?;
 
