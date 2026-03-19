@@ -120,7 +120,10 @@ impl Deserializable for MastNodeEntry {
     }
 }
 
-/// Logical node metadata combining fixed-width structure and the node digest.
+/// Logical node metadata combining fixed-width structure and a digest value.
+///
+/// This is a convenience type for APIs that want both pieces together. The wire format does not
+/// require `MastNodeInfo` to appear as one contiguous fixed-width section.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MastNodeInfo {
     entry: MastNodeEntry,
@@ -202,12 +205,13 @@ const DYN: u8 = 6;
 const DYNCALL: u8 = 7;
 const EXTERNAL: u8 = 8;
 
-/// Represents the variant of a [`MastNode`], as well as any additional data. For example, for more
-/// efficient decoding, and because of the frequency with which these node types appear, we directly
-/// represent the child indices for `Join`, `Split`, and `Loop`, `Call` and `SysCall` inline.
+/// Represents the variant of a [`MastNode`], along with any inline structural payload.
 ///
-/// The serialized representation of the MAST node type is guaranteed to be 8 bytes, so that
-/// [`MastNodeInfo`] (which contains it) can be of fixed width.
+/// Child indices for `Join`, `Split`, `Loop`, `Call`, and `SysCall` are stored inline so random
+/// access does not need any extra pointer chasing.
+///
+/// The serialized representation is always 8 bytes, which keeps [`MastNodeEntry`] fixed-width on
+/// the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum MastNodeType {

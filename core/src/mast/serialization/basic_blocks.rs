@@ -1,13 +1,19 @@
-//! Basic block serialization format.
+//! Basic block serialization for the MAST wire format.
 //!
-//! ## Wire Format
+//! Basic blocks are the variable-size part of the format. Node entries only store an offset into
+//! this section.
 //!
-//! - Padded operations (variable size)
-//! - Batch count (4 bytes)
-//! - Delta-encoded indptr per batch (4 bytes each: 8 deltas × 4 bits, packed)
-//! - Padding flags per batch (1 byte each, bit-packed)
+//! The wire layout for one basic block is:
+//! - Encoded operations vector (`Vec<Operation>`)
+//! - Batch count (`u32`)
+//! - Delta-encoded `indptr` arrays for each batch (`4 * num_batches` bytes)
+//! - Padding flags for each batch (`1 * num_batches` bytes)
 //!
-//! **Total**: `ops_size + 4 + (5 * num_batches)` bytes
+//! The total encoded size is:
+//! `encoded_operations_len + size_of::<u32>() + (5 * num_batches)`.
+//!
+//! This matches [`basic_block_data_len`], which is used for size accounting in stripped and
+//! hashless serialization.
 
 use alloc::vec::Vec;
 

@@ -14,12 +14,21 @@ use crate::{
     serde::{Deserializable, DeserializationError, SliceReader},
 };
 
+/// Digest sources for a parsed serialized forest.
+///
+/// Non-external nodes either read from the internal-hash section or from a rebuilt in-memory hash
+/// table. External nodes always read from the external-digest section.
 #[derive(Debug, Clone)]
 struct ForestDigests {
     slot_by_node: Vec<u32>,
     hash_table: Option<Vec<crate::Word>>,
 }
 
+/// A serialized forest whose digest source has been resolved.
+///
+/// This is the elaborated layer between raw wire layout and a fully materialized [`MastForest`].
+/// It combines structural access from [`ForestLayout`] with digest access from either wire sections
+/// or a rebuilt in-memory hash table.
 #[derive(Debug, Clone)]
 pub(super) struct ResolvedSerializedForest<'a> {
     bytes: &'a [u8],
@@ -30,6 +39,8 @@ pub(super) struct ResolvedSerializedForest<'a> {
 impl ForestDigests {
     fn new(bytes: &[u8], layout: &ForestLayout) -> Result<Self, DeserializationError> {
         let slot_by_node = build_digest_slot_by_node(bytes, layout)?;
+        // If the internal-hash section is absent, rebuild all non-external digests once and cache
+        // them for later lookups.
         let hash_table = if layout.node_hash_offset.is_none() {
             Some(recompute_hash_table(bytes, layout)?)
         } else {
@@ -66,11 +77,13 @@ impl ForestDigests {
 }
 
 impl<'a> ResolvedSerializedForest<'a> {
+    /// Resolves digest access for a parsed serialized forest.
     pub(super) fn new(bytes: &'a [u8], layout: ForestLayout) -> Result<Self, DeserializationError> {
         let digests = ForestDigests::new(bytes, &layout)?;
         Ok(Self { bytes, layout, digests })
     }
 
+    /// Materializes a full [`MastForest`] from the serialized structure and resolved digests.
     pub(super) fn materialize(
         &self,
         advice_map: AdviceMap,

@@ -8,6 +8,11 @@ use crate::{
     serde::{ByteReader, Deserializable, DeserializationError, SliceReader},
 };
 
+/// Fixed offsets and counts for the structural sections of a serialized MAST forest.
+///
+/// This is the shared substrate used by both serialized random-access views and the reader-based
+/// deserialization paths. It answers "where is this section?" but does not decide whether the
+/// bytes should be trusted.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ForestLayout {
     pub(super) node_count: usize,
@@ -25,6 +30,10 @@ pub(crate) struct ForestLayout {
     pub(super) node_hash_count: usize,
 }
 
+/// Raw wire flags from the MAST header.
+///
+/// These flags describe which optional sections are present in the payload. Trust policy lives in
+/// the caller that reads the payload, not in the flags themselves.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct WireFlags(u8);
 
@@ -33,6 +42,8 @@ impl ForestLayout {
         self.node_hash_offset.is_none()
     }
 
+    /// Converts scan-time offsets, which are relative to the post-header payload, into byte
+    /// offsets into the full serialized blob.
     pub(super) fn resolve(mut self) -> Result<Self, DeserializationError> {
         let header_len = MAGIC.len() + 1 + VERSION.len();
         self.roots_offset = header_len.checked_add(self.roots_offset).ok_or_else(|| {
@@ -165,6 +176,7 @@ pub(super) fn read_header_and_scan_layout<R: OffsetTrackingReader>(
     source: &mut R,
     allow_hashless: bool,
 ) -> Result<(WireFlags, ForestLayout), DeserializationError> {
+    // Reader trust policy is enforced here, before deeper parsing.
     let (raw_flags, _version) = read_and_validate_header(source)?;
     let flags = WireFlags::new(raw_flags)?;
     if flags.is_hashless() && !allow_hashless {

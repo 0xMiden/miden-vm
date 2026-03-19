@@ -1,4 +1,16 @@
-//! The serialization format of MastForest is as follows:
+//! MAST forest serialization keeps one fixed structural layout for full, stripped, and hashless
+//! payloads.
+//!
+//! The main goal is to keep random access cheap in stripped and hashless modes. Node structure
+//! stays in one fixed-width section. Variable-size data lives in separate sections. Internal node
+//! digests also live in a separate section so hashless payloads can omit them without changing the
+//! structural layout.
+//!
+//! Wire flags describe serializer intent, not reader trust policy. Trusted [`MastForest`] reads
+//! reject hashless payloads. [`crate::mast::UntrustedMastForest`] accepts them and rebuilds
+//! non-external digests before use.
+//!
+//! The format is:
 //!
 //! (Metadata)
 //! - MAGIC (4 bytes) + FLAGS (1 byte) + VERSION (3 bytes)
@@ -34,18 +46,12 @@
 //! - NodeToDecoratorIds CSR (before_enter and after_exit decorators, dense representation)
 //! - Procedure names map (`BTreeMap<Word, String>`)
 //!
-//! # Stripped Format
+//! In stripped format, the `DebugInfo` section is omitted and readers materialize an empty
+//! `DebugInfo`.
 //!
-//! When serializing with [`MastForest::write_stripped`], the FLAGS byte has bit 0 set
-//! and the entire DebugInfo section is omitted. Deserialization auto-detects the format
-//! and creates an empty `DebugInfo` with valid CSR structures when reading stripped files.
-//!
-//! # Hashless Format
-//!
-//! When serializing with [`MastForest::write_hashless`], the FLAGS byte has bit 1 set, and
-//! bit 0 is also set (hashless implies stripped). In this format, the general node-hash section
-//! is omitted entirely. Trusted deserialization rejects hashless inputs; use
-//! [`UntrustedMastForest`] instead.
+//! In hashless format, the internal node-hash section is omitted and `HASHLESS` also implies
+//! `STRIPPED`. External node digests still stay on the wire because they cannot be rebuilt from
+//! local structure.
 
 #[cfg(test)]
 use alloc::string::ToString;
@@ -107,26 +113,21 @@ type StringIndex = usize;
 
 /// Magic bytes for detecting that a file is binary-encoded MAST.
 ///
-/// The format uses 4 bytes for identification followed by a flags byte:
-/// - Bytes 0-3: `b"MAST"` - Magic identifier
-/// - Byte 4: Flags byte (see [`FLAG_STRIPPED`] and [`FLAGS_RESERVED_MASK`] constants)
+/// The header is `b"MAST"` + flags byte + version bytes.
 ///
-/// This design repurposes the original null terminator (`b"MAST\0"`) as a flags byte,
-/// maintaining backward compatibility: old files have flags=0x00 (the null byte),
-/// which means "debug info present".
+/// This repurposes the old `b"MAST\0"` terminator as the flags byte, so legacy payloads still
+/// decode as "debug info present".
 const MAGIC: &[u8; 4] = b"MAST";
 
-/// Flag indicating debug info is stripped from the serialized MastForest.
+/// Flag indicating that the `DebugInfo` section is omitted from the wire payload.
 ///
-/// When this bit is set in the flags byte, the DebugInfo section is omitted entirely.
-/// The deserializer will create an empty `DebugInfo` with valid CSR structures.
+/// Readers treat this as serializer intent about the wire layout, not as a trust decision.
 const FLAG_STRIPPED: u8 = 0x01;
 
-/// Flag indicating the serialized MastForest should be treated as hashless.
+/// Flag indicating that the internal node-hash section is omitted from the wire payload.
 ///
-/// When this bit is set, the general node-hash section is omitted. External digests remain
-/// serialized in their dedicated section because they cannot be reconstructed locally.
-/// Trusted deserialization rejects this format. This flag implies [`FLAG_STRIPPED`].
+/// External digests still remain serialized in their own section because they cannot be rebuilt
+/// from local structure. This flag implies [`FLAG_STRIPPED`].
 pub(super) const FLAG_HASHLESS: u8 = 0x02;
 
 /// Mask for reserved flag bits that must be zero.
@@ -292,9 +293,9 @@ fn serialized_size_hint(forest: &MastForest, stripped: bool, hashless: bool) -> 
 
 /// A zero-copy structural view over serialized MAST forest bytes.
 ///
-/// This view accepts full, stripped, and hashless payloads. It eagerly validates the header and
-/// fixed-width structural sections needed for random access, but leaves digest resolution lazy:
-/// digests are read from the wire when present and otherwise recomputed on first access.
+/// This view accepts full, stripped, and hashless payloads. It validates the header and the
+/// fixed-width structural sections needed for random access, but it does not fully materialize the
+/// forest.
 ///
 /// Use this when callers need random access to roots or node metadata without deserializing the
 /// full forest. For strict trusted deserialization, use
@@ -343,16 +344,15 @@ impl<'a> SerializedMastForest<'a> {
     /// For strict full-payload validation, use
     /// [`crate::mast::MastForest::read_from_bytes`].
     ///
-    /// Wire flags describe serializer intent, not a trust policy. This constructor accepts
+    /// Wire flags describe serializer intent, not trust policy. This constructor accepts
     /// hashless payloads for inspection even though trusted [`crate::mast::MastForest`]
     /// deserialization rejects them.
     ///
-    /// Digest conventions:
-    /// - If `HASHLESS` is not set, node digests are read from the wire hash section.
-    /// - If `HASHLESS` is set, non-external node digests are recomputed lazily the first time
-    ///   digest-backed access is requested.
-    /// - For `External` nodes in `HASHLESS` mode, digests are marshaled opaquely from wire data;
-    ///   this view does not attempt semantic resolution of external references.
+    /// Digest lookup follows the wire layout:
+    /// - If the internal-hash section is present, non-external node digests are read from it.
+    /// - If the internal-hash section is absent, the first digest-backed access rebuilds all
+    ///   non-external node digests from structure and caches them.
+    /// - External node digests are always read from the external-digest section.
     ///
     /// # Examples
     ///
@@ -392,12 +392,12 @@ impl<'a> SerializedMastForest<'a> {
         self.layout.node_count
     }
 
-    /// Returns `true` when the wire header declares hashless serializer intent.
+    /// Returns `true` when the wire header says that the internal-hash section is omitted.
     pub fn is_hashless(&self) -> bool {
         self.flags.is_hashless()
     }
 
-    /// Returns `true` when the wire header declares stripped serializer intent.
+    /// Returns `true` when the wire header says that the `DebugInfo` section is omitted.
     pub fn is_stripped(&self) -> bool {
         self.flags.is_stripped()
     }
@@ -448,8 +448,8 @@ impl<'a> SerializedMastForest<'a> {
 
     /// Returns the digest for the node at the specified index.
     ///
-    /// This resolves digests lazily. Hashless views rebuild non-external node digests on first
-    /// digest-backed access and cache the result for later lookups.
+    /// This resolves digests lazily. If the internal-hash section is absent, the first
+    /// digest-backed access rebuilds all non-external node digests and caches them.
     pub fn node_digest_at(&self, index: usize) -> Result<crate::Word, DeserializationError> {
         self.resolved()?.node_digest_at(index)
     }
