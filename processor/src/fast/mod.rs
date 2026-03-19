@@ -200,6 +200,96 @@ pub struct FastProcessor {
 }
 
 impl FastProcessor {
+    #[inline(always)]
+    fn into_execution_output(self, stack: StackOutputs) -> ExecutionOutput {
+        ExecutionOutput {
+            stack,
+            advice: self.advice,
+            memory: self.memory,
+            final_pc_transcript: self.pc_transcript,
+        }
+    }
+
+    #[inline(always)]
+    fn execution_result_from_flow(
+        flow: ControlFlow<BreakReason, StackOutputs>,
+        processor: Self,
+    ) -> Result<ExecutionOutput, ExecutionError> {
+        match flow {
+            ControlFlow::Continue(stack_outputs) => {
+                Ok(processor.into_execution_output(stack_outputs))
+            },
+            ControlFlow::Break(break_reason) => match break_reason {
+                BreakReason::Err(err) => Err(err),
+                BreakReason::Stopped(_) => {
+                    unreachable!("Execution never stops prematurely with NeverStopper")
+                },
+            },
+        }
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    #[inline(always)]
+    fn stack_result_from_flow(
+        flow: ControlFlow<BreakReason, StackOutputs>,
+    ) -> Result<StackOutputs, ExecutionError> {
+        match flow {
+            ControlFlow::Continue(stack_outputs) => Ok(stack_outputs),
+            ControlFlow::Break(break_reason) => match break_reason {
+                BreakReason::Err(err) => Err(err),
+                BreakReason::Stopped(_) => {
+                    unreachable!("Execution never stops prematurely with NeverStopper")
+                },
+            },
+        }
+    }
+
+    #[inline(always)]
+    fn trace_result_from_parts(
+        execution_output: ExecutionOutput,
+        tracer: ExecutionTracer,
+    ) -> (ExecutionOutput, TraceGenerationContext) {
+        (execution_output, tracer.into_trace_generation_context())
+    }
+
+    #[inline(always)]
+    fn resume_result_from_flow(
+        flow: ControlFlow<BreakReason, StackOutputs>,
+        mut continuation_stack: ContinuationStack,
+        current_forest: Arc<MastForest>,
+        kernel: Kernel,
+    ) -> Result<Option<ResumeContext>, ExecutionError> {
+        match flow {
+            ControlFlow::Continue(_) => Ok(None),
+            ControlFlow::Break(break_reason) => match break_reason {
+                BreakReason::Err(err) => Err(err),
+                BreakReason::Stopped(maybe_continuation) => {
+                    if let Some(continuation) = maybe_continuation {
+                        continuation_stack.push_continuation(continuation);
+                    }
+
+                    Ok(Some(ResumeContext {
+                        current_forest,
+                        continuation_stack,
+                        kernel,
+                    }))
+                },
+            },
+        }
+    }
+
+    #[inline(always)]
+    fn current_stack_outputs(&self) -> StackOutputs {
+        StackOutputs::new(
+            &self.stack[self.stack_bot_idx..self.stack_top_idx]
+                .iter()
+                .rev()
+                .copied()
+                .collect::<Vec<_>>(),
+        )
+        .unwrap()
+    }
+
     // CONSTRUCTORS
     // ----------------------------------------------------------------------------------------------
 
@@ -553,10 +643,7 @@ impl FastProcessor {
     ) -> Result<(ExecutionOutput, TraceGenerationContext), ExecutionError> {
         let mut tracer = ExecutionTracer::new(self.options.core_trace_fragment_size());
         let execution_output = self.execute_with_tracer_sync(program, host, &mut tracer)?;
-
-        let context = tracer.into_trace_generation_context();
-
-        Ok((execution_output, context))
+        Ok(Self::trace_result_from_parts(execution_output, tracer))
     }
 
     /// Async compatibility wrapper for [`Self::execute_for_trace_sync`].
@@ -569,10 +656,7 @@ impl FastProcessor {
     ) -> Result<(ExecutionOutput, TraceGenerationContext), ExecutionError> {
         let mut tracer = ExecutionTracer::new(self.options.core_trace_fragment_size());
         let execution_output = self.execute_with_tracer(program, host, &mut tracer).await?;
-
-        let context = tracer.into_trace_generation_context();
-
-        Ok((execution_output, context))
+        Ok(Self::trace_result_from_parts(execution_output, tracer))
     }
 
     /// Executes the given program with the provided tracer and returns the stack outputs, and the
@@ -590,8 +674,7 @@ impl FastProcessor {
         let mut current_forest = program.mast_forest().clone();
 
         self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
-
-        match self
+        let flow = self
             .execute_impl_async(
                 &mut continuation_stack,
                 &mut current_forest,
@@ -600,21 +683,8 @@ impl FastProcessor {
                 tracer,
                 &NeverStopper,
             )
-            .await
-        {
-            ControlFlow::Continue(stack_outputs) => Ok(ExecutionOutput {
-                stack: stack_outputs,
-                advice: self.advice,
-                memory: self.memory,
-                final_pc_transcript: self.pc_transcript,
-            }),
-            ControlFlow::Break(break_reason) => match break_reason {
-                BreakReason::Err(err) => Err(err),
-                BreakReason::Stopped(_) => {
-                    unreachable!("Execution never stops prematurely with NeverStopper")
-                },
-            },
-        }
+            .await;
+        Self::execution_result_from_flow(flow, self)
     }
 
     /// Executes the given program with the provided tracer and returns the stack outputs, and the
@@ -633,28 +703,15 @@ impl FastProcessor {
 
         // Merge the program's advice map into the advice provider
         self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
-
-        match self.execute_impl(
+        let flow = self.execute_impl(
             &mut continuation_stack,
             &mut current_forest,
             program.kernel(),
             host,
             tracer,
             &NeverStopper,
-        ) {
-            ControlFlow::Continue(stack_outputs) => Ok(ExecutionOutput {
-                stack: stack_outputs,
-                advice: self.advice,
-                memory: self.memory,
-                final_pc_transcript: self.pc_transcript,
-            }),
-            ControlFlow::Break(break_reason) => match break_reason {
-                BreakReason::Err(err) => Err(err),
-                BreakReason::Stopped(_) => {
-                    unreachable!("Execution never stops prematurely with NeverStopper")
-                },
-            },
-        }
+        );
+        Self::execution_result_from_flow(flow, self)
     }
 
     /// Executes a single clock cycle
@@ -669,30 +726,15 @@ impl FastProcessor {
             kernel,
         } = resume_ctx;
 
-        match self.execute_impl(
+        let flow = self.execute_impl(
             &mut continuation_stack,
             &mut current_forest,
             &kernel,
             host,
             &mut NoopTracer,
             &StepStopper,
-        ) {
-            ControlFlow::Continue(_) => Ok(None),
-            ControlFlow::Break(break_reason) => match break_reason {
-                BreakReason::Err(err) => Err(err),
-                BreakReason::Stopped(maybe_continuation) => {
-                    if let Some(continuation) = maybe_continuation {
-                        continuation_stack.push_continuation(continuation);
-                    }
-
-                    Ok(Some(ResumeContext {
-                        current_forest,
-                        continuation_stack,
-                        kernel,
-                    }))
-                },
-            },
-        }
+        );
+        Self::resume_result_from_flow(flow, continuation_stack, current_forest, kernel)
     }
 
     /// Async compatibility wrapper for [`Self::step_sync`].
@@ -708,7 +750,7 @@ impl FastProcessor {
             kernel,
         } = resume_ctx;
 
-        match self
+        let flow = self
             .execute_impl_async(
                 &mut continuation_stack,
                 &mut current_forest,
@@ -717,24 +759,8 @@ impl FastProcessor {
                 &mut NoopTracer,
                 &StepStopper,
             )
-            .await
-        {
-            ControlFlow::Continue(_) => Ok(None),
-            ControlFlow::Break(break_reason) => match break_reason {
-                BreakReason::Err(err) => Err(err),
-                BreakReason::Stopped(maybe_continuation) => {
-                    if let Some(continuation) = maybe_continuation {
-                        continuation_stack.push_continuation(continuation);
-                    }
-
-                    Ok(Some(ResumeContext {
-                        current_forest,
-                        continuation_stack,
-                        kernel,
-                    }))
-                },
-            },
-        }
+            .await;
+        Self::resume_result_from_flow(flow, continuation_stack, current_forest, kernel)
     }
 
     /// Executes the given program with the provided tracer and returns the stack outputs.
@@ -1199,14 +1225,7 @@ impl FastProcessor {
                 },
                 None => {
                     // End of program was reached.
-                    break Ok(StackOutputs::new(
-                        &self.stack[self.stack_bot_idx..self.stack_top_idx]
-                            .iter()
-                            .rev()
-                            .copied()
-                            .collect::<Vec<_>>(),
-                    )
-                    .unwrap());
+                    break Ok(self.current_stack_outputs());
                 },
             }
         }
@@ -1228,14 +1247,7 @@ impl FastProcessor {
                     current_resume_ctx = next_resume_ctx;
                 },
                 None => {
-                    break Ok(StackOutputs::new(
-                        &processor.stack[processor.stack_bot_idx..processor.stack_top_idx]
-                            .iter()
-                            .rev()
-                            .copied()
-                            .collect::<Vec<_>>(),
-                    )
-                    .unwrap());
+                    break Ok(processor.current_stack_outputs());
                 },
             }
         }
@@ -1256,22 +1268,15 @@ impl FastProcessor {
         // Merge the program's advice map into the advice provider
         self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
 
-        match self.execute_impl(
+        let flow = self.execute_impl(
             &mut continuation_stack,
             &mut current_forest,
             program.kernel(),
             host,
             &mut NoopTracer,
             &NeverStopper,
-        ) {
-            ControlFlow::Continue(stack_outputs) => Ok(stack_outputs),
-            ControlFlow::Break(break_reason) => match break_reason {
-                BreakReason::Err(err) => Err(err),
-                BreakReason::Stopped(_) => {
-                    unreachable!("Execution never stops prematurely with NeverStopper")
-                },
-            },
-        }
+        );
+        Self::stack_result_from_flow(flow)
     }
 
     /// Async compatibility wrapper for [`Self::execute_sync_mut`].
@@ -1287,7 +1292,7 @@ impl FastProcessor {
 
         self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
 
-        match self
+        let flow = self
             .execute_impl_async(
                 &mut continuation_stack,
                 &mut current_forest,
@@ -1296,16 +1301,8 @@ impl FastProcessor {
                 &mut NoopTracer,
                 &NeverStopper,
             )
-            .await
-        {
-            ControlFlow::Continue(stack_outputs) => Ok(stack_outputs),
-            ControlFlow::Break(break_reason) => match break_reason {
-                BreakReason::Err(err) => Err(err),
-                BreakReason::Stopped(_) => {
-                    unreachable!("Execution never stops prematurely with NeverStopper")
-                },
-            },
-        }
+            .await;
+        Self::stack_result_from_flow(flow)
     }
 }
 
