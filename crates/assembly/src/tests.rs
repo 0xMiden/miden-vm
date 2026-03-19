@@ -1,5 +1,5 @@
 use alloc::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     string::{String, ToString},
     vec::Vec,
 };
@@ -10,7 +10,10 @@ use std::{
 };
 
 use miden_assembly_syntax::{
-    MAX_REPEAT_COUNT, ast::Path, diagnostics::WrapErr, library::LibraryExport,
+    MAX_REPEAT_COUNT,
+    ast::Path,
+    diagnostics::WrapErr,
+    library::{LibraryExport, ProcedureExport},
 };
 use miden_core::{
     Felt, Word, assert_matches,
@@ -19,7 +22,7 @@ use miden_core::{
     mast::{MastNodeExt, MastNodeId},
     operations::Operation,
     program::Program,
-    serde::{Deserializable, Serializable},
+    serde::{Deserializable, DeserializationError, Serializable},
 };
 use miden_mast_package::{
     MastArtifact, MastForest, Package, PackageExport, PackageKind, PackageManifest,
@@ -5385,6 +5388,130 @@ fn test_cross_module_quoted_identifier_resolution() -> TestResult {
     let _ = assembler.assemble_library([module_a, module_b])?;
 
     Ok(())
+}
+
+#[test]
+fn regression_symbol_resolution_duplicate_module_paths_are_rejected_during_linking() {
+    fn try_assemble_program_with_link_order(libs: &[Library]) -> Result<(), Report> {
+        let program_source = r#"
+begin
+    exec.::foo::bar::add
+end
+"#;
+
+        let mut assembler = Assembler::default();
+        for lib in libs {
+            assembler.link_static_library(lib)?;
+        }
+
+        assembler.assemble_program(program_source).map(|_| ())
+    }
+
+    let context = TestContext::default();
+    let source_manager = context.source_manager();
+
+    let legit_mod = context
+        .parse_module_with_path(
+            "::foo::bar",
+            r#"
+pub proc add
+    add.1
+end
+"#,
+        )
+        .expect("module must parse and analyse");
+
+    let attacker_mod = context
+        .parse_module_with_path(r#"::foo::"bar""#, "pub proc add add.2 end")
+        .expect("module must parse and analyse");
+
+    let legit_lib = Assembler::new(source_manager.clone())
+        .assemble_library([legit_mod])
+        .expect("library assembly must succeed");
+    let attacker_lib = Assembler::new(source_manager)
+        .assemble_library([attacker_mod])
+        .expect("library assembly must succeed");
+
+    let err = try_assemble_program_with_link_order(&[legit_lib.clone(), attacker_lib.clone()])
+        .expect_err("expected duplicate canonical module namespace to be rejected");
+    assert_diagnostic!(err, "duplicate definition found for module '::foo::bar'");
+
+    let err = try_assemble_program_with_link_order(&[attacker_lib, legit_lib])
+        .expect_err("expected duplicate canonical module namespace to be rejected");
+    assert_diagnostic!(err, "duplicate definition found for module '::foo::bar'");
+}
+
+#[test]
+fn regression_symbol_resolution_in_library_canonical_export_collision_is_rejected() {
+    let context = TestContext::default();
+    let source_manager = context.source_manager();
+    let legit_mod = context
+        .parse_module_with_path("::foo::bar", "pub proc add add.1 end")
+        .expect("module must parse and analyse");
+    let attacker_mod = context
+        .parse_module_with_path(r#"::foo::"bar""#, "pub proc add add.2 end")
+        .expect("module must parse and analyse");
+
+    let err = Assembler::new(source_manager)
+        .assemble_library([legit_mod, attacker_mod])
+        .expect_err("expected duplicate canonical export paths to be rejected during assembly");
+    assert_diagnostic!(err, "duplicate definition found for export path '::foo::bar::add'");
+}
+
+#[test]
+fn regression_symbol_resolution_export_leaf_name_collision_should_be_rejected() {
+    let base = Assembler::default()
+        .assemble_library([r#"
+pub proc p
+    push.1
+end
+"#])
+        .expect("base library assembly must succeed");
+    let node = base
+        .exports()
+        .find_map(|e| e.as_procedure())
+        .expect("expected at least one procedure export")
+        .node;
+
+    let quoted = Arc::<Path>::from(Path::validate(r#"::foo::"bar""#).unwrap());
+    let unquoted = Arc::<Path>::from(Path::validate("::foo::bar").unwrap());
+
+    let mut exports = BTreeMap::new();
+    exports.insert(quoted.clone(), LibraryExport::Procedure(ProcedureExport::new(node, quoted)));
+    exports
+        .insert(unquoted.clone(), LibraryExport::Procedure(ProcedureExport::new(node, unquoted)));
+
+    let lib = Library::new(Arc::clone(base.mast_forest()), exports).expect("library must validate");
+    let err = Library::read_from_bytes(&lib.to_bytes()).expect_err(
+        "expected duplicate canonical export paths to be rejected during deserialization",
+    );
+    assert_matches!(err, DeserializationError::InvalidValue(_));
+}
+
+#[test]
+fn regression_symbol_resolution_malformed_quoted_export_leaf_should_return_error_not_panic() {
+    let base = Assembler::default()
+        .assemble_library([r#"
+pub proc p
+    push.1
+end
+"#])
+        .expect("base library assembly must succeed");
+    let node = base
+        .exports()
+        .find_map(|e| e.as_procedure())
+        .expect("expected at least one procedure export")
+        .node;
+
+    let bad = Arc::<Path>::from(Path::validate(r#"::foo::"bad name""#).unwrap());
+
+    let mut exports = BTreeMap::new();
+    exports.insert(bad.clone(), LibraryExport::Procedure(ProcedureExport::new(node, bad)));
+
+    let lib = Library::new(Arc::clone(base.mast_forest()), exports).expect("library must validate");
+    let err = Library::read_from_bytes(&lib.to_bytes())
+        .expect_err("expected malformed procedure export leaf names to be rejected");
+    assert_matches!(err, DeserializationError::InvalidValue(_));
 }
 
 #[test]

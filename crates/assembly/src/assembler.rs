@@ -48,6 +48,9 @@ enum AssemblerError {
         source_file: Option<Arc<SourceFile>>,
         max_depth: usize,
     },
+    #[error("duplicate definition found for export path '{path}'")]
+    #[diagnostic()]
+    DuplicateExportPath { path: Arc<Path> },
 }
 
 // ASSEMBLER
@@ -510,7 +513,12 @@ impl Assembler {
                         if !symbol.visibility().is_public() {
                             continue;
                         }
-                        module_path.join(symbol.name()).into()
+                        module_path
+                            .join(symbol.name())
+                            .canonicalize()
+                            .into_diagnostic()?
+                            .into_boxed_path()
+                            .into()
                     };
                     let export = self.export_symbol(
                         gid,
@@ -518,7 +526,9 @@ impl Assembler {
                         path.clone(),
                         &mut mast_forest_builder,
                     )?;
-                    exports.insert(path, export);
+                    if exports.insert(path.clone(), export).is_some() {
+                        return Err(Report::new(AssemblerError::DuplicateExportPath { path }));
+                    }
                 }
             }
 
