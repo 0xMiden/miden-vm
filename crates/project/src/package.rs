@@ -250,7 +250,12 @@ impl Package {
         profiles.push(Profile::release());
         if let Some(workspace) = workspace {
             for ast in workspace.profiles.iter() {
-                profiles.push(Profile::from_ast(ast, source.clone(), &profiles)?);
+                let profile = Profile::from_ast(ast, source.clone(), &profiles)?;
+                if let Some(prev) = profiles.iter_mut().find(|p| p.name() == ast.name.inner()) {
+                    *prev = profile;
+                } else {
+                    profiles.push(profile);
+                }
             }
         }
 
