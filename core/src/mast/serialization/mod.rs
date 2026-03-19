@@ -239,12 +239,16 @@ impl MastForest {
     }
 }
 
-pub(super) fn stripped_size_hint(forest: &MastForest) -> usize {
-    serialized_size_hint(forest, true, false)
+pub(super) fn write_stripped_into<W: ByteWriter>(forest: &MastForest, target: &mut W) {
+    forest.write_into_with_options(target, true, false);
 }
 
-fn hashless_size_hint(forest: &MastForest) -> usize {
-    serialized_size_hint(forest, true, true)
+pub(super) fn write_hashless_into<W: ByteWriter>(forest: &MastForest, target: &mut W) {
+    forest.write_into_with_options(target, true, true);
+}
+
+pub(super) fn stripped_size_hint(forest: &MastForest) -> usize {
+    serialized_size_hint(forest, true, false)
 }
 
 fn serialized_size_hint(forest: &MastForest, stripped: bool, hashless: bool) -> usize {
@@ -286,10 +290,15 @@ fn serialized_size_hint(forest: &MastForest, stripped: bool, hashless: bool) -> 
     size
 }
 
-/// A zero-copy view over a stripped, serialized MAST forest.
+/// A zero-copy structural view over serialized MAST forest bytes.
 ///
-/// This is intended for trusted inputs and supports random access to `MastNodeInfo`
-/// entries without deserializing the full forest.
+/// This view accepts full, stripped, and hashless payloads. It eagerly validates the header and
+/// fixed-width structural sections needed for random access, but leaves digest resolution lazy:
+/// digests are read from the wire when present and otherwise recomputed on first access.
+///
+/// Use this when callers need random access to roots or node metadata without deserializing the
+/// full forest. For strict trusted deserialization, use
+/// [`crate::mast::MastForest::read_from_bytes`].
 ///
 /// # Examples
 ///
@@ -323,7 +332,7 @@ pub struct SerializedMastForest<'a> {
 impl<'a> SerializedMastForest<'a> {
     /// Creates a new view from serialized bytes.
     ///
-    /// The input may be either full or stripped format.
+    /// The input may be full, stripped, or hashless format.
     /// Structural parsing is delegated to the same single-pass scanner used by reader-based
     /// deserialization paths.
     ///
@@ -334,10 +343,14 @@ impl<'a> SerializedMastForest<'a> {
     /// For strict full-payload validation, use
     /// [`crate::mast::MastForest::read_from_bytes`].
     ///
-    /// Conventions:
-    /// - If `HASHLESS` is not set, node digests are read from wire data.
-    /// - If `HASHLESS` is set, wire digests are ignored and non-external node digests are
-    ///   recomputed lazily the first time digest-backed access is requested.
+    /// Wire flags describe serializer intent, not a trust policy. This constructor accepts
+    /// hashless payloads for inspection even though trusted [`crate::mast::MastForest`]
+    /// deserialization rejects them.
+    ///
+    /// Digest conventions:
+    /// - If `HASHLESS` is not set, node digests are read from the wire hash section.
+    /// - If `HASHLESS` is set, non-external node digests are recomputed lazily the first time
+    ///   digest-backed access is requested.
     /// - For `External` nodes in `HASHLESS` mode, digests are marshaled opaquely from wire data;
     ///   this view does not attempt semantic resolution of external references.
     ///
@@ -379,12 +392,12 @@ impl<'a> SerializedMastForest<'a> {
         self.layout.node_count
     }
 
-    /// Returns `true` when this view uses hashless convention and recomputed digests.
+    /// Returns `true` when the wire header declares hashless serializer intent.
     pub fn is_hashless(&self) -> bool {
         self.flags.is_hashless()
     }
 
-    /// Returns `true` when this view represents stripped serialization.
+    /// Returns `true` when the wire header declares stripped serializer intent.
     pub fn is_stripped(&self) -> bool {
         self.flags.is_stripped()
     }
@@ -434,6 +447,9 @@ impl<'a> SerializedMastForest<'a> {
     }
 
     /// Returns the digest for the node at the specified index.
+    ///
+    /// This resolves digests lazily. Hashless views rebuild non-external node digests on first
+    /// digest-backed access and cache the result for later lookups.
     pub fn node_digest_at(&self, index: usize) -> Result<crate::Word, DeserializationError> {
         self.resolved()?.node_digest_at(index)
     }
@@ -681,41 +697,5 @@ impl Deserializable for super::UntrustedMastForest {
     /// the forest.
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
         super::UntrustedMastForest::read_from_bytes(bytes)
-    }
-}
-
-// STRIPPED SERIALIZATION
-// ================================================================================================
-
-/// Wrapper for serializing a [`MastForest`] without debug information.
-///
-/// This newtype enables an alternative serialization format that omits the DebugInfo section,
-/// producing smaller output files suitable for production deployment where debug info is not
-/// needed.
-///
-/// The resulting bytes can be deserialized with the standard [`Deserializable`] impl for
-/// [`MastForest`], which auto-detects the format via the flags byte in the header.
-pub(super) struct StrippedMastForest<'a>(pub(super) &'a MastForest);
-
-impl Serializable for StrippedMastForest<'_> {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.0.write_into_with_options(target, true, false);
-    }
-
-    fn get_size_hint(&self) -> usize {
-        stripped_size_hint(self.0)
-    }
-}
-
-/// Wrapper for serializing a [`MastForest`] with the HASHLESS flag set.
-pub(super) struct HashlessMastForest<'a>(pub(super) &'a MastForest);
-
-impl Serializable for HashlessMastForest<'_> {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.0.write_into_with_options(target, true, true);
-    }
-
-    fn get_size_hint(&self) -> usize {
-        hashless_size_hint(self.0)
     }
 }

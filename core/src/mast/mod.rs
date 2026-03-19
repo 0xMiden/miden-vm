@@ -501,8 +501,7 @@ impl MastForest {
     /// // let restored = MastForest::read_from_bytes(&stripped_bytes).unwrap();
     /// ```
     pub fn write_stripped<W: ByteWriter>(&self, target: &mut W) {
-        use serialization::StrippedMastForest;
-        StrippedMastForest(self).write_into(target);
+        serialization::write_stripped_into(self, target);
     }
 
     /// Serializes this MastForest with the HASHLESS flag set.
@@ -512,8 +511,7 @@ impl MastForest {
     ///
     /// Use this when producing data for untrusted validation.
     pub fn write_hashless<W: ByteWriter>(&self, target: &mut W) {
-        use serialization::HashlessMastForest;
-        HashlessMastForest(self).write_into(target);
+        serialization::write_hashless_into(self, target);
     }
 
     /// Returns the exact size of stripped serialization in bytes.
@@ -1461,9 +1459,9 @@ impl UntrustedMastForest {
         let is_hashless = self.layout.is_hashless();
         let mut forest = self.into_materialized().map_err(MastForestError::Deserialization)?;
 
-        // Step 1: Recompute all non-external hashes when wire hashes were supplied. Hashless
-        // materialization already rebuilt digests from structure, so running the rebuild a second
-        // time only duplicates work.
+        // Step 1: Ensure every non-external digest comes from local structure rather than wire
+        // input. Hashless materialization already rebuilt the digest table, while full/stripped
+        // payloads still need this trust-boundary recomputation here.
         if !is_hashless {
             forest.recompute_node_hashes_in_place()?;
         }
@@ -1495,10 +1493,10 @@ impl UntrustedMastForest {
         Self::read_from_bytes_with_budget(bytes, bytes.len())
     }
 
-    /// Deserializes an [`UntrustedMastForest`] from bytes and returns the header flags.
+    /// Deserializes an [`UntrustedMastForest`] from bytes and returns the raw wire flags.
     ///
-    /// This enables callers to inspect intent flags (e.g., HASHLESS) without affecting the
-    /// deserialization path.
+    /// This enables callers to inspect serializer intent flags (e.g., HASHLESS) without affecting
+    /// the untrusted deserialization path.
     pub fn read_from_bytes_with_flags(bytes: &[u8]) -> Result<(Self, u8), DeserializationError> {
         Self::read_from_bytes_with_budget_and_flags(bytes, bytes.len())
     }
