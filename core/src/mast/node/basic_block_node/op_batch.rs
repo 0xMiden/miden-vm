@@ -114,6 +114,58 @@ impl OpBatch {
         self.num_groups
     }
 
+    /// Validates that padding metadata matches group contents.
+    ///
+    /// Checks:
+    /// - Empty groups cannot be marked as padded.
+    /// - Padded groups must end with a NOOP operation.
+    pub(crate) fn validate_padding_semantics(&self) -> Result<(), String> {
+        if self.num_groups > BATCH_SIZE {
+            return Err(format!(
+                "invalid batch metadata: num_groups {} exceeds BATCH_SIZE {}",
+                self.num_groups, BATCH_SIZE
+            ));
+        }
+
+        for group_idx in 0..self.num_groups {
+            let is_padded = *self
+                .padding
+                .get(group_idx)
+                .ok_or_else(|| format!("group {}: missing padding metadata", group_idx))?;
+            if !is_padded {
+                continue;
+            }
+
+            let group_start = *self
+                .indptr
+                .get(group_idx)
+                .ok_or_else(|| format!("group {}: missing indptr start", group_idx))?;
+            let group_end = *self
+                .indptr
+                .get(group_idx + 1)
+                .ok_or_else(|| format!("group {}: missing indptr end", group_idx))?;
+
+            if group_start == group_end {
+                return Err(format!("group {}: empty group cannot be marked as padded", group_idx));
+            }
+            if group_start > group_end {
+                return Err(format!("group {}: invalid group bounds", group_idx));
+            }
+
+            let last_op_idx = group_end - 1;
+            let last_op = self
+                .ops
+                .get(last_op_idx)
+                .ok_or_else(|| format!("group {}: invalid group bounds", group_idx))?;
+
+            if *last_op != Operation::Noop {
+                return Err(format!("group {}: padded group must end with NOOP", group_idx));
+            }
+        }
+
+        Ok(())
+    }
+
     /// Creates a new OpBatch from its constituent parts.
     ///
     /// This constructor is used during deserialization to reconstruct OpBatches with the exact
