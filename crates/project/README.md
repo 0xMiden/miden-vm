@@ -158,6 +158,26 @@ f = { git = "https://github.com/example/f", rev = "deadbeef" }
 g = { git = "https://github.com/example/g", rev = "deadbeef", version = "~> 0.1.0" }
 ```
 
+#### Linkage
+
+Dependencies are dynamically-linked by default, which means that the assembled
+package will have a runtime dependency on the referenced package, and it is
+assumed that the dependency will have been loaded into the VM at runtime.
+
+You may also specify that a dependency should be statically-linked, like so:
+
+```toml
+[dependencies]
+a = { version = "=0.1.0", linkage = "static" }
+```
+
+When a dependency is statically-linked, it is as if the dependency was defined
+as part of your own package.
+
+NOTE: Kernel dependencies are always statically-linked into executable targets,
+and dynamically-linked for library targets, and it is not possible to change
+this behavior.
+
 #### Semantics
 
 * `a` specifies a semantic version requirement, these would be evaluated against a package registry implementation
@@ -171,18 +191,6 @@ g = { git = "https://github.com/example/g", rev = "deadbeef", version = "~> 0.1.
 In cases where the dependency is resolved to project sources and _not_ an assembled package, the behavior would be to assemble those dependencies first, and then link against them when assembling the current project. This is most useful when linking against packages which are _not_ contracts, or where the contracts are deployed together as a unit.
 
 **NOTE:** Currently there is no canonical package registry, so the resolution of the first two forms described above is dependent on the specific tool that is doing the resolution, namely, how it populates the package index for the resolver provided by this crate.
-
-### Build profiles
-
-TODO
-
-### Custom package metadata
-
-TODO
-
-### Lint configuration
-
-TODO
 
 ## License
 This project is dual-licensed under the [MIT](http://opensource.org/licenses/MIT) and [Apache 2.0](https://opensource.org/license/apache-2-0) licenses.

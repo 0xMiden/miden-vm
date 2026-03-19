@@ -8,4 +8,6 @@ path = "mod.masm"
 
 [dependencies]
 miden-utils = { workspace = true, linkage = "dynamic" }
+# NOTE: As described in the miden-project README, this will be linked as a kernel automatically
+# as `miden-tx` defines a kernel target
 miden-tx.workspace = true
