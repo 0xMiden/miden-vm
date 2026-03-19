@@ -129,7 +129,7 @@ pub async fn prove(
 /// # Panics
 /// Panics if called from within an existing Tokio runtime. Use the async `prove()`
 /// method instead in async contexts.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 #[instrument("prove_program_sync", skip_all)]
 pub fn prove_sync(
     program: &Program,

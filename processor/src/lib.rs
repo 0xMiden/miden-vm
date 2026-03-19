@@ -123,7 +123,7 @@ pub async fn execute(
 /// # Panics
 /// Panics if called from within an existing Tokio runtime. Use the async `execute()` method
 /// instead in async contexts.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 #[tracing::instrument("execute_program_sync", skip_all)]
 pub fn execute_sync(
     program: &Program,
