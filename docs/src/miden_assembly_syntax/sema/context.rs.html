@@ -36,7 +36,7 @@
 <a href=#36 id=36 data-nosnippet>36</a>        </span>}
 <a href=#37 id=37 data-nosnippet>37</a>    }
 <a href=#38 id=38 data-nosnippet>38</a>    <span class="attr">#[inline]
-<a href=#39 id=39 data-nosnippet>39</a>    </span><span class="kw">fn </span>get(<span class="kw-2">&amp;</span><span class="self">self</span>, name: <span class="kw-2">&amp;</span>Ident) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;CachedConstantValue&lt;<span class="lifetime">'_</span>&gt;&gt;, <span class="self">Self</span>::Error&gt; {
+<a href=#39 id=39 data-nosnippet>39</a>    </span><span class="kw">fn </span>get(<span class="kw-2">&amp;mut </span><span class="self">self</span>, name: <span class="kw-2">&amp;</span>Ident) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;CachedConstantValue&lt;<span class="lifetime">'_</span>&gt;&gt;, <span class="self">Self</span>::Error&gt; {
 <a href=#40 id=40 data-nosnippet>40</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(constant) = <span class="self">self</span>.constants.get(name) {
 <a href=#41 id=41 data-nosnippet>41</a>            <span class="prelude-val">Ok</span>(<span class="prelude-val">Some</span>(CachedConstantValue::Miss(<span class="kw-2">&amp;</span>constant.value)))
 <a href=#42 id=42 data-nosnippet>42</a>        } <span class="kw">else if </span><span class="self">self</span>.imported.contains(name) {
@@ -52,7 +52,7 @@
 <a href=#52 id=52 data-nosnippet>52</a>    }
 <a href=#53 id=53 data-nosnippet>53</a>    <span class="attr">#[inline(always)]
 <a href=#54 id=54 data-nosnippet>54</a>    </span><span class="kw">fn </span>get_by_path(
-<a href=#55 id=55 data-nosnippet>55</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#55 id=55 data-nosnippet>55</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
 <a href=#56 id=56 data-nosnippet>56</a>        path: Span&lt;<span class="kw-2">&amp;</span>Path&gt;,
 <a href=#57 id=57 data-nosnippet>57</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;<span class="prelude-ty">Option</span>&lt;CachedConstantValue&lt;<span class="lifetime">'_</span>&gt;&gt;, <span class="self">Self</span>::Error&gt; {
 <a href=#58 id=58 data-nosnippet>58</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(name) = path.as_ident() {

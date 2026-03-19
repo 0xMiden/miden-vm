@@ -62,7 +62,7 @@
 <a href=#62 id=62 data-nosnippet>62</a>            }
 <a href=#63 id=63 data-nosnippet>63</a>        },
 <a href=#64 id=64 data-nosnippet>64</a>        SymbolItem::Procedure(proc) =&gt; {
-<a href=#65 id=65 data-nosnippet>65</a>            <span class="kw">let </span><span class="kw-2">mut </span>rewriter = ModuleRewriter::new(gid.module, resolver);
+<a href=#65 id=65 data-nosnippet>65</a>            <span class="kw">let </span><span class="kw-2">mut </span>rewriter = ModuleRewriter::new(gid.module, resolver, cache);
 <a href=#66 id=66 data-nosnippet>66</a>            <span class="kw">let </span><span class="kw-2">mut </span>proc = proc.borrow_mut();
 <a href=#67 id=67 data-nosnippet>67</a>            <span class="kw">if let </span>ControlFlow::Break(err) = rewriter.visit_mut_procedure(<span class="kw-2">&amp;mut </span>proc) {
 <a href=#68 id=68 data-nosnippet>68</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(err);
