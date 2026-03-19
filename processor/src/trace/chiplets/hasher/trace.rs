@@ -141,7 +141,6 @@ impl HasherTrace {
         columns.push(self.node_index);
 
         // copy trace into the fragment column-by-column
-        // TODO: this can be parallelized to copy columns in multiple threads (#2163)
         for (out_column, column) in trace.columns().zip(columns) {
             out_column.copy_from_slice(&column);
         }
