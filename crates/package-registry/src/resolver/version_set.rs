@@ -40,6 +40,7 @@ pub struct VersionSet {
 }
 
 /// Represents an additional filter on the versions considered a member of a [VersionSet].
+#[derive(Debug)]
 pub enum VersionSetFilter<'a> {
     /// Matches any version, regardless of content digest
     Any,
@@ -206,8 +207,28 @@ impl pubgrub::VersionSet for VersionSet {
     fn contains(&self, v: &Self::V) -> bool {
         if let Some(digest) = v.digest.as_ref() {
             self.digests.contains(digest)
+                && (self.range.is_empty() || self.range.contains(&v.version))
         } else {
             self.range.contains(&v.version)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use miden_core::crypto::hash::Rpo256;
+
+    use super::*;
+
+    #[test]
+    fn version_set_contains_requires_both_digest_and_semver() {
+        let digest = Rpo256::hash(b"same-digest");
+        let set = VersionSet::from(Version::new("1.0.0".parse().unwrap(), digest));
+        let candidate = Version::new("9.9.9".parse().unwrap(), digest);
+
+        assert!(
+            !<VersionSet as pubgrub::VersionSet>::contains(&set, &candidate),
+            "set {set} unexpectedly contains {candidate}"
+        );
     }
 }
