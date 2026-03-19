@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["MidenProject"],"struct":["BinTarget","DependencySpec","LibTarget","PackageConfig","PackageDetail","Profile","ProjectFile","WorkspaceFile"]};
