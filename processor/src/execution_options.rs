@@ -14,6 +14,14 @@ pub struct ExecutionOptions {
     core_trace_fragment_size: usize,
     enable_tracing: bool,
     enable_debugging: bool,
+    /// Maximum number of field elements that can be inserted into the advice map in a single
+    /// `adv.insert_mem` operation.
+    max_adv_map_value_size: usize,
+    /// Maximum number of input bytes allowed for a single hash precompile invocation.
+    max_hash_len_bytes: usize,
+    /// Maximum number of continuations allowed on the continuation stack at any point during
+    /// execution.
+    max_num_continuations: usize,
 }
 
 impl Default for ExecutionOptions {
@@ -24,6 +32,9 @@ impl Default for ExecutionOptions {
             core_trace_fragment_size: Self::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
             enable_tracing: false,
             enable_debugging: false,
+            max_adv_map_value_size: Self::DEFAULT_MAX_ADV_MAP_VALUE_SIZE,
+            max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
+            max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
         }
     }
 }
@@ -38,6 +49,18 @@ impl ExecutionOptions {
     /// Default fragment size for core trace generation.
     pub const DEFAULT_CORE_TRACE_FRAGMENT_SIZE: usize = 4096; // 2^12
 
+    /// Default maximum number of field elements in a single advice map value inserted via
+    /// `adv.insert_mem`. Set to 2^17 (~1 MB given 8-byte field elements).
+    pub const DEFAULT_MAX_ADV_MAP_VALUE_SIZE: usize = 1 << 17;
+
+    /// Default maximum number of input bytes for a single hash precompile invocation (e.g.
+    /// keccak256, sha512, etc.). Set to 2^20 (1 MB).
+    pub const DEFAULT_MAX_HASH_LEN_BYTES: usize = 1 << 20;
+
+    /// Default maximum number of continuations allowed on the continuation stack.
+    /// Set to 2^16 (65536).
+    pub const DEFAULT_MAX_NUM_CONTINUATIONS: usize = 1 << 16;
+
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
 
@@ -48,7 +71,7 @@ impl ExecutionOptions {
     /// # Errors
     /// Returns an error if:
     /// - `max_cycles` is outside the valid range
-    /// - `expected_cycles` exceeds `max_cycles`
+    /// - after rounding up to the next power of two, `expected_cycles` exceeds `max_cycles`
     /// - `core_trace_fragment_size` is zero
     pub fn new(
         max_cycles: Option<u32>,
@@ -75,16 +98,16 @@ impl ExecutionOptions {
         } else {
             Self::MAX_CYCLES
         };
-        // Validate expected cycles.
+        // Round up the expected number of cycles to the next power of two. If it is smaller than
+        // MIN_TRACE_LEN -- pad expected number to it.
+        let expected_cycles = expected_cycles.next_power_of_two().max(MIN_TRACE_LEN as u32);
+        // Validate expected cycles (after rounding) against max_cycles.
         if max_cycles < expected_cycles {
             return Err(ExecutionOptionsError::ExpectedCyclesTooBig {
                 max_cycles,
                 expected_cycles,
             });
         }
-        // Round up the expected number of cycles to the next power of two. If it is smaller than
-        // MIN_TRACE_LEN -- pad expected number to it.
-        let expected_cycles = expected_cycles.next_power_of_two().max(MIN_TRACE_LEN as u32);
 
         // Validate core trace fragment size.
         if core_trace_fragment_size == 0 {
@@ -97,6 +120,9 @@ impl ExecutionOptions {
             core_trace_fragment_size,
             enable_tracing,
             enable_debugging,
+            max_adv_map_value_size: Self::DEFAULT_MAX_ADV_MAP_VALUE_SIZE,
+            max_hash_len_bytes: Self::DEFAULT_MAX_HASH_LEN_BYTES,
+            max_num_continuations: Self::DEFAULT_MAX_NUM_CONTINUATIONS,
         })
     }
 
@@ -166,6 +192,44 @@ impl ExecutionOptions {
     pub fn enable_debugging(&self) -> bool {
         self.enable_debugging
     }
+
+    /// Returns the maximum number of field elements allowed in a single advice map value
+    /// inserted via `adv.insert_mem`.
+    #[inline]
+    pub fn max_adv_map_value_size(&self) -> usize {
+        self.max_adv_map_value_size
+    }
+
+    /// Returns the maximum number of input bytes allowed for a single hash precompile invocation.
+    #[inline]
+    pub fn max_hash_len_bytes(&self) -> usize {
+        self.max_hash_len_bytes
+    }
+
+    /// Sets the maximum number of field elements allowed in a single advice map value
+    /// inserted via `adv.insert_mem`.
+    pub fn with_max_adv_map_value_size(mut self, size: usize) -> Self {
+        self.max_adv_map_value_size = size;
+        self
+    }
+
+    /// Sets the maximum number of input bytes allowed for a single hash precompile invocation.
+    pub fn with_max_hash_len_bytes(mut self, size: usize) -> Self {
+        self.max_hash_len_bytes = size;
+        self
+    }
+
+    /// Returns the maximum number of continuations allowed on the continuation stack.
+    #[inline]
+    pub fn max_num_continuations(&self) -> usize {
+        self.max_num_continuations
+    }
+
+    /// Sets the maximum number of continuations allowed on the continuation stack.
+    pub fn with_max_num_continuations(mut self, max_num_continuations: usize) -> Self {
+        self.max_num_continuations = max_num_continuations;
+        self
+    }
 }
 
 // EXECUTION OPTIONS ERROR
@@ -222,5 +286,23 @@ mod tests {
         // Zero should fail
         let result = ExecutionOptions::default().with_core_trace_fragment_size(0);
         assert!(matches!(result, Err(ExecutionOptionsError::CoreTraceFragmentSizeTooSmall)));
+    }
+
+    #[test]
+    fn expected_cycles_validated_after_rounding() {
+        // expected_cycles=65 rounds to 128; max_cycles=100 -> must fail (128 > 100).
+        let opts = ExecutionOptions::new(Some(100), 65, 1024, false, false);
+        assert!(matches!(
+            opts,
+            Err(ExecutionOptionsError::ExpectedCyclesTooBig {
+                max_cycles: 100,
+                expected_cycles: 128
+            })
+        ));
+
+        // expected_cycles=64 rounds to 64; max_cycles=100 -> ok.
+        let opts = ExecutionOptions::new(Some(100), 64, 1024, false, false);
+        assert!(opts.is_ok());
+        assert_eq!(opts.unwrap().expected_cycles(), 64);
     }
 }

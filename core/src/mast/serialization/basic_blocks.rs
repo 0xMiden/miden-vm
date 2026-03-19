@@ -13,9 +13,9 @@ use alloc::vec::Vec;
 
 use super::NodeDataOffset;
 use crate::{
-    mast::{BasicBlockNode, OP_GROUP_SIZE},
+    mast::{BasicBlockNode, OP_BATCH_SIZE, OP_GROUP_SIZE, collect_immediate_placements},
     operations::Operation,
-    serde::{ByteReader, DeserializationError, Serializable, SliceReader},
+    serde::{BudgetedReader, ByteReader, DeserializationError, Serializable, SliceReader},
 };
 
 // BASIC BLOCK DATA BUILDER
@@ -137,6 +137,10 @@ fn unpack_indptr_deltas(packed: &[u8; 4]) -> Result<[usize; 9], DeserializationE
 // BASIC BLOCK DATA DECODER
 // ================================================================================================
 
+const INDPTR_BYTES_PER_BATCH: usize = 4;
+const PADDING_BYTES_PER_BATCH: usize = 1;
+const BATCH_METADATA_BYTES_PER_BATCH: usize = INDPTR_BYTES_PER_BATCH + PADDING_BYTES_PER_BATCH;
+
 pub struct BasicBlockDataDecoder<'a> {
     node_data: &'a [u8],
 }
@@ -168,7 +172,9 @@ impl BasicBlockDataDecoder<'_> {
             )));
         }
 
-        let mut ops_data_reader = SliceReader::new(&self.node_data[offset..]);
+        let remaining_bytes = self.node_data.len() - offset;
+        let mut ops_data_reader =
+            BudgetedReader::new(SliceReader::new(&self.node_data[offset..]), remaining_bytes);
 
         // Read padded operations
         let operations: Vec<Operation> = ops_data_reader.read()?;
@@ -176,6 +182,13 @@ impl BasicBlockDataDecoder<'_> {
         // Read batch count
         let num_batches: u32 = ops_data_reader.read()?;
         let num_batches = num_batches as usize;
+        let max_batches = ops_data_reader.max_alloc(BATCH_METADATA_BYTES_PER_BATCH);
+        if num_batches > max_batches {
+            return Err(DeserializationError::InvalidValue(format!(
+                "batch count {} exceeds remaining data capacity {}",
+                num_batches, max_batches
+            )));
+        }
 
         // Read delta-encoded indptr arrays (4 bytes per batch)
         let mut batch_indptrs: Vec<[usize; 9]> = Vec::with_capacity(num_batches);
@@ -200,7 +213,7 @@ impl BasicBlockDataDecoder<'_> {
         let mut op_batches: Vec<crate::mast::OpBatch> = Vec::with_capacity(num_batches);
         let mut global_op_offset = 0;
 
-        for (indptr, padding) in batch_indptrs.iter().zip(batch_padding) {
+        for (batch_idx, (indptr, padding)) in batch_indptrs.iter().zip(batch_padding).enumerate() {
             // Find the highest operation group index
             let highest_op_group = (1..=8).rev().find(|&i| indptr[i] > indptr[i - 1]).unwrap_or(1);
 
@@ -236,26 +249,35 @@ impl BasicBlockDataDecoder<'_> {
                         group_value |= opcode << (Operation::OP_BITS * local_op_idx);
                     }
                     groups[array_idx] = Felt::new(group_value);
-                    next_group_idx = array_idx + 1;
 
-                    // Store immediate values from this operation group
-                    for op in &batch_ops[start..end] {
-                        if let Some(imm) = op.imm_value()
-                            && next_group_idx < 8
-                        {
-                            groups[next_group_idx] = imm;
-                            next_group_idx += 1;
-                        }
+                    let (placements, next_group_idx_after) = collect_immediate_placements(
+                        &batch_ops,
+                        indptr,
+                        array_idx,
+                        OP_BATCH_SIZE,
+                        None,
+                    )
+                    .map_err(DeserializationError::InvalidValue)?;
+
+                    for (imm_group_idx, imm_value) in placements {
+                        groups[imm_group_idx] = imm_value;
                     }
+
+                    next_group_idx = next_group_idx_after;
                 }
             }
 
             // num_groups is the next available index after all groups and immediates
             let num_groups = next_group_idx;
 
-            op_batches.push(crate::mast::OpBatch::new_from_parts(
+            let op_batch = crate::mast::OpBatch::new_from_parts(
                 batch_ops, *indptr, padding, groups, num_groups,
-            ));
+            );
+            op_batch.validate_padding_semantics().map_err(|err| {
+                DeserializationError::InvalidValue(format!("batch {}: {}", batch_idx, err))
+            })?;
+
+            op_batches.push(op_batch);
 
             global_op_offset = batch_ops_end;
         }
@@ -271,6 +293,10 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+    use crate::{
+        Felt,
+        serde::{ByteWriter, DeserializationError, Serializable},
+    };
 
     #[rstest]
     #[case::all_empty([0, 0, 0, 0, 0, 0, 0, 0, 0])]
@@ -295,5 +321,137 @@ mod tests {
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains(expected_msg));
+    }
+
+    #[test]
+    fn decode_operations_rejects_over_budget_batch_count() {
+        let mut bytes = Vec::new();
+        let operations: Vec<Operation> = Vec::new();
+        operations.write_into(&mut bytes);
+        bytes.write_u32(u32::MAX);
+
+        let decoder = BasicBlockDataDecoder::new(&bytes);
+        let err = decoder.decode_operations(0).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("batch count"));
+    }
+
+    #[test]
+    fn decode_operations_allows_exact_batch_budget() {
+        let mut bytes = Vec::new();
+        let operations: Vec<Operation> = Vec::new();
+        operations.write_into(&mut bytes);
+
+        bytes.write_u32(2);
+        for _ in 0..2 {
+            bytes.write_bytes(&[0u8; INDPTR_BYTES_PER_BATCH]);
+        }
+        for _ in 0..2 {
+            bytes.write_u8(0);
+        }
+
+        let decoder = BasicBlockDataDecoder::new(&bytes);
+        let op_batches = decoder.decode_operations(0).unwrap();
+        assert_eq!(op_batches.len(), 2);
+    }
+
+    #[test]
+    fn decode_operations_rejects_over_budget_with_ops_consumed() {
+        let mut bytes = Vec::new();
+        let operations: Vec<Operation> = vec![Operation::Noop];
+        operations.write_into(&mut bytes);
+
+        bytes.write_u32(2);
+        bytes.write_bytes(&[0u8; INDPTR_BYTES_PER_BATCH]);
+        bytes.write_u8(0);
+
+        let decoder = BasicBlockDataDecoder::new(&bytes);
+        let err = decoder.decode_operations(0).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("batch count"));
+    }
+
+    #[test]
+    fn test_decode_operations_rejects_push_immediate_group_overflow() {
+        let operations = vec![Operation::Push(Felt::new(1))];
+
+        let mut bytes = Vec::new();
+        operations.write_into(&mut bytes);
+        1u32.write_into(&mut bytes);
+
+        let indptr = [0usize, 0, 0, 0, 0, 0, 0, 0, 1];
+        let packed = pack_indptr_deltas(&indptr);
+        packed.write_into(&mut bytes);
+        0u8.write_into(&mut bytes);
+
+        let decoder = BasicBlockDataDecoder::new(&bytes);
+        let err = decoder.decode_operations(0).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                DeserializationError::InvalidValue(ref msg) if msg.contains("exceeds group slots")
+            ),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn decode_operations_rejects_empty_padded_group() {
+        let mut bytes = Vec::new();
+
+        vec![Operation::Noop].write_into(&mut bytes);
+
+        bytes.write_u32(1);
+        bytes.write_bytes(&[0x10, 0x00, 0x00, 0x00]);
+        bytes.write_u8(0x01);
+
+        let decoder = BasicBlockDataDecoder::new(&bytes);
+        let err = decoder.decode_operations(0).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("empty group cannot be marked as padded"));
+    }
+
+    #[test]
+    fn decode_operations_rejects_padded_group_without_noop() {
+        let mut bytes = Vec::new();
+
+        vec![Operation::Add].write_into(&mut bytes);
+
+        bytes.write_u32(1);
+        bytes.write_bytes(&[0x01, 0x00, 0x00, 0x00]);
+        bytes.write_u8(0x01);
+
+        let decoder = BasicBlockDataDecoder::new(&bytes);
+        let err = decoder.decode_operations(0).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("padded group must end with NOOP"));
+    }
+
+    #[test]
+    fn decode_operations_accepts_padded_group_with_noop() {
+        let mut bytes = Vec::new();
+
+        vec![Operation::Add, Operation::Noop].write_into(&mut bytes);
+
+        bytes.write_u32(1);
+        bytes.write_bytes(&[0x02, 0x00, 0x00, 0x00]);
+        bytes.write_u8(0x01);
+
+        let decoder = BasicBlockDataDecoder::new(&bytes);
+        let batches = decoder.decode_operations(0).unwrap();
+
+        assert_eq!(batches.len(), 1);
+        let batch = &batches[0];
+        assert_eq!(batch.num_groups(), 1);
+        assert_eq!(batch.ops(), &[Operation::Add, Operation::Noop]);
+        assert!(batch.padding()[0]);
     }
 }

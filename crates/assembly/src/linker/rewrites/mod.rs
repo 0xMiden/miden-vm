@@ -62,7 +62,7 @@ pub fn rewrite_symbol(
             }
         },
         SymbolItem::Procedure(proc) => {
-            let mut rewriter = ModuleRewriter::new(gid.module, resolver);
+            let mut rewriter = ModuleRewriter::new(gid.module, resolver, cache);
             let mut proc = proc.borrow_mut();
             if let ControlFlow::Break(err) = rewriter.visit_mut_procedure(&mut proc) {
                 return Err(err);
@@ -80,12 +80,15 @@ pub fn rewrite_symbol(
             resolver.cache.constants.insert(gid, value);
         },
         SymbolItem::Type(item) => {
-            let resolver = Resolver {
+            let mut resolver = Resolver {
                 resolver,
                 cache,
                 current_module: gid.module,
             };
-            let ty = item.ty().resolve_type(&resolver)?.expect("type or error to have been raised");
+            let ty = item
+                .ty()
+                .resolve_type(&mut resolver)?
+                .expect("type or error to have been raised");
             resolver.cache.types.insert(gid, ty);
         },
     }

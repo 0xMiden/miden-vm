@@ -150,6 +150,7 @@ where:
 - $ptr$ is the word-aligned pointer to the first input variable.
 - $n_{read} = I + C$ is the total count of input and constant elements that the chiplet will read.
 - $n_{eval} = N$ is the total number of arithmetic operations (instructions) the chiplet will evaluate.
+  The chiplet stores $N - 1$ in the trace column so that the READ→EVAL switch triggers when $id_0' = n_{eval}$.
 
 For both inputs and constants, it is permissible to pad their respective regions with zeros.  
 Any padded zero will simply be ignored by the instructions (they are not referenced by any instruction, so their multiplicity will be set to 0).
@@ -163,7 +164,7 @@ The evaluation is initialized in the first row of the section by setting
 - $id_0 = n_{read} + n_{eval} -1$, indicating the expected number of nodes in the DAG. Whenever the chiplet adds a new wire to the bus, this identifier decrements by 1, until it reaches 0.
 - $s_{start} = 1$, indicating the start of the section (it is set to 0 in all remaining rows)
 - $s_{block} = 0$, ensuring the evaluation starts by reading variables
-- $ctx, clk, n_{eval}, ptr$ provided by the bus request. $(ctx, clk)$ remain constant for the entire section, while $n_{eval}$ is constant only across the READ block.
+- $ctx, clk, n_{eval}, ptr$ provided by the bus request. $(ctx, clk)$ remain constant for the entire section, while $n_{eval}$ (stored as $N-1$ in the trace) is constant only across the READ block.
 
 In every row, the chiplet the following actions in each block:
 
@@ -279,7 +280,7 @@ From these common selectors, we derive the following binary flags which indicate
 > \begin{aligned}
 > f_{prev} &\gets (1 - s_{d-1}) \cdot \prod_{i=1}^{d-2} s_{i} && | \deg = d-1
 > f_{ace} &\gets (1 - s_{d}) \cdot \prod_{i=1}^{d-1} s_{i} && | \deg = d
-> f_{ace, first}' &\gets f_{prev} \cdot (1 - s_{d-1}') && | \deg = d 
+> f_{ace, first}' &\gets f_{prev} \cdot s_{d-1}' \cdot (1 - s_d') && | \deg = d + 1
 > f_{ace, next} &\gets f_{ace} \cdot (1 - s_{d}') && | \deg = d + 1
 > f_{ace, last} &\gets f_{ace} \cdot s_{d}' && | \deg = d + 1
 > \end{aligned}
@@ -349,18 +350,18 @@ In particular, we can infer from the above that
 - each section contains at least two rows (a READ and an EVAL row), and,
 - a row following a READ is always in the same section.
 
-A READ row checks whether $id_0'$ in the next row is equal to $n_{eval} - 1$ provided by the caller at initialization,
+A READ row checks whether $id_0'$ in the next row is equal to $n_{eval}$ (the value stored in the trace, i.e. $N-1$),
 in which case we ensure the following row is an EVAL.
 Otherwise, $n_{eval}$ remains the same.
 
 > $$
 > f_{ace} \cdot f_{read} \cdot
-> \big[f_{read}' \cdot n_{eval}' + f_{eval}' \cdot (id_0' + 1) - n_{eval}\big] = 0 \quad | \deg = d + 3.
+> \big[f_{read}' \cdot n_{eval}' + f_{eval}' \cdot id_0' - n_{eval}\big] = 0 \quad | \deg = d + 3.
 > $$
 
 ### Section constraints
 
-These constraints apply to all rows within the same section/
+These constraints apply to all rows within the same section:
 
 - Across the section, $ctx$ and $clk$ are constant.
 - A READ/EVAL block requests a word/element from memory, so the $ptr$ increases by 4/1, respectively in the next row.
@@ -370,8 +371,8 @@ These constraints apply to all rows within the same section/
 > \begin{aligned}
 > f_{next} \cdot (ctx' - ctx) &= 0 && | \deg = d + 3
 > f_{next} \cdot (clk' - clk) &= 0 && | \deg = d + 3
-> f_{next} \cdot \big[ptr' - ptr + 4 \cdot f_{read} + f_{eval}\big] &= 0 && | \deg = d + 3
-> f_{next} \cdot \big[id_0 - id_0' + 2 \cdot f_{read} + f_{eval}\big] &= 0 && | \deg = d + 3
+> f_{next} \cdot \big[ptr' - ptr - 4 \cdot f_{read} - f_{eval}\big] &= 0 && | \deg = d + 3
+> f_{next} \cdot \big[id_0 - id_0' - 2 \cdot f_{read} - f_{eval}\big] &= 0 && | \deg = d + 3
 > \end{aligned}
 > $$
 
@@ -481,7 +482,7 @@ The actual constraint is given by normalizing the denominator
 The ACE chiplet initializes a circuit evaluation by responding to a request made by the decoder, through the [chiplet bus](./index.md#chiplets-bus) $b_{chip}$.
 As mentioned earlier, the message corresponds to the tuple, which is sent to the bus only when $f_{start} = 1$.
 $$(\mathsf{ACE_LABEL}, ctx, ptr, clk, n_\text{read}, n_\text{eval}).$$
-The value $n_{read}$ is computed as $id_0 - 1 - n_{eval}$, since in the first row, $id_0$ is expected to be equal to the total number of nodes inserted (subtracting 1 since identifiers are indexed from zero).
+The value $n_{read}$ is computed as $id_0 - n_{eval}$, since in the first row, $id_0$ is expected to be equal to the total number of nodes inserted (subtracting 1 since identifiers are indexed from zero, and recalling the trace stores $n_{eval} = N - 1$).
 We refer to the [chiplet bus constraints](./index.md#chiplets-bus-constraints) which describes the constraints for chiplet bus responses.
 
 The requests sent to the memory chiplet cannot use the same chiplet bus, as the decoder requests saturate the degree of constraint over its auxiliary column.

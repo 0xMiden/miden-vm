@@ -14,6 +14,7 @@ pub use miden_core::{
 };
 pub use miden_debug_types as debuginfo;
 pub use miden_utils_diagnostics::{self as diagnostics, Report};
+pub use semver;
 
 #[cfg(feature = "arbitrary")]
 pub mod arbitrary;
@@ -34,6 +35,9 @@ pub use self::{
     parse::{Parse, ParseOptions},
     sema::SemanticAnalysisError,
 };
+
+/// Maximum allowed iteration count for `repeat.<count>` blocks.
+pub const MAX_REPEAT_COUNT: u32 = 1_000_000;
 
 /// The modulus of the Miden field as a raw u64 integer
 pub(crate) const FIELD_MODULUS: u64 = miden_core::Felt::ORDER_U64;

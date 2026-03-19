@@ -15,7 +15,9 @@ use crate::{
         constants::ConstEnvironment,
         visit::{self, VisitMut},
     },
-    linker::{LinkerError, SymbolItem, SymbolResolutionContext, SymbolResolver},
+    linker::{
+        LinkerError, Resolver, ResolverCache, SymbolItem, SymbolResolutionContext, SymbolResolver,
+    },
 };
 
 // MODULE REWRITE CHECK
@@ -29,6 +31,7 @@ use crate::{
 ///   referenced by MAST root for which we have no definition.
 pub struct ModuleRewriter<'a, 'b: 'a> {
     resolver: &'a SymbolResolver<'b>,
+    cache: &'a mut ResolverCache,
     module_id: ModuleIndex,
     invoked: BTreeSet<Invoke>,
 }
@@ -49,12 +52,63 @@ macro_rules! wrap_const_control_flow {
 
 impl<'a, 'b: 'a> ModuleRewriter<'a, 'b> {
     /// Create a new instance of this pass with the given [SymbolResolver]
-    pub fn new(module: ModuleIndex, resolver: &'a SymbolResolver<'b>) -> Self {
+    pub fn new(
+        module: ModuleIndex,
+        resolver: &'a SymbolResolver<'b>,
+        cache: &'a mut ResolverCache,
+    ) -> Self {
         Self {
             resolver,
+            cache,
             module_id: module,
             invoked: Default::default(),
         }
+    }
+
+    fn invalid_constant_ref(&self, span: SourceSpan) -> LinkerError {
+        LinkerError::InvalidConstantRef {
+            span,
+            source_file: self.get_source_file_for(span),
+        }
+    }
+
+    fn get_constant_by_gid(
+        &mut self,
+        gid: ast::GlobalItemIndex,
+        span: SourceSpan,
+    ) -> Result<Option<CachedConstantValue<'_>>, LinkerError> {
+        if self.cache.constants.contains_key(&gid) {
+            let cached = self
+                .cache
+                .constants
+                .get(&gid)
+                .expect("constant value present in cache must be retrievable");
+            return Ok(Some(CachedConstantValue::Hit(cached)));
+        }
+
+        match self.resolver.linker()[gid].item() {
+            SymbolItem::Compiled(ItemInfo::Constant(info)) => {
+                return Ok(Some(CachedConstantValue::Hit(&info.value)));
+            },
+            SymbolItem::Constant(_) => {
+                let mut resolver = Resolver {
+                    resolver: self.resolver,
+                    cache: self.cache,
+                    current_module: gid.module,
+                };
+                resolver.materialize_constant_by_gid(gid, span)?;
+                let cached = self
+                    .cache
+                    .constants
+                    .get(&gid)
+                    .expect("constant value inserted into cache must be retrievable");
+                return Ok(Some(CachedConstantValue::Hit(cached)));
+            },
+            SymbolItem::Compiled(_) | SymbolItem::Procedure(_) | SymbolItem::Type(_) => (),
+            SymbolItem::Alias { .. } => unreachable!(),
+        }
+
+        Err(self.invalid_constant_ref(span))
     }
 
     fn rewrite_target(
@@ -228,44 +282,29 @@ impl<'a, 'b: 'a> ConstEnvironment for ModuleRewriter<'a, 'b> {
         self.resolver.source_manager().get(span.source_id()).ok()
     }
 
-    fn get(&self, name: &ast::Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
-        let module = &self.resolver.linker()[self.module_id];
+    fn get(&mut self, name: &ast::Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
         let name = Span::new(name.span(), name.as_str());
         let context = SymbolResolutionContext {
             span: name.span(),
             module: self.module_id,
             kind: None,
         };
-        let symbol = match self.resolver.resolve_local(&context, &name)? {
-            SymbolResolution::Exact { gid, .. } => &self.resolver.linker()[gid],
-            SymbolResolution::Local(item) => &module[*item.inner()],
+        let gid = match self.resolver.resolve_local(&context, &name)? {
+            SymbolResolution::Exact { gid, .. } => gid,
+            SymbolResolution::Local(item) => self.module_id + item.into_inner(),
             SymbolResolution::External(path) => {
                 return self.get_by_path(path.as_deref());
             },
             SymbolResolution::Module { .. } | SymbolResolution::MastRoot(_) => {
-                return Err(LinkerError::InvalidConstantRef {
-                    span: name.span(),
-                    source_file: self.get_source_file_for(name.span()),
-                });
+                return Err(self.invalid_constant_ref(name.span()));
             },
         };
-        match symbol.item() {
-            SymbolItem::Compiled(ItemInfo::Constant(info)) => {
-                Ok(Some(CachedConstantValue::Hit(&info.value)))
-            },
-            SymbolItem::Constant(ast) => Ok(Some(CachedConstantValue::Miss(&ast.value))),
-            SymbolItem::Compiled(_) | SymbolItem::Procedure(_) | SymbolItem::Type(_) => {
-                Err(LinkerError::InvalidConstantRef {
-                    span: name.span(),
-                    source_file: self.get_source_file_for(name.span()),
-                })
-            },
-            SymbolItem::Alias { .. } => unreachable!(),
-        }
+
+        self.get_constant_by_gid(gid, name.span())
     }
 
     fn get_by_path(
-        &self,
+        &mut self,
         path: Span<&ast::Path>,
     ) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
         let context = SymbolResolutionContext {
@@ -277,25 +316,11 @@ impl<'a, 'b: 'a> ConstEnvironment for ModuleRewriter<'a, 'b> {
             SymbolResolution::Exact { gid, .. } => gid,
             SymbolResolution::Local(item) => self.module_id + item.into_inner(),
             SymbolResolution::MastRoot(_) | SymbolResolution::Module { .. } => {
-                return Err(LinkerError::InvalidConstantRef {
-                    span: path.span(),
-                    source_file: self.get_source_file_for(path.span()),
-                });
+                return Err(self.invalid_constant_ref(path.span()));
             },
             SymbolResolution::External(_) => unreachable!(),
         };
-        match self.resolver.linker()[gid].item() {
-            SymbolItem::Compiled(ItemInfo::Constant(info)) => {
-                Ok(Some(CachedConstantValue::Hit(&info.value)))
-            },
-            SymbolItem::Constant(ast) => Ok(Some(CachedConstantValue::Miss(&ast.value))),
-            SymbolItem::Compiled(_) | SymbolItem::Procedure(_) | SymbolItem::Type(_) => {
-                Err(LinkerError::InvalidConstantRef {
-                    span: path.span(),
-                    source_file: self.get_source_file_for(path.span()),
-                })
-            },
-            SymbolItem::Alias { .. } => unreachable!(),
-        }
+
+        self.get_constant_by_gid(gid, path.span())
     }
 }

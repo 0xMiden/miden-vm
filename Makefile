@@ -28,8 +28,8 @@ help:
 
 # -- environment toggles --------------------------------------------------------------------------
 BACKTRACE                := RUST_BACKTRACE=1
-WARNINGS                 := RUSTDOCFLAGS="-D warnings"
 BUILDDOCS                := MIDEN_BUILD_LIB_DOCS=1
+DOCS_NIGHTLY_TOOLCHAIN   ?= nightly
 
 # -- feature configuration ------------------------------------------------------------------------
 ALL_FEATURES             := --all-features
@@ -50,6 +50,7 @@ FEATURES_assembly-syntax := testing,serde
 FEATURES_core            :=
 FEATURES_vm              := concurrent,executable,internal
 FEATURES_processor       := concurrent,testing,bus-debugger
+FEATURES_project         := resolver
 FEATURES_prover          := concurrent
 FEATURES_core-lib        :=
 FEATURES_verifier        :=
@@ -57,13 +58,22 @@ FEATURES_verifier        :=
 # -- linting --------------------------------------------------------------------------------------
 
 .PHONY: clippy
-clippy: ## Runs Clippy with configs
-	cargo +nightly clippy --workspace --all-targets ${ALL_FEATURES} -- -D warnings
+clippy: ## Runs Clippy with configs (alias for xclippy)
+	cargo +nightly xclippy
+
+
+.PHONY: xclippy
+xclippy: ## Runs Clippy with custom lint config from .cargo/config.toml
+	cargo +nightly xclippy
 
 
 .PHONY: fix
-fix: ## Runs Fix with configs
-	cargo +nightly fix --allow-staged --allow-dirty --all-targets ${ALL_FEATURES}
+fix: ## Runs Fix with configs (alias for xclippy-fix)
+	cargo +nightly xclippy-fix
+
+.PHONY: xclippy-fix
+xclippy-fix: ## Runs Clippy with --fix using the same lints as xclippy
+	cargo +nightly xclippy-fix
 
 
 .PHONY: format
@@ -77,13 +87,14 @@ format-check: ## Runs Format using nightly toolchain but only in check mode
 
 
 .PHONY: lint
-lint: format fix clippy ## Runs all linting tasks at once (Clippy, fixing, formatting)
+lint: xclippy xclippy-fix format ## Runs all linting tasks: check with xclippy, fix issues, then format
 
 # --- docs ----------------------------------------------------------------------------------------
 
 .PHONY: doc
-doc: ## Generates & checks documentation
-	$(WARNINGS) $(BUILDDOCS) cargo doc ${ALL_FEATURES} --keep-going --release
+doc: ## Generates & checks documentation for workspace crates only
+	rm -rf "$${CARGO_TARGET_DIR:-target}/doc"
+	$(BUILDDOCS) RUSTDOCFLAGS="--enable-index-page -Zunstable-options -D warnings" cargo +$(DOCS_NIGHTLY_TOOLCHAIN) doc ${ALL_FEATURES} --keep-going --release --no-deps
 
 .PHONY: serve-docs
 serve-docs: ## Serves the docs
@@ -247,17 +258,35 @@ bench: ## Runs benchmarks
 # ============================================================
 
 .PHONY: fuzz-mast-forest
-fuzz-mast-forest: ## Run fuzzing for MastForest deserialization
+fuzz-mast-forest: fuzz-seeds ## Run fuzzing for MastForest deserialization
 	-@cargo +nightly fuzz run mast_forest_deserialize --release --fuzz-dir miden-core-fuzz
 
 .PHONY: fuzz-mast-validate
-fuzz-mast-validate: ## Run fuzzing for UntrustedMastForest validation
+fuzz-mast-validate: fuzz-seeds ## Run fuzzing for UntrustedMastForest validation
 	-@cargo +nightly fuzz run mast_forest_validate --release --fuzz-dir miden-core-fuzz
 
 .PHONY: fuzz-all
-fuzz-all: ## Run all fuzz targets (in sequence)
+fuzz-all: fuzz-seeds ## Run all fuzz targets (in sequence)
 	-@cargo +nightly fuzz run mast_forest_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run mast_forest_serde_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
 	-@cargo +nightly fuzz run mast_forest_validate --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run program_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run program_serde_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run kernel_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run kernel_serde_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run stack_io_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run advice_map_serde_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run advice_inputs_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run operation_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run operation_serde_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run execution_proof_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run execution_proof_serde_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run precompile_request_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run precompile_request_serde_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run library_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run library_serde_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run package_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run package_serde_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
 
 .PHONY: fuzz-list
 fuzz-list: ## List available fuzz targets
@@ -271,3 +300,4 @@ fuzz-coverage: ## Generate coverage report for fuzz targets
 .PHONY: fuzz-seeds
 fuzz-seeds: ## Generate seed corpus files for fuzzing
 	cargo test -p miden-core generate_fuzz_seeds -- --ignored --nocapture
+	cargo test -p miden-mast-package generate_fuzz_seeds -- --ignored --nocapture

@@ -398,11 +398,11 @@ impl Test {
         // compare fast and slow processors' stack outputs
         self.assert_result_with_step_execution(&fast_stack_result);
 
-        fast_stack_result.map(|(execution_output, trace_generation_ctx)| {
-            let trace = build_trace(execution_output, trace_generation_ctx, program.to_info());
+        fast_stack_result.and_then(|(execution_output, trace_generation_ctx)| {
+            let trace = build_trace(execution_output, trace_generation_ctx, program.to_info())?;
 
             assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
-            trace
+            Ok(trace)
         })
     }
 
@@ -455,9 +455,13 @@ impl Test {
         }
     }
 
-    /// Compiles the test's code into a program, then generates and verifies a proof of execution
-    /// using the given public inputs and the specified number of stack outputs. When `test_fail`
-    /// is true, this function will force a failure by modifying the first output.
+    /// Compiles the test's code into a program, then generates and verifies a STARK proof of
+    /// execution. When `test_fail` is true, forces a failure by modifying the first output.
+    ///
+    /// Prefer [`check_constraints`](Self::check_constraints) for constraint validation — it is
+    /// much faster and provides better error diagnostics. Use this method only when you need to
+    /// exercise the full STARK prove/verify pipeline (e.g., testing proof serialization,
+    /// verifier logic, or precompile request handling).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn prove_and_verify(&self, pub_inputs: Vec<u64>, test_fail: bool) {
         let (program, mut host) = self.get_program_and_host();
@@ -481,6 +485,30 @@ impl Test {
             let result = miden_verifier::verify(program_info, stack_inputs, stack_outputs, proof);
             assert!(result.is_ok(), "error: {result:?}");
         }
+    }
+
+    /// Executes the test program and checks all AIR constraints without generating a STARK proof.
+    ///
+    /// This is the recommended way to validate constraints in tests. It delegates to
+    /// [`ExecutionTrace::check_constraints`], which is much faster than the
+    /// full prove/verify pipeline and provides better error diagnostics. Use
+    /// [`prove_and_verify`](Self::prove_and_verify) only when you need to exercise the
+    /// complete STARK proof generation and verification flow.
+    ///
+    /// # Panics
+    ///
+    /// Panics if execution fails or if any AIR constraint evaluates to nonzero on any row.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[track_caller]
+    pub fn check_constraints(&self) {
+        let trace = self
+            .execute()
+            .inspect_err(|_err| {
+                #[cfg(feature = "std")]
+                std::eprintln!("{}", PrintDiagnostic::new_without_color(_err))
+            })
+            .expect("failed to execute");
+        trace.check_constraints();
     }
 
     /// Returns the last state of the stack after executing a test.

@@ -36,7 +36,7 @@ impl constants::ConstEnvironment for AnalysisContext {
         }
     }
     #[inline]
-    fn get(&self, name: &Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
+    fn get(&mut self, name: &Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
         if let Some(constant) = self.constants.get(name) {
             Ok(Some(CachedConstantValue::Miss(&constant.value)))
         } else if self.imported.contains(name) {
@@ -52,7 +52,7 @@ impl constants::ConstEnvironment for AnalysisContext {
     }
     #[inline(always)]
     fn get_by_path(
-        &self,
+        &mut self,
         path: Span<&Path>,
     ) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
         if let Some(name) = path.as_ident() {
@@ -106,6 +106,22 @@ impl AnalysisContext {
             self.errors.push(err);
         } else {
             let name = constant.name.clone();
+            self.constants.insert(name, constant);
+        }
+    }
+
+    /// Register a constant for semantic analysis without defining it in the module.
+    ///
+    /// This is used for enum variants so we can fold discriminants without
+    /// attempting to define the same constant twice.
+    pub fn register_constant(&mut self, constant: Constant) {
+        let name = constant.name.clone();
+        if let Some(prev) = self.constants.get(&name) {
+            self.errors.push(SemanticAnalysisError::SymbolConflict {
+                span: constant.span,
+                prev_span: prev.span,
+            });
+        } else {
             self.constants.insert(name, constant);
         }
     }

@@ -5,13 +5,9 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::cell::Cell;
 use core::{cmp::min, ops::ControlFlow};
 
-use miden_air::{
-    Felt,
-    trace::{RowIndex, chiplets::hasher::STATE_WIDTH},
-};
+use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     EMPTY_WORD, WORD_SIZE, Word, ZERO,
-    crypto::merkle::MerklePath,
     mast::{MastForest, MastNodeExt, MastNodeId},
     operations::Decorator,
     precompile::PrecompileTranscript,
@@ -29,10 +25,7 @@ use crate::{
         InternalBreakReason, execute_impl, finish_emit_op_execution,
         finish_load_mast_forest_from_dyn_start, finish_load_mast_forest_from_external,
     },
-    trace::{
-        chiplets::CircuitEvaluation,
-        execution_tracer::{ExecutionTracer, TraceGenerationContext},
-    },
+    trace::execution_tracer::{ExecutionTracer, TraceGenerationContext},
     tracer::{OperationHelperRegisters, Tracer},
 };
 
@@ -305,12 +298,37 @@ impl FastProcessor {
     }
 
     /// Returns the element on the stack at index `idx`.
+    ///
+    /// This method is only meant to be used to access the stack top by operation handlers, and
+    /// system event handlers.
+    ///
+    /// # Preconditions
+    /// - `idx` must be less than or equal to 15.
     #[inline(always)]
     pub fn stack_get(&self, idx: usize) -> Felt {
         self.stack[self.stack_top_idx - idx - 1]
     }
 
+    /// Same as [`Self::stack_get()`], but returns [`ZERO`] if `idx` falls below index 0 in the
+    /// stack buffer.
+    ///
+    /// Use this instead of `stack_get()` when `idx` may exceed 15.
+    #[inline(always)]
+    pub fn stack_get_safe(&self, idx: usize) -> Felt {
+        if idx < self.stack_top_idx {
+            self.stack[self.stack_top_idx - idx - 1]
+        } else {
+            ZERO
+        }
+    }
+
     /// Mutable variant of `stack_get()`.
+    ///
+    /// This method is only meant to be used to access the stack top by operation handlers, and
+    /// system event handlers.
+    ///
+    /// # Preconditions
+    /// - `idx` must be less than or equal to 15.
     #[inline(always)]
     pub fn stack_get_mut(&mut self, idx: usize) -> &mut Felt {
         &mut self.stack[self.stack_top_idx - idx - 1]
@@ -330,6 +348,12 @@ impl FastProcessor {
     /// - `stack_get_word(0)` returns `[a, b, c, d]`,
     /// - `stack_get_word(1)` returns `[b, c, d, e]`,
     /// - etc.
+    ///
+    /// This method is only meant to be used to access the stack top by operation handlers, and
+    /// system event handlers.
+    ///
+    /// # Preconditions
+    /// - `start_idx` must be less than or equal to 12.
     #[inline(always)]
     pub fn stack_get_word(&self, start_idx: usize) -> Word {
         // Ensure we have enough elements to form a complete word
@@ -338,11 +362,35 @@ impl FastProcessor {
             "Not enough elements on stack to read word starting at index {start_idx}"
         );
 
-        let word_start_idx = self.stack_top_idx - start_idx - 4;
+        let word_start_idx = self.stack_top_idx - start_idx - WORD_SIZE;
         let mut result: [Felt; WORD_SIZE] =
             self.stack[range(word_start_idx, WORD_SIZE)].try_into().unwrap();
         // Reverse so top of stack (idx 0) goes to word[0]
         result.reverse();
+        result.into()
+    }
+
+    /// Same as [`Self::stack_get_word()`], but returns [`ZERO`] for any element that falls below
+    /// index 0 in the stack buffer.
+    ///
+    /// Use this instead of `stack_get_word()` when `start_idx + WORD_SIZE` may exceed
+    /// `stack_top_idx`.
+    #[inline(always)]
+    pub fn stack_get_word_safe(&self, start_idx: usize) -> Word {
+        let buf_end = self.stack_top_idx.saturating_sub(start_idx);
+        let buf_start = self.stack_top_idx.saturating_sub(start_idx.saturating_add(WORD_SIZE));
+        let num_elements_to_read_from_buf = buf_end - buf_start;
+
+        let mut result = [ZERO; WORD_SIZE];
+        if num_elements_to_read_from_buf == WORD_SIZE {
+            result.copy_from_slice(&self.stack[range(buf_start, WORD_SIZE)]);
+        } else if num_elements_to_read_from_buf > 0 {
+            let offset = WORD_SIZE - num_elements_to_read_from_buf;
+            result[offset..]
+                .copy_from_slice(&self.stack[range(buf_start, num_elements_to_read_from_buf)]);
+        }
+        result.reverse();
+
         result.into()
     }
 
@@ -357,9 +405,14 @@ impl FastProcessor {
         &self.memory
     }
 
+    /// Returns a reference to the execution options.
+    pub fn execution_options(&self) -> &ExecutionOptions {
+        &self.options
+    }
+
     /// Returns a narrowed interface for reading and updating the processor state.
     #[inline(always)]
-    pub fn state(&mut self) -> ProcessorState<'_> {
+    pub fn state(&self) -> ProcessorState<'_> {
         ProcessorState { processor: self }
     }
 
@@ -377,7 +430,7 @@ impl FastProcessor {
     /// `word[0]` goes to stack position start_idx (top), `word[1]` to start_idx+1, etc.
     #[inline(always)]
     pub fn stack_write_word(&mut self, start_idx: usize, word: &Word) {
-        debug_assert!(start_idx < MIN_STACK_DEPTH);
+        debug_assert!(start_idx <= MIN_STACK_DEPTH - WORD_SIZE);
 
         let word_start_idx = self.stack_top_idx - start_idx - 4;
         let mut source: [Felt; WORD_SIZE] = (*word).into();
@@ -418,9 +471,7 @@ impl FastProcessor {
         let mut tracer = ExecutionTracer::new(self.options.core_trace_fragment_size());
         let execution_output = self.execute_with_tracer(program, host, &mut tracer).await?;
 
-        // Pass the final precompile transcript from execution output to the trace generation
-        // context
-        let context = tracer.into_trace_generation_context(execution_output.final_pc_transcript);
+        let context = tracer.into_trace_generation_context();
 
         Ok((execution_output, context))
     }
@@ -552,13 +603,7 @@ impl FastProcessor {
                 InternalBreakReason::LoadMastForestFromDyn { dyn_node_id, callee_hash } => {
                     // load mast forest asynchronously
                     let (root_id, new_forest) = match self
-                        .load_mast_forest(
-                            callee_hash,
-                            host,
-                            |digest| OperationError::DynamicNodeNotFound { digest },
-                            current_forest,
-                            dyn_node_id,
-                        )
+                        .load_mast_forest(callee_hash, host, current_forest, dyn_node_id)
                         .await
                     {
                         Ok(result) => result,
@@ -583,13 +628,7 @@ impl FastProcessor {
                 } => {
                     // load mast forest asynchronously
                     let (root_id, new_forest) = match self
-                        .load_mast_forest(
-                            procedure_hash,
-                            host,
-                            |root_digest| OperationError::NoMastForestWithProcedure { root_digest },
-                            current_forest,
-                            external_node_id,
-                        )
+                        .load_mast_forest(procedure_hash, host, current_forest, external_node_id)
                         .await
                     {
                         Ok(result) => result,
@@ -639,7 +678,7 @@ impl FastProcessor {
 
     /// Executes the decorators that should be executed before entering a node.
     fn execute_before_enter_decorators(
-        &mut self,
+        &self,
         node_id: MastNodeId,
         current_forest: &MastForest,
         host: &mut impl Host,
@@ -664,7 +703,7 @@ impl FastProcessor {
 
     /// Executes the decorators that should be executed after exiting a node.
     fn execute_after_exit_decorators(
-        &mut self,
+        &self,
         node_id: MastNodeId,
         current_forest: &MastForest,
         host: &mut impl Host,
@@ -689,27 +728,28 @@ impl FastProcessor {
 
     /// Executes the specified decorator
     fn execute_decorator(
-        &mut self,
+        &self,
         decorator: &Decorator,
         host: &mut impl Host,
     ) -> ControlFlow<BreakReason> {
         match decorator {
             Decorator::Debug(options) => {
                 if self.in_debug_mode() {
-                    let process = &mut self.state();
-                    if let Err(err) = host.on_debug(process, options) {
+                    let processor_state = self.state();
+                    if let Err(err) = host.on_debug(&processor_state, options) {
                         return ControlFlow::Break(BreakReason::Err(
-                            ExecutionError::DebugHandlerError { err },
+                            crate::errors::HostError::DebugHandlerError { err }.into(),
                         ));
                     }
                 }
             },
             Decorator::Trace(id) => {
                 if self.options.enable_tracing() {
-                    let process = &mut self.state();
-                    if let Err(err) = host.on_trace(process, *id) {
+                    let processor_state = self.state();
+                    if let Err(err) = host.on_trace(&processor_state, *id) {
                         return ControlFlow::Break(BreakReason::Err(
-                            ExecutionError::TraceHandlerError { trace_id: *id, err },
+                            crate::errors::HostError::TraceHandlerError { trace_id: *id, err }
+                                .into(),
                         ));
                     }
                 }
@@ -725,15 +765,17 @@ impl FastProcessor {
         &mut self,
         node_digest: Word,
         host: &mut impl Host,
-        get_mast_forest_failed: impl Fn(Word) -> OperationError,
         current_forest: &MastForest,
         node_id: MastNodeId,
     ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
-        let mast_forest = host
-            .get_mast_forest(&node_digest)
-            .await
-            .ok_or_else(|| get_mast_forest_failed(node_digest))
-            .map_exec_err(current_forest, node_id, host)?;
+        let mast_forest = host.get_mast_forest(&node_digest).await.ok_or_else(|| {
+            crate::errors::procedure_not_found_with_context(
+                node_digest,
+                current_forest,
+                node_id,
+                host,
+            )
+        })?;
 
         // We limit the parts of the program that can be called externally to procedure
         // roots, even though MAST doesn't have that restriction.
@@ -1038,154 +1080,12 @@ impl Tracer for NoopTracer {
     }
 
     #[inline(always)]
-    fn record_mast_forest_resolution(&mut self, _node_id: MastNodeId, _forest: &Arc<MastForest>) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_hasher_permute(
-        &mut self,
-        _input_state: [Felt; STATE_WIDTH],
-        _output_state: [Felt; STATE_WIDTH],
-    ) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_hasher_build_merkle_root(
-        &mut self,
-        _node: Word,
-        _path: Option<&MerklePath>,
-        _index: Felt,
-        _output_root: Word,
-    ) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_hasher_update_merkle_root(
-        &mut self,
-        _old_node: Word,
-        _new_node: Word,
-        _path: Option<&MerklePath>,
-        _index: Felt,
-        _old_root: Word,
-        _new_root: Word,
-    ) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_memory_read_element(
-        &mut self,
-        _element: Felt,
-        _addr: Felt,
-        _ctx: ContextId,
-        _clk: RowIndex,
-    ) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_memory_read_word(
-        &mut self,
-        _word: Word,
-        _addr: Felt,
-        _ctx: ContextId,
-        _clk: RowIndex,
-    ) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_memory_write_element(
-        &mut self,
-        _element: Felt,
-        _addr: Felt,
-        _ctx: ContextId,
-        _clk: RowIndex,
-    ) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_memory_write_word(
-        &mut self,
-        _word: Word,
-        _addr: Felt,
-        _ctx: ContextId,
-        _clk: RowIndex,
-    ) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_advice_pop_stack(&mut self, _value: Felt) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_advice_pop_stack_word(&mut self, _word: Word) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_advice_pop_stack_dword(&mut self, _words: [Word; 2]) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_u32and(&mut self, _a: Felt, _b: Felt) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_u32xor(&mut self, _a: Felt, _b: Felt) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_u32_range_checks(&mut self, _clk: RowIndex, _u32_lo: Felt, _u32_hi: Felt) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_kernel_proc_access(&mut self, _proc_hash: Word) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_circuit_evaluation(&mut self, _circuit_evaluation: CircuitEvaluation) {
-        // do nothing
-    }
-
-    #[inline(always)]
     fn finalize_clock_cycle(
         &mut self,
         _processor: &FastProcessor,
         _op_helper_registers: OperationHelperRegisters,
         _current_forest: &Arc<MastForest>,
     ) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn increment_stack_size(&mut self, _processor: &FastProcessor) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn decrement_stack_size(&mut self) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn start_context(&mut self) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn restore_context(&mut self) {
         // do nothing
     }
 }

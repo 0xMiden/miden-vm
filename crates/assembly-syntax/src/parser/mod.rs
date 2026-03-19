@@ -10,6 +10,7 @@ macro_rules! span {
 
 lalrpop_util::lalrpop_mod!(
     #[expect(clippy::all)]
+    #[expect(unused_lifetimes)]
     grammar,
     "/parser/grammar.rs"
 );
@@ -93,6 +94,9 @@ impl ModuleParser {
         source_manager: Arc<dyn SourceManager>,
     ) -> Result<Box<ast::Module>, Report> {
         let path = path.as_ref();
+        if let Err(err) = Path::validate(path.as_str()) {
+            return Err(Report::msg(err.to_string()).with_source_code(source.clone()));
+        }
         let forms = parse_forms_internal(source.clone(), &mut self.interned)
             .map_err(|err| Report::new(err).with_source_code(source.clone()))?;
         sema::analyze(source, self.kind, path, forms, self.warnings_as_errors, source_manager)
@@ -323,7 +327,7 @@ mod module_walker {
                 match entry {
                     Ok((ref entry, ref file_type)) => {
                         match self.next_entry(entry, file_type).transpose() {
-                            None => continue,
+                            None => {},
                             result => break result,
                         }
                     },
@@ -415,5 +419,66 @@ end
         assert_matches!(lexer.next(), Some(Ok(Token::Rparen)));
         assert_matches!(lexer.next(), Some(Ok(Token::End)));
         assert_matches!(lexer.next(), Some(Ok(Token::Eof)));
+    }
+
+    #[test]
+    fn lex_invalid_token_after_whitespace_returns_error() {
+        let source_id = SourceId::default();
+        let scanner = Scanner::new("begin \u{0001}\nend\n");
+        let mut lexer = Lexer::new(source_id, scanner).map(|result| result.map(|(_, t, _)| t));
+
+        assert_matches!(lexer.next(), Some(Ok(Token::Begin)));
+        assert_matches!(
+            lexer.next(),
+            Some(Err(ParsingError::InvalidToken { span })) if span.into_range() == (6..7)
+        );
+    }
+
+    #[test]
+    fn lex_invalid_underscore_token_span() {
+        let source_id = SourceId::default();
+        let scanner = Scanner::new("begin _-\nend\n");
+        let mut lexer = Lexer::new(source_id, scanner).map(|result| result.map(|(_, t, _)| t));
+
+        assert_matches!(lexer.next(), Some(Ok(Token::Begin)));
+        assert_matches!(
+            lexer.next(),
+            Some(Err(ParsingError::InvalidToken { span })) if span.into_range() == (6..7)
+        );
+    }
+
+    #[test]
+    fn lex_single_char_token_and_ident_spans() {
+        let source_id = SourceId::default();
+        let scanner = Scanner::new("@\nA\n");
+        let mut lexer = Lexer::new(source_id, scanner);
+
+        assert_matches!(lexer.next(), Some(Ok((0, Token::At, 1))));
+        assert_matches!(lexer.next(), Some(Ok((2, Token::ConstantIdent("A"), 3))));
+    }
+
+    #[test]
+    fn overlong_path_component_is_rejected_without_panic() {
+        use std::{
+            panic::{AssertUnwindSafe, catch_unwind},
+            sync::Arc,
+        };
+
+        use crate::{
+            debuginfo::DefaultSourceManager,
+            parse::{Parse, ParseOptions},
+        };
+
+        let big_component = "a".repeat(256);
+        let source = format!("begin\n    exec.{big_component}::x::foo\nend\n");
+
+        let source_manager = Arc::new(DefaultSourceManager::default());
+        let parsed = catch_unwind(AssertUnwindSafe(|| {
+            source.parse_with_options(source_manager, ParseOptions::default())
+        }));
+
+        assert!(parsed.is_ok(), "parsing panicked, expected a structured error");
+        let err = parsed.unwrap().expect_err("parsing succeeded, expected an error");
+        crate::assert_diagnostic!(err, "this reference is invalid without a corresponding import");
     }
 }

@@ -164,6 +164,10 @@ impl Path {
             _ => (),
         }
 
+        if path.len() > u16::MAX as usize {
+            return Err(PathError::TooLong { max: u16::MAX as usize });
+        }
+
         for result in Iter::new(path) {
             result?;
         }
@@ -529,7 +533,7 @@ impl StartsWith<Path> for Path {
             // APIs
             let prefix_component = prefix_component.expect("invalid prefix path");
             match (components.next(), prefix_component) {
-                (Some(Ok(PathComponent::Root)), PathComponent::Root) => continue,
+                (Some(Ok(PathComponent::Root)), PathComponent::Root) => {},
                 (Some(Ok(c @ PathComponent::Normal(_))), pc @ PathComponent::Normal(_)) => {
                     if c.as_str() != pc.as_str() {
                         return false;

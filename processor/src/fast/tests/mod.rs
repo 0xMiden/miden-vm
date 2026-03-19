@@ -4,6 +4,7 @@ use miden_air::trace::MIN_TRACE_LEN;
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_core::{
     ONE, assert_matches,
+    events::SystemEvent,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
         MastForestContributor,
@@ -22,6 +23,76 @@ mod all_ops;
 mod fast_decorator_execution_tests;
 mod masm_consistency;
 mod memory;
+
+#[test]
+fn stack_get_word_out_of_bounds_read() {
+    // This event reads a word whose last felt is at index 16, which we will set to be out of bounds
+    // in the stack buffer.
+    const SYS_HQWORD_TO_MAP_EVENT_ID: u64 = SystemEvent::HqwordToMap.event_id().as_u64();
+
+    let program_source = format!(
+        "
+    begin
+        repeat.{} drop end
+
+        push.{SYS_HQWORD_TO_MAP_EVENT_ID}
+        swap
+        drop
+
+        emit
+    end
+    ",
+        INITIAL_STACK_TOP_IDX - MIN_STACK_DEPTH
+    );
+
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let program = Assembler::new(source_manager)
+        .assemble_program(program_source)
+        .expect("program should assemble");
+
+    let mut host = DefaultHost::default();
+    let processor = FastProcessor::new(StackInputs::default());
+
+    // Should not panic
+    processor.execute_sync(&program, &mut host).unwrap();
+}
+
+#[test]
+fn stack_get_safe_boundary() {
+    let inputs = StackInputs::try_from_ints(1..=16_u64).unwrap();
+    let processor = FastProcessor::new(inputs);
+
+    // idx == stack_top_idx: out of bounds, should return ZERO.
+    assert_eq!(processor.stack_get_safe(INITIAL_STACK_TOP_IDX), ZERO);
+
+    // idx == stack_top_idx - 1: below the stack (buffer index 0 is zeroed), should return ZERO.
+    assert_eq!(processor.stack_get_safe(INITIAL_STACK_TOP_IDX - 1), ZERO);
+
+    // idx == stack_top_idx + 1: out of bounds, should return ZERO.
+    assert_eq!(processor.stack_get_safe(INITIAL_STACK_TOP_IDX + 1), ZERO);
+
+    // idx == usize::MAX: far out of bounds, should return ZERO.
+    assert_eq!(processor.stack_get_safe(usize::MAX), ZERO);
+}
+
+#[test]
+fn stack_get_word_safe_partial_read() {
+    let inputs = StackInputs::try_from_ints(1..=16_u64).unwrap();
+    let processor = FastProcessor::new(inputs);
+
+    // The stack has 16 elements (indices 0..=15). Reading a word at start_idx=15 means we want
+    // elements at indices 15, 16, 17, 18. Only index 15 is valid; the rest should be ZERO.
+    let word = processor.stack_get_word_safe(15);
+    // Index 15 is the bottom of the stack (value 16, since inputs are in stack order: top first).
+    assert_eq!(word, [Felt::new(16), ZERO, ZERO, ZERO].into());
+}
+
+#[test]
+fn stack_get_word_safe_usize_max() {
+    let processor = FastProcessor::new(StackInputs::default());
+    let word = processor.stack_get_word_safe(usize::MAX);
+    assert_eq!(word, Word::default());
+}
 
 /// Ensures that the stack is correctly reset in the buffer when the stack is reset in the buffer
 /// as a result of underflow.
@@ -125,6 +196,20 @@ fn test_syscall_fail() {
             ..
         }
     );
+}
+
+#[test]
+fn test_stack_write_word_max_start_idx() {
+    let stack_inputs = StackInputs::new(&[]).unwrap();
+    let mut processor = FastProcessor::new(stack_inputs);
+
+    let word =
+        Word::from([Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4)]);
+    let start_idx = MIN_STACK_DEPTH - WORD_SIZE;
+
+    processor.stack_write_word(start_idx, &word);
+
+    assert_eq!(processor.stack_get_word(start_idx), word);
 }
 
 /// Tests that `ExecutionError::CycleLimitExceeded` is correctly emitted when a program exceeds the
@@ -483,6 +568,46 @@ fn test_external_node_decorator_sequencing() {
         execution_order[2].1 > execution_order[1].1,
         "after_exit should execute after external node operations"
     );
+}
+
+/// Tests that `ExecutionError::Internal` is correctly emitted when the continuation stack grows
+/// past the maximum allowed size.
+#[test]
+fn test_continuation_stack_limit_exceeded() {
+    let mut host = DefaultHost::default();
+
+    // Build a program with deeply nested join nodes. Each join node pushes 2 continuations
+    // (FinishJoin + StartNode) onto the continuation stack before executing its first child.
+    // With `depth` levels of nesting, the continuation stack will grow to approximately
+    // `2 * depth` entries.
+    let program = {
+        let mut forest = MastForest::new();
+
+        // Create a simple leaf basic block (just a noop).
+        let leaf_id = BasicBlockNodeBuilder::new(vec![Operation::Noop], Vec::new())
+            .add_to_forest(&mut forest)
+            .unwrap();
+
+        // Nest join nodes: join(join(join(..., leaf), leaf), leaf)
+        // Each level adds ~2 continuations to the stack.
+        let depth = 10;
+        let mut current = leaf_id;
+        for _ in 0..depth {
+            current = JoinNodeBuilder::new([current, leaf_id]).add_to_forest(&mut forest).unwrap();
+        }
+
+        forest.make_root(current);
+        Program::new(forest.into(), current)
+    };
+
+    // Set a very small continuation stack limit that will be exceeded by the nested joins.
+    let options = ExecutionOptions::default().with_max_num_continuations(3);
+
+    let processor =
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options);
+    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+
+    assert_matches!(err, ExecutionError::Internal(msg) if msg.contains("continuation stack"));
 }
 
 // TEST HELPERS

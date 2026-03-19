@@ -1,6 +1,8 @@
 mod context;
 mod errors;
 mod passes;
+#[cfg(test)]
+mod tests;
 
 use alloc::{
     boxed::Box,
@@ -16,7 +18,7 @@ use smallvec::SmallVec;
 pub use self::{
     context::AnalysisContext,
     errors::{SemanticAnalysisError, SyntaxError},
-    passes::{ConstEvalVisitor, VerifyInvokeTargets},
+    passes::{ConstEvalVisitor, VerifyInvokeTargets, VerifyRepeatCounts},
 };
 use crate::{ast::*, parser::WordValue};
 
@@ -67,16 +69,13 @@ pub fn analyze(
                 // Ensure the constants defined by the enum are made known to the analyzer
                 for variant in ty.variants() {
                     let Variant { span, name, discriminant, .. } = variant;
-                    analyzer.define_constant(
-                        &mut module,
-                        Constant {
-                            span: *span,
-                            docs: None,
-                            visibility: ty.visibility(),
-                            name: name.clone(),
-                            value: discriminant.clone(),
-                        },
-                    );
+                    analyzer.register_constant(Constant {
+                        span: *span,
+                        docs: None,
+                        visibility: ty.visibility(),
+                        name: name.clone(),
+                        value: discriminant.clone(),
+                    });
                 }
 
                 // Defer definition of the enum until we discover all constants
@@ -135,6 +134,15 @@ pub fn analyze(
 
     // Simplify all constant declarations
     analyzer.simplify_constants();
+    for item in module.items_mut().iter_mut() {
+        let Export::Constant(constant) = item else {
+            continue;
+        };
+        constant.value = analyzer
+            .get_constant(&constant.name)
+            .expect("semantic analysis tracks all module constants")
+            .clone();
+    }
 
     // Define enums now that all constant declarations have been discovered
     for mut ty in enums {
@@ -196,9 +204,15 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) -> Result<()
                     }
                 }
 
+                // Ensure repeat counts are within acceptable bounds.
+                log::debug!(target: "verify-repeat", "visiting procedure {}", procedure.name());
+                {
+                    let mut visitor = VerifyRepeatCounts::new(analyzer);
+                    let _ = visitor.visit_procedure(&procedure);
+                }
+
                 // Next, verify invoke targets:
                 //
-                // * Kernel procedures cannot use `syscall` or `call`
                 // * Mark imports as used if they have at least one call to a procedure defined in
                 //   that module
                 // * Verify that all external callees have a matching import

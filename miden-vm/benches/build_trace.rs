@@ -84,7 +84,8 @@ fn build_trace(c: &mut Criterion) {
                                 execution_output,
                                 trace_generation_context,
                                 program.to_info(),
-                            );
+                            )
+                            .unwrap();
                             black_box(trace);
                         },
                         BatchSize::SmallInput,
@@ -131,7 +132,6 @@ fn build_trace(c: &mut Criterion) {
             // If we can't access the entry, just skip it
             Err(err) => {
                 eprintln!("Failed to access file: {entry:?} with error {err:?}");
-                continue;
             },
         }
     }

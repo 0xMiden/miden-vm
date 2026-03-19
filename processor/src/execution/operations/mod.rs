@@ -55,36 +55,29 @@ where
     let user_op_helpers = match op {
         // ----- system operations ------------------------------------------------------------
         Operation::Noop => OperationHelperRegisters::Empty,
-        Operation::Assert(err_code) => {
-            sys_ops::op_assert(processor, *err_code, current_forest, tracer)
-                .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?
-        },
-        Operation::SDepth => sys_ops::op_sdepth(processor, tracer)?,
+        Operation::Assert(err_code) => sys_ops::op_assert(processor, *err_code, current_forest)
+            .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?,
+        Operation::SDepth => sys_ops::op_sdepth(processor)?,
         Operation::Caller => sys_ops::op_caller(processor)?,
-        Operation::Clk => sys_ops::op_clk(processor, tracer)?,
+        Operation::Clk => sys_ops::op_clk(processor)?,
         Operation::Emit => {
             panic!("emit instruction requires async, so is not supported by execute_op()")
         },
 
-        // ----- flow control operations ------------------------------------------------------
-        // control flow operations are never executed directly
-        Operation::Join => unreachable!("control flow operation"),
-        Operation::Split => unreachable!("control flow operation"),
-        Operation::Loop => unreachable!("control flow operation"),
-        Operation::Call => unreachable!("control flow operation"),
-        Operation::SysCall => unreachable!("control flow operation"),
-        Operation::Dyn => unreachable!("control flow operation"),
-        Operation::Dyncall => unreachable!("control flow operation"),
-        Operation::Span => unreachable!("control flow operation"),
-        Operation::Repeat => unreachable!("control flow operation"),
-        Operation::Respan => unreachable!("control flow operation"),
-        Operation::End => unreachable!("control flow operation"),
-        Operation::Halt => unreachable!("control flow operation"),
-
         // ----- field operations -------------------------------------------------------------
-        Operation::Add => field_ops::op_add(processor, tracer),
+        Operation::Add => field_ops::op_add(processor).map_exec_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            op_idx,
+        )?,
         Operation::Neg => field_ops::op_neg(processor),
-        Operation::Mul => field_ops::op_mul(processor, tracer),
+        Operation::Mul => field_ops::op_mul(processor).map_exec_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            op_idx,
+        )?,
         Operation::Inv => field_ops::op_inv(processor).map_exec_err_with_op_idx(
             current_forest,
             node_id,
@@ -92,13 +85,13 @@ where
             op_idx,
         )?,
         Operation::Incr => field_ops::op_incr(processor),
-        Operation::And => field_ops::op_and(processor, tracer).map_exec_err_with_op_idx(
+        Operation::And => field_ops::op_and(processor).map_exec_err_with_op_idx(
             current_forest,
             node_id,
             host,
             op_idx,
         )?,
-        Operation::Or => field_ops::op_or(processor, tracer).map_exec_err_with_op_idx(
+        Operation::Or => field_ops::op_or(processor).map_exec_err_with_op_idx(
             current_forest,
             node_id,
             host,
@@ -110,7 +103,12 @@ where
             host,
             op_idx,
         )?,
-        Operation::Eq => field_ops::op_eq(processor, tracer),
+        Operation::Eq => field_ops::op_eq(processor).map_exec_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            op_idx,
+        )?,
         Operation::Eqz => field_ops::op_eqz(processor),
         Operation::Expacc => field_ops::op_expacc(processor),
 
@@ -171,24 +169,28 @@ where
             .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?,
 
         // ----- stack manipulation -----------------------------------------------------------
-        Operation::Pad => stack_ops::op_pad(processor, tracer)?,
+        Operation::Pad => stack_ops::op_pad(processor)?,
         Operation::Drop => {
-            processor.stack_mut().decrement_size();
-            tracer.decrement_stack_size();
+            processor.stack_mut().decrement_size().map_exec_err_with_op_idx(
+                current_forest,
+                node_id,
+                host,
+                op_idx,
+            )?;
             OperationHelperRegisters::Empty
         },
-        Operation::Dup0 => stack_ops::dup_nth(processor, 0, tracer)?,
-        Operation::Dup1 => stack_ops::dup_nth(processor, 1, tracer)?,
-        Operation::Dup2 => stack_ops::dup_nth(processor, 2, tracer)?,
-        Operation::Dup3 => stack_ops::dup_nth(processor, 3, tracer)?,
-        Operation::Dup4 => stack_ops::dup_nth(processor, 4, tracer)?,
-        Operation::Dup5 => stack_ops::dup_nth(processor, 5, tracer)?,
-        Operation::Dup6 => stack_ops::dup_nth(processor, 6, tracer)?,
-        Operation::Dup7 => stack_ops::dup_nth(processor, 7, tracer)?,
-        Operation::Dup9 => stack_ops::dup_nth(processor, 9, tracer)?,
-        Operation::Dup11 => stack_ops::dup_nth(processor, 11, tracer)?,
-        Operation::Dup13 => stack_ops::dup_nth(processor, 13, tracer)?,
-        Operation::Dup15 => stack_ops::dup_nth(processor, 15, tracer)?,
+        Operation::Dup0 => stack_ops::dup_nth(processor, 0)?,
+        Operation::Dup1 => stack_ops::dup_nth(processor, 1)?,
+        Operation::Dup2 => stack_ops::dup_nth(processor, 2)?,
+        Operation::Dup3 => stack_ops::dup_nth(processor, 3)?,
+        Operation::Dup4 => stack_ops::dup_nth(processor, 4)?,
+        Operation::Dup5 => stack_ops::dup_nth(processor, 5)?,
+        Operation::Dup6 => stack_ops::dup_nth(processor, 6)?,
+        Operation::Dup7 => stack_ops::dup_nth(processor, 7)?,
+        Operation::Dup9 => stack_ops::dup_nth(processor, 9)?,
+        Operation::Dup11 => stack_ops::dup_nth(processor, 11)?,
+        Operation::Dup13 => stack_ops::dup_nth(processor, 13)?,
+        Operation::Dup15 => stack_ops::dup_nth(processor, 15)?,
         Operation::Swap => stack_ops::op_swap(processor),
         Operation::SwapW => {
             processor.stack_mut().swapw_nth(1);
@@ -259,13 +261,13 @@ where
             processor.stack_mut().rotate_right(9);
             OperationHelperRegisters::Empty
         },
-        Operation::CSwap => stack_ops::op_cswap(processor, tracer).map_exec_err_with_op_idx(
+        Operation::CSwap => stack_ops::op_cswap(processor).map_exec_err_with_op_idx(
             current_forest,
             node_id,
             host,
             op_idx,
         )?,
-        Operation::CSwapW => stack_ops::op_cswapw(processor, tracer).map_exec_err_with_op_idx(
+        Operation::CSwapW => stack_ops::op_cswapw(processor).map_exec_err_with_op_idx(
             current_forest,
             node_id,
             host,
@@ -273,7 +275,7 @@ where
         )?,
 
         // ----- input / output ---------------------------------------------------------------
-        Operation::Push(value) => stack_ops::op_push(processor, *value, tracer)?,
+        Operation::Push(value) => stack_ops::op_push(processor, *value)?,
         Operation::AdvPop => io_ops::op_advpop(processor, tracer).map_exec_err_with_op_idx(
             current_forest,
             node_id,
@@ -324,15 +326,24 @@ where
         )?,
 
         // ----- cryptographic operations -----------------------------------------------------
-        Operation::HPerm => crypto_ops::op_hperm(processor, tracer),
+        Operation::HPerm => crypto_ops::op_hperm(processor, tracer).map_exec_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            op_idx,
+        )?,
         Operation::MpVerify(err_code) => {
             crypto_ops::op_mpverify(processor, *err_code, current_forest, tracer)
                 .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?
         },
         Operation::MrUpdate => crypto_ops::op_mrupdate(processor, tracer)
             .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?,
-        Operation::FriE2F4 => fri_ops::op_fri_ext2fold4(processor, tracer)
-            .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?,
+        Operation::FriE2F4 => fri_ops::op_fri_ext2fold4(processor).map_exec_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            op_idx,
+        )?,
         Operation::HornerBase => crypto_ops::op_horner_eval_base(processor, tracer)
             .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?,
         Operation::HornerExt => crypto_ops::op_horner_eval_ext(processor, tracer)
@@ -346,7 +357,8 @@ where
             )?;
             OperationHelperRegisters::Empty
         },
-        Operation::LogPrecompile => crypto_ops::op_log_precompile(processor, tracer),
+        Operation::LogPrecompile => crypto_ops::op_log_precompile(processor, tracer)
+            .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?,
         Operation::CryptoStream => crypto_ops::op_crypto_stream(processor, tracer)
             .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?,
     };

@@ -200,12 +200,14 @@ mod fast_parallel {
     use alloc::sync::Arc;
 
     use miden_assembly::{Assembler, DefaultSourceManager};
-    use miden_core::proof::{ExecutionProof, HashFunction};
-    use miden_crypto::stark;
+    use miden_core::{
+        Felt,
+        proof::{ExecutionProof, HashFunction},
+    };
     use miden_processor::{
         ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs, trace::build_trace,
     };
-    use miden_prover::{ProcessorAir, config, execution_trace_to_row_major};
+    use miden_prover::{config, prove_stark};
     use miden_verifier::verify;
     use miden_vm::DefaultHost;
 
@@ -247,19 +249,27 @@ mod fast_parallel {
         let fast_stack_outputs = execution_output.stack;
 
         // Build trace using parallel trace generation
-        let trace = build_trace(execution_output, trace_context, program.to_info());
+        let trace = build_trace(execution_output, trace_context, program.to_info()).unwrap();
 
         // Convert trace to row-major format for proving
-        let trace_matrix = execution_trace_to_row_major(&trace);
-        let public_values = trace.to_public_values();
+        let trace_matrix = trace.to_row_major_matrix();
 
-        // Create AIR with aux trace builders
-        let air = ProcessorAir::with_aux_builder(trace.aux_trace_builders().clone());
+        // Build public inputs
+        let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();
+        let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
+
+        let aux_builder = trace.aux_trace_builders();
 
         // Generate proof using Blake3_256
-        let config = config::create_blake3_256_config();
-        let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
-        let proof_bytes = bincode::serialize(&proof).expect("Failed to serialize proof");
+        let blake3_config = config::blake3_256_config(config::pcs_params());
+        let proof_bytes = prove_stark(
+            &blake3_config,
+            &trace_matrix,
+            &public_values,
+            var_len_public_inputs,
+            &aux_builder,
+        )
+        .expect("Proving failed");
 
         let precompile_requests = trace.precompile_requests().to_vec();
 

@@ -11,7 +11,7 @@ use super::{
     op_fri_ext2fold4,
 };
 use crate::{
-    fast::{FastProcessor, NoopTracer},
+    fast::FastProcessor,
     processor::{Processor, SystemInterface},
 };
 
@@ -110,16 +110,15 @@ proptest! {
         ];
 
         let mut processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
-        let mut tracer = NoopTracer;
 
         // Push v0 to the top of the stack
         // This shifts everything down by one position, moving end_ptr to overflow
         let v0 = query_values[0].as_basis_coefficients_slice()[0];
-        op_push(&mut processor, v0, &mut tracer).unwrap();
+        op_push(&mut processor, v0).unwrap();
         processor.system_mut().increment_clock();
 
         // Execute the operation
-        let result = op_fri_ext2fold4(&mut processor, &mut tracer);
+        let result = op_fri_ext2fold4(&mut processor);
         prop_assert!(result.is_ok(), "op_fri_ext2fold4 failed: {:?}", result.err());
         processor.system_mut().increment_clock();
 

@@ -10,17 +10,20 @@ use alloc::vec::Vec;
 use core::borrow::Borrow;
 
 use miden_core::{
+    WORD_SIZE, Word,
     field::ExtensionField,
     precompile::PrecompileTranscriptState,
-    program::{ProgramInfo, StackInputs, StackOutputs},
+    program::{MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs},
 };
-use miden_crypto::stark::matrix::{Matrix, RowMajorMatrix};
+use miden_crypto::stark::air::{
+    ReducedAuxValues, ReductionError, VarLenPublicInputs, WindowAccess,
+};
 
 pub mod config;
 mod constraints;
 
 pub mod trace;
-use trace::{AUX_TRACE_WIDTH, AuxTraceBuilder, MainTraceRow, TRACE_WIDTH};
+use trace::{AUX_TRACE_WIDTH, MainTraceRow, TRACE_WIDTH};
 
 // RE-EXPORTS
 // ================================================================================================
@@ -30,7 +33,13 @@ mod export {
         serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
         utils::ToElements,
     };
-    pub use miden_crypto::stark::air::{Air, AirBuilder, BaseAir, MidenAir, MidenAirBuilder};
+    pub use miden_crypto::stark::{
+        air::{
+            AirBuilder, AirWitness, AuxBuilder, BaseAir, ExtensionBuilder, LiftedAir,
+            LiftedAirBuilder, PermutationAirBuilder,
+        },
+        debug,
+    };
 }
 
 pub use export::*;
@@ -80,8 +89,32 @@ impl PublicInputs {
         self.pc_transcript_state
     }
 
+    /// Returns the fixed-length public values and the variable-length kernel procedure digests
+    /// as a flat slice of `Felt`s.
+    ///
+    /// The fixed-length public values layout is:
+    ///   [0..4]   program hash
+    ///   [4..20]  stack inputs
+    ///   [20..36] stack outputs
+    ///   [36..40] precompile transcript state
+    ///
+    /// The kernel procedure digests are returned as a single flat `Vec<Felt>` (concatenated
+    /// words), to be passed as a single variable-length public input slice to the verifier.
+    pub fn to_air_inputs(&self) -> (Vec<Felt>, Vec<Felt>) {
+        let mut public_values = Vec::with_capacity(NUM_PUBLIC_VALUES);
+        public_values.extend_from_slice(self.program_info.program_hash().as_elements());
+        public_values.extend_from_slice(self.stack_inputs.as_ref());
+        public_values.extend_from_slice(self.stack_outputs.as_ref());
+        public_values.extend_from_slice(self.pc_transcript_state.as_ref());
+
+        let kernel_felts: Vec<Felt> =
+            Word::words_as_elements(self.program_info.kernel_procedures()).to_vec();
+
+        (public_values, kernel_felts)
+    }
+
     /// Converts public inputs into a vector of field elements (Felt) in the canonical order:
-    /// - program info elements
+    /// - program info elements (including kernel procedure hashes)
     /// - stack inputs
     /// - stack outputs
     /// - precompile transcript state
@@ -125,85 +158,290 @@ impl Deserializable for PublicInputs {
 // PROCESSOR AIR
 // ================================================================================================
 
+/// Number of fixed-length public values for the Miden VM AIR.
+///
+/// Layout (40 Felts total):
+///   [0..4]   program hash
+///   [4..20]  stack inputs
+///   [20..36] stack outputs
+///   [36..40] precompile transcript state
+pub const NUM_PUBLIC_VALUES: usize = WORD_SIZE + MIN_STACK_DEPTH + MIN_STACK_DEPTH + WORD_SIZE;
+
+// Public values layout offsets.
+const PV_PROGRAM_HASH: usize = 0;
+const PV_TRANSCRIPT_STATE: usize = NUM_PUBLIC_VALUES - WORD_SIZE;
+
 /// Miden VM Processor AIR implementation.
 ///
-/// This struct defines the constraints for the Miden VM processor.
-/// Generic over aux trace builder to support different extension fields.
-pub struct ProcessorAir<B = ()> {
-    /// Auxiliary trace builder for generating auxiliary columns.
-    aux_builder: Option<B>,
-}
+/// Auxiliary trace building is handled separately via [`AuxBuilder`].
+///
+/// Public-input-dependent boundary checks are performed in [`LiftedAir::reduced_aux_values`].
+/// Aux columns are NOT initialized with boundary terms -- they start at identity. The verifier
+/// independently computes expected boundary messages from variable length public values and checks
+/// them against the final column values.
+#[derive(Copy, Clone, Debug, Default)]
+pub struct ProcessorAir;
 
-impl Default for ProcessorAir<()> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// --- Upstream trait impls for ProcessorAir ---
 
-impl ProcessorAir<()> {
-    /// Creates a new ProcessorAir without auxiliary trace support.
-    pub fn new() -> Self {
-        Self { aux_builder: None }
-    }
-}
-
-impl<B> ProcessorAir<B> {
-    /// Creates a new ProcessorAir with auxiliary trace support.
-    pub fn with_aux_builder(builder: B) -> Self {
-        Self { aux_builder: Some(builder) }
-    }
-}
-
-impl<EF, B> MidenAir<Felt, EF> for ProcessorAir<B>
-where
-    EF: ExtensionField<Felt>,
-    B: AuxTraceBuilder<EF>,
-{
+impl BaseAir<Felt> for ProcessorAir {
     fn width(&self) -> usize {
         TRACE_WIDTH
     }
 
-    fn aux_width(&self) -> usize {
-        // Return the number of extension field columns
-        // The prover will interpret the returned base field data as EF columns
-        AUX_TRACE_WIDTH
+    fn num_public_values(&self) -> usize {
+        NUM_PUBLIC_VALUES
+    }
+}
+
+// --- LiftedAir impl ---
+
+impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
+    fn periodic_columns(&self) -> Vec<Vec<Felt>> {
+        let mut cols = constraints::chiplets::hasher::periodic_columns();
+        cols.extend(constraints::chiplets::bitwise::periodic_columns());
+        cols
     }
 
     fn num_randomness(&self) -> usize {
-        trace::AUX_TRACE_RAND_ELEMENTS
+        trace::AUX_TRACE_RAND_CHALLENGES
     }
 
-    fn build_aux_trace(
+    fn aux_width(&self) -> usize {
+        AUX_TRACE_WIDTH
+    }
+
+    fn num_aux_values(&self) -> usize {
+        AUX_TRACE_WIDTH
+    }
+
+    /// Returns the number of variable-length public input slices.
+    ///
+    /// The Miden VM AIR uses a single variable-length slice that contains all kernel
+    /// procedure digests as concatenated field elements (each digest is `WORD_SIZE`
+    /// elements). The verifier framework uses this count to validate that the correct
+    /// number of slices is provided.
+    fn num_var_len_public_inputs(&self) -> usize {
+        1
+    }
+
+    fn reduced_aux_values(
         &self,
-        main: &RowMajorMatrix<Felt>,
+        aux_values: &[EF],
         challenges: &[EF],
-    ) -> Option<RowMajorMatrix<Felt>> {
-        let _span = tracing::info_span!("build_aux_trace").entered();
+        public_values: &[Felt],
+        var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
+    ) -> Result<ReducedAuxValues<EF>, ReductionError>
+    where
+        EF: ExtensionField<Felt>,
+    {
+        // Extract final aux column values.
+        let p1 = aux_values[trace::DECODER_AUX_TRACE_OFFSET];
+        let p2 = aux_values[trace::DECODER_AUX_TRACE_OFFSET + 1];
+        let p3 = aux_values[trace::DECODER_AUX_TRACE_OFFSET + 2];
+        let s_aux = aux_values[trace::STACK_AUX_TRACE_OFFSET];
+        let b_range = aux_values[trace::RANGE_CHECK_AUX_TRACE_OFFSET];
+        let b_hash_kernel = aux_values[trace::HASH_KERNEL_VTABLE_AUX_TRACE_OFFSET];
+        let b_chiplets = aux_values[trace::CHIPLETS_BUS_AUX_TRACE_OFFSET];
+        let v_wiring = aux_values[trace::ACE_CHIPLET_WIRING_BUS_OFFSET];
 
-        let builders = self.aux_builder.as_ref()?;
+        // Parse fixed-length public values (see `NUM_PUBLIC_VALUES` for layout).
+        if public_values.len() != NUM_PUBLIC_VALUES {
+            return Err(format!(
+                "expected {} public values, got {}",
+                NUM_PUBLIC_VALUES,
+                public_values.len()
+            )
+            .into());
+        }
+        let program_hash: Word = public_values[PV_PROGRAM_HASH..PV_PROGRAM_HASH + WORD_SIZE]
+            .try_into()
+            .map_err(|_| -> ReductionError { "invalid program hash slice".into() })?;
+        let pc_transcript_state: PrecompileTranscriptState = public_values
+            [PV_TRANSCRIPT_STATE..PV_TRANSCRIPT_STATE + WORD_SIZE]
+            .try_into()
+            .map_err(|_| -> ReductionError { "invalid transcript state slice".into() })?;
 
-        Some(builders.build_aux_columns(main, challenges))
+        // Precompute challenge powers once for all bus message encodings.
+        let challenges = trace::Challenges::<EF>::new(challenges[0], challenges[1]);
+
+        // Compute expected bus messages from public inputs and derived challenges.
+        let ph_msg = program_hash_message(&challenges, &program_hash);
+
+        let (default_transcript_msg, final_transcript_msg) =
+            transcript_messages(&challenges, pc_transcript_state);
+
+        let kernel_reduced = kernel_reduced_from_var_len(&challenges, var_len_public_inputs)?;
+
+        // Combine all multiset column finals with reduced variable length public-inputs.
+        //
+        // Running-product columns accumulate `responses / requests` at each row, so
+        // their final value is product(responses) / product(requests) over the entire trace.
+        //
+        // Columns whose requests and responses fully cancel end at 1:
+        //   p1  (block stack table) -- every block pushed is later popped
+        //   p3  (op group table)    -- every op group pushed is later consumed
+        //   s_aux (stack overflow)  -- every overflow push has a matching pop
+        //
+        // Columns with public-input-dependent boundary terms end at non-unity values:
+        //
+        //   p2 (block hash table):
+        //     The root block's hash is removed from the table at END, but was never
+        //     added (the root has no parent that would add it). This leaves one
+        //     unmatched removal: p2_final = 1 / ph_msg.
+        //
+        //   b_hash_kernel (chiplets virtual table: sibling table + transcript state):
+        //     The log_precompile transcript tracking chain starts by removing
+        //     default_transcript_msg (initial capacity state) and ends by inserting
+        //     final_transcript_msg (final capacity state). On the other hand, sibling table
+        //     entries cancel out. Net: b_hk_final = final_transcript_msg / default_transcript_msg.
+        //
+        //   b_chiplets (chiplets bus):
+        //     Each unique kernel procedure produces a KernelRomInitMessage response
+        //     from the kernel ROM chiplet These init messages are matched by the verifier
+        //     via public inputs. Net: b_ch_final = product(kernel_init_msgs) = kernel_reduced.
+        //
+        // Multiplying all finals with correction terms:
+        //   prod = (p1 * p3 * s_aux)                               -- each is 1
+        //        * (p2 * ph_msg)                                   -- (1/ph_msg) * ph_msg = 1
+        //        * (b_hk * default_msg / final_msg)                -- cancels to 1
+        //        * (b_ch / kernel_reduced)                         -- cancels to 1
+        //
+        // Rearranged: prod = all_finals * ph_msg * default_msg / (final_msg * kernel_reduced) (= 1)
+        let expected_denom = final_transcript_msg * kernel_reduced;
+        let expected_denom_inv = expected_denom
+            .try_inverse()
+            .ok_or_else(|| -> ReductionError { "zero denominator in reduced_aux_values".into() })?;
+
+        let prod = p1
+            * p2
+            * p3
+            * s_aux
+            * b_hash_kernel
+            * b_chiplets
+            * ph_msg
+            * default_transcript_msg
+            * expected_denom_inv;
+
+        // LogUp: all columns should end at 0.
+        let sum = b_range + v_wiring;
+
+        Ok(ReducedAuxValues { prod, sum })
     }
 
-    fn eval<AB: MidenAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         use crate::constraints;
 
         let main = builder.main();
 
         // Access the two rows: current (local) and next
-        let local = main.row_slice(0).expect("Matrix should have at least 1 row");
-        let next = main.row_slice(1).expect("Matrix should have at least 2 rows");
+        let local = main.current_slice();
+        let next = main.next_slice();
 
         // Use structured column access via MainTraceCols
         let local: &MainTraceRow<AB::Var> = (*local).borrow();
         let next: &MainTraceRow<AB::Var> = (*next).borrow();
 
-        // SYSTEM CONSTRAINTS
-        constraints::enforce_clock_constraint(builder, local, next);
+        // Main trace constraints.
+        constraints::enforce_main(builder, local, next);
 
-        // RANGE CHECKER CONSTRAINTS
-        constraints::range::enforce_range_boundary_constraints(builder, local);
-        constraints::range::enforce_range_transition_constraint(builder, local, next);
-        constraints::range::enforce_range_bus_constraint(builder, local);
+        // Auxiliary (bus) constraints.
+        constraints::enforce_bus(builder, local, next);
+
+        // Public inputs boundary constraints.
+        constraints::public_inputs::enforce_main(builder, local);
     }
+}
+
+// REDUCED AUX VALUES HELPERS
+// ================================================================================================
+
+/// Builds the program-hash bus message for the block-hash table boundary term.
+///
+/// Must match `BlockHashTableRow::from_end().collapse()` on the prover side for the
+/// root block, which encodes `[parent_id=0, hash[0..4], is_first_child=0, is_loop_body=0]`.
+fn program_hash_message<EF: ExtensionField<Felt>>(
+    challenges: &trace::Challenges<EF>,
+    program_hash: &Word,
+) -> EF {
+    challenges.encode([
+        Felt::ZERO, // parent_id = 0 (root block)
+        program_hash[0],
+        program_hash[1],
+        program_hash[2],
+        program_hash[3],
+        Felt::ZERO, // is_first_child = false
+        Felt::ZERO, // is_loop_body = false
+    ])
+}
+
+/// Returns the pair of (initial, final) log-precompile transcript messages for the
+/// virtual-table bus boundary term.
+///
+/// The initial message uses the default (zero) capacity state; the final message uses
+/// the public-input transcript state.
+fn transcript_messages<EF: ExtensionField<Felt>>(
+    challenges: &trace::Challenges<EF>,
+    final_state: PrecompileTranscriptState,
+) -> (EF, EF) {
+    let encode = |state: PrecompileTranscriptState| {
+        let cap: &[Felt] = state.as_ref();
+        challenges.encode([
+            Felt::from_u8(trace::LOG_PRECOMPILE_LABEL),
+            cap[0],
+            cap[1],
+            cap[2],
+            cap[3],
+        ])
+    };
+    (encode(PrecompileTranscriptState::default()), encode(final_state))
+}
+
+/// Builds the kernel procedure init message for the kernel ROM bus.
+///
+/// Must match `KernelRomInitMessage::value()` on the prover side, which encodes
+/// `[KERNEL_PROC_INIT_LABEL, digest[0..4]]`.
+fn kernel_proc_message<EF: ExtensionField<Felt>>(
+    challenges: &trace::Challenges<EF>,
+    digest: &Word,
+) -> EF {
+    challenges.encode([
+        trace::chiplets::kernel_rom::KERNEL_PROC_INIT_LABEL,
+        digest[0],
+        digest[1],
+        digest[2],
+        digest[3],
+    ])
+}
+
+/// Reduces kernel procedure digests from var-len public inputs into a multiset product.
+///
+/// Expects exactly one variable-length public input slice containing all kernel digests
+/// as concatenated `Felt`s (i.e. `len % WORD_SIZE == 0`).
+fn kernel_reduced_from_var_len<EF: ExtensionField<Felt>>(
+    challenges: &trace::Challenges<EF>,
+    var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
+) -> Result<EF, ReductionError> {
+    if var_len_public_inputs.len() != 1 {
+        return Err(format!(
+            "expected 1 var-len public input slice, got {}",
+            var_len_public_inputs.len()
+        )
+        .into());
+    }
+    let kernel_felts = var_len_public_inputs[0];
+    if !kernel_felts.len().is_multiple_of(WORD_SIZE) {
+        return Err(format!(
+            "kernel digest felts length {} is not a multiple of {}",
+            kernel_felts.len(),
+            WORD_SIZE
+        )
+        .into());
+    }
+    let mut acc = EF::ONE;
+    for digest in kernel_felts.chunks_exact(WORD_SIZE) {
+        let word: Word = [digest[0], digest[1], digest[2], digest[3]].into();
+        acc *= kernel_proc_message(challenges, &word);
+    }
+    Ok(acc)
 }

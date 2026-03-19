@@ -57,17 +57,19 @@ pub fn fingerprint_from_parts(
     children_ids: &[MastNodeId],
     node_digest: Word,
 ) -> Result<MastNodeFingerprint, MastForestError> {
-    let pre_decorator_hash_bytes: Vec<[u8; 32]> =
-        before_enter_ids.iter().map(|&id| forest[id].fingerprint().as_bytes()).collect();
+    let pre_decorator_hash_bytes: Vec<[u8; 32]> = before_enter_ids
+        .iter()
+        .map(|&id| *forest[id].fingerprint().as_bytes())
+        .collect();
     let post_decorator_hash_bytes: Vec<[u8; 32]> =
-        after_exit_ids.iter().map(|&id| forest[id].fingerprint().as_bytes()).collect();
+        after_exit_ids.iter().map(|&id| *forest[id].fingerprint().as_bytes()).collect();
 
     let children_decorator_roots: Vec<[u8; 32]> = {
         let mut roots = Vec::new();
         for child_id in children_ids {
             if let Some(child_fingerprint) = hash_by_node_id.get(*child_id) {
                 if let Some(decorator_root) = child_fingerprint.decorator_root {
-                    roots.push(decorator_root.as_bytes());
+                    roots.push(*decorator_root.as_bytes());
                 }
             } else {
                 return Err(MastForestError::ChildFingerprintMissing(*child_id));

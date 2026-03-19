@@ -142,14 +142,16 @@ impl EventHandlerRegistry {
     ) -> Result<(), ExecutionError> {
         // Check if the event is a reserved system event
         if SystemEvent::from_name(event.as_str()).is_some() {
-            return Err(ExecutionError::ReservedEventNamespace { event });
+            return Err(crate::errors::HostError::ReservedEventNamespace { event }.into());
         }
 
         // Compute EventId from the event name
         let id = event.to_event_id();
         match self.handlers.entry(id) {
             Entry::Vacant(e) => e.insert((event, handler)),
-            Entry::Occupied(_) => return Err(ExecutionError::DuplicateEventHandler { event }),
+            Entry::Occupied(_) => {
+                return Err(crate::errors::HostError::DuplicateEventHandler { event }.into());
+            },
         };
         Ok(())
     }
@@ -197,25 +199,20 @@ impl Debug for EventHandlerRegistry {
 /// Handler for debug and trace operations
 pub trait DebugHandler: Sync {
     /// This function is invoked when the `Debug` decorator is executed.
+    ///
+    /// The default implementation is a no-op.
     fn on_debug(
         &mut self,
-        process: &ProcessorState,
-        options: &DebugOptions,
+        _process: &ProcessorState,
+        _options: &DebugOptions,
     ) -> Result<(), DebugError> {
-        let mut handler = crate::host::debug::DefaultDebugHandler::default();
-        handler.on_debug(process, options)
+        Ok(())
     }
 
     /// This function is invoked when the `Trace` decorator is executed.
-    fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
-        let _ = (&process, trace_id);
-        #[cfg(feature = "std")]
-        std::println!(
-            "Trace with id {} emitted at step {} in context {}",
-            trace_id,
-            process.clock(),
-            process.ctx()
-        );
+    ///
+    /// The default implementation is a no-op.
+    fn on_trace(&mut self, _process: &ProcessorState, _trace_id: u32) -> Result<(), TraceError> {
         Ok(())
     }
 }

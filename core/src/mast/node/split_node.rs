@@ -5,14 +5,15 @@ use core::fmt;
 use serde::{Deserialize, Serialize};
 
 use super::{MastForestContributor, MastNodeExt};
+#[cfg(debug_assertions)]
+use crate::mast::MastNode;
 use crate::{
     Felt, Word,
     chiplets::hasher,
     mast::{
-        DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode, MastNodeFingerprint,
-        MastNodeId,
+        DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeFingerprint, MastNodeId,
     },
-    operations::OPCODE_SPLIT,
+    operations::opcodes,
     prettier::PrettyPrint,
     utils::{Idx, LookupByIdx},
 };
@@ -38,7 +39,7 @@ pub struct SplitNode {
 /// Constants
 impl SplitNode {
     /// The domain of the split node (used for control block hashing).
-    pub const DOMAIN: Felt = Felt::new(OPCODE_SPLIT as u64);
+    pub const DOMAIN: Felt = Felt::new(opcodes::SPLIT as u64);
 }
 
 /// Public accessors

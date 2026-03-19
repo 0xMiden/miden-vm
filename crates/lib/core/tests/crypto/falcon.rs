@@ -6,18 +6,17 @@ use miden_core::{
     ZERO,
     events::EventName,
     field::PrimeField64,
-    proof::HashFunction,
     serde::{Deserializable, Serializable},
 };
 use miden_core_lib::{CoreLibrary, dsa::falcon512_poseidon2};
 use miden_processor::{
-    DefaultHost, ExecutionError, ProcessorState, Program, ProgramInfo, StackInputs,
+    DefaultHost, ExecutionError, ProcessorState, Program, StackInputs,
     advice::{AdviceInputs, AdviceMutation},
-    crypto::random::RpoRandomCoin,
+    crypto::random::RandomCoin,
     event::EventError,
+    execute_sync,
     operation::OperationError,
 };
-use miden_prover::ProvingOptions;
 use miden_utils_testing::{
     AdviceStackBuilder, Word,
     crypto::{
@@ -26,11 +25,11 @@ use miden_utils_testing::{
     },
     expect_exec_error_matches,
     proptest::proptest,
-    prove_sync,
     rand::random_word,
 };
 use rand::{Rng, SeedableRng, rng};
 use rand_chacha::ChaCha20Rng;
+use rstest::rstest;
 
 /// Modulus used for Falcon512-Poseidon2.
 const M: u64 = 12289;
@@ -39,14 +38,14 @@ const N: usize = 512;
 const J: u64 = (N * M as usize * M as usize) as u64;
 
 const PROBABILISTIC_PRODUCT_SOURCE: &str = "
-    use miden::core::crypto::dsa::falcon512poseidon2
+    use miden::core::crypto::dsa::falcon512_poseidon2
 
     begin
         #=> [PK, ...]
         push.0
         #=> [h_ptr, PK, ...]
 
-        exec.falcon512poseidon2::load_h_s2_and_product
+        exec.falcon512_poseidon2::load_h_s2_and_product
         #=> [...]
     end
     ";
@@ -107,10 +106,10 @@ pub enum FalconError {
 #[test]
 fn test_falcon512_norm_sq() {
     let source = "
-    use miden::core::crypto::dsa::falcon512poseidon2
+    use miden::core::crypto::dsa::falcon512_poseidon2
 
     begin
-        exec.falcon512poseidon2::norm_sq
+        exec.falcon512_poseidon2::norm_sq
     end
     ";
 
@@ -127,10 +126,10 @@ fn test_falcon512_norm_sq() {
 #[test]
 fn test_falcon512_diff_mod_m() {
     let source = "
-    use miden::core::crypto::dsa::falcon512poseidon2
+    use miden::core::crypto::dsa::falcon512_poseidon2
 
     begin
-        exec.falcon512poseidon2::diff_mod_M
+        exec.falcon512_poseidon2::diff_mod_M
     end
     ";
     let v = Felt::ORDER_U64 - 1;
@@ -170,10 +169,10 @@ proptest! {
     fn diff_mod_m_proptest(v in 0..Felt::ORDER_U64, w in 0..J, u in 0..J) {
 
           let source = "
-    use miden::core::crypto::dsa::falcon512poseidon2
+    use miden::core::crypto::dsa::falcon512_poseidon2
 
     begin
-        exec.falcon512poseidon2::diff_mod_M
+        exec.falcon512_poseidon2::diff_mod_M
     end
     ";
 
@@ -195,9 +194,9 @@ proptest! {
 #[test]
 fn test_falcon512_probabilistic_product_deterministic() {
     // Use a fixed seed to make the test deterministic
-    use miden_crypto::rand::RpoRandomCoin;
+    use miden_crypto::rand::RandomCoin;
     let seed = Word::default();
-    let mut rng = RpoRandomCoin::new(seed);
+    let mut rng = RandomCoin::new(seed);
 
     // Generate deterministic coefficients
     let mut h_coeffs = Vec::new();
@@ -257,16 +256,16 @@ fn test_falcon512_probabilistic_product_failure() {
 #[test]
 fn test_move_sig_to_adv_stack() {
     let seed = Word::default();
-    let mut rng = RpoRandomCoin::new(seed);
+    let mut rng = RandomCoin::new(seed);
     let secret_key = SecretKey::with_rng(&mut rng);
     let message = random_word();
 
     let source = "
-    use miden::core::crypto::dsa::falcon512poseidon2
+    use miden::core::crypto::dsa::falcon512_poseidon2
 
     begin
-        exec.falcon512poseidon2::move_sig_from_map_to_adv_stack
-        exec.falcon512poseidon2::verify
+        exec.falcon512_poseidon2::move_sig_from_map_to_adv_stack
+        exec.falcon512_poseidon2::verify
     end
     ";
 
@@ -293,7 +292,7 @@ fn test_move_sig_to_adv_stack() {
 #[test]
 fn falcon_execution() {
     let seed = Word::default();
-    let mut rng = RpoRandomCoin::new(seed);
+    let mut rng = RandomCoin::new(seed);
     let sk = SecretKey::with_rng(&mut rng);
     let message = random_word();
     let (source, op_stack, adv_stack, store, advice_map) = generate_test(sk, message);
@@ -307,10 +306,10 @@ fn falcon_execution() {
 fn test_mod_12289_simple() {
     // Simple test to debug mod_12289 with a known input
     let source = "
-        use miden::core::crypto::dsa::falcon512poseidon2
+        use miden::core::crypto::dsa::falcon512_poseidon2
 
         begin
-            exec.falcon512poseidon2::mod_12289
+            exec.falcon512_poseidon2::mod_12289
         end
     ";
 
@@ -326,10 +325,10 @@ fn test_mod_12289_simple() {
 fn test_mod_12289_larger_value() {
     // Test with a larger value that requires the higher 32 bits
     let source = "
-        use miden::core::crypto::dsa::falcon512poseidon2
+        use miden::core::crypto::dsa::falcon512_poseidon2
 
         begin
-            exec.falcon512poseidon2::mod_12289
+            exec.falcon512_poseidon2::mod_12289
         end
     ";
 
@@ -342,6 +341,111 @@ fn test_mod_12289_larger_value() {
     // Expected: 8589934592 % 12289 = 7507
     let expected = 8589934592u64 % 12289;
     test.expect_stack(&[expected]);
+}
+
+#[rstest]
+#[case(0, 100_000)]
+#[case(2, 0)]
+#[case(0, 12_290)]
+#[case(1, 1)]
+#[case(0xffff_ffff, 0xffff_fffe)]
+fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo: u64) {
+    const FALCON_DIV: EventName =
+        EventName::new("miden::core::crypto::dsa::falcon512_poseidon2::falcon_div");
+
+    // M^(-1) mod 2^64. For any a, q = a * M_INV (mod 2^64) satisfies M*q ≡ a (mod 2^64).
+    const M_INV: u64 = 15010777177727684609;
+
+    // Malicious event handler that always returns remainder = 0.
+    fn malicious_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
+        let a_hi = process.get_stack_item(1).as_canonical_u64();
+        let a_lo = process.get_stack_item(2).as_canonical_u64();
+        let a = (a_hi << 32) | a_lo;
+
+        let q = a.wrapping_mul(M_INV);
+        let q_hi = Felt::new(q >> 32);
+        let q_lo = Felt::new(q & 0xffff_ffff);
+
+        let remainder = AdviceMutation::extend_stack([ZERO]);
+        let quotient = AdviceMutation::extend_stack([q_hi, q_lo]);
+        Ok(vec![remainder, quotient])
+    }
+
+    let source = "
+        use miden::core::crypto::dsa::falcon512_poseidon2
+        begin
+            exec.falcon512_poseidon2::mod_12289
+        end
+    ";
+
+    let a = (a_hi << 32) | a_lo;
+    let true_remainder = a % M;
+    assert_ne!(true_remainder, 0, "test expects inputs with non-zero true remainder");
+
+    let op_stack = vec![a_hi, a_lo];
+    let adv_stack: Vec<u64> = vec![];
+
+    // Use the upstream test builder directly so we do not auto-register the honest
+    // falcon_div handler from CoreLibrary.
+    let core_lib = miden_core_lib::CoreLibrary::default();
+    let mut test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack);
+    test.libraries.push(core_lib.library().clone());
+    test.add_event_handler(FALCON_DIV, malicious_falcon_div);
+
+    // Hardened mod_12289 must reject forged advice.
+    expect_exec_error_matches!(
+        test,
+        ExecutionError::OperationError {
+            err: OperationError::FailedAssertion { err_msg, .. },
+            ..
+        } if err_msg.as_deref() == Some("comparison failed: quotient overflow")
+    );
+}
+
+#[test]
+fn test_mod_12289_rejects_forged_addition_overflow() {
+    const FALCON_DIV: EventName =
+        EventName::new("miden::core::crypto::dsa::falcon512_poseidon2::falcon_div");
+
+    // Largest q such that M * q fits into 64 bits. This guarantees quotient-overflow checks pass.
+    const FORGED_Q: u64 = u64::MAX / M;
+    // 5664 > u64::MAX - M * FORGED_Q, so (M * FORGED_Q + FORGED_R) overflows u64.
+    const FORGED_R: u64 = 5_664;
+
+    // Malicious event handler that forges q/r to trigger the addition-overflow assertion.
+    fn malicious_falcon_div(_process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
+        let q_hi = Felt::new(FORGED_Q >> 32);
+        let q_lo = Felt::new(FORGED_Q & 0xffff_ffff);
+
+        let remainder = AdviceMutation::extend_stack([Felt::new(FORGED_R)]);
+        let quotient = AdviceMutation::extend_stack([q_hi, q_lo]);
+        Ok(vec![remainder, quotient])
+    }
+
+    let source = "
+        use miden::core::crypto::dsa::falcon512_poseidon2
+        begin
+            exec.falcon512_poseidon2::mod_12289
+        end
+    ";
+
+    // Choose input equal to wrapping sum, so without the assertz this forged advice would pass.
+    let a = M.wrapping_mul(FORGED_Q).wrapping_add(FORGED_R);
+    let op_stack = vec![a >> 32, a & 0xffff_ffff];
+    let adv_stack: Vec<u64> = vec![];
+
+    let core_lib = miden_core_lib::CoreLibrary::default();
+    let mut test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack);
+    test.libraries.push(core_lib.library().clone());
+    test.add_event_handler(FALCON_DIV, malicious_falcon_div);
+
+    expect_exec_error_matches!(
+        test,
+        ExecutionError::OperationError {
+            err: OperationError::FailedAssertion { err_msg, .. },
+            ..
+        } if err_msg.as_deref() == Some("comparison failed: addition overflow")
+    );
 }
 
 #[test]
@@ -363,15 +467,9 @@ fn falcon_prove_verify() {
     host.register_handler(EVENT_FALCON_SIG_TO_STACK, Arc::new(push_falcon_signature))
         .unwrap();
 
-    let options = ProvingOptions::with_96_bit_security(HashFunction::Blake3_256);
-    let (stack_outputs, proof) =
-        prove_sync(&program, stack_inputs, advice_inputs, &mut host, options)
-            .expect("failed to generate proof");
-
-    let program_info = ProgramInfo::from(program);
-    let result = miden_utils_testing::verify(program_info, stack_inputs, stack_outputs, proof);
-
-    assert!(result.is_ok(), "error: {result:?}");
+    let trace = execute_sync(&program, stack_inputs, advice_inputs, &mut host, Default::default())
+        .expect("failed to execute");
+    trace.check_constraints();
 }
 
 #[allow(clippy::type_complexity)]
@@ -381,11 +479,11 @@ fn generate_test(
 ) -> (String, Vec<u64>, Vec<u64>, MerkleStore, Vec<(Word, Vec<Felt>)>) {
     let source = format!(
         "
-    use miden::core::crypto::dsa::falcon512poseidon2
+    use miden::core::crypto::dsa::falcon512_poseidon2
 
     begin
         emit.event(\"{EVENT_FALCON_SIG_TO_STACK}\")
-        exec.falcon512poseidon2::verify
+        exec.falcon512_poseidon2::verify
     end
     "
     );

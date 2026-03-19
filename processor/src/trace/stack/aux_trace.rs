@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
-use miden_air::trace::{MainTrace, RowIndex};
-use miden_core::{field::ExtensionField, operations::OPCODE_DYNCALL};
+use miden_air::trace::{Challenges, MainTrace, RowIndex};
+use miden_core::{field::ExtensionField, operations::opcodes};
 
 use super::Felt;
 use crate::{debug::BusDebugger, trace::AuxColumnBuilder};
@@ -20,9 +20,9 @@ impl AuxTraceBuilder {
     pub fn build_aux_columns<E: ExtensionField<Felt>>(
         &self,
         main_trace: &MainTrace,
-        rand_elements: &[E],
+        challenges: &Challenges<E>,
     ) -> Vec<Vec<E>> {
-        let p1 = self.build_aux_column(main_trace, rand_elements);
+        let p1 = self.build_aux_column(main_trace, challenges);
 
         debug_assert_eq!(*p1.last().unwrap(), E::ONE);
         vec![p1]
@@ -34,12 +34,12 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for AuxTraceBuilder {
     fn get_requests_at(
         &self,
         main_trace: &MainTrace,
-        alphas: &[E],
+        challenges: &Challenges<E>,
         i: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         let is_left_shift = main_trace.is_left_shift(i);
-        let is_dyncall = main_trace.get_op_code(i) == Felt::from_u8(OPCODE_DYNCALL);
+        let is_dyncall = main_trace.get_op_code(i) == Felt::from_u8(opcodes::DYNCALL);
         let is_non_empty_overflow = main_trace.is_non_empty_overflow(i);
 
         if is_left_shift && is_non_empty_overflow {
@@ -47,13 +47,13 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for AuxTraceBuilder {
             let s15_prime = main_trace.stack_element(15, i + 1);
             let b1_prime = main_trace.parent_overflow_address(i + 1);
 
-            OverflowTableRow::new(b1, s15_prime, b1_prime).to_value(alphas)
+            OverflowTableRow::new(b1, s15_prime, b1_prime).to_value(challenges)
         } else if is_dyncall && is_non_empty_overflow {
             let b1 = main_trace.parent_overflow_address(i);
             let s15_prime = main_trace.stack_element(15, i + 1);
             let b1_prime = main_trace.decoder_hasher_state_element(5, i);
 
-            OverflowTableRow::new(b1, s15_prime, b1_prime).to_value(alphas)
+            OverflowTableRow::new(b1, s15_prime, b1_prime).to_value(challenges)
         } else {
             E::ONE
         }
@@ -63,7 +63,7 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for AuxTraceBuilder {
     fn get_responses_at(
         &self,
         main_trace: &MainTrace,
-        alphas: &[E],
+        challenges: &Challenges<E>,
         i: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
@@ -75,10 +75,15 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for AuxTraceBuilder {
             let b1 = main_trace.parent_overflow_address(i);
 
             let row = OverflowTableRow::new(k0, s15, b1);
-            row.to_value(alphas)
+            row.to_value(challenges)
         } else {
             E::ONE
         }
+    }
+
+    #[cfg(any(test, feature = "bus-debugger"))]
+    fn enforce_bus_balance(&self) -> bool {
+        true
     }
 }
 
@@ -106,7 +111,7 @@ impl OverflowTableRow {
 impl OverflowTableRow {
     /// Reduces this row to a single field element in the field specified by E. This requires
     /// at least 4 alpha values.
-    pub fn to_value<E: ExtensionField<Felt>>(&self, alphas: &[E]) -> E {
-        alphas[0] + alphas[1] * self.clk + alphas[2] * self.val + alphas[3] * self.prev
+    pub fn to_value<E: ExtensionField<Felt>>(&self, challenges: &Challenges<E>) -> E {
+        challenges.encode([self.clk, self.val, self.prev])
     }
 }

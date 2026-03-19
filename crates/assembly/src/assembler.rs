@@ -1,13 +1,13 @@
 use alloc::{collections::BTreeMap, string::ToString, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{
-    KernelLibrary, Library, Parse, ParseOptions, SemanticAnalysisError,
+    KernelLibrary, Library, MAX_REPEAT_COUNT, Parse, ParseOptions, SemanticAnalysisError,
     ast::{
         self, Ident, InvocationTarget, InvokeKind, ItemIndex, ModuleKind, SymbolResolution,
         Visibility, types::FunctionType,
     },
-    debuginfo::{DefaultSourceManager, SourceManager, SourceSpan, Spanned},
-    diagnostics::{IntoDiagnostic, RelatedLabel, Report},
+    debuginfo::{DefaultSourceManager, SourceFile, SourceManager, SourceSpan, Spanned},
+    diagnostics::{Diagnostic, IntoDiagnostic, RelatedLabel, Report, miette},
     library::{ConstantExport, ItemInfo, LibraryExport, ProcedureExport, TypeExport},
 };
 use miden_core::{
@@ -30,6 +30,25 @@ use crate::{
     },
     mast_forest_builder::MastForestBuilder,
 };
+
+/// Maximum allowed nesting of control-flow blocks during compilation.
+///
+/// This limit is intended to prevent stack overflows from maliciously deep block nesting while
+/// remaining far above typical program structure depth.
+pub(crate) const MAX_CONTROL_FLOW_NESTING: usize = 256;
+
+#[derive(Debug, thiserror::Error, Diagnostic)]
+enum AssemblerError {
+    #[error("control-flow nesting depth exceeded")]
+    #[diagnostic(help("control-flow nesting exceeded the maximum depth of {max_depth}"))]
+    ControlFlowNestingDepthExceeded {
+        #[label("control-flow nesting exceeded the configured depth limit here")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        max_depth: usize,
+    },
+}
 
 // ASSEMBLER
 // ================================================================================================
@@ -617,8 +636,6 @@ impl Assembler {
             },
             SymbolItem::Type(item) => {
                 let ty = self.linker.resolve_type(item.span(), gid)?;
-                // TODO(pauls): Add export type for enums, and make sure we emit them
-                // here
                 LibraryExport::Type(TypeExport { path: symbol_path, ty })
             },
 
@@ -813,7 +830,7 @@ impl Assembler {
                     // We must resolve aliases at this point to their real definition, in order to
                     // know whether we need to emit a MAST node for a foreign procedure item. If
                     // the aliased item is not a procedure, we can ignore the alias entirely.
-                    let Some(ResolvedProcedure { node: proc_node_id, signature, .. }) = self
+                    let Some(ResolvedProcedure { node: proc_node_id, signature }) = self
                         .resolve_target(
                             InvokeKind::ProcRef,
                             &alias.target().into(),
@@ -837,7 +854,6 @@ impl Assembler {
                 },
                 SymbolItem::Compiled(_) | SymbolItem::Constant(_) | SymbolItem::Type(_) => {
                     // There is nothing to do for other items that might have edges in the graph
-                    continue;
                 },
             }
         }
@@ -877,7 +893,7 @@ impl Assembler {
         };
 
         let proc_body_id =
-            self.compile_body(proc.iter(), &mut proc_ctx, body_wrapper, mast_forest_builder)?;
+            self.compile_body(proc.iter(), &mut proc_ctx, body_wrapper, mast_forest_builder, 0)?;
 
         let proc_body_node = mast_forest_builder
             .get_mast_node(proc_body_id)
@@ -904,6 +920,7 @@ impl Assembler {
         proc_ctx: &mut ProcedureContext,
         wrapper: Option<BodyWrapper>,
         mast_forest_builder: &mut MastForestBuilder,
+        nesting_depth: usize,
     ) -> Result<MastNodeId, Report>
     where
         I: Iterator<Item = &'a ast::Op>,
@@ -937,17 +954,28 @@ impl Assembler {
                         body_node_ids.push(basic_block_id);
                     }
 
+                    let next_depth = nesting_depth + 1;
+                    if next_depth > MAX_CONTROL_FLOW_NESTING {
+                        return Err(Report::new(AssemblerError::ControlFlowNestingDepthExceeded {
+                            span: *span,
+                            source_file: proc_ctx.source_manager().get(span.source_id()).ok(),
+                            max_depth: MAX_CONTROL_FLOW_NESTING,
+                        }));
+                    }
+
                     let then_blk = self.compile_body(
                         then_blk.iter(),
                         proc_ctx,
                         None,
                         block_builder.mast_forest_builder_mut(),
+                        next_depth,
                     )?;
                     let else_blk = self.compile_body(
                         else_blk.iter(),
                         proc_ctx,
                         None,
                         block_builder.mast_forest_builder_mut(),
+                        next_depth,
                     )?;
 
                     let mut split_builder = SplitNodeBuilder::new([then_blk, else_blk]);
@@ -967,9 +995,18 @@ impl Assembler {
                     body_node_ids.push(split_node_id);
                 },
 
-                Op::Repeat { count, body, .. } => {
+                Op::Repeat { count, body, span } => {
                     if let Some(basic_block_id) = block_builder.make_basic_block()? {
                         body_node_ids.push(basic_block_id);
+                    }
+
+                    let next_depth = nesting_depth + 1;
+                    if next_depth > MAX_CONTROL_FLOW_NESTING {
+                        return Err(Report::new(AssemblerError::ControlFlowNestingDepthExceeded {
+                            span: *span,
+                            source_file: proc_ctx.source_manager().get(span.source_id()).ok(),
+                            max_depth: MAX_CONTROL_FLOW_NESTING,
+                        }));
                     }
 
                     let repeat_node_id = self.compile_body(
@@ -977,9 +1014,33 @@ impl Assembler {
                         proc_ctx,
                         None,
                         block_builder.mast_forest_builder_mut(),
+                        next_depth,
                     )?;
 
                     let iteration_count = (*count).expect_value();
+                    if iteration_count == 0 {
+                        return Err(RelatedLabel::error("invalid repeat count")
+                            .with_help("repeat count must be greater than 0")
+                            .with_labeled_span(count.span(), "repeat count must be at least 1")
+                            .with_source_file(
+                                proc_ctx.source_manager().get(proc_ctx.span().source_id()).ok(),
+                            )
+                            .into());
+                    }
+                    if iteration_count > MAX_REPEAT_COUNT {
+                        return Err(RelatedLabel::error("invalid repeat count")
+                            .with_help(format!(
+                                "repeat count must be less than or equal to {MAX_REPEAT_COUNT}",
+                            ))
+                            .with_labeled_span(
+                                count.span(),
+                                format!("repeat count exceeds {MAX_REPEAT_COUNT}"),
+                            )
+                            .with_source_file(
+                                proc_ctx.source_manager().get(proc_ctx.span().source_id()).ok(),
+                            )
+                            .into());
+                    }
 
                     if let Some(decorator_ids) = block_builder.drain_decorators() {
                         // Attach the decorators before the first instance of the repeated node
@@ -993,7 +1054,24 @@ impl Assembler {
                             .ensure_node(first_repeat_builder)?;
 
                         body_node_ids.push(first_repeat_node_id);
-                        for _ in 0..(iteration_count - 1) {
+                        let remaining_iterations =
+                            iteration_count.checked_sub(1).ok_or_else(|| {
+                                Report::new(
+                                    RelatedLabel::error("invalid repeat count")
+                                        .with_help("repeat count must be greater than 0")
+                                        .with_labeled_span(
+                                            count.span(),
+                                            "repeat count must be at least 1",
+                                        )
+                                        .with_source_file(
+                                            proc_ctx
+                                                .source_manager()
+                                                .get(proc_ctx.span().source_id())
+                                                .ok(),
+                                        ),
+                                )
+                            })?;
+                        for _ in 0..remaining_iterations {
                             body_node_ids.push(repeat_node_id);
                         }
                     } else {
@@ -1008,11 +1086,21 @@ impl Assembler {
                         body_node_ids.push(basic_block_id);
                     }
 
+                    let next_depth = nesting_depth + 1;
+                    if next_depth > MAX_CONTROL_FLOW_NESTING {
+                        return Err(Report::new(AssemblerError::ControlFlowNestingDepthExceeded {
+                            span: *span,
+                            source_file: proc_ctx.source_manager().get(span.source_id()).ok(),
+                            max_depth: MAX_CONTROL_FLOW_NESTING,
+                        }));
+                    }
+
                     let loop_body_node_id = self.compile_body(
                         body.iter(),
                         proc_ctx,
                         None,
                         block_builder.mast_forest_builder_mut(),
+                        next_depth,
                     )?;
                     let mut loop_builder = LoopNodeBuilder::new(loop_body_node_id);
                     if let Some(decorator_ids) = block_builder.drain_decorators() {
@@ -1164,49 +1252,24 @@ impl Assembler {
         // Get the procedure from the assembler
         let current_source_file = self.source_manager.get(span.source_id()).ok();
 
-        // If the procedure is cached and is a system call, ensure that the call is valid.
-        match mast_forest_builder.find_procedure_by_mast_root(&mast_root) {
-            Some(proc) if matches!(kind, InvokeKind::SysCall) => {
-                // Verify if this is a syscall, that the callee is a kernel procedure
-                //
-                // NOTE: The assembler is expected to know the full set of all kernel
-                // procedures at this point, so if we can't identify the callee as a
-                // kernel procedure, it is a definite error.
-                assert!(
-                    proc.is_syscall(),
-                    "linker failed to validate syscall correctly: {}",
-                    Report::new(LinkerError::InvalidSysCallTarget {
-                        span,
-                        source_file: current_source_file,
-                        callee: proc.path().clone(),
-                    })
-                );
-                let maybe_kernel_path = proc.module();
-                let module = self.linker.find_module(maybe_kernel_path).unwrap_or_else(|| {
-                    panic!(
-                        "linker failed to validate syscall correctly: {}",
-                        Report::new(LinkerError::InvalidSysCallTarget {
-                            span,
-                            source_file: current_source_file.clone(),
-                            callee: proc.path().clone(),
-                        })
-                    )
-                });
-                // Note: this module is guaranteed to be of AST variant, since we have the
-                // AST of a procedure contained in it (i.e. `proc`). Hence, it must be that
-                // the entire module is in AST representation as well.
-                if module.kind().is_kernel() || module.path().is_kernel_path() {
-                    panic!(
-                        "linker failed to validate syscall correctly: {}",
-                        Report::new(LinkerError::InvalidSysCallTarget {
-                            span,
-                            source_file: current_source_file.clone(),
-                            callee: proc.path().clone(),
-                        })
-                    )
-                }
-            },
-            Some(_) | None => (),
+        if matches!(kind, InvokeKind::SysCall) && self.linker.has_nonempty_kernel() {
+            // NOTE: The assembler is expected to know the full set of all kernel
+            // procedures at this point, so if the digest is not present in the kernel,
+            // it is a definite error.
+            if !self.linker.kernel().contains_proc(mast_root) {
+                let callee = mast_forest_builder
+                    .find_procedure_by_mast_root(&mast_root)
+                    .map(|proc| proc.path().clone())
+                    .unwrap_or_else(|| {
+                        let digest_path = format!("{mast_root}");
+                        Arc::<Path>::from(Path::new(&digest_path))
+                    });
+                return Err(Report::new(LinkerError::InvalidSysCallTarget {
+                    span,
+                    source_file: current_source_file,
+                    callee,
+                }));
+            }
         }
 
         mast_forest_builder.ensure_external_link(mast_root)

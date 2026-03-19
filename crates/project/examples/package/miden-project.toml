@@ -1,0 +1,19 @@
+[package]
+name = "example"
+version = "0.1.0"
+
+[lib]
+path = "lib/mod.masm"
+
+[dependencies]
+miden-protocol = { path = "../protocol/userspace" }
+
+[profile.test]
+inherits = "dev"
+network = "local"
+
+[lints.miden]
+unused = "error"
+
+[package.metadata.network.local]
+endpoint = "tcp://127.0.0.1"

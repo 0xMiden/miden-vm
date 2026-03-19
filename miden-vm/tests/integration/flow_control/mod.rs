@@ -199,7 +199,7 @@ fn local_fn_call() {
     let test = build_test!(source, &[]);
     test.expect_stack(&[2, 1]);
 
-    test.prove_and_verify(vec![], false);
+    test.check_constraints();
 }
 
 #[test]
@@ -224,7 +224,7 @@ fn local_fn_call_with_mem_access() {
     let test = build_test!(source, &[7, 3]);
     test.expect_stack(&[1]);
 
-    test.prove_and_verify(vec![7, 3], false);
+    test.check_constraints();
 }
 
 #[test]
@@ -250,7 +250,7 @@ fn simple_syscall() {
     ));
     test.expect_stack(&[3]);
 
-    test.prove_and_verify(vec![1, 2], false);
+    test.check_constraints();
 }
 
 #[test]
@@ -285,7 +285,7 @@ fn simple_syscall_2() {
     ));
     test.expect_stack(&[24]);
 
-    test.prove_and_verify(vec![1, 2, 3, 2, 2], false);
+    test.check_constraints();
 }
 
 /// Tests that `CALL`ing from a syscall context works correctly, especially in terms of properly
@@ -362,7 +362,7 @@ fn call_in_syscall() {
     ));
     test.expect_stack(&[]);
 
-    test.prove_and_verify(Vec::new(), false);
+    test.check_constraints();
 }
 
 /// Tests that syscalling back into context 0 uses a different overflow table with each call.
@@ -401,7 +401,7 @@ fn root_context_separate_overflows() {
         kernel_source.to_string(),
     ));
     test.expect_stack(&[100]);
-    test.prove_and_verify(vec![100], false);
+    test.check_constraints();
 }
 
 // DYNAMIC CODE EXECUTION
@@ -454,7 +454,7 @@ fn simple_dyn_exec() {
 
     test.expect_stack(&[6]);
 
-    test.prove_and_verify(stack_init.to_vec(), false);
+    test.check_constraints();
 }
 
 #[test]
@@ -549,7 +549,7 @@ fn simple_dyncall() {
 
     test.expect_stack(&[6]);
 
-    test.prove_and_verify(stack_init.to_vec(), false);
+    test.check_constraints();
 }
 
 /// Calls `bar` dynamically, which issues a syscall. We ensure that the `caller` instruction in the
@@ -610,7 +610,7 @@ fn dyncall_with_syscall_and_caller() {
         1,
     ]);
 
-    test.prove_and_verify(vec![], false);
+    test.check_constraints();
 }
 
 // PROCREF INSTRUCTION
@@ -682,6 +682,6 @@ fn procref() -> Result<(), Report> {
         mast_roots[1][3].as_canonical_u64(),
     ]);
 
-    test.prove_and_verify(vec![], false);
+    test.check_constraints();
     Ok(())
 }

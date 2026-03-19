@@ -1,14 +1,21 @@
-use alloc::{collections::BTreeSet, string::ToString, vec::Vec};
+use alloc::{
+    collections::BTreeSet,
+    string::{String, ToString},
+    vec::Vec,
+};
 use core::str::FromStr;
 use std::{
     eprintln,
     sync::{Arc, LazyLock},
 };
 
-use miden_assembly_syntax::{ast::Path, diagnostics::WrapErr, library::LibraryExport};
+use miden_assembly_syntax::{
+    MAX_REPEAT_COUNT, ast::Path, diagnostics::WrapErr, library::LibraryExport,
+};
 use miden_core::{
     Felt, Word, assert_matches,
     events::EventId,
+    field::PrimeField64,
     mast::{MastNodeExt, MastNodeId},
     operations::Operation,
     program::Program,
@@ -24,12 +31,15 @@ use proptest::{
 
 use crate::{
     Assembler, Library, ModuleParser, PathBuf,
+    assembler::MAX_CONTROL_FLOW_NESTING,
     ast::{Module, ModuleKind, ProcedureName, QualifiedProcedureName},
     diagnostics::{IntoDiagnostic, Report},
     fmp::fmp_initialization_sequence,
     mast_forest_builder::MastForestBuilder,
     report,
-    testing::{TestContext, assert_diagnostic_lines, parse_module, regex, source_file},
+    testing::{
+        TestContext, assert_diagnostic, assert_diagnostic_lines, parse_module, regex, source_file,
+    },
 };
 
 type TestResult = Result<(), Report>;
@@ -704,6 +714,135 @@ fn simple_constant() -> TestResult {
     );
     let program = context.assemble(source)?;
     insta::assert_snapshot!(program);
+    Ok(())
+}
+
+#[test]
+fn enum_explicit_discriminants() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        r#"
+enum Status : u16 {
+    OK = 200,
+    NOT_FOUND = 404,
+    SERVER_ERROR = 500,
+}
+
+begin
+    push.OK
+    push.NOT_FOUND
+    push.SERVER_ERROR
+end
+"#
+    );
+    let _program = context.assemble(source)?;
+    Ok(())
+}
+
+#[test]
+fn enum_discriminants_can_reference_constants() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        r#"
+const BASE = 10
+
+enum Status : u16 {
+    OK = BASE,
+    NOT_FOUND = OK + 1,
+}
+
+begin
+    push.OK
+    push.NOT_FOUND
+end
+"#
+    );
+    let _program = context.assemble(source)?;
+    Ok(())
+}
+
+#[test]
+fn enum_felt_repr_variants() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        r#"
+enum Status : felt {
+    OK = 1,
+}
+
+begin
+    push.OK
+end
+"#
+    );
+    let _program = context.assemble(source)?;
+    Ok(())
+}
+
+#[test]
+fn enum_felt_discriminant_negative_is_rejected() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        r#"
+enum Status : felt {
+    BAD = 0 - 1,
+}
+
+begin
+    push.BAD
+end
+"#
+    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected negative discriminant to be rejected");
+    assert_diagnostic!(err, "invalid constant expression: value is larger than expected range");
+    Ok(())
+}
+
+#[test]
+fn enum_felt_discriminant_too_large_is_rejected() -> TestResult {
+    let context = TestContext::default();
+    let modulus = miden_core::Felt::ORDER_U64;
+    let source = source_file!(
+        &context,
+        format!(
+            r#"
+enum Status : felt {{
+    BAD = {modulus},
+}}
+
+begin
+    push.BAD
+end
+"#
+        )
+    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected out-of-range felt discriminant to be rejected");
+    assert_diagnostic!(err, "invalid literal: value overflowed the field modulus");
+    Ok(())
+}
+
+#[test]
+fn constant_expression_overflow_is_rejected() -> TestResult {
+    let context = TestContext::default();
+    let modulus_minus_one = miden_core::Felt::ORDER_U64 - 1;
+    let source = source_file!(
+        &context,
+        format!(
+            "const TOO_BIG = {modulus_minus_one} + {modulus_minus_one}\nbegin\n    push.TOO_BIG\nend\n"
+        )
+    );
+    let err = context
+        .assemble(source)
+        .expect_err("expected constant expression overflow to be rejected");
+    assert_diagnostic!(err, "invalid constant expression: value is larger than expected range");
     Ok(())
 }
 
@@ -2135,6 +2274,40 @@ fn nested_control_blocks() -> TestResult {
     Ok(())
 }
 
+fn nested_if_source(depth: usize) -> String {
+    let mut source = String::from("begin\n");
+    for _ in 0..depth {
+        source.push_str("push.1\nif.true\n");
+    }
+    source.push_str("push.1\n");
+    for _ in 0..depth {
+        source.push_str("end\n");
+    }
+    source.push_str("end\n");
+    source
+}
+
+#[test]
+fn control_flow_nesting_depth_boundary() -> TestResult {
+    let context = TestContext::default();
+    let source = nested_if_source(MAX_CONTROL_FLOW_NESTING);
+    let source = source_file!(&context, source.as_str());
+    context.assemble(source)?;
+    Ok(())
+}
+
+#[test]
+fn control_flow_nesting_depth_exceeded() -> TestResult {
+    let context = TestContext::default();
+    let source = nested_if_source(MAX_CONTROL_FLOW_NESTING + 1);
+    let source = source_file!(&context, source.as_str());
+    let error = context
+        .assemble(source)
+        .expect_err("expected diagnostic to be raised, but compilation succeeded");
+    assert_diagnostic!(&error, "control-flow nesting depth exceeded");
+    Ok(())
+}
+
 // PROGRAMS WITH PROCEDURES
 // ================================================================================================
 
@@ -3369,6 +3542,310 @@ fn invalid_repeat() -> TestResult {
 }
 
 #[test]
+fn invalid_repeat_count_zero() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(&context, "begin repeat.0 nop end end");
+    let error = context.assemble(source).expect_err("expected repeat.0 to be rejected");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+    assert!(rendered.contains("invalid repeat count"));
+    Ok(())
+}
+
+#[test]
+fn invalid_repeat_count_zero_with_decorator() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "\
+proc foo
+    trace.1
+    repeat.0
+        nop
+    end
+end
+
+begin
+    call.foo
+end"
+    );
+    let error = context
+        .assemble(source)
+        .expect_err("expected repeat.0 with decorator to be rejected");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+    assert!(rendered.contains("invalid repeat count"));
+    Ok(())
+}
+
+#[test]
+fn invalid_repeat_count_too_large() -> TestResult {
+    let context = TestContext::default();
+    let repeat_count = MAX_REPEAT_COUNT + 1;
+    let source = source_file!(&context, format!("begin repeat.{repeat_count} nop end end"));
+    let error = context
+        .assemble(source)
+        .expect_err("expected repeat count above limit to be rejected");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+    assert!(rendered.contains("invalid repeat count"));
+    Ok(())
+}
+
+#[test]
+fn invalid_repeat_count_constant_zero() -> TestResult {
+    let context = TestContext::default();
+    let source =
+        source_file!(&context, "const REPEAT_COUNT = 0\nbegin repeat.REPEAT_COUNT nop end end");
+    let error = context
+        .assemble(source)
+        .expect_err("expected repeat.0 from constant to be rejected");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+    assert!(rendered.contains("invalid repeat count"));
+    Ok(())
+}
+
+#[test]
+fn invalid_repeat_count_constant_too_large() -> TestResult {
+    let context = TestContext::default();
+    let repeat_count = MAX_REPEAT_COUNT + 1;
+    let source = source_file!(
+        &context,
+        format!("const REPEAT_COUNT = {repeat_count}\nbegin repeat.REPEAT_COUNT nop end end")
+    );
+    let error = context
+        .assemble(source)
+        .expect_err("expected repeat count above limit from constant to be rejected");
+    let rendered =
+        format!("{}", crate::diagnostics::reporting::PrintDiagnostic::new_without_color(&error));
+    assert!(rendered.contains("invalid repeat count"));
+    Ok(())
+}
+
+#[test]
+fn repeat_count_constant_at_limit_allowed() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        format!("const REPEAT_COUNT = {MAX_REPEAT_COUNT}\nbegin repeat.REPEAT_COUNT nop end end")
+    );
+    context
+        .assemble(source)
+        .expect("expected repeat count at limit from constant to be accepted");
+    Ok(())
+}
+
+#[test]
+fn const_folding_modulus_aliasing_must_be_rejected() {
+    let program_src = r#"
+const ALIAS = 18446744069414584320+1
+
+begin
+    push.ALIAS
+end
+"#;
+
+    let assembled = Assembler::default().assemble_program(program_src);
+    assert!(
+        assembled.is_err(),
+        "expected constants >= field modulus to be rejected (must not silently alias to 0)"
+    );
+}
+
+#[test]
+fn const_evaluator_modulus_aliasing_must_be_rejected() {
+    let program_src = r#"
+const X = 18446744069414584320
+const Y = 1
+const ALIAS = X+Y
+
+begin
+    push.ALIAS
+end
+"#;
+
+    let assembled = Assembler::default().assemble_program(program_src);
+    assert!(
+        assembled.is_err(),
+        "expected out-of-range constant results to be rejected (must not silently alias via `Felt::new`)"
+    );
+}
+
+#[test]
+fn const_folding_u64_overflow_must_not_panic_and_must_error() {
+    let program_src = r#"
+const WRAP = 18446744069414584320+18446744069414584320
+
+begin
+    push.WRAP
+end
+"#;
+
+    let assembled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        Assembler::default().assemble_program(program_src)
+    }));
+
+    assert!(
+        assembled.is_ok(),
+        "assembler panicked while folding a constant expression with u64 overflow"
+    );
+
+    let assembled = assembled.unwrap();
+    assert!(
+        assembled.is_err(),
+        "expected the assembler to reject constant expressions which overflow u64 during folding"
+    );
+}
+
+#[test]
+fn const_folding_subtraction_underflow_must_be_rejected() {
+    let program_src = r#"
+const UNDERFLOW = 0-1
+
+begin
+    push.UNDERFLOW
+end
+"#;
+
+    let assembled = Assembler::default().assemble_program(program_src);
+    assert!(
+        assembled.is_err(),
+        "expected subtraction underflow in constant expressions to be rejected"
+    );
+}
+
+#[test]
+fn const_division_slash_must_not_match_int_division() {
+    let program_src = r#"
+const A1 = 3/2
+const B1 = 3//2
+
+const X = 3
+const Y = 2
+const A2 = X/Y
+const B2 = X//Y
+
+begin
+    push.A1
+    push.B1
+    push.A2
+    push.B2
+end
+"#;
+
+    let program = Assembler::default()
+        .assemble_program(program_src)
+        .expect("program assembly must succeed");
+
+    let entry = program.get_node_by_id(program.entrypoint()).expect("missing entrypoint node");
+    let mast = format!("{}", entry.to_display(program.mast_forest()));
+
+    let toks: Vec<&str> = mast.split_whitespace().collect();
+    let pad_incr_pairs = toks.windows(2).filter(|w| w[0] == "pad" && w[1] == "incr").count();
+
+    assert_eq!(
+        pad_incr_pairs, 2,
+        "expected `/` (field division) to not fold to the same value as `//` (integer division)"
+    );
+}
+
+#[test]
+fn const_division_by_zero_must_error() {
+    let program_src = r#"
+const BAD = 1/0
+
+begin
+    push.BAD
+end
+"#;
+
+    let assembled = Assembler::default().assemble_program(program_src);
+    assert!(
+        assembled.is_err(),
+        "expected division by zero in constant expressions to be rejected"
+    );
+}
+
+#[test]
+fn push_word_slice_u64_max_must_not_panic_and_must_error() {
+    let program_src = r#"
+const WORD = [1,2,3,4]
+
+begin
+    push.WORD[18446744073709551615]
+end
+"#;
+
+    let assembled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        Assembler::default().assemble_program(program_src)
+    }));
+
+    assert!(
+        assembled.is_ok(),
+        "assembler panicked while parsing push.WORD[...] with an out-of-range index"
+    );
+
+    let assembled = assembled.unwrap();
+    assert!(
+        assembled.is_err(),
+        "expected push.WORD[...] with an out-of-range index to be rejected with an error"
+    );
+}
+
+#[test]
+fn push_word_slice_range_u64_max_end_must_not_panic_and_must_error() {
+    let program_src = r#"
+const WORD = [1,2,3,4]
+
+begin
+    push.WORD[0..18446744073709551615]
+end
+"#;
+
+    let assembled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        Assembler::default().assemble_program(program_src)
+    }));
+
+    assert!(
+        assembled.is_ok(),
+        "assembler panicked while parsing push.WORD[0..] with an out-of-range index"
+    );
+
+    let assembled = assembled.unwrap();
+    assert!(
+        assembled.is_err(),
+        "expected push.WORD[0..] with an out-of-range index to be rejected with an error"
+    );
+}
+
+#[test]
+fn push_word_slice_range_u64_max_start_must_not_panic_and_must_error() {
+    let program_src = r#"
+const WORD = [1,2,3,4]
+
+begin
+    push.WORD[18446744073709551615..0]
+end
+"#;
+
+    let assembled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        Assembler::default().assemble_program(program_src)
+    }));
+
+    assert!(
+        assembled.is_ok(),
+        "assembler panicked while parsing push.WORD[..0] with an out-of-range index"
+    );
+
+    let assembled = assembled.unwrap();
+    assert!(
+        assembled.is_err(),
+        "expected push.WORD[..0] with an out-of-range index to be rejected with an error"
+    );
+}
+
+#[test]
 fn invalid_while() -> TestResult {
     let context = TestContext::default();
 
@@ -4336,6 +4813,19 @@ fn can_assemble_a_multi_module_kernel() -> Result<(), Report> {
     Ok(())
 }
 
+#[test]
+fn regression_empty_kernel_library_is_rejected() {
+    let context = TestContext::default();
+    let source_manager = context.source_manager();
+
+    // A kernel module with no exported procedures should be rejected.
+    let kernel_masm = "pub const FOO = 1\n";
+    let err = Assembler::new(source_manager)
+        .assemble_kernel(kernel_masm)
+        .expect_err("expected empty kernel to be rejected");
+    assert_diagnostic_lines!(err, "library must contain at least one exported procedure");
+}
+
 /// Test for issue #1644: verify that single-forest merge doesn't preserves node digests
 #[test]
 fn issue_1644_single_forest_merge_identity() -> TestResult {
@@ -4438,6 +4928,100 @@ fn issue_1644_single_forest_merge_identity() -> TestResult {
 
     eprintln!("Merge identity test passed - no violations detected");
     Ok(())
+}
+
+#[test]
+fn overlong_total_path_is_rejected_without_panic() {
+    use std::{
+        panic::{AssertUnwindSafe, catch_unwind},
+        sync::Arc,
+    };
+
+    use miden_assembly_syntax::ast::Path;
+
+    use crate::{Parse, ParseOptions, ast::ModuleKind, testing::TestContext};
+
+    // Build a valid path where each component is within the per-component limit (255 bytes),
+    // but the total byte length exceeds u16::MAX (the binary serialization length prefix).
+    let component = "a".repeat(255);
+    let num_components: usize = 300;
+    let mut path_str = alloc::string::String::with_capacity(num_components * (component.len() + 2));
+    for i in 0..num_components {
+        if i > 0 {
+            path_str.push_str("::");
+        }
+        path_str.push_str(&component);
+    }
+
+    let context = TestContext::default();
+    let source_manager = context.source_manager();
+
+    let lib_src = r#"
+pub proc add
+    add.1
+end
+"#;
+
+    let parsed = catch_unwind(AssertUnwindSafe(|| {
+        let path = Path::new(&path_str);
+        let options = ParseOptions {
+            kind: ModuleKind::Library,
+            warnings_as_errors: false,
+            path: Some(Arc::<Path>::from(path)),
+        };
+        <&str as Parse>::parse_with_options(lib_src, source_manager.clone(), options)
+    }));
+
+    assert!(
+        parsed.is_ok(),
+        "overlong total path caused a panic; expected a structured error"
+    );
+    let parsed = parsed.unwrap();
+    let err = parsed.expect_err("expected overlong path to be rejected");
+    assert_diagnostic!(err, "invalid item path: too long");
+}
+
+#[test]
+fn imported_error_message_alias_is_resolved_without_panicking() {
+    use std::{
+        panic::{AssertUnwindSafe, catch_unwind},
+        sync::Arc,
+    };
+
+    use crate::{Assembler, DefaultSourceManager, Parse, ParseOptions, ast::ModuleKind};
+
+    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+
+    // Library module `b` exports a string constant and an alias to it.
+    let module_b_src = r#"
+pub const ERR1 = "oops"
+pub const ERR2 = ERR1
+"#;
+    let module_b = module_b_src
+        .parse_with_options(source_manager.clone(), ParseOptions::new(ModuleKind::Library, "b"))
+        .expect("module b parsing must succeed");
+
+    // Executable module imports `ERR2` and uses it as an assertion error message.
+    let module_a_src = r#"
+use b::ERR2
+
+begin
+    assert.err=ERR2
+end
+"#;
+
+    let assembled = catch_unwind(AssertUnwindSafe(|| {
+        let mut assembler = Assembler::new(source_manager);
+        assembler
+            .compile_and_statically_link(module_b)
+            .expect("linking module b must succeed");
+        assembler.assemble_program(module_a_src)
+    }));
+
+    assert!(assembled.is_ok(), "assembler panicked during assembly");
+    assembled
+        .unwrap()
+        .expect("expected imported error message alias to assemble successfully");
 }
 
 #[test]
@@ -4574,6 +5158,184 @@ fn test_cross_module_constant_resolution_as_local_definition() -> TestResult {
 
     Ok(())
 }
+
+#[test]
+fn test_cross_module_constant_reexport_chain_in_procedure_scope() -> TestResult {
+    let context = TestContext::new();
+
+    let a = parse_module!(
+        &context,
+        "dcrc::a",
+        r#"
+            pub const VAL = 99
+            pub proc use_val
+                push.VAL
+                drop
+            end
+        "#
+    );
+
+    let b = parse_module!(
+        &context,
+        "dcrc::b",
+        r#"
+            use dcrc::a
+            pub const STEP = a::VAL + 1
+            pub proc dummy
+                push.STEP
+                drop
+            end
+        "#
+    );
+
+    let c = parse_module!(
+        &context,
+        "dcrc::c",
+        r#"
+            use dcrc::b
+            pub const FINAL_VAL = b::STEP + 1
+            pub proc dummy
+                push.FINAL_VAL
+                drop
+            end
+        "#
+    );
+
+    let lib = Assembler::new(context.source_manager()).assemble_library([a, b, c])?;
+
+    let src = source_file!(
+        &context,
+        r#"
+            use dcrc::c
+            const LOCAL = c::FINAL_VAL
+            begin
+                push.LOCAL
+                drop
+            end
+        "#
+    );
+
+    let _program = Assembler::new(context.source_manager())
+        .with_dynamic_library(lib)?
+        .assemble_program(src)?;
+
+    Ok(())
+}
+
+#[test]
+fn test_issue_2696_imported_constant_with_private_dependency() -> TestResult {
+    let context = TestContext::new();
+
+    let memory = parse_module!(
+        &context,
+        "wallet::memory",
+        r#"
+            const ACCOUNT_ID_AND_NONCE_OFFSET = 4
+            pub const ACCOUNT_ID_SUFFIX_OFFSET = ACCOUNT_ID_AND_NONCE_OFFSET + 2
+        "#
+    );
+
+    let account = parse_module!(
+        &context,
+        "wallet::account",
+        r#"
+            use wallet::memory::ACCOUNT_ID_SUFFIX_OFFSET
+
+            pub proc use_suffix
+                push.ACCOUNT_ID_SUFFIX_OFFSET
+                drop
+            end
+        "#
+    );
+
+    Assembler::new(context.source_manager()).assemble_library([memory, account])?;
+
+    Ok(())
+}
+
+#[test]
+fn test_cross_module_constant_cycle_in_procedure_scope_is_structured_error() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let context = TestContext::new();
+
+    let a = parse_module!(
+        &context,
+        "cycle::a",
+        r#"
+            use cycle::b
+
+            pub proc use_cycle
+                push.A
+                drop
+            end
+
+            pub const A = b::B + 1
+        "#
+    );
+
+    let b = parse_module!(
+        &context,
+        "cycle::b",
+        r#"
+            use cycle::a
+            pub const B = a::A + 1
+        "#
+    );
+
+    let assembled = catch_unwind(AssertUnwindSafe(|| {
+        Assembler::new(context.source_manager()).assemble_library([a, b])
+    }));
+
+    assert!(assembled.is_ok(), "assembler panicked during assembly");
+    let err = assembled.unwrap().expect_err("expected cyclic constants to be rejected");
+    assert_diagnostic!(&err, "constant evaluation terminated due to infinite recursion");
+    assert_diagnostic!(&err, "pub const A = b::B + 1");
+    assert_diagnostic!(&err, "pub const B = a::A + 1");
+}
+
+#[test]
+fn imported_error_message_cycle_is_rejected_without_panicking() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let context = TestContext::new();
+
+    let a = parse_module!(
+        &context,
+        "cycle::errs::a",
+        r#"
+            use cycle::errs::b
+
+            pub proc use_cycle
+                assert.err=ERR_A
+            end
+
+            pub const ERR_A = b::ERR_B
+        "#
+    );
+
+    let b = parse_module!(
+        &context,
+        "cycle::errs::b",
+        r#"
+            use cycle::errs::a
+            pub const ERR_B = a::ERR_A
+        "#
+    );
+
+    let assembled = catch_unwind(AssertUnwindSafe(|| {
+        Assembler::new(context.source_manager()).assemble_library([a, b])
+    }));
+
+    assert!(assembled.is_ok(), "assembler panicked during assembly");
+    let err = assembled
+        .unwrap()
+        .expect_err("expected cyclic error message constants to be rejected");
+    assert_diagnostic!(&err, "constant evaluation terminated due to infinite recursion");
+    assert_diagnostic!(&err, "pub const ERR_A = b::ERR_B");
+    assert_diagnostic!(&err, "pub const ERR_B = a::ERR_A");
+}
+
 #[test]
 fn test_cross_module_quoted_identifier_resolution() -> TestResult {
     let context = TestContext::default();
@@ -4799,6 +5561,87 @@ fn test_syscall_resolution_to_non_kernel_path_is_checked() -> TestResult {
     );
 
     Ok(())
+}
+
+#[test]
+fn syscall_validation_does_not_panic_on_same_digest_userspace_procedure() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let context = TestContext::default();
+    let source_manager = context.source_manager();
+
+    let kernel_src = r#"
+pub proc k1
+    push.1
+end
+"#;
+
+    let kernel_lib = Assembler::new(source_manager.clone())
+        .assemble_kernel(kernel_src)
+        .expect("kernel assembly must succeed");
+
+    let assembler = Assembler::with_kernel(source_manager, kernel_lib);
+
+    let program_src = r#"
+proc dup
+    push.1
+end
+
+begin
+    exec.dup
+    syscall.k1
+end
+"#;
+
+    let assembled = catch_unwind(AssertUnwindSafe(|| assembler.assemble_program(program_src)));
+    assert!(assembled.is_ok(), "assembler panicked while assembling a valid program");
+    assert!(assembled.unwrap().is_ok(), "expected program assembly to succeed");
+}
+
+#[test]
+fn syscall_by_unknown_digest_is_rejected_at_assembly_time_when_kernel_is_configured() {
+    let context = TestContext::default();
+    let source_manager = context.source_manager();
+
+    let kernel_src = r#"
+pub proc k1
+    push.1
+end
+"#;
+
+    let kernel_lib = Assembler::new(source_manager.clone())
+        .assemble_kernel(kernel_src)
+        .expect("kernel assembly must succeed");
+
+    let assembler = Assembler::with_kernel(source_manager, kernel_lib);
+
+    let program_src = r#"
+begin
+    syscall.0x0000000000000000000000000000000000000000000000000000000000000000
+end
+"#;
+
+    let err = assembler
+        .assemble_program(program_src)
+        .expect_err("expected unknown digest syscall to be rejected");
+    assert_diagnostic!(err, "invalid syscall");
+}
+
+#[test]
+fn syscall_without_kernel_is_rejected_at_assembly_time() {
+    let context = TestContext::default();
+    let assembler = Assembler::new(context.source_manager());
+
+    let program_src = r#"
+begin
+    syscall.0x0000000000000000000000000000000000000000000000000000000000000000
+end
+"#;
+
+    let err = assembler
+        .assemble_program(program_src)
+        .expect_err("expected syscall without kernel to be rejected");
+    assert_diagnostic!(err, "invalid syscall");
 }
 
 #[test]

@@ -59,7 +59,7 @@ More precisely, we use the virtual $f_{ACE}$ flag, which is active in all rows o
 along with the selector $s_3$ which transitions from 0 to 1 in the last row, allowing us to target the first row of the kernel ROM trace.
 
 > $$
-> f_{ACE} \cdot s_{3}' \cdot (1 - s_{first}') = 0 \text{ | degree} = 6
+> f_{ACE} \cdot s_{3}' \cdot (1 - s_{4}') \cdot (s_{first}' - 1) = 0 \text{ | degree} = 7
 > $$
 
 The contiguity of the digests in a block is ensured by enforcing equality between digests across two consecutive rows, whenever the next row is not the start of a new block.
@@ -117,4 +117,3 @@ This is described in the [chiplets bus constraints](../chiplets/index.md#chiplet
 By using the bus to initialize the kernel ROM procedure digest in this way, the verifier only learns which procedures can be invoked but doesn't learn how often they were called, if at all.
 
 The full set of constraints applied to the $b_{chip}$ are described as part of the [chiplets bus constraints](../chiplets/index.md#chiplets-bus-constraints).
-

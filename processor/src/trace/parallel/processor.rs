@@ -160,7 +160,12 @@ impl ReplayProcessor {
                 InternalBreakReason::LoadMastForestFromDyn { .. } => {
                     // load mast forest from replay
                     let (root_id, new_forest) =
-                        self.mast_forest_resolution_replay.replay_resolution();
+                        match self.mast_forest_resolution_replay.replay_resolution() {
+                            Ok(v) => v,
+                            Err(err) => {
+                                return ControlFlow::Break(BreakReason::Err(err));
+                            },
+                        };
 
                     // Finish loading the MAST forest from the Dyn node, as per the sans-IO
                     // contract.
@@ -180,7 +185,12 @@ impl ReplayProcessor {
                 } => {
                     // load mast forest from replay
                     let (root_id, new_forest) =
-                        self.mast_forest_resolution_replay.replay_resolution();
+                        match self.mast_forest_resolution_replay.replay_resolution() {
+                            Ok(v) => v,
+                            Err(err) => {
+                                return ControlFlow::Break(BreakReason::Err(err));
+                            },
+                        };
 
                     // Finish loading the MAST forest from the External node, as per the sans-IO
                     // contract.
@@ -345,7 +355,7 @@ impl StackInterface for ReplayProcessor {
         Ok(())
     }
 
-    fn decrement_size(&mut self) {
+    fn decrement_size(&mut self) -> Result<(), OperationError> {
         // Shift all other elements up
         for write_idx in 0..(MIN_STACK_DEPTH - 1) {
             let read_idx = write_idx + 1;
@@ -353,13 +363,15 @@ impl StackInterface for ReplayProcessor {
         }
 
         // Pop the last element from the overflow table
-        if let Some(last_element) = self.stack.pop_overflow(&mut self.stack_overflow_replay) {
+        if let Some(last_element) = self.stack.pop_overflow(&mut self.stack_overflow_replay)? {
             // Write the last element to the bottom of the stack
             self.set(MIN_STACK_DEPTH - 1, last_element);
         } else {
             // If overflow table is empty, set the bottom element to zero
             self.set(MIN_STACK_DEPTH - 1, ZERO);
         }
+
+        Ok(())
     }
 }
 
@@ -407,14 +419,14 @@ impl Processor for ReplayProcessor {
     }
 
     fn restore_context(&mut self) -> Result<(), OperationError> {
-        let ctx_info = self.execution_context_replay.replay_execution_context();
+        let ctx_info = self.execution_context_replay.replay_execution_context()?;
 
         // Restore system state
         self.system_mut().set_ctx(ctx_info.parent_ctx);
         self.system_mut().set_caller_hash(ctx_info.parent_fn_hash);
 
         // Restore stack state
-        self.stack.restore_context(&mut self.stack_overflow_replay);
+        self.stack.restore_context(&mut self.stack_overflow_replay)?;
 
         Ok(())
     }
@@ -428,7 +440,7 @@ impl Processor for ReplayProcessor {
     }
 
     fn execute_before_enter_decorators(
-        &mut self,
+        &self,
         _node_id: MastNodeId,
         _current_forest: &MastForest,
         _host: &mut impl Host,
@@ -438,7 +450,7 @@ impl Processor for ReplayProcessor {
     }
 
     fn execute_after_exit_decorators(
-        &mut self,
+        &self,
         _node_id: MastNodeId,
         _current_forest: &MastForest,
         _host: &mut impl Host,
@@ -448,7 +460,7 @@ impl Processor for ReplayProcessor {
     }
 
     fn execute_decorators_for_op(
-        &mut self,
+        &self,
         _node_id: MastNodeId,
         _op_idx_in_block: usize,
         _current_forest: &MastForest,
@@ -459,7 +471,7 @@ impl Processor for ReplayProcessor {
     }
 
     fn execute_end_of_block_decorators(
-        &mut self,
+        &self,
         _basic_block_node: &BasicBlockNode,
         _node_id: MastNodeId,
         _current_forest: &Arc<MastForest>,
@@ -484,6 +496,7 @@ impl Stopper for ReplayStopper {
     fn should_stop(
         &self,
         processor: &ReplayProcessor,
+        _continuation_stack: &ContinuationStack,
         continuation_after_stop: impl FnOnce() -> Option<Continuation>,
     ) -> ControlFlow<BreakReason> {
         if processor.system().clock() >= processor.maximum_clock {

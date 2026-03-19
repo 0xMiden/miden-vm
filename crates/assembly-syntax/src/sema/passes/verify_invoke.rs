@@ -13,9 +13,8 @@ use crate::{
 /// invocation target for that call is resolvable to the extent possible within the current
 /// module's context.
 ///
-/// This means that any reference to an external module must have a corresponding import, that
-/// the invocation kind is valid in the current module (e.g. `syscall` in a kernel module is
-/// _not_ valid, nor is `caller` outside of a kernel module).
+/// This means that any reference to an external module must have a corresponding import, and that
+/// the invocation kind is valid in the current module.
 ///
 /// We attempt to apply as many call-related validations as we can here, however we are limited
 /// until later stages of compilation on what we can know in the context of a single module.
@@ -56,7 +55,10 @@ impl VerifyInvokeTargets<'_> {
     }
     fn resolve_external(&mut self, span: SourceSpan, path: &Path) -> Option<InvocationTarget> {
         log::debug!(target: "verify-invoke", "resolving external symbol '{path}'");
-        let (module, rest) = path.split_first().unwrap();
+        let Some((module, rest)) = path.split_first() else {
+            self.analyzer.error(SemanticAnalysisError::InvalidInvokePath { span });
+            return None;
+        };
         log::debug!(target: "verify-invoke", "attempting to resolve '{module}' to local import");
         if let Some(import) = self.module.get_import_mut(module) {
             log::debug!(target: "verify-invoke", "found import '{}'", import.target());

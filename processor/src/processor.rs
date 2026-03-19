@@ -68,7 +68,7 @@ pub(crate) trait Processor: Sized {
 
     /// Executes the decorators that should be executed before entering a node.
     fn execute_before_enter_decorators(
-        &mut self,
+        &self,
         node_id: MastNodeId,
         current_forest: &MastForest,
         host: &mut impl Host,
@@ -76,7 +76,7 @@ pub(crate) trait Processor: Sized {
 
     /// Executes the decorators that should be executed after exiting a node.
     fn execute_after_exit_decorators(
-        &mut self,
+        &self,
         node_id: MastNodeId,
         current_forest: &MastForest,
         host: &mut impl Host,
@@ -85,7 +85,7 @@ pub(crate) trait Processor: Sized {
     /// Executes any decorator in a basic block that is to be executed before the operation at the
     /// given index in the block.
     fn execute_decorators_for_op(
-        &mut self,
+        &self,
         node_id: MastNodeId,
         op_idx_in_block: usize,
         current_forest: &MastForest,
@@ -96,7 +96,7 @@ pub(crate) trait Processor: Sized {
     /// block. This only differs from `execute_after_exit_decorators` in that these decorators are
     /// stored in the basic block node itself.
     fn execute_end_of_block_decorators(
-        &mut self,
+        &self,
         basic_block_node: &BasicBlockNode,
         node_id: MastNodeId,
         current_forest: &Arc<MastForest>,
@@ -113,7 +113,7 @@ pub(crate) trait SystemInterface {
     // --------------------------------------------------------------------------------------------
 
     /// Returns the value of the CALLER_HASH register, which is the hash of the procedure that
-    /// called the currently executing procedure.
+    /// initiated the most recent SYSCALL, or ZERO if not in a syscall context.
     fn caller_hash(&self) -> Word;
 
     /// Returns the current clock cycle.
@@ -150,9 +150,13 @@ pub(crate) trait StackInterface {
     fn top(&self) -> &[Felt];
 
     /// Returns the element on the stack at index `idx`.
+    ///
+    /// `idx` must be less than or equal to 15.
     fn get(&self, idx: usize) -> Felt;
 
     /// Mutable variant of `stack_get()`.
+    ///
+    /// `idx` must be less than or equal to 15.
     fn get_mut(&mut self, idx: usize) -> &mut Felt;
 
     /// Returns the word on the stack starting at index `start_idx` in "stack order".
@@ -172,6 +176,8 @@ pub(crate) trait StackInterface {
     /// - etc.
     ///
     /// Word\[0\] corresponds to the top of stack.
+    ///
+    /// `start_idx` must be less than or equal to 12.
     fn get_word(&self, start_idx: usize) -> Word;
 
     /// Returns two words (8 elements) from the stack starting at index `start_idx`.
@@ -186,6 +192,8 @@ pub(crate) trait StackInterface {
     /// a | b | c | d | e | f | g | h | i | j | k | l | m | n | o | p
     ///
     /// Then `get_double_word(0)` returns `[a, b, c, d, e, f, g, h]`.
+    ///
+    /// `start_idx` must be less than or equal to 8.
     fn get_double_word(&self, start_idx: usize) -> [Felt; 8] {
         core::array::from_fn(|i| self.get(start_idx + i))
     }
@@ -194,14 +202,20 @@ pub(crate) trait StackInterface {
     fn depth(&self) -> u32;
 
     /// Writes an element to the stack at the given index.
+    ///
+    /// `idx` must be less than or equal to 15.
     fn set(&mut self, idx: usize, element: Felt);
 
     /// Writes a word to the stack starting at the given index.
     ///
     /// Word\[0\] goes to stack position start_idx (top), word\[1\] to start_idx+1, etc.
+    ///
+    /// `start_idx` must be less than or equal to 12.
     fn set_word(&mut self, start_idx: usize, word: &Word);
 
     /// Swaps the elements at the given indices on the stack.
+    ///
+    /// `idx1` and `idx2` must be less than or equal to 15.
     fn swap(&mut self, idx1: usize, idx2: usize);
 
     /// Swaps the nth word from the top of the stack with the top word of the stack.
@@ -246,7 +260,7 @@ pub(crate) trait StackInterface {
     /// Concretely, this decrements the stack top pointer by one (removing the top element), and
     /// pushes a `ZERO` at the bottom of the stack if the stack size is already at 16 elements
     /// (since the stack size can never be less than 16).
-    fn decrement_size(&mut self);
+    fn decrement_size(&mut self) -> Result<(), OperationError>;
 }
 
 // ADVICE PROVIDER INTERFACE
@@ -346,7 +360,7 @@ pub(crate) trait HasherInterface {
     ///
     /// The address is only needed for operation helpers in trace generation, and thus an
     /// implementation might choose to return a default/invalid address if it is not needed.
-    fn permute(&mut self, state: HasherState) -> (Felt, HasherState);
+    fn permute(&mut self, state: HasherState) -> Result<(Felt, HasherState), OperationError>;
 
     /// Verifies that the `claimed_root` is indeed the root of a Merkle tree containing `value` at
     /// the specified `index`.

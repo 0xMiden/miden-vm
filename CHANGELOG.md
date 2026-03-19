@@ -1,5 +1,64 @@
 # Changelog
 
+## 0.22.0 (2025-03-18)
+
+#### Enhancements
+
+- Define and implement Miden project file format ([#2510](https://github.com/0xMiden/miden-vm/pull/2510)).
+- Added `math::u128` comparison (`lt`, `lte`, `gt`, `gte`), bitwise (`and`, `or`, `xor`, `not`), and shift (`shl`, `shr`, `rotl`, `rotr`) operations ([#2624](https://github.com/0xMiden/miden-vm/pull/2624)).
+- [BREAKING] `build_trace()` no longer assumes valid user input ([#2747](https://github.com/0xMiden/miden-vm/pull/2747)).
+- Added `math::u128` division operations ([#2776](https://github.com/0xMiden/miden-vm/pull/2776)).
+- [BREAKING] Migrated to lifted-STARK backend and `miden-crypto` to v0.23 ([#2783](https://github.com/0xMiden/miden-vm/pull/2783)).
+
+
+#### Changes
+
+- Consolidated error variants: simplified `AceError` and FRI errors to string-based types, merged `DynamicNodeNotFound`/`NoMastForestWithProcedure` into `ProcedureNotFound`, introduced `HostError` for handler-related variants ([#2675](https://github.com/0xMiden/miden-vm/pull/2675)).
+- Added optional tagging instrumentation for AIR constraints (test-only; enables stable ID tracking and OOD parity checks) ([#2713](https://github.com/0xMiden/miden-vm/pull/2713)).
+- [BREAKING] `Processor` and `FastProcessor` decorator execution is now immutable ([#2718](https://github.com/0xMiden/miden-vm/pull/2718)).
+- [BREAKING] `Tracer` API significantly refactored ([#2720](https://github.com/0xMiden/miden-vm/pull/2720)).
+- Added general stack transition constraints (shift/no‑shift) ([#2725](https://github.com/0xMiden/miden-vm/pull/2725)).
+- Added stack overflow table constraints ([#2735](https://github.com/0xMiden/miden-vm/pull/2735)).
+- Added stack shuffling ops constraints ([#2736](https://github.com/0xMiden/miden-vm/pull/2736)).
+- [BREAKING] Renamed `miden::core::crypto::dsa::falcon512poseidon2` module to `falcon512_poseidon2` to align with snake_case naming convention ([#2740](https://github.com/0xMiden/miden-vm/issues/2740)).
+- Added `miden-ace-codegen` crate for lowering AIR constraints to ACE circuit format ([#2757](https://github.com/0xMiden/miden-vm/pull/2757)).
+- [BREAKING] `Operation` enum now only encodes basic block operations ([#2771](https://github.com/0xMiden/miden-vm/pull/2771)).
+- Added AIR constraints for system, range checker, stack, decoder, and chiplets components ([#2772](https://github.com/0xMiden/miden-vm/pull/2772)).
+- Added recursion guards for assembly inputs and tests ([#2792](https://github.com/0xMiden/miden-vm/pull/2792)).
+- Introduced `build_trace_with_max_len()` which stops building the trace after a given max, and `build_trace()` no longer allocates more than 2^29 rows ([#2809](https://github.com/0xMiden/miden-vm/pull/2809)).
+- `DebugHandler`'s default method implementations are now no-ops (instead of prints) ([#2837](https://github.com/0xMiden/miden-vm/pull/2837)).
+- Added `ExecutionTrace::check_constraints()` for fast debug constraint checking without STARK proving, and migrated tests from `prove_and_verify` ([#2846](https://github.com/0xMiden/miden-vm/pull/2846)).
+- [BREAKING] Updated the dependency on `midenc-hir-type` to 0.5.0, which changes the set of available calling conventions, and adds support for enum types and named struct types. ([#2848](https://github.com/0xMiden/miden-vm/pull/2848))
+- [BREAKING] `StructType::new` now expects an optional name to be specified ([#2848](https://github.com/0xMiden/miden-vm/pull/2848))
+- [BREAKING] `Variant::new` now expects an optional payload type to be specified ([#2848](https://github.com/0xMiden/miden-vm/pull/2848))
+- [BREAKING] Enum types are now exported from libraries as a `midenc_hir_type::EnumType`, rather than the type of the discriminant. ([#2848](https://github.com/0xMiden/miden-vm/pull/2848))
+
+#### Fixes
+
+- Fixed `Constant::PartialEq` to include `visibility` field in equality comparison, making it consistent with other exportable items (`Procedure`, `TypeAlias`, `EnumType`).
+- Cryptostream operation now correctly sends chiplets bus memory requests ([#2686](https://github.com/0xMiden/miden-vm/pull/2686)).
+- Fixed a possible panic in decorator serialization ([#2742](https://github.com/0xMiden/miden-vm/pull/2742)).
+- Hardened untrusted deserialization by enforcing budgets and depth limits, plus expanded fuzzing coverage ([#2777](https://github.com/0xMiden/miden-vm/pull/2777)).
+- Validated push immediate group commitments and slot placement to reject invalid immediates ([#2779](https://github.com/0xMiden/miden-vm/pull/2779)).
+- Added documentation for `math::u64` module operations ([#2781](https://github.com/0xMiden/miden-vm/pull/2781)).
+- Prevented a trace-generation panic by validating op batch groups in basic blocks ([#2782](https://github.com/0xMiden/miden-vm/pull/2782)).
+- Preserved dynexec/dyncall distinction (and digests) when remapping or merging MAST forests ([#2784](https://github.com/0xMiden/miden-vm/pull/2784)).
+- Hardened AEAD decrypt size calculations ([#2789](https://github.com/0xMiden/miden-vm/pull/2789)).
+- Introduced `FastProcessor` safe stack method accesses for event handlers ([#2797](https://github.com/0xMiden/miden-vm/pull/2797)).
+- Fixed a possible u64 overflow issue in `op_eval_circuit()` [#2799](https://github.com/0xMiden/miden-vm/pull/2799).
+- `SystemEvent::HpermToMap` handler now computes the correct permutation ([#2801](https://github.com/0xMiden/miden-vm/pull/2801)).
+- Hardened MASM parsing and constants handling (lexer invalid-token spans, repeat count bounds, constant range checks, field division folding, and `push.WORD[...]` index validation) ([#2803](https://github.com/0xMiden/miden-vm/pull/2803)).
+- Hardened syscall target validation to avoid panic paths and reject invalid digests at assembly time ([#2804](https://github.com/0xMiden/miden-vm/pull/2804)).
+- Added bounds to attacker-controlled allocation sizes in advice map and keccak256/sha512 precompiles ([#2805](https://github.com/0xMiden/miden-vm/pull/2805)).
+- Hardened boundary and overflow checks for `u64::shr`, `ilog2`, `u32clz`, and Falcon `mod_12289` ([#2808](https://github.com/0xMiden/miden-vm/pull/2808)).
+- `build_trace()` no longer panics when no core trace contexts are provided ([#2809](https://github.com/0xMiden/miden-vm/pull/2809)).
+- Set a bound on `ContinuationStack` size, checked during execution ([#2824](https://github.com/0xMiden/miden-vm/pull/2824)).
+- Hardened basic-block batch validation and decode-time padding checks to reject inconsistent padded groups and prevent raw-helper underflow/panic paths on malformed forests ([#2839](https://github.com/0xMiden/miden-vm/pull/2839)).
+- Fixed undefined behavior in parallel trace generation by limiting H0 batch inversion to initialized rows ([#2842](https://github.com/0xMiden/miden-vm/pull/2842)).
+- `Visit` and `VisitMut` traits now properly visit enum type discriminant values, as well as the new payload `TypeExpr` when present ([#2848](https://github.com/0xMiden/miden-vm/pull/2848)).
+- Enforced canonical kernel procedure-hash validation on binary and serde deserialization paths, and expanded serde deserialization fuzz coverage for related artifact types ([#2849](https://github.com/0xMiden/miden-vm/pull/2849)).
+- Fixed constant evaluation across semantic analysis and linking so exported constants no longer retain private local dependencies and cross-module constant chains resolve in the defining module ([#2873](https://github.com/0xMiden/miden-vm/pull/2873)).
+
 ## 0.21.2 (2026-03-04)
 
 - Removes `features = serde` from `miden-core` in `miden-air` to avoid unconditionally enabling the `serde` dependency  ([#2767](https://github.com/0xMiden/miden-vm/pull/2767)).

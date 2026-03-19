@@ -89,7 +89,7 @@ impl Processor for FastProcessor {
 
     #[inline(always)]
     fn execute_before_enter_decorators(
-        &mut self,
+        &self,
         node_id: MastNodeId,
         current_forest: &MastForest,
         host: &mut impl Host,
@@ -99,7 +99,7 @@ impl Processor for FastProcessor {
 
     #[inline(always)]
     fn execute_after_exit_decorators(
-        &mut self,
+        &self,
         node_id: MastNodeId,
         current_forest: &MastForest,
         host: &mut impl Host,
@@ -109,7 +109,7 @@ impl Processor for FastProcessor {
 
     #[inline(always)]
     fn execute_decorators_for_op(
-        &mut self,
+        &self,
         node_id: MastNodeId,
         op_idx_in_block: usize,
         current_forest: &MastForest,
@@ -129,7 +129,7 @@ impl Processor for FastProcessor {
 
     #[inline(always)]
     fn execute_end_of_block_decorators(
-        &mut self,
+        &self,
         basic_block_node: &BasicBlockNode,
         node_id: MastNodeId,
         current_forest: &Arc<MastForest>,
@@ -141,11 +141,14 @@ impl Processor for FastProcessor {
 
 impl HasherInterface for FastProcessor {
     #[inline(always)]
-    fn permute(&mut self, mut input_state: HasherState) -> (Felt, HasherState) {
+    fn permute(
+        &mut self,
+        mut input_state: HasherState,
+    ) -> Result<(Felt, HasherState), OperationError> {
         Poseidon2::apply_permutation(&mut input_state);
 
         // Return a default value for the address, as it is not needed in trace generation.
-        (ZERO, input_state)
+        Ok((ZERO, input_state))
     }
 
     #[inline(always)]
@@ -315,7 +318,8 @@ impl StackInterface for FastProcessor {
     }
 
     #[inline(always)]
-    fn decrement_size(&mut self) {
-        self.decrement_stack_size()
+    fn decrement_size(&mut self) -> Result<(), OperationError> {
+        self.decrement_stack_size();
+        Ok(())
     }
 }

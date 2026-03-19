@@ -13,9 +13,18 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+serde_json = "1.0"
 
 [dependencies.miden-core]
 path = "../core"
+features = ["std", "serde"]
+
+[dependencies.miden-assembly-syntax]
+path = "../crates/assembly-syntax"
+features = ["std", "serde"]
+
+[dependencies.miden-mast-package]
+path = "../crates/mast-package"
 features = ["std"]
 
 # Fuzz targets - each is a separate binary
@@ -50,6 +59,132 @@ bench = false
 [[bin]]
 name = "debug_info"
 path = "fuzz_targets/debug_info.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "program_deserialize"
+path = "fuzz_targets/program_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "program_serde_deserialize"
+path = "fuzz_targets/program_serde_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "kernel_deserialize"
+path = "fuzz_targets/kernel_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "kernel_serde_deserialize"
+path = "fuzz_targets/kernel_serde_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "stack_io_deserialize"
+path = "fuzz_targets/stack_io_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "advice_map_serde_deserialize"
+path = "fuzz_targets/advice_map_serde_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "advice_inputs_deserialize"
+path = "fuzz_targets/advice_inputs_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "operation_deserialize"
+path = "fuzz_targets/operation_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "operation_serde_deserialize"
+path = "fuzz_targets/operation_serde_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "execution_proof_deserialize"
+path = "fuzz_targets/execution_proof_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "execution_proof_serde_deserialize"
+path = "fuzz_targets/execution_proof_serde_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "precompile_request_deserialize"
+path = "fuzz_targets/precompile_request_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "precompile_request_serde_deserialize"
+path = "fuzz_targets/precompile_request_serde_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "library_deserialize"
+path = "fuzz_targets/library_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "library_serde_deserialize"
+path = "fuzz_targets/library_serde_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "package_deserialize"
+path = "fuzz_targets/package_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "package_serde_deserialize"
+path = "fuzz_targets/package_serde_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mast_forest_serde_deserialize"
+path = "fuzz_targets/mast_forest_serde_deserialize.rs"
 test = false
 doc = false
 bench = false

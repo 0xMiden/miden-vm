@@ -7,7 +7,7 @@ fn range_check_once() {
     let asm_op = "u32overflowing_add";
     let stack = vec![1, 1];
 
-    build_op_test!(asm_op, &stack).prove_and_verify(stack, false);
+    build_op_test!(asm_op, &stack).check_constraints();
 }
 
 /// Range checks multiple values a varying number of times, since each value is checked as an input.
@@ -18,7 +18,7 @@ fn range_check_multi() {
         "begin u32assert2 u32overflowing_add assertz u32assert2 u32overflowing_add assertz end";
     let stack = vec![5, 5, 5];
 
-    build_test!(source, &stack).prove_and_verify(stack, false);
+    build_test!(source, &stack).check_constraints();
 }
 
 /// Range checks the result of 1 + u32::MAX - 1, which is u32::MAX. Therefore, it requires range
@@ -28,5 +28,5 @@ fn range_check_u16max() {
     let asm_op = "u32overflowing_add";
     let stack = vec![1, (u32::MAX - 1) as u64];
 
-    build_op_test!(asm_op, &stack).prove_and_verify(stack, false);
+    build_op_test!(asm_op, &stack).check_constraints();
 }

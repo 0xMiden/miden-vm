@@ -54,6 +54,20 @@ pub struct Span<T> {
 }
 
 #[cfg(feature = "serde")]
+impl<T> Span<T> {
+    pub fn from_serde_spanned(source_id: SourceId, spanned: serde_spanned::Spanned<T>) -> Self {
+        let range = spanned.span();
+        let start = range.start as u32;
+        let end = range.end as u32;
+        let spanned = spanned.into_inner();
+        Self {
+            span: SourceSpan::new(source_id, start..end),
+            spanned,
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
 impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for Span<T> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -160,10 +174,7 @@ impl<T> Span<T> {
         U: ?Sized,
         T: Deref<Target = U>,
     {
-        Span {
-            span: self.span,
-            spanned: self.spanned.deref(),
-        }
+        Span { span: self.span, spanned: &*self.spanned }
     }
 
     /// Gets a new [Span] that borrows the inner value.

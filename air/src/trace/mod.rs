@@ -3,6 +3,9 @@ use core::ops::Range;
 use chiplets::hasher::RATE_LEN;
 use miden_core::utils::range;
 
+mod challenges;
+pub use challenges::Challenges;
+
 pub mod chiplets;
 pub mod decoder;
 pub mod range;
@@ -13,20 +16,13 @@ pub use rows::{RowIndex, RowIndexError};
 
 mod main_trace;
 pub use main_trace::{MainTrace, MainTraceRow};
-
-mod aux_trace;
-pub use aux_trace::AuxTraceBuilder;
+pub use miden_crypto::stark::air::AuxBuilder;
 
 // CONSTANTS
 // ================================================================================================
 
 /// The minimum length of the execution trace. This is the minimum required to support range checks.
-/// Minimum trace length required by FRI parameters.
-///
-/// FRI requires: log2(MIN_TRACE_LEN) > log_final_poly_len + log_blowup
-/// With log_final_poly_len=7 and log_blowup=3, we need: log2(MIN_TRACE_LEN) > 10
-/// Therefore: MIN_TRACE_LEN >= 2048
-pub const MIN_TRACE_LEN: usize = 2048;
+pub const MIN_TRACE_LEN: usize = 64;
 
 // MAIN TRACE LAYOUT
 // ------------------------------------------------------------------------------------------------
@@ -55,7 +51,7 @@ pub const STACK_TRACE_WIDTH: usize = 19;
 pub const STACK_TRACE_RANGE: Range<usize> = range(STACK_TRACE_OFFSET, STACK_TRACE_WIDTH);
 
 /// Label for log_precompile transcript state messages on the virtual table bus.
-pub const LOG_PRECOMPILE_LABEL: u8 = miden_core::operations::OPCODE_LOGPRECOMPILE;
+pub const LOG_PRECOMPILE_LABEL: u8 = miden_core::operations::opcodes::LOGPRECOMPILE;
 
 pub mod log_precompile {
     use core::ops::Range;
@@ -121,6 +117,14 @@ pub const CHIPLETS_OFFSET: usize = RANGE_CHECK_TRACE_RANGE.end;
 pub const CHIPLETS_WIDTH: usize = 20;
 pub const CHIPLETS_RANGE: Range<usize> = range(CHIPLETS_OFFSET, CHIPLETS_WIDTH);
 
+/// Shared chiplet selector columns at the start of the chiplets segment.
+pub const CHIPLET_SELECTORS_RANGE: Range<usize> = range(CHIPLETS_OFFSET, 5);
+pub const CHIPLET_S0_COL_IDX: usize = CHIPLET_SELECTORS_RANGE.start;
+pub const CHIPLET_S1_COL_IDX: usize = CHIPLET_SELECTORS_RANGE.start + 1;
+pub const CHIPLET_S2_COL_IDX: usize = CHIPLET_SELECTORS_RANGE.start + 2;
+pub const CHIPLET_S3_COL_IDX: usize = CHIPLET_SELECTORS_RANGE.start + 3;
+pub const CHIPLET_S4_COL_IDX: usize = CHIPLET_SELECTORS_RANGE.start + 4;
+
 pub const TRACE_WIDTH: usize = CHIPLETS_OFFSET + CHIPLETS_WIDTH;
 pub const PADDED_TRACE_WIDTH: usize = TRACE_WIDTH.next_multiple_of(RATE_LEN);
 
@@ -175,6 +179,56 @@ pub const ACE_CHIPLET_WIRING_BUS_RANGE: Range<usize> =
 /// Auxiliary trace segment width.
 pub const AUX_TRACE_WIDTH: usize = ACE_CHIPLET_WIRING_BUS_RANGE.end;
 
-/// Number of random elements available to the prover after the commitment to the main trace
-/// segment.
-pub const AUX_TRACE_RAND_ELEMENTS: usize = 16;
+/// Number of random challenges used for auxiliary trace constraints.
+pub const AUX_TRACE_RAND_CHALLENGES: usize = 2;
+
+/// Maximum number of coefficients used in bus message encodings.
+pub const MAX_MESSAGE_WIDTH: usize = 16;
+
+/// Bus message coefficient indices.
+///
+/// These define the standard positions for encoding bus messages using the pattern:
+/// `alpha + sum(beta_powers\[i\] * elem\[i\])` where:
+/// - `alpha` is the randomness base (accessed directly as `.alpha`)
+/// - `beta_powers\[i\] = beta^i` are the powers of beta
+///
+/// These indices refer to positions in the `beta_powers` array, not including alpha.
+///
+/// This layout is shared between:
+/// - AIR constraint builders (symbolic expressions): `Challenges<AB::ExprEF>`
+/// - Processor auxiliary trace builders (concrete field elements): `Challenges<E>`
+pub mod bus_message {
+    /// Label coefficient index: `beta_powers[0] = beta^0`.
+    ///
+    /// Used for transition type/operation label.
+    pub const LABEL_IDX: usize = 0;
+
+    /// Address coefficient index: `beta_powers[1] = beta^1`.
+    ///
+    /// Used for chiplet address.
+    pub const ADDR_IDX: usize = 1;
+
+    /// Node index coefficient index: `beta_powers[2] = beta^2`.
+    ///
+    /// Used for Merkle path position. Set to 0 for non-Merkle operations (SPAN, RESPAN, HPERM,
+    /// etc.).
+    pub const NODE_INDEX_IDX: usize = 2;
+
+    /// State start coefficient index: `beta_powers[3] = beta^3`.
+    ///
+    /// Beginning of hasher state. Hasher state occupies 8 consecutive coefficients:
+    /// `beta_powers[3..11]` (beta^3..beta^10) for `state[0..7]` (rate portion: RATE0 || RATE1).
+    pub const STATE_START_IDX: usize = 3;
+
+    /// Capacity start coefficient index: `beta_powers[11] = beta^11`.
+    ///
+    /// Beginning of hasher capacity. Hasher capacity occupies 4 consecutive coefficients:
+    /// `beta_powers[11..15]` (beta^11..beta^14) for `capacity[0..3]`.
+    pub const CAPACITY_START_IDX: usize = 11;
+
+    /// Capacity domain coefficient index: `beta_powers[12] = beta^12`.
+    ///
+    /// Second capacity element. Used for encoding operation-specific data (e.g., op_code in control
+    /// block messages).
+    pub const CAPACITY_DOMAIN_IDX: usize = CAPACITY_START_IDX + 1;
+}

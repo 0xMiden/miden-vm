@@ -334,7 +334,7 @@ impl Linker {
     ///
     /// Note: it is assumed that kernel and kernel_module are consistent, but this is not checked.
     ///
-    /// TODO: consider passing `KerneLibrary` into this constructor as a parameter instead.
+    /// TODO: consider passing `KernelLibrary` into this constructor as a parameter instead.
     pub(super) fn with_kernel(
         source_manager: Arc<dyn SourceManager>,
         kernel: Kernel,
@@ -685,7 +685,7 @@ impl Linker {
 
         let symbol_resolver = SymbolResolver::new(self);
         let mut cache = ResolverCache::default();
-        let resolver = Resolver {
+        let mut resolver = Resolver {
             resolver: &symbol_resolver,
             cache: &mut cache,
             current_module: module_index,
@@ -764,7 +764,7 @@ impl Linker {
 
         let symbol_resolver = SymbolResolver::new(self);
         let mut cache = ResolverCache::default();
-        let resolver = Resolver {
+        let mut resolver = Resolver {
             cache: &mut cache,
             resolver: &symbol_resolver,
             current_module: gid.module,

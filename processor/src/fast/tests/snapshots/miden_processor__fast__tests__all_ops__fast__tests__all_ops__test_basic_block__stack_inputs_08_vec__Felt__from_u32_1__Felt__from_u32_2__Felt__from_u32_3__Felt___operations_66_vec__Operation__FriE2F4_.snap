@@ -16,6 +16,8 @@ Err(
             ),
         },
         source_file: None,
-        err: InvalidFriDomainGenerator,
+        err: FriError(
+            "domain size was 0",
+        ),
     },
 )

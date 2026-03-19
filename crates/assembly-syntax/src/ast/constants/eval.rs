@@ -6,9 +6,11 @@ use alloc::{sync::Arc, vec::Vec};
 use smallvec::SmallVec;
 
 use crate::{
+    Felt,
     ast::*,
     debuginfo::{SourceFile, SourceSpan, Span, Spanned},
     diagnostics::{Diagnostic, RelatedLabel, miette},
+    parser::IntValue,
 };
 
 /// An error raised during evaluation of a constant expression
@@ -108,7 +110,7 @@ impl ConstEvalError {
         <Env as ConstEnvironment>::Error: From<Self>,
     {
         let start_file = env.get_source_file_for(start);
-        let detected_file = env.get_source_file_for(start);
+        let detected_file = env.get_source_file_for(detected);
         let detected = [RelatedLabel::error("related error")
             .with_labeled_span(
                 detected,
@@ -163,7 +165,7 @@ pub trait ConstEnvironment {
     ///
     /// Implementations should return `Ok(None)` if the symbol is defined, but not yet resolvable to
     /// a concrete definition.
-    fn get(&self, name: &Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error>;
+    fn get(&mut self, name: &Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error>;
 
     /// Get the constant expression/value defined at `path`, which is resolved using the imports
     /// and definitions in the current scope.
@@ -176,27 +178,18 @@ pub trait ConstEnvironment {
     /// * The path cannot be resolved, and the implementation wishes this to be treated as an error
     /// * The definition of the constant was found, but it does not have public visibility
     fn get_by_path(
-        &self,
+        &mut self,
         path: Span<&Path>,
     ) -> Result<Option<CachedConstantValue<'_>>, Self::Error>;
 
     /// A specialized form of [ConstEnvironment::get], which validates that the constant expression
     /// returned by `get` evaluates to an error string, returning that string, or raising an error
     /// if invalid.
-    fn get_error(&self, name: &Ident) -> Result<Option<Arc<str>>, Self::Error> {
-        match self.get(name)? {
-            Some(expr) => match expr {
-                CachedConstantValue::Hit(ConstantValue::String(spanned)) => {
-                    Ok(Some(spanned.clone().into_inner()))
-                },
-                CachedConstantValue::Miss(ConstantExpr::String(spanned)) => {
-                    Ok(Some(spanned.clone().into_inner()))
-                },
-                CachedConstantValue::Miss(ConstantExpr::Var(_)) => Ok(None),
-                other => {
-                    Err(ConstEvalError::invalid_constant(other.span(), "a string", self).into())
-                },
-            },
+    fn get_error(&mut self, name: &Ident) -> Result<Option<Arc<str>>, Self::Error> {
+        let mut seen = Vec::new();
+        let start = name.span();
+        match self.get(name)?.map(CachedConstantValue::into_expr) {
+            Some(expr) => resolve_error_expr(self, expr, start, &mut seen),
             None => Ok(None),
         }
     }
@@ -204,20 +197,11 @@ pub trait ConstEnvironment {
     /// A specialized form of [ConstEnvironment::get_by_path], which validates that the constant
     /// expression returned by `get_by_path` evaluates to an error string, returning that string,
     /// or raising an error if invalid.
-    fn get_error_by_path(&self, path: Span<&Path>) -> Result<Option<Arc<str>>, Self::Error> {
-        match self.get_by_path(path)? {
-            Some(expr) => match expr {
-                CachedConstantValue::Hit(ConstantValue::String(spanned)) => {
-                    Ok(Some(spanned.clone().into_inner()))
-                },
-                CachedConstantValue::Miss(ConstantExpr::String(spanned)) => {
-                    Ok(Some(spanned.clone().into_inner()))
-                },
-                CachedConstantValue::Miss(ConstantExpr::Var(_)) => Ok(None),
-                other => {
-                    Err(ConstEvalError::invalid_constant(other.span(), "a string", self).into())
-                },
-            },
+    fn get_error_by_path(&mut self, path: Span<&Path>) -> Result<Option<Arc<str>>, Self::Error> {
+        let mut seen = Vec::new();
+        let start = path.span();
+        match self.get_by_path(path)?.map(CachedConstantValue::into_expr) {
+            Some(expr) => resolve_error_expr(self, expr, start, &mut seen),
             None => Ok(None),
         }
     }
@@ -233,6 +217,51 @@ pub trait ConstEnvironment {
     #[inline]
     #[allow(unused_variables)]
     fn on_eval_completed(&mut self, name: Span<&Path>, value: &ConstantExpr) {}
+}
+
+fn resolve_error_expr<Env>(
+    env: &mut Env,
+    expr: ConstantExpr,
+    start: SourceSpan,
+    seen: &mut Vec<Arc<Path>>,
+) -> Result<Option<Arc<str>>, <Env as ConstEnvironment>::Error>
+where
+    Env: ?Sized + ConstEnvironment,
+    <Env as ConstEnvironment>::Error: From<ConstEvalError>,
+{
+    match expr {
+        ConstantExpr::String(spanned) => Ok(Some(spanned.into_inner())),
+        ConstantExpr::Var(path) => {
+            let path_ref = path.inner().as_ref();
+            let path_span = path.span();
+            resolve_error_path(env, Span::new(path_span, path_ref), start, seen)
+        },
+        other => Err(ConstEvalError::invalid_constant(other.span(), "a string", env).into()),
+    }
+}
+
+fn resolve_error_path<Env>(
+    env: &mut Env,
+    path: Span<&Path>,
+    start: SourceSpan,
+    seen: &mut Vec<Arc<Path>>,
+) -> Result<Option<Arc<str>>, <Env as ConstEnvironment>::Error>
+where
+    Env: ?Sized + ConstEnvironment,
+    <Env as ConstEnvironment>::Error: From<ConstEvalError>,
+{
+    let path_span = path.span();
+    let path_ref = path.into_inner();
+    if seen.iter().any(|seen_path| seen_path.as_ref() == path_ref) {
+        return Err(ConstEvalError::eval_cycle(start, path_span, env).into());
+    }
+    seen.push(Arc::<Path>::from(path_ref));
+
+    let path = Span::new(path_span, path_ref);
+    match env.get_by_path(path)?.map(CachedConstantValue::into_expr) {
+        Some(expr) => resolve_error_expr(env, expr, start, seen),
+        None => Ok(None),
+    }
 }
 
 /// Evaluate `expr` in `env`, producing a new [ConstantExpr] representing the value produced as the
@@ -351,18 +380,32 @@ where
                                     source_file: env.get_source_file_for(span),
                                 }
                             })?,
-                            ConstantOp::Div | ConstantOp::IntDiv => lhs
-                                .checked_div(rhs)
-                                .ok_or_else(|| ConstEvalError::DivisionByZero {
+                            ConstantOp::IntDiv => lhs.checked_div(rhs).ok_or_else(|| {
+                                ConstEvalError::DivisionByZero {
                                     span,
                                     source_file: env.get_source_file_for(span),
-                                })?,
+                                }
+                            })?,
+                            ConstantOp::Div => {
+                                if rhs.as_int() == 0 {
+                                    return Err(ConstEvalError::DivisionByZero {
+                                        span,
+                                        source_file: env.get_source_file_for(span),
+                                    }
+                                    .into());
+                                }
+                                let lhs = Felt::new(lhs.as_int());
+                                let rhs = Felt::new(rhs.as_int());
+                                IntValue::from(lhs / rhs)
+                            },
                         };
                         stack.push(ConstantExpr::Int(Span::new(span, result)));
                     },
-                    operands @ ((ConstantExpr::Int(_), ConstantExpr::Var(_))
-                    | (ConstantExpr::Var(_), ConstantExpr::Int(_))
-                    | (ConstantExpr::Var(_), ConstantExpr::Var(_))) => {
+                    operands @ ((
+                        ConstantExpr::Int(_) | ConstantExpr::Var(_),
+                        ConstantExpr::Var(_),
+                    )
+                    | (ConstantExpr::Var(_), ConstantExpr::Int(_))) => {
                         let (lhs, rhs) = operands;
                         stack.push(ConstantExpr::BinaryOp {
                             span,

@@ -103,15 +103,15 @@ The above constraints ensure that $n=1$ whenever the address changes, and $n=0$ 
 | Condition | Constraint                                      | Comments                                                                                                                                   |
 | --------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | $n=1$     | $(a' - a) - (2^{16} \cdot d_1' + d_0') = 0$     | When the address changes, columns `d0` and `d1` at the next row should contain the delta between the old and the new address.              |
-| $n=0$     | $(i' - i - 1) - (2^{16} \cdot d_1' + d_0') = 0$ | When the address remains the same, columns `d0` and `d1` at the next row should contain the delta between the old and the new clock cycle. |
+| $n=0$     | $(i' - i) - (2^{16} \cdot d_1' + d_0') = 0$ | When the address remains the same, columns `d0` and `d1` at the next row should contain the delta between the old and the new clock cycle. |
 
 We can combine the above constraints as follows:
 
 $$
-\left(n \cdot (a' - a) + (1 - n) \cdot (i' - i - 1)\right) - (2^{16} \cdot d_1' + d_0') = 0
+\left(n \cdot (a' - a) + (1 - n) \cdot (i' - i)\right) - (2^{16} \cdot d_1' + d_0') = 0
 $$
 
-The above constraint, in combination with $16$-bit range checks against columns `d0` and `d1` ensure that values in `addr` and `clk` columns always increase monotonically, and also that column `addr` may contain duplicates, while values in `clk` column must be unique for a given address.
+The above constraint, in combination with $16$-bit range checks against columns `d0` and `d1` ensure that values in `addr` and `clk` columns always increase monotonically, and also that column `addr` may contain duplicates. Values in `clk` may repeat for a given address, but only for read operations.
 
 ### Context separation
 
@@ -151,15 +151,15 @@ We can then define the following constraints to make sure values in columns `d0`
 | -------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | $n_0=1$              | $(c' - c) - (2^{16} \cdot d_1' + d_0') = 0$     | When the context changes, columns `d0` and `d1` at the next row should contain the delta between the old and the new contexts.                                   |
 | $n_0=0$ <br /> $n_1=1$ | $(a' - a) - (2^{16} \cdot d_1' + d_0') = 0$     | When the context remains the same but the address changes, columns `d0` and `d1` at the next row should contain the delta between the old and the new addresses. |
-| $n_0=0$ <br /> $n_1=0$ | $(i' - i - 1) - (2^{16} \cdot d_1' + d_0') = 0$ | When both the context and the address remain the same, columns `d0` and `d1` at the next row should contain the delta between the old and the new clock cycle.   |
+| $n_0=0$ <br /> $n_1=0$ | $(i' - i) - (2^{16} \cdot d_1' + d_0') = 0$ | When both the context and the address remain the same, columns `d0` and `d1` at the next row should contain the delta between the old and the new clock cycle.   |
 
 We can combine the above constraints as follows:
 
 $$
-\left(n_0 \cdot (c' - c) + (1 - n_0) \cdot \left(n_1 \cdot (a - a') + (1 - n_1) \cdot (i' - i - 1) \right) \right) - (2^{16} \cdot d_1' + d_0') = 0
+\left(n_0 \cdot (c' - c) + (1 - n_0) \cdot \left(n_1 \cdot (a' - a) + (1 - n_1) \cdot (i' - i) \right) \right) - (2^{16} \cdot d_1' + d_0') = 0
 $$
 
-The above constraint, in combination with $16$-bit range checks against columns `d0` and `d1` ensure that values in `ctx`, `addr`, and `clk` columns always increase monotonically, and also that columns `ctx` and `addr` may contain duplicates, while the values in column `clk` must be unique for a given combination of `ctx` and `addr`.
+The above constraint, in combination with $16$-bit range checks against columns `d0` and `d1` ensure that values in `ctx`, `addr`, and `clk` columns always increase monotonically, and also that columns `ctx` and `addr` may contain duplicates. Values in `clk` may repeat for a given `(ctx, addr)`, but only for read operations.
 
 Notice that the above constraint has degree $5$.
 
@@ -182,7 +182,7 @@ where:
 - `idx0` and `idx1` are selector columns used to identify which element in the word is being accessed. Specifically, the index within the word is computed as `idx1 * 2 + idx0`.
   - However, when `ew` is set to $1$ (indicating that a word is accessed), these columns are meaningless and are set to $0$.
 - `clk` contains clock cycle at which the memory operation happened. Values in this column must increase monotonically for a given context and memory word but there can be gaps between two consecutive values of up to $2^{32}$.
-  - Unlike the previously described approaches, we allow `clk` to be constant in the same context/word address, with the restriction that when this is the case, then only reads are allowed.
+  - When the context and word address are unchanged, `clk` may stay the same, but only read operations are allowed.
 - `v0, v1, v2, v3` columns contain field elements stored at a given context/word/clock cycle after the memory operation.
 - Columns `d0` and `d1` contain lower and upper $16$ bits of the delta between two consecutive context IDs, addresses, or clock cycles. Specifically:
   - When the context changes within a frame, these columns contain $(ctx' - ctx)$ in the "next" row.
@@ -191,7 +191,7 @@ where:
 - Column `t` contains the inverse of the delta between two consecutive context IDs, addresses, or clock cycles. Specifically:
   - When the context changes within a frame, this column contains the inverse of $(ctx' - ctx)$ in the "next" row.
   - When the context remains the same but the word address changes within a frame, this column contains the inverse of $(a' - a)$ in the "next" row.
-  - When both the context and the word address remain the same within a frame, this column contains the inverse of $(clk' - clk)$ in the "next" row.
+- When both the context and the word address remain the same within a frame, this column contains the inverse of $(clk' - clk)$ in the "next" row.
 - Column `f_scw` stands for "flag same context and word address", which is set to $1$ when the current and previous rows have the same context and word address, and $0$ otherwise.
 
 For every memory access operation (i.e., read or write a word or element), a new row is added to the memory table. If neither `ctx` nor `addr` have changed, the `v` columns are set to equal the values from the previous row (except for any element written to). If `ctx` or `addr` have changed, then the `v` columns are initialized to $0$ (except for any element written to).
@@ -214,7 +214,7 @@ $$
 - $f_{mem\_fr}$ is set to 1 when the next row is the first row of the memory chiplet.
 
 $$
-f_{mem\_fr} = (1 - s_1) \cdot f_{mem}' \text{ | degree} = 4
+f_{mem\_fr} = (1 - s_1) \cdot s_0 \cdot s_1' \cdot (1 - s_2') \text{ | degree} = 4
 $$
 
 To simplify description of constraints, we'll define two variables $n_0$ and $n_1$ as follows:
@@ -224,7 +224,7 @@ n_0 = \Delta ctx \cdot t'
 n_1 = \Delta a \cdot t'
 $$
 
-Where $\Delta ctx = ctx' - ctx$ and $\Delta a = a' - a$.
+Where $\Delta ctx = ctx' - ctx$, $\Delta a = a' - a$, and $\Delta clk = clk' - clk$.
 
 To make sure the prover sets the value of column `t` correctly, we'll need to impose the following constraints:
 
@@ -233,7 +233,7 @@ f_{mem\_nl} \cdot (n_0^2 - n_0) = 0 \text{ | degree} = 7
 $$
 
 $$
-f_{mem\_nl} \cdot (1 - n_0) \cdot  \Delta ctx = 0 \text{ | degree} = 7
+f_{mem\_nl} \cdot (1 - n_0) \cdot  \Delta ctx = 0 \text{ | degree} = 6
 $$
 
 $$
@@ -264,6 +264,16 @@ $$
 f_{mem} \cdot (idx1^2 - idx1) = 0 \text{ | degree} = 5
 $$
 
+For word access, the element index bits are zero:
+
+$$
+f_{mem} \cdot ew \cdot idx0 = 0 \text{ | degree} = 5
+$$
+
+$$
+f_{mem} \cdot ew \cdot idx1 = 0 \text{ | degree} = 5
+$$
+
 
 To enforce the values of context ID, word address, and clock cycle grow monotonically as described in the previous section, we define the following constraint.
 
@@ -273,10 +283,10 @@ $$
 
 In addition to this constraint, we also need to make sure that the values in registers $d_0$ and $d_1$ are less than $2^{16}$, and this can be done with [range checks](../range.md).
 
-Next, we need to ensure that when the context, word address and clock are constant in a frame, then only read operations are allowed in that clock cycle.
+Next, we need to ensure that when the context and word address are unchanged and the clock does not advance, both rows are reads.
 
 $$
-f_{mem\_nl} \cdot f_{scw}' \cdot (1 - \Delta clk \cdot t') \cdot (1 - rw) \cdot (1 - rw') = 0 \text{ | degree} = 8
+f_{mem\_nl} \cdot f_{scw}' \cdot (1 - \Delta clk \cdot t') \cdot \big((1 - rw) + (1 - rw')\big) = 0 \text{ | degree} = 8
 $$
 
 
@@ -327,7 +337,7 @@ That is, if $v_i$ is not written to, then either its value needs to be copied ov
 
 #### Chiplets bus constraints {#chiplets-bus-constraints}
 
-Communication between the memory chiplet and the stack is accomplished via the chiplets bus $b_{chip}$. To respond to memory access requests from the stack, we need to divide the current value in $b_{chip}$ by the value representing a row in the memory table.
+Communication between the memory chiplet and the stack is accomplished via the chiplets bus $b_{chip}$. To respond to memory access requests from the stack, we need to multiply the current value in $b_{chip}$ by the value representing a row in the memory table.
 
 ##### Memory row value {#memory-row-value}
 
@@ -339,7 +349,7 @@ v_{mem} = \alpha_0 + \alpha_1 \cdot op_{mem} + \alpha_2 \cdot ctx + \alpha_3 \cd
 \end{align*}
 $$
 
-where
+where $a = word\_addr + 2 \cdot idx1 + idx0$ and
 
 $$
 \begin{align*}

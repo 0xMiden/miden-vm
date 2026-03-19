@@ -24,6 +24,8 @@ Note: The maximum gets rounded up to the next power of 2, and the other 2 sets o
 
 In some cases, either the range checker or chiplets could end up requiring more rows than the stack rows, making the true cycle count higher than what the stack-based cycle counter reports.
 
+The runtime also applies a hard trace limit of `2^29` rows in parallel trace building. If replayed core or chiplet rows would pass that limit, execution stops with `TraceLenExceeded` instead of trying to allocate a larger trace.
+
 ## Analyzing trace segments with miden-vm analyze
 
 The `miden-vm analyze` command provides detailed information about trace segment utilization, showing:

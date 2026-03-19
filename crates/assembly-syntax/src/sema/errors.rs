@@ -67,13 +67,19 @@ pub enum SemanticAnalysisError {
         #[label]
         prev_span: SourceSpan,
     },
+    #[error("invalid invocation target")]
+    #[diagnostic(help("path contains an invalid component"))]
+    InvalidInvokePath {
+        #[label]
+        span: SourceSpan,
+    },
     #[error("invalid program: procedure exports are not allowed")]
     #[diagnostic(help("perhaps you meant to use `proc` instead of `export`?"))]
     UnexpectedExport {
         #[label]
         span: SourceSpan,
     },
-    #[error("invalid enum type representation: underlying type must be an integral type")]
+    #[error("invalid enum type representation: underlying type must be an integral or felt type")]
     #[diagnostic()]
     InvalidEnumRepr {
         #[label]
@@ -133,12 +139,6 @@ pub enum SemanticAnalysisError {
         #[label]
         span: SourceSpan,
     },
-    #[error("invalid instruction usage: 'caller' is only valid in kernel modules")]
-    #[diagnostic()]
-    CallerInKernel {
-        #[label]
-        span: SourceSpan,
-    },
     #[error("invalid syscall: callee must be resolvable to kernel module")]
     #[diagnostic()]
     InvalidSyscallTarget {
@@ -166,6 +166,14 @@ pub enum SemanticAnalysisError {
     SelfRecursive {
         #[label]
         span: SourceSpan,
+    },
+    #[error("invalid repeat count")]
+    #[diagnostic(help("repeat count must be in the range {min}..={max}"))]
+    InvalidRepeatCount {
+        #[label]
+        span: SourceSpan,
+        min: u32,
+        max: u32,
     },
     #[error("invalid immediate: value is larger than expected range")]
     #[diagnostic()]

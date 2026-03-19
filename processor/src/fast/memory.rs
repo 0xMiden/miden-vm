@@ -9,6 +9,16 @@ use crate::{ContextId, MemoryAddress, MemoryError, processor::MemoryInterface};
 ///
 /// Allows to read/write elements or words to memory. Internally, it is implemented as a map from
 ///(context_id, word_address) to the word stored starting at that memory location.
+///
+/// # Invariants
+/// The memory submodule assumes that the following invariants hold:
+/// - Multiple reads in the same clock cycle to the same address are allowed, but
+/// - Multiple writes in the same clock cycle to the same address are *not* allowed
+///
+/// These invariants are not enforced by [`Memory`] explicitly, but are expected to be upheld by all
+/// processor operations (i.e. all variants of the [`miden_core::operations::Operation`] enum). This
+/// is a consequence of the design of the memory chiplet constraints, which allow for multiple reads
+/// but not multiple writes in the same clock cycle to the same address.
 #[derive(Debug, Default)]
 pub struct Memory {
     memory: BTreeMap<(ContextId, u32), Word>,
