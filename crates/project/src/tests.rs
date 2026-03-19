@@ -1,4 +1,4 @@
-use std::{boxed::Box, path::Path, sync::Arc};
+use std::{boxed::Box, fs, path::Path, sync::Arc};
 
 use miden_assembly_syntax::{
     Path as MasmPath,
@@ -6,8 +6,9 @@ use miden_assembly_syntax::{
     diagnostics::Report,
 };
 use miden_core::assert_matches;
+use tempfile::TempDir;
 
-use crate::{DependencyVersionScheme, Linkage, TargetType, Workspace};
+use crate::{DependencyVersionScheme, Linkage, Project, TargetType, Workspace};
 
 struct TestContext {
     pub source_manager: Arc<dyn SourceManager>,
@@ -99,6 +100,53 @@ fn can_load_protocol_example_project() -> Result<(), Report> {
     assert_eq!(&**userspace_project.dependencies()[1].name(), "miden-utils");
     assert_matches!(userspace_project.dependencies()[1].scheme(), DependencyVersionScheme::Workspace { member } if member.path() == "utils");
     assert_eq!(userspace_project.dependencies()[1].linkage(), Linkage::Dynamic);
+
+    Ok(())
+}
+
+#[test]
+fn workspace_dev_override_is_used_for_child_profile_inheritance() -> Result<(), Report> {
+    let tempdir = TempDir::new().unwrap();
+    let root = tempdir.path().join("workspace-profile");
+    let app_dir = root.join("app");
+    fs::create_dir_all(&app_dir).unwrap();
+
+    fs::write(
+        root.join("miden-project.toml"),
+        r#"[workspace]
+members = ["app"]
+
+[workspace.package]
+version = "0.1.0"
+
+[profile.dev]
+debug = false
+"#,
+    )
+    .unwrap();
+
+    let app_manifest_path = app_dir.join("miden-project.toml");
+    fs::write(
+        &app_manifest_path,
+        r#"[package]
+name = "app"
+version = "0.1.0"
+
+[profile.child]
+inherits = "dev"
+"#,
+    )
+    .unwrap();
+
+    let context = TestContext::default();
+    let Project::WorkspacePackage { package, workspace: _ } =
+        Project::load(&app_manifest_path, &context.source_manager)?
+    else {
+        panic!("expected workspace package")
+    };
+    let child = package.profiles().iter().find(|p| p.name().as_ref() == "child").unwrap();
+
+    assert!(!child.should_emit_debug_info());
 
     Ok(())
 }
