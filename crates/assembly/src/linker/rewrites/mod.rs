@@ -62,7 +62,7 @@ pub fn rewrite_symbol(
             }
         },
         SymbolItem::Procedure(proc) => {
-            let mut rewriter = ModuleRewriter::new(gid.module, resolver);
+            let mut rewriter = ModuleRewriter::new(gid.module, resolver, cache);
             let mut proc = proc.borrow_mut();
             if let ControlFlow::Break(err) = rewriter.visit_mut_procedure(&mut proc) {
                 return Err(err);

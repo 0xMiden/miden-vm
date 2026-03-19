@@ -134,6 +134,15 @@ pub fn analyze(
 
     // Simplify all constant declarations
     analyzer.simplify_constants();
+    for item in module.items_mut().iter_mut() {
+        let Export::Constant(constant) = item else {
+            continue;
+        };
+        constant.value = analyzer
+            .get_constant(&constant.name)
+            .expect("semantic analysis tracks all module constants")
+            .clone();
+    }
 
     // Define enums now that all constant declarations have been discovered
     for mut ty in enums {

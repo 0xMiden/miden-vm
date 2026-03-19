@@ -110,7 +110,7 @@ impl ConstEvalError {
         <Env as ConstEnvironment>::Error: From<Self>,
     {
         let start_file = env.get_source_file_for(start);
-        let detected_file = env.get_source_file_for(start);
+        let detected_file = env.get_source_file_for(detected);
         let detected = [RelatedLabel::error("related error")
             .with_labeled_span(
                 detected,
@@ -165,7 +165,7 @@ pub trait ConstEnvironment {
     ///
     /// Implementations should return `Ok(None)` if the symbol is defined, but not yet resolvable to
     /// a concrete definition.
-    fn get(&self, name: &Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error>;
+    fn get(&mut self, name: &Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error>;
 
     /// Get the constant expression/value defined at `path`, which is resolved using the imports
     /// and definitions in the current scope.
@@ -178,17 +178,17 @@ pub trait ConstEnvironment {
     /// * The path cannot be resolved, and the implementation wishes this to be treated as an error
     /// * The definition of the constant was found, but it does not have public visibility
     fn get_by_path(
-        &self,
+        &mut self,
         path: Span<&Path>,
     ) -> Result<Option<CachedConstantValue<'_>>, Self::Error>;
 
     /// A specialized form of [ConstEnvironment::get], which validates that the constant expression
     /// returned by `get` evaluates to an error string, returning that string, or raising an error
     /// if invalid.
-    fn get_error(&self, name: &Ident) -> Result<Option<Arc<str>>, Self::Error> {
+    fn get_error(&mut self, name: &Ident) -> Result<Option<Arc<str>>, Self::Error> {
         let mut seen = Vec::new();
         let start = name.span();
-        match self.get(name)? {
+        match self.get(name)?.map(CachedConstantValue::into_expr) {
             Some(expr) => resolve_error_expr(self, expr, start, &mut seen),
             None => Ok(None),
         }
@@ -197,10 +197,10 @@ pub trait ConstEnvironment {
     /// A specialized form of [ConstEnvironment::get_by_path], which validates that the constant
     /// expression returned by `get_by_path` evaluates to an error string, returning that string,
     /// or raising an error if invalid.
-    fn get_error_by_path(&self, path: Span<&Path>) -> Result<Option<Arc<str>>, Self::Error> {
+    fn get_error_by_path(&mut self, path: Span<&Path>) -> Result<Option<Arc<str>>, Self::Error> {
         let mut seen = Vec::new();
         let start = path.span();
-        match self.get_by_path(path)? {
+        match self.get_by_path(path)?.map(CachedConstantValue::into_expr) {
             Some(expr) => resolve_error_expr(self, expr, start, &mut seen),
             None => Ok(None),
         }
@@ -220,8 +220,8 @@ pub trait ConstEnvironment {
 }
 
 fn resolve_error_expr<Env>(
-    env: &Env,
-    expr: CachedConstantValue<'_>,
+    env: &mut Env,
+    expr: ConstantExpr,
     start: SourceSpan,
     seen: &mut Vec<Arc<Path>>,
 ) -> Result<Option<Arc<str>>, <Env as ConstEnvironment>::Error>
@@ -230,13 +230,8 @@ where
     <Env as ConstEnvironment>::Error: From<ConstEvalError>,
 {
     match expr {
-        CachedConstantValue::Hit(ConstantValue::String(spanned)) => {
-            Ok(Some(spanned.clone().into_inner()))
-        },
-        CachedConstantValue::Miss(ConstantExpr::String(spanned)) => {
-            Ok(Some(spanned.clone().into_inner()))
-        },
-        CachedConstantValue::Miss(ConstantExpr::Var(path)) => {
+        ConstantExpr::String(spanned) => Ok(Some(spanned.into_inner())),
+        ConstantExpr::Var(path) => {
             let path_ref = path.inner().as_ref();
             let path_span = path.span();
             resolve_error_path(env, Span::new(path_span, path_ref), start, seen)
@@ -246,7 +241,7 @@ where
 }
 
 fn resolve_error_path<Env>(
-    env: &Env,
+    env: &mut Env,
     path: Span<&Path>,
     start: SourceSpan,
     seen: &mut Vec<Arc<Path>>,
@@ -263,7 +258,7 @@ where
     seen.push(Arc::<Path>::from(path_ref));
 
     let path = Span::new(path_span, path_ref);
-    match env.get_by_path(path)? {
+    match env.get_by_path(path)?.map(CachedConstantValue::into_expr) {
         Some(expr) => resolve_error_expr(env, expr, start, seen),
         None => Ok(None),
     }
