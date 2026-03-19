@@ -531,4 +531,29 @@ mod tests {
 
         assert_selected(&selected, &expected);
     }
+
+    #[test]
+    fn resolver_keeps_plain_and_precise_versions_separate() {
+        let digest = Rpo256::hash(b"a");
+        let mut index = InMemoryPackageRegistry::default();
+
+        let dep_id = PackageId::from("dep");
+        index.insert(
+            dep_id.clone(),
+            "1.0.0".parse::<Version>().unwrap(),
+            None::<(PackageId, VersionRequirement)>,
+        );
+        index.insert(
+            dep_id.clone(),
+            Version::new("1.0.0".parse().unwrap(), digest),
+            None::<(PackageId, VersionRequirement)>,
+        );
+
+        let versions = index
+            .available_versions(&dep_id)
+            .into_iter()
+            .flat_map(|versions| versions.keys().map(alloc::string::ToString::to_string))
+            .collect::<alloc::vec::Vec<_>>();
+        assert_eq!(versions.len(), 2, "versions = {versions:?}");
+    }
 }
