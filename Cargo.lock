@@ -1609,7 +1609,6 @@ dependencies = [
  "miden-processor",
  "miden-prover",
  "miden-verifier",
- "miden-vm",
  "pretty_assertions",
  "proptest",
  "test-case",

@@ -36,7 +36,8 @@ Miden crate exposes several functions which can be used to execute programs, gen
 
 ### Executing programs
 
-To execute a program on Miden VM, you can use `execute()` which takes the following arguments:
+To execute a program on Miden VM, you can use `execute_sync()`. The async `execute()` variant is
+also available for async callers. `execute_sync()` takes the following arguments:
 
 - `program: &Program` - a reference to a Miden program to be executed.
 - `stack_inputs: StackInputs` - a set of public inputs with which to execute the program.
@@ -52,7 +53,7 @@ use std::sync::Arc;
 use miden_vm::{
     advice::AdviceInputs,
     assembly::DefaultSourceManager,
-    Assembler, execute, ExecutionOptions, DefaultHost, Program, StackInputs
+    Assembler, execute_sync, ExecutionOptions, DefaultHost, Program, StackInputs
 };
 
 // instantiate the assembler
@@ -74,12 +75,15 @@ let mut host = DefaultHost::default();
 let exec_options = ExecutionOptions::default();
 
 // execute the program with no inputs
-let trace = execute(&program, stack_inputs, advice_inputs.clone(), &mut host, exec_options).unwrap();
+let trace =
+    execute_sync(&program, stack_inputs, advice_inputs.clone(), &mut host, exec_options).unwrap();
 ```
 
 ### Proving program execution
 
-To execute a program on Miden VM and generate a proof that the program was executed correctly, you can use the `prove()` function. This function takes the following arguments:
+To execute a program on Miden VM and generate a proof that the program was executed correctly, you
+can use the `prove_sync()` function. The async `prove()` variant is also available for async
+callers. `prove_sync()` takes the following arguments:
 
 - `program: &Program` - a reference to a Miden program to be executed.
 - `stack_inputs: StackInputs` - a set of public inputs with which to execute the program.
@@ -101,7 +105,7 @@ use miden_vm::{
     advice::AdviceInputs,
     assembly::DefaultSourceManager,
     field::PrimeField64,
-    Assembler, DefaultHost, ProvingOptions, Program, prove, StackInputs
+    Assembler, DefaultHost, ProvingOptions, Program, prove_sync, StackInputs
 };
 
 // instantiate the assembler
@@ -111,7 +115,7 @@ let mut assembler = Assembler::default();
 let program = assembler.assemble_program("begin push.3 push.5 add swap drop end").unwrap();
 
 // let's execute it and generate a STARK proof
-let (outputs, proof) = prove(
+let (outputs, proof) = prove_sync(
     &program,
     StackInputs::default(),       // we won't provide any inputs
     AdviceInputs::default(),      // we don't need any initial advice inputs
@@ -212,7 +216,7 @@ let mut host = DefaultHost::default();
 let stack_inputs = StackInputs::try_from_ints([1, 0]).unwrap();
 
 // execute the program
-let (outputs, proof) = miden_vm::prove(
+let (outputs, proof) = miden_vm::prove_sync(
     &program,
     stack_inputs,
     AdviceInputs::default(), // without initial advice inputs

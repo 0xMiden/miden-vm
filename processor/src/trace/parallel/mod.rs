@@ -81,7 +81,7 @@ mod tests;
 /// let mut host = DefaultHost::default();
 ///
 /// let (execution_output, ctx) = FastProcessor::new(StackInputs::default())
-///     .execute_for_trace(&program, &mut host)
+///     .execute_for_trace_sync(&program, &mut host)
 ///     .unwrap();
 /// let trace =
 ///     miden_processor::trace::build_trace(execution_output, ctx, program.to_info()).unwrap();
