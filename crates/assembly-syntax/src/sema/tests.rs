@@ -1,6 +1,21 @@
 use crate::{
-    MAX_REPEAT_COUNT, diagnostics::reporting::PrintDiagnostic, testing::SyntaxTestContext,
+    MAX_REPEAT_COUNT,
+    ast::{Constant, Export, Module},
+    diagnostics::reporting::PrintDiagnostic,
+    testing::SyntaxTestContext,
 };
+
+fn exported_constant<'a>(module: &'a Module, name: &str) -> &'a Constant {
+    match module
+        .items()
+        .iter()
+        .find(|item| item.name().as_str() == name && item.visibility().is_public())
+    {
+        Some(Export::Constant(constant)) => constant,
+        Some(item) => panic!("expected exported constant named {name}, found {item:?}"),
+        None => panic!("expected exported constant named {name}"),
+    }
+}
 
 #[test]
 fn repeat_count_zero_rejected_in_analysis() {
@@ -64,4 +79,25 @@ fn repeat_count_constant_too_large_rejected_in_analysis() {
     );
     let rendered = format!("{}", PrintDiagnostic::new_without_color(&error));
     assert!(rendered.contains("invalid repeat count"));
+}
+
+#[test]
+fn exported_constant_with_private_local_dependency_is_fully_evaluated_in_analysis() {
+    let context = SyntaxTestContext::default();
+    let module = context
+        .parse_module_with_path(
+            "wallet::memory",
+            "
+const ACCOUNT_ID_AND_NONCE_OFFSET = 4
+pub const ACCOUNT_ID_SUFFIX_OFFSET = ACCOUNT_ID_AND_NONCE_OFFSET + 2
+",
+        )
+        .expect("expected semantic analysis to succeed");
+
+    let exported = exported_constant(&module, "ACCOUNT_ID_SUFFIX_OFFSET");
+    assert_eq!(exported.value.expect_int().as_int(), 6);
+    assert!(
+        exported.value.references().is_empty(),
+        "expected semantic analysis to remove private local constant references from exported constants",
+    );
 }

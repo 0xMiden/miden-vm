@@ -213,7 +213,7 @@ impl BasicBlockDataDecoder<'_> {
         let mut op_batches: Vec<crate::mast::OpBatch> = Vec::with_capacity(num_batches);
         let mut global_op_offset = 0;
 
-        for (indptr, padding) in batch_indptrs.iter().zip(batch_padding) {
+        for (batch_idx, (indptr, padding)) in batch_indptrs.iter().zip(batch_padding).enumerate() {
             // Find the highest operation group index
             let highest_op_group = (1..=8).rev().find(|&i| indptr[i] > indptr[i - 1]).unwrap_or(1);
 
@@ -270,9 +270,14 @@ impl BasicBlockDataDecoder<'_> {
             // num_groups is the next available index after all groups and immediates
             let num_groups = next_group_idx;
 
-            op_batches.push(crate::mast::OpBatch::new_from_parts(
+            let op_batch = crate::mast::OpBatch::new_from_parts(
                 batch_ops, *indptr, padding, groups, num_groups,
-            ));
+            );
+            op_batch.validate_padding_semantics().map_err(|err| {
+                DeserializationError::InvalidValue(format!("batch {}: {}", batch_idx, err))
+            })?;
+
+            op_batches.push(op_batch);
 
             global_op_offset = batch_ops_end;
         }
@@ -392,5 +397,61 @@ mod tests {
             ),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn decode_operations_rejects_empty_padded_group() {
+        let mut bytes = Vec::new();
+
+        vec![Operation::Noop].write_into(&mut bytes);
+
+        bytes.write_u32(1);
+        bytes.write_bytes(&[0x10, 0x00, 0x00, 0x00]);
+        bytes.write_u8(0x01);
+
+        let decoder = BasicBlockDataDecoder::new(&bytes);
+        let err = decoder.decode_operations(0).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("empty group cannot be marked as padded"));
+    }
+
+    #[test]
+    fn decode_operations_rejects_padded_group_without_noop() {
+        let mut bytes = Vec::new();
+
+        vec![Operation::Add].write_into(&mut bytes);
+
+        bytes.write_u32(1);
+        bytes.write_bytes(&[0x01, 0x00, 0x00, 0x00]);
+        bytes.write_u8(0x01);
+
+        let decoder = BasicBlockDataDecoder::new(&bytes);
+        let err = decoder.decode_operations(0).unwrap_err();
+        let DeserializationError::InvalidValue(message) = err else {
+            panic!("expected InvalidValue error");
+        };
+        assert!(message.contains("padded group must end with NOOP"));
+    }
+
+    #[test]
+    fn decode_operations_accepts_padded_group_with_noop() {
+        let mut bytes = Vec::new();
+
+        vec![Operation::Add, Operation::Noop].write_into(&mut bytes);
+
+        bytes.write_u32(1);
+        bytes.write_bytes(&[0x02, 0x00, 0x00, 0x00]);
+        bytes.write_u8(0x01);
+
+        let decoder = BasicBlockDataDecoder::new(&bytes);
+        let batches = decoder.decode_operations(0).unwrap();
+
+        assert_eq!(batches.len(), 1);
+        let batch = &batches[0];
+        assert_eq!(batch.num_groups(), 1);
+        assert_eq!(batch.ops(), &[Operation::Add, Operation::Noop]);
+        assert!(batch.padding()[0]);
     }
 }

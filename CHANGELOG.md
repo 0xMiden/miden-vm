@@ -52,7 +52,15 @@
 - Validated push immediate group commitments and slot placement to reject invalid immediates ([#2779](https://github.com/0xMiden/miden-vm/pull/2779)).
 - Fixed undefined behavior in parallel trace generation by limiting H0 batch inversion to initialized rows ([#2842](https://github.com/0xMiden/miden-vm/pull/2842)).
 - Hardened boundary and overflow checks for `u64::shr`, `ilog2`, `u32clz`, and Falcon `mod_12289` ([#2808](https://github.com/0xMiden/miden-vm/pull/2808)).
-- `Visit` and `VisitMut` traits now properly visit enum type discriminant values, as well as the new payload `TypeExpr` when present ([#2848](https://github.com/0xMiden/miden-vm/pull/2848))
+- `Visit` and `VisitMut` traits now properly visit enum type discriminant values, as well as the new payload `TypeExpr` when present ([#2848](https://github.com/0xMiden/miden-vm/pull/2848)).
+- Set a bound on `ContinuationStack` size, checked during execution ([#2824](https://github.com/0xMiden/miden-vm/pull/2824)).
+- Prevented a trace-generation panic by validating op batch groups in basic blocks ([#2782](https://github.com/0xMiden/miden-vm/pull/2782)).
+- Validated push immediate group commitments and slot placement to reject invalid immediates ([#2779](https://github.com/0xMiden/miden-vm/pull/2779)).
+- Fixed undefined behavior in parallel trace generation by limiting H0 batch inversion to initialized rows ([#2842](https://github.com/0xMiden/miden-vm/pull/2842)).
+- Hardened boundary and overflow checks for `u64::shr`, `ilog2`, `u32clz`, and Falcon `mod_12289` ([#2808](https://github.com/0xMiden/miden-vm/pull/2808)).
+- Hardened basic-block batch validation and decode-time padding checks to reject inconsistent padded groups and prevent raw-helper underflow/panic paths on malformed forests ([#2839](https://github.com/0xMiden/miden-vm/pull/2839)).
+- Enforced canonical kernel procedure-hash validation on binary and serde deserialization paths, and expanded serde deserialization fuzz coverage for related artifact types ([#2849](https://github.com/0xMiden/miden-vm/pull/2849)).
+- Fixed constant evaluation across semantic analysis and linking so exported constants no longer retain private local dependencies and cross-module constant chains resolve in the defining module ([#2873](https://github.com/0xMiden/miden-vm/pull/2873)).
 
 ## 0.21.2 (2026-03-04)
 
@@ -87,6 +95,7 @@
 - Added `StackInterface::get_double_word()` method for reading 8 consecutive stack elements ([#2607](https://github.com/0xMiden/miden-vm/pull/2607)).
 - Added error messages to asserts in the standard library ([#2650](https://github.com/0xMiden/miden-vm/pull/2650))
 - Optimized `ExecutionTracer` to avoid cloning `Vec<OpBatch>` on every basic block entry. ([#2664](https://github.com/0xMiden/miden-vm/pull/2664))
+- Define and implement Miden project file format ([#2510](https://github.com/0xMiden/miden-vm/pull/2510)).
 
 #### Fixes
 

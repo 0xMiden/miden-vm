@@ -36,7 +36,7 @@ impl constants::ConstEnvironment for AnalysisContext {
         }
     }
     #[inline]
-    fn get(&self, name: &Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
+    fn get(&mut self, name: &Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
         if let Some(constant) = self.constants.get(name) {
             Ok(Some(CachedConstantValue::Miss(&constant.value)))
         } else if self.imported.contains(name) {
@@ -52,7 +52,7 @@ impl constants::ConstEnvironment for AnalysisContext {
     }
     #[inline(always)]
     fn get_by_path(
-        &self,
+        &mut self,
         path: Span<&Path>,
     ) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
         if let Some(name) = path.as_ident() {
