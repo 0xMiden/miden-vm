@@ -200,11 +200,6 @@ impl<'a> ResolvedSerializedForest<'a> {
     }
 
     #[cfg(test)]
-    pub(super) fn node_entry_size(&self) -> usize {
-        self.layout.node_entry_size
-    }
-
-    #[cfg(test)]
     pub(super) fn node_hash_offset(&self) -> Option<usize> {
         self.layout.node_hash_offset
     }

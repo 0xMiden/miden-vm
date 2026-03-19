@@ -441,11 +441,6 @@ impl<'a> SerializedMastForest<'a> {
     }
 
     #[cfg(test)]
-    fn node_entry_size(&self) -> usize {
-        self.forest.node_entry_size()
-    }
-
-    #[cfg(test)]
     fn node_hash_offset(&self) -> Option<usize> {
         self.forest.node_hash_offset()
     }
