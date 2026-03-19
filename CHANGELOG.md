@@ -17,7 +17,7 @@
 - [BREAKING] Migrated to lifted-STARK backend and `miden-crypto` to v0.23 ([#2783](https://github.com/0xMiden/miden-vm/pull/2783)).
 
 - [BREAKING] Migrate to lifted-STARK backend and `miden-crypto` to v0.23 ([#2783](https://github.com/0xMiden/miden-vm/pull/2783)).
-- [BREAKING] Made processor execution and proving sync-first; async usage now goes through compatibility wrappers (`execute_async`, `prove_async`) ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
+- [BREAKING] Sync execution and proving APIs now require `SyncHost`; async `Host`, `execute`, and `prove` remain available ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
 
 #### Changes
 
