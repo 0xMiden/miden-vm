@@ -6,7 +6,7 @@ use alloc::{
 use miden_core::{
     Felt, Word,
     advice::{AdviceInputs, AdviceMap},
-    crypto::merkle::{InnerNodeInfo, MerkleError, MerklePath, MerkleStore, NodeIndex},
+    crypto::merkle::{InnerNodeInfo, MerklePath, MerkleStore, NodeIndex},
     precompile::PrecompileRequest,
 };
 
@@ -333,13 +333,7 @@ impl AdviceProvider {
         let index = NodeIndex::from_elements(&depth, &index)
             .map_err(|_| AdviceError::InvalidMerkleTreeNodeIndex { depth, index })?;
 
-        // TODO: switch to `MerkleStore::has_path()` once this method is implemented (#2795)
-        match self.store.get_path(root, index) {
-            Ok(_) => Ok(true),
-            Err(MerkleError::RootNotInStore(..)) => Ok(false),
-            Err(MerkleError::NodeIndexNotFoundInStore(..)) => Ok(false),
-            Err(err) => Err(AdviceError::MerkleStoreLookupFailed(err)),
-        }
+        Ok(self.store.has_path(root, index))
     }
 
     /// Returns a path to a node at the specified depth and index in a Merkle tree with the
