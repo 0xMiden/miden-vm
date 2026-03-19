@@ -66,7 +66,7 @@ pub trait Tracer {
     /// the current clock cycle.
     ///
     /// `continuation` represents what is to be executed at the beginning of this clock cycle, while
-    /// `continuation_stack` represents whatever comes after execution `continuation`.
+    /// `continuation_stack` represents whatever comes after executing `continuation`.
     ///
     /// The following continuations do not occur at the start of a clock cycle, and hence will never
     /// be passed to this method:
