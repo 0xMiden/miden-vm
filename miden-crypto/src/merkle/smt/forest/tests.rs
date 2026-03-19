@@ -35,10 +35,10 @@ fn test_insert_root_empty() -> Result<(), MerkleError> {
     assert_eq!(
         forest.insert(empty_tree_root, key, value)?,
         Word::new([
-            Felt::new(10282719876465040359),
-            Felt::new(11409448441631035650),
-            Felt::new(5182120309170345651),
-            Felt::new(13734097025026540107),
+            Felt::new(14568730562832515847),
+            Felt::new(18252916646450022498),
+            Felt::new(41434158889285279),
+            Felt::new(9206344219167471937),
         ]),
     );
     Ok(())
@@ -55,10 +55,10 @@ fn test_insert_multiple_values() -> Result<(), MerkleError> {
     assert_eq!(
         new_root,
         Word::new([
-            Felt::new(10282719876465040359),
-            Felt::new(11409448441631035650),
-            Felt::new(5182120309170345651),
-            Felt::new(13734097025026540107),
+            Felt::new(14568730562832515847),
+            Felt::new(18252916646450022498),
+            Felt::new(41434158889285279),
+            Felt::new(9206344219167471937),
         ]),
     );
 
@@ -66,10 +66,10 @@ fn test_insert_multiple_values() -> Result<(), MerkleError> {
     assert_eq!(
         new_root,
         Word::new([
-            Felt::new(10282719876465040359),
-            Felt::new(11409448441631035650),
-            Felt::new(5182120309170345651),
-            Felt::new(13734097025026540107),
+            Felt::new(14568730562832515847),
+            Felt::new(18252916646450022498),
+            Felt::new(41434158889285279),
+            Felt::new(9206344219167471937),
         ]),
     );
 
@@ -82,10 +82,10 @@ fn test_insert_multiple_values() -> Result<(), MerkleError> {
     assert_eq!(
         new_root,
         Word::new([
-            Felt::new(13926725651708849655),
-            Felt::new(15133040102807981886),
-            Felt::new(13129040520743261049),
-            Felt::new(12502921173243968881),
+            Felt::new(8331046026464464586),
+            Felt::new(2235589849047307808),
+            Felt::new(16989070170732558432),
+            Felt::new(14827437307365892589),
         ])
     );
 
@@ -111,10 +111,10 @@ fn test_batch_insert() -> Result<(), MerkleError> {
         assert_eq!(
             new_root,
             Word::new([
-                Felt::new(14549016523344139792),
-                Felt::new(9300503680013959685),
-                Felt::new(16332664079126957671),
-                Felt::new(13970928800244566339),
+                Felt::new(10190519849202762248),
+                Felt::new(435931819697066051),
+                Felt::new(16151289788138594836),
+                Felt::new(9391498722098326251),
             ])
         );
 
