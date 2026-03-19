@@ -108,6 +108,7 @@ impl Version {
                 .digest
                 .as_ref()
                 .is_some_and(|digest| &LexicographicWord::new(req.into_inner()) == digest),
+            VersionRequirement::Exact(req) => self == req,
         }
     }
 }
@@ -115,7 +116,7 @@ impl Version {
 impl FromStr for Version {
     type Err = InvalidVersionError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.split_once('@') {
+        match s.split_once('#') {
             Some((v, digest)) => {
                 let v = v.parse::<SemVer>().map_err(InvalidVersionError::Version)?;
                 let digest = Word::parse(digest).map_err(InvalidVersionError::Digest)?;
@@ -152,7 +153,7 @@ impl Borrow<SemVer> for Version {
 impl fmt::Display for Version {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(digest) = self.digest.as_ref() {
-            write!(f, "{}@{}", &self.version, digest.inner())
+            write!(f, "{}#{}", &self.version, digest.inner())
         } else {
             fmt::Display::fmt(&self.version, f)
         }

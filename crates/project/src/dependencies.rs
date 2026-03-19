@@ -180,6 +180,9 @@ impl TryFrom<Span<&crate::ast::DependencySpec>> for DependencyVersionScheme {
                 Some(VersionRequirement::Digest(digest)) => {
                     return Err(InvalidDependencySpecError::GitWithDigest { span: digest.span() });
                 },
+                Some(VersionRequirement::Exact(_)) => {
+                    return Err(InvalidDependencySpecError::GitWithDigest { span: ast.span() });
+                },
                 Some(VersionRequirement::Semantic(v)) => Some(v.clone()),
                 None => None,
             };

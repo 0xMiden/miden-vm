@@ -2,11 +2,10 @@ use alloc::{
     boxed::Box,
     collections::{BTreeMap, BTreeSet},
     format,
-    string::ToString,
+    string::{String, ToString},
     sync::Arc,
     vec::Vec,
 };
-use core::str::FromStr;
 use std::{
     ffi::OsStr,
     fs,
@@ -19,14 +18,19 @@ use miden_assembly_syntax::{
     debuginfo::SourceManagerExt,
     diagnostics::Report,
 };
-use miden_core::serde::Deserializable;
-use miden_mast_package::{Dependency as PackageDependency, Package as MastPackage, TargetType};
-use miden_package_registry::{
-    PackageId, PackageProvider, PackageRegistry, VersionReq, VersionRequirement,
+use miden_core::{
+    Word,
+    serde::{Deserializable, Serializable, SliceReader},
+    utils::hash_string_to_word,
 };
+use miden_mast_package::{
+    Dependency as PackageDependency, Package as MastPackage, Section, SectionId, TargetType,
+};
+use miden_package_registry::{PackageId, PackageStore};
 use miden_project::{
     Linkage, Package as ProjectPackage, Profile, ProjectDependencyGraph,
-    ProjectDependencyGraphBuilder, ProjectDependencyNodeProvenance, Target,
+    ProjectDependencyGraphBuilder, ProjectDependencyNodeProvenance, ProjectSource,
+    ProjectSourceOrigin, Target,
 };
 
 use crate::{Assembler, SourceManager, ast::Module};
@@ -41,31 +45,28 @@ pub struct ProjectSourceInputs {
     pub support: Vec<Box<Module>>,
 }
 
-pub struct ProjectAssembler<'a, R: PackageRegistry + ?Sized, P: PackageProvider + ?Sized> {
+pub struct ProjectAssembler<'a, S: PackageStore + ?Sized> {
     assembler: Assembler,
     project: Arc<ProjectPackage>,
     dependency_graph: ProjectDependencyGraph,
-    registry: &'a R,
-    provider: &'a P,
+    store: &'a mut S,
 }
 
 impl Assembler {
     /// Get a [ProjectAssembler] configured for the project whose manifest is at `manifest_path`.
-    pub fn for_project_at_path<'a, R, P>(
+    pub fn for_project_at_path<'a, S>(
         self,
         manifest_path: impl AsRef<FsPath>,
-        registry: &'a R,
-        provider: &'a P,
-    ) -> Result<ProjectAssembler<'a, R, P>, Report>
+        store: &'a mut S,
+    ) -> Result<ProjectAssembler<'a, S>, Report>
     where
-        R: PackageRegistry + ?Sized,
-        P: PackageProvider + ?Sized,
+        S: PackageStore + ?Sized,
     {
         let manifest_path = manifest_path.as_ref();
         let source_manager = self.source_manager();
         let project = miden_project::Project::load(manifest_path, &source_manager)?;
         let package = project.package();
-        let dependency_graph = ProjectDependencyGraphBuilder::new(registry)
+        let dependency_graph = ProjectDependencyGraphBuilder::new(&*store)
             .with_source_manager(source_manager)
             .build_from_path(manifest_path)?;
 
@@ -73,25 +74,22 @@ impl Assembler {
             assembler: self,
             project: package,
             dependency_graph,
-            registry,
-            provider,
+            store,
         })
     }
 
     /// Get a [ProjectAssembler] configured for `project`
-    pub fn for_project<'a, R, P>(
+    pub fn for_project<'a, S>(
         self,
         project: Arc<ProjectPackage>,
-        registry: &'a R,
-        provider: &'a P,
-    ) -> Result<ProjectAssembler<'a, R, P>, Report>
+        store: &'a mut S,
+    ) -> Result<ProjectAssembler<'a, S>, Report>
     where
-        R: PackageRegistry + ?Sized,
-        P: PackageProvider + ?Sized,
+        S: PackageStore + ?Sized,
     {
         let source_manager = self.source_manager();
         let dependency_graph_builder =
-            ProjectDependencyGraphBuilder::new(registry).with_source_manager(source_manager);
+            ProjectDependencyGraphBuilder::new(&*store).with_source_manager(source_manager);
         let dependency_graph = if let Some(manifest_path) = project.manifest_path() {
             dependency_graph_builder.build_from_path(manifest_path)?
         } else {
@@ -101,16 +99,14 @@ impl Assembler {
             assembler: self,
             project,
             dependency_graph,
-            registry,
-            provider,
+            store,
         })
     }
 }
 
-impl<'a, R, P> ProjectAssembler<'a, R, P>
+impl<'a, S> ProjectAssembler<'a, S>
 where
-    R: PackageRegistry + ?Sized,
-    P: PackageProvider + ?Sized,
+    S: PackageStore + ?Sized,
 {
     pub fn project(&self) -> &ProjectPackage {
         self.project.as_ref()
@@ -121,7 +117,7 @@ where
     }
 
     pub fn assemble(
-        &self,
+        &mut self,
         target: ProjectTargetSelector<'_>,
         profile: &str,
     ) -> Result<Arc<MastPackage>, Report> {
@@ -129,7 +125,7 @@ where
     }
 
     pub fn assemble_with_sources(
-        &self,
+        &mut self,
         target: ProjectTargetSelector<'_>,
         profile: &str,
         sources: ProjectSourceInputs,
@@ -138,12 +134,12 @@ where
     }
 
     fn assemble_impl(
-        &self,
+        &mut self,
         target_selector: ProjectTargetSelector<'_>,
         profile_name: &str,
         sources: Option<ProjectSourceInputs>,
     ) -> Result<Arc<MastPackage>, Report> {
-        let target = self.select_target(target_selector)?;
+        let target = self.select_target(target_selector)?.clone();
 
         // When building an executable target from a project with a library target, we require
         // that the executable target be linked statically against the library target
@@ -160,7 +156,7 @@ where
         self.assemble_source_package(
             root_id,
             Arc::clone(&self.project),
-            target,
+            &target,
             profile_name,
             lib,
             sources,
@@ -169,7 +165,7 @@ where
     }
 
     fn assemble_source_package(
-        &self,
+        &mut self,
         package_id: PackageId,
         project: Arc<ProjectPackage>,
         target: &Target,
@@ -201,7 +197,8 @@ where
         let node = self.dependency_graph.get(&package_id).ok_or_else(|| {
             Report::msg(format!("missing dependency graph node for '{package_id}'"))
         })?;
-        for edge in node.dependencies.iter() {
+        let dependencies = node.dependencies.clone();
+        for edge in dependencies.iter() {
             let dependency_package =
                 self.resolve_dependency_package(&edge.dependency, profile_name, cache)?;
             if !dependency_package.is_library() {
@@ -236,6 +233,7 @@ where
                     &mut runtime_dependencies,
                     PackageDependency {
                         name: dependency_package.name.clone(),
+                        version: dependency_package.version.clone(),
                         kind: dependency_package.kind,
                         digest: dependency_package.digest(),
                     },
@@ -246,7 +244,8 @@ where
                     &mut runtime_dependencies,
                     PackageDependency {
                         name: dependency.name.clone(),
-                        kind: dependency_package.kind,
+                        version: dependency.version.clone(),
+                        kind: dependency.kind,
                         digest: dependency.digest,
                     },
                 )?;
@@ -278,6 +277,16 @@ where
 
         let manifest =
             product.manifest().clone().with_dependencies(runtime_dependencies.into_values());
+        let mut sections = Vec::new();
+        if let Some(provenance) = self.build_source_provenance(
+            &package_id,
+            project.as_ref(),
+            target,
+            has_provided_sources,
+        )? {
+            sections.push(provenance.to_section());
+        }
+
         let package = Arc::new(MastPackage {
             name: target_package_name(project.as_ref(), target),
             version: project.version().into_inner().clone(),
@@ -285,7 +294,7 @@ where
             kind: product.kind(),
             mast: product.into_artifact(),
             manifest,
-            sections: Vec::new(),
+            sections,
         });
 
         if !has_provided_sources {
@@ -296,7 +305,7 @@ where
     }
 
     fn resolve_dependency_package(
-        &self,
+        &mut self,
         package_id: &PackageId,
         profile_name: &str,
         cache: &mut BTreeMap<PackageId, Arc<MastPackage>>,
@@ -317,9 +326,11 @@ where
                     "package '{package_id}' is missing a manifest path",
                 )));
             },
-            ProjectDependencyNodeProvenance::Source(miden_project::ProjectSource::Real {
+            ProjectDependencyNodeProvenance::Source(ProjectSource::Real {
                 manifest_path,
+                origin,
                 library_path: Some(_),
+                workspace_root,
                 ..
             }) => {
                 let project = load_project_package(self.assembler.source_manager(), manifest_path)?;
@@ -332,29 +343,40 @@ where
                             package_id
                         ))
                     })?;
-                self.assemble_source_package(
-                    package_id.clone(),
-                    project,
+                if let Some(package) = self.try_reuse_registered_source_package(
+                    package_id,
+                    &node.version,
+                    &project,
                     &target,
-                    profile_name,
-                    None,
-                    None,
-                    cache,
-                )?
+                    origin,
+                    manifest_path,
+                    workspace_root.as_deref(),
+                )? {
+                    package
+                } else {
+                    let package = self.assemble_source_package(
+                        package_id.clone(),
+                        project,
+                        &target,
+                        profile_name,
+                        None,
+                        None,
+                        cache,
+                    )?;
+                    self.publish_source_dependency(package.clone())?;
+                    package
+                }
             },
             ProjectDependencyNodeProvenance::Source(_) => {
-                let requirement = exact_version_requirement(&node.version)?;
-                let record =
-                    self.registry.find_latest(package_id, &requirement).ok_or_else(|| {
-                        Report::msg(format!(
-                            "dependency '{}' version '{}' was not found in the package registry",
-                            package_id, node.version
-                        ))
-                    })?;
-                self.provider.load_package(package_id, record.version())?
+                self.load_canonical_package(package_id, &node.version)?.ok_or_else(|| {
+                    Report::msg(format!(
+                        "dependency '{}' version '{}' was not found in the package registry",
+                        package_id, node.version
+                    ))
+                })?
             },
             ProjectDependencyNodeProvenance::Registry { selected, .. } => {
-                self.provider.load_package(package_id, selected)?
+                self.store.load_package(package_id, selected)?
             },
             ProjectDependencyNodeProvenance::Preassembled { path, .. } => {
                 load_package_from_path(path)?
@@ -363,6 +385,188 @@ where
 
         cache.insert(package_id.clone(), Arc::clone(&package));
         Ok(package)
+    }
+
+    fn load_canonical_package(
+        &self,
+        package_id: &PackageId,
+        version: &miden_project::SemVer,
+    ) -> Result<Option<Arc<MastPackage>>, Report> {
+        let Some(record) = self.store.get_by_semver(package_id, version) else {
+            return Ok(None);
+        };
+        self.store.load_package(package_id, record.version()).map(Some)
+    }
+
+    fn try_reuse_registered_source_package(
+        &self,
+        package_id: &PackageId,
+        version: &miden_project::SemVer,
+        project: &ProjectPackage,
+        target: &Target,
+        origin: &ProjectSourceOrigin,
+        manifest_path: &FsPath,
+        workspace_root: Option<&FsPath>,
+    ) -> Result<Option<Arc<MastPackage>>, Report> {
+        let Some(package) = self.load_canonical_package(package_id, version)? else {
+            return Ok(None);
+        };
+
+        let actual = PackageBuildProvenance::from_package(&package)?.ok_or_else(|| {
+            Report::msg(format!(
+                "package '{}' version '{}' is already registered, but is missing source provenance; bump the semantic version",
+                package_id, version
+            ))
+        })?;
+        let expected = match origin {
+            ProjectSourceOrigin::Git { repo, resolved_revision, .. } => {
+                PackageBuildProvenance::Git {
+                    repo: repo.to_string(),
+                    resolved_revision: resolved_revision.to_string(),
+                }
+            },
+            ProjectSourceOrigin::Path | ProjectSourceOrigin::Root => PackageBuildProvenance::Path {
+                source_hash: self.compute_path_source_hash(
+                    project,
+                    target,
+                    manifest_path,
+                    workspace_root,
+                )?,
+            },
+        };
+
+        if actual == expected {
+            Ok(Some(package))
+        } else {
+            Err(Report::msg(format!(
+                "package '{}' version '{}' is already registered with different source provenance (expected {}, found {}); bump the semantic version",
+                package_id,
+                version,
+                expected.describe(),
+                actual.describe()
+            )))
+        }
+    }
+
+    fn publish_source_dependency(&mut self, package: Arc<MastPackage>) -> Result<(), Report> {
+        self.store
+            .publish_package(package)
+            .map(|_| ())
+            .map_err(|error| Report::msg(error.to_string()))
+    }
+
+    fn build_source_provenance(
+        &self,
+        package_id: &PackageId,
+        project: &ProjectPackage,
+        target: &Target,
+        has_provided_sources: bool,
+    ) -> Result<Option<PackageBuildProvenance>, Report> {
+        if has_provided_sources {
+            return Ok(None);
+        }
+
+        let Some(node) = self.dependency_graph.get(package_id) else {
+            return Ok(None);
+        };
+        let ProjectDependencyNodeProvenance::Source(source) = &node.provenance else {
+            return Ok(None);
+        };
+
+        match source {
+            ProjectSource::Virtual { .. } => Ok(None),
+            ProjectSource::Real {
+                origin, manifest_path, workspace_root, ..
+            } => match origin {
+                ProjectSourceOrigin::Git { repo, resolved_revision, .. } => {
+                    Ok(Some(PackageBuildProvenance::Git {
+                        repo: repo.to_string(),
+                        resolved_revision: resolved_revision.to_string(),
+                    }))
+                },
+                ProjectSourceOrigin::Path | ProjectSourceOrigin::Root => {
+                    if target.path.is_none() {
+                        return Ok(None);
+                    }
+                    Ok(Some(PackageBuildProvenance::Path {
+                        source_hash: self.compute_path_source_hash(
+                            project,
+                            target,
+                            manifest_path,
+                            workspace_root.as_deref(),
+                        )?,
+                    }))
+                },
+            },
+        }
+    }
+
+    fn compute_path_source_hash(
+        &self,
+        project: &ProjectPackage,
+        target: &Target,
+        manifest_path: &FsPath,
+        workspace_root: Option<&FsPath>,
+    ) -> Result<Word, Report> {
+        let source_paths = self.resolve_target_source_paths(project, target)?;
+        let project_root = manifest_path.parent().ok_or_else(|| {
+            Report::msg(format!("manifest '{}' has no parent directory", manifest_path.display()))
+        })?;
+
+        let mut inputs = Vec::<(String, PathBuf)>::new();
+        let manifest_label = manifest_path
+            .strip_prefix(project_root)
+            .unwrap_or(manifest_path)
+            .display()
+            .to_string();
+        inputs.push((format!("manifest:{manifest_label}"), manifest_path.to_path_buf()));
+
+        if let Some(workspace_root) = workspace_root {
+            let workspace_manifest = workspace_root.join("miden-project.toml");
+            if workspace_manifest.exists() {
+                let label = workspace_manifest
+                    .strip_prefix(workspace_root)
+                    .unwrap_or(workspace_manifest.as_path())
+                    .display()
+                    .to_string();
+                inputs.push((format!("workspace:{label}"), workspace_manifest));
+            }
+        }
+
+        let root_label = source_paths
+            .root
+            .strip_prefix(project_root)
+            .unwrap_or(source_paths.root.as_path())
+            .display()
+            .to_string();
+        inputs.push((format!("root:{root_label}"), source_paths.root));
+        for support in source_paths.support {
+            let label = support
+                .strip_prefix(project_root)
+                .unwrap_or(support.as_path())
+                .display()
+                .to_string();
+            inputs.push((format!("support:{label}"), support));
+        }
+        inputs.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let mut material = format!(
+            "target:{}\nkind:{}\nnamespace:{}\n",
+            target.name.inner(),
+            target.ty,
+            target.namespace.inner()
+        );
+        for (label, path) in inputs {
+            let bytes = fs::read(&path).map_err(|error| {
+                Report::msg(format!("failed to read source input '{}': {error}", path.display()))
+            })?;
+            material.push_str(&label);
+            material.push('\n');
+            material.push_str(&String::from_utf8_lossy(&bytes));
+            material.push('\n');
+        }
+
+        Ok(hash_string_to_word(material.as_str()))
     }
 
     fn select_target(&self, selector: ProjectTargetSelector<'_>) -> Result<&Target, Report> {
@@ -412,6 +616,35 @@ where
         project: &ProjectPackage,
         target: &Target,
     ) -> Result<LoadedTargetSources, Report> {
+        let source_paths = self.resolve_target_source_paths(project, target)?;
+        let root = self.parse_module_file(
+            &source_paths.root,
+            target_root_module_kind(target.ty),
+            target.namespace.inner().as_ref(),
+        )?;
+        let support = source_paths
+            .support
+            .iter()
+            .map(|path| {
+                let relative = path.strip_prefix(&source_paths.root_dir).map_err(|error| {
+                    Report::msg(format!(
+                        "failed to derive module path for '{}': {error}",
+                        path.display()
+                    ))
+                })?;
+                let module_path = module_path_from_relative(target.namespace.inner(), relative)?;
+                self.parse_module_file(path, ModuleKind::Library, module_path.as_ref())
+            })
+            .collect::<Result<Vec<_>, Report>>()?;
+
+        Ok(LoadedTargetSources { root, support })
+    }
+
+    fn resolve_target_source_paths(
+        &self,
+        project: &ProjectPackage,
+        target: &Target,
+    ) -> Result<TargetSourcePaths, Report> {
         let manifest_path = project_manifest_path(project)?;
         let project_root = manifest_path.parent().ok_or_else(|| {
             Report::msg(format!("manifest '{}' has no parent directory", manifest_path.display()))
@@ -429,20 +662,18 @@ where
                 root_path.display()
             ))
         })?;
-        let root_dir = root_path.parent().ok_or_else(|| {
+        let root_dir = root_path.parent().map(FsPath::to_path_buf).ok_or_else(|| {
             Report::msg(format!("target source '{}' has no parent directory", root_path.display()))
         })?;
         let mut excluded = self.excluded_target_roots(project, target, &root_path)?;
         excluded.insert(root_path.clone());
-        let root = self.parse_module_file(
-            &root_path,
-            target_root_module_kind(target.ty),
+        let support = self.read_support_module_paths(
+            &root_dir,
             target.namespace.inner().as_ref(),
+            &excluded,
         )?;
-        let support =
-            self.read_support_modules(root_dir, target.namespace.inner().as_ref(), &excluded)?;
 
-        Ok(LoadedTargetSources { root, support })
+        Ok(TargetSourcePaths { root: root_path, root_dir, support })
     }
 
     fn excluded_target_roots(
@@ -485,12 +716,12 @@ where
     }
 
     #[allow(clippy::vec_box)]
-    fn read_support_modules(
+    fn read_support_module_paths(
         &self,
         root_dir: &FsPath,
         namespace: &MasmPath,
         excluded: &BTreeSet<PathBuf>,
-    ) -> Result<Vec<Box<Module>>, Report> {
+    ) -> Result<Vec<PathBuf>, Report> {
         let mut paths = Vec::new();
         collect_module_files(root_dir, &mut paths)?;
         paths.sort();
@@ -510,12 +741,8 @@ where
                     canonical.display()
                 ))
             })?;
-            let module_path = module_path_from_relative(namespace, relative)?;
-            modules.push(self.parse_module_file(
-                &canonical,
-                ModuleKind::Library,
-                module_path.as_ref(),
-            )?);
+            module_path_from_relative(namespace, relative)?;
+            modules.push(canonical);
         }
 
         Ok(modules)
@@ -537,6 +764,84 @@ struct LoadedTargetSources {
     root: Box<Module>,
     #[allow(clippy::vec_box)]
     support: Vec<Box<Module>>,
+}
+
+struct TargetSourcePaths {
+    root: PathBuf,
+    root_dir: PathBuf,
+    support: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PackageBuildProvenance {
+    Path { source_hash: Word },
+    Git { repo: String, resolved_revision: String },
+}
+
+impl PackageBuildProvenance {
+    fn to_section(&self) -> Section {
+        let mut data = Vec::new();
+        self.write_into(&mut data);
+        Section::new(SectionId::PROJECT_SOURCE_PROVENANCE, data)
+    }
+
+    fn from_package(package: &MastPackage) -> Result<Option<Self>, Report> {
+        let Some(section) = package
+            .sections
+            .iter()
+            .find(|section| section.id == SectionId::PROJECT_SOURCE_PROVENANCE)
+        else {
+            return Ok(None);
+        };
+
+        let mut reader = SliceReader::new(section.data.as_ref());
+        Self::read_from(&mut reader).map(Some).map_err(|error| {
+            Report::msg(format!(
+                "failed to decode source provenance for package '{}': {error}",
+                package.name
+            ))
+        })
+    }
+
+    fn describe(&self) -> String {
+        match self {
+            Self::Path { source_hash } => format!("path({source_hash})"),
+            Self::Git { repo, resolved_revision } => format!("git({repo}@{resolved_revision})"),
+        }
+    }
+}
+
+impl Serializable for PackageBuildProvenance {
+    fn write_into<W: miden_core::serde::ByteWriter>(&self, target: &mut W) {
+        match self {
+            Self::Path { source_hash } => {
+                target.write_u8(0);
+                source_hash.write_into(target);
+            },
+            Self::Git { repo, resolved_revision } => {
+                target.write_u8(1);
+                repo.write_into(target);
+                resolved_revision.write_into(target);
+            },
+        }
+    }
+}
+
+impl Deserializable for PackageBuildProvenance {
+    fn read_from<R: miden_core::serde::ByteReader>(
+        source: &mut R,
+    ) -> Result<Self, miden_core::serde::DeserializationError> {
+        match source.read_u8()? {
+            0 => Ok(Self::Path { source_hash: Word::read_from(source)? }),
+            1 => Ok(Self::Git {
+                repo: String::read_from(source)?,
+                resolved_revision: String::read_from(source)?,
+            }),
+            invalid => Err(miden_core::serde::DeserializationError::InvalidValue(format!(
+                "invalid project source provenance tag '{invalid}'"
+            ))),
+        }
+    }
 }
 
 fn load_project_package(
@@ -583,23 +888,25 @@ fn target_root_module_kind(ty: TargetType) -> ModuleKind {
     }
 }
 
-fn exact_version_requirement(
-    version: &miden_project::SemVer,
-) -> Result<VersionRequirement, Report> {
-    let requirement = VersionReq::from_str(&format!("={version}"))
-        .map_err(|error| Report::msg(error.to_string()))?;
-    Ok(VersionRequirement::from(requirement))
-}
-
 fn merge_runtime_dependency(
     dependencies: &mut BTreeMap<PackageId, PackageDependency>,
     dependency: PackageDependency,
 ) -> Result<(), Report> {
     match dependencies.get(&dependency.name) {
-        Some(existing) if existing.digest == dependency.digest => Ok(()),
+        Some(existing)
+            if existing.version == dependency.version
+                && existing.kind == dependency.kind
+                && existing.digest == dependency.digest =>
+        {
+            Ok(())
+        },
         Some(existing) => Err(Report::msg(format!(
-            "conflicting runtime dependency '{}' resolved to digests '{}' and '{}'",
-            dependency.name, existing.digest, dependency.digest
+            "conflicting runtime dependency '{}' resolved to versions '{}#{}' and '{}#{}'",
+            dependency.name,
+            existing.version,
+            existing.digest,
+            dependency.version,
+            dependency.digest
         ))),
         None => {
             dependencies.insert(dependency.name.clone(), dependency);
@@ -674,6 +981,7 @@ mod tests {
     use std::{process::Command, string::String};
 
     use miden_assembly_syntax::source_file;
+    use miden_package_registry::PackageRegistry;
     use tempfile::TempDir;
 
     use super::*;
@@ -704,7 +1012,7 @@ end
 "#,
         );
 
-        let context = TestContext::new();
+        let mut context = TestContext::new();
 
         let dev = context
             .assemble_library_package(&manifest_path, None)
@@ -776,7 +1084,7 @@ end
 "#,
         );
 
-        let context = TestContext::new();
+        let mut context = TestContext::new();
         let package = context
             .assemble_executable_package(&manifest_path, Some("primary"), None)
             .expect("executable build should succeed");
@@ -800,7 +1108,7 @@ version = "1.0.0"
 "#,
         );
 
-        let context = TestContext::new();
+        let mut context = TestContext::new();
         let error = context
             .assemble_library_package(&manifest_path, None)
             .expect_err("assembly without sources should fail");
@@ -820,7 +1128,7 @@ end
         )
         .unwrap();
 
-        let project_assembler = context.project_assembler_for_path(&manifest_path).unwrap();
+        let mut project_assembler = context.project_assembler_for_path(&manifest_path).unwrap();
         let package = project_assembler
             .assemble_with_sources(
                 ProjectTargetSelector::Library,
@@ -855,9 +1163,9 @@ end
 "#,
         );
 
-        let registry = TestRegistry::default();
+        let mut registry = TestRegistry::default();
         let package = Assembler::default()
-            .for_project_at_path(&manifest_path, &registry, &registry)
+            .for_project_at_path(&manifest_path, &mut registry)
             .unwrap()
             .assemble(ProjectTargetSelector::Library, "dev")
             .expect("kernel build should succeed");
@@ -886,6 +1194,7 @@ end
             "deps::regdep::leaf",
             [],
         );
+        let regdep_digest = regdep.digest();
         context.registry_mut().add_package(regdep.into());
 
         let predep = context.assemble_library_package_with_export(
@@ -990,12 +1299,38 @@ end
             .map(|dependency| dependency.name.to_string())
             .collect::<Vec<_>>();
         assert_eq!(dependency_names, vec!["gitdep", "predep", "regdep", "runtime"]);
-        assert_eq!(context.registry().loaded_packages(), vec!["runtime", "regdep"]);
+        assert_eq!(
+            context.registry().loaded_packages(),
+            vec![
+                format!("runtime@1.0.0#{runtime_digest}"),
+                format!("regdep@1.0.0#{regdep_digest}")
+            ]
+        );
         assert!(!dependency_names.iter().any(|name| name == "pathdep"));
         assert_eq!(package.kind, TargetType::Library);
         assert_eq!(
             runtime_digest,
             package.manifest.dependencies().find(|d| &d.name == "runtime").unwrap().digest
+        );
+        assert_eq!(
+            package
+                .manifest
+                .dependencies()
+                .find(|d| &d.name == "runtime")
+                .unwrap()
+                .version
+                .to_string(),
+            "1.0.0"
+        );
+        assert!(
+            context
+                .registry()
+                .is_semver_available(&PackageId::from("pathdep"), &"1.0.0".parse().unwrap())
+        );
+        assert!(
+            context
+                .registry()
+                .is_semver_available(&PackageId::from("gitdep"), &"1.0.0".parse().unwrap())
         );
     }
 
@@ -1080,22 +1415,318 @@ dep.workspace = true
             .assemble_library_package(&app_manifest, None)
             .expect("failed to assemble 'app'");
 
-        assert_ne!(dep010.digest(), package.digest());
-        assert_ne!(
-            package
-                .manifest
-                .dependencies()
-                .map(|dep| format!("{}@{}", &dep.name, &dep.digest))
-                .collect::<Vec<_>>(),
-            vec![format!("dep@{}", dep010.digest())]
-        );
         assert_eq!(
             package
                 .manifest
                 .dependencies()
-                .map(|dep| format!("{}@{}", &dep.name, &dep.digest))
+                .map(|dep| format!("{}@{}#{}", &dep.name, dep.version, dep.digest))
                 .collect::<Vec<_>>(),
-            vec![format!("dep@{}", package.digest())]
+            vec![format!("dep@0.2.0#{}", dep010.digest())]
+        );
+    }
+
+    #[test]
+    fn path_dependency_is_published_and_reused_when_sources_match() {
+        let tempdir = TempDir::new().unwrap();
+        let dep_dir = tempdir.path().join("dep");
+        write_file(
+            &dep_dir.join("miden-project.toml"),
+            r#"[package]
+name = "dep"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+"#,
+        );
+        write_file(
+            &dep_dir.join("lib.masm"),
+            r#"pub proc foo
+    push.1
+end
+"#,
+        );
+
+        let root_dir = tempdir.path().join("root");
+        let root_manifest = root_dir.join("miden-project.toml");
+        write_file(
+            &root_manifest,
+            r#"[package]
+name = "root"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+
+[dependencies]
+dep = { path = "../dep" }
+"#,
+        );
+        write_file(
+            &root_dir.join("lib.masm"),
+            r#"pub proc entry
+    exec.::dep::foo
+end
+"#,
+        );
+
+        let mut context = TestContext::new();
+        let first = context
+            .assemble_library_package(&root_manifest, None)
+            .expect("first build should succeed");
+        assert!(
+            context
+                .registry()
+                .is_semver_available(&PackageId::from("dep"), &"1.0.0".parse().unwrap())
+        );
+        assert!(context.registry().loaded_packages().is_empty());
+
+        let expected_dependency = first
+            .manifest
+            .dependencies()
+            .map(|dep| format!("{}@{}#{}", &dep.name, dep.version, dep.digest))
+            .collect::<Vec<_>>();
+        context.registry().clear_loaded_packages();
+
+        let second = context
+            .assemble_library_package(&root_manifest, None)
+            .expect("second build should reuse canonical dependency");
+
+        let dep_record = context
+            .registry()
+            .get_by_semver(&PackageId::from("dep"), &"1.0.0".parse().unwrap())
+            .expect("dependency should be registered");
+        assert_eq!(
+            context.registry().loaded_packages(),
+            vec![format!("dep@{}", dep_record.version())]
+        );
+        assert_eq!(
+            second
+                .manifest
+                .dependencies()
+                .map(|dep| format!("{}@{}#{}", &dep.name, dep.version, dep.digest))
+                .collect::<Vec<_>>(),
+            expected_dependency
+        );
+    }
+
+    #[test]
+    fn path_dependency_source_changes_require_semver_bump() {
+        let tempdir = TempDir::new().unwrap();
+        let dep_dir = tempdir.path().join("dep");
+        write_file(
+            &dep_dir.join("miden-project.toml"),
+            r#"[package]
+name = "dep"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+"#,
+        );
+        let dep_source = dep_dir.join("lib.masm");
+        write_file(
+            &dep_source,
+            r#"pub proc foo
+    push.1
+end
+"#,
+        );
+
+        let root_dir = tempdir.path().join("root");
+        let root_manifest = root_dir.join("miden-project.toml");
+        write_file(
+            &root_manifest,
+            r#"[package]
+name = "root"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+
+[dependencies]
+dep = { path = "../dep" }
+"#,
+        );
+        write_file(
+            &root_dir.join("lib.masm"),
+            r#"pub proc entry
+    exec.::dep::foo
+end
+"#,
+        );
+
+        let mut context = TestContext::new();
+        context
+            .assemble_library_package(&root_manifest, None)
+            .expect("initial build should succeed");
+
+        write_file(
+            &dep_source,
+            r#"pub proc foo
+    push.2
+end
+"#,
+        );
+
+        let error = context
+            .assemble_library_package(&root_manifest, None)
+            .expect_err("changed dependency sources should require a semver bump");
+        assert!(error.to_string().contains("bump the semantic version"));
+    }
+
+    #[test]
+    fn git_dependency_reuses_canonical_revision_and_rejects_new_commit_without_semver_bump() {
+        let tempdir = TempDir::new().unwrap();
+        let gitdep_repo = tempdir.path().join("gitdep");
+        write_file(
+            &gitdep_repo.join("miden-project.toml"),
+            r#"[package]
+name = "gitdep"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+"#,
+        );
+        let git_source = gitdep_repo.join("lib.masm");
+        write_file(
+            &git_source,
+            r#"pub proc leaf
+    push.7
+end
+"#,
+        );
+        run_git(&gitdep_repo, &["init", "-b", "main"]);
+        run_git(&gitdep_repo, &["config", "user.email", "test@example.com"]);
+        run_git(&gitdep_repo, &["config", "user.name", "Test"]);
+        run_git(&gitdep_repo, &["config", "commit.gpgsign", "false"]);
+        run_git(&gitdep_repo, &["add", "."]);
+        run_git(&gitdep_repo, &["commit", "-m", "init"]);
+
+        let root_dir = tempdir.path().join("root");
+        let root_manifest = root_dir.join("miden-project.toml");
+        write_file(
+            &root_manifest,
+            &format!(
+                r#"[package]
+name = "root"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+
+[dependencies]
+gitdep = {{ git = "{}", branch = "main" }}
+"#,
+                gitdep_repo.display()
+            ),
+        );
+        write_file(
+            &root_dir.join("lib.masm"),
+            r#"pub proc entry
+    exec.::gitdep::leaf
+end
+"#,
+        );
+
+        let mut context = TestContext::new();
+        context
+            .assemble_library_package(&root_manifest, None)
+            .expect("initial build should succeed");
+        context.registry().clear_loaded_packages();
+
+        context
+            .assemble_library_package(&root_manifest, None)
+            .expect("matching revision should reuse canonical dependency");
+        let dep_record = context
+            .registry()
+            .get_by_semver(&PackageId::from("gitdep"), &"1.0.0".parse().unwrap())
+            .expect("git dependency should be registered");
+        assert_eq!(
+            context.registry().loaded_packages(),
+            vec![format!("gitdep@{}", dep_record.version())]
+        );
+
+        write_file(
+            &git_source,
+            r#"pub proc leaf
+    push.8
+end
+"#,
+        );
+        run_git(&gitdep_repo, &["add", "."]);
+        run_git(&gitdep_repo, &["commit", "-m", "change"]);
+
+        let error = context
+            .assemble_library_package(&root_manifest, None)
+            .expect_err("new git revision should require a semver bump");
+        assert!(error.to_string().contains("bump the semantic version"));
+    }
+
+    #[test]
+    fn omitted_path_dependency_requires_canonical_registry_entry() {
+        let tempdir = TempDir::new().unwrap();
+        let dep_dir = tempdir.path().join("dep");
+        write_file(
+            &dep_dir.join("miden-project.toml"),
+            r#"[package]
+name = "dep"
+version = "1.0.0"
+
+[lib]
+"#,
+        );
+
+        let root_dir = tempdir.path().join("root");
+        let root_manifest = root_dir.join("miden-project.toml");
+        write_file(
+            &root_manifest,
+            r#"[package]
+name = "root"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+
+[dependencies]
+dep = { path = "../dep" }
+"#,
+        );
+        write_file(
+            &root_dir.join("lib.masm"),
+            r#"pub proc entry
+    exec.::dep::foo
+end
+"#,
+        );
+
+        let mut context = TestContext::new();
+        let missing = context
+            .assemble_library_package(&root_manifest, None)
+            .expect_err("omitted-path dependency should require a canonical registry entry");
+        assert!(missing.to_string().contains("was not found in the package registry"));
+
+        let dep = Arc::<MastPackage>::from(context.assemble_library_package_with_export(
+            "dep",
+            "1.0.0",
+            "dep::foo",
+            [],
+        ));
+        let dep_digest = dep.digest();
+        context.registry_mut().add_package(dep);
+        context.registry().clear_loaded_packages();
+
+        let package = context
+            .assemble_library_package(&root_manifest, None)
+            .expect("canonical registry entry should satisfy omitted-path dependency");
+        assert_eq!(
+            package
+                .manifest
+                .dependencies()
+                .map(|dep| format!("{}@{}#{}", &dep.name, dep.version, dep.digest))
+                .collect::<Vec<_>>(),
+            vec![format!("dep@1.0.0#{dep_digest}")]
         );
     }
 }

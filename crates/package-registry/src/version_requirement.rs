@@ -27,6 +27,8 @@ pub enum VersionRequirement {
     /// when the dependency is resolved, we must be able to find a `.masp` file with the expected
     /// digest.
     Digest(Span<Word>),
+    /// Requires an exact assembled package version, including both semantic version and digest.
+    Exact(Version),
 }
 
 impl VersionRequirement {
@@ -39,6 +41,11 @@ impl VersionRequirement {
     pub fn is_digest(&self) -> bool {
         matches!(self, Self::Digest(_))
     }
+
+    /// Returns true if this version requirement requires an exact assembled version match.
+    pub fn is_exact(&self) -> bool {
+        matches!(self, Self::Exact(_))
+    }
 }
 
 impl Eq for VersionRequirement {}
@@ -46,11 +53,15 @@ impl Eq for VersionRequirement {}
 impl PartialEq for VersionRequirement {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Semantic(l), Self::Semantic(r)) => l == r,
-            (Self::Semantic(_), Self::Digest(_)) | (Self::Digest(_), Self::Semantic(_)) => false,
+            (Self::Exact(l), Self::Exact(r)) => l == r,
             (Self::Digest(l), Self::Digest(r)) => {
                 LexicographicWord::new(l.into_inner()) == LexicographicWord::new(r.into_inner())
             },
+            (Self::Semantic(l), Self::Semantic(r)) => l == r,
+            (Self::Semantic(_) | Self::Exact(_), Self::Digest(_))
+            | (Self::Semantic(_), Self::Exact(_))
+            | (Self::Digest(_), Self::Semantic(_) | Self::Exact(_))
+            | (Self::Exact(_), Self::Semantic(_)) => false,
         }
     }
 }
@@ -60,6 +71,13 @@ impl fmt::Display for VersionRequirement {
         match self {
             Self::Semantic(v) => fmt::Display::fmt(v, f),
             Self::Digest(word) => fmt::Display::fmt(word, f),
+            Self::Exact(version) => {
+                assert!(
+                    version.digest.is_some(),
+                    "exact requirements must include an artifact digest"
+                );
+                write!(f, "{version}")
+            },
         }
     }
 }
@@ -73,6 +91,16 @@ impl From<VersionReq> for VersionRequirement {
 impl From<Word> for VersionRequirement {
     fn from(digest: Word) -> Self {
         Self::Digest(Span::unknown(digest))
+    }
+}
+
+impl From<Version> for VersionRequirement {
+    fn from(value: Version) -> Self {
+        if value.digest.is_none() {
+            Self::Semantic(Span::unknown(format!("={}", &value.version).parse().unwrap()))
+        } else {
+            Self::Exact(value)
+        }
     }
 }
 
@@ -99,6 +127,12 @@ impl<'de> Deserialize<'de> for VersionRequirement {
 
         if value == "*" {
             return Ok(Self::from(VersionReq::STAR.clone()));
+        }
+
+        if let Some((version, digest)) = value.split_once('#') {
+            let version = version.parse::<SemVer>().map_err(serde::de::Error::custom)?;
+            let digest = Word::parse(digest).map_err(serde::de::Error::custom)?;
+            return Ok(Self::Exact(Version::new(version, digest)));
         }
 
         if let Ok(digest) = Word::parse(&value) {

@@ -775,7 +775,7 @@ mod tests {
     };
     use miden_core::{assert_matches, serde::Serializable, utils::hash_string_to_word};
     use miden_mast_package::{Package as MastPackage, TargetType};
-    use miden_package_registry::{PackageRecord, PackageRegistry, PackageVersions};
+    use miden_package_registry::{PackageIndex, PackageRecord, PackageRegistry, PackageVersions};
     use tempfile::TempDir;
 
     use super::*;
@@ -806,7 +806,9 @@ mod tests {
         fn available_versions(&self, package: &PackageId) -> Option<&PackageVersions> {
             self.packages.get(package)
         }
+    }
 
+    impl PackageIndex for TestRegistry {
         fn register(&mut self, name: PackageId, version: Version, record: PackageRecord) {
             self.insert_record(name, version, record);
         }

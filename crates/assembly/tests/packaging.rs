@@ -17,7 +17,7 @@ pub const FIXTURES_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtu
 /// * Multiple linkage modes
 #[test]
 fn assemble_a_protocol_like_workspace_project() -> Result<(), Report> {
-    let context = TestContext::new();
+    let mut context = TestContext::new();
 
     let manifest_path = Path::new(FIXTURES_DIR)
         .join("protocol")

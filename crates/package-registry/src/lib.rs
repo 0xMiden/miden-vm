@@ -11,7 +11,8 @@ mod resolver;
 mod version;
 mod version_requirement;
 
-use alloc::{collections::BTreeMap, sync::Arc};
+use alloc::{collections::BTreeMap, string::String, sync::Arc};
+use core::fmt;
 
 use miden_assembly_syntax::Report;
 pub use miden_assembly_syntax::{
@@ -110,28 +111,38 @@ pub trait PackageRegistry {
 
     /// Returns true if the specific `version` of `package` exists in the registry.
     fn is_version_available(&self, package: &PackageId, version: &Version) -> bool {
-        if version.digest.is_some() {
-            // Search for exact matches when a digest is provided
-            self.available_versions(package)
-                .map(|versions| versions.contains_key(version))
-                .unwrap_or(false)
-        } else {
-            // Search for any matching version if no digest is provided
-            self.available_versions(package)
-                .map(|versions| versions.range(version.as_range()).next_back().is_some())
-                .unwrap_or(false)
-        }
+        self.get_by_version(package, version).is_some()
+    }
+
+    /// Returns true if the canonical semantic version of `package` exists in the registry.
+    fn is_semver_available(&self, package: &PackageId, version: &SemVer) -> bool {
+        self.get_by_semver(package, version).is_some()
     }
 
     /// Return the metadata for `package` at `version`, if present.
     fn get_by_version(&self, package: &PackageId, version: &Version) -> Option<&PackageRecord> {
-        if version.digest.is_some() {
-            self.available_versions(package).and_then(|versions| versions.get(version))
-        } else {
-            // Search for any matching version if no digest is provided
-            self.available_versions(package).and_then(|versions| {
-                versions.range(version.as_range()).next_back().map(|(_, record)| record)
+        let record = self.get_by_semver(package, &version.version)?;
+        match version.digest.as_ref() {
+            Some(_) if record.version() == version => Some(record),
+            Some(_) => None,
+            None => Some(record),
+        }
+    }
+
+    /// Return the canonical metadata for `package` at the given semantic version.
+    fn get_by_semver(&self, package: &PackageId, version: &SemVer) -> Option<&PackageRecord> {
+        self.available_versions(package)
+            .and_then(|versions| {
+                versions.iter().find(|(candidate, _)| &candidate.version == version)
             })
+            .map(|(_, record)| record)
+    }
+
+    /// Return the exact metadata for `package` at the given fully-qualified version.
+    fn get_exact_version(&self, package: &PackageId, version: &Version) -> Option<&PackageRecord> {
+        match version.digest.as_ref() {
+            Some(_) => self.get_by_version(package, version),
+            None => None,
         }
     }
 
@@ -155,6 +166,10 @@ pub trait PackageRegistry {
         package: &PackageId,
         requirement: &VersionRequirement,
     ) -> Option<&'a PackageRecord> {
+        if let VersionRequirement::Exact(version) = requirement {
+            return self.get_exact_version(package, version);
+        }
+
         self.available_versions(package).and_then(|versions| {
             versions.iter().rev().find_map(|(version, record)| {
                 if version.satisfies(requirement) {
@@ -165,9 +180,6 @@ pub trait PackageRegistry {
             })
         })
     }
-
-    /// Register a package `name` with `version`, using the provided package metadata
-    fn register(&mut self, name: PackageId, version: Version, record: PackageRecord);
 }
 
 /// A read-only package artifact provider used to load assembled packages by resolved version.
@@ -180,16 +192,52 @@ pub trait PackageProvider {
     ) -> Result<Arc<MastPackage>, Report>;
 }
 
-/// An implementation of [PackageProvider] that always returns an error when asked to load a package
-#[derive(Default)]
-pub struct NoPackageProvider;
+/// A writable metadata index for package records.
+pub trait PackageIndex: PackageRegistry {
+    /// Register a package `name` with `version`, using the provided package metadata.
+    fn register(&mut self, name: PackageId, version: Version, record: PackageRecord);
+}
 
-impl PackageProvider for NoPackageProvider {
+/// A writable package store used to publish assembled package artifacts and index metadata.
+pub trait PackageStore: PackageRegistry + PackageProvider {
+    type Error: fmt::Display;
+
+    /// Publish `package` to the store, returning the fully-qualified stored version.
+    fn publish_package(&mut self, package: Arc<MastPackage>) -> Result<Version, Self::Error>;
+}
+
+/// The error type returned by [NoPackageStore]
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub struct NoPackageStoreError(String);
+
+/// A package store implementation which always refuses publication.
+#[derive(Default)]
+pub struct NoPackageStore;
+
+impl PackageRegistry for NoPackageStore {
+    fn available_versions(&self, _package: &PackageId) -> Option<&PackageVersions> {
+        None
+    }
+}
+
+impl PackageProvider for NoPackageStore {
     fn load_package(
         &self,
         package: &PackageId,
         version: &Version,
     ) -> Result<Arc<MastPackage>, Report> {
         Err(Report::msg(format!("cannot load package {package}@{version}")))
+    }
+}
+
+impl PackageStore for NoPackageStore {
+    type Error = NoPackageStoreError;
+
+    fn publish_package(&mut self, package: Arc<MastPackage>) -> Result<Version, Self::Error> {
+        Err(NoPackageStoreError(format!(
+            "cannot publish package {}@{}",
+            package.name, package.version
+        )))
     }
 }

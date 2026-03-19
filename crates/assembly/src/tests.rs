@@ -542,7 +542,7 @@ fn simple_main_call() -> TestResult {
 
 #[test]
 fn call_without_path() -> TestResult {
-    let context = TestContext::default();
+    let mut context = TestContext::default();
 
     let project =
         miden_project::Package::new("call_without_path", miden_project::Target::executable("main"));
@@ -611,7 +611,7 @@ end
         context.source_manager(),
     )?;
 
-    let project_assembler = context.project_assembler(project.into())?;
+    let mut project_assembler = context.project_assembler(project.into())?;
     project_assembler.assemble_with_sources(
         ProjectTargetSelector::Executable("main"),
         "dev",

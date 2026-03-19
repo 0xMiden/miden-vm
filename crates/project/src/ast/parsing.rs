@@ -118,6 +118,7 @@ impl SetSourceId for crate::VersionRequirement {
         match self {
             crate::VersionRequirement::Semantic(version) => version.set_source_id(source_id),
             crate::VersionRequirement::Digest(digest) => digest.set_source_id(source_id),
+            crate::VersionRequirement::Exact(_) => {},
         }
     }
 }

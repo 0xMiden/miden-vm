@@ -220,10 +220,9 @@ fn main() -> Result<(), Report> {
     let asm_dir = Path::new(manifest_dir).join(ASM_DIR_PATH);
 
     let assembler = Assembler::default();
-    let registry = miden_package_registry::InMemoryPackageRegistry::default();
-    let provider = miden_package_registry::NoPackageProvider;
-    let project_assembler =
-        assembler.for_project_at_path(asm_dir.join("miden-project.toml"), &registry, &provider)?;
+    let mut registry = miden_package_registry::InMemoryPackageRegistry::default();
+    let mut project_assembler =
+        assembler.for_project_at_path(asm_dir.join("miden-project.toml"), &mut registry)?;
 
     let package =
         project_assembler.assemble(miden_assembly::ProjectTargetSelector::Library, "release")?;

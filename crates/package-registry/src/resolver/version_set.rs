@@ -133,6 +133,7 @@ impl From<VersionRequirement> for VersionSet {
         match value {
             VersionRequirement::Digest(digest) => Self::from(digest.into_inner()),
             VersionRequirement::Semantic(req) => Self::from(req.inner()),
+            VersionRequirement::Exact(version) => Self::from(version),
         }
     }
 }

@@ -243,8 +243,8 @@ mod package_features {
 
     use miden_mast_package::{Package, PackageId};
     use miden_package_registry::{
-        PackageProvider, PackageRecord, PackageRegistry, PackageVersions, Version,
-        VersionRequirement,
+        PackageIndex, PackageProvider, PackageRecord, PackageRegistry, PackageStore,
+        PackageVersions, Version, VersionRequirement,
     };
 
     use super::*;
@@ -262,23 +262,16 @@ mod package_features {
         pub fn add_package(&mut self, package: Arc<Package>) -> Version {
             let version =
                 miden_package_registry::Version::new(package.version.clone(), package.digest());
-            let id = package.name.clone();
-            let dependencies = package
-                .manifest
-                .dependencies()
-                .map(|dependency| {
-                    (dependency.name.clone(), VersionRequirement::from(dependency.digest))
-                })
-                .collect::<Vec<_>>();
-            let record = PackageRecord::new(version.clone(), dependencies)
-                .with_description(package.description.clone().unwrap_or_default());
-            self.index.entry(id.clone()).or_default().insert(version.clone(), record);
-            self.packages.insert((id, version.clone()), package);
+            self.publish_package(package).expect("failed to add test package");
             version
         }
 
         pub fn loaded_packages(&self) -> Vec<String> {
             self.loads.lock().unwrap().clone()
+        }
+
+        pub fn clear_loaded_packages(&self) {
+            self.loads.lock().unwrap().clear();
         }
     }
 
@@ -286,7 +279,9 @@ mod package_features {
         fn available_versions(&self, package: &PackageId) -> Option<&PackageVersions> {
             self.index.get(package)
         }
+    }
 
+    impl PackageIndex for TestRegistry {
         fn register(&mut self, name: PackageId, version: Version, record: PackageRecord) {
             self.index.entry(name).or_default().insert(version, record);
         }
@@ -305,6 +300,44 @@ mod package_features {
         }
     }
 
+    impl PackageStore for TestRegistry {
+        type Error = Report;
+
+        fn publish_package(&mut self, package: Arc<Package>) -> Result<Version, Self::Error> {
+            let version =
+                miden_package_registry::Version::new(package.version.clone(), package.digest());
+            if self.get_by_semver(&package.name, &package.version).is_some() {
+                return Err(Report::msg(format!(
+                    "package '{}' version '{}' is already registered",
+                    package.name, package.version
+                )));
+            }
+
+            let dependencies = package
+                .manifest
+                .dependencies()
+                .map(|dependency| {
+                    let version = Version::new(dependency.version.clone(), dependency.digest);
+                    if self.get_exact_version(&dependency.name, &version).is_none() {
+                        return Err(Report::msg(format!(
+                            "missing dependency '{}' at '{}'",
+                            dependency.name, version
+                        )));
+                    }
+                    Ok((dependency.name.clone(), VersionRequirement::Exact(version)))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let record = PackageRecord::new(version.clone(), dependencies)
+                .with_description(package.description.clone().unwrap_or_default());
+            self.index
+                .entry(package.name.clone())
+                .or_default()
+                .insert(version.clone(), record);
+            self.packages.insert((package.name.clone(), version.clone()), package);
+            Ok(version)
+        }
+    }
+
     impl TestContext {
         pub fn registry(&self) -> &TestRegistry {
             &self.registry
@@ -315,18 +348,17 @@ mod package_features {
         }
 
         pub fn project_assembler_for_path<'a>(
-            &'a self,
+            &'a mut self,
             manifest_path: impl AsRef<std::path::Path>,
-        ) -> Result<crate::ProjectAssembler<'a, TestRegistry, TestRegistry>, Report> {
-            self.assembler()
-                .for_project_at_path(manifest_path, &self.registry, &self.registry)
+        ) -> Result<crate::ProjectAssembler<'a, TestRegistry>, Report> {
+            self.assembler().for_project_at_path(manifest_path, &mut self.registry)
         }
 
         pub fn project_assembler<'a>(
-            &'a self,
+            &'a mut self,
             project: Arc<miden_project::Package>,
-        ) -> Result<crate::ProjectAssembler<'a, TestRegistry, TestRegistry>, Report> {
-            self.assembler().for_project(project, &self.registry, &self.registry)
+        ) -> Result<crate::ProjectAssembler<'a, TestRegistry>, Report> {
+            self.assembler().for_project(project, &mut self.registry)
         }
 
         /// Assembles the library target of the package at `manifest_path`, using `profile`.
@@ -336,13 +368,13 @@ mod package_features {
         /// This requires that the referenced package define a library target, or an error will be
         /// raised.
         pub fn assemble_library_package(
-            &self,
+            &mut self,
             manifest_path: impl AsRef<std::path::Path>,
             profile: Option<&str>,
         ) -> Result<Arc<Package>, Report> {
             let assembler = self.assembler();
-            let project_assembler =
-                assembler.for_project_at_path(manifest_path, &self.registry, &self.registry)?;
+            let mut project_assembler =
+                assembler.for_project_at_path(manifest_path, &mut self.registry)?;
             project_assembler.assemble(ProjectTargetSelector::Library, profile.unwrap_or("dev"))
         }
 
@@ -356,14 +388,14 @@ mod package_features {
         /// This requires that the referenced package define the given executable target, or an
         /// error will be raised.
         pub fn assemble_executable_package(
-            &self,
+            &mut self,
             manifest_path: impl AsRef<std::path::Path>,
             name: Option<&str>,
             profile: Option<&str>,
         ) -> Result<Arc<Package>, Report> {
             let assembler = self.assembler();
-            let project_assembler =
-                assembler.for_project_at_path(manifest_path, &self.registry, &self.registry)?;
+            let mut project_assembler =
+                assembler.for_project_at_path(manifest_path, &mut self.registry)?;
             project_assembler.assemble(
                 ProjectTargetSelector::Executable(name.unwrap_or(Path::EXEC_PATH)),
                 profile.unwrap_or("dev"),
@@ -380,12 +412,12 @@ mod package_features {
         ///     add
         /// end
         /// ```
-        pub fn assemble_library_package_with_export(
+        pub fn assemble_library_package_with_export<'a>(
             &self,
             name: &str,
             version: &str,
             export: &str,
-            dependencies: impl IntoIterator<Item = (&'static str, TargetType, Word)>,
+            dependencies: impl IntoIterator<Item = (&'static str, &'a str, TargetType, Word)>,
         ) -> Box<miden_mast_package::Package> {
             use alloc::string::ToString;
 
@@ -409,8 +441,9 @@ mod package_features {
                 version.parse().unwrap(),
                 TargetType::Library,
                 library,
-                dependencies.into_iter().map(|(name, kind, digest)| Dependency {
+                dependencies.into_iter().map(|(name, version, kind, digest)| Dependency {
                     name: name.into(),
+                    version: version.parse().unwrap(),
                     kind,
                     digest,
                 }),

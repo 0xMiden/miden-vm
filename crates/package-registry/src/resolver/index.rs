@@ -1,19 +1,35 @@
-use alloc::collections::BTreeMap;
+use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
+
+use miden_assembly_syntax::Report;
+use miden_mast_package::Package as MastPackage;
 
 use crate::{
-    PackageId, PackageRecord, PackageRegistry, PackageVersions, Version, VersionRequirement,
+    PackageId, PackageIndex, PackageProvider, PackageRecord, PackageRegistry, PackageStore,
+    PackageVersions, SemVer, Version, VersionRequirement,
 };
+
+#[derive(Debug, thiserror::Error)]
+pub enum InMemoryPackageStoreError {
+    #[error("package '{package}' version '{version}' is already registered")]
+    DuplicateSemanticVersion { package: PackageId, version: SemVer },
+    #[error("package '{package}' depends on '{dependency}' without a semantic version")]
+    MissingDependencyVersion {
+        package: PackageId,
+        dependency: PackageId,
+    },
+}
 
 /// An in-memory package registry implementation used for tests, local tooling, and resolver state.
 #[derive(Default)]
 pub struct InMemoryPackageRegistry {
     packages: BTreeMap<PackageId, PackageVersions>,
+    artifacts: BTreeMap<(PackageId, Version), Arc<MastPackage>>,
 }
 
 impl InMemoryPackageRegistry {
     /// Construct a registry from an existing package map.
     pub fn from_packages(packages: BTreeMap<PackageId, PackageVersions>) -> Self {
-        Self { packages }
+        Self { packages, artifacts: BTreeMap::default() }
     }
 
     /// Insert a new entry for `name` and `version`, creating a record from `dependencies`.
@@ -66,16 +82,75 @@ impl InMemoryPackageRegistry {
     pub fn packages(&self) -> &BTreeMap<PackageId, PackageVersions> {
         &self.packages
     }
+
+    /// Returns all package artifacts recorded in this store.
+    pub fn artifacts(&self) -> &BTreeMap<(PackageId, Version), Arc<MastPackage>> {
+        &self.artifacts
+    }
 }
 
 impl PackageRegistry for InMemoryPackageRegistry {
     fn available_versions(&self, package: &PackageId) -> Option<&PackageVersions> {
         self.packages.get(package)
     }
+}
 
-    #[inline]
+impl PackageIndex for InMemoryPackageRegistry {
     fn register(&mut self, name: PackageId, version: Version, record: PackageRecord) {
         self.insert_record(name, version, record);
+    }
+}
+
+impl PackageProvider for InMemoryPackageRegistry {
+    fn load_package(
+        &self,
+        package: &PackageId,
+        version: &Version,
+    ) -> Result<Arc<MastPackage>, Report> {
+        self.artifacts
+            .get(&(package.clone(), version.clone()))
+            .cloned()
+            .ok_or_else(|| Report::msg(format!("cannot load package {package}@{version}")))
+    }
+}
+
+impl PackageStore for InMemoryPackageRegistry {
+    type Error = InMemoryPackageStoreError;
+
+    fn publish_package(&mut self, package: Arc<MastPackage>) -> Result<Version, Self::Error> {
+        let version = Version::new(package.version.clone(), package.digest());
+        if self.is_semver_available(&package.name, &package.version) {
+            return Err(InMemoryPackageStoreError::DuplicateSemanticVersion {
+                package: package.name.clone(),
+                version: package.version.clone(),
+            });
+        }
+
+        let dependencies = package
+            .manifest
+            .dependencies()
+            .map(|dependency| {
+                let dependency_version =
+                    Version::new(dependency.version.clone(), dependency.digest);
+                if !self.is_version_available(&dependency.name, &dependency_version) {
+                    return Err(InMemoryPackageStoreError::MissingDependencyVersion {
+                        package: package.name.clone(),
+                        dependency: dependency.name.clone(),
+                    });
+                }
+                Ok((dependency.name.clone(), VersionRequirement::Exact(dependency_version)))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let record = match package.description.clone() {
+            Some(description) => {
+                PackageRecord::new(version.clone(), dependencies).with_description(description)
+            },
+            None => PackageRecord::new(version.clone(), dependencies),
+        };
+        self.insert_record(package.name.clone(), version.clone(), record);
+        self.artifacts.insert((package.name.clone(), version.clone()), package);
+        Ok(version)
     }
 }
 

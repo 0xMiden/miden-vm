@@ -296,6 +296,10 @@ mod tests {
         VersionRequirement::from(value)
     }
 
+    fn exact_requirement(version: &str, digest: Word) -> VersionRequirement {
+        VersionRequirement::Exact(Version::new(version.parse().unwrap(), digest))
+    }
+
     fn select<'a>(
         packages: &[(&str, &str)],
     ) -> SelectedDependencies<PackageResolver<'a, InMemoryPackageRegistry>> {
@@ -382,6 +386,13 @@ mod tests {
 
         assert_eq!(record.semantic_version(), &"1.0.0".parse().unwrap());
         assert_eq!(record.digest(), Some(&digest));
+    }
+
+    #[test]
+    fn exact_requirement_uses_hash_separator() {
+        let digest = Rpo256::hash(b"foo");
+        let requirement = exact_requirement("1.0.0", digest);
+        assert_eq!(format!("{requirement}"), format!("1.0.0#{digest}"));
     }
 
     #[test]
@@ -528,6 +539,30 @@ mod tests {
             ("b", &format!("1.0.0@{b_digest}")),
             ("c", &format!("2.0.0@{c_digest}")),
         ]);
+
+        assert_selected(&selected, &expected);
+    }
+
+    #[test]
+    fn resolver_resolves_exact_version_requirements() {
+        let b_digest = Rpo256::hash(b"b");
+        let index = InMemoryPackageRegistry::from_iter([
+            (
+                "a",
+                vec![("0.1.0".parse().unwrap(), vec![("b", exact_requirement("1.0.0", b_digest))])],
+            ),
+            (
+                "b",
+                vec![
+                    (Version::new("1.0.0".parse().unwrap(), b_digest), vec![]),
+                    ("1.0.1".parse().unwrap(), vec![]),
+                ],
+            ),
+        ]);
+
+        let resolver = PackageResolver::for_package("a", "0.1.0".parse().unwrap(), &index);
+        let selected = resolver.resolve().expect("failed to resolve");
+        let expected = select(&[("a", "0.1.0"), ("b", &format!("1.0.0@{b_digest}"))]);
 
         assert_selected(&selected, &expected);
     }
