@@ -178,9 +178,11 @@ where
         sources: Option<ProjectSourceInputs>,
         cache: &mut BTreeMap<PackageId, Arc<MastPackage>>,
     ) -> Result<Arc<MastPackage>, Report> {
+        let cache_key = target_package_name(&project, target);
         if sources.is_none()
-            && let Some(package) = cache.get(&package_id)
+            && let Some(package) = cache.get(&cache_key)
         {
+            assert_eq!(package.kind, target.ty);
             return Ok(Arc::clone(package));
         }
 
