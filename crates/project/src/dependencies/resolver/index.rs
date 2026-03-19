@@ -167,8 +167,7 @@ impl PackageIndex {
             versions
                 .iter()
                 .rev()
-                .filter_map(|(v, deps)| if v.satisfies(requirement) { Some(deps) } else { None })
-                .next()
+                .find_map(|(v, deps)| if v.satisfies(requirement) { Some(deps) } else { None })
         })
     }
 
