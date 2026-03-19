@@ -478,7 +478,7 @@ impl Assembler {
         self.linker.kernel()
     }
 
-    #[cfg(any(test, feature = "std"))]
+    #[cfg(any(feature = "std", all(test, feature = "std")))]
     pub(crate) fn source_manager(&self) -> Arc<dyn SourceManager> {
         self.source_manager.clone()
     }

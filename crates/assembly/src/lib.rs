@@ -23,7 +23,7 @@ mod project;
 mod mast_forest_merger_tests;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests;
 
 // Re-exported for downstream crates

@@ -5,8 +5,6 @@ use alloc::{
 };
 use core::ops::{Index, IndexMut};
 
-#[cfg(test)]
-use miden_core::mast::{LoopNodeBuilder, SplitNodeBuilder};
 use miden_core::{
     Felt, Word,
     advice::AdviceMap,
@@ -669,7 +667,7 @@ impl MastForestBuilder {
 
     /// Adds a split node to the forest, and returns the [`MastNodeId`] associated with it.
     // Kept for giving tests some consistency
-    #[cfg(test)]
+    #[cfg(all(test, feature = "std"))]
     pub fn ensure_split(
         &mut self,
         left_child: MastNodeId,
@@ -677,6 +675,7 @@ impl MastForestBuilder {
         before_enter: Vec<DecoratorId>,
         after_exit: Vec<DecoratorId>,
     ) -> Result<MastNodeId, Report> {
+        use miden_core::mast::SplitNodeBuilder;
         let split = SplitNodeBuilder::new([left_child, right_child])
             .with_before_enter(before_enter)
             .with_after_exit(after_exit);
@@ -685,13 +684,14 @@ impl MastForestBuilder {
 
     /// Adds a loop node to the forest, and returns the [`MastNodeId`] associated with it.
     // Kept for giving tests some consistency
-    #[cfg(test)]
+    #[cfg(all(test, feature = "std"))]
     pub fn ensure_loop(
         &mut self,
         body: MastNodeId,
         before_enter: Vec<DecoratorId>,
         after_exit: Vec<DecoratorId>,
     ) -> Result<MastNodeId, Report> {
+        use miden_core::mast::LoopNodeBuilder;
         let loop_node = LoopNodeBuilder::new(body)
             .with_before_enter(before_enter)
             .with_after_exit(after_exit);
