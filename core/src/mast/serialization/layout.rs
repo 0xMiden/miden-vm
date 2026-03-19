@@ -4,8 +4,8 @@ use super::{
     FLAG_HASHLESS, FLAG_STRIPPED, FLAGS_RESERVED_MASK, MAGIC, MastForest, MastNodeEntry, VERSION,
 };
 use crate::{
-    mast::serialization::info::MastNodeType,
-    serde::{ByteReader, Deserializable, DeserializationError},
+    mast::{MastNodeId, serialization::info::MastNodeType},
+    serde::{ByteReader, Deserializable, DeserializationError, SliceReader},
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -60,6 +60,79 @@ impl ForestLayout {
             .transpose()?;
 
         Ok(self)
+    }
+
+    pub(super) fn read_procedure_root_at(
+        &self,
+        bytes: &[u8],
+        index: usize,
+    ) -> Result<MastNodeId, DeserializationError> {
+        if index >= self.roots_count {
+            return Err(DeserializationError::InvalidValue(format!(
+                "root index {} out of bounds for {} roots",
+                index, self.roots_count
+            )));
+        }
+
+        let mut raw = [0u8; core::mem::size_of::<u32>()];
+        raw.copy_from_slice(read_fixed_section_entry(
+            bytes,
+            self.roots_offset,
+            core::mem::size_of::<u32>(),
+            index,
+            "root",
+        )?);
+        MastNodeId::from_u32_with_node_count(u32::from_le_bytes(raw), self.node_count)
+    }
+
+    pub(super) fn read_node_entry_at(
+        &self,
+        bytes: &[u8],
+        index: usize,
+    ) -> Result<MastNodeEntry, DeserializationError> {
+        if index >= self.node_count {
+            return Err(DeserializationError::InvalidValue(format!(
+                "node index {} out of bounds for {} nodes",
+                index, self.node_count
+            )));
+        }
+
+        let mut reader = SliceReader::new(read_fixed_section_entry(
+            bytes,
+            self.node_entry_offset,
+            self.node_entry_size,
+            index,
+            "node entry",
+        )?);
+        MastNodeEntry::read_from(&mut reader)
+    }
+
+    #[cfg(test)]
+    pub(super) fn advice_map_offset(
+        &self,
+        bytes_len: usize,
+    ) -> Result<usize, DeserializationError> {
+        let digest_section_end = if let Some(node_hash_offset) = self.node_hash_offset {
+            node_hash_offset
+                .checked_add(self.node_hash_count * crate::Word::min_serialized_size())
+                .ok_or_else(|| {
+                    DeserializationError::InvalidValue("node hash section overflow".to_string())
+                })?
+        } else {
+            self.external_digest_offset
+                .checked_add(self.external_digest_count * crate::Word::min_serialized_size())
+                .ok_or_else(|| {
+                    DeserializationError::InvalidValue(
+                        "external digest section overflow".to_string(),
+                    )
+                })?
+        };
+
+        if digest_section_end > bytes_len {
+            return Err(DeserializationError::UnexpectedEOF);
+        }
+
+        Ok(digest_section_end)
     }
 }
 
@@ -314,4 +387,27 @@ fn read_and_validate_header<R: ByteReader>(
     }
 
     Ok((flags, version))
+}
+
+pub(super) fn read_fixed_section_entry<'a>(
+    bytes: &'a [u8],
+    section_offset: usize,
+    entry_size: usize,
+    index: usize,
+    section_name: &str,
+) -> Result<&'a [u8], DeserializationError> {
+    let entry_offset = index
+        .checked_mul(entry_size)
+        .and_then(|delta| section_offset.checked_add(delta))
+        .ok_or_else(|| {
+            DeserializationError::InvalidValue(format!("{section_name} offset overflow"))
+        })?;
+    let entry_end = entry_offset.checked_add(entry_size).ok_or_else(|| {
+        DeserializationError::InvalidValue(format!("{section_name} length overflow"))
+    })?;
+    if entry_end > bytes.len() {
+        return Err(DeserializationError::UnexpectedEOF);
+    }
+
+    Ok(&bytes[entry_offset..entry_end])
 }

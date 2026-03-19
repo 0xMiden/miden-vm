@@ -51,6 +51,8 @@
 use alloc::string::ToString;
 use alloc::vec::Vec;
 
+use miden_utils_sync::OnceLockCompat;
+
 use super::{MastForest, MastNode, MastNodeId};
 use crate::{
     advice::AdviceMap,
@@ -312,8 +314,10 @@ fn serialized_size_hint(forest: &MastForest, stripped: bool, hashless: bool) -> 
 /// ```
 #[derive(Debug)]
 pub struct SerializedMastForest<'a> {
+    bytes: &'a [u8],
     flags: WireFlags,
-    forest: ResolvedSerializedForest<'a>,
+    layout: ForestLayout,
+    resolved: OnceLockCompat<Result<ResolvedSerializedForest<'a>, DeserializationError>>,
 }
 
 impl<'a> SerializedMastForest<'a> {
@@ -332,8 +336,8 @@ impl<'a> SerializedMastForest<'a> {
     ///
     /// Conventions:
     /// - If `HASHLESS` is not set, node digests are read from wire data.
-    /// - If `HASHLESS` is set, wire digests are ignored and node digests are recomputed during
-    ///   construction whenever possible.
+    /// - If `HASHLESS` is set, wire digests are ignored and non-external node digests are
+    ///   recomputed lazily the first time digest-backed access is requested.
     /// - For `External` nodes in `HASHLESS` mode, digests are marshaled opaquely from wire data;
     ///   this view does not attempt semantic resolution of external references.
     ///
@@ -361,14 +365,18 @@ impl<'a> SerializedMastForest<'a> {
         let mut reader = SliceReader::new(bytes);
         let mut scanner = TrackingReader::new(&mut reader);
         let (flags, layout) = read_header_and_scan_layout(&mut scanner, true)?;
-        let forest = ResolvedSerializedForest::new(bytes, layout)?;
 
-        Ok(Self { flags, forest })
+        Ok(Self {
+            bytes,
+            flags,
+            layout: layout.resolve()?,
+            resolved: OnceLockCompat::new(),
+        })
     }
 
     /// Returns the number of nodes in the serialized forest.
     pub fn node_count(&self) -> usize {
-        self.forest.node_count()
+        self.layout.node_count
     }
 
     /// Returns `true` when this view uses hashless convention and recomputed digests.
@@ -383,12 +391,12 @@ impl<'a> SerializedMastForest<'a> {
 
     /// Returns the number of procedure roots in the serialized forest.
     pub fn procedure_root_count(&self) -> usize {
-        self.forest.procedure_root_count()
+        self.layout.roots_count
     }
 
     /// Returns the procedure root id at the specified index.
     pub fn procedure_root_at(&self, index: usize) -> Result<MastNodeId, DeserializationError> {
-        self.forest.procedure_root_at(index)
+        self.layout.read_procedure_root_at(self.bytes, index)
     }
 
     /// Returns the `MastNodeInfo` at the specified index.
@@ -422,32 +430,41 @@ impl<'a> SerializedMastForest<'a> {
 
     /// Returns the fixed-width structural node entry at the specified index.
     pub fn node_entry_at(&self, index: usize) -> Result<MastNodeEntry, DeserializationError> {
-        self.forest.node_entry_at(index)
+        self.layout.read_node_entry_at(self.bytes, index)
     }
 
     /// Returns the digest for the node at the specified index.
     pub fn node_digest_at(&self, index: usize) -> Result<crate::Word, DeserializationError> {
-        self.forest.node_digest_at(index)
+        self.resolved()?.node_digest_at(index)
     }
 
     #[cfg(test)]
     fn advice_map_offset(&self) -> Result<usize, DeserializationError> {
-        self.forest.advice_map_offset()
+        self.layout.advice_map_offset(self.bytes.len())
     }
 
     #[cfg(test)]
     fn node_entry_offset(&self) -> usize {
-        self.forest.node_entry_offset()
+        self.layout.node_entry_offset
     }
 
     #[cfg(test)]
     fn node_hash_offset(&self) -> Option<usize> {
-        self.forest.node_hash_offset()
+        self.layout.node_hash_offset
     }
 
     #[cfg(test)]
     fn digest_slot_at(&self, index: usize) -> usize {
-        self.forest.digest_slot_at(index)
+        self.resolved()
+            .expect("digest slots should be readable for a valid serialized view")
+            .digest_slot_at(index)
+    }
+
+    fn resolved(&self) -> Result<&ResolvedSerializedForest<'a>, DeserializationError> {
+        self.resolved
+            .get_or_init(|| ResolvedSerializedForest::new(self.bytes, self.layout))
+            .as_ref()
+            .map_err(Clone::clone)
     }
 }
 
@@ -618,6 +635,7 @@ fn decode_from_reader<R: ByteReader>(
 ) -> Result<(WireFlags, super::UntrustedMastForest), DeserializationError> {
     let mut recording = TrackingReader::new_recording(source);
     let (flags, layout) = read_header_and_scan_layout(&mut recording, allow_hashless)?;
+    let layout = layout.resolve()?;
 
     let advice_map = AdviceMap::read_from(&mut recording)?;
     let debug_info = if flags.is_stripped() {

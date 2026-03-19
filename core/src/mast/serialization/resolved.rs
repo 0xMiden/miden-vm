@@ -6,7 +6,10 @@ use crate::{
     chiplets::hasher,
     mast::{
         CallNode, DebugInfo, DynNode, JoinNode, LoopNode, SplitNode,
-        serialization::{basic_blocks::BasicBlockDataDecoder, info::MastNodeType},
+        serialization::{
+            basic_blocks::BasicBlockDataDecoder, info::MastNodeType,
+            layout::read_fixed_section_entry,
+        },
     },
     serde::{Deserializable, DeserializationError, SliceReader},
 };
@@ -64,7 +67,6 @@ impl ForestDigests {
 
 impl<'a> ResolvedSerializedForest<'a> {
     pub(super) fn new(bytes: &'a [u8], layout: ForestLayout) -> Result<Self, DeserializationError> {
-        let layout = layout.resolve()?;
         let digests = ForestDigests::new(bytes, &layout)?;
         Ok(Self { bytes, layout, digests })
     }
@@ -118,41 +120,14 @@ impl<'a> ResolvedSerializedForest<'a> {
         &self,
         index: usize,
     ) -> Result<MastNodeId, DeserializationError> {
-        if index >= self.layout.roots_count {
-            return Err(DeserializationError::InvalidValue(format!(
-                "root index {} out of bounds for {} roots",
-                index, self.layout.roots_count
-            )));
-        }
-
-        let mut raw = [0u8; core::mem::size_of::<u32>()];
-        raw.copy_from_slice(read_fixed_section_entry(
-            self.bytes,
-            self.layout.roots_offset,
-            core::mem::size_of::<u32>(),
-            index,
-            "root",
-        )?);
-        MastNodeId::from_u32_with_node_count(u32::from_le_bytes(raw), self.layout.node_count)
+        self.layout.read_procedure_root_at(self.bytes, index)
     }
 
     pub(super) fn node_entry_at(
         &self,
         index: usize,
     ) -> Result<MastNodeEntry, DeserializationError> {
-        if index >= self.layout.node_count {
-            return Err(DeserializationError::InvalidValue(format!(
-                "node index {} out of bounds for {} nodes",
-                index, self.layout.node_count
-            )));
-        }
-
-        read_node_entry(
-            self.bytes,
-            self.layout.node_entry_offset,
-            self.layout.node_entry_size,
-            index,
-        )
+        self.layout.read_node_entry_at(self.bytes, index)
     }
 
     pub(super) fn node_digest_at(&self, index: usize) -> Result<crate::Word, DeserializationError> {
@@ -169,61 +144,9 @@ impl<'a> ResolvedSerializedForest<'a> {
     }
 
     #[cfg(test)]
-    pub(super) fn advice_map_offset(&self) -> Result<usize, DeserializationError> {
-        let digest_section_end = if let Some(node_hash_offset) = self.layout.node_hash_offset {
-            node_hash_offset
-                .checked_add(self.layout.node_hash_count * crate::Word::min_serialized_size())
-                .ok_or_else(|| {
-                    DeserializationError::InvalidValue("node hash section overflow".to_string())
-                })?
-        } else {
-            self.layout
-                .external_digest_offset
-                .checked_add(self.layout.external_digest_count * crate::Word::min_serialized_size())
-                .ok_or_else(|| {
-                    DeserializationError::InvalidValue(
-                        "external digest section overflow".to_string(),
-                    )
-                })?
-        };
-
-        if digest_section_end > self.bytes.len() {
-            return Err(DeserializationError::UnexpectedEOF);
-        }
-
-        Ok(digest_section_end)
-    }
-
-    #[cfg(test)]
-    pub(super) fn node_entry_offset(&self) -> usize {
-        self.layout.node_entry_offset
-    }
-
-    #[cfg(test)]
-    pub(super) fn node_hash_offset(&self) -> Option<usize> {
-        self.layout.node_hash_offset
-    }
-
-    #[cfg(test)]
     pub(super) fn digest_slot_at(&self, index: usize) -> usize {
         self.digests.slot_by_node[index] as usize
     }
-}
-
-fn read_node_entry(
-    bytes: &[u8],
-    node_entry_offset: usize,
-    node_entry_size: usize,
-    index: usize,
-) -> Result<MastNodeEntry, DeserializationError> {
-    let mut reader = SliceReader::new(read_fixed_section_entry(
-        bytes,
-        node_entry_offset,
-        node_entry_size,
-        index,
-        "node entry",
-    )?);
-    MastNodeEntry::read_from(&mut reader)
 }
 
 fn read_digest_entry(
@@ -239,29 +162,6 @@ fn read_digest_entry(
         "digest",
     )?);
     crate::Word::read_from(&mut reader)
-}
-
-fn read_fixed_section_entry<'a>(
-    bytes: &'a [u8],
-    section_offset: usize,
-    entry_size: usize,
-    index: usize,
-    section_name: &str,
-) -> Result<&'a [u8], DeserializationError> {
-    let entry_offset = index
-        .checked_mul(entry_size)
-        .and_then(|delta| section_offset.checked_add(delta))
-        .ok_or_else(|| {
-            DeserializationError::InvalidValue(format!("{section_name} offset overflow"))
-        })?;
-    let entry_end = entry_offset.checked_add(entry_size).ok_or_else(|| {
-        DeserializationError::InvalidValue(format!("{section_name} length overflow"))
-    })?;
-    if entry_end > bytes.len() {
-        return Err(DeserializationError::UnexpectedEOF);
-    }
-
-    Ok(&bytes[entry_offset..entry_end])
 }
 
 fn basic_block_data(
@@ -287,8 +187,7 @@ fn build_digest_slot_by_node(
     let mut node_hash_slot = 0u32;
 
     for index in 0..layout.node_count {
-        let entry =
-            read_node_entry(bytes, layout.node_entry_offset, layout.node_entry_size, index)?;
+        let entry = layout.read_node_entry_at(bytes, index)?;
         if matches!(entry.node_type(), MastNodeType::External) {
             slots.push(external_slot);
             external_slot = external_slot.checked_add(1).ok_or_else(|| {
@@ -319,8 +218,7 @@ fn recompute_hash_table(
     let mut external_digest_index = 0usize;
 
     for index in 0..layout.node_count {
-        let entry =
-            read_node_entry(bytes, layout.node_entry_offset, layout.node_entry_size, index)?;
+        let entry = layout.read_node_entry_at(bytes, index)?;
         let computed = match entry.node_type() {
             MastNodeType::Block { ops_offset } => {
                 let op_batches = basic_block_data_decoder.decode_operations(ops_offset)?;
