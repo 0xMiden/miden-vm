@@ -36,6 +36,7 @@
 - Introduced `build_trace_with_max_len()` which stops building the trace after a given max, and `build_trace()` no longer allocates more than 2^29 rows ([#2809](https://github.com/0xMiden/miden-vm/pull/2809)).
 - `DebugHandler`'s default method implementations are now no-ops (instead of prints) ([#2837](https://github.com/0xMiden/miden-vm/pull/2837)).
 - Added `ExecutionTrace::check_constraints()` for fast debug constraint checking without STARK proving, and migrated tests from `prove_and_verify` ([#2846](https://github.com/0xMiden/miden-vm/pull/2846)).
+- Added `prove_from_trace_sync(...)` for proving from pre-executed trace inputs ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
 - [BREAKING] Updated the dependency on `midenc-hir-type` to 0.5.0, which changes the set of available calling conventions, and adds support for enum types and named struct types. ([#2848](https://github.com/0xMiden/miden-vm/pull/2848))
 - [BREAKING] `StructType::new` now expects an optional name to be specified ([#2848](https://github.com/0xMiden/miden-vm/pull/2848))
 - [BREAKING] `Variant::new` now expects an optional payload type to be specified ([#2848](https://github.com/0xMiden/miden-vm/pull/2848))

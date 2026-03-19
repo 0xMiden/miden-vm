@@ -18,7 +18,7 @@ use miden_crypto::stark::{
 };
 use miden_processor::{
     FastProcessor, Program,
-    trace::{AuxTraceBuilders, build_trace},
+    trace::{AuxTraceBuilders, ExecutionTrace, build_trace},
 };
 use tracing::instrument;
 
@@ -29,8 +29,9 @@ mod proving_options;
 pub use miden_air::{DeserializationError, ProcessorAir, PublicInputs, config};
 pub use miden_core::proof::{ExecutionProof, HashFunction};
 pub use miden_processor::{
-    ExecutionError, FutureMaybeSend, Host, InputError, StackInputs, StackOutputs, SyncHost, Word,
-    advice::AdviceInputs, crypto, field, serde, utils,
+    ExecutionError, ExecutionOutput, FutureMaybeSend, Host, InputError, ProgramInfo, StackInputs,
+    StackOutputs, SyncHost, TraceGenerationContext, Word, advice::AdviceInputs, crypto, field,
+    serde, utils,
 };
 pub use proving_options::ProvingOptions;
 
@@ -62,61 +63,7 @@ pub async fn prove(
     let (execution_output, trace_generation_context) =
         processor.execute_for_trace(program, host).await?;
 
-    let trace = build_trace(execution_output, trace_generation_context, program.to_info())?;
-
-    tracing::event!(
-        tracing::Level::INFO,
-        "Generated execution trace of {} columns and {} steps (padded from {})",
-        miden_air::trace::TRACE_WIDTH,
-        trace.trace_len_summary().padded_trace_len(),
-        trace.trace_len_summary().trace_len()
-    );
-
-    let stack_outputs = *trace.stack_outputs();
-    let precompile_requests = trace.precompile_requests().to_vec();
-    let hash_fn = options.hash_fn();
-
-    // Convert trace to row-major format
-    let trace_matrix = {
-        let _span = tracing::info_span!("to_row_major_matrix").entered();
-        trace.to_row_major_matrix()
-    };
-
-    // Build public inputs and extract fixed/variable-length components
-    let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();
-    let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
-
-    // Get aux trace builders
-    let aux_builder = trace.aux_trace_builders();
-
-    // Generate STARK proof using lifted prover
-    let params = config::pcs_params();
-    let proof_bytes = match hash_fn {
-        HashFunction::Blake3_256 => {
-            let config = config::blake3_256_config(params);
-            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
-        },
-        HashFunction::Keccak => {
-            let config = config::keccak_config(params);
-            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
-        },
-        HashFunction::Rpo256 => {
-            let config = config::rpo_config(params);
-            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
-        },
-        HashFunction::Poseidon2 => {
-            let config = config::poseidon2_config(params);
-            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
-        },
-        HashFunction::Rpx256 => {
-            let config = config::rpx_config(params);
-            prove_stark(&config, &trace_matrix, &public_values, var_len_public_inputs, &aux_builder)
-        },
-    }?;
-
-    let proof = ExecutionProof::new(proof_bytes, hash_fn, precompile_requests);
-
-    Ok((stack_outputs, proof))
+    prove_from_trace_sync(execution_output, trace_generation_context, program.to_info(), options)
 }
 
 /// Synchronous wrapper for the async `prove()` function.
@@ -134,8 +81,28 @@ pub fn prove_sync(
     let (execution_output, trace_generation_context) =
         processor.execute_for_trace_sync(program, host)?;
 
-    let trace = build_trace(execution_output, trace_generation_context, program.to_info())?;
+    prove_from_trace_sync(execution_output, trace_generation_context, program.to_info(), options)
+}
 
+/// Builds an execution trace from pre-executed trace inputs and proves it synchronously.
+///
+/// This is useful when program execution has already happened elsewhere and only trace building
+/// plus proof generation remain.
+#[instrument("prove_trace_sync", skip_all)]
+pub fn prove_from_trace_sync(
+    execution_output: ExecutionOutput,
+    trace_generation_context: TraceGenerationContext,
+    program_info: ProgramInfo,
+    options: ProvingOptions,
+) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
+    let trace = build_trace(execution_output, trace_generation_context, program_info)?;
+    prove_execution_trace(trace, options)
+}
+
+fn prove_execution_trace(
+    trace: ExecutionTrace,
+    options: ProvingOptions,
+) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
     tracing::event!(
         tracing::Level::INFO,
         "Generated execution trace of {} columns and {} steps (padded from {})",

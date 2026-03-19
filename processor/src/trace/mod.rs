@@ -39,6 +39,7 @@ mod tests;
 // RE-EXPORTS
 // ================================================================================================
 
+pub use execution_tracer::TraceGenerationContext;
 pub use miden_air::trace::RowIndex;
 pub use parallel::{CORE_TRACE_WIDTH, build_trace, build_trace_with_max_len};
 pub use utils::{ChipletsLengths, TraceLenSummary};

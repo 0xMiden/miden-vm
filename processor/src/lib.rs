@@ -58,6 +58,7 @@ pub use miden_core::{
     },
     serde, utils,
 };
+pub use trace::TraceGenerationContext;
 
 pub mod advice {
     pub use miden_core::advice::{AdviceInputs, AdviceMap, AdviceStackBuilder};
