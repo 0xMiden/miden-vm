@@ -110,14 +110,29 @@ pub trait PackageRegistry {
 
     /// Returns true if the specific `version` of `package` exists in the registry.
     fn is_version_available(&self, package: &PackageId, version: &Version) -> bool {
-        self.available_versions(package)
-            .map(|versions| versions.contains_key(version))
-            .unwrap_or(false)
+        if version.digest.is_some() {
+            // Search for exact matches when a digest is provided
+            self.available_versions(package)
+                .map(|versions| versions.contains_key(version))
+                .unwrap_or(false)
+        } else {
+            // Search for any matching version if no digest is provided
+            self.available_versions(package)
+                .map(|versions| versions.range(version.as_range()).next_back().is_some())
+                .unwrap_or(false)
+        }
     }
 
     /// Return the metadata for `package` at `version`, if present.
     fn get_by_version(&self, package: &PackageId, version: &Version) -> Option<&PackageRecord> {
-        self.available_versions(package).and_then(|versions| versions.get(version))
+        if version.digest.is_some() {
+            self.available_versions(package).and_then(|versions| versions.get(version))
+        } else {
+            // Search for any matching version if no digest is provided
+            self.available_versions(package).and_then(|versions| {
+                versions.range(version.as_range()).next_back().map(|(_, record)| record)
+            })
+        }
     }
 
     /// Return the metadata for `package` with `digest`, if present.

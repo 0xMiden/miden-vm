@@ -32,7 +32,7 @@ pub enum InvalidVersionError {
 /// * Record multiple entries in the index for the same semantic version string, when multiple
 ///   assembled packages with that version are present, disambiguating using the content digest.
 /// * Provide a total ordering for package versions that may or may not include a specific digest
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Version {
     /// The semantic version information
     ///
@@ -72,6 +72,29 @@ impl Version {
     /// Construct a [Version] from its component parts.
     pub fn new(version: SemVer, digest: Word) -> Self {
         Self { version, digest: Some(digest.into()) }
+    }
+
+    /// Get a [Version] without an attached digest for comparison purposes
+    pub fn without_digest(&self) -> Self {
+        Self {
+            version: self.version.clone(),
+            digest: None,
+        }
+    }
+
+    /// Get a [core::ops::Range] which can be used to select all available versions with the same
+    /// semantic version, but with possibly-differing digests
+    pub fn as_range(&self) -> core::ops::Range<Version> {
+        let start = self.without_digest();
+        let mut end = start.clone();
+        end.version.patch += 1;
+
+        start..end
+    }
+
+    /// Returns true if `self` and `other` are equivalent with regards to semantic versioning
+    pub fn is_semantically_equivalent(&self, other: &Self) -> bool {
+        self.version.cmp_precedence(&other.version).is_eq()
     }
 
     /// Check if this version satisfies the given `requirement`.
@@ -136,22 +159,6 @@ impl fmt::Display for Version {
     }
 }
 
-impl Eq for Version {}
-impl PartialEq for Version {
-    fn eq(&self, other: &Self) -> bool {
-        if self.version != other.version {
-            return false;
-        }
-        if let Some(l) = self.digest.as_ref()
-            && let Some(r) = other.digest.as_ref()
-        {
-            l == r
-        } else {
-            true
-        }
-    }
-}
-
 impl PartialOrd for Version {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         Some(self.cmp(other))
@@ -162,12 +169,11 @@ impl Ord for Version {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         use core::cmp::Ordering;
         self.version.cmp_precedence(&other.version).then_with(|| {
-            if let Some(l) = self.digest.as_ref()
-                && let Some(r) = other.digest.as_ref()
-            {
-                l.cmp(r)
-            } else {
-                Ordering::Equal
+            match (self.digest.as_ref(), other.digest.as_ref()) {
+                (None, None) => Ordering::Equal,
+                (Some(l), Some(r)) => l.cmp(r),
+                (None, Some(_)) => Ordering::Less,
+                (Some(_), None) => Ordering::Greater,
             }
         })
     }

@@ -40,17 +40,9 @@ impl InMemoryPackageRegistry {
         version: Version,
         record: PackageRecord,
     ) {
-        self.insert_or_refine(name.into(), version, record);
-    }
-
-    /// Returns all packages recorded in this registry.
-    pub fn packages(&self) -> &BTreeMap<PackageId, PackageVersions> {
-        &self.packages
-    }
-
-    fn insert_or_refine(&mut self, name: PackageId, version: Version, record: PackageRecord) {
         use alloc::collections::btree_map::Entry;
 
+        let name = name.into();
         match self.packages.entry(name) {
             Entry::Vacant(entry) => {
                 let versions = BTreeMap::from_iter([(version, record)]);
@@ -63,18 +55,16 @@ impl InMemoryPackageRegistry {
                         entry.insert(record);
                     },
                     Entry::Occupied(mut entry) => {
-                        if entry.key().digest.is_none() {
-                            if version.digest.is_some() {
-                                let _ = entry.remove_entry();
-                                versions.insert(version, record);
-                            } else {
-                                entry.insert(record);
-                            }
-                        }
+                        *entry.get_mut() = record;
                     },
                 }
             },
         }
+    }
+
+    /// Returns all packages recorded in this registry.
+    pub fn packages(&self) -> &BTreeMap<PackageId, PackageVersions> {
+        &self.packages
     }
 }
 
@@ -85,7 +75,7 @@ impl PackageRegistry for InMemoryPackageRegistry {
 
     #[inline]
     fn register(&mut self, name: PackageId, version: Version, record: PackageRecord) {
-        self.insert_or_refine(name, version, record);
+        self.insert_record(name, version, record);
     }
 }
 
