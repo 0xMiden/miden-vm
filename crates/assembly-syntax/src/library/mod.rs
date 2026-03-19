@@ -5,7 +5,9 @@ use miden_core::{
     advice::AdviceMap,
     mast::{MastForest, MastNodeExt, MastNodeId, UntrustedMastForest},
     program::Kernel,
-    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
+    },
 };
 use midenc_hir_type::{FunctionType, Type};
 #[cfg(feature = "arbitrary")]
@@ -301,6 +303,108 @@ impl Library {
             ..self
         }
     }
+
+    fn read_mast_forest<R: ByteReader>(
+        source: &mut R,
+        validate_mast_forest: bool,
+    ) -> Result<Arc<MastForest>, DeserializationError> {
+        let mast_forest = if validate_mast_forest {
+            UntrustedMastForest::read_from(source)?.validate().map_err(|err| {
+                DeserializationError::InvalidValue(format!(
+                    "library contains an invalid untrusted MAST forest: {err}"
+                ))
+            })?
+        } else {
+            MastForest::read_from(source)?
+        };
+
+        Ok(Arc::new(mast_forest))
+    }
+
+    fn read_from_with_mast_forest<R: ByteReader>(
+        source: &mut R,
+        mast_forest: Arc<MastForest>,
+    ) -> Result<Self, DeserializationError> {
+        let num_exports = source.read_usize()?;
+        if num_exports == 0 {
+            return Err(DeserializationError::InvalidValue(String::from("No exported procedures")));
+        };
+        let mut exports = BTreeMap::new();
+        for _ in 0..num_exports {
+            let tag = source.read_u8()?;
+            let path: PathBuf = source.read()?;
+            let path = Arc::<Path>::from(path.into_boxed_path());
+            let export = match tag {
+                0 => {
+                    let node = MastNodeId::from_u32_safe(source.read_u32()?, &mast_forest)?;
+                    let signature = if source.read_bool()? {
+                        Some(FunctionTypeDeserializer::read_from(source)?.0)
+                    } else {
+                        None
+                    };
+                    let attributes = AttributeSet::read_from(source)?;
+                    LibraryExport::Procedure(ProcedureExport {
+                        node,
+                        path: path.clone(),
+                        signature,
+                        attributes,
+                    })
+                },
+                1 => {
+                    let value = crate::ast::ConstantValue::read_from(source)?;
+                    LibraryExport::Constant(ConstantExport { path: path.clone(), value })
+                },
+                2 => {
+                    let ty = TypeDeserializer::read_from(source)?.0;
+                    LibraryExport::Type(TypeExport { path: path.clone(), ty })
+                },
+                invalid => {
+                    return Err(DeserializationError::InvalidValue(format!(
+                        "unknown LibraryExport tag: '{invalid}'"
+                    )));
+                },
+            };
+            let (path, export) = normalize_export_for_deserialization(export)
+                .map_err(DeserializationError::InvalidValue)?;
+            if exports.insert(path.clone(), export).is_some() {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "duplicate canonical export path in library artifact: '{path}'"
+                )));
+            }
+        }
+
+        let digest =
+            mast_forest.compute_nodes_commitment(exports.values().filter_map(|e| match e {
+                LibraryExport::Procedure(e) => Some(&e.node),
+                LibraryExport::Constant(_) | LibraryExport::Type(_) => None,
+            }));
+
+        Ok(Self { digest, exports, mast_forest })
+    }
+
+    /// Reads a library from `source` without validating the embedded MAST forest.
+    ///
+    /// This is only correct when serialization and deserialization happen within the same trust
+    /// domain. A typical use case is reloading bytes that were already validated before being
+    /// persisted to local storage controlled by the same trusted system.
+    ///
+    /// Do not use this for inbound artifact processing across a trust boundary, including bytes
+    /// received over the network or from another party. Authenticating the outer byte stream does
+    /// not prove that embedded MAST node digests are semantically valid.
+    pub fn read_from_unchecked<R: ByteReader>(
+        source: &mut R,
+    ) -> Result<Self, DeserializationError> {
+        let mast_forest = Self::read_mast_forest(source, false)?;
+        Self::read_from_with_mast_forest(source, mast_forest)
+    }
+
+    /// Reads a library from `bytes` without validating the embedded MAST forest.
+    ///
+    /// See [`Library::read_from_unchecked`].
+    pub fn read_from_bytes_unchecked(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        let mut source = SliceReader::new(bytes);
+        Self::read_from_unchecked(&mut source)
+    }
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -486,6 +590,14 @@ impl AsRef<Library> for KernelLibrary {
 }
 
 impl KernelLibrary {
+    fn try_from_library(library: Library) -> Result<Self, DeserializationError> {
+        Self::try_from(library).map_err(|err| {
+            DeserializationError::InvalidValue(format!(
+                "Failed to deserialize kernel library: {err}"
+            ))
+        })
+    }
+
     /// Returns the [Kernel] for this kernel library.
     pub fn kernel(&self) -> &Kernel {
         &self.kernel
@@ -499,6 +611,30 @@ impl KernelLibrary {
     /// Destructures this kernel library into individual parts.
     pub fn into_parts(self) -> (Kernel, ModuleInfo, Arc<MastForest>) {
         (self.kernel, self.kernel_info, self.library.mast_forest)
+    }
+
+    /// Reads a kernel library from `source` without validating the embedded MAST forest.
+    ///
+    /// This is only correct when serialization and deserialization happen within the same trust
+    /// domain. A typical use case is reloading bytes that were already validated before being
+    /// persisted to local storage controlled by the same trusted system.
+    ///
+    /// Do not use this for inbound artifact processing across a trust boundary, including bytes
+    /// received over the network or from another party. Authenticating the outer byte stream does
+    /// not prove that embedded MAST node digests are semantically valid.
+    pub fn read_from_unchecked<R: ByteReader>(
+        source: &mut R,
+    ) -> Result<Self, DeserializationError> {
+        let library = Library::read_from_unchecked(source)?;
+        Self::try_from_library(library)
+    }
+
+    /// Reads a kernel library from `bytes` without validating the embedded MAST forest.
+    ///
+    /// See [`KernelLibrary::read_from_unchecked`].
+    pub fn read_from_bytes_unchecked(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        let mut source = SliceReader::new(bytes);
+        Self::read_from_unchecked(&mut source)
     }
 }
 
@@ -634,68 +770,8 @@ impl Serializable for Library {
 /// NOTE: Serialization of libraries is likely to be deprecated in a future release
 impl Deserializable for Library {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let mast_forest =
-            Arc::new(UntrustedMastForest::read_from(source)?.validate().map_err(|err| {
-                DeserializationError::InvalidValue(format!(
-                    "library contains an invalid untrusted MAST forest: {err}"
-                ))
-            })?);
-
-        let num_exports = source.read_usize()?;
-        if num_exports == 0 {
-            return Err(DeserializationError::InvalidValue(String::from("No exported procedures")));
-        };
-        let mut exports = BTreeMap::new();
-        for _ in 0..num_exports {
-            let tag = source.read_u8()?;
-            let path: PathBuf = source.read()?;
-            let path = Arc::<Path>::from(path.into_boxed_path());
-            let export = match tag {
-                0 => {
-                    let node = MastNodeId::from_u32_safe(source.read_u32()?, &mast_forest)?;
-                    let signature = if source.read_bool()? {
-                        Some(FunctionTypeDeserializer::read_from(source)?.0)
-                    } else {
-                        None
-                    };
-                    let attributes = AttributeSet::read_from(source)?;
-                    LibraryExport::Procedure(ProcedureExport {
-                        node,
-                        path: path.clone(),
-                        signature,
-                        attributes,
-                    })
-                },
-                1 => {
-                    let value = crate::ast::ConstantValue::read_from(source)?;
-                    LibraryExport::Constant(ConstantExport { path: path.clone(), value })
-                },
-                2 => {
-                    let ty = TypeDeserializer::read_from(source)?.0;
-                    LibraryExport::Type(TypeExport { path: path.clone(), ty })
-                },
-                invalid => {
-                    return Err(DeserializationError::InvalidValue(format!(
-                        "unknown LibraryExport tag: '{invalid}'"
-                    )));
-                },
-            };
-            let (path, export) = normalize_export_for_deserialization(export)
-                .map_err(DeserializationError::InvalidValue)?;
-            if exports.insert(path.clone(), export).is_some() {
-                return Err(DeserializationError::InvalidValue(format!(
-                    "duplicate canonical export path in library artifact: '{path}'"
-                )));
-            }
-        }
-
-        let digest =
-            mast_forest.compute_nodes_commitment(exports.values().filter_map(|e| match e {
-                LibraryExport::Procedure(e) => Some(&e.node),
-                LibraryExport::Constant(_) | LibraryExport::Type(_) => None,
-            }));
-
-        Ok(Self { digest, exports, mast_forest })
+        let mast_forest = Self::read_mast_forest(source, true)?;
+        Self::read_from_with_mast_forest(source, mast_forest)
     }
 }
 
@@ -838,12 +914,7 @@ impl Serializable for KernelLibrary {
 impl Deserializable for KernelLibrary {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let library = Library::read_from(source)?;
-
-        Self::try_from(library).map_err(|err| {
-            DeserializationError::InvalidValue(format!(
-                "Failed to deserialize kernel library: {err}"
-            ))
-        })
+        Self::try_from_library(library)
     }
 }
 

@@ -455,7 +455,10 @@ fn locate_node_infos(bytes: &[u8]) -> (usize, usize) {
     (offset, node_count)
 }
 
-fn build_library_bytes_with_spoofed_first_node_digest(lib: &Library, spoof_seed: &str) -> Vec<u8> {
+fn build_library_bytes_with_spoofed_first_node_digest(
+    lib: &Library,
+    spoof_seed: &str,
+) -> (Vec<u8>, Word) {
     use miden_core::serde::{ByteWriter, Serializable};
 
     // Serialize the MastForest in stripped form so the byte layout is minimal and stable.
@@ -485,7 +488,7 @@ fn build_library_bytes_with_spoofed_first_node_digest(lib: &Library, spoof_seed:
     for export in lib.exports() {
         export.write_into(&mut bytes);
     }
-    bytes
+    (bytes, spoofed_digest)
 }
 
 #[test]
@@ -499,7 +502,8 @@ end
         .assemble_library([lib_src])
         .expect("library assembly must succeed");
 
-    let bytes = build_library_bytes_with_spoofed_first_node_digest(&lib, "spoofed-library-digest");
+    let (bytes, _) =
+        build_library_bytes_with_spoofed_first_node_digest(&lib, "spoofed-library-digest");
     let err = Library::read_from_bytes(&bytes)
         .expect_err("expected library deserialization to reject inconsistent node digests");
     assert!(
@@ -509,6 +513,28 @@ end
     assert!(
         err.to_string().contains("hash mismatch for node"),
         "expected digest mismatch failure, got: {err}"
+    );
+}
+
+#[test]
+fn unchecked_library_deserialisation_accepts_spoofed_mast_node_digests() {
+    let lib_src = r#"
+pub proc p
+    push.1
+end
+"#;
+    let lib = Assembler::default()
+        .assemble_library([lib_src])
+        .expect("library assembly must succeed");
+
+    let (bytes, spoofed_digest) =
+        build_library_bytes_with_spoofed_first_node_digest(&lib, "spoofed-library-digest");
+    let deserialized = Library::read_from_bytes_unchecked(&bytes)
+        .expect("unchecked library deserialization must accept spoofed node digests");
+
+    assert_eq!(
+        deserialized.mast_forest()[MastNodeId::new_unchecked(0)].digest(),
+        spoofed_digest
     );
 }
 
@@ -523,7 +549,7 @@ end
         .assemble_kernel(kernel_src)
         .expect("kernel assembly must succeed");
 
-    let bytes = build_library_bytes_with_spoofed_first_node_digest(
+    let (bytes, _) = build_library_bytes_with_spoofed_first_node_digest(
         kernel_lib.as_ref(),
         "spoofed-kernel-digest",
     );
@@ -536,6 +562,30 @@ end
     assert!(
         err.to_string().contains("hash mismatch for node"),
         "expected digest mismatch failure, got: {err}"
+    );
+}
+
+#[test]
+fn unchecked_kernel_library_deserialisation_accepts_spoofed_mast_node_digests() {
+    let kernel_src = r#"
+pub proc k1
+    push.1
+end
+"#;
+    let kernel_lib = Assembler::default()
+        .assemble_kernel(kernel_src)
+        .expect("kernel assembly must succeed");
+
+    let (bytes, spoofed_digest) = build_library_bytes_with_spoofed_first_node_digest(
+        kernel_lib.as_ref(),
+        "spoofed-kernel-digest",
+    );
+    let deserialized = KernelLibrary::read_from_bytes_unchecked(&bytes)
+        .expect("unchecked kernel deserialization must accept spoofed node digests");
+
+    assert_eq!(
+        deserialized.mast_forest()[MastNodeId::new_unchecked(0)].digest(),
+        spoofed_digest
     );
 }
 
