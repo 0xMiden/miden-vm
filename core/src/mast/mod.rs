@@ -1421,7 +1421,10 @@ impl<'de> Deserialize<'de> for MastForest {
 ///    stored digest.
 #[derive(Debug, Clone)]
 pub struct UntrustedMastForest {
-    decoded: serialization::DecodedSerializedForest,
+    bytes: Vec<u8>,
+    layout: serialization::ForestLayout,
+    advice_map: AdviceMap,
+    debug_info: DebugInfo,
 }
 
 impl UntrustedMastForest {
@@ -1455,12 +1458,15 @@ impl UntrustedMastForest {
     /// - External node digests are marshaled as opaque values and are not semantically resolved
     ///   here.
     pub fn validate(self) -> Result<MastForest, MastForestError> {
-        let mut forest =
-            self.decoded.into_mast_forest().map_err(MastForestError::Deserialization)?;
+        let is_hashless = self.layout.is_hashless();
+        let mut forest = self.into_materialized().map_err(MastForestError::Deserialization)?;
 
-        // Step 1: Recompute all non-external hashes. Untrusted validation never trusts
-        // serialized digests; overspecified trusted payload is accepted but ignored.
-        forest.recompute_node_hashes_in_place()?;
+        // Step 1: Recompute all non-external hashes when wire hashes were supplied. Hashless
+        // materialization already rebuilt digests from structure, so running the rebuild a second
+        // time only duplicates work.
+        if !is_hashless {
+            forest.recompute_node_hashes_in_place()?;
+        }
 
         // Step 2: Validate the recomputed forest.
         forest.validate()?;

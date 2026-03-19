@@ -657,8 +657,8 @@ fn debug_info_offset_after_advice_map(bytes: &[u8]) -> usize {
 }
 
 fn node_hash_digest_offset(view: &SerializedMastForest<'_>, node_index: usize) -> usize {
-    let digest_slot = view.digest_slot_by_node[node_index] as usize;
-    view.node_hash_offset.unwrap() + digest_slot * Word::min_serialized_size()
+    let digest_slot = view.digest_slot_at(node_index);
+    view.node_hash_offset().unwrap() + digest_slot * Word::min_serialized_size()
 }
 
 fn rewrite_debug_info_procedure_name_digest(
@@ -714,7 +714,7 @@ fn test_trusted_deserialize_rejects_truncated_after_node_info() {
 fn test_serialized_mast_forest_rejects_truncated_inside_node_info() {
     let bytes = sample_serialized_view_bytes();
     let view = SerializedMastForest::new(&bytes).unwrap();
-    let truncation_point = view.node_entry_offset + view.node_entry_size - 1;
+    let truncation_point = view.node_entry_offset() + view.node_entry_size() - 1;
 
     let truncated = bytes[..truncation_point].to_vec();
     assert_matches!(
@@ -895,7 +895,7 @@ fn test_serialized_mast_forest_hashless_omits_hash_section_and_recomputes_digest
     forest.write_hashless(&mut bytes);
     let view = SerializedMastForest::new(&bytes).unwrap();
     assert!(view.is_hashless());
-    assert!(view.node_hash_offset.is_none());
+    assert!(view.node_hash_offset().is_none());
     for index in 0..view.node_count() {
         assert_eq!(forest.nodes()[index].digest(), view.node_info_at(index).unwrap().digest());
     }
@@ -912,7 +912,7 @@ fn test_serialized_mast_forest_hashless_accepts_external_nodes_parse_only() {
     forest.write_hashless(&mut bytes);
     let view = SerializedMastForest::new(&bytes).unwrap();
     assert!(view.is_hashless());
-    assert!(view.node_hash_offset.is_none());
+    assert!(view.node_hash_offset().is_none());
     assert_eq!(view.node_count(), 1);
     assert!(view.node_info_at(0).is_ok());
     assert_eq!(view.node_digest_at(0).unwrap(), external_digest);
@@ -1146,7 +1146,7 @@ fn mast_forest_deserialize_invalid_ops_offset_fails() {
     let _basic_block_data: Vec<u8> = Deserializable::read_from(&mut reader).unwrap();
 
     let view = SerializedMastForest::new(&serialized).unwrap();
-    let node_entry_offset = view.node_entry_offset;
+    let node_entry_offset = view.node_entry_offset();
 
     // Corrupt the ops_offset field with an out-of-bounds value
     let block_discriminant: u64 = 3;
@@ -1546,8 +1546,8 @@ fn test_hashless_serialization_smaller_than_stripped() {
 
     let stripped_view = SerializedMastForest::new(&stripped_bytes).unwrap();
     let hashless_view = SerializedMastForest::new(&hashless_bytes).unwrap();
-    assert!(stripped_view.node_hash_offset.is_some());
-    assert!(hashless_view.node_hash_offset.is_none());
+    assert!(stripped_view.node_hash_offset().is_some());
+    assert!(hashless_view.node_hash_offset().is_none());
 }
 
 /// Test that stripped serialization round-trips correctly with empty DebugInfo.
@@ -1759,6 +1759,25 @@ fn test_trusted_rejects_hashless() {
     );
 }
 
+#[test]
+fn test_trusted_rejects_truncated_hashless_before_layout_scan() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let mut hashless_bytes = Vec::new();
+    forest.write_hashless(&mut hashless_bytes);
+    hashless_bytes.truncate(8);
+
+    let result = MastForest::read_from_bytes(&hashless_bytes);
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg)) if msg.contains("HASHLESS")
+    );
+}
+
 /// Test that hashless without stripped is rejected.
 #[test]
 fn test_hashless_requires_stripped() {
@@ -1932,7 +1951,7 @@ fn test_untrusted_hashless_validate_recomputes_without_wire_hash_section() {
     let mut hashless_bytes = Vec::new();
     forest.write_hashless(&mut hashless_bytes);
     let view = SerializedMastForest::new(&hashless_bytes).unwrap();
-    assert!(view.node_hash_offset.is_none());
+    assert!(view.node_hash_offset().is_none());
 
     let (untrusted, flags) =
         UntrustedMastForest::read_from_bytes_with_flags(&hashless_bytes).unwrap();
@@ -2703,7 +2722,7 @@ fn locate_single_block_indptr_and_digest_offsets(bytes: &[u8]) -> (usize, usize)
     let bb_payload_start = cursor.position();
     let bb_payload_end = bb_payload_start + bb_data_len;
     let view = SerializedMastForest::new(bytes).unwrap();
-    let node_entries_start = view.node_entry_offset;
+    let node_entries_start = view.node_entry_offset();
 
     // node entry: MastNodeType (8 bytes)
     let node_type_u64 = u64::from_le_bytes(
@@ -2718,7 +2737,7 @@ fn locate_single_block_indptr_and_digest_offsets(bytes: &[u8]) -> (usize, usize)
     assert!(payload <= u32::MAX as u64, "Block ops_offset payload must fit in u32");
     let ops_offset = payload as usize;
 
-    let digest_offset = view.node_hash_offset.unwrap();
+    let digest_offset = view.node_hash_offset().unwrap();
 
     // Locate the start of the packed indptr for the first (and only) batch.
     let block_start = bb_payload_start + ops_offset;
