@@ -17,7 +17,7 @@ It is intentionally implementation-first. Where the current behavior appears sur
 ### Source projects
 
 - A source project is versioned only by the semantic version declared in `miden-project.toml` under `[package].version`.
-- Workspace members may inherit a version from `[workspace.package].version`, but the effective version is still a semantic version only.
+- Workspace members may inherit a version from `[workspace.package].version` using dotted-key syntax in the member manifest, e.g. `[package] version.workspace = true`, but the effective version is still a semantic version only.
 - A source project does not have an artifact digest until it is assembled.
 
 ### Assembled packages

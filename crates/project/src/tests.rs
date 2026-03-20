@@ -150,3 +150,43 @@ inherits = "dev"
 
     Ok(())
 }
+
+#[test]
+fn workspace_package_version_can_be_inherited_with_dotted_key_syntax() -> Result<(), Report> {
+    let tempdir = TempDir::new().unwrap();
+    let root = tempdir.path().join("workspace-version");
+    let app_dir = root.join("app");
+    fs::create_dir_all(&app_dir).unwrap();
+
+    fs::write(
+        root.join("miden-project.toml"),
+        r#"[workspace]
+members = ["app"]
+
+[workspace.package]
+version = "0.1.0"
+"#,
+    )
+    .unwrap();
+
+    let app_manifest_path = app_dir.join("miden-project.toml");
+    fs::write(
+        &app_manifest_path,
+        r#"[package]
+name = "app"
+version.workspace = true
+"#,
+    )
+    .unwrap();
+
+    let context = TestContext::default();
+    let Project::WorkspacePackage { package, workspace: _ } =
+        Project::load(&app_dir, &context.source_manager)?
+    else {
+        panic!("expected workspace package")
+    };
+
+    assert_eq!(format!("{}", package.version()), "0.1.0");
+
+    Ok(())
+}

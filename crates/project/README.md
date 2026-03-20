@@ -64,6 +64,16 @@ This represents an empty workspace for a new project at version `0.1.0`.
 
 The next step is to create subdirectories for each sub-project, and initialize those as called for by the tooling of the language used in that project.
 
+Workspace members can inherit package metadata from `[workspace.package]` using dotted-key syntax in their own `[package]` table. For example:
+
+```toml
+[package]
+name = "app"
+version.workspace = true
+```
+
+The same form applies to other inheritable package metadata fields, e.g. `description.workspace = true`.
+
 For examples of Miden Assembly and Rust-based projects, see the section below titled [Defining a project](#defining-a-project).
 
 ## Defining a project
