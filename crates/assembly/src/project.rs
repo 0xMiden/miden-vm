@@ -766,6 +766,7 @@ struct LoadedTargetSources {
     support: Vec<Box<Module>>,
 }
 
+#[derive(Debug)]
 struct TargetSourcePaths {
     root: PathBuf,
     root_dir: PathBuf,

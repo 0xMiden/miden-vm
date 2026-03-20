@@ -430,7 +430,7 @@ impl Assembler {
                     .manifest
                     .exports()
                     .filter_map(|export| {
-                        if export.path().is_kernel_path()
+                        if export.namespace().is_kernel_path()
                             && let PackageExport::Procedure(p) = export
                         {
                             Some(p.digest)
