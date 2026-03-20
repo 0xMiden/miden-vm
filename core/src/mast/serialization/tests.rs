@@ -1200,7 +1200,7 @@ fn test_batched_construction_preserves_structure() {
 fn assert_header_flags(bytes: &[u8], expected_flags: u8) {
     assert_eq!(&bytes[0..4], b"MAST", "Magic should be MAST");
     assert_eq!(bytes[4], expected_flags, "unexpected serialization flags");
-    assert_eq!(&bytes[5..8], &[0, 0, 4], "Version should be [0, 0, 4]");
+    assert_eq!(&bytes[5..8], &[0, 0, 3], "Version should be [0, 0, 3]");
 }
 
 #[test]

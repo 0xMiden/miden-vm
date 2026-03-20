@@ -151,10 +151,9 @@ const FLAGS_RESERVED_MASK: u8 = 0xfc;
 ///   separately in DebugInfo. Removed `should_break` field from AssemblyOp serialization (#2646).
 ///   Removed `breakpoint` instruction (#2655).
 /// - [0, 0, 3]: Added HASHLESS flag (bit 1). HASHLESS implies STRIPPED. Trusted deserialization
-///   rejects HASHLESS.
-/// - [0, 0, 4]: Split fixed-width node entries from digest storage. External digests moved to a
-///   dedicated section. Hashless serialization omits the general node-hash section entirely.
-const VERSION: [u8; 3] = [0, 0, 4];
+///   rejects HASHLESS. Split fixed-width node entries from digest storage. External digests moved
+///   to a dedicated section. Hashless serialization omits the general node-hash section entirely.
+const VERSION: [u8; 3] = [0, 0, 3];
 
 // MAST FOREST SERIALIZATION/DESERIALIZATION
 // ================================================================================================
