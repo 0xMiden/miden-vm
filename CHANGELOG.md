@@ -50,6 +50,7 @@
 #### Fixes
 
 - Fixed stale `ReplayProcessor` doc comment links to `ExecutionTracer` after module-structure refactors.
+- [BREAKING] Refactored MAST forest serialization around fixed-layout full, stripped, and hashless sections, and bumped the MAST wire format to `0.0.3` ([#2765](https://github.com/0xMiden/miden-vm/pull/2765)).
 
 ## 0.22.1 (2026-04-07)
 
