@@ -9,7 +9,7 @@ use miden_core::{
 use crate::{
     BaseHost, Host, SyncHost,
     errors::{MapExecErrWithOpIdx, advice_error_with_context, event_error_with_context},
-    fast::{BreakReason, FastProcessor, HostAdapter},
+    fast::{BreakReason, FastProcessor},
 };
 
 mod sys_event_handlers;
@@ -127,19 +127,11 @@ impl FastProcessor {
         let event_id = EventId::from_felt(self.stack_get(0));
 
         if let Some(system_event) = SystemEvent::from_event_id(event_id) {
-            let host_adapter = HostAdapter::new(host);
-            return self.handle_system_event(
-                system_event,
-                current_forest,
-                node_id,
-                &host_adapter,
-                op_idx,
-            );
+            return self.handle_system_event(system_event, current_forest, node_id, host, op_idx);
         }
 
         let processor_state = self.state();
         let mutations = host.on_event(&processor_state).await;
-        let host_adapter = HostAdapter::new(host);
-        self.apply_host_event_mutations(current_forest, node_id, &host_adapter, event_id, mutations)
+        self.apply_host_event_mutations(current_forest, node_id, host, event_id, mutations)
     }
 }

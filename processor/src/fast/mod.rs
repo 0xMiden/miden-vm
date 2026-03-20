@@ -45,53 +45,6 @@ use step::{NeverStopper, StepStopper};
 #[cfg(test)]
 mod tests;
 
-/// Adapts an async [`Host`] to the shared [`BaseHost`] surface used by the sans-IO core loop.
-struct HostAdapter<'a, H> {
-    host: &'a mut H,
-}
-
-impl<'a, H> HostAdapter<'a, H> {
-    /// Wraps an async host so it can satisfy the shared host surface.
-    fn new(host: &'a mut H) -> Self {
-        Self { host }
-    }
-}
-
-impl<H> BaseHost for HostAdapter<'_, H>
-where
-    H: Host,
-{
-    fn get_label_and_source_file(
-        &self,
-        location: &miden_debug_types::Location,
-    ) -> (miden_debug_types::SourceSpan, Option<Arc<miden_debug_types::SourceFile>>) {
-        self.host.get_label_and_source_file(location)
-    }
-
-    fn on_debug(
-        &mut self,
-        process: &ProcessorState,
-        options: &miden_core::operations::DebugOptions,
-    ) -> Result<(), crate::DebugError> {
-        self.host.on_debug(process, options)
-    }
-
-    fn on_trace(
-        &mut self,
-        process: &ProcessorState,
-        trace_id: u32,
-    ) -> Result<(), crate::TraceError> {
-        self.host.on_trace(process, trace_id)
-    }
-
-    fn resolve_event(
-        &self,
-        event_id: miden_core::events::EventId,
-    ) -> Option<&miden_core::events::EventName> {
-        self.host.resolve_event(event_id)
-    }
-}
-
 // CONSTANTS
 // ================================================================================================
 
@@ -888,18 +841,9 @@ impl FastProcessor {
         S: Stopper<Processor = Self>,
         T: Tracer<Processor = Self>,
     {
-        while let ControlFlow::Break(internal_break_reason) = {
-            let mut host_adapter = HostAdapter::new(host);
-            execute_impl(
-                self,
-                continuation_stack,
-                current_forest,
-                kernel,
-                &mut host_adapter,
-                tracer,
-                stopper,
-            )
-        } {
+        while let ControlFlow::Break(internal_break_reason) =
+            execute_impl(self, continuation_stack, current_forest, kernel, host, tracer, stopper)
+        {
             match internal_break_reason {
                 InternalBreakReason::User(break_reason) => return ControlFlow::Break(break_reason),
                 InternalBreakReason::Emit {
@@ -952,26 +896,24 @@ impl FastProcessor {
                     {
                         Ok(result) => result,
                         Err(err) => {
-                            let mut host_adapter = HostAdapter::new(host);
                             let maybe_enriched_err = maybe_use_caller_error_context(
                                 err,
                                 current_forest,
                                 continuation_stack,
-                                &mut host_adapter,
+                                host,
                             );
 
                             return ControlFlow::Break(BreakReason::Err(maybe_enriched_err));
                         },
                     };
 
-                    let mut host_adapter = HostAdapter::new(host);
                     finish_load_mast_forest_from_external(
                         root_id,
                         new_forest,
                         external_node_id,
                         current_forest,
                         continuation_stack,
-                        &mut host_adapter,
+                        host,
                         tracer,
                     )?;
                 },
@@ -1128,30 +1070,25 @@ impl FastProcessor {
         let mast_forest = if let Some(mast_forest) = host.get_mast_forest(&node_digest).await {
             mast_forest
         } else {
-            let host_adapter = HostAdapter::new(host);
             return Err(crate::errors::procedure_not_found_with_context(
                 node_digest,
                 current_forest,
                 node_id,
-                &host_adapter,
+                host,
             ));
         };
 
         let root_id = mast_forest.find_procedure_root(node_digest).ok_or_else(|| {
-            let host_adapter = HostAdapter::new(host);
             Err::<(), _>(OperationError::MalformedMastForestInHost { root_digest: node_digest })
-                .map_exec_err(current_forest, node_id, &host_adapter)
+                .map_exec_err(current_forest, node_id, host)
                 .unwrap_err()
         })?;
 
-        {
-            let host_adapter = HostAdapter::new(host);
-            self.advice.extend_map(mast_forest.advice_map()).map_exec_err(
-                current_forest,
-                node_id,
-                &host_adapter,
-            )?;
-        }
+        self.advice.extend_map(mast_forest.advice_map()).map_exec_err(
+            current_forest,
+            node_id,
+            host,
+        )?;
 
         Ok((root_id, mast_forest))
     }
