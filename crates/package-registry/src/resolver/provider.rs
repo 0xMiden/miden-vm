@@ -7,7 +7,7 @@ use smallvec::SmallVec;
 use super::{version_set::VersionSetFilter, *};
 #[cfg(test)]
 use crate::InMemoryPackageRegistry;
-use crate::{PackageId, PackageRecord, PackageRegistry, SemVer, Version};
+use crate::{PackageId, PackageRecord, PackageRegistry, SemVer, Version, VersionRequirement};
 
 /// Represents package priorities in the resolver.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -122,12 +122,21 @@ impl<R: PackageRegistry + ?Sized> DependencyProvider for PackageResolver<'_, R> 
     ) -> Self::Priority {
         if let Some(priority) = self.context.try_prioritize(package) {
             priority
-        } else if matches!(range.filter(), VersionSetFilter::Digest(_)) {
-            PackagePriority::Digest(Reverse(3))
-        } else if range.range().as_singleton().is_some() {
-            PackagePriority::Singleton(Reverse(2))
         } else {
-            PackagePriority::Weak(Reverse(1))
+            let version_count = self
+                .index
+                .available_versions(package)
+                .map(|versions| {
+                    versions
+                        .keys()
+                        .filter(|version| {
+                            <VersionSet as pubgrub::VersionSet>::contains(range, version)
+                        })
+                        .count()
+                })
+                .unwrap_or(0)
+                .min(u8::MAX as usize) as u8;
+            PackagePriority::Weak(Reverse(version_count))
         }
     }
 
@@ -141,7 +150,7 @@ impl<R: PackageRegistry + ?Sized> DependencyProvider for PackageResolver<'_, R> 
         };
         let filter = range.filter();
         let ranges = range.range();
-        if ranges.is_empty()
+        if range.is_digest_only()
             && let VersionSetFilter::Digest(digests) = filter
         {
             let version = versions
@@ -153,10 +162,6 @@ impl<R: PackageRegistry + ?Sized> DependencyProvider for PackageResolver<'_, R> 
                 .cloned();
 
             Ok(version)
-        } else if let Some(version) = ranges.as_singleton()
-            && let Some((version, _)) = versions.get_key_value(version)
-        {
-            Ok(Some(version.clone()))
         } else if let Some((start, end)) = ranges.bounding_range() {
             let range = (start.cloned(), end.cloned());
             let version = versions
@@ -199,11 +204,36 @@ impl<R: PackageRegistry + ?Sized> DependencyProvider for PackageResolver<'_, R> 
             )));
         };
 
-        Ok(Dependencies::Available(record_to_version_sets(record)))
+        Ok(Dependencies::Available(self.record_to_version_sets(record)))
     }
 
     fn should_cancel(&self) -> Result<(), Self::Err> {
         Ok(())
+    }
+}
+
+impl<R: PackageRegistry + ?Sized> PackageResolver<'_, R> {
+    fn record_to_version_sets(
+        &self,
+        record: &PackageRecord,
+    ) -> pubgrub::DependencyConstraints<PackageId, VersionSet> {
+        record
+            .dependencies()
+            .iter()
+            .map(|(name, requirement)| {
+                let set = match requirement {
+                    VersionRequirement::Digest(digest) => self
+                        .index
+                        .available_versions(name)
+                        .map(|versions| {
+                            VersionSet::from_available_digest(digest.into_inner(), versions.keys())
+                        })
+                        .unwrap_or_else(<VersionSet as pubgrub::VersionSet>::empty),
+                    _ => VersionSet::from(requirement.clone()),
+                };
+                (name.clone(), set)
+            })
+            .collect()
     }
 }
 
@@ -258,19 +288,6 @@ impl<R: PackageRegistry + ?Sized> From<pubgrub::PubGrubError<PackageResolver<'_,
             PubGrubError::ErrorInShouldCancel(_err) => Self::Cancelled { reason: String::new() },
         }
     }
-}
-
-fn record_to_version_sets(
-    record: &PackageRecord,
-) -> pubgrub::DependencyConstraints<PackageId, VersionSet> {
-    record
-        .dependencies()
-        .iter()
-        .map(|(name, requirement)| {
-            let set = VersionSet::from(requirement.clone());
-            (name.clone(), set)
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -587,6 +604,27 @@ mod tests {
     }
 
     #[test]
+    fn resolver_resolves_semantic_singleton_to_digest_qualified_version() {
+        let b_digest = Rpo256::hash(b"b");
+        let index = InMemoryPackageRegistry::from_iter([
+            ("a", vec![("0.1.0".parse().unwrap(), vec![("b", req("=1.0.0"))])]),
+            (
+                "b",
+                vec![
+                    (Version::new("1.0.0".parse().unwrap(), b_digest), vec![]),
+                    ("2.0.0".parse().unwrap(), vec![]),
+                ],
+            ),
+        ]);
+
+        let resolver = PackageResolver::for_package("a", "0.1.0".parse().unwrap(), &index);
+        let selected = resolver.resolve().expect("failed to resolve");
+        let expected = select(&[("a", "0.1.0"), ("b", &format!("1.0.0@{b_digest}"))]);
+
+        assert_selected(&selected, &expected);
+    }
+
+    #[test]
     fn resolver_exact_requirement_ignores_newer_versions_with_same_digest() {
         let b_digest = Rpo256::hash(b"b");
         let index = InMemoryPackageRegistry::from_iter([
@@ -637,7 +675,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "digest-only requirements do not currently prefer the most-compatible shared-digest version"]
     fn resolver_prefers_compatible_shared_digest_version() {
         let digest = Rpo256::hash(b"shared");
         let index = InMemoryPackageRegistry::from_iter([
