@@ -15,7 +15,6 @@ use std::{
 use miden_assembly_syntax::{
     ModuleParser,
     ast::{self, ModuleKind, Path as MasmPath},
-    debuginfo::SourceManagerExt,
     diagnostics::Report,
 };
 use miden_core::{
@@ -28,7 +27,7 @@ use miden_mast_package::{
 };
 use miden_package_registry::{PackageId, PackageStore};
 use miden_project::{
-    Linkage, Package as ProjectPackage, Profile, ProjectDependencyGraph,
+    DependencyVersionScheme, Linkage, Package as ProjectPackage, Profile, ProjectDependencyGraph,
     ProjectDependencyGraphBuilder, ProjectDependencyNodeProvenance, ProjectSource,
     ProjectSourceOrigin, Target,
 };
@@ -245,17 +244,10 @@ where
             // NOTE: If there are conflicting runtime dependencies on the same package, an error
             // will be raised. In the future, we may wish to relax this restriction, since such
             // dependencies are technically satisfiable.
-            if matches!(edge.linkage, Linkage::Dynamic)
-                || matches!(dependency_package.kind, TargetType::Kernel)
-            {
+            if matches!(edge.linkage, Linkage::Dynamic) && !dependency_package.is_kernel() {
                 merge_runtime_dependency(
                     &mut runtime_dependencies,
-                    PackageDependency {
-                        name: dependency_package.name.clone(),
-                        version: dependency_package.version.clone(),
-                        kind: dependency_package.kind,
-                        digest: dependency_package.digest(),
-                    },
+                    package_dependency(dependency_package.as_ref()),
                 )?;
             }
             for dependency in dependency_package.manifest.dependencies() {
@@ -355,7 +347,11 @@ where
                 workspace_root,
                 ..
             }) => {
-                let project = load_project_package(self.assembler.source_manager(), manifest_path)?;
+                let project = load_project_package(
+                    self.assembler.source_manager(),
+                    package_id,
+                    manifest_path,
+                )?;
                 let target = project
                     .library_target()
                     .map(|target| target.inner().clone())
@@ -536,24 +532,6 @@ where
         })?;
 
         let mut inputs = Vec::<(String, PathBuf)>::new();
-        let manifest_label = manifest_path
-            .strip_prefix(project_root)
-            .unwrap_or(manifest_path)
-            .display()
-            .to_string();
-        inputs.push((format!("manifest:{manifest_label}"), manifest_path.to_path_buf()));
-
-        if let Some(workspace_root) = workspace_root {
-            let workspace_manifest = workspace_root.join("miden-project.toml");
-            if workspace_manifest.exists() {
-                let label = workspace_manifest
-                    .strip_prefix(workspace_root)
-                    .unwrap_or(workspace_manifest.as_path())
-                    .display()
-                    .to_string();
-                inputs.push((format!("workspace:{label}"), workspace_manifest));
-            }
-        }
 
         let root_label = source_paths
             .root
@@ -578,6 +556,18 @@ where
             target.ty,
             target.namespace.inner()
         );
+        if workspace_root.is_some() {
+            material.push_str("manifest:effective\n");
+            material.push_str(&effective_manifest_hash_input(project)?);
+            material.push('\n');
+        } else {
+            let manifest_label = manifest_path
+                .strip_prefix(project_root)
+                .unwrap_or(manifest_path)
+                .display()
+                .to_string();
+            inputs.push((format!("manifest:{manifest_label}"), manifest_path.to_path_buf()));
+        }
         for (label, path) in inputs {
             let bytes = fs::read(&path).map_err(|error| {
                 Report::msg(format!("failed to read source input '{}': {error}", path.display()))
@@ -869,16 +859,48 @@ impl Deserializable for PackageBuildProvenance {
 
 fn load_project_package(
     source_manager: Arc<dyn SourceManager>,
+    expected_name: &PackageId,
     manifest_path: &FsPath,
 ) -> Result<Arc<ProjectPackage>, Report> {
-    let source = source_manager.load_file(manifest_path).map_err(Report::msg)?;
-    Ok(Arc::from(ProjectPackage::load(source)?))
+    miden_project::Project::load_project_reference(
+        expected_name.as_ref(),
+        manifest_path,
+        source_manager.as_ref(),
+    )
+    .map(|project| project.package())
 }
 
 fn project_manifest_path(project: &ProjectPackage) -> Result<&FsPath, Report> {
     project.manifest_path().ok_or_else(|| {
         Report::msg(format!("project '{}' is missing its manifest path", project.name().inner()))
     })
+}
+
+fn effective_manifest_hash_input(project: &ProjectPackage) -> Result<String, Report> {
+    let mut manifest = project.to_toml()?;
+
+    let mut workspace_dependencies = project
+        .dependencies()
+        .iter()
+        .filter_map(|dependency| match dependency.scheme() {
+            DependencyVersionScheme::Workspace { member } => Some((
+                dependency.name().to_string(),
+                member.path().to_string(),
+                dependency.linkage(),
+            )),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    workspace_dependencies.sort_by(|a, b| a.0.cmp(&b.0));
+
+    if !workspace_dependencies.is_empty() {
+        manifest.push_str("\n# resolved_workspace_dependencies\n");
+        for (name, member_path, linkage) in workspace_dependencies {
+            manifest.push_str(&format!("{name}={member_path}:{linkage}\n"));
+        }
+    }
+
+    Ok(manifest)
 }
 
 fn resolve_profile<'a>(project: &'a ProjectPackage, name: &str) -> Result<&'a Profile, Report> {
@@ -908,6 +930,15 @@ fn target_root_module_kind(ty: TargetType) -> ModuleKind {
         TargetType::Executable => ModuleKind::Executable,
         TargetType::Kernel => ModuleKind::Kernel,
         _ => ModuleKind::Library,
+    }
+}
+
+fn package_dependency(package: &MastPackage) -> PackageDependency {
+    PackageDependency {
+        name: package.name.clone(),
+        version: package.version.clone(),
+        kind: package.kind,
+        digest: package.digest(),
     }
 }
 
@@ -1045,7 +1076,6 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-    use crate::DefaultSourceManager;
     use crate::testing::{TestContext, TestRegistry};
 
     #[test]
@@ -2062,7 +2092,6 @@ end
     }
 
     #[test]
-    #[ignore = "current implementation reloads workspace-member source dependencies outside workspace context"]
     fn workspace_member_source_dependencies_preserve_workspace_inheritance() {
         let tempdir = TempDir::new().unwrap();
         let workspace_dir = tempdir.path().join("workspace");
@@ -2087,6 +2116,7 @@ dep = { path = "dep" }
             &dep_dir.join("miden-project.toml"),
             r#"[package]
 name = "dep"
+version.workspace = true
 
 [lib]
 path = "mod.masm"
