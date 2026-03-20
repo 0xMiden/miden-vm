@@ -985,6 +985,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+    use crate::DefaultSourceManager;
     use crate::testing::{TestContext, TestRegistry};
 
     #[test]
@@ -1998,5 +1999,154 @@ end
                 .collect::<Vec<_>>(),
             vec![format!("dep@1.0.0#{dep_digest}")]
         );
+    }
+
+    #[test]
+    #[ignore = "current implementation reloads workspace-member source dependencies outside workspace context"]
+    fn workspace_member_source_dependencies_preserve_workspace_inheritance() {
+        let tempdir = TempDir::new().unwrap();
+        let workspace_dir = tempdir.path().join("workspace");
+        let dep_dir = workspace_dir.join("dep");
+        let app_dir = workspace_dir.join("app");
+        fs::create_dir_all(&dep_dir).unwrap();
+        fs::create_dir_all(&app_dir).unwrap();
+
+        write_file(
+            &workspace_dir.join("miden-project.toml"),
+            r#"[workspace]
+members = ["dep", "app"]
+
+[workspace.package]
+version = "1.0.0"
+
+[workspace.dependencies]
+dep = { path = "dep" }
+"#,
+        );
+        write_file(
+            &dep_dir.join("miden-project.toml"),
+            r#"[package]
+name = "dep"
+
+[lib]
+path = "mod.masm"
+"#,
+        );
+        write_file(
+            &dep_dir.join("mod.masm"),
+            r#"pub proc foo
+    push.1
+end
+"#,
+        );
+
+        let app_manifest = app_dir.join("miden-project.toml");
+        write_file(
+            &app_manifest,
+            r#"[package]
+name = "app"
+version = "1.0.0"
+
+[lib]
+path = "mod.masm"
+
+[dependencies]
+dep.workspace = true
+"#,
+        );
+        write_file(
+            &app_dir.join("mod.masm"),
+            r#"pub proc bar
+    exec.::dep::foo
+end
+"#,
+        );
+
+        let mut context = TestContext::new();
+        let package = context
+            .assemble_library_package(&app_manifest, None)
+            .expect("workspace member dependency should assemble with inherited workspace config");
+        assert!(
+            context
+                .registry()
+                .is_semver_available(&PackageId::from("dep"), &"1.0.0".parse().unwrap())
+        );
+
+        let dependencies = package.manifest.dependencies().collect::<Vec<_>>();
+        assert_eq!(dependencies.len(), 1);
+        assert_eq!(dependencies[0].name, PackageId::from("dep"));
+        assert_eq!(dependencies[0].version.to_string(), "1.0.0");
+    }
+
+    #[test]
+    #[ignore = "current executable package conversion drops kernel information"]
+    fn executable_packages_preserve_kernel_when_converted_back_to_program() {
+        use alloc::collections::BTreeMap;
+
+        use miden_assembly_syntax::library::{LibraryExport, ProcedureExport};
+
+        let source_manager = Arc::new(DefaultSourceManager::default());
+        let kernel_lib = Assembler::new(source_manager.clone())
+            .assemble_kernel(
+                r#"pub proc foo
+    caller
+end
+"#,
+            )
+            .expect("kernel assembly should succeed");
+        let expected_kernel = kernel_lib.kernel().clone();
+        assert!(!expected_kernel.is_empty());
+
+        let program = Assembler::with_kernel(source_manager, kernel_lib.clone())
+            .assemble_program(
+                r#"begin
+    syscall.foo
+end
+"#,
+            )
+            .expect("program assembly should succeed");
+        let entrypoint_path: Arc<MasmPath> =
+            MasmPath::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME).into();
+        let executable_library = Arc::new(
+            miden_assembly_syntax::Library::new(
+                program.mast_forest().clone(),
+                BTreeMap::from_iter([(
+                    entrypoint_path.clone(),
+                    LibraryExport::Procedure(ProcedureExport {
+                        node: program.entrypoint(),
+                        path: entrypoint_path,
+                        signature: None,
+                        attributes: Default::default(),
+                    }),
+                )]),
+            )
+            .expect("executable library construction should succeed"),
+        );
+        let kernel_package = Arc::<MastPackage>::from(MastPackage::from_library(
+            "kernel".into(),
+            "1.0.0".parse().unwrap(),
+            TargetType::Kernel,
+            Arc::new(kernel_lib.as_ref().clone()),
+            [],
+        ));
+        let mut package = MastPackage::from_library(
+            "app:main".into(),
+            "1.0.0".parse().unwrap(),
+            TargetType::Executable,
+            executable_library,
+            [],
+        );
+        package.manifest = package.manifest.clone().with_dependencies([PackageDependency {
+            name: kernel_package.name.clone(),
+            kind: TargetType::Kernel,
+            version: kernel_package.version.clone(),
+            digest: kernel_package.digest(),
+        }]);
+
+        let round_tripped = package
+            .try_into_program()
+            .expect("executable package conversion should succeed");
+
+        assert_eq!(round_tripped.kernel(), &expected_kernel);
     }
 }

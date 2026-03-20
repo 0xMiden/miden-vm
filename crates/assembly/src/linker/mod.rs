@@ -371,7 +371,8 @@ impl Linker {
         kernel: Kernel,
         kernel_module: ModuleInfo,
     ) -> Result<(), LinkerError> {
-        assert!(kernel.is_empty());
+        assert!(self.kernel.is_empty());
+        assert!(!kernel.is_empty());
         assert!(
             kernel_module.path().is_kernel_path(),
             "invalid root kernel module path: {}",
