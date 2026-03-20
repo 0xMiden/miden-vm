@@ -389,6 +389,25 @@ mod tests {
     }
 
     #[test]
+    fn registry_find_digest_prefers_latest_matching_semver_when_digest_is_reused() {
+        let digest = Rpo256::hash(b"foo");
+        let index = InMemoryPackageRegistry::from_iter([(
+            "foo",
+            vec![
+                (Version::new("1.0.0".parse().unwrap(), digest), vec![]),
+                (Version::new("2.0.0".parse().unwrap(), digest), vec![]),
+            ],
+        )]);
+
+        let record = index
+            .find_latest(&PackageId::from("foo"), &VersionRequirement::from(digest))
+            .expect("missing digest match");
+
+        assert_eq!(record.semantic_version(), &"2.0.0".parse().unwrap());
+        assert_eq!(record.digest(), Some(&digest));
+    }
+
+    #[test]
     fn exact_requirement_uses_hash_separator() {
         let digest = Rpo256::hash(b"foo");
         let requirement = exact_requirement("1.0.0", digest);
@@ -568,6 +587,31 @@ mod tests {
     }
 
     #[test]
+    fn resolver_exact_requirement_ignores_newer_versions_with_same_digest() {
+        let b_digest = Rpo256::hash(b"b");
+        let index = InMemoryPackageRegistry::from_iter([
+            (
+                "a",
+                vec![("0.1.0".parse().unwrap(), vec![("b", exact_requirement("1.0.0", b_digest))])],
+            ),
+            (
+                "b",
+                vec![
+                    (Version::new("1.0.0".parse().unwrap(), b_digest), vec![]),
+                    (Version::new("2.0.0".parse().unwrap(), b_digest), vec![]),
+                    ("3.0.0".parse().unwrap(), vec![]),
+                ],
+            ),
+        ]);
+
+        let resolver = PackageResolver::for_package("a", "0.1.0".parse().unwrap(), &index);
+        let selected = resolver.resolve().expect("failed to resolve");
+        let expected = select(&[("a", "0.1.0"), ("b", &format!("1.0.0@{b_digest}"))]);
+
+        assert_selected(&selected, &expected);
+    }
+
+    #[test]
     fn resolver_keeps_plain_and_precise_versions_separate() {
         let digest = Rpo256::hash(b"a");
         let mut index = InMemoryPackageRegistry::default();
@@ -590,5 +634,34 @@ mod tests {
             .flat_map(|versions| versions.keys().map(alloc::string::ToString::to_string))
             .collect::<alloc::vec::Vec<_>>();
         assert_eq!(versions.len(), 2, "versions = {versions:?}");
+    }
+
+    #[test]
+    #[ignore = "digest-only requirements do not currently prefer the most-compatible shared-digest version"]
+    fn resolver_prefers_compatible_shared_digest_version() {
+        let digest = Rpo256::hash(b"shared");
+        let index = InMemoryPackageRegistry::from_iter([
+            (
+                "a",
+                vec![(
+                    "0.1.0".parse().unwrap(),
+                    vec![("b", digest_requirement(digest)), ("c", req("=1.0.0"))],
+                )],
+            ),
+            (
+                "b",
+                vec![
+                    (Version::new("1.0.0".parse().unwrap(), digest), vec![]),
+                    (Version::new("2.0.0".parse().unwrap(), digest), vec![]),
+                ],
+            ),
+            ("c", vec![("1.0.0".parse().unwrap(), vec![("b", req("=1.0.0"))])]),
+        ]);
+
+        let resolver = PackageResolver::for_package("a", "0.1.0".parse().unwrap(), &index);
+        let selected = resolver.resolve().expect("failed to resolve");
+        let expected = select(&[("a", "0.1.0"), ("b", &format!("1.0.0@{digest}")), ("c", "1.0.0")]);
+
+        assert_selected(&selected, &expected);
     }
 }

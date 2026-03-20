@@ -1138,6 +1138,7 @@ end
             .expect("assembly with sources should succeed");
         assert_eq!(&package.name, "generated");
         assert_eq!(package.kind, TargetType::Library);
+        assert!(PackageBuildProvenance::from_package(&package).unwrap().is_none());
     }
 
     #[test]
@@ -1331,6 +1332,164 @@ end
             context
                 .registry()
                 .is_semver_available(&PackageId::from("gitdep"), &"1.0.0".parse().unwrap())
+        );
+    }
+
+    #[test]
+    fn runtime_dependency_conflict_requires_matching_digest() {
+        let tempdir = TempDir::new().unwrap();
+        let mut context = TestContext::new();
+
+        let runtime_a_digest = hash_string_to_word("runtime-a");
+        let runtime_b_digest = hash_string_to_word("runtime-b");
+
+        let depa = context.assemble_library_package_with_export(
+            "depa",
+            "1.0.0",
+            "deps::depa::leaf",
+            [("runtime", "1.0.0", TargetType::Library, runtime_a_digest)],
+        );
+        let depa_path = tempdir.path().join("depa.masp");
+        depa.write_to_file(&depa_path).unwrap();
+
+        let depb = context.assemble_library_package_with_export(
+            "depb",
+            "1.0.0",
+            "deps::depb::leaf",
+            [("runtime", "1.0.0", TargetType::Library, runtime_b_digest)],
+        );
+        let depb_path = tempdir.path().join("depb.masp");
+        depb.write_to_file(&depb_path).unwrap();
+
+        let root_dir = tempdir.path().join("root");
+        let root_manifest = root_dir.join("miden-project.toml");
+        write_file(
+            &root_manifest,
+            r#"[package]
+name = "root"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+
+[dependencies]
+depa = { path = "../depa.masp" }
+depb = { path = "../depb.masp" }
+"#,
+        );
+        write_file(
+            &root_dir.join("lib.masm"),
+            r#"pub proc entry
+    exec.::deps::depa::leaf
+    exec.::deps::depb::leaf
+end
+"#,
+        );
+
+        let error = context
+            .assemble_library_package(&root_manifest, None)
+            .expect_err("runtime dependency digest conflicts should fail");
+        assert!(error.to_string().contains("conflicting runtime dependency 'runtime'"));
+    }
+
+    #[test]
+    fn statically_linked_dynamic_dependencies_propagate_multiple_levels() {
+        let tempdir = TempDir::new().unwrap();
+        let mut context = TestContext::new();
+
+        let runtime = Arc::<MastPackage>::from(context.assemble_library_package_with_export(
+            "runtime",
+            "1.0.0",
+            "deps::runtime::leaf",
+            [],
+        ));
+        let runtime_digest = runtime.digest();
+        context.registry_mut().add_package(runtime);
+
+        let mid_dir = tempdir.path().join("mid");
+        write_file(
+            &mid_dir.join("miden-project.toml"),
+            r#"[package]
+name = "mid"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+namespace = "deps::mid"
+
+[dependencies]
+runtime = "=1.0.0"
+"#,
+        );
+        write_file(
+            &mid_dir.join("lib.masm"),
+            r#"use ::deps::runtime
+
+pub proc call_runtime
+    exec.runtime::leaf
+end
+"#,
+        );
+
+        let top_dir = tempdir.path().join("top");
+        write_file(
+            &top_dir.join("miden-project.toml"),
+            r#"[package]
+name = "top"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+namespace = "deps::top"
+
+[dependencies]
+mid = { path = "../mid", linkage = "static" }
+"#,
+        );
+        write_file(
+            &top_dir.join("lib.masm"),
+            r#"use ::deps::mid
+
+pub proc call_mid
+    exec.mid::call_runtime
+end
+"#,
+        );
+
+        let root_dir = tempdir.path().join("root");
+        let root_manifest = root_dir.join("miden-project.toml");
+        write_file(
+            &root_manifest,
+            r#"[package]
+name = "root"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+
+[dependencies]
+top = { path = "../top", linkage = "static" }
+"#,
+        );
+        write_file(
+            &root_dir.join("lib.masm"),
+            r#"pub proc entry
+    exec.::deps::top::call_mid
+end
+"#,
+        );
+
+        let package = context
+            .assemble_library_package(&root_manifest, None)
+            .expect("multi-level static propagation should succeed");
+
+        assert_eq!(
+            package
+                .manifest
+                .dependencies()
+                .map(|dep| format!("{}@{}#{}", &dep.name, dep.version, dep.digest))
+                .collect::<Vec<_>>(),
+            vec![format!("runtime@1.0.0#{runtime_digest}")]
         );
     }
 
@@ -1573,6 +1732,117 @@ end
             .assemble_library_package(&root_manifest, None)
             .expect_err("changed dependency sources should require a semver bump");
         assert!(error.to_string().contains("bump the semantic version"));
+    }
+
+    #[test]
+    fn workspace_manifest_changes_without_effect_allow_reuse_of_member_packages() {
+        let tempdir = TempDir::new().unwrap();
+        let workspace_dir = tempdir.path().join("workspace");
+        let dep_dir = workspace_dir.join("dep");
+        let app_dir = workspace_dir.join("app");
+        fs::create_dir_all(&dep_dir).unwrap();
+        fs::create_dir_all(&app_dir).unwrap();
+
+        let workspace_manifest = workspace_dir.join("miden-project.toml");
+        write_file(
+            &workspace_manifest,
+            r#"[workspace]
+members = ["dep", "app"]
+
+[workspace.dependencies]
+dep = { path = "dep" }
+"#,
+        );
+        write_file(
+            &dep_dir.join("miden-project.toml"),
+            r#"[package]
+name = "dep"
+version = "1.0.0"
+
+[lib]
+path = "mod.masm"
+"#,
+        );
+        write_file(
+            &dep_dir.join("mod.masm"),
+            r#"pub proc foo
+    push.1
+end
+"#,
+        );
+
+        let app_manifest = app_dir.join("miden-project.toml");
+        write_file(
+            &app_manifest,
+            r#"[package]
+name = "app"
+version = "1.0.0"
+
+[lib]
+path = "mod.masm"
+
+[dependencies]
+dep.workspace = true
+"#,
+        );
+        write_file(
+            &app_dir.join("mod.masm"),
+            r#"pub proc bar
+    exec.::dep::foo
+end
+"#,
+        );
+
+        let mut context = TestContext::new();
+        let first = context
+            .assemble_library_package(&app_manifest, None)
+            .expect("initial workspace build should succeed");
+        assert!(
+            context
+                .registry()
+                .is_semver_available(&PackageId::from("dep"), &"1.0.0".parse().unwrap())
+        );
+
+        let expected_dependency = first
+            .manifest
+            .dependencies()
+            .map(|dep| format!("{}@{}#{}", &dep.name, dep.version, dep.digest))
+            .collect::<Vec<_>>();
+        context.registry().clear_loaded_packages();
+
+        write_file(
+            &workspace_manifest,
+            r#"[workspace]
+members = ["dep", "app"]
+
+[workspace.dependencies]
+dep = { path = "dep" }
+
+# comment changes provenance hashing for workspace member builds
+"#,
+        );
+
+        let second = context
+            .assemble_library_package(&app_manifest, None)
+            .expect("workspace manifest comment changes should still allow reuse");
+
+        let dep_record = context
+            .registry()
+            .get_by_semver(&PackageId::from("dep"), &"1.0.0".parse().unwrap())
+            .expect("workspace dependency should be registered");
+        assert_eq!(
+            context.registry().loaded_packages(),
+            vec![format!("dep@{}", dep_record.version())]
+        );
+        assert_eq!(second.digest(), first.digest());
+        assert_eq!(
+            second
+                .manifest
+                .dependencies()
+                .map(|dep| format!("{}@{}#{}", &dep.name, dep.version, dep.digest))
+                .collect::<Vec<_>>(),
+            expected_dependency
+        );
     }
 
     #[test]

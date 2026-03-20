@@ -847,6 +847,134 @@ mod tests {
     }
 
     #[test]
+    fn path_dependency_without_version_uses_referenced_source_version() {
+        let tempdir = TempDir::new().unwrap();
+        let dependency_dir = tempdir.path().join("dep");
+        write_package(&dependency_dir, "dep", "9.9.9", Some("export.foo\nend\n"), []);
+
+        let root_dir = tempdir.path().join("root");
+        let root_manifest = write_package(
+            &root_dir,
+            "root",
+            "1.0.0",
+            Some("export.foo\nend\n"),
+            [Dependency::new(
+                Span::unknown("dep".into()),
+                DependencyVersionScheme::Path {
+                    path: Span::unknown(Uri::new("../dep")),
+                    version: None,
+                },
+                Linkage::Dynamic,
+            )],
+        );
+
+        let registry = TestRegistry::default();
+        let graph = builder(&registry, &tempdir.path().join("git"))
+            .build_from_path(&root_manifest)
+            .unwrap();
+        let dep = graph.get(&PackageId::from("dep")).unwrap();
+
+        assert_eq!(dep.version, "9.9.9".parse().unwrap());
+    }
+
+    #[test]
+    fn path_dependency_version_requirement_must_match_source_version() {
+        let tempdir = TempDir::new().unwrap();
+        let dependency_dir = tempdir.path().join("dep");
+        write_package(&dependency_dir, "dep", "1.0.0", Some("export.foo\nend\n"), []);
+
+        let root_dir = tempdir.path().join("root");
+        let root_manifest = write_package(
+            &root_dir,
+            "root",
+            "1.0.0",
+            Some("export.foo\nend\n"),
+            [Dependency::new(
+                Span::unknown("dep".into()),
+                DependencyVersionScheme::Path {
+                    path: Span::unknown(Uri::new("../dep")),
+                    version: Some(VersionRequirement::Semantic(Span::unknown(
+                        "=2.0.0".parse().unwrap(),
+                    ))),
+                },
+                Linkage::Dynamic,
+            )],
+        );
+
+        let registry = TestRegistry::default();
+        let error = builder(&registry, &tempdir.path().join("git"))
+            .build_from_path(&root_manifest)
+            .expect_err("mismatched path dependency version should fail");
+
+        assert!(error.to_string().contains("requires '=2.0.0'"));
+    }
+
+    #[test]
+    fn path_source_dependency_rejects_digest_requirement() {
+        let tempdir = TempDir::new().unwrap();
+        let dependency_dir = tempdir.path().join("dep");
+        write_package(&dependency_dir, "dep", "1.0.0", Some("export.foo\nend\n"), []);
+
+        let root_dir = tempdir.path().join("root");
+        let root_manifest = write_package(
+            &root_dir,
+            "root",
+            "1.0.0",
+            Some("export.foo\nend\n"),
+            [Dependency::new(
+                Span::unknown("dep".into()),
+                DependencyVersionScheme::Path {
+                    path: Span::unknown(Uri::new("../dep")),
+                    version: Some(VersionRequirement::Digest(Span::unknown(hash_string_to_word(
+                        "dep-digest",
+                    )))),
+                },
+                Linkage::Dynamic,
+            )],
+        );
+
+        let registry = TestRegistry::default();
+        let error = builder(&registry, &tempdir.path().join("git"))
+            .build_from_path(&root_manifest)
+            .expect_err("digest requirements on source paths should fail");
+
+        assert!(error.to_string().contains("resolved version was '1.0.0'"));
+    }
+
+    #[test]
+    fn path_source_dependency_rejects_exact_published_requirement() {
+        let tempdir = TempDir::new().unwrap();
+        let dependency_dir = tempdir.path().join("dep");
+        write_package(&dependency_dir, "dep", "1.0.0", Some("export.foo\nend\n"), []);
+
+        let root_dir = tempdir.path().join("root");
+        let root_manifest = write_package(
+            &root_dir,
+            "root",
+            "1.0.0",
+            Some("export.foo\nend\n"),
+            [Dependency::new(
+                Span::unknown("dep".into()),
+                DependencyVersionScheme::Path {
+                    path: Span::unknown(Uri::new("../dep")),
+                    version: Some(VersionRequirement::Exact(Version::new(
+                        "1.0.0".parse().unwrap(),
+                        hash_string_to_word("dep-digest"),
+                    ))),
+                },
+                Linkage::Dynamic,
+            )],
+        );
+
+        let registry = TestRegistry::default();
+        let error = builder(&registry, &tempdir.path().join("git"))
+            .build_from_path(&root_manifest)
+            .expect_err("exact published requirements on source paths should fail");
+
+        assert!(error.to_string().contains("resolved version was '1.0.0'"));
+    }
+
+    #[test]
     fn resolves_workspace_root_by_dependency_name() {
         let tempdir = TempDir::new().unwrap();
         let workspace_root = tempdir.path().join("workspace");
@@ -1065,6 +1193,83 @@ mod tests {
     }
 
     #[test]
+    fn git_dependency_without_version_uses_checked_out_source_version() {
+        let tempdir = TempDir::new().unwrap();
+        let repo_dir = tempdir.path().join("repo");
+        fs::create_dir_all(&repo_dir).unwrap();
+        write_package(&repo_dir, "dep", "9.9.9", Some("export.foo\nend\n"), []);
+        run_git(&repo_dir, &["init", "-b", "main"]);
+        run_git(&repo_dir, &["config", "user.email", "test@example.com"]);
+        run_git(&repo_dir, &["config", "user.name", "Test"]);
+        run_git(&repo_dir, &["config", "commit.gpgsign", "false"]);
+        run_git(&repo_dir, &["add", "."]);
+        run_git(&repo_dir, &["commit", "-m", "init"]);
+
+        let root_dir = tempdir.path().join("root");
+        let root_manifest = write_package(
+            &root_dir,
+            "root",
+            "1.0.0",
+            Some("export.foo\nend\n"),
+            [Dependency::new(
+                Span::unknown("dep".into()),
+                DependencyVersionScheme::Git {
+                    repo: Span::unknown(Uri::from(repo_dir.as_path())),
+                    revision: Span::unknown(GitRevision::Branch("main".into())),
+                    version: None,
+                },
+                Linkage::Dynamic,
+            )],
+        );
+
+        let registry = TestRegistry::default();
+        let graph = builder(&registry, &tempdir.path().join("git-cache"))
+            .build_from_path(&root_manifest)
+            .unwrap();
+        let dep = graph.get(&PackageId::from("dep")).unwrap();
+
+        assert_eq!(dep.version, "9.9.9".parse().unwrap());
+    }
+
+    #[test]
+    fn git_dependency_version_requirement_must_match_checked_out_source_version() {
+        let tempdir = TempDir::new().unwrap();
+        let repo_dir = tempdir.path().join("repo");
+        fs::create_dir_all(&repo_dir).unwrap();
+        write_package(&repo_dir, "dep", "1.0.0", Some("export.foo\nend\n"), []);
+        run_git(&repo_dir, &["init", "-b", "main"]);
+        run_git(&repo_dir, &["config", "user.email", "test@example.com"]);
+        run_git(&repo_dir, &["config", "user.name", "Test"]);
+        run_git(&repo_dir, &["config", "commit.gpgsign", "false"]);
+        run_git(&repo_dir, &["add", "."]);
+        run_git(&repo_dir, &["commit", "-m", "init"]);
+
+        let root_dir = tempdir.path().join("root");
+        let root_manifest = write_package(
+            &root_dir,
+            "root",
+            "1.0.0",
+            Some("export.foo\nend\n"),
+            [Dependency::new(
+                Span::unknown("dep".into()),
+                DependencyVersionScheme::Git {
+                    repo: Span::unknown(Uri::from(repo_dir.as_path())),
+                    revision: Span::unknown(GitRevision::Branch("main".into())),
+                    version: Some(Span::unknown("=2.0.0".parse().unwrap())),
+                },
+                Linkage::Dynamic,
+            )],
+        );
+
+        let registry = TestRegistry::default();
+        let error = builder(&registry, &tempdir.path().join("git-cache"))
+            .build_from_path(&root_manifest)
+            .expect_err("mismatched git dependency version should fail");
+
+        assert!(error.to_string().contains("requires '=2.0.0'"));
+    }
+
+    #[test]
     fn workspace_dependency_stays_on_the_workspace_member_version() {
         let tempdir = TempDir::new().unwrap();
         let root_dir = tempdir.path().join("workspace-dep");
@@ -1092,6 +1297,36 @@ mod tests {
         let version999 = "9.9.9".parse::<miden_package_registry::SemVer>().unwrap();
         registry.insert(&dep_id, Version::from(version010.clone()));
         registry.insert(&dep_id, Version::from(version999.clone()));
+        let graph = builder(&registry, &tempdir.path().join("git-cache"))
+            .build_from_path(&app_manifest)
+            .unwrap();
+        let dep = graph.get(&PackageId::from("dep")).unwrap();
+        assert_eq!(dep.version.to_string(), "0.2.0");
+    }
+
+    #[test]
+    fn workspace_dependency_uses_member_version_even_with_workspace_requirement() {
+        let tempdir = TempDir::new().unwrap();
+        let root_dir = tempdir.path().join("workspace-dep");
+        fs::create_dir_all(&root_dir).unwrap();
+        fs::create_dir_all(root_dir.join("dep")).unwrap();
+        fs::create_dir_all(root_dir.join("app")).unwrap();
+
+        write_file(
+            &root_dir.join("miden-project.toml"),
+            "[workspace]\nmembers = [\"dep\", \"app\"]\n\n[workspace.dependencies]\ndep = { path = \"dep\", version = \"=0.1.0\" }\n",
+        );
+        write_file(
+            &root_dir.join("dep").join("miden-project.toml"),
+            "[package]\nname = \"dep\"\nversion = \"0.2.0\"\n",
+        );
+        let app_manifest = root_dir.join("app").join("miden-project.toml");
+        write_file(
+            &app_manifest,
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\ndep.workspace = true\n",
+        );
+
+        let registry = TestRegistry::default();
         let graph = builder(&registry, &tempdir.path().join("git-cache"))
             .build_from_path(&app_manifest)
             .unwrap();

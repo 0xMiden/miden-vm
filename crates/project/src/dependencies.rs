@@ -86,8 +86,8 @@ pub enum DependencyVersionScheme {
         /// If specified, the version of the referenced project/package _must_ match this version
         /// requirement.
         ///
-        /// If unspecified, the version requirement is presumed to be an exact match for the
-        /// version found in the package/project at the given path.
+        /// If unspecified, no additional version validation is performed; the current version
+        /// declared by the referenced source/package is used as-is.
         version: Option<VersionRequirement>,
     },
     /// Resolve the given Git repository to a Miden project/workspace.
@@ -101,8 +101,8 @@ pub enum DependencyVersionScheme {
         /// If specified, the version declared in the manifest found in the cloned repository
         /// _must_ match this version requirement.
         ///
-        /// If unspecified, the version requirement is presumed to be an exact match for the
-        /// version found in the project manifest of the cloned repo.
+        /// If unspecified, no additional version validation is performed; the current version
+        /// declared by the checked out sources is used as-is.
         version: Option<Span<VersionReq>>,
     },
 }
