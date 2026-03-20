@@ -25,7 +25,7 @@ use miden_core::{
 use miden_mast_package::{
     Dependency as PackageDependency, Package as MastPackage, Section, SectionId, TargetType,
 };
-use miden_package_registry::{PackageId, PackageStore};
+use miden_package_registry::{PackageId, PackageStore, Version as PackageVersion};
 use miden_project::{
     DependencyVersionScheme, Linkage, Package as ProjectPackage, Profile, ProjectDependencyGraph,
     ProjectDependencyGraphBuilder, ProjectDependencyNodeProvenance, ProjectSource,
@@ -42,6 +42,12 @@ pub enum ProjectTargetSelector<'a> {
 pub struct ProjectSourceInputs {
     pub root: Box<Module>,
     pub support: Vec<Box<Module>>,
+}
+
+#[derive(Clone)]
+struct ResolvedPackage {
+    package: Arc<MastPackage>,
+    linked_kernel_package: Option<Arc<MastPackage>>,
 }
 
 pub struct ProjectAssembler<'a, S: PackageStore + ?Sized> {
@@ -144,10 +150,18 @@ where
         // that the executable target be linked statically against the library target
         let mut cache = BTreeMap::new();
         let root_id = self.dependency_graph.root().clone();
-        let lib = if target.is_executable() && self.project.library_target().is_some() {
-            let lib = self.assemble(ProjectTargetSelector::Library, profile_name)?;
-            cache.insert(self.project.name().into_inner(), lib.clone());
-            Some(lib)
+        let required_lib = if target.is_executable()
+            && let Some(library_target) = self.project.library_target().map(|target| target.inner().clone())
+        {
+            Some(self.assemble_source_package(
+                root_id.clone(),
+                Arc::clone(&self.project),
+                &library_target,
+                profile_name,
+                None,
+                None,
+                &mut cache,
+            )?)
         } else {
             None
         };
@@ -157,10 +171,11 @@ where
             Arc::clone(&self.project),
             &target,
             profile_name,
-            lib,
+            required_lib,
             sources,
             &mut cache,
         )
+        .map(|resolved| resolved.package)
     }
 
     fn assemble_source_package(
@@ -169,16 +184,16 @@ where
         project: Arc<ProjectPackage>,
         target: &Target,
         profile_name: &str,
-        required_lib: Option<Arc<MastPackage>>,
+        required_lib: Option<ResolvedPackage>,
         sources: Option<ProjectSourceInputs>,
-        cache: &mut BTreeMap<PackageId, Arc<MastPackage>>,
-    ) -> Result<Arc<MastPackage>, Report> {
+        cache: &mut BTreeMap<PackageId, ResolvedPackage>,
+    ) -> Result<ResolvedPackage, Report> {
         let cache_key = target_package_name(&project, target);
         if sources.is_none()
-            && let Some(package) = cache.get(&cache_key)
+            && let Some(package) = cache.get(&cache_key).cloned()
         {
-            assert_eq!(package.kind, target.ty);
-            return Ok(Arc::clone(package));
+            assert_eq!(package.package.kind, target.ty);
+            return Ok(package);
         }
 
         let profile = resolve_profile(project.as_ref(), profile_name)?;
@@ -190,16 +205,23 @@ where
         let mut runtime_dependencies = BTreeMap::<PackageId, PackageDependency>::new();
         let mut linked_kernel_package = None;
         match required_lib {
-            Some(required_lib) if required_lib.is_kernel() => {
-                assembler.link_package(required_lib.clone(), Linkage::Dynamic)?;
+            Some(required_lib) if required_lib.package.is_kernel() => {
+                assembler.link_package(required_lib.package.clone(), Linkage::Dynamic)?;
                 record_linked_kernel_dependency(
                     &mut runtime_dependencies,
                     &mut linked_kernel_package,
-                    required_lib,
+                    required_lib.package,
                 )?;
             },
             Some(required_lib) => {
-                assembler.link_package(required_lib.clone(), Linkage::Static)?;
+                assembler.link_package(required_lib.package.clone(), Linkage::Static)?;
+                if let Some(kernel_package) = required_lib.linked_kernel_package {
+                    record_linked_kernel_dependency(
+                        &mut runtime_dependencies,
+                        &mut linked_kernel_package,
+                        kernel_package,
+                    )?;
+                }
             },
             None => (),
         }
@@ -211,20 +233,26 @@ where
         for edge in dependencies.iter() {
             let dependency_package =
                 self.resolve_dependency_package(&edge.dependency, profile_name, cache)?;
-            if !dependency_package.is_library() {
+            if !dependency_package.package.is_library() {
                 return Err(Report::msg(format!(
                     "dependency '{}' resolved to executable package '{}', but only library-like packages can be linked",
-                    edge.dependency, dependency_package.name
+                    edge.dependency, dependency_package.package.name
                 )));
             }
 
-            assembler.link_package(dependency_package.clone(), edge.linkage)?;
+            assembler.link_package(dependency_package.package.clone(), edge.linkage)?;
 
-            if dependency_package.is_kernel() {
+            if dependency_package.package.is_kernel() {
                 record_linked_kernel_dependency(
                     &mut runtime_dependencies,
                     &mut linked_kernel_package,
-                    dependency_package.clone(),
+                    dependency_package.package.clone(),
+                )?;
+            } else if let Some(kernel_package) = dependency_package.linked_kernel_package.clone() {
+                record_linked_kernel_dependency(
+                    &mut runtime_dependencies,
+                    &mut linked_kernel_package,
+                    kernel_package,
                 )?;
             }
 
@@ -244,13 +272,13 @@ where
             // NOTE: If there are conflicting runtime dependencies on the same package, an error
             // will be raised. In the future, we may wish to relax this restriction, since such
             // dependencies are technically satisfiable.
-            if matches!(edge.linkage, Linkage::Dynamic) && !dependency_package.is_kernel() {
+            if matches!(edge.linkage, Linkage::Dynamic) && !dependency_package.package.is_kernel() {
                 merge_runtime_dependency(
                     &mut runtime_dependencies,
-                    package_dependency(dependency_package.as_ref()),
+                    package_dependency(dependency_package.package.as_ref()),
                 )?;
             }
-            for dependency in dependency_package.manifest.dependencies() {
+            for dependency in dependency_package.package.manifest.dependencies() {
                 merge_runtime_dependency(
                     &mut runtime_dependencies,
                     PackageDependency {
@@ -298,7 +326,9 @@ where
         )? {
             sections.push(provenance.to_section());
         }
-        if let Some(kernel_package) = linked_kernel_package {
+        if target.ty.is_executable()
+            && let Some(kernel_package) = linked_kernel_package.clone()
+        {
             sections.push(linked_kernel_package_section(kernel_package.as_ref()));
         }
 
@@ -312,21 +342,22 @@ where
             sections,
         });
 
+        let resolved = ResolvedPackage { package: Arc::clone(&package), linked_kernel_package };
         if !has_provided_sources {
-            cache.insert(package_id, Arc::clone(&package));
+            cache.insert(package_id, resolved.clone());
         }
 
-        Ok(package)
+        Ok(resolved)
     }
 
     fn resolve_dependency_package(
         &mut self,
         package_id: &PackageId,
         profile_name: &str,
-        cache: &mut BTreeMap<PackageId, Arc<MastPackage>>,
-    ) -> Result<Arc<MastPackage>, Report> {
-        if let Some(package) = cache.get(package_id) {
-            return Ok(Arc::clone(package));
+        cache: &mut BTreeMap<PackageId, ResolvedPackage>,
+    ) -> Result<ResolvedPackage, Report> {
+        if let Some(package) = cache.get(package_id).cloned() {
+            return Ok(package);
         }
 
         let node = self.dependency_graph.get(package_id).ok_or_else(|| {
@@ -372,7 +403,10 @@ where
                     manifest_path,
                     workspace_root.as_deref(),
                 )? {
-                    package
+                    ResolvedPackage {
+                        linked_kernel_package: self.resolve_linked_kernel_package(package.clone())?,
+                        package,
+                    }
                 } else {
                     let package = self.assemble_source_package(
                         package_id.clone(),
@@ -383,28 +417,72 @@ where
                         None,
                         cache,
                     )?;
-                    self.publish_source_dependency(package.clone())?;
+                    self.publish_source_dependency(package.package.clone())?;
                     package
                 }
             },
             ProjectDependencyNodeProvenance::Source(_) => {
-                self.load_canonical_package(package_id, &node.version)?.ok_or_else(|| {
+                let package = self.load_canonical_package(package_id, &node.version)?.ok_or_else(|| {
                     Report::msg(format!(
                         "dependency '{}' version '{}' was not found in the package registry",
                         package_id, node.version
                     ))
-                })?
+                })?;
+                ResolvedPackage {
+                    linked_kernel_package: self.resolve_linked_kernel_package(package.clone())?,
+                    package,
+                }
             },
             ProjectDependencyNodeProvenance::Registry { selected, .. } => {
-                self.store.load_package(package_id, selected)?
+                let package = self.store.load_package(package_id, selected)?;
+                ResolvedPackage {
+                    linked_kernel_package: self.resolve_linked_kernel_package(package.clone())?,
+                    package,
+                }
             },
             ProjectDependencyNodeProvenance::Preassembled { path, .. } => {
-                load_package_from_path(path)?
+                let package = load_package_from_path(path)?;
+                ResolvedPackage {
+                    linked_kernel_package: self.resolve_linked_kernel_package(package.clone())?,
+                    package,
+                }
             },
         };
 
-        cache.insert(package_id.clone(), Arc::clone(&package));
+        cache.insert(package_id.clone(), package.clone());
         Ok(package)
+    }
+
+    fn resolve_linked_kernel_package(
+        &self,
+        package: Arc<MastPackage>,
+    ) -> Result<Option<Arc<MastPackage>>, Report> {
+        if package.is_kernel() {
+            return Ok(Some(package));
+        }
+
+        let Some(kernel_dependency) = kernel_runtime_dependency(package.as_ref())? else {
+            return Ok(None);
+        };
+
+        let version = PackageVersion::new(kernel_dependency.version.clone(), kernel_dependency.digest);
+        if self.store.get_exact_version(&kernel_dependency.name, &version).is_some() {
+            let kernel_package = self.store.load_package(&kernel_dependency.name, &version)?;
+            if !kernel_package.is_kernel() {
+                return Err(Report::msg(format!(
+                    "runtime kernel dependency '{}@{}#{}' resolved to non-kernel package '{}'",
+                    kernel_dependency.name,
+                    kernel_dependency.version,
+                    kernel_dependency.digest,
+                    kernel_package.name
+                )));
+            }
+            return Ok(Some(kernel_package));
+        }
+
+        package
+            .try_embedded_kernel_package()
+            .map(|kernel_package| kernel_package.map(Arc::new))
     }
 
     fn load_canonical_package(
@@ -1235,6 +1313,25 @@ fn package_dependency(package: &MastPackage) -> PackageDependency {
 
 fn linked_kernel_package_section(package: &MastPackage) -> Section {
     Section::new(SectionId::KERNEL, package.to_bytes())
+}
+
+fn kernel_runtime_dependency(package: &MastPackage) -> Result<Option<PackageDependency>, Report> {
+    let mut kernel_dependencies = package
+        .manifest
+        .dependencies()
+        .filter(|dependency| dependency.kind == TargetType::Kernel)
+        .cloned();
+    let Some(kernel_dependency) = kernel_dependencies.next() else {
+        return Ok(None);
+    };
+    if kernel_dependencies.next().is_some() {
+        return Err(Report::msg(format!(
+            "package '{}' declares multiple kernel runtime dependencies",
+            package.name
+        )));
+    }
+
+    Ok(Some(kernel_dependency))
 }
 
 fn record_linked_kernel_dependency(
@@ -2654,6 +2751,205 @@ end
     }
 
     #[test]
+    fn executable_packages_preserve_transitive_kernel_when_converted_back_to_program() {
+        let tempdir = TempDir::new().unwrap();
+        let (root_manifest, kernel_manifest) =
+            write_transitive_kernel_program_project(tempdir.path());
+
+        let mut context = TestContext::new();
+        let kernel_package = context
+            .assemble_library_package(&kernel_manifest, None)
+            .expect("kernel package build should succeed");
+        let expected_kernel = kernel_package
+            .try_into_kernel_library()
+            .expect("kernel package should round-trip as a kernel library")
+            .kernel()
+            .clone();
+        let package = context
+            .assemble_executable_package(&root_manifest, Some("main"), None)
+            .expect("executable package build should succeed");
+        let kernel_dependency = package
+            .manifest
+            .dependencies()
+            .find(|dependency| dependency.kind == TargetType::Kernel)
+            .cloned()
+            .expect("executable package should record the transitive kernel runtime dependency");
+        let embedded_kernel_package = package
+            .sections
+            .iter()
+            .find(|section| section.id == SectionId::KERNEL)
+            .map(|section| MastPackage::read_from_bytes(section.data.as_ref()).unwrap())
+            .expect("executable package should embed the transitive kernel package");
+        assert_eq!(embedded_kernel_package.kind, TargetType::Kernel);
+        assert_eq!(embedded_kernel_package.name, kernel_dependency.name);
+        assert_eq!(embedded_kernel_package.version, kernel_dependency.version);
+        assert_eq!(embedded_kernel_package.digest(), kernel_dependency.digest);
+
+        let round_tripped_package = MastPackage::read_from_bytes(&package.to_bytes())
+            .expect("serialized executable package should round-trip");
+        let round_tripped_program = round_tripped_package
+            .try_into_program()
+            .expect("executable package conversion should preserve transitive kernel information");
+
+        assert_eq!(round_tripped_program.kernel(), &expected_kernel);
+    }
+
+    #[test]
+    fn library_packages_with_transitive_kernels_do_not_embed_kernel_sections() {
+        let tempdir = TempDir::new().unwrap();
+        write_transitive_kernel_program_project(tempdir.path());
+        let mid_manifest = tempdir.path().join("mid").join("miden-project.toml");
+
+        let mut context = TestContext::new();
+        let package = context
+            .assemble_library_package(&mid_manifest, None)
+            .expect("library package build should succeed");
+
+        assert!(
+            package.manifest.dependencies().any(|dependency| dependency.kind == TargetType::Kernel)
+        );
+        assert!(!package.sections.iter().any(|section| section.id == SectionId::KERNEL));
+    }
+
+    #[test]
+    fn preassembled_libraries_prefer_store_kernel_over_embedded_copy() {
+        let tempdir = TempDir::new().unwrap();
+        let (_, kernel_manifest) = write_transitive_kernel_program_project(tempdir.path());
+        let mid_manifest = tempdir.path().join("mid").join("miden-project.toml");
+        let mid_package_path = tempdir.path().join("mid-embedded.masp");
+
+        let mut build_context = TestContext::new();
+        let kernel_package = build_context
+            .assemble_library_package(&kernel_manifest, None)
+            .expect("kernel package build should succeed");
+        let expected_kernel = kernel_package
+            .try_into_kernel_library()
+            .expect("kernel package should round-trip as a kernel library")
+            .kernel()
+            .clone();
+        let mut mid_package = MastPackage::read_from_bytes(
+            &build_context
+                .assemble_library_package(&mid_manifest, None)
+                .expect("mid package build should succeed")
+                .to_bytes(),
+        )
+        .expect("mid package should deserialize");
+        let mut mismatched_kernel_package =
+            MastPackage::read_from_bytes(&kernel_package.to_bytes()).expect("kernel should deserialize");
+        mismatched_kernel_package.version = "2.0.0".parse().unwrap();
+        mid_package
+            .sections
+            .push(Section::new(SectionId::KERNEL, mismatched_kernel_package.to_bytes()));
+        mid_package.write_to_file(&mid_package_path).unwrap();
+
+        let root_manifest =
+            write_preassembled_kernel_executable_project(tempdir.path(), &mid_package_path);
+        let mut context = TestContext::new();
+        context.registry_mut().add_package(kernel_package.clone());
+
+        let package = context
+            .assemble_executable_package(&root_manifest, Some("main"), None)
+            .expect("executable package build should prefer the store kernel");
+        let embedded_kernel_package = package
+            .sections
+            .iter()
+            .find(|section| section.id == SectionId::KERNEL)
+            .map(|section| MastPackage::read_from_bytes(section.data.as_ref()).unwrap())
+            .expect("executable package should embed the store-provided kernel package");
+        assert_eq!(embedded_kernel_package.version, kernel_package.version);
+        assert_eq!(embedded_kernel_package.digest(), kernel_package.digest());
+
+        let round_tripped_program = MastPackage::read_from_bytes(&package.to_bytes())
+            .expect("serialized executable package should round-trip")
+            .try_into_program()
+            .expect("program reconstruction should use the store-provided kernel");
+        assert_eq!(round_tripped_program.kernel(), &expected_kernel);
+    }
+
+    #[test]
+    fn preassembled_libraries_fall_back_to_embedded_kernel_when_store_is_missing() {
+        let tempdir = TempDir::new().unwrap();
+        let (_, kernel_manifest) = write_transitive_kernel_program_project(tempdir.path());
+        let mid_manifest = tempdir.path().join("mid").join("miden-project.toml");
+        let mid_package_path = tempdir.path().join("mid-embedded.masp");
+
+        let mut build_context = TestContext::new();
+        let kernel_package = build_context
+            .assemble_library_package(&kernel_manifest, None)
+            .expect("kernel package build should succeed");
+        let expected_kernel = kernel_package
+            .try_into_kernel_library()
+            .expect("kernel package should round-trip as a kernel library")
+            .kernel()
+            .clone();
+        let mut mid_package = MastPackage::read_from_bytes(
+            &build_context
+                .assemble_library_package(&mid_manifest, None)
+                .expect("mid package build should succeed")
+                .to_bytes(),
+        )
+        .expect("mid package should deserialize");
+        mid_package
+            .sections
+            .push(Section::new(SectionId::KERNEL, kernel_package.to_bytes()));
+        mid_package.write_to_file(&mid_package_path).unwrap();
+
+        let root_manifest =
+            write_preassembled_kernel_executable_project(tempdir.path(), &mid_package_path);
+        let mut context = TestContext::new();
+        let package = context
+            .assemble_executable_package(&root_manifest, Some("main"), None)
+            .expect("executable package build should fall back to the embedded kernel");
+        let embedded_kernel_package = package
+            .sections
+            .iter()
+            .find(|section| section.id == SectionId::KERNEL)
+            .map(|section| MastPackage::read_from_bytes(section.data.as_ref()).unwrap())
+            .expect("executable package should embed the fallback kernel package");
+        assert_eq!(embedded_kernel_package.version, kernel_package.version);
+        assert_eq!(embedded_kernel_package.digest(), kernel_package.digest());
+
+        let round_tripped_program = MastPackage::read_from_bytes(&package.to_bytes())
+            .expect("serialized executable package should round-trip")
+            .try_into_program()
+            .expect("program reconstruction should use the embedded fallback kernel");
+        assert_eq!(round_tripped_program.kernel(), &expected_kernel);
+    }
+
+    #[test]
+    fn preassembled_libraries_without_store_or_embedded_kernel_leave_runtime_kernel_to_caller() {
+        let tempdir = TempDir::new().unwrap();
+        write_transitive_kernel_program_project(tempdir.path());
+        let mid_manifest = tempdir.path().join("mid").join("miden-project.toml");
+        let mid_package_path = tempdir.path().join("mid.masp");
+
+        let mut build_context = TestContext::new();
+        build_context
+            .assemble_library_package(&mid_manifest, None)
+            .expect("mid package build should succeed")
+            .write_to_file(&mid_package_path)
+            .unwrap();
+
+        let root_manifest =
+            write_preassembled_kernel_executable_project(tempdir.path(), &mid_package_path);
+        let mut context = TestContext::new();
+        let package = context
+            .assemble_executable_package(&root_manifest, Some("main"), None)
+            .expect("executable package build should succeed without an available kernel artifact");
+
+        assert!(
+            package.manifest.dependencies().any(|dependency| dependency.kind == TargetType::Kernel)
+        );
+        assert!(!package.sections.iter().any(|section| section.id == SectionId::KERNEL));
+
+        let round_tripped_program = MastPackage::read_from_bytes(&package.to_bytes())
+            .expect("serialized executable package should round-trip")
+            .try_into_program()
+            .expect("packages without a recoverable kernel should still convert to a program");
+        assert!(round_tripped_program.kernel().is_empty());
+    }
+
+    #[test]
     fn embedded_kernel_package_must_match_runtime_dependency() {
         let tempdir = TempDir::new().unwrap();
         let manifest_path = write_kernel_program_project(tempdir.path());
@@ -2737,6 +3033,111 @@ end
             &root.join("main.masm"),
             r#"begin
     syscall.foo
+end
+"#,
+        );
+
+        manifest_path
+    }
+
+    fn write_transitive_kernel_program_project(root: &FsPath) -> (PathBuf, PathBuf) {
+        let kernel_dir = root.join("kernel");
+        let kernel_manifest = kernel_dir.join("miden-project.toml");
+        write_file(
+            &kernel_manifest,
+            r#"[package]
+name = "kernelpkg"
+version = "1.0.0"
+
+[lib]
+kind = "kernel"
+path = "kernel.masm"
+"#,
+        );
+        write_file(
+            &kernel_dir.join("kernel.masm"),
+            r#"pub proc foo
+    caller
+end
+"#,
+        );
+
+        let mid_dir = root.join("mid");
+        write_file(
+            &mid_dir.join("miden-project.toml"),
+            r#"[package]
+name = "mid"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+namespace = "deps::mid"
+
+[dependencies]
+kernelpkg = { path = "../kernel" }
+"#,
+        );
+        write_file(
+            &mid_dir.join("lib.masm"),
+            r#"pub proc call_kernel
+    syscall.foo
+end
+"#,
+        );
+
+        let root_dir = root.join("app");
+        let root_manifest = root_dir.join("miden-project.toml");
+        write_file(
+            &root_manifest,
+            r#"[package]
+name = "app"
+version = "1.0.0"
+
+[[bin]]
+name = "main"
+path = "main.masm"
+
+[dependencies]
+mid = { path = "../mid", linkage = "static" }
+"#,
+        );
+        write_file(
+            &root_dir.join("main.masm"),
+            r#"begin
+    exec.::deps::mid::call_kernel
+end
+"#,
+        );
+
+        (root_manifest, kernel_manifest)
+    }
+
+    fn write_preassembled_kernel_executable_project(
+        root: &FsPath,
+        dependency_package_path: &FsPath,
+    ) -> PathBuf {
+        let manifest_path = root.join("preassembled-app").join("miden-project.toml");
+        write_file(
+            &manifest_path,
+            &format!(
+                r#"[package]
+name = "app"
+version = "1.0.0"
+
+[[bin]]
+name = "main"
+path = "main.masm"
+
+[dependencies]
+mid = {{ path = "{}", linkage = "static" }}
+"#,
+                dependency_package_path.display()
+            ),
+        );
+        write_file(
+            &manifest_path.parent().unwrap().join("main.masm"),
+            r#"begin
+    exec.::deps::mid::call_kernel
 end
 "#,
         );
