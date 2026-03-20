@@ -167,6 +167,7 @@ impl Project {
             .ancestors()
             .skip(ignore_first_ancestor as usize);
 
+        let initial_package_dir = manifest_path.parent();
         for ancestor in ancestors {
             let workspace_manifest = ancestor.join("miden-project.toml");
             if !workspace_manifest.exists() {
@@ -199,7 +200,7 @@ impl Project {
                 };
 
                 return Ok(Self::WorkspacePackage { package, workspace: workspace.into() });
-            } else {
+            } else if Some(ancestor) != initial_package_dir {
                 break;
             }
         }
