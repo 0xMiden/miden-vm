@@ -14,13 +14,24 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModuleInfo {
     path: Arc<Path>,
+    /// When specified, multiple modules with the same name can be present, so long as they are
+    /// disambiguated by version.
+    version: Option<crate::Version>,
     items: Vec<ItemInfo>,
 }
 
 impl ModuleInfo {
-    /// Returns a new [`ModuleInfo`] instantiated library path.
-    pub fn new(path: Arc<Path>) -> Self {
-        Self { path, items: Vec::new() }
+    /// Returns a new [`ModuleInfo`] instantiated by library path and optional semantic version.
+    ///
+    /// The semantic version is optional, as currently the assembler allows assembling artifacts
+    /// without providing one.
+    pub fn new(path: Arc<Path>, version: Option<crate::Version>) -> Self {
+        Self { version, path, items: Vec::new() }
+    }
+
+    /// Specify the version of this module
+    pub fn set_version(&mut self, version: crate::Version) {
+        self.version = Some(version);
     }
 
     /// Adds a procedure to the module.

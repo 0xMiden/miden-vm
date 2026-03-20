@@ -5,6 +5,7 @@ use alloc::{
 };
 use core::str::FromStr;
 use std::{
+    collections::BTreeMap,
     eprintln,
     sync::{Arc, LazyLock},
 };
@@ -22,7 +23,8 @@ use miden_core::{
     serde::{Deserializable, Serializable},
 };
 use miden_mast_package::{
-    MastArtifact, MastForest, Package, PackageExport, PackageKind, PackageManifest,
+    ConstantExport, MastForest, Package, PackageExport, PackageId, PackageManifest, TargetType,
+    TypeExport,
 };
 use proptest::{
     prelude::*,
@@ -4219,85 +4221,82 @@ fn test_assert_diagnostic_lines() {
 // ================================================================================================
 
 prop_compose! {
-    fn any_package()(name in ".*", mast in any::<ArbitraryMastArtifact>(), manifest in any::<PackageManifest>()) -> Package {
-        use miden_mast_package::{ConstantExport, TypeExport, ProcedureExport};
+    fn any_package()(name in ".*", artifact in any::<ArbitraryMastArtifact>(), manifest in any::<PackageManifest>()) -> Package {
 
-        let mast = mast.0;
+        let ArbitraryMastArtifact { ty, lib } = artifact;
 
         // Ensure the manifest reflects exports of the actual MAST artifact
         let mut exports = Vec::default();
-        match &mast {
-            MastArtifact::Library(lib) => {
-                for export in lib.exports() {
-                    match export {
-                        LibraryExport::Procedure(export) => {
-                            let digest = lib.mast_forest()[export.node].digest();
-                            exports.push(PackageExport::Procedure(ProcedureExport {
-                                path: export.path.clone(),
-                                digest,
-                                signature: export.signature.clone(),
-                                attributes: export.attributes.clone(),
-                            }));
-                        }
-                        LibraryExport::Constant(export) => {
-                            exports.push(PackageExport::Constant(ConstantExport {
-                                path: export.path.clone(),
-                                value: export.value.clone(),
-                            }));
-                        }
-                        LibraryExport::Type(export) => {
-                                                    exports.push(PackageExport::Type(TypeExport {
-                                                        path: export.path.clone(),
-                                                        ty: export.ty.clone(),
-                                                    }))
-                                                }
-                    }
+        for export in lib.exports() {
+            match export {
+                LibraryExport::Procedure(export) => {
+                    let digest = lib.mast_forest()[export.node].digest();
+                    exports.push(PackageExport::Procedure(miden_mast_package::ProcedureExport {
+                        path: export.path.clone(),digest,
+                        signature: export.signature.clone(),
+                        attributes: export.attributes.clone(),
+                    }));
                 }
-            }
-            MastArtifact::Executable(prog) => {
-                let path = Path::exec_path().join(ProcedureName::MAIN_PROC_NAME).into();
-                let digest = prog.mast_forest()[prog.entrypoint()].digest();
-                exports.push(PackageExport::Procedure(ProcedureExport {
-                    path,
-                    digest,
-                    signature: None,
-                    attributes: Default::default(),
-                }));
+                LibraryExport::Constant(export) => {
+                    exports.push(PackageExport::Constant(ConstantExport {
+                        path: export.path.clone(),
+                        value: export.value.clone(),
+                    }));
+                }
+                LibraryExport::Type(export) => {
+                    exports.push(PackageExport::Type(TypeExport {
+                        path: export.path.clone(),
+                        ty: export.ty.clone(),
+                    }));
+                }
             }
         }
 
         let manifest = PackageManifest::new(exports).with_dependencies(manifest.dependencies().cloned());
 
-        let kind = match &mast {
-            MastArtifact::Executable(_) => PackageKind::Executable,
-            MastArtifact::Library(_) => PackageKind::Library,
-        };
-
-        Package { name, version: None, description: None, kind, mast, manifest, sections: Default::default() }
+        let name = PackageId::from(name);
+        let version = miden_assembly_syntax::Version::new(0, 0, 0);
+        Package { name, version, description: None, kind: ty, mast: lib, manifest, sections: Default::default() }
     }
 }
 
 #[derive(Debug, Clone)]
-struct ArbitraryMastArtifact(MastArtifact);
+struct ArbitraryMastArtifact {
+    ty: TargetType,
+    lib: Arc<Library>,
+}
+
+impl ArbitraryMastArtifact {
+    fn library(lib: Arc<Library>) -> Self {
+        Self { ty: TargetType::Library, lib }
+    }
+
+    fn executable(lib: Arc<Library>) -> Self {
+        Self { ty: TargetType::Executable, lib }
+    }
+}
 
 impl Arbitrary for ArbitraryMastArtifact {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        prop_oneof![Just(Self(LIB_EXAMPLE.clone().into())), Just(Self(PRG_EXAMPLE.clone().into()))]
-            .boxed()
+        prop_oneof![
+            Just(Self::library(LIB_EXAMPLE.clone())),
+            Just(Self::executable(PRG_EXAMPLE.clone()))
+        ]
+        .boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;
 }
 
 static LIB_EXAMPLE: LazyLock<Arc<Library>> = LazyLock::new(build_library_example);
-static PRG_EXAMPLE: LazyLock<Arc<Program>> = LazyLock::new(build_program_example);
+static PRG_EXAMPLE: LazyLock<Arc<Library>> = LazyLock::new(build_program_example);
 
 fn build_library_example() -> Arc<Library> {
     let context = TestContext::new();
     // declare foo module
-    let foo = r#"
+    let foo_src = r#"
         pub proc foo(a: felt, b: felt) -> felt
             add
         end
@@ -4305,10 +4304,10 @@ fn build_library_example() -> Arc<Library> {
             mul
         end
     "#;
-    let foo = parse_module!(&context, "test::foo", foo);
+    let foo_module = parse_module!(&context, "test::foo", foo_src);
 
     // declare bar module
-    let bar = r#"
+    let bar_src = r#"
         pub proc bar
             mtree_get
         end
@@ -4316,8 +4315,8 @@ fn build_library_example() -> Arc<Library> {
             mul
         end
     "#;
-    let bar = parse_module!(&context, "test::bar", bar);
-    let modules = [foo, bar];
+    let bar_module = parse_module!(&context, "test::bar", bar_src);
+    let modules = [foo_module, bar_module];
 
     // serialize/deserialize the bundle with locations
     Assembler::new(context.source_manager())
@@ -4326,7 +4325,8 @@ fn build_library_example() -> Arc<Library> {
         .into()
 }
 
-fn build_program_example() -> Arc<Program> {
+fn build_program_example() -> Arc<Library> {
+    use miden_assembly_syntax::library::ProcedureExport;
     let source = "
     begin
         push.1.2
@@ -4335,7 +4335,27 @@ fn build_program_example() -> Arc<Program> {
     end
     ";
     let assembler = Assembler::default();
-    assembler.assemble_program(source).unwrap().into()
+
+    // TODO: once the assembler supports assembling executable modules, replace with:
+    //
+    // let options = ParseOptions {
+    //    kind: ModuleKind::Executable,
+    //    warnings_as_errors: assembler.warnings_as_errors(),
+    //    path: Some(Path::exec_path().into()),
+    // };
+    //
+    // let program = source.parse_with_options(assembler.source_manager(), options).unwrap();
+    // assembler.assemble_executable_modules(program, []).unwrap().into_artifact()
+
+    let program = assembler.assemble_program(source).unwrap();
+    let mast_forest = program.mast_forest().clone();
+    let entrypoint = program.entrypoint();
+    let mut exports = BTreeMap::new();
+    let export =
+        LibraryExport::Procedure(ProcedureExport::new(entrypoint, Path::exec_path().into()));
+    exports.insert(Path::exec_path().into(), export);
+
+    Library::new(mast_forest, exports).unwrap().into()
 }
 
 #[test]

@@ -1,4 +1,4 @@
-use alloc::{collections::BTreeMap, string::String, sync::Arc, vec, vec::Vec};
+use alloc::{collections::BTreeMap, sync::Arc, vec, vec::Vec};
 use std::{fs, path::Path, println};
 
 use miden_assembly_syntax::{
@@ -8,6 +8,7 @@ use miden_assembly_syntax::{
         types::{CallConv, FunctionType, Type},
     },
     library::{LibraryExport, ProcedureExport as LibraryProcedureExport},
+    semver::Version,
 };
 use miden_core::{
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt, MastNodeId},
@@ -15,10 +16,8 @@ use miden_core::{
     serde::Serializable,
 };
 
-use crate::{
-    MastArtifact, Package, PackageExport, PackageKind, PackageManifest,
-    ProcedureExport as PackageProcedureExport,
-};
+use super::{PackageId, TargetType};
+use crate::{Package, PackageExport, PackageManifest, ProcedureExport as PackageProcedureExport};
 
 fn build_forest() -> (MastForest, MastNodeId) {
     let mut forest = MastForest::new();
@@ -35,7 +34,7 @@ fn absolute_path(name: &str) -> Arc<AstPath> {
     Arc::from(path.into_boxed_path())
 }
 
-fn build_library(signature: Option<FunctionType>) -> Library {
+fn build_library(signature: Option<FunctionType>) -> Arc<Library> {
     let (forest, node_id) = build_forest();
     let path = absolute_path("test::proc");
     let mut export = LibraryProcedureExport::new(node_id, Arc::clone(&path));
@@ -46,10 +45,10 @@ fn build_library(signature: Option<FunctionType>) -> Library {
     let mut exports = BTreeMap::new();
     exports.insert(path, LibraryExport::Procedure(export));
 
-    Library::new(Arc::new(forest), exports).expect("failed to build library")
+    Arc::new(Library::new(Arc::new(forest), exports).expect("failed to build library"))
 }
 
-fn build_package(library: Library, signature: FunctionType) -> Package {
+fn build_package(library: Arc<Library>, signature: FunctionType) -> Package {
     let path = absolute_path("test::proc");
     let node_id = library.get_export_node_id(path.as_ref());
     let digest = library.mast_forest()[node_id].digest();
@@ -64,11 +63,11 @@ fn build_package(library: Library, signature: FunctionType) -> Package {
     let manifest = PackageManifest::new([export]);
 
     Package {
-        name: String::from("test_pkg"),
-        version: None,
+        name: PackageId::from("test_pkg"),
+        version: Version::new(0, 0, 0),
         description: None,
-        kind: PackageKind::Library,
-        mast: MastArtifact::Library(Arc::new(library)),
+        kind: TargetType::Library,
+        mast: library,
         manifest,
         sections: Vec::new(),
     }

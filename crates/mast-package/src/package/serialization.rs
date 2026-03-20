@@ -6,12 +6,12 @@
 //!
 //! #### Metadata
 //! - `name` (`String`)
-//! - `version` (optional, [`miden_assembly_syntax::Version`] serialized as a `String`)
+//! - `version` ([`miden_assembly_syntax::Version`] serialized as a `String`)
 //! - `description` (optional, `String`)
-//! - `kind` (`u8`, see [`crate::PackageKind`])
+//! - `kind` (`u8`, see [`crate::TargetType`])
 //!
 //! #### Code
-//! - `mast` (see [`crate::MastArtifact`])
+//! - `mast` (see [`miden_assembly_syntax::Library`])
 //!
 //! #### Manifest
 //! - `manifest` (see [`crate::PackageManifest`])
@@ -33,12 +33,11 @@ use miden_assembly_syntax::{
 };
 use miden_core::{
     Word,
-    program::Program,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
-use super::{ConstantExport, PackageKind, ProcedureExport, TypeExport};
-use crate::{Dependency, MastArtifact, Package, PackageExport, PackageManifest, Section};
+use super::{ConstantExport, PackageId, ProcedureExport, TargetType, TypeExport};
+use crate::{Dependency, Package, PackageExport, PackageManifest, Section};
 
 // CONSTANTS
 // ================================================================================================
@@ -46,16 +45,10 @@ use crate::{Dependency, MastArtifact, Package, PackageExport, PackageManifest, S
 /// Magic string for detecting that a file is serialized [`Package`]
 const MAGIC_PACKAGE: &[u8; 5] = b"MASP\0";
 
-/// Magic string indicating a Program artifact.
-const MAGIC_PROGRAM: &[u8; 4] = b"PRG\0";
-
-/// Magic string indicating a Library artifact.
-const MAGIC_LIBRARY: &[u8; 4] = b"LIB\0";
-
 /// The format version.
 ///
 /// If future modifications are made to this format, the version should be incremented by 1.
-const VERSION: [u8; 3] = [3, 0, 0];
+const VERSION: [u8; 3] = [4, 0, 0];
 
 // PACKAGE SERIALIZATION/DESERIALIZATION
 // ================================================================================================
@@ -70,7 +63,7 @@ impl Serializable for Package {
         self.name.write_into(target);
 
         // Write package version
-        self.version.as_ref().map(|v| v.to_string()).write_into(target);
+        self.version.to_string().write_into(target);
 
         // Write package description
         self.description.write_into(target);
@@ -110,28 +103,23 @@ impl Deserializable for Package {
         }
 
         // Read package name
-        let name = String::read_from(source)?;
+        let name = PackageId::read_from(source)?;
 
         // Read package version
-        let version = Option::<String>::read_from(source)?;
-        let version = match version {
-            Some(version) => Some(
-                crate::Version::parse(&version)
-                    .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?,
-            ),
-            None => None,
-        };
+        let version = String::read_from(source)?
+            .parse::<crate::Version>()
+            .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
 
         // Read package description
         let description = Option::<String>::read_from(source)?;
 
         // Read package kind
         let kind_tag = source.read_u8()?;
-        let kind = PackageKind::try_from(kind_tag)
+        let kind = TargetType::try_from(kind_tag)
             .map_err(|e| DeserializationError::InvalidValue(e.to_string()))?;
 
         // Read MAST artifact
-        let mast = MastArtifact::read_from(source)?;
+        let mast = Arc::new(Library::read_from(source)?);
 
         // Read manifest
         let manifest = PackageManifest::read_from(source)?;
@@ -148,41 +136,6 @@ impl Deserializable for Package {
             manifest,
             sections,
         })
-    }
-}
-
-// MAST ARTIFACT SERIALIZATION/DESERIALIZATION
-// ================================================================================================
-
-impl Serializable for MastArtifact {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        match self {
-            Self::Executable(program) => {
-                target.write_bytes(MAGIC_PROGRAM);
-                program.write_into(target);
-            },
-            Self::Library(library) => {
-                target.write_bytes(MAGIC_LIBRARY);
-                library.write_into(target);
-            },
-        }
-    }
-}
-
-impl Deserializable for MastArtifact {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let tag: [u8; 4] = source.read_array()?;
-
-        if &tag == MAGIC_PROGRAM {
-            Program::read_from(source).map(Arc::new).map(MastArtifact::Executable)
-        } else if &tag == MAGIC_LIBRARY {
-            Library::read_from(source).map(Arc::new).map(MastArtifact::Library)
-        } else {
-            Err(DeserializationError::InvalidValue(format!(
-                "invalid MAST artifact tag: {:?}",
-                &tag
-            )))
-        }
     }
 }
 
@@ -418,13 +371,7 @@ impl Deserializable for TypeExport {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{
-        collections::BTreeMap,
-        string::{String, ToString},
-        sync::Arc,
-        vec,
-        vec::Vec,
-    };
+    use alloc::{collections::BTreeMap, string::ToString, sync::Arc, vec, vec::Vec};
 
     use miden_assembly_syntax::{
         Library,
@@ -440,10 +387,10 @@ mod tests {
         },
     };
 
-    use super::{
-        MAGIC_PACKAGE, MastArtifact, Package, PackageExport, PackageKind, PackageManifest, VERSION,
+    use super::{MAGIC_PACKAGE, Package, PackageExport, PackageManifest, VERSION};
+    use crate::{
+        PackageId, TargetType, package::manifest::ProcedureExport as PackageProcedureExport,
     };
-    use crate::package::manifest::ProcedureExport as PackageProcedureExport;
 
     fn build_forest() -> (MastForest, MastNodeId) {
         let mut forest = MastForest::new();
@@ -460,7 +407,7 @@ mod tests {
         Arc::from(path.into_boxed_path())
     }
 
-    fn build_library() -> Library {
+    fn build_library() -> Arc<Library> {
         let (forest, node_id) = build_forest();
         let path = absolute_path("test::proc");
         let export = LibraryProcedureExport::new(node_id, Arc::clone(&path));
@@ -468,7 +415,7 @@ mod tests {
         let mut exports = BTreeMap::new();
         exports.insert(path, LibraryExport::Procedure(export));
 
-        Library::new(Arc::new(forest), exports).expect("failed to build library")
+        Arc::new(Library::new(Arc::new(forest), exports).expect("failed to build library"))
     }
 
     fn build_package() -> Package {
@@ -487,11 +434,11 @@ mod tests {
         let manifest = PackageManifest::new([export]);
 
         Package {
-            name: String::from("test_pkg"),
-            version: None,
+            name: PackageId::from("test_pkg"),
+            version: crate::Version::new(0, 0, 0),
             description: None,
-            kind: PackageKind::Library,
-            mast: MastArtifact::Library(Arc::new(library)),
+            kind: TargetType::Library,
+            mast: library,
             manifest,
             sections: Vec::new(),
         }
@@ -504,7 +451,7 @@ mod tests {
         bytes.write_bytes(MAGIC_PACKAGE);
         bytes.write_bytes(&VERSION);
         package.name.write_into(&mut bytes);
-        package.version.as_ref().map(|v| v.to_string()).write_into(&mut bytes);
+        package.version.to_string().write_into(&mut bytes);
         package.description.write_into(&mut bytes);
         bytes.write_u8(package.kind.into());
         package.mast.write_into(&mut bytes);

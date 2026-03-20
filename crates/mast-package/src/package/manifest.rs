@@ -1,9 +1,12 @@
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 use core::fmt;
 
-use miden_assembly_syntax::ast::{
-    self, AttributeSet, Path,
-    types::{FunctionType, Type},
+use miden_assembly_syntax::{
+    ast::{
+        self, AttributeSet, Path,
+        types::{FunctionType, Type},
+    },
+    library::Library,
 };
 use miden_core::{Word, utils::DisplayHex};
 #[cfg(feature = "arbitrary")]
@@ -35,12 +38,40 @@ pub struct PackageManifest {
 }
 
 impl PackageManifest {
+    /// Construct a new [PackageManifest] by providing the set of exports for the corresponding
+    /// package.
     pub fn new(exports: impl IntoIterator<Item = PackageExport>) -> Self {
         let exports = exports.into_iter().map(|export| (export.path(), export)).collect();
         Self {
             exports,
             dependencies: Default::default(),
         }
+    }
+
+    /// Construct a new [PackageManifest] by deriving export information from the given [Library].
+    pub fn from_library(library: &Library) -> Self {
+        use miden_assembly_syntax::library::LibraryExport;
+        use miden_core::mast::MastNodeExt;
+
+        Self::new(library.exports().map(|export| match export {
+            LibraryExport::Procedure(export) => {
+                let digest = library.mast_forest()[export.node].digest();
+                PackageExport::Procedure(ProcedureExport {
+                    path: export.path.clone(),
+                    digest,
+                    signature: export.signature.clone(),
+                    attributes: export.attributes.clone(),
+                })
+            },
+            LibraryExport::Constant(export) => PackageExport::Constant(ConstantExport {
+                path: export.path.clone(),
+                value: export.value.clone(),
+            }),
+            LibraryExport::Type(export) => PackageExport::Type(TypeExport {
+                path: export.path.clone(),
+                ty: export.ty.clone(),
+            }),
+        }))
     }
 
     /// Extend this manifest with the provided dependencies
