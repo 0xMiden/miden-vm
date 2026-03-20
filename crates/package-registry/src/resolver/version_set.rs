@@ -14,7 +14,7 @@ use crate::{SemVer, Version, VersionReq, VersionRequirement};
 /// that may also be further constrained by specific content digests that are considered to be part
 /// of the set.
 ///
-/// * The empty set is represented as a range that cannot contain any version
+/// * The empty set is represented as a range that cannot contain any version, with no digest filter
 /// * The complete (aka "full") set is represented as an unbounded range with an empty content
 ///   digest filter, equivalent to the semantic versioning constraint `*`
 /// * A digest-only constraint is represented as a semantic range paired with a digest filter. When
@@ -236,14 +236,10 @@ impl pubgrub::VersionSet for VersionSet {
             return Self::empty();
         }
 
-        let range = match (self.range.is_empty(), other.range.is_empty()) {
-            (false, false) => self.range.intersection(&other.range),
-            (true, false) if self.digests.is_empty() => SemverPubgrub::empty(),
-            (false, true) if other.digests.is_empty() => SemverPubgrub::empty(),
-            (true, false) => other.range.clone(),
-            (false, true) => self.range.clone(),
-            (true, true) => SemverPubgrub::empty(),
-        };
+        let range = self.range.intersection(&other.range);
+        if range.is_empty() {
+            return Self::empty();
+        }
 
         Self { range, digests }
     }
@@ -312,6 +308,27 @@ mod tests {
         assert!(
             <VersionSet as pubgrub::VersionSet>::contains(&set, &candidate),
             "semantic set {set} should contain {candidate}"
+        );
+    }
+
+    #[test]
+    fn empty_digest_constrained_intersection_stays_empty() {
+        let digest = Rpo256::hash(b"revived-digest");
+        let impossible = <VersionSet as pubgrub::VersionSet>::intersection(
+            &VersionSet::from(Version::new("1.0.0".parse().unwrap(), digest)),
+            &VersionSet::from("=2.0.0".parse::<VersionReq>().unwrap()),
+        );
+
+        let revived = <VersionSet as pubgrub::VersionSet>::intersection(
+            &impossible,
+            &VersionSet::from("^3.0.0".parse::<VersionReq>().unwrap()),
+        );
+        let candidate = Version::new("3.1.0".parse().unwrap(), digest);
+
+        assert_eq!(revived, VersionSet::empty());
+        assert!(
+            !<VersionSet as pubgrub::VersionSet>::contains(&revived, &candidate),
+            "set {revived} unexpectedly revived impossible candidate {candidate}"
         );
     }
 }
