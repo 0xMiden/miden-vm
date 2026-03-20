@@ -436,22 +436,14 @@ where
                 package_id, version
             ))
         })?;
-        let expected = match origin {
-            ProjectSourceOrigin::Git { repo, resolved_revision, .. } => {
-                PackageBuildProvenance::Git {
-                    repo: repo.to_string(),
-                    resolved_revision: resolved_revision.to_string(),
-                }
-            },
-            ProjectSourceOrigin::Path | ProjectSourceOrigin::Root => PackageBuildProvenance::Path {
-                source_hash: self.compute_path_source_hash(
-                    project,
-                    target,
-                    manifest_path,
-                    workspace_root,
-                )?,
-            },
-        };
+        let expected = self.expected_source_provenance(
+            package_id,
+            project,
+            target,
+            origin,
+            manifest_path,
+            workspace_root,
+        )?;
 
         if actual == expected {
             Ok(Some(package))
@@ -495,26 +487,171 @@ where
             ProjectSource::Virtual { .. } => Ok(None),
             ProjectSource::Real {
                 origin, manifest_path, workspace_root, ..
-            } => match origin {
-                ProjectSourceOrigin::Git { repo, resolved_revision, .. } => {
-                    Ok(Some(PackageBuildProvenance::Git {
-                        repo: repo.to_string(),
-                        resolved_revision: resolved_revision.to_string(),
-                    }))
-                },
-                ProjectSourceOrigin::Path | ProjectSourceOrigin::Root => {
-                    if target.path.is_none() {
-                        return Ok(None);
-                    }
-                    Ok(Some(PackageBuildProvenance::Path {
-                        source_hash: self.compute_path_source_hash(
-                            project,
-                            target,
-                            manifest_path,
-                            workspace_root.as_deref(),
-                        )?,
-                    }))
-                },
+            } => {
+                if matches!(origin, ProjectSourceOrigin::Path | ProjectSourceOrigin::Root)
+                    && target.path.is_none()
+                {
+                    return Ok(None);
+                }
+
+                self.expected_source_provenance(
+                    package_id,
+                    project,
+                    target,
+                    origin,
+                    manifest_path,
+                    workspace_root.as_deref(),
+                )
+                .map(Some)
+            },
+        }
+    }
+
+    fn expected_source_provenance(
+        &self,
+        package_id: &PackageId,
+        project: &ProjectPackage,
+        target: &Target,
+        origin: &ProjectSourceOrigin,
+        manifest_path: &FsPath,
+        workspace_root: Option<&FsPath>,
+    ) -> Result<PackageBuildProvenance, Report> {
+        self.expected_source_provenance_with_visited(
+            package_id,
+            project,
+            target,
+            origin,
+            manifest_path,
+            workspace_root,
+            &mut BTreeSet::new(),
+        )
+    }
+
+    fn expected_source_provenance_with_visited(
+        &self,
+        package_id: &PackageId,
+        project: &ProjectPackage,
+        target: &Target,
+        origin: &ProjectSourceOrigin,
+        manifest_path: &FsPath,
+        workspace_root: Option<&FsPath>,
+        visiting: &mut BTreeSet<PackageId>,
+    ) -> Result<PackageBuildProvenance, Report> {
+        let dependency_hash = self.compute_dependency_closure_hash(package_id, visiting)?;
+
+        match origin {
+            ProjectSourceOrigin::Git { repo, resolved_revision, .. } => {
+                Ok(PackageBuildProvenance::Git {
+                    repo: repo.to_string(),
+                    resolved_revision: resolved_revision.to_string(),
+                    dependency_hash,
+                })
+            },
+            ProjectSourceOrigin::Path | ProjectSourceOrigin::Root => {
+                Ok(PackageBuildProvenance::Path {
+                    source_hash: self.compute_path_source_hash(
+                        project,
+                        target,
+                        manifest_path,
+                        workspace_root,
+                    )?,
+                    dependency_hash,
+                })
+            },
+        }
+    }
+
+    fn compute_dependency_closure_hash(
+        &self,
+        package_id: &PackageId,
+        visiting: &mut BTreeSet<PackageId>,
+    ) -> Result<Word, Report> {
+        if !visiting.insert(package_id.clone()) {
+            return Err(Report::msg(format!(
+                "dependency cycle detected while computing source provenance for '{package_id}'"
+            )));
+        }
+
+        let outcome = (|| {
+            let node = self.dependency_graph.get(package_id).ok_or_else(|| {
+                Report::msg(format!("missing dependency graph node for '{package_id}'"))
+            })?;
+            if node.dependencies.is_empty() {
+                return Ok(PackageBuildProvenance::empty_dependency_hash());
+            }
+
+            let mut dependencies = node.dependencies.clone();
+            dependencies.sort_by(|a, b| {
+                a.dependency
+                    .cmp(&b.dependency)
+                    .then_with(|| a.linkage.to_string().cmp(&b.linkage.to_string()))
+            });
+
+            let mut material = String::new();
+            for edge in dependencies {
+                material.push_str("dependency:");
+                material.push_str(edge.dependency.as_ref());
+                material.push(':');
+                material.push_str(edge.linkage.to_string().as_str());
+                material.push('\n');
+                material.push_str(&self.dependency_resolution_hash_input(&edge.dependency, visiting)?);
+            }
+
+            Ok(hash_string_to_word(material.as_str()))
+        })();
+
+        visiting.remove(package_id);
+        outcome
+    }
+
+    fn dependency_resolution_hash_input(
+        &self,
+        package_id: &PackageId,
+        visiting: &mut BTreeSet<PackageId>,
+    ) -> Result<String, Report> {
+        let node = self
+            .dependency_graph
+            .get(package_id)
+            .ok_or_else(|| Report::msg(format!("missing dependency graph node for '{package_id}'")))?;
+
+        match &node.provenance {
+            ProjectDependencyNodeProvenance::Registry { selected, .. } => {
+                Ok(format!("registry:{package_id}@{selected}\n"))
+            },
+            ProjectDependencyNodeProvenance::Preassembled { selected, .. } => {
+                Ok(format!("preassembled:{package_id}@{selected}\n"))
+            },
+            ProjectDependencyNodeProvenance::Source(ProjectSource::Real {
+                origin,
+                manifest_path,
+                workspace_root,
+                library_path: Some(_),
+                ..
+            }) => {
+                let project =
+                    load_project_package(self.assembler.source_manager(), package_id, manifest_path)?;
+                let target = project
+                    .library_target()
+                    .map(|target| target.inner().clone())
+                    .ok_or_else(|| {
+                        Report::msg(format!(
+                            "dependency '{}' does not define a library target",
+                            package_id
+                        ))
+                    })?;
+                let provenance = self.expected_source_provenance_with_visited(
+                    package_id,
+                    &project,
+                    &target,
+                    origin,
+                    manifest_path,
+                    workspace_root.as_deref(),
+                    visiting,
+                )?;
+                Ok(format!("source:{package_id}:{}\n", provenance.describe()))
+            },
+            ProjectDependencyNodeProvenance::Source(_) => {
+                Ok(format!("canonical:{package_id}@{}\n", node.version))
             },
         }
     }
@@ -787,11 +924,15 @@ struct TargetSourcePaths {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PackageBuildProvenance {
-    Path { source_hash: Word },
-    Git { repo: String, resolved_revision: String },
+    Path { source_hash: Word, dependency_hash: Word },
+    Git { repo: String, resolved_revision: String, dependency_hash: Word },
 }
 
 impl PackageBuildProvenance {
+    fn empty_dependency_hash() -> Word {
+        hash_string_to_word("")
+    }
+
     fn to_section(&self) -> Section {
         let mut data = Vec::new();
         self.write_into(&mut data);
@@ -818,8 +959,22 @@ impl PackageBuildProvenance {
 
     fn describe(&self) -> String {
         match self {
-            Self::Path { source_hash } => format!("path({source_hash})"),
-            Self::Git { repo, resolved_revision } => format!("git({repo}@{resolved_revision})"),
+            Self::Path { source_hash, dependency_hash }
+                if *dependency_hash == Self::empty_dependency_hash() =>
+            {
+                format!("path({source_hash})")
+            },
+            Self::Path { source_hash, dependency_hash } => {
+                format!("path({source_hash}, deps={dependency_hash})")
+            },
+            Self::Git { repo, resolved_revision, dependency_hash }
+                if *dependency_hash == Self::empty_dependency_hash() =>
+            {
+                format!("git({repo}@{resolved_revision})")
+            },
+            Self::Git { repo, resolved_revision, dependency_hash } => {
+                format!("git({repo}@{resolved_revision}, deps={dependency_hash})")
+            },
         }
     }
 }
@@ -827,14 +982,29 @@ impl PackageBuildProvenance {
 impl Serializable for PackageBuildProvenance {
     fn write_into<W: miden_core::serde::ByteWriter>(&self, target: &mut W) {
         match self {
-            Self::Path { source_hash } => {
+            Self::Path { source_hash, dependency_hash }
+                if *dependency_hash == Self::empty_dependency_hash() =>
+            {
                 target.write_u8(0);
                 source_hash.write_into(target);
             },
-            Self::Git { repo, resolved_revision } => {
+            Self::Git { repo, resolved_revision, dependency_hash }
+                if *dependency_hash == Self::empty_dependency_hash() =>
+            {
                 target.write_u8(1);
                 repo.write_into(target);
                 resolved_revision.write_into(target);
+            },
+            Self::Path { source_hash, dependency_hash } => {
+                target.write_u8(2);
+                source_hash.write_into(target);
+                dependency_hash.write_into(target);
+            },
+            Self::Git { repo, resolved_revision, dependency_hash } => {
+                target.write_u8(3);
+                repo.write_into(target);
+                resolved_revision.write_into(target);
+                dependency_hash.write_into(target);
             },
         }
     }
@@ -845,10 +1015,23 @@ impl Deserializable for PackageBuildProvenance {
         source: &mut R,
     ) -> Result<Self, miden_core::serde::DeserializationError> {
         match source.read_u8()? {
-            0 => Ok(Self::Path { source_hash: Word::read_from(source)? }),
+            0 => Ok(Self::Path {
+                source_hash: Word::read_from(source)?,
+                dependency_hash: Self::empty_dependency_hash(),
+            }),
             1 => Ok(Self::Git {
                 repo: String::read_from(source)?,
                 resolved_revision: String::read_from(source)?,
+                dependency_hash: Self::empty_dependency_hash(),
+            }),
+            2 => Ok(Self::Path {
+                source_hash: Word::read_from(source)?,
+                dependency_hash: Word::read_from(source)?,
+            }),
+            3 => Ok(Self::Git {
+                repo: String::read_from(source)?,
+                resolved_revision: String::read_from(source)?,
+                dependency_hash: Word::read_from(source)?,
             }),
             invalid => Err(miden_core::serde::DeserializationError::InvalidValue(format!(
                 "invalid project source provenance tag '{invalid}'"
@@ -1823,6 +2006,98 @@ end
             .assemble_library_package(&root_manifest, None)
             .expect_err("changed dependency sources should require a semver bump");
         assert!(error.to_string().contains("bump the semantic version"));
+    }
+
+    #[test]
+    fn transitive_path_dependency_source_changes_require_semver_bump() {
+        let tempdir = TempDir::new().unwrap();
+        let leaf_dir = tempdir.path().join("leaf");
+        write_file(
+            &leaf_dir.join("miden-project.toml"),
+            r#"[package]
+name = "leaf"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+namespace = "deps::leaf"
+"#,
+        );
+        let leaf_source = leaf_dir.join("lib.masm");
+        write_file(
+            &leaf_source,
+            r#"pub proc foo
+    push.1
+end
+"#,
+        );
+
+        let dep_dir = tempdir.path().join("dep");
+        write_file(
+            &dep_dir.join("miden-project.toml"),
+            r#"[package]
+name = "dep"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+namespace = "deps::dep"
+
+[dependencies]
+leaf = { path = "../leaf", linkage = "static" }
+"#,
+        );
+        write_file(
+            &dep_dir.join("lib.masm"),
+            r#"use ::deps::leaf
+
+pub proc call_leaf
+    exec.leaf::foo
+end
+"#,
+        );
+
+        let root_dir = tempdir.path().join("root");
+        let root_manifest = root_dir.join("miden-project.toml");
+        write_file(
+            &root_manifest,
+            r#"[package]
+name = "root"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+
+[dependencies]
+dep = { path = "../dep" }
+"#,
+        );
+        write_file(
+            &root_dir.join("lib.masm"),
+            r#"pub proc entry
+    exec.::deps::dep::call_leaf
+end
+"#,
+        );
+
+        let mut context = TestContext::new();
+        context
+            .assemble_library_package(&root_manifest, None)
+            .expect("initial build should succeed");
+
+        write_file(
+            &leaf_source,
+            r#"pub proc foo
+    push.2
+end
+"#,
+        );
+
+        let error = context
+            .assemble_library_package(&root_manifest, None)
+            .expect_err("changed transitive dependency sources should require a semver bump");
+        assert!(error.to_string().contains("package 'dep' version '1.0.0'"));
+        assert!(error.to_string().contains("different source provenance"));
     }
 
     #[test]
