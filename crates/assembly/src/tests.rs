@@ -4252,7 +4252,11 @@ prop_compose! {
             }
         }
 
-        let manifest = PackageManifest::new(exports).with_dependencies(manifest.dependencies().cloned());
+        let manifest = PackageManifest::new(exports)
+            .and_then(|package_manifest| {
+                package_manifest.with_dependencies(manifest.dependencies().cloned())
+            })
+            .expect("test package manifest should be valid");
 
         let name = PackageId::from(name);
         let version = miden_assembly_syntax::Version::new(0, 0, 0);

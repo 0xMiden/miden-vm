@@ -15,7 +15,7 @@ use alloc::{
 };
 
 use miden_assembly_syntax::{KernelLibrary, Library, Report, ast::QualifiedProcedureName};
-use miden_core::Word;
+use miden_core::{Word, serde::Deserializable};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -129,26 +129,135 @@ impl Package {
 
     #[doc(hidden)]
     pub fn try_into_program(&self) -> Result<miden_core::program::Program, Report> {
+        use miden_assembly_syntax::{Path as MasmPath, ast};
+        use miden_core::program::Program;
+
         if !self.is_program() {
-            Err(Report::msg(format!(
+            return Err(Report::msg(format!(
                 "cannot convert package of type {} to Executable",
                 self.kind
-            )))
+            )));
+        }
+        let main_path = MasmPath::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME);
+        if let Some(digest) = self.mast.get_procedure_root_by_path(&main_path)
+            && let Some(entrypoint) = self.mast.mast_forest().find_procedure_root(digest)
+        {
+            let mast_forest = self.mast.mast_forest().clone();
+            match self.try_embedded_kernel_library()? {
+                Some(kernel_library) => Ok(Program::with_kernel(
+                    mast_forest,
+                    entrypoint,
+                    kernel_library.kernel().clone(),
+                )),
+                None => Ok(Program::new(mast_forest, entrypoint)),
+            }
         } else {
-            Ok(self.unwrap_program())
+            Err(Report::msg(format!(
+                "malformed executable package: no procedure root for '{main_path}'"
+            )))
         }
     }
 
     #[doc(hidden)]
     pub fn unwrap_program(&self) -> miden_core::program::Program {
-        use miden_assembly_syntax::{Path as MasmPath, ast};
-        use miden_core::program::Program;
         assert_eq!(self.kind, TargetType::Executable);
-        Program::new(
-            self.mast.mast_forest().clone(),
-            self.mast
-                .get_export_node_id(MasmPath::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME)),
-        )
+        self.try_into_program().unwrap_or_else(|err| panic!("{err}"))
+    }
+
+    #[doc(hidden)]
+    pub fn try_embedded_kernel_package(&self) -> Result<Option<Self>, Report> {
+        let Some(kernel_package) = self.embedded_kernel_package()? else {
+            return Ok(None);
+        };
+        self.validate_embedded_kernel_dependency(&kernel_package)?;
+        Ok(Some(kernel_package))
+    }
+
+    fn try_embedded_kernel_library(&self) -> Result<Option<KernelLibrary>, Report> {
+        let Some(kernel_package) = self.try_embedded_kernel_package()? else {
+            return Ok(None);
+        };
+        kernel_package.try_into_kernel_library().map(Some)
+    }
+
+    /// This function extracts a embedded kernel package from the KERNEL section of this package,
+    /// if present.
+    ///
+    /// This returns an error in the following situations:
+    ///
+    /// * There are duplicate KERNEL sections
+    /// * Deserialization of a package from the KERNEL section fails
+    fn embedded_kernel_package(&self) -> Result<Option<Self>, Report> {
+        let mut sections = self.sections.iter().filter(|section| section.id == SectionId::KERNEL);
+        let Some(section) = sections.next() else {
+            return Ok(None);
+        };
+        if sections.next().is_some() {
+            return Err(Report::msg(format!(
+                "package '{}' contains multiple '{}' sections",
+                self.name,
+                SectionId::KERNEL
+            )));
+        }
+
+        Self::read_from_bytes(section.data.as_ref()).map(Some).map_err(|error| {
+            Report::msg(format!(
+                "failed to decode embedded kernel package for '{}': {error}",
+                self.name
+            ))
+        })
+    }
+
+    fn validate_embedded_kernel_dependency(&self, kernel_package: &Self) -> Result<(), Report> {
+        if !kernel_package.is_kernel() {
+            return Err(Report::msg(format!(
+                "package '{}' embeds '{}', but its kind is '{}'",
+                self.name, kernel_package.name, kernel_package.kind
+            )));
+        }
+
+        let Some(kernel_dependency) = self.kernel_runtime_dependency()? else {
+            return Err(Report::msg(format!(
+                "package '{}' embeds a kernel package, but does not declare a kernel runtime dependency",
+                self.name
+            )));
+        };
+
+        if kernel_dependency.name != kernel_package.name
+            || kernel_dependency.version != kernel_package.version
+            || kernel_dependency.digest != kernel_package.digest()
+        {
+            return Err(Report::msg(format!(
+                "package '{}' declares kernel runtime dependency '{}@{}#{}', but that does not match the embedded kernel package '{}@{}#{}'",
+                self.name,
+                kernel_dependency.name,
+                kernel_dependency.version,
+                kernel_dependency.digest,
+                kernel_package.name,
+                kernel_package.version,
+                kernel_package.digest()
+            )));
+        }
+
+        Ok(())
+    }
+
+    fn kernel_runtime_dependency(&self) -> Result<Option<&Dependency>, Report> {
+        let mut kernel_dependencies = self
+            .manifest
+            .dependencies()
+            .filter(|dependency| dependency.kind == TargetType::Kernel);
+        let Some(kernel_dependency) = kernel_dependencies.next() else {
+            return Ok(None);
+        };
+        if kernel_dependencies.next().is_some() {
+            return Err(Report::msg(format!(
+                "package '{}' declares multiple kernel runtime dependencies",
+                self.name
+            )));
+        }
+
+        Ok(Some(kernel_dependency))
     }
 
     /// Derive a new executable package from this one by specifying the entrypoint to use.
