@@ -46,7 +46,7 @@ pub use errors::{AceError, ExecutionError, HostError, MemoryError};
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
 pub use fast::{BreakReason, ExecutionOutput, FastProcessor, ResumeContext};
 pub use host::{
-    FutureMaybeSend, Host, MastForestStore, MemMastForestStore, SyncHost,
+    BaseHost, FutureMaybeSend, Host, MastForestStore, MemMastForestStore, SyncHost,
     debug::DefaultDebugHandler,
     default::{DefaultHost, HostLibrary},
     handlers::{DebugError, DebugHandler, TraceError},

@@ -7,7 +7,7 @@ use miden_core::{
 };
 
 use crate::{
-    Host, SyncHost,
+    BaseHost, Host, SyncHost,
     errors::{MapExecErrWithOpIdx, advice_error_with_context, event_error_with_context},
     fast::{BreakReason, FastProcessor, HostAdapter},
 };
@@ -23,7 +23,7 @@ impl FastProcessor {
         system_event: SystemEvent,
         current_forest: &MastForest,
         node_id: MastNodeId,
-        host: &impl SyncHost,
+        host: &impl BaseHost,
         op_idx: usize,
     ) -> ControlFlow<BreakReason> {
         match handle_system_event(self, system_event).map_exec_err_with_op_idx(
@@ -42,7 +42,7 @@ impl FastProcessor {
         &mut self,
         current_forest: &MastForest,
         node_id: MastNodeId,
-        host: &impl SyncHost,
+        host: &impl BaseHost,
         event_id: EventId,
         mutations: Result<Vec<crate::advice::AdviceMutation>, crate::event::EventError>,
     ) -> ControlFlow<BreakReason> {
@@ -81,7 +81,7 @@ impl FastProcessor {
         basic_block_node: &BasicBlockNode,
         node_id: MastNodeId,
         current_forest: &Arc<MastForest>,
-        host: &mut impl SyncHost,
+        host: &mut impl BaseHost,
     ) -> ControlFlow<BreakReason> {
         if self.should_execute_decorators() {
             #[cfg(test)]

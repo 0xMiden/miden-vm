@@ -11,8 +11,8 @@ use miden_debug_types::{
 };
 
 use crate::{
-    DebugError, DebugHandler, MastForestStore, MemMastForestStore, ProcessorState, SyncHost,
-    TraceError, Word, advice::AdviceMutation, event::EventError, mast::MastForest,
+    BaseHost, DebugError, DebugHandler, MastForestStore, MemMastForestStore, ProcessorState,
+    SyncHost, TraceError, Word, advice::AdviceMutation, event::EventError, mast::MastForest,
 };
 
 /// A snapshot of the processor state for consistency checking between processors.
@@ -152,7 +152,7 @@ impl Default for TestHost {
     }
 }
 
-impl<S> SyncHost for TestHost<S>
+impl<S> BaseHost for TestHost<S>
 where
     S: SourceManagerSync,
 {
@@ -163,16 +163,6 @@ where
         let maybe_file = self.source_manager.get_by_uri(location.uri());
         let span = self.source_manager.location_to_span(location.clone()).unwrap_or_default();
         (span, maybe_file)
-    }
-
-    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
-        self.store.get(node_digest)
-    }
-
-    fn on_event(&mut self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-        let event_id: u32 = process.get_stack_item(0).as_canonical_u64().try_into().unwrap();
-        self.event_handler.push(event_id);
-        Ok(Vec::new())
     }
 
     fn on_debug(
@@ -193,5 +183,20 @@ where
         self.snapshots.entry(trace_id).or_default().push(snapshot);
 
         Ok(())
+    }
+}
+
+impl<S> SyncHost for TestHost<S>
+where
+    S: SourceManagerSync,
+{
+    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
+        self.store.get(node_digest)
+    }
+
+    fn on_event(&mut self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
+        let event_id: u32 = process.get_stack_item(0).as_canonical_u64().try_into().unwrap();
+        self.event_handler.push(event_id);
+        Ok(Vec::new())
     }
 }

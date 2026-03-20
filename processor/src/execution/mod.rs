@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use crate::{
-    BreakReason, ContextId, Kernel, Stopper, SyncHost, Word,
+    BaseHost, BreakReason, ContextId, Kernel, Stopper, Word,
     continuation_stack::{Continuation, ContinuationStack},
     mast::{MastForest, MastNode, MastNodeId},
     processor::{Processor, SystemInterface},
@@ -132,7 +132,7 @@ pub(crate) fn execute_impl<P, S, T>(
     continuation_stack: &mut ContinuationStack,
     current_forest: &mut Arc<MastForest>,
     kernel: &Kernel,
-    host: &mut impl SyncHost,
+    host: &mut impl BaseHost,
     tracer: &mut T,
     stopper: &S,
 ) -> ControlFlow<InternalBreakReason>

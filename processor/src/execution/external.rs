@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use crate::{
-    BreakReason, SyncHost,
+    BaseHost, BreakReason,
     continuation_stack::ContinuationStack,
     execution::InternalBreakReason,
     mast::{MastForest, MastNodeExt, MastNodeId},
@@ -20,7 +20,7 @@ pub(super) fn execute_external_node(
     processor: &mut impl Processor,
     external_node_id: MastNodeId,
     current_forest: &mut Arc<MastForest>,
-    host: &mut impl SyncHost,
+    host: &mut impl BaseHost,
 ) -> ControlFlow<InternalBreakReason> {
     // Execute decorators that should be executed before entering the node
     processor
@@ -46,7 +46,7 @@ pub fn finish_load_mast_forest_from_external(
     external_node_id: MastNodeId,
     current_forest: &mut Arc<MastForest>,
     continuation_stack: &mut ContinuationStack,
-    host: &mut impl SyncHost,
+    host: &mut impl BaseHost,
     tracer: &mut impl Tracer,
 ) -> ControlFlow<BreakReason> {
     let external_node = current_forest[external_node_id].unwrap_external();

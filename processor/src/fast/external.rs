@@ -1,7 +1,7 @@
 use miden_core::mast::MastForest;
 
 use crate::{
-    ExecutionError, SyncHost,
+    BaseHost, ExecutionError,
     continuation_stack::{Continuation, ContinuationStack},
     errors::{OperationError, procedure_not_found_with_context},
 };
@@ -35,7 +35,7 @@ pub(super) fn maybe_use_caller_error_context(
     original_err: ExecutionError,
     current_forest: &MastForest,
     continuation_stack: &ContinuationStack,
-    host: &mut impl SyncHost,
+    host: &mut impl BaseHost,
 ) -> ExecutionError {
     // We only care about procedure-not-found errors or malformed MAST forest errors.
     let root_digest = match &original_err {

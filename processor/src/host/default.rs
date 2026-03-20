@@ -13,8 +13,8 @@ use super::{
     handlers::{EventError, EventHandler, EventHandlerRegistry},
 };
 use crate::{
-    DebugError, DebugHandler, ExecutionError, MastForestStore, MemMastForestStore, ProcessorState,
-    SyncHost, TraceError, advice::AdviceMutation,
+    BaseHost, DebugError, DebugHandler, ExecutionError, MastForestStore, MemMastForestStore,
+    ProcessorState, SyncHost, TraceError, advice::AdviceMutation,
 };
 
 // DEFAULT HOST IMPLEMENTATION
@@ -124,7 +124,7 @@ where
     }
 }
 
-impl<D, S> SyncHost for DefaultHost<D, S>
+impl<D, S> BaseHost for DefaultHost<D, S>
 where
     D: DebugHandler,
     S: SourceManager,
@@ -136,32 +136,6 @@ where
         let maybe_file = self.source_manager.get_by_uri(location.uri());
         let span = self.source_manager.location_to_span(location.clone()).unwrap_or_default();
         (span, maybe_file)
-    }
-
-    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
-        self.store.get(node_digest)
-    }
-
-    fn on_event(
-        &mut self,
-        process: &ProcessorState<'_>,
-    ) -> Result<Vec<AdviceMutation>, EventError> {
-        let event_id = EventId::from_felt(process.get_stack_item(0));
-        match self.event_handlers.handle_event(event_id, process) {
-            Ok(Some(mutations)) => {
-                // the event was handled by the registered event handlers; just return
-                Ok(mutations)
-            },
-            Ok(None) => {
-                // EventError is a `Box<dyn Error>` so we can define the error anonymously.
-                #[derive(Debug, thiserror::Error)]
-                #[error("no event handler registered")]
-                struct UnhandledEvent;
-
-                Err(UnhandledEvent.into())
-            },
-            Err(e) => Err(e),
-        }
     }
 
     fn on_debug(
@@ -181,13 +155,41 @@ where
     }
 }
 
+impl<D, S> SyncHost for DefaultHost<D, S>
+where
+    D: DebugHandler,
+    S: SourceManager,
+{
+    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
+        self.store.get(node_digest)
+    }
+
+    fn on_event(
+        &mut self,
+        process: &ProcessorState<'_>,
+    ) -> Result<Vec<AdviceMutation>, EventError> {
+        let event_id = EventId::from_felt(process.get_stack_item(0));
+        match self.event_handlers.handle_event(event_id, process) {
+            Ok(Some(mutations)) => Ok(mutations),
+            Ok(None) => {
+                #[derive(Debug, thiserror::Error)]
+                #[error("no event handler registered")]
+                struct UnhandledEvent;
+
+                Err(UnhandledEvent.into())
+            },
+            Err(e) => Err(e),
+        }
+    }
+}
+
 // NOOPHOST
 // ================================================================================================
 
 /// A SyncHost which does nothing.
 pub struct NoopHost;
 
-impl SyncHost for NoopHost {
+impl BaseHost for NoopHost {
     #[inline(always)]
     fn get_label_and_source_file(
         &self,
@@ -195,7 +197,9 @@ impl SyncHost for NoopHost {
     ) -> (SourceSpan, Option<Arc<SourceFile>>) {
         (SourceSpan::UNKNOWN, None)
     }
+}
 
+impl SyncHost for NoopHost {
     #[inline(always)]
     fn get_mast_forest(&self, _node_digest: &Word) -> Option<Arc<MastForest>> {
         None

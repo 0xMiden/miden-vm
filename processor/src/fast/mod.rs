@@ -17,7 +17,7 @@ use miden_core::{
 use tracing::instrument;
 
 use crate::{
-    AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, Host,
+    AdviceInputs, AdviceProvider, BaseHost, ContextId, ExecutionError, ExecutionOptions, Host,
     ProcessorState, Stopper, SyncHost,
     continuation_stack::{Continuation, ContinuationStack},
     errors::{MapExecErr, MapExecErrNoCtx, OperationError},
@@ -45,17 +45,19 @@ use step::{NeverStopper, StepStopper};
 #[cfg(test)]
 mod tests;
 
+/// Adapts an async [`Host`] to the shared [`BaseHost`] surface used by the sans-IO core loop.
 struct HostAdapter<'a, H> {
     host: &'a mut H,
 }
 
 impl<'a, H> HostAdapter<'a, H> {
+    /// Wraps an async host so it can satisfy the shared host surface.
     fn new(host: &'a mut H) -> Self {
         Self { host }
     }
 }
 
-impl<H> SyncHost for HostAdapter<'_, H>
+impl<H> BaseHost for HostAdapter<'_, H>
 where
     H: Host,
 {
@@ -64,17 +66,6 @@ where
         location: &miden_debug_types::Location,
     ) -> (miden_debug_types::SourceSpan, Option<Arc<miden_debug_types::SourceFile>>) {
         self.host.get_label_and_source_file(location)
-    }
-
-    fn get_mast_forest(&self, _node_digest: &Word) -> Option<Arc<MastForest>> {
-        panic!("HostAdapter::get_mast_forest should not be called directly")
-    }
-
-    fn on_event(
-        &mut self,
-        _process: &ProcessorState<'_>,
-    ) -> Result<Vec<crate::advice::AdviceMutation>, crate::event::EventError> {
-        panic!("HostAdapter::on_event should not be called directly")
     }
 
     fn on_debug(
@@ -200,6 +191,7 @@ pub struct FastProcessor {
 }
 
 impl FastProcessor {
+    /// Packages the processor state after successful execution into a public result type.
     #[inline(always)]
     fn into_execution_output(self, stack: StackOutputs) -> ExecutionOutput {
         ExecutionOutput {
@@ -210,6 +202,7 @@ impl FastProcessor {
         }
     }
 
+    /// Converts the terminal result of a full execution run into [`ExecutionOutput`].
     #[inline(always)]
     fn execution_result_from_flow(
         flow: ControlFlow<BreakReason, StackOutputs>,
@@ -228,6 +221,7 @@ impl FastProcessor {
         }
     }
 
+    /// Converts a testing-only execution result into stack outputs.
     #[cfg(any(test, feature = "testing"))]
     #[inline(always)]
     fn stack_result_from_flow(
@@ -244,6 +238,7 @@ impl FastProcessor {
         }
     }
 
+    /// Pairs execution output with the trace inputs captured by the tracer.
     #[inline(always)]
     fn trace_result_from_parts(
         execution_output: ExecutionOutput,
@@ -252,6 +247,7 @@ impl FastProcessor {
         (execution_output, tracer.into_trace_generation_context())
     }
 
+    /// Converts a step-wise execution result into the next resume context, if execution stopped.
     #[inline(always)]
     fn resume_result_from_flow(
         flow: ControlFlow<BreakReason, StackOutputs>,
@@ -278,6 +274,7 @@ impl FastProcessor {
         }
     }
 
+    /// Materializes the current stack as public outputs without consuming the processor.
     #[inline(always)]
     fn current_stack_outputs(&self) -> StackOutputs {
         StackOutputs::new(
@@ -1003,7 +1000,7 @@ impl FastProcessor {
         &self,
         node_id: MastNodeId,
         current_forest: &MastForest,
-        host: &mut impl SyncHost,
+        host: &mut impl BaseHost,
     ) -> ControlFlow<BreakReason> {
         if !self.should_execute_decorators() {
             return ControlFlow::Continue(());
@@ -1028,7 +1025,7 @@ impl FastProcessor {
         &self,
         node_id: MastNodeId,
         current_forest: &MastForest,
-        host: &mut impl SyncHost,
+        host: &mut impl BaseHost,
     ) -> ControlFlow<BreakReason> {
         if !self.in_debug_mode() {
             return ControlFlow::Continue(());
@@ -1052,7 +1049,7 @@ impl FastProcessor {
     fn execute_decorator(
         &self,
         decorator: &Decorator,
-        host: &mut impl SyncHost,
+        host: &mut impl BaseHost,
     ) -> ControlFlow<BreakReason> {
         match decorator {
             Decorator::Debug(options) => {

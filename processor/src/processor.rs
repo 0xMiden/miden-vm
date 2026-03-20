@@ -4,7 +4,7 @@ use core::ops::ControlFlow;
 use miden_air::trace::{RowIndex, chiplets::hasher::HasherState};
 
 use crate::{
-    BreakReason, ContextId, ExecutionError, Felt, MemoryError, SyncHost, Word,
+    BaseHost, BreakReason, ContextId, ExecutionError, Felt, MemoryError, Word,
     advice::AdviceError,
     crypto::merkle::MerklePath,
     errors::OperationError,
@@ -71,7 +71,7 @@ pub(crate) trait Processor: Sized {
         &self,
         node_id: MastNodeId,
         current_forest: &MastForest,
-        host: &mut impl SyncHost,
+        host: &mut impl BaseHost,
     ) -> ControlFlow<BreakReason>;
 
     /// Executes the decorators that should be executed after exiting a node.
@@ -79,7 +79,7 @@ pub(crate) trait Processor: Sized {
         &self,
         node_id: MastNodeId,
         current_forest: &MastForest,
-        host: &mut impl SyncHost,
+        host: &mut impl BaseHost,
     ) -> ControlFlow<BreakReason>;
 
     /// Executes any decorator in a basic block that is to be executed before the operation at the
@@ -89,7 +89,7 @@ pub(crate) trait Processor: Sized {
         node_id: MastNodeId,
         op_idx_in_block: usize,
         current_forest: &MastForest,
-        host: &mut impl SyncHost,
+        host: &mut impl BaseHost,
     ) -> ControlFlow<BreakReason>;
 
     /// Executes any decorator in a basic block that is to be executed after all operations in the
@@ -100,7 +100,7 @@ pub(crate) trait Processor: Sized {
         basic_block_node: &BasicBlockNode,
         node_id: MastNodeId,
         current_forest: &Arc<MastForest>,
-        host: &mut impl SyncHost,
+        host: &mut impl BaseHost,
     ) -> ControlFlow<BreakReason>;
 }
 

@@ -13,10 +13,10 @@ pub use miden_core::proof::{ExecutionProof, HashFunction};
 #[cfg(not(target_arch = "wasm32"))]
 pub use miden_processor::execute_sync;
 pub use miden_processor::{
-    DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor, FutureMaybeSend,
-    Host, Kernel, Program, ProgramInfo, StackInputs, SyncHost, TraceGenerationContext, ZERO,
-    advice, crypto, execute, field, operation::Operation, serde, trace, trace::ExecutionTrace,
-    utils,
+    BaseHost, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor,
+    FutureMaybeSend, Host, Kernel, Program, ProgramInfo, StackInputs, SyncHost,
+    TraceGenerationContext, ZERO, advice, crypto, execute, field, operation::Operation, serde,
+    trace, trace::ExecutionTrace, utils,
 };
 pub use miden_prover::{InputError, ProvingOptions, StackOutputs, Word, prove};
 #[cfg(not(target_arch = "wasm32"))]

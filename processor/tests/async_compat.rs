@@ -3,8 +3,8 @@ use std::sync::Arc;
 use miden_assembly::Assembler;
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_processor::{
-    DefaultHost, ExecutionOptions, FastProcessor, Felt, FutureMaybeSend, Host, ProcessorState,
-    StackInputs, Word,
+    BaseHost, DefaultHost, ExecutionOptions, FastProcessor, Felt, FutureMaybeSend, Host,
+    ProcessorState, StackInputs, Word,
     advice::{AdviceInputs, AdviceMutation},
     event::{EventError, EventName},
     mast::MastForest,
@@ -20,14 +20,16 @@ impl YieldingAsyncHost {
     }
 }
 
-impl Host for YieldingAsyncHost {
+impl BaseHost for YieldingAsyncHost {
     fn get_label_and_source_file(
         &self,
         _location: &Location,
     ) -> (SourceSpan, Option<Arc<SourceFile>>) {
         (SourceSpan::UNKNOWN, None)
     }
+}
 
+impl Host for YieldingAsyncHost {
     fn get_mast_forest(
         &self,
         _node_digest: &Word,
