@@ -151,7 +151,8 @@ where
         let mut cache = BTreeMap::new();
         let root_id = self.dependency_graph.root().clone();
         let required_lib = if target.is_executable()
-            && let Some(library_target) = self.project.library_target().map(|target| target.inner().clone())
+            && let Some(library_target) =
+                self.project.library_target().map(|target| target.inner().clone())
         {
             Some(self.assemble_source_package(
                 root_id.clone(),
@@ -314,8 +315,11 @@ where
             _ => unreachable!("non-exhaustive target type"),
         };
 
-        let manifest =
-            product.manifest().clone().with_dependencies(runtime_dependencies.into_values());
+        let manifest = product
+            .manifest()
+            .clone()
+            .with_dependencies(runtime_dependencies.into_values())
+            .expect("assembled package manifest should have unique runtime dependencies");
         let mut sections = Vec::new();
         if let Some(provenance) = self.build_source_provenance(
             &package_id,
@@ -342,7 +346,10 @@ where
             sections,
         });
 
-        let resolved = ResolvedPackage { package: Arc::clone(&package), linked_kernel_package };
+        let resolved = ResolvedPackage {
+            package: Arc::clone(&package),
+            linked_kernel_package,
+        };
         if !has_provided_sources {
             cache.insert(package_id, resolved.clone());
         }
@@ -404,7 +411,8 @@ where
                     workspace_root.as_deref(),
                 )? {
                     ResolvedPackage {
-                        linked_kernel_package: self.resolve_linked_kernel_package(package.clone())?,
+                        linked_kernel_package: self
+                            .resolve_linked_kernel_package(package.clone())?,
                         package,
                     }
                 } else {
@@ -422,12 +430,13 @@ where
                 }
             },
             ProjectDependencyNodeProvenance::Source(_) => {
-                let package = self.load_canonical_package(package_id, &node.version)?.ok_or_else(|| {
-                    Report::msg(format!(
-                        "dependency '{}' version '{}' was not found in the package registry",
-                        package_id, node.version
-                    ))
-                })?;
+                let package =
+                    self.load_canonical_package(package_id, &node.version)?.ok_or_else(|| {
+                        Report::msg(format!(
+                            "dependency '{}' version '{}' was not found in the package registry",
+                            package_id, node.version
+                        ))
+                    })?;
                 ResolvedPackage {
                     linked_kernel_package: self.resolve_linked_kernel_package(package.clone())?,
                     package,
@@ -465,7 +474,8 @@ where
             return Ok(None);
         };
 
-        let version = PackageVersion::new(kernel_dependency.version.clone(), kernel_dependency.digest);
+        let version =
+            PackageVersion::new(kernel_dependency.version.clone(), kernel_dependency.digest);
         if self.store.get_exact_version(&kernel_dependency.name, &version).is_some() {
             let kernel_package = self.store.load_package(&kernel_dependency.name, &version)?;
             if !kernel_package.is_kernel() {
@@ -496,6 +506,22 @@ where
         self.store.load_package(package_id, record.version()).map(Some)
     }
 
+    fn load_semver_equivalent_packages(
+        &self,
+        package_id: &PackageId,
+        version: &miden_project::SemVer,
+    ) -> Result<Vec<Arc<MastPackage>>, Report> {
+        let Some(versions) = self.store.available_versions(package_id) else {
+            return Ok(Vec::new());
+        };
+
+        versions
+            .iter()
+            .filter(|(candidate, _)| &candidate.version == version)
+            .map(|(candidate, _)| self.store.load_package(package_id, candidate))
+            .collect()
+    }
+
     fn try_reuse_registered_source_package(
         &self,
         package_id: &PackageId,
@@ -507,16 +533,10 @@ where
         manifest_path: &FsPath,
         workspace_root: Option<&FsPath>,
     ) -> Result<Option<Arc<MastPackage>>, Report> {
-        let Some(package) = self.load_canonical_package(package_id, version)? else {
+        let packages = self.load_semver_equivalent_packages(package_id, version)?;
+        if packages.is_empty() {
             return Ok(None);
-        };
-
-        let actual = PackageBuildProvenance::from_package(&package)?.ok_or_else(|| {
-            Report::msg(format!(
-                "package '{}' version '{}' is already registered, but is missing source provenance; bump the semantic version",
-                package_id, version
-            ))
-        })?;
+        }
         let expected = self.expected_source_provenance(
             package_id,
             project,
@@ -526,16 +546,47 @@ where
             manifest_path,
             workspace_root,
         )?;
+        let mut mismatched = Vec::new();
+        let mut missing_provenance = false;
 
-        if actual == expected {
-            Ok(Some(package))
-        } else {
+        for package in packages {
+            match PackageBuildProvenance::from_package(&package)? {
+                Some(actual) if actual == expected => return Ok(Some(package)),
+                Some(actual) => mismatched.push(actual),
+                None => missing_provenance = true,
+            }
+        }
+
+        if mismatched.is_empty() {
             Err(Report::msg(format!(
-                "package '{}' version '{}' is already registered with different source provenance (expected {}, found {}); bump the semantic version",
+                "package '{}' version '{}' is already registered, but none of the semver-equivalent artifacts carry matching source provenance{}; bump the semantic version",
+                package_id,
+                version,
+                if missing_provenance {
+                    " (some are missing source provenance)"
+                } else {
+                    ""
+                }
+            )))
+        } else {
+            let first = mismatched.remove(0);
+            let extra = mismatched.len();
+            Err(Report::msg(format!(
+                "package '{}' version '{}' is already registered with different source provenance (expected {}, found {}{}{}); bump the semantic version",
                 package_id,
                 version,
                 expected.describe(),
-                actual.describe()
+                first.describe(),
+                if extra > 0 {
+                    format!(", plus {extra} other non-matching semver-equivalent artifact(s)")
+                } else {
+                    String::new()
+                },
+                if missing_provenance {
+                    ", and some semver-equivalent artifacts are missing source provenance"
+                } else {
+                    ""
+                }
             )))
         }
     }
@@ -626,7 +677,8 @@ where
     ) -> Result<PackageBuildProvenance, Report> {
         let dependency_hash =
             self.compute_dependency_closure_hash(package_id, profile_name, visiting)?;
-        let build_settings = PackageBuildSettings::from_profile(resolve_profile(project, profile_name)?);
+        let build_settings =
+            PackageBuildSettings::from_profile(resolve_profile(project, profile_name)?);
 
         match origin {
             ProjectSourceOrigin::Git { repo, resolved_revision, .. } => {
@@ -706,10 +758,9 @@ where
         profile_name: &str,
         visiting: &mut BTreeSet<PackageId>,
     ) -> Result<String, Report> {
-        let node = self
-            .dependency_graph
-            .get(package_id)
-            .ok_or_else(|| Report::msg(format!("missing dependency graph node for '{package_id}'")))?;
+        let node = self.dependency_graph.get(package_id).ok_or_else(|| {
+            Report::msg(format!("missing dependency graph node for '{package_id}'"))
+        })?;
 
         match &node.provenance {
             ProjectDependencyNodeProvenance::Registry { selected, .. } => {
@@ -725,8 +776,11 @@ where
                 library_path: Some(_),
                 ..
             }) => {
-                let project =
-                    load_project_package(self.assembler.source_manager(), package_id, manifest_path)?;
+                let project = load_project_package(
+                    self.assembler.source_manager(),
+                    package_id,
+                    manifest_path,
+                )?;
                 let target = project
                     .library_target()
                     .map(|target| target.inner().clone())
@@ -1089,33 +1143,56 @@ impl PackageBuildProvenance {
 
     fn describe(&self) -> String {
         match self {
-            Self::Path { source_hash, dependency_hash, build_settings }
-                if *dependency_hash == Self::empty_dependency_hash() && build_settings.is_legacy() =>
+            Self::Path {
+                source_hash,
+                dependency_hash,
+                build_settings,
+            } if *dependency_hash == Self::empty_dependency_hash()
+                && build_settings.is_legacy() =>
             {
                 format!("path({source_hash})")
             },
-            Self::Path { source_hash, dependency_hash, build_settings }
-                if build_settings.is_legacy() =>
-            {
+            Self::Path {
+                source_hash,
+                dependency_hash,
+                build_settings,
+            } if build_settings.is_legacy() => {
                 format!("path({source_hash}, deps={dependency_hash})")
             },
-            Self::Path { source_hash, dependency_hash, build_settings } => {
+            Self::Path {
+                source_hash,
+                dependency_hash,
+                build_settings,
+            } => {
                 format!(
                     "path({source_hash}, deps={dependency_hash}, debug={}, trim_paths={})",
                     build_settings.emit_debug_info, build_settings.trim_paths
                 )
             },
-            Self::Git { repo, resolved_revision, dependency_hash, build_settings }
-                if *dependency_hash == Self::empty_dependency_hash() && build_settings.is_legacy() =>
+            Self::Git {
+                repo,
+                resolved_revision,
+                dependency_hash,
+                build_settings,
+            } if *dependency_hash == Self::empty_dependency_hash()
+                && build_settings.is_legacy() =>
             {
                 format!("git({repo}@{resolved_revision})")
             },
-            Self::Git { repo, resolved_revision, dependency_hash, build_settings }
-                if build_settings.is_legacy() =>
-            {
+            Self::Git {
+                repo,
+                resolved_revision,
+                dependency_hash,
+                build_settings,
+            } if build_settings.is_legacy() => {
                 format!("git({repo}@{resolved_revision}, deps={dependency_hash})")
             },
-            Self::Git { repo, resolved_revision, dependency_hash, build_settings } => {
+            Self::Git {
+                repo,
+                resolved_revision,
+                dependency_hash,
+                build_settings,
+            } => {
                 format!(
                     "git({repo}@{resolved_revision}, deps={dependency_hash}, debug={}, trim_paths={})",
                     build_settings.emit_debug_info, build_settings.trim_paths
@@ -1128,42 +1205,65 @@ impl PackageBuildProvenance {
 impl Serializable for PackageBuildProvenance {
     fn write_into<W: miden_core::serde::ByteWriter>(&self, target: &mut W) {
         match self {
-            Self::Path { source_hash, dependency_hash, build_settings }
-                if *dependency_hash == Self::empty_dependency_hash() && build_settings.is_legacy() =>
+            Self::Path {
+                source_hash,
+                dependency_hash,
+                build_settings,
+            } if *dependency_hash == Self::empty_dependency_hash()
+                && build_settings.is_legacy() =>
             {
                 target.write_u8(0);
                 source_hash.write_into(target);
             },
-            Self::Git { repo, resolved_revision, dependency_hash, build_settings }
-                if *dependency_hash == Self::empty_dependency_hash() && build_settings.is_legacy() =>
+            Self::Git {
+                repo,
+                resolved_revision,
+                dependency_hash,
+                build_settings,
+            } if *dependency_hash == Self::empty_dependency_hash()
+                && build_settings.is_legacy() =>
             {
                 target.write_u8(1);
                 repo.write_into(target);
                 resolved_revision.write_into(target);
             },
-            Self::Path { source_hash, dependency_hash, build_settings }
-                if build_settings.is_legacy() =>
-            {
+            Self::Path {
+                source_hash,
+                dependency_hash,
+                build_settings,
+            } if build_settings.is_legacy() => {
                 target.write_u8(2);
                 source_hash.write_into(target);
                 dependency_hash.write_into(target);
             },
-            Self::Git { repo, resolved_revision, dependency_hash, build_settings }
-                if build_settings.is_legacy() =>
-            {
+            Self::Git {
+                repo,
+                resolved_revision,
+                dependency_hash,
+                build_settings,
+            } if build_settings.is_legacy() => {
                 target.write_u8(3);
                 repo.write_into(target);
                 resolved_revision.write_into(target);
                 dependency_hash.write_into(target);
             },
-            Self::Path { source_hash, dependency_hash, build_settings } => {
+            Self::Path {
+                source_hash,
+                dependency_hash,
+                build_settings,
+            } => {
                 target.write_u8(4);
                 source_hash.write_into(target);
                 dependency_hash.write_into(target);
                 target.write_bool(build_settings.emit_debug_info);
                 target.write_bool(build_settings.trim_paths);
             },
-            Self::Git { repo, resolved_revision, dependency_hash, build_settings } => {
+            Self::Git {
+                repo,
+                resolved_revision,
+                dependency_hash,
+                build_settings,
+            } => {
                 target.write_u8(5);
                 repo.write_into(target);
                 resolved_revision.write_into(target);
@@ -1257,11 +1357,9 @@ fn effective_manifest_hash_input(project: &ProjectPackage) -> Result<String, Rep
                 member.path().to_string(),
                 dependency.linkage(),
             )),
-            DependencyVersionScheme::WorkspacePath { path, .. } => Some((
-                dependency.name().to_string(),
-                path.path().to_string(),
-                dependency.linkage(),
-            )),
+            DependencyVersionScheme::WorkspacePath { path, .. } => {
+                Some((dependency.name().to_string(), path.path().to_string(), dependency.linkage()))
+            },
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -1464,12 +1562,94 @@ fn load_package_from_path(path: &FsPath) -> Result<Arc<MastPackage>, Report> {
 mod tests {
     use std::{process::Command, string::String};
 
-    use miden_assembly_syntax::source_file;
-    use miden_package_registry::PackageRegistry;
+    use miden_assembly_syntax::{debuginfo::DefaultSourceManager, source_file};
+    use miden_package_registry::{
+        PackageProvider, PackageRecord, PackageRegistry, PackageStore, PackageVersions,
+        Version as RegistryVersion,
+    };
     use tempfile::TempDir;
 
     use super::*;
     use crate::testing::{TestContext, TestRegistry};
+
+    #[derive(Default)]
+    struct MultiArtifactRegistry {
+        index: BTreeMap<PackageId, PackageVersions>,
+        packages: BTreeMap<(PackageId, RegistryVersion), Arc<MastPackage>>,
+        canonical: BTreeMap<(PackageId, miden_mast_package::Version), RegistryVersion>,
+    }
+
+    impl MultiArtifactRegistry {
+        fn insert_package(
+            &mut self,
+            package: Arc<MastPackage>,
+            canonical: bool,
+        ) -> RegistryVersion {
+            let version = RegistryVersion::new(package.version.clone(), package.digest());
+            let record = PackageRecord::new(version.clone(), std::iter::empty());
+            self.index
+                .entry(package.name.clone())
+                .or_default()
+                .insert(version.clone(), record);
+            self.packages.insert((package.name.clone(), version.clone()), package.clone());
+            if canonical {
+                self.canonical
+                    .insert((package.name.clone(), package.version.clone()), version.clone());
+            }
+            version
+        }
+    }
+
+    impl PackageRegistry for MultiArtifactRegistry {
+        fn available_versions(&self, package: &PackageId) -> Option<&PackageVersions> {
+            self.index.get(package)
+        }
+
+        fn get_by_semver(
+            &self,
+            package: &PackageId,
+            version: &miden_package_registry::SemVer,
+        ) -> Option<&PackageRecord> {
+            self.canonical
+                .get(&(package.clone(), version.clone()))
+                .and_then(|selected| self.index.get(package)?.get(selected))
+                .or_else(|| {
+                    self.index.get(package).and_then(|versions| {
+                        versions
+                            .iter()
+                            .find(|(candidate, _)| &candidate.version == version)
+                            .map(|(_, record)| record)
+                    })
+                })
+        }
+    }
+
+    impl PackageProvider for MultiArtifactRegistry {
+        fn load_package(
+            &self,
+            package: &PackageId,
+            version: &RegistryVersion,
+        ) -> Result<Arc<MastPackage>, Report> {
+            self.packages.get(&(package.clone(), version.clone())).cloned().ok_or_else(|| {
+                Report::msg(format!("missing test package '{package}' at '{version}'"))
+            })
+        }
+    }
+
+    impl PackageStore for MultiArtifactRegistry {
+        type Error = Report;
+
+        fn publish_package(
+            &mut self,
+            package: Arc<MastPackage>,
+        ) -> Result<RegistryVersion, Self::Error> {
+            let version = self.insert_package(package.clone(), false);
+            self.canonical
+                .entry((package.name.clone(), package.version.clone()))
+                .or_insert_with(|| version.clone());
+            Ok(version)
+        }
+    }
 
     #[test]
     fn builds_library_package_from_project_profiles() {
@@ -2636,6 +2816,90 @@ end
     }
 
     #[test]
+    fn source_dependency_reuse_should_not_depend_on_arbitrary_semver_record_selection() {
+        let tempdir = TempDir::new().unwrap();
+        let dep_dir = tempdir.path().join("dep");
+        let dep_manifest = dep_dir.join("miden-project.toml");
+        write_file(
+            &dep_manifest,
+            r#"[package]
+name = "dep"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+"#,
+        );
+        write_file(
+            &dep_dir.join("lib.masm"),
+            r#"pub proc foo
+    push.1
+end
+"#,
+        );
+
+        let root_dir = tempdir.path().join("root");
+        let root_manifest = root_dir.join("miden-project.toml");
+        write_file(
+            &root_manifest,
+            r#"[package]
+name = "root"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+
+[dependencies]
+dep = { path = "../dep" }
+"#,
+        );
+        write_file(
+            &root_dir.join("lib.masm"),
+            r#"pub proc entry
+    exec.::dep::foo
+end
+"#,
+        );
+
+        let mut matching_context = TestContext::new();
+        let matching = matching_context
+            .assemble_library_package(&dep_manifest, None)
+            .expect("matching source package should assemble");
+        let mismatching_context = TestContext::new();
+        let mismatching =
+            Arc::<MastPackage>::from(mismatching_context.assemble_library_package_with_export(
+                "dep",
+                "1.0.0",
+                "dep::alt",
+                [],
+            ));
+
+        let mut registry = MultiArtifactRegistry::default();
+        let mismatching_version = registry.insert_package(mismatching, true);
+        let matching_version = registry.insert_package(matching.clone(), false);
+        assert_ne!(
+            mismatching_version, matching_version,
+            "test requires distinct artifacts for the same semantic version"
+        );
+
+        let assembler = crate::Assembler::new(Arc::new(DefaultSourceManager::default()))
+            .with_warnings_as_errors(true);
+        let mut project_assembler = assembler
+            .for_project_at_path(&root_manifest, &mut registry)
+            .expect("root project should load");
+        let package = project_assembler
+            .assemble(ProjectTargetSelector::Library, "dev")
+            .expect("matching source-built artifact should be reusable even if canonical semver lookup points at another digest");
+
+        let dependency = package
+            .manifest
+            .dependencies()
+            .find(|dependency| &dependency.name == "dep")
+            .expect("root package should depend on dep");
+        assert_eq!(dependency.digest, matching.digest());
+    }
+
+    #[test]
     fn workspace_member_source_dependencies_preserve_workspace_inheritance() {
         let tempdir = TempDir::new().unwrap();
         let workspace_dir = tempdir.path().join("workspace");
@@ -2811,7 +3075,10 @@ end
             .expect("library package build should succeed");
 
         assert!(
-            package.manifest.dependencies().any(|dependency| dependency.kind == TargetType::Kernel)
+            package
+                .manifest
+                .dependencies()
+                .any(|dependency| dependency.kind == TargetType::Kernel)
         );
         assert!(!package.sections.iter().any(|section| section.id == SectionId::KERNEL));
     }
@@ -2840,7 +3107,8 @@ end
         )
         .expect("mid package should deserialize");
         let mut mismatched_kernel_package =
-            MastPackage::read_from_bytes(&kernel_package.to_bytes()).expect("kernel should deserialize");
+            MastPackage::read_from_bytes(&kernel_package.to_bytes())
+                .expect("kernel should deserialize");
         mismatched_kernel_package.version = "2.0.0".parse().unwrap();
         mid_package
             .sections
@@ -2943,7 +3211,10 @@ end
             .expect("executable package build should succeed without an available kernel artifact");
 
         assert!(
-            package.manifest.dependencies().any(|dependency| dependency.kind == TargetType::Kernel)
+            package
+                .manifest
+                .dependencies()
+                .any(|dependency| dependency.kind == TargetType::Kernel)
         );
         assert!(!package.sections.iter().any(|section| section.id == SectionId::KERNEL));
 
