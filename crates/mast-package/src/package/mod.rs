@@ -393,3 +393,120 @@ fn arbitrary_library() -> Arc<Library> {
     let value_tree = <Library as Arbitrary>::arbitrary().new_tree(&mut runner).unwrap();
     Arc::new(value_tree.current())
 }
+
+#[cfg(test)]
+mod tests {
+    use alloc::{collections::BTreeMap, sync::Arc, vec, vec::Vec};
+
+    use miden_assembly_syntax::{
+        Library,
+        ast::{Path as AstPath, PathBuf},
+        library::{LibraryExport, ProcedureExport as LibraryProcedureExport},
+    };
+    use miden_core::{
+        mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeId},
+        operations::Operation,
+        serde::Serializable,
+    };
+
+    use super::*;
+    use crate::{Dependency, Version};
+
+    fn build_forest() -> (MastForest, MastNodeId) {
+        let mut forest = MastForest::new();
+        let node_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+            .add_to_forest(&mut forest)
+            .expect("failed to build basic block");
+        forest.make_root(node_id);
+        (forest, node_id)
+    }
+
+    fn absolute_path(name: &str) -> Arc<AstPath> {
+        let path = PathBuf::new(name).expect("invalid path");
+        let path = path.as_path().to_absolute().into_owned();
+        Arc::from(path.into_boxed_path())
+    }
+
+    fn build_library(export: &str) -> Arc<Library> {
+        let (forest, node_id) = build_forest();
+        let path = absolute_path(export);
+        let export = LibraryProcedureExport::new(node_id, Arc::clone(&path));
+
+        let mut exports = BTreeMap::new();
+        exports.insert(path, LibraryExport::Procedure(export));
+
+        Arc::new(Library::new(Arc::new(forest), exports).expect("failed to build library"))
+    }
+
+    fn build_package(
+        name: &str,
+        kind: TargetType,
+        export: &str,
+        dependencies: impl IntoIterator<Item = Dependency>,
+        sections: Vec<Section>,
+    ) -> Package {
+        let mut package = *Package::from_library(
+            PackageId::from(name),
+            Version::new(1, 0, 0),
+            kind,
+            build_library(export),
+            dependencies,
+        );
+        package.sections = sections;
+        package
+    }
+
+    fn build_kernel_package(name: &str) -> Package {
+        build_package(name, TargetType::Kernel, &format!("{name}::boot"), [], Vec::new())
+    }
+
+    fn kernel_dependency(package: &Package) -> Dependency {
+        Dependency {
+            name: package.name.clone(),
+            kind: TargetType::Kernel,
+            version: package.version.clone(),
+            digest: package.digest(),
+        }
+    }
+
+    #[test]
+    fn embedded_kernel_package_rejects_duplicate_kernel_sections() {
+        let kernel = build_kernel_package("kernel");
+        let kernel_bytes = kernel.to_bytes();
+        let package = build_package(
+            "app",
+            TargetType::Library,
+            "app::entry",
+            vec![kernel_dependency(&kernel)],
+            vec![
+                Section::new(SectionId::KERNEL, kernel_bytes.clone()),
+                Section::new(SectionId::KERNEL, kernel_bytes),
+            ],
+        );
+
+        let error = package
+            .try_embedded_kernel_package()
+            .expect_err("duplicate kernel sections should be rejected");
+
+        assert!(error.to_string().contains("multiple 'kernel' sections"));
+    }
+
+    #[test]
+    fn embedded_kernel_package_rejects_multiple_kernel_runtime_dependencies() {
+        let kernel_a = build_kernel_package("kernel-a");
+        let kernel_b = build_kernel_package("kernel-b");
+        let package = build_package(
+            "app",
+            TargetType::Library,
+            "app::entry",
+            vec![kernel_dependency(&kernel_a), kernel_dependency(&kernel_b)],
+            vec![Section::new(SectionId::KERNEL, kernel_a.to_bytes())],
+        );
+
+        let error = package
+            .try_embedded_kernel_package()
+            .expect_err("multiple kernel runtime dependencies should be rejected");
+
+        assert!(error.to_string().contains("declares multiple kernel runtime dependencies"));
+    }
+}
