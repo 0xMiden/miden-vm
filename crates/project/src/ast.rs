@@ -155,6 +155,16 @@ pub(crate) enum ProjectFileError {
         #[label(primary)]
         span: Label,
     },
+    #[error("duplicate workspace member package name '{name}'")]
+    DuplicateWorkspaceMember {
+        name: String,
+        #[source_code]
+        source_file: Arc<SourceFile>,
+        #[label(primary, "duplicate workspace member")]
+        span: SourceSpan,
+        #[label("previous workspace member")]
+        prev: SourceSpan,
+    },
     #[error("no profile named '{name}' has been defined yet")]
     UnknownProfile {
         name: Arc<str>,

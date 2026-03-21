@@ -190,3 +190,56 @@ version.workspace = true
 
     Ok(())
 }
+
+#[test]
+fn workspace_rejects_duplicate_member_package_names() {
+    let tempdir = TempDir::new().unwrap();
+    let root = tempdir.path().join("workspace");
+    fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let first_dir = root.join("first");
+    let second_dir = root.join("second");
+    fs::create_dir_all(&first_dir).unwrap();
+    fs::create_dir_all(&second_dir).unwrap();
+
+    fs::write(
+        root.join("miden-project.toml"),
+        r#"[workspace]
+members = ["first", "second"]
+"#,
+    )
+    .unwrap();
+
+    fs::write(
+        first_dir.join("miden-project.toml"),
+        r#"[package]
+name = "dep"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+"#,
+    )
+    .unwrap();
+    fs::write(first_dir.join("lib.masm"), "export.foo\nend\n").unwrap();
+
+    fs::write(
+        second_dir.join("miden-project.toml"),
+        r#"[package]
+name = "dep"
+version = "2.0.0"
+
+[lib]
+path = "lib.masm"
+"#,
+    )
+    .unwrap();
+    fs::write(second_dir.join("lib.masm"), "export.foo\nend\n").unwrap();
+
+    let context = TestContext::default();
+    let error = context
+        .load_workspace(root.join("miden-project.toml"))
+        .expect_err("duplicate member package names should be rejected");
+
+    assert!(format!("{error}").contains("duplicate"), "{error}");
+}
