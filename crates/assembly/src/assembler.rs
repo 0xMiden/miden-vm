@@ -449,7 +449,7 @@ impl Assembler {
         let module_indices = self.linker.link_kernel(module)?;
 
         self.assemble_common(&module_indices)
-            .and_then(|lib| KernelLibrary::try_from(lib).map_err(Report::new))
+            .and_then(|lib| KernelLibrary::try_from(Arc::new(lib)).map_err(Report::new))
     }
 
     /// Assemble a [KernelLibrary] from a standard Miden Assembly kernel project layout.

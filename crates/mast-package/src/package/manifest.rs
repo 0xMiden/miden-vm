@@ -1,17 +1,21 @@
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 use core::fmt;
 
-use miden_assembly_syntax::ast::{
-    self, AttributeSet, Path,
-    types::{FunctionType, Type},
+use miden_assembly_syntax::{
+    ast::{
+        self, AttributeSet, Path,
+        types::{FunctionType, Type},
+    },
+    library::Library,
 };
 use miden_core::{Word, utils::DisplayHex};
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::{Strategy, any};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
-use crate::Dependency;
+use crate::{Dependency, PackageId};
 
 // PACKAGE MANIFEST
 // ================================================================================================
@@ -25,7 +29,7 @@ pub struct PackageManifest {
     #[cfg_attr(
         feature = "arbitrary",
         proptest(
-            strategy = "proptest::collection::vec(any::<PackageExport>(), 1..10).prop_map(|exports| PackageManifest::new(exports).exports)"
+            strategy = "proptest::collection::vec(any::<PackageExport>(), 1..10).prop_filter_map(\"package exports must have unique paths\", |exports| PackageManifest::new(exports).ok().map(|manifest| manifest.exports))"
         )
     )]
     pub(super) exports: BTreeMap<Arc<Path>, PackageExport>,
@@ -34,24 +38,81 @@ pub struct PackageManifest {
     pub(super) dependencies: Vec<Dependency>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum ManifestValidationError {
+    #[error("duplicate export path '{0}' in package manifest")]
+    DuplicateExport(Arc<Path>),
+    #[error("duplicate dependency '{0}' in package manifest")]
+    DuplicateDependency(PackageId),
+}
+
 impl PackageManifest {
-    pub fn new(exports: impl IntoIterator<Item = PackageExport>) -> Self {
-        let exports = exports.into_iter().map(|export| (export.path(), export)).collect();
-        Self {
-            exports,
+    /// Construct a new [PackageManifest] by providing the set of exports for the corresponding
+    /// package.
+    pub fn new(
+        exports: impl IntoIterator<Item = PackageExport>,
+    ) -> Result<Self, ManifestValidationError> {
+        let mut manifest = Self {
+            exports: Default::default(),
             dependencies: Default::default(),
+        };
+        for export in exports {
+            manifest.add_export(export)?;
         }
+
+        Ok(manifest)
+    }
+
+    /// Construct a new [PackageManifest] by deriving export information from the given [Library].
+    pub fn from_library(library: &Library) -> Self {
+        use miden_assembly_syntax::library::LibraryExport;
+        use miden_core::mast::MastNodeExt;
+
+        Self::new(library.exports().map(|export| match export {
+            LibraryExport::Procedure(export) => {
+                let digest = library.mast_forest()[export.node].digest();
+                PackageExport::Procedure(ProcedureExport {
+                    path: export.path.clone(),
+                    digest,
+                    signature: export.signature.clone(),
+                    attributes: export.attributes.clone(),
+                })
+            },
+            LibraryExport::Constant(export) => PackageExport::Constant(ConstantExport {
+                path: export.path.clone(),
+                value: export.value.clone(),
+            }),
+            LibraryExport::Type(export) => PackageExport::Type(TypeExport {
+                path: export.path.clone(),
+                ty: export.ty.clone(),
+            }),
+        }))
+        .expect("library exports should have unique paths")
     }
 
     /// Extend this manifest with the provided dependencies
-    pub fn with_dependencies(mut self, dependencies: impl IntoIterator<Item = Dependency>) -> Self {
-        self.dependencies.extend(dependencies);
-        self
+    pub fn with_dependencies(
+        mut self,
+        dependencies: impl IntoIterator<Item = Dependency>,
+    ) -> Result<Self, ManifestValidationError> {
+        for dependency in dependencies {
+            self.add_dependency(dependency)?;
+        }
+
+        Ok(self)
     }
 
     /// Add a dependency to the manifest
-    pub fn add_dependency(&mut self, dependency: Dependency) {
+    pub fn add_dependency(
+        &mut self,
+        dependency: Dependency,
+    ) -> Result<(), ManifestValidationError> {
+        if self.dependencies.iter().any(|existing| existing.id() == dependency.id()) {
+            return Err(ManifestValidationError::DuplicateDependency(dependency.name));
+        }
+
         self.dependencies.push(dependency);
+        Ok(())
     }
 
     /// Get the number of dependencies of this package
@@ -91,6 +152,15 @@ impl PackageManifest {
             PackageExport::Procedure(_) => None,
             PackageExport::Constant(_) | PackageExport::Type(_) => None,
         })
+    }
+
+    fn add_export(&mut self, export: PackageExport) -> Result<(), ManifestValidationError> {
+        let path = export.path();
+        if self.exports.insert(path.clone(), export).is_some() {
+            return Err(ManifestValidationError::DuplicateExport(path));
+        }
+
+        Ok(())
     }
 }
 
