@@ -440,6 +440,29 @@ fn test_trace_generation_at_fragment_boundaries(
 
 #[test]
 fn test_nested_loop_end_flags_stable_across_fragmentation() {
+    // Small fragment size is chosen so that the fragment boundaries land on the outer loop replay:
+    // rows [0..6], [7..13], [14..].
+    //
+    // Execution for the chosen stack inputs:
+    //  0: LOOP
+    //  1:   LOOP
+    //  2:     BLOCK PAD DROP END
+    //  6:   END
+    //  7: REPEAT
+    //  8:   LOOP
+    //  9:     BLOCK PAD DROP END
+    // 13:   END
+    // 14: END
+    // 15: HALT
+    //
+    // Stack inputs, top first:
+    //  1) enter outer loop
+    //  2) enter inner loop
+    //  3) exit inner loop
+    //  4) repeat outer loop
+    //  5) enter inner loop
+    //  6) exit inner loop
+    //  7) exit outer loop
     const SMALL_FRAGMENT_SIZE: usize = 7;
     const LARGE_FRAGMENT_SIZE: usize = 1 << 20;
 
