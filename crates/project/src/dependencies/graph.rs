@@ -358,6 +358,38 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
                     package,
                 })
             },
+            DependencyVersionScheme::WorkspacePath { path, version } => {
+                let workspace_root = parent.workspace_root.as_ref().ok_or_else(|| {
+                    Report::msg(format!(
+                        "workspace dependency '{}' cannot be resolved outside of a workspace",
+                        dependency.name()
+                    ))
+                })?;
+                let resolved_path = crate::absolutize_path(Path::new(path.path()), workspace_root)
+                    .map_err(|error| Report::msg(error.to_string()))?;
+                if resolved_path.extension().is_some_and(|extension| extension == "masp") {
+                    let node = self.load_preassembled_dependency(
+                        &resolved_path,
+                        dependency.name().as_ref(),
+                        version.as_ref(),
+                    )?;
+                    Ok(ResolvedDependencyNode::Leaf(node))
+                } else {
+                    let package =
+                        self.load_dependency_source(&resolved_path, dependency.name().as_ref())?;
+                    if let Some(requirement) = version.as_ref() {
+                        self.ensure_version_satisfies(
+                            dependency.name(),
+                            requirement,
+                            Version::from(package.package.version().into_inner().clone()),
+                        )?;
+                    }
+                    Ok(ResolvedDependencyNode::Source {
+                        origin: ProjectSourceOrigin::Path,
+                        package,
+                    })
+                }
+            },
             DependencyVersionScheme::Path { path, version } => {
                 let Some(parent_manifest_path) = parent.manifest_path.as_ref() else {
                     return Err(Report::msg(format!(
@@ -1332,6 +1364,79 @@ mod tests {
             .unwrap();
         let dep = graph.get(&PackageId::from("dep")).unwrap();
         assert_eq!(dep.version.to_string(), "0.2.0");
+    }
+
+    #[test]
+    fn non_member_path_dependency_inside_workspace_root_is_resolved_by_path() {
+        let tempdir = TempDir::new().unwrap();
+        let root_dir = tempdir.path().join("workspace-dep");
+        let app_dir = root_dir.join("app");
+        let dep_dir = root_dir.join("vendor").join("dep");
+        fs::create_dir_all(&app_dir).unwrap();
+        fs::create_dir_all(&dep_dir).unwrap();
+
+        write_file(
+            &root_dir.join("miden-project.toml"),
+            "[workspace]\nmembers = [\"app\"]\n\n[workspace.dependencies]\ndep = { path = \"vendor/dep\" }\n",
+        );
+        write_package(&dep_dir, "dep", "0.3.0", Some("export.foo\nend\n"), []);
+        let app_manifest = app_dir.join("miden-project.toml");
+        write_file(
+            &app_manifest,
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\ndep.workspace = true\n",
+        );
+
+        let registry = TestRegistry::default();
+        let graph = builder(&registry, &tempdir.path().join("git-cache"))
+            .build_from_path(&app_manifest)
+            .unwrap();
+        let dep = graph.get(&PackageId::from("dep")).unwrap();
+
+        assert_eq!(dep.version.to_string(), "0.3.0");
+        assert_matches!(
+            dep.provenance,
+            ProjectDependencyNodeProvenance::Source(ProjectSource::Real {
+                origin: ProjectSourceOrigin::Path,
+                workspace_root: None,
+                ..
+            })
+        );
+    }
+
+    #[test]
+    fn preassembled_path_dependency_inside_workspace_root_is_not_treated_as_workspace_member() {
+        let tempdir = TempDir::new().unwrap();
+        let root_dir = tempdir.path().join("workspace-dep");
+        let app_dir = root_dir.join("app");
+        let artifacts_dir = root_dir.join("artifacts");
+        fs::create_dir_all(&app_dir).unwrap();
+        fs::create_dir_all(&artifacts_dir).unwrap();
+
+        write_file(
+            &root_dir.join("miden-project.toml"),
+            "[workspace]\nmembers = [\"app\"]\n\n[workspace.dependencies]\ndep = { path = \"artifacts/dep.masp\" }\n",
+        );
+        let dep_package = build_registry_test_package("dep", "1.0.0");
+        let dep_package_path = artifacts_dir.join("dep.masp");
+        fs::write(&dep_package_path, dep_package.to_bytes()).unwrap();
+        let app_manifest = app_dir.join("miden-project.toml");
+        write_file(
+            &app_manifest,
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\ndep.workspace = true\n",
+        );
+
+        let registry = TestRegistry::default();
+        let graph = builder(&registry, &tempdir.path().join("git-cache"))
+            .build_from_path(&app_manifest)
+            .unwrap();
+        let dep = graph.get(&PackageId::from("dep")).unwrap();
+
+        assert_eq!(dep.version.to_string(), "1.0.0");
+        assert_matches!(
+            dep.provenance,
+            ProjectDependencyNodeProvenance::Preassembled { ref path, .. }
+                if path == &dep_package_path.canonicalize().unwrap()
+        );
     }
 
     // ------ TEST UTILS

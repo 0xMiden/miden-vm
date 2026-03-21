@@ -181,20 +181,23 @@ impl Project {
             })?;
             if contents.contains_key("workspace") {
                 let workspace = Workspace::load(source, source_manager)?;
-                let package = if let Some(name) = name {
-                    workspace.get_member_by_name(name).ok_or_else(|| {
-                        Report::msg(format!(
-                            "workspace '{}' does not contain a member named '{name}'",
-                            workspace_manifest.display(),
-                        ))
-                    })?
-                } else if let Some(package) = workspace
+                let package = if let Some(package) = workspace
                     .members()
                     .iter()
                     .find(|member| member.manifest_path().is_some_and(|path| path == manifest_path))
                     .cloned()
                 {
                     package
+                } else if manifest_path == workspace_manifest {
+                    let Some(name) = name else {
+                        break;
+                    };
+                    workspace.get_member_by_name(name).ok_or_else(|| {
+                        Report::msg(format!(
+                            "workspace '{}' does not contain a member named '{name}'",
+                            workspace_manifest.display(),
+                        ))
+                    })?
                 } else {
                     break;
                 };

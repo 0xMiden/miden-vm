@@ -1,5 +1,9 @@
 #[cfg(feature = "std")]
-use std::{boxed::Box, path::Path, string::{String, ToString}};
+use std::{
+    boxed::Box,
+    path::Path,
+    string::{String, ToString},
+};
 
 #[cfg(all(feature = "std", feature = "serde"))]
 use miden_assembly_syntax::debuginfo::SourceManager;
@@ -71,7 +75,7 @@ impl Workspace {
 
         use crate::ast::ProjectFileError;
 
-        let mut file = ast::WorkspaceFile::parse(source.clone())?;
+        let file = ast::WorkspaceFile::parse(source.clone())?;
 
         let manifest_uri = source.content().uri();
         let manifest_path = if manifest_uri.scheme().is_none_or(|scheme| scheme == "file") {
@@ -80,7 +84,7 @@ impl Workspace {
             None
         };
 
-        let members = core::mem::take(&mut file.workspace.members);
+        let members = file.workspace.members.clone();
 
         let mut workspace = Box::new(Workspace {
             manifest_path: manifest_path.clone(),

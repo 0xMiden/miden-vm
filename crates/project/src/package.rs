@@ -359,6 +359,18 @@ impl Package {
                                 rev: None,
                                 linkage,
                             },
+                            DependencyVersionScheme::WorkspacePath { path, version } => {
+                                ast::DependencySpec {
+                                    name: name.clone(),
+                                    version_or_digest: version.clone(),
+                                    workspace: false,
+                                    path: Some(path.clone()),
+                                    git: None,
+                                    branch: None,
+                                    rev: None,
+                                    linkage,
+                                }
+                            },
                             DependencyVersionScheme::Registry(req) => ast::DependencySpec {
                                 name: name.clone(),
                                 version_or_digest: Some(req.clone()),

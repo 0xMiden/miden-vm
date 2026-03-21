@@ -52,6 +52,7 @@ impl Dependency {
         let req = match &self.version {
             DependencyVersionScheme::Registry(version) => return version.clone(),
             DependencyVersionScheme::Workspace { .. } => None,
+            DependencyVersionScheme::WorkspacePath { version, .. } => version.clone(),
             DependencyVersionScheme::Path { version, .. } => version.clone(),
             DependencyVersionScheme::Git { version, .. } => {
                 version.as_ref().map(|spanned| VersionRequirement::Semantic(spanned.clone()))
@@ -76,8 +77,17 @@ pub enum DependencyVersionScheme {
     /// Resolution of packages using this scheme relies on the specific implementation of the
     /// package registry in use, which can vary depending on context.
     Registry(VersionRequirement),
-    /// Resolve the given path to a member of the current workspace.
+    /// Resolve the given workspace-relative path to a declared member of the current workspace.
     Workspace { member: Span<Uri> },
+    /// Resolve the given path inherited from `[workspace.dependencies]`, relative to the
+    /// workspace root, to either a Miden project/workspace or an assembled package artifact.
+    WorkspacePath {
+        /// The path as declared in `[workspace.dependencies]`.
+        path: Span<Uri>,
+        /// If specified, the version of the referenced project/package _must_ match this version
+        /// requirement.
+        version: Option<VersionRequirement>,
+    },
     /// Resolve the given path to a Miden project/workspace, or assembled Miden package artifact.
     Path {
         /// The path to a Miden project directory containing a `miden-project.toml` OR a Miden
@@ -246,9 +256,23 @@ impl DependencyVersionScheme {
                     && let Some(workspace_path) = workspace_path.and_then(|p| p.canonicalize().ok())
                     && let Some(workspace_root) = workspace_path.parent()
                     && let Ok(resolved_uri) = absolutize_path(Path::new(uri.path()), workspace_root)
-                    && resolved_uri.strip_prefix(workspace_root).is_ok()
                 {
-                    Ok(Self::Workspace { member: uri.clone() })
+                    let is_member = workspace.workspace.members.iter().any(|member| {
+                        let member_path = member.path();
+                        uri.path() == member_path
+                            || uri.path() == format!("{member_path}/miden-project.toml")
+                            || absolutize_path(Path::new(member_path), workspace_root)
+                                .ok()
+                                .is_some_and(|member_dir| {
+                                    resolved_uri == member_dir
+                                        || resolved_uri == member_dir.join("miden-project.toml")
+                                })
+                    });
+                    if is_member {
+                        Ok(Self::Workspace { member: uri.clone() })
+                    } else {
+                        Ok(Self::WorkspacePath { path: uri.clone(), version })
+                    }
                 } else {
                     Ok(Self::Path { path: uri, version })
                 }
@@ -262,17 +286,27 @@ impl DependencyVersionScheme {
         spec: Span<&crate::ast::DependencySpec>,
         workspace: &crate::ast::WorkspaceFile,
     ) -> Result<Self, InvalidDependencySpecError> {
+        use alloc::format;
+
         match Self::try_from(spec)? {
             Self::Path { path: uri, version } => {
                 let workspace_path =
                     workspace.source_file.as_ref().map(|file| file.content().uri().path());
                 if uri.scheme().is_none_or(|scheme| scheme == "file") &&
                     let Some(workspace_root) = workspace_path.and_then(|p| p.strip_suffix("miden-project.toml")) &&
-                    uri.path().strip_prefix(workspace_root).is_some() &&
                     // Make sure the uri is relative to workspace root
                     (!workspace_root.is_empty() && !(uri.path().starts_with('/') || uri.path().starts_with("..")))
                 {
-                    Ok(Self::Workspace { member: uri.clone() })
+                    let is_member = workspace.workspace.members.iter().any(|member| {
+                        let member_path = member.path();
+                        uri.path() == member_path
+                            || uri.path() == format!("{member_path}/miden-project.toml")
+                    });
+                    if is_member {
+                        Ok(Self::Workspace { member: uri.clone() })
+                    } else {
+                        Ok(Self::WorkspacePath { path: uri.clone(), version })
+                    }
                 } else {
                     Ok(Self::Path { path: uri, version })
                 }

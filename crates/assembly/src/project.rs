@@ -1257,6 +1257,11 @@ fn effective_manifest_hash_input(project: &ProjectPackage) -> Result<String, Rep
                 member.path().to_string(),
                 dependency.linkage(),
             )),
+            DependencyVersionScheme::WorkspacePath { path, .. } => Some((
+                dependency.name().to_string(),
+                path.path().to_string(),
+                dependency.linkage(),
+            )),
             _ => None,
         })
         .collect::<Vec<_>>();
