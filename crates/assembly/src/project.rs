@@ -2334,6 +2334,69 @@ end
     }
 
     #[test]
+    fn root_package_is_not_auto_published_when_assembling_source_dependencies() {
+        let tempdir = TempDir::new().unwrap();
+        let dep_dir = tempdir.path().join("dep");
+        write_file(
+            &dep_dir.join("miden-project.toml"),
+            r#"[package]
+name = "dep"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+"#,
+        );
+        write_file(
+            &dep_dir.join("lib.masm"),
+            r#"pub proc foo
+    push.1
+end
+"#,
+        );
+
+        let root_dir = tempdir.path().join("root");
+        let root_manifest = root_dir.join("miden-project.toml");
+        write_file(
+            &root_manifest,
+            r#"[package]
+name = "root"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+
+[dependencies]
+dep = { path = "../dep" }
+"#,
+        );
+        write_file(
+            &root_dir.join("lib.masm"),
+            r#"pub proc entry
+    exec.::dep::foo
+end
+"#,
+        );
+
+        let mut context = TestContext::new();
+        let package = context
+            .assemble_library_package(&root_manifest, None)
+            .expect("assembly with a source dependency should succeed");
+
+        assert_eq!(&package.name, "root");
+        assert!(
+            context
+                .registry()
+                .is_semver_available(&PackageId::from("dep"), &"1.0.0".parse().unwrap())
+        );
+        assert!(
+            !context
+                .registry()
+                .is_semver_available(&PackageId::from("root"), &"1.0.0".parse().unwrap())
+        );
+    }
+
+    #[test]
     fn path_dependency_source_changes_require_semver_bump() {
         let tempdir = TempDir::new().unwrap();
         let dep_dir = tempdir.path().join("dep");

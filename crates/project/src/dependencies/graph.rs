@@ -1166,6 +1166,106 @@ mod tests {
     }
 
     #[test]
+    fn preassembled_path_dependency_accepts_exact_published_requirement() {
+        let tempdir = TempDir::new().unwrap();
+        let package = build_registry_test_package("dep", "1.0.0");
+        let digest = package.digest();
+        let package_path = tempdir.path().join("dep.masp");
+        fs::write(&package_path, package.to_bytes()).unwrap();
+
+        let root_dir = tempdir.path().join("root");
+        let root_manifest = write_package(
+            &root_dir,
+            "root",
+            "1.0.0",
+            Some("export.foo\nend\n"),
+            [Dependency::new(
+                Span::unknown("dep".into()),
+                DependencyVersionScheme::Path {
+                    path: Span::unknown(Uri::from(package_path.as_path())),
+                    version: Some(VersionRequirement::Exact(Version::new(
+                        "1.0.0".parse().unwrap(),
+                        digest,
+                    ))),
+                },
+                Linkage::Dynamic,
+            )],
+        );
+
+        let registry = TestRegistry::default();
+        let graph = builder(&registry, &tempdir.path().join("git"))
+            .build_from_path(&root_manifest)
+            .unwrap();
+        let dep = graph.get(&PackageId::from("dep")).unwrap();
+
+        assert_eq!(dep.version, "1.0.0".parse().unwrap());
+        assert_matches!(
+            dep.provenance,
+            ProjectDependencyNodeProvenance::Preassembled {
+                ref path,
+                ref selected,
+            } if path == &package_path.canonicalize().unwrap()
+                && *selected == Version::new("1.0.0".parse().unwrap(), digest)
+        );
+    }
+
+    #[test]
+    fn preassembled_path_dependency_validates_digest_requirement_against_artifact_digest() {
+        let tempdir = TempDir::new().unwrap();
+        let package = build_registry_test_package("dep", "1.0.0");
+        let digest = package.digest();
+        let package_path = tempdir.path().join("dep.masp");
+        fs::write(&package_path, package.to_bytes()).unwrap();
+
+        let ok_root_dir = tempdir.path().join("root-ok");
+        let ok_manifest = write_package(
+            &ok_root_dir,
+            "root-ok",
+            "1.0.0",
+            Some("export.foo\nend\n"),
+            [Dependency::new(
+                Span::unknown("dep".into()),
+                DependencyVersionScheme::Path {
+                    path: Span::unknown(Uri::from(package_path.as_path())),
+                    version: Some(VersionRequirement::Digest(Span::unknown(digest))),
+                },
+                Linkage::Dynamic,
+            )],
+        );
+
+        let registry = TestRegistry::default();
+        let graph = builder(&registry, &tempdir.path().join("git"))
+            .build_from_path(&ok_manifest)
+            .unwrap();
+        let dep = graph.get(&PackageId::from("dep")).unwrap();
+        assert_eq!(dep.version, "1.0.0".parse().unwrap());
+
+        let bad_root_dir = tempdir.path().join("root-bad");
+        let bad_manifest = write_package(
+            &bad_root_dir,
+            "root-bad",
+            "1.0.0",
+            Some("export.foo\nend\n"),
+            [Dependency::new(
+                Span::unknown("dep".into()),
+                DependencyVersionScheme::Path {
+                    path: Span::unknown(Uri::from(package_path.as_path())),
+                    version: Some(VersionRequirement::Digest(Span::unknown(hash_string_to_word(
+                        "wrong-digest",
+                    )))),
+                },
+                Linkage::Dynamic,
+            )],
+        );
+
+        let error = builder(&registry, &tempdir.path().join("git"))
+            .build_from_path(&bad_manifest)
+            .expect_err("mismatched digest requirement should fail for preassembled packages");
+
+        assert!(error.to_string().contains("resolved version was '1.0.0#"));
+    }
+
+    #[test]
     fn validates_bin_path_is_required() {
         let tempdir = TempDir::new().unwrap();
         let manifest_path = tempdir.path().join("miden-project.toml");
