@@ -1,57 +1,43 @@
 use alloc::vec::Vec;
-use core::ops::Range;
 
 use miden_air::trace::{
-    CLK_COL_IDX, Challenges, DECODER_TRACE_OFFSET, RowIndex,
-    chiplets::{
-        HASHER_NODE_INDEX_COL_IDX, HASHER_STATE_COL_RANGE, HASHER_TRACE_OFFSET,
-        hasher::{
-            CAPACITY_DOMAIN_IDX, DIGEST_RANGE, HASH_CYCLE_LEN, HasherState, LAST_CYCLE_ROW,
-            LINEAR_HASH, LINEAR_HASH_LABEL, MP_VERIFY, MP_VERIFY_LABEL, MR_UPDATE_NEW,
-            MR_UPDATE_NEW_LABEL, MR_UPDATE_OLD, MR_UPDATE_OLD_LABEL, RATE_LEN, RETURN_HASH,
-            RETURN_HASH_LABEL, RETURN_STATE, RETURN_STATE_LABEL, STATE_WIDTH, Selectors,
-        },
+    Challenges, DECODER_TRACE_OFFSET, RowIndex, bus_message,
+    chiplets::hasher::{
+        CAPACITY_DOMAIN_IDX, CONTROLLER_ROWS_PER_PERM_FELT, DIGEST_RANGE, HasherState,
+        LINEAR_HASH_LABEL, MP_VERIFY_LABEL, MR_UPDATE_NEW_LABEL, MR_UPDATE_OLD_LABEL, RATE_LEN,
+        RETURN_HASH_LABEL, RETURN_STATE_LABEL,
     },
-    decoder::{NUM_OP_BITS, OP_BITS_OFFSET},
+    log_precompile::{
+        HELPER_ADDR_IDX, HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE, STACK_COMM_RANGE,
+        STACK_R0_RANGE, STACK_R1_RANGE, STACK_TAG_RANGE,
+    },
 };
 use miden_core::{
     Word,
-    chiplets::hasher::apply_permutation,
-    crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
+    crypto::merkle::{MerkleStore, MerkleTree},
     field::Field,
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, SplitNodeBuilder},
     operations::opcodes,
     program::Program,
-    utils::range,
 };
 use miden_utils_testing::stack;
 
 use super::{
     AUX_TRACE_RAND_CHALLENGES, AdviceInputs, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt,
     ONE, Operation, ZERO, build_span_with_respan_ops, build_trace_from_ops_with_inputs,
-    build_trace_from_program, init_state_from_words, rand_array,
+    build_trace_from_program, rand_array,
 };
 use crate::StackInputs;
-
-// CONSTANTS
-// ================================================================================================
-
-const DECODER_HASHER_STATE_RANGE: Range<usize> = range(
-    DECODER_TRACE_OFFSET + miden_air::trace::decoder::HASHER_STATE_OFFSET,
-    miden_air::trace::decoder::NUM_HASHER_COLUMNS,
-);
-
-/// Location of operation bits columns relative to the main trace.
-pub const DECODER_OP_BITS_RANGE: Range<usize> =
-    range(DECODER_TRACE_OFFSET + OP_BITS_OFFSET, NUM_OP_BITS);
 
 // TESTS
 // ================================================================================================
 
 /// Tests the generation of the `b_chip` bus column when the hasher only performs a single `SPAN`
 /// with one operation batch.
+///
+/// Verifies step-by-step that each decoder request (SPAN, END) and each hasher response
+/// (sponge start, digest return) correctly update the bus running product.
 #[test]
-#[expect(clippy::needless_range_loop)]
 pub fn b_chip_span() {
     let program = {
         let mut mast_forest = MastForest::new();
@@ -67,68 +53,25 @@ pub fn b_chip_span() {
 
     let trace = build_trace_from_program(&program, &[]);
 
-    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
+    let rand_challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&rand_challenges).unwrap();
     let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
-
-    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
+    let challenges = Challenges::new(rand_challenges[0], rand_challenges[1]);
 
     assert_eq!(trace.length(), b_chip.len());
     assert_eq!(ONE, b_chip[0]);
 
-    // at the first cycle the following are added for inclusion in the next row:
-    // - the initialization of the span hash is requested by the decoder
-    // - the initialization of the span hash is provided by the hasher
+    // Verify the bus running product step-by-step at every row.
+    verify_b_chip_step_by_step(&trace, &challenges, b_chip);
 
-    // initialize the request state.
-    let mut state = [ZERO; STATE_WIDTH];
-    fill_state_from_decoder_with_domain(&trace, &mut state, 0.into());
-    // request the initialization of the span hash
-    let request_init =
-        build_expected(&challenges, LINEAR_HASH_LABEL, state, [ZERO; STATE_WIDTH], ONE, ZERO);
-    let mut expected = request_init.inverse();
-
-    // provide the initialization of the span hash
-    expected *= build_expected_from_trace(&trace, &challenges, 0.into());
-    assert_eq!(expected, b_chip[1]);
-
-    // Nothing changes when there is no communication with the hash chiplet.
-    for row in 2..4 {
-        assert_eq!(expected, b_chip[row]);
-    }
-
-    // At cycle 3 the decoder requests the result of the span hash.
-    apply_permutation(&mut state);
-    let request_result = build_expected(
-        &challenges,
-        RETURN_HASH_LABEL,
-        state,
-        [ZERO; STATE_WIDTH],
-        Felt::new(HASH_CYCLE_LEN as u64),
-        ZERO,
-    );
-    expected *= request_result.inverse();
-    assert_eq!(expected, b_chip[4]);
-
-    // Nothing changes when there is no communication with the hash chiplet.
-    for row in 5..HASH_CYCLE_LEN {
-        assert_eq!(expected, b_chip[row]);
-    }
-
-    // At the end of the hash cycle, the result of the span hash is provided by the hasher
-    expected *= build_expected_from_trace(&trace, &challenges, LAST_CYCLE_ROW.into());
-    assert_eq!(expected, b_chip[HASH_CYCLE_LEN]);
-
-    // The value in b_chip should be ONE now and for the rest of the trace.
-    for row in HASH_CYCLE_LEN..trace.length() {
-        assert_eq!(ONE, b_chip[row]);
-    }
+    assert_bus_balanced(b_chip);
 }
 
 /// Tests the generation of the `b_chip` bus column when the hasher only performs a `SPAN` but it
-/// includes multiple batches.
+/// includes multiple batches (RESPAN).
+///
+/// Verifies step-by-step that SPAN, RESPAN, and END requests are each matched by hasher responses.
 #[test]
-#[expect(clippy::needless_range_loop)]
 pub fn b_chip_span_with_respan() {
     let program = {
         let mut mast_forest = MastForest::new();
@@ -143,103 +86,23 @@ pub fn b_chip_span_with_respan() {
     };
     let trace = build_trace_from_program(&program, &[]);
 
-    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
+    let rand_challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&rand_challenges).unwrap();
     let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
+    let challenges = Challenges::new(rand_challenges[0], rand_challenges[1]);
 
-    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
-
-    assert_eq!(trace.length(), b_chip.len());
     assert_eq!(ONE, b_chip[0]);
 
-    // at cycle 0 the following are added for inclusion in the next row:
-    // - the initialization of the span hash is requested by the decoder
-    // - the initialization of the span hash is provided by the hasher
+    verify_b_chip_step_by_step(&trace, &challenges, b_chip);
 
-    // initialize the request state.
-    let mut state = [ZERO; STATE_WIDTH];
-    fill_state_from_decoder_with_domain(&trace, &mut state, 0.into());
-    // request the initialization of the span hash
-    let request_init =
-        build_expected(&challenges, LINEAR_HASH_LABEL, state, [ZERO; STATE_WIDTH], ONE, ZERO);
-    let mut expected = request_init.inverse();
-
-    // provide the initialization of the span hash
-    expected *= build_expected_from_trace(&trace, &challenges, 0.into());
-    assert_eq!(expected, b_chip[1]);
-
-    // Nothing changes when there is no communication with the hash chiplet.
-    for row in 2..10 {
-        assert_eq!(expected, b_chip[row]);
-    }
-
-    // At cycle 9, after the first operation batch, the decoder initiates a respan and requests the
-    // absorption of the next operation batch.
-    apply_permutation(&mut state);
-    let prev_state = state;
-    // get the state with the next absorbed batch.
-    fill_state_from_decoder(&trace, &mut state, 9.into());
-
-    let request_respan = build_expected(
-        &challenges,
-        LINEAR_HASH_LABEL,
-        prev_state,
-        state,
-        Felt::new(HASH_CYCLE_LEN as u64),
-        ZERO,
-    );
-    expected *= request_respan.inverse();
-    assert_eq!(expected, b_chip[10]);
-
-    // Nothing changes when there is no communication with the hash chiplet.
-    for row in 11..22 {
-        assert_eq!(expected, b_chip[row]);
-    }
-
-    // At cycle 21, after the second operation batch, the decoder ends the SPAN block and requests
-    // its hash.
-    apply_permutation(&mut state);
-    let request_result = build_expected(
-        &challenges,
-        RETURN_HASH_LABEL,
-        state,
-        [ZERO; STATE_WIDTH],
-        Felt::new((2 * HASH_CYCLE_LEN) as u64),
-        ZERO,
-    );
-    expected *= request_result.inverse();
-    assert_eq!(expected, b_chip[22]);
-
-    // Nothing changes when there is no communication with the hash chiplet.
-    for row in 23..HASH_CYCLE_LEN {
-        assert_eq!(expected, b_chip[row]);
-    }
-
-    // At the end of the first hash cycle, the absorption of the next operation batch is provided
-    // by the hasher.
-    expected *= build_expected_from_trace(&trace, &challenges, LAST_CYCLE_ROW.into());
-    assert_eq!(expected, b_chip[HASH_CYCLE_LEN]);
-
-    // Nothing changes when there is no communication with the hash chiplet.
-    for row in (HASH_CYCLE_LEN + 1)..(2 * HASH_CYCLE_LEN) {
-        assert_eq!(expected, b_chip[row]);
-    }
-
-    // At the end of the second hash cycle, the result of the span hash is provided by the hasher.
-    expected *=
-        build_expected_from_trace(&trace, &challenges, (HASH_CYCLE_LEN + LAST_CYCLE_ROW).into());
-    assert_eq!(expected, b_chip[2 * HASH_CYCLE_LEN]);
-
-    // The value in b_chip should be ONE now and for the rest of the trace.
-    for row in (2 * HASH_CYCLE_LEN)..trace.length() {
-        assert_eq!(ONE, b_chip[row]);
-    }
+    assert_bus_balanced(b_chip);
 }
 
 /// Tests the generation of the `b_chip` bus column when the hasher performs a merge of two code
-/// blocks requested by the decoder. (This also requires a `SPAN` block.)
+/// blocks requested by the decoder (SPLIT). This also requires inner SPAN blocks.
+///
+/// Verifies step-by-step that SPLIT, SPAN, and END requests are each matched by hasher responses.
 #[test]
-#[expect(clippy::needless_range_loop)]
 pub fn b_chip_merge() {
     let program = {
         let mut mast_forest = MastForest::new();
@@ -260,111 +123,21 @@ pub fn b_chip_merge() {
 
     let trace = build_trace_from_program(&program, &[]);
 
-    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
+    let rand_challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&rand_challenges).unwrap();
     let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
+    let challenges = Challenges::new(rand_challenges[0], rand_challenges[1]);
 
-    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
-
-    assert_eq!(trace.length(), b_chip.len());
     assert_eq!(ONE, b_chip[0]);
 
-    // at cycle 0 the following are added for inclusion in the next row:
-    // - the initialization of the merge of the split's child hashes is requested by the decoder
-    // - the initialization of the code block merge is provided by the hasher
+    verify_b_chip_step_by_step(&trace, &challenges, b_chip);
 
-    // initialize the request state.
-    let mut split_state = [ZERO; STATE_WIDTH];
-    fill_state_from_decoder_with_domain(&trace, &mut split_state, 0.into());
-    // request the initialization of the span hash
-    let split_init =
-        build_expected(&challenges, LINEAR_HASH_LABEL, split_state, [ZERO; STATE_WIDTH], ONE, ZERO);
-    let mut expected = split_init.inverse();
-
-    // provide the initialization of the span hash
-    expected *= build_expected_from_trace(&trace, &challenges, 0.into());
-    assert_eq!(expected, b_chip[1]);
-
-    // at cycle 1 the initialization of the span block hash for the false branch is requested by the
-    // decoder
-    let mut f_branch_state = [ZERO; STATE_WIDTH];
-    fill_state_from_decoder_with_domain(&trace, &mut f_branch_state, 1.into());
-    // request the initialization of the false branch hash
-    let f_branch_init = build_expected(
-        &challenges,
-        LINEAR_HASH_LABEL,
-        f_branch_state,
-        [ZERO; STATE_WIDTH],
-        Felt::new((HASH_CYCLE_LEN + 1) as u64),
-        ZERO,
-    );
-    expected *= f_branch_init.inverse();
-    assert_eq!(expected, b_chip[2]);
-
-    // Nothing changes when there is no communication with the hash chiplet.
-    assert_eq!(expected, b_chip[3]);
-
-    // at cycle 3 the result hash of the span block for the false branch is requested by the decoder
-    apply_permutation(&mut f_branch_state);
-    let f_branch_result = build_expected(
-        &challenges,
-        RETURN_HASH_LABEL,
-        f_branch_state,
-        [ZERO; STATE_WIDTH],
-        Felt::new((2 * HASH_CYCLE_LEN) as u64),
-        ZERO,
-    );
-    expected *= f_branch_result.inverse();
-    assert_eq!(expected, b_chip[4]);
-
-    // at cycle 4 the result of the split code block's hash is requested by the decoder
-    apply_permutation(&mut split_state);
-    let split_result = build_expected(
-        &challenges,
-        RETURN_HASH_LABEL,
-        split_state,
-        [ZERO; STATE_WIDTH],
-        Felt::new(HASH_CYCLE_LEN as u64),
-        ZERO,
-    );
-    expected *= split_result.inverse();
-    assert_eq!(expected, b_chip[5]);
-
-    // Nothing changes when there is no communication with the hash chiplet.
-    for row in 6..HASH_CYCLE_LEN {
-        assert_eq!(expected, b_chip[row]);
-    }
-
-    // At the end of the merge hash cycle, the result of the merge is provided by the hasher.
-    expected *= build_expected_from_trace(&trace, &challenges, LAST_CYCLE_ROW.into());
-    assert_eq!(expected, b_chip[HASH_CYCLE_LEN]);
-
-    // At the start of the next hash cycle, the initialization of the hash of the span block for the
-    // false branch is provided by the hasher.
-    expected *= build_expected_from_trace(&trace, &challenges, HASH_CYCLE_LEN.into());
-    assert_eq!(expected, b_chip[HASH_CYCLE_LEN + 1]);
-
-    // Nothing changes when there is no communication with the hash chiplet.
-    for row in (HASH_CYCLE_LEN + 2)..(2 * HASH_CYCLE_LEN) {
-        assert_eq!(expected, b_chip[row]);
-    }
-
-    // At the end of the false branch hash cycle, the result of the span block for the false branch
-    // is provided by the hasher.
-    expected *=
-        build_expected_from_trace(&trace, &challenges, (HASH_CYCLE_LEN + LAST_CYCLE_ROW).into());
-    assert_eq!(expected, b_chip[2 * HASH_CYCLE_LEN]);
-
-    // The value in b_chip should be ONE now and for the rest of the trace.
-    for row in (2 * HASH_CYCLE_LEN)..trace.length() {
-        assert_eq!(ONE, b_chip[row]);
-    }
+    assert_bus_balanced(b_chip);
 }
 
 /// Tests the generation of the `b_chip` bus column when the hasher performs a permutation
 /// requested by the `HPerm` user operation.
 #[test]
-#[expect(clippy::needless_range_loop)]
 pub fn b_chip_permutation() {
     let program = {
         let mut mast_forest = MastForest::new();
@@ -379,109 +152,22 @@ pub fn b_chip_permutation() {
     let stack = vec![8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0, 8];
     let trace = build_trace_from_program(&program, &stack);
 
-    let mut hperm_state: [Felt; STATE_WIDTH] = stack
-        .iter()
-        .map(|v| Felt::new(*v))
-        .collect::<Vec<_>>()
-        .try_into()
-        .expect("failed to convert vector to array");
-    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
+    let rand_challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&rand_challenges).unwrap();
     let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
+    let challenges = Challenges::new(rand_challenges[0], rand_challenges[1]);
 
-    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
-
-    assert_eq!(trace.length(), b_chip.len());
     assert_eq!(ONE, b_chip[0]);
 
-    // at cycle 0 the following are added for inclusion in the next row:
-    // - the initialization of the span hash is requested by the decoder
-    // - the initialization of the span hash is provided by the hasher
+    verify_b_chip_step_by_step(&trace, &challenges, b_chip);
 
-    // initialize the request state.
-    let mut span_state = [ZERO; STATE_WIDTH];
-    fill_state_from_decoder_with_domain(&trace, &mut span_state, 0.into());
-    // request the initialization of the span hash
-    let span_init =
-        build_expected(&challenges, LINEAR_HASH_LABEL, span_state, [ZERO; STATE_WIDTH], ONE, ZERO);
-    let mut expected = span_init.inverse();
-    // provide the initialization of the span hash
-    expected *= build_expected_from_trace(&trace, &challenges, 0.into());
-    assert_eq!(expected, b_chip[1]);
-
-    // at cycle 1 hperm is executed and the initialization and result of the hash are both
-    // requested by the stack.
-    let hperm_init = build_expected(
-        &challenges,
-        LINEAR_HASH_LABEL,
-        hperm_state,
-        [ZERO; STATE_WIDTH],
-        Felt::new((HASH_CYCLE_LEN + 1) as u64),
-        ZERO,
-    );
-    // request the hperm initialization.
-    expected *= hperm_init.inverse();
-    apply_permutation(&mut hperm_state);
-    let hperm_result = build_expected(
-        &challenges,
-        RETURN_STATE_LABEL,
-        hperm_state,
-        [ZERO; STATE_WIDTH],
-        Felt::new((2 * HASH_CYCLE_LEN) as u64),
-        ZERO,
-    );
-    // request the hperm result.
-    expected *= hperm_result.inverse();
-    assert_eq!(expected, b_chip[2]);
-
-    // at cycle 2 the result of the span hash is requested by the decoder
-    apply_permutation(&mut span_state);
-    let span_result = build_expected(
-        &challenges,
-        RETURN_HASH_LABEL,
-        span_state,
-        [ZERO; STATE_WIDTH],
-        Felt::new(HASH_CYCLE_LEN as u64),
-        ZERO,
-    );
-    expected *= span_result.inverse();
-    assert_eq!(expected, b_chip[3]);
-
-    // Nothing changes when there is no communication with the hash chiplet.
-    for row in 4..HASH_CYCLE_LEN {
-        assert_eq!(expected, b_chip[row]);
-    }
-
-    // At the end of the span hash cycle, the result of the span hash is provided by the hasher.
-    expected *= build_expected_from_trace(&trace, &challenges, LAST_CYCLE_ROW.into());
-    assert_eq!(expected, b_chip[HASH_CYCLE_LEN]);
-
-    // At the start of the next hash cycle, the initialization of the hperm hash is provided by the
-    // hasher.
-    expected *= build_expected_from_trace(&trace, &challenges, HASH_CYCLE_LEN.into());
-    assert_eq!(expected, b_chip[HASH_CYCLE_LEN + 1]);
-
-    // Nothing changes when there is no communication with the hash chiplet.
-    for row in (HASH_CYCLE_LEN + 2)..(2 * HASH_CYCLE_LEN) {
-        assert_eq!(expected, b_chip[row]);
-    }
-
-    // At the end of the hperm hash cycle, the result of the hperm hash is provided by the hasher.
-    expected *=
-        build_expected_from_trace(&trace, &challenges, (HASH_CYCLE_LEN + LAST_CYCLE_ROW).into());
-    assert_eq!(expected, b_chip[2 * HASH_CYCLE_LEN]);
-
-    // The value in b_chip should be ONE now and for the rest of the trace.
-    for row in (2 * HASH_CYCLE_LEN)..trace.length() {
-        assert_eq!(ONE, b_chip[row]);
-    }
+    assert_bus_balanced(b_chip);
 }
 
 /// Tests the generation of the `b_chip` bus column when the hasher performs a log_precompile
 /// operation requested by the stack. The operation absorbs TAG and COMM into a Poseidon2
 /// sponge with capacity CAP_PREV, producing (CAP_NEXT, R0, R1).
 #[test]
-#[expect(clippy::needless_range_loop)]
 pub fn b_chip_log_precompile() {
     let program = {
         let mut mast_forest = MastForest::new();
@@ -494,121 +180,27 @@ pub fn b_chip_log_precompile() {
         Program::new(mast_forest.into(), basic_block_id)
     };
     // Runtime stack layout: [COMM(5,6,7,8), TAG(1,2,3,4)] with comm[0]=5 on top
-    let comm_word: Word = [Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)].into();
-    let tag_word: Word = [Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)].into();
+    let _comm_word: Word = [Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)].into();
+    let _tag_word: Word = [Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)].into();
     // stack! takes elements in runtime order (first = top) and handles reversal
     let stack_inputs = stack![5, 6, 7, 8, 1, 2, 3, 4];
     let trace = build_trace_from_program(&program, &stack_inputs);
 
-    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
+    let rand_challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&rand_challenges).unwrap();
     let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
+    let challenges = Challenges::new(rand_challenges[0], rand_challenges[1]);
 
-    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
-
-    assert_eq!(trace.length(), b_chip.len());
     assert_eq!(ONE, b_chip[0]);
 
-    let mut expected = ONE;
+    verify_b_chip_step_by_step(&trace, &challenges, b_chip);
 
-    // at cycle 0 the following are added for inclusion in the next row:
-    // - the initialization of the span hash is requested by the decoder
-    // - the initialization of the span hash is provided by the hasher
-
-    // initialize the request state.
-    let mut span_state = [ZERO; STATE_WIDTH];
-    fill_state_from_decoder_with_domain(&trace, &mut span_state, 0.into());
-    // request the initialization of the span hash
-    let span_init =
-        build_expected(&challenges, LINEAR_HASH_LABEL, span_state, [ZERO; STATE_WIDTH], ONE, ZERO);
-    expected *= span_init.inverse();
-    // provide the initialization of the span hash
-    expected *= build_expected_from_trace(&trace, &challenges, 0.into());
-    assert_eq!(expected, b_chip[1]);
-
-    // at cycle 1 log_precompile is executed and the initialization and result of the hash are both
-    // requested by the stack.
-
-    // Build the input state in sponge order: [COMM, TAG, CAP_PREV] = [RATE0, RATE1, CAP]
-    // CAP_PREV comes from helper registers and defaults to [0,0,0,0].
-    // COMM = [5,6,7,8] is at stack positions 0-3.
-    // TAG = [1,2,3,4] is at stack positions 4-7.
-    // init_state_from_words(w1, w2) puts w1 at RATE0 and w2 at RATE1.
-    let log_pc_state = init_state_from_words(&comm_word, &tag_word);
-
-    let log_pc_init = build_expected(
-        &challenges,
-        LINEAR_HASH_LABEL,
-        log_pc_state,
-        [ZERO; STATE_WIDTH],
-        Felt::new((HASH_CYCLE_LEN + 1) as u64),
-        ZERO,
-    );
-    // request the log_precompile initialization.
-    expected *= log_pc_init.inverse();
-
-    // Compute the output state by applying the permutation
-    let mut log_pc_output_state = log_pc_state;
-    apply_permutation(&mut log_pc_output_state);
-
-    let log_pc_result = build_expected(
-        &challenges,
-        RETURN_STATE_LABEL,
-        log_pc_output_state,
-        [ZERO; STATE_WIDTH],
-        Felt::new((2 * HASH_CYCLE_LEN) as u64),
-        ZERO,
-    );
-    // request the log_precompile result.
-    expected *= log_pc_result.inverse();
-    assert_eq!(expected, b_chip[2]);
-
-    // at cycle 2 the result of the span hash is requested by the decoder
-    apply_permutation(&mut span_state);
-    let span_result = build_expected(
-        &challenges,
-        RETURN_HASH_LABEL,
-        span_state,
-        [ZERO; STATE_WIDTH],
-        Felt::new(HASH_CYCLE_LEN as u64),
-        ZERO,
-    );
-    expected *= span_result.inverse();
-    assert_eq!(expected, b_chip[3]);
-
-    // Nothing changes when there is no communication with the hash chiplet.
-    for row in 4..HASH_CYCLE_LEN {
-        assert_eq!(expected, b_chip[row]);
-    }
-
-    // at cycle 7 the result of the span hash is provided by the hasher
-    expected *= build_expected_from_trace(&trace, &challenges, LAST_CYCLE_ROW.into());
-    assert_eq!(expected, b_chip[HASH_CYCLE_LEN]);
-
-    // at cycle 8 the initialization of the log_precompile hash is provided by the hasher
-    expected *= build_expected_from_trace(&trace, &challenges, HASH_CYCLE_LEN.into());
-    assert_eq!(expected, b_chip[HASH_CYCLE_LEN + 1]);
-
-    // Nothing changes when there is no communication with the hash chiplet.
-    for row in (HASH_CYCLE_LEN + 2)..(2 * HASH_CYCLE_LEN) {
-        assert_eq!(expected, b_chip[row]);
-    }
-
-    // at cycle 15 the result of the log_precompile hash is provided by the hasher
-    expected *=
-        build_expected_from_trace(&trace, &challenges, (HASH_CYCLE_LEN + LAST_CYCLE_ROW).into());
-    assert_eq!(expected, b_chip[2 * HASH_CYCLE_LEN]);
-
-    // The value in b_chip should be ONE now and for the rest of the trace.
-    for row in (2 * HASH_CYCLE_LEN)..trace.length() {
-        assert_eq!(ONE, b_chip[row]);
-    }
+    assert_bus_balanced(b_chip);
 }
 
 /// Tests the generation of the `b_chip` bus column when the hasher performs a Merkle path
 /// verification requested by the `MpVerify` user operation.
 #[test]
-#[expect(clippy::needless_range_loop)]
 fn b_chip_mpverify() {
     let index = 5usize;
     let leaves = init_leaves(&[1, 2, 3, 4, 5, 6, 7, 8]);
@@ -628,116 +220,29 @@ fn b_chip_mpverify() {
         stack_inputs,
         advice_inputs,
     );
-    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
+
+    let rand_challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&rand_challenges).unwrap();
     let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
+    let challenges = Challenges::new(rand_challenges[0], rand_challenges[1]);
 
-    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
-
-    assert_eq!(trace.length(), b_chip.len());
     assert_eq!(ONE, b_chip[0]);
 
-    // at cycle 0 the following are added for inclusion in the next row:
-    // - the initialization of the span hash is requested by the decoder
-    // - the initialization of the span hash is provided by the hasher
+    verify_b_chip_step_by_step(&trace, &challenges, b_chip);
 
-    // initialize the request state.
-    let mut span_state = [ZERO; STATE_WIDTH];
-    fill_state_from_decoder_with_domain(&trace, &mut span_state, 0.into());
-    // request the initialization of the span hash
-    let span_init =
-        build_expected(&challenges, LINEAR_HASH_LABEL, span_state, [ZERO; STATE_WIDTH], ONE, ZERO);
-    let mut expected = span_init.inverse();
-    // provide the initialization of the span hash
-    expected *= build_expected_from_trace(&trace, &challenges, 0.into());
-    assert_eq!(expected, b_chip[1]);
-
-    // at cycle 1 a merkle path verification is executed and the initialization and result of the
-    // hash are both requested by the stack.
-    let path = tree
-        .get_path(NodeIndex::new(tree.depth(), index as u64).unwrap())
-        .expect("failed to get Merkle tree path");
-    let mp_state = init_state_from_words(&path[0], &leaves[index]);
-    let mp_init = build_expected(
-        &challenges,
-        MP_VERIFY_LABEL,
-        mp_state,
-        [ZERO; STATE_WIDTH],
-        Felt::new((HASH_CYCLE_LEN + 1) as u64),
-        Felt::new(index as u64),
-    );
-    // request the initialization of the Merkle path verification
-    expected *= mp_init.inverse();
-
-    let mp_verify_complete = HASH_CYCLE_LEN + (tree.depth() as usize) * HASH_CYCLE_LEN;
-    let mut result_state = [ZERO; STATE_WIDTH];
-    result_state[DIGEST_RANGE].copy_from_slice(tree.root().as_elements());
-    let mp_result = build_expected(
-        &challenges,
-        RETURN_HASH_LABEL,
-        result_state,
-        [ZERO; STATE_WIDTH],
-        Felt::new(mp_verify_complete as u64),
-        Felt::new(index as u64 >> tree.depth()),
-    );
-    // request the result of the Merkle path verification
-    expected *= mp_result.inverse();
-    assert_eq!(expected, b_chip[2]);
-
-    // at cycle 2 the result of the span hash is requested by the decoder
-    apply_permutation(&mut span_state);
-    let span_result = build_expected(
-        &challenges,
-        RETURN_HASH_LABEL,
-        span_state,
-        [ZERO; STATE_WIDTH],
-        Felt::new(HASH_CYCLE_LEN as u64),
-        ZERO,
-    );
-    expected *= span_result.inverse();
-    assert_eq!(expected, b_chip[3]);
-
-    // Nothing changes when there is no communication with the hash chiplet.
-    for row in 4..HASH_CYCLE_LEN {
-        assert_eq!(expected, b_chip[row]);
-    }
-
-    // At the end of the span hash cycle, the result of the span hash is provided by the hasher.
-    expected *= build_expected_from_trace(&trace, &challenges, LAST_CYCLE_ROW.into());
-    assert_eq!(expected, b_chip[HASH_CYCLE_LEN]);
-
-    // At the start of the next hash cycle, the initialization of the merkle path is provided by
-    // the hasher.
-    expected *= build_expected_from_trace(&trace, &challenges, HASH_CYCLE_LEN.into());
-    assert_eq!(expected, b_chip[HASH_CYCLE_LEN + 1]);
-
-    // Nothing changes when there is no communication with the hash chiplet.
-    for row in (HASH_CYCLE_LEN + 2)..(mp_verify_complete) {
-        assert_eq!(expected, b_chip[row]);
-    }
-
-    // when the merkle path verification has been completed the hasher provides the result
-    expected *= build_expected_from_trace(&trace, &challenges, (mp_verify_complete - 1).into());
-    assert_eq!(expected, b_chip[mp_verify_complete]);
-
-    // The value in b_chip should be ONE now and for the rest of the trace.
-    for row in mp_verify_complete..trace.length() {
-        assert_eq!(ONE, b_chip[row]);
-    }
+    assert_bus_balanced(b_chip);
 }
 
 /// Tests the generation of the `b_chip` bus column when the hasher performs a Merkle root update
 /// requested by the `MrUpdate` user operation.
 #[test]
-#[expect(clippy::needless_range_loop)]
 fn b_chip_mrupdate() {
     let index = 5usize;
     let leaves = init_leaves(&[1, 2, 3, 4, 5, 6, 7, 8]);
-    let mut tree = MerkleTree::new(&leaves).unwrap();
+    let tree = MerkleTree::new(&leaves).unwrap();
 
     let old_root = tree.root();
     let old_leaf_value = leaves[index];
-
     let new_leaf_value = leaves[0];
 
     let mut runtime_stack = Vec::new();
@@ -752,239 +257,159 @@ fn b_chip_mrupdate() {
 
     let trace =
         build_trace_from_ops_with_inputs(vec![Operation::MrUpdate], stack_inputs, advice_inputs);
-    let challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let aux_columns = trace.build_aux_trace(&challenges).unwrap();
+
+    let rand_challenges = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
+    let aux_columns = trace.build_aux_trace(&rand_challenges).unwrap();
     let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
+    let challenges = Challenges::new(rand_challenges[0], rand_challenges[1]);
 
-    let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
-
-    assert_eq!(trace.length(), b_chip.len());
     assert_eq!(ONE, b_chip[0]);
 
-    // at cycle 0 the following are added for inclusion in the next row:
-    // - the initialization of the span hash is requested by the decoder
-    // - the initialization of the span hash is provided by the hasher
+    verify_b_chip_step_by_step(&trace, &challenges, b_chip);
 
-    // initialize the request state.
-    let mut span_state = [ZERO; STATE_WIDTH];
-    fill_state_from_decoder_with_domain(&trace, &mut span_state, 0.into());
-    // request the initialization of the span hash
-    let span_init =
-        build_expected(&challenges, LINEAR_HASH_LABEL, span_state, [ZERO; STATE_WIDTH], ONE, ZERO);
-    let mut expected = span_init.inverse();
-    // provide the initialization of the span hash
-    expected *= build_expected_from_trace(&trace, &challenges, 0.into());
-    assert_eq!(expected, b_chip[1]);
-
-    // at cycle 1 a merkle path verification is executed and the initialization and result of the
-    // hash are both requested by the stack.
-    let path = tree
-        .get_path(NodeIndex::new(tree.depth(), index as u64).unwrap())
-        .expect("failed to get Merkle tree path");
-    let mp_state = init_state_from_words(&path[0], &leaves[index]);
-    let mp_init_old = build_expected(
-        &challenges,
-        MR_UPDATE_OLD_LABEL,
-        mp_state,
-        [ZERO; STATE_WIDTH],
-        Felt::new((HASH_CYCLE_LEN + 1) as u64),
-        Felt::new(index as u64),
-    );
-    // request the initialization of the (first) Merkle path verification
-    expected *= mp_init_old.inverse();
-
-    let mp_old_verify_complete = HASH_CYCLE_LEN + (tree.depth() as usize) * HASH_CYCLE_LEN;
-    let mut result_state_old = [ZERO; STATE_WIDTH];
-    result_state_old[DIGEST_RANGE].copy_from_slice(tree.root().as_elements());
-    let mp_result_old = build_expected(
-        &challenges,
-        RETURN_HASH_LABEL,
-        result_state_old,
-        [ZERO; STATE_WIDTH],
-        Felt::new(mp_old_verify_complete as u64),
-        Felt::new(index as u64 >> tree.depth()),
-    );
-
-    // request the result of the first Merkle path verification
-    expected *= mp_result_old.inverse();
-
-    let new_leaf_value = leaves[0];
-    tree.update_leaf(index as u64, new_leaf_value).unwrap();
-    let new_root = tree.root();
-
-    // a second merkle path verification is executed and the initialization and result of the
-    // hash are both requested by the stack.
-    let path = tree
-        .get_path(NodeIndex::new(tree.depth(), index as u64).unwrap())
-        .expect("failed to get Merkle tree path");
-    let mp_state = init_state_from_words(&path[0], &new_leaf_value);
-
-    let mp_new_verify_complete = mp_old_verify_complete + (tree.depth() as usize) * HASH_CYCLE_LEN;
-    let mp_init_new = build_expected(
-        &challenges,
-        MR_UPDATE_NEW_LABEL,
-        mp_state,
-        [ZERO; STATE_WIDTH],
-        Felt::new(mp_old_verify_complete as u64 + 1),
-        Felt::new(index as u64),
-    );
-
-    // request the initialization of the second Merkle path verification
-    expected *= mp_init_new.inverse();
-
-    let mut result_state_new = [ZERO; STATE_WIDTH];
-    result_state_new[DIGEST_RANGE].copy_from_slice(new_root.as_elements());
-    let mp_result_new = build_expected(
-        &challenges,
-        RETURN_HASH_LABEL,
-        result_state_new,
-        [ZERO; STATE_WIDTH],
-        Felt::new(mp_new_verify_complete as u64),
-        Felt::new(index as u64 >> tree.depth()),
-    );
-
-    // request the result of the second Merkle path verification
-    expected *= mp_result_new.inverse();
-    assert_eq!(expected, b_chip[2]);
-
-    // at cycle 2 the result of the span hash is requested by the decoder
-    apply_permutation(&mut span_state);
-    let span_result = build_expected(
-        &challenges,
-        RETURN_HASH_LABEL,
-        span_state,
-        [ZERO; STATE_WIDTH],
-        Felt::new(HASH_CYCLE_LEN as u64),
-        ZERO,
-    );
-    expected *= span_result.inverse();
-    assert_eq!(expected, b_chip[3]);
-
-    // Nothing changes when there is no communication with the hash chiplet.
-    for row in 4..HASH_CYCLE_LEN {
-        assert_eq!(expected, b_chip[row]);
-    }
-
-    // At the end of the span hash cycle, the result of the span hash is provided by the hasher.
-    expected *= build_expected_from_trace(&trace, &challenges, LAST_CYCLE_ROW.into());
-    assert_eq!(expected, b_chip[HASH_CYCLE_LEN]);
-
-    // At the start of the next hash cycle, the initialization of the first merkle path is provided
-    // by the hasher.
-    expected *= build_expected_from_trace(&trace, &challenges, HASH_CYCLE_LEN.into());
-    assert_eq!(expected, b_chip[HASH_CYCLE_LEN + 1]);
-
-    // Nothing changes when there is no communication with the hash chiplet.
-    for row in (HASH_CYCLE_LEN + 2)..(mp_old_verify_complete) {
-        assert_eq!(expected, b_chip[row]);
-    }
-
-    // when the first merkle path verification has been completed the hasher provides the result
-    expected *= build_expected_from_trace(&trace, &challenges, (mp_old_verify_complete - 1).into());
-    assert_eq!(expected, b_chip[mp_old_verify_complete]);
-
-    // at cycle 32 the initialization of the second merkle path is provided by the hasher
-    expected *= build_expected_from_trace(&trace, &challenges, mp_old_verify_complete.into());
-    assert_eq!(expected, b_chip[mp_old_verify_complete + 1]);
-
-    // Nothing changes when there is no communication with the hash chiplet.
-    for row in (mp_old_verify_complete + 1)..(mp_new_verify_complete) {
-        assert_eq!(expected, b_chip[row]);
-    }
-
-    // when the merkle path verification has been completed the hasher provides the result
-    expected *= build_expected_from_trace(&trace, &challenges, (mp_new_verify_complete - 1).into());
-    assert_eq!(expected, b_chip[mp_new_verify_complete]);
-
-    // The value in b_chip should be ONE now and for the rest of the trace.
-    for row in (mp_new_verify_complete)..trace.length() {
-        assert_eq!(ONE, b_chip[row]);
-    }
+    assert_bus_balanced(b_chip);
 }
 
-// TEST HELPERS
+// TEST HELPERS -- MESSAGE BUILDERS
 // ================================================================================================
+//
+// These helpers build expected bus message values for each of the 5 message types.
+// The label encoding and selector mapping are encapsulated here so tests can
+// speak in terms of operations, not selector bits.
+//
+// Label convention: input messages use label + 16, output messages use label + 32.
 
-/// Reduces the provided hasher row information to an expected value.
-fn build_expected(
+const LABEL_OFFSET_INPUT: u8 = 16;
+const LABEL_OFFSET_OUTPUT: u8 = 32;
+
+/// Sponge start message: full 12-element state (matches SPAN / control block request).
+fn sponge_start_msg(challenges: &Challenges<Felt>, addr: Felt, state: &HasherState) -> Felt {
+    let header = challenges.alpha
+        + challenges.beta_powers[0] * Felt::from_u8(LINEAR_HASH_LABEL + LABEL_OFFSET_INPUT)
+        + challenges.beta_powers[1] * addr;
+    header + build_value(&challenges.beta_powers[3..15], state)
+}
+
+/// Sponge continuation message: rate-only 8 elements (matches RESPAN request).
+/// Both the RESPAN request and the hasher continuation response use LABEL_OFFSET_OUTPUT (= 32).
+fn sponge_continuation_msg(challenges: &Challenges<Felt>, addr: Felt, rate: &[Felt]) -> Felt {
+    assert_eq!(rate.len(), RATE_LEN);
+    let header = challenges.alpha
+        + challenges.beta_powers[0] * Felt::from_u8(LINEAR_HASH_LABEL + LABEL_OFFSET_OUTPUT)
+        + challenges.beta_powers[1] * addr;
+    header + build_value(&challenges.beta_powers[3..11], rate)
+}
+
+/// Digest return message: 4-element digest (matches END / MPVERIFY output / MRUPDATE output).
+fn digest_return_msg(challenges: &Challenges<Felt>, addr: Felt, digest: &[Felt]) -> Felt {
+    assert_eq!(digest.len(), 4);
+    let header = challenges.alpha
+        + challenges.beta_powers[0] * Felt::from_u8(RETURN_HASH_LABEL + LABEL_OFFSET_OUTPUT)
+        + challenges.beta_powers[1] * addr;
+    header + build_value(&challenges.beta_powers[3..7], digest)
+}
+
+/// Full state return message: 12-element state (matches HPERM output).
+fn full_state_return_msg(challenges: &Challenges<Felt>, addr: Felt, state: &HasherState) -> Felt {
+    let header = challenges.alpha
+        + challenges.beta_powers[0] * Felt::from_u8(RETURN_STATE_LABEL + LABEL_OFFSET_OUTPUT)
+        + challenges.beta_powers[1] * addr;
+    header + build_value(&challenges.beta_powers[3..15], state)
+}
+
+/// Tree input message: leaf word selected by direction bit (matches MPVERIFY/MRUPDATE input).
+fn tree_input_msg(
     challenges: &Challenges<Felt>,
     label: u8,
-    state: HasherState,
-    next_state: HasherState,
     addr: Felt,
     index: Felt,
+    leaf_word: &[Felt; 4],
 ) -> Felt {
-    let first_cycle_row = addr_to_cycle_row(addr) == 0;
-    let transition_label = if first_cycle_row { label + 16_u8 } else { label + 32_u8 };
     let header = challenges.alpha
-        + challenges.beta_powers[0] * Felt::from_u8(transition_label)
+        + challenges.beta_powers[0] * Felt::from_u8(label + LABEL_OFFSET_INPUT)
         + challenges.beta_powers[1] * addr
         + challenges.beta_powers[2] * index;
-    let mut value = header;
-
-    if (first_cycle_row && label == LINEAR_HASH_LABEL) || label == RETURN_STATE_LABEL {
-        // include the entire state (words a, b, c)
-        value += build_value(&challenges.beta_powers[3..15], &state);
-    } else if label == LINEAR_HASH_LABEL {
-        // Include the next absorbed rate portion of the state (RATE0 || RATE1).
-        // With LE sponge layout [RATE0, RATE1, CAP], rate is at indices 0..8.
-        value += build_value(&challenges.beta_powers[3..11], &next_state[0..RATE_LEN]);
-    } else if label == RETURN_HASH_LABEL {
-        // include the digest (word b)
-        value += build_value(&challenges.beta_powers[3..7], &state[DIGEST_RANGE]);
-    } else {
-        assert!(
-            label == MP_VERIFY_LABEL
-                || label == MR_UPDATE_NEW_LABEL
-                || label == MR_UPDATE_OLD_LABEL
-        );
-        let bit = index.as_canonical_u64() & 1;
-        // For Merkle operations, RATE0 and RATE1 hold the two child digests.
-        // With LE sponge layout [RATE0, RATE1, CAP], they are at indices 0..4 and 4..8.
-        let left_word = build_value(&challenges.beta_powers[3..7], &state[0..4]);
-        let right_word = build_value(&challenges.beta_powers[3..7], &state[4..8]);
-
-        value += Felt::new(1 - bit) * left_word + Felt::new(bit) * right_word;
-    }
-
-    value
+    header + build_value(&challenges.beta_powers[3..7], leaf_word)
 }
 
-/// Reduces the specified row in the execution trace to an expected value representing a hash
-/// operation lookup.
-fn build_expected_from_trace(
+/// Reads the hasher chiplet response at the given trace row.
+///
+/// This mirrors the response builder logic: reads the trace and computes the bus message.
+/// Returns ONE (identity) if the row doesn't produce a response.
+fn hasher_response_at(
     trace: &ExecutionTrace,
     challenges: &Challenges<Felt>,
     row: RowIndex,
 ) -> Felt {
-    let s0 = trace.main_trace.get_column(HASHER_TRACE_OFFSET)[row];
-    let s1 = trace.main_trace.get_column(HASHER_TRACE_OFFSET + 1)[row];
-    let s2 = trace.main_trace.get_column(HASHER_TRACE_OFFSET + 2)[row];
-    let selectors: Selectors = [s0, s1, s2];
+    let perm_seg = trace.main_trace.chiplet_perm_seg(row);
+    if perm_seg == ONE {
+        return ONE; // perm segment: no response
+    }
 
-    let label = get_label_from_selectors(selectors)
-        .expect("unrecognized hasher operation label in hasher trace");
+    // Hasher internal selectors (chiplet columns 1, 2, 3 = hasher s0, s1, s2)
+    let hasher_s0 = trace.main_trace.chiplet_selector_1(row);
+    let hasher_s1 = trace.main_trace.chiplet_selector_2(row);
+    let hasher_s2 = trace.main_trace.chiplet_selector_3(row);
 
-    let addr = trace.main_trace.get_column(CLK_COL_IDX)[row] + ONE;
-    let index = trace.main_trace.get_column(HASHER_NODE_INDEX_COL_IDX)[row];
+    let addr = Felt::from(u32::from(row) + 1);
+    let state = trace.main_trace.chiplet_hasher_state(row);
+    let node_index = trace.main_trace.chiplet_node_index(row);
 
-    let cycle_row = addr_to_cycle_row(addr);
+    // Input rows (hasher s0=1)
+    if hasher_s0 == ONE {
+        let is_start = trace.main_trace.chiplet_is_start(row);
 
-    // Trace is already in sponge order [RATE0, RATE1, CAP]
-    let mut state = [ZERO; STATE_WIDTH];
-    let mut next_state = [ZERO; STATE_WIDTH];
-    for (i, col_idx) in HASHER_STATE_COL_RANGE.enumerate() {
-        state[i] = trace.main_trace.get_column(col_idx)[row];
-        if cycle_row == LAST_CYCLE_ROW && label == LINEAR_HASH_LABEL {
-            next_state[i] = trace.main_trace.get_column(col_idx)[row + 1];
+        // Sponge mode (s1=0, s2=0)
+        if hasher_s1 == ZERO && hasher_s2 == ZERO {
+            if is_start == ONE {
+                return sponge_start_msg(challenges, addr, &state);
+            } else {
+                return sponge_continuation_msg(challenges, addr, &state[..RATE_LEN]);
+            }
+        }
+
+        // Tree mode (s1=1 or s2=1) -- only start rows produce responses
+        if is_start == ONE {
+            let label = if hasher_s1 == ZERO {
+                MP_VERIFY_LABEL
+            } else if hasher_s2 == ZERO {
+                MR_UPDATE_OLD_LABEL
+            } else {
+                MR_UPDATE_NEW_LABEL
+            };
+            let bit = (node_index.as_canonical_u64() & 1) as usize;
+            let leaf_word: [Felt; 4] = if bit == 0 {
+                state[..4].try_into().unwrap()
+            } else {
+                state[4..8].try_into().unwrap()
+            };
+            return tree_input_msg(challenges, label, addr, node_index, &leaf_word);
+        }
+
+        return ONE; // tree continuation: no response
+    }
+
+    // Output rows (hasher s0=0, s1=0)
+    if hasher_s0 == ZERO && hasher_s1 == ZERO {
+        // HOUT (s2=0): always produces response
+        if hasher_s2 == ZERO {
+            return digest_return_msg(challenges, addr, &state[DIGEST_RANGE]);
+        }
+
+        // SOUT (s2=1): only with is_final=1
+        let is_final = trace.main_trace.chiplet_is_final(row);
+        if is_final == ONE {
+            return full_state_return_msg(challenges, addr, &state);
         }
     }
 
-    build_expected(challenges, label, state, next_state, addr, index)
+    ONE // no response
 }
 
-/// Builds a value from coefficients and elements of matching lengths. This can be used to build
-/// the value for a single word or for the entire state.
+// TEST HELPERS -- STATE BUILDERS
+// ================================================================================================
+
+/// Builds a value from coefficients and elements of matching lengths.
 fn build_value(coeffs: &[Felt], elements: &[Felt]) -> Felt {
     let mut value = ZERO;
     for (&coeff, &element) in coeffs.iter().zip(elements.iter()) {
@@ -993,78 +418,337 @@ fn build_value(coeffs: &[Felt], elements: &[Felt]) -> Felt {
     value
 }
 
-/// Returns the hash operation label for the specified selectors.
-fn get_label_from_selectors(selectors: Selectors) -> Option<u8> {
-    if selectors == LINEAR_HASH {
-        Some(LINEAR_HASH_LABEL)
-    } else if selectors == MP_VERIFY {
-        Some(MP_VERIFY_LABEL)
-    } else if selectors == MR_UPDATE_OLD {
-        Some(MR_UPDATE_OLD_LABEL)
-    } else if selectors == MR_UPDATE_NEW {
-        Some(MR_UPDATE_NEW_LABEL)
-    } else if selectors == RETURN_HASH {
-        Some(RETURN_HASH_LABEL)
-    } else if selectors == RETURN_STATE {
-        Some(RETURN_STATE_LABEL)
-    } else {
-        None
-    }
-}
 
-/// Populates the provided HasherState with the state stored in the decoder's execution trace at the
-/// specified row.
-fn fill_state_from_decoder_with_domain(
+// STEP-BY-STEP BUS VERIFICATION
+// ================================================================================================
+
+/// Computes the decoder's request to the chiplets bus at the given row.
+///
+/// Only handles hasher-related opcodes (SPAN, END, RESPAN, SPLIT, JOIN, LOOP).
+/// Returns ONE (identity) for all other opcodes.
+fn decoder_request_at(
     trace: &ExecutionTrace,
-    state: &mut HasherState,
+    challenges: &Challenges<Felt>,
     row: RowIndex,
+) -> Felt {
+    let op_code = trace.main_trace.get_op_code(row).as_canonical_u64() as u8;
+
+    match op_code {
+        opcodes::SPAN => {
+            // SPAN request: rate-only message (LINEAR_HASH_LABEL + 16) at addr(row+1).
+            let addr_next = trace.main_trace.addr(row + 1);
+            let state = trace.main_trace.decoder_hasher_state(row);
+            let header = challenges.alpha
+                + challenges.beta_powers[bus_message::LABEL_IDX]
+                    * Felt::from_u8(LINEAR_HASH_LABEL + LABEL_OFFSET_INPUT)
+                + challenges.beta_powers[bus_message::ADDR_IDX] * addr_next;
+            let mut value = header;
+            for (i, &elem) in state.iter().enumerate() {
+                value += challenges.beta_powers[bus_message::STATE_START_IDX + i] * elem;
+            }
+            value
+        },
+        opcodes::RESPAN => {
+            // RESPAN request: rate-only message (LINEAR_HASH_LABEL + 32) at addr(row+1).
+            let addr_next = trace.main_trace.addr(row + 1);
+            let state = trace.main_trace.decoder_hasher_state(row);
+            let header = challenges.alpha
+                + challenges.beta_powers[bus_message::LABEL_IDX]
+                    * Felt::from_u8(LINEAR_HASH_LABEL + LABEL_OFFSET_OUTPUT)
+                + challenges.beta_powers[bus_message::ADDR_IDX] * addr_next;
+            let mut value = header;
+            for (i, &elem) in state.iter().enumerate() {
+                value += challenges.beta_powers[bus_message::STATE_START_IDX + i] * elem;
+            }
+            value
+        },
+        opcodes::END => {
+            // END request: digest message (RETURN_HASH_LABEL + 32) at addr(row) + 1.
+            let addr = trace.main_trace.addr(row) + ONE;
+            let state = trace.main_trace.decoder_hasher_state(row);
+            let digest = &state[..4];
+            let header = challenges.alpha
+                + challenges.beta_powers[bus_message::LABEL_IDX]
+                    * Felt::from_u8(RETURN_HASH_LABEL + LABEL_OFFSET_OUTPUT)
+                + challenges.beta_powers[bus_message::ADDR_IDX] * addr;
+            let mut value = header;
+            for (i, &elem) in digest.iter().enumerate() {
+                value += challenges.beta_powers[bus_message::STATE_START_IDX + i] * elem;
+            }
+            value
+        },
+        opcodes::SPLIT | opcodes::JOIN | opcodes::LOOP => {
+            // Control block request: rate + capacity domain element for op_code.
+            let addr_next = trace.main_trace.addr(row + 1);
+            let state = trace.main_trace.decoder_hasher_state(row);
+            let op_code_felt = trace.main_trace.get_op_code(row);
+            let header = challenges.alpha
+                + challenges.beta_powers[bus_message::LABEL_IDX]
+                    * Felt::from_u8(LINEAR_HASH_LABEL + LABEL_OFFSET_INPUT)
+                + challenges.beta_powers[bus_message::ADDR_IDX] * addr_next;
+            let mut value = header;
+            for (i, &elem) in state.iter().enumerate() {
+                value += challenges.beta_powers[bus_message::STATE_START_IDX + i] * elem;
+            }
+            value += challenges.beta_powers[bus_message::CAPACITY_DOMAIN_IDX] * op_code_felt;
+            value
+        },
+        opcodes::HPERM => {
+            // HPERM sends two messages: input (full state from stack) and output (full state
+            // from next row). Combined as a product.
+            let helper_0 = trace.main_trace.helper_register(0, row);
+            let state: [Felt; 12] = core::array::from_fn(|i| trace.main_trace.stack_element(i, row));
+            let state_nxt: [Felt; 12] =
+                core::array::from_fn(|i| trace.main_trace.stack_element(i, row + 1));
+
+            let input_value = {
+                let mut acc = challenges.alpha
+                    + challenges.beta_powers[bus_message::LABEL_IDX]
+                        * Felt::from_u8(LINEAR_HASH_LABEL + LABEL_OFFSET_INPUT)
+                    + challenges.beta_powers[bus_message::ADDR_IDX] * helper_0;
+                for (i, &elem) in state.iter().enumerate() {
+                    acc += challenges.beta_powers[bus_message::STATE_START_IDX + i] * elem;
+                }
+                acc
+            };
+            let output_value = {
+                let mut acc = challenges.alpha
+                    + challenges.beta_powers[bus_message::LABEL_IDX]
+                        * Felt::from_u8(RETURN_STATE_LABEL + LABEL_OFFSET_OUTPUT)
+                    + challenges.beta_powers[bus_message::ADDR_IDX] * (helper_0 + ONE);
+                for (i, &elem) in state_nxt.iter().enumerate() {
+                    acc += challenges.beta_powers[bus_message::STATE_START_IDX + i] * elem;
+                }
+                acc
+            };
+            input_value * output_value
+        },
+        opcodes::LOGPRECOMPILE => {
+            // LOG_PRECOMPILE sends two messages: input [COMM, TAG, CAP_PREV] and
+            // output [R0, R1, CAP_NEXT]. Combined as a product.
+            let addr = trace.main_trace.helper_register(HELPER_ADDR_IDX, row);
+            let cap_prev: [Felt; 4] = core::array::from_fn(|i| {
+                trace.main_trace.helper_register(HELPER_CAP_PREV_RANGE.start + i, row)
+            });
+            let comm = trace.main_trace.stack_word(STACK_COMM_RANGE.start, row);
+            let tag = trace.main_trace.stack_word(STACK_TAG_RANGE.start, row);
+            let input_state: Vec<Felt> = comm
+                .as_elements()
+                .iter()
+                .chain(tag.as_elements().iter())
+                .chain(cap_prev.iter())
+                .copied()
+                .collect();
+
+            let r0 = trace.main_trace.stack_word(STACK_R0_RANGE.start, row + 1);
+            let r1 = trace.main_trace.stack_word(STACK_R1_RANGE.start, row + 1);
+            let cap_next = trace.main_trace.stack_word(STACK_CAP_NEXT_RANGE.start, row + 1);
+            let output_state: Vec<Felt> = r0
+                .as_elements()
+                .iter()
+                .chain(r1.as_elements().iter())
+                .chain(cap_next.as_elements().iter())
+                .copied()
+                .collect();
+
+            let input_value = {
+                let mut acc = challenges.alpha
+                    + challenges.beta_powers[bus_message::LABEL_IDX]
+                        * Felt::from_u8(LINEAR_HASH_LABEL + LABEL_OFFSET_INPUT)
+                    + challenges.beta_powers[bus_message::ADDR_IDX] * addr;
+                for (i, &elem) in input_state.iter().enumerate() {
+                    acc += challenges.beta_powers[bus_message::STATE_START_IDX + i] * elem;
+                }
+                acc
+            };
+            let output_value = {
+                let mut acc = challenges.alpha
+                    + challenges.beta_powers[bus_message::LABEL_IDX]
+                        * Felt::from_u8(RETURN_STATE_LABEL + LABEL_OFFSET_OUTPUT)
+                    + challenges.beta_powers[bus_message::ADDR_IDX] * (addr + ONE);
+                for (i, &elem) in output_state.iter().enumerate() {
+                    acc += challenges.beta_powers[bus_message::STATE_START_IDX + i] * elem;
+                }
+                acc
+            };
+            input_value * output_value
+        },
+        opcodes::MPVERIFY => {
+            // MPVERIFY sends two messages: input (leaf word + node_index) and output (root
+            // digest). Combined as a product.
+            let helper_0 = trace.main_trace.helper_register(0, row);
+            let rows_per_perm = CONTROLLER_ROWS_PER_PERM_FELT;
+
+            let node_value = trace.main_trace.stack_word(0, row);
+            let node_depth = trace.main_trace.stack_element(4, row);
+            let node_index = trace.main_trace.stack_element(5, row);
+            let merkle_root = trace.main_trace.stack_word(6, row);
+
+            let node_word: [Felt; 4] = node_value
+                .as_elements()
+                .try_into()
+                .expect("word must be 4 field elements");
+            let root_word: [Felt; 4] = merkle_root
+                .as_elements()
+                .try_into()
+                .expect("word must be 4 field elements");
+
+            let input_value = {
+                let mut acc = challenges.alpha
+                    + challenges.beta_powers[bus_message::LABEL_IDX]
+                        * Felt::from_u8(MP_VERIFY_LABEL + LABEL_OFFSET_INPUT)
+                    + challenges.beta_powers[bus_message::ADDR_IDX] * helper_0
+                    + challenges.beta_powers[bus_message::NODE_INDEX_IDX] * node_index;
+                for (i, &elem) in node_word.iter().enumerate() {
+                    acc += challenges.beta_powers[bus_message::STATE_START_IDX + i] * elem;
+                }
+                acc
+            };
+            let output_addr = helper_0 + node_depth * rows_per_perm - ONE;
+            let output_value = {
+                let mut acc = challenges.alpha
+                    + challenges.beta_powers[bus_message::LABEL_IDX]
+                        * Felt::from_u8(RETURN_HASH_LABEL + LABEL_OFFSET_OUTPUT)
+                    + challenges.beta_powers[bus_message::ADDR_IDX] * output_addr;
+                for (i, &elem) in root_word.iter().enumerate() {
+                    acc += challenges.beta_powers[bus_message::STATE_START_IDX + i] * elem;
+                }
+                acc
+            };
+            input_value * output_value
+        },
+        opcodes::MRUPDATE => {
+            // MRUPDATE sends four messages: old input, old output, new input, new output.
+            // Combined as a product.
+            let helper_0 = trace.main_trace.helper_register(0, row);
+            let rows_per_perm = CONTROLLER_ROWS_PER_PERM_FELT;
+            let two_legs_rows = rows_per_perm + rows_per_perm;
+
+            let old_node_value = trace.main_trace.stack_word(0, row);
+            let merkle_path_depth = trace.main_trace.stack_element(4, row);
+            let node_index = trace.main_trace.stack_element(5, row);
+            let old_root = trace.main_trace.stack_word(6, row);
+            let new_node_value = trace.main_trace.stack_word(10, row);
+            let new_root = trace.main_trace.stack_word(0, row + 1);
+
+            let old_node_word: [Felt; 4] = old_node_value
+                .as_elements()
+                .try_into()
+                .expect("word must be 4 field elements");
+            let old_root_word: [Felt; 4] = old_root
+                .as_elements()
+                .try_into()
+                .expect("word must be 4 field elements");
+            let new_node_word: [Felt; 4] = new_node_value
+                .as_elements()
+                .try_into()
+                .expect("word must be 4 field elements");
+            let new_root_word: [Felt; 4] = new_root
+                .as_elements()
+                .try_into()
+                .expect("word must be 4 field elements");
+
+            let input_old = {
+                let mut acc = challenges.alpha
+                    + challenges.beta_powers[bus_message::LABEL_IDX]
+                        * Felt::from_u8(MR_UPDATE_OLD_LABEL + LABEL_OFFSET_INPUT)
+                    + challenges.beta_powers[bus_message::ADDR_IDX] * helper_0
+                    + challenges.beta_powers[bus_message::NODE_INDEX_IDX] * node_index;
+                for (i, &elem) in old_node_word.iter().enumerate() {
+                    acc += challenges.beta_powers[bus_message::STATE_START_IDX + i] * elem;
+                }
+                acc
+            };
+            let output_old = {
+                let output_addr = helper_0 + merkle_path_depth * rows_per_perm - ONE;
+                let mut acc = challenges.alpha
+                    + challenges.beta_powers[bus_message::LABEL_IDX]
+                        * Felt::from_u8(RETURN_HASH_LABEL + LABEL_OFFSET_OUTPUT)
+                    + challenges.beta_powers[bus_message::ADDR_IDX] * output_addr;
+                for (i, &elem) in old_root_word.iter().enumerate() {
+                    acc += challenges.beta_powers[bus_message::STATE_START_IDX + i] * elem;
+                }
+                acc
+            };
+            let input_new = {
+                let new_input_addr = helper_0 + merkle_path_depth * rows_per_perm;
+                let mut acc = challenges.alpha
+                    + challenges.beta_powers[bus_message::LABEL_IDX]
+                        * Felt::from_u8(MR_UPDATE_NEW_LABEL + LABEL_OFFSET_INPUT)
+                    + challenges.beta_powers[bus_message::ADDR_IDX] * new_input_addr
+                    + challenges.beta_powers[bus_message::NODE_INDEX_IDX] * node_index;
+                for (i, &elem) in new_node_word.iter().enumerate() {
+                    acc += challenges.beta_powers[bus_message::STATE_START_IDX + i] * elem;
+                }
+                acc
+            };
+            let output_new = {
+                let new_output_addr = helper_0 + merkle_path_depth * two_legs_rows - ONE;
+                let mut acc = challenges.alpha
+                    + challenges.beta_powers[bus_message::LABEL_IDX]
+                        * Felt::from_u8(RETURN_HASH_LABEL + LABEL_OFFSET_OUTPUT)
+                    + challenges.beta_powers[bus_message::ADDR_IDX] * new_output_addr;
+                for (i, &elem) in new_root_word.iter().enumerate() {
+                    acc += challenges.beta_powers[bus_message::STATE_START_IDX + i] * elem;
+                }
+                acc
+            };
+            input_old * output_old * input_new * output_new
+        },
+        _ => ONE,
+    }
+}
+
+/// Verifies b_chip step-by-step by recomputing the running product at every row.
+///
+/// At each row `r`:
+///   request  = decoder_request_at(r)
+///   response = hasher_response_at(r)
+///   expected[r+1] = expected[r] * response / request
+///
+/// Asserts that the recomputed value matches `b_chip[r+1]` at every row.
+fn verify_b_chip_step_by_step(
+    trace: &ExecutionTrace,
+    challenges: &Challenges<Felt>,
+    b_chip: &[Felt],
 ) {
-    let domain = extract_control_block_domain_from_trace(trace, row);
-    state[CAPACITY_DOMAIN_IDX] = domain;
+    let mut expected = ONE;
+    let trace_len = b_chip.len();
 
-    fill_state_from_decoder(trace, state, row);
-}
+    for row_idx in 0..trace_len - 1 {
+        let row = RowIndex::from(row_idx);
+        let request = decoder_request_at(trace, challenges, row);
+        let response = hasher_response_at(trace, challenges, row);
 
-/// Populates the provided HasherState with the state stored in the decoder's execution trace at the
-/// specified row. The decoder stores the 8 rate elements which go at sponge indices 0..8.
-fn fill_state_from_decoder(trace: &ExecutionTrace, state: &mut HasherState, row: RowIndex) {
-    for (i, col_idx) in DECODER_HASHER_STATE_RANGE.enumerate() {
-        // In sponge order [RATE0, RATE1, CAP], rate is at indices 0..8
-        state[i] = trace.main_trace.get_column(col_idx)[row];
+        expected *= response * request.try_inverse().expect("request must be invertible");
+
+        assert_eq!(
+            expected, b_chip[row_idx + 1],
+            "b_chip mismatch at row {} (after processing row {}): \
+             expected={}, actual={}, request={}, response={}",
+            row_idx + 1,
+            row_idx,
+            expected,
+            b_chip[row_idx + 1],
+            request,
+            response,
+        );
     }
 }
 
-/// Extract the control block domain from the execution trace.  This is achieved
-/// by calculating the op code as [bit_0 * 2**0 + bit_1 * 2**1 + ... + bit_6 * 2**6]
-fn extract_control_block_domain_from_trace(trace: &ExecutionTrace, row: RowIndex) -> Felt {
-    // calculate the op code
-    let opcode_value = DECODER_OP_BITS_RANGE.rev().fold(0u8, |result, bit_index| {
-        let op_bit = trace.main_trace.get_column(bit_index)[row].as_canonical_u64() as u8;
-        (result << 1) ^ op_bit
-    });
+// BUS BALANCE ASSERTION
+// ================================================================================================
 
-    // opcode values that represent control block initialization (excluding span)
-    let control_block_initializers =
-        [opcodes::CALL, opcodes::JOIN, opcodes::LOOP, opcodes::SPLIT, opcodes::SYSCALL];
-
-    if control_block_initializers.contains(&opcode_value) {
-        Felt::from_u8(opcode_value)
-    } else {
-        ZERO
-    }
+/// Asserts that the b_chip bus column eventually settles to ONE (balanced) and stays there.
+fn assert_bus_balanced(b_chip: &[Felt]) {
+    // The bus should reach ONE at some point after the initial requests/responses
+    // and stay there for the rest of the trace.
+    let last = *b_chip.last().expect("b_chip should not be empty");
+    assert_eq!(last, ONE, "b_chip final value should be ONE (bus balanced), got {last}");
 }
 
-/// Returns the row of the hash cycle which corresponds to the provided Hasher address.
-fn addr_to_cycle_row(addr: Felt) -> usize {
-    let cycle = (addr.as_canonical_u64() - 1) as usize;
-    let cycle_row = cycle % HASH_CYCLE_LEN;
-    debug_assert!(
-        cycle_row == 0 || cycle_row == LAST_CYCLE_ROW,
-        "invalid address for hasher lookup"
-    );
-
-    cycle_row
-}
+// MERKLE TREE HELPERS
+// ================================================================================================
 
 /// Initializes Merkle tree leaves with the specified values.
 fn init_leaves(values: &[u64]) -> Vec<Word> {

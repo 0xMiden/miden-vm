@@ -32,12 +32,12 @@ use crate::{
 const PERM_INIT_NAMESPACE: &str = "chiplets.hasher.permutation.init";
 const PERM_EXT_NAMESPACE: &str = "chiplets.hasher.permutation.external";
 const PERM_INT_NAMESPACE: &str = "chiplets.hasher.permutation.internal";
-const ABP_CAP_NAMESPACE: &str = "chiplets.hasher.abp.capacity";
+const SPONGE_CAP_NAMESPACE: &str = "chiplets.hasher.sponge.capacity";
 
 const PERM_INIT_NAMES: [&str; STATE_WIDTH] = [PERM_INIT_NAMESPACE; STATE_WIDTH];
 const PERM_EXT_NAMES: [&str; STATE_WIDTH] = [PERM_EXT_NAMESPACE; STATE_WIDTH];
 const PERM_INT_NAMES: [&str; STATE_WIDTH] = [PERM_INT_NAMESPACE; STATE_WIDTH];
-const ABP_CAP_NAMES: [&str; 4] = [ABP_CAP_NAMESPACE; 4];
+const SPONGE_CAP_NAMES: [&str; 4] = [SPONGE_CAP_NAMESPACE; 4];
 
 const PERM_INIT_TAGS: TagGroup = TagGroup {
     base: super::HASHER_PERM_INIT_BASE_ID,
@@ -51,15 +51,18 @@ const PERM_INT_TAGS: TagGroup = TagGroup {
     base: super::HASHER_PERM_INT_BASE_ID,
     names: &PERM_INT_NAMES,
 };
-const ABP_CAP_TAGS: TagGroup = TagGroup {
-    base: super::HASHER_ABP_BASE_ID,
-    names: &ABP_CAP_NAMES,
+const SPONGE_CAP_TAGS: TagGroup = TagGroup {
+    base: super::HASHER_SPONGE_CAP_BASE_ID,
+    names: &SPONGE_CAP_NAMES,
 };
 
 // CONSTRAINT HELPERS
 // ================================================================================================
 
 /// Enforces Poseidon2 permutation step constraints.
+///
+/// These constraints are gated by `perm_gate = perm_seg`, so they only
+/// fire on permutation segment rows.
 ///
 /// ## Step Types
 ///
@@ -69,7 +72,7 @@ const ABP_CAP_TAGS: TagGroup = TagGroup {
 /// 4. **Boundary (row 31)**: No constraint
 pub fn enforce_permutation_steps<AB>(
     builder: &mut AB,
-    hasher_flag: AB::Expr,
+    perm_gate: AB::Expr,
     h: &[AB::Expr; STATE_WIDTH],
     h_next: &[AB::Expr; STATE_WIDTH],
     periodic: &[AB::PeriodicVar],
@@ -112,8 +115,8 @@ pub fn enforce_permutation_steps<AB>(
     // Enforce step constraints
     // -------------------------------------------------------------------------
 
-    // Use combined gates to share `hasher_flag * step_type` across all lanes.
-    let gate_init = hasher_flag.clone() * is_init_linear;
+    // Use combined gates to share `perm_gate * step_type` across all lanes.
+    let gate_init = perm_gate.clone() * is_init_linear;
     let mut idx = 0;
     tagged_assert_zeros(
         builder,
@@ -125,7 +128,7 @@ pub fn enforce_permutation_steps<AB>(
         }),
     );
 
-    let gate_ext = hasher_flag.clone() * is_external;
+    let gate_ext = perm_gate.clone() * is_external;
     let mut idx = 0;
     tagged_assert_zeros(
         builder,
@@ -137,7 +140,7 @@ pub fn enforce_permutation_steps<AB>(
         }),
     );
 
-    let gate_int = hasher_flag * is_internal;
+    let gate_int = perm_gate * is_internal;
     let mut idx = 0;
     tagged_assert_zeros(
         builder,
@@ -150,27 +153,29 @@ pub fn enforce_permutation_steps<AB>(
     );
 }
 
-/// Enforces ABP capacity preservation constraint.
+/// Enforces that the sponge capacity is unchanged across batch boundaries.
 ///
-/// When absorbing the next set of elements during linear hash computation (ABP on row 31),
-/// the capacity portion `h[8..12]` is preserved unchanged.
-pub fn enforce_abp_capacity_preservation<AB>(
+/// During multi-batch linear hashing (RESPAN), each new batch overwrites the rate
+/// (h0..h7) but the capacity (h8..h11) must carry over from the previous permutation
+/// output. Without this constraint, a prover could inject arbitrary capacity values on
+/// continuation rows, corrupting the sponge state.
+///
+/// The `gate` is constructed by the caller to fire only when the next row is a sponge
+/// continuation input (see `enforce_respan_capacity` in mod.rs for details).
+pub fn enforce_respan_capacity_preservation<AB>(
     builder: &mut AB,
-    hasher_flag: AB::Expr,
-    f_abp: AB::Expr,
+    gate: AB::Expr,
     h_cap: &[AB::Expr; 4],
     h_cap_next: &[AB::Expr; 4],
 ) where
     AB: TaggingAirBuilderExt<F = Felt>,
 {
-    // Use a combined gate to share `hasher_flag * f_abp` across all 4 lanes.
-    let gate = hasher_flag * f_abp;
     let mut idx = 0;
     tagged_assert_zeros(
         builder,
-        &ABP_CAP_TAGS,
+        &SPONGE_CAP_TAGS,
         &mut idx,
-        ABP_CAP_NAMESPACE,
+        SPONGE_CAP_NAMESPACE,
         core::array::from_fn::<_, 4, _>(|i| {
             gate.clone() * (h_cap_next[i].clone() - h_cap[i].clone())
         }),
@@ -189,17 +194,10 @@ pub fn enforce_abp_capacity_preservation<AB>(
 fn apply_matmul_external<AB: LiftedAirBuilder<F = Felt>>(
     state: &[AB::Expr; STATE_WIDTH],
 ) -> [AB::Expr; STATE_WIDTH] {
-    // Apply M4 to each block
-    let b0 =
-        matmul_m4::<AB>(&[state[0].clone(), state[1].clone(), state[2].clone(), state[3].clone()]);
-    let b1 =
-        matmul_m4::<AB>(&[state[4].clone(), state[5].clone(), state[6].clone(), state[7].clone()]);
-    let b2 = matmul_m4::<AB>(&[
-        state[8].clone(),
-        state[9].clone(),
-        state[10].clone(),
-        state[11].clone(),
-    ]);
+    // Apply M4 to each 4-element block
+    let b0 = matmul_m4::<AB>(&core::array::from_fn(|i| state[i].clone()));
+    let b1 = matmul_m4::<AB>(&core::array::from_fn(|i| state[4 + i].clone()));
+    let b2 = matmul_m4::<AB>(&core::array::from_fn(|i| state[8 + i].clone()));
 
     // Compute cross-block sums
     let stored0 = b0[0].clone() + b1[0].clone() + b2[0].clone();
@@ -224,16 +222,16 @@ fn apply_matmul_external<AB: LiftedAirBuilder<F = Felt>>(
     ]
 }
 
-/// Applies the 4x4 MDS matrix M4.
+/// Applies the 4x4 matrix M4 used in Poseidon2's external linear layer.
 fn matmul_m4<AB: LiftedAirBuilder<F = Felt>>(input: &[AB::Expr; 4]) -> [AB::Expr; 4] {
     let [a, b, c, d] = input.clone();
 
     let t0 = a.clone() + b.clone();
     let t1 = c.clone() + d.clone();
-    let t2 = b.clone() + b.clone() + t1.clone(); // 2b + t1
-    let t3 = d.clone() + d.clone() + t0.clone(); // 2d + t0
-    let t4 = t1.clone().double() + t1.clone().double() + t3.clone(); // 4*t1 + t3
-    let t5 = t0.clone().double() + t0.clone().double() + t2.clone(); // 4*t0 + t2
+    let t2 = b.double() + t1.clone(); // 2b + t1
+    let t3 = d.double() + t0.clone(); // 2d + t0
+    let t4 = t1.double().double() + t3.clone(); // 4*t1 + t3
+    let t5 = t0.double().double() + t2.clone(); // 4*t0 + t2
 
     let out0 = t3.clone() + t5.clone();
     let out1 = t5;

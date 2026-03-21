@@ -1,26 +1,28 @@
 //! Hasher chiplet Merkle path constraints.
 //!
-//! This module enforces constraints specific to Merkle tree operations:
+//! In the controller/permutation split architecture, Merkle constraints apply only to
+//! controller rows (perm_seg=0). The constraints enforce:
 //!
-//! - **Index shifting**: Node index shifts right by 1 bit at absorb points
-//! - **Index stability**: Index unchanged outside of Merkle operations
-//! - **Capacity reset**: Capacity lanes reset to zero on Merkle absorb
-//! - **Digest placement**: Current digest placed in rate0 or rate1 based on direction bit
+//! - **Index shifting**: Node index on input row = 2 * node_index on output row + discarded bit
+//! - **Discarded-bit binary**: The per-step discarded bit is constrained to {0,1}
+//! - **Cross-step index continuity**: For non-final Merkle outputs, next input index equals
+//!   current output index
+//! - **Output index zero**: HOUT output rows have node_index = 0
+//! - **Capacity zeroing**: Merkle input rows have capacity = 0
 //!
-//! ## Merkle Operations
+//! ## TODO: Digest routing constraint
 //!
-//! | Flag | Operation | Description |
-//! |------|-----------|-------------|
-//! | MP   | Merkle Path | Standard path verification |
-//! | MV   | Merkle Verify | Old root verification (for updates) |
-//! | MU   | Merkle Update | New root computation (for updates) |
-//! | MPA  | Merkle Path Absorb | Absorb next sibling (standard) |
-//! | MVA  | Merkle Verify Absorb | Absorb next sibling (old path) |
-//! | MUA  | Merkle Update Absorb | Absorb next sibling (new path) |
+//! There is currently no direct constraint enforcing that the digest from step i's output
+//! is placed in the correct rate half (RATE0 or RATE1) of step i+1's input based on the
+//! direction bit of the NEXT input step. The monolithic 32-row hasher design had this
+//! constraint inline.
+//!
+//! The fix likely requires a `direction_bit` trace column so that `b_{i+1}` is available at the
+//! (output_i, input_{i+1}) boundary.
 
 use miden_core::field::PrimeCharacteristicRing;
 
-use super::{HasherColumns, HasherFlags};
+use super::HasherColumns;
 use crate::{
     Felt,
     constraints::tagging::{
@@ -33,28 +35,18 @@ use crate::{
 // ================================================================================================
 
 const MERKLE_INDEX_BINARY_NAMESPACE: &str = "chiplets.hasher.merkle.index.binary";
-const MERKLE_INDEX_STABILITY_NAMESPACE: &str = "chiplets.hasher.merkle.index.stability";
+const MERKLE_INDEX_ZERO_NAMESPACE: &str = "chiplets.hasher.merkle.index.zero";
 const MERKLE_CAP_NAMESPACE: &str = "chiplets.hasher.merkle.capacity";
-const MERKLE_RATE0_NAMESPACE: &str = "chiplets.hasher.merkle.digest.rate0";
-const MERKLE_RATE1_NAMESPACE: &str = "chiplets.hasher.merkle.digest.rate1";
 
 const OUTPUT_INDEX_NAMES: [&str; 1] = [super::OUTPUT_INDEX_NAMESPACE];
-const MERKLE_INDEX_NAMES: [&str; 2] =
-    [MERKLE_INDEX_BINARY_NAMESPACE, MERKLE_INDEX_STABILITY_NAMESPACE];
-const MERKLE_ABSORB_NAMES: [&str; 12] = [
-    MERKLE_CAP_NAMESPACE,
-    MERKLE_CAP_NAMESPACE,
-    MERKLE_CAP_NAMESPACE,
-    MERKLE_CAP_NAMESPACE,
-    MERKLE_RATE0_NAMESPACE,
-    MERKLE_RATE0_NAMESPACE,
-    MERKLE_RATE0_NAMESPACE,
-    MERKLE_RATE0_NAMESPACE,
-    MERKLE_RATE1_NAMESPACE,
-    MERKLE_RATE1_NAMESPACE,
-    MERKLE_RATE1_NAMESPACE,
-    MERKLE_RATE1_NAMESPACE,
+const MERKLE_INDEX_CONTINUITY_NAMESPACE: &str = "chiplets.hasher.merkle.index.continuity";
+
+const MERKLE_INDEX_NAMES: [&str; 3] = [
+    MERKLE_INDEX_BINARY_NAMESPACE,
+    MERKLE_INDEX_ZERO_NAMESPACE,
+    MERKLE_INDEX_CONTINUITY_NAMESPACE,
 ];
+const MERKLE_INPUT_STATE_NAMES: [&str; 4] = [MERKLE_CAP_NAMESPACE; 4];
 
 const OUTPUT_INDEX_TAGS: TagGroup = TagGroup {
     base: super::HASHER_OUTPUT_IDX_ID,
@@ -64,156 +56,132 @@ const MERKLE_INDEX_TAGS: TagGroup = TagGroup {
     base: super::HASHER_MERKLE_INDEX_BASE_ID,
     names: &MERKLE_INDEX_NAMES,
 };
-const MERKLE_ABSORB_TAGS: TagGroup = TagGroup {
-    base: super::HASHER_MERKLE_ABSORB_BASE_ID,
-    names: &MERKLE_ABSORB_NAMES,
+const MERKLE_INPUT_STATE_TAGS: TagGroup = TagGroup {
+    base: super::HASHER_MERKLE_INPUT_STATE_BASE_ID,
+    names: &MERKLE_INPUT_STATE_NAMES,
 };
 
-// CONSTRAINT HELPERS
+// CONSTRAINT FUNCTIONS
 // ================================================================================================
 
-/// Enforces node index constraints for Merkle operations.
+/// Enforces node index constraints for Merkle operations on controller rows.
 ///
 /// ## Index Shift Constraint
 ///
-/// On Merkle start (row 0) and absorb (row 31) operations, the index shifts right by 1 bit:
-/// `i' = floor(i/2)`. The discarded bit `b = i - 2*i'` must be binary.
+/// On controller input rows for Merkle operations (s0=1, s1 or s2 non-zero), the index
+/// shifts from input to output: `b = input_idx - 2 * output_idx` must be binary.
+/// The output row is the NEXT row (controller pairs are adjacent).
 ///
-/// This encodes the tree traversal from leaf to root.
+/// ## Index Zero Constraint
 ///
-/// ## Index Stability Constraint
+/// On sponge (non-Merkle) input rows, node_index must be zero.
 ///
-/// Outside of shift rows (and output rows), the index must remain unchanged.
+/// ## Output Index Zero
+///
+/// On HOUT output rows (final output), node_index must be zero.
 pub(super) fn enforce_node_index_constraints<AB>(
     builder: &mut AB,
     hasher_flag: AB::Expr,
     cols: &HasherColumns<AB::Expr>,
     cols_next: &HasherColumns<AB::Expr>,
-    flags: &HasherFlags<AB::Expr>,
 ) where
     AB: TaggingAirBuilderExt<F = Felt>,
 {
-    let one: AB::Expr = AB::Expr::ONE;
+    let controller_flag = cols.controller_flag();
 
     // -------------------------------------------------------------------------
-    // Output Index Constraint
+    // Output Index Constraint: index must be 0 on HOUT rows
     // -------------------------------------------------------------------------
-
-    // Constraint 1: Index must be 0 on output rows.
+    let f_hout = super::flags::f_hout(cols.s0.clone(), cols.s1.clone(), cols.s2.clone());
     let mut idx = 0;
     tagged_assert_zero_integrity(
         builder,
         &OUTPUT_INDEX_TAGS,
         &mut idx,
-        hasher_flag.clone() * flags.f_out.clone() * cols.node_index.clone(),
+        hasher_flag.clone() * controller_flag.clone() * f_hout * cols.node_index.clone(),
     );
 
     // -------------------------------------------------------------------------
-    // Index Shift Constraint
+    // Index Shift Constraint (on Merkle input rows)
     // -------------------------------------------------------------------------
+    // On controller input rows (s0=1), when any Merkle op is active:
+    // b = input_idx - 2 * output_idx_next must be binary.
+    // The next row is the paired output row.
+    let f_merkle = super::flags::f_merkle_input(cols.s0.clone(), cols.s1.clone(), cols.s2.clone());
 
-    let f_shift = flags.f_merkle_active();
-    let f_out = flags.f_out.clone();
-
-    // Direction bit: b = i - 2*i'
-    // This is the bit discarded when shifting index right by 1.
+    // Direction bit: b = idx - 2 * idx_next
     let b = cols.node_index.clone() - AB::Expr::TWO * cols_next.node_index.clone();
 
-    // Constraint 2: b must be binary when shifting (b^2 - b = 0)
-    let gate = hasher_flag.clone() * f_shift.clone();
+    let gate = hasher_flag.clone() * controller_flag.clone() * f_merkle;
     let mut idx = 0;
-    tagged_assert_zero(builder, &MERKLE_INDEX_TAGS, &mut idx, gate * (b.square() - b.clone()));
+    tagged_assert_zero(builder, &MERKLE_INDEX_TAGS, &mut idx, gate * (b.square() - b));
 
     // -------------------------------------------------------------------------
-    // Index Stability Constraint
+    // Cross-step Merkle index continuity (output_i -> input_{i+1})
     // -------------------------------------------------------------------------
+    // On non-final controller output rows, if the next row is a Merkle input row,
+    // enforce idx_in_{i+1} == idx_out_i.
+    let f_output = (AB::Expr::ONE - cols.s0.clone()) * (AB::Expr::ONE - cols.s1.clone());
 
-    // Constraint 3: Index unchanged when not shifting or outputting
-    // keep = 1 - f_out - f_shift
-    let keep = one.clone() - f_out - f_shift;
-    let gate = hasher_flag.clone() * keep;
+    // NOTE: `f_merkle_next` is read from `cols_next` without an explicit `hasher_flag_next` gate.
+    // This is safe by construction: on local hasher controller rows (perm_seg=0),
+    // `enforce_perm_seg_constraints` enforces
+    //   hasher_flag * (1 - hasher_flag_next) * (1 - perm_seg) = 0,
+    // so `hasher_flag_next = 1` whenever this continuity gate can be active. Thus `cols_next`
+    // selectors are guaranteed to belong to the hasher chiplet (not cross-chiplet garbage values).
+    let f_merkle_next =
+        super::flags::f_merkle_input(cols_next.s0.clone(), cols_next.s1.clone(), cols_next.s2.clone());
+
+    let continuity_gate = hasher_flag.clone()
+        * controller_flag.clone()
+        * f_output
+        * (AB::Expr::ONE - cols.is_final.clone())
+        * f_merkle_next;
+
     tagged_assert_zero(
         builder,
         &MERKLE_INDEX_TAGS,
         &mut idx,
-        gate * (cols_next.node_index.clone() - cols.node_index.clone()),
+        continuity_gate * (cols_next.node_index.clone() - cols.node_index.clone()),
+    );
+
+    // -------------------------------------------------------------------------
+    // Sponge input node_index zero constraint
+    // -------------------------------------------------------------------------
+    // On sponge (non-Merkle) input rows, node_index must be zero.
+    // f_sponge = s0 * (1-s1) * (1-s2): sponge-mode inputs don't use node_index.
+    let f_sponge = super::flags::f_sponge(cols.s0.clone(), cols.s1.clone(), cols.s2.clone());
+    tagged_assert_zero(
+        builder,
+        &MERKLE_INDEX_TAGS,
+        &mut idx,
+        hasher_flag * controller_flag * f_sponge * cols.node_index.clone(),
     );
 }
 
-/// Enforces state constraints for Merkle absorb operations (MPA/MVA/MUA on row 31).
+/// Enforces capacity zeroing on Merkle input rows.
 ///
-/// ## Capacity Reset
-///
-/// The capacity lanes `h[8..12]` are reset to zero for the next 2-to-1 compression.
-///
-/// ## Digest Placement
-///
-/// The current digest `h[0..4]` is copied to either rate0 or rate1 based on direction bit `b`:
-/// - If `b=0`: digest goes to rate0 (`h'[0..4] = h[0..4]`), sibling to rate1 (witness)
-/// - If `b=1`: digest goes to rate1 (`h'[4..8] = h[0..4]`), sibling to rate0 (witness)
-pub(super) fn enforce_merkle_absorb_state<AB>(
+/// On controller input rows for Merkle operations, all 4 capacity lanes h[8..12] must be zero.
+/// This ensures each 2-to-1 compression in the Merkle path starts with a clean sponge capacity.
+pub(super) fn enforce_merkle_input_state<AB>(
     builder: &mut AB,
     hasher_flag: AB::Expr,
     cols: &HasherColumns<AB::Expr>,
-    cols_next: &HasherColumns<AB::Expr>,
-    flags: &HasherFlags<AB::Expr>,
 ) where
     AB: TaggingAirBuilderExt<F = Felt>,
 {
-    let one: AB::Expr = AB::Expr::ONE;
-    let f_absorb = flags.f_merkle_absorb();
+    let controller_flag = cols.controller_flag();
+    let f_merkle = super::flags::f_merkle_input(cols.s0.clone(), cols.s1.clone(), cols.s2.clone());
 
-    let digest = cols.digest();
-    let rate0_next = cols_next.rate0();
-    let rate1_next = cols_next.rate1();
-    let cap_next = cols_next.capacity();
+    let gate = hasher_flag * controller_flag * f_merkle;
+    let cap = cols.capacity();
 
-    // Direction bit: b = i - 2*i'
-    let b = cols.node_index.clone() - AB::Expr::TWO * cols_next.node_index.clone();
-
-    // -------------------------------------------------------------------------
-    // Capacity Reset Constraint
-    // -------------------------------------------------------------------------
-
-    // Constraint 1: Capacity reset to zero (batched).
-    // Use a combined gate to share `hasher_flag * f_absorb` across all 4 lanes.
-    let gate_absorb = hasher_flag.clone() * f_absorb.clone();
     let mut idx = 0;
     tagged_assert_zeros(
         builder,
-        &MERKLE_ABSORB_TAGS,
+        &MERKLE_INPUT_STATE_TAGS,
         &mut idx,
         MERKLE_CAP_NAMESPACE,
-        core::array::from_fn::<_, 4, _>(|i| gate_absorb.clone() * cap_next[i].clone()),
-    );
-
-    // -------------------------------------------------------------------------
-    // Digest Placement Constraints
-    // -------------------------------------------------------------------------
-
-    // Constraint 2: If b=0, digest goes to rate0 (h'[0..4] = h[0..4])
-    let f_b0 = f_absorb.clone() * (one.clone() - b.clone());
-    let gate_b0 = hasher_flag.clone() * f_b0;
-    tagged_assert_zeros(
-        builder,
-        &MERKLE_ABSORB_TAGS,
-        &mut idx,
-        MERKLE_RATE0_NAMESPACE,
-        core::array::from_fn::<_, 4, _>(|i| {
-            gate_b0.clone() * (rate0_next[i].clone() - digest[i].clone())
-        }),
-    );
-
-    // Constraint 3: If b=1, digest goes to rate1 (h'[4..8] = h[0..4])
-    let f_b1 = f_absorb * b;
-    let gate_b1 = hasher_flag * f_b1;
-    tagged_assert_zeros(
-        builder,
-        &MERKLE_ABSORB_TAGS,
-        &mut idx,
-        MERKLE_RATE1_NAMESPACE,
-        core::array::from_fn::<_, 4, _>(|i| {
-            gate_b1.clone() * (rate1_next[i].clone() - digest[i].clone())
-        }),
+        core::array::from_fn::<_, 4, _>(|i| gate.clone() * cap[i].clone()),
     );
 }

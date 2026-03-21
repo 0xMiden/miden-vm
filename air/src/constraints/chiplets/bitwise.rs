@@ -61,7 +61,7 @@ const NUM_BITS_PER_ROW: usize = 4;
 // TAGGING IDS
 // ================================================================================================
 
-pub(super) const BITWISE_BASE_ID: usize = super::hasher::HASHER_MERKLE_ABSORB_BASE_ID + 12;
+pub(super) const BITWISE_BASE_ID: usize = super::hasher::HASHER_MERKLE_INPUT_STATE_BASE_ID + 4;
 pub(super) const BITWISE_COUNT: usize = 17;
 const BITWISE_OP_BINARY_ID: usize = BITWISE_BASE_ID;
 const BITWISE_A_BITS_BINARY_BASE_ID: usize = BITWISE_BASE_ID + 2;

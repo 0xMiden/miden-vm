@@ -9,7 +9,7 @@
 //! | Index | Name           | Description |
 //! |-------|----------------|-------------|
 //! | 0     | cycle_row_0    | 1 on first row of cycle, 0 elsewhere |
-//! | 1     | cycle_row_30   | 1 on penultimate row (lookahead for output) |
+//! | 1     | cycle_row_30   | 1 on penultimate row of cycle (currently unused by hasher constraints) |
 //! | 2     | cycle_row_31   | 1 on final row (boundary/output row) |
 //! | 3     | p2_is_external | 1 on external round rows (1-4, 27-30) |
 //! | 4     | p2_is_internal | 1 on internal round rows (5-26) |
@@ -33,6 +33,9 @@ pub const STATE_WIDTH: usize = 12;
 
 // Periodic column indices.
 pub const P_CYCLE_ROW_0: usize = 0;
+// Currently unused by constraints but the periodic column itself is still generated
+// (removing the column would require re-indexing all subsequent periodic columns).
+#[allow(dead_code)]
 pub const P_CYCLE_ROW_30: usize = 1;
 pub const P_CYCLE_ROW_31: usize = 2;
 pub const P_IS_EXTERNAL: usize = 3;

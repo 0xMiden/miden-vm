@@ -66,8 +66,10 @@ const ADDR_OFFSET: usize = 0;
 /// Op bits start at index 1 in the decoder (after addr at index 0).
 const OP_BITS_OFFSET: usize = 1;
 
-/// Hash cycle length for Poseidon2 (32 rows per permutation).
-const HASH_CYCLE_LEN: u64 = 32;
+/// Number of hasher controller rows per permutation request (= 2: input + output).
+/// This is the address increment per hash operation in the decoder's addr column.
+const ADDR_INCREMENT_PER_HASH: u64 =
+    crate::trace::chiplets::hasher::CONTROLLER_ROWS_PER_PERMUTATION as u64;
 
 /// Number of operation bits.
 const NUM_OP_BITS: usize = 7;
@@ -827,16 +829,13 @@ fn enforce_batch_flags_constraints<AB>(
 ///
 /// The block address identifies the current code block in the hasher table:
 /// - addr stays constant inside a basic block (sp = 1)
-/// - addr increments by HASH_CYCLE_LEN (32) after RESPAN
+/// - addr increments by ADDR_INCREMENT_PER_HASH (= 2) after RESPAN
 /// - addr must be 0 when HALT is executed
 ///
-/// This ties the span state to the hasher table position.
-///
 /// Constraints:
-/// 1. Inside basic block, address unchanged: sp * (addr' - addr) = 0
-/// 2. RESPAN increments address by HASH_CYCLE_LEN: respan_flag * (addr' - addr - HASH_CYCLE_LEN) =
-///    0
-/// 3. HALT has addr = 0: halt_flag * addr = 0
+/// 1. sp * (addr' - addr) = 0
+/// 2. respan_flag * (addr' - addr - ADDR_INCREMENT_PER_HASH) = 0
+/// 3. halt_flag * addr = 0
 fn enforce_block_address_constraints<AB>(
     builder: &mut AB,
     cols: &DecoderColumns<AB::Expr>,
@@ -853,14 +852,14 @@ fn enforce_block_address_constraints<AB>(
     // sp * (addr' - addr) = 0
     assert_zero_transition(builder, ADDR_BASE, sp * (addr_next.clone() - addr.clone()));
 
-    // Constraint 2: RESPAN moves to the next hash block (Poseidon2 = 32 rows).
-    // respan_flag * (addr' - addr - HASH_CYCLE_LEN) = 0
-    let hash_cycle_len: AB::Expr = AB::Expr::from_u16(HASH_CYCLE_LEN as u16);
+    // Constraint 2: RESPAN advances the address by one controller pair (2 rows).
+    // respan_flag * (addr' - addr - ADDR_INCREMENT_PER_HASH) = 0
+    let addr_increment: AB::Expr = AB::Expr::from_u16(ADDR_INCREMENT_PER_HASH as u16);
     let respan_flag = op_flags.respan();
     assert_zero_transition(
         builder,
         ADDR_BASE + 1,
-        respan_flag * (addr_next - addr.clone() - hash_cycle_len),
+        respan_flag * (addr_next - addr.clone() - addr_increment),
     );
 
     // Constraint 3: HALT forces addr = 0.

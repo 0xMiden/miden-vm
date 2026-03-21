@@ -15,6 +15,7 @@ pub use bus::{
 mod virtual_table;
 pub use virtual_table::ChipletsVTableColBuilder;
 
+mod hasher_perm;
 mod wiring_bus;
 
 /// Constructs the execution trace for chiplets-related auxiliary columns (used in multiset checks).
@@ -42,7 +43,8 @@ impl AuxTraceBuilder {
     /// 2. A column acting as
     ///    - a virtual table for the sibling table used by the hasher chiplet,
     ///    - a bus between the memory chiplet and the ACE chiplet.
-    /// 3. A column used as a bus to wire the gates of the ACE chiplet.
+    /// 3. A column used as a bus to wire the gates of the ACE chiplet. It also carries the
+    ///    hasher perm-link (linking hasher controller rows to hasher permutation segment).
     pub(crate) fn build_aux_columns<E: ExtensionField<Felt>>(
         &self,
         main_trace: &MainTrace,
@@ -55,11 +57,12 @@ impl AuxTraceBuilder {
         let b_chip = bus_col_builder.build_aux_column(main_trace, challenges);
         let wiring_bus = wiring_bus_builder.build_aux_column(main_trace, challenges);
 
-        // When debugging, check that the LogUp wiring bus balances.
-        // The vtable and chiplets bus final values are non-trivial (they encode public-input-
-        // dependent boundary terms) and are checked by the verifier in reduced_aux_values.
-        let log_up_final_value = wiring_bus.last().copied().unwrap_or(E::ZERO);
-        debug_assert_eq!(log_up_final_value, E::ZERO);
+        // The wiring bus (v_wiring) carries three stacked LogUp contributions:
+        // 1. ACE wiring (node definitions and consumptions)
+        // 2. Memory range checks (3 fractions per memory row)
+        // 3. Hasher perm-link (linking controller rows to permutation segment)
+        // The final value is non-zero due to memory range check residual;
+        // the verifier checks b_range + v_wiring = 0 in reduced_aux_values.
 
         [t_chip, b_chip, wiring_bus]
     }

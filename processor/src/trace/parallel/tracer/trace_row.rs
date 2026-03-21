@@ -3,7 +3,7 @@
 use miden_air::trace::{
     CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FN_HASH_OFFSET, STACK_TRACE_OFFSET,
     SYS_TRACE_WIDTH,
-    chiplets::hasher::HASH_CYCLE_LEN_FELT,
+    chiplets::hasher::CONTROLLER_ROWS_PER_PERM_FELT,
     decoder::{
         ADDR_COL_IDX, GROUP_COUNT_COL_IDX, HASHER_STATE_OFFSET, IN_SPAN_COL_IDX,
         NUM_OP_BATCH_FLAGS, NUM_OP_BITS, NUM_USER_OP_HELPERS, OP_BATCH_FLAGS_OFFSET,
@@ -217,7 +217,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         }
 
         // Update block address for the upcoming block
-        self.decoder_state.current_addr += HASH_CYCLE_LEN_FELT;
+        self.decoder_state.current_addr += CONTROLLER_ROWS_PER_PERM_FELT;
 
         // Update basic block context
         basic_block_context.group_count_in_block -= ONE;

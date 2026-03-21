@@ -95,8 +95,8 @@ pub const TAG_CHIPLETS_BUS_COUNT: usize = 1;
 
 /// Base ID for the wiring bus constraint.
 pub const TAG_WIRING_BUS_BASE: usize = TAG_CHIPLETS_BUS_BASE + TAG_CHIPLETS_BUS_COUNT;
-/// Number of wiring bus constraints in this group.
-pub const TAG_WIRING_BUS_COUNT: usize = 1;
+/// Number of wiring bus constraints in this group (ACE + memory range + hasher perm-link).
+pub const TAG_WIRING_BUS_COUNT: usize = 3;
 
 /// Base ID for the public inputs boundary constraint group.
 pub const TAG_PUBLIC_INPUTS_BASE: usize = TAG_WIRING_BUS_BASE + TAG_WIRING_BUS_COUNT;

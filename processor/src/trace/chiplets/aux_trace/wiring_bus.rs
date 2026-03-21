@@ -1,11 +1,18 @@
 use alloc::vec::Vec;
 
-use miden_air::trace::{Challenges, MainTrace};
+use miden_air::trace::{Challenges, MainTrace, RowIndex};
 use miden_core::{Felt, field::ExtensionField};
 
-use super::super::ace::{AceHints, NUM_ACE_LOGUP_FRACTIONS_EVAL, NUM_ACE_LOGUP_FRACTIONS_READ};
+use super::{
+    super::ace::{AceHints, NUM_ACE_LOGUP_FRACTIONS_EVAL, NUM_ACE_LOGUP_FRACTIONS_READ},
+    hasher_perm,
+};
 
-/// Describes how to construct the execution trace of the ACE chiplet wiring bus column.
+/// Describes how to construct the execution trace of the wiring bus column (v_wiring).
+/// This column carries three stacked LogUp contributions:
+/// 1. ACE wiring (node definitions and consumptions)
+/// 2. Memory range checks (w0, w1, 4*w1 16-bit lookups)
+/// 3. Hasher perm-link (controller-to-permutation segment linking)
 pub struct WiringBusBuilder<'a> {
     ace_hints: &'a AceHints,
 }
@@ -63,6 +70,40 @@ impl<'a> WiringBusBuilder<'a> {
         }
 
         assert_eq!(wiring_bus[trace_offset], E::ZERO);
+
+        // Build memory range check LogUp requests as a running sum, then merge into wiring_bus.
+        // For each memory row, subtract 1/(alpha+w0) + 1/(alpha+w1) + 1/(alpha+4*w1).
+        // The range checker provides matching responses. 
+        let alpha = challenges.alpha;
+        let mut mem_prefix = vec![E::ZERO; main_trace.num_rows()];
+        for row_idx in 0..(main_trace.num_rows() - 1) {
+            let row: RowIndex = (row_idx as u32).into();
+            if !main_trace.is_memory_row(row) {
+                mem_prefix[row_idx + 1] = mem_prefix[row_idx];
+                continue;
+            }
+
+            let w0: E = main_trace.chiplet_memory_word_addr_lo(row).into();
+            let w1: E = main_trace.chiplet_memory_word_addr_hi(row).into();
+            let w1_mul4: E = (main_trace.chiplet_memory_word_addr_hi(row) * Felt::from_u8(4)).into();
+
+            let den0 = alpha + w0;
+            let den1 = alpha + w1;
+            let den2 = alpha + w1_mul4;
+
+            let delta = -(den0.inverse() + den1.inverse() + den2.inverse());
+            mem_prefix[row_idx + 1] = mem_prefix[row_idx] + delta;
+        }
+
+        for (dst, mem) in wiring_bus.iter_mut().zip(mem_prefix.iter()) {
+            *dst += *mem;
+        }
+
+        // Build hasher perm-link LogUp running sum and merge into wiring_bus.
+        let perm_prefix = hasher_perm::build_perm_link_running_sum(main_trace, challenges);
+        for (dst, perm) in wiring_bus.iter_mut().zip(perm_prefix.iter()) {
+            *dst += *perm;
+        }
 
         wiring_bus
     }

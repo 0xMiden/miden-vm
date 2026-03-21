@@ -29,7 +29,6 @@
 //! Word format: alpha + beta^0*label + ... + beta^7*word[3]
 //!
 //! ## References
-//! - Air-script: ~/air-script/constraints/chiplets.air
 //! - Processor: processor/src/chiplets/aux_trace/bus/
 
 use miden_core::{FMP_ADDR, FMP_INIT_VALUE, field::PrimeCharacteristicRing, operations::opcodes};
@@ -39,7 +38,7 @@ use crate::{
     Felt, MainTraceRow,
     constraints::{
         bus::indices::B_CHIPLETS,
-        chiplets::{bitwise::P_BITWISE_K_TRANSITION, hasher},
+        chiplets::bitwise::P_BITWISE_K_TRANSITION,
         op_flags::OpFlags,
         tagging::{TaggingAirBuilderExt, ids::TAG_CHIPLETS_BUS_BASE},
     },
@@ -53,8 +52,8 @@ use crate::{
             },
             bitwise::{self, BITWISE_AND_LABEL, BITWISE_XOR_LABEL},
             hasher::{
-                HASH_CYCLE_LEN, LINEAR_HASH_LABEL, MP_VERIFY_LABEL, MR_UPDATE_NEW_LABEL,
-                MR_UPDATE_OLD_LABEL, RETURN_HASH_LABEL, RETURN_STATE_LABEL,
+                CONTROLLER_ROWS_PER_PERMUTATION, LINEAR_HASH_LABEL, MP_VERIFY_LABEL,
+                MR_UPDATE_NEW_LABEL, MR_UPDATE_OLD_LABEL, RETURN_HASH_LABEL, RETURN_STATE_LABEL,
             },
             kernel_rom::{KERNEL_PROC_CALL_LABEL, KERNEL_PROC_INIT_LABEL},
             memory::{
@@ -69,6 +68,11 @@ use crate::{
         },
     },
 };
+
+/// Label offset for input (start) messages on the chiplets bus.
+const INPUT_LABEL_OFFSET: u16 = 16;
+/// Label offset for output (end) messages on the chiplets bus.
+const OUTPUT_LABEL_OFFSET: u16 = 32;
 
 /// Tag ID and namespace for the main chiplets bus transition constraint.
 const CHIPLET_BUS_ID: usize = TAG_CHIPLETS_BUS_BASE;
@@ -247,14 +251,8 @@ pub fn enforce_chiplets_bus_constraint<AB>(
     // =========================================================================
     // Responses come from chiplet rows. Chiplet selectors are mutually exclusive.
 
-    // --- Get periodic columns we need for hasher cycle detection and bitwise cycle gating ---
-    let (cycle_row_0, cycle_row_31, k_transition) = {
-        let p = builder.periodic_values();
-        let cycle_row_0: AB::Expr = p[hasher::periodic::P_CYCLE_ROW_0].into();
-        let cycle_row_31: AB::Expr = p[hasher::periodic::P_CYCLE_ROW_31].into();
-        let k_transition: AB::Expr = p[P_BITWISE_K_TRANSITION].into();
-        (cycle_row_0, cycle_row_31, k_transition)
-    };
+    // --- Get periodic columns for bitwise cycle gating ---
+    let k_transition: AB::Expr = builder.periodic_values()[P_BITWISE_K_TRANSITION].into();
 
     // --- Chiplet selector flags (from chiplets columns) ---
     let chiplet_s0: AB::Expr = local.chiplets[0].clone().into();
@@ -290,8 +288,7 @@ pub fn enforce_chiplets_bus_constraint<AB>(
         * (AB::Expr::ONE - chiplet_s4.clone());
 
     // --- Hasher response (complex, depends on cycle position and selectors) ---
-    let hasher_response =
-        compute_hasher_response::<AB>(local, next, challenges, cycle_row_0, cycle_row_31);
+    let hasher_response = compute_hasher_response::<AB>(local, next, challenges);
 
     // --- Bitwise response ---
     let v_bitwise = compute_bitwise_response::<AB>(local, challenges);
@@ -773,79 +770,55 @@ struct HasherResponse<EF, E> {
     flag_sum: E,
 }
 
-/// Computes the hasher chiplet response message value.
+/// Computes the hasher chiplet response.
 ///
-/// The hasher responds at two cycle positions:
-/// - Row 0: Initialization (f_bp, f_mp, f_mv, f_mu)
-/// - Row 31: Output/Absorption (f_hout, f_sout, f_abp)
+/// Only hasher controller rows (dispatch, perm_seg=0) produce bus responses.
+/// Hasher permutation segment rows (compute, perm_seg=1) do not contribute.
+///
+/// **Controller input rows** (s0=1, perm_seg=0):
+/// - Sponge start (is_start=1, s1=0, s2=0): full 12-element state
+/// - Sponge continuation (is_start=0, s1=0, s2=0): rate-only 8 elements (RESPAN)
+/// - Tree start (is_start=1, s1=1 or s2=1): leaf word
+///
+/// **Controller output rows** (s0=0, s1=0, perm_seg=0):
+/// - HOUT (s2=0): digest
+/// - SOUT + is_final=1 (s2=1): full 12-element state
+///
+/// No response on: hasher permutation segment rows, padding rows ([0,1,0]),
+/// tree continuations (is_start=0), intermediate SOUT (is_final=0).
 fn compute_hasher_response<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
-    cycle_row_0: AB::Expr,
-    cycle_row_31: AB::Expr,
 ) -> HasherResponse<AB::ExprEF, AB::Expr> {
     use crate::trace::{
         CHIPLETS_OFFSET,
-        chiplets::{HASHER_NODE_INDEX_COL_IDX, HASHER_STATE_COL_RANGE},
+        chiplets::{
+            HASHER_IS_FINAL_COL_IDX, HASHER_IS_START_COL_IDX, HASHER_NODE_INDEX_COL_IDX,
+            HASHER_PERM_SEG_COL_IDX, HASHER_STATE_COL_RANGE,
+        },
     };
 
     let one = AB::Expr::ONE;
-    // Hasher is active when chiplets[0] == 0
-    let hasher_active: AB::Expr = one.clone() - local.chiplets[0].clone().into();
 
-    // Hasher selectors (when hasher is active, chiplets[0]=0)
-    // chiplets[1..4] are the hasher's internal selectors s0, s1, s2
+    // Controller flag: hasher active AND not in perm segment
+    let hasher_active: AB::Expr = one.clone() - local.chiplets[0].clone().into();
+    let perm_seg: AB::Expr =
+        local.chiplets[HASHER_PERM_SEG_COL_IDX - CHIPLETS_OFFSET].clone().into();
+    let controller_flag = hasher_active * (one.clone() - perm_seg);
+
+    // Hasher internal selectors
     let hs0: AB::Expr = local.chiplets[1].clone().into();
     let hs1: AB::Expr = local.chiplets[2].clone().into();
     let hs2: AB::Expr = local.chiplets[3].clone().into();
 
-    // Compute operation flags (each flag is active at most once)
-    // All hasher flags require hasher_active (chiplets[0] == 0)
-    // Row 0 flags:
-    // f_bp = hasher_active * cycle_row_0 * s0 * !s1 * !s2
-    let f_bp = hasher_active.clone()
-        * cycle_row_0.clone()
-        * hs0.clone()
-        * (one.clone() - hs1.clone())
-        * (one.clone() - hs2.clone());
-    // f_mp = hasher_active * cycle_row_0 * s0 * !s1 * s2
-    let f_mp = hasher_active.clone()
-        * cycle_row_0.clone()
-        * hs0.clone()
-        * (one.clone() - hs1.clone())
-        * hs2.clone();
-    // f_mv = hasher_active * cycle_row_0 * s0 * s1 * !s2
-    let f_mv = hasher_active.clone()
-        * cycle_row_0.clone()
-        * hs0.clone()
-        * hs1.clone()
-        * (one.clone() - hs2.clone());
-    // f_mu = hasher_active * cycle_row_0 * s0 * s1 * s2
-    let f_mu =
-        hasher_active.clone() * cycle_row_0.clone() * hs0.clone() * hs1.clone() * hs2.clone();
+    // Lifecycle columns
+    let is_start: AB::Expr =
+        local.chiplets[HASHER_IS_START_COL_IDX - CHIPLETS_OFFSET].clone().into();
+    let is_final: AB::Expr =
+        local.chiplets[HASHER_IS_FINAL_COL_IDX - CHIPLETS_OFFSET].clone().into();
 
-    // Row 31 flags:
-    // f_hout = hasher_active * cycle_row_31 * !s0 * !s1 * !s2
-    let f_hout = hasher_active.clone()
-        * cycle_row_31.clone()
-        * (one.clone() - hs0.clone())
-        * (one.clone() - hs1.clone())
-        * (one.clone() - hs2.clone());
-    // f_sout = hasher_active * cycle_row_31 * !s0 * !s1 * s2
-    let f_sout = hasher_active.clone()
-        * cycle_row_31.clone()
-        * (one.clone() - hs0.clone())
-        * (one.clone() - hs1.clone())
-        * hs2.clone();
-    // f_abp = hasher_active * cycle_row_31 * s0 * !s1 * !s2
-    let f_abp = hasher_active.clone()
-        * cycle_row_31.clone()
-        * hs0.clone()
-        * (one.clone() - hs1.clone())
-        * (one.clone() - hs2.clone());
-
-    // Get current hasher state (12 elements) and node index
+    // State and node_index
     let state: [AB::Expr; 12] = core::array::from_fn(|i| {
         let col_idx = HASHER_STATE_COL_RANGE.start - CHIPLETS_OFFSET + i;
         local.chiplets[col_idx].clone().into()
@@ -853,58 +826,71 @@ fn compute_hasher_response<AB: LiftedAirBuilder<F = Felt>>(
     let node_index: AB::Expr =
         local.chiplets[HASHER_NODE_INDEX_COL_IDX - CHIPLETS_OFFSET].clone().into();
 
-    // Get next row's hasher state (for f_abp)
-    let state_next: [AB::Expr; 12] = core::array::from_fn(|i| {
-        let col_idx = HASHER_STATE_COL_RANGE.start - CHIPLETS_OFFSET + i;
-        next.chiplets[col_idx].clone().into()
-    });
-
-    // Get next row's node_index for computing the node_index bit
-    let node_index_next: AB::Expr =
-        next.chiplets[HASHER_NODE_INDEX_COL_IDX - CHIPLETS_OFFSET].clone().into();
-
-    // addr_next = row + 1 (using clk as proxy since clk = row in the trace)
+    // Address
     let addr_next: AB::Expr = local.clk.clone().into() + one.clone();
 
-    // Build message values for each operation type using canonical labels.
-    let label_bp = AB::Expr::from_u16(LINEAR_HASH_LABEL as u16 + 16);
-    let label_mp = AB::Expr::from_u16(MP_VERIFY_LABEL as u16 + 16);
-    let label_mv = AB::Expr::from_u16(MR_UPDATE_OLD_LABEL as u16 + 16);
-    let label_mu = AB::Expr::from_u16(MR_UPDATE_NEW_LABEL as u16 + 16);
-    let label_hout = AB::Expr::from_u16(RETURN_HASH_LABEL as u16 + 32);
-    let label_sout = AB::Expr::from_u16(RETURN_STATE_LABEL as u16 + 32);
-    let label_abp = AB::Expr::from_u16(LINEAR_HASH_LABEL as u16 + 32);
+    // --- Response flags (inner, without controller_flag to keep degree low) ---
+    //
+    // controller_flag (degree 2) is factored out and applied to the entire response sum,
+    // keeping the max flag*message degree at 6 instead of 8.
 
-    // v_bp: Full state message for f_bp (linear hash / 2-to-1 hash init)
-    let v_bp = compute_hasher_message::<AB>(
+    // Sponge start: input, s1=0, s2=0, is_start=1
+    let f_sponge_start =
+        hs0.clone() * (one.clone() - hs1.clone()) * (one.clone() - hs2.clone()) * is_start.clone();
+
+    // Sponge continuation (RESPAN): input, s1=0, s2=0, is_start=0
+    let f_sponge_respan = hs0.clone()
+        * (one.clone() - hs1.clone())
+        * (one.clone() - hs2.clone())
+        * (one.clone() - is_start.clone());
+
+    // Merle tree op start inputs (only is_start=1 produces response)
+    let f_mp_start = hs0.clone() * (one.clone() - hs1.clone()) * hs2.clone() * is_start.clone();
+    let f_mv_start = hs0.clone() * hs1.clone() * (one.clone() - hs2.clone()) * is_start.clone();
+    let f_mu_start = hs0.clone() * hs1.clone() * hs2.clone() * is_start.clone();
+
+    // HOUT output (always responds)
+    let f_hout =
+        (one.clone() - hs0.clone()) * (one.clone() - hs1.clone()) * (one.clone() - hs2.clone());
+
+    // SOUT output with is_final=1 only (HPERM return)
+    let f_sout_final =
+        (one.clone() - hs0.clone()) * (one.clone() - hs1.clone()) * hs2.clone() * is_final;
+
+    // --- Message values ---
+
+    let label_sponge_start = AB::Expr::from_u16(LINEAR_HASH_LABEL as u16 + INPUT_LABEL_OFFSET);
+    let label_sponge_respan = AB::Expr::from_u16(LINEAR_HASH_LABEL as u16 + OUTPUT_LABEL_OFFSET);
+    let label_mp = AB::Expr::from_u16(MP_VERIFY_LABEL as u16 + INPUT_LABEL_OFFSET);
+    let label_mv = AB::Expr::from_u16(MR_UPDATE_OLD_LABEL as u16 + INPUT_LABEL_OFFSET);
+    let label_mu = AB::Expr::from_u16(MR_UPDATE_NEW_LABEL as u16 + INPUT_LABEL_OFFSET);
+    let label_hout = AB::Expr::from_u16(RETURN_HASH_LABEL as u16 + OUTPUT_LABEL_OFFSET);
+    let label_sout = AB::Expr::from_u16(RETURN_STATE_LABEL as u16 + OUTPUT_LABEL_OFFSET);
+
+    // Sponge start: full 12-element state, node_index=0 (sponge doesn't use index)
+    let v_sponge_start = compute_hasher_message::<AB>(
         challenges,
-        label_bp,
+        label_sponge_start,
         addr_next.clone(),
-        node_index.clone(),
+        AB::Expr::ZERO,
         &state,
     );
 
-    // v_sout: Full state message for f_sout (return full state)
-    let v_sout = compute_hasher_message::<AB>(
+    // Sponge continuation (RESPAN): rate-only 8 elements, addr_next directly
+    let rate: [AB::Expr; 8] = core::array::from_fn(|i| state[i].clone());
+    let v_sponge_respan = compute_hasher_rate_message::<AB>(
         challenges,
-        label_sout,
+        label_sponge_respan,
         addr_next.clone(),
-        node_index.clone(),
-        &state,
+        AB::Expr::ZERO,
+        &rate,
     );
 
-    // v_leaf: Leaf node message (for f_mp, f_mv, f_mu)
-    // The leaf is encoded as a 4-lane word, matching the processor.
-    // The bit determines which part of the trace state to use:
-    // - bit=0: use RATE0 (state[0..4])
-    // - bit=1: use RATE1 (state[4..8])
-    // The bit can be computed as: bit = node_index - 2 * node_index_next
+    // Merkle tree inputs: leaf word selected by direction bit
     let two = AB::Expr::from_u16(2);
-    let bit = node_index.clone() - two * node_index_next.clone();
-
-    // Leaf word uses RATE0 or RATE1 depending on bit:
-    // bit=0: use state[0..4] (RATE0)
-    // bit=1: use state[4..8] (RATE1)
+    let node_index_next: AB::Expr =
+        next.chiplets[HASHER_NODE_INDEX_COL_IDX - CHIPLETS_OFFSET].clone().into();
+    let bit = node_index.clone() - two * node_index_next;
     let leaf_word: [AB::Expr; 4] = [
         (one.clone() - bit.clone()) * state[0].clone() + bit.clone() * state[4].clone(),
         (one.clone() - bit.clone()) * state[1].clone() + bit.clone() * state[5].clone(),
@@ -933,55 +919,46 @@ fn compute_hasher_response<AB: LiftedAirBuilder<F = Felt>>(
         &leaf_word,
     );
 
-    // v_hout: Hash output message (for f_hout)
-    // Digest from RATE0 (state[0..4]) encoded as a 4-lane word.
-    let result_word: [AB::Expr; 4] =
-        [state[0].clone(), state[1].clone(), state[2].clone(), state[3].clone()];
+    // HOUT: digest from RATE0 (state[0..4])
+    let digest: [AB::Expr; 4] = core::array::from_fn(|i| state[i].clone());
     let v_hout = compute_hasher_word_message::<AB>(
         challenges,
         label_hout,
         addr_next.clone(),
         node_index.clone(),
-        &result_word,
+        &digest,
     );
 
-    // v_abp: Absorption message (for f_abp) - uses NEXT row's rate (8 elements)
-    // Rate from state_next[0..8] is encoded as an 8-lane rate message.
-    let rate_next: [AB::Expr; 8] = [
-        state_next[0].clone(),
-        state_next[1].clone(),
-        state_next[2].clone(),
-        state_next[3].clone(),
-        state_next[4].clone(),
-        state_next[5].clone(),
-        state_next[6].clone(),
-        state_next[7].clone(),
-    ];
-    let v_abp = compute_hasher_rate_message::<AB>(
-        challenges,
-        label_abp,
-        addr_next.clone(),
-        node_index.clone(),
-        &rate_next,
-    );
+    // SOUT: full 12-element state (HPERM return), node_index=0
+    let v_sout =
+        compute_hasher_message::<AB>(challenges, label_sout, addr_next, AB::Expr::ZERO, &state);
 
-    // Sum of all hasher response flags
-    let flag_sum = f_bp.clone()
-        + f_mp.clone()
-        + f_mv.clone()
-        + f_mu.clone()
+    // --- Additive OR combination ---
+    //
+    // The inner flag_sum and sum are computed without controller_flag. The controller_flag
+    // is applied as a multiplicative factor to the entire sum, keeping the degree within
+    // budget: inner_flag(4) * message(2) = 6, * controller_flag(2) = 8.
+
+    let inner_flag_sum = f_sponge_start.clone()
+        + f_sponge_respan.clone()
+        + f_mp_start.clone()
+        + f_mv_start.clone()
+        + f_mu_start.clone()
         + f_hout.clone()
-        + f_sout.clone()
-        + f_abp.clone();
+        + f_sout_final.clone();
 
-    // Sum of response values (rest term handled by caller).
-    let sum = v_bp * f_bp
-        + v_mp * f_mp
-        + v_mv * f_mv
-        + v_mu * f_mu
+    let inner_sum = v_sponge_start * f_sponge_start
+        + v_sponge_respan * f_sponge_respan
+        + v_mp * f_mp_start
+        + v_mv * f_mv_start
+        + v_mu * f_mu_start
         + v_hout * f_hout
-        + v_sout * f_sout
-        + v_abp * f_abp;
+        + v_sout * f_sout_final;
+
+    // Apply controller_flag to the entire response. On perm segment and non-hasher rows,
+    // controller_flag=0 so the hasher contributes nothing (identity via the outer 1-flag_sum).
+    let flag_sum = controller_flag.clone() * inner_flag_sum;
+    let sum = inner_sum * controller_flag;
 
     HasherResponse { sum, flag_sum }
 }
@@ -1015,7 +992,7 @@ fn compute_hperm_request<AB: LiftedAirBuilder<F = Felt>>(
     let output_state: [AB::Expr; 12] = core::array::from_fn(|i| next.stack[i].clone().into());
 
     // Input message: transition_label = LINEAR_HASH_LABEL + 16 = 3 + 16 = 19
-    let input_label: AB::Expr = AB::Expr::from_u16(LINEAR_HASH_LABEL as u16 + 16);
+    let input_label: AB::Expr = AB::Expr::from_u16(LINEAR_HASH_LABEL as u16 + INPUT_LABEL_OFFSET);
     let node_index_zero: AB::Expr = AB::Expr::ZERO;
 
     let input_msg = compute_hasher_message::<AB>(
@@ -1026,10 +1003,11 @@ fn compute_hperm_request<AB: LiftedAirBuilder<F = Felt>>(
         &input_state,
     );
 
-    // Output message: transition_label = RETURN_STATE_LABEL + 32 = 9 + 32 = 41
-    // addr_next = addr + (HASH_CYCLE_LEN - 1) = addr + 31
-    let output_label: AB::Expr = AB::Expr::from_u16(RETURN_STATE_LABEL as u16 + 32);
-    let addr_offset: AB::Expr = AB::Expr::from_u16((HASH_CYCLE_LEN - 1) as u16);
+    // Output message: transition_label = RETURN_STATE_LABEL + 32
+    // addr_next = addr + (CONTROLLER_ROWS_PER_PERMUTATION - 1) = addr + 1
+    let output_label: AB::Expr =
+        AB::Expr::from_u16(RETURN_STATE_LABEL as u16 + OUTPUT_LABEL_OFFSET);
+    let addr_offset: AB::Expr = AB::Expr::from_u16((CONTROLLER_ROWS_PER_PERMUTATION - 1) as u16);
     let addr_next = addr + addr_offset;
 
     let output_msg = compute_hasher_message::<AB>(
@@ -1107,7 +1085,7 @@ fn compute_log_precompile_request<AB: LiftedAirBuilder<F = Felt>>(
     ];
 
     // Input message: LINEAR_HASH_LABEL + 16
-    let input_label: AB::Expr = AB::Expr::from_u16(LINEAR_HASH_LABEL as u16 + 16);
+    let input_label: AB::Expr = AB::Expr::from_u16(LINEAR_HASH_LABEL as u16 + INPUT_LABEL_OFFSET);
     let input_msg = compute_hasher_message::<AB>(
         challenges,
         input_label,
@@ -1116,9 +1094,11 @@ fn compute_log_precompile_request<AB: LiftedAirBuilder<F = Felt>>(
         &state_input,
     );
 
-    // Output message: RETURN_STATE_LABEL + 32 with addr offset by HASH_CYCLE_LEN - 1
-    let output_label: AB::Expr = AB::Expr::from_u16(RETURN_STATE_LABEL as u16 + 32);
-    let addr_offset: AB::Expr = AB::Expr::from_u16((HASH_CYCLE_LEN - 1) as u16);
+    // Output message: RETURN_STATE_LABEL + 32 with addr offset by CONTROLLER_ROWS_PER_PERMUTATION -
+    // 1
+    let output_label: AB::Expr =
+        AB::Expr::from_u16(RETURN_STATE_LABEL as u16 + OUTPUT_LABEL_OFFSET);
+    let addr_offset: AB::Expr = AB::Expr::from_u16((CONTROLLER_ROWS_PER_PERMUTATION - 1) as u16);
     let output_msg = compute_hasher_message::<AB>(
         challenges,
         output_label,
@@ -1335,7 +1315,7 @@ impl ControlBlockOp {
 /// - state = 12-lane sponge with 8-element decoder hasher state as rate + opcode as domain
 ///
 /// The message reconstructs:
-/// - transition_label = LINEAR_HASH_LABEL + 16 = 3 + 16 = 19
+/// - transition_label = LINEAR_HASH_LABEL + 16
 /// - addr_next = decoder address at next row (from next row's addr column)
 /// - hasher_state = rate lanes from decoder hasher columns + opcode in capacity domain position
 fn compute_control_block_request<AB: LiftedAirBuilder<F = Felt>>(
@@ -1344,8 +1324,9 @@ fn compute_control_block_request<AB: LiftedAirBuilder<F = Felt>>(
     challenges: &Challenges<AB::ExprEF>,
     op: ControlBlockOp,
 ) -> AB::ExprEF {
-    // transition_label = LINEAR_HASH_LABEL + 16 = 19
-    let transition_label: AB::Expr = AB::Expr::from_u16(LINEAR_HASH_LABEL as u16 + 16);
+    // transition_label = LINEAR_HASH_LABEL + 
+    let transition_label: AB::Expr =
+        AB::Expr::from_u16(LINEAR_HASH_LABEL as u16 + INPUT_LABEL_OFFSET);
 
     // addr_next = next row's decoder address
     let addr_next: AB::Expr = next.decoder[ADDR_COL_IDX].clone().into();
@@ -1476,8 +1457,9 @@ fn compute_span_request<AB: LiftedAirBuilder<F = Felt>>(
     next: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
-    // transition_label = LINEAR_HASH_LABEL + 16 = 19
-    let transition_label: AB::Expr = AB::Expr::from_u16(LINEAR_HASH_LABEL as u16 + 16);
+    // transition_label = LINEAR_HASH_LABEL + 16
+    let transition_label: AB::Expr =
+        AB::Expr::from_u16(LINEAR_HASH_LABEL as u16 + INPUT_LABEL_OFFSET);
 
     // addr_next = next row's decoder address
     let addr_next: AB::Expr = next.decoder[ADDR_COL_IDX].clone().into();
@@ -1513,12 +1495,15 @@ fn compute_respan_request<AB: LiftedAirBuilder<F = Felt>>(
     next: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
-    // transition_label = LINEAR_HASH_LABEL + 32 = 35
-    let transition_label: AB::Expr = AB::Expr::from_u16(LINEAR_HASH_LABEL as u16 + 32);
+    // transition_label = LINEAR_HASH_LABEL + 32
+    let transition_label: AB::Expr =
+        AB::Expr::from_u16(LINEAR_HASH_LABEL as u16 + OUTPUT_LABEL_OFFSET);
 
-    // RESPAN message uses addr_next - 1, where addr_next is the next row's decoder address
+    // RESPAN message uses addr_next directly (the next row's decoder address).
+    // In the controller/perm split, addr_next points directly to the continuation
+    // input row -- no offset needed.
     let addr_next: AB::Expr = next.decoder[ADDR_COL_IDX].clone().into();
-    let addr_for_msg = addr_next - AB::Expr::ONE;
+    let addr_for_msg = addr_next;
 
     // Get decoder hasher state (8 elements)
     let hasher_state: [AB::Expr; 8] =
@@ -1540,12 +1525,13 @@ fn compute_end_request<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
-    // transition_label = RETURN_HASH_LABEL + 32 = 1 + 32 = 33
-    let transition_label: AB::Expr = AB::Expr::from_u16(RETURN_HASH_LABEL as u16 + 32);
+    // transition_label = RETURN_HASH_LABEL + 32 = 1 + 32
+    let transition_label: AB::Expr =
+        AB::Expr::from_u16(RETURN_HASH_LABEL as u16 + OUTPUT_LABEL_OFFSET);
 
-    // addr = decoder.addr + (HASH_CYCLE_LEN - 1) = addr + 31
+    // addr = decoder.addr + (CONTROLLER_ROWS_PER_PERMUTATION - 1) = addr + 1
     let addr: AB::Expr = local.decoder[ADDR_COL_IDX].clone().into()
-        + AB::Expr::from_u16((HASH_CYCLE_LEN - 1) as u16);
+        + AB::Expr::from_u16((CONTROLLER_ROWS_PER_PERMUTATION - 1) as u16);
 
     // Get digest from decoder hasher state (first 4 elements)
     let digest: [AB::Expr; 4] =
@@ -1561,8 +1547,9 @@ fn compute_control_block_request_zeros<AB: LiftedAirBuilder<F = Felt>>(
     challenges: &Challenges<AB::ExprEF>,
     opcode: u8,
 ) -> AB::ExprEF {
-    // transition_label = LINEAR_HASH_LABEL + 16 = 19
-    let transition_label: AB::Expr = AB::Expr::from_u16(LINEAR_HASH_LABEL as u16 + 16);
+    // transition_label = LINEAR_HASH_LABEL + 16
+    let transition_label: AB::Expr =
+        AB::Expr::from_u16(LINEAR_HASH_LABEL as u16 + INPUT_LABEL_OFFSET);
 
     // addr_next = next row's decoder address
     let addr_next: AB::Expr = next.decoder[ADDR_COL_IDX].clone().into();
@@ -1635,9 +1622,9 @@ fn compute_dyn_callee_hash_read<AB: LiftedAirBuilder<F = Felt>>(
 
 /// Computes the MPVERIFY request message value.
 ///
-/// MPVERIFY sends two messages:
-/// 1. Input: node value at RATE1 (indices 4..8)
-/// 2. Output: root value at RATE1 (indices 4..8)
+/// MPVERIFY sends two messages as a product:
+/// 1. Input: node value (stack[0..4]) with node_index
+/// 2. Output: root digest (stack[6..10]) at the computed output address
 fn compute_mpverify_request<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
@@ -1645,7 +1632,7 @@ fn compute_mpverify_request<AB: LiftedAirBuilder<F = Felt>>(
     use crate::trace::decoder::USER_OP_HELPERS_OFFSET;
 
     let helper_0: AB::Expr = local.decoder[USER_OP_HELPERS_OFFSET].clone().into();
-    let merkle_cycle_len: AB::Expr = AB::Expr::from_u16(HASH_CYCLE_LEN as u16);
+    let rows_per_perm: AB::Expr = AB::Expr::from_u16(CONTROLLER_ROWS_PER_PERMUTATION as u16);
 
     // Stack layout: [node_value0..3, node_depth, node_index, root0..3, ...]
     let node_value: [AB::Expr; 4] = core::array::from_fn(|i| local.stack[i].clone().into());
@@ -1653,7 +1640,7 @@ fn compute_mpverify_request<AB: LiftedAirBuilder<F = Felt>>(
     let node_index: AB::Expr = local.stack[5].clone().into();
     let root: [AB::Expr; 4] = core::array::from_fn(|i| local.stack[6 + i].clone().into());
 
-    let input_label: AB::Expr = AB::Expr::from_u16(MP_VERIFY_LABEL as u16 + 16);
+    let input_label: AB::Expr = AB::Expr::from_u16(MP_VERIFY_LABEL as u16 + INPUT_LABEL_OFFSET);
     let input_msg = compute_hasher_word_message::<AB>(
         challenges,
         input_label,
@@ -1662,9 +1649,9 @@ fn compute_mpverify_request<AB: LiftedAirBuilder<F = Felt>>(
         &node_value,
     );
 
-    // addr_next = helper_0 + node_depth * merkle_cycle_len - 1
-    let output_addr = helper_0 + node_depth * merkle_cycle_len - AB::Expr::ONE;
-    let output_label: AB::Expr = AB::Expr::from_u16(RETURN_HASH_LABEL as u16 + 32);
+    // Output address = start + depth * rows_per_perm - 1 (last output row of the path)
+    let output_addr = helper_0 + node_depth * rows_per_perm - AB::Expr::ONE;
+    let output_label: AB::Expr = AB::Expr::from_u16(RETURN_HASH_LABEL as u16 + OUTPUT_LABEL_OFFSET);
     let output_msg = compute_hasher_word_message::<AB>(
         challenges,
         output_label,
@@ -1678,11 +1665,11 @@ fn compute_mpverify_request<AB: LiftedAirBuilder<F = Felt>>(
 
 /// Computes the MRUPDATE request message value.
 ///
-/// MRUPDATE sends four messages:
-/// 1. Input old: old node value at RATE0 (positions 0-3 in LE layout)
-/// 2. Output old: old root at RATE0
-/// 3. Input new: new node value at RATE0
-/// 4. Output new: new root at RATE0
+/// MRUPDATE sends four messages as a product:
+/// 1. Input old: old node value (stack[0..4]) with node_index
+/// 2. Output old: old root digest (stack[6..10]) at computed output address
+/// 3. Input new: new node value (stack[10..14]) with node_index
+/// 4. Output new: new root digest (next.stack[0..4]) at computed output address
 fn compute_mrupdate_request<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
@@ -1691,8 +1678,8 @@ fn compute_mrupdate_request<AB: LiftedAirBuilder<F = Felt>>(
     use crate::trace::decoder::USER_OP_HELPERS_OFFSET;
 
     let helper_0: AB::Expr = local.decoder[USER_OP_HELPERS_OFFSET].clone().into();
-    let merkle_cycle_len: AB::Expr = AB::Expr::from_u16(HASH_CYCLE_LEN as u16);
-    let two_merkle_cycles: AB::Expr = merkle_cycle_len.clone() + merkle_cycle_len.clone();
+    let rows_per_perm: AB::Expr = AB::Expr::from_u16(CONTROLLER_ROWS_PER_PERMUTATION as u16);
+    let two_legs_rows: AB::Expr = rows_per_perm.clone() + rows_per_perm.clone();
 
     // Stack layout: [old_node0..3, depth, index, old_root0..3, new_node0..3, ...]
     let old_node: [AB::Expr; 4] = core::array::from_fn(|i| local.stack[i].clone().into());
@@ -1703,7 +1690,8 @@ fn compute_mrupdate_request<AB: LiftedAirBuilder<F = Felt>>(
     // New root is at next.stack[0..4]
     let new_root: [AB::Expr; 4] = core::array::from_fn(|i| next.stack[i].clone().into());
 
-    let input_old_label: AB::Expr = AB::Expr::from_u16(MR_UPDATE_OLD_LABEL as u16 + 16);
+    let input_old_label: AB::Expr =
+        AB::Expr::from_u16(MR_UPDATE_OLD_LABEL as u16 + INPUT_LABEL_OFFSET);
     let input_old_msg = compute_hasher_word_message::<AB>(
         challenges,
         input_old_label,
@@ -1713,8 +1701,9 @@ fn compute_mrupdate_request<AB: LiftedAirBuilder<F = Felt>>(
     );
 
     let output_old_addr =
-        helper_0.clone() + depth.clone() * merkle_cycle_len.clone() - AB::Expr::ONE;
-    let output_old_label: AB::Expr = AB::Expr::from_u16(RETURN_HASH_LABEL as u16 + 32);
+        helper_0.clone() + depth.clone() * rows_per_perm.clone() - AB::Expr::ONE;
+    let output_old_label: AB::Expr =
+        AB::Expr::from_u16(RETURN_HASH_LABEL as u16 + OUTPUT_LABEL_OFFSET);
     let output_old_msg = compute_hasher_word_message::<AB>(
         challenges,
         output_old_label.clone(),
@@ -1723,8 +1712,9 @@ fn compute_mrupdate_request<AB: LiftedAirBuilder<F = Felt>>(
         &old_root,
     );
 
-    let input_new_addr = helper_0.clone() + depth.clone() * merkle_cycle_len.clone();
-    let input_new_label: AB::Expr = AB::Expr::from_u16(MR_UPDATE_NEW_LABEL as u16 + 16);
+    let input_new_addr = helper_0.clone() + depth.clone() * rows_per_perm;
+    let input_new_label: AB::Expr =
+        AB::Expr::from_u16(MR_UPDATE_NEW_LABEL as u16 + INPUT_LABEL_OFFSET);
     let input_new_msg = compute_hasher_word_message::<AB>(
         challenges,
         input_new_label,
@@ -1733,7 +1723,7 @@ fn compute_mrupdate_request<AB: LiftedAirBuilder<F = Felt>>(
         &new_node,
     );
 
-    let output_new_addr = helper_0 + depth * two_merkle_cycles - AB::Expr::ONE;
+    let output_new_addr = helper_0 + depth * two_legs_rows - AB::Expr::ONE;
     let output_new_msg = compute_hasher_word_message::<AB>(
         challenges,
         output_old_label,
