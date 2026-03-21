@@ -20,7 +20,8 @@ pub use miden_core::{Word, mast::MastForest, program::Program};
 pub use self::{
     dependency::Dependency,
     package::{
-        ConstantExport, InvalidSectionIdError, InvalidTargetTypeError, Package, PackageExport,
-        PackageId, PackageManifest, ProcedureExport, Section, SectionId, TargetType, TypeExport,
+        ConstantExport, InvalidSectionIdError, InvalidTargetTypeError, ManifestValidationError,
+        Package, PackageExport, PackageId, PackageManifest, ProcedureExport, Section, SectionId,
+        TargetType, TypeExport,
     },
 };

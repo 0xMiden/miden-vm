@@ -21,7 +21,10 @@ use serde::{Deserialize, Serialize};
 
 pub use self::{
     id::PackageId,
-    manifest::{ConstantExport, PackageExport, PackageManifest, ProcedureExport, TypeExport},
+    manifest::{
+        ConstantExport, ManifestValidationError, PackageExport, PackageManifest, ProcedureExport,
+        TypeExport,
+    },
     section::{InvalidSectionIdError, Section, SectionId},
     target_type::{InvalidTargetTypeError, TargetType},
 };
@@ -76,7 +79,9 @@ impl Package {
         library: Arc<Library>,
         dependencies: impl IntoIterator<Item = Dependency>,
     ) -> Box<Package> {
-        let manifest = PackageManifest::from_library(&library).with_dependencies(dependencies);
+        let manifest = PackageManifest::from_library(&library)
+            .with_dependencies(dependencies)
+            .expect("package dependencies should be unique");
 
         Box::new(Self {
             name,
@@ -325,7 +330,10 @@ impl Package {
                         .cloned()
                         .map(PackageExport::Procedure),
                 )
-                .with_dependencies(self.manifest.dependencies().cloned()),
+                .and_then(|manifest| {
+                    manifest.with_dependencies(self.manifest.dependencies().cloned())
+                })
+                .expect("executable package manifest should remain valid"),
                 sections: self.sections.clone(),
             })
         } else {

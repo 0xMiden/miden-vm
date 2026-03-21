@@ -60,7 +60,7 @@ fn build_package(library: Arc<Library>, signature: FunctionType) -> Package {
         attributes: AttributeSet::default(),
     });
 
-    let manifest = PackageManifest::new([export]);
+    let manifest = PackageManifest::new([export]).expect("seed package manifest should be valid");
 
     Package {
         name: PackageId::from("test_pkg"),
