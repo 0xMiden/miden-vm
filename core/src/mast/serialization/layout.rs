@@ -4,7 +4,7 @@ use super::{
     FLAG_HASHLESS, FLAG_STRIPPED, FLAGS_RESERVED_MASK, MAGIC, MastForest, MastNodeEntry, VERSION,
 };
 use crate::{
-    mast::{MastNodeId, serialization::info::MastNodeType},
+    mast::MastNodeId,
     serde::{ByteReader, Deserializable, DeserializationError, SliceReader},
 };
 
@@ -318,7 +318,7 @@ fn scan_layout_sections<R: OffsetTrackingReader>(
     let mut external_digest_count = 0usize;
     for _ in 0..node_count {
         let node_entry = MastNodeEntry::read_from(source)?;
-        if matches!(node_entry.node_type(), MastNodeType::External) {
+        if matches!(node_entry, MastNodeEntry::External) {
             external_digest_count = external_digest_count.checked_add(1).ok_or_else(|| {
                 DeserializationError::InvalidValue("external digest count overflow".to_string())
             })?;

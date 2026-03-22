@@ -6,10 +6,7 @@ use crate::{
     chiplets::hasher,
     mast::{
         CallNode, DebugInfo, DynNode, JoinNode, LoopNode, SplitNode,
-        serialization::{
-            basic_blocks::BasicBlockDataDecoder, info::MastNodeType,
-            layout::read_fixed_section_entry,
-        },
+        serialization::{basic_blocks::BasicBlockDataDecoder, layout::read_fixed_section_entry},
     },
     serde::{Deserializable, DeserializationError, SliceReader},
 };
@@ -63,7 +60,7 @@ impl ForestDigests {
     ) -> Result<crate::Word, DeserializationError> {
         let digest_slot = self.slot_by_node[index] as usize;
 
-        if matches!(entry.node_type(), MastNodeType::External) {
+        if matches!(entry, MastNodeEntry::External) {
             return read_digest_entry(bytes, layout.external_digest_offset, digest_slot);
         }
 
@@ -208,7 +205,7 @@ fn build_digest_slot_by_node(
 
     for index in 0..layout.node_count {
         let entry = layout.read_node_entry_at(bytes, index)?;
-        if matches!(entry.node_type(), MastNodeType::External) {
+        if matches!(entry, MastNodeEntry::External) {
             slots.push(external_slot);
             external_slot = external_slot.checked_add(1).ok_or_else(|| {
                 DeserializationError::InvalidValue("external digest slot overflow".to_string())
@@ -239,44 +236,44 @@ fn recompute_hash_table(
 
     for index in 0..layout.node_count {
         let entry = layout.read_node_entry_at(bytes, index)?;
-        let computed = match entry.node_type() {
-            MastNodeType::Block { ops_offset } => {
+        let computed = match entry {
+            MastNodeEntry::Block { ops_offset } => {
                 let op_batches = basic_block_data_decoder.decode_operations(ops_offset)?;
                 let op_groups: Vec<Felt> =
                     op_batches.iter().flat_map(|batch| *batch.groups()).collect();
                 hasher::hash_elements(&op_groups)
             },
-            MastNodeType::Join { left_child_id, right_child_id } => {
+            MastNodeEntry::Join { left_child_id, right_child_id } => {
                 let left = checked_child_index(index, left_child_id, layout.node_count)?;
                 let right = checked_child_index(index, right_child_id, layout.node_count)?;
                 hasher::merge_in_domain(&[digests[left], digests[right]], JoinNode::DOMAIN)
             },
-            MastNodeType::Split { if_branch_id, else_branch_id } => {
+            MastNodeEntry::Split { if_branch_id, else_branch_id } => {
                 let on_true = checked_child_index(index, if_branch_id, layout.node_count)?;
                 let on_false = checked_child_index(index, else_branch_id, layout.node_count)?;
                 hasher::merge_in_domain(&[digests[on_true], digests[on_false]], SplitNode::DOMAIN)
             },
-            MastNodeType::Loop { body_id } => {
+            MastNodeEntry::Loop { body_id } => {
                 let body = checked_child_index(index, body_id, layout.node_count)?;
                 hasher::merge_in_domain(&[digests[body], crate::Word::default()], LoopNode::DOMAIN)
             },
-            MastNodeType::Call { callee_id } => {
+            MastNodeEntry::Call { callee_id } => {
                 let callee = checked_child_index(index, callee_id, layout.node_count)?;
                 hasher::merge_in_domain(
                     &[digests[callee], crate::Word::default()],
                     CallNode::CALL_DOMAIN,
                 )
             },
-            MastNodeType::SysCall { callee_id } => {
+            MastNodeEntry::SysCall { callee_id } => {
                 let callee = checked_child_index(index, callee_id, layout.node_count)?;
                 hasher::merge_in_domain(
                     &[digests[callee], crate::Word::default()],
                     CallNode::SYSCALL_DOMAIN,
                 )
             },
-            MastNodeType::Dyn => DynNode::DYN_DEFAULT_DIGEST,
-            MastNodeType::Dyncall => DynNode::DYNCALL_DEFAULT_DIGEST,
-            MastNodeType::External => {
+            MastNodeEntry::Dyn => DynNode::DYN_DEFAULT_DIGEST,
+            MastNodeEntry::Dyncall => DynNode::DYNCALL_DEFAULT_DIGEST,
+            MastNodeEntry::External => {
                 let digest =
                     read_digest_entry(bytes, layout.external_digest_offset, external_digest_index)?;
                 external_digest_index = external_digest_index.checked_add(1).ok_or_else(|| {

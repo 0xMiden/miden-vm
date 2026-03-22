@@ -2247,7 +2247,7 @@ fn locate_single_block_indptr_and_digest_offsets(bytes: &[u8]) -> (usize, usize)
     let view = SerializedMastForest::new(bytes).unwrap();
     let node_entries_start = view.node_entry_offset();
 
-    // node entry: MastNodeType (8 bytes)
+    // node entry: MastNodeEntry (8 bytes)
     let node_type_u64 = u64::from_le_bytes(
         bytes[node_entries_start..node_entries_start + 8]
             .try_into()
