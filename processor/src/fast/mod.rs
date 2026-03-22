@@ -192,11 +192,9 @@ impl FastProcessor {
         execution_output: ExecutionOutput,
         tracer: ExecutionTracer,
     ) -> TraceBuildInputs {
-        TraceBuildInputs::from_execution(
-            program,
-            execution_output,
-            tracer.into_trace_generation_context(),
-        )
+        let mut trace_generation_context = tracer.into_trace_generation_context();
+        trace_generation_context.bind_execution(program.to_info(), &execution_output);
+        TraceBuildInputs::from_execution(program, execution_output, trace_generation_context)
     }
 
     /// Converts a step-wise execution result into the next resume context, if execution stopped.

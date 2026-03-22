@@ -6,7 +6,8 @@ use miden_air::trace::{
 };
 
 use crate::{
-    ContextId, ExecutionError, Felt, MIN_STACK_DEPTH, MemoryError, ONE, ProgramInfo, Word, ZERO,
+    ContextId, ExecutionError, Felt, MIN_STACK_DEPTH, MemoryError, ONE, ProgramInfo, StackOutputs,
+    Word, ZERO,
     advice::AdviceError,
     continuation_stack::ContinuationStack,
     crypto::merkle::MerklePath,
@@ -769,11 +770,51 @@ impl IntoIterator for BitwiseReplay {
 // KERNEL REPLAY
 // ================================================================================================
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ExecutedTraceBinding {
+    program_info: ProgramInfo,
+    stack_outputs: StackOutputs,
+    final_pc_transcript_state: PrecompileTranscriptState,
+    precompile_request_count: usize,
+}
+
+impl ExecutedTraceBinding {
+    pub(crate) fn new(
+        program_info: ProgramInfo,
+        stack_outputs: StackOutputs,
+        final_pc_transcript_state: PrecompileTranscriptState,
+        precompile_request_count: usize,
+    ) -> Self {
+        Self {
+            program_info,
+            stack_outputs,
+            final_pc_transcript_state,
+            precompile_request_count,
+        }
+    }
+
+    pub(crate) fn program_info(&self) -> &ProgramInfo {
+        &self.program_info
+    }
+
+    pub(crate) fn stack_outputs(&self) -> &StackOutputs {
+        &self.stack_outputs
+    }
+
+    pub(crate) fn final_pc_transcript_state(&self) -> PrecompileTranscriptState {
+        self.final_pc_transcript_state
+    }
+
+    pub(crate) fn precompile_request_count(&self) -> usize {
+        self.precompile_request_count
+    }
+}
+
 /// Replay data for kernel operations.
 #[derive(Debug, Default)]
 pub struct KernelReplay {
     kernel_proc_accesses: VecDeque<Word>,
-    executed_program_info: Option<ProgramInfo>,
+    execution_binding: Option<ExecutedTraceBinding>,
 }
 
 impl KernelReplay {
@@ -785,12 +826,12 @@ impl KernelReplay {
         self.kernel_proc_accesses.push_back(proc_hash);
     }
 
-    pub(crate) fn bind_program_info(&mut self, program_info: ProgramInfo) {
-        self.executed_program_info = Some(program_info);
+    pub(crate) fn bind_execution(&mut self, execution_binding: ExecutedTraceBinding) {
+        self.execution_binding = Some(execution_binding);
     }
 
-    pub(crate) fn executed_program_info(&self) -> Option<&ProgramInfo> {
-        self.executed_program_info.as_ref()
+    pub(crate) fn execution_binding(&self) -> Option<&ExecutedTraceBinding> {
+        self.execution_binding.as_ref()
     }
 }
 

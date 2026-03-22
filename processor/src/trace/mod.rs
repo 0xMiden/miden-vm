@@ -51,7 +51,7 @@ pub struct TraceBuildInputs {
     execution_output: ExecutionOutput,
     trace_generation_context: TraceGenerationContext,
     program_info: ProgramInfo,
-    expected_program_info: Option<ProgramInfo>,
+    expected_execution_binding: Option<trace_state::ExecutedTraceBinding>,
 }
 
 impl TraceBuildInputs {
@@ -67,13 +67,13 @@ impl TraceBuildInputs {
         trace_generation_context: TraceGenerationContext,
         program_info: ProgramInfo,
     ) -> Self {
-        let expected_program_info =
-            trace_generation_context.kernel_replay.executed_program_info().cloned();
+        let expected_execution_binding =
+            trace_generation_context.kernel_replay.execution_binding().cloned();
         Self {
             execution_output,
             trace_generation_context,
             program_info,
-            expected_program_info,
+            expected_execution_binding,
         }
     }
 
@@ -86,13 +86,13 @@ impl TraceBuildInputs {
         execution_output: ExecutionOutput,
         trace_generation_context: TraceGenerationContext,
     ) -> Self {
-        let expected_program_info =
-            trace_generation_context.kernel_replay.executed_program_info().cloned();
+        let expected_execution_binding =
+            trace_generation_context.kernel_replay.execution_binding().cloned();
         Self {
             execution_output,
             trace_generation_context,
             program_info: program.to_info(),
-            expected_program_info,
+            expected_execution_binding,
         }
     }
 
@@ -103,10 +103,15 @@ impl TraceBuildInputs {
     ) -> Self {
         let program_info = program.to_info();
         Self {
+            expected_execution_binding: Some(trace_state::ExecutedTraceBinding::new(
+                program_info.clone(),
+                execution_output.stack,
+                execution_output.final_pc_transcript.state(),
+                execution_output.advice.precompile_requests().len(),
+            )),
             execution_output,
             trace_generation_context,
-            program_info: program_info.clone(),
-            expected_program_info: Some(program_info),
+            program_info,
         }
     }
 
@@ -139,11 +144,17 @@ impl TraceBuildInputs {
         trace_generation_context: TraceGenerationContext,
         program_info: ProgramInfo,
     ) -> Self {
+        let expected_execution_binding = trace_state::ExecutedTraceBinding::new(
+            program.to_info(),
+            execution_output.stack,
+            execution_output.final_pc_transcript.state(),
+            execution_output.advice.precompile_requests().len(),
+        );
         Self {
             execution_output,
             trace_generation_context,
             program_info,
-            expected_program_info: Some(program.to_info()),
+            expected_execution_binding: Some(expected_execution_binding),
         }
     }
 }

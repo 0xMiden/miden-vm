@@ -8,16 +8,16 @@ use super::{
     stack::OverflowTable,
     trace_state::{
         AceReplay, AdviceReplay, BitwiseReplay, BlockAddressReplay, BlockStackReplay,
-        CoreTraceFragmentContext, CoreTraceState, DecoderState, ExecutionContextReplay,
-        ExecutionContextSystemInfo, ExecutionReplay, HasherRequestReplay, HasherResponseReplay,
-        KernelReplay, MastForestResolutionReplay, MemoryReadsReplay, MemoryWritesReplay,
-        RangeCheckerReplay, StackOverflowReplay, StackState, SystemState,
+        CoreTraceFragmentContext, CoreTraceState, DecoderState, ExecutedTraceBinding,
+        ExecutionContextReplay, ExecutionContextSystemInfo, ExecutionReplay, HasherRequestReplay,
+        HasherResponseReplay, KernelReplay, MastForestResolutionReplay, MemoryReadsReplay,
+        MemoryWritesReplay, RangeCheckerReplay, StackOverflowReplay, StackState, SystemState,
     },
     utils::split_u32_into_u16,
 };
 use crate::{
-    ContextId, EMPTY_WORD, FastProcessor, Felt, MIN_STACK_DEPTH, ONE, ProgramInfo, RowIndex, Word,
-    ZERO,
+    ContextId, EMPTY_WORD, ExecutionOutput, FastProcessor, Felt, MIN_STACK_DEPTH, ONE, ProgramInfo,
+    RowIndex, Word, ZERO,
     continuation_stack::{Continuation, ContinuationStack},
     crypto::merkle::MerklePath,
     mast::{
@@ -60,6 +60,21 @@ pub struct TraceGenerationContext {
     /// The number of rows per core trace fragment, except for the last fragment which may be
     /// shorter.
     pub fragment_size: usize,
+}
+
+impl TraceGenerationContext {
+    pub(crate) fn bind_execution(
+        &mut self,
+        program_info: ProgramInfo,
+        execution_output: &ExecutionOutput,
+    ) {
+        self.kernel_replay.bind_execution(ExecutedTraceBinding::new(
+            program_info,
+            execution_output.stack,
+            execution_output.final_pc_transcript.state(),
+            execution_output.advice.precompile_requests().len(),
+        ));
+    }
 }
 
 /// Builder for recording the context to generate trace fragments during execution.
@@ -121,8 +136,6 @@ pub struct ExecutionTracer {
     /// Flag set in `start_clock_cycle` when an `EvalCircuit` operation is encountered, consumed
     /// in `finalize_clock_cycle` to record the memory reads performed by the operation.
     is_eval_circuit_op: bool,
-
-    program_info: Option<ProgramInfo>,
 }
 
 impl ExecutionTracer {
@@ -150,15 +163,7 @@ impl ExecutionTracer {
             fragment_size,
             pending_restore_context: false,
             is_eval_circuit_op: false,
-            program_info: None,
         }
-    }
-
-    #[inline(always)]
-    pub(crate) fn new_with_program_info(fragment_size: usize, program_info: ProgramInfo) -> Self {
-        let mut tracer = Self::new(fragment_size);
-        tracer.program_info = Some(program_info);
-        tracer
     }
 
     /// Convert the `ExecutionTracer` into a [TraceGenerationContext] using the data accumulated
@@ -167,10 +172,6 @@ impl ExecutionTracer {
     pub fn into_trace_generation_context(mut self) -> TraceGenerationContext {
         // If there is an ongoing trace state being built, finish it
         self.finish_current_fragment_context();
-
-        if let Some(program_info) = self.program_info.take() {
-            self.kernel.bind_program_info(program_info);
-        }
 
         TraceGenerationContext {
             core_trace_contexts: self.fragment_contexts,

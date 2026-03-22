@@ -1046,6 +1046,57 @@ fn test_build_trace_accepts_bound_trace_build_inputs_new() {
     );
 }
 
+/// Verifies that `build_trace` rejects compatibility bundles that mix an `ExecutionOutput` from a
+/// different run of the same program.
+#[test]
+#[allow(deprecated)]
+fn test_build_trace_rejects_mismatched_execution_output() {
+    const MAX_FRAGMENT_SIZE: usize = 1 << 20;
+    const OTHER_STACK: &[Felt] = &[Felt::new(4), Felt::new(5), Felt::new(6)];
+
+    let program = join_program();
+
+    let processor = FastProcessor::new_with_options(
+        StackInputs::new(DEFAULT_STACK).unwrap(),
+        AdviceInputs::default(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
+            .unwrap(),
+    );
+    let mut host = DefaultHost::default();
+    let (execution_output, trace_generation_context) =
+        processor.execute_trace_inputs_sync(&program, &mut host).unwrap().into_parts();
+
+    let other_processor = FastProcessor::new_with_options(
+        StackInputs::new(OTHER_STACK).unwrap(),
+        AdviceInputs::default(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
+            .unwrap(),
+    );
+    let mut other_host = DefaultHost::default();
+    let (other_execution_output, _) = other_processor
+        .execute_trace_inputs_sync(&program, &mut other_host)
+        .unwrap()
+        .into_parts();
+
+    assert_ne!(execution_output.stack, other_execution_output.stack);
+
+    let result = build_trace(TraceBuildInputs::new(
+        other_execution_output,
+        trace_generation_context,
+        program.to_info(),
+    ));
+
+    assert!(
+        matches!(
+            result,
+            Err(ExecutionError::Internal("trace inputs do not match execution output"))
+        ),
+        "expected execution-output mismatch error, got: {result:?}"
+    );
+}
+
 /// Verifies that `build_trace` rejects tampered `ProgramInfo` even when it preserves the same
 /// entrypoint hash but swaps in a different kernel.
 #[test]

@@ -103,15 +103,24 @@ pub fn build_trace_with_max_len(
         execution_output,
         trace_generation_context,
         program_info,
-        expected_program_info,
+        expected_execution_binding,
     } = inputs;
 
-    let Some(expected_program_info) = expected_program_info else {
+    let Some(expected_execution_binding) = expected_execution_binding else {
         return Err(ExecutionError::Internal("trace inputs are not bound to an executed program"));
     };
 
-    if expected_program_info != program_info {
+    if expected_execution_binding.program_info() != &program_info {
         return Err(ExecutionError::Internal("trace inputs do not match program info"));
+    }
+
+    if expected_execution_binding.stack_outputs() != &execution_output.stack
+        || expected_execution_binding.final_pc_transcript_state()
+            != execution_output.final_pc_transcript.state()
+        || expected_execution_binding.precompile_request_count()
+            != execution_output.advice.precompile_requests().len()
+    {
+        return Err(ExecutionError::Internal("trace inputs do not match execution output"));
     }
 
     let TraceGenerationContext {
