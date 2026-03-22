@@ -117,7 +117,8 @@ pub fn build_trace_with_max_len(
     if expected_execution_binding.stack_outputs() != &execution_output.stack
         || expected_execution_binding.final_pc_transcript_state()
             != execution_output.final_pc_transcript.state()
-        || expected_execution_binding.advice_provider() != &execution_output.advice
+        || expected_execution_binding.advice_provider_fingerprint()
+            != &execution_output.advice.fingerprint()
     {
         return Err(ExecutionError::Internal("trace inputs do not match execution output"));
     }

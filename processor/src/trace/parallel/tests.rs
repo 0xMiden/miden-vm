@@ -1135,7 +1135,10 @@ fn test_build_trace_rejects_mismatched_advice_provider() {
         execution_output.final_pc_transcript.state(),
         other_execution_output.final_pc_transcript.state()
     );
-    assert_ne!(execution_output.advice, other_execution_output.advice);
+    assert_ne!(
+        execution_output.advice.fingerprint(),
+        other_execution_output.advice.fingerprint()
+    );
 
     let result = build_trace(TraceBuildInputs::new(
         other_execution_output,

@@ -107,7 +107,7 @@ impl TraceBuildInputs {
                 program_info.clone(),
                 execution_output.stack,
                 execution_output.final_pc_transcript.state(),
-                execution_output.advice.clone(),
+                execution_output.advice.fingerprint(),
             )),
             execution_output,
             trace_generation_context,
@@ -148,7 +148,7 @@ impl TraceBuildInputs {
             program.to_info(),
             execution_output.stack,
             execution_output.final_pc_transcript.state(),
-            execution_output.advice.clone(),
+            execution_output.advice.fingerprint(),
         );
         Self {
             execution_output,
