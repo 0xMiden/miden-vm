@@ -13,7 +13,8 @@ use miden_air::{
 };
 
 use crate::{
-    AdviceProvider, Felt, MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
+    AdviceProvider, Felt, MIN_STACK_DEPTH, Program, ProgramInfo, StackInputs, StackOutputs, Word,
+    ZERO,
     fast::ExecutionOutput,
     field::{ExtensionField, QuadFelt},
     precompile::{PrecompileRequest, PrecompileTranscript},
@@ -25,7 +26,7 @@ use miden_air::trace::Challenges;
 use utils::{AuxColumnBuilder, TraceFragment};
 
 pub mod chiplets;
-pub mod execution_tracer;
+pub(crate) mod execution_tracer;
 
 mod decoder;
 mod parallel;
@@ -43,6 +44,36 @@ pub use execution_tracer::TraceGenerationContext;
 pub use miden_air::trace::RowIndex;
 pub use parallel::{CORE_TRACE_WIDTH, build_trace, build_trace_with_max_len};
 pub use utils::{ChipletsLengths, TraceLenSummary};
+
+/// Inputs required to build an execution trace from pre-executed data.
+#[derive(Debug)]
+pub struct TraceBuildInputs {
+    pub execution_output: ExecutionOutput,
+    pub trace_generation_context: TraceGenerationContext,
+    pub program_info: ProgramInfo,
+}
+
+impl TraceBuildInputs {
+    pub fn new(
+        execution_output: ExecutionOutput,
+        trace_generation_context: TraceGenerationContext,
+        program_info: ProgramInfo,
+    ) -> Self {
+        Self {
+            execution_output,
+            trace_generation_context,
+            program_info,
+        }
+    }
+
+    pub fn from_program(
+        program: &Program,
+        execution_output: ExecutionOutput,
+        trace_generation_context: TraceGenerationContext,
+    ) -> Self {
+        Self::new(execution_output, trace_generation_context, program.to_info())
+    }
+}
 
 // VM EXECUTION TRACE
 // ================================================================================================

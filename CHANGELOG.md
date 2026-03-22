@@ -5,6 +5,10 @@
 #### Bug Fixes
 
 - Reverted `InvokeKind::ProcRef` back to `InvokeKind::Exec` in `visit_mut_procref` and added an explanatory comment (#2893).
+#### Changes
+
+- [BREAKING] Sync execution and proving APIs now require `SyncHost`; async `Host`, `execute`, and `prove` remain available ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
+- Added `prove_from_trace_sync(...)` for proving from pre-executed trace inputs ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
 
 ## 0.22.0 (2025-03-18)
 
@@ -15,9 +19,6 @@
 - [BREAKING] `build_trace()` no longer assumes valid user input ([#2747](https://github.com/0xMiden/miden-vm/pull/2747)).
 - Added `math::u128` division operations ([#2776](https://github.com/0xMiden/miden-vm/pull/2776)).
 - [BREAKING] Migrated to lifted-STARK backend and `miden-crypto` to v0.23 ([#2783](https://github.com/0xMiden/miden-vm/pull/2783)).
-
-- [BREAKING] Migrate to lifted-STARK backend and `miden-crypto` to v0.23 ([#2783](https://github.com/0xMiden/miden-vm/pull/2783)).
-- [BREAKING] Sync execution and proving APIs now require `SyncHost`; async `Host`, `execute`, and `prove` remain available ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
 
 #### Changes
 
@@ -36,7 +37,6 @@
 - Introduced `build_trace_with_max_len()` which stops building the trace after a given max, and `build_trace()` no longer allocates more than 2^29 rows ([#2809](https://github.com/0xMiden/miden-vm/pull/2809)).
 - `DebugHandler`'s default method implementations are now no-ops (instead of prints) ([#2837](https://github.com/0xMiden/miden-vm/pull/2837)).
 - Added `ExecutionTrace::check_constraints()` for fast debug constraint checking without STARK proving, and migrated tests from `prove_and_verify` ([#2846](https://github.com/0xMiden/miden-vm/pull/2846)).
-- Added `prove_from_trace_sync(...)` for proving from pre-executed trace inputs ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
 - [BREAKING] Updated the dependency on `midenc-hir-type` to 0.5.0, which changes the set of available calling conventions, and adds support for enum types and named struct types. ([#2848](https://github.com/0xMiden/miden-vm/pull/2848))
 - [BREAKING] `StructType::new` now expects an optional name to be specified ([#2848](https://github.com/0xMiden/miden-vm/pull/2848))
 - [BREAKING] `Variant::new` now expects an optional payload type to be specified ([#2848](https://github.com/0xMiden/miden-vm/pull/2848))

@@ -23,7 +23,7 @@ use miden_core::{
 use miden_utils_testing::rand::rand_value;
 
 use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, ExecutionTrace, FastProcessor,
+    AdviceInputs, DefaultHost, ExecutionOptions, ExecutionTrace, FastProcessor, TraceBuildInputs,
     event::NoopEventHandler, trace::build_trace,
 };
 
@@ -1609,7 +1609,12 @@ fn build_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace,
     let (execution_output, trace_generation_context) =
         processor.execute_for_trace_sync(program, &mut host).unwrap();
 
-    let trace = build_trace(execution_output, trace_generation_context, program.to_info()).unwrap();
+    let trace = build_trace(TraceBuildInputs::from_program(
+        program,
+        execution_output,
+        trace_generation_context,
+    ))
+    .unwrap();
 
     // The trace_len_summary().main_trace_len() is the actual program row count (before padding)
     let trace_len = trace.trace_len_summary().main_trace_len();
@@ -1640,7 +1645,12 @@ fn build_call_trace_helper(program: &Program) -> (SystemTrace, DecoderTrace, usi
     let (execution_output, trace_generation_context) =
         processor.execute_for_trace_sync(program, &mut host).unwrap();
 
-    let trace = build_trace(execution_output, trace_generation_context, program.to_info()).unwrap();
+    let trace = build_trace(TraceBuildInputs::from_program(
+        program,
+        execution_output,
+        trace_generation_context,
+    ))
+    .unwrap();
 
     // The trace_len_summary().main_trace_len() is the actual program row count (before padding)
     let trace_len = trace.trace_len_summary().main_trace_len();

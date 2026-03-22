@@ -37,9 +37,8 @@ pub use miden_processor::{
     trace::ExecutionTrace,
 };
 use miden_processor::{
-    DefaultDebugHandler, DefaultHost, ExecutionOutput, FastProcessor, Program,
-    event::EventHandler,
-    trace::{build_trace, execution_tracer::TraceGenerationContext},
+    DefaultDebugHandler, DefaultHost, ExecutionOutput, FastProcessor, Program, TraceBuildInputs,
+    TraceGenerationContext, event::EventHandler, trace::build_trace,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use miden_prover::prove_sync;
@@ -399,7 +398,11 @@ impl Test {
         self.assert_result_with_step_execution(&fast_stack_result);
 
         fast_stack_result.and_then(|(execution_output, trace_generation_ctx)| {
-            let trace = build_trace(execution_output, trace_generation_ctx, program.to_info())?;
+            let trace = build_trace(TraceBuildInputs::from_program(
+                &program,
+                execution_output,
+                trace_generation_ctx,
+            ))?;
 
             assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
             Ok(trace)

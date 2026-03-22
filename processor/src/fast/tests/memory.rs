@@ -51,7 +51,7 @@ fn test_mloadw_success() {
         processor.memory.write_word(ctx, addr, dummy_clk, word_at_addr.into()).unwrap();
 
         let program = simple_program_with_ops(vec![Operation::MLoadW]);
-        let stack_outputs = processor.execute_sync_mut(&program, &mut host).unwrap();
+        let stack_outputs = processor.execute_mut_sync(&program, &mut host).unwrap();
 
         // Memory word[i] maps to stack position i (word[0] at top)
         assert_eq!(
@@ -66,7 +66,7 @@ fn test_mloadw_success() {
         processor.memory.write_word(ctx, addr, dummy_clk, word_at_addr.into()).unwrap();
 
         let program = simple_program_with_ops(vec![Operation::MLoadW]);
-        let stack_outputs = processor.execute_sync_mut(&program, &mut host).unwrap();
+        let stack_outputs = processor.execute_mut_sync(&program, &mut host).unwrap();
 
         assert_eq!(stack_outputs.get_num_elements(16), &vec![ZERO; 16]);
     }
@@ -94,7 +94,7 @@ fn test_mstorew_success() {
         .unwrap(),
     );
     let program = simple_program_with_ops(vec![Operation::MStoreW]);
-    processor.execute_sync_mut(&program, &mut host).unwrap();
+    processor.execute_mut_sync(&program, &mut host).unwrap();
 
     // Ensure that the memory was correctly modified
     assert_eq!(processor.memory.read_word(ctx, addr, clk).unwrap(), word_to_store);
@@ -115,7 +115,7 @@ fn test_mstore_success(#[case] addr: u32, #[case] value_to_store: u32) {
     let mut processor =
         FastProcessor::new(StackInputs::new(&[Felt::from_u32(addr), value_to_store]).unwrap());
     let program = simple_program_with_ops(vec![Operation::MStore]);
-    processor.execute_sync_mut(&program, &mut host).unwrap();
+    processor.execute_mut_sync(&program, &mut host).unwrap();
 
     // Ensure that the memory was correctly modified
     let word_addr = addr - (addr % WORD_SIZE as u32);
@@ -144,7 +144,7 @@ fn test_mload_success(#[case] addr_to_access: u32) {
         .unwrap();
 
     let program = simple_program_with_ops(vec![Operation::MLoad]);
-    let stack_outputs = processor.execute_sync_mut(&program, &mut host).unwrap();
+    let stack_outputs = processor.execute_mut_sync(&program, &mut host).unwrap();
 
     // Ensure that Operation::MLoad correctly reads the value on the stack
     assert_eq!(
@@ -180,7 +180,7 @@ fn test_mstream() {
         .unwrap();
 
     let program = simple_program_with_ops(vec![Operation::MStream]);
-    let stack_outputs = processor.execute_sync_mut(&program, &mut host).unwrap();
+    let stack_outputs = processor.execute_mut_sync(&program, &mut host).unwrap();
 
     // Word at addr 40 goes to positions 0-3, word at addr 44 goes to positions 4-7
     // word[0] at lowest position (top of stack)

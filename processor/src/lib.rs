@@ -58,7 +58,7 @@ pub use miden_core::{
     },
     serde, utils,
 };
-pub use trace::TraceGenerationContext;
+pub use trace::{TraceBuildInputs, TraceGenerationContext};
 
 pub mod advice {
     pub use miden_core::advice::{AdviceInputs, AdviceMap, AdviceStackBuilder};
@@ -108,7 +108,11 @@ pub async fn execute(
     let (execution_output, trace_generation_context) =
         processor.execute_for_trace(program, host).await?;
 
-    let trace = trace::build_trace(execution_output, trace_generation_context, program.to_info())?;
+    let trace = trace::build_trace(trace::TraceBuildInputs::from_program(
+        program,
+        execution_output,
+        trace_generation_context,
+    ))?;
 
     assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
     Ok(trace)
@@ -127,7 +131,11 @@ pub fn execute_sync(
     let (execution_output, trace_generation_context) =
         processor.execute_for_trace_sync(program, host)?;
 
-    let trace = trace::build_trace(execution_output, trace_generation_context, program.to_info())?;
+    let trace = trace::build_trace(trace::TraceBuildInputs::from_program(
+        program,
+        execution_output,
+        trace_generation_context,
+    ))?;
 
     assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
     Ok(trace)

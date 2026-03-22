@@ -30,8 +30,8 @@ pub use miden_air::{DeserializationError, ProcessorAir, PublicInputs, config};
 pub use miden_core::proof::{ExecutionProof, HashFunction};
 pub use miden_processor::{
     ExecutionError, ExecutionOutput, FutureMaybeSend, Host, InputError, ProgramInfo, StackInputs,
-    StackOutputs, SyncHost, TraceGenerationContext, Word, advice::AdviceInputs, crypto, field,
-    serde, utils,
+    StackOutputs, SyncHost, TraceBuildInputs, TraceGenerationContext, Word, advice::AdviceInputs,
+    crypto, field, serde, utils,
 };
 pub use proving_options::ProvingOptions;
 
@@ -63,7 +63,10 @@ pub async fn prove(
     let (execution_output, trace_generation_context) =
         processor.execute_for_trace(program, host).await?;
 
-    prove_from_trace_sync(execution_output, trace_generation_context, program.to_info(), options)
+    prove_from_trace_sync(
+        TraceBuildInputs::from_program(program, execution_output, trace_generation_context),
+        options,
+    )
 }
 
 /// Synchronous wrapper for the async `prove()` function.
@@ -81,7 +84,10 @@ pub fn prove_sync(
     let (execution_output, trace_generation_context) =
         processor.execute_for_trace_sync(program, host)?;
 
-    prove_from_trace_sync(execution_output, trace_generation_context, program.to_info(), options)
+    prove_from_trace_sync(
+        TraceBuildInputs::from_program(program, execution_output, trace_generation_context),
+        options,
+    )
 }
 
 /// Builds an execution trace from pre-executed trace inputs and proves it synchronously.
@@ -90,12 +96,10 @@ pub fn prove_sync(
 /// plus proof generation remain.
 #[instrument("prove_trace_sync", skip_all)]
 pub fn prove_from_trace_sync(
-    execution_output: ExecutionOutput,
-    trace_generation_context: TraceGenerationContext,
-    program_info: ProgramInfo,
+    trace_inputs: TraceBuildInputs,
     options: ProvingOptions,
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
-    let trace = build_trace(execution_output, trace_generation_context, program_info)?;
+    let trace = build_trace(trace_inputs)?;
     prove_execution_trace(trace, options)
 }
 

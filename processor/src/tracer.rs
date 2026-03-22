@@ -21,8 +21,8 @@ use crate::{
 ///
 /// Allows for recording different aspects of the processor's execution. For example, the
 /// [`crate::FastProcessor::execute_for_trace`] execution mode needs to build a
-/// [`crate::fast::execution_tracer::TraceGenerationContext`] which records information necessary to
-/// build the trace at each clock cycle.
+/// [`crate::TraceGenerationContext`] which records information necessary to build the trace at each
+/// clock cycle.
 ///
 /// A useful mental model to differentiate between the processor and the tracer is:
 /// - Processor: maintains and mutates the state of the VM components (system, stack, memory, etc)

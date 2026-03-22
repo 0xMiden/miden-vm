@@ -97,7 +97,7 @@ impl FastProcessor {
     }
 
     #[inline(always)]
-    pub(super) fn op_emit(
+    pub(super) fn op_emit_sync(
         &mut self,
         host: &mut impl SyncHost,
         current_forest: &MastForest,
@@ -117,7 +117,7 @@ impl FastProcessor {
     }
 
     #[inline(always)]
-    pub(super) async fn op_emit_async(
+    pub(super) async fn op_emit(
         &mut self,
         host: &mut impl Host,
         current_forest: &MastForest,

@@ -21,7 +21,7 @@ use rstest::{fixture, rstest};
 
 use super::*;
 use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, HostLibrary,
+    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, HostLibrary, TraceBuildInputs,
     trace::trace_state::MemoryReadsReplay,
 };
 
@@ -334,7 +334,12 @@ fn test_trace_generation_at_fragment_boundaries(
         let (execution_output, trace_fragment_contexts) =
             processor.execute_for_trace_sync(&program, &mut host).unwrap();
 
-        build_trace(execution_output, trace_fragment_contexts, program.to_info()).unwrap()
+        build_trace(TraceBuildInputs::from_program(
+            &program,
+            execution_output,
+            trace_fragment_contexts,
+        ))
+        .unwrap()
     };
 
     let trace_from_single_fragment = {
@@ -351,7 +356,12 @@ fn test_trace_generation_at_fragment_boundaries(
             processor.execute_for_trace_sync(&program, &mut host).unwrap();
         assert!(trace_fragment_contexts.core_trace_contexts.len() == 1);
 
-        build_trace(execution_output, trace_fragment_contexts, program.to_info()).unwrap()
+        build_trace(TraceBuildInputs::from_program(
+            &program,
+            execution_output,
+            trace_fragment_contexts,
+        ))
+        .unwrap()
     };
 
     // Ensure that the trace generated from multiple fragments is identical to the one generated
@@ -528,7 +538,12 @@ fn test_partial_last_fragment_exists_for_h0_inversion_path() {
         "repro precondition requires multiple fragments"
     );
 
-    let trace = build_trace(execution_output, trace_fragment_contexts, program.to_info()).unwrap();
+    let trace = build_trace(TraceBuildInputs::from_program(
+        &program,
+        execution_output,
+        trace_fragment_contexts,
+    ))
+    .unwrap();
     let total_rows_without_halt = trace.main_trace().num_rows() - 1;
 
     assert_ne!(
@@ -560,7 +575,11 @@ fn miri_repro_uninitialized_tail_read_during_h0_inversion() {
 
     assert!(trace_fragment_contexts.core_trace_contexts.len() > 1);
 
-    let _ = build_trace(execution_output, trace_fragment_contexts, program.to_info());
+    let _ = build_trace(TraceBuildInputs::from_program(
+        &program,
+        execution_output,
+        trace_fragment_contexts,
+    ));
 }
 
 /// Creates a library with a single procedure containing just a SWAP operation.
@@ -940,7 +959,11 @@ fn test_build_trace_returns_err_on_empty_memory_reads_replay() {
         ctx.replay.memory_reads = MemoryReadsReplay::default();
     }
 
-    let result = build_trace(execution_output, trace_generation_context, program.to_info());
+    let result = build_trace(TraceBuildInputs::from_program(
+        &program,
+        execution_output,
+        trace_generation_context,
+    ));
     assert!(
         result.is_err(),
         "build_trace should return Err when hasher replay has bad node ID"
@@ -981,7 +1004,11 @@ fn test_build_trace_returns_err_on_bad_node_id_in_hasher_replay() {
         [ZERO; 4].into(),
     );
 
-    let result = build_trace(execution_output, trace_generation_context, program.to_info());
+    let result = build_trace(TraceBuildInputs::from_program(
+        &program,
+        execution_output,
+        trace_generation_context,
+    ));
     assert!(
         result.is_err(),
         "build_trace should return Err when hasher replay has bad node ID"
@@ -1029,9 +1056,7 @@ fn test_build_trace_with_max_len_corner_cases(
         .checked_add_signed(max_trace_len_offset_from_core_trace_len)
         .unwrap();
     let result = build_trace_with_max_len(
-        execution_output,
-        trace_generation_context,
-        program.to_info(),
+        TraceBuildInputs::from_program(&program, execution_output, trace_generation_context),
         max_trace_len,
     );
 
@@ -1075,9 +1100,7 @@ fn test_build_trace_returns_err_on_fragment_size_overflow() {
     trace_generation_context.fragment_size = usize::MAX;
 
     let result = build_trace_with_max_len(
-        execution_output,
-        trace_generation_context,
-        program.to_info(),
+        TraceBuildInputs::from_program(&program, execution_output, trace_generation_context),
         usize::MAX,
     );
 
@@ -1127,9 +1150,7 @@ fn test_build_trace_returns_err_when_chiplets_trace_exceeds_max_len() {
     let max_trace_len = core_trace_rows;
 
     let result = build_trace_with_max_len(
-        execution_output,
-        trace_generation_context,
-        program.to_info(),
+        TraceBuildInputs::from_program(&program, execution_output, trace_generation_context),
         max_trace_len,
     );
 
@@ -1161,7 +1182,11 @@ fn test_build_trace_returns_err_on_empty_core_trace_contexts() {
     // Clear core_trace_contexts to simulate an empty trace.
     trace_generation_context.core_trace_contexts.clear();
 
-    let result = build_trace(execution_output, trace_generation_context, program.to_info());
+    let result = build_trace(TraceBuildInputs::from_program(
+        &program,
+        execution_output,
+        trace_generation_context,
+    ));
 
     assert!(
         matches!(result, Err(ExecutionError::Internal(_))),
