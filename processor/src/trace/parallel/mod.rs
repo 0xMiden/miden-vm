@@ -122,6 +122,7 @@ pub fn build_trace_with_max_len(
         hasher_for_chiplet,
         ace_replay,
         fragment_size,
+        ..
     } = trace_generation_context;
 
     // Before any trace generation, check that the number of core trace rows doesn't exceed the

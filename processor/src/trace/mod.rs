@@ -67,7 +67,7 @@ impl TraceBuildInputs {
         trace_generation_context: TraceGenerationContext,
         program_info: ProgramInfo,
     ) -> Self {
-        let expected_program_info = program_info.clone();
+        let expected_program_info = trace_generation_context.program_info().clone();
         Self {
             execution_output,
             trace_generation_context,
@@ -114,16 +114,17 @@ impl TraceBuildInputs {
 
     #[cfg(test)]
     pub(crate) fn with_program_info(
-        program: &Program,
+        _program: &Program,
         execution_output: ExecutionOutput,
         trace_generation_context: TraceGenerationContext,
         program_info: ProgramInfo,
     ) -> Self {
+        let expected_program_info = trace_generation_context.program_info().clone();
         Self {
             execution_output,
             trace_generation_context,
             program_info,
-            expected_program_info: Some(program.to_info()),
+            expected_program_info: Some(expected_program_info),
         }
     }
 }
