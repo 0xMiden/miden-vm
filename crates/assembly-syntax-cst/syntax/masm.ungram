@@ -1,0 +1,52 @@
+SourceFile = Item*
+
+Item =
+  ModuleDoc
+| Doc
+| Import
+| Constant
+| TypeDecl
+| BeginBlock
+| Procedure
+
+ModuleDoc = DocComment
+Doc = DocComment
+
+Import = "use" Path ("->" Path)? ";"
+Constant = "const" Name "=" Expr
+TypeDecl = ("type" | "enum") Name
+
+BeginBlock = "begin" Block "end"
+
+Procedure = Attribute* Visibility? "proc" Name Signature? Block "end"
+Visibility = "pub"
+
+Attribute = "@" Name ("(" MetaItem* ")")?
+Signature = "(" ParamList? ")" ("->" "(" ParamList? ")")?
+ParamList = Name ("," Name)*
+
+Block = Op*
+
+Op =
+  IfOp
+| WhileOp
+| RepeatOp
+| Instruction
+
+IfOp = "if" "." Name Block ("else" Block)? "end"
+WhileOp = "while" "." Name Block "end"
+RepeatOp = "repeat" "." Expr Block "end"
+
+Instruction = Name ("." InstrSuffix)*
+InstrSuffix = Expr | Name | Range | List
+
+List = "[" Expr ("," Expr)* "]"
+Range = Expr ".." Expr
+
+Expr = Name | Number | String | List
+MetaItem = Name | String | Number
+
+Path = Name ("::" Name)*
+Name = Ident | QuotedIdent | SpecialIdent
+Number = NumberToken
+String = QuotedString
