@@ -1,3 +1,5 @@
+mod formatter;
+
 use std::{
     fs,
     io::{self, Read},
@@ -7,6 +9,8 @@ use std::{
 
 use clap::Parser;
 use miden_assembly_syntax_cst::parse_text;
+
+use self::formatter::format_syntax;
 
 #[derive(Debug, Parser)]
 #[command(name = "miden-format", version, about = "Format Miden Assembly source files")]
@@ -38,12 +42,18 @@ enum CliError {
         #[source]
         source: io::Error,
     },
+    #[error("failed to write formatted source to '{path}': {source}")]
+    WriteFile {
+        path: String,
+        #[source]
+        source: io::Error,
+    },
     #[error("failed to read source from stdin: {0}")]
     ReadStdin(#[source] io::Error),
-    #[error("formatting is not implemented yet; parser and lexer scaffolding are in place")]
-    FormattingUnavailable,
     #[error("syntax errors were found in the provided inputs")]
     SyntaxErrors,
+    #[error("the following inputs are not formatted:\n{0}")]
+    CheckFailed(String),
 }
 
 fn main() -> ExitCode {
@@ -61,8 +71,9 @@ fn run() -> Result<(), CliError> {
     let inputs = collect_inputs(&cli)?;
 
     let mut has_syntax_errors = false;
-    for (path, source) in &inputs {
-        let parse = parse_text(source);
+    let mut formatted_inputs = Vec::with_capacity(inputs.len());
+    for (path, source) in inputs {
+        let parse = parse_text(&source);
         if parse.has_errors() {
             has_syntax_errors = true;
             for diagnostic in parse.diagnostics() {
@@ -75,15 +86,52 @@ fn run() -> Result<(), CliError> {
                     diagnostic.message()
                 );
             }
+            continue;
         }
+
+        formatted_inputs.push((path, source, format_syntax(&parse.syntax())));
     }
 
     if has_syntax_errors {
         return Err(CliError::SyntaxErrors);
     }
 
-    let _ = cli.check;
-    Err(CliError::FormattingUnavailable)
+    if cli.check {
+        let mut mismatches = Vec::new();
+        for (path, source, formatted) in &formatted_inputs {
+            if source != formatted {
+                mismatches.push(path.display().to_string());
+            }
+        }
+
+        if mismatches.is_empty() {
+            return Ok(());
+        }
+
+        for path in &mismatches {
+            eprintln!("would reformat {path}");
+        }
+
+        return Err(CliError::CheckFailed(mismatches.join("\n")));
+    }
+
+    if cli.stdin {
+        if let Some((_, _, formatted)) = formatted_inputs.into_iter().next() {
+            print!("{formatted}");
+        }
+        return Ok(());
+    }
+
+    for (path, source, formatted) in formatted_inputs {
+        if source == formatted {
+            continue;
+        }
+
+        fs::write(&path, formatted)
+            .map_err(|source| CliError::WriteFile { path: path.display().to_string(), source })?;
+    }
+
+    Ok(())
 }
 
 fn collect_inputs(cli: &Cli) -> Result<Vec<(PathBuf, String)>, CliError> {
