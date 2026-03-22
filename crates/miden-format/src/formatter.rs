@@ -236,7 +236,11 @@ fn render_value_declaration(node: &SyntaxNode, indent: usize) -> String {
         render_token_sequence(&combine_tokens(&prefix_tokens, &value_tokens))
     );
 
-    let mut rendered = if line_length(&compact) <= MAX_LINE_WIDTH {
+    let mut rendered = if has_comment_token(&value) {
+        let header = format!("{}{}", indent_string(indent), render_token_sequence(&prefix_tokens));
+        let body = render_expression_with_comments(&value, indent + INDENT_WIDTH).join("\n");
+        format!("{header}\n{body}")
+    } else if line_length(&compact) <= MAX_LINE_WIDTH {
         compact
     } else {
         let header = format!("{}{}", indent_string(indent), render_token_sequence(&prefix_tokens));
@@ -818,6 +822,95 @@ fn render_delimited_group(
     lines
 }
 
+fn render_expression_with_comments(expr: &SyntaxNode, indent: usize) -> Vec<String> {
+    let tokens = expr
+        .descendants_with_tokens()
+        .filter_map(|element| element.into_token())
+        .collect::<Vec<_>>();
+    render_token_stream_with_comments(&tokens, indent, SpacingStyle::Default)
+}
+
+fn render_token_stream_with_comments(
+    tokens: &[SyntaxToken],
+    indent: usize,
+    style: SpacingStyle,
+) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut previous: Option<SyntaxToken> = None;
+    let mut nesting = LineNesting::default();
+    let mut pending_blank_lines = 0usize;
+    let mut just_flushed_line = false;
+
+    for token in tokens {
+        match token.kind() {
+            SyntaxKind::Whitespace => (),
+            SyntaxKind::Newline => {
+                if just_flushed_line {
+                    just_flushed_line = false;
+                    continue;
+                }
+
+                if !current.is_empty() {
+                    lines.push(mem::take(&mut current));
+                    previous = None;
+                    just_flushed_line = true;
+                } else {
+                    pending_blank_lines += 1;
+                }
+            },
+            SyntaxKind::Comment | SyntaxKind::DocComment => {
+                while pending_blank_lines > 0 {
+                    push_blank_line(&mut lines);
+                    pending_blank_lines -= 1;
+                }
+
+                if current.is_empty() {
+                    current.push_str(&indent_string(
+                        indent + nesting.line_indent_offset(token.kind()) * INDENT_WIDTH,
+                    ));
+                    current.push_str(&trimmed_comment(token));
+                } else {
+                    append_inline_comment(&mut current, &trimmed_comment(token));
+                }
+
+                lines.push(mem::take(&mut current));
+                previous = None;
+                just_flushed_line = true;
+            },
+            _ => {
+                while pending_blank_lines > 0 {
+                    push_blank_line(&mut lines);
+                    pending_blank_lines -= 1;
+                }
+                just_flushed_line = false;
+
+                if current.is_empty() {
+                    current.push_str(&indent_string(
+                        indent + nesting.line_indent_offset(token.kind()) * INDENT_WIDTH,
+                    ));
+                }
+
+                if let Some(previous_token) = previous.as_ref()
+                    && needs_space(previous_token, token, style)
+                {
+                    current.push(' ');
+                }
+
+                current.push_str(token.text());
+                previous = Some(token.clone());
+                nesting.bump(token.kind());
+            },
+        }
+    }
+
+    if !current.is_empty() {
+        lines.push(current);
+    }
+
+    lines
+}
+
 fn render_token_sequence(tokens: &[SyntaxToken]) -> String {
     render_token_sequence_with_style(tokens, SpacingStyle::Default)
 }
@@ -826,6 +919,36 @@ fn render_token_sequence(tokens: &[SyntaxToken]) -> String {
 enum SpacingStyle {
     Default,
     TypeBodyItem,
+}
+
+#[derive(Default)]
+struct LineNesting {
+    parens: usize,
+    brackets: usize,
+    braces: usize,
+}
+
+impl LineNesting {
+    fn bump(&mut self, kind: SyntaxKind) {
+        match kind {
+            SyntaxKind::LParen => self.parens += 1,
+            SyntaxKind::RParen => self.parens = self.parens.saturating_sub(1),
+            SyntaxKind::LBracket => self.brackets += 1,
+            SyntaxKind::RBracket => self.brackets = self.brackets.saturating_sub(1),
+            SyntaxKind::LBrace => self.braces += 1,
+            SyntaxKind::RBrace => self.braces = self.braces.saturating_sub(1),
+            _ => (),
+        }
+    }
+
+    fn line_indent_offset(&self, next_kind: SyntaxKind) -> usize {
+        let depth = self.parens + self.brackets + self.braces;
+        if matches!(next_kind, SyntaxKind::RParen | SyntaxKind::RBracket | SyntaxKind::RBrace) {
+            depth.saturating_sub(1)
+        } else {
+            depth
+        }
+    }
 }
 
 fn render_token_sequence_with_style(tokens: &[SyntaxToken], style: SpacingStyle) -> String {
@@ -863,6 +986,12 @@ fn render_path_lines(header: &str, path_tokens: &[SyntaxToken], indent: usize) -
     }
     lines.push(current);
     lines
+}
+
+fn has_comment_token(node: &SyntaxNode) -> bool {
+    node.descendants_with_tokens()
+        .filter_map(|element| element.into_token())
+        .any(|token| matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment))
 }
 
 fn significant_tokens(node: &SyntaxNode) -> Vec<SyntaxToken> {
@@ -1436,6 +1565,52 @@ end
 pub proc long_name(arg: ptr<u8, addrspace(byte)>) # proc
     nop
 end
+";
+
+        assert_eq!(formatted, expected);
+
+        let reparsed = parse_text(&formatted);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+    }
+
+    #[test]
+    fn preserves_comments_inside_multiline_value_expressions() {
+        let source = "\
+const LONG = event(
+    # message
+    foo(bar, baz),
+    # id
+    qux
+)
+
+adv_map TABLE = [
+    # first
+    [1, 2],
+    # second
+    event(foo(bar, baz)),
+]
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let formatted = format_syntax(&parse.syntax());
+        let expected = "\
+const LONG =
+    event(
+        # message
+        foo(bar, baz),
+        # id
+        qux
+    )
+
+adv_map TABLE =
+    [
+        # first
+        [1, 2],
+        # second
+        event(foo(bar, baz)),
+    ]
 ";
 
         assert_eq!(formatted, expected);
