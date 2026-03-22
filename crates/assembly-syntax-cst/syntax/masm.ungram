@@ -6,15 +6,17 @@ Item =
 | Import
 | Constant
 | TypeDecl
+| AdviceMap
 | BeginBlock
 | Procedure
 
 ModuleDoc = DocComment
 Doc = DocComment
 
-Import = "use" Path ("->" Path)? ";"
-Constant = "const" Name "=" Expr
-TypeDecl = ("type" | "enum") Name
+Import = Visibility? "use" Path ("->" Name)?
+Constant = Visibility? "const" Name "=" Expr
+TypeDecl = Visibility? ("type" | "enum") Name TypeBody
+AdviceMap = "adv_map" Name ("(" Expr ")")? "=" Expr
 
 BeginBlock = "begin" Block "end"
 
@@ -43,7 +45,9 @@ InstrSuffix = Expr | Name | Range | List
 List = "[" Expr ("," Expr)* "]"
 Range = Expr ".." Expr
 
-Expr = Name | Number | String | List
+Expr = Name | Number | String | List | Group
+TypeBody = Expr
+Group = "(" Expr* ")" | "[" Expr* "]" | "{" Expr* "}"
 MetaItem = Name | String | Number
 
 Path = Name ("::" Name)*
