@@ -10,6 +10,21 @@
 //! reject hashless payloads. [`crate::mast::UntrustedMastForest`] accepts them and rebuilds
 //! non-external digests before use.
 //!
+//! The main layers fit together like this:
+//!
+//! ```text
+//! wire bytes
+//!     |
+//!     +--> ForestLayout -----------> SerializedMastForest --+
+//!     |        scan offsets             structural view      |
+//!     |                                                     v
+//!     +--> UntrustedMastForest ----validate----> ResolvedSerializedForest ---> MastForest
+//!              bytes + parsed state                digest-backed view            trusted runtime
+//!
+//! MastForestView is the shared random-access API implemented by SerializedMastForest and
+//! MastForest.
+//! ```
+//!
 //! The format is:
 //!
 //! (Metadata)
