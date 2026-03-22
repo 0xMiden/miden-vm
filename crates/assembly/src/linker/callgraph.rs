@@ -323,6 +323,21 @@ mod tests {
         assert_eq!(err.0.into_iter().collect::<Vec<_>>(), &[A2, A3, B2, B3]);
     }
 
+    #[test]
+    fn callgraph_toposort_caller_with_reachable_cycle() {
+        let graph = callgraph_cycle();
+
+        let err = graph
+            .toposort_caller(A1)
+            .expect_err("expected toposort_caller to fail when a reachable cycle exists");
+        assert!(
+            err.0.contains(&A2)
+                || err.0.contains(&B2)
+                || err.0.contains(&B3)
+                || err.0.contains(&A3),
+            "expected cycle error to contain at least one node from the reachable cycle",
+        );
+    }
     /// a::a1 -> a::a2 -> a::a3
     ///            |        ^
     ///            v        |

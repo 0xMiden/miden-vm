@@ -34,7 +34,6 @@
 
 #### Fixes
 - **toposort_caller**: Fixed cycle detection in assembly call graph ([#2871](https://github.com/0xMiden/miden-vm/pull/2871)).
-- **toposort_caller**: Fixed cycle detection in assembly call graph ([#2871](https://github.com/0xMiden/miden-vm/pull/2871)).
 
 - Fixed `Constant::PartialEq` to include `visibility` field in equality comparison, making it consistent with other exportable items (`Procedure`, `TypeAlias`, `EnumType`).
 - Cryptostream operation now correctly sends chiplets bus memory requests ([#2686](https://github.com/0xMiden/miden-vm/pull/2686)).
@@ -100,8 +99,6 @@
 - Define and implement Miden project file format ([#2510](https://github.com/0xMiden/miden-vm/pull/2510)).
 
 #### Fixes
-- **toposort_caller**: Fixed cycle detection in assembly call graph ([#2871](https://github.com/0xMiden/miden-vm/pull/2871)).
-- **toposort_caller**: Fixed cycle detection in assembly call graph ([#2871](https://github.com/0xMiden/miden-vm/pull/2871)).
 
 - Fixed memory chiplet constraint documentation: corrected `f_i` variable definitions, first row flag, and `f_mem_nl` constraint expression ([#2423](https://github.com/0xMiden/miden-vm/pull/2423)).
 - Removed the intentional HALT-insertion bug from the parallel trace generation ([#2484](https://github.com/0xMiden/miden-vm/pull/2484)).
@@ -463,8 +460,6 @@
 - [BREAKING] Replaced `miden_assembly_syntax::Version` with `semver::Version` ([#1946](https://github.com/0xMiden/miden-vm/pull/1946))
 
 #### Fixes
-- **toposort_caller**: Fixed cycle detection in assembly call graph ([#2871](https://github.com/0xMiden/miden-vm/pull/2871)).
-- **toposort_caller**: Fixed cycle detection in assembly call graph ([#2871](https://github.com/0xMiden/miden-vm/pull/2871)).
 
 - Fixed `SourceContent::update` splice logic to prevent panics on single-line edits and respect exclusive end semantics for multi-line edits ([#XXXX](https://github.com/0xMiden/miden-vm/pull/2146)).
 - Truncated nprime.masm output stack to prevent overflow during benchmarks ([#1879](https://github.com/0xMiden/miden-vm/issues/1879)).
@@ -497,8 +492,6 @@
 - Add handling of variable length public inputs to the recursive verifier (#1813).
 
 #### Fixes
-- **toposort_caller**: Fixed cycle detection in assembly call graph ([#2871](https://github.com/0xMiden/miden-vm/pull/2871)).
-- **toposort_caller**: Fixed cycle detection in assembly call graph ([#2871](https://github.com/0xMiden/miden-vm/pull/2871)).
 
 - `miden debug` rewind command no longer panics at clock 0 (#1751)
 - Prevent overflow in ACE circuit evaluation (#1820)
@@ -537,8 +530,6 @@
 - [BREAKING] Renamed `Ident::new_unchecked` and `ProcedureName::new_unchecked` to `from_raw_parts` (#1735).
 
 #### Fixes
-- **toposort_caller**: Fixed cycle detection in assembly call graph ([#2871](https://github.com/0xMiden/miden-vm/pull/2871)).
-- **toposort_caller**: Fixed cycle detection in assembly call graph ([#2871](https://github.com/0xMiden/miden-vm/pull/2871)).
 
 - Fixed various issues with pretty printing of Miden Assembly (#1740).
 
@@ -633,8 +624,6 @@
 - Compile advice injectors down to `Emit` operations (#1581)
 
 #### Fixes
-- **toposort_caller**: Fixed cycle detection in assembly call graph ([#2871](https://github.com/0xMiden/miden-vm/pull/2871)).
-- **toposort_caller**: Fixed cycle detection in assembly call graph ([#2871](https://github.com/0xMiden/miden-vm/pull/2871)).
 
 - Fixed an issue with formatting of blocks in Miden Assembly syntax
 - Fixed the construction of the block hash table (#1506)
@@ -664,8 +653,6 @@
 - Consolidated `BasicBlockNode` constructors and converted assert flow to `MastForestError::EmptyBasicBlock` (#1453).
 
 #### Fixes
-- **toposort_caller**: Fixed cycle detection in assembly call graph ([#2871](https://github.com/0xMiden/miden-vm/pull/2871)).
-- **toposort_caller**: Fixed cycle detection in assembly call graph ([#2871](https://github.com/0xMiden/miden-vm/pull/2871)).
 
 - Fixed an issue with registering non-local procedures in `MemMastForestStore` (#1462).
 - Added a check for circular external node lookups in the processor (#1464).
