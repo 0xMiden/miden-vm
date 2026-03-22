@@ -55,6 +55,26 @@ pub struct TraceBuildInputs {
 }
 
 impl TraceBuildInputs {
+    /// Deprecated compatibility constructor for callers that only retained `ProgramInfo`.
+    ///
+    /// Prefer [`Self::from_program`] or [`crate::FastProcessor::execute_trace_inputs_sync`] when
+    /// the original [`Program`] is still available.
+    #[deprecated(
+        note = "use TraceBuildInputs::from_program() or FastProcessor::execute_trace_inputs*()"
+    )]
+    pub fn new(
+        execution_output: ExecutionOutput,
+        trace_generation_context: TraceGenerationContext,
+        program_info: ProgramInfo,
+    ) -> Self {
+        Self {
+            execution_output,
+            trace_generation_context,
+            program_info,
+            expected_program_info: None,
+        }
+    }
+
     pub fn from_program(
         program: &Program,
         execution_output: ExecutionOutput,
