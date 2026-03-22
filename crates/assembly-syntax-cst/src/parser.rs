@@ -177,10 +177,10 @@ impl<'input> Parser<'input> {
         self.bump_regular_trivia();
         self.parse_import_target();
 
-        self.bump_inline_whitespace();
+        self.bump_regular_trivia();
         if self.at_kind(SyntaxKind::RArrow) {
             self.bump();
-            self.bump_inline_whitespace();
+            self.bump_regular_trivia();
             if self.at_name_like() || self.at_keyword_like() {
                 self.bump();
             } else {
@@ -287,7 +287,7 @@ impl<'input> Parser<'input> {
             self.bump();
         }
 
-        self.bump_inline_whitespace();
+        self.bump_regular_trivia();
         if self.at_name_like() || self.at_keyword_like() {
             self.bump();
         } else {
@@ -297,13 +297,13 @@ impl<'input> Parser<'input> {
         }
 
         loop {
-            self.bump_inline_whitespace();
+            self.bump_regular_trivia();
             if !self.at_kind(SyntaxKind::ColonColon) {
                 break;
             }
 
             self.bump();
-            self.bump_inline_whitespace();
+            self.bump_regular_trivia();
             if self.at_name_like() || self.at_keyword_like() {
                 self.bump();
             } else {
@@ -462,10 +462,31 @@ impl<'input> Parser<'input> {
                     "expected `)` to close procedure results",
                 );
             } else {
-                self.error_here("expected `(` after `->` in procedure signature");
+                self.parse_signature_result_until_line_end();
             }
         }
         self.finish_node();
+    }
+
+    fn parse_signature_result_until_line_end(&mut self) {
+        let start = self.pos;
+        let mut nesting = Nesting::default();
+        while !self.eof() {
+            let kind = self.current_kind().expect("not eof");
+            if nesting.is_root() && matches!(kind, SyntaxKind::Comment | SyntaxKind::DocComment) {
+                break;
+            }
+            if nesting.is_root() && kind == SyntaxKind::Newline {
+                break;
+            }
+
+            nesting = nesting.bump(kind);
+            self.bump();
+        }
+
+        if self.pos == start {
+            self.error_here("expected a result type after `->` in procedure signature");
+        }
     }
 
     fn parse_block(&mut self, terminators: &[&str]) {
@@ -1029,6 +1050,51 @@ adv_map TABLE(0x0200000000000000020000000000000002000000000000000200000000000000
                 .collect::<Vec<_>>(),
             vec!["[", "0x01", ",", "0x02", "]"]
         );
+    }
+
+    #[test]
+    fn parses_unparenthesized_procedure_result_types() {
+        let source = "\
+pub proc println(message: ptr<u8, addrspace(byte)>) -> ptr<u8, addrspace(byte)>
+    nop
+end
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let root = parse.syntax();
+        let source_file = SourceFile::cast(root).expect("source file");
+        let items = source_file.items().collect::<Vec<_>>();
+        assert_eq!(items.len(), 1);
+
+        let Item::Procedure(procedure) = &items[0] else {
+            panic!("expected procedure, got {:?}", items[0]);
+        };
+        assert!(
+            procedure.signature().is_some(),
+            "expected procedure to retain its signature node"
+        );
+    }
+
+    #[test]
+    fn parses_multiline_import_aliases() {
+        let source = "\
+pub use ::miden::core::collections::sorted_array::lowerbound_key_value
+    -> lowerbound_key_value
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let source_file = SourceFile::cast(parse.syntax()).expect("source file");
+        let items = source_file.items().collect::<Vec<_>>();
+        assert_eq!(items.len(), 1);
+
+        let Item::Import(import) = &items[0] else {
+            panic!("expected import, got {:?}", items[0]);
+        };
+        assert_eq!(import.alias_token().expect("alias").text(), "lowerbound_key_value");
     }
 
     #[test]
