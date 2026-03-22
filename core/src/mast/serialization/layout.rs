@@ -295,8 +295,6 @@ fn scan_layout_sections<R: OffsetTrackingReader>(
             MastForest::MAX_NODES
         )));
     }
-    let _decorator_count = source.read_usize()?;
-
     let roots_count = source.read_usize()?;
     let roots_offset = source
         .offset()

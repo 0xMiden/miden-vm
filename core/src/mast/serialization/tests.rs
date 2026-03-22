@@ -889,7 +889,6 @@ fn mast_forest_deserialize_invalid_ops_offset_fails() {
 
     let _: [u8; 8] = reader.read_array().unwrap(); // magic (4) + flags (1) + version (3)
     let _node_count: usize = reader.read().unwrap();
-    let _decorator_count: usize = reader.read().unwrap();
     let _roots: Vec<u32> = Deserializable::read_from(&mut reader).unwrap();
     let _basic_block_data: Vec<u8> = Deserializable::read_from(&mut reader).unwrap();
 
@@ -2003,7 +2002,7 @@ fn test_untrusted_forest_detects_forward_reference() {
 }
 
 #[test]
-fn test_untrusted_forest_remaps_procedure_names_after_hash_recompute() {
+fn test_untrusted_forest_rejects_mismatched_wire_root_hash() {
     let mut forest = MastForest::new();
     let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
         .add_to_forest(&mut forest)
@@ -2024,15 +2023,20 @@ fn test_untrusted_forest_remaps_procedure_names_after_hash_recompute() {
     );
 
     let untrusted = UntrustedMastForest::read_from_bytes(&corrupted).unwrap();
-    let validated = untrusted.validate().unwrap();
+    let result = untrusted.validate();
 
-    assert_eq!(validated[block_id].digest(), expected_digest);
-    assert_eq!(validated.procedure_name(&expected_digest), Some("proc"));
-    assert_eq!(validated.debug_info().num_procedure_names(), 1);
+    assert_matches!(
+        result,
+        Err(MastForestError::HashMismatch {
+            node_id,
+            expected,
+            computed,
+        }) if node_id == block_id && expected == bogus_digest && computed == expected_digest
+    );
 }
 
 #[test]
-fn test_untrusted_forest_keeps_procedure_names_when_only_wire_root_hash_is_corrupted() {
+fn test_untrusted_forest_rejects_invalid_procedure_name_digest_without_remapping() {
     let mut forest = MastForest::new();
     let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
         .add_to_forest(&mut forest)
@@ -2042,25 +2046,18 @@ fn test_untrusted_forest_keeps_procedure_names_when_only_wire_root_hash_is_corru
     forest.insert_procedure_name(expected_digest, "proc".into());
 
     let bytes = forest.to_bytes();
-    let view = SerializedMastForest::new(&bytes).unwrap();
-    let digest_offset = node_hash_digest_offset(&view, block_id.to_usize());
     let bogus_digest: Word = [Felt::new(9), Felt::new(8), Felt::new(7), Felt::new(6)].into();
 
-    let mut corrupted = bytes.clone();
-    bogus_digest.write_into(
-        &mut &mut corrupted[digest_offset..digest_offset + Word::min_serialized_size()],
-    );
+    let corrupted = rewrite_debug_info_procedure_name_digest(&bytes, expected_digest, bogus_digest);
 
     let untrusted = UntrustedMastForest::read_from_bytes(&corrupted).unwrap();
-    let validated = untrusted.validate().unwrap();
+    let result = untrusted.validate();
 
-    assert_eq!(validated[block_id].digest(), expected_digest);
-    assert_eq!(validated.procedure_name(&expected_digest), Some("proc"));
-    assert_eq!(validated.debug_info().num_procedure_names(), 1);
+    assert_matches!(result, Err(MastForestError::InvalidProcedureNameDigest(digest)) if digest == bogus_digest);
 }
 
 #[test]
-fn test_untrusted_forest_preserves_incoming_root_resolution_on_digest_collision() {
+fn test_untrusted_forest_rejects_digest_collision_in_wire_hashes() {
     let mut forest = MastForest::new();
     let left_root = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
         .add_to_forest(&mut forest)
@@ -2085,12 +2082,16 @@ fn test_untrusted_forest_preserves_incoming_root_resolution_on_digest_collision(
     );
 
     let untrusted = UntrustedMastForest::read_from_bytes(&corrupted).unwrap();
-    let validated = untrusted.validate().unwrap();
+    let result = untrusted.validate();
 
-    assert_eq!(validated[left_root].digest(), left_digest);
-    assert_eq!(validated[right_root].digest(), right_digest);
-    assert_eq!(validated.procedure_name(&left_digest), Some("right"));
-    assert_eq!(validated.procedure_name(&right_digest), None);
+    assert_matches!(
+        result,
+        Err(MastForestError::HashMismatch {
+            node_id,
+            expected,
+            computed,
+        }) if node_id == left_root && expected == right_digest && computed == left_digest
+    );
 }
 
 // UNTRUSTED VALIDATION TEST HELPERS
@@ -2237,7 +2238,6 @@ fn locate_single_block_indptr_and_digest_offsets(bytes: &[u8]) -> (usize, usize)
     let node_count: usize = cursor.read().unwrap();
     assert_eq!(node_count, 1);
 
-    let _decorator_count: usize = cursor.read().unwrap();
     let _roots: Vec<u32> = Deserializable::read_from(&mut cursor).unwrap();
 
     // basic block data section: Vec<u8>
@@ -2510,9 +2510,6 @@ fn test_deserialization_rejects_excessive_node_count() {
     // Write excessive node count (MAX_NODES + 1)
     let excessive_count: usize = MastForest::MAX_NODES + 1;
     excessive_count.write_into(&mut bytes);
-
-    // Write decorator count
-    0usize.write_into(&mut bytes);
 
     // Attempt to deserialize - should fail before any large allocation
     let result = MastForest::read_from_bytes(&bytes);

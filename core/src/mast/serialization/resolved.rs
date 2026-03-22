@@ -20,6 +20,10 @@ use crate::{
 /// table. External nodes always read from the external-digest section.
 #[derive(Debug, Clone)]
 struct ForestDigests {
+    /// Dense slot index for each node within its digest section.
+    ///
+    /// External nodes index into the external-digest section. All other nodes index into the
+    /// general node-hash section or the rebuilt hash table.
     slot_by_node: Vec<u32>,
     hash_table: Option<Vec<crate::Word>>,
 }
@@ -195,6 +199,9 @@ fn build_digest_slot_by_node(
     bytes: &[u8],
     layout: &ForestLayout,
 ) -> Result<Vec<u32>, DeserializationError> {
+    // Digest sections are packed densely by node kind rather than by absolute node index.
+    // This scan records, for each node index, which slot to read from in the corresponding digest
+    // source.
     let mut slots = Vec::with_capacity(layout.node_count);
     let mut external_slot = 0u32;
     let mut node_hash_slot = 0u32;

@@ -8,7 +8,8 @@
 //!
 //! Wire flags describe serializer intent, not reader trust policy. Trusted [`MastForest`] reads
 //! reject hashless payloads. [`crate::mast::UntrustedMastForest`] accepts them and rebuilds
-//! non-external digests before use.
+//! non-external digests before use. If a non-hashless payload is sent down the untrusted path,
+//! validation recomputes those digests and requires them to match the serialized values.
 //!
 //! The main layers fit together like this:
 //!
@@ -32,7 +33,6 @@
 //!
 //! (Counts)
 //! - nodes count (`usize`)
-//! - decorators count (`usize`) - 0 if stripped, reserved for future use in lazy loading (#2504)
 //!
 //! (Procedure roots section)
 //! - procedure roots (`Vec<u32>` as MastNodeId values)
@@ -42,12 +42,15 @@
 //!
 //! (Node entries section)
 //! - fixed-width structural node entries (`Vec<MastNodeEntry>`)
+//! - `Block` entries store offsets into the basic-block section above
 //!
 //! (External digest section)
 //! - digests for `External` nodes only (`Vec<Word>`, ordered by node index)
+//! - lookup is dense-by-kind: the Nth external node uses slot N in this section
 //!
 //! (Node hash section - omitted if FLAGS bit 1 is set)
 //! - digests for all non-external nodes (`Vec<Word>`, ordered by node index)
+//! - lookup is also dense-by-kind: the Nth non-external node uses slot N in this section
 //!
 //! (Advice map section)
 //! - Advice map (`AdviceMap`)
@@ -67,6 +70,10 @@
 //! In hashless format, the internal node-hash section is omitted and `HASHLESS` also implies
 //! `STRIPPED`. External node digests still stay on the wire because they cannot be rebuilt from
 //! local structure.
+//!
+//! Readers recover per-node digest lookup by scanning node entries once and building a compact
+//! "slot by node index" table. This preserves random access without forcing all digests into the
+//! same contiguous array on the wire.
 
 #[cfg(test)]
 use alloc::string::ToString;
@@ -168,6 +175,8 @@ const FLAGS_RESERVED_MASK: u8 = 0xfc;
 /// - [0, 0, 3]: Added HASHLESS flag (bit 1). HASHLESS implies STRIPPED. Trusted deserialization
 ///   rejects HASHLESS. Split fixed-width node entries from digest storage. External digests moved
 ///   to a dedicated section. Hashless serialization omits the general node-hash section entirely.
+///   Dropped the serialized decorator-count field because it was not used by the wire layout or
+///   deserializers.
 const VERSION: [u8; 3] = [0, 0, 3];
 
 // MAST FOREST SERIALIZATION/DESERIALIZATION
@@ -201,9 +210,8 @@ impl MastForest {
         // version
         target.write_bytes(&VERSION);
 
-        // node & decorator counts
+        // node count
         target.write_usize(self.nodes.len());
-        target.write_usize(if stripped { 0 } else { self.debug_info.num_decorators() });
 
         // roots
         let roots: Vec<u32> = self.roots.iter().copied().map(u32::from).collect();
@@ -273,12 +281,6 @@ fn serialized_size_hint(forest: &MastForest, stripped: bool, hashless: bool) -> 
 
     let mut size = MAGIC.len() + 1 + VERSION.len();
     size += node_count.get_size_hint();
-    size += if stripped {
-        0usize
-    } else {
-        forest.debug_info.num_decorators()
-    }
-    .get_size_hint();
 
     let roots_len = forest.roots.len();
     size += roots_len.get_size_hint();
@@ -648,7 +650,7 @@ pub(super) fn read_untrusted_with_flags<R: ByteReader>(
 fn log_untrusted_overspecification(flags: WireFlags) {
     if !flags.is_hashless() {
         log::error!(
-            "UntrustedMastForest expected HASHLESS input; supplied artifact includes wire node hashes that will be ignored and recomputed during validation"
+            "UntrustedMastForest expected HASHLESS input; supplied artifact includes wire node hashes, and validation will recompute them and require them to match"
         );
     }
 

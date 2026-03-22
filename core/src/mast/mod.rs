@@ -727,34 +727,6 @@ impl MastForest {
         Ok(())
     }
 
-    fn procedure_name_bindings(&self) -> Vec<(Word, Arc<str>, Option<MastNodeId>)> {
-        self.debug_info
-            .procedure_names()
-            .map(|(digest, name)| (digest, Arc::clone(name), self.find_procedure_root(digest)))
-            .collect()
-    }
-
-    fn remap_procedure_name_bindings(
-        &mut self,
-        bindings: &[(Word, Arc<str>, Option<MastNodeId>)],
-    ) -> Result<(), MastForestError> {
-        self.debug_info.clear_procedure_names();
-        for (digest, name, incoming_root_id) in bindings {
-            let resolved_digest = if let Some(root_id) = incoming_root_id {
-                self.get_node_by_id(*root_id)
-                    .ok_or(MastForestError::NodeIdOverflow(*root_id, self.nodes.len()))?
-                    .digest()
-            } else if self.find_procedure_root(*digest).is_some() {
-                *digest
-            } else {
-                return Err(MastForestError::InvalidProcedureNameDigest(*digest));
-            };
-            self.debug_info.insert_procedure_name(resolved_digest, Arc::clone(name));
-        }
-
-        Ok(())
-    }
-
     /// Validates that all BasicBlockNodes in this forest satisfy the core invariants:
     /// 1. Power-of-two number of groups in each batch
     /// 2. No operation group ends with an operation requiring an immediate value
@@ -770,36 +742,36 @@ impl MastForest {
         self.validate_procedure_name_digests()
     }
 
-    /// Recomputes node hashes in topological order and overwrites node digests.
+    /// Validates that stored node digests match the hashes implied by local structure.
     ///
-    /// For `External` nodes the digest is kept as-is because it is externally provided and cannot
-    /// be reconstructed from local structure alone.
-    fn recompute_node_hashes_in_place(&mut self) -> Result<(), MastForestError> {
-        let procedure_name_bindings = self.procedure_name_bindings();
+    /// For `External` nodes the digest is accepted as-is because it is externally provided and
+    /// cannot be reconstructed from local structure alone.
+    fn validate_node_hashes(&self) -> Result<(), MastForestError> {
         let computed_hashes = self.compute_node_hashes()?;
-        let source_forest = self.clone();
-
-        let mut rebuilt_forest = MastForest::new();
-        rebuilt_forest.debug_info = source_forest.debug_info.clone();
-        rebuilt_forest.advice_map = source_forest.advice_map.clone();
-
-        for (idx, node) in source_forest.nodes.iter().cloned().enumerate() {
-            node.to_builder(&source_forest)
-                .with_digest(computed_hashes[idx])
-                .add_to_forest_relaxed(&mut rebuilt_forest)?;
+        for (node_idx, (node, computed_digest)) in
+            self.nodes.iter().zip(computed_hashes).enumerate()
+        {
+            let expected_digest = node.digest();
+            if expected_digest != computed_digest {
+                return Err(MastForestError::HashMismatch {
+                    node_id: MastNodeId::new_unchecked(node_idx as u32),
+                    expected: expected_digest,
+                    computed: computed_digest,
+                });
+            }
         }
-
-        rebuilt_forest.roots = source_forest.roots.clone();
-        rebuilt_forest.remap_procedure_name_bindings(&procedure_name_bindings)?;
-        rebuilt_forest.commitment_cache = OnceLockCompat::new();
-        *self = rebuilt_forest;
 
         Ok(())
     }
 
     /// Computes node hashes in topological order.
     ///
+    /// The returned vector is aligned with node indices, so `digests[node_id as usize]` is the
+    /// digest of that node.
+    ///
     /// For `External` nodes, the existing digest is returned unchanged.
+    ///
+    /// Returns [`MastForestError::ForwardReference`] if nodes are not in topological order.
     fn compute_node_hashes(&self) -> Result<Vec<Word>, MastForestError> {
         use crate::chiplets::hasher;
 
@@ -1430,10 +1402,10 @@ impl UntrustedMastForest {
     ///
     /// This method performs a complete validation of the deserialized forest:
     ///
-    /// 1. Resolves procedure-name bindings against the incoming root set.
-    /// 2. Recomputes all non-external node hashes and overwrites stored digests.
-    /// 3. Rebinds procedure names to the recomputed root digests.
-    /// 4. Validates structural invariants and topological ordering against the recomputed forest.
+    /// 1. If wire node hashes are present, recomputes all non-external node hashes and requires
+    ///    them to match the serialized digests.
+    /// 2. If the payload is hashless, uses the digests rebuilt during materialization.
+    /// 3. Validates structural invariants, topological ordering, and procedure-name roots.
     ///
     /// # Returns
     ///
@@ -1449,21 +1421,22 @@ impl UntrustedMastForest {
     ///   ([`MastForestError::InvalidProcedureNameDigest`])
     /// - Any node references a child that appears later in the forest
     ///   ([`MastForestError::ForwardReference`])
+    /// - Any non-external wire digest does not match the recomputed digest
+    ///   ([`MastForestError::HashMismatch`])
     /// - Any node's digest cannot be recomputed because structural validation fails first
     ///
     /// Security convention:
-    /// - This validator never trusts serialized digest bytes for non-external nodes.
+    /// - Hashless payloads rebuild non-external digests from structure during materialization.
+    /// - If wire node hashes are present, validation recomputes them and requires them to match.
     /// - External node digests are marshaled as opaque values and are not semantically resolved
     ///   here.
     pub fn validate(self) -> Result<MastForest, MastForestError> {
         let is_hashless = self.layout.is_hashless();
-        let mut forest = self.into_materialized().map_err(MastForestError::Deserialization)?;
+        let forest = self.into_materialized().map_err(MastForestError::Deserialization)?;
 
-        // Step 1: Ensure every non-external digest comes from local structure rather than wire
-        // input. Hashless materialization already rebuilt the digest table, while full/stripped
-        // payloads still need this trust-boundary recomputation here.
+        // Step 1: Validate over-specified wire hashes instead of silently rewriting them.
         if !is_hashless {
-            forest.recompute_node_hashes_in_place()?;
+            forest.validate_node_hashes()?;
         }
 
         // Step 2: Validate the recomputed forest.
