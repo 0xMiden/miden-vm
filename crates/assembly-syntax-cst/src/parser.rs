@@ -177,10 +177,10 @@ impl<'input> Parser<'input> {
         self.bump_regular_trivia();
         self.parse_import_target();
 
-        self.bump_regular_trivia();
+        self.bump_non_comment_trivia();
         if self.at_kind(SyntaxKind::RArrow) {
             self.bump();
-            self.bump_regular_trivia();
+            self.bump_non_comment_trivia();
             if self.at_name_like() || self.at_keyword_like() {
                 self.bump();
             } else {
@@ -287,7 +287,7 @@ impl<'input> Parser<'input> {
             self.bump();
         }
 
-        self.bump_regular_trivia();
+        self.bump_non_comment_trivia();
         if self.at_name_like() || self.at_keyword_like() {
             self.bump();
         } else {
@@ -297,13 +297,13 @@ impl<'input> Parser<'input> {
         }
 
         loop {
-            self.bump_regular_trivia();
+            self.bump_non_comment_trivia();
             if !self.at_kind(SyntaxKind::ColonColon) {
                 break;
             }
 
             self.bump();
-            self.bump_regular_trivia();
+            self.bump_non_comment_trivia();
             if self.at_name_like() || self.at_keyword_like() {
                 self.bump();
             } else {
@@ -372,6 +372,7 @@ impl<'input> Parser<'input> {
     fn parse_begin_block(&mut self) {
         self.start_node(SyntaxKind::BeginBlock);
         self.expect_keyword("begin", "expected `begin`");
+        self.parse_line_tail();
         self.parse_block(&["end"]);
         self.expect_keyword("end", "expected `end` to close `begin` block");
         self.finish_node();
@@ -411,6 +412,7 @@ impl<'input> Parser<'input> {
             self.parse_signature();
         }
 
+        self.parse_line_tail();
         self.parse_block(&["end"]);
         self.expect_keyword("end", "expected `end` to close procedure");
         self.finish_node();
@@ -451,10 +453,10 @@ impl<'input> Parser<'input> {
             "expected `)` to close procedure parameters",
         );
 
-        self.bump_regular_trivia();
+        self.bump_non_comment_trivia();
         if self.at_kind(SyntaxKind::RArrow) {
             self.bump();
-            self.bump_regular_trivia();
+            self.bump_non_comment_trivia();
             if self.at_kind(SyntaxKind::LParen) {
                 self.parse_balanced_group(
                     SyntaxKind::LParen,
@@ -523,9 +525,11 @@ impl<'input> Parser<'input> {
         self.start_node(SyntaxKind::IfOp);
         self.expect_keyword("if", "expected `if`");
         self.parse_structured_header_suffixes();
+        self.parse_line_tail();
         self.parse_block(&["else", "end"]);
         if self.at_keyword("else") {
             self.bump();
+            self.parse_line_tail();
             self.parse_block(&["end"]);
         }
         self.expect_keyword("end", "expected `end` to close `if`");
@@ -536,6 +540,7 @@ impl<'input> Parser<'input> {
         self.start_node(SyntaxKind::WhileOp);
         self.expect_keyword("while", "expected `while`");
         self.parse_structured_header_suffixes();
+        self.parse_line_tail();
         self.parse_block(&["end"]);
         self.expect_keyword("end", "expected `end` to close `while`");
         self.finish_node();
@@ -545,6 +550,7 @@ impl<'input> Parser<'input> {
         self.start_node(SyntaxKind::RepeatOp);
         self.expect_keyword("repeat", "expected `repeat`");
         self.parse_structured_header_suffixes();
+        self.parse_line_tail();
         self.parse_block(&["end"]);
         self.expect_keyword("end", "expected `end` to close `repeat`");
         self.finish_node();
@@ -814,6 +820,12 @@ impl<'input> Parser<'input> {
 
     fn bump_regular_trivia(&mut self) {
         while self.at_regular_trivia() {
+            self.bump();
+        }
+    }
+
+    fn bump_non_comment_trivia(&mut self) {
+        while matches!(self.current_kind(), Some(SyntaxKind::Whitespace | SyntaxKind::Newline)) {
             self.bump();
         }
     }
@@ -1095,6 +1107,57 @@ pub use ::miden::core::collections::sorted_array::lowerbound_key_value
             panic!("expected import, got {:?}", items[0]);
         };
         assert_eq!(import.alias_token().expect("alias").text(), "lowerbound_key_value");
+    }
+
+    #[test]
+    fn keeps_header_comments_on_structured_nodes() {
+        let source = "\
+use ::miden::utils::panic # import
+pub proc long_name(arg: felt) # proc
+    nop
+end
+begin # begin
+    if.true # if
+        nop
+    else # else
+        nop
+    end
+end
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let root = parse.syntax();
+        let procedure = root
+            .descendants()
+            .find(|node| node.kind() == SyntaxKind::Procedure)
+            .expect("procedure");
+        assert!(
+            procedure
+                .children_with_tokens()
+                .filter_map(|element| element.into_token())
+                .any(|token| token.kind() == SyntaxKind::Comment && token.text().contains("proc"))
+        );
+
+        let if_node = root
+            .descendants()
+            .find(|node| node.kind() == SyntaxKind::IfOp)
+            .expect("if node");
+        let if_comments = if_node
+            .children_with_tokens()
+            .filter_map(|element| element.into_token())
+            .filter(|token| token.kind() == SyntaxKind::Comment)
+            .map(|token| token.text().to_string())
+            .collect::<Vec<_>>();
+        assert!(
+            if_comments.iter().any(|comment| comment.contains("if")),
+            "expected header comment on if node, got {if_comments:?}"
+        );
+        assert!(
+            if_comments.iter().any(|comment| comment.contains("else")),
+            "expected else comment on if node, got {if_comments:?}"
+        );
     }
 
     #[test]

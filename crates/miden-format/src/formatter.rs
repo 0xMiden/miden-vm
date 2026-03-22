@@ -184,34 +184,34 @@ fn render_line_form(node: &SyntaxNode, indent: usize) -> String {
 }
 
 fn render_import(import: &Import, indent: usize) -> String {
-    let compact = format!("{}{}", indent_string(indent), render_compact_tokens(import.syntax()));
-    let mut rendered = if line_length(&compact) <= MAX_LINE_WIDTH {
-        compact
-    } else {
-        let Some(path) = import.path() else {
-            return render_line_form(import.syntax(), indent);
-        };
+    let Some(path) = import.path() else {
+        return render_line_form(import.syntax(), indent);
+    };
 
-        let mut header = indent_string(indent);
-        if import.visibility().is_some() {
-            header.push_str("pub ");
-        }
-        header.push_str("use");
+    let mut header = indent_string(indent);
+    if import.visibility().is_some() {
+        header.push_str("pub ");
+    }
+    header.push_str("use");
 
-        let path_tokens = significant_tokens(path.syntax());
-        let alias_tokens = significant_tokens_after_child(import.syntax(), path.syntax());
-        let mut lines = render_path_lines(&header, &path_tokens, indent);
-        if !alias_tokens.is_empty() {
-            let alias = render_token_sequence(&alias_tokens);
-            if let Some(last) = lines.last_mut() {
-                if line_length(last) + 1 + line_length(&alias) <= MAX_LINE_WIDTH {
-                    last.push(' ');
-                    last.push_str(&alias);
-                } else {
-                    lines.push(format!("{}{}", indent_string(indent + INDENT_WIDTH), alias));
-                }
+    let path_tokens = significant_tokens(path.syntax());
+    let alias_tokens = significant_tokens_after_child(import.syntax(), path.syntax());
+    let mut lines = render_path_lines(&header, &path_tokens, indent);
+    if !alias_tokens.is_empty() {
+        let alias = render_token_sequence(&alias_tokens);
+        if let Some(last) = lines.last_mut() {
+            if line_length(last) + 1 + line_length(&alias) <= MAX_LINE_WIDTH {
+                last.push(' ');
+                last.push_str(&alias);
+            } else {
+                lines.push(format!("{}{}", indent_string(indent + INDENT_WIDTH), alias));
             }
         }
+    }
+
+    let mut rendered = if lines.len() == 1 && line_length(&lines[0]) <= MAX_LINE_WIDTH {
+        lines.remove(0)
+    } else {
         lines.join("\n")
     };
 
@@ -338,6 +338,9 @@ fn render_type_body(body: &TypeBody, indent: usize, prefix_width: usize) -> Stri
 
 fn render_begin_block(begin: &BeginBlock, indent: usize) -> String {
     let mut rendered = format!("{}begin", indent_string(indent));
+    if let Some(comment) = comment_before_child_of_kind(begin.syntax(), SyntaxKind::Block, 0) {
+        append_inline_comment(&mut rendered, &comment);
+    }
     if let Some(block) = begin.block() {
         let body = render_block(&block, indent + INDENT_WIDTH);
         if !body.is_empty() {
@@ -374,6 +377,11 @@ fn render_procedure(procedure: &Procedure, indent: usize) -> String {
         lines.extend(render_signature_lines(&header, &signature, indent));
     } else {
         lines.push(header);
+    }
+    if let Some(comment) = comment_before_child_of_kind(procedure.syntax(), SyntaxKind::Block, 0) {
+        if let Some(last_line) = lines.last_mut() {
+            append_inline_comment(last_line, &comment);
+        }
     }
 
     if let Some(block) = procedure.block() {
@@ -600,6 +608,9 @@ fn render_instruction(
 fn render_if(if_op: &IfOp, indent: usize) -> String {
     let mut rendered =
         format!("{}{}", indent_string(indent), render_prefix_before_first_block(if_op.syntax()));
+    if let Some(comment) = comment_before_child_of_kind(if_op.syntax(), SyntaxKind::Block, 0) {
+        append_inline_comment(&mut rendered, &comment);
+    }
 
     if let Some(then_block) = if_op.then_block() {
         let then_body = render_block(&then_block, indent + INDENT_WIDTH);
@@ -611,7 +622,11 @@ fn render_if(if_op: &IfOp, indent: usize) -> String {
 
     if let Some(else_block) = if_op.else_block() {
         rendered.push('\n');
-        rendered.push_str(&format!("{}else", indent_string(indent)));
+        let mut else_line = format!("{}else", indent_string(indent));
+        if let Some(comment) = comment_before_child_of_kind(if_op.syntax(), SyntaxKind::Block, 1) {
+            append_inline_comment(&mut else_line, &comment);
+        }
+        rendered.push_str(&else_line);
         let else_body = render_block(&else_block, indent + INDENT_WIDTH);
         if !else_body.is_empty() {
             rendered.push('\n');
@@ -630,6 +645,9 @@ fn render_while(while_op: &WhileOp, indent: usize) -> String {
         indent_string(indent),
         render_prefix_before_first_block(while_op.syntax())
     );
+    if let Some(comment) = comment_before_child_of_kind(while_op.syntax(), SyntaxKind::Block, 0) {
+        append_inline_comment(&mut rendered, &comment);
+    }
 
     if let Some(body) = while_op.body() {
         let block = render_block(&body, indent + INDENT_WIDTH);
@@ -650,6 +668,9 @@ fn render_repeat(repeat_op: &RepeatOp, indent: usize) -> String {
         indent_string(indent),
         render_prefix_before_first_block(repeat_op.syntax())
     );
+    if let Some(comment) = comment_before_child_of_kind(repeat_op.syntax(), SyntaxKind::Block, 0) {
+        append_inline_comment(&mut rendered, &comment);
+    }
 
     if let Some(body) = repeat_op.body() {
         let block = render_block(&body, indent + INDENT_WIDTH);
@@ -1024,6 +1045,38 @@ fn direct_comment_token(node: &SyntaxNode) -> Option<String> {
         .map(|token| trimmed_comment(&token))
 }
 
+fn comment_before_child_of_kind(
+    node: &SyntaxNode,
+    child_kind: SyntaxKind,
+    occurrence: usize,
+) -> Option<String> {
+    let mut comments = None;
+    let mut seen = 0usize;
+
+    for element in node.children_with_tokens() {
+        match element {
+            NodeOrToken::Node(child) => {
+                if child.kind() == child_kind {
+                    if seen == occurrence {
+                        return comments;
+                    }
+                    seen += 1;
+                }
+                comments = None;
+            },
+            NodeOrToken::Token(token) => match token.kind() {
+                SyntaxKind::Comment | SyntaxKind::DocComment => {
+                    comments = Some(trimmed_comment(&token));
+                },
+                SyntaxKind::Whitespace | SyntaxKind::Newline => (),
+                _ => (),
+            },
+        }
+    }
+
+    None
+}
+
 fn emit_leading_layout(lines: &mut Vec<String>, entry: &NodeLayout, indent: usize) {
     if entry.blank_lines_before > 0 && !lines.is_empty() {
         push_blank_line(lines);
@@ -1334,6 +1387,58 @@ end
 
         assert_eq!(formatted, expected);
         assert!(formatted.lines().all(|line| line.len() <= MAX_LINE_WIDTH));
+
+        let reparsed = parse_text(&formatted);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+    }
+
+    #[test]
+    fn preserves_root_import_spacing_and_structured_header_comments() {
+        let source = "\
+use ::miden::utils::panic # import
+
+begin # begin
+ if.true # if
+  while.true # while
+   repeat.2 # repeat
+    nop
+   end
+   end
+ else # else
+  nop
+ end
+end
+
+pub proc long_name(arg: ptr<u8, addrspace(byte)>) # proc
+    nop
+end
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let formatted = format_syntax(&parse.syntax());
+        let expected = "\
+use ::miden::utils::panic # import
+
+begin # begin
+    if.true # if
+        while.true # while
+            repeat.2 # repeat
+                nop
+            end
+        end
+    else # else
+        nop
+    end
+end
+
+pub proc long_name(arg: ptr<u8, addrspace(byte)>) # proc
+    nop
+end
+";
+
+        assert_eq!(formatted, expected);
 
         let reparsed = parse_text(&formatted);
         assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
