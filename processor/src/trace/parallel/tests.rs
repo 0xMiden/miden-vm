@@ -1013,10 +1013,11 @@ fn test_build_trace_returns_err_on_mismatched_program_info() {
     );
 }
 
-/// Verifies that `build_trace` rejects compatibility bundles created via `TraceBuildInputs::new`.
+/// Verifies that `build_trace` accepts a compatibility bundle created via `TraceBuildInputs::new`
+/// when it reuses an authentic execution context and matching `ProgramInfo`.
 #[test]
 #[allow(deprecated)]
-fn test_build_trace_rejects_unbound_trace_build_inputs_new() {
+fn test_build_trace_accepts_bound_trace_build_inputs_new() {
     const MAX_FRAGMENT_SIZE: usize = 1 << 20;
 
     let program = basic_block_program_small();
@@ -1032,18 +1033,16 @@ fn test_build_trace_rejects_unbound_trace_build_inputs_new() {
     let (execution_output, trace_generation_context) =
         processor.execute_trace_inputs_sync(&program, &mut host).unwrap().into_parts();
 
-    let result = build_trace(TraceBuildInputs::new(
+    let trace = build_trace(TraceBuildInputs::new(
         execution_output,
         trace_generation_context,
         program.to_info(),
-    ));
+    ))
+    .unwrap();
 
     assert!(
-        matches!(
-            result,
-            Err(ExecutionError::Internal("trace inputs do not match program info"))
-        ),
-        "expected unbound-trace-inputs error, got: {result:?}"
+        trace.program_hash() == &program.hash(),
+        "expected compatibility constructor to preserve the executed program binding"
     );
 }
 
@@ -1081,10 +1080,11 @@ fn test_build_trace_returns_err_on_mismatched_kernel_with_same_program_hash() {
     );
 }
 
-/// Verifies that `build_trace` rejects compatibility bundles created via `from_program()`.
+/// Verifies that `build_trace` rejects compatibility bundles created via `from_program()` when the
+/// supplied program does not match the authentic execution context.
 #[test]
 #[allow(deprecated)]
-fn test_build_trace_rejects_unbound_trace_build_inputs_from_program() {
+fn test_build_trace_rejects_mismatched_trace_build_inputs_from_program() {
     const MAX_FRAGMENT_SIZE: usize = 1 << 20;
 
     let program = basic_block_program_small();
@@ -1108,11 +1108,8 @@ fn test_build_trace_rejects_unbound_trace_build_inputs_from_program() {
     ));
 
     assert!(
-        matches!(
-            result,
-            Err(ExecutionError::Internal("trace inputs are not bound to an executed program"))
-        ),
-        "expected unbound-trace-inputs error, got: {result:?}"
+        matches!(result, Err(ExecutionError::Internal("trace inputs do not match program info"))),
+        "expected program-info mismatch error, got: {result:?}"
     );
 }
 

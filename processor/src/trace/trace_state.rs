@@ -6,7 +6,7 @@ use miden_air::trace::{
 };
 
 use crate::{
-    ContextId, ExecutionError, Felt, MIN_STACK_DEPTH, MemoryError, ONE, Word, ZERO,
+    ContextId, ExecutionError, Felt, MIN_STACK_DEPTH, MemoryError, ONE, ProgramInfo, Word, ZERO,
     advice::AdviceError,
     continuation_stack::ContinuationStack,
     crypto::merkle::MerklePath,
@@ -773,6 +773,7 @@ impl IntoIterator for BitwiseReplay {
 #[derive(Debug, Default)]
 pub struct KernelReplay {
     kernel_proc_accesses: VecDeque<Word>,
+    executed_program_info: Option<ProgramInfo>,
 }
 
 impl KernelReplay {
@@ -782,6 +783,14 @@ impl KernelReplay {
     /// Records the procedure hash of a syscall.
     pub fn record_kernel_proc_access(&mut self, proc_hash: Word) {
         self.kernel_proc_accesses.push_back(proc_hash);
+    }
+
+    pub(crate) fn bind_program_info(&mut self, program_info: ProgramInfo) {
+        self.executed_program_info = Some(program_info);
+    }
+
+    pub(crate) fn executed_program_info(&self) -> Option<&ProgramInfo> {
+        self.executed_program_info.as_ref()
     }
 }
 

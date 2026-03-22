@@ -73,7 +73,10 @@ impl FastProcessor {
         program: &Program,
         host: &mut impl SyncHost,
     ) -> Result<TraceBuildInputs, ExecutionError> {
-        let mut tracer = ExecutionTracer::new(self.options.core_trace_fragment_size());
+        let mut tracer = ExecutionTracer::new_with_program_info(
+            self.options.core_trace_fragment_size(),
+            program.to_info(),
+        );
         let execution_output = self.execute_with_tracer_sync(program, host, &mut tracer)?;
         Ok(Self::trace_result_from_parts(program, execution_output, tracer))
     }
@@ -86,7 +89,10 @@ impl FastProcessor {
         program: &Program,
         host: &mut impl Host,
     ) -> Result<TraceBuildInputs, ExecutionError> {
-        let mut tracer = ExecutionTracer::new(self.options.core_trace_fragment_size());
+        let mut tracer = ExecutionTracer::new_with_program_info(
+            self.options.core_trace_fragment_size(),
+            program.to_info(),
+        );
         let execution_output = self.execute_with_tracer(program, host, &mut tracer).await?;
         Ok(Self::trace_result_from_parts(program, execution_output, tracer))
     }

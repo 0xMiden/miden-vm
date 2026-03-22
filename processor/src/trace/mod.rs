@@ -67,11 +67,13 @@ impl TraceBuildInputs {
         trace_generation_context: TraceGenerationContext,
         program_info: ProgramInfo,
     ) -> Self {
+        let expected_program_info =
+            trace_generation_context.kernel_replay.executed_program_info().cloned();
         Self {
             execution_output,
             trace_generation_context,
             program_info,
-            expected_program_info: None,
+            expected_program_info,
         }
     }
 
@@ -84,12 +86,13 @@ impl TraceBuildInputs {
         execution_output: ExecutionOutput,
         trace_generation_context: TraceGenerationContext,
     ) -> Self {
-        let program_info = program.to_info();
+        let expected_program_info =
+            trace_generation_context.kernel_replay.executed_program_info().cloned();
         Self {
             execution_output,
             trace_generation_context,
-            program_info: program_info.clone(),
-            expected_program_info: Some(program_info),
+            program_info: program.to_info(),
+            expected_program_info,
         }
     }
 
