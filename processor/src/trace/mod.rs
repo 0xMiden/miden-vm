@@ -51,30 +51,22 @@ pub struct TraceBuildInputs {
     execution_output: ExecutionOutput,
     trace_generation_context: TraceGenerationContext,
     program_info: ProgramInfo,
-    program_hash: Word,
+    expected_program_info: Option<ProgramInfo>,
 }
 
 impl TraceBuildInputs {
-    pub(crate) fn new(
-        program_hash: Word,
-        execution_output: ExecutionOutput,
-        trace_generation_context: TraceGenerationContext,
-        program_info: ProgramInfo,
-    ) -> Self {
-        Self {
-            execution_output,
-            trace_generation_context,
-            program_info,
-            program_hash,
-        }
-    }
-
-    pub(crate) fn from_program(
+    pub fn from_program(
         program: &Program,
         execution_output: ExecutionOutput,
         trace_generation_context: TraceGenerationContext,
     ) -> Self {
-        Self::new(program.hash(), execution_output, trace_generation_context, program.to_info())
+        let program_info = program.to_info();
+        Self {
+            execution_output,
+            trace_generation_context,
+            program_info: program_info.clone(),
+            expected_program_info: Some(program_info),
+        }
     }
 
     pub fn execution_output(&self) -> &ExecutionOutput {
@@ -89,10 +81,29 @@ impl TraceBuildInputs {
         &self.program_info
     }
 
+    pub(crate) fn into_parts(self) -> (ExecutionOutput, TraceGenerationContext) {
+        (self.execution_output, self.trace_generation_context)
+    }
+
     #[cfg(any(test, feature = "testing"))]
     #[allow(dead_code)]
     pub(crate) fn trace_generation_context_mut(&mut self) -> &mut TraceGenerationContext {
         &mut self.trace_generation_context
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_program_info(
+        program: &Program,
+        execution_output: ExecutionOutput,
+        trace_generation_context: TraceGenerationContext,
+        program_info: ProgramInfo,
+    ) -> Self {
+        Self {
+            execution_output,
+            trace_generation_context,
+            program_info,
+            expected_program_info: Some(program.to_info()),
+        }
     }
 }
 

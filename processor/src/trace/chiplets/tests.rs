@@ -138,7 +138,7 @@ fn build_trace(
         Program::with_kernel(mast_forest.into(), basic_block_id, kernel)
     };
 
-    let trace_inputs = processor.execute_for_trace_sync(&program, &mut host).unwrap();
+    let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
     let trace = crate::trace::build_trace(trace_inputs).unwrap();
 
     let trace_len = trace.get_trace_len();

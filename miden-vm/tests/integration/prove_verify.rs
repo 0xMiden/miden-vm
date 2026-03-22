@@ -243,7 +243,7 @@ mod fast_parallel {
         let fast_processor =
             FastProcessor::new_with_options(stack_inputs, advice_inputs.clone(), options);
         let trace_inputs = fast_processor
-            .execute_for_trace_sync(&program, &mut host)
+            .execute_trace_inputs_sync(&program, &mut host)
             .expect("Fast processor execution failed");
 
         let fast_stack_outputs = trace_inputs.execution_output().stack;

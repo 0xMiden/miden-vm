@@ -99,12 +99,12 @@ async fn fast_processor_execute_for_trace_async_matches_sync() {
 
     let mut sync_host = DefaultHost::default();
     let sync_trace_inputs = FastProcessor::new(stack_inputs)
-        .execute_for_trace_sync(&program, &mut sync_host)
+        .execute_trace_inputs_sync(&program, &mut sync_host)
         .unwrap();
 
     let mut async_host = DefaultHost::default();
     let async_trace_inputs = FastProcessor::new(stack_inputs)
-        .execute_for_trace(&program, &mut async_host)
+        .execute_trace_inputs(&program, &mut async_host)
         .await
         .unwrap();
 

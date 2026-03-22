@@ -391,7 +391,7 @@ impl Test {
                     .with_core_trace_fragment_size(FRAGMENT_SIZE)
                     .unwrap(),
             );
-            fast_processor.execute_for_trace_sync(&program, &mut host)
+            fast_processor.execute_trace_inputs_sync(&program, &mut host)
         };
 
         // compare fast and slow processors' stack outputs

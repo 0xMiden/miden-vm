@@ -78,7 +78,7 @@ fn build_trace(c: &mut Criterion) {
                         },
                         |(mut host, program, processor)| async move {
                             let trace_inputs =
-                                processor.execute_for_trace(&program, &mut host).await.unwrap();
+                                processor.execute_trace_inputs(&program, &mut host).await.unwrap();
                             let trace = trace::build_trace(trace_inputs).unwrap();
                             black_box(trace);
                         },

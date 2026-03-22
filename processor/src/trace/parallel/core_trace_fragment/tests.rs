@@ -1606,7 +1606,7 @@ fn build_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace,
     let mut host = DefaultHost::default();
     host.register_handler(EMIT_EVENT, Arc::new(NoopEventHandler)).unwrap();
 
-    let trace_inputs = processor.execute_for_trace_sync(program, &mut host).unwrap();
+    let trace_inputs = processor.execute_trace_inputs_sync(program, &mut host).unwrap();
     let trace = build_trace(trace_inputs).unwrap();
 
     // The trace_len_summary().main_trace_len() is the actual program row count (before padding)
@@ -1635,7 +1635,7 @@ fn build_call_trace_helper(program: &Program) -> (SystemTrace, DecoderTrace, usi
     );
     let mut host = DefaultHost::default();
 
-    let trace_inputs = processor.execute_for_trace_sync(program, &mut host).unwrap();
+    let trace_inputs = processor.execute_trace_inputs_sync(program, &mut host).unwrap();
     let trace = build_trace(trace_inputs).unwrap();
 
     // The trace_len_summary().main_trace_len() is the actual program row count (before padding)

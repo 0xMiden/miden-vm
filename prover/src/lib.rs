@@ -60,7 +60,7 @@ pub async fn prove(
     let processor =
         FastProcessor::new_with_options(stack_inputs, advice_inputs, *options.execution_options());
 
-    let trace_inputs = processor.execute_for_trace(program, host).await?;
+    let trace_inputs = processor.execute_trace_inputs(program, host).await?;
     prove_from_trace_sync(trace_inputs, options)
 }
 
@@ -76,7 +76,7 @@ pub fn prove_sync(
     let processor =
         FastProcessor::new_with_options(stack_inputs, advice_inputs, *options.execution_options());
 
-    let trace_inputs = processor.execute_for_trace_sync(program, host)?;
+    let trace_inputs = processor.execute_trace_inputs_sync(program, host)?;
     prove_from_trace_sync(trace_inputs, options)
 }
 

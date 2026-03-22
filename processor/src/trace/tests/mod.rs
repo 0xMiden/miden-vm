@@ -38,7 +38,7 @@ pub fn build_trace_from_program(program: &Program, stack_inputs: &[u64]) -> Exec
             .with_core_trace_fragment_size(TEST_TRACE_FRAGMENT_SIZE)
             .unwrap(),
     );
-    let trace_inputs = processor.execute_for_trace_sync(program, &mut host).unwrap();
+    let trace_inputs = processor.execute_trace_inputs_sync(program, &mut host).unwrap();
     build_trace(trace_inputs).unwrap()
 }
 
@@ -80,6 +80,6 @@ pub fn build_trace_from_ops_with_inputs(
             .with_core_trace_fragment_size(TEST_TRACE_FRAGMENT_SIZE)
             .unwrap(),
     );
-    let trace_inputs = processor.execute_for_trace_sync(&program, &mut host).unwrap();
+    let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
     build_trace(trace_inputs).unwrap()
 }

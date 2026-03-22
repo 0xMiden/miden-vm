@@ -157,7 +157,7 @@ fn run_masp_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
         .with_options(exec_options);
 
     let trace_inputs = processor
-        .execute_for_trace_sync(&program, &mut host)
+        .execute_trace_inputs_sync(&program, &mut host)
         .wrap_err("Failed to execute program")?;
     let trace = build_trace(trace_inputs).wrap_err("Failed to build trace")?;
 
@@ -224,7 +224,7 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
         .with_options(exec_options);
 
     let trace_inputs = processor
-        .execute_for_trace_sync(&program, &mut host)
+        .execute_trace_inputs_sync(&program, &mut host)
         .wrap_err("Failed to execute program")?;
     let trace = build_trace(trace_inputs).wrap_err("Failed to build trace")?;
 
