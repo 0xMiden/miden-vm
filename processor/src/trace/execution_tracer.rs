@@ -16,8 +16,7 @@ use super::{
     utils::split_u32_into_u16,
 };
 use crate::{
-    ContextId, EMPTY_WORD, FastProcessor, Felt, MIN_STACK_DEPTH, ONE, ProgramInfo, RowIndex, Word,
-    ZERO,
+    ContextId, EMPTY_WORD, FastProcessor, Felt, MIN_STACK_DEPTH, ONE, RowIndex, Word, ZERO,
     continuation_stack::{Continuation, ContinuationStack},
     crypto::merkle::MerklePath,
     mast::{
@@ -47,7 +46,6 @@ struct StateSnapshot {
 pub struct TraceGenerationContext {
     /// The list of trace fragment contexts built during execution.
     pub core_trace_contexts: Vec<CoreTraceFragmentContext>,
-    pub program_info: ProgramInfo,
 
     // Replays that contain additional data needed to generate the range checker and chiplets
     // columns.
@@ -122,13 +120,12 @@ pub struct ExecutionTracer {
     /// Flag set in `start_clock_cycle` when an `EvalCircuit` operation is encountered, consumed
     /// in `finalize_clock_cycle` to record the memory reads performed by the operation.
     is_eval_circuit_op: bool,
-    program_info: ProgramInfo,
 }
 
 impl ExecutionTracer {
     /// Creates a new `ExecutionTracer` with the given fragment size.
     #[inline(always)]
-    pub fn new(fragment_size: usize, program_info: ProgramInfo) -> Self {
+    pub fn new(fragment_size: usize) -> Self {
         Self {
             state_snapshot: None,
             overflow_table: OverflowTable::default(),
@@ -150,7 +147,6 @@ impl ExecutionTracer {
             fragment_size,
             pending_restore_context: false,
             is_eval_circuit_op: false,
-            program_info,
         }
     }
 
@@ -170,7 +166,6 @@ impl ExecutionTracer {
             hasher_for_chiplet: self.hasher_for_chiplet,
             ace_replay: self.ace,
             fragment_size: self.fragment_size,
-            program_info: self.program_info,
         }
     }
 
@@ -429,12 +424,6 @@ impl ExecutionTracer {
             let new_overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
             self.overflow_replay.record_pop_overflow(popped_value, new_overflow_addr);
         }
-    }
-}
-
-impl TraceGenerationContext {
-    pub fn program_info(&self) -> &ProgramInfo {
-        &self.program_info
     }
 }
 

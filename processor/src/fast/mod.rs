@@ -192,7 +192,7 @@ impl FastProcessor {
         execution_output: ExecutionOutput,
         tracer: ExecutionTracer,
     ) -> TraceBuildInputs {
-        TraceBuildInputs::from_program(
+        TraceBuildInputs::from_execution(
             program,
             execution_output,
             tracer.into_trace_generation_context(),

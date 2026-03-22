@@ -106,10 +106,11 @@ pub fn build_trace_with_max_len(
         expected_program_info,
     } = inputs;
 
-    if expected_program_info
-        .as_ref()
-        .is_some_and(|expected_program_info| expected_program_info != &program_info)
-    {
+    let Some(expected_program_info) = expected_program_info else {
+        return Err(ExecutionError::Internal("trace inputs are not bound to an executed program"));
+    };
+
+    if expected_program_info != program_info {
         return Err(ExecutionError::Internal("trace inputs do not match program info"));
     }
 
@@ -122,7 +123,6 @@ pub fn build_trace_with_max_len(
         hasher_for_chiplet,
         ace_replay,
         fragment_size,
-        ..
     } = trace_generation_context;
 
     // Before any trace generation, check that the number of core trace rows doesn't exceed the

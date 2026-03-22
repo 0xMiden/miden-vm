@@ -57,26 +57,42 @@ pub struct TraceBuildInputs {
 impl TraceBuildInputs {
     /// Deprecated compatibility constructor for callers that only retained `ProgramInfo`.
     ///
-    /// Prefer [`Self::from_program`] or [`crate::FastProcessor::execute_trace_inputs_sync`] when
-    /// the original [`Program`] is still available.
+    /// Prefer [`crate::FastProcessor::execute_trace_inputs_sync`] when the original execution can
+    /// be rerun.
     #[deprecated(
-        note = "use TraceBuildInputs::from_program() or FastProcessor::execute_trace_inputs*()"
+        note = "use FastProcessor::execute_trace_inputs*() to get execution-bound trace inputs"
     )]
     pub fn new(
         execution_output: ExecutionOutput,
         trace_generation_context: TraceGenerationContext,
         program_info: ProgramInfo,
     ) -> Self {
-        let expected_program_info = trace_generation_context.program_info().clone();
         Self {
             execution_output,
             trace_generation_context,
             program_info,
-            expected_program_info: Some(expected_program_info),
+            expected_program_info: None,
         }
     }
 
+    /// Deprecated compatibility constructor for callers that only retained a `Program`.
+    #[deprecated(
+        note = "use FastProcessor::execute_trace_inputs*() to get execution-bound trace inputs"
+    )]
     pub fn from_program(
+        program: &Program,
+        execution_output: ExecutionOutput,
+        trace_generation_context: TraceGenerationContext,
+    ) -> Self {
+        Self {
+            execution_output,
+            trace_generation_context,
+            program_info: program.to_info(),
+            expected_program_info: None,
+        }
+    }
+
+    pub(crate) fn from_execution(
         program: &Program,
         execution_output: ExecutionOutput,
         trace_generation_context: TraceGenerationContext,
@@ -114,17 +130,16 @@ impl TraceBuildInputs {
 
     #[cfg(test)]
     pub(crate) fn with_program_info(
-        _program: &Program,
+        program: &Program,
         execution_output: ExecutionOutput,
         trace_generation_context: TraceGenerationContext,
         program_info: ProgramInfo,
     ) -> Self {
-        let expected_program_info = trace_generation_context.program_info().clone();
         Self {
             execution_output,
             trace_generation_context,
             program_info,
-            expected_program_info: Some(expected_program_info),
+            expected_program_info: Some(program.to_info()),
         }
     }
 }

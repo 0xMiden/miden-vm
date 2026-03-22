@@ -1013,6 +1013,40 @@ fn test_build_trace_returns_err_on_mismatched_program_info() {
     );
 }
 
+/// Verifies that `build_trace` rejects compatibility bundles created via `TraceBuildInputs::new`.
+#[test]
+#[allow(deprecated)]
+fn test_build_trace_rejects_unbound_trace_build_inputs_new() {
+    const MAX_FRAGMENT_SIZE: usize = 1 << 20;
+
+    let program = basic_block_program_small();
+
+    let processor = FastProcessor::new_with_options(
+        StackInputs::new(DEFAULT_STACK).unwrap(),
+        AdviceInputs::default(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
+            .unwrap(),
+    );
+    let mut host = DefaultHost::default();
+    let (execution_output, trace_generation_context) =
+        processor.execute_trace_inputs_sync(&program, &mut host).unwrap().into_parts();
+
+    let result = build_trace(TraceBuildInputs::new(
+        execution_output,
+        trace_generation_context,
+        program.to_info(),
+    ));
+
+    assert!(
+        matches!(
+            result,
+            Err(ExecutionError::Internal("trace inputs are not bound to an executed program"))
+        ),
+        "expected unbound-trace-inputs error, got: {result:?}"
+    );
+}
+
 /// Verifies that `build_trace` rejects tampered `ProgramInfo` even when it preserves the same
 /// entrypoint hash but swaps in a different kernel.
 #[test]
@@ -1044,6 +1078,41 @@ fn test_build_trace_returns_err_on_mismatched_kernel_with_same_program_hash() {
     assert!(
         matches!(result, Err(ExecutionError::Internal("trace inputs do not match program info"))),
         "expected program-info mismatch error, got: {result:?}"
+    );
+}
+
+/// Verifies that `build_trace` rejects compatibility bundles created via `from_program()`.
+#[test]
+#[allow(deprecated)]
+fn test_build_trace_rejects_unbound_trace_build_inputs_from_program() {
+    const MAX_FRAGMENT_SIZE: usize = 1 << 20;
+
+    let program = basic_block_program_small();
+    let other_program = join_program();
+
+    let processor = FastProcessor::new_with_options(
+        StackInputs::new(DEFAULT_STACK).unwrap(),
+        AdviceInputs::default(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
+            .unwrap(),
+    );
+    let mut host = DefaultHost::default();
+    let (execution_output, trace_generation_context) =
+        processor.execute_trace_inputs_sync(&program, &mut host).unwrap().into_parts();
+
+    let result = build_trace(TraceBuildInputs::from_program(
+        &other_program,
+        execution_output,
+        trace_generation_context,
+    ));
+
+    assert!(
+        matches!(
+            result,
+            Err(ExecutionError::Internal("trace inputs are not bound to an executed program"))
+        ),
+        "expected unbound-trace-inputs error, got: {result:?}"
     );
 }
 
