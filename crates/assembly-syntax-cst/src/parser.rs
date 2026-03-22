@@ -104,7 +104,10 @@ impl<'input> Parser<'input> {
             return;
         }
 
-        if self.at_kind(SyntaxKind::At) || self.at_keyword("pub") || self.at_keyword("proc") {
+        if self.at_kind(SyntaxKind::At)
+            || self.at_keyword("proc")
+            || self.at_prefixed_keyword("pub", "proc")
+        {
             self.seen_non_doc_form = true;
             self.parse_procedure();
             return;
@@ -116,21 +119,31 @@ impl<'input> Parser<'input> {
             return;
         }
 
-        if self.at_keyword("use") {
+        if self.at_keyword("use") || self.at_prefixed_keyword("pub", "use") {
             self.seen_non_doc_form = true;
-            self.parse_opaque_top_level_item(SyntaxKind::Import);
+            self.parse_import();
             return;
         }
 
-        if self.at_keyword("const") {
+        if self.at_keyword("const") || self.at_prefixed_keyword("pub", "const") {
             self.seen_non_doc_form = true;
-            self.parse_opaque_top_level_item(SyntaxKind::Constant);
+            self.parse_constant();
             return;
         }
 
-        if self.at_keyword("type") || self.at_keyword("enum") {
+        if self.at_keyword("type")
+            || self.at_keyword("enum")
+            || self.at_prefixed_keyword("pub", "type")
+            || self.at_prefixed_keyword("pub", "enum")
+        {
             self.seen_non_doc_form = true;
-            self.parse_opaque_top_level_item(SyntaxKind::TypeDecl);
+            self.parse_type_decl();
+            return;
+        }
+
+        if self.at_keyword("adv_map") {
+            self.seen_non_doc_form = true;
+            self.parse_advice_map();
             return;
         }
 
@@ -153,8 +166,178 @@ impl<'input> Parser<'input> {
         self.finish_node();
     }
 
-    fn parse_opaque_top_level_item(&mut self, kind: SyntaxKind) {
-        self.start_node(kind);
+    fn parse_import(&mut self) {
+        self.start_node(SyntaxKind::Import);
+
+        if self.at_keyword("pub") {
+            self.parse_visibility();
+        }
+
+        self.expect_keyword("use", "expected `use` in import declaration");
+        self.bump_regular_trivia();
+        self.parse_import_target();
+
+        self.bump_inline_whitespace();
+        if self.at_kind(SyntaxKind::RArrow) {
+            self.bump();
+            self.bump_inline_whitespace();
+            if self.at_name_like() || self.at_keyword_like() {
+                self.bump();
+            } else {
+                self.error_here("expected an alias name after `->`");
+            }
+        }
+
+        self.parse_line_tail();
+        self.finish_node();
+    }
+
+    fn parse_constant(&mut self) {
+        self.start_node(SyntaxKind::Constant);
+
+        if self.at_keyword("pub") {
+            self.parse_visibility();
+        }
+
+        self.expect_keyword("const", "expected `const` in constant declaration");
+        self.bump_regular_trivia();
+        if self.at_name_like() || self.at_keyword_like() {
+            self.bump();
+        } else {
+            self.error_here("expected a constant name");
+        }
+
+        self.expect_kind(SyntaxKind::Equal, "expected `=` in constant declaration");
+        self.parse_expr_until_line_end();
+        self.parse_line_tail();
+        self.finish_node();
+    }
+
+    fn parse_type_decl(&mut self) {
+        self.start_node(SyntaxKind::TypeDecl);
+
+        if self.at_keyword("pub") {
+            self.parse_visibility();
+        }
+
+        self.bump_regular_trivia();
+        if self.at_keyword("type") || self.at_keyword("enum") {
+            self.bump();
+        } else {
+            self.error_here("expected `type` or `enum`");
+            self.finish_node();
+            return;
+        }
+
+        self.bump_regular_trivia();
+        if self.at_name_like() || self.at_keyword_like() {
+            self.bump();
+        } else {
+            self.error_here("expected a type name");
+        }
+
+        self.bump_regular_trivia();
+        if self.at_kind(SyntaxKind::Equal) || self.at_kind(SyntaxKind::Colon) {
+            self.parse_type_body();
+        } else {
+            self.error_here("expected `=` or `:` in type declaration");
+        }
+
+        self.finish_node();
+    }
+
+    fn parse_advice_map(&mut self) {
+        self.start_node(SyntaxKind::AdviceMap);
+        self.expect_keyword("adv_map", "expected `adv_map`");
+        self.bump_regular_trivia();
+        if self.at_name_like() || self.at_keyword_like() {
+            self.bump();
+        } else {
+            self.error_here("expected an advice-map name");
+        }
+
+        self.bump_inline_whitespace();
+        if self.at_kind(SyntaxKind::LParen) {
+            self.parse_balanced_group(
+                SyntaxKind::LParen,
+                SyntaxKind::RParen,
+                "expected `)` to close advice-map key",
+            );
+        }
+
+        self.expect_kind(SyntaxKind::Equal, "expected `=` in advice-map declaration");
+        self.parse_expr_until_line_end();
+        self.parse_line_tail();
+        self.finish_node();
+    }
+
+    fn parse_import_target(&mut self) {
+        self.bump_regular_trivia();
+        if self.at_kind(SyntaxKind::Number) {
+            self.bump();
+            return;
+        }
+
+        self.parse_path();
+    }
+
+    fn parse_path(&mut self) {
+        self.start_node(SyntaxKind::Path);
+        if self.at_kind(SyntaxKind::ColonColon) {
+            self.bump();
+        }
+
+        self.bump_inline_whitespace();
+        if self.at_name_like() || self.at_keyword_like() {
+            self.bump();
+        } else {
+            self.error_here("expected an import path");
+            self.finish_node();
+            return;
+        }
+
+        loop {
+            self.bump_inline_whitespace();
+            if !self.at_kind(SyntaxKind::ColonColon) {
+                break;
+            }
+
+            self.bump();
+            self.bump_inline_whitespace();
+            if self.at_name_like() || self.at_keyword_like() {
+                self.bump();
+            } else {
+                self.error_here("expected a path segment after `::`");
+                break;
+            }
+        }
+
+        self.finish_node();
+    }
+
+    fn parse_expr_until_line_end(&mut self) {
+        self.bump_regular_trivia();
+        self.start_node(SyntaxKind::Expr);
+
+        let mut nesting = Nesting::default();
+        while !self.eof() {
+            let kind = self.current_kind().expect("not eof");
+            if nesting.is_root() && matches!(kind, SyntaxKind::Comment | SyntaxKind::DocComment) {
+                break;
+            }
+            if nesting.is_root() && kind == SyntaxKind::Newline {
+                break;
+            }
+
+            nesting = nesting.bump(kind);
+            self.bump();
+        }
+
+        self.finish_node();
+    }
+
+    fn parse_type_body(&mut self) {
+        self.start_node(SyntaxKind::TypeBody);
 
         let mut nesting = Nesting::default();
         while !self.eof() {
@@ -171,6 +354,19 @@ impl<'input> Parser<'input> {
         }
 
         self.finish_node();
+    }
+
+    fn parse_line_tail(&mut self) {
+        loop {
+            match self.current_kind() {
+                Some(SyntaxKind::Whitespace) => self.bump(),
+                Some(SyntaxKind::Comment | SyntaxKind::DocComment) => {
+                    self.bump();
+                    break;
+                },
+                _ => break,
+            }
+        }
     }
 
     fn parse_begin_block(&mut self) {
@@ -527,7 +723,7 @@ impl<'input> Parser<'input> {
             || (token.kind() == SyntaxKind::Ident
                 && matches!(
                     token.text(),
-                    "begin" | "const" | "enum" | "proc" | "pub" | "type" | "use"
+                    "adv_map" | "begin" | "const" | "enum" | "proc" | "pub" | "type" | "use"
                 ))
     }
 
@@ -559,6 +755,17 @@ impl<'input> Parser<'input> {
 
     fn at_keyword(&self, keyword: &str) -> bool {
         matches!(self.current(), Some(token) if token.kind() == SyntaxKind::Ident && token.text() == keyword)
+    }
+
+    fn at_prefixed_keyword(&self, prefix: &str, keyword: &str) -> bool {
+        if !self.at_keyword(prefix) {
+            return false;
+        }
+
+        matches!(
+            self.next_relevant_top_level_token(self.pos + 1).and_then(|index| self.tokens.get(index)),
+            Some(token) if token.kind() == SyntaxKind::Ident && token.text() == keyword
+        )
     }
 
     fn at_regular_trivia(&self) -> bool {
@@ -697,15 +904,22 @@ fn punctuation_continues_instruction(kind: SyntaxKind) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::{parse_text, syntax::SyntaxKind};
+    use rowan::ast::AstNode;
+
+    use crate::{
+        ast::{Item, SourceFile},
+        parse_text,
+        syntax::SyntaxKind,
+    };
 
     #[test]
     fn parses_top_level_forms_and_nested_structured_ops() {
         let source = "\
 #! docs
-use foo::bar;
-const X = 1
-type FeltAlias = felt
+pub use foo::bar -> baz
+pub const X = 1
+pub type FeltAlias = felt
+adv_map TABLE = [0x01, 0x02]
 begin
     if.true
         repeat.4
@@ -734,6 +948,7 @@ end
                 SyntaxKind::Import,
                 SyntaxKind::Constant,
                 SyntaxKind::TypeDecl,
+                SyntaxKind::AdviceMap,
                 SyntaxKind::BeginBlock,
                 SyntaxKind::Procedure,
             ]
@@ -742,6 +957,78 @@ end
         assert!(root.descendants().any(|node| node.kind() == SyntaxKind::IfOp));
         assert!(root.descendants().any(|node| node.kind() == SyntaxKind::RepeatOp));
         assert!(root.descendants().any(|node| node.kind() == SyntaxKind::WhileOp));
+    }
+
+    #[test]
+    fn exposes_typed_wrappers_for_structured_top_level_forms() {
+        let source = "\
+pub use miden::core::mem -> memory
+pub const EVENT = event(\"miden::event\")
+pub enum Bool : u8 {
+    FALSE,
+    TRUE = 1,
+}
+adv_map TABLE(0x0200000000000000020000000000000002000000000000000200000000000000) = [0x01, 0x02]
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let source_file = SourceFile::cast(parse.syntax()).expect("source file");
+        let items = source_file.items().collect::<Vec<_>>();
+        assert_eq!(items.len(), 4);
+
+        let Item::Import(import) = &items[0] else {
+            panic!("expected import, got {:?}", items[0]);
+        };
+        assert_eq!(
+            import
+                .path()
+                .expect("import path")
+                .segments()
+                .map(|segment| segment.text().to_string())
+                .collect::<Vec<_>>(),
+            vec!["miden", "core", "mem"]
+        );
+        assert_eq!(import.alias_token().expect("alias").text(), "memory");
+
+        let Item::Constant(constant) = &items[1] else {
+            panic!("expected constant, got {:?}", items[1]);
+        };
+        assert_eq!(constant.name_token().expect("constant name").text(), "EVENT");
+        assert_eq!(
+            constant
+                .expr()
+                .expect("constant expr")
+                .significant_tokens()
+                .map(|token| token.text().to_string())
+                .collect::<Vec<_>>(),
+            vec!["event", "(", "\"miden::event\"", ")"]
+        );
+
+        let Item::TypeDecl(type_decl) = &items[2] else {
+            panic!("expected type declaration, got {:?}", items[2]);
+        };
+        assert_eq!(type_decl.keyword_token().expect("type keyword").text(), "enum");
+        assert_eq!(type_decl.name_token().expect("type name").text(), "Bool");
+        assert!(
+            type_decl.body().is_some(),
+            "expected enum declaration to expose a structured type body"
+        );
+
+        let Item::AdviceMap(advice_map) = &items[3] else {
+            panic!("expected advice map, got {:?}", items[3]);
+        };
+        assert_eq!(advice_map.name_token().expect("advice map name").text(), "TABLE");
+        assert_eq!(
+            advice_map
+                .value_expr()
+                .expect("advice map value")
+                .significant_tokens()
+                .map(|token| token.text().to_string())
+                .collect::<Vec<_>>(),
+            vec!["[", "0x01", ",", "0x02", "]"]
+        );
     }
 
     #[test]
