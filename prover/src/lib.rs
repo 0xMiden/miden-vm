@@ -60,13 +60,8 @@ pub async fn prove(
     let processor =
         FastProcessor::new_with_options(stack_inputs, advice_inputs, *options.execution_options());
 
-    let (execution_output, trace_generation_context) =
-        processor.execute_for_trace(program, host).await?;
-
-    prove_from_trace_sync(
-        TraceBuildInputs::from_program(program, execution_output, trace_generation_context),
-        options,
-    )
+    let trace_inputs = processor.execute_for_trace(program, host).await?;
+    prove_from_trace_sync(trace_inputs, options)
 }
 
 /// Synchronous wrapper for the async `prove()` function.
@@ -81,13 +76,8 @@ pub fn prove_sync(
     let processor =
         FastProcessor::new_with_options(stack_inputs, advice_inputs, *options.execution_options());
 
-    let (execution_output, trace_generation_context) =
-        processor.execute_for_trace_sync(program, host)?;
-
-    prove_from_trace_sync(
-        TraceBuildInputs::from_program(program, execution_output, trace_generation_context),
-        options,
-    )
+    let trace_inputs = processor.execute_for_trace_sync(program, host)?;
+    prove_from_trace_sync(trace_inputs, options)
 }
 
 /// Builds an execution trace from pre-executed trace inputs and proves it synchronously.

@@ -48,13 +48,15 @@ pub use utils::{ChipletsLengths, TraceLenSummary};
 /// Inputs required to build an execution trace from pre-executed data.
 #[derive(Debug)]
 pub struct TraceBuildInputs {
-    pub execution_output: ExecutionOutput,
-    pub trace_generation_context: TraceGenerationContext,
-    pub program_info: ProgramInfo,
+    execution_output: ExecutionOutput,
+    trace_generation_context: TraceGenerationContext,
+    program_info: ProgramInfo,
+    program_hash: Word,
 }
 
 impl TraceBuildInputs {
-    pub fn new(
+    pub(crate) fn new(
+        program_hash: Word,
         execution_output: ExecutionOutput,
         trace_generation_context: TraceGenerationContext,
         program_info: ProgramInfo,
@@ -63,15 +65,34 @@ impl TraceBuildInputs {
             execution_output,
             trace_generation_context,
             program_info,
+            program_hash,
         }
     }
 
-    pub fn from_program(
+    pub(crate) fn from_program(
         program: &Program,
         execution_output: ExecutionOutput,
         trace_generation_context: TraceGenerationContext,
     ) -> Self {
-        Self::new(execution_output, trace_generation_context, program.to_info())
+        Self::new(program.hash(), execution_output, trace_generation_context, program.to_info())
+    }
+
+    pub fn execution_output(&self) -> &ExecutionOutput {
+        &self.execution_output
+    }
+
+    pub fn trace_generation_context(&self) -> &TraceGenerationContext {
+        &self.trace_generation_context
+    }
+
+    pub fn program_info(&self) -> &ProgramInfo {
+        &self.program_info
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    #[allow(dead_code)]
+    pub(crate) fn trace_generation_context_mut(&mut self) -> &mut TraceGenerationContext {
+        &mut self.trace_generation_context
     }
 }
 

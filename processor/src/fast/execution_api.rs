@@ -14,7 +14,7 @@ use super::{
     step::{BreakReason, NeverStopper, ResumeContext, StepStopper},
 };
 use crate::{
-    ExecutionError, ExecutionOutput, Host, Stopper, SyncHost, TraceGenerationContext,
+    ExecutionError, ExecutionOutput, Host, Stopper, SyncHost, TraceBuildInputs,
     continuation_stack::ContinuationStack,
     errors::{MapExecErr, MapExecErrNoCtx, OperationError},
     execution::{
@@ -59,13 +59,10 @@ impl FastProcessor {
     /// let program = Assembler::default().assemble_program("begin push.1 drop end").unwrap();
     /// let mut host = DefaultHost::default();
     ///
-    /// let (execution_output, ctx) = FastProcessor::new(StackInputs::default())
+    /// let trace_inputs = FastProcessor::new(StackInputs::default())
     ///     .execute_for_trace_sync(&program, &mut host)
     ///     .unwrap();
-    /// let trace = miden_processor::trace::build_trace(
-    ///     miden_processor::trace::TraceBuildInputs::from_program(&program, execution_output, ctx),
-    /// )
-    /// .unwrap();
+    /// let trace = miden_processor::trace::build_trace(trace_inputs).unwrap();
     ///
     /// assert_eq!(*trace.program_hash(), program.hash());
     /// ```
@@ -74,10 +71,10 @@ impl FastProcessor {
         self,
         program: &Program,
         host: &mut impl SyncHost,
-    ) -> Result<(ExecutionOutput, TraceGenerationContext), ExecutionError> {
+    ) -> Result<TraceBuildInputs, ExecutionError> {
         let mut tracer = ExecutionTracer::new(self.options.core_trace_fragment_size());
         let execution_output = self.execute_with_tracer_sync(program, host, &mut tracer)?;
-        Ok(Self::trace_result_from_parts(execution_output, tracer))
+        Ok(Self::trace_result_from_parts(program, execution_output, tracer))
     }
 
     /// Async variant of [`Self::execute_for_trace_sync`] for async hosts.
@@ -87,10 +84,10 @@ impl FastProcessor {
         self,
         program: &Program,
         host: &mut impl Host,
-    ) -> Result<(ExecutionOutput, TraceGenerationContext), ExecutionError> {
+    ) -> Result<TraceBuildInputs, ExecutionError> {
         let mut tracer = ExecutionTracer::new(self.options.core_trace_fragment_size());
         let execution_output = self.execute_with_tracer(program, host, &mut tracer).await?;
-        Ok(Self::trace_result_from_parts(execution_output, tracer))
+        Ok(Self::trace_result_from_parts(program, execution_output, tracer))
     }
 
     /// Executes the given program with the provided tracer using an async host.
@@ -533,6 +530,17 @@ impl FastProcessor {
             &NeverStopper,
         );
         Self::stack_result_from_flow(flow)
+    }
+
+    /// Deprecated compatibility alias for [`Self::execute_mut_sync`].
+    #[cfg(any(test, feature = "testing"))]
+    #[deprecated(note = "renamed to execute_mut_sync")]
+    pub fn execute_sync_mut(
+        &mut self,
+        program: &Program,
+        host: &mut impl SyncHost,
+    ) -> Result<StackOutputs, ExecutionError> {
+        self.execute_mut_sync(program, host)
     }
 
     /// Async variant of [`Self::execute_mut_sync`].

@@ -205,8 +205,7 @@ mod fast_parallel {
         proof::{ExecutionProof, HashFunction},
     };
     use miden_processor::{
-        ExecutionOptions, FastProcessor, StackInputs, TraceBuildInputs, advice::AdviceInputs,
-        trace::build_trace,
+        ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs, trace::build_trace,
     };
     use miden_prover::{config, prove_stark};
     use miden_verifier::verify;
@@ -243,16 +242,14 @@ mod fast_parallel {
             .unwrap();
         let fast_processor =
             FastProcessor::new_with_options(stack_inputs, advice_inputs.clone(), options);
-        let (execution_output, trace_context) = fast_processor
+        let trace_inputs = fast_processor
             .execute_for_trace_sync(&program, &mut host)
             .expect("Fast processor execution failed");
 
-        let fast_stack_outputs = execution_output.stack;
+        let fast_stack_outputs = trace_inputs.execution_output().stack;
 
         // Build trace using parallel trace generation
-        let trace =
-            build_trace(TraceBuildInputs::from_program(&program, execution_output, trace_context))
-                .unwrap();
+        let trace = build_trace(trace_inputs).unwrap();
 
         // Convert trace to row-major format for proving
         let trace_matrix = trace.to_row_major_matrix();

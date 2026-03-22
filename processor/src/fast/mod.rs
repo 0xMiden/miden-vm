@@ -17,7 +17,7 @@ use miden_core::{
 
 use crate::{
     AdviceInputs, AdviceProvider, BaseHost, ContextId, ExecutionError, ExecutionOptions,
-    ProcessorState, TraceGenerationContext,
+    ProcessorState, TraceBuildInputs,
     continuation_stack::{Continuation, ContinuationStack},
     errors::MapExecErrNoCtx,
     trace::execution_tracer::ExecutionTracer,
@@ -188,10 +188,15 @@ impl FastProcessor {
     /// Pairs execution output with the trace inputs captured by the tracer.
     #[inline(always)]
     fn trace_result_from_parts(
+        program: &Program,
         execution_output: ExecutionOutput,
         tracer: ExecutionTracer,
-    ) -> (ExecutionOutput, TraceGenerationContext) {
-        (execution_output, tracer.into_trace_generation_context())
+    ) -> TraceBuildInputs {
+        TraceBuildInputs::from_program(
+            program,
+            execution_output,
+            tracer.into_trace_generation_context(),
+        )
     }
 
     /// Converts a step-wise execution result into the next resume context, if execution stopped.

@@ -79,13 +79,10 @@ mod tests;
 /// let program = Assembler::default().assemble_program("begin push.1 drop end").unwrap();
 /// let mut host = DefaultHost::default();
 ///
-/// let (execution_output, ctx) = FastProcessor::new(StackInputs::default())
+/// let trace_inputs = FastProcessor::new(StackInputs::default())
 ///     .execute_for_trace_sync(&program, &mut host)
 ///     .unwrap();
-/// let trace = miden_processor::trace::build_trace(
-///     miden_processor::trace::TraceBuildInputs::from_program(&program, execution_output, ctx),
-/// )
-/// .unwrap();
+/// let trace = miden_processor::trace::build_trace(trace_inputs).unwrap();
 ///
 /// assert_eq!(*trace.program_hash(), program.hash());
 /// ```
@@ -106,7 +103,12 @@ pub fn build_trace_with_max_len(
         execution_output,
         trace_generation_context,
         program_info,
+        program_hash,
     } = inputs;
+
+    if *program_info.program_hash() != program_hash {
+        return Err(ExecutionError::Internal("trace inputs do not match program info"));
+    }
 
     let TraceGenerationContext {
         core_trace_contexts,

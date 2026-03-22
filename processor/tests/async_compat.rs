@@ -98,19 +98,28 @@ async fn fast_processor_execute_for_trace_async_matches_sync() {
     let stack_inputs = StackInputs::new(&[Felt::new(3)]).unwrap();
 
     let mut sync_host = DefaultHost::default();
-    let (sync_output, sync_ctx) = FastProcessor::new(stack_inputs)
+    let sync_trace_inputs = FastProcessor::new(stack_inputs)
         .execute_for_trace_sync(&program, &mut sync_host)
         .unwrap();
 
     let mut async_host = DefaultHost::default();
-    let (async_output, async_ctx) = FastProcessor::new(stack_inputs)
+    let async_trace_inputs = FastProcessor::new(stack_inputs)
         .execute_for_trace(&program, &mut async_host)
         .await
         .unwrap();
 
-    assert_eq!(sync_output.stack, async_output.stack);
-    assert_eq!(sync_ctx.fragment_size, async_ctx.fragment_size);
-    assert_eq!(sync_ctx.core_trace_contexts.len(), async_ctx.core_trace_contexts.len());
+    assert_eq!(
+        sync_trace_inputs.execution_output().stack,
+        async_trace_inputs.execution_output().stack
+    );
+    assert_eq!(
+        sync_trace_inputs.trace_generation_context().fragment_size,
+        async_trace_inputs.trace_generation_context().fragment_size
+    );
+    assert_eq!(
+        sync_trace_inputs.trace_generation_context().core_trace_contexts.len(),
+        async_trace_inputs.trace_generation_context().core_trace_contexts.len()
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]

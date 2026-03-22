@@ -105,14 +105,8 @@ pub async fn execute(
     options: ExecutionOptions,
 ) -> Result<ExecutionTrace, ExecutionError> {
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, options);
-    let (execution_output, trace_generation_context) =
-        processor.execute_for_trace(program, host).await?;
-
-    let trace = trace::build_trace(trace::TraceBuildInputs::from_program(
-        program,
-        execution_output,
-        trace_generation_context,
-    ))?;
+    let trace_inputs = processor.execute_for_trace(program, host).await?;
+    let trace = trace::build_trace(trace_inputs)?;
 
     assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
     Ok(trace)
@@ -128,14 +122,8 @@ pub fn execute_sync(
     options: ExecutionOptions,
 ) -> Result<ExecutionTrace, ExecutionError> {
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, options);
-    let (execution_output, trace_generation_context) =
-        processor.execute_for_trace_sync(program, host)?;
-
-    let trace = trace::build_trace(trace::TraceBuildInputs::from_program(
-        program,
-        execution_output,
-        trace_generation_context,
-    ))?;
+    let trace_inputs = processor.execute_for_trace_sync(program, host)?;
+    let trace = trace::build_trace(trace_inputs)?;
 
     assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
     Ok(trace)

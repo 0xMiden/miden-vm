@@ -38,7 +38,7 @@ pub use miden_processor::{
 };
 use miden_processor::{
     DefaultDebugHandler, DefaultHost, ExecutionOutput, FastProcessor, Program, TraceBuildInputs,
-    TraceGenerationContext, event::EventHandler, trace::build_trace,
+    event::EventHandler, trace::build_trace,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use miden_prover::prove_sync;
@@ -397,12 +397,8 @@ impl Test {
         // compare fast and slow processors' stack outputs
         self.assert_result_with_step_execution(&fast_stack_result);
 
-        fast_stack_result.and_then(|(execution_output, trace_generation_ctx)| {
-            let trace = build_trace(TraceBuildInputs::from_program(
-                &program,
-                execution_output,
-                trace_generation_ctx,
-            ))?;
+        fast_stack_result.and_then(|trace_inputs| {
+            let trace = build_trace(trace_inputs)?;
 
             assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
             Ok(trace)
@@ -554,7 +550,7 @@ impl Test {
 
     fn assert_result_with_step_execution(
         &self,
-        fast_result: &Result<(ExecutionOutput, TraceGenerationContext), ExecutionError>,
+        fast_result: &Result<TraceBuildInputs, ExecutionError>,
     ) {
         fn compare_results(
             left_result: Result<StackOutputs, &ExecutionError>,
@@ -609,7 +605,7 @@ impl Test {
         };
 
         compare_results(
-            fast_result.as_ref().map(|(output, _)| output.stack),
+            fast_result.as_ref().map(|trace_inputs| trace_inputs.execution_output().stack),
             &fast_result_by_step,
             "fast processor",
             "fast processor by step",
