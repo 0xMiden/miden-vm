@@ -11,6 +11,7 @@ use super::{
     op_u32sub, op_u32xor,
 };
 use crate::fast::{FastProcessor, NoopTracer};
+use crate::operation::OperationError;
 
 // CASTING OPERATIONS
 // --------------------------------------------------------------------------------------------
@@ -77,7 +78,12 @@ fn test_op_u32assert2_both_invalid() {
     let mut tracer = NoopTracer;
 
     let result = op_u32assert2(&mut processor, Felt::from_u32(123u32), &mut tracer);
-    assert!(result.is_err());
+    match result {
+        Err(OperationError::FailedAssertion { err_code, .. }) => {
+            assert_eq!(err_code, Felt::from_u32(123u32));
+        },
+        other => panic!("expected FailedAssertion, got: {other:?}"),
+    }
 }
 
 #[test]
@@ -89,7 +95,12 @@ fn test_op_u32assert2_second_invalid() {
     let mut tracer = NoopTracer;
 
     let result = op_u32assert2(&mut processor, Felt::from_u32(456u32), &mut tracer);
-    assert!(result.is_err());
+    match result {
+        Err(OperationError::FailedAssertion { err_code, .. }) => {
+            assert_eq!(err_code, Felt::from_u32(456u32));
+        },
+        other => panic!("expected FailedAssertion, got: {other:?}"),
+    }
 }
 
 #[test]
@@ -101,7 +112,12 @@ fn test_op_u32assert2_first_invalid() {
     let mut tracer = NoopTracer;
 
     let result = op_u32assert2(&mut processor, Felt::from_u32(789), &mut tracer);
-    assert!(result.is_err());
+    match result {
+        Err(OperationError::FailedAssertion { err_code, .. }) => {
+            assert_eq!(err_code, Felt::from_u32(789));
+        },
+        other => panic!("expected FailedAssertion, got: {other:?}"),
+    }
 }
 
 // ARITHMETIC OPERATIONS

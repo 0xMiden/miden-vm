@@ -296,14 +296,19 @@ where
 
 /// Pops top two element off the stack, splits them into low and high 32-bit values, checks if
 /// the high values are equal to 0; if they are, puts the original elements back onto the
-/// stack; if they are not, returns an error.
+/// stack; if they are not, returns an error with the user-specified error code.
 #[inline(always)]
 pub(super) fn op_u32assert2<P: Processor, T: Tracer>(
     processor: &mut P,
-    _err_code: Felt,
+    err_code: Felt,
     tracer: &mut T,
 ) -> Result<OperationHelperRegisters, OperationError> {
-    let (first, second) = require_u32_operands!(processor, [0, 1]);
+    let first = processor.stack().get(0);
+    let second = processor.stack().get(1);
+
+    if first.as_canonical_u64() > U32_MAX || second.as_canonical_u64() > U32_MAX {
+        return Err(OperationError::FailedAssertion { err_code, err_msg: None });
+    }
 
     tracer.record_u32_range_checks(processor.system().clock(), first, second);
 
