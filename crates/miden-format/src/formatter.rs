@@ -3,8 +3,8 @@ use std::mem;
 use miden_assembly_syntax_cst::{
     Item, Operation, SyntaxKind, SyntaxNode, SyntaxToken,
     ast::{
-        BeginBlock, Block, IfOp, Instruction, Procedure, RepeatOp, SourceFile, TypeBody, TypeDecl,
-        WhileOp,
+        BeginBlock, Block, IfOp, Import, Instruction, Procedure, RepeatOp, Signature, SourceFile,
+        TypeBody, TypeDecl, WhileOp,
     },
     rowan::{NodeOrToken, ast::AstNode},
 };
@@ -159,7 +159,7 @@ fn render_item(item: &Item, indent: usize) -> String {
     match item {
         Item::ModuleDoc(doc) => render_doc(doc, indent),
         Item::Doc(doc) => render_doc(doc, indent),
-        Item::Import(import) => render_line_form(import.syntax(), indent),
+        Item::Import(import) => render_import(import, indent),
         Item::Constant(constant) => render_value_declaration(constant.syntax(), indent),
         Item::TypeDecl(type_decl) => render_type_decl(type_decl, indent),
         Item::AdviceMap(advice_map) => render_value_declaration(advice_map.syntax(), indent),
@@ -180,6 +180,45 @@ fn render_line_form(node: &SyntaxNode, indent: usize) -> String {
     if let Some(comment) = direct_comment_token(node) {
         append_inline_comment(&mut rendered, &comment);
     }
+    rendered
+}
+
+fn render_import(import: &Import, indent: usize) -> String {
+    let compact = format!("{}{}", indent_string(indent), render_compact_tokens(import.syntax()));
+    let mut rendered = if line_length(&compact) <= MAX_LINE_WIDTH {
+        compact
+    } else {
+        let Some(path) = import.path() else {
+            return render_line_form(import.syntax(), indent);
+        };
+
+        let mut header = indent_string(indent);
+        if import.visibility().is_some() {
+            header.push_str("pub ");
+        }
+        header.push_str("use");
+
+        let path_tokens = significant_tokens(path.syntax());
+        let alias_tokens = significant_tokens_after_child(import.syntax(), path.syntax());
+        let mut lines = render_path_lines(&header, &path_tokens, indent);
+        if !alias_tokens.is_empty() {
+            let alias = render_token_sequence(&alias_tokens);
+            if let Some(last) = lines.last_mut() {
+                if line_length(last) + 1 + line_length(&alias) <= MAX_LINE_WIDTH {
+                    last.push(' ');
+                    last.push_str(&alias);
+                } else {
+                    lines.push(format!("{}{}", indent_string(indent + INDENT_WIDTH), alias));
+                }
+            }
+        }
+        lines.join("\n")
+    };
+
+    if let Some(comment) = direct_comment_token(import.syntax()) {
+        append_inline_comment(&mut rendered, &comment);
+    }
+
     rendered
 }
 
@@ -332,9 +371,10 @@ fn render_procedure(procedure: &Procedure, indent: usize) -> String {
         header.push_str(name.text());
     }
     if let Some(signature) = procedure.signature() {
-        header.push_str(&render_compact_tokens(signature.syntax()));
+        lines.extend(render_signature_lines(&header, &signature, indent));
+    } else {
+        lines.push(header);
     }
-    lines.push(header);
 
     if let Some(block) = procedure.block() {
         let body = render_block(&block, indent + INDENT_WIDTH);
@@ -345,6 +385,124 @@ fn render_procedure(procedure: &Procedure, indent: usize) -> String {
 
     lines.push(format!("{}end", indent_string(indent)));
     lines.join("\n")
+}
+
+fn render_signature_lines(
+    header_prefix: &str,
+    signature: &Signature,
+    indent: usize,
+) -> Vec<String> {
+    let compact_signature = render_token_sequence_with_style(
+        &significant_tokens(signature.syntax()),
+        SpacingStyle::TypeBodyItem,
+    );
+    let compact = format!("{header_prefix}{compact_signature}");
+    if line_length(&compact) <= MAX_LINE_WIDTH {
+        return vec![compact];
+    }
+
+    let tokens = significant_tokens(signature.syntax());
+    let Some(params_close) = matching_group_end(&tokens, 0, SyntaxKind::LParen, SyntaxKind::RParen)
+    else {
+        return vec![compact];
+    };
+
+    let params = split_top_level_items(&tokens[1..params_close]);
+    let result_tokens =
+        if tokens.get(params_close + 1).map(SyntaxToken::kind) == Some(SyntaxKind::RArrow) {
+            &tokens[(params_close + 2)..]
+        } else {
+            &tokens[0..0]
+        };
+
+    let mut lines = vec![format!("{header_prefix}(")];
+    let param_count = params.len();
+    for (index, param) in params.into_iter().enumerate() {
+        if param.is_empty() {
+            continue;
+        }
+
+        let mut param_lines = render_token_lines_with_style(
+            &param,
+            indent + INDENT_WIDTH,
+            true,
+            SpacingStyle::TypeBodyItem,
+        );
+        if index + 1 != param_count {
+            if let Some(last_line) = param_lines.last_mut() {
+                last_line.push(',');
+            }
+        }
+        lines.extend(param_lines);
+    }
+
+    let mut closing = format!("{})", indent_string(indent));
+    if result_tokens.is_empty() {
+        lines.push(closing);
+        return lines;
+    }
+
+    if let Some((open_index, close_index)) =
+        outer_group_indices(result_tokens, SyntaxKind::LParen, SyntaxKind::RParen)
+    {
+        if open_index == 0 {
+            let items = split_top_level_items(&result_tokens[1..close_index]);
+            let result =
+                render_token_sequence_with_style(result_tokens, SpacingStyle::TypeBodyItem);
+            if items.len() <= 1
+                && line_length(&closing) + 4 + line_length(&result) <= MAX_LINE_WIDTH
+            {
+                closing.push_str(" -> ");
+                closing.push_str(&result);
+                lines.push(closing);
+                return lines;
+            }
+
+            closing.push_str(" -> (");
+            lines.push(closing);
+
+            let item_count = items.len();
+            for (index, item) in items.into_iter().enumerate() {
+                if item.is_empty() {
+                    continue;
+                }
+
+                let mut item_lines = render_token_lines_with_style(
+                    &item,
+                    indent + INDENT_WIDTH,
+                    true,
+                    SpacingStyle::TypeBodyItem,
+                );
+                if index + 1 != item_count {
+                    if let Some(last_line) = item_lines.last_mut() {
+                        last_line.push(',');
+                    }
+                }
+                lines.extend(item_lines);
+            }
+
+            lines.push(format!("{})", indent_string(indent)));
+            return lines;
+        }
+    }
+
+    let result = render_token_sequence_with_style(result_tokens, SpacingStyle::TypeBodyItem);
+    if line_length(&closing) + 4 + line_length(&result) <= MAX_LINE_WIDTH {
+        closing.push_str(" -> ");
+        closing.push_str(&result);
+        lines.push(closing);
+        return lines;
+    }
+
+    closing.push_str(" ->");
+    lines.push(closing);
+    lines.extend(render_token_lines_with_style(
+        result_tokens,
+        indent + INDENT_WIDTH,
+        true,
+        SpacingStyle::TypeBodyItem,
+    ));
+    lines
 }
 
 fn render_block(block: &Block, indent: usize) -> String {
@@ -560,23 +718,32 @@ fn render_token_lines(
     indent: usize,
     prefer_multiline_groups: bool,
 ) -> Vec<String> {
+    render_token_lines_with_style(tokens, indent, prefer_multiline_groups, SpacingStyle::Default)
+}
+
+fn render_token_lines_with_style(
+    tokens: &[SyntaxToken],
+    indent: usize,
+    prefer_multiline_groups: bool,
+    style: SpacingStyle,
+) -> Vec<String> {
     if prefer_multiline_groups {
         if let Some((open_index, close_index)) =
             outer_group_indices(tokens, SyntaxKind::LBracket, SyntaxKind::RBracket)
         {
-            return render_delimited_group(tokens, indent, open_index, close_index);
+            return render_delimited_group(tokens, indent, open_index, close_index, style);
         }
 
         if let Some((open_index, close_index)) =
             outer_group_indices(tokens, SyntaxKind::LParen, SyntaxKind::RParen)
         {
             if open_index > 0 {
-                return render_delimited_group(tokens, indent, open_index, close_index);
+                return render_delimited_group(tokens, indent, open_index, close_index, style);
             }
         }
     }
 
-    let compact = render_token_sequence(tokens);
+    let compact = render_token_sequence_with_style(tokens, style);
     let inline = format!("{}{}", indent_string(indent), compact);
     if line_length(&inline) <= MAX_LINE_WIDTH {
         return vec![inline];
@@ -585,14 +752,14 @@ fn render_token_lines(
     if let Some((open_index, close_index)) =
         outer_group_indices(tokens, SyntaxKind::LBracket, SyntaxKind::RBracket)
     {
-        return render_delimited_group(tokens, indent, open_index, close_index);
+        return render_delimited_group(tokens, indent, open_index, close_index, style);
     }
 
     if let Some((open_index, close_index)) =
         outer_group_indices(tokens, SyntaxKind::LParen, SyntaxKind::RParen)
     {
         if open_index > 0 {
-            return render_delimited_group(tokens, indent, open_index, close_index);
+            return render_delimited_group(tokens, indent, open_index, close_index, style);
         }
     }
 
@@ -604,6 +771,7 @@ fn render_delimited_group(
     indent: usize,
     open_index: usize,
     close_index: usize,
+    style: SpacingStyle,
 ) -> Vec<String> {
     let opener = render_token_sequence(&tokens[..=open_index]);
     let closer = render_token_sequence(&tokens[close_index..]);
@@ -616,7 +784,8 @@ fn render_delimited_group(
             continue;
         }
 
-        let mut item_lines = render_token_lines(&item, indent + INDENT_WIDTH, true);
+        let mut item_lines =
+            render_token_lines_with_style(&item, indent + INDENT_WIDTH, true, style);
         if index + 1 != item_count
             && let Some(last_line) = item_lines.last_mut()
         {
@@ -655,6 +824,26 @@ fn render_token_sequence_with_style(tokens: &[SyntaxToken], style: SpacingStyle)
     rendered
 }
 
+fn render_path_lines(header: &str, path_tokens: &[SyntaxToken], indent: usize) -> Vec<String> {
+    let pieces = split_path_pieces(path_tokens);
+    let Some(first) = pieces.first() else {
+        return vec![header.to_string()];
+    };
+
+    let mut lines = Vec::new();
+    let mut current = format!("{header} {first}");
+    for piece in pieces.iter().skip(1) {
+        if line_length(&current) + line_length(piece) <= MAX_LINE_WIDTH {
+            current.push_str(piece);
+        } else {
+            lines.push(current);
+            current = format!("{}{}", indent_string(indent + INDENT_WIDTH), piece);
+        }
+    }
+    lines.push(current);
+    lines
+}
+
 fn significant_tokens(node: &SyntaxNode) -> Vec<SyntaxToken> {
     node.descendants_with_tokens()
         .filter_map(|element| element.into_token())
@@ -674,6 +863,31 @@ fn significant_tokens_before_child(node: &SyntaxNode, child: &SyntaxNode) -> Vec
             NodeOrToken::Node(candidate) => tokens.extend(significant_tokens(&candidate)),
             NodeOrToken::Token(token)
                 if !token.kind().is_trivia()
+                    && !matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment) =>
+            {
+                tokens.push(token)
+            },
+            NodeOrToken::Token(_) => (),
+        }
+    }
+
+    tokens
+}
+
+fn significant_tokens_after_child(node: &SyntaxNode, child: &SyntaxNode) -> Vec<SyntaxToken> {
+    let mut tokens = Vec::new();
+    let mut seen_child = false;
+
+    for element in node.children_with_tokens() {
+        match element {
+            NodeOrToken::Node(candidate) if candidate == *child => seen_child = true,
+            NodeOrToken::Node(candidate) if seen_child => {
+                tokens.extend(significant_tokens(&candidate))
+            },
+            NodeOrToken::Node(_) => (),
+            NodeOrToken::Token(token)
+                if seen_child
+                    && !token.kind().is_trivia()
                     && !matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment) =>
             {
                 tokens.push(token)
@@ -722,22 +936,71 @@ fn outer_group_indices(
     None
 }
 
+fn matching_group_end(
+    tokens: &[SyntaxToken],
+    open_index: usize,
+    open: SyntaxKind,
+    close: SyntaxKind,
+) -> Option<usize> {
+    if tokens.get(open_index).map(SyntaxToken::kind) != Some(open) {
+        return None;
+    }
+
+    let mut depth = 0usize;
+    for (index, token) in tokens.iter().enumerate().skip(open_index) {
+        match token.kind() {
+            kind if kind == open => depth += 1,
+            kind if kind == close => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(index);
+                }
+            },
+            _ => (),
+        }
+    }
+
+    None
+}
+
+fn split_path_pieces(tokens: &[SyntaxToken]) -> Vec<String> {
+    let mut pieces = Vec::new();
+    let mut current = String::new();
+
+    for token in tokens {
+        if token.kind() == SyntaxKind::ColonColon && !current.is_empty() {
+            pieces.push(mem::take(&mut current));
+        }
+
+        current.push_str(token.text());
+    }
+
+    if !current.is_empty() {
+        pieces.push(current);
+    }
+
+    pieces
+}
+
 fn split_top_level_items(tokens: &[SyntaxToken]) -> Vec<Vec<SyntaxToken>> {
     let mut items = Vec::new();
     let mut current = Vec::new();
+    let mut angles = 0usize;
     let mut parens = 0usize;
     let mut brackets = 0usize;
     let mut braces = 0usize;
 
     for token in tokens {
         match token.kind() {
+            SyntaxKind::LAngle => angles += 1,
+            SyntaxKind::RAngle => angles = angles.saturating_sub(1),
             SyntaxKind::LParen => parens += 1,
             SyntaxKind::RParen => parens = parens.saturating_sub(1),
             SyntaxKind::LBracket => brackets += 1,
             SyntaxKind::RBracket => brackets = brackets.saturating_sub(1),
             SyntaxKind::LBrace => braces += 1,
             SyntaxKind::RBrace => braces = braces.saturating_sub(1),
-            SyntaxKind::Comma if parens == 0 && brackets == 0 && braces == 0 => {
+            SyntaxKind::Comma if angles == 0 && parens == 0 && brackets == 0 && braces == 0 => {
                 items.push(mem::take(&mut current));
                 continue;
             },
@@ -836,8 +1099,8 @@ fn trim_line_ends(text: &str) -> Vec<String> {
 
 fn needs_space(previous: &SyntaxToken, next: &SyntaxToken, style: SpacingStyle) -> bool {
     use SyntaxKind::{
-        At, Colon, ColonColon, Comma, Dot, DotDot, Equal, LBrace, LBracket, LParen, Minus, Plus,
-        RArrow, RBrace, RBracket, RParen, Slash, SlashSlash, Star,
+        At, Colon, ColonColon, Comma, Dot, DotDot, Equal, LAngle, LBrace, LBracket, LParen, Minus,
+        Plus, RAngle, RArrow, RBrace, RBracket, RParen, Slash, SlashSlash, Star,
     };
 
     let previous_kind = previous.kind();
@@ -847,11 +1110,14 @@ fn needs_space(previous: &SyntaxToken, next: &SyntaxToken, style: SpacingStyle) 
         return false;
     }
 
-    if matches!(previous_kind, Dot | ColonColon | LParen | LBracket | LBrace) {
+    if matches!(previous_kind, Dot | ColonColon | LAngle | LParen | LBracket | LBrace) {
         return false;
     }
 
-    if matches!(next_kind, Dot | ColonColon | DotDot | Comma | RParen | RBracket | RBrace) {
+    if matches!(
+        next_kind,
+        Dot | ColonColon | DotDot | Comma | LAngle | RAngle | RParen | RBracket | RBrace
+    ) {
         return false;
     }
 
@@ -1032,6 +1298,42 @@ enum Status : u16 {
 ";
 
         assert_eq!(formatted, expected);
+
+        let reparsed = parse_text(&formatted);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+    }
+
+    #[test]
+    fn wraps_long_imports_and_procedure_headers_without_mangling_generic_types() {
+        let source = "\
+pub use ::miden::core::collections::sorted_array::lowerbound_key_value -> lowerbound_key_value
+
+pub proc println_debug_message_with_context(message: ptr<u8, addrspace(byte)>, context: ptr<u8, addrspace(byte)>) -> (result: ptr<u8, addrspace(byte)>, status: i1)
+    nop
+end
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let formatted = format_syntax(&parse.syntax());
+        let expected = "\
+pub use ::miden::core::collections::sorted_array::lowerbound_key_value
+    -> lowerbound_key_value
+
+pub proc println_debug_message_with_context(
+    message: ptr<u8, addrspace(byte)>,
+    context: ptr<u8, addrspace(byte)>
+) -> (
+    result: ptr<u8, addrspace(byte)>,
+    status: i1
+)
+    nop
+end
+";
+
+        assert_eq!(formatted, expected);
+        assert!(formatted.lines().all(|line| line.len() <= MAX_LINE_WIDTH));
 
         let reparsed = parse_text(&formatted);
         assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
