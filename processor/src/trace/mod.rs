@@ -67,11 +67,12 @@ impl TraceBuildInputs {
         trace_generation_context: TraceGenerationContext,
         program_info: ProgramInfo,
     ) -> Self {
+        let expected_program_info = program_info.clone();
         Self {
             execution_output,
             trace_generation_context,
             program_info,
-            expected_program_info: None,
+            expected_program_info: Some(expected_program_info),
         }
     }
 
