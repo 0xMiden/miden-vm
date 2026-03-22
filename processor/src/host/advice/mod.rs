@@ -46,7 +46,7 @@ const MAX_ADVICE_STACK_SIZE: usize = 1 << 17;
 ///      or,
 ///    - used to produce a STARK proof using a precompile VM, which can be verified in the epilog of
 ///      the program.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AdviceProvider {
     stack: VecDeque<Felt>,
     map: AdviceMap,

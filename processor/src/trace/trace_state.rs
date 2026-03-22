@@ -6,8 +6,8 @@ use miden_air::trace::{
 };
 
 use crate::{
-    ContextId, ExecutionError, Felt, MIN_STACK_DEPTH, MemoryError, ONE, ProgramInfo, StackOutputs,
-    Word, ZERO,
+    AdviceProvider, ContextId, ExecutionError, Felt, MIN_STACK_DEPTH, MemoryError, ONE,
+    ProgramInfo, StackOutputs, Word, ZERO,
     advice::AdviceError,
     continuation_stack::ContinuationStack,
     crypto::merkle::MerklePath,
@@ -775,7 +775,7 @@ pub(crate) struct ExecutedTraceBinding {
     program_info: ProgramInfo,
     stack_outputs: StackOutputs,
     final_pc_transcript_state: PrecompileTranscriptState,
-    precompile_request_count: usize,
+    advice_provider: AdviceProvider,
 }
 
 impl ExecutedTraceBinding {
@@ -783,13 +783,13 @@ impl ExecutedTraceBinding {
         program_info: ProgramInfo,
         stack_outputs: StackOutputs,
         final_pc_transcript_state: PrecompileTranscriptState,
-        precompile_request_count: usize,
+        advice_provider: AdviceProvider,
     ) -> Self {
         Self {
             program_info,
             stack_outputs,
             final_pc_transcript_state,
-            precompile_request_count,
+            advice_provider,
         }
     }
 
@@ -805,8 +805,8 @@ impl ExecutedTraceBinding {
         self.final_pc_transcript_state
     }
 
-    pub(crate) fn precompile_request_count(&self) -> usize {
-        self.precompile_request_count
+    pub(crate) fn advice_provider(&self) -> &AdviceProvider {
+        &self.advice_provider
     }
 }
 

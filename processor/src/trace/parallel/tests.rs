@@ -1097,6 +1097,61 @@ fn test_build_trace_rejects_mismatched_execution_output() {
     );
 }
 
+/// Verifies that `build_trace` rejects compatibility bundles that reuse a matching stack output
+/// but carry a different final advice-provider state.
+#[test]
+#[allow(deprecated)]
+fn test_build_trace_rejects_mismatched_advice_provider() {
+    const MAX_FRAGMENT_SIZE: usize = 1 << 20;
+
+    let program = basic_block_program_small();
+
+    let processor = FastProcessor::new_with_options(
+        StackInputs::new(DEFAULT_STACK).unwrap(),
+        AdviceInputs::default(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
+            .unwrap(),
+    );
+    let mut host = DefaultHost::default();
+    let (execution_output, trace_generation_context) =
+        processor.execute_trace_inputs_sync(&program, &mut host).unwrap().into_parts();
+
+    let other_processor = FastProcessor::new_with_options(
+        StackInputs::new(DEFAULT_STACK).unwrap(),
+        AdviceInputs::default().with_stack_values([99]).unwrap(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
+            .unwrap(),
+    );
+    let mut other_host = DefaultHost::default();
+    let (other_execution_output, _) = other_processor
+        .execute_trace_inputs_sync(&program, &mut other_host)
+        .unwrap()
+        .into_parts();
+
+    assert_eq!(execution_output.stack, other_execution_output.stack);
+    assert_eq!(
+        execution_output.final_pc_transcript.state(),
+        other_execution_output.final_pc_transcript.state()
+    );
+    assert_ne!(execution_output.advice, other_execution_output.advice);
+
+    let result = build_trace(TraceBuildInputs::new(
+        other_execution_output,
+        trace_generation_context,
+        program.to_info(),
+    ));
+
+    assert!(
+        matches!(
+            result,
+            Err(ExecutionError::Internal("trace inputs do not match execution output"))
+        ),
+        "expected execution-output mismatch error, got: {result:?}"
+    );
+}
+
 /// Verifies that `build_trace` rejects tampered `ProgramInfo` even when it preserves the same
 /// entrypoint hash but swaps in a different kernel.
 #[test]

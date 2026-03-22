@@ -72,7 +72,7 @@ impl TraceGenerationContext {
             program_info,
             execution_output.stack,
             execution_output.final_pc_transcript.state(),
-            execution_output.advice.precompile_requests().len(),
+            execution_output.advice.clone(),
         ));
     }
 }
