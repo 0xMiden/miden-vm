@@ -1041,7 +1041,7 @@ fn test_build_trace_rejects_unbound_trace_build_inputs_new() {
     assert!(
         matches!(
             result,
-            Err(ExecutionError::Internal("trace inputs are not bound to an executed program"))
+            Err(ExecutionError::Internal("trace inputs do not match program info"))
         ),
         "expected unbound-trace-inputs error, got: {result:?}"
     );
