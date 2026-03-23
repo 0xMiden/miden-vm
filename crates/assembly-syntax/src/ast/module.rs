@@ -245,7 +245,7 @@ impl Module {
         }
 
         // We only define constants for C-like enums
-        if ty.is_c_like() {
+        if !ty.is_c_like() {
             self.items.push(Export::Type(ty.into()));
             return Ok(());
         }
