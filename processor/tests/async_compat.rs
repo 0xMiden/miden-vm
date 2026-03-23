@@ -69,7 +69,7 @@ async fn execute_async_matches_execute() {
     let advice_inputs = AdviceInputs::default();
 
     let mut sync_host = DefaultHost::default();
-    let sync_trace = miden_processor::execute_sync(
+    let sync_output = miden_processor::execute_sync(
         &program,
         stack_inputs,
         advice_inputs.clone(),
@@ -79,7 +79,7 @@ async fn execute_async_matches_execute() {
     .unwrap();
 
     let mut async_host = DefaultHost::default();
-    let async_trace = miden_processor::execute(
+    let async_output = miden_processor::execute(
         &program,
         stack_inputs,
         advice_inputs,
@@ -89,7 +89,7 @@ async fn execute_async_matches_execute() {
     .await
     .unwrap();
 
-    assert_eq!(sync_trace.stack_outputs(), async_trace.stack_outputs());
+    assert_eq!(sync_output.stack, async_output.stack);
 }
 
 #[tokio::test(flavor = "current_thread")]

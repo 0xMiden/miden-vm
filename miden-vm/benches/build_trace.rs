@@ -3,12 +3,12 @@ use std::hint::black_box;
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{ExecutionOptions, FastProcessor, advice::AdviceInputs, trace};
-use miden_vm::{Assembler, DefaultHost, StackInputs, execute, internal::InputFile};
+use miden_vm::{Assembler, DefaultHost, StackInputs, internal::InputFile};
 use tokio::runtime::Runtime;
 use walkdir::WalkDir;
 
 /// The size of each trace fragment (in rows) when executing programs for trace generation.
-const TRACE_FRAGMENT_SIZE: usize = 4096;
+const TRACE_FRAGMENT_SIZE: usize = 1024;
 
 /// Benchmark the execution of all the masm examples in the `masm-examples` directory.
 fn build_trace(c: &mut Criterion) {
@@ -86,9 +86,9 @@ fn build_trace(c: &mut Criterion) {
                     );
                 });
 
-                // LEGACY EXECUTE
+                // DEFAULT TRACE BUILD
                 // --------------------------------
-                group.bench_function(format!("{file_stem}_legacy"), |bench| {
+                group.bench_function(format!("{file_stem}_default"), |bench| {
                     let mut assembler = Assembler::default();
                     assembler
                         .link_dynamic_library(CoreLibrary::default())
@@ -103,20 +103,18 @@ fn build_trace(c: &mut Criterion) {
                             let host = DefaultHost::default()
                                 .with_library(&CoreLibrary::default())
                                 .unwrap();
-                            let advice_inputs = advice_inputs.clone();
-
-                            (host, stack_inputs, advice_inputs, program.clone())
-                        },
-                        |(mut host, stack_inputs, advice_inputs, program)| async move {
-                            let trace = execute(
-                                &program,
+                            let processor = FastProcessor::new_with_options(
                                 stack_inputs,
-                                advice_inputs,
-                                &mut host,
+                                advice_inputs.clone(),
                                 ExecutionOptions::default(),
-                            )
-                            .await
-                            .unwrap();
+                            );
+
+                            (host, program.clone(), processor)
+                        },
+                        |(mut host, program, processor)| async move {
+                            let trace_inputs =
+                                processor.execute_trace_inputs(&program, &mut host).await.unwrap();
+                            let trace = trace::build_trace(trace_inputs).unwrap();
                             black_box(trace);
                         },
                         BatchSize::SmallInput,

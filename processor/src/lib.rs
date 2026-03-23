@@ -27,7 +27,7 @@ use crate::{
     continuation_stack::ContinuationStack,
     errors::MapExecErr,
     processor::{Processor, SystemInterface},
-    trace::{ExecutionTrace, RowIndex},
+    trace::RowIndex,
 };
 
 #[cfg(any(test, feature = "testing"))]
@@ -88,8 +88,8 @@ pub mod trace;
 // EXECUTORS
 // ================================================================================================
 
-/// Returns an execution trace resulting from executing the provided program against the provided
-/// inputs.
+/// Executes the provided program against the provided inputs and returns the resulting execution
+/// output.
 ///
 /// The `host` parameter is used to provide the external environment to the program being executed,
 /// such as access to the advice provider and libraries that the program depends on.
@@ -103,13 +103,9 @@ pub async fn execute(
     advice_inputs: AdviceInputs,
     host: &mut impl Host,
     options: ExecutionOptions,
-) -> Result<ExecutionTrace, ExecutionError> {
+) -> Result<ExecutionOutput, ExecutionError> {
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, options);
-    let trace_inputs = processor.execute_trace_inputs(program, host).await?;
-    let trace = trace::build_trace(trace_inputs)?;
-
-    assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
-    Ok(trace)
+    processor.execute(program, host).await
 }
 
 /// Synchronous wrapper for the async `execute()` function.
@@ -120,13 +116,9 @@ pub fn execute_sync(
     advice_inputs: AdviceInputs,
     host: &mut impl SyncHost,
     options: ExecutionOptions,
-) -> Result<ExecutionTrace, ExecutionError> {
+) -> Result<ExecutionOutput, ExecutionError> {
     let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, options);
-    let trace_inputs = processor.execute_trace_inputs_sync(program, host)?;
-    let trace = trace::build_trace(trace_inputs)?;
-
-    assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
-    Ok(trace)
+    processor.execute_sync(program, host)
 }
 
 // PROCESSOR STATE

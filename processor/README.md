@@ -5,7 +5,8 @@ This crate contains an implementation of Miden VM processor. The purpose of the 
 The processor provides multiple APIs depending on your use case:
 
 ### High-level API
-The `execute()` function provides a convenient interface that executes a program and generates a complete execution trace:
+The `execute()` function provides a convenient interface that executes a program and returns the
+resulting `ExecutionOutput`:
 
 * `program: &Program` - a reference to a Miden program to be executed.
 * `stack_inputs: StackInputs` - a set of public inputs with which to execute the program.
@@ -13,7 +14,13 @@ The `execute()` function provides a convenient interface that executes a program
 * `host: &mut impl Host` - an instance of a host which can be used to supply non-deterministic inputs to the VM and receive messages from the VM.
 * `options: ExecutionOptions` - a set of options for executing the specified program (e.g., max allowed number of cycles).
 
-The (async) function returns a `Result<ExecutionTrace, ExecutionError>` which will contain the execution trace of the program if the execution was successful, or an error if the execution failed.
+The (async) function returns a `Result<ExecutionOutput, ExecutionError>` which will contain the
+final stack state, advice provider, memory, and precompile transcript if the execution was
+successful, or an error if the execution failed.
+
+If you also need an `ExecutionTrace`, use `FastProcessor::execute_trace_inputs()` /
+`FastProcessor::execute_trace_inputs_sync()` and then pass the returned `TraceBuildInputs` bundle
+to `build_trace()`.
 
 ### Low-level API
 For more control over execution and trace generation, you can use `FastProcessor` directly:

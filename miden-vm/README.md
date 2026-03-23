@@ -41,10 +41,15 @@ also available for async callers. `execute_sync()` takes the following arguments
 
 - `program: &Program` - a reference to a Miden program to be executed.
 - `stack_inputs: StackInputs` - a set of public inputs with which to execute the program.
+- `advice_inputs: AdviceInputs` - the private inputs used to build the advice provider; use `AdviceInputs::default()` when no private inputs are needed.
 - `host: Host` - an instance of a `Host` which can be used to supply non-deterministic inputs to the VM and receive messages from the VM.
 - `options: ExecutionOptions` - a set of options for executing the specified program (e.g., max allowed number of cycles).
 
-The function returns a `Result<ExecutionTrace, ExecutionError>` which will contain the execution trace of the program if the execution was successful, or an error, if the execution failed. Internally, the VM then passes this execution trace to the prover to generate a proof of a correct execution of the program.
+The function returns a `Result<ExecutionOutput, ExecutionError>` which will contain the final stack
+state and other execution outputs if the execution was successful, or an error if the execution
+failed. If you need an execution trace, use `FastProcessor::execute_trace_inputs()` /
+`FastProcessor::execute_trace_inputs_sync()` and pass the returned `TraceBuildInputs` bundle to
+`trace::build_trace()`.
 
 For example:
 
@@ -75,7 +80,7 @@ let mut host = DefaultHost::default();
 let exec_options = ExecutionOptions::default();
 
 // execute the program with no inputs
-let trace =
+let output =
     execute_sync(&program, stack_inputs, advice_inputs.clone(), &mut host, exec_options).unwrap();
 ```
 
