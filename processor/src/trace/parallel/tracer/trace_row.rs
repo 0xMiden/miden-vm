@@ -176,13 +176,13 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         system: &SystemState,
         stack: &StackState,
         basic_block_node: &BasicBlockNode,
+        hasher_state_second_word: Word,
     ) -> Result<(), ExecutionError> {
-        let (ended_node_addr, flags) =
-            self.decoder_state.replay_node_end(&mut self.block_stack_replay)?;
+        let ended_node_addr = self.decoder_state.replay_node_end(&mut self.block_stack_replay)?;
 
         let decoder_row = DecoderRow::new_control_flow(
             opcodes::END,
-            (basic_block_node.digest(), flags.to_hasher_state_second_word()),
+            (basic_block_node.digest(), hasher_state_second_word),
             ended_node_addr,
         );
 
@@ -447,14 +447,14 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         system: &SystemState,
         stack: &StackState,
         node_digest: Word,
+        hasher_state_second_word: Word,
     ) -> Result<(), ExecutionError> {
         // Pop the block from stack and use its info for END operations
-        let (ended_node_addr, flags) =
-            self.decoder_state.replay_node_end(&mut self.block_stack_replay)?;
+        let ended_node_addr = self.decoder_state.replay_node_end(&mut self.block_stack_replay)?;
 
         let decoder_row = DecoderRow::new_control_flow(
             opcodes::END,
-            (node_digest, flags.to_hasher_state_second_word()),
+            (node_digest, hasher_state_second_word),
             ended_node_addr,
         );
 
