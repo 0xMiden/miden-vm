@@ -127,14 +127,12 @@ pub proc verify
     #==============================================================================================
 
     #============================================
-    #   1) Draw random coefficients for computing
-    #       DEEP composition polynomial.
+    #   1) Check DEEP PoW and draw random
+    #       coefficients for DEEP composition
+    #       polynomial.
     #============================================
 
-    # Check DEEP proof-of-work.
     exec.random_coin::check_deep_pow
-
-    # Cycles: 281
     exec.random_coin::generate_deep_composition_random_coefficients
 
     #============================================

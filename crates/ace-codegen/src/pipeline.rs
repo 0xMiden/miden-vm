@@ -135,7 +135,10 @@ where
     );
 
     let num_randomness = air.num_randomness();
-    assert!(num_randomness > 0, "AIR must declare at least one randomness challenge");
+    assert!(
+        num_randomness == 2,
+        "AIR must declare exactly 2 randomness challenges (alpha, beta), got {num_randomness}"
+    );
 
     // Convert logical VLPI groups to EF slots based on layout policy.
     // MASM word-aligns each group (4 base felts = 2 EF slots per group).

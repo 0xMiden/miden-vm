@@ -11,8 +11,8 @@
 //!   security params (nq, query_pow, deep_pow, folding_pow) ->
 //!   fixed-length PI -> num_kernel_proc_digests -> kernel_digests ->
 //!   aux randomness -> main commit -> aux commit ->
-//!   aux finals -> quotient commit -> deep alpha -> OOD evals -> DEEP PoW witness ->
-//!   FRI rounds -> FRI remainder -> query PoW witness
+//!   aux finals -> quotient commit -> deep alpha ND -> OOD evals ->
+//!   DEEP PoW witness -> FRI rounds -> FRI remainder -> query PoW witness
 //!
 //! See `build_advice` for the authoritative layout.
 
@@ -214,15 +214,15 @@ fn build_advice(
     // 13. FRI remainder polynomial (already in descending degree order from the prover, matching
     //     the order observed into the Fiat-Shamir transcript).
     let final_poly = &pcs.fri_transcript.final_poly;
-    let remainder_base = flatten_challenges(final_poly);
+    let remainder_base: Vec<Felt> = QuadFelt::flatten_to_base(final_poly.to_vec());
     let remainder_u64s: Vec<u64> = remainder_base.iter().map(|f| f.as_canonical_u64()).collect();
     advice_stack.extend_from_slice(&remainder_u64s);
 
-    // 14. PoW witness.
+    // 14. Query PoW witness.
     advice_stack.push(pcs.query_pow_witness.as_canonical_u64());
 
     // --- Merkle data ---
-    let (store, advice_map) = build_merkle_data(config, stark)?;
+    let (store, advice_map) = build_merkle_data(config, stark, log_trace_height)?;
 
     Ok(VerifierData {
         initial_stack,
@@ -278,18 +278,20 @@ where
 fn build_merkle_data(
     config: &P2Config,
     stark: &StarkTranscript<Challenge, P2Lmcs>,
+    log_trace_height: usize,
 ) -> Result<MerkleAdvice, VerifierError> {
     let pcs = &stark.pcs_transcript;
     let lmcs = config.lmcs();
+    let log_blowup = config::pcs_params().log_blowup() as usize;
+    let log_lde_height = log_trace_height + log_blowup;
 
     let mut partial_trees = Vec::new();
     let mut advice_map = Vec::new();
 
     // DEEP openings -- one BatchProof per commitment (main, aux, quotient).
     for batch_proof in pcs.deep_openings.iter() {
-        let log_height = infer_log_height_from_indices(&pcs.tree_indices);
         let (trees, advs) =
-            batch_proof_to_merkle(lmcs, batch_proof, log_height, &pcs.tree_indices)?;
+            batch_proof_to_merkle(lmcs, batch_proof, log_lde_height, &pcs.tree_indices)?;
         partial_trees.extend(trees);
         advice_map.extend(advs);
     }
@@ -297,11 +299,12 @@ fn build_merkle_data(
     // FRI openings -- one BatchProof per FRI round.
     let log_arity = config::LOG_FOLDING_ARITY as usize;
     for (round_idx, batch_proof) in pcs.fri_openings.iter().enumerate() {
-        let round_shift = log_arity * (round_idx + 1);
+        let log_folded = log_arity * (round_idx + 1);
         let round_indices: Vec<usize> =
-            pcs.tree_indices.iter().map(|&idx| idx >> round_shift).collect();
-        let log_height = infer_log_height_from_indices(&round_indices);
-        let (trees, advs) = batch_proof_to_merkle(lmcs, batch_proof, log_height, &round_indices)?;
+            pcs.tree_indices.iter().map(|&idx| idx >> log_folded).collect();
+        let fri_log_height = log_lde_height - log_folded;
+        let (trees, advs) =
+            batch_proof_to_merkle(lmcs, batch_proof, fri_log_height, &round_indices)?;
         partial_trees.extend(trees);
         advice_map.extend(advs);
     }
@@ -389,14 +392,6 @@ fn infer_widths<F, C>(batch: &BatchProof<F, C>) -> Vec<usize> {
         .unwrap_or_default()
 }
 
-fn infer_log_height_from_indices(indices: &[usize]) -> usize {
-    let max_idx = indices.iter().copied().max().unwrap_or(0);
-    if max_idx == 0 {
-        return 0;
-    }
-    (usize::BITS - max_idx.leading_zeros()) as usize
-}
-
 /// Build kernel digest advice data.
 ///
 /// Each digest (4 elements) is padded to 8 elements with zeros, then reversed. This matches
@@ -442,6 +437,3 @@ fn challenges_to_u64s(challenges: &[Challenge]) -> Vec<u64> {
     base.iter().map(|f| f.as_canonical_u64()).collect()
 }
 
-fn flatten_challenges(challenges: &[Challenge]) -> Vec<Felt> {
-    QuadFelt::flatten_to_base(challenges.to_vec())
-}
