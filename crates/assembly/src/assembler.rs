@@ -652,11 +652,48 @@ impl Assembler {
             },
 
             SymbolItem::Alias { alias, resolved } => {
-                // All aliases should've been resolved by now
-                let resolved = resolved.get().unwrap_or_else(|| {
-                    panic!("unresolved alias {symbol_path} targeting: {}", alias.target())
-                });
-                return self.export_symbol(resolved, module_kind, symbol_path, mast_forest_builder);
+                if let Some(resolved) = resolved.get() {
+                    return self.export_symbol(
+                        resolved,
+                        module_kind,
+                        symbol_path,
+                        mast_forest_builder,
+                    );
+                }
+
+                let Some(ResolvedProcedure { node, signature }) = self.resolve_target(
+                    InvokeKind::ProcRef,
+                    &alias.target().into(),
+                    gid,
+                    mast_forest_builder,
+                )?
+                else {
+                    return Err(self.unresolved_alias_report("export", &symbol_path, alias));
+                };
+
+                let digest = mast_forest_builder
+                    .get_mast_node(node)
+                    .expect("resolved alias export node must exist")
+                    .digest();
+                let pctx = ProcedureContext::new(
+                    gid,
+                    /* is_program_entrypoint= */ false,
+                    symbol_path.clone(),
+                    Visibility::Public,
+                    signature.clone(),
+                    module_kind.is_kernel(),
+                    self.source_manager.clone(),
+                );
+                let procedure = pctx.into_procedure(digest, node);
+                self.linker.register_procedure_root(gid, digest)?;
+                mast_forest_builder.insert_procedure(gid, procedure)?;
+
+                return Ok(LibraryExport::Procedure(ProcedureExport {
+                    node,
+                    path: symbol_path,
+                    signature: signature.map(Arc::unwrap_or_clone),
+                    attributes: Default::default(),
+                }));
             },
         };
 
@@ -813,19 +850,27 @@ impl Assembler {
                     mast_forest_builder.insert_procedure(procedure_gid, procedure)?;
                 },
                 SymbolItem::Alias { alias, resolved } => {
-                    let procedure_gid = resolved.get().expect("resolved alias");
-                    match self.linker[procedure_gid].item() {
-                        SymbolItem::Procedure(_) | SymbolItem::Compiled(ItemInfo::Procedure(_)) => {
+                    let path: Arc<Path> = module_path.join(alias.name().as_str()).into();
+                    let procedure_gid = match resolved.get() {
+                        Some(procedure_gid) => {
+                            match self.linker[procedure_gid].item() {
+                                SymbolItem::Procedure(_)
+                                | SymbolItem::Compiled(ItemInfo::Procedure(_)) => {},
+                                SymbolItem::Constant(_)
+                                | SymbolItem::Type(_)
+                                | SymbolItem::Compiled(_) => {
+                                    continue;
+                                },
+                                // A resolved alias will always refer to a non-alias item, this is
+                                // because when aliases are resolved, they are resolved
+                                // recursively. Had the alias chain been cyclical, we would have
+                                // raised an error already.
+                                SymbolItem::Alias { .. } => unreachable!(),
+                            }
+                            procedure_gid
                         },
-                        SymbolItem::Constant(_) | SymbolItem::Type(_) | SymbolItem::Compiled(_) => {
-                            continue;
-                        },
-                        // A resolved alias will always refer to a non-alias item, this is because
-                        // when aliases are resolved, they are resolved recursively. Had the alias
-                        // chain been cyclical, we would have raised an error already.
-                        SymbolItem::Alias { .. } => unreachable!(),
-                    }
-                    let path = module_path.join(alias.name().as_str()).into();
+                        None => procedure_gid,
+                    };
                     // A program entrypoint is never an alias
                     let is_program_entrypoint = false;
                     let mut pctx = ProcedureContext::new(
@@ -872,6 +917,30 @@ impl Assembler {
         }
 
         Ok(())
+    }
+
+    fn unresolved_alias_report(
+        &self,
+        action: &'static str,
+        symbol_path: &Path,
+        alias: &ast::Alias,
+    ) -> Report {
+        let span = alias.target().span();
+        let reason = match alias.target() {
+            ast::AliasTarget::MastRoot(_) => {
+                "this digest target does not resolve to a known procedure"
+            },
+            ast::AliasTarget::Path(_) => "this alias target does not resolve to a concrete item",
+        };
+
+        RelatedLabel::error(format!(
+            "unable to {action} alias '{symbol_path}' targeting '{}'",
+            alias.target()
+        ))
+        .with_labeled_span(span, reason)
+        .with_help("aliases must resolve to a concrete item before they can be used")
+        .with_source_file(self.source_manager.get(span.source_id()).ok())
+        .into()
     }
 
     /// Compiles a single Miden Assembly procedure to its MAST representation.

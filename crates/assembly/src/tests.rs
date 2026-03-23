@@ -5609,6 +5609,68 @@ fn imported_error_message_cycle_is_rejected_without_panicking() {
 }
 
 #[test]
+fn exporting_unresolved_digest_alias_preserves_digest_without_panicking() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let context = TestContext::new();
+    let digest = Word::default();
+    let module = context
+        .parse_module_with_path(
+            "m::n",
+            source_file!(
+                &context,
+                "pub use 0x0000000000000000000000000000000000000000000000000000000000000000 -> foo\n"
+            ),
+        )
+        .expect("module parsing must succeed");
+
+    let assembled = catch_unwind(AssertUnwindSafe(|| {
+        Assembler::new(context.source_manager()).assemble_library([module])
+    }));
+
+    assert!(assembled.is_ok(), "assembly panicked, expected library assembly to succeed");
+    let library = assembled
+        .unwrap()
+        .expect("expected digest alias export to assemble successfully");
+    assert_eq!(library.get_procedure_root_by_path("m::n::foo"), Some(digest));
+}
+
+#[test]
+fn path_alias_chain_to_digest_assembles_without_panicking() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let context = TestContext::new();
+    let digest = Word::default();
+    let module = context
+        .parse_module_with_path(
+            "m::n",
+            source_file!(
+                &context,
+                r#"
+                    pub use 0x0000000000000000000000000000000000000000000000000000000000000000 -> foo
+                    pub use m::n::foo->bar
+
+                    pub proc calls_bar
+                        call.bar
+                    end
+                "#
+            ),
+        )
+        .expect("module parsing must succeed");
+
+    let assembled = catch_unwind(AssertUnwindSafe(|| {
+        Assembler::new(context.source_manager()).assemble_library([module])
+    }));
+
+    assert!(assembled.is_ok(), "assembly panicked, expected library assembly to succeed");
+    let library = assembled
+        .unwrap()
+        .expect("expected digest alias chain to assemble successfully");
+    assert_eq!(library.get_procedure_root_by_path("m::n::bar"), Some(digest));
+    assert!(library.get_procedure_root_by_path("m::n::calls_bar").is_some());
+}
+
+#[test]
 fn test_cross_module_quoted_identifier_resolution() -> TestResult {
     let context = TestContext::default();
 
