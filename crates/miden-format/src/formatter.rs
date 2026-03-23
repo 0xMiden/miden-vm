@@ -410,42 +410,50 @@ fn render_signature_lines(
     signature: &Signature,
     indent: usize,
 ) -> Vec<String> {
-    let compact_signature = render_token_sequence_with_style(
-        &significant_tokens(signature.syntax()),
-        SpacingStyle::TypeBodyItem,
-    );
-    let compact = format!("{header_prefix}{compact_signature}");
-    if line_length(&compact) <= MAX_LINE_WIDTH {
-        return vec![compact];
+    let has_comments = has_comment_tokens(&all_tokens(signature.syntax()));
+    let compact_signature = (!has_comments).then(|| {
+        render_token_sequence_with_style(
+            &significant_tokens(signature.syntax()),
+            SpacingStyle::TypeBodyItem,
+        )
+    });
+    if let Some(compact_signature) = compact_signature.as_ref() {
+        let compact = format!("{header_prefix}{compact_signature}");
+        if line_length(&compact) <= MAX_LINE_WIDTH {
+            return vec![compact];
+        }
     }
 
-    let tokens = significant_tokens(signature.syntax());
-    let Some(params_close) = matching_group_end(&tokens, 0, SyntaxKind::LParen, SyntaxKind::RParen)
+    let tokens = if has_comments {
+        trim_outer_whitespace_tokens(&all_tokens(signature.syntax()))
+    } else {
+        significant_tokens(signature.syntax())
+    };
+    let Some(params_open) = tokens.iter().position(|token| token.kind() == SyntaxKind::LParen)
     else {
-        return vec![compact];
+        return compact_signature
+            .map(|signature| vec![format!("{header_prefix}{signature}")])
+            .unwrap_or_else(|| vec![header_prefix.to_string()]);
+    };
+    let Some(params_close) =
+        matching_group_end(&tokens, params_open, SyntaxKind::LParen, SyntaxKind::RParen)
+    else {
+        return compact_signature
+            .map(|signature| vec![format!("{header_prefix}{signature}")])
+            .unwrap_or_else(|| vec![header_prefix.to_string()]);
     };
 
-    let params = split_top_level_items(&tokens[1..params_close]);
-    let result_tokens =
-        if tokens.get(params_close + 1).map(SyntaxToken::kind) == Some(SyntaxKind::RArrow) {
-            &tokens[(params_close + 2)..]
-        } else {
-            &tokens[0..0]
-        };
+    let params = split_top_level_items(&tokens[(params_open + 1)..params_close])
+        .into_iter()
+        .map(|item| trim_outer_whitespace_tokens(&item))
+        .filter(|item| !item.is_empty())
+        .collect::<Vec<_>>();
+    let result_tokens = result_tokens_after_params(&tokens, params_close);
 
     let mut lines = vec![format!("{header_prefix}(")];
     let param_count = params.len();
     for (index, param) in params.into_iter().enumerate() {
-        if param.is_empty() {
-            continue;
-        }
-
-        let mut param_lines = render_token_lines_with_style(
-            &param,
-            indent + INDENT_WIDTH,
-            true,
-            SpacingStyle::TypeBodyItem,
-        );
+        let mut param_lines = render_signature_item_lines(&param, indent + INDENT_WIDTH);
         if index + 1 != param_count {
             if let Some(last_line) = param_lines.last_mut() {
                 last_line.push(',');
@@ -460,14 +468,21 @@ fn render_signature_lines(
         return lines;
     }
 
+    let result_has_comments = has_comment_tokens(&result_tokens);
+
     if let Some((open_index, close_index)) =
-        outer_group_indices(result_tokens, SyntaxKind::LParen, SyntaxKind::RParen)
+        outer_group_indices(&result_tokens, SyntaxKind::LParen, SyntaxKind::RParen)
     {
         if open_index == 0 {
-            let items = split_top_level_items(&result_tokens[1..close_index]);
+            let items = split_top_level_items(&result_tokens[1..close_index])
+                .into_iter()
+                .map(|item| trim_outer_whitespace_tokens(&item))
+                .filter(|item| !item.is_empty())
+                .collect::<Vec<_>>();
             let result =
-                render_token_sequence_with_style(result_tokens, SpacingStyle::TypeBodyItem);
+                render_token_sequence_with_style(&result_tokens, SpacingStyle::TypeBodyItem);
             if items.len() <= 1
+                && !result_has_comments
                 && line_length(&closing) + 4 + line_length(&result) <= MAX_LINE_WIDTH
             {
                 closing.push_str(" -> ");
@@ -481,16 +496,7 @@ fn render_signature_lines(
 
             let item_count = items.len();
             for (index, item) in items.into_iter().enumerate() {
-                if item.is_empty() {
-                    continue;
-                }
-
-                let mut item_lines = render_token_lines_with_style(
-                    &item,
-                    indent + INDENT_WIDTH,
-                    true,
-                    SpacingStyle::TypeBodyItem,
-                );
+                let mut item_lines = render_signature_item_lines(&item, indent + INDENT_WIDTH);
                 if index + 1 != item_count {
                     if let Some(last_line) = item_lines.last_mut() {
                         last_line.push(',');
@@ -504,8 +510,8 @@ fn render_signature_lines(
         }
     }
 
-    let result = render_token_sequence_with_style(result_tokens, SpacingStyle::TypeBodyItem);
-    if line_length(&closing) + 4 + line_length(&result) <= MAX_LINE_WIDTH {
+    let result = render_token_sequence_with_style(&result_tokens, SpacingStyle::TypeBodyItem);
+    if !result_has_comments && line_length(&closing) + 4 + line_length(&result) <= MAX_LINE_WIDTH {
         closing.push_str(" -> ");
         closing.push_str(&result);
         lines.push(closing);
@@ -514,12 +520,7 @@ fn render_signature_lines(
 
     closing.push_str(" ->");
     lines.push(closing);
-    lines.extend(render_token_lines_with_style(
-        result_tokens,
-        indent + INDENT_WIDTH,
-        true,
-        SpacingStyle::TypeBodyItem,
-    ));
+    lines.extend(render_signature_item_lines(&result_tokens, indent + INDENT_WIDTH));
     lines
 }
 
@@ -829,11 +830,7 @@ fn render_delimited_group(
 }
 
 fn render_expression_with_comments(expr: &SyntaxNode, indent: usize) -> Vec<String> {
-    let tokens = expr
-        .descendants_with_tokens()
-        .filter_map(|element| element.into_token())
-        .collect::<Vec<_>>();
-    render_token_stream_with_comments(&tokens, indent, SpacingStyle::Default)
+    render_token_stream_with_comments(&all_tokens(expr), indent, SpacingStyle::Default)
 }
 
 fn render_token_stream_with_comments(
@@ -1004,6 +1001,18 @@ fn render_path_lines(header: &str, path_tokens: &[SyntaxToken], indent: usize) -
     lines
 }
 
+fn all_tokens(node: &SyntaxNode) -> Vec<SyntaxToken> {
+    node.descendants_with_tokens()
+        .filter_map(|element| element.into_token())
+        .collect()
+}
+
+fn has_comment_tokens(tokens: &[SyntaxToken]) -> bool {
+    tokens
+        .iter()
+        .any(|token| matches!(token.kind(), SyntaxKind::Comment | SyntaxKind::DocComment))
+}
+
 fn has_comment_token(node: &SyntaxNode) -> bool {
     node.descendants_with_tokens()
         .filter_map(|element| element.into_token())
@@ -1071,6 +1080,41 @@ fn direct_child_of_kind(node: &SyntaxNode, kind: SyntaxKind) -> Option<SyntaxNod
 
 fn combine_tokens(prefix: &[SyntaxToken], suffix: &[SyntaxToken]) -> Vec<SyntaxToken> {
     prefix.iter().cloned().chain(suffix.iter().cloned()).collect()
+}
+
+fn trim_outer_whitespace_tokens(tokens: &[SyntaxToken]) -> Vec<SyntaxToken> {
+    let start = tokens
+        .iter()
+        .position(|token| !matches!(token.kind(), SyntaxKind::Whitespace | SyntaxKind::Newline));
+    let end = tokens
+        .iter()
+        .rposition(|token| !matches!(token.kind(), SyntaxKind::Whitespace | SyntaxKind::Newline));
+
+    match (start, end) {
+        (Some(start), Some(end)) if start <= end => tokens[start..=end].to_vec(),
+        _ => Vec::new(),
+    }
+}
+
+fn result_tokens_after_params(tokens: &[SyntaxToken], params_close: usize) -> Vec<SyntaxToken> {
+    let Some(arrow_offset) = tokens
+        .iter()
+        .enumerate()
+        .skip(params_close + 1)
+        .find_map(|(index, token)| (token.kind() == SyntaxKind::RArrow).then_some(index))
+    else {
+        return Vec::new();
+    };
+
+    trim_outer_whitespace_tokens(&tokens[(arrow_offset + 1)..])
+}
+
+fn render_signature_item_lines(tokens: &[SyntaxToken], indent: usize) -> Vec<String> {
+    if has_comment_tokens(tokens) {
+        render_token_stream_with_comments(tokens, indent, SpacingStyle::TypeBodyItem)
+    } else {
+        render_token_lines_with_style(tokens, indent, true, SpacingStyle::TypeBodyItem)
+    }
 }
 
 fn outer_group_indices(
@@ -1584,6 +1628,49 @@ end
 ";
 
         assert_eq!(formatted, expected);
+
+        let reparsed = parse_text(&formatted);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+    }
+
+    #[test]
+    fn preserves_comments_inside_wrapped_procedure_signatures() {
+        let source = "\
+pub proc println_debug_message_with_context(
+    # message
+    message: ptr<u8, addrspace(byte)>,
+    # context
+    context: ptr<u8, addrspace(byte)>
+) -> (
+    # result
+    result: ptr<u8, addrspace(byte)>,
+    status: i1 # status
+) # proc
+    nop
+end
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let formatted = format_syntax(&parse.syntax());
+        let expected = "\
+pub proc println_debug_message_with_context(
+    # message
+    message: ptr<u8, addrspace(byte)>,
+    # context
+    context: ptr<u8, addrspace(byte)>
+) -> (
+    # result
+    result: ptr<u8, addrspace(byte)>,
+    status: i1 # status
+) # proc
+    nop
+end
+";
+
+        assert_eq!(formatted, expected);
+        assert!(formatted.lines().all(|line| line.len() <= MAX_LINE_WIDTH));
 
         let reparsed = parse_text(&formatted);
         assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
