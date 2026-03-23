@@ -115,7 +115,7 @@ fn check_pow_invalid_has_message() {
             push.16 exec.constants::set_folding_pow_bits
             push.0.0.0.0 push.10
             exec.random_coin::init_seed
-            exec.random_coin::check_pow
+            exec.random_coin::check_query_pow
         end
     ";
     let advice_stack = &[0_u64];

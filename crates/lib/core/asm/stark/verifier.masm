@@ -131,6 +131,9 @@ pub proc verify
     #       DEEP composition polynomial.
     #============================================
 
+    # Check DEEP proof-of-work.
+    exec.random_coin::check_deep_pow
+
     # Cycles: 281
     exec.random_coin::generate_deep_composition_random_coefficients
 
@@ -162,17 +165,17 @@ pub proc verify
     #      polynomial.
     #============================================
 
-    # Cycles (load_and_verify_remainder + check_pow combined):
+    # Cycles:
     #  1- Remainder polynomial of degree less than 64: 156
     #  2- Remainder polynomial of degree less than 128: 188
     exec.helper::load_and_verify_remainder
     # => [...]
 
     #============================================
-    #   5) Check PoW nonce
+    #   5) Check FRI Queries PoW nonce
     #============================================
 
-    exec.random_coin::check_pow
+    exec.random_coin::check_query_pow
     # => [...]
 
     #============================================

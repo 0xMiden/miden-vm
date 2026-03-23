@@ -11,8 +11,8 @@
 //!   security params (nq, query_pow, deep_pow, folding_pow) ->
 //!   fixed-length PI -> num_kernel_proc_digests -> kernel_digests ->
 //!   aux randomness -> main commit -> aux commit ->
-//!   aux finals -> quotient commit -> deep alpha -> OOD evals -> FRI rounds ->
-//!   FRI remainder -> PoW witness
+//!   aux finals -> quotient commit -> deep alpha -> OOD evals -> DEEP PoW witness ->
+//!   FRI rounds -> FRI remainder -> query PoW witness
 //!
 //! See `build_advice` for the authoritative layout.
 
@@ -202,20 +202,23 @@ fn build_advice(
     // 10. OOD evaluations.
     append_ood_evaluations(&mut advice_stack, pcs);
 
-    // 11. FRI layer commitments + per-round PoW witnesses.
+    // 11. DEEP PoW witness.
+    advice_stack.push(pcs.deep_transcript.pow_witness.as_canonical_u64());
+
+    // 12. FRI layer commitments + per-round PoW witnesses.
     for round in &pcs.fri_transcript.rounds {
         advice_stack.extend_from_slice(&commitment_to_u64s(round.commitment));
         advice_stack.push(round.pow_witness.as_canonical_u64());
     }
 
-    // 12. FRI remainder polynomial (already in descending degree order from the prover, matching
+    // 13. FRI remainder polynomial (already in descending degree order from the prover, matching
     //     the order observed into the Fiat-Shamir transcript).
     let final_poly = &pcs.fri_transcript.final_poly;
     let remainder_base = flatten_challenges(final_poly);
     let remainder_u64s: Vec<u64> = remainder_base.iter().map(|f| f.as_canonical_u64()).collect();
     advice_stack.extend_from_slice(&remainder_u64s);
 
-    // 13. PoW witness.
+    // 14. PoW witness.
     advice_stack.push(pcs.query_pow_witness.as_canonical_u64());
 
     // --- Merkle data ---

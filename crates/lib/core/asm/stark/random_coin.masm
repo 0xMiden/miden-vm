@@ -683,19 +683,21 @@ end
 # PROOF-OF-WORK CHECK
 # =============================================================================================
 
-#! Check the query proof-of-work. Reads query_pow_bits from memory and verifies that
-#! the nonce (from advice) satisfies the required number of leading zero bits.
+#! Verify a proof-of-work witness given pow_bits on the stack.
 #!
-#! When query_pow_bits != 0, writes the nonce directly to rate[0] and permutes, then
-#! sample_bits reads from the fresh permutation output.
+#! When pow_bits != 0, reads the nonce from advice, writes it to rate[0], permutes,
+#! and checks that the low pow_bits of the output are zero.
+#! When pow_bits == 0, consumes the witness (must be zero) without affecting the transcript.
 #!
-#! SAFETY: Requires input_len=0 (guaranteed after load_and_verify_remainder).
+#! Used by check_query_pow (query phase) and check_deep_pow (DEEP phase).
+#! FRI folding PoW uses a separate path (sample_folding_pow_and_ext) because the
+#! witness is bundled with the commitment reseed.
 #!
-#! Input: [...]
+#! SAFETY: Requires input_len=0.
+#!
+#! Input: [pow_bits, ...]
 #! Output: [...]
-pub proc check_pow
-    exec.constants::get_query_pow_bits
-
+proc check_pow
     dup
     push.0 neq
     if.true
@@ -717,4 +719,30 @@ pub proc check_pow
         assertz.err="proof-of-work nonce must be zero when grinding factor is zero"
         drop
     end
+end
+
+#! Check the DEEP proof-of-work.
+#!
+#! Called before sampling DEEP composition polynomial challenges.
+#!
+#! SAFETY: Requires input_len=0.
+#!
+#! Input: [...]
+#! Output: [...]
+pub proc check_deep_pow
+    exec.constants::get_deep_pow_bits
+    exec.check_pow
+end
+
+#! Check the query proof-of-work.
+#!
+#! Called after loading the FRI remainder, before sampling query indices.
+#!
+#! SAFETY: Requires input_len=0 (guaranteed after load_and_verify_remainder).
+#!
+#! Input: [...]
+#! Output: [...]
+pub proc check_query_pow
+    exec.constants::get_query_pow_bits
+    exec.check_pow
 end

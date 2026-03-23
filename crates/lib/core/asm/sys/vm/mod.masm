@@ -11,9 +11,9 @@ use miden::core::stark::constants
 # These define the security policy enforced by `assert_acceptable_options`.
 # If the protocol security level changes, update these constants accordingly.
 const ACCEPTABLE_NUM_QUERIES = 27
-const ACCEPTABLE_QUERY_POW_BITS = 0
-const ACCEPTABLE_DEEP_POW_BITS = 0
-const ACCEPTABLE_FOLDING_POW_BITS = 16
+const ACCEPTABLE_QUERY_POW_BITS = 16
+const ACCEPTABLE_DEEP_POW_BITS = 12
+const ACCEPTABLE_FOLDING_POW_BITS = 4
 
 # RELATION_DIGEST = hash(PROTOCOL_ID, CIRCUIT_COMMITMENT).
 # This is a compile-time constant computed once per AIR that binds the Fiat-Shamir

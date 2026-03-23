@@ -33,13 +33,13 @@ pub const LOG_FOLDING_ARITY: u8 = 2;
 /// Log2 of the final polynomial degree (degree = 128).
 const LOG_FINAL_DEGREE: u8 = 7;
 /// Proof-of-work bits for FRI folding challenges.
-pub const FOLDING_POW_BITS: usize = 16;
+pub const FOLDING_POW_BITS: usize = 4;
 /// Proof-of-work bits for DEEP composition polynomial.
-pub const DEEP_POW_BITS: usize = 0;
+pub const DEEP_POW_BITS: usize = 12;
 /// Number of FRI query repetitions.
 const NUM_QUERIES: usize = 27;
 /// Proof-of-work bits for query phase.
-const QUERY_POW_BITS: usize = 0;
+const QUERY_POW_BITS: usize = 16;
 
 /// Default PCS parameters shared by all hash function configurations.
 pub fn pcs_params() -> PcsParams {
