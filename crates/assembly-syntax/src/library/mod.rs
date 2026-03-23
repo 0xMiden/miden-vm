@@ -421,13 +421,7 @@ impl Library {
             self.write_into(&mut file);
             Ok(())
         })
-        .map_err(|p| {
-            match p.downcast::<std::io::Error>() {
-                // SAFETY: It is guaranteed safe to read Box<std::io::Error>
-                Ok(err) => unsafe { core::ptr::read(&*err) },
-                Err(err) => std::panic::resume_unwind(err),
-            }
-        })?
+        .map_err(map_write_panic)?
     }
 
     pub fn deserialize_from_file(
@@ -887,4 +881,36 @@ impl proptest::prelude::Arbitrary for Library {
     }
 
     type Strategy = proptest::prelude::BoxedStrategy<Self>;
+}
+
+// HELPERS
+// ================================================================================================
+
+/// Maps a `catch_unwind` panic payload to an `io::Error`.
+///
+/// If the panic payload is a boxed `io::Error` (which is what `WriteAdapter` produces when an
+/// underlying write fails), it is moved out of the box and returned directly. Any other panic
+/// payload is re-raised so it propagates normally.
+#[cfg(feature = "std")]
+fn map_write_panic(p: std::boxed::Box<dyn core::any::Any + Send>) -> std::io::Error {
+    match p.downcast::<std::io::Error>() {
+        Ok(err) => *err,
+        Err(p) => std::panic::resume_unwind(p),
+    }
+}
+
+#[cfg(all(test, feature = "std"))]
+mod tests_write_to_file {
+    use std::{io::Write, string::String};
+
+    #[test]
+    fn map_write_panic_sees_real_std_write_payload() {
+        let panic_payload = std::panic::catch_unwind(|| {
+            let mut writer = std::io::Cursor::new([0u8; 0]);
+            writer.write_all(b"x").expect("write failed");
+        })
+        .unwrap_err();
+
+        assert!(panic_payload.downcast_ref::<String>().unwrap().contains("write failed"));
+    }
 }

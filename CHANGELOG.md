@@ -7,6 +7,8 @@
 #### Bug Fixes
 
 - Reverted `InvokeKind::ProcRef` back to `InvokeKind::Exec` in `visit_mut_procref` and added an explanatory comment (#2893).
+- Eliminated unsound `unsafe` double-drop UB in `Program::write_to_file` and `Library::write_to_file`: replaced `unsafe { core::ptr::read(&*err) }` with safe `*err` (deref-move from `Box<io::Error>`); added regression tests for both ([#2840](https://github.com/0xMiden/miden-vm/pull/2840)).
+
 #### Changes
 
 - Documented that enum variants are module-level constants and must be unique within a module (#2932).
