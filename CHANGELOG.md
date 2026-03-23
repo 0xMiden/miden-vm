@@ -2,6 +2,9 @@
 
 ## v0.23.0 (TBD)
 
+#### Fixes
+- Rejected non-syscall references to exported kernel procedures in the linker ([#2902](https://github.com/0xMiden/miden-vm/issues/2902)).
+
 ## 0.22.0 (2025-03-18)
 
 #### Enhancements

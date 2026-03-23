@@ -5645,6 +5645,39 @@ end
 }
 
 #[test]
+fn regression_kernel_exports_are_syscall_only_exec_target_is_rejected() {
+    let context = TestContext::default();
+    let source_manager = context.source_manager();
+
+    let kernel_src = r#"
+pub proc k1
+    push.1
+end
+"#;
+
+    let kernel = Assembler::new(source_manager.clone())
+        .assemble_kernel(kernel_src)
+        .expect("kernel assembly must succeed");
+
+    let program_src = r#"
+proc user
+    exec.::$kernel::k1
+end
+
+begin
+    call.user
+end
+"#;
+
+    let res = Assembler::with_kernel(source_manager, kernel).assemble_program(program_src);
+
+    assert!(
+        res.is_err(),
+        "expected `exec.::$kernel::...` to be rejected in executable modules"
+    );
+}
+
+#[test]
 fn test_linking_imported_symbols_with_duplicate_prefix_components() -> TestResult {
     let context = TestContext::default();
 
