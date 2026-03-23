@@ -6,7 +6,7 @@ mod tests;
 
 use alloc::{
     boxed::Box,
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     string::ToString,
     sync::Arc,
     vec::Vec,
@@ -189,6 +189,7 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) -> Result<()
             .iter()
             .map(|item| (item.name().as_str().to_string(), LocalInvokeTarget::from(item))),
     );
+    let mut used_aliases = BTreeSet::default();
     let mut items = VecDeque::from(core::mem::take(&mut module.items));
     while let Some(item) = items.pop_front() {
         match item {
@@ -230,6 +231,7 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) -> Result<()
                         analyzer,
                         module,
                         &locals,
+                        &mut used_aliases,
                         Some(procedure.name().clone()),
                     );
                     let _ = visitor.visit_mut_procedure(&mut procedure);
@@ -241,7 +243,13 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) -> Result<()
             Export::Alias(mut alias) => {
                 log::debug!(target: "verify-invoke", "visiting alias {}", alias.target());
                 {
-                    let mut visitor = VerifyInvokeTargets::new(analyzer, module, &locals, None);
+                    let mut visitor = VerifyInvokeTargets::new(
+                        analyzer,
+                        module,
+                        &locals,
+                        &mut used_aliases,
+                        None,
+                    );
                     let _ = visitor.visit_mut_alias(&mut alias);
                 }
                 if let Err(err) = module.push_export(Export::Alias(alias)) {
@@ -251,7 +259,13 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) -> Result<()
             Export::Constant(mut constant) => {
                 log::debug!(target: "verify-invoke", "visiting constant {}", constant.name());
                 {
-                    let mut visitor = VerifyInvokeTargets::new(analyzer, module, &locals, None);
+                    let mut visitor = VerifyInvokeTargets::new(
+                        analyzer,
+                        module,
+                        &locals,
+                        &mut used_aliases,
+                        None,
+                    );
                     let _ = visitor.visit_mut_constant(&mut constant);
                 }
                 if let Err(err) = module.push_export(Export::Constant(constant)) {
@@ -261,13 +275,25 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) -> Result<()
             Export::Type(mut ty) => {
                 log::debug!(target: "verify-invoke", "visiting type {}", ty.name());
                 {
-                    let mut visitor = VerifyInvokeTargets::new(analyzer, module, &locals, None);
+                    let mut visitor = VerifyInvokeTargets::new(
+                        analyzer,
+                        module,
+                        &locals,
+                        &mut used_aliases,
+                        None,
+                    );
                     let _ = visitor.visit_mut_type_decl(&mut ty);
                 }
                 if let Err(err) = module.push_export(Export::Type(ty)) {
                     analyzer.error(err);
                 }
             },
+        }
+    }
+
+    for alias in module.aliases_mut() {
+        if alias.uses == 0 && used_aliases.contains(alias.name().as_str()) {
+            alias.uses = 1;
         }
     }
 

@@ -5671,6 +5671,157 @@ fn path_alias_chain_to_digest_assembles_without_panicking() {
 }
 
 #[test]
+fn imported_digest_alias_invoke_assembles_without_panicking() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let program = r#"
+        use 0x0000000000000000000000000000000000000000000000000000000000000000 -> foo
+
+        begin
+            exec.foo
+        end
+    "#;
+
+    let assembled =
+        catch_unwind(AssertUnwindSafe(|| Assembler::default().assemble_program(program)));
+
+    assert!(
+        assembled.is_ok(),
+        "assembly panicked, expected opaque digest invoke to be allowed"
+    );
+    assembled
+        .unwrap()
+        .expect("expected digest-backed invoke alias to assemble successfully");
+}
+
+#[test]
+fn imported_digest_alias_invoke_is_not_reported_unused_when_warnings_are_errors() {
+    use std::sync::Arc;
+
+    use crate::{DefaultSourceManager, Parse, ParseOptions, ast::ModuleKind};
+
+    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let program = r#"
+        use 0x0000000000000000000000000000000000000000000000000000000000000000 -> foo
+
+        begin
+            exec.foo
+        end
+    "#;
+
+    let mut options = ParseOptions::new(ModuleKind::Executable, "main");
+    options.warnings_as_errors = true;
+
+    <&str as Parse>::parse_with_options(program, source_manager, options)
+        .expect("expected digest-backed invoke alias to count as used");
+}
+
+#[test]
+fn imported_digest_alias_forward_decl_is_not_reported_unused_when_warnings_are_errors() {
+    use std::sync::Arc;
+
+    use crate::{DefaultSourceManager, Parse, ParseOptions, ast::ModuleKind};
+
+    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let program = r#"
+        proc helper
+            exec.foo
+        end
+
+        use 0x0000000000000000000000000000000000000000000000000000000000000000 -> foo
+
+        begin
+            call.helper
+        end
+    "#;
+
+    let mut options = ParseOptions::new(ModuleKind::Executable, "main");
+    options.warnings_as_errors = true;
+
+    <&str as Parse>::parse_with_options(program, source_manager, options)
+        .expect("expected forward-declared digest alias to count as used");
+}
+
+#[test]
+fn forward_declared_import_used_by_alias_target_is_not_reported_unused_when_warnings_are_errors() {
+    use std::sync::Arc;
+
+    use crate::{DefaultSourceManager, Parse, ParseOptions, ast::ModuleKind};
+
+    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let module = r#"
+        pub use foo::bar -> baz
+        use external::module -> foo
+    "#;
+
+    let mut options = ParseOptions::new(ModuleKind::Library, "m");
+    options.warnings_as_errors = true;
+
+    <&str as Parse>::parse_with_options(module, source_manager, options)
+        .expect("expected forward-declared import used by alias target to count as used");
+}
+
+#[test]
+fn forward_declared_import_used_by_type_ref_is_not_reported_unused_when_warnings_are_errors() {
+    use std::sync::Arc;
+
+    use crate::{DefaultSourceManager, Parse, ParseOptions, ast::ModuleKind};
+
+    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let module = r#"
+        type Local = foo::Type
+        use external::module -> foo
+    "#;
+
+    let mut options = ParseOptions::new(ModuleKind::Library, "m");
+    options.warnings_as_errors = true;
+
+    <&str as Parse>::parse_with_options(module, source_manager, options)
+        .expect("expected forward-declared import used by type ref to count as used");
+}
+
+#[test]
+fn forward_declared_import_used_by_constant_ref_is_not_reported_unused_when_warnings_are_errors() {
+    use std::sync::Arc;
+
+    use crate::{DefaultSourceManager, Parse, ParseOptions, ast::ModuleKind};
+
+    let source_manager: Arc<dyn crate::SourceManager> = Arc::new(DefaultSourceManager::default());
+    let module = r#"
+        const LOCAL = foo::BAR
+        use external::module -> foo
+    "#;
+
+    let mut options = ParseOptions::new(ModuleKind::Library, "m");
+    options.warnings_as_errors = true;
+
+    <&str as Parse>::parse_with_options(module, source_manager, options)
+        .expect("expected forward-declared import used by constant ref to count as used");
+}
+
+#[test]
+fn imported_digest_alias_subpath_is_rejected_without_panicking() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let program = r#"
+        use 0x0000000000000000000000000000000000000000000000000000000000000000 -> foo
+
+        begin
+            exec.foo::bar
+        end
+    "#;
+
+    let assembled =
+        catch_unwind(AssertUnwindSafe(|| Assembler::default().assemble_program(program)));
+
+    assert!(assembled.is_ok(), "assembly panicked, expected a structured error");
+    let err = assembled
+        .unwrap()
+        .expect_err("expected digest-backed invoke subpath to be rejected");
+    assert_diagnostic!(&err, "invalid procedure path: not an item");
+}
+
+#[test]
 fn invoking_local_type_alias_returns_error_instead_of_panicking() {
     use std::panic::{AssertUnwindSafe, catch_unwind};
 

@@ -48,6 +48,7 @@ pub(crate) struct VerifyInvokeTargets<'a> {
     analyzer: &'a mut AnalysisContext,
     module: &'a mut Module,
     locals: &'a BTreeMap<String, LocalInvokeTarget>,
+    used_aliases: &'a mut BTreeSet<String>,
     current_procedure: Option<ProcedureName>,
     invoked: BTreeSet<Invoke>,
 }
@@ -57,12 +58,14 @@ impl<'a> VerifyInvokeTargets<'a> {
         analyzer: &'a mut AnalysisContext,
         module: &'a mut Module,
         locals: &'a BTreeMap<String, LocalInvokeTarget>,
+        used_aliases: &'a mut BTreeSet<String>,
         current_procedure: Option<ProcedureName>,
     ) -> Self {
         Self {
             analyzer,
             module,
             locals,
+            used_aliases,
             current_procedure,
             invoked: Default::default(),
         }
@@ -70,6 +73,10 @@ impl<'a> VerifyInvokeTargets<'a> {
 }
 
 impl VerifyInvokeTargets<'_> {
+    fn track_used_alias_name(&mut self, name: &str) {
+        self.used_aliases.insert(name.to_string());
+    }
+
     fn resolve_local(&mut self, name: &Ident) -> ControlFlow<()> {
         let mut visited = BTreeSet::default();
         self.resolve_local_name(name.span(), name.as_str(), &mut visited)
@@ -118,6 +125,8 @@ impl VerifyInvokeTargets<'_> {
                 ControlFlow::Continue(())
             },
             LocalInvokeTarget::Alias(target) => {
+                self.track_used_alias_name(name);
+
                 if !visited.insert(name.to_string()) {
                     self.analyzer.error(SemanticAnalysisError::SymbolResolutionError(Box::new(
                         SymbolResolutionError::alias_expansion_cycle(
@@ -176,12 +185,16 @@ impl VerifyInvokeTargets<'_> {
             log::debug!(target: "verify-invoke", "found import '{}'", import.target());
             import.uses += 1;
             match import.target() {
-                AliasTarget::MastRoot(_) => {
-                    self.analyzer.error(SemanticAnalysisError::InvalidInvokeTargetViaImport {
-                        span,
-                        import: import.span(),
-                    });
-                    None
+                AliasTarget::MastRoot(digest) => {
+                    if rest.is_empty() {
+                        Some(InvocationTarget::MastRoot(*digest))
+                    } else {
+                        self.analyzer.error(SemanticAnalysisError::InvalidInvokeTargetViaImport {
+                            span,
+                            import: import.span(),
+                        });
+                        None
+                    }
                 },
                 // If we have an import like `use lib::lib`, the base `lib` has been shadowed, so
                 // we cannot attempt to resolve further. Instead, we use the target path we have.
@@ -197,13 +210,17 @@ impl VerifyInvokeTargets<'_> {
                     let resolved = self.resolve_external(path.span(), path.inner())?;
                     match resolved {
                         InvocationTarget::MastRoot(digest) => {
-                            self.analyzer.error(
-                                SemanticAnalysisError::InvalidInvokeTargetViaImport {
-                                    span,
-                                    import: digest.span(),
-                                },
-                            );
-                            None
+                            if rest.is_empty() {
+                                Some(InvocationTarget::MastRoot(digest))
+                            } else {
+                                self.analyzer.error(
+                                    SemanticAnalysisError::InvalidInvokeTargetViaImport {
+                                        span,
+                                        import: digest.span(),
+                                    },
+                                );
+                                None
+                            }
                         },
                         // We can consider this path fully-resolved, and mark it absolute, if it is
                         // not already
@@ -222,9 +239,7 @@ impl VerifyInvokeTargets<'_> {
         }
     }
     fn track_used_alias(&mut self, name: &Ident) {
-        if let Some(alias) = self.module.aliases_mut().find(|a| a.name() == name) {
-            alias.uses += 1;
-        }
+        self.track_used_alias_name(name.as_str());
     }
 }
 
@@ -322,10 +337,7 @@ impl VisitMut for VerifyInvokeTargets<'_> {
                     return ControlFlow::Continue(());
                 };
 
-                if let Some(via) = self.module.get_import_mut(ns) {
-                    via.uses += 1;
-                    assert!(via.is_used());
-                }
+                self.track_used_alias_name(ns);
                 ControlFlow::Continue(())
             },
         }
@@ -384,20 +396,16 @@ impl VisitMut for VerifyInvokeTargets<'_> {
     fn visit_mut_type_ref(&mut self, path: &mut Span<Arc<Path>>) -> ControlFlow<()> {
         if let Some(name) = path.as_ident() {
             self.track_used_alias(&name);
-        } else if let Some((module, _)) = path.split_first()
-            && let Some(alias) = self.module.aliases_mut().find(|a| a.name().as_str() == module)
-        {
-            alias.uses += 1;
+        } else if let Some((module, _)) = path.split_first() {
+            self.track_used_alias_name(module);
         }
         ControlFlow::Continue(())
     }
     fn visit_mut_constant_ref(&mut self, path: &mut Span<Arc<Path>>) -> ControlFlow<()> {
         if let Some(name) = path.as_ident() {
             self.track_used_alias(&name);
-        } else if let Some((module, _)) = path.split_first()
-            && let Some(alias) = self.module.aliases_mut().find(|a| a.name().as_str() == module)
-        {
-            alias.uses += 1;
+        } else if let Some((module, _)) = path.split_first() {
+            self.track_used_alias_name(module);
         }
         ControlFlow::Continue(())
     }
