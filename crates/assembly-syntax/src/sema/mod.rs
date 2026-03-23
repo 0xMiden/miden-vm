@@ -6,7 +6,8 @@ mod tests;
 
 use alloc::{
     boxed::Box,
-    collections::{BTreeSet, VecDeque},
+    collections::{BTreeMap, VecDeque},
+    string::ToString,
     sync::Arc,
     vec::Vec,
 };
@@ -15,10 +16,11 @@ use miden_core::{Word, crypto::hash::Poseidon2};
 use miden_debug_types::{SourceFile, SourceManager, Span, Spanned};
 use smallvec::SmallVec;
 
+use self::passes::{LocalInvokeTarget, VerifyInvokeTargets};
 pub use self::{
     context::AnalysisContext,
     errors::{LimitKind, SemanticAnalysisError, SyntaxError},
-    passes::{ConstEvalVisitor, VerifyInvokeTargets, VerifyRepeatCounts},
+    passes::{ConstEvalVisitor, VerifyRepeatCounts},
 };
 use crate::{ast::*, parser::WordValue};
 
@@ -181,7 +183,12 @@ pub fn analyze(
 /// of a module graph and global program analysis to perform any remaining transformations.
 fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) -> Result<(), SyntaxError> {
     let is_kernel = module.is_kernel();
-    let locals = BTreeSet::from_iter(module.items().iter().map(|p| p.name().clone()));
+    let locals = BTreeMap::from_iter(
+        module
+            .items()
+            .iter()
+            .map(|item| (item.name().as_str().to_string(), LocalInvokeTarget::from(item))),
+    );
     let mut items = VecDeque::from(core::mem::take(&mut module.items));
     while let Some(item) = items.pop_front() {
         match item {

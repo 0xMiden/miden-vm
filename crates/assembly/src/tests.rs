@@ -5455,8 +5455,8 @@ fn imported_main_alias_self_call_is_structured_error() {
     let err = assembled
         .unwrap()
         .expect_err("expected self-referential alias call to be rejected");
-    assert_diagnostic!(&err, "found a cycle in the call graph");
-    assert_diagnostic!(&err, "::$exec::$main");
+    assert_diagnostic!(&err, "invalid recursive procedure call");
+    assert_diagnostic!(&err, "this call is self-recursive");
 }
 
 #[test]
@@ -5668,6 +5668,56 @@ fn path_alias_chain_to_digest_assembles_without_panicking() {
         .expect("expected digest alias chain to assemble successfully");
     assert_eq!(library.get_procedure_root_by_path("m::n::bar"), Some(digest));
     assert!(library.get_procedure_root_by_path("m::n::calls_bar").is_some());
+}
+
+#[test]
+fn invoking_local_type_alias_returns_error_instead_of_panicking() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let masm = "type foo = u32\nbegin\n    exec.foo\nend\n";
+
+    let result = catch_unwind(AssertUnwindSafe(|| Assembler::default().assemble_program(masm)));
+
+    let result = result.expect("assembly panicked, expected a structured error");
+    let err = result.expect_err("assembly unexpectedly succeeded");
+    assert_diagnostic!(&err, "invalid symbol reference: wrong type");
+    assert_diagnostic!(&err, "expected this symbol to reference a procedure item");
+}
+
+#[test]
+fn invoking_local_type_alias_is_rejected_during_semantic_analysis() {
+    let context = TestContext::new();
+    let masm = source_file!(&context, "type foo = u32\nbegin\n    exec.foo\nend\n");
+
+    let err = context
+        .parse_program(masm)
+        .expect_err("semantic analysis unexpectedly accepted invoking a local type alias");
+    assert_diagnostic!(&err, "invalid symbol reference: wrong type");
+    assert_diagnostic!(&err, "expected this symbol to reference a procedure item");
+}
+
+#[test]
+fn invoking_imported_type_alias_returns_error_instead_of_panicking() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let context = TestContext::new();
+    let lib = context
+        .parse_module_with_path("test::types", source_file!(&context, "pub type foo = u32\n"))
+        .expect("library module parsing must succeed");
+    let library = Assembler::new(context.source_manager())
+        .assemble_library([lib])
+        .expect("library assembly must succeed");
+
+    let mut assembler = Assembler::new(context.source_manager());
+    assembler.link_dynamic_library(library).expect("library linking must succeed");
+
+    let program = "use test::types\nbegin\n    exec.types::foo\nend\n";
+    let result = catch_unwind(AssertUnwindSafe(|| assembler.assemble_program(program)));
+
+    let result = result.expect("assembly panicked, expected a structured error");
+    let err = result.expect_err("assembly unexpectedly succeeded");
+    assert_diagnostic!(&err, "invalid procedure reference: path refers to a non-procedure item");
+    assert_diagnostic!(&err, "test::types::foo");
 }
 
 #[test]

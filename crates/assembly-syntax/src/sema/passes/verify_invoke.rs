@@ -1,4 +1,9 @@
-use alloc::{boxed::Box, collections::BTreeSet, sync::Arc};
+use alloc::{
+    boxed::Box,
+    collections::{BTreeMap, BTreeSet},
+    string::{String, ToString},
+    sync::Arc,
+};
 use core::ops::ControlFlow;
 
 use miden_debug_types::{SourceSpan, Span, Spanned};
@@ -8,6 +13,25 @@ use crate::{
     ast::*,
     sema::{AnalysisContext, SemanticAnalysisError},
 };
+
+const MAX_ALIAS_EXPANSION_DEPTH: usize = 128;
+
+#[derive(Debug, Clone)]
+pub(crate) enum LocalInvokeTarget {
+    Procedure,
+    Alias(AliasTarget),
+    Other(SourceSpan),
+}
+
+impl From<&Export> for LocalInvokeTarget {
+    fn from(item: &Export) -> Self {
+        match item {
+            Export::Procedure(_) => Self::Procedure,
+            Export::Alias(alias) => Self::Alias(alias.target().clone()),
+            Export::Constant(_) | Export::Type(_) => Self::Other(item.span()),
+        }
+    }
+}
 
 /// This visitor visits every `exec`, `call`, `syscall`, and `procref`, and ensures that the
 /// invocation target for that call is resolvable to the extent possible within the current
@@ -20,25 +44,25 @@ use crate::{
 /// We attempt to apply as many call-related validations as we can here, however we are limited
 /// until later stages of compilation on what we can know in the context of a single module.
 /// As a result, more complex analyses are reserved until assembly.
-pub struct VerifyInvokeTargets<'a> {
+pub(crate) struct VerifyInvokeTargets<'a> {
     analyzer: &'a mut AnalysisContext,
     module: &'a mut Module,
-    procedures: &'a BTreeSet<Ident>,
+    locals: &'a BTreeMap<String, LocalInvokeTarget>,
     current_procedure: Option<ProcedureName>,
     invoked: BTreeSet<Invoke>,
 }
 
 impl<'a> VerifyInvokeTargets<'a> {
-    pub fn new(
+    pub(crate) fn new(
         analyzer: &'a mut AnalysisContext,
         module: &'a mut Module,
-        procedures: &'a BTreeSet<Ident>,
+        locals: &'a BTreeMap<String, LocalInvokeTarget>,
         current_procedure: Option<ProcedureName>,
     ) -> Self {
         Self {
             analyzer,
             module,
-            procedures,
+            locals,
             current_procedure,
             invoked: Default::default(),
         }
@@ -47,11 +71,98 @@ impl<'a> VerifyInvokeTargets<'a> {
 
 impl VerifyInvokeTargets<'_> {
     fn resolve_local(&mut self, name: &Ident) -> ControlFlow<()> {
-        if !self.procedures.contains(name) {
+        let mut visited = BTreeSet::default();
+        self.resolve_local_name(name.span(), name.as_str(), &mut visited)
+    }
+
+    fn resolve_local_name(
+        &mut self,
+        span: SourceSpan,
+        name: &str,
+        visited: &mut BTreeSet<String>,
+    ) -> ControlFlow<()> {
+        if visited.len() > MAX_ALIAS_EXPANSION_DEPTH {
             self.analyzer.error(SemanticAnalysisError::SymbolResolutionError(Box::new(
-                SymbolResolutionError::undefined(name.span(), &self.analyzer.source_manager()),
+                SymbolResolutionError::alias_expansion_depth_exceeded(
+                    span,
+                    MAX_ALIAS_EXPANSION_DEPTH,
+                    &self.analyzer.source_manager(),
+                ),
             )));
+            return ControlFlow::Continue(());
         }
+
+        if self.current_procedure.as_ref().is_some_and(|curr| curr.as_str() == name) {
+            self.analyzer.error(SemanticAnalysisError::SelfRecursive { span });
+            return ControlFlow::Continue(());
+        }
+
+        let Some(item) = self.locals.get(name).cloned() else {
+            self.analyzer.error(SemanticAnalysisError::SymbolResolutionError(Box::new(
+                SymbolResolutionError::undefined(span, &self.analyzer.source_manager()),
+            )));
+            return ControlFlow::Continue(());
+        };
+
+        match &item {
+            LocalInvokeTarget::Procedure => ControlFlow::Continue(()),
+            LocalInvokeTarget::Other(actual) => {
+                self.analyzer.error(SemanticAnalysisError::SymbolResolutionError(Box::new(
+                    SymbolResolutionError::invalid_symbol_type(
+                        span,
+                        "procedure",
+                        *actual,
+                        &self.analyzer.source_manager(),
+                    ),
+                )));
+                ControlFlow::Continue(())
+            },
+            LocalInvokeTarget::Alias(target) => {
+                if !visited.insert(name.to_string()) {
+                    self.analyzer.error(SemanticAnalysisError::SymbolResolutionError(Box::new(
+                        SymbolResolutionError::alias_expansion_cycle(
+                            span,
+                            &self.analyzer.source_manager(),
+                        ),
+                    )));
+                    return ControlFlow::Continue(());
+                }
+
+                self.resolve_local_alias_target(span, target, visited)
+            },
+        }
+    }
+
+    fn resolve_local_alias_target(
+        &mut self,
+        span: SourceSpan,
+        target: &AliasTarget,
+        visited: &mut BTreeSet<String>,
+    ) -> ControlFlow<()> {
+        match target {
+            AliasTarget::MastRoot(_) => ControlFlow::Continue(()),
+            AliasTarget::Path(path) => self.resolve_invocation_path(span, path.inner(), visited),
+        }
+    }
+
+    fn resolve_invocation_path(
+        &mut self,
+        span: SourceSpan,
+        path: &Path,
+        visited: &mut BTreeSet<String>,
+    ) -> ControlFlow<()> {
+        if let Some(name) = path.as_ident() {
+            return self.resolve_local_name(span, name.as_str(), visited);
+        }
+
+        if path.parent().is_some_and(|parent| parent == self.module.path()) {
+            return self.resolve_local_name(span, path.last().unwrap(), visited);
+        }
+
+        if self.resolve_external(span, path).is_none() {
+            self.analyzer.error(SemanticAnalysisError::MissingImport { span });
+        }
+
         ControlFlow::Continue(())
     }
     fn resolve_external(&mut self, span: SourceSpan, path: &Path) -> Option<InvocationTarget> {

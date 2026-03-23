@@ -154,6 +154,39 @@ impl Assembler {
         self.warnings_as_errors = yes;
         self
     }
+
+    pub(crate) fn invalid_invoke_target_report(
+        &self,
+        kind: InvokeKind,
+        callee: &InvocationTarget,
+        caller: GlobalItemIndex,
+    ) -> Report {
+        let span = callee.span();
+        let source_file = self.source_manager.get(span.source_id()).ok();
+        let context = SymbolResolutionContext {
+            span,
+            module: caller.module,
+            kind: Some(kind),
+        };
+
+        let path = match self.linker.resolve_invoke_target(&context, callee) {
+            Ok(SymbolResolution::Exact { path, .. })
+            | Ok(SymbolResolution::Module { path, .. })
+            | Ok(SymbolResolution::External(path)) => Some(path.into_inner()),
+            Ok(SymbolResolution::Local(_)) | Ok(SymbolResolution::MastRoot(_)) => None,
+            Err(err) => return Report::new(err),
+        }
+        .or_else(|| match callee {
+            InvocationTarget::Symbol(symbol) => Some(Path::from_ident(symbol).into_owned().into()),
+            InvocationTarget::Path(path) => Some(path.clone().into_inner()),
+            InvocationTarget::MastRoot(_) => None,
+        });
+
+        match path {
+            Some(path) => Report::new(LinkerError::InvalidInvokeTarget { span, source_file, path }),
+            None => Report::msg("invalid procedure reference: target is not a procedure"),
+        }
+    }
 }
 
 // ------------------------------------------------------------------------------------------------
