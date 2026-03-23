@@ -11,16 +11,15 @@ use miden_core::{
     mast::{MastForest, MastNodeExt, MastNodeId},
     operations::Decorator,
     precompile::PrecompileTranscript,
-    program::{Kernel, MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
+    program::{MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
     utils::range,
 };
 
 use crate::{
     AdviceInputs, AdviceProvider, BaseHost, ContextId, ExecutionError, ExecutionOptions,
-    ProcessorState, TraceBuildInputs,
+    ProcessorState,
     continuation_stack::{Continuation, ContinuationStack},
     errors::MapExecErrNoCtx,
-    trace::execution_tracer::ExecutionTracer,
     tracer::{OperationHelperRegisters, Tracer},
 };
 
@@ -183,58 +182,6 @@ impl FastProcessor {
                 },
             },
         }
-    }
-
-    /// Pairs execution output with the trace inputs captured by the tracer.
-    #[inline(always)]
-    fn trace_result_from_parts(
-        program: &Program,
-        execution_output: ExecutionOutput,
-        tracer: ExecutionTracer,
-    ) -> TraceBuildInputs {
-        let mut trace_generation_context = tracer.into_trace_generation_context();
-        trace_generation_context.bind_execution(program.to_info(), &execution_output);
-        TraceBuildInputs::from_execution(program, execution_output, trace_generation_context)
-    }
-
-    /// Converts a step-wise execution result into the next resume context, if execution stopped.
-    #[inline(always)]
-    fn resume_result_from_flow(
-        flow: ControlFlow<BreakReason, StackOutputs>,
-        mut continuation_stack: ContinuationStack,
-        current_forest: Arc<MastForest>,
-        kernel: Kernel,
-    ) -> Result<Option<ResumeContext>, ExecutionError> {
-        match flow {
-            ControlFlow::Continue(_) => Ok(None),
-            ControlFlow::Break(break_reason) => match break_reason {
-                BreakReason::Err(err) => Err(err),
-                BreakReason::Stopped(maybe_continuation) => {
-                    if let Some(continuation) = maybe_continuation {
-                        continuation_stack.push_continuation(continuation);
-                    }
-
-                    Ok(Some(ResumeContext {
-                        current_forest,
-                        continuation_stack,
-                        kernel,
-                    }))
-                },
-            },
-        }
-    }
-
-    /// Materializes the current stack as public outputs without consuming the processor.
-    #[inline(always)]
-    fn current_stack_outputs(&self) -> StackOutputs {
-        StackOutputs::new(
-            &self.stack[self.stack_bot_idx..self.stack_top_idx]
-                .iter()
-                .rev()
-                .copied()
-                .collect::<Vec<_>>(),
-        )
-        .unwrap()
     }
 
     // CONSTRUCTORS

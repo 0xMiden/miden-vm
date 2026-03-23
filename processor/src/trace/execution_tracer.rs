@@ -8,16 +8,15 @@ use super::{
     stack::OverflowTable,
     trace_state::{
         AceReplay, AdviceReplay, BitwiseReplay, BlockAddressReplay, BlockStackReplay,
-        CoreTraceFragmentContext, CoreTraceState, DecoderState, ExecutedTraceBinding,
-        ExecutionContextReplay, ExecutionContextSystemInfo, ExecutionReplay, HasherRequestReplay,
-        HasherResponseReplay, KernelReplay, MastForestResolutionReplay, MemoryReadsReplay,
-        MemoryWritesReplay, RangeCheckerReplay, StackOverflowReplay, StackState, SystemState,
+        CoreTraceFragmentContext, CoreTraceState, DecoderState, ExecutionContextReplay,
+        ExecutionContextSystemInfo, ExecutionReplay, HasherRequestReplay, HasherResponseReplay,
+        KernelReplay, MastForestResolutionReplay, MemoryReadsReplay, MemoryWritesReplay,
+        RangeCheckerReplay, StackOverflowReplay, StackState, SystemState,
     },
     utils::split_u32_into_u16,
 };
 use crate::{
-    ContextId, EMPTY_WORD, ExecutionOutput, FastProcessor, Felt, MIN_STACK_DEPTH, ONE, ProgramInfo,
-    RowIndex, Word, ZERO,
+    ContextId, EMPTY_WORD, FastProcessor, Felt, MIN_STACK_DEPTH, ONE, RowIndex, Word, ZERO,
     continuation_stack::{Continuation, ContinuationStack},
     crypto::merkle::MerklePath,
     mast::{
@@ -60,21 +59,6 @@ pub struct TraceGenerationContext {
     /// The number of rows per core trace fragment, except for the last fragment which may be
     /// shorter.
     pub fragment_size: usize,
-}
-
-impl TraceGenerationContext {
-    pub(crate) fn bind_execution(
-        &mut self,
-        program_info: ProgramInfo,
-        execution_output: &ExecutionOutput,
-    ) {
-        self.kernel_replay.bind_execution(ExecutedTraceBinding::new(
-            program_info,
-            execution_output.stack,
-            execution_output.final_pc_transcript.state(),
-            execution_output.advice.fingerprint(),
-        ));
-    }
 }
 
 /// Builder for recording the context to generate trace fragments during execution.

@@ -85,41 +85,6 @@ fn build_trace(c: &mut Criterion) {
                         BatchSize::SmallInput,
                     );
                 });
-
-                // DEFAULT TRACE BUILD
-                // --------------------------------
-                group.bench_function(format!("{file_stem}_default"), |bench| {
-                    let mut assembler = Assembler::default();
-                    assembler
-                        .link_dynamic_library(CoreLibrary::default())
-                        .expect("failed to load core library");
-
-                    let program = assembler
-                        .assemble_program(&source)
-                        .expect("Failed to compile test source.");
-
-                    bench.to_async(Runtime::new().unwrap()).iter_batched(
-                        || {
-                            let host = DefaultHost::default()
-                                .with_library(&CoreLibrary::default())
-                                .unwrap();
-                            let processor = FastProcessor::new_with_options(
-                                stack_inputs,
-                                advice_inputs.clone(),
-                                ExecutionOptions::default(),
-                            );
-
-                            (host, program.clone(), processor)
-                        },
-                        |(mut host, program, processor)| async move {
-                            let trace_inputs =
-                                processor.execute_trace_inputs(&program, &mut host).await.unwrap();
-                            let trace = trace::build_trace(trace_inputs).unwrap();
-                            black_box(trace);
-                        },
-                        BatchSize::SmallInput,
-                    );
-                });
             },
             // If we can't access the entry, just skip it
             Err(err) => {

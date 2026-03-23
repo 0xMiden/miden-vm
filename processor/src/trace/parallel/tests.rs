@@ -1013,43 +1013,9 @@ fn test_build_trace_returns_err_on_mismatched_program_info() {
     );
 }
 
-/// Verifies that `build_trace` accepts a compatibility bundle created via `TraceBuildInputs::new`
-/// when it reuses an authentic execution context and matching `ProgramInfo`.
-#[test]
-#[allow(deprecated)]
-fn test_build_trace_accepts_bound_trace_build_inputs_new() {
-    const MAX_FRAGMENT_SIZE: usize = 1 << 20;
-
-    let program = basic_block_program_small();
-
-    let processor = FastProcessor::new_with_options(
-        StackInputs::new(DEFAULT_STACK).unwrap(),
-        AdviceInputs::default(),
-        ExecutionOptions::default()
-            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
-            .unwrap(),
-    );
-    let mut host = DefaultHost::default();
-    let (execution_output, trace_generation_context) =
-        processor.execute_trace_inputs_sync(&program, &mut host).unwrap().into_parts();
-
-    let trace = build_trace(TraceBuildInputs::new(
-        execution_output,
-        trace_generation_context,
-        program.to_info(),
-    ))
-    .unwrap();
-
-    assert!(
-        trace.program_hash() == &program.hash(),
-        "expected compatibility constructor to preserve the executed program binding"
-    );
-}
-
 /// Verifies that `build_trace` rejects compatibility bundles that mix an `ExecutionOutput` from a
 /// different run of the same program.
 #[test]
-#[allow(deprecated)]
 fn test_build_trace_rejects_mismatched_execution_output() {
     const MAX_FRAGMENT_SIZE: usize = 1 << 20;
     const OTHER_STACK: &[Felt] = &[Felt::new(4), Felt::new(5), Felt::new(6)];
@@ -1064,8 +1030,9 @@ fn test_build_trace_rejects_mismatched_execution_output() {
             .unwrap(),
     );
     let mut host = DefaultHost::default();
-    let (execution_output, trace_generation_context) =
-        processor.execute_trace_inputs_sync(&program, &mut host).unwrap().into_parts();
+    let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
+    let execution_binding = trace_inputs.execution_binding().clone();
+    let (execution_output, trace_generation_context) = trace_inputs.into_parts();
 
     let other_processor = FastProcessor::new_with_options(
         StackInputs::new(OTHER_STACK).unwrap(),
@@ -1082,10 +1049,11 @@ fn test_build_trace_rejects_mismatched_execution_output() {
 
     assert_ne!(execution_output.stack, other_execution_output.stack);
 
-    let result = build_trace(TraceBuildInputs::new(
+    let result = build_trace(TraceBuildInputs::with_execution_binding(
         other_execution_output,
         trace_generation_context,
         program.to_info(),
+        execution_binding,
     ));
 
     assert!(
@@ -1100,7 +1068,6 @@ fn test_build_trace_rejects_mismatched_execution_output() {
 /// Verifies that `build_trace` rejects compatibility bundles that reuse a matching stack output
 /// but carry a different final advice-provider state.
 #[test]
-#[allow(deprecated)]
 fn test_build_trace_rejects_mismatched_advice_provider() {
     const MAX_FRAGMENT_SIZE: usize = 1 << 20;
 
@@ -1114,8 +1081,9 @@ fn test_build_trace_rejects_mismatched_advice_provider() {
             .unwrap(),
     );
     let mut host = DefaultHost::default();
-    let (execution_output, trace_generation_context) =
-        processor.execute_trace_inputs_sync(&program, &mut host).unwrap().into_parts();
+    let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
+    let execution_binding = trace_inputs.execution_binding().clone();
+    let (execution_output, trace_generation_context) = trace_inputs.into_parts();
 
     let other_processor = FastProcessor::new_with_options(
         StackInputs::new(DEFAULT_STACK).unwrap(),
@@ -1140,10 +1108,11 @@ fn test_build_trace_rejects_mismatched_advice_provider() {
         other_execution_output.advice.fingerprint()
     );
 
-    let result = build_trace(TraceBuildInputs::new(
+    let result = build_trace(TraceBuildInputs::with_execution_binding(
         other_execution_output,
         trace_generation_context,
         program.to_info(),
+        execution_binding,
     ));
 
     assert!(
@@ -1181,39 +1150,6 @@ fn test_build_trace_returns_err_on_mismatched_kernel_with_same_program_hash() {
         execution_output,
         trace_generation_context,
         other_program,
-    ));
-
-    assert!(
-        matches!(result, Err(ExecutionError::Internal("trace inputs do not match program info"))),
-        "expected program-info mismatch error, got: {result:?}"
-    );
-}
-
-/// Verifies that `build_trace` rejects compatibility bundles created via `from_program()` when the
-/// supplied program does not match the authentic execution context.
-#[test]
-#[allow(deprecated)]
-fn test_build_trace_rejects_mismatched_trace_build_inputs_from_program() {
-    const MAX_FRAGMENT_SIZE: usize = 1 << 20;
-
-    let program = basic_block_program_small();
-    let other_program = join_program();
-
-    let processor = FastProcessor::new_with_options(
-        StackInputs::new(DEFAULT_STACK).unwrap(),
-        AdviceInputs::default(),
-        ExecutionOptions::default()
-            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
-            .unwrap(),
-    );
-    let mut host = DefaultHost::default();
-    let (execution_output, trace_generation_context) =
-        processor.execute_trace_inputs_sync(&program, &mut host).unwrap().into_parts();
-
-    let result = build_trace(TraceBuildInputs::from_program(
-        &other_program,
-        execution_output,
-        trace_generation_context,
     ));
 
     assert!(

@@ -74,7 +74,7 @@ impl FastProcessor {
     ) -> Result<TraceBuildInputs, ExecutionError> {
         let mut tracer = ExecutionTracer::new(self.options.core_trace_fragment_size());
         let execution_output = self.execute_with_tracer_sync(program, host, &mut tracer)?;
-        Ok(Self::trace_result_from_parts(program, execution_output, tracer))
+        Ok(Self::trace_build_inputs_from_parts(program, execution_output, tracer))
     }
 
     /// Async variant of [`Self::execute_trace_inputs_sync`] for async hosts.
@@ -87,7 +87,7 @@ impl FastProcessor {
     ) -> Result<TraceBuildInputs, ExecutionError> {
         let mut tracer = ExecutionTracer::new(self.options.core_trace_fragment_size());
         let execution_output = self.execute_with_tracer(program, host, &mut tracer).await?;
-        Ok(Self::trace_result_from_parts(program, execution_output, tracer))
+        Ok(Self::trace_build_inputs_from_parts(program, execution_output, tracer))
     }
 
     /// Executes the given program with the provided tracer using an async host.
@@ -162,7 +162,7 @@ impl FastProcessor {
             &mut NoopTracer,
             &StepStopper,
         );
-        Self::resume_result_from_flow(flow, continuation_stack, current_forest, kernel)
+        Self::resume_context_from_flow(flow, continuation_stack, current_forest, kernel)
     }
 
     /// Async variant of [`Self::step_sync`].
@@ -188,7 +188,61 @@ impl FastProcessor {
                 &StepStopper,
             )
             .await;
-        Self::resume_result_from_flow(flow, continuation_stack, current_forest, kernel)
+        Self::resume_context_from_flow(flow, continuation_stack, current_forest, kernel)
+    }
+
+    /// Pairs execution output with the trace inputs captured by the tracer.
+    #[inline(always)]
+    fn trace_build_inputs_from_parts(
+        program: &Program,
+        execution_output: ExecutionOutput,
+        tracer: ExecutionTracer,
+    ) -> TraceBuildInputs {
+        TraceBuildInputs::from_execution(
+            program,
+            execution_output,
+            tracer.into_trace_generation_context(),
+        )
+    }
+
+    /// Converts a step-wise execution result into the next resume context, if execution stopped.
+    #[inline(always)]
+    fn resume_context_from_flow(
+        flow: ControlFlow<BreakReason, StackOutputs>,
+        mut continuation_stack: ContinuationStack,
+        current_forest: Arc<MastForest>,
+        kernel: Kernel,
+    ) -> Result<Option<ResumeContext>, ExecutionError> {
+        match flow {
+            ControlFlow::Continue(_) => Ok(None),
+            ControlFlow::Break(break_reason) => match break_reason {
+                BreakReason::Err(err) => Err(err),
+                BreakReason::Stopped(maybe_continuation) => {
+                    if let Some(continuation) = maybe_continuation {
+                        continuation_stack.push_continuation(continuation);
+                    }
+
+                    Ok(Some(ResumeContext {
+                        current_forest,
+                        continuation_stack,
+                        kernel,
+                    }))
+                },
+            },
+        }
+    }
+
+    /// Materializes the current stack as public outputs without consuming the processor.
+    #[inline(always)]
+    fn current_stack_outputs(&self) -> StackOutputs {
+        StackOutputs::new(
+            &self.stack[self.stack_bot_idx..self.stack_top_idx]
+                .iter()
+                .rev()
+                .copied()
+                .collect::<Vec<_>>(),
+        )
+        .unwrap()
     }
 
     /// Executes the given program with the provided tracer and returns the stack outputs.

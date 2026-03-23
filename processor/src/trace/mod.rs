@@ -51,51 +51,10 @@ pub struct TraceBuildInputs {
     execution_output: ExecutionOutput,
     trace_generation_context: TraceGenerationContext,
     program_info: ProgramInfo,
-    expected_execution_binding: Option<trace_state::ExecutedTraceBinding>,
+    execution_binding: trace_state::ExecutedTraceBinding,
 }
 
 impl TraceBuildInputs {
-    /// Deprecated compatibility constructor for callers that only retained `ProgramInfo`.
-    ///
-    /// Prefer [`crate::FastProcessor::execute_trace_inputs_sync`] when the original execution can
-    /// be rerun.
-    #[deprecated(
-        note = "use FastProcessor::execute_trace_inputs*() to get execution-bound trace inputs"
-    )]
-    pub fn new(
-        execution_output: ExecutionOutput,
-        trace_generation_context: TraceGenerationContext,
-        program_info: ProgramInfo,
-    ) -> Self {
-        let expected_execution_binding =
-            trace_generation_context.kernel_replay.execution_binding().cloned();
-        Self {
-            execution_output,
-            trace_generation_context,
-            program_info,
-            expected_execution_binding,
-        }
-    }
-
-    /// Deprecated compatibility constructor for callers that only retained a `Program`.
-    #[deprecated(
-        note = "use FastProcessor::execute_trace_inputs*() to get execution-bound trace inputs"
-    )]
-    pub fn from_program(
-        program: &Program,
-        execution_output: ExecutionOutput,
-        trace_generation_context: TraceGenerationContext,
-    ) -> Self {
-        let expected_execution_binding =
-            trace_generation_context.kernel_replay.execution_binding().cloned();
-        Self {
-            execution_output,
-            trace_generation_context,
-            program_info: program.to_info(),
-            expected_execution_binding,
-        }
-    }
-
     pub(crate) fn from_execution(
         program: &Program,
         execution_output: ExecutionOutput,
@@ -103,16 +62,21 @@ impl TraceBuildInputs {
     ) -> Self {
         let program_info = program.to_info();
         Self {
-            expected_execution_binding: Some(trace_state::ExecutedTraceBinding::new(
+            execution_binding: trace_state::ExecutedTraceBinding::new(
                 program_info.clone(),
                 execution_output.stack,
                 execution_output.final_pc_transcript.state(),
                 execution_output.advice.fingerprint(),
-            )),
+            ),
             execution_output,
             trace_generation_context,
             program_info,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn execution_binding(&self) -> &trace_state::ExecutedTraceBinding {
+        &self.execution_binding
     }
 
     pub fn execution_output(&self) -> &ExecutionOutput {
@@ -146,17 +110,32 @@ impl TraceBuildInputs {
         trace_generation_context: TraceGenerationContext,
         program_info: ProgramInfo,
     ) -> Self {
-        let expected_execution_binding = trace_state::ExecutedTraceBinding::new(
+        let execution_binding = trace_state::ExecutedTraceBinding::new(
             program.to_info(),
             execution_output.stack,
             execution_output.final_pc_transcript.state(),
             execution_output.advice.fingerprint(),
         );
+        Self::with_execution_binding(
+            execution_output,
+            trace_generation_context,
+            program_info,
+            execution_binding,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_execution_binding(
+        execution_output: ExecutionOutput,
+        trace_generation_context: TraceGenerationContext,
+        program_info: ProgramInfo,
+        execution_binding: trace_state::ExecutedTraceBinding,
+    ) -> Self {
         Self {
             execution_output,
             trace_generation_context,
             program_info,
-            expected_execution_binding: Some(expected_execution_binding),
+            execution_binding,
         }
     }
 }

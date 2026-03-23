@@ -767,7 +767,7 @@ impl IntoIterator for BitwiseReplay {
     }
 }
 
-// KERNEL REPLAY
+// TRACE BUILD INPUT BINDING
 // ================================================================================================
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -810,11 +810,13 @@ impl ExecutedTraceBinding {
     }
 }
 
+// KERNEL REPLAY
+// ================================================================================================
+
 /// Replay data for kernel operations.
 #[derive(Debug, Default)]
 pub struct KernelReplay {
     kernel_proc_accesses: VecDeque<Word>,
-    execution_binding: Option<ExecutedTraceBinding>,
 }
 
 impl KernelReplay {
@@ -824,14 +826,6 @@ impl KernelReplay {
     /// Records the procedure hash of a syscall.
     pub fn record_kernel_proc_access(&mut self, proc_hash: Word) {
         self.kernel_proc_accesses.push_back(proc_hash);
-    }
-
-    pub(crate) fn bind_execution(&mut self, execution_binding: ExecutedTraceBinding) {
-        self.execution_binding = Some(execution_binding);
-    }
-
-    pub(crate) fn execution_binding(&self) -> Option<&ExecutedTraceBinding> {
-        self.execution_binding.as_ref()
     }
 }
 

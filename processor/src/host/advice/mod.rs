@@ -90,6 +90,10 @@ impl AdviceProvider {
         Ok(())
     }
 
+    /// Returns a stable fingerprint of the advice state.
+    ///
+    /// The fingerprint is insensitive to advice-map insertion order and Merkle-store insertion
+    /// order, but it still reflects advice-stack order and precompile-request order.
     pub(crate) fn fingerprint(&self) -> [u8; 32] {
         let stack = self.stack.iter().copied().collect::<Vec<_>>().to_bytes();
         let map = self.map.to_bytes();
