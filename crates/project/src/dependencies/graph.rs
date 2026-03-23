@@ -684,15 +684,11 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
             self.git_cache_root.join(format!("0x{}", DisplayHex::new(&key.as_bytes())));
         if !checkout_path.exists() {
             let mut args = vec!["clone"];
-            let mut rev_buffer = String::new();
             match revision {
                 GitRevision::Branch(name) => {
                     args.extend_from_slice(&["--branch", name.as_ref()]);
                 },
-                GitRevision::Commit(rev) => {
-                    rev_buffer = format!("--revision={rev}");
-                    args.push(&rev_buffer);
-                },
+                GitRevision::Commit(_) => (),
             };
             args.push(repo.as_str());
             let checkout_path = checkout_path.to_string_lossy();
@@ -1339,6 +1335,62 @@ mod tests {
     }
 
     #[test]
+    fn resolves_commit_pinned_git_dependency_after_repo_advances() {
+        let tempdir = TempDir::new().unwrap();
+        let repo_dir = tempdir.path().join("repo");
+        fs::create_dir_all(&repo_dir).unwrap();
+        write_package(&repo_dir, "dep", "1.0.0", Some("export.foo\nend\n"), []);
+        run_git(&repo_dir, &["init", "-b", "main"]);
+        run_git(&repo_dir, &["config", "user.email", "test@example.com"]);
+        run_git(&repo_dir, &["config", "user.name", "Test"]);
+        run_git(&repo_dir, &["config", "commit.gpgsign", "false"]);
+        run_git(&repo_dir, &["add", "."]);
+        run_git(&repo_dir, &["commit", "-m", "init"]);
+        let initial_revision = run_git_capture(&repo_dir, &["rev-parse", "HEAD"]);
+
+        write_package(&repo_dir, "dep", "2.0.0", Some("export.foo\nend\n"), []);
+        run_git(&repo_dir, &["add", "."]);
+        run_git(&repo_dir, &["commit", "-m", "change"]);
+
+        let root_dir = tempdir.path().join("root");
+        let root_manifest = write_package(
+            &root_dir,
+            "root",
+            "1.0.0",
+            Some("export.foo\nend\n"),
+            [Dependency::new(
+                Span::unknown("dep".into()),
+                DependencyVersionScheme::Git {
+                    repo: Span::unknown(Uri::from(repo_dir.as_path())),
+                    revision: Span::unknown(GitRevision::Commit(initial_revision.clone().into())),
+                    version: None,
+                },
+                Linkage::Dynamic,
+            )],
+        );
+
+        let registry = TestRegistry::default();
+        let graph = builder(&registry, &tempdir.path().join("git-cache"))
+            .build_from_path(&root_manifest)
+            .unwrap();
+        let dep = graph.get(&PackageId::from("dep")).unwrap();
+
+        assert_eq!(dep.version, "1.0.0".parse().unwrap());
+        assert_matches!(
+            &dep.provenance,
+            ProjectDependencyNodeProvenance::Source(ProjectSource::Real {
+                origin: ProjectSourceOrigin::Git {
+                    revision,
+                    resolved_revision,
+                    ..
+                },
+                ..
+            }) if *revision == GitRevision::Commit(initial_revision.clone().into())
+                && resolved_revision.as_ref() == initial_revision
+        );
+    }
+
+    #[test]
     fn git_dependency_without_version_uses_checked_out_source_version() {
         let tempdir = TempDir::new().unwrap();
         let repo_dir = tempdir.path().join("repo");
@@ -1593,6 +1645,18 @@ mod tests {
             dir.display(),
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    fn run_git_capture(dir: &Path, args: &[&str]) -> String {
+        let output = Command::new("git").current_dir(dir).args(args).output().unwrap();
+        assert!(
+            output.status.success(),
+            "git {} failed in '{}': {}",
+            args.join(" "),
+            dir.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap().trim().to_owned()
     }
 
     fn write_file(path: &Path, contents: &str) {
