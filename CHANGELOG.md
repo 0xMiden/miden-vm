@@ -14,6 +14,10 @@
 - Memoized semantic constant evaluation in `AnalysisContext` to prevent exponential work from shared constant-dependency graphs during parsing and semantic analysis ([#2858](https://github.com/0xMiden/miden-vm/pull/2858)).
 - Fixed quote-equivalent path ambiguity in library deserialization and linker symbol resolution ([#2836](https://github.com/0xMiden/miden-vm/pull/2836)).
 - Treat serialized libraries and kernel libraries as untrusted MAST forests during deserialization, rejecting spoofed node digests ([#2863](https://github.com/0xMiden/miden-vm/pull/2863)).
+- Return typed cycle errors for self-recursive and rootless procedure call graphs, and roll back linker state on failure ([#2899](https://github.com/0xMiden/miden-vm/pull/2899)).
+- [BREAKING] Reject oversized modules at resolver construction instead of building partial resolver state or panicking ([#2899](https://github.com/0xMiden/miden-vm/pull/2899)).
+- Return a normal assembly error when `pub use <digest> -> <name>` does not resolve to an exported procedure ([#2899](https://github.com/0xMiden/miden-vm/pull/2899)).
+- [BREAKING] Reject non-procedure invoke targets during semantic analysis, and return an assembly error instead of panicking if one still reaches assembly ([#2899](https://github.com/0xMiden/miden-vm/pull/2899)).
 
 ## 0.22.0 (TBD)
 
