@@ -73,15 +73,14 @@ fn b_range_trace_stack() {
 ///
 /// Each memory access produces two kinds of 16-bit range checks:
 ///
-/// 1. **Delta checks** (`d0`, `d1`): the difference between consecutive memory rows is
-///    decomposed into two 16-bit limbs. These are subtracted from `b_range` at the memory
-///    row and added back by the range checker table.
+/// 1. **Delta checks** (`d0`, `d1`): the difference between consecutive memory rows is decomposed
+///    into two 16-bit limbs. These are subtracted from `b_range` at the memory row and added back
+///    by the range checker table.
 ///
-/// 2. **Address decomposition checks** (`w0`, `w1`, `4*w1`): the word-aligned address is
-///    decomposed as `word_index = word_addr / 4`, then `w0 = word_index & 0xFFFF` and
-///    `w1 = word_index >> 16`. The three values `w0`, `w1`, `4*w1` are subtracted from the
-///    **wiring bus** (`v_wiring`) at the memory row, and added back by the range checker
-///    table into `b_range`.
+/// 2. **Address decomposition checks** (`w0`, `w1`, `4*w1`): the word-aligned address is decomposed
+///    as `word_index = word_addr / 4`, then `w0 = word_index & 0xFFFF` and `w1 = word_index >> 16`.
+///    The three values `w0`, `w1`, `4*w1` are subtracted from the **wiring bus** (`v_wiring`) at
+///    the memory row, and added back by the range checker table into `b_range`.
 ///
 /// Because the address range checks are subtracted on `v_wiring` but their multiplicities are
 /// added to `b_range`, neither column balances to zero on its own. The verifier checks the
@@ -168,8 +167,8 @@ fn b_range_trace_mem() {
     // 4. CHECK b_range: DELTA SUBTRACTIONS ON MEMORY ROWS
     // =====================================================================
     //
-    // The hasher trace occupies the first 64 rows (2 hasher controller + 30 padding +
-    // 32 hasher permutation segment). The memory chiplet starts at row 64.
+    // The hasher trace occupies the first 32 rows (2 hasher controller + 14 padding +
+    // 16 hasher permutation segment). The memory chiplet starts at row 32.
     let memory_start = 2 * HASH_CYCLE_LEN;
 
     // b_range starts at zero and stays zero until the first memory row.

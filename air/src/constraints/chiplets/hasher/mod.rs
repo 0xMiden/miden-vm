@@ -1,10 +1,10 @@
 //! Hasher chiplet constraints.
 //!
 //! The hasher chiplet uses a dispatch/compute split architecture:
-//! - The **hasher controller** (dispatch, `perm_seg=0`) records permutation requests as
-//!   compact (input, output) row pairs and responds to the chiplets bus.
-//! - The **hasher permutation segment** (compute, `perm_seg=1`) executes Poseidon2
-//!   permutations as 32-row cycles, one per unique input state.
+//! - The **hasher controller** (dispatch, `perm_seg=0`) records permutation requests as compact
+//!   (input, output) row pairs and responds to the chiplets bus.
+//! - The **hasher permutation segment** (compute, `perm_seg=1`) executes Poseidon2 permutations as
+//!   16-row cycles, one per unique input state.
 //!
 //! A LogUp perm-link bus on the shared `v_wiring` column binds the two regions.
 //!
@@ -24,8 +24,8 @@
 //! | h[0..12)     | Hasher state (RATE0, RATE1, CAP) |
 //! | node_index   | Merkle tree node index on controller rows; reused for request multiplicity on perm segment rows |
 //! | mrupdate_id  | Domain separator for sibling table |
-//! | is_start     | 1 on first input of operation |
-//! | is_final     | 1 on last output of operation |
+//! | is_boundary  | 1 on boundary rows (first input or last output) |
+//! | direction_bit| Merkle direction bit (0 on non-Merkle / perm rows) |
 //! | perm_seg     | 0 = hasher controller, 1 = hasher permutation segment |
 
 pub mod flags;
@@ -45,7 +45,7 @@ use crate::{
     trace::{
         CHIPLETS_OFFSET,
         chiplets::{
-            HASHER_IS_FINAL_COL_IDX, HASHER_IS_START_COL_IDX, HASHER_MRUPDATE_ID_COL_IDX,
+            HASHER_DIRECTION_BIT_COL_IDX, HASHER_IS_BOUNDARY_COL_IDX, HASHER_MRUPDATE_ID_COL_IDX,
             HASHER_NODE_INDEX_COL_IDX, HASHER_PERM_SEG_COL_IDX, HASHER_SELECTOR_COL_RANGE,
             HASHER_STATE_COL_RANGE,
         },
@@ -57,23 +57,30 @@ use crate::{
 
 // Tag IDs must follow constraint emission order (ascending) in enforce_hasher_constraints.
 // Emission order: selector_bool -> perm_seg -> structural -> lifecycle -> controller_adj
-//   -> controller_pairing -> perm_steps(init,ext,int) -> mrupdate -> sponge_cap
-//   -> output_idx -> merkle_index -> merkle_input_state
+//   -> controller_pairing -> perm_steps(init_ext,ext,packed_int,int_ext) -> mrupdate -> sponge_cap
+//   -> output_idx -> merkle_index -> merkle_input_state -> merkle_routing
 pub(super) const HASHER_BASE_ID: usize = TAG_CHIPLETS_BASE + 10;
 pub(super) const HASHER_SELECTOR_BOOL_BASE_ID: usize = HASHER_BASE_ID;
 pub(super) const HASHER_PERM_SEG_BASE_ID: usize = HASHER_SELECTOR_BOOL_BASE_ID + 3;
 pub(super) const HASHER_STRUCTURAL_BASE_ID: usize = HASHER_PERM_SEG_BASE_ID + 7;
-pub(super) const HASHER_LIFECYCLE_BASE_ID: usize = HASHER_STRUCTURAL_BASE_ID + 5;
+pub(super) const HASHER_LIFECYCLE_BASE_ID: usize = HASHER_STRUCTURAL_BASE_ID + 7;
 pub(super) const HASHER_CONTROLLER_ADJ_BASE_ID: usize = HASHER_LIFECYCLE_BASE_ID + 2;
 pub(super) const HASHER_CONTROLLER_PAIRING_BASE_ID: usize = HASHER_CONTROLLER_ADJ_BASE_ID + 2;
 pub(super) const HASHER_PERM_INIT_BASE_ID: usize = HASHER_CONTROLLER_PAIRING_BASE_ID + 4;
 pub(super) const HASHER_PERM_EXT_BASE_ID: usize = HASHER_PERM_INIT_BASE_ID + STATE_WIDTH;
 pub(super) const HASHER_PERM_INT_BASE_ID: usize = HASHER_PERM_EXT_BASE_ID + STATE_WIDTH;
-pub(super) const HASHER_MRUPDATE_ID_BASE_ID: usize = HASHER_PERM_INT_BASE_ID + STATE_WIDTH;
+// 15 constraints: 3 witness + 12 next-state
+pub(super) const HASHER_PERM_INT_EXT_BASE_ID: usize = HASHER_PERM_INT_BASE_ID + 15;
+// 13 constraints: 1 witness + 12 next-state
+pub(super) const HASHER_MRUPDATE_ID_BASE_ID: usize = HASHER_PERM_INT_EXT_BASE_ID + 13;
 pub(super) const HASHER_SPONGE_CAP_BASE_ID: usize = HASHER_MRUPDATE_ID_BASE_ID + 2;
 pub(super) const HASHER_OUTPUT_IDX_ID: usize = HASHER_SPONGE_CAP_BASE_ID + 4;
 pub(super) const HASHER_MERKLE_INDEX_BASE_ID: usize = HASHER_OUTPUT_IDX_ID + 1;
-pub(super) const HASHER_MERKLE_INPUT_STATE_BASE_ID: usize = HASHER_MERKLE_INDEX_BASE_ID + 3;
+pub(super) const HASHER_MERKLE_INDEX_COUNT: usize = 4;
+pub(super) const HASHER_MERKLE_INPUT_STATE_BASE_ID: usize =
+    HASHER_MERKLE_INDEX_BASE_ID + HASHER_MERKLE_INDEX_COUNT;
+pub(super) const HASHER_MERKLE_ROUTING_BASE_ID: usize = HASHER_MERKLE_INPUT_STATE_BASE_ID + 4;
+pub(super) const HASHER_MERKLE_ROUTING_COUNT: usize = 5;
 
 const OUTPUT_INDEX_NAMESPACE: &str = "chiplets.hasher.output.index";
 const MRUPDATE_NAMESPACE: &str = "chiplets.hasher.mrupdate_id";
@@ -96,8 +103,8 @@ pub struct HasherColumns<E> {
     pub state: [E; STATE_WIDTH],
     pub node_index: E,
     pub mrupdate_id: E,
-    pub is_start: E,
-    pub is_final: E,
+    pub is_boundary: E,
+    pub direction_bit: E,
     pub perm_seg: E,
 }
 
@@ -121,8 +128,8 @@ impl<E: Clone> HasherColumns<E> {
         let h_start = HASHER_STATE_COL_RANGE.start - CHIPLETS_OFFSET;
         let idx_col = HASHER_NODE_INDEX_COL_IDX - CHIPLETS_OFFSET;
         let mrupdate_col = HASHER_MRUPDATE_ID_COL_IDX - CHIPLETS_OFFSET;
-        let is_start_col = HASHER_IS_START_COL_IDX - CHIPLETS_OFFSET;
-        let is_final_col = HASHER_IS_FINAL_COL_IDX - CHIPLETS_OFFSET;
+        let is_boundary_col = HASHER_IS_BOUNDARY_COL_IDX - CHIPLETS_OFFSET;
+        let direction_bit_col = HASHER_DIRECTION_BIT_COL_IDX - CHIPLETS_OFFSET;
         let perm_seg_col = HASHER_PERM_SEG_COL_IDX - CHIPLETS_OFFSET;
 
         HasherColumns {
@@ -132,8 +139,8 @@ impl<E: Clone> HasherColumns<E> {
             state: core::array::from_fn(|i| row.chiplets[h_start + i].clone().into()),
             node_index: row.chiplets[idx_col].clone().into(),
             mrupdate_id: row.chiplets[mrupdate_col].clone().into(),
-            is_start: row.chiplets[is_start_col].clone().into(),
-            is_final: row.chiplets[is_final_col].clone().into(),
+            is_boundary: row.chiplets[is_boundary_col].clone().into(),
+            direction_bit: row.chiplets[direction_bit_col].clone().into(),
             perm_seg: row.chiplets[perm_seg_col].clone().into(),
         }
     }
@@ -204,17 +211,23 @@ pub fn enforce_hasher_constraints<AB>(
     // --- perm_seg constraints ---
     let hasher_flag_next: AB::Expr =
         AB::Expr::ONE - Into::<AB::Expr>::into(next.chiplets[0].clone());
-    let cycle_row_31: AB::Expr = periodic[periodic::P_CYCLE_ROW_31].into();
+    // Derive (1 - cycle_row_15) = selector_sum. The boundary row (row 15) is the
+    // only row where all 4 selectors are 0. The perm_seg constraints use this in the
+    // form (1 - cycle_row_N) to gate multiplicity constancy and cycle alignment.
+    let selector_sum: AB::Expr = Into::<AB::Expr>::into(periodic[periodic::P_IS_INIT_EXT])
+        + Into::<AB::Expr>::into(periodic[periodic::P_IS_EXT])
+        + Into::<AB::Expr>::into(periodic[periodic::P_IS_PACKED_INT])
+        + Into::<AB::Expr>::into(periodic[periodic::P_IS_INT_EXT]);
     selectors::enforce_perm_seg_constraints(
         builder,
         hasher_flag.clone(),
         hasher_flag_next,
         &cols,
         &cols_next,
-        cycle_row_31,
+        selector_sum,
     );
 
-    // --- Structural confinement (is_start, is_final) ---
+    // --- Structural confinement (is_boundary, direction_bit) ---
     selectors::enforce_structural_confinement(builder, hasher_flag.clone(), &cols);
 
     // --- Lifecycle booleanity ---
@@ -233,7 +246,16 @@ pub fn enforce_hasher_constraints<AB>(
     // the S-box has degree 7, and with the periodic selector (degree 1), the total constraint
     // degree is 1 + 1 + 7 = 9, which matches the system's max degree.
     let perm_gate = cols.perm_seg.clone();
-    state::enforce_permutation_steps(builder, perm_gate, &cols.state, &cols_next.state, &periodic);
+    // On permutation rows, s0/s1/s2 serve as witness columns for packed internal rounds.
+    let witnesses: [AB::Expr; 3] = [cols.s0.clone(), cols.s1.clone(), cols.s2.clone()];
+    state::enforce_permutation_steps(
+        builder,
+        perm_gate,
+        &cols.state,
+        &cols_next.state,
+        &witnesses,
+        &periodic,
+    );
 
     // --- mrupdate_id constraints ---
     enforce_mrupdate_id_constraints(builder, hasher_flag.clone(), &cols, &cols_next);
@@ -243,7 +265,8 @@ pub fn enforce_hasher_constraints<AB>(
 
     // --- Tree constraints ---
     merkle::enforce_node_index_constraints(builder, hasher_flag.clone(), &cols, &cols_next);
-    merkle::enforce_merkle_input_state(builder, hasher_flag, &cols);
+    merkle::enforce_merkle_input_state(builder, hasher_flag.clone(), &cols);
+    merkle::enforce_merkle_digest_routing(builder, hasher_flag, &cols, &cols_next);
 }
 
 // INTERNAL CONSTRAINT FUNCTIONS
@@ -264,9 +287,9 @@ fn enforce_mrupdate_id_constraints<AB>(
     let controller_flag = cols.controller_flag();
     let controller_flag_next = cols_next.controller_flag();
 
-    // f_mv_start_next: MV input on next row with is_start=1.
+    // f_mv_start_next: MV input on next row with is_boundary=1.
     let f_mv_next = flags::f_mv(cols_next.s0.clone(), cols_next.s1.clone(), cols_next.s2.clone());
-    let f_mv_start_next = f_mv_next * cols_next.is_start.clone();
+    let f_mv_start_next = f_mv_next * cols_next.is_boundary.clone();
 
     // On controller->controller transitions: id_next = id + f_mv_start_next.
     // controller_flag_next in the outer gate prevents firing at the controller->perm boundary.
@@ -295,12 +318,12 @@ fn enforce_mrupdate_id_constraints<AB>(
 
 /// Enforces capacity preservation across LINEAR_HASH continuation boundaries.
 ///
-/// When the next row is a LINEAR_HASH continuation input (f_sponge_next=1, is_start_next=0),
+/// When the next row is a LINEAR_HASH continuation input (f_sponge_next=1, is_boundary_next=0),
 /// the capacity h[8..12] must be preserved from the current row to the next.
 ///
 /// ## Gate (degree 7)
 ///
-/// `hasher_flag * hasher_flag_next * f_sponge_next * (1 - is_start_next)` * state_diff
+/// `hasher_flag * hasher_flag_next * f_sponge_next * (1 - is_boundary_next)` * state_diff
 ///
 /// - `hasher_flag_next` ensures the next row's columns are hasher columns (not garbage from another
 ///   chiplet at a boundary).
@@ -318,16 +341,21 @@ fn enforce_respan_capacity<AB>(
     let hasher_flag_next: AB::Expr =
         AB::Expr::ONE - Into::<AB::Expr>::into(next.chiplets[0].clone());
 
-    // f_sponge_next: next row is a sponge-mode input (s0=1, s1=0, s2=0)
+    // f_sponge_next: next row is a sponge-mode controller input (s0=1, s1=0, s2=0).
+    // Must also check controller_flag_next because on perm rows s0/s1/s2 hold witness
+    // values (not selectors), and a witness could accidentally match the sponge pattern.
+    let controller_flag_next = cols_next.controller_flag();
     let f_sponge_next =
         flags::f_sponge(cols_next.s0.clone(), cols_next.s1.clone(), cols_next.s2.clone());
 
-    // Gate degree: hasher_flag(1) * hasher_flag_next(1) * f_sponge_next(3) * (1-is_start)(1) = 6.
-    // Constraint degree: gate(6) * state_diff(1) = 7.
+    // Gate degree: hasher_flag(1) * hasher_flag_next(1) * controller_flag_next(1)
+    //              * f_sponge_next(3) * (1-is_boundary)(1) = 7.
+    // Constraint degree: gate(7) * state_diff(1) = 8.
     let gate = hasher_flag
         * hasher_flag_next
+        * controller_flag_next
         * f_sponge_next
-        * (AB::Expr::ONE - cols_next.is_start.clone());
+        * (AB::Expr::ONE - cols_next.is_boundary.clone());
 
     state::enforce_respan_capacity_preservation(
         builder,

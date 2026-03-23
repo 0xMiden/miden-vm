@@ -5,9 +5,7 @@ use miden_air::trace::{
     chiplets::{
         NUM_BITWISE_SELECTORS, NUM_KERNEL_ROM_SELECTORS, NUM_MEMORY_SELECTORS,
         bitwise::{self, BITWISE_XOR, OP_CYCLE_LEN},
-        hasher::{
-            CONTROLLER_ROWS_PER_PERMUTATION, HASH_CYCLE_LEN, LINEAR_HASH, PERM_SEG_COL_IDX,
-        },
+        hasher::{CONTROLLER_ROWS_PER_PERMUTATION, HASH_CYCLE_LEN, LINEAR_HASH, PERM_SEG_COL_IDX},
         kernel_rom, memory,
     },
 };
@@ -47,7 +45,7 @@ fn hasher_chiplet_trace() {
     // This produces:
     //   - 1 span hash (LINEAR_HASH input + RETURN_HASH output) = 2 controller rows, 1 perm
     //   - 1 HPERM (RETURN_STATE input + RETURN_STATE output) = 2 controller rows, 1 perm
-    // Total: 4 controller rows padded to 32, 2 unique perms (64 perm rows) = 96 hasher rows.
+    // Total: 4 controller rows padded to 16, 2 unique perms (32 perm rows) = 48 hasher rows.
     let stack = [2, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0];
     let operations = vec![Operation::HPerm];
     let (chiplets_trace, _trace_len) = build_trace(&stack, operations, Kernel::default());
@@ -55,7 +53,7 @@ fn hasher_chiplet_trace() {
     let controller_rows = 2 * CONTROLLER_ROWS_PER_PERMUTATION; // span hash + HPerm
     let unique_perms = 2;
     let hasher_len = hasher_trace_len(controller_rows, unique_perms);
-    assert_eq!(hasher_len, 96);
+    assert_eq!(hasher_len, 48);
 
     validate_hasher_trace(&chiplets_trace, hasher_len, controller_rows, unique_perms);
 }
@@ -63,15 +61,15 @@ fn hasher_chiplet_trace() {
 #[test]
 fn bitwise_chiplet_trace() {
     // --- single bitwise operation with no stack manipulation ---
-    // This produces: 1 span hash (2 controller rows, 1 perm) = 64 hasher rows, then 8 bitwise.
+    // This produces: 1 span hash (2 controller rows, 1 perm) = 32 hasher rows, then 8 bitwise.
     let stack = [4, 8];
     let operations = vec![Operation::U32xor];
     let (chiplets_trace, _trace_len) = build_trace(&stack, operations, Kernel::default());
 
-    let controller_rows = 1 * CONTROLLER_ROWS_PER_PERMUTATION; // span hash only
+    let controller_rows = CONTROLLER_ROWS_PER_PERMUTATION; // span hash only
     let unique_perms = 1;
     let hasher_len = hasher_trace_len(controller_rows, unique_perms);
-    assert_eq!(hasher_len, 64);
+    assert_eq!(hasher_len, 32);
 
     let bitwise_start = hasher_len;
     let bitwise_end = bitwise_start + OP_CYCLE_LEN;
@@ -81,16 +79,16 @@ fn bitwise_chiplet_trace() {
 #[test]
 fn memory_chiplet_trace() {
     // --- single memory operation with no stack manipulation ---
-    // This produces: 1 span hash (64 hasher rows), then 1 memory row.
+    // This produces: 1 span hash (32 hasher rows), then 1 memory row.
     let addr = Felt::from_u32(4);
     let stack = [1, 2, 3, 4];
     let operations = vec![Operation::Push(addr), Operation::MStoreW];
     let (chiplets_trace, _trace_len) = build_trace(&stack, operations, Kernel::default());
 
-    let controller_rows = 1 * CONTROLLER_ROWS_PER_PERMUTATION;
+    let controller_rows = CONTROLLER_ROWS_PER_PERMUTATION;
     let unique_perms = 1;
     let hasher_len = hasher_trace_len(controller_rows, unique_perms);
-    assert_eq!(hasher_len, 64);
+    assert_eq!(hasher_len, 32);
 
     let memory_start = hasher_len;
     validate_memory_trace(&chiplets_trace, memory_start, memory_start + 1);
@@ -103,7 +101,7 @@ fn stacked_chiplet_trace() {
     // This produces:
     //   - 1 span hash (2 controller rows, 1 perm) for the basic block
     //   - 1 HPerm (2 controller rows, 1 perm)
-    // Total hasher: 4 controller rows padded to 32, 2 unique perms = 96 rows
+    // Total hasher: 4 controller rows padded to 16, 2 unique perms = 48 rows
     // Then: 8 bitwise rows (U32xor), then 1 memory row (MStoreW)
     let stack = [8, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 1];
     let ops = vec![Operation::U32xor, Operation::Push(ZERO), Operation::MStoreW, Operation::HPerm];
@@ -113,7 +111,7 @@ fn stacked_chiplet_trace() {
     let controller_rows = 2 * CONTROLLER_ROWS_PER_PERMUTATION; // span hash + HPerm
     let unique_perms = 2;
     let hasher_len = hasher_trace_len(controller_rows, unique_perms);
-    assert_eq!(hasher_len, 96);
+    assert_eq!(hasher_len, 48);
 
     // Validate hasher region
     validate_hasher_trace(&chiplets_trace, hasher_len, controller_rows, unique_perms);
@@ -213,10 +211,7 @@ fn validate_hasher_trace(
 
     // --- Check all hasher rows have chiplet selector = 0 ---
     for row in 0..expected_len {
-        assert_eq!(
-            trace[0][row], ZERO,
-            "chiplet selector s0 should be 0 for hasher row {row}"
-        );
+        assert_eq!(trace[0][row], ZERO, "chiplet selector s0 should be 0 for hasher row {row}");
     }
 
     // --- Check controller rows (perm_seg = 0) ---
@@ -224,10 +219,7 @@ fn validate_hasher_trace(
     // For a span hash: input has LINEAR_HASH selectors, output has RETURN_HASH selectors.
     // For HPerm: input has LINEAR_HASH selectors, output has RETURN_STATE selectors.
     for row in 0..controller_rows {
-        assert_eq!(
-            trace[perm_seg_col][row], ZERO,
-            "controller row {row} should have perm_seg=0"
-        );
+        assert_eq!(trace[perm_seg_col][row], ZERO, "controller row {row} should have perm_seg=0");
 
         let is_input_row = row % CONTROLLER_ROWS_PER_PERMUTATION == 0;
         if is_input_row {
@@ -251,10 +243,7 @@ fn validate_hasher_trace(
     // Padding selectors are [0, 1, 0] (matching PERM_STEP pattern but in controller region).
     let padding_start = controller_rows;
     for row in padding_start..controller_padded {
-        assert_eq!(
-            trace[perm_seg_col][row], ZERO,
-            "padding row {row} should have perm_seg=0"
-        );
+        assert_eq!(trace[perm_seg_col][row], ZERO, "padding row {row} should have perm_seg=0");
         // Padding selectors: s0=0, s1=1, s2=0
         assert_eq!(trace[s0_col][row], ZERO, "padding row {row}: s0 should be 0");
         assert_eq!(trace[s1_col][row], ONE, "padding row {row}: s1 should be 1");
@@ -263,24 +252,35 @@ fn validate_hasher_trace(
         // Non-selector hasher columns should be zero on padding rows.
         // Hasher state columns (indices 4..16 in chiplets trace = hasher cols 3..15)
         for col in 4..=CHIPLETS_WIDTH - 1 {
-            assert_eq!(
-                trace[col][row], ZERO,
-                "padding row {row}, col {col} should be zero"
-            );
+            assert_eq!(trace[col][row], ZERO, "padding row {row}, col {col} should be zero");
         }
     }
 
     // --- Check perm segment rows (perm_seg = 1) ---
     for row in perm_segment_start..expected_len {
-        assert_eq!(
-            trace[perm_seg_col][row], ONE,
-            "perm segment row {row} should have perm_seg=1"
-        );
+        assert_eq!(trace[perm_seg_col][row], ONE, "perm segment row {row} should have perm_seg=1");
 
-        // Selectors are don't-care on perm rows; honest prover writes zeros.
-        assert_eq!(trace[s0_col][row], ZERO, "perm row {row}: s0 should be 0");
-        assert_eq!(trace[s1_col][row], ZERO, "perm row {row}: s1 should be 0");
-        assert_eq!(trace[s2_col][row], ZERO, "perm row {row}: s2 should be 0");
+        // On perm rows, s0/s1/s2 serve as witness columns for packed internal rounds.
+        // They are zero on external/boundary rows (offsets 0-3, 12-15 within each cycle),
+        // and hold S-box witnesses on packed-internal rows (offsets 4-10) and the int+ext
+        // row (offset 11, s0 only).
+        let offset_in_cycle = (row - perm_segment_start) % HASH_CYCLE_LEN;
+        match offset_in_cycle {
+            0..=3 | 12..=15 => {
+                assert_eq!(trace[s0_col][row], ZERO, "perm row {row}: s0 should be 0");
+                assert_eq!(trace[s1_col][row], ZERO, "perm row {row}: s1 should be 0");
+                assert_eq!(trace[s2_col][row], ZERO, "perm row {row}: s2 should be 0");
+            },
+            4..=10 => {
+                // Packed internal: all 3 witnesses may be nonzero (no assertion on value)
+            },
+            11 => {
+                // Int+ext: s0 holds witness, s1 and s2 are zero
+                assert_eq!(trace[s1_col][row], ZERO, "perm row {row}: s1 should be 0");
+                assert_eq!(trace[s2_col][row], ZERO, "perm row {row}: s2 should be 0");
+            },
+            _ => unreachable!(),
+        }
     }
 }
 
@@ -301,11 +301,7 @@ fn validate_bitwise_trace(trace: &ChipletsTrace, start: usize, end: usize) {
         assert_eq!(ZERO, trace[1][row], "bitwise s1 at row {row}");
 
         // Internal bitwise operation selector (XOR)
-        assert_eq!(
-            BITWISE_XOR,
-            trace[NUM_BITWISE_SELECTORS][row],
-            "bitwise op at row {row}"
-        );
+        assert_eq!(BITWISE_XOR, trace[NUM_BITWISE_SELECTORS][row], "bitwise op at row {row}");
 
         // Columns beyond bitwise trace should be zero
         for col in bitwise_used_cols..CHIPLETS_WIDTH {
@@ -380,17 +376,11 @@ fn validate_padding(trace: &ChipletsTrace, start: usize, end: usize) {
     for row in start..end {
         // All 5 selector columns should be 1
         for col in 0..5 {
-            assert_eq!(
-                ONE, trace[col][row],
-                "padding selector at row {row}, col {col}"
-            );
+            assert_eq!(ONE, trace[col][row], "padding selector at row {row}, col {col}");
         }
         // All non-selector columns should be zero
         for col in 5..CHIPLETS_WIDTH {
-            assert_eq!(
-                ZERO, trace[col][row],
-                "padding data col {col} at row {row} should be zero"
-            );
+            assert_eq!(ZERO, trace[col][row], "padding data col {col} at row {row} should be zero");
         }
     }
 }

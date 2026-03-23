@@ -7,8 +7,8 @@
 //! 3. **Perm segment selectors**: unconstrained (don't-care); all perm logic uses perm_seg +
 //!    periodic columns
 //! 4. **Perm segment booleanity and monotonicity**: perm_seg is binary and non-decreasing
-//! 5. **Structural confinement**: is_start/is_final confined to correct row types
-//! 6. **Lifecycle booleanity**: is_start and is_final are binary on their respective row types
+//! 5. **Structural confinement**: is_boundary/direction_bit confined to correct row types
+//! 6. **Lifecycle booleanity**: is_boundary is binary on boundary row types
 
 use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::AirBuilder;
@@ -34,7 +34,7 @@ const LIFECYCLE_NAMESPACE: &str = "chiplets.hasher.selectors.lifecycle";
 
 const SELECTOR_BOOL_NAMES: [&str; 3] = [SELECTOR_BOOL_NAMESPACE; 3];
 const PERM_SEG_NAMES: [&str; 7] = [PERM_SEG_NAMESPACE; 7];
-const STRUCTURAL_NAMES: [&str; 5] = [STRUCTURAL_NAMESPACE; 5];
+const STRUCTURAL_NAMES: [&str; 7] = [STRUCTURAL_NAMESPACE; 7];
 const LIFECYCLE_NAMES: [&str; 2] = [LIFECYCLE_NAMESPACE; 2];
 const CONTROLLER_ADJ_NAMES: [&str; 2] = [CONTROLLER_ADJ_NAMESPACE; 2];
 const CONTROLLER_PAIRING_NAMES: [&str; 4] = [CONTROLLER_PAIRING_NAMESPACE; 4];
@@ -127,16 +127,19 @@ pub fn enforce_controller_adjacency<AB>(
 /// Constraints:
 /// - `(1 - hasher_flag) * perm_seg = 0` (perm_seg can only be non-zero on hasher rows)
 /// - `hasher_flag * perm_seg * (perm_seg - 1) = 0` (booleanity)
-/// - `hasher_flag * hasher_flag_next * perm_seg * (1 - perm_seg_next) = 0`
-///   (monotonicity: once 1, stays 1 within hasher rows)
-/// - `hasher_flag * hasher_flag_next * (1 - perm_seg) * perm_seg_next * (1 - cycle_row_31) = 0`
-///   (0->1 transition can happen only after cycle row 31, i.e. first perm row is cycle row 0)
-/// - `hasher_flag * (1 - hasher_flag_next) * perm_seg * (1 - cycle_row_31) = 0`
-///   (if hasher ends while in perm segment, it must end on cycle row 31)
-/// - `hasher_flag * (1 - hasher_flag_next) * (1 - perm_seg) = 0`
-///   (hasher region cannot end while still in controller section)
-/// - `hasher_flag * perm_seg * (1 - cycle_row_31) * (node_index_next - node_index) = 0`
-///   (multiplicity is constant within a 32-row permutation cycle)
+/// - `hasher_flag * hasher_flag_next * perm_seg * (1 - perm_seg_next) = 0` (monotonicity: once 1,
+///   stays 1 within hasher rows)
+/// - `hasher_flag * hasher_flag_next * (1 - perm_seg) * perm_seg_next * not_boundary = 0` (0->1
+///   transition can happen only after the cycle boundary row)
+/// - `hasher_flag * (1 - hasher_flag_next) * perm_seg * not_boundary = 0` (if hasher ends while in
+///   perm segment, it must end on the cycle boundary row)
+/// - `hasher_flag * (1 - hasher_flag_next) * (1 - perm_seg) = 0` (hasher region cannot end while
+///   still in controller section)
+/// - `hasher_flag * perm_seg * not_boundary * (node_index_next - node_index) = 0` (multiplicity is
+///   constant within a permutation cycle)
+///
+/// The `not_boundary` parameter equals `(1 - cycle_row_15)`, derived as the sum of
+/// the 4 periodic step-type selectors. It is 1 on rows 0-14 and 0 on row 15.
 ///
 /// The controller region (perm_seg=0) precedes the permutation segment (perm_seg=1).
 /// Once perm_seg transitions to 1, it cannot go back to 0.
@@ -146,7 +149,7 @@ pub fn enforce_perm_seg_constraints<AB>(
     hasher_flag_next: AB::Expr,
     cols: &HasherColumns<AB::Expr>,
     cols_next: &HasherColumns<AB::Expr>,
-    cycle_row_31: AB::Expr,
+    not_boundary: AB::Expr,
 ) where
     AB: TaggingAirBuilderExt<F = Felt>,
 {
@@ -183,8 +186,8 @@ pub fn enforce_perm_seg_constraints<AB>(
             * (AB::Expr::ONE - cols_next.perm_seg.clone()),
     );
 
-    // Rising-edge alignment: entering perm segment (0->1) can happen only after cycle row 31.
-    // This ensures the first perm row is aligned with cycle row 0.
+    // Rising-edge alignment: entering perm segment (0->1) can happen only after the cycle
+    // boundary row (row 15). This ensures the first perm row is aligned with cycle row 0.
     tagged_assert_zero(
         builder,
         &PERM_SEG_TAGS,
@@ -193,11 +196,12 @@ pub fn enforce_perm_seg_constraints<AB>(
             * hasher_flag_next.clone()
             * (AB::Expr::ONE - cols.perm_seg.clone())
             * cols_next.perm_seg.clone()
-            * (AB::Expr::ONE - cycle_row_31.clone()),
+            * not_boundary.clone(),
     );
 
     // Exit safety: if the hasher segment ends while in perm segment, the last hasher row must
-    // be cycle row 31. This prevents cross-chiplet next-row reads from firing under perm gates.
+    // be the cycle boundary row (row 15). This prevents cross-chiplet next-row reads from
+    // firing under perm gates.
     tagged_assert_zero(
         builder,
         &PERM_SEG_TAGS,
@@ -205,7 +209,7 @@ pub fn enforce_perm_seg_constraints<AB>(
         hasher_flag.clone()
             * (AB::Expr::ONE - hasher_flag_next.clone())
             * cols.perm_seg.clone()
-            * (AB::Expr::ONE - cycle_row_31.clone()),
+            * not_boundary.clone(),
     );
 
     // If the hasher segment ends, it must not end while still in the controller section.
@@ -219,32 +223,36 @@ pub fn enforce_perm_seg_constraints<AB>(
     );
 
     // Multiplicity constancy within perm cycles: on perm segment rows that are NOT the
-    // cycle boundary (row 31), node_index must stay constant. This ensures each 32-row
+    // cycle boundary (row 15), node_index must stay constant. This ensures each 16-row
     // cycle has a single multiplicity value.
-    // Degree: hasher_flag(1) * perm_seg(1) * (1-cycle_row_31)(1) * diff(1) = 4.
+    // Degree: hasher_flag(1) * perm_seg(1) * not_boundary(1) * diff(1) = 4.
     tagged_assert_zero(
         builder,
         &PERM_SEG_TAGS,
         &mut idx,
         hasher_flag
             * cols.perm_seg.clone()
-            * (AB::Expr::ONE - cycle_row_31)
+            * not_boundary
             * (cols_next.node_index.clone() - cols.node_index.clone()),
     );
 }
 
-/// Enforces structural confinement of is_start and is_final.
+/// Ensures is_boundary and direction_bit are zero where they should not be active.
 ///
-/// Confines is_start and is_final to their valid row types.
+/// is_boundary can only be non-zero on controller input and output rows:
+/// - zero on padding rows: `(1-s0) * s1 * is_boundary = 0`
+/// - zero on perm segment rows: `perm_seg * is_boundary = 0`
 ///
-/// is_start is confined to controller input rows (s0=1, perm_seg=0):
-/// - `(1 - s0) * is_start = 0` -- zero when s0=0 (output, padding rows in controller)
-/// - `perm_seg * is_start = 0` -- zero on perm segment rows (where s0 is unconstrained)
+/// direction_bit can only be non-zero on Merkle input/output controller rows:
+/// - zero on padding rows: `(1-s0) * s1 * direction_bit = 0`
+/// - zero on perm segment rows: `perm_seg * direction_bit = 0`
+/// - zero on sponge (LINEAR_HASH) input rows: `f_sponge * direction_bit = 0`
+/// - zero on RETURN_HASH output rows: `f_hout * direction_bit = 0`
+/// - zero on HPERM final output (RETURN_STATE with is_boundary=1): `f_sout * is_boundary *
+///   direction_bit = 0`
 ///
-/// is_final is confined to controller output rows (s0=0, s1=0, perm_seg=0):
-/// - `s0 * is_final = 0` -- zero on input rows (s0=1)
-/// - `(1-s0) * s1 * is_final = 0` -- zero on padding rows (s0=0, s1=1)
-/// - `perm_seg * is_final = 0` -- zero on perm segment rows (where s0/s1 are unconstrained)
+/// This keeps direction_bit unconstrained only where it is semantically needed: Merkle
+/// input rows and non-final Merkle RETURN_STATE output rows.
 pub fn enforce_structural_confinement<AB>(
     builder: &mut AB,
     hasher_flag: AB::Expr,
@@ -252,6 +260,14 @@ pub fn enforce_structural_confinement<AB>(
 ) where
     AB: TaggingAirBuilderExt<F = Felt>,
 {
+    let f_sponge =
+        cols.s0.clone() * (AB::Expr::ONE - cols.s1.clone()) * (AB::Expr::ONE - cols.s2.clone());
+    let f_hout = (AB::Expr::ONE - cols.s0.clone())
+        * (AB::Expr::ONE - cols.s1.clone())
+        * (AB::Expr::ONE - cols.s2.clone());
+    let f_sout =
+        (AB::Expr::ONE - cols.s0.clone()) * (AB::Expr::ONE - cols.s1.clone()) * cols.s2.clone();
+
     let mut idx = 0;
     tagged_assert_zeros_integrity(
         builder,
@@ -259,32 +275,41 @@ pub fn enforce_structural_confinement<AB>(
         &mut idx,
         STRUCTURAL_NAMESPACE,
         [
-            // is_start zero when s0=0 (controller output and padding rows)
-            hasher_flag.clone() * (AB::Expr::ONE - cols.s0.clone()) * cols.is_start.clone(),
-            // is_start zero on perm segment rows
-            hasher_flag.clone() * cols.perm_seg.clone() * cols.is_start.clone(),
-            // is_final zero on input rows (s0=1)
-            hasher_flag.clone() * cols.s0.clone() * cols.is_final.clone(),
-            // is_final zero on padding rows (s0=0, s1=1)
+            // is_boundary zero on padding rows (s0=0, s1=1)
             hasher_flag.clone()
                 * (AB::Expr::ONE - cols.s0.clone())
                 * cols.s1.clone()
-                * cols.is_final.clone(),
-            // is_final zero on perm segment rows
-            hasher_flag * cols.perm_seg.clone() * cols.is_final.clone(),
+                * cols.is_boundary.clone(),
+            // is_boundary zero on perm segment rows
+            hasher_flag.clone() * cols.perm_seg.clone() * cols.is_boundary.clone(),
+            // direction_bit zero on padding rows (s0=0, s1=1)
+            hasher_flag.clone()
+                * (AB::Expr::ONE - cols.s0.clone())
+                * cols.s1.clone()
+                * cols.direction_bit.clone(),
+            // direction_bit zero on perm segment rows
+            hasher_flag.clone() * cols.perm_seg.clone() * cols.direction_bit.clone(),
+            // direction_bit zero on sponge (LINEAR_HASH) input rows
+            hasher_flag.clone() * cols.controller_flag() * f_sponge * cols.direction_bit.clone(),
+            // direction_bit zero on RETURN_HASH rows
+            hasher_flag.clone() * cols.controller_flag() * f_hout * cols.direction_bit.clone(),
+            // direction_bit zero on final RETURN_STATE boundary rows (HPERM final output)
+            hasher_flag
+                * cols.controller_flag()
+                * f_sout
+                * cols.is_boundary.clone()
+                * cols.direction_bit.clone(),
         ],
     );
 }
 
-/// Enforces booleanity of is_start and is_final on their respective row types.
+/// Enforces booleanity of is_boundary on input and output row types.
 ///
-/// The structural confinement constraints already ensure is_start=0 and is_final=0 on rows
-/// where they don't apply, so booleanity only needs to fire on the correct row types:
+/// The structural confinement constraints already ensure is_boundary=0 on padding and perm
+/// rows, so booleanity only needs to fire on input and output rows:
 ///
-/// - `hasher_flag * s0 * is_start * (is_start - 1) = 0`  (on input rows; s0=1 excludes output and
-///   perm rows)
-/// - `hasher_flag * (1-s0) * (1-s1) * is_final * (is_final - 1) = 0`  (on output rows;
-///   (1-s0)*(1-s1) excludes input and perm rows)
+/// - `hasher_flag * s0 * is_boundary * (is_boundary - 1) = 0`  (on input rows)
+/// - `hasher_flag * (1-s0) * (1-s1) * is_boundary * (is_boundary - 1) = 0`  (on output rows)
 pub fn enforce_lifecycle_booleanity<AB>(
     builder: &mut AB,
     hasher_flag: AB::Expr,
@@ -299,18 +324,19 @@ pub fn enforce_lifecycle_booleanity<AB>(
         &mut idx,
         LIFECYCLE_NAMESPACE,
         [
-            // is_start booleanity on input rows (degree 4: hasher * s0 * is_start * (is_start-1))
+            // is_boundary booleanity on input rows (degree 4: hasher * s0 * is_boundary *
+            // (is_boundary-1))
             hasher_flag.clone()
                 * cols.s0.clone()
-                * cols.is_start.clone()
-                * (cols.is_start.clone() - AB::Expr::ONE),
-            // is_final booleanity on output rows (degree 5: hasher * (1-s0) * (1-s1) * is_final *
-            // (is_final-1))
+                * cols.is_boundary.clone()
+                * (cols.is_boundary.clone() - AB::Expr::ONE),
+            // is_boundary booleanity on output rows (degree 5: hasher * (1-s0) * (1-s1) *
+            // is_boundary * (is_boundary-1))
             hasher_flag
                 * (AB::Expr::ONE - cols.s0.clone())
                 * (AB::Expr::ONE - cols.s1.clone())
-                * cols.is_final.clone()
-                * (cols.is_final.clone() - AB::Expr::ONE),
+                * cols.is_boundary.clone()
+                * (cols.is_boundary.clone() - AB::Expr::ONE),
         ],
     );
 }

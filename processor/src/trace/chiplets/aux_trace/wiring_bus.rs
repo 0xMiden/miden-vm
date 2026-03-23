@@ -73,7 +73,7 @@ impl<'a> WiringBusBuilder<'a> {
 
         // Build memory range check LogUp requests as a running sum, then merge into wiring_bus.
         // For each memory row, subtract 1/(alpha+w0) + 1/(alpha+w1) + 1/(alpha+4*w1).
-        // The range checker provides matching responses. 
+        // The range checker provides matching responses.
         let alpha = challenges.alpha;
         let mut mem_prefix = vec![E::ZERO; main_trace.num_rows()];
         for row_idx in 0..(main_trace.num_rows() - 1) {
@@ -85,7 +85,8 @@ impl<'a> WiringBusBuilder<'a> {
 
             let w0: E = main_trace.chiplet_memory_word_addr_lo(row).into();
             let w1: E = main_trace.chiplet_memory_word_addr_hi(row).into();
-            let w1_mul4: E = (main_trace.chiplet_memory_word_addr_hi(row) * Felt::from_u8(4)).into();
+            let w1_mul4: E =
+                (main_trace.chiplet_memory_word_addr_hi(row) * Felt::from_u8(4)).into();
 
             let den0 = alpha + w0;
             let den1 = alpha + w1;

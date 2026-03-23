@@ -776,16 +776,16 @@ struct HasherResponse<EF, E> {
 /// Hasher permutation segment rows (compute, perm_seg=1) do not contribute.
 ///
 /// **Controller input rows** (s0=1, perm_seg=0):
-/// - Sponge start (is_start=1, s1=0, s2=0): full 12-element state
-/// - Sponge continuation (is_start=0, s1=0, s2=0): rate-only 8 elements (RESPAN)
-/// - Tree start (is_start=1, s1=1 or s2=1): leaf word
+/// - Sponge start (is_boundary=1, s1=0, s2=0): full 12-element state
+/// - Sponge continuation (is_boundary=0, s1=0, s2=0): rate-only 8 elements (RESPAN)
+/// - Tree start (is_boundary=1, s1=1 or s2=1): leaf word
 ///
 /// **Controller output rows** (s0=0, s1=0, perm_seg=0):
 /// - HOUT (s2=0): digest
-/// - SOUT + is_final=1 (s2=1): full 12-element state
+/// - SOUT (s2=1) + is_boundary=1: full 12-element state
 ///
 /// No response on: hasher permutation segment rows, padding rows ([0,1,0]),
-/// tree continuations (is_start=0), intermediate SOUT (is_final=0).
+/// tree continuations (is_boundary=0), or intermediate SOUT (is_boundary=0).
 fn compute_hasher_response<AB: LiftedAirBuilder<F = Felt>>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
@@ -794,8 +794,8 @@ fn compute_hasher_response<AB: LiftedAirBuilder<F = Felt>>(
     use crate::trace::{
         CHIPLETS_OFFSET,
         chiplets::{
-            HASHER_IS_FINAL_COL_IDX, HASHER_IS_START_COL_IDX, HASHER_NODE_INDEX_COL_IDX,
-            HASHER_PERM_SEG_COL_IDX, HASHER_STATE_COL_RANGE,
+            HASHER_IS_BOUNDARY_COL_IDX, HASHER_NODE_INDEX_COL_IDX, HASHER_PERM_SEG_COL_IDX,
+            HASHER_STATE_COL_RANGE,
         },
     };
 
@@ -813,11 +813,8 @@ fn compute_hasher_response<AB: LiftedAirBuilder<F = Felt>>(
     let hs2: AB::Expr = local.chiplets[3].clone().into();
 
     // Lifecycle columns
-    let is_start: AB::Expr =
-        local.chiplets[HASHER_IS_START_COL_IDX - CHIPLETS_OFFSET].clone().into();
-    let is_final: AB::Expr =
-        local.chiplets[HASHER_IS_FINAL_COL_IDX - CHIPLETS_OFFSET].clone().into();
-
+    let is_boundary: AB::Expr =
+        local.chiplets[HASHER_IS_BOUNDARY_COL_IDX - CHIPLETS_OFFSET].clone().into();
     // State and node_index
     let state: [AB::Expr; 12] = core::array::from_fn(|i| {
         let col_idx = HASHER_STATE_COL_RANGE.start - CHIPLETS_OFFSET + i;
@@ -834,28 +831,30 @@ fn compute_hasher_response<AB: LiftedAirBuilder<F = Felt>>(
     // controller_flag (degree 2) is factored out and applied to the entire response sum,
     // keeping the max flag*message degree at 6 instead of 8.
 
-    // Sponge start: input, s1=0, s2=0, is_start=1
-    let f_sponge_start =
-        hs0.clone() * (one.clone() - hs1.clone()) * (one.clone() - hs2.clone()) * is_start.clone();
+    // Sponge start: input, s1=0, s2=0, is_boundary=1
+    let f_sponge_start = hs0.clone()
+        * (one.clone() - hs1.clone())
+        * (one.clone() - hs2.clone())
+        * is_boundary.clone();
 
-    // Sponge continuation (RESPAN): input, s1=0, s2=0, is_start=0
+    // Sponge continuation (RESPAN): input, s1=0, s2=0, is_boundary=0
     let f_sponge_respan = hs0.clone()
         * (one.clone() - hs1.clone())
         * (one.clone() - hs2.clone())
-        * (one.clone() - is_start.clone());
+        * (one.clone() - is_boundary.clone());
 
-    // Merle tree op start inputs (only is_start=1 produces response)
-    let f_mp_start = hs0.clone() * (one.clone() - hs1.clone()) * hs2.clone() * is_start.clone();
-    let f_mv_start = hs0.clone() * hs1.clone() * (one.clone() - hs2.clone()) * is_start.clone();
-    let f_mu_start = hs0.clone() * hs1.clone() * hs2.clone() * is_start.clone();
+    // Merkle tree op start inputs (only is_boundary=1 produces response)
+    let f_mp_start = hs0.clone() * (one.clone() - hs1.clone()) * hs2.clone() * is_boundary.clone();
+    let f_mv_start = hs0.clone() * hs1.clone() * (one.clone() - hs2.clone()) * is_boundary.clone();
+    let f_mu_start = hs0.clone() * hs1.clone() * hs2.clone() * is_boundary.clone();
 
     // HOUT output (always responds)
     let f_hout =
         (one.clone() - hs0.clone()) * (one.clone() - hs1.clone()) * (one.clone() - hs2.clone());
 
-    // SOUT output with is_final=1 only (HPERM return)
+    // SOUT output with is_boundary=1 only (HPERM return)
     let f_sout_final =
-        (one.clone() - hs0.clone()) * (one.clone() - hs1.clone()) * hs2.clone() * is_final;
+        (one.clone() - hs0.clone()) * (one.clone() - hs1.clone()) * hs2.clone() * is_boundary;
 
     // --- Message values ---
 
@@ -1324,7 +1323,7 @@ fn compute_control_block_request<AB: LiftedAirBuilder<F = Felt>>(
     challenges: &Challenges<AB::ExprEF>,
     op: ControlBlockOp,
 ) -> AB::ExprEF {
-    // transition_label = LINEAR_HASH_LABEL + 
+    // transition_label = LINEAR_HASH_LABEL +
     let transition_label: AB::Expr =
         AB::Expr::from_u16(LINEAR_HASH_LABEL as u16 + INPUT_LABEL_OFFSET);
 
@@ -1700,8 +1699,7 @@ fn compute_mrupdate_request<AB: LiftedAirBuilder<F = Felt>>(
         &old_node,
     );
 
-    let output_old_addr =
-        helper_0.clone() + depth.clone() * rows_per_perm.clone() - AB::Expr::ONE;
+    let output_old_addr = helper_0.clone() + depth.clone() * rows_per_perm.clone() - AB::Expr::ONE;
     let output_old_label: AB::Expr =
         AB::Expr::from_u16(RETURN_HASH_LABEL as u16 + OUTPUT_LABEL_OFFSET);
     let output_old_msg = compute_hasher_word_message::<AB>(

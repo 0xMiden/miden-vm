@@ -522,19 +522,19 @@ pub(super) fn build_mrupdate_request<E: ExtensionField<Felt>>(
 /// Only controller rows of the hasher chiplet are able to produce bus responses.
 ///
 /// **Input rows that produce responses:**
-/// - Sponge start (is_start=1, LINEAR_HASH): full state -> matches SPAN/control block request
-/// - Sponge continuation (is_start=0, LINEAR_HASH): rate-only -> matches RESPAN request
-/// - Tree start (is_start=1, MP/MV/MU): leaf word -> matches MPVERIFY/MRUPDATE input
+/// - Sponge start (is_boundary=1, LINEAR_HASH): full state -> matches SPAN/control block request
+/// - Sponge continuation (is_boundary=0, LINEAR_HASH): rate-only -> matches RESPAN request
+/// - Tree start (is_boundary=1, MP/MV/MU): leaf word -> matches MPVERIFY/MRUPDATE input
 ///
 /// **Input rows that do NOT produce responses:**
-/// - Tree continuation (is_start=0, MP/MV/MU): no matching request from decoder
+/// - Tree continuation (is_boundary=0, MP/MV/MU): no matching request from decoder
 ///
 /// **Output rows that produce responses:**
 /// - HOUT (s2=0): digest -> matches END / MPVERIFY output / MRUPDATE output
-/// - SOUT with is_final=1 (s2=1): full state -> matches HPERM output
+/// - SOUT with is_boundary=1 (s2=1): full state -> matches HPERM output
 ///
 /// **Output rows that do NOT produce responses:**
-/// - SOUT with is_final=0: intermediate output, no matching request
+/// - SOUT with is_boundary=0: intermediate output, no matching request
 ///
 /// **Perm segment rows:** never produce responses.
 pub(super) fn build_hasher_chiplet_responses<E>(
@@ -568,13 +568,11 @@ where
     let hs1 = selector2;
     let hs2 = selector3;
 
-    let is_start = main_trace.chiplet_is_start(row);
-    let is_final = main_trace.chiplet_is_final(row);
+    let is_boundary = main_trace.chiplet_is_boundary(row);
 
     // Precompute commonly needed slices.
-    let digest: [Felt; WORD_SIZE] = state[..WORD_SIZE]
-        .try_into()
-        .expect("state[0..4] must be 4 field elements");
+    let digest: [Felt; WORD_SIZE] =
+        state[..WORD_SIZE].try_into().expect("state[0..4] must be 4 field elements");
     let rate: [Felt; hasher::RATE_LEN] = state[..hasher::RATE_LEN]
         .try_into()
         .expect("state[0..8] must be 8 field elements");
@@ -584,8 +582,8 @@ where
     // The branches below are mutually exclusive. Each either returns a non-identity
     // response or falls through to return E::ONE (identity = no response).
 
-    if hs0 == ONE && hs1 == ZERO && hs2 == ZERO && is_start == ONE {
-        // Sponge start (LINEAR_HASH, is_start=1): full 12-element state.
+    if hs0 == ONE && hs1 == ZERO && hs2 == ZERO && is_boundary == ONE {
+        // Sponge start (LINEAR_HASH, is_boundary=1): full 12-element state.
         // Matches SPAN / control block start request.
         let label = op_label + LABEL_OFFSET_START;
         let msg = HasherMessage {
@@ -602,7 +600,7 @@ where
 
         value
     } else if hs0 == ONE && hs1 == ZERO && hs2 == ZERO {
-        // Sponge continuation (LINEAR_HASH, is_start=0): rate-only message.
+        // Sponge continuation (LINEAR_HASH, is_boundary=0): rate-only message.
         // Label uses OUTPUT_LABEL_OFFSET because the decoder's RESPAN request uses
         // LINEAR_HASH_LABEL + 32.
         let label = op_label + LABEL_OFFSET_END;
@@ -621,13 +619,15 @@ where
         }
 
         value
-    } else if hs0 == ONE && (hs1 == ONE || hs2 == ONE) && is_start == ONE {
-        // Tree start (MP_VERIFY / MR_UPDATE_OLD / MR_UPDATE_NEW, is_start=1): leaf word
+    } else if hs0 == ONE && (hs1 == ONE || hs2 == ONE) && is_boundary == ONE {
+        // Tree start (MP_VERIFY / MR_UPDATE_OLD / MR_UPDATE_NEW, is_boundary=1): leaf word
         // selected by direction bit. Matches MPVERIFY / MRUPDATE first-input request.
-        // Tree continuation inputs (is_start=0) produce no response.
+        // Tree continuation inputs (is_boundary=0) produce no response.
         let label = op_label + LABEL_OFFSET_START;
         let bit = node_index.as_canonical_u64() & 1;
-        let leaf_word: [Felt; WORD_SIZE] = if bit == 0 { digest } else {
+        let leaf_word: [Felt; WORD_SIZE] = if bit == 0 {
+            digest
+        } else {
             state[WORD_SIZE..hasher::RATE_LEN]
                 .try_into()
                 .expect("state[4..8] must be 4 field elements")
@@ -667,9 +667,9 @@ where
         }
 
         value
-    } else if hs0 == ZERO && hs1 == ZERO && hs2 == ONE && is_final == ONE {
-        // SOUT final -- RETURN_STATE (0,0,1) with is_final=1: full 12-element state.
-        // Matches HPERM output request. Intermediate SOUT (is_final=0) produces no response.
+    } else if hs0 == ZERO && hs1 == ZERO && hs2 == ONE && is_boundary == ONE {
+        // SOUT final -- RETURN_STATE (0,0,1) with is_boundary=1: full 12-element state.
+        // Matches HPERM output request. Intermediate SOUT (is_boundary=0) produces no response.
         let label = op_label + LABEL_OFFSET_END;
         let msg = HasherMessage {
             transition_label: label,
@@ -685,8 +685,8 @@ where
 
         value
     } else {
-        // No response: padding rows (hs0=0, hs1=1), tree continuations (is_start=0),
-        // intermediate SOUT (is_final=0), or any other non-responding row.
+        // No response: padding rows (hs0=0, hs1=1), tree continuations (is_boundary=0),
+        // intermediate SOUT (is_boundary=0), or any other non-responding row.
         E::ONE
     }
 }

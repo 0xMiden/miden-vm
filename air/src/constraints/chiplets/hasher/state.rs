@@ -1,12 +1,13 @@
 //! Hasher chiplet state transition constraints.
 //!
 //! This module enforces the Poseidon2 permutation constraints for the hasher chiplet.
-//! The permutation operates on a 32-row cycle with three types of steps:
+//! The permutation operates on a 16-row cycle with five types of steps:
 //!
-//! - **Row 0 (init linear)**: Apply external linear layer M_E only
-//! - **Rows 1-4, 27-30 (external)**: Add lane RCs, full S-box^7, then M_E
-//! - **Rows 5-26 (internal)**: Add RC to lane 0, S-box lane 0 only, then M_I
-//! - **Row 31 (boundary)**: No step constraint (output/absorb row)
+//! - **Row 0 (init+ext1)**: Merged init linear layer + first external round
+//! - **Rows 1-3, 12-14 (external)**: Single external round: add RCs, S-box^7, M_E
+//! - **Rows 4-10 (packed internal)**: 3 internal rounds packed per row using s0,s1,s2 as witnesses
+//! - **Row 11 (int+ext)**: Last internal round + first trailing external round
+//! - **Row 15 (boundary)**: No step constraint (cycle boundary, final permutation state)
 //!
 //! ## Poseidon2 Parameters
 //!
@@ -19,7 +20,7 @@ use miden_core::{chiplets::hasher::Hasher, field::PrimeCharacteristicRing};
 use miden_crypto::stark::air::LiftedAirBuilder;
 
 use super::periodic::{
-    P_ARK_EXT_START, P_ARK_INT, P_CYCLE_ROW_0, P_IS_EXTERNAL, P_IS_INTERNAL, STATE_WIDTH,
+    P_ARK_START, P_IS_EXT, P_IS_INIT_EXT, P_IS_INT_EXT, P_IS_PACKED_INT, STATE_WIDTH,
 };
 use crate::{
     Felt,
@@ -29,27 +30,35 @@ use crate::{
 // TAGGING NAMESPACES
 // ================================================================================================
 
-const PERM_INIT_NAMESPACE: &str = "chiplets.hasher.permutation.init";
+const PERM_INIT_EXT_NAMESPACE: &str = "chiplets.hasher.permutation.init_ext";
 const PERM_EXT_NAMESPACE: &str = "chiplets.hasher.permutation.external";
-const PERM_INT_NAMESPACE: &str = "chiplets.hasher.permutation.internal";
+const PERM_PACKED_INT_NAMESPACE: &str = "chiplets.hasher.permutation.packed_internal";
+const PERM_INT_EXT_NAMESPACE: &str = "chiplets.hasher.permutation.int_ext";
 const SPONGE_CAP_NAMESPACE: &str = "chiplets.hasher.sponge.capacity";
 
-const PERM_INIT_NAMES: [&str; STATE_WIDTH] = [PERM_INIT_NAMESPACE; STATE_WIDTH];
+const PERM_INIT_EXT_NAMES: [&str; STATE_WIDTH] = [PERM_INIT_EXT_NAMESPACE; STATE_WIDTH];
 const PERM_EXT_NAMES: [&str; STATE_WIDTH] = [PERM_EXT_NAMESPACE; STATE_WIDTH];
-const PERM_INT_NAMES: [&str; STATE_WIDTH] = [PERM_INT_NAMESPACE; STATE_WIDTH];
+// 3 witness constraints + 12 next-state constraints = 15
+const PERM_PACKED_INT_NAMES: [&str; 15] = [PERM_PACKED_INT_NAMESPACE; 15];
+// 1 witness constraint + 12 next-state constraints = 13
+const PERM_INT_EXT_NAMES: [&str; 13] = [PERM_INT_EXT_NAMESPACE; 13];
 const SPONGE_CAP_NAMES: [&str; 4] = [SPONGE_CAP_NAMESPACE; 4];
 
-const PERM_INIT_TAGS: TagGroup = TagGroup {
+const PERM_INIT_EXT_TAGS: TagGroup = TagGroup {
     base: super::HASHER_PERM_INIT_BASE_ID,
-    names: &PERM_INIT_NAMES,
+    names: &PERM_INIT_EXT_NAMES,
 };
 const PERM_EXT_TAGS: TagGroup = TagGroup {
     base: super::HASHER_PERM_EXT_BASE_ID,
     names: &PERM_EXT_NAMES,
 };
-const PERM_INT_TAGS: TagGroup = TagGroup {
+const PERM_PACKED_INT_TAGS: TagGroup = TagGroup {
     base: super::HASHER_PERM_INT_BASE_ID,
-    names: &PERM_INT_NAMES,
+    names: &PERM_PACKED_INT_NAMES,
+};
+const PERM_INT_EXT_TAGS: TagGroup = TagGroup {
+    base: super::HASHER_PERM_INT_EXT_BASE_ID,
+    names: &PERM_INT_EXT_NAMES,
 };
 const SPONGE_CAP_TAGS: TagGroup = TagGroup {
     base: super::HASHER_SPONGE_CAP_BASE_ID,
@@ -59,76 +68,67 @@ const SPONGE_CAP_TAGS: TagGroup = TagGroup {
 // CONSTRAINT HELPERS
 // ================================================================================================
 
-/// Enforces Poseidon2 permutation step constraints.
+/// Enforces Poseidon2 permutation step constraints on the 16-row packed cycle.
 ///
 /// These constraints are gated by `perm_gate = perm_seg`, so they only
 /// fire on permutation segment rows.
 ///
 /// ## Step Types
 ///
-/// 1. **Init linear (row 0)**: `h' = M_E(h)`
-/// 2. **External round (rows 1-4, 27-30)**: `h' = M_E(S-box(h + ark_ext))`
-/// 3. **Internal round (rows 5-26)**: `h' = M_I(h with lane0 = (h[0] + ark_int)^7)`
-/// 4. **Boundary (row 31)**: No constraint
+/// 1. **Init+ext1 (row 0)**: `h' = M_E(S(M_E(h) + ark))` — degree 9
+/// 2. **Single ext (rows 1-3, 12-14)**: `h' = M_E(S(h + ark))` — degree 9
+/// 3. **Packed 3x internal (rows 4-10)**: witnesses + affine next-state — degree 9 / 3
+/// 4. **Int+ext (row 11)**: witness + `h' = M_E(S(y + ark))` — degree 9
+/// 5. **Boundary (row 15)**: No constraint
+///
+/// The witness columns `w[0..3]` correspond to `s0, s1, s2` on permutation rows.
 pub fn enforce_permutation_steps<AB>(
     builder: &mut AB,
     perm_gate: AB::Expr,
     h: &[AB::Expr; STATE_WIDTH],
     h_next: &[AB::Expr; STATE_WIDTH],
+    w: &[AB::Expr; 3],
     periodic: &[AB::PeriodicVar],
 ) where
     AB: TaggingAirBuilderExt<F = Felt>,
 {
-    // Cycle markers and step selectors
-    let cycle_row_0: AB::Expr = periodic[P_CYCLE_ROW_0].into();
-    let is_external: AB::Expr = periodic[P_IS_EXTERNAL].into();
-    let is_internal: AB::Expr = periodic[P_IS_INTERNAL].into();
-    let is_init_linear = cycle_row_0.clone();
+    // Step-type selectors
+    let is_init_ext: AB::Expr = periodic[P_IS_INIT_EXT].into();
+    let is_ext: AB::Expr = periodic[P_IS_EXT].into();
+    let is_packed_int: AB::Expr = periodic[P_IS_PACKED_INT].into();
+    let is_int_ext: AB::Expr = periodic[P_IS_INT_EXT].into();
 
-    // External round constants
-    let mut ark_ext = [AB::Expr::ZERO; STATE_WIDTH];
-    for lane in 0..STATE_WIDTH {
-        ark_ext[lane] = periodic[P_ARK_EXT_START + lane].into();
-    }
-    let ark_int: AB::Expr = periodic[P_ARK_INT].into();
+    // Shared round constants
+    let ark: [AB::Expr; STATE_WIDTH] = core::array::from_fn(|i| periodic[P_ARK_START + i].into());
 
     // -------------------------------------------------------------------------
-    // Compute expected next states for each step type
+    // 1. Init+ext1 (row 0): h' = M_E(S(M_E(h) + ark)) Gate degree: perm_gate(1) * is_init_ext(1) =
+    //    2 Constraint degree: gate(2) * sbox(7) = 9
     // -------------------------------------------------------------------------
+    let expected_init_ext = apply_init_plus_ext::<AB>(h, &ark);
+    let gate_init_ext = perm_gate.clone() * is_init_ext;
+    let mut idx = 0;
+    tagged_assert_zeros(
+        builder,
+        &PERM_INIT_EXT_TAGS,
+        &mut idx,
+        PERM_INIT_EXT_NAMESPACE,
+        core::array::from_fn::<_, STATE_WIDTH, _>(|i| {
+            gate_init_ext.clone() * (h_next[i].clone() - expected_init_ext[i].clone())
+        }),
+    );
 
-    // Init linear: h' = M_E(h)
-    let expected_init = apply_matmul_external::<AB>(h);
-
-    // External round: h' = M_E(S-box(h + ark_ext))
+    // -------------------------------------------------------------------------
+    // 2. Single external round (rows 1-3, 12-14): h' = M_E(S(h + ark)) Gate degree: perm_gate(1) *
+    //    is_ext(1) = 2 Constraint degree: gate(2) * sbox(7) = 9
+    // -------------------------------------------------------------------------
     let ext_with_rc: [AB::Expr; STATE_WIDTH] =
-        core::array::from_fn(|i| h[i].clone() + ark_ext[i].clone());
+        core::array::from_fn(|i| h[i].clone() + ark[i].clone());
     let ext_with_sbox: [AB::Expr; STATE_WIDTH] =
         core::array::from_fn(|i| ext_with_rc[i].clone().exp_const_u64::<7>());
     let expected_ext = apply_matmul_external::<AB>(&ext_with_sbox);
 
-    // Internal round: h' = M_I(h with h[0] = (h[0] + ark_int)^7)
-    let mut tmp_int = h.clone();
-    tmp_int[0] = (tmp_int[0].clone() + ark_int).exp_const_u64::<7>();
-    let expected_int = apply_matmul_internal::<AB>(&tmp_int);
-
-    // -------------------------------------------------------------------------
-    // Enforce step constraints
-    // -------------------------------------------------------------------------
-
-    // Use combined gates to share `perm_gate * step_type` across all lanes.
-    let gate_init = perm_gate.clone() * is_init_linear;
-    let mut idx = 0;
-    tagged_assert_zeros(
-        builder,
-        &PERM_INIT_TAGS,
-        &mut idx,
-        PERM_INIT_NAMESPACE,
-        core::array::from_fn::<_, STATE_WIDTH, _>(|i| {
-            gate_init.clone() * (h_next[i].clone() - expected_init[i].clone())
-        }),
-    );
-
-    let gate_ext = perm_gate.clone() * is_external;
+    let gate_ext = perm_gate.clone() * is_ext;
     let mut idx = 0;
     tagged_assert_zeros(
         builder,
@@ -140,15 +140,62 @@ pub fn enforce_permutation_steps<AB>(
         }),
     );
 
-    let gate_int = perm_gate * is_internal;
+    // -------------------------------------------------------------------------
+    // 3. Packed 3x internal (rows 4-10): witness checks + affine next-state Gate degree:
+    //    perm_gate(1) * is_packed_int(1) = 2 Witness constraint degree: gate(2) * sbox(7) = 9
+    //    Next-state constraint degree: gate(2) * affine(1) = 3
+    // -------------------------------------------------------------------------
+    // ark[0..2] hold the 3 internal round constants on packed-int rows
+    let ark_int_3: [AB::Expr; 3] = core::array::from_fn(|i| ark[i].clone());
+    let (expected_packed, witness_checks) = apply_packed_internals::<AB>(h, w, &ark_int_3);
+
+    let gate_packed = perm_gate.clone() * is_packed_int;
     let mut idx = 0;
+    // 3 witness constraints
     tagged_assert_zeros(
         builder,
-        &PERM_INT_TAGS,
+        &PERM_PACKED_INT_TAGS,
         &mut idx,
-        PERM_INT_NAMESPACE,
+        PERM_PACKED_INT_NAMESPACE,
+        core::array::from_fn::<_, 3, _>(|k| gate_packed.clone() * witness_checks[k].clone()),
+    );
+    // 12 next-state constraints
+    tagged_assert_zeros(
+        builder,
+        &PERM_PACKED_INT_TAGS,
+        &mut idx,
+        PERM_PACKED_INT_NAMESPACE,
         core::array::from_fn::<_, STATE_WIDTH, _>(|i| {
-            gate_int.clone() * (h_next[i].clone() - expected_int[i].clone())
+            gate_packed.clone() * (h_next[i].clone() - expected_packed[i].clone())
+        }),
+    );
+
+    // -------------------------------------------------------------------------
+    // 4. Int+ext merged (row 11): 1 internal (ARK_INT[21] hardcoded) + 1 external Gate degree:
+    //    perm_gate(1) * is_int_ext(1) = 2 Witness constraint degree: gate(2) * sbox(7) = 9
+    //    Next-state constraint degree: gate(2) * sbox(7) = 9
+    // -------------------------------------------------------------------------
+    let (expected_int_ext, witness_check) =
+        apply_internal_plus_ext::<AB>(h, &w[0], Hasher::ARK_INT[21], &ark);
+
+    let gate_int_ext = perm_gate * is_int_ext;
+    let mut idx = 0;
+    // 1 witness constraint
+    tagged_assert_zeros(
+        builder,
+        &PERM_INT_EXT_TAGS,
+        &mut idx,
+        PERM_INT_EXT_NAMESPACE,
+        [gate_int_ext.clone() * witness_check],
+    );
+    // 12 next-state constraints
+    tagged_assert_zeros(
+        builder,
+        &PERM_INT_EXT_TAGS,
+        &mut idx,
+        PERM_INT_EXT_NAMESPACE,
+        core::array::from_fn::<_, STATE_WIDTH, _>(|i| {
+            gate_int_ext.clone() * (h_next[i].clone() - expected_int_ext[i].clone())
         }),
     );
 }
@@ -252,4 +299,97 @@ fn apply_matmul_internal<AB: LiftedAirBuilder<F = Felt>>(
 
     // result[i] = state[i] * MAT_DIAG[i] + sum
     core::array::from_fn(|i| state[i].clone() * AB::Expr::from(Hasher::MAT_DIAG[i]) + sum.clone())
+}
+
+// =============================================================================
+// PACKED ROUND HELPERS
+// =============================================================================
+
+/// Computes the expected next state for the merged init linear + first external round.
+///
+/// h' = M_E(S(M_E(h) + ark_ext))
+///
+/// The init step applies M_E to the input, then the first external round adds round
+/// constants, applies the full S-box, and applies M_E again. This is a single S-box
+/// layer over affine expressions, so the constraint degree is 7.
+pub fn apply_init_plus_ext<AB: LiftedAirBuilder<F = Felt>>(
+    h: &[AB::Expr; STATE_WIDTH],
+    ark_ext: &[AB::Expr; STATE_WIDTH],
+) -> [AB::Expr; STATE_WIDTH] {
+    // Apply M_E to get the pre-round state
+    let pre = apply_matmul_external::<AB>(h);
+
+    // Add round constants, apply S-box, apply M_E
+    let with_rc: [AB::Expr; STATE_WIDTH] =
+        core::array::from_fn(|i| pre[i].clone() + ark_ext[i].clone());
+    let with_sbox: [AB::Expr; STATE_WIDTH] =
+        core::array::from_fn(|i| with_rc[i].clone().exp_const_u64::<7>());
+    apply_matmul_external::<AB>(&with_sbox)
+}
+
+/// Computes the expected next state and witness checks for 3 packed internal rounds.
+///
+/// Each internal round applies: add RC to lane 0, S-box lane 0, then M_I.
+/// The S-box output for each round is provided as an explicit witness (w0, w1, w2),
+/// which keeps the intermediate states affine and the constraint degree at 7.
+///
+/// Returns:
+/// - `next_state`: expected state after all 3 rounds (affine in trace columns, degree 1)
+/// - `witness_checks`: 3 expressions that must be zero (each degree 7): `wk - (y(k)_0 +
+///   ark_int[k])^7`
+pub fn apply_packed_internals<AB: LiftedAirBuilder<F = Felt>>(
+    h: &[AB::Expr; STATE_WIDTH],
+    w: &[AB::Expr; 3],
+    ark_int: &[AB::Expr; 3],
+) -> ([AB::Expr; STATE_WIDTH], [AB::Expr; 3]) {
+    let mut state = h.clone();
+    let mut witness_checks: [AB::Expr; 3] = core::array::from_fn(|_| AB::Expr::ZERO);
+
+    for k in 0..3 {
+        // Witness check: wk = (state[0] + ark_int[k])^7
+        let sbox_input = state[0].clone() + ark_int[k].clone();
+        witness_checks[k] = w[k].clone() - sbox_input.exp_const_u64::<7>();
+
+        // Substitute witness for lane 0 and apply M_I
+        state[0] = w[k].clone();
+        state = apply_matmul_internal::<AB>(&state);
+    }
+
+    (state, witness_checks)
+}
+
+/// Computes the expected next state and witness check for one internal round followed
+/// by one external round.
+///
+/// Used for the int22+ext5 merged row (row 11). The internal round constant ARK_INT[21]
+/// is passed as a concrete Felt rather than read from a periodic column. This is valid
+/// because row 11 is the only row gated by `is_int_ext` -- no other row needs a different
+/// value under the same gate. A periodic column would waste 15 zero entries to deliver
+/// one value.
+///
+/// Returns:
+/// - `next_state`: expected state after int + ext (degree 7 in trace columns)
+/// - `witness_check`: `w0 - (h[0] + ark_int_const)^7` (degree 7)
+pub fn apply_internal_plus_ext<AB: LiftedAirBuilder<F = Felt>>(
+    h: &[AB::Expr; STATE_WIDTH],
+    w0: &AB::Expr,
+    ark_int_const: Felt,
+    ark_ext: &[AB::Expr; STATE_WIDTH],
+) -> ([AB::Expr; STATE_WIDTH], AB::Expr) {
+    // Internal round: witness check and state update
+    let sbox_input = h[0].clone() + AB::Expr::from(ark_int_const);
+    let witness_check = w0.clone() - sbox_input.exp_const_u64::<7>();
+
+    let mut int_state = h.clone();
+    int_state[0] = w0.clone();
+    let intermediate = apply_matmul_internal::<AB>(&int_state);
+
+    // External round: add RC, S-box all lanes, M_E
+    let with_rc: [AB::Expr; STATE_WIDTH] =
+        core::array::from_fn(|i| intermediate[i].clone() + ark_ext[i].clone());
+    let with_sbox: [AB::Expr; STATE_WIDTH] =
+        core::array::from_fn(|i| with_rc[i].clone().exp_const_u64::<7>());
+    let next_state = apply_matmul_external::<AB>(&with_sbox);
+
+    (next_state, witness_check)
 }

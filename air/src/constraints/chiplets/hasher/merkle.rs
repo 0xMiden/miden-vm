@@ -3,22 +3,16 @@
 //! In the controller/permutation split architecture, Merkle constraints apply only to
 //! controller rows (perm_seg=0). The constraints enforce:
 //!
-//! - **Index shifting**: Node index on input row = 2 * node_index on output row + discarded bit
-//! - **Discarded-bit binary**: The per-step discarded bit is constrained to {0,1}
-//! - **Cross-step index continuity**: For non-final Merkle outputs, next input index equals
-//!   current output index
+//! - **Index decomposition**: `idx = 2 * idx_next + direction_bit` on Merkle input rows
+//! - **Direction bit booleanity**: `direction_bit * (1 - direction_bit) = 0` on Merkle input rows
+//! - **Cross-step index continuity**: For non-final Merkle outputs, next input index equals current
+//!   output index
 //! - **Output index zero**: HOUT output rows have node_index = 0
 //! - **Capacity zeroing**: Merkle input rows have capacity = 0
-//!
-//! ## TODO: Digest routing constraint
-//!
-//! There is currently no direct constraint enforcing that the digest from step i's output
-//! is placed in the correct rate half (RATE0 or RATE1) of step i+1's input based on the
-//! direction bit of the NEXT input step. The monolithic 32-row hasher design had this
-//! constraint inline.
-//!
-//! The fix likely requires a `direction_bit` trace column so that `b_{i+1}` is available at the
-//! (output_i, input_{i+1}) boundary.
+//! - **Forward propagation**: On non-final output -> next-input boundaries, direction_bit is
+//!   propagated from the next input to the current output, making `b_{i+1}` available for routing
+//! - **Digest routing**: The digest from output_i is placed in the correct rate half of input_{i+1}
+//!   based on direction_bit (which equals `b_{i+1}` via forward propagation)
 
 use miden_core::field::PrimeCharacteristicRing;
 
@@ -34,19 +28,24 @@ use crate::{
 // TAGGING NAMESPACES
 // ================================================================================================
 
-const MERKLE_INDEX_BINARY_NAMESPACE: &str = "chiplets.hasher.merkle.index.binary";
+const MERKLE_INDEX_DECOMP_NAMESPACE: &str = "chiplets.hasher.merkle.index.decomposition";
+const MERKLE_INDEX_BOOLEANITY_NAMESPACE: &str = "chiplets.hasher.merkle.index.booleanity";
 const MERKLE_INDEX_ZERO_NAMESPACE: &str = "chiplets.hasher.merkle.index.zero";
 const MERKLE_CAP_NAMESPACE: &str = "chiplets.hasher.merkle.capacity";
 
 const OUTPUT_INDEX_NAMES: [&str; 1] = [super::OUTPUT_INDEX_NAMESPACE];
 const MERKLE_INDEX_CONTINUITY_NAMESPACE: &str = "chiplets.hasher.merkle.index.continuity";
 
-const MERKLE_INDEX_NAMES: [&str; 3] = [
-    MERKLE_INDEX_BINARY_NAMESPACE,
+const MERKLE_INDEX_NAMES: [&str; 4] = [
+    MERKLE_INDEX_DECOMP_NAMESPACE,
+    MERKLE_INDEX_BOOLEANITY_NAMESPACE,
     MERKLE_INDEX_ZERO_NAMESPACE,
     MERKLE_INDEX_CONTINUITY_NAMESPACE,
 ];
 const MERKLE_INPUT_STATE_NAMES: [&str; 4] = [MERKLE_CAP_NAMESPACE; 4];
+
+const MERKLE_ROUTING_NAMESPACE: &str = "chiplets.hasher.merkle.routing";
+const MERKLE_ROUTING_NAMES: [&str; 5] = [MERKLE_ROUTING_NAMESPACE; 5];
 
 const OUTPUT_INDEX_TAGS: TagGroup = TagGroup {
     base: super::HASHER_OUTPUT_IDX_ID,
@@ -60,17 +59,24 @@ const MERKLE_INPUT_STATE_TAGS: TagGroup = TagGroup {
     base: super::HASHER_MERKLE_INPUT_STATE_BASE_ID,
     names: &MERKLE_INPUT_STATE_NAMES,
 };
+const MERKLE_ROUTING_TAGS: TagGroup = TagGroup {
+    base: super::HASHER_MERKLE_ROUTING_BASE_ID,
+    names: &MERKLE_ROUTING_NAMES,
+};
 
 // CONSTRAINT FUNCTIONS
 // ================================================================================================
 
 /// Enforces node index constraints for Merkle operations on controller rows.
 ///
-/// ## Index Shift Constraint
+/// ## Index Decomposition Constraint
 ///
-/// On controller input rows for Merkle operations (s0=1, s1 or s2 non-zero), the index
-/// shifts from input to output: `b = input_idx - 2 * output_idx` must be binary.
-/// The output row is the NEXT row (controller pairs are adjacent).
+/// On controller input rows for Merkle operations (s0=1, s1 or s2 non-zero):
+/// `idx = 2 * idx_next + direction_bit` where idx_next is the paired output row's index.
+///
+/// ## Direction Bit Booleanity
+///
+/// On Merkle input rows: `direction_bit * (1 - direction_bit) = 0`.
 ///
 /// ## Index Zero Constraint
 ///
@@ -102,19 +108,51 @@ pub(super) fn enforce_node_index_constraints<AB>(
     );
 
     // -------------------------------------------------------------------------
-    // Index Shift Constraint (on Merkle input rows)
+    // Index Decomposition + Booleanity (on Merkle input rows)
     // -------------------------------------------------------------------------
     // On controller input rows (s0=1), when any Merkle op is active:
-    // b = input_idx - 2 * output_idx_next must be binary.
-    // The next row is the paired output row.
+    // idx = 2 * idx_next + direction_bit
+    // direction_bit is binary
     let f_merkle = super::flags::f_merkle_input(cols.s0.clone(), cols.s1.clone(), cols.s2.clone());
 
-    // Direction bit: b = idx - 2 * idx_next
-    let b = cols.node_index.clone() - AB::Expr::TWO * cols_next.node_index.clone();
-
+    // Gate degree: hasher_flag(1) * controller_flag(1) * f_merkle(3) = 5
     let gate = hasher_flag.clone() * controller_flag.clone() * f_merkle;
+
     let mut idx = 0;
-    tagged_assert_zero(builder, &MERKLE_INDEX_TAGS, &mut idx, gate * (b.square() - b));
+
+    // Index decomposition: idx - 2 * idx_next - direction_bit = 0
+    // Constraint degree: gate(5) * diff(1) = 6
+    tagged_assert_zero(
+        builder,
+        &MERKLE_INDEX_TAGS,
+        &mut idx,
+        gate.clone()
+            * (cols.node_index.clone()
+                - AB::Expr::TWO * cols_next.node_index.clone()
+                - cols.direction_bit.clone()),
+    );
+
+    // Direction bit booleanity: direction_bit * (1 - direction_bit) = 0
+    // Constraint degree: gate(5) * direction_bit(1) * (1-direction_bit)(1) = 7
+    tagged_assert_zero(
+        builder,
+        &MERKLE_INDEX_TAGS,
+        &mut idx,
+        gate * cols.direction_bit.clone() * (AB::Expr::ONE - cols.direction_bit.clone()),
+    );
+
+    // -------------------------------------------------------------------------
+    // Sponge input node_index zero constraint
+    // -------------------------------------------------------------------------
+    // On sponge (non-Merkle) input rows, node_index must be zero.
+    // f_sponge = s0 * (1-s1) * (1-s2): sponge-mode inputs don't use node_index.
+    let f_sponge = super::flags::f_sponge(cols.s0.clone(), cols.s1.clone(), cols.s2.clone());
+    tagged_assert_zero(
+        builder,
+        &MERKLE_INDEX_TAGS,
+        &mut idx,
+        hasher_flag.clone() * controller_flag.clone() * f_sponge * cols.node_index.clone(),
+    );
 
     // -------------------------------------------------------------------------
     // Cross-step Merkle index continuity (output_i -> input_{i+1})
@@ -129,33 +167,27 @@ pub(super) fn enforce_node_index_constraints<AB>(
     //   hasher_flag * (1 - hasher_flag_next) * (1 - perm_seg) = 0,
     // so `hasher_flag_next = 1` whenever this continuity gate can be active. Thus `cols_next`
     // selectors are guaranteed to belong to the hasher chiplet (not cross-chiplet garbage values).
-    let f_merkle_next =
-        super::flags::f_merkle_input(cols_next.s0.clone(), cols_next.s1.clone(), cols_next.s2.clone());
+    let f_merkle_next = super::flags::f_merkle_input(
+        cols_next.s0.clone(),
+        cols_next.s1.clone(),
+        cols_next.s2.clone(),
+    );
 
+    // Gate degree: hasher_flag(1) * controller_flag(1) * f_output(2) * (1-is_boundary)(1)
+    //              * f_merkle_next(3) = 8
     let continuity_gate = hasher_flag.clone()
         * controller_flag.clone()
         * f_output
-        * (AB::Expr::ONE - cols.is_final.clone())
+        * (AB::Expr::ONE - cols.is_boundary.clone())
         * f_merkle_next;
 
+    // Index continuity: idx_next - idx = 0
+    // Constraint degree: continuity_gate(8) * diff(1) = 9
     tagged_assert_zero(
         builder,
         &MERKLE_INDEX_TAGS,
         &mut idx,
         continuity_gate * (cols_next.node_index.clone() - cols.node_index.clone()),
-    );
-
-    // -------------------------------------------------------------------------
-    // Sponge input node_index zero constraint
-    // -------------------------------------------------------------------------
-    // On sponge (non-Merkle) input rows, node_index must be zero.
-    // f_sponge = s0 * (1-s1) * (1-s2): sponge-mode inputs don't use node_index.
-    let f_sponge = super::flags::f_sponge(cols.s0.clone(), cols.s1.clone(), cols.s2.clone());
-    tagged_assert_zero(
-        builder,
-        &MERKLE_INDEX_TAGS,
-        &mut idx,
-        hasher_flag * controller_flag * f_sponge * cols.node_index.clone(),
     );
 }
 
@@ -184,4 +216,97 @@ pub(super) fn enforce_merkle_input_state<AB>(
         MERKLE_CAP_NAMESPACE,
         core::array::from_fn::<_, 4, _>(|i| gate.clone() * cap[i].clone()),
     );
+}
+
+/// Enforces Merkle digest routing and direction_bit forward propagation.
+///
+/// ## Forward Propagation
+///
+/// On non-final output -> next-input Merkle boundaries, the direction_bit on the output row
+/// must equal the direction_bit on the next input row. This makes `b_{i+1}` (the next step's
+/// direction bit) available on the output row for digest routing.
+///
+/// ## Digest Routing
+///
+/// The digest from output_i (in rate0, `h[0..4]`) must appear in the correct rate half of
+/// input_{i+1}, selected by direction_bit:
+/// - `direction_bit = 0`: digest goes to rate0 of input_{i+1} (`h_next[j]`)
+/// - `direction_bit = 1`: digest goes to rate1 of input_{i+1} (`h_next[4+j]`)
+///
+/// Combined constraint for each j in 0..4:
+/// ```text
+/// gate * (h_next[j] - h[j] + direction_bit * (h_next[4+j] - h_next[j])) = 0
+/// ```
+///
+/// The gate uses a lightweight Merkle-next selector (`s1_next + s2_next`, degree 1) instead
+/// of the full `f_merkle_input` (degree 3) to keep the routing constraints within the system's
+/// max degree of 9. See inline comments for the soundness argument.
+pub(super) fn enforce_merkle_digest_routing<AB>(
+    builder: &mut AB,
+    hasher_flag: AB::Expr,
+    cols: &HasherColumns<AB::Expr>,
+    cols_next: &HasherColumns<AB::Expr>,
+) where
+    AB: TaggingAirBuilderExt<F = Felt>,
+{
+    let controller_flag = cols.controller_flag();
+    let f_output = (AB::Expr::ONE - cols.s0.clone()) * (AB::Expr::ONE - cols.s1.clone());
+
+    // Use a lower-degree Merkle-next selector to keep routing constraints within degree 8.
+    //
+    // `f_merkle_input` (degree 3) = `s0 * (s1 + s2 - s1*s2)` is too expensive here because
+    // the routing inner expression is degree 2 (involves direction_bit * state_diff), making
+    // the total `gate(8) * inner(2) = 10` which exceeds the system's max degree of 9.
+    //
+    // Instead we use `s1_next + s2_next` (degree 1): among input rows, this is nonzero
+    // exactly on Merkle inputs (MP: s1=0,s2=1; MV: s1=1,s2=0; MU: s1=1,s2=1) and zero on
+    // sponge inputs (s1=0,s2=0). The non-unit value on MU rows (s1+s2=2) is harmless: it
+    // only scales a constraint that is already zero when the routing is correct.
+    //
+    // Soundness note: a malicious prover could mislabel a Merkle input as sponge (s1=s2=0)
+    // to zero this selector and bypass routing. This is caught by the bus: any (1,0,0) input
+    // row unconditionally fires f_sponge_start or f_sponge_respan, generating a sponge bus
+    // message with a unique address that has no matching decoder request.
+    let merkle_next_lite = cols_next.s1.clone() + cols_next.s2.clone();
+
+    // Gate degree: hasher_flag(1) * controller_flag(1) * f_output(2) * (1-is_boundary)(1)
+    //              * merkle_next_lite(1) = 6
+    let gate = hasher_flag
+        * controller_flag
+        * f_output
+        * (AB::Expr::ONE - cols.is_boundary.clone())
+        * merkle_next_lite;
+
+    let mut idx = 0;
+
+    // Forward propagation: direction_bit on output row = direction_bit on next input row.
+    // Constraint degree: gate(6) * diff(1) = 7
+    tagged_assert_zero(
+        builder,
+        &MERKLE_ROUTING_TAGS,
+        &mut idx,
+        gate.clone() * (cols.direction_bit.clone() - cols_next.direction_bit.clone()),
+    );
+
+    // Digest routing: for each j in 0..4, enforce
+    //   gate * ((1 - b) * (h_next[j] - h[j]) + b * (h_next[4+j] - h[j])) = 0
+    // where b = direction_bit on the output row (= b_{i+1} via propagation).
+    //
+    // Expanding: gate * (h_next[j] - h[j] + b * (h_next[4+j] - h_next[j])) = 0
+    // Constraint degree: gate(6) * inner(2) = 8
+    let b = cols.direction_bit.clone();
+    let rate0_curr = cols.rate0();
+    let rate0_next = cols_next.rate0();
+    let rate1_next = cols_next.rate1();
+
+    for j in 0..4 {
+        tagged_assert_zero(
+            builder,
+            &MERKLE_ROUTING_TAGS,
+            &mut idx,
+            gate.clone()
+                * (rate0_next[j].clone() - rate0_curr[j].clone()
+                    + b.clone() * (rate1_next[j].clone() - rate0_next[j].clone())),
+        );
+    }
 }

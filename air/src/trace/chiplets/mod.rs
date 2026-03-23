@@ -55,10 +55,10 @@ pub const HASHER_RATE_COL_RANGE: Range<usize> = Range {
 pub const HASHER_NODE_INDEX_COL_IDX: usize = HASHER_STATE_COL_RANGE.end;
 /// The index of the hasher's mrupdate_id column in the execution trace.
 pub const HASHER_MRUPDATE_ID_COL_IDX: usize = HASHER_TRACE_OFFSET + hasher::MRUPDATE_ID_COL_IDX;
-/// The index of the hasher's is_start column in the execution trace.
-pub const HASHER_IS_START_COL_IDX: usize = HASHER_TRACE_OFFSET + hasher::IS_START_COL_IDX;
-/// The index of the hasher's is_final column in the execution trace.
-pub const HASHER_IS_FINAL_COL_IDX: usize = HASHER_TRACE_OFFSET + hasher::IS_FINAL_COL_IDX;
+/// The index of the hasher's is_boundary column in the execution trace.
+pub const HASHER_IS_BOUNDARY_COL_IDX: usize = HASHER_TRACE_OFFSET + hasher::IS_BOUNDARY_COL_IDX;
+/// The index of the hasher's direction_bit column in the execution trace.
+pub const HASHER_DIRECTION_BIT_COL_IDX: usize = HASHER_TRACE_OFFSET + hasher::DIRECTION_BIT_COL_IDX;
 /// The index of the hasher's perm_seg column in the execution trace.
 pub const HASHER_PERM_SEG_COL_IDX: usize = HASHER_TRACE_OFFSET + hasher::PERM_SEG_COL_IDX;
 

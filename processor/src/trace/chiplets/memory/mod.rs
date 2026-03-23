@@ -53,8 +53,8 @@ const INIT_MEM_VALUE: Word = EMPTY_WORD;
 /// ## Execution trace
 /// The layout of the memory access trace is shown below.
 ///
-///   rw   ew   ctx  word_addr   idx0   idx1  clk   v0   v1   v2   v3   d0   d1   d_inv   f_scw  w0   w1
-/// ├────┴────┴────┴───────────┴──────┴──────┴────┴────┴────┴────┴────┴────┴────┴───────┴──────┴────┴────┤
+///   rw   ew   ctx  word_addr idx0   idx1  clk   v0   v1   v2   v3   d0   d1  d_inv f_scw w0 w1
+/// ├────┴────┴────┴──────────┴─────┴──────┴────┴────┴────┴────┴────┴────┴────┴─────┴─────┴───┴─┤
 ///
 /// In the above, the meaning of the columns is as follows:
 /// - `rw` is a selector column used to identify whether the memory operation is a read or a write

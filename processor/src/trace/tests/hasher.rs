@@ -203,12 +203,12 @@ impl SiblingTableRow {
     /// Reduces this row to a single field element in the field specified by E.
     ///
     /// The encoding includes:
-    /// - `mrupdate_id` at position 1: prevents cross-operation sibling reuse by binding
-    ///   each sibling table entry to a specific MRUPDATE operation. Without this, a prover
-    ///   could swap siblings between the old path of one update and the new path of another.
+    /// - `mrupdate_id` at position 1: prevents cross-operation sibling reuse by binding each
+    ///   sibling table entry to a specific MRUPDATE operation. Without this, a prover could swap
+    ///   siblings between the old path of one update and the new path of another.
     /// - `node_index` at position 2: the Merkle tree index at this path level.
-    /// - sibling word at positions 3-6 or 7-10: which rate half holds the sibling depends
-    ///   on the direction bit (LSB of node_index).
+    /// - sibling word at positions 3-6 or 7-10: which rate half holds the sibling depends on the
+    ///   direction bit (LSB of node_index).
     pub fn to_value<E: ExtensionField<Felt>>(
         &self,
         _main_trace: &MainTrace,

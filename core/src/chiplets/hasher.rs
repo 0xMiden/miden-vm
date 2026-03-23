@@ -193,4 +193,83 @@ mod tests {
 
         assert_eq!(state_half2, state_full, "split application doesn't match full permutation");
     }
+
+    /// Verifies that the 16-row packed permutation schedule produces the same result
+    /// as the reference `apply_permutation`.
+    ///
+    /// The packed schedule:
+    /// - init + ext1 (merged)
+    /// - ext2, ext3, ext4
+    /// - 7 x (3 packed internal rounds)
+    /// - int22 + ext5 (merged)
+    /// - ext6, ext7, ext8
+    #[test]
+    fn packed_16row_matches_permutation() {
+        let test_states: [_; 3] = [
+            [Felt::ZERO; STATE_WIDTH],
+            core::array::from_fn(|i| Felt::new(i as u64)),
+            [
+                Felt::new(0x123456789abcdef0),
+                Felt::new(0xfedcba9876543210),
+                Felt::new(0x0011223344556677),
+                Felt::new(0x8899aabbccddeeff),
+                Felt::new(0xdeadbeefcafebabe),
+                Felt::new(0x1234567890abcdef),
+                Felt::new(0x1234567890abcdef),
+                Felt::new(0x0badc0debadf00d0),
+                Felt::new(0x1111111111111111),
+                Felt::new(0x2222222222222222),
+                Felt::new(0x3333333333333333),
+                Felt::new(0x4444444444444444),
+            ],
+        ];
+
+        for (idx, init_state) in test_states.iter().enumerate() {
+            let mut state = *init_state;
+
+            // Init + ext1 (merged)
+            Hasher::apply_matmul_external(&mut state);
+            Hasher::add_rc(&mut state, &Hasher::ARK_EXT_INITIAL[0]);
+            Hasher::apply_sbox(&mut state);
+            Hasher::apply_matmul_external(&mut state);
+
+            // Ext2, ext3, ext4
+            for r in 1..=3 {
+                Hasher::add_rc(&mut state, &Hasher::ARK_EXT_INITIAL[r]);
+                Hasher::apply_sbox(&mut state);
+                Hasher::apply_matmul_external(&mut state);
+            }
+
+            // 7 x (3 packed internal rounds)
+            for triple in 0..7_usize {
+                let base = triple * 3;
+                for k in 0..3 {
+                    state[0] += Hasher::ARK_INT[base + k];
+                    state[0] = state[0].exp_const_u64::<7>();
+                    Hasher::matmul_internal(&mut state, Hasher::MAT_DIAG);
+                }
+            }
+
+            // Int22 + ext5 (merged)
+            state[0] += Hasher::ARK_INT[21];
+            state[0] = state[0].exp_const_u64::<7>();
+            Hasher::matmul_internal(&mut state, Hasher::MAT_DIAG);
+            Hasher::add_rc(&mut state, &Hasher::ARK_EXT_TERMINAL[0]);
+            Hasher::apply_sbox(&mut state);
+            Hasher::apply_matmul_external(&mut state);
+
+            // Ext6, ext7, ext8
+            for r in 1..=3 {
+                Hasher::add_rc(&mut state, &Hasher::ARK_EXT_TERMINAL[r]);
+                Hasher::apply_sbox(&mut state);
+                Hasher::apply_matmul_external(&mut state);
+            }
+
+            // Compare with reference
+            let mut reference = *init_state;
+            apply_permutation(&mut reference);
+
+            assert_eq!(state, reference, "packed schedule mismatch for test state {idx}");
+        }
+    }
 }

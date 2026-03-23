@@ -1,11 +1,11 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::{
-    Challenges, DECODER_TRACE_OFFSET, RowIndex, bus_message,
+    Challenges, RowIndex, bus_message,
     chiplets::hasher::{
-        CAPACITY_DOMAIN_IDX, CONTROLLER_ROWS_PER_PERM_FELT, DIGEST_RANGE, HasherState,
-        LINEAR_HASH_LABEL, MP_VERIFY_LABEL, MR_UPDATE_NEW_LABEL, MR_UPDATE_OLD_LABEL, RATE_LEN,
-        RETURN_HASH_LABEL, RETURN_STATE_LABEL,
+        CONTROLLER_ROWS_PER_PERM_FELT, DIGEST_RANGE, HasherState, LINEAR_HASH_LABEL,
+        MP_VERIFY_LABEL, MR_UPDATE_NEW_LABEL, MR_UPDATE_OLD_LABEL, RATE_LEN, RETURN_HASH_LABEL,
+        RETURN_STATE_LABEL,
     },
     log_precompile::{
         HELPER_ADDR_IDX, HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE, STACK_COMM_RANGE,
@@ -179,9 +179,6 @@ pub fn b_chip_log_precompile() {
 
         Program::new(mast_forest.into(), basic_block_id)
     };
-    // Runtime stack layout: [COMM(5,6,7,8), TAG(1,2,3,4)] with comm[0]=5 on top
-    let _comm_word: Word = [Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)].into();
-    let _tag_word: Word = [Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)].into();
     // stack! takes elements in runtime order (first = top) and handles reversal
     let stack_inputs = stack![5, 6, 7, 8, 1, 2, 3, 4];
     let trace = build_trace_from_program(&program, &stack_inputs);
@@ -357,7 +354,7 @@ fn hasher_response_at(
 
     // Input rows (hasher s0=1)
     if hasher_s0 == ONE {
-        let is_start = trace.main_trace.chiplet_is_start(row);
+        let is_start = trace.main_trace.chiplet_is_boundary(row);
 
         // Sponge mode (s1=0, s2=0)
         if hasher_s1 == ZERO && hasher_s2 == ZERO {
@@ -397,7 +394,7 @@ fn hasher_response_at(
         }
 
         // SOUT (s2=1): only with is_final=1
-        let is_final = trace.main_trace.chiplet_is_final(row);
+        let is_final = trace.main_trace.chiplet_is_boundary(row);
         if is_final == ONE {
             return full_state_return_msg(challenges, addr, &state);
         }
@@ -417,7 +414,6 @@ fn build_value(coeffs: &[Felt], elements: &[Felt]) -> Felt {
     }
     value
 }
-
 
 // STEP-BY-STEP BUS VERIFICATION
 // ================================================================================================
@@ -497,7 +493,8 @@ fn decoder_request_at(
             // HPERM sends two messages: input (full state from stack) and output (full state
             // from next row). Combined as a product.
             let helper_0 = trace.main_trace.helper_register(0, row);
-            let state: [Felt; 12] = core::array::from_fn(|i| trace.main_trace.stack_element(i, row));
+            let state: [Felt; 12] =
+                core::array::from_fn(|i| trace.main_trace.stack_element(i, row));
             let state_nxt: [Felt; 12] =
                 core::array::from_fn(|i| trace.main_trace.stack_element(i, row + 1));
 
@@ -584,14 +581,10 @@ fn decoder_request_at(
             let node_index = trace.main_trace.stack_element(5, row);
             let merkle_root = trace.main_trace.stack_word(6, row);
 
-            let node_word: [Felt; 4] = node_value
-                .as_elements()
-                .try_into()
-                .expect("word must be 4 field elements");
-            let root_word: [Felt; 4] = merkle_root
-                .as_elements()
-                .try_into()
-                .expect("word must be 4 field elements");
+            let node_word: [Felt; 4] =
+                node_value.as_elements().try_into().expect("word must be 4 field elements");
+            let root_word: [Felt; 4] =
+                merkle_root.as_elements().try_into().expect("word must be 4 field elements");
 
             let input_value = {
                 let mut acc = challenges.alpha
@@ -631,22 +624,14 @@ fn decoder_request_at(
             let new_node_value = trace.main_trace.stack_word(10, row);
             let new_root = trace.main_trace.stack_word(0, row + 1);
 
-            let old_node_word: [Felt; 4] = old_node_value
-                .as_elements()
-                .try_into()
-                .expect("word must be 4 field elements");
-            let old_root_word: [Felt; 4] = old_root
-                .as_elements()
-                .try_into()
-                .expect("word must be 4 field elements");
-            let new_node_word: [Felt; 4] = new_node_value
-                .as_elements()
-                .try_into()
-                .expect("word must be 4 field elements");
-            let new_root_word: [Felt; 4] = new_root
-                .as_elements()
-                .try_into()
-                .expect("word must be 4 field elements");
+            let old_node_word: [Felt; 4] =
+                old_node_value.as_elements().try_into().expect("word must be 4 field elements");
+            let old_root_word: [Felt; 4] =
+                old_root.as_elements().try_into().expect("word must be 4 field elements");
+            let new_node_word: [Felt; 4] =
+                new_node_value.as_elements().try_into().expect("word must be 4 field elements");
+            let new_root_word: [Felt; 4] =
+                new_root.as_elements().try_into().expect("word must be 4 field elements");
 
             let input_old = {
                 let mut acc = challenges.alpha
@@ -723,7 +708,8 @@ fn verify_b_chip_step_by_step(
         expected *= response * request.try_inverse().expect("request must be invertible");
 
         assert_eq!(
-            expected, b_chip[row_idx + 1],
+            expected,
+            b_chip[row_idx + 1],
             "b_chip mismatch at row {} (after processing row {}): \
              expected={}, actual={}, request={}, response={}",
             row_idx + 1,

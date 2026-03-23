@@ -51,7 +51,7 @@ fn key_to_state(key: &StateKey) -> HasherState {
 ///   request. Input rows (s0=1) capture the operation type and pre-permutation state. Output rows
 ///   (s0=0, s1=0) capture the post-permutation state.
 ///
-/// - **Permutation segment** (perm_seg=1): one 32-row Poseidon2 cycle per unique input state.
+/// - **Permutation segment** (perm_seg=1): one 16-row Poseidon2 cycle per unique input state.
 ///   Multiplicity is stored in the node_index column. Linked to controller rows via the hasher_perm
 ///   LogUp bus.
 ///
@@ -60,7 +60,7 @@ fn key_to_state(key: &StateKey) -> HasherState {
 ///
 /// ## Trace layout (20 columns)
 ///
-///   s0  s1  s2  h0..h11  idx  mrupdate_id  is_start  is_final  perm_seg
+///   s0  s1  s2  h0..h11  idx  mrupdate_id  is_boundary  direction_bit  perm_seg
 /// ├────┴───┴───┴────────┴────┴────────────┴─────────┴─────────┴────────┤
 #[derive(Debug, Default)]
 pub struct Hasher {
@@ -68,7 +68,7 @@ pub struct Hasher {
     /// Maps block digest -> (start_row, end_row) for memoized controller traces.
     memoized_trace_map: BTreeMap<DigestKey, (usize, usize)>,
     /// Maps input state -> multiplicity for permutation deduplication.
-    /// During finalize_trace(), one 32-row perm cycle is emitted per entry.
+    /// During finalize_trace(), one 16-row perm cycle is emitted per entry.
     perm_request_map: BTreeMap<StateKey, u64>,
     /// Monotonically increasing counter for MRUPDATE domain separation.
     mrupdate_id: Felt,
@@ -123,8 +123,10 @@ impl Hasher {
             state,
             ZERO, // input_node_index
             ZERO, // output_node_index
-            ONE,  // is_start = 1 (single permutation)
-            ONE,  // is_final = 1
+            ONE,  // is_boundary_input = 1 (first input)
+            ONE,  // is_boundary_output = 1 (final output)
+            ZERO, // input_direction_bit (non-Merkle)
+            ZERO, // output_direction_bit (non-Merkle)
         );
 
         (addr, permuted)
@@ -146,15 +148,17 @@ impl Hasher {
 
         let addr = self.trace.next_row_addr();
         let init_state = init_state_from_words_with_domain(&h1, &h2, domain);
-        // Single permutation: is_start=1, is_final=1, output=RETURN_HASH
+        // Single permutation: boundary on both input and output
         let permuted = self.append_controller_permutation(
             LINEAR_HASH,
             RETURN_HASH,
             init_state,
-            ZERO, // input_node_index
-            ZERO, // output_node_index
-            ONE,  // is_start
-            ONE,  // is_final
+            ZERO,
+            ZERO, // node_index: input, output
+            ONE,
+            ONE, // is_boundary: input=1, output=1
+            ZERO,
+            ZERO, // direction_bit: non-Merkle
         );
 
         self.insert_to_memoized_trace_map(addr, expected_hash);
@@ -181,15 +185,17 @@ impl Hasher {
         let num_batches = op_batches.len();
 
         if num_batches == 1 {
-            // Single batch: is_start=1, is_final=1
+            // Single batch: boundary on both input and output
             let permuted = self.append_controller_permutation(
                 LINEAR_HASH,
                 RETURN_HASH,
                 init_state,
-                ZERO, // input_node_index
-                ZERO, // output_node_index
-                ONE,  // is_start
-                ONE,  // is_final
+                ZERO,
+                ZERO,
+                ONE,
+                ONE,
+                ZERO,
+                ZERO,
             );
             self.insert_to_memoized_trace_map(addr, expected_hash);
             let result = get_digest(&permuted);
@@ -197,41 +203,47 @@ impl Hasher {
         }
 
         // Multiple batches:
-        // First batch: is_start=1, is_final=0, output=RETURN_STATE (intermediate)
+        // First batch: boundary input only
         let mut state = self.append_controller_permutation(
             LINEAR_HASH,
             RETURN_STATE,
             init_state,
-            ZERO, // input_node_index
-            ZERO, // output_node_index
-            ONE,  // is_start
-            ZERO, // is_final (not the last)
+            ZERO,
+            ZERO,
+            ONE,
+            ZERO,
+            ZERO,
+            ZERO,
         );
 
-        // Middle batches: is_start=0, is_final=0
+        // Middle batches: no boundary flags
         for batch in op_batches.iter().take(num_batches - 1).skip(1) {
             absorb_into_state(&mut state, batch.groups());
             state = self.append_controller_permutation(
                 LINEAR_HASH,
                 RETURN_STATE,
                 state,
-                ZERO, // input_node_index
-                ZERO, // output_node_index
-                ZERO, // is_start (continuation)
-                ZERO, // is_final (not the last)
+                ZERO,
+                ZERO,
+                ZERO,
+                ZERO,
+                ZERO,
+                ZERO,
             );
         }
 
-        // Last batch: is_start=0, is_final=1, output=RETURN_HASH
+        // Last batch: boundary output only
         absorb_into_state(&mut state, op_batches[num_batches - 1].groups());
         let permuted = self.append_controller_permutation(
             LINEAR_HASH,
             RETURN_HASH,
             state,
-            ZERO, // input_node_index
-            ZERO, // output_node_index
-            ZERO, // is_start (continuation)
-            ONE,  // is_final
+            ZERO,
+            ZERO,
+            ZERO,
+            ONE,
+            ZERO,
+            ZERO,
         );
 
         self.insert_to_memoized_trace_map(addr, expected_hash);
@@ -287,7 +299,7 @@ impl Hasher {
 
     /// Finalizes and fills the provided trace fragment with data from this hasher trace.
     ///
-    /// Finalization pads the controller region and appends one 32-row permutation cycle
+    /// Finalization pads the controller region and appends one 16-row permutation cycle
     /// per unique input state. This is the only place where the perm segment is materialized.
     pub(super) fn fill_trace(mut self, trace: &mut TraceFragment) {
         if !self.finalized {
@@ -315,7 +327,7 @@ impl Hasher {
         // constraint (mrupdate_id is constant on non-MV-start transitions).
         self.trace.pad_to_cycle_boundary(self.mrupdate_id);
 
-        // Append one 32-row permutation cycle per unique input state
+        // Append one 16-row permutation cycle per unique input state
         for (key, multiplicity) in core::mem::take(&mut self.perm_request_map) {
             let state = key_to_state(&key);
             self.trace.append_permutation_cycle(&state, Felt::new(multiplicity));
@@ -331,9 +343,9 @@ impl Hasher {
     ///
     /// Writes two rows to the controller region:
     /// - Input row: `init_selectors` (s0=1), pre-permutation `state`, `input_node_index`,
-    ///   `is_start` flag, is_final=0.
+    ///   `is_boundary_input`, `input_direction_bit`.
     /// - Output row: `final_selectors` (s0=0), post-permutation state, `output_node_index`,
-    ///   is_start=0, `is_final` flag.
+    ///   `is_boundary_output`, `output_direction_bit`.
     ///
     /// Both rows carry the current `mrupdate_id` for sibling table domain separation.
     /// The pre-permutation state is also recorded in `perm_request_map` for deduplication.
@@ -350,8 +362,10 @@ impl Hasher {
         state: HasherState,
         input_node_index: Felt,
         output_node_index: Felt,
-        is_start: Felt,
-        is_final: Felt,
+        is_boundary_input: Felt,
+        is_boundary_output: Felt,
+        input_direction_bit: Felt,
+        output_direction_bit: Felt,
     ) -> HasherState {
         // Append input controller row
         self.trace.append_controller_row(
@@ -359,8 +373,8 @@ impl Hasher {
             &state,
             input_node_index,
             self.mrupdate_id,
-            is_start,
-            ZERO, // is_final is always 0 on input rows
+            is_boundary_input,
+            input_direction_bit,
         );
 
         // Apply the permutation
@@ -373,8 +387,8 @@ impl Hasher {
             &permuted,
             output_node_index,
             self.mrupdate_id,
-            ZERO, // is_start is always 0 on output rows
-            is_final,
+            is_boundary_output,
+            output_direction_bit,
         );
 
         // Record this permutation request for deduplication
@@ -409,30 +423,35 @@ impl Hasher {
             let is_first = i == 0;
             let is_last = i == depth - 1;
 
-            // Determine lifecycle flags
-            let is_start = if is_first { ONE } else { ZERO };
-            let is_final = if is_last { ONE } else { ZERO };
+            // Determine boundary flags
+            let is_boundary_input = if is_first { ONE } else { ZERO };
+            let is_boundary_output = if is_last { ONE } else { ZERO };
 
-            // Build merge state based on direction bit
-            let index_bit = index & 1;
-            let state = build_merge_state(&root, &sibling, index_bit);
+            // Direction bit for this step: LSB of the current index
+            let b_i = index & 1;
+            let state = build_merge_state(&root, &sibling, b_i);
 
             // Input row carries the full index; output row carries the shifted index.
             let input_node_idx = Felt::new(index);
             let output_node_idx = Felt::new(index >> 1);
 
-            // Determine output selectors
+            // Direction bit for the NEXT step (forward propagation for routing constraint).
+            // On the last step there is no next step, so direction_bit = 0.
+            let b_next = if is_last { 0 } else { (index >> 1) & 1 };
+
             let final_selectors = if is_last { RETURN_HASH } else { RETURN_STATE };
 
-            // Append controller pair
+            // Append controller pair with direction bits
             let permuted = self.append_controller_permutation(
                 main_selectors,
                 final_selectors,
                 state,
                 input_node_idx,
                 output_node_idx,
-                is_start,
-                is_final,
+                is_boundary_input,
+                is_boundary_output,
+                Felt::new(b_i),    // input direction_bit: current step's bit
+                Felt::new(b_next), // output direction_bit: next step's bit (propagated)
             );
 
             root = get_digest(&permuted);
@@ -543,7 +562,7 @@ fn build_merge_state(a: &Digest, b: &Digest, index_bit: u64) -> HasherState {
 
 /// Initializes hasher state with the first 8 elements to be absorbed.
 ///
-/// State layout: [R1, R2, CAP] where:
+/// State layout: [RATE0, RATE1, CAP] where:
 /// - state[0..8] = init_values (rate)
 /// - state[8..12] = [padding_flag, ZERO, ZERO, ZERO] (capacity)
 #[inline(always)]

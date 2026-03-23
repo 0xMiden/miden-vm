@@ -43,8 +43,8 @@ impl AuxTraceBuilder {
     /// 2. A column acting as
     ///    - a virtual table for the sibling table used by the hasher chiplet,
     ///    - a bus between the memory chiplet and the ACE chiplet.
-    /// 3. A column used as a bus to wire the gates of the ACE chiplet. It also carries the
-    ///    hasher perm-link (linking hasher controller rows to hasher permutation segment).
+    /// 3. A column used as a bus to wire the gates of the ACE chiplet. It also carries the hasher
+    ///    perm-link (linking hasher controller rows to hasher permutation segment).
     pub(crate) fn build_aux_columns<E: ExtensionField<Felt>>(
         &self,
         main_trace: &MainTrace,

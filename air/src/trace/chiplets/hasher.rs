@@ -76,19 +76,25 @@ pub const DIGEST_RANGE: Range<usize> = Hasher::DIGEST_RANGE;
 
 /// Number of round steps used to complete a single permutation.
 ///
-/// For Poseidon2, we model a permutation as 31 step transitions, resulting in a 32-row cycle.
+/// For Poseidon2, the permutation consists of 31 step transitions (1 init linear + 8 external
+/// + 22 internal). These are packed into a 16-row cycle.
 pub const NUM_ROUNDS: usize = miden_core::chiplets::hasher::NUM_ROUNDS;
 
 /// Index of the last row in a permutation cycle (0-based).
-pub const LAST_CYCLE_ROW: usize = NUM_ROUNDS;
+pub const LAST_CYCLE_ROW: usize = HASH_CYCLE_LEN - 1;
 pub const LAST_CYCLE_ROW_FELT: Felt = Felt::new(LAST_CYCLE_ROW as u64);
 
 /// Number of selector columns in the trace.
 pub const NUM_SELECTORS: usize = 3;
 
 /// The number of rows in the execution trace required to compute a permutation of Poseidon2.
-/// This is equal to 32.
-pub const HASH_CYCLE_LEN: usize = NUM_ROUNDS.next_power_of_two();
+///
+/// The 16-row packed cycle compresses the 31 permutation steps by:
+/// - Merging init linear + ext1 into one row
+/// - Packing 3 internal rounds per row (7 rows for 21 rounds)
+/// - Merging int22 + ext5 into one row
+/// Result: 1 + 3 + 7 + 1 + 3 + 1 = 16 rows.
+pub const HASH_CYCLE_LEN: usize = 16;
 pub const HASH_CYCLE_LEN_FELT: Felt = Felt::new(HASH_CYCLE_LEN as u64);
 
 /// Index of the node_index column. Holds the Merkle tree node index on controller rows.
@@ -98,17 +104,19 @@ pub const NODE_INDEX_COL_IDX: usize = NUM_SELECTORS + STATE_WIDTH;
 /// Index of the mrupdate_id column (domain separator for sibling table across MRUPDATE ops).
 pub const MRUPDATE_ID_COL_IDX: usize = NODE_INDEX_COL_IDX + 1;
 
-/// Index of the is_start column (1 on first input row of each operation, 0 on continuation).
-pub const IS_START_COL_IDX: usize = MRUPDATE_ID_COL_IDX + 1;
+/// Index of the is_boundary column (1 on boundary rows: first input or last output of each
+/// operation, 0 otherwise).
+pub const IS_BOUNDARY_COL_IDX: usize = MRUPDATE_ID_COL_IDX + 1;
 
-/// Index of the is_final column (1 on last output row of each operation, 0 on intermediate).
-pub const IS_FINAL_COL_IDX: usize = IS_START_COL_IDX + 1;
+/// Index of the direction_bit column. On Merkle controller rows, holds the extracted direction
+/// bit from the node index. Zero on non-Merkle rows and perm segment rows.
+pub const DIRECTION_BIT_COL_IDX: usize = IS_BOUNDARY_COL_IDX + 1;
 
 /// Index of the perm_seg column (0 = controller region, 1 = permutation segment).
-pub const PERM_SEG_COL_IDX: usize = IS_FINAL_COL_IDX + 1;
+pub const PERM_SEG_COL_IDX: usize = DIRECTION_BIT_COL_IDX + 1;
 
 /// Number of columns in Hasher execution trace.
-/// 3 selectors + 12 state + node_index + mrupdate_id + is_start + is_final + perm_seg = 20.
+/// 3 selectors + 12 state + node_index + mrupdate_id + is_boundary + direction_bit + perm_seg = 20.
 pub const TRACE_WIDTH: usize = PERM_SEG_COL_IDX + 1;
 
 /// Number of controller rows per permutation request (one input + one output).

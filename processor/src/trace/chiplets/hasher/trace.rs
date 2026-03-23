@@ -1,10 +1,8 @@
 use alloc::vec::Vec;
 use core::ops::Range;
 
-use miden_air::trace::chiplets::hasher::{
-    HASH_CYCLE_LEN, NUM_ROUNDS, TRACE_WIDTH,
-};
-use miden_core::chiplets::hasher::apply_round;
+use miden_air::trace::chiplets::hasher::{HASH_CYCLE_LEN, TRACE_WIDTH};
+use miden_core::chiplets::hasher::Hasher;
 
 use super::{Felt, HasherState, ONE, STATE_WIDTH, Selectors, TraceFragment, ZERO};
 
@@ -19,21 +17,21 @@ use super::{Felt, HasherState, ONE, STATE_WIDTH, Selectors, TraceFragment, ZERO}
 /// - 1 node_index column: holds the Merkle tree node index on controller rows. This
 ///   column is reused to hold the permutation request multiplicity on perm segment rows.
 /// - 1 mrupdate_id column (domain separator for sibling table).
-/// - 1 is_start column (1 on first input of operation, 0 on continuation).
-/// - 1 is_final column (1 on last output of operation, 0 on intermediate).
+/// - 1 is_boundary column (1 on boundary rows: first input or last output, 0 otherwise).
+/// - 1 direction_bit column (Merkle direction bit on controller rows, 0 elsewhere).
 /// - 1 perm_seg column (0 = controller region, 1 = permutation segment).
 ///
 /// The trace is divided into two regions:
 /// - Controller region (perm_seg=0): pairs of (input, output) rows per permutation request.
-/// - Permutation segment (perm_seg=1): one 32-row cycle per unique input state.
+/// - Permutation segment (perm_seg=1): one 16-row cycle per unique input state.
 #[derive(Debug, Default)]
 pub struct HasherTrace {
     selectors: [Vec<Felt>; 3],
     hasher_state: [Vec<Felt>; STATE_WIDTH],
     node_index: Vec<Felt>,
     mrupdate_id: Vec<Felt>,
-    is_start: Vec<Felt>,
-    is_final_col: Vec<Felt>,
+    is_boundary: Vec<Felt>,
+    direction_bit: Vec<Felt>,
     perm_seg: Vec<Felt>,
 }
 
@@ -65,8 +63,8 @@ impl HasherTrace {
         state: &HasherState,
         node_index: Felt,
         mrupdate_id: Felt,
-        is_start: Felt,
-        is_final: Felt,
+        is_boundary: Felt,
+        direction_bit: Felt,
     ) {
         for (trace_col, selector_val) in self.selectors.iter_mut().zip(selectors) {
             trace_col.push(selector_val);
@@ -76,58 +74,104 @@ impl HasherTrace {
         }
         self.node_index.push(node_index);
         self.mrupdate_id.push(mrupdate_id);
-        self.is_start.push(is_start);
-        self.is_final_col.push(is_final);
+        self.is_boundary.push(is_boundary);
+        self.direction_bit.push(direction_bit);
         self.perm_seg.push(ZERO);
     }
 
     // PERMUTATION SEGMENT METHODS
     // --------------------------------------------------------------------------------------------
 
-    /// Appends a 32-row permutation cycle to the trace.
+    /// Appends a 16-row permutation cycle to the trace.
     ///
-    /// The `multiplicity` is stored in the node_index column on all rows of the cycle
-    /// (constrained to be constant within a cycle by the AIR).
+    /// The 16-row packed schedule:
+    /// - Row 0:     init linear + ext1 (merged)
+    /// - Rows 1-3:  ext2, ext3, ext4
+    /// - Rows 4-10: 7 packed triples of internal rounds (needs extra witnesses in s0,s1,s2)
+    /// - Row 11:    int22 + ext5 (merged, extra witness in s0)
+    /// - Rows 12-14: ext6, ext7, ext8
+    /// - Row 15:    boundary (final state, no transition)
     ///
-    /// Appends a 32-row permutation cycle to the trace.
-    ///
-    /// The `multiplicity` is stored in the node_index column on all rows of the cycle
-    /// (constrained to be constant within a cycle by the AIR).
-    ///
-    /// The AIR constrains mrupdate_id, is_start, and is_final to zero on perm segment rows.
-    /// Selectors (s0, s1, s2) are unconstrained on perm rows (don't-care), so we write zeros.
+    /// The `multiplicity` is stored in the node_index column on all rows of the cycle and constant
+    /// within a cycle.
     pub fn append_permutation_cycle(&mut self, init_state: &HasherState, multiplicity: Felt) {
         let mut state = *init_state;
 
         // Row 0: initial state
-        self.append_perm_row(&state, multiplicity);
+        self.append_perm_row_with_witnesses(&state, multiplicity, [ZERO; 3]);
 
-        // Rows 1 through 30: apply rounds
-        for i in 0..NUM_ROUNDS - 1 {
-            apply_round(&mut state, i);
-            self.append_perm_row(&state, multiplicity);
+        // Apply init linear + ext1 (merged: M_E, add RC, S-box, M_E)
+        Hasher::apply_matmul_external(&mut state);
+        Hasher::add_rc(&mut state, &Hasher::ARK_EXT_INITIAL[0]);
+        Hasher::apply_sbox(&mut state);
+        Hasher::apply_matmul_external(&mut state);
+
+        // Rows 1-3: ext2, ext3, ext4
+        for r in 1..=3 {
+            self.append_perm_row_with_witnesses(&state, multiplicity, [ZERO; 3]);
+            Hasher::add_rc(&mut state, &Hasher::ARK_EXT_INITIAL[r]);
+            Hasher::apply_sbox(&mut state);
+            Hasher::apply_matmul_external(&mut state);
         }
 
-        // Row 31: apply final round
-        apply_round(&mut state, NUM_ROUNDS - 1);
-        self.append_perm_row(&state, multiplicity);
+        // Rows 4-10: packed 3x internal rounds
+        for triple in 0..7_usize {
+            let base = triple * 3;
+            let pre_state = state;
+            let mut witnesses = [ZERO; 3];
+            for (k, witness) in witnesses.iter_mut().enumerate() {
+                // Witness = S-box output for lane 0
+                let sbox_out = (state[0] + Hasher::ARK_INT[base + k]).exp_const_u64::<7>();
+                *witness = sbox_out;
+                state[0] = sbox_out;
+                Hasher::matmul_internal(&mut state, Hasher::MAT_DIAG);
+            }
+            self.append_perm_row_with_witnesses(&pre_state, multiplicity, witnesses);
+        }
+
+        // Row 11: int22 + ext5 (merged)
+        let pre_state = state;
+        let w0 = (state[0] + Hasher::ARK_INT[21]).exp_const_u64::<7>();
+        state[0] = w0;
+        Hasher::matmul_internal(&mut state, Hasher::MAT_DIAG);
+        Hasher::add_rc(&mut state, &Hasher::ARK_EXT_TERMINAL[0]);
+        Hasher::apply_sbox(&mut state);
+        Hasher::apply_matmul_external(&mut state);
+        self.append_perm_row_with_witnesses(&pre_state, multiplicity, [w0, ZERO, ZERO]);
+
+        // Rows 12-14: ext6, ext7, ext8
+        for r in 1..=3 {
+            self.append_perm_row_with_witnesses(&state, multiplicity, [ZERO; 3]);
+            Hasher::add_rc(&mut state, &Hasher::ARK_EXT_TERMINAL[r]);
+            Hasher::apply_sbox(&mut state);
+            Hasher::apply_matmul_external(&mut state);
+        }
+
+        // Row 15: boundary (final state)
+        self.append_perm_row_with_witnesses(&state, multiplicity, [ZERO; 3]);
     }
 
     /// Appends a single permutation segment row (perm_seg = 1).
     ///
-    /// Selectors are set to zero (unconstrained on perm rows). Control columns
-    /// (mrupdate_id, is_start, is_final) are zero (enforced by AIR).
-    fn append_perm_row(&mut self, state: &HasherState, multiplicity: Felt) {
-        for trace_col in self.selectors.iter_mut() {
-            trace_col.push(ZERO);
-        }
+    /// On permutation rows, `s0, s1, s2` serve as witness columns for packed internal
+    /// rounds. The `witnesses` array provides values to write into these columns.
+    /// Control columns (mrupdate_id, is_boundary, direction_bit) are zero.
+    fn append_perm_row_with_witnesses(
+        &mut self,
+        state: &HasherState,
+        multiplicity: Felt,
+        witnesses: [Felt; 3],
+    ) {
+        self.selectors[0].push(witnesses[0]);
+        self.selectors[1].push(witnesses[1]);
+        self.selectors[2].push(witnesses[2]);
         for (trace_col, &state_val) in self.hasher_state.iter_mut().zip(state) {
             trace_col.push(state_val);
         }
         self.node_index.push(multiplicity);
         self.mrupdate_id.push(ZERO);
-        self.is_start.push(ZERO);
-        self.is_final_col.push(ZERO);
+        self.is_boundary.push(ZERO);
+        self.direction_bit.push(ZERO);
         self.perm_seg.push(ONE);
     }
 
@@ -192,8 +236,8 @@ impl HasherTrace {
         }
         self.node_index.extend_from_within(range.clone());
         self.mrupdate_id.extend_from_within(range.clone());
-        self.is_start.extend_from_within(range.clone());
-        self.is_final_col.extend_from_within(range.clone());
+        self.is_boundary.extend_from_within(range.clone());
+        self.direction_bit.extend_from_within(range.clone());
         self.perm_seg.extend_from_within(range.clone());
 
         // copy the latest hasher state to the provided state slice
@@ -222,8 +266,8 @@ impl HasherTrace {
         self.hasher_state.into_iter().for_each(|c| columns.push(c));
         columns.push(self.node_index);
         columns.push(self.mrupdate_id);
-        columns.push(self.is_start);
-        columns.push(self.is_final_col);
+        columns.push(self.is_boundary);
+        columns.push(self.direction_bit);
         columns.push(self.perm_seg);
 
         for (out_column, column) in trace.columns().zip(columns) {

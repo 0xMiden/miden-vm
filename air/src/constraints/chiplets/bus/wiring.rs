@@ -17,7 +17,7 @@
 //! memory_flag * (delta * D_mem + N_mem) = 0
 //! hasher_flag * (delta * D_perm - N_perm) = 0
 //! ```
-//! 
+//!
 //! TODO(Al): Revisit the above equations
 
 use miden_core::field::PrimeCharacteristicRing;
@@ -28,7 +28,7 @@ use crate::{
     constraints::{
         bus::indices::V_WIRING,
         chiplets::{
-            hasher::periodic::{P_CYCLE_ROW_0, P_CYCLE_ROW_31},
+            hasher::periodic::{P_IS_EXT, P_IS_INIT_EXT, P_IS_INT_EXT, P_IS_PACKED_INT},
             selectors::{ace_chiplet_flag, memory_chiplet_flag},
         },
         tagging::{
@@ -99,11 +99,16 @@ pub fn enforce_wiring_bus_constraint<AB>(
     let delta = v_next_ef - v_local_ef;
 
     // --- Periodic columns for hasher cycle detection ---
-    let (p_cycle_row_0, p_cycle_row_31) = {
+    // Row 0 = is_init_ext. Row 15 (boundary) = 1 - selector_sum.
+    let (p_cycle_row_0, p_cycle_row_boundary) = {
         let p = builder.periodic_values();
-        let row_0: AB::Expr = p[P_CYCLE_ROW_0].into();
-        let row_31: AB::Expr = p[P_CYCLE_ROW_31].into();
-        (row_0, row_31)
+        let row_0: AB::Expr = p[P_IS_INIT_EXT].into();
+        let selector_sum: AB::Expr = Into::<AB::Expr>::into(p[P_IS_INIT_EXT])
+            + Into::<AB::Expr>::into(p[P_IS_EXT])
+            + Into::<AB::Expr>::into(p[P_IS_PACKED_INT])
+            + Into::<AB::Expr>::into(p[P_IS_INT_EXT]);
+        let row_boundary = AB::Expr::ONE - selector_sum;
+        (row_0, row_boundary)
     };
 
     // --- Chiplet selectors ---
@@ -136,7 +141,7 @@ pub fn enforce_wiring_bus_constraint<AB>(
         local,
         challenges,
         p_cycle_row_0,
-        p_cycle_row_31,
+        p_cycle_row_boundary,
     );
 
     // --- Three separate constraints ---
@@ -253,7 +258,7 @@ where
 /// - Hasher controller input (perm_seg=0, hs0=1): +1/msg_in
 /// - Hasher controller output (perm_seg=0, hs0=0, hs1=0): +1/msg_out
 /// - Hasher perm segment row 0 (perm_seg=1, P_CYCLE_ROW_0=1): -m/msg_in
-/// - Hasher perm segment row 31 (perm_seg=1, P_CYCLE_ROW_31=1): -m/msg_out
+/// - Hasher perm segment boundary row (perm_seg=1, cycle boundary): -m/msg_out
 ///
 /// Common-denominator form:
 /// ```text
@@ -267,7 +272,7 @@ fn compute_hasher_perm_link_term<AB>(
     local: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
     p_cycle_row_0: AB::Expr,
-    p_cycle_row_31: AB::Expr,
+    p_cycle_row_boundary: AB::Expr,
 ) -> AB::ExprEF
 where
     AB: TaggingAirBuilderExt<F = Felt>,
@@ -297,8 +302,8 @@ where
     // f_p_in: perm row 0 (perm_seg=1, P_CYCLE_ROW_0=1)
     let f_p_in = perm_seg.clone() * p_cycle_row_0;
 
-    // f_p_out: perm row 31 (perm_seg=1, P_CYCLE_ROW_31=1)
-    let f_p_out = perm_seg * p_cycle_row_31;
+    // f_p_out: perm boundary row (perm_seg=1, cycle boundary)
+    let f_p_out = perm_seg * p_cycle_row_boundary;
 
     // --- Messages ---
     // msg = challenges.encode([label, h0, h1, ..., h11]) -- 13 elements
