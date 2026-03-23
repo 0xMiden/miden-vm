@@ -901,9 +901,19 @@ impl Index<GlobalItemIndex> for Linker {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        panic::{AssertUnwindSafe, catch_unwind},
+        string::String,
+        sync::Arc,
+    };
+
     use miden_assembly_syntax::{
-        ast::{Ident, InvocationTarget, InvokeKind},
-        debuginfo::SourceSpan,
+        ast::{
+            Ident, InvocationTarget, InvokeKind, ItemIndex, Path, SymbolResolutionError,
+            Visibility, types,
+        },
+        debuginfo::{SourceSpan, Span},
+        library::{ItemInfo, TypeInfo},
     };
 
     use super::*;
@@ -979,5 +989,56 @@ mod tests {
             )
             .expect_err("expected syscall without a linked kernel to be rejected");
         assert!(matches!(err, LinkerError::InvalidSysCallTarget { .. }));
+    }
+
+    #[test]
+    fn oversized_link_module_resolution_returns_structured_error() {
+        let context = TestContext::default();
+        let mut linker = Linker::new(context.source_manager());
+        let module_id = ModuleIndex::new(0);
+        let path = Arc::<Path>::from(Path::new("::m::huge"));
+        let mut symbols = Vec::with_capacity(ItemIndex::MAX_ITEMS + 1);
+
+        for i in 0..=ItemIndex::MAX_ITEMS {
+            let name = Ident::new(format!("a{i}")).expect("valid identifier");
+            symbols.push(Symbol::new(
+                name.clone(),
+                Visibility::Private,
+                LinkStatus::Unlinked,
+                SymbolItem::Compiled(ItemInfo::Type(TypeInfo { name, ty: types::Type::Felt })),
+            ));
+        }
+
+        linker.modules.push(
+            LinkModule::new(
+                module_id,
+                ast::ModuleKind::Library,
+                LinkStatus::Unlinked,
+                ModuleSource::Mast,
+                path,
+            )
+            .with_symbols(symbols),
+        );
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            linker[module_id].resolve(Span::unknown("a0"), &SymbolResolver::new(&linker))
+        }));
+
+        let result = match result {
+            Ok(result) => result,
+            Err(panic) => {
+                let message = panic
+                    .downcast_ref::<&str>()
+                    .copied()
+                    .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+                    .expect("panic payload should be a string");
+                panic!("expected graceful error, got panic: {message}");
+            },
+        };
+
+        assert!(matches!(
+            result,
+            Err(err) if matches!(*err, SymbolResolutionError::TooManyItemsInModule { .. })
+        ));
     }
 }

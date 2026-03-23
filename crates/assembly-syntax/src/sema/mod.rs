@@ -17,7 +17,7 @@ use smallvec::SmallVec;
 
 pub use self::{
     context::AnalysisContext,
-    errors::{SemanticAnalysisError, SyntaxError},
+    errors::{LimitKind, SemanticAnalysisError, SyntaxError},
     passes::{ConstEvalVisitor, VerifyInvokeTargets, VerifyRepeatCounts},
 };
 use crate::{ast::*, parser::WordValue};
@@ -227,7 +227,9 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) -> Result<()
                     );
                     let _ = visitor.visit_mut_procedure(&mut procedure);
                 }
-                module.items.push(Export::Procedure(procedure));
+                if let Err(err) = module.push_export(Export::Procedure(procedure)) {
+                    analyzer.error(err);
+                }
             },
             Export::Alias(mut alias) => {
                 log::debug!(target: "verify-invoke", "visiting alias {}", alias.target());
@@ -235,7 +237,9 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) -> Result<()
                     let mut visitor = VerifyInvokeTargets::new(analyzer, module, &locals, None);
                     let _ = visitor.visit_mut_alias(&mut alias);
                 }
-                module.items.push(Export::Alias(alias));
+                if let Err(err) = module.push_export(Export::Alias(alias)) {
+                    analyzer.error(err);
+                }
             },
             Export::Constant(mut constant) => {
                 log::debug!(target: "verify-invoke", "visiting constant {}", constant.name());
@@ -243,7 +247,9 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) -> Result<()
                     let mut visitor = VerifyInvokeTargets::new(analyzer, module, &locals, None);
                     let _ = visitor.visit_mut_constant(&mut constant);
                 }
-                module.items.push(Export::Constant(constant));
+                if let Err(err) = module.push_export(Export::Constant(constant)) {
+                    analyzer.error(err);
+                }
             },
             Export::Type(mut ty) => {
                 log::debug!(target: "verify-invoke", "visiting type {}", ty.name());
@@ -251,7 +257,9 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) -> Result<()
                     let mut visitor = VerifyInvokeTargets::new(analyzer, module, &locals, None);
                     let _ = visitor.visit_mut_type_decl(&mut ty);
                 }
-                module.items.push(Export::Type(ty));
+                if let Err(err) = module.push_export(Export::Type(ty)) {
+                    analyzer.error(err);
+                }
             },
         }
     }

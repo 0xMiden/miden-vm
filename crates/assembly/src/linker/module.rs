@@ -7,7 +7,7 @@ use miden_assembly_syntax::{
         self, AliasTarget, ItemIndex, LocalSymbol, LocalSymbolResolver, ModuleIndex, ModuleKind,
         SymbolResolution, SymbolResolutionError, SymbolTable,
     },
-    debuginfo::{SourceManager, Span, Spanned},
+    debuginfo::{SourceManager, SourceSpan, Span, Spanned},
 };
 
 use super::{AdviceMap, LinkStatus, Symbol, SymbolItem, SymbolResolver};
@@ -182,7 +182,8 @@ impl LinkModule {
         resolver: &SymbolResolver<'_>,
     ) -> Result<SymbolResolution, Box<SymbolResolutionError>> {
         let container = LinkModuleIter { resolver, module: self };
-        let local_resolver = LocalSymbolResolver::new(container, resolver.source_manager_arc());
+        let local_resolver =
+            LocalSymbolResolver::new(container, resolver.source_manager_arc()).map_err(Box::new)?;
         local_resolver.resolve(name).map_err(Box::new)
     }
 
@@ -193,7 +194,8 @@ impl LinkModule {
         resolver: &SymbolResolver<'_>,
     ) -> Result<SymbolResolution, Box<SymbolResolutionError>> {
         let container = LinkModuleIter { resolver, module: self };
-        let local_resolver = LocalSymbolResolver::new(container, resolver.source_manager_arc());
+        let local_resolver =
+            LocalSymbolResolver::new(container, resolver.source_manager_arc()).map_err(Box::new)?;
         local_resolver.resolve_path(path).map_err(Box::new)
     }
 }
@@ -216,68 +218,80 @@ impl<'a, 'b: 'a> SymbolTable for LinkModuleIter<'a, 'b> {
     type SymbolIter = alloc::vec::IntoIter<LocalSymbol>;
 
     fn symbols(&self, source_manager: Arc<dyn SourceManager>) -> Self::SymbolIter {
-        let symbols = self
-            .module
-            .symbols
-            .iter()
-            .enumerate()
-            .map(|(i, symbol)| {
-                let index = ItemIndex::new(i);
-                let gid = self.module.id + index;
-                match symbol.item() {
-                    SymbolItem::Compiled(_)
-                    | SymbolItem::Procedure(_)
-                    | SymbolItem::Constant(_)
-                    | SymbolItem::Type(_) => {
-                        let path = self.module.path.join(symbol.name());
-                        ast::LocalSymbol::Item {
-                            name: symbol.name().clone(),
-                            resolved: SymbolResolution::Exact {
-                                gid,
-                                path: Span::new(symbol.name().span(), path.into()),
+        let mut symbols = Vec::with_capacity(self.module.symbols.len());
+        for (i, symbol) in self.module.symbols.iter().enumerate() {
+            let index = ItemIndex::new(i);
+            let gid = self.module.id + index;
+            symbols.push(match symbol.item() {
+                SymbolItem::Compiled(_)
+                | SymbolItem::Procedure(_)
+                | SymbolItem::Constant(_)
+                | SymbolItem::Type(_) => {
+                    let path = self.module.path.join(symbol.name());
+                    ast::LocalSymbol::Item {
+                        name: symbol.name().clone(),
+                        resolved: SymbolResolution::Exact {
+                            gid,
+                            path: Span::new(symbol.name().span(), path.into()),
+                        },
+                    }
+                },
+                SymbolItem::Alias { alias, resolved } => {
+                    let name = alias.name().clone();
+                    let name = Span::new(name.span(), name.into_inner());
+                    if let Some(resolved) = resolved.get() {
+                        let path = self.resolver.item_path(gid);
+                        let span = name.span();
+                        ast::LocalSymbol::Import {
+                            name,
+                            resolution: Ok(SymbolResolution::Exact {
+                                gid: resolved,
+                                path: Span::new(span, path),
+                            }),
+                        }
+                    } else {
+                        match alias.target() {
+                            AliasTarget::MastRoot(root) => ast::LocalSymbol::Import {
+                                name,
+                                resolution: Ok(SymbolResolution::MastRoot(*root)),
+                            },
+                            AliasTarget::Path(path) => {
+                                let resolution = LocalSymbolResolver::expand(
+                                    |name| {
+                                        self.module.get(name).and_then(|sym| match sym.item() {
+                                            SymbolItem::Alias { alias, .. } => {
+                                                Some(alias.target().clone())
+                                            },
+                                            _ => None,
+                                        })
+                                    },
+                                    path.as_deref(),
+                                    &source_manager,
+                                );
+                                ast::LocalSymbol::Import { name, resolution }
                             },
                         }
-                    },
-                    SymbolItem::Alias { alias, resolved } => {
-                        let name = alias.name().clone();
-                        let name = Span::new(name.span(), name.into_inner());
-                        if let Some(resolved) = resolved.get() {
-                            let path = self.resolver.item_path(gid);
-                            let span = name.span();
-                            ast::LocalSymbol::Import {
-                                name,
-                                resolution: Ok(SymbolResolution::Exact {
-                                    gid: resolved,
-                                    path: Span::new(span, path),
-                                }),
-                            }
-                        } else {
-                            match alias.target() {
-                                AliasTarget::MastRoot(root) => ast::LocalSymbol::Import {
-                                    name,
-                                    resolution: Ok(SymbolResolution::MastRoot(*root)),
-                                },
-                                AliasTarget::Path(path) => {
-                                    let resolution = LocalSymbolResolver::expand(
-                                        |name| {
-                                            self.module.get(name).and_then(|sym| match sym.item() {
-                                                SymbolItem::Alias { alias, .. } => {
-                                                    Some(alias.target().clone())
-                                                },
-                                                _ => None,
-                                            })
-                                        },
-                                        path.as_deref(),
-                                        &source_manager,
-                                    );
-                                    ast::LocalSymbol::Import { name, resolution }
-                                },
-                            }
-                        }
-                    },
-                }
-            })
-            .collect::<Vec<_>>();
+                    }
+                },
+            });
+        }
         symbols.into_iter()
+    }
+
+    fn checked_symbols(
+        &self,
+        source_manager: Arc<dyn SourceManager>,
+    ) -> Result<Self::SymbolIter, SymbolResolutionError> {
+        if self.module.symbols.len() > ItemIndex::MAX_ITEMS {
+            let span = self
+                .module
+                .symbols
+                .first()
+                .map(|symbol| symbol.name().span())
+                .unwrap_or(SourceSpan::UNKNOWN);
+            Err(SymbolResolutionError::too_many_items_in_module(span, &*source_manager))
+        } else {
+            Ok(self.symbols(source_manager))
+        }
     }
 }
