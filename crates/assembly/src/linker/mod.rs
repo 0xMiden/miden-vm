@@ -370,6 +370,17 @@ impl Linker {
 // ------------------------------------------------------------------------------------------------
 /// Analysis
 impl Linker {
+    fn cycle_error(&self, cycle: CycleError) -> LinkerError {
+        let iter = cycle.into_node_ids();
+        let mut nodes = Vec::with_capacity(iter.len());
+        for node in iter {
+            let module = self[node.module].path();
+            let item = self[node].name();
+            nodes.push(module.join(item).to_string());
+        }
+        LinkerError::Cycle { nodes: nodes.into() }
+    }
+
     /// Links `modules` using the current state of the linker.
     ///
     /// Returns the module indices corresponding to the provided modules, which are expected to
@@ -396,7 +407,18 @@ impl Linker {
         &mut self,
         mut kernel: Box<Module>,
     ) -> Result<Vec<ModuleIndex>, LinkerError> {
+        let original_module_len = self.modules.len();
+        let original_callgraph = self.callgraph.clone();
         let module_index = self.link_module(&mut kernel)?;
+        let original_kernel_index = self.kernel_index;
+        let original_module_kinds = self
+            .modules
+            .iter()
+            .enumerate()
+            .take(module_index.as_usize())
+            .filter(|(_, module)| matches!(module.source(), ModuleSource::Ast))
+            .map(|(module_index, module)| (module_index, module.kind()))
+            .collect::<Vec<_>>();
 
         // Set the module kind of all pending AST modules to Kernel, as we are linking a kernel
         for module in self.modules.iter_mut().take(module_index.as_usize()) {
@@ -407,7 +429,16 @@ impl Linker {
 
         self.kernel_index = Some(module_index);
 
-        self.link_and_rewrite()?;
+        if let Err(err) = self.link_and_rewrite() {
+            self.kernel_index = original_kernel_index;
+            self.callgraph = original_callgraph;
+            self.modules.truncate(original_module_len);
+            for (module_index, module_kind) in original_module_kinds {
+                self.modules[module_index].set_kind(module_kind);
+            }
+
+            return Err(err);
+        }
 
         Ok(vec![module_index])
     }
@@ -470,106 +501,124 @@ impl Linker {
 
         // Obtain a set of resolvers for the pending modules so that we can do name resolution
         // before they are added to the graph
-        let resolver = SymbolResolver::new(self);
-        let mut edges = Vec::new();
-        let mut cache = ResolverCache::default();
+        let pending_modules = self
+            .modules
+            .iter()
+            .enumerate()
+            .filter(|(_, module)| module.is_unlinked())
+            .map(|(module_index, module)| (module_index, module.clone()))
+            .collect::<Vec<_>>();
+        let original_callgraph = self.callgraph.clone();
 
-        for (module_index, module) in self.modules.iter().enumerate() {
-            if !module.is_unlinked() {
-                continue;
-            }
+        let result = {
+            let resolver = SymbolResolver::new(self);
+            let mut edges = Vec::new();
+            let mut cache = ResolverCache::default();
+            let mut linked_modules = Vec::new();
 
-            let module_index = ModuleIndex::new(module_index);
-
-            for (symbol_idx, symbol) in module.symbols().enumerate() {
-                assert!(
-                    symbol.is_unlinked(),
-                    "an unlinked module should only have unlinked symbols"
-                );
-
-                let gid = module_index + ItemIndex::new(symbol_idx);
-
-                // Perform any applicable rewrites to this item
-                rewrites::rewrite_symbol(gid, symbol, &resolver, &mut cache)?;
-
-                // Update the linker graph
-                match symbol.item() {
-                    SymbolItem::Compiled(_) | SymbolItem::Type(_) | SymbolItem::Constant(_) => (),
-                    SymbolItem::Alias { alias, resolved } => {
-                        if let Some(resolved) = resolved.get() {
-                            log::debug!(target: "linker", "  | resolved alias {} to item {resolved}", alias.target());
-                            if self[resolved].is_procedure() {
-                                edges.push((gid, resolved));
-                            }
-                        } else {
-                            log::debug!(target: "linker", "  | resolving alias {}..", alias.target());
-
-                            let context = SymbolResolutionContext {
-                                span: alias.target().span(),
-                                module: module_index,
-                                kind: None,
-                            };
-                            if let Some(callee) =
-                                resolver.resolve_alias_target(&context, alias)?.into_global_id()
-                            {
-                                log::debug!(
-                                    target: "linker",
-                                    "  | resolved alias to gid {:?}:{:?}",
-                                    callee.module,
-                                    callee.index
-                                );
-                                edges.push((gid, callee));
-                                resolved.set(Some(callee));
-                            }
-                        }
-                    },
-                    SymbolItem::Procedure(proc) => {
-                        // Add edges to all transitive dependencies of this item due to calls/symbol
-                        // refs
-                        let proc = proc.borrow();
-                        for invoke in proc.invoked() {
-                            log::debug!(target: "linker", "  | recording {} dependency on {}", invoke.kind, &invoke.target);
-
-                            let context = SymbolResolutionContext {
-                                span: invoke.span(),
-                                module: module_index,
-                                kind: None,
-                            };
-                            if let Some(callee) = resolver
-                                .resolve_invoke_target(&context, &invoke.target)?
-                                .into_global_id()
-                            {
-                                log::debug!(
-                                    target: "linker",
-                                    "  | resolved dependency to gid {}:{}",
-                                    callee.module.as_usize(),
-                                    callee.index.as_usize()
-                                );
-                                edges.push((gid, callee));
-                            }
-                        }
-                    },
+            for (module_index, module) in self.modules.iter().enumerate() {
+                if !module.is_unlinked() {
+                    continue;
                 }
+
+                let module_index = ModuleIndex::new(module_index);
+
+                for (symbol_idx, symbol) in module.symbols().enumerate() {
+                    let gid = module_index + ItemIndex::new(symbol_idx);
+
+                    // Perform any applicable rewrites to this item
+                    rewrites::rewrite_symbol(gid, symbol, &resolver, &mut cache)?;
+
+                    // Update the linker graph
+                    match symbol.item() {
+                        SymbolItem::Compiled(_) | SymbolItem::Type(_) | SymbolItem::Constant(_) => {
+                        },
+                        SymbolItem::Alias { alias, resolved } => {
+                            if let Some(resolved) = resolved.get() {
+                                log::debug!(target: "linker", "  | resolved alias {} to item {resolved}", alias.target());
+                                if self[resolved].is_procedure() {
+                                    edges.push((gid, resolved));
+                                }
+                            } else {
+                                log::debug!(target: "linker", "  | resolving alias {}..", alias.target());
+
+                                let context = SymbolResolutionContext {
+                                    span: alias.target().span(),
+                                    module: module_index,
+                                    kind: None,
+                                };
+                                if let Some(callee) =
+                                    resolver.resolve_alias_target(&context, alias)?.into_global_id()
+                                {
+                                    log::debug!(
+                                        target: "linker",
+                                        "  | resolved alias to gid {:?}:{:?}",
+                                        callee.module,
+                                        callee.index
+                                    );
+                                    edges.push((gid, callee));
+                                    resolved.set(Some(callee));
+                                }
+                            }
+                        },
+                        SymbolItem::Procedure(proc) => {
+                            // Add edges to all transitive dependencies of this item due to
+                            // calls/symbol refs
+                            let proc = proc.borrow();
+                            for invoke in proc.invoked() {
+                                log::debug!(target: "linker", "  | recording {} dependency on {}", invoke.kind, &invoke.target);
+
+                                let context = SymbolResolutionContext {
+                                    span: invoke.span(),
+                                    module: module_index,
+                                    kind: None,
+                                };
+                                if let Some(callee) = resolver
+                                    .resolve_invoke_target(&context, &invoke.target)?
+                                    .into_global_id()
+                                {
+                                    log::debug!(
+                                        target: "linker",
+                                        "  | resolved dependency to gid {}:{}",
+                                        callee.module.as_usize(),
+                                        callee.index.as_usize()
+                                    );
+                                    edges.push((gid, callee));
+                                }
+                            }
+                        },
+                    }
+                }
+
+                linked_modules.push(module_index);
             }
 
-            module.set_status(LinkStatus::Linked);
+            let mut callgraph = self.callgraph.clone();
+            for (caller, callee) in edges {
+                callgraph.add_edge(caller, callee).map_err(|cycle| self.cycle_error(cycle))?;
+            }
+
+            // Make sure the graph is free of cycles
+            callgraph.toposort().map_err(|cycle| self.cycle_error(cycle))?;
+
+            Ok::<_, LinkerError>((linked_modules, callgraph))
+        };
+
+        match result {
+            Ok((linked_modules, callgraph)) => {
+                self.callgraph = callgraph;
+                for module_index in linked_modules {
+                    self.modules[module_index.as_usize()].set_status(LinkStatus::Linked);
+                }
+            },
+            Err(err) => {
+                self.callgraph = original_callgraph;
+                for (module_index, module) in pending_modules {
+                    self.modules[module_index] = module;
+                }
+                return Err(err);
+            },
         }
-
-        edges
-            .into_iter()
-            .for_each(|(caller, callee)| self.callgraph.add_edge(caller, callee));
-
-        // Make sure the graph is free of cycles
-        self.callgraph.toposort().map_err(|cycle| {
-            let iter = cycle.into_node_ids();
-            let mut nodes = Vec::with_capacity(iter.len());
-            for node in iter {
-                let module = self[node.module].path();
-                let item = self[node].name();
-                nodes.push(module.join(item).to_string());
-            }
-            LinkerError::Cycle { nodes: nodes.into() }
-        })?;
 
         Ok(())
     }
@@ -847,5 +896,88 @@ impl Index<GlobalItemIndex> for Linker {
 
     fn index(&self, index: GlobalItemIndex) -> &Self::Output {
         &self.modules[index.module.as_usize()][index.index]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use miden_assembly_syntax::{
+        ast::{Ident, InvocationTarget, InvokeKind},
+        debuginfo::SourceSpan,
+    };
+
+    use super::*;
+    use crate::testing::{TestContext, source_file};
+
+    #[test]
+    fn failed_kernel_link_restores_kernel_state() {
+        let context = TestContext::default();
+        let source_manager = context.source_manager();
+        let kernel_source = r#"
+                pub proc a
+                    call.b
+                end
+
+                proc b
+                    call.a
+                end
+                "#;
+
+        let userspace = context
+            .parse_module_with_path(
+                "userspace",
+                source_file!(
+                    &context,
+                    r#"
+                    pub proc helper
+                        push.1
+                    end
+                    "#
+                ),
+            )
+            .expect("userspace module parsing must succeed");
+
+        let mut linker = Linker::new(source_manager);
+        let userspace_index = linker
+            .link([userspace])
+            .expect("userspace module must link successfully")
+            .into_iter()
+            .next()
+            .expect("linked module index must be returned");
+
+        let first_err = linker
+            .link_kernel(
+                context
+                    .parse_kernel(source_file!(&context, kernel_source))
+                    .expect("kernel parsing must succeed"),
+            )
+            .expect_err("expected cyclic kernel to be rejected");
+
+        assert!(first_err.to_string().contains("found a cycle in the call graph"));
+        assert!(!linker.has_nonempty_kernel(), "failed kernel link must not leave a kernel set");
+        assert_eq!(linker[userspace_index].kind(), ast::ModuleKind::Library);
+
+        let second_err = linker
+            .link_kernel(
+                context
+                    .parse_kernel(source_file!(&context, kernel_source))
+                    .expect("kernel parsing must succeed"),
+            )
+            .expect_err("expected cyclic kernel retry to be rejected");
+        assert!(second_err.to_string().contains("found a cycle in the call graph"));
+        assert!(!second_err.to_string().contains("duplicate module"));
+
+        let syscall_context = SymbolResolutionContext {
+            span: SourceSpan::UNKNOWN,
+            module: userspace_index,
+            kind: Some(InvokeKind::SysCall),
+        };
+        let err = linker
+            .resolve_invoke_target(
+                &syscall_context,
+                &InvocationTarget::Symbol(Ident::new("a").expect("valid identifier")),
+            )
+            .expect_err("expected syscall without a linked kernel to be rejected");
+        assert!(matches!(err, LinkerError::InvalidSysCallTarget { .. }));
     }
 }
