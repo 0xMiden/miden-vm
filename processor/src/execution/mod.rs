@@ -58,7 +58,7 @@ pub(crate) struct ExecutionState<'a, P, H, S, T> {
 /// # Tracing
 ///
 /// Different processor implementations will need to record different pieces of information as the
-/// the program is executed. For example, the [`crate::FastProcessor::execute_for_trace`]
+/// the program is executed. For example, the [`crate::FastProcessor::execute_trace_inputs`]
 /// execution mode needs to build a [`crate::TraceGenerationContext`] which records information
 /// necessary to build the trace at each clock cycle, while the
 /// [`crate::parallel::core_trace_fragment::CoreTraceFragmentFiller`] needs to build the trace

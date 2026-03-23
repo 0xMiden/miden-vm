@@ -15,7 +15,6 @@ use super::{
 };
 use crate::{
     ExecutionError, ExecutionOutput, Host, Stopper, SyncHost, TraceBuildInputs,
-    TraceGenerationContext,
     continuation_stack::ContinuationStack,
     errors::{MapExecErr, MapExecErrNoCtx, OperationError},
     execution::{
@@ -89,32 +88,6 @@ impl FastProcessor {
         let mut tracer = ExecutionTracer::new(self.options.core_trace_fragment_size());
         let execution_output = self.execute_with_tracer(program, host, &mut tracer).await?;
         Ok(Self::trace_result_from_parts(program, execution_output, tracer))
-    }
-
-    /// Executes the given program synchronously and returns the execution output together with the
-    /// trace-generation context required by [`crate::trace::build_trace`].
-    #[deprecated(note = "use execute_trace_inputs_sync() to get a TraceBuildInputs bundle")]
-    #[instrument(name = "execute_for_trace_sync", skip_all)]
-    pub fn execute_for_trace_sync(
-        self,
-        program: &Program,
-        host: &mut impl SyncHost,
-    ) -> Result<(ExecutionOutput, TraceGenerationContext), ExecutionError> {
-        let trace_inputs = self.execute_trace_inputs_sync(program, host)?;
-        Ok(trace_inputs.into_parts())
-    }
-
-    /// Async variant of [`Self::execute_for_trace_sync`] for async hosts.
-    #[inline(always)]
-    #[deprecated(note = "use execute_trace_inputs() to get a TraceBuildInputs bundle")]
-    #[instrument(name = "execute_for_trace", skip_all)]
-    pub async fn execute_for_trace(
-        self,
-        program: &Program,
-        host: &mut impl Host,
-    ) -> Result<(ExecutionOutput, TraceGenerationContext), ExecutionError> {
-        let trace_inputs = self.execute_trace_inputs(program, host).await?;
-        Ok(trace_inputs.into_parts())
     }
 
     /// Executes the given program with the provided tracer using an async host.

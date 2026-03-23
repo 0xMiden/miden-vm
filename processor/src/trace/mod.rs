@@ -127,6 +127,8 @@ impl TraceBuildInputs {
         &self.program_info
     }
 
+    #[cfg(any(test, feature = "testing"))]
+    #[allow(dead_code)]
     pub(crate) fn into_parts(self) -> (ExecutionOutput, TraceGenerationContext) {
         (self.execution_output, self.trace_generation_context)
     }

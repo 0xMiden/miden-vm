@@ -19,8 +19,8 @@ The (async) function returns a `Result<ExecutionTrace, ExecutionError>` which wi
 For more control over execution and trace generation, you can use `FastProcessor` directly:
 
 * `FastProcessor::execute()` - Executes a program without any trace generation overhead. Returns `ExecutionOutput` containing the final stack state and other execution results.
-* `FastProcessor::execute_for_trace()` - Executes a program while collecting metadata for trace generation. Returns both `ExecutionOutput` and `TraceGenerationContext`.
-* `build_trace()` - Takes the `ExecutionOutput` and `TraceGenerationContext` from `execute_for_trace()` and constructs the full execution trace. When the `concurrent` feature is enabled, trace building is parallelized. 
+* `FastProcessor::execute_trace_inputs()` / `FastProcessor::execute_trace_inputs_sync()` - Executes a program while collecting the execution metadata required for trace generation. Returns a `TraceBuildInputs` bundle.
+* `build_trace()` - Takes the `TraceBuildInputs` bundle from `execute_trace_inputs*()` and constructs the full execution trace. When the `concurrent` feature is enabled, trace building is parallelized.
 
 ## Processor components
 The processor is separated into two main components: **execution** and **trace generation**.
@@ -29,10 +29,10 @@ The processor is separated into two main components: **execution** and **trace g
 The `FastProcessor` is designed for fast program execution with minimal overhead. It can operate in two modes:
 
 * **Pure execution** via `FastProcessor::execute()`: Executes a program without generating any trace-related metadata. This mode is optimized for maximum performance when proof generation is not required.
-* **Execution for trace generation** via `FastProcessor::execute_for_trace()`: Executes a program while collecting metadata required for subsequent trace generation. This metadata is encapsulated in a `TraceGenerationContext` that is passed to the `build_trace()` function.
+* **Execution for trace generation** via `FastProcessor::execute_trace_inputs()` / `FastProcessor::execute_trace_inputs_sync()`: Executes a program while collecting the metadata required for subsequent trace generation. This metadata is bundled with the execution output into `TraceBuildInputs`, which is then passed to `build_trace()`.
 
 ### Trace generation with `build_trace()`
-After execution with `FastProcessor::execute_for_trace()`, the `build_trace()` function uses the returned `TraceGenerationContext` to construct the full execution trace. When the `concurrent` feature is enabled, trace generation is parallelized for improved performance.
+After execution with `FastProcessor::execute_trace_inputs*()`, the `build_trace()` function uses the returned `TraceBuildInputs` bundle to construct the full execution trace. When the `concurrent` feature is enabled, trace generation is parallelized for improved performance.
 
 The trace consists of several sections:
 * The decoder, which tracks instruction decoding and control flow.
