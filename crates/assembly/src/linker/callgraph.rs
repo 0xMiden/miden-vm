@@ -190,6 +190,15 @@ impl CallGraph {
         // Build a subgraph of `self` containing only those nodes reachable from `caller`
         let mut graph = self.subgraph(caller);
 
+        // Check if any node in the subgraph has an edge back to caller before we erase them
+        let has_edge_to_caller = graph.nodes.values().any(|edges| edges.contains(&caller));
+        let caller_predecessors: BTreeSet<GlobalItemIndex> = graph
+            .nodes
+            .iter()
+            .filter(|(_, edges)| edges.contains(&caller))
+            .map(|(n, _)| *n)
+            .collect();
+
         // Remove all predecessor edges to `caller`
         graph.nodes.iter_mut().for_each(|(_pred, out_edges)| {
             out_edges.retain(|n| *n != caller);
@@ -209,7 +218,7 @@ impl CallGraph {
             }
         }
 
-        let has_cycle = output.len() != graph.nodes.len();
+        let has_cycle = output.len() != graph.nodes.len() || has_edge_to_caller;
         if has_cycle {
             let mut in_cycle = BTreeSet::default();
             for (n, edges) in graph.nodes.iter() {
@@ -218,6 +227,10 @@ impl CallGraph {
                 }
                 in_cycle.insert(*n);
                 in_cycle.extend(edges.as_slice());
+            }
+            if has_edge_to_caller {
+                in_cycle.insert(caller);
+                in_cycle.extend(caller_predecessors.iter());
             }
             Err(CycleError(in_cycle))
         } else {
@@ -336,6 +349,22 @@ mod tests {
                 || err.0.contains(&B3)
                 || err.0.contains(&A3),
             "expected cycle error to contain at least one node from the reachable cycle",
+        );
+    }
+
+    #[test]
+    fn callgraph_toposort_caller_root_closing_cycle() {
+        let graph = callgraph_cycle();
+
+        let err = graph
+            .toposort_caller(A2)
+            .expect_err("expected toposort_caller to detect cycle closing back into root");
+        assert!(
+            err.0.contains(&A2)
+                || err.0.contains(&B2)
+                || err.0.contains(&B3)
+                || err.0.contains(&A3),
+            "expected cycle error to contain at least one node from the root-closing cycle",
         );
     }
     /// a::a1 -> a::a2 -> a::a3
