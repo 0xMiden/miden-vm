@@ -427,7 +427,7 @@ fn ilog2_ignores_prefilled_advice_in_real_opcode_path() {
 fn ilog2_bound_verification_source() -> &'static str {
     "begin
         # Pop claimed ilog2 from advice stack: [claimed_ilog2, n, ...]
-        adv_push.1
+        adv_push
 
         # Compute pow2 = 2^claimed_ilog2.
         dup.0

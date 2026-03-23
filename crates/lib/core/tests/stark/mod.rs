@@ -383,7 +383,7 @@ const TEST_RANDOM_INDICES_GENERATION: &str = r#"
             push.1
             while.true
                 swap
-                adv_push.1
+                adv_push
                 assert_eq
                 add.1
                 dup

@@ -68,7 +68,7 @@ pub proc get
 
         # Get leaf pre-image from advice map. Push the leaf preimage size on the stack
         # (0 cycles)
-        adv.push_mapvaln adv_push.1
+        adv.push_mapvaln adv_push
         # => [leaf_size, NV, K, R]
 
         # Consistency check: assert this is actually a valid leaf.
@@ -87,8 +87,8 @@ pub proc get
             # Push leaf pre-image on stack (single K-V pair)
             # (1 cycle)
             drop
-            padw adv_loadw
-            padw adv_loadw
+            adv_pushw
+            adv_pushw
             swapw
             # => [K, V, NV, K, R]
 
@@ -151,7 +151,7 @@ pub proc set
     # Push MT node on advice stack (in structural order for adv_loadw), cleanup operand stack,
     # and then push MT node on operand stack (NV)
     # (X cycles)
-    adv.push_mtnode drop drop movdnw.2 padw adv_loadw
+    adv.push_mtnode drop drop movdnw.2 adv_pushw
     # => [NV, V, K, R]
 
     # (X cycles)
@@ -178,7 +178,7 @@ pub proc set
         # Retrieve leaf pre-image on advice stack, and push leaf size on stack
         # Note: the rest of the leaf pre-image will be pulled out later
         # (4 cycles)
-        adv.push_mapvaln adv_push.1
+        adv.push_mapvaln adv_push
         # => [leaf_size, NV, V, K, R]
 
         # Leaf size will be a multiple of 8 (each kv-pair in a leaf is 8 elements)
@@ -439,8 +439,8 @@ end
 proc insert_single_leaf
     # Push the leaf pre-image on stack
     # (X cycles)
-    padw adv_loadw
-    padw adv_loadw
+    adv_pushw
+    adv_pushw
     # => [V_in_leaf, K_in_leaf, V, K, R]
 
     # Check if the key stored in the leaf is the same as K
@@ -602,8 +602,8 @@ end
 proc remove_single_leaf
     # Push the leaf pre-image on stack
     # (0 cycles)
-    padw adv_loadw
-    padw adv_loadw
+    adv_pushw
+    adv_pushw
     # => [V_in_leaf, K_in_leaf, V, K, R]
 
     # Check if the key stored in the leaf is the same as K

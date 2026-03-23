@@ -56,10 +56,10 @@ const SIG_LEN_FELTS = 17   # 65.div_ceil(4)
 @locals(48)
 pub proc verify
     # Load the compressed public key (9 felts) into local memory at locaddr.[0..9]
-    padw adv_loadw loc_storew_le.0
+    adv_pushw loc_storew_le.0
 
     adv_loadw loc_storew_le.4 dropw
-    adv_push.1 loc_store.8
+    adv_push loc_store.8
 
     # Compute the expected commitment and ensure it matches the provided PK_COMM
     push.PK_LEN_FELTS locaddr.0 exec.poseidon2::hash_elements
@@ -84,7 +84,7 @@ pub proc verify
     adv_loadw loc_storew_le.32
     adv_loadw loc_storew_le.36
     adv_loadw loc_storew_le.40 dropw
-    adv_push.1 loc_store.44
+    adv_push loc_store.44
     # => [...]
 
     # Invoke the deferred verification precompile with in-memory calldata
@@ -159,7 +159,7 @@ pub proc verify_prehash_impl
     # => [pk_ptr, digest_ptr, sig_ptr, ...]
 
     # Read verification result from advice stack (provided by the host)
-    adv_push.1
+    adv_push
     # => [result, pk_ptr, digest_ptr, sig_ptr, ...]
 
     # Compute commitment: COMM = Poseidon2(Poseidon2(Poseidon2(pk) || Poseidon2(digest)) || Poseidon2(sig))

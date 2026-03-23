@@ -222,7 +222,7 @@ impl AdviceProvider {
 
         // Treat map values as already canonical sequences of FELTs.
         // The advice stack is LIFO; extend in reverse so that the first element of `values`
-        // becomes the first element returned by a subsequent `adv_push.*`.
+        // becomes the first element returned by a subsequent `adv_push`.
         for &value in values.iter().rev() {
             self.stack.push_front(value);
         }

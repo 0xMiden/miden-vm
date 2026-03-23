@@ -67,6 +67,8 @@ extern {
         "adv_loadw" => Token::AdvLoadw,
         "adv_pipe" => Token::AdvPipe,
         "adv_push" => Token::AdvPush,
+        "adv_push_pair" => Token::AdvPushPair,
+        "adv_pushw" => Token::AdvPushw,
         "adv_stack" => Token::AdvStack,
         "push_mapval" => Token::PushMapval,
         "push_mapval_count" => Token::PushMapvalCount,
@@ -988,6 +990,9 @@ Inst: Instruction = {
     InstWithU32Immediate,
     ProcRef,
     "adv_pipe" => Instruction::AdvPipe,
+    "adv_push" => Instruction::AdvPush,
+    "adv_push_pair" => Instruction::AdvPushPair,
+    "adv_pushw" => Instruction::AdvPushW,
     "adv_loadw" => Instruction::AdvLoadW,
     "and" => Instruction::And,
     "eval_circuit" => Instruction::EvalCircuit,
@@ -1561,7 +1566,6 @@ InstWithLocalIndex: Instruction = {
 
 #[inline]
 InstWithStackIndex: Instruction = {
-    "adv_push" "." <l:@L> <i:OneBasedStackIndex> <r:@R> => Instruction::AdvPush(Immediate::Value(Span::new(span!(source_id, l, r), i))),
     "dup" <i:("." <U8>)?> =>? {
         let (span, idx) = i.map(|s| s.into_parts()).unwrap_or((SourceSpan::default(), 0));
         Ok(match idx {
@@ -2128,6 +2132,8 @@ Opcode: &'static str = {
     "adv_loadw" => "adv_loadw",
     "adv_pipe" => "adv_pipe",
     "adv_push" => "adv_push",
+    "adv_push_pair" => "adv_push_pair",
+    "adv_pushw" => "adv_pushw",
     "adv_stack" => "adv_stack",
     "and" => "and",
     "eval_circuit" => "eval_circuit",

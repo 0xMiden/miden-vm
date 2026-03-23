@@ -214,7 +214,7 @@ pub proc init_seed
     # is easily derived using an addition.
     movup.8
     # => [num_fixed_len_pi, num_queries, grinding, proof_options, num_constraints, modulus1, modulus0, trace_length, trace_info, ...]
-    adv_push.1 add
+    adv_push add
     dup exec.constants::num_public_inputs_ptr mem_store
     u32divmod.8
     # => [rem, quo, num_queries, grinding, proof_options, num_constraints, modulus1, modulus0, trace_length, trace_info, ...]
@@ -707,7 +707,7 @@ pub proc check_pow
 
     # Load first half of rate portion and add pow witness to first element of rate
     exec.get_rate_1
-    adv_push.1
+    adv_push
     dup.4
     add
     swap.4

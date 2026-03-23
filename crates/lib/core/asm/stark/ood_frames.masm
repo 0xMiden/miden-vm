@@ -37,7 +37,7 @@ pub proc load_and_horner_eval_ood_frames
     # `core::stark::random_coin::generate_deep_composition_random_coefficients`
 
     ## Load the random challenge non-deterministically
-    adv_push.2
+    adv_push_pair
     # => [alpha_1, alpha_0]
 
     # Save the random challenge

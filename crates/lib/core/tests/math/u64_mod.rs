@@ -490,7 +490,7 @@ fn advice_push_u64div() {
     // push a/b onto the advice stack and then move these values onto the operand stack.
     // Uses [b_lo, b_hi, a_lo, a_hi] from top (divisor on top, then dividend)
     let source = format!(
-        "begin emit.event(\"{U64_DIV_EVENT_NAME}\") adv_push.2 adv_push.2 movupw.2 dropw end"
+        "begin emit.event(\"{U64_DIV_EVENT_NAME}\") repeat.2 adv_push end repeat.2 adv_push end movupw.2 dropw end"
     );
 
     // get two random 64-bit integers and split them into 32-bit limbs
@@ -517,21 +517,21 @@ fn advice_push_u64div() {
     let test = build_test!(source, &input_stack);
     // Handler uses extend_stack_for_adv_push which reverses for proper ordering.
     // Advice stack (top-to-bottom): [q_hi, q_lo, r_hi, r_lo]
-    // First adv_push.2: pops q_hi then q_lo → [q_lo, q_hi, ...]
-    // Second adv_push.2: pops r_hi then r_lo → [r_lo, r_hi, q_lo, q_hi, ...]
+    // First repeat.2 adv_push end: pops q_hi then q_lo → [q_lo, q_hi, ...]
+    // Second repeat.2 adv_push end: pops r_hi then r_lo → [r_lo, r_hi, q_lo, q_hi, ...]
     let expected = [r_lo, r_hi, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi];
     test.expect_stack(&expected);
 }
 
 #[test]
 fn advice_push_u64div_two_pushes() {
-    // Test that two separate adv_push.2 calls work correctly (like the div procedure uses)
-    // Uses [b_lo, b_hi, a_lo, a_hi] from top (divisor on top, then dividend)
+    // Test that two separate repeat.2 adv_push end calls work correctly (like the div procedure
+    // uses) Uses [b_lo, b_hi, a_lo, a_hi] from top (divisor on top, then dividend)
     let source = format!(
         "begin
             emit.event(\"{U64_DIV_EVENT_NAME}\")
-            adv_push.2  # first push: quotient [q_lo, q_hi]
-            adv_push.2  # second push: remainder [r_lo, r_hi]
+            repeat.2 adv_push end  # first push: quotient [q_lo, q_hi]
+            repeat.2 adv_push end  # second push: remainder [r_lo, r_hi]
             # Stack: [r_lo, r_hi, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi]
             # Drop input: positions 4-7
             movup.7 drop  # a_hi
@@ -557,8 +557,8 @@ fn advice_push_u64div_local_procedure() {
         "
     proc foo
         emit.event(\"{U64_DIV_EVENT_NAME}\")
-        adv_push.2  # quotient
-        adv_push.2  # remainder
+        repeat.2 adv_push end  # quotient
+        repeat.2 adv_push end  # remainder
     end
 
     begin
@@ -591,8 +591,8 @@ fn advice_push_u64div_local_procedure() {
     let test = build_test!(source, &input_stack);
     // Handler uses extend_stack_for_adv_push which reverses for proper ordering.
     // Advice stack (top-to-bottom): [q_hi, q_lo, r_hi, r_lo]
-    // First adv_push.2: pops q_hi then q_lo → [q_lo, q_hi, ...]
-    // Second adv_push.2: pops r_hi then r_lo → [r_lo, r_hi, q_lo, q_hi, ...]
+    // First repeat.2 adv_push end: pops q_hi then q_lo → [q_lo, q_hi, ...]
+    // Second repeat.2 adv_push end: pops r_hi then r_lo → [r_lo, r_hi, q_lo, q_hi, ...]
     let expected = [r_lo, r_hi, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi];
     test.expect_stack(&expected);
 }
@@ -607,8 +607,8 @@ fn advice_push_u64div_conditional_execution() {
         eq
         if.true
             emit.event(\"{U64_DIV_EVENT_NAME}\")
-            adv_push.2  # quotient
-            adv_push.2  # remainder
+            repeat.2 adv_push end  # quotient
+            repeat.2 adv_push end  # remainder
         else
             padw
         end
@@ -624,8 +624,8 @@ fn advice_push_u64div_conditional_execution() {
     let test = build_test!(&source, &[1, 1, 4, 0, 8, 0]);
     // Handler uses extend_stack_for_adv_push which reverses for proper ordering.
     // Advice stack (top-to-bottom): [q_hi, q_lo, r_hi, r_lo]
-    // First adv_push.2: pops q_hi then q_lo → [q_lo, q_hi, ...]
-    // Second adv_push.2: pops r_hi then r_lo → [r_lo, r_hi, q_lo, q_hi, ...]
+    // First repeat.2 adv_push end: pops q_hi then q_lo → [q_lo, q_hi, ...]
+    // Second repeat.2 adv_push end: pops r_hi then r_lo → [r_lo, r_hi, q_lo, q_hi, ...]
     // Result: [r_lo=0, r_hi=0, q_lo=2, q_hi=0, b_lo=4, b_hi=0, a_lo=8, a_hi=0]
     test.expect_stack(&[0, 0, 2, 0, 4, 0, 8, 0]);
 

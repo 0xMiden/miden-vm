@@ -378,7 +378,7 @@ pub proc divmod(b: u64, a: u64) -> (remainder: u64, quotient: u64)
     # Advice stack now has [q_hi, q_lo, r_hi, r_lo]
     # => [b_lo, b_hi, a_lo, a_hi, ...]
 
-    adv_push.2
+    repeat.2 adv_push end
     # Pops from advice: first q_hi, then q_lo, pushes them
     # => [q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     u32assert2
@@ -434,7 +434,7 @@ pub proc divmod(b: u64, a: u64) -> (remainder: u64, quotient: u64)
     #==========================================================================
     # REMAINDER BLOCK: Get remainder and verify b > r
     #==========================================================================
-    adv_push.2
+    repeat.2 adv_push end
     # Pops from advice: first r_hi, then r_lo
     # => [r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     u32assert2

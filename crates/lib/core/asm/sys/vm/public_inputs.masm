@@ -183,7 +183,7 @@ proc reduce_variable_length_public_inputs
     # 1) Load the auxiliary randomness i.e., alpha and beta
     #    We store them as [beta0, beta1, alpha0, alpha1] since `horner_eval_ext` requires memory
     #    word-alignment.
-    padw adv_loadw
+    adv_pushw
     exec.constants::aux_rand_nd_ptr mem_storew_be
     # => [alpha1, alpha0, beta1, beta0, ...]
     dropw
@@ -202,7 +202,7 @@ proc reduce_variable_length_public_inputs
     # stored temporarily and they will be over-written by, among other data, the result of reducing
     # the variable public inputs.
 
-    adv_push.1 exec.reduce_kernel_digests
+    adv_push exec.reduce_kernel_digests
     # => [next_var_len_pub_inputs_ptr, var_len_pub_inputs_res_ptr, ...]
 
     # 3) Clean up the stack.

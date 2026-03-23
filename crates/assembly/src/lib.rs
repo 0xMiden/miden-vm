@@ -49,10 +49,6 @@ pub use self::{
 // CONSTANTS
 // ================================================================================================
 
-/// The maximum number of elements that can be popped from the advice stack in a single `adv_push`
-/// instruction.
-const ADVICE_READ_LIMIT: u8 = 16;
-
 /// The maximum number of bits by which a u32 value can be shifted in a bitwise operation.
 const MAX_U32_SHIFT_VALUE: u8 = 31;
 

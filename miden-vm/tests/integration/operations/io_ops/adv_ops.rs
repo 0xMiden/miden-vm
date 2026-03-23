@@ -1,4 +1,6 @@
-use miden_core::{Felt, chiplets::hasher::apply_permutation, utils::ToElements};
+use miden_core::{
+    Felt, advice::AdviceStackBuilder, chiplets::hasher::apply_permutation, utils::ToElements,
+};
 use miden_processor::{ExecutionError, advice::AdviceError};
 use miden_utils_testing::expect_exec_error_matches;
 
@@ -9,33 +11,49 @@ use super::{TRUNCATE_STACK_PROC, build_op_test, build_test};
 
 #[test]
 fn adv_push() {
-    let asm_op = "adv_push";
-    let advice_stack = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-    let test_n = |n: usize| {
-        let source = format!("{asm_op}.{n}");
-        let mut final_stack = vec![0; n];
-        final_stack.copy_from_slice(&advice_stack[..n]);
-        final_stack.reverse();
+    let advice_stack = [42];
+    let test = build_op_test!("adv_push", &[], &advice_stack);
+    test.expect_stack(&[42]);
+}
 
-        let test = build_op_test!(source, &[], &advice_stack);
-        test.expect_stack(&final_stack);
-    };
+#[test]
+fn adv_push_pair() {
+    // AdviceStackBuilder handles the reversal required by adv_push_pair.
+    let mut builder = AdviceStackBuilder::new();
+    builder.push_for_adv_push_pair(Felt::new(1), Felt::new(2));
+    let advice_stack = builder.build_vec_u64();
+    let test = build_op_test!("adv_push_pair", &[], &advice_stack);
+    test.expect_stack(&[1, 2]);
+}
 
-    // --- push 1 ---------------------------------------------------------------------------------
-    test_n(1);
-
-    // --- push max -------------------------------------------------------------------------------
-    test_n(16);
+#[test]
+fn adv_push_repeat() {
+    // AdviceStackBuilder handles the reversal required by sequential adv_push.
+    let mut builder = AdviceStackBuilder::new();
+    builder.push_for_adv_push(&[Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
+    let advice_stack = builder.build_vec_u64();
+    let test = build_op_test!("repeat.4 adv_push end", &[], &advice_stack);
+    test.expect_stack(&[1, 2, 3, 4]);
 }
 
 #[test]
 fn adv_push_invalid() {
     // attempting to read from empty advice stack should throw an error
-    let test = build_op_test!("adv_push.1");
+    let test = build_op_test!("adv_push");
     expect_exec_error_matches!(
         test,
         ExecutionError::AdviceError { err: AdviceError::StackReadFailed, .. }
     )
+}
+
+// PUSHING WORDS ONTO THE STACK (PUSHW)
+// ================================================================================================
+
+#[test]
+fn adv_pushw() {
+    let advice_stack = [1, 2, 3, 4];
+    let test = build_op_test!("adv_pushw", &[], &advice_stack);
+    test.expect_stack(&[1, 2, 3, 4]);
 }
 
 // OVERWRITING VALUES ON THE STACK (LOAD)
@@ -43,11 +61,9 @@ fn adv_push_invalid() {
 
 #[test]
 fn adv_loadw() {
-    // adv_loadw loads the structural word directly (no built-in reversal).
-    // Use reversew afterward if canonical order is needed.
     let asm_op = "adv_loadw";
     let advice_stack = [1, 2, 3, 4];
-    let final_stack = advice_stack; // No reversal - structural order
+    let final_stack = advice_stack;
 
     let test = build_op_test!(asm_op, &[8, 7, 6, 5], &advice_stack);
     test.expect_stack(&final_stack);
@@ -57,6 +73,24 @@ fn adv_loadw() {
 fn adv_loadw_invalid() {
     // attempting to read from empty advice stack should throw an error
     let test = build_op_test!("adv_loadw", &[0, 0, 0, 0]);
+    expect_exec_error_matches!(
+        test,
+        ExecutionError::AdviceError { err: AdviceError::StackReadFailed, .. }
+    );
+}
+
+#[test]
+fn adv_push_pair_invalid() {
+    let test = build_op_test!("adv_push_pair", &[], &[1]);
+    expect_exec_error_matches!(
+        test,
+        ExecutionError::AdviceError { err: AdviceError::StackReadFailed, .. }
+    );
+}
+
+#[test]
+fn adv_pushw_invalid() {
+    let test = build_op_test!("adv_pushw", &[], &[1, 2, 3]);
     expect_exec_error_matches!(
         test,
         ExecutionError::AdviceError { err: AdviceError::StackReadFailed, .. }

@@ -192,8 +192,7 @@ end
 #!     than 128: 191
 pub proc load_and_verify_remainder
     # Load remainder commitment and save it at `TMP1`
-    padw
-    adv_loadw
+    adv_pushw
     exec.constants::tmp1 mem_storew_be
     #=> [COM, ...]
 

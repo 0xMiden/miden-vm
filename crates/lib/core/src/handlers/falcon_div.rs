@@ -65,9 +65,10 @@ pub fn handle_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>
     // Assertion from the original code: r_hi should always be zero for Falcon modulus
     assert_eq!(r_hi, ZERO);
 
-    // `mod_12289` consumes the quotient via `adv_push.2` followed by the remainder via
-    // `adv_push.1`. Push the remainder first (so it stays below the quotient) and rely on
-    // `extend_stack_for_adv_push` to take care of the per-word little-endian layout.
+    // `mod_12289` consumes the quotient via `repeat.2 adv_push end` followed by the remainder
+    // via `adv_push`. Push the remainder first (consumed last), then the quotient (consumed
+    // first). `extend_stack` reverses internally, so [q_hi, q_lo] -> advice [q_lo, q_hi]
+    // with q_lo popped first, ending up on top after the two adv_push ops.
     let remainder = AdviceMutation::extend_stack([r_lo]);
     let quotient = AdviceMutation::extend_stack([q_hi, q_lo]);
     Ok(vec![remainder, quotient])
