@@ -168,7 +168,7 @@ impl VisitMut for VerifyInvokeTargets<'_> {
     }
     fn visit_mut_procref(&mut self, target: &mut InvocationTarget) -> ControlFlow<()> {
         self.visit_mut_invoke_target(target)?;
-        self.invoked.insert(Invoke::new(InvokeKind::Exec, target.clone()));
+        self.invoked.insert(Invoke::new(InvokeKind::ProcRef, target.clone()));
         ControlFlow::Continue(())
     }
     fn visit_mut_invoke_target(&mut self, target: &mut InvocationTarget) -> ControlFlow<()> {
