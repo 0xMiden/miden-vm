@@ -198,10 +198,16 @@ fn render_import(import: &Import, indent: usize) -> String {
     let alias_tokens = significant_tokens_after_child(import.syntax(), path.syntax());
     let mut lines = render_path_lines(&header, &path_tokens, indent);
     if !alias_tokens.is_empty() {
-        let alias = render_token_sequence(&alias_tokens);
+        let alias = render_import_alias(&alias_tokens);
         if let Some(last) = lines.last_mut() {
-            if line_length(last) + 1 + line_length(&alias) <= MAX_LINE_WIDTH {
-                last.push(' ');
+            let separator =
+                if alias_tokens.first().is_some_and(|token| token.kind() == SyntaxKind::RArrow) {
+                    ""
+                } else {
+                    " "
+                };
+            if line_length(last) + line_length(separator) + line_length(&alias) <= MAX_LINE_WIDTH {
+                last.push_str(separator);
                 last.push_str(&alias);
             } else {
                 lines.push(format!("{}{}", indent_string(indent + INDENT_WIDTH), alias));
@@ -915,6 +921,16 @@ fn render_token_sequence(tokens: &[SyntaxToken]) -> String {
     render_token_sequence_with_style(tokens, SpacingStyle::Default)
 }
 
+fn render_import_alias(tokens: &[SyntaxToken]) -> String {
+    match tokens.split_first() {
+        Some((first, rest)) if first.kind() == SyntaxKind::RArrow => {
+            let alias = render_token_sequence(rest);
+            format!("->{alias}")
+        },
+        _ => render_token_sequence(tokens),
+    }
+}
+
 #[derive(Clone, Copy)]
 enum SpacingStyle {
     Default,
@@ -1365,7 +1381,7 @@ end
         let formatted = format_syntax(&parse.syntax());
         let expected = "\
 #! docs
-pub use miden::core::mem -> memory
+pub use miden::core::mem->memory
 
 # const comment
 pub const EVENT = event(\"miden::event\")
@@ -1501,7 +1517,7 @@ end
         let formatted = format_syntax(&parse.syntax());
         let expected = "\
 pub use ::miden::core::collections::sorted_array::lowerbound_key_value
-    -> lowerbound_key_value
+    ->lowerbound_key_value
 
 pub proc println_debug_message_with_context(
     message: ptr<u8, addrspace(byte)>,
