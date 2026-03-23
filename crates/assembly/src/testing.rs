@@ -282,8 +282,22 @@ mod package_features {
     }
 
     impl PackageIndex for TestRegistry {
-        fn register(&mut self, name: PackageId, version: Version, record: PackageRecord) {
-            self.index.entry(name).or_default().insert(version, record);
+        type Error = Report;
+
+        fn register(&mut self, name: PackageId, record: PackageRecord) -> Result<(), Self::Error> {
+            use std::collections::btree_map::Entry;
+
+            let semver = record.semantic_version().clone();
+            match self.index.entry(name.clone()).or_default().entry(semver.clone()) {
+                Entry::Vacant(entry) => {
+                    entry.insert(record);
+                    Ok(())
+                },
+                Entry::Occupied(_) => Err(Report::msg(format!(
+                    "package '{}' version '{}' is already registered",
+                    name, semver
+                ))),
+            }
         }
     }
 
@@ -306,13 +320,6 @@ mod package_features {
         fn publish_package(&mut self, package: Arc<Package>) -> Result<Version, Self::Error> {
             let version =
                 miden_package_registry::Version::new(package.version.clone(), package.digest());
-            if self.get_by_semver(&package.name, &package.version).is_some() {
-                return Err(Report::msg(format!(
-                    "package '{}' version '{}' is already registered",
-                    package.name, package.version
-                )));
-            }
-
             let dependencies = package
                 .manifest
                 .dependencies()
@@ -329,10 +336,7 @@ mod package_features {
                 .collect::<Result<Vec<_>, _>>()?;
             let record = PackageRecord::new(version.clone(), dependencies)
                 .with_description(package.description.clone().unwrap_or_default());
-            self.index
-                .entry(package.name.clone())
-                .or_default()
-                .insert(version.clone(), record);
+            self.register(package.name.clone(), record)?;
             self.packages.insert((package.name.clone(), version.clone()), package);
             Ok(version)
         }

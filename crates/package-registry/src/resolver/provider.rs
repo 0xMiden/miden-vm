@@ -128,9 +128,9 @@ impl<R: PackageRegistry + ?Sized> DependencyProvider for PackageResolver<'_, R> 
                 .available_versions(package)
                 .map(|versions| {
                     versions
-                        .keys()
-                        .filter(|version| {
-                            <VersionSet as pubgrub::VersionSet>::contains(range, version)
+                        .values()
+                        .filter(|record| {
+                            <VersionSet as pubgrub::VersionSet>::contains(range, record.version())
                         })
                         .count()
                 })
@@ -154,34 +154,32 @@ impl<R: PackageRegistry + ?Sized> DependencyProvider for PackageResolver<'_, R> 
             && let VersionSetFilter::Digest(digests) = filter
         {
             let version = versions
-                .keys()
+                .values()
                 .rev()
-                .find(|version| {
-                    version.digest.as_ref().is_some_and(|digest| digests.contains(digest))
+                .find(|record| {
+                    record.version().digest.as_ref().is_some_and(|digest| digests.contains(digest))
                 })
-                .cloned();
+                .map(|record| record.version().clone());
 
             Ok(version)
         } else if let Some((start, end)) = ranges.bounding_range() {
             let range = (start.cloned(), end.cloned());
-            let version = versions
-                .range(range)
-                .rev()
-                .find_map(|(version, _)| {
-                    if filter.matches(version) && ranges.contains(&version.version) {
-                        Some(version)
-                    } else {
-                        None
-                    }
-                })
-                .cloned();
+            let version = versions.range(range).rev().find_map(|(semver, record)| {
+                if filter.matches(record.version()) && ranges.contains(semver) {
+                    Some(record.version().clone())
+                } else {
+                    None
+                }
+            });
             Ok(version)
         } else {
-            let version = versions
-                .keys()
-                .rev()
-                .find(|version| filter.matches(version) && ranges.contains(&version.version))
-                .cloned();
+            let version = versions.iter().rev().find_map(|(semver, record)| {
+                if filter.matches(record.version()) && ranges.contains(semver) {
+                    Some(record.version().clone())
+                } else {
+                    None
+                }
+            });
 
             Ok(version)
         }
@@ -192,13 +190,13 @@ impl<R: PackageRegistry + ?Sized> DependencyProvider for PackageResolver<'_, R> 
         package: &Self::P,
         version: &Self::V,
     ) -> Result<Dependencies<Self::P, Self::VS, Self::M>, Self::Err> {
-        let Some(available) = self.index.available_versions(package) else {
+        let Some(_available) = self.index.available_versions(package) else {
             return Ok(Dependencies::Unavailable(format!(
                 "no package named '{package}' found in registry"
             )));
         };
 
-        let Some(record) = available.get(version) else {
+        let Some(record) = self.index.get_by_version(package, version) else {
             return Ok(Dependencies::Unavailable(format!(
                 "version '{version}' of '{package}' was not found in registry"
             )));
@@ -226,7 +224,10 @@ impl<R: PackageRegistry + ?Sized> PackageResolver<'_, R> {
                         .index
                         .available_versions(name)
                         .map(|versions| {
-                            VersionSet::from_available_digest(digest.into_inner(), versions.keys())
+                            VersionSet::from_available_digest(
+                                digest.into_inner(),
+                                versions.values().map(PackageRecord::version),
+                            )
                         })
                         .unwrap_or_else(<VersionSet as pubgrub::VersionSet>::empty),
                     _ => VersionSet::from(requirement.clone()),
@@ -650,28 +651,33 @@ mod tests {
     }
 
     #[test]
-    fn resolver_keeps_plain_and_precise_versions_separate() {
+    fn registry_rejects_duplicate_canonical_semantic_versions() {
         let digest = Rpo256::hash(b"a");
         let mut index = InMemoryPackageRegistry::default();
 
         let dep_id = PackageId::from("dep");
-        index.insert(
-            dep_id.clone(),
-            "1.0.0".parse::<Version>().unwrap(),
-            None::<(PackageId, VersionRequirement)>,
-        );
-        index.insert(
-            dep_id.clone(),
-            Version::new("1.0.0".parse().unwrap(), digest),
-            None::<(PackageId, VersionRequirement)>,
-        );
+        index
+            .insert(
+                dep_id.clone(),
+                "1.0.0".parse::<Version>().unwrap(),
+                None::<(PackageId, VersionRequirement)>,
+            )
+            .expect("first canonical semantic version should register");
+        let error = index
+            .insert(
+                dep_id.clone(),
+                Version::new("1.0.0".parse().unwrap(), digest),
+                None::<(PackageId, VersionRequirement)>,
+            )
+            .expect_err("duplicate canonical semantic versions should be rejected");
 
-        let versions = index
-            .available_versions(&dep_id)
-            .into_iter()
-            .flat_map(|versions| versions.keys().map(alloc::string::ToString::to_string))
-            .collect::<alloc::vec::Vec<_>>();
-        assert_eq!(versions.len(), 2, "versions = {versions:?}");
+        assert!(matches!(
+            error,
+            crate::resolver::index::InMemoryPackageStoreError::DuplicateSemanticVersion {
+                package,
+                version,
+            } if package == dep_id && version == "1.0.0".parse().unwrap()
+        ));
     }
 
     #[test]

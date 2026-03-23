@@ -11,8 +11,10 @@ This crate provides:
 
 Version resolution currently follows these rules:
 
-- semantic version requirements select the latest available matching version
+- each package semantic version maps to at most one canonical published artifact in the registry
+- semantic version requirements select the latest available matching canonical semantic version
 - digest requirements match only the exact package digest
+- exact `semver#digest` requirements match only that canonical published artifact
 - indexed package dependencies are stored as exact resolved requirements from published artifacts
 
 Artifact storage is intentionally out of scope for this crate. Concrete registries are expected to

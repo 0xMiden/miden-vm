@@ -29,8 +29,7 @@ pub enum InvalidVersionError {
 /// it can:
 ///
 /// * Satisfy requirements for a package that has a specific digest
-/// * Record multiple entries in the index for the same semantic version string, when multiple
-///   assembled packages with that version are present, disambiguating using the content digest.
+/// * Record the exact published identity of a canonical package artifact as `semver#digest`
 /// * Provide a total ordering for package versions that may or may not include a specific digest
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Version {
@@ -40,8 +39,8 @@ pub struct Version {
     pub version: SemVer,
     /// The content digest for this version, if known.
     ///
-    /// This is the most precise version for a package, and is used to disambiguate multiple
-    /// instances of a package with the same semantic version, but differing content.
+    /// This is the most precise version for a package, and uniquely identifies the canonical
+    /// published artifact associated with a semantic version.
     pub digest: Option<LexicographicWord>,
 }
 

@@ -39,11 +39,11 @@ pub use self::{
 /// A type alias for an ordered map of package requirements.
 pub type PackageRequirements = BTreeMap<PackageId, VersionRequirement>;
 
-/// Metadata tracked for a specific package version.
+/// Metadata tracked for a specific canonical package version.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct PackageRecord {
-    /// The version associated with this package
+    /// The exact published version associated with this package
     version: Version,
     /// An optional description of this package
     description: Option<Arc<str>>,
@@ -96,8 +96,11 @@ impl PackageRecord {
     }
 }
 
-/// A type alias for all known versions of a specific package.
-pub type PackageVersions = BTreeMap<Version, PackageRecord>;
+/// A type alias for all known canonical semantic versions of a specific package.
+///
+/// Each semantic version maps to at most one canonical published artifact. The exact artifact
+/// identity, including content digest, is stored in the corresponding [`PackageRecord`].
+pub type PackageVersions = BTreeMap<SemVer, PackageRecord>;
 
 /// A read-only package registry interface used for querying package metadata and versions.
 pub trait PackageRegistry {
@@ -121,7 +124,7 @@ pub trait PackageRegistry {
 
     /// Return the metadata for `package` at `version`, if present.
     fn get_by_version(&self, package: &PackageId, version: &Version) -> Option<&PackageRecord> {
-        let record = self.get_by_semver(package, &version.version)?;
+        let record = self.available_versions(package)?.get(&version.version)?;
         match version.digest.as_ref() {
             Some(_) if record.version() == version => Some(record),
             Some(_) => None,
@@ -131,11 +134,7 @@ pub trait PackageRegistry {
 
     /// Return the canonical metadata for `package` at the given semantic version.
     fn get_by_semver(&self, package: &PackageId, version: &SemVer) -> Option<&PackageRecord> {
-        self.available_versions(package)
-            .and_then(|versions| {
-                versions.iter().find(|(candidate, _)| &candidate.version == version)
-            })
-            .map(|(_, record)| record)
+        self.available_versions(package)?.get(version)
     }
 
     /// Return the exact metadata for `package` at the given fully-qualified version.
@@ -150,13 +149,10 @@ pub trait PackageRegistry {
     fn get_by_digest(&self, package: &PackageId, digest: &Word) -> Option<&PackageRecord> {
         let digest = LexicographicWord::new(*digest);
         self.available_versions(package).and_then(|versions| {
-            versions.iter().rev().find_map(|(version, record)| {
-                if version.digest.is_some_and(|d| d == digest) {
-                    Some(record)
-                } else {
-                    None
-                }
-            })
+            versions
+                .values()
+                .rev()
+                .find(|record| record.version().digest.is_some_and(|d| d == digest))
         })
     }
 
@@ -171,13 +167,7 @@ pub trait PackageRegistry {
         }
 
         self.available_versions(package).and_then(|versions| {
-            versions.iter().rev().find_map(|(version, record)| {
-                if version.satisfies(requirement) {
-                    Some(record)
-                } else {
-                    None
-                }
-            })
+            versions.values().rev().find(|record| record.version().satisfies(requirement))
         })
     }
 }
@@ -194,8 +184,13 @@ pub trait PackageProvider {
 
 /// A writable metadata index for package records.
 pub trait PackageIndex: PackageRegistry {
-    /// Register a package `name` with `version`, using the provided package metadata.
-    fn register(&mut self, name: PackageId, version: Version, record: PackageRecord);
+    type Error: fmt::Display;
+
+    /// Register the canonical metadata for `name`.
+    ///
+    /// Implementations must reject attempts to register a second canonical artifact for the same
+    /// package semantic version.
+    fn register(&mut self, name: PackageId, record: PackageRecord) -> Result<(), Self::Error>;
 }
 
 /// A writable package store used to publish assembled package artifacts and index metadata.

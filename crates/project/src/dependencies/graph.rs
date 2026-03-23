@@ -824,13 +824,25 @@ mod tests {
             let record_version = version.clone();
             self.insert_record(
                 PackageId::from(name),
-                version,
                 PackageRecord::new(record_version, std::iter::empty()),
-            );
+            )
+            .expect("failed to insert test package");
         }
 
-        fn insert_record(&mut self, id: PackageId, version: Version, record: PackageRecord) {
-            self.packages.entry(id).or_default().insert(version, record);
+        fn insert_record(&mut self, id: PackageId, record: PackageRecord) -> Result<(), Report> {
+            use std::collections::btree_map::Entry;
+
+            let semver = record.semantic_version().clone();
+            match self.packages.entry(id.clone()).or_default().entry(semver.clone()) {
+                Entry::Vacant(entry) => {
+                    entry.insert(record);
+                    Ok(())
+                },
+                Entry::Occupied(_) => Err(Report::msg(format!(
+                    "package '{}' version '{}' is already registered",
+                    id, semver
+                ))),
+            }
         }
     }
 
@@ -841,8 +853,10 @@ mod tests {
     }
 
     impl PackageIndex for TestRegistry {
-        fn register(&mut self, name: PackageId, version: Version, record: PackageRecord) {
-            self.insert_record(name, version, record);
+        type Error = Report;
+
+        fn register(&mut self, name: PackageId, record: PackageRecord) -> Result<(), Self::Error> {
+            self.insert_record(name, record)
         }
     }
 

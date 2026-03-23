@@ -33,7 +33,12 @@ impl InMemoryPackageRegistry {
     }
 
     /// Insert a new entry for `name` and `version`, creating a record from `dependencies`.
-    pub fn insert<D, P, V>(&mut self, name: impl Into<PackageId>, version: Version, dependencies: D)
+    pub fn insert<D, P, V>(
+        &mut self,
+        name: impl Into<PackageId>,
+        version: Version,
+        dependencies: D,
+    ) -> Result<(), InMemoryPackageStoreError>
     where
         D: IntoIterator<Item = (P, V)>,
         P: Into<PackageId>,
@@ -46,32 +51,38 @@ impl InMemoryPackageRegistry {
                 .into_iter()
                 .map(|(name, requirement)| (name.into(), requirement.into())),
         );
-        self.insert_record(name, version, record);
+        self.insert_record(name, record)
     }
 
-    /// Insert or update the metadata for `name` at `version`.
+    /// Insert the canonical metadata for `name`.
     pub fn insert_record(
         &mut self,
         name: impl Into<PackageId>,
-        version: Version,
         record: PackageRecord,
-    ) {
+    ) -> Result<(), InMemoryPackageStoreError> {
         use alloc::collections::btree_map::Entry;
 
         let name = name.into();
+        let semver = record.semantic_version().clone();
         match self.packages.entry(name) {
             Entry::Vacant(entry) => {
-                let versions = BTreeMap::from_iter([(version, record)]);
+                let versions = BTreeMap::from_iter([(semver, record)]);
                 entry.insert(versions);
+                Ok(())
             },
             Entry::Occupied(mut entry) => {
                 let versions = entry.get_mut();
-                match versions.entry(version.clone()) {
+                match versions.entry(semver.clone()) {
                     Entry::Vacant(entry) => {
                         entry.insert(record);
+                        Ok(())
                     },
-                    Entry::Occupied(mut entry) => {
-                        *entry.get_mut() = record;
+                    Entry::Occupied(_) => {
+                        let package = entry.key().clone();
+                        Err(InMemoryPackageStoreError::DuplicateSemanticVersion {
+                            package,
+                            version: semver,
+                        })
                     },
                 }
             },
@@ -96,8 +107,10 @@ impl PackageRegistry for InMemoryPackageRegistry {
 }
 
 impl PackageIndex for InMemoryPackageRegistry {
-    fn register(&mut self, name: PackageId, version: Version, record: PackageRecord) {
-        self.insert_record(name, version, record);
+    type Error = InMemoryPackageStoreError;
+
+    fn register(&mut self, name: PackageId, record: PackageRecord) -> Result<(), Self::Error> {
+        self.insert_record(name, record)
     }
 }
 
@@ -148,7 +161,7 @@ impl PackageStore for InMemoryPackageRegistry {
             },
             None => PackageRecord::new(version.clone(), dependencies),
         };
-        self.insert_record(package.name.clone(), version.clone(), record);
+        self.insert_record(package.name.clone(), record)?;
         self.artifacts.insert((package.name.clone(), version.clone()), package);
         Ok(version)
     }
@@ -170,7 +183,9 @@ where
                 let deps = deps
                     .into_iter()
                     .map(|(name, requirement)| (PackageId::from(name), requirement));
-                index.insert(name.clone(), version, deps);
+                index
+                    .insert(name.clone(), version, deps)
+                    .expect("duplicate semantic version in registry fixture");
             }
         }
         index
