@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.22.1
+
+#### Enhancements
+
+- Added `FastProcessor::into_parts()` to extract advice provider, memory, and precompile transcript after step-based execution ([#2901](https://github.com/0xMiden/miden-vm/pull/2901)).
+
 ## 0.22.0 (2025-03-18)
 
 #### Enhancements
