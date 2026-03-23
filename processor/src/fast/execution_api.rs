@@ -559,17 +559,6 @@ impl FastProcessor {
         Self::stack_result_from_flow(flow)
     }
 
-    /// Deprecated compatibility alias for [`Self::execute_mut_sync`].
-    #[cfg(any(test, feature = "testing"))]
-    #[deprecated(note = "renamed to execute_mut_sync")]
-    pub fn execute_sync_mut(
-        &mut self,
-        program: &Program,
-        host: &mut impl SyncHost,
-    ) -> Result<StackOutputs, ExecutionError> {
-        self.execute_mut_sync(program, host)
-    }
-
     /// Async variant of [`Self::execute_mut_sync`].
     #[cfg(any(test, feature = "testing"))]
     #[inline(always)]
