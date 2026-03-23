@@ -436,4 +436,3 @@ fn challenges_to_u64s(challenges: &[Challenge]) -> Vec<u64> {
     let base: Vec<Felt> = QuadFelt::flatten_to_base(challenges.to_vec());
     base.iter().map(|f| f.as_canonical_u64()).collect()
 }
-
