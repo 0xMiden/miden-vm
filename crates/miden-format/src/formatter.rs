@@ -586,6 +586,22 @@ fn render_instruction(
     entry: &NodeLayout,
     indent: usize,
 ) {
+    let tokens = all_tokens(instruction.syntax());
+    if has_comment_tokens(&tokens) {
+        flush_instruction_line(lines, current_instruction_line);
+
+        let mut rendered_lines =
+            render_token_stream_with_comments(&tokens, indent, SpacingStyle::Default);
+        if let Some(comment) = entry.trailing_comment.as_deref() {
+            if let Some(last_line) = rendered_lines.last_mut() {
+                append_inline_comment(last_line, comment);
+            }
+        }
+
+        lines.extend(rendered_lines);
+        return;
+    }
+
     let op_text = render_compact_tokens(instruction.syntax());
     let rendered_indent = indent_string(indent);
 
@@ -1468,6 +1484,48 @@ end
         );
         assert!(body_lines.iter().all(|line| line.len() <= MAX_LINE_WIDTH));
         assert!(formatted.contains("\n    instruction_delta_four\n"));
+
+        let reparsed = parse_text(&formatted);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+    }
+
+    #[test]
+    fn preserves_comments_inside_instruction_token_groups() {
+        let source = "\
+begin
+    foo(
+        # arg
+        bar,
+        baz
+    )
+    emit.event([
+        # first
+        1,
+        2
+    ])
+end
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let formatted = format_syntax(&parse.syntax());
+        let expected = "\
+begin
+    foo(
+        # arg
+        bar,
+        baz
+    )
+    emit.event([
+            # first
+            1,
+            2
+        ])
+end
+";
+
+        assert_eq!(formatted, expected);
 
         let reparsed = parse_text(&formatted);
         assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
