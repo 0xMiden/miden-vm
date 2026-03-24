@@ -348,6 +348,11 @@ impl Assembler {
     pub fn linker(&self) -> &Linker {
         &self.linker
     }
+
+    /// Returns `true` if `word` matches the digest of an exported kernel procedure.
+    pub(crate) fn is_kernel_proc_digest(&self, word: miden_core::Word) -> bool {
+        self.linker.has_nonempty_kernel() && self.linker.kernel().contains_proc(word)
+    }
 }
 
 // ------------------------------------------------------------------------------------------------

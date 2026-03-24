@@ -76,17 +76,10 @@ impl Assembler {
         ops: &[Operation],
         span: SourceSpan,
     ) -> Result<(), Report> {
-        if !self.linker().has_nonempty_kernel() {
-            return Ok(());
-        }
         if let Some(word) = Self::try_extract_top_word(ops)
-            && self.linker().kernel().contains_proc(word)
+            && self.is_kernel_proc_digest(word)
         {
-            return Err(LinkerError::KernelProcDynInvoke {
-                span,
-                source_file: None,
-            }
-            .into());
+            return Err(LinkerError::KernelProcDynInvoke { span, source_file: None }.into());
         }
         Ok(())
     }
