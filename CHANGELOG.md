@@ -37,6 +37,7 @@
 - In `ExecutionTracer`, we no longer record node flags in `CoreTraceFragmentContext` when entering a node (they are redundant) ([#2866](https://github.com/0xMiden/miden-vm/pull/2866))
 
 #### Fixes
+- Fixed C-like enum validation and constant materialization in `define_enum` ([#2887](https://github.com/0xMiden/miden-vm/pull/2887)).
 - **toposort_caller**: Fixed cycle detection in assembly call graph ([#2871](https://github.com/0xMiden/miden-vm/pull/2871)).
 
 - Fixed `Constant::PartialEq` to include `visibility` field in equality comparison, making it consistent with other exportable items (`Procedure`, `TypeAlias`, `EnumType`).
