@@ -1,6 +1,7 @@
 use alloc::{
     borrow::Cow,
     boxed::Box,
+    collections::BTreeMap,
     string::{String, ToString},
     sync::Arc,
     vec::Vec,
@@ -8,7 +9,10 @@ use alloc::{
 
 use miden_assembly_syntax_cst::{
     SyntaxKind, SyntaxToken,
-    ast::{AstNode, Expr as CstExpr, Signature as CstSignature, TypeBody as CstTypeBody},
+    ast::{
+        AdviceMap as CstAdviceMap, AstNode, Attribute as CstAttribute, Expr as CstExpr,
+        Signature as CstSignature, TypeBody as CstTypeBody,
+    },
 };
 use miden_core::{Felt, field::PrimeField64};
 use miden_debug_types::{SourceSpan, Span, Spanned};
@@ -74,8 +78,41 @@ pub(super) fn lower_function_type_from_signature(
     Ok(ty)
 }
 
+pub(super) fn lower_attribute(
+    context: &mut LoweringContext<'_>,
+    attribute: &CstAttribute,
+) -> Result<ast::Attribute, ParsingError> {
+    let span = context.parse().span_for_node(attribute.syntax());
+    let tokens = significant_tokens(attribute.syntax());
+    let mut parser = FragmentParser::new(context, tokens, span);
+    let attribute = parser.parse_attribute()?;
+    parser.expect_eof("unexpected trailing tokens in attribute")?;
+    Ok(attribute)
+}
+
+pub(super) fn lower_advice_map_decl(
+    context: &mut LoweringContext<'_>,
+    advice_map: &CstAdviceMap,
+) -> Result<ast::AdviceMapEntry, ParsingError> {
+    let span = context.parse().span_for_node(advice_map.syntax());
+    let tokens = significant_tokens_recursive(advice_map.syntax());
+    let mut parser = FragmentParser::new(context, tokens, span);
+    let entry = parser.parse_advice_map_decl(span)?;
+    parser.expect_eof("unexpected trailing tokens in advice-map declaration")?;
+    Ok(entry)
+}
+
 fn significant_tokens(node: &miden_assembly_syntax_cst::syntax::SyntaxNode) -> Vec<SyntaxToken> {
     node.children_with_tokens()
+        .filter_map(|element| element.into_token())
+        .filter(|token| !token.kind().is_trivia())
+        .collect()
+}
+
+fn significant_tokens_recursive(
+    node: &miden_assembly_syntax_cst::syntax::SyntaxNode,
+) -> Vec<SyntaxToken> {
+    node.descendants_with_tokens()
         .filter_map(|element| element.into_token())
         .filter(|token| !token.kind().is_trivia())
         .collect()
@@ -388,6 +425,152 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
             self.bump();
         }
         self.parse_type_expr()
+    }
+
+    fn parse_attribute(&mut self) -> Result<ast::Attribute, ParsingError> {
+        self.expect_kind(SyntaxKind::At, "expected `@` to start an attribute")?;
+        let name_token = self.expect_ident("expected an attribute name")?;
+        let name = self.context.lower_ident_token(&name_token)?;
+
+        let attribute = if self.at_kind(SyntaxKind::LParen) {
+            self.bump();
+            if self.at_kind(SyntaxKind::RParen) {
+                return Err(self.invalid_syntax("expected attribute metadata"));
+            }
+
+            let has_key_value = self.has_top_level_equals_before(SyntaxKind::RParen);
+            let attribute = if has_key_value {
+                let items = self.parse_comma_delimited(SyntaxKind::RParen, Self::parse_meta_kv)?;
+                let mut map = BTreeMap::<ast::Ident, ast::MetaExpr>::default();
+                for (pair_span, key, value) in items {
+                    use alloc::collections::btree_map::Entry;
+
+                    match map.entry(key) {
+                        Entry::Vacant(entry) => {
+                            entry.insert(value);
+                        },
+                        Entry::Occupied(entry) => {
+                            return Err(ParsingError::AttributeKeyValueConflict {
+                                span: pair_span,
+                                prev: entry.key().span(),
+                            });
+                        },
+                    }
+                }
+                ast::Attribute::KeyValue(ast::MetaKeyValue::new(name, map))
+            } else {
+                let items =
+                    self.parse_comma_delimited(SyntaxKind::RParen, Self::parse_meta_expr)?;
+                ast::Attribute::List(ast::MetaList::new(name, items))
+            };
+            self.expect_kind(SyntaxKind::RParen, "expected `)` to close attribute metadata")?;
+            attribute
+        } else {
+            ast::Attribute::Marker(name)
+        };
+
+        Ok(attribute.with_span(self.span))
+    }
+
+    fn parse_meta_kv(&mut self) -> Result<(SourceSpan, ast::Ident, ast::MetaExpr), ParsingError> {
+        let key_token = self.expect_ident("expected an attribute key")?;
+        let key = self.context.lower_ident_token(&key_token)?;
+        self.expect_kind(SyntaxKind::Equal, "expected `=` in attribute metadata")?;
+        let value = self.parse_meta_expr()?;
+        Ok((join_spans(key.span(), value.span()), key, value))
+    }
+
+    fn parse_meta_expr(&mut self) -> Result<ast::MetaExpr, ParsingError> {
+        if self.at_kind(SyntaxKind::LBracket) {
+            return self.parse_word_value_literal().map(ast::MetaExpr::Word);
+        }
+
+        let Some(token) = self.current() else {
+            return Err(self.invalid_syntax("expected an attribute metadata value"));
+        };
+
+        match token.kind() {
+            SyntaxKind::Ident => {
+                let token = self.bump().expect("current token should exist");
+                Ok(ast::MetaExpr::Ident(self.context.lower_ident_token(&token)?))
+            },
+            SyntaxKind::QuotedString | SyntaxKind::QuotedIdent => {
+                let token = self.bump().expect("current token should exist");
+                Ok(ast::MetaExpr::String(self.lower_string_token(&token)?))
+            },
+            SyntaxKind::Number => match parse_numeric_token(self.token_span(&token), token.text())?
+            {
+                ParsedNumeric::Int(value) => {
+                    self.bump();
+                    Ok(ast::MetaExpr::Int(Span::new(self.token_span(&token), value)))
+                },
+                ParsedNumeric::Word(value) => {
+                    self.bump();
+                    Ok(ast::MetaExpr::Word(Span::new(self.token_span(&token), value)))
+                },
+            },
+            _ => Err(self.invalid_syntax("expected an attribute metadata value")),
+        }
+    }
+
+    fn parse_advice_map_decl(
+        &mut self,
+        span: SourceSpan,
+    ) -> Result<ast::AdviceMapEntry, ParsingError> {
+        self.expect_keyword("adv_map", "expected `adv_map` in advice-map declaration")?;
+        let name_token = self.expect_ident("expected an advice-map name")?;
+        let name = self.context.lower_constant_ident_token(&name_token)?;
+        let key = if self.at_kind(SyntaxKind::LParen) {
+            let lparen = self.bump().expect("`(` should be present");
+            let value = self.parse_word_value()?;
+            let rparen =
+                self.expect_kind(SyntaxKind::RParen, "expected `)` to close advice-map key")?;
+            Some(Span::new(join_spans(self.token_span(&lparen), self.token_span(&rparen)), value))
+        } else {
+            None
+        };
+
+        self.expect_kind(SyntaxKind::Equal, "expected `=` in advice-map declaration")?;
+        self.expect_kind(SyntaxKind::LBracket, "expected `[` to start advice-map values")?;
+        let value = self.parse_comma_delimited(SyntaxKind::RBracket, Self::parse_felt)?;
+        self.expect_kind(SyntaxKind::RBracket, "expected `]` to close advice-map values")?;
+
+        Ok(ast::AdviceMapEntry::new(span, name, key, value))
+    }
+
+    fn parse_word_value(&mut self) -> Result<WordValue, ParsingError> {
+        if self.at_kind(SyntaxKind::LBracket) {
+            return self.parse_word_value_literal().map(Span::into_inner);
+        }
+
+        let Some(token) = self.current() else {
+            return Err(ParsingError::InvalidAdvMapKey { span: self.current_span() });
+        };
+        if token.kind() != SyntaxKind::Number {
+            return Err(ParsingError::InvalidAdvMapKey { span: self.token_span(&token) });
+        }
+
+        match parse_numeric_token(self.token_span(&token), token.text())? {
+            ParsedNumeric::Word(value) => {
+                self.bump();
+                Ok(value)
+            },
+            ParsedNumeric::Int(_) => {
+                Err(ParsingError::InvalidAdvMapKey { span: self.token_span(&token) })
+            },
+        }
+    }
+
+    fn parse_word_value_literal(&mut self) -> Result<Span<WordValue>, ParsingError> {
+        match self.parse_word_literal()? {
+            ast::ConstantExpr::Word(value) => Ok(value),
+            _ => unreachable!("word literal parser should produce a word"),
+        }
+    }
+
+    fn parse_felt(&mut self) -> Result<Felt, ParsingError> {
+        let value = self.parse_felt_literal()?;
+        Ok(Felt::new(value.as_int()))
     }
 
     fn parse_enum_decl(
@@ -872,6 +1055,57 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
         Ok(items)
     }
 
+    fn parse_comma_delimited<T>(
+        &mut self,
+        terminator: SyntaxKind,
+        mut parse_item: impl FnMut(&mut Self) -> Result<T, ParsingError>,
+    ) -> Result<Vec<T>, ParsingError> {
+        if self.at_kind(terminator) {
+            return Err(self.invalid_syntax("expected at least one item"));
+        }
+
+        let mut items = Vec::new();
+        loop {
+            items.push(parse_item(self)?);
+            if self.at_kind(SyntaxKind::Comma) {
+                self.bump();
+                if self.at_kind(terminator) {
+                    return Err(self.invalid_syntax("unexpected trailing comma"));
+                }
+            } else {
+                break;
+            }
+        }
+
+        Ok(items)
+    }
+
+    fn has_top_level_equals_before(&self, terminator: SyntaxKind) -> bool {
+        let mut index = self.pos;
+        let mut depth = 0usize;
+        while let Some(token) = self.tokens.get(index) {
+            match token.kind() {
+                kind if depth == 0 && kind == terminator => return false,
+                SyntaxKind::Equal if depth == 0 => return true,
+                SyntaxKind::LParen
+                | SyntaxKind::LBracket
+                | SyntaxKind::LBrace
+                | SyntaxKind::LAngle => {
+                    depth += 1;
+                },
+                SyntaxKind::RParen
+                | SyntaxKind::RBracket
+                | SyntaxKind::RBrace
+                | SyntaxKind::RAngle => {
+                    depth = depth.saturating_sub(1);
+                },
+                _ => {},
+            }
+            index += 1;
+        }
+        false
+    }
+
     fn current_span(&self) -> SourceSpan {
         self.current()
             .map(|token| self.token_span(&token))
@@ -1070,11 +1304,7 @@ fn close_text(kind: SyntaxKind) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{
-        collections::BTreeSet,
-        string::ToString,
-        sync::Arc,
-    };
+    use alloc::{collections::BTreeSet, string::ToString, sync::Arc};
 
     use miden_assembly_syntax_cst::{
         ast::{AstNode, Item as CstItem, SourceFile as CstSourceFile},
@@ -1083,7 +1313,10 @@ mod tests {
     use miden_debug_types::{SourceFile, SourceId, SourceLanguage, Uri};
     use pretty_assertions::assert_eq;
 
-    use super::{lower_function_type_from_signature, lower_type_expr_from_alias_body};
+    use super::{
+        lower_advice_map_decl, lower_attribute, lower_function_type_from_signature,
+        lower_type_expr_from_alias_body,
+    };
     use crate::{ast, parser::cst_lowering::context::LoweringContext};
 
     #[test]
@@ -1189,6 +1422,101 @@ end
                     },
                 ],
             ))
+        );
+    }
+
+    #[test]
+    fn lowers_attributes_from_cst_tokens() {
+        let source = test_source_file(
+            "\
+@storage(offset = 1, size = [0, 1, 2, 3])
+proc foo
+    nop
+end
+",
+        );
+        let parse = parse_source_file(source.clone());
+        assert!(parse.diagnostics().is_empty(), "unexpected CST diagnostics");
+
+        let source_file = CstSourceFile::cast(parse.syntax()).expect("source file");
+        let procedure = source_file
+            .items()
+            .find_map(|item| match item {
+                CstItem::Procedure(procedure) => Some(procedure),
+                _ => None,
+            })
+            .expect("procedure");
+        let attribute = procedure.attributes().next().expect("attribute");
+
+        let mut interned = BTreeSet::default();
+        let mut context = LoweringContext::new(source, parse, &mut interned);
+        let attribute =
+            lower_attribute(&mut context, &attribute).expect("attribute lowering should succeed");
+
+        let ast::Attribute::KeyValue(attribute) = attribute else {
+            panic!("expected key-value attribute");
+        };
+        assert_eq!(attribute.name(), "storage");
+        let offset = attribute
+            .iter()
+            .find(|(key, _)| key.as_str() == "offset")
+            .map(|(_, value)| value)
+            .expect("offset entry");
+        assert!(matches!(
+            offset,
+            ast::MetaExpr::Int(value) if matches!(value.inner(), crate::parser::IntValue::U8(1))
+        ));
+        let size = attribute
+            .iter()
+            .find(|(key, _)| key.as_str() == "size")
+            .map(|(_, value)| value)
+            .expect("size entry");
+        assert!(matches!(
+            size,
+            ast::MetaExpr::Word(value)
+                if *value.inner()
+                    == crate::parser::WordValue([
+                miden_core::Felt::ZERO,
+                miden_core::Felt::new(1),
+                miden_core::Felt::new(2),
+                miden_core::Felt::new(3),
+            ])
+        ));
+    }
+
+    #[test]
+    fn lowers_advice_map_decls_from_cst_tokens() {
+        let source = test_source_file("adv_map TABLE([1, 2, 3, 4]) = [5, 6, 7]\n");
+        let parse = parse_source_file(source.clone());
+        assert!(parse.diagnostics().is_empty(), "unexpected CST diagnostics");
+
+        let source_file = CstSourceFile::cast(parse.syntax()).expect("source file");
+        let advice_map = source_file
+            .items()
+            .find_map(|item| match item {
+                CstItem::AdviceMap(advice_map) => Some(advice_map),
+                _ => None,
+            })
+            .expect("advice map");
+
+        let mut interned = BTreeSet::default();
+        let mut context = LoweringContext::new(source, parse, &mut interned);
+        let entry = lower_advice_map_decl(&mut context, &advice_map)
+            .expect("advice-map lowering should succeed");
+
+        assert_eq!(entry.name.as_str(), "TABLE");
+        assert_eq!(
+            entry.key.as_ref().map(|word| *word.inner()),
+            Some(crate::parser::WordValue([
+                miden_core::Felt::new(1),
+                miden_core::Felt::new(2),
+                miden_core::Felt::new(3),
+                miden_core::Felt::new(4),
+            ]))
+        );
+        assert_eq!(
+            entry.value,
+            vec![miden_core::Felt::new(5), miden_core::Felt::new(6), miden_core::Felt::new(7),]
         );
     }
 

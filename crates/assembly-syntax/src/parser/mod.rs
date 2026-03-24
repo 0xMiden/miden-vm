@@ -243,10 +243,10 @@ fn parse_forms_with_lalrpop(
     source: Arc<SourceFile>,
     interned: &mut BTreeSet<Arc<str>>,
 ) -> Result<Vec<ast::Form>, ParsingError> {
+    let felt_type = Arc::new(ast::types::ArrayType::new(ast::types::Type::Felt, 4));
     let source_id = source.id();
     let scanner = Scanner::new(source.as_str());
     let lexer = Lexer::new(source_id, scanner);
-    let felt_type = Arc::new(ast::types::ArrayType::new(ast::types::Type::Felt, 4));
     grammar::FormsParser::new()
         .parse(source_id, interned, &felt_type, core::marker::PhantomData, lexer)
         .map_err(|err| ParsingError::from_parse_error(source_id, err))
@@ -735,6 +735,53 @@ end
 
     #[cfg(feature = "std")]
     #[test]
+    fn experimental_cst_backend_matches_legacy_advice_map_and_begin_forms() {
+        let source = test_source_file(
+            "\
+adv_map TABLE = [1, 2, 3]
+adv_map DIGEST([1, 2, 3, 4]) = [5, 6]
+
+begin
+    push.1
+    add
+end
+",
+        );
+
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+            .expect("legacy parser should succeed");
+        let cst = parse_forms_with_backend(source, ParserBackend::CstExperimental)
+            .expect("cst backend should succeed");
+
+        assert_eq!(cst, legacy);
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn experimental_cst_backend_matches_legacy_procedure_attributes() {
+        let source = test_source_file(
+            "\
+@inline
+@storage(offset = 1)
+@storage(size = 2)
+@callconv(\"C\")
+@locals(4)
+pub proc foo(a: felt) -> felt
+    push.1
+end
+",
+        );
+
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+            .expect("legacy parser should succeed");
+        let cst = parse_forms_with_backend(source, ParserBackend::CstExperimental)
+            .expect("cst backend should succeed");
+
+        assert_eq!(cst, legacy);
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
     fn experimental_cst_backend_reports_unqualified_imports() {
         let source = test_source_file("use foo\n");
 
@@ -753,6 +800,36 @@ end
             .expect_err("cst backend should reject invalid struct repr");
 
         assert_matches!(err, ParsingError::InvalidStructRepr { .. });
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn experimental_cst_backend_reports_attribute_key_value_conflicts() {
+        let source = test_source_file(
+            "\
+@storage(offset = 1)
+@storage(offset = 2)
+proc foo
+    nop
+end
+",
+        );
+
+        let err = parse_forms_with_backend(source, ParserBackend::CstExperimental)
+            .expect_err("cst backend should reject conflicting attribute keys");
+
+        assert_matches!(err, ParsingError::AttributeKeyValueConflict { .. });
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn experimental_cst_backend_reports_invalid_advice_map_keys() {
+        let source = test_source_file("adv_map TABLE(1) = [1]\n");
+
+        let err = parse_forms_with_backend(source, ParserBackend::CstExperimental)
+            .expect_err("cst backend should reject invalid advice-map keys");
+
+        assert_matches!(err, ParsingError::InvalidAdvMapKey { .. });
     }
 
     #[test]
