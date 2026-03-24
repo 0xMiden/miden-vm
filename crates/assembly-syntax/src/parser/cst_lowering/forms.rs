@@ -12,6 +12,7 @@ use miden_assembly_syntax_cst::ast::{
 use miden_debug_types::{SourceSpan, Span, Spanned};
 
 use super::{
+    blocks::lower_required_block,
     context::LoweringContext,
     fragments::{
         lower_advice_map_decl, lower_attribute, lower_constant_expr, lower_enum_decl_from_body,
@@ -324,9 +325,7 @@ fn lower_begin_block(
 ) -> Result<ast::Form, ParsingError> {
     let span = context.parse().span_for_node(begin.syntax());
     let block = match begin.block() {
-        Some(block) => {
-            context.lower_block_with_legacy_parser(context.parse().span_for_node(block.syntax()))?
-        },
+        Some(block) => lower_required_block(context, &block, "expected a non-empty entry block")?,
         None => {
             return Err(ParsingError::InvalidSyntax {
                 span,
@@ -347,7 +346,7 @@ fn lower_procedure(
     let (name, signature) = preflight_procedure_header(context, procedure)?;
     let body = match procedure.block() {
         Some(block) => {
-            context.lower_block_with_legacy_parser(context.parse().span_for_node(block.syntax()))?
+            lower_required_block(context, &block, "expected a non-empty procedure body")?
         },
         None => {
             return Err(ParsingError::InvalidSyntax {
