@@ -9,7 +9,10 @@ use miden_assembly_syntax_cst::{
 };
 use miden_debug_types::{SourceSpan, Span};
 
-use super::{context::LoweringContext, fragments::lower_u32_immediate_token};
+use super::{
+    context::LoweringContext, fragments::lower_u32_immediate_token,
+    instructions::try_lower_instruction,
+};
 use crate::{
     ast::{self, Instruction},
     parser::ParsingError,
@@ -139,6 +142,9 @@ fn lower_instruction(
     instruction: &CstInstruction,
 ) -> Result<Vec<ast::Op>, ParsingError> {
     let span = context.parse().span_for_node(instruction.syntax());
+    if let Some(ops) = try_lower_instruction(context, instruction) {
+        return Ok(ops);
+    }
     context.lower_ops_with_legacy_parser(span)
 }
 

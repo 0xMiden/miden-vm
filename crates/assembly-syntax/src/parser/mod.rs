@@ -820,6 +820,39 @@ end
 
     #[cfg(feature = "std")]
     #[test]
+    fn experimental_cst_backend_matches_legacy_primitive_instruction_blocks() {
+        let source = test_source_file(
+            "\
+begin
+    add
+    eq
+    dup
+    swap
+    assert
+    adv.insert_hdword
+    adv.push_mapvaln
+    emit
+    debug.stack
+    mem_load
+    u32div
+    add.1
+    dup.3
+    adv.push_mapvaln.4
+    u32shl.1
+end
+",
+        );
+
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+            .expect("legacy parser should succeed");
+        let cst = parse_forms_with_backend(source, ParserBackend::CstExperimental)
+            .expect("cst backend should succeed");
+
+        assert_eq!(cst, legacy);
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
     fn experimental_cst_backend_reports_unqualified_imports() {
         let source = test_source_file("use foo\n");
 
@@ -868,6 +901,24 @@ end
             .expect_err("cst backend should reject invalid advice-map keys");
 
         assert_matches!(err, ParsingError::InvalidAdvMapKey { .. });
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn experimental_cst_backend_preserves_legacy_instruction_fallback_diagnostics() {
+        let source = test_source_file(
+            "\
+begin
+    mem_loadw
+end
+",
+        );
+
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy);
+        let cst = parse_forms_with_backend(source, ParserBackend::CstExperimental);
+
+        assert_matches!(legacy, Err(ParsingError::DeprecatedInstruction { .. }));
+        assert_matches!(cst, Err(ParsingError::DeprecatedInstruction { .. }));
     }
 
     #[cfg(feature = "std")]
