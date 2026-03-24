@@ -6,7 +6,6 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
-
 use miden_assembly_syntax_cst::{
     SyntaxKind, SyntaxToken,
     ast::{
@@ -24,7 +23,7 @@ use crate::{
         self, PathBuf,
         types::{AddressSpace, Type, TypeRepr},
     },
-    parser::{HexErrorKind, IntValue, LiteralErrorKind, ParsingError, WordValue},
+    parser::{BinErrorKind, HexErrorKind, IntValue, LiteralErrorKind, ParsingError, WordValue},
 };
 
 pub(super) fn lower_constant_expr(
@@ -87,25 +86,9 @@ pub(super) fn lower_u32_immediate_token(
         SyntaxKind::Ident => {
             Ok(ast::Immediate::Constant(context.lower_constant_ident_token(token)?))
         },
-        SyntaxKind::Number => match parse_numeric_token(span, token.text())? {
-            ParsedNumeric::Int(value) => {
-                let value = match value {
-                    IntValue::U8(value) => value as u32,
-                    IntValue::U16(value) => value as u32,
-                    IntValue::U32(value) => value,
-                    IntValue::Felt(_) => {
-                        return Err(ParsingError::InvalidLiteral {
-                            span,
-                            kind: LiteralErrorKind::U32Overflow,
-                        });
-                    },
-                };
-                Ok(ast::Immediate::Value(Span::new(span, value)))
-            },
-            ParsedNumeric::Word(_) => Err(ParsingError::InvalidLiteral {
-                span,
-                kind: LiteralErrorKind::U32Overflow,
-            }),
+        SyntaxKind::Number => {
+            let value = parse_u32_literal(span, token.text())?;
+            Ok(ast::Immediate::Value(Span::new(span, value)))
         },
         _ => Err(ParsingError::InvalidSyntax {
             span,
@@ -1176,7 +1159,7 @@ enum PathMode {
     Type,
 }
 
-enum ParsedNumeric {
+pub(super) enum ParsedNumeric {
     Int(IntValue),
     Word(WordValue),
 }
@@ -1200,7 +1183,10 @@ fn builtin_type_for_name(name: &str) -> Option<Type> {
     })
 }
 
-fn parse_numeric_token(span: SourceSpan, text: &str) -> Result<ParsedNumeric, ParsingError> {
+pub(super) fn parse_numeric_token(
+    span: SourceSpan,
+    text: &str,
+) -> Result<ParsedNumeric, ParsingError> {
     if let Some(hex) = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
         return parse_hex_literal(span, hex);
     }
@@ -1299,7 +1285,7 @@ fn parse_alignment_literal(text: &str, span: SourceSpan) -> Result<u64, ParsingE
     }
 }
 
-fn parse_decimal_u64(text: &str) -> Option<u64> {
+pub(super) fn parse_decimal_u64(text: &str) -> Option<u64> {
     if text.starts_with("0x")
         || text.starts_with("0X")
         || text.starts_with("0b")
@@ -1321,6 +1307,37 @@ fn literal_error_from_int_error(
         core::num::IntErrorKind::PosOverflow | core::num::IntErrorKind::NegOverflow => overflow,
         core::num::IntErrorKind::Zero => LiteralErrorKind::InvalidDigit,
         _ => overflow,
+    }
+}
+
+fn parse_u32_literal(span: SourceSpan, text: &str) -> Result<u32, ParsingError> {
+    if let Some(bin_digits) = text.strip_prefix("0b").or_else(|| text.strip_prefix("0B")) {
+        if bin_digits.len() > 32 {
+            return Err(ParsingError::InvalidBinaryLiteral { span, kind: BinErrorKind::TooLong });
+        }
+
+        let value =
+            u32::from_str_radix(bin_digits, 2).map_err(|error| ParsingError::InvalidLiteral {
+                span,
+                kind: literal_error_from_int_error(error.kind(), LiteralErrorKind::U32Overflow),
+            })?;
+        return Ok(value);
+    }
+
+    match parse_numeric_token(span, text)? {
+        ParsedNumeric::Int(value) => match value {
+            IntValue::U8(value) => Ok(value as u32),
+            IntValue::U16(value) => Ok(value as u32),
+            IntValue::U32(value) => Ok(value),
+            IntValue::Felt(_) => Err(ParsingError::InvalidLiteral {
+                span,
+                kind: LiteralErrorKind::U32Overflow,
+            }),
+        },
+        ParsedNumeric::Word(_) => Err(ParsingError::InvalidLiteral {
+            span,
+            kind: LiteralErrorKind::U32Overflow,
+        }),
     }
 }
 

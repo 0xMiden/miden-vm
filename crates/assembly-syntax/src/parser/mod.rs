@@ -853,6 +853,42 @@ end
 
     #[cfg(feature = "std")]
     #[test]
+    fn experimental_cst_backend_matches_legacy_immediate_instruction_blocks() {
+        let source = test_source_file(
+            "\
+begin
+    add.1
+    eq.FLAG
+    lt.3
+    exp.u32
+    exp.POWER
+    mem_load.0b1010
+    locaddr.LOCAL
+    adv_push.1
+    dup.3
+    swap.2
+    movup.4
+    adv.push_mapvaln.8
+    u32div.1
+    u32wrapping_mul.0
+    u32and.MASK
+    u32shl.SHIFT
+    debug.stack.4
+    push.1
+end
+",
+        );
+
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+            .expect("legacy parser should succeed");
+        let cst = parse_forms_with_backend(source, ParserBackend::CstExperimental)
+            .expect("cst backend should succeed");
+
+        assert_eq!(cst, legacy);
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
     fn experimental_cst_backend_reports_unqualified_imports() {
         let source = test_source_file("use foo\n");
 
@@ -901,6 +937,42 @@ end
             .expect_err("cst backend should reject invalid advice-map keys");
 
         assert_matches!(err, ParsingError::InvalidAdvMapKey { .. });
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn experimental_cst_backend_reports_direct_division_by_zero_for_foldable_instructions() {
+        let source = test_source_file(
+            "\
+begin
+    u32div.0
+end
+",
+        );
+
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy);
+        let cst = parse_forms_with_backend(source, ParserBackend::CstExperimental);
+
+        assert_matches!(legacy, Err(ParsingError::DivisionByZero { .. }));
+        assert_matches!(cst, Err(ParsingError::DivisionByZero { .. }));
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn experimental_cst_backend_reports_direct_invalid_pad_values() {
+        let source = test_source_file(
+            "\
+begin
+    adv.push_mapvaln.5
+end
+",
+        );
+
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy);
+        let cst = parse_forms_with_backend(source, ParserBackend::CstExperimental);
+
+        assert_matches!(legacy, Err(ParsingError::InvalidPadValue { .. }));
+        assert_matches!(cst, Err(ParsingError::InvalidPadValue { .. }));
     }
 
     #[cfg(feature = "std")]
