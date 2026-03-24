@@ -1,13 +1,13 @@
 use alloc::vec::Vec;
 
-use super::{MastNodeEntry, MastNodeId, MastNodeInfo, Word};
-use crate::serde::DeserializationError;
+use super::{MastNodeEntry, MastNodeInfo};
+use crate::{Word, mast::MastNodeId, serde::DeserializationError};
 
-/// Read-only view over MAST node metadata.
+/// Read-only view over serialization-oriented MAST node metadata.
 ///
-/// This trait is implemented by both in-memory [`super::MastForest`] and serialized
-/// [`super::SerializedMastForest`] representations, enabling callers to consume a shared
-/// random-access API independent of backing storage.
+/// This trait lives alongside [`super::SerializedMastForest`] because its surface is defined in
+/// terms of serialized-equivalent node entries and digests, even though both
+/// [`super::SerializedMastForest`] and in-memory [`crate::mast::MastForest`] implement it.
 pub trait MastForestView {
     /// Returns the number of nodes in the forest.
     fn node_count(&self) -> usize;

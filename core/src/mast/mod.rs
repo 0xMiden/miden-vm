@@ -86,10 +86,7 @@ pub use debuginfo::{
 };
 
 mod serialization;
-pub use serialization::{MastNodeEntry, MastNodeInfo, SerializedMastForest};
-
-mod view;
-pub use view::MastForestView;
+pub use serialization::{MastForestView, MastNodeEntry, MastNodeInfo, SerializedMastForest};
 
 mod merger;
 pub(crate) use merger::MastForestMerger;
