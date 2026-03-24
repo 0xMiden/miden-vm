@@ -1,16 +1,16 @@
-use core::ops::Range;
+use miden_debug_types::{SourceFile, SourceId, SourceSpan};
 
 use crate::syntax::SyntaxKind;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token<'input> {
     kind: SyntaxKind,
-    span: Range<usize>,
+    span: SourceSpan,
     text: &'input str,
 }
 
 impl<'input> Token<'input> {
-    pub fn new(kind: SyntaxKind, span: Range<usize>, text: &'input str) -> Self {
+    pub fn new(kind: SyntaxKind, span: SourceSpan, text: &'input str) -> Self {
         Self { kind, span, text }
     }
 
@@ -18,8 +18,8 @@ impl<'input> Token<'input> {
         self.kind
     }
 
-    pub fn span(&self) -> Range<usize> {
-        self.span.clone()
+    pub fn span(&self) -> SourceSpan {
+        self.span
     }
 
     pub fn text(&self) -> &'input str {
@@ -27,18 +27,27 @@ impl<'input> Token<'input> {
     }
 }
 
-pub fn tokenize(input: &str) -> Vec<Token<'_>> {
-    Lexer::new(input).collect()
+pub fn tokenize(source: &SourceFile) -> Vec<Token<'_>> {
+    Lexer::new(source).collect()
+}
+
+pub fn tokenize_text(input: &str) -> Vec<Token<'_>> {
+    Lexer::from_raw_parts(SourceId::UNKNOWN, input).collect()
 }
 
 pub struct Lexer<'input> {
     input: &'input str,
+    source_id: SourceId,
     offset: usize,
 }
 
 impl<'input> Lexer<'input> {
-    pub fn new(input: &'input str) -> Self {
-        Self { input, offset: 0 }
+    pub fn new(source: &'input SourceFile) -> Self {
+        Self::from_raw_parts(source.id(), source.as_str())
+    }
+
+    pub fn from_raw_parts(source_id: SourceId, input: &'input str) -> Self {
+        Self { input, source_id, offset: 0 }
     }
 
     fn is_eof(&self) -> bool {
@@ -65,7 +74,9 @@ impl<'input> Lexer<'input> {
     }
 
     fn token(&self, kind: SyntaxKind, start: usize, end: usize) -> Token<'input> {
-        Token::new(kind, start..end, &self.input[start..end])
+        let span = SourceSpan::try_from_range(self.source_id, start..end)
+            .expect("source files larger than 4GiB are not supported");
+        Token::new(kind, span, &self.input[start..end])
     }
 
     fn lex_trivia(&mut self, start: usize, first: char) -> Token<'input> {
@@ -297,15 +308,18 @@ impl<'input> Iterator for Lexer<'input> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use miden_debug_types::{SourceFile, SourceId, SourceLanguage, SourceSpan, Uri};
     use pretty_assertions::assert_eq;
 
-    use super::tokenize;
+    use super::{tokenize, tokenize_text};
     use crate::syntax::SyntaxKind;
 
     #[test]
     fn preserves_trivia_and_simple_tokens() {
         let source = "proc foo\r\n    # comment\r\n    push.1.2 add\r\nend\r\n";
-        let tokens = tokenize(source);
+        let tokens = tokenize_text(source);
         let actual = tokens
             .iter()
             .map(|token| (token.kind(), token.text().to_string()))
@@ -337,7 +351,7 @@ mod tests {
     #[test]
     fn classifies_doc_comments_and_special_identifiers() {
         let source = "#! docs\nadv.push_mapval $kernel\n";
-        let tokens = tokenize(source);
+        let tokens = tokenize_text(source);
         let actual = tokens
             .iter()
             .map(|token| (token.kind(), token.text().to_string()))
@@ -354,5 +368,21 @@ mod tests {
         ];
 
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn tracks_source_spans_when_tokenizing_source_files() {
+        let source = Arc::new(SourceFile::new(
+            SourceId::new(7),
+            SourceLanguage::Masm,
+            Uri::new("memory:///lexer-span-test.masm"),
+            "proc foo\n".to_string().into_boxed_str(),
+        ));
+
+        let tokens = tokenize(source.as_ref());
+        assert_eq!(tokens[0].text(), "proc");
+        assert_eq!(tokens[0].span(), SourceSpan::new(source.id(), 0u32..4u32));
+        assert_eq!(tokens[2].text(), "foo");
+        assert_eq!(tokens[2].span(), SourceSpan::new(source.id(), 5u32..8u32));
     }
 }

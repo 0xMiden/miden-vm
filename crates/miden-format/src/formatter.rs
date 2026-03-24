@@ -388,10 +388,10 @@ fn render_procedure(procedure: &Procedure, indent: usize) -> String {
     } else {
         lines.push(header);
     }
-    if let Some(comment) = comment_before_child_of_kind(procedure.syntax(), SyntaxKind::Block, 0) {
-        if let Some(last_line) = lines.last_mut() {
-            append_inline_comment(last_line, &comment);
-        }
+    if let Some(comment) = comment_before_child_of_kind(procedure.syntax(), SyntaxKind::Block, 0)
+        && let Some(last_line) = lines.last_mut()
+    {
+        append_inline_comment(last_line, &comment);
     }
 
     if let Some(block) = procedure.block() {
@@ -454,10 +454,10 @@ fn render_signature_lines(
     let param_count = params.len();
     for (index, param) in params.into_iter().enumerate() {
         let mut param_lines = render_signature_item_lines(&param, indent + INDENT_WIDTH);
-        if index + 1 != param_count {
-            if let Some(last_line) = param_lines.last_mut() {
-                last_line.push(',');
-            }
+        if index + 1 != param_count
+            && let Some(last_line) = param_lines.last_mut()
+        {
+            last_line.push(',');
         }
         lines.extend(param_lines);
     }
@@ -472,42 +472,40 @@ fn render_signature_lines(
 
     if let Some((open_index, close_index)) =
         outer_group_indices(&result_tokens, SyntaxKind::LParen, SyntaxKind::RParen)
+        && open_index == 0
     {
-        if open_index == 0 {
-            let items = split_top_level_items(&result_tokens[1..close_index])
-                .into_iter()
-                .map(|item| trim_outer_whitespace_tokens(&item))
-                .filter(|item| !item.is_empty())
-                .collect::<Vec<_>>();
-            let result =
-                render_token_sequence_with_style(&result_tokens, SpacingStyle::TypeBodyItem);
-            if items.len() <= 1
-                && !result_has_comments
-                && line_length(&closing) + 4 + line_length(&result) <= MAX_LINE_WIDTH
-            {
-                closing.push_str(" -> ");
-                closing.push_str(&result);
-                lines.push(closing);
-                return lines;
-            }
-
-            closing.push_str(" -> (");
+        let items = split_top_level_items(&result_tokens[1..close_index])
+            .into_iter()
+            .map(|item| trim_outer_whitespace_tokens(&item))
+            .filter(|item| !item.is_empty())
+            .collect::<Vec<_>>();
+        let result = render_token_sequence_with_style(&result_tokens, SpacingStyle::TypeBodyItem);
+        if items.len() <= 1
+            && !result_has_comments
+            && line_length(&closing) + 4 + line_length(&result) <= MAX_LINE_WIDTH
+        {
+            closing.push_str(" -> ");
+            closing.push_str(&result);
             lines.push(closing);
-
-            let item_count = items.len();
-            for (index, item) in items.into_iter().enumerate() {
-                let mut item_lines = render_signature_item_lines(&item, indent + INDENT_WIDTH);
-                if index + 1 != item_count {
-                    if let Some(last_line) = item_lines.last_mut() {
-                        last_line.push(',');
-                    }
-                }
-                lines.extend(item_lines);
-            }
-
-            lines.push(format!("{})", indent_string(indent)));
             return lines;
         }
+
+        closing.push_str(" -> (");
+        lines.push(closing);
+
+        let item_count = items.len();
+        for (index, item) in items.into_iter().enumerate() {
+            let mut item_lines = render_signature_item_lines(&item, indent + INDENT_WIDTH);
+            if index + 1 != item_count
+                && let Some(last_line) = item_lines.last_mut()
+            {
+                last_line.push(',');
+            }
+            lines.extend(item_lines);
+        }
+
+        lines.push(format!("{})", indent_string(indent)));
+        return lines;
     }
 
     let result = render_token_sequence_with_style(&result_tokens, SpacingStyle::TypeBodyItem);
@@ -592,10 +590,10 @@ fn render_instruction(
 
         let mut rendered_lines =
             render_token_stream_with_comments(&tokens, indent, SpacingStyle::Default);
-        if let Some(comment) = entry.trailing_comment.as_deref() {
-            if let Some(last_line) = rendered_lines.last_mut() {
-                append_inline_comment(last_line, comment);
-            }
+        if let Some(comment) = entry.trailing_comment.as_deref()
+            && let Some(last_line) = rendered_lines.last_mut()
+        {
+            append_inline_comment(last_line, comment);
         }
 
         lines.extend(rendered_lines);
@@ -784,10 +782,9 @@ fn render_token_lines_with_style(
 
         if let Some((open_index, close_index)) =
             outer_group_indices(tokens, SyntaxKind::LParen, SyntaxKind::RParen)
+            && open_index > 0
         {
-            if open_index > 0 {
-                return render_delimited_group(tokens, indent, open_index, close_index, style);
-            }
+            return render_delimited_group(tokens, indent, open_index, close_index, style);
         }
     }
 
@@ -805,10 +802,9 @@ fn render_token_lines_with_style(
 
     if let Some((open_index, close_index)) =
         outer_group_indices(tokens, SyntaxKind::LParen, SyntaxKind::RParen)
+        && open_index > 0
     {
-        if open_index > 0 {
-            return render_delimited_group(tokens, indent, open_index, close_index, style);
-        }
+        return render_delimited_group(tokens, indent, open_index, close_index, style);
     }
 
     vec![inline]

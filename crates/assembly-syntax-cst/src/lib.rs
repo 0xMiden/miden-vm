@@ -1,5 +1,4 @@
 pub mod ast;
-pub mod diagnostics;
 pub mod lexer;
 pub mod parser;
 pub mod syntax;
@@ -9,9 +8,8 @@ pub use rowan;
 
 pub use self::{
     ast::{Item, Operation},
-    diagnostics::Diagnostic,
-    lexer::{Lexer, Token, tokenize},
-    parser::{Parse, parse_text},
+    lexer::{Lexer, Token, tokenize, tokenize_text},
+    parser::{Parse, parse_source_file, parse_text},
     syntax::{MasmLanguage, SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken},
 };
 
