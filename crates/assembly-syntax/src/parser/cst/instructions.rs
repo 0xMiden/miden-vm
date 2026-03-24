@@ -207,7 +207,6 @@ fn u16_local_immediate_instruction(name: &str) -> Option<fn(ast::ImmU16) -> Inst
 
 #[derive(Debug, Clone, Copy)]
 enum StackImmediateFamily {
-    AdvPush,
     Dup,
     DupW,
     Swap,
@@ -220,7 +219,6 @@ enum StackImmediateFamily {
 
 fn stack_immediate_family(name: &str) -> Option<StackImmediateFamily> {
     match name {
-        "adv_push" => Some(StackImmediateFamily::AdvPush),
         "dup" => Some(StackImmediateFamily::Dup),
         "dupw" => Some(StackImmediateFamily::DupW),
         "swap" => Some(StackImmediateFamily::Swap),
@@ -239,7 +237,6 @@ fn lower_stack_immediate_instruction(
     token: &SyntaxToken,
 ) -> Result<Option<Vec<ast::Op>>, ParsingError> {
     match family {
-        StackImmediateFamily::AdvPush => lower_adv_push(span, token),
         StackImmediateFamily::Dup => lower_dup(span, token),
         StackImmediateFamily::DupW => lower_dupw(span, token),
         StackImmediateFamily::Swap => lower_swap(span, token),
@@ -345,6 +342,7 @@ fn lower_felt_primitive_instruction(text: &str) -> Option<Instruction> {
 
 fn lower_stack_primitive_instruction(text: &str) -> Option<Instruction> {
     match text {
+        "adv_push" => Some(Instruction::AdvPush),
         "caller" => Some(Instruction::Caller),
         "cdrop" => Some(Instruction::CDrop),
         "cdropw" => Some(Instruction::CDropW),
@@ -947,7 +945,10 @@ fn lower_word_literal(
         }
         let span = context.parse().span_for_token(token);
         match parse_numeric_token(span, token.text())? {
-            ParsedNumeric::Int(value) => *element = Felt::new(value.as_int()),
+            ParsedNumeric::Int(value) => {
+                *element =
+                    Felt::new(value.as_int()).expect("IntValue is guaranteed to not overflow Felt")
+            },
             ParsedNumeric::Word(_) => {
                 return Err(ParsingError::InvalidSyntax {
                     span,
@@ -1350,23 +1351,6 @@ fn lower_foldable_u32(
     Ok(Some(ops))
 }
 
-fn lower_adv_push(
-    span: SourceSpan,
-    token: &SyntaxToken,
-) -> Result<Option<Vec<ast::Op>>, ParsingError> {
-    let Some(index) = lower_decimal_u8_literal(token)? else {
-        return Ok(None);
-    };
-    if index == 0 || index > 16 {
-        return Err(ParsingError::ImmediateOutOfRange { span, range: 1..17 });
-    }
-
-    Ok(Some(vec![inst_op(
-        span,
-        Instruction::AdvPush(Immediate::Value(Span::new(span, index))),
-    )]))
-}
-
 fn lower_dup(span: SourceSpan, token: &SyntaxToken) -> Result<Option<Vec<ast::Op>>, ParsingError> {
     let Some(index) = lower_decimal_u8_literal(token)? else {
         return Ok(None);
@@ -1579,9 +1563,10 @@ fn lower_felt_immediate(
             }
 
             match parse_numeric_token(span, token.text())? {
-                ParsedNumeric::Int(value) => {
-                    Ok(Some(ast::Immediate::Value(Span::new(span, Felt::new(value.as_int())))))
-                },
+                ParsedNumeric::Int(value) => Ok(Some(ast::Immediate::Value(Span::new(
+                    span,
+                    Felt::new(value.as_int()).expect("IntValue is guaranteed to not overflow Felt"),
+                )))),
                 ParsedNumeric::Word(_) => Ok(None),
             }
         },

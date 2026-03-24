@@ -335,7 +335,8 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
         let mut elements = [Felt::ZERO; 4];
         for (index, element) in elements.iter_mut().enumerate() {
             let value = self.parse_felt_literal()?;
-            *element = Felt::new(value.as_int());
+            *element = Felt::new(value.as_int())
+                .expect("parse_felt_literal has already checked for overflow");
             if index < 3 {
                 self.expect_kind(SyntaxKind::Comma, "expected `,` between word elements")?;
             }
@@ -590,7 +591,7 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
 
     fn parse_felt(&mut self) -> Result<Felt, ParsingError> {
         let value = self.parse_felt_literal()?;
-        Ok(Felt::new(value.as_int()))
+        Ok(Felt::new(value.as_int()).expect("parse_felt_literal has already checked for overflow"))
     }
 
     fn parse_enum_decl(
@@ -1258,7 +1259,7 @@ fn parse_hex_literal(span: SourceSpan, hex_digits: &str) -> Result<ParsedNumeric
                         kind: LiteralErrorKind::FeltOverflow,
                     });
                 }
-                *element = Felt::new(value);
+                *element = Felt::new(value).map_err(|_| ParsingError::ConstantOverflow { span })?;
             }
 
             Ok(ParsedNumeric::Word(WordValue(word)))
@@ -1536,9 +1537,9 @@ end
                 if *value.inner()
                     == crate::parser::WordValue([
                 miden_core::Felt::ZERO,
-                miden_core::Felt::new(1),
-                miden_core::Felt::new(2),
-                miden_core::Felt::new(3),
+                miden_core::Felt::from_u32(1),
+                miden_core::Felt::from_u32(2),
+                miden_core::Felt::from_u32(3),
             ])
         ));
     }
@@ -1567,15 +1568,19 @@ end
         assert_eq!(
             entry.key.as_ref().map(|word| *word.inner()),
             Some(crate::parser::WordValue([
-                miden_core::Felt::new(1),
-                miden_core::Felt::new(2),
-                miden_core::Felt::new(3),
-                miden_core::Felt::new(4),
+                miden_core::Felt::from_u32(1),
+                miden_core::Felt::from_u32(2),
+                miden_core::Felt::from_u32(3),
+                miden_core::Felt::from_u32(4),
             ]))
         );
         assert_eq!(
             entry.value,
-            vec![miden_core::Felt::new(5), miden_core::Felt::new(6), miden_core::Felt::new(7),]
+            vec![
+                miden_core::Felt::from_u32(5),
+                miden_core::Felt::from_u32(6),
+                miden_core::Felt::from_u32(7),
+            ]
         );
     }
 
