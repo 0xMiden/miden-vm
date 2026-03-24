@@ -18,7 +18,7 @@ lalrpop_util::lalrpop_mod!(
     "/parser/grammar.rs"
 );
 
-mod cst_lowering;
+mod cst;
 mod error;
 mod lexer;
 mod scanner;
@@ -220,7 +220,7 @@ fn parse_forms_internal_with_backend(
 ) -> Result<Vec<ast::Form>, ParsingError> {
     match backend {
         InternalParserBackend::Legacy => parse_forms_with_lalrpop(source, interned),
-        InternalParserBackend::Cst => cst_lowering::parse_forms_from_cst(source, interned),
+        InternalParserBackend::Cst => cst::parse_forms_from_cst(source, interned),
     }
 }
 
