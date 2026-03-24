@@ -111,6 +111,11 @@ impl BasicBlockBuilder<'_> {
     pub fn mast_forest_builder_mut(&mut self) -> &mut MastForestBuilder {
         self.mast_forest_builder
     }
+
+    /// Returns the current list of operations in this basic block.
+    pub fn ops(&self) -> &[Operation] {
+        &self.ops
+    }
 }
 
 /// Operations

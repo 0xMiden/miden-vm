@@ -5645,7 +5645,7 @@ end
 }
 
 #[test]
-fn regression_kernel_exports_are_syscall_only_exec_target_is_rejected() {
+fn regression_kernel_exports_are_syscall_only_for_all_non_syscall_entrypoints() {
     let context = TestContext::default();
     let source_manager = context.source_manager();
 
@@ -5659,22 +5659,36 @@ end
         .assemble_kernel(kernel_src)
         .expect("kernel assembly must succeed");
 
-    let program_src = r#"
-proc user
-    exec.::$kernel::k1
-end
+    let digest = kernel
+        .as_ref()
+        .get_procedure_root_by_path("::$kernel::k1")
+        .expect("kernel export must have a digest");
+    let [a, b, c, d] = digest.map(|felt| felt.as_canonical_u64());
 
-begin
-    call.user
-end
-"#;
+    let cases = vec![
+        (
+            "exec",
+            "proc user\n    exec.::$kernel::k1\nend\n\nbegin\n    call.user\nend\n".to_string(),
+        ),
+        (
+            "call",
+            "proc user\n    call.::$kernel::k1\nend\n\nbegin\n    call.user\nend\n".to_string(),
+        ),
+        (
+            "procref",
+            "proc user\n    procref.::$kernel::k1\n    dropw\nend\n\nbegin\n    call.user\nend\n"
+                .to_string(),
+        ),
+        ("dynexec", format!("begin\n    push.{d}.{c}.{b}.{a}\n    dynexec\nend\n")),
+        ("dyncall", format!("begin\n    push.{d}.{c}.{b}.{a}\n    dyncall\nend\n")),
+    ];
 
-    let res = Assembler::with_kernel(source_manager, kernel).assemble_program(program_src);
-
-    assert!(
-        res.is_err(),
-        "expected `exec.::$kernel::...` to be rejected in executable modules"
-    );
+    for (kind, program_src) in cases {
+        let err = Assembler::with_kernel(source_manager.clone(), kernel.clone())
+            .assemble_program(program_src)
+            .expect_err(&format!("kernel exports should be syscall-only, but {kind} succeeded"));
+        assert_diagnostic!(err, "syscall");
+    }
 }
 
 #[test]

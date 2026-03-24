@@ -82,6 +82,14 @@ pub enum LinkerError {
         source_file: Option<Arc<SourceFile>>,
         callee: Arc<Path>,
     },
+    #[error("kernel procedure can only be invoked via syscall, not via dynamic execution")]
+    #[diagnostic()]
+    KernelProcDynInvoke {
+        #[label("dynamic invocation targets a kernel procedure")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+    },
     #[error("invalid procedure reference: path refers to a non-procedure item")]
     #[diagnostic()]
     InvalidInvokeTarget {
