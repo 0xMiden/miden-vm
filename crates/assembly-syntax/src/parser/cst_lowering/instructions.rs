@@ -1,9 +1,14 @@
-use alloc::{string::String, vec::Vec};
+use alloc::{
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 
 use miden_assembly_syntax_cst::{
     SyntaxKind, SyntaxToken,
     ast::{AstNode, Instruction as CstInstruction},
 };
+use miden_core::events::EventId;
 use miden_debug_types::{SourceSpan, Span};
 
 use super::{
@@ -11,7 +16,7 @@ use super::{
     fragments::{ParsedNumeric, lower_u32_immediate_token, parse_decimal_u64, parse_numeric_token},
 };
 use crate::{
-    Felt,
+    Felt, Word,
     ast::{self, DebugOptions, Immediate, Instruction, SystemEventNode},
     parser::{LiteralErrorKind, ParsingError, PushValue},
 };
@@ -20,16 +25,18 @@ pub(super) fn try_lower_instruction(
     context: &mut LoweringContext<'_>,
     instruction: &CstInstruction,
 ) -> Result<Option<Vec<ast::Op>>, ParsingError> {
-    let Some(compact) = CompactInstruction::parse(instruction) else {
-        return Ok(None);
-    };
-
     let span = context.parse().span_for_node(instruction.syntax());
-    if let Some(inst) = lower_primitive_instruction(span, compact.text.as_str()) {
-        return Ok(Some(vec![inst_op(span, inst)]));
+    if let Some(compact) = CompactInstruction::parse(instruction) {
+        if let Some(inst) = lower_primitive_instruction(compact.text.as_str()) {
+            return Ok(Some(vec![inst_op(span, inst)]));
+        }
+
+        if let Some(ops) = lower_immediate_instruction(context, span, &compact)? {
+            return Ok(Some(ops));
+        }
     }
 
-    lower_immediate_instruction(context, span, &compact)
+    lower_extended_instruction(context, instruction)
 }
 
 struct CompactInstruction {
@@ -184,7 +191,7 @@ fn lower_immediate_instruction(
     }
 }
 
-fn lower_primitive_instruction(span: SourceSpan, text: &str) -> Option<Instruction> {
+fn lower_primitive_instruction(text: &str) -> Option<Instruction> {
     let instruction = match text {
         "add" => Instruction::Add,
         "adv.insert_hdword" => Instruction::SysEvent(SystemEventNode::InsertHdword),
@@ -211,9 +218,7 @@ fn lower_primitive_instruction(span: SourceSpan, text: &str) -> Option<Instructi
         "crypto_stream" => Instruction::CryptoStream,
         "cswap" => Instruction::CSwap,
         "cswapw" => Instruction::CSwapW,
-        "debug.adv_stack" => {
-            Instruction::Debug(DebugOptions::AdvStackTop(zero_u16_immediate(span)))
-        },
+        "debug.adv_stack" => Instruction::Debug(DebugOptions::AdvStackTop(0u16.into())),
         "debug.local" => Instruction::Debug(DebugOptions::LocalAll),
         "debug.mem" => Instruction::Debug(DebugOptions::MemAll),
         "debug.stack" => Instruction::Debug(DebugOptions::StackAll),
@@ -321,6 +326,616 @@ fn lower_primitive_instruction(span: SourceSpan, text: &str) -> Option<Instructi
     };
 
     Some(instruction)
+}
+
+fn lower_extended_instruction(
+    context: &mut LoweringContext<'_>,
+    instruction: &CstInstruction,
+) -> Result<Option<Vec<ast::Op>>, ParsingError> {
+    let tokens = significant_tokens(instruction);
+    let Some(first) = tokens.first() else {
+        return Ok(None);
+    };
+    if first.kind() != SyntaxKind::Ident {
+        return Ok(None);
+    }
+
+    let span = context.parse().span_for_node(instruction.syntax());
+    match first.text() {
+        "push" => lower_push_instruction(context, span, &tokens),
+        "exec" => lower_invocation_instruction(context, span, &tokens, Instruction::Exec),
+        "call" => lower_invocation_instruction(context, span, &tokens, Instruction::Call),
+        "syscall" => lower_invocation_instruction(context, span, &tokens, Instruction::SysCall),
+        "procref" => lower_invocation_instruction(context, span, &tokens, Instruction::ProcRef),
+        "debug" => lower_debug_instruction(context, span, &tokens),
+        "emit" => lower_emit_instruction(context, span, &tokens),
+        "trace" => lower_trace_instruction(context, span, &tokens),
+        "assert" => lower_error_code_instruction(
+            context,
+            span,
+            &tokens,
+            "assert",
+            Instruction::AssertWithError,
+        ),
+        "assertz" => lower_error_code_instruction(
+            context,
+            span,
+            &tokens,
+            "assertz",
+            Instruction::AssertzWithError,
+        ),
+        "assert_eq" => lower_error_code_instruction(
+            context,
+            span,
+            &tokens,
+            "assert_eq",
+            Instruction::AssertEqWithError,
+        ),
+        "assert_eqw" => lower_error_code_instruction(
+            context,
+            span,
+            &tokens,
+            "assert_eqw",
+            Instruction::AssertEqwWithError,
+        ),
+        "u32assert" => lower_error_code_instruction(
+            context,
+            span,
+            &tokens,
+            "u32assert",
+            Instruction::U32AssertWithError,
+        ),
+        "u32assert2" => lower_error_code_instruction(
+            context,
+            span,
+            &tokens,
+            "u32assert2",
+            Instruction::U32Assert2WithError,
+        ),
+        "u32assertw" => lower_error_code_instruction(
+            context,
+            span,
+            &tokens,
+            "u32assertw",
+            Instruction::U32AssertWWithError,
+        ),
+        "mtree_verify" => lower_error_code_instruction(
+            context,
+            span,
+            &tokens,
+            "mtree_verify",
+            Instruction::MTreeVerifyWithError,
+        ),
+        _ => Ok(None),
+    }
+}
+
+fn lower_push_instruction(
+    context: &mut LoweringContext<'_>,
+    instruction_span: SourceSpan,
+    tokens: &[SyntaxToken],
+) -> Result<Option<Vec<ast::Op>>, ParsingError> {
+    if !matches!(tokens, [push, dot, ..] if push.kind() == SyntaxKind::Ident
+        && push.text() == "push"
+        && dot.kind() == SyntaxKind::Dot)
+    {
+        return Ok(None);
+    }
+
+    let rest = &tokens[2..];
+    if rest.is_empty() {
+        return Ok(None);
+    }
+
+    if let Some((imm, consumed, imm_span)) = lower_word_immediate(context, rest)? {
+        if consumed == rest.len() {
+            let push = match imm {
+                Immediate::Constant(name) => Immediate::Constant(name),
+                Immediate::Value(value) => Immediate::Value(value.map(PushValue::Word)),
+            };
+            return Ok(Some(vec![inst_op(instruction_span, Instruction::Push(push))]));
+        }
+
+        if rest.get(consumed).is_some_and(|token| token.kind() == SyntaxKind::LBracket)
+            && let Some((range, used)) = parse_push_slice_range(context, rest, consumed)?
+            && consumed + used == rest.len()
+        {
+            return Ok(Some(vec![inst_op(
+                instruction_span,
+                Instruction::PushSlice(imm.with_span(imm_span), range),
+            )]));
+        }
+    }
+
+    lower_push_list(context, instruction_span, rest)
+}
+
+fn lower_invocation_instruction(
+    context: &mut LoweringContext<'_>,
+    instruction_span: SourceSpan,
+    tokens: &[SyntaxToken],
+    build: fn(ast::InvocationTarget) -> Instruction,
+) -> Result<Option<Vec<ast::Op>>, ParsingError> {
+    if tokens.len() < 3 || tokens[1].kind() != SyntaxKind::Dot {
+        return Ok(None);
+    }
+
+    let target = lower_invocation_target(context, &tokens[2..])?;
+    Ok(Some(vec![inst_op(instruction_span, build(target))]))
+}
+
+fn lower_debug_instruction(
+    context: &mut LoweringContext<'_>,
+    instruction_span: SourceSpan,
+    tokens: &[SyntaxToken],
+) -> Result<Option<Vec<ast::Op>>, ParsingError> {
+    if tokens.len() < 3
+        || tokens[0].kind() != SyntaxKind::Ident
+        || tokens[0].text() != "debug"
+        || tokens[1].kind() != SyntaxKind::Dot
+        || tokens[2].kind() != SyntaxKind::Ident
+    {
+        return Ok(None);
+    }
+
+    let option = match tokens[2].text() {
+        "stack" => match &tokens[3..] {
+            [] => return Ok(None),
+            [dot, value] if dot.kind() == SyntaxKind::Dot => {
+                let imm = lower_u8_immediate(context, value)?.ok_or_else(|| {
+                    ParsingError::InvalidSyntax {
+                        span: context.parse().span_for_token(value),
+                        message: "expected a u8 literal or constant reference".to_string(),
+                    }
+                })?;
+                DebugOptions::StackTop(imm)
+            },
+            _ => return Ok(None),
+        },
+        "mem" => match &tokens[3..] {
+            [] => return Ok(None),
+            [dot, value] if dot.kind() == SyntaxKind::Dot => {
+                let imm = lower_u32_immediate(context, value)?.ok_or_else(|| {
+                    ParsingError::InvalidSyntax {
+                        span: context.parse().span_for_token(value),
+                        message: "expected a u32 literal or constant reference".to_string(),
+                    }
+                })?;
+                DebugOptions::MemInterval(imm.clone(), imm)
+            },
+            [dot1, first, dot2, second]
+                if dot1.kind() == SyntaxKind::Dot && dot2.kind() == SyntaxKind::Dot =>
+            {
+                let first = lower_u32_immediate(context, first)?.ok_or_else(|| {
+                    ParsingError::InvalidSyntax {
+                        span: context.parse().span_for_token(first),
+                        message: "expected a u32 literal or constant reference".to_string(),
+                    }
+                })?;
+                let second = lower_u32_immediate(context, second)?.ok_or_else(|| {
+                    ParsingError::InvalidSyntax {
+                        span: context.parse().span_for_token(second),
+                        message: "expected a u32 literal or constant reference".to_string(),
+                    }
+                })?;
+                DebugOptions::MemInterval(first, second)
+            },
+            _ => return Ok(None),
+        },
+        "local" => match &tokens[3..] {
+            [] => return Ok(None),
+            [dot, value] if dot.kind() == SyntaxKind::Dot => {
+                let imm = lower_u16_immediate(context, value)?.ok_or_else(|| {
+                    ParsingError::InvalidSyntax {
+                        span: context.parse().span_for_token(value),
+                        message: "expected a u16 literal or constant reference".to_string(),
+                    }
+                })?;
+                DebugOptions::LocalRangeFrom(imm)
+            },
+            [dot1, first, dot2, second]
+                if dot1.kind() == SyntaxKind::Dot && dot2.kind() == SyntaxKind::Dot =>
+            {
+                let first = lower_u16_immediate(context, first)?.ok_or_else(|| {
+                    ParsingError::InvalidSyntax {
+                        span: context.parse().span_for_token(first),
+                        message: "expected a u16 literal or constant reference".to_string(),
+                    }
+                })?;
+                let second = lower_u16_immediate(context, second)?.ok_or_else(|| {
+                    ParsingError::InvalidSyntax {
+                        span: context.parse().span_for_token(second),
+                        message: "expected a u16 literal or constant reference".to_string(),
+                    }
+                })?;
+                DebugOptions::LocalInterval(first, second)
+            },
+            _ => return Ok(None),
+        },
+        "adv_stack" => match &tokens[3..] {
+            [] => return Ok(None),
+            [dot, value] if dot.kind() == SyntaxKind::Dot => {
+                let imm = lower_u16_immediate(context, value)?.ok_or_else(|| {
+                    ParsingError::InvalidSyntax {
+                        span: context.parse().span_for_token(value),
+                        message: "expected a u16 literal or constant reference".to_string(),
+                    }
+                })?;
+                DebugOptions::AdvStackTop(imm)
+            },
+            _ => return Ok(None),
+        },
+        _ => return Ok(None),
+    };
+
+    Ok(Some(vec![inst_op(instruction_span, Instruction::Debug(option))]))
+}
+
+fn lower_emit_instruction(
+    context: &mut LoweringContext<'_>,
+    instruction_span: SourceSpan,
+    tokens: &[SyntaxToken],
+) -> Result<Option<Vec<ast::Op>>, ParsingError> {
+    if tokens.len() < 3
+        || tokens[0].kind() != SyntaxKind::Ident
+        || tokens[0].text() != "emit"
+        || tokens[1].kind() != SyntaxKind::Dot
+    {
+        return Ok(None);
+    }
+
+    match &tokens[2..] {
+        [name] if name.kind() == SyntaxKind::Ident && name.text() != "event" => {
+            let name = context.lower_constant_ident_token(name)?;
+            Ok(Some(vec![inst_op(
+                instruction_span,
+                Instruction::EmitImm(Immediate::Constant(name)),
+            )]))
+        },
+        [event, lparen, string, rparen]
+            if event.kind() == SyntaxKind::Ident
+                && event.text() == "event"
+                && lparen.kind() == SyntaxKind::LParen
+                && matches!(string.kind(), SyntaxKind::QuotedString | SyntaxKind::QuotedIdent)
+                && rparen.kind() == SyntaxKind::RParen =>
+        {
+            let value = unquote_string_token(string, context.parse().span_for_token(string))?;
+            let event_id = EventId::from_name(value.as_ref()).as_felt();
+            Ok(Some(vec![inst_op(
+                instruction_span,
+                Instruction::EmitImm(Immediate::Value(Span::new(instruction_span, event_id))),
+            )]))
+        },
+        _ => Ok(None),
+    }
+}
+
+fn lower_trace_instruction(
+    context: &mut LoweringContext<'_>,
+    instruction_span: SourceSpan,
+    tokens: &[SyntaxToken],
+) -> Result<Option<Vec<ast::Op>>, ParsingError> {
+    if !matches!(tokens, [trace, dot, _value] if trace.kind() == SyntaxKind::Ident
+        && trace.text() == "trace"
+        && dot.kind() == SyntaxKind::Dot)
+    {
+        return Ok(None);
+    }
+
+    let value =
+        lower_u32_immediate(context, &tokens[2])?.ok_or_else(|| ParsingError::InvalidSyntax {
+            span: context.parse().span_for_token(&tokens[2]),
+            message: "expected a u32 literal or constant reference".to_string(),
+        })?;
+    Ok(Some(vec![inst_op(instruction_span, Instruction::Trace(value))]))
+}
+
+fn lower_error_code_instruction(
+    context: &mut LoweringContext<'_>,
+    instruction_span: SourceSpan,
+    tokens: &[SyntaxToken],
+    keyword: &str,
+    build: fn(ast::ErrorMsg) -> Instruction,
+) -> Result<Option<Vec<ast::Op>>, ParsingError> {
+    if !matches!(
+        tokens,
+        [kw, dot, err, eq, _]
+            if kw.kind() == SyntaxKind::Ident
+                && kw.text() == keyword
+                && dot.kind() == SyntaxKind::Dot
+                && err.kind() == SyntaxKind::Ident
+                && err.text() == "err"
+                && eq.kind() == SyntaxKind::Equal
+    ) {
+        return Ok(None);
+    }
+
+    let value = lower_error_msg(context, &tokens[4])?;
+    Ok(Some(vec![inst_op(instruction_span, build(value))]))
+}
+
+fn lower_invocation_target(
+    context: &mut LoweringContext<'_>,
+    tokens: &[SyntaxToken],
+) -> Result<ast::InvocationTarget, ParsingError> {
+    let span = span_for_tokens(context, tokens);
+    if tokens.len() == 1 && tokens[0].kind() == SyntaxKind::Number {
+        return match parse_numeric_token(span, tokens[0].text())? {
+            ParsedNumeric::Word(value) => {
+                Ok(ast::InvocationTarget::MastRoot(Span::new(span, Word::from(value.0))))
+            },
+            ParsedNumeric::Int(_)
+                if tokens[0].text().starts_with("0x") || tokens[0].text().starts_with("0X") =>
+            {
+                Err(ParsingError::InvalidMastRoot { span })
+            },
+            ParsedNumeric::Int(_) => Err(ParsingError::InvalidSyntax {
+                span,
+                message: "expected a procedure name, path, or MAST root digest".to_string(),
+            }),
+        };
+    }
+
+    if !tokens.iter().all(|token| {
+        matches!(
+            token.kind(),
+            SyntaxKind::Ident
+                | SyntaxKind::QuotedIdent
+                | SyntaxKind::SpecialIdent
+                | SyntaxKind::ColonColon
+        )
+    }) {
+        return Err(ParsingError::InvalidSyntax {
+            span,
+            message: "expected a procedure name, path, or MAST root digest".to_string(),
+        });
+    }
+
+    let raw = tokens.iter().map(SyntaxToken::text).collect::<String>();
+    let path = context.lower_raw_path(span, &raw)?;
+    if let Some(name) = path.as_ident() {
+        Ok(ast::InvocationTarget::Symbol(name.with_span(span)))
+    } else {
+        Ok(ast::InvocationTarget::Path(path))
+    }
+}
+
+fn lower_push_list(
+    context: &mut LoweringContext<'_>,
+    instruction_span: SourceSpan,
+    tokens: &[SyntaxToken],
+) -> Result<Option<Vec<ast::Op>>, ParsingError> {
+    let mut ops = Vec::new();
+    let mut index = 0usize;
+    while index < tokens.len() {
+        let token = &tokens[index];
+        let imm_span = context.parse().span_for_token(token);
+        let imm = match token.kind() {
+            SyntaxKind::Ident => Immediate::Constant(context.lower_constant_ident_token(token)?),
+            SyntaxKind::Number => match parse_numeric_token(imm_span, token.text())? {
+                ParsedNumeric::Int(value) => Immediate::Value(Span::new(imm_span, value)),
+                ParsedNumeric::Word(_) => return Ok(None),
+            },
+            _ => return Ok(None),
+        };
+
+        let span = if ops.is_empty() {
+            SourceSpan::new(instruction_span.source_id(), instruction_span.start()..imm_span.end())
+        } else {
+            imm_span
+        };
+        ops.push(inst_op(span, Instruction::Push(imm.map(PushValue::Int))));
+
+        index += 1;
+        if index == tokens.len() {
+            break;
+        }
+        if tokens[index].kind() != SyntaxKind::Dot {
+            return Ok(None);
+        }
+        index += 1;
+    }
+
+    if ops.len() > 16 {
+        return Err(ParsingError::PushOverflow { span: instruction_span, count: ops.len() });
+    }
+    Ok(Some(ops))
+}
+
+fn lower_word_immediate(
+    context: &mut LoweringContext<'_>,
+    tokens: &[SyntaxToken],
+) -> Result<Option<(Immediate<crate::parser::WordValue>, usize, SourceSpan)>, ParsingError> {
+    let Some(first) = tokens.first() else {
+        return Ok(None);
+    };
+
+    match first.kind() {
+        SyntaxKind::Ident => {
+            let ident = context.lower_constant_ident_token(first)?;
+            Ok(Some((Immediate::Constant(ident), 1, context.parse().span_for_token(first))))
+        },
+        SyntaxKind::Number => {
+            let span = context.parse().span_for_token(first);
+            match parse_numeric_token(span, first.text())? {
+                ParsedNumeric::Word(word) => {
+                    Ok(Some((Immediate::Value(Span::new(span, word)), 1, span)))
+                },
+                ParsedNumeric::Int(_) => Ok(None),
+            }
+        },
+        SyntaxKind::LBracket => lower_word_literal(context, tokens).map(|option| {
+            option.map(|(value, consumed, span)| {
+                (Immediate::Value(Span::new(span, value)), consumed, span)
+            })
+        }),
+        _ => Ok(None),
+    }
+}
+
+fn lower_word_literal(
+    context: &mut LoweringContext<'_>,
+    tokens: &[SyntaxToken],
+) -> Result<Option<(crate::parser::WordValue, usize, SourceSpan)>, ParsingError> {
+    if tokens.first().is_none_or(|token| token.kind() != SyntaxKind::LBracket) {
+        return Ok(None);
+    }
+    if tokens.len() < 9 {
+        return Ok(None);
+    }
+
+    let mut index = 1usize;
+    let mut elements = [Felt::ZERO; 4];
+    for (position, element) in elements.iter_mut().enumerate() {
+        let Some(token) = tokens.get(index) else {
+            return Ok(None);
+        };
+        if token.kind() != SyntaxKind::Number {
+            return Ok(None);
+        }
+        let span = context.parse().span_for_token(token);
+        match parse_numeric_token(span, token.text())? {
+            ParsedNumeric::Int(value) => *element = Felt::new(value.as_int()),
+            ParsedNumeric::Word(_) => {
+                return Err(ParsingError::InvalidSyntax {
+                    span,
+                    message: "expected a felt-sized integer literal".to_string(),
+                });
+            },
+        }
+        index += 1;
+        if position < 3 {
+            if tokens.get(index).is_none_or(|token| token.kind() != SyntaxKind::Comma) {
+                return Ok(None);
+            }
+            index += 1;
+        }
+    }
+
+    let Some(rbracket) = tokens.get(index) else {
+        return Ok(None);
+    };
+    if rbracket.kind() != SyntaxKind::RBracket {
+        return Ok(None);
+    }
+    let span = join_spans(
+        context.parse().span_for_token(&tokens[0]),
+        context.parse().span_for_token(rbracket),
+    );
+    Ok(Some((crate::parser::WordValue(elements), index + 1, span)))
+}
+
+fn parse_push_slice_range(
+    context: &LoweringContext<'_>,
+    tokens: &[SyntaxToken],
+    start: usize,
+) -> Result<Option<(core::ops::Range<usize>, usize)>, ParsingError> {
+    if tokens.get(start).is_none_or(|token| token.kind() != SyntaxKind::LBracket) {
+        return Ok(None);
+    }
+
+    let Some(first) = tokens.get(start + 1) else {
+        return Ok(None);
+    };
+    let Some(begin) = parse_decimal_u64(first.text()) else {
+        return Ok(None);
+    };
+    let begin = usize::try_from(begin).ok().unwrap_or(usize::MAX);
+
+    match (tokens.get(start + 2), tokens.get(start + 3), tokens.get(start + 4)) {
+        (Some(rbracket), _, _) if rbracket.kind() == SyntaxKind::RBracket => {
+            let end = begin.checked_add(1).ok_or(ParsingError::ImmediateOutOfRange {
+                span: join_spans(
+                    context.parse().span_for_token(&tokens[start]),
+                    context.parse().span_for_token(rbracket),
+                ),
+                range: 0..usize::MAX,
+            })?;
+            Ok(Some((core::ops::Range { start: begin, end }, 3)))
+        },
+        (Some(dotdot), Some(end), Some(rbracket))
+            if dotdot.kind() == SyntaxKind::DotDot && rbracket.kind() == SyntaxKind::RBracket =>
+        {
+            let Some(end) = parse_decimal_u64(end.text()) else {
+                return Ok(None);
+            };
+            let end = usize::try_from(end).ok().unwrap_or(usize::MAX);
+            Ok(Some((core::ops::Range { start: begin, end }, 5)))
+        },
+        _ => Ok(None),
+    }
+}
+
+fn lower_error_msg(
+    context: &mut LoweringContext<'_>,
+    token: &SyntaxToken,
+) -> Result<ast::ErrorMsg, ParsingError> {
+    let span = context.parse().span_for_token(token);
+    match token.kind() {
+        SyntaxKind::QuotedString | SyntaxKind::QuotedIdent => {
+            let value = unquote_string_token(token, span)?;
+            Ok(Immediate::Value(Span::new(span, value)))
+        },
+        SyntaxKind::Ident => Ok(Immediate::Constant(context.lower_constant_ident_token(token)?)),
+        _ => Err(ParsingError::InvalidSyntax {
+            span,
+            message: "expected a quoted string or constant reference".to_string(),
+        }),
+    }
+}
+
+fn lower_u8_immediate(
+    context: &mut LoweringContext<'_>,
+    token: &SyntaxToken,
+) -> Result<Option<ast::ImmU8>, ParsingError> {
+    let span = context.parse().span_for_token(token);
+    match token.kind() {
+        SyntaxKind::Ident => {
+            Ok(Some(Immediate::Constant(context.lower_constant_ident_token(token)?)))
+        },
+        SyntaxKind::Number => {
+            let Some(value) = parse_decimal_u64(token.text()) else {
+                return Ok(None);
+            };
+            let value = u8::try_from(value).map_err(|_| ParsingError::ImmediateOutOfRange {
+                span,
+                range: 0..(u8::MAX as usize + 1),
+            })?;
+            Ok(Some(Immediate::Value(Span::new(span, value))))
+        },
+        _ => Ok(None),
+    }
+}
+
+fn significant_tokens(instruction: &CstInstruction) -> Vec<SyntaxToken> {
+    instruction
+        .syntax()
+        .children_with_tokens()
+        .filter_map(|element| element.into_token())
+        .filter(|token| !token.kind().is_trivia())
+        .collect()
+}
+
+fn span_for_tokens(context: &LoweringContext<'_>, tokens: &[SyntaxToken]) -> SourceSpan {
+    let first = tokens.first().expect("instruction operands should be non-empty");
+    let last = tokens.last().expect("non-empty tokens");
+    join_spans(context.parse().span_for_token(first), context.parse().span_for_token(last))
+}
+
+fn unquote_string_token(token: &SyntaxToken, span: SourceSpan) -> Result<Arc<str>, ParsingError> {
+    token
+        .text()
+        .strip_prefix('"')
+        .and_then(|text| text.strip_suffix('"'))
+        .map(Arc::<str>::from)
+        .ok_or(ParsingError::InvalidSyntax {
+            span,
+            message: "expected a quoted string".to_string(),
+        })
+}
+
+fn join_spans(start: SourceSpan, end: SourceSpan) -> SourceSpan {
+    SourceSpan::new(start.source_id(), start.start()..end.end())
 }
 
 enum FeltFoldKind {
@@ -941,8 +1556,4 @@ fn push_u32_op(span: SourceSpan, imm: ast::ImmU32) -> ast::Op {
 
 fn push_zero_op(span: SourceSpan) -> ast::Op {
     inst_op(span, Instruction::Push(Immediate::Value(Span::new(span, PushValue::from(0u8)))))
-}
-
-fn zero_u16_immediate(span: SourceSpan) -> ast::ImmU16 {
-    Immediate::Value(Span::new(span, 0u16))
 }
