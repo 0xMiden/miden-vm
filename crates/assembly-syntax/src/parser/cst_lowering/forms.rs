@@ -8,8 +8,7 @@ use miden_assembly_syntax_cst::{
     SyntaxKind, SyntaxToken,
     ast::{
         AdviceMap as CstAdviceMap, AstNode, BeginBlock as CstBeginBlock, Constant as CstConstant,
-        Import as CstImport, Item as CstItem, Procedure as CstProcedure,
-        SourceFile as CstSourceFile, TypeDecl as CstTypeDecl,
+        Import as CstImport, Item as CstItem, Procedure as CstProcedure, TypeDecl as CstTypeDecl,
     },
 };
 use miden_debug_types::{SourceSpan, Span, Spanned};
@@ -28,37 +27,21 @@ use crate::{Word, ast, parser::ParsingError};
 pub(super) fn lower_source_file(
     context: &mut LoweringContext<'_>,
 ) -> Result<Vec<ast::Form>, ParsingError> {
-    let source_file = CstSourceFile::cast(context.parse().syntax()).expect("source file");
+    let source_file = context.parse().root();
     let items = source_file.items().collect::<Vec<_>>();
     let mut forms = Vec::with_capacity(items.len());
     let mut index = 0usize;
 
     while index < items.len() {
-        if index == 0
-            && is_doc_item(&items[index])
-            && starts_at_file_beginning(context, &items[index])
-        {
-            let end = extend_leading_module_doc_group(context, &items, index);
-            forms.push(lower_doc_group(context, &items[index..end], true));
+        if let Some(is_module_doc) = doc_group_kind(context, &items, index) {
+            let end = extend_doc_group(context, &items, index);
+            forms.push(lower_doc_group(context, &items[index..end], is_module_doc));
             index = end;
             continue;
         }
 
         match &items[index] {
-            CstItem::ModuleDoc(_) => {
-                let end = extend_doc_group(context, &items, index);
-                forms.push(lower_doc_group(
-                    context,
-                    &items[index..end],
-                    starts_at_file_beginning(context, &items[index]),
-                ));
-                index = end;
-            },
-            CstItem::Doc(_) => {
-                let end = extend_doc_group(context, &items, index);
-                forms.push(lower_doc_group(context, &items[index..end], false));
-                index = end;
-            },
+            CstItem::ModuleDoc(_) | CstItem::Doc(_) => unreachable!("doc items handled above"),
             CstItem::Import(import) => {
                 forms.push(lower_import(context, import)?);
                 index += 1;
@@ -89,19 +72,9 @@ pub(super) fn lower_source_file(
     Ok(forms)
 }
 
-fn extend_leading_module_doc_group(
-    context: &LoweringContext<'_>,
-    items: &[CstItem],
-    start: usize,
-) -> usize {
-    let mut end = start + 1;
-    while end < items.len()
-        && is_doc_item(&items[end])
-        && !has_blank_line_between(context, &items[end - 1], &items[end])
-    {
-        end += 1;
-    }
-    end
+fn doc_group_kind(context: &LoweringContext<'_>, items: &[CstItem], index: usize) -> Option<bool> {
+    let item = items.get(index)?;
+    is_doc_item(item).then(|| index == 0 && starts_at_file_beginning(context, item))
 }
 
 fn extend_doc_group(context: &LoweringContext<'_>, items: &[CstItem], start: usize) -> usize {

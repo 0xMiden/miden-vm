@@ -1400,7 +1400,7 @@ end
         let signature = procedure.signature().expect("signature");
 
         let mut interned = BTreeSet::default();
-        let mut context = LoweringContext::new(source, parse, &mut interned);
+        let mut context = LoweringContext::new(parse, &mut interned);
         let signature = lower_function_type_from_signature(&mut context, &signature)
             .expect("signature lowering should succeed");
 
@@ -1452,7 +1452,7 @@ end
         let body = type_decl.body().expect("type body");
 
         let mut interned = BTreeSet::default();
-        let mut context = LoweringContext::new(source, parse, &mut interned);
+        let mut context = LoweringContext::new(parse, &mut interned);
         let ty = lower_type_expr_from_alias_body(&mut context, &body)
             .expect("type lowering should succeed");
 
@@ -1507,7 +1507,7 @@ end
         let attribute = procedure.attributes().next().expect("attribute");
 
         let mut interned = BTreeSet::default();
-        let mut context = LoweringContext::new(source, parse, &mut interned);
+        let mut context = LoweringContext::new(parse, &mut interned);
         let attribute =
             lower_attribute(&mut context, &attribute).expect("attribute lowering should succeed");
 
@@ -1558,7 +1558,7 @@ end
             .expect("advice map");
 
         let mut interned = BTreeSet::default();
-        let mut context = LoweringContext::new(source, parse, &mut interned);
+        let mut context = LoweringContext::new(parse, &mut interned);
         let entry = lower_advice_map_decl(&mut context, &advice_map)
             .expect("advice-map lowering should succeed");
 

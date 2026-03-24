@@ -66,9 +66,13 @@ impl Default for InternalParserBackend {
 #[cfg(any(test, feature = "testing"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
+/// Selects which raw parser implementation to use when parsing forms in tests or differential
+/// validation.
 pub enum ParserBackend {
+    /// Uses the original LALRPOP-based parser.
     Legacy,
     #[cfg(feature = "std")]
+    /// Uses the lossless CST parser followed by CST-to-AST lowering.
     Cst,
 }
 
@@ -215,8 +219,10 @@ pub fn parse_forms(source: Arc<SourceFile>) -> Result<Vec<ast::Form>, ParsingErr
     parse_forms_internal(source, &mut interned)
 }
 
-/// This is used in tests to invoke a specific parser backend without changing the default parser
-/// behavior for ordinary callers.
+/// Parses raw forms with an explicitly selected backend.
+///
+/// This is intended for tests and differential validation. Ordinary callers should use
+/// [`parse_forms`] or [`ModuleParser`] and accept the default backend.
 #[cfg(any(test, feature = "testing"))]
 pub fn parse_forms_with_backend(
     source: Arc<SourceFile>,
