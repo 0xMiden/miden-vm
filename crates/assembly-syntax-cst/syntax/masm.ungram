@@ -1,8 +1,7 @@
 SourceFile = Item*
 
 Item =
-  ModuleDoc
-| Doc
+  Doc
 | Import
 | Constant
 | TypeDecl
@@ -10,7 +9,6 @@ Item =
 | BeginBlock
 | Procedure
 
-ModuleDoc = DocComment
 Doc = DocComment
 
 Import = Visibility? "use" Path ("->" Name)?

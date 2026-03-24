@@ -157,7 +157,6 @@ fn analyze_children(parent: &SyntaxNode) -> (Vec<NodeLayout>, ContainerTail) {
 
 fn render_item(item: &Item, indent: usize) -> String {
     match item {
-        Item::ModuleDoc(doc) => render_doc(doc, indent),
         Item::Doc(doc) => render_doc(doc, indent),
         Item::Import(import) => render_import(import, indent),
         Item::Constant(constant) => render_value_declaration(constant.syntax(), indent),
