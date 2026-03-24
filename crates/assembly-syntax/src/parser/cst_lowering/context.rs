@@ -107,6 +107,11 @@ impl<'a> LoweringContext<'a> {
         Ok(ast::Ident::from_raw_parts(Span::new(span, interned)))
     }
 
+    pub(super) fn lower_string_text(&mut self, span: SourceSpan, text: &str) -> ast::Ident {
+        let interned = self.intern(text);
+        ast::Ident::from_raw_parts(Span::new(span, interned))
+    }
+
     pub(super) fn lower_path(&mut self, path: &CstPath) -> Result<Span<Arc<Path>>, ParsingError> {
         let span = self.parse.span_for_node(path.syntax());
         let mut raw = String::new();
