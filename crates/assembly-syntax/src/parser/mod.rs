@@ -591,6 +591,41 @@ end
 
     #[cfg(feature = "std")]
     #[test]
+    fn experimental_cst_backend_matches_legacy_top_level_form_sequences() {
+        let source = test_source_file(
+            "\
+#! Module docs line 1
+#! Module docs line 2
+
+#! Import docs
+use std::math::u64
+
+#! Constant docs
+const ERR = 1
+
+type FeltAlias = felt
+adv_map TABLE = [1, 2]
+begin
+    nop
+end
+
+@locals(1)
+pub proc foo
+    loc_load.0
+end
+",
+        );
+
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+            .expect("legacy parser should succeed");
+        let cst = parse_forms_with_backend(source, ParserBackend::CstExperimental)
+            .expect("cst backend should succeed");
+
+        assert_eq!(cst, legacy);
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
     fn experimental_cst_backend_reports_cst_parse_errors() {
         let source = test_source_file("begin\n    if.true\n        add\n");
 

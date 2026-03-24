@@ -1,4 +1,5 @@
-use rowan::ast::{AstNode, support};
+pub use rowan::ast::AstNode;
+use rowan::ast::support;
 
 use crate::syntax::{MasmLanguage, SyntaxKind, SyntaxNode, SyntaxToken};
 
