@@ -1,6 +1,9 @@
-use alloc::{string::ToString, vec::Vec};
+use alloc::{format, string::ToString, vec::Vec};
 
-use super::{AdviceMap, ForestLayout, MastForest, MastNodeEntry, MastNodeId, basic_block_data_len};
+use super::{
+    AdviceMap, ForestLayout, MastForest, MastNodeEntry, MastNodeId, basic_block_data_len,
+    reserve_allocation,
+};
 use crate::{
     Felt,
     chiplets::hasher,
@@ -38,12 +41,17 @@ pub(super) struct ResolvedSerializedForest<'a> {
 }
 
 impl ForestDigests {
-    fn new(bytes: &[u8], layout: &ForestLayout) -> Result<Self, DeserializationError> {
-        let slot_by_node = build_digest_slot_by_node(bytes, layout)?;
+    fn new(
+        bytes: &[u8],
+        layout: &ForestLayout,
+        mut remaining_allocation_budget: Option<&mut usize>,
+    ) -> Result<Self, DeserializationError> {
+        let slot_by_node =
+            build_digest_slot_by_node(bytes, layout, remaining_allocation_budget.as_deref_mut())?;
         // If the internal-hash section is absent, rebuild all non-external digests once and cache
         // them for later lookups.
         let hash_table = if layout.node_hash_offset.is_none() {
-            Some(recompute_hash_table(bytes, layout)?)
+            Some(recompute_hash_table(bytes, layout, remaining_allocation_budget)?)
         } else {
             None
         };
@@ -80,7 +88,18 @@ impl ForestDigests {
 impl<'a> ResolvedSerializedForest<'a> {
     /// Resolves digest access for a parsed serialized forest.
     pub(super) fn new(bytes: &'a [u8], layout: ForestLayout) -> Result<Self, DeserializationError> {
-        let digests = ForestDigests::new(bytes, &layout)?;
+        let digests = ForestDigests::new(bytes, &layout, None)?;
+        Ok(Self { bytes, layout, digests })
+    }
+
+    /// Resolves digest access for a parsed serialized forest while charging helper allocations
+    /// against an explicit untrusted validation budget.
+    pub(super) fn new_with_allocation_budget(
+        bytes: &'a [u8],
+        layout: ForestLayout,
+        mut allocation_budget: usize,
+    ) -> Result<Self, DeserializationError> {
+        let digests = ForestDigests::new(bytes, &layout, Some(&mut allocation_budget))?;
         Ok(Self { bytes, layout, digests })
     }
 
@@ -195,11 +214,18 @@ fn basic_block_data(
 fn build_digest_slot_by_node(
     bytes: &[u8],
     layout: &ForestLayout,
+    remaining_allocation_budget: Option<&mut usize>,
 ) -> Result<Vec<u32>, DeserializationError> {
     // Digest sections are packed densely by node kind rather than by absolute node index.
     // This scan records, for each node index, which slot to read from in the corresponding digest
     // source.
-    let mut slots = Vec::with_capacity(layout.node_count);
+    let mut slots = Vec::new();
+    reserve_node_capacity(
+        &mut slots,
+        layout.node_count,
+        "digest slot table",
+        remaining_allocation_budget,
+    )?;
     let mut external_slot = 0u32;
     let mut node_hash_slot = 0u32;
 
@@ -224,6 +250,7 @@ fn build_digest_slot_by_node(
 fn recompute_hash_table(
     bytes: &[u8],
     layout: &ForestLayout,
+    remaining_allocation_budget: Option<&mut usize>,
 ) -> Result<Vec<crate::Word>, DeserializationError> {
     let basic_block_data_decoder = BasicBlockDataDecoder::new(basic_block_data(
         bytes,
@@ -231,7 +258,13 @@ fn recompute_hash_table(
         layout.basic_block_len,
     )?);
 
-    let mut digests = Vec::with_capacity(layout.node_count);
+    let mut digests = Vec::new();
+    reserve_node_capacity(
+        &mut digests,
+        layout.node_count,
+        "hash table",
+        remaining_allocation_budget,
+    )?;
     let mut external_digest_index = 0usize;
 
     for index in 0..layout.node_count {
@@ -287,6 +320,22 @@ fn recompute_hash_table(
     }
 
     Ok(digests)
+}
+
+fn reserve_node_capacity<T>(
+    values: &mut Vec<T>,
+    node_count: usize,
+    label: &str,
+    remaining_allocation_budget: Option<&mut usize>,
+) -> Result<(), DeserializationError> {
+    if let Some(allocation_budget) = remaining_allocation_budget {
+        reserve_allocation::<T>(allocation_budget, node_count, label)?;
+    }
+    values.try_reserve_exact(node_count).map_err(|err| {
+        DeserializationError::InvalidValue(format!(
+            "failed to reserve {label} for {node_count} nodes: {err}",
+        ))
+    })
 }
 
 fn checked_child_index(

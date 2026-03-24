@@ -10,6 +10,12 @@
 //! reject hashless payloads. [`crate::mast::UntrustedMastForest`] accepts them and rebuilds
 //! non-external digests before use. If a non-hashless payload is sent down the untrusted path,
 //! validation recomputes those digests and requires them to match the serialized values.
+//! Budgeted untrusted reads always bound wire counts during layout scanning via
+//! [`ByteReader::max_alloc`]. Callers that opt into validation budgeting also get a second check:
+//! - later stripped/hashless helper allocations are charged against an explicit validation budget
+//!   before the corresponding `Vec` or CSR scaffolding is created
+//! - the default convenience path uses a coarse validation budget derived from the input size;
+//!   this is intentionally a simple bound for common callers, not an exact peak-memory formula
 //!
 //! The main layers fit together like this:
 //!
@@ -17,7 +23,7 @@
 //! wire bytes
 //!     |
 //!     +--> ForestLayout -----------> SerializedMastForest --+
-//!     |        scan offsets             structural view      |
+//!     |        absolute offsets         structural view      |
 //!     |                                                     v
 //!     +--> UntrustedMastForest ----validate----> ResolvedSerializedForest ---> MastForest
 //!              bytes + parsed state                digest-backed view            trusted runtime
@@ -74,10 +80,17 @@
 //! Readers recover per-node digest lookup by scanning node entries once and building a compact
 //! "slot by node index" table. This preserves random access without forcing all digests into the
 //! same contiguous array on the wire.
+//!
+//! Public entry points adopt these policies:
+//! - [`MastForest::read_from_bytes`]: trusted full payload, no hashless support.
+//! - [`SerializedMastForest::new`]: trusted structural inspection, including hashless payloads.
+//! - [`crate::mast::UntrustedMastForest::read_from_bytes`] /
+//!   [`crate::mast::UntrustedMastForest::read_from_bytes_with_budgets`]: untrusted parsing plus
+//!   later validation before use.
 
 #[cfg(test)]
 use alloc::string::ToString;
-use alloc::vec::Vec;
+use alloc::{format, vec::Vec};
 
 use miden_utils_sync::OnceLockCompat;
 
@@ -129,6 +142,25 @@ type StringDataOffset = usize;
 
 /// Specifies an offset into the strings table of an encoded [`MastForest`].
 type StringIndex = usize;
+
+/// Default multiplier for the untrusted validation allocation budget.
+///
+/// The budgeted byte reader limits wire-driven parsing. Hashless and stripped validation also
+/// needs transient per-node allocations for the slot table, empty debug-info scaffolding, and
+/// rebuilt digest table. The generic untrusted path also retains a recorded copy of the consumed
+/// serialized payload for deferred validation.
+///
+/// This convenience multiplier is therefore a coarse "wire bytes plus worst-case helper
+/// headroom" bound:
+/// - `* 6` covers the helper-allocation model introduced with explicit validation budgeting
+/// - `+ 1 * bytes_len` covers the retained serialized copy recorded during untrusted reads
+///
+/// It is deliberately conservative and exists to make the default
+/// [`crate::mast::UntrustedMastForest::read_from_bytes`] path usable without forcing callers to
+/// size each helper allocation themselves. Callers with stricter limits should use
+/// [`crate::mast::UntrustedMastForest::read_from_bytes_with_budgets`] and choose explicit parsing
+/// and validation budgets.
+const DEFAULT_UNTRUSTED_ALLOCATION_BUDGET_MULTIPLIER: usize = 7;
 
 // CONSTANTS
 // ================================================================================================
@@ -357,6 +389,18 @@ impl<'a> SerializedMastForest<'a> {
     /// node/roots/random-access metadata only. It does not validate or fully parse trailing
     /// `AdviceMap` / `DebugInfo` payloads.
     ///
+    /// Treat this as a trusted inspection API, not as an untrusted-validation entry point. It is
+    /// appropriate for local tools that need random access over serialized structure, but callers
+    /// handling adversarial bytes should use [`crate::mast::UntrustedMastForest`] instead.
+    ///
+    /// In particular, this constructor does **not** protect callers from untrusted-input concerns
+    /// that are enforced by [`crate::mast::UntrustedMastForest::validate`]. It does not:
+    /// - verify that serialized non-external digests match the structure they describe
+    /// - check topological ordering / forward-reference constraints
+    /// - validate basic-block batch invariants or procedure-name-root consistency
+    /// - fully parse or validate trailing `AdviceMap` / `DebugInfo` payloads
+    /// - provide a bounded-work guarantee for hashless digest-backed inspection
+    ///
     /// For strict full-payload validation, use
     /// [`crate::mast::MastForest::read_from_bytes`].
     ///
@@ -398,7 +442,7 @@ impl<'a> SerializedMastForest<'a> {
         Ok(Self {
             bytes,
             flags,
-            layout: layout.resolve()?,
+            layout,
             resolved: OnceLockCompat::new(),
         })
     }
@@ -634,8 +678,17 @@ impl Deserializable for MastForest {
 
 impl super::UntrustedMastForest {
     pub(super) fn into_materialized(self) -> Result<MastForest, DeserializationError> {
-        ResolvedSerializedForest::new(&self.bytes, self.layout)?
-            .materialize(self.advice_map, self.debug_info)
+        let resolved = if let Some(allocation_budget) = self.remaining_allocation_budget {
+            ResolvedSerializedForest::new_with_allocation_budget(
+                &self.bytes,
+                self.layout,
+                allocation_budget,
+            )?
+        } else {
+            ResolvedSerializedForest::new(&self.bytes, self.layout)?
+        };
+
+        resolved.materialize(self.advice_map, self.debug_info)
     }
 }
 
@@ -643,6 +696,15 @@ pub(super) fn read_untrusted_with_flags<R: ByteReader>(
     source: &mut R,
 ) -> Result<(super::UntrustedMastForest, u8), DeserializationError> {
     let (flags, forest) = decode_from_reader(source, true)?;
+    log_untrusted_overspecification(flags);
+    Ok((forest, flags.bits()))
+}
+
+pub(super) fn read_untrusted_with_flags_and_allocation_budget<R: ByteReader>(
+    source: &mut R,
+    allocation_budget: usize,
+) -> Result<(super::UntrustedMastForest, u8), DeserializationError> {
+    let (flags, forest) = decode_from_reader_inner(source, true, Some(allocation_budget))?;
     log_untrusted_overspecification(flags);
     Ok((forest, flags.bits()))
 }
@@ -665,12 +727,28 @@ fn decode_from_reader<R: ByteReader>(
     source: &mut R,
     allow_hashless: bool,
 ) -> Result<(WireFlags, super::UntrustedMastForest), DeserializationError> {
+    decode_from_reader_inner(source, allow_hashless, None)
+}
+
+fn decode_from_reader_inner<R: ByteReader>(
+    source: &mut R,
+    allow_hashless: bool,
+    mut remaining_allocation_budget: Option<usize>,
+) -> Result<(WireFlags, super::UntrustedMastForest), DeserializationError> {
     let mut recording = TrackingReader::new_recording(source);
     let (flags, layout) = read_header_and_scan_layout(&mut recording, allow_hashless)?;
-    let layout = layout.resolve()?;
 
     let advice_map = AdviceMap::read_from(&mut recording)?;
     let debug_info = if flags.is_stripped() {
+        if let Some(allocation_budget) = &mut remaining_allocation_budget {
+            reserve_allocation::<usize>(
+                allocation_budget,
+                layout.node_count.checked_add(1).ok_or_else(|| {
+                    DeserializationError::InvalidValue("debug-info node count overflow".into())
+                })?,
+                "empty debug-info scaffolding",
+            )?;
+        }
         super::DebugInfo::empty_for_nodes(layout.node_count)
     } else {
         super::DebugInfo::read_from(&mut recording)?
@@ -683,8 +761,32 @@ fn decode_from_reader<R: ByteReader>(
             layout,
             advice_map,
             debug_info,
+            remaining_allocation_budget,
         },
     ))
+}
+
+pub(super) fn reserve_allocation<T>(
+    remaining_budget: &mut usize,
+    count: usize,
+    label: &str,
+) -> Result<(), DeserializationError> {
+    let bytes_needed = count
+        .checked_mul(core::mem::size_of::<T>())
+        .ok_or_else(|| DeserializationError::InvalidValue(format!("{label} size overflow")))?;
+    if bytes_needed > *remaining_budget {
+        return Err(DeserializationError::InvalidValue(format!(
+            "{label} requires {bytes_needed} bytes, exceeding the remaining untrusted allocation budget of {} bytes",
+            *remaining_budget
+        )));
+    }
+
+    *remaining_budget -= bytes_needed;
+    Ok(())
+}
+
+pub(super) fn default_untrusted_allocation_budget(bytes_len: usize) -> usize {
+    bytes_len.saturating_mul(DEFAULT_UNTRUSTED_ALLOCATION_BUDGET_MULTIPLIER)
 }
 
 // UNTRUSTED DESERIALIZATION
@@ -705,8 +807,8 @@ impl Deserializable for super::UntrustedMastForest {
 
     /// Deserializes an [`super::UntrustedMastForest`] from bytes using budgeted deserialization.
     ///
-    /// This method uses a [`crate::serde::BudgetedReader`] with a budget equal to the input size
-    /// to protect against denial-of-service attacks from malicious input.
+    /// This method uses the default untrusted wire/validation budget from
+    /// [`super::UntrustedMastForest::read_from_bytes`].
     ///
     /// After deserialization, callers should use [`super::UntrustedMastForest::validate()`]
     /// to verify structural integrity and recompute all node hashes before using

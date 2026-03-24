@@ -1,4 +1,4 @@
-use alloc::{string::ToString, vec::Vec};
+use alloc::{format, string::ToString, vec::Vec};
 
 use super::{
     FLAG_HASHLESS, FLAG_STRIPPED, FLAGS_RESERVED_MASK, MAGIC, MastForest, MastNodeEntry, VERSION,
@@ -11,8 +11,15 @@ use crate::{
 /// Fixed offsets and counts for the structural sections of a serialized MAST forest.
 ///
 /// This is the shared substrate used by both serialized random-access views and the reader-based
-/// deserialization paths. It answers "where is this section?" but does not decide whether the
-/// bytes should be trusted.
+/// deserialization paths. All offsets are absolute byte offsets into the full serialized blob.
+/// `ForestLayout` itself is not a trust marker; it only says the structural sections fit within
+/// the scanned byte slice.
+///
+/// The scanner validates section sizes immediately. For budgeted readers, it also bounds wire
+/// counts via [`ByteReader::max_alloc`] before those counts are used to size fixed-width sections.
+/// Plain [`SliceReader`] leaves `max_alloc` unconstrained, so trusted inspection paths keep their
+/// previous behavior. Full untrusted validation lives above this layer in
+/// [`crate::mast::UntrustedMastForest`].
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ForestLayout {
     pub(super) node_count: usize,
@@ -40,37 +47,6 @@ pub(super) struct WireFlags(u8);
 impl ForestLayout {
     pub(crate) fn is_hashless(&self) -> bool {
         self.node_hash_offset.is_none()
-    }
-
-    /// Converts scan-time offsets, which are relative to the post-header payload, into byte
-    /// offsets into the full serialized blob.
-    pub(super) fn resolve(mut self) -> Result<Self, DeserializationError> {
-        let header_len = MAGIC.len() + 1 + VERSION.len();
-        self.roots_offset = header_len.checked_add(self.roots_offset).ok_or_else(|| {
-            DeserializationError::InvalidValue("roots offset overflow".to_string())
-        })?;
-        self.basic_block_offset =
-            header_len.checked_add(self.basic_block_offset).ok_or_else(|| {
-                DeserializationError::InvalidValue("basic-block offset overflow".to_string())
-            })?;
-        self.node_entry_offset =
-            header_len.checked_add(self.node_entry_offset).ok_or_else(|| {
-                DeserializationError::InvalidValue("node entry offset overflow".to_string())
-            })?;
-        self.external_digest_offset =
-            header_len.checked_add(self.external_digest_offset).ok_or_else(|| {
-                DeserializationError::InvalidValue("external digest offset overflow".to_string())
-            })?;
-        self.node_hash_offset = self
-            .node_hash_offset
-            .map(|offset| {
-                header_len.checked_add(offset).ok_or_else(|| {
-                    DeserializationError::InvalidValue("node hash offset overflow".to_string())
-                })
-            })
-            .transpose()?;
-
-        Ok(self)
     }
 
     pub(super) fn read_procedure_root_at(
@@ -176,7 +152,9 @@ pub(super) fn read_header_and_scan_layout<R: OffsetTrackingReader>(
     source: &mut R,
     allow_hashless: bool,
 ) -> Result<(WireFlags, ForestLayout), DeserializationError> {
-    // Reader trust policy is enforced here, before deeper parsing.
+    // This scanner always enforces syntactic layout validity. Reader choice determines the trust
+    // policy for counts: e.g. `SliceReader` for trusted inspection versus `BudgetedReader` for the
+    // untrusted deserialization path.
     let (raw_flags, _version) = read_and_validate_header(source)?;
     let flags = WireFlags::new(raw_flags)?;
     if flags.is_hashless() && !allow_hashless {
@@ -285,8 +263,6 @@ fn scan_layout_sections<R: OffsetTrackingReader>(
     source: &mut R,
     is_hashless: bool,
 ) -> Result<ForestLayout, DeserializationError> {
-    let body_start = source.offset();
-
     let node_count = source.read_usize()?;
     if node_count > MastForest::MAX_NODES {
         return Err(DeserializationError::InvalidValue(format!(
@@ -295,26 +271,27 @@ fn scan_layout_sections<R: OffsetTrackingReader>(
             MastForest::MAX_NODES
         )));
     }
+    validate_budgeted_count(
+        source,
+        node_count,
+        MastNodeEntry::min_serialized_size(),
+        "node count",
+    )?;
+
     let roots_count = source.read_usize()?;
-    let roots_offset = source
-        .offset()
-        .checked_sub(body_start)
-        .ok_or_else(|| DeserializationError::InvalidValue("roots offset underflow".to_string()))?;
+    validate_budgeted_count(source, roots_count, core::mem::size_of::<u32>(), "root count")?;
+    let roots_offset = source.offset();
     let roots_len_bytes = roots_count
         .checked_mul(core::mem::size_of::<u32>())
         .ok_or_else(|| DeserializationError::InvalidValue("roots length overflow".to_string()))?;
     let _roots_data = source.read_slice(roots_len_bytes)?;
 
     let basic_block_len = source.read_usize()?;
-    let basic_block_offset = source.offset().checked_sub(body_start).ok_or_else(|| {
-        DeserializationError::InvalidValue("basic-block offset underflow".to_string())
-    })?;
+    let basic_block_offset = source.offset();
     let _basic_block_data = source.read_slice(basic_block_len)?;
 
     let node_entry_size = MastNodeEntry::min_serialized_size();
-    let node_entry_offset = source.offset().checked_sub(body_start).ok_or_else(|| {
-        DeserializationError::InvalidValue("node entry offset underflow".to_string())
-    })?;
+    let node_entry_offset = source.offset();
     let mut external_digest_count = 0usize;
     for _ in 0..node_count {
         let node_entry = MastNodeEntry::read_from(source)?;
@@ -325,9 +302,7 @@ fn scan_layout_sections<R: OffsetTrackingReader>(
         }
     }
 
-    let external_digest_offset = source.offset().checked_sub(body_start).ok_or_else(|| {
-        DeserializationError::InvalidValue("external digest offset underflow".to_string())
-    })?;
+    let external_digest_offset = source.offset();
     let external_digests_len = external_digest_count
         .checked_mul(crate::Word::min_serialized_size())
         .ok_or_else(|| {
@@ -341,9 +316,7 @@ fn scan_layout_sections<R: OffsetTrackingReader>(
     let node_hash_offset = if is_hashless {
         None
     } else {
-        let offset = source.offset().checked_sub(body_start).ok_or_else(|| {
-            DeserializationError::InvalidValue("node hash offset underflow".to_string())
-        })?;
+        let offset = source.offset();
         let node_hash_len =
             node_hash_count.checked_mul(crate::Word::min_serialized_size()).ok_or_else(|| {
                 DeserializationError::InvalidValue("node hash length overflow".to_string())
@@ -367,6 +340,22 @@ fn scan_layout_sections<R: OffsetTrackingReader>(
         #[cfg(test)]
         node_hash_count,
     })
+}
+
+fn validate_budgeted_count<R: ByteReader>(
+    source: &R,
+    count: usize,
+    element_size: usize,
+    label: &str,
+) -> Result<(), DeserializationError> {
+    let max_count = source.max_alloc(element_size);
+    if count > max_count {
+        return Err(DeserializationError::InvalidValue(format!(
+            "{label} {count} exceeds reader allocation bound {max_count} for {element_size}-byte elements",
+        )));
+    }
+
+    Ok(())
 }
 
 fn read_and_validate_header<R: ByteReader>(

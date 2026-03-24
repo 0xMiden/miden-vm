@@ -12,20 +12,34 @@
 //!     .validate()?;
 //! ```
 //!
-//! For maximum protection against denial-of-service attacks from malicious input, use
-//! [`UntrustedMastForest::read_from_bytes_with_budget`] which limits memory consumption:
+//! [`UntrustedMastForest::read_from_bytes`] applies default parsing and validation budgets derived
+//! from the input size. Use [`UntrustedMastForest::read_from_bytes_with_budget`] to tune only the
+//! wire-parsing budget, or [`UntrustedMastForest::read_from_bytes_with_budgets`] to tune both:
 //!
 //! ```ignore
 //! use miden_core::mast::UntrustedMastForest;
 //!
-//! // Budget limits pre-allocation sizes and total bytes consumed
+//! // Parsing budget only
 //! let forest = UntrustedMastForest::read_from_bytes_with_budget(&bytes, bytes.len())?
+//!     .validate()?;
+//!
+//! // Parsing budget plus explicit validation-allocation budget
+//! let forest = UntrustedMastForest::read_from_bytes_with_budgets(&bytes, bytes.len(), bytes.len() * 7)?
 //!     .validate()?;
 //! ```
 //!
 //! This recomputes all node hashes and checks structural invariants before returning a usable
 //! `MastForest`. Direct deserialization via `MastForest::read_from_bytes` trusts the serialized
 //! hashes and should only be used for data from trusted sources (e.g. compiled locally).
+//!
+//! In practice, the public entry points split into three policies:
+//! - [`MastForest::read_from_bytes`]: trusted full deserialization; rejects hashless payloads and
+//!   trusts serialized non-external digests.
+//! - [`SerializedMastForest::new`]: trusted inspection path; scans only the structural layout
+//!   needed for random access and may accept full, stripped, or hashless payloads.
+//! - [`UntrustedMastForest::read_from_bytes`] and
+//!   [`UntrustedMastForest::read_from_bytes_with_budgets`]: untrusted paths; parse with bounded
+//!   readers and require [`UntrustedMastForest::validate`] before use.
 
 use alloc::{
     collections::{BTreeMap, BTreeSet},
@@ -1346,6 +1360,7 @@ pub struct UntrustedMastForest {
     layout: serialization::ForestLayout,
     advice_map: AdviceMap,
     debug_info: DebugInfo,
+    remaining_allocation_budget: Option<usize>,
 }
 
 impl UntrustedMastForest {
@@ -1398,11 +1413,15 @@ impl UntrustedMastForest {
 
     /// Deserializes an [`UntrustedMastForest`] from bytes.
     ///
-    /// This method uses a [`BudgetedReader`] with a budget equal to the input size to protect
-    /// against denial-of-service attacks from malicious input.
+    /// This method uses a [`BudgetedReader`] plus a bounded validation-allocation budget derived
+    /// from the input size to protect against denial-of-service attacks from malicious input.
+    /// The default validation budget includes room for the retained serialized copy used by the
+    /// deferred-validation path, in addition to stripped/hashless helper allocations. Concretely,
+    /// the default is `bytes.len()` for parsing and `bytes.len() * 7` for validation allocations.
+    /// That `* 7` factor is a coarse convenience bound, not an exact peak-memory formula.
     ///
-    /// For stricter limits, use
-    /// [`read_from_bytes_with_budget`](Self::read_from_bytes_with_budget) with a custom budget.
+    /// For explicit parsing and validation limits, use
+    /// [`read_from_bytes_with_budgets`](Self::read_from_bytes_with_budgets).
     ///
     /// # Example
     ///
@@ -1414,7 +1433,11 @@ impl UntrustedMastForest {
     /// let forest = untrusted.validate()?;
     /// ```
     pub fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
-        Self::read_from_bytes_with_budget(bytes, bytes.len())
+        Self::read_from_bytes_with_budgets(
+            bytes,
+            bytes.len(),
+            serialization::default_untrusted_allocation_budget(bytes.len()),
+        )
     }
 
     /// Deserializes an [`UntrustedMastForest`] from bytes and returns the raw wire flags.
@@ -1422,7 +1445,11 @@ impl UntrustedMastForest {
     /// This enables callers to inspect serializer intent flags (e.g., HASHLESS) without affecting
     /// the untrusted deserialization path.
     pub fn read_from_bytes_with_flags(bytes: &[u8]) -> Result<(Self, u8), DeserializationError> {
-        Self::read_from_bytes_with_budget_and_flags(bytes, bytes.len())
+        Self::read_from_bytes_with_budgets_and_flags(
+            bytes,
+            bytes.len(),
+            serialization::default_untrusted_allocation_budget(bytes.len()),
+        )
     }
 
     /// Deserializes an [`UntrustedMastForest`] from bytes with a byte budget.
@@ -1434,13 +1461,13 @@ impl UntrustedMastForest {
     /// # Arguments
     ///
     /// * `bytes` - The serialized forest bytes
-    /// * `budget` - Maximum bytes to consume during deserialization. Set this to `bytes.len()` for
-    ///   typical use cases, or lower to enforce stricter limits.
+    /// * `budget` - Maximum bytes to consume while parsing the wire payload and pre-sizing
+    ///   wire-driven collections via [`BudgetedReader`]
     ///
     /// # Example
     ///
     /// ```ignore
-    /// // Read from untrusted source with budget equal to input size
+    /// // Read from untrusted source with an explicit parsing budget
     /// let untrusted = UntrustedMastForest::read_from_bytes_with_budget(&bytes, bytes.len())?;
     ///
     /// // Validate before use
@@ -1455,12 +1482,15 @@ impl UntrustedMastForest {
     ///
     /// This prevents attacks where malicious input claims an unrealistic number of elements
     /// (e.g., `len = 2^60`), causing excessive memory allocation before any data is read.
+    ///
+    /// To also cap stripped/hashless validation helper allocations, use
+    /// [`read_from_bytes_with_budgets`](Self::read_from_bytes_with_budgets).
     pub fn read_from_bytes_with_budget(
         bytes: &[u8],
         budget: usize,
     ) -> Result<Self, DeserializationError> {
         let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
-        Self::read_from(&mut reader)
+        serialization::read_untrusted_with_flags(&mut reader).map(|(forest, _flags)| forest)
     }
 
     /// Deserializes an [`UntrustedMastForest`] from bytes with a byte budget and returns flags.
@@ -1470,5 +1500,38 @@ impl UntrustedMastForest {
     ) -> Result<(Self, u8), DeserializationError> {
         let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
         serialization::read_untrusted_with_flags(&mut reader)
+    }
+
+    /// Deserializes an [`UntrustedMastForest`] from bytes with separate parsing and validation
+    /// budgets.
+    ///
+    /// `parsing_budget` limits wire-driven parsing and collection pre-sizing. `validation_budget`
+    /// additionally caps tracked stripped/hashless helper allocations such as empty debug-info
+    /// scaffolding, digest slot tables, and rebuilt digest tables.
+    pub fn read_from_bytes_with_budgets(
+        bytes: &[u8],
+        parsing_budget: usize,
+        validation_budget: usize,
+    ) -> Result<Self, DeserializationError> {
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), parsing_budget);
+        serialization::read_untrusted_with_flags_and_allocation_budget(
+            &mut reader,
+            validation_budget,
+        )
+        .map(|(forest, _flags)| forest)
+    }
+
+    /// Deserializes an [`UntrustedMastForest`] from bytes with separate parsing and validation
+    /// budgets and returns flags.
+    pub fn read_from_bytes_with_budgets_and_flags(
+        bytes: &[u8],
+        parsing_budget: usize,
+        validation_budget: usize,
+    ) -> Result<(Self, u8), DeserializationError> {
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), parsing_budget);
+        serialization::read_untrusted_with_flags_and_allocation_budget(
+            &mut reader,
+            validation_budget,
+        )
     }
 }

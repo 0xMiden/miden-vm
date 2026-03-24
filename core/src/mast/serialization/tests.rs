@@ -1468,8 +1468,12 @@ fn assert_untrusted_overspec_logging(
     }
     assert_eq!(untrusted.validate().unwrap().num_nodes(), expected_nodes);
 
-    let (budgeted, budgeted_flags) =
-        UntrustedMastForest::read_from_bytes_with_budget_and_flags(bytes, bytes.len()).unwrap();
+    let (budgeted, budgeted_flags) = UntrustedMastForest::read_from_bytes_with_budgets_and_flags(
+        bytes,
+        bytes.len(),
+        super::default_untrusted_allocation_budget(bytes.len()),
+    )
+    .unwrap();
     assert_eq!(budgeted_flags, expected_flags);
     assert_eq!(budgeted.validate().unwrap().num_nodes(), expected_nodes);
 }
@@ -2518,5 +2522,83 @@ fn test_deserialization_rejects_excessive_node_count() {
     assert!(
         err.to_string().contains("exceeds maximum"),
         "Expected error about exceeding maximum, got: {err}"
+    );
+}
+
+/// Test that untrusted deserialization rejects node counts that exceed the reader allocation
+/// bound before they can drive later allocations.
+#[test]
+fn test_untrusted_deserialization_rejects_node_count_above_budget_bound() {
+    let mut bytes = Vec::new();
+
+    super::MAGIC.write_into(&mut bytes);
+    bytes.write_u8(FLAG_STRIPPED | FLAG_HASHLESS);
+    super::VERSION.write_into(&mut bytes);
+
+    2usize.write_into(&mut bytes);
+
+    let result = UntrustedMastForest::read_from_bytes_with_budget(&bytes, bytes.len());
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.to_string().contains("node count 2 exceeds reader allocation bound"),
+        "Expected budget-bound node count error, got: {err}"
+    );
+}
+
+/// Test that custom untrusted budgets also apply to later hashless validation allocations.
+#[test]
+fn test_untrusted_hashless_validation_respects_custom_allocation_budget() {
+    let mut forest = MastForest::new();
+    let left = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let right = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let root = JoinNodeBuilder::new([left, right]).add_to_forest(&mut forest).unwrap();
+    forest.make_root(root);
+
+    let mut bytes = Vec::new();
+    forest.write_hashless(&mut bytes);
+
+    let untrusted =
+        UntrustedMastForest::read_from_bytes_with_budgets(&bytes, bytes.len(), bytes.len())
+            .unwrap();
+    let result = untrusted.validate();
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.to_string().contains("remaining untrusted allocation budget"),
+        "Expected validation-allocation budget error, got: {err}"
+    );
+}
+
+/// Test that stripped payloads charge empty debug-info scaffolding with the target pointer width.
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn test_untrusted_stripped_debug_info_budget_uses_usize_slots() {
+    let mut forest = MastForest::new();
+    let left = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let right = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let root = JoinNodeBuilder::new([left, right]).add_to_forest(&mut forest).unwrap();
+    forest.make_root(root);
+
+    let mut bytes = Vec::new();
+    forest.write_stripped(&mut bytes);
+
+    let validation_budget =
+        (usize::try_from(forest.num_nodes()).unwrap() + 1) * core::mem::size_of::<usize>() - 1;
+    let result =
+        UntrustedMastForest::read_from_bytes_with_budgets(&bytes, bytes.len(), validation_budget);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.to_string().contains("empty debug-info scaffolding"),
+        "Expected stripped debug-info budget error, got: {err}"
     );
 }
