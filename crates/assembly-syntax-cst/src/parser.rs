@@ -537,7 +537,7 @@ impl<'input> Parser<'input> {
                 break;
             }
 
-            if self.at_kind(SyntaxKind::DocComment) || self.at_regular_trivia() {
+            if self.at_regular_trivia() {
                 self.bump();
                 continue;
             }
