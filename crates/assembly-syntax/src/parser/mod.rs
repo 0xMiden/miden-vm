@@ -626,6 +626,36 @@ end
 
     #[cfg(feature = "std")]
     #[test]
+    fn experimental_cst_backend_matches_legacy_path_import_forms() {
+        let source = test_source_file(
+            "\
+use std::math::u64
+pub use ::std::math::u64->math_u64
+use foo::\"miden::base/account@0.1.0\"->account
+",
+        );
+
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+            .expect("legacy parser should succeed");
+        let cst = parse_forms_with_backend(source, ParserBackend::CstExperimental)
+            .expect("cst backend should succeed");
+
+        assert_eq!(cst, legacy);
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn experimental_cst_backend_reports_unqualified_imports() {
+        let source = test_source_file("use foo\n");
+
+        let err = parse_forms_with_backend(source, ParserBackend::CstExperimental)
+            .expect_err("cst backend should reject unqualified imports");
+
+        assert_matches!(err, ParsingError::UnqualifiedImport { .. });
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
     fn experimental_cst_backend_reports_cst_parse_errors() {
         let source = test_source_file("begin\n    if.true\n        add\n");
 

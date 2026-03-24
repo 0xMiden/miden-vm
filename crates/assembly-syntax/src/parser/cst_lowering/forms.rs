@@ -1,6 +1,8 @@
 use alloc::{string::String, vec::Vec};
 
-use miden_assembly_syntax_cst::ast::{AstNode, Item as CstItem, SourceFile as CstSourceFile};
+use miden_assembly_syntax_cst::ast::{
+    AstNode, Import as CstImport, Item as CstItem, SourceFile as CstSourceFile,
+};
 use miden_debug_types::{SourceSpan, Span};
 
 use super::context::LoweringContext;
@@ -33,8 +35,12 @@ pub(super) fn lower_source_file(
                 forms.push(lower_doc_group(context, &items[index..end], false));
                 index = end;
             },
+            CstItem::Import(import) => {
+                forms.push(lower_import(context, import)?);
+                index += 1;
+            },
             item => {
-                forms.push(context.lower_form_with_legacy_parser(item_span(context, item))?);
+                forms.push(lower_item_with_fallback(context, item)?);
                 index += 1;
             },
         }
@@ -148,6 +154,44 @@ fn doc_text(context: &LoweringContext<'_>, item: &CstItem) -> String {
     text.push_str(raw);
     text.push('\n');
     text
+}
+
+fn lower_import(
+    context: &mut LoweringContext<'_>,
+    import: &CstImport,
+) -> Result<ast::Form, ParsingError> {
+    let Some(path) = import.path() else {
+        return lower_item_with_fallback(context, &CstItem::Import(import.clone()));
+    };
+
+    let visibility = context.lower_visibility(import.visibility());
+    let target = context.lower_path(&path)?;
+    if target.as_ident().is_some() {
+        return Err(ParsingError::UnqualifiedImport { span: target.span() });
+    }
+
+    let name = match import.alias_token() {
+        Some(alias) => context.lower_ident_token(&alias)?,
+        None => {
+            let last = target
+                .last()
+                .expect("validated import targets should always contain at least one segment");
+            context.lower_ident_text(target.span(), last)?
+        },
+    };
+
+    Ok(ast::Form::Alias(ast::Alias::new(
+        visibility,
+        name,
+        ast::AliasTarget::Path(target),
+    )))
+}
+
+fn lower_item_with_fallback(
+    context: &mut LoweringContext<'_>,
+    item: &CstItem,
+) -> Result<ast::Form, ParsingError> {
+    context.lower_form_with_legacy_parser(item_span(context, item))
 }
 
 fn item_span(context: &LoweringContext<'_>, item: &CstItem) -> SourceSpan {

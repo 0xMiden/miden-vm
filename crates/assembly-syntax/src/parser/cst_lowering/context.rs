@@ -4,10 +4,13 @@ use alloc::{
     sync::Arc,
 };
 
-use miden_assembly_syntax_cst::Parse as CstParse;
-use miden_debug_types::{SourceFile, SourceLanguage, SourceSpan};
+use miden_assembly_syntax_cst::{
+    Parse as CstParse, SyntaxKind, SyntaxToken,
+    ast::{AstNode, Path as CstPath, Visibility as CstVisibility},
+};
+use miden_debug_types::{SourceFile, SourceLanguage, SourceSpan, Span};
 
-use crate::{ast, parser::ParsingError};
+use crate::{Path, ast, parser::ParsingError};
 
 pub(super) struct LoweringContext<'a> {
     source: Arc<SourceFile>,
@@ -38,6 +41,55 @@ impl<'a> LoweringContext<'a> {
             .expect("cst spans should always refer to valid source slices")
     }
 
+    pub(super) fn lower_visibility(&self, visibility: Option<CstVisibility>) -> ast::Visibility {
+        if visibility.is_some() {
+            ast::Visibility::Public
+        } else {
+            ast::Visibility::Private
+        }
+    }
+
+    pub(super) fn lower_ident_token(
+        &mut self,
+        token: &SyntaxToken,
+    ) -> Result<ast::Ident, ParsingError> {
+        let span = self.parse.span_for_token(token);
+        let raw = match token.kind() {
+            SyntaxKind::QuotedIdent if token.text().len() >= 2 => {
+                &token.text()[1..token.text().len() - 1]
+            },
+            _ => token.text(),
+        };
+        self.lower_ident_text(span, raw)
+    }
+
+    pub(super) fn lower_ident_text(
+        &mut self,
+        span: SourceSpan,
+        text: &str,
+    ) -> Result<ast::Ident, ParsingError> {
+        let interned = self.intern(text);
+        ast::Ident::validate(interned.as_ref())
+            .map_err(|error| ParsingError::InvalidIdentifier { error, span })?;
+        Ok(ast::Ident::from_raw_parts(Span::new(span, interned)))
+    }
+
+    pub(super) fn lower_path(&mut self, path: &CstPath) -> Result<Span<Arc<Path>>, ParsingError> {
+        let span = self.parse.span_for_node(path.syntax());
+        let mut raw = String::new();
+        for token in path.syntax().children_with_tokens().filter_map(|element| element.into_token())
+        {
+            if !token.kind().is_trivia() {
+                raw.push_str(token.text());
+            }
+        }
+
+        let path = crate::ast::PathBuf::new(&raw).map_err(|error| {
+            ParsingError::InvalidLibraryPath { span, message: error.to_string() }
+        })?;
+        Ok(Span::new(span, Arc::<Path>::from(path)))
+    }
+
     pub(super) fn lower_form_with_legacy_parser(
         &mut self,
         span: SourceSpan,
@@ -51,6 +103,14 @@ impl<'a> LoweringContext<'a> {
         Err(ParsingError::InvalidSyntax {
             span,
             message: "expected a single top-level form from CST item lowering".to_string(),
+        })
+    }
+
+    fn intern(&mut self, text: &str) -> Arc<str> {
+        self.interned.get(text).cloned().unwrap_or_else(|| {
+            let interned = Arc::<str>::from(text.to_string().into_boxed_str());
+            self.interned.insert(interned.clone());
+            interned
         })
     }
 
