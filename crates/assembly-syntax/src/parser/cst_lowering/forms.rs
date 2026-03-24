@@ -5,13 +5,16 @@ use alloc::{
 
 use miden_assembly_syntax_cst::ast::{
     AstNode, Constant as CstConstant, Import as CstImport, Item as CstItem,
-    SourceFile as CstSourceFile, TypeDecl as CstTypeDecl,
+    Procedure as CstProcedure, SourceFile as CstSourceFile, TypeDecl as CstTypeDecl,
 };
 use miden_debug_types::{SourceSpan, Span};
 
 use super::{
     context::LoweringContext,
-    fragments::{lower_constant_expr, lower_type_expr_from_alias_body},
+    fragments::{
+        lower_constant_expr, lower_enum_decl_from_body, lower_function_type_from_signature,
+        lower_type_expr_from_alias_body,
+    },
 };
 use crate::{ast, parser::ParsingError};
 
@@ -52,6 +55,14 @@ pub(super) fn lower_source_file(
             },
             CstItem::TypeDecl(type_decl) => {
                 forms.push(lower_type_decl(context, type_decl)?);
+                index += 1;
+            },
+            CstItem::Procedure(procedure) => {
+                preflight_procedure_header(context, procedure)?;
+                forms.push(lower_item_with_fallback(
+                    context,
+                    &CstItem::Procedure(procedure.clone()),
+                )?);
                 index += 1;
             },
             item => {
@@ -238,9 +249,6 @@ fn lower_type_decl(
         Some(token) => token,
         None => return lower_item_with_fallback(context, &CstItem::TypeDecl(type_decl.clone())),
     };
-    if keyword.text() != "type" {
-        return lower_item_with_fallback(context, &CstItem::TypeDecl(type_decl.clone()));
-    }
 
     let span = context.parse().span_for_node(type_decl.syntax());
     let visibility = context.lower_visibility(type_decl.visibility());
@@ -263,9 +271,33 @@ fn lower_type_decl(
         },
     };
 
-    let mut ty = lower_type_expr_from_alias_body(context, &body)?;
-    ty.set_name(name.clone());
-    Ok(ast::Form::Type(ast::TypeAlias::new(visibility, name, ty).with_span(span)))
+    match keyword.text() {
+        "type" => {
+            let mut ty = lower_type_expr_from_alias_body(context, &body)?;
+            ty.set_name(name.clone());
+            Ok(ast::Form::Type(ast::TypeAlias::new(visibility, name, ty).with_span(span)))
+        },
+        "enum" => {
+            let enum_ty = lower_enum_decl_from_body(context, visibility, name, &body, span)?;
+            Ok(ast::Form::Enum(enum_ty))
+        },
+        _ => lower_item_with_fallback(context, &CstItem::TypeDecl(type_decl.clone())),
+    }
+}
+
+fn preflight_procedure_header(
+    context: &mut LoweringContext<'_>,
+    procedure: &CstProcedure,
+) -> Result<(), ParsingError> {
+    if let Some(name) = procedure.name_token() {
+        let _ = context.lower_procedure_name_token(&name)?;
+    }
+
+    if let Some(signature) = procedure.signature() {
+        let _ = lower_function_type_from_signature(context, &signature)?;
+    }
+
+    Ok(())
 }
 
 fn lower_item_with_fallback(

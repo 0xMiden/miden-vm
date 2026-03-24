@@ -8,7 +8,7 @@ use alloc::{
 
 use miden_assembly_syntax_cst::{
     SyntaxKind, SyntaxToken,
-    ast::{AstNode, Expr as CstExpr, TypeBody as CstTypeBody},
+    ast::{AstNode, Expr as CstExpr, Signature as CstSignature, TypeBody as CstTypeBody},
 };
 use miden_core::{Felt, field::PrimeField64};
 use miden_debug_types::{SourceSpan, Span, Spanned};
@@ -17,7 +17,7 @@ use super::context::LoweringContext;
 use crate::{
     Path,
     ast::{
-        self,
+        self, PathBuf,
         types::{AddressSpace, Type, TypeRepr},
     },
     parser::{HexErrorKind, IntValue, LiteralErrorKind, ParsingError, WordValue},
@@ -45,6 +45,32 @@ pub(super) fn lower_type_expr_from_alias_body(
     parser.expect_kind(SyntaxKind::Equal, "expected `=` in type declaration")?;
     let ty = parser.parse_type_expr()?;
     parser.expect_eof("unexpected trailing tokens in type declaration")?;
+    Ok(ty)
+}
+
+pub(super) fn lower_enum_decl_from_body(
+    context: &mut LoweringContext<'_>,
+    visibility: ast::Visibility,
+    name: ast::Ident,
+    body: &CstTypeBody,
+    span: SourceSpan,
+) -> Result<ast::EnumType, ParsingError> {
+    let tokens = significant_tokens(body.syntax());
+    let mut parser = FragmentParser::new(context, tokens, span);
+    let enum_ty = parser.parse_enum_decl(visibility, name, span)?;
+    parser.expect_eof("unexpected trailing tokens in enum declaration")?;
+    Ok(enum_ty)
+}
+
+pub(super) fn lower_function_type_from_signature(
+    context: &mut LoweringContext<'_>,
+    signature: &CstSignature,
+) -> Result<ast::FunctionType, ParsingError> {
+    let span = context.parse().span_for_node(signature.syntax());
+    let tokens = significant_tokens(signature.syntax());
+    let mut parser = FragmentParser::new(context, tokens, span);
+    let ty = parser.parse_function_type()?;
+    parser.expect_eof("unexpected trailing tokens in procedure signature")?;
     Ok(ty)
 }
 
@@ -103,6 +129,38 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
         Ok(lhs)
     }
 
+    fn parse_constant_arithmetic_expr(&mut self) -> Result<ast::ConstantExpr, ParsingError> {
+        if self.is_eof() {
+            return Err(self.invalid_syntax("expected a constant expression"));
+        }
+        self.parse_constant_arithmetic_expr_bp(0)
+    }
+
+    fn parse_constant_arithmetic_expr_bp(
+        &mut self,
+        min_precedence: u8,
+    ) -> Result<ast::ConstantExpr, ParsingError> {
+        let mut lhs = self.parse_numeric_constant_term()?;
+        while let Some((precedence, op)) = self.current_constant_operator() {
+            if precedence < min_precedence {
+                break;
+            }
+
+            self.bump();
+            let rhs = self.parse_constant_arithmetic_expr_bp(precedence + 1)?;
+            let span = join_spans(lhs.span(), rhs.span());
+            lhs = ast::ConstantExpr::BinaryOp {
+                span,
+                op,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            }
+            .try_fold()?;
+        }
+
+        Ok(lhs)
+    }
+
     fn parse_constant_term(&mut self) -> Result<ast::ConstantExpr, ParsingError> {
         if self.at_kind(SyntaxKind::LParen) {
             self.bump();
@@ -141,6 +199,48 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
                 let token = self.bump().expect("quoted string token should exist");
                 let value = self.lower_string_token(&token)?;
                 Ok(ast::ConstantExpr::String(value))
+            },
+            _ => {
+                let path = self.parse_path(PathMode::Constant)?;
+                Ok(ast::ConstantExpr::Var(path))
+            },
+        }
+    }
+
+    fn parse_numeric_constant_term(&mut self) -> Result<ast::ConstantExpr, ParsingError> {
+        if self.at_kind(SyntaxKind::LParen) {
+            self.bump();
+            let expr = self.parse_constant_arithmetic_expr()?;
+            self.expect_kind(SyntaxKind::RParen, "expected `)` to close constant expression")?;
+            return Ok(expr);
+        }
+
+        if self.at_kind(SyntaxKind::LBracket)
+            || ((self.at_keyword("word") || self.at_keyword("event"))
+                && self.peek_kind(1) == Some(SyntaxKind::LParen))
+            || matches!(
+                self.current().as_ref().map(SyntaxToken::kind),
+                Some(SyntaxKind::QuotedString | SyntaxKind::QuotedIdent)
+            )
+        {
+            return Err(self.invalid_syntax("expected an integer literal or constant reference"));
+        }
+
+        let Some(token) = self.current() else {
+            return Err(self.invalid_syntax("expected an integer literal or constant reference"));
+        };
+
+        match token.kind() {
+            SyntaxKind::Number => match parse_numeric_token(self.token_span(&token), token.text())?
+            {
+                ParsedNumeric::Int(value) => {
+                    self.bump();
+                    Ok(ast::ConstantExpr::Int(Span::new(self.token_span(&token), value)))
+                },
+                ParsedNumeric::Word(_) => Err(ParsingError::InvalidSyntax {
+                    span: self.token_span(&token),
+                    message: "expected an integer literal or constant reference".to_string(),
+                }),
             },
             _ => {
                 let path = self.parse_path(PathMode::Constant)?;
@@ -227,6 +327,152 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
         }
 
         Ok(ast::TypeExpr::Ref(path))
+    }
+
+    fn parse_function_type(&mut self) -> Result<ast::FunctionType, ParsingError> {
+        let lparen =
+            self.expect_kind(SyntaxKind::LParen, "expected `(` to start procedure signature")?;
+        let args = self.parse_comma_delimited_allow_trailing(
+            SyntaxKind::RParen,
+            Self::parse_function_param_type,
+        )?;
+        let rparen =
+            self.expect_kind(SyntaxKind::RParen, "expected `)` to close procedure parameters")?;
+        let mut end_span = self.token_span(&rparen);
+        let results = if self.at_kind(SyntaxKind::RArrow) {
+            self.bump();
+            let results = self.parse_function_result_types()?;
+            if let Some(last) = self.last_consumed_span() {
+                end_span = last;
+            }
+            results
+        } else {
+            Vec::new()
+        };
+
+        Ok(ast::FunctionType::new(ast::types::CallConv::Fast, args, results)
+            .with_span(join_spans(self.token_span(&lparen), end_span)))
+    }
+
+    fn parse_function_param_type(&mut self) -> Result<ast::TypeExpr, ParsingError> {
+        if !matches!(self.current().as_ref().map(SyntaxToken::kind), Some(SyntaxKind::Ident))
+            || self.peek_kind(1) != Some(SyntaxKind::Colon)
+        {
+            return Err(self.invalid_syntax("expected a named procedure parameter"));
+        }
+
+        self.bump();
+        self.bump();
+        self.parse_type_expr()
+    }
+
+    fn parse_function_result_types(&mut self) -> Result<Vec<ast::TypeExpr>, ParsingError> {
+        if self.at_kind(SyntaxKind::LParen) {
+            self.bump();
+            let results = self.parse_comma_delimited_allow_trailing(
+                SyntaxKind::RParen,
+                Self::parse_maybe_named_result_type,
+            )?;
+            self.expect_kind(SyntaxKind::RParen, "expected `)` to close procedure results")?;
+            Ok(results)
+        } else {
+            Ok(vec![self.parse_type_expr()?])
+        }
+    }
+
+    fn parse_maybe_named_result_type(&mut self) -> Result<ast::TypeExpr, ParsingError> {
+        if matches!(self.current().as_ref().map(SyntaxToken::kind), Some(SyntaxKind::Ident))
+            && self.peek_kind(1) == Some(SyntaxKind::Colon)
+        {
+            self.bump();
+            self.bump();
+        }
+        self.parse_type_expr()
+    }
+
+    fn parse_enum_decl(
+        &mut self,
+        visibility: ast::Visibility,
+        name: ast::Ident,
+        span: SourceSpan,
+    ) -> Result<ast::EnumType, ParsingError> {
+        self.expect_kind(SyntaxKind::Colon, "expected `:` in enum declaration")?;
+        let repr = self.parse_enum_repr()?;
+        self.expect_kind(SyntaxKind::LBrace, "expected `{` to start enum body")?;
+        let variants = self.parse_enum_variants()?;
+        self.expect_kind(SyntaxKind::RBrace, "expected `}` to close enum declaration")?;
+        Ok(ast::EnumType::new(visibility, name, repr, variants).with_span(span))
+    }
+
+    fn parse_enum_repr(&mut self) -> Result<Type, ParsingError> {
+        let token = self.expect_ident("expected an integral or felt enum representation type")?;
+        let span = self.token_span(&token);
+        match token.text() {
+            "i1" => Ok(Type::I1),
+            "i8" => Ok(Type::I8),
+            "i16" => Ok(Type::I16),
+            "i32" => Ok(Type::I32),
+            "i64" => Ok(Type::I64),
+            "i128" => Ok(Type::I128),
+            "u8" => Ok(Type::U8),
+            "u16" => Ok(Type::U16),
+            "u32" => Ok(Type::U32),
+            "u64" => Ok(Type::U64),
+            "u128" => Ok(Type::U128),
+            "felt" => Ok(Type::Felt),
+            _ => Err(ParsingError::InvalidSyntax {
+                span,
+                message: "expected an integral or felt enum representation type".to_string(),
+            }),
+        }
+    }
+
+    fn parse_enum_variants(&mut self) -> Result<Vec<ast::Variant>, ParsingError> {
+        let mut variants = Vec::new();
+        let mut next = ast::ConstantExpr::Int(Span::new(self.span, IntValue::U8(0)));
+
+        while !self.at_kind(SyntaxKind::RBrace) {
+            let name_token = self.expect_ident("expected an enum variant name")?;
+            let name_span = self.token_span(&name_token);
+            let name = self.context.lower_constant_ident_token(&name_token)?;
+
+            let (variant, next_expr) = if self.at_kind(SyntaxKind::Equal) {
+                self.bump();
+                let discriminant = self.parse_constant_arithmetic_expr()?;
+                let variant_span = join_spans(name_span, discriminant.span());
+                (
+                    ast::Variant::new(name.clone(), discriminant, None).with_span(variant_span),
+                    self.next_enum_discriminant_expr(name.clone(), variant_span),
+                )
+            } else {
+                (
+                    ast::Variant::new(name.clone(), next, None).with_span(name_span),
+                    self.next_enum_discriminant_expr(name.clone(), name_span),
+                )
+            };
+            next = next_expr;
+            variants.push(variant);
+
+            if self.at_kind(SyntaxKind::Comma) {
+                self.bump();
+                if self.at_kind(SyntaxKind::RBrace) {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        Ok(variants)
+    }
+
+    fn next_enum_discriminant_expr(&self, name: ast::Ident, span: SourceSpan) -> ast::ConstantExpr {
+        ast::ConstantExpr::BinaryOp {
+            span,
+            op: ast::ConstantOp::Add,
+            lhs: Box::new(ast::ConstantExpr::Var(Span::new(span, PathBuf::from(name).into()))),
+            rhs: Box::new(ast::ConstantExpr::Int(Span::new(span, IntValue::U8(1)))),
+        }
     }
 
     fn parse_pointer_type(&mut self) -> Result<ast::PointerType, ParsingError> {
@@ -594,6 +840,38 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
         self.tokens.get(self.pos).cloned()
     }
 
+    fn last_consumed_span(&self) -> Option<SourceSpan> {
+        self.pos
+            .checked_sub(1)
+            .and_then(|index| self.tokens.get(index))
+            .map(|token| self.token_span(token))
+    }
+
+    fn parse_comma_delimited_allow_trailing<T>(
+        &mut self,
+        terminator: SyntaxKind,
+        mut parse_item: impl FnMut(&mut Self) -> Result<T, ParsingError>,
+    ) -> Result<Vec<T>, ParsingError> {
+        let mut items = Vec::new();
+        if self.at_kind(terminator) {
+            return Ok(items);
+        }
+
+        loop {
+            items.push(parse_item(self)?);
+            if self.at_kind(SyntaxKind::Comma) {
+                self.bump();
+                if self.at_kind(terminator) {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        Ok(items)
+    }
+
     fn current_span(&self) -> SourceSpan {
         self.current()
             .map(|token| self.token_span(&token))
@@ -787,5 +1065,139 @@ fn close_text(kind: SyntaxKind) -> &'static str {
         SyntaxKind::RBracket => "]",
         SyntaxKind::RAngle => ">",
         _ => "token",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::{
+        collections::BTreeSet,
+        string::ToString,
+        sync::Arc,
+    };
+
+    use miden_assembly_syntax_cst::{
+        ast::{AstNode, Item as CstItem, SourceFile as CstSourceFile},
+        parse_source_file,
+    };
+    use miden_debug_types::{SourceFile, SourceId, SourceLanguage, Uri};
+    use pretty_assertions::assert_eq;
+
+    use super::{lower_function_type_from_signature, lower_type_expr_from_alias_body};
+    use crate::{ast, parser::cst_lowering::context::LoweringContext};
+
+    #[test]
+    fn lowers_procedure_signatures_from_cst_tokens() {
+        let source = test_source_file(
+            "\
+pub proc foo(a: felt, b: ptr<u8, addrspace(byte)>) -> (ok: i1, value: [u32; 4])
+    nop
+end
+",
+        );
+        let parse = parse_source_file(source.clone());
+        assert!(parse.diagnostics().is_empty(), "unexpected CST diagnostics");
+
+        let source_file = CstSourceFile::cast(parse.syntax()).expect("source file");
+        let procedure = source_file
+            .items()
+            .find_map(|item| match item {
+                CstItem::Procedure(procedure) => Some(procedure),
+                _ => None,
+            })
+            .expect("procedure");
+        let signature = procedure.signature().expect("signature");
+
+        let mut interned = BTreeSet::default();
+        let mut context = LoweringContext::new(source, parse, &mut interned);
+        let signature = lower_function_type_from_signature(&mut context, &signature)
+            .expect("signature lowering should succeed");
+
+        assert_eq!(
+            signature,
+            ast::FunctionType::new(
+                ast::types::CallConv::Fast,
+                vec![
+                    ast::TypeExpr::Primitive(miden_debug_types::Span::unknown(
+                        ast::types::Type::Felt
+                    )),
+                    ast::TypeExpr::Ptr(
+                        ast::PointerType::new(ast::TypeExpr::Primitive(
+                            miden_debug_types::Span::unknown(ast::types::Type::U8),
+                        ))
+                        .with_address_space(ast::types::AddressSpace::Byte),
+                    ),
+                ],
+                vec![
+                    ast::TypeExpr::Primitive(miden_debug_types::Span::unknown(
+                        ast::types::Type::I1
+                    )),
+                    ast::TypeExpr::Array(ast::ArrayType::new(
+                        ast::TypeExpr::Primitive(miden_debug_types::Span::unknown(
+                            ast::types::Type::U32
+                        )),
+                        4,
+                    )),
+                ],
+            )
+        );
+    }
+
+    #[test]
+    fn lowers_named_type_alias_bodies_from_cst_tokens() {
+        let source =
+            test_source_file("type Point = struct { x: u32, y: ptr<u8, addrspace(byte)> }\n");
+        let parse = parse_source_file(source.clone());
+        assert!(parse.diagnostics().is_empty(), "unexpected CST diagnostics");
+
+        let source_file = CstSourceFile::cast(parse.syntax()).expect("source file");
+        let type_decl = source_file
+            .items()
+            .find_map(|item| match item {
+                CstItem::TypeDecl(type_decl) => Some(type_decl),
+                _ => None,
+            })
+            .expect("type decl");
+        let body = type_decl.body().expect("type body");
+
+        let mut interned = BTreeSet::default();
+        let mut context = LoweringContext::new(source, parse, &mut interned);
+        let ty = lower_type_expr_from_alias_body(&mut context, &body)
+            .expect("type lowering should succeed");
+
+        assert_eq!(
+            ty,
+            ast::TypeExpr::Struct(ast::StructType::new(
+                None,
+                [
+                    ast::StructField {
+                        span: miden_debug_types::SourceSpan::UNKNOWN,
+                        name: ast::Ident::new("x").unwrap(),
+                        ty: ast::TypeExpr::Primitive(miden_debug_types::Span::unknown(
+                            ast::types::Type::U32,
+                        )),
+                    },
+                    ast::StructField {
+                        span: miden_debug_types::SourceSpan::UNKNOWN,
+                        name: ast::Ident::new("y").unwrap(),
+                        ty: ast::TypeExpr::Ptr(
+                            ast::PointerType::new(ast::TypeExpr::Primitive(
+                                miden_debug_types::Span::unknown(ast::types::Type::U8),
+                            ))
+                            .with_address_space(ast::types::AddressSpace::Byte),
+                        ),
+                    },
+                ],
+            ))
+        );
+    }
+
+    fn test_source_file(source: &str) -> Arc<SourceFile> {
+        Arc::new(SourceFile::new(
+            SourceId::UNKNOWN,
+            SourceLanguage::Masm,
+            Uri::new("memory:///cst-fragments-test.masm"),
+            source.to_string().into_boxed_str(),
+        ))
     }
 }
