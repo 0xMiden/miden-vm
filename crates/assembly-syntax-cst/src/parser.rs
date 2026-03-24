@@ -1253,7 +1253,7 @@ end
             |labels| {
                 labels
                     .iter()
-                    .any(|l| l.label().is_some_and(|label| label.contains("unrecognized")))
+                    .any(|l| l.label().is_some_and(|label| label.contains("unrecognized token")))
             }
         )));
     }
@@ -1299,9 +1299,9 @@ end
             .iter()
             .find(|diag| {
                 diag.labels.as_ref().is_some_and(|labels| {
-                    labels
-                        .iter()
-                        .any(|l| l.label().is_some_and(|label| label.contains("unrecognized")))
+                    labels.iter().any(|l| {
+                        l.label().is_some_and(|label| label.contains("unrecognized token"))
+                    })
                 })
             })
             .expect("invalid-token diagnostic");

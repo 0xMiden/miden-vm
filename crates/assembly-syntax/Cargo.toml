@@ -18,7 +18,9 @@ exclude.workspace = true
 default = ["std"]
 std = [
     "aho-corasick/std",
+    "dep:miden-assembly-syntax-cst",
     "miden-core/std",
+    "miden-assembly-syntax-cst/std",
     "miden-debug-types/std",
     "miden-utils-diagnostics/std",
     "thiserror/std",
@@ -37,6 +39,7 @@ logging = ["dep:env_logger"]
 
 [dependencies]
 # Miden dependencies
+miden-assembly-syntax-cst = { workspace = true, default-features = false, optional = true }
 miden-core.workspace = true
 miden-debug-types.workspace = true
 miden-utils-diagnostics.workspace = true

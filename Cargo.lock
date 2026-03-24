@@ -1286,6 +1286,7 @@ dependencies = [
  "lalrpop",
  "lalrpop-util",
  "log",
+ "miden-assembly-syntax-cst",
  "miden-core",
  "miden-debug-types",
  "miden-test-serde-macros",

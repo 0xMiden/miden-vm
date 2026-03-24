@@ -18,6 +18,8 @@ lalrpop_util::lalrpop_mod!(
     "/parser/grammar.rs"
 );
 
+#[cfg(feature = "std")]
+mod cst_lowering;
 mod error;
 mod lexer;
 mod scanner;
@@ -40,6 +42,47 @@ use crate::{Path, ast, sema};
 // ================================================================================================
 
 type ParseError<'a> = lalrpop_util::ParseError<u32, Token<'a>, ParsingError>;
+
+#[cfg_attr(not(any(test, feature = "testing")), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InternalParserBackend {
+    Legacy,
+    #[cfg(feature = "std")]
+    CstExperimental,
+}
+
+impl Default for InternalParserBackend {
+    fn default() -> Self {
+        Self::Legacy
+    }
+}
+
+#[cfg(any(test, feature = "testing"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ParserBackend {
+    Legacy,
+    #[cfg(feature = "std")]
+    CstExperimental,
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl Default for ParserBackend {
+    fn default() -> Self {
+        Self::Legacy
+    }
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl From<ParserBackend> for InternalParserBackend {
+    fn from(backend: ParserBackend) -> Self {
+        match backend {
+            ParserBackend::Legacy => Self::Legacy,
+            #[cfg(feature = "std")]
+            ParserBackend::CstExperimental => Self::CstExperimental,
+        }
+    }
+}
 
 // MODULE PARSER
 // ================================================================================================
@@ -160,11 +203,43 @@ pub fn parse_forms(source: Arc<SourceFile>) -> Result<Vec<ast::Form>, ParsingErr
     parse_forms_internal(source, &mut interned)
 }
 
+/// This is used in tests to invoke a specific parser backend without changing the default parser
+/// behavior for ordinary callers.
+#[cfg(any(test, feature = "testing"))]
+pub fn parse_forms_with_backend(
+    source: Arc<SourceFile>,
+    backend: ParserBackend,
+) -> Result<Vec<ast::Form>, ParsingError> {
+    let mut interned = BTreeSet::default();
+    parse_forms_internal_with_backend(source, &mut interned, backend.into())
+}
+
 /// Parse `source` as a set of [ast::Form]s
 ///
 /// Aside from catching syntax errors, this does little validation of the resulting forms, that is
 /// handled by semantic analysis, which the caller is expected to perform next.
 fn parse_forms_internal(
+    source: Arc<SourceFile>,
+    interned: &mut BTreeSet<Arc<str>>,
+) -> Result<Vec<ast::Form>, ParsingError> {
+    parse_forms_internal_with_backend(source, interned, InternalParserBackend::default())
+}
+
+fn parse_forms_internal_with_backend(
+    source: Arc<SourceFile>,
+    interned: &mut BTreeSet<Arc<str>>,
+    backend: InternalParserBackend,
+) -> Result<Vec<ast::Form>, ParsingError> {
+    match backend {
+        InternalParserBackend::Legacy => parse_forms_with_lalrpop(source, interned),
+        #[cfg(feature = "std")]
+        InternalParserBackend::CstExperimental => {
+            cst_lowering::parse_forms_from_cst(source, interned)
+        },
+    }
+}
+
+fn parse_forms_with_lalrpop(
     source: Arc<SourceFile>,
     interned: &mut BTreeSet<Arc<str>>,
 ) -> Result<Vec<ast::Form>, ParsingError> {
@@ -346,10 +421,21 @@ mod module_walker {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use miden_core::assert_matches;
-    use miden_debug_types::SourceId;
+    use miden_debug_types::{SourceFile, SourceId, SourceLanguage, Uri};
 
     use super::*;
+
+    fn test_source_file(source: &str) -> Arc<SourceFile> {
+        Arc::new(SourceFile::new(
+            SourceId::default(),
+            SourceLanguage::Masm,
+            Uri::new("memory:///parser-backend-test.masm"),
+            source.to_string().into_boxed_str(),
+        ))
+    }
 
     // This test checks the lexer behavior with regard to tokenizing `exp(.u?[\d]+)?`
     #[test]
@@ -462,10 +548,7 @@ end
 
     #[test]
     fn overlong_path_component_is_rejected_without_panic() {
-        use std::{
-            panic::{AssertUnwindSafe, catch_unwind},
-            sync::Arc,
-        };
+        use std::panic::{AssertUnwindSafe, catch_unwind};
 
         use crate::{
             debuginfo::DefaultSourceManager,
@@ -483,5 +566,40 @@ end
         assert!(parsed.is_ok(), "parsing panicked, expected a structured error");
         let err = parsed.unwrap().expect_err("parsing succeeded, expected an error");
         crate::assert_diagnostic!(err, "this reference is invalid without a corresponding import");
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn experimental_cst_backend_can_be_invoked_for_parse_forms() {
+        let source = test_source_file(
+            "\
+const ERR = 1
+begin
+    push.1
+    add
+end
+",
+        );
+
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+            .expect("legacy parser should succeed");
+        let cst = parse_forms_with_backend(source, ParserBackend::CstExperimental)
+            .expect("cst backend should succeed");
+
+        assert_eq!(cst, legacy);
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn experimental_cst_backend_reports_cst_parse_errors() {
+        let source = test_source_file("begin\n    if.true\n        add\n");
+
+        let err = parse_forms_with_backend(source, ParserBackend::CstExperimental)
+            .expect_err("cst backend should surface a parse error");
+
+        assert_matches!(
+            err,
+            ParsingError::InvalidSyntax { message, .. } if message.contains("expected `end`")
+        );
     }
 }
