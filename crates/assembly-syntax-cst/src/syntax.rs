@@ -1,5 +1,6 @@
 use rowan::Language;
 
+/// The full set of rowan node and token kinds used by the MASM CST.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u16)]
 pub enum SyntaxKind {
@@ -60,6 +61,8 @@ pub enum SyntaxKind {
 }
 
 impl SyntaxKind {
+    /// Returns `true` if this kind represents trivia that the formatter may preserve but most
+    /// typed accessors ignore.
     pub fn is_trivia(self) -> bool {
         matches!(self, Self::Whitespace | Self::Newline | Self::Comment | Self::DocComment)
     }
@@ -128,6 +131,7 @@ const ALL_KINDS: [SyntaxKind; SyntaxKind::Star as usize + 1] = [
     SyntaxKind::Star,
 ];
 
+/// The rowan language marker for MASM CST nodes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum MasmLanguage {}
 
@@ -146,6 +150,9 @@ impl Language for MasmLanguage {
     }
 }
 
+/// A rowan syntax node in the MASM CST.
 pub type SyntaxNode = rowan::SyntaxNode<MasmLanguage>;
+/// A rowan syntax token in the MASM CST.
 pub type SyntaxToken = rowan::SyntaxToken<MasmLanguage>;
+/// A rowan syntax element in the MASM CST.
 pub type SyntaxElement = rowan::SyntaxElement<MasmLanguage>;

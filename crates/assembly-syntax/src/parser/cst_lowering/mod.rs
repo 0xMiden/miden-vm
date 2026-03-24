@@ -23,6 +23,6 @@ pub(super) fn parse_forms_from_cst(
         return Err(error);
     }
 
-    let mut context = LoweringContext::new(source, parse, interned);
+    let mut context = LoweringContext::new(parse, interned);
     lower_source_file(&mut context)
 }

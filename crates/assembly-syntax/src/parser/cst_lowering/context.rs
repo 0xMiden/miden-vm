@@ -13,30 +13,25 @@ use miden_debug_types::{SourceFile, SourceSpan, Span, Spanned};
 use crate::{Path, ast, parser::ParsingError};
 
 pub(super) struct LoweringContext<'a> {
-    source: Arc<SourceFile>,
     parse: CstParse,
     interned: &'a mut BTreeSet<Arc<str>>,
 }
 
 impl<'a> LoweringContext<'a> {
-    pub(super) fn new(
-        source: Arc<SourceFile>,
-        parse: CstParse,
-        interned: &'a mut BTreeSet<Arc<str>>,
-    ) -> Self {
-        Self { source, parse, interned }
+    pub(super) fn new(parse: CstParse, interned: &'a mut BTreeSet<Arc<str>>) -> Self {
+        Self { parse, interned }
     }
 
     pub(super) fn parse(&self) -> &CstParse {
         &self.parse
     }
 
-    pub(super) fn source_file(&self) -> &Arc<SourceFile> {
-        &self.source
+    pub(super) fn source_file(&self) -> &SourceFile {
+        self.parse.source()
     }
 
     pub(super) fn source_text(&self, span: SourceSpan) -> &str {
-        self.source
+        self.source_file()
             .source_slice(span.into_slice_index())
             .expect("cst spans should always refer to valid source slices")
     }

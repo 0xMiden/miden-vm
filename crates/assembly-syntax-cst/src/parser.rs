@@ -4,11 +4,16 @@ use miden_debug_types::{SourceFile, SourceId, SourceLanguage, SourceSpan, Uri};
 use rowan::{GreenNodeBuilder, NodeOrToken, TextRange};
 
 use crate::{
+    ast::AstNode,
     diagnostics::{LabeledSpan, Severity, diagnostic, miette::MietteDiagnostic as Diagnostic},
     lexer::{Token, tokenize},
     syntax::{SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken},
 };
 
+/// The result of parsing a MASM source file into a lossless CST.
+///
+/// This type owns the green tree, retains the originating [`SourceFile`], and exposes both
+/// diagnostics and span helpers for later lowering.
 #[derive(Debug, Clone)]
 pub struct Parse {
     source: Arc<SourceFile>,
@@ -17,34 +22,53 @@ pub struct Parse {
 }
 
 impl Parse {
+    /// Returns the raw rowan syntax tree rooted at [`SyntaxKind::SourceFile`].
     pub fn syntax(&self) -> SyntaxNode {
         SyntaxNode::new_root(self.green_node.clone())
     }
 
+    /// Returns the typed root node for this parse.
+    pub fn root(&self) -> crate::ast::SourceFile {
+        crate::ast::SourceFile::cast(self.syntax())
+            .expect("parse root kind should always be SourceFile")
+    }
+
+    /// Returns any syntax diagnostics emitted while building the CST.
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
     }
 
+    /// Removes and returns any syntax diagnostics emitted while building the CST.
     pub fn take_diagnostics(&mut self) -> Vec<Diagnostic> {
         core::mem::take(&mut self.diagnostics)
     }
 
+    /// Returns the source file used to produce this parse result.
     pub fn source_file(&self) -> Arc<SourceFile> {
         Arc::clone(&self.source)
     }
 
+    /// Returns the source file used to produce this parse result by shared reference.
+    pub fn source(&self) -> &SourceFile {
+        self.source.as_ref()
+    }
+
+    /// Returns `true` when the parse emitted at least one syntax diagnostic.
     pub fn has_errors(&self) -> bool {
         !self.diagnostics.is_empty()
     }
 
+    /// Maps a rowan node back to a [`SourceSpan`] in the originating source file.
     pub fn span_for_node(&self, node: &SyntaxNode) -> SourceSpan {
         self.span_for_range(node.text_range())
     }
 
+    /// Maps a rowan token back to a [`SourceSpan`] in the originating source file.
     pub fn span_for_token(&self, token: &SyntaxToken) -> SourceSpan {
         self.span_for_range(token.text_range())
     }
 
+    /// Maps a rowan element back to a [`SourceSpan`] in the originating source file.
     pub fn span_for_element(&self, element: &SyntaxElement) -> SourceSpan {
         match element {
             NodeOrToken::Node(node) => self.span_for_node(node),
@@ -52,16 +76,22 @@ impl Parse {
         }
     }
 
+    /// Converts a rowan [`TextRange`] to a [`SourceSpan`] in the originating source file.
     pub fn span_for_range(&self, range: TextRange) -> SourceSpan {
         source_span_from_text_range(self.source.id(), range)
     }
 }
 
+/// Parses a source-managed MASM file into a lossless CST.
 pub fn parse_source_file(source: Arc<SourceFile>) -> Parse {
     let parser_source = Arc::clone(&source);
     Parser::new(parser_source.as_ref()).parse(source)
 }
 
+/// Parses raw MASM text into a detached CST with [`SourceId::UNKNOWN`] spans.
+///
+/// This is primarily intended for tests and ad hoc helpers. Production callers should prefer
+/// [`parse_source_file`] so diagnostics and spans remain attached to a real [`SourceFile`].
 pub fn parse_text(input: &str) -> Parse {
     parse_source_file(detached_source_file(input))
 }
