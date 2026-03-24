@@ -91,245 +91,373 @@ fn lower_immediate_instruction(
 ) -> Result<Option<Vec<ast::Op>>, ParsingError> {
     let texts = compact.texts();
     match texts.as_slice() {
-        ["eq", _] => lower_eq_like(context, span, compact.token(1), Instruction::EqImm),
-        ["neq", _] => lower_eq_like(context, span, compact.token(1), Instruction::NeqImm),
-        ["lt", _] => lower_int_compare(context, span, compact.token(1), Instruction::Lt),
-        ["lte", _] => lower_int_compare(context, span, compact.token(1), Instruction::Lte),
-        ["gt", _] => lower_int_compare(context, span, compact.token(1), Instruction::Gt),
-        ["gte", _] => lower_int_compare(context, span, compact.token(1), Instruction::Gte),
-        ["add", _] => lower_foldable_felt(context, span, compact.token(1), FeltFoldKind::Add),
-        ["sub", _] => lower_foldable_felt(context, span, compact.token(1), FeltFoldKind::Sub),
-        ["mul", _] => lower_foldable_felt(context, span, compact.token(1), FeltFoldKind::Mul),
-        ["div", _] => lower_foldable_felt(context, span, compact.token(1), FeltFoldKind::Div),
-        ["exp", _] => lower_exp_family(context, span, compact.token(1)),
-        ["mem_load", _] => {
-            lower_u32_instruction(context, span, compact.token(1), Instruction::MemLoadImm)
-        },
-        ["mem_loadw_be", _] => {
-            lower_u32_instruction(context, span, compact.token(1), Instruction::MemLoadWBeImm)
-        },
-        ["mem_loadw_le", _] => {
-            lower_u32_instruction(context, span, compact.token(1), Instruction::MemLoadWLeImm)
-        },
-        ["mem_store", _] => {
-            lower_u32_instruction(context, span, compact.token(1), Instruction::MemStoreImm)
-        },
-        ["mem_storew_be", _] => {
-            lower_u32_instruction(context, span, compact.token(1), Instruction::MemStoreWBeImm)
-        },
-        ["mem_storew_le", _] => {
-            lower_u32_instruction(context, span, compact.token(1), Instruction::MemStoreWLeImm)
-        },
-        ["locaddr", _] => {
-            lower_u16_instruction(context, span, compact.token(1), Instruction::Locaddr)
-        },
-        ["loc_load", _] => {
-            lower_u16_instruction(context, span, compact.token(1), Instruction::LocLoad)
-        },
-        ["loc_loadw_be", _] => {
-            lower_u16_instruction(context, span, compact.token(1), Instruction::LocLoadWBe)
-        },
-        ["loc_loadw_le", _] => {
-            lower_u16_instruction(context, span, compact.token(1), Instruction::LocLoadWLe)
-        },
-        ["loc_store", _] => {
-            lower_u16_instruction(context, span, compact.token(1), Instruction::LocStore)
-        },
-        ["loc_storew_be", _] => {
-            lower_u16_instruction(context, span, compact.token(1), Instruction::LocStoreWBe)
-        },
-        ["loc_storew_le", _] => {
-            lower_u16_instruction(context, span, compact.token(1), Instruction::LocStoreWLe)
-        },
-        ["adv_push", _] => lower_adv_push(span, compact.token(1)),
-        ["dup", _] => lower_dup(span, compact.token(1)),
-        ["dupw", _] => lower_dupw(span, compact.token(1)),
-        ["swap", _] => lower_swap(span, compact.token(1)),
-        ["swapw", _] => lower_swapw(span, compact.token(1)),
-        ["movdn", _] => lower_movdn(span, compact.token(1)),
-        ["movdnw", _] => lower_movdnw(span, compact.token(1)),
-        ["movup", _] => lower_movup(span, compact.token(1)),
-        ["movupw", _] => lower_movupw(span, compact.token(1)),
-        ["u32div", _] => lower_foldable_u32(context, span, compact.token(1), U32FoldKind::Div),
-        ["u32divmod", _] => {
-            lower_foldable_u32(context, span, compact.token(1), U32FoldKind::DivMod)
-        },
-        ["u32mod", _] => lower_foldable_u32(context, span, compact.token(1), U32FoldKind::Mod),
-        ["u32and", _] => lower_foldable_u32(context, span, compact.token(1), U32FoldKind::And),
-        ["u32or", _] => lower_foldable_u32(context, span, compact.token(1), U32FoldKind::Or),
-        ["u32xor", _] => lower_foldable_u32(context, span, compact.token(1), U32FoldKind::Xor),
-        ["u32not", _] => lower_foldable_u32(context, span, compact.token(1), U32FoldKind::Not),
-        ["u32wrapping_add", _] => {
-            lower_foldable_u32(context, span, compact.token(1), U32FoldKind::WrappingAdd)
-        },
-        ["u32wrapping_sub", _] => {
-            lower_foldable_u32(context, span, compact.token(1), U32FoldKind::WrappingSub)
-        },
-        ["u32wrapping_mul", _] => {
-            lower_foldable_u32(context, span, compact.token(1), U32FoldKind::WrappingMul)
-        },
-        ["u32overflowing_add", _] => {
-            lower_foldable_u32(context, span, compact.token(1), U32FoldKind::OverflowingAdd)
-        },
-        ["u32widening_add", _] => {
-            lower_foldable_u32(context, span, compact.token(1), U32FoldKind::WideningAdd)
-        },
-        ["u32overflowing_sub", _] => {
-            lower_foldable_u32(context, span, compact.token(1), U32FoldKind::OverflowingSub)
-        },
-        ["u32widening_mul", _] => {
-            lower_foldable_u32(context, span, compact.token(1), U32FoldKind::WideningMul)
-        },
-        ["u32shl", _] => lower_shift_u32(context, span, compact.token(1), Instruction::U32ShlImm),
-        ["u32shr", _] => lower_shift_u32(context, span, compact.token(1), Instruction::U32ShrImm),
-        ["u32rotl", _] => lower_shift_u32(context, span, compact.token(1), Instruction::U32RotlImm),
-        ["u32rotr", _] => lower_shift_u32(context, span, compact.token(1), Instruction::U32RotrImm),
-        ["u32lt", _] => lower_foldable_u32(context, span, compact.token(1), U32FoldKind::Lt),
-        ["u32lte", _] => lower_foldable_u32(context, span, compact.token(1), U32FoldKind::Lte),
-        ["u32gt", _] => lower_foldable_u32(context, span, compact.token(1), U32FoldKind::Gt),
-        ["u32gte", _] => lower_foldable_u32(context, span, compact.token(1), U32FoldKind::Gte),
-        ["u32min", _] => lower_foldable_u32(context, span, compact.token(1), U32FoldKind::Min),
-        ["u32max", _] => lower_foldable_u32(context, span, compact.token(1), U32FoldKind::Max),
+        [name, _] => lower_binary_immediate_instruction(context, span, name, compact.token(1)),
         ["adv", "push_mapvaln", _] => lower_push_mapvaln(span, compact.token(2)),
         _ => Ok(None),
     }
 }
 
 fn lower_primitive_instruction(text: &str) -> Option<Instruction> {
-    let instruction = match text {
-        "add" => Instruction::Add,
-        "adv.insert_hdword" => Instruction::SysEvent(SystemEventNode::InsertHdword),
-        "adv.insert_hdword_d" => Instruction::SysEvent(SystemEventNode::InsertHdwordWithDomain),
-        "adv.insert_hperm" => Instruction::SysEvent(SystemEventNode::InsertHperm),
-        "adv.insert_hqword" => Instruction::SysEvent(SystemEventNode::InsertHqword),
-        "adv.insert_mem" => Instruction::SysEvent(SystemEventNode::InsertMem),
-        "adv.has_mapkey" => Instruction::SysEvent(SystemEventNode::HasMapKey),
-        "adv.push_mapval" => Instruction::SysEvent(SystemEventNode::PushMapVal),
-        "adv.push_mapval_count" => Instruction::SysEvent(SystemEventNode::PushMapValCount),
-        "adv.push_mapvaln" => Instruction::SysEvent(SystemEventNode::PushMapValN0),
-        "adv.push_mtnode" => Instruction::SysEvent(SystemEventNode::PushMtNode),
-        "adv_loadw" => Instruction::AdvLoadW,
-        "adv_pipe" => Instruction::AdvPipe,
-        "and" => Instruction::And,
-        "assert" => Instruction::Assert,
-        "assert_eq" => Instruction::AssertEq,
-        "assert_eqw" => Instruction::AssertEqw,
-        "assertz" => Instruction::Assertz,
-        "caller" => Instruction::Caller,
-        "cdrop" => Instruction::CDrop,
-        "cdropw" => Instruction::CDropW,
-        "clk" => Instruction::Clk,
-        "crypto_stream" => Instruction::CryptoStream,
-        "cswap" => Instruction::CSwap,
-        "cswapw" => Instruction::CSwapW,
-        "debug.adv_stack" => Instruction::Debug(DebugOptions::AdvStackTop(0u16.into())),
-        "debug.local" => Instruction::Debug(DebugOptions::LocalAll),
-        "debug.mem" => Instruction::Debug(DebugOptions::MemAll),
-        "debug.stack" => Instruction::Debug(DebugOptions::StackAll),
-        "div" => Instruction::Div,
-        "drop" => Instruction::Drop,
-        "dropw" => Instruction::DropW,
-        "dup" => Instruction::Dup0,
-        "dupw" => Instruction::DupW0,
-        "dyncall" => Instruction::DynCall,
-        "dynexec" => Instruction::DynExec,
-        "emit" => Instruction::Emit,
-        "eq" => Instruction::Eq,
-        "eqw" => Instruction::Eqw,
-        "eval_circuit" => Instruction::EvalCircuit,
-        "exp" => Instruction::Exp,
-        "ext2add" => Instruction::Ext2Add,
-        "ext2div" => Instruction::Ext2Div,
-        "ext2inv" => Instruction::Ext2Inv,
-        "ext2mul" => Instruction::Ext2Mul,
-        "ext2neg" => Instruction::Ext2Neg,
-        "ext2sub" => Instruction::Ext2Sub,
-        "fri_ext2fold4" => Instruction::FriExt2Fold4,
-        "gt" => Instruction::Gt,
-        "gte" => Instruction::Gte,
-        "hash" => Instruction::Hash,
-        "hmerge" => Instruction::HMerge,
-        "hperm" => Instruction::HPerm,
-        "horner_eval_base" => Instruction::HornerBase,
-        "horner_eval_ext" => Instruction::HornerExt,
-        "ilog2" => Instruction::ILog2,
-        "inv" => Instruction::Inv,
-        "is_odd" => Instruction::IsOdd,
-        "log_precompile" => Instruction::LogPrecompile,
-        "lt" => Instruction::Lt,
-        "lte" => Instruction::Lte,
-        "mem_load" => Instruction::MemLoad,
-        "mem_loadw_be" => Instruction::MemLoadWBe,
-        "mem_loadw_le" => Instruction::MemLoadWLe,
-        "mem_store" => Instruction::MemStore,
-        "mem_storew_be" => Instruction::MemStoreWBe,
-        "mem_storew_le" => Instruction::MemStoreWLe,
-        "mem_stream" => Instruction::MemStream,
-        "mtree_get" => Instruction::MTreeGet,
-        "mtree_merge" => Instruction::MTreeMerge,
-        "mtree_set" => Instruction::MTreeSet,
-        "mtree_verify" => Instruction::MTreeVerify,
-        "mul" => Instruction::Mul,
-        "neg" => Instruction::Neg,
-        "neq" => Instruction::Neq,
-        "nop" => Instruction::Nop,
-        "not" => Instruction::Not,
-        "or" => Instruction::Or,
-        "padw" => Instruction::PadW,
-        "pow2" => Instruction::Pow2,
-        "reversew" => Instruction::Reversew,
-        "reversedw" => Instruction::Reversedw,
-        "sdepth" => Instruction::Sdepth,
-        "sub" => Instruction::Sub,
-        "swap" => Instruction::Swap1,
-        "swapdw" => Instruction::SwapDw,
-        "swapw" => Instruction::SwapW1,
-        "u32and" => Instruction::U32And,
-        "u32assert" => Instruction::U32Assert,
-        "u32assert2" => Instruction::U32Assert2,
-        "u32assertw" => Instruction::U32AssertW,
-        "u32cast" => Instruction::U32Cast,
-        "u32clo" => Instruction::U32Clo,
-        "u32clz" => Instruction::U32Clz,
-        "u32cto" => Instruction::U32Cto,
-        "u32ctz" => Instruction::U32Ctz,
-        "u32div" => Instruction::U32Div,
-        "u32divmod" => Instruction::U32DivMod,
-        "u32gt" => Instruction::U32Gt,
-        "u32gte" => Instruction::U32Gte,
-        "u32lt" => Instruction::U32Lt,
-        "u32lte" => Instruction::U32Lte,
-        "u32max" => Instruction::U32Max,
-        "u32min" => Instruction::U32Min,
-        "u32mod" => Instruction::U32Mod,
-        "u32not" => Instruction::U32Not,
-        "u32or" => Instruction::U32Or,
-        "u32overflowing_add" => Instruction::U32OverflowingAdd,
-        "u32overflowing_add3" => Instruction::U32OverflowingAdd3,
-        "u32overflowing_sub" => Instruction::U32OverflowingSub,
-        "u32popcnt" => Instruction::U32Popcnt,
-        "u32rotl" => Instruction::U32Rotl,
-        "u32rotr" => Instruction::U32Rotr,
-        "u32shl" => Instruction::U32Shl,
-        "u32shr" => Instruction::U32Shr,
-        "u32split" => Instruction::U32Split,
-        "u32test" => Instruction::U32Test,
-        "u32testw" => Instruction::U32TestW,
-        "u32widening_add" => Instruction::U32WideningAdd,
-        "u32widening_add3" => Instruction::U32WideningAdd3,
-        "u32widening_madd" => Instruction::U32WideningMadd,
-        "u32widening_mul" => Instruction::U32WideningMul,
-        "u32wrapping_add" => Instruction::U32WrappingAdd,
-        "u32wrapping_add3" => Instruction::U32WrappingAdd3,
-        "u32wrapping_madd" => Instruction::U32WrappingMadd,
-        "u32wrapping_mul" => Instruction::U32WrappingMul,
-        "u32wrapping_sub" => Instruction::U32WrappingSub,
-        "u32xor" => Instruction::U32Xor,
-        "xor" => Instruction::Xor,
-        _ => return None,
-    };
+    lower_system_event_instruction(text)
+        .or_else(|| lower_debug_short_instruction(text))
+        .or_else(|| lower_felt_primitive_instruction(text))
+        .or_else(|| lower_stack_primitive_instruction(text))
+        .or_else(|| lower_misc_primitive_instruction(text))
+        .or_else(|| lower_memory_primitive_instruction(text))
+        .or_else(|| lower_u32_primitive_instruction(text))
+}
 
-    Some(instruction)
+fn lower_binary_immediate_instruction(
+    context: &mut LoweringContext<'_>,
+    span: SourceSpan,
+    name: &str,
+    token: &SyntaxToken,
+) -> Result<Option<Vec<ast::Op>>, ParsingError> {
+    if let Some(instruction) = eq_like_immediate_instruction(name) {
+        return lower_eq_like(context, span, token, instruction);
+    }
+
+    if let Some(instruction) = int_compare_immediate_instruction(name) {
+        return lower_int_compare(context, span, token, instruction);
+    }
+
+    if let Some(kind) = felt_fold_kind(name) {
+        return lower_foldable_felt(context, span, token, kind);
+    }
+
+    if name == "exp" {
+        return lower_exp_family(context, span, token);
+    }
+
+    if let Some(instruction) = u32_memory_immediate_instruction(name) {
+        return lower_u32_instruction(context, span, token, instruction);
+    }
+
+    if let Some(instruction) = u16_local_immediate_instruction(name) {
+        return lower_u16_instruction(context, span, token, instruction);
+    }
+
+    if let Some(family) = stack_immediate_family(name) {
+        return lower_stack_immediate_instruction(family, span, token);
+    }
+
+    if let Some(kind) = u32_fold_kind(name) {
+        return lower_foldable_u32(context, span, token, kind);
+    }
+
+    if let Some(instruction) = u32_shift_immediate_instruction(name) {
+        return lower_shift_u32(context, span, token, instruction);
+    }
+
+    Ok(None)
+}
+
+fn eq_like_immediate_instruction(name: &str) -> Option<fn(ast::ImmFelt) -> Instruction> {
+    match name {
+        "eq" => Some(Instruction::EqImm),
+        "neq" => Some(Instruction::NeqImm),
+        _ => None,
+    }
+}
+
+fn int_compare_immediate_instruction(name: &str) -> Option<Instruction> {
+    match name {
+        "lt" => Some(Instruction::Lt),
+        "lte" => Some(Instruction::Lte),
+        "gt" => Some(Instruction::Gt),
+        "gte" => Some(Instruction::Gte),
+        _ => None,
+    }
+}
+
+fn felt_fold_kind(name: &str) -> Option<FeltFoldKind> {
+    match name {
+        "add" => Some(FeltFoldKind::Add),
+        "sub" => Some(FeltFoldKind::Sub),
+        "mul" => Some(FeltFoldKind::Mul),
+        "div" => Some(FeltFoldKind::Div),
+        _ => None,
+    }
+}
+
+fn u32_memory_immediate_instruction(name: &str) -> Option<fn(ast::ImmU32) -> Instruction> {
+    match name {
+        "mem_load" => Some(Instruction::MemLoadImm),
+        "mem_loadw_be" => Some(Instruction::MemLoadWBeImm),
+        "mem_loadw_le" => Some(Instruction::MemLoadWLeImm),
+        "mem_store" => Some(Instruction::MemStoreImm),
+        "mem_storew_be" => Some(Instruction::MemStoreWBeImm),
+        "mem_storew_le" => Some(Instruction::MemStoreWLeImm),
+        _ => None,
+    }
+}
+
+fn u16_local_immediate_instruction(name: &str) -> Option<fn(ast::ImmU16) -> Instruction> {
+    match name {
+        "locaddr" => Some(Instruction::Locaddr),
+        "loc_load" => Some(Instruction::LocLoad),
+        "loc_loadw_be" => Some(Instruction::LocLoadWBe),
+        "loc_loadw_le" => Some(Instruction::LocLoadWLe),
+        "loc_store" => Some(Instruction::LocStore),
+        "loc_storew_be" => Some(Instruction::LocStoreWBe),
+        "loc_storew_le" => Some(Instruction::LocStoreWLe),
+        _ => None,
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum StackImmediateFamily {
+    AdvPush,
+    Dup,
+    DupW,
+    Swap,
+    SwapW,
+    MovDn,
+    MovDnW,
+    MovUp,
+    MovUpW,
+}
+
+fn stack_immediate_family(name: &str) -> Option<StackImmediateFamily> {
+    match name {
+        "adv_push" => Some(StackImmediateFamily::AdvPush),
+        "dup" => Some(StackImmediateFamily::Dup),
+        "dupw" => Some(StackImmediateFamily::DupW),
+        "swap" => Some(StackImmediateFamily::Swap),
+        "swapw" => Some(StackImmediateFamily::SwapW),
+        "movdn" => Some(StackImmediateFamily::MovDn),
+        "movdnw" => Some(StackImmediateFamily::MovDnW),
+        "movup" => Some(StackImmediateFamily::MovUp),
+        "movupw" => Some(StackImmediateFamily::MovUpW),
+        _ => None,
+    }
+}
+
+fn lower_stack_immediate_instruction(
+    family: StackImmediateFamily,
+    span: SourceSpan,
+    token: &SyntaxToken,
+) -> Result<Option<Vec<ast::Op>>, ParsingError> {
+    match family {
+        StackImmediateFamily::AdvPush => lower_adv_push(span, token),
+        StackImmediateFamily::Dup => lower_dup(span, token),
+        StackImmediateFamily::DupW => lower_dupw(span, token),
+        StackImmediateFamily::Swap => lower_swap(span, token),
+        StackImmediateFamily::SwapW => lower_swapw(span, token),
+        StackImmediateFamily::MovDn => lower_movdn(span, token),
+        StackImmediateFamily::MovDnW => lower_movdnw(span, token),
+        StackImmediateFamily::MovUp => lower_movup(span, token),
+        StackImmediateFamily::MovUpW => lower_movupw(span, token),
+    }
+}
+
+fn u32_fold_kind(name: &str) -> Option<U32FoldKind> {
+    match name {
+        "u32div" => Some(U32FoldKind::Div),
+        "u32divmod" => Some(U32FoldKind::DivMod),
+        "u32mod" => Some(U32FoldKind::Mod),
+        "u32and" => Some(U32FoldKind::And),
+        "u32or" => Some(U32FoldKind::Or),
+        "u32xor" => Some(U32FoldKind::Xor),
+        "u32not" => Some(U32FoldKind::Not),
+        "u32wrapping_add" => Some(U32FoldKind::WrappingAdd),
+        "u32wrapping_sub" => Some(U32FoldKind::WrappingSub),
+        "u32wrapping_mul" => Some(U32FoldKind::WrappingMul),
+        "u32overflowing_add" => Some(U32FoldKind::OverflowingAdd),
+        "u32widening_add" => Some(U32FoldKind::WideningAdd),
+        "u32overflowing_sub" => Some(U32FoldKind::OverflowingSub),
+        "u32widening_mul" => Some(U32FoldKind::WideningMul),
+        "u32lt" => Some(U32FoldKind::Lt),
+        "u32lte" => Some(U32FoldKind::Lte),
+        "u32gt" => Some(U32FoldKind::Gt),
+        "u32gte" => Some(U32FoldKind::Gte),
+        "u32min" => Some(U32FoldKind::Min),
+        "u32max" => Some(U32FoldKind::Max),
+        _ => None,
+    }
+}
+
+fn u32_shift_immediate_instruction(name: &str) -> Option<fn(ast::ImmU8) -> Instruction> {
+    match name {
+        "u32shl" => Some(Instruction::U32ShlImm),
+        "u32shr" => Some(Instruction::U32ShrImm),
+        "u32rotl" => Some(Instruction::U32RotlImm),
+        "u32rotr" => Some(Instruction::U32RotrImm),
+        _ => None,
+    }
+}
+
+fn lower_system_event_instruction(text: &str) -> Option<Instruction> {
+    match text {
+        "adv.insert_hdword" => Some(Instruction::SysEvent(SystemEventNode::InsertHdword)),
+        "adv.insert_hdword_d" => {
+            Some(Instruction::SysEvent(SystemEventNode::InsertHdwordWithDomain))
+        },
+        "adv.insert_hperm" => Some(Instruction::SysEvent(SystemEventNode::InsertHperm)),
+        "adv.insert_hqword" => Some(Instruction::SysEvent(SystemEventNode::InsertHqword)),
+        "adv.insert_mem" => Some(Instruction::SysEvent(SystemEventNode::InsertMem)),
+        "adv.has_mapkey" => Some(Instruction::SysEvent(SystemEventNode::HasMapKey)),
+        "adv.push_mapval" => Some(Instruction::SysEvent(SystemEventNode::PushMapVal)),
+        "adv.push_mapval_count" => Some(Instruction::SysEvent(SystemEventNode::PushMapValCount)),
+        "adv.push_mapvaln" => Some(Instruction::SysEvent(SystemEventNode::PushMapValN0)),
+        "adv.push_mtnode" => Some(Instruction::SysEvent(SystemEventNode::PushMtNode)),
+        _ => None,
+    }
+}
+
+fn lower_debug_short_instruction(text: &str) -> Option<Instruction> {
+    match text {
+        "debug.adv_stack" => Some(Instruction::Debug(DebugOptions::AdvStackTop(0u16.into()))),
+        "debug.local" => Some(Instruction::Debug(DebugOptions::LocalAll)),
+        "debug.mem" => Some(Instruction::Debug(DebugOptions::MemAll)),
+        "debug.stack" => Some(Instruction::Debug(DebugOptions::StackAll)),
+        _ => None,
+    }
+}
+
+fn lower_felt_primitive_instruction(text: &str) -> Option<Instruction> {
+    match text {
+        "add" => Some(Instruction::Add),
+        "and" => Some(Instruction::And),
+        "assert" => Some(Instruction::Assert),
+        "assert_eq" => Some(Instruction::AssertEq),
+        "assert_eqw" => Some(Instruction::AssertEqw),
+        "assertz" => Some(Instruction::Assertz),
+        "div" => Some(Instruction::Div),
+        "eq" => Some(Instruction::Eq),
+        "eqw" => Some(Instruction::Eqw),
+        "exp" => Some(Instruction::Exp),
+        "gt" => Some(Instruction::Gt),
+        "gte" => Some(Instruction::Gte),
+        "inv" => Some(Instruction::Inv),
+        "lt" => Some(Instruction::Lt),
+        "lte" => Some(Instruction::Lte),
+        "mul" => Some(Instruction::Mul),
+        "neg" => Some(Instruction::Neg),
+        "neq" => Some(Instruction::Neq),
+        "not" => Some(Instruction::Not),
+        "or" => Some(Instruction::Or),
+        "sub" => Some(Instruction::Sub),
+        "xor" => Some(Instruction::Xor),
+        _ => None,
+    }
+}
+
+fn lower_stack_primitive_instruction(text: &str) -> Option<Instruction> {
+    match text {
+        "caller" => Some(Instruction::Caller),
+        "cdrop" => Some(Instruction::CDrop),
+        "cdropw" => Some(Instruction::CDropW),
+        "cswap" => Some(Instruction::CSwap),
+        "cswapw" => Some(Instruction::CSwapW),
+        "drop" => Some(Instruction::Drop),
+        "dropw" => Some(Instruction::DropW),
+        "dup" => Some(Instruction::Dup0),
+        "dupw" => Some(Instruction::DupW0),
+        "padw" => Some(Instruction::PadW),
+        "sdepth" => Some(Instruction::Sdepth),
+        "swap" => Some(Instruction::Swap1),
+        "swapdw" => Some(Instruction::SwapDw),
+        "swapw" => Some(Instruction::SwapW1),
+        _ => None,
+    }
+}
+
+fn lower_misc_primitive_instruction(text: &str) -> Option<Instruction> {
+    match text {
+        "adv_loadw" => Some(Instruction::AdvLoadW),
+        "adv_pipe" => Some(Instruction::AdvPipe),
+        "clk" => Some(Instruction::Clk),
+        "crypto_stream" => Some(Instruction::CryptoStream),
+        "dyncall" => Some(Instruction::DynCall),
+        "dynexec" => Some(Instruction::DynExec),
+        "emit" => Some(Instruction::Emit),
+        "eval_circuit" => Some(Instruction::EvalCircuit),
+        "ext2add" => Some(Instruction::Ext2Add),
+        "ext2div" => Some(Instruction::Ext2Div),
+        "ext2inv" => Some(Instruction::Ext2Inv),
+        "ext2mul" => Some(Instruction::Ext2Mul),
+        "ext2neg" => Some(Instruction::Ext2Neg),
+        "ext2sub" => Some(Instruction::Ext2Sub),
+        "fri_ext2fold4" => Some(Instruction::FriExt2Fold4),
+        "hash" => Some(Instruction::Hash),
+        "hmerge" => Some(Instruction::HMerge),
+        "hperm" => Some(Instruction::HPerm),
+        "horner_eval_base" => Some(Instruction::HornerBase),
+        "horner_eval_ext" => Some(Instruction::HornerExt),
+        "ilog2" => Some(Instruction::ILog2),
+        "is_odd" => Some(Instruction::IsOdd),
+        "log_precompile" => Some(Instruction::LogPrecompile),
+        "nop" => Some(Instruction::Nop),
+        "pow2" => Some(Instruction::Pow2),
+        "reversew" => Some(Instruction::Reversew),
+        "reversedw" => Some(Instruction::Reversedw),
+        _ => None,
+    }
+}
+
+fn lower_memory_primitive_instruction(text: &str) -> Option<Instruction> {
+    match text {
+        "mem_load" => Some(Instruction::MemLoad),
+        "mem_loadw_be" => Some(Instruction::MemLoadWBe),
+        "mem_loadw_le" => Some(Instruction::MemLoadWLe),
+        "mem_store" => Some(Instruction::MemStore),
+        "mem_storew_be" => Some(Instruction::MemStoreWBe),
+        "mem_storew_le" => Some(Instruction::MemStoreWLe),
+        "mem_stream" => Some(Instruction::MemStream),
+        "mtree_get" => Some(Instruction::MTreeGet),
+        "mtree_merge" => Some(Instruction::MTreeMerge),
+        "mtree_set" => Some(Instruction::MTreeSet),
+        "mtree_verify" => Some(Instruction::MTreeVerify),
+        _ => None,
+    }
+}
+
+fn lower_u32_primitive_instruction(text: &str) -> Option<Instruction> {
+    match text {
+        "u32and" => Some(Instruction::U32And),
+        "u32assert" => Some(Instruction::U32Assert),
+        "u32assert2" => Some(Instruction::U32Assert2),
+        "u32assertw" => Some(Instruction::U32AssertW),
+        "u32cast" => Some(Instruction::U32Cast),
+        "u32clo" => Some(Instruction::U32Clo),
+        "u32clz" => Some(Instruction::U32Clz),
+        "u32cto" => Some(Instruction::U32Cto),
+        "u32ctz" => Some(Instruction::U32Ctz),
+        "u32div" => Some(Instruction::U32Div),
+        "u32divmod" => Some(Instruction::U32DivMod),
+        "u32gt" => Some(Instruction::U32Gt),
+        "u32gte" => Some(Instruction::U32Gte),
+        "u32lt" => Some(Instruction::U32Lt),
+        "u32lte" => Some(Instruction::U32Lte),
+        "u32max" => Some(Instruction::U32Max),
+        "u32min" => Some(Instruction::U32Min),
+        "u32mod" => Some(Instruction::U32Mod),
+        "u32not" => Some(Instruction::U32Not),
+        "u32or" => Some(Instruction::U32Or),
+        "u32overflowing_add" => Some(Instruction::U32OverflowingAdd),
+        "u32overflowing_add3" => Some(Instruction::U32OverflowingAdd3),
+        "u32overflowing_sub" => Some(Instruction::U32OverflowingSub),
+        "u32popcnt" => Some(Instruction::U32Popcnt),
+        "u32rotl" => Some(Instruction::U32Rotl),
+        "u32rotr" => Some(Instruction::U32Rotr),
+        "u32shl" => Some(Instruction::U32Shl),
+        "u32shr" => Some(Instruction::U32Shr),
+        "u32split" => Some(Instruction::U32Split),
+        "u32test" => Some(Instruction::U32Test),
+        "u32testw" => Some(Instruction::U32TestW),
+        "u32widening_add" => Some(Instruction::U32WideningAdd),
+        "u32widening_add3" => Some(Instruction::U32WideningAdd3),
+        "u32widening_madd" => Some(Instruction::U32WideningMadd),
+        "u32widening_mul" => Some(Instruction::U32WideningMul),
+        "u32wrapping_add" => Some(Instruction::U32WrappingAdd),
+        "u32wrapping_add3" => Some(Instruction::U32WrappingAdd3),
+        "u32wrapping_madd" => Some(Instruction::U32WrappingMadd),
+        "u32wrapping_mul" => Some(Instruction::U32WrappingMul),
+        "u32wrapping_sub" => Some(Instruction::U32WrappingSub),
+        "u32xor" => Some(Instruction::U32Xor),
+        _ => None,
+    }
 }
 
 fn deprecated_instruction_error(
