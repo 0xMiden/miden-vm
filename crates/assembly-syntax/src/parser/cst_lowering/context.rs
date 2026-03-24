@@ -2,7 +2,6 @@ use alloc::{
     collections::BTreeSet,
     string::{String, ToString},
     sync::Arc,
-    vec::Vec,
 };
 
 use miden_assembly_syntax_cst::{
@@ -152,24 +151,6 @@ impl<'a> LoweringContext<'a> {
         })
     }
 
-    pub(super) fn lower_ops_with_legacy_parser(
-        &mut self,
-        span: SourceSpan,
-    ) -> Result<Vec<ast::Op>, ParsingError> {
-        let source = self.wrapped_block_source_file(span);
-        let mut forms = super::super::parse_forms_with_lalrpop(source, self.interned)?;
-        if forms.len() == 1
-            && let ast::Form::Begin(block) = forms.pop().expect("single form")
-        {
-            return Ok(block.iter().cloned().collect());
-        }
-
-        Err(ParsingError::InvalidSyntax {
-            span,
-            message: "expected a single begin form from CST operation lowering".to_string(),
-        })
-    }
-
     fn intern(&mut self, text: &str) -> Arc<str> {
         self.interned.get(text).cloned().unwrap_or_else(|| {
             let interned = Arc::<str>::from(text.to_string().into_boxed_str());
@@ -190,32 +171,6 @@ impl<'a> LoweringContext<'a> {
             SourceLanguage::Masm,
             self.source.uri().clone(),
             masked.into_boxed_str(),
-        ))
-    }
-
-    fn wrapped_block_source_file(&self, span: SourceSpan) -> Arc<SourceFile> {
-        const PREFIX: &str = "begin\n";
-        const SUFFIX: &str = "\nend";
-
-        let full_source = self.source.as_str();
-        let range = span.into_slice_index();
-        assert!(
-            range.start >= PREFIX.len(),
-            "block spans should always start far enough into the source to host a begin wrapper"
-        );
-
-        let wrapper_start = range.start - PREFIX.len();
-        let mut wrapped = String::with_capacity(range.end + SUFFIX.len());
-        wrapped.push_str(&mask_prefix(&full_source[..wrapper_start]));
-        wrapped.push_str(PREFIX);
-        wrapped.push_str(&full_source[range]);
-        wrapped.push_str(SUFFIX);
-
-        Arc::new(SourceFile::new(
-            self.source.id(),
-            SourceLanguage::Masm,
-            self.source.uri().clone(),
-            wrapped.into_boxed_str(),
         ))
     }
 }

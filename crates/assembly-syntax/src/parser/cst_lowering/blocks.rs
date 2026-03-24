@@ -141,11 +141,10 @@ fn lower_instruction(
     context: &mut LoweringContext<'_>,
     instruction: &CstInstruction,
 ) -> Result<Vec<ast::Op>, ParsingError> {
-    let span = context.parse().span_for_node(instruction.syntax());
     if let Some(ops) = try_lower_instruction(context, instruction)? {
         return Ok(ops);
     }
-    context.lower_ops_with_legacy_parser(span)
+    Err(invalid_instruction_error(context, instruction))
 }
 
 fn parse_if_condition(context: &LoweringContext<'_>, op: &CstIfOp) -> Result<bool, ParsingError> {
@@ -231,6 +230,23 @@ fn header_tokens_before_first_block(
 
 fn has_source_operations(block: &CstBlock) -> bool {
     block.operations().next().is_some()
+}
+
+fn invalid_instruction_error(
+    context: &LoweringContext<'_>,
+    instruction: &CstInstruction,
+) -> ParsingError {
+    let span = context.parse().span_for_node(instruction.syntax());
+    let message = instruction
+        .syntax()
+        .children_with_tokens()
+        .filter_map(|element| element.into_token())
+        .find(|token| !token.kind().is_trivia())
+        .and_then(|token| (token.kind() == SyntaxKind::Ident).then(|| token.text().to_string()))
+        .map(|name| format!("invalid instruction `{name}` or malformed operands"))
+        .unwrap_or_else(|| "invalid instruction syntax".to_string());
+
+    ParsingError::InvalidSyntax { span, message }
 }
 
 fn nop_block(span: SourceSpan) -> ast::Block {
