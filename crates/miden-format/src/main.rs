@@ -5,10 +5,17 @@ use std::{
     io::{self, Read},
     path::{Path, PathBuf},
     process::ExitCode,
+    sync::Arc,
 };
 
 use clap::Parser;
-use miden_assembly_syntax_cst::parse_text;
+use miden_assembly_syntax_cst::{
+    Report, diagnostics::reporting::PrintDiagnostic, parse_source_file,
+};
+use miden_debug_types::{
+    DefaultSourceManager, SourceFile, SourceLanguage, SourceManager, SourceManagerError,
+    SourceManagerExt, Uri,
+};
 
 use self::formatter::format_syntax;
 
@@ -36,12 +43,6 @@ struct Cli {
 enum CliError {
     #[error("either at least one path or --stdin must be provided")]
     MissingInput,
-    #[error("failed to read source from '{path}': {source}")]
-    ReadFile {
-        path: String,
-        #[source]
-        source: io::Error,
-    },
     #[error("failed to write formatted source to '{path}': {source}")]
     WriteFile {
         path: String,
@@ -54,6 +55,8 @@ enum CliError {
     SyntaxErrors,
     #[error("the following inputs are not formatted:\n{0}")]
     CheckFailed(String),
+    #[error(transparent)]
+    SourceManagerError(#[from] SourceManagerError),
 }
 
 fn main() -> ExitCode {
@@ -67,29 +70,25 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), CliError> {
+    miden_assembly_syntax_cst::diagnostics::reporting::set_panic_hook();
+
     let cli = Cli::parse();
-    let inputs = collect_inputs(&cli)?;
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let inputs = collect_inputs(&cli, &source_manager)?;
 
     let mut has_syntax_errors = false;
     let mut formatted_inputs = Vec::with_capacity(inputs.len());
-    for (path, source) in inputs {
-        let parse = parse_text(&source);
+    for input in inputs {
+        let mut parse = parse_source_file(input.clone());
         if parse.has_errors() {
             has_syntax_errors = true;
-            for diagnostic in parse.diagnostics() {
-                let span = diagnostic.span();
-                eprintln!(
-                    "{}:{}..{}: {}",
-                    path.display(),
-                    span.start,
-                    span.end,
-                    diagnostic.message()
-                );
+            for diagnostic in parse.take_diagnostics() {
+                eprintln!("{}", PrintDiagnostic::new(Report::from(diagnostic)));
             }
             continue;
         }
 
-        formatted_inputs.push((path, source, format_syntax(&parse.syntax())));
+        formatted_inputs.push((input, format_syntax(&parse.syntax())));
     }
 
     if has_syntax_errors {
@@ -98,9 +97,9 @@ fn run() -> Result<(), CliError> {
 
     if cli.check {
         let mut mismatches = Vec::new();
-        for (path, source, formatted) in &formatted_inputs {
-            if source != formatted {
-                mismatches.push(path.display().to_string());
+        for (source, formatted) in &formatted_inputs {
+            if source.as_str() != formatted {
+                mismatches.push(source.uri());
             }
         }
 
@@ -112,45 +111,62 @@ fn run() -> Result<(), CliError> {
             eprintln!("would reformat {path}");
         }
 
-        return Err(CliError::CheckFailed(mismatches.join("\n")));
+        return Err(CliError::CheckFailed(mismatches.iter().map(|uri| uri.to_string()).fold(
+            String::new(),
+            |mut acc, item| {
+                acc.push('\n');
+                acc.push_str(&item);
+                acc
+            },
+        )));
     }
 
     if cli.stdin {
-        if let Some((_, _, formatted)) = formatted_inputs.into_iter().next() {
+        if let Some((_, formatted)) = formatted_inputs.into_iter().next() {
             print!("{formatted}");
         }
         return Ok(());
     }
 
-    for (path, source, formatted) in formatted_inputs {
-        if source == formatted {
+    for (source, formatted) in formatted_inputs {
+        if source.as_str() == formatted {
             continue;
         }
 
-        fs::write(&path, formatted)
-            .map_err(|source| CliError::WriteFile { path: path.display().to_string(), source })?;
+        let path = Path::new(source.uri().path());
+        fs::write(path, formatted).map_err(|err| CliError::WriteFile {
+            path: source.uri().path().to_string(),
+            source: err,
+        })?;
     }
 
     Ok(())
 }
 
-fn collect_inputs(cli: &Cli) -> Result<Vec<(PathBuf, String)>, CliError> {
+fn collect_inputs(
+    cli: &Cli,
+    source_manager: &dyn SourceManager,
+) -> Result<Vec<Arc<SourceFile>>, CliError> {
+    let mut inputs = vec![];
+
     if cli.stdin {
         let path = cli.stdin_filepath.clone().unwrap_or_else(|| PathBuf::from("<stdin>"));
         let mut source = String::new();
         io::stdin().read_to_string(&mut source).map_err(CliError::ReadStdin)?;
-        return Ok(vec![(path, source)]);
+        let source = source_manager.load(SourceLanguage::Masm, Uri::from(path.as_path()), source);
+        inputs.push(source);
+        return Ok(inputs);
     }
 
     if cli.paths.is_empty() {
         return Err(CliError::MissingInput);
     }
 
-    cli.paths.iter().map(|path| read_file(path)).collect::<Result<Vec<_>, _>>()
-}
+    inputs.reserve_exact(cli.paths.len());
+    for path in cli.paths.iter() {
+        let source = source_manager.load_file(path)?;
+        inputs.push(source);
+    }
 
-fn read_file(path: &Path) -> Result<(PathBuf, String), CliError> {
-    let source = fs::read_to_string(path)
-        .map_err(|source| CliError::ReadFile { path: path.display().to_string(), source })?;
-    Ok((path.to_path_buf(), source))
+    Ok(inputs)
 }

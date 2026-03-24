@@ -1490,6 +1490,7 @@ version = "0.23.0"
 dependencies = [
  "clap",
  "miden-assembly-syntax-cst",
+ "miden-debug-types",
  "thiserror",
 ]
 
