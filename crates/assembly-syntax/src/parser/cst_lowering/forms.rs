@@ -1,19 +1,21 @@
 use alloc::{
+    collections::btree_map::Entry,
     string::{String, ToString},
     vec::Vec,
 };
 
 use miden_assembly_syntax_cst::ast::{
-    AstNode, Constant as CstConstant, Import as CstImport, Item as CstItem,
-    Procedure as CstProcedure, SourceFile as CstSourceFile, TypeDecl as CstTypeDecl,
+    AdviceMap as CstAdviceMap, AstNode, BeginBlock as CstBeginBlock, Constant as CstConstant,
+    Import as CstImport, Item as CstItem, Procedure as CstProcedure, SourceFile as CstSourceFile,
+    TypeDecl as CstTypeDecl,
 };
-use miden_debug_types::{SourceSpan, Span};
+use miden_debug_types::{SourceSpan, Span, Spanned};
 
 use super::{
     context::LoweringContext,
     fragments::{
-        lower_constant_expr, lower_enum_decl_from_body, lower_function_type_from_signature,
-        lower_type_expr_from_alias_body,
+        lower_advice_map_decl, lower_attribute, lower_constant_expr, lower_enum_decl_from_body,
+        lower_function_type_from_signature, lower_type_expr_from_alias_body,
     },
 };
 use crate::{ast, parser::ParsingError};
@@ -57,16 +59,16 @@ pub(super) fn lower_source_file(
                 forms.push(lower_type_decl(context, type_decl)?);
                 index += 1;
             },
-            CstItem::Procedure(procedure) => {
-                preflight_procedure_header(context, procedure)?;
-                forms.push(lower_item_with_fallback(
-                    context,
-                    &CstItem::Procedure(procedure.clone()),
-                )?);
+            CstItem::AdviceMap(advice_map) => {
+                forms.push(lower_advice_map(context, advice_map)?);
                 index += 1;
             },
-            item => {
-                forms.push(lower_item_with_fallback(context, item)?);
+            CstItem::BeginBlock(begin) => {
+                forms.push(lower_begin_block(context, begin)?);
+                index += 1;
+            },
+            CstItem::Procedure(procedure) => {
+                forms.push(lower_procedure(context, procedure)?);
                 index += 1;
             },
         }
@@ -288,16 +290,246 @@ fn lower_type_decl(
 fn preflight_procedure_header(
     context: &mut LoweringContext<'_>,
     procedure: &CstProcedure,
-) -> Result<(), ParsingError> {
-    if let Some(name) = procedure.name_token() {
-        let _ = context.lower_procedure_name_token(&name)?;
+) -> Result<(ast::ProcedureName, Option<ast::FunctionType>), ParsingError> {
+    let span = context.parse().span_for_node(procedure.syntax());
+    let name = match procedure.name_token() {
+        Some(name) => context.lower_procedure_name_token(&name)?,
+        None => {
+            return Err(ParsingError::InvalidSyntax {
+                span,
+                message: "expected a procedure name".to_string(),
+            });
+        },
+    };
+
+    let signature = if let Some(signature) = procedure.signature() {
+        Some(lower_function_type_from_signature(context, &signature)?)
+    } else {
+        None
+    };
+
+    Ok((name, signature))
+}
+
+fn lower_advice_map(
+    context: &mut LoweringContext<'_>,
+    advice_map: &CstAdviceMap,
+) -> Result<ast::Form, ParsingError> {
+    Ok(ast::Form::AdviceMapEntry(lower_advice_map_decl(context, advice_map)?))
+}
+
+fn lower_begin_block(
+    context: &mut LoweringContext<'_>,
+    begin: &CstBeginBlock,
+) -> Result<ast::Form, ParsingError> {
+    let span = context.parse().span_for_node(begin.syntax());
+    let block = match begin.block() {
+        Some(block) => {
+            context.lower_block_with_legacy_parser(context.parse().span_for_node(block.syntax()))?
+        },
+        None => {
+            return Err(ParsingError::InvalidSyntax {
+                span,
+                message: "expected a block body".to_string(),
+            });
+        },
+    };
+
+    Ok(ast::Form::Begin(re_span_block(span, &block)))
+}
+
+fn lower_procedure(
+    context: &mut LoweringContext<'_>,
+    procedure: &CstProcedure,
+) -> Result<ast::Form, ParsingError> {
+    let span = context.parse().span_for_node(procedure.syntax());
+    let visibility = context.lower_visibility(procedure.visibility());
+    let (name, signature) = preflight_procedure_header(context, procedure)?;
+    let body = match procedure.block() {
+        Some(block) => {
+            context.lower_block_with_legacy_parser(context.parse().span_for_node(block.syntax()))?
+        },
+        None => {
+            return Err(ParsingError::InvalidSyntax {
+                span,
+                message: "expected a procedure body".to_string(),
+            });
+        },
+    };
+
+    let mut proc = ast::Procedure::new(span, visibility, name, 0, body);
+    if let Some(signature) = signature {
+        proc = proc.with_signature(signature);
     }
 
-    if let Some(signature) = procedure.signature() {
-        let _ = lower_function_type_from_signature(context, &signature)?;
+    let attrs = procedure
+        .attributes()
+        .map(|attribute| lower_attribute(context, &attribute))
+        .collect::<Result<Vec<_>, _>>()?;
+    apply_procedure_attributes(&mut proc, attrs)?;
+
+    Ok(ast::Form::Procedure(proc))
+}
+
+fn apply_procedure_attributes(
+    procedure: &mut ast::Procedure,
+    annotations: Vec<ast::Attribute>,
+) -> Result<(), ParsingError> {
+    let mut cc = None;
+    let mut num_locals = None;
+    {
+        let attributes = procedure.attributes_mut();
+
+        for attr in annotations {
+            match attr {
+                ast::Attribute::KeyValue(kv) => match attributes.entry(kv.id()) {
+                    ast::AttributeSetEntry::Vacant(entry) => {
+                        entry.insert(ast::Attribute::KeyValue(kv));
+                    },
+                    ast::AttributeSetEntry::Occupied(mut entry) => {
+                        let value = entry.get_mut();
+                        match value {
+                            ast::Attribute::KeyValue(existing_kvs) => {
+                                for (k, v) in kv.into_iter() {
+                                    let span = k.span();
+                                    match existing_kvs.entry(k) {
+                                        Entry::Vacant(entry) => {
+                                            entry.insert(v);
+                                        },
+                                        Entry::Occupied(entry) => {
+                                            let prev = entry.get();
+                                            return Err(ParsingError::AttributeKeyValueConflict {
+                                                span,
+                                                prev: prev.span(),
+                                            });
+                                        },
+                                    }
+                                }
+                            },
+                            other => {
+                                return Err(ParsingError::AttributeConflict {
+                                    span: kv.span(),
+                                    prev: other.span(),
+                                });
+                            },
+                        }
+                    },
+                },
+                ast::Attribute::List(list) if list.name() == "callconv" && list.len() == 1 => {
+                    match attributes.entry(list.id()) {
+                        ast::AttributeSetEntry::Vacant(entry) => {
+                            let valid_cc = match &list.as_slice()[0] {
+                                ast::MetaExpr::Ident(cc) => {
+                                    cc.as_str().parse::<ast::types::CallConv>().ok()
+                                },
+                                ast::MetaExpr::String(cc) => {
+                                    cc.as_str().parse::<ast::types::CallConv>().ok()
+                                },
+                                _ => None,
+                            };
+                            if let Some(valid_cc) = valid_cc {
+                                cc = Some(valid_cc);
+                                entry.insert(ast::Attribute::List(list));
+                            } else {
+                                return Err(ParsingError::UnrecognizedCallConv {
+                                    span: list.span(),
+                                });
+                            }
+                        },
+                        ast::AttributeSetEntry::Occupied(entry) => {
+                            let prev_attr = entry.get();
+                            return Err(ParsingError::AttributeConflict {
+                                span: list.span(),
+                                prev: prev_attr.span(),
+                            });
+                        },
+                    }
+                },
+                ast::Attribute::List(list) if list.name() == "locals" && list.len() == 1 => {
+                    match attributes.entry(list.id()) {
+                        ast::AttributeSetEntry::Vacant(entry) => {
+                            let valid_num_locals = match &list.as_slice()[0] {
+                                ast::MetaExpr::Int(value) => match value.inner() {
+                                    crate::parser::IntValue::U8(n) => Some(*n as u16),
+                                    crate::parser::IntValue::U16(n) => Some(*n),
+                                    _ => None,
+                                },
+                                other => {
+                                    return Err(ParsingError::InvalidLocalsAttr {
+                                        span: other.span(),
+                                        message: "expected an integer literal".to_string(),
+                                    });
+                                },
+                            };
+
+                            match valid_num_locals {
+                                Some(n) if n > (u16::MAX / 4) * 4 => {
+                                    return Err(ParsingError::InvalidLocalsAttr {
+                                        span: list.span(),
+                                        message: "number of locals exceeds the maximum of 65532"
+                                            .to_string(),
+                                    });
+                                },
+                                Some(n) => {
+                                    num_locals = Some(n);
+                                    entry.insert(ast::Attribute::List(list));
+                                },
+                                None => {
+                                    return Err(ParsingError::ImmediateOutOfRange {
+                                        span: list.span(),
+                                        range: 0..((u16::MAX as usize) + 1),
+                                    });
+                                },
+                            }
+                        },
+                        ast::AttributeSetEntry::Occupied(entry) => {
+                            let prev_attr = entry.get();
+                            return Err(ParsingError::AttributeConflict {
+                                span: list.span(),
+                                prev: prev_attr.span(),
+                            });
+                        },
+                    }
+                },
+                attr => match attributes.entry(attr.id()) {
+                    ast::AttributeSetEntry::Vacant(entry) => {
+                        entry.insert(attr);
+                    },
+                    ast::AttributeSetEntry::Occupied(entry) => {
+                        let prev_attr = entry.get();
+                        return Err(ParsingError::AttributeConflict {
+                            span: attr.span(),
+                            prev: prev_attr.span(),
+                        });
+                    },
+                },
+            }
+        }
+
+        if num_locals.is_some() {
+            attributes.remove("locals");
+        }
+
+        if cc.is_some() {
+            attributes.remove("callconv");
+        }
+    }
+
+    if let Some(num_locals) = num_locals {
+        procedure.set_num_locals(num_locals);
+    }
+
+    if let Some(cc) = cc
+        && let Some(signature) = procedure.signature_mut()
+    {
+        signature.cc = cc;
     }
 
     Ok(())
+}
+
+fn re_span_block(span: SourceSpan, block: &ast::Block) -> ast::Block {
+    ast::Block::new(span, block.iter().cloned().collect())
 }
 
 fn lower_item_with_fallback(
