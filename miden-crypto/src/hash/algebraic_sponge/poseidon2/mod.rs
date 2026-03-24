@@ -1,3 +1,4 @@
+use once_cell::sync::Lazy;
 use p3_goldilocks::Goldilocks;
 use p3_symmetric::Permutation;
 
@@ -12,31 +13,21 @@ use constants::{NUM_EXTERNAL_ROUNDS_HALF, NUM_INTERNAL_ROUNDS};
 #[cfg(test)]
 mod test;
 
-#[cfg(feature = "std")]
-static P3_POSEIDON2: std::sync::LazyLock<p3_goldilocks::Poseidon2Goldilocks<12>> =
-    std::sync::LazyLock::new(p3_goldilocks::default_goldilocks_poseidon2_12);
+static P3_POSEIDON2: Lazy<p3_goldilocks::Poseidon2Goldilocks<12>> =
+    Lazy::new(p3_goldilocks::default_goldilocks_poseidon2_12);
 
 /// Applies Plonky3's optimized Poseidon2 permutation to a `[Felt; 12]` state.
 ///
 /// `Felt` is `#[repr(transparent)]` over `Goldilocks`, so the transmute is safe.
-/// With `std`, a static instance is used to avoid repeated allocation of round constants.
-/// Without `std`, the instance is constructed on each call.
+/// A process-global lazy static holds the permutation so round constants are not reallocated on
+/// every call (including `no_std`, via `once_cell` and the `critical-section` crate).
 #[inline(always)]
 fn p3_permute(state: &mut [Felt; STATE_WIDTH]) {
     // SAFETY: Felt is #[repr(transparent)] over Goldilocks.
     let gl_state =
         unsafe { &mut *(state as *mut [Felt; STATE_WIDTH] as *mut [Goldilocks; STATE_WIDTH]) };
 
-    #[cfg(feature = "std")]
-    {
-        P3_POSEIDON2.permute_mut(gl_state);
-    }
-
-    #[cfg(not(feature = "std"))]
-    {
-        let perm = p3_goldilocks::default_goldilocks_poseidon2_12();
-        perm.permute_mut(gl_state);
-    }
+    P3_POSEIDON2.permute_mut(gl_state);
 }
 
 /// Implementation of the Poseidon2 hash function with 256-bit output.
