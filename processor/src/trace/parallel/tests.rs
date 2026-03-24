@@ -1,14 +1,18 @@
 use alloc::{string::String, sync::Arc};
 
-use miden_air::trace::{AUX_TRACE_RAND_CHALLENGES, chiplets::hasher::HASH_CYCLE_LEN};
+use miden_air::trace::{
+    AUX_TRACE_RAND_CHALLENGES, DECODER_TRACE_OFFSET,
+    chiplets::hasher::HASH_CYCLE_LEN,
+    decoder::{HASHER_STATE_OFFSET, NUM_OP_BITS, OP_BITS_OFFSET},
+};
 use miden_core::{
-    Felt,
+    Felt, Word,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
         JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor, MastNodeExt,
         SplitNodeBuilder,
     },
-    operations::Operation,
+    operations::{Operation, opcodes},
     program::{Kernel, Program, StackInputs},
 };
 use miden_utils_testing::{get_column_name, rand::rand_array};
@@ -435,6 +439,72 @@ fn test_trace_generation_at_fragment_boundaries(
 }
 
 #[test]
+fn test_nested_loop_end_flags_stable_across_fragmentation() {
+    // Small fragment size is chosen so that the fragment boundaries land on the outer loop replay:
+    // rows [0..6], [7..13], [14..].
+    //
+    // Execution for the chosen stack inputs:
+    //  0: LOOP
+    //  1:   LOOP
+    //  2:     BLOCK PAD DROP END
+    //  6:   END
+    //  7: REPEAT
+    //  8:   LOOP
+    //  9:     BLOCK PAD DROP END
+    // 13:   END
+    // 14: END
+    // 15: HALT
+    //
+    // Stack inputs, top first:
+    //  1) enter outer loop
+    //  2) enter inner loop
+    //  3) exit inner loop
+    //  4) repeat outer loop
+    //  5) enter inner loop
+    //  6) exit inner loop
+    //  7) exit outer loop
+    const SMALL_FRAGMENT_SIZE: usize = 7;
+    const LARGE_FRAGMENT_SIZE: usize = 1 << 20;
+
+    let program = nested_loop_program();
+    let stack_inputs = &[ONE, ONE, ZERO, ONE, ONE, ZERO, ZERO, SENTINEL_VALUE];
+
+    let trace_from_fragments = build_trace_for_program(&program, stack_inputs, SMALL_FRAGMENT_SIZE);
+    let trace_from_single_fragment =
+        build_trace_for_program(&program, stack_inputs, LARGE_FRAGMENT_SIZE);
+
+    let columns_from_fragments = trace_from_fragments
+        .main_trace()
+        .columns()
+        .map(|col| col.to_vec())
+        .collect::<Vec<_>>();
+    let columns_from_single_fragment = trace_from_single_fragment
+        .main_trace()
+        .columns()
+        .map(|col| col.to_vec())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        columns_from_fragments, columns_from_single_fragment,
+        "nested-loop trace changed across fragment boundaries"
+    );
+
+    let end_flags = collect_end_flags(&trace_from_fragments);
+    assert!(
+        end_flags.contains(&[ONE, ZERO, ZERO, ZERO].into()),
+        "expected an END row for loop body basic block (is_loop_body=1)"
+    );
+    assert!(
+        end_flags.contains(&[ONE, ONE, ZERO, ZERO].into()),
+        "expected an END row for inner loop node (is_loop_body=1, loop_entered=1)"
+    );
+    assert!(
+        end_flags.contains(&[ZERO, ONE, ZERO, ZERO].into()),
+        "expected an END row for outer loop node (is_loop_body=0, loop_entered=1)"
+    );
+}
+
+#[test]
 fn test_partial_last_fragment_exists_for_h0_inversion_path() {
     // Keep this > 1 and non-dividing for join_program() to guarantee a short final fragment.
     const FRAGMENT_SIZE: usize = 11;
@@ -596,6 +666,25 @@ fn loop_program() -> Program {
 
     program.make_root(root_join_node);
     Program::new(Arc::new(program), root_join_node)
+}
+
+/// (loop (loop (block pad drop)))
+fn nested_loop_program() -> Program {
+    let mut program = MastForest::new();
+
+    let inner_loop = {
+        let basic_block_pad_drop =
+            BasicBlockNodeBuilder::new(vec![Operation::Pad, Operation::Drop], Vec::new())
+                .add_to_forest(&mut program)
+                .unwrap();
+
+        LoopNodeBuilder::new(basic_block_pad_drop).add_to_forest(&mut program).unwrap()
+    };
+
+    let outer_loop = LoopNodeBuilder::new(inner_loop).add_to_forest(&mut program).unwrap();
+
+    program.make_root(outer_loop);
+    Program::new(Arc::new(program), outer_loop)
 }
 
 /// (join (
@@ -1087,6 +1176,63 @@ fn testname() -> String {
     // Replace `::` with `__` to make snapshot file names Windows-compatible.
     // Windows does not allow `:` in file names.
     std::thread::current().name().unwrap().replace("::", "__")
+}
+
+fn build_trace_for_program(
+    program: &Program,
+    stack_inputs: &[Felt],
+    fragment_size: usize,
+) -> ExecutionTrace {
+    let processor = FastProcessor::new_with_options(
+        StackInputs::new(stack_inputs).unwrap(),
+        AdviceInputs::default(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(fragment_size)
+            .unwrap(),
+    );
+    let mut host = DefaultHost::default();
+    host.load_library(create_simple_library()).unwrap();
+    let (execution_output, trace_fragment_contexts) =
+        processor.execute_for_trace_sync(program, &mut host).unwrap();
+
+    build_trace(execution_output, trace_fragment_contexts, program.to_info()).unwrap()
+}
+
+fn collect_end_flags(trace: &ExecutionTrace) -> Vec<Word> {
+    let main_trace = trace.main_trace();
+
+    (0..main_trace.num_rows())
+        .filter_map(|row_idx| {
+            if read_opcode(main_trace, row_idx) == opcodes::END {
+                Some(
+                    [
+                        main_trace.get_column(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 4)
+                            [row_idx],
+                        main_trace.get_column(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 5)
+                            [row_idx],
+                        main_trace.get_column(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 6)
+                            [row_idx],
+                        main_trace.get_column(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 7)
+                            [row_idx],
+                    ]
+                    .into(),
+                )
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn read_opcode(main_trace: &MainTrace, row_idx: usize) -> u8 {
+    let mut result = 0;
+    for i in 0..NUM_OP_BITS {
+        let op_bit = main_trace.get_column(DECODER_TRACE_OFFSET + OP_BITS_OFFSET + i)[row_idx]
+            .as_canonical_u64();
+        assert!(op_bit <= 1, "invalid op bit");
+        result += op_bit << i;
+    }
+    result as u8
 }
 
 /// Wrapper around `ExecutionTrace` that produces deterministic `Debug` output.
