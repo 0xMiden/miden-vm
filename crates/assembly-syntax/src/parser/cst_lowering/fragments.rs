@@ -1237,15 +1237,20 @@ fn parse_hex_literal(span: SourceSpan, hex_digits: &str) -> Result<ParsedNumeric
             for (index, element) in word.iter_mut().enumerate() {
                 let offset = index * 16;
                 let digits = &hex_digits[offset..(offset + 16)];
-                let value = u64::from_str_radix(digits, 16).map_err(|error| {
-                    ParsingError::InvalidLiteral {
-                        span,
-                        kind: literal_error_from_int_error(
-                            error.kind(),
-                            LiteralErrorKind::FeltOverflow,
-                        ),
-                    }
-                })?;
+                let mut felt_bytes = [0u8; 8];
+                for (byte_idx, byte) in felt_bytes.iter_mut().enumerate() {
+                    let byte_str = &digits[(byte_idx * 2)..((byte_idx * 2) + 2)];
+                    *byte = u8::from_str_radix(byte_str, 16).map_err(|error| {
+                        ParsingError::InvalidLiteral {
+                            span,
+                            kind: literal_error_from_int_error(
+                                error.kind(),
+                                LiteralErrorKind::FeltOverflow,
+                            ),
+                        }
+                    })?;
+                }
+                let value = u64::from_le_bytes(felt_bytes);
                 if value >= Felt::ORDER_U64 {
                     return Err(ParsingError::InvalidLiteral {
                         span,

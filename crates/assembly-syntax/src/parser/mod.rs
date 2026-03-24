@@ -889,6 +889,43 @@ end
 
     #[cfg(feature = "std")]
     #[test]
+    fn experimental_cst_backend_matches_legacy_extended_instruction_blocks() {
+        let source = test_source_file(
+            "\
+begin
+    push.1.2.3
+    push.[1,2,3,4]
+    push.[1,2,3,4][1]
+    push.[1,2,3,4][1..3]
+    exec.foo
+    call.foo::bar
+    syscall.0x065c394c00227acff3545da5493cf1b79d9a9f5628db553d240edf8ef0cca04a
+    procref.foo::bar
+    debug.adv_stack
+    debug.adv_stack.2
+    debug.mem.1
+    debug.mem.1.2
+    debug.local.3
+    debug.local.3.4
+    emit.EVENT_ID
+    emit.event(\"abc\")
+    trace.7
+    assert.err=\"oops\"
+    u32assert.err=ERR_CODE
+end
+",
+        );
+
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+            .expect("legacy parser should succeed");
+        let cst = parse_forms_with_backend(source, ParserBackend::CstExperimental)
+            .expect("cst backend should succeed");
+
+        assert_eq!(cst, legacy);
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
     fn experimental_cst_backend_reports_unqualified_imports() {
         let source = test_source_file("use foo\n");
 
@@ -973,6 +1010,42 @@ end
 
         assert_matches!(legacy, Err(ParsingError::InvalidPadValue { .. }));
         assert_matches!(cst, Err(ParsingError::InvalidPadValue { .. }));
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn experimental_cst_backend_reports_direct_invalid_mast_roots() {
+        let source = test_source_file(
+            "\
+begin
+    exec.0x1234
+end
+",
+        );
+
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy);
+        let cst = parse_forms_with_backend(source, ParserBackend::CstExperimental);
+
+        assert_matches!(legacy, Err(ParsingError::InvalidMastRoot { .. }));
+        assert_matches!(cst, Err(ParsingError::InvalidMastRoot { .. }));
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn experimental_cst_backend_reports_direct_push_overflow() {
+        let source = test_source_file(
+            "\
+begin
+    push.1.2.3.4.5.6.7.8.9.10.11.12.13.14.15.16.17
+end
+",
+        );
+
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy);
+        let cst = parse_forms_with_backend(source, ParserBackend::CstExperimental);
+
+        assert_matches!(legacy, Err(ParsingError::PushOverflow { count: 17, .. }));
+        assert_matches!(cst, Err(ParsingError::PushOverflow { count: 17, .. }));
     }
 
     #[cfg(feature = "std")]
