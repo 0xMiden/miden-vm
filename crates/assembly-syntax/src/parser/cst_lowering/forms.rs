@@ -41,7 +41,7 @@ pub(super) fn lower_source_file(
         }
 
         match &items[index] {
-            CstItem::ModuleDoc(_) | CstItem::Doc(_) => unreachable!("doc items handled above"),
+            CstItem::Doc(_) => unreachable!("doc items handled above"),
             CstItem::Import(import) => {
                 forms.push(lower_import(context, import)?);
                 index += 1;
@@ -74,22 +74,18 @@ pub(super) fn lower_source_file(
 
 fn doc_group_kind(context: &LoweringContext<'_>, items: &[CstItem], index: usize) -> Option<bool> {
     let item = items.get(index)?;
-    is_doc_item(item).then(|| index == 0 && starts_at_file_beginning(context, item))
+    matches!(item, CstItem::Doc(_)).then(|| index == 0 && starts_at_file_beginning(context, item))
 }
 
 fn extend_doc_group(context: &LoweringContext<'_>, items: &[CstItem], start: usize) -> usize {
     let mut end = start + 1;
     while end < items.len()
-        && is_doc_item(&items[end])
+        && matches!(items[end], CstItem::Doc(_))
         && !has_blank_line_between(context, &items[end - 1], &items[end])
     {
         end += 1;
     }
     end
-}
-
-fn is_doc_item(item: &CstItem) -> bool {
-    matches!(item, CstItem::ModuleDoc(_) | CstItem::Doc(_))
 }
 
 fn starts_at_file_beginning(context: &LoweringContext<'_>, item: &CstItem) -> bool {
@@ -141,7 +137,7 @@ fn lower_doc_group(
     let mut text = String::new();
     for item in items {
         let line = match item {
-            CstItem::ModuleDoc(_) | CstItem::Doc(_) => doc_text(context, item),
+            CstItem::Doc(_) => doc_text(context, item),
             _ => unreachable!("expected only doc items in doc group"),
         };
         text.push_str(&line);
@@ -579,7 +575,6 @@ fn lower_import_digest_target(
 
 fn item_span(context: &LoweringContext<'_>, item: &CstItem) -> SourceSpan {
     match item {
-        CstItem::ModuleDoc(node) => context.parse().span_for_node(node.syntax()),
         CstItem::Doc(node) => context.parse().span_for_node(node.syntax()),
         CstItem::Import(node) => context.parse().span_for_node(node.syntax()),
         CstItem::Constant(node) => context.parse().span_for_node(node.syntax()),

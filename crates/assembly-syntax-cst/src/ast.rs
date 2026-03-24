@@ -36,12 +36,7 @@ ast_node!(
     SyntaxKind::SourceFile
 );
 ast_node!(
-    #[doc = "A leading `#!` documentation line classified as module-level documentation."]
-    ModuleDoc,
-    SyntaxKind::ModuleDoc
-);
-ast_node!(
-    #[doc = "A `#!` documentation line attached to the following item."]
+    #[doc = "A `#!` documentation line. Lowering decides whether a contiguous group becomes module-level or item-level documentation."]
     Doc,
     SyntaxKind::Doc
 );
@@ -134,7 +129,6 @@ ast_node!(
 /// Any top-level item that can appear beneath the CST root.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Item {
-    ModuleDoc(ModuleDoc),
     Doc(Doc),
     Import(Import),
     Constant(Constant),
@@ -148,7 +142,6 @@ impl Item {
     /// Attempts to cast a raw syntax node to a typed top-level item wrapper.
     pub fn cast(node: SyntaxNode) -> Option<Self> {
         match node.kind() {
-            SyntaxKind::ModuleDoc => ModuleDoc::cast(node).map(Self::ModuleDoc),
             SyntaxKind::Doc => Doc::cast(node).map(Self::Doc),
             SyntaxKind::Import => Import::cast(node).map(Self::Import),
             SyntaxKind::Constant => Constant::cast(node).map(Self::Constant),

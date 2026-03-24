@@ -102,8 +102,6 @@ struct Parser<'input> {
     builder: GreenNodeBuilder<'static>,
     diagnostics: Vec<Diagnostic>,
     eof_span: SourceSpan,
-    module_doc_emitted: bool,
-    seen_non_doc_form: bool,
 }
 
 #[derive(Default, Debug, Clone, Copy)]
@@ -143,8 +141,6 @@ impl<'input> Parser<'input> {
             builder: GreenNodeBuilder::new(),
             diagnostics: Vec::new(),
             eof_span,
-            module_doc_emitted: false,
-            seen_non_doc_form: false,
         }
     }
 
@@ -177,25 +173,21 @@ impl<'input> Parser<'input> {
             || self.at_keyword("proc")
             || self.at_prefixed_keyword("pub", "proc")
         {
-            self.seen_non_doc_form = true;
             self.parse_procedure();
             return;
         }
 
         if self.at_keyword("begin") {
-            self.seen_non_doc_form = true;
             self.parse_begin_block();
             return;
         }
 
         if self.at_keyword("use") || self.at_prefixed_keyword("pub", "use") {
-            self.seen_non_doc_form = true;
             self.parse_import();
             return;
         }
 
         if self.at_keyword("const") || self.at_prefixed_keyword("pub", "const") {
-            self.seen_non_doc_form = true;
             self.parse_constant();
             return;
         }
@@ -205,13 +197,11 @@ impl<'input> Parser<'input> {
             || self.at_prefixed_keyword("pub", "type")
             || self.at_prefixed_keyword("pub", "enum")
         {
-            self.seen_non_doc_form = true;
             self.parse_type_decl();
             return;
         }
 
         if self.at_keyword("adv_map") {
-            self.seen_non_doc_form = true;
             self.parse_advice_map();
             return;
         }
@@ -223,14 +213,7 @@ impl<'input> Parser<'input> {
     }
 
     fn parse_doc_form(&mut self) {
-        let kind = if !self.module_doc_emitted && !self.seen_non_doc_form {
-            self.module_doc_emitted = true;
-            SyntaxKind::ModuleDoc
-        } else {
-            SyntaxKind::Doc
-        };
-
-        self.start_node(kind);
+        self.start_node(SyntaxKind::Doc);
         self.bump();
         self.finish_node();
     }
@@ -1072,7 +1055,7 @@ end
         assert_eq!(
             child_kinds,
             vec![
-                SyntaxKind::ModuleDoc,
+                SyntaxKind::Doc,
                 SyntaxKind::Import,
                 SyntaxKind::Constant,
                 SyntaxKind::TypeDecl,
