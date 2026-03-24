@@ -574,11 +574,9 @@ impl Assembler {
                     .map(Into::into);
             },
             Instruction::DynExec => {
-                self.validate_dyn_not_kernel(block_builder.ops(), span)?;
                 return self.dynexec(block_builder.mast_forest_builder_mut(), before_enter);
             },
             Instruction::DynCall => {
-                self.validate_dyn_not_kernel(block_builder.ops(), span)?;
                 return self.dyncall(block_builder.mast_forest_builder_mut(), before_enter);
             },
             Instruction::ProcRef(callee) => self.procref(callee, proc_ctx.id(), block_builder)?,

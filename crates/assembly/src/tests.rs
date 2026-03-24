@@ -5659,12 +5659,6 @@ end
         .assemble_kernel(kernel_src)
         .expect("kernel assembly must succeed");
 
-    let digest = kernel
-        .as_ref()
-        .get_procedure_root_by_path("::$kernel::k1")
-        .expect("kernel export must have a digest");
-    let [a, b, c, d] = digest.map(|felt| felt.as_canonical_u64());
-
     let cases = vec![
         (
             "exec",
@@ -5679,8 +5673,6 @@ end
             "proc user\n    procref.::$kernel::k1\n    dropw\nend\n\nbegin\n    call.user\nend\n"
                 .to_string(),
         ),
-        ("dynexec", format!("begin\n    push.{d}.{c}.{b}.{a}\n    dynexec\nend\n")),
-        ("dyncall", format!("begin\n    push.{d}.{c}.{b}.{a}\n    dyncall\nend\n")),
     ];
 
     for (kind, program_src) in cases {

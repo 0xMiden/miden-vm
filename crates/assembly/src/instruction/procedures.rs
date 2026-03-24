@@ -1,9 +1,8 @@
 use alloc::vec::Vec;
 
 use miden_assembly_syntax::{
-    Felt, Word,
+    Word,
     ast::{InvocationTarget, InvokeKind},
-    debuginfo::SourceSpan,
     diagnostics::Report,
 };
 use miden_core::{
@@ -13,7 +12,7 @@ use miden_core::{
 use smallvec::SmallVec;
 
 use crate::{
-    Assembler, GlobalItemIndex, LinkerError, basic_block_builder::BasicBlockBuilder,
+    Assembler, GlobalItemIndex, basic_block_builder::BasicBlockBuilder,
     mast_forest_builder::MastForestBuilder,
 };
 
@@ -67,39 +66,6 @@ impl Assembler {
         let dyn_call_node_id = mast_forest_builder.ensure_dyncall(before_enter, vec![])?;
 
         Ok(Some(dyn_call_node_id))
-    }
-
-    /// Best-effort check: if the last operations in the basic block push a word that
-    /// matches a kernel procedure digest, reject `dynexec`/`dyncall`.
-    pub(super) fn validate_dyn_not_kernel(
-        &self,
-        ops: &[Operation],
-        span: SourceSpan,
-    ) -> Result<(), Report> {
-        if let Some(word) = Self::try_extract_top_word(ops)
-            && self.is_kernel_proc_digest(word)
-        {
-            return Err(LinkerError::KernelProcDynInvoke { span, source_file: None }.into());
-        }
-        Ok(())
-    }
-
-    fn try_extract_top_word(ops: &[Operation]) -> Option<Word> {
-        let mut felts = [Felt::ZERO; 4];
-        let mut idx = ops.len();
-        for felt in felts.iter_mut() {
-            idx = idx.checked_sub(1)?;
-            match ops[idx] {
-                Operation::Push(f) => *felt = f,
-                Operation::Pad => *felt = Felt::ZERO,
-                Operation::Incr if idx > 0 && matches!(ops[idx - 1], Operation::Pad) => {
-                    idx -= 1;
-                    *felt = Felt::ONE;
-                },
-                _ => return None,
-            }
-        }
-        Some(felts.into())
     }
 
     pub(super) fn procref(
