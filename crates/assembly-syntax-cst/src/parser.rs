@@ -131,6 +131,51 @@ impl Nesting {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BlockOwner {
+    Begin,
+    Procedure,
+    If,
+    While,
+    Repeat,
+}
+
+impl BlockOwner {
+    fn missing_end_message(self) -> &'static str {
+        match self {
+            Self::Begin => "expected `end` to close `begin` block",
+            Self::Procedure => "expected `end` to close procedure",
+            Self::If => "expected `end` to close `if`",
+            Self::While => "expected `end` to close `while`",
+            Self::Repeat => "expected `end` to close `repeat`",
+        }
+    }
+
+    fn recovery_message(self, boundary: BlockRecoveryBoundary) -> String {
+        match boundary {
+            BlockRecoveryBoundary::Else => {
+                format!("{} before `else`", self.missing_end_message())
+            },
+            BlockRecoveryBoundary::TopLevelItem => {
+                format!("{} before top-level item", self.missing_end_message())
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BlockRecoveryBoundary {
+    Else,
+    TopLevelItem,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BlockParseOutcome {
+    FoundTerminator,
+    RecoveredImplicitEnd,
+    ReachedEof,
+}
+
 impl<'input> Parser<'input> {
     fn new(source: &'input SourceFile) -> Self {
         let eof_span = SourceSpan::try_from_range(source.id(), source.len()..source.len())
@@ -425,8 +470,9 @@ impl<'input> Parser<'input> {
         self.start_node(SyntaxKind::BeginBlock);
         self.expect_keyword("begin", "expected `begin`");
         self.parse_line_tail();
-        self.parse_block(&["end"]);
-        self.expect_keyword("end", "expected `end` to close `begin` block");
+        if self.parse_block(BlockOwner::Begin, &["end"]) == BlockParseOutcome::FoundTerminator {
+            self.expect_keyword("end", BlockOwner::Begin.missing_end_message());
+        }
         self.finish_node();
     }
 
@@ -465,8 +511,9 @@ impl<'input> Parser<'input> {
         }
 
         self.parse_line_tail();
-        self.parse_block(&["end"]);
-        self.expect_keyword("end", "expected `end` to close procedure");
+        if self.parse_block(BlockOwner::Procedure, &["end"]) == BlockParseOutcome::FoundTerminator {
+            self.expect_keyword("end", BlockOwner::Procedure.missing_end_message());
+        }
         self.finish_node();
     }
 
@@ -543,11 +590,12 @@ impl<'input> Parser<'input> {
         }
     }
 
-    fn parse_block(&mut self, terminators: &[&str]) {
+    fn parse_block(&mut self, owner: BlockOwner, terminators: &[&str]) -> BlockParseOutcome {
         self.start_node(SyntaxKind::Block);
         while !self.eof() {
             if self.at_terminator(terminators) {
-                break;
+                self.finish_node();
+                return BlockParseOutcome::FoundTerminator;
             }
 
             if self.at_regular_trivia() {
@@ -555,12 +603,29 @@ impl<'input> Parser<'input> {
                 continue;
             }
 
+            if let Some(boundary) = self.block_recovery_boundary(terminators) {
+                self.start_node(SyntaxKind::Error);
+                self.error_here(owner.recovery_message(boundary));
+                self.finish_node();
+                self.finish_node();
+                return BlockParseOutcome::RecoveredImplicitEnd;
+            }
+
             if self.at_keyword("if") {
-                self.parse_if();
+                if self.parse_if() {
+                    self.finish_node();
+                    return BlockParseOutcome::ReachedEof;
+                }
             } else if self.at_keyword("while") {
-                self.parse_while();
+                if self.parse_while() {
+                    self.finish_node();
+                    return BlockParseOutcome::ReachedEof;
+                }
             } else if self.at_keyword("repeat") {
-                self.parse_repeat();
+                if self.parse_repeat() {
+                    self.finish_node();
+                    return BlockParseOutcome::ReachedEof;
+                }
             } else if self.can_start_instruction() {
                 self.parse_instruction();
             } else {
@@ -570,42 +635,72 @@ impl<'input> Parser<'input> {
                 self.finish_node();
             }
         }
+
+        self.error_at_eof(owner.missing_end_message());
         self.finish_node();
+        BlockParseOutcome::ReachedEof
     }
 
-    fn parse_if(&mut self) {
+    fn parse_if(&mut self) -> bool {
         self.start_node(SyntaxKind::IfOp);
         self.expect_keyword("if", "expected `if`");
         self.parse_structured_header_suffixes();
         self.parse_line_tail();
-        self.parse_block(&["else", "end"]);
+        let then_outcome = self.parse_block(BlockOwner::If, &["else", "end"]);
+        if then_outcome == BlockParseOutcome::ReachedEof {
+            self.finish_node();
+            return true;
+        }
+        let mut needs_end = then_outcome == BlockParseOutcome::FoundTerminator;
         if self.at_keyword("else") {
             self.bump();
             self.parse_line_tail();
-            self.parse_block(&["end"]);
+            let else_outcome = self.parse_block(BlockOwner::If, &["end"]);
+            if else_outcome == BlockParseOutcome::ReachedEof {
+                self.finish_node();
+                return true;
+            }
+            needs_end = else_outcome == BlockParseOutcome::FoundTerminator;
         }
-        self.expect_keyword("end", "expected `end` to close `if`");
+        if needs_end {
+            self.expect_keyword("end", BlockOwner::If.missing_end_message());
+        }
         self.finish_node();
+        false
     }
 
-    fn parse_while(&mut self) {
+    fn parse_while(&mut self) -> bool {
         self.start_node(SyntaxKind::WhileOp);
         self.expect_keyword("while", "expected `while`");
         self.parse_structured_header_suffixes();
         self.parse_line_tail();
-        self.parse_block(&["end"]);
-        self.expect_keyword("end", "expected `end` to close `while`");
+        let outcome = self.parse_block(BlockOwner::While, &["end"]);
+        if outcome == BlockParseOutcome::ReachedEof {
+            self.finish_node();
+            return true;
+        }
+        if outcome == BlockParseOutcome::FoundTerminator {
+            self.expect_keyword("end", BlockOwner::While.missing_end_message());
+        }
         self.finish_node();
+        false
     }
 
-    fn parse_repeat(&mut self) {
+    fn parse_repeat(&mut self) -> bool {
         self.start_node(SyntaxKind::RepeatOp);
         self.expect_keyword("repeat", "expected `repeat`");
         self.parse_structured_header_suffixes();
         self.parse_line_tail();
-        self.parse_block(&["end"]);
-        self.expect_keyword("end", "expected `end` to close `repeat`");
+        let outcome = self.parse_block(BlockOwner::Repeat, &["end"]);
+        if outcome == BlockParseOutcome::ReachedEof {
+            self.finish_node();
+            return true;
+        }
+        if outcome == BlockParseOutcome::FoundTerminator {
+            self.expect_keyword("end", BlockOwner::Repeat.missing_end_message());
+        }
         self.finish_node();
+        false
     }
 
     fn parse_structured_header_suffixes(&mut self) {
@@ -760,7 +855,9 @@ impl<'input> Parser<'input> {
             return false;
         }
 
-        self.at_terminator(&["else", "end"]) || self.can_start_operation()
+        self.at_terminator(&["else", "end"])
+            || self.can_start_operation()
+            || self.at_block_recovery_boundary()
     }
 
     fn line_break_starts_new_top_level_item(&self) -> bool {
@@ -800,10 +897,17 @@ impl<'input> Parser<'input> {
         token.kind() == SyntaxKind::DocComment
             || token.kind() == SyntaxKind::At
             || (token.kind() == SyntaxKind::Ident
-                && matches!(
-                    token.text(),
-                    "adv_map" | "begin" | "const" | "enum" | "proc" | "pub" | "type" | "use"
-                ))
+                && match token.text() {
+                    "adv_map" | "begin" | "const" | "enum" | "proc" | "type" | "use" => true,
+                    "pub" => matches!(
+                        self.next_relevant_top_level_token(index + 1)
+                            .and_then(|next| self.tokens.get(next)),
+                        Some(next)
+                            if next.kind() == SyntaxKind::Ident
+                                && matches!(next.text(), "const" | "enum" | "proc" | "type" | "use")
+                    ),
+                    _ => false,
+                })
     }
 
     fn can_start_operation(&self) -> bool {
@@ -814,7 +918,35 @@ impl<'input> Parser<'input> {
     }
 
     fn can_start_instruction(&self) -> bool {
-        self.at_name_like() || self.at_keyword_like()
+        matches!(
+            self.current(),
+            Some(token)
+                if matches!(
+                    token.kind(),
+                    SyntaxKind::Ident | SyntaxKind::SpecialIdent | SyntaxKind::QuotedIdent
+                ) && (token.kind() != SyntaxKind::Ident
+                    || !is_reserved_block_keyword(token.text()))
+        )
+    }
+
+    fn block_recovery_boundary(&self, terminators: &[&str]) -> Option<BlockRecoveryBoundary> {
+        if self.at_keyword("else") && !terminators.contains(&"else") {
+            return Some(BlockRecoveryBoundary::Else);
+        }
+
+        if self.at_top_level_form_starter() {
+            return Some(BlockRecoveryBoundary::TopLevelItem);
+        }
+
+        None
+    }
+
+    fn at_block_recovery_boundary(&self) -> bool {
+        self.at_keyword("else") || self.at_top_level_form_starter()
+    }
+
+    fn at_top_level_form_starter(&self) -> bool {
+        self.is_top_level_starter(self.pos)
     }
 
     fn at_terminator(&self, terminators: &[&str]) -> bool {
@@ -1005,6 +1137,25 @@ fn punctuation_continues_instruction(kind: SyntaxKind) -> bool {
             | SyntaxKind::RBracket
             | SyntaxKind::RParen
             | SyntaxKind::RBrace
+    )
+}
+
+fn is_reserved_block_keyword(text: &str) -> bool {
+    matches!(
+        text,
+        "adv_map"
+            | "begin"
+            | "const"
+            | "else"
+            | "end"
+            | "enum"
+            | "if"
+            | "proc"
+            | "pub"
+            | "repeat"
+            | "type"
+            | "use"
+            | "while"
     )
 }
 
@@ -1242,20 +1393,93 @@ end
     fn recovers_from_missing_end_tokens() {
         let parse = parse_text("begin\n    if.true\n        add\n");
         assert!(parse.has_errors());
-        assert!(
-            parse
-                .diagnostics()
-                .iter()
-                .any(|diag| diag.labels.as_ref().is_some_and(|labels| labels
-                    .iter()
-                    .any(|l| l.label().is_some_and(|label| label.contains("expected `end`"))))),
-            "expected an `end`-related diagnostic, got {:?}",
+        let end_labels = parse
+            .diagnostics()
+            .iter()
+            .flat_map(|diag| diag.labels.as_deref().unwrap_or(&[]).iter())
+            .filter_map(|label| label.label())
+            .filter(|label| label.contains("expected `end`"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            end_labels.len(),
+            1,
+            "expected exactly one missing-`end` diagnostic, got {:?}",
             parse.diagnostics()
+        );
+        assert!(
+            end_labels[0].contains("`if`"),
+            "expected the innermost unterminated block to own the diagnostic, got {end_labels:?}"
         );
 
         let root = parse.syntax();
         assert!(root.descendants().any(|node| node.kind() == SyntaxKind::BeginBlock));
         assert!(root.descendants().any(|node| node.kind() == SyntaxKind::IfOp));
+    }
+
+    #[test]
+    fn recovers_before_top_level_items_inside_blocks() {
+        let source = "\
+proc foo
+    if.true
+        add
+pub const X = 1
+";
+        let parse = parse_text(source);
+        assert!(parse.has_errors());
+        assert!(
+            parse
+                .diagnostics()
+                .iter()
+                .flat_map(|diag| diag.labels.as_deref().unwrap_or(&[]).iter())
+                .filter_map(|label| label.label())
+                .any(|label| label.contains("before top-level item")),
+            "expected block recovery before a top-level item, got {:?}",
+            parse.diagnostics()
+        );
+
+        let source_file = AstSourceFile::cast(parse.syntax()).expect("source file");
+        let items = source_file.items().collect::<Vec<_>>();
+        assert_eq!(items.len(), 2, "expected recovery to preserve the top-level constant");
+        assert!(matches!(items[0], Item::Procedure(_)));
+        assert!(matches!(items[1], Item::Constant(_)));
+        assert!(parse.syntax().descendants().any(|node| node.kind() == SyntaxKind::Error));
+    }
+
+    #[test]
+    fn else_synchronizes_unterminated_nested_blocks() {
+        let source = "\
+proc foo
+    if.true
+        while.true
+            nop
+    else
+        nop
+    end
+end
+";
+        let parse = parse_text(source);
+        assert!(parse.has_errors());
+        assert!(
+            parse
+                .diagnostics()
+                .iter()
+                .flat_map(|diag| diag.labels.as_deref().unwrap_or(&[]).iter())
+                .filter_map(|label| label.label())
+                .any(|label| label.contains("close `while` before `else`")),
+            "expected the nested `while` to recover before `else`, got {:?}",
+            parse.diagnostics()
+        );
+
+        let if_node = parse
+            .syntax()
+            .descendants()
+            .find(|node| node.kind() == SyntaxKind::IfOp)
+            .expect("if node");
+        assert_eq!(
+            if_node.children().filter(|child| child.kind() == SyntaxKind::Block).count(),
+            2,
+            "expected `else` to remain attached to the enclosing `if` after recovery"
+        );
     }
 
     #[test]
