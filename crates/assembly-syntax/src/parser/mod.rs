@@ -747,6 +747,52 @@ use foo::\"miden::base/account@0.1.0\"->account
 
     #[cfg(feature = "std")]
     #[test]
+    fn experimental_cst_backend_matches_legacy_digest_import_forms() {
+        let source = test_source_file(
+            "\
+use 0x0000000000000000000000000000000000000000000000000000000000000000->entry
+pub use 0x0000000000000000000000000000000000000000000000000000000000000000->public_entry
+",
+        );
+
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+            .expect("legacy parser should succeed");
+        let cst = parse_forms_with_backend(source, ParserBackend::CstExperimental)
+            .expect("cst backend should succeed");
+
+        assert_eq!(cst, legacy);
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn experimental_cst_backend_reports_unnamed_digest_imports() {
+        let source = test_source_file(
+            "\
+use 0x0000000000000000000000000000000000000000000000000000000000000000
+",
+        );
+
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy);
+        let cst = parse_forms_with_backend(source, ParserBackend::CstExperimental);
+
+        assert_matches!(legacy, Err(ParsingError::UnnamedReexportOfMastRoot { .. }));
+        assert_matches!(cst, Err(ParsingError::UnnamedReexportOfMastRoot { .. }));
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn experimental_cst_backend_reports_invalid_digest_imports() {
+        let source = test_source_file("use 0x1234->entry\n");
+
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy);
+        let cst = parse_forms_with_backend(source, ParserBackend::CstExperimental);
+
+        assert_matches!(legacy, Err(ParsingError::InvalidMastRoot { .. }));
+        assert_matches!(cst, Err(ParsingError::InvalidMastRoot { .. }));
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
     fn experimental_cst_backend_matches_legacy_constant_forms() {
         let source = test_source_file(
             "\

@@ -8,7 +8,7 @@ use miden_assembly_syntax_cst::{
     Parse as CstParse, SyntaxKind, SyntaxToken,
     ast::{AstNode, Path as CstPath, Visibility as CstVisibility},
 };
-use miden_debug_types::{SourceFile, SourceLanguage, SourceSpan, Span, Spanned};
+use miden_debug_types::{SourceFile, SourceSpan, Span, Spanned};
 
 use crate::{Path, ast, parser::ParsingError};
 
@@ -135,22 +135,6 @@ impl<'a> LoweringContext<'a> {
         Ok(Span::new(span, Arc::<Path>::from(path)))
     }
 
-    pub(super) fn lower_form_with_legacy_parser(
-        &mut self,
-        span: SourceSpan,
-    ) -> Result<ast::Form, ParsingError> {
-        let source = self.masked_source_file(span);
-        let mut forms = super::super::parse_forms_with_lalrpop(source, self.interned)?;
-        if forms.len() == 1 {
-            return Ok(forms.pop().expect("single form"));
-        }
-
-        Err(ParsingError::InvalidSyntax {
-            span,
-            message: "expected a single top-level form from CST item lowering".to_string(),
-        })
-    }
-
     fn intern(&mut self, text: &str) -> Arc<str> {
         self.interned.get(text).cloned().unwrap_or_else(|| {
             let interned = Arc::<str>::from(text.to_string().into_boxed_str());
@@ -158,31 +142,4 @@ impl<'a> LoweringContext<'a> {
             interned
         })
     }
-
-    fn masked_source_file(&self, span: SourceSpan) -> Arc<SourceFile> {
-        let full_source = self.source.as_str();
-        let range = span.into_slice_index();
-        let mut masked = String::with_capacity(range.end);
-        masked.push_str(&mask_prefix(&full_source[..range.start]));
-        masked.push_str(&full_source[range.clone()]);
-
-        Arc::new(SourceFile::new(
-            self.source.id(),
-            SourceLanguage::Masm,
-            self.source.uri().clone(),
-            masked.into_boxed_str(),
-        ))
-    }
-}
-
-fn mask_prefix(prefix: &str) -> String {
-    let mut masked = String::with_capacity(prefix.len());
-    for byte in prefix.bytes() {
-        match byte {
-            b'\n' => masked.push('\n'),
-            b'\r' => masked.push('\r'),
-            _ => masked.push(' '),
-        }
-    }
-    masked
 }
