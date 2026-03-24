@@ -1,6 +1,7 @@
 ## 0.24.0 (TBD)
 
 - [BREAKING] Removed `AlgebraicSponge::merge_with_int()` method ([#894](https://github.com/0xMiden/crypto/pull/894)).
+- Added the ability to configure the sync-to-disk behavior of the persistent backend using its config ([#912](https://github.com/0xMiden/crypto/pull/912)).
 
 ## 0.23.0 (2026-03-11)
 

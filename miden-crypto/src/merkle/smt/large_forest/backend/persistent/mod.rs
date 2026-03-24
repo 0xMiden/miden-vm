@@ -171,6 +171,12 @@ pub struct PersistentBackend {
     /// Care must be taken that this is _always_ kept in sync with the on-disk copy in the
     /// [`METADATA_CF`] column.
     lineages: HashMap<LineageId, TreeMetadata>,
+
+    /// Whether writes should be synchronously flushed to disk.
+    ///
+    /// Setting this to true will result in reduced throughput but may result in higher durability
+    /// in the presence of crashes.
+    sync_writes: bool,
 }
 
 // CONSTRUCTION
@@ -189,8 +195,9 @@ impl PersistentBackend {
     pub fn load(config: Config) -> Result<Self> {
         let db = Arc::new(Self::build_db_with_options(&config)?);
         let lineages = Self::read_all_metadata(db.clone())?;
+        let sync_writes = config.sync_writes;
 
-        Ok(Self { db, lineages })
+        Ok(Self { db, lineages, sync_writes })
     }
 }
 
@@ -1145,7 +1152,7 @@ impl PersistentBackend {
     /// - [`BackendError::Internal`] if writing to the database fails for any reason.
     fn write(&self, batch: WriteBatch) -> Result<()> {
         let mut write_opts = db::WriteOptions::default();
-        write_opts.set_sync(false);
+        write_opts.set_sync(self.sync_writes);
         self.db.write_opt(batch, &write_opts)?;
 
         Ok(())
