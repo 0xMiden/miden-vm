@@ -685,6 +685,56 @@ type Point = struct @align(16) { x: u32, y: ptr<u8, addrspace(byte)> }
 
     #[cfg(feature = "std")]
     #[test]
+    fn experimental_cst_backend_matches_legacy_enum_forms() {
+        let source = test_source_file(
+            "\
+enum Tag : u8 {
+    A,
+    B = 2,
+    C = B * 2,
+    D,
+}
+
+pub enum Result : felt {
+    OK = 1,
+    ERR = OK + 1,
+}
+",
+        );
+
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+            .expect("legacy parser should succeed");
+        let cst = parse_forms_with_backend(source, ParserBackend::CstExperimental)
+            .expect("cst backend should succeed");
+
+        assert_eq!(cst, legacy);
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn experimental_cst_backend_matches_legacy_procedure_signatures() {
+        let source = test_source_file(
+            "\
+pub proc println(message: ptr<u8, addrspace(byte)>) -> ptr<u8, addrspace(byte)>
+    nop
+end
+
+pub proc classify(value: felt) -> (ok: i1, words: [u32; 4])
+    push.1
+end
+",
+        );
+
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+            .expect("legacy parser should succeed");
+        let cst = parse_forms_with_backend(source, ParserBackend::CstExperimental)
+            .expect("cst backend should succeed");
+
+        assert_eq!(cst, legacy);
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
     fn experimental_cst_backend_reports_unqualified_imports() {
         let source = test_source_file("use foo\n");
 
