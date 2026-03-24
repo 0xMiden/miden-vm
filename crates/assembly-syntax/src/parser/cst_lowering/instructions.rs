@@ -1701,7 +1701,7 @@ fn push_int_op(span: SourceSpan, imm: Immediate<crate::parser::IntValue>) -> ast
 fn push_u32_op(span: SourceSpan, imm: ast::ImmU32) -> ast::Op {
     let push = match imm {
         Immediate::Constant(name) => Immediate::Constant(name),
-        Immediate::Value(value) => Immediate::Value(value.map(|value| PushValue::from(value))),
+        Immediate::Value(value) => Immediate::Value(value.map(PushValue::from)),
     };
     inst_op(span, Instruction::Push(push))
 }

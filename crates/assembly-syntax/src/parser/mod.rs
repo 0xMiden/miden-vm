@@ -18,7 +18,6 @@ lalrpop_util::lalrpop_mod!(
     "/parser/grammar.rs"
 );
 
-#[cfg(feature = "std")]
 mod cst_lowering;
 mod error;
 mod lexer;
@@ -43,58 +42,29 @@ use crate::{Path, ast, sema};
 
 type ParseError<'a> = lalrpop_util::ParseError<u32, Token<'a>, ParsingError>;
 
-#[cfg_attr(not(any(test, feature = "testing")), allow(dead_code))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 enum InternalParserBackend {
     Legacy,
-    #[cfg(feature = "std")]
+    #[default]
     Cst,
 }
 
-impl Default for InternalParserBackend {
-    fn default() -> Self {
-        #[cfg(feature = "std")]
-        {
-            return Self::Cst;
-        }
-
-        #[cfg(not(feature = "std"))]
-        Self::Legacy
-    }
-}
-
-#[cfg(any(test, feature = "testing"))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 /// Selects which raw parser implementation to use when parsing forms in tests or differential
 /// validation.
 pub enum ParserBackend {
     /// Uses the original LALRPOP-based parser.
     Legacy,
-    #[cfg(feature = "std")]
     /// Uses the lossless CST parser followed by CST-to-AST lowering.
+    #[default]
     Cst,
 }
 
-#[cfg(any(test, feature = "testing"))]
-impl Default for ParserBackend {
-    fn default() -> Self {
-        #[cfg(feature = "std")]
-        {
-            return Self::Cst;
-        }
-
-        #[cfg(not(feature = "std"))]
-        Self::Legacy
-    }
-}
-
-#[cfg(any(test, feature = "testing"))]
 impl From<ParserBackend> for InternalParserBackend {
     fn from(backend: ParserBackend) -> Self {
         match backend {
             ParserBackend::Legacy => Self::Legacy,
-            #[cfg(feature = "std")]
             ParserBackend::Cst => Self::Cst,
         }
     }
@@ -250,7 +220,6 @@ fn parse_forms_internal_with_backend(
 ) -> Result<Vec<ast::Form>, ParsingError> {
     match backend {
         InternalParserBackend::Legacy => parse_forms_with_lalrpop(source, interned),
-        #[cfg(feature = "std")]
         InternalParserBackend::Cst => cst_lowering::parse_forms_from_cst(source, interned),
     }
 }
@@ -457,7 +426,6 @@ mod tests {
         ))
     }
 
-    #[cfg(feature = "std")]
     fn repo_root() -> PathBuf {
         FsPath::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
@@ -466,7 +434,6 @@ mod tests {
             .to_path_buf()
     }
 
-    #[cfg(feature = "std")]
     fn checked_in_masm_corpus() -> Vec<PathBuf> {
         let root = repo_root();
         let mut files = Vec::new();
@@ -482,7 +449,6 @@ mod tests {
         files
     }
 
-    #[cfg(feature = "std")]
     fn collect_masm_files(dir: &FsPath, files: &mut Vec<PathBuf>) {
         let entries = fs::read_dir(dir)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", dir.display()));
@@ -499,7 +465,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "std")]
     fn load_source_file(path: &FsPath) -> Arc<SourceFile> {
         let source = fs::read_to_string(path)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
@@ -642,7 +607,6 @@ end
         crate::assert_diagnostic!(err, "length exceeds the maximum of 255 bytes");
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn parse_forms_uses_cst_backend_by_default_under_std() {
         let source = test_source_file(
@@ -665,7 +629,6 @@ end
         assert_eq!(cst, legacy);
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_matches_legacy_top_level_form_sequences() {
         let source = test_source_file(
@@ -700,7 +663,6 @@ end
         assert_eq!(cst, legacy);
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_matches_legacy_doc_comment_trimming() {
         let source = test_source_file(
@@ -722,7 +684,6 @@ const VALUE = 1
         assert_eq!(cst, legacy);
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_matches_legacy_doc_kind_after_leading_line_comment() {
         let source = test_source_file(
@@ -744,7 +705,6 @@ end
         assert_eq!(cst, legacy);
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_matches_legacy_path_import_forms() {
         let source = test_source_file(
@@ -763,7 +723,6 @@ use foo::\"miden::base/account@0.1.0\"->account
         assert_eq!(cst, legacy);
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_matches_legacy_digest_import_forms() {
         let source = test_source_file(
@@ -781,7 +740,6 @@ pub use 0x0000000000000000000000000000000000000000000000000000000000000000->publ
         assert_eq!(cst, legacy);
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_reports_unnamed_digest_imports() {
         let source = test_source_file(
@@ -797,7 +755,6 @@ use 0x0000000000000000000000000000000000000000000000000000000000000000
         assert_matches!(cst, Err(ParsingError::UnnamedReexportOfMastRoot { .. }));
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_reports_invalid_digest_imports() {
         let source = test_source_file("use 0x1234->entry\n");
@@ -809,7 +766,6 @@ use 0x0000000000000000000000000000000000000000000000000000000000000000
         assert_matches!(cst, Err(ParsingError::InvalidMastRoot { .. }));
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_matches_legacy_constant_forms() {
         let source = test_source_file(
@@ -829,7 +785,6 @@ const VALUE = (parts::COUNT + 3) // 2
         assert_eq!(cst, legacy);
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_matches_legacy_string_constant_forms() {
         let source = test_source_file("const ERR = \"failed to load the circuit description\"\n");
@@ -842,7 +797,6 @@ const VALUE = (parts::COUNT + 3) // 2
         assert_eq!(cst, legacy);
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_matches_legacy_type_alias_forms() {
         let source = test_source_file(
@@ -862,7 +816,6 @@ type Point = struct @align(16) { x: u32, y: ptr<u8, addrspace(byte)> }
         assert_eq!(cst, legacy);
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_matches_legacy_enum_forms() {
         let source = test_source_file(
@@ -889,7 +842,6 @@ pub enum Result : felt {
         assert_eq!(cst, legacy);
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_matches_legacy_procedure_signatures() {
         let source = test_source_file(
@@ -912,7 +864,6 @@ end
         assert_eq!(cst, legacy);
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_matches_legacy_advice_map_and_begin_forms() {
         let source = test_source_file(
@@ -935,7 +886,6 @@ end
         assert_eq!(cst, legacy);
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_matches_legacy_procedure_attributes() {
         let source = test_source_file(
@@ -959,7 +909,6 @@ end
         assert_eq!(cst, legacy);
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_matches_legacy_nested_structured_blocks() {
         let source = test_source_file(
@@ -997,7 +946,6 @@ end
         assert_eq!(cst, legacy);
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_matches_legacy_primitive_instruction_blocks() {
         let source = test_source_file(
@@ -1030,7 +978,6 @@ end
         assert_eq!(cst, legacy);
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_matches_legacy_immediate_instruction_blocks() {
         let source = test_source_file(
@@ -1066,7 +1013,6 @@ end
         assert_eq!(cst, legacy);
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_matches_legacy_extended_instruction_blocks() {
         let source = test_source_file(
@@ -1103,7 +1049,6 @@ end
         assert_eq!(cst, legacy);
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_matches_legacy_checked_in_masm_corpus() {
         let files = checked_in_masm_corpus();
@@ -1120,7 +1065,6 @@ end
         }
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_reports_unqualified_imports() {
         let source = test_source_file("use foo\n");
@@ -1131,7 +1075,6 @@ end
         assert_matches!(err, ParsingError::UnqualifiedImport { .. });
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_reports_invalid_struct_repr_from_direct_type_lowering() {
         let source = test_source_file("type Foo = struct @align { x: u32 }\n");
@@ -1142,7 +1085,6 @@ end
         assert_matches!(err, ParsingError::InvalidStructRepr { .. });
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_reports_attribute_key_value_conflicts() {
         let source = test_source_file(
@@ -1161,7 +1103,6 @@ end
         assert_matches!(err, ParsingError::AttributeKeyValueConflict { .. });
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_reports_invalid_advice_map_keys() {
         let source = test_source_file("adv_map TABLE(1) = [1]\n");
@@ -1172,7 +1113,6 @@ end
         assert_matches!(err, ParsingError::InvalidAdvMapKey { .. });
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_reports_direct_division_by_zero_for_foldable_instructions() {
         let source = test_source_file(
@@ -1190,7 +1130,6 @@ end
         assert_matches!(cst, Err(ParsingError::DivisionByZero { .. }));
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_reports_direct_invalid_pad_values() {
         let source = test_source_file(
@@ -1208,7 +1147,6 @@ end
         assert_matches!(cst, Err(ParsingError::InvalidPadValue { .. }));
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_reports_direct_invalid_mast_roots() {
         let source = test_source_file(
@@ -1226,7 +1164,6 @@ end
         assert_matches!(cst, Err(ParsingError::InvalidMastRoot { .. }));
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_reports_direct_push_overflow() {
         let source = test_source_file(
@@ -1244,7 +1181,6 @@ end
         assert_matches!(cst, Err(ParsingError::PushOverflow { count: 17, .. }));
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_reports_direct_deprecated_memory_word_aliases() {
         let source = test_source_file(
@@ -1262,7 +1198,6 @@ end
         assert_matches!(cst, Err(ParsingError::DeprecatedInstruction { .. }));
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_reports_direct_deprecated_local_word_aliases() {
         let source = test_source_file(
@@ -1280,7 +1215,6 @@ end
         assert_matches!(cst, Err(ParsingError::DeprecatedInstruction { .. }));
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_reports_direct_invalid_instruction_syntax() {
         let source = test_source_file(
@@ -1298,7 +1232,6 @@ end
         assert_matches!(cst, Err(ParsingError::InvalidSyntax { .. }));
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_rejects_empty_while_blocks() {
         let source = test_source_file(
@@ -1317,7 +1250,6 @@ end
         assert!(cst.is_err(), "cst backend should reject empty while blocks");
     }
 
-    #[cfg(feature = "std")]
     #[test]
     fn cst_backend_rejects_empty_if_then_without_else() {
         let source = test_source_file(
