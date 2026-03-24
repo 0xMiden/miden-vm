@@ -7,6 +7,7 @@
 #### Bug Fixes
 
 - Reverted `InvokeKind::ProcRef` back to `InvokeKind::Exec` in `visit_mut_procref` and added an explanatory comment (#2893).
+
 #### Changes
 
 - Documented that enum variants are module-level constants and must be unique within a module (#2932).
@@ -16,6 +17,10 @@
 - [BREAKING] Removed the deprecated `FastProcessor::execute_for_trace_sync()` and `execute_for_trace()` wrappers; use `execute_trace_inputs_sync()` or `execute_trace_inputs()` instead ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
 - [BREAKING] Removed the deprecated unbound `TraceBuildInputs::new()` and `TraceBuildInputs::from_program()` constructors; use `execute_trace_inputs_sync()` or `execute_trace_inputs()` instead ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
 - Added `prove_from_trace_sync(...)` for proving from pre-executed trace inputs ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
+
+#### Bug fixes
+
+- Fixed `ExecutionTracer` DYNCALL stack-depth off-by-one at `MIN_STACK_DEPTH` ([#2813](https://github.com/0xMiden/miden-vm/issues/2813)).
 
 ## 0.22.0 (2025-03-18)
 

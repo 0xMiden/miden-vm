@@ -42,6 +42,27 @@ pub fn build_trace_from_program(program: &Program, stack_inputs: &[u64]) -> Exec
     build_trace(trace_inputs).unwrap()
 }
 
+/// Builds a sample trace by executing the provided program with pre-built `StackInputs`.
+///
+/// Unlike [`build_trace_from_program`], this helper accepts a `StackInputs` value directly so
+/// that callers can supply `Felt` elements (e.g. a procedure hash word) without having to
+/// convert them through `u64` first.
+pub fn build_trace_from_program_with_stack(
+    program: &Program,
+    stack_inputs: StackInputs,
+) -> ExecutionTrace {
+    let mut host = DefaultHost::default();
+    let processor = FastProcessor::new_with_options(
+        stack_inputs,
+        AdviceInputs::default(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(TEST_TRACE_FRAGMENT_SIZE)
+            .unwrap(),
+    );
+    let trace_inputs = processor.execute_trace_inputs_sync(program, &mut host).unwrap();
+    build_trace(trace_inputs).unwrap()
+}
+
 /// Builds a sample trace by executing a span block containing the specified operations. This
 /// results in 1 additional hash cycle (8 rows) at the beginning of the hash chiplet.
 pub fn build_trace_from_ops(operations: Vec<Operation>, stack: &[u64]) -> ExecutionTrace {
