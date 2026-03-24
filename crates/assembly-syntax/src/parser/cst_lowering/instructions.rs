@@ -27,6 +27,10 @@ pub(super) fn try_lower_instruction(
 ) -> Result<Option<Vec<ast::Op>>, ParsingError> {
     let span = context.parse().span_for_node(instruction.syntax());
     if let Some(compact) = CompactInstruction::parse(instruction) {
+        if let Some(error) = deprecated_instruction_error(span, &compact) {
+            return Err(error);
+        }
+
         if let Some(inst) = lower_primitive_instruction(compact.text.as_str()) {
             return Ok(Some(vec![inst_op(span, inst)]));
         }
@@ -326,6 +330,26 @@ fn lower_primitive_instruction(text: &str) -> Option<Instruction> {
     };
 
     Some(instruction)
+}
+
+fn deprecated_instruction_error(
+    span: SourceSpan,
+    compact: &CompactInstruction,
+) -> Option<ParsingError> {
+    let instruction = compact.texts().first().copied()?;
+    let replacement = match instruction {
+        "mem_loadw" => "mem_loadw_be",
+        "mem_storew" => "mem_storew_be",
+        "loc_loadw" => "loc_loadw_be",
+        "loc_storew" => "loc_storew_be",
+        _ => return None,
+    };
+
+    Some(ParsingError::DeprecatedInstruction {
+        span,
+        instruction: instruction.to_string(),
+        replacement: replacement.to_string(),
+    })
 }
 
 fn lower_extended_instruction(

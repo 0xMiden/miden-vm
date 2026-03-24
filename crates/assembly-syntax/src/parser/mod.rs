@@ -1182,11 +1182,11 @@ end
 
     #[cfg(feature = "std")]
     #[test]
-    fn experimental_cst_backend_preserves_legacy_instruction_fallback_diagnostics() {
+    fn experimental_cst_backend_reports_direct_deprecated_memory_word_aliases() {
         let source = test_source_file(
             "\
 begin
-    mem_loadw
+    mem_loadw.1
 end
 ",
         );
@@ -1196,6 +1196,42 @@ end
 
         assert_matches!(legacy, Err(ParsingError::DeprecatedInstruction { .. }));
         assert_matches!(cst, Err(ParsingError::DeprecatedInstruction { .. }));
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn experimental_cst_backend_reports_direct_deprecated_local_word_aliases() {
+        let source = test_source_file(
+            "\
+begin
+    loc_storew.0
+end
+",
+        );
+
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy);
+        let cst = parse_forms_with_backend(source, ParserBackend::CstExperimental);
+
+        assert_matches!(legacy, Err(ParsingError::DeprecatedInstruction { .. }));
+        assert_matches!(cst, Err(ParsingError::DeprecatedInstruction { .. }));
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn experimental_cst_backend_reports_direct_invalid_instruction_syntax() {
+        let source = test_source_file(
+            "\
+begin
+    u32widening_mulx
+end
+",
+        );
+
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy);
+        let cst = parse_forms_with_backend(source, ParserBackend::CstExperimental);
+
+        assert!(legacy.is_err(), "legacy parser should reject invalid instructions");
+        assert_matches!(cst, Err(ParsingError::InvalidSyntax { .. }));
     }
 
     #[cfg(feature = "std")]
