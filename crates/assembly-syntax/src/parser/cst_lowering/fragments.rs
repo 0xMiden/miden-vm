@@ -78,6 +78,42 @@ pub(super) fn lower_function_type_from_signature(
     Ok(ty)
 }
 
+pub(super) fn lower_u32_immediate_token(
+    context: &mut LoweringContext<'_>,
+    token: &SyntaxToken,
+) -> Result<ast::ImmU32, ParsingError> {
+    let span = context.parse().span_for_token(token);
+    match token.kind() {
+        SyntaxKind::Ident => {
+            Ok(ast::Immediate::Constant(context.lower_constant_ident_token(token)?))
+        },
+        SyntaxKind::Number => match parse_numeric_token(span, token.text())? {
+            ParsedNumeric::Int(value) => {
+                let value = match value {
+                    IntValue::U8(value) => value as u32,
+                    IntValue::U16(value) => value as u32,
+                    IntValue::U32(value) => value,
+                    IntValue::Felt(_) => {
+                        return Err(ParsingError::InvalidLiteral {
+                            span,
+                            kind: LiteralErrorKind::U32Overflow,
+                        });
+                    },
+                };
+                Ok(ast::Immediate::Value(Span::new(span, value)))
+            },
+            ParsedNumeric::Word(_) => Err(ParsingError::InvalidLiteral {
+                span,
+                kind: LiteralErrorKind::U32Overflow,
+            }),
+        },
+        _ => Err(ParsingError::InvalidSyntax {
+            span,
+            message: "expected a u32 literal or constant reference".to_string(),
+        }),
+    }
+}
+
 pub(super) fn lower_attribute(
     context: &mut LoweringContext<'_>,
     attribute: &CstAttribute,

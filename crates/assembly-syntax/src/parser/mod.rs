@@ -782,6 +782,44 @@ end
 
     #[cfg(feature = "std")]
     #[test]
+    fn experimental_cst_backend_matches_legacy_nested_structured_blocks() {
+        let source = test_source_file(
+            "\
+const COUNT = 3
+
+begin
+    if.true
+        add.0
+    else
+        push.1
+    end
+
+    if.false
+        push.2
+    else
+        mul
+    end
+
+    while.true
+        repeat.COUNT
+            push.1
+        end
+        neq.0
+    end
+end
+",
+        );
+
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+            .expect("legacy parser should succeed");
+        let cst = parse_forms_with_backend(source, ParserBackend::CstExperimental)
+            .expect("cst backend should succeed");
+
+        assert_eq!(cst, legacy);
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
     fn experimental_cst_backend_reports_unqualified_imports() {
         let source = test_source_file("use foo\n");
 
@@ -830,6 +868,44 @@ end
             .expect_err("cst backend should reject invalid advice-map keys");
 
         assert_matches!(err, ParsingError::InvalidAdvMapKey { .. });
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn experimental_cst_backend_rejects_empty_while_blocks() {
+        let source = test_source_file(
+            "\
+begin
+    while.true
+    end
+end
+",
+        );
+
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy);
+        let cst = parse_forms_with_backend(source, ParserBackend::CstExperimental);
+
+        assert!(legacy.is_err(), "legacy parser should reject empty while blocks");
+        assert!(cst.is_err(), "cst backend should reject empty while blocks");
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn experimental_cst_backend_rejects_empty_if_then_without_else() {
+        let source = test_source_file(
+            "\
+begin
+    if.true
+    end
+end
+",
+        );
+
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy);
+        let cst = parse_forms_with_backend(source, ParserBackend::CstExperimental);
+
+        assert!(legacy.is_err(), "legacy parser should reject empty if-then blocks");
+        assert!(cst.is_err(), "cst backend should reject empty if-then blocks");
     }
 
     #[test]

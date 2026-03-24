@@ -2,6 +2,7 @@ use alloc::{
     collections::BTreeSet,
     string::{String, ToString},
     sync::Arc,
+    vec::Vec,
 };
 
 use miden_assembly_syntax_cst::{
@@ -146,21 +147,21 @@ impl<'a> LoweringContext<'a> {
         })
     }
 
-    pub(super) fn lower_block_with_legacy_parser(
+    pub(super) fn lower_ops_with_legacy_parser(
         &mut self,
         span: SourceSpan,
-    ) -> Result<ast::Block, ParsingError> {
+    ) -> Result<Vec<ast::Op>, ParsingError> {
         let source = self.wrapped_block_source_file(span);
         let mut forms = super::super::parse_forms_with_lalrpop(source, self.interned)?;
         if forms.len() == 1
             && let ast::Form::Begin(block) = forms.pop().expect("single form")
         {
-            return Ok(block);
+            return Ok(block.iter().cloned().collect());
         }
 
         Err(ParsingError::InvalidSyntax {
             span,
-            message: "expected a single begin form from CST block lowering".to_string(),
+            message: "expected a single begin form from CST operation lowering".to_string(),
         })
     }
 

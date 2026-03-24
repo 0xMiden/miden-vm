@@ -1,3 +1,4 @@
+mod blocks;
 mod context;
 mod diagnostics;
 mod forms;
