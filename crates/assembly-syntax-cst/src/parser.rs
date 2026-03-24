@@ -399,7 +399,7 @@ impl<'input> Parser<'input> {
         loop {
             match self.current_kind() {
                 Some(SyntaxKind::Whitespace) => self.bump(),
-                Some(SyntaxKind::Comment | SyntaxKind::DocComment) => {
+                Some(SyntaxKind::Comment) => {
                     self.bump();
                     break;
                 },

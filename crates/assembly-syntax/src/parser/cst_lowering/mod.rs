@@ -1,11 +1,14 @@
 mod context;
 mod diagnostics;
+mod forms;
 
 use alloc::{collections::BTreeSet, sync::Arc, vec::Vec};
 
 use miden_debug_types::SourceFile;
 
-use self::{context::LoweringContext, diagnostics::lower_cst_diagnostics};
+use self::{
+    context::LoweringContext, diagnostics::lower_cst_diagnostics, forms::lower_source_file,
+};
 use crate::{ast, parser::ParsingError};
 
 pub(super) fn parse_forms_from_cst(
@@ -17,5 +20,6 @@ pub(super) fn parse_forms_from_cst(
         return Err(error);
     }
 
-    LoweringContext::new(source, parse, interned).lower_forms()
+    let mut context = LoweringContext::new(source, parse, interned);
+    lower_source_file(&mut context)
 }
