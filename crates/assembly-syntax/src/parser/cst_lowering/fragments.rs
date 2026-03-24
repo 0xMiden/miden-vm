@@ -928,7 +928,7 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
                 message: "expected a quoted string".to_string(),
             },
         )?;
-        self.context.lower_ident_text(span, raw)
+        Ok(self.context.lower_string_text(span, raw))
     }
 
     fn current_constant_operator(&self) -> Option<(u8, ast::ConstantOp)> {

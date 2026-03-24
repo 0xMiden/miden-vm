@@ -421,7 +421,11 @@ mod module_walker {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{
+        fs,
+        path::{Path as FsPath, PathBuf},
+        sync::Arc,
+    };
 
     use miden_core::assert_matches;
     use miden_debug_types::{SourceFile, SourceId, SourceLanguage, Uri};
@@ -434,6 +438,60 @@ mod tests {
             SourceLanguage::Masm,
             Uri::new("memory:///parser-backend-test.masm"),
             source.to_string().into_boxed_str(),
+        ))
+    }
+
+    #[cfg(feature = "std")]
+    fn repo_root() -> PathBuf {
+        FsPath::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(FsPath::parent)
+            .expect("workspace root should be two levels above crates/assembly-syntax")
+            .to_path_buf()
+    }
+
+    #[cfg(feature = "std")]
+    fn checked_in_masm_corpus() -> Vec<PathBuf> {
+        let root = repo_root();
+        let mut files = Vec::new();
+        for relative in [
+            "crates/lib/core/asm",
+            "crates/project/examples",
+            "miden-vm/masm-examples",
+            "miden-vm/tests/integration/cli/data",
+        ] {
+            collect_masm_files(&root.join(relative), &mut files);
+        }
+        files.sort();
+        files
+    }
+
+    #[cfg(feature = "std")]
+    fn collect_masm_files(dir: &FsPath, files: &mut Vec<PathBuf>) {
+        let entries = fs::read_dir(dir)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", dir.display()));
+        for entry in entries {
+            let entry = entry.unwrap_or_else(|error| {
+                panic!("failed to read a directory entry under {}: {error}", dir.display())
+            });
+            let path = entry.path();
+            if path.is_dir() {
+                collect_masm_files(&path, files);
+            } else if path.extension().is_some_and(|ext| ext == "masm") {
+                files.push(path);
+            }
+        }
+    }
+
+    #[cfg(feature = "std")]
+    fn load_source_file(path: &FsPath) -> Arc<SourceFile> {
+        let source = fs::read_to_string(path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+        Arc::new(SourceFile::new(
+            SourceId::default(),
+            SourceLanguage::Masm,
+            Uri::new(format!("file://{}", path.display())),
+            source.into_boxed_str(),
         ))
     }
 
@@ -626,6 +684,50 @@ end
 
     #[cfg(feature = "std")]
     #[test]
+    fn experimental_cst_backend_matches_legacy_doc_comment_trimming() {
+        let source = test_source_file(
+            "\
+#! heading
+#!  - bullet
+#!    continuation
+
+#!  item docs
+const VALUE = 1
+",
+        );
+
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+            .expect("legacy parser should succeed");
+        let cst = parse_forms_with_backend(source, ParserBackend::CstExperimental)
+            .expect("cst backend should succeed");
+
+        assert_eq!(cst, legacy);
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn experimental_cst_backend_matches_legacy_doc_kind_after_leading_line_comment() {
+        let source = test_source_file(
+            "\
+# heading comment
+
+#! item docs
+pub proc foo
+    nop
+end
+",
+        );
+
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+            .expect("legacy parser should succeed");
+        let cst = parse_forms_with_backend(source, ParserBackend::CstExperimental)
+            .expect("cst backend should succeed");
+
+        assert_eq!(cst, legacy);
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
     fn experimental_cst_backend_matches_legacy_path_import_forms() {
         let source = test_source_file(
             "\
@@ -654,6 +756,19 @@ const EVENT_ID = event(\"miden::event\")
 const VALUE = (parts::COUNT + 3) // 2
 ",
         );
+
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+            .expect("legacy parser should succeed");
+        let cst = parse_forms_with_backend(source, ParserBackend::CstExperimental)
+            .expect("cst backend should succeed");
+
+        assert_eq!(cst, legacy);
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn experimental_cst_backend_matches_legacy_string_constant_forms() {
+        let source = test_source_file("const ERR = \"failed to load the circuit description\"\n");
 
         let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
             .expect("legacy parser should succeed");
@@ -922,6 +1037,23 @@ end
             .expect("cst backend should succeed");
 
         assert_eq!(cst, legacy);
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn experimental_cst_backend_matches_legacy_checked_in_masm_corpus() {
+        let files = checked_in_masm_corpus();
+        assert!(
+            !files.is_empty(),
+            "expected the checked-in MASM corpus to contain at least one source file"
+        );
+
+        for path in files {
+            let source = load_source_file(&path);
+            let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy);
+            let cst = parse_forms_with_backend(source, ParserBackend::CstExperimental);
+            assert_eq!(cst, legacy, "parser backend mismatch for {}", path.display());
+        }
     }
 
     #[cfg(feature = "std")]

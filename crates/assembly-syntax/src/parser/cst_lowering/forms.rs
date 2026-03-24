@@ -30,7 +30,10 @@ pub(super) fn lower_source_file(
     let mut index = 0usize;
 
     while index < items.len() {
-        if index == 0 && is_doc_item(&items[index]) {
+        if index == 0
+            && is_doc_item(&items[index])
+            && starts_at_file_beginning(context, &items[index])
+        {
             let end = extend_leading_module_doc_group(context, &items, index);
             forms.push(lower_doc_group(context, &items[index..end], true));
             index = end;
@@ -40,7 +43,11 @@ pub(super) fn lower_source_file(
         match &items[index] {
             CstItem::ModuleDoc(_) => {
                 let end = extend_doc_group(context, &items, index);
-                forms.push(lower_doc_group(context, &items[index..end], true));
+                forms.push(lower_doc_group(
+                    context,
+                    &items[index..end],
+                    starts_at_file_beginning(context, &items[index]),
+                ));
                 index = end;
             },
             CstItem::Doc(_) => {
@@ -96,7 +103,7 @@ fn extend_leading_module_doc_group(
 fn extend_doc_group(context: &LoweringContext<'_>, items: &[CstItem], start: usize) -> usize {
     let mut end = start + 1;
     while end < items.len()
-        && same_doc_kind(&items[start], &items[end])
+        && is_doc_item(&items[end])
         && !has_blank_line_between(context, &items[end - 1], &items[end])
     {
         end += 1;
@@ -104,15 +111,12 @@ fn extend_doc_group(context: &LoweringContext<'_>, items: &[CstItem], start: usi
     end
 }
 
-fn same_doc_kind(lhs: &CstItem, rhs: &CstItem) -> bool {
-    matches!(
-        (lhs, rhs),
-        (CstItem::ModuleDoc(_), CstItem::ModuleDoc(_)) | (CstItem::Doc(_), CstItem::Doc(_))
-    )
-}
-
 fn is_doc_item(item: &CstItem) -> bool {
     matches!(item, CstItem::ModuleDoc(_) | CstItem::Doc(_))
+}
+
+fn starts_at_file_beginning(context: &LoweringContext<'_>, item: &CstItem) -> bool {
+    item_span(context, item).start().to_usize() == 0
 }
 
 fn has_blank_line_between(context: &LoweringContext<'_>, lhs: &CstItem, rhs: &CstItem) -> bool {
@@ -178,7 +182,7 @@ fn doc_text(context: &LoweringContext<'_>, item: &CstItem) -> String {
     let span = item_span(context, item);
     let raw = context.source_text(span);
     let raw = raw.strip_prefix("#!").expect("doc nodes should start with `#!`");
-    let raw = raw.strip_prefix(' ').unwrap_or(raw);
+    let raw = raw.trim();
     let mut text = String::with_capacity(raw.len() + 1);
     text.push_str(raw);
     text.push('\n');
