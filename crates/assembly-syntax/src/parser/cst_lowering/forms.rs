@@ -1,11 +1,18 @@
-use alloc::{string::String, vec::Vec};
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
 
 use miden_assembly_syntax_cst::ast::{
-    AstNode, Import as CstImport, Item as CstItem, SourceFile as CstSourceFile,
+    AstNode, Constant as CstConstant, Import as CstImport, Item as CstItem,
+    SourceFile as CstSourceFile, TypeDecl as CstTypeDecl,
 };
 use miden_debug_types::{SourceSpan, Span};
 
-use super::context::LoweringContext;
+use super::{
+    context::LoweringContext,
+    fragments::{lower_constant_expr, lower_type_expr_from_alias_body},
+};
 use crate::{ast, parser::ParsingError};
 
 pub(super) fn lower_source_file(
@@ -37,6 +44,14 @@ pub(super) fn lower_source_file(
             },
             CstItem::Import(import) => {
                 forms.push(lower_import(context, import)?);
+                index += 1;
+            },
+            CstItem::Constant(constant) => {
+                forms.push(lower_constant(context, constant)?);
+                index += 1;
+            },
+            CstItem::TypeDecl(type_decl) => {
+                forms.push(lower_type_decl(context, type_decl)?);
                 index += 1;
             },
             item => {
@@ -185,6 +200,72 @@ fn lower_import(
         name,
         ast::AliasTarget::Path(target),
     )))
+}
+
+fn lower_constant(
+    context: &mut LoweringContext<'_>,
+    constant: &CstConstant,
+) -> Result<ast::Form, ParsingError> {
+    let span = context.parse().span_for_node(constant.syntax());
+    let visibility = context.lower_visibility(constant.visibility());
+    let name = match constant.name_token() {
+        Some(token) => context.lower_constant_ident_token(&token)?,
+        None => {
+            return Err(ParsingError::InvalidSyntax {
+                span,
+                message: "expected a constant name".to_string(),
+            });
+        },
+    };
+    let expr = match constant.expr() {
+        Some(expr) => lower_constant_expr(context, &expr)?,
+        None => {
+            return Err(ParsingError::InvalidSyntax {
+                span,
+                message: "expected a constant expression".to_string(),
+            });
+        },
+    };
+
+    Ok(ast::Form::Constant(ast::Constant::new(span, visibility, name, expr)))
+}
+
+fn lower_type_decl(
+    context: &mut LoweringContext<'_>,
+    type_decl: &CstTypeDecl,
+) -> Result<ast::Form, ParsingError> {
+    let keyword = match type_decl.keyword_token() {
+        Some(token) => token,
+        None => return lower_item_with_fallback(context, &CstItem::TypeDecl(type_decl.clone())),
+    };
+    if keyword.text() != "type" {
+        return lower_item_with_fallback(context, &CstItem::TypeDecl(type_decl.clone()));
+    }
+
+    let span = context.parse().span_for_node(type_decl.syntax());
+    let visibility = context.lower_visibility(type_decl.visibility());
+    let name = match type_decl.name_token() {
+        Some(token) => context.lower_ident_token(&token)?,
+        None => {
+            return Err(ParsingError::InvalidSyntax {
+                span,
+                message: "expected a type name".to_string(),
+            });
+        },
+    };
+    let body = match type_decl.body() {
+        Some(body) => body,
+        None => {
+            return Err(ParsingError::InvalidSyntax {
+                span,
+                message: "expected `=` in type declaration".to_string(),
+            });
+        },
+    };
+
+    let mut ty = lower_type_expr_from_alias_body(context, &body)?;
+    ty.set_name(name.clone());
+    Ok(ast::Form::Type(ast::TypeAlias::new(visibility, name, ty).with_span(span)))
 }
 
 fn lower_item_with_fallback(

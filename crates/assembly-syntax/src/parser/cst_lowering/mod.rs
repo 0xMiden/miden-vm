@@ -1,6 +1,7 @@
 mod context;
 mod diagnostics;
 mod forms;
+mod fragments;
 
 use alloc::{collections::BTreeSet, sync::Arc, vec::Vec};
 

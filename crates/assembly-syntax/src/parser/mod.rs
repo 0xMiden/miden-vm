@@ -645,6 +645,46 @@ use foo::\"miden::base/account@0.1.0\"->account
 
     #[cfg(feature = "std")]
     #[test]
+    fn experimental_cst_backend_matches_legacy_constant_forms() {
+        let source = test_source_file(
+            "\
+const WORD = [1, 2, 3, 4]
+const DIGEST = word(\"miden::digest\")
+const EVENT_ID = event(\"miden::event\")
+const VALUE = (parts::COUNT + 3) // 2
+",
+        );
+
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+            .expect("legacy parser should succeed");
+        let cst = parse_forms_with_backend(source, ParserBackend::CstExperimental)
+            .expect("cst backend should succeed");
+
+        assert_eq!(cst, legacy);
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn experimental_cst_backend_matches_legacy_type_alias_forms() {
+        let source = test_source_file(
+            "\
+type WordAlias = word
+type Buffer = ptr<u8, addrspace(byte)>
+type Digest = [u32; 4]
+type Point = struct @align(16) { x: u32, y: ptr<u8, addrspace(byte)> }
+",
+        );
+
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+            .expect("legacy parser should succeed");
+        let cst = parse_forms_with_backend(source, ParserBackend::CstExperimental)
+            .expect("cst backend should succeed");
+
+        assert_eq!(cst, legacy);
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
     fn experimental_cst_backend_reports_unqualified_imports() {
         let source = test_source_file("use foo\n");
 
@@ -655,6 +695,16 @@ use foo::\"miden::base/account@0.1.0\"->account
     }
 
     #[cfg(feature = "std")]
+    #[test]
+    fn experimental_cst_backend_reports_invalid_struct_repr_from_direct_type_lowering() {
+        let source = test_source_file("type Foo = struct @align { x: u32 }\n");
+
+        let err = parse_forms_with_backend(source, ParserBackend::CstExperimental)
+            .expect_err("cst backend should reject invalid struct repr");
+
+        assert_matches!(err, ParsingError::InvalidStructRepr { .. });
+    }
+
     #[test]
     fn experimental_cst_backend_reports_cst_parse_errors() {
         let source = test_source_file("begin\n    if.true\n        add\n");
