@@ -995,7 +995,7 @@ fn parse_push_slice_range(
     let begin = usize::try_from(begin).ok().unwrap_or(usize::MAX);
 
     match (tokens.get(start + 2), tokens.get(start + 3), tokens.get(start + 4)) {
-        (Some(rbracket), _, _) if rbracket.kind() == SyntaxKind::RBracket => {
+        (Some(rbracket), ..) if rbracket.kind() == SyntaxKind::RBracket => {
             let end = begin.checked_add(1).ok_or(ParsingError::ImmediateOutOfRange {
                 span: join_spans(
                     context.parse().span_for_token(&tokens[start]),
