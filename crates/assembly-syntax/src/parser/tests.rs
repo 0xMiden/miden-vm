@@ -1,6 +1,7 @@
 use std::{
     fs,
     path::{Path, PathBuf},
+    string::String,
     sync::Arc,
 };
 
@@ -66,6 +67,10 @@ fn load_source_file(path: &Path) -> Arc<SourceFile> {
         Uri::new(format!("file://{}", path.display())),
         source.into_boxed_str(),
     ))
+}
+
+fn render_diagnostic(diag: impl AsRef<dyn crate::diagnostics::Diagnostic>) -> String {
+    crate::diagnostics::reporting::PrintDiagnostic::new_without_color(diag).to_string()
 }
 
 // This test checks the lexer behavior with regard to tokenizing `exp(.u?[\d]+)?`
@@ -340,22 +345,25 @@ use 0x0000000000000000000000000000000000000000000000000000000000000000
 ",
     );
 
-    let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy);
-    let cst = parse_forms_with_backend(source, ParserBackend::Cst);
+    let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+        .expect_err("expected unnamed reexport error");
+    let cst = parse_forms_with_backend(source, ParserBackend::Cst)
+        .expect_err("expected unnamed reexport error");
 
-    assert_matches!(legacy, Err(ParsingError::UnnamedReexportOfMastRoot { .. }));
-    assert_matches!(cst, Err(ParsingError::UnnamedReexportOfMastRoot { .. }));
+    assert_matches!(render_diagnostic(&legacy), diag if diag.contains("re-exporting a procedure identified by digest requires giving it a name"));
+    assert_matches!(render_diagnostic(&cst), diag if diag.contains("re-exporting a procedure identified by digest requires giving it a name"));
 }
 
 #[test]
 fn cst_backend_reports_invalid_digest_imports() {
     let source = test_source_file("use 0x1234->entry\n");
 
-    let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy);
-    let cst = parse_forms_with_backend(source, ParserBackend::Cst);
+    let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+        .expect_err("expected invalid digest error");
+    let cst = parse_forms_with_backend(source, ParserBackend::Cst)
+        .expect_err("expected invalid digest error");
 
-    assert_matches!(legacy, Err(ParsingError::InvalidMastRoot { .. }));
-    assert_matches!(cst, Err(ParsingError::InvalidMastRoot { .. }));
+    assert_eq!(render_diagnostic(&legacy), render_diagnostic(&cst));
 }
 
 #[test]
@@ -651,8 +659,9 @@ fn cst_backend_matches_legacy_checked_in_masm_corpus() {
 
     for path in files {
         let source = load_source_file(&path);
-        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy);
-        let cst = parse_forms_with_backend(source, ParserBackend::Cst);
+        let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+            .map_err(render_diagnostic);
+        let cst = parse_forms_with_backend(source, ParserBackend::Cst).map_err(render_diagnostic);
         assert_eq!(cst, legacy, "parser backend mismatch for {}", path.display());
     }
 }
@@ -664,7 +673,7 @@ fn cst_backend_reports_unqualified_imports() {
     let err = parse_forms_with_backend(source, ParserBackend::Cst)
         .expect_err("cst backend should reject unqualified imports");
 
-    assert_matches!(err, ParsingError::UnqualifiedImport { .. });
+    assert_matches!(render_diagnostic(err), diag if diag.contains("expected a fully-qualified module path"));
 }
 
 #[test]
@@ -674,7 +683,7 @@ fn cst_backend_reports_invalid_struct_repr_from_direct_type_lowering() {
     let err = parse_forms_with_backend(source, ParserBackend::Cst)
         .expect_err("cst backend should reject invalid struct repr");
 
-    assert_matches!(err, ParsingError::InvalidStructRepr { .. });
+    assert_matches!(render_diagnostic(err), diag if diag.contains("invalid struct representation"));
 }
 
 #[test]
@@ -692,7 +701,7 @@ end
     let err = parse_forms_with_backend(source, ParserBackend::Cst)
         .expect_err("cst backend should reject conflicting attribute keys");
 
-    assert_matches!(err, ParsingError::AttributeKeyValueConflict { .. });
+    assert_matches!(render_diagnostic(err), diag if diag.contains("conflicting key-value attributes"));
 }
 
 #[test]
@@ -702,7 +711,7 @@ fn cst_backend_reports_invalid_advice_map_keys() {
     let err = parse_forms_with_backend(source, ParserBackend::Cst)
         .expect_err("cst backend should reject invalid advice-map keys");
 
-    assert_matches!(err, ParsingError::InvalidAdvMapKey { .. });
+    assert_matches!(render_diagnostic(err), diag if diag.contains("invalid Advice Map key"));
 }
 
 #[test]
@@ -715,11 +724,12 @@ end
 ",
     );
 
-    let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy);
-    let cst = parse_forms_with_backend(source, ParserBackend::Cst);
+    let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+        .expect_err("expected division by zero error");
+    let cst = parse_forms_with_backend(source, ParserBackend::Cst)
+        .expect_err("expected division by zero error");
 
-    assert_matches!(legacy, Err(ParsingError::DivisionByZero { .. }));
-    assert_matches!(cst, Err(ParsingError::DivisionByZero { .. }));
+    assert_eq!(render_diagnostic(&legacy), render_diagnostic(&cst));
 }
 
 #[test]
@@ -732,11 +742,67 @@ end
 ",
     );
 
-    let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy);
-    let cst = parse_forms_with_backend(source, ParserBackend::Cst);
+    let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+        .expect_err("expected invalid pad value error");
+    let cst = parse_forms_with_backend(source, ParserBackend::Cst)
+        .expect_err("expected invalid pad value error");
 
-    assert_matches!(legacy, Err(ParsingError::InvalidPadValue { .. }));
-    assert_matches!(cst, Err(ParsingError::InvalidPadValue { .. }));
+    assert_matches!(render_diagnostic(&legacy), diag if diag.contains("invalid padding value"));
+    assert_matches!(render_diagnostic(&cst), diag if diag.contains("invalid padding value"));
+}
+
+#[test]
+fn cst_backend_matches_legacy_stack_immediate_error_spans() {
+    let source = test_source_file(
+        "\
+begin
+    dup.16
+end
+",
+    );
+
+    let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+        .expect_err("expected invalid immediate error");
+    let cst = parse_forms_with_backend(source, ParserBackend::Cst)
+        .expect_err("expected invalid immediate error");
+
+    assert_eq!(render_diagnostic(&legacy), render_diagnostic(&cst));
+}
+
+#[test]
+fn cst_backend_matches_legacy_bit_size_error_spans() {
+    let source = test_source_file(
+        "\
+begin
+    exp.u65
+end
+",
+    );
+
+    let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+        .expect_err("expected invalid bit-size error");
+    let cst = parse_forms_with_backend(source, ParserBackend::Cst)
+        .expect_err("expected invalid bit-size error");
+
+    assert_eq!(render_diagnostic(&legacy), render_diagnostic(&cst));
+}
+
+#[test]
+fn cst_backend_matches_legacy_suffixless_primitive_syntax_errors() {
+    let source = test_source_file(
+        "\
+begin
+    neg.1
+end
+",
+    );
+
+    let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+        .expect_err("expected invalid syntax error");
+    let cst = parse_forms_with_backend(source, ParserBackend::Cst)
+        .expect_err("expected invalid syntax error");
+
+    assert_eq!(render_diagnostic(&legacy), render_diagnostic(&cst));
 }
 
 #[test]
@@ -749,11 +815,12 @@ end
 ",
     );
 
-    let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy);
-    let cst = parse_forms_with_backend(source, ParserBackend::Cst);
+    let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+        .expect_err("expected invalid mast root error");
+    let cst = parse_forms_with_backend(source, ParserBackend::Cst)
+        .expect_err("expected invalid mast root error");
 
-    assert_matches!(legacy, Err(ParsingError::InvalidMastRoot { .. }));
-    assert_matches!(cst, Err(ParsingError::InvalidMastRoot { .. }));
+    assert_eq!(render_diagnostic(&legacy), render_diagnostic(&cst));
 }
 
 #[test]
@@ -766,11 +833,12 @@ end
 ",
     );
 
-    let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy);
-    let cst = parse_forms_with_backend(source, ParserBackend::Cst);
+    let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+        .expect_err("expected push overflow error");
+    let cst = parse_forms_with_backend(source, ParserBackend::Cst)
+        .expect_err("expected push overflow error");
 
-    assert_matches!(legacy, Err(ParsingError::PushOverflow { count: 17, .. }));
-    assert_matches!(cst, Err(ParsingError::PushOverflow { count: 17, .. }));
+    assert_eq!(render_diagnostic(&legacy), render_diagnostic(&cst));
 }
 
 #[test]
@@ -783,11 +851,12 @@ end
 ",
     );
 
-    let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy);
-    let cst = parse_forms_with_backend(source, ParserBackend::Cst);
+    let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+        .expect_err("expected deprecated instruction error");
+    let cst = parse_forms_with_backend(source, ParserBackend::Cst)
+        .expect_err("expected deprecated instruction error");
 
-    assert_matches!(legacy, Err(ParsingError::DeprecatedInstruction { .. }));
-    assert_matches!(cst, Err(ParsingError::DeprecatedInstruction { .. }));
+    assert_eq!(render_diagnostic(&legacy), render_diagnostic(&cst));
 }
 
 #[test]
@@ -800,11 +869,12 @@ end
 ",
     );
 
-    let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy);
-    let cst = parse_forms_with_backend(source, ParserBackend::Cst);
+    let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+        .expect_err("expected deprecated instruction error");
+    let cst = parse_forms_with_backend(source, ParserBackend::Cst)
+        .expect_err("expected deprecated instruction error");
 
-    assert_matches!(legacy, Err(ParsingError::DeprecatedInstruction { .. }));
-    assert_matches!(cst, Err(ParsingError::DeprecatedInstruction { .. }));
+    assert_eq!(render_diagnostic(&legacy), render_diagnostic(&cst));
 }
 
 #[test]
@@ -817,11 +887,12 @@ end
 ",
     );
 
-    let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy);
-    let cst = parse_forms_with_backend(source, ParserBackend::Cst);
+    let _legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+        .expect_err("expected invalid instruction error");
+    let cst = parse_forms_with_backend(source, ParserBackend::Cst)
+        .expect_err("expected invalid instruction error");
 
-    assert!(legacy.is_err(), "legacy parser should reject invalid instructions");
-    assert_matches!(cst, Err(ParsingError::InvalidSyntax { .. }));
+    assert_matches!(render_diagnostic(&cst), diag if diag.contains("invalid instruction"));
 }
 
 #[test]
@@ -835,11 +906,12 @@ end
 ",
     );
 
-    let legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy);
-    let cst = parse_forms_with_backend(source, ParserBackend::Cst);
+    let _legacy = parse_forms_with_backend(source.clone(), ParserBackend::Legacy)
+        .expect_err("expected empty while block error");
+    let cst = parse_forms_with_backend(source, ParserBackend::Cst)
+        .expect_err("expected empty while block error");
 
-    assert!(legacy.is_err(), "legacy parser should reject empty while blocks");
-    assert!(cst.is_err(), "cst backend should reject empty while blocks");
+    assert_matches!(render_diagnostic(&cst), diag if diag.contains("expected a non-empty `while` block"));
 }
 
 #[test]
@@ -867,8 +939,5 @@ fn cst_backend_reports_cst_parse_errors() {
     let err = parse_forms_with_backend(source, ParserBackend::Cst)
         .expect_err("cst backend should surface a parse error");
 
-    assert_matches!(
-        err,
-        ParsingError::InvalidSyntax { message, .. } if message.contains("expected `end`")
-    );
+    assert_matches!(render_diagnostic(err), diag if diag.contains("expected `end`"));
 }

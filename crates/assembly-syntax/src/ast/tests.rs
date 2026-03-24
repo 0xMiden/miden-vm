@@ -400,16 +400,14 @@ macro_rules! assert_forms {
 macro_rules! assert_parse_diagnostic {
     ($source:expr, $expected:literal) => {{
         let source = $source.clone();
-        let error = crate::parser::parse_forms(source.clone())
-            .map_err(|err| Report::new(err).with_source_code(source))
+        let error = crate::parser::parse_forms(source)
             .expect_err("expected diagnostic to be raised, but parsing succeeded");
         assert_diagnostic!(error, $expected);
     }};
 
     ($source:expr, $expected:expr) => {{
         let source = $source.clone();
-        let error = crate::parser::parse_forms(source.clone())
-            .map_err(|err| Report::new(err).with_source_code(source))
+        let error = crate::parser::parse_forms(source)
             .expect_err("expected diagnostic to be raised, but parsing succeeded");
         assert_diagnostic!(error, $expected);
     }};
@@ -418,16 +416,15 @@ macro_rules! assert_parse_diagnostic {
 #[expect(unused_macros)]
 macro_rules! assert_parse_diagnostic_lines {
     ($source:expr, $($expected:literal),+) => {{
-        let error = crate::parser::parse_forms(source.clone())
-            .map_err(|err| Report::new(err).with_source_code(source))
+        let source = $source.clone();
+        let error = crate::parser::parse_forms(source)
             .expect_err("expected diagnostic to be raised, but parsing succeeded");
         assert_diagnostic_lines!(error, $($expected),*);
     }};
 
     ($source:expr, $($expected:expr),+) => {{
         let source = $source.clone();
-        let error = crate::parser::parse_forms(source.clone())
-            .map_err(|err| Report::new(err).with_source_code(source))
+        let error = crate::parser::parse_forms(source)
             .expect_err("expected diagnostic to be raised, but parsing succeeded");
         assert_diagnostic_lines!(error, $($expected),*);
     }};
@@ -912,7 +909,7 @@ fn test_use_in_proc_body() {
     end"#
     );
 
-    assert_parse_diagnostic!(source, "invalid instruction `use` or malformed operands");
+    assert_parse_diagnostic!(source, "expected `end` to close procedure before top-level item");
 }
 
 #[test]
@@ -920,7 +917,7 @@ fn test_unterminated_proc() {
     let context = SyntaxTestContext::default();
     let source = source_file!(&context, "proc foo add mul begin push.1 end");
 
-    assert_parse_diagnostic!(source, "invalid instruction `begin` or malformed operands");
+    assert_parse_diagnostic!(source, "expected `end` to close procedure before top-level item");
 }
 
 #[test]
@@ -928,7 +925,7 @@ fn test_unterminated_if() {
     let context = SyntaxTestContext::default();
     let source = source_file!(&context, "proc foo add mul if.true add.2 begin push.1 end");
 
-    assert_parse_diagnostic!(source, "expected `end` to close procedure");
+    assert_parse_diagnostic!(source, "expected `end` to close `if` before top-level item");
 }
 
 #[test]
@@ -1231,7 +1228,7 @@ fn test_ast_parsing_module_docs_fail() {
     assert_module_diagnostic_lines!(
         context,
         source,
-        "invalid syntax",
+        "syntax error",
         regex!(r#",-\[test[\d]+:4:9\]"#),
         "3 |     pub proc foo",
         "4 |         #! malformed doc",

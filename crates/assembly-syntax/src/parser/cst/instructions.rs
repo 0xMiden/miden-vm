@@ -38,6 +38,10 @@ pub(super) fn try_lower_instruction(
         if let Some(ops) = lower_immediate_instruction(context, span, &compact)? {
             return Ok(Some(ops));
         }
+
+        if let Some(error) = unexpected_primitive_suffix_error(context, instruction, &compact) {
+            return Err(error);
+        }
     }
 
     lower_extended_instruction(context, instruction)
@@ -92,9 +96,55 @@ fn lower_immediate_instruction(
     let texts = compact.texts();
     match texts.as_slice() {
         [name, _] => lower_binary_immediate_instruction(context, span, name, compact.token(1)),
-        ["adv", "push_mapvaln", _] => lower_push_mapvaln(span, compact.token(2)),
+        ["adv", "push_mapvaln", _] => lower_push_mapvaln(context, span, compact.token(2)),
         _ => Ok(None),
     }
+}
+
+fn unexpected_primitive_suffix_error(
+    context: &LoweringContext<'_>,
+    instruction: &CstInstruction,
+    compact: &CompactInstruction,
+) -> Option<ParsingError> {
+    let texts = compact.texts();
+    let [name, _suffix] = texts.as_slice() else {
+        return None;
+    };
+    if lower_primitive_instruction(name).is_none() || accepts_single_suffix(name) {
+        return None;
+    }
+
+    let dot = instruction
+        .syntax()
+        .children_with_tokens()
+        .filter_map(|element| element.into_token())
+        .find(|token| token.kind() == SyntaxKind::Dot)?;
+    Some(ParsingError::UnrecognizedToken {
+        span: context.parse().span_for_token(&dot),
+        token: dot.text().to_string(),
+        expected: expected_block_operation_tokens(),
+    })
+}
+
+fn accepts_single_suffix(name: &str) -> bool {
+    eq_like_immediate_instruction(name).is_some()
+        || int_compare_immediate_instruction(name).is_some()
+        || felt_fold_kind(name).is_some()
+        || name == "exp"
+        || matches!(name, "debug" | "emit" | "trace")
+        || u32_memory_immediate_instruction(name).is_some()
+        || u16_local_immediate_instruction(name).is_some()
+        || stack_immediate_family(name).is_some()
+        || u32_fold_kind(name).is_some()
+        || u32_shift_immediate_instruction(name).is_some()
+}
+
+fn expected_block_operation_tokens() -> Vec<String> {
+    vec![
+        r#"primitive opcode (e.g. "add")"#.to_string(),
+        r#""end""#.to_string(),
+        r#"control flow opcode (e.g. "if.true")"#.to_string(),
+    ]
 }
 
 fn lower_primitive_instruction(text: &str) -> Option<Instruction> {
@@ -138,7 +188,7 @@ fn lower_binary_immediate_instruction(
     }
 
     if let Some(family) = stack_immediate_family(name) {
-        return lower_stack_immediate_instruction(family, span, token);
+        return lower_stack_immediate_instruction(context, family, span, token);
     }
 
     if let Some(kind) = u32_fold_kind(name) {
@@ -234,20 +284,22 @@ fn stack_immediate_family(name: &str) -> Option<StackImmediateFamily> {
 }
 
 fn lower_stack_immediate_instruction(
+    context: &LoweringContext<'_>,
     family: StackImmediateFamily,
-    span: SourceSpan,
+    instruction_span: SourceSpan,
     token: &SyntaxToken,
 ) -> Result<Option<Vec<ast::Op>>, ParsingError> {
+    let immediate_span = context.parse().span_for_token(token);
     match family {
-        StackImmediateFamily::AdvPush => lower_adv_push(span, token),
-        StackImmediateFamily::Dup => lower_dup(span, token),
-        StackImmediateFamily::DupW => lower_dupw(span, token),
-        StackImmediateFamily::Swap => lower_swap(span, token),
-        StackImmediateFamily::SwapW => lower_swapw(span, token),
-        StackImmediateFamily::MovDn => lower_movdn(span, token),
-        StackImmediateFamily::MovDnW => lower_movdnw(span, token),
-        StackImmediateFamily::MovUp => lower_movup(span, token),
-        StackImmediateFamily::MovUpW => lower_movupw(span, token),
+        StackImmediateFamily::AdvPush => lower_adv_push(instruction_span, immediate_span, token),
+        StackImmediateFamily::Dup => lower_dup(instruction_span, immediate_span, token),
+        StackImmediateFamily::DupW => lower_dupw(instruction_span, immediate_span, token),
+        StackImmediateFamily::Swap => lower_swap(instruction_span, immediate_span, token),
+        StackImmediateFamily::SwapW => lower_swapw(instruction_span, immediate_span, token),
+        StackImmediateFamily::MovDn => lower_movdn(instruction_span, immediate_span, token),
+        StackImmediateFamily::MovDnW => lower_movdnw(instruction_span, immediate_span, token),
+        StackImmediateFamily::MovUp => lower_movup(instruction_span, immediate_span, token),
+        StackImmediateFamily::MovUpW => lower_movupw(instruction_span, immediate_span, token),
     }
 }
 
@@ -1210,7 +1262,7 @@ fn lower_exp_family(
         }
 
         return Err(ParsingError::InvalidLiteral {
-            span: context.parse().span_for_token(token),
+            span: token_suffix_span(context.parse().span_for_token(token), 1),
             kind: LiteralErrorKind::InvalidBitSize,
         });
     }
@@ -1351,23 +1403,28 @@ fn lower_foldable_u32(
 }
 
 fn lower_adv_push(
-    span: SourceSpan,
+    instruction_span: SourceSpan,
+    immediate_span: SourceSpan,
     token: &SyntaxToken,
 ) -> Result<Option<Vec<ast::Op>>, ParsingError> {
     let Some(index) = lower_decimal_u8_literal(token)? else {
         return Ok(None);
     };
     if index == 0 || index > 16 {
-        return Err(ParsingError::ImmediateOutOfRange { span, range: 1..17 });
+        return Err(ParsingError::ImmediateOutOfRange { span: immediate_span, range: 1..17 });
     }
 
     Ok(Some(vec![inst_op(
-        span,
-        Instruction::AdvPush(Immediate::Value(Span::new(span, index))),
+        instruction_span,
+        Instruction::AdvPush(Immediate::Value(Span::new(immediate_span, index))),
     )]))
 }
 
-fn lower_dup(span: SourceSpan, token: &SyntaxToken) -> Result<Option<Vec<ast::Op>>, ParsingError> {
+fn lower_dup(
+    instruction_span: SourceSpan,
+    immediate_span: SourceSpan,
+    token: &SyntaxToken,
+) -> Result<Option<Vec<ast::Op>>, ParsingError> {
     let Some(index) = lower_decimal_u8_literal(token)? else {
         return Ok(None);
     };
@@ -1389,13 +1446,17 @@ fn lower_dup(span: SourceSpan, token: &SyntaxToken) -> Result<Option<Vec<ast::Op
         14 => Instruction::Dup14,
         15 => Instruction::Dup15,
         _ => {
-            return Err(ParsingError::ImmediateOutOfRange { span, range: 0..16 });
+            return Err(ParsingError::ImmediateOutOfRange { span: immediate_span, range: 0..16 });
         },
     };
-    Ok(Some(vec![inst_op(span, instruction)]))
+    Ok(Some(vec![inst_op(instruction_span, instruction)]))
 }
 
-fn lower_dupw(span: SourceSpan, token: &SyntaxToken) -> Result<Option<Vec<ast::Op>>, ParsingError> {
+fn lower_dupw(
+    instruction_span: SourceSpan,
+    immediate_span: SourceSpan,
+    token: &SyntaxToken,
+) -> Result<Option<Vec<ast::Op>>, ParsingError> {
     let Some(index) = lower_decimal_u8_literal(token)? else {
         return Ok(None);
     };
@@ -1405,13 +1466,17 @@ fn lower_dupw(span: SourceSpan, token: &SyntaxToken) -> Result<Option<Vec<ast::O
         2 => Instruction::DupW2,
         3 => Instruction::DupW3,
         _ => {
-            return Err(ParsingError::ImmediateOutOfRange { span, range: 0..4 });
+            return Err(ParsingError::ImmediateOutOfRange { span: immediate_span, range: 0..4 });
         },
     };
-    Ok(Some(vec![inst_op(span, instruction)]))
+    Ok(Some(vec![inst_op(instruction_span, instruction)]))
 }
 
-fn lower_swap(span: SourceSpan, token: &SyntaxToken) -> Result<Option<Vec<ast::Op>>, ParsingError> {
+fn lower_swap(
+    instruction_span: SourceSpan,
+    immediate_span: SourceSpan,
+    token: &SyntaxToken,
+) -> Result<Option<Vec<ast::Op>>, ParsingError> {
     let Some(index) = lower_decimal_u8_literal(token)? else {
         return Ok(None);
     };
@@ -1432,14 +1497,15 @@ fn lower_swap(span: SourceSpan, token: &SyntaxToken) -> Result<Option<Vec<ast::O
         14 => Instruction::Swap14,
         15 => Instruction::Swap15,
         _ => {
-            return Err(ParsingError::ImmediateOutOfRange { span, range: 1..16 });
+            return Err(ParsingError::ImmediateOutOfRange { span: immediate_span, range: 1..16 });
         },
     };
-    Ok(Some(vec![inst_op(span, instruction)]))
+    Ok(Some(vec![inst_op(instruction_span, instruction)]))
 }
 
 fn lower_swapw(
-    span: SourceSpan,
+    instruction_span: SourceSpan,
+    immediate_span: SourceSpan,
     token: &SyntaxToken,
 ) -> Result<Option<Vec<ast::Op>>, ParsingError> {
     let Some(index) = lower_decimal_u8_literal(token)? else {
@@ -1450,14 +1516,15 @@ fn lower_swapw(
         2 => Instruction::SwapW2,
         3 => Instruction::SwapW3,
         _ => {
-            return Err(ParsingError::ImmediateOutOfRange { span, range: 1..4 });
+            return Err(ParsingError::ImmediateOutOfRange { span: immediate_span, range: 1..4 });
         },
     };
-    Ok(Some(vec![inst_op(span, instruction)]))
+    Ok(Some(vec![inst_op(instruction_span, instruction)]))
 }
 
 fn lower_movdn(
-    span: SourceSpan,
+    instruction_span: SourceSpan,
+    immediate_span: SourceSpan,
     token: &SyntaxToken,
 ) -> Result<Option<Vec<ast::Op>>, ParsingError> {
     let Some(index) = lower_decimal_u8_literal(token)? else {
@@ -1479,14 +1546,15 @@ fn lower_movdn(
         14 => Instruction::MovDn14,
         15 => Instruction::MovDn15,
         _ => {
-            return Err(ParsingError::ImmediateOutOfRange { span, range: 2..16 });
+            return Err(ParsingError::ImmediateOutOfRange { span: immediate_span, range: 2..16 });
         },
     };
-    Ok(Some(vec![inst_op(span, instruction)]))
+    Ok(Some(vec![inst_op(instruction_span, instruction)]))
 }
 
 fn lower_movdnw(
-    span: SourceSpan,
+    instruction_span: SourceSpan,
+    immediate_span: SourceSpan,
     token: &SyntaxToken,
 ) -> Result<Option<Vec<ast::Op>>, ParsingError> {
     let Some(index) = lower_decimal_u8_literal(token)? else {
@@ -1496,14 +1564,15 @@ fn lower_movdnw(
         2 => Instruction::MovDnW2,
         3 => Instruction::MovDnW3,
         _ => {
-            return Err(ParsingError::ImmediateOutOfRange { span, range: 2..4 });
+            return Err(ParsingError::ImmediateOutOfRange { span: immediate_span, range: 2..4 });
         },
     };
-    Ok(Some(vec![inst_op(span, instruction)]))
+    Ok(Some(vec![inst_op(instruction_span, instruction)]))
 }
 
 fn lower_movup(
-    span: SourceSpan,
+    instruction_span: SourceSpan,
+    immediate_span: SourceSpan,
     token: &SyntaxToken,
 ) -> Result<Option<Vec<ast::Op>>, ParsingError> {
     let Some(index) = lower_decimal_u8_literal(token)? else {
@@ -1525,14 +1594,15 @@ fn lower_movup(
         14 => Instruction::MovUp14,
         15 => Instruction::MovUp15,
         _ => {
-            return Err(ParsingError::ImmediateOutOfRange { span, range: 2..16 });
+            return Err(ParsingError::ImmediateOutOfRange { span: immediate_span, range: 2..16 });
         },
     };
-    Ok(Some(vec![inst_op(span, instruction)]))
+    Ok(Some(vec![inst_op(instruction_span, instruction)]))
 }
 
 fn lower_movupw(
-    span: SourceSpan,
+    instruction_span: SourceSpan,
+    immediate_span: SourceSpan,
     token: &SyntaxToken,
 ) -> Result<Option<Vec<ast::Op>>, ParsingError> {
     let Some(index) = lower_decimal_u8_literal(token)? else {
@@ -1542,16 +1612,18 @@ fn lower_movupw(
         2 => Instruction::MovUpW2,
         3 => Instruction::MovUpW3,
         _ => {
-            return Err(ParsingError::ImmediateOutOfRange { span, range: 2..4 });
+            return Err(ParsingError::ImmediateOutOfRange { span: immediate_span, range: 2..4 });
         },
     };
-    Ok(Some(vec![inst_op(span, instruction)]))
+    Ok(Some(vec![inst_op(instruction_span, instruction)]))
 }
 
 fn lower_push_mapvaln(
+    context: &LoweringContext<'_>,
     span: SourceSpan,
     token: &SyntaxToken,
 ) -> Result<Option<Vec<ast::Op>>, ParsingError> {
+    let immediate_span = context.parse().span_for_token(token);
     let Some(padding) = lower_decimal_u8_literal(token)? else {
         return Ok(None);
     };
@@ -1559,7 +1631,9 @@ fn lower_push_mapvaln(
         0 => SystemEventNode::PushMapValN0,
         4 => SystemEventNode::PushMapValN4,
         8 => SystemEventNode::PushMapValN8,
-        _ => return Err(ParsingError::InvalidPadValue { span, padding }),
+        _ => {
+            return Err(ParsingError::InvalidPadValue { span: immediate_span, padding });
+        },
     };
     Ok(Some(vec![inst_op(span, Instruction::SysEvent(event))]))
 }
@@ -1681,6 +1755,10 @@ fn lower_decimal_u8_literal(token: &SyntaxToken) -> Result<Option<u8>, ParsingEr
         return Ok(None);
     };
     Ok(u8::try_from(value).ok())
+}
+
+fn token_suffix_span(span: SourceSpan, prefix_len: u32) -> SourceSpan {
+    SourceSpan::new(span.source_id(), span.start() + prefix_len..span.end())
 }
 
 fn lower_decimal_u64_literal(token: &SyntaxToken) -> Result<Option<u64>, ParsingError> {

@@ -45,13 +45,6 @@ use crate::{Path, ast, sema};
 type ParseError<'a> = lalrpop_util::ParseError<u32, Token<'a>, ParsingError>;
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
-enum InternalParserBackend {
-    Legacy,
-    #[default]
-    Cst,
-}
-
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 /// Selects which raw parser implementation to use when parsing forms in tests or differential
 /// validation.
@@ -61,15 +54,6 @@ pub enum ParserBackend {
     /// Uses the lossless CST parser followed by CST-to-AST lowering.
     #[default]
     Cst,
-}
-
-impl From<ParserBackend> for InternalParserBackend {
-    fn from(backend: ParserBackend) -> Self {
-        match backend {
-            ParserBackend::Legacy => Self::Legacy,
-            ParserBackend::Cst => Self::Cst,
-        }
-    }
 }
 
 // MODULE PARSER
@@ -131,8 +115,7 @@ impl ModuleParser {
         if let Err(err) = Path::validate(path.as_str()) {
             return Err(Report::msg(err.to_string()).with_source_code(source));
         }
-        let forms = parse_forms_internal(source.clone(), &mut self.interned)
-            .map_err(|err| Report::new(err).with_source_code(source.clone()))?;
+        let forms = parse_forms_internal(source.clone(), &mut self.interned)?;
         sema::analyze(source, self.kind, path, forms, self.warnings_as_errors, source_manager)
             .map_err(Report::new)
     }
@@ -186,7 +169,7 @@ impl ModuleParser {
 ///
 /// NOTE: This does _not_ run semantic analysis.
 #[cfg(any(test, feature = "testing"))]
-pub fn parse_forms(source: Arc<SourceFile>) -> Result<Vec<ast::Form>, ParsingError> {
+pub fn parse_forms(source: Arc<SourceFile>) -> Result<Vec<ast::Form>, Report> {
     let mut interned = BTreeSet::default();
     parse_forms_internal(source, &mut interned)
 }
@@ -199,9 +182,9 @@ pub fn parse_forms(source: Arc<SourceFile>) -> Result<Vec<ast::Form>, ParsingErr
 pub fn parse_forms_with_backend(
     source: Arc<SourceFile>,
     backend: ParserBackend,
-) -> Result<Vec<ast::Form>, ParsingError> {
+) -> Result<Vec<ast::Form>, Report> {
     let mut interned = BTreeSet::default();
-    parse_forms_internal_with_backend(source, &mut interned, backend.into())
+    parse_forms_internal_with_backend(source, &mut interned, backend)
 }
 
 /// Parse `source` as a set of [ast::Form]s
@@ -211,32 +194,36 @@ pub fn parse_forms_with_backend(
 fn parse_forms_internal(
     source: Arc<SourceFile>,
     interned: &mut BTreeSet<Arc<str>>,
-) -> Result<Vec<ast::Form>, ParsingError> {
-    parse_forms_internal_with_backend(source, interned, InternalParserBackend::default())
+) -> Result<Vec<ast::Form>, Report> {
+    parse_forms_internal_with_backend(source, interned, ParserBackend::default())
 }
 
 fn parse_forms_internal_with_backend(
     source: Arc<SourceFile>,
     interned: &mut BTreeSet<Arc<str>>,
-    backend: InternalParserBackend,
-) -> Result<Vec<ast::Form>, ParsingError> {
+    backend: ParserBackend,
+) -> Result<Vec<ast::Form>, Report> {
     match backend {
-        InternalParserBackend::Legacy => parse_forms_with_lalrpop(source, interned),
-        InternalParserBackend::Cst => cst::parse_forms_from_cst(source, interned),
+        ParserBackend::Legacy => parse_forms_with_lalrpop(source, interned),
+        ParserBackend::Cst => cst::parse_forms(source, interned),
     }
 }
 
 fn parse_forms_with_lalrpop(
     source: Arc<SourceFile>,
     interned: &mut BTreeSet<Arc<str>>,
-) -> Result<Vec<ast::Form>, ParsingError> {
+) -> Result<Vec<ast::Form>, Report> {
     let felt_type = Arc::new(ast::types::ArrayType::new(ast::types::Type::Felt, 4));
     let source_id = source.id();
     let scanner = Scanner::new(source.as_str());
     let lexer = Lexer::new(source_id, scanner);
+    let source_code = source.clone();
     grammar::FormsParser::new()
         .parse(source_id, interned, &felt_type, core::marker::PhantomData, lexer)
-        .map_err(|err| ParsingError::from_parse_error(source_id, err))
+        .map_err(move |err| {
+            Report::from(ParsingError::from_parse_error(source_id, err))
+                .with_source_code(source_code)
+        })
 }
 
 // DIRECTORY PARSER

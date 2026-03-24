@@ -77,7 +77,6 @@ impl SyntaxTestContext {
     #[track_caller]
     pub fn parse_forms(&self, source: Arc<SourceFile>) -> Result<Vec<Form>, Report> {
         crate::parser::parse_forms(source.clone())
-            .map_err(|err| Report::new(err).with_source_code(source))
     }
 
     /// Parse the given source file into a vector of top-level [Form]s using a specific parser
@@ -90,7 +89,6 @@ impl SyntaxTestContext {
         backend: crate::parser::ParserBackend,
     ) -> Result<Vec<Form>, Report> {
         crate::parser::parse_forms_with_backend(source.clone(), backend)
-            .map_err(|err| Report::new(err).with_source_code(source))
     }
 
     /// Parse the given source file into an executable [Module].

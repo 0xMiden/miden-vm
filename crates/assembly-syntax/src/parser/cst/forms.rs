@@ -22,11 +22,11 @@ use super::{
         lower_type_expr_from_alias_body, parse_numeric_token,
     },
 };
-use crate::{Word, ast, parser::ParsingError};
+use crate::{Report, Word, ast, parser::ParsingError};
 
 pub(super) fn lower_source_file(
     context: &mut LoweringContext<'_>,
-) -> Result<Vec<ast::Form>, ParsingError> {
+) -> Result<Vec<ast::Form>, Report> {
     let source_file = context.parse().root();
     let items = source_file.items().collect::<Vec<_>>();
     let mut forms = Vec::with_capacity(items.len());

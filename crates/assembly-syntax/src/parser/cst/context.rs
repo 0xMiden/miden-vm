@@ -8,7 +8,7 @@ use miden_assembly_syntax_cst::{
     Parse as CstParse, SyntaxKind, SyntaxToken,
     ast::{AstNode, Path as CstPath, Visibility as CstVisibility},
 };
-use miden_debug_types::{SourceFile, SourceSpan, Span, Spanned};
+use miden_debug_types::{SourceFile, SourceSpan, Span};
 
 use crate::{Path, ast, parser::ParsingError};
 
@@ -62,9 +62,9 @@ impl<'a> LoweringContext<'a> {
         &mut self,
         token: &SyntaxToken,
     ) -> Result<ast::ProcedureName, ParsingError> {
-        let ident = self.lower_ident_token(token)?;
-        ast::ProcedureName::new_with_span(ident.span(), ident.as_str())
-            .map_err(|error| ParsingError::InvalidIdentifier { error, span: ident.span() })
+        let span = self.parse.span_for_token(token);
+        ast::ProcedureName::new_with_span(span, token.text())
+            .map_err(|error| ParsingError::InvalidIdentifier { error, span })
     }
 
     pub(super) fn lower_constant_ident_token(

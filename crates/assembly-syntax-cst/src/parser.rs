@@ -178,8 +178,7 @@ enum BlockParseOutcome {
 
 impl<'input> Parser<'input> {
     fn new(source: &'input SourceFile) -> Self {
-        let eof_span = SourceSpan::try_from_range(source.id(), source.len()..source.len())
-            .expect("source files larger than 4GiB are not supported");
+        let eof_span = eof_anchor_span(source);
         Self {
             tokens: tokenize(source),
             pos: 0,
@@ -274,8 +273,8 @@ impl<'input> Parser<'input> {
         self.bump_regular_trivia();
         self.parse_import_target();
 
-        self.bump_non_comment_trivia();
-        if self.at_kind(SyntaxKind::RArrow) {
+        if self.peek_after_non_comment_trivia() == Some(SyntaxKind::RArrow) {
+            self.bump_non_comment_trivia();
             self.bump();
             self.bump_non_comment_trivia();
             if self.at_name_like() || self.at_keyword_like() {
@@ -394,11 +393,11 @@ impl<'input> Parser<'input> {
         }
 
         loop {
-            self.bump_non_comment_trivia();
-            if !self.at_kind(SyntaxKind::ColonColon) {
+            if self.peek_after_non_comment_trivia() != Some(SyntaxKind::ColonColon) {
                 break;
             }
 
+            self.bump_non_comment_trivia();
             self.bump();
             self.bump_non_comment_trivia();
             if self.at_name_like() || self.at_keyword_like() {
@@ -417,6 +416,7 @@ impl<'input> Parser<'input> {
         self.start_node(SyntaxKind::Expr);
 
         let mut nesting = Nesting::default();
+        let mut saw_significant = false;
         while !self.eof() {
             let kind = self.current_kind().expect("not eof");
             if nesting.is_root() && matches!(kind, SyntaxKind::Comment | SyntaxKind::DocComment) {
@@ -425,7 +425,17 @@ impl<'input> Parser<'input> {
             if nesting.is_root() && kind == SyntaxKind::Newline {
                 break;
             }
+            if nesting.is_root()
+                && saw_significant
+                && kind == SyntaxKind::Whitespace
+                && self
+                    .next_relevant_top_level_token(self.pos + 1)
+                    .is_some_and(|index| self.is_top_level_starter(index))
+            {
+                break;
+            }
 
+            saw_significant |= !kind.is_trivia();
             nesting = nesting.bump(kind);
             self.bump();
         }
@@ -596,6 +606,11 @@ impl<'input> Parser<'input> {
             if self.at_terminator(terminators) {
                 self.finish_node();
                 return BlockParseOutcome::FoundTerminator;
+            }
+
+            if self.doc_comment_looks_like_regular_comment_in_block() {
+                self.bump();
+                continue;
             }
 
             if self.at_regular_trivia() {
@@ -877,12 +892,36 @@ impl<'input> Parser<'input> {
         None
     }
 
+    fn next_relevant_block_token(&self, mut index: usize) -> Option<usize> {
+        while let Some(token) = self.tokens.get(index) {
+            match token.kind() {
+                SyntaxKind::Whitespace
+                | SyntaxKind::Newline
+                | SyntaxKind::Comment
+                | SyntaxKind::DocComment => index += 1,
+                _ => return Some(index),
+            }
+        }
+        None
+    }
+
     fn peek_after_inline_whitespace(&self) -> Option<SyntaxKind> {
         let mut index = self.pos;
         while let Some(token) = self.tokens.get(index) {
             match token.kind() {
                 SyntaxKind::Whitespace => index += 1,
                 SyntaxKind::Newline | SyntaxKind::Comment | SyntaxKind::DocComment => return None,
+                kind => return Some(kind),
+            }
+        }
+        None
+    }
+
+    fn peek_after_non_comment_trivia(&self) -> Option<SyntaxKind> {
+        let mut index = self.pos;
+        while let Some(token) = self.tokens.get(index) {
+            match token.kind() {
+                SyntaxKind::Whitespace | SyntaxKind::Newline => index += 1,
                 kind => return Some(kind),
             }
         }
@@ -934,7 +973,7 @@ impl<'input> Parser<'input> {
             return Some(BlockRecoveryBoundary::Else);
         }
 
-        if self.at_top_level_form_starter() {
+        if self.at_top_level_form_starter_in_block() {
             return Some(BlockRecoveryBoundary::TopLevelItem);
         }
 
@@ -942,11 +981,34 @@ impl<'input> Parser<'input> {
     }
 
     fn at_block_recovery_boundary(&self) -> bool {
-        self.at_keyword("else") || self.at_top_level_form_starter()
+        self.at_keyword("else") || self.at_top_level_form_starter_in_block()
     }
 
     fn at_top_level_form_starter(&self) -> bool {
         self.is_top_level_starter(self.pos)
+    }
+
+    fn at_top_level_form_starter_in_block(&self) -> bool {
+        match self.current() {
+            Some(token) if token.kind() == SyntaxKind::DocComment => self
+                .next_relevant_block_token(self.pos + 1)
+                .is_some_and(|index| self.is_top_level_starter(index)),
+            _ => self.at_top_level_form_starter(),
+        }
+    }
+
+    fn doc_comment_looks_like_regular_comment_in_block(&self) -> bool {
+        if !self.at_kind(SyntaxKind::DocComment) {
+            return false;
+        }
+
+        self.next_relevant_block_token(self.pos + 1)
+            .and_then(|index| self.tokens.get(index).map(|token| (index, token)))
+            .is_some_and(|(index, token)| {
+                token.kind() == SyntaxKind::Ident
+                    && !self.is_top_level_starter(index)
+                    && is_non_top_level_block_keyword(token.text())
+            })
     }
 
     fn at_terminator(&self, terminators: &[&str]) -> bool {
@@ -1094,6 +1156,23 @@ fn detached_source_file(input: &str) -> Arc<SourceFile> {
     ))
 }
 
+fn eof_anchor_span(source: &SourceFile) -> SourceSpan {
+    source
+        .as_str()
+        .char_indices()
+        .last()
+        .map(|(offset, _)| {
+            SourceSpan::at(
+                source.id(),
+                u32::try_from(offset).expect("source files larger than 4GiB are not supported"),
+            )
+        })
+        .unwrap_or_else(|| {
+            SourceSpan::try_from_range(source.id(), 0..0)
+                .expect("source files larger than 4GiB are not supported")
+        })
+}
+
 fn source_span_from_text_range(source_id: SourceId, range: TextRange) -> SourceSpan {
     SourceSpan::new(source_id, u32::from(range.start())..u32::from(range.end()))
 }
@@ -1157,6 +1236,10 @@ fn is_reserved_block_keyword(text: &str) -> bool {
             | "use"
             | "while"
     )
+}
+
+fn is_non_top_level_block_keyword(text: &str) -> bool {
+    matches!(text, "else" | "end" | "if" | "repeat" | "while")
 }
 
 #[cfg(test)]
@@ -1390,6 +1473,93 @@ end
     }
 
     #[test]
+    fn treats_block_local_doc_comments_as_regular_comments_before_block_keywords() {
+        let source = "\
+proc foo
+    #! mistaken doc comment before if
+    if.true
+        nop
+        #! mistaken doc comment before else
+    else
+        #! mistaken doc comment before while
+        while.true
+            add
+        end
+    end
+end
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let root = parse.syntax();
+        assert!(root.descendants().any(|node| node.kind() == SyntaxKind::Procedure));
+        assert!(root.descendants().any(|node| node.kind() == SyntaxKind::IfOp));
+        assert!(
+            root.descendants().filter(|node| node.kind() == SyntaxKind::Instruction).count() >= 2
+        );
+    }
+
+    #[test]
+    fn block_local_doc_comments_before_instructions_still_error() {
+        let source = "\
+proc foo
+    #! malformed doc comment before instruction
+    loc_load.0
+end
+";
+
+        let parse = parse_text(source);
+        assert!(parse.has_errors());
+        assert!(
+            parse
+                .diagnostics()
+                .iter()
+                .flat_map(|diag| diag.labels.as_deref().unwrap_or(&[]).iter())
+                .filter_map(|label| label.label())
+                .any(|label| label.contains("unexpected token in block")),
+            "expected block-local doc comments before instructions to remain invalid, got {:?}",
+            parse.diagnostics()
+        );
+    }
+
+    #[test]
+    fn block_local_doc_comments_still_recover_before_true_top_level_items() {
+        let source = "\
+proc foo
+    #! actual misplaced doc comment
+    pub const X = 1
+";
+
+        let parse = parse_text(source);
+        assert!(parse.has_errors());
+        assert!(
+            parse
+                .diagnostics()
+                .iter()
+                .flat_map(|diag| diag.labels.as_deref().unwrap_or(&[]).iter())
+                .filter_map(|label| label.label())
+                .any(|label| label.contains("before top-level item")),
+            "expected block recovery before a top-level item, got {:?}",
+            parse.diagnostics()
+        );
+
+        let root = parse.syntax();
+        assert!(root.descendants().any(|node| node.kind() == SyntaxKind::Doc));
+
+        let source_file = AstSourceFile::cast(root).expect("source file");
+        let items = source_file.items().collect::<Vec<_>>();
+        assert_eq!(
+            items.len(),
+            3,
+            "expected recovery to preserve the recovered doc comment and top-level constant"
+        );
+        assert!(matches!(items[0], Item::Procedure(_)));
+        assert!(matches!(items[1], Item::Doc(_)));
+        assert!(matches!(items[2], Item::Constant(_)));
+    }
+
+    #[test]
     fn recovers_from_missing_end_tokens() {
         let parse = parse_text("begin\n    if.true\n        add\n");
         assert!(parse.has_errors());
@@ -1551,5 +1721,56 @@ end
             (label_span.offset() as u32)..((label_span.offset() + label_span.len()) as u32),
         );
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn eof_diagnostics_anchor_to_the_last_character_offset() {
+        let source = Arc::new(ManagedSourceFile::new(
+            SourceId::new(13),
+            SourceLanguage::Masm,
+            Uri::new("memory:///parser-eof-span-test.masm"),
+            "begin\n    if.true\n        add\n".to_string().into_boxed_str(),
+        ));
+
+        let parse = parse_source_file(source.clone());
+        assert!(parse.has_errors());
+
+        let diagnostic = parse
+            .diagnostics()
+            .iter()
+            .find(|diag| {
+                diag.labels
+                    .as_deref()
+                    .unwrap_or(&[])
+                    .iter()
+                    .filter_map(|label| label.label())
+                    .any(|label| label.contains("expected `end`"))
+            })
+            .expect("missing-end diagnostic");
+
+        let last_char_offset = source
+            .as_str()
+            .char_indices()
+            .last()
+            .map(|(offset, _)| offset)
+            .expect("source should be non-empty");
+        let label_span = diagnostic.labels.as_deref().unwrap()[0].inner();
+        assert_eq!(label_span.offset(), last_char_offset);
+        assert_eq!(label_span.len(), 0);
+    }
+
+    #[test]
+    fn import_path_spans_do_not_consume_trailing_newlines() {
+        let source = "use lib::a::FOO\nbegin end\n";
+        let parse = parse_text(source);
+        let source_file = AstSourceFile::cast(parse.syntax()).expect("source file");
+        let Item::Import(import) = source_file.items().next().expect("import item") else {
+            panic!("expected first item to be an import");
+        };
+        let path = import.path().expect("import path");
+        let start = source.find("lib::a::FOO").expect("path start") as u32;
+        let end = start + "lib::a::FOO".len() as u32;
+        let expected = SourceSpan::new(parse.source().id(), start..end);
+        assert_eq!(parse.span_for_node(path.syntax()), expected);
     }
 }
