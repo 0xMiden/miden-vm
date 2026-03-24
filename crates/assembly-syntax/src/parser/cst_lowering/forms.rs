@@ -4,10 +4,13 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_assembly_syntax_cst::ast::{
-    AdviceMap as CstAdviceMap, AstNode, BeginBlock as CstBeginBlock, Constant as CstConstant,
-    Import as CstImport, Item as CstItem, Procedure as CstProcedure, SourceFile as CstSourceFile,
-    TypeDecl as CstTypeDecl,
+use miden_assembly_syntax_cst::{
+    SyntaxKind, SyntaxToken,
+    ast::{
+        AdviceMap as CstAdviceMap, AstNode, BeginBlock as CstBeginBlock, Constant as CstConstant,
+        Import as CstImport, Item as CstItem, Procedure as CstProcedure,
+        SourceFile as CstSourceFile, TypeDecl as CstTypeDecl,
+    },
 };
 use miden_debug_types::{SourceSpan, Span, Spanned};
 
@@ -15,11 +18,12 @@ use super::{
     blocks::lower_required_block,
     context::LoweringContext,
     fragments::{
-        lower_advice_map_decl, lower_attribute, lower_constant_expr, lower_enum_decl_from_body,
-        lower_function_type_from_signature, lower_type_expr_from_alias_body,
+        ParsedNumeric, lower_advice_map_decl, lower_attribute, lower_constant_expr,
+        lower_enum_decl_from_body, lower_function_type_from_signature,
+        lower_type_expr_from_alias_body, parse_numeric_token,
     },
 };
-use crate::{ast, parser::ParsingError};
+use crate::{Word, ast, parser::ParsingError};
 
 pub(super) fn lower_source_file(
     context: &mut LoweringContext<'_>,
@@ -193,31 +197,25 @@ fn lower_import(
     context: &mut LoweringContext<'_>,
     import: &CstImport,
 ) -> Result<ast::Form, ParsingError> {
-    let Some(path) = import.path() else {
-        return lower_item_with_fallback(context, &CstItem::Import(import.clone()));
-    };
-
+    let span = context.parse().span_for_node(import.syntax());
     let visibility = context.lower_visibility(import.visibility());
-    let target = context.lower_path(&path)?;
-    if target.as_ident().is_some() {
-        return Err(ParsingError::UnqualifiedImport { span: target.span() });
-    }
-
+    let target = lower_import_target(context, import)?;
     let name = match import.alias_token() {
         Some(alias) => context.lower_ident_token(&alias)?,
-        None => {
-            let last = target
-                .last()
-                .expect("validated import targets should always contain at least one segment");
-            context.lower_ident_text(target.span(), last)?
+        None => match &target {
+            ast::AliasTarget::MastRoot(_) => {
+                return Err(ParsingError::UnnamedReexportOfMastRoot { span });
+            },
+            ast::AliasTarget::Path(target) => {
+                let last = target
+                    .last()
+                    .expect("validated import targets should always contain at least one segment");
+                context.lower_ident_text(target.span(), last)?
+            },
         },
     };
 
-    Ok(ast::Form::Alias(ast::Alias::new(
-        visibility,
-        name,
-        ast::AliasTarget::Path(target),
-    )))
+    Ok(ast::Form::Alias(ast::Alias::new(visibility, name, target)))
 }
 
 fn lower_constant(
@@ -252,12 +250,11 @@ fn lower_type_decl(
     context: &mut LoweringContext<'_>,
     type_decl: &CstTypeDecl,
 ) -> Result<ast::Form, ParsingError> {
-    let keyword = match type_decl.keyword_token() {
-        Some(token) => token,
-        None => return lower_item_with_fallback(context, &CstItem::TypeDecl(type_decl.clone())),
-    };
-
     let span = context.parse().span_for_node(type_decl.syntax());
+    let keyword = type_decl.keyword_token().ok_or_else(|| ParsingError::InvalidSyntax {
+        span,
+        message: "expected `type` or `enum` in type declaration".to_string(),
+    })?;
     let visibility = context.lower_visibility(type_decl.visibility());
     let name = match type_decl.name_token() {
         Some(token) => context.lower_ident_token(&token)?,
@@ -288,7 +285,10 @@ fn lower_type_decl(
             let enum_ty = lower_enum_decl_from_body(context, visibility, name, &body, span)?;
             Ok(ast::Form::Enum(enum_ty))
         },
-        _ => lower_item_with_fallback(context, &CstItem::TypeDecl(type_decl.clone())),
+        _ => Err(ParsingError::InvalidSyntax {
+            span: context.parse().span_for_token(&keyword),
+            message: "expected `type` or `enum` in type declaration".to_string(),
+        }),
     }
 }
 
@@ -535,11 +535,73 @@ fn re_span_block(span: SourceSpan, block: &ast::Block) -> ast::Block {
     ast::Block::new(span, block.iter().cloned().collect())
 }
 
-fn lower_item_with_fallback(
+fn lower_import_target(
     context: &mut LoweringContext<'_>,
-    item: &CstItem,
-) -> Result<ast::Form, ParsingError> {
-    context.lower_form_with_legacy_parser(item_span(context, item))
+    import: &CstImport,
+) -> Result<ast::AliasTarget, ParsingError> {
+    if let Some(path) = import.path() {
+        let target = context.lower_path(&path)?;
+        if target.as_ident().is_some() {
+            return Err(ParsingError::UnqualifiedImport { span: target.span() });
+        }
+        return Ok(ast::AliasTarget::Path(target));
+    }
+
+    let target = import_target_token(import).ok_or_else(|| ParsingError::InvalidSyntax {
+        span: context.parse().span_for_node(import.syntax()),
+        message: "expected an import path or MAST root digest".to_string(),
+    })?;
+    lower_import_digest_target(context, &target)
+}
+
+fn import_target_token(import: &CstImport) -> Option<SyntaxToken> {
+    let mut seen_use = false;
+    for token in import
+        .syntax()
+        .children_with_tokens()
+        .filter_map(|element| element.into_token())
+    {
+        if token.kind().is_trivia() {
+            continue;
+        }
+
+        if !seen_use {
+            seen_use = token.kind() == SyntaxKind::Ident && token.text() == "use";
+            continue;
+        }
+
+        return Some(token);
+    }
+
+    None
+}
+
+fn lower_import_digest_target(
+    context: &mut LoweringContext<'_>,
+    token: &SyntaxToken,
+) -> Result<ast::AliasTarget, ParsingError> {
+    let span = context.parse().span_for_token(token);
+    if token.kind() != SyntaxKind::Number {
+        return Err(ParsingError::InvalidSyntax {
+            span,
+            message: "expected an import path or MAST root digest".to_string(),
+        });
+    }
+
+    match parse_numeric_token(span, token.text())? {
+        ParsedNumeric::Word(word) => {
+            Ok(ast::AliasTarget::MastRoot(Span::new(span, Word::from(word.0))))
+        },
+        ParsedNumeric::Int(_)
+            if token.text().starts_with("0x") || token.text().starts_with("0X") =>
+        {
+            Err(ParsingError::InvalidMastRoot { span })
+        },
+        ParsedNumeric::Int(_) => Err(ParsingError::InvalidSyntax {
+            span,
+            message: "expected an import path or MAST root digest".to_string(),
+        }),
+    }
 }
 
 fn item_span(context: &LoweringContext<'_>, item: &CstItem) -> SourceSpan {
