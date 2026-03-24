@@ -63,6 +63,29 @@ impl<'a> LoweringContext<'a> {
         self.lower_ident_text(span, raw)
     }
 
+    pub(super) fn lower_constant_ident_token(
+        &mut self,
+        token: &SyntaxToken,
+    ) -> Result<ast::Ident, ParsingError> {
+        let span = self.parse.span_for_token(token);
+        if token.kind() != SyntaxKind::Ident {
+            return Err(ParsingError::InvalidIdentifier {
+                error: ast::IdentError::Casing(ast::CaseKindError::Screaming),
+                span,
+            });
+        }
+
+        let ident = self.lower_ident_token(token)?;
+        if ident.is_constant_ident() {
+            Ok(ident)
+        } else {
+            Err(ParsingError::InvalidIdentifier {
+                error: ast::IdentError::Casing(ast::CaseKindError::Screaming),
+                span,
+            })
+        }
+    }
+
     pub(super) fn lower_ident_text(
         &mut self,
         span: SourceSpan,
@@ -84,6 +107,14 @@ impl<'a> LoweringContext<'a> {
             }
         }
 
+        self.lower_raw_path(span, &raw)
+    }
+
+    pub(super) fn lower_raw_path(
+        &mut self,
+        span: SourceSpan,
+        raw: &str,
+    ) -> Result<Span<Arc<Path>>, ParsingError> {
         let path = crate::ast::PathBuf::new(&raw).map_err(|error| {
             ParsingError::InvalidLibraryPath { span, message: error.to_string() }
         })?;
