@@ -1310,14 +1310,18 @@ fn effective_manifest_hash_input(project: &ProjectPackage) -> Result<String, Rep
         .dependencies()
         .iter()
         .filter_map(|dependency| match dependency.scheme() {
-            DependencyVersionScheme::Workspace { member } => Some((
+            DependencyVersionScheme::Workspace { member, version } => Some((
                 dependency.name().to_string(),
                 member.path().to_string(),
+                version.as_ref().map(ToString::to_string),
                 dependency.linkage(),
             )),
-            DependencyVersionScheme::WorkspacePath { path, .. } => {
-                Some((dependency.name().to_string(), path.path().to_string(), dependency.linkage()))
-            },
+            DependencyVersionScheme::WorkspacePath { path, version } => Some((
+                dependency.name().to_string(),
+                path.path().to_string(),
+                version.as_ref().map(ToString::to_string),
+                dependency.linkage(),
+            )),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -1325,8 +1329,13 @@ fn effective_manifest_hash_input(project: &ProjectPackage) -> Result<String, Rep
 
     if !workspace_dependencies.is_empty() {
         manifest.push_str("\n# resolved_workspace_dependencies\n");
-        for (name, member_path, linkage) in workspace_dependencies {
-            manifest.push_str(&format!("{name}={member_path}:{linkage}\n"));
+        for (name, member_path, version, linkage) in workspace_dependencies {
+            match version {
+                Some(version) => {
+                    manifest.push_str(&format!("{name}={member_path}@{version}:{linkage}\n"));
+                },
+                None => manifest.push_str(&format!("{name}={member_path}:{linkage}\n")),
+            }
         }
     }
 

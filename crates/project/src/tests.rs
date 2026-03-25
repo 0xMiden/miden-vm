@@ -81,7 +81,7 @@ fn can_load_protocol_example_project() -> Result<(), Report> {
 
     assert_eq!(kernel_project.dependencies().len(), 1);
     assert_eq!(&**kernel_project.dependencies()[0].name(), "miden-utils");
-    assert_matches!(kernel_project.dependencies()[0].scheme(), DependencyVersionScheme::Workspace { member } if member.path() == "utils");
+    assert_matches!(kernel_project.dependencies()[0].scheme(), DependencyVersionScheme::Workspace { member, .. } if member.path() == "utils");
     assert_eq!(kernel_project.dependencies()[0].linkage(), Linkage::Static);
 
     let userspace_project = workspace
@@ -96,9 +96,9 @@ fn can_load_protocol_example_project() -> Result<(), Report> {
 
     assert_eq!(userspace_project.dependencies().len(), 2);
     assert_eq!(&**userspace_project.dependencies()[0].name(), "miden-tx");
-    assert_matches!(userspace_project.dependencies()[0].scheme(), DependencyVersionScheme::Workspace { member } if member.path() == "kernel");
+    assert_matches!(userspace_project.dependencies()[0].scheme(), DependencyVersionScheme::Workspace { member, .. } if member.path() == "kernel");
     assert_eq!(&**userspace_project.dependencies()[1].name(), "miden-utils");
-    assert_matches!(userspace_project.dependencies()[1].scheme(), DependencyVersionScheme::Workspace { member } if member.path() == "utils");
+    assert_matches!(userspace_project.dependencies()[1].scheme(), DependencyVersionScheme::Workspace { member, .. } if member.path() == "utils");
     assert_eq!(userspace_project.dependencies()[1].linkage(), Linkage::Dynamic);
 
     Ok(())

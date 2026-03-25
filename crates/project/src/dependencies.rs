@@ -51,7 +51,7 @@ impl Dependency {
     pub fn required_version(&self) -> VersionRequirement {
         let req = match &self.version {
             DependencyVersionScheme::Registry(version) => return version.clone(),
-            DependencyVersionScheme::Workspace { .. } => None,
+            DependencyVersionScheme::Workspace { version, .. } => version.clone(),
             DependencyVersionScheme::WorkspacePath { version, .. } => version.clone(),
             DependencyVersionScheme::Path { version, .. } => version.clone(),
             DependencyVersionScheme::Git { version, .. } => {
@@ -78,7 +78,13 @@ pub enum DependencyVersionScheme {
     /// package registry in use, which can vary depending on context.
     Registry(VersionRequirement),
     /// Resolve the given workspace-relative path to a declared member of the current workspace.
-    Workspace { member: Span<Uri> },
+    Workspace {
+        /// The workspace-relative member path.
+        member: Span<Uri>,
+        /// If specified on the corresponding `[workspace.dependencies]` entry, the version of the
+        /// referenced project/package must satisfy this requirement.
+        version: Option<VersionRequirement>,
+    },
     /// Resolve the given path inherited from `[workspace.dependencies]`, relative to the
     /// workspace root, to either a Miden project/workspace or an assembled package artifact.
     WorkspacePath {
@@ -269,7 +275,7 @@ impl DependencyVersionScheme {
                                 })
                     });
                     if is_member {
-                        Ok(Self::Workspace { member: uri.clone() })
+                        Ok(Self::Workspace { member: uri.clone(), version })
                     } else {
                         Ok(Self::WorkspacePath { path: uri.clone(), version })
                     }
@@ -303,7 +309,7 @@ impl DependencyVersionScheme {
                             || uri.path() == format!("{member_path}/miden-project.toml")
                     });
                     if is_member {
-                        Ok(Self::Workspace { member: uri.clone() })
+                        Ok(Self::Workspace { member: uri.clone(), version })
                     } else {
                         Ok(Self::WorkspacePath { path: uri.clone(), version })
                     }

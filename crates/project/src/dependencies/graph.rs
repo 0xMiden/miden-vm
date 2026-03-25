@@ -342,7 +342,7 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
                     version: record.semantic_version().clone(),
                 }))
             },
-            DependencyVersionScheme::Workspace { member } => {
+            DependencyVersionScheme::Workspace { member, .. } => {
                 let workspace_root = parent.workspace_root.as_ref().ok_or_else(|| {
                     Report::msg(format!(
                         "workspace dependency '{}' cannot be resolved outside of a workspace",
@@ -1503,7 +1503,7 @@ mod tests {
     }
 
     #[test]
-    fn workspace_dependency_uses_member_version_even_with_workspace_requirement() {
+    fn workspace_dependency_rejects_mismatched_workspace_requirement() {
         let tempdir = TempDir::new().unwrap();
         let root_dir = tempdir.path().join("workspace-dep");
         fs::create_dir_all(&root_dir).unwrap();
@@ -1525,11 +1525,11 @@ mod tests {
         );
 
         let registry = TestRegistry::default();
-        let graph = builder(&registry, &tempdir.path().join("git-cache"))
+        let error = builder(&registry, &tempdir.path().join("git-cache"))
             .build_from_path(&app_manifest)
-            .unwrap();
-        let dep = graph.get(&PackageId::from("dep")).unwrap();
-        assert_eq!(dep.version.to_string(), "0.2.0");
+            .expect_err("mismatched workspace dependency version should fail");
+        assert!(error.to_string().contains("requires '=0.1.0'"));
+        assert!(error.to_string().contains("resolved version was '0.2.0'"));
     }
 
     #[test]
