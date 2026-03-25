@@ -2,6 +2,10 @@
 
 ## v0.23.0 (TBD)
 
+#### Bug Fixes
+
+- Reverted `InvokeKind::ProcRef` back to `InvokeKind::Exec` in `visit_mut_procref` and added an explanatory comment (#2893).
+
 ## 0.22.0 (2025-03-18)
 
 #### Enhancements
