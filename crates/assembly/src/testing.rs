@@ -273,6 +273,14 @@ mod package_features {
         pub fn clear_loaded_packages(&self) {
             self.loads.lock().unwrap().clear();
         }
+
+        pub fn remove_package(
+            &mut self,
+            package: &PackageId,
+            version: &Version,
+        ) -> Option<Arc<Package>> {
+            self.packages.remove(&(package.clone(), version.clone()))
+        }
     }
 
     impl PackageRegistry for TestRegistry {

@@ -53,6 +53,12 @@ struct ResolvedPackage {
     linked_kernel_package: Option<Arc<MastPackage>>,
 }
 
+enum RegisteredSourcePackage {
+    Missing,
+    Loaded(Arc<MastPackage>),
+    IndexedButUnreadable(PackageVersion),
+}
+
 pub struct ProjectAssembler<'a, S: PackageStore + ?Sized> {
     assembler: Assembler,
     project: Arc<ProjectPackage>,
@@ -373,6 +379,7 @@ where
         let node = self.dependency_graph.get(package_id).ok_or_else(|| {
             Report::msg(format!("missing dependency graph node for '{package_id}'"))
         })?;
+        let node_version = node.version.clone();
 
         let package = match &node.provenance {
             ProjectDependencyNodeProvenance::Source(miden_project::ProjectSource::Virtual {
@@ -403,9 +410,9 @@ where
                             package_id
                         ))
                     })?;
-                if let Some(package) = self.try_reuse_registered_source_package(
+                match self.try_reuse_registered_source_package(
                     package_id,
-                    &node.version,
+                    &node_version,
                     &project,
                     &target,
                     profile_name,
@@ -413,31 +420,49 @@ where
                     manifest_path,
                     workspace_root.as_deref(),
                 )? {
-                    ResolvedPackage {
+                    RegisteredSourcePackage::Loaded(package) => ResolvedPackage {
                         linked_kernel_package: self
                             .resolve_linked_kernel_package(package.clone())?,
                         package,
-                    }
-                } else {
-                    let package = self.assemble_source_package(
-                        package_id.clone(),
-                        project,
-                        &target,
-                        profile_name,
-                        None,
-                        None,
-                        cache,
-                    )?;
-                    self.publish_source_dependency(package.package.clone())?;
-                    package
+                    },
+                    reuse => {
+                        let package = self.assemble_source_package(
+                            package_id.clone(),
+                            project,
+                            &target,
+                            profile_name,
+                            None,
+                            None,
+                            cache,
+                        )?;
+                        match reuse {
+                            RegisteredSourcePackage::Missing => {
+                                self.publish_source_dependency(package.package.clone())?;
+                            },
+                            RegisteredSourcePackage::IndexedButUnreadable(expected) => {
+                                let actual = PackageVersion::new(
+                                    package.package.version.clone(),
+                                    package.package.digest(),
+                                );
+                                if actual != expected {
+                                    return Err(Report::msg(format!(
+                                        "package '{}' version '{}' is already registered as '{}', but the canonical artifact could not be loaded and rebuilding from source produced '{}'; bump the semantic version or repair the package store",
+                                        package_id, node_version, expected, actual
+                                    )));
+                                }
+                            },
+                            RegisteredSourcePackage::Loaded(_) => unreachable!(),
+                        }
+                        package
+                    },
                 }
             },
             ProjectDependencyNodeProvenance::Source(_) => {
                 let package =
-                    self.load_canonical_package(package_id, &node.version)?.ok_or_else(|| {
+                    self.load_canonical_package(package_id, &node_version)?.ok_or_else(|| {
                         Report::msg(format!(
                             "dependency '{}' version '{}' was not found in the package registry",
-                            package_id, node.version
+                            package_id, node_version
                         ))
                     })?;
                 ResolvedPackage {
@@ -452,8 +477,8 @@ where
                     package,
                 }
             },
-            ProjectDependencyNodeProvenance::Preassembled { path, .. } => {
-                let package = load_package_from_path(path)?;
+            ProjectDependencyNodeProvenance::Preassembled { path, selected } => {
+                let package = load_selected_preassembled_package(path, package_id, selected)?;
                 ResolvedPackage {
                     linked_kernel_package: self.resolve_linked_kernel_package(package.clone())?,
                     package,
@@ -480,17 +505,29 @@ where
         let version =
             PackageVersion::new(kernel_dependency.version.clone(), kernel_dependency.digest);
         if self.store.get_exact_version(&kernel_dependency.name, &version).is_some() {
-            let kernel_package = self.store.load_package(&kernel_dependency.name, &version)?;
-            if !kernel_package.is_kernel() {
-                return Err(Report::msg(format!(
-                    "runtime kernel dependency '{}@{}#{}' resolved to non-kernel package '{}'",
-                    kernel_dependency.name,
-                    kernel_dependency.version,
-                    kernel_dependency.digest,
-                    kernel_package.name
-                )));
+            match self.store.load_package(&kernel_dependency.name, &version) {
+                Ok(kernel_package) => {
+                    if !kernel_package.is_kernel() {
+                        return Err(Report::msg(format!(
+                            "runtime kernel dependency '{}@{}#{}' resolved to non-kernel package '{}'",
+                            kernel_dependency.name,
+                            kernel_dependency.version,
+                            kernel_dependency.digest,
+                            kernel_package.name
+                        )));
+                    }
+                    return Ok(Some(kernel_package));
+                },
+                Err(load_error) => {
+                    if let Some(kernel_package) = package
+                        .try_embedded_kernel_package()
+                        .map(|kernel_package| kernel_package.map(Arc::new))?
+                    {
+                        return Ok(Some(kernel_package));
+                    }
+                    return Err(load_error);
+                },
             }
-            return Ok(Some(kernel_package));
         }
 
         package
@@ -519,9 +556,15 @@ where
         origin: &ProjectSourceOrigin,
         manifest_path: &FsPath,
         workspace_root: Option<&FsPath>,
-    ) -> Result<Option<Arc<MastPackage>>, Report> {
-        let Some(package) = self.load_canonical_package(package_id, version)? else {
-            return Ok(None);
+    ) -> Result<RegisteredSourcePackage, Report> {
+        let Some(record) = self.store.get_by_semver(package_id, version) else {
+            return Ok(RegisteredSourcePackage::Missing);
+        };
+        let package = match self.store.load_package(package_id, record.version()) {
+            Ok(package) => package,
+            Err(_) => {
+                return Ok(RegisteredSourcePackage::IndexedButUnreadable(record.version().clone()));
+            },
         };
         let expected = self.expected_source_provenance(
             package_id,
@@ -534,7 +577,7 @@ where
         )?;
 
         match PackageBuildProvenance::from_package(&package)? {
-            Some(actual) if actual == expected => Ok(Some(package)),
+            Some(actual) if actual == expected => Ok(()),
             Some(actual) => Err(Report::msg(format!(
                 "package '{}' version '{}' is already registered with different source provenance (expected {}, found {}); bump the semantic version",
                 package_id,
@@ -546,7 +589,9 @@ where
                 "package '{}' version '{}' is already registered, but the canonical artifact is missing source provenance; bump the semantic version",
                 package_id, version
             ))),
-        }
+        }?;
+
+        Ok(RegisteredSourcePackage::Loaded(package))
     }
 
     fn publish_source_dependency(&mut self, package: Arc<MastPackage>) -> Result<(), Report> {
@@ -1523,4 +1568,33 @@ fn load_package_from_path(path: &FsPath) -> Result<Arc<MastPackage>, Report> {
         Report::msg(format!("failed to decode package '{}': {error}", path.display()))
     })?;
     Ok(Arc::new(package))
+}
+
+fn load_selected_preassembled_package(
+    path: &FsPath,
+    expected_name: &PackageId,
+    selected: &PackageVersion,
+) -> Result<Arc<MastPackage>, Report> {
+    let package = load_package_from_path(path)?;
+    if &package.name != expected_name {
+        return Err(Report::msg(format!(
+            "preassembled dependency '{}' at '{}' resolved to package '{}'",
+            expected_name,
+            path.display(),
+            package.name
+        )));
+    }
+
+    let actual = PackageVersion::new(package.version.clone(), package.digest());
+    if &actual != selected {
+        return Err(Report::msg(format!(
+            "preassembled dependency '{}@{}' at '{}' no longer matches the dependency graph selection '{}'",
+            expected_name,
+            actual,
+            path.display(),
+            selected
+        )));
+    }
+
+    Ok(package)
 }
