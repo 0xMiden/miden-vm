@@ -18,8 +18,11 @@ wasm-bindgen-futures = "0.4"
 wasm-bindgen-test = "0.3"
 getrandom = { version = "0.2", features = ["js"] }
 
-# Patch p3-challenger to fix wasm32 usize truncation in grinding code.
-# See: https://github.com/igamigo/miden-vm/tree/igamigo-p3-panic
 # TODO: remove once fix is upstreamed to Plonky3
 [patch.crates-io]
 p3-challenger = { git = "https://github.com/igamigo/Plonky3.git", branch = "fix/wasm32-grinding-usize-truncation" }
+p3-field = { git = "https://github.com/igamigo/Plonky3.git", branch = "fix/wasm32-grinding-usize-truncation" }
+p3-symmetric = { git = "https://github.com/igamigo/Plonky3.git", branch = "fix/wasm32-grinding-usize-truncation" }
+p3-maybe-rayon = { git = "https://github.com/igamigo/Plonky3.git", branch = "fix/wasm32-grinding-usize-truncation" }
+p3-monty-31 = { git = "https://github.com/igamigo/Plonky3.git", branch = "fix/wasm32-grinding-usize-truncation" }
+p3-util = { git = "https://github.com/igamigo/Plonky3.git", branch = "fix/wasm32-grinding-usize-truncation" }
