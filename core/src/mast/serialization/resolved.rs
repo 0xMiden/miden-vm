@@ -25,6 +25,11 @@ struct ForestDigests {
     /// External nodes index into the external-digest section. All other nodes index into the
     /// general node-hash section or the rebuilt hash table.
     slot_by_node: Vec<u32>,
+    /// Source of non-external digests.
+    ///
+    /// `None` means the serialized bytes still contain the internal node-hash section, so
+    /// lookups read directly from the wire. `Some(...)` means the payload was hashless and the
+    /// non-external digests have been recomputed once into this cache.
     hash_table: Option<Vec<crate::Word>>,
 }
 
@@ -41,6 +46,12 @@ pub(super) struct ResolvedSerializedForest<'a> {
 }
 
 impl ForestDigests {
+    /// Resolves how later digest lookups will be served for a parsed serialized forest.
+    ///
+    /// `bytes` and `layout` provide the already-scanned structural wire view. When
+    /// `remaining_allocation_budget` is `Some`, helper allocations needed for untrusted validation
+    /// such as the slot table and rebuilt hash table are charged against that budget. Trusted
+    /// structural views pass `None` here, which keeps the previous unbudgeted inspection behavior.
     fn new(
         bytes: &[u8],
         layout: &ForestLayout,
@@ -66,14 +77,26 @@ impl ForestDigests {
         index: usize,
         entry: MastNodeEntry,
     ) -> Result<crate::Word, DeserializationError> {
-        let digest_slot = self.slot_by_node[index] as usize;
+        let digest_slot = self.slot_by_node.get(index).copied().ok_or_else(|| {
+            DeserializationError::InvalidValue(format!(
+                "node index {} out of bounds for {} digest slots",
+                index,
+                self.slot_by_node.len()
+            ))
+        })? as usize;
 
         if matches!(entry, MastNodeEntry::External) {
             return read_digest_entry(bytes, layout.external_digest_offset, digest_slot);
         }
 
         if let Some(hash_table) = &self.hash_table {
-            return Ok(hash_table[index]);
+            return hash_table.get(index).copied().ok_or_else(|| {
+                DeserializationError::InvalidValue(format!(
+                    "node index {} out of bounds for {} rebuilt digests",
+                    index,
+                    hash_table.len()
+                ))
+            });
         }
 
         let node_hash_offset = layout.node_hash_offset.ok_or_else(|| {
@@ -163,11 +186,16 @@ impl<'a> ResolvedSerializedForest<'a> {
         self.layout.read_node_entry_at(self.bytes, index)
     }
 
+    /// Returns the digest for the node at `index`.
+    ///
+    /// The caller-supplied index is checked via [`Self::node_entry_at`] before the digest lookup
+    /// reaches the internal slot table.
     pub(super) fn node_digest_at(&self, index: usize) -> Result<crate::Word, DeserializationError> {
         let entry = self.node_entry_at(index)?;
         self.node_digest_for_entry(index, entry)
     }
 
+    /// Returns the digest for a node whose entry was already read and bounds-checked by the caller.
     fn node_digest_for_entry(
         &self,
         index: usize,
@@ -202,6 +230,8 @@ fn basic_block_data(
     basic_block_offset: usize,
     basic_block_len: usize,
 ) -> Result<&[u8], DeserializationError> {
+    // Layout scanning already established the coarse section boundaries. This helper keeps the
+    // consumer-side slice extraction explicit and local to the basic-block decoder path.
     let end = basic_block_offset.checked_add(basic_block_len).ok_or_else(|| {
         DeserializationError::InvalidValue("basic-block data overflow".to_string())
     })?;

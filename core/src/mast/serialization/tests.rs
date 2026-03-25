@@ -464,7 +464,9 @@ fn test_operation_encoded_size_push_varint_boundaries() {
         72_057_594_037_927_935,
         72_057_594_037_927_936,
     ] {
-        assert_operation_encoded_size_matches_serialized_len(Operation::Push(Felt::new(value)));
+        assert_operation_encoded_size_matches_serialized_len(Operation::Push(Felt::new_unchecked(
+            value,
+        )));
     }
 }
 
@@ -493,7 +495,7 @@ fn test_mast_forest_view_trait_matches_serialized_view() {
     let mut forest = MastForest::new();
 
     let block1 = BasicBlockNodeBuilder::new(
-        vec![Operation::Push(Felt::new(7)), Operation::Add, Operation::Mul],
+        vec![Operation::Push(Felt::new_unchecked(7)), Operation::Add, Operation::Mul],
         Vec::new(),
     )
     .add_to_forest(&mut forest)
@@ -654,7 +656,12 @@ fn test_serialized_mast_forest_hashless_omits_hash_section_and_recomputes_digest
 #[test]
 fn test_serialized_mast_forest_hashless_accepts_external_nodes_parse_only() {
     let mut forest = MastForest::new();
-    let external_digest = Word::new([Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
+    let external_digest = Word::new([
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(4),
+    ]);
     let external_id = ExternalNodeBuilder::new(external_digest).add_to_forest(&mut forest).unwrap();
     forest.make_root(external_id);
 
@@ -1300,19 +1307,23 @@ fn assert_stripped_size_hint_matches_serialized_len(forest: &MastForest) {
 fn test_stripped_size_hint_matches_serialized_len() {
     let mut small_forest = MastForest::new();
 
-    let block1 =
-        BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Push(Felt::new(3))], Vec::new())
-            .add_to_forest(&mut small_forest)
-            .unwrap();
+    let block1 = BasicBlockNodeBuilder::new(
+        vec![Operation::Add, Operation::Push(Felt::new_unchecked(3))],
+        Vec::new(),
+    )
+    .add_to_forest(&mut small_forest)
+    .unwrap();
     let block2 = BasicBlockNodeBuilder::new(
-        vec![Operation::U32div, Operation::Assert(Felt::new(1))],
+        vec![Operation::U32div, Operation::Assert(Felt::new_unchecked(1))],
         Vec::new(),
     )
     .add_to_forest(&mut small_forest)
     .unwrap();
     let join = JoinNodeBuilder::new([block1, block2]).add_to_forest(&mut small_forest).unwrap();
     small_forest.make_root(join);
-    small_forest.advice_map_mut().insert(Word::default(), vec![ONE, Felt::new(2)]);
+    small_forest
+        .advice_map_mut()
+        .insert(Word::default(), vec![ONE, Felt::new_unchecked(2)]);
     assert_stripped_size_hint_matches_serialized_len(&small_forest);
 
     let mut forest = MastForest::new();
@@ -1321,21 +1332,31 @@ fn test_stripped_size_hint_matches_serialized_len() {
     for _ in 0..300 {
         operations.push(Operation::Add);
     }
-    operations.push(Operation::Push(Felt::new(7)));
-    operations.push(Operation::Assert(Felt::new(9)));
-    operations.push(Operation::U32assert2(Felt::new(11)));
-    operations.push(Operation::MpVerify(Felt::new(13)));
+    operations.push(Operation::Push(Felt::new_unchecked(7)));
+    operations.push(Operation::Assert(Felt::new_unchecked(9)));
+    operations.push(Operation::U32assert2(Felt::new_unchecked(11)));
+    operations.push(Operation::MpVerify(Felt::new_unchecked(13)));
 
     let block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
         .add_to_forest(&mut forest)
         .unwrap();
     forest.make_root(block_id);
 
-    let key_a = Word::new([Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
-    let key_b = Word::new([Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)]);
+    let key_a = Word::new([
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(4),
+    ]);
+    let key_b = Word::new([
+        Felt::new_unchecked(5),
+        Felt::new_unchecked(6),
+        Felt::new_unchecked(7),
+        Felt::new_unchecked(8),
+    ]);
 
-    let values_a: Vec<Felt> = (0..200).map(|i| Felt::new(i as u64)).collect();
-    let values_b: Vec<Felt> = (0..5).map(|i| Felt::new((i + 10) as u64)).collect();
+    let values_a: Vec<Felt> = (0..200).map(|i| Felt::new_unchecked(i as u64)).collect();
+    let values_b: Vec<Felt> = (0..5).map(|i| Felt::new_unchecked((i + 10) as u64)).collect();
 
     forest.advice_map_mut().insert(key_a, values_a);
     forest.advice_map_mut().insert(key_b, values_b);
@@ -1542,10 +1563,10 @@ fn test_untrusted_hashless_validate_recomputes_without_wire_hash_section() {
 fn test_untrusted_hashless_external_parse_and_validate() {
     let mut forest = MastForest::new();
     let external = ExternalNodeBuilder::new(Word::new([
-        Felt::new(10),
-        Felt::new(11),
-        Felt::new(12),
-        Felt::new(13),
+        Felt::new_unchecked(10),
+        Felt::new_unchecked(11),
+        Felt::new_unchecked(12),
+        Felt::new_unchecked(13),
     ]))
     .add_to_forest(&mut forest)
     .unwrap();
@@ -2018,7 +2039,13 @@ fn test_untrusted_forest_rejects_mismatched_wire_root_hash() {
     let bytes = forest.to_bytes();
     let view = SerializedMastForest::new(&bytes).unwrap();
     let digest_offset = node_hash_digest_offset(&view, block_id.to_usize());
-    let bogus_digest: Word = [Felt::new(9), Felt::new(8), Felt::new(7), Felt::new(6)].into();
+    let bogus_digest: Word = [
+        Felt::new_unchecked(9),
+        Felt::new_unchecked(8),
+        Felt::new_unchecked(7),
+        Felt::new_unchecked(6),
+    ]
+    .into();
 
     let mut corrupted =
         rewrite_debug_info_procedure_name_digest(&bytes, expected_digest, bogus_digest);
@@ -2050,7 +2077,13 @@ fn test_untrusted_forest_rejects_invalid_procedure_name_digest_without_remapping
     forest.insert_procedure_name(expected_digest, "proc".into());
 
     let bytes = forest.to_bytes();
-    let bogus_digest: Word = [Felt::new(9), Felt::new(8), Felt::new(7), Felt::new(6)].into();
+    let bogus_digest: Word = [
+        Felt::new_unchecked(9),
+        Felt::new_unchecked(8),
+        Felt::new_unchecked(7),
+        Felt::new_unchecked(6),
+    ]
+    .into();
 
     let corrupted = rewrite_debug_info_procedure_name_digest(&bytes, expected_digest, bogus_digest);
 

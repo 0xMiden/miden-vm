@@ -13,12 +13,18 @@ pub trait MastForestView {
     fn node_count(&self) -> usize;
 
     /// Returns fixed-width structural metadata for a node at the specified index.
+    ///
+    /// Returns an error if `index >= self.node_count()`.
     fn node_entry_at(&self, index: usize) -> Result<MastNodeEntry, DeserializationError>;
 
     /// Returns the digest of the node at the specified index.
+    ///
+    /// Returns an error if `index >= self.node_count()`.
     fn node_digest_at(&self, index: usize) -> Result<Word, DeserializationError>;
 
     /// Returns serialized-equivalent metadata for a node at the specified index.
+    ///
+    /// Returns an error if `index >= self.node_count()`.
     fn node_info_at(&self, index: usize) -> Result<MastNodeInfo, DeserializationError> {
         Ok(MastNodeInfo::from_entry(
             self.node_entry_at(index)?,
@@ -30,6 +36,8 @@ pub trait MastForestView {
     fn procedure_root_count(&self) -> usize;
 
     /// Returns the procedure root id at the specified index.
+    ///
+    /// Returns an error if `index >= self.procedure_root_count()`.
     fn procedure_root_at(&self, index: usize) -> Result<MastNodeId, DeserializationError>;
 
     /// Returns true when the forest contains no nodes.

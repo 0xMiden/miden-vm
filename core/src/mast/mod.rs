@@ -35,8 +35,9 @@
 //! In practice, the public entry points split into three policies:
 //! - [`MastForest::read_from_bytes`]: trusted full deserialization; rejects hashless payloads and
 //!   trusts serialized non-external digests.
-//! - [`SerializedMastForest::new`]: trusted inspection path; scans only the structural layout
-//!   needed for random access and may accept full, stripped, or hashless payloads.
+//! - [`SerializedMastForest::new`]: structural inspection path for local tooling; scans only the
+//!   layout needed for random access and may accept full, stripped, or hashless payloads, but it is
+//!   not an untrusted-validation entry point.
 //! - [`UntrustedMastForest::read_from_bytes`] and
 //!   [`UntrustedMastForest::read_from_bytes_with_budgets`]: untrusted paths; parse with bounded
 //!   readers and require [`UntrustedMastForest::validate`] before use.

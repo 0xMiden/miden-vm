@@ -75,7 +75,10 @@
 //!
 //! In hashless format, the internal node-hash section is omitted and `HASHLESS` also implies
 //! `STRIPPED`. External node digests still stay on the wire because they cannot be rebuilt from
-//! local structure.
+//! local structure. This keeps hashless focused on the untrusted-validation use case: trusted
+//! reads reject `HASHLESS`, and the untrusted path rebuilds the data it actually trusts before
+//! use, so supporting a separate "hashless but with debug info" mode would add another wire mode
+//! without changing the validation semantics.
 //!
 //! Readers recover per-node digest lookup by scanning node entries once and building a compact
 //! "slot by node index" table. This preserves random access without forcing all digests into the
@@ -83,7 +86,8 @@
 //!
 //! Public entry points adopt these policies:
 //! - [`MastForest::read_from_bytes`]: trusted full payload, no hashless support.
-//! - [`SerializedMastForest::new`]: trusted structural inspection, including hashless payloads.
+//! - [`SerializedMastForest::new`]: structural inspection for local tooling, including hashless
+//!   payloads; not an untrusted-validation entry point.
 //! - [`crate::mast::UntrustedMastForest::read_from_bytes`] /
 //!   [`crate::mast::UntrustedMastForest::read_from_bytes_with_budgets`]: untrusted parsing plus
 //!   later validation before use.
@@ -184,7 +188,10 @@ const FLAG_STRIPPED: u8 = 0x01;
 /// Flag indicating that the internal node-hash section is omitted from the wire payload.
 ///
 /// External digests still remain serialized in their own section because they cannot be rebuilt
-/// from local structure. This flag implies [`FLAG_STRIPPED`].
+/// from local structure. This flag implies [`FLAG_STRIPPED`] because no supported consumer treats
+/// wire `DebugInfo` as trusted in hashless mode: [`crate::mast::MastForest`] rejects `HASHLESS`,
+/// [`SerializedMastForest::new`] accepts it only for structural inspection, and the untrusted path
+/// rebuilds the data it actually trusts before use.
 pub(super) const FLAG_HASHLESS: u8 = 0x02;
 
 /// Mask for reserved flag bits that must be zero.
@@ -471,11 +478,18 @@ impl<'a> SerializedMastForest<'a> {
     }
 
     /// Returns the procedure root id at the specified index.
+    ///
+    /// Returns an error if `index >= self.procedure_root_count()`.
     pub fn procedure_root_at(&self, index: usize) -> Result<MastNodeId, DeserializationError> {
         self.layout.read_procedure_root_at(self.bytes, index)
     }
 
     /// Returns the `MastNodeInfo` at the specified index.
+    ///
+    /// On hashless payloads, this may trigger the first digest-backed access and therefore the
+    /// one-time rebuild of the non-external digest table described in [`Self::node_digest_at`].
+    ///
+    /// Returns an error if `index >= self.node_count()`.
     ///
     /// # Examples
     ///
@@ -505,6 +519,8 @@ impl<'a> SerializedMastForest<'a> {
     }
 
     /// Returns the fixed-width structural node entry at the specified index.
+    ///
+    /// Returns an error if `index >= self.node_count()`.
     pub fn node_entry_at(&self, index: usize) -> Result<MastNodeEntry, DeserializationError> {
         self.layout.read_node_entry_at(self.bytes, index)
     }
@@ -513,6 +529,14 @@ impl<'a> SerializedMastForest<'a> {
     ///
     /// This resolves digests lazily. If the internal-hash section is absent, the first
     /// digest-backed access rebuilds all non-external node digests and caches them.
+    ///
+    /// This means the hashless cost model is:
+    /// - `node_count()`, `node_entry_at()`, and `procedure_root_at()` stay cheap and structural
+    /// - the first `node_digest_at()` / `node_info_at()` call does `O(node_count)` digest rebuild
+    ///   work and allocates the cached digest table
+    /// - later digest lookups reuse that cache
+    ///
+    /// Returns an error if `index >= self.node_count()`.
     pub fn node_digest_at(&self, index: usize) -> Result<crate::Word, DeserializationError> {
         self.resolved()?.node_digest_at(index)
     }
