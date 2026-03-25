@@ -15,6 +15,11 @@ use crate::{
     diagnostics::{Diagnostic, Severity, miette, miette::MietteDiagnostic},
 };
 
+/// User-facing syntax diagnostics produced by the CST-backed parser entry point.
+///
+/// The CST parser itself can accumulate multiple recovery diagnostics; this wrapper converts those
+/// diagnostics into the severity/label structure used by the existing `miden-assembly-syntax`
+/// parser surface.
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum SyntaxError {
     #[error("{message}")]
@@ -52,7 +57,11 @@ pub enum SyntaxError {
     },
 }
 
-/// Parse zero or more [ast::Form] from `source`, using `interned` for string interning.
+/// Parses zero or more legacy AST forms from `source` using the CST-backed frontend.
+///
+/// This function is the public entry point for the CST backend. It first runs the lossless CST
+/// parser, converts any CST diagnostics into the existing parser-facing report surface, and only
+/// then lowers the recovered CST into the historic `Vec<Form>` boundary used by semantic analysis.
 pub fn parse_forms(
     source: Arc<SourceFile>,
     interned: &mut BTreeSet<Arc<str>>,
@@ -67,6 +76,10 @@ pub fn parse_forms(
     }
 }
 
+/// Collapses a recovered CST diagnostic list into the user-facing syntax error surface.
+///
+/// When recovery produced multiple diagnostics, we prefer the first real error to avoid surfacing
+/// noisy follow-on messages that the legacy parser would never have reported.
 impl From<Vec<MietteDiagnostic>> for SyntaxError {
     fn from(mut diagnostics: Vec<MietteDiagnostic>) -> Self {
         if diagnostics.len() == 1 {
@@ -87,6 +100,7 @@ impl From<Vec<MietteDiagnostic>> for SyntaxError {
     }
 }
 
+/// Converts a single CST diagnostic into the parser's severity-preserving syntax error wrapper.
 impl From<MietteDiagnostic> for SyntaxError {
     fn from(value: MietteDiagnostic) -> Self {
         let MietteDiagnostic {
