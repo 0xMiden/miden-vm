@@ -24,6 +24,10 @@ use super::{
 };
 use crate::{Report, Word, ast, parser::ParsingError};
 
+/// Lowers the CST source file into the top-level `Form` sequence expected by the rest of the parser
+/// pipeline.
+///
+/// This is the main top-level bridge from the lossless CST to the historic AST boundary.
 pub(super) fn lower_source_file(
     context: &mut LoweringContext<'_>,
 ) -> Result<Vec<ast::Form>, Report> {
@@ -72,11 +76,16 @@ pub(super) fn lower_source_file(
     Ok(forms)
 }
 
+/// Returns `Some(true/false)` when `items[index]` starts a doc-comment group.
+///
+/// The boolean indicates whether the group should become `Form::ModuleDoc` (`true`) or ordinary
+/// item docs (`false`). Non-doc items return `None`.
 fn doc_group_kind(context: &LoweringContext<'_>, items: &[CstItem], index: usize) -> Option<bool> {
     let item = items.get(index)?;
     matches!(item, CstItem::Doc(_)).then(|| index == 0 && starts_at_file_beginning(context, item))
 }
 
+/// Extends a doc-comment run until the next non-doc item or blank-line separator.
 fn extend_doc_group(context: &LoweringContext<'_>, items: &[CstItem], start: usize) -> usize {
     let mut end = start + 1;
     while end < items.len()
@@ -88,10 +97,15 @@ fn extend_doc_group(context: &LoweringContext<'_>, items: &[CstItem], start: usi
     end
 }
 
+/// Returns true when `item` begins at byte offset 0 in the source file.
 fn starts_at_file_beginning(context: &LoweringContext<'_>, item: &CstItem) -> bool {
     item_span(context, item).start().to_usize() == 0
 }
 
+/// Returns true when the source text between `lhs` and `rhs` contains a blank line.
+///
+/// Doc groups are split on blank lines to preserve the distinction between contiguous doc blocks
+/// and separated documentation sections.
 fn has_blank_line_between(context: &LoweringContext<'_>, lhs: &CstItem, rhs: &CstItem) -> bool {
     let lhs = item_span(context, lhs);
     let rhs = item_span(context, rhs);
@@ -102,6 +116,7 @@ fn has_blank_line_between(context: &LoweringContext<'_>, lhs: &CstItem, rhs: &Cs
     count_line_breaks(between) > 1
 }
 
+/// Counts line terminators in `text`, treating CRLF as a single logical line break.
 fn count_line_breaks(text: &str) -> usize {
     let bytes = text.as_bytes();
     let mut index = 0usize;
@@ -125,6 +140,7 @@ fn count_line_breaks(text: &str) -> usize {
     count
 }
 
+/// Lowers a contiguous run of doc-comment items into either `Form::ModuleDoc` or `Form::Doc`.
 fn lower_doc_group(
     context: &LoweringContext<'_>,
     items: &[CstItem],
@@ -151,6 +167,10 @@ fn lower_doc_group(
     }
 }
 
+/// Extracts the normalized text payload for a single doc-comment item.
+///
+/// The returned string is trimmed the same way as the legacy parser and always includes a trailing
+/// newline so grouped docs concatenate without additional bookkeeping.
 fn doc_text(context: &LoweringContext<'_>, item: &CstItem) -> String {
     let span = item_span(context, item);
     let raw = context.source_text(span);
@@ -162,6 +182,10 @@ fn doc_text(context: &LoweringContext<'_>, item: &CstItem) -> String {
     text
 }
 
+/// Lowers a `use` form into the alias representation.
+///
+/// Unnamed path imports derive their alias name from the final path segment, while digest imports
+/// are required to provide an explicit alias to match the legacy parser contract.
 fn lower_import(
     context: &mut LoweringContext<'_>,
     import: &CstImport,
@@ -187,6 +211,7 @@ fn lower_import(
     Ok(ast::Form::Alias(ast::Alias::new(visibility, name, target)))
 }
 
+/// Lowers a constant declaration and validates its name/value pair.
 fn lower_constant(
     context: &mut LoweringContext<'_>,
     constant: &CstConstant,
@@ -215,6 +240,7 @@ fn lower_constant(
     Ok(ast::Form::Constant(ast::Constant::new(span, visibility, name, expr)))
 }
 
+/// Lowers either a `type` alias or an `enum` declaration from the shared CST form.
 fn lower_type_decl(
     context: &mut LoweringContext<'_>,
     type_decl: &CstTypeDecl,
@@ -261,6 +287,9 @@ fn lower_type_decl(
     }
 }
 
+/// Validates the parts of a procedure header that do not depend on body lowering.
+///
+/// This keeps header diagnostics stable even when later body lowering fails.
 fn preflight_procedure_header(
     context: &mut LoweringContext<'_>,
     procedure: &CstProcedure,
@@ -285,6 +314,7 @@ fn preflight_procedure_header(
     Ok((name, signature))
 }
 
+/// Lowers an `adv_map` declaration into the corresponding top-level form.
 fn lower_advice_map(
     context: &mut LoweringContext<'_>,
     advice_map: &CstAdviceMap,
@@ -292,6 +322,7 @@ fn lower_advice_map(
     Ok(ast::Form::AdviceMapEntry(lower_advice_map_decl(context, advice_map)?))
 }
 
+/// Lowers the entry `begin ... end` block for a program/module source file.
 fn lower_begin_block(
     context: &mut LoweringContext<'_>,
     begin: &CstBeginBlock,
@@ -310,6 +341,7 @@ fn lower_begin_block(
     Ok(ast::Form::Begin(re_span_block(span, &block)))
 }
 
+/// Lowers a procedure declaration, including signature preflight, body lowering, and attributes.
 fn lower_procedure(
     context: &mut LoweringContext<'_>,
     procedure: &CstProcedure,
@@ -343,6 +375,11 @@ fn lower_procedure(
     Ok(ast::Form::Procedure(proc))
 }
 
+/// Applies lowered attributes to a procedure while preserving legacy attribute semantics.
+///
+/// This is responsible for duplicate detection, `@callconv` validation, `@locals` validation, and
+/// the historical rule that some validated attributes are reflected into dedicated procedure
+/// fields rather than staying in the generic attribute set.
 fn apply_procedure_attributes(
     procedure: &mut ast::Procedure,
     annotations: Vec<ast::Attribute>,
@@ -500,10 +537,15 @@ fn apply_procedure_attributes(
     Ok(())
 }
 
+/// Rebuilds an AST block with a new outer span while preserving its operations unchanged.
+///
+/// Top-level `begin` forms and procedures historically use the enclosing form span rather than the
+/// nested body span reported by the CST block node itself.
 fn re_span_block(span: SourceSpan, block: &ast::Block) -> ast::Block {
     ast::Block::new(span, block.iter().cloned().collect())
 }
 
+/// Lowers either a path import target or a digest import target from a `use` form.
 fn lower_import_target(
     context: &mut LoweringContext<'_>,
     import: &CstImport,
@@ -523,6 +565,9 @@ fn lower_import_target(
     lower_import_digest_target(context, &target)
 }
 
+/// Returns the first significant token following the `use` keyword.
+///
+/// This is used to recover digest imports, which are not represented as CST path nodes.
 fn import_target_token(import: &CstImport) -> Option<SyntaxToken> {
     let mut seen_use = false;
     for token in import
@@ -545,6 +590,7 @@ fn import_target_token(import: &CstImport) -> Option<SyntaxToken> {
     None
 }
 
+/// Lowers a digest-based import target and validates that it is a full MAST root literal.
 fn lower_import_digest_target(
     context: &mut LoweringContext<'_>,
     token: &SyntaxToken,
@@ -573,6 +619,7 @@ fn lower_import_digest_target(
     }
 }
 
+/// Returns the source span for any top-level CST item variant.
 fn item_span(context: &LoweringContext<'_>, item: &CstItem) -> SourceSpan {
     match item {
         CstItem::Doc(node) => context.parse().span_for_node(node.syntax()),

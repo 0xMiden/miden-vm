@@ -21,6 +21,11 @@ use crate::{
     parser::{LiteralErrorKind, ParsingError, PushValue},
 };
 
+/// Attempts to lower a CST instruction node into one or more AST ops.
+///
+/// Lowering first tries compact single-line spellings (`dup.3`, `exp.u32`, etc.), then falls back
+/// to extended operand forms (`push`, `exec`, `debug`, `emit`, ...). `None` means the direct
+/// lowerer does not recognize the spelling and callers should report it as malformed.
 pub(super) fn try_lower_instruction(
     context: &mut LoweringContext<'_>,
     instruction: &CstInstruction,
@@ -47,12 +52,15 @@ pub(super) fn try_lower_instruction(
     lower_extended_instruction(context, instruction)
 }
 
+/// Compact instruction view used for spellings that can be interpreted as a trivia-free
+/// `ident(.segment)*` token sequence.
 struct CompactInstruction {
     text: String,
     segments: Vec<SyntaxToken>,
 }
 
 impl CompactInstruction {
+    /// Parses `instruction` as a compact `ident(.segment)*` spelling if possible.
     fn parse(instruction: &CstInstruction) -> Option<Self> {
         let mut text = String::new();
         let mut segments = Vec::new();
@@ -79,15 +87,18 @@ impl CompactInstruction {
         (!text.is_empty()).then_some(Self { text, segments })
     }
 
+    /// Returns the non-dot compact segments as borrowed text slices.
     fn texts(&self) -> Vec<&str> {
         self.segments.iter().map(|token| token.text()).collect()
     }
 
+    /// Returns the `index`th non-dot segment token.
     fn token(&self, index: usize) -> &SyntaxToken {
         &self.segments[index]
     }
 }
 
+/// Lowers compact spellings that carry exactly one immediate-like segment.
 fn lower_immediate_instruction(
     context: &mut LoweringContext<'_>,
     span: SourceSpan,
@@ -101,6 +112,8 @@ fn lower_immediate_instruction(
     }
 }
 
+/// Restores the legacy “unexpected `.`” diagnostic for primitive opcodes that do not accept
+/// suffixes, e.g. `neg.1` or `inv.1`.
 fn unexpected_primitive_suffix_error(
     context: &LoweringContext<'_>,
     instruction: &CstInstruction,
@@ -126,6 +139,7 @@ fn unexpected_primitive_suffix_error(
     })
 }
 
+/// Returns true when `name.<suffix>` may be a valid spelling handled by direct lowering.
 fn accepts_single_suffix(name: &str) -> bool {
     eq_like_immediate_instruction(name).is_some()
         || int_compare_immediate_instruction(name).is_some()
@@ -139,6 +153,7 @@ fn accepts_single_suffix(name: &str) -> bool {
         || u32_shift_immediate_instruction(name).is_some()
 }
 
+/// Returns the compact legacy expected-token set for block-local syntax errors.
 fn expected_block_operation_tokens() -> Vec<String> {
     vec![
         r#"primitive opcode (e.g. "add")"#.to_string(),
@@ -147,6 +162,7 @@ fn expected_block_operation_tokens() -> Vec<String> {
     ]
 }
 
+/// Returns the fixed primitive instruction for suffix-free spellings.
 fn lower_primitive_instruction(text: &str) -> Option<Instruction> {
     lower_system_event_instruction(text)
         .or_else(|| lower_debug_short_instruction(text))
@@ -157,6 +173,7 @@ fn lower_primitive_instruction(text: &str) -> Option<Instruction> {
         .or_else(|| lower_u32_primitive_instruction(text))
 }
 
+/// Dispatches single-immediate compact spellings to the appropriate lowering family.
 fn lower_binary_immediate_instruction(
     context: &mut LoweringContext<'_>,
     span: SourceSpan,
@@ -532,6 +549,10 @@ fn deprecated_instruction_error(
     })
 }
 
+/// Lowers the instruction spellings that are not representable as compact primitives/immediates.
+///
+/// These forms generally have richer operand structure, such as invocation targets, push lists,
+/// event names, or debug operand tuples.
 fn lower_extended_instruction(
     context: &mut LoweringContext<'_>,
     instruction: &CstInstruction,
@@ -614,6 +635,7 @@ fn lower_extended_instruction(
     }
 }
 
+/// Lowers all `push` spellings, including scalar lists, word literals, and slices.
 fn lower_push_instruction(
     context: &mut LoweringContext<'_>,
     instruction_span: SourceSpan,
@@ -654,6 +676,7 @@ fn lower_push_instruction(
     lower_push_list(context, instruction_span, rest)
 }
 
+/// Lowers `exec`, `call`, `syscall`, and `procref` invocation forms.
 fn lower_invocation_instruction(
     context: &mut LoweringContext<'_>,
     instruction_span: SourceSpan,
@@ -668,6 +691,7 @@ fn lower_invocation_instruction(
     Ok(Some(vec![inst_op(instruction_span, build(target))]))
 }
 
+/// Lowers all `debug.*` forms, including interval/range variants.
 fn lower_debug_instruction(
     context: &mut LoweringContext<'_>,
     instruction_span: SourceSpan,
@@ -775,6 +799,7 @@ fn lower_debug_instruction(
     Ok(Some(vec![inst_op(instruction_span, Instruction::Debug(option))]))
 }
 
+/// Lowers `emit.<const>` and `emit.event("name")`.
 fn lower_emit_instruction(
     context: &mut LoweringContext<'_>,
     instruction_span: SourceSpan,
@@ -814,6 +839,7 @@ fn lower_emit_instruction(
     }
 }
 
+/// Lowers `trace.<u32>` immediates.
 fn lower_trace_instruction(
     context: &mut LoweringContext<'_>,
     instruction_span: SourceSpan,
@@ -834,6 +860,7 @@ fn lower_trace_instruction(
     Ok(Some(vec![inst_op(instruction_span, Instruction::Trace(value))]))
 }
 
+/// Lowers `.err=` forms for assertion-like instructions.
 fn lower_error_code_instruction(
     context: &mut LoweringContext<'_>,
     instruction_span: SourceSpan,
@@ -858,6 +885,7 @@ fn lower_error_code_instruction(
     Ok(Some(vec![inst_op(instruction_span, build(value))]))
 }
 
+/// Lowers an invocation target operand into a symbol, path, or MAST-root reference.
 fn lower_invocation_target(
     context: &mut LoweringContext<'_>,
     tokens: &[SyntaxToken],
@@ -904,6 +932,10 @@ fn lower_invocation_target(
     }
 }
 
+/// Lowers a `push` list of integer immediates and/or constant references.
+///
+/// Each pushed element becomes a separate AST op so the rest of the pipeline sees the same shape
+/// produced by the legacy parser.
 fn lower_push_list(
     context: &mut LoweringContext<'_>,
     instruction_span: SourceSpan,
@@ -1088,6 +1120,7 @@ fn lower_error_msg(
     }
 }
 
+/// Lowers a token that must represent a `u8` immediate or constant reference.
 fn lower_u8_immediate(
     context: &mut LoweringContext<'_>,
     token: &SyntaxToken,
@@ -1111,6 +1144,7 @@ fn lower_u8_immediate(
     }
 }
 
+/// Extracts the significant, non-trivia tokens from an instruction node.
 fn significant_tokens(instruction: &CstInstruction) -> Vec<SyntaxToken> {
     instruction
         .syntax()
@@ -1120,12 +1154,14 @@ fn significant_tokens(instruction: &CstInstruction) -> Vec<SyntaxToken> {
         .collect()
 }
 
+/// Returns the span covering the first through last token in `tokens`.
 fn span_for_tokens(context: &LoweringContext<'_>, tokens: &[SyntaxToken]) -> SourceSpan {
     let first = tokens.first().expect("instruction operands should be non-empty");
     let last = tokens.last().expect("non-empty tokens");
     join_spans(context.parse().span_for_token(first), context.parse().span_for_token(last))
 }
 
+/// Removes the surrounding quotes from a string token, preserving diagnostics on malformed input.
 fn unquote_string_token(token: &SyntaxToken, span: SourceSpan) -> Result<Arc<str>, ParsingError> {
     token
         .text()
@@ -1184,6 +1220,7 @@ fn lower_eq_like(
     Ok(Some(vec![inst_op(span, build(imm))]))
 }
 
+/// Lowers integer-comparison immediates by expanding them into `push` + compare pairs.
 fn lower_int_compare(
     context: &mut LoweringContext<'_>,
     span: SourceSpan,
@@ -1196,6 +1233,8 @@ fn lower_int_compare(
     Ok(Some(vec![push_int_op(span, imm), inst_op(span, instruction)]))
 }
 
+/// Lowers foldable felt-immediate arithmetic and applies the same peephole folds as the legacy
+/// parser.
 fn lower_foldable_felt(
     context: &mut LoweringContext<'_>,
     span: SourceSpan,
@@ -1247,6 +1286,7 @@ fn lower_foldable_felt(
     Ok(Some(ops))
 }
 
+/// Lowers the two `exp` families: `exp.<felt>` and `exp.u<bits>`.
 fn lower_exp_family(
     context: &mut LoweringContext<'_>,
     span: SourceSpan,
@@ -1273,6 +1313,7 @@ fn lower_exp_family(
     Ok(Some(vec![inst_op(span, Instruction::ExpImm(imm))]))
 }
 
+/// Lowers `u32` immediates for instructions that keep the operand embedded in the AST opcode.
 fn lower_u32_instruction(
     context: &mut LoweringContext<'_>,
     span: SourceSpan,
@@ -1285,6 +1326,7 @@ fn lower_u32_instruction(
     Ok(Some(vec![inst_op(span, build(imm))]))
 }
 
+/// Lowers `u16` immediates for local-memory operations.
 fn lower_u16_instruction(
     context: &mut LoweringContext<'_>,
     span: SourceSpan,
@@ -1297,6 +1339,7 @@ fn lower_u16_instruction(
     Ok(Some(vec![inst_op(span, build(imm))]))
 }
 
+/// Lowers shift/rotate instructions that accept `u8` immediates.
 fn lower_shift_u32(
     context: &mut LoweringContext<'_>,
     span: SourceSpan,
@@ -1309,6 +1352,7 @@ fn lower_shift_u32(
     Ok(Some(vec![inst_op(span, build(imm))]))
 }
 
+/// Lowers foldable `u32` immediate instruction families and preserves the legacy peephole folds.
 fn lower_foldable_u32(
     context: &mut LoweringContext<'_>,
     span: SourceSpan,
@@ -1402,6 +1446,7 @@ fn lower_foldable_u32(
     Ok(Some(ops))
 }
 
+/// Lowers `adv_push.<n>`, reporting out-of-range diagnostics on the immediate token span.
 fn lower_adv_push(
     instruction_span: SourceSpan,
     immediate_span: SourceSpan,
@@ -1750,6 +1795,7 @@ fn lower_shift32_immediate(
     }
 }
 
+/// Parses a decimal `u8` literal token without accepting non-decimal spellings.
 fn lower_decimal_u8_literal(token: &SyntaxToken) -> Result<Option<u8>, ParsingError> {
     let Some(value) = lower_decimal_u64_literal(token)? else {
         return Ok(None);
@@ -1757,10 +1803,12 @@ fn lower_decimal_u8_literal(token: &SyntaxToken) -> Result<Option<u8>, ParsingEr
     Ok(u8::try_from(value).ok())
 }
 
+/// Returns the suffix subspan of a token span, used for diagnostics like `exp.u65 -> 65`.
 fn token_suffix_span(span: SourceSpan, prefix_len: u32) -> SourceSpan {
     SourceSpan::new(span.source_id(), span.start() + prefix_len..span.end())
 }
 
+/// Parses a decimal `u64` from a number token if the token is decimal-shaped.
 fn lower_decimal_u64_literal(token: &SyntaxToken) -> Result<Option<u64>, ParsingError> {
     if token.kind() != SyntaxKind::Number {
         return Ok(None);
@@ -1768,14 +1816,17 @@ fn lower_decimal_u64_literal(token: &SyntaxToken) -> Result<Option<u64>, Parsing
     Ok(parse_decimal_u64(token.text()))
 }
 
+/// Wraps an instruction in an AST op at `span`.
 fn inst_op(span: SourceSpan, instruction: Instruction) -> ast::Op {
     ast::Op::Inst(Span::new(span, instruction))
 }
 
+/// Builds a `push` op for an integer immediate.
 fn push_int_op(span: SourceSpan, imm: Immediate<crate::parser::IntValue>) -> ast::Op {
     inst_op(span, Instruction::Push(imm.map(PushValue::from)))
 }
 
+/// Builds a `push` op for a `u32` immediate or constant.
 fn push_u32_op(span: SourceSpan, imm: ast::ImmU32) -> ast::Op {
     let push = match imm {
         Immediate::Constant(name) => Immediate::Constant(name),
@@ -1784,6 +1835,7 @@ fn push_u32_op(span: SourceSpan, imm: ast::ImmU32) -> ast::Op {
     inst_op(span, Instruction::Push(push))
 }
 
+/// Builds a `push.0` op at `span`.
 fn push_zero_op(span: SourceSpan) -> ast::Op {
     inst_op(span, Instruction::Push(Immediate::Value(Span::new(span, PushValue::from(0u8)))))
 }

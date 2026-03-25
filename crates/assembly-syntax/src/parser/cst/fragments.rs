@@ -27,6 +27,7 @@ use crate::{
     parser::{BinErrorKind, HexErrorKind, IntValue, LiteralErrorKind, ParsingError, WordValue},
 };
 
+/// Lowers a CST expression fragment into the constant-expression AST.
 pub(super) fn lower_constant_expr(
     context: &mut LoweringContext<'_>,
     expr: &CstExpr,
@@ -39,6 +40,7 @@ pub(super) fn lower_constant_expr(
     Ok(expr)
 }
 
+/// Lowers the right-hand side of a `type` alias declaration.
 pub(super) fn lower_type_expr_from_alias_body(
     context: &mut LoweringContext<'_>,
     body: &CstTypeBody,
@@ -52,6 +54,7 @@ pub(super) fn lower_type_expr_from_alias_body(
     Ok(ty)
 }
 
+/// Lowers the body of an `enum` declaration into the legacy enum AST.
 pub(super) fn lower_enum_decl_from_body(
     context: &mut LoweringContext<'_>,
     visibility: ast::Visibility,
@@ -66,6 +69,7 @@ pub(super) fn lower_enum_decl_from_body(
     Ok(enum_ty)
 }
 
+/// Lowers a CST procedure signature into the legacy function-type AST.
 pub(super) fn lower_function_type_from_signature(
     context: &mut LoweringContext<'_>,
     signature: &CstSignature,
@@ -78,6 +82,7 @@ pub(super) fn lower_function_type_from_signature(
     Ok(ty)
 }
 
+/// Lowers a token that must be either a `u32` literal or a constant reference.
 pub(super) fn lower_u32_immediate_token(
     context: &mut LoweringContext<'_>,
     token: &SyntaxToken,
@@ -98,6 +103,7 @@ pub(super) fn lower_u32_immediate_token(
     }
 }
 
+/// Lowers a single attribute node using the fragment parser.
 pub(super) fn lower_attribute(
     context: &mut LoweringContext<'_>,
     attribute: &CstAttribute,
@@ -110,6 +116,7 @@ pub(super) fn lower_attribute(
     Ok(attribute)
 }
 
+/// Lowers an `adv_map` declaration fragment into the legacy advice-map entry AST.
 pub(super) fn lower_advice_map_decl(
     context: &mut LoweringContext<'_>,
     advice_map: &CstAdviceMap,
@@ -122,6 +129,7 @@ pub(super) fn lower_advice_map_decl(
     Ok(entry)
 }
 
+/// Collects the direct, non-trivia tokens under `node`.
 fn significant_tokens(node: &miden_assembly_syntax_cst::syntax::SyntaxNode) -> Vec<SyntaxToken> {
     node.children_with_tokens()
         .filter_map(|element| element.into_token())
@@ -129,6 +137,10 @@ fn significant_tokens(node: &miden_assembly_syntax_cst::syntax::SyntaxNode) -> V
         .collect()
 }
 
+/// Collects all non-trivia tokens in `node`'s subtree.
+///
+/// Some fragments nest their significant syntax under container nodes, so direct-child token
+/// collection is not sufficient.
 fn significant_tokens_recursive(
     node: &miden_assembly_syntax_cst::syntax::SyntaxNode,
 ) -> Vec<SyntaxToken> {
@@ -138,6 +150,7 @@ fn significant_tokens_recursive(
         .collect()
 }
 
+/// Small recursive-descent/Pratt parser used to re-parse fragment-local CST token streams.
 struct FragmentParser<'a, 'b> {
     context: &'a mut LoweringContext<'b>,
     tokens: Vec<SyntaxToken>,
@@ -146,6 +159,7 @@ struct FragmentParser<'a, 'b> {
 }
 
 impl<'a, 'b> FragmentParser<'a, 'b> {
+    /// Creates a fragment parser over the provided token sequence and enclosing span.
     fn new(
         context: &'a mut LoweringContext<'b>,
         tokens: Vec<SyntaxToken>,
@@ -154,6 +168,7 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
         Self { context, tokens, pos: 0, span }
     }
 
+    /// Parses a complete constant expression from the current fragment.
     fn parse_constant_expr(&mut self) -> Result<ast::ConstantExpr, ParsingError> {
         if self.is_eof() {
             return Err(self.invalid_syntax("expected a constant expression"));
@@ -264,6 +279,10 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
         }
     }
 
+    /// Parses a numeric-only constant-expression term.
+    ///
+    /// This rejects strings, words, and hash constructors so arithmetic-only contexts can reuse
+    /// the constant-expression precedence parser without permitting non-numeric operands.
     fn parse_numeric_constant_term(&mut self) -> Result<ast::ConstantExpr, ParsingError> {
         if self.at_kind(SyntaxKind::LParen) {
             self.bump();
@@ -306,6 +325,7 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
         }
     }
 
+    /// Parses `word("...")` / `event("...")` hash-like constant constructors.
     fn parse_hash_constant(&mut self) -> Result<ast::ConstantExpr, ParsingError> {
         let name = self.bump().expect("hash-like identifier should be present").text().to_string();
         let lparen = self.expect_kind(SyntaxKind::LParen, "expected `(` after hash function")?;
@@ -330,6 +350,7 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
         }
     }
 
+    /// Parses a four-element word literal of the form `[a, b, c, d]`.
     fn parse_word_literal(&mut self) -> Result<ast::ConstantExpr, ParsingError> {
         let lbracket = self.expect_kind(SyntaxKind::LBracket, "expected `[` to start word")?;
         let mut elements = [Felt::ZERO; 4];
@@ -365,6 +386,7 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
         }
     }
 
+    /// Parses any type expression supported by the legacy AST type grammar.
     fn parse_type_expr(&mut self) -> Result<ast::TypeExpr, ParsingError> {
         if (self.at_keyword("ptr")) && self.peek_kind(1) == Some(SyntaxKind::LAngle) {
             return self.parse_pointer_type().map(ast::TypeExpr::Ptr);
@@ -386,6 +408,7 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
         Ok(ast::TypeExpr::Ref(path))
     }
 
+    /// Parses a full procedure signature fragment.
     fn parse_function_type(&mut self) -> Result<ast::FunctionType, ParsingError> {
         let lparen =
             self.expect_kind(SyntaxKind::LParen, "expected `(` to start procedure signature")?;
@@ -447,6 +470,7 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
         self.parse_type_expr()
     }
 
+    /// Parses an attribute payload after the leading `@`.
     fn parse_attribute(&mut self) -> Result<ast::Attribute, ParsingError> {
         self.expect_kind(SyntaxKind::At, "expected `@` to start an attribute")?;
         let name_token = self.expect_ident("expected an attribute name")?;
@@ -533,6 +557,7 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
         }
     }
 
+    /// Parses the right-hand side of an `adv_map` declaration.
     fn parse_advice_map_decl(
         &mut self,
         span: SourceSpan,
@@ -593,6 +618,7 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
         Ok(Felt::new(value.as_int()))
     }
 
+    /// Parses an enum declaration body after the `= :repr { ... }` portion begins.
     fn parse_enum_decl(
         &mut self,
         visibility: ast::Visibility,
@@ -866,6 +892,7 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
             .map_err(|_| ParsingError::ImmediateOutOfRange { span, range: 0..(u32::MAX as usize) })
     }
 
+    /// Parses a path using the rules appropriate for `mode`.
     fn parse_path(&mut self, mode: PathMode) -> Result<Span<Arc<Path>>, ParsingError> {
         let start_pos = self.pos;
         let absolute = if self.at_kind(SyntaxKind::ColonColon) {
@@ -932,6 +959,8 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
         Ok(self.context.lower_string_text(span, raw))
     }
 
+    /// Returns the infix constant-expression operator at the current cursor, if any, together
+    /// with its binding power.
     fn current_constant_operator(&self) -> Option<(u8, ast::ConstantOp)> {
         let token = self.current()?;
         match token.kind() {
@@ -985,6 +1014,7 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
         }
     }
 
+    /// Ensures that the fragment parser consumed the entire token sequence supplied by the caller.
     fn expect_eof(&self, message: &'static str) -> Result<(), ParsingError> {
         if self.is_eof() {
             Ok(())
@@ -1132,6 +1162,7 @@ impl<'a, 'b> FragmentParser<'a, 'b> {
             .unwrap_or_else(|| SourceSpan::at(self.span.source_id(), self.span.end()))
     }
 
+    /// Constructs a generic syntax error anchored at the current cursor position.
     fn invalid_syntax(&self, message: &'static str) -> ParsingError {
         ParsingError::InvalidSyntax {
             span: self.current_span(),
@@ -1165,6 +1196,7 @@ pub(super) enum ParsedNumeric {
     Word(WordValue),
 }
 
+/// Maps a bare type name to the builtin AST type it denotes, if any.
 fn builtin_type_for_name(name: &str) -> Option<Type> {
     Some(match name {
         "word" => Type::Array(Arc::new(ast::types::ArrayType::new(Type::Felt, 4))),
@@ -1184,6 +1216,7 @@ fn builtin_type_for_name(name: &str) -> Option<Type> {
     })
 }
 
+/// Parses a numeric token into the shared `ParsedNumeric` representation used by CST lowering.
 pub(super) fn parse_numeric_token(
     span: SourceSpan,
     text: &str,
@@ -1212,6 +1245,7 @@ pub(super) fn parse_numeric_token(
     Ok(ParsedNumeric::Int(super::super::lexer::shrink_u64_hex(value)))
 }
 
+/// Parses a hexadecimal literal body after the radix prefix has been removed.
 fn parse_hex_literal(span: SourceSpan, hex_digits: &str) -> Result<ParsedNumeric, ParsingError> {
     let hex_digits = pad_hex_if_needed(hex_digits);
     match hex_digits.len() {
@@ -1270,6 +1304,7 @@ fn parse_hex_literal(span: SourceSpan, hex_digits: &str) -> Result<ParsedNumeric
     }
 }
 
+/// Pads odd-length hex strings to the byte-aligned form expected by literal decoding.
 fn pad_hex_if_needed(hex: &str) -> Cow<'_, str> {
     if hex.len().is_multiple_of(2) {
         Cow::Borrowed(hex)
@@ -1281,6 +1316,7 @@ fn pad_hex_if_needed(hex: &str) -> Cow<'_, str> {
     }
 }
 
+/// Parses the numeric argument of `@align(N)` and rejects non-integer inputs.
 fn parse_alignment_literal(text: &str, span: SourceSpan) -> Result<u64, ParsingError> {
     match parse_numeric_token(span, text)? {
         ParsedNumeric::Int(value) => Ok(value.as_int()),
@@ -1291,6 +1327,7 @@ fn parse_alignment_literal(text: &str, span: SourceSpan) -> Result<u64, ParsingE
     }
 }
 
+/// Parses a decimal `u64` without accepting MASM radix prefixes.
 pub(super) fn parse_decimal_u64(text: &str) -> Option<u64> {
     if text.starts_with("0x")
         || text.starts_with("0X")
@@ -1303,6 +1340,7 @@ pub(super) fn parse_decimal_u64(text: &str) -> Option<u64> {
     }
 }
 
+/// Converts integer parsing failures into the legacy literal error categories.
 fn literal_error_from_int_error(
     kind: &core::num::IntErrorKind,
     overflow: LiteralErrorKind,
@@ -1316,6 +1354,7 @@ fn literal_error_from_int_error(
     }
 }
 
+/// Parses a literal that must fit in `u32`, including binary forms accepted by immediate syntax.
 fn parse_u32_literal(span: SourceSpan, text: &str) -> Result<u32, ParsingError> {
     if let Some(bin_digits) = text.strip_prefix("0b").or_else(|| text.strip_prefix("0B")) {
         if bin_digits.len() > 32 {
@@ -1347,10 +1386,12 @@ fn parse_u32_literal(span: SourceSpan, text: &str) -> Result<u32, ParsingError> 
     }
 }
 
+/// Joins two spans that are known to belong to the same source file.
 fn join_spans(start: SourceSpan, end: SourceSpan) -> SourceSpan {
     SourceSpan::new(start.source_id(), start.start()..end.end())
 }
 
+/// Returns the closing delimiter text corresponding to `kind`.
 fn close_text(kind: SyntaxKind) -> &'static str {
     match kind {
         SyntaxKind::RParen => ")",
