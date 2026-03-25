@@ -39,6 +39,7 @@
 - Added chainable `Test` builders for common test setup in `miden-utils-testing` ([#2957](https://github.com/0xMiden/miden-vm/pull/2957)).
 - Speed-up AUX range check trace generation by changing divisors to a flat Vec layout ([#2966](https://github.com/0xMiden/miden-vm/pull/2966)).
 - Removed AIR constraint tagging instrumentation, applied a uniform constraint description style across components, and optimized constraint evaluation ([#2856](https://github.com/0xMiden/miden-vm/pull/2856)).
+- Switched the default parser backend for Miden Assembly to use the new lossless parser ([#2907](https://github.com/0xMiden/miden-vm/pull/2907))
 
 ## 0.22.1
 
