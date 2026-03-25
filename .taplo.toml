@@ -1,3 +1,8 @@
+exclude = [
+  # Keep Cargo alias argv order stable; reordering this file breaks `cargo xclippy`.
+  ".cargo/config.toml",
+]
+
 [formatting]
 align_entries         = true
 column_width          = 120
