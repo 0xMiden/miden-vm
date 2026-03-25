@@ -963,6 +963,12 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
+
+[[package]]
+name = "hashbrown"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f467dd6dccf739c208452f8014c75c18bb8301b050ad1cfb27153803edb0f51"
@@ -1670,11 +1676,11 @@ dependencies = [
 
 [[package]]
 name = "miden-rowan"
-version = "0.16.2"
+version = "0.16.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cee457127cc63e09c23b48f48131593bce7d4afac889862fce4e8d580313003e"
+checksum = "2aaf2ec18c4b049c917bc718072496f0c94fcb54c215fb296bd2308f7835d36e"
 dependencies = [
- "hashbrown 0.15.5",
+ "hashbrown 0.16.1",
  "rustc-hash",
 ]
 
