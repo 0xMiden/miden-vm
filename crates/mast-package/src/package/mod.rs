@@ -68,8 +68,9 @@ impl Package {
     ///
     /// This is distinct from [`Self::digest`], which is only the digest of the underlying MAST
     /// artifact. The content digest currently binds the MAST digest, package name, semantic
-    /// version, package kind, and manifest. Package descriptions and opaque custom sections are
-    /// intentionally excluded for now; kernel-section binding is added separately.
+    /// version, package kind, manifest, and any semantic package sections. Package descriptions
+    /// and opaque custom sections are intentionally excluded for now; kernel-section binding is
+    /// added separately.
     pub fn content_digest(&self) -> Word {
         let mut bytes = Vec::new();
         self.write_content_digest_preimage(&mut bytes, None);
@@ -87,9 +88,22 @@ impl Package {
         self.version.as_ref().map(|v| v.to_string()).write_into(target);
         target.write_u8(self.kind.into());
         self.manifest.write_into(target);
+        self.write_content_digest_sections(target);
         target.write_bool(kernel_digest.is_some());
         if let Some(kernel_digest) = kernel_digest {
             kernel_digest.write_into(target);
+        }
+    }
+
+    fn write_content_digest_sections<W: ByteWriter>(&self, target: &mut W) {
+        let semantic_sections = self
+            .sections
+            .iter()
+            .filter(|section| section.id == SectionId::ACCOUNT_COMPONENT_METADATA)
+            .collect::<Vec<_>>();
+        target.write_usize(semantic_sections.len());
+        for section in semantic_sections {
+            section.write_into(target);
         }
     }
 

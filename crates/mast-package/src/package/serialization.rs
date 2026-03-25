@@ -556,7 +556,25 @@ mod tests {
     }
 
     #[test]
-    fn package_content_digest_ignores_description_and_custom_sections_for_now() {
+    fn package_content_digest_changes_when_account_component_metadata_changes() {
+        let package = build_package();
+        let digest = package.content_digest();
+
+        let with_metadata = Package {
+            sections: vec![Section::new(SectionId::ACCOUNT_COMPONENT_METADATA, vec![1, 2, 3, 4])],
+            ..package.clone()
+        };
+        assert_ne!(digest, with_metadata.content_digest());
+
+        let with_different_metadata = Package {
+            sections: vec![Section::new(SectionId::ACCOUNT_COMPONENT_METADATA, vec![4, 3, 2, 1])],
+            ..package
+        };
+        assert_ne!(with_metadata.content_digest(), with_different_metadata.content_digest());
+    }
+
+    #[test]
+    fn package_content_digest_ignores_description_and_opaque_custom_sections_for_now() {
         let package = build_package();
         let digest = package.content_digest();
 
