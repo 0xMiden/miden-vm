@@ -176,6 +176,27 @@ impl CallGraph {
         graph
     }
 
+    /// Computes the set of nodes in this graph which can reach `root`.
+    fn reverse_reachable(&self, root: GlobalItemIndex) -> BTreeSet<GlobalItemIndex> {
+        let mut worklist = VecDeque::from_iter([root]);
+        let mut visited = BTreeSet::default();
+
+        while let Some(gid) = worklist.pop_front() {
+            if !visited.insert(gid) {
+                continue;
+            }
+
+            worklist.extend(
+                self.nodes
+                    .iter()
+                    .filter(|(_, out_edges)| out_edges.contains(&gid))
+                    .map(|(pred, _)| *pred),
+            );
+        }
+
+        visited
+    }
+
     /// Constructs the topological ordering of nodes in the call graph, for which `caller` is an
     /// ancestor.
     ///
@@ -188,16 +209,16 @@ impl CallGraph {
         let mut output = Vec::with_capacity(self.nodes.len());
 
         // Build a subgraph of `self` containing only those nodes reachable from `caller`
-        let mut graph = self.subgraph(caller);
+        let caller_subgraph = self.subgraph(caller);
+        let mut graph = caller_subgraph.clone();
 
-        // Check if any node in the subgraph has an edge back to caller before we erase them
-        let has_edge_to_caller = graph.nodes.values().any(|edges| edges.contains(&caller));
-        let caller_predecessors: BTreeSet<GlobalItemIndex> = graph
+        // Preserve the full set of nodes participating in cycles that close back into `caller`
+        // before we erase those back-edges to seed the traversal from `caller`.
+        let caller_cycle = caller_subgraph
             .nodes
-            .iter()
-            .filter(|(_, edges)| edges.contains(&caller))
-            .map(|(n, _)| *n)
-            .collect();
+            .values()
+            .any(|edges| edges.contains(&caller))
+            .then(|| caller_subgraph.reverse_reachable(caller));
 
         // Remove all predecessor edges to `caller`
         graph.nodes.iter_mut().for_each(|(_pred, out_edges)| {
@@ -218,7 +239,7 @@ impl CallGraph {
             }
         }
 
-        let has_cycle = output.len() != graph.nodes.len() || has_edge_to_caller;
+        let has_cycle = output.len() != graph.nodes.len() || caller_cycle.is_some();
         if has_cycle {
             let mut in_cycle = BTreeSet::default();
             for (n, edges) in graph.nodes.iter() {
@@ -228,9 +249,8 @@ impl CallGraph {
                 in_cycle.insert(*n);
                 in_cycle.extend(edges.as_slice());
             }
-            if has_edge_to_caller {
-                in_cycle.insert(caller);
-                in_cycle.extend(caller_predecessors.iter());
+            if let Some(caller_cycle) = caller_cycle {
+                in_cycle.extend(caller_cycle);
             }
             Err(CycleError(in_cycle))
         } else {
@@ -343,13 +363,7 @@ mod tests {
         let err = graph
             .toposort_caller(A1)
             .expect_err("expected toposort_caller to fail when a reachable cycle exists");
-        assert!(
-            err.0.contains(&A2)
-                || err.0.contains(&B2)
-                || err.0.contains(&B3)
-                || err.0.contains(&A3),
-            "expected cycle error to contain at least one node from the reachable cycle",
-        );
+        assert_eq!(err.0.into_iter().collect::<Vec<_>>(), &[A2, A3, B2, B3]);
     }
 
     #[test]
@@ -359,13 +373,7 @@ mod tests {
         let err = graph
             .toposort_caller(A2)
             .expect_err("expected toposort_caller to detect cycle closing back into root");
-        assert!(
-            err.0.contains(&A2)
-                || err.0.contains(&B2)
-                || err.0.contains(&B3)
-                || err.0.contains(&A3),
-            "expected cycle error to contain at least one node from the root-closing cycle",
-        );
+        assert_eq!(err.0.into_iter().collect::<Vec<_>>(), &[A2, A3, B2, B3]);
     }
     /// a::a1 -> a::a2 -> a::a3
     ///            |        ^
