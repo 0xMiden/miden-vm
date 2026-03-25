@@ -5,11 +5,21 @@ mod section;
 mod seed_gen;
 mod serialization;
 
-use alloc::{format, string::String, sync::Arc, vec::Vec};
+use alloc::{
+    format,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 
 use miden_assembly_syntax::{Library, Report, ast::QualifiedProcedureName};
 pub use miden_assembly_syntax::{Version, VersionError};
-use miden_core::{Word, program::Program};
+use miden_core::{
+    Word,
+    crypto::hash::Poseidon2,
+    program::Program,
+    serde::{ByteWriter, Serializable},
+};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -52,6 +62,35 @@ impl Package {
     /// Returns the digest of the package's MAST artifact
     pub fn digest(&self) -> Word {
         self.mast.digest()
+    }
+
+    /// Returns a digest of the package content relevant to assembly and dependency resolution.
+    ///
+    /// This is distinct from [`Self::digest`], which is only the digest of the underlying MAST
+    /// artifact. The content digest currently binds the MAST digest, package name, semantic
+    /// version, package kind, and manifest. Package descriptions and opaque custom sections are
+    /// intentionally excluded for now; kernel-section binding is added separately.
+    pub fn content_digest(&self) -> Word {
+        let mut bytes = Vec::new();
+        self.write_content_digest_preimage(&mut bytes, None);
+        Poseidon2::hash(&bytes)
+    }
+
+    fn write_content_digest_preimage<W: ByteWriter>(
+        &self,
+        target: &mut W,
+        kernel_digest: Option<&Word>,
+    ) {
+        target.write_bytes(b"miden.package.content.v1");
+        self.digest().write_into(target);
+        self.name.write_into(target);
+        self.version.as_ref().map(|v| v.to_string()).write_into(target);
+        target.write_u8(self.kind.into());
+        self.manifest.write_into(target);
+        target.write_bool(kernel_digest.is_some());
+        if let Some(kernel_digest) = kernel_digest {
+            kernel_digest.write_into(target);
+        }
     }
 
     /// Returns the MastArtifact of the package
