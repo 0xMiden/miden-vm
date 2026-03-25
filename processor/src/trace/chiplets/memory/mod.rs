@@ -82,13 +82,14 @@ const INIT_MEM_VALUE: Word = EMPTY_WORD;
 ///   - When the context remains the same but the word changes, these columns contain (`new_word`
 ///     - `old_word`).
 ///   - When both the context and the word remain the same, these columns contain (`new_clk` -
-///     `old_clk` - 1).
+///     `old_clk`).
 /// - `d_inv` contains the inverse of the delta between two consecutive context IDs, words, or clock
 ///   cycles computed as described above. It is the field inverse of `(d_1 * 2^16) + d_0`
 /// - `f_scw` is a flag indicating whether the context and the word of the current row are the same
-///   as in the next row.
+///   as in the previous row.
 ///
-/// For the first row of the trace, values in `d0`, `d1`, and `d_inv` are set to zeros.
+/// For the first row of the trace, `prev_clk` is initialized to `first_clk - 1`, so `d0`,
+/// `d1`, and `d_inv` reflect the delta against that value rather than being forced to zero.
 #[derive(Debug, Default)]
 pub struct Memory {
     /// Memory segment traces sorted by their execution context ID.
@@ -248,8 +249,9 @@ impl Memory {
     /// [RangeChecker] chiplet instance, along with their row in the finalized execution trace.
     pub fn append_range_checks(&self, memory_start_row: RowIndex, range: &mut RangeChecker) {
         // set the previous address and clock cycle to the first address and clock cycle of the
-        // trace; we also adjust the clock cycle so that delta value for the first row would end
-        // up being ZERO. if the trace is empty, return without any further processing.
+        // trace; we also adjust the clock cycle to be one less than the first row's clock so the
+        // first-row delta is computed against the immediately preceding clock. if the trace is
+        // empty, return without any further processing.
         let (mut prev_ctx, mut prev_addr, mut prev_clk) = match self.get_first_row_info() {
             Some((ctx, addr, clk)) => (ctx, addr, clk.as_canonical_u64() - 1),
             None => return,
@@ -291,9 +293,10 @@ impl Memory {
     pub fn fill_trace(self, trace: &mut TraceFragment) {
         debug_assert_eq!(self.trace_len(), trace.len(), "inconsistent trace lengths");
 
-        // set the pervious address and clock cycle to the first address and clock cycle of the
-        // trace; we also adjust the clock cycle so that delta value for the first row would end
-        // up being ZERO. if the trace is empty, return without any further processing.
+        // set the previous address and clock cycle to the first address and clock cycle of the
+        // trace; we also adjust the clock cycle to be one less than the first row's clock so the
+        // first-row delta is computed against the immediately preceding clock. if the trace is
+        // empty, return without any further processing.
         let (mut prev_ctx, mut prev_addr, mut prev_clk) = match self.get_first_row_info() {
             Some((ctx, addr, clk)) => (Felt::from(ctx), Felt::from_u32(addr), clk - ONE),
             None => return,
