@@ -572,7 +572,7 @@ impl<B: Backend> LargeSmtForest<B> {
     /// # Errors
     ///
     /// - [`LargeSmtForestError::Fatal`] if the backend fails to operate properly during the query.
-    /// - [`LargeSmtForestError::UnknownLineage`] If the provided `tree` specifies a lineage that is
+    /// - [`LargeSmtForestError::UnknownLineage`] if the provided `tree` specifies a lineage that is
     ///   not one known by the forest.
     /// - [`LargeSmtForestError::UnknownTree`] if the provided `tree` refers to a tree that is not a
     ///   member of the forest.
@@ -616,8 +616,8 @@ impl<B: Backend> LargeSmtForest<B> {
 
         // We compute the new leaf and new path by applying any reversions from the history on
         // top of the current state.
-        let new_leaf = self.merge_leaves(opening.leaf(), view)?;
-        let new_path = self.merge_paths(leaf_index, opening.path(), view)?;
+        let new_leaf = Self::merge_leaves(opening.leaf(), view)?;
+        let new_path = Self::merge_paths(leaf_index, opening.path(), view)?;
 
         // Finally we can compose our combined opening.
         Ok(SmtProof::new(new_path, new_leaf)?)
@@ -921,6 +921,61 @@ impl<B: Backend> LargeSmtForest<B> {
 /// Where anything more specific can be said about performance, the method documentation will
 /// contain more detail.
 impl<B: Backend> LargeSmtForest<B> {
+    /// Adds multiple new `lineages` to the tree, creating an empty tree for each and applying the
+    /// provided modifications to it, with the result being given the specified `version`.
+    ///
+    /// If the provide batch of modifications is empty for any given lineage, then the **empty tree
+    /// will be added** as the first version in that lineage.
+    ///
+    /// # Performance
+    ///
+    /// This method is intended to be a reliable choice if the caller needs to add more than one
+    /// new lineage at once. At _worst_, its performance should be no slower than repeating
+    /// [`Self::add_lineage`] in a loop, but in some cases it may be significantly more performant.
+    ///
+    /// The exact scope of any speed-up is determined by the backend in use, so it is worth reading
+    /// the documentation for the Backend's `add_lineages` method.
+    ///
+    /// # Errors
+    ///
+    /// - [`LargeSmtForestError::DuplicateLineage`] if any of the provided lineages share an ID with
+    ///   an already-known lineage.
+    /// - [`LargeSmtForestError::Fatal`] if the backend fails while being accessed.
+    /// - [`BackendError::Merkle`] if the provided `updates` cannot be applied to the empty tree.
+    pub fn add_lineages(
+        &mut self,
+        version: VersionId,
+        lineages: SmtForestUpdateBatch,
+    ) -> Result<Vec<TreeWithRoot>> {
+        // We start by performing our precondition checks: none of the lineages in the batch should
+        // already exist in the forest.
+        for lineage in lineages.lineages() {
+            if self.lineage_data.contains_key(lineage) {
+                return Err(LargeSmtForestError::DuplicateLineage(*lineage));
+            }
+        }
+
+        // With the preconditions checked we can call into the backend to perform the additions, and
+        // we forward all errors as this will be correct for conformant backend implementations.
+        let results = self.backend.add_lineages(version, lineages)?;
+
+        // Now we have to update the lineage data for each newly-added lineage. New lineages have
+        // empty histories, so we do not need to insert into `non_empty_histories`.
+        results
+            .into_iter()
+            .map(|(lineage, tree_info)| {
+                let lineage_data = LineageData {
+                    history: History::empty(self.config.max_history_versions()),
+                    latest_version: tree_info.version(),
+                    latest_root: tree_info.root(),
+                };
+                self.lineage_data.insert(lineage, lineage_data);
+
+                Ok(tree_info)
+            })
+            .collect()
+    }
+
     /// Performs the provided `updates` on the forest, adding at most one new root with version
     /// `new_version` to the forest for each target root in `updates` and returning a mapping
     /// from old root to the new root data.
@@ -1023,7 +1078,11 @@ impl<B: Backend> LargeSmtForest<B> {
 impl<B: Backend> LargeSmtForest<B> {
     /// Applies the history delta given by `history_view` on top of the provided `full_tree_leaf` to
     /// produce the correct leaf for a historical opening.
-    fn merge_leaves(&self, full_tree_leaf: &SmtLeaf, history_view: HistoryView) -> Result<SmtLeaf> {
+    ///
+    /// # Errors
+    ///
+    /// - [`LargeSmtForestError::SmtLeafError`] if the combined leaf cannot be computed correctly
+    fn merge_leaves(full_tree_leaf: &SmtLeaf, history_view: HistoryView) -> Result<SmtLeaf> {
         // We apply the historical delta on top of the existing entries to perform the reversion
         // back to the previous state.
         let mut leaf_entries = Map::new();
@@ -1051,14 +1110,21 @@ impl<B: Backend> LargeSmtForest<B> {
             "Leaf entries should not contain entries with empty values"
         );
 
-        // Any entries that are still empty at this point should be removed.
-        Ok(SmtLeaf::new(leaf_entries.into_iter().collect(), full_tree_leaf.index())?)
+        // We sort the entries to ensure a consistent ordering, as the map above is a HashMap
+        // which does not guarantee iteration order.
+        let mut entries: Vec<_> = leaf_entries.into_iter().collect();
+        entries.sort_unstable_by(|(k1, _), (k2, _)| k1.cmp(k2));
+
+        Ok(SmtLeaf::new(entries, full_tree_leaf.index())?)
     }
 
     /// Applies any historical changes contained in `history_view` on top of the merkle path
     /// obtained from the full tree to produce the correct path for a historical opening.
+    ///
+    /// # Errors
+    ///
+    /// - [`LargeSmtForestError::Merkle`] if the merkle path cannot be created properly.
     fn merge_paths(
-        &self,
         leaf_index: LeafIndex<SMT_DEPTH>,
         full_tree_path: &SparseMerklePath,
         history_view: HistoryView,

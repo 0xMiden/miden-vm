@@ -173,6 +173,22 @@ where
     // MULTI-TREE MODIFIERS
     // ============================================================================================
 
+    /// Adds multiple new `lineages` to the backend with the provided `version` and sets the
+    /// associated SMTs to have the value created by applying the provided updates to the empty
+    /// tree, returning the new root of that tree.
+    ///
+    /// # Expected Behavior
+    ///
+    /// Implementations must guarantee the following behavior in addition to the global invariants:
+    ///
+    /// - If any provided lineage conflicts with an already-existing lineage in the backend, it must
+    ///   return [`BackendError::DuplicateLineage`].
+    fn add_lineages(
+        &mut self,
+        version: VersionId,
+        lineages: SmtForestUpdateBatch,
+    ) -> Result<Vec<(LineageId, TreeWithRoot)>>;
+
     /// Performs the provided `updates` on the forest, setting all new tree states to have the
     /// provided `new_version` and returning a vector of the mutation sets that reverse the changes
     /// to each changed tree.

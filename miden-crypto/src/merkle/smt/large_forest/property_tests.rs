@@ -22,6 +22,9 @@ use crate::{
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(10))]
 
+    // ENTRIES
+    // ============================================================================================
+
     /// This test ensures that the `entries` iterator for the forest always returns the exact same
     /// values as the `entries` iterator over a basic SMT with the same state.
     #[test]
@@ -126,5 +129,64 @@ proptest! {
             .collect::<Result<Vec<_>, _>>()
             .map_err(to_fail)?;
         prop_assert!(entries.iter().all(|e| e.value != EMPTY_WORD), "EMPTY_WORD entry encountered");
+    }
+
+    // ADD LINEAGES
+    // ============================================================================================
+
+    /// This test ensures that `add_lineages` produces the same results as adding each lineage
+    /// individually via `add_lineage`.
+    #[test]
+    fn add_lineages_matches_repeated_add_lineage(
+        lineages in prop::collection::vec(arbitrary_lineage(), 0..10)
+            .prop_map(|v| v.into_iter().unique().collect::<Vec<_>>()),
+        version in arbitrary_version(),
+        entries in prop::collection::vec(arbitrary_batch(), 0..10),
+    ) {
+        // Build a forest update batch containing all lineages with their respective entries.
+        let mut batch = crate::merkle::smt::SmtForestUpdateBatch::empty();
+        for (i, lineage) in lineages.iter().enumerate() {
+            if let Some(entry_batch) = entries.get(i) {
+                *batch.operations(*lineage) = entry_batch.clone();
+            } else {
+                batch.operations(*lineage);
+            }
+        }
+
+        // Add all lineages at once via add_lineages.
+        let mut forest_batch = LargeSmtForest::new(ForestInMemoryBackend::new()).map_err(to_fail)?;
+        let batch_results = forest_batch.add_lineages(version, batch).map_err(to_fail)?;
+
+        // Add each lineage individually via add_lineage.
+        let mut forest_individual = LargeSmtForest::new(ForestInMemoryBackend::new()).map_err(to_fail)?;
+        let mut individual_results = Vec::new();
+        for (i, lineage) in lineages.iter().enumerate() {
+            let entry_batch = entries.get(i).cloned().unwrap_or_default();
+            let result = forest_individual.add_lineage(*lineage, version, entry_batch).map_err(to_fail)?;
+            individual_results.push(result);
+        }
+
+        // Both should yield the same number of results.
+        prop_assert_eq!(batch_results.len(), individual_results.len());
+
+        // For each lineage, verify the roots match and get returns the same values.
+        for (i, lineage) in lineages.iter().enumerate() {
+            let batch_root = batch_results.iter().find(|r| r.lineage() == *lineage);
+            let individual_root = &individual_results[i];
+
+            let batch_root = batch_root.unwrap();
+            prop_assert_eq!(batch_root.root(), individual_root.root());
+            prop_assert_eq!(batch_root.version(), individual_root.version());
+
+            // Verify get returns the same values for all keys in the entries.
+            let tree = TreeId::new(*lineage, version);
+            if let Some(entry_batch) = entries.get(i) {
+                for op in entry_batch.clone().into_iter() {
+                    let batch_val = forest_batch.get(tree, op.key()).map_err(to_fail)?;
+                    let individual_val = forest_individual.get(tree, op.key()).map_err(to_fail)?;
+                    prop_assert_eq!(batch_val, individual_val);
+                }
+            }
+        }
     }
 }

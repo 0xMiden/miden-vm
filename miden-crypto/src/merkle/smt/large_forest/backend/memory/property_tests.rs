@@ -264,6 +264,46 @@ proptest! {
     }
 
     #[test]
+    fn add_lineages_correct(
+        lineages in prop::collection::vec(arbitrary_lineage(), 0..30),
+        version in arbitrary_version(),
+        entries in prop::collection::vec(arbitrary_batch(), 0..30),
+    ) {
+        let mut backend = InMemoryBackend::new();
+        let pairs = lineages.into_iter().unique().zip(entries).collect_vec();
+        let mut batch = SmtForestUpdateBatch::empty();
+        for (lineage, entries) in &pairs {
+            *batch.operations(*lineage) = entries.clone();
+        }
+
+        // Add all lineages in one call.
+        let results = backend.add_lineages(version, batch).map_err(to_fail)?;
+
+        // Verify each result against a reference tree.
+        for (lineage, entries) in &pairs {
+            let mut tree = Smt::new();
+            let tree_mutations =
+                tree.compute_mutations(Vec::from(entries.clone()).into_iter()).map_err(to_fail)?;
+            tree.apply_mutations(tree_mutations).map_err(to_fail)?;
+
+            let (_, result) = results.iter().find(|(l, _)| l == lineage).unwrap();
+            prop_assert_eq!(result.root(), tree.root());
+            prop_assert_eq!(result.version(), version);
+            prop_assert_eq!(result.lineage(), *lineage);
+
+            // Verify cross-lineage gets.
+            for op in entries.clone().into_iter() {
+                let (key, value) = op.into();
+                let backend_value = backend.get(*lineage, key).map_err(to_fail)?;
+                let expected = if value == EMPTY_WORD { None } else { Some(value) };
+                prop_assert_eq!(backend_value, expected);
+            }
+        }
+
+        prop_assert_eq!(backend.lineages().map_err(to_fail)?.count(), pairs.len());
+    }
+
+    #[test]
     fn update_lineage_correct(
         lineage_1 in arbitrary_lineage(),
         lineage_2 in arbitrary_lineage(),

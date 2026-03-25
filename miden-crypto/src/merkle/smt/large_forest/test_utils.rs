@@ -201,6 +201,14 @@ impl Backend for FallibleEntriesBackend {
         self.inner.update_tree(lineage, new_version, updates)
     }
 
+    fn add_lineages(
+        &mut self,
+        version: VersionId,
+        lineages: SmtForestUpdateBatch,
+    ) -> BackendResult<Vec<(LineageId, TreeWithRoot)>> {
+        self.inner.add_lineages(version, lineages)
+    }
+
     fn update_forest(
         &mut self,
         new_version: VersionId,

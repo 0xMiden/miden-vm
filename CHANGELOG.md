@@ -2,6 +2,7 @@
 
 - [BREAKING] Removed `AlgebraicSponge::merge_with_int()` method ([#894](https://github.com/0xMiden/crypto/pull/894)).
 - Added the ability to configure the sync-to-disk behavior of the persistent backend using its config ([#912](https://github.com/0xMiden/crypto/pull/912)).
+- Adds `LargeSmtForest::add_lineages` which provides an efficient means of adding multiple new lineages at once ([#910](https://github.com/0xMiden/crypto/pull/910)).
 
 ## 0.23.0 (2026-03-11)
 

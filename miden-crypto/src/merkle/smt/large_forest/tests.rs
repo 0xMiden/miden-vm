@@ -1052,6 +1052,97 @@ fn update_tree() -> Result<()> {
 // ================================================================================================
 
 #[test]
+fn add_lineages() -> Result<()> {
+    let backend = ForestInMemoryBackend::new();
+    let mut forest = Forest::new(backend)?;
+    let mut rng = ContinuousRng::new([0xa1; 32]);
+
+    // An empty batch should return an empty result and leave the forest unchanged.
+    let version: VersionId = rng.value();
+    let empty_batch = SmtForestUpdateBatch::empty();
+    let results = forest.add_lineages(version, empty_batch)?;
+    assert!(results.is_empty());
+
+    // We can add multiple distinct lineages at once, each with their own data.
+    let lineage_1: LineageId = rng.value();
+    let lineage_2: LineageId = rng.value();
+    let lineage_3: LineageId = rng.value();
+
+    let l1_key: Word = rng.value();
+    let l1_value: Word = rng.value();
+    let l2_key: Word = rng.value();
+    let l2_value: Word = rng.value();
+
+    let mut batch = SmtForestUpdateBatch::empty();
+    batch.operations(lineage_1).add_insert(l1_key, l1_value);
+    batch.operations(lineage_2).add_insert(l2_key, l2_value);
+    batch.operations(lineage_3); // empty lineage — should still be added
+
+    let results = forest.add_lineages(version, batch)?;
+    assert_eq!(results.len(), 3);
+
+    // Verify roots match reference Smt trees.
+    let mut tree_1 = Smt::new();
+    tree_1.insert(l1_key, l1_value)?;
+    let mut tree_2 = Smt::new();
+    tree_2.insert(l2_key, l2_value)?;
+    let tree_3 = Smt::new();
+
+    assert!(
+        results.iter().any(|r| r.lineage() == lineage_1
+            && r.root() == tree_1.root()
+            && r.version() == version)
+    );
+    assert!(
+        results.iter().any(|r| r.lineage() == lineage_2
+            && r.root() == tree_2.root()
+            && r.version() == version)
+    );
+    assert!(
+        results.iter().any(|r| r.lineage() == lineage_3
+            && r.root() == tree_3.root()
+            && r.version() == version)
+    );
+
+    // Verify lineage_data is populated via root_info.
+    assert_eq!(
+        forest.root_info(TreeId::new(lineage_1, version)),
+        RootInfo::LatestVersion(tree_1.root())
+    );
+    assert_eq!(
+        forest.root_info(TreeId::new(lineage_2, version)),
+        RootInfo::LatestVersion(tree_2.root())
+    );
+    assert_eq!(
+        forest.root_info(TreeId::new(lineage_3, version)),
+        RootInfo::LatestVersion(tree_3.root())
+    );
+
+    // New lineages should have empty histories.
+    assert!(!forest.get_non_empty_histories().contains(&lineage_1));
+    assert!(!forest.get_non_empty_histories().contains(&lineage_2));
+    assert!(!forest.get_non_empty_histories().contains(&lineage_3));
+
+    // Adding a batch that contains an already-known lineage should fail with DuplicateLineage.
+    let lineage_4: LineageId = rng.value();
+    let mut dup_batch = SmtForestUpdateBatch::empty();
+    dup_batch.operations(lineage_1); // already exists
+    dup_batch.operations(lineage_4); // new
+
+    let result = forest.add_lineages(version, dup_batch);
+    assert!(result.is_err());
+    assert_matches!(
+        result.unwrap_err(),
+        LargeSmtForestError::DuplicateLineage(l) if l == lineage_1
+    );
+
+    // The failed batch should not have added lineage_4.
+    assert_eq!(forest.root_info(TreeId::new(lineage_4, version)), RootInfo::Missing);
+
+    Ok(())
+}
+
+#[test]
 fn update_forest() -> Result<()> {
     let backend = ForestInMemoryBackend::new();
     let mut forest = Forest::new(backend)?;

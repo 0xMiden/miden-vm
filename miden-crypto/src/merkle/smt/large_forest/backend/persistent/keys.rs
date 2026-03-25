@@ -12,7 +12,7 @@ use crate::merkle::{NodeIndex, smt::LineageId};
 // ================================================================================================
 
 /// A key that uniquely identifies a leaf in the database.
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Deserialize, Serialize)]
 pub struct LeafKey {
     /// The lineage (and hence tree) to which the leaf belongs.
     pub lineage: LineageId,
@@ -45,7 +45,7 @@ impl Deserializable for LeafKey {
 // ================================================================================================
 
 /// A key that uniquely identifies a subtree in the database.
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq, Deserialize, Serialize)]
 pub struct SubtreeKey {
     /// The lineage (and hence tree) to which the subtree belongs.
     pub lineage: LineageId,
