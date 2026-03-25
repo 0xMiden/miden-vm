@@ -82,7 +82,7 @@ impl Package {
         target: &mut W,
         kernel_digest: Option<&Word>,
     ) {
-        target.write_bytes(b"miden.package.content.v1");
+        target.write_bytes(b"miden.package.content.v2");
         self.digest().write_into(target);
         self.name.write_into(target);
         self.version.as_ref().map(|v| v.to_string()).write_into(target);
