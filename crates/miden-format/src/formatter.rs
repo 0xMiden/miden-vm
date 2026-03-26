@@ -26,6 +26,7 @@ pub fn format_syntax(root: &SyntaxNode) -> String {
             append_inline_comment(&mut rendered, &comment);
         }
         extend_lines(&mut lines, &rendered);
+        emit_trailing_comments(&mut lines, &entry.trailing_comments, 0);
     }
 
     emit_tail_layout(&mut lines, tail, 0);
@@ -39,6 +40,7 @@ struct NodeLayout {
     blank_lines_before: usize,
     leading_comments: Vec<String>,
     trailing_comment: Option<String>,
+    trailing_comments: Vec<String>,
 }
 
 #[derive(Debug, Default)]
@@ -50,8 +52,10 @@ struct ContainerTail {
 #[derive(Debug, Clone, Copy)]
 enum IntersticeState {
     SameLineAfterNode,
+    StartOfLineAfterNode,
     StartOfLine,
-    AfterContent,
+    AfterLeadingComment,
+    AfterTrailingComment,
 }
 
 #[derive(Debug)]
@@ -61,6 +65,7 @@ struct Interstice {
     blank_lines: usize,
     leading_comments: Vec<String>,
     trailing_comment: Option<String>,
+    trailing_comments: Vec<String>,
 }
 
 impl Interstice {
@@ -71,6 +76,7 @@ impl Interstice {
             blank_lines: 0,
             leading_comments: Vec::new(),
             trailing_comment: None,
+            trailing_comments: Vec::new(),
         }
     }
 
@@ -81,6 +87,7 @@ impl Interstice {
             blank_lines: 0,
             leading_comments: Vec::new(),
             trailing_comment: None,
+            trailing_comments: Vec::new(),
         }
     }
 
@@ -90,28 +97,41 @@ impl Interstice {
             SyntaxKind::Newline => match self.state {
                 IntersticeState::SameLineAfterNode => {
                     self.same_line_with_prev = false;
+                    self.state = IntersticeState::StartOfLineAfterNode;
+                },
+                IntersticeState::StartOfLineAfterNode => {
+                    self.same_line_with_prev = false;
+                    self.blank_lines += 1;
                     self.state = IntersticeState::StartOfLine;
                 },
                 IntersticeState::StartOfLine => {
                     self.same_line_with_prev = false;
                     self.blank_lines += 1;
                 },
-                IntersticeState::AfterContent => {
+                IntersticeState::AfterLeadingComment => {
                     self.state = IntersticeState::StartOfLine;
+                },
+                IntersticeState::AfterTrailingComment => {
+                    self.state = IntersticeState::StartOfLineAfterNode;
                 },
             },
             SyntaxKind::Comment | SyntaxKind::DocComment => match self.state {
                 IntersticeState::SameLineAfterNode => {
                     self.same_line_with_prev = false;
                     self.trailing_comment = Some(trimmed_comment(token));
-                    self.state = IntersticeState::AfterContent;
+                    self.state = IntersticeState::AfterTrailingComment;
+                },
+                IntersticeState::StartOfLineAfterNode => {
+                    self.same_line_with_prev = false;
+                    self.trailing_comments.push(trimmed_comment(token));
+                    self.state = IntersticeState::AfterTrailingComment;
                 },
                 IntersticeState::StartOfLine => {
                     self.same_line_with_prev = false;
                     self.leading_comments.push(trimmed_comment(token));
-                    self.state = IntersticeState::AfterContent;
+                    self.state = IntersticeState::AfterLeadingComment;
                 },
-                IntersticeState::AfterContent => (),
+                IntersticeState::AfterLeadingComment | IntersticeState::AfterTrailingComment => (),
             },
             _ => (),
         }
@@ -127,6 +147,7 @@ fn analyze_children(parent: &SyntaxNode) -> (Vec<NodeLayout>, ContainerTail) {
             NodeOrToken::Node(node) => {
                 if let Some(previous) = entries.last_mut() {
                     previous.trailing_comment = interstice.trailing_comment.take();
+                    previous.trailing_comments = mem::take(&mut interstice.trailing_comments);
                 }
 
                 entries.push(NodeLayout {
@@ -135,6 +156,7 @@ fn analyze_children(parent: &SyntaxNode) -> (Vec<NodeLayout>, ContainerTail) {
                     blank_lines_before: interstice.blank_lines.min(1),
                     leading_comments: mem::take(&mut interstice.leading_comments),
                     trailing_comment: None,
+                    trailing_comments: Vec::new(),
                 });
                 interstice = Interstice::after_node();
             },
@@ -144,6 +166,7 @@ fn analyze_children(parent: &SyntaxNode) -> (Vec<NodeLayout>, ContainerTail) {
 
     if let Some(previous) = entries.last_mut() {
         previous.trailing_comment = interstice.trailing_comment.take();
+        previous.trailing_comments = mem::take(&mut interstice.trailing_comments);
     }
 
     (
@@ -393,6 +416,16 @@ fn render_procedure(procedure: &Procedure, indent: usize) -> String {
         append_inline_comment(last_line, &comment);
     }
 
+    let body_comments =
+        standalone_comments_before_child_of_kind(procedure.syntax(), SyntaxKind::Block, 0);
+    if !body_comments.is_empty() {
+        lines.extend(
+            body_comments
+                .into_iter()
+                .map(|comment| format!("{}{}", indent_string(indent + INDENT_WIDTH), comment)),
+        );
+    }
+
     if let Some(block) = procedure.block() {
         let body = render_block(&block, indent + INDENT_WIDTH);
         if !body.is_empty() {
@@ -568,6 +601,11 @@ fn render_block(block: &Block, indent: usize) -> String {
                 }
                 extend_lines(&mut lines, &rendered);
             },
+        }
+
+        if !entry.trailing_comments.is_empty() {
+            flush_instruction_line(&mut lines, &mut current_instruction_line);
+            emit_trailing_comments(&mut lines, &entry.trailing_comments, indent);
         }
     }
 
@@ -1256,6 +1294,7 @@ fn comment_before_child_of_kind(
     occurrence: usize,
 ) -> Option<String> {
     let mut comments = None;
+    let mut comment_on_same_line = false;
     let mut seen = 0usize;
 
     for element in node.children_with_tokens() {
@@ -1263,23 +1302,82 @@ fn comment_before_child_of_kind(
             NodeOrToken::Node(child) => {
                 if child.kind() == child_kind {
                     if seen == occurrence {
-                        return comments;
+                        return comment_on_same_line.then_some(comments).flatten();
                     }
                     seen += 1;
                 }
                 comments = None;
+                comment_on_same_line = false;
             },
             NodeOrToken::Token(token) => match token.kind() {
                 SyntaxKind::Comment | SyntaxKind::DocComment => {
                     comments = Some(trimmed_comment(&token));
+                    comment_on_same_line = true;
                 },
-                SyntaxKind::Whitespace | SyntaxKind::Newline => (),
+                SyntaxKind::Whitespace => (),
+                SyntaxKind::Newline => comment_on_same_line = false,
                 _ => (),
             },
         }
     }
 
     None
+}
+
+fn standalone_comments_before_child_of_kind(
+    node: &SyntaxNode,
+    child_kind: SyntaxKind,
+    occurrence: usize,
+) -> Vec<String> {
+    let mut comments = Vec::new();
+    let mut pending_comment: Option<String> = None;
+    let mut pending_same_line = false;
+    let mut seen = 0usize;
+
+    for element in node.children_with_tokens() {
+        match element {
+            NodeOrToken::Node(child) => {
+                if child.kind() == child_kind {
+                    if seen == occurrence {
+                        if let Some(comment) = pending_comment.take().filter(|_| !pending_same_line)
+                        {
+                            comments.push(comment);
+                        }
+                        return comments;
+                    }
+                    seen += 1;
+                }
+
+                comments.clear();
+                pending_comment = None;
+                pending_same_line = false;
+            },
+            NodeOrToken::Token(token) => match token.kind() {
+                SyntaxKind::Comment | SyntaxKind::DocComment => {
+                    if let Some(comment) = pending_comment.take().filter(|_| !pending_same_line) {
+                        comments.push(comment);
+                    }
+                    pending_comment = Some(trimmed_comment(&token));
+                    pending_same_line = true;
+                },
+                SyntaxKind::Whitespace => (),
+                SyntaxKind::Newline => {
+                    if pending_comment.is_some() {
+                        pending_same_line = false;
+                    }
+                },
+                _ => (),
+            },
+        }
+    }
+
+    Vec::new()
+}
+
+fn emit_trailing_comments(lines: &mut Vec<String>, comments: &[String], indent: usize) {
+    for comment in comments {
+        lines.push(format!("{}{}", indent_string(indent), comment));
+    }
 }
 
 fn emit_leading_layout(lines: &mut Vec<String>, entry: &NodeLayout, indent: usize) {
@@ -1717,6 +1815,61 @@ end
 
         let reparsed = parse_text(&formatted);
         assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+    }
+
+    #[test]
+    fn preserves_standalone_body_comments_after_headers() {
+        let source = "\
+begin
+    # begin body
+    if.true
+        # then body
+        nop
+    else
+        # else body
+        nop
+    end
+end
+
+pub proc get_native_storage_slot_type
+    # convert the index into a memory offset
+    nop
+end
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let formatted = format_syntax(&parse.syntax());
+        assert_eq!(formatted, source);
+
+        let reparsed = parse_text(&formatted);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+    }
+
+    #[test]
+    fn preserves_stack_comments_after_the_preceding_instruction() {
+        let source = "\
+pub proc set_item
+    dup.4 exec.get_item_raw
+    # => [OLD_VALUE, VALUE, slot_ptr]
+
+    swapw movup.8
+    # => [slot_ptr, VALUE, OLD_VALUE]
+end
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let formatted = format_syntax(&parse.syntax());
+        assert_eq!(formatted, source);
+
+        let reparsed = parse_text(&formatted);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+
+        let reformatted = format_syntax(&reparsed.syntax());
+        assert_eq!(reformatted, formatted);
     }
 
     #[test]
