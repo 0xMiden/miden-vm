@@ -8,7 +8,6 @@ on:
     types: [opened, reopened, synchronize, labeled, unlabeled]
 
 permissions:
-  contents: write
   models: read
   pull-requests: write
 
@@ -20,11 +19,6 @@ jobs:
   draft:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout base repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
       - name: Collect PR context
         id: context
         uses: actions/github-script@v7
@@ -45,7 +39,6 @@ jobs:
 
             const hasNoChangelog = (pr.labels || []).some(label => label.name === 'no changelog');
             const hasFragment = files.some(file => /^\.changes\/unreleased\/.+\.md$/.test(file.filename));
-            const sameRepo = pr.head.repo.full_name === pr.base.repo.full_name;
             const shouldRun = !hasNoChangelog && !hasFragment;
 
             const changedFiles = files.map(file => file.filename).join('\n') || '(no changed files reported)';
@@ -72,30 +65,83 @@ jobs:
             const titlePath = path.join(inputsDir, 'title.txt');
             const changedFilesPath = path.join(inputsDir, 'changed_files.txt');
             const diffPath = path.join(inputsDir, 'diff.txt');
+            const promptPath = path.join(inputsDir, 'prompt.prompt.yml');
 
             fs.writeFileSync(bodyPath, pr.body || '');
             fs.writeFileSync(titlePath, pr.title || '');
             fs.writeFileSync(changedFilesPath, changedFiles);
             fs.writeFileSync(diffPath, diffSections.join('\n\n'));
+            fs.writeFileSync(promptPath, `messages:
+              - role: system
+                content: |-
+                  You draft changelog fragments for a Rust workspace.
+                  Return JSON only.
+                  Pick the smallest accurate kind from: breaking, change, enhancement, fix.
+                  Write a single concise, user-facing summary sentence.
+                  Do not mention tests, reviews, CI, or implementation details unless they matter to users.
+                  Only set crate when a single obvious crate is central to the change; otherwise use an empty string.
+              - role: user
+                content: |-
+                  Draft a changelog fragment from this pull request.
+
+                  Pull request URL:
+                  {{pr_url}}
+
+                  Pull request title:
+                  {{title}}
+
+                  Pull request body:
+                  {{body}}
+
+                  Changed files:
+                  {{changed_files}}
+
+                  Unified diff:
+                  {{diff}}
+            model: openai/gpt-4.1-mini
+            responseFormat: json_schema
+            jsonSchema: |-
+              {
+                "name": "changelog_fragment",
+                "strict": true,
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": ["breaking", "change", "enhancement", "fix"]
+                    },
+                    "crate": {
+                      "type": "string"
+                    },
+                    "summary": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["kind", "crate", "summary"],
+                  "additionalProperties": false
+                }
+              }
+            modelParameters:
+              temperature: 0.2
+              maxCompletionTokens: 250
+            `);
 
             core.setOutput('should_run', shouldRun ? 'true' : 'false');
-            core.setOutput('same_repo', sameRepo ? 'true' : 'false');
             core.setOutput('pr_number', String(pr.number));
             core.setOutput('pr_url', pr.html_url);
-            core.setOutput('head_ref', pr.head.ref);
-            core.setOutput('head_sha', pr.head.sha);
-            core.setOutput('title', pr.title);
             core.setOutput('body_path', bodyPath);
             core.setOutput('title_path', titlePath);
             core.setOutput('changed_files_path', changedFilesPath);
             core.setOutput('diff_path', diffPath);
+            core.setOutput('prompt_path', promptPath);
 
       - name: Run AI inference
         if: ${{ steps.context.outputs.should_run == 'true' }}
         id: inference
         uses: actions/ai-inference@v1
         with:
-          prompt-file: ./.github/prompts/changelog-fragment.prompt.yml
+          prompt-file: ${{ steps.context.outputs.prompt_path }}
           input: |
             pr_url: ${{ steps.context.outputs.pr_url }}
           file_input: |
@@ -104,96 +150,40 @@ jobs:
             changed_files: ${{ steps.context.outputs.changed_files_path }}
             diff: ${{ steps.context.outputs.diff_path }}
 
-      - name: Render fragment draft
+      - name: Comment fragment instructions
         if: ${{ steps.context.outputs.should_run == 'true' }}
-        id: fragment
         env:
           PR_NUMBER: ${{ steps.context.outputs.pr_number }}
           PR_URL: ${{ steps.context.outputs.pr_url }}
           RESPONSE_FILE: ${{ steps.inference.outputs.response-file }}
-        run: |
-          kind="$(jq -r '.kind' "$RESPONSE_FILE")"
-          crate="$(jq -r '.crate' "$RESPONSE_FILE")"
-          summary="$(jq -r '.summary' "$RESPONSE_FILE")"
-
-          if [ "$crate" = "null" ]; then
-            crate=""
-          fi
-
-          fragment_path="$RUNNER_TEMP/${PR_NUMBER}.${kind}.md"
-
-          render_args=(
-            --kind "$kind"
-            --pr-url "$PR_URL"
-            --summary "$summary"
-            --output "$fragment_path"
-          )
-
-          if [ -n "$crate" ]; then
-            render_args+=(--crate "$crate")
-          fi
-
-          ./scripts/render-changelog-fragment.sh "${render_args[@]}"
-
-          {
-            echo "kind=$kind"
-            echo "crate=$crate"
-            echo "summary=$summary"
-            echo "fragment_path=$fragment_path"
-            echo "repo_fragment_path=.changes/unreleased/${PR_NUMBER}.${kind}.md"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Commit fragment to same-repo PR branch
-        if: ${{ steps.context.outputs.should_run == 'true' && steps.context.outputs.same_repo == 'true' }}
-        env:
-          HEAD_REF: ${{ steps.context.outputs.head_ref }}
-          HEAD_SHA: ${{ steps.context.outputs.head_sha }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          FRAGMENT_PATH: ${{ steps.fragment.outputs.fragment_path }}
-          REPO_FRAGMENT_PATH: ${{ steps.fragment.outputs.repo_fragment_path }}
-        run: |
-          git fetch origin "$BASE_REF" "$HEAD_REF" --depth=1
-          git checkout -B "$HEAD_REF" "origin/$HEAD_REF"
-
-          if git diff --name-only "origin/$BASE_REF...HEAD" -- ':(glob).changes/unreleased/*.md' | grep -q .; then
-            echo "A changelog fragment is already present on the PR branch; skipping auto-commit."
-            exit 0
-          fi
-
-          mkdir -p "$(dirname "$REPO_FRAGMENT_PATH")"
-          cp "$FRAGMENT_PATH" "$REPO_FRAGMENT_PATH"
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "$REPO_FRAGMENT_PATH"
-
-          if git diff --cached --quiet; then
-            echo "No fragment change to commit."
-            exit 0
-          fi
-
-          git commit -m "chore(changelog): add fragment for PR #${{ steps.context.outputs.pr_number }}"
-          git push origin "HEAD:$HEAD_REF"
-
-      - name: Comment fragment instructions on foreign PR
-        if: ${{ steps.context.outputs.should_run == 'true' && steps.context.outputs.same_repo != 'true' }}
         uses: actions/github-script@v7
-        env:
-          REPO_FRAGMENT_PATH: ${{ steps.fragment.outputs.repo_fragment_path }}
-          FRAGMENT_PATH: ${{ steps.fragment.outputs.fragment_path }}
         with:
           script: |
             const fs = require('fs');
-
+            const prNumber = process.env.PR_NUMBER;
+            const prUrl = process.env.PR_URL;
+            const response = JSON.parse(fs.readFileSync(process.env.RESPONSE_FILE, 'utf8'));
             const marker = '<!-- changelog-fragment-draft -->';
-            const fragment = fs.readFileSync(process.env.FRAGMENT_PATH, 'utf8').trimEnd();
+            const kind = response.kind;
+            const crate = response.crate || '';
+            const summary = response.summary;
+            const repoFragmentPath = `.changes/unreleased/${prNumber}.${kind}.md`;
+
+            const frontMatter = [
+              '---',
+              `kind: ${kind}`,
+              `pr: ${prUrl}`,
+              ...(crate ? [`crate: ${crate}`] : []),
+              '---',
+              '',
+              summary,
+            ];
+            const fragment = frontMatter.join('\n');
             const body = [
               marker,
               'This pull request does not include a changelog fragment and is not labeled `no changelog`.',
               '',
-              'Because this branch lives in a different repository, maintainers cannot add the fragment automatically here.',
-              '',
-              `Please add a file at \`${process.env.REPO_FRAGMENT_PATH}\` with content like:`,
+              `Please add a file at \`${repoFragmentPath}\` with content like:`,
               '',
               '```md',
               fragment,
