@@ -1,5 +1,4 @@
 # Runs changelog related jobs.
-# CI job heavily inspired by: https://github.com/tarides/changelog-check-action
 
 name: changelog
 
@@ -14,5 +13,17 @@ on:
     types: [opened, reopened, synchronize, labeled, unlabeled]
 
 jobs:
-  changelog-reusable:
-    uses: 0xMiden/.github/.github/workflows/changelog.yml@d34ae3cd29234c5aa4d3ab57635b30563471c3c3
+  changelog:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check for changes in changelog
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          NO_CHANGELOG_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'no changelog') }}
+        run: ./scripts/check-changelog.sh
+        shell: bash
