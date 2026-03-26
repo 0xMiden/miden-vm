@@ -194,7 +194,8 @@ fn verify_encoded_circuit_eval(circuit: &Circuit, inputs: &[QuadFelt]) -> Encode
     let ctx = ContextId::default();
     let clk = RowIndex::from(0);
 
-    let mut evaluator = CircuitEvaluation::new(ctx, clk, num_read_rows, num_eval_rows);
+    let mut evaluator =
+        CircuitEvaluation::new(ctx, clk, num_read_rows, num_eval_rows).expect("valid circuit");
 
     // Feed memory to evaluation context
     let circuit_mem = generate_memory(&encoded_circuit, inputs);
@@ -378,4 +379,40 @@ fn verify_trace(context: &CircuitEvaluation, num_read_rows: usize, num_eval_rows
     for (_id, (_v, m)) in bus {
         assert_eq!(m, Felt::ZERO);
     }
+}
+
+// Regression test for https://github.com/0xMiden/miden-vm/issues/1820
+// Previously CircuitEvaluation::new() used assert!() which:
+//   - panicked in debug builds when row counts overflow MAX_NUM_ACE_WIRES
+//   - silently wrapped (undefined behavior) in release builds
+// Now it returns Err so both build modes behave identically.
+#[test]
+fn circuit_evaluation_new_rejects_overflow_counts() {
+    let ctx = ContextId::default();
+    let clk = RowIndex::from(0);
+
+    // num_wires = 2 * num_read_rows + num_eval_rows
+    // When num_read_rows = u32::MAX / 2 + 1, doubling overflows u32.
+    let num_read_rows = u32::MAX / 2 + 1;
+    let result = CircuitEvaluation::new(ctx, clk, num_read_rows, 0);
+    assert!(
+        result.is_err(),
+        "CircuitEvaluation::new must return Err when 2*num_read_rows overflows (was {num_read_rows})"
+    );
+
+    // Also reject when the combined wire count exceeds MAX_NUM_ACE_WIRES.
+    let max_wires = super::MAX_NUM_ACE_WIRES;
+    let result = CircuitEvaluation::new(ctx, clk, max_wires, 1);
+    assert!(
+        result.is_err(),
+        "CircuitEvaluation::new must return Err when num_wires > MAX_NUM_ACE_WIRES"
+    );
+
+    // A circuit that is exactly at the limit should succeed.
+    // num_wires = 2*1 + (max_wires - 2) = max_wires, which is exactly at the limit.
+    let result = CircuitEvaluation::new(ctx, clk, 1, max_wires - 2);
+    assert!(
+        result.is_ok(),
+        "CircuitEvaluation::new must succeed when num_wires == MAX_NUM_ACE_WIRES"
+    );
 }
