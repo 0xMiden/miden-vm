@@ -10,7 +10,9 @@ use std::{
 
 use clap::Parser;
 use miden_assembly_syntax_cst::{
-    Report, diagnostics::reporting::PrintDiagnostic, parse_source_file,
+    Report,
+    diagnostics::{miette::MietteDiagnostic, reporting::PrintDiagnostic},
+    parse_source_file,
 };
 use miden_debug_types::{
     DefaultSourceManager, SourceFile, SourceLanguage, SourceManager, SourceManagerError,
@@ -83,7 +85,10 @@ fn run() -> Result<(), CliError> {
         if parse.has_errors() {
             has_syntax_errors = true;
             for diagnostic in parse.take_diagnostics() {
-                eprintln!("{}", PrintDiagnostic::new(Report::from(diagnostic)));
+                eprintln!(
+                    "{}",
+                    PrintDiagnostic::new(report_parse_diagnostic(input.clone(), diagnostic))
+                );
             }
             continue;
         }
@@ -143,6 +148,10 @@ fn run() -> Result<(), CliError> {
     Ok(())
 }
 
+fn report_parse_diagnostic(source: Arc<SourceFile>, diagnostic: MietteDiagnostic) -> Report {
+    Report::from(diagnostic).with_source_code(source)
+}
+
 fn collect_inputs(
     cli: &Cli,
     source_manager: &dyn SourceManager,
@@ -169,4 +178,32 @@ fn collect_inputs(
     }
 
     Ok(inputs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_diagnostics_include_source_context() {
+        let source_manager = Arc::new(DefaultSourceManager::default());
+        let source = source_manager.load(
+            SourceLanguage::Masm,
+            Uri::from(Path::new("snippet.masm")),
+            "begin".to_string(),
+        );
+
+        let mut parse = parse_source_file(source.clone());
+        assert!(parse.has_errors());
+
+        let diagnostic =
+            parse.take_diagnostics().into_iter().next().expect("expected syntax diagnostic");
+        let rendered = format!(
+            "{}",
+            PrintDiagnostic::new_without_color(report_parse_diagnostic(source, diagnostic))
+        );
+
+        assert!(rendered.contains("snippet.masm"));
+        assert!(rendered.contains("begin"));
+    }
 }
