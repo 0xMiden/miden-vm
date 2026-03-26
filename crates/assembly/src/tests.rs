@@ -5762,3 +5762,112 @@ fn test_linking_recursive_expansion_via_renamed_aliases() -> TestResult {
 
     Ok(())
 }
+
+// ============================================================
+// Regression tests for Issue #2902
+// Kernel procedures must only be reachable via `syscall`.
+// exec, call, procref must be rejected at link time.
+// ============================================================
+
+#[test]
+fn regression_2902_kernel_proc_exec_is_rejected() {
+    let context = TestContext::default();
+
+    let kernel_src = source_file!(
+        &context,
+        r#"
+export.k1
+    push.1
+end
+"#
+    );
+    let kernel_lib = Assembler::new(context.source_manager())
+        .assemble_kernel(kernel_src)
+        .expect("kernel must assemble");
+
+    let program_src = source_file!(
+        &context,
+        r#"
+begin
+    exec.::$kernel::k1
+end
+"#
+    );
+
+    let err = Assembler::with_kernel(context.source_manager(), kernel_lib)
+        .assemble_program(program_src)
+        .expect_err("exec targeting a kernel export must be rejected (#2902)");
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("kernel procedure") || msg.contains("syscall"),
+        "unexpected error message: {msg}"
+    );
+}
+
+#[test]
+fn regression_2902_kernel_proc_call_is_rejected() {
+    let context = TestContext::default();
+
+    let kernel_src = source_file!(
+        &context,
+        r#"
+export.k1
+    push.1
+end
+"#
+    );
+    let kernel_lib = Assembler::new(context.source_manager())
+        .assemble_kernel(kernel_src)
+        .expect("kernel must assemble");
+
+    let program_src = source_file!(
+        &context,
+        r#"
+begin
+    call.::$kernel::k1
+end
+"#
+    );
+
+    let err = Assembler::with_kernel(context.source_manager(), kernel_lib)
+        .assemble_program(program_src)
+        .expect_err("call targeting a kernel export must be rejected (#2902)");
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("kernel procedure") || msg.contains("syscall"),
+        "unexpected error message: {msg}"
+    );
+}
+
+#[test]
+fn regression_2902_kernel_proc_via_syscall_is_accepted() {
+    let context = TestContext::default();
+
+    let kernel_src = source_file!(
+        &context,
+        r#"
+export.k1
+    push.1
+end
+"#
+    );
+    let kernel_lib = Assembler::new(context.source_manager())
+        .assemble_kernel(kernel_src)
+        .expect("kernel must assemble");
+
+    let program_src = source_file!(
+        &context,
+        r#"
+begin
+    syscall.::$kernel::k1
+end
+"#
+    );
+
+    // syscall must succeed
+    Assembler::with_kernel(context.source_manager(), kernel_lib)
+        .assemble_program(program_src)
+        .expect("syscall targeting a kernel export must succeed (#2902)");
+}

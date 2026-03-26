@@ -78,6 +78,35 @@ impl<'a> SymbolResolver<'a> {
         self.graph
     }
 
+    /// Returns `true` if `gid` belongs to the kernel module.
+    ///
+    /// Used to guard non-syscall invocations from targeting kernel exports (fixes #2902).
+    #[inline]
+    fn is_kernel_proc(&self, gid: GlobalItemIndex) -> bool {
+        self.graph.kernel_index.is_some_and(|k| k == gid.module)
+    }
+
+    /// Reject a non-syscall invocation that resolved to a kernel export.
+    ///
+    /// Kernel procedures must only be reachable through `syscall` so that the VM's
+    /// context-switch semantics are always respected.  Allowing `exec`, `call`, `procref`,
+    /// `dynexec`, or `dyncall` to reach a kernel export is a correctness bug (#2902).
+    fn reject_kernel_proc_non_syscall(
+        &self,
+        context: &SymbolResolutionContext,
+        callee: Arc<Path>,
+    ) -> LinkerError {
+        LinkerError::KernelProcNotSyscall {
+            span: context.span,
+            source_file: self.source_manager().get(context.span.source_id()).ok(),
+            callee,
+            kind: context
+                .kind
+                .map(|k| k.to_string())
+                .unwrap_or_else(|| "exec".into()),
+        }
+    }
+
     /// Resolve `target`, a possibly-resolved symbol reference, to a [SymbolResolution], using
     /// `context` as the context.
     pub fn resolve_invoke_target(
@@ -108,10 +137,18 @@ impl<'a> SymbolResolver<'a> {
                             })
                         }
                     },
-                    Some(gid) => Ok(SymbolResolution::Exact {
-                        gid,
-                        path: Span::new(mast_root.span(), self.item_path(gid)),
-                    }),
+                    Some(gid) => {
+                        // Non-syscall invocation: reject if the resolved proc is a kernel export.
+                        // Kernel procedures must only be reachable via `syscall` (#2902).
+                        if self.is_kernel_proc(gid) {
+                            let callee = self.item_path(gid);
+                            return Err(self.reject_kernel_proc_non_syscall(context, callee));
+                        }
+                        Ok(SymbolResolution::Exact {
+                            gid,
+                            path: Span::new(mast_root.span(), self.item_path(gid)),
+                        })
+                    },
                 }
             },
             InvocationTarget::Symbol(symbol) => {
@@ -141,6 +178,14 @@ impl<'a> SymbolResolver<'a> {
                             path: module_path.into_inner(),
                         })
                     },
+                    SymbolResolution::Exact { gid, path } if !context.in_syscall() => {
+                        // Non-syscall: reject kernel exports (#2902)
+                        if self.is_kernel_proc(gid) {
+                            let callee = path.into_inner();
+                            return Err(self.reject_kernel_proc_non_syscall(context, callee));
+                        }
+                        Ok(SymbolResolution::Exact { gid, path })
+                    },
                     resolution => Ok(resolution),
                 }
             },
@@ -163,6 +208,12 @@ impl<'a> SymbolResolver<'a> {
                         })
                     }
                 },
+                // Non-syscall exact resolution: reject kernel exports (#2902).
+                // Kernel procedures must only be invoked via `syscall`.
+                SymbolResolution::Exact { gid, path } if self.is_kernel_proc(gid) => {
+                    let callee = path.into_inner();
+                    Err(self.reject_kernel_proc_non_syscall(context, callee))
+                },
                 SymbolResolution::MastRoot(mast_root) => {
                     self.validate_syscall_digest(context, mast_root)?;
                     match self.graph.get_procedure_index_by_digest(&mast_root) {
@@ -184,10 +235,17 @@ impl<'a> SymbolResolver<'a> {
                                 })
                             }
                         },
-                        Some(gid) => Ok(SymbolResolution::Exact {
-                            gid,
-                            path: Span::new(mast_root.span(), self.item_path(gid)),
-                        }),
+                        Some(gid) => {
+                            // Non-syscall MastRoot resolved to kernel export: reject (#2902)
+                            if self.is_kernel_proc(gid) {
+                                let callee = self.item_path(gid);
+                                return Err(self.reject_kernel_proc_non_syscall(context, callee));
+                            }
+                            Ok(SymbolResolution::Exact {
+                                gid,
+                                path: Span::new(mast_root.span(), self.item_path(gid)),
+                            })
+                        },
                     }
                 },
                 // NOTE: If we're in a syscall here, we can't validate syscall targets that are not

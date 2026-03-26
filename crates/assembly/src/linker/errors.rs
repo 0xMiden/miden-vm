@@ -73,6 +73,21 @@ pub enum LinkerError {
         source_file: Option<Arc<SourceFile>>,
         callee: Arc<Path>,
     },
+    /// Kernel procedures are part of the execution environment and may only be invoked via
+    /// `syscall`. Using `exec`, `call`, `procref`, `dynexec`, or `dyncall` to target a kernel
+    /// export bypasses the context-switch semantics and is a correctness error (fixes #2902).
+    #[error("invalid invocation: '{callee}' is a kernel procedure and must be called via `syscall`")]
+    #[diagnostic(help(
+        "use `syscall.{callee}` instead of `{kind}.{callee}` to call exported kernel procedures"
+    ))]
+    KernelProcNotSyscall {
+        #[label("invocation occurs here")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        callee: Arc<Path>,
+        kind: alloc::string::String,
+    },
     #[error("invalid procedure reference: path refers to a non-procedure item")]
     #[diagnostic()]
     InvalidInvokeTarget {
