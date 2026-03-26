@@ -1,6 +1,7 @@
 ## 0.24.0 (TBD)
 
 - [BREAKING] Removed `AlgebraicSponge::merge_with_int()` method ([#894](https://github.com/0xMiden/crypto/pull/894)).
+- [BREAKING] Update `Poseidon2` instance to match Plonky3 one ([#905](https://github.com/0xMiden/crypto/pull/905)).
 
 ## 0.23.0 (2026-03-11)
 
