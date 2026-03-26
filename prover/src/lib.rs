@@ -8,7 +8,6 @@ extern crate std;
 use alloc::{string::ToString, vec::Vec};
 
 use ::serde::Serialize;
-use miden_air::config::InitTranscript;
 use miden_core::{
     Felt, WORD_SIZE,
     field::QuadFelt,
@@ -164,12 +163,12 @@ pub fn prove_stark<SC>(
 ) -> Result<Vec<u8>, ExecutionError>
 where
     SC: StarkConfig<Felt, QuadFelt>,
-    SC::Challenger: InitTranscript,
     <SC::Lmcs as Lmcs>::Commitment: Serialize,
 {
     let log_trace_height = trace.height().ilog2() as u8;
 
-    let mut challenger = SC::Challenger::seeded(log_trace_height as u64);
+    let mut challenger = config.challenger();
+    config::observe_protocol_params(&mut challenger, log_trace_height as u64);
     challenger.observe_slice(public_values);
     config::observe_var_len_public_inputs(&mut challenger, var_len_public_inputs, &[WORD_SIZE]);
     let output: StarkOutput<Felt, QuadFelt, SC> = miden_crypto::stark::prover::prove_single(

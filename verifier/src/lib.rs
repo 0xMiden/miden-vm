@@ -7,7 +7,7 @@ extern crate std;
 
 use alloc::{boxed::Box, vec::Vec};
 
-use miden_air::{ProcessorAir, PublicInputs, config, config::InitTranscript};
+use miden_air::{ProcessorAir, PublicInputs, config};
 use miden_core::{
     Felt, WORD_SIZE,
     field::{QuadFelt, TwoAdicField},
@@ -210,7 +210,6 @@ fn verify_stark_proof<SC>(
 ) -> Result<(), StarkVerificationError>
 where
     SC: StarkConfig<Felt, QuadFelt>,
-    SC::Challenger: InitTranscript,
     <SC::Lmcs as Lmcs>::Commitment: DeserializeOwned,
 {
     // Proof deserialization via bincode; see https://github.com/0xMiden/miden-vm/issues/2550
@@ -223,7 +222,8 @@ where
         return Err(StarkVerificationError::InvalidTraceHeight(log_trace_height));
     }
 
-    let mut challenger = SC::Challenger::seeded(log_trace_height as u64);
+    let mut challenger = config.challenger();
+    config::observe_protocol_params(&mut challenger, log_trace_height as u64);
     challenger.observe_slice(public_values);
     config::observe_var_len_public_inputs(&mut challenger, var_len_public_inputs, &[WORD_SIZE]);
     miden_crypto::stark::verifier::verify_single(

@@ -18,15 +18,14 @@
 
 use alloc::vec::Vec;
 
-use miden_air::{ProcessorAir, PublicInputs, config, config::InitTranscript};
+use miden_air::{ProcessorAir, PublicInputs, config};
 use miden_core::{Felt, WORD_SIZE, Word, field::QuadFelt};
 use miden_crypto::{
     field::BasedVectorSpace,
-    hash::poseidon2::Poseidon2Permutation256,
     stark::{
         StarkConfig,
         air::AirInstance,
-        challenger::{CanObserve, DuplexChallenger},
+        challenger::CanObserve,
         fri::PcsTranscript,
         lmcs::{BatchProof, Lmcs},
         proof::StarkTranscript,
@@ -84,8 +83,8 @@ pub fn generate_advice_inputs(
 
     // 2. Build domain-separated challenger, then observe public values.
     let (public_values, kernel_felts) = pub_inputs.to_air_inputs();
-    let mut challenger: DuplexChallenger<Felt, Poseidon2Permutation256, 12, 8> =
-        InitTranscript::seeded(log_trace_height as u64);
+    let mut challenger = config.challenger();
+    config::observe_protocol_params(&mut challenger, log_trace_height as u64);
     challenger.observe_slice(&public_values);
     let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
     config::observe_var_len_public_inputs(&mut challenger, var_len_public_inputs, &[WORD_SIZE]);
