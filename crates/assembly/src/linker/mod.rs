@@ -610,21 +610,7 @@ impl Linker {
         target: &InvocationTarget,
     ) -> Result<SymbolResolution, LinkerError> {
         let resolver = SymbolResolver::new(self);
-        let resolution = resolver.resolve_invoke_target(caller, target)?;
-
-        if let SymbolResolution::Exact { gid, ref path } = resolution
-            && caller.kind.is_some()
-            && !caller.in_syscall()
-            && self.kernel_index.is_some_and(|k| k == gid.module && k != caller.module)
-        {
-            return Err(LinkerError::KernelProcNotSyscall {
-                span: caller.span,
-                source_file: self.source_manager.get(caller.span.source_id()).ok(),
-                callee: path.clone().into_inner(),
-            });
-        }
-
-        Ok(resolution)
+        resolver.resolve_invoke_target(caller, target)
     }
 
     /// Resolves `target` from the perspective of `caller`.

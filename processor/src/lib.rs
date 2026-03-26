@@ -1,4 +1,7 @@
 #![no_std]
+// Trace tests intentionally use index-based `for i in a..b` over column slices; clippy's iterator
+// suggestion is noisier than helpful there.
+#![cfg_attr(test, allow(clippy::needless_range_loop))]
 
 #[macro_use]
 extern crate alloc;
