@@ -36,4 +36,4 @@ pub use p3_field::{
     },
     integers::QuotientMap,
 };
-pub use word::{LexicographicWord, Word, WordError};
+pub use word::{Word, WordError};

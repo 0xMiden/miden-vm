@@ -25,9 +25,6 @@ use p3_field::integers::QuotientMap;
 use super::Felt;
 use crate::utils::bytes_to_hex_string;
 
-mod lexicographic;
-pub use lexicographic::LexicographicWord;
-
 #[cfg(test)]
 mod tests;
 
@@ -322,8 +319,8 @@ impl Ord for Word {
         // though the field order is p = 2^64 - 2^32 + 1. This method canonicalizes to [0, p).
         //
         // We must iterate over and compare each element individually. A simple bytestring
-        // comparison would be inappropriate because the `Word`s are represented in
-        // "lexicographical" order.
+        // comparison would be inappropriate because `Word`s internal representation is not
+        // naturally lexicographically comparable.
         for (felt0, felt1) in self
             .iter()
             .rev()
