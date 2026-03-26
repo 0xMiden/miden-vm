@@ -6,8 +6,11 @@ use super::{
     AlgebraicSponge, CAPACITY_RANGE, DIGEST_RANGE, Felt, RATE_RANGE, RATE0_RANGE, RATE1_RANGE,
     Range, STATE_WIDTH, Word,
 };
-use crate::hash::algebraic_sponge::poseidon2::constants::{
-    ARK_EXT_INITIAL, ARK_EXT_TERMINAL, ARK_INT, MAT_DIAG,
+use crate::{
+    ZERO,
+    hash::algebraic_sponge::poseidon2::constants::{
+        ARK_EXT_INITIAL, ARK_EXT_TERMINAL, ARK_INT, MAT_DIAG,
+    },
 };
 
 mod constants;
@@ -181,6 +184,104 @@ impl Poseidon2 {
     #[inline(always)]
     pub fn merge_in_domain(values: &[Word; 2], domain: Felt) -> Word {
         <Self as AlgebraicSponge>::merge_in_domain(values, domain)
+    }
+
+    // POSEIDON2 PERMUTATION
+    // --------------------------------------------------------------------------------------------
+
+    /// Applies the M_E (external) linear layer to the state in-place.
+    ///
+    /// This basically takes any 4 x 4 MDS matrix M and computes the matrix-vector product with
+    /// the matrix defined by `[[2M, M, ..., M], [M, 2M, ..., M], ..., [M, M, ..., 2M]]`.
+    ///
+    /// Given the structure of the above matrix, we can compute the product of the state with
+    /// matrix `[M, M, ..., M]` and compute the final result using a few addition.
+    #[inline(always)]
+    pub fn apply_matmul_external(state: &mut [Felt; STATE_WIDTH]) {
+        // multiply the state by `[M, M, ..., M]` block-wise
+        Self::matmul_m4(state);
+
+        // accumulate column-wise sums
+        let number_blocks = STATE_WIDTH / 4;
+        let mut stored = [ZERO; 4];
+        for j in 0..number_blocks {
+            let base = j * 4;
+            for l in 0..4 {
+                stored[l] += state[base + l];
+            }
+        }
+
+        // add stored column-sums to each element
+        for (i, val) in state.iter_mut().enumerate() {
+            *val += stored[i % 4];
+        }
+    }
+
+    /// Multiply a 4-element vector x by:
+    /// [ 2 3 1 1 ]
+    /// [ 1 2 3 1 ]
+    /// [ 1 1 2 3 ]
+    /// [ 3 1 1 2 ].
+    #[inline(always)]
+    fn matmul_m4(state: &mut [Felt; STATE_WIDTH]) {
+        const N_CHUNKS: usize = STATE_WIDTH / 4;
+
+        for i in 0..N_CHUNKS {
+            let base = i * 4;
+            let x = &mut state[base..base + 4];
+
+            let t01 = x[0] + x[1];
+            let t23 = x[2] + x[3];
+            let t0123 = t01 + t23;
+            let t01123 = t0123 + x[1];
+            let t01233 = t0123 + x[3];
+
+            // The order here is important. Need to overwrite x[0] and x[2] after x[1] and x[3].
+            x[3] = t01233 + x[0].double(); // 3*x[0] + x[1] + x[2] + 2*x[3]
+            x[1] = t01123 + x[2].double(); // x[0] + 2*x[1] + 3*x[2] + x[3]
+            x[0] = t01123 + t01; // 2*x[0] + 3*x[1] + x[2] + x[3]
+            x[2] = t01233 + t23; // x[0] + x[1] + 2*x[2] + 3*x[3]
+        }
+    }
+
+    /// Applies the M_I (internal) linear layer to the state in-place.
+    ///
+    /// The matrix is given by its diagonal entries with the remaining entries set equal to 1.
+    /// Hence, given the sum of the state entries, the matrix-vector product is computed using
+    /// a multiply-and-add per state entry.
+    #[inline(always)]
+    pub fn matmul_internal(state: &mut [Felt; STATE_WIDTH], mat_diag: [Felt; 12]) {
+        let mut sum = ZERO;
+        for s in state.iter().take(STATE_WIDTH) {
+            sum += *s
+        }
+
+        for i in 0..state.len() {
+            state[i] = state[i] * mat_diag[i] + sum;
+        }
+    }
+
+    /// Adds the round constants to the state in-place.
+    #[inline(always)]
+    pub fn add_rc(state: &mut [Felt; STATE_WIDTH], ark: &[Felt; 12]) {
+        state.iter_mut().zip(ark).for_each(|(s, &k)| *s += k);
+    }
+
+    /// Applies the S-box (x^7) to each element of the state in-place.
+    #[inline(always)]
+    pub fn apply_sbox(state: &mut [Felt; STATE_WIDTH]) {
+        state[0] = state[0].exp_const_u64::<7>();
+        state[1] = state[1].exp_const_u64::<7>();
+        state[2] = state[2].exp_const_u64::<7>();
+        state[3] = state[3].exp_const_u64::<7>();
+        state[4] = state[4].exp_const_u64::<7>();
+        state[5] = state[5].exp_const_u64::<7>();
+        state[6] = state[6].exp_const_u64::<7>();
+        state[7] = state[7].exp_const_u64::<7>();
+        state[8] = state[8].exp_const_u64::<7>();
+        state[9] = state[9].exp_const_u64::<7>();
+        state[10] = state[10].exp_const_u64::<7>();
+        state[11] = state[11].exp_const_u64::<7>();
     }
 }
 
