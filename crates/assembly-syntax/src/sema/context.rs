@@ -17,6 +17,10 @@ use crate::ast::{
 /// This maintains the state for semantic analysis of a single [Module].
 pub struct AnalysisContext {
     constants: BTreeMap<Ident, Constant>,
+    /// Tracks which constants have been referenced at least once during semantic
+    /// analysis.  Any private constant absent from this set after analysis is
+    /// complete is reported as an `UnusedConstant` warning (see #2898).
+    used_constants: BTreeSet<Ident>,
     imported: BTreeSet<Ident>,
     procedures: BTreeSet<ProcedureName>,
     errors: Vec<SemanticAnalysisError>,
@@ -38,6 +42,8 @@ impl constants::ConstEnvironment for AnalysisContext {
     #[inline]
     fn get(&mut self, name: &Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
         if let Some(constant) = self.constants.get(name) {
+            // Mark this constant as referenced so we can detect unused ones later (#2898).
+            self.used_constants.insert(name.clone());
             Ok(Some(CachedConstantValue::Miss(&constant.value)))
         } else if self.imported.contains(name) {
             // We don't have the definition available yet
@@ -67,6 +73,7 @@ impl AnalysisContext {
     pub fn new(source_file: Arc<SourceFile>, source_manager: Arc<dyn SourceManager>) -> Self {
         Self {
             constants: Default::default(),
+            used_constants: Default::default(),
             imported: Default::default(),
             procedures: Default::default(),
             errors: Default::default(),
@@ -146,6 +153,17 @@ impl AnalysisContext {
                 },
             }
         }
+    }
+
+    /// Return an iterator over the names of constants that were referenced at least once
+    /// during semantic analysis.  Used by the unused-constant lint (#2898).
+    pub fn used_constants(&self) -> impl Iterator<Item = &Ident> {
+        self.used_constants.iter()
+    }
+
+    /// Return an iterator over all defined constants (name + definition).
+    pub fn defined_constants(&self) -> impl Iterator<Item = (&Ident, &Constant)> {
+        self.constants.iter()
     }
 
     /// Get the constant value bound to `name`

@@ -114,6 +114,20 @@ pub enum SemanticAnalysisError {
         #[label]
         span: SourceSpan,
     },
+    /// Emitted when a private constant is defined in a module but never referenced by
+    /// any procedure, repeat count, immediate, or other constant expression within that
+    /// module.  This mirrors the existing `UnusedImport` warning and is controlled by
+    /// the same `warnings_as_errors` flag (fixes #2898).
+    #[error("unused constant '{name}'")]
+    #[diagnostic(
+        severity(Warning),
+        help("this constant is defined but never used; remove it or prefix its name with '_' to suppress this warning")
+    )]
+    UnusedConstant {
+        #[label("defined here")]
+        span: SourceSpan,
+        name: alloc::string::String,
+    },
     #[error("missing import: the referenced module has not been imported")]
     #[diagnostic()]
     MissingImport {

@@ -171,6 +171,32 @@ pub fn analyze(
         }
     }
 
+    // Check unused constants (#2898).
+    //
+    // Only private (non-exported) constants are checked: exported constants are part of the
+    // module's public API and callers outside this module may reference them.
+    //
+    // Constants whose names start with `_` are explicitly opted out of this warning,
+    // mirroring the convention used in Rust for intentionally-unused bindings.
+    {
+        let used: alloc::collections::BTreeSet<_> = analyzer.used_constants().cloned().collect();
+        let unused: alloc::vec::Vec<_> = analyzer
+            .defined_constants()
+            .filter(|(name, cst)| {
+                !cst.visibility.is_public()                    // private only
+                    && !used.contains(*name)                   // never referenced
+                    && !name.as_str().starts_with('_')         // not opted-out
+            })
+            .map(|(name, cst)| (name.clone(), cst.span))
+            .collect();
+        for (name, span) in unused {
+            analyzer.error(SemanticAnalysisError::UnusedConstant {
+                span,
+                name: name.to_string(),
+            });
+        }
+    }
+
     analyzer.into_result().map(move |_| module)
 }
 
