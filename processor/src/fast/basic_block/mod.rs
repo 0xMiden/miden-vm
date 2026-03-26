@@ -8,7 +8,9 @@ use miden_core::{
 
 use crate::{
     BaseHost, Host, SyncHost,
+    advice::AdviceMutation,
     errors::{MapExecErrWithOpIdx, advice_error_with_context, event_error_with_context},
+    event::EventError,
     fast::{BreakReason, FastProcessor},
 };
 
@@ -44,7 +46,7 @@ impl FastProcessor {
         node_id: MastNodeId,
         host: &impl BaseHost,
         event_id: EventId,
-        mutations: Result<Vec<crate::advice::AdviceMutation>, crate::event::EventError>,
+        mutations: Result<Vec<AdviceMutation>, EventError>,
     ) -> ControlFlow<BreakReason> {
         let mutations = match mutations {
             Ok(mutations) => mutations,

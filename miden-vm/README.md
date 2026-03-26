@@ -36,13 +36,13 @@ Miden crate exposes several functions which can be used to execute programs, gen
 
 ### Executing programs
 
-To execute a program on Miden VM, you can use `execute_sync()`. The async `execute()` variant is
-also available for async callers. `execute_sync()` takes the following arguments:
+To execute a program on Miden VM, you can use `execute()`. The sync `execute_sync()` variant is
+also available for sync callers. These functions take the following arguments:
 
 - `program: &Program` - a reference to a Miden program to be executed.
 - `stack_inputs: StackInputs` - a set of public inputs with which to execute the program.
 - `advice_inputs: AdviceInputs` - the private inputs used to build the advice provider; use `AdviceInputs::default()` when no private inputs are needed.
-- `host: Host` - an instance of a `Host` which can be used to supply non-deterministic inputs to the VM and receive messages from the VM.
+- `host` - an instance of `Host` for `execute()` or `SyncHost` for `execute_sync()`, used to supply non-deterministic inputs to the VM and receive messages from the VM.
 - `options: ExecutionOptions` - a set of options for executing the specified program (e.g., max allowed number of cycles).
 
 The function returns a `Result<ExecutionOutput, ExecutionError>` which will contain the final stack
