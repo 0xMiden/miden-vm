@@ -18,7 +18,7 @@ use miden_crypto::stark::{
 };
 use miden_processor::{
     FastProcessor, Program,
-    trace::{AuxTraceBuilders, build_trace},
+    trace::{AuxTraceBuilders, ExecutionTrace, build_trace},
 };
 use tracing::instrument;
 
@@ -29,7 +29,8 @@ mod proving_options;
 pub use miden_air::{DeserializationError, ProcessorAir, PublicInputs, config};
 pub use miden_core::proof::{ExecutionProof, HashFunction};
 pub use miden_processor::{
-    ExecutionError, Host, InputError, StackInputs, StackOutputs, Word, advice::AdviceInputs,
+    ExecutionError, ExecutionOutput, FutureMaybeSend, Host, InputError, ProgramInfo, StackInputs,
+    StackOutputs, SyncHost, TraceBuildInputs, TraceGenerationContext, Word, advice::AdviceInputs,
     crypto, field, serde, utils,
 };
 pub use proving_options::ProvingOptions;
@@ -40,11 +41,9 @@ pub use proving_options::ProvingOptions;
 /// Executes and proves the specified `program` and returns the result together with a STARK-based
 /// proof of the program's execution.
 ///
-/// This is an async function that works on all platforms including wasm32.
-///
 /// - `stack_inputs` specifies the initial state of the stack for the VM.
 /// - `host` specifies the host environment which contain non-deterministic (secret) inputs for the
-///   prover
+///   prover.
 /// - `options` defines parameters for STARK proof generation.
 ///
 /// # Errors
@@ -61,11 +60,43 @@ pub async fn prove(
     let processor =
         FastProcessor::new_with_options(stack_inputs, advice_inputs, *options.execution_options());
 
-    let (execution_output, trace_generation_context) =
-        processor.execute_for_trace(program, host).await?;
+    let trace_inputs = processor.execute_trace_inputs(program, host).await?;
+    prove_from_trace_sync(trace_inputs, options)
+}
 
-    let trace = build_trace(execution_output, trace_generation_context, program.to_info())?;
+/// Synchronous wrapper for the async `prove()` function.
+#[instrument("prove_program_sync", skip_all)]
+pub fn prove_sync(
+    program: &Program,
+    stack_inputs: StackInputs,
+    advice_inputs: AdviceInputs,
+    host: &mut impl SyncHost,
+    options: ProvingOptions,
+) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
+    let processor =
+        FastProcessor::new_with_options(stack_inputs, advice_inputs, *options.execution_options());
 
+    let trace_inputs = processor.execute_trace_inputs_sync(program, host)?;
+    prove_from_trace_sync(trace_inputs, options)
+}
+
+/// Builds an execution trace from pre-executed trace inputs and proves it synchronously.
+///
+/// This is useful when program execution has already happened elsewhere and only trace building
+/// plus proof generation remain.
+#[instrument("prove_trace_sync", skip_all)]
+pub fn prove_from_trace_sync(
+    trace_inputs: TraceBuildInputs,
+    options: ProvingOptions,
+) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
+    let trace = build_trace(trace_inputs)?;
+    prove_execution_trace(trace, options)
+}
+
+fn prove_execution_trace(
+    trace: ExecutionTrace,
+    options: ProvingOptions,
+) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
     tracing::event!(
         tracing::Level::INFO,
         "Generated execution trace of {} columns and {} steps (padded from {})",
@@ -78,20 +109,15 @@ pub async fn prove(
     let precompile_requests = trace.precompile_requests().to_vec();
     let hash_fn = options.hash_fn();
 
-    // Convert trace to row-major format
     let trace_matrix = {
         let _span = tracing::info_span!("to_row_major_matrix").entered();
         trace.to_row_major_matrix()
     };
 
-    // Build public inputs and extract fixed/variable-length components
     let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();
     let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
-
-    // Get aux trace builders
     let aux_builder = trace.aux_trace_builders();
 
-    // Generate STARK proof using lifted prover
     let params = config::pcs_params();
     let proof_bytes = match hash_fn {
         HashFunction::Blake3_256 => {
@@ -119,41 +145,6 @@ pub async fn prove(
     let proof = ExecutionProof::new(proof_bytes, hash_fn, precompile_requests);
 
     Ok((stack_outputs, proof))
-}
-
-/// Synchronous wrapper for the async `prove()` function.
-///
-/// This method is only available on non-wasm32 targets. On wasm32, use the
-/// async `prove()` method directly since wasm32 runs in the browser's event loop.
-///
-/// # Panics
-/// Panics if called from within an existing Tokio runtime. Use the async `prove()`
-/// method instead in async contexts.
-#[cfg(not(target_arch = "wasm32"))]
-#[instrument("prove_program_sync", skip_all)]
-pub fn prove_sync(
-    program: &Program,
-    stack_inputs: StackInputs,
-    advice_inputs: AdviceInputs,
-    host: &mut impl Host,
-    options: ProvingOptions,
-) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
-    match tokio::runtime::Handle::try_current() {
-        Ok(_handle) => {
-            // We're already inside a Tokio runtime - this is not supported
-            // because we cannot safely create a nested runtime or move the
-            // non-Send host reference to another thread
-            panic!(
-                "Cannot call prove_sync from within a Tokio runtime. \
-                 Use the async prove() method instead."
-            )
-        },
-        Err(_) => {
-            // No runtime exists - create one and use it
-            let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-            rt.block_on(prove(program, stack_inputs, advice_inputs, host, options))
-        },
-    }
 }
 
 // STARK PROOF GENERATION

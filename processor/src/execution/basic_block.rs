@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use crate::{
-    BreakReason, Host, Stopper,
+    BaseHost, BreakReason, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
     execution::{
         ExecutionState, InternalBreakReason, execute_op, finalize_clock_cycle_with_continuation,
@@ -27,7 +27,7 @@ pub(super) fn execute_basic_block_node_from_start<P, H, S, T>(
 ) -> ControlFlow<InternalBreakReason>
 where
     P: Processor,
-    H: Host,
+    H: BaseHost,
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
@@ -85,7 +85,7 @@ pub(super) fn execute_basic_block_node_from_op_idx<P, H, S, T>(
 ) -> ControlFlow<InternalBreakReason>
 where
     P: Processor,
-    H: Host,
+    H: BaseHost,
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
@@ -127,7 +127,7 @@ pub(super) fn execute_basic_block_node_from_batch<P, H, S, T>(
 ) -> ControlFlow<InternalBreakReason>
 where
     P: Processor,
-    H: Host,
+    H: BaseHost,
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
@@ -200,7 +200,7 @@ pub(super) fn finish_basic_block<P, H, S, T>(
 ) -> ControlFlow<BreakReason>
 where
     P: Processor,
-    H: Host,
+    H: BaseHost,
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
@@ -248,7 +248,7 @@ fn execute_op_batch<P, H, S, T>(
 ) -> ControlFlow<InternalBreakReason>
 where
     P: Processor,
-    H: Host,
+    H: BaseHost,
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {

@@ -1,5 +1,5 @@
 use crate::{
-    ExecutionError, Felt, Host,
+    BaseHost, ExecutionError, Felt,
     errors::MapExecErrWithOpIdx,
     mast::{MastForest, MastNodeId},
     operation::Operation,
@@ -45,7 +45,7 @@ pub(crate) fn execute_op<P, T>(
     op_idx: usize,
     current_forest: &MastForest,
     node_id: MastNodeId,
-    host: &mut impl Host,
+    host: &mut impl BaseHost,
     tracer: &mut T,
 ) -> Result<OperationHelperRegisters, ExecutionError>
 where
