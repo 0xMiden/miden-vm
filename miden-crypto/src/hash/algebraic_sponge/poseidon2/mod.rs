@@ -6,6 +6,9 @@ use super::{
     AlgebraicSponge, CAPACITY_RANGE, DIGEST_RANGE, Felt, RATE_RANGE, RATE0_RANGE, RATE1_RANGE,
     Range, STATE_WIDTH, Word,
 };
+use crate::hash::algebraic_sponge::poseidon2::constants::{
+    ARK_EXT_INITIAL, ARK_EXT_TERMINAL, ARK_INT, MAT_DIAG,
+};
 
 mod constants;
 use constants::{NUM_EXTERNAL_ROUNDS_HALF, NUM_INTERNAL_ROUNDS};
@@ -132,6 +135,14 @@ impl Poseidon2 {
     /// word of the state).
     pub const DIGEST_RANGE: Range<usize> = DIGEST_RANGE;
 
+    /// Matrix used for computing the linear layers of internal rounds.
+    pub const MAT_DIAG: [Felt; STATE_WIDTH] = MAT_DIAG;
+
+    /// Round constants added to the hasher state.
+    pub const ARK_EXT_INITIAL: [[Felt; STATE_WIDTH]; NUM_EXTERNAL_ROUNDS_HALF] = ARK_EXT_INITIAL;
+    pub const ARK_EXT_TERMINAL: [[Felt; STATE_WIDTH]; NUM_EXTERNAL_ROUNDS_HALF] = ARK_EXT_TERMINAL;
+    pub const ARK_INT: [Felt; NUM_INTERNAL_ROUNDS] = ARK_INT;
+
     // HASH FUNCTIONS
     // --------------------------------------------------------------------------------------------
 
@@ -214,6 +225,12 @@ impl Poseidon2Permutation256 {
     /// The output of the hash function can be read from state elements 0, 1, 2, and 3.
     pub const DIGEST_RANGE: Range<usize> = Poseidon2::DIGEST_RANGE;
 
+    // POSEIDON2 PERMUTATION
+    // --------------------------------------------------------------------------------------------
+
+    /// Applies Poseidon2 permutation to the provided state.
+    ///
+    /// This delegates to the Poseidon2 implementation.
     #[inline(always)]
     pub fn apply_permutation(state: &mut [Felt; STATE_WIDTH]) {
         Poseidon2::apply_permutation(state);
