@@ -6,7 +6,8 @@ use miden_air::trace::{
 };
 
 use crate::{
-    ContextId, ExecutionError, Felt, MIN_STACK_DEPTH, MemoryError, ONE, Word, ZERO,
+    ContextId, ExecutionError, Felt, MIN_STACK_DEPTH, MemoryError, ONE, ProgramInfo, StackOutputs,
+    Word, ZERO,
     advice::AdviceError,
     continuation_stack::ContinuationStack,
     crypto::merkle::MerklePath,
@@ -763,6 +764,49 @@ impl IntoIterator for BitwiseReplay {
     /// Returns an iterator over all recorded u32 operations with their operands.
     fn into_iter(self) -> Self::IntoIter {
         self.u32op_with_operands.into_iter()
+    }
+}
+
+// TRACE BUILD INPUT BINDING
+// ================================================================================================
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ExecutedTraceBinding {
+    program_info: ProgramInfo,
+    stack_outputs: StackOutputs,
+    final_pc_transcript_state: PrecompileTranscriptState,
+    advice_provider_fingerprint: [u8; 32],
+}
+
+impl ExecutedTraceBinding {
+    pub(crate) fn new(
+        program_info: ProgramInfo,
+        stack_outputs: StackOutputs,
+        final_pc_transcript_state: PrecompileTranscriptState,
+        advice_provider_fingerprint: [u8; 32],
+    ) -> Self {
+        Self {
+            program_info,
+            stack_outputs,
+            final_pc_transcript_state,
+            advice_provider_fingerprint,
+        }
+    }
+
+    pub(crate) fn program_info(&self) -> &ProgramInfo {
+        &self.program_info
+    }
+
+    pub(crate) fn stack_outputs(&self) -> &StackOutputs {
+        &self.stack_outputs
+    }
+
+    pub(crate) fn final_pc_transcript_state(&self) -> PrecompileTranscriptState {
+        self.final_pc_transcript_state
+    }
+
+    pub(crate) fn advice_provider_fingerprint(&self) -> &[u8; 32] {
+        &self.advice_provider_fingerprint
     }
 }
 

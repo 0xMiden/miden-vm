@@ -74,7 +74,7 @@ fn program_execution_for_trace(c: &mut Criterion) {
                         },
                         |(mut host, program, processor)| async move {
                             let out =
-                                processor.execute_for_trace(&program, &mut host).await.unwrap();
+                                processor.execute_trace_inputs(&program, &mut host).await.unwrap();
                             black_box(out);
                         },
                         BatchSize::SmallInput,
