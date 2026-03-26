@@ -12,13 +12,20 @@ WARNINGS=RUSTDOCFLAGS="-D warnings"
 # -- linting --------------------------------------------------------------------------------------
 
 .PHONY: clippy
-clippy: ## Run Clippy with configs
-	cargo clippy --workspace --all-targets --all-features -- -D warnings
+clippy: ## Run Clippy with configs (alias for xclippy)
+	cargo xclippy
 
+.PHONY: xclippy
+xclippy: ## Run Clippy with the curated workspace lint set
+	cargo xclippy
 
 .PHONY: fix
-fix: ## Run Fix with configs
-	cargo +nightly fix --allow-staged --allow-dirty --all-targets --all-features
+fix: ## Run Fix with configs (alias for xclippy-fix)
+	cargo xclippy-fix
+
+.PHONY: xclippy-fix
+xclippy-fix: ## Run Clippy with --fix using the same lint set as xclippy
+	cargo xclippy-fix
 
 
 .PHONY: format
@@ -62,7 +69,7 @@ zeroize-audit: ## Run Zeroize audit using rustdoc JSON
 	cargo run --quiet --manifest-path tools/zeroize-audit/Cargo.toml -- "$$target_dir/doc/miden_crypto.json"
 
 .PHONY: lint
-lint: format fix clippy toml typos-check machete cargo-deny ## Run all linting tasks at once (Clippy, fixing, formatting, machete, cargo-deny)
+lint: clippy fix format toml typos-check machete cargo-deny ## Run all linting tasks at once (Clippy, fixing, formatting, machete, cargo-deny)
 
 # --- docs ----------------------------------------------------------------------------------------
 

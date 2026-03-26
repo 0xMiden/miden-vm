@@ -16,7 +16,7 @@ pub mod utils;
 
 // RE-EXPORTS
 // ================================================================================================
-pub use miden_field::{Felt, LexicographicWord, Word, WordError, word};
+pub use miden_field::{Felt, Word, WordError, word};
 
 pub mod field {
     //! Traits and utilities for working with the Goldilocks finite field (i.e.,

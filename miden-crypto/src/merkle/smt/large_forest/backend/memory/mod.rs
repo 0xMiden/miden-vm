@@ -47,7 +47,7 @@ impl Backend for InMemoryBackend {
     ///
     /// # Errors
     ///
-    /// - [`BackendError::UnknownLineage`] If the provided `lineage` is one not known by this
+    /// - [`BackendError::UnknownLineage`] if the provided `lineage` is one not known by this
     ///   backend.
     fn open(&self, lineage: LineageId, key: Word) -> Result<SmtProof> {
         let tree = self.trees.get(&lineage).ok_or(BackendError::UnknownLineage(lineage))?;
@@ -203,6 +203,70 @@ impl Backend for InMemoryBackend {
         tree_data.version = new_version;
 
         Ok(reversion_set)
+    }
+
+    /// Adds multiple new `lineages` to the tree, creating an empty tree for each and applying the
+    /// provided modifications to it, with the result being given the specified `version`.
+    ///
+    /// If the provide batch of modifications is empty for any given lineage, then the **empty tree
+    /// will be added** as the first version in that lineage.
+    ///
+    /// # Errors
+    ///
+    /// - [`BackendError::DuplicateLineage`] if any provided lineage conflicts with an already-known
+    ///   lineage. No data is changed in this case.
+    /// - [`BackendError::Merkle`] if any of the provided updates cannot be applied on top of the
+    ///   empty tree.
+    fn add_lineages(
+        &mut self,
+        version: VersionId,
+        lineages: SmtForestUpdateBatch,
+    ) -> Result<Vec<(LineageId, TreeWithRoot)>> {
+        // We start by checking that all lineages referred to in the batch of `updates` are valid,
+        // failing early with an error if need be.
+        let updates = lineages
+            .into_iter()
+            .map(|(lineage, ops)| {
+                if self.trees.contains_key(&lineage) {
+                    return Err(BackendError::DuplicateLineage(lineage));
+                }
+                Ok((lineage, ops))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        // Next, we compute all the relevant mutations to each tree, also failing with an error
+        // where relevant.
+        let mutations = updates
+            .into_iter()
+            .map(|(lineage, ops)| {
+                let tree = Smt::new();
+                let mutations = tree.compute_mutations(ops.into_iter().map(|o| o.into()))?;
+                Ok((lineage, tree, mutations))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        // With the preconditions checked, we can unconditionally perform the changes on all trees.
+        // We apply all mutations first without modifying self.trees, so that if any mutation
+        // fails, no data is changed.
+        let applied = mutations
+            .into_iter()
+            .map(|(lineage, mut tree, mutations)| {
+                tree.apply_mutations(mutations).map_err(BackendError::internal_from)?;
+                Ok((lineage, tree))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        // Once they have all succeeded, we then modify the data in memory.
+        let results = applied
+            .into_iter()
+            .map(|(lineage, tree)| {
+                let root = tree.root();
+                self.trees.insert(lineage, TreeData { version, tree });
+                (lineage, TreeWithRoot::new(lineage, version, root))
+            })
+            .collect::<Vec<_>>();
+
+        Ok(results)
     }
 
     /// Performs the provided `updates` on the entire forest, returning the mutation sets that would

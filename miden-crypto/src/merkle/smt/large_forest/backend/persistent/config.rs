@@ -23,6 +23,11 @@ const DEFAULT_BLOOM_FILTER_BITS_PER_KEY: c_double = 10.0;
 /// The default target file size for the files that make up the database (512 MiB).
 const DEFAULT_TARGET_FILE_SIZE: u64 = 512 << 20;
 
+/// The default setting for synchronous writes (`false`).
+///
+/// When `false`, writes are buffered and not immediately flushed to disk.
+const DEFAULT_SYNC_WRITES: bool = false;
+
 // CONFIG TYPE
 // ================================================================================================
 
@@ -76,6 +81,15 @@ pub struct Config {
     ///
     /// Defaults to [`DEFAULT_TARGET_FILE_SIZE`].
     pub(super) target_file_size: u64,
+
+    /// Whether each write should be synchronously flushed to disk.
+    ///
+    /// When `true`, every write is synchronously flushed to disk, providing stronger durability
+    /// guarantees but with reduced write performance. When `false` (the default), writes are
+    /// buffered and only flushed to disk when the buffers become full.
+    ///
+    /// Defaults to [`DEFAULT_SYNC_WRITES`].
+    pub(super) sync_writes: bool,
 }
 
 impl Config {
@@ -90,6 +104,7 @@ impl Config {
     /// - `cache_size_bytes`: 2 GiB
     /// - `max_open_files`: 512
     /// - `max_wal_size`: 1 GiB
+    /// - `sync_writes`: `false`
     ///
     /// # Errors
     ///
@@ -123,6 +138,7 @@ impl Config {
             max_wal_size: DEFAULT_MAX_TOTAL_WAL_SIZE_BYTES,
             bloom_filter_bits: DEFAULT_BLOOM_FILTER_BITS_PER_KEY,
             target_file_size: DEFAULT_TARGET_FILE_SIZE,
+            sync_writes: DEFAULT_SYNC_WRITES,
         })
     }
 }
@@ -189,6 +205,18 @@ impl Config {
         self.target_file_size = target_file_size;
         self
     }
+
+    /// Sets whether writes should be synchronously flushed to disk.
+    ///
+    /// When `true`, every write is synchronously flushed to disk, providing stronger durability
+    /// guarantees but with reduced write performance. When `false` (the default), writes are
+    /// buffered only flushed to disk when the buffer becomes full.
+    ///
+    /// Defaults to `false`.
+    pub fn with_sync_writes(mut self, sync_writes: bool) -> Self {
+        self.sync_writes = sync_writes;
+        self
+    }
 }
 
 // TESTS
@@ -210,6 +238,7 @@ mod test {
         assert_eq!(config.max_wal_size, DEFAULT_MAX_TOTAL_WAL_SIZE_BYTES);
         assert_eq!(config.bloom_filter_bits, DEFAULT_BLOOM_FILTER_BITS_PER_KEY);
         assert_eq!(config.target_file_size, DEFAULT_TARGET_FILE_SIZE);
+        assert_eq!(config.sync_writes, DEFAULT_SYNC_WRITES);
 
         Ok(())
     }
@@ -265,6 +294,17 @@ mod test {
         let config = config.with_target_file_size(256 << 20);
 
         assert_eq!(config.target_file_size, 256 << 20);
+
+        Ok(())
+    }
+
+    #[test]
+    fn with_sync_writes() -> Result<()> {
+        let tempdir = tempdir()?;
+        let config = Config::new(tempdir.path())?;
+        let config = config.with_sync_writes(true);
+
+        assert!(config.sync_writes);
 
         Ok(())
     }
