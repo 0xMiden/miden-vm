@@ -1,23 +1,10 @@
 use miden_air::{Felt, trace::decoder::NUM_OP_BITS};
 use miden_core::{mast::BasicBlockNode, operations::opcodes};
 
-use super::CORE_TRACE_WIDTH;
 use crate::errors::OperationError;
 
 #[cfg(test)]
 mod tests;
-
-// CORE TRACE FRAGMENT
-// ================================================================================================
-
-/// The columns of the main trace fragment. These consist of the system, decoder, and stack columns.
-///
-/// A fragment is a collection of columns of length `fragment_size` or less. Only the last fragment
-/// is allowed to be shorter than `fragment_size`.
-#[derive(Debug)]
-pub struct CoreTraceFragment<'a> {
-    pub columns: [&'a mut [Felt]; CORE_TRACE_WIDTH],
-}
 
 // BASIC BLOCK CONTEXT
 // ================================================================================================
