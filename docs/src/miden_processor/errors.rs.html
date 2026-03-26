@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `processor/src/errors.rs`."><title>errors.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="miden_processor" data-themes="" data-resource-suffix="" data-rustdoc-version="1.96.0-nightly (362211dc2 2026-03-24)" data-channel="nightly" data-search-js="search-63369b7b.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5013f961.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">miden_processor/</div>errors.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="comment">// Allow unused assignments - required by miette::Diagnostic derive macro
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `processor/src/errors.rs`."><title>errors.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="miden_processor" data-themes="" data-resource-suffix="" data-rustdoc-version="1.96.0-nightly (80d0e4be6 2026-03-25)" data-channel="nightly" data-search-js="search-63369b7b.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-5013f961.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">miden_processor/</div>errors.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="comment">// Allow unused assignments - required by miette::Diagnostic derive macro
 <a href=#2 id=2 data-nosnippet>2</a></span><span class="attr">#![allow(unused_assignments)]
 <a href=#3 id=3 data-nosnippet>3</a>
 <a href=#4 id=4 data-nosnippet>4</a></span><span class="kw">use </span>alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
@@ -8,7 +8,7 @@
 <a href=#8 id=8 data-nosnippet>8</a><span class="kw">use </span>miden_utils_diagnostics::{Diagnostic, miette};
 <a href=#9 id=9 data-nosnippet>9</a>
 <a href=#10 id=10 data-nosnippet>10</a><span class="kw">use </span>crate::{
-<a href=#11 id=11 data-nosnippet>11</a>    ContextId, DebugError, Felt, Host, TraceError, Word,
+<a href=#11 id=11 data-nosnippet>11</a>    BaseHost, ContextId, DebugError, Felt, TraceError, Word,
 <a href=#12 id=12 data-nosnippet>12</a>    advice::AdviceError,
 <a href=#13 id=13 data-nosnippet>13</a>    event::{EventError, EventId, EventName},
 <a href=#14 id=14 data-nosnippet>14</a>    fast::SystemEventError,
@@ -347,7 +347,7 @@
 <a href=#347 id=347 data-nosnippet>347</a>        <span class="self">self</span>,
 <a href=#348 id=348 data-nosnippet>348</a>        mast_forest: <span class="kw-2">&amp;</span>MastForest,
 <a href=#349 id=349 data-nosnippet>349</a>        node_id: MastNodeId,
-<a href=#350 id=350 data-nosnippet>350</a>        host: <span class="kw-2">&amp;</span><span class="kw">impl </span>Host,
+<a href=#350 id=350 data-nosnippet>350</a>        host: <span class="kw-2">&amp;</span><span class="kw">impl </span>BaseHost,
 <a href=#351 id=351 data-nosnippet>351</a>    ) -&gt; ExecutionError {
 <a href=#352 id=352 data-nosnippet>352</a>        <span class="kw">let </span>(label, source_file) = get_label_and_source_file(<span class="prelude-val">None</span>, mast_forest, node_id, host);
 <a href=#353 id=353 data-nosnippet>353</a>        ExecutionError::OperationError { label, source_file, err: <span class="self">self </span>}
@@ -378,7 +378,7 @@
 <a href=#378 id=378 data-nosnippet>378</a>    op_idx: <span class="prelude-ty">Option</span>&lt;usize&gt;,
 <a href=#379 id=379 data-nosnippet>379</a>    mast_forest: <span class="kw-2">&amp;</span>MastForest,
 <a href=#380 id=380 data-nosnippet>380</a>    node_id: MastNodeId,
-<a href=#381 id=381 data-nosnippet>381</a>    host: <span class="kw-2">&amp;</span><span class="kw">impl </span>Host,
+<a href=#381 id=381 data-nosnippet>381</a>    host: <span class="kw-2">&amp;</span><span class="kw">impl </span>BaseHost,
 <a href=#382 id=382 data-nosnippet>382</a>) -&gt; (SourceSpan, <span class="prelude-ty">Option</span>&lt;Arc&lt;SourceFile&gt;&gt;) {
 <a href=#383 id=383 data-nosnippet>383</a>    mast_forest
 <a href=#384 id=384 data-nosnippet>384</a>        .get_assembly_op(node_id, op_idx)
@@ -397,7 +397,7 @@
 <a href=#397 id=397 data-nosnippet>397</a>    err: AdviceError,
 <a href=#398 id=398 data-nosnippet>398</a>    mast_forest: <span class="kw-2">&amp;</span>MastForest,
 <a href=#399 id=399 data-nosnippet>399</a>    node_id: MastNodeId,
-<a href=#400 id=400 data-nosnippet>400</a>    host: <span class="kw-2">&amp;</span><span class="kw">impl </span>Host,
+<a href=#400 id=400 data-nosnippet>400</a>    host: <span class="kw-2">&amp;</span><span class="kw">impl </span>BaseHost,
 <a href=#401 id=401 data-nosnippet>401</a>) -&gt; ExecutionError {
 <a href=#402 id=402 data-nosnippet>402</a>    <span class="kw">let </span>(label, source_file) = get_label_and_source_file(<span class="prelude-val">None</span>, mast_forest, node_id, host);
 <a href=#403 id=403 data-nosnippet>403</a>    ExecutionError::AdviceError { label, source_file, err }
@@ -411,7 +411,7 @@
 <a href=#411 id=411 data-nosnippet>411</a>    error: EventError,
 <a href=#412 id=412 data-nosnippet>412</a>    mast_forest: <span class="kw-2">&amp;</span>MastForest,
 <a href=#413 id=413 data-nosnippet>413</a>    node_id: MastNodeId,
-<a href=#414 id=414 data-nosnippet>414</a>    host: <span class="kw-2">&amp;</span><span class="kw">impl </span>Host,
+<a href=#414 id=414 data-nosnippet>414</a>    host: <span class="kw-2">&amp;</span><span class="kw">impl </span>BaseHost,
 <a href=#415 id=415 data-nosnippet>415</a>    event_id: EventId,
 <a href=#416 id=416 data-nosnippet>416</a>    event_name: <span class="prelude-ty">Option</span>&lt;EventName&gt;,
 <a href=#417 id=417 data-nosnippet>417</a>) -&gt; ExecutionError {
@@ -430,7 +430,7 @@
 <a href=#430 id=430 data-nosnippet>430</a>    root_digest: Word,
 <a href=#431 id=431 data-nosnippet>431</a>    mast_forest: <span class="kw-2">&amp;</span>MastForest,
 <a href=#432 id=432 data-nosnippet>432</a>    node_id: MastNodeId,
-<a href=#433 id=433 data-nosnippet>433</a>    host: <span class="kw-2">&amp;</span><span class="kw">impl </span>Host,
+<a href=#433 id=433 data-nosnippet>433</a>    host: <span class="kw-2">&amp;</span><span class="kw">impl </span>BaseHost,
 <a href=#434 id=434 data-nosnippet>434</a>) -&gt; ExecutionError {
 <a href=#435 id=435 data-nosnippet>435</a>    <span class="kw">let </span>(label, source_file) = get_label_and_source_file(<span class="prelude-val">None</span>, mast_forest, node_id, host);
 <a href=#436 id=436 data-nosnippet>436</a>    ExecutionError::ProcedureNotFound { label, source_file, root_digest }
@@ -453,7 +453,7 @@
 <a href=#453 id=453 data-nosnippet>453</a>        <span class="self">self</span>,
 <a href=#454 id=454 data-nosnippet>454</a>        mast_forest: <span class="kw-2">&amp;</span>MastForest,
 <a href=#455 id=455 data-nosnippet>455</a>        node_id: MastNodeId,
-<a href=#456 id=456 data-nosnippet>456</a>        host: <span class="kw-2">&amp;</span><span class="kw">impl </span>Host,
+<a href=#456 id=456 data-nosnippet>456</a>        host: <span class="kw-2">&amp;</span><span class="kw">impl </span>BaseHost,
 <a href=#457 id=457 data-nosnippet>457</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;T, ExecutionError&gt;;
 <a href=#458 id=458 data-nosnippet>458</a>}
 <a href=#459 id=459 data-nosnippet>459</a>
@@ -466,7 +466,7 @@
 <a href=#466 id=466 data-nosnippet>466</a>        <span class="self">self</span>,
 <a href=#467 id=467 data-nosnippet>467</a>        mast_forest: <span class="kw-2">&amp;</span>MastForest,
 <a href=#468 id=468 data-nosnippet>468</a>        node_id: MastNodeId,
-<a href=#469 id=469 data-nosnippet>469</a>        host: <span class="kw-2">&amp;</span><span class="kw">impl </span>Host,
+<a href=#469 id=469 data-nosnippet>469</a>        host: <span class="kw-2">&amp;</span><span class="kw">impl </span>BaseHost,
 <a href=#470 id=470 data-nosnippet>470</a>        op_idx: usize,
 <a href=#471 id=471 data-nosnippet>471</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;T, ExecutionError&gt;;
 <a href=#472 id=472 data-nosnippet>472</a>}
@@ -486,7 +486,7 @@
 <a href=#486 id=486 data-nosnippet>486</a>        <span class="self">self</span>,
 <a href=#487 id=487 data-nosnippet>487</a>        mast_forest: <span class="kw-2">&amp;</span>MastForest,
 <a href=#488 id=488 data-nosnippet>488</a>        node_id: MastNodeId,
-<a href=#489 id=489 data-nosnippet>489</a>        host: <span class="kw-2">&amp;</span><span class="kw">impl </span>Host,
+<a href=#489 id=489 data-nosnippet>489</a>        host: <span class="kw-2">&amp;</span><span class="kw">impl </span>BaseHost,
 <a href=#490 id=490 data-nosnippet>490</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;T, ExecutionError&gt; {
 <a href=#491 id=491 data-nosnippet>491</a>        <span class="kw">match </span><span class="self">self </span>{
 <a href=#492 id=492 data-nosnippet>492</a>            <span class="prelude-val">Ok</span>(v) =&gt; <span class="prelude-val">Ok</span>(v),
@@ -505,7 +505,7 @@
 <a href=#505 id=505 data-nosnippet>505</a>        <span class="self">self</span>,
 <a href=#506 id=506 data-nosnippet>506</a>        mast_forest: <span class="kw-2">&amp;</span>MastForest,
 <a href=#507 id=507 data-nosnippet>507</a>        node_id: MastNodeId,
-<a href=#508 id=508 data-nosnippet>508</a>        host: <span class="kw-2">&amp;</span><span class="kw">impl </span>Host,
+<a href=#508 id=508 data-nosnippet>508</a>        host: <span class="kw-2">&amp;</span><span class="kw">impl </span>BaseHost,
 <a href=#509 id=509 data-nosnippet>509</a>        op_idx: usize,
 <a href=#510 id=510 data-nosnippet>510</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;T, ExecutionError&gt; {
 <a href=#511 id=511 data-nosnippet>511</a>        <span class="kw">match </span><span class="self">self </span>{
@@ -540,7 +540,7 @@
 <a href=#540 id=540 data-nosnippet>540</a>        <span class="self">self</span>,
 <a href=#541 id=541 data-nosnippet>541</a>        mast_forest: <span class="kw-2">&amp;</span>MastForest,
 <a href=#542 id=542 data-nosnippet>542</a>        node_id: MastNodeId,
-<a href=#543 id=543 data-nosnippet>543</a>        host: <span class="kw-2">&amp;</span><span class="kw">impl </span>Host,
+<a href=#543 id=543 data-nosnippet>543</a>        host: <span class="kw-2">&amp;</span><span class="kw">impl </span>BaseHost,
 <a href=#544 id=544 data-nosnippet>544</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;T, ExecutionError&gt; {
 <a href=#545 id=545 data-nosnippet>545</a>        <span class="kw">match </span><span class="self">self </span>{
 <a href=#546 id=546 data-nosnippet>546</a>            <span class="prelude-val">Ok</span>(v) =&gt; <span class="prelude-val">Ok</span>(v),
@@ -570,7 +570,7 @@
 <a href=#570 id=570 data-nosnippet>570</a>        <span class="self">self</span>,
 <a href=#571 id=571 data-nosnippet>571</a>        mast_forest: <span class="kw-2">&amp;</span>MastForest,
 <a href=#572 id=572 data-nosnippet>572</a>        node_id: MastNodeId,
-<a href=#573 id=573 data-nosnippet>573</a>        host: <span class="kw-2">&amp;</span><span class="kw">impl </span>Host,
+<a href=#573 id=573 data-nosnippet>573</a>        host: <span class="kw-2">&amp;</span><span class="kw">impl </span>BaseHost,
 <a href=#574 id=574 data-nosnippet>574</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;T, ExecutionError&gt; {
 <a href=#575 id=575 data-nosnippet>575</a>        <span class="kw">match </span><span class="self">self </span>{
 <a href=#576 id=576 data-nosnippet>576</a>            <span class="prelude-val">Ok</span>(v) =&gt; <span class="prelude-val">Ok</span>(v),
@@ -589,7 +589,7 @@
 <a href=#589 id=589 data-nosnippet>589</a>        <span class="self">self</span>,
 <a href=#590 id=590 data-nosnippet>590</a>        mast_forest: <span class="kw-2">&amp;</span>MastForest,
 <a href=#591 id=591 data-nosnippet>591</a>        node_id: MastNodeId,
-<a href=#592 id=592 data-nosnippet>592</a>        host: <span class="kw-2">&amp;</span><span class="kw">impl </span>Host,
+<a href=#592 id=592 data-nosnippet>592</a>        host: <span class="kw-2">&amp;</span><span class="kw">impl </span>BaseHost,
 <a href=#593 id=593 data-nosnippet>593</a>        op_idx: usize,
 <a href=#594 id=594 data-nosnippet>594</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;T, ExecutionError&gt; {
 <a href=#595 id=595 data-nosnippet>595</a>        <span class="kw">match </span><span class="self">self </span>{
@@ -610,7 +610,7 @@
 <a href=#610 id=610 data-nosnippet>610</a>        <span class="self">self</span>,
 <a href=#611 id=611 data-nosnippet>611</a>        mast_forest: <span class="kw-2">&amp;</span>MastForest,
 <a href=#612 id=612 data-nosnippet>612</a>        node_id: MastNodeId,
-<a href=#613 id=613 data-nosnippet>613</a>        host: <span class="kw-2">&amp;</span><span class="kw">impl </span>Host,
+<a href=#613 id=613 data-nosnippet>613</a>        host: <span class="kw-2">&amp;</span><span class="kw">impl </span>BaseHost,
 <a href=#614 id=614 data-nosnippet>614</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;T, ExecutionError&gt; {
 <a href=#615 id=615 data-nosnippet>615</a>        <span class="kw">match </span><span class="self">self </span>{
 <a href=#616 id=616 data-nosnippet>616</a>            <span class="prelude-val">Ok</span>(v) =&gt; <span class="prelude-val">Ok</span>(v),
@@ -639,7 +639,7 @@
 <a href=#639 id=639 data-nosnippet>639</a>        <span class="self">self</span>,
 <a href=#640 id=640 data-nosnippet>640</a>        mast_forest: <span class="kw-2">&amp;</span>MastForest,
 <a href=#641 id=641 data-nosnippet>641</a>        node_id: MastNodeId,
-<a href=#642 id=642 data-nosnippet>642</a>        host: <span class="kw-2">&amp;</span><span class="kw">impl </span>Host,
+<a href=#642 id=642 data-nosnippet>642</a>        host: <span class="kw-2">&amp;</span><span class="kw">impl </span>BaseHost,
 <a href=#643 id=643 data-nosnippet>643</a>        op_idx: usize,
 <a href=#644 id=644 data-nosnippet>644</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;T, ExecutionError&gt; {
 <a href=#645 id=645 data-nosnippet>645</a>        <span class="kw">match </span><span class="self">self </span>{
@@ -670,7 +670,7 @@
 <a href=#670 id=670 data-nosnippet>670</a>        <span class="self">self</span>,
 <a href=#671 id=671 data-nosnippet>671</a>        mast_forest: <span class="kw-2">&amp;</span>MastForest,
 <a href=#672 id=672 data-nosnippet>672</a>        node_id: MastNodeId,
-<a href=#673 id=673 data-nosnippet>673</a>        host: <span class="kw-2">&amp;</span><span class="kw">impl </span>Host,
+<a href=#673 id=673 data-nosnippet>673</a>        host: <span class="kw-2">&amp;</span><span class="kw">impl </span>BaseHost,
 <a href=#674 id=674 data-nosnippet>674</a>        op_idx: usize,
 <a href=#675 id=675 data-nosnippet>675</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;T, ExecutionError&gt; {
 <a href=#676 id=676 data-nosnippet>676</a>        <span class="kw">match </span><span class="self">self </span>{
@@ -699,7 +699,7 @@
 <a href=#699 id=699 data-nosnippet>699</a>        <span class="self">self</span>,
 <a href=#700 id=700 data-nosnippet>700</a>        mast_forest: <span class="kw-2">&amp;</span>MastForest,
 <a href=#701 id=701 data-nosnippet>701</a>        node_id: MastNodeId,
-<a href=#702 id=702 data-nosnippet>702</a>        host: <span class="kw-2">&amp;</span><span class="kw">impl </span>Host,
+<a href=#702 id=702 data-nosnippet>702</a>        host: <span class="kw-2">&amp;</span><span class="kw">impl </span>BaseHost,
 <a href=#703 id=703 data-nosnippet>703</a>        op_idx: usize,
 <a href=#704 id=704 data-nosnippet>704</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;T, ExecutionError&gt; {
 <a href=#705 id=705 data-nosnippet>705</a>        <span class="kw">match </span><span class="self">self </span>{
@@ -727,7 +727,7 @@
 <a href=#727 id=727 data-nosnippet>727</a>        <span class="self">self</span>,
 <a href=#728 id=728 data-nosnippet>728</a>        mast_forest: <span class="kw-2">&amp;</span>MastForest,
 <a href=#729 id=729 data-nosnippet>729</a>        node_id: MastNodeId,
-<a href=#730 id=730 data-nosnippet>730</a>        host: <span class="kw-2">&amp;</span><span class="kw">impl </span>Host,
+<a href=#730 id=730 data-nosnippet>730</a>        host: <span class="kw-2">&amp;</span><span class="kw">impl </span>BaseHost,
 <a href=#731 id=731 data-nosnippet>731</a>        op_idx: usize,
 <a href=#732 id=732 data-nosnippet>732</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;T, ExecutionError&gt; {
 <a href=#733 id=733 data-nosnippet>733</a>        <span class="kw">match </span><span class="self">self </span>{
