@@ -626,7 +626,7 @@ fn render_instruction(
         flush_instruction_line(lines, current_instruction_line);
 
         let mut rendered_lines =
-            render_token_stream_with_comments(&tokens, indent, SpacingStyle::Default);
+            render_token_stream_with_comments(&tokens, indent, SpacingStyle::CompactInstruction);
         if let Some(comment) = entry.trailing_comment.as_deref()
             && let Some(last_line) = rendered_lines.last_mut()
         {
@@ -1481,7 +1481,11 @@ fn needs_space(previous: &SyntaxToken, next: &SyntaxToken, style: SpacingStyle) 
         return false;
     }
 
-    if matches!(style, SpacingStyle::CompactInstruction) && next_kind == LBracket {
+    if matches!(style, SpacingStyle::CompactInstruction) && matches!(next_kind, LBracket | Equal) {
+        return false;
+    }
+
+    if matches!(style, SpacingStyle::CompactInstruction) && previous_kind == Equal {
         return false;
     }
 
@@ -1641,6 +1645,29 @@ pub proc has_callbacks
     exec.has_non_empty_slot
     push.ON_BEFORE_ASSET_ADDED_TO_NOTE_PROC_ROOT_SLOT[0..2]
     exec.has_non_empty_slot
+end
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let formatted = format_syntax(&parse.syntax());
+        assert_eq!(formatted, source);
+
+        let reparsed = parse_text(&formatted);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+
+        let reformatted = format_syntax(&reparsed.syntax());
+        assert_eq!(reformatted, formatted);
+    }
+
+    #[test]
+    fn preserves_compact_instruction_error_operands() {
+        let source = "\
+pub proc checks
+    assert.err=ERR_FOO
+    assert.err=\"message\"
+    u32assert2.err=\"number of storage map elements should fit into a u32\"
 end
 ";
 
