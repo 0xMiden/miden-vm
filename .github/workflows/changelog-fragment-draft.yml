@@ -1,0 +1,232 @@
+name: Draft changelog fragment
+
+on:
+  pull_request_target:
+    branches:
+      - main
+      - next
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+
+permissions:
+  contents: write
+  models: read
+  pull-requests: write
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.event.pull_request.number }}"
+  cancel-in-progress: true
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout base repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Collect PR context
+        id: context
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const pr = context.payload.pull_request;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner,
+              repo,
+              pull_number: pr.number,
+              per_page: 100,
+            });
+
+            const hasNoChangelog = (pr.labels || []).some(label => label.name === 'no changelog');
+            const hasFragment = files.some(file => /^\.changes\/unreleased\/.+\.md$/.test(file.filename));
+            const sameRepo = pr.head.repo.full_name === pr.base.repo.full_name;
+            const shouldRun = !hasNoChangelog && !hasFragment;
+
+            const changedFiles = files.map(file => file.filename).join('\n') || '(no changed files reported)';
+
+            const diffSections = [];
+            let totalChars = 0;
+            for (const file of files) {
+              const patch = file.patch || '[diff omitted by GitHub]';
+              const truncatedPatch = patch.length > 4000 ? `${patch.slice(0, 4000)}\n...[truncated]` : patch;
+              const section = `### ${file.filename}\n${truncatedPatch}`;
+              if (totalChars + section.length > 20000) {
+                diffSections.push('...[additional diff omitted]');
+                break;
+              }
+              diffSections.push(section);
+              totalChars += section.length;
+            }
+
+            const tempDir = process.env.RUNNER_TEMP;
+            const inputsDir = path.join(tempDir, 'changelog-fragment-inputs');
+            fs.mkdirSync(inputsDir, { recursive: true });
+
+            const bodyPath = path.join(inputsDir, 'body.txt');
+            const titlePath = path.join(inputsDir, 'title.txt');
+            const changedFilesPath = path.join(inputsDir, 'changed_files.txt');
+            const diffPath = path.join(inputsDir, 'diff.txt');
+
+            fs.writeFileSync(bodyPath, pr.body || '');
+            fs.writeFileSync(titlePath, pr.title || '');
+            fs.writeFileSync(changedFilesPath, changedFiles);
+            fs.writeFileSync(diffPath, diffSections.join('\n\n'));
+
+            core.setOutput('should_run', shouldRun ? 'true' : 'false');
+            core.setOutput('same_repo', sameRepo ? 'true' : 'false');
+            core.setOutput('pr_number', String(pr.number));
+            core.setOutput('pr_url', pr.html_url);
+            core.setOutput('head_ref', pr.head.ref);
+            core.setOutput('head_sha', pr.head.sha);
+            core.setOutput('title', pr.title);
+            core.setOutput('body_path', bodyPath);
+            core.setOutput('title_path', titlePath);
+            core.setOutput('changed_files_path', changedFilesPath);
+            core.setOutput('diff_path', diffPath);
+
+      - name: Run AI inference
+        if: ${{ steps.context.outputs.should_run == 'true' }}
+        id: inference
+        uses: actions/ai-inference@v1
+        with:
+          prompt-file: ./.github/prompts/changelog-fragment.prompt.yml
+          input: |
+            pr_url: ${{ steps.context.outputs.pr_url }}
+          file_input: |
+            title: ${{ steps.context.outputs.title_path }}
+            body: ${{ steps.context.outputs.body_path }}
+            changed_files: ${{ steps.context.outputs.changed_files_path }}
+            diff: ${{ steps.context.outputs.diff_path }}
+
+      - name: Render fragment draft
+        if: ${{ steps.context.outputs.should_run == 'true' }}
+        id: fragment
+        env:
+          PR_NUMBER: ${{ steps.context.outputs.pr_number }}
+          PR_URL: ${{ steps.context.outputs.pr_url }}
+          RESPONSE_FILE: ${{ steps.inference.outputs.response-file }}
+        run: |
+          kind="$(jq -r '.kind' "$RESPONSE_FILE")"
+          crate="$(jq -r '.crate' "$RESPONSE_FILE")"
+          summary="$(jq -r '.summary' "$RESPONSE_FILE")"
+
+          if [ "$crate" = "null" ]; then
+            crate=""
+          fi
+
+          fragment_path="$RUNNER_TEMP/${PR_NUMBER}.${kind}.md"
+
+          render_args=(
+            --kind "$kind"
+            --pr-url "$PR_URL"
+            --summary "$summary"
+            --output "$fragment_path"
+          )
+
+          if [ -n "$crate" ]; then
+            render_args+=(--crate "$crate")
+          fi
+
+          ./scripts/render-changelog-fragment.sh "${render_args[@]}"
+
+          {
+            echo "kind=$kind"
+            echo "crate=$crate"
+            echo "summary=$summary"
+            echo "fragment_path=$fragment_path"
+            echo "repo_fragment_path=.changes/unreleased/${PR_NUMBER}.${kind}.md"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Commit fragment to same-repo PR branch
+        if: ${{ steps.context.outputs.should_run == 'true' && steps.context.outputs.same_repo == 'true' }}
+        env:
+          HEAD_REF: ${{ steps.context.outputs.head_ref }}
+          HEAD_SHA: ${{ steps.context.outputs.head_sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          FRAGMENT_PATH: ${{ steps.fragment.outputs.fragment_path }}
+          REPO_FRAGMENT_PATH: ${{ steps.fragment.outputs.repo_fragment_path }}
+        run: |
+          git fetch origin "$BASE_REF" "$HEAD_REF" --depth=1
+          git checkout -B "$HEAD_REF" "origin/$HEAD_REF"
+
+          if git diff --name-only "origin/$BASE_REF...HEAD" -- ':(glob).changes/unreleased/*.md' | grep -q .; then
+            echo "A changelog fragment is already present on the PR branch; skipping auto-commit."
+            exit 0
+          fi
+
+          mkdir -p "$(dirname "$REPO_FRAGMENT_PATH")"
+          cp "$FRAGMENT_PATH" "$REPO_FRAGMENT_PATH"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$REPO_FRAGMENT_PATH"
+
+          if git diff --cached --quiet; then
+            echo "No fragment change to commit."
+            exit 0
+          fi
+
+          git commit -m "chore(changelog): add fragment for PR #${{ steps.context.outputs.pr_number }}"
+          git push origin "HEAD:$HEAD_REF"
+
+      - name: Comment fragment instructions on foreign PR
+        if: ${{ steps.context.outputs.should_run == 'true' && steps.context.outputs.same_repo != 'true' }}
+        uses: actions/github-script@v7
+        env:
+          REPO_FRAGMENT_PATH: ${{ steps.fragment.outputs.repo_fragment_path }}
+          FRAGMENT_PATH: ${{ steps.fragment.outputs.fragment_path }}
+        with:
+          script: |
+            const fs = require('fs');
+
+            const marker = '<!-- changelog-fragment-draft -->';
+            const fragment = fs.readFileSync(process.env.FRAGMENT_PATH, 'utf8').trimEnd();
+            const body = [
+              marker,
+              'This pull request does not include a changelog fragment and is not labeled `no changelog`.',
+              '',
+              'Because this branch lives in a different repository, maintainers cannot add the fragment automatically here.',
+              '',
+              `Please add a file at \`${process.env.REPO_FRAGMENT_PATH}\` with content like:`,
+              '',
+              '```md',
+              fragment,
+              '```',
+              '',
+              'If no changelog entry is needed, ask a maintainer to apply the `no changelog` label.',
+            ].join('\n');
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+
+            const existing = comments.find(comment =>
+              comment.user?.login === 'github-actions[bot]' && comment.body?.includes(marker)
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              });
+            }
