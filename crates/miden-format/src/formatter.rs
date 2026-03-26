@@ -599,7 +599,7 @@ fn render_instruction(
         return;
     }
 
-    let op_text = render_compact_tokens(instruction.syntax());
+    let op_text = render_instruction_tokens(instruction.syntax());
     let rendered_indent = indent_string(indent);
 
     let can_append = current_instruction_line.is_some()
@@ -929,6 +929,10 @@ fn render_token_sequence(tokens: &[SyntaxToken]) -> String {
     render_token_sequence_with_style(tokens, SpacingStyle::Default)
 }
 
+fn render_instruction_tokens(node: &SyntaxNode) -> String {
+    render_token_sequence_with_style(&significant_tokens(node), SpacingStyle::CompactInstruction)
+}
+
 fn render_import_alias(tokens: &[SyntaxToken]) -> String {
     match tokens.split_first() {
         Some((first, rest)) if first.kind() == SyntaxKind::RArrow => {
@@ -942,6 +946,7 @@ fn render_import_alias(tokens: &[SyntaxToken]) -> String {
 #[derive(Clone, Copy)]
 enum SpacingStyle {
     Default,
+    CompactInstruction,
     TypeBodyItem,
 }
 
@@ -1378,6 +1383,10 @@ fn needs_space(previous: &SyntaxToken, next: &SyntaxToken, style: SpacingStyle) 
         return false;
     }
 
+    if matches!(style, SpacingStyle::CompactInstruction) && next_kind == LBracket {
+        return false;
+    }
+
     if matches!(style, SpacingStyle::TypeBodyItem) && next_kind == Colon {
         return false;
     }
@@ -1524,6 +1533,30 @@ end
 
         let reparsed = parse_text(&formatted);
         assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+    }
+
+    #[test]
+    fn preserves_compact_instruction_bracket_suffixes_across_formatting_passes() {
+        let source = "\
+pub proc has_callbacks
+    push.ON_BEFORE_ASSET_ADDED_TO_ACCOUNT_PROC_ROOT_SLOT[0..2]
+    exec.has_non_empty_slot
+    push.ON_BEFORE_ASSET_ADDED_TO_NOTE_PROC_ROOT_SLOT[0..2]
+    exec.has_non_empty_slot
+end
+";
+
+        let parse = parse_text(source);
+        assert!(!parse.has_errors(), "{:?}", parse.diagnostics());
+
+        let formatted = format_syntax(&parse.syntax());
+        assert_eq!(formatted, source);
+
+        let reparsed = parse_text(&formatted);
+        assert!(!reparsed.has_errors(), "{:?}", reparsed.diagnostics());
+
+        let reformatted = format_syntax(&reparsed.syntax());
+        assert_eq!(reformatted, formatted);
     }
 
     #[test]
