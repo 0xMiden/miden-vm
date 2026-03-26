@@ -9,19 +9,41 @@ use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::{
     field::Field,
     hash::{
-        blake::Blake3Hasher, keccak::Keccak256Hash, poseidon2::Poseidon2Permutation256,
-        rpo::RpoPermutation256, rpx::RpxPermutation256,
+        blake::Blake3Hasher,
+        keccak::{Keccak256Hash, KeccakF, VECTOR_LEN},
+        poseidon2::Poseidon2Permutation256,
+        rpo::RpoPermutation256,
+        rpx::RpxPermutation256,
     },
     stark::{
         GenericStarkConfig,
         challenger::{DuplexChallenger, HashChallenger, SerializingChallenger64},
         dft::Radix2DitParallel,
         fri::PcsParams,
-        hasher::{ChainingHasher, StatefulSponge},
+        hasher::{ChainingHasher, SerializingStatefulSponge, StatefulSponge},
         lmcs::LmcsConfig,
-        symmetric::{CompressionFunctionFromHasher, TruncatedPermutation},
+        symmetric::{
+            CompressionFunctionFromHasher, CryptographicPermutation, PaddingFreeSponge,
+            TruncatedPermutation,
+        },
     },
 };
+
+// SHARED
+// ================================================================================================
+
+/// Miden VM STARK configuration with pre-filled common type parameters.
+///
+/// All Miden configurations use `Felt` as the base field, `QuadFelt` as the extension field,
+/// and `Radix2DitParallel<Felt>` as the DFT. Only the LMCS commitment scheme (`L`) and
+/// Fiat-Shamir challenger (`Ch`) vary by hash function.
+pub type MidenStarkConfig<L, Ch> =
+    GenericStarkConfig<Felt, QuadFelt, L, Radix2DitParallel<Felt>, Ch>;
+
+type PackedFelt = <Felt as Field>::Packing;
+
+/// Number of inputs to the Merkle compression function.
+const COMPRESSION_INPUTS: usize = 2;
 
 // PCS PARAMETERS
 // ================================================================================================
@@ -55,17 +77,80 @@ pub fn pcs_params() -> PcsParams {
     .expect("invalid PCS parameters")
 }
 
-// HASH FUNCTION PARAMETERS
+// BLAKE3
 // ================================================================================================
 
-// Byte-oriented hashes (Blake3, Keccak).
+/// Digest size in bytes for Blake3.
+const BLAKE_DIGEST_SIZE: usize = 32;
 
-/// Digest size in bytes for byte-oriented hashes.
-const BYTE_DIGEST_SIZE: usize = 32;
-/// Number of inputs to the Merkle compression function.
-const COMPRESSION_INPUTS: usize = 2;
+/// Blake3 LMCS.
+type BlakeLmcs = LmcsConfig<
+    Felt,
+    u8,
+    ChainingHasher<Blake3Hasher>,
+    CompressionFunctionFromHasher<Blake3Hasher, COMPRESSION_INPUTS, BLAKE_DIGEST_SIZE>,
+    BLAKE_DIGEST_SIZE,
+    BLAKE_DIGEST_SIZE,
+>;
 
-// Algebraic hashes (RPO, Poseidon2, RPX).
+/// Blake3 challenger.
+type BlakeChallenger =
+    SerializingChallenger64<Felt, HashChallenger<u8, Blake3Hasher, BLAKE_DIGEST_SIZE>>;
+
+/// Creates a Blake3_256-based STARK configuration.
+pub fn blake3_256_config(params: PcsParams) -> MidenStarkConfig<BlakeLmcs, BlakeChallenger> {
+    let lmcs = LmcsConfig::new(
+        ChainingHasher::new(Blake3Hasher),
+        CompressionFunctionFromHasher::new(Blake3Hasher),
+    );
+    let challenger = SerializingChallenger64::from_hasher(vec![], Blake3Hasher);
+    GenericStarkConfig::new(params, lmcs, Radix2DitParallel::default(), challenger)
+}
+
+// KECCAK
+// ================================================================================================
+
+/// Keccak permutation state width (in u64 elements).
+const KECCAK_WIDTH: usize = 25;
+/// Keccak sponge rate (absorbable u64 elements per permutation).
+const KECCAK_RATE: usize = 17;
+/// Keccak digest width (in u64 elements).
+const KECCAK_DIGEST: usize = 4;
+/// Keccak-256 digest size in bytes (for the Fiat-Shamir challenger).
+const KECCAK_CHALLENGER_DIGEST_SIZE: usize = 32;
+
+/// Keccak MMCS sponge (padding-free, used for compression).
+type KeccakMmcsSponge = PaddingFreeSponge<KeccakF, KECCAK_WIDTH, KECCAK_RATE, KECCAK_DIGEST>;
+
+/// Keccak LMCS using the stateful binary sponge with `[Felt; VECTOR_LEN]` packing.
+type KeccakLmcs = LmcsConfig<
+    [Felt; VECTOR_LEN],
+    [u64; VECTOR_LEN],
+    SerializingStatefulSponge<StatefulSponge<KeccakF, KECCAK_WIDTH, KECCAK_RATE, KECCAK_DIGEST>>,
+    CompressionFunctionFromHasher<KeccakMmcsSponge, COMPRESSION_INPUTS, KECCAK_DIGEST>,
+    KECCAK_WIDTH,
+    KECCAK_DIGEST,
+>;
+
+/// Keccak challenger.
+type KeccakChallenger =
+    SerializingChallenger64<Felt, HashChallenger<u8, Keccak256Hash, KECCAK_CHALLENGER_DIGEST_SIZE>>;
+
+/// Creates a Keccak-based STARK configuration.
+///
+/// Uses the stateful binary sponge with the Keccak permutation and `[Felt; VECTOR_LEN]` packing
+/// for SIMD parallelization.
+pub fn keccak_config(params: PcsParams) -> MidenStarkConfig<KeccakLmcs, KeccakChallenger> {
+    let mmcs_sponge = KeccakMmcsSponge::new(KeccakF {});
+    let compress = CompressionFunctionFromHasher::new(mmcs_sponge);
+    let sponge = SerializingStatefulSponge::new(StatefulSponge::new(KeccakF {}));
+    let lmcs = LmcsConfig::new(sponge, compress);
+    let challenger = SerializingChallenger64::from_hasher(vec![], Keccak256Hash {});
+    GenericStarkConfig::new(params, lmcs, Radix2DitParallel::default(), challenger)
+}
+
+// ALGEBRAIC HASHES (RPO, Poseidon2, RPX)
+// ================================================================================================
 
 /// Sponge state width in field elements.
 const SPONGE_WIDTH: usize = 12;
@@ -73,32 +158,6 @@ const SPONGE_WIDTH: usize = 12;
 const SPONGE_RATE: usize = 8;
 /// Sponge digest width in field elements.
 const DIGEST_WIDTH: usize = 4;
-
-// SHARED TYPE ALIASES
-// ================================================================================================
-
-type PackedFelt = <Felt as Field>::Packing;
-
-/// Miden VM STARK configuration with pre-filled common type parameters.
-///
-/// All Miden configurations use `Felt` as the base field, `QuadFelt` as the extension field,
-/// and `Radix2DitParallel<Felt>` as the DFT. Only the LMCS commitment scheme (`L`) and
-/// Fiat-Shamir challenger (`Ch`) vary by hash function.
-pub type MidenStarkConfig<L, Ch> =
-    GenericStarkConfig<Felt, QuadFelt, L, Radix2DitParallel<Felt>, Ch>;
-
-/// Byte-oriented LMCS (for Blake3, Keccak).
-type ByteLmcs<H> = LmcsConfig<
-    Felt,
-    u8,
-    ChainingHasher<H>,
-    CompressionFunctionFromHasher<H, COMPRESSION_INPUTS, BYTE_DIGEST_SIZE>,
-    BYTE_DIGEST_SIZE,
-    BYTE_DIGEST_SIZE,
->;
-
-/// Byte-oriented challenger (for Blake3, Keccak).
-type ByteChallenger<H> = SerializingChallenger64<Felt, HashChallenger<u8, H, BYTE_DIGEST_SIZE>>;
 
 /// Algebraic LMCS (for RPO, Poseidon2, RPX).
 type AlgLmcs<P> = LmcsConfig<
@@ -113,56 +172,32 @@ type AlgLmcs<P> = LmcsConfig<
 /// Algebraic duplex challenger (for RPO, Poseidon2, RPX).
 type AlgChallenger<P> = DuplexChallenger<Felt, P, SPONGE_WIDTH, SPONGE_RATE>;
 
-// CONFIGURATION FACTORIES
-// ================================================================================================
-
-/// Creates a Blake3_256-based STARK configuration.
-pub fn blake3_256_config(
-    params: PcsParams,
-) -> MidenStarkConfig<ByteLmcs<Blake3Hasher>, ByteChallenger<Blake3Hasher>> {
-    let lmcs = LmcsConfig::new(
-        ChainingHasher::new(Blake3Hasher),
-        CompressionFunctionFromHasher::new(Blake3Hasher),
-    );
-    let challenger = SerializingChallenger64::from_hasher(vec![], Blake3Hasher);
-    GenericStarkConfig::new(params, lmcs, Radix2DitParallel::default(), challenger)
-}
-
-/// Creates a Keccak-based STARK configuration.
-pub fn keccak_config(
-    params: PcsParams,
-) -> MidenStarkConfig<ByteLmcs<Keccak256Hash>, ByteChallenger<Keccak256Hash>> {
-    let hash = Keccak256Hash {};
-    let lmcs = LmcsConfig::new(ChainingHasher::new(hash), CompressionFunctionFromHasher::new(hash));
-    let challenger = SerializingChallenger64::from_hasher(vec![], hash);
-    GenericStarkConfig::new(params, lmcs, Radix2DitParallel::default(), challenger)
-}
-
 /// Creates an RPO-based STARK configuration.
 pub fn rpo_config(
     params: PcsParams,
 ) -> MidenStarkConfig<AlgLmcs<RpoPermutation256>, AlgChallenger<RpoPermutation256>> {
-    let perm = RpoPermutation256;
-    let lmcs = LmcsConfig::new(StatefulSponge::new(perm), TruncatedPermutation::new(perm));
-    let challenger = DuplexChallenger::new(perm);
-    GenericStarkConfig::new(params, lmcs, Radix2DitParallel::default(), challenger)
+    alg_config(params, RpoPermutation256)
 }
 
 /// Creates a Poseidon2-based STARK configuration.
 pub fn poseidon2_config(
     params: PcsParams,
 ) -> MidenStarkConfig<AlgLmcs<Poseidon2Permutation256>, AlgChallenger<Poseidon2Permutation256>> {
-    let perm = Poseidon2Permutation256;
-    let lmcs = LmcsConfig::new(StatefulSponge::new(perm), TruncatedPermutation::new(perm));
-    let challenger = DuplexChallenger::new(perm);
-    GenericStarkConfig::new(params, lmcs, Radix2DitParallel::default(), challenger)
+    alg_config(params, Poseidon2Permutation256)
 }
 
 /// Creates an RPX-based STARK configuration.
 pub fn rpx_config(
     params: PcsParams,
 ) -> MidenStarkConfig<AlgLmcs<RpxPermutation256>, AlgChallenger<RpxPermutation256>> {
-    let perm = RpxPermutation256;
+    alg_config(params, RpxPermutation256)
+}
+
+/// Internal helper: builds an algebraic STARK configuration from a permutation.
+fn alg_config<P>(params: PcsParams, perm: P) -> MidenStarkConfig<AlgLmcs<P>, AlgChallenger<P>>
+where
+    P: CryptographicPermutation<[Felt; SPONGE_WIDTH]> + Copy,
+{
     let lmcs = LmcsConfig::new(StatefulSponge::new(perm), TruncatedPermutation::new(perm));
     let challenger = DuplexChallenger::new(perm);
     GenericStarkConfig::new(params, lmcs, Radix2DitParallel::default(), challenger)
