@@ -4,6 +4,7 @@ mod product;
 
 use alloc::{boxed::Box, collections::BTreeMap, string::ToString, sync::Arc, vec::Vec};
 
+use debuginfo::DebugInfoSections;
 use miden_assembly_syntax::{
     KernelLibrary, Library, MAX_REPEAT_COUNT, Parse, ParseOptions, SemanticAnalysisError,
     ast::{
@@ -23,10 +24,7 @@ use miden_core::{
     operations::{AssemblyOp, Operation},
     program::{Kernel, Program},
 };
-use miden_mast_package::{
-    PackageManifest,
-    debug_info::{DebugFunctionsSection, DebugSourcesSection, DebugTypesSection},
-};
+use miden_mast_package::PackageManifest;
 use miden_project::{Linkage, TargetType};
 
 use self::{error::AssemblerError, product::AssemblyProduct};
@@ -107,16 +105,6 @@ pub struct Assembler {
     emit_debug_info: bool,
     /// Whether to trim source file paths in debug information.
     trim_paths: bool,
-}
-
-#[derive(Default, Clone)]
-struct DebugInfoSections {
-    /// The debug function section maintained by the assembler during assembly
-    debug_functions_section: DebugFunctionsSection,
-    /// The debug type section maintained by the assembler during assembly
-    debug_types_section: DebugTypesSection,
-    /// The debug sources section maintained by the assembler during assembly
-    debug_sources_section: DebugSourcesSection,
 }
 
 impl Default for Assembler {
@@ -928,9 +916,8 @@ impl Assembler {
                     // be added to the forest.
 
                     // Record the debug info for this procedure
-                    emit_procedure_debug_info(
+                    self.debug_info.emit_procedure_debug_info(
                         &self.source_manager,
-                        &mut self.debug_info,
                         proc.span(),
                         &path,
                         signature,
@@ -1450,48 +1437,4 @@ pub(crate) struct BodyWrapper {
 pub(super) struct ResolvedProcedure {
     pub node: MastNodeId,
     pub signature: Option<Arc<FunctionType>>,
-}
-
-fn emit_procedure_debug_info(
-    source_manager: &dyn SourceManager,
-    debug_info: &mut DebugInfoSections,
-    span: SourceSpan,
-    path: &Path,
-    signature: Option<Arc<FunctionType>>,
-    procedure: &Procedure,
-) -> Result<(), Report> {
-    if let Ok(file_line_col) = source_manager.file_line_col(span) {
-        let path_id =
-            debug_info.debug_sources_section.add_string(Arc::from(file_line_col.uri.path()));
-        let file_id = debug_info
-            .debug_sources_section
-            .add_file(miden_mast_package::debug_info::DebugFileInfo::new(path_id));
-        let name = Arc::<str>::from(path.as_str());
-        let name_id = debug_info.debug_functions_section.add_string(name.clone());
-        let type_index = if let Some(signature) = signature {
-            Some(debuginfo::register_debug_type(
-                &mut debug_info.debug_types_section,
-                Some(name),
-                None,
-                &ast::types::Type::Function(signature),
-            )?)
-        } else {
-            None
-        };
-        let func_info = miden_mast_package::debug_info::DebugFunctionInfo::new(
-            name_id,
-            file_id,
-            file_line_col.line,
-            file_line_col.column,
-        )
-        .with_mast_root(procedure.mast_root());
-        let func_info = if let Some(type_index) = type_index {
-            func_info.with_type(type_index)
-        } else {
-            func_info
-        };
-        debug_info.debug_functions_section.add_function(func_info);
-    }
-
-    Ok(())
 }

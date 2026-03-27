@@ -1,22 +1,93 @@
 use alloc::sync::Arc;
 
-use miden_assembly_syntax::{ast, diagnostics::Report};
 use miden_mast_package::debug_info::{
-    DebugFieldInfo, DebugPrimitiveType, DebugTypeIdx, DebugTypeInfo, DebugTypesSection,
+    DebugFieldInfo, DebugFunctionsSection, DebugPrimitiveType, DebugSourcesSection, DebugTypeIdx,
+    DebugTypeInfo, DebugTypesSection,
 };
+
+use crate::{
+    Procedure,
+    ast::{
+        Path, TypeExpr,
+        types::{FunctionType, StructType, Type},
+    },
+    debuginfo::{SourceManager, SourceSpan},
+    diagnostics::Report,
+};
+
+// DEBUG INFO SECTIONS
+// ================================================================================================
+
+#[derive(Default, Clone)]
+pub(super) struct DebugInfoSections {
+    /// The debug function section maintained by the assembler during assembly
+    debug_functions_section: DebugFunctionsSection,
+    /// The debug type section maintained by the assembler during assembly
+    debug_types_section: DebugTypesSection,
+    /// The debug sources section maintained by the assembler during assembly
+    debug_sources_section: DebugSourcesSection,
+}
+
+impl DebugInfoSections {
+    pub fn emit_procedure_debug_info(
+        &mut self,
+        source_manager: &dyn SourceManager,
+        span: SourceSpan,
+        path: &Path,
+        signature: Option<Arc<FunctionType>>,
+        procedure: &Procedure,
+    ) -> Result<(), Report> {
+        if let Ok(file_line_col) = source_manager.file_line_col(span) {
+            let path_id =
+                self.debug_sources_section.add_string(Arc::from(file_line_col.uri.path()));
+            let file_id = self
+                .debug_sources_section
+                .add_file(miden_mast_package::debug_info::DebugFileInfo::new(path_id));
+            let name = Arc::<str>::from(path.as_str());
+            let name_id = self.debug_functions_section.add_string(name.clone());
+            let type_index = if let Some(signature) = signature {
+                Some(register_debug_type(
+                    &mut self.debug_types_section,
+                    Some(name),
+                    None,
+                    &Type::Function(signature),
+                )?)
+            } else {
+                None
+            };
+            let func_info = miden_mast_package::debug_info::DebugFunctionInfo::new(
+                name_id,
+                file_id,
+                file_line_col.line,
+                file_line_col.column,
+            )
+            .with_mast_root(procedure.mast_root());
+            let func_info = if let Some(type_index) = type_index {
+                func_info.with_type(type_index)
+            } else {
+                func_info
+            };
+            self.debug_functions_section.add_function(func_info);
+        }
+
+        Ok(())
+    }
+}
+
+// HELPER FUNCTIONS
+// ================================================================================================
 
 /// This visits a type exported or used in a procedure signature, and emits records to the
 /// provided debug types section corresponding to it.
 ///
 /// The declared name and type expression can be optionally provided to give additional useful
 /// context to the debug info type produced, e.g. type name, field names, etc.
-pub fn register_debug_type(
+fn register_debug_type(
     debug_types_section: &mut DebugTypesSection,
     declared_name: Option<Arc<str>>,
-    declared_ty: Option<&ast::TypeExpr>,
-    ty: &ast::types::Type,
+    declared_ty: Option<&TypeExpr>,
+    ty: &Type,
 ) -> Result<DebugTypeIdx, Report> {
-    use ast::types::Type;
     Ok(match ty {
         Type::I1 => {
             debug_types_section.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::Bool))
@@ -59,14 +130,14 @@ pub fn register_debug_type(
         },
         Type::Ptr(ptr) => {
             let pointee_name = declared_ty.and_then(|t| match t {
-                ast::TypeExpr::Ptr(p) => match p.pointee.as_ref() {
-                    ast::TypeExpr::Ref(p) => Some(Arc::from(p.inner().as_str())),
+                TypeExpr::Ptr(p) => match p.pointee.as_ref() {
+                    TypeExpr::Ref(p) => Some(Arc::from(p.inner().as_str())),
                     _ => None,
                 },
                 _ => None,
             });
             let pointee_decl = declared_ty.and_then(|t| match t {
-                ast::TypeExpr::Ptr(p) => Some(p.pointee.as_ref()),
+                TypeExpr::Ptr(p) => Some(p.pointee.as_ref()),
                 _ => None,
             });
             let pointee_type_idx = register_debug_type(
@@ -79,14 +150,14 @@ pub fn register_debug_type(
         },
         Type::Array(array) => {
             let element_name = declared_ty.and_then(|t| match t {
-                ast::TypeExpr::Array(array) => match array.elem.as_ref() {
-                    ast::TypeExpr::Ref(t) => Some(Arc::from(t.inner().as_str())),
+                TypeExpr::Array(array) => match array.elem.as_ref() {
+                    TypeExpr::Ref(t) => Some(Arc::from(t.inner().as_str())),
                     _ => None,
                 },
                 _ => None,
             });
             let element_decl = declared_ty.and_then(|t| match t {
-                ast::TypeExpr::Ptr(p) => Some(p.pointee.as_ref()),
+                TypeExpr::Ptr(p) => Some(p.pointee.as_ref()),
                 _ => None,
             });
             let element_type_idx = register_debug_type(
@@ -102,14 +173,14 @@ pub fn register_debug_type(
         },
         Type::List(ty) => {
             let pointee_name = declared_ty.and_then(|t| match t {
-                ast::TypeExpr::Ptr(p) => match p.pointee.as_ref() {
-                    ast::TypeExpr::Ref(p) => Some(Arc::from(p.inner().as_str())),
+                TypeExpr::Ptr(p) => match p.pointee.as_ref() {
+                    TypeExpr::Ref(p) => Some(Arc::from(p.inner().as_str())),
                     _ => None,
                 },
                 _ => None,
             });
             let pointee_decl = declared_ty.and_then(|t| match t {
-                ast::TypeExpr::Ptr(p) => Some(p.pointee.as_ref()),
+                TypeExpr::Ptr(p) => Some(p.pointee.as_ref()),
                 _ => None,
             });
             let pointee_ty =
@@ -138,7 +209,7 @@ pub fn register_debug_type(
         },
         Type::Struct(struct_ty) => {
             let declared_field_tys = declared_ty.and_then(|t| match t {
-                ast::TypeExpr::Struct(t) => Some(&t.fields),
+                TypeExpr::Struct(t) => Some(&t.fields),
                 _ => None,
             });
             let mut fields = vec![];
@@ -187,7 +258,7 @@ pub fn register_debug_type(
                 },
                 [ty] => register_debug_type(debug_types_section, None, None, ty)?,
                 types => {
-                    let ty = ast::types::StructType::new(types.iter().cloned());
+                    let ty = StructType::new(types.iter().cloned());
                     let size = u32::try_from(ty.size()).map_err(|_| {
                         if let Some(declared_name) = declared_name.as_ref() {
                             Report::msg(format!(
