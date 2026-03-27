@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"constant":["EXT_DEGREE"],"enum":["AceError","InputKey","LayoutKind"],"fn":["build_ace_circuit_for_air","build_layout_for_air"],"struct":["AceCircuit","AceConfig","EncodedCircuit","InputCounts","InputLayout"]};
+window.SIDEBAR_ITEMS = {"constant":["EXT_DEGREE"],"enum":["AceError","InputKey","LayoutKind"],"fn":["build_ace_circuit_for_air","build_ace_dag_for_air","emit_circuit"],"struct":["AceArtifacts","AceCircuit","AceConfig","AceDag","DagBuilder","EncodedCircuit","InputCounts","InputLayout","NodeId"]};

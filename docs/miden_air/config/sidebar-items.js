@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"fn":["blake3_256_config","keccak_config","pcs_params","poseidon2_config","rpo_config","rpx_config"],"type":["MidenStarkConfig"]};
+window.SIDEBAR_ITEMS = {"constant":["DEEP_POW_BITS","FOLDING_POW_BITS","LOG_FOLDING_ARITY","RELATION_DIGEST"],"fn":["blake3_256_config","keccak_config","observe_protocol_params","observe_var_len_public_inputs","pcs_params","poseidon2_config","rpo_config","rpx_config"],"type":["MidenStarkConfig","Poseidon2Config"]};

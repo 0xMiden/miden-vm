@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `air/src/constraints/op_flags/mod.rs`."><title>mod.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="miden_air" data-themes="" data-resource-suffix="" data-rustdoc-version="1.96.0-nightly (80d0e4be6 2026-03-25)" data-channel="nightly" data-search-js="search-63369b7b.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-5013f961.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">miden_air/constraints/op_flags/</div>mod.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Operation flags for stack constraints.
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `air/src/constraints/op_flags/mod.rs`."><title>mod.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="miden_air" data-themes="" data-resource-suffix="" data-rustdoc-version="1.96.0-nightly (23903d01c 2026-03-26)" data-channel="nightly" data-search-js="search-63369b7b.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-5013f961.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">miden_air/constraints/op_flags/</div>mod.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-4"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="doccomment">//! Operation flags for stack constraints.
 <a href=#2 id=2 data-nosnippet>2</a>//!
 <a href=#3 id=3 data-nosnippet>3</a>//! This module computes operation flags from decoder op bits. These flags are used
 <a href=#4 id=4 data-nosnippet>4</a>//! throughout stack constraints to gate constraint enforcement based on which operation
@@ -714,321 +714,323 @@
 <a href=#714 id=714 data-nosnippet>714</a>        </span>u32and =&gt; opcodes::U32AND,
 <a href=#715 id=715 data-nosnippet>715</a>        <span class="doccomment">/// Operation Flag of U32XOR operation.
 <a href=#716 id=716 data-nosnippet>716</a>        </span>u32xor =&gt; opcodes::U32XOR,
-<a href=#717 id=717 data-nosnippet>717</a>        <span class="doccomment">/// Operation Flag of DROP operation.
-<a href=#718 id=718 data-nosnippet>718</a>        </span><span class="attr">#[allow(dead_code)]
-<a href=#719 id=719 data-nosnippet>719</a>        </span>drop =&gt; opcodes::DROP,
-<a href=#720 id=720 data-nosnippet>720</a>        <span class="doccomment">/// Operation Flag of CSWAP operation.
-<a href=#721 id=721 data-nosnippet>721</a>        </span>cswap =&gt; opcodes::CSWAP,
-<a href=#722 id=722 data-nosnippet>722</a>        <span class="doccomment">/// Operation Flag of CSWAPW operation.
-<a href=#723 id=723 data-nosnippet>723</a>        </span>cswapw =&gt; opcodes::CSWAPW,
-<a href=#724 id=724 data-nosnippet>724</a>        <span class="doccomment">/// Operation Flag of MLOADW operation.
-<a href=#725 id=725 data-nosnippet>725</a>        </span>mloadw =&gt; opcodes::MLOADW,
-<a href=#726 id=726 data-nosnippet>726</a>        <span class="doccomment">/// Operation Flag of MSTORE operation.
-<a href=#727 id=727 data-nosnippet>727</a>        </span>mstore =&gt; opcodes::MSTORE,
-<a href=#728 id=728 data-nosnippet>728</a>        <span class="doccomment">/// Operation Flag of MSTOREW operation.
-<a href=#729 id=729 data-nosnippet>729</a>        </span>mstorew =&gt; opcodes::MSTOREW,
-<a href=#730 id=730 data-nosnippet>730</a>        <span class="doccomment">/// Operation Flag of PAD operation.
-<a href=#731 id=731 data-nosnippet>731</a>        </span>pad =&gt; opcodes::PAD,
-<a href=#732 id=732 data-nosnippet>732</a>        <span class="doccomment">/// Operation Flag of DUP operation.
-<a href=#733 id=733 data-nosnippet>733</a>        </span>dup =&gt; opcodes::DUP0,
-<a href=#734 id=734 data-nosnippet>734</a>        <span class="doccomment">/// Operation Flag of DUP1 operation.
-<a href=#735 id=735 data-nosnippet>735</a>        </span>dup1 =&gt; opcodes::DUP1,
-<a href=#736 id=736 data-nosnippet>736</a>        <span class="doccomment">/// Operation Flag of DUP2 operation.
-<a href=#737 id=737 data-nosnippet>737</a>        </span>dup2 =&gt; opcodes::DUP2,
-<a href=#738 id=738 data-nosnippet>738</a>        <span class="doccomment">/// Operation Flag of DUP3 operation.
-<a href=#739 id=739 data-nosnippet>739</a>        </span>dup3 =&gt; opcodes::DUP3,
-<a href=#740 id=740 data-nosnippet>740</a>        <span class="doccomment">/// Operation Flag of DUP4 operation.
-<a href=#741 id=741 data-nosnippet>741</a>        </span>dup4 =&gt; opcodes::DUP4,
-<a href=#742 id=742 data-nosnippet>742</a>        <span class="doccomment">/// Operation Flag of DUP5 operation.
-<a href=#743 id=743 data-nosnippet>743</a>        </span>dup5 =&gt; opcodes::DUP5,
-<a href=#744 id=744 data-nosnippet>744</a>        <span class="doccomment">/// Operation Flag of DUP6 operation.
-<a href=#745 id=745 data-nosnippet>745</a>        </span>dup6 =&gt; opcodes::DUP6,
-<a href=#746 id=746 data-nosnippet>746</a>        <span class="doccomment">/// Operation Flag of DUP7 operation.
-<a href=#747 id=747 data-nosnippet>747</a>        </span>dup7 =&gt; opcodes::DUP7,
-<a href=#748 id=748 data-nosnippet>748</a>        <span class="doccomment">/// Operation Flag of DUP9 operation.
-<a href=#749 id=749 data-nosnippet>749</a>        </span>dup9 =&gt; opcodes::DUP9,
-<a href=#750 id=750 data-nosnippet>750</a>        <span class="doccomment">/// Operation Flag of DUP11 operation.
-<a href=#751 id=751 data-nosnippet>751</a>        </span>dup11 =&gt; opcodes::DUP11,
-<a href=#752 id=752 data-nosnippet>752</a>        <span class="doccomment">/// Operation Flag of DUP13 operation.
-<a href=#753 id=753 data-nosnippet>753</a>        </span>dup13 =&gt; opcodes::DUP13,
-<a href=#754 id=754 data-nosnippet>754</a>        <span class="doccomment">/// Operation Flag of DUP15 operation.
-<a href=#755 id=755 data-nosnippet>755</a>        </span>dup15 =&gt; opcodes::DUP15,
-<a href=#756 id=756 data-nosnippet>756</a>        <span class="doccomment">/// Operation Flag of ADVPOP operation.
-<a href=#757 id=757 data-nosnippet>757</a>        </span><span class="attr">#[allow(dead_code)]
-<a href=#758 id=758 data-nosnippet>758</a>        </span>advpop =&gt; opcodes::ADVPOP,
-<a href=#759 id=759 data-nosnippet>759</a>        <span class="doccomment">/// Operation Flag of SDEPTH operation.
-<a href=#760 id=760 data-nosnippet>760</a>        </span>sdepth =&gt; opcodes::SDEPTH,
-<a href=#761 id=761 data-nosnippet>761</a>        <span class="doccomment">/// Operation Flag of CLK operation.
-<a href=#762 id=762 data-nosnippet>762</a>        </span>clk =&gt; opcodes::CLK,
-<a href=#763 id=763 data-nosnippet>763</a>    );
-<a href=#764 id=764 data-nosnippet>764</a>
-<a href=#765 id=765 data-nosnippet>765</a>    <span class="comment">// ------ Degree 6 u32 operations  ------------------------------------------------------------
+<a href=#717 id=717 data-nosnippet>717</a>        <span class="doccomment">/// Operation Flag of FRIE2F4 operation.
+<a href=#718 id=718 data-nosnippet>718</a>        </span>frie2f4 =&gt; opcodes::FRIE2F4,
+<a href=#719 id=719 data-nosnippet>719</a>        <span class="doccomment">/// Operation Flag of DROP operation.
+<a href=#720 id=720 data-nosnippet>720</a>        </span><span class="attr">#[allow(dead_code)]
+<a href=#721 id=721 data-nosnippet>721</a>        </span>drop =&gt; opcodes::DROP,
+<a href=#722 id=722 data-nosnippet>722</a>        <span class="doccomment">/// Operation Flag of CSWAP operation.
+<a href=#723 id=723 data-nosnippet>723</a>        </span>cswap =&gt; opcodes::CSWAP,
+<a href=#724 id=724 data-nosnippet>724</a>        <span class="doccomment">/// Operation Flag of CSWAPW operation.
+<a href=#725 id=725 data-nosnippet>725</a>        </span>cswapw =&gt; opcodes::CSWAPW,
+<a href=#726 id=726 data-nosnippet>726</a>        <span class="doccomment">/// Operation Flag of MLOADW operation.
+<a href=#727 id=727 data-nosnippet>727</a>        </span>mloadw =&gt; opcodes::MLOADW,
+<a href=#728 id=728 data-nosnippet>728</a>        <span class="doccomment">/// Operation Flag of MSTORE operation.
+<a href=#729 id=729 data-nosnippet>729</a>        </span>mstore =&gt; opcodes::MSTORE,
+<a href=#730 id=730 data-nosnippet>730</a>        <span class="doccomment">/// Operation Flag of MSTOREW operation.
+<a href=#731 id=731 data-nosnippet>731</a>        </span>mstorew =&gt; opcodes::MSTOREW,
+<a href=#732 id=732 data-nosnippet>732</a>        <span class="doccomment">/// Operation Flag of PAD operation.
+<a href=#733 id=733 data-nosnippet>733</a>        </span>pad =&gt; opcodes::PAD,
+<a href=#734 id=734 data-nosnippet>734</a>        <span class="doccomment">/// Operation Flag of DUP operation.
+<a href=#735 id=735 data-nosnippet>735</a>        </span>dup =&gt; opcodes::DUP0,
+<a href=#736 id=736 data-nosnippet>736</a>        <span class="doccomment">/// Operation Flag of DUP1 operation.
+<a href=#737 id=737 data-nosnippet>737</a>        </span>dup1 =&gt; opcodes::DUP1,
+<a href=#738 id=738 data-nosnippet>738</a>        <span class="doccomment">/// Operation Flag of DUP2 operation.
+<a href=#739 id=739 data-nosnippet>739</a>        </span>dup2 =&gt; opcodes::DUP2,
+<a href=#740 id=740 data-nosnippet>740</a>        <span class="doccomment">/// Operation Flag of DUP3 operation.
+<a href=#741 id=741 data-nosnippet>741</a>        </span>dup3 =&gt; opcodes::DUP3,
+<a href=#742 id=742 data-nosnippet>742</a>        <span class="doccomment">/// Operation Flag of DUP4 operation.
+<a href=#743 id=743 data-nosnippet>743</a>        </span>dup4 =&gt; opcodes::DUP4,
+<a href=#744 id=744 data-nosnippet>744</a>        <span class="doccomment">/// Operation Flag of DUP5 operation.
+<a href=#745 id=745 data-nosnippet>745</a>        </span>dup5 =&gt; opcodes::DUP5,
+<a href=#746 id=746 data-nosnippet>746</a>        <span class="doccomment">/// Operation Flag of DUP6 operation.
+<a href=#747 id=747 data-nosnippet>747</a>        </span>dup6 =&gt; opcodes::DUP6,
+<a href=#748 id=748 data-nosnippet>748</a>        <span class="doccomment">/// Operation Flag of DUP7 operation.
+<a href=#749 id=749 data-nosnippet>749</a>        </span>dup7 =&gt; opcodes::DUP7,
+<a href=#750 id=750 data-nosnippet>750</a>        <span class="doccomment">/// Operation Flag of DUP9 operation.
+<a href=#751 id=751 data-nosnippet>751</a>        </span>dup9 =&gt; opcodes::DUP9,
+<a href=#752 id=752 data-nosnippet>752</a>        <span class="doccomment">/// Operation Flag of DUP11 operation.
+<a href=#753 id=753 data-nosnippet>753</a>        </span>dup11 =&gt; opcodes::DUP11,
+<a href=#754 id=754 data-nosnippet>754</a>        <span class="doccomment">/// Operation Flag of DUP13 operation.
+<a href=#755 id=755 data-nosnippet>755</a>        </span>dup13 =&gt; opcodes::DUP13,
+<a href=#756 id=756 data-nosnippet>756</a>        <span class="doccomment">/// Operation Flag of DUP15 operation.
+<a href=#757 id=757 data-nosnippet>757</a>        </span>dup15 =&gt; opcodes::DUP15,
+<a href=#758 id=758 data-nosnippet>758</a>        <span class="doccomment">/// Operation Flag of ADVPOP operation.
+<a href=#759 id=759 data-nosnippet>759</a>        </span><span class="attr">#[allow(dead_code)]
+<a href=#760 id=760 data-nosnippet>760</a>        </span>advpop =&gt; opcodes::ADVPOP,
+<a href=#761 id=761 data-nosnippet>761</a>        <span class="doccomment">/// Operation Flag of SDEPTH operation.
+<a href=#762 id=762 data-nosnippet>762</a>        </span>sdepth =&gt; opcodes::SDEPTH,
+<a href=#763 id=763 data-nosnippet>763</a>        <span class="doccomment">/// Operation Flag of CLK operation.
+<a href=#764 id=764 data-nosnippet>764</a>        </span>clk =&gt; opcodes::CLK,
+<a href=#765 id=765 data-nosnippet>765</a>    );
 <a href=#766 id=766 data-nosnippet>766</a>
-<a href=#767 id=767 data-nosnippet>767</a>    </span><span class="macro">op_flag_getters!</span>(degree6_op_flags,
-<a href=#768 id=768 data-nosnippet>768</a>        <span class="doccomment">/// Operation Flag of U32ADD operation.
-<a href=#769 id=769 data-nosnippet>769</a>        </span>u32add =&gt; opcodes::U32ADD,
-<a href=#770 id=770 data-nosnippet>770</a>        <span class="doccomment">/// Operation Flag of U32SUB operation.
-<a href=#771 id=771 data-nosnippet>771</a>        </span>u32sub =&gt; opcodes::U32SUB,
-<a href=#772 id=772 data-nosnippet>772</a>        <span class="doccomment">/// Operation Flag of U32MUL operation.
-<a href=#773 id=773 data-nosnippet>773</a>        </span>u32mul =&gt; opcodes::U32MUL,
-<a href=#774 id=774 data-nosnippet>774</a>        <span class="doccomment">/// Operation Flag of U32DIV operation.
-<a href=#775 id=775 data-nosnippet>775</a>        </span>u32div =&gt; opcodes::U32DIV,
-<a href=#776 id=776 data-nosnippet>776</a>        <span class="doccomment">/// Operation Flag of U32SPLIT operation.
-<a href=#777 id=777 data-nosnippet>777</a>        </span>u32split =&gt; opcodes::U32SPLIT,
-<a href=#778 id=778 data-nosnippet>778</a>        <span class="doccomment">/// Operation Flag of U32ASSERT2 operation.
-<a href=#779 id=779 data-nosnippet>779</a>        </span>u32assert2 =&gt; opcodes::U32ASSERT2,
-<a href=#780 id=780 data-nosnippet>780</a>        <span class="doccomment">/// Operation Flag of U32ADD3 operation.
-<a href=#781 id=781 data-nosnippet>781</a>        </span>u32add3 =&gt; opcodes::U32ADD3,
-<a href=#782 id=782 data-nosnippet>782</a>        <span class="doccomment">/// Operation Flag of U32MADD operation.
-<a href=#783 id=783 data-nosnippet>783</a>        </span>u32madd =&gt; opcodes::U32MADD,
-<a href=#784 id=784 data-nosnippet>784</a>    );
-<a href=#785 id=785 data-nosnippet>785</a>
-<a href=#786 id=786 data-nosnippet>786</a>    <span class="comment">// ------ Degree 5 operations  ----------------------------------------------------------------
+<a href=#767 id=767 data-nosnippet>767</a>    <span class="comment">// ------ Degree 6 u32 operations  ------------------------------------------------------------
+<a href=#768 id=768 data-nosnippet>768</a>
+<a href=#769 id=769 data-nosnippet>769</a>    </span><span class="macro">op_flag_getters!</span>(degree6_op_flags,
+<a href=#770 id=770 data-nosnippet>770</a>        <span class="doccomment">/// Operation Flag of U32ADD operation.
+<a href=#771 id=771 data-nosnippet>771</a>        </span>u32add =&gt; opcodes::U32ADD,
+<a href=#772 id=772 data-nosnippet>772</a>        <span class="doccomment">/// Operation Flag of U32SUB operation.
+<a href=#773 id=773 data-nosnippet>773</a>        </span>u32sub =&gt; opcodes::U32SUB,
+<a href=#774 id=774 data-nosnippet>774</a>        <span class="doccomment">/// Operation Flag of U32MUL operation.
+<a href=#775 id=775 data-nosnippet>775</a>        </span>u32mul =&gt; opcodes::U32MUL,
+<a href=#776 id=776 data-nosnippet>776</a>        <span class="doccomment">/// Operation Flag of U32DIV operation.
+<a href=#777 id=777 data-nosnippet>777</a>        </span>u32div =&gt; opcodes::U32DIV,
+<a href=#778 id=778 data-nosnippet>778</a>        <span class="doccomment">/// Operation Flag of U32SPLIT operation.
+<a href=#779 id=779 data-nosnippet>779</a>        </span>u32split =&gt; opcodes::U32SPLIT,
+<a href=#780 id=780 data-nosnippet>780</a>        <span class="doccomment">/// Operation Flag of U32ASSERT2 operation.
+<a href=#781 id=781 data-nosnippet>781</a>        </span>u32assert2 =&gt; opcodes::U32ASSERT2,
+<a href=#782 id=782 data-nosnippet>782</a>        <span class="doccomment">/// Operation Flag of U32ADD3 operation.
+<a href=#783 id=783 data-nosnippet>783</a>        </span>u32add3 =&gt; opcodes::U32ADD3,
+<a href=#784 id=784 data-nosnippet>784</a>        <span class="doccomment">/// Operation Flag of U32MADD operation.
+<a href=#785 id=785 data-nosnippet>785</a>        </span>u32madd =&gt; opcodes::U32MADD,
+<a href=#786 id=786 data-nosnippet>786</a>    );
 <a href=#787 id=787 data-nosnippet>787</a>
-<a href=#788 id=788 data-nosnippet>788</a>    </span><span class="macro">op_flag_getters!</span>(degree5_op_flags,
-<a href=#789 id=789 data-nosnippet>789</a>        <span class="doccomment">/// Operation Flag of HPERM operation.
-<a href=#790 id=790 data-nosnippet>790</a>        </span>hperm =&gt; opcodes::HPERM,
-<a href=#791 id=791 data-nosnippet>791</a>        <span class="doccomment">/// Operation Flag of MPVERIFY operation.
-<a href=#792 id=792 data-nosnippet>792</a>        </span>mpverify =&gt; opcodes::MPVERIFY,
-<a href=#793 id=793 data-nosnippet>793</a>        <span class="doccomment">/// Operation Flag of SPLIT operation.
-<a href=#794 id=794 data-nosnippet>794</a>        </span>split =&gt; opcodes::SPLIT,
-<a href=#795 id=795 data-nosnippet>795</a>        <span class="doccomment">/// Operation Flag of LOOP operation.
-<a href=#796 id=796 data-nosnippet>796</a>        </span>loop_op =&gt; opcodes::LOOP,
-<a href=#797 id=797 data-nosnippet>797</a>        <span class="doccomment">/// Operation Flag of SPAN operation.
-<a href=#798 id=798 data-nosnippet>798</a>        </span>span =&gt; opcodes::SPAN,
-<a href=#799 id=799 data-nosnippet>799</a>        <span class="doccomment">/// Operation Flag of JOIN operation.
-<a href=#800 id=800 data-nosnippet>800</a>        </span>join =&gt; opcodes::JOIN,
-<a href=#801 id=801 data-nosnippet>801</a>        <span class="doccomment">/// Operation Flag of PUSH operation.
-<a href=#802 id=802 data-nosnippet>802</a>        </span>push =&gt; opcodes::PUSH,
-<a href=#803 id=803 data-nosnippet>803</a>        <span class="doccomment">/// Operation Flag of DYN operation.
-<a href=#804 id=804 data-nosnippet>804</a>        </span>dyn_op =&gt; opcodes::DYN,
-<a href=#805 id=805 data-nosnippet>805</a>        <span class="doccomment">/// Operation Flag of DYNCALL operation.
-<a href=#806 id=806 data-nosnippet>806</a>        </span>dyncall =&gt; opcodes::DYNCALL,
-<a href=#807 id=807 data-nosnippet>807</a>        <span class="doccomment">/// Operation Flag of EVALCIRCUIT operation.
-<a href=#808 id=808 data-nosnippet>808</a>        </span>evalcircuit =&gt; opcodes::EVALCIRCUIT,
-<a href=#809 id=809 data-nosnippet>809</a>        <span class="doccomment">/// Operation Flag of LOG_PRECOMPILE operation.
-<a href=#810 id=810 data-nosnippet>810</a>        </span>log_precompile =&gt; opcodes::LOGPRECOMPILE,
-<a href=#811 id=811 data-nosnippet>811</a>        <span class="doccomment">/// Operation Flag of HORNERBASE operation.
-<a href=#812 id=812 data-nosnippet>812</a>        </span>hornerbase =&gt; opcodes::HORNERBASE,
-<a href=#813 id=813 data-nosnippet>813</a>        <span class="doccomment">/// Operation Flag of HORNEREXT operation.
-<a href=#814 id=814 data-nosnippet>814</a>        </span>hornerext =&gt; opcodes::HORNEREXT,
-<a href=#815 id=815 data-nosnippet>815</a>        <span class="doccomment">/// Operation Flag of MSTREAM operation.
-<a href=#816 id=816 data-nosnippet>816</a>        </span>mstream =&gt; opcodes::MSTREAM,
-<a href=#817 id=817 data-nosnippet>817</a>        <span class="doccomment">/// Operation Flag of PIPE operation.
-<a href=#818 id=818 data-nosnippet>818</a>        </span>pipe =&gt; opcodes::PIPE,
-<a href=#819 id=819 data-nosnippet>819</a>    );
-<a href=#820 id=820 data-nosnippet>820</a>
-<a href=#821 id=821 data-nosnippet>821</a>    <span class="comment">// ------ Degree 4 operations  ----------------------------------------------------------------
+<a href=#788 id=788 data-nosnippet>788</a>    <span class="comment">// ------ Degree 5 operations  ----------------------------------------------------------------
+<a href=#789 id=789 data-nosnippet>789</a>
+<a href=#790 id=790 data-nosnippet>790</a>    </span><span class="macro">op_flag_getters!</span>(degree5_op_flags,
+<a href=#791 id=791 data-nosnippet>791</a>        <span class="doccomment">/// Operation Flag of HPERM operation.
+<a href=#792 id=792 data-nosnippet>792</a>        </span>hperm =&gt; opcodes::HPERM,
+<a href=#793 id=793 data-nosnippet>793</a>        <span class="doccomment">/// Operation Flag of MPVERIFY operation.
+<a href=#794 id=794 data-nosnippet>794</a>        </span>mpverify =&gt; opcodes::MPVERIFY,
+<a href=#795 id=795 data-nosnippet>795</a>        <span class="doccomment">/// Operation Flag of SPLIT operation.
+<a href=#796 id=796 data-nosnippet>796</a>        </span>split =&gt; opcodes::SPLIT,
+<a href=#797 id=797 data-nosnippet>797</a>        <span class="doccomment">/// Operation Flag of LOOP operation.
+<a href=#798 id=798 data-nosnippet>798</a>        </span>loop_op =&gt; opcodes::LOOP,
+<a href=#799 id=799 data-nosnippet>799</a>        <span class="doccomment">/// Operation Flag of SPAN operation.
+<a href=#800 id=800 data-nosnippet>800</a>        </span>span =&gt; opcodes::SPAN,
+<a href=#801 id=801 data-nosnippet>801</a>        <span class="doccomment">/// Operation Flag of JOIN operation.
+<a href=#802 id=802 data-nosnippet>802</a>        </span>join =&gt; opcodes::JOIN,
+<a href=#803 id=803 data-nosnippet>803</a>        <span class="doccomment">/// Operation Flag of PUSH operation.
+<a href=#804 id=804 data-nosnippet>804</a>        </span>push =&gt; opcodes::PUSH,
+<a href=#805 id=805 data-nosnippet>805</a>        <span class="doccomment">/// Operation Flag of DYN operation.
+<a href=#806 id=806 data-nosnippet>806</a>        </span>dyn_op =&gt; opcodes::DYN,
+<a href=#807 id=807 data-nosnippet>807</a>        <span class="doccomment">/// Operation Flag of DYNCALL operation.
+<a href=#808 id=808 data-nosnippet>808</a>        </span>dyncall =&gt; opcodes::DYNCALL,
+<a href=#809 id=809 data-nosnippet>809</a>        <span class="doccomment">/// Operation Flag of EVALCIRCUIT operation.
+<a href=#810 id=810 data-nosnippet>810</a>        </span>evalcircuit =&gt; opcodes::EVALCIRCUIT,
+<a href=#811 id=811 data-nosnippet>811</a>        <span class="doccomment">/// Operation Flag of LOG_PRECOMPILE operation.
+<a href=#812 id=812 data-nosnippet>812</a>        </span>log_precompile =&gt; opcodes::LOGPRECOMPILE,
+<a href=#813 id=813 data-nosnippet>813</a>        <span class="doccomment">/// Operation Flag of HORNERBASE operation.
+<a href=#814 id=814 data-nosnippet>814</a>        </span>hornerbase =&gt; opcodes::HORNERBASE,
+<a href=#815 id=815 data-nosnippet>815</a>        <span class="doccomment">/// Operation Flag of HORNEREXT operation.
+<a href=#816 id=816 data-nosnippet>816</a>        </span>hornerext =&gt; opcodes::HORNEREXT,
+<a href=#817 id=817 data-nosnippet>817</a>        <span class="doccomment">/// Operation Flag of MSTREAM operation.
+<a href=#818 id=818 data-nosnippet>818</a>        </span>mstream =&gt; opcodes::MSTREAM,
+<a href=#819 id=819 data-nosnippet>819</a>        <span class="doccomment">/// Operation Flag of PIPE operation.
+<a href=#820 id=820 data-nosnippet>820</a>        </span>pipe =&gt; opcodes::PIPE,
+<a href=#821 id=821 data-nosnippet>821</a>    );
 <a href=#822 id=822 data-nosnippet>822</a>
-<a href=#823 id=823 data-nosnippet>823</a>    </span><span class="macro">op_flag_getters!</span>(degree4_op_flags,
-<a href=#824 id=824 data-nosnippet>824</a>        <span class="doccomment">/// Operation Flag of MRUPDATE operation.
-<a href=#825 id=825 data-nosnippet>825</a>        </span>mrupdate =&gt; opcodes::MRUPDATE,
-<a href=#826 id=826 data-nosnippet>826</a>        <span class="doccomment">/// Operation Flag of CALL operation.
-<a href=#827 id=827 data-nosnippet>827</a>        </span>call =&gt; opcodes::CALL,
-<a href=#828 id=828 data-nosnippet>828</a>        <span class="doccomment">/// Operation Flag of SYSCALL operation.
-<a href=#829 id=829 data-nosnippet>829</a>        </span>syscall =&gt; opcodes::SYSCALL,
-<a href=#830 id=830 data-nosnippet>830</a>        <span class="doccomment">/// Operation Flag of END operation.
-<a href=#831 id=831 data-nosnippet>831</a>        </span>end =&gt; opcodes::END,
-<a href=#832 id=832 data-nosnippet>832</a>        <span class="doccomment">/// Operation Flag of REPEAT operation.
-<a href=#833 id=833 data-nosnippet>833</a>        </span>repeat =&gt; opcodes::REPEAT,
-<a href=#834 id=834 data-nosnippet>834</a>        <span class="doccomment">/// Operation Flag of RESPAN operation.
-<a href=#835 id=835 data-nosnippet>835</a>        </span>respan =&gt; opcodes::RESPAN,
-<a href=#836 id=836 data-nosnippet>836</a>        <span class="doccomment">/// Operation Flag of HALT operation.
-<a href=#837 id=837 data-nosnippet>837</a>        </span>halt =&gt; opcodes::HALT,
-<a href=#838 id=838 data-nosnippet>838</a>        <span class="doccomment">/// Operation Flag of CRYPTOSTREAM operation.
-<a href=#839 id=839 data-nosnippet>839</a>        </span>cryptostream =&gt; opcodes::CRYPTOSTREAM,
-<a href=#840 id=840 data-nosnippet>840</a>    );
-<a href=#841 id=841 data-nosnippet>841</a>
-<a href=#842 id=842 data-nosnippet>842</a>    <span class="comment">// ------ Composite Flags ---------------------------------------------------------------------
+<a href=#823 id=823 data-nosnippet>823</a>    <span class="comment">// ------ Degree 4 operations  ----------------------------------------------------------------
+<a href=#824 id=824 data-nosnippet>824</a>
+<a href=#825 id=825 data-nosnippet>825</a>    </span><span class="macro">op_flag_getters!</span>(degree4_op_flags,
+<a href=#826 id=826 data-nosnippet>826</a>        <span class="doccomment">/// Operation Flag of MRUPDATE operation.
+<a href=#827 id=827 data-nosnippet>827</a>        </span>mrupdate =&gt; opcodes::MRUPDATE,
+<a href=#828 id=828 data-nosnippet>828</a>        <span class="doccomment">/// Operation Flag of CALL operation.
+<a href=#829 id=829 data-nosnippet>829</a>        </span>call =&gt; opcodes::CALL,
+<a href=#830 id=830 data-nosnippet>830</a>        <span class="doccomment">/// Operation Flag of SYSCALL operation.
+<a href=#831 id=831 data-nosnippet>831</a>        </span>syscall =&gt; opcodes::SYSCALL,
+<a href=#832 id=832 data-nosnippet>832</a>        <span class="doccomment">/// Operation Flag of END operation.
+<a href=#833 id=833 data-nosnippet>833</a>        </span>end =&gt; opcodes::END,
+<a href=#834 id=834 data-nosnippet>834</a>        <span class="doccomment">/// Operation Flag of REPEAT operation.
+<a href=#835 id=835 data-nosnippet>835</a>        </span>repeat =&gt; opcodes::REPEAT,
+<a href=#836 id=836 data-nosnippet>836</a>        <span class="doccomment">/// Operation Flag of RESPAN operation.
+<a href=#837 id=837 data-nosnippet>837</a>        </span>respan =&gt; opcodes::RESPAN,
+<a href=#838 id=838 data-nosnippet>838</a>        <span class="doccomment">/// Operation Flag of HALT operation.
+<a href=#839 id=839 data-nosnippet>839</a>        </span>halt =&gt; opcodes::HALT,
+<a href=#840 id=840 data-nosnippet>840</a>        <span class="doccomment">/// Operation Flag of CRYPTOSTREAM operation.
+<a href=#841 id=841 data-nosnippet>841</a>        </span>cryptostream =&gt; opcodes::CRYPTOSTREAM,
+<a href=#842 id=842 data-nosnippet>842</a>    );
 <a href=#843 id=843 data-nosnippet>843</a>
-<a href=#844 id=844 data-nosnippet>844</a>    </span><span class="doccomment">/// Returns the flag for when the stack item at the specified depth remains unchanged.
-<a href=#845 id=845 data-nosnippet>845</a>    </span><span class="attr">#[inline(always)]
-<a href=#846 id=846 data-nosnippet>846</a>    </span><span class="kw">pub fn </span>no_shift_at(<span class="kw-2">&amp;</span><span class="self">self</span>, index: usize) -&gt; E {
-<a href=#847 id=847 data-nosnippet>847</a>        <span class="self">self</span>.no_shift_flags[index].clone()
-<a href=#848 id=848 data-nosnippet>848</a>    }
-<a href=#849 id=849 data-nosnippet>849</a>
-<a href=#850 id=850 data-nosnippet>850</a>    <span class="doccomment">/// Returns the flag for when the stack item at the specified depth shifts left.
-<a href=#851 id=851 data-nosnippet>851</a>    /// Left shift is not defined on position 0, so returns default for index 0.
-<a href=#852 id=852 data-nosnippet>852</a>    </span><span class="attr">#[inline(always)]
-<a href=#853 id=853 data-nosnippet>853</a>    </span><span class="kw">pub fn </span>left_shift_at(<span class="kw-2">&amp;</span><span class="self">self</span>, index: usize) -&gt; E {
-<a href=#854 id=854 data-nosnippet>854</a>        <span class="self">self</span>.left_shift_flags[index].clone()
-<a href=#855 id=855 data-nosnippet>855</a>    }
-<a href=#856 id=856 data-nosnippet>856</a>
-<a href=#857 id=857 data-nosnippet>857</a>    <span class="doccomment">/// Returns the flag for when the stack item at the specified depth shifts right.
-<a href=#858 id=858 data-nosnippet>858</a>    </span><span class="attr">#[inline(always)]
-<a href=#859 id=859 data-nosnippet>859</a>    </span><span class="kw">pub fn </span>right_shift_at(<span class="kw-2">&amp;</span><span class="self">self</span>, index: usize) -&gt; E {
-<a href=#860 id=860 data-nosnippet>860</a>        <span class="self">self</span>.right_shift_flags[index].clone()
-<a href=#861 id=861 data-nosnippet>861</a>    }
-<a href=#862 id=862 data-nosnippet>862</a>
-<a href=#863 id=863 data-nosnippet>863</a>    <span class="doccomment">/// Returns the flag when the stack operation shifts the stack to the right.
-<a href=#864 id=864 data-nosnippet>864</a>    /// Degree: 6
-<a href=#865 id=865 data-nosnippet>865</a>    </span><span class="attr">#[inline(always)]
-<a href=#866 id=866 data-nosnippet>866</a>    </span><span class="kw">pub fn </span>right_shift(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; E {
-<a href=#867 id=867 data-nosnippet>867</a>        <span class="self">self</span>.right_shift.clone()
-<a href=#868 id=868 data-nosnippet>868</a>    }
-<a href=#869 id=869 data-nosnippet>869</a>
-<a href=#870 id=870 data-nosnippet>870</a>    <span class="doccomment">/// Returns the flag when the stack operation shifts the stack to the left.
-<a href=#871 id=871 data-nosnippet>871</a>    ///
-<a href=#872 id=872 data-nosnippet>872</a>    /// Note: `DYNCALL` still shifts the stack, but it is handled via the per-position
-<a href=#873 id=873 data-nosnippet>873</a>    /// `left_shift_at` flags. The aggregate `left_shift` flag only gates the generic
-<a href=#874 id=874 data-nosnippet>874</a>    /// helper/overflow constraints, which do not apply to `DYNCALL` because those
-<a href=#875 id=875 data-nosnippet>875</a>    /// helper columns are reused for the context switch and the overflow pointer is
-<a href=#876 id=876 data-nosnippet>876</a>    /// stored in decoder hasher state (h5), not in the usual helper/stack columns.
-<a href=#877 id=877 data-nosnippet>877</a>    /// Degree: 5
-<a href=#878 id=878 data-nosnippet>878</a>    </span><span class="attr">#[inline(always)]
-<a href=#879 id=879 data-nosnippet>879</a>    </span><span class="kw">pub fn </span>left_shift(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; E {
-<a href=#880 id=880 data-nosnippet>880</a>        <span class="self">self</span>.left_shift.clone()
-<a href=#881 id=881 data-nosnippet>881</a>    }
-<a href=#882 id=882 data-nosnippet>882</a>
-<a href=#883 id=883 data-nosnippet>883</a>    <span class="doccomment">/// Returns the flag when the current operation is a control flow operation.
-<a href=#884 id=884 data-nosnippet>884</a>    ///
-<a href=#885 id=885 data-nosnippet>885</a>    /// Control flow operations are the only operations allowed to execute when outside a basic
-<a href=#886 id=886 data-nosnippet>886</a>    /// block (i.e., when in_span = 0). This includes:
-<a href=#887 id=887 data-nosnippet>887</a>    /// - Block starters: SPAN, JOIN, SPLIT, LOOP
-<a href=#888 id=888 data-nosnippet>888</a>    /// - Block transitions: END, REPEAT, RESPAN, HALT
-<a href=#889 id=889 data-nosnippet>889</a>    /// - Dynamic execution: DYN, DYNCALL
-<a href=#890 id=890 data-nosnippet>890</a>    /// - Procedure calls: CALL, SYSCALL
-<a href=#891 id=891 data-nosnippet>891</a>    ///
-<a href=#892 id=892 data-nosnippet>892</a>    /// Used by the decoder constraint: `(1 - in_span) * (1 - control_flow) = 0`
+<a href=#844 id=844 data-nosnippet>844</a>    <span class="comment">// ------ Composite Flags ---------------------------------------------------------------------
+<a href=#845 id=845 data-nosnippet>845</a>
+<a href=#846 id=846 data-nosnippet>846</a>    </span><span class="doccomment">/// Returns the flag for when the stack item at the specified depth remains unchanged.
+<a href=#847 id=847 data-nosnippet>847</a>    </span><span class="attr">#[inline(always)]
+<a href=#848 id=848 data-nosnippet>848</a>    </span><span class="kw">pub fn </span>no_shift_at(<span class="kw-2">&amp;</span><span class="self">self</span>, index: usize) -&gt; E {
+<a href=#849 id=849 data-nosnippet>849</a>        <span class="self">self</span>.no_shift_flags[index].clone()
+<a href=#850 id=850 data-nosnippet>850</a>    }
+<a href=#851 id=851 data-nosnippet>851</a>
+<a href=#852 id=852 data-nosnippet>852</a>    <span class="doccomment">/// Returns the flag for when the stack item at the specified depth shifts left.
+<a href=#853 id=853 data-nosnippet>853</a>    /// Left shift is not defined on position 0, so returns default for index 0.
+<a href=#854 id=854 data-nosnippet>854</a>    </span><span class="attr">#[inline(always)]
+<a href=#855 id=855 data-nosnippet>855</a>    </span><span class="kw">pub fn </span>left_shift_at(<span class="kw-2">&amp;</span><span class="self">self</span>, index: usize) -&gt; E {
+<a href=#856 id=856 data-nosnippet>856</a>        <span class="self">self</span>.left_shift_flags[index].clone()
+<a href=#857 id=857 data-nosnippet>857</a>    }
+<a href=#858 id=858 data-nosnippet>858</a>
+<a href=#859 id=859 data-nosnippet>859</a>    <span class="doccomment">/// Returns the flag for when the stack item at the specified depth shifts right.
+<a href=#860 id=860 data-nosnippet>860</a>    </span><span class="attr">#[inline(always)]
+<a href=#861 id=861 data-nosnippet>861</a>    </span><span class="kw">pub fn </span>right_shift_at(<span class="kw-2">&amp;</span><span class="self">self</span>, index: usize) -&gt; E {
+<a href=#862 id=862 data-nosnippet>862</a>        <span class="self">self</span>.right_shift_flags[index].clone()
+<a href=#863 id=863 data-nosnippet>863</a>    }
+<a href=#864 id=864 data-nosnippet>864</a>
+<a href=#865 id=865 data-nosnippet>865</a>    <span class="doccomment">/// Returns the flag when the stack operation shifts the stack to the right.
+<a href=#866 id=866 data-nosnippet>866</a>    /// Degree: 6
+<a href=#867 id=867 data-nosnippet>867</a>    </span><span class="attr">#[inline(always)]
+<a href=#868 id=868 data-nosnippet>868</a>    </span><span class="kw">pub fn </span>right_shift(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; E {
+<a href=#869 id=869 data-nosnippet>869</a>        <span class="self">self</span>.right_shift.clone()
+<a href=#870 id=870 data-nosnippet>870</a>    }
+<a href=#871 id=871 data-nosnippet>871</a>
+<a href=#872 id=872 data-nosnippet>872</a>    <span class="doccomment">/// Returns the flag when the stack operation shifts the stack to the left.
+<a href=#873 id=873 data-nosnippet>873</a>    ///
+<a href=#874 id=874 data-nosnippet>874</a>    /// Note: `DYNCALL` still shifts the stack, but it is handled via the per-position
+<a href=#875 id=875 data-nosnippet>875</a>    /// `left_shift_at` flags. The aggregate `left_shift` flag only gates the generic
+<a href=#876 id=876 data-nosnippet>876</a>    /// helper/overflow constraints, which do not apply to `DYNCALL` because those
+<a href=#877 id=877 data-nosnippet>877</a>    /// helper columns are reused for the context switch and the overflow pointer is
+<a href=#878 id=878 data-nosnippet>878</a>    /// stored in decoder hasher state (h5), not in the usual helper/stack columns.
+<a href=#879 id=879 data-nosnippet>879</a>    /// Degree: 5
+<a href=#880 id=880 data-nosnippet>880</a>    </span><span class="attr">#[inline(always)]
+<a href=#881 id=881 data-nosnippet>881</a>    </span><span class="kw">pub fn </span>left_shift(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; E {
+<a href=#882 id=882 data-nosnippet>882</a>        <span class="self">self</span>.left_shift.clone()
+<a href=#883 id=883 data-nosnippet>883</a>    }
+<a href=#884 id=884 data-nosnippet>884</a>
+<a href=#885 id=885 data-nosnippet>885</a>    <span class="doccomment">/// Returns the flag when the current operation is a control flow operation.
+<a href=#886 id=886 data-nosnippet>886</a>    ///
+<a href=#887 id=887 data-nosnippet>887</a>    /// Control flow operations are the only operations allowed to execute when outside a basic
+<a href=#888 id=888 data-nosnippet>888</a>    /// block (i.e., when in_span = 0). This includes:
+<a href=#889 id=889 data-nosnippet>889</a>    /// - Block starters: SPAN, JOIN, SPLIT, LOOP
+<a href=#890 id=890 data-nosnippet>890</a>    /// - Block transitions: END, REPEAT, RESPAN, HALT
+<a href=#891 id=891 data-nosnippet>891</a>    /// - Dynamic execution: DYN, DYNCALL
+<a href=#892 id=892 data-nosnippet>892</a>    /// - Procedure calls: CALL, SYSCALL
 <a href=#893 id=893 data-nosnippet>893</a>    ///
-<a href=#894 id=894 data-nosnippet>894</a>    /// Degree: 3
-<a href=#895 id=895 data-nosnippet>895</a>    </span><span class="attr">#[inline(always)]
-<a href=#896 id=896 data-nosnippet>896</a>    </span><span class="kw">pub fn </span>control_flow(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; E {
-<a href=#897 id=897 data-nosnippet>897</a>        <span class="self">self</span>.control_flow.clone()
-<a href=#898 id=898 data-nosnippet>898</a>    }
-<a href=#899 id=899 data-nosnippet>899</a>
-<a href=#900 id=900 data-nosnippet>900</a>    <span class="doccomment">/// Returns the flag when the current operation is a u32 operation requiring range checks.
-<a href=#901 id=901 data-nosnippet>901</a>    </span><span class="attr">#[inline(always)]
-<a href=#902 id=902 data-nosnippet>902</a>    #[allow(dead_code)]
-<a href=#903 id=903 data-nosnippet>903</a>    </span><span class="kw">pub fn </span>u32_rc_op(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; E {
-<a href=#904 id=904 data-nosnippet>904</a>        <span class="self">self</span>.u32_rc_op.clone()
-<a href=#905 id=905 data-nosnippet>905</a>    }
-<a href=#906 id=906 data-nosnippet>906</a>
-<a href=#907 id=907 data-nosnippet>907</a>    <span class="doccomment">/// Returns the flag indicating whether the overflow stack contains values.
-<a href=#908 id=908 data-nosnippet>908</a>    /// Degree: 2
-<a href=#909 id=909 data-nosnippet>909</a>    </span><span class="attr">#[inline(always)]
-<a href=#910 id=910 data-nosnippet>910</a>    </span><span class="kw">pub fn </span>overflow(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; E {
-<a href=#911 id=911 data-nosnippet>911</a>        <span class="self">self</span>.overflow.clone()
-<a href=#912 id=912 data-nosnippet>912</a>    }
-<a href=#913 id=913 data-nosnippet>913</a>
-<a href=#914 id=914 data-nosnippet>914</a>    <span class="comment">// TEST ACCESSORS
-<a href=#915 id=915 data-nosnippet>915</a>    // ============================================================================================
-<a href=#916 id=916 data-nosnippet>916</a>
-<a href=#917 id=917 data-nosnippet>917</a>    </span><span class="doccomment">/// Returns reference to degree 7 operation flags array (for testing).
-<a href=#918 id=918 data-nosnippet>918</a>    </span><span class="attr">#[cfg(test)]
-<a href=#919 id=919 data-nosnippet>919</a>    </span><span class="kw">pub fn </span>degree7_op_flags(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[E; NUM_DEGREE_7_OPS] {
-<a href=#920 id=920 data-nosnippet>920</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.degree7_op_flags
-<a href=#921 id=921 data-nosnippet>921</a>    }
-<a href=#922 id=922 data-nosnippet>922</a>
-<a href=#923 id=923 data-nosnippet>923</a>    <span class="doccomment">/// Returns reference to degree 6 operation flags array (for testing).
-<a href=#924 id=924 data-nosnippet>924</a>    </span><span class="attr">#[cfg(test)]
-<a href=#925 id=925 data-nosnippet>925</a>    </span><span class="kw">pub fn </span>degree6_op_flags(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[E; NUM_DEGREE_6_OPS] {
-<a href=#926 id=926 data-nosnippet>926</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.degree6_op_flags
-<a href=#927 id=927 data-nosnippet>927</a>    }
-<a href=#928 id=928 data-nosnippet>928</a>
-<a href=#929 id=929 data-nosnippet>929</a>    <span class="doccomment">/// Returns reference to degree 5 operation flags array (for testing).
-<a href=#930 id=930 data-nosnippet>930</a>    </span><span class="attr">#[cfg(test)]
-<a href=#931 id=931 data-nosnippet>931</a>    </span><span class="kw">pub fn </span>degree5_op_flags(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[E; NUM_DEGREE_5_OPS] {
-<a href=#932 id=932 data-nosnippet>932</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.degree5_op_flags
-<a href=#933 id=933 data-nosnippet>933</a>    }
-<a href=#934 id=934 data-nosnippet>934</a>
-<a href=#935 id=935 data-nosnippet>935</a>    <span class="doccomment">/// Returns reference to degree 4 operation flags array (for testing).
-<a href=#936 id=936 data-nosnippet>936</a>    </span><span class="attr">#[cfg(test)]
-<a href=#937 id=937 data-nosnippet>937</a>    </span><span class="kw">pub fn </span>degree4_op_flags(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[E; NUM_DEGREE_4_OPS] {
-<a href=#938 id=938 data-nosnippet>938</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.degree4_op_flags
-<a href=#939 id=939 data-nosnippet>939</a>    }
-<a href=#940 id=940 data-nosnippet>940</a>}
-<a href=#941 id=941 data-nosnippet>941</a>
-<a href=#942 id=942 data-nosnippet>942</a><span class="comment">// INTERNAL HELPERS
-<a href=#943 id=943 data-nosnippet>943</a>// ================================================================================================
-<a href=#944 id=944 data-nosnippet>944</a>
-<a href=#945 id=945 data-nosnippet>945</a></span><span class="doccomment">/// Maps opcode of an operation to the index in its respective degree flag array.
-<a href=#946 id=946 data-nosnippet>946</a></span><span class="kw">pub const fn </span>get_op_index(opcode: u8) -&gt; usize {
-<a href=#947 id=947 data-nosnippet>947</a>    <span class="kw">let </span>opcode = opcode <span class="kw">as </span>usize;
-<a href=#948 id=948 data-nosnippet>948</a>
-<a href=#949 id=949 data-nosnippet>949</a>    <span class="kw">if </span>opcode &lt;= DEGREE_7_OPCODE_ENDS {
-<a href=#950 id=950 data-nosnippet>950</a>        <span class="comment">// Index of a degree 7 operation (0-63)
-<a href=#951 id=951 data-nosnippet>951</a>        </span>opcode
-<a href=#952 id=952 data-nosnippet>952</a>    } <span class="kw">else if </span>opcode &lt;= DEGREE_6_OPCODE_ENDS {
-<a href=#953 id=953 data-nosnippet>953</a>        <span class="comment">// Index of a degree 6 operation (64-79, even opcodes only)
-<a href=#954 id=954 data-nosnippet>954</a>        </span>(opcode - DEGREE_6_OPCODE_STARTS) / <span class="number">2
-<a href=#955 id=955 data-nosnippet>955</a>    </span>} <span class="kw">else if </span>opcode &lt;= DEGREE_5_OPCODE_ENDS {
-<a href=#956 id=956 data-nosnippet>956</a>        <span class="comment">// Index of a degree 5 operation (80-95)
-<a href=#957 id=957 data-nosnippet>957</a>        </span>opcode - DEGREE_5_OPCODE_STARTS
-<a href=#958 id=958 data-nosnippet>958</a>    } <span class="kw">else </span>{
-<a href=#959 id=959 data-nosnippet>959</a>        <span class="comment">// Index of a degree 4 operation (96-127, every 4th opcode)
-<a href=#960 id=960 data-nosnippet>960</a>        </span>(opcode - DEGREE_4_OPCODE_STARTS) / <span class="number">4
-<a href=#961 id=961 data-nosnippet>961</a>    </span>}
-<a href=#962 id=962 data-nosnippet>962</a>}
-<a href=#963 id=963 data-nosnippet>963</a>
-<a href=#964 id=964 data-nosnippet>964</a><span class="comment">// TEST HELPERS
-<a href=#965 id=965 data-nosnippet>965</a>// ================================================================================================
-<a href=#966 id=966 data-nosnippet>966</a>
-<a href=#967 id=967 data-nosnippet>967</a></span><span class="doccomment">/// Generates a test trace row with the op bits set for a given opcode.
-<a href=#968 id=968 data-nosnippet>968</a>///
-<a href=#969 id=969 data-nosnippet>969</a>/// This creates a minimal trace row where:
-<a href=#970 id=970 data-nosnippet>970</a>/// - Op bits are set according to the opcode's binary representation
-<a href=#971 id=971 data-nosnippet>971</a>/// - Op bits extra columns are computed for degree reduction
-<a href=#972 id=972 data-nosnippet>972</a>/// - All other columns are zero
-<a href=#973 id=973 data-nosnippet>973</a></span><span class="attr">#[cfg(test)]
-<a href=#974 id=974 data-nosnippet>974</a></span><span class="kw">pub fn </span>generate_test_row(opcode: usize) -&gt; <span class="kw">crate</span>::MainTraceRow&lt;miden_core::Felt&gt; {
-<a href=#975 id=975 data-nosnippet>975</a>    <span class="kw">use </span>miden_core::{ONE, ZERO};
-<a href=#976 id=976 data-nosnippet>976</a>
-<a href=#977 id=977 data-nosnippet>977</a>    <span class="kw">use </span><span class="kw">crate</span>::trace::{
-<a href=#978 id=978 data-nosnippet>978</a>        CHIPLETS_WIDTH, DECODER_TRACE_WIDTH, RANGE_CHECK_TRACE_WIDTH, STACK_TRACE_WIDTH,
-<a href=#979 id=979 data-nosnippet>979</a>        decoder::OP_BITS_EXTRA_COLS_RANGE,
-<a href=#980 id=980 data-nosnippet>980</a>    };
-<a href=#981 id=981 data-nosnippet>981</a>
-<a href=#982 id=982 data-nosnippet>982</a>    <span class="comment">// Get op bits for this opcode
-<a href=#983 id=983 data-nosnippet>983</a>    </span><span class="kw">let </span>op_bits = get_op_bits(opcode);
-<a href=#984 id=984 data-nosnippet>984</a>
-<a href=#985 id=985 data-nosnippet>985</a>    <span class="comment">// Initialize decoder array with zeros
-<a href=#986 id=986 data-nosnippet>986</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>decoder = [ZERO; DECODER_TRACE_WIDTH];
-<a href=#987 id=987 data-nosnippet>987</a>
-<a href=#988 id=988 data-nosnippet>988</a>    <span class="comment">// Set op bits (indices 1-7 in decoder, after addr column at index 0)
-<a href=#989 id=989 data-nosnippet>989</a>    </span><span class="kw">for </span>(i, <span class="kw-2">&amp;</span>bit) <span class="kw">in </span>op_bits.iter().enumerate() {
-<a href=#990 id=990 data-nosnippet>990</a>        decoder[OP_BITS_RANGE.start + i] = bit;
-<a href=#991 id=991 data-nosnippet>991</a>    }
-<a href=#992 id=992 data-nosnippet>992</a>
-<a href=#993 id=993 data-nosnippet>993</a>    <span class="comment">// Compute and set op bits extra columns for degree reduction
-<a href=#994 id=994 data-nosnippet>994</a>    </span><span class="kw">let </span>bit_6 = op_bits[<span class="number">6</span>];
-<a href=#995 id=995 data-nosnippet>995</a>    <span class="kw">let </span>bit_5 = op_bits[<span class="number">5</span>];
-<a href=#996 id=996 data-nosnippet>996</a>    <span class="kw">let </span>bit_4 = op_bits[<span class="number">4</span>];
-<a href=#997 id=997 data-nosnippet>997</a>
-<a href=#998 id=998 data-nosnippet>998</a>    <span class="comment">// op_bit_extra[0] = bit_6 * (1 - bit_5) * bit_4 (degree 5 flag)
-<a href=#999 id=999 data-nosnippet>999</a>    </span>decoder[OP_BITS_EXTRA_COLS_RANGE.start] = bit_6 * (ONE - bit_5) * bit_4;
-<a href=#1000 id=1000 data-nosnippet>1000</a>
-<a href=#1001 id=1001 data-nosnippet>1001</a>    <span class="comment">// op_bit_extra[1] = bit_6 * bit_5 (degree 4 flag)
-<a href=#1002 id=1002 data-nosnippet>1002</a>    </span>decoder[OP_BITS_EXTRA_COLS_RANGE.start + <span class="number">1</span>] = bit_6 * bit_5;
-<a href=#1003 id=1003 data-nosnippet>1003</a>
-<a href=#1004 id=1004 data-nosnippet>1004</a>    <span class="kw">crate</span>::MainTraceRow {
-<a href=#1005 id=1005 data-nosnippet>1005</a>        clk: ZERO,
-<a href=#1006 id=1006 data-nosnippet>1006</a>        ctx: ZERO,
-<a href=#1007 id=1007 data-nosnippet>1007</a>        fn_hash: [ZERO; <span class="number">4</span>],
-<a href=#1008 id=1008 data-nosnippet>1008</a>        decoder,
-<a href=#1009 id=1009 data-nosnippet>1009</a>        stack: [ZERO; STACK_TRACE_WIDTH],
-<a href=#1010 id=1010 data-nosnippet>1010</a>        range: [ZERO; RANGE_CHECK_TRACE_WIDTH],
-<a href=#1011 id=1011 data-nosnippet>1011</a>        chiplets: [ZERO; CHIPLETS_WIDTH],
-<a href=#1012 id=1012 data-nosnippet>1012</a>    }
-<a href=#1013 id=1013 data-nosnippet>1013</a>}
-<a href=#1014 id=1014 data-nosnippet>1014</a>
-<a href=#1015 id=1015 data-nosnippet>1015</a><span class="doccomment">/// Returns a 7-bit array representation of an opcode.
-<a href=#1016 id=1016 data-nosnippet>1016</a></span><span class="attr">#[cfg(test)]
-<a href=#1017 id=1017 data-nosnippet>1017</a></span><span class="kw">pub fn </span>get_op_bits(opcode: usize) -&gt; [miden_core::Felt; NUM_OP_BITS] {
-<a href=#1018 id=1018 data-nosnippet>1018</a>    <span class="kw">use </span>miden_core::{Felt, ZERO};
-<a href=#1019 id=1019 data-nosnippet>1019</a>
-<a href=#1020 id=1020 data-nosnippet>1020</a>    <span class="kw">let </span><span class="kw-2">mut </span>opcode_copy = opcode;
-<a href=#1021 id=1021 data-nosnippet>1021</a>    <span class="kw">let </span><span class="kw-2">mut </span>bit_array = [ZERO; NUM_OP_BITS];
-<a href=#1022 id=1022 data-nosnippet>1022</a>
-<a href=#1023 id=1023 data-nosnippet>1023</a>    <span class="kw">for </span>bit <span class="kw">in </span>bit_array.iter_mut() {
-<a href=#1024 id=1024 data-nosnippet>1024</a>        <span class="kw-2">*</span>bit = Felt::new((opcode_copy &amp; <span class="number">1</span>) <span class="kw">as </span>u64);
-<a href=#1025 id=1025 data-nosnippet>1025</a>        opcode_copy &gt;&gt;= <span class="number">1</span>;
-<a href=#1026 id=1026 data-nosnippet>1026</a>    }
-<a href=#1027 id=1027 data-nosnippet>1027</a>
-<a href=#1028 id=1028 data-nosnippet>1028</a>    <span class="macro">assert_eq!</span>(opcode_copy, <span class="number">0</span>, <span class="string">"Opcode must be 7 bits"</span>);
-<a href=#1029 id=1029 data-nosnippet>1029</a>    bit_array
-<a href=#1030 id=1030 data-nosnippet>1030</a>}
-<a href=#1031 id=1031 data-nosnippet>1031</a>
-<a href=#1032 id=1032 data-nosnippet>1032</a><span class="attr">#[cfg(test)]
-<a href=#1033 id=1033 data-nosnippet>1033</a></span><span class="kw">mod </span>tests;
+<a href=#894 id=894 data-nosnippet>894</a>    /// Used by the decoder constraint: `(1 - in_span) * (1 - control_flow) = 0`
+<a href=#895 id=895 data-nosnippet>895</a>    ///
+<a href=#896 id=896 data-nosnippet>896</a>    /// Degree: 3
+<a href=#897 id=897 data-nosnippet>897</a>    </span><span class="attr">#[inline(always)]
+<a href=#898 id=898 data-nosnippet>898</a>    </span><span class="kw">pub fn </span>control_flow(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; E {
+<a href=#899 id=899 data-nosnippet>899</a>        <span class="self">self</span>.control_flow.clone()
+<a href=#900 id=900 data-nosnippet>900</a>    }
+<a href=#901 id=901 data-nosnippet>901</a>
+<a href=#902 id=902 data-nosnippet>902</a>    <span class="doccomment">/// Returns the flag when the current operation is a u32 operation requiring range checks.
+<a href=#903 id=903 data-nosnippet>903</a>    </span><span class="attr">#[inline(always)]
+<a href=#904 id=904 data-nosnippet>904</a>    #[allow(dead_code)]
+<a href=#905 id=905 data-nosnippet>905</a>    </span><span class="kw">pub fn </span>u32_rc_op(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; E {
+<a href=#906 id=906 data-nosnippet>906</a>        <span class="self">self</span>.u32_rc_op.clone()
+<a href=#907 id=907 data-nosnippet>907</a>    }
+<a href=#908 id=908 data-nosnippet>908</a>
+<a href=#909 id=909 data-nosnippet>909</a>    <span class="doccomment">/// Returns the flag indicating whether the overflow stack contains values.
+<a href=#910 id=910 data-nosnippet>910</a>    /// Degree: 2
+<a href=#911 id=911 data-nosnippet>911</a>    </span><span class="attr">#[inline(always)]
+<a href=#912 id=912 data-nosnippet>912</a>    </span><span class="kw">pub fn </span>overflow(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; E {
+<a href=#913 id=913 data-nosnippet>913</a>        <span class="self">self</span>.overflow.clone()
+<a href=#914 id=914 data-nosnippet>914</a>    }
+<a href=#915 id=915 data-nosnippet>915</a>
+<a href=#916 id=916 data-nosnippet>916</a>    <span class="comment">// TEST ACCESSORS
+<a href=#917 id=917 data-nosnippet>917</a>    // ============================================================================================
+<a href=#918 id=918 data-nosnippet>918</a>
+<a href=#919 id=919 data-nosnippet>919</a>    </span><span class="doccomment">/// Returns reference to degree 7 operation flags array (for testing).
+<a href=#920 id=920 data-nosnippet>920</a>    </span><span class="attr">#[cfg(test)]
+<a href=#921 id=921 data-nosnippet>921</a>    </span><span class="kw">pub fn </span>degree7_op_flags(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[E; NUM_DEGREE_7_OPS] {
+<a href=#922 id=922 data-nosnippet>922</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.degree7_op_flags
+<a href=#923 id=923 data-nosnippet>923</a>    }
+<a href=#924 id=924 data-nosnippet>924</a>
+<a href=#925 id=925 data-nosnippet>925</a>    <span class="doccomment">/// Returns reference to degree 6 operation flags array (for testing).
+<a href=#926 id=926 data-nosnippet>926</a>    </span><span class="attr">#[cfg(test)]
+<a href=#927 id=927 data-nosnippet>927</a>    </span><span class="kw">pub fn </span>degree6_op_flags(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[E; NUM_DEGREE_6_OPS] {
+<a href=#928 id=928 data-nosnippet>928</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.degree6_op_flags
+<a href=#929 id=929 data-nosnippet>929</a>    }
+<a href=#930 id=930 data-nosnippet>930</a>
+<a href=#931 id=931 data-nosnippet>931</a>    <span class="doccomment">/// Returns reference to degree 5 operation flags array (for testing).
+<a href=#932 id=932 data-nosnippet>932</a>    </span><span class="attr">#[cfg(test)]
+<a href=#933 id=933 data-nosnippet>933</a>    </span><span class="kw">pub fn </span>degree5_op_flags(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[E; NUM_DEGREE_5_OPS] {
+<a href=#934 id=934 data-nosnippet>934</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.degree5_op_flags
+<a href=#935 id=935 data-nosnippet>935</a>    }
+<a href=#936 id=936 data-nosnippet>936</a>
+<a href=#937 id=937 data-nosnippet>937</a>    <span class="doccomment">/// Returns reference to degree 4 operation flags array (for testing).
+<a href=#938 id=938 data-nosnippet>938</a>    </span><span class="attr">#[cfg(test)]
+<a href=#939 id=939 data-nosnippet>939</a>    </span><span class="kw">pub fn </span>degree4_op_flags(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[E; NUM_DEGREE_4_OPS] {
+<a href=#940 id=940 data-nosnippet>940</a>        <span class="kw-2">&amp;</span><span class="self">self</span>.degree4_op_flags
+<a href=#941 id=941 data-nosnippet>941</a>    }
+<a href=#942 id=942 data-nosnippet>942</a>}
+<a href=#943 id=943 data-nosnippet>943</a>
+<a href=#944 id=944 data-nosnippet>944</a><span class="comment">// INTERNAL HELPERS
+<a href=#945 id=945 data-nosnippet>945</a>// ================================================================================================
+<a href=#946 id=946 data-nosnippet>946</a>
+<a href=#947 id=947 data-nosnippet>947</a></span><span class="doccomment">/// Maps opcode of an operation to the index in its respective degree flag array.
+<a href=#948 id=948 data-nosnippet>948</a></span><span class="kw">pub const fn </span>get_op_index(opcode: u8) -&gt; usize {
+<a href=#949 id=949 data-nosnippet>949</a>    <span class="kw">let </span>opcode = opcode <span class="kw">as </span>usize;
+<a href=#950 id=950 data-nosnippet>950</a>
+<a href=#951 id=951 data-nosnippet>951</a>    <span class="kw">if </span>opcode &lt;= DEGREE_7_OPCODE_ENDS {
+<a href=#952 id=952 data-nosnippet>952</a>        <span class="comment">// Index of a degree 7 operation (0-63)
+<a href=#953 id=953 data-nosnippet>953</a>        </span>opcode
+<a href=#954 id=954 data-nosnippet>954</a>    } <span class="kw">else if </span>opcode &lt;= DEGREE_6_OPCODE_ENDS {
+<a href=#955 id=955 data-nosnippet>955</a>        <span class="comment">// Index of a degree 6 operation (64-79, even opcodes only)
+<a href=#956 id=956 data-nosnippet>956</a>        </span>(opcode - DEGREE_6_OPCODE_STARTS) / <span class="number">2
+<a href=#957 id=957 data-nosnippet>957</a>    </span>} <span class="kw">else if </span>opcode &lt;= DEGREE_5_OPCODE_ENDS {
+<a href=#958 id=958 data-nosnippet>958</a>        <span class="comment">// Index of a degree 5 operation (80-95)
+<a href=#959 id=959 data-nosnippet>959</a>        </span>opcode - DEGREE_5_OPCODE_STARTS
+<a href=#960 id=960 data-nosnippet>960</a>    } <span class="kw">else </span>{
+<a href=#961 id=961 data-nosnippet>961</a>        <span class="comment">// Index of a degree 4 operation (96-127, every 4th opcode)
+<a href=#962 id=962 data-nosnippet>962</a>        </span>(opcode - DEGREE_4_OPCODE_STARTS) / <span class="number">4
+<a href=#963 id=963 data-nosnippet>963</a>    </span>}
+<a href=#964 id=964 data-nosnippet>964</a>}
+<a href=#965 id=965 data-nosnippet>965</a>
+<a href=#966 id=966 data-nosnippet>966</a><span class="comment">// TEST HELPERS
+<a href=#967 id=967 data-nosnippet>967</a>// ================================================================================================
+<a href=#968 id=968 data-nosnippet>968</a>
+<a href=#969 id=969 data-nosnippet>969</a></span><span class="doccomment">/// Generates a test trace row with the op bits set for a given opcode.
+<a href=#970 id=970 data-nosnippet>970</a>///
+<a href=#971 id=971 data-nosnippet>971</a>/// This creates a minimal trace row where:
+<a href=#972 id=972 data-nosnippet>972</a>/// - Op bits are set according to the opcode's binary representation
+<a href=#973 id=973 data-nosnippet>973</a>/// - Op bits extra columns are computed for degree reduction
+<a href=#974 id=974 data-nosnippet>974</a>/// - All other columns are zero
+<a href=#975 id=975 data-nosnippet>975</a></span><span class="attr">#[cfg(test)]
+<a href=#976 id=976 data-nosnippet>976</a></span><span class="kw">pub fn </span>generate_test_row(opcode: usize) -&gt; <span class="kw">crate</span>::MainTraceRow&lt;miden_core::Felt&gt; {
+<a href=#977 id=977 data-nosnippet>977</a>    <span class="kw">use </span>miden_core::{ONE, ZERO};
+<a href=#978 id=978 data-nosnippet>978</a>
+<a href=#979 id=979 data-nosnippet>979</a>    <span class="kw">use </span><span class="kw">crate</span>::trace::{
+<a href=#980 id=980 data-nosnippet>980</a>        CHIPLETS_WIDTH, DECODER_TRACE_WIDTH, RANGE_CHECK_TRACE_WIDTH, STACK_TRACE_WIDTH,
+<a href=#981 id=981 data-nosnippet>981</a>        decoder::OP_BITS_EXTRA_COLS_RANGE,
+<a href=#982 id=982 data-nosnippet>982</a>    };
+<a href=#983 id=983 data-nosnippet>983</a>
+<a href=#984 id=984 data-nosnippet>984</a>    <span class="comment">// Get op bits for this opcode
+<a href=#985 id=985 data-nosnippet>985</a>    </span><span class="kw">let </span>op_bits = get_op_bits(opcode);
+<a href=#986 id=986 data-nosnippet>986</a>
+<a href=#987 id=987 data-nosnippet>987</a>    <span class="comment">// Initialize decoder array with zeros
+<a href=#988 id=988 data-nosnippet>988</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>decoder = [ZERO; DECODER_TRACE_WIDTH];
+<a href=#989 id=989 data-nosnippet>989</a>
+<a href=#990 id=990 data-nosnippet>990</a>    <span class="comment">// Set op bits (indices 1-7 in decoder, after addr column at index 0)
+<a href=#991 id=991 data-nosnippet>991</a>    </span><span class="kw">for </span>(i, <span class="kw-2">&amp;</span>bit) <span class="kw">in </span>op_bits.iter().enumerate() {
+<a href=#992 id=992 data-nosnippet>992</a>        decoder[OP_BITS_RANGE.start + i] = bit;
+<a href=#993 id=993 data-nosnippet>993</a>    }
+<a href=#994 id=994 data-nosnippet>994</a>
+<a href=#995 id=995 data-nosnippet>995</a>    <span class="comment">// Compute and set op bits extra columns for degree reduction
+<a href=#996 id=996 data-nosnippet>996</a>    </span><span class="kw">let </span>bit_6 = op_bits[<span class="number">6</span>];
+<a href=#997 id=997 data-nosnippet>997</a>    <span class="kw">let </span>bit_5 = op_bits[<span class="number">5</span>];
+<a href=#998 id=998 data-nosnippet>998</a>    <span class="kw">let </span>bit_4 = op_bits[<span class="number">4</span>];
+<a href=#999 id=999 data-nosnippet>999</a>
+<a href=#1000 id=1000 data-nosnippet>1000</a>    <span class="comment">// op_bit_extra[0] = bit_6 * (1 - bit_5) * bit_4 (degree 5 flag)
+<a href=#1001 id=1001 data-nosnippet>1001</a>    </span>decoder[OP_BITS_EXTRA_COLS_RANGE.start] = bit_6 * (ONE - bit_5) * bit_4;
+<a href=#1002 id=1002 data-nosnippet>1002</a>
+<a href=#1003 id=1003 data-nosnippet>1003</a>    <span class="comment">// op_bit_extra[1] = bit_6 * bit_5 (degree 4 flag)
+<a href=#1004 id=1004 data-nosnippet>1004</a>    </span>decoder[OP_BITS_EXTRA_COLS_RANGE.start + <span class="number">1</span>] = bit_6 * bit_5;
+<a href=#1005 id=1005 data-nosnippet>1005</a>
+<a href=#1006 id=1006 data-nosnippet>1006</a>    <span class="kw">crate</span>::MainTraceRow {
+<a href=#1007 id=1007 data-nosnippet>1007</a>        clk: ZERO,
+<a href=#1008 id=1008 data-nosnippet>1008</a>        ctx: ZERO,
+<a href=#1009 id=1009 data-nosnippet>1009</a>        fn_hash: [ZERO; <span class="number">4</span>],
+<a href=#1010 id=1010 data-nosnippet>1010</a>        decoder,
+<a href=#1011 id=1011 data-nosnippet>1011</a>        stack: [ZERO; STACK_TRACE_WIDTH],
+<a href=#1012 id=1012 data-nosnippet>1012</a>        range: [ZERO; RANGE_CHECK_TRACE_WIDTH],
+<a href=#1013 id=1013 data-nosnippet>1013</a>        chiplets: [ZERO; CHIPLETS_WIDTH],
+<a href=#1014 id=1014 data-nosnippet>1014</a>    }
+<a href=#1015 id=1015 data-nosnippet>1015</a>}
+<a href=#1016 id=1016 data-nosnippet>1016</a>
+<a href=#1017 id=1017 data-nosnippet>1017</a><span class="doccomment">/// Returns a 7-bit array representation of an opcode.
+<a href=#1018 id=1018 data-nosnippet>1018</a></span><span class="attr">#[cfg(test)]
+<a href=#1019 id=1019 data-nosnippet>1019</a></span><span class="kw">pub fn </span>get_op_bits(opcode: usize) -&gt; [miden_core::Felt; NUM_OP_BITS] {
+<a href=#1020 id=1020 data-nosnippet>1020</a>    <span class="kw">use </span>miden_core::{Felt, ZERO};
+<a href=#1021 id=1021 data-nosnippet>1021</a>
+<a href=#1022 id=1022 data-nosnippet>1022</a>    <span class="kw">let </span><span class="kw-2">mut </span>opcode_copy = opcode;
+<a href=#1023 id=1023 data-nosnippet>1023</a>    <span class="kw">let </span><span class="kw-2">mut </span>bit_array = [ZERO; NUM_OP_BITS];
+<a href=#1024 id=1024 data-nosnippet>1024</a>
+<a href=#1025 id=1025 data-nosnippet>1025</a>    <span class="kw">for </span>bit <span class="kw">in </span>bit_array.iter_mut() {
+<a href=#1026 id=1026 data-nosnippet>1026</a>        <span class="kw-2">*</span>bit = Felt::new((opcode_copy &amp; <span class="number">1</span>) <span class="kw">as </span>u64);
+<a href=#1027 id=1027 data-nosnippet>1027</a>        opcode_copy &gt;&gt;= <span class="number">1</span>;
+<a href=#1028 id=1028 data-nosnippet>1028</a>    }
+<a href=#1029 id=1029 data-nosnippet>1029</a>
+<a href=#1030 id=1030 data-nosnippet>1030</a>    <span class="macro">assert_eq!</span>(opcode_copy, <span class="number">0</span>, <span class="string">"Opcode must be 7 bits"</span>);
+<a href=#1031 id=1031 data-nosnippet>1031</a>    bit_array
+<a href=#1032 id=1032 data-nosnippet>1032</a>}
+<a href=#1033 id=1033 data-nosnippet>1033</a>
+<a href=#1034 id=1034 data-nosnippet>1034</a><span class="attr">#[cfg(test)]
+<a href=#1035 id=1035 data-nosnippet>1035</a></span><span class="kw">mod </span>tests;
 </code></pre></div></section></main></body></html>
