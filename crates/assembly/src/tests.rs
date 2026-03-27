@@ -5861,12 +5861,12 @@ end
         &context,
         r#"
 begin
-    syscall.::$kernel::k1
+    syscall.k1
 end
 "#
     );
 
-    // syscall must succeed
+    // syscall must succeed (use unqualified name; the Symbol arm resolves it in the kernel)
     Assembler::with_kernel(context.source_manager(), kernel_lib)
         .assemble_program(program_src)
         .expect("syscall targeting a kernel export must succeed (#2902)");
