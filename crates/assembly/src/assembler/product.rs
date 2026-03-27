@@ -1,12 +1,9 @@
 use super::*;
 
 pub struct AssemblyProduct {
-    // This is unused when the `std` feature is not present
     kind: TargetType,
     artifact: Arc<Library>,
     kernel: Option<Kernel>,
-    // This is unused when the `std` feature is not present
-    #[allow(unused)]
     manifest: PackageManifest,
 }
 
@@ -24,12 +21,12 @@ impl AssemblyProduct {
         Self { kind, artifact, kernel, manifest }
     }
 
-    #[cfg(feature = "std")]
+    #[cfg_attr(not(feature = "std"), expect(unused))]
     pub fn kind(&self) -> TargetType {
         self.kind
     }
 
-    #[cfg(feature = "std")]
+    #[cfg_attr(not(feature = "std"), expect(unused))]
     pub fn manifest(&self) -> &PackageManifest {
         &self.manifest
     }
