@@ -1,20 +1,21 @@
 use miden_air::{LiftedAir, ProcessorAir};
 use miden_core::{Felt, field::QuadFelt};
-use miden_crypto::stark::air::symbolic::{AirLayout, SymbolicAirBuilder};
+use miden_crypto::{
+    field::PrimeCharacteristicRing,
+    stark::air::symbolic::{AirLayout, SymbolicAirBuilder},
+};
 
 use super::common::{
     eval_dag, eval_folded_constraints, eval_periodic_values, eval_quotient, fill_inputs,
 };
-use crate::{
-    AceConfig, InputKey, LayoutKind, build_ace_circuit_for_air, pipeline::build_ace_dag_for_air,
-};
+use crate::{AceConfig, InputKey, LayoutKind, pipeline::build_ace_dag_for_air};
 
 #[test]
 fn processor_air_dag_matches_manual_eval() {
     let air = ProcessorAir;
     let config = AceConfig {
         num_quotient_chunks: 2,
-        num_aux_inputs: 14,
+        num_vlpi_groups: 0,
         layout: LayoutKind::Native,
     };
     let artifacts = build_ace_dag_for_air::<_, Felt, QuadFelt>(&air, config).unwrap();
@@ -35,25 +36,18 @@ fn processor_air_dag_matches_manual_eval() {
     };
     let mut builder = SymbolicAirBuilder::<Felt, QuadFelt>::new(air_layout);
     LiftedAir::<Felt, QuadFelt>::eval(&air, &mut builder);
-    let constraint_layout = builder.constraint_layout();
-    let base_constraints = builder.base_constraints();
-    let ext_constraints = builder.extension_constraints();
 
-    let alpha = inputs[layout.index(InputKey::Alpha).unwrap()];
-    let inv_vanishing = inputs[layout.index(InputKey::InvVanishing).unwrap()];
-
-    let acc = eval_folded_constraints::<Felt, QuadFelt>(
-        &base_constraints,
-        &ext_constraints,
-        &constraint_layout,
-        alpha,
+    let acc = eval_folded_constraints(
+        &builder.base_constraints(),
+        &builder.extension_constraints(),
+        &builder.constraint_layout(),
         &inputs,
         &layout,
         &periodic_values,
     );
-    let folded = acc * inv_vanishing;
-    let quotient = eval_quotient(&layout, &inputs);
-    let expected = folded - quotient;
+    let z_pow_n = inputs[layout.index(InputKey::ZPowN).unwrap()];
+    let vanishing = z_pow_n - QuadFelt::ONE;
+    let expected = acc - eval_quotient(&layout, &inputs) * vanishing;
 
     let actual = eval_dag(&artifacts.dag.nodes, artifacts.dag.root, &inputs, &layout);
     assert_eq!(actual, expected);
@@ -65,11 +59,12 @@ fn processor_air_chiplet_rows() {
     let air = ProcessorAir;
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_aux_inputs: 14,
+        num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
     };
 
-    let circuit = build_ace_circuit_for_air::<_, Felt, QuadFelt>(&air, config).unwrap();
+    let circuit =
+        crate::pipeline::build_ace_circuit_for_air::<_, Felt, QuadFelt>(&air, config).unwrap();
     let encoded = circuit.to_ace().unwrap();
     let read_rows = encoded.num_read_rows();
     let eval_rows = encoded.num_eval_rows();

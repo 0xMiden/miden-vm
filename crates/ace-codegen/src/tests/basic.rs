@@ -35,7 +35,7 @@ impl LiftedAir<F, EF> for MockAir {
     }
 
     fn num_randomness(&self) -> usize {
-        1
+        2
     }
 
     fn aux_width(&self) -> usize {
@@ -89,18 +89,16 @@ fn build_inputs(layout: &InputLayout) -> Vec<EF> {
     set(InputKey::AuxCoord { offset: 0, index: 0, coord: 1 }, ef(101));
     set(InputKey::AuxCoord { offset: 1, index: 0, coord: 0 }, ef(12));
     set(InputKey::AuxCoord { offset: 1, index: 0, coord: 1 }, ef(102));
-    set(InputKey::Z, ef(2));
     set(InputKey::Alpha, ef(17));
-    set(InputKey::GInv, ef(3));
     set(InputKey::ZPowN, ef(19));
-    set(InputKey::GInv2, ef(5));
     set(InputKey::ZK, ef(23));
+    set(InputKey::IsFirst, ef(47));
+    set(InputKey::IsLast, ef(43));
+    set(InputKey::IsTransition, ef(2) - ef(3));
+    set(InputKey::Gamma, ef(53));
     set(InputKey::Weight0, ef(31));
-    set(InputKey::G, ef(37));
+    set(InputKey::F, ef(37));
     set(InputKey::S0, ef(41));
-    set(InputKey::InvZMinusGInv, ef(43));
-    set(InputKey::InvZMinusOne, ef(47));
-    set(InputKey::InvVanishing, ef(2));
 
     set(InputKey::QuotientChunkCoord { offset: 0, chunk: 0, coord: 0 }, ef(2));
     set(InputKey::QuotientChunkCoord { offset: 0, chunk: 0, coord: 1 }, ef(3));
@@ -115,7 +113,7 @@ fn test_verifier_dag_matches_manual_eval() {
     let air = MockAir;
     let config = AceConfig {
         num_quotient_chunks: 2,
-        num_aux_inputs: 14,
+        num_vlpi_groups: 0,
         layout: LayoutKind::Native,
     };
     let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
@@ -135,28 +133,20 @@ fn test_verifier_dag_matches_manual_eval() {
     };
     let mut builder = SymbolicAirBuilder::<F, EF>::new(air_layout);
     air.eval(&mut builder);
-    let constraint_layout = builder.constraint_layout();
-    let base_constraints = builder.base_constraints();
-    let ext_constraints = builder.extension_constraints();
-    let dag = artifacts.dag;
 
-    let alpha = inputs[layout.index(InputKey::Alpha).unwrap()];
-    let inv_vanishing = inputs[layout.index(InputKey::InvVanishing).unwrap()];
-
-    let acc = eval_folded_constraints::<F, EF>(
-        &base_constraints,
-        &ext_constraints,
-        &constraint_layout,
-        alpha,
+    let acc = eval_folded_constraints(
+        &builder.base_constraints(),
+        &builder.extension_constraints(),
+        &builder.constraint_layout(),
         &inputs,
         &layout,
         &periodic_values,
     );
-    let folded = acc * inv_vanishing;
-    let quotient = eval_quotient(&layout, &inputs);
-    let expected = folded - quotient;
+    let z_pow_n = inputs[layout.index(InputKey::ZPowN).unwrap()];
+    let vanishing = z_pow_n - EF::ONE;
+    let expected = acc - eval_quotient(&layout, &inputs) * vanishing;
 
-    let actual = eval_dag(&dag.nodes, dag.root, &inputs, &layout);
+    let actual = eval_dag(&artifacts.dag.nodes, artifacts.dag.root, &inputs, &layout);
     assert_eq!(actual, expected);
 }
 
@@ -165,7 +155,7 @@ fn test_emitted_circuit_matches_dag_eval() {
     let air = MockAir;
     let config = AceConfig {
         num_quotient_chunks: 2,
-        num_aux_inputs: 14,
+        num_vlpi_groups: 0,
         layout: LayoutKind::Native,
     };
     let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
@@ -183,7 +173,7 @@ fn test_encoded_circuit_structure() {
     let air = MockAir;
     let config = AceConfig {
         num_quotient_chunks: 2,
-        num_aux_inputs: 14,
+        num_vlpi_groups: 0,
         layout: LayoutKind::Native,
     };
     let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();

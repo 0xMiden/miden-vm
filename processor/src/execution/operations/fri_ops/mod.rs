@@ -23,14 +23,19 @@ mod tests;
 /// - Checks that the previous folding was done correctly.
 /// - Shifts the stack to the left to move an item from the overflow table to stack position 15.
 ///
+/// Bit-reversal handling:
+/// - Query values exist on the stack in bit-reversed order.
+/// - p on the stack is a bit-reversed tree index. The instruction internally computes d_seg = p & 3
+///   (bit-reversed coset index) for the consistency check and tau factor. f_pos is provided
+///   separately on the stack and the AIR constrains f_pos = p >> 2 via p = 4*f_pos + d_seg.
+///
 /// Stack transition for this operation looks as follows:
 ///
 /// Input:
-/// [v0, v1, v2, v3, v4, v5, v6, v7, f_pos, d_seg, poe, pe1, pe0, a1, a0, cptr, ...]
+/// [v0, v1, v2, v3, v4, v5, v6, v7, f_pos, p, poe, pe0, pe1, a0, a1, cptr, ...]
 ///
 /// Output:
-/// [t1, t0, s1, s0, df3, df2, df1, df0, poe^2, f_tau, cptr+2, poe^4, f_pos, ne1, ne0, eptr,
-/// ...]
+/// [t0, t1, s0, s1, df3, df2, df1, df0, poe^2, f_tau, cptr+8, poe^4, f_pos, ne0, ne1, eptr, ...]
 ///
 /// In the above, eptr is moved from the stack overflow table and is expected to be the address
 /// of the final FRI layer.
@@ -49,9 +54,12 @@ where
 {
     // --- read all relevant variables from the stack ---------------------
     let query_values = get_query_values(processor);
-    let folded_pos = processor.stack().get(8);
-    // the segment identifier of the position in the source domain
-    let domain_segment = processor.stack().get(9).as_canonical_u64();
+    // Reorder from bit-reversed to natural for fold4.
+    let query_values_reordered = reorder_bitrev4(query_values);
+    // p is the bit-reversed tree index; compute f_pos and d_seg from it
+    let p = processor.stack().get(9).as_canonical_u64();
+    let domain_segment = p & 3;
+    let folded_pos = Felt::new(p >> 2);
     // the power of the domain generator which can be used to determine current domain value x
     let poe = processor.stack().get(10);
     if poe.is_zero() {
@@ -59,14 +67,14 @@ where
     }
     // the result of the previous layer folding
     let prev_value = {
-        let pe1 = processor.stack().get(11);
-        let pe0 = processor.stack().get(12);
+        let pe0 = processor.stack().get(11);
+        let pe1 = processor.stack().get(12);
         QuadFelt::from_basis_coefficients_fn(|i: usize| [pe0, pe1][i])
     };
     // the verifier challenge for the current layer
     let alpha = {
-        let a1 = processor.stack().get(13);
-        let a0 = processor.stack().get(14);
+        let a0 = processor.stack().get(13);
+        let a1 = processor.stack().get(14);
         QuadFelt::from_basis_coefficients_fn(|i: usize| [a0, a1][i])
     };
     // the memory address of the current layer
@@ -79,26 +87,37 @@ where
         )));
     }
 
+    // Consistency check: query_values[d_seg] == prev_value.
+    // Both query_values and d_seg are bit-reversed, so indexing works out correctly.
     let d_seg = domain_segment as usize;
     if query_values[d_seg] != prev_value {
         return Err(OperationError::FriError(format!(
-            "degree-respecting projection is inconsistent: expected {} but was {}",
-            prev_value, query_values[d_seg]
+            "degree-respecting projection is inconsistent at d_seg={d_seg} poe={} fpos={}: expected {} but was {}; all values: [0]={} [1]={} [2]={} [3]={}",
+            poe.as_canonical_u64(),
+            folded_pos.as_canonical_u64(),
+            prev_value,
+            query_values[d_seg],
+            query_values[0],
+            query_values[1],
+            query_values[2],
+            query_values[3]
         )));
     }
 
     // --- fold query values ----------------------------------------------
-    let f_tau = get_tau_factor(d_seg);
+    // Bit-reverse d_seg to get natural coset index for tau factor and domain segment flags.
+    let d_seg_rev = bit_reverse_segment(d_seg);
+    let f_tau = get_tau_factor(d_seg_rev);
     let x = poe * f_tau;
     let x_inv = x.inverse();
 
     let (ev, es) = compute_evaluation_points(alpha, x_inv);
-    let (folded_value, tmp0, tmp1) = fold4(query_values, ev, es);
+    let (folded_value, tmp0, tmp1) = fold4(query_values_reordered, ev, es);
 
     // --- write the relevant values into the next state of the stack -----
     let tmp0 = tmp0.as_basis_coefficients_slice();
     let tmp1 = tmp1.as_basis_coefficients_slice();
-    let ds = get_domain_segment_flags(d_seg);
+    let ds = get_domain_segment_flags(d_seg_rev);
     let folded_value = folded_value.as_basis_coefficients_slice();
 
     let poe2 = poe * poe;
@@ -106,18 +125,18 @@ where
 
     processor.stack_mut().decrement_size()?;
 
-    processor.stack_mut().set(0, tmp0[1]);
-    processor.stack_mut().set(1, tmp0[0]);
-    processor.stack_mut().set(2, tmp1[1]);
-    processor.stack_mut().set(3, tmp1[0]);
+    processor.stack_mut().set(0, tmp0[0]);
+    processor.stack_mut().set(1, tmp0[1]);
+    processor.stack_mut().set(2, tmp1[0]);
+    processor.stack_mut().set(3, tmp1[1]);
     processor.stack_mut().set_word(4, &ds.into());
     processor.stack_mut().set(8, poe2);
     processor.stack_mut().set(9, f_tau);
     processor.stack_mut().set(10, layer_ptr + EIGHT);
     processor.stack_mut().set(11, poe4);
     processor.stack_mut().set(12, folded_pos);
-    processor.stack_mut().set(13, folded_value[1]);
-    processor.stack_mut().set(14, folded_value[0]);
+    processor.stack_mut().set(13, folded_value[0]);
+    processor.stack_mut().set(14, folded_value[1]);
 
     Ok(OperationHelperRegisters::FriExt2Fold4 { ev, es, x, x_inv })
 }
@@ -143,6 +162,24 @@ fn get_query_values<P: Processor>(processor: &mut P) -> [QuadFelt; 4] {
         QuadFelt::from_basis_coefficients_fn(|i: usize| [v4, v5][i]),
         QuadFelt::from_basis_coefficients_fn(|i: usize| [v6, v7][i]),
     ]
+}
+
+/// Bit-reverses a 2-bit segment index: 0->0, 1->2, 2->1, 3->3.
+#[inline(always)]
+fn bit_reverse_segment(domain_segment: usize) -> usize {
+    match domain_segment {
+        0 => 0,
+        1 => 2,
+        2 => 1,
+        3 => 3,
+        _ => panic!("invalid domain segment {domain_segment}"),
+    }
+}
+
+/// Reorders 4 evals from bit-reversed order to natural order.
+#[inline(always)]
+fn reorder_bitrev4(values: [QuadFelt; 4]) -> [QuadFelt; 4] {
+    [values[0], values[2], values[1], values[3]]
 }
 
 // HELPER FUNCTIONS

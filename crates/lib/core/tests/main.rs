@@ -83,6 +83,4 @@ mod stark_asserts;
 mod sys;
 mod word;
 
-// These tests are disabled until the recursive verifier is updated to work with Plonky3 proofs
-// mod pcs;
-// mod stark;
+mod stark;

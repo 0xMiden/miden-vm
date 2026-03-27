@@ -9,7 +9,7 @@ use alloc::{boxed::Box, vec::Vec};
 
 use miden_air::{ProcessorAir, PublicInputs, config};
 use miden_core::{
-    Felt,
+    Felt, WORD_SIZE,
     field::{QuadFelt, TwoAdicField},
 };
 use miden_crypto::stark::{
@@ -223,13 +223,9 @@ where
     }
 
     let mut challenger = config.challenger();
+    config::observe_protocol_params(&mut challenger, log_trace_height as u64);
     challenger.observe_slice(public_values);
-    // TODO: observe log_trace_height in the transcript for Fiat-Shamir binding.
-    // TODO: observe var_len_public_inputs in the transcript for Fiat-Shamir binding.
-    //   This also requires updating the recursive verifier to absorb both fixed and
-    //   variable-length public inputs.
-    // TODO: observe ACE commitment once ACE verification is integrated.
-    // See https://github.com/0xMiden/miden-vm/issues/2822
+    config::observe_var_len_public_inputs(&mut challenger, var_len_public_inputs, &[WORD_SIZE]);
     miden_crypto::stark::verifier::verify_single(
         config,
         &ProcessorAir,
