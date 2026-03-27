@@ -4,7 +4,6 @@ use miden_assembly_syntax::{Library, library::ModuleInfo};
 use miden_core::mast::MastForest;
 use miden_mast_package::Package;
 use miden_project::Linkage;
-
 /// Prefer to use [`miden_project::Linkage`], as this will be removed in a future release
 pub use miden_project::Linkage as LinkLibraryKind;
 

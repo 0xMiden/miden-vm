@@ -29,6 +29,7 @@ use miden_mast_package::{
 };
 use miden_project::{Linkage, TargetType};
 
+use self::{error::AssemblerError, product::AssemblyProduct};
 use crate::{
     GlobalItemIndex, ModuleIndex, Procedure, ProcedureContext,
     ast::Path,
