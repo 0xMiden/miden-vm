@@ -230,15 +230,7 @@ fn main() -> Result<(), Report> {
     let build_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
     // write the masp output
-    package
-        .write_to_file(
-            build_dir
-                .join(ASL_DIR_PATH)
-                .join("core")
-                .with_extension(miden_assembly::package::Package::EXTENSION),
-        )
-        .map_err(|err| io::Error::other(err.to_string()))
-        .into_diagnostic()?;
+    package.write_masp_file(build_dir.join(ASL_DIR_PATH)).into_diagnostic()?;
 
     // write the masl output
     package

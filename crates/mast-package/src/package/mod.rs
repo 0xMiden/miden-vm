@@ -369,6 +369,15 @@ impl Package {
         <Self as Serializable>::write_into(self, &mut file);
         Ok(())
     }
+
+    /// Write this package to a file in `dir` named `$name.masp`, where `$name` is the package name.
+    #[cfg(feature = "std")]
+    pub fn write_masp_file(&self, dir: impl AsRef<std::path::Path>) -> std::io::Result<()> {
+        let dir = dir.as_ref();
+        let package_name: &str = &self.name;
+        self.write_to_file(dir.join(package_name).with_extension(Self::EXTENSION))
+            .map_err(|err| std::io::Error::other(err.to_string()))
+    }
 }
 
 #[cfg(feature = "arbitrary")]
