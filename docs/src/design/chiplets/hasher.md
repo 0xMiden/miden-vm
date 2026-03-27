@@ -68,6 +68,40 @@ The Poseidon2 state is stored in little-endian sponge order:
 
 `RATE0` (`h0..h3`) is always the digest word.
 
+## Design invariants
+
+The current hasher design relies on a few invariants
+
+- **`perm_seg` is the authoritative controller/permutation discriminator.**  
+  When `perm_seg = 0`, the row is in the controller region and `s0/s1/s2` are interpreted as
+  controller selectors. When `perm_seg = 1`, the row is in the permutation segment and
+  `s0/s1/s2` are interpreted as witness columns, not selectors.
+
+- **Only controller rows participate in the external chiplets interface.**  
+  The controller region is the only region that sends or receives hasher messages on
+  `b_chiplets`. The permutation segment is internal compute only.
+
+- **Permutation cycles are aligned.**  
+  Entering the permutation segment can happen only at packed cycle row `0`, and leaving the
+  hasher while still in the permutation segment can happen only at packed cycle row `15`.
+
+- **Multiplicity is cycle-wide.**  
+  On permutation rows, `node_index` is repurposed as a multiplicity counter. It must stay
+  constant within a cycle so that one multiplicity is attached to the entire permutation.
+
+- **Witness reuse is explicit.**  
+  On packed internal rows, `s0/s1/s2` carry witness values for internal-round S-box outputs.
+  On row `11`, only `s0` is used as a witness. Unused witness slots are constrained to zero.
+
+- **Merkle routing happens entirely in the controller region.**  
+  Merkle-specific values (`node_index`, `direction_bit`, `mrupdate_id`) have controller
+  semantics only. The permutation segment does not carry Merkle routing meaning.
+
+- **Sibling-table balancing is partitioned by `mrupdate_id`.**  
+  The old-path and new-path legs of a single `MRUPDATE` share the same `mrupdate_id`, and
+  different updates use different IDs. This prevents sibling entries from unrelated updates
+  from cancelling each other.
+
 ## Controller region
 
 Each hash request is recorded as a pair of consecutive rows:
@@ -172,12 +206,13 @@ On permutation rows, `(s0, s1, s2)` hold witness values:
 - row `11`: `s0` is the S-box output for the final internal round,
 - all other permutation rows: unused witness slots are constrained to zero.
 
-Reusing `s0/s1/s2` as witnesses is what keeps the packed internal rows within the
- degree-9 budget. Separately, `perm_seg` remains the authoritative
-controller/permutation discriminator: any consumer that interprets `s0/s1/s2` as
-selectors must first gate on `perm_seg = 0` (equivalently, `controller_flag`).
-On permutation rows these columns are witnesses, not selectors, and unused
-witness slots are forced to zero for additional robustness.
+Reusing `s0/s1/s2` as witnesses keeps the packed internal rows within the degree-9
+budget.
+
+Independently, `perm_seg` is the authoritative controller/permutation
+discriminator: any consumer that interprets `s0/s1/s2` as selectors must first
+gate on `perm_seg = 0` (equivalently, `controller_flag`). On permutation rows
+these columns are witnesses, not selectors.
 
 ## Buses
 
@@ -242,6 +277,17 @@ The high-degree Poseidon2 step constraints are gated by `perm_seg` and periodic
 step selectors, keeping the overall degree within the system limit.
 
 ## Detailed constraint structure
+
+The full set of constraints is in `air/src/constraints/chiplets/hasher/*`.
+
+This section does **not** attempt to describe every constraint. Instead,
+it records the key structural constraints and representative formulas that
+capture the key design decisions.
+
+## Representative AIR formulas
+
+The following formulas capture the most important structure of the current
+hasher AIR.
 
 ### Controller selectors, lifecycle, and `perm_seg`
 
@@ -451,6 +497,38 @@ The hasher uses this running product for two logically separate purposes:
 For the sibling-table part, the old-path leg inserts siblings and the new-path
 leg removes them. Because the entries are keyed by `(mrupdate_id, node_index,
 sibling_word)`, unrelated updates cannot cancel each other.
+
+## Implementation map
+
+The hasher design is implemented across the following files:
+
+- `air/src/constraints/chiplets/hasher/selectors.rs`  
+  Controller structure, `perm_seg` rules, lifecycle, and padding constraints.
+
+- `air/src/constraints/chiplets/hasher/state.rs`  
+  Packed Poseidon2 transition constraints, witness usage, and unused-witness
+  zeroing rules.
+
+- `air/src/constraints/chiplets/hasher/merkle.rs`  
+  Merkle index decomposition, continuity, routing, and zero-capacity rules.
+
+- `air/src/constraints/chiplets/hasher/periodic.rs`  
+  Packed 16-row schedule and periodic round-constant encoding.
+
+- `air/src/constraints/chiplets/bus/chiplets.rs`  
+  Hasher messages visible to the rest of the VM.
+
+- `air/src/constraints/chiplets/bus/wiring.rs`  
+  Controller-to-permutation permutation-link relation on `v_wiring`.
+
+- `air/src/constraints/chiplets/bus/hash_kernel.rs`  
+  Sibling-table and `log_precompile`-related hasher interactions.
+
+- `processor/src/trace/chiplets/hasher/trace.rs`  
+  Trace generation for the controller and packed permutation segment.
+
+- `processor/src/trace/chiplets/aux_trace/hasher_perm.rs`  
+  Auxiliary trace generation for the permutation-link running sum.
 
 ## Soundness-critical design points
 
