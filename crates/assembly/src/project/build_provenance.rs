@@ -13,32 +13,74 @@ use super::PackageBuildSettings;
 // PACKAGE BUILD PROVENANCE
 // ================================================================================================
 
+/// Provenance metadata attached to packages that were assembled from concrete project sources.
+///
+/// `ProjectAssembler` uses this metadata to decide whether a canonical package already present in
+/// the package store is still a valid reuse candidate for a source dependency, or whether the
+/// current sources have diverged and the dependency must be rebuilt or semver-bumped instead.
+///
+/// The value is serialized into the package's [`SectionId::PROJECT_SOURCE_PROVENANCE`] section via
+/// [`Self::to_section`] when a package is built from real on-disk sources. Builds that use
+/// caller-provided modules or other virtual sources intentionally omit this section because there
+/// is no stable filesystem or git identity to compare on a later reuse attempt.
+///
+/// The recorded fields differ by source origin:
+///
+/// - [`Self::Path`] tracks a hash of the effective manifest and the target's resolved source
+///   files, along with a hash of the fully resolved dependency closure and the build-profile knobs
+///   that affect the emitted package bytes.
+/// - [`Self::Git`] records the repository identity and resolved revision instead of hashing the
+///   checked-out source tree directly, but still includes the dependency-closure hash and build
+///   settings for the same reuse decision.
+///
+/// Beyond direct reuse checks, [`Self::describe`] is also folded into dependency-closure hashing
+/// for parent packages and is used in semver-bump diagnostics to explain why an existing canonical
+/// artifact no longer matches the current sources.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum PackageBuildProvenance {
+    /// Provenance for a package assembled from sources addressed by a local filesystem path.
     Path {
+        /// Hash of the effective manifest plus the root/support modules that define the target.
         source_hash: Word,
+        /// Hash of the resolved dependency closure, including linkage and exact selected artifacts.
         dependency_hash: Word,
+        /// Build-profile settings that materially affect the produced package bytes.
         build_settings: PackageBuildSettings,
     },
+    /// Provenance for a package assembled from a checked-out Git source.
     Git {
+        /// Repository URI used to fetch the sources.
         repo: String,
+        /// Fully resolved revision used for the checkout, after branch/tag resolution.
         resolved_revision: String,
+        /// Hash of the resolved dependency closure, including linkage and exact selected artifacts.
         dependency_hash: Word,
+        /// Build-profile settings that materially affect the produced package bytes.
         build_settings: PackageBuildSettings,
     },
 }
 
 impl PackageBuildProvenance {
+    /// The canonical dependency hash for packages that have no dependencies.
+    ///
+    /// This keeps the serialized format compact and provides a stable value for older provenance
+    /// encodings that predated explicit dependency-closure hashing.
     pub fn empty_dependency_hash() -> Word {
         hash_string_to_word("")
     }
 
+    /// Encode this provenance record as a package section that can be embedded in a `.masp`.
     pub fn to_section(&self) -> Section {
         let mut data = Vec::new();
         self.write_into(&mut data);
         Section::new(SectionId::PROJECT_SOURCE_PROVENANCE, data)
     }
 
+    /// Decode source provenance from `package`, if the package carries a provenance section.
+    ///
+    /// This is used when considering reuse of a canonical store artifact for a source dependency:
+    /// the decoded value is compared against the provenance that would be produced from the current
+    /// dependency graph and build profile.
     pub fn from_package(package: &MastPackage) -> Result<Option<Self>, Report> {
         let Some(section) = package
             .sections
@@ -57,6 +99,7 @@ impl PackageBuildProvenance {
         })
     }
 
+    /// Render a stable human-readable summary for diagnostics and dependency-closure hashing.
     pub fn describe(&self) -> String {
         match self {
             Self::Path {
