@@ -7,6 +7,7 @@
 - Added `Serializable` and `Deserializable` instances for `Arc<str>`.
 - [BREAKING] Removed `WORD_SIZE_FELTS` and `WORD_SIZE_BYTES` from `miden-field` in favor of `Word::NUM_FELTS` and `Word::SERIALIZED_SIZE`, respectively. The values remain the same.
 - [BREAKING] `WORD_SIZE` has been removed from `miden-crypto` in favor of `Word::NUM_FELTS`. Clients will need to update references to the constant, but `Word` will already be in scope as it is re-exported from `miden-crypto`.
+- [BREAKING] Removed implementations of `Deref` and `DerefMut` for `Felt`.
 
 ## 0.23.0 (2026-03-11)
 

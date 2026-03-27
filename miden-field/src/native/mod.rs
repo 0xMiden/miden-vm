@@ -5,7 +5,7 @@ use core::{
     array, fmt,
     hash::{Hash, Hasher},
     iter::{Product, Sum},
-    ops::{Add, AddAssign, Deref, DerefMut, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
+    ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
 };
 
 use miden_serde_utils::{
@@ -415,22 +415,6 @@ impl FeltFromIntError {
     /// Returns the integer for which the conversion failed.
     pub fn as_u64(&self) -> u64 {
         self.0
-    }
-}
-
-impl Deref for Felt {
-    type Target = Goldilocks;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for Felt {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
     }
 }
 
