@@ -93,8 +93,7 @@ pub(crate) fn eval_circuit_impl(
     let num_read_rows = (num_vars / 2) as u32;
     let num_eval_rows = num_eval as u32;
 
-    let mut evaluation_context =
-        CircuitEvaluation::new(ctx, clk, num_read_rows, num_eval_rows)?;
+    let mut evaluation_context = CircuitEvaluation::new(ctx, clk, num_read_rows, num_eval_rows)?;
 
     let mut ptr = ptr;
     // perform READ operations

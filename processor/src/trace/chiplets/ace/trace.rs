@@ -18,7 +18,10 @@ use super::{
     MAX_NUM_ACE_WIRES,
     instruction::{Op, decode_instruction},
 };
-use crate::{ContextId, errors::{AceError, AceEvalError}};
+use crate::{
+    ContextId,
+    errors::{AceError, AceEvalError},
+};
 
 /// Number of LogUp fractions in the wiring bus for rows in the `READ` section.
 pub const NUM_ACE_LOGUP_FRACTIONS_READ: usize = 2;
@@ -66,9 +69,8 @@ impl CircuitEvaluation {
     ) -> Result<Self, AceEvalError> {
         // Widen to u64 before multiplying to avoid u32 overflow.
         // num_wires = 2 * num_read_rows + num_eval_rows (each READ row contributes 2 wires).
-        let num_wires = 2u64
-            .saturating_mul(num_read_rows as u64)
-            .saturating_add(num_eval_rows as u64);
+        let num_wires =
+            2u64.saturating_mul(num_read_rows as u64).saturating_add(num_eval_rows as u64);
 
         if num_wires > MAX_NUM_ACE_WIRES as u64 {
             return Err(AceError(format!(

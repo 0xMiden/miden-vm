@@ -3,6 +3,7 @@
 ## v0.23.0 (TBD)
 
 #### Bug Fixes
+- Fixed `CircuitEvaluation::new()` returning `Err` instead of panicking/wrapping on wire-count overflow; widened arithmetic to `u64` to prevent silent u32 wrap in release builds ([#2919](https://github.com/0xMiden/miden-vm/pull/2919)).
 
 - Reverted `InvokeKind::ProcRef` back to `InvokeKind::Exec` in `visit_mut_procref` and added an explanatory comment (#2893).
 #### Changes
