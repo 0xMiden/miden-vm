@@ -2,7 +2,6 @@ use super::*;
 
 pub struct AssemblyProduct {
     // This is unused when the `std` feature is not present
-    #[allow(unused)]
     kind: TargetType,
     artifact: Arc<Library>,
     kernel: Option<Kernel>,
@@ -18,6 +17,10 @@ impl AssemblyProduct {
         kernel: Option<Kernel>,
         manifest: PackageManifest,
     ) -> Self {
+        assert!(
+            kernel.is_none() || kind != TargetType::Kernel,
+            "kernels cannot depend on another kernel"
+        );
         Self { kind, artifact, kernel, manifest }
     }
 
@@ -35,7 +38,9 @@ impl AssemblyProduct {
         self.artifact
     }
 
+    // TODO(pauls): This can be removed when we remove Library/KernelLibrary/Program
     pub fn into_program(self) -> Result<Program, Report> {
+        assert_eq!(self.kind, TargetType::Executable);
         let entry = ast::Path::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME);
         let entrypoint = self.artifact.get_export_node_id(&entry);
         Ok(if let Some(kernel) = self.kernel {
@@ -45,7 +50,9 @@ impl AssemblyProduct {
         })
     }
 
+    // TODO(pauls): This can be removed when we remove Library/KernelLibrary/Program
     pub fn into_kernel_library(self) -> Result<KernelLibrary, Report> {
+        assert_eq!(self.kind, TargetType::Kernel);
         KernelLibrary::try_from(self.artifact).map_err(|error| Report::msg(error.to_string()))
     }
 }

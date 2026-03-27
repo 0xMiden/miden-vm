@@ -121,6 +121,8 @@ impl Package {
     }
 
     /// Converts this package into a [KernelLibrary] if it is marked as a kernel package.
+    //
+    // TODO(pauls): This function can be removed when we remove Library/KernelLibrary/Program
     pub fn try_into_kernel_library(&self) -> Result<KernelLibrary, Report> {
         if !self.is_kernel() {
             return Err(Report::msg(format!(
@@ -132,6 +134,7 @@ impl Package {
         KernelLibrary::try_from(self.mast.clone()).map_err(|error| Report::msg(error.to_string()))
     }
 
+    // TODO(pauls): This function can be removed when we remove Library/KernelLibrary/Program
     #[doc(hidden)]
     pub fn try_into_program(&self) -> Result<miden_core::program::Program, Report> {
         use miden_assembly_syntax::{Path as MasmPath, ast};
@@ -163,6 +166,7 @@ impl Package {
         }
     }
 
+    // TODO(pauls): This function can be removed when we remove Library/KernelLibrary/Program
     #[doc(hidden)]
     pub fn unwrap_program(&self) -> miden_core::program::Program {
         assert_eq!(self.kind, TargetType::Executable);
