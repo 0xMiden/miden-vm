@@ -104,10 +104,11 @@ impl InputLayout {
         let main_curr = builder.alloc(counts.width, policy.main);
         let aux_coord_width = counts.aux_width * EXT_DEGREE;
         let aux_curr = builder.alloc(aux_coord_width, policy.aux);
-        let quotient_curr = builder.alloc(counts.num_quotient_chunks * EXT_DEGREE, policy.quotient);
+        let q_stride = if counts.quotient_extension { 1 } else { EXT_DEGREE };
+        let quotient_curr = builder.alloc(counts.num_quotient_chunks * q_stride, policy.quotient);
         let main_next = builder.alloc(counts.width, policy.main);
         let aux_next = builder.alloc(aux_coord_width, policy.aux);
-        let quotient_next = builder.alloc(counts.num_quotient_chunks * EXT_DEGREE, policy.quotient);
+        let quotient_next = builder.alloc(counts.num_quotient_chunks * q_stride, policy.quotient);
         let aux_bus_boundary = builder.alloc(counts.aux_width, policy.aux_bus_boundary);
 
         let stark_vars = builder.alloc(NUM_STARK_VARS, policy.stark_vars);

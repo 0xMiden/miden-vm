@@ -34,6 +34,15 @@ pub struct InputCounts {
     pub num_periodic: usize,
     /// Number of quotient chunks.
     pub num_quotient_chunks: usize,
+    /// When `true`, each quotient chunk is an EF element (1 slot per chunk)
+    /// and the reconstruction uses power-sum formula with `quotient_segment_len`.
+    /// When `false`, each chunk is flattened to `EXT_DEGREE` base-field coords
+    /// and uses barycentric Lagrange recomposition.
+    pub quotient_extension: bool,
+    /// Segment length for power-sum quotient reconstruction.
+    /// Only used when `quotient_extension = true`.
+    /// Q(z) = sum_j chunk_j(z) * z^{j * segment_len}
+    pub quotient_segment_len: usize,
 }
 
 /// Grouped regions for the ACE input layout.
@@ -156,7 +165,8 @@ impl InputLayout {
         assert_eq!(self.regions.aux_curr.width, aux_coord_width, "aux_curr width mismatch");
         assert_eq!(self.regions.aux_next.width, aux_coord_width, "aux_next width mismatch");
 
-        let quotient_width = self.counts.num_quotient_chunks * EXT_DEGREE;
+        let q_stride = if self.counts.quotient_extension { 1 } else { EXT_DEGREE };
+        let quotient_width = self.counts.num_quotient_chunks * q_stride;
         assert_eq!(
             self.regions.quotient_curr.width, quotient_width,
             "quotient_curr width mismatch"

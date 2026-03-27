@@ -1,0 +1,405 @@
+#! DEEP polynomial consistency checks for the 0-fold signature verifier.
+#!
+#! # What this module does
+#!
+#! For each of 53 query indices, verifies that the committed trace polynomials
+#! (witness + quotient) are consistent with their OOD evaluations via the DEEP
+#! polynomial identity:
+#!
+#!   DEEP(x) = (f_red(z) - f_red(x)) / (z - x) + beta * (f_red(gz) - f_red(x)) / (gz - x)
+#!
+#! where f_red is the Horner reduction of all committed columns using alpha.
+#!
+#! # Column layout
+#!
+#! The Horner reduction covers 24 extension-field columns (all committed polynomials):
+#!   - Witness:  8 base-field columns (from the RPO8 state trace, lifted to EF)
+#!   - Quotient: 16 extension-field columns (15 quotient chunks + 1 DEEP mask R)
+#!
+#! # Data sources
+#!
+#! - OOD Horner fixed terms: read from memory at SIG_HORNER_FIXED_PTR (set in Phase 3)
+#! - Per-query leaf data: read from advice stack via adv.push_mapval after mtree_get
+#! - DEEP polynomial coefficients: read from memory at SIG_DEEP_POLY_PTR
+#! - Precomputed constants: -z, -gz in memory
+
+use miden::core::sig::constants
+
+# ─── Local constants (must be in-file for push.X) ───────────────────────────
+
+const SIG_DEEP_COEFS_PTR = 3240099864
+const SIG_BETA_PTR = 3240099866
+const SIG_HORNER_FIXED_PTR = 3240099872
+const SIG_NEG_Z_GZ_PTR = 3240099876
+const SIG_Z_PTR = 3240099856
+const SIG_DEEP_POLY_PTR = 3240099976
+const SIG_QUERIES_PTR = 3240100232
+const SIG_OPENED_ROW_PTR = 3240100448
+const SIG_WITNESS_COM_PTR = 3240099848
+const SIG_QUOTIENT_COM_PTR = 3240099852
+
+const LOG_CODE_SIZE = 11
+const CODE_GEN = 455906449640507599
+const TRACE_GEN = 18446744069397807105
+const COSET_OFFSET = 7
+const TMP2_PTR = 3223322684
+const NUM_QUERIES = 53
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#   Precomputation (called once before the query loop)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+#! Precompute geometric values that are constant across all DEEP queries:
+#!   - [-z0, -z1, -gz0, -gz1] stored at SIG_NEG_Z_GZ_PTR.
+#! Horner fixed terms (-f_red(z), -f_red(gz)) are computed in Phase 3 during
+#! OOD absorption and stored at SIG_HORNER_FIXED_PTR.
+#!
+#! Stack transition:
+#! Input:  [...]
+#! Output: [...]
+pub proc precompute_deep_constants
+    # ── Precompute -z and -gz ──
+    # z is the OOD point and gz = z * TRACE_GEN.
+    # We store [-z0, -z1, -gz0, -gz1] for denominator terms:
+    #   denom_z  = x + (-z0, -z1)  = x - z
+    #   denom_gz = x + (-gz0, -gz1) = x - gz
+
+    # Load z in reverse address order and negate each coordinate in place:
+    # [z1] -> [-z1] -> [z0, -z1] -> [-z0, -z1]
+    push.SIG_Z_PTR add.1 mem_load
+    neg
+    push.SIG_Z_PTR mem_load
+    neg
+    # => [-z0, -z1]
+
+    dup.1 push.TRACE_GEN mul
+    dup.1 push.TRACE_GEN mul
+    # => [-gz0, -gz1, -z0, -z1]
+
+    movdn.3 movdn.3
+    # => [-z0, -z1, -gz0, -gz1]
+
+    push.SIG_NEG_Z_GZ_PTR mem_storew_le dropw
+end
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#   Query verification loop
+# ═══════════════════════════════════════════════════════════════════════════════
+
+#! Verify all NUM_QUERIES DEEP queries.
+#!
+#! Iterates over query indices stored at SIG_QUERIES_PTR, calling
+#! verify_single_query for each. Query pointers advance by 4 (word stride).
+#!
+#! Stack transition:
+#! Input:  [...]
+#! Output: [...]
+pub proc verify_all_queries
+    # Hoist all DEEP invariants once for the whole query loop.
+    # Final layout:
+    # [query_ptr, beta0, beta1, hfz0, hfz1, hfgz0, hfgz1, nz0, nz1, ngz0, ngz1]
+    # mem_loadw_le overwrites the top word, so we pad before each load and keep
+    # the hoisted invariant bundle intact.
+    padw push.SIG_NEG_Z_GZ_PTR mem_loadw_le
+    padw push.SIG_HORNER_FIXED_PTR mem_loadw_le
+    push.SIG_BETA_PTR add.1 mem_load
+    push.SIG_BETA_PTR mem_load
+    push.SIG_QUERIES_PTR
+    # => [query_ptr, beta0, beta1, hfz0, hfz1, hfgz0, hfgz1, nz0, nz1, ngz0, ngz1]
+
+    repeat.NUM_QUERIES
+        exec.compute_single_query_evals_hoisted
+        # => [deep0, deep1, expected0, expected1, query_ptr, beta0, beta1, hfz0, hfz1, hfgz0, hfgz1, nz0, nz1, ngz0, ngz1]
+        movup.2
+        assert_eq.err="DEEP coord 0"
+        assert_eq.err="DEEP coord 1"
+        # => [query_ptr, beta0, beta1, hfz0, hfz1, hfgz0, hfgz1, nz0, nz1, ngz0, ngz1]
+        add.4
+        # => [query_ptr + 4, beta0, beta1, hfz0, hfz1, hfgz0, hfgz1, nz0, nz1, ngz0, ngz1]
+    end
+
+    # Drop hoisted invariants + query_ptr.
+    dropw dropw
+    drop drop drop
+end
+
+#! Verify a single DEEP query selected by slot number.
+#!
+#! Input:  [slot, ...]
+#! Output: [...]
+pub proc verify_query_at_slot
+    push.4 mul
+    push.SIG_QUERIES_PTR add
+    # => [query_ptr, ...]
+    exec.verify_single_query
+    # => [query_ptr, ...]
+    drop
+end
+
+#! Evaluate a single DEEP query selected by slot number without asserting equality.
+#!
+#! Returns both values so tests can compare MASM and Rust computations:
+#!   [deep0, deep1, expected0, expected1]
+#!
+#! Input:  [slot, ...]
+#! Output: [deep0, deep1, expected0, expected1, ...]
+pub proc eval_query_at_slot_no_assert
+    push.4 mul
+    push.SIG_QUERIES_PTR add
+    # => [query_ptr, ...]
+    exec.compute_single_query_evals
+    # => [deep0, deep1, expected0, expected1, query_ptr, ...]
+    movup.4
+    drop
+    # => [deep0, deep1, expected0, expected1, ...]
+end
+
+#! Verify a single DEEP query at the given query pointer.
+#!
+#! For query index p (read from memory at query_ptr):
+#!
+#! 1. Compute x = COSET_OFFSET * CODE_GEN^p  (LDE domain point)
+#! 2. Verify witness Merkle opening: mtree_get + adv.push_mapval
+#! 3. Horner-reduce 8 base-field witness values with alpha
+#! 4. Verify quotient Merkle opening: mtree_get + adv.push_mapval
+#! 5. Continue Horner with 16 EF quotient values (32 flattened base coords)
+#! 6. Compute expected DEEP value from f_red(x), f_red(z), f_red(gz)
+#! 7. Evaluate DEEP polynomial at x via Horner
+#! 8. Assert expected == DEEP(x)
+#!
+#! Stack transition:
+#! Input:  [query_ptr, ...]
+#! Output: [query_ptr, ...]
+proc verify_single_query
+    exec.compute_single_query_evals
+    # => [deep0, deep1, expected0, expected1, query_ptr, ...]
+
+    movup.2
+    assert_eq.err="DEEP coord 0"
+    assert_eq.err="DEEP coord 1"
+    # => [query_ptr, ...]
+end
+
+#! Compute DEEP(x) and expected(x) for the query at `query_ptr`.
+#!
+#! Stack transition:
+#! Input:  [query_ptr, ...]
+#! Output: [deep0, deep1, expected0, expected1, query_ptr, ...]
+proc compute_single_query_evals
+    dup mem_load
+    dup
+    push.CODE_GEN swap exp.u32 push.COSET_OFFSET mul
+    movdn.2
+    # => [index, query_ptr, x, ...]
+
+    # Duplicate index so both Merkle openings reuse it without re-loading from memory.
+    dup
+    padw push.SIG_QUOTIENT_COM_PTR mem_loadw_le
+    movup.4 push.LOG_CODE_SIZE
+    mtree_get
+    adv.push_mapval
+    dropw dropw
+
+    padw push.SIG_WITNESS_COM_PTR mem_loadw_le
+    movup.4 push.LOG_CODE_SIZE
+    mtree_get
+    adv.push_mapval
+    dropw dropw
+
+    push.0.0
+    push.SIG_DEEP_COEFS_PTR
+    push.SIG_OPENED_ROW_PTR
+    padw padw padw
+
+    adv_pipe
+    horner_eval_base
+
+    repeat.4
+        adv_pipe
+        horner_eval_ext
+    end
+
+    dropw dropw dropw
+    drop drop
+    # => [f_red_x0, f_red_x1, query_ptr, x]
+
+    # Keep two copies of f_red(x): one for z term, one for gz term.
+    dup.1 dup.1
+    # => [fx0, fx1, fx0, fx1]
+
+    # term_z = (f_red(x) - f_red(z)) / (x - z)
+    # Load in reverse address order so ext2add can consume directly:
+    # [hfz0, hfz1, fx0, fx1].
+    push.SIG_HORNER_FIXED_PTR add.1 mem_load
+    push.SIG_HORNER_FIXED_PTR mem_load
+    ext2add
+    # => [num_z0, num_z1, fx0, fx1]
+
+    dup.5
+    push.SIG_NEG_Z_GZ_PTR mem_load
+    add
+    push.SIG_NEG_Z_GZ_PTR add.1 mem_load
+    swap
+    ext2div
+    # => [term_z0, term_z1, fx0, fx1, query_ptr, x]
+
+    # term_gz = (f_red(x) - f_red(gz)) / (x - gz)
+    movdn.3 movdn.3
+    # => [fx0, fx1, term_z0, term_z1]
+    # Load in reverse address order so ext2add can consume directly:
+    # [hfgz0, hfgz1, fx0, fx1].
+    push.SIG_HORNER_FIXED_PTR add.3 mem_load
+    push.SIG_HORNER_FIXED_PTR add.2 mem_load
+    ext2add
+    # => [num_gz0, num_gz1, term_z0, term_z1]
+
+    dup.5
+    push.SIG_NEG_Z_GZ_PTR add.2 mem_load
+    add
+    push.SIG_NEG_Z_GZ_PTR add.3 mem_load
+    swap
+    ext2div
+    # => [term_gz0, term_gz1, term_z0, term_z1, query_ptr, x]
+
+    # Load in reverse address order to materialize [beta0, beta1] directly.
+    push.SIG_BETA_PTR add.1 mem_load
+    push.SIG_BETA_PTR mem_load
+    ext2mul ext2add
+    # We build terms as (f(x)-f(z))/(x-z) and (f(x)-f(gz))/(x-gz), while the
+    # prover/verifier reference uses (f(z)-f(x))/(x-z) and (f(gz)-f(x))/(x-gz).
+    # Negating once here aligns with the canonical Rust DEEP expected value.
+    neg swap neg swap
+    # => [expected0, expected1, query_ptr, x, ...]
+
+    exec.eval_deep_poly_at_x
+    # => [deep0, deep1, expected0, expected1, query_ptr, ...]
+end
+
+#! Compute DEEP(x) and expected(x) for the query at `query_ptr`, reusing
+#! query-invariant DEEP constants from the stack.
+#! 
+#! Stack transition:
+#! Input:  [query_ptr, beta0, beta1, hfz0, hfz1, hfgz0, hfgz1, nz0, nz1, ngz0, ngz1, ...]
+#! Output: [deep0, deep1, expected0, expected1, query_ptr, beta0, beta1, hfz0, hfz1, hfgz0, hfgz1, nz0, nz1, ngz0, ngz1, ...]
+proc compute_single_query_evals_hoisted
+    dup mem_load
+    dup
+    push.CODE_GEN swap exp.u32 push.COSET_OFFSET mul
+    movdn.2
+    # => [index, query_ptr, x, ...]
+
+    # Duplicate index so both Merkle openings reuse it without re-loading from memory.
+    dup
+    padw push.SIG_QUOTIENT_COM_PTR mem_loadw_le
+    movup.4 push.LOG_CODE_SIZE
+    mtree_get
+    adv.push_mapval
+    dropw dropw
+
+    padw push.SIG_WITNESS_COM_PTR mem_loadw_le
+    movup.4 push.LOG_CODE_SIZE
+    mtree_get
+    adv.push_mapval
+    dropw dropw
+
+    push.0.0
+    push.SIG_DEEP_COEFS_PTR
+    push.SIG_OPENED_ROW_PTR
+    padw padw padw
+
+    adv_pipe
+    horner_eval_base
+
+    repeat.4
+        adv_pipe
+        horner_eval_ext
+    end
+
+    dropw dropw dropw
+    drop drop
+    # => [f_red_x0, f_red_x1, query_ptr, x]
+
+    # Keep two copies of f_red(x): one for z term, one for gz term.
+    dup.1 dup.1
+    # => [fx0, fx1, fx0, fx1]
+
+    # term_z = (f_red(x) - f_red(z)) / (x - z)
+    # Duplicate [hfz0, hfz1] in an order that feeds ext2add directly.
+    dup.9
+    dup.9
+    ext2add
+    # => [num_z0, num_z1, fx0, fx1]
+
+    dup.13
+    dup.13
+    dup.7
+    add
+    ext2div
+    # => [term_z0, term_z1, fx0, fx1, query_ptr, x]
+
+    # term_gz = (f_red(x) - f_red(gz)) / (x - gz)
+    movdn.3 movdn.3
+    # => [fx0, fx1, term_z0, term_z1]
+    # Duplicate [hfgz0, hfgz1] in an order that feeds ext2add directly.
+    dup.11
+    dup.11
+    ext2add
+    # => [num_gz0, num_gz1, term_z0, term_z1]
+
+    dup.15
+    dup.15
+    dup.7
+    add
+    ext2div
+    # => [term_gz0, term_gz1, term_z0, term_z1, query_ptr, x]
+
+    dup.7 dup.7
+    ext2mul ext2add
+    # We build terms as (f(x)-f(z))/(x-z) and (f(x)-f(gz))/(x-gz), while the
+    # prover/verifier reference uses (f(z)-f(x))/(x-z) and (f(gz)-f(x))/(x-gz).
+    # Negating once here aligns with the canonical Rust DEEP expected value.
+    neg swap neg swap
+    # => [expected0, expected1, query_ptr, x, beta0, beta1, hfz0, hfz1, hfgz0, hfgz1, nz0, nz1, ngz0, ngz1, ...]
+
+    exec.eval_deep_poly_at_x
+    # => [deep0, deep1, expected0, expected1, query_ptr, beta0, beta1, hfz0, hfz1, hfgz0, hfgz1, nz0, nz1, ngz0, ngz1, ...]
+end
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#   DEEP polynomial evaluation
+# ═══════════════════════════════════════════════════════════════════════════════
+
+#! Evaluate the DEEP polynomial at a base-field point x via Horner's method.
+#!
+#! Memory at SIG_DEEP_POLY_PTR holds a padded 128-coefficient descending layout:
+#!   [0, ..., 0, c117, c116, ..., c0]
+#! where c0..c117 are the 118 logical DEEP coefficients.
+#! This lets us evaluate with the native 4-EF Horner instruction:
+#!   repeat.32 { mem_stream; horner_eval_ext }.
+#!
+#! Stack transition:
+#! Input:  [expected0, expected1, query_ptr, x, ...]
+#! Output: [deep0, deep1, expected0, expected1, query_ptr, ...]
+proc eval_deep_poly_at_x
+    # Store x (at depth 3) as extension element (x, 0) in TMP2 for horner_eval_ext.
+    push.0.0.0
+    movup.6
+    push.TMP2_PTR
+    mem_storew_le
+    dropw
+
+    # Stack layout for each round:
+    #   [R0(4), R1(4), C(4), ptr, alpha_ptr, acc0, acc1, ...]
+    push.0.0
+    push.TMP2_PTR
+    push.SIG_DEEP_POLY_PTR
+    padw padw padw
+
+    repeat.32
+        mem_stream
+        horner_eval_ext
+    end
+
+    dropw dropw dropw
+    drop drop
+end

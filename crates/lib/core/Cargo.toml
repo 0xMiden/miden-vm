@@ -53,8 +53,12 @@ num-bigint = { version = "0.4" }
 pretty_assertions = { version = "1.4" }
 rand = { version = "0.9", default-features = false }
 rand_chacha = { version = "0.9", default-features = false }
+p3-goldilocks = { version = "0.5" }
+p3-field = { version = "0.5" }
+p3-symmetric = { version = "0.5" }
 rstest = { version = "0.26" }
 bincode.workspace = true
+miden-signature = { path = "/Users/al/Code/miden-signature" }
 serde.workspace = true
 serde_json.workspace = true
 

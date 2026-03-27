@@ -1,0 +1,147 @@
+#! Batch entrypoints for STARK-based signature verification.
+#!
+#! This module is intended for throughput benchmarking in Miden VM by verifying
+#! a power-of-two number of signatures in one program run.
+#!
+#! It exposes two batching modes:
+#! 1. `verify_*`: each signature provides its own `(pk, msg)` on the operand stack;
+#!    proof data is read from the advice stack.
+#! 2. `verify_same_msg_*`: a single shared `msg` is loaded once from the operand
+#!    stack, then each signer provides only `pk` on the operand stack; proof data
+#!    is read from the advice stack.
+
+use miden::core::sig
+use miden::core::sig::constants
+
+#! Verify one signature where message and public key are on the operand stack.
+#! 
+#! Inputs:
+#!   Operand stack: [pk(4), msg(4), ...]
+#!   Advice stack:  [proof_advice...]
+proc verify_one_from_stack
+    exec.sig::verify_signature
+end
+
+#! Initialize a shared message for same-message batching.
+#! 
+#! Inputs:
+#!   Operand stack: [msg(4), ...]
+proc init_shared_message_from_stack
+    exec.constants::sig_msg_ptr mem_storew_le
+    dropw
+end
+
+#! Verify one signature when message is shared across all signers.
+#! 
+#! Inputs:
+#!   Operand stack: [pk(4), ...]
+#!   Advice stack:  [proof_advice...]
+proc verify_one_shared_msg_from_stack
+    # Load shared message from memory and reorder to [pk, msg].
+    padw exec.constants::sig_msg_ptr mem_loadw_le
+    swapw
+    exec.sig::verify_signature
+end
+
+#! Verify one signature (independent msg per signature).
+#! 
+#! Inputs:
+#!   Operand stack: [pk0(4), msg0(4)]
+#!   Advice stack:  [proof0...]
+pub proc verify_1
+    exec.verify_one_from_stack
+end
+
+#! Verify two signatures (independent msg per signature).
+#! 
+#! Inputs:
+#!   Operand stack: [pk0(4), msg0(4), pk1(4), msg1(4)] (top verified first)
+#!   Advice stack:  [proof0..., proof1...]
+pub proc verify_2
+    repeat.2
+        exec.verify_one_from_stack
+    end
+end
+
+#! Verify four signatures (independent msg per signature).
+pub proc verify_4
+    repeat.4
+        exec.verify_one_from_stack
+    end
+end
+
+#! Verify eight signatures (independent msg per signature).
+pub proc verify_8
+    repeat.8
+        exec.verify_one_from_stack
+    end
+end
+
+#! Verify sixteen signatures (independent msg per signature).
+pub proc verify_16
+    repeat.16
+        exec.verify_one_from_stack
+    end
+end
+
+#! Verify thirty-two signatures (independent msg per signature).
+pub proc verify_32
+    repeat.32
+        exec.verify_one_from_stack
+    end
+end
+
+#! Verify one signature over a shared message.
+#! 
+#! Inputs:
+#!   Operand stack: [msg(4), pk0(4)]
+#!   Advice stack:  [proof0...]
+pub proc verify_same_msg_1
+    exec.init_shared_message_from_stack
+    exec.verify_one_shared_msg_from_stack
+end
+
+#! Verify two signatures over a shared message.
+#! 
+#! Inputs:
+#!   Operand stack: [msg(4), pk0(4), pk1(4)]
+#!   After storing msg, pk0 is on top and verified first; pk1 is verified second.
+#!   Advice stack:  [proof0..., proof1...]
+pub proc verify_same_msg_2
+    exec.init_shared_message_from_stack
+    repeat.2
+        exec.verify_one_shared_msg_from_stack
+    end
+end
+
+#! Verify four signatures over a shared message.
+pub proc verify_same_msg_4
+    exec.init_shared_message_from_stack
+    repeat.4
+        exec.verify_one_shared_msg_from_stack
+    end
+end
+
+#! Verify eight signatures over a shared message.
+pub proc verify_same_msg_8
+    exec.init_shared_message_from_stack
+    repeat.8
+        exec.verify_one_shared_msg_from_stack
+    end
+end
+
+#! Verify sixteen signatures over a shared message.
+pub proc verify_same_msg_16
+    exec.init_shared_message_from_stack
+    repeat.16
+        exec.verify_one_shared_msg_from_stack
+    end
+end
+
+#! Verify thirty-two signatures over a shared message.
+pub proc verify_same_msg_32
+    exec.init_shared_message_from_stack
+    repeat.32
+        exec.verify_one_shared_msg_from_stack
+    end
+end

@@ -1,0 +1,600 @@
+#! STARK-based signature verifier (e2_105 variant, 0-fold / no FRI).
+#!
+#! Verifies a STARK proof that the signer knows a secret key `sk` such that
+#! `RPO8_permute(sk) = pk`, bound to a message via Fiat-Shamir.
+#!
+#! # Protocol overview
+#!
+#! The protocol has 4 verifier rounds with no FRI (0-fold). Soundness comes
+#! entirely from direct DEEP polynomial consistency checks at query points.
+#!
+#! ```text
+#!   Phase 0:  Init transcript from INSTANCE_SEED + pk + msg
+#!   Round 1:  Absorb witness_commitment  -> grind(0)  -> sample lambda
+#!   Round 2:  Absorb quotient_commitment -> grind(0)  -> sample z, compute z^8
+#!   Round 3:  Absorb OOD evaluations     -> grind(10) -> sample alpha, beta
+#!   Round 4:  Load DEEP poly coeffs      -> grind(14) -> sample 53 query indices
+#!             Precompute DEEP constants, then verify all 53 DEEP queries
+#! ```
+#!
+#! # Transcript
+#!
+#! Poseidon2 width-12 sponge (rate=8, capacity=4), matching Miden VM's `hperm`.
+#! Initialized from a hardcoded INSTANCE_SEED (encodes protocol parameters)
+#! combined with per-signature public data (pk + msg).
+#!
+#! # Data flow
+#!
+#! Public inputs arrive on the operand stack: [pk, msg].
+#! Proof data arrives on the advice stack in consumption order:
+#!
+#! ```text
+#! Advice stack (consumed top to bottom):
+#!   witness_commitment  (4 felts)   -- Phase 1: padw adv_loadw
+#!   ali_nonce            (1 felt)   -- Phase 1: adv_push.1
+#!   quotient_commitment (4 felts)   -- Phase 2: padw adv_loadw
+#!   ood_nonce            (1 felt)   -- Phase 2: adv_push.1
+#!   deep_alpha_nd       (2 felts)   -- Phase 3: adv_push.2
+#!   OOD evaluations    (96 felts)   -- Phase 3
+#!   prox_nonce           (1 felt)   -- Phase 3: adv_push.1
+#!   DEEP coefficients (256 felts)   -- Phase 4: 32x adv_pipe
+#!   query_nonce          (1 felt)   -- Phase 4: adv_push.1
+#! ```
+#!
+#! Merkle authentication paths come from the advice store (mtree_get) and
+#! leaf data from the advice map (adv.push_mapval).
+
+use miden::core::sig::constants
+use miden::core::sig::deep_queries
+use miden::core::sig::ood_check
+use miden::core::crypto::hashes::poseidon2
+use miden::core::stark::random_coin
+
+# Constants used with `push.X` must be defined in the file that uses them.
+# See sig/constants.masm for derivation and full memory layout.
+
+const SIG_INSTANCE_SEED_0 = 15970698031008604874
+const SIG_INSTANCE_SEED_1 = 1635706101942399971
+const SIG_INSTANCE_SEED_2 = 13761930488983831210
+const SIG_INSTANCE_SEED_3 = 17142195108738414454
+
+const NUM_QUERIES = 53
+const QUERY_INDEX_MASK = 2047
+const RANDOM_COIN_RATE = 8
+const RANDOM_COIN_RATE_MINUS_ONE = 7
+const OOD_ROW_ABSORB_BLOCKS = 6
+const DEEP_POLY_ABSORB_BLOCKS = 32
+const QUERY_FELTS_BEFORE_REFILL = 7
+const QUERY_FELTS_AFTER_REFILL = 6
+
+# Local copies of the shared random-coin memory layout (from stark/constants.masm).
+const R1_PTR = 3223322672
+const RANDOM_COIN_INPUT_LEN_PTR = 3223322756
+const RANDOM_COIN_OUTPUT_LEN_PTR = 3223322757
+
+#! Move signature proof data from the advice map to the advice stack.
+#!
+#! Inputs:
+#!   Operand stack: [pk(4), msg(4), ...]
+#!   Advice map: hash(PK || MSG) -> PROOF_ADVICE
+#! Outputs:
+#!   Operand stack: [pk(4), msg(4), ...]
+#!   Advice stack:  [PROOF_ADVICE...]
+pub proc move_proof_from_map_to_adv_stack
+    dupw.1 dupw.1 hmerge
+    #=> [hash(PK || MSG), PK, MSG, ...]
+    adv.push_mapval dropw
+end
+
+#! Verify a STARK-based signature using proof data stored in the advice map.
+#!
+#! Stack transition:
+#! Input:  [pk0, pk1, pk2, pk3, msg0, msg1, msg2, msg3, ...]
+#! Output: [...]
+#!
+#! Errors if the signature is invalid.
+pub proc verify_signature_from_map
+    exec.move_proof_from_map_to_adv_stack
+    exec.verify_signature
+end
+
+#! Verify a STARK-based signature.
+#!
+#! Stack transition:
+#! Input:  [pk0, pk1, pk2, pk3, msg0, msg1, msg2, msg3, ...]
+#! Output: [...]
+#!
+#! Errors if the signature is invalid.
+pub proc verify_signature
+    exec.verify_signature_setup
+    exec.deep_queries::verify_all_queries
+end
+
+#! Run signature-verifier setup through DEEP precomputations.
+#!
+#! This performs phases 0-4 up to:
+#!   - loading DEEP coefficients,
+#!   - sampling query indices with replacement,
+#!   - precomputing fixed DEEP terms.
+#! It does not execute per-query DEEP checks.
+#!
+#! Stack transition:
+#! Input:  [pk0, pk1, pk2, pk3, msg0, msg1, msg2, msg3, ...]
+#! Output: [...]
+pub proc verify_signature_setup
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #   Phase 0: Store public inputs and initialize transcript
+    # ══════════════════════════════════════════════════════════════════════════
+    #
+    # The sponge is initialized via two-phase seeding:
+    #   1. INSTANCE_SEED encodes fixed protocol params (hardcoded constant).
+    #   2. PROOF_SEED = capacity after hperm(R1=msg, R2=pk, C=INSTANCE_SEED).
+    #
+    # After the init permute, R2' carries entropy from the permutation output.
+    # The next reseed_direct (Phase 1) overwrites only R1, preserving R2'.
+    # This matches the p3 DuplexChallenger behavior after auto-duplexing 8 elements.
+
+    # Store pk and msg to dedicated memory for later reference.
+    exec.constants::sig_pk_ptr mem_storew_le dropw
+    # => [msg0, msg1, msg2, msg3, ...]
+    exec.constants::sig_msg_ptr mem_storew_le dropw
+    # => [...]
+
+    # Build sponge state [R1, R2, C] and permute.
+    push.SIG_INSTANCE_SEED_3.SIG_INSTANCE_SEED_2.SIG_INSTANCE_SEED_1.SIG_INSTANCE_SEED_0
+    # => [C(4), ...]
+    padw exec.constants::sig_pk_ptr mem_loadw_le
+    # => [R2=pk(4), C(4), ...]
+    padw exec.constants::sig_msg_ptr mem_loadw_le
+    # => [R1=msg(4), R2=pk(4), C(4), ...]
+
+    exec.poseidon2::permute
+    # => [R1'(4), R2'(4), C'=PROOF_SEED(4), ...]
+
+    # Save full permuted state to sponge memory. No rate zeroing --
+    # R2' is preserved by the next reseed_direct.
+    exec.random_coin::store_random_coin_state
+    # => [...]
+
+    push.RANDOM_COIN_RATE push.RANDOM_COIN_OUTPUT_LEN_PTR mem_store
+    push.0 push.RANDOM_COIN_INPUT_LEN_PTR mem_store
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #   Phase 1 (Round 1): Witness commitment -> lambda
+    # ══════════════════════════════════════════════════════════════════════════
+    #
+    # Absorb the Merkle root of the witness trace (8-column RPO8 state codeword).
+    # reseed_direct: overwrites R1 with commitment, preserves R2', permutes.
+    # Then sample the constraint-batching challenge lambda in EF.
+
+    padw adv_loadw
+    # => [witness_com(4), ...]                          -- from advice stack
+    exec.constants::sig_witness_com_ptr mem_storew_le
+    # => [witness_com(4), ...]                          -- saved to memory
+    exec.random_coin::reseed_direct
+    # => [...]                                          -- absorbed + permuted
+
+    exec.check_sig_grind_zero
+    # => [...]
+
+    exec.random_coin::sample_ext
+    # => [lambda0, lambda1, ...]
+    push.0.0 movup.3 movup.3
+    # => [lambda0, lambda1, 0, 0, ...]
+    exec.constants::sig_lambda_ptr mem_storew_le dropw
+    # => [...]
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #   Phase 2 (Round 2): Quotient commitment -> z
+    # ══════════════════════════════════════════════════════════════════════════
+    #
+    # Absorb the Merkle root of the quotient trace (16 EF columns: 15 chunks + R).
+
+    padw adv_loadw
+    exec.constants::sig_quotient_com_ptr mem_storew_le
+    exec.random_coin::reseed_direct
+
+    exec.check_sig_grind_zero
+
+    # Sample the OOD evaluation point z in EF, then compute z^8 for vanishing poly.
+    exec.random_coin::sample_ext
+    # => [z0, z1, ...]
+
+    # z^8 = ((z^2)^2)^2. Preserve z by storing first, then computing z^8.
+    dup.1 dup.1
+    # => [z0, z1, z0, z1, ...]
+    # Store z at SIG_Z_PTR (first 2 slots)
+    exec.constants::sig_z_ptr mem_store
+    exec.constants::sig_z_ptr add.1 mem_store
+    # => [z0, z1, ...]
+
+    # Now compute z^2
+    dup.1 dup.1 ext2mul
+    # => [z2_0, z2_1, ...]
+
+    # z^4
+    dup.1 dup.1 ext2mul
+
+    # z^8
+    dup.1 dup.1 ext2mul
+    # => [z8_0, z8_1, ...]
+
+    # Store z^8 at SIG_Z_PTR+2..3
+    exec.constants::sig_z_ptr add.2 mem_store
+    exec.constants::sig_z_ptr add.3 mem_store
+    # => [...]
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #   Phase 3 (Round 3): OOD evaluations -> constraint check -> alpha, beta
+    # ══════════════════════════════════════════════════════════════════════════
+    #
+    # Load OOD evaluations from advice and absorb into transcript.
+    # OOD data layout (point-major):
+    #   z-row  = witness_z(16)  + quotient_z(32)  = 48 felts (6 full-rate absorbs)
+    #   gz-row = witness_gz(16) + quotient_gz(32) = 48 felts (6 full-rate absorbs)
+    # Total: 96 felts on the advice stack = 12 full-rate absorbs.
+    #
+    # `alpha` is supplied via advice so we can compute Horner fixed terms while
+    # absorbing OOD rows, then checked against the transcript challenge below.
+    adv_push.2
+    push.0.0
+    movup.3
+    movup.3
+    exec.constants::sig_alpha_inv_ptr mem_storew_le dropw
+
+    exec.load_and_absorb_ood_evaluations
+
+    # OOD constraint check at point z (ACE circuit-backed).
+    exec.ood_check::verify_constraints_at_ood
+
+    exec.check_sig_grind_prox_nonzero
+
+    # Sample DEEP batching challenges: alpha (column reduction), beta (point reduction).
+    exec.random_coin::sample_ext
+    # => [alpha0, alpha1, ...]
+    dup
+    exec.constants::sig_alpha_inv_ptr mem_load
+    assert_eq.err="sig alpha mismatch at element 0"
+    dup.1
+    exec.constants::sig_alpha_inv_ptr add.1 mem_load
+    assert_eq.err="sig alpha mismatch at element 1"
+
+    exec.random_coin::sample_ext
+    # => [beta0, beta1, alpha0, alpha1, ...]
+    movdn.3 movdn.3
+    # => [alpha0, alpha1, beta0, beta1, ...]
+    exec.constants::sig_deep_coefs_ptr mem_storew_le dropw
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #   Phase 4 (Round 4): DEEP polynomial + query verification
+    # ══════════════════════════════════════════════════════════════════════════
+    #
+    # Load+absorb DEEP polynomial coefficients, sample query indices, then verify
+    # that committed polynomials are consistent with OOD evaluations at each
+    # query point via the DEEP polynomial identity.
+
+    exec.load_deep_coefficients
+
+    exec.check_sig_grind_query_nonzero
+
+    exec.sample_sig_query_indices
+
+    # Precompute values constant across all queries:
+    #   - -z, -gz  (negated OOD point and shifted OOD point)
+    # Horner fixed terms are already computed in Phase 3 while absorbing OOD.
+    exec.deep_queries::precompute_deep_constants
+end
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#   Transcript helpers
+# ═══════════════════════════════════════════════════════════════════════════════
+
+#! Load OOD evaluations from advice, absorb them into the transcript, and
+#! compute the two fixed Horner terms used by DEEP.
+#! Simultaneously Horner-reduce OOD rows using non-deterministic alpha:
+#!   - stores -f_red(z)  at SIG_HORNER_FIXED_PTR[0..1]
+#!   - stores -f_red(gz) at SIG_HORNER_FIXED_PTR[2..3]
+#!
+#! Matches the prover's absorption pattern exactly:
+#!   - witness_z/gz: observe_ext_elements      → absorb_full_rate (8 felts per permutation)
+#!   - quotient_z/gz: observe_elements_aligned → absorb_full_rate (8 felts per permutation)
+#!
+#! Absorption counts (point-major rows):
+#!   z-row:  witness_z(16) + quotient_z(32)   = 48 felts = 6 absorb_full_rate
+#!   gz-row: witness_gz(16) + quotient_gz(32) = 48 felts = 6 absorb_full_rate
+#!
+#! Advice stack order: wz(16), qz(32), wgz(16), qgz(32) = 96 felts total.
+proc load_and_absorb_ood_evaluations
+    # Keep the duplex state on stack and absorb OOD stream directly into it.
+    # The Horner accumulator frame is:
+    #   [R1(4), R2(4), C(4), ptr, alpha_ptr, acc0, acc1]
+    exec.random_coin::load_random_coin_state
+    exec.constants::sig_ood_ptr
+    movdn.12
+    # => [R1, R2, C, ood_ptr]
+
+    exec.constants::sig_alpha_inv_ptr
+    movdn.13
+    # => [R1, R2, C, ood_ptr, alpha_ptr]
+
+    # z-row: witness_z + quotient_z, Horner-reduced to f_red(z).
+    push.0
+    movdn.14
+    push.0
+    movdn.15
+    repeat.OOD_ROW_ABSORB_BLOCKS
+        adv_pipe
+        horner_eval_ext
+        exec.poseidon2::permute
+    end
+    movup.14
+    neg
+    exec.constants::sig_horner_fixed_ptr mem_store
+    movup.14
+    neg
+    exec.constants::sig_horner_fixed_ptr add.1 mem_store
+
+    # gz-row: witness_gz + quotient_gz, Horner-reduced to f_red(gz).
+    push.0
+    movdn.14
+    push.0
+    movdn.15
+    repeat.OOD_ROW_ABSORB_BLOCKS
+        adv_pipe
+        horner_eval_ext
+        exec.poseidon2::permute
+    end
+    movup.14
+    neg
+    exec.constants::sig_horner_fixed_ptr add.2 mem_store
+    movup.14
+    neg
+    exec.constants::sig_horner_fixed_ptr add.3 mem_store
+
+    # Strip alpha_ptr and pointer, keep [R1, R2, C].
+    movup.13 drop
+    movup.12 drop
+    exec.random_coin::store_random_coin_state
+
+    push.RANDOM_COIN_RATE push.RANDOM_COIN_OUTPUT_LEN_PTR mem_store
+    push.0 push.RANDOM_COIN_INPUT_LEN_PTR mem_store
+end
+
+#! Load DEEP polynomial coefficients from advice, absorb them into transcript,
+#! and store them at SIG_DEEP_POLY_PTR in evaluation order:
+#!   [0, 0, ..., 0, c117, c116, ..., c0]  (128 EF = 256 base felts).
+#! 
+#! Advice is pre-packed in this exact order, split into 32 full-rate blocks.
+#! Each `adv_pipe` writes one block to memory and provides the same block to
+#! the sponge rate; `permute` then absorbs it.
+#! 
+#! This binds DEEP coefficients before query grinding and leaves memory ready
+#! for eval_deep_poly_at_x (32 rounds of mem_stream + horner_eval_ext).
+#!
+#! Stack transition:
+#! Input:  [...]
+#! Output: [...]
+proc load_deep_coefficients
+    exec.random_coin::load_random_coin_state
+    # => [R1, R2, C]
+
+    exec.constants::sig_deep_poly_ptr
+    movdn.12
+    # => [R1, R2, C, deep_poly_ptr]
+
+    repeat.DEEP_POLY_ABSORB_BLOCKS
+        adv_pipe
+        exec.poseidon2::permute
+    end
+
+    exec.random_coin::store_random_coin_state
+    push.RANDOM_COIN_RATE push.RANDOM_COIN_OUTPUT_LEN_PTR mem_store
+    push.0 push.RANDOM_COIN_INPUT_LEN_PTR mem_store
+
+    # Drop deep_poly_ptr.
+    drop
+end
+
+#! Sample NUM_QUERIES query indices and store at SIG_QUERIES_PTR.
+#!
+#! Query sampling uses a packed extraction scheme:
+#! - read one felt from sponge output,
+#! - split it into four u16 lanes,
+#! - map each lane to [0, 2048) with `& QUERY_INDEX_MASK`.
+#! This yields 4 indices per felt and significantly reduces permutation pressure.
+#!
+#! In signature flow, query grinding (bits=14) always consumes one fresh rate
+#! element right before this routine, so output_len is deterministically 7 here.
+#! We exploit this fixed schedule:
+#!   - consume 7 felts from current output,
+#!   - permute once,
+#!   - consume 7 felts from fresh output.
+#!
+#! Stack transition:
+#! Input:  [...]
+#! Output: [...]
+proc sample_sig_query_indices
+    exec.constants::sig_queries_ptr
+    # Fixed schedule: query grinding consumes one felt from a fresh permutation
+    # output, so sampling starts with output_len=7.
+    push.RANDOM_COIN_RATE_MINUS_ONE
+    # => [output_len, query_ptr]
+
+    # 7 felts -> 28 indices.
+    repeat.QUERY_FELTS_BEFORE_REFILL
+        sub.1
+        dup push.R1_PTR add mem_load
+        exec.store_four_query_indices_from_felt
+    end
+
+    # Refill once.
+    drop
+    exec.random_coin::load_random_coin_state
+    exec.poseidon2::permute
+    exec.random_coin::store_random_coin_state
+    push.RANDOM_COIN_RATE
+    # => [output_len=8, query_ptr]
+
+    # Next 6 felts -> 24 indices.
+    repeat.QUERY_FELTS_AFTER_REFILL
+        sub.1
+        dup push.R1_PTR add mem_load
+        exec.store_four_query_indices_from_felt
+    end
+
+    # Final felt -> 1 index (53 total).
+    sub.1
+    dup push.R1_PTR add mem_load
+    exec.store_one_query_index_from_felt
+    # => [output_len=1, query_ptr]
+
+    # Persist remaining output_len back to random coin state.
+    push.RANDOM_COIN_OUTPUT_LEN_PTR mem_store
+    # => [query_ptr]
+    drop
+end
+
+#! Consume one felt and store four query indices (u16 lanes, masked to 11 bits).
+#!
+#! Input:  [felt, output_len, query_ptr, ...]
+#! Output: [output_len, query_ptr + 16, ...]
+proc store_four_query_indices_from_felt
+    # Split felt into lo/hi u32 halves.
+    u32split
+    # => [lo32, hi32, output_len, query_ptr]
+
+    # Build indices in lane order:
+    # idx0 = lo32[15:0], idx1 = lo32[31:16], idx2 = hi32[15:0], idx3 = hi32[31:16]
+    dup
+    push.QUERY_INDEX_MASK
+    u32and
+    swap
+    u32shr.16
+    push.QUERY_INDEX_MASK
+    u32and
+    movup.2
+    dup
+    push.QUERY_INDEX_MASK
+    u32and
+    swap
+    u32shr.16
+    push.QUERY_INDEX_MASK
+    u32and
+    # => [idx3, idx2, idx1, idx0, output_len, query_ptr]
+
+    # Store idx0, idx1, idx2, idx3 at consecutive word addresses.
+    movup.3
+    movup.5
+    swap
+    dup.1 mem_store
+    add.4
+
+    movup.3
+    dup.1 mem_store
+    add.4
+
+    movup.2
+    dup.1 mem_store
+    add.4
+
+    swap
+    dup.1 mem_store
+    add.4
+
+    swap
+    # => [output_len, query_ptr + 16]
+end
+
+#! Consume one felt and store one query index from lane 0.
+#!
+#! Input:  [felt, output_len, query_ptr, ...]
+#! Output: [output_len, query_ptr + 4, ...]
+proc store_one_query_index_from_felt
+    u32split
+    swap
+    drop
+    push.QUERY_INDEX_MASK
+    u32and
+    movup.2
+    swap
+    dup.1 mem_store
+    add.4
+    swap
+end
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#   Grinding checks
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Each round has a proof-of-work check. We split the implementation into:
+# - zero-bit checks (ALI/OOD): consume nonce witness and assert it is zero.
+# - nonzero checks (PROX/QUERY): absorb nonce, permute, sample from rate[7] with fixed masks.
+
+#! Zero-bit grinding check.
+#!
+#! Stack transition:
+#! Input:  [...]
+#! Output: [...]
+#! 
+#! Advice: consumes 1 felt (nonce), which must be zero.
+proc check_sig_grind_zero
+    adv_push.1
+    assertz.err="grinding nonce must be zero when bits=0"
+end
+
+#! PROX grinding check (bits = 10).
+#! 
+#! Stack transition:
+#! Input:  [...]
+#! Output: [...]
+#! 
+#! Advice: consumes 1 felt (nonce).
+proc check_sig_grind_prox_nonzero
+    adv_push.1
+    # => [nonce]
+
+    # Write nonce to R1[0] (overwrites only position 0, rest of R1 unchanged).
+    push.R1_PTR mem_store
+    # => [...]
+
+    # Permute sponge with the nonce absorbed.
+    exec.random_coin::load_random_coin_state
+    exec.poseidon2::permute
+    exec.random_coin::store_random_coin_state
+    # Consume one felt directly from rate[7], so output_len becomes 7.
+    push.RANDOM_COIN_RATE_MINUS_ONE push.RANDOM_COIN_OUTPUT_LEN_PTR mem_store
+
+    # Check 10 low bits are zero.
+    push.RANDOM_COIN_RATE_MINUS_ONE push.R1_PTR add mem_load
+    u32split swap drop
+    push.1023 u32and
+    assertz.err="grinding_pow_check_failed"
+end
+
+#! QUERY grinding check (bits = 14).
+#! 
+#! Stack transition:
+#! Input:  [...]
+#! Output: [...]
+#! 
+#! Advice: consumes 1 felt (nonce).
+proc check_sig_grind_query_nonzero
+    adv_push.1
+    # => [nonce]
+
+    push.R1_PTR mem_store
+    # => [...]
+
+    exec.random_coin::load_random_coin_state
+    exec.poseidon2::permute
+    exec.random_coin::store_random_coin_state
+    # Consume one felt directly from rate[7], so output_len becomes 7.
+    push.RANDOM_COIN_RATE_MINUS_ONE push.RANDOM_COIN_OUTPUT_LEN_PTR mem_store
+
+    # Check 14 low bits are zero.
+    push.RANDOM_COIN_RATE_MINUS_ONE push.R1_PTR add mem_load
+    u32split swap drop
+    push.16383 u32and
+    assertz.err="grinding_pow_check_failed"
+end

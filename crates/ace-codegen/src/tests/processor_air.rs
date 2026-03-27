@@ -14,6 +14,8 @@ fn processor_air_dag_matches_manual_eval() {
         num_quotient_chunks: 2,
         num_vlpi_groups: 0,
         layout: LayoutKind::Native,
+        quotient_extension: false,
+        quotient_segment_len: 0,
     };
     let artifacts = build_ace_dag_for_air::<_, Felt, QuadFelt>(&air, config).unwrap();
     let layout = artifacts.layout.clone();
@@ -57,6 +59,8 @@ fn processor_air_chiplet_rows() {
         num_quotient_chunks: 8,
         num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
+        quotient_extension: false,
+        quotient_segment_len: 0,
     };
 
     let circuit =

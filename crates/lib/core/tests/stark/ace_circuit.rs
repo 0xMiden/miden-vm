@@ -7,6 +7,8 @@ const MASM_CONFIG: AceConfig = AceConfig {
     num_quotient_chunks: 8,
     num_vlpi_groups: 1,
     layout: LayoutKind::Masm,
+    quotient_extension: false,
+    quotient_segment_len: 0,
 };
 
 const REGEN_CMD: &str = "cargo test --release -p miden-core-lib generate_constraints_eval_masm_data -- --ignored --nocapture";

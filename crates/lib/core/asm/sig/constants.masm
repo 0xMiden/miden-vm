@@ -1,0 +1,263 @@
+#! Memory layout and hardcoded parameters for the STARK-based signature verifier.
+#!
+#! # Variant: e2_105
+#!
+#! - Trace:     8 columns x 8 rows (RPO8 permutation: 7 rounds + input state)
+#! - Code domain: |D| = 2048, blowup = 256 (= 2048 / 8)
+#! - Extension: quadratic (e = 2), 128-bit challenge field
+#! - Queries:   q = 53
+#! - Mask degree: md = |H| + 2*(e+q) - 1 = 8 + 110 - 1 = 117
+#! - Message size: ms = md + 1 = 118  (number of masked witness coefficients)
+#! - Quotient:  7*md - 6 = 813 coefficients, segmented into 15 chunks of length 55
+#! - Aux width: 15 chunks + 1 DEEP mask R = 16 committed EF columns
+#!
+#! # Sponge memory
+#!
+#! This verifier shares the Poseidon2 sponge memory region with `stark/constants.masm`
+#! (R1_PTR, R2_PTR, C_PTR, output_len, input_len). It cannot coexist with a VM proof
+#! verifier in the same execution context. Sig-specific storage lives in a separate
+#! memory region starting at SIG_MEM_BASE.
+
+use miden::core::stark::constants
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#   Protocol parameters
+# ═══════════════════════════════════════════════════════════════════════════════
+
+const CODE_SIZE = 2048
+const LOG_CODE_SIZE = 11
+const NUM_QUERIES = 53
+const TRACE_HEIGHT = 8
+const LOG_TRACE_HEIGHT = 3
+const WITNESS_WIDTH = 8
+const AUX_WIDTH = 16
+const NUM_QUOTIENT_CHUNKS = 15
+const SEGMENT_LEN = 55
+const MESSAGE_SIZE = 118
+
+# OOD evaluation counts:
+#   witness_z(8 EF) + witness_gz(8 EF) + quotient_z(16 EF) + quotient_gz(16 EF) = 48 EF
+#   = 96 base felts. Absorbed in 12 blocks of 8.
+const NUM_OOD_EF_ELEMENTS = 48
+const NUM_OOD_BASE_FELTS = 96
+const NUM_OOD_ABSORPTIONS = 12
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#   Domain generators (precomputed from ROOT_UNITY = 1753635133440165772)
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Goldilocks field: p = 2^64 - 2^32 + 1
+# ROOT_UNITY is the primitive 2^32-th root of unity.
+# Generators for smaller subgroups: omega_k = ROOT_UNITY^(2^(32-k)).
+
+# Code domain generator: omega_{2048} = ROOT_UNITY^(2^21)
+const CODE_GEN = 455906449640507599
+
+# Trace domain generator: omega_8 = ROOT_UNITY^(2^29)
+const TRACE_GEN = 18446744069397807105
+
+# Last trace domain point: omega_8^7 = trace_gen^7
+# Used in vanishing polynomial evaluation: v_trans(x) = (x^8 - 1) / (x - omega^7)
+const OMEGA_7 = 1099511627520
+
+# Coset offset: Goldilocks::GENERATOR = 7 (shifts the code domain off subgroup)
+const COSET_OFFSET = 7
+const COSET_OFFSET_INV = 2635249152773512046
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#   Instance seed
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# INSTANCE_SEED = capacity after:
+# (num_constraints=16 for the width-8 RPO AIR)
+#   hperm(R1=[code_size=2048, num_queries=53, grind_prox=10, grind_query=14],
+#         R2=[log_trace_height=3, num_constraints=16, 0, 0],
+#         C=[0, 0, 0, 0])
+#
+# This is a compile-time constant encoding all fixed protocol parameters.
+# The zero capacity is a placeholder for RELATION_DIGEST (= hash(protocol_string,
+# CIRCUIT_COMMITMENT)), which will be non-zero once the ACE circuit is finalized.
+
+const SIG_INSTANCE_SEED_0 = 15970698031008604874
+const SIG_INSTANCE_SEED_1 = 1635706101942399971
+const SIG_INSTANCE_SEED_2 = 13761930488983831210
+const SIG_INSTANCE_SEED_3 = 17142195108738414454
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#   Grinding bits per round
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# From the GrindingSchedule for e2_105 (JSN(m=3), target=108 bits):
+#   ALI  = 0   (constraint batching error already > 108 bits)
+#   OOD  = 0   (OOD collision error already > 108 bits)
+#   PROX = 10  (proximity gap needs 10 bits of grinding)
+#   QUERY = 14 (query agreement needs 14 bits of grinding)
+
+const GRIND_ALI_BITS = 0
+const GRIND_OOD_BITS = 0
+const GRIND_PROX_BITS = 10
+const GRIND_QUERY_BITS = 14
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#   Memory layout (sig-specific region)
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Base address: 3240099840 = 2^31 + 2^30 + 2^24 + 2^21
+# Well above the VM verifier regions (3223322624 and 3225419776).
+#
+# Layout (address, size, contents):
+#
+#   3240099840  [4]   pk          -- public key (4 Goldilocks felts)
+#   3240099844  [4]   msg         -- message digest (4 felts, Blake3 hash of raw message)
+#   3240099848  [4]   witness_com -- Merkle root of witness trace
+#   3240099852  [4]   quotient_com-- Merkle root of quotient trace
+#   3240099856  [4]   z_z8        -- [z0, z1, z8_0, z8_1] OOD point and z^8
+#   3240099860  [4]   lambda      -- [lambda0, lambda1, 0, 0] constraint batching
+#   3240099864  [4]   deep_coefs  -- [alpha0, alpha1, beta0, beta1] DEEP batching
+#   3240099868  [4]   alpha_nd    -- [alpha0, alpha1, 0, 0] for OOD Horner lockstep
+#   3240099872  [4]   horner_fix  -- [-fz0, -fz1, -fgz0, -fgz1] precomputed Horner terms
+#   3240099876  [4]   neg_z_gz    -- [-z0, -z1, -gz0, -gz1] for DEEP denominators
+#   3240099880  [96]  ood_evals   -- OOD evaluations in point-major order:
+#                                   --   witness_z(16), quotient_z(32),
+#                                   --   witness_gz(16), quotient_gz(32)
+#   3240099976  [256] deep_poly   -- DEEP polynomial coefficients (padded to 128 EF)
+#   3240100232  [212] queries     -- 53 query indices (word-stride)
+#   3240100444  [--]  (end)
+
+const SIG_MEM_BASE = 3240099840
+
+const SIG_PK_PTR = 3240099840
+const SIG_MSG_PTR = 3240099844
+const SIG_WITNESS_COM_PTR = 3240099848
+const SIG_QUOTIENT_COM_PTR = 3240099852
+const SIG_Z_PTR = 3240099856
+const SIG_LAMBDA_PTR = 3240099860
+const SIG_DEEP_COEFS_PTR = 3240099864
+const SIG_ALPHA_INV_PTR = 3240099868
+const SIG_HORNER_FIXED_PTR = 3240099872
+const SIG_NEG_Z_GZ_PTR = 3240099876
+const SIG_OOD_PTR = 3240099880
+const SIG_DEEP_POLY_PTR = 3240099976
+const SIG_QUERIES_PTR = 3240100232
+const SIG_QUERIES_END_PTR = 3240100444
+const SIG_OPENED_ROW_PTR = 3240100448
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#   Accessor procedures
+# ═══════════════════════════════════════════════════════════════════════════════
+
+pub proc sig_pk_ptr
+    push.SIG_PK_PTR
+end
+
+pub proc sig_msg_ptr
+    push.SIG_MSG_PTR
+end
+
+pub proc sig_witness_com_ptr
+    push.SIG_WITNESS_COM_PTR
+end
+
+pub proc sig_quotient_com_ptr
+    push.SIG_QUOTIENT_COM_PTR
+end
+
+pub proc sig_z_ptr
+    push.SIG_Z_PTR
+end
+
+pub proc sig_lambda_ptr
+    push.SIG_LAMBDA_PTR
+end
+
+pub proc sig_deep_coefs_ptr
+    push.SIG_DEEP_COEFS_PTR
+end
+
+pub proc sig_alpha_inv_ptr
+    push.SIG_ALPHA_INV_PTR
+end
+
+pub proc sig_horner_fixed_ptr
+    push.SIG_HORNER_FIXED_PTR
+end
+
+pub proc sig_neg_z_gz_ptr
+    push.SIG_NEG_Z_GZ_PTR
+end
+
+pub proc sig_ood_ptr
+    push.SIG_OOD_PTR
+end
+
+pub proc sig_deep_poly_ptr
+    push.SIG_DEEP_POLY_PTR
+end
+
+pub proc sig_queries_ptr
+    push.SIG_QUERIES_PTR
+end
+
+pub proc sig_queries_end_ptr
+    push.SIG_QUERIES_END_PTR
+end
+
+pub proc sig_opened_row_ptr
+    push.SIG_OPENED_ROW_PTR
+end
+
+pub proc get_sig_code_size
+    push.CODE_SIZE
+end
+
+pub proc get_sig_log_code_size
+    push.LOG_CODE_SIZE
+end
+
+pub proc get_sig_num_queries
+    push.NUM_QUERIES
+end
+
+pub proc get_sig_trace_height
+    push.TRACE_HEIGHT
+end
+
+pub proc get_sig_witness_width
+    push.WITNESS_WIDTH
+end
+
+pub proc get_sig_aux_width
+    push.AUX_WIDTH
+end
+
+pub proc get_sig_num_quotient_chunks
+    push.NUM_QUOTIENT_CHUNKS
+end
+
+pub proc get_sig_segment_len
+    push.SEGMENT_LEN
+end
+
+pub proc get_sig_message_size
+    push.MESSAGE_SIZE
+end
+
+pub proc get_sig_code_gen
+    push.CODE_GEN
+end
+
+pub proc get_sig_trace_gen
+    push.TRACE_GEN
+end
+
+pub proc get_sig_omega_7
+    push.OMEGA_7
+end
+
+pub proc get_sig_coset_offset
+    push.COSET_OFFSET
+end
+
+pub proc get_sig_coset_offset_inv
+    push.COSET_OFFSET_INV
+end
