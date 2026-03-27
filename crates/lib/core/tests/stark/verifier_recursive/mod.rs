@@ -413,18 +413,14 @@ fn build_kernel_digest_advice(kernel_digests: &[Word]) -> Vec<u64> {
 ///
 /// Must stay in sync with `PublicInputs::to_air_inputs()`.
 fn build_fixed_len_inputs(pub_inputs: &PublicInputs) -> Vec<u64> {
-    let mut fixed_len = Vec::new();
-    fixed_len
-        .extend_from_slice(&felts_to_u64(pub_inputs.program_info().program_hash().as_elements()));
-    fixed_len.extend_from_slice(&felts_to_u64(pub_inputs.stack_inputs().as_ref()));
-    fixed_len.extend_from_slice(&felts_to_u64(pub_inputs.stack_outputs().as_ref()));
-    fixed_len.extend_from_slice(&felts_to_u64(pub_inputs.pc_transcript_state().as_ref()));
+    let mut felts = Vec::<Felt>::new();
+    felts.extend_from_slice(pub_inputs.program_info().program_hash().as_elements());
+    felts.extend_from_slice(pub_inputs.stack_inputs().as_ref());
+    felts.extend_from_slice(pub_inputs.stack_outputs().as_ref());
+    felts.extend_from_slice(pub_inputs.pc_transcript_state().as_ref());
+    let mut fixed_len: Vec<u64> = felts.iter().map(|f| f.as_canonical_u64()).collect();
     fixed_len.resize(fixed_len.len().next_multiple_of(8), 0);
     fixed_len
-}
-
-fn felts_to_u64(felts: &[Felt]) -> Vec<u64> {
-    felts.iter().map(|f| f.as_canonical_u64()).collect()
 }
 
 fn commitment_to_u64s<C: Copy + Into<[Felt; 4]>>(commitment: C) -> Vec<u64> {

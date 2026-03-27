@@ -83,7 +83,10 @@ impl InputKeyMapper<'_> {
                 }
             },
             InputKey::AuxBusBoundary(i) => layout.regions.aux_bus_boundary.index(i),
-            InputKey::VlpiReduction(i) => layout.regions.vlpi_reductions.index(i),
+            InputKey::VlpiReduction(i) => {
+                let local = i * layout.vlpi_stride;
+                layout.regions.vlpi_reductions.index(local)
+            },
             // Extension-field stark vars.
             InputKey::Alpha => Some(layout.stark.alpha),
             InputKey::ZPowN => Some(layout.stark.z_pow_n),

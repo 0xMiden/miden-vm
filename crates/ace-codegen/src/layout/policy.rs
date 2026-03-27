@@ -13,6 +13,7 @@ enum Alignment {
 struct LayoutPolicy {
     public_values: Alignment,
     vlpi: Alignment,
+    vlpi_stride: usize,
     randomness: Alignment,
     main: Alignment,
     aux: Alignment,
@@ -27,6 +28,7 @@ impl LayoutPolicy {
         Self {
             public_values: Alignment::Unaligned,
             vlpi: Alignment::Unaligned,
+            vlpi_stride: 1,
             randomness: Alignment::Unaligned,
             main: Alignment::Unaligned,
             aux: Alignment::Unaligned,
@@ -41,6 +43,7 @@ impl LayoutPolicy {
         Self {
             public_values: Alignment::QuadWord,
             vlpi: Alignment::Word,
+            vlpi_stride: 2,
             randomness: Alignment::Word,
             main: Alignment::DoubleWord,
             aux: Alignment::DoubleWord,
@@ -158,6 +161,7 @@ impl InputLayout {
             },
             aux_rand_alpha,
             aux_rand_beta,
+            vlpi_stride: policy.vlpi_stride,
             stark: StarkVarIndices {
                 alpha,
                 z_pow_n,
@@ -173,5 +177,55 @@ impl InputLayout {
             total_inputs: builder.offset,
             counts,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{InputCounts, InputKey, InputLayout};
+
+    #[test]
+    fn masm_layout_vlpi_groups_use_word_stride() {
+        let counts = InputCounts {
+            width: 1,
+            aux_width: 1,
+            num_public: 8,
+            // Two logical VLPI groups in MASM occupy four EF slots total:
+            // [group0, pad0, group1, pad1].
+            num_vlpi: 4,
+            num_randomness: 2,
+            num_periodic: 0,
+            num_quotient_chunks: 1,
+        };
+        let layout = InputLayout::new_masm(counts);
+
+        let vlpi_base = layout.index(InputKey::VlpiReduction(0)).unwrap();
+        assert_eq!(layout.index(InputKey::VlpiReduction(0)), Some(vlpi_base));
+        assert_eq!(
+            layout.index(InputKey::VlpiReduction(1)),
+            Some(vlpi_base + 2),
+            "MASM VLPI groups should advance by a word-aligned stride"
+        );
+    }
+
+    #[test]
+    fn native_layout_vlpi_groups_use_unit_stride() {
+        let counts = InputCounts {
+            width: 1,
+            aux_width: 1,
+            num_public: 8,
+            num_vlpi: 2,
+            num_randomness: 2,
+            num_periodic: 0,
+            num_quotient_chunks: 1,
+        };
+        let layout = InputLayout::new(counts);
+
+        let vlpi_base = layout.index(InputKey::VlpiReduction(0)).unwrap();
+        assert_eq!(
+            layout.index(InputKey::VlpiReduction(1)),
+            Some(vlpi_base + 1),
+            "Native VLPI groups should advance by unit stride"
+        );
     }
 }

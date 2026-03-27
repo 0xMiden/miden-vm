@@ -238,53 +238,44 @@ fn seed_sponge_state(
     state
 }
 
-impl InitTranscript for AlgChallenger<Poseidon2Permutation256> {
-    fn seeded(log_trace_height: u64) -> Self {
-        let state = seed_sponge_state(log_trace_height, |s| {
-            Poseidon2Permutation256.permute_mut(s);
-        });
-        DuplexChallenger {
-            sponge_state: state,
-            input_buffer: vec![],
-            output_buffer: vec![],
-            permutation: Poseidon2Permutation256,
+// Per-permutation impls for algebraic (sponge-based) challengers.
+//
+// The algebraic path seeds RELATION_DIGEST into the sponge capacity, then absorbs PCS
+// params and log_trace_height via two explicit permutation rounds (`seed_sponge_state`).
+// This matches the MASM recursive verifier's `init_seed` in `random_coin.masm`.
+//
+// The DuplexChallenger's `duplexing` overwrites the rate, so the algebraic path
+// could equivalently use `observe` after setting the initial capacity. However,
+// full unification would require a domain-separation constructor on the challenger
+// and matching changes in the MASM verifier.
+macro_rules! impl_alg_init_transcript {
+    ($perm_ty:ty, $perm_val:expr) => {
+        impl InitTranscript for AlgChallenger<$perm_ty> {
+            fn seeded(log_trace_height: u64) -> Self {
+                let perm = $perm_val;
+                let state = seed_sponge_state(log_trace_height, |s| {
+                    perm.permute_mut(s);
+                });
+                DuplexChallenger {
+                    sponge_state: state,
+                    input_buffer: vec![],
+                    output_buffer: vec![],
+                    permutation: perm,
+                }
+            }
         }
-    }
+    };
 }
 
-impl InitTranscript for AlgChallenger<RpoPermutation256> {
-    fn seeded(log_trace_height: u64) -> Self {
-        let state = seed_sponge_state(log_trace_height, |s| {
-            RpoPermutation256.permute_mut(s);
-        });
-        DuplexChallenger {
-            sponge_state: state,
-            input_buffer: vec![],
-            output_buffer: vec![],
-            permutation: RpoPermutation256,
-        }
-    }
-}
+impl_alg_init_transcript!(Poseidon2Permutation256, Poseidon2Permutation256);
+impl_alg_init_transcript!(RpoPermutation256, RpoPermutation256);
+impl_alg_init_transcript!(RpxPermutation256, RpxPermutation256);
 
-impl InitTranscript for AlgChallenger<RpxPermutation256> {
-    fn seeded(log_trace_height: u64) -> Self {
-        let state = seed_sponge_state(log_trace_height, |s| {
-            RpxPermutation256.permute_mut(s);
-        });
-        DuplexChallenger {
-            sponge_state: state,
-            input_buffer: vec![],
-            output_buffer: vec![],
-            permutation: RpxPermutation256,
-        }
-    }
-}
-
-/// Helper for bit-oriented `InitTranscript` implementations.
+/// Transcript initialization for bit-oriented challengers (Blake3, Keccak).
 ///
-/// Unlike the sponge-based algebraic challengers (RPO, Poseidon2, RPX) which seed the
-/// capacity directly via `seed_sponge_state`, bit-oriented challengers observe the
-/// RELATION_DIGEST, PCS parameters, and log_trace_height sequentially as a prefix.
+/// Observes RELATION_DIGEST, PCS parameters, and log_trace_height sequentially into the
+/// rate. Byte-oriented challengers have no capacity, so RELATION_DIGEST is absorbed as
+/// data rather than set as domain separation in the capacity.
 fn init_transcript_hash(challenger: &mut impl CanObserve<Felt>, log_trace_height: u64) {
     challenger.observe_slice(&RELATION_DIGEST);
     challenger.observe(Felt::new(NUM_QUERIES as u64));

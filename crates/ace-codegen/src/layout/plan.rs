@@ -111,6 +111,8 @@ pub struct InputLayout {
     pub(crate) aux_rand_alpha: usize,
     /// Input index for aux randomness beta.
     pub(crate) aux_rand_beta: usize,
+    /// Stride between logical VLPI groups (2 for MASM word-aligned, 1 for native).
+    pub(crate) vlpi_stride: usize,
     /// Indexes into the stark-vars region.
     pub(crate) stark: StarkVarIndices,
     /// Total number of inputs (length of the READ section).
