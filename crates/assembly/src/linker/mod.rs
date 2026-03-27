@@ -364,7 +364,7 @@ impl Linker {
     /// This cannot cause any issues with modules already added to the linker (if any), as they
     /// cannot have directly depended on the kernel, or an error would have been raised.
     ///
-    /// This will panic if the kernel is empty, or the provided kernel module inf o is not valid for
+    /// This will panic if the kernel is empty, or the provided kernel module info is not valid for
     /// a kernel.
     pub(super) fn link_with_kernel(
         &mut self,
