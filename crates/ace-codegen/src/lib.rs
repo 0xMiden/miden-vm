@@ -1,9 +1,14 @@
 //! ACE circuit codegen for Plonky3-based Miden AIRs.
 //!
 //! The pipeline is:
-//! 1. Record AIR constraints with `RecordingAirBuilder`.
+//! 1. Capture AIR constraints via the `SymbolicAirBuilder`.
 //! 2. Lower symbolic expressions into a DAG that mirrors verifier constraints evaluation.
 //! 3. Emit an ACE circuit plus an `InputLayout` describing the MASM ACE-READ section order.
+//!
+//! The resulting circuit is intended to run inside the recursive verifier. All
+//! input layout decisions (point-major OOD ordering, aux/quotient coords, and
+//! alpha/beta randomness expansion) are centralized in this crate so tests can
+//! validate both layout and evaluation.
 //!
 //! Quick start:
 //! ```ignore
@@ -11,14 +16,12 @@
 //! use miden_air::ProcessorAir;
 //! use miden_core::{Felt, field::QuadFelt};
 //!
-//! let air = ProcessorAir::default();
 //! let config = AceConfig { num_quotient_chunks: 8, num_vlpi_groups: 1, layout: LayoutKind::Masm };
-//! let circuit = build_ace_circuit_for_air::<_, Felt, QuadFelt>(&air, config)?;
+//! let circuit = build_ace_circuit_for_air::<_, Felt, QuadFelt>(&ProcessorAir, config)?;
 //! ```
 //!
 //! Module map (data flow):
 //! - `pipeline`: public entry points that orchestrate layout + DAG + circuit emission.
-//! - `builder`: AIR recorder that captures symbolic constraints.
 //! - `dag`: verifier-style DAG IR and lowering helpers.
 //! - `circuit`: off-VM circuit representation (inputs/constants/ops/root).
 //! - `layout`: READ-section layout and index mapping.
@@ -26,11 +29,7 @@
 //! - `randomness`: challenge input planning for layouts + DAG lowering.
 //! - `quotient`: barycentric quotient recomposition helpers (used by DAG + tests).
 
-// Symbolic types (Entry, SymVar, SymExpr).
-mod symbolic;
-
 // Core IR and lowering.
-mod builder;
 mod circuit;
 mod dag;
 
@@ -63,7 +62,8 @@ pub enum AceError {
 pub use crate::{
     circuit::{AceCircuit, emit_circuit},
     dag::{AceDag, DagBuilder, NodeId},
-    layout::{InputKey, InputLayout},
+    encode::EncodedCircuit,
+    layout::{InputCounts, InputKey, InputLayout},
     pipeline::{
         AceArtifacts, AceConfig, LayoutKind, build_ace_circuit_for_air, build_ace_dag_for_air,
     },

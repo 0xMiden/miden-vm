@@ -45,16 +45,11 @@ pub enum InputKey {
     S0,
     /// Base-field coordinate for a quotient chunk opening at `offset`
     /// (0 = zeta, 1 = g * zeta).
-    /// Used when `quotient_extension = false` (flattened to base field).
     QuotientChunkCoord {
         offset: usize,
         chunk: usize,
         coord: usize,
     },
-    /// Extension-field quotient chunk opening at `offset` (0 = zeta, 1 = g * zeta).
-    /// Used when `quotient_extension = true` (committed as EF codewords).
-    /// Each chunk occupies 1 EF slot (no coordinate reconstruction needed).
-    QuotientChunk { offset: usize, chunk: usize },
 }
 
 /// Canonical InputKey → index mapping for a given layout.
@@ -105,28 +100,13 @@ impl InputKeyMapper<'_> {
             InputKey::F => Some(layout.stark.f),
             InputKey::S0 => Some(layout.stark.s0),
             InputKey::QuotientChunkCoord { offset, chunk, coord } => {
-                // Only valid when quotient_extension=false (flattened to base coords).
-                if layout.counts.quotient_extension
-                    || chunk >= layout.counts.num_quotient_chunks
-                    || coord >= EXT_DEGREE
-                {
+                if chunk >= layout.counts.num_quotient_chunks || coord >= EXT_DEGREE {
                     return None;
                 }
                 let idx = chunk * EXT_DEGREE + coord;
                 match offset {
                     0 => layout.regions.quotient_curr.index(idx),
                     1 => layout.regions.quotient_next.index(idx),
-                    _ => None,
-                }
-            },
-            InputKey::QuotientChunk { offset, chunk } => {
-                // Only valid when quotient_extension=true (EF quotient chunks).
-                if !layout.counts.quotient_extension || chunk >= layout.counts.num_quotient_chunks {
-                    return None;
-                }
-                match offset {
-                    0 => layout.regions.quotient_curr.index(chunk),
-                    1 => layout.regions.quotient_next.index(chunk),
                     _ => None,
                 }
             },

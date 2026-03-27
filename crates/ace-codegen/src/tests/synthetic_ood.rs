@@ -20,8 +20,6 @@ fn synthetic_ood_adjusts_quotient_to_zero() {
         num_quotient_chunks: 8,
         num_vlpi_groups: 0,
         layout: LayoutKind::Masm,
-        quotient_extension: false,
-        quotient_segment_len: 0,
     };
 
     let artifacts =
@@ -56,8 +54,6 @@ fn quotient_next_inputs_do_not_affect_eval() {
         num_quotient_chunks: 8,
         num_vlpi_groups: 0,
         layout: LayoutKind::Masm,
-        quotient_extension: false,
-        quotient_segment_len: 0,
     };
 
     let artifacts =

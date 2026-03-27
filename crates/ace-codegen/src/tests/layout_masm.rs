@@ -10,8 +10,6 @@ fn masm_layout_aligns_and_maps_aux_inputs() {
         num_randomness: 16,
         num_periodic: 1,
         num_quotient_chunks: 2,
-        quotient_extension: false,
-        quotient_segment_len: 0,
     };
     let layout = InputLayout::new_masm(counts);
 

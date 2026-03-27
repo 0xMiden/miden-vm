@@ -1,13 +1,16 @@
 use miden_core::{Felt, field::QuadFelt};
 use miden_crypto::{
     field::PrimeCharacteristicRing,
-    stark::air::{AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess},
+    stark::air::{
+        AirBuilder, BaseAir, LiftedAir, LiftedAirBuilder, WindowAccess,
+        symbolic::{AirLayout, SymbolicAirBuilder},
+    },
 };
 
-use super::common::{eval_dag, eval_expr, eval_periodic_values, eval_quotient};
+use super::common::{eval_dag, eval_folded_constraints, eval_periodic_values, eval_quotient};
 use crate::{
-    AceConfig, InputKey, InputLayout, LayoutKind, builder::RecordingAirBuilder,
-    circuit::emit_circuit, pipeline::build_ace_dag_for_air,
+    AceConfig, InputKey, InputLayout, LayoutKind, circuit::emit_circuit,
+    pipeline::build_ace_dag_for_air,
 };
 
 // Base and extension field types for tests.
@@ -32,7 +35,7 @@ impl LiftedAir<F, EF> for MockAir {
     }
 
     fn num_randomness(&self) -> usize {
-        1
+        2
     }
 
     fn aux_width(&self) -> usize {
@@ -112,8 +115,6 @@ fn test_verifier_dag_matches_manual_eval() {
         num_quotient_chunks: 2,
         num_vlpi_groups: 0,
         layout: LayoutKind::Native,
-        quotient_extension: false,
-        quotient_segment_len: 0,
     };
     let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
     let layout = artifacts.layout.clone();
@@ -121,31 +122,31 @@ fn test_verifier_dag_matches_manual_eval() {
     let z_k = inputs[layout.index(InputKey::ZK).unwrap()];
     let periodic_values = eval_periodic_values(&air.periodic_columns(), z_k);
 
-    let mut builder = RecordingAirBuilder::<F, EF>::new(
-        0,
-        layout.counts.width,
-        layout.counts.aux_width,
-        layout.counts.num_randomness,
-        layout.counts.num_public,
-        layout.counts.num_periodic,
-        air.num_aux_values(),
-    );
+    let air_layout = AirLayout {
+        preprocessed_width: 0,
+        main_width: layout.counts.width,
+        num_public_values: layout.counts.num_public,
+        permutation_width: layout.counts.aux_width,
+        num_permutation_challenges: layout.counts.num_randomness,
+        num_permutation_values: air.num_aux_values(),
+        num_periodic_columns: layout.counts.num_periodic,
+    };
+    let mut builder = SymbolicAirBuilder::<F, EF>::new(air_layout);
     air.eval(&mut builder);
-    let dag = artifacts.dag;
 
-    let alpha = inputs[layout.index(InputKey::Alpha).unwrap()];
+    let acc = eval_folded_constraints(
+        &builder.base_constraints(),
+        &builder.extension_constraints(),
+        &builder.constraint_layout(),
+        &inputs,
+        &layout,
+        &periodic_values,
+    );
     let z_pow_n = inputs[layout.index(InputKey::ZPowN).unwrap()];
-
-    let mut acc = EF::ZERO;
-    for c in builder.constraints() {
-        let val = eval_expr::<F, EF>(c, &inputs, &layout, &periodic_values);
-        acc = acc * alpha + val;
-    }
     let vanishing = z_pow_n - EF::ONE;
-    let quotient = eval_quotient(&layout, &inputs);
-    let expected = acc - quotient * vanishing;
+    let expected = acc - eval_quotient(&layout, &inputs) * vanishing;
 
-    let actual = eval_dag(&dag.nodes, dag.root, &inputs, &layout);
+    let actual = eval_dag(&artifacts.dag.nodes, artifacts.dag.root, &inputs, &layout);
     assert_eq!(actual, expected);
 }
 
@@ -156,8 +157,6 @@ fn test_emitted_circuit_matches_dag_eval() {
         num_quotient_chunks: 2,
         num_vlpi_groups: 0,
         layout: LayoutKind::Native,
-        quotient_extension: false,
-        quotient_segment_len: 0,
     };
     let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
     let layout = artifacts.layout.clone();
@@ -176,8 +175,6 @@ fn test_encoded_circuit_structure() {
         num_quotient_chunks: 2,
         num_vlpi_groups: 0,
         layout: LayoutKind::Native,
-        quotient_extension: false,
-        quotient_segment_len: 0,
     };
     let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
     let layout = artifacts.layout.clone();
@@ -186,73 +183,4 @@ fn test_encoded_circuit_structure() {
     let encoded = circuit.to_ace().unwrap();
     assert!(encoded.size_in_felt().is_multiple_of(8));
     assert_eq!(encoded.num_inputs(), layout.total_inputs);
-}
-
-#[test]
-fn quotient_power_sum_recomposition_small_shape() {
-    let air = MockAir;
-    let config = AceConfig {
-        num_quotient_chunks: 3,
-        num_vlpi_groups: 0,
-        layout: LayoutKind::Native,
-        quotient_extension: true,
-        quotient_segment_len: 5,
-    };
-    let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
-    let layout = artifacts.layout;
-
-    let mut inputs = vec![EF::ZERO; layout.total_inputs];
-    let z_k = ef(7);
-    inputs[layout.index(InputKey::ZK).unwrap()] = z_k;
-    let chunks = [ef(3), ef(11), ef(19)];
-    for (i, &chunk) in chunks.iter().enumerate() {
-        inputs[layout.index(InputKey::QuotientChunk { offset: 0, chunk: i }).unwrap()] = chunk;
-    }
-
-    let z_step = z_k.exp_u64(5);
-    let mut expected = EF::ZERO;
-    let mut pow = EF::ONE;
-    for &chunk in &chunks {
-        expected += chunk * pow;
-        pow *= z_step;
-    }
-
-    let actual = eval_quotient(&layout, &inputs);
-    assert_eq!(actual, expected);
-}
-
-#[test]
-fn quotient_power_sum_recomposition_signature_shape() {
-    let air = MockAir;
-    let config = AceConfig {
-        num_quotient_chunks: 15,
-        num_vlpi_groups: 0,
-        layout: LayoutKind::Native,
-        quotient_extension: true,
-        quotient_segment_len: 55,
-    };
-    let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
-    let layout = artifacts.layout;
-
-    let mut inputs = vec![EF::ZERO; layout.total_inputs];
-    let z_k = ef(13);
-    inputs[layout.index(InputKey::ZK).unwrap()] = z_k;
-
-    let mut chunks = Vec::with_capacity(15);
-    for i in 0..15 {
-        let c = ef((i as u64) + 1);
-        inputs[layout.index(InputKey::QuotientChunk { offset: 0, chunk: i }).unwrap()] = c;
-        chunks.push(c);
-    }
-
-    let z_step = z_k.exp_u64(55);
-    let mut expected = EF::ZERO;
-    let mut pow = EF::ONE;
-    for &chunk in &chunks {
-        expected += chunk * pow;
-        pow *= z_step;
-    }
-
-    let actual = eval_quotient(&layout, &inputs);
-    assert_eq!(actual, expected);
 }
