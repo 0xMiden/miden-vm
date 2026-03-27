@@ -530,10 +530,13 @@ impl Linker {
                         for invoke in proc.invoked() {
                             log::debug!(target: "linker", "  | recording {} dependency on {}", invoke.kind, &invoke.target);
 
+                            // Preserve the invocation kind so that syscall targets are resolved
+                            // correctly against the kernel module and are not incorrectly rejected
+                            // by the kernel-proc guard in `resolve_invoke_target` (fixes #2902).
                             let context = SymbolResolutionContext {
                                 span: invoke.span(),
                                 module: module_index,
-                                kind: None,
+                                kind: Some(invoke.kind),
                             };
                             if let Some(callee) = resolver
                                 .resolve_invoke_target(&context, &invoke.target)?
