@@ -21,7 +21,7 @@ We benchmark the above hash functions using two scenarios. The first is a 2-to-1
 | ------------------- | :----: | :----: | :-------: | :-------: | :------: | :------: |
 | Apple M1 Pro        | 76 ns  | 245 ns |           |           | *5.2 µs  | *2.7 µs  |
 | Apple M2 Max        | 71 ns  | 233 ns |           |           | *4.6 µs  | *2.4 µs  |
-| Apple M4 Max        | 48 ns  |        | 149 ns    | 0.7 µs    | 2.5 µs   | 1.3 µs   |
+| Apple M4 Max        | 48 ns  |        | 149 ns    | 0.47 µs   | 2.5 µs   | 1.3 µs   |
 | Amazon Graviton 3   | 108 ns |        |           |           | *5.3 µs  | *3.1 µs  |
 | Amazon Graviton 4   | 96 ns  |        |           |           | *5.1 µs  | *2.8 µs  |
 | AMD Ryzen 9 9950X   | 49 ns  |        | 375 ns    | 0.65 µs   | 3.1 µs   | 1.6 µs   |
@@ -35,7 +35,7 @@ We benchmark the above hash functions using two scenarios. The first is a 2-to-1
 | ------------------- | :----: | :----: | :-------: | :-------: | :------: | :------: |
 | Apple M1 Pro        | 1.0 µs | 1.5 µs |           |           | *69 µs   | *35 µs   |
 | Apple M2 Max        | 0.9 µs | 1.5 µs |           |           | *60 µs   | *31 µs   |
-| Apple M4 Max        | 0.7 µs |        | 0.7 µs    | 8.7 µs    | 32 µs    | 17 µs    |
+| Apple M4 Max        | 0.7 µs |        | 0.7 µs    | 6.1 µs    | 32 µs    | 17 µs    |
 | Amazon Graviton 3   | 1.4 µs |        |           |           | *69 µs   | *41 µs   |
 | Amazon Graviton 4   | 1.2 µs |        |           |           | *67 µs   | *36 µs   |
 | AMD Ryzen 9 9950X   | 0.8 µs |        | 2.2 µs    | 8.7 µs    | 40 µs    | 22 µs    |
