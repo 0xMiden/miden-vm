@@ -1,3 +1,6 @@
+mod error;
+mod product;
+
 use alloc::{boxed::Box, collections::BTreeMap, string::ToString, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{
@@ -6,8 +9,8 @@ use miden_assembly_syntax::{
         self, Ident, InvocationTarget, InvokeKind, ItemIndex, ModuleKind, SymbolResolution,
         Visibility, types::FunctionType,
     },
-    debuginfo::{DefaultSourceManager, SourceFile, SourceManager, SourceSpan, Spanned},
-    diagnostics::{Diagnostic, IntoDiagnostic, RelatedLabel, Report, miette},
+    debuginfo::{DefaultSourceManager, SourceManager, SourceSpan, Spanned},
+    diagnostics::{IntoDiagnostic, RelatedLabel, Report},
     library::{ConstantExport, ItemInfo, LibraryExport, ProcedureExport, TypeExport},
 };
 use miden_core::{
@@ -39,69 +42,6 @@ use crate::{
 /// This limit is intended to prevent stack overflows from maliciously deep block nesting while
 /// remaining far above typical program structure depth.
 pub(crate) const MAX_CONTROL_FLOW_NESTING: usize = 256;
-
-#[derive(Debug, thiserror::Error, Diagnostic)]
-enum AssemblerError {
-    #[error("control-flow nesting depth exceeded")]
-    #[diagnostic(help("control-flow nesting exceeded the maximum depth of {max_depth}"))]
-    ControlFlowNestingDepthExceeded {
-        #[label("control-flow nesting exceeded the configured depth limit here")]
-        span: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        max_depth: usize,
-    },
-}
-
-pub(crate) struct AssemblyProduct {
-    // This is unused when the `std` feature is not present
-    #[allow(unused)]
-    kind: TargetType,
-    artifact: Arc<Library>,
-    kernel: Option<Kernel>,
-    // This is unused when the `std` feature is not present
-    #[allow(unused)]
-    manifest: PackageManifest,
-}
-
-impl AssemblyProduct {
-    fn new(
-        kind: TargetType,
-        artifact: Arc<Library>,
-        kernel: Option<Kernel>,
-        manifest: PackageManifest,
-    ) -> Self {
-        Self { kind, artifact, kernel, manifest }
-    }
-
-    #[cfg(feature = "std")]
-    pub fn kind(&self) -> TargetType {
-        self.kind
-    }
-
-    #[cfg(feature = "std")]
-    pub fn manifest(&self) -> &PackageManifest {
-        &self.manifest
-    }
-
-    pub fn into_artifact(self) -> Arc<Library> {
-        self.artifact
-    }
-
-    pub fn into_program(self) -> Result<Program, Report> {
-        let entry = ast::Path::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME);
-        let entrypoint = self.artifact.get_export_node_id(&entry);
-        Ok(if let Some(kernel) = self.kernel {
-            Program::with_kernel(self.artifact.mast_forest().clone(), entrypoint, kernel)
-        } else {
-            Program::new(self.artifact.mast_forest().clone(), entrypoint)
-        })
-    }
-
-    pub fn into_kernel_library(self) -> Result<KernelLibrary, Report> {
-        KernelLibrary::try_from(self.artifact).map_err(|error| Report::msg(error.to_string()))
-    }
-}
 
 // ASSEMBLER
 // ================================================================================================
