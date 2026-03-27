@@ -28,14 +28,16 @@ The message is hashed and turned into a field element. If the error code is omit
 
 ### Arithmetic and Boolean operations
 
-The arithmetic operations below are performed in a 64-bit [prime field](https://en.wikipedia.org/wiki/Finite_field) defined by modulus $p = 2^{64} - 2^{32} + 1$. This means that overflow happens after a value exceeds $p$. Also, the result of divisions may appear counter-intuitive because divisions are defined via inversions.
+The arithmetic operations below are performed in a 64-bit [prime field](https://en.wikipedia.org/wiki/Finite_field) defined by modulus $p = 2^{64} - 2^{32} + 1$. This means that overflow happens after a value exceeds $p$.
+
+**Important:** `div` is field division, i.e. $a \cdot b^{-1} \mod p$, not integer floor division. For integer division, use [`u32div`](./u32_operations.md#arithmetic-operations) (or [`u32divmod`](./u32_operations.md#arithmetic-operations)).
 
 | Instruction                                                                    | Stack_input | Stack_output  | Notes                                                                                                        |
 | ------------------------------------------------------------------------------ | ----------- | ------------- | ------------------------------------------------------------------------------------------------------------ |
 | add <br /> - *(1 cycle)*  <br /> add.*b* <br /> - *(1-2 cycle)*                      | [b, a, ...] | [c, ...]      | $c \leftarrow (a + b) \mod p$                                                                                |
 | sub <br /> - *(2 cycles)*  <br /> sub.*b* <br /> - *(2 cycles)*                      | [b, a, ...] | [c, ...]      | $c \leftarrow (a - b) \mod p$                                                                                |
 | mul <br /> - *(1 cycle)*  <br /> mul.*b* <br /> - *(2 cycles)*                       | [b, a, ...] | [c, ...]      | $c \leftarrow (a \cdot b) \mod p$                                                                            |
-| div <br /> - *(2 cycles)*  <br /> div.*b* <br /> - *(2 cycles)*                      | [b, a, ...] | [c, ...]      | $c \leftarrow (a \cdot b^{-1}) \mod p$ <br /> Fails if $b = 0$                                                 |
+| div <br /> - *(2 cycles)*  <br /> div.*b* <br /> - *(2 cycles)*                      | [b, a, ...] | [c, ...]      | $c \leftarrow (a \cdot b^{-1}) \mod p$ <br /> Fails if $b = 0$ <br /> For integer floor division, use [`u32div`](./u32_operations.md#arithmetic-operations).                                                 |
 | neg <br /> - *(1 cycle)*                                                         | [a, ...]    | [b, ...]      | $b \leftarrow -a \mod p$                                                                                     |
 | inv <br /> - *(1 cycle)*                                                         | [a, ...]    | [b, ...]      | $b \leftarrow a^{-1} \mod p$ <br /> Fails if $a = 0$                                                           |
 | pow2 <br /> - *(16 cycles)*                                                      | [a, ...]    | [b, ...]      | $b \leftarrow 2^a$ <br /> Fails if $a > 63$                                                                    |
