@@ -4,9 +4,8 @@ use itertools::Itertools;
 use miden_air::{
     Felt,
     trace::{
-        CLK_COL_IDX, DECODER_TRACE_OFFSET, DECODER_TRACE_WIDTH, MIN_TRACE_LEN, MainTrace,
-        PADDED_TRACE_WIDTH, RowIndex, STACK_TRACE_OFFSET, STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
-        TRACE_WIDTH,
+        CLK_COL_IDX, DECODER_TRACE_OFFSET, DECODER_TRACE_WIDTH, MIN_TRACE_LEN, MainTrace, RowIndex,
+        STACK_TRACE_OFFSET, STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
         decoder::{
             HASHER_STATE_OFFSET, NUM_HASHER_COLUMNS, NUM_OP_BITS, OP_BITS_EXTRA_COLS_OFFSET,
             OP_BITS_OFFSET,
@@ -189,18 +188,16 @@ pub fn build_trace_with_max_len(
         || pad_core_row_major(&mut core_trace_data, main_trace_len),
     );
 
-    // Collect non-core columns (range checker + chiplets + padding)
-    let non_core_cols: Vec<Vec<Felt>> = range_checker_trace
-        .trace
-        .into_iter()
-        .chain(chiplets_trace.trace)
-        .chain((0..PADDED_TRACE_WIDTH - TRACE_WIDTH).map(|_| vec![ZERO; main_trace_len]))
-        .collect();
-
     // Create the MainTrace
     let main_trace = {
         let last_program_row = RowIndex::from((core_trace_len as u32).saturating_sub(1));
-        MainTrace::from_parts(core_trace_data, non_core_cols, main_trace_len, last_program_row)
+        MainTrace::from_parts(
+            core_trace_data,
+            chiplets_trace.trace,
+            range_checker_trace.trace,
+            main_trace_len,
+            last_program_row,
+        )
     };
 
     // Create aux trace builders

@@ -23,44 +23,18 @@ pub struct RowMajorTraceWriter<'a, E> {
     width: usize,
 }
 
-#[allow(dead_code)]
 impl<'a, E: Copy> RowMajorTraceWriter<'a, E> {
     pub fn new(data: &'a mut [E], width: usize) -> Self {
         debug_assert_eq!(data.len() % width, 0, "buffer length must be a multiple of width");
         Self { data, width }
     }
 
-    pub fn width(&self) -> usize {
-        self.width
-    }
-
-    pub fn height(&self) -> usize {
-        self.data.len() / self.width
-    }
-
-    #[inline(always)]
-    pub fn get(&self, row: usize, col: usize) -> E {
-        self.data[row * self.width + col]
-    }
-
-    #[inline(always)]
-    pub fn set(&mut self, row: usize, col: usize, value: E) {
-        self.data[row * self.width + col] = value;
-    }
-
-    /// Writes an entire row from a slice. `values.len()` must equal `self.width()`.
+    /// Writes one row; `values.len()` must equal `width`.
     #[inline(always)]
     pub fn write_row(&mut self, row: usize, values: &[E]) {
         debug_assert_eq!(values.len(), self.width);
         let start = row * self.width;
         self.data[start..start + self.width].copy_from_slice(values);
-    }
-
-    /// Writes a contiguous sub-range of a row starting at `col_start`.
-    #[inline(always)]
-    pub fn write_row_slice(&mut self, row: usize, col_start: usize, values: &[E]) {
-        let start = row * self.width + col_start;
-        self.data[start..start + values.len()].copy_from_slice(values);
     }
 }
 
