@@ -26,9 +26,9 @@ use super::PackageBuildSettings;
 ///
 /// The recorded fields differ by source origin:
 ///
-/// - [`Self::Path`] tracks a hash of the effective manifest and the target's resolved source
-///   files, along with a hash of the fully resolved dependency closure and the build-profile knobs
-///   that affect the emitted package bytes.
+/// - [`Self::Path`] tracks a hash of the effective manifest and the target's resolved source files,
+///   along with a hash of the fully resolved dependency closure and the build-profile knobs that
+///   affect the emitted package bytes.
 /// - [`Self::Git`] records the repository identity and resolved revision instead of hashing the
 ///   checked-out source tree directly, but still includes the dependency-closure hash and build
 ///   settings for the same reuse decision.
@@ -42,7 +42,8 @@ pub(super) enum PackageBuildProvenance {
     Path {
         /// Hash of the effective manifest plus the root/support modules that define the target.
         source_hash: Word,
-        /// Hash of the resolved dependency closure, including linkage and exact selected artifacts.
+        /// Hash of the resolved dependency closure, including linkage and exact selected
+        /// artifacts.
         dependency_hash: Word,
         /// Build-profile settings that materially affect the produced package bytes.
         build_settings: PackageBuildSettings,
@@ -53,7 +54,8 @@ pub(super) enum PackageBuildProvenance {
         repo: String,
         /// Fully resolved revision used for the checkout, after branch/tag resolution.
         resolved_revision: String,
-        /// Hash of the resolved dependency closure, including linkage and exact selected artifacts.
+        /// Hash of the resolved dependency closure, including linkage and exact selected
+        /// artifacts.
         dependency_hash: Word,
         /// Build-profile settings that materially affect the produced package bytes.
         build_settings: PackageBuildSettings,

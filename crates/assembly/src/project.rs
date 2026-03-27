@@ -40,10 +40,8 @@ use crate::{Assembler, SourceManager, assembler::debuginfo::DebugInfoSections, a
 mod build_provenance;
 use build_provenance::PackageBuildProvenance;
 
-pub enum ProjectTargetSelector<'a> {
-    Library,
-    Executable(&'a str),
-}
+mod target_selector;
+pub use target_selector::ProjectTargetSelector;
 
 pub struct ProjectSourceInputs {
     pub root: Box<Module>,
@@ -156,7 +154,7 @@ where
         profile_name: &str,
         sources: Option<ProjectSourceInputs>,
     ) -> Result<Arc<MastPackage>, Report> {
-        let target = self.select_target(target_selector)?.clone();
+        let target = target_selector.select_target(self.project.as_ref())?;
 
         // When building an executable target from a project with a library target, we require
         // that the executable target be linked statically against the library target
@@ -893,27 +891,6 @@ where
         }
 
         Ok(hash_string_to_word(material.as_str()))
-    }
-
-    fn select_target(&self, selector: ProjectTargetSelector<'_>) -> Result<&Target, Report> {
-        match selector {
-            ProjectTargetSelector::Library => self
-                .project
-                .library_target()
-                .map(|target| target.inner())
-                .ok_or_else(|| Report::msg("project does not define a library target")),
-            ProjectTargetSelector::Executable(name) => self
-                .project
-                .executable_targets()
-                .iter()
-                .find(|target| target.name.inner().as_ref() == name)
-                .map(|target| target.inner())
-                .ok_or_else(|| {
-                    Report::msg(format!(
-                        "project does not define an executable target named '{name}'"
-                    ))
-                }),
-        }
     }
 
     fn normalize_provided_sources(
