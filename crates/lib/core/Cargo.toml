@@ -58,7 +58,7 @@ p3-field = { version = "0.5" }
 p3-symmetric = { version = "0.5" }
 rstest = { version = "0.26" }
 bincode.workspace = true
-miden-signature = { path = "/Users/al/Code/miden-signature" }
+miden-signature = { git = "https://github.com/0xMiden/miden-signature.git", rev = "be5bd0cf" }
 serde.workspace = true
 serde_json.workspace = true
 

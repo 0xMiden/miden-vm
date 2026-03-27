@@ -5,12 +5,13 @@ use miden_core::Felt;
 use miden_signature::{QuadExt, internal::transcript::Poseidon2Suite};
 
 use super::{
+    SigVerifierData,
     conversions::ef_to_felts,
     fixtures::{
         advice_map_with_sig_proof, advice_map_with_sig_proofs, build_fixture,
         build_fixture_with_message, hash_message,
     },
-    instance_seed_goldilocks, test_message, SigVerifierData,
+    instance_seed_goldilocks, test_message,
 };
 
 fn build_sig_test(source: &str, data: &SigVerifierData) -> miden_utils_testing::Test {

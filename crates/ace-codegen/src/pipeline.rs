@@ -45,6 +45,15 @@ pub struct AceConfig {
     pub num_vlpi_groups: usize,
     /// Layout policy (Native vs Masm).
     pub layout: LayoutKind,
+    /// When `true`, quotient chunk openings are extension-field elements (1 EF slot
+    /// per chunk) and reconstruction uses power-sum: Q(z) = sum_j chunk_j * z^{j * segment_len}.
+    /// When `false` (default), they are flattened to base-field coordinates
+    /// (2 slots per chunk) and reconstruction uses barycentric Lagrange interpolation.
+    pub quotient_extension: bool,
+    /// Segment length for power-sum quotient reconstruction (only used when
+    /// `quotient_extension = true`). Each quotient chunk polynomial has degree
+    /// < segment_len.
+    pub quotient_segment_len: usize,
 }
 
 /// Output of the ACE codegen pipeline (layout + DAG).
@@ -156,5 +165,7 @@ where
         num_randomness,
         num_periodic,
         num_quotient_chunks: config.num_quotient_chunks,
+        quotient_extension: config.quotient_extension,
+        quotient_segment_len: config.quotient_segment_len,
     }
 }

@@ -183,11 +183,7 @@ pub fn compute_instance_seed() -> [Felt; 4] {
     let seed = miden_signature::internal::proof::instance_seed_for_config::<
         miden_signature::internal::air8::Rpo8,
     >(&config.stark);
-    debug_assert_eq!(
-        core::mem::size_of::<Felt>(),
-        core::mem::size_of::<miden_signature::Goldilocks>()
-    );
-    core::array::from_fn(|i| unsafe { core::mem::transmute(seed[i]) })
+    core::array::from_fn(|i| seed[i].into())
 }
 
 #[cfg(test)]
@@ -245,7 +241,7 @@ mod tests {
 
         for i in 0..12 {
             let mc = state_mc[i].as_canonical_u64();
-            let sig: u64 = unsafe { core::mem::transmute(state_sig[i]) };
+            let sig: u64 = Felt::from(state_sig[i]).as_canonical_u64();
             assert_eq!(mc, sig, "Poseidon2 mismatch at {}: mc={}, sig={}", i, mc, sig);
         }
     }

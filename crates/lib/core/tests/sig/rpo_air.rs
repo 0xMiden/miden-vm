@@ -79,8 +79,9 @@ impl LiftedAir<F, EF> for RpoSignatureAir {
     }
 
     fn num_randomness(&self) -> usize {
-        // Minimal: 1 required by the framework.
-        1
+        // The RPO signature AIR uses no randomness, but the ACE pipeline
+        // requires exactly 2 (alpha, beta) to match the Miden VM convention.
+        2
     }
 
     fn aux_width(&self) -> usize {
@@ -126,9 +127,9 @@ impl LiftedAir<F, EF> for RpoSignatureAir {
                 .map(|j| {
                     let c0: AB::Expr = F::new(MDS[j][0]).into();
                     let mut acc = state[0].clone() * c0;
-                    for k in 1..STATE_WIDTH {
+                    for (k, state_k) in state.iter().enumerate().take(STATE_WIDTH).skip(1) {
                         let ck: AB::Expr = F::new(MDS[j][k]).into();
-                        acc += state[k].clone() * ck;
+                        acc += state_k.clone() * ck;
                     }
                     acc
                 })

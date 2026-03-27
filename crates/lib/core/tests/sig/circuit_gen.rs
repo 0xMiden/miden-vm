@@ -35,7 +35,7 @@ use alloc::vec::Vec;
 
 use miden_core::{
     Felt,
-    field::{Field, QuadFelt, TwoAdicField},
+    field::{BasedVectorSpace, Field, QuadFelt, TwoAdicField},
 };
 use miden_signature::e2_105_w8 as e2_105;
 
@@ -243,8 +243,8 @@ pub fn build_sig_circuit() -> (Vec<QuadFelt>, Vec<u64>, usize) {
     for j in 0..STATE_WIDTH {
         let first = b.mul(mds_const[j][0], v[0]);
         let mut acc = first;
-        for k in 1..STATE_WIDTH {
-            let term = b.mul(mds_const[j][k], v[k]);
+        for (k, &v_k) in v.iter().enumerate().skip(1) {
+            let term = b.mul(mds_const[j][k], v_k);
             acc = b.add(acc, term);
         }
         w[j] = acc;
@@ -475,7 +475,7 @@ pub fn encode_for_eval_circuit(
 
     // Constants: each QuadFelt as [coeff0, coeff1]
     for c in constants {
-        let pair: [Felt; 2] = unsafe { core::mem::transmute(*c) };
+        let pair = c.as_basis_coefficients_slice();
         stream.push(pair[0]);
         stream.push(pair[1]);
     }
@@ -507,15 +507,10 @@ pub fn circuit_hash(stream: &[Felt]) -> [Felt; 4] {
 
 #[cfg(test)]
 mod tests {
+    use miden_signature::Goldilocks;
+
     use super::*;
-
-    fn g2f(g: miden_signature::Goldilocks) -> Felt {
-        unsafe { core::mem::transmute(g) }
-    }
-
-    fn f2g(f: Felt) -> miden_signature::Goldilocks {
-        unsafe { core::mem::transmute(f) }
-    }
+    use crate::sig::conversions::{qe_to_qf, qf_to_qe};
 
     fn manual_root_from_inputs(inputs: &[QuadFelt]) -> QuadFelt {
         let z_k = inputs[ZK_SLOT];
@@ -547,8 +542,8 @@ mod tests {
         let mut t = [QuadFelt::new([Felt::ZERO, Felt::ZERO]); STATE_WIDTH];
         for r in 0..STATE_WIDTH {
             let mut acc = QuadFelt::new([Felt::ZERO, Felt::ZERO]);
-            for c in 0..STATE_WIDTH {
-                acc += QuadFelt::from(Felt::new(mds[r][c])) * wz[c];
+            for (c, &wz_c) in wz.iter().enumerate().take(STATE_WIDTH) {
+                acc += QuadFelt::from(Felt::new(mds[r][c])) * wz_c;
             }
             t[r] = acc;
         }
@@ -569,8 +564,8 @@ mod tests {
         let mut w = [QuadFelt::new([Felt::ZERO, Felt::ZERO]); STATE_WIDTH];
         for r in 0..STATE_WIDTH {
             let mut acc = QuadFelt::new([Felt::ZERO, Felt::ZERO]);
-            for c in 0..STATE_WIDTH {
-                acc += QuadFelt::from(Felt::new(mds[r][c])) * v[c];
+            for (c, &v_c) in v.iter().enumerate().take(STATE_WIDTH) {
+                acc += QuadFelt::from(Felt::new(mds[r][c])) * v_c;
             }
             w[r] = acc;
         }
@@ -688,19 +683,16 @@ mod tests {
         let msg_felts = message_to_goldilocks(message);
         let seed = crate::sig::transcript::compute_instance_seed();
 
-        fn g2f(g: miden_signature::Goldilocks) -> Felt {
-            unsafe { core::mem::transmute(g) }
-        }
-        let pk_m: [Felt; 4] = core::array::from_fn(|i| g2f(pk_felts[i]));
-        let msg_m: [Felt; 4] = core::array::from_fn(|i| g2f(msg_felts[i]));
+        let pk_m: [Felt; 4] = core::array::from_fn(|i| Felt::from(pk_felts[i]));
+        let msg_m: [Felt; 4] = core::array::from_fn(|i| Felt::from(msg_felts[i]));
 
         let mut t = crate::sig::transcript::SigTranscript::new(seed, pk_m, msg_m);
         let wc: &[miden_signature::Goldilocks; 4] = &proof.witness_commitment;
-        t.reseed_direct(core::array::from_fn(|i| g2f(wc[i])));
+        t.reseed_direct(core::array::from_fn(|i| Felt::from(wc[i])));
         t.check_grind(proof.ali_nonce, stark.grinding.ali);
         let lambda = t.sample_ext();
         let qc: &[miden_signature::Goldilocks; 4] = &proof.quotient_commitment;
-        t.reseed_direct(core::array::from_fn(|i| g2f(qc[i])));
+        t.reseed_direct(core::array::from_fn(|i| Felt::from(qc[i])));
         t.check_grind(proof.ood_nonce, stark.grinding.ood);
         let z = t.sample_ext();
 
@@ -719,18 +711,16 @@ mod tests {
 
         // witness_z (EF)
         for i in 0..8 {
-            let ef: [Felt; 2] = unsafe { core::mem::transmute(proof.witness_z[i]) };
-            inputs[WZ_START + i] = QuadFelt::new(ef);
+            inputs[WZ_START + i] = qe_to_qf(proof.witness_z[i]);
         }
         // witness_gz (EF)
         for i in 0..8 {
-            let ef: [Felt; 2] = unsafe { core::mem::transmute(proof.witness_gz[i]) };
-            inputs[WGZ_START + i] = QuadFelt::new(ef);
+            inputs[WGZ_START + i] = qe_to_qf(proof.witness_gz[i]);
         }
 
         // quotient_z coords (flattened base field, each as EF with zero second coord)
         for i in 0..30 {
-            inputs[QZ_COORDS_START + i] = QuadFelt::from(g2f(proof.quotient_z[i]));
+            inputs[QZ_COORDS_START + i] = QuadFelt::from(Felt::from(proof.quotient_z[i]));
         }
 
         // STARK vars
@@ -788,19 +778,16 @@ mod tests {
         let msg_felts = message_to_goldilocks(message);
         let seed = crate::sig::transcript::compute_instance_seed();
 
-        fn g2f(g: miden_signature::Goldilocks) -> Felt {
-            unsafe { core::mem::transmute(g) }
-        }
-        let pk_m: [Felt; 4] = core::array::from_fn(|i| g2f(pk_felts[i]));
-        let msg_m: [Felt; 4] = core::array::from_fn(|i| g2f(msg_felts[i]));
+        let pk_m: [Felt; 4] = core::array::from_fn(|i| Felt::from(pk_felts[i]));
+        let msg_m: [Felt; 4] = core::array::from_fn(|i| Felt::from(msg_felts[i]));
 
         let mut t = crate::sig::transcript::SigTranscript::new(seed, pk_m, msg_m);
         let wc: &[miden_signature::Goldilocks; 4] = &proof.witness_commitment;
-        t.reseed_direct(core::array::from_fn(|i| g2f(wc[i])));
+        t.reseed_direct(core::array::from_fn(|i| Felt::from(wc[i])));
         t.check_grind(proof.ali_nonce, stark.grinding.ali);
         let lambda = t.sample_ext();
         let qc: &[miden_signature::Goldilocks; 4] = &proof.quotient_commitment;
-        t.reseed_direct(core::array::from_fn(|i| g2f(qc[i])));
+        t.reseed_direct(core::array::from_fn(|i| Felt::from(qc[i])));
         t.check_grind(proof.ood_nonce, stark.grinding.ood);
         let z = t.sample_ext();
 
@@ -815,15 +802,13 @@ mod tests {
             inputs[PK_START + i] = QuadFelt::from(pk_m[i]);
         }
         for i in 0..8 {
-            let ef: [Felt; 2] = unsafe { core::mem::transmute(proof.witness_z[i]) };
-            inputs[WZ_START + i] = QuadFelt::new(ef);
+            inputs[WZ_START + i] = qe_to_qf(proof.witness_z[i]);
         }
         for i in 0..8 {
-            let ef: [Felt; 2] = unsafe { core::mem::transmute(proof.witness_gz[i]) };
-            inputs[WGZ_START + i] = QuadFelt::new(ef);
+            inputs[WGZ_START + i] = qe_to_qf(proof.witness_gz[i]);
         }
         for i in 0..30 {
-            inputs[QZ_COORDS_START + i] = QuadFelt::from(g2f(proof.quotient_z[i]));
+            inputs[QZ_COORDS_START + i] = QuadFelt::from(Felt::from(proof.quotient_z[i]));
         }
 
         inputs[ALPHA_SLOT] = lambda_qf;
@@ -876,21 +861,21 @@ mod tests {
 
         let msg_felts = message_to_goldilocks(message);
         let seed = crate::sig::transcript::compute_instance_seed();
-        let pk_m: [Felt; 4] = core::array::from_fn(|i| g2f(pk_felts[i]));
-        let msg_m: [Felt; 4] = core::array::from_fn(|i| g2f(msg_felts[i]));
+        let pk_m: [Felt; 4] = core::array::from_fn(|i| Felt::from(pk_felts[i]));
+        let msg_m: [Felt; 4] = core::array::from_fn(|i| Felt::from(msg_felts[i]));
 
         let mut t = crate::sig::transcript::SigTranscript::new(seed, pk_m, msg_m);
         let wc: &[miden_signature::Goldilocks; 4] = &proof.witness_commitment;
-        t.reseed_direct(core::array::from_fn(|i| g2f(wc[i])));
+        t.reseed_direct(core::array::from_fn(|i| Felt::from(wc[i])));
         t.check_grind(proof.ali_nonce, stark.grinding.ali);
         let _lambda = t.sample_ext();
         let qc: &[miden_signature::Goldilocks; 4] = &proof.quotient_commitment;
-        t.reseed_direct(core::array::from_fn(|i| g2f(qc[i])));
+        t.reseed_direct(core::array::from_fn(|i| Felt::from(qc[i])));
         t.check_grind(proof.ood_nonce, stark.grinding.ood);
         let z = t.sample_ext();
 
         let z_qf = QuadFelt::new(z);
-        let z_sig: QuadExt = unsafe { core::mem::transmute(z_qf) };
+        let z_sig = qf_to_qe(z_qf);
 
         // Evaluate periodic columns in the same way as the circuit (IDFT coeffs + Horner).
         let (ark1_coeffs, ark2_coeffs) = compute_round_constant_coefficients();
@@ -908,22 +893,24 @@ mod tests {
         }
 
         // Evaluate periodic columns in the same way as miden-signature verifier (Lagrange).
-        let mut ark1_rows = vec![vec![f2g(Felt::ZERO); STATE_WIDTH]; 8];
-        let mut ark2_rows = vec![vec![f2g(Felt::ZERO); STATE_WIDTH]; 8];
+        let mut ark1_rows = vec![vec![Goldilocks::from(Felt::ZERO); STATE_WIDTH]; 8];
+        let mut ark2_rows = vec![vec![Goldilocks::from(Felt::ZERO); STATE_WIDTH]; 8];
         for r in 0..miden_signature::internal::rpo8::NUM_ROUNDS {
             for j in 0..STATE_WIDTH {
-                ark1_rows[r][j] = f2g(Felt::new(miden_signature::internal::rpo8::ARK1_U64[r][j]));
-                ark2_rows[r][j] = f2g(Felt::new(miden_signature::internal::rpo8::ARK2_U64[r][j]));
+                ark1_rows[r][j] =
+                    Goldilocks::from(Felt::new(miden_signature::internal::rpo8::ARK1_U64[r][j]));
+                ark2_rows[r][j] =
+                    Goldilocks::from(Felt::new(miden_signature::internal::rpo8::ARK2_U64[r][j]));
             }
         }
 
-        let trace_gen = f2g(Felt::two_adic_generator(3));
+        let trace_gen = Goldilocks::from(Felt::two_adic_generator(3));
         let ark1_lagrange = lagrange_interp_at_vec::<QuadExt>(&ark1_rows, z_sig, trace_gen);
         let ark2_lagrange = lagrange_interp_at_vec::<QuadExt>(&ark2_rows, z_sig, trace_gen);
 
         for j in 0..STATE_WIDTH {
-            let a1: QuadFelt = unsafe { core::mem::transmute(ark1_lagrange[j]) };
-            let a2: QuadFelt = unsafe { core::mem::transmute(ark2_lagrange[j]) };
+            let a1 = qe_to_qf(ark1_lagrange[j]);
+            let a2 = qe_to_qf(ark2_lagrange[j]);
             assert_eq!(ark1_horner[j], a1, "ark1 column {j} mismatch");
             assert_eq!(ark2_horner[j], a2, "ark2 column {j} mismatch");
         }
@@ -962,25 +949,25 @@ mod tests {
 
         let msg_felts = message_to_goldilocks(message);
         let seed = crate::sig::transcript::compute_instance_seed();
-        let pk_m: [Felt; 4] = core::array::from_fn(|i| g2f(pk_felts[i]));
-        let msg_m: [Felt; 4] = core::array::from_fn(|i| g2f(msg_felts[i]));
+        let pk_m: [Felt; 4] = core::array::from_fn(|i| Felt::from(pk_felts[i]));
+        let msg_m: [Felt; 4] = core::array::from_fn(|i| Felt::from(msg_felts[i]));
 
         let mut t = crate::sig::transcript::SigTranscript::new(seed, pk_m, msg_m);
         let wc: &[miden_signature::Goldilocks; 4] = &proof.witness_commitment;
-        t.reseed_direct(core::array::from_fn(|i| g2f(wc[i])));
+        t.reseed_direct(core::array::from_fn(|i| Felt::from(wc[i])));
         t.check_grind(proof.ali_nonce, stark.grinding.ali);
         let lambda = t.sample_ext();
         let qc: &[miden_signature::Goldilocks; 4] = &proof.quotient_commitment;
-        t.reseed_direct(core::array::from_fn(|i| g2f(qc[i])));
+        t.reseed_direct(core::array::from_fn(|i| Felt::from(qc[i])));
         t.check_grind(proof.ood_nonce, stark.grinding.ood);
         let z = t.sample_ext();
 
         let lambda_qf = QuadFelt::new(lambda);
         let z_qf = QuadFelt::new(z);
-        let z_sig: QuadExt = unsafe { core::mem::transmute(z_qf) };
+        let z_sig = qf_to_qe(z_qf);
 
         let (ark1_rows, ark2_rows) = Rpo8::round_constants();
-        let trace_gen = f2g(Felt::two_adic_generator(3));
+        let trace_gen = Goldilocks::from(Felt::two_adic_generator(3));
         let ark1_z = lagrange_interp_at_vec::<QuadExt>(&ark1_rows, z_sig, trace_gen);
         let ark2_z = lagrange_interp_at_vec::<QuadExt>(&ark2_rows, z_sig, trace_gen);
 
@@ -992,17 +979,13 @@ mod tests {
         let air = Rpo8Air { pk: pk_felts };
         let constraints_sig =
             air.evaluate_constraints_at_ood(&wz_arr, &wgz_arr, &ark1_arr, &ark2_arr);
-        let constraints: Vec<QuadFelt> = constraints_sig
-            .iter()
-            .map(|c| unsafe { core::mem::transmute_copy(c) })
-            .collect();
+        let constraints: Vec<QuadFelt> = constraints_sig.iter().map(|c| qe_to_qf(*c)).collect();
         assert_eq!(constraints.len(), NUM_TRANSITION + NUM_BOUNDARY_FIRST + NUM_BOUNDARY_LAST);
 
         // Recompute constraints in the same algebraic shape used by build_sig_circuit.
-        let wz_qf: [QuadFelt; STATE_WIDTH] =
-            core::array::from_fn(|i| unsafe { core::mem::transmute(proof.witness_z[i]) });
+        let wz_qf: [QuadFelt; STATE_WIDTH] = core::array::from_fn(|i| qe_to_qf(proof.witness_z[i]));
         let wgz_qf: [QuadFelt; STATE_WIDTH] =
-            core::array::from_fn(|i| unsafe { core::mem::transmute(proof.witness_gz[i]) });
+            core::array::from_fn(|i| qe_to_qf(proof.witness_gz[i]));
 
         let (ark1_coeffs, ark2_coeffs) = compute_round_constant_coefficients();
         let mut ark1_eval = [QuadFelt::new([Felt::ZERO, Felt::ZERO]); STATE_WIDTH];
@@ -1022,8 +1005,8 @@ mod tests {
         let mut t_state = [QuadFelt::new([Felt::ZERO, Felt::ZERO]); STATE_WIDTH];
         for r in 0..STATE_WIDTH {
             let mut acc = QuadFelt::new([Felt::ZERO, Felt::ZERO]);
-            for c in 0..STATE_WIDTH {
-                acc += QuadFelt::from(Felt::new(mds[r][c])) * wz_qf[c];
+            for (c, &wz_c) in wz_qf.iter().enumerate().take(STATE_WIDTH) {
+                acc += QuadFelt::from(Felt::new(mds[r][c])) * wz_c;
             }
             t_state[r] = acc;
         }
@@ -1041,8 +1024,8 @@ mod tests {
         let mut w_state = [QuadFelt::new([Felt::ZERO, Felt::ZERO]); STATE_WIDTH];
         for r in 0..STATE_WIDTH {
             let mut acc = QuadFelt::new([Felt::ZERO, Felt::ZERO]);
-            for c in 0..STATE_WIDTH {
-                acc += QuadFelt::from(Felt::new(mds[r][c])) * v_state[c];
+            for (c, &v_c) in v_state.iter().enumerate().take(STATE_WIDTH) {
+                acc += QuadFelt::from(Felt::new(mds[r][c])) * v_c;
             }
             w_state[r] = acc;
         }
@@ -1118,8 +1101,8 @@ mod tests {
         let beta_basis = QuadFelt::new([Felt::ZERO, Felt::ONE]);
         let mut chunks = Vec::with_capacity(NUM_QUOTIENT_CHUNKS);
         for j in 0..NUM_QUOTIENT_CHUNKS {
-            let c0 = QuadFelt::from(g2f(proof.quotient_z[2 * j]));
-            let c1 = QuadFelt::from(g2f(proof.quotient_z[2 * j + 1]));
+            let c0 = QuadFelt::from(Felt::from(proof.quotient_z[2 * j]));
+            let c1 = QuadFelt::from(Felt::from(proof.quotient_z[2 * j + 1]));
             chunks.push(c0 + c1 * beta_basis);
         }
 

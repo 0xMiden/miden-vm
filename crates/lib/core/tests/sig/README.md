@@ -6,25 +6,7 @@ This folder is the main entrypoint for the STARK signature verifier tests and be
 - MASM execution (single and batch)
 - Proving benchmarks for the batch verifier
 
-If you’re new to this code, start with the integration tests below.
-
-## Quick start
-
-Run the core integration tests:
-
-```bash
-cargo test -p miden-core-lib sig::integration
-```
-
-Run the instance‑seed guard test (keeps MASM constants in sync with Rust):
-
-```bash
-cargo test -p miden-core-lib --test core-lib sig::transcript::tests::instance_seed_matches_masm_constants
-```
-
 ## Benchmarks
-
-These are slow in debug builds. Always run in release and enable concurrency.
 
 P3 Poseidon2 (prove‑only):
 
@@ -54,8 +36,21 @@ bench_prove_sig_batch_shared_message -- --ignored --nocapture
 - `RUSTFLAGS="-C target-cpu=native"`: enable CPU-specific optimizations
 - `--features miden-prover/concurrent`: enable parallel proving
 
-## Where to look next
+## Module overview
 
-- `integration.rs` — end‑to‑end tests and the batch proving benchmark
-- `transcript.rs` — MASM‑matching transcript model and seed guard
-- `circuit_gen.rs` — ACE circuit layout for the OOD check
+| File | Purpose |
+|------|---------|
+| `mod.rs` | Top-level helpers: test message generation, signing/verifying wrappers |
+| `fixtures.rs` | Builds the full advice inputs (stack, Merkle store, advice map) for a signature proof |
+| `conversions.rs` | Safe `Goldilocks <-> Felt` and `QuadExt <-> QuadFelt` conversions |
+| `transcript.rs` | Mirrors the `miden-signature` Fiat-Shamir transcript using Miden's Poseidon2 |
+| `rpo_air.rs` | The RPO signature AIR definition and ACE circuit generation |
+| `circuit_gen.rs` | ACE circuit layout for the OOD check |
+| `integration.rs` | End-to-end tests (sign -> build advice -> execute in VM) |
+| `bench.rs` | Proving benchmarks for batch signature verification |
+| `p3_poseidon2.rs` | Alternate prover backend using Plonky3's Poseidon2 (faster proving) |
+
+## Dependencies
+
+- [`miden-signature`](https://github.com/0xMiden/miden-signature) -- the STARK-based signature scheme
+- [`0xMiden/Plonky3`](https://github.com/0xMiden/Plonky3/tree/fix/goldilocks-binext3-v0.5.1) -- patched p3 0.5 with `BinomiallyExtendable<3>` for Goldilocks

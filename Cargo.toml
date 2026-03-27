@@ -105,13 +105,13 @@ getrandom = { version = "0.2", default-features = false, features = ["js"] }
 unexpected_cfgs = { check-cfg = ['cfg(fuzzing)'], level = "warn" }
 
 [patch.crates-io]
-p3-field = { git = "https://github.com/0xMiden/Plonky3.git", rev = "5a66c71d" }
-p3-goldilocks = { git = "https://github.com/0xMiden/Plonky3.git", rev = "5a66c71d" }
-p3-matrix = { git = "https://github.com/0xMiden/Plonky3.git", rev = "5a66c71d" }
-p3-dft = { git = "https://github.com/0xMiden/Plonky3.git", rev = "5a66c71d" }
-p3-maybe-rayon = { git = "https://github.com/0xMiden/Plonky3.git", rev = "5a66c71d" }
-p3-util = { git = "https://github.com/0xMiden/Plonky3.git", rev = "5a66c71d" }
-p3-symmetric = { git = "https://github.com/0xMiden/Plonky3.git", rev = "5a66c71d" }
-p3-challenger = { git = "https://github.com/0xMiden/Plonky3.git", rev = "5a66c71d" }
-p3-mds = { git = "https://github.com/0xMiden/Plonky3.git", rev = "5a66c71d" }
-p3-poseidon2 = { git = "https://github.com/0xMiden/Plonky3.git", rev = "5a66c71d" }
+p3-field = { git = "https://github.com/0xMiden/Plonky3.git", rev = "1a8aa944" }
+p3-goldilocks = { git = "https://github.com/0xMiden/Plonky3.git", rev = "1a8aa944" }
+p3-matrix = { git = "https://github.com/0xMiden/Plonky3.git", rev = "1a8aa944" }
+p3-dft = { git = "https://github.com/0xMiden/Plonky3.git", rev = "1a8aa944" }
+p3-maybe-rayon = { git = "https://github.com/0xMiden/Plonky3.git", rev = "1a8aa944" }
+p3-util = { git = "https://github.com/0xMiden/Plonky3.git", rev = "1a8aa944" }
+p3-symmetric = { git = "https://github.com/0xMiden/Plonky3.git", rev = "1a8aa944" }
+p3-challenger = { git = "https://github.com/0xMiden/Plonky3.git", rev = "1a8aa944" }
+p3-mds = { git = "https://github.com/0xMiden/Plonky3.git", rev = "1a8aa944" }
+p3-poseidon2 = { git = "https://github.com/0xMiden/Plonky3.git", rev = "1a8aa944" }

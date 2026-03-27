@@ -115,6 +115,8 @@ fn test_verifier_dag_matches_manual_eval() {
         num_quotient_chunks: 2,
         num_vlpi_groups: 0,
         layout: LayoutKind::Native,
+        quotient_extension: false,
+        quotient_segment_len: 0,
     };
     let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
     let layout = artifacts.layout.clone();
@@ -157,6 +159,8 @@ fn test_emitted_circuit_matches_dag_eval() {
         num_quotient_chunks: 2,
         num_vlpi_groups: 0,
         layout: LayoutKind::Native,
+        quotient_extension: false,
+        quotient_segment_len: 0,
     };
     let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
     let layout = artifacts.layout.clone();
@@ -175,6 +179,8 @@ fn test_encoded_circuit_structure() {
         num_quotient_chunks: 2,
         num_vlpi_groups: 0,
         layout: LayoutKind::Native,
+        quotient_extension: false,
+        quotient_segment_len: 0,
     };
     let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
     let layout = artifacts.layout.clone();
@@ -183,4 +189,73 @@ fn test_encoded_circuit_structure() {
     let encoded = circuit.to_ace().unwrap();
     assert!(encoded.size_in_felt().is_multiple_of(8));
     assert_eq!(encoded.num_inputs(), layout.total_inputs);
+}
+
+#[test]
+fn quotient_power_sum_recomposition_small_shape() {
+    let air = MockAir;
+    let config = AceConfig {
+        num_quotient_chunks: 3,
+        num_vlpi_groups: 0,
+        layout: LayoutKind::Native,
+        quotient_extension: true,
+        quotient_segment_len: 5,
+    };
+    let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
+    let layout = artifacts.layout;
+
+    let mut inputs = vec![EF::ZERO; layout.total_inputs];
+    let z_k = ef(7);
+    inputs[layout.index(InputKey::ZK).unwrap()] = z_k;
+    let chunks = [ef(3), ef(11), ef(19)];
+    for (i, &chunk) in chunks.iter().enumerate() {
+        inputs[layout.index(InputKey::QuotientChunk { offset: 0, chunk: i }).unwrap()] = chunk;
+    }
+
+    let z_step = z_k.exp_u64(5);
+    let mut expected = EF::ZERO;
+    let mut pow = EF::ONE;
+    for &chunk in &chunks {
+        expected += chunk * pow;
+        pow *= z_step;
+    }
+
+    let actual = eval_quotient(&layout, &inputs);
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn quotient_power_sum_recomposition_signature_shape() {
+    let air = MockAir;
+    let config = AceConfig {
+        num_quotient_chunks: 15,
+        num_vlpi_groups: 0,
+        layout: LayoutKind::Native,
+        quotient_extension: true,
+        quotient_segment_len: 55,
+    };
+    let artifacts = build_ace_dag_for_air::<_, F, EF>(&air, config).unwrap();
+    let layout = artifacts.layout;
+
+    let mut inputs = vec![EF::ZERO; layout.total_inputs];
+    let z_k = ef(13);
+    inputs[layout.index(InputKey::ZK).unwrap()] = z_k;
+
+    let mut chunks = Vec::with_capacity(15);
+    for i in 0..15 {
+        let c = ef((i as u64) + 1);
+        inputs[layout.index(InputKey::QuotientChunk { offset: 0, chunk: i }).unwrap()] = c;
+        chunks.push(c);
+    }
+
+    let z_step = z_k.exp_u64(55);
+    let mut expected = EF::ZERO;
+    let mut pow = EF::ONE;
+    for &chunk in &chunks {
+        expected += chunk * pow;
+        pow *= z_step;
+    }
+
+    let actual = eval_quotient(&layout, &inputs);
+    assert_eq!(actual, expected);
 }

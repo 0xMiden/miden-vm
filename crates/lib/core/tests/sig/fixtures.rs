@@ -14,7 +14,7 @@ use super::{
     conversions::{
         absorb_base_group_full_rate, absorb_deep_poly_full_rate, absorb_ext_group_full_rate,
         append_base_group_full_rate_advice, append_deep_poly_full_rate_advice,
-        append_ext_group_full_rate_advice, g_to_felt, g4_to_felt4, g4_to_u64,
+        append_ext_group_full_rate_advice, g4_to_felt4, g4_to_u64,
     },
     instance_seed_goldilocks, message_to_goldilocks, seed_from_label, sign_sig_w8, test_message,
     transcript::SigTranscript,
@@ -131,7 +131,7 @@ pub(crate) fn pack_proof_for_masm(
         &mut advice_map,
         &query_indices,
         proof.witness_openings.as_slice(),
-        |opening| opening.row.iter().map(|&g| g_to_felt(g)).collect(),
+        |opening| opening.row.iter().map(|&g| Felt::from(g)).collect(),
         |opening| opening.path.iter().map(|s| Word::new(g4_to_felt4(s))).collect(),
         "witness",
     );
@@ -142,7 +142,7 @@ pub(crate) fn pack_proof_for_masm(
         &mut advice_map,
         &query_indices,
         proof.quotient_openings.as_slice(),
-        |opening| opening.row.iter().map(|&g| g_to_felt(g)).collect(),
+        |opening| opening.row.iter().map(|&g| Felt::from(g)).collect(),
         |opening| opening.path.iter().map(|s| Word::new(g4_to_felt4(s))).collect(),
         "quotient",
     );

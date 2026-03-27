@@ -20,7 +20,7 @@ use miden_crypto::{
         symmetric::{CryptographicPermutation, Permutation, TruncatedPermutation},
     },
 };
-use miden_processor::{ExecutionOptions, FastProcessor, trace::build_trace};
+use miden_processor::{FastProcessor, trace::build_trace};
 use miden_utils_testing::{AdviceInputs, StackInputs};
 use p3_goldilocks::{
     Goldilocks as P3Goldilocks, Poseidon2Goldilocks, default_goldilocks_poseidon2_12,
@@ -70,12 +70,10 @@ impl Default for P3Poseidon2FeltPerm {
 
 impl Permutation<[Felt; P3_SPONGE_WIDTH]> for P3Poseidon2FeltPerm {
     fn permute_mut(&self, state: &mut [Felt; P3_SPONGE_WIDTH]) {
-        // Safety: Felt is a transparent wrapper over Goldilocks.
-        debug_assert_eq!(core::mem::size_of::<Felt>(), core::mem::size_of::<P3Goldilocks>());
         let mut p3_state: [P3Goldilocks; P3_SPONGE_WIDTH] =
-            unsafe { core::mem::transmute_copy(state) };
+            core::array::from_fn(|i| state[i].into());
         P3Permutation::permute_mut(&self.perm, &mut p3_state);
-        *state = unsafe { core::mem::transmute_copy(&p3_state) };
+        *state = core::array::from_fn(|i| p3_state[i].into());
     }
 }
 
@@ -189,13 +187,11 @@ pub fn prove_program_with_p3_poseidon2(
     program: &miden_processor::Program,
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
-    host: &mut impl miden_processor::Host,
+    host: &mut impl miden_processor::SyncHost,
 ) -> Result<(), miden_processor::ExecutionError> {
-    let processor =
-        FastProcessor::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default());
-    let (execution_output, trace_generation_context) =
-        processor.execute_for_trace_sync(program, host)?;
-    let trace = build_trace(execution_output, trace_generation_context, program.to_info())?;
+    let processor = FastProcessor::new(stack_inputs).with_advice(advice_inputs).with_tracing(true);
+    let trace_inputs = processor.execute_trace_inputs_sync(program, host)?;
+    let trace = build_trace(trace_inputs)?;
 
     let trace_matrix = trace.to_row_major_matrix();
     let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();

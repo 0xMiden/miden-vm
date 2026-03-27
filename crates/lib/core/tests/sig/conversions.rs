@@ -1,20 +1,32 @@
 //! Small conversion and packing helpers used by the signature test harness.
+//!
+//! `miden-signature` uses `p3_goldilocks::Goldilocks` and `QuadExt =
+//! BinomialExtensionField<Goldilocks, 2>`, while the VM uses `miden_core::Felt` (a newtype over
+//! `Goldilocks`) and `QuadFelt = BinomialExtensionField<Felt, 2>`. Both crates now share the same
+//! p3 version, so `From` conversions are available.
 
-use miden_core::Felt;
+use miden_core::{
+    Felt,
+    field::{BasedVectorSpace, QuadFelt},
+};
 use miden_signature::{Goldilocks, QuadExt};
 
 use super::transcript::SigTranscript;
 
-// NOTE: The signature crate uses `p3_goldilocks::Goldilocks`, while the VM/test
-// harness uses `miden_core::Felt`. They are layout-compatible, so we transmute
-// for zero-copy conversions. This is intentionally isolated here so it’s easy
-// to swap to safe conversions once the types are unified.
-pub(crate) fn g_to_felt(g: Goldilocks) -> Felt {
-    unsafe { core::mem::transmute(g) }
+#[inline]
+fn ext_coeffs(ef: &QuadExt) -> &[Goldilocks] {
+    let c: &[Goldilocks] = ef.as_basis_coefficients_slice();
+    c
+}
+
+#[inline]
+fn qf_coeffs(qf: &QuadFelt) -> &[Felt] {
+    let c: &[Felt] = qf.as_basis_coefficients_slice();
+    c
 }
 
 pub(crate) fn g4_to_felt4(g: &[Goldilocks; 4]) -> [Felt; 4] {
-    core::array::from_fn(|i| g_to_felt(g[i]))
+    core::array::from_fn(|i| g[i].into())
 }
 
 pub(crate) fn g4_to_u64(g: &[Goldilocks; 4]) -> [u64; 4] {
@@ -22,11 +34,18 @@ pub(crate) fn g4_to_u64(g: &[Goldilocks; 4]) -> [u64; 4] {
 }
 
 pub(crate) fn ef_to_felts(ef: &QuadExt) -> [Felt; 2] {
-    unsafe { core::mem::transmute_copy(ef) }
+    let c = ext_coeffs(ef);
+    [c[0].into(), c[1].into()]
 }
 
-pub(crate) fn ef_to_u64_pair(ef: &QuadExt) -> [u64; 2] {
-    ef_to_felts(ef).map(|f| f.as_canonical_u64())
+pub(crate) fn qe_to_qf(qe: QuadExt) -> QuadFelt {
+    let c = ext_coeffs(&qe);
+    QuadFelt::new([c[0].into(), c[1].into()])
+}
+
+pub(crate) fn qf_to_qe(qf: QuadFelt) -> QuadExt {
+    let c = qf_coeffs(&qf);
+    QuadExt::new([c[0].into(), c[1].into()])
 }
 
 pub(crate) fn absorb_ext_group_full_rate(t: &mut SigTranscript, group: &[QuadExt]) {
@@ -44,7 +63,7 @@ pub(crate) fn absorb_ext_group_full_rate(t: &mut SigTranscript, group: &[QuadExt
 }
 
 pub(crate) fn absorb_base_group_full_rate(t: &mut SigTranscript, group: &[Goldilocks]) {
-    let felts: Vec<Felt> = group.iter().map(|&g| g_to_felt(g)).collect();
+    let felts: Vec<Felt> = group.iter().map(|&g| g.into()).collect();
     assert_eq!(felts.len() % 8, 0, "base OOD group must be multiple of 8");
     for chunk in felts.chunks(8) {
         t.absorb_full_rate(chunk[0..4].try_into().unwrap(), chunk[4..8].try_into().unwrap());
@@ -55,8 +74,8 @@ pub(crate) fn append_ext_group_full_rate_advice(adv: &mut Vec<u64>, group: &[Qua
     let felts: Vec<u64> = group
         .iter()
         .flat_map(|ef| {
-            let p = ef_to_u64_pair(ef);
-            [p[0], p[1]]
+            let c = ext_coeffs(ef);
+            [Felt::from(c[0]).as_canonical_u64(), Felt::from(c[1]).as_canonical_u64()]
         })
         .collect();
     assert_eq!(felts.len() % 8, 0, "ext OOD group must be multiple of 8");
@@ -64,7 +83,7 @@ pub(crate) fn append_ext_group_full_rate_advice(adv: &mut Vec<u64>, group: &[Qua
 }
 
 pub(crate) fn append_base_group_full_rate_advice(adv: &mut Vec<u64>, group: &[Goldilocks]) {
-    let felts: Vec<u64> = group.iter().map(|&g| g_to_felt(g).as_canonical_u64()).collect();
+    let felts: Vec<u64> = group.iter().map(|&g| Felt::from(g).as_canonical_u64()).collect();
     assert_eq!(felts.len() % 8, 0, "base OOD group must be multiple of 8");
     adv.extend_from_slice(&felts);
 }
@@ -99,8 +118,8 @@ pub(crate) fn append_deep_poly_full_rate_advice(adv: &mut Vec<u64>, coeffs: &[Qu
     let felts: Vec<u64> = padded_desc
         .iter()
         .flat_map(|ef| {
-            let p = ef_to_u64_pair(ef);
-            [p[0], p[1]]
+            let c = ext_coeffs(ef);
+            [Felt::from(c[0]).as_canonical_u64(), Felt::from(c[1]).as_canonical_u64()]
         })
         .collect();
     assert_eq!(felts.len() % 8, 0, "DEEP coeff advice stream must be multiple of 8");

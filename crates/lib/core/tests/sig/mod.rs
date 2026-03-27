@@ -42,8 +42,7 @@ pub fn test_message(tag: u64) -> [Felt; 4] {
 
 /// Convert a 4-felt message into Goldilocks elements for miden-signature APIs.
 pub fn message_to_goldilocks(msg: [Felt; 4]) -> [Goldilocks; 4] {
-    debug_assert_eq!(core::mem::size_of::<Felt>(), core::mem::size_of::<Goldilocks>());
-    unsafe { core::mem::transmute(msg) }
+    msg.map(|f| f.into())
 }
 
 /// Derive a deterministic keygen seed from an arbitrary label.
