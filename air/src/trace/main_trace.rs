@@ -101,6 +101,11 @@ enum TraceStorage {
         num_rows: usize,
     },
     RowMajor(RowMajorMatrix<Felt>),
+    Transposed {
+        matrix: RowMajorMatrix<Felt>,
+        num_cols: usize,
+        num_rows: usize,
+    },
 }
 
 #[derive(Debug)]
@@ -148,6 +153,16 @@ impl MainTrace {
         }
     }
 
+    /// `transposed` is `main.transpose()` where `main` was `num_rows × num_cols`.
+    pub fn from_transposed(transposed: RowMajorMatrix<Felt>, last_program_row: RowIndex) -> Self {
+        let num_cols = transposed.height();
+        let num_rows = transposed.width();
+        Self {
+            storage: TraceStorage::Transposed { matrix: transposed, num_cols, num_rows },
+            last_program_row,
+        }
+    }
+
     /// Get matrix element at `(row, col)`.
     ///
     /// # Panics
@@ -168,7 +183,6 @@ impl MainTrace {
                     } else if nc < 2 + CHIPLETS_WIDTH {
                         chiplets_rm[r * CHIPLETS_WIDTH + (nc - 2)]
                     } else {
-                        // padding columns
                         ZERO
                     }
                 }
@@ -181,6 +195,10 @@ impl MainTrace {
                     unsafe { matrix.get_unchecked(r, col) }
                 }
             },
+            TraceStorage::Transposed { matrix, num_rows, .. } => {
+                debug_assert!(r < *num_rows && col < matrix.height());
+                unsafe { matrix.get_unchecked(col, r) }
+            },
         }
     }
 
@@ -190,6 +208,7 @@ impl MainTrace {
         match &self.storage {
             TraceStorage::Parts { .. } => PADDED_TRACE_WIDTH,
             TraceStorage::RowMajor(matrix) => matrix.width(),
+            TraceStorage::Transposed { num_cols, .. } => *num_cols,
         }
     }
 
@@ -197,6 +216,7 @@ impl MainTrace {
     pub fn to_row_major(&self) -> RowMajorMatrix<Felt> {
         match &self.storage {
             TraceStorage::RowMajor(matrix) => matrix.clone(),
+            TraceStorage::Transposed { matrix, .. } => matrix.transpose(),
             TraceStorage::Parts {
                 core_rm,
                 chiplets_rm,
@@ -296,6 +316,26 @@ impl MainTrace {
 
                 RowMajorMatrix::new(data, target_width)
             },
+            TraceStorage::Transposed { .. } => {
+                let full = self.to_row_major();
+                if target_width == full.width() {
+                    return full;
+                }
+                let h = full.height();
+                let total = h * target_width;
+                let mut data = Vec::with_capacity(total);
+                // SAFETY: the loop below writes exactly `h * target_width` elements.
+                #[allow(clippy::uninit_vec)]
+                unsafe {
+                    data.set_len(total);
+                }
+                for row in 0..h {
+                    let src = full.row_slice(row).expect("row index in bounds");
+                    data[row * target_width..(row + 1) * target_width]
+                        .copy_from_slice(&src[..target_width]);
+                }
+                RowMajorMatrix::new(data, target_width)
+            },
             TraceStorage::Parts {
                 core_rm,
                 chiplets_rm,
@@ -363,6 +403,7 @@ impl MainTrace {
         match &self.storage {
             TraceStorage::Parts { num_rows, .. } => *num_rows,
             TraceStorage::RowMajor(matrix) => matrix.height(),
+            TraceStorage::Transposed { num_rows, .. } => *num_rows,
         }
     }
 
@@ -393,6 +434,11 @@ impl MainTrace {
                     *dst = ZERO;
                 }
             },
+            TraceStorage::Transposed { matrix, num_cols, .. } => {
+                for (col_idx, cell) in row[..*num_cols].iter_mut().enumerate() {
+                    *cell = unsafe { matrix.get_unchecked(col_idx, row_idx) };
+                }
+            },
         }
     }
 
@@ -419,6 +465,10 @@ impl MainTrace {
             },
             TraceStorage::RowMajor(_) => {
                 (0..h).map(|r| self.get(RowIndex::from(r), col_idx)).collect()
+            },
+            TraceStorage::Transposed { matrix, .. } => {
+                let row_slice = matrix.row_slice(col_idx).expect("column index in bounds");
+                row_slice[..h].to_vec()
             },
         }
     }

@@ -439,8 +439,9 @@ impl<EF: ExtensionField<Felt>> AuxBuilder<Felt, EF> for AuxTraceBuilders {
     ) -> (RowMajorMatrix<EF>, Vec<EF>) {
         let _span = tracing::info_span!("build_aux_trace").entered();
 
-        // Wrap the row-major main trace for auxiliary builders. The last program row is where the
-        // clock (column 0) stops incrementing.
+        // Transpose the row-major main trace into column-major `MainTrace` needed by the
+        // auxiliary trace builders. The last program row is the point where the clock
+        // (column 0) stops incrementing.
         let main_for_aux = {
             let num_rows = main.height();
             let last_program_row = (1..num_rows)
@@ -449,7 +450,8 @@ impl<EF: ExtensionField<Felt>> AuxBuilder<Felt, EF> for AuxTraceBuilders {
                         != main.get(i - 1, 0).expect("valid indices") + Felt::ONE
                 })
                 .map_or(num_rows - 1, |i| i - 1);
-            MainTrace::new(main.clone(), RowIndex::from(last_program_row))
+            let transposed = main.transpose();
+            MainTrace::from_transposed(transposed, RowIndex::from(last_program_row))
         };
 
         let aux_columns = self.build_aux_columns(&main_for_aux, challenges);
