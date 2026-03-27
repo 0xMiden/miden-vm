@@ -518,7 +518,7 @@ where
             return Ok(Some(package));
         }
 
-        let Some(kernel_dependency) = kernel_runtime_dependency(package.as_ref())? else {
+        let Some(kernel_dependency) = package.kernel_runtime_dependency()? else {
             return Ok(None);
         };
 
@@ -1198,25 +1198,6 @@ fn package_dependency(package: &MastPackage) -> PackageDependency {
 
 fn linked_kernel_package_section(package: &MastPackage) -> Section {
     Section::new(SectionId::KERNEL, package.to_bytes())
-}
-
-fn kernel_runtime_dependency(package: &MastPackage) -> Result<Option<PackageDependency>, Report> {
-    let mut kernel_dependencies = package
-        .manifest
-        .dependencies()
-        .filter(|dependency| dependency.kind == TargetType::Kernel)
-        .cloned();
-    let Some(kernel_dependency) = kernel_dependencies.next() else {
-        return Ok(None);
-    };
-    if kernel_dependencies.next().is_some() {
-        return Err(Report::msg(format!(
-            "package '{}' declares multiple kernel runtime dependencies",
-            package.name
-        )));
-    }
-
-    Ok(Some(kernel_dependency))
 }
 
 fn record_linked_kernel_dependency(

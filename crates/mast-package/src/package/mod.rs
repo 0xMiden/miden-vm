@@ -279,7 +279,7 @@ impl Package {
         Ok(())
     }
 
-    fn kernel_runtime_dependency(&self) -> Result<Option<&Dependency>, Report> {
+    pub fn kernel_runtime_dependency(&self) -> Result<Option<&Dependency>, Report> {
         let mut kernel_dependencies = self
             .manifest
             .dependencies()
@@ -434,6 +434,9 @@ fn arbitrary_library() -> Arc<Library> {
     let value_tree = <Library as Arbitrary>::arbitrary().new_tree(&mut runner).unwrap();
     Arc::new(value_tree.current())
 }
+
+// TESTS
+// ================================================================================================
 
 #[cfg(test)]
 mod tests {
