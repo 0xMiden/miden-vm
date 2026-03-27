@@ -355,7 +355,6 @@ impl Assembler {
         package: Arc<miden_mast_package::Package>,
         linkage: Linkage,
     ) -> Result<(), Report> {
-        use miden_mast_package::PackageExport;
         match package.kind {
             TargetType::Kernel => {
                 if !self.kernel().is_empty() {
@@ -366,28 +365,8 @@ impl Assembler {
                     )));
                 }
 
-                let exports = package
-                    .manifest
-                    .exports()
-                    .filter_map(|export| {
-                        if export.namespace().is_kernel_path()
-                            && let PackageExport::Procedure(p) = export
-                        {
-                            Some(p.digest)
-                        } else {
-                            None
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                let Some(kernel_module) =
-                    package.mast.module_infos().find(|mi| mi.path().is_kernel_path())
-                else {
-                    return Err(Report::msg(
-                        "invalid kernel package: does not contain kernel module",
-                    ));
-                };
-                let kernel = Kernel::new(&exports)
-                    .map_err(|err| Report::msg(format!("invalid kernel package: {err}")))?;
+                let kernel_module = package.kernel_module_info()?;
+                let kernel = package.to_kernel()?;
                 self.linker.link_with_kernel(kernel, kernel_module)?;
                 Ok(())
             },

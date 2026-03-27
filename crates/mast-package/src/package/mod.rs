@@ -14,8 +14,10 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_assembly_syntax::{KernelLibrary, Library, Report, ast::QualifiedProcedureName};
-use miden_core::{Word, serde::Deserializable};
+use miden_assembly_syntax::{
+    KernelLibrary, Library, Report, ast::QualifiedProcedureName, library::ModuleInfo,
+};
+use miden_core::{Word, program::Kernel, serde::Deserializable};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -118,6 +120,32 @@ impl Package {
     /// Returns true if this package was produced specifically for a kernel target
     pub fn is_kernel(&self) -> bool {
         matches!(self.kind, TargetType::Kernel)
+    }
+
+    /// Get the [ModuleInfo] corresponding to the kernel module, if this package contains the kernel
+    pub fn kernel_module_info(&self) -> Result<ModuleInfo, Report> {
+        self.mast
+            .module_infos()
+            .find(|mi| mi.path().is_kernel_path())
+            .ok_or_else(|| Report::msg("invalid kernel package: does not contain kernel module"))
+    }
+
+    /// Get a [Kernel] from this package, if this package contains one.
+    pub fn to_kernel(&self) -> Result<Kernel, Report> {
+        let exports = self
+            .manifest
+            .exports()
+            .filter_map(|export| {
+                if export.namespace().is_kernel_path()
+                    && let PackageExport::Procedure(p) = export
+                {
+                    Some(p.digest)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        Kernel::new(&exports).map_err(|err| Report::msg(format!("invalid kernel package: {err}")))
     }
 
     /// Converts this package into a [KernelLibrary] if it is marked as a kernel package.
