@@ -76,7 +76,9 @@ pub enum LinkerError {
     /// Kernel procedures are part of the execution environment and may only be invoked via
     /// `syscall`. Using `exec`, `call`, `procref`, `dynexec`, or `dyncall` to target a kernel
     /// export bypasses the context-switch semantics and is a correctness error (fixes #2902).
-    #[error("invalid invocation: '{callee}' is a kernel procedure and must be called via `syscall`")]
+    #[error(
+        "invalid invocation: '{callee}' is a kernel procedure and must be called via `syscall`"
+    )]
     #[diagnostic(help(
         "use `syscall.{callee}` instead of `{kind}.{callee}` to call exported kernel procedures"
     ))]

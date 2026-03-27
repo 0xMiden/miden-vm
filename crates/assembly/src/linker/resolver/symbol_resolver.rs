@@ -100,10 +100,7 @@ impl<'a> SymbolResolver<'a> {
             span: context.span,
             source_file: self.source_manager().get(context.span.source_id()).ok(),
             callee,
-            kind: context
-                .kind
-                .map(|k| k.to_string())
-                .unwrap_or_else(|| "exec".into()),
+            kind: context.kind.map(|k| k.to_string()).unwrap_or_else(|| "exec".into()),
         }
     }
 
@@ -182,7 +179,7 @@ impl<'a> SymbolResolver<'a> {
                         // Non-syscall: reject kernel exports (#2902)
                         if self.is_kernel_proc(gid) {
                             let callee = path.into_inner();
-                            return Err(self.reject_kernel_proc_non_syscall(context, callee));
+                            return Err(self.reject_kernel_proc_non_syscall(&context, callee));
                         }
                         Ok(SymbolResolution::Exact { gid, path })
                     },

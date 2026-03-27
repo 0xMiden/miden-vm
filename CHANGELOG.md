@@ -3,6 +3,7 @@
 ## v0.23.0 (TBD)
 
 #### Bug Fixes
+- Fixed linker accepting non-`syscall` invocations of exported kernel procedures; `exec`, `call`, and `procref` targeting kernel exports now emit `LinkerError::KernelProcNotSyscall` with an actionable help message ([#2920](https://github.com/0xMiden/miden-vm/pull/2920)).
 
 - Reverted `InvokeKind::ProcRef` back to `InvokeKind::Exec` in `visit_mut_procref` and added an explanatory comment (#2893).
 #### Changes
