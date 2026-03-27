@@ -1,4 +1,4 @@
-mod debuginfo;
+pub(super) mod debuginfo;
 mod error;
 mod product;
 
@@ -98,13 +98,13 @@ pub struct Assembler {
     /// The linker instance used internally to link assembler inputs
     linker: Box<Linker>,
     /// The debug information gathered during assembly
-    debug_info: DebugInfoSections,
+    pub(super) debug_info: DebugInfoSections,
     /// Whether to treat warning diagnostics as errors
     warnings_as_errors: bool,
     /// Whether to preserve debug information in the assembled artifact.
-    emit_debug_info: bool,
+    pub(super) emit_debug_info: bool,
     /// Whether to trim source file paths in debug information.
-    trim_paths: bool,
+    pub(super) trim_paths: bool,
 }
 
 impl Default for Assembler {

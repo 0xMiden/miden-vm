@@ -35,7 +35,7 @@ use miden_project::{
     ProjectSourceOrigin, Target,
 };
 
-use crate::{Assembler, SourceManager, ast::Module};
+use crate::{Assembler, SourceManager, assembler::debuginfo::DebugInfoSections, ast::Module};
 
 pub enum ProjectTargetSelector<'a> {
     Library,
@@ -329,7 +329,11 @@ where
             .clone()
             .with_dependencies(runtime_dependencies.into_values())
             .expect("assembled package manifest should have unique runtime dependencies");
+
+        // Emit custom sections
         let mut sections = Vec::new();
+
+        // Section: build provenance
         if let Some(provenance) = self.build_source_provenance(
             &package_id,
             project.as_ref(),
@@ -339,10 +343,25 @@ where
         )? {
             sections.push(provenance.to_section());
         }
+
+        // Section: embedded kernel package
         if target.ty.is_executable()
             && let Some(kernel_package) = linked_kernel_package.clone()
         {
             sections.push(linked_kernel_package_section(kernel_package.as_ref()));
+        }
+
+        // Section: debug info
+        if self.assembler.emit_debug_info {
+            let DebugInfoSections {
+                debug_sources_section,
+                debug_functions_section,
+                debug_types_section,
+            } = &self.assembler.debug_info;
+            sections.push(Section::new(SectionId::DEBUG_SOURCES, debug_sources_section.to_bytes()));
+            sections
+                .push(Section::new(SectionId::DEBUG_FUNCTIONS, debug_functions_section.to_bytes()));
+            sections.push(Section::new(SectionId::DEBUG_TYPES, debug_types_section.to_bytes()));
         }
 
         let package = Arc::new(MastPackage {

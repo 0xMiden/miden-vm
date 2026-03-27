@@ -19,13 +19,13 @@ use crate::{
 // ================================================================================================
 
 #[derive(Default, Clone)]
-pub(super) struct DebugInfoSections {
+pub struct DebugInfoSections {
     /// The debug function section maintained by the assembler during assembly
-    debug_functions_section: DebugFunctionsSection,
+    pub debug_functions_section: DebugFunctionsSection,
     /// The debug type section maintained by the assembler during assembly
-    debug_types_section: DebugTypesSection,
+    pub debug_types_section: DebugTypesSection,
     /// The debug sources section maintained by the assembler during assembly
-    debug_sources_section: DebugSourcesSection,
+    pub debug_sources_section: DebugSourcesSection,
 }
 
 impl DebugInfoSections {
