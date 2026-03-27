@@ -185,14 +185,14 @@ pub fn analyze(
             .filter(|(name, cst)| {
                 !cst.visibility.is_public()                    // private only
                     && !used.contains(*name)                   // never referenced
-                    && !name.as_str().starts_with('_')         // not opted-out
+                    && !name.as_str().starts_with('_') // not opted-out
             })
             .map(|(name, cst)| (name.clone(), cst.span))
             .collect();
         for (name, span) in unused {
             analyzer.error(SemanticAnalysisError::UnusedConstant {
                 span,
-                name: name.to_string(),
+                name: alloc::format!("{name}"),
             });
         }
     }

@@ -121,7 +121,9 @@ pub enum SemanticAnalysisError {
     #[error("unused constant '{name}'")]
     #[diagnostic(
         severity(Warning),
-        help("this constant is defined but never used; remove it or prefix its name with '_' to suppress this warning")
+        help(
+            "this constant is defined but never used; remove it or prefix its name with '_' to suppress this warning"
+        )
     )]
     UnusedConstant {
         #[label("defined here")]

@@ -17,6 +17,7 @@
 ## 0.22.0 (2025-03-18)
 
 #### Enhancements
+- Added `UnusedConstant` warning in the assembler semantic analysis pass; private constants that are defined but never referenced in a module now emit a warning (promoted to error when `warnings_as_errors` is enabled) ([#2921](https://github.com/0xMiden/miden-vm/pull/2921)).
 
 - Define and implement Miden project file format ([#2510](https://github.com/0xMiden/miden-vm/pull/2510)).
 - Added `math::u128` comparison (`lt`, `lte`, `gt`, `gte`), bitwise (`and`, `or`, `xor`, `not`), and shift (`shl`, `shr`, `rotl`, `rotr`) operations ([#2624](https://github.com/0xMiden/miden-vm/pull/2624)).
