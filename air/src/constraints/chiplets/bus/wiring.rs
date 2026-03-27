@@ -257,8 +257,9 @@ where
 /// This links hasher controller rows (dispatch) to hasher permutation segment (compute):
 /// - Hasher controller input (perm_seg=0, hs0=1): +1/msg_in
 /// - Hasher controller output (perm_seg=0, hs0=0, hs1=0): +1/msg_out
-/// - Hasher perm segment row 0 (perm_seg=1, P_CYCLE_ROW_0=1): -m/msg_in
-/// - Hasher perm segment boundary row (perm_seg=1, cycle boundary): -m/msg_out
+/// - Hasher permutation cycle row 0 (`is_init_ext = 1`): -m/msg_in
+/// - Hasher permutation boundary row (cycle row 15, i.e. `perm_seg=1` and all row-type selectors
+///   are 0): -m/msg_out
 ///
 /// Common-denominator form:
 /// ```text
@@ -299,7 +300,7 @@ where
     // f_out: controller output row (perm_seg=0, hs0=0, hs1=0)
     let f_out = ctrl * (one.clone() - hs0) * (one - hs1);
 
-    // f_p_in: perm row 0 (perm_seg=1, P_CYCLE_ROW_0=1)
+    // f_p_in: packed permutation row 0 (`is_init_ext = 1`)
     let f_p_in = perm_seg.clone() * p_cycle_row_0;
 
     // f_p_out: perm boundary row (perm_seg=1, cycle boundary)

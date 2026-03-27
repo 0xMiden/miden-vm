@@ -160,9 +160,9 @@ fn b_chip_trace_mem() {
     // Verify the HOUT response and END request cancel.
     assert_eq!(hout_response * span_end_mult, ONE);
 
-    // Nothing changes until the memory segment starts. The hasher trace for a single-batch span
-    // is: 2 hasher controller rows + 14 padding + 16 hasher permutation segment = 32 rows. No
-    // bitwise ops, so memory starts at row 32.
+    // Nothing changes until the memory segment starts. The hasher contributes 32 total rows:
+    // 16 rows for the padded controller region (2 controller rows + 14 padding) and 16 rows for
+    // the packed permutation segment. No bitwise ops, so memory starts at row 32.
     let memory_start = 2 * HASH_CYCLE_LEN; // controller(16 padded) + perm(16)
     for row in 16..memory_start {
         assert_eq!(expected, b_chip[row]);

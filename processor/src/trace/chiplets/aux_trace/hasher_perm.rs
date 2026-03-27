@@ -71,7 +71,7 @@ pub fn build_perm_link_running_sum<E: ExtensionField<Felt>>(
                 let msg_in = encode_perm_link_message(main_trace, row, challenges, LABEL_IN);
                 running_sum[row_idx + 1] = running_sum[row_idx] - m * msg_in.inverse();
             } else if cycle_pos == HASH_CYCLE_LEN - 1 {
-                // Perm row 31: -m/msg_out
+                // Perm boundary row (row 15 in the packed 16-row cycle): -m/msg_out
                 let m: E = main_trace.chiplet_node_index(row).into();
                 let msg_out = encode_perm_link_message(main_trace, row, challenges, LABEL_OUT);
                 running_sum[row_idx + 1] = running_sum[row_idx] - m * msg_out.inverse();

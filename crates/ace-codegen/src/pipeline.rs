@@ -132,14 +132,6 @@ where
         LayoutKind::Native => config.num_vlpi_groups,
     };
 
-    // Convert logical VLPI groups to EF slots based on layout policy.
-    // MASM word-aligns each group (4 base felts = 2 EF slots per group).
-    // Native uses 1 EF slot per group (no padding).
-    let num_vlpi = match config.layout {
-        LayoutKind::Masm => config.num_vlpi_groups * 2,
-        LayoutKind::Native => config.num_vlpi_groups,
-    };
-
     InputCounts {
         width: air.width(),
         aux_width: air.aux_width(),

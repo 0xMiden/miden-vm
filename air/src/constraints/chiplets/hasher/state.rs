@@ -30,12 +30,14 @@ use crate::{
 // TAGGING NAMESPACES
 // ================================================================================================
 
+const PERM_WITNESS_SHAPE_NAMESPACE: &str = "chiplets.hasher.permutation.witness_shape";
 const PERM_INIT_EXT_NAMESPACE: &str = "chiplets.hasher.permutation.init_ext";
 const PERM_EXT_NAMESPACE: &str = "chiplets.hasher.permutation.external";
 const PERM_PACKED_INT_NAMESPACE: &str = "chiplets.hasher.permutation.packed_internal";
 const PERM_INT_EXT_NAMESPACE: &str = "chiplets.hasher.permutation.int_ext";
 const SPONGE_CAP_NAMESPACE: &str = "chiplets.hasher.sponge.capacity";
 
+const PERM_WITNESS_SHAPE_NAMES: [&str; 3] = [PERM_WITNESS_SHAPE_NAMESPACE; 3];
 const PERM_INIT_EXT_NAMES: [&str; STATE_WIDTH] = [PERM_INIT_EXT_NAMESPACE; STATE_WIDTH];
 const PERM_EXT_NAMES: [&str; STATE_WIDTH] = [PERM_EXT_NAMESPACE; STATE_WIDTH];
 // 3 witness constraints + 12 next-state constraints = 15
@@ -44,6 +46,10 @@ const PERM_PACKED_INT_NAMES: [&str; 15] = [PERM_PACKED_INT_NAMESPACE; 15];
 const PERM_INT_EXT_NAMES: [&str; 13] = [PERM_INT_EXT_NAMESPACE; 13];
 const SPONGE_CAP_NAMES: [&str; 4] = [SPONGE_CAP_NAMESPACE; 4];
 
+const PERM_WITNESS_SHAPE_TAGS: TagGroup = TagGroup {
+    base: super::HASHER_PERM_WITNESS_SHAPE_BASE_ID,
+    names: &PERM_WITNESS_SHAPE_NAMES,
+};
 const PERM_INIT_EXT_TAGS: TagGroup = TagGroup {
     base: super::HASHER_PERM_INIT_BASE_ID,
     names: &PERM_INIT_EXT_NAMES,
@@ -81,7 +87,7 @@ const SPONGE_CAP_TAGS: TagGroup = TagGroup {
 /// 4. **Int+ext (row 11)**: witness + `h' = M_E(S(y + ark))` — degree 9
 /// 5. **Boundary (row 15)**: No constraint
 ///
-/// The witness columns `w[0..3]` correspond to `s0, s1, s2` on permutation rows.
+/// The witness columns `w[0..2]` correspond to `s0, s1, s2` on permutation rows.
 pub fn enforce_permutation_steps<AB>(
     builder: &mut AB,
     perm_gate: AB::Expr,
@@ -100,6 +106,40 @@ pub fn enforce_permutation_steps<AB>(
 
     // Shared round constants
     let ark: [AB::Expr; STATE_WIDTH] = core::array::from_fn(|i| periodic[P_ARK_START + i].into());
+
+    // -------------------------------------------------------------------------
+    // 0. Unused witness zeroing
+    //
+    // Unused witness columns are forced to zero. On non-packed rows, this means:
+    // - rows 0-3, 12-15: w0 = w1 = w2 = 0
+    // - row 11:          w1 = w2 = 0
+    // - rows 4-10:       w0, w1, w2 unconstrained here (checked by packed witness equations)
+    //
+    // These constraints are primarily defensive. They make permutation rows inert when
+    // s0/s1/s2 are reused as witnesses and reduce accidental coupling with controller-side selector
+    // logic. They may be redundant under the current gating structure, but are kept for now to be
+    // on the safe side.
+    //
+    // Gate degrees:
+    // - perm_gate(1) * (1 - is_packed_int - is_int_ext)(1) = 2 for w0
+    // - perm_gate(1) * (1 - is_packed_int)(1) = 2 for w1,w2
+    // Constraint degree: gate(2) * witness(1) = 3
+    // -------------------------------------------------------------------------
+    let gate_w0_unused =
+        perm_gate.clone() * (AB::Expr::ONE - is_packed_int.clone() - is_int_ext.clone());
+    let gate_w12_unused = perm_gate.clone() * (AB::Expr::ONE - is_packed_int.clone());
+    let mut idx = 0;
+    tagged_assert_zeros(
+        builder,
+        &PERM_WITNESS_SHAPE_TAGS,
+        &mut idx,
+        PERM_WITNESS_SHAPE_NAMESPACE,
+        [
+            gate_w0_unused * w[0].clone(),
+            gate_w12_unused.clone() * w[1].clone(),
+            gate_w12_unused * w[2].clone(),
+        ],
+    );
 
     // -------------------------------------------------------------------------
     // 1. Init+ext1 (row 0): h' = M_E(S(M_E(h) + ark)) Gate degree: perm_gate(1) * is_init_ext(1) =

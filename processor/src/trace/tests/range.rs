@@ -167,8 +167,9 @@ fn b_range_trace_mem() {
     // 4. CHECK b_range: DELTA SUBTRACTIONS ON MEMORY ROWS
     // =====================================================================
     //
-    // The hasher trace occupies the first 32 rows (2 hasher controller + 14 padding +
-    // 16 hasher permutation segment). The memory chiplet starts at row 32.
+    // The hasher trace occupies the first 32 rows in total:
+    // 16 rows for the padded controller region (2 controller rows + 14 padding) and
+    // 16 rows for the packed permutation segment. The memory chiplet starts at row 32.
     let memory_start = 2 * HASH_CYCLE_LEN;
 
     // b_range starts at zero and stays zero until the first memory row.

@@ -14,8 +14,8 @@ use super::{Felt, HasherState, ONE, STATE_WIDTH, Selectors, TraceFragment, ZERO}
 /// The trace consists of 20 columns grouped logically as follows:
 /// - 3 selector columns (s0, s1, s2).
 /// - 12 columns describing hasher state (h0..h11).
-/// - 1 node_index column: holds the Merkle tree node index on controller rows. This
-///   column is reused to hold the permutation request multiplicity on perm segment rows.
+/// - 1 node_index column: holds the Merkle tree node index on controller rows. This column is
+///   reused to hold the permutation request multiplicity on perm segment rows.
 /// - 1 mrupdate_id column (domain separator for sibling table).
 /// - 1 is_boundary column (1 on boundary rows: first input or last output, 0 otherwise).
 /// - 1 direction_bit column (Merkle direction bit on controller rows, 0 elsewhere).

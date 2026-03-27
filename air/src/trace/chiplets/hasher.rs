@@ -92,8 +92,7 @@ pub const NUM_SELECTORS: usize = 3;
 /// The 16-row packed cycle compresses the 31 permutation steps by:
 /// - Merging init linear + ext1 into one row
 /// - Packing 3 internal rounds per row (7 rows for 21 rounds)
-/// - Merging int22 + ext5 into one row
-/// Result: 1 + 3 + 7 + 1 + 3 + 1 = 16 rows.
+/// - Merging int22 + ext5 into one row Result: 1 + 3 + 7 + 1 + 3 + 1 = 16 rows.
 pub const HASH_CYCLE_LEN: usize = 16;
 pub const HASH_CYCLE_LEN_FELT: Felt = Felt::new(HASH_CYCLE_LEN as u64);
 

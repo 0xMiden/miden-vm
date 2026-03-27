@@ -36,7 +36,7 @@ impl LiftedAir<F, EF> for MockAir {
     }
 
     fn num_randomness(&self) -> usize {
-        1
+        2
     }
 
     fn aux_width(&self) -> usize {

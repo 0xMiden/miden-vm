@@ -363,12 +363,16 @@ pub fn enforce_controller_pairing<AB>(
 {
     // 1. First-row boundary: row 0 must be a controller input row.
     // Enforce both s0=1 and perm_seg=0 in a single constraint:
-    // (1 - s0) + perm_seg = 0.
+    // s0 * (1 - perm_seg) = 1.
+    //
+    // This is stronger than (1 - s0) + perm_seg = 0 as s0 can carry witness
+    // values on permutation rows: if perm_seg=1 the left-hand side is 0, so the
+    // constraint cannot be satisfied; thus perm_seg=0 and s0=1.
     builder.tagged(CONTROLLER_PAIRING_TAGS.base, CONTROLLER_PAIRING_NAMES[0], |builder| {
         builder
             .when_first_row()
             .when(hasher_flag.clone())
-            .assert_zero((AB::Expr::ONE - cols.s0.clone()) + cols.perm_seg.clone());
+            .assert_zero(cols.s0.clone() * (AB::Expr::ONE - cols.perm_seg.clone()) - AB::Expr::ONE);
     });
 
     // 2. Output non-adjacency: output row cannot be followed by another output row.

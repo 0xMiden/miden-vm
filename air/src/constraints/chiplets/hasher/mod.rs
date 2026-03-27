@@ -57,8 +57,9 @@ use crate::{
 
 // Tag IDs must follow constraint emission order (ascending) in enforce_hasher_constraints.
 // Emission order: selector_bool -> perm_seg -> structural -> lifecycle -> controller_adj
-//   -> controller_pairing -> perm_steps(init_ext,ext,packed_int,int_ext) -> mrupdate -> sponge_cap
-//   -> output_idx -> merkle_index -> merkle_input_state -> merkle_routing
+//   -> controller_pairing -> perm_steps(witness_shape,init_ext,ext,packed_int,int_ext)
+//   -> mrupdate -> sponge_cap -> output_idx -> merkle_index -> merkle_input_state
+//   -> merkle_routing
 pub(super) const HASHER_BASE_ID: usize = TAG_CHIPLETS_BASE + 10;
 pub(super) const HASHER_SELECTOR_BOOL_BASE_ID: usize = HASHER_BASE_ID;
 pub(super) const HASHER_PERM_SEG_BASE_ID: usize = HASHER_SELECTOR_BOOL_BASE_ID + 3;
@@ -66,7 +67,9 @@ pub(super) const HASHER_STRUCTURAL_BASE_ID: usize = HASHER_PERM_SEG_BASE_ID + 7;
 pub(super) const HASHER_LIFECYCLE_BASE_ID: usize = HASHER_STRUCTURAL_BASE_ID + 7;
 pub(super) const HASHER_CONTROLLER_ADJ_BASE_ID: usize = HASHER_LIFECYCLE_BASE_ID + 2;
 pub(super) const HASHER_CONTROLLER_PAIRING_BASE_ID: usize = HASHER_CONTROLLER_ADJ_BASE_ID + 2;
-pub(super) const HASHER_PERM_INIT_BASE_ID: usize = HASHER_CONTROLLER_PAIRING_BASE_ID + 4;
+// 3 constraints: unused witness slots are zero outside the packed-int rows / int+ext row shape.
+pub(super) const HASHER_PERM_WITNESS_SHAPE_BASE_ID: usize = HASHER_CONTROLLER_PAIRING_BASE_ID + 4;
+pub(super) const HASHER_PERM_INIT_BASE_ID: usize = HASHER_PERM_WITNESS_SHAPE_BASE_ID + 3;
 pub(super) const HASHER_PERM_EXT_BASE_ID: usize = HASHER_PERM_INIT_BASE_ID + STATE_WIDTH;
 pub(super) const HASHER_PERM_INT_BASE_ID: usize = HASHER_PERM_EXT_BASE_ID + STATE_WIDTH;
 // 15 constraints: 3 witness + 12 next-state

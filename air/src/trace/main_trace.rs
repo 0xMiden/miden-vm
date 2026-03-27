@@ -711,6 +711,6 @@ impl MainTrace {
             && self.chiplet_perm_seg(i) == ZERO   // controller region
             && self.chiplet_selector_1(i) == ONE  // s0=1 (input row)
             && self.chiplet_selector_2(i) == ONE  // s1=1 (MR_UPDATE_NEW)
-            && self.chiplet_selector_3(i) == ONE  // s2=1
+            && self.chiplet_selector_3(i) == ONE // s2=1
     }
 }

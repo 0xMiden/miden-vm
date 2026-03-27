@@ -35,9 +35,9 @@ fn hasher_permute() {
 
     let trace = build_trace(hasher);
 
-    // Controller region: 2 rows (1 pair), padded to 16
-    // Perm segment: 1 cycle of 16 rows (1 unique state)
-    // Total: 32 rows
+    // Controller region: 2 rows (1 pair), padded to 16 rows total.
+    // Perm segment: 1 packed 16-row cycle (1 unique state).
+    // Total hasher rows: 32.
     assert_eq!(trace[0].len(), 2 * HASH_CYCLE_LEN);
 
     // Row 0: input (LINEAR_HASH, is_boundary=1, perm_seg=0)
@@ -67,7 +67,9 @@ fn hasher_permute_two() {
 
     let trace = build_trace(hasher);
 
-    // Controller: 4 rows (2 pairs), padded to 16. Perm: 2 cycles = 32 rows. Total: 48.
+    // Controller region: 4 rows (2 pairs), padded to 16 rows total.
+    // Perm segment: 2 packed 16-row cycles = 32 rows.
+    // Total hasher rows: 48.
     assert_eq!(trace[0].len(), HASH_CYCLE_LEN + 2 * HASH_CYCLE_LEN);
 
     // Pair 1
