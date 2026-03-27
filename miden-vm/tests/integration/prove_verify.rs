@@ -242,14 +242,14 @@ mod fast_parallel {
             .unwrap();
         let fast_processor =
             FastProcessor::new_with_options(stack_inputs, advice_inputs.clone(), options);
-        let (execution_output, trace_context) = fast_processor
-            .execute_for_trace_sync(&program, &mut host)
+        let trace_inputs = fast_processor
+            .execute_trace_inputs_sync(&program, &mut host)
             .expect("Fast processor execution failed");
 
-        let fast_stack_outputs = execution_output.stack;
+        let fast_stack_outputs = trace_inputs.execution_output().stack;
 
         // Build trace using parallel trace generation
-        let trace = build_trace(execution_output, trace_context, program.to_info()).unwrap();
+        let trace = build_trace(trace_inputs).unwrap();
 
         // Convert trace to row-major format for proving
         let trace_matrix = trace.to_row_major_matrix();

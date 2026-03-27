@@ -473,7 +473,7 @@ fn test_call_node_preserves_stack_overflow_table() {
     );
 
     // Execute the program
-    let result = processor.execute_sync_mut(&program, &mut host).unwrap();
+    let result = processor.execute_mut_sync(&program, &mut host).unwrap();
 
     assert_eq!(
         result.get_num_elements(16),

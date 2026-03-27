@@ -16,7 +16,7 @@ use super::super::trace_state::{
     MemoryReadsReplay, StackOverflowReplay, StackState, SystemState,
 };
 use crate::{
-    BreakReason, ContextId, ExecutionError, Host, Stopper,
+    BaseHost, BreakReason, ContextId, ExecutionError, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
     errors::OperationError,
     execution::{
@@ -42,7 +42,7 @@ use crate::{
 ///
 /// The replay structures and initial system and stack state are built by the
 /// [`crate::execution_tracer::ExecutionTracer`] in conjunction with
-/// [`crate::FastProcessor::execute_for_trace`].
+/// [`crate::FastProcessor::execute_trace_inputs`].
 #[derive(Debug)]
 pub(crate) struct ReplayProcessor {
     pub system: SystemState,
@@ -63,7 +63,7 @@ impl ReplayProcessor {
     ///
     /// The parameters are expected to be built by the
     /// [`crate::execution_tracer::ExecutionTracer`] when used in conjunction with
-    /// [`crate::FastProcessor::execute_for_trace`].
+    /// [`crate::FastProcessor::execute_trace_inputs`].
     pub fn new(
         initial_system: SystemState,
         initial_stack: StackState,
@@ -443,7 +443,7 @@ impl Processor for ReplayProcessor {
         &self,
         _node_id: MastNodeId,
         _current_forest: &MastForest,
-        _host: &mut impl Host,
+        _host: &mut impl BaseHost,
     ) -> ControlFlow<BreakReason> {
         // do nothing - we don't execute decorators in this processor
         ControlFlow::Continue(())
@@ -453,7 +453,7 @@ impl Processor for ReplayProcessor {
         &self,
         _node_id: MastNodeId,
         _current_forest: &MastForest,
-        _host: &mut impl Host,
+        _host: &mut impl BaseHost,
     ) -> ControlFlow<BreakReason> {
         // do nothing - we don't execute decorators in this processor
         ControlFlow::Continue(())
@@ -464,7 +464,7 @@ impl Processor for ReplayProcessor {
         _node_id: MastNodeId,
         _op_idx_in_block: usize,
         _current_forest: &MastForest,
-        _host: &mut impl Host,
+        _host: &mut impl BaseHost,
     ) -> ControlFlow<BreakReason> {
         // do nothing - we don't execute decorators in this processor
         ControlFlow::Continue(())
@@ -475,7 +475,7 @@ impl Processor for ReplayProcessor {
         _basic_block_node: &BasicBlockNode,
         _node_id: MastNodeId,
         _current_forest: &Arc<MastForest>,
-        _host: &mut impl Host,
+        _host: &mut impl BaseHost,
     ) -> ControlFlow<BreakReason> {
         // do nothing - we don't execute decorators in this processor
         ControlFlow::Continue(())

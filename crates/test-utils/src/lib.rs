@@ -37,13 +37,11 @@ pub use miden_processor::{
     trace::ExecutionTrace,
 };
 use miden_processor::{
-    DefaultDebugHandler, DefaultHost, ExecutionOutput, FastProcessor, Program,
-    event::EventHandler,
-    trace::{build_trace, execution_tracer::TraceGenerationContext},
+    DefaultDebugHandler, DefaultHost, ExecutionOutput, FastProcessor, Program, TraceBuildInputs,
+    event::EventHandler, trace::build_trace,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use miden_prover::prove_sync;
-use miden_prover::utils::range;
 pub use miden_prover::{ProvingOptions, prove};
 pub use miden_verifier::verify;
 pub use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
@@ -284,8 +282,9 @@ impl Test {
         let execution_output = processor.execute_sync(&program, &mut host).unwrap();
 
         // validate the memory state
-        for (addr, mem_value) in
-            (range(mem_start_addr as usize, expected_mem.len())).zip(expected_mem.iter())
+        for (addr, mem_value) in ((mem_start_addr as usize)
+            ..(mem_start_addr as usize + expected_mem.len()))
+            .zip(expected_mem.iter())
         {
             let mem_state = execution_output
                 .memory
@@ -392,14 +391,14 @@ impl Test {
                     .with_core_trace_fragment_size(FRAGMENT_SIZE)
                     .unwrap(),
             );
-            fast_processor.execute_for_trace_sync(&program, &mut host)
+            fast_processor.execute_trace_inputs_sync(&program, &mut host)
         };
 
         // compare fast and slow processors' stack outputs
         self.assert_result_with_step_execution(&fast_stack_result);
 
-        fast_stack_result.and_then(|(execution_output, trace_generation_ctx)| {
-            let trace = build_trace(execution_output, trace_generation_ctx, program.to_info())?;
+        fast_stack_result.and_then(|trace_inputs| {
+            let trace = build_trace(trace_inputs)?;
 
             assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
             Ok(trace)
@@ -551,7 +550,7 @@ impl Test {
 
     fn assert_result_with_step_execution(
         &self,
-        fast_result: &Result<(ExecutionOutput, TraceGenerationContext), ExecutionError>,
+        fast_result: &Result<TraceBuildInputs, ExecutionError>,
     ) {
         fn compare_results(
             left_result: Result<StackOutputs, &ExecutionError>,
@@ -606,7 +605,7 @@ impl Test {
         };
 
         compare_results(
-            fast_result.as_ref().map(|(output, _)| output.stack),
+            fast_result.as_ref().map(|trace_inputs| trace_inputs.execution_output().stack),
             &fast_result_by_step,
             "fast processor",
             "fast processor by step",
@@ -702,33 +701,45 @@ pub fn get_column_name(col_idx: usize) -> String {
 
         // Decoder columns
         i if i == DECODER_TRACE_OFFSET + ADDR_COL_IDX => "decoder_addr".to_string(),
-        i if range(DECODER_TRACE_OFFSET + OP_BITS_OFFSET, NUM_OP_BITS).contains(&i) => {
+        i if (DECODER_TRACE_OFFSET + OP_BITS_OFFSET
+            ..DECODER_TRACE_OFFSET + OP_BITS_OFFSET + NUM_OP_BITS)
+            .contains(&i) =>
+        {
             format!("op_bits[{}]", i - (DECODER_TRACE_OFFSET + OP_BITS_OFFSET))
         },
-        i if range(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET, NUM_HASHER_COLUMNS).contains(&i) => {
+        i if (DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET
+            ..DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + NUM_HASHER_COLUMNS)
+            .contains(&i) =>
+        {
             format!("hasher_state[{}]", i - (DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET))
         },
         i if i == DECODER_TRACE_OFFSET + IN_SPAN_COL_IDX => "in_span".to_string(),
         i if i == DECODER_TRACE_OFFSET + GROUP_COUNT_COL_IDX => "group_count".to_string(),
         i if i == DECODER_TRACE_OFFSET + OP_INDEX_COL_IDX => "op_index".to_string(),
-        i if range(DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET, NUM_OP_BATCH_FLAGS)
+        i if (DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET
+            ..DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET + NUM_OP_BATCH_FLAGS)
             .contains(&i) =>
         {
             format!("op_batch_flag[{}]", i - (DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET))
         },
-        i if range(DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET, NUM_OP_BITS_EXTRA_COLS)
+        i if (DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET
+            ..DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + NUM_OP_BITS_EXTRA_COLS)
             .contains(&i) =>
         {
             format!("op_bits_extra[{}]", i - (DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET))
         },
-        i if range(DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET, NUM_OP_BITS_EXTRA_COLS)
+        i if (DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET
+            ..DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + NUM_OP_BITS_EXTRA_COLS)
             .contains(&i) =>
         {
             format!("op_bits_extra[{}]", i - (DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET))
         },
 
         // Stack columns
-        i if range(STACK_TRACE_OFFSET + STACK_TOP_OFFSET, MIN_STACK_DEPTH).contains(&i) => {
+        i if (STACK_TRACE_OFFSET + STACK_TOP_OFFSET
+            ..STACK_TRACE_OFFSET + STACK_TOP_OFFSET + MIN_STACK_DEPTH)
+            .contains(&i) =>
+        {
             format!("stack[{}]", i - (STACK_TRACE_OFFSET + STACK_TOP_OFFSET))
         },
         i if i == STACK_TRACE_OFFSET + B0_COL_IDX => "stack_b0".to_string(),

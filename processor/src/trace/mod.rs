@@ -13,7 +13,8 @@ use miden_air::{
 };
 
 use crate::{
-    AdviceProvider, Felt, MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
+    AdviceProvider, Felt, MIN_STACK_DEPTH, Program, ProgramInfo, StackInputs, StackOutputs, Word,
+    ZERO,
     fast::ExecutionOutput,
     field::{ExtensionField, QuadFelt},
     precompile::{PrecompileRequest, PrecompileTranscript},
@@ -25,7 +26,7 @@ use miden_air::trace::Challenges;
 use utils::{AuxColumnBuilder, TraceFragment};
 
 pub mod chiplets;
-pub mod execution_tracer;
+pub(crate) mod execution_tracer;
 
 mod decoder;
 mod parallel;
@@ -39,9 +40,105 @@ mod tests;
 // RE-EXPORTS
 // ================================================================================================
 
+pub use execution_tracer::TraceGenerationContext;
 pub use miden_air::trace::RowIndex;
 pub use parallel::{CORE_TRACE_WIDTH, build_trace, build_trace_with_max_len};
 pub use utils::{ChipletsLengths, TraceLenSummary};
+
+/// Inputs required to build an execution trace from pre-executed data.
+#[derive(Debug)]
+pub struct TraceBuildInputs {
+    execution_output: ExecutionOutput,
+    trace_generation_context: TraceGenerationContext,
+    program_info: ProgramInfo,
+    execution_binding: trace_state::ExecutedTraceBinding,
+}
+
+impl TraceBuildInputs {
+    pub(crate) fn from_execution(
+        program: &Program,
+        execution_output: ExecutionOutput,
+        trace_generation_context: TraceGenerationContext,
+    ) -> Self {
+        let program_info = program.to_info();
+        Self {
+            execution_binding: trace_state::ExecutedTraceBinding::new(
+                program_info.clone(),
+                execution_output.stack,
+                execution_output.final_pc_transcript.state(),
+                execution_output.advice.fingerprint(),
+            ),
+            execution_output,
+            trace_generation_context,
+            program_info,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn execution_binding(&self) -> &trace_state::ExecutedTraceBinding {
+        &self.execution_binding
+    }
+
+    pub fn execution_output(&self) -> &ExecutionOutput {
+        &self.execution_output
+    }
+
+    pub fn trace_generation_context(&self) -> &TraceGenerationContext {
+        &self.trace_generation_context
+    }
+
+    pub fn program_info(&self) -> &ProgramInfo {
+        &self.program_info
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    #[allow(dead_code)]
+    pub(crate) fn into_parts(self) -> (ExecutionOutput, TraceGenerationContext) {
+        (self.execution_output, self.trace_generation_context)
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    #[allow(dead_code)]
+    pub(crate) fn trace_generation_context_mut(&mut self) -> &mut TraceGenerationContext {
+        &mut self.trace_generation_context
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_program_info(
+        program: &Program,
+        execution_output: ExecutionOutput,
+        trace_generation_context: TraceGenerationContext,
+        program_info: ProgramInfo,
+    ) -> Self {
+        let execution_binding = trace_state::ExecutedTraceBinding::new(
+            program.to_info(),
+            execution_output.stack,
+            execution_output.final_pc_transcript.state(),
+            execution_output.advice.fingerprint(),
+        );
+        Self::with_execution_binding(
+            execution_output,
+            trace_generation_context,
+            program_info,
+            execution_binding,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_execution_binding(
+        execution_output: ExecutionOutput,
+        trace_generation_context: TraceGenerationContext,
+        program_info: ProgramInfo,
+        execution_binding: trace_state::ExecutedTraceBinding,
+    ) -> Self {
+        Self {
+            execution_output,
+            trace_generation_context,
+            program_info,
+            execution_binding,
+        }
+    }
+}
 
 // VM EXECUTION TRACE
 // ================================================================================================

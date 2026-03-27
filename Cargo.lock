@@ -1566,6 +1566,7 @@ version = "0.23.0"
 dependencies = [
  "bincode",
  "miden-air",
+ "miden-assembly",
  "miden-core",
  "miden-crypto",
  "miden-debug-types",
