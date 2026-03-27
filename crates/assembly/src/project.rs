@@ -30,18 +30,21 @@ use miden_mast_package::{
 };
 use miden_package_registry::{PackageId, PackageStore, Version as PackageVersion};
 use miden_project::{
-    DependencyVersionScheme, Linkage, Package as ProjectPackage, Profile, ProjectDependencyGraph,
+    Linkage, Package as ProjectPackage, Profile, ProjectDependencyGraph,
     ProjectDependencyGraphBuilder, ProjectDependencyNodeProvenance, ProjectSource,
     ProjectSourceOrigin, Target,
 };
 
-use crate::{Assembler, SourceManager, assembler::debuginfo::DebugInfoSections, ast::Module};
+use crate::{Assembler, assembler::debuginfo::DebugInfoSections, ast::Module};
 
 mod build_provenance;
 use build_provenance::PackageBuildProvenance;
 
 mod target_selector;
 pub use target_selector::ProjectTargetSelector;
+
+mod package_ext;
+use package_ext::ProjectPackageExt;
 
 pub struct ProjectSourceInputs {
     pub root: Box<Module>,
@@ -207,7 +210,7 @@ where
             return Ok(package);
         }
 
-        let profile = resolve_profile(project.as_ref(), profile_name)?;
+        let profile = project.resolve_profile(profile_name)?;
         let mut assembler = self
             .assembler
             .clone()
@@ -416,7 +419,7 @@ where
                 workspace_root,
                 ..
             }) => {
-                let project = load_project_package(
+                let project = ProjectPackage::load_package(
                     self.assembler.source_manager(),
                     package_id,
                     manifest_path,
@@ -701,7 +704,7 @@ where
         let dependency_hash =
             self.compute_dependency_closure_hash(package_id, profile_name, visiting)?;
         let build_settings =
-            PackageBuildSettings::from_profile(resolve_profile(project, profile_name)?);
+            PackageBuildSettings::from_profile(project.resolve_profile(profile_name)?);
 
         match origin {
             ProjectSourceOrigin::Git { repo, resolved_revision, .. } => {
@@ -714,8 +717,7 @@ where
             },
             ProjectSourceOrigin::Path | ProjectSourceOrigin::Root => {
                 Ok(PackageBuildProvenance::Path {
-                    source_hash: self.compute_path_source_hash(
-                        project,
+                    source_hash: project.compute_path_source_hash(
                         target,
                         manifest_path,
                         workspace_root,
@@ -799,7 +801,7 @@ where
                 library_path: Some(_),
                 ..
             }) => {
-                let project = load_project_package(
+                let project = ProjectPackage::load_package(
                     self.assembler.source_manager(),
                     package_id,
                     manifest_path,
@@ -831,68 +833,6 @@ where
         }
     }
 
-    fn compute_path_source_hash(
-        &self,
-        project: &ProjectPackage,
-        target: &Target,
-        manifest_path: &FsPath,
-        workspace_root: Option<&FsPath>,
-    ) -> Result<Word, Report> {
-        let source_paths = self.resolve_target_source_paths(project, target)?;
-        let project_root = manifest_path.parent().ok_or_else(|| {
-            Report::msg(format!("manifest '{}' has no parent directory", manifest_path.display()))
-        })?;
-
-        let mut inputs = Vec::<(String, PathBuf)>::new();
-
-        let root_label = source_paths
-            .root
-            .strip_prefix(project_root)
-            .unwrap_or(source_paths.root.as_path())
-            .display()
-            .to_string();
-        inputs.push((format!("root:{root_label}"), source_paths.root));
-        for support in source_paths.support {
-            let label = support
-                .strip_prefix(project_root)
-                .unwrap_or(support.as_path())
-                .display()
-                .to_string();
-            inputs.push((format!("support:{label}"), support));
-        }
-        inputs.sort_by(|a, b| a.0.cmp(&b.0));
-
-        let mut material = format!(
-            "target:{}\nkind:{}\nnamespace:{}\n",
-            target.name.inner(),
-            target.ty,
-            target.namespace.inner()
-        );
-        if workspace_root.is_some() {
-            material.push_str("manifest:effective\n");
-            material.push_str(&effective_manifest_hash_input(project)?);
-            material.push('\n');
-        } else {
-            let manifest_label = manifest_path
-                .strip_prefix(project_root)
-                .unwrap_or(manifest_path)
-                .display()
-                .to_string();
-            inputs.push((format!("manifest:{manifest_label}"), manifest_path.to_path_buf()));
-        }
-        for (label, path) in inputs {
-            let bytes = fs::read(&path).map_err(|error| {
-                Report::msg(format!("failed to read source input '{}': {error}", path.display()))
-            })?;
-            material.push_str(&label);
-            material.push('\n');
-            material.push_str(&String::from_utf8_lossy(&bytes));
-            material.push('\n');
-        }
-
-        Ok(hash_string_to_word(material.as_str()))
-    }
-
     fn normalize_provided_sources(
         &self,
         target: &Target,
@@ -919,7 +859,7 @@ where
         project: &ProjectPackage,
         target: &Target,
     ) -> Result<LoadedTargetSources, Report> {
-        let source_paths = self.resolve_target_source_paths(project, target)?;
+        let source_paths = project.resolve_target_source_paths(target)?;
         let root = self.parse_module_file(
             &source_paths.root,
             target_root_module_kind(target.ty),
@@ -941,114 +881,6 @@ where
             .collect::<Result<Vec<_>, Report>>()?;
 
         Ok(LoadedTargetSources { root, support })
-    }
-
-    fn resolve_target_source_paths(
-        &self,
-        project: &ProjectPackage,
-        target: &Target,
-    ) -> Result<TargetSourcePaths, Report> {
-        let manifest_path = project_manifest_path(project)?;
-        let project_root = manifest_path.parent().ok_or_else(|| {
-            Report::msg(format!("manifest '{}' has no parent directory", manifest_path.display()))
-        })?;
-        let target_path = target.path.as_ref().ok_or_else(|| {
-            Report::msg(format!(
-                "target '{}' does not define a source path; use assemble_with_sources instead",
-                target.name.inner()
-            ))
-        })?;
-        let root_path = project_root.join(target_path.path());
-        let root_path = root_path.canonicalize().map_err(|error| {
-            Report::msg(format!(
-                "failed to resolve target source '{}': {error}",
-                root_path.display()
-            ))
-        })?;
-        let root_dir = root_path.parent().map(FsPath::to_path_buf).ok_or_else(|| {
-            Report::msg(format!("target source '{}' has no parent directory", root_path.display()))
-        })?;
-        let mut excluded = self.excluded_target_roots(project, target, &root_path)?;
-        excluded.insert(root_path.clone());
-        let support = self.read_support_module_paths(
-            &root_dir,
-            target.namespace.inner().as_ref(),
-            &excluded,
-        )?;
-
-        Ok(TargetSourcePaths { root: root_path, root_dir, support })
-    }
-
-    fn excluded_target_roots(
-        &self,
-        project: &ProjectPackage,
-        target: &Target,
-        current_root: &FsPath,
-    ) -> Result<BTreeSet<PathBuf>, Report> {
-        let manifest_path = project_manifest_path(project)?;
-        let project_root = manifest_path.parent().ok_or_else(|| {
-            Report::msg(format!("manifest '{}' has no parent directory", manifest_path.display()))
-        })?;
-
-        let mut excluded = BTreeSet::new();
-        if !target.ty.is_executable()
-            && let Some(library_target) = project.library_target()
-            && let Some(path) = library_target.path.as_ref()
-        {
-            let path = project_root.join(path.path());
-            if let Ok(path) = path.canonicalize()
-                && path != current_root
-            {
-                excluded.insert(path);
-            }
-        }
-
-        for executable in project.executable_targets() {
-            let Some(path) = executable.path.as_ref() else {
-                continue;
-            };
-            let path = project_root.join(path.path());
-            if let Ok(path) = path.canonicalize()
-                && path != current_root
-            {
-                excluded.insert(path);
-            }
-        }
-
-        Ok(excluded)
-    }
-
-    #[allow(clippy::vec_box)]
-    fn read_support_module_paths(
-        &self,
-        root_dir: &FsPath,
-        namespace: &MasmPath,
-        excluded: &BTreeSet<PathBuf>,
-    ) -> Result<Vec<PathBuf>, Report> {
-        let mut paths = Vec::new();
-        collect_module_files(root_dir, &mut paths)?;
-        paths.sort();
-
-        let mut modules = Vec::new();
-        for path in paths {
-            let canonical = path.canonicalize().map_err(|error| {
-                Report::msg(format!("failed to resolve '{}': {error}", path.display()))
-            })?;
-            if excluded.contains(&canonical) {
-                continue;
-            }
-
-            let relative = canonical.strip_prefix(root_dir).map_err(|error| {
-                Report::msg(format!(
-                    "failed to derive module path for '{}': {error}",
-                    canonical.display()
-                ))
-            })?;
-            module_path_from_relative(namespace, relative)?;
-            modules.push(canonical);
-        }
-
-        Ok(modules)
     }
 
     fn parse_module_file(
@@ -1099,77 +931,8 @@ impl PackageBuildSettings {
     }
 }
 
-fn load_project_package(
-    source_manager: Arc<dyn SourceManager>,
-    expected_name: &PackageId,
-    manifest_path: &FsPath,
-) -> Result<Arc<ProjectPackage>, Report> {
-    miden_project::Project::load_project_reference(
-        expected_name.as_ref(),
-        manifest_path,
-        source_manager.as_ref(),
-    )
-    .map(|project| project.package())
-}
-
-fn project_manifest_path(project: &ProjectPackage) -> Result<&FsPath, Report> {
-    project.manifest_path().ok_or_else(|| {
-        Report::msg(format!("project '{}' is missing its manifest path", project.name().inner()))
-    })
-}
-
-fn effective_manifest_hash_input(project: &ProjectPackage) -> Result<String, Report> {
-    let mut manifest = project.to_toml()?;
-
-    let mut workspace_dependencies = project
-        .dependencies()
-        .iter()
-        .filter_map(|dependency| match dependency.scheme() {
-            DependencyVersionScheme::Workspace { member, version } => Some((
-                dependency.name().to_string(),
-                member.path().to_string(),
-                version.as_ref().map(ToString::to_string),
-                dependency.linkage(),
-            )),
-            DependencyVersionScheme::WorkspacePath { path, version } => Some((
-                dependency.name().to_string(),
-                path.path().to_string(),
-                version.as_ref().map(ToString::to_string),
-                dependency.linkage(),
-            )),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    workspace_dependencies.sort_by(|a, b| a.0.cmp(&b.0));
-
-    if !workspace_dependencies.is_empty() {
-        manifest.push_str("\n# resolved_workspace_dependencies\n");
-        for (name, member_path, version, linkage) in workspace_dependencies {
-            match version {
-                Some(version) => {
-                    manifest.push_str(&format!("{name}={member_path}@{version}:{linkage}\n"));
-                },
-                None => manifest.push_str(&format!("{name}={member_path}:{linkage}\n")),
-            }
-        }
-    }
-
-    Ok(manifest)
-}
-
-fn resolve_profile<'a>(project: &'a ProjectPackage, name: &str) -> Result<&'a Profile, Report> {
-    project
-        .profiles()
-        .iter()
-        .find(|profile| profile.name().as_ref() == name)
-        .ok_or_else(|| {
-            Report::msg(format!(
-                "project '{}' does not define a '{}' build profile",
-                project.name().inner(),
-                name
-            ))
-        })
-}
+// HELPER FUNCTIONS
+// ================================================================================================
 
 fn target_package_name(project: &ProjectPackage, target: &Target) -> PackageId {
     if target.ty.is_executable() {

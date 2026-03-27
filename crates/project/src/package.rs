@@ -191,6 +191,12 @@ impl Package {
         &self.profiles
     }
 
+    /// Returns a profile with the specified name, or None if such a profile does not exist in this
+    /// package.
+    pub fn get_profile(&self, name: &str) -> Option<&Profile> {
+        self.profiles().iter().find(|profile| profile.name().as_ref() == name)
+    }
+
     /// Get a reference to the library build target provided by this package
     pub fn library_target(&self) -> Option<&Span<Target>> {
         self.lib.as_ref()
