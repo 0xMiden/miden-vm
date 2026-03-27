@@ -437,11 +437,6 @@ impl AuxTraceBuilders {
 
 // PLONKY3 AUX TRACE BUILDER
 // ================================================================================================
-//
-// Implements the upstream `AuxBuilder` trait from `p3_miden_lifted_air` directly on
-// `AuxTraceBuilders`. Plonky3 uses row-major matrices while our existing aux trace building logic
-// uses column-major format. This impl adapts between the two by converting the main trace from
-// row-major to column-major, delegating to the existing logic, and converting the result back.
 
 impl<EF: ExtensionField<Felt>> AuxBuilder<Felt, EF> for AuxTraceBuilders {
     fn build_aux_trace(
@@ -467,15 +462,21 @@ impl<EF: ExtensionField<Felt>> AuxBuilder<Felt, EF> for AuxTraceBuilders {
         let aux_columns = self.build_aux_columns(&main_for_aux, challenges);
         assert!(!aux_columns.is_empty(), "aux columns should not be empty");
 
-        // Flatten column-major aux columns into a contiguous buffer, then transpose
-        // to the row-major layout expected by the lifted prover.
         let trace_len = main.height();
         let num_ef_cols = aux_columns.len();
-        let mut col_major_data = Vec::with_capacity(trace_len * num_ef_cols);
-        for col in aux_columns {
-            col_major_data.extend_from_slice(&col);
+        for col in &aux_columns {
+            debug_assert_eq!(col.len(), trace_len, "aux column length must match main height");
         }
-        let aux_trace = RowMajorMatrix::new(col_major_data, trace_len).transpose();
+
+        // Pack into row-major in one pass (avoids an extra `trace_len * num_ef_cols` buffer and a
+        // full transpose vs. concat-then-transpose).
+        let mut data = Vec::with_capacity(trace_len * num_ef_cols);
+        for r in 0..trace_len {
+            for col in &aux_columns {
+                data.push(col[r]);
+            }
+        }
+        let aux_trace = RowMajorMatrix::new(data, num_ef_cols);
 
         // Extract the last row from the row-major aux trace for Fiat-Shamir.
         let last_row = aux_trace
