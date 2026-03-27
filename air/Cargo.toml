@@ -20,7 +20,7 @@ doctest = false
 [features]
 default = ["std"]
 std = ["miden-core/std", "thiserror/std"]
-concurrent = ["std"]
+concurrent = ["std", "rayon"]
 testing = []
 
 [dependencies]
@@ -31,6 +31,7 @@ miden-crypto.workspace = true
 miden-utils-indexing.workspace = true
 
 # External dependencies
+rayon = { version = "1.10", default-features = false, optional = true }
 thiserror.workspace = true
 tracing.workspace = true
 

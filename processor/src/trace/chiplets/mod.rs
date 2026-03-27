@@ -1,11 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::{CHIPLETS_WIDTH, chiplets::hasher::HasherState};
-use miden_core::{
-    mast::OpBatch,
-    program::Kernel,
-    utils::RowMajorMatrix,
-};
+use miden_core::{mast::OpBatch, program::Kernel, utils::RowMajorMatrix};
 
 use crate::{
     Felt, ONE, Word, ZERO,

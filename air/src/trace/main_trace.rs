@@ -112,6 +112,10 @@ pub struct MainTrace {
 /// Number of columns in the core (row-major) part of [`TraceStorage::Parts`].
 const CORE_WIDTH: usize = RANGE_CHECK_TRACE_OFFSET;
 
+// TODO: Could be tailored more efficiently?
+#[cfg(feature = "concurrent")]
+const ROW_MAJOR_CHUNK_SIZE: usize = 512;
+
 impl MainTrace {
     /// Creates a `MainTrace` from a [`RowMajorMatrix`].
     pub fn new(matrix: RowMajorMatrix<Felt>, last_program_row: RowIndex) -> Self {
@@ -189,10 +193,7 @@ impl MainTrace {
         }
     }
 
-    /// Converts this trace into a row-major matrix.
-    ///
-    /// For the `Parts` variant the core and chiplets data are already row-major. Only the
-    /// range checker (2 columns) needs per-row scatter. No bulk transposes.
+    /// Row-major matrix of this trace.
     pub fn to_row_major(&self) -> RowMajorMatrix<Felt> {
         match &self.storage {
             TraceStorage::RowMajor(matrix) => matrix.clone(),
@@ -214,29 +215,44 @@ impl MainTrace {
                 unsafe {
                     data.set_len(total);
                 }
-                for row in 0..h {
-                    let dst = &mut data[row * w..(row + 1) * w];
-                    // core (49 cols)
-                    dst[..CORE_WIDTH]
-                        .copy_from_slice(&core_rm[row * CORE_WIDTH..(row + 1) * CORE_WIDTH]);
-                    // range checker (2 cols)
-                    dst[CORE_WIDTH] = range_checker_cols[0][row];
-                    dst[CORE_WIDTH + 1] = range_checker_cols[1][row];
-                    // chiplets (20 cols, already row-major)
-                    dst[CORE_WIDTH + 2..CORE_WIDTH + 2 + cw]
-                        .copy_from_slice(&chiplets_rm[row * cw..(row + 1) * cw]);
-                    // padding (1 col)
-                    for p in 0..num_pad {
-                        dst[CORE_WIDTH + 2 + cw + p] = ZERO;
+
+                let fill_rows = |chunk: &mut [Felt], start_row: usize| {
+                    let chunk_rows = chunk.len() / w;
+                    for i in 0..chunk_rows {
+                        let row = start_row + i;
+                        let dst = &mut chunk[i * w..(i + 1) * w];
+                        dst[..CORE_WIDTH]
+                            .copy_from_slice(&core_rm[row * CORE_WIDTH..(row + 1) * CORE_WIDTH]);
+                        dst[CORE_WIDTH] = range_checker_cols[0][row];
+                        dst[CORE_WIDTH + 1] = range_checker_cols[1][row];
+                        dst[CORE_WIDTH + 2..CORE_WIDTH + 2 + cw]
+                            .copy_from_slice(&chiplets_rm[row * cw..(row + 1) * cw]);
+                        for p in 0..num_pad {
+                            dst[CORE_WIDTH + 2 + cw + p] = ZERO;
+                        }
                     }
+                };
+
+                #[cfg(not(feature = "concurrent"))]
+                fill_rows(&mut data, 0);
+
+                #[cfg(feature = "concurrent")]
+                {
+                    use rayon::prelude::*;
+                    let rows_per_chunk = ROW_MAJOR_CHUNK_SIZE;
+                    data.par_chunks_mut(rows_per_chunk * w).enumerate().for_each(
+                        |(chunk_idx, chunk)| {
+                            fill_rows(chunk, chunk_idx * rows_per_chunk);
+                        },
+                    );
                 }
+
                 RowMajorMatrix::new(data, w)
             },
         }
     }
 
-    /// Like [`to_row_major`](Self::to_row_major), but only includes the first `target_width`
-    /// columns (used to strip padding columns without an intermediate full-width copy).
+    /// Like [`to_row_major`](Self::to_row_major) but only the first `target_width` columns.
     pub fn to_row_major_stripped(&self, target_width: usize) -> RowMajorMatrix<Felt> {
         match &self.storage {
             TraceStorage::RowMajor(matrix) => {
@@ -253,11 +269,31 @@ impl MainTrace {
                 unsafe {
                     data.set_len(total);
                 }
+
+                #[cfg(not(feature = "concurrent"))]
                 for row in 0..h {
                     let src = matrix.row_slice(row).expect("row index in bounds");
                     data[row * target_width..(row + 1) * target_width]
                         .copy_from_slice(&src[..target_width]);
                 }
+
+                #[cfg(feature = "concurrent")]
+                {
+                    use rayon::prelude::*;
+                    let rows_per_chunk = ROW_MAJOR_CHUNK_SIZE;
+                    data.par_chunks_mut(rows_per_chunk * target_width).enumerate().for_each(
+                        |(chunk_idx, chunk)| {
+                            let chunk_rows = chunk.len() / target_width;
+                            for i in 0..chunk_rows {
+                                let row = chunk_idx * rows_per_chunk + i;
+                                let src = matrix.row_slice(row).expect("row index in bounds");
+                                chunk[i * target_width..(i + 1) * target_width]
+                                    .copy_from_slice(&src[..target_width]);
+                            }
+                        },
+                    );
+                }
+
                 RowMajorMatrix::new(data, target_width)
             },
             TraceStorage::Parts {
@@ -278,30 +314,46 @@ impl MainTrace {
                 unsafe {
                     data.set_len(total);
                 }
-                for row in 0..h {
-                    let dst = &mut data[row * target_width..(row + 1) * target_width];
-                    dst[..CORE_WIDTH]
-                        .copy_from_slice(&core_rm[row * CORE_WIDTH..(row + 1) * CORE_WIDTH]);
-                    // Fill non-core columns up to nc_needed
-                    let nc_dst = &mut dst[CORE_WIDTH..];
-                    let mut nc_pos = 0;
-                    // range checker (2 cols)
-                    for rc_idx in 0..2.min(nc_needed) {
-                        nc_dst[nc_pos] = range_checker_cols[rc_idx][row];
-                        nc_pos += 1;
+
+                let fill_rows = |chunk: &mut [Felt], start_row: usize| {
+                    let chunk_rows = chunk.len() / target_width;
+                    for i in 0..chunk_rows {
+                        let row = start_row + i;
+                        let dst = &mut chunk[i * target_width..(i + 1) * target_width];
+                        dst[..CORE_WIDTH]
+                            .copy_from_slice(&core_rm[row * CORE_WIDTH..(row + 1) * CORE_WIDTH]);
+                        let nc_dst = &mut dst[CORE_WIDTH..];
+                        let mut nc_pos = 0;
+                        for col in &range_checker_cols[..2.min(nc_needed)] {
+                            nc_dst[nc_pos] = col[row];
+                            nc_pos += 1;
+                        }
+                        if nc_pos < nc_needed {
+                            let chip_cols = (nc_needed - nc_pos).min(cw);
+                            nc_dst[nc_pos..nc_pos + chip_cols]
+                                .copy_from_slice(&chiplets_rm[row * cw..row * cw + chip_cols]);
+                            nc_pos += chip_cols;
+                        }
+                        for dst in &mut dst[nc_pos..nc_needed] {
+                            *dst = ZERO;
+                        }
                     }
-                    // chiplets (up to CHIPLETS_WIDTH cols)
-                    if nc_pos < nc_needed {
-                        let chip_cols = (nc_needed - nc_pos).min(cw);
-                        nc_dst[nc_pos..nc_pos + chip_cols]
-                            .copy_from_slice(&chiplets_rm[row * cw..row * cw + chip_cols]);
-                        nc_pos += chip_cols;
-                    }
-                    // padding (zeros)
-                    for p in nc_pos..nc_needed {
-                        nc_dst[p] = ZERO;
-                    }
+                };
+
+                #[cfg(not(feature = "concurrent"))]
+                fill_rows(&mut data, 0);
+
+                #[cfg(feature = "concurrent")]
+                {
+                    use rayon::prelude::*;
+                    let rows_per_chunk = ROW_MAJOR_CHUNK_SIZE;
+                    data.par_chunks_mut(rows_per_chunk * target_width).enumerate().for_each(
+                        |(chunk_idx, chunk)| {
+                            fill_rows(chunk, chunk_idx * rows_per_chunk);
+                        },
+                    );
                 }
+
                 RowMajorMatrix::new(data, target_width)
             },
         }
