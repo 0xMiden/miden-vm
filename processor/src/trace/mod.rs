@@ -2,12 +2,10 @@ use alloc::vec::Vec;
 #[cfg(any(test, feature = "testing"))]
 use core::ops::Range;
 
-#[cfg(feature = "std")]
-use miden_air::trace::PADDED_TRACE_WIDTH;
 use miden_air::{
     AirWitness, AuxBuilder, ProcessorAir, PublicInputs, debug,
     trace::{
-        DECODER_TRACE_OFFSET, MainTrace, STACK_TRACE_OFFSET, TRACE_WIDTH,
+        DECODER_TRACE_OFFSET, MainTrace, PADDED_TRACE_WIDTH, STACK_TRACE_OFFSET, TRACE_WIDTH,
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     },
 };
@@ -336,7 +334,7 @@ impl ExecutionTrace {
         debug::check_constraints(&ProcessorAir, witness, &aux_builder, &challenges);
     }
 
-    /// Converts the main trace from column-major to row-major format.
+    /// Returns the main trace as a row-major matrix for proving.
     ///
     /// Only includes the first [`TRACE_WIDTH`] columns (excluding padding columns added for
     /// Poseidon2 rate alignment), which is the width expected by the AIR.
@@ -344,12 +342,20 @@ impl ExecutionTrace {
     // alignment, which pads to the required rate width without materializing extra columns.
     pub fn to_row_major_matrix(&self) -> RowMajorMatrix<Felt> {
         let trace_len = self.get_trace_len();
-        let mut col_major_data = Vec::with_capacity(TRACE_WIDTH * trace_len);
-        for col_idx in 0..TRACE_WIDTH {
-            col_major_data.extend_from_slice(self.main_trace.get_column(col_idx));
+        let stored_w = self.main_trace.width();
+        if stored_w == TRACE_WIDTH {
+            return self.main_trace.to_row_major();
         }
-        let col_major_matrix = RowMajorMatrix::new(col_major_data, trace_len);
-        col_major_matrix.transpose()
+
+        // Width includes padding columns — strip them by narrowing each row.
+        assert_eq!(stored_w, PADDED_TRACE_WIDTH);
+        let mut narrow = vec![ZERO; trace_len * TRACE_WIDTH];
+        let mut row_buf = vec![ZERO; PADDED_TRACE_WIDTH];
+        for r in 0..trace_len {
+            self.main_trace.read_row_into(r, &mut row_buf);
+            narrow[r * TRACE_WIDTH..(r + 1) * TRACE_WIDTH].copy_from_slice(&row_buf[..TRACE_WIDTH]);
+        }
+        RowMajorMatrix::new(narrow, TRACE_WIDTH)
     }
 
     // HELPER METHODS
@@ -445,25 +451,20 @@ impl<EF: ExtensionField<Felt>> AuxBuilder<Felt, EF> for AuxTraceBuilders {
     ) -> (RowMajorMatrix<EF>, Vec<EF>) {
         let _span = tracing::info_span!("build_aux_trace").entered();
 
-        // Transpose the row-major main trace into column-major `MainTrace` needed by the
-        // auxiliary trace builders. The last program row is the point where the clock
-        // (column 0) stops incrementing.
-        let main_trace_col_major = {
+        // Wrap the row-major main trace for auxiliary builders. The last program row is where the
+        // clock (column 0) stops incrementing.
+        let main_for_aux = {
             let num_rows = main.height();
-            // Detect last program row from row-major layout using column 0 (clock).
             let last_program_row = (1..num_rows)
                 .find(|&i| {
                     main.get(i, 0).expect("valid indices")
                         != main.get(i - 1, 0).expect("valid indices") + Felt::ONE
                 })
                 .map_or(num_rows - 1, |i| i - 1);
-            let transposed = main.transpose();
-            let columns: Vec<Vec<Felt>> = transposed.row_slices().map(|row| row.to_vec()).collect();
-            MainTrace::new(ColMatrix::new(columns), last_program_row.into())
+            MainTrace::new(main.clone(), RowIndex::from(last_program_row))
         };
 
-        // Build auxiliary columns in column-major format.
-        let aux_columns = self.build_aux_columns(&main_trace_col_major, challenges);
+        let aux_columns = self.build_aux_columns(&main_for_aux, challenges);
         assert!(!aux_columns.is_empty(), "aux columns should not be empty");
 
         // Flatten column-major aux columns into a contiguous buffer, then transpose
