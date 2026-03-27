@@ -1,8 +1,12 @@
 use alloc::{sync::Arc, vec::Vec};
 
-use miden_assembly_syntax::library::ModuleInfo;
+use miden_assembly_syntax::{Library, library::ModuleInfo};
 use miden_core::mast::MastForest;
+use miden_mast_package::Package;
 use miden_project::Linkage;
+
+/// Prefer to use [`miden_project::Linkage`], as this will be removed in a future release
+pub use miden_project::Linkage as LinkLibraryKind;
 
 /// Represents an assembled module or modules to use when resolving references while linking,
 /// as well as the method by which referenced symbols will be linked into the assembled MAST.
@@ -18,7 +22,7 @@ pub struct LinkLibrary {
 
 impl LinkLibrary {
     /// Construct a [LinkLibrary] from a [miden_mast_package::Package]
-    pub fn from_package(package: Arc<miden_mast_package::Package>) -> Self {
+    pub fn from_package(package: Arc<Package>) -> Self {
         let mast = package.mast.mast_forest().clone();
         let module_infos = package
             .mast
@@ -35,7 +39,7 @@ impl LinkLibrary {
         }
     }
 
-    pub(crate) fn from_library(library: &miden_assembly_syntax::Library) -> Self {
+    pub(crate) fn from_library(library: &Library) -> Self {
         let mast = library.mast_forest().clone();
         let module_infos = library.module_infos().collect();
         Self {
@@ -51,5 +55,3 @@ impl LinkLibrary {
         self
     }
 }
-
-pub use miden_project::Linkage as LinkLibraryKind;
