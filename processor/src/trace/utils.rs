@@ -23,6 +23,7 @@ pub struct RowMajorTraceWriter<'a, E> {
     width: usize,
 }
 
+#[allow(dead_code)]
 impl<'a, E: Copy> RowMajorTraceWriter<'a, E> {
     pub fn new(data: &'a mut [E], width: usize) -> Self {
         debug_assert_eq!(data.len() % width, 0, "buffer length must be a multiple of width");

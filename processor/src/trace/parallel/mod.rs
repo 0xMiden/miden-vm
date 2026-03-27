@@ -298,18 +298,23 @@ fn generate_core_trace_row_major(
         &first_stack_top,
     );
 
-    // Run batch inversion on stack's H0 helper column. Extract strided values, invert in chunks,
-    // then scatter back. This must be done after fixup_stack_and_system_rows since that function
-    // overwrites the first row of each fragment with non-inverted values.
+    // Run batch inversion on stack's H0 helper column, processing each fragment in parallel.
+    // This must be done after fixup_stack_and_system_rows since that function overwrites the first
+    // row of each fragment with non-inverted values.
     {
         let h0_col_offset = STACK_TRACE_OFFSET + H0_COL_IDX;
-        let mut h0_values: Vec<Felt> = (0..total_core_trace_rows)
-            .map(|row| core_trace_data[row * CORE_TRACE_WIDTH + h0_col_offset])
-            .collect();
-        h0_values.par_chunks_mut(fragment_size).for_each(batch_inversion_allow_zeros);
-        for (row, &val) in h0_values.iter().enumerate() {
-            core_trace_data[row * CORE_TRACE_WIDTH + h0_col_offset] = val;
-        }
+        let w = CORE_TRACE_WIDTH;
+        core_trace_data[..total_core_trace_rows * w]
+            .par_chunks_mut(fragment_size * w)
+            .for_each(|fragment_chunk| {
+                let num_rows = fragment_chunk.len() / w;
+                let mut h0_vals: Vec<Felt> =
+                    (0..num_rows).map(|r| fragment_chunk[r * w + h0_col_offset]).collect();
+                batch_inversion_allow_zeros(&mut h0_vals);
+                for (r, &val) in h0_vals.iter().enumerate() {
+                    fragment_chunk[r * w + h0_col_offset] = val;
+                }
+            });
     }
 
     // Truncate the core trace columns to the actual number of rows written.

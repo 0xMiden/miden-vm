@@ -149,7 +149,7 @@ impl MainTrace {
     /// # Panics
     /// Panics if the row or column is out of bounds.
     #[inline]
-    fn get(&self, row: RowIndex, col: usize) -> Felt {
+    pub fn get(&self, row: RowIndex, col: usize) -> Felt {
         let r = row.as_usize();
         match &self.storage {
             TraceStorage::Parts { core_rm, non_core_cols, .. } => {
@@ -199,17 +199,82 @@ impl MainTrace {
                 }
                 let nc_as_rows = RowMajorMatrix::new(nc_flat, h);
                 let nc_rm = nc_as_rows.transpose();
+                let nc_vals = &nc_rm.values;
 
                 // Horizontal concat: core (row-major, 49 cols) + non-core (row-major, 23 cols).
-                let mut data = vec![ZERO; h * w];
+                // Build directly without zero-init: every element is written exactly once.
+                let total = h * w;
+                let mut data = Vec::with_capacity(total);
+                // SAFETY: the loop below writes exactly `h * w` elements.
+                #[allow(clippy::uninit_vec)]
+                unsafe {
+                    data.set_len(total);
+                }
                 for row in 0..h {
                     let dst = &mut data[row * w..(row + 1) * w];
                     dst[..CORE_WIDTH]
                         .copy_from_slice(&core_rm[row * CORE_WIDTH..(row + 1) * CORE_WIDTH]);
-                    dst[CORE_WIDTH..]
-                        .copy_from_slice(&nc_rm.values[row * num_nc..(row + 1) * num_nc]);
+                    dst[CORE_WIDTH..].copy_from_slice(&nc_vals[row * num_nc..(row + 1) * num_nc]);
                 }
                 RowMajorMatrix::new(data, w)
+            },
+        }
+    }
+
+    /// Like [`to_row_major`](Self::to_row_major), but only includes the first `target_width`
+    /// columns (used to strip padding columns without an intermediate full-width copy).
+    pub fn to_row_major_stripped(&self, target_width: usize) -> RowMajorMatrix<Felt> {
+        match &self.storage {
+            TraceStorage::RowMajor(matrix) => {
+                let h = matrix.height();
+                let w = matrix.width();
+                debug_assert!(target_width <= w);
+                if target_width == w {
+                    return matrix.clone();
+                }
+                let total = h * target_width;
+                let mut data = Vec::with_capacity(total);
+                // SAFETY: the loop below writes exactly `h * target_width` elements.
+                #[allow(clippy::uninit_vec)]
+                unsafe {
+                    data.set_len(total);
+                }
+                for row in 0..h {
+                    let src = matrix.row_slice(row).expect("row index in bounds");
+                    data[row * target_width..(row + 1) * target_width]
+                        .copy_from_slice(&src[..target_width]);
+                }
+                RowMajorMatrix::new(data, target_width)
+            },
+            TraceStorage::Parts { core_rm, non_core_cols, num_rows } => {
+                let h = *num_rows;
+                debug_assert!(target_width >= CORE_WIDTH);
+                let num_nc = target_width - CORE_WIDTH;
+                debug_assert!(num_nc <= non_core_cols.len());
+
+                // Transpose only the non-core columns we need.
+                let mut nc_flat = Vec::with_capacity(num_nc * h);
+                for col in &non_core_cols[..num_nc] {
+                    nc_flat.extend_from_slice(col);
+                }
+                let nc_as_rows = RowMajorMatrix::new(nc_flat, h);
+                let nc_rm = nc_as_rows.transpose();
+                let nc_vals = &nc_rm.values;
+
+                let total = h * target_width;
+                let mut data = Vec::with_capacity(total);
+                // SAFETY: the loop below writes exactly `h * target_width` elements.
+                #[allow(clippy::uninit_vec)]
+                unsafe {
+                    data.set_len(total);
+                }
+                for row in 0..h {
+                    let dst = &mut data[row * target_width..(row + 1) * target_width];
+                    dst[..CORE_WIDTH]
+                        .copy_from_slice(&core_rm[row * CORE_WIDTH..(row + 1) * CORE_WIDTH]);
+                    dst[CORE_WIDTH..].copy_from_slice(&nc_vals[row * num_nc..(row + 1) * num_nc]);
+                }
+                RowMajorMatrix::new(data, target_width)
             },
         }
     }

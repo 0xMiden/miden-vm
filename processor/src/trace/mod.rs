@@ -5,7 +5,7 @@ use core::ops::Range;
 use miden_air::{
     AirWitness, AuxBuilder, ProcessorAir, PublicInputs, debug,
     trace::{
-        DECODER_TRACE_OFFSET, MainTrace, PADDED_TRACE_WIDTH, STACK_TRACE_OFFSET, TRACE_WIDTH,
+        DECODER_TRACE_OFFSET, MainTrace, PADDED_TRACE_WIDTH, TRACE_WIDTH,
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     },
 };
@@ -251,18 +251,19 @@ impl ExecutionTrace {
     /// Returns the initial state of the top 16 stack registers.
     pub fn init_stack_state(&self) -> StackInputs {
         let mut result = [ZERO; MIN_STACK_DEPTH];
+        let row = RowIndex::from(0_u32);
         for (i, result) in result.iter_mut().enumerate() {
-            *result = self.main_trace.get_column(i + STACK_TRACE_OFFSET)[0];
+            *result = self.main_trace.stack_element(i, row);
         }
         result.into()
     }
 
     /// Returns the final state of the top 16 stack registers.
     pub fn last_stack_state(&self) -> StackOutputs {
-        let last_step = self.last_step();
+        let last_step = RowIndex::from(self.last_step());
         let mut result = [ZERO; MIN_STACK_DEPTH];
         for (i, result) in result.iter_mut().enumerate() {
-            *result = self.main_trace.get_column(i + STACK_TRACE_OFFSET)[last_step];
+            *result = self.main_trace.stack_element(i, last_step);
         }
         result.into()
     }
@@ -270,9 +271,9 @@ impl ExecutionTrace {
     /// Returns helper registers state at the specified `clk` of the VM
     pub fn get_user_op_helpers_at(&self, clk: u32) -> [Felt; NUM_USER_OP_HELPERS] {
         let mut result = [ZERO; NUM_USER_OP_HELPERS];
+        let row = RowIndex::from(clk);
         for (i, result) in result.iter_mut().enumerate() {
-            *result = self.main_trace.get_column(DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + i)
-                [clk as usize];
+            *result = self.main_trace.get(row, DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + i);
         }
         result
     }
@@ -341,21 +342,13 @@ impl ExecutionTrace {
     // TODO: the padding columns can be removed once we use the lifted-stark's virtual trace
     // alignment, which pads to the required rate width without materializing extra columns.
     pub fn to_row_major_matrix(&self) -> RowMajorMatrix<Felt> {
-        let trace_len = self.get_trace_len();
         let stored_w = self.main_trace.width();
         if stored_w == TRACE_WIDTH {
             return self.main_trace.to_row_major();
         }
 
-        // Width includes padding columns — strip them by narrowing each row.
         assert_eq!(stored_w, PADDED_TRACE_WIDTH);
-        let mut narrow = vec![ZERO; trace_len * TRACE_WIDTH];
-        let mut row_buf = vec![ZERO; PADDED_TRACE_WIDTH];
-        for r in 0..trace_len {
-            self.main_trace.read_row_into(r, &mut row_buf);
-            narrow[r * TRACE_WIDTH..(r + 1) * TRACE_WIDTH].copy_from_slice(&row_buf[..TRACE_WIDTH]);
-        }
-        RowMajorMatrix::new(narrow, TRACE_WIDTH)
+        self.main_trace.to_row_major_stripped(TRACE_WIDTH)
     }
 
     // HELPER METHODS
@@ -468,15 +461,11 @@ impl<EF: ExtensionField<Felt>> AuxBuilder<Felt, EF> for AuxTraceBuilders {
             debug_assert_eq!(col.len(), trace_len, "aux column length must match main height");
         }
 
-        // Pack into row-major in one pass (avoids an extra `trace_len * num_ef_cols` buffer and a
-        // full transpose vs. concat-then-transpose).
-        let mut data = Vec::with_capacity(trace_len * num_ef_cols);
-        for r in 0..trace_len {
-            for col in &aux_columns {
-                data.push(col[r]);
-            }
+        let mut flat = Vec::with_capacity(trace_len * num_ef_cols);
+        for col in &aux_columns {
+            flat.extend_from_slice(col);
         }
-        let aux_trace = RowMajorMatrix::new(data, num_ef_cols);
+        let aux_trace = RowMajorMatrix::new(flat, trace_len).transpose();
 
         // Extract the last row from the row-major aux trace for Fiat-Shamir.
         let last_row = aux_trace
