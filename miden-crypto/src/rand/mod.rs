@@ -1,6 +1,5 @@
 //! Pseudo-random element generation.
 
-use miden_field::word::WORD_SIZE_BYTES;
 use rand::RngCore;
 
 use crate::{Felt, Word};
@@ -102,7 +101,7 @@ impl Randomizable for Felt {
 }
 
 impl Randomizable for Word {
-    const VALUE_SIZE: usize = WORD_SIZE_BYTES;
+    const VALUE_SIZE: usize = Word::SERIALIZED_SIZE;
 
     fn from_random_bytes(bytes: &[u8]) -> Option<Self> {
         let bytes_array: Option<[u8; 32]> = bytes.try_into().ok();

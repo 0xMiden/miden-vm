@@ -276,11 +276,11 @@ mod tests {
 
     use super::*;
     use crate::{
-        Felt, WORD_SIZE,
+        Felt,
         merkle::{int_to_leaf, int_to_node},
     };
 
-    const LEAVES4: [Word; WORD_SIZE] =
+    const LEAVES4: [Word; Word::NUM_ELEMENTS] =
         [int_to_node(1), int_to_node(2), int_to_node(3), int_to_node(4)];
 
     const LEAVES8: [Word; 8] = [

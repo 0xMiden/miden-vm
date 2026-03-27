@@ -1,5 +1,5 @@
 use miden_crypto::{
-    EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO,
+    EMPTY_WORD, Felt, ONE, Word, ZERO,
     merkle::{
         InnerNodeInfo,
         smt::{LargeSmt, LargeSmtError, RocksDbConfig, RocksDbStorage},
@@ -36,7 +36,7 @@ fn rocksdb_sanity_insert_and_get() {
     let mut smt = LargeSmt::<RocksDbStorage>::new(storage).unwrap();
 
     let key = Word::new([ONE, ONE, ONE, ONE]);
-    let val = Word::new([ONE; WORD_SIZE]);
+    let val = Word::new([ONE; Word::NUM_ELEMENTS]);
 
     let prev = smt.insert(key, val).unwrap();
     assert_eq!(prev, EMPTY_WORD);

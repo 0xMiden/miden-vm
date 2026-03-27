@@ -14,7 +14,7 @@ use super::{
     Poseidon2, Word,
 };
 use crate::{
-    Felt, ONE, WORD_SIZE, ZERO,
+    Felt, ONE, ZERO,
     merkle::{
         MerkleTree, int_to_leaf, int_to_node,
         smt::{LeafIndex, SMT_MAX_DEPTH, SimpleSmt},
@@ -687,7 +687,7 @@ fn node_path_should_be_truncated_by_midtier_insert() {
 
     // insert first node - works as expected
     let depth = 64;
-    let node = Word::from([Felt::new(key); WORD_SIZE]);
+    let node = Word::from([Felt::new(key); Word::NUM_ELEMENTS]);
     let index = NodeIndex::new(depth, key).unwrap();
     let root = store.set_node(root, index, node).unwrap().root;
     let result = store.get_node(root, index).unwrap();
@@ -701,7 +701,7 @@ fn node_path_should_be_truncated_by_midtier_insert() {
     let key = key ^ (1 << 63);
     let key = key >> 8;
     let depth = 56;
-    let node = Word::from([Felt::new(key); WORD_SIZE]);
+    let node = Word::from([Felt::new(key); Word::NUM_ELEMENTS]);
     let index = NodeIndex::new(depth, key).unwrap();
     let root = store.set_node(root, index, node).unwrap().root;
     let result = store.get_node(root, index).unwrap();
@@ -730,7 +730,7 @@ fn get_leaf_depth_works_depth_64() {
     // this will create a rainbow tree and test all opening to depth 64
     for d in 0..64 {
         let k = key & (u64::MAX >> d);
-        let node = Word::from([Felt::new(k); WORD_SIZE]);
+        let node = Word::from([Felt::new(k); Word::NUM_ELEMENTS]);
         let index = NodeIndex::new(64, k).unwrap();
 
         // assert the leaf doesn't exist before the insert. the returned depth should always
@@ -754,7 +754,7 @@ fn get_leaf_depth_works_with_incremental_depth() {
     assert_eq!(0, store.get_leaf_depth(root, 64, key).unwrap());
     let depth = 64;
     let index = NodeIndex::new(depth, key).unwrap();
-    let node = Word::from([Felt::new(key); WORD_SIZE]);
+    let node = Word::from([Felt::new(key); Word::NUM_ELEMENTS]);
     root = store.set_node(root, index, node).unwrap().root;
     assert_eq!(depth, store.get_leaf_depth(root, 64, key).unwrap());
 
@@ -763,7 +763,7 @@ fn get_leaf_depth_works_with_incremental_depth() {
     assert_eq!(1, store.get_leaf_depth(root, 64, key).unwrap());
     let depth = 16;
     let index = NodeIndex::new(depth, key >> (64 - depth)).unwrap();
-    let node = Word::from([Felt::new(key); WORD_SIZE]);
+    let node = Word::from([Felt::new(key); Word::NUM_ELEMENTS]);
     root = store.set_node(root, index, node).unwrap().root;
     assert_eq!(depth, store.get_leaf_depth(root, 64, key).unwrap());
 
@@ -771,7 +771,7 @@ fn get_leaf_depth_works_with_incremental_depth() {
     let key = 0b11001011_10110111_00000000_00000000_00000000_00000000_00000000_00000000_u64;
     assert_eq!(16, store.get_leaf_depth(root, 64, key).unwrap());
     let index = NodeIndex::new(depth, key >> (64 - depth)).unwrap();
-    let node = Word::from([Felt::new(key); WORD_SIZE]);
+    let node = Word::from([Felt::new(key); Word::NUM_ELEMENTS]);
     root = store.set_node(root, index, node).unwrap().root;
     assert_eq!(depth, store.get_leaf_depth(root, 64, key).unwrap());
 
@@ -780,7 +780,7 @@ fn get_leaf_depth_works_with_incremental_depth() {
     assert_eq!(15, store.get_leaf_depth(root, 64, key).unwrap());
     let depth = 17;
     let index = NodeIndex::new(depth, key >> (64 - depth)).unwrap();
-    let node = Word::from([Felt::new(key); WORD_SIZE]);
+    let node = Word::from([Felt::new(key); Word::NUM_ELEMENTS]);
     root = store.set_node(root, index, node).unwrap().root;
     assert_eq!(depth, store.get_leaf_depth(root, 64, key).unwrap());
 }
@@ -798,7 +798,7 @@ fn get_leaf_depth_works_with_depth_8() {
 
     for k in [a, b, c, d] {
         let index = NodeIndex::new(8, k).unwrap();
-        let node = Word::from([Felt::new(k); WORD_SIZE]);
+        let node = Word::from([Felt::new(k); Word::NUM_ELEMENTS]);
         root = store.set_node(root, index, node).unwrap().root;
     }
 

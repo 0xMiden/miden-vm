@@ -4,7 +4,7 @@ use assert_matches::assert_matches;
 
 use super::{EMPTY_WORD, LeafIndex, NodeIndex, SMT_DEPTH, Smt, SmtLeaf};
 use crate::{
-    Felt, ONE, WORD_SIZE, Word,
+    Felt, ONE, Word,
     hash::poseidon2::Poseidon2,
     merkle::{
         EmptySubtreeRoots,
@@ -36,8 +36,8 @@ fn test_smt_insert_at_same_key() {
     };
     let key_1_index: NodeIndex = LeafIndex::<SMT_DEPTH>::from(key_1).into();
 
-    let value_1 = Word::new([ONE; WORD_SIZE]);
-    let value_2 = Word::new([ONE + ONE; WORD_SIZE]);
+    let value_1 = Word::new([ONE; Word::NUM_ELEMENTS]);
+    let value_2 = Word::new([ONE + ONE; Word::NUM_ELEMENTS]);
 
     // Insert value 1 and ensure root is as expected
     {
@@ -72,7 +72,7 @@ fn test_smt_insert_at_same_key_2() {
     let key_already_present = Word::from([2_u64, 2_u64, 2_u64, key_msb].map(Felt::new));
     let key_already_present_index: NodeIndex =
         LeafIndex::<SMT_DEPTH>::from(key_already_present).into();
-    let value_already_present = Word::new([ONE + ONE + ONE; WORD_SIZE]);
+    let value_already_present = Word::new([ONE + ONE + ONE; Word::NUM_ELEMENTS]);
 
     let mut smt =
         Smt::with_entries(core::iter::once((key_already_present, value_already_present))).unwrap();
@@ -91,8 +91,8 @@ fn test_smt_insert_at_same_key_2() {
 
     assert_eq!(key_1_index, key_already_present_index);
 
-    let value_1 = Word::new([ONE; WORD_SIZE]);
-    let value_2 = Word::new([ONE + ONE; WORD_SIZE]);
+    let value_1 = Word::new([ONE; Word::NUM_ELEMENTS]);
+    let value_2 = Word::new([ONE + ONE; Word::NUM_ELEMENTS]);
 
     // Insert value 1 and ensure root is as expected
     {
@@ -170,9 +170,9 @@ fn test_smt_insert_and_remove_multiple_values() {
         Word::from([ONE, ONE, ONE, Felt::new(raw)])
     };
 
-    let value_1 = Word::new([ONE; WORD_SIZE]);
-    let value_2 = Word::new([ONE + ONE; WORD_SIZE]);
-    let value_3 = Word::new([ONE + ONE + ONE; WORD_SIZE]);
+    let value_1 = Word::new([ONE; Word::NUM_ELEMENTS]);
+    let value_2 = Word::new([ONE + ONE; Word::NUM_ELEMENTS]);
+    let value_3 = Word::new([ONE + ONE + ONE; Word::NUM_ELEMENTS]);
 
     // Insert values in the tree
     let key_values = [(key_1, value_1), (key_2, value_2), (key_3, value_3)];
@@ -241,9 +241,9 @@ fn test_smt_removal() {
         Felt::new(raw),
     ]);
 
-    let value_1 = Word::new([ONE; WORD_SIZE]);
-    let value_2 = Word::new([Felt::from_u32(2_u32); WORD_SIZE]);
-    let value_3 = Word::new([Felt::from_u32(3_u32); WORD_SIZE]);
+    let value_1 = Word::new([ONE; Word::NUM_ELEMENTS]);
+    let value_2 = Word::new([Felt::from_u32(2_u32); Word::NUM_ELEMENTS]);
+    let value_3 = Word::new([Felt::from_u32(3_u32); Word::NUM_ELEMENTS]);
 
     // insert key-value 1
     {
@@ -322,9 +322,9 @@ fn test_prospective_hash() {
         Felt::new(raw),
     ]);
 
-    let value_1 = Word::new([ONE; WORD_SIZE]);
-    let value_2 = Word::new([Felt::from_u32(2_u32); WORD_SIZE]);
-    let value_3 = Word::new([Felt::from_u32(3_u32); WORD_SIZE]);
+    let value_1 = Word::new([ONE; Word::NUM_ELEMENTS]);
+    let value_2 = Word::new([Felt::from_u32(2_u32); Word::NUM_ELEMENTS]);
+    let value_3 = Word::new([Felt::from_u32(3_u32); Word::NUM_ELEMENTS]);
 
     // insert key-value 1
     {
@@ -445,9 +445,9 @@ fn test_prospective_insertion() {
         Felt::new(raw),
     ]);
 
-    let value_1 = Word::new([ONE; WORD_SIZE]);
-    let value_2 = Word::new([Felt::from_u32(2_u32); WORD_SIZE]);
-    let value_3 = Word::new([Felt::from_u32(3_u32); WORD_SIZE]);
+    let value_1 = Word::new([ONE; Word::NUM_ELEMENTS]);
+    let value_2 = Word::new([Felt::from_u32(2_u32); Word::NUM_ELEMENTS]);
+    let value_3 = Word::new([Felt::from_u32(3_u32); Word::NUM_ELEMENTS]);
 
     let root_empty = smt.root();
 
@@ -530,7 +530,7 @@ fn test_prospective_insertion() {
 #[test]
 fn test_mutations_no_mutations() {
     let key = Word::from([ONE, ONE, ONE, ONE]);
-    let value = Word::new([ONE; WORD_SIZE]);
+    let value = Word::new([ONE; Word::NUM_ELEMENTS]);
     let entries = [(key, value)];
 
     let tree = Smt::with_entries(entries).unwrap();
@@ -554,9 +554,9 @@ fn test_mutations_revert() {
         Felt::new(3),
     ]);
 
-    let value_1 = Word::new([ONE; WORD_SIZE]);
-    let value_2 = Word::new([Felt::from_u32(2_u32); WORD_SIZE]);
-    let value_3 = Word::new([Felt::from_u32(3_u32); WORD_SIZE]);
+    let value_1 = Word::new([ONE; Word::NUM_ELEMENTS]);
+    let value_2 = Word::new([Felt::from_u32(2_u32); Word::NUM_ELEMENTS]);
+    let value_3 = Word::new([Felt::from_u32(3_u32); Word::NUM_ELEMENTS]);
 
     smt.insert(key_1, value_1).unwrap();
     smt.insert(key_2, value_2).unwrap();
@@ -589,9 +589,9 @@ fn test_mutation_set_serialization() {
         Felt::new(3),
     ]);
 
-    let value_1 = Word::new([ONE; WORD_SIZE]);
-    let value_2 = Word::new([Felt::from_u32(2_u32); WORD_SIZE]);
-    let value_3 = Word::new([Felt::from_u32(3_u32); WORD_SIZE]);
+    let value_1 = Word::new([ONE; Word::NUM_ELEMENTS]);
+    let value_2 = Word::new([Felt::from_u32(2_u32); Word::NUM_ELEMENTS]);
+    let value_3 = Word::new([Felt::from_u32(3_u32); Word::NUM_ELEMENTS]);
 
     smt.insert(key_1, value_1).unwrap();
     smt.insert(key_2, value_2).unwrap();
@@ -621,8 +621,8 @@ fn test_smt_path_to_keys_in_same_leaf_are_equal() {
     let key_1: Word = Word::from([ONE, ONE, ONE, Felt::new(raw)]);
     let key_2: Word = Word::from([Felt::new(2), Felt::new(2), Felt::new(2), Felt::new(raw)]);
 
-    let value_1 = Word::new([ONE; WORD_SIZE]);
-    let value_2 = Word::new([Felt::from_u32(2_u32); WORD_SIZE]);
+    let value_1 = Word::new([ONE; Word::NUM_ELEMENTS]);
+    let value_2 = Word::new([Felt::from_u32(2_u32); Word::NUM_ELEMENTS]);
 
     let smt = Smt::with_entries([(key_1, value_1), (key_2, value_2)]).unwrap();
 
@@ -644,8 +644,8 @@ fn test_smt_get_value() {
     let key_1: Word = Word::from([ONE, ONE, ONE, ONE]);
     let key_2: Word = Word::from([2_u32, 2_u32, 2_u32, 2_u32]);
 
-    let value_1 = Word::new([ONE; WORD_SIZE]);
-    let value_2 = Word::new([Felt::from_u32(2_u32); WORD_SIZE]);
+    let value_1 = Word::new([ONE; Word::NUM_ELEMENTS]);
+    let value_2 = Word::new([Felt::from_u32(2_u32); Word::NUM_ELEMENTS]);
 
     let smt = Smt::with_entries([(key_1, value_1), (key_2, value_2)]).unwrap();
 
@@ -667,8 +667,8 @@ fn test_smt_entries() {
     let key_1 = Word::from([ONE, ONE, ONE, ONE]);
     let key_2 = Word::from([2_u32, 2_u32, 2_u32, 2_u32]);
 
-    let value_1 = Word::new([ONE; WORD_SIZE]);
-    let value_2 = Word::new([Felt::from_u32(2_u32); WORD_SIZE]);
+    let value_1 = Word::new([ONE; Word::NUM_ELEMENTS]);
+    let value_2 = Word::new([Felt::from_u32(2_u32); Word::NUM_ELEMENTS]);
     let entries = [(key_1, value_1), (key_2, value_2)];
 
     let smt = Smt::with_entries(entries).unwrap();
@@ -809,7 +809,7 @@ fn test_max_leaf_entries_validation() {
 #[test]
 fn test_smt_proof_error_invalid_key_for_proof() {
     let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
-    let value = Word::new([ONE; WORD_SIZE]);
+    let value = Word::new([ONE; Word::NUM_ELEMENTS]);
 
     let smt = Smt::with_entries([(key, value)]).unwrap();
     let proof = smt.open(&key);
@@ -828,14 +828,14 @@ fn test_smt_proof_error_invalid_key_for_proof() {
 #[test]
 fn test_smt_proof_error_value_mismatch() {
     let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
-    let value = Word::new([ONE; WORD_SIZE]);
+    let value = Word::new([ONE; Word::NUM_ELEMENTS]);
 
     let smt = Smt::with_entries([(key, value)]).unwrap();
     let proof = smt.open(&key);
     let root = smt.root();
 
     // Use the correct key but wrong value
-    let wrong_value = Word::new([Felt::new(999); WORD_SIZE]);
+    let wrong_value = Word::new([Felt::new(999); Word::NUM_ELEMENTS]);
 
     assert_matches!(
         proof.verify_presence(&key, &wrong_value, &root),
@@ -848,14 +848,14 @@ fn test_smt_proof_error_value_mismatch() {
 #[test]
 fn test_smt_proof_error_conflicting_roots() {
     let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
-    let value = Word::new([ONE; WORD_SIZE]);
+    let value = Word::new([ONE; Word::NUM_ELEMENTS]);
 
     let smt = Smt::with_entries([(key, value)]).unwrap();
     let proof = smt.open(&key);
     let actual_root = smt.root();
 
     // Use a completely wrong root
-    let wrong_root = Word::new([Felt::new(999); WORD_SIZE]);
+    let wrong_root = Word::new([Felt::new(999); Word::NUM_ELEMENTS]);
 
     assert_matches!(
         proof.verify_presence(&key, &value, &wrong_root),
@@ -881,7 +881,7 @@ fn test_smt_proof_verify_unset_success() {
 #[test]
 fn test_smt_proof_verify_unset_fails_when_value_exists() {
     let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
-    let value = Word::new([ONE; WORD_SIZE]);
+    let value = Word::new([ONE; Word::NUM_ELEMENTS]);
 
     let smt = Smt::with_entries([(key, value)]).unwrap();
     let proof = smt.open(&key);
@@ -895,14 +895,14 @@ fn test_smt_proof_verify_unset_fails_when_value_exists() {
 #[test]
 fn test_smt_proof_verify_absence_success_different_value() {
     let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
-    let actual_value = Word::new([ONE; WORD_SIZE]);
+    let actual_value = Word::new([ONE; Word::NUM_ELEMENTS]);
 
     let smt = Smt::with_entries([(key, actual_value)]).unwrap();
     let proof = smt.open(&key);
     let root = smt.root();
 
     // The key has a different value, so this pair is absent
-    let absent_value = Word::new([Felt::new(999); WORD_SIZE]);
+    let absent_value = Word::new([Felt::new(999); Word::NUM_ELEMENTS]);
     proof.verify_absence(&key, &absent_value, &root).unwrap();
 }
 
@@ -916,7 +916,7 @@ fn test_smt_proof_verify_absence_success_key_unset() {
     let root = smt.root();
 
     // Any non-empty value should be absent since key is unset
-    let value = Word::new([ONE; WORD_SIZE]);
+    let value = Word::new([ONE; Word::NUM_ELEMENTS]);
     proof.verify_absence(&key, &value, &root).unwrap();
 }
 
@@ -924,7 +924,7 @@ fn test_smt_proof_verify_absence_success_key_unset() {
 #[test]
 fn test_smt_proof_error_value_present() {
     let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
-    let value = Word::new([ONE; WORD_SIZE]);
+    let value = Word::new([ONE; Word::NUM_ELEMENTS]);
 
     let smt = Smt::with_entries([(key, value)]).unwrap();
     let proof = smt.open(&key);
@@ -941,7 +941,7 @@ fn test_smt_proof_error_value_present() {
 #[test]
 fn test_smt_proof_verify_absence_invalid_key() {
     let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
-    let value = Word::new([ONE; WORD_SIZE]);
+    let value = Word::new([ONE; Word::NUM_ELEMENTS]);
 
     let smt = Smt::with_entries([(key, value)]).unwrap();
     let proof = smt.open(&key);
@@ -960,7 +960,7 @@ fn test_smt_proof_verify_absence_invalid_key() {
 #[test]
 fn test_smt_proof_get_returns_none_for_different_leaf() {
     let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
-    let value = Word::new([ONE; WORD_SIZE]);
+    let value = Word::new([ONE; Word::NUM_ELEMENTS]);
 
     let smt = Smt::with_entries([(key, value)]).unwrap();
     let proof = smt.open(&key);
@@ -978,7 +978,7 @@ fn test_smt_proof_get_returns_none_for_different_leaf() {
 #[test]
 fn test_smt_proof_get_returns_empty_for_absent_key_same_leaf() {
     let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
-    let value = Word::new([ONE; WORD_SIZE]);
+    let value = Word::new([ONE; Word::NUM_ELEMENTS]);
 
     let smt = Smt::with_entries([(key, value)]).unwrap();
     let proof = smt.open(&key);
@@ -1057,7 +1057,7 @@ fn test_compute_mutations_rejects_duplicate_keys() {
 
     let smt = Smt::default();
     let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
-    let value = Word::new([ONE; WORD_SIZE]);
+    let value = Word::new([ONE; Word::NUM_ELEMENTS]);
 
     let result = smt.compute_mutations(vec![(key, value), (key, value)]);
 
@@ -1072,8 +1072,8 @@ fn test_compute_mutations_rejects_duplicate_keys_different_values() {
 
     let smt = Smt::default();
     let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
-    let value_1 = Word::new([ONE; WORD_SIZE]);
-    let value_2 = Word::new([Felt::from_u32(2_u32); WORD_SIZE]);
+    let value_1 = Word::new([ONE; Word::NUM_ELEMENTS]);
+    let value_2 = Word::new([Felt::from_u32(2_u32); Word::NUM_ELEMENTS]);
 
     let result = smt.compute_mutations(vec![(key, value_1), (key, value_2)]);
 
@@ -1093,9 +1093,9 @@ fn test_compute_mutations_rejects_interleaved_duplicate_keys() {
     let key_1 = Word::from([ONE, ONE, ONE, Felt::new(42)]);
     let key_2 = Word::from([Felt::new(2), Felt::new(2), Felt::new(2), Felt::new(42)]);
 
-    let value_1 = Word::new([ONE; WORD_SIZE]);
-    let value_2 = Word::new([Felt::from_u32(2_u32); WORD_SIZE]);
-    let value_3 = Word::new([Felt::from_u32(3_u32); WORD_SIZE]);
+    let value_1 = Word::new([ONE; Word::NUM_ELEMENTS]);
+    let value_2 = Word::new([Felt::from_u32(2_u32); Word::NUM_ELEMENTS]);
+    let value_3 = Word::new([Felt::from_u32(3_u32); Word::NUM_ELEMENTS]);
 
     // k1 appears at positions 0 and 2, interleaved with k2
     let result = smt.compute_mutations(vec![(key_1, value_1), (key_2, value_2), (key_1, value_3)]);
@@ -1113,8 +1113,8 @@ fn test_compute_mutations_no_false_positives() {
     let key_1 = Word::from([ONE, ONE, ONE, Felt::new(42)]);
     let key_2 = Word::from([Felt::new(2), Felt::new(2), Felt::new(2), Felt::new(42)]);
 
-    let value_1 = Word::new([ONE; WORD_SIZE]);
-    let value_2 = Word::new([Felt::from_u32(2_u32); WORD_SIZE]);
+    let value_1 = Word::new([ONE; Word::NUM_ELEMENTS]);
+    let value_2 = Word::new([Felt::from_u32(2_u32); Word::NUM_ELEMENTS]);
 
     // These are different keys (despite sharing a leaf index), so this should succeed.
     let result = smt.compute_mutations(vec![(key_1, value_1), (key_2, value_2)]);
@@ -1128,8 +1128,8 @@ fn test_with_entries_rejects_duplicate_keys() {
     use crate::merkle::MerkleError;
 
     let key = Word::from([ONE, ONE, ONE, Felt::new(42)]);
-    let value_1 = Word::new([ONE; WORD_SIZE]);
-    let value_2 = Word::new([Felt::from_u32(2_u32); WORD_SIZE]);
+    let value_1 = Word::new([ONE; Word::NUM_ELEMENTS]);
+    let value_2 = Word::new([Felt::from_u32(2_u32); Word::NUM_ELEMENTS]);
 
     let result = Smt::with_entries(vec![(key, value_1), (key, value_2)]);
 
@@ -1146,9 +1146,9 @@ fn test_with_entries_rejects_interleaved_duplicate_keys() {
     let key_1 = Word::from([ONE, ONE, ONE, Felt::new(42)]);
     let key_2 = Word::from([Felt::new(2), Felt::new(2), Felt::new(2), Felt::new(42)]);
 
-    let value_1 = Word::new([ONE; WORD_SIZE]);
-    let value_2 = Word::new([Felt::from_u32(2_u32); WORD_SIZE]);
-    let value_3 = Word::new([Felt::from_u32(3_u32); WORD_SIZE]);
+    let value_1 = Word::new([ONE; Word::NUM_ELEMENTS]);
+    let value_2 = Word::new([Felt::from_u32(2_u32); Word::NUM_ELEMENTS]);
+    let value_3 = Word::new([Felt::from_u32(3_u32); Word::NUM_ELEMENTS]);
 
     // k1 appears at positions 0 and 2, interleaved with k2
     let result = Smt::with_entries(vec![(key_1, value_1), (key_2, value_2), (key_1, value_3)]);

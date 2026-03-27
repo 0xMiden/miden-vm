@@ -107,11 +107,6 @@ pub mod stark {
 #[cfg(feature = "std")]
 pub type Map<K, V> = std::collections::HashMap<K, V>;
 
-#[cfg(feature = "std")]
-pub use std::collections::hash_map::Entry as MapEntry;
-#[cfg(feature = "std")]
-pub use std::collections::hash_map::IntoIter as MapIntoIter;
-
 /// An alias for a key-value map.
 ///
 /// When the `std` feature is enabled, this is an alias for [`std::collections::HashMap`].
@@ -123,6 +118,10 @@ pub type Map<K, V> = alloc::collections::BTreeMap<K, V>;
 pub use alloc::collections::btree_map::Entry as MapEntry;
 #[cfg(not(feature = "std"))]
 pub use alloc::collections::btree_map::IntoIter as MapIntoIter;
+#[cfg(feature = "std")]
+pub use std::collections::hash_map::Entry as MapEntry;
+#[cfg(feature = "std")]
+pub use std::collections::hash_map::IntoIter as MapIntoIter;
 
 /// An alias for a simple set.
 ///
@@ -141,17 +140,14 @@ pub type Set<V> = alloc::collections::BTreeSet<V>;
 // CONSTANTS
 // ================================================================================================
 
-/// Number of field elements in a word.
-pub const WORD_SIZE: usize = word::WORD_SIZE_FELTS;
-
-/// Field element representing ZERO in the Miden base filed.
+/// Field element representing ZERO in the Miden base field.
 pub const ZERO: Felt = Felt::ZERO;
 
-/// Field element representing ONE in the Miden base filed.
+/// Field element representing ONE in the Miden base field.
 pub const ONE: Felt = Felt::ONE;
 
 /// Array of field elements representing word of ZEROs in the Miden base field.
-pub const EMPTY_WORD: Word = Word::new([ZERO; WORD_SIZE]);
+pub const EMPTY_WORD: Word = Word::new([ZERO; Word::NUM_ELEMENTS]);
 
 // TRAITS
 // ================================================================================================
