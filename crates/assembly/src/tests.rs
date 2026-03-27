@@ -5776,7 +5776,7 @@ fn regression_2902_kernel_proc_exec_is_rejected() {
     let kernel_src = source_file!(
         &context,
         r#"
-export.k1
+pub proc k1
     push.1
 end
 "#
@@ -5812,7 +5812,7 @@ fn regression_2902_kernel_proc_call_is_rejected() {
     let kernel_src = source_file!(
         &context,
         r#"
-export.k1
+pub proc k1
     push.1
 end
 "#
@@ -5848,7 +5848,7 @@ fn regression_2902_kernel_proc_via_syscall_is_accepted() {
     let kernel_src = source_file!(
         &context,
         r#"
-export.k1
+pub proc k1
     push.1
 end
 "#

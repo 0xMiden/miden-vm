@@ -86,6 +86,15 @@ impl<'a> SymbolResolver<'a> {
         self.graph.kernel_index.is_some_and(|k| k == gid.module)
     }
 
+    /// Returns `true` if the *caller* (i.e. `context.module`) is itself part of the kernel module.
+    ///
+    /// Kernel procedures are allowed to call other kernel procedures via `exec`/`call` — the
+    /// `syscall`-only restriction only applies to userland callers (#2902).
+    #[inline]
+    fn is_kernel_caller(&self, context: &SymbolResolutionContext) -> bool {
+        self.graph.kernel_index.is_some_and(|k| k == context.module)
+    }
+
     /// Reject a non-syscall invocation that resolved to a kernel export.
     ///
     /// Kernel procedures must only be reachable through `syscall` so that the VM's
@@ -135,9 +144,10 @@ impl<'a> SymbolResolver<'a> {
                         }
                     },
                     Some(gid) => {
-                        // Non-syscall invocation: reject if the resolved proc is a kernel export.
-                        // Kernel procedures must only be reachable via `syscall` (#2902).
-                        if self.is_kernel_proc(gid) {
+                        // Non-syscall invocation: reject if the resolved proc is a kernel export
+                        // AND the caller is not itself a kernel procedure.
+                        // Kernel procedures may freely call each other via exec/call (#2902).
+                        if self.is_kernel_proc(gid) && !self.is_kernel_caller(context) {
                             let callee = self.item_path(gid);
                             return Err(self.reject_kernel_proc_non_syscall(context, callee));
                         }
@@ -176,8 +186,9 @@ impl<'a> SymbolResolver<'a> {
                         })
                     },
                     SymbolResolution::Exact { gid, path } if !context.in_syscall() => {
-                        // Non-syscall: reject kernel exports (#2902)
-                        if self.is_kernel_proc(gid) {
+                        // Non-syscall: reject kernel exports, unless the caller is also in the
+                        // kernel (kernel procs may freely call each other via exec/call) (#2902).
+                        if self.is_kernel_proc(gid) && !self.is_kernel_caller(&context) {
                             let callee = path.into_inner();
                             return Err(self.reject_kernel_proc_non_syscall(&context, callee));
                         }
@@ -205,9 +216,11 @@ impl<'a> SymbolResolver<'a> {
                         })
                     }
                 },
-                // Non-syscall exact resolution: reject kernel exports (#2902).
-                // Kernel procedures must only be invoked via `syscall`.
-                SymbolResolution::Exact { gid, path } if self.is_kernel_proc(gid) => {
+                // Non-syscall exact resolution: reject kernel exports unless the caller is
+                // itself a kernel procedure (kernel procs may freely call each other) (#2902).
+                SymbolResolution::Exact { gid, path }
+                    if self.is_kernel_proc(gid) && !self.is_kernel_caller(context) =>
+                {
                     let callee = path.into_inner();
                     Err(self.reject_kernel_proc_non_syscall(context, callee))
                 },
@@ -233,8 +246,9 @@ impl<'a> SymbolResolver<'a> {
                             }
                         },
                         Some(gid) => {
-                            // Non-syscall MastRoot resolved to kernel export: reject (#2902)
-                            if self.is_kernel_proc(gid) {
+                            // Non-syscall MastRoot resolved to kernel export: reject unless the
+                            // caller is itself a kernel proc (they may call each other) (#2902).
+                            if self.is_kernel_proc(gid) && !self.is_kernel_caller(context) {
                                 let callee = self.item_path(gid);
                                 return Err(self.reject_kernel_proc_non_syscall(context, callee));
                             }
