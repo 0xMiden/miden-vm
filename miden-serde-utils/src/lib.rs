@@ -11,6 +11,7 @@ use alloc::{
     collections::{BTreeMap, BTreeSet},
     format,
     string::String,
+    sync::Arc,
     vec::Vec,
 };
 
@@ -380,12 +381,21 @@ impl Serializable for str {
 
 impl Serializable for String {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_usize(self.len());
-        target.write_many(self.as_bytes());
+        self.as_str().write_into(target);
     }
 
     fn get_size_hint(&self) -> usize {
-        self.len().get_size_hint() + self.len()
+        self.as_str().get_size_hint()
+    }
+}
+
+impl Serializable for Arc<str> {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.as_ref().write_into(target);
+    }
+
+    fn get_size_hint(&self) -> usize {
+        self.as_ref().get_size_hint()
     }
 }
 
@@ -711,6 +721,16 @@ impl Deserializable for String {
     }
 }
 
+impl Deserializable for Arc<str> {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        String::read_from(source).map(Arc::from)
+    }
+
+    fn min_serialized_size() -> usize {
+        1 // minimum vint length prefix
+    }
+}
+
 // GOLDILOCKS FIELD ELEMENT IMPLEMENTATIONS
 // ================================================================================================
 
@@ -736,5 +756,78 @@ impl Deserializable for p3_goldilocks::Goldilocks {
                 value
             ))
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::sync::Arc;
+
+    use super::*;
+
+    #[test]
+    fn arc_str_roundtrip() {
+        let original: Arc<str> = Arc::from("hello world");
+        let bytes = original.to_bytes();
+        let deserialized = Arc::<str>::read_from_bytes(&bytes).unwrap();
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn string_roundtrip() {
+        let original = String::from("hello world");
+        let bytes = original.to_bytes();
+        let deserialized = String::read_from_bytes(&bytes).unwrap();
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn empty_string_roundtrip() {
+        let arc: Arc<str> = Arc::from("");
+        let bytes = arc.to_bytes();
+        let deserialized = Arc::<str>::read_from_bytes(&bytes).unwrap();
+        assert_eq!(deserialized, Arc::from(""));
+
+        let string = String::from("");
+        let bytes = string.to_bytes();
+        let deserialized = String::read_from_bytes(&bytes).unwrap();
+        assert_eq!(deserialized, "");
+    }
+
+    #[test]
+    fn multibyte_utf8_roundtrip() {
+        let text = "héllo 🌍";
+
+        let arc: Arc<str> = Arc::from(text);
+        let bytes = arc.to_bytes();
+        let deserialized = Arc::<str>::read_from_bytes(&bytes).unwrap();
+        assert_eq!(&*deserialized, text);
+
+        let string = String::from(text);
+        let bytes = string.to_bytes();
+        let deserialized = String::read_from_bytes(&bytes).unwrap();
+        assert_eq!(deserialized, text);
+
+        // Cross-compat: Arc<str> bytes can be read as String and vice versa
+        let arc_bytes = Arc::<str>::from(text).to_bytes();
+        let string_bytes = String::from(text).to_bytes();
+        assert_eq!(arc_bytes, string_bytes);
+        assert_eq!(String::read_from_bytes(&arc_bytes).unwrap(), text);
+        assert_eq!(&*Arc::<str>::read_from_bytes(&string_bytes).unwrap(), text);
+    }
+
+    #[test]
+    fn arc_str_string_cross_compat() {
+        // Arc<str> -> bytes -> String
+        let arc: Arc<str> = Arc::from("cross type");
+        let bytes = arc.to_bytes();
+        let as_string = String::read_from_bytes(&bytes).unwrap();
+        assert_eq!(as_string, "cross type");
+
+        // String -> bytes -> Arc<str>
+        let string = String::from("other direction");
+        let bytes = string.to_bytes();
+        let as_arc = Arc::<str>::read_from_bytes(&bytes).unwrap();
+        assert_eq!(&*as_arc, "other direction");
     }
 }

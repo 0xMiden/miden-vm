@@ -4,6 +4,7 @@
 - Added the ability to configure the sync-to-disk behavior of the persistent backend using its config ([#912](https://github.com/0xMiden/crypto/pull/912)).
 - Adds `LargeSmtForest::add_lineages` which provides an efficient means of adding multiple new lineages at once ([#910](https://github.com/0xMiden/crypto/pull/910)).
 - [BREAKING] Removed `LexicographicWord` as `Word` itself now implements the correct comparison behavior. Any place where the former is used should be able to seamlessly swap to the latter.
+- Added `Serializable` and `Deserializable` instances for `Arc<str>`.
 
 ## 0.23.0 (2026-03-11)
 
