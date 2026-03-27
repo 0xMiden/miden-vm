@@ -279,6 +279,10 @@ impl Package {
         Ok(())
     }
 
+    /// If this package depends on a kernel, this method extracts the [Dependency] corresponding to
+    /// it.
+    ///
+    /// Returns `Err` if the dependency metadata for this package contains multiple kernels.
     pub fn kernel_runtime_dependency(&self) -> Result<Option<&Dependency>, Report> {
         let mut kernel_dependencies = self
             .manifest
