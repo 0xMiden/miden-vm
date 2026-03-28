@@ -1,9 +1,5 @@
-#[cfg(test)]
-mod tests;
-
 use alloc::{boxed::Box, collections::BTreeMap, format, string::ToString, sync::Arc, vec::Vec};
 use std::{
-    ffi::OsStr,
     fs,
     path::{Path as FsPath, PathBuf},
 };
@@ -14,9 +10,7 @@ use miden_assembly_syntax::{
     diagnostics::Report,
 };
 use miden_core::serde::{Deserializable, Serializable};
-use miden_mast_package::{
-    Dependency as PackageDependency, Package as MastPackage, Section, SectionId, TargetType,
-};
+use miden_mast_package::{Package as MastPackage, Section, SectionId, TargetType};
 use miden_package_registry::{PackageId, PackageStore, Version as PackageVersion};
 use miden_project::{
     Linkage, Package as ProjectPackage, Profile, ProjectDependencyNodeProvenance, ProjectSource,
@@ -26,42 +20,22 @@ use miden_project::{
 use crate::{Assembler, assembler::debuginfo::DebugInfoSections, ast::Module};
 
 mod build_provenance;
-use build_provenance::PackageBuildProvenance;
-
+mod dependency_graph;
+mod package_ext;
+mod runtime_dependencies;
 mod target_selector;
+
+use build_provenance::PackageBuildProvenance;
+use dependency_graph::DependencyGraph;
+use package_ext::ProjectPackageExt;
+use runtime_dependencies::RuntimeDependencies;
 pub use target_selector::ProjectTargetSelector;
 
-mod package_ext;
-use package_ext::ProjectPackageExt;
+#[cfg(test)]
+mod tests;
 
-mod dependency_graph;
-use dependency_graph::DependencyGraph;
-
+// ASSEMBLER EXTENSIONS
 // ================================================================================================
-
-pub struct ProjectSourceInputs {
-    pub root: Box<Module>,
-    pub support: Vec<Box<Module>>,
-}
-
-#[derive(Clone)]
-struct ResolvedPackage {
-    package: Arc<MastPackage>,
-    linked_kernel_package: Option<Arc<MastPackage>>,
-}
-
-enum RegisteredSourcePackage {
-    Missing,
-    Loaded(Arc<MastPackage>),
-    IndexedButUnreadable(PackageVersion),
-}
-
-pub struct ProjectAssembler<'a, S: PackageStore + ?Sized> {
-    assembler: Assembler,
-    project: Arc<ProjectPackage>,
-    dependency_graph: DependencyGraph,
-    store: &'a mut S,
-}
 
 impl Assembler {
     /// Get a [ProjectAssembler] configured for the project whose manifest is at `manifest_path`.
@@ -107,6 +81,21 @@ impl Assembler {
             store,
         })
     }
+}
+
+// PROJECT ASSEMBLER
+// ================================================================================================
+
+pub struct ProjectSourceInputs {
+    pub root: Box<Module>,
+    pub support: Vec<Box<Module>>,
+}
+
+pub struct ProjectAssembler<'a, S: PackageStore + ?Sized> {
+    assembler: Assembler,
+    project: Arc<ProjectPackage>,
+    dependency_graph: DependencyGraph,
+    store: &'a mut S,
 }
 
 impl<'a, S> ProjectAssembler<'a, S>
@@ -185,7 +174,7 @@ where
         sources: Option<ProjectSourceInputs>,
         cache: &mut BTreeMap<PackageId, ResolvedPackage>,
     ) -> Result<ResolvedPackage, Report> {
-        let cache_key = target_package_name(&project, target);
+        let cache_key = project.target_package_name(target);
         if sources.is_none()
             && let Some(package) = cache.get(&cache_key).cloned()
         {
@@ -199,25 +188,16 @@ where
             .clone()
             .with_emit_debug_info(profile.should_emit_debug_info())
             .with_trim_paths(profile.should_trim_paths());
-        let mut runtime_dependencies = BTreeMap::<PackageId, PackageDependency>::new();
-        let mut linked_kernel_package = None;
+        let mut runtime_dependencies = RuntimeDependencies::default();
         match required_lib {
             Some(required_lib) if required_lib.package.is_kernel() => {
                 assembler.link_package(required_lib.package.clone(), Linkage::Dynamic)?;
-                record_linked_kernel_dependency(
-                    &mut runtime_dependencies,
-                    &mut linked_kernel_package,
-                    required_lib.package,
-                )?;
+                runtime_dependencies.record_linked_kernel_dependency(required_lib.package)?;
             },
             Some(required_lib) => {
                 assembler.link_package(required_lib.package.clone(), Linkage::Static)?;
                 if let Some(kernel_package) = required_lib.linked_kernel_package {
-                    record_linked_kernel_dependency(
-                        &mut runtime_dependencies,
-                        &mut linked_kernel_package,
-                        kernel_package,
-                    )?;
+                    runtime_dependencies.record_linked_kernel_dependency(kernel_package)?;
                 }
             },
             None => (),
@@ -238,17 +218,10 @@ where
             assembler.link_package(dependency_package.package.clone(), edge.linkage)?;
 
             if dependency_package.package.is_kernel() {
-                record_linked_kernel_dependency(
-                    &mut runtime_dependencies,
-                    &mut linked_kernel_package,
-                    dependency_package.package.clone(),
-                )?;
+                runtime_dependencies
+                    .record_linked_kernel_dependency(dependency_package.package.clone())?;
             } else if let Some(kernel_package) = dependency_package.linked_kernel_package.clone() {
-                record_linked_kernel_dependency(
-                    &mut runtime_dependencies,
-                    &mut linked_kernel_package,
-                    kernel_package,
-                )?;
+                runtime_dependencies.record_linked_kernel_dependency(kernel_package)?;
             }
 
             // We record the dynamic/runtime dependencies of a package here.
@@ -268,21 +241,11 @@ where
             // will be raised. In the future, we may wish to relax this restriction, since such
             // dependencies are technically satisfiable.
             if matches!(edge.linkage, Linkage::Dynamic) && !dependency_package.package.is_kernel() {
-                merge_runtime_dependency(
-                    &mut runtime_dependencies,
-                    package_dependency(dependency_package.package.as_ref()),
-                )?;
+                runtime_dependencies
+                    .merge_dependency(dependency_package.package.to_dependency())?;
             }
             for dependency in dependency_package.package.manifest.dependencies() {
-                merge_runtime_dependency(
-                    &mut runtime_dependencies,
-                    PackageDependency {
-                        name: dependency.name.clone(),
-                        version: dependency.version.clone(),
-                        kind: dependency.kind,
-                        digest: dependency.digest,
-                    },
-                )?;
+                runtime_dependencies.merge_dependency(dependency.clone())?;
             }
         }
 
@@ -312,7 +275,7 @@ where
         let manifest = product
             .manifest()
             .clone()
-            .with_dependencies(runtime_dependencies.into_values())
+            .with_dependencies(runtime_dependencies.deps.into_values())
             .expect("assembled package manifest should have unique runtime dependencies");
 
         // Emit custom sections
@@ -331,7 +294,7 @@ where
 
         // Section: embedded kernel package
         if target.ty.is_executable()
-            && let Some(kernel_package) = linked_kernel_package.clone()
+            && let Some(kernel_package) = runtime_dependencies.kernel.clone()
         {
             sections.push(linked_kernel_package_section(kernel_package.as_ref()));
         }
@@ -350,7 +313,7 @@ where
         }
 
         let package = Arc::new(MastPackage {
-            name: target_package_name(project.as_ref(), target),
+            name: project.target_package_name(target),
             version: project.version().into_inner().clone(),
             description: project.description().map(|description| description.to_string()),
             kind: product.kind(),
@@ -361,7 +324,7 @@ where
 
         let resolved = ResolvedPackage {
             package: Arc::clone(&package),
-            linked_kernel_package,
+            linked_kernel_package: runtime_dependencies.kernel,
         };
         if !has_provided_sources {
             cache.insert(package_id, resolved.clone());
@@ -384,9 +347,7 @@ where
         let node_version = node.version.clone();
 
         let package = match &node.provenance {
-            ProjectDependencyNodeProvenance::Source(miden_project::ProjectSource::Virtual {
-                ..
-            }) => {
+            ProjectDependencyNodeProvenance::Source(ProjectSource::Virtual { .. }) => {
                 return Err(Report::msg(format!(
                     "package '{package_id}' is missing a manifest path",
                 )));
@@ -666,6 +627,20 @@ where
     }
 }
 
+// ================================================================================================
+
+#[derive(Clone)]
+struct ResolvedPackage {
+    package: Arc<MastPackage>,
+    linked_kernel_package: Option<Arc<MastPackage>>,
+}
+
+enum RegisteredSourcePackage {
+    Missing,
+    Loaded(Arc<MastPackage>),
+    IndexedButUnreadable(PackageVersion),
+}
+
 struct LoadedTargetSources {
     root: Box<Module>,
     #[allow(clippy::vec_box)]
@@ -705,14 +680,6 @@ impl PackageBuildSettings {
 // HELPER FUNCTIONS
 // ================================================================================================
 
-fn target_package_name(project: &ProjectPackage, target: &Target) -> PackageId {
-    if target.ty.is_executable() {
-        format!("{}:{}", project.name().inner(), target.name.inner()).into()
-    } else {
-        project.name().inner().clone()
-    }
-}
-
 fn target_root_module_kind(ty: TargetType) -> ModuleKind {
     match ty {
         TargetType::Executable => ModuleKind::Executable,
@@ -721,102 +688,8 @@ fn target_root_module_kind(ty: TargetType) -> ModuleKind {
     }
 }
 
-fn package_dependency(package: &MastPackage) -> PackageDependency {
-    PackageDependency {
-        name: package.name.clone(),
-        version: package.version.clone(),
-        kind: package.kind,
-        digest: package.digest(),
-    }
-}
-
 fn linked_kernel_package_section(package: &MastPackage) -> Section {
     Section::new(SectionId::KERNEL, package.to_bytes())
-}
-
-fn record_linked_kernel_dependency(
-    dependencies: &mut BTreeMap<PackageId, PackageDependency>,
-    linked_kernel_package: &mut Option<Arc<MastPackage>>,
-    package: Arc<MastPackage>,
-) -> Result<(), Report> {
-    debug_assert!(package.is_kernel());
-
-    merge_runtime_dependency(dependencies, package_dependency(package.as_ref()))?;
-
-    match linked_kernel_package {
-        Some(existing)
-            if existing.name == package.name
-                && existing.version == package.version
-                && existing.digest() == package.digest() =>
-        {
-            Ok(())
-        },
-        Some(existing) => Err(Report::msg(format!(
-            "conflicting linked kernel packages '{}@{}#{}' and '{}@{}#{}'",
-            existing.name,
-            existing.version,
-            existing.digest(),
-            package.name,
-            package.version,
-            package.digest()
-        ))),
-        slot @ None => {
-            *slot = Some(package);
-            Ok(())
-        },
-    }
-}
-
-fn merge_runtime_dependency(
-    dependencies: &mut BTreeMap<PackageId, PackageDependency>,
-    dependency: PackageDependency,
-) -> Result<(), Report> {
-    match dependencies.get(&dependency.name) {
-        Some(existing)
-            if existing.version == dependency.version
-                && existing.kind == dependency.kind
-                && existing.digest == dependency.digest =>
-        {
-            Ok(())
-        },
-        Some(existing) => Err(Report::msg(format!(
-            "conflicting runtime dependency '{}' resolved to versions '{}#{}' and '{}#{}'",
-            dependency.name,
-            existing.version,
-            existing.digest,
-            dependency.version,
-            dependency.digest
-        ))),
-        None => {
-            dependencies.insert(dependency.name.clone(), dependency);
-            Ok(())
-        },
-    }
-}
-
-fn collect_module_files(dir: &FsPath, paths: &mut Vec<PathBuf>) -> Result<(), Report> {
-    for entry in fs::read_dir(dir).map_err(|error| {
-        Report::msg(format!("failed to read module directory '{}': {error}", dir.display()))
-    })? {
-        let entry = entry.map_err(|error| {
-            Report::msg(format!("failed to read directory entry in '{}': {error}", dir.display()))
-        })?;
-        let path = entry.path();
-        let file_type = entry.file_type().map_err(|error| {
-            Report::msg(format!("failed to read file type for '{}': {error}", path.display()))
-        })?;
-
-        if file_type.is_dir() {
-            collect_module_files(&path, paths)?;
-            continue;
-        }
-
-        if path.extension() == Some(AsRef::<OsStr>::as_ref(ast::Module::FILE_EXTENSION)) {
-            paths.push(path);
-        }
-    }
-
-    Ok(())
 }
 
 fn module_path_from_relative(
@@ -846,15 +719,6 @@ fn module_path_from_relative(
     Ok(module_path.into())
 }
 
-fn load_package_from_path(path: &FsPath) -> Result<Arc<MastPackage>, Report> {
-    let bytes = fs::read(path)
-        .map_err(|error| Report::msg(format!("failed to read '{}': {error}", path.display())))?;
-    let package = MastPackage::read_from_bytes(&bytes).map_err(|error| {
-        Report::msg(format!("failed to decode package '{}': {error}", path.display()))
-    })?;
-    Ok(Arc::new(package))
-}
-
 fn load_selected_preassembled_package(
     path: &FsPath,
     expected_name: &PackageId,
@@ -882,4 +746,13 @@ fn load_selected_preassembled_package(
     }
 
     Ok(package)
+}
+
+fn load_package_from_path(path: &FsPath) -> Result<Arc<MastPackage>, Report> {
+    let bytes = fs::read(path)
+        .map_err(|error| Report::msg(format!("failed to read '{}': {error}", path.display())))?;
+    let package = MastPackage::read_from_bytes(&bytes).map_err(|error| {
+        Report::msg(format!("failed to decode package '{}': {error}", path.display()))
+    })?;
+    Ok(Arc::new(package))
 }

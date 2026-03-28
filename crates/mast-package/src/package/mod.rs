@@ -279,6 +279,15 @@ impl Package {
         Ok(())
     }
 
+    pub fn to_dependency(&self) -> Dependency {
+        Dependency {
+            name: self.name.clone(),
+            version: self.version.clone(),
+            kind: self.kind,
+            digest: self.digest(),
+        }
+    }
+
     /// If this package depends on a kernel, this method extracts the [Dependency] corresponding to
     /// it.
     ///

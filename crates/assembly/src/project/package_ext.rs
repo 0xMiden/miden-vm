@@ -6,11 +6,15 @@ use alloc::{
     vec::Vec,
 };
 use std::{
+    ffi::OsStr,
     fs,
     path::{Path as FsPath, PathBuf},
 };
 
-use miden_assembly_syntax::{ast::Path as MasmPath, diagnostics::Report};
+use miden_assembly_syntax::{
+    ast::{Module, Path as MasmPath},
+    diagnostics::Report,
+};
 use miden_core::{Word, utils::hash_string_to_word};
 use miden_package_registry::PackageId;
 use miden_project::{DependencyVersionScheme, Package as ProjectPackage, Profile, Target};
@@ -29,6 +33,8 @@ pub(super) trait ProjectPackageExt {
     ) -> Result<Arc<ProjectPackage>, Report>;
 
     fn get_manifest_path(&self) -> Result<&FsPath, Report>;
+
+    fn target_package_name(&self, target: &Target) -> PackageId;
 
     fn compute_path_source_hash(
         &self,
@@ -68,6 +74,14 @@ impl ProjectPackageExt for ProjectPackage {
         self.manifest_path().ok_or_else(|| {
             Report::msg(format!("project '{}' is missing its manifest path", self.name().inner()))
         })
+    }
+
+    fn target_package_name(&self, target: &Target) -> PackageId {
+        if target.ty.is_executable() {
+            format!("{}:{}", self.name().inner(), target.name.inner()).into()
+        } else {
+            self.name().inner().clone()
+        }
     }
 
     fn excluded_target_roots(
@@ -258,7 +272,7 @@ fn read_support_module_paths(
     excluded: &BTreeSet<PathBuf>,
 ) -> Result<Vec<PathBuf>, Report> {
     let mut paths = Vec::new();
-    super::collect_module_files(root_dir, &mut paths)?;
+    collect_module_files(root_dir, &mut paths)?;
     paths.sort();
 
     let mut modules = Vec::new();
@@ -281,4 +295,29 @@ fn read_support_module_paths(
     }
 
     Ok(modules)
+}
+
+fn collect_module_files(dir: &FsPath, paths: &mut Vec<PathBuf>) -> Result<(), Report> {
+    for entry in fs::read_dir(dir).map_err(|error| {
+        Report::msg(format!("failed to read module directory '{}': {error}", dir.display()))
+    })? {
+        let entry = entry.map_err(|error| {
+            Report::msg(format!("failed to read directory entry in '{}': {error}", dir.display()))
+        })?;
+        let path = entry.path();
+        let file_type = entry.file_type().map_err(|error| {
+            Report::msg(format!("failed to read file type for '{}': {error}", path.display()))
+        })?;
+
+        if file_type.is_dir() {
+            collect_module_files(&path, paths)?;
+            continue;
+        }
+
+        if path.extension() == Some(AsRef::<OsStr>::as_ref(Module::FILE_EXTENSION)) {
+            paths.push(path);
+        }
+    }
+
+    Ok(())
 }
