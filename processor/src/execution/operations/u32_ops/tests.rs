@@ -96,9 +96,8 @@ fn test_op_u32assert2_both_invalid_no_err_code() {
     // Both values > u32::MAX with err_code=0: must return NotU32Values with both values
     let invalid1 = 4294967296u64; // 2^32
     let invalid2 = 4294967297u64; // 2^32 + 1
-    let mut processor = FastProcessor::new(
-        StackInputs::new(&[Felt::new(invalid1), Felt::new(invalid2)]).unwrap(),
-    );
+    let mut processor =
+        FastProcessor::new(StackInputs::new(&[Felt::new(invalid1), Felt::new(invalid2)]).unwrap());
     let mut tracer = NoopTracer;
 
     let err = op_u32assert2(&mut processor, ZERO, &mut tracer, &MastForest::default()).unwrap_err();
