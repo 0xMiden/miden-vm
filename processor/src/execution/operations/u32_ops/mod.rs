@@ -4,6 +4,7 @@ use paste::paste;
 
 use crate::{
     ExecutionError, Felt, ZERO,
+    mast::MastForest,
     operation::OperationError,
     processor::{Processor, StackInterface, SystemInterface},
     tracer::{OperationHelperRegisters, Tracer},
@@ -302,7 +303,7 @@ pub(super) fn op_u32assert2<P: Processor, T: Tracer>(
     processor: &mut P,
     err_code: Felt,
     tracer: &mut T,
-    program: &miden_core::mast::MastForest,
+    program: &MastForest,
 ) -> Result<OperationHelperRegisters, OperationError> {
     let first = processor.stack().get(0);
     let second = processor.stack().get(1);
