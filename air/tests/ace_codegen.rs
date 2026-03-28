@@ -1,6 +1,6 @@
 use miden_ace_codegen::{
-    AceConfig, EXT_DEGREE, InputKey, InputLayout, LayoutKind, NodeId, NodeKind,
-    build_ace_circuit_for_air, build_ace_dag_for_air, emit_circuit,
+    AceConfig, AceError, EXT_DEGREE, InputKey, InputLayout, LayoutKind, build_ace_circuit_for_air,
+    build_ace_dag_for_air, emit_circuit, testing::eval_dag,
 };
 use miden_air::{LiftedAir, ProcessorAir};
 use miden_core::{Felt, field::QuadFelt};
@@ -203,27 +203,6 @@ where
     acc
 }
 
-fn eval_dag(
-    nodes: &[NodeKind<QuadFelt>],
-    root: NodeId,
-    inputs: &[QuadFelt],
-    layout: &InputLayout,
-) -> QuadFelt {
-    let mut values: Vec<QuadFelt> = vec![QuadFelt::ZERO; nodes.len()];
-    for (idx, node) in nodes.iter().enumerate() {
-        let value = match node {
-            NodeKind::Input(key) => inputs[layout.index(*key).unwrap()],
-            NodeKind::Constant(c) => *c,
-            NodeKind::Add(a, b) => values[a.index()] + values[b.index()],
-            NodeKind::Sub(a, b) => values[a.index()] - values[b.index()],
-            NodeKind::Mul(a, b) => values[a.index()] * values[b.index()],
-            NodeKind::Neg(a) => -values[a.index()],
-        };
-        values[idx] = value;
-    }
-    values[root.index()]
-}
-
 fn eval_quotient(layout: &InputLayout, inputs: &[QuadFelt]) -> QuadFelt {
     let k = layout.counts.num_quotient_chunks;
     let z_pow_n = inputs[layout.index(InputKey::ZPowN).expect("ZPowN in layout")];
@@ -335,8 +314,34 @@ fn processor_air_dag_matches_manual_eval() {
     let vanishing = z_pow_n - QuadFelt::ONE;
     let expected = acc - eval_quotient(&layout, &inputs) * vanishing;
 
-    let actual = eval_dag(&artifacts.dag.nodes, artifacts.dag.root, &inputs, &layout);
+    let actual = eval_dag(&artifacts.dag, &inputs, &layout).unwrap();
     assert_eq!(actual, expected);
+}
+
+#[test]
+fn processor_air_dag_rejects_mismatched_layout() {
+    let air = ProcessorAir;
+    let dag_config = AceConfig {
+        num_quotient_chunks: 8,
+        num_vlpi_groups: 0,
+        layout: LayoutKind::Native,
+    };
+    let layout_config = AceConfig {
+        num_quotient_chunks: 1,
+        num_vlpi_groups: 0,
+        layout: LayoutKind::Native,
+    };
+
+    let dag = build_ace_dag_for_air::<_, Felt, QuadFelt>(&air, dag_config).unwrap().dag;
+    let wrong_layout =
+        build_ace_dag_for_air::<_, Felt, QuadFelt>(&air, layout_config).unwrap().layout;
+    let inputs = fill_inputs(&wrong_layout);
+
+    let err = eval_dag(&dag, &inputs, &wrong_layout).unwrap_err();
+    assert!(
+        matches!(err, AceError::InvalidInputLayout { .. }),
+        "expected InvalidInputLayout, got {err:?}"
+    );
 }
 
 #[test]

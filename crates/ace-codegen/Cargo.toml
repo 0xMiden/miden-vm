@@ -13,6 +13,9 @@ repository.workspace = true
 rust-version.workspace = true
 edition.workspace = true
 
+[features]
+testing = []
+
 [dependencies]
 miden-core = { workspace = true }
 miden-crypto = { workspace = true }
