@@ -82,7 +82,8 @@ fn test_op_u32assert2_both_invalid() {
     );
     let mut tracer = NoopTracer;
 
-    let result = op_u32assert2(&mut processor, Felt::from_u32(123u32), &mut tracer, &MastForest::default());
+    let result =
+        op_u32assert2(&mut processor, Felt::from_u32(123u32), &mut tracer, &MastForest::default());
     assert!(result.is_err());
 }
 
@@ -94,7 +95,8 @@ fn test_op_u32assert2_second_invalid() {
     );
     let mut tracer = NoopTracer;
 
-    let result = op_u32assert2(&mut processor, Felt::from_u32(456u32), &mut tracer, &MastForest::default());
+    let result =
+        op_u32assert2(&mut processor, Felt::from_u32(456u32), &mut tracer, &MastForest::default());
     assert!(result.is_err());
 }
 
@@ -106,7 +108,8 @@ fn test_op_u32assert2_first_invalid() {
     );
     let mut tracer = NoopTracer;
 
-    let result = op_u32assert2(&mut processor, Felt::from_u32(789), &mut tracer, &MastForest::default());
+    let result =
+        op_u32assert2(&mut processor, Felt::from_u32(789), &mut tracer, &MastForest::default());
     assert!(result.is_err());
 }
 
