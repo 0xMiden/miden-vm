@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use crate::{
-    BreakReason, ContextId, Host, Kernel, Stopper, Word,
+    BaseHost, BreakReason, ContextId, Kernel, Stopper, Word,
     continuation_stack::{Continuation, ContinuationStack},
     mast::{MastForest, MastNode, MastNodeId},
     processor::{Processor, SystemInterface},
@@ -58,9 +58,9 @@ pub(crate) struct ExecutionState<'a, P, H, S, T> {
 /// # Tracing
 ///
 /// Different processor implementations will need to record different pieces of information as the
-/// the program is executed. For example, the [`crate::FastProcessor::execute_for_trace`]
-/// execution mode needs to build a [`crate::fast::execution_tracer::TraceGenerationContext`] which
-/// records information necessary to build the trace at each clock cycle, while the
+/// the program is executed. For example, the [`crate::FastProcessor::execute_trace_inputs`]
+/// execution mode needs to build a [`crate::TraceGenerationContext`] which records information
+/// necessary to build the trace at each clock cycle, while the
 /// [`crate::parallel::core_trace_fragment::CoreTraceFragmentFiller`] needs to build the trace
 /// essentially by recording the processor state at each clock cycle. For this purpose, the
 /// [`Self::execute_impl`] method takes in [`Tracer`] argument that abstracts away the "information
@@ -101,7 +101,7 @@ pub(crate) struct ExecutionState<'a, P, H, S, T> {
 ///             // Handle user-initiated break (e.g., propagate break reason)
 ///         },
 ///         InternalBreakReason::Emit { basic_block_node_id, op_idx, continuation } => {
-///             // Handle Emit operation (e.g., call `Host::on_event`)
+///             // Handle Emit operation (e.g., call `SyncHost::on_event`)
 ///             self.op_emit(...);
 ///    
 ///             // As per `InternalBreakReason::Emit` documentation, we call `finish_emit_op_execution`
@@ -132,7 +132,7 @@ pub(crate) fn execute_impl<P, S, T>(
     continuation_stack: &mut ContinuationStack,
     current_forest: &mut Arc<MastForest>,
     kernel: &Kernel,
-    host: &mut impl Host,
+    host: &mut impl BaseHost,
     tracer: &mut T,
     stopper: &S,
 ) -> ControlFlow<InternalBreakReason>

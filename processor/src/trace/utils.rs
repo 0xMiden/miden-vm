@@ -152,13 +152,13 @@ impl TraceLenSummary {
 // CHIPLET LENGTHS
 // ================================================================================================
 
-/// Contains trace lengths of all chilplets: hash, bitwise, memory and kernel ROM trace
-/// lengths.
+/// Contains trace lengths of all chiplets: hash, bitwise, memory, ACE, and kernel ROM.
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ChipletsLengths {
     hash_chiplet_len: usize,
     bitwise_chiplet_len: usize,
     memory_chiplet_len: usize,
+    ace_chiplet_len: usize,
     kernel_rom_len: usize,
 }
 
@@ -167,7 +167,8 @@ impl ChipletsLengths {
         ChipletsLengths {
             hash_chiplet_len: chiplets.bitwise_start().into(),
             bitwise_chiplet_len: chiplets.memory_start() - chiplets.bitwise_start(),
-            memory_chiplet_len: chiplets.kernel_rom_start() - chiplets.memory_start(),
+            memory_chiplet_len: chiplets.ace_start() - chiplets.memory_start(),
+            ace_chiplet_len: chiplets.kernel_rom_start() - chiplets.ace_start(),
             kernel_rom_len: chiplets.padding_start() - chiplets.kernel_rom_start(),
         }
     }
@@ -176,12 +177,14 @@ impl ChipletsLengths {
         hash_len: usize,
         bitwise_len: usize,
         memory_len: usize,
+        ace_len: usize,
         kernel_len: usize,
     ) -> Self {
         ChipletsLengths {
             hash_chiplet_len: hash_len,
             bitwise_chiplet_len: bitwise_len,
             memory_chiplet_len: memory_len,
+            ace_chiplet_len: ace_len,
             kernel_rom_len: kernel_len,
         }
     }
@@ -201,6 +204,11 @@ impl ChipletsLengths {
         self.memory_chiplet_len
     }
 
+    /// Returns the length of the ACE chiplet trace
+    pub fn ace_chiplet_len(&self) -> usize {
+        self.ace_chiplet_len
+    }
+
     /// Returns the length of the kernel ROM trace
     pub fn kernel_rom_len(&self) -> usize {
         self.kernel_rom_len
@@ -213,6 +221,7 @@ impl ChipletsLengths {
         self.hash_chiplet_len()
             + self.bitwise_chiplet_len()
             + self.memory_chiplet_len()
+            + self.ace_chiplet_len()
             + self.kernel_rom_len()
             + 1
     }

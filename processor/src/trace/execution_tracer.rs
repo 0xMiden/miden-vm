@@ -42,6 +42,7 @@ struct StateSnapshot {
 // TRACE GENERATION CONTEXT
 // ================================================================================================
 
+#[derive(Debug)]
 pub struct TraceGenerationContext {
     /// The list of trace fragment contexts built during execution.
     pub core_trace_contexts: Vec<CoreTraceFragmentContext>,

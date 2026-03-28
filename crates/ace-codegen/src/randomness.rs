@@ -22,10 +22,10 @@ pub(crate) fn aux_rand_indices(randomness: InputRegion) -> (usize, usize) {
 
 /// Lower a challenge index into DAG nodes.
 ///
-/// Challenge indices map to:
-/// - 0 → alpha
-/// - 1 → 1 (beta^0)
-/// - n → beta^(n-1)
+/// The AIR's `Challenges::from_randomness` receives these two raw values and
+/// internally expands beta into powers `[1, beta, beta^2, ...]` via symbolic
+/// multiplication. This means the DAG will contain nodes for `beta^k` built
+/// from `AuxRandBeta`, which is correct.
 pub(crate) fn lower_challenge<EF>(
     builder: &mut DagBuilder<EF>,
     layout: &InputLayout,
@@ -37,16 +37,11 @@ where
     let num = layout.counts.num_randomness;
     assert!(index < num, "challenge index {index} out of range (num={num})");
 
-    if index == 0 {
-        return builder.input(InputKey::AuxRandAlpha);
+    match index {
+        0 => builder.input(InputKey::AuxRandAlpha),
+        1 => builder.input(InputKey::AuxRandBeta),
+        _ => panic!(
+            "challenge index {index} exceeds the 2-element randomness convention (alpha, beta)"
+        ),
     }
-    if index == 1 {
-        return builder.constant(EF::ONE);
-    }
-    let beta_node = builder.input(InputKey::AuxRandBeta);
-    let mut power = beta_node;
-    for _ in 2..index {
-        power = builder.mul(power, beta_node);
-    }
-    power
 }

@@ -1,7 +1,7 @@
 //! ACE circuit codegen for Plonky3-based Miden AIRs.
 //!
 //! The pipeline is:
-//! 1. Capture AIR constraints via plonky3's `SymbolicAirBuilder`.
+//! 1. Capture AIR constraints via the `SymbolicAirBuilder`.
 //! 2. Lower symbolic expressions into a DAG that mirrors verifier constraints evaluation.
 //! 3. Emit an ACE circuit plus an `InputLayout` describing the MASM ACE-READ section order.
 //!
@@ -16,7 +16,7 @@
 //! use miden_air::ProcessorAir;
 //! use miden_core::{Felt, field::QuadFelt};
 //!
-//! let config = AceConfig { num_quotient_chunks: 8, num_aux_inputs: 14, layout: LayoutKind::Masm };
+//! let config = AceConfig { num_quotient_chunks: 8, num_vlpi_groups: 1, layout: LayoutKind::Masm };
 //! let circuit = build_ace_circuit_for_air::<_, Felt, QuadFelt>(&ProcessorAir, config)?;
 //! ```
 //!
@@ -60,8 +60,11 @@ pub enum AceError {
 }
 
 pub use crate::{
-    circuit::AceCircuit,
+    circuit::{AceCircuit, emit_circuit},
+    dag::{AceDag, DagBuilder, NodeId},
     encode::EncodedCircuit,
     layout::{InputCounts, InputKey, InputLayout},
-    pipeline::{AceConfig, LayoutKind, build_ace_circuit_for_air, build_layout_for_air},
+    pipeline::{
+        AceArtifacts, AceConfig, LayoutKind, build_ace_circuit_for_air, build_ace_dag_for_air,
+    },
 };

@@ -20,7 +20,7 @@ use miden_core::{
     field::batch_inversion_allow_zeros,
     mast::{MastForest, MastNode},
     operations::opcodes,
-    program::{Kernel, MIN_STACK_DEPTH, ProgramInfo},
+    program::{Kernel, MIN_STACK_DEPTH},
     utils::ColMatrix,
 };
 use rayon::prelude::*;
@@ -30,9 +30,8 @@ use crate::{
     ContextId, ExecutionError,
     continuation_stack::ContinuationStack,
     errors::MapExecErrNoCtx,
-    fast::ExecutionOutput,
     trace::{
-        AuxTraceBuilders, ChipletsLengths, ExecutionTrace, TraceLenSummary,
+        AuxTraceBuilders, ChipletsLengths, ExecutionTrace, TraceBuildInputs, TraceLenSummary,
         parallel::{processor::ReplayProcessor, tracer::CoreTraceGenerationTracer},
         range::RangeChecker,
     },
@@ -71,18 +70,25 @@ mod tests;
 // ================================================================================================
 
 /// Builds the main trace from the provided trace states in parallel.
+///
+/// # Example
+/// ```
+/// use miden_assembly::Assembler;
+/// use miden_processor::{DefaultHost, FastProcessor, StackInputs};
+///
+/// let program = Assembler::default().assemble_program("begin push.1 drop end").unwrap();
+/// let mut host = DefaultHost::default();
+///
+/// let trace_inputs = FastProcessor::new(StackInputs::default())
+///     .execute_trace_inputs_sync(&program, &mut host)
+///     .unwrap();
+/// let trace = miden_processor::trace::build_trace(trace_inputs).unwrap();
+///
+/// assert_eq!(*trace.program_hash(), program.hash());
+/// ```
 #[instrument(name = "build_trace", skip_all)]
-pub fn build_trace(
-    execution_output: ExecutionOutput,
-    trace_generation_context: TraceGenerationContext,
-    program_info: ProgramInfo,
-) -> Result<ExecutionTrace, ExecutionError> {
-    build_trace_with_max_len(
-        execution_output,
-        trace_generation_context,
-        program_info,
-        MAX_TRACE_LEN,
-    )
+pub fn build_trace(inputs: TraceBuildInputs) -> Result<ExecutionTrace, ExecutionError> {
+    build_trace_with_max_len(inputs, MAX_TRACE_LEN)
 }
 
 /// Same as [`build_trace`], but with a custom hard cap.
@@ -90,11 +96,28 @@ pub fn build_trace(
 /// When the trace would go over `max_trace_len`, this returns
 /// [`ExecutionError::TraceLenExceeded`].
 pub fn build_trace_with_max_len(
-    execution_output: ExecutionOutput,
-    trace_generation_context: TraceGenerationContext,
-    program_info: ProgramInfo,
+    inputs: TraceBuildInputs,
     max_trace_len: usize,
 ) -> Result<ExecutionTrace, ExecutionError> {
+    let TraceBuildInputs {
+        execution_output,
+        trace_generation_context,
+        program_info,
+        execution_binding,
+    } = inputs;
+
+    if execution_binding.program_info() != &program_info {
+        return Err(ExecutionError::Internal("trace inputs do not match program info"));
+    }
+
+    if execution_binding.stack_outputs() != &execution_output.stack
+        || execution_binding.final_pc_transcript_state()
+            != execution_output.final_pc_transcript.state()
+        || execution_binding.advice_provider_fingerprint() != &execution_output.advice.fingerprint()
+    {
+        return Err(ExecutionError::Internal("trace inputs do not match execution output"));
+    }
+
     let TraceGenerationContext {
         core_trace_contexts,
         range_checker_replay,

@@ -1266,6 +1266,7 @@ dependencies = [
 name = "miden-air"
 version = "0.23.0"
 dependencies = [
+ "miden-ace-codegen",
  "miden-core",
  "miden-crypto",
  "miden-utils-indexing",
@@ -1346,6 +1347,7 @@ dependencies = [
 name = "miden-core-lib"
 version = "0.23.0"
 dependencies = [
+ "bincode",
  "criterion",
  "env_logger",
  "fs-err",
@@ -1564,6 +1566,7 @@ version = "0.23.0"
 dependencies = [
  "bincode",
  "miden-air",
+ "miden-assembly",
  "miden-core",
  "miden-crypto",
  "miden-debug-types",

@@ -2,6 +2,18 @@
 
 ## v0.23.0 (TBD)
 
+#### Bug Fixes
+
+- Reverted `InvokeKind::ProcRef` back to `InvokeKind::Exec` in `visit_mut_procref` and added an explanatory comment (#2893).
+#### Changes
+
+- [BREAKING] Sync execution and proving APIs now require `SyncHost`; async `Host`, `execute`, and `prove` remain available ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
+- [BREAKING] `miden_processor::execute()` and `execute_sync()` now return `ExecutionOutput`; trace building remains explicit via `execute_trace_inputs*()` and `trace::build_trace()` ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
+- [BREAKING] Removed the deprecated `FastProcessor::execute_sync_mut()` alias; `execute_mut_sync()` is now the only sync mutable-execution entrypoint ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
+- [BREAKING] Removed the deprecated `FastProcessor::execute_for_trace_sync()` and `execute_for_trace()` wrappers; use `execute_trace_inputs_sync()` or `execute_trace_inputs()` instead ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
+- [BREAKING] Removed the deprecated unbound `TraceBuildInputs::new()` and `TraceBuildInputs::from_program()` constructors; use `execute_trace_inputs_sync()` or `execute_trace_inputs()` instead ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
+- Added `prove_from_trace_sync(...)` for proving from pre-executed trace inputs ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
+
 ## 0.22.0 (2025-03-18)
 
 #### Enhancements
@@ -11,7 +23,6 @@
 - [BREAKING] `build_trace()` no longer assumes valid user input ([#2747](https://github.com/0xMiden/miden-vm/pull/2747)).
 - Added `math::u128` division operations ([#2776](https://github.com/0xMiden/miden-vm/pull/2776)).
 - [BREAKING] Migrated to lifted-STARK backend and `miden-crypto` to v0.23 ([#2783](https://github.com/0xMiden/miden-vm/pull/2783)).
-
 
 #### Changes
 
@@ -35,9 +46,12 @@
 - [BREAKING] `Variant::new` now expects an optional payload type to be specified ([#2848](https://github.com/0xMiden/miden-vm/pull/2848))
 - [BREAKING] Enum types are now exported from libraries as a `midenc_hir_type::EnumType`, rather than the type of the discriminant. ([#2848](https://github.com/0xMiden/miden-vm/pull/2848))
 - In `ExecutionTracer`, we no longer record node flags in `CoreTraceFragmentContext` when entering a node (they are redundant) ([#2866](https://github.com/0xMiden/miden-vm/pull/2866))
+- Updated the recursive STARK verifier to work with the lifted-STARK / `p3-miden` backend ([#2869](https://github.com/0xMiden/miden-vm/pull/2869)).
+- Switched Keccak STARK config to use stateful binary sponge with `[Felt; VECTOR_LEN]` packing, and reorganized `config.rs` into per-hash-family sections ([#2874](https://github.com/0xMiden/miden-vm/pull/2874)).
 
 #### Fixes
 - Fixed C-like enum validation and constant materialization in `define_enum` ([#2887](https://github.com/0xMiden/miden-vm/pull/2887)).
+- **toposort_caller**: Fixed cycle detection in assembly call graph ([#2871](https://github.com/0xMiden/miden-vm/pull/2871)).
 
 - Fixed `Constant::PartialEq` to include `visibility` field in equality comparison, making it consistent with other exportable items (`Procedure`, `TypeAlias`, `EnumType`).
 - Cryptostream operation now correctly sends chiplets bus memory requests ([#2686](https://github.com/0xMiden/miden-vm/pull/2686)).

@@ -19,6 +19,7 @@ use miden_crypto::stark::air::{
     ReducedAuxValues, ReductionError, VarLenPublicInputs, WindowAccess,
 };
 
+pub mod ace;
 pub mod config;
 mod constraints;
 
