@@ -165,7 +165,7 @@ where
             host,
             op_idx,
         )?,
-        Operation::U32assert2(err_code) => u32_ops::op_u32assert2(processor, *err_code, tracer)
+        Operation::U32assert2(err_code) => u32_ops::op_u32assert2(processor, *err_code, tracer, current_forest)
             .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?,
 
         // ----- stack manipulation -----------------------------------------------------------
