@@ -14,6 +14,7 @@ CHANGELOG_PATH = ROOT / "CHANGELOG.md"
 UNRELEASED_DIR = ROOT / ".changes" / "unreleased"
 ARCHIVE_DIR = ROOT / ".changes" / "archive"
 SECTION_ORDER = ["enhancement", "change", "fix"]
+ALLOWED_KINDS = {"breaking", "change", "enhancement", "fix"}
 SECTION_HEADERS = {
     "enhancement": "Enhancements",
     "change": "Changes",
@@ -29,19 +30,37 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Batch changelog fragments into CHANGELOG.md and archive them."
     )
-    parser.add_argument("--version", required=True, help="Release version, e.g. 0.23.0")
+    parser.add_argument("--version", help="Release version, e.g. 0.23.0")
     parser.add_argument(
         "--date",
         default=dt.date.today().isoformat(),
         help="Release date in YYYY-MM-DD format",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--validate-fragment",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="Validate one or more fragment files and exit without updating the changelog.",
+    )
+    args = parser.parse_args()
+    if args.validate_fragment and args.version:
+        parser.error("--validate-fragment cannot be used together with --version")
+    if not args.validate_fragment and not args.version:
+        parser.error("either --version or --validate-fragment is required")
+    return args
 
 
-def parse_fragment(path: pathlib.Path) -> dict[str, str]:
-    text = path.read_text(encoding="utf-8")
-    lines = text.splitlines()
+def normalize_front_matter_value(raw: str) -> str:
+    value = raw.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    if value in {"null", "~"}:
+        return ""
+    return value
 
+
+def parse_front_matter(path: pathlib.Path, lines: list[str]) -> tuple[dict[str, str], int]:
     if len(lines) < 4 or lines[0] != "---":
         raise FragmentError(f"{path} must start with YAML front matter delimited by '---'")
 
@@ -52,15 +71,29 @@ def parse_fragment(path: pathlib.Path) -> dict[str, str]:
 
     front_matter: dict[str, str] = {}
     for line in lines[1:closing]:
-        if not line.strip():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
             continue
-        if ":" not in line:
+        if ":" not in stripped:
             raise FragmentError(f"{path} has invalid front matter line: {line}")
-        key, value = line.split(":", 1)
-        front_matter[key.strip()] = value.strip()
+        key, value = stripped.split(":", 1)
+        key = key.strip()
+        if not key:
+            raise FragmentError(f"{path} has invalid front matter line: {line}")
+        if key in front_matter:
+            raise FragmentError(f"{path} defines front matter key '{key}' more than once")
+        front_matter[key] = normalize_front_matter_value(value)
+
+    return front_matter, closing
+
+
+def parse_fragment(path: pathlib.Path) -> dict[str, str]:
+    text = path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    front_matter, closing = parse_front_matter(path, lines)
 
     kind = front_matter.get("kind", "")
-    if kind not in {"breaking", "change", "enhancement", "fix"}:
+    if kind not in ALLOWED_KINDS:
         raise FragmentError(f"{path} has invalid kind '{kind}'")
 
     pr_url = front_matter.get("pr", "")
@@ -105,13 +138,24 @@ def make_bullet(fragment: dict[str, str]) -> tuple[str, str]:
     return section, f"- {summary} ([#{pr_number}]({pr_url}))."
 
 
+def fragment_sort_key(fragment: dict[str, str]) -> tuple[int, str]:
+    # Keep batched changelog entries deterministic across repeated release-prep runs.
+    return fragment["pr_number"], fragment["filename"]
+
+
 def collect_fragments() -> list[dict[str, str]]:
     paths = sorted(UNRELEASED_DIR.glob("*.md"))
     if not paths:
         raise FragmentError(f"No fragments found in {UNRELEASED_DIR}")
     fragments = [parse_fragment(path) for path in paths]
-    fragments.sort(key=lambda item: (item["pr_number"], item["filename"]))
+    fragments.sort(key=fragment_sort_key)
     return fragments
+
+
+def validate_fragments(paths: list[pathlib.Path]) -> list[dict[str, str]]:
+    if not paths:
+        raise FragmentError("No fragments were provided for validation")
+    return [parse_fragment(path) for path in paths]
 
 
 def build_generated_sections(fragments: list[dict[str, str]]) -> dict[str, list[str]]:
@@ -210,7 +254,23 @@ def update_changelog(version: str, date: str, generated: dict[str, list[str]]) -
     CHANGELOG_PATH.write_text(new_changelog, encoding="utf-8")
 
 
+def flush_archive() -> None:
+    ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+
+    for path in ARCHIVE_DIR.iterdir():
+        if path.name.startswith("."):
+            continue
+        if path.is_symlink() or path.is_file():
+            path.unlink()
+        elif path.is_dir():
+            shutil.rmtree(path)
+        else:
+            raise FragmentError(f"Unsupported archive entry: {path}")
+
+
 def archive_fragments(version: str, fragments: list[dict[str, str]]) -> None:
+    # Keep only the current release batch under .changes/archive/.
+    flush_archive()
     destination = ARCHIVE_DIR / version
     destination.mkdir(parents=True, exist_ok=True)
 
@@ -225,6 +285,11 @@ def archive_fragments(version: str, fragments: list[dict[str, str]]) -> None:
 def main() -> int:
     args = parse_args()
     try:
+        if args.validate_fragment:
+            fragments = validate_fragments([pathlib.Path(path) for path in args.validate_fragment])
+            print(f"Validated {len(fragments)} changelog fragment(s).")
+            return 0
+
         fragments = collect_fragments()
         generated = build_generated_sections(fragments)
         update_changelog(args.version, args.date, generated)
