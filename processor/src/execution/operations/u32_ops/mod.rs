@@ -309,17 +309,6 @@ pub(super) fn op_u32assert2<P: Processor, T: Tracer>(
     let second = processor.stack().get(1);
 
     if first.as_canonical_u64() > U32_MAX || second.as_canonical_u64() > U32_MAX {
-        let mut invalid_values = Vec::new();
-        if first.as_canonical_u64() > U32_MAX {
-            invalid_values.push(first);
-        }
-        if second.as_canonical_u64() > U32_MAX {
-            invalid_values.push(second);
-        }
-        return Err(OperationError::NotU32Values { values: invalid_values });
-    }
-
-    if err_code != Felt::ZERO {
         let err_msg = program.resolve_error_message(err_code);
         return Err(OperationError::FailedAssertion { err_code, err_msg });
     }

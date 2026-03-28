@@ -15,7 +15,7 @@ use crate::{
     DefaultHost, ExecutionError,
     execution::operations::execute_op,
     fast::{FastProcessor, NoopTracer},
-    operation::Operation,
+    operation::{Operation, OperationError},
 };
 
 // CASTING OPERATIONS
@@ -111,6 +111,36 @@ fn test_op_u32assert2_first_invalid() {
     let result =
         op_u32assert2(&mut processor, Felt::from_u32(789), &mut tracer, &MastForest::default());
     assert!(result.is_err());
+}
+
+#[test]
+fn test_op_u32assert2_err_code_propagates_on_invalid() {
+    // err_code must appear in the FailedAssertion error when a value is out of range
+    let mut processor =
+        FastProcessor::new(StackInputs::new(&[Felt::new(4294967296u64), Felt::new(1u64)]).unwrap());
+    let mut tracer = NoopTracer;
+    let err_code = Felt::from_u32(42);
+
+    let err =
+        op_u32assert2(&mut processor, err_code, &mut tracer, &MastForest::default()).unwrap_err();
+    assert!(
+        matches!(err, OperationError::FailedAssertion { err_code: c, .. } if c == err_code),
+        "expected FailedAssertion with err_code 42"
+    );
+}
+
+#[test]
+fn test_op_u32assert2_valid_inputs_succeed_with_nonzero_err_code() {
+    // A non-zero err_code must NOT cause an error when both values are valid u32s
+    let mut processor = FastProcessor::new(
+        StackInputs::new(&[Felt::new(1u64), Felt::new(2u64), Felt::new(3u64), Felt::new(4u64)])
+            .unwrap(),
+    );
+    let mut tracer = NoopTracer;
+
+    let result =
+        op_u32assert2(&mut processor, Felt::from_u32(99), &mut tracer, &MastForest::default());
+    assert!(result.is_ok(), "valid u32 inputs must succeed regardless of err_code");
 }
 
 // ARITHMETIC OPERATIONS
