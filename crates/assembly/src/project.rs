@@ -216,37 +216,7 @@ where
             }
 
             assembler.link_package(dependency_package.package.clone(), edge.linkage)?;
-
-            if dependency_package.package.is_kernel() {
-                runtime_dependencies
-                    .record_linked_kernel_dependency(dependency_package.package.clone())?;
-            } else if let Some(kernel_package) = dependency_package.linked_kernel_package.clone() {
-                runtime_dependencies.record_linked_kernel_dependency(kernel_package)?;
-            }
-
-            // We record the dynamic/runtime dependencies of a package here.
-            //
-            // When linking against a package dynamically, both the package and its own dynamically-
-            // linked dependencies are recorded in the manifest.
-            //
-            // When linking statically, only the dynamically-linked dependencies of the package are
-            // recorded, not the statically-linked package, as it is by definition included in the
-            // assembled package
-            //
-            // We _always_ record the kernel that a package is assembled against, regardless of
-            // linkage, and propagate such dependencies up the dependency tree so as to require
-            // that all packages that transitively depend on a kernel, depend on the same kernel.
-            //
-            // NOTE: If there are conflicting runtime dependencies on the same package, an error
-            // will be raised. In the future, we may wish to relax this restriction, since such
-            // dependencies are technically satisfiable.
-            if matches!(edge.linkage, Linkage::Dynamic) && !dependency_package.package.is_kernel() {
-                runtime_dependencies
-                    .merge_dependency(dependency_package.package.to_dependency())?;
-            }
-            for dependency in dependency_package.package.manifest.dependencies() {
-                runtime_dependencies.merge_dependency(dependency.clone())?;
-            }
+            runtime_dependencies.merge_package(dependency_package, edge.linkage)?;
         }
 
         let has_provided_sources = sources.is_some();
