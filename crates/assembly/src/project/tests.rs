@@ -1,6 +1,7 @@
 use std::{process::Command, string::String};
 
 use miden_assembly_syntax::source_file;
+use miden_core::utils::hash_string_to_word;
 use miden_package_registry::PackageRegistry;
 use tempfile::TempDir;
 

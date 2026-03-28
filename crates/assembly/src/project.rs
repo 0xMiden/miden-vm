@@ -1,14 +1,7 @@
 #[cfg(test)]
 mod tests;
 
-use alloc::{
-    boxed::Box,
-    collections::{BTreeMap, BTreeSet},
-    format,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
-};
+use alloc::{boxed::Box, collections::BTreeMap, format, string::ToString, sync::Arc, vec::Vec};
 use std::{
     ffi::OsStr,
     fs,
@@ -20,18 +13,13 @@ use miden_assembly_syntax::{
     ast::{self, ModuleKind, Path as MasmPath},
     diagnostics::Report,
 };
-use miden_core::{
-    Word,
-    serde::{Deserializable, Serializable},
-    utils::hash_string_to_word,
-};
+use miden_core::serde::{Deserializable, Serializable};
 use miden_mast_package::{
     Dependency as PackageDependency, Package as MastPackage, Section, SectionId, TargetType,
 };
 use miden_package_registry::{PackageId, PackageStore, Version as PackageVersion};
 use miden_project::{
-    Linkage, Package as ProjectPackage, Profile, ProjectDependencyGraph,
-    ProjectDependencyGraphBuilder, ProjectDependencyNodeProvenance, ProjectSource,
+    Linkage, Package as ProjectPackage, Profile, ProjectDependencyNodeProvenance, ProjectSource,
     ProjectSourceOrigin, Target,
 };
 
@@ -45,6 +33,11 @@ pub use target_selector::ProjectTargetSelector;
 
 mod package_ext;
 use package_ext::ProjectPackageExt;
+
+mod dependency_graph;
+use dependency_graph::DependencyGraph;
+
+// ================================================================================================
 
 pub struct ProjectSourceInputs {
     pub root: Box<Module>,
@@ -66,7 +59,7 @@ enum RegisteredSourcePackage {
 pub struct ProjectAssembler<'a, S: PackageStore + ?Sized> {
     assembler: Assembler,
     project: Arc<ProjectPackage>,
-    dependency_graph: ProjectDependencyGraph,
+    dependency_graph: DependencyGraph,
     store: &'a mut S,
 }
 
@@ -84,9 +77,8 @@ impl Assembler {
         let source_manager = self.source_manager();
         let project = miden_project::Project::load(manifest_path, &source_manager)?;
         let package = project.package();
-        let dependency_graph = ProjectDependencyGraphBuilder::new(&*store)
-            .with_source_manager(source_manager)
-            .build_from_path(manifest_path)?;
+        let dependency_graph =
+            DependencyGraph::from_project_path(manifest_path, store, source_manager)?;
 
         Ok(ProjectAssembler {
             assembler: self,
@@ -106,13 +98,8 @@ impl Assembler {
         S: PackageStore + ?Sized,
     {
         let source_manager = self.source_manager();
-        let dependency_graph_builder =
-            ProjectDependencyGraphBuilder::new(&*store).with_source_manager(source_manager);
-        let dependency_graph = if let Some(manifest_path) = project.manifest_path() {
-            dependency_graph_builder.build_from_path(manifest_path)?
-        } else {
-            dependency_graph_builder.build(project.clone())?
-        };
+        let dependency_graph =
+            DependencyGraph::from_project(project.clone(), store, source_manager)?;
         Ok(ProjectAssembler {
             assembler: self,
             project,
@@ -128,10 +115,6 @@ where
 {
     pub fn project(&self) -> &ProjectPackage {
         self.project.as_ref()
-    }
-
-    pub fn dependency_graph(&self) -> &ProjectDependencyGraph {
-        &self.dependency_graph
     }
 
     pub fn assemble(
@@ -240,9 +223,7 @@ where
             None => (),
         }
 
-        let node = self.dependency_graph.get(&package_id).ok_or_else(|| {
-            Report::msg(format!("missing dependency graph node for '{package_id}'"))
-        })?;
+        let node = self.dependency_graph.get(&package_id)?;
         let dependencies = node.dependencies.clone();
         for edge in dependencies.iter() {
             let dependency_package =
@@ -338,7 +319,7 @@ where
         let mut sections = Vec::new();
 
         // Section: build provenance
-        if let Some(provenance) = self.build_source_provenance(
+        if let Some(provenance) = self.dependency_graph.build_source_provenance(
             &package_id,
             project.as_ref(),
             target,
@@ -399,9 +380,7 @@ where
             return Ok(package);
         }
 
-        let node = self.dependency_graph.get(package_id).ok_or_else(|| {
-            Report::msg(format!("missing dependency graph node for '{package_id}'"))
-        })?;
+        let node = self.dependency_graph.get(package_id)?;
         let node_version = node.version.clone();
 
         let package = match &node.provenance {
@@ -589,7 +568,8 @@ where
                 return Ok(RegisteredSourcePackage::IndexedButUnreadable(record.version().clone()));
             },
         };
-        let expected = self.expected_source_provenance(
+
+        let expected = self.dependency_graph.expected_source_provenance(
             package_id,
             project,
             target,
@@ -622,215 +602,6 @@ where
             .publish_package(package)
             .map(|_| ())
             .map_err(|error| Report::msg(error.to_string()))
-    }
-
-    fn build_source_provenance(
-        &self,
-        package_id: &PackageId,
-        project: &ProjectPackage,
-        target: &Target,
-        profile_name: &str,
-        has_provided_sources: bool,
-    ) -> Result<Option<PackageBuildProvenance>, Report> {
-        if has_provided_sources {
-            return Ok(None);
-        }
-
-        let Some(node) = self.dependency_graph.get(package_id) else {
-            return Ok(None);
-        };
-        let ProjectDependencyNodeProvenance::Source(source) = &node.provenance else {
-            return Ok(None);
-        };
-
-        match source {
-            ProjectSource::Virtual { .. } => Ok(None),
-            ProjectSource::Real {
-                origin, manifest_path, workspace_root, ..
-            } => {
-                if matches!(origin, ProjectSourceOrigin::Path | ProjectSourceOrigin::Root)
-                    && target.path.is_none()
-                {
-                    return Ok(None);
-                }
-
-                self.expected_source_provenance(
-                    package_id,
-                    project,
-                    target,
-                    profile_name,
-                    origin,
-                    manifest_path,
-                    workspace_root.as_deref(),
-                )
-                .map(Some)
-            },
-        }
-    }
-
-    fn expected_source_provenance(
-        &self,
-        package_id: &PackageId,
-        project: &ProjectPackage,
-        target: &Target,
-        profile_name: &str,
-        origin: &ProjectSourceOrigin,
-        manifest_path: &FsPath,
-        workspace_root: Option<&FsPath>,
-    ) -> Result<PackageBuildProvenance, Report> {
-        self.expected_source_provenance_with_visited(
-            package_id,
-            project,
-            target,
-            profile_name,
-            origin,
-            manifest_path,
-            workspace_root,
-            &mut BTreeSet::new(),
-        )
-    }
-
-    fn expected_source_provenance_with_visited(
-        &self,
-        package_id: &PackageId,
-        project: &ProjectPackage,
-        target: &Target,
-        profile_name: &str,
-        origin: &ProjectSourceOrigin,
-        manifest_path: &FsPath,
-        workspace_root: Option<&FsPath>,
-        visiting: &mut BTreeSet<PackageId>,
-    ) -> Result<PackageBuildProvenance, Report> {
-        let dependency_hash =
-            self.compute_dependency_closure_hash(package_id, profile_name, visiting)?;
-        let build_settings =
-            PackageBuildSettings::from_profile(project.resolve_profile(profile_name)?);
-
-        match origin {
-            ProjectSourceOrigin::Git { repo, resolved_revision, .. } => {
-                Ok(PackageBuildProvenance::Git {
-                    repo: repo.to_string(),
-                    resolved_revision: resolved_revision.to_string(),
-                    dependency_hash,
-                    build_settings,
-                })
-            },
-            ProjectSourceOrigin::Path | ProjectSourceOrigin::Root => {
-                Ok(PackageBuildProvenance::Path {
-                    source_hash: project.compute_path_source_hash(
-                        target,
-                        manifest_path,
-                        workspace_root,
-                    )?,
-                    dependency_hash,
-                    build_settings,
-                })
-            },
-        }
-    }
-
-    fn compute_dependency_closure_hash(
-        &self,
-        package_id: &PackageId,
-        profile_name: &str,
-        visiting: &mut BTreeSet<PackageId>,
-    ) -> Result<Word, Report> {
-        if !visiting.insert(package_id.clone()) {
-            return Err(Report::msg(format!(
-                "dependency cycle detected while computing source provenance for '{package_id}'"
-            )));
-        }
-
-        let outcome = (|| {
-            let node = self.dependency_graph.get(package_id).ok_or_else(|| {
-                Report::msg(format!("missing dependency graph node for '{package_id}'"))
-            })?;
-            if node.dependencies.is_empty() {
-                return Ok(PackageBuildProvenance::empty_dependency_hash());
-            }
-
-            let mut dependencies = node.dependencies.clone();
-            dependencies.sort_by(|a, b| {
-                a.dependency
-                    .cmp(&b.dependency)
-                    .then_with(|| a.linkage.to_string().cmp(&b.linkage.to_string()))
-            });
-
-            let mut material = String::new();
-            for edge in dependencies {
-                material.push_str("dependency:");
-                material.push_str(edge.dependency.as_ref());
-                material.push(':');
-                material.push_str(edge.linkage.to_string().as_str());
-                material.push('\n');
-                material.push_str(&self.dependency_resolution_hash_input(
-                    &edge.dependency,
-                    profile_name,
-                    visiting,
-                )?);
-            }
-
-            Ok(hash_string_to_word(material.as_str()))
-        })();
-
-        visiting.remove(package_id);
-        outcome
-    }
-
-    fn dependency_resolution_hash_input(
-        &self,
-        package_id: &PackageId,
-        profile_name: &str,
-        visiting: &mut BTreeSet<PackageId>,
-    ) -> Result<String, Report> {
-        let node = self.dependency_graph.get(package_id).ok_or_else(|| {
-            Report::msg(format!("missing dependency graph node for '{package_id}'"))
-        })?;
-
-        match &node.provenance {
-            ProjectDependencyNodeProvenance::Registry { selected, .. } => {
-                Ok(format!("registry:{package_id}@{selected}\n"))
-            },
-            ProjectDependencyNodeProvenance::Preassembled { selected, .. } => {
-                Ok(format!("preassembled:{package_id}@{selected}\n"))
-            },
-            ProjectDependencyNodeProvenance::Source(ProjectSource::Real {
-                origin,
-                manifest_path,
-                workspace_root,
-                library_path: Some(_),
-                ..
-            }) => {
-                let project = ProjectPackage::load_package(
-                    self.assembler.source_manager(),
-                    package_id,
-                    manifest_path,
-                )?;
-                let target = project
-                    .library_target()
-                    .map(|target| target.inner().clone())
-                    .ok_or_else(|| {
-                        Report::msg(format!(
-                            "dependency '{}' does not define a library target",
-                            package_id
-                        ))
-                    })?;
-                let provenance = self.expected_source_provenance_with_visited(
-                    package_id,
-                    &project,
-                    &target,
-                    profile_name,
-                    origin,
-                    manifest_path,
-                    workspace_root.as_deref(),
-                    visiting,
-                )?;
-                Ok(format!("source:{package_id}:{}\n", provenance.describe()))
-            },
-            ProjectDependencyNodeProvenance::Source(_) => {
-                Ok(format!("canonical:{package_id}@{}\n", node.version))
-            },
-        }
     }
 
     fn normalize_provided_sources(
