@@ -61,7 +61,7 @@ pub enum AceError {
 
 pub use crate::{
     circuit::{AceCircuit, emit_circuit},
-    dag::{AceDag, DagBuilder, NodeId},
+    dag::{AceDag, DagBuilder, NodeId, NodeKind},
     encode::EncodedCircuit,
     layout::{InputCounts, InputKey, InputLayout},
     pipeline::{

@@ -66,42 +66,6 @@ where
     Ok(quotient)
 }
 
-/// Compute the barycentric kernel value (`zps`) for a single chunk.
-#[cfg(test)]
-pub fn zps_for_chunk<EF>(layout: &InputLayout, inputs: &[EF], chunk: usize) -> Result<EF, AceError>
-where
-    EF: Field,
-{
-    if inputs.len() != layout.total_inputs {
-        return Err(AceError::InvalidInputLength {
-            expected: layout.total_inputs,
-            got: inputs.len(),
-        });
-    }
-
-    let k = layout.counts.num_quotient_chunks;
-    assert!(chunk < k, "quotient chunk {chunk} out of range (k={k})");
-
-    let z_pow_n = inputs[layout.index(InputKey::ZPowN).expect("ZPowN in layout")];
-    let s0 = inputs[layout.index(InputKey::S0).expect("S0 in layout")];
-    let f = inputs[layout.index(InputKey::F).expect("F in layout")];
-    let weight0 = inputs[layout.index(InputKey::Weight0).expect("Weight0 in layout")];
-
-    let (deltas, weights) = {
-        let mut ops = FieldOps;
-        compute_deltas_and_weights(k, z_pow_n, s0, f, weight0, &mut ops)
-    };
-
-    let mut prod = EF::ONE;
-    for (j, delta) in deltas.iter().enumerate() {
-        if j != chunk {
-            prod *= *delta;
-        }
-    }
-
-    Ok(weights[chunk] * prod)
-}
-
 /// Build DAG nodes that recombine quotient chunks.
 pub(crate) fn build_quotient_recomposition_dag<F, EF>(
     builder: &mut DagBuilder<EF>,

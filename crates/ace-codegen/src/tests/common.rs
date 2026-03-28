@@ -16,20 +16,6 @@ use crate::{
     quotient,
 };
 
-/// Deterministic input filler for layout-sized buffers.
-pub fn fill_inputs(layout: &InputLayout) -> Vec<QuadFelt> {
-    let mut values = Vec::with_capacity(layout.total_inputs);
-    let mut state = 0x9e37_79b9_7f4a_7c15u64;
-    for _ in 0..layout.total_inputs {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        let lo = Felt::new(state);
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        let hi = Felt::new(state);
-        values.push(QuadFelt::new([lo, hi]));
-    }
-    values
-}
-
 pub fn eval_periodic_values(periodic_columns: &[Vec<Felt>], z_k: QuadFelt) -> Vec<QuadFelt> {
     if periodic_columns.is_empty() {
         return Vec::new();
@@ -236,8 +222,4 @@ pub fn eval_dag(
 
 pub fn eval_quotient(layout: &InputLayout, inputs: &[QuadFelt]) -> QuadFelt {
     quotient::eval_quotient::<Felt, QuadFelt>(layout, inputs).expect("quotient evaluation")
-}
-
-pub fn zps_for_chunk(layout: &InputLayout, inputs: &[QuadFelt], chunk: usize) -> QuadFelt {
-    quotient::zps_for_chunk(layout, inputs, chunk).expect("quotient zps")
 }

@@ -18,6 +18,7 @@ cargo publish -p miden-utils-indexing
 cargo publish -p miden-debug-types
 cargo publish -p miden-utils-core-derive
 cargo publish -p miden-core
+cargo publish -p miden-ace-codegen
 cargo publish -p miden-air
 cargo publish -p miden-assembly-syntax
 cargo publish -p miden-mast-package
