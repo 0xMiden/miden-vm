@@ -791,8 +791,9 @@ impl Assembler {
 
         let library = Library::new(Arc::new(mast_forest), exports)?;
         let manifest = PackageManifest::from_library(&library);
+        let debug_info = self.emit_debug_info.then(|| self.debug_info.clone());
 
-        Ok(AssemblyProduct::new(kind, Arc::new(library), None, manifest))
+        Ok(AssemblyProduct::new(kind, Arc::new(library), None, manifest, debug_info))
     }
 
     fn finish_program_product(
@@ -814,8 +815,15 @@ impl Assembler {
         });
         let library = Arc::new(Library::new(mast, BTreeMap::from_iter([(entry, entrypoint)]))?);
         let manifest = PackageManifest::from_library(&library);
+        let debug_info = self.emit_debug_info.then(|| self.debug_info.clone());
 
-        Ok(AssemblyProduct::new(TargetType::Executable, library, Some(kernel), manifest))
+        Ok(AssemblyProduct::new(
+            TargetType::Executable,
+            library,
+            Some(kernel),
+            manifest,
+            debug_info,
+        ))
     }
 
     fn apply_debug_options(&self, mast_forest: &mut miden_core::mast::MastForest) {

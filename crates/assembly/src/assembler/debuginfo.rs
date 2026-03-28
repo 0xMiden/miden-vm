@@ -18,7 +18,7 @@ use crate::{
 // DEBUG INFO SECTIONS
 // ================================================================================================
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct DebugInfoSections {
     /// The debug function section maintained by the assembler during assembly
     pub debug_functions_section: DebugFunctionsSection,
@@ -26,6 +26,16 @@ pub struct DebugInfoSections {
     pub debug_types_section: DebugTypesSection,
     /// The debug sources section maintained by the assembler during assembly
     pub debug_sources_section: DebugSourcesSection,
+}
+
+impl Default for DebugInfoSections {
+    fn default() -> Self {
+        Self {
+            debug_functions_section: DebugFunctionsSection::new(),
+            debug_types_section: DebugTypesSection::new(),
+            debug_sources_section: DebugSourcesSection::new(),
+        }
+    }
 }
 
 impl DebugInfoSections {

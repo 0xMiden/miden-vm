@@ -247,6 +247,7 @@ where
             .clone()
             .with_dependencies(runtime_dependencies.deps.into_values())
             .expect("assembled package manifest should have unique runtime dependencies");
+        let debug_info = product.debug_info().cloned();
 
         // Emit custom sections
         let mut sections = Vec::new();
@@ -270,12 +271,12 @@ where
         }
 
         // Section: debug info
-        if self.assembler.emit_debug_info {
-            let DebugInfoSections {
-                debug_sources_section,
-                debug_functions_section,
-                debug_types_section,
-            } = &self.assembler.debug_info;
+        if let Some(DebugInfoSections {
+            debug_sources_section,
+            debug_functions_section,
+            debug_types_section,
+        }) = debug_info.as_ref()
+        {
             sections.push(Section::new(SectionId::DEBUG_SOURCES, debug_sources_section.to_bytes()));
             sections
                 .push(Section::new(SectionId::DEBUG_FUNCTIONS, debug_functions_section.to_bytes()));

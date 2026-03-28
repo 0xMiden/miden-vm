@@ -5,6 +5,7 @@ pub struct AssemblyProduct {
     artifact: Arc<Library>,
     kernel: Option<Kernel>,
     manifest: PackageManifest,
+    debug_info: Option<DebugInfoSections>,
 }
 
 impl AssemblyProduct {
@@ -13,12 +14,19 @@ impl AssemblyProduct {
         artifact: Arc<Library>,
         kernel: Option<Kernel>,
         manifest: PackageManifest,
+        debug_info: Option<DebugInfoSections>,
     ) -> Self {
         assert!(
             kernel.is_none() || kind != TargetType::Kernel,
             "kernels cannot depend on another kernel"
         );
-        Self { kind, artifact, kernel, manifest }
+        Self {
+            kind,
+            artifact,
+            kernel,
+            manifest,
+            debug_info,
+        }
     }
 
     #[cfg_attr(not(feature = "std"), expect(unused))]
@@ -29,6 +37,11 @@ impl AssemblyProduct {
     #[cfg_attr(not(feature = "std"), expect(unused))]
     pub fn manifest(&self) -> &PackageManifest {
         &self.manifest
+    }
+
+    #[cfg_attr(not(feature = "std"), expect(unused))]
+    pub fn debug_info(&self) -> Option<&DebugInfoSections> {
+        self.debug_info.as_ref()
     }
 
     pub fn into_artifact(self) -> Arc<Library> {

@@ -1,7 +1,14 @@
 use std::{process::Command, string::String};
 
 use miden_assembly_syntax::source_file;
-use miden_core::utils::hash_string_to_word;
+use miden_core::{
+    serde::{Deserializable, SliceReader},
+    utils::hash_string_to_word,
+};
+use miden_mast_package::{
+    SectionId,
+    debug_info::{DebugFunctionsSection, DebugSourcesSection, DebugTypesSection},
+};
 use miden_package_registry::PackageRegistry;
 use tempfile::TempDir;
 
@@ -194,6 +201,68 @@ end
 
     assert_eq!(package.kind, TargetType::Kernel);
     assert!(package.try_into_kernel_library().is_ok());
+}
+
+#[test]
+fn emitted_debug_sections_deserialize_from_the_build_assembler_state() {
+    let tempdir = TempDir::new().unwrap();
+    let manifest_path = tempdir.path().join("miden-project.toml");
+    write_file(
+        &manifest_path,
+        r#"[package]
+name = "debuggable"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+"#,
+    );
+    write_file(
+        &tempdir.path().join("lib.masm"),
+        r#"pub proc entry
+    push.1
+    drop
+end
+"#,
+    );
+
+    let mut context = TestContext::new();
+    let package = context
+        .assemble_library_package(&manifest_path, Some("dev"))
+        .expect("debug build should succeed");
+
+    let debug_sources = package
+        .sections
+        .iter()
+        .find(|section| section.id == SectionId::DEBUG_SOURCES)
+        .expect("package should contain DEBUG_SOURCES");
+    let debug_functions = package
+        .sections
+        .iter()
+        .find(|section| section.id == SectionId::DEBUG_FUNCTIONS)
+        .expect("package should contain DEBUG_FUNCTIONS");
+    let debug_types = package
+        .sections
+        .iter()
+        .find(|section| section.id == SectionId::DEBUG_TYPES)
+        .expect("package should contain DEBUG_TYPES");
+
+    let mut sources_reader = SliceReader::new(debug_sources.data.as_ref());
+    let debug_sources = DebugSourcesSection::read_from(&mut sources_reader)
+        .expect("DEBUG_SOURCES should deserialize");
+    assert_eq!(debug_sources.version, 1);
+    assert_eq!(debug_sources.files.len(), 1);
+
+    let mut functions_reader = SliceReader::new(debug_functions.data.as_ref());
+    let debug_functions = DebugFunctionsSection::read_from(&mut functions_reader)
+        .expect("DEBUG_FUNCTIONS should deserialize");
+    assert_eq!(debug_functions.version, 1);
+    assert_eq!(debug_functions.functions.len(), 1);
+
+    let mut types_reader = SliceReader::new(debug_types.data.as_ref());
+    let debug_types =
+        DebugTypesSection::read_from(&mut types_reader).expect("DEBUG_TYPES should deserialize");
+    assert_eq!(debug_types.version, 1);
 }
 
 #[test]
