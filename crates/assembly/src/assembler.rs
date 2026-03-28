@@ -791,7 +791,15 @@ impl Assembler {
 
         let library = Library::new(Arc::new(mast_forest), exports)?;
         let manifest = PackageManifest::from_library(&library);
-        let debug_info = self.emit_debug_info.then(|| self.debug_info.clone());
+        let debug_info = self.emit_debug_info.then(|| {
+            #[cfg_attr(not(feature = "std"), expect(unused_mut))]
+            let mut debug_info = self.debug_info.clone();
+            #[cfg(feature = "std")]
+            if let Some(trimmer) = self.source_path_trimmer() {
+                debug_info.trim_paths(&trimmer);
+            }
+            debug_info
+        });
 
         Ok(AssemblyProduct::new(kind, Arc::new(library), None, manifest, debug_info))
     }
@@ -815,7 +823,15 @@ impl Assembler {
         });
         let library = Arc::new(Library::new(mast, BTreeMap::from_iter([(entry, entrypoint)]))?);
         let manifest = PackageManifest::from_library(&library);
-        let debug_info = self.emit_debug_info.then(|| self.debug_info.clone());
+        let debug_info = self.emit_debug_info.then(|| {
+            #[cfg_attr(not(feature = "std"), expect(unused_mut))]
+            let mut debug_info = self.debug_info.clone();
+            #[cfg(feature = "std")]
+            if let Some(trimmer) = self.source_path_trimmer() {
+                debug_info.trim_paths(&trimmer);
+            }
+            debug_info
+        });
 
         Ok(AssemblyProduct::new(
             TargetType::Executable,
@@ -833,9 +849,23 @@ impl Assembler {
         }
 
         if self.trim_paths {
-            // Package-level debug sections are introduced separately from core assembly artifacts,
-            // so there is nothing to rewrite here yet.
+            #[cfg(feature = "std")]
+            if let Some(trimmer) = self.source_path_trimmer() {
+                mast_forest.debug_info_mut().rewrite_source_locations(
+                    |location| trimmer.trim_location(location),
+                    |location| trimmer.trim_file_line_col(location),
+                );
+            }
         }
+    }
+
+    #[cfg(feature = "std")]
+    fn source_path_trimmer(&self) -> Option<debuginfo::SourcePathTrimmer> {
+        if !self.trim_paths {
+            return None;
+        }
+
+        std::env::current_dir().ok().map(debuginfo::SourcePathTrimmer::new)
     }
 
     /// Compile the uncompiled procedure in the linked module graph which are members of the
@@ -925,7 +955,7 @@ impl Assembler {
 
                     // Record the debug info for this procedure
                     self.debug_info
-                        .register_procedure_debug_info(&procedure, &self.source_manager)?;
+                        .register_procedure_debug_info(&procedure, self.source_manager.as_ref())?;
 
                     // Cache the compiled procedure
                     drop(proc);

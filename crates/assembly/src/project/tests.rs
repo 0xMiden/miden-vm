@@ -1,4 +1,4 @@
-use std::{process::Command, string::String};
+use std::{path::Path, process::Command, string::String};
 
 use miden_assembly_syntax::source_file;
 use miden_core::{
@@ -263,6 +263,78 @@ end
     let debug_types =
         DebugTypesSection::read_from(&mut types_reader).expect("DEBUG_TYPES should deserialize");
     assert_eq!(debug_types.version, 1);
+}
+
+#[test]
+fn trim_paths_rewrites_mast_and_package_debug_paths() {
+    let cwd = std::env::current_dir().unwrap();
+    let tempdir = tempfile::Builder::new().prefix("trim-paths-").tempdir_in(&cwd).unwrap();
+    let manifest_path = tempdir.path().join("miden-project.toml");
+    write_file(
+        &manifest_path,
+        r#"[package]
+name = "trimmed"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+
+[profile.dev]
+trim-paths = true
+"#,
+    );
+    write_file(
+        &tempdir.path().join("lib.masm"),
+        r#"pub proc entry
+    push.1
+    push.2
+    add
+end
+"#,
+    );
+
+    let mut context = TestContext::new();
+    let package = context
+        .assemble_library_package(&manifest_path, Some("dev"))
+        .expect("trim-paths build should succeed");
+    let tempdir_prefix = tempdir.path().display().to_string();
+
+    let asm_op_path = package
+        .mast
+        .mast_forest()
+        .debug_info()
+        .asm_ops()
+        .iter()
+        .find_map(|asm_op| asm_op.location().map(|location| location.uri.path().to_string()))
+        .expect("assembled package should contain asm-op locations");
+    assert!(
+        !asm_op_path.contains(tempdir_prefix.as_str()),
+        "asm-op path was not trimmed: {asm_op_path}"
+    );
+    assert!(
+        !Path::new(&asm_op_path).is_absolute(),
+        "asm-op path remained absolute: {asm_op_path}"
+    );
+
+    let debug_sources = package
+        .sections
+        .iter()
+        .find(|section| section.id == SectionId::DEBUG_SOURCES)
+        .expect("package should contain DEBUG_SOURCES");
+    let mut sources_reader = SliceReader::new(debug_sources.data.as_ref());
+    let debug_sources = DebugSourcesSection::read_from(&mut sources_reader)
+        .expect("DEBUG_SOURCES should deserialize");
+    assert!(!debug_sources.files.is_empty());
+    for path in debug_sources.strings.iter() {
+        assert!(
+            !path.contains(tempdir_prefix.as_str()),
+            "package debug path was not trimmed: {path}"
+        );
+        assert!(
+            !Path::new(path.as_ref()).is_absolute(),
+            "package debug path remained absolute: {path}"
+        );
+    }
 }
 
 #[test]
