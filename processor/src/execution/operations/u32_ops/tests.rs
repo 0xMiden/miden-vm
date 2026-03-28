@@ -236,9 +236,7 @@ fn test_u32assert_err_wrapper_assembled() {
     // error message makes it through the full execute_sync pipeline.
     let source_manager = Arc::new(DefaultSourceManager::default());
     let program = Assembler::new(source_manager)
-        .assemble_program(
-            r#"begin push.4294967296 u32assert.err="value must fit in u32" end"#,
-        )
+        .assemble_program(r#"begin push.4294967296 u32assert.err="value must fit in u32" end"#)
         .expect("program should assemble");
 
     let mut host = DefaultHost::default();
@@ -269,9 +267,9 @@ fn test_u32assertw_err_wrapper_assembled() {
     // Push a word where the third element exceeds u32::MAX; verify the error message
     // is resolved end-to-end through execute_sync.
     let source_manager = Arc::new(DefaultSourceManager::default());
+    // Stack (top->bottom): 1 2 2^32 4 — element at position 2 is out of range
     let program = Assembler::new(source_manager)
         .assemble_program(
-            // Stack (top→bottom): 1 2 2^32 4  — element at position 2 is out of range
             r#"begin push.4 push.4294967296 push.2 push.1 u32assertw.err="word contains non-u32 element" end"#,
         )
         .expect("program should assemble");
