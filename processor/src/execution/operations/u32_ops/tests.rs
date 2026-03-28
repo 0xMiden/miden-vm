@@ -223,10 +223,7 @@ fn test_op_u32assert2_assembled_err_msg_lookup() {
                 Some("value exceeded u32 range"),
                 "err_msg should be resolved from the MastForest, got {err_msg:?}"
             );
-            assert!(
-                !invalid_values.is_empty(),
-                "at least one invalid value should be reported"
-            );
+            assert!(!invalid_values.is_empty(), "at least one invalid value should be reported");
         },
         other => panic!("expected U32AssertionFailed, got {other:?}"),
     }
