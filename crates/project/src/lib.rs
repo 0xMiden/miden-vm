@@ -117,13 +117,13 @@ impl Project {
         source_manager: &dyn miden_assembly_syntax::debuginfo::SourceManager,
     ) -> Result<Self, Report> {
         let path = path.as_ref();
-        let (manifest_path, check_first) = if path.is_dir() {
-            (path.join("miden-project.toml").canonicalize().map_err(Report::msg)?, true)
+        let manifest_path = if path.is_dir() {
+            path.join("miden-project.toml").canonicalize().map_err(Report::msg)?
         } else {
-            (path.canonicalize().map_err(Report::msg)?, false)
+            path.canonicalize().map_err(Report::msg)?
         };
 
-        Self::try_load_as_workspace_member(None, &manifest_path, check_first, source_manager)
+        Self::try_load_as_workspace_member(None, &manifest_path, source_manager)
     }
 
     /// Load a project manifest from `path`, expected to be named `name`
@@ -136,26 +136,23 @@ impl Project {
         source_manager: &dyn miden_assembly_syntax::debuginfo::SourceManager,
     ) -> Result<Self, Report> {
         let path = path.as_ref();
-        let (manifest_path, check_first) = if path.is_dir() {
-            (path.join("miden-project.toml").canonicalize().map_err(Report::msg)?, true)
+        let manifest_path = if path.is_dir() {
+            path.join("miden-project.toml").canonicalize().map_err(Report::msg)?
         } else {
-            (path.canonicalize().map_err(Report::msg)?, false)
+            path.canonicalize().map_err(Report::msg)?
         };
 
-        Self::try_load_as_workspace_member(Some(name), &manifest_path, check_first, source_manager)
+        Self::try_load_as_workspace_member(Some(name), &manifest_path, source_manager)
     }
 
     fn try_load_as_workspace_member(
         name: Option<&str>,
         manifest_path: impl AsRef<std::path::Path>,
-        include_initial_path: bool,
         source_manager: &dyn miden_assembly_syntax::debuginfo::SourceManager,
     ) -> Result<Self, Report> {
         use miden_assembly_syntax::debuginfo::SourceManagerExt;
 
         let manifest_path = manifest_path.as_ref();
-
-        let ignore_first_ancestor = !include_initial_path;
         let ancestors = manifest_path
             .parent()
             .ok_or_else(|| {
@@ -164,8 +161,7 @@ impl Project {
                     manifest_path.display()
                 ))
             })?
-            .ancestors()
-            .skip(ignore_first_ancestor as usize);
+            .ancestors();
 
         let initial_package_dir = manifest_path.parent();
         for ancestor in ancestors {

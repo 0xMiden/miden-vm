@@ -248,6 +248,48 @@ path = "lib.masm"
 }
 
 #[test]
+fn load_project_reference_resolves_workspace_manifest_file_inputs() -> Result<(), Report> {
+    let tempdir = TempDir::new().unwrap();
+    let root = tempdir.path().join("workspace");
+    let dep_dir = root.join("dep");
+    fs::create_dir_all(&dep_dir).unwrap();
+
+    let workspace_manifest = root.join("miden-project.toml");
+    fs::write(
+        &workspace_manifest,
+        r#"[workspace]
+members = ["dep"]
+"#,
+    )
+    .unwrap();
+
+    let dep_manifest = dep_dir.join("miden-project.toml");
+    fs::write(
+        &dep_manifest,
+        r#"[package]
+name = "dep"
+version = "1.2.3"
+
+[lib]
+path = "lib.masm"
+"#,
+    )
+    .unwrap();
+    fs::write(dep_dir.join("lib.masm"), "export.foo\nend\n").unwrap();
+    let dep_manifest = dep_manifest.canonicalize().unwrap();
+
+    let context = TestContext::default();
+    let project =
+        Project::load_project_reference("dep", &workspace_manifest, &context.source_manager)?;
+
+    assert!(project.is_workspace_member());
+    assert_eq!(project.manifest_path(), Some(dep_manifest.as_path()));
+    assert_eq!(format!("{}", project.package().version()), "1.2.3");
+
+    Ok(())
+}
+
+#[test]
 fn workspace_rejects_duplicate_member_package_names() {
     let tempdir = TempDir::new().unwrap();
     let root = tempdir.path().join("workspace");
