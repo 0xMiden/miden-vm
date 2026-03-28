@@ -916,13 +916,8 @@ impl Assembler {
                     // be added to the forest.
 
                     // Record the debug info for this procedure
-                    self.debug_info.emit_procedure_debug_info(
-                        &self.source_manager,
-                        proc.span(),
-                        &path,
-                        signature,
-                        &procedure,
-                    )?;
+                    self.debug_info
+                        .register_procedure_debug_info(&procedure, &self.source_manager)?;
 
                     // Cache the compiled procedure
                     drop(proc);
