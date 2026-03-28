@@ -3,7 +3,7 @@ use itertools::Itertools;
 
 use super::{EmptySubtreeRoots, MerkleError, SmtForest, Word};
 use crate::{
-    EMPTY_WORD, Felt, ONE, WORD_SIZE, ZERO,
+    EMPTY_WORD, Felt, ONE, ZERO,
     merkle::{
         int_to_node,
         smt::{SMT_DEPTH, SmtProofError},
@@ -16,7 +16,7 @@ use crate::{
 #[test]
 fn test_insert_root_not_in_store() -> Result<(), MerkleError> {
     let mut forest = SmtForest::new();
-    let word = Word::new([ONE; WORD_SIZE]);
+    let word = Word::new([ONE; Word::NUM_ELEMENTS]);
     assert_matches!(
         forest.insert(word, word, word),
         Err(MerkleError::RootNotInStore(_)),
@@ -30,8 +30,8 @@ fn test_insert_root_not_in_store() -> Result<(), MerkleError> {
 fn test_insert_root_empty() -> Result<(), MerkleError> {
     let mut forest = SmtForest::new();
     let empty_tree_root = *EmptySubtreeRoots::entry(SMT_DEPTH, 0);
-    let key = Word::new([ZERO; WORD_SIZE]);
-    let value = Word::new([ONE; WORD_SIZE]);
+    let key = Word::new([ZERO; Word::NUM_ELEMENTS]);
+    let value = Word::new([ONE; Word::NUM_ELEMENTS]);
     assert_eq!(
         forest.insert(empty_tree_root, key, value)?,
         Word::new([
@@ -49,8 +49,8 @@ fn test_insert_multiple_values() -> Result<(), MerkleError> {
     let mut forest = SmtForest::new();
 
     let empty_tree_root = *EmptySubtreeRoots::entry(SMT_DEPTH, 0);
-    let key = Word::new([ZERO; WORD_SIZE]);
-    let value = Word::new([ONE; WORD_SIZE]);
+    let key = Word::new([ZERO; Word::NUM_ELEMENTS]);
+    let value = Word::new([ONE; Word::NUM_ELEMENTS]);
     let new_root = forest.insert(empty_tree_root, key, value)?;
     assert_eq!(
         new_root,
@@ -99,9 +99,9 @@ fn test_batch_insert() -> Result<(), MerkleError> {
     let empty_tree_root = *EmptySubtreeRoots::entry(SMT_DEPTH, 0);
 
     let values = vec![
-        (Word::new([ZERO; WORD_SIZE]), Word::new([ONE; WORD_SIZE])),
-        (Word::new([ZERO, ONE, ZERO, ONE]), Word::new([ONE; WORD_SIZE])),
-        (Word::new([ZERO, ONE, ZERO, ZERO]), Word::new([ONE; WORD_SIZE])),
+        (Word::new([ZERO; Word::NUM_ELEMENTS]), Word::new([ONE; Word::NUM_ELEMENTS])),
+        (Word::new([ZERO, ONE, ZERO, ONE]), Word::new([ONE; Word::NUM_ELEMENTS])),
+        (Word::new([ZERO, ONE, ZERO, ZERO]), Word::new([ONE; Word::NUM_ELEMENTS])),
     ];
 
     values.into_iter().permutations(3).for_each(|values| {
@@ -130,7 +130,7 @@ fn test_batch_insert() -> Result<(), MerkleError> {
 #[test]
 fn test_open_root_not_in_store() -> Result<(), MerkleError> {
     let forest = SmtForest::new();
-    let word = Word::new([ONE; WORD_SIZE]);
+    let word = Word::new([ONE; Word::NUM_ELEMENTS]);
     assert_matches!(
         forest.open(word, word),
         Err(MerkleError::RootNotInStore(_)),
@@ -178,8 +178,8 @@ fn test_open_root_in_store() -> Result<(), MerkleError> {
 fn test_empty_word_removes_key() -> Result<(), MerkleError> {
     let mut forest = SmtForest::new();
     let empty_root = *EmptySubtreeRoots::entry(SMT_DEPTH, 0);
-    let key = Word::from([1_u32; WORD_SIZE]);
-    let value = Word::from([2_u32; WORD_SIZE]);
+    let key = Word::from([1_u32; Word::NUM_ELEMENTS]);
+    let value = Word::from([2_u32; Word::NUM_ELEMENTS]);
 
     let root_with_value = forest.insert(empty_root, key, value)?;
     let root_after_remove = forest.insert(root_with_value, key, EMPTY_WORD)?;
@@ -200,16 +200,16 @@ fn test_multiple_versions_of_same_key() -> Result<(), MerkleError> {
     let mut forest = SmtForest::new();
 
     let empty_tree_root = *EmptySubtreeRoots::entry(SMT_DEPTH, 0);
-    let key = Word::new([ZERO; WORD_SIZE]);
+    let key = Word::new([ZERO; Word::NUM_ELEMENTS]);
 
     // Insert the same key with different values, creating multiple roots
-    let value1 = Word::new([ONE; WORD_SIZE]);
+    let value1 = Word::new([ONE; Word::NUM_ELEMENTS]);
     let root1 = forest.insert(empty_tree_root, key, value1)?;
 
-    let value2 = Word::new([Felt::new(2); WORD_SIZE]);
+    let value2 = Word::new([Felt::new(2); Word::NUM_ELEMENTS]);
     let root2 = forest.insert(root1, key, value2)?;
 
-    let value3 = Word::new([Felt::new(3); WORD_SIZE]);
+    let value3 = Word::new([Felt::new(3); Word::NUM_ELEMENTS]);
     let root3 = forest.insert(root2, key, value3)?;
 
     // All three roots should be different
@@ -254,8 +254,8 @@ fn test_pop_roots() -> Result<(), MerkleError> {
     let mut forest = SmtForest::new();
 
     let empty_tree_root = *EmptySubtreeRoots::entry(SMT_DEPTH, 0);
-    let key = Word::new([ZERO; WORD_SIZE]);
-    let value = Word::new([ONE; WORD_SIZE]);
+    let key = Word::new([ZERO; Word::NUM_ELEMENTS]);
+    let value = Word::new([ONE; Word::NUM_ELEMENTS]);
     let root = forest.insert(empty_tree_root, key, value)?;
 
     assert_eq!(forest.roots.len(), 1);
@@ -274,8 +274,8 @@ fn test_pop_and_reinsert_same_tree() -> Result<(), MerkleError> {
     let mut forest = SmtForest::new();
 
     let empty_tree_root = *EmptySubtreeRoots::entry(SMT_DEPTH, 0);
-    let key = Word::new([ZERO; WORD_SIZE]);
-    let value = Word::new([ONE; WORD_SIZE]);
+    let key = Word::new([ZERO; Word::NUM_ELEMENTS]);
+    let value = Word::new([ONE; Word::NUM_ELEMENTS]);
 
     // Insert a key, then pop the tree
     let root1 = forest.insert(empty_tree_root, key, value)?;
@@ -302,7 +302,7 @@ fn test_pop_and_reinsert_same_tree() -> Result<(), MerkleError> {
 fn test_removing_empty_smt_from_forest() {
     let mut forest = SmtForest::new();
     let empty_tree_root = *EmptySubtreeRoots::entry(SMT_DEPTH, 0);
-    let non_empty_root = Word::new([ONE; WORD_SIZE]);
+    let non_empty_root = Word::new([ONE; Word::NUM_ELEMENTS]);
 
     // Popping zero SMTs from forest should be a no-op (no panic or error)
     forest.pop_smts(vec![]);
@@ -320,8 +320,8 @@ fn test_empty_root_never_removed() -> Result<(), MerkleError> {
     // popping it does not corrupt the store.
     let mut forest = SmtForest::new();
     let empty_root = *EmptySubtreeRoots::entry(SMT_DEPTH, 0);
-    let key = Word::new([ZERO; WORD_SIZE]);
-    let value = Word::new([ONE; WORD_SIZE]);
+    let key = Word::new([ZERO; Word::NUM_ELEMENTS]);
+    let value = Word::new([ONE; Word::NUM_ELEMENTS]);
 
     // batch_insert with no entries returns the empty root — it must not be registered
     let root = forest.batch_insert(empty_root, vec![])?;

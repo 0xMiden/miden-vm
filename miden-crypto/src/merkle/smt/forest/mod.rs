@@ -25,7 +25,7 @@ mod tests;
 ///
 /// ```rust
 /// use miden_crypto::{
-///     Felt, ONE, WORD_SIZE, Word, ZERO,
+///     Felt, ONE, Word, ZERO,
 ///     merkle::{
 ///         EmptySubtreeRoots,
 ///         smt::{MAX_LEAF_ENTRIES, SMT_DEPTH, SmtForest},
@@ -37,15 +37,15 @@ mod tests;
 ///
 /// // Insert a key-value pair into an SMT with an empty root
 /// let empty_tree_root = *EmptySubtreeRoots::entry(SMT_DEPTH, 0);
-/// let key = Word::new([ZERO; WORD_SIZE]);
-/// let value = Word::new([ONE; WORD_SIZE]);
+/// let key = Word::new([ZERO; Word::NUM_ELEMENTS]);
+/// let value = Word::new([ONE; Word::NUM_ELEMENTS]);
 /// let new_root = forest.insert(empty_tree_root, key, value).unwrap();
 ///
 /// // Insert multiple key-value pairs
 /// let mut entries = Vec::new();
 /// for i in 0..MAX_LEAF_ENTRIES {
-///     let key = Word::new([Felt::new(i as u64); WORD_SIZE]);
-///     let value = Word::new([Felt::new((i + 1) as u64); WORD_SIZE]);
+///     let key = Word::new([Felt::new(i as u64); Word::NUM_ELEMENTS]);
+///     let value = Word::new([Felt::new((i + 1) as u64); Word::NUM_ELEMENTS]);
 ///     entries.push((key, value));
 /// }
 /// let new_root = forest.batch_insert(new_root, entries.into_iter()).unwrap();
