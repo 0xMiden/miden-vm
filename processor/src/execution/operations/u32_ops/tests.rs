@@ -229,6 +229,75 @@ fn test_op_u32assert2_assembled_err_msg_lookup() {
     }
 }
 
+#[test]
+fn test_u32assert_err_wrapper_assembled() {
+    // `u32assert.err=...` lowers to [Pad, U32assert2(err_code), Drop].
+    // Push a value > u32::MAX so the assertion fires; verify the resolved
+    // error message makes it through the full execute_sync pipeline.
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let program = Assembler::new(source_manager)
+        .assemble_program(
+            r#"begin push.4294967296 u32assert.err="value must fit in u32" end"#,
+        )
+        .expect("program should assemble");
+
+    let mut host = DefaultHost::default();
+    let exec_err = FastProcessor::new(StackInputs::default())
+        .execute_sync(&program, &mut host)
+        .expect_err("expected u32 assertion failure");
+
+    let op_err = match exec_err {
+        ExecutionError::OperationError { err, .. } => err,
+        other => panic!("expected OperationError, got {other:?}"),
+    };
+    match op_err {
+        OperationError::U32AssertionFailed { err_msg, ref invalid_values, .. } => {
+            assert_eq!(
+                err_msg.as_deref(),
+                Some("value must fit in u32"),
+                "err_msg should be resolved from MastForest, got {err_msg:?}"
+            );
+            assert!(!invalid_values.is_empty(), "at least one invalid value expected");
+        },
+        other => panic!("expected U32AssertionFailed, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_u32assertw_err_wrapper_assembled() {
+    // `u32assertw.err=...` lowers to two U32assert2(err_code) ops via `u32assertw`.
+    // Push a word where the third element exceeds u32::MAX; verify the error message
+    // is resolved end-to-end through execute_sync.
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let program = Assembler::new(source_manager)
+        .assemble_program(
+            // Stack (top→bottom): 1 2 2^32 4  — element at position 2 is out of range
+            r#"begin push.4 push.4294967296 push.2 push.1 u32assertw.err="word contains non-u32 element" end"#,
+        )
+        .expect("program should assemble");
+
+    let mut host = DefaultHost::default();
+    let exec_err = FastProcessor::new(StackInputs::default())
+        .execute_sync(&program, &mut host)
+        .expect_err("expected u32 assertion failure");
+
+    let op_err = match exec_err {
+        ExecutionError::OperationError { err, .. } => err,
+        other => panic!("expected OperationError, got {other:?}"),
+    };
+    match op_err {
+        OperationError::U32AssertionFailed { err_msg, ref invalid_values, .. } => {
+            assert_eq!(
+                err_msg.as_deref(),
+                Some("word contains non-u32 element"),
+                "err_msg should be resolved from MastForest, got {err_msg:?}"
+            );
+            assert!(!invalid_values.is_empty(), "at least one invalid value expected");
+        },
+        other => panic!("expected U32AssertionFailed, got {other:?}"),
+    }
+}
+
 // ARITHMETIC OPERATIONS
 // --------------------------------------------------------------------------------------------
 
