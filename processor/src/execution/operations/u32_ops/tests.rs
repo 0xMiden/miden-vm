@@ -75,42 +75,67 @@ proptest! {
 }
 
 #[test]
-fn test_op_u32assert2_both_invalid() {
-    // Stack: [invalid1, invalid2] with invalid1 at top - both > u32::MAX
+fn test_op_u32assert2_both_invalid_with_err_code() {
+    // Both values > u32::MAX with a custom err_code: must return FailedAssertion
     let mut processor = FastProcessor::new(
         StackInputs::new(&[Felt::new(4294967296u64), Felt::new(4294967297u64)]).unwrap(),
     );
     let mut tracer = NoopTracer;
+    let err_code = Felt::from_u32(123u32);
 
-    let result =
-        op_u32assert2(&mut processor, Felt::from_u32(123u32), &mut tracer, &MastForest::default());
-    assert!(result.is_err());
+    let err =
+        op_u32assert2(&mut processor, err_code, &mut tracer, &MastForest::default()).unwrap_err();
+    assert!(
+        matches!(err, OperationError::FailedAssertion { err_code: c, .. } if c == err_code),
+        "expected FailedAssertion with err_code 123"
+    );
+}
+
+#[test]
+fn test_op_u32assert2_both_invalid_no_err_code() {
+    // Both values > u32::MAX with err_code=0: must return NotU32Values with both values
+    let invalid1 = 4294967296u64; // 2^32
+    let invalid2 = 4294967297u64; // 2^32 + 1
+    let mut processor = FastProcessor::new(
+        StackInputs::new(&[Felt::new(invalid1), Felt::new(invalid2)]).unwrap(),
+    );
+    let mut tracer = NoopTracer;
+
+    let err = op_u32assert2(&mut processor, ZERO, &mut tracer, &MastForest::default()).unwrap_err();
+    assert!(
+        matches!(err, OperationError::NotU32Values { ref values } if values.len() == 2),
+        "expected NotU32Values with 2 invalid values"
+    );
 }
 
 #[test]
 fn test_op_u32assert2_second_invalid() {
-    // Stack: [valid, invalid] with valid at top - second value > u32::MAX
+    // Stack: [valid, invalid] with valid at top - second value > u32::MAX, no err_code
     let mut processor = FastProcessor::new(
         StackInputs::new(&[Felt::new(1000u64), Felt::new(4294967297u64)]).unwrap(),
     );
     let mut tracer = NoopTracer;
 
-    let result =
-        op_u32assert2(&mut processor, Felt::from_u32(456u32), &mut tracer, &MastForest::default());
-    assert!(result.is_err());
+    let err = op_u32assert2(&mut processor, ZERO, &mut tracer, &MastForest::default()).unwrap_err();
+    assert!(
+        matches!(err, OperationError::NotU32Values { .. }),
+        "expected NotU32Values when err_code is zero"
+    );
 }
 
 #[test]
 fn test_op_u32assert2_first_invalid() {
-    // Stack: [invalid, valid] with invalid at top - first value > u32::MAX
+    // Stack: [invalid, valid] with invalid at top - first value > u32::MAX, no err_code
     let mut processor = FastProcessor::new(
         StackInputs::new(&[Felt::new(4294967296u64), Felt::new(2000u64)]).unwrap(),
     );
     let mut tracer = NoopTracer;
 
-    let result =
-        op_u32assert2(&mut processor, Felt::from_u32(789), &mut tracer, &MastForest::default());
-    assert!(result.is_err());
+    let err = op_u32assert2(&mut processor, ZERO, &mut tracer, &MastForest::default()).unwrap_err();
+    assert!(
+        matches!(err, OperationError::NotU32Values { .. }),
+        "expected NotU32Values when err_code is zero"
+    );
 }
 
 #[test]

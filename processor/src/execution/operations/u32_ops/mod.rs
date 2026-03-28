@@ -308,9 +308,29 @@ pub(super) fn op_u32assert2<P: Processor, T: Tracer>(
     let first = processor.stack().get(0);
     let second = processor.stack().get(1);
 
-    if first.as_canonical_u64() > U32_MAX || second.as_canonical_u64() > U32_MAX {
-        let err_msg = program.resolve_error_message(err_code);
-        return Err(OperationError::FailedAssertion { err_code, err_msg });
+    let first_invalid = first.as_canonical_u64() > U32_MAX;
+    let second_invalid = second.as_canonical_u64() > U32_MAX;
+
+    if first_invalid || second_invalid {
+        if err_code != ZERO {
+            // A custom error code was provided: surface it as a FailedAssertion so
+            // callers can distinguish *which* assertion fired.
+            let err_msg = program.resolve_error_message(err_code);
+            return Err(OperationError::FailedAssertion { err_code, err_msg });
+        }
+
+        // No custom error code: report the specific out-of-range values so
+        // the diagnostic layer can name them (matches historical behaviour and
+        // what u32assert / u32not / u32assertw expect when they internally
+        // lower to U32assert2(ZERO)).
+        let mut invalid_values = Vec::with_capacity(2);
+        if first_invalid {
+            invalid_values.push(first);
+        }
+        if second_invalid {
+            invalid_values.push(second);
+        }
+        return Err(OperationError::NotU32Values { values: invalid_values });
     }
 
     tracer.record_u32_range_checks(processor.system().clock(), first, second);
