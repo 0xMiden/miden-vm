@@ -345,6 +345,280 @@ end
 }
 
 #[test]
+fn assembles_mixed_path_and_git_dependencies_with_shared_registry_semver_resolution() {
+    let tempdir = TempDir::new().unwrap();
+    let mut context = TestContext::new();
+
+    let shared_120 =
+        context.assemble_library_package_with_export("shared", "1.2.0", "deps::shared::leaf", []);
+    let shared_120_digest = shared_120.digest();
+    context.registry_mut().add_package(shared_120.into());
+
+    let shared_130 =
+        context.assemble_library_package_with_export("shared", "1.3.0", "deps::shared::leaf", []);
+    let shared_130_digest = shared_130.digest();
+    context.registry_mut().add_package(shared_130.into());
+
+    let pathdep_dir = tempdir.path().join("pathdep");
+    write_file(
+        &pathdep_dir.join("miden-project.toml"),
+        r#"[package]
+name = "pathdep"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+namespace = "deps::pathdep"
+
+[dependencies]
+shared = "^1.0.0"
+"#,
+    );
+    write_file(
+        &pathdep_dir.join("lib.masm"),
+        r#"use ::deps::shared
+
+pub proc call_shared
+    exec.shared::leaf
+    push.1
+    drop
+end
+"#,
+    );
+
+    let gitdep_repo = tempdir.path().join("gitdep");
+    write_file(
+        &gitdep_repo.join("miden-project.toml"),
+        r#"[package]
+name = "gitdep"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+namespace = "deps::gitdep"
+
+[dependencies]
+shared = "=1.2.0"
+"#,
+    );
+    write_file(
+        &gitdep_repo.join("lib.masm"),
+        r#"use ::deps::shared
+
+pub proc call_shared
+    exec.shared::leaf
+    push.2
+    drop
+end
+"#,
+    );
+    run_git(&gitdep_repo, &["init", "-b", "main"]);
+    run_git(&gitdep_repo, &["config", "user.email", "test@example.com"]);
+    run_git(&gitdep_repo, &["config", "user.name", "Test"]);
+    run_git(&gitdep_repo, &["config", "commit.gpgsign", "false"]);
+    run_git(&gitdep_repo, &["add", "."]);
+    run_git(&gitdep_repo, &["commit", "-m", "init"]);
+
+    let root_dir = tempdir.path().join("root");
+    let root_manifest = root_dir.join("miden-project.toml");
+    write_file(
+        &root_manifest,
+        &format!(
+            r#"[package]
+name = "root"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+
+[dependencies]
+pathdep = {{ path = "../pathdep" }}
+gitdep = {{ git = "{}", branch = "main" }}
+"#,
+            gitdep_repo.display()
+        ),
+    );
+    write_file(
+        &root_dir.join("lib.masm"),
+        r#"use ::deps::pathdep
+use ::deps::gitdep
+
+pub proc entry
+    exec.pathdep::call_shared
+    exec.gitdep::call_shared
+end
+"#,
+    );
+
+    let package = context
+        .assemble_library_package(&root_manifest, None)
+        .expect("compatible shared registry dependency should assemble");
+    let shared_dependency = package
+        .manifest
+        .dependencies()
+        .find(|dependency| &dependency.name == "shared")
+        .expect("root package should retain the shared runtime dependency");
+    assert_eq!(shared_dependency.version.to_string(), "1.2.0");
+    assert_eq!(shared_dependency.digest, shared_120_digest);
+
+    let shared_loads = context
+        .registry()
+        .loaded_packages()
+        .into_iter()
+        .filter(|entry| entry.starts_with("shared@"))
+        .collect::<Vec<_>>();
+    assert!(
+        shared_loads
+            .iter()
+            .any(|entry| entry == &format!("shared@1.2.0#{shared_120_digest}"))
+    );
+    assert!(
+        !shared_loads
+            .iter()
+            .any(|entry| entry == &format!("shared@1.3.0#{shared_130_digest}"))
+    );
+}
+
+#[test]
+fn assembles_mixed_path_and_git_dependencies_with_shared_registry_digest_resolution() {
+    let tempdir = TempDir::new().unwrap();
+    let mut context = TestContext::new();
+
+    let shared_100 =
+        context.assemble_library_package_with_export("shared", "1.0.0", "deps::shared::leaf", []);
+    let shared_digest = shared_100.digest();
+    context.registry_mut().add_package(shared_100.into());
+
+    let shared_200 =
+        context.assemble_library_package_with_export("shared", "2.0.0", "deps::shared::leaf", []);
+    assert_eq!(shared_200.digest(), shared_digest);
+    context.registry_mut().add_package(shared_200.into());
+
+    let pathdep_dir = tempdir.path().join("pathdep");
+    write_file(
+        &pathdep_dir.join("miden-project.toml"),
+        &format!(
+            r#"[package]
+name = "pathdep"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+namespace = "deps::pathdep"
+
+[dependencies]
+shared = "{shared_digest}"
+"#
+        ),
+    );
+    write_file(
+        &pathdep_dir.join("lib.masm"),
+        r#"use ::deps::shared
+
+pub proc call_shared
+    exec.shared::leaf
+    push.1
+    drop
+end
+"#,
+    );
+
+    let gitdep_repo = tempdir.path().join("gitdep");
+    write_file(
+        &gitdep_repo.join("miden-project.toml"),
+        &format!(
+            r#"[package]
+name = "gitdep"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+namespace = "deps::gitdep"
+
+[dependencies]
+shared = "1.0.0#{shared_digest}"
+"#
+        ),
+    );
+    write_file(
+        &gitdep_repo.join("lib.masm"),
+        r#"use ::deps::shared
+
+pub proc call_shared
+    exec.shared::leaf
+    push.2
+    drop
+end
+"#,
+    );
+    run_git(&gitdep_repo, &["init", "-b", "main"]);
+    run_git(&gitdep_repo, &["config", "user.email", "test@example.com"]);
+    run_git(&gitdep_repo, &["config", "user.name", "Test"]);
+    run_git(&gitdep_repo, &["config", "commit.gpgsign", "false"]);
+    run_git(&gitdep_repo, &["add", "."]);
+    run_git(&gitdep_repo, &["commit", "-m", "init"]);
+
+    let root_dir = tempdir.path().join("root");
+    let root_manifest = root_dir.join("miden-project.toml");
+    write_file(
+        &root_manifest,
+        &format!(
+            r#"[package]
+name = "root"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+
+[dependencies]
+pathdep = {{ path = "../pathdep" }}
+gitdep = {{ git = "{}", branch = "main" }}
+"#,
+            gitdep_repo.display()
+        ),
+    );
+    write_file(
+        &root_dir.join("lib.masm"),
+        r#"use ::deps::pathdep
+use ::deps::gitdep
+
+pub proc entry
+    exec.pathdep::call_shared
+    exec.gitdep::call_shared
+end
+"#,
+    );
+
+    let package = context
+        .assemble_library_package(&root_manifest, None)
+        .expect("digest-compatible shared registry dependency should assemble");
+    let shared_dependency = package
+        .manifest
+        .dependencies()
+        .find(|dependency| &dependency.name == "shared")
+        .expect("root package should retain the shared runtime dependency");
+    assert_eq!(shared_dependency.version.to_string(), "1.0.0");
+    assert_eq!(shared_dependency.digest, shared_digest);
+
+    let shared_loads = context
+        .registry()
+        .loaded_packages()
+        .into_iter()
+        .filter(|entry| entry.starts_with("shared@"))
+        .collect::<Vec<_>>();
+    assert!(
+        shared_loads
+            .iter()
+            .any(|entry| entry == &format!("shared@1.0.0#{shared_digest}"))
+    );
+    assert!(
+        !shared_loads
+            .iter()
+            .any(|entry| entry == &format!("shared@2.0.0#{shared_digest}"))
+    );
+}
+
+#[test]
 fn runtime_dependency_conflict_requires_matching_digest() {
     let tempdir = TempDir::new().unwrap();
     let mut context = TestContext::new();
