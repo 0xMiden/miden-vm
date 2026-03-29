@@ -123,3 +123,7 @@ pub const MEMORY_D_INV_COL_IDX: usize = MEMORY_TRACE_OFFSET + memory::D_INV_COL_
 /// and same word as the previous operation.
 pub const MEMORY_FLAG_SAME_CONTEXT_AND_WORD: usize =
     MEMORY_TRACE_OFFSET + memory::FLAG_SAME_CONTEXT_AND_WORD;
+/// Global index of the low 16-bit address limb column in the memory chiplet trace.
+pub const MEMORY_ADDR_LO_COL_IDX: usize = MEMORY_TRACE_OFFSET + memory::ADDR_LO_COL_IDX;
+/// Global index of the high 16-bit address limb column in the memory chiplet trace.
+pub const MEMORY_ADDR_HI_COL_IDX: usize = MEMORY_TRACE_OFFSET + memory::ADDR_HI_COL_IDX;

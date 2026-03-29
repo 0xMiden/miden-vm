@@ -4,10 +4,10 @@ use core::fmt::Debug;
 use miden_air::trace::{
     RowIndex,
     chiplets::memory::{
-        CLK_COL_IDX, CTX_COL_IDX, D_INV_COL_IDX, D0_COL_IDX, D1_COL_IDX,
-        FLAG_SAME_CONTEXT_AND_WORD, IDX0_COL_IDX, IDX1_COL_IDX, IS_READ_COL_IDX,
-        IS_WORD_ACCESS_COL_IDX, MEMORY_ACCESS_ELEMENT, MEMORY_ACCESS_WORD, MEMORY_READ,
-        MEMORY_WRITE, V_COL_RANGE, WORD_COL_IDX,
+        ADDR_HI_COL_IDX, ADDR_LO_COL_IDX, CLK_COL_IDX, CTX_COL_IDX, D_INV_COL_IDX,
+        D0_COL_IDX, D1_COL_IDX, FLAG_SAME_CONTEXT_AND_WORD, IDX0_COL_IDX, IDX1_COL_IDX,
+        IS_READ_COL_IDX, IS_WORD_ACCESS_COL_IDX, MEMORY_ACCESS_ELEMENT, MEMORY_ACCESS_WORD,
+        MEMORY_READ, MEMORY_WRITE, V_COL_RANGE, WORD_COL_IDX,
     },
 };
 
@@ -277,6 +277,20 @@ impl Memory {
                     let (delta_hi, delta_lo) = split_u32_into_u16(delta);
                     range.add_range_checks(row, &[delta_lo, delta_hi]);
 
+                    // Also range-check the absolute word_addr via its 16-bit limbs.
+                    //
+                    // The delta range-checks above only prove that consecutive addresses
+                    // differ by < 2^32.  Without also range-checking the absolute address,
+                    // a dishonest prover could start the trace at word_addr = P − 1
+                    // (Goldilocks prime ≈ 2^64) and satisfy all delta constraints by
+                    // wrapping.  See `enforce_addr_range_check` in the AIR for details.
+                    let (addr_hi, addr_lo) = split_u32_into_u16(u64::from(addr));
+                    // The overflow guard (4 * addr_hi) ensures word_addr * 4 + 3 < 2^32,
+                    // i.e. every element address derived from this word fits in u32.
+                    let addr_hi_times_4 = u16::try_from((addr_hi as u32) * 4)
+                        .expect("addr_hi * 4 overflows u16; word_addr is out of valid range");
+                    range.add_range_checks(row, &[addr_lo, addr_hi, addr_hi_times_4]);
+
                     // update values for the next iteration of the loop
                     prev_ctx = ctx;
                     prev_addr = addr;
@@ -362,6 +376,13 @@ impl Memory {
                     } else {
                         trace.set(row, FLAG_SAME_CONTEXT_AND_WORD, ZERO);
                     };
+
+                    // Populate address limb columns: addr_lo = word_addr & 0xFFFF,
+                    // addr_hi = word_addr >> 16.  These are used by the AIR to enforce
+                    // that word_addr is a valid 32-bit value (see enforce_addr_range_check).
+                    let (addr_hi_u16, addr_lo_u16) = split_u32_into_u16(addr as u64);
+                    trace.set(row, ADDR_LO_COL_IDX, Felt::new(addr_lo_u16 as u64));
+                    trace.set(row, ADDR_HI_COL_IDX, Felt::new(addr_hi_u16 as u64));
 
                     // update values for the next iteration of the loop
                     prev_ctx = ctx;

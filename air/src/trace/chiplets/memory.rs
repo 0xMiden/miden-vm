@@ -6,7 +6,7 @@ use super::{Felt, ONE, Range, ZERO, create_range};
 // ================================================================================================
 
 /// Number of columns needed to record an execution trace of the memory chiplet.
-pub const TRACE_WIDTH: usize = 15;
+pub const TRACE_WIDTH: usize = 17;
 
 // --- OPERATION SELECTORS ------------------------------------------------------------------------
 
@@ -78,3 +78,21 @@ pub const D_INV_COL_IDX: usize = D1_COL_IDX + 1;
 /// Column to hold the flag indicating whether the current memory operation is in the same word and
 /// same context as the previous operation.
 pub const FLAG_SAME_CONTEXT_AND_WORD: usize = D_INV_COL_IDX + 1;
+/// Column to hold the low 16 bits of `word_addr`, used to range-check the absolute address
+/// and close the AIR soundness gap described in [memory constraints docs].
+///
+/// A malicious prover could otherwise supply a `word_addr` larger than 2^32 in the chiplet
+/// trace; the existing delta range-checks only bound *differences* between consecutive
+/// addresses, not the absolute starting value.  By committing to and range-checking the
+/// 16-bit limbs we close that gap without adding new global trace columns (the memory
+/// chiplet occupies 18 of the 20 available chiplet columns, leaving these two spare).
+pub const ADDR_LO_COL_IDX: usize = FLAG_SAME_CONTEXT_AND_WORD + 1;
+/// Column to hold the high 16 bits of `word_addr` (bits 16–31).
+///
+/// Together with [`ADDR_LO_COL_IDX`], these two columns satisfy:
+/// `word_addr = ADDR_HI * 2^16 + ADDR_LO`, with `ADDR_LO, ADDR_HI ∈ [0, 2^16)`.
+///
+/// Additionally we enforce `4 * ADDR_HI < 2^16`, which guarantees that
+/// `word_addr * 4 + 3 < 2^32` (i.e. every element address derived from this word
+/// fits in the u32 range).
+pub const ADDR_HI_COL_IDX: usize = ADDR_LO_COL_IDX + 1;

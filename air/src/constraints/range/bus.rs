@@ -38,6 +38,8 @@ const CHIPLET_S1_IDX: usize = CHIPLET_S1_COL_IDX - CHIPLETS_OFFSET;
 const CHIPLET_S2_IDX: usize = CHIPLET_S2_COL_IDX - CHIPLETS_OFFSET;
 const MEMORY_D0_IDX: usize = chiplets::MEMORY_D0_COL_IDX - CHIPLETS_OFFSET;
 const MEMORY_D1_IDX: usize = chiplets::MEMORY_D1_COL_IDX - CHIPLETS_OFFSET;
+const MEMORY_ADDR_LO_IDX: usize = chiplets::MEMORY_ADDR_LO_COL_IDX - CHIPLETS_OFFSET;
+const MEMORY_ADDR_HI_IDX: usize = chiplets::MEMORY_ADDR_HI_COL_IDX - CHIPLETS_OFFSET;
 const RANGE_M_COL_IDX: usize = range::M_COL_IDX - RANGE_CHECK_TRACE_OFFSET;
 const RANGE_V_COL_IDX: usize = range::V_COL_IDX - RANGE_CHECK_TRACE_OFFSET;
 
@@ -62,7 +64,8 @@ const RANGE_BUS_NAME: &str = "range.bus.transition";
 /// ## Lookups
 ///
 /// - Stack lookups (4): decoder helper columns (USER_OP_HELPERS_OFFSET..+4)
-/// - Memory lookups (2): memory delta limbs (MEMORY_D0, MEMORY_D1)
+/// - Memory lookups (5): memory delta limbs (MEMORY_D0, MEMORY_D1) and address limbs
+///   (MEMORY_ADDR_LO, MEMORY_ADDR_HI, 4*MEMORY_ADDR_HI) for absolute address range checks
 /// - Range response: range V column with multiplicity range M column
 pub fn enforce_bus<AB>(builder: &mut AB, local: &MainTraceRow<AB::Var>)
 where
@@ -84,6 +87,16 @@ where
     // Memory lookups: mv0 = alpha + chiplets[MEMORY_D0], mv1 = alpha + chiplets[MEMORY_D1]
     let mv0: AB::ExprEF = alpha.into() + local.chiplets[MEMORY_D0_IDX].clone().into();
     let mv1: AB::ExprEF = alpha.into() + local.chiplets[MEMORY_D1_IDX].clone().into();
+    // Additional address range-check lookups: addr_lo, addr_hi, and 4*addr_hi.
+    // These close the soundness gap where the delta-based range checks only bound
+    // differences between consecutive addresses, not absolute address values.
+    let mv_addr_lo: AB::ExprEF =
+        alpha.into() + local.chiplets[MEMORY_ADDR_LO_IDX].clone().into();
+    let mv_addr_hi: AB::ExprEF =
+        alpha.into() + local.chiplets[MEMORY_ADDR_HI_IDX].clone().into();
+    // 4 * addr_hi: enforces word_addr * 4 + 3 < 2^32 (overflow guard).
+    let mv_addr_hi_x4: AB::ExprEF = alpha.into()
+        + AB::Expr::from_u16(4) * local.chiplets[MEMORY_ADDR_HI_IDX].clone().into();
 
     // Stack lookups: sv0-sv3 = alpha + decoder helper columns
     let sv0: AB::ExprEF = alpha.into() + local.decoder[STACK_LOOKUP_BASE].clone().into();
@@ -95,7 +108,11 @@ where
     let range_check: AB::ExprEF = alpha.into() + local.range[RANGE_V_COL_IDX].clone().into();
 
     // Combined lookup denominators
-    let memory_lookups = mv0.clone() * mv1.clone();
+    let memory_lookups = mv0.clone()
+        * mv1.clone()
+        * mv_addr_lo.clone()
+        * mv_addr_hi.clone()
+        * mv_addr_hi_x4.clone();
     let stack_lookups = sv0.clone() * sv1.clone() * sv2.clone() * sv3.clone();
     let lookups = range_check.clone() * stack_lookups.clone() * memory_lookups.clone();
 
@@ -124,12 +141,34 @@ where
     let s2_term = sflag_rc_mem.clone() * sv0.clone() * sv1.clone() * sv3;
     let s3_term = sflag_rc_mem * sv0 * sv1 * sv2;
 
-    // Memory lookup removal terms
-    let m0_term: AB::ExprEF = mflag_rc_stack.clone() * mv1;
-    let m1_term = mflag_rc_stack * mv0;
+    // Memory lookup removal terms (one per memory range-check value submitted per row)
+    let m0_term: AB::ExprEF = mflag_rc_stack.clone()
+        * mv1.clone()
+        * mv_addr_lo.clone()
+        * mv_addr_hi.clone()
+        * mv_addr_hi_x4.clone();
+    let m1_term = mflag_rc_stack.clone()
+        * mv0.clone()
+        * mv_addr_lo.clone()
+        * mv_addr_hi.clone()
+        * mv_addr_hi_x4.clone();
+    let m_addr_lo_term = mflag_rc_stack.clone()
+        * mv0.clone()
+        * mv1.clone()
+        * mv_addr_hi.clone()
+        * mv_addr_hi_x4.clone();
+    let m_addr_hi_term = mflag_rc_stack.clone()
+        * mv0.clone()
+        * mv1.clone()
+        * mv_addr_lo.clone()
+        * mv_addr_hi_x4.clone();
+    let m_addr_hi_x4_term = mflag_rc_stack
+        * mv0
+        * mv1
+        * mv_addr_lo
+        * mv_addr_hi;
 
-    // Main constraint: b_next * lookups = b * lookups + rc_term - s0_term - s1_term - s2_term -
-    // s3_term - m0_term - m1_term
+    // Main constraint: b_next * lookups = b * lookups + rc_term - s_terms - m_terms
     builder.tagged(TAG_RANGE_BUS_BASE, RANGE_BUS_NAME, |builder| {
         builder.when_transition().assert_zero_ext(
             b_next_term - b_term - rc_term
@@ -138,7 +177,10 @@ where
                 + s2_term
                 + s3_term
                 + m0_term
-                + m1_term,
+                + m1_term
+                + m_addr_lo_term
+                + m_addr_hi_term
+                + m_addr_hi_x4_term,
         );
     });
 }

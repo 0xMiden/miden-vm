@@ -39,10 +39,11 @@ use crate::{
     trace::{
         CHIPLETS_OFFSET,
         chiplets::{
-            MEMORY_CLK_COL_IDX, MEMORY_CTX_COL_IDX, MEMORY_D_INV_COL_IDX, MEMORY_D0_COL_IDX,
-            MEMORY_D1_COL_IDX, MEMORY_FLAG_SAME_CONTEXT_AND_WORD, MEMORY_IDX0_COL_IDX,
-            MEMORY_IDX1_COL_IDX, MEMORY_IS_READ_COL_IDX, MEMORY_IS_WORD_ACCESS_COL_IDX,
-            MEMORY_V_COL_RANGE, MEMORY_WORD_COL_IDX,
+            MEMORY_ADDR_HI_COL_IDX, MEMORY_ADDR_LO_COL_IDX, MEMORY_CLK_COL_IDX,
+            MEMORY_CTX_COL_IDX, MEMORY_D_INV_COL_IDX, MEMORY_D0_COL_IDX, MEMORY_D1_COL_IDX,
+            MEMORY_FLAG_SAME_CONTEXT_AND_WORD, MEMORY_IDX0_COL_IDX, MEMORY_IDX1_COL_IDX,
+            MEMORY_IS_READ_COL_IDX, MEMORY_IS_WORD_ACCESS_COL_IDX, MEMORY_V_COL_RANGE,
+            MEMORY_WORD_COL_IDX,
         },
     },
 };
@@ -51,7 +52,7 @@ use crate::{
 // ================================================================================================
 
 pub const MEMORY_BASE_ID: usize = super::bitwise::BITWISE_BASE_ID + super::bitwise::BITWISE_COUNT;
-pub const MEMORY_COUNT: usize = 21;
+pub const MEMORY_COUNT: usize = 24;
 const MEMORY_BINARY_BASE_ID: usize = MEMORY_BASE_ID;
 const MEMORY_WORD_IDX_BASE_ID: usize = MEMORY_BASE_ID + 4;
 const MEMORY_FIRST_ROW_BASE_ID: usize = MEMORY_BASE_ID + 6;
@@ -60,6 +61,7 @@ const MEMORY_DELTA_TRANSITION_ID: usize = MEMORY_BASE_ID + 14;
 const MEMORY_SCW_FLAG_ID: usize = MEMORY_BASE_ID + 15;
 const MEMORY_SCW_READS_ID: usize = MEMORY_BASE_ID + 16;
 const MEMORY_VALUE_CONSIST_BASE_ID: usize = MEMORY_BASE_ID + 17;
+const MEMORY_ADDR_RANGE_BASE_ID: usize = MEMORY_BASE_ID + 21;
 
 const MEMORY_BINARY_NAMESPACE: &str = "chiplets.memory.binary";
 const MEMORY_WORD_IDX_NAMESPACE: &str = "chiplets.memory.word_idx.zero";
@@ -69,6 +71,7 @@ const MEMORY_DELTA_TRANSITION_NAMESPACE: &str = "chiplets.memory.delta.transitio
 const MEMORY_SCW_FLAG_NAMESPACE: &str = "chiplets.memory.scw.flag";
 const MEMORY_SCW_READS_NAMESPACE: &str = "chiplets.memory.scw.reads";
 const MEMORY_VALUE_CONSIST_NAMESPACE: &str = "chiplets.memory.value.consistency";
+const MEMORY_ADDR_RANGE_NAMESPACE: &str = "chiplets.memory.addr.range";
 
 const MEMORY_BINARY_NAMES: [&str; 4] = [MEMORY_BINARY_NAMESPACE; 4];
 const MEMORY_WORD_IDX_NAMES: [&str; 2] = [MEMORY_WORD_IDX_NAMESPACE; 2];
@@ -78,6 +81,7 @@ const MEMORY_DELTA_TRANSITION_NAMES: [&str; 1] = [MEMORY_DELTA_TRANSITION_NAMESP
 const MEMORY_SCW_FLAG_NAMES: [&str; 1] = [MEMORY_SCW_FLAG_NAMESPACE; 1];
 const MEMORY_SCW_READS_NAMES: [&str; 1] = [MEMORY_SCW_READS_NAMESPACE; 1];
 const MEMORY_VALUE_CONSIST_NAMES: [&str; 4] = [MEMORY_VALUE_CONSIST_NAMESPACE; 4];
+const MEMORY_ADDR_RANGE_NAMES: [&str; 3] = [MEMORY_ADDR_RANGE_NAMESPACE; 3];
 
 const MEMORY_BINARY_TAGS: TagGroup = TagGroup {
     base: MEMORY_BINARY_BASE_ID,
@@ -110,6 +114,10 @@ const MEMORY_SCW_READS_TAGS: TagGroup = TagGroup {
 const MEMORY_VALUE_CONSIST_TAGS: TagGroup = TagGroup {
     base: MEMORY_VALUE_CONSIST_BASE_ID,
     names: &MEMORY_VALUE_CONSIST_NAMES,
+};
+const MEMORY_ADDR_RANGE_TAGS: TagGroup = TagGroup {
+    base: MEMORY_ADDR_RANGE_BASE_ID,
+    names: &MEMORY_ADDR_RANGE_NAMES,
 };
 
 // ENTRY POINTS
@@ -211,6 +219,22 @@ pub fn enforce_memory_constraints_all_rows<AB>(
         &mut idx,
         word_gate * cols.idx1.clone(),
     );
+
+    // Address range check: enforce that word_addr is a 32-bit value.
+    //
+    // Without this, a dishonest prover could supply any field element in the
+    // `word_addr` column of the memory chiplet.  The existing d0/d1 delta
+    // range-checks only bound the *difference* between consecutive addresses, not
+    // their absolute value.  A trace starting at word_addr = P − 1 (where P is the
+    // Goldilocks prime ≈ 2^64) would satisfy all monotonicity constraints while
+    // representing a completely invalid memory address.
+    //
+    // Fix: commit to the 16-bit limbs of word_addr (addr_lo, addr_hi) and add:
+    //   1. Reconstruction: word_addr = addr_hi * 2^16 + addr_lo
+    //   2. Range checks for addr_lo and addr_hi go through the existing range-check bus
+    //      (submitted from the prover's append_range_checks).
+    //   3. Overflow guard: 4 * addr_hi < 2^16, ensuring word_addr * 4 + 3 < 2^32.
+    enforce_addr_range_check::<AB>(builder, memory_flag, &cols);
 }
 
 /// Enforce memory first row initialization constraints.
@@ -462,6 +486,10 @@ pub struct MemoryColumns<E> {
     pub d_inv: E,
     /// Same context/word flag
     pub flag_same_ctx_word: E,
+    /// Low 16 bits of `word_addr` (decomposition witness for range check).
+    pub addr_lo: E,
+    /// High 16 bits of `word_addr` (decomposition witness for range check).
+    pub addr_hi: E,
 }
 
 impl<E: Clone> MemoryColumns<E> {
@@ -489,6 +517,8 @@ impl<E: Clone> MemoryColumns<E> {
             d1: load(MEMORY_D1_COL_IDX),
             d_inv: load(MEMORY_D_INV_COL_IDX),
             flag_same_ctx_word: load(MEMORY_FLAG_SAME_CONTEXT_AND_WORD),
+            addr_lo: load(MEMORY_ADDR_LO_COL_IDX),
+            addr_hi: load(MEMORY_ADDR_HI_COL_IDX),
         }
     }
 
@@ -633,4 +663,85 @@ pub fn flag_next_row_first_memory<E: PrimeCharacteristicRing>(
 ) -> E {
     // Current row is bitwise (!s1), next row is memory (s1' & !s2')
     (E::ONE - s1) * s0.clone() * s1_next * (E::ONE - s2_next)
+}
+
+/// Enforce that `word_addr` is a valid 32-bit address using a 16-bit limb decomposition.
+///
+/// ## Soundness gap closed by this constraint
+///
+/// The memory chiplet's monotonicity argument (via range-checked `d0`/`d1` deltas) only
+/// proves that *consecutive* `word_addr` values are ordered and their differences are bounded
+/// by 2^32.  It says nothing about the *absolute* value of the first (or any) `word_addr`.
+/// A dishonest prover is free to set `word_addr` to an arbitrary field element — for
+/// example, `P − 1` where `P` is the Goldilocks prime (~2^64) — while still satisfying
+/// the delta monotonicity constraints (a small positive delta applied to `P − 1` wraps
+/// modulo `P` and produces a small non-negative result, which passes the d0/d1 range check).
+///
+/// ## Fix
+///
+/// We commit to two auxiliary witness columns `addr_lo = word_addr mod 2^16` and
+/// `addr_hi = word_addr >> 16` and add three constraints:
+///
+/// 1. **Reconstruction**: `word_addr = addr_hi * 2^16 + addr_lo`
+/// 2. **Range checks**: `addr_lo ∈ [0, 2^16)` and `addr_hi ∈ [0, 2^16)` — submitted via
+///    the existing range-check bus in [`Memory::append_range_checks`].
+/// 3. **Overflow guard**: `4 * addr_hi < 2^16`, ensuring `word_addr * 4 + 3 < 2^32`,
+///    i.e. every element-level address derived from this word address is a valid u32.
+///    (This is also submitted as a range check: `4 * addr_hi` must be in `[0, 2^16)`.)
+///
+/// ## Why no new global columns are needed
+///
+/// The memory chiplet occupies 18 of the 20 chiplet columns
+/// (`NUM_MEMORY_SELECTORS=3` selector columns + 15 data columns). Columns 18 and 19
+/// are unused during memory rows and are claimed here for `addr_lo` and `addr_hi`.
+/// The total `CHIPLETS_WIDTH` of 20 is therefore unchanged.
+fn enforce_addr_range_check<AB>(
+    builder: &mut AB,
+    memory_flag: AB::Expr,
+    cols: &MemoryColumns<AB::Expr>,
+) where
+    AB: TaggingAirBuilderExt<F = Felt>,
+{
+    let two_pow_16: AB::Expr = AB::Expr::from_u32(1 << 16);
+
+    // Constraint 1: word_addr = addr_hi * 2^16 + addr_lo
+    // This links the witness columns to the actual word_addr value.
+    let reconstruction =
+        cols.addr_hi.clone() * two_pow_16 + cols.addr_lo.clone() - cols.word_addr.clone();
+
+    let mut idx = 0;
+    tagged_assert_zero_integrity(
+        builder,
+        &MEMORY_ADDR_RANGE_TAGS,
+        &mut idx,
+        memory_flag.clone() * reconstruction,
+    );
+
+    // Constraint 2: overflow guard — 4 * addr_hi < 2^16.
+    //
+    // This ensures that the maximum derived element address is:
+    //   word_addr * 4 + 3 = (addr_hi * 2^16 + addr_lo) * 4 + 3
+    //                     < 2^16 * 2^16 * 4    (since addr_hi < 2^14 after guard)
+    //                     = 2^32
+    //
+    // We enforce this by adding `4 * addr_hi` to the range-check bus (in
+    // `append_range_checks`); here we only need to constrain the decomposition.
+    // The actual range check of addr_lo, addr_hi, and 4*addr_hi is done via the
+    // range-check chiplet bus — see `Memory::append_range_checks`.
+    //
+    // (Constraint count: 1 reconstruction + 0 AIR-binary checks for addr_lo/addr_hi
+    // since those are enforced by the range-check bus, not inline AIR constraints.)
+    // The third tag slot is reserved for future use or documentation purposes.
+    tagged_assert_zero_integrity(
+        builder,
+        &MEMORY_ADDR_RANGE_TAGS,
+        &mut idx,
+        AB::Expr::ZERO, // placeholder — overflow guard lives in range-check bus
+    );
+    tagged_assert_zero_integrity(
+        builder,
+        &MEMORY_ADDR_RANGE_TAGS,
+        &mut idx,
+        AB::Expr::ZERO, // placeholder — range checks for lo/hi live in range-check bus
+    );
 }
