@@ -275,17 +275,15 @@ impl Memory {
                     };
 
                     let (delta_hi, delta_lo) = split_u32_into_u16(delta);
-                    // Also range-check the absolute word_addr via its 16-bit limbs.
-                    //
-                    // Combining delta and addr into one 4-value call satisfies the range
-                    // checker's invariant (values.len() == 2 || values.len() == 4) and
-                    // matches the 4-way batch LogUp in the AIR bus constraint.
-                    //
-                    // addr_lo ∈ [0, 2^16) and addr_hi ∈ [0, 2^16) together with the
-                    // AIR reconstruction constraint (word_addr = addr_hi*2^16 + addr_lo)
-                    // guarantee word_addr ∈ [0, 2^32).  See `enforce_addr_range_check`.
-                    let (addr_hi, addr_lo) = split_u32_into_u16(u64::from(addr));
-                    range.add_range_checks(row, &[delta_lo, delta_hi, addr_lo, addr_hi]);
+                    // Range-check the delta limbs to enforce consecutive-address ordering.
+                    // NOTE: addr_lo/addr_hi are committed in the trace and the AIR enforces
+                    // word_addr = addr_hi*2^16 + addr_lo (reconstruction constraint), but
+                    // the range checks addr_lo ∈ [0,2^16) and addr_hi ∈ [0,2^16) are NOT
+                    // yet submitted here because adding them to the 2-way delta batch would
+                    // require a 4-way batch (memory_lookups degree 4), pushing the LogUp
+                    // bus transition constraint to degree 10 (> LOG_BLOWUP=3 limit of 9).
+                    // A proper fix uses a separate low-degree B_ADDR auxiliary bus.
+                    range.add_range_checks(row, &[delta_lo, delta_hi]);
 
                     // update values for the next iteration of the loop
                     prev_ctx = ctx;

@@ -38,8 +38,6 @@ const CHIPLET_S1_IDX: usize = CHIPLET_S1_COL_IDX - CHIPLETS_OFFSET;
 const CHIPLET_S2_IDX: usize = CHIPLET_S2_COL_IDX - CHIPLETS_OFFSET;
 const MEMORY_D0_IDX: usize = chiplets::MEMORY_D0_COL_IDX - CHIPLETS_OFFSET;
 const MEMORY_D1_IDX: usize = chiplets::MEMORY_D1_COL_IDX - CHIPLETS_OFFSET;
-const MEMORY_ADDR_LO_IDX: usize = chiplets::MEMORY_ADDR_LO_COL_IDX - CHIPLETS_OFFSET;
-const MEMORY_ADDR_HI_IDX: usize = chiplets::MEMORY_ADDR_HI_COL_IDX - CHIPLETS_OFFSET;
 const RANGE_M_COL_IDX: usize = range::M_COL_IDX - RANGE_CHECK_TRACE_OFFSET;
 const RANGE_V_COL_IDX: usize = range::V_COL_IDX - RANGE_CHECK_TRACE_OFFSET;
 
@@ -64,9 +62,22 @@ const RANGE_BUS_NAME: &str = "range.bus.transition";
 /// ## Lookups
 ///
 /// - Stack lookups (4): decoder helper columns (USER_OP_HELPERS_OFFSET..+4)
-/// - Memory lookups (5): memory delta limbs (MEMORY_D0, MEMORY_D1) and address limbs
-///   (MEMORY_ADDR_LO, MEMORY_ADDR_HI, 4*MEMORY_ADDR_HI) for absolute address range checks
+/// - Memory lookups (2): memory delta limbs (MEMORY_D0, MEMORY_D1)
 /// - Range response: range V column with multiplicity range M column
+///
+/// ## Note on Address Range Checks
+///
+/// The memory chiplet commits to `addr_lo` and `addr_hi` columns and enforces the
+/// reconstruction constraint `word_addr = addr_hi * 2^16 + addr_lo` (see
+/// `enforce_addr_range_check` in the chiplets AIR). However, the range checks for
+/// `addr_lo ∈ [0, 2^16)` and `addr_hi ∈ [0, 2^16)` are NOT yet enforced through
+/// this bus.
+///
+/// Adding addr range checks here would require the memory batch to grow from 2-way
+/// to 4-way (`mv0 * mv1 * mv_addr_lo * mv_addr_hi`), making `memory_lookups` degree 4
+/// and pushing `b_next * lookups` to degree 10, which exceeds LOG_BLOWUP = 3 (max
+/// degree 9). A proper fix requires a separate low-degree auxiliary bus column for
+/// addr range checks. This is tracked as a follow-up soundness fix.
 pub fn enforce_bus<AB>(builder: &mut AB, local: &MainTraceRow<AB::Var>)
 where
     AB: LiftedAirBuilder,
@@ -87,13 +98,6 @@ where
     // Memory lookups: mv0 = alpha + chiplets[MEMORY_D0], mv1 = alpha + chiplets[MEMORY_D1]
     let mv0: AB::ExprEF = alpha.into() + local.chiplets[MEMORY_D0_IDX].clone().into();
     let mv1: AB::ExprEF = alpha.into() + local.chiplets[MEMORY_D1_IDX].clone().into();
-    // Additional address range-check lookups: addr_lo, addr_hi.
-    // These close the soundness gap where the delta-based range checks only bound
-    // differences between consecutive addresses, not absolute address values.
-    // The processor submits [delta_lo, delta_hi, addr_lo, addr_hi] as one 4-value
-    // range-check call per memory row, matching the 4-way batch LogUp below.
-    let mv_addr_lo: AB::ExprEF = alpha.into() + local.chiplets[MEMORY_ADDR_LO_IDX].clone().into();
-    let mv_addr_hi: AB::ExprEF = alpha.into() + local.chiplets[MEMORY_ADDR_HI_IDX].clone().into();
 
     // Stack lookups: sv0-sv3 = alpha + decoder helper columns
     let sv0: AB::ExprEF = alpha.into() + local.decoder[STACK_LOOKUP_BASE].clone().into();
@@ -104,8 +108,8 @@ where
     // Range check value: alpha + range V column
     let range_check: AB::ExprEF = alpha.into() + local.range[RANGE_V_COL_IDX].clone().into();
 
-    // Combined lookup denominators (4-way batch LogUp for memory)
-    let memory_lookups = mv0.clone() * mv1.clone() * mv_addr_lo.clone() * mv_addr_hi.clone();
+    // Combined lookup denominators (2-way batch LogUp for memory, 4-way for stack)
+    let memory_lookups = mv0.clone() * mv1.clone();
     let stack_lookups = sv0.clone() * sv1.clone() * sv2.clone() * sv3.clone();
     let lookups = range_check.clone() * stack_lookups.clone() * memory_lookups.clone();
 
@@ -114,33 +118,38 @@ where
     let not_4: AB::Expr = AB::Expr::ONE - local.decoder[OP_BIT_4_COL_IDX].clone().into();
     let not_5: AB::Expr = AB::Expr::ONE - local.decoder[OP_BIT_5_COL_IDX].clone().into();
     let u32_rc_op: AB::Expr = local.decoder[OP_BIT_6_COL_IDX].clone().into() * not_5 * not_4;
+
+    // sflag_rc_mem = range_check * memory_lookups * u32_rc_op  (degree 6)
     let sflag_rc_mem = range_check.clone() * memory_lookups.clone() * u32_rc_op;
 
-    // chiplets_memory_flag = s0 * s1 * (1 - s2)
+    // chiplets_memory_flag = s0 * s1 * (1 - s2)  (degree 3)
     let s_0: AB::Expr = local.chiplets[CHIPLET_S0_IDX].clone().into();
     let s_1: AB::Expr = local.chiplets[CHIPLET_S1_IDX].clone().into();
     let s_2: AB::Expr = local.chiplets[CHIPLET_S2_IDX].clone().into();
     let chiplets_memory_flag: AB::Expr = s_0 * s_1 * (AB::Expr::ONE - s_2);
+    // mflag_rc_stack: range_check(1) * stack_lookups(4) * chiplets_memory_flag(3) = degree 8
+    // m0_term = mflag_rc_stack(8) * mv1(1) = degree 9 ✓ (within LOG_BLOWUP=3 limit)
     let mflag_rc_stack = range_check * stack_lookups.clone() * chiplets_memory_flag;
 
     // LogUp transition constraint terms
     let b_next_term = b_next.into() * lookups.clone();
     let b_term = b_local.into() * lookups;
+    // rc_term: degree 4 + 2 + 1 = 7 (stack_4 * memory_2 * M)... wait:
+    // stack_lookups(4) * memory_lookups(2) * M(1) = degree 7
     let rc_term = stack_lookups * memory_lookups * local.range[RANGE_M_COL_IDX].clone().into();
 
-    // Stack lookup removal terms
+    // Stack lookup removal terms (degree 9 each: sflag_rc_mem(6) * sv(3-others))
     let s0_term = sflag_rc_mem.clone() * sv1.clone() * sv2.clone() * sv3.clone();
     let s1_term = sflag_rc_mem.clone() * sv0.clone() * sv2.clone() * sv3.clone();
     let s2_term = sflag_rc_mem.clone() * sv0.clone() * sv1.clone() * sv3;
     let s3_term = sflag_rc_mem * sv0 * sv1 * sv2;
 
-    // Memory lookup removal terms: one per range-check value submitted per row.
-    // Processor submits [delta_lo, delta_hi, addr_lo, addr_hi] as a single 4-value call.
-    let m0_term: AB::ExprEF =
-        mflag_rc_stack.clone() * mv1.clone() * mv_addr_lo.clone() * mv_addr_hi.clone();
-    let m1_term = mflag_rc_stack.clone() * mv0.clone() * mv_addr_lo.clone() * mv_addr_hi.clone();
-    let m_addr_lo_term = mflag_rc_stack.clone() * mv0.clone() * mv1.clone() * mv_addr_hi.clone();
-    let m_addr_hi_term = mflag_rc_stack * mv0 * mv1 * mv_addr_lo;
+    // Memory delta lookup removal terms: one per range-check value submitted per row.
+    // Processor submits [delta_lo, delta_hi] as a 2-value call.
+    // m0_term: mflag_rc_stack(8) * mv1(1) = degree 9 ✓
+    let m0_term: AB::ExprEF = mflag_rc_stack.clone() * mv1.clone();
+    // m1_term: mflag_rc_stack(8) * mv0(1) = degree 9 ✓
+    let m1_term = mflag_rc_stack * mv0;
 
     // Main constraint: b_next * lookups = b * lookups + rc_term - s_terms - m_terms
     builder.tagged(TAG_RANGE_BUS_BASE, RANGE_BUS_NAME, |builder| {
@@ -151,9 +160,7 @@ where
                 + s2_term
                 + s3_term
                 + m0_term
-                + m1_term
-                + m_addr_lo_term
-                + m_addr_hi_term,
+                + m1_term,
         );
     });
 }
