@@ -3,9 +3,9 @@ use alloc::vec::Vec;
 use miden_air::trace::{
     RowIndex,
     chiplets::memory::{
-        ADDR_HI_COL_IDX, ADDR_LO_COL_IDX, FLAG_SAME_CONTEXT_AND_WORD, IDX0_COL_IDX,
-        IDX1_COL_IDX, IS_READ_COL_IDX, IS_WORD_ACCESS_COL_IDX, MEMORY_ACCESS_ELEMENT,
-        MEMORY_ACCESS_WORD, MEMORY_READ, MEMORY_WRITE, TRACE_WIDTH as MEMORY_TRACE_WIDTH,
+        ADDR_HI_COL_IDX, ADDR_LO_COL_IDX, FLAG_SAME_CONTEXT_AND_WORD, IDX0_COL_IDX, IDX1_COL_IDX,
+        IS_READ_COL_IDX, IS_WORD_ACCESS_COL_IDX, MEMORY_ACCESS_ELEMENT, MEMORY_ACCESS_WORD,
+        MEMORY_READ, MEMORY_WRITE, TRACE_WIDTH as MEMORY_TRACE_WIDTH,
     },
 };
 use miden_core::{ONE, WORD_SIZE, Word, ZERO, assert_matches, field::Field};
@@ -580,7 +580,7 @@ fn build_trace_row(
     // Populate address limb columns matching what fill_trace() writes.
     // ADDR_LO = word_addr & 0xFFFF, ADDR_HI = word_addr >> 16.
     let word_addr_u32: u32 = word.as_canonical_u64().try_into().unwrap();
-    let addr_lo = u16::try_from(word_addr_u32 & 0xFFFF).unwrap();
+    let addr_lo = u16::try_from(word_addr_u32 & 0xffff).unwrap();
     let addr_hi = u16::try_from(word_addr_u32 >> 16).unwrap();
     row[ADDR_LO_COL_IDX] = Felt::new(addr_lo as u64);
     row[ADDR_HI_COL_IDX] = Felt::new(addr_hi as u64);

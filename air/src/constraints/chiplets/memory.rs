@@ -39,8 +39,8 @@ use crate::{
     trace::{
         CHIPLETS_OFFSET,
         chiplets::{
-            MEMORY_ADDR_HI_COL_IDX, MEMORY_ADDR_LO_COL_IDX, MEMORY_CLK_COL_IDX,
-            MEMORY_CTX_COL_IDX, MEMORY_D_INV_COL_IDX, MEMORY_D0_COL_IDX, MEMORY_D1_COL_IDX,
+            MEMORY_ADDR_HI_COL_IDX, MEMORY_ADDR_LO_COL_IDX, MEMORY_CLK_COL_IDX, MEMORY_CTX_COL_IDX,
+            MEMORY_D_INV_COL_IDX, MEMORY_D0_COL_IDX, MEMORY_D1_COL_IDX,
             MEMORY_FLAG_SAME_CONTEXT_AND_WORD, MEMORY_IDX0_COL_IDX, MEMORY_IDX1_COL_IDX,
             MEMORY_IS_READ_COL_IDX, MEMORY_IS_WORD_ACCESS_COL_IDX, MEMORY_V_COL_RANGE,
             MEMORY_WORD_COL_IDX,
@@ -231,8 +231,8 @@ pub fn enforce_memory_constraints_all_rows<AB>(
     //
     // Fix: commit to the 16-bit limbs of word_addr (addr_lo, addr_hi) and add:
     //   1. Reconstruction: word_addr = addr_hi * 2^16 + addr_lo
-    //   2. Range checks for addr_lo and addr_hi go through the existing range-check bus
-    //      (submitted from the prover's append_range_checks).
+    //   2. Range checks for addr_lo and addr_hi go through the existing range-check bus (submitted
+    //      from the prover's append_range_checks).
     //   3. Overflow guard: 4 * addr_hi < 2^16, ensuring word_addr * 4 + 3 < 2^32.
     enforce_addr_range_check::<AB>(builder, memory_flag, &cols);
 }
@@ -683,11 +683,11 @@ pub fn flag_next_row_first_memory<E: PrimeCharacteristicRing>(
 /// `addr_hi = word_addr >> 16` and add three constraints:
 ///
 /// 1. **Reconstruction**: `word_addr = addr_hi * 2^16 + addr_lo`
-/// 2. **Range checks**: `addr_lo ∈ [0, 2^16)` and `addr_hi ∈ [0, 2^16)` — submitted via
-///    the existing range-check bus in [`Memory::append_range_checks`].
-/// 3. **Overflow guard**: `4 * addr_hi < 2^16`, ensuring `word_addr * 4 + 3 < 2^32`,
-///    i.e. every element-level address derived from this word address is a valid u32.
-///    (This is also submitted as a range check: `4 * addr_hi` must be in `[0, 2^16)`.)
+/// 2. **Range checks**: `addr_lo ∈ [0, 2^16)` and `addr_hi ∈ [0, 2^16)` — submitted via the
+///    existing range-check bus in [`Memory::append_range_checks`].
+/// 3. **Overflow guard**: `4 * addr_hi < 2^16`, ensuring `word_addr * 4 + 3 < 2^32`, i.e. every
+///    element-level address derived from this word address is a valid u32. (This is also submitted
+///    as a range check: `4 * addr_hi` must be in `[0, 2^16)`.)
 ///
 /// ## Why no new global columns are needed
 ///

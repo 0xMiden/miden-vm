@@ -90,13 +90,11 @@ where
     // Additional address range-check lookups: addr_lo, addr_hi, and 4*addr_hi.
     // These close the soundness gap where the delta-based range checks only bound
     // differences between consecutive addresses, not absolute address values.
-    let mv_addr_lo: AB::ExprEF =
-        alpha.into() + local.chiplets[MEMORY_ADDR_LO_IDX].clone().into();
-    let mv_addr_hi: AB::ExprEF =
-        alpha.into() + local.chiplets[MEMORY_ADDR_HI_IDX].clone().into();
+    let mv_addr_lo: AB::ExprEF = alpha.into() + local.chiplets[MEMORY_ADDR_LO_IDX].clone().into();
+    let mv_addr_hi: AB::ExprEF = alpha.into() + local.chiplets[MEMORY_ADDR_HI_IDX].clone().into();
     // 4 * addr_hi: enforces word_addr * 4 + 3 < 2^32 (overflow guard).
-    let mv_addr_hi_x4: AB::ExprEF = alpha.into()
-        + AB::Expr::from_u16(4) * local.chiplets[MEMORY_ADDR_HI_IDX].clone().into();
+    let mv_addr_hi_x4: AB::ExprEF =
+        alpha.into() + AB::Expr::from_u16(4) * local.chiplets[MEMORY_ADDR_HI_IDX].clone().into();
 
     // Stack lookups: sv0-sv3 = alpha + decoder helper columns
     let sv0: AB::ExprEF = alpha.into() + local.decoder[STACK_LOOKUP_BASE].clone().into();
@@ -108,11 +106,8 @@ where
     let range_check: AB::ExprEF = alpha.into() + local.range[RANGE_V_COL_IDX].clone().into();
 
     // Combined lookup denominators
-    let memory_lookups = mv0.clone()
-        * mv1.clone()
-        * mv_addr_lo.clone()
-        * mv_addr_hi.clone()
-        * mv_addr_hi_x4.clone();
+    let memory_lookups =
+        mv0.clone() * mv1.clone() * mv_addr_lo.clone() * mv_addr_hi.clone() * mv_addr_hi_x4.clone();
     let stack_lookups = sv0.clone() * sv1.clone() * sv2.clone() * sv3.clone();
     let lookups = range_check.clone() * stack_lookups.clone() * memory_lookups.clone();
 
@@ -162,11 +157,7 @@ where
         * mv1.clone()
         * mv_addr_lo.clone()
         * mv_addr_hi_x4.clone();
-    let m_addr_hi_x4_term = mflag_rc_stack
-        * mv0
-        * mv1
-        * mv_addr_lo
-        * mv_addr_hi;
+    let m_addr_hi_x4_term = mflag_rc_stack * mv0 * mv1 * mv_addr_lo * mv_addr_hi;
 
     // Main constraint: b_next * lookups = b * lookups + rc_term - s_terms - m_terms
     builder.tagged(TAG_RANGE_BUS_BASE, RANGE_BUS_NAME, |builder| {
