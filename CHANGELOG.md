@@ -4,6 +4,7 @@
 
 #### Bug Fixes
 
+- Fixed a proof-soundness vulnerability in the memory chiplet AIR: `word_addr` was never constrained to `[0, 2^32)`, allowing a dishonest prover to supply arbitrary field elements as memory addresses. The fix commits to two 16-bit witness columns (`addr_lo`, `addr_hi`) and enforces a reconstruction constraint plus range checks via the existing range-check bus ([#2935](https://github.com/0xMiden/miden-vm/pull/2935)).
 - Reverted `InvokeKind::ProcRef` back to `InvokeKind::Exec` in `visit_mut_procref` and added an explanatory comment (#2893).
 #### Changes
 
