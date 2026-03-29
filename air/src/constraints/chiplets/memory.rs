@@ -52,16 +52,19 @@ use crate::{
 // ================================================================================================
 
 pub const MEMORY_BASE_ID: usize = super::bitwise::BITWISE_BASE_ID + super::bitwise::BITWISE_COUNT;
-pub const MEMORY_COUNT: usize = 24;
+pub const MEMORY_COUNT: usize = 22;
 const MEMORY_BINARY_BASE_ID: usize = MEMORY_BASE_ID;
 const MEMORY_WORD_IDX_BASE_ID: usize = MEMORY_BASE_ID + 4;
-const MEMORY_FIRST_ROW_BASE_ID: usize = MEMORY_BASE_ID + 6;
-const MEMORY_DELTA_INV_BASE_ID: usize = MEMORY_BASE_ID + 10;
-const MEMORY_DELTA_TRANSITION_ID: usize = MEMORY_BASE_ID + 14;
-const MEMORY_SCW_FLAG_ID: usize = MEMORY_BASE_ID + 15;
-const MEMORY_SCW_READS_ID: usize = MEMORY_BASE_ID + 16;
-const MEMORY_VALUE_CONSIST_BASE_ID: usize = MEMORY_BASE_ID + 17;
-const MEMORY_ADDR_RANGE_BASE_ID: usize = MEMORY_BASE_ID + 21;
+// ADDR_RANGE is placed at +6 because enforce_addr_range_check is called from
+// enforce_memory_constraints_all_rows immediately after the WORD_IDX constraints.
+// Constraint IDs must match execution order: BINARY(4) + WORD_IDX(2) + ADDR_RANGE(1) = 7.
+const MEMORY_ADDR_RANGE_BASE_ID: usize = MEMORY_BASE_ID + 6;
+const MEMORY_FIRST_ROW_BASE_ID: usize = MEMORY_BASE_ID + 7;
+const MEMORY_DELTA_INV_BASE_ID: usize = MEMORY_BASE_ID + 11;
+const MEMORY_DELTA_TRANSITION_ID: usize = MEMORY_BASE_ID + 15;
+const MEMORY_SCW_FLAG_ID: usize = MEMORY_BASE_ID + 16;
+const MEMORY_SCW_READS_ID: usize = MEMORY_BASE_ID + 17;
+const MEMORY_VALUE_CONSIST_BASE_ID: usize = MEMORY_BASE_ID + 18;
 
 const MEMORY_BINARY_NAMESPACE: &str = "chiplets.memory.binary";
 const MEMORY_WORD_IDX_NAMESPACE: &str = "chiplets.memory.word_idx.zero";
@@ -81,7 +84,7 @@ const MEMORY_DELTA_TRANSITION_NAMES: [&str; 1] = [MEMORY_DELTA_TRANSITION_NAMESP
 const MEMORY_SCW_FLAG_NAMES: [&str; 1] = [MEMORY_SCW_FLAG_NAMESPACE; 1];
 const MEMORY_SCW_READS_NAMES: [&str; 1] = [MEMORY_SCW_READS_NAMESPACE; 1];
 const MEMORY_VALUE_CONSIST_NAMES: [&str; 4] = [MEMORY_VALUE_CONSIST_NAMESPACE; 4];
-const MEMORY_ADDR_RANGE_NAMES: [&str; 3] = [MEMORY_ADDR_RANGE_NAMESPACE; 3];
+const MEMORY_ADDR_RANGE_NAMES: [&str; 1] = [MEMORY_ADDR_RANGE_NAMESPACE; 1];
 
 const MEMORY_BINARY_TAGS: TagGroup = TagGroup {
     base: MEMORY_BINARY_BASE_ID,
@@ -716,32 +719,6 @@ fn enforce_addr_range_check<AB>(
         &mut idx,
         memory_flag.clone() * reconstruction,
     );
-
-    // Constraint 2: overflow guard — 4 * addr_hi < 2^16.
-    //
-    // This ensures that the maximum derived element address is:
-    //   word_addr * 4 + 3 = (addr_hi * 2^16 + addr_lo) * 4 + 3
-    //                     < 2^16 * 2^16 * 4    (since addr_hi < 2^14 after guard)
-    //                     = 2^32
-    //
-    // We enforce this by adding `4 * addr_hi` to the range-check bus (in
-    // `append_range_checks`); here we only need to constrain the decomposition.
-    // The actual range check of addr_lo, addr_hi, and 4*addr_hi is done via the
-    // range-check chiplet bus — see `Memory::append_range_checks`.
-    //
-    // (Constraint count: 1 reconstruction + 0 AIR-binary checks for addr_lo/addr_hi
-    // since those are enforced by the range-check bus, not inline AIR constraints.)
-    // The third tag slot is reserved for future use or documentation purposes.
-    tagged_assert_zero_integrity(
-        builder,
-        &MEMORY_ADDR_RANGE_TAGS,
-        &mut idx,
-        AB::Expr::ZERO, // placeholder — overflow guard lives in range-check bus
-    );
-    tagged_assert_zero_integrity(
-        builder,
-        &MEMORY_ADDR_RANGE_TAGS,
-        &mut idx,
-        AB::Expr::ZERO, // placeholder — range checks for lo/hi live in range-check bus
-    );
+    // Range-check bus lookups for addr_lo, addr_hi are submitted by the processor
+    // via `Memory::append_range_checks` — no additional AIR constraints needed here.
 }

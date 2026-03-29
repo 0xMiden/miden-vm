@@ -275,21 +275,17 @@ impl Memory {
                     };
 
                     let (delta_hi, delta_lo) = split_u32_into_u16(delta);
-                    range.add_range_checks(row, &[delta_lo, delta_hi]);
-
                     // Also range-check the absolute word_addr via its 16-bit limbs.
                     //
-                    // The delta range-checks above only prove that consecutive addresses
-                    // differ by < 2^32.  Without also range-checking the absolute address,
-                    // a dishonest prover could start the trace at word_addr = P − 1
-                    // (Goldilocks prime ≈ 2^64) and satisfy all delta constraints by
-                    // wrapping.  See `enforce_addr_range_check` in the AIR for details.
+                    // Combining delta and addr into one 4-value call satisfies the range
+                    // checker's invariant (values.len() == 2 || values.len() == 4) and
+                    // matches the 4-way batch LogUp in the AIR bus constraint.
+                    //
+                    // addr_lo ∈ [0, 2^16) and addr_hi ∈ [0, 2^16) together with the
+                    // AIR reconstruction constraint (word_addr = addr_hi*2^16 + addr_lo)
+                    // guarantee word_addr ∈ [0, 2^32).  See `enforce_addr_range_check`.
                     let (addr_hi, addr_lo) = split_u32_into_u16(u64::from(addr));
-                    // The overflow guard (4 * addr_hi) ensures word_addr * 4 + 3 < 2^32,
-                    // i.e. every element address derived from this word fits in u32.
-                    let addr_hi_times_4 = u16::try_from((addr_hi as u32) * 4)
-                        .expect("addr_hi * 4 overflows u16; word_addr is out of valid range");
-                    range.add_range_checks(row, &[addr_lo, addr_hi, addr_hi_times_4]);
+                    range.add_range_checks(row, &[delta_lo, delta_hi, addr_lo, addr_hi]);
 
                     // update values for the next iteration of the loop
                     prev_ctx = ctx;

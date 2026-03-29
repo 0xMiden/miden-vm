@@ -58,7 +58,7 @@ pub const TAG_DECODER_COUNT: usize = 57;
 /// Base ID for the chiplets constraint group.
 pub const TAG_CHIPLETS_BASE: usize = TAG_DECODER_BASE + TAG_DECODER_COUNT;
 /// Number of chiplets constraints in this group.
-pub const TAG_CHIPLETS_COUNT: usize = 136;
+pub const TAG_CHIPLETS_COUNT: usize = 137;
 
 /// Base ID for the bus boundary constraint group.
 /// 8 first-row (aux columns pinned to identity) + 8 last-row (aux columns bound to finals) = 16.
