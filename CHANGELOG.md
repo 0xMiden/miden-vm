@@ -5,6 +5,8 @@
 #### Bug Fixes
 
 - Reverted `InvokeKind::ProcRef` back to `InvokeKind::Exec` in `visit_mut_procref` and added an explanatory comment (#2893).
+- Corrected memory trace docs to align same-word delta encoding, first-row delta initialization, and `f_scw` semantics with the implementation (#2815).
+
 #### Changes
 
 - [BREAKING] Sync execution and proving APIs now require `SyncHost`; async `Host`, `execute`, and `prove` remain available ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
