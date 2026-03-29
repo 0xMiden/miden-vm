@@ -138,8 +138,7 @@ where
     // Processor submits [delta_lo, delta_hi, addr_lo, addr_hi] as a single 4-value call.
     let m0_term: AB::ExprEF =
         mflag_rc_stack.clone() * mv1.clone() * mv_addr_lo.clone() * mv_addr_hi.clone();
-    let m1_term =
-        mflag_rc_stack.clone() * mv0.clone() * mv_addr_lo.clone() * mv_addr_hi.clone();
+    let m1_term = mflag_rc_stack.clone() * mv0.clone() * mv_addr_lo.clone() * mv_addr_hi.clone();
     let m_addr_lo_term = mflag_rc_stack.clone() * mv0.clone() * mv1.clone() * mv_addr_hi.clone();
     let m_addr_hi_term = mflag_rc_stack * mv0 * mv1 * mv_addr_lo;
 

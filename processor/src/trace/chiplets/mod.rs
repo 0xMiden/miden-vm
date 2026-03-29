@@ -308,19 +308,12 @@ impl Chiplets {
                     let rest = memory_fragment.push_column_slice(rest);
                     ace_fragment.push_column_slice(rest);
                 },
-                17 => {
-                    // column 17 is relevant only for the memory chiplet
+                17 | 18 | 19 => {
+                    // columns 17-19 are relevant for the memory chiplet (col 17 = D_INV / FLAG_SCW,
+                    // cols 18-19 = ADDR_LO / ADDR_HI) and the ACE chiplet
                     // skip the hasher and bitwise chiplets
                     let (_, rest) = column.split_at_mut(hasher.trace_len() + bitwise.trace_len());
                     let rest = memory_fragment.push_column_slice(rest);
-                    ace_fragment.push_column_slice(rest);
-                },
-                18 | 19 => {
-                    // column 18 and 19 are relevant only for the ACE chiplet
-                    // skip the hasher, bitwise and memory chiplets
-                    let (_, rest) = column.split_at_mut(
-                        hasher.trace_len() + bitwise.trace_len() + memory.trace_len(),
-                    );
                     ace_fragment.push_column_slice(rest);
                 },
                 _ => panic!("invalid column index"),
