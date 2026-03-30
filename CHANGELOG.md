@@ -79,11 +79,6 @@
 - Added `FrameBase` variant to `DebugVarLocation` and `set_value_location` to `DebugVarInfo` for frame-pointer-relative debug variable locations ([#2955](https://github.com/0xMiden/miden-vm/pull/2955)).
 
 ## 0.22.0 (2026-03-18)
-#### Bug fixes
-
-- Fixed `ExecutionTracer` DYNCALL stack-depth off-by-one at `MIN_STACK_DEPTH` ([#2813](https://github.com/0xMiden/miden-vm/issues/2813)).
-
-## 0.22.0 (2025-03-18)
 
 #### Enhancements
 
@@ -120,6 +115,8 @@
 - Add support to the `Assembler` for assembling Miden projects to Miden packages ([#2877](https://github.com/0xMiden/miden-vm/pull/2877))
 
 #### Fixes
+
+- Fixed `ExecutionTracer` DYNCALL stack-depth off-by-one at `MIN_STACK_DEPTH` ([#2813](https://github.com/0xMiden/miden-vm/issues/2813)).
 - Fixed C-like enum validation and constant materialization in `define_enum` ([#2887](https://github.com/0xMiden/miden-vm/pull/2887)).
 - **toposort_caller**: Fixed cycle detection in assembly call graph ([#2871](https://github.com/0xMiden/miden-vm/pull/2871)).
 
