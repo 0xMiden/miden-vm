@@ -1,6 +1,0 @@
-begin
-    # This code computes 1001st Fibonacci number
-    repeat.1000
-        swap dup.1 add
-    end
-end

@@ -26,6 +26,37 @@ pub struct RangeCheckTrace {
 // RANGE CHECKER
 // ================================================================================================
 
+/// Fixed-size storage for range check lookups requested at a single trace row.
+///
+/// Stack u32 operations record 4 sixteen-bit limbs; memory records 2 per access. At most one
+/// batch from each can apply to the same row, so 6 slots suffice without heap allocation.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct MemoryLookupValues {
+    num_lookups: u8,
+    lookup_values: [u16; 6],
+}
+impl MemoryLookupValues {
+    fn from_slice(values: &[u16]) -> Self {
+        debug_assert!(values.len() <= 6);
+        let mut lookup_values = [0u16; 6];
+        lookup_values[..values.len()].copy_from_slice(values);
+        Self {
+            num_lookups: values.len() as u8,
+            lookup_values,
+        }
+    }
+    fn append(&mut self, values: &[u16]) {
+        let n = values.len();
+        debug_assert!(self.num_lookups as usize + n <= 6);
+        let start = self.num_lookups as usize;
+        self.lookup_values[start..start + n].copy_from_slice(values);
+        self.num_lookups += n as u8;
+    }
+    #[inline]
+    pub(crate) fn as_slice(&self) -> &[u16] {
+        &self.lookup_values[..self.num_lookups as usize]
+    }
+}
 /// Range checker for the VM.
 ///
 /// This component is responsible for building an execution trace for all 16-bit range checks
@@ -55,9 +86,8 @@ pub struct RangeChecker {
     /// Tracks lookup count for each checked value.
     lookups: BTreeMap<u16, usize>,
     /// Range check lookups performed by all user operations, grouped and sorted by clock cycle.
-    /// Each cycle is mapped to a vector of the range checks requested at that cycle, which can
-    /// come from the stack, memory, or both.
-    cycle_lookups: BTreeMap<RowIndex, Vec<u16>>,
+    /// Each row maps to the range checks requested there (stack, memory, or both).
+    cycle_lookups: BTreeMap<RowIndex, MemoryLookupValues>,
 }
 
 impl RangeChecker {
@@ -93,15 +123,10 @@ impl RangeChecker {
         }
 
         // track the range check requests at each cycle
-        // TODO: optimize this to use a struct instead of vectors, e.g. (#2793):
-        // struct MemoryLookupValues {
-        //   num_lookups: u8,
-        //   lookup_values: [u16; 6],
-        // }
         self.cycle_lookups
             .entry(clk)
-            .and_modify(|entry| entry.append(&mut values.to_vec()))
-            .or_insert_with(|| values.to_vec());
+            .and_modify(|entry| entry.append(values))
+            .or_insert_with(|| MemoryLookupValues::from_slice(values));
     }
 
     // EXECUTION TRACE GENERATION (INTERNAL)

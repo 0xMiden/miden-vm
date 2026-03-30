@@ -1,9 +1,0 @@
-proc internal_proc
-    caller
-    drop
-    exec.::$kernel::lib::lib_proc
-end
-
-pub proc kernel_proc
-    exec.internal_proc
-end

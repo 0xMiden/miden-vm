@@ -1,3 +1,0 @@
-pub proc explode
-    exec.::miden::protocol::panic
-end

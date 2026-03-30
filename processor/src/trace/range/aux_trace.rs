@@ -12,6 +12,8 @@ use crate::{
     utils::{assume_init_vec, uninit_vector},
 };
 
+use super::MemoryLookupValues;
+
 // AUXILIARY TRACE BUILDER
 // ================================================================================================
 
@@ -23,7 +25,7 @@ pub struct AuxTraceBuilder {
     lookup_values: Vec<u16>,
     /// Range check lookups performed by all user operations, grouped and sorted by the clock cycle
     /// at which they are requested.
-    cycle_lookups: BTreeMap<RowIndex, Vec<u16>>,
+    cycle_lookups: BTreeMap<RowIndex, MemoryLookupValues>,
     // The index of the first row of Range Checker's trace when the padded rows end and values to
     // be range checked start.
     values_start: usize,
@@ -34,7 +36,7 @@ impl AuxTraceBuilder {
     // --------------------------------------------------------------------------------------------
     pub fn new(
         lookup_values: Vec<u16>,
-        cycle_lookups: BTreeMap<RowIndex, Vec<u16>>,
+        cycle_lookups: BTreeMap<RowIndex, MemoryLookupValues>,
         values_start: usize,
     ) -> Self {
         Self {
@@ -97,7 +99,7 @@ impl AuxTraceBuilder {
 
             let mut new_value = current_value;
             // include the operation lookups
-            for lookup in range_checks.iter() {
+            for lookup in range_checks.as_slice() {
                 let value = divisors.get(lookup).expect("invalid lookup value");
                 new_value -= *value;
             }
@@ -138,7 +140,7 @@ impl AuxTraceBuilder {
 
             // subtract the range checks requested by operations
             if let Some(range_checks) = self.cycle_lookups.get(&(row_idx as u32).into()) {
-                for lookup in range_checks.iter() {
+                for lookup in range_checks.as_slice() {
                     let value = divisors.get(lookup).expect("invalid lookup value");
                     new_value -= *value;
                 }

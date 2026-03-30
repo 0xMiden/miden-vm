@@ -1,9 +1,0 @@
-pub proc panic
-    push.1
-    syscall.system_call
-end
-
-pub proc println(message: ptr<u8, addrspace(byte)>)
-    push.2
-    syscall.system_call
-end
