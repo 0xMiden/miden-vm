@@ -414,10 +414,27 @@ impl AuxTraceBuilders {
         // the expanded challenges to all sub-builders.
         let challenges = Challenges::<E>::new(challenges[0], challenges[1]);
 
-        let decoder_cols = self.decoder.build_aux_columns(main_trace, &challenges);
-        let stack_cols = self.stack.build_aux_columns(main_trace, &challenges);
-        let range_cols = self.range.build_aux_columns(main_trace, &challenges);
-        let chiplets_cols = self.chiplets.build_aux_columns(main_trace, &challenges);
+        let (decoder_cols, stack_cols, range_cols, chiplets_cols) = {
+            let ((decoder_cols, stack_cols), (range_cols, chiplets_cols)) = rayon::join(
+                || {
+                    rayon::join(
+                        || self.decoder.build_aux_columns(main_trace, &challenges),
+                        || self.stack.build_aux_columns(main_trace, &challenges),
+                    )
+                },
+                || {
+                    rayon::join(
+                        || self.range.build_aux_columns(main_trace, &challenges),
+                        || {
+                            let [a, b, c] =
+                                self.chiplets.build_aux_columns(main_trace, &challenges);
+                            vec![a, b, c]
+                        },
+                    )
+                },
+            );
+            (decoder_cols, stack_cols, range_cols, chiplets_cols)
+        };
 
         decoder_cols
             .into_iter()
