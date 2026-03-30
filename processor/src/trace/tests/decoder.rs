@@ -26,7 +26,6 @@ use crate::{
 // ================================================================================================
 
 #[test]
-#[expect(clippy::needless_range_loop)]
 fn decoder_p1_span_with_respan() {
     let (ops, _) = build_span_with_respan_ops();
     let trace = build_trace_from_ops(ops, &[]);
@@ -70,7 +69,6 @@ fn decoder_p1_span_with_respan() {
 }
 
 #[test]
-#[expect(clippy::needless_range_loop)]
 fn decoder_p1_join() {
     let program = {
         let mut mast_forest = MastForest::new();
@@ -144,7 +142,6 @@ fn decoder_p1_join() {
 }
 
 #[test]
-#[expect(clippy::needless_range_loop)]
 fn decoder_p1_split() {
     let program = {
         let mut mast_forest = MastForest::new();
@@ -205,7 +202,6 @@ fn decoder_p1_split() {
 }
 
 #[test]
-#[expect(clippy::needless_range_loop)]
 fn decoder_p1_loop_with_repeat() {
     let program = {
         let mut mast_forest = MastForest::new();
@@ -340,7 +336,6 @@ fn decoder_p1_loop_with_repeat() {
 // ================================================================================================
 
 #[test]
-#[expect(clippy::needless_range_loop)]
 fn decoder_p2_span_with_respan() {
     let program = {
         let mut mast_forest = MastForest::new();
@@ -379,7 +374,6 @@ fn decoder_p2_span_with_respan() {
 }
 
 #[test]
-#[expect(clippy::needless_range_loop)]
 fn decoder_p2_join() {
     let mut mast_forest = MastForest::new();
 
@@ -448,7 +442,6 @@ fn decoder_p2_join() {
 }
 
 #[test]
-#[expect(clippy::needless_range_loop)]
 fn decoder_p2_split_true() {
     // build program
     let mut mast_forest = MastForest::new();
@@ -507,7 +500,6 @@ fn decoder_p2_split_true() {
 }
 
 #[test]
-#[expect(clippy::needless_range_loop)]
 fn decoder_p2_split_false() {
     // build program
     let mut mast_forest = MastForest::new();
@@ -567,7 +559,6 @@ fn decoder_p2_split_false() {
 }
 
 #[test]
-#[expect(clippy::needless_range_loop)]
 fn decoder_p2_loop_with_repeat() {
     // build program
     let mut mast_forest = MastForest::new();
@@ -711,7 +702,6 @@ fn decoder_p3_trace_empty_table() {
 }
 
 #[test]
-#[expect(clippy::needless_range_loop)]
 fn decoder_p3_trace_one_batch() {
     let stack = [1, 2, 3, 4, 5, 6, 7, 8];
     let ops = vec![
@@ -779,7 +769,6 @@ fn decoder_p3_trace_one_batch() {
 }
 
 #[test]
-#[expect(clippy::needless_range_loop)]
 fn decoder_p3_trace_two_batches() {
     let (ops, iv) = build_span_with_respan_ops();
     let trace = build_trace_from_ops(ops, &[]);
