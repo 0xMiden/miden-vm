@@ -82,6 +82,14 @@ pub struct MastForestBuilder {
     /// when `build()` is called. This is necessary because the CSR structure requires nodes
     /// to be added in sequential order, but nodes may be created in any order during assembly.
     pending_asm_op_mappings: Vec<(MastNodeId, Vec<(usize, AsmOpId)>)>,
+    /// Pending debug variable mappings to be registered at build time.
+    ///
+    /// Like `pending_asm_op_mappings`, these are collected during assembly and registered all
+    /// at once in sorted node order when `build()` is called. This avoids the crash that
+    /// occurs when `register_debug_vars_for_node` is called with an out-of-order node ID
+    /// (which happens when `ensure_block` deduplicates a basic block and returns an
+    /// already-existing `MastNodeId`).
+    pending_debug_var_mappings: Vec<(MastNodeId, Vec<(usize, miden_core::mast::DebugVarId)>)>,
 }
 
 impl MastForestBuilder {
@@ -139,6 +147,21 @@ impl MastForestBuilder {
                 .debug_info_mut()
                 .register_asm_ops(node_id, num_operations, adjusted_mappings)
                 .expect("failed to register AssemblyOps - internal ordering error");
+        }
+
+        // Register all pending debug variable mappings in sorted node order.
+        // Like AssemblyOps, the CSR structure requires sequential node registration.
+        let mut debug_var_mappings = core::mem::take(&mut self.pending_debug_var_mappings);
+        debug_var_mappings.sort_by_key(|(node_id, _)| *node_id);
+        // Keep only the first registration per node_id (duplicates come from deduplication).
+        let mut seen_debug_var_node_ids = BTreeSet::new();
+        debug_var_mappings.retain(|(node_id, _)| seen_debug_var_node_ids.insert(*node_id));
+
+        for (node_id, debug_vars) in debug_var_mappings {
+            self.mast_forest
+                .debug_info_mut()
+                .register_op_indexed_debug_vars(node_id, debug_vars)
+                .expect("failed to register debug variables - internal ordering error");
         }
 
         let nodes_to_remove = get_nodes_to_remove(self.merged_basic_block_ids, &self.mast_forest);
@@ -599,17 +622,23 @@ impl MastForestBuilder {
     /// entry is `(op_idx, AssemblyOp)` where `op_idx` is the operation index the AssemblyOp
     /// corresponds to.
     ///
-    /// Note: AssemblyOps are only registered for newly created nodes. If a duplicate node already
-    /// exists in the forest (deduplication), the asm_ops are ignored since the existing node
-    /// already has its metadata registered.
+    /// The `debug_vars` parameter contains debug variable metadata for operations in this block.
+    /// Each entry is `(op_idx, DebugVarId)` where `op_idx` is the operation index the debug
+    /// variable corresponds to.
     ///
-    /// The actual registration of AssemblyOp mappings is deferred until `build()` is called,
-    /// to ensure nodes are registered in sequential order as required by the CSR structure.
+    /// Note: AssemblyOps and debug variables are only registered for newly created nodes. If a
+    /// duplicate node already exists in the forest (deduplication), they are ignored since the
+    /// existing node already has its metadata registered.
+    ///
+    /// The actual registration of both AssemblyOp and debug variable mappings is deferred until
+    /// `build()` is called, to ensure nodes are registered in sequential order as required by
+    /// the CSR structure.
     pub fn ensure_block(
         &mut self,
         operations: Vec<Operation>,
         decorators: DecoratorList,
         asm_ops: Vec<(usize, AssemblyOp)>,
+        debug_vars: Vec<(usize, miden_core::mast::DebugVarId)>,
         before_enter: Vec<DecoratorId>,
         after_exit: Vec<DecoratorId>,
     ) -> Result<MastNodeId, Report> {
@@ -633,6 +662,12 @@ impl MastForestBuilder {
             }
             // Defer registration until build() to ensure sequential node order.
             self.pending_asm_op_mappings.push((node_id, asm_op_mappings));
+        }
+
+        // Only register debug variables for newly created nodes.
+        // Deduplicated nodes already have their debug vars registered.
+        if is_new && !debug_vars.is_empty() {
+            self.pending_debug_var_mappings.push((node_id, debug_vars));
         }
 
         Ok(node_id)
@@ -896,21 +931,6 @@ impl MastForestBuilder {
         Ok(())
     }
 
-    /// Registers debug variables for a specific node.
-    ///
-    /// This associates already-added debug variables with specific operations within a node.
-    /// Debug variables are stored in dedicated CSR storage and are only accessed by the debugger.
-    pub fn register_debug_vars_for_node(
-        &mut self,
-        node_id: MastNodeId,
-        debug_vars: Vec<(usize, miden_core::mast::DebugVarId)>,
-    ) -> Result<(), Report> {
-        self.mast_forest
-            .debug_info_mut()
-            .register_op_indexed_debug_vars(node_id, debug_vars)
-            .into_diagnostic()
-            .wrap_err("failed to register debug variables for node")
-    }
 }
 
 impl Index<MastNodeId> for MastForestBuilder {
@@ -1026,7 +1046,7 @@ mod tests {
         ];
 
         let block1_id = builder
-            .ensure_block(block1_ops.clone(), block1_decorators, vec![], vec![], vec![])
+            .ensure_block(block1_ops.clone(), block1_decorators, vec![], vec![], vec![], vec![])
             .unwrap();
 
         // Sanity check the test itself makes sense
@@ -1047,7 +1067,7 @@ mod tests {
         ]; // [push mul] [3]
 
         let block2_id = builder
-            .ensure_block(block2_ops.clone(), block2_decorators, vec![], vec![], vec![])
+            .ensure_block(block2_ops.clone(), block2_decorators, vec![], vec![], vec![], vec![])
             .unwrap();
 
         // Merge the blocks
@@ -1186,11 +1206,11 @@ mod tests {
         let num_ops = PROCEDURE_INLINING_THRESHOLD * 1024;
         let large_ops = vec![Operation::Add; num_ops];
         let large_block_id =
-            builder.ensure_block(large_ops, Vec::new(), vec![], vec![], vec![]).unwrap();
+            builder.ensure_block(large_ops, Vec::new(), vec![], vec![], vec![], vec![]).unwrap();
         builder.mast_forest.make_root(large_block_id);
 
         let small_block_id = builder
-            .ensure_block(vec![Operation::Add], Vec::new(), vec![], vec![], vec![])
+            .ensure_block(vec![Operation::Add], Vec::new(), vec![], vec![], vec![], vec![])
             .unwrap();
 
         let merged_blocks = builder.merge_basic_blocks(&[large_block_id, small_block_id]).unwrap();

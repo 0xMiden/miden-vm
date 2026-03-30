@@ -233,13 +233,7 @@ impl BasicBlockBuilder<'_> {
 
             let basic_block_node_id =
                 self.mast_forest_builder
-                    .ensure_block(ops, decorators, asm_ops, vec![], vec![])?;
-
-            // Register debug variables for this node (stored separately from decorators)
-            if !debug_vars.is_empty() {
-                self.mast_forest_builder
-                    .register_debug_vars_for_node(basic_block_node_id, debug_vars)?;
-            }
+                    .ensure_block(ops, decorators, asm_ops, debug_vars, vec![], vec![])?;
 
             Ok(Some(basic_block_node_id))
         } else {
