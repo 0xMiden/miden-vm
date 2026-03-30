@@ -1093,8 +1093,7 @@ fn decoder_dyncall_with_multiple_overflow_entries_records_correct_overflow_addr(
     // Asserting exact equality with T1 (not just != ZERO) distinguishes the two code paths
     // even when both T1 and T2 are nonzero.
     assert_eq!(
-        recorded_overflow_addr,
-        t1,
+        recorded_overflow_addr, t1,
         "parent_next_overflow_addr must equal T1 (second-to-last overflow clock = {t1}); \
          T2 (top overflow clock = {t2}) would indicate the buggy \
          last_update_clk_in_current_ctx() path"
