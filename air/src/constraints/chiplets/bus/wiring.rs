@@ -15,10 +15,15 @@
 //! ```text
 //! ace_flag * (delta * D_ace - N_ace) = 0
 //! memory_flag * (delta * D_mem + N_mem) = 0
-//! hasher_flag * (delta * D_perm - N_perm) = 0
+//! hasher_flag * (delta * D_perm - N_perm) + idle_flag * delta = 0
 //! ```
 //!
-//! TODO(Al): Revisit the above equations
+//! The `idle_flag * delta` term is important as on bitwise, kernel-ROM, and padding rows, none of
+//! the stacked `v_wiring` contributors are active, but the accumulator must still propagate
+//! unchanged so its last-row boundary value remains bound to the earlier accumulation.
+//!
+//! TODO(Al): Revisit the above equations. The three assertions above could also be collapsed
+//! into a single assertion later once we rebase and remove tags.
 
 use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::{LiftedAirBuilder, WindowAccess};
@@ -73,11 +78,12 @@ const WIRING_BUS_TAGS: TagGroup = TagGroup {
 /// ```text
 /// ace_flag * (delta * D_ace - N_ace) = 0
 /// memory_flag * (delta * D_mem + N_mem) = 0
-/// hasher_flag * (delta * D_perm - N_perm) = 0
+/// hasher_flag * (delta * D_perm - N_perm) + idle_flag * delta = 0
 /// ```
 ///
-/// Each flag selects the correct accumulation formula for its row type. On idle rows,
-/// all flags are zero and each constraint is trivially satisfied.
+/// Each flag selects the correct accumulation formula for its row type. On idle rows
+/// (bitwise, kernel-ROM, and padding), all stacked contributors are inactive, so the
+/// `idle_flag * delta` term forces the shared accumulator to propagate unchanged.
 pub fn enforce_wiring_bus_constraint<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,
@@ -117,27 +123,22 @@ pub fn enforce_wiring_bus_constraint<AB>(
     let s2: AB::Expr = local.chiplets[2].clone().into();
     let s3: AB::Expr = local.chiplets[3].clone().into();
 
+    let ace_flag = ace_chiplet_flag(s0.clone(), s1.clone(), s2.clone(), s3);
+    let memory_flag = memory_chiplet_flag(s0.clone(), s1.clone(), s2);
+    let hasher_flag = AB::Expr::ONE - s0.clone();
+    let idle_flag = AB::Expr::ONE - ace_flag.clone() - memory_flag.clone() - hasher_flag.clone();
+
     // --- ACE term ---
-    let ace_term = compute_ace_term::<AB>(
-        &delta,
-        ace_chiplet_flag(s0.clone(), s1.clone(), s2.clone(), s3),
-        local,
-        challenges,
-    );
+    let ace_term = compute_ace_term::<AB>(&delta, ace_flag, local, challenges);
 
     // --- Memory term ---
-    let mem_term = compute_memory_term::<AB>(
-        &delta,
-        memory_chiplet_flag(s0.clone(), s1.clone(), s2),
-        local,
-        challenges,
-    );
+    let mem_term = compute_memory_term::<AB>(&delta, memory_flag, local, challenges);
 
-    // --- Hasher perm-link term ---
-    let hasher_flag = AB::Expr::ONE - s0.clone();
+    // --- Hasher perm-link + idle propagation term ---
     let perm_link_term = compute_hasher_perm_link_term::<AB>(
         &delta,
         hasher_flag,
+        idle_flag,
         local,
         challenges,
         p_cycle_row_0,
@@ -252,7 +253,7 @@ where
 // HASHER PERM-LINK TERM
 // ================================================================================================
 
-/// Computes the hasher perm-link contribution to the wiring bus.
+/// Computes the hasher perm-link contribution to the wiring bus and enforces idle propagation.
 ///
 /// This links hasher controller rows (dispatch) to hasher permutation segment (compute):
 /// - Hasher controller input (perm_seg=0, hs0=1): +1/msg_in
@@ -260,16 +261,19 @@ where
 /// - Hasher permutation cycle row 0 (`is_init_ext = 1`): -m/msg_in
 /// - Hasher permutation boundary row (cycle row 15, i.e. `perm_seg=1` and all row-type selectors
 ///   are 0): -m/msg_out
+/// - Idle bitwise / kernel-ROM / padding rows: `delta = 0`
 ///
 /// Common-denominator form:
 /// ```text
 /// hasher_flag * (delta * msg_in * msg_out
 ///               - msg_out * (f_in - f_p_in * m)
-///               - msg_in * (f_out - f_p_out * m)) = 0
+///               - msg_in * (f_out - f_p_out * m))
+/// + idle_flag * delta = 0
 /// ```
 fn compute_hasher_perm_link_term<AB>(
     delta: &AB::ExprEF,
     hasher_flag: AB::Expr,
+    idle_flag: AB::Expr,
     local: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
     p_cycle_row_0: AB::Expr,
@@ -321,11 +325,13 @@ where
     let f_p_in_m: AB::ExprEF = (f_p_in * m.clone()).into();
     let f_p_out_m: AB::ExprEF = (f_p_out * m).into();
 
-    let term = delta.clone() * msg_in.clone() * msg_out.clone()
+    let perm_link_term = delta.clone() * msg_in.clone() * msg_out.clone()
         - msg_out * (f_in_ef - f_p_in_m)
         - msg_in * (f_out_ef - f_p_out_m);
 
-    term * hasher_flag
+    let idle_term: AB::ExprEF = delta.clone() * Into::<AB::ExprEF>::into(idle_flag);
+
+    perm_link_term * hasher_flag + idle_term
 }
 
 /// Encodes a perm-link message: `challenges.encode([label, h0, h1, ..., h11])`.
