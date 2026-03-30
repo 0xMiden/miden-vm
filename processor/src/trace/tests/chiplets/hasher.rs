@@ -51,7 +51,6 @@ pub const DECODER_OP_BITS_RANGE: Range<usize> =
 /// Tests the generation of the `b_chip` bus column when the hasher only performs a single `SPAN`
 /// with one operation batch.
 #[test]
-#[expect(clippy::needless_range_loop)]
 pub fn b_chip_span() {
     let program = {
         let mut mast_forest = MastForest::new();
@@ -128,7 +127,6 @@ pub fn b_chip_span() {
 /// Tests the generation of the `b_chip` bus column when the hasher only performs a `SPAN` but it
 /// includes multiple batches.
 #[test]
-#[expect(clippy::needless_range_loop)]
 pub fn b_chip_span_with_respan() {
     let program = {
         let mut mast_forest = MastForest::new();
@@ -239,7 +237,6 @@ pub fn b_chip_span_with_respan() {
 /// Tests the generation of the `b_chip` bus column when the hasher performs a merge of two code
 /// blocks requested by the decoder. (This also requires a `SPAN` block.)
 #[test]
-#[expect(clippy::needless_range_loop)]
 pub fn b_chip_merge() {
     let program = {
         let mut mast_forest = MastForest::new();
@@ -364,7 +361,6 @@ pub fn b_chip_merge() {
 /// Tests the generation of the `b_chip` bus column when the hasher performs a permutation
 /// requested by the `HPerm` user operation.
 #[test]
-#[expect(clippy::needless_range_loop)]
 pub fn b_chip_permutation() {
     let program = {
         let mut mast_forest = MastForest::new();
@@ -481,7 +477,6 @@ pub fn b_chip_permutation() {
 /// operation requested by the stack. The operation absorbs TAG and COMM into a Poseidon2
 /// sponge with capacity CAP_PREV, producing (CAP_NEXT, R0, R1).
 #[test]
-#[expect(clippy::needless_range_loop)]
 pub fn b_chip_log_precompile() {
     let program = {
         let mut mast_forest = MastForest::new();
@@ -608,7 +603,6 @@ pub fn b_chip_log_precompile() {
 /// Tests the generation of the `b_chip` bus column when the hasher performs a Merkle path
 /// verification requested by the `MpVerify` user operation.
 #[test]
-#[expect(clippy::needless_range_loop)]
 fn b_chip_mpverify() {
     let index = 5usize;
     let leaves = init_leaves(&[1, 2, 3, 4, 5, 6, 7, 8]);
@@ -729,7 +723,6 @@ fn b_chip_mpverify() {
 /// Tests the generation of the `b_chip` bus column when the hasher performs a Merkle root update
 /// requested by the `MrUpdate` user operation.
 #[test]
-#[expect(clippy::needless_range_loop)]
 fn b_chip_mrupdate() {
     let index = 5usize;
     let leaves = init_leaves(&[1, 2, 3, 4, 5, 6, 7, 8]);

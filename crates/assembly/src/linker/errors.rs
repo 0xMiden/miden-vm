@@ -73,6 +73,15 @@ pub enum LinkerError {
         source_file: Option<Arc<SourceFile>>,
         callee: Arc<Path>,
     },
+    #[error("kernel procedure '{callee}' can only be invoked via syscall")]
+    #[diagnostic()]
+    KernelProcNotSyscall {
+        #[label("non-syscall reference to kernel procedure")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        callee: Arc<Path>,
+    },
     #[error("invalid procedure reference: path refers to a non-procedure item")]
     #[diagnostic()]
     InvalidInvokeTarget {
