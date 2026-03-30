@@ -252,6 +252,12 @@ where `m` is the multiplicity stored in `node_index` on permutation rows.
 
 This is the mechanism that makes permutation deduplication sound.
 
+Because `v_wiring` is a shared bus, the AIR also forces it to stay constant on
+rows where none of its stacked contributors are active. In particular, on
+bitwise rows, kernel-ROM rows, and trailing chiplet padding rows, the hasher-side
+wiring relation contributes an `idle_flag * delta` term so those rows cannot let
+`v_wiring` drift before the final boundary.
+
 <a id="sibling-table-constraints"></a>
 
 ### 3. Hash-kernel virtual table (`b_hash_kernel`)
@@ -475,15 +481,17 @@ segment by balancing:
 - controller input rows against permutation row `0`, and
 - controller output rows against permutation row `15`.
 
-In common-denominator form, the AIR enforces a relation of the shape:
+In common-denominator form, the hasher-side AIR enforces:
 
 ```text
-delta * msg_in * msg_out
-  - msg_out * (f_in  - f_p_in  * m)
-  - msg_in  * (f_out - f_p_out * m)
+hasher_flag * (delta * msg_in * msg_out
+              - msg_out * (f_in  - f_p_in  * m)
+              - msg_in  * (f_out - f_p_out * m))
++ idle_flag * delta
 ```
 
-where `m` is the permutation multiplicity.
+where `m` is the permutation multiplicity and `idle_flag` covers rows where the
+shared `v_wiring` accumulator must propagate unchanged.
 
 This is the core mechanism for memoization.
 
