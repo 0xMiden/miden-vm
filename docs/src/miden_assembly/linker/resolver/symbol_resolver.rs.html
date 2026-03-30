@@ -1,4 +1,4 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `crates/assembly/src/linker/resolver/symbol_resolver.rs`."><title>symbol_resolver.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="miden_assembly" data-themes="" data-resource-suffix="" data-rustdoc-version="1.96.0-nightly (fda6d37bb 2026-03-27)" data-channel="nightly" data-search-js="search-63369b7b.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-5013f961.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">miden_assembly/linker/resolver/</div>symbol_resolver.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="kw">use </span>alloc::{boxed::Box, collections::BTreeSet, string::ToString, sync::Arc};
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `crates/assembly/src/linker/resolver/symbol_resolver.rs`."><title>symbol_resolver.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../../../../" data-static-root-path="../../../../static.files/" data-current-crate="miden_assembly" data-themes="" data-resource-suffix="" data-rustdoc-version="1.96.0-nightly (a25435bcf 2026-03-29)" data-channel="nightly" data-search-js="search-63369b7b.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../src-files.js"></script><script defer src="../../../../static.files/main-5013f961.js"></script><noscript><link rel="stylesheet" href="../../../../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">miden_assembly/linker/resolver/</div>symbol_resolver.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="kw">use </span>alloc::{boxed::Box, collections::BTreeSet, string::ToString, sync::Arc};
 <a href=#2 id=2 data-nosnippet>2</a>
 <a href=#3 id=3 data-nosnippet>3</a><span class="kw">use </span>miden_assembly_syntax::{
 <a href=#4 id=4 data-nosnippet>4</a>    ast::{
@@ -85,7 +85,7 @@
 <a href=#85 id=85 data-nosnippet>85</a>        context: <span class="kw-2">&amp;</span>SymbolResolutionContext,
 <a href=#86 id=86 data-nosnippet>86</a>        target: <span class="kw-2">&amp;</span>InvocationTarget,
 <a href=#87 id=87 data-nosnippet>87</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;SymbolResolution, LinkerError&gt; {
-<a href=#88 id=88 data-nosnippet>88</a>        <span class="kw">match </span>target {
+<a href=#88 id=88 data-nosnippet>88</a>        <span class="kw">let </span>resolution = <span class="kw">match </span>target {
 <a href=#89 id=89 data-nosnippet>89</a>            InvocationTarget::MastRoot(mast_root) =&gt; {
 <a href=#90 id=90 data-nosnippet>90</a>                <span class="macro">log::debug!</span>(target: <span class="string">"name-resolver::invoke"</span>, <span class="string">"resolving {target}"</span>);
 <a href=#91 id=91 data-nosnippet>91</a>                <span class="self">self</span>.validate_syscall_digest(context, <span class="kw-2">*</span>mast_root)<span class="question-mark">?</span>;
@@ -195,341 +195,372 @@
 <a href=#195 id=195 data-nosnippet>195</a>                // will be checked
 <a href=#196 id=196 data-nosnippet>196</a>                </span>resolution =&gt; <span class="prelude-val">Ok</span>(resolution),
 <a href=#197 id=197 data-nosnippet>197</a>            },
-<a href=#198 id=198 data-nosnippet>198</a>        }
-<a href=#199 id=199 data-nosnippet>199</a>    }
-<a href=#200 id=200 data-nosnippet>200</a>
-<a href=#201 id=201 data-nosnippet>201</a>    <span class="kw">fn </span>validate_syscall_digest(
-<a href=#202 id=202 data-nosnippet>202</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#203 id=203 data-nosnippet>203</a>        context: <span class="kw-2">&amp;</span>SymbolResolutionContext,
-<a href=#204 id=204 data-nosnippet>204</a>        mast_root: Span&lt;Word&gt;,
-<a href=#205 id=205 data-nosnippet>205</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), LinkerError&gt; {
-<a href=#206 id=206 data-nosnippet>206</a>        <span class="kw">if </span>!context.in_syscall() {
-<a href=#207 id=207 data-nosnippet>207</a>            <span class="kw">return </span><span class="prelude-val">Ok</span>(());
-<a href=#208 id=208 data-nosnippet>208</a>        }
-<a href=#209 id=209 data-nosnippet>209</a>        <span class="comment">// Syscalls must be validated against an attached kernel at assembly time.
-<a href=#210 id=210 data-nosnippet>210</a>        </span><span class="kw">if </span>!<span class="self">self</span>.graph.has_nonempty_kernel() {
-<a href=#211 id=211 data-nosnippet>211</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(LinkerError::InvalidSysCallTarget {
-<a href=#212 id=212 data-nosnippet>212</a>                span: context.span,
-<a href=#213 id=213 data-nosnippet>213</a>                source_file: <span class="self">self</span>.source_manager().get(context.span.source_id()).ok(),
-<a href=#214 id=214 data-nosnippet>214</a>                callee: Arc::&lt;Path&gt;::from(Path::new(<span class="string">"syscall"</span>)),
-<a href=#215 id=215 data-nosnippet>215</a>            });
-<a href=#216 id=216 data-nosnippet>216</a>        }
-<a href=#217 id=217 data-nosnippet>217</a>        <span class="comment">// Kernel digests only contain exported kernel procedures.
-<a href=#218 id=218 data-nosnippet>218</a>        </span><span class="kw">if </span>!<span class="self">self</span>.graph.kernel().contains_proc(<span class="kw-2">*</span>mast_root.inner()) {
-<a href=#219 id=219 data-nosnippet>219</a>            <span class="kw">let </span>digest_path = <span class="macro">format!</span>(<span class="string">"{mast_root}"</span>);
-<a href=#220 id=220 data-nosnippet>220</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(LinkerError::InvalidSysCallTarget {
-<a href=#221 id=221 data-nosnippet>221</a>                span: context.span,
-<a href=#222 id=222 data-nosnippet>222</a>                source_file: <span class="self">self</span>.source_manager().get(context.span.source_id()).ok(),
-<a href=#223 id=223 data-nosnippet>223</a>                callee: Arc::&lt;Path&gt;::from(Path::new(<span class="kw-2">&amp;</span>digest_path)),
-<a href=#224 id=224 data-nosnippet>224</a>            });
-<a href=#225 id=225 data-nosnippet>225</a>        }
-<a href=#226 id=226 data-nosnippet>226</a>        <span class="prelude-val">Ok</span>(())
-<a href=#227 id=227 data-nosnippet>227</a>    }
-<a href=#228 id=228 data-nosnippet>228</a>
-<a href=#229 id=229 data-nosnippet>229</a>    <span class="doccomment">/// Resolve `target`, a possibly-resolved symbol reference, to a [SymbolResolution], using
-<a href=#230 id=230 data-nosnippet>230</a>    /// `context` as the context.
-<a href=#231 id=231 data-nosnippet>231</a>    </span><span class="kw">pub fn </span>resolve_alias_target(
-<a href=#232 id=232 data-nosnippet>232</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#233 id=233 data-nosnippet>233</a>        context: <span class="kw-2">&amp;</span>SymbolResolutionContext,
-<a href=#234 id=234 data-nosnippet>234</a>        alias: <span class="kw-2">&amp;</span>Alias,
-<a href=#235 id=235 data-nosnippet>235</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;SymbolResolution, LinkerError&gt; {
-<a href=#236 id=236 data-nosnippet>236</a>        <span class="kw">match </span>alias.target() {
-<a href=#237 id=237 data-nosnippet>237</a>            target @ AliasTarget::MastRoot(mast_root) =&gt; {
-<a href=#238 id=238 data-nosnippet>238</a>                <span class="macro">log::debug!</span>(target: <span class="string">"name-resolver::alias"</span>, <span class="string">"resolving alias target {target}"</span>);
-<a href=#239 id=239 data-nosnippet>239</a>                <span class="kw">match </span><span class="self">self</span>.graph.get_procedure_index_by_digest(mast_root) {
-<a href=#240 id=240 data-nosnippet>240</a>                    <span class="prelude-val">None </span>=&gt; <span class="prelude-val">Ok</span>(SymbolResolution::MastRoot(<span class="kw-2">*</span>mast_root)),
-<a href=#241 id=241 data-nosnippet>241</a>                    <span class="prelude-val">Some</span>(gid) =&gt; <span class="prelude-val">Ok</span>(SymbolResolution::Exact {
-<a href=#242 id=242 data-nosnippet>242</a>                        gid,
-<a href=#243 id=243 data-nosnippet>243</a>                        path: Span::new(mast_root.span(), <span class="self">self</span>.item_path(gid)),
-<a href=#244 id=244 data-nosnippet>244</a>                    }),
-<a href=#245 id=245 data-nosnippet>245</a>                }
-<a href=#246 id=246 data-nosnippet>246</a>            },
-<a href=#247 id=247 data-nosnippet>247</a>            AliasTarget::Path(path) =&gt; {
-<a href=#248 id=248 data-nosnippet>248</a>                <span class="macro">log::debug!</span>(target: <span class="string">"name-resolver::alias"</span>, <span class="string">"resolving alias target '{path}'"</span>);
-<a href=#249 id=249 data-nosnippet>249</a>                <span class="comment">// We ensure that we do not unintentionally recursively expand an alias target using
-<a href=#250 id=250 data-nosnippet>250</a>                // its own definition, e.g. with something like `use lib::lib` which without this,
-<a href=#251 id=251 data-nosnippet>251</a>                // will expand until the stack blows
-<a href=#252 id=252 data-nosnippet>252</a>                </span><span class="kw">let </span><span class="kw-2">mut </span>ignored_imports = BTreeSet::from_iter([alias.name().clone().into_inner()]);
-<a href=#253 id=253 data-nosnippet>253</a>                <span class="self">self</span>.expand_path(context, path.as_deref(), <span class="kw-2">&amp;mut </span>ignored_imports)
-<a href=#254 id=254 data-nosnippet>254</a>            },
-<a href=#255 id=255 data-nosnippet>255</a>        }
-<a href=#256 id=256 data-nosnippet>256</a>    }
-<a href=#257 id=257 data-nosnippet>257</a>
-<a href=#258 id=258 data-nosnippet>258</a>    <span class="kw">pub fn </span>resolve_path(
-<a href=#259 id=259 data-nosnippet>259</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#260 id=260 data-nosnippet>260</a>        context: <span class="kw-2">&amp;</span>SymbolResolutionContext,
-<a href=#261 id=261 data-nosnippet>261</a>        path: Span&lt;<span class="kw-2">&amp;</span>Path&gt;,
-<a href=#262 id=262 data-nosnippet>262</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;SymbolResolution, LinkerError&gt; {
-<a href=#263 id=263 data-nosnippet>263</a>        <span class="kw">let </span><span class="kw-2">mut </span>ignored_imports = BTreeSet::default();
-<a href=#264 id=264 data-nosnippet>264</a>        <span class="self">self</span>.expand_path(context, path, <span class="kw-2">&amp;mut </span>ignored_imports)
-<a href=#265 id=265 data-nosnippet>265</a>    }
-<a href=#266 id=266 data-nosnippet>266</a>
-<a href=#267 id=267 data-nosnippet>267</a>    <span class="kw">fn </span>expand_path(
-<a href=#268 id=268 data-nosnippet>268</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#269 id=269 data-nosnippet>269</a>        context: <span class="kw-2">&amp;</span>SymbolResolutionContext,
-<a href=#270 id=270 data-nosnippet>270</a>        path: Span&lt;<span class="kw-2">&amp;</span>Path&gt;,
-<a href=#271 id=271 data-nosnippet>271</a>        ignored_imports: <span class="kw-2">&amp;mut </span>BTreeSet&lt;Arc&lt;str&gt;&gt;,
-<a href=#272 id=272 data-nosnippet>272</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;SymbolResolution, LinkerError&gt; {
-<a href=#273 id=273 data-nosnippet>273</a>        <span class="kw">let </span>span = path.span();
-<a href=#274 id=274 data-nosnippet>274</a>        <span class="kw">let </span><span class="kw-2">mut </span>path = path.into_inner();
-<a href=#275 id=275 data-nosnippet>275</a>        <span class="kw">let </span><span class="kw-2">mut </span>context = context.clone();
-<a href=#276 id=276 data-nosnippet>276</a>        <span class="kw">loop </span>{
-<a href=#277 id=277 data-nosnippet>277</a>            <span class="macro">log::debug!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"expanding path '{path}' (absolute = {})"</span>, path.is_absolute());
-<a href=#278 id=278 data-nosnippet>278</a>            <span class="kw">if </span>path.is_absolute() {
-<a href=#279 id=279 data-nosnippet>279</a>                <span class="comment">// An absolute path does not reference any aliases in the current module, but may
-<a href=#280 id=280 data-nosnippet>280</a>                // refer to aliases in any of its non-root components.
-<a href=#281 id=281 data-nosnippet>281</a>                //
-<a href=#282 id=282 data-nosnippet>282</a>                // However, if the root component of the path is not a known module, then we have to
-<a href=#283 id=283 data-nosnippet>283</a>                // proceed as if an actual module exists, just one that incorporates more components
-<a href=#284 id=284 data-nosnippet>284</a>                // of the path than just the root.
-<a href=#285 id=285 data-nosnippet>285</a>                //
-<a href=#286 id=286 data-nosnippet>286</a>                // To speed this up, we search for a matching "longest-prefix" of `path` in the
-<a href=#287 id=287 data-nosnippet>287</a>                // global module list. If we find an exact match, we're done. If we
-<a href=#288 id=288 data-nosnippet>288</a>                // find a partial match, then we resolve the rest of `path` relative
-<a href=#289 id=289 data-nosnippet>289</a>                // to that partial match. If we cannot find any match at all, then
-<a href=#290 id=290 data-nosnippet>290</a>                // the path references an undefined module
-<a href=#291 id=291 data-nosnippet>291</a>                </span><span class="kw">let </span><span class="kw-2">mut </span>longest_prefix: <span class="prelude-ty">Option</span>&lt;(ModuleIndex, Arc&lt;Path&gt;)&gt; = <span class="prelude-val">None</span>;
-<a href=#292 id=292 data-nosnippet>292</a>                <span class="kw">for </span>module <span class="kw">in </span><span class="self">self</span>.graph.modules.iter() {
-<a href=#293 id=293 data-nosnippet>293</a>                    <span class="kw">let </span>module_path = module.path().clone();
-<a href=#294 id=294 data-nosnippet>294</a>                    <span class="kw">if </span>path == <span class="kw-2">&amp;*</span>module_path {
-<a href=#295 id=295 data-nosnippet>295</a>                        <span class="macro">log::debug!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"found exact match for '{path}': id={}"</span>, module.id());
-<a href=#296 id=296 data-nosnippet>296</a>                        <span class="kw">return </span><span class="prelude-val">Ok</span>(SymbolResolution::Module {
-<a href=#297 id=297 data-nosnippet>297</a>                            id: module.id(),
-<a href=#298 id=298 data-nosnippet>298</a>                            path: Span::new(span, module_path),
-<a href=#299 id=299 data-nosnippet>299</a>                        });
-<a href=#300 id=300 data-nosnippet>300</a>                    }
-<a href=#301 id=301 data-nosnippet>301</a>
-<a href=#302 id=302 data-nosnippet>302</a>                    <span class="kw">if </span>path.starts_with_exactly(module_path.as_ref()) {
-<a href=#303 id=303 data-nosnippet>303</a>                        <span class="kw">if let </span><span class="prelude-val">Some</span>((<span class="kw">_</span>, prev)) = longest_prefix.as_ref() {
-<a href=#304 id=304 data-nosnippet>304</a>                            <span class="kw">if </span>prev.components().count() &lt; module_path.components().count() {
-<a href=#305 id=305 data-nosnippet>305</a>                                longest_prefix = <span class="prelude-val">Some</span>((module.id(), module_path));
-<a href=#306 id=306 data-nosnippet>306</a>                            }
-<a href=#307 id=307 data-nosnippet>307</a>                        } <span class="kw">else </span>{
-<a href=#308 id=308 data-nosnippet>308</a>                            longest_prefix = <span class="prelude-val">Some</span>((module.id(), module_path));
-<a href=#309 id=309 data-nosnippet>309</a>                        }
-<a href=#310 id=310 data-nosnippet>310</a>                    }
-<a href=#311 id=311 data-nosnippet>311</a>                }
-<a href=#312 id=312 data-nosnippet>312</a>
-<a href=#313 id=313 data-nosnippet>313</a>                <span class="kw">match </span>longest_prefix {
-<a href=#314 id=314 data-nosnippet>314</a>                    <span class="comment">// We found a module with a common prefix, attempt to expand the subpath of
-<a href=#315 id=315 data-nosnippet>315</a>                    // `path` relative to that module. If this fails, the path
-<a href=#316 id=316 data-nosnippet>316</a>                    // is an undefined reference.
-<a href=#317 id=317 data-nosnippet>317</a>                    </span><span class="prelude-val">Some</span>((module_id, module_path)) =&gt; {
-<a href=#318 id=318 data-nosnippet>318</a>                        <span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"found prefix match for '{path}': id={module_id}, prefix={module_path}"</span>);
-<a href=#319 id=319 data-nosnippet>319</a>                        <span class="kw">let </span>subpath = path.strip_prefix(<span class="kw-2">&amp;</span>module_path).unwrap();
-<a href=#320 id=320 data-nosnippet>320</a>                        context.module = module_id;
-<a href=#321 id=321 data-nosnippet>321</a>                        ignored_imports.clear();
-<a href=#322 id=322 data-nosnippet>322</a>                        path = subpath;
-<a href=#323 id=323 data-nosnippet>323</a>                    },
-<a href=#324 id=324 data-nosnippet>324</a>                    <span class="comment">// No matching module paths found, path is undefined symbol reference
-<a href=#325 id=325 data-nosnippet>325</a>                    </span><span class="prelude-val">None </span>=&gt; {
-<a href=#326 id=326 data-nosnippet>326</a>                        <span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"no prefix match found for '{path}' - path is undefined symbol reference"</span>);
-<a href=#327 id=327 data-nosnippet>327</a>                        <span class="kw">break </span><span class="prelude-val">Err</span>(
-<a href=#328 id=328 data-nosnippet>328</a>                            SymbolResolutionError::undefined(span, <span class="self">self</span>.source_manager()).into()
-<a href=#329 id=329 data-nosnippet>329</a>                        );
-<a href=#330 id=330 data-nosnippet>330</a>                    },
-<a href=#331 id=331 data-nosnippet>331</a>                }
-<a href=#332 id=332 data-nosnippet>332</a>            } <span class="kw">else if let </span><span class="prelude-val">Some</span>(symbol) = path.as_ident() {
-<a href=#333 id=333 data-nosnippet>333</a>                <span class="comment">// This is a reference to a symbol in the current module, possibly imported.
-<a href=#334 id=334 data-nosnippet>334</a>                //
-<a href=#335 id=335 data-nosnippet>335</a>                // We first resolve the symbol in the local module to either a local definition, or
-<a href=#336 id=336 data-nosnippet>336</a>                // an imported symbol.
-<a href=#337 id=337 data-nosnippet>337</a>                //
-<a href=#338 id=338 data-nosnippet>338</a>                // If the symbol is locally-defined, the expansion is the join of the current module
-<a href=#339 id=339 data-nosnippet>339</a>                // path and the symbol name.
-<a href=#340 id=340 data-nosnippet>340</a>                //
-<a href=#341 id=341 data-nosnippet>341</a>                // If the symbol is an imported item, then we expand the imported path recursively.
-<a href=#342 id=342 data-nosnippet>342</a>                </span><span class="kw">break match </span><span class="self">self
-<a href=#343 id=343 data-nosnippet>343</a>                    </span>.resolve_local_with_index(context.module, Span::new(span, symbol.as_str()))<span class="question-mark">?
-<a href=#344 id=344 data-nosnippet>344</a>                </span>{
-<a href=#345 id=345 data-nosnippet>345</a>                    SymbolResolution::Local(item) =&gt; {
-<a href=#346 id=346 data-nosnippet>346</a>                        <span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"resolved '{symbol}' to local symbol: {}"</span>, context.module + item.into_inner());
-<a href=#347 id=347 data-nosnippet>347</a>                        <span class="kw">let </span>path = <span class="self">self</span>.module_path(context.module).join(<span class="kw-2">&amp;</span>symbol);
-<a href=#348 id=348 data-nosnippet>348</a>                        <span class="prelude-val">Ok</span>(SymbolResolution::Exact {
-<a href=#349 id=349 data-nosnippet>349</a>                            gid: context.module + item.into_inner(),
-<a href=#350 id=350 data-nosnippet>350</a>                            path: Span::new(span, path.into()),
-<a href=#351 id=351 data-nosnippet>351</a>                        })
-<a href=#352 id=352 data-nosnippet>352</a>                    },
-<a href=#353 id=353 data-nosnippet>353</a>                    SymbolResolution::External(path) =&gt; {
-<a href=#354 id=354 data-nosnippet>354</a>                        <span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"expanded '{symbol}' to unresolved external path '{path}'"</span>);
-<a href=#355 id=355 data-nosnippet>355</a>                        <span class="self">self</span>.expand_path(<span class="kw-2">&amp;</span>context, path.as_deref(), ignored_imports)
-<a href=#356 id=356 data-nosnippet>356</a>                    },
-<a href=#357 id=357 data-nosnippet>357</a>                    resolved @ (SymbolResolution::MastRoot(<span class="kw">_</span>) | SymbolResolution::Exact { .. }) =&gt; {
-<a href=#358 id=358 data-nosnippet>358</a>                        <span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"resolved '{symbol}' to exact definition"</span>);
-<a href=#359 id=359 data-nosnippet>359</a>                        <span class="prelude-val">Ok</span>(resolved)
-<a href=#360 id=360 data-nosnippet>360</a>                    },
-<a href=#361 id=361 data-nosnippet>361</a>                    SymbolResolution::Module { id, path: module_path } =&gt; {
-<a href=#362 id=362 data-nosnippet>362</a>                        <span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"resolved '{symbol}' to module: id={id} path={module_path}"</span>);
-<a href=#363 id=363 data-nosnippet>363</a>                        <span class="prelude-val">Ok</span>(SymbolResolution::Module { id, path: module_path })
-<a href=#364 id=364 data-nosnippet>364</a>                    },
-<a href=#365 id=365 data-nosnippet>365</a>                };
-<a href=#366 id=366 data-nosnippet>366</a>            } <span class="kw">else </span>{
-<a href=#367 id=367 data-nosnippet>367</a>                <span class="comment">// A relative path can be expressed in four forms:
+<a href=#198 id=198 data-nosnippet>198</a>        }<span class="question-mark">?</span>;
+<a href=#199 id=199 data-nosnippet>199</a>        <span class="self">self</span>.enforce_kernel_export_syscall_only(context, target, resolution)
+<a href=#200 id=200 data-nosnippet>200</a>    }
+<a href=#201 id=201 data-nosnippet>201</a>
+<a href=#202 id=202 data-nosnippet>202</a>    <span class="kw">fn </span>enforce_kernel_export_syscall_only(
+<a href=#203 id=203 data-nosnippet>203</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#204 id=204 data-nosnippet>204</a>        context: <span class="kw-2">&amp;</span>SymbolResolutionContext,
+<a href=#205 id=205 data-nosnippet>205</a>        target: <span class="kw-2">&amp;</span>InvocationTarget,
+<a href=#206 id=206 data-nosnippet>206</a>        resolution: SymbolResolution,
+<a href=#207 id=207 data-nosnippet>207</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;SymbolResolution, LinkerError&gt; {
+<a href=#208 id=208 data-nosnippet>208</a>        <span class="kw">if </span><span class="macro">matches!</span>(target, InvocationTarget::MastRoot(<span class="kw">_</span>)) {
+<a href=#209 id=209 data-nosnippet>209</a>            <span class="kw">return </span><span class="prelude-val">Ok</span>(resolution);
+<a href=#210 id=210 data-nosnippet>210</a>        }
+<a href=#211 id=211 data-nosnippet>211</a>        <span class="kw">if let </span>SymbolResolution::Exact { gid, <span class="kw-2">ref </span>path } = resolution
+<a href=#212 id=212 data-nosnippet>212</a>            &amp;&amp; context.kind.is_some()
+<a href=#213 id=213 data-nosnippet>213</a>            &amp;&amp; !context.in_syscall()
+<a href=#214 id=214 data-nosnippet>214</a>        {
+<a href=#215 id=215 data-nosnippet>215</a>            <span class="comment">// Root kernel attached via `with_kernel` is stored as ModuleKind::Library (MAST);
+<a href=#216 id=216 data-nosnippet>216</a>            // `kernel_index` identifies it. AST kernel modules use ModuleKind::Kernel.
+<a href=#217 id=217 data-nosnippet>217</a>            </span><span class="kw">let </span>target_is_kernel = <span class="self">self</span>.graph.kernel_index.is_some_and(|ki| ki == gid.module)
+<a href=#218 id=218 data-nosnippet>218</a>                || <span class="self">self</span>.graph[gid.module].kind().is_kernel();
+<a href=#219 id=219 data-nosnippet>219</a>            <span class="kw">let </span>caller_is_kernel = <span class="self">self</span>.graph.kernel_index.is_some_and(|ki| ki == context.module)
+<a href=#220 id=220 data-nosnippet>220</a>                || <span class="self">self</span>.graph[context.module].kind().is_kernel();
+<a href=#221 id=221 data-nosnippet>221</a>            <span class="kw">if </span>target_is_kernel &amp;&amp; !caller_is_kernel {
+<a href=#222 id=222 data-nosnippet>222</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(LinkerError::KernelProcNotSyscall {
+<a href=#223 id=223 data-nosnippet>223</a>                    span: context.span,
+<a href=#224 id=224 data-nosnippet>224</a>                    source_file: <span class="self">self</span>.graph.source_manager.get(context.span.source_id()).ok(),
+<a href=#225 id=225 data-nosnippet>225</a>                    callee: path.clone().into_inner(),
+<a href=#226 id=226 data-nosnippet>226</a>                });
+<a href=#227 id=227 data-nosnippet>227</a>            }
+<a href=#228 id=228 data-nosnippet>228</a>        }
+<a href=#229 id=229 data-nosnippet>229</a>        <span class="prelude-val">Ok</span>(resolution)
+<a href=#230 id=230 data-nosnippet>230</a>    }
+<a href=#231 id=231 data-nosnippet>231</a>
+<a href=#232 id=232 data-nosnippet>232</a>    <span class="kw">fn </span>validate_syscall_digest(
+<a href=#233 id=233 data-nosnippet>233</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#234 id=234 data-nosnippet>234</a>        context: <span class="kw-2">&amp;</span>SymbolResolutionContext,
+<a href=#235 id=235 data-nosnippet>235</a>        mast_root: Span&lt;Word&gt;,
+<a href=#236 id=236 data-nosnippet>236</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;(), LinkerError&gt; {
+<a href=#237 id=237 data-nosnippet>237</a>        <span class="kw">if </span>!context.in_syscall() {
+<a href=#238 id=238 data-nosnippet>238</a>            <span class="kw">return </span><span class="prelude-val">Ok</span>(());
+<a href=#239 id=239 data-nosnippet>239</a>        }
+<a href=#240 id=240 data-nosnippet>240</a>        <span class="comment">// Syscalls must be validated against an attached kernel at assembly time.
+<a href=#241 id=241 data-nosnippet>241</a>        </span><span class="kw">if </span>!<span class="self">self</span>.graph.has_nonempty_kernel() {
+<a href=#242 id=242 data-nosnippet>242</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(LinkerError::InvalidSysCallTarget {
+<a href=#243 id=243 data-nosnippet>243</a>                span: context.span,
+<a href=#244 id=244 data-nosnippet>244</a>                source_file: <span class="self">self</span>.source_manager().get(context.span.source_id()).ok(),
+<a href=#245 id=245 data-nosnippet>245</a>                callee: Arc::&lt;Path&gt;::from(Path::new(<span class="string">"syscall"</span>)),
+<a href=#246 id=246 data-nosnippet>246</a>            });
+<a href=#247 id=247 data-nosnippet>247</a>        }
+<a href=#248 id=248 data-nosnippet>248</a>        <span class="comment">// Kernel digests only contain exported kernel procedures.
+<a href=#249 id=249 data-nosnippet>249</a>        </span><span class="kw">if </span>!<span class="self">self</span>.graph.kernel().contains_proc(<span class="kw-2">*</span>mast_root.inner()) {
+<a href=#250 id=250 data-nosnippet>250</a>            <span class="kw">let </span>digest_path = <span class="macro">format!</span>(<span class="string">"{mast_root}"</span>);
+<a href=#251 id=251 data-nosnippet>251</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(LinkerError::InvalidSysCallTarget {
+<a href=#252 id=252 data-nosnippet>252</a>                span: context.span,
+<a href=#253 id=253 data-nosnippet>253</a>                source_file: <span class="self">self</span>.source_manager().get(context.span.source_id()).ok(),
+<a href=#254 id=254 data-nosnippet>254</a>                callee: Arc::&lt;Path&gt;::from(Path::new(<span class="kw-2">&amp;</span>digest_path)),
+<a href=#255 id=255 data-nosnippet>255</a>            });
+<a href=#256 id=256 data-nosnippet>256</a>        }
+<a href=#257 id=257 data-nosnippet>257</a>        <span class="prelude-val">Ok</span>(())
+<a href=#258 id=258 data-nosnippet>258</a>    }
+<a href=#259 id=259 data-nosnippet>259</a>
+<a href=#260 id=260 data-nosnippet>260</a>    <span class="doccomment">/// Resolve `target`, a possibly-resolved symbol reference, to a [SymbolResolution], using
+<a href=#261 id=261 data-nosnippet>261</a>    /// `context` as the context.
+<a href=#262 id=262 data-nosnippet>262</a>    </span><span class="kw">pub fn </span>resolve_alias_target(
+<a href=#263 id=263 data-nosnippet>263</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#264 id=264 data-nosnippet>264</a>        context: <span class="kw-2">&amp;</span>SymbolResolutionContext,
+<a href=#265 id=265 data-nosnippet>265</a>        alias: <span class="kw-2">&amp;</span>Alias,
+<a href=#266 id=266 data-nosnippet>266</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;SymbolResolution, LinkerError&gt; {
+<a href=#267 id=267 data-nosnippet>267</a>        <span class="kw">match </span>alias.target() {
+<a href=#268 id=268 data-nosnippet>268</a>            target @ AliasTarget::MastRoot(mast_root) =&gt; {
+<a href=#269 id=269 data-nosnippet>269</a>                <span class="macro">log::debug!</span>(target: <span class="string">"name-resolver::alias"</span>, <span class="string">"resolving alias target {target}"</span>);
+<a href=#270 id=270 data-nosnippet>270</a>                <span class="kw">match </span><span class="self">self</span>.graph.get_procedure_index_by_digest(mast_root) {
+<a href=#271 id=271 data-nosnippet>271</a>                    <span class="prelude-val">None </span>=&gt; <span class="prelude-val">Ok</span>(SymbolResolution::MastRoot(<span class="kw-2">*</span>mast_root)),
+<a href=#272 id=272 data-nosnippet>272</a>                    <span class="prelude-val">Some</span>(gid) =&gt; <span class="prelude-val">Ok</span>(SymbolResolution::Exact {
+<a href=#273 id=273 data-nosnippet>273</a>                        gid,
+<a href=#274 id=274 data-nosnippet>274</a>                        path: Span::new(mast_root.span(), <span class="self">self</span>.item_path(gid)),
+<a href=#275 id=275 data-nosnippet>275</a>                    }),
+<a href=#276 id=276 data-nosnippet>276</a>                }
+<a href=#277 id=277 data-nosnippet>277</a>            },
+<a href=#278 id=278 data-nosnippet>278</a>            AliasTarget::Path(path) =&gt; {
+<a href=#279 id=279 data-nosnippet>279</a>                <span class="macro">log::debug!</span>(target: <span class="string">"name-resolver::alias"</span>, <span class="string">"resolving alias target '{path}'"</span>);
+<a href=#280 id=280 data-nosnippet>280</a>                <span class="comment">// We ensure that we do not unintentionally recursively expand an alias target using
+<a href=#281 id=281 data-nosnippet>281</a>                // its own definition, e.g. with something like `use lib::lib` which without this,
+<a href=#282 id=282 data-nosnippet>282</a>                // will expand until the stack blows
+<a href=#283 id=283 data-nosnippet>283</a>                </span><span class="kw">let </span><span class="kw-2">mut </span>ignored_imports = BTreeSet::from_iter([alias.name().clone().into_inner()]);
+<a href=#284 id=284 data-nosnippet>284</a>                <span class="self">self</span>.expand_path(context, path.as_deref(), <span class="kw-2">&amp;mut </span>ignored_imports)
+<a href=#285 id=285 data-nosnippet>285</a>            },
+<a href=#286 id=286 data-nosnippet>286</a>        }
+<a href=#287 id=287 data-nosnippet>287</a>    }
+<a href=#288 id=288 data-nosnippet>288</a>
+<a href=#289 id=289 data-nosnippet>289</a>    <span class="kw">pub fn </span>resolve_path(
+<a href=#290 id=290 data-nosnippet>290</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#291 id=291 data-nosnippet>291</a>        context: <span class="kw-2">&amp;</span>SymbolResolutionContext,
+<a href=#292 id=292 data-nosnippet>292</a>        path: Span&lt;<span class="kw-2">&amp;</span>Path&gt;,
+<a href=#293 id=293 data-nosnippet>293</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;SymbolResolution, LinkerError&gt; {
+<a href=#294 id=294 data-nosnippet>294</a>        <span class="kw">let </span><span class="kw-2">mut </span>ignored_imports = BTreeSet::default();
+<a href=#295 id=295 data-nosnippet>295</a>        <span class="self">self</span>.expand_path(context, path, <span class="kw-2">&amp;mut </span>ignored_imports)
+<a href=#296 id=296 data-nosnippet>296</a>    }
+<a href=#297 id=297 data-nosnippet>297</a>
+<a href=#298 id=298 data-nosnippet>298</a>    <span class="kw">fn </span>expand_path(
+<a href=#299 id=299 data-nosnippet>299</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#300 id=300 data-nosnippet>300</a>        context: <span class="kw-2">&amp;</span>SymbolResolutionContext,
+<a href=#301 id=301 data-nosnippet>301</a>        path: Span&lt;<span class="kw-2">&amp;</span>Path&gt;,
+<a href=#302 id=302 data-nosnippet>302</a>        ignored_imports: <span class="kw-2">&amp;mut </span>BTreeSet&lt;Arc&lt;str&gt;&gt;,
+<a href=#303 id=303 data-nosnippet>303</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;SymbolResolution, LinkerError&gt; {
+<a href=#304 id=304 data-nosnippet>304</a>        <span class="kw">let </span>span = path.span();
+<a href=#305 id=305 data-nosnippet>305</a>        <span class="kw">let </span><span class="kw-2">mut </span>path = path.into_inner();
+<a href=#306 id=306 data-nosnippet>306</a>        <span class="kw">let </span><span class="kw-2">mut </span>context = context.clone();
+<a href=#307 id=307 data-nosnippet>307</a>        <span class="kw">loop </span>{
+<a href=#308 id=308 data-nosnippet>308</a>            <span class="macro">log::debug!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"expanding path '{path}' (absolute = {})"</span>, path.is_absolute());
+<a href=#309 id=309 data-nosnippet>309</a>            <span class="kw">if </span>path.is_absolute() {
+<a href=#310 id=310 data-nosnippet>310</a>                <span class="comment">// An absolute path does not reference any aliases in the current module, but may
+<a href=#311 id=311 data-nosnippet>311</a>                // refer to aliases in any of its non-root components.
+<a href=#312 id=312 data-nosnippet>312</a>                //
+<a href=#313 id=313 data-nosnippet>313</a>                // However, if the root component of the path is not a known module, then we have to
+<a href=#314 id=314 data-nosnippet>314</a>                // proceed as if an actual module exists, just one that incorporates more components
+<a href=#315 id=315 data-nosnippet>315</a>                // of the path than just the root.
+<a href=#316 id=316 data-nosnippet>316</a>                //
+<a href=#317 id=317 data-nosnippet>317</a>                // To speed this up, we search for a matching "longest-prefix" of `path` in the
+<a href=#318 id=318 data-nosnippet>318</a>                // global module list. If we find an exact match, we're done. If we
+<a href=#319 id=319 data-nosnippet>319</a>                // find a partial match, then we resolve the rest of `path` relative
+<a href=#320 id=320 data-nosnippet>320</a>                // to that partial match. If we cannot find any match at all, then
+<a href=#321 id=321 data-nosnippet>321</a>                // the path references an undefined module
+<a href=#322 id=322 data-nosnippet>322</a>                </span><span class="kw">let </span><span class="kw-2">mut </span>longest_prefix: <span class="prelude-ty">Option</span>&lt;(ModuleIndex, Arc&lt;Path&gt;)&gt; = <span class="prelude-val">None</span>;
+<a href=#323 id=323 data-nosnippet>323</a>                <span class="kw">for </span>module <span class="kw">in </span><span class="self">self</span>.graph.modules.iter() {
+<a href=#324 id=324 data-nosnippet>324</a>                    <span class="kw">let </span>module_path = module.path().clone();
+<a href=#325 id=325 data-nosnippet>325</a>                    <span class="kw">if </span>path == <span class="kw-2">&amp;*</span>module_path {
+<a href=#326 id=326 data-nosnippet>326</a>                        <span class="macro">log::debug!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"found exact match for '{path}': id={}"</span>, module.id());
+<a href=#327 id=327 data-nosnippet>327</a>                        <span class="kw">return </span><span class="prelude-val">Ok</span>(SymbolResolution::Module {
+<a href=#328 id=328 data-nosnippet>328</a>                            id: module.id(),
+<a href=#329 id=329 data-nosnippet>329</a>                            path: Span::new(span, module_path),
+<a href=#330 id=330 data-nosnippet>330</a>                        });
+<a href=#331 id=331 data-nosnippet>331</a>                    }
+<a href=#332 id=332 data-nosnippet>332</a>
+<a href=#333 id=333 data-nosnippet>333</a>                    <span class="kw">if </span>path.starts_with_exactly(module_path.as_ref()) {
+<a href=#334 id=334 data-nosnippet>334</a>                        <span class="kw">if let </span><span class="prelude-val">Some</span>((<span class="kw">_</span>, prev)) = longest_prefix.as_ref() {
+<a href=#335 id=335 data-nosnippet>335</a>                            <span class="kw">if </span>prev.components().count() &lt; module_path.components().count() {
+<a href=#336 id=336 data-nosnippet>336</a>                                longest_prefix = <span class="prelude-val">Some</span>((module.id(), module_path));
+<a href=#337 id=337 data-nosnippet>337</a>                            }
+<a href=#338 id=338 data-nosnippet>338</a>                        } <span class="kw">else </span>{
+<a href=#339 id=339 data-nosnippet>339</a>                            longest_prefix = <span class="prelude-val">Some</span>((module.id(), module_path));
+<a href=#340 id=340 data-nosnippet>340</a>                        }
+<a href=#341 id=341 data-nosnippet>341</a>                    }
+<a href=#342 id=342 data-nosnippet>342</a>                }
+<a href=#343 id=343 data-nosnippet>343</a>
+<a href=#344 id=344 data-nosnippet>344</a>                <span class="kw">match </span>longest_prefix {
+<a href=#345 id=345 data-nosnippet>345</a>                    <span class="comment">// We found a module with a common prefix, attempt to expand the subpath of
+<a href=#346 id=346 data-nosnippet>346</a>                    // `path` relative to that module. If this fails, the path
+<a href=#347 id=347 data-nosnippet>347</a>                    // is an undefined reference.
+<a href=#348 id=348 data-nosnippet>348</a>                    </span><span class="prelude-val">Some</span>((module_id, module_path)) =&gt; {
+<a href=#349 id=349 data-nosnippet>349</a>                        <span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"found prefix match for '{path}': id={module_id}, prefix={module_path}"</span>);
+<a href=#350 id=350 data-nosnippet>350</a>                        <span class="kw">let </span>subpath = path.strip_prefix(<span class="kw-2">&amp;</span>module_path).unwrap();
+<a href=#351 id=351 data-nosnippet>351</a>                        context.module = module_id;
+<a href=#352 id=352 data-nosnippet>352</a>                        ignored_imports.clear();
+<a href=#353 id=353 data-nosnippet>353</a>                        path = subpath;
+<a href=#354 id=354 data-nosnippet>354</a>                    },
+<a href=#355 id=355 data-nosnippet>355</a>                    <span class="comment">// No matching module paths found, path is undefined symbol reference
+<a href=#356 id=356 data-nosnippet>356</a>                    </span><span class="prelude-val">None </span>=&gt; {
+<a href=#357 id=357 data-nosnippet>357</a>                        <span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"no prefix match found for '{path}' - path is undefined symbol reference"</span>);
+<a href=#358 id=358 data-nosnippet>358</a>                        <span class="kw">break </span><span class="prelude-val">Err</span>(
+<a href=#359 id=359 data-nosnippet>359</a>                            SymbolResolutionError::undefined(span, <span class="self">self</span>.source_manager()).into()
+<a href=#360 id=360 data-nosnippet>360</a>                        );
+<a href=#361 id=361 data-nosnippet>361</a>                    },
+<a href=#362 id=362 data-nosnippet>362</a>                }
+<a href=#363 id=363 data-nosnippet>363</a>            } <span class="kw">else if let </span><span class="prelude-val">Some</span>(symbol) = path.as_ident() {
+<a href=#364 id=364 data-nosnippet>364</a>                <span class="comment">// This is a reference to a symbol in the current module, possibly imported.
+<a href=#365 id=365 data-nosnippet>365</a>                //
+<a href=#366 id=366 data-nosnippet>366</a>                // We first resolve the symbol in the local module to either a local definition, or
+<a href=#367 id=367 data-nosnippet>367</a>                // an imported symbol.
 <a href=#368 id=368 data-nosnippet>368</a>                //
-<a href=#369 id=369 data-nosnippet>369</a>                // 1. A reference to a symbol in the current module (possibly imported)
-<a href=#370 id=370 data-nosnippet>370</a>                // 2. A reference to a symbol relative to an imported module, e.g. `push.mod::CONST`
-<a href=#371 id=371 data-nosnippet>371</a>                // 3. A reference to a nested symbol relative to an imported module, e.g.
-<a href=#372 id=372 data-nosnippet>372</a>                //    `push.mod::submod::CONST`
-<a href=#373 id=373 data-nosnippet>373</a>                // 4. An absolute path expressed relatively, e.g. `push.root::mod::submod::CONST`,
-<a href=#374 id=374 data-nosnippet>374</a>                //    which should have been expressed as `push.::root::mod::submod::CONST`, but the
-<a href=#375 id=375 data-nosnippet>375</a>                //    `::` prefix was omitted/forgotten.
-<a href=#376 id=376 data-nosnippet>376</a>                //
-<a href=#377 id=377 data-nosnippet>377</a>                // 1 and 4 are easy to handle (4 is technically a degenerate edge case of 3, but has
-<a href=#378 id=378 data-nosnippet>378</a>                // an easy fallback path).
-<a href=#379 id=379 data-nosnippet>379</a>                //
-<a href=#380 id=380 data-nosnippet>380</a>                // 3 is where all the complexity of relative paths comes in, because it requires us
-<a href=#381 id=381 data-nosnippet>381</a>                // to recursively expand paths until we cannot do so any longer, and then resolve
-<a href=#382 id=382 data-nosnippet>382</a>                // the originally referenced symbol relative to that expanded path (which may
-<a href=#383 id=383 data-nosnippet>383</a>                // require further recursive expansion).
-<a href=#384 id=384 data-nosnippet>384</a>                //
-<a href=#385 id=385 data-nosnippet>385</a>                // We start by expecting that a relative path refers to an import in the current
-<a href=#386 id=386 data-nosnippet>386</a>                // module: if this is not the case, then we fall back to attempting to resolve the
-<a href=#387 id=387 data-nosnippet>387</a>                // path as if it was absolute. If this fails, the path is considered to refer to an
-<a href=#388 id=388 data-nosnippet>388</a>                // undefined symbol.
-<a href=#389 id=389 data-nosnippet>389</a>                //
-<a href=#390 id=390 data-nosnippet>390</a>                // If the path is relative to an import in the current module, then we proceed by
-<a href=#391 id=391 data-nosnippet>391</a>                // resolving the subpath relative to the import target. This is the recursive part,
-<a href=#392 id=392 data-nosnippet>392</a>                // and the result of this recursive expansion is what gets returned from this
-<a href=#393 id=393 data-nosnippet>393</a>                // function.
-<a href=#394 id=394 data-nosnippet>394</a>                </span><span class="kw">let </span>(imported_symbol, subpath) = path.split_first().expect(<span class="string">"multi-component path"</span>);
-<a href=#395 id=395 data-nosnippet>395</a>                <span class="kw">if </span>ignored_imports.contains(imported_symbol) {
-<a href=#396 id=396 data-nosnippet>396</a>                    <span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"skipping import expansion of '{imported_symbol}': already expanded, resolving as absolute path instead"</span>);
-<a href=#397 id=397 data-nosnippet>397</a>                    <span class="kw">let </span>path = path.to_absolute();
-<a href=#398 id=398 data-nosnippet>398</a>                    <span class="kw">break </span><span class="self">self</span>.expand_path(
-<a href=#399 id=399 data-nosnippet>399</a>                        <span class="kw-2">&amp;</span>context,
-<a href=#400 id=400 data-nosnippet>400</a>                        Span::new(span, path.as_ref()),
-<a href=#401 id=401 data-nosnippet>401</a>                        ignored_imports,
-<a href=#402 id=402 data-nosnippet>402</a>                    );
-<a href=#403 id=403 data-nosnippet>403</a>                }
-<a href=#404 id=404 data-nosnippet>404</a>                <span class="kw">match </span><span class="self">self
-<a href=#405 id=405 data-nosnippet>405</a>                    </span>.resolve_local_with_index(context.module, Span::new(span, imported_symbol))
-<a href=#406 id=406 data-nosnippet>406</a>                {
-<a href=#407 id=407 data-nosnippet>407</a>                    <span class="prelude-val">Ok</span>(SymbolResolution::Local(item)) =&gt; {
-<a href=#408 id=408 data-nosnippet>408</a>                        <span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"cannot expand '{path}': path is relative to local definition"</span>);
-<a href=#409 id=409 data-nosnippet>409</a>                        <span class="comment">// This is a conflicting symbol reference that we would've expected to be
-<a href=#410 id=410 data-nosnippet>410</a>                        // caught during semantic analysis. Raise a
-<a href=#411 id=411 data-nosnippet>411</a>                        // diagnostic here telling the user what's wrong
-<a href=#412 id=412 data-nosnippet>412</a>                        </span><span class="kw">break </span><span class="prelude-val">Err</span>(SymbolResolutionError::invalid_sub_path(
-<a href=#413 id=413 data-nosnippet>413</a>                            span,
-<a href=#414 id=414 data-nosnippet>414</a>                            item.span(),
-<a href=#415 id=415 data-nosnippet>415</a>                            <span class="self">self</span>.source_manager(),
-<a href=#416 id=416 data-nosnippet>416</a>                        )
-<a href=#417 id=417 data-nosnippet>417</a>                        .into());
-<a href=#418 id=418 data-nosnippet>418</a>                    },
-<a href=#419 id=419 data-nosnippet>419</a>                    <span class="prelude-val">Ok</span>(SymbolResolution::Exact { path: item, .. }) =&gt; {
-<a href=#420 id=420 data-nosnippet>420</a>                        <span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"cannot expand '{path}': path is relative to item at '{item}'"</span>);
-<a href=#421 id=421 data-nosnippet>421</a>                        <span class="comment">// This is a conflicting symbol reference that we would've expected to be
-<a href=#422 id=422 data-nosnippet>422</a>                        // caught during semantic analysis. Raise a
-<a href=#423 id=423 data-nosnippet>423</a>                        // diagnostic here telling the user what's wrong
-<a href=#424 id=424 data-nosnippet>424</a>                        </span><span class="kw">break </span><span class="prelude-val">Err</span>(SymbolResolutionError::invalid_sub_path(
-<a href=#425 id=425 data-nosnippet>425</a>                            span,
-<a href=#426 id=426 data-nosnippet>426</a>                            item.span(),
-<a href=#427 id=427 data-nosnippet>427</a>                            <span class="self">self</span>.source_manager(),
-<a href=#428 id=428 data-nosnippet>428</a>                        )
-<a href=#429 id=429 data-nosnippet>429</a>                        .into());
-<a href=#430 id=430 data-nosnippet>430</a>                    },
-<a href=#431 id=431 data-nosnippet>431</a>                    <span class="prelude-val">Ok</span>(SymbolResolution::MastRoot(item)) =&gt; {
-<a href=#432 id=432 data-nosnippet>432</a>                        <span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"cannot expand '{path}': path is relative to imported procedure root"</span>);
-<a href=#433 id=433 data-nosnippet>433</a>                        <span class="comment">// This is a conflicting symbol reference that we would've expected to be
-<a href=#434 id=434 data-nosnippet>434</a>                        // caught during semantic analysis. Raise a
-<a href=#435 id=435 data-nosnippet>435</a>                        // diagnostic here telling the user what's wrong
-<a href=#436 id=436 data-nosnippet>436</a>                        </span><span class="kw">break </span><span class="prelude-val">Err</span>(SymbolResolutionError::invalid_sub_path(
-<a href=#437 id=437 data-nosnippet>437</a>                            span,
-<a href=#438 id=438 data-nosnippet>438</a>                            item.span(),
-<a href=#439 id=439 data-nosnippet>439</a>                            <span class="self">self</span>.source_manager(),
-<a href=#440 id=440 data-nosnippet>440</a>                        )
-<a href=#441 id=441 data-nosnippet>441</a>                        .into());
-<a href=#442 id=442 data-nosnippet>442</a>                    },
-<a href=#443 id=443 data-nosnippet>443</a>                    <span class="prelude-val">Ok</span>(SymbolResolution::Module { id, path: module_path }) =&gt; {
-<a href=#444 id=444 data-nosnippet>444</a>                        <span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"expanded import '{imported_symbol}' to module: id={id} path={module_path}"</span>);
-<a href=#445 id=445 data-nosnippet>445</a>                        <span class="comment">// We've resolved the import to a known module, resolve `subpath` relative
-<a href=#446 id=446 data-nosnippet>446</a>                        // to it
-<a href=#447 id=447 data-nosnippet>447</a>                        </span>context.module = id;
-<a href=#448 id=448 data-nosnippet>448</a>                        ignored_imports.clear();
-<a href=#449 id=449 data-nosnippet>449</a>                        path = subpath;
-<a href=#450 id=450 data-nosnippet>450</a>                    },
-<a href=#451 id=451 data-nosnippet>451</a>                    <span class="prelude-val">Ok</span>(SymbolResolution::External(external_path)) =&gt; {
-<a href=#452 id=452 data-nosnippet>452</a>                        <span class="comment">// We've resolved the imported symbol to an external path, but we don't know
-<a href=#453 id=453 data-nosnippet>453</a>                        // if that path is valid or not. Attempt to expand
-<a href=#454 id=454 data-nosnippet>454</a>                        // the full path produced by joining `subpath` to
-<a href=#455 id=455 data-nosnippet>455</a>                        // `external_path` and resolving in the context of the
-<a href=#456 id=456 data-nosnippet>456</a>                        // current module
-<a href=#457 id=457 data-nosnippet>457</a>                        </span><span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"expanded import '{imported_symbol}' to unresolved external path '{external_path}'"</span>);
-<a href=#458 id=458 data-nosnippet>458</a>                        <span class="kw">let </span>partially_expanded = external_path.join(subpath);
-<a href=#459 id=459 data-nosnippet>459</a>                        <span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"partially expanded '{path}' to '{partially_expanded}'"</span>);
-<a href=#460 id=460 data-nosnippet>460</a>                        ignored_imports.insert(imported_symbol.to_string().into_boxed_str().into());
-<a href=#461 id=461 data-nosnippet>461</a>                        <span class="kw">break </span><span class="self">self</span>.expand_path(
-<a href=#462 id=462 data-nosnippet>462</a>                            <span class="kw-2">&amp;</span>context,
-<a href=#463 id=463 data-nosnippet>463</a>                            Span::new(span, partially_expanded.as_path()),
-<a href=#464 id=464 data-nosnippet>464</a>                            ignored_imports,
-<a href=#465 id=465 data-nosnippet>465</a>                        );
-<a href=#466 id=466 data-nosnippet>466</a>                    },
-<a href=#467 id=467 data-nosnippet>467</a>                    <span class="prelude-val">Err</span>(err)
-<a href=#468 id=468 data-nosnippet>468</a>                        <span class="kw">if </span><span class="macro">matches!</span>(
-<a href=#469 id=469 data-nosnippet>469</a>                            err.as_ref(),
-<a href=#470 id=470 data-nosnippet>470</a>                            SymbolResolutionError::UndefinedSymbol { .. }
-<a href=#471 id=471 data-nosnippet>471</a>                        ) =&gt;
-<a href=#472 id=472 data-nosnippet>472</a>                    {
-<a href=#473 id=473 data-nosnippet>473</a>                        <span class="comment">// Try to expand the path by treating it as an absolute path
-<a href=#474 id=474 data-nosnippet>474</a>                        </span><span class="kw">let </span>absolute = path.to_absolute();
-<a href=#475 id=475 data-nosnippet>475</a>                        <span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"no import found for '{imported_symbol}' in '{path}': attempting to resolve as absolute path instead"</span>);
-<a href=#476 id=476 data-nosnippet>476</a>                        <span class="kw">break </span><span class="self">self</span>.expand_path(
-<a href=#477 id=477 data-nosnippet>477</a>                            <span class="kw-2">&amp;</span>context,
-<a href=#478 id=478 data-nosnippet>478</a>                            Span::new(span, absolute.as_ref()),
-<a href=#479 id=479 data-nosnippet>479</a>                            ignored_imports,
-<a href=#480 id=480 data-nosnippet>480</a>                        );
+<a href=#369 id=369 data-nosnippet>369</a>                // If the symbol is locally-defined, the expansion is the join of the current module
+<a href=#370 id=370 data-nosnippet>370</a>                // path and the symbol name.
+<a href=#371 id=371 data-nosnippet>371</a>                //
+<a href=#372 id=372 data-nosnippet>372</a>                // If the symbol is an imported item, then we expand the imported path recursively.
+<a href=#373 id=373 data-nosnippet>373</a>                </span><span class="kw">break match </span><span class="self">self
+<a href=#374 id=374 data-nosnippet>374</a>                    </span>.resolve_local_with_index(context.module, Span::new(span, symbol.as_str()))<span class="question-mark">?
+<a href=#375 id=375 data-nosnippet>375</a>                </span>{
+<a href=#376 id=376 data-nosnippet>376</a>                    SymbolResolution::Local(item) =&gt; {
+<a href=#377 id=377 data-nosnippet>377</a>                        <span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"resolved '{symbol}' to local symbol: {}"</span>, context.module + item.into_inner());
+<a href=#378 id=378 data-nosnippet>378</a>                        <span class="kw">let </span>path = <span class="self">self</span>.module_path(context.module).join(<span class="kw-2">&amp;</span>symbol);
+<a href=#379 id=379 data-nosnippet>379</a>                        <span class="prelude-val">Ok</span>(SymbolResolution::Exact {
+<a href=#380 id=380 data-nosnippet>380</a>                            gid: context.module + item.into_inner(),
+<a href=#381 id=381 data-nosnippet>381</a>                            path: Span::new(span, path.into()),
+<a href=#382 id=382 data-nosnippet>382</a>                        })
+<a href=#383 id=383 data-nosnippet>383</a>                    },
+<a href=#384 id=384 data-nosnippet>384</a>                    SymbolResolution::External(path) =&gt; {
+<a href=#385 id=385 data-nosnippet>385</a>                        <span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"expanded '{symbol}' to unresolved external path '{path}'"</span>);
+<a href=#386 id=386 data-nosnippet>386</a>                        <span class="self">self</span>.expand_path(<span class="kw-2">&amp;</span>context, path.as_deref(), ignored_imports)
+<a href=#387 id=387 data-nosnippet>387</a>                    },
+<a href=#388 id=388 data-nosnippet>388</a>                    resolved @ (SymbolResolution::MastRoot(<span class="kw">_</span>) | SymbolResolution::Exact { .. }) =&gt; {
+<a href=#389 id=389 data-nosnippet>389</a>                        <span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"resolved '{symbol}' to exact definition"</span>);
+<a href=#390 id=390 data-nosnippet>390</a>                        <span class="prelude-val">Ok</span>(resolved)
+<a href=#391 id=391 data-nosnippet>391</a>                    },
+<a href=#392 id=392 data-nosnippet>392</a>                    SymbolResolution::Module { id, path: module_path } =&gt; {
+<a href=#393 id=393 data-nosnippet>393</a>                        <span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"resolved '{symbol}' to module: id={id} path={module_path}"</span>);
+<a href=#394 id=394 data-nosnippet>394</a>                        <span class="prelude-val">Ok</span>(SymbolResolution::Module { id, path: module_path })
+<a href=#395 id=395 data-nosnippet>395</a>                    },
+<a href=#396 id=396 data-nosnippet>396</a>                };
+<a href=#397 id=397 data-nosnippet>397</a>            } <span class="kw">else </span>{
+<a href=#398 id=398 data-nosnippet>398</a>                <span class="comment">// A relative path can be expressed in four forms:
+<a href=#399 id=399 data-nosnippet>399</a>                //
+<a href=#400 id=400 data-nosnippet>400</a>                // 1. A reference to a symbol in the current module (possibly imported)
+<a href=#401 id=401 data-nosnippet>401</a>                // 2. A reference to a symbol relative to an imported module, e.g. `push.mod::CONST`
+<a href=#402 id=402 data-nosnippet>402</a>                // 3. A reference to a nested symbol relative to an imported module, e.g.
+<a href=#403 id=403 data-nosnippet>403</a>                //    `push.mod::submod::CONST`
+<a href=#404 id=404 data-nosnippet>404</a>                // 4. An absolute path expressed relatively, e.g. `push.root::mod::submod::CONST`,
+<a href=#405 id=405 data-nosnippet>405</a>                //    which should have been expressed as `push.::root::mod::submod::CONST`, but the
+<a href=#406 id=406 data-nosnippet>406</a>                //    `::` prefix was omitted/forgotten.
+<a href=#407 id=407 data-nosnippet>407</a>                //
+<a href=#408 id=408 data-nosnippet>408</a>                // 1 and 4 are easy to handle (4 is technically a degenerate edge case of 3, but has
+<a href=#409 id=409 data-nosnippet>409</a>                // an easy fallback path).
+<a href=#410 id=410 data-nosnippet>410</a>                //
+<a href=#411 id=411 data-nosnippet>411</a>                // 3 is where all the complexity of relative paths comes in, because it requires us
+<a href=#412 id=412 data-nosnippet>412</a>                // to recursively expand paths until we cannot do so any longer, and then resolve
+<a href=#413 id=413 data-nosnippet>413</a>                // the originally referenced symbol relative to that expanded path (which may
+<a href=#414 id=414 data-nosnippet>414</a>                // require further recursive expansion).
+<a href=#415 id=415 data-nosnippet>415</a>                //
+<a href=#416 id=416 data-nosnippet>416</a>                // We start by expecting that a relative path refers to an import in the current
+<a href=#417 id=417 data-nosnippet>417</a>                // module: if this is not the case, then we fall back to attempting to resolve the
+<a href=#418 id=418 data-nosnippet>418</a>                // path as if it was absolute. If this fails, the path is considered to refer to an
+<a href=#419 id=419 data-nosnippet>419</a>                // undefined symbol.
+<a href=#420 id=420 data-nosnippet>420</a>                //
+<a href=#421 id=421 data-nosnippet>421</a>                // If the path is relative to an import in the current module, then we proceed by
+<a href=#422 id=422 data-nosnippet>422</a>                // resolving the subpath relative to the import target. This is the recursive part,
+<a href=#423 id=423 data-nosnippet>423</a>                // and the result of this recursive expansion is what gets returned from this
+<a href=#424 id=424 data-nosnippet>424</a>                // function.
+<a href=#425 id=425 data-nosnippet>425</a>                </span><span class="kw">let </span>(imported_symbol, subpath) = path.split_first().expect(<span class="string">"multi-component path"</span>);
+<a href=#426 id=426 data-nosnippet>426</a>                <span class="kw">if </span>ignored_imports.contains(imported_symbol) {
+<a href=#427 id=427 data-nosnippet>427</a>                    <span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"skipping import expansion of '{imported_symbol}': already expanded, resolving as absolute path instead"</span>);
+<a href=#428 id=428 data-nosnippet>428</a>                    <span class="kw">let </span>path = path.to_absolute();
+<a href=#429 id=429 data-nosnippet>429</a>                    <span class="kw">break </span><span class="self">self</span>.expand_path(
+<a href=#430 id=430 data-nosnippet>430</a>                        <span class="kw-2">&amp;</span>context,
+<a href=#431 id=431 data-nosnippet>431</a>                        Span::new(span, path.as_ref()),
+<a href=#432 id=432 data-nosnippet>432</a>                        ignored_imports,
+<a href=#433 id=433 data-nosnippet>433</a>                    );
+<a href=#434 id=434 data-nosnippet>434</a>                }
+<a href=#435 id=435 data-nosnippet>435</a>                <span class="kw">match </span><span class="self">self
+<a href=#436 id=436 data-nosnippet>436</a>                    </span>.resolve_local_with_index(context.module, Span::new(span, imported_symbol))
+<a href=#437 id=437 data-nosnippet>437</a>                {
+<a href=#438 id=438 data-nosnippet>438</a>                    <span class="prelude-val">Ok</span>(SymbolResolution::Local(item)) =&gt; {
+<a href=#439 id=439 data-nosnippet>439</a>                        <span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"cannot expand '{path}': path is relative to local definition"</span>);
+<a href=#440 id=440 data-nosnippet>440</a>                        <span class="comment">// This is a conflicting symbol reference that we would've expected to be
+<a href=#441 id=441 data-nosnippet>441</a>                        // caught during semantic analysis. Raise a
+<a href=#442 id=442 data-nosnippet>442</a>                        // diagnostic here telling the user what's wrong
+<a href=#443 id=443 data-nosnippet>443</a>                        </span><span class="kw">break </span><span class="prelude-val">Err</span>(SymbolResolutionError::invalid_sub_path(
+<a href=#444 id=444 data-nosnippet>444</a>                            span,
+<a href=#445 id=445 data-nosnippet>445</a>                            item.span(),
+<a href=#446 id=446 data-nosnippet>446</a>                            <span class="self">self</span>.source_manager(),
+<a href=#447 id=447 data-nosnippet>447</a>                        )
+<a href=#448 id=448 data-nosnippet>448</a>                        .into());
+<a href=#449 id=449 data-nosnippet>449</a>                    },
+<a href=#450 id=450 data-nosnippet>450</a>                    <span class="prelude-val">Ok</span>(SymbolResolution::Exact { path: item, .. }) =&gt; {
+<a href=#451 id=451 data-nosnippet>451</a>                        <span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"cannot expand '{path}': path is relative to item at '{item}'"</span>);
+<a href=#452 id=452 data-nosnippet>452</a>                        <span class="comment">// This is a conflicting symbol reference that we would've expected to be
+<a href=#453 id=453 data-nosnippet>453</a>                        // caught during semantic analysis. Raise a
+<a href=#454 id=454 data-nosnippet>454</a>                        // diagnostic here telling the user what's wrong
+<a href=#455 id=455 data-nosnippet>455</a>                        </span><span class="kw">break </span><span class="prelude-val">Err</span>(SymbolResolutionError::invalid_sub_path(
+<a href=#456 id=456 data-nosnippet>456</a>                            span,
+<a href=#457 id=457 data-nosnippet>457</a>                            item.span(),
+<a href=#458 id=458 data-nosnippet>458</a>                            <span class="self">self</span>.source_manager(),
+<a href=#459 id=459 data-nosnippet>459</a>                        )
+<a href=#460 id=460 data-nosnippet>460</a>                        .into());
+<a href=#461 id=461 data-nosnippet>461</a>                    },
+<a href=#462 id=462 data-nosnippet>462</a>                    <span class="prelude-val">Ok</span>(SymbolResolution::MastRoot(item)) =&gt; {
+<a href=#463 id=463 data-nosnippet>463</a>                        <span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"cannot expand '{path}': path is relative to imported procedure root"</span>);
+<a href=#464 id=464 data-nosnippet>464</a>                        <span class="comment">// This is a conflicting symbol reference that we would've expected to be
+<a href=#465 id=465 data-nosnippet>465</a>                        // caught during semantic analysis. Raise a
+<a href=#466 id=466 data-nosnippet>466</a>                        // diagnostic here telling the user what's wrong
+<a href=#467 id=467 data-nosnippet>467</a>                        </span><span class="kw">break </span><span class="prelude-val">Err</span>(SymbolResolutionError::invalid_sub_path(
+<a href=#468 id=468 data-nosnippet>468</a>                            span,
+<a href=#469 id=469 data-nosnippet>469</a>                            item.span(),
+<a href=#470 id=470 data-nosnippet>470</a>                            <span class="self">self</span>.source_manager(),
+<a href=#471 id=471 data-nosnippet>471</a>                        )
+<a href=#472 id=472 data-nosnippet>472</a>                        .into());
+<a href=#473 id=473 data-nosnippet>473</a>                    },
+<a href=#474 id=474 data-nosnippet>474</a>                    <span class="prelude-val">Ok</span>(SymbolResolution::Module { id, path: module_path }) =&gt; {
+<a href=#475 id=475 data-nosnippet>475</a>                        <span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"expanded import '{imported_symbol}' to module: id={id} path={module_path}"</span>);
+<a href=#476 id=476 data-nosnippet>476</a>                        <span class="comment">// We've resolved the import to a known module, resolve `subpath` relative
+<a href=#477 id=477 data-nosnippet>477</a>                        // to it
+<a href=#478 id=478 data-nosnippet>478</a>                        </span>context.module = id;
+<a href=#479 id=479 data-nosnippet>479</a>                        ignored_imports.clear();
+<a href=#480 id=480 data-nosnippet>480</a>                        path = subpath;
 <a href=#481 id=481 data-nosnippet>481</a>                    },
-<a href=#482 id=482 data-nosnippet>482</a>                    <span class="prelude-val">Err</span>(err) =&gt; {
-<a href=#483 id=483 data-nosnippet>483</a>                        <span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"expansion failed due to symbol resolution error"</span>);
-<a href=#484 id=484 data-nosnippet>484</a>                        <span class="kw">break </span><span class="prelude-val">Err</span>(err.into());
-<a href=#485 id=485 data-nosnippet>485</a>                    },
-<a href=#486 id=486 data-nosnippet>486</a>                }
-<a href=#487 id=487 data-nosnippet>487</a>            }
-<a href=#488 id=488 data-nosnippet>488</a>        }
-<a href=#489 id=489 data-nosnippet>489</a>    }
-<a href=#490 id=490 data-nosnippet>490</a>
-<a href=#491 id=491 data-nosnippet>491</a>    <span class="kw">pub fn </span>resolve_local(
-<a href=#492 id=492 data-nosnippet>492</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#493 id=493 data-nosnippet>493</a>        context: <span class="kw-2">&amp;</span>SymbolResolutionContext,
-<a href=#494 id=494 data-nosnippet>494</a>        symbol: <span class="kw-2">&amp;</span>str,
-<a href=#495 id=495 data-nosnippet>495</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;SymbolResolution, Box&lt;SymbolResolutionError&gt;&gt; {
-<a href=#496 id=496 data-nosnippet>496</a>        <span class="kw">let </span>module = <span class="kw">if </span>context.in_syscall() {
-<a href=#497 id=497 data-nosnippet>497</a>            <span class="comment">// Resolve local names relative to the kernel
-<a href=#498 id=498 data-nosnippet>498</a>            </span><span class="kw">match </span><span class="self">self</span>.graph.kernel_index {
-<a href=#499 id=499 data-nosnippet>499</a>                <span class="prelude-val">Some</span>(kernel) =&gt; kernel,
-<a href=#500 id=500 data-nosnippet>500</a>                <span class="prelude-val">None </span>=&gt; {
-<a href=#501 id=501 data-nosnippet>501</a>                    <span class="kw">return </span><span class="prelude-val">Err</span>(Box::new(SymbolResolutionError::UndefinedSymbol {
-<a href=#502 id=502 data-nosnippet>502</a>                        span: context.span,
-<a href=#503 id=503 data-nosnippet>503</a>                        source_file: <span class="self">self</span>.source_manager().get(context.span.source_id()).ok(),
-<a href=#504 id=504 data-nosnippet>504</a>                    }));
-<a href=#505 id=505 data-nosnippet>505</a>                },
-<a href=#506 id=506 data-nosnippet>506</a>            }
-<a href=#507 id=507 data-nosnippet>507</a>        } <span class="kw">else </span>{
-<a href=#508 id=508 data-nosnippet>508</a>            context.module
-<a href=#509 id=509 data-nosnippet>509</a>        };
-<a href=#510 id=510 data-nosnippet>510</a>        <span class="self">self</span>.resolve_local_with_index(module, Span::new(context.span, symbol))
-<a href=#511 id=511 data-nosnippet>511</a>    }
-<a href=#512 id=512 data-nosnippet>512</a>
-<a href=#513 id=513 data-nosnippet>513</a>    <span class="kw">fn </span>resolve_local_with_index(
-<a href=#514 id=514 data-nosnippet>514</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
-<a href=#515 id=515 data-nosnippet>515</a>        module: ModuleIndex,
-<a href=#516 id=516 data-nosnippet>516</a>        symbol: Span&lt;<span class="kw-2">&amp;</span>str&gt;,
-<a href=#517 id=517 data-nosnippet>517</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;SymbolResolution, Box&lt;SymbolResolutionError&gt;&gt; {
-<a href=#518 id=518 data-nosnippet>518</a>        <span class="kw">let </span>module = <span class="kw-2">&amp;</span><span class="self">self</span>.graph[module];
-<a href=#519 id=519 data-nosnippet>519</a>        <span class="macro">log::debug!</span>(target: <span class="string">"name-resolver::local"</span>, <span class="string">"resolving '{symbol}' in module {}"</span>, module.path());
-<a href=#520 id=520 data-nosnippet>520</a>        <span class="macro">log::debug!</span>(target: <span class="string">"name-resolver::local"</span>, <span class="string">"module status: {:?}"</span>, <span class="kw-2">&amp;</span>module.status());
-<a href=#521 id=521 data-nosnippet>521</a>        module.resolve(symbol, <span class="self">self</span>)
-<a href=#522 id=522 data-nosnippet>522</a>    }
-<a href=#523 id=523 data-nosnippet>523</a>
-<a href=#524 id=524 data-nosnippet>524</a>    <span class="attr">#[inline]
-<a href=#525 id=525 data-nosnippet>525</a>    </span><span class="kw">pub fn </span>module_path(<span class="kw-2">&amp;</span><span class="self">self</span>, module: ModuleIndex) -&gt; <span class="kw-2">&amp;</span>Path {
-<a href=#526 id=526 data-nosnippet>526</a>        <span class="self">self</span>.graph[module].path()
-<a href=#527 id=527 data-nosnippet>527</a>    }
-<a href=#528 id=528 data-nosnippet>528</a>
-<a href=#529 id=529 data-nosnippet>529</a>    <span class="kw">pub fn </span>item_path(<span class="kw-2">&amp;</span><span class="self">self</span>, item: GlobalItemIndex) -&gt; Arc&lt;Path&gt; {
-<a href=#530 id=530 data-nosnippet>530</a>        <span class="kw">let </span>module = <span class="kw-2">&amp;</span><span class="self">self</span>.graph[item.module];
-<a href=#531 id=531 data-nosnippet>531</a>        <span class="kw">let </span>name = module[item.index].name();
-<a href=#532 id=532 data-nosnippet>532</a>        module.path().join(name).into()
-<a href=#533 id=533 data-nosnippet>533</a>    }
-<a href=#534 id=534 data-nosnippet>534</a>}
+<a href=#482 id=482 data-nosnippet>482</a>                    <span class="prelude-val">Ok</span>(SymbolResolution::External(external_path)) =&gt; {
+<a href=#483 id=483 data-nosnippet>483</a>                        <span class="comment">// We've resolved the imported symbol to an external path, but we don't know
+<a href=#484 id=484 data-nosnippet>484</a>                        // if that path is valid or not. Attempt to expand
+<a href=#485 id=485 data-nosnippet>485</a>                        // the full path produced by joining `subpath` to
+<a href=#486 id=486 data-nosnippet>486</a>                        // `external_path` and resolving in the context of the
+<a href=#487 id=487 data-nosnippet>487</a>                        // current module
+<a href=#488 id=488 data-nosnippet>488</a>                        </span><span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"expanded import '{imported_symbol}' to unresolved external path '{external_path}'"</span>);
+<a href=#489 id=489 data-nosnippet>489</a>                        <span class="kw">let </span>partially_expanded = external_path.join(subpath);
+<a href=#490 id=490 data-nosnippet>490</a>                        <span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"partially expanded '{path}' to '{partially_expanded}'"</span>);
+<a href=#491 id=491 data-nosnippet>491</a>                        ignored_imports.insert(imported_symbol.to_string().into_boxed_str().into());
+<a href=#492 id=492 data-nosnippet>492</a>                        <span class="kw">break </span><span class="self">self</span>.expand_path(
+<a href=#493 id=493 data-nosnippet>493</a>                            <span class="kw-2">&amp;</span>context,
+<a href=#494 id=494 data-nosnippet>494</a>                            Span::new(span, partially_expanded.as_path()),
+<a href=#495 id=495 data-nosnippet>495</a>                            ignored_imports,
+<a href=#496 id=496 data-nosnippet>496</a>                        );
+<a href=#497 id=497 data-nosnippet>497</a>                    },
+<a href=#498 id=498 data-nosnippet>498</a>                    <span class="prelude-val">Err</span>(err)
+<a href=#499 id=499 data-nosnippet>499</a>                        <span class="kw">if </span><span class="macro">matches!</span>(
+<a href=#500 id=500 data-nosnippet>500</a>                            err.as_ref(),
+<a href=#501 id=501 data-nosnippet>501</a>                            SymbolResolutionError::UndefinedSymbol { .. }
+<a href=#502 id=502 data-nosnippet>502</a>                        ) =&gt;
+<a href=#503 id=503 data-nosnippet>503</a>                    {
+<a href=#504 id=504 data-nosnippet>504</a>                        <span class="comment">// Try to expand the path by treating it as an absolute path
+<a href=#505 id=505 data-nosnippet>505</a>                        </span><span class="kw">let </span>absolute = path.to_absolute();
+<a href=#506 id=506 data-nosnippet>506</a>                        <span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"no import found for '{imported_symbol}' in '{path}': attempting to resolve as absolute path instead"</span>);
+<a href=#507 id=507 data-nosnippet>507</a>                        <span class="kw">break </span><span class="self">self</span>.expand_path(
+<a href=#508 id=508 data-nosnippet>508</a>                            <span class="kw-2">&amp;</span>context,
+<a href=#509 id=509 data-nosnippet>509</a>                            Span::new(span, absolute.as_ref()),
+<a href=#510 id=510 data-nosnippet>510</a>                            ignored_imports,
+<a href=#511 id=511 data-nosnippet>511</a>                        );
+<a href=#512 id=512 data-nosnippet>512</a>                    },
+<a href=#513 id=513 data-nosnippet>513</a>                    <span class="prelude-val">Err</span>(err) =&gt; {
+<a href=#514 id=514 data-nosnippet>514</a>                        <span class="macro">log::trace!</span>(target: <span class="string">"name-resolver::expand"</span>, <span class="string">"expansion failed due to symbol resolution error"</span>);
+<a href=#515 id=515 data-nosnippet>515</a>                        <span class="kw">break </span><span class="prelude-val">Err</span>(err.into());
+<a href=#516 id=516 data-nosnippet>516</a>                    },
+<a href=#517 id=517 data-nosnippet>517</a>                }
+<a href=#518 id=518 data-nosnippet>518</a>            }
+<a href=#519 id=519 data-nosnippet>519</a>        }
+<a href=#520 id=520 data-nosnippet>520</a>    }
+<a href=#521 id=521 data-nosnippet>521</a>
+<a href=#522 id=522 data-nosnippet>522</a>    <span class="kw">pub fn </span>resolve_local(
+<a href=#523 id=523 data-nosnippet>523</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#524 id=524 data-nosnippet>524</a>        context: <span class="kw-2">&amp;</span>SymbolResolutionContext,
+<a href=#525 id=525 data-nosnippet>525</a>        symbol: <span class="kw-2">&amp;</span>str,
+<a href=#526 id=526 data-nosnippet>526</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;SymbolResolution, Box&lt;SymbolResolutionError&gt;&gt; {
+<a href=#527 id=527 data-nosnippet>527</a>        <span class="kw">let </span>module = <span class="kw">if </span>context.in_syscall() {
+<a href=#528 id=528 data-nosnippet>528</a>            <span class="comment">// Resolve local names relative to the kernel
+<a href=#529 id=529 data-nosnippet>529</a>            </span><span class="kw">match </span><span class="self">self</span>.graph.kernel_index {
+<a href=#530 id=530 data-nosnippet>530</a>                <span class="prelude-val">Some</span>(kernel) =&gt; kernel,
+<a href=#531 id=531 data-nosnippet>531</a>                <span class="prelude-val">None </span>=&gt; {
+<a href=#532 id=532 data-nosnippet>532</a>                    <span class="kw">return </span><span class="prelude-val">Err</span>(Box::new(SymbolResolutionError::UndefinedSymbol {
+<a href=#533 id=533 data-nosnippet>533</a>                        span: context.span,
+<a href=#534 id=534 data-nosnippet>534</a>                        source_file: <span class="self">self</span>.source_manager().get(context.span.source_id()).ok(),
+<a href=#535 id=535 data-nosnippet>535</a>                    }));
+<a href=#536 id=536 data-nosnippet>536</a>                },
+<a href=#537 id=537 data-nosnippet>537</a>            }
+<a href=#538 id=538 data-nosnippet>538</a>        } <span class="kw">else </span>{
+<a href=#539 id=539 data-nosnippet>539</a>            context.module
+<a href=#540 id=540 data-nosnippet>540</a>        };
+<a href=#541 id=541 data-nosnippet>541</a>        <span class="self">self</span>.resolve_local_with_index(module, Span::new(context.span, symbol))
+<a href=#542 id=542 data-nosnippet>542</a>    }
+<a href=#543 id=543 data-nosnippet>543</a>
+<a href=#544 id=544 data-nosnippet>544</a>    <span class="kw">fn </span>resolve_local_with_index(
+<a href=#545 id=545 data-nosnippet>545</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#546 id=546 data-nosnippet>546</a>        module: ModuleIndex,
+<a href=#547 id=547 data-nosnippet>547</a>        symbol: Span&lt;<span class="kw-2">&amp;</span>str&gt;,
+<a href=#548 id=548 data-nosnippet>548</a>    ) -&gt; <span class="prelude-ty">Result</span>&lt;SymbolResolution, Box&lt;SymbolResolutionError&gt;&gt; {
+<a href=#549 id=549 data-nosnippet>549</a>        <span class="kw">let </span>module = <span class="kw-2">&amp;</span><span class="self">self</span>.graph[module];
+<a href=#550 id=550 data-nosnippet>550</a>        <span class="macro">log::debug!</span>(target: <span class="string">"name-resolver::local"</span>, <span class="string">"resolving '{symbol}' in module {}"</span>, module.path());
+<a href=#551 id=551 data-nosnippet>551</a>        <span class="macro">log::debug!</span>(target: <span class="string">"name-resolver::local"</span>, <span class="string">"module status: {:?}"</span>, <span class="kw-2">&amp;</span>module.status());
+<a href=#552 id=552 data-nosnippet>552</a>        module.resolve(symbol, <span class="self">self</span>)
+<a href=#553 id=553 data-nosnippet>553</a>    }
+<a href=#554 id=554 data-nosnippet>554</a>
+<a href=#555 id=555 data-nosnippet>555</a>    <span class="attr">#[inline]
+<a href=#556 id=556 data-nosnippet>556</a>    </span><span class="kw">pub fn </span>module_path(<span class="kw-2">&amp;</span><span class="self">self</span>, module: ModuleIndex) -&gt; <span class="kw-2">&amp;</span>Path {
+<a href=#557 id=557 data-nosnippet>557</a>        <span class="self">self</span>.graph[module].path()
+<a href=#558 id=558 data-nosnippet>558</a>    }
+<a href=#559 id=559 data-nosnippet>559</a>
+<a href=#560 id=560 data-nosnippet>560</a>    <span class="kw">pub fn </span>item_path(<span class="kw-2">&amp;</span><span class="self">self</span>, item: GlobalItemIndex) -&gt; Arc&lt;Path&gt; {
+<a href=#561 id=561 data-nosnippet>561</a>        <span class="kw">let </span>module = <span class="kw-2">&amp;</span><span class="self">self</span>.graph[item.module];
+<a href=#562 id=562 data-nosnippet>562</a>        <span class="kw">let </span>name = module[item.index].name();
+<a href=#563 id=563 data-nosnippet>563</a>        module.path().join(name).into()
+<a href=#564 id=564 data-nosnippet>564</a>    }
+<a href=#565 id=565 data-nosnippet>565</a>}
 </code></pre></div></section></main></body></html>
