@@ -903,6 +903,24 @@ fn map_write_panic(p: std::boxed::Box<dyn core::any::Any + Send>) -> std::io::Er
 mod tests_write_to_file {
     use std::{io::Write, string::String};
 
+    /// Verifies that `map_write_panic` recovers a `Box<io::Error>` panic payload via safe
+    /// deref-move (`*err`) rather than the former unsound `ptr::read` that caused a double-drop.
+    #[test]
+    fn map_write_panic_recovers_boxed_io_error_without_double_drop() {
+        let panic_payload = std::panic::catch_unwind(|| {
+            std::panic::panic_any(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "simulated write failure",
+            ));
+        })
+        .unwrap_err();
+
+        let err = super::map_write_panic(panic_payload);
+        assert_eq!(err.kind(), std::io::ErrorKind::Other);
+    }
+
+    /// Documents that `WriteAdapter` (via `ByteWriter`) panics with a `String` payload
+    /// (from `.expect("write failed")`), not a `Box<io::Error>`, on a real write failure.
     #[test]
     fn map_write_panic_sees_real_std_write_payload() {
         let panic_payload = std::panic::catch_unwind(|| {
