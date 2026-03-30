@@ -59,48 +59,8 @@ pub enum AceError {
     InvalidInputLayout { message: String },
 }
 
-#[cfg(feature = "testing")]
-pub mod testing {
-    use super::{AceDag, AceError, InputLayout};
-
-    /// Evaluate a lowered DAG against concrete inputs.
-    pub fn eval_dag<EF>(
-        dag: &AceDag<EF>,
-        inputs: &[EF],
-        layout: &InputLayout,
-    ) -> Result<EF, AceError>
-    where
-        EF: miden_crypto::field::Field,
-    {
-        if inputs.len() != layout.total_inputs {
-            return Err(AceError::InvalidInputLength {
-                expected: layout.total_inputs,
-                got: inputs.len(),
-            });
-        }
-
-        let mut values: Vec<EF> = vec![EF::ZERO; dag.nodes().len()];
-        for (idx, node) in dag.nodes().iter().enumerate() {
-            let value = match node {
-                crate::dag::NodeKind::Input(key) => {
-                    let input_idx =
-                        layout.index(*key).ok_or_else(|| AceError::InvalidInputLayout {
-                            message: format!("missing input key in layout: {key:?}"),
-                        })?;
-                    inputs[input_idx]
-                },
-                crate::dag::NodeKind::Constant(c) => *c,
-                crate::dag::NodeKind::Add(a, b) => values[a.index()] + values[b.index()],
-                crate::dag::NodeKind::Sub(a, b) => values[a.index()] - values[b.index()],
-                crate::dag::NodeKind::Mul(a, b) => values[a.index()] * values[b.index()],
-                crate::dag::NodeKind::Neg(a) => -values[a.index()],
-            };
-            values[idx] = value;
-        }
-
-        Ok(values[dag.root().index()])
-    }
-}
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 
 pub use crate::{
     circuit::{AceCircuit, emit_circuit},

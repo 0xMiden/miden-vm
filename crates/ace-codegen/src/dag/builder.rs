@@ -37,7 +37,7 @@ where
     /// are accepted only when that provenance is encoded in the node graph itself.
     pub fn from_nodes(nodes: Vec<NodeKind<EF>>) -> Self {
         let imported_dag = infer_dag_id(&nodes)
-            .map(|source_dag_id| ImportedDag::Known { source_dag_id, imported_len: nodes.len() });
+            .map(|source_dag_id| ImportedDag { source_dag_id, imported_len: nodes.len() });
         let dag_id = DagId::fresh();
         let nodes = rebase_nodes(nodes, dag_id);
 
@@ -50,7 +50,7 @@ where
     pub fn from_snapshot(snapshot: DagSnapshot<EF>) -> Self {
         let (source_dag_id, nodes, _) = snapshot.into_parts();
         let dag_id = DagId::fresh();
-        let imported_dag = Some(ImportedDag::Known { source_dag_id, imported_len: nodes.len() });
+        let imported_dag = Some(ImportedDag { source_dag_id, imported_len: nodes.len() });
         let nodes = rebase_nodes(nodes, dag_id);
 
         Self::from_existing_nodes(dag_id, nodes, imported_dag)
@@ -160,7 +160,6 @@ where
     }
 
     fn const_value(&self, id: NodeId) -> Option<EF> {
-        let id = self.resolve_node(id);
         match self.nodes.get(id.index())? {
             NodeKind::Constant(v) => Some(*v),
             _ => None,
@@ -196,15 +195,11 @@ where
             return id;
         }
 
-        if let Some(imported_dag) = &self.imported_dag {
-            match imported_dag {
-                ImportedDag::Known { source_dag_id, imported_len }
-                    if *source_dag_id == id.dag_id && id.index() < *imported_len =>
-                {
-                    return NodeId::in_dag(id.index(), self.dag_id);
-                },
-                _ => {},
-            }
+        if let Some(imported) = &self.imported_dag
+            && imported.source_dag_id == id.dag_id
+            && id.index() < imported.imported_len
+        {
+            return NodeId::in_dag(id.index(), self.dag_id);
         }
 
         panic!("{message}");
@@ -239,11 +234,9 @@ fn rebase_node(id: NodeId, dag_id: DagId) -> NodeId {
 }
 
 #[derive(Debug, Clone)]
-enum ImportedDag {
-    Known {
-        source_dag_id: DagId,
-        imported_len: usize,
-    },
+struct ImportedDag {
+    source_dag_id: DagId,
+    imported_len: usize,
 }
 
 impl<EF> Default for DagBuilder<EF>

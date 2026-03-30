@@ -153,26 +153,9 @@ impl<EF> AceDag<EF> {
             source_dag_id: self.dag_id,
         }
     }
-
-    /// Clone the DAG into an exported snapshot that can be re-imported later.
-    pub fn snapshot(&self) -> DagSnapshot<EF>
-    where
-        EF: Clone,
-    {
-        DagSnapshot {
-            nodes: self.nodes.clone(),
-            root: self.root,
-            source_dag_id: self.dag_id,
-        }
-    }
 }
 
 impl<EF> DagSnapshot<EF> {
-    /// Topologically ordered nodes.
-    pub fn nodes(&self) -> &[NodeKind<EF>] {
-        &self.nodes
-    }
-
     /// Root node of the verifier equation.
     pub fn root(&self) -> NodeId {
         self.root
