@@ -24,12 +24,14 @@ pub struct InputCounts {
     pub aux_width: usize,
     /// Number of public inputs.
     pub num_public: usize,
+    /// Number of variable-length public input (VLPI) reduction slots (in EF elements).
+    /// This is derived from `AceConfig::num_vlpi_groups` by the layout policy:
+    /// MASM expands each group to 2 EF slots (word-aligned); Native uses 1 per group.
+    pub num_vlpi: usize,
     /// Number of randomness challenges used by the AIR.
     pub num_randomness: usize,
     /// Number of periodic columns.
     pub num_periodic: usize,
-    /// Number of auxiliary (stark var) inputs reserved.
-    pub num_aux_inputs: usize,
     /// Number of quotient chunks.
     pub num_quotient_chunks: usize,
 }
@@ -39,6 +41,8 @@ pub struct InputCounts {
 pub(crate) struct LayoutRegions {
     /// Region containing fixed-length public values.
     pub public_values: InputRegion,
+    /// Region containing variable-length public input reductions.
+    pub vlpi_reductions: InputRegion,
     /// Region containing randomness inputs (alpha, beta).
     pub randomness: InputRegion,
     /// Main trace OOD values at `zeta`.
@@ -60,32 +64,39 @@ pub(crate) struct LayoutRegions {
 }
 
 /// Indexes of canonical verifier scalars inside the stark-vars block.
+///
+/// Every slot in the ACE input array is an extension-field (EF) element --
+/// the circuit operates entirely in the extension field. However, some of
+/// these scalars are inherently base-field values that the MASM verifier
+/// stores as `(val, 0)` in the EF slot.
+///
+/// See the module documentation on [`super::super::dag::lower`] for how each
+/// variable enters the verifier expression.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct StarkVarIndices {
-    /// Index of `zeta` in the stark-vars block.
-    pub z: usize,
-    /// Index of the composition challenge `alpha`.
+    // -- Extension-field values (slots 0-5) --
+    /// Composition challenge `alpha` for folding constraints.
     pub alpha: usize,
-    /// Index of `g^{-1}`.
-    pub g_inv: usize,
-    /// Index of `zeta^N`.
+    /// `zeta^N` where N is the trace length.
     pub z_pow_n: usize,
-    /// Index of `g^{-2}`.
-    pub g_inv2: usize,
-    /// Index of `z_k`.
+    /// `zeta^(N / max_cycle_len)` for periodic column evaluation.
     pub z_k: usize,
-    /// Index of `weight0`.
+    /// Precomputed first-row selector: `(z^N - 1) / (z - 1)`.
+    pub is_first: usize,
+    /// Precomputed last-row selector: `(z^N - 1) / (z - g^{-1})`.
+    pub is_last: usize,
+    /// Precomputed transition selector: `z - g^{-1}`.
+    pub is_transition: usize,
+    /// Batching challenge `gamma` for reduced_aux_values.
+    pub gamma: usize,
+
+    // -- Base-field values stored as (val, 0) in EF slots --
+    /// First barycentric weight `1 / (k * s0^{k-1})`.
     pub weight0: usize,
-    /// Index of `g`.
-    pub g: usize,
-    /// Index of `s0`.
+    /// `f = h^N` (chunk shift ratio between cosets).
+    pub f: usize,
+    /// `s0 = offset^N` (first chunk shift).
     pub s0: usize,
-    /// Index of `1 / (zeta - g^{-1})`.
-    pub inv_z_minus_g_inv: usize,
-    /// Index of `1 / (zeta - 1)`.
-    pub inv_z_minus_one: usize,
-    /// Index of `1 / (zeta^N - 1)`.
-    pub inv_vanishing: usize,
 }
 
 /// ACE input layout for Plonky3-based verifier logic.
@@ -100,6 +111,8 @@ pub struct InputLayout {
     pub(crate) aux_rand_alpha: usize,
     /// Input index for aux randomness beta.
     pub(crate) aux_rand_beta: usize,
+    /// Stride between logical VLPI groups (2 for MASM word-aligned, 1 for native).
+    pub(crate) vlpi_stride: usize,
     /// Indexes into the stark-vars region.
     pub(crate) stark: StarkVarIndices,
     /// Total number of inputs (length of the READ section).
@@ -123,6 +136,7 @@ impl InputLayout {
         let mut max_end = 0usize;
         for region in [
             self.regions.public_values,
+            self.regions.vlpi_reductions,
             self.regions.randomness,
             self.regions.main_curr,
             self.regions.aux_curr,
@@ -156,26 +170,23 @@ impl InputLayout {
             "aux bus boundary width mismatch"
         );
 
-        let stark_end = self.regions.stark_vars.offset + self.regions.stark_vars.width;
-        for (name, idx) in [
-            ("z", self.stark.z),
-            ("alpha", self.stark.alpha),
-            ("g_inv", self.stark.g_inv),
-            ("z_pow_n", self.stark.z_pow_n),
-            ("g_inv2", self.stark.g_inv2),
-            ("z_k", self.stark.z_k),
-            ("weight0", self.stark.weight0),
-            ("g", self.stark.g),
-            ("s0", self.stark.s0),
-            ("inv_z_minus_g_inv", self.stark.inv_z_minus_g_inv),
-            ("inv_z_minus_one", self.stark.inv_z_minus_one),
-            ("inv_vanishing", self.stark.inv_vanishing),
-        ] {
-            assert!(
-                idx >= self.regions.stark_vars.offset && idx < stark_end,
-                "stark var {name} out of range"
-            );
-        }
+        let stark_start = self.regions.stark_vars.offset;
+        let stark_end = stark_start + self.regions.stark_vars.width;
+        let check = |name: &str, idx: usize| {
+            assert!(idx >= stark_start && idx < stark_end, "stark var {name} out of range");
+        };
+        // Extension-field slots.
+        check("alpha", self.stark.alpha);
+        check("z_pow_n", self.stark.z_pow_n);
+        check("z_k", self.stark.z_k);
+        check("is_first", self.stark.is_first);
+        check("is_last", self.stark.is_last);
+        check("is_transition", self.stark.is_transition);
+        check("gamma", self.stark.gamma);
+        // Base-field slots (stored as (val, 0) in the EF slot).
+        check("weight0", self.stark.weight0);
+        check("f", self.stark.f);
+        check("s0", self.stark.s0);
 
         let rand_start = self.regions.randomness.offset;
         let rand_end = rand_start + self.regions.randomness.width;

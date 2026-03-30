@@ -4,6 +4,7 @@ use paste::paste;
 
 use crate::{
     ExecutionError, Felt, ZERO,
+    mast::MastForest,
     operation::OperationError,
     processor::{Processor, StackInterface, SystemInterface},
     tracer::{OperationHelperRegisters, Tracer},
@@ -300,10 +301,39 @@ where
 #[inline(always)]
 pub(super) fn op_u32assert2<P: Processor, T: Tracer>(
     processor: &mut P,
-    _err_code: Felt,
+    err_code: Felt,
     tracer: &mut T,
+    program: &MastForest,
 ) -> Result<OperationHelperRegisters, OperationError> {
-    let (first, second) = require_u32_operands!(processor, [0, 1]);
+    let first = processor.stack().get(0);
+    let second = processor.stack().get(1);
+
+    let first_invalid = first.as_canonical_u64() > U32_MAX;
+    let second_invalid = second.as_canonical_u64() > U32_MAX;
+
+    if first_invalid || second_invalid {
+        let mut invalid_values = Vec::with_capacity(2);
+        if first_invalid {
+            invalid_values.push(first);
+        }
+        if second_invalid {
+            invalid_values.push(second);
+        }
+
+        if err_code != ZERO {
+            // A custom error code was provided: surface it as a U32AssertionFailed so
+            // callers get both the error context *and* the offending values for
+            // richer diagnostics (addresses bobbinth's review suggestion).
+            let err_msg = program.resolve_error_message(err_code);
+            return Err(OperationError::U32AssertionFailed { err_code, err_msg, invalid_values });
+        }
+
+        // No custom error code: report the specific out-of-range values so
+        // the diagnostic layer can name them (matches historical behaviour and
+        // what u32assert / u32not / u32assertw expect when they internally
+        // lower to U32assert2(ZERO)).
+        return Err(OperationError::NotU32Values { values: invalid_values });
+    }
 
     tracer.record_u32_range_checks(processor.system().clock(), first, second);
 

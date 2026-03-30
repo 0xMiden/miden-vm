@@ -86,21 +86,9 @@ where
                     panic!("preprocessed not supported in test")
                 },
             },
-            BaseLeaf::IsFirstRow => {
-                let z_pow_n = inputs[layout.index(InputKey::ZPowN).unwrap()];
-                let inv = inputs[layout.index(InputKey::InvZMinusOne).unwrap()];
-                (z_pow_n - EF::ONE) * inv
-            },
-            BaseLeaf::IsLastRow => {
-                let z_pow_n = inputs[layout.index(InputKey::ZPowN).unwrap()];
-                let inv = inputs[layout.index(InputKey::InvZMinusGInv).unwrap()];
-                (z_pow_n - EF::ONE) * inv
-            },
-            BaseLeaf::IsTransition => {
-                let z = inputs[layout.index(InputKey::Z).unwrap()];
-                let g_inv = inputs[layout.index(InputKey::GInv).unwrap()];
-                z - g_inv
-            },
+            BaseLeaf::IsFirstRow => inputs[layout.index(InputKey::IsFirst).unwrap()],
+            BaseLeaf::IsLastRow => inputs[layout.index(InputKey::IsLast).unwrap()],
+            BaseLeaf::IsTransition => inputs[layout.index(InputKey::IsTransition).unwrap()],
             BaseLeaf::Constant(c) => EF::from(*c),
         },
         SymbolicExpression::Add { x, y, .. } => {
@@ -153,14 +141,11 @@ where
                     let beta = inputs[layout.index(InputKey::AuxRandBeta).unwrap()];
                     match v.index {
                         0 => alpha,
-                        1 => EF::ONE,
-                        _ => {
-                            let mut power = beta;
-                            for _ in 2..v.index {
-                                power *= beta;
-                            }
-                            power
-                        },
+                        1 => beta,
+                        _ => panic!(
+                            "challenge index {} exceeds the 2-element randomness convention",
+                            v.index
+                        ),
                     }
                 },
                 ExtEntry::PermutationValue => {
@@ -188,12 +173,14 @@ where
     }
 }
 
-/// Evaluate all constraints (base + extension) folded with alpha in evaluation order.
+/// Evaluate the folded constraint accumulator from symbolic constraints.
+///
+/// Merges base and extension constraints in evaluation order (using the
+/// `ConstraintLayout`), then folds them via Horner with `alpha`.
 pub fn eval_folded_constraints<F, EF>(
     base_constraints: &[SymbolicExpression<F>],
     ext_constraints: &[SymbolicExpressionExt<F, EF>],
     constraint_layout: &ConstraintLayout,
-    alpha: EF,
     inputs: &[EF],
     layout: &InputLayout,
     periodic_values: &[EF],
@@ -202,6 +189,8 @@ where
     F: Field,
     EF: ExtensionField<F>,
 {
+    let alpha = inputs[layout.index(InputKey::Alpha).unwrap()];
+
     let total = constraint_layout.base_indices.len() + constraint_layout.ext_indices.len();
     let mut ordered: Vec<(usize, bool, usize)> = Vec::with_capacity(total);
     for (i, &pos) in constraint_layout.base_indices.iter().enumerate() {

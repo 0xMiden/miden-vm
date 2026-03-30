@@ -15,9 +15,9 @@ fn minimal_layout(num_public: usize) -> InputLayout {
         width: 0,
         aux_width: 0,
         num_public,
+        num_vlpi: 0,
         num_randomness: 2,
         num_periodic: 0,
-        num_aux_inputs: 14,
         num_quotient_chunks: 1,
     };
     InputLayout::new(counts)

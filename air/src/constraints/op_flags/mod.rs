@@ -714,6 +714,8 @@ where
         u32and => opcodes::U32AND,
         /// Operation Flag of U32XOR operation.
         u32xor => opcodes::U32XOR,
+        /// Operation Flag of FRIE2F4 operation.
+        frie2f4 => opcodes::FRIE2F4,
         /// Operation Flag of DROP operation.
         #[allow(dead_code)]
         drop => opcodes::DROP,

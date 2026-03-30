@@ -43,7 +43,7 @@ pub const TAG_STACK_OPS_COUNT: usize = 88;
 /// Base ID for the stack crypto constraint group.
 pub const TAG_STACK_CRYPTO_BASE: usize = TAG_STACK_OPS_BASE + TAG_STACK_OPS_COUNT;
 /// Number of stack crypto constraints in this group.
-pub const TAG_STACK_CRYPTO_COUNT: usize = 46;
+pub const TAG_STACK_CRYPTO_COUNT: usize = 71;
 
 /// Base ID for the stack arith/u32 constraint group.
 pub const TAG_STACK_ARITH_BASE: usize = TAG_STACK_CRYPTO_BASE + TAG_STACK_CRYPTO_COUNT;
