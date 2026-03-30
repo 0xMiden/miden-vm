@@ -18,7 +18,7 @@
 - [BREAKING] Removed the deprecated unbound `TraceBuildInputs::new()` and `TraceBuildInputs::from_program()` constructors; use `execute_trace_inputs_sync()` or `execute_trace_inputs()` instead ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
 - Added `prove_from_trace_sync(...)` for proving from pre-executed trace inputs ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
 
-#### Bug fixes
+#### Bug Fixes
 
 - Fixed `ExecutionTracer` DYNCALL stack-depth off-by-one at `MIN_STACK_DEPTH` ([#2813](https://github.com/0xMiden/miden-vm/issues/2813)).
 
