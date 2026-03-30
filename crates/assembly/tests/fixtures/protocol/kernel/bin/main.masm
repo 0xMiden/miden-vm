@@ -1,0 +1,16 @@
+# We assume that the first word on the operand stack is the procedure digest of the user
+# program to be executed, so we store that into procedure local memory, and then dyncall it
+@locals(4)
+proc invoke_user_script
+    loc_storew_le.0
+    locaddr.0
+    dyncall
+end
+
+begin
+    # At program start, initialize the kernel environment
+    exec.$kernel::init
+
+    # Execute the user script whose entrypoint digest is on top of the stack
+    exec.invoke_user_script
+end

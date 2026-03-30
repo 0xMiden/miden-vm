@@ -145,3 +145,6 @@ xclippy-fix = [
     "-Wunexpected_cfgs",
     "-Wunused_lifetimes",
 ]
+
+[target.wasm32-unknown-unknown]
+rustflags = ['--cfg', 'getrandom_backend="unsupported"']

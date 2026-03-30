@@ -918,7 +918,7 @@ impl FastProcessor {
     /// # Panics
     /// Panics if called from within an existing Tokio runtime. Use the async `execute()`
     /// method instead in async contexts.
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(target_family = "wasm"))]
     pub fn execute_sync(
         self,
         program: &Program,
@@ -950,7 +950,7 @@ impl FastProcessor {
     /// # Panics
     /// Panics if called from within an existing Tokio runtime. Use the async `execute_for_trace()`
     /// method instead in async contexts.
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(target_family = "wasm"))]
     #[instrument(name = "execute_for_trace_sync", skip_all)]
     pub fn execute_for_trace_sync(
         self,
@@ -983,7 +983,7 @@ impl FastProcessor {
     /// # Panics
     /// Panics if called from within an existing Tokio runtime. Use async execution
     /// methods instead in async contexts.
-    #[cfg(all(any(test, feature = "testing"), not(target_arch = "wasm32")))]
+    #[cfg(all(any(test, feature = "testing"), not(target_family = "wasm")))]
     pub fn execute_sync_mut(
         &mut self,
         program: &Program,

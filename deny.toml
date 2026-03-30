@@ -28,9 +28,9 @@ allow = [
     "BSD-2-Clause",
     "BSD-3-Clause",
     "CC0-1.0",
-    "ISC",
     "Zlib",
     "Unicode-3.0",
+    "MPL-2.0"
 ]
 exceptions = [
     # Each entry is the crate and version constraint, and its specific allowed licenses
@@ -49,6 +49,9 @@ deny = [
     #{ name = "ansi_term", version = "=0.11.0" },
 ]
 skip = [
+    # Allow duplicate anstream/anstyle-parse versions - clap uses 1.0.0, env_logger uses 0.6.*
+    { name = "anstream" },
+    { name = "anstyle-parse" },
     # Allow duplicate spin versions - transitively pulled by p3-dft and flume
     { name = "spin" },
     # Allow duplicate rand versions - miden-field uses 0.10, miden-vm uses 0.9
@@ -58,6 +61,8 @@ skip = [
 skip-tree = [
     # Allow getrandom v0.2.x for now - will be phased out with nanorand
     { name = "getrandom", version = "=0.2.17" },
+    # Allow getrandom v0.3.x for now - will be updated when miden-crypto upgrades
+    { name = "getrandom", version = "=0.3.4" },
     # Allow rand_core v0.6.x for now - legacy dependency
     { name = "rand_core", version = "=0.6.4" },
     # Allow rustc_version v0.2.x - build dependency
@@ -68,7 +73,7 @@ skip-tree = [
     { name = "windows-sys", version = "=0.59.0" },
     # Allow syn v1.x and v2.x - our derive macros need v1.x while ecosystem uses v2.x
     { name = "syn", version = "=1.0.109" },
-    { name = "syn", version = "=2.0.114" },
+    { name = "syn", version = "=2.0.117" },
 ]
 
 # Sources configuration

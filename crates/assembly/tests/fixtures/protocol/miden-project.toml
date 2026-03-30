@@ -1,0 +1,14 @@
+[workspace]
+members = [
+    "utils",
+    "kernel",
+    "userspace",
+]
+
+[workspace.dependencies]
+miden-core = { path = "../../../../../lib/core/asm" }
+miden-utils = { path = "utils", linkage = "static" }
+miden-tx = { path = "kernel" }
+
+[profile.test]
+inherits = "dev"

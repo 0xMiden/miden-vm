@@ -14,8 +14,10 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_assembly_syntax::{KernelLibrary, Library, Report, ast::QualifiedProcedureName};
-use miden_core::{Word, serde::Deserializable};
+use miden_assembly_syntax::{
+    KernelLibrary, Library, Report, ast::QualifiedProcedureName, library::ModuleInfo,
+};
+use miden_core::{Word, program::Kernel, serde::Deserializable};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -120,7 +122,35 @@ impl Package {
         matches!(self.kind, TargetType::Kernel)
     }
 
+    /// Get the [ModuleInfo] corresponding to the kernel module, if this package contains the kernel
+    pub fn kernel_module_info(&self) -> Result<ModuleInfo, Report> {
+        self.mast
+            .module_infos()
+            .find(|mi| mi.path().is_kernel_path())
+            .ok_or_else(|| Report::msg("invalid kernel package: does not contain kernel module"))
+    }
+
+    /// Get a [Kernel] from this package, if this package contains one.
+    pub fn to_kernel(&self) -> Result<Kernel, Report> {
+        let exports = self
+            .manifest
+            .exports()
+            .filter_map(|export| {
+                if export.namespace().is_kernel_path()
+                    && let PackageExport::Procedure(p) = export
+                {
+                    Some(p.digest)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        Kernel::new(&exports).map_err(|err| Report::msg(format!("invalid kernel package: {err}")))
+    }
+
     /// Converts this package into a [KernelLibrary] if it is marked as a kernel package.
+    //
+    // TODO(pauls): This function can be removed when we remove Library/KernelLibrary/Program
     pub fn try_into_kernel_library(&self) -> Result<KernelLibrary, Report> {
         if !self.is_kernel() {
             return Err(Report::msg(format!(
@@ -132,6 +162,7 @@ impl Package {
         KernelLibrary::try_from(self.mast.clone()).map_err(|error| Report::msg(error.to_string()))
     }
 
+    // TODO(pauls): This function can be removed when we remove Library/KernelLibrary/Program
     #[doc(hidden)]
     pub fn try_into_program(&self) -> Result<miden_core::program::Program, Report> {
         use miden_assembly_syntax::{Path as MasmPath, ast};
@@ -163,6 +194,7 @@ impl Package {
         }
     }
 
+    // TODO(pauls): This function can be removed when we remove Library/KernelLibrary/Program
     #[doc(hidden)]
     pub fn unwrap_program(&self) -> miden_core::program::Program {
         assert_eq!(self.kind, TargetType::Executable);
@@ -247,7 +279,20 @@ impl Package {
         Ok(())
     }
 
-    fn kernel_runtime_dependency(&self) -> Result<Option<&Dependency>, Report> {
+    pub fn to_dependency(&self) -> Dependency {
+        Dependency {
+            name: self.name.clone(),
+            version: self.version.clone(),
+            kind: self.kind,
+            digest: self.digest(),
+        }
+    }
+
+    /// If this package depends on a kernel, this method extracts the [Dependency] corresponding to
+    /// it.
+    ///
+    /// Returns `Err` if the dependency metadata for this package contains multiple kernels.
+    pub fn kernel_runtime_dependency(&self) -> Result<Option<&Dependency>, Report> {
         let mut kernel_dependencies = self
             .manifest
             .dependencies()
@@ -369,6 +414,15 @@ impl Package {
         <Self as Serializable>::write_into(self, &mut file);
         Ok(())
     }
+
+    /// Write this package to a file in `dir` named `$name.masp`, where `$name` is the package name.
+    #[cfg(feature = "std")]
+    pub fn write_masp_file(&self, dir: impl AsRef<std::path::Path>) -> std::io::Result<()> {
+        let dir = dir.as_ref();
+        let package_name: &str = &self.name;
+        self.write_to_file(dir.join(package_name).with_extension(Self::EXTENSION))
+            .map_err(|err| std::io::Error::other(err.to_string()))
+    }
 }
 
 #[cfg(feature = "arbitrary")]
@@ -393,6 +447,9 @@ fn arbitrary_library() -> Arc<Library> {
     let value_tree = <Library as Arbitrary>::arbitrary().new_tree(&mut runner).unwrap();
     Arc::new(value_tree.current())
 }
+
+// TESTS
+// ================================================================================================
 
 #[cfg(test)]
 mod tests {

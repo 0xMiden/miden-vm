@@ -19,7 +19,15 @@ doctest = false
 
 [features]
 default = ["std"]
-std = ["miden-assembly-syntax/std", "miden-core/std", "thiserror/std"]
+std = [
+    "dep:miden-package-registry",
+    "miden-assembly-syntax/std",
+    "miden-core/std",
+    "miden-mast-package/std",
+    "miden-project/std",
+    "tempfile/getrandom",
+    "thiserror/std",
+]
 testing = ["logging", "miden-assembly-syntax/testing"]
 logging = ["dep:env_logger"]
 
@@ -28,6 +36,8 @@ logging = ["dep:env_logger"]
 miden-assembly-syntax.workspace = true
 miden-core.workspace = true
 miden-mast-package.workspace = true
+miden-package-registry = { workspace = true, optional = true }
+miden-project = { workspace = true, features = ["serde"] }
 
 # External dependencies
 env_logger = { workspace = true, optional = true }
@@ -44,3 +54,4 @@ miden-assembly = { path = ".", default-features = false, features = ["testing"] 
 miden-mast-package = { workspace = true, features = ["arbitrary"] }
 insta = { workspace = true }
 proptest = { workspace = true, features = ["std"] }
+tempfile.workspace = true

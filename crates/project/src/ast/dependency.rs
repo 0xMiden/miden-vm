@@ -3,8 +3,7 @@ use crate::{Linkage, SourceId, Span, Uri, VersionRequirement};
 
 /// Represents information about a project dependency needed to resolve it to a Miden package
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
+#[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct DependencySpec {
     /// The name of the dependency package
     #[cfg_attr(feature = "serde", serde(default, skip))]
@@ -112,10 +111,75 @@ mod serialization {
     use alloc::sync::Arc;
 
     use miden_assembly_syntax::debuginfo::Span;
-    use serde::de::{MapAccess, Visitor};
+    use serde::{
+        Deserialize,
+        de::{IntoDeserializer, MapAccess, Visitor},
+    };
 
     use super::DependencySpec;
     use crate::Map;
+
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct DependencySpecTable {
+        #[serde(default, skip)]
+        name: Span<Arc<str>>,
+        #[serde(rename = "version", alias = "digest", skip_serializing_if = "Option::is_none")]
+        version_or_digest: Option<crate::VersionRequirement>,
+        #[serde(default, skip_serializing_if = "super::does_not_inherit_from_workspace")]
+        workspace: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path: Option<Span<crate::Uri>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        git: Option<Span<crate::Uri>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        branch: Option<Span<Arc<str>>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rev: Option<Span<Arc<str>>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        linkage: Option<Span<crate::Linkage>>,
+    }
+
+    impl From<DependencySpecTable> for DependencySpec {
+        fn from(table: DependencySpecTable) -> Self {
+            Self {
+                name: table.name,
+                version_or_digest: table.version_or_digest,
+                workspace: table.workspace,
+                path: table.path,
+                git: table.git,
+                branch: table.branch,
+                rev: table.rev,
+                linkage: table.linkage,
+            }
+        }
+    }
+
+    impl<'de> Deserialize<'de> for DependencySpec {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            serde_untagged::UntaggedEnumVisitor::new()
+                .expecting("a dependency requirement string or dependency table")
+                .string(|value| {
+                    crate::VersionRequirement::deserialize(value.into_deserializer()).map(
+                        |version_or_digest| Self {
+                            name: Span::default(),
+                            version_or_digest: Some(version_or_digest),
+                            workspace: false,
+                            path: None,
+                            git: None,
+                            branch: None,
+                            rev: None,
+                            linkage: None,
+                        },
+                    )
+                })
+                .map(|map| map.deserialize::<DependencySpecTable>().map(Into::into))
+                .deserialize(deserializer)
+        }
+    }
 
     struct DependencyMapVisitor;
 
