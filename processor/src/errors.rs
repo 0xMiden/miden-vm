@@ -294,6 +294,21 @@ pub enum OperationError {
         err_code: Felt,
         err_msg: Option<Arc<str>>,
     },
+    #[error(
+        "u32 assertion failed with error {}: invalid values: {invalid_values:?}",
+        match err_msg {
+            Some(msg) => format!("message: {msg}"),
+            None => format!("code: {err_code}"),
+        }
+    )]
+    #[diagnostic(help(
+        "u32assert2 requires both stack values to be valid 32-bit unsigned integers"
+    ))]
+    U32AssertionFailed {
+        err_code: Felt,
+        err_msg: Option<Arc<str>>,
+        invalid_values: Vec<Felt>,
+    },
     #[error("FRI operation failed: {0}")]
     FriError(String),
     #[error(
