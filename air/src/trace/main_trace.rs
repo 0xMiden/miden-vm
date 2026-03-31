@@ -185,10 +185,10 @@ impl MainTrace {
                     core_rm[r * CORE_WIDTH + col]
                 } else {
                     let nc = col - CORE_WIDTH;
-                    if nc < 2 {
+                    if nc < RANGE_CHECK_TRACE_WIDTH {
                         range_checker_cols[nc][r]
-                    } else if nc < 2 + CHIPLETS_WIDTH {
-                        chiplets_rm[r * CHIPLETS_WIDTH + (nc - 2)]
+                    } else if nc < RANGE_CHECK_TRACE_WIDTH + CHIPLETS_WIDTH {
+                        chiplets_rm[r * CHIPLETS_WIDTH + (nc - RANGE_CHECK_TRACE_WIDTH)]
                     } else {
                         ZERO
                     }
@@ -371,7 +371,7 @@ impl MainTrace {
                             .copy_from_slice(&core_rm[row * CORE_WIDTH..(row + 1) * CORE_WIDTH]);
                         let nc_dst = &mut dst[CORE_WIDTH..];
                         let mut nc_pos = 0;
-                        for col in &range_checker_cols[..2.min(nc_needed)] {
+                        for col in &range_checker_cols[..RANGE_CHECK_TRACE_WIDTH.min(nc_needed)] {
                             nc_dst[nc_pos] = col[row];
                             nc_pos += 1;
                         }
