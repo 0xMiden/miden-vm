@@ -21,6 +21,7 @@ use miden_core::{
     program::{Kernel, MIN_STACK_DEPTH},
     utils::{Matrix, RowMajorMatrix},
 };
+use once_cell::sync::OnceCell;
 use rayon::prelude::*;
 use tracing::instrument;
 
@@ -213,6 +214,7 @@ pub fn build_trace_with_max_len(
         chiplets: chiplets_aux_builder,
         stack: StackAuxTraceBuilder,
         last_program_row,
+        precomputed_main_transpose: Arc::new(OnceCell::new()),
     };
 
     Ok(ExecutionTrace::new_from_parts(

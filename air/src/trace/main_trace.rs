@@ -1,4 +1,4 @@
-use alloc::vec::Vec;
+use alloc::{sync::Arc, vec::Vec};
 use core::{
     borrow::{Borrow, BorrowMut},
     ops::Range,
@@ -104,7 +104,7 @@ enum TraceStorage {
     },
     RowMajor(RowMajorMatrix<Felt>),
     Transposed {
-        matrix: RowMajorMatrix<Felt>,
+        matrix: Arc<RowMajorMatrix<Felt>>,
         num_cols: usize,
         num_rows: usize,
     },
@@ -164,10 +164,19 @@ impl MainTrace {
 
     /// `transposed` is `main.transpose()` where `main` was `num_rows × num_cols`.
     pub fn from_transposed(transposed: RowMajorMatrix<Felt>, last_program_row: RowIndex) -> Self {
-        let num_cols = transposed.height();
-        let num_rows = transposed.width();
+        Self::from_transposed_arc(Arc::new(transposed), last_program_row)
+    }
+
+    /// Same as [`Self::from_transposed`], but reuses an existing `Arc` to skip cloning the matrix.
+    pub fn from_transposed_arc(
+        matrix: Arc<RowMajorMatrix<Felt>>,
+        last_program_row: RowIndex,
+    ) -> Self {
+        let num_cols = matrix.height();
+        let num_rows = matrix.width();
+
         Self {
-            storage: TraceStorage::Transposed { matrix: transposed, num_cols, num_rows },
+            storage: TraceStorage::Transposed { matrix, num_cols, num_rows },
             last_program_row,
         }
     }

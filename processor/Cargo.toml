@@ -41,6 +41,7 @@ miden-utils-indexing.workspace = true
 
 # External dependencies
 itertools.workspace = true
+once_cell = { default-features = false, features = ["alloc", "critical-section"], version = "1.21" }
 paste.workspace = true
 rayon = { version = "1.10", default-features = false }
 tracing.workspace = true

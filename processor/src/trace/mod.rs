@@ -1,4 +1,4 @@
-use alloc::vec::Vec;
+use alloc::{sync::Arc, vec::Vec};
 #[cfg(any(test, feature = "testing"))]
 use core::ops::Range;
 
@@ -9,6 +9,7 @@ use miden_air::{
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     },
 };
+use once_cell::sync::OnceCell;
 
 use crate::{
     AdviceProvider, Felt, MIN_STACK_DEPTH, Program, ProgramInfo, StackInputs, StackOutputs, Word,
@@ -331,7 +332,7 @@ impl ExecutionTrace {
         let challenges =
             [QuadFelt::new([digest[0], digest[1]]), QuadFelt::new([digest[2], digest[3]])];
 
-        let witness = AirWitness::new(&trace_matrix, &public_values, var_len_public_inputs);
+        let witness = AirWitness::new(trace_matrix.as_ref(), &public_values, var_len_public_inputs);
         debug::check_constraints(&ProcessorAir, witness, &aux_builder, &challenges);
     }
 
@@ -341,14 +342,24 @@ impl ExecutionTrace {
     /// Poseidon2 rate alignment), which is the width expected by the AIR.
     // TODO: the padding columns can be removed once we use the lifted-stark's virtual trace
     // alignment, which pads to the required rate width without materializing extra columns.
-    pub fn to_row_major_matrix(&self) -> RowMajorMatrix<Felt> {
+    pub fn to_row_major_matrix(&self) -> Arc<RowMajorMatrix<Felt>> {
         let stored_w = self.main_trace.width();
-        if stored_w == TRACE_WIDTH {
-            return self.main_trace.to_row_major();
-        }
+        let row_major = if stored_w == TRACE_WIDTH {
+            self.main_trace.to_row_major()
+        } else {
+            assert_eq!(stored_w, PADDED_TRACE_WIDTH);
+            self.main_trace.to_row_major_stripped(TRACE_WIDTH)
+        };
 
-        assert_eq!(stored_w, PADDED_TRACE_WIDTH);
-        self.main_trace.to_row_major_stripped(TRACE_WIDTH)
+        let shared = Arc::new(row_major);
+        let for_transpose = shared.clone();
+        let lock = self.aux_trace_builders.precomputed_main_transpose.clone();
+        rayon::spawn(move || {
+            let transposed = Arc::new(for_transpose.transpose());
+            let _ = lock.set(transposed);
+        });
+
+        shared
     }
 
     // HELPER METHODS
@@ -402,6 +413,9 @@ pub struct AuxTraceBuilders {
     pub(crate) chiplets: chiplets::AuxTraceBuilder,
     /// Index of the last row that was executed (not a padding row).
     pub(crate) last_program_row: RowIndex,
+    /// Filled by [`ExecutionTrace::to_row_major_matrix`] with `main.transpose()` for reuse in
+    /// [`AuxBuilder::build_aux_trace`].
+    pub(crate) precomputed_main_transpose: Arc<OnceCell<Arc<RowMajorMatrix<Felt>>>>,
 }
 
 impl AuxTraceBuilders {
@@ -458,7 +472,9 @@ impl<EF: ExtensionField<Felt>> AuxBuilder<Felt, EF> for AuxTraceBuilders {
     ) -> (RowMajorMatrix<EF>, Vec<EF>) {
         let _span = tracing::info_span!("build_aux_trace").entered();
 
-        let main_for_aux = {
+        let main_for_aux = if let Some(t) = self.precomputed_main_transpose.get() {
+            MainTrace::from_transposed_arc(t.clone(), self.last_program_row)
+        } else {
             let transposed = main.transpose();
             MainTrace::from_transposed(transposed, self.last_program_row)
         };
