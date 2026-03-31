@@ -94,9 +94,11 @@ impl<T> BorrowMut<MainTraceRow<T>> for [T] {
 /// `Transposed` (`W×N` row-major of an `N×W` trace) for aux trace construction.
 #[derive(Debug)]
 enum TraceStorage {
+    /// Core and chiplets as row-major matrices; range checker as column vectors (same layout as
+    /// `build_trace` output, moved in without repacking).
     Parts {
-        core_rm: Vec<Felt>,
-        chiplets_rm: Vec<Felt>,
+        core_rm: RowMajorMatrix<Felt>,
+        chiplets_rm: RowMajorMatrix<Felt>,
         range_checker_cols: [Vec<Felt>; 2],
         num_rows: usize,
     },
@@ -130,19 +132,25 @@ impl MainTrace {
         }
     }
 
-    /// Builds from `build_trace` outputs: core and chiplets row-major, range checker column
-    /// vectors.
+    /// Builds from `build_trace` outputs: core row-major buffer, chiplets as a
+    /// [`RowMajorMatrix`], and range checker column vectors.
     pub fn from_parts(
         core_rm: Vec<Felt>,
-        chiplets_rm: Vec<Felt>,
+        chiplets_rm: RowMajorMatrix<Felt>,
         range_checker_cols: [Vec<Felt>; 2],
         num_rows: usize,
         last_program_row: RowIndex,
     ) -> Self {
         assert_eq!(core_rm.len(), num_rows * CORE_WIDTH);
-        assert_eq!(chiplets_rm.len(), num_rows * CHIPLETS_WIDTH);
+        assert_eq!(
+            chiplets_rm.width(),
+            CHIPLETS_WIDTH,
+            "chiplet trace width matches CHIPLETS_WIDTH"
+        );
+        assert_eq!(chiplets_rm.height(), num_rows, "chiplet trace height matches num_rows");
         assert_eq!(range_checker_cols[0].len(), num_rows);
         assert_eq!(range_checker_cols[1].len(), num_rows);
+        let core_rm = RowMajorMatrix::new(core_rm, CORE_WIDTH);
         Self {
             storage: TraceStorage::Parts {
                 core_rm,
@@ -182,13 +190,14 @@ impl MainTrace {
                 assert!(col < PADDED_TRACE_WIDTH, "main trace column index in bounds");
 
                 if col < CORE_WIDTH {
-                    core_rm[r * CORE_WIDTH + col]
+                    core_rm.row_slice(r).expect("main trace row index in bounds")[col]
                 } else {
                     let nc = col - CORE_WIDTH;
                     if nc < RANGE_CHECK_TRACE_WIDTH {
                         range_checker_cols[nc][r]
                     } else if nc < RANGE_CHECK_TRACE_WIDTH + CHIPLETS_WIDTH {
-                        chiplets_rm[r * CHIPLETS_WIDTH + (nc - RANGE_CHECK_TRACE_WIDTH)]
+                        let cc = nc - RANGE_CHECK_TRACE_WIDTH;
+                        chiplets_rm.row_slice(r).expect("main trace row index in bounds")[cc]
                     } else {
                         ZERO
                     }
@@ -248,12 +257,14 @@ impl MainTrace {
                     for i in 0..chunk_rows {
                         let row = start_row + i;
                         let dst = &mut chunk[i * w..(i + 1) * w];
-                        dst[..CORE_WIDTH]
-                            .copy_from_slice(&core_rm[row * CORE_WIDTH..(row + 1) * CORE_WIDTH]);
+                        dst[..CORE_WIDTH].copy_from_slice(
+                            &core_rm.row_slice(row).expect("main trace row index in bounds"),
+                        );
                         dst[CORE_WIDTH] = range_checker_cols[0][row];
                         dst[CORE_WIDTH + 1] = range_checker_cols[1][row];
-                        dst[CORE_WIDTH + 2..CORE_WIDTH + 2 + cw]
-                            .copy_from_slice(&chiplets_rm[row * cw..(row + 1) * cw]);
+                        dst[CORE_WIDTH + 2..CORE_WIDTH + 2 + cw].copy_from_slice(
+                            &chiplets_rm.row_slice(row).expect("main trace row index in bounds"),
+                        );
                         for p in 0..num_pad {
                             dst[CORE_WIDTH + 2 + cw + p] = ZERO;
                         }
@@ -366,22 +377,28 @@ impl MainTrace {
                     let chunk_rows = chunk.len() / target_width;
                     for i in 0..chunk_rows {
                         let row = start_row + i;
+                        let core_row =
+                            core_rm.row_slice(row).expect("main trace row index in bounds");
+                        let chip_row =
+                            chiplets_rm.row_slice(row).expect("main trace row index in bounds");
                         let dst = &mut chunk[i * target_width..(i + 1) * target_width];
-                        dst[..CORE_WIDTH]
-                            .copy_from_slice(&core_rm[row * CORE_WIDTH..(row + 1) * CORE_WIDTH]);
+                        dst[..CORE_WIDTH].copy_from_slice(&core_row);
                         let nc_dst = &mut dst[CORE_WIDTH..];
                         let mut nc_pos = 0;
-                        for col in &range_checker_cols[..RANGE_CHECK_TRACE_WIDTH.min(nc_needed)] {
-                            nc_dst[nc_pos] = col[row];
-                            nc_pos += 1;
+                        if nc_needed > 0 {
+                            let range_cols = RANGE_CHECK_TRACE_WIDTH.min(nc_needed);
+                            for c in 0..range_cols {
+                                nc_dst[c] = range_checker_cols[c][row];
+                            }
+                            nc_pos = range_cols;
                         }
                         if nc_pos < nc_needed {
                             let chip_cols = (nc_needed - nc_pos).min(cw);
                             nc_dst[nc_pos..nc_pos + chip_cols]
-                                .copy_from_slice(&chiplets_rm[row * cw..row * cw + chip_cols]);
+                                .copy_from_slice(&chip_row.as_ref()[..chip_cols]);
                             nc_pos += chip_cols;
                         }
-                        for dst in &mut dst[nc_pos..nc_needed] {
+                        for dst in &mut nc_dst[nc_pos..nc_needed] {
                             *dst = ZERO;
                         }
                     }
@@ -428,14 +445,19 @@ impl MainTrace {
                 row[..w].copy_from_slice(&slice);
             },
             TraceStorage::Parts {
-                core_rm, chiplets_rm, range_checker_cols, ..
+                core_rm,
+                chiplets_rm,
+                range_checker_cols,
+                num_rows,
             } => {
-                row[..CORE_WIDTH]
-                    .copy_from_slice(&core_rm[row_idx * CORE_WIDTH..(row_idx + 1) * CORE_WIDTH]);
+                assert!(row_idx < *num_rows, "row index in bounds");
+                row[..CORE_WIDTH].copy_from_slice(
+                    &core_rm.row_slice(row_idx).expect("main trace row index in bounds"),
+                );
                 row[CORE_WIDTH] = range_checker_cols[0][row_idx];
                 row[CORE_WIDTH + 1] = range_checker_cols[1][row_idx];
                 row[CORE_WIDTH + 2..CORE_WIDTH + 2 + CHIPLETS_WIDTH].copy_from_slice(
-                    &chiplets_rm[row_idx * CHIPLETS_WIDTH..(row_idx + 1) * CHIPLETS_WIDTH],
+                    &chiplets_rm.row_slice(row_idx).expect("main trace row index in bounds"),
                 );
                 for dst in &mut row[CORE_WIDTH + 2 + CHIPLETS_WIDTH..w] {
                     *dst = ZERO;
@@ -454,17 +476,29 @@ impl MainTrace {
         let h = self.num_rows();
         match &self.storage {
             TraceStorage::Parts {
-                core_rm, chiplets_rm, range_checker_cols, ..
+                core_rm,
+                chiplets_rm,
+                range_checker_cols,
+                num_rows,
             } => {
                 if col_idx < CORE_WIDTH {
-                    (0..h).map(|r| core_rm[r * CORE_WIDTH + col_idx]).collect()
+                    (0..*num_rows)
+                        .map(|r| {
+                            core_rm.row_slice(r).expect("main trace row index in bounds")[col_idx]
+                        })
+                        .collect()
                 } else {
                     let nc = col_idx - CORE_WIDTH;
-                    if nc < 2 {
-                        range_checker_cols[nc].clone()
-                    } else if nc < 2 + CHIPLETS_WIDTH {
-                        let cc = nc - 2;
-                        (0..h).map(|r| chiplets_rm[r * CHIPLETS_WIDTH + cc]).collect()
+                    if nc < RANGE_CHECK_TRACE_WIDTH {
+                        (0..*num_rows).map(|r| range_checker_cols[nc][r]).collect()
+                    } else if nc < RANGE_CHECK_TRACE_WIDTH + CHIPLETS_WIDTH {
+                        let cc = nc - RANGE_CHECK_TRACE_WIDTH;
+                        (0..*num_rows)
+                            .map(|r| {
+                                chiplets_rm.row_slice(r).expect("main trace row index in bounds")
+                                    [cc]
+                            })
+                            .collect()
                     } else {
                         vec![ZERO; h]
                     }
@@ -1034,5 +1068,46 @@ impl MainTrace {
             && self.chiplet_selector_1(i) == ONE
             && self.chiplet_selector_2(i) == ONE
             && self.chiplet_selector_3(i) == ONE
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use miden_core::Felt;
+
+    use super::*;
+
+    #[test]
+    fn parts_debug_preserves_layout() {
+        let num_rows = 2;
+        let core_rm = (0..num_rows * CORE_WIDTH)
+            .map(|v| Felt::new(u64::try_from(v).unwrap()))
+            .collect::<Vec<_>>();
+        let chiplets_flat = (0..num_rows * CHIPLETS_WIDTH)
+            .map(|v| Felt::new(u64::try_from(v + 100).unwrap()))
+            .collect::<Vec<_>>();
+        let chiplets_rm = RowMajorMatrix::new(chiplets_flat.clone(), CHIPLETS_WIDTH);
+        let range_checker_cols = [
+            (0..num_rows)
+                .map(|v| Felt::new(u64::try_from(v + 200).unwrap()))
+                .collect::<Vec<_>>(),
+            (0..num_rows)
+                .map(|v| Felt::new(u64::try_from(v + 300).unwrap()))
+                .collect::<Vec<_>>(),
+        ];
+        let expected_parts = format!(
+            "Parts {{ core_rm: {:?}, chiplets_rm: {:?}, range_checker_cols: {:?}, num_rows: {num_rows} }}",
+            core_rm, chiplets_flat, range_checker_cols
+        );
+        let trace = MainTrace::from_parts(
+            core_rm.clone(),
+            chiplets_rm,
+            [range_checker_cols[0].clone(), range_checker_cols[1].clone()],
+            num_rows,
+            RowIndex::from(0),
+        );
+        let expected =
+            format!("MainTrace {{ storage: {expected_parts}, last_program_row: RowIndex(0) }}");
+        assert_eq!(format!("{:?}", trace), expected);
     }
 }

@@ -29,6 +29,7 @@ use crate::{
     errors::MapExecErrNoCtx,
     trace::{
         AuxTraceBuilders, ChipletsLengths, ExecutionTrace, TraceBuildInputs, TraceLenSummary,
+        chiplets::ChipletsTrace,
         parallel::{processor::ReplayProcessor, tracer::CoreTraceGenerationTracer},
         range::RangeChecker,
         utils::RowMajorTraceWriter,
@@ -188,12 +189,17 @@ pub fn build_trace_with_max_len(
         || pad_core_row_major(&mut core_trace_data, main_trace_len),
     );
 
+    let ChipletsTrace {
+        trace: chiplets_mat,
+        aux_builder: chiplets_aux_builder,
+    } = chiplets_trace;
+
     // Create the MainTrace
     let main_trace = {
         let last_program_row = RowIndex::from((core_trace_len as u32).saturating_sub(1));
         MainTrace::from_parts(
             core_trace_data,
-            chiplets_trace.trace,
+            chiplets_mat,
             range_checker_trace.trace,
             main_trace_len,
             last_program_row,
@@ -204,7 +210,7 @@ pub fn build_trace_with_max_len(
     let aux_trace_builders = AuxTraceBuilders {
         decoder: DecoderAuxTraceBuilder::default(),
         range: range_checker_trace.aux_builder,
-        chiplets: chiplets_trace.aux_builder,
+        chiplets: chiplets_aux_builder,
         stack: StackAuxTraceBuilder,
     };
 
