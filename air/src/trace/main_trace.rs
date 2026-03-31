@@ -1,19 +1,22 @@
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use core::{
     borrow::{Borrow, BorrowMut},
-    ops::{Deref, Range},
+    fmt,
+    mem::ManuallyDrop,
+    ops::Range,
+    ptr,
 };
 
 use miden_core::{
     Felt, ONE, WORD_SIZE, Word, ZERO,
     field::PrimeCharacteristicRing,
-    utils::{ColMatrix, RowMajorMatrix, range},
+    utils::{Matrix, RowMajorMatrix, range},
 };
 
 use super::{
     CHIPLETS_OFFSET, CHIPLETS_WIDTH, CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET,
-    DECODER_TRACE_WIDTH, FN_HASH_OFFSET, RANGE_CHECK_TRACE_WIDTH, RowIndex, STACK_TRACE_OFFSET,
-    STACK_TRACE_WIDTH,
+    DECODER_TRACE_WIDTH, FN_HASH_OFFSET, PADDED_TRACE_WIDTH, RANGE_CHECK_TRACE_OFFSET,
+    RANGE_CHECK_TRACE_WIDTH, RowIndex, STACK_TRACE_OFFSET, STACK_TRACE_WIDTH,
     chiplets::{
         BITWISE_A_COL_IDX, BITWISE_B_COL_IDX, BITWISE_OUTPUT_COL_IDX, HASHER_NODE_INDEX_COL_IDX,
         HASHER_STATE_COL_RANGE, MEMORY_CLK_COL_IDX, MEMORY_CTX_COL_IDX, MEMORY_IDX0_COL_IDX,
@@ -90,49 +93,515 @@ impl<T> BorrowMut<MainTraceRow<T>> for [T] {
 // MAIN TRACE MATRIX
 // ================================================================================================
 
+struct PartsTraceRow {
+    core: [Felt; CORE_WIDTH],
+    range_checker: [Felt; RANGE_CHECK_TRACE_WIDTH],
+    chiplets: [Felt; CHIPLETS_WIDTH],
+}
+
+struct PartsTraceStorage {
+    rows: Vec<PartsTraceRow>,
+}
+
+struct PartsCoreRmDebug<'a>(&'a [PartsTraceRow]);
+
+struct PartsChipletsRmDebug<'a>(&'a [PartsTraceRow]);
+
+struct PartsRangeCheckerColDebug<'a> {
+    rows: &'a [PartsTraceRow],
+    idx: usize,
+}
+
+struct PartsRangeCheckerColsDebug<'a>(&'a [PartsTraceRow]);
+
+impl PartsTraceStorage {
+    fn new(
+        core_rm: Vec<Felt>,
+        chiplets_rm: Vec<Felt>,
+        range_checker_cols: [Vec<Felt>; 2],
+        num_rows: usize,
+    ) -> Self {
+        let core_rows = into_row_arrays::<CORE_WIDTH>(core_rm, num_rows, "core trace");
+        let chiplet_rows =
+            into_row_arrays::<CHIPLETS_WIDTH>(chiplets_rm, num_rows, "chiplet trace");
+        let [range_checker_0, range_checker_1] = range_checker_cols;
+
+        assert_eq!(
+            range_checker_0.len(),
+            num_rows,
+            "range checker trace row count matches metadata"
+        );
+        assert_eq!(
+            range_checker_1.len(),
+            num_rows,
+            "range checker trace row count matches metadata"
+        );
+
+        let range_checker_rows =
+            range_checker_0.into_iter().zip(range_checker_1).map(|(lo, hi)| [lo, hi]);
+
+        let rows = core_rows
+            .into_iter()
+            .zip(range_checker_rows)
+            .zip(chiplet_rows)
+            .map(|((core, range_checker), chiplets)| PartsTraceRow {
+                core,
+                range_checker,
+                chiplets,
+            })
+            .collect();
+
+        Self { rows }
+    }
+
+    #[inline]
+    fn get(&self, row: usize, col: usize) -> Felt {
+        assert!(row < self.rows.len(), "main trace row index in bounds");
+        assert!(col < PADDED_TRACE_WIDTH, "main trace column index in bounds");
+
+        let row_values = &self.rows[row];
+        if col < CORE_WIDTH {
+            row_values.core[col]
+        } else {
+            let nc = col - CORE_WIDTH;
+            if nc < RANGE_CHECK_TRACE_WIDTH {
+                row_values.range_checker[nc]
+            } else if nc < RANGE_CHECK_TRACE_WIDTH + CHIPLETS_WIDTH {
+                row_values.chiplets[nc - RANGE_CHECK_TRACE_WIDTH]
+            } else {
+                ZERO
+            }
+        }
+    }
+
+    #[inline]
+    fn num_rows(&self) -> usize {
+        self.rows.len()
+    }
+}
+
+impl fmt::Debug for PartsCoreRmDebug<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list().entries(self.0.iter().flat_map(|row| row.core)).finish()
+    }
+}
+
+impl fmt::Debug for PartsChipletsRmDebug<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list().entries(self.0.iter().flat_map(|row| row.chiplets)).finish()
+    }
+}
+
+impl fmt::Debug for PartsRangeCheckerColDebug<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_list()
+            .entries(self.rows.iter().map(|row| row.range_checker[self.idx]))
+            .finish()
+    }
+}
+
+impl fmt::Debug for PartsRangeCheckerColsDebug<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut list = f.debug_list();
+        for idx in 0..RANGE_CHECK_TRACE_WIDTH {
+            list.entry(&PartsRangeCheckerColDebug { rows: self.0, idx });
+        }
+        list.finish()
+    }
+}
+
+/// Storage backing [`MainTrace`]: `Parts` from `build_trace`, `RowMajor` from the prover, or
+/// `Transposed` (`W×N` row-major of an `N×W` trace) for aux trace construction.
+enum TraceStorage {
+    Parts(PartsTraceStorage),
+    RowMajor(RowMajorMatrix<Felt>),
+    Transposed {
+        matrix: RowMajorMatrix<Felt>,
+        num_cols: usize,
+        num_rows: usize,
+    },
+}
+
+impl fmt::Debug for TraceStorage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Parts(parts) => f
+                .debug_struct("Parts")
+                .field("core_rm", &PartsCoreRmDebug(&parts.rows))
+                .field("chiplets_rm", &PartsChipletsRmDebug(&parts.rows))
+                .field("range_checker_cols", &PartsRangeCheckerColsDebug(&parts.rows))
+                .field("num_rows", &parts.num_rows())
+                .finish(),
+            Self::RowMajor(matrix) => f.debug_tuple("RowMajor").field(matrix).finish(),
+            Self::Transposed { matrix, num_cols, num_rows } => f
+                .debug_struct("Transposed")
+                .field("matrix", matrix)
+                .field("num_cols", num_cols)
+                .field("num_rows", num_rows)
+                .finish(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct MainTrace {
-    columns: ColMatrix<Felt>,
+    storage: TraceStorage,
     last_program_row: RowIndex,
 }
 
-impl Deref for MainTrace {
-    type Target = ColMatrix<Felt>;
+/// Number of columns in the core (row-major) part of [`TraceStorage::Parts`].
+const CORE_WIDTH: usize = RANGE_CHECK_TRACE_OFFSET;
 
-    fn deref(&self) -> &Self::Target {
-        &self.columns
-    }
+fn into_row_arrays<const WIDTH: usize>(
+    values: Vec<Felt>,
+    num_rows: usize,
+    label: &'static str,
+) -> Vec<[Felt; WIDTH]> {
+    assert_eq!(values.len(), num_rows * WIDTH, "{label} row count matches metadata");
+
+    let mut values = ManuallyDrop::new(values.into_boxed_slice());
+    let rows_ptr =
+        ptr::slice_from_raw_parts_mut(values.as_mut_ptr().cast::<[Felt; WIDTH]>(), num_rows);
+
+    // SAFETY: `[Felt; WIDTH]` has the same layout as `WIDTH` consecutive `Felt`s, and the boxed
+    // slice above has exactly `num_rows * WIDTH` elements.
+    unsafe { Box::from_raw(rows_ptr).into_vec() }
 }
 
+// TODO: Could be tailored more efficiently?
+#[cfg(feature = "concurrent")]
+const ROW_MAJOR_CHUNK_SIZE: usize = 512;
+
 impl MainTrace {
-    pub fn new(main_trace: ColMatrix<Felt>, last_program_row: RowIndex) -> Self {
-        Self { columns: main_trace, last_program_row }
+    /// Creates a `MainTrace` from a [`RowMajorMatrix`].
+    pub fn new(matrix: RowMajorMatrix<Felt>, last_program_row: RowIndex) -> Self {
+        Self {
+            storage: TraceStorage::RowMajor(matrix),
+            last_program_row,
+        }
     }
 
-    /// Converts this column-major `MainTrace` into a row-major matrix.
-    pub fn to_row_major(&self) -> RowMajorMatrix<Felt> {
-        let num_rows = self.columns.num_rows();
-        let mut col_major_data = Vec::with_capacity(num_rows * self.columns.num_cols());
-        for col in self.columns.columns() {
-            col_major_data.extend_from_slice(col);
+    /// Builds from `build_trace` outputs: core and chiplets row-major, range checker column
+    /// vectors.
+    pub fn from_parts(
+        core_rm: Vec<Felt>,
+        chiplets_rm: Vec<Felt>,
+        range_checker_cols: [Vec<Felt>; 2],
+        num_rows: usize,
+        last_program_row: RowIndex,
+    ) -> Self {
+        Self {
+            storage: TraceStorage::Parts(PartsTraceStorage::new(
+                core_rm,
+                chiplets_rm,
+                range_checker_cols,
+                num_rows,
+            )),
+            last_program_row,
         }
-        // Treat the flat column-major data as a "row-major" matrix with width = num_rows
-        // (i.e. each "row" is one original column), then transpose to get true row-major.
-        RowMajorMatrix::new(col_major_data, num_rows).transpose()
+    }
+
+    /// `transposed` is `main.transpose()` where `main` was `num_rows × num_cols`.
+    pub fn from_transposed(transposed: RowMajorMatrix<Felt>, last_program_row: RowIndex) -> Self {
+        let num_cols = transposed.height();
+        let num_rows = transposed.width();
+        Self {
+            storage: TraceStorage::Transposed { matrix: transposed, num_cols, num_rows },
+            last_program_row,
+        }
+    }
+
+    /// Get matrix element at `(row, col)`.
+    ///
+    /// # Panics
+    /// Panics if the row or column is out of bounds.
+    #[inline]
+    pub fn get(&self, row: RowIndex, col: usize) -> Felt {
+        let r = row.as_usize();
+        match &self.storage {
+            TraceStorage::Parts(parts) => parts.get(r, col),
+            TraceStorage::RowMajor(matrix) => {
+                let row_slice = matrix.row_slice(r).expect("main trace row index in bounds");
+                assert!(col < row_slice.len(), "main trace column index in bounds");
+                row_slice[col]
+            },
+            TraceStorage::Transposed { matrix, num_cols, .. } => {
+                let col_slice = matrix.row_slice(col).expect("main trace column index in bounds");
+                assert!(r < col_slice.len(), "main trace row index in bounds");
+                debug_assert_eq!(col_slice.len(), matrix.width());
+                debug_assert_eq!(matrix.height(), *num_cols);
+                col_slice[r]
+            },
+        }
+    }
+
+    /// Returns the stored width (number of columns).
+    #[inline]
+    pub fn width(&self) -> usize {
+        match &self.storage {
+            TraceStorage::Parts(_) => PADDED_TRACE_WIDTH,
+            TraceStorage::RowMajor(matrix) => matrix.width(),
+            TraceStorage::Transposed { num_cols, .. } => *num_cols,
+        }
+    }
+
+    /// Row-major matrix of this trace.
+    pub fn to_row_major(&self) -> RowMajorMatrix<Felt> {
+        match &self.storage {
+            TraceStorage::RowMajor(matrix) => matrix.clone(),
+            TraceStorage::Transposed { matrix, .. } => matrix.transpose(),
+            TraceStorage::Parts(parts) => {
+                let h = parts.num_rows();
+                let w = PADDED_TRACE_WIDTH;
+                let cw = CHIPLETS_WIDTH;
+                let num_pad = PADDED_TRACE_WIDTH - CORE_WIDTH - 2 - cw;
+
+                let total = h * w;
+                let mut data = Vec::with_capacity(total);
+                // SAFETY: the loop below writes exactly `h * w` elements.
+                #[allow(clippy::uninit_vec)]
+                unsafe {
+                    data.set_len(total);
+                }
+
+                let fill_rows = |chunk: &mut [Felt], start_row: usize| {
+                    let chunk_rows = chunk.len() / w;
+                    for i in 0..chunk_rows {
+                        let row = start_row + i;
+                        let dst = &mut chunk[i * w..(i + 1) * w];
+                        let row_values = &parts.rows[row];
+                        dst[..CORE_WIDTH].copy_from_slice(&row_values.core);
+                        dst[CORE_WIDTH..CORE_WIDTH + RANGE_CHECK_TRACE_WIDTH]
+                            .copy_from_slice(&row_values.range_checker);
+                        dst[CORE_WIDTH + 2..CORE_WIDTH + 2 + cw]
+                            .copy_from_slice(&row_values.chiplets);
+                        for p in 0..num_pad {
+                            dst[CORE_WIDTH + 2 + cw + p] = ZERO;
+                        }
+                    }
+                };
+
+                #[cfg(not(feature = "concurrent"))]
+                fill_rows(&mut data, 0);
+
+                #[cfg(feature = "concurrent")]
+                {
+                    use miden_crypto::parallel::*;
+                    let rows_per_chunk = ROW_MAJOR_CHUNK_SIZE;
+                    data.par_chunks_mut(rows_per_chunk * w).enumerate().for_each(
+                        |(chunk_idx, chunk)| {
+                            fill_rows(chunk, chunk_idx * rows_per_chunk);
+                        },
+                    );
+                }
+
+                RowMajorMatrix::new(data, w)
+            },
+        }
+    }
+
+    /// Like [`to_row_major`](Self::to_row_major) but only the first `target_width` columns.
+    pub fn to_row_major_stripped(&self, target_width: usize) -> RowMajorMatrix<Felt> {
+        match &self.storage {
+            TraceStorage::RowMajor(matrix) => {
+                let h = matrix.height();
+                let w = matrix.width();
+                debug_assert!(target_width <= w);
+                if target_width == w {
+                    return matrix.clone();
+                }
+                let total = h * target_width;
+                let mut data = Vec::with_capacity(total);
+                // SAFETY: the loop below writes exactly `h * target_width` elements.
+                #[allow(clippy::uninit_vec)]
+                unsafe {
+                    data.set_len(total);
+                }
+
+                #[cfg(not(feature = "concurrent"))]
+                for row in 0..h {
+                    let src = matrix.row_slice(row).expect("row index in bounds");
+                    data[row * target_width..(row + 1) * target_width]
+                        .copy_from_slice(&src[..target_width]);
+                }
+
+                #[cfg(feature = "concurrent")]
+                {
+                    use miden_crypto::parallel::*;
+                    let rows_per_chunk = ROW_MAJOR_CHUNK_SIZE;
+                    data.par_chunks_mut(rows_per_chunk * target_width).enumerate().for_each(
+                        |(chunk_idx, chunk)| {
+                            let chunk_rows = chunk.len() / target_width;
+                            for i in 0..chunk_rows {
+                                let row = chunk_idx * rows_per_chunk + i;
+                                let src = matrix.row_slice(row).expect("row index in bounds");
+                                chunk[i * target_width..(i + 1) * target_width]
+                                    .copy_from_slice(&src[..target_width]);
+                            }
+                        },
+                    );
+                }
+
+                RowMajorMatrix::new(data, target_width)
+            },
+            TraceStorage::Transposed { .. } => {
+                let full = self.to_row_major();
+                if target_width == full.width() {
+                    return full;
+                }
+                let h = full.height();
+                let total = h * target_width;
+                let mut data = Vec::with_capacity(total);
+                // SAFETY: the loop below writes exactly `h * target_width` elements.
+                #[allow(clippy::uninit_vec)]
+                unsafe {
+                    data.set_len(total);
+                }
+                for row in 0..h {
+                    let src = full.row_slice(row).expect("row index in bounds");
+                    data[row * target_width..(row + 1) * target_width]
+                        .copy_from_slice(&src[..target_width]);
+                }
+                RowMajorMatrix::new(data, target_width)
+            },
+            TraceStorage::Parts(parts) => {
+                let h = parts.num_rows();
+                let cw = CHIPLETS_WIDTH;
+                debug_assert!(target_width >= CORE_WIDTH);
+                let nc_needed = target_width - CORE_WIDTH;
+
+                let total = h * target_width;
+                let mut data = Vec::with_capacity(total);
+                // SAFETY: the loop below writes exactly `h * target_width` elements.
+                #[allow(clippy::uninit_vec)]
+                unsafe {
+                    data.set_len(total);
+                }
+
+                let fill_rows = |chunk: &mut [Felt], start_row: usize| {
+                    let chunk_rows = chunk.len() / target_width;
+                    for i in 0..chunk_rows {
+                        let row = start_row + i;
+                        let row_values = &parts.rows[row];
+                        let dst = &mut chunk[i * target_width..(i + 1) * target_width];
+                        dst[..CORE_WIDTH].copy_from_slice(&row_values.core);
+                        let nc_dst = &mut dst[CORE_WIDTH..];
+                        let mut nc_pos = 0;
+                        if nc_needed > 0 {
+                            let range_cols = RANGE_CHECK_TRACE_WIDTH.min(nc_needed);
+                            nc_dst[..range_cols]
+                                .copy_from_slice(&row_values.range_checker[..range_cols]);
+                            nc_pos = range_cols;
+                        }
+                        if nc_pos < nc_needed {
+                            let chip_cols = (nc_needed - nc_pos).min(cw);
+                            nc_dst[nc_pos..nc_pos + chip_cols]
+                                .copy_from_slice(&row_values.chiplets[..chip_cols]);
+                            nc_pos += chip_cols;
+                        }
+                        for dst in &mut dst[nc_pos..nc_needed] {
+                            *dst = ZERO;
+                        }
+                    }
+                };
+
+                #[cfg(not(feature = "concurrent"))]
+                fill_rows(&mut data, 0);
+
+                #[cfg(feature = "concurrent")]
+                {
+                    use miden_crypto::parallel::*;
+                    let rows_per_chunk = ROW_MAJOR_CHUNK_SIZE;
+                    data.par_chunks_mut(rows_per_chunk * target_width).enumerate().for_each(
+                        |(chunk_idx, chunk)| {
+                            fill_rows(chunk, chunk_idx * rows_per_chunk);
+                        },
+                    );
+                }
+
+                RowMajorMatrix::new(data, target_width)
+            },
+        }
     }
 
     pub fn num_rows(&self) -> usize {
-        self.columns.num_rows()
+        match &self.storage {
+            TraceStorage::Parts(parts) => parts.num_rows(),
+            TraceStorage::RowMajor(matrix) => matrix.height(),
+            TraceStorage::Transposed { num_rows, .. } => *num_rows,
+        }
     }
 
     pub fn last_program_row(&self) -> RowIndex {
         self.last_program_row
     }
 
+    /// Copies one logical row into `row` (must be at least as long as the stored width).
+    pub fn read_row_into(&self, row_idx: usize, row: &mut [Felt]) {
+        let w = self.width();
+        assert!(row.len() >= w, "row buffer too small for main trace");
+        match &self.storage {
+            TraceStorage::RowMajor(matrix) => {
+                let slice = matrix.row_slice(row_idx).expect("row index in bounds");
+                row[..w].copy_from_slice(&slice);
+            },
+            TraceStorage::Parts(parts) => {
+                let row_values = &parts.rows[row_idx];
+                row[..CORE_WIDTH].copy_from_slice(&row_values.core);
+                row[CORE_WIDTH..CORE_WIDTH + RANGE_CHECK_TRACE_WIDTH]
+                    .copy_from_slice(&row_values.range_checker);
+                row[CORE_WIDTH + 2..CORE_WIDTH + 2 + CHIPLETS_WIDTH]
+                    .copy_from_slice(&row_values.chiplets);
+                for dst in &mut row[CORE_WIDTH + 2 + CHIPLETS_WIDTH..w] {
+                    *dst = ZERO;
+                }
+            },
+            TraceStorage::Transposed { matrix, num_cols, .. } => {
+                for (col_idx, cell) in row[..*num_cols].iter_mut().enumerate() {
+                    *cell = unsafe { matrix.get_unchecked(col_idx, row_idx) };
+                }
+            },
+        }
+    }
+
+    /// Returns one column as a new vector.
+    pub fn get_column(&self, col_idx: usize) -> Vec<Felt> {
+        let h = self.num_rows();
+        match &self.storage {
+            TraceStorage::Parts(parts) => {
+                if col_idx < CORE_WIDTH {
+                    parts.rows.iter().map(|row| row.core[col_idx]).collect()
+                } else {
+                    let nc = col_idx - CORE_WIDTH;
+                    if nc < RANGE_CHECK_TRACE_WIDTH {
+                        parts.rows.iter().map(|row| row.range_checker[nc]).collect()
+                    } else if nc < RANGE_CHECK_TRACE_WIDTH + CHIPLETS_WIDTH {
+                        let cc = nc - RANGE_CHECK_TRACE_WIDTH;
+                        parts.rows.iter().map(|row| row.chiplets[cc]).collect()
+                    } else {
+                        vec![ZERO; h]
+                    }
+                }
+            },
+            TraceStorage::RowMajor(_) => {
+                (0..h).map(|r| self.get(RowIndex::from(r), col_idx)).collect()
+            },
+            TraceStorage::Transposed { matrix, .. } => {
+                let row_slice = matrix.row_slice(col_idx).expect("column index in bounds");
+                row_slice[..h].to_vec()
+            },
+        }
+    }
+
+    /// Iterates over all columns (materialises each one).
+    pub fn columns(&self) -> impl Iterator<Item = Vec<Felt>> + '_ {
+        (0..self.width()).map(|c| self.get_column(c))
+    }
+
     #[cfg(any(test, feature = "testing"))]
     pub fn get_column_range(&self, range: Range<usize>) -> Vec<Vec<Felt>> {
         range.fold(vec![], |mut acc, col_idx| {
-            acc.push(self.get_column(col_idx).to_vec());
+            acc.push(self.get_column(col_idx));
             acc
         })
     }
@@ -142,12 +611,12 @@ impl MainTrace {
 
     /// Returns the value of the clk column at row i.
     pub fn clk(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(CLK_COL_IDX)[i]
+        self.get(i, CLK_COL_IDX)
     }
 
     /// Returns the value of the ctx column at row i.
     pub fn ctx(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(CTX_COL_IDX)[i]
+        self.get(i, CTX_COL_IDX)
     }
 
     // DECODER COLUMNS
@@ -155,7 +624,7 @@ impl MainTrace {
 
     /// Returns the value in the block address column at the row i.
     pub fn addr(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(DECODER_TRACE_OFFSET)[i]
+        self.get(i, DECODER_TRACE_OFFSET)
     }
 
     /// Helper method to detect change of address.
@@ -165,15 +634,14 @@ impl MainTrace {
 
     /// The i-th decoder helper register at `row`.
     pub fn helper_register(&self, i: usize, row: RowIndex) -> Felt {
-        self.columns.get_column(DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + i)[row]
+        self.get(row, DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + i)
     }
 
     /// Returns the hasher state at row i.
     pub fn decoder_hasher_state(&self, i: RowIndex) -> [Felt; NUM_HASHER_COLUMNS] {
         let mut state = [ZERO; NUM_HASHER_COLUMNS];
         for (idx, col_idx) in DECODER_HASHER_RANGE.enumerate() {
-            let column = self.columns.get_column(col_idx);
-            state[idx] = column[i];
+            state[idx] = self.get(i, col_idx);
         }
         state
     }
@@ -182,7 +650,7 @@ impl MainTrace {
     pub fn decoder_hasher_state_first_half(&self, i: RowIndex) -> Word {
         let mut state = [ZERO; DIGEST_LEN];
         for (col, s) in state.iter_mut().enumerate() {
-            *s = self.columns.get_column(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + col)[i];
+            *s = self.get(i, DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + col);
         }
         state.into()
     }
@@ -192,62 +660,59 @@ impl MainTrace {
         const SECOND_WORD_OFFSET: usize = 4;
         let mut state = [ZERO; DIGEST_LEN];
         for (col, s) in state.iter_mut().enumerate() {
-            *s = self
-                .columns
-                .get_column(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + SECOND_WORD_OFFSET + col)
-                [i];
+            *s = self.get(i, DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + SECOND_WORD_OFFSET + col);
         }
         state.into()
     }
 
     /// Returns a specific element from the hasher state at row i.
     pub fn decoder_hasher_state_element(&self, element: usize, i: RowIndex) -> Felt {
-        self.columns.get_column(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + element)[i]
+        self.get(i, DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + element)
     }
 
     /// Returns the current function hash (i.e., root) at row i.
     pub fn fn_hash(&self, i: RowIndex) -> [Felt; DIGEST_LEN] {
         let mut state = [ZERO; DIGEST_LEN];
         for (col, s) in state.iter_mut().enumerate() {
-            *s = self.columns.get_column(FN_HASH_OFFSET + col)[i];
+            *s = self.get(i, FN_HASH_OFFSET + col);
         }
         state
     }
 
     /// Returns the `is_loop_body` flag at row i.
     pub fn is_loop_body_flag(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(DECODER_TRACE_OFFSET + IS_LOOP_BODY_FLAG_COL_IDX)[i]
+        self.get(i, DECODER_TRACE_OFFSET + IS_LOOP_BODY_FLAG_COL_IDX)
     }
 
     /// Returns the `is_loop` flag at row i.
     pub fn is_loop_flag(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(DECODER_TRACE_OFFSET + IS_LOOP_FLAG_COL_IDX)[i]
+        self.get(i, DECODER_TRACE_OFFSET + IS_LOOP_FLAG_COL_IDX)
     }
 
     /// Returns the `is_call` flag at row i.
     pub fn is_call_flag(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(DECODER_TRACE_OFFSET + IS_CALL_FLAG_COL_IDX)[i]
+        self.get(i, DECODER_TRACE_OFFSET + IS_CALL_FLAG_COL_IDX)
     }
 
     /// Returns the `is_syscall` flag at row i.
     pub fn is_syscall_flag(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(DECODER_TRACE_OFFSET + IS_SYSCALL_FLAG_COL_IDX)[i]
+        self.get(i, DECODER_TRACE_OFFSET + IS_SYSCALL_FLAG_COL_IDX)
     }
 
     /// Returns the operation batch flags at row i. This indicates the number of op groups in
     /// the current batch that is being processed.
     pub fn op_batch_flag(&self, i: RowIndex) -> [Felt; NUM_OP_BATCH_FLAGS] {
         [
-            self.columns.get(DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET, i.into()),
-            self.columns.get(DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET + 1, i.into()),
-            self.columns.get(DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET + 2, i.into()),
+            self.get(i, DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET),
+            self.get(i, DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET + 1),
+            self.get(i, DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET + 2),
         ]
     }
 
     /// Returns the operation group count. This indicates the number of operation that remain
     /// to be executed in the current span block.
     pub fn group_count(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(DECODER_TRACE_OFFSET + GROUP_COUNT_COL_IDX)[i]
+        self.get(i, DECODER_TRACE_OFFSET + GROUP_COUNT_COL_IDX)
     }
 
     /// Returns the delta between the current and next group counts.
@@ -257,20 +722,18 @@ impl MainTrace {
 
     /// Returns the `in_span` flag at row i.
     pub fn is_in_span(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(DECODER_TRACE_OFFSET + IN_SPAN_COL_IDX)[i]
+        self.get(i, DECODER_TRACE_OFFSET + IN_SPAN_COL_IDX)
     }
 
     /// Constructs the i-th op code value from its individual bits.
     pub fn get_op_code(&self, i: RowIndex) -> Felt {
-        let col_b0 = self.columns.get_column(DECODER_TRACE_OFFSET + 1);
-        let col_b1 = self.columns.get_column(DECODER_TRACE_OFFSET + 2);
-        let col_b2 = self.columns.get_column(DECODER_TRACE_OFFSET + 3);
-        let col_b3 = self.columns.get_column(DECODER_TRACE_OFFSET + 4);
-        let col_b4 = self.columns.get_column(DECODER_TRACE_OFFSET + 5);
-        let col_b5 = self.columns.get_column(DECODER_TRACE_OFFSET + 6);
-        let col_b6 = self.columns.get_column(DECODER_TRACE_OFFSET + 7);
-        let [b0, b1, b2, b3, b4, b5, b6] =
-            [col_b0[i], col_b1[i], col_b2[i], col_b3[i], col_b4[i], col_b5[i], col_b6[i]];
+        let b0 = self.get(i, DECODER_TRACE_OFFSET + 1);
+        let b1 = self.get(i, DECODER_TRACE_OFFSET + 2);
+        let b2 = self.get(i, DECODER_TRACE_OFFSET + 3);
+        let b3 = self.get(i, DECODER_TRACE_OFFSET + 4);
+        let b4 = self.get(i, DECODER_TRACE_OFFSET + 5);
+        let b5 = self.get(i, DECODER_TRACE_OFFSET + 6);
+        let b6 = self.get(i, DECODER_TRACE_OFFSET + 7);
         b0 + b1 * Felt::from_u64(2)
             + b2 * Felt::from_u64(4)
             + b3 * Felt::from_u64(8)
@@ -287,15 +750,15 @@ impl MainTrace {
     /// Returns a flag indicating whether the current operation induces a left shift of the operand
     /// stack.
     pub fn is_left_shift(&self, i: RowIndex) -> bool {
-        let b0 = self.columns.get(DECODER_TRACE_OFFSET + 1, i.into());
-        let b1 = self.columns.get(DECODER_TRACE_OFFSET + 2, i.into());
-        let b2 = self.columns.get(DECODER_TRACE_OFFSET + 3, i.into());
-        let b3 = self.columns.get(DECODER_TRACE_OFFSET + 4, i.into());
-        let b4 = self.columns.get(DECODER_TRACE_OFFSET + 5, i.into());
-        let b5 = self.columns.get(DECODER_TRACE_OFFSET + 6, i.into());
-        let b6 = self.columns.get(DECODER_TRACE_OFFSET + 7, i.into());
-        let e0 = self.columns.get(DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET, i.into());
-        let h5 = self.columns.get(DECODER_TRACE_OFFSET + IS_LOOP_FLAG_COL_IDX, i.into());
+        let b0 = self.get(i, DECODER_TRACE_OFFSET + 1);
+        let b1 = self.get(i, DECODER_TRACE_OFFSET + 2);
+        let b2 = self.get(i, DECODER_TRACE_OFFSET + 3);
+        let b3 = self.get(i, DECODER_TRACE_OFFSET + 4);
+        let b4 = self.get(i, DECODER_TRACE_OFFSET + 5);
+        let b5 = self.get(i, DECODER_TRACE_OFFSET + 6);
+        let b6 = self.get(i, DECODER_TRACE_OFFSET + 7);
+        let e0 = self.get(i, DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET);
+        let h5 = self.get(i, DECODER_TRACE_OFFSET + IS_LOOP_FLAG_COL_IDX);
 
         // group with left shift effect grouped by a common prefix
         ([b6, b5, b4] == [ZERO, ONE, ZERO])||
@@ -314,13 +777,13 @@ impl MainTrace {
     /// Returns a flag indicating whether the current operation induces a right shift of the operand
     /// stack.
     pub fn is_right_shift(&self, i: RowIndex) -> bool {
-        let b0 = self.columns.get(DECODER_TRACE_OFFSET + 1, i.into());
-        let b1 = self.columns.get(DECODER_TRACE_OFFSET + 2, i.into());
-        let b2 = self.columns.get(DECODER_TRACE_OFFSET + 3, i.into());
-        let b3 = self.columns.get(DECODER_TRACE_OFFSET + 4, i.into());
-        let b4 = self.columns.get(DECODER_TRACE_OFFSET + 5, i.into());
-        let b5 = self.columns.get(DECODER_TRACE_OFFSET + 6, i.into());
-        let b6 = self.columns.get(DECODER_TRACE_OFFSET + 7, i.into());
+        let b0 = self.get(i, DECODER_TRACE_OFFSET + 1);
+        let b1 = self.get(i, DECODER_TRACE_OFFSET + 2);
+        let b2 = self.get(i, DECODER_TRACE_OFFSET + 3);
+        let b3 = self.get(i, DECODER_TRACE_OFFSET + 4);
+        let b4 = self.get(i, DECODER_TRACE_OFFSET + 5);
+        let b5 = self.get(i, DECODER_TRACE_OFFSET + 6);
+        let b6 = self.get(i, DECODER_TRACE_OFFSET + 7);
 
         // group with right shift effect grouped by a common prefix
         [b6, b5, b4] == [ZERO, ONE, ONE]||
@@ -335,12 +798,12 @@ impl MainTrace {
 
     /// Returns the value of the stack depth column at row i.
     pub fn stack_depth(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(STACK_TRACE_OFFSET + B0_COL_IDX)[i]
+        self.get(i, STACK_TRACE_OFFSET + B0_COL_IDX)
     }
 
     /// Returns the element at row i in a given stack trace column.
     pub fn stack_element(&self, column: usize, i: RowIndex) -> Felt {
-        self.columns.get_column(STACK_TRACE_OFFSET + column)[i]
+        self.get(i, STACK_TRACE_OFFSET + column)
     }
 
     /// Returns a word from the stack starting at `start` index at row i, in LE order.
@@ -358,13 +821,13 @@ impl MainTrace {
 
     /// Returns the address of the top element in the stack overflow table at row i.
     pub fn parent_overflow_address(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(STACK_TRACE_OFFSET + B1_COL_IDX)[i]
+        self.get(i, STACK_TRACE_OFFSET + B1_COL_IDX)
     }
 
     /// Returns a flag indicating whether the overflow stack is non-empty.
     pub fn is_non_empty_overflow(&self, i: RowIndex) -> bool {
-        let b0 = self.columns.get_column(STACK_TRACE_OFFSET + B0_COL_IDX)[i];
-        let h0 = self.columns.get_column(STACK_TRACE_OFFSET + H0_COL_IDX)[i];
+        let b0 = self.get(i, STACK_TRACE_OFFSET + B0_COL_IDX);
+        let h0 = self.get(i, STACK_TRACE_OFFSET + H0_COL_IDX);
         (b0 - Felt::from_u64(16)) * h0 == ONE
     }
 
@@ -373,32 +836,32 @@ impl MainTrace {
 
     /// Returns chiplet column number 0 at row i.
     pub fn chiplet_selector_0(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(CHIPLETS_OFFSET)[i]
+        self.get(i, CHIPLETS_OFFSET)
     }
 
     /// Returns chiplet column number 1 at row i.
     pub fn chiplet_selector_1(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(CHIPLETS_OFFSET + 1)[i]
+        self.get(i, CHIPLETS_OFFSET + 1)
     }
 
     /// Returns chiplet column number 2 at row i.
     pub fn chiplet_selector_2(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(CHIPLETS_OFFSET + 2)[i]
+        self.get(i, CHIPLETS_OFFSET + 2)
     }
 
     /// Returns chiplet column number 3 at row i.
     pub fn chiplet_selector_3(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(CHIPLETS_OFFSET + 3)[i]
+        self.get(i, CHIPLETS_OFFSET + 3)
     }
 
     /// Returns chiplet column number 4 at row i.
     pub fn chiplet_selector_4(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(CHIPLETS_OFFSET + 4)[i]
+        self.get(i, CHIPLETS_OFFSET + 4)
     }
 
     /// Returns chiplet column number 5 at row i.
     pub fn chiplet_selector_5(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(CHIPLETS_OFFSET + 5)[i]
+        self.get(i, CHIPLETS_OFFSET + 5)
     }
 
     /// Returns `true` if a row is part of the hash chiplet.
@@ -410,15 +873,14 @@ impl MainTrace {
     pub fn chiplet_hasher_state(&self, i: RowIndex) -> [Felt; STATE_WIDTH] {
         let mut state = [ZERO; STATE_WIDTH];
         for (idx, col_idx) in HASHER_STATE_COL_RANGE.enumerate() {
-            let column = self.columns.get_column(col_idx);
-            state[idx] = column[i];
+            state[idx] = self.get(i, col_idx);
         }
         state
     }
 
     /// Returns the hasher's node index column at row i
     pub fn chiplet_node_index(&self, i: RowIndex) -> Felt {
-        self.columns.get(HASHER_NODE_INDEX_COL_IDX, i.into())
+        self.get(i, HASHER_NODE_INDEX_COL_IDX)
     }
 
     /// Returns `true` if a row is part of the bitwise chiplet.
@@ -428,17 +890,17 @@ impl MainTrace {
 
     /// Returns the bitwise column holding the aggregated value of input `a` at row i.
     pub fn chiplet_bitwise_a(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(BITWISE_A_COL_IDX)[i]
+        self.get(i, BITWISE_A_COL_IDX)
     }
 
     /// Returns the bitwise column holding the aggregated value of input `b` at row i.
     pub fn chiplet_bitwise_b(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(BITWISE_B_COL_IDX)[i]
+        self.get(i, BITWISE_B_COL_IDX)
     }
 
     /// Returns the bitwise column holding the aggregated value of the output at row i.
     pub fn chiplet_bitwise_z(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(BITWISE_OUTPUT_COL_IDX)[i]
+        self.get(i, BITWISE_OUTPUT_COL_IDX)
     }
 
     /// Returns `true` if a row is part of the memory chiplet.
@@ -450,47 +912,47 @@ impl MainTrace {
 
     /// Returns the i-th row of the chiplet column containing memory context.
     pub fn chiplet_memory_ctx(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(MEMORY_CTX_COL_IDX)[i]
+        self.get(i, MEMORY_CTX_COL_IDX)
     }
 
     /// Returns the i-th row of the chiplet column containing memory address.
     pub fn chiplet_memory_word(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(MEMORY_WORD_COL_IDX)[i]
+        self.get(i, MEMORY_WORD_COL_IDX)
     }
 
     /// Returns the i-th row of the chiplet column containing 0th bit of the word index.
     pub fn chiplet_memory_idx0(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(MEMORY_IDX0_COL_IDX)[i]
+        self.get(i, MEMORY_IDX0_COL_IDX)
     }
 
     /// Returns the i-th row of the chiplet column containing 1st bit of the word index.
     pub fn chiplet_memory_idx1(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(MEMORY_IDX1_COL_IDX)[i]
+        self.get(i, MEMORY_IDX1_COL_IDX)
     }
 
     /// Returns the i-th row of the chiplet column containing clock cycle.
     pub fn chiplet_memory_clk(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(MEMORY_CLK_COL_IDX)[i]
+        self.get(i, MEMORY_CLK_COL_IDX)
     }
 
     /// Returns the i-th row of the chiplet column containing the zeroth memory value element.
     pub fn chiplet_memory_value_0(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(MEMORY_V_COL_RANGE.start)[i]
+        self.get(i, MEMORY_V_COL_RANGE.start)
     }
 
     /// Returns the i-th row of the chiplet column containing the first memory value element.
     pub fn chiplet_memory_value_1(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(MEMORY_V_COL_RANGE.start + 1)[i]
+        self.get(i, MEMORY_V_COL_RANGE.start + 1)
     }
 
     /// Returns the i-th row of the chiplet column containing the second memory value element.
     pub fn chiplet_memory_value_2(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(MEMORY_V_COL_RANGE.start + 2)[i]
+        self.get(i, MEMORY_V_COL_RANGE.start + 2)
     }
 
     /// Returns the i-th row of the chiplet column containing the third memory value element.
     pub fn chiplet_memory_value_3(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(MEMORY_V_COL_RANGE.start + 3)[i]
+        self.get(i, MEMORY_V_COL_RANGE.start + 3)
     }
 
     /// Returns `true` if a row is part of the ACE chiplet.
@@ -502,45 +964,43 @@ impl MainTrace {
     }
 
     pub fn chiplet_ace_start_selector(&self, i: RowIndex) -> Felt {
-        self.columns
-            .get_column(CHIPLETS_OFFSET + NUM_ACE_SELECTORS + SELECTOR_START_IDX)[i]
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + SELECTOR_START_IDX)
     }
 
     pub fn chiplet_ace_block_selector(&self, i: RowIndex) -> Felt {
-        self.columns
-            .get_column(CHIPLETS_OFFSET + NUM_ACE_SELECTORS + SELECTOR_BLOCK_IDX)[i]
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + SELECTOR_BLOCK_IDX)
     }
 
     pub fn chiplet_ace_ctx(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(CHIPLETS_OFFSET + NUM_ACE_SELECTORS + CTX_IDX)[i]
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + CTX_IDX)
     }
 
     pub fn chiplet_ace_ptr(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(CHIPLETS_OFFSET + NUM_ACE_SELECTORS + PTR_IDX)[i]
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + PTR_IDX)
     }
 
     pub fn chiplet_ace_clk(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(CHIPLETS_OFFSET + NUM_ACE_SELECTORS + CLK_IDX)[i]
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + CLK_IDX)
     }
 
     pub fn chiplet_ace_eval_op(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(CHIPLETS_OFFSET + NUM_ACE_SELECTORS + EVAL_OP_IDX)[i]
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + EVAL_OP_IDX)
     }
 
     pub fn chiplet_ace_num_eval_rows(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(CHIPLETS_OFFSET + NUM_ACE_SELECTORS + READ_NUM_EVAL_IDX)[i]
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + READ_NUM_EVAL_IDX)
     }
 
     pub fn chiplet_ace_id_0(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(CHIPLETS_OFFSET + NUM_ACE_SELECTORS + ID_0_IDX)[i]
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + ID_0_IDX)
     }
 
     pub fn chiplet_ace_v_0_0(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(CHIPLETS_OFFSET + NUM_ACE_SELECTORS + V_0_0_IDX)[i]
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + V_0_0_IDX)
     }
 
     pub fn chiplet_ace_v_0_1(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(CHIPLETS_OFFSET + NUM_ACE_SELECTORS + V_0_1_IDX)[i]
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + V_0_1_IDX)
     }
 
     pub fn chiplet_ace_wire_0(&self, i: RowIndex) -> [Felt; 3] {
@@ -552,15 +1012,15 @@ impl MainTrace {
     }
 
     pub fn chiplet_ace_id_1(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(CHIPLETS_OFFSET + NUM_ACE_SELECTORS + ID_1_IDX)[i]
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + ID_1_IDX)
     }
 
     pub fn chiplet_ace_v_1_0(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(CHIPLETS_OFFSET + NUM_ACE_SELECTORS + V_1_0_IDX)[i]
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + V_1_0_IDX)
     }
 
     pub fn chiplet_ace_v_1_1(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(CHIPLETS_OFFSET + NUM_ACE_SELECTORS + V_1_1_IDX)[i]
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + V_1_1_IDX)
     }
 
     pub fn chiplet_ace_wire_1(&self, i: RowIndex) -> [Felt; 3] {
@@ -572,15 +1032,15 @@ impl MainTrace {
     }
 
     pub fn chiplet_ace_id_2(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(CHIPLETS_OFFSET + NUM_ACE_SELECTORS + ID_2_IDX)[i]
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + ID_2_IDX)
     }
 
     pub fn chiplet_ace_v_2_0(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(CHIPLETS_OFFSET + NUM_ACE_SELECTORS + V_2_0_IDX)[i]
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + V_2_0_IDX)
     }
 
     pub fn chiplet_ace_v_2_1(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(CHIPLETS_OFFSET + NUM_ACE_SELECTORS + V_2_1_IDX)[i]
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + V_2_1_IDX)
     }
 
     pub fn chiplet_ace_wire_2(&self, i: RowIndex) -> [Felt; 3] {
@@ -592,11 +1052,11 @@ impl MainTrace {
     }
 
     pub fn chiplet_ace_m_1(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(CHIPLETS_OFFSET + NUM_ACE_SELECTORS + M_1_IDX)[i]
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + M_1_IDX)
     }
 
     pub fn chiplet_ace_m_0(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(CHIPLETS_OFFSET + NUM_ACE_SELECTORS + M_0_IDX)[i]
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + M_0_IDX)
     }
 
     pub fn chiplet_ace_is_read_row(&self, i: RowIndex) -> bool {
@@ -619,31 +1079,31 @@ impl MainTrace {
     /// Returns true when the i-th row of the `s_first` column in the kernel chiplet is one, i.e.,
     /// when this is the first row in a range of rows containing the same kernel proc hash.
     pub fn chiplet_kernel_is_first_hash_row(&self, i: RowIndex) -> bool {
-        self.columns.get_column(CHIPLETS_OFFSET + 5)[i] == ONE
+        self.get(i, CHIPLETS_OFFSET + 5) == ONE
     }
 
     /// Returns the i-th row of the chiplet column containing the zeroth element of the kernel
     /// procedure root.
     pub fn chiplet_kernel_root_0(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(CHIPLETS_OFFSET + 6)[i]
+        self.get(i, CHIPLETS_OFFSET + 6)
     }
 
     /// Returns the i-th row of the chiplet column containing the first element of the kernel
     /// procedure root.
     pub fn chiplet_kernel_root_1(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(CHIPLETS_OFFSET + 7)[i]
+        self.get(i, CHIPLETS_OFFSET + 7)
     }
 
     /// Returns the i-th row of the chiplet column containing the second element of the kernel
     /// procedure root.
     pub fn chiplet_kernel_root_2(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(CHIPLETS_OFFSET + 8)[i]
+        self.get(i, CHIPLETS_OFFSET + 8)
     }
 
     /// Returns the i-th row of the chiplet column containing the third element of the kernel
     /// procedure root.
     pub fn chiplet_kernel_root_3(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(CHIPLETS_OFFSET + 9)[i]
+        self.get(i, CHIPLETS_OFFSET + 9)
     }
 
     //  MERKLE PATH HASHING SELECTORS
@@ -687,5 +1147,45 @@ impl MainTrace {
             && self.chiplet_selector_1(i) == ONE
             && self.chiplet_selector_2(i) == ONE
             && self.chiplet_selector_3(i) == ONE
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use miden_core::Felt;
+
+    use super::*;
+
+    #[test]
+    fn parts_debug_preserves_layout() {
+        let num_rows = 2;
+        let core_rm = (0..num_rows * CORE_WIDTH)
+            .map(|v| Felt::new(u64::try_from(v).unwrap()))
+            .collect::<Vec<_>>();
+        let chiplets_rm = (0..num_rows * CHIPLETS_WIDTH)
+            .map(|v| Felt::new(u64::try_from(v + 100).unwrap()))
+            .collect::<Vec<_>>();
+        let range_checker_cols = [
+            (0..num_rows)
+                .map(|v| Felt::new(u64::try_from(v + 200).unwrap()))
+                .collect::<Vec<_>>(),
+            (0..num_rows)
+                .map(|v| Felt::new(u64::try_from(v + 300).unwrap()))
+                .collect::<Vec<_>>(),
+        ];
+        let expected_parts = format!(
+            "Parts {{ core_rm: {:?}, chiplets_rm: {:?}, range_checker_cols: {:?}, num_rows: {num_rows} }}",
+            core_rm, chiplets_rm, range_checker_cols
+        );
+        let trace = MainTrace::from_parts(
+            core_rm.clone(),
+            chiplets_rm.clone(),
+            [range_checker_cols[0].clone(), range_checker_cols[1].clone()],
+            num_rows,
+            RowIndex::from(0),
+        );
+        let expected =
+            format!("MainTrace {{ storage: {expected_parts}, last_program_row: RowIndex(0) }}");
+        assert_eq!(format!("{:?}", trace), expected);
     }
 }
