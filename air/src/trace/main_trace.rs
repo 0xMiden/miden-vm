@@ -12,8 +12,8 @@ use miden_core::{
 
 use super::{
     CHIPLETS_OFFSET, CHIPLETS_WIDTH, CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET,
-    DECODER_TRACE_WIDTH, FN_HASH_OFFSET, PADDED_TRACE_WIDTH, RANGE_CHECK_TRACE_OFFSET,
-    RANGE_CHECK_TRACE_WIDTH, RowIndex, STACK_TRACE_OFFSET, STACK_TRACE_WIDTH,
+    DECODER_TRACE_WIDTH, FN_HASH_OFFSET, RANGE_CHECK_TRACE_OFFSET, RANGE_CHECK_TRACE_WIDTH,
+    RowIndex, STACK_TRACE_OFFSET, STACK_TRACE_WIDTH, TRACE_WIDTH,
     chiplets::{
         BITWISE_A_COL_IDX, BITWISE_B_COL_IDX, BITWISE_OUTPUT_COL_IDX, HASHER_DIRECTION_BIT_COL_IDX,
         HASHER_IS_BOUNDARY_COL_IDX, HASHER_MRUPDATE_ID_COL_IDX, HASHER_NODE_INDEX_COL_IDX,
@@ -181,7 +181,7 @@ impl MainTrace {
                 num_rows,
             } => {
                 assert!(r < *num_rows, "main trace row index in bounds");
-                assert!(col < PADDED_TRACE_WIDTH, "main trace column index in bounds");
+                assert!(col < TRACE_WIDTH, "main trace column index in bounds");
 
                 if col < CORE_WIDTH {
                     core_rm[r * CORE_WIDTH + col]
@@ -215,7 +215,7 @@ impl MainTrace {
     #[inline]
     pub fn width(&self) -> usize {
         match &self.storage {
-            TraceStorage::Parts { .. } => PADDED_TRACE_WIDTH,
+            TraceStorage::Parts { .. } => TRACE_WIDTH,
             TraceStorage::RowMajor(matrix) => matrix.width(),
             TraceStorage::Transposed { num_cols, .. } => *num_cols,
         }
@@ -233,9 +233,8 @@ impl MainTrace {
                 num_rows,
             } => {
                 let h = *num_rows;
-                let w = PADDED_TRACE_WIDTH;
+                let w = TRACE_WIDTH;
                 let cw = CHIPLETS_WIDTH;
-                let num_pad = PADDED_TRACE_WIDTH - CORE_WIDTH - 2 - cw;
 
                 let total = h * w;
                 let mut data = Vec::with_capacity(total);
@@ -256,9 +255,6 @@ impl MainTrace {
                         dst[CORE_WIDTH + 1] = range_checker_cols[1][row];
                         dst[CORE_WIDTH + 2..CORE_WIDTH + 2 + cw]
                             .copy_from_slice(&chiplets_rm[row * cw..(row + 1) * cw]);
-                        for p in 0..num_pad {
-                            dst[CORE_WIDTH + 2 + cw + p] = ZERO;
-                        }
                     }
                 };
 
@@ -277,133 +273,6 @@ impl MainTrace {
                 }
 
                 RowMajorMatrix::new(data, w)
-            },
-        }
-    }
-
-    /// Like [`to_row_major`](Self::to_row_major) but only the first `target_width` columns.
-    pub fn to_row_major_stripped(&self, target_width: usize) -> RowMajorMatrix<Felt> {
-        match &self.storage {
-            TraceStorage::RowMajor(matrix) => {
-                let h = matrix.height();
-                let w = matrix.width();
-                debug_assert!(target_width <= w);
-                if target_width == w {
-                    return matrix.clone();
-                }
-                let total = h * target_width;
-                let mut data = Vec::with_capacity(total);
-                // SAFETY: the loop below writes exactly `h * target_width` elements.
-                #[allow(clippy::uninit_vec)]
-                unsafe {
-                    data.set_len(total);
-                }
-
-                #[cfg(not(feature = "concurrent"))]
-                for row in 0..h {
-                    let src = matrix.row_slice(row).expect("row index in bounds");
-                    data[row * target_width..(row + 1) * target_width]
-                        .copy_from_slice(&src[..target_width]);
-                }
-
-                #[cfg(feature = "concurrent")]
-                {
-                    use miden_crypto::parallel::*;
-                    let rows_per_chunk = ROW_MAJOR_CHUNK_SIZE;
-                    data.par_chunks_mut(rows_per_chunk * target_width).enumerate().for_each(
-                        |(chunk_idx, chunk)| {
-                            let chunk_rows = chunk.len() / target_width;
-                            for i in 0..chunk_rows {
-                                let row = chunk_idx * rows_per_chunk + i;
-                                let src = matrix.row_slice(row).expect("row index in bounds");
-                                chunk[i * target_width..(i + 1) * target_width]
-                                    .copy_from_slice(&src[..target_width]);
-                            }
-                        },
-                    );
-                }
-
-                RowMajorMatrix::new(data, target_width)
-            },
-            TraceStorage::Transposed { .. } => {
-                let full = self.to_row_major();
-                if target_width == full.width() {
-                    return full;
-                }
-                let h = full.height();
-                let total = h * target_width;
-                let mut data = Vec::with_capacity(total);
-                // SAFETY: the loop below writes exactly `h * target_width` elements.
-                #[allow(clippy::uninit_vec)]
-                unsafe {
-                    data.set_len(total);
-                }
-                for row in 0..h {
-                    let src = full.row_slice(row).expect("row index in bounds");
-                    data[row * target_width..(row + 1) * target_width]
-                        .copy_from_slice(&src[..target_width]);
-                }
-                RowMajorMatrix::new(data, target_width)
-            },
-            TraceStorage::Parts {
-                core_rm,
-                chiplets_rm,
-                range_checker_cols,
-                num_rows,
-            } => {
-                let h = *num_rows;
-                let cw = CHIPLETS_WIDTH;
-                debug_assert!(target_width >= CORE_WIDTH);
-                let nc_needed = target_width - CORE_WIDTH;
-
-                let total = h * target_width;
-                let mut data = Vec::with_capacity(total);
-                // SAFETY: the loop below writes exactly `h * target_width` elements.
-                #[allow(clippy::uninit_vec)]
-                unsafe {
-                    data.set_len(total);
-                }
-
-                let fill_rows = |chunk: &mut [Felt], start_row: usize| {
-                    let chunk_rows = chunk.len() / target_width;
-                    for i in 0..chunk_rows {
-                        let row = start_row + i;
-                        let dst = &mut chunk[i * target_width..(i + 1) * target_width];
-                        dst[..CORE_WIDTH]
-                            .copy_from_slice(&core_rm[row * CORE_WIDTH..(row + 1) * CORE_WIDTH]);
-                        let nc_dst = &mut dst[CORE_WIDTH..];
-                        let mut nc_pos = 0;
-                        for col in &range_checker_cols[..RANGE_CHECK_TRACE_WIDTH.min(nc_needed)] {
-                            nc_dst[nc_pos] = col[row];
-                            nc_pos += 1;
-                        }
-                        if nc_pos < nc_needed {
-                            let chip_cols = (nc_needed - nc_pos).min(cw);
-                            nc_dst[nc_pos..nc_pos + chip_cols]
-                                .copy_from_slice(&chiplets_rm[row * cw..row * cw + chip_cols]);
-                            nc_pos += chip_cols;
-                        }
-                        for dst in &mut dst[nc_pos..nc_needed] {
-                            *dst = ZERO;
-                        }
-                    }
-                };
-
-                #[cfg(not(feature = "concurrent"))]
-                fill_rows(&mut data, 0);
-
-                #[cfg(feature = "concurrent")]
-                {
-                    use miden_crypto::parallel::*;
-                    let rows_per_chunk = ROW_MAJOR_CHUNK_SIZE;
-                    data.par_chunks_mut(rows_per_chunk * target_width).enumerate().for_each(
-                        |(chunk_idx, chunk)| {
-                            fill_rows(chunk, chunk_idx * rows_per_chunk);
-                        },
-                    );
-                }
-
-                RowMajorMatrix::new(data, target_width)
             },
         }
     }
