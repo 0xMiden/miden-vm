@@ -316,16 +316,29 @@ impl ExecutionTracer {
                 );
 
                 if dyn_node.is_dyncall() {
-                    let overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
-                    // Note: the stack depth to record is the `current_stack_depth - 1` due to
-                    // the semantics of DYNCALL. That is, the top of the
-                    // stack contains the memory address to where the
-                    // address to dynamically call is located. Then, the
-                    // DYNCALL operation performs a drop, and
-                    // records the stack depth after the drop as the beginning of
-                    // the new context. For more information, look at the docs for how the
-                    // constraints are designed; it's a bit tricky but it works.
-                    let stack_depth_after_drop = processor.stack().depth() - 1;
+                    // DYNCALL drops the top stack element (the memory address holding the
+                    // callee hash) and records the stack state *after* the drop as the new
+                    // context.
+                    //
+                    // `record_control_node_start()` is called *before* `decrement_stack_size()`,
+                    // so we must compute the post-drop overflow address without actually
+                    // performing the pop.  We use `clk_after_pop_in_current_ctx()` which
+                    // returns the clock of the second-to-last overflow entry (i.e. what
+                    // `last_update_clk_in_current_ctx()` would return after the pop), or ZERO
+                    // when the overflow stack has ≤1 entry and would become empty.
+                    //
+                    // When the stack is already at MIN_STACK_DEPTH the drop does not reduce
+                    // the depth and the overflow address is ZERO — mirroring the same guard
+                    // already present in the parallel-tracer path.  See #2813 / PR #2904.
+                    let (stack_depth_after_drop, overflow_addr) =
+                        if processor.stack().depth() > MIN_STACK_DEPTH as u32 {
+                            (
+                                processor.stack().depth() - 1,
+                                self.overflow_table.clk_after_pop_in_current_ctx(),
+                            )
+                        } else {
+                            (processor.stack().depth(), ZERO)
+                        };
                     Some(ExecutionContextInfo::new(
                         processor.system().ctx(),
                         processor.system().caller_hash(),
