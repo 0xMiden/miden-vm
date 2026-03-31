@@ -1521,8 +1521,8 @@ end
 #!
 #! SHA256 digest is represented in terms of eight 32 -bit words ( big endian byte order ).
 pub proc merge
-    push.0x5be0cd19.0x1f83d9ab.0x9b05688c.0x510e527f
-    push.0xa54ff53a.0x3c6ef372.0xbb67ae85.0x6a09e667
+    push.0x5be0cd19 push.0x1f83d9ab push.0x9b05688c push.0x510e527f
+    push.0xa54ff53a push.0x3c6ef372 push.0xbb67ae85 push.0x6a09e667
 
     exec.prepare_message_schedule_and_consume
     exec.consume_padding_message_schedule
@@ -1545,11 +1545,11 @@ end
 pub proc hash
     # apply padding, see padding rule in section 5.1.1 of
     # https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf
-    push.256.0.0.0.0.0.0.2147483648
+    push.256 push.0 push.0 push.0 push.0 push.0 push.0 push.2147483648
     swapdw
 
-    push.0x5be0cd19.0x1f83d9ab.0x9b05688c.0x510e527f
-    push.0xa54ff53a.0x3c6ef372.0xbb67ae85.0x6a09e667
+    push.0x5be0cd19 push.0x1f83d9ab push.0x9b05688c push.0x510e527f
+    push.0xa54ff53a push.0x3c6ef372 push.0xbb67ae85 push.0x6a09e667
 
     exec.prepare_message_schedule_and_consume
 end
@@ -1605,8 +1605,8 @@ pub proc hash_bytes
     loc_load.12 mem_storew_be dropw
 
     # Sha256 init
-    push.0x5be0cd19.0x1f83d9ab.0x9b05688c.0x510e527f
-    push.0xa54ff53a.0x3c6ef372.0xbb67ae85.0x6a09e667
+    push.0x5be0cd19 push.0x1f83d9ab push.0x9b05688c push.0x510e527f
+    push.0xa54ff53a push.0x3c6ef372 push.0xbb67ae85 push.0x6a09e667
 
     # Consume sha256 blocks
     loc_load.28 u32assert neq.0

@@ -293,7 +293,7 @@ proc get_multi_leaf_value
         # => [val_ptr, x, x, R]
 
         # (2 cycles)
-        push.0.0
+        push.0 push.0
         # => [x, x, key_ptr, x, x, R]
 
         # (1 cycle)

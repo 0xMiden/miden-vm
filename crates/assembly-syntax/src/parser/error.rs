@@ -247,16 +247,6 @@ pub enum ParsingError {
         #[label]
         span: SourceSpan,
     },
-    #[error(
-        "too many operands for `push`: tried to push {} elements, but only 16 can be pushed at one time",
-        count
-    )]
-    #[diagnostic()]
-    PushOverflow {
-        #[label]
-        span: SourceSpan,
-        count: usize,
-    },
     #[error("expected a fully-qualified module path, e.g. `std::u64`")]
     UnqualifiedImport {
         #[label]
@@ -390,7 +380,6 @@ impl PartialEq for ParsingError {
                 Self::ImmediateOutOfRange { range: l, .. },
                 Self::ImmediateOutOfRange { range: r, .. },
             ) => l == r,
-            (Self::PushOverflow { count: l, .. }, Self::PushOverflow { count: r, .. }) => l == r,
             (
                 Self::UnrecognizedToken { token: ltok, expected: lexpect, .. },
                 Self::UnrecognizedToken { token: rtok, expected: rexpect, .. },

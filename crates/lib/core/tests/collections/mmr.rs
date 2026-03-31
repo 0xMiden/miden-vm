@@ -496,9 +496,9 @@ fn test_mmr_pack() {
         use miden::core::collections::mmr
 
         begin
-            push.3.1000 mem_store  # num_leaves, 2 peaks
-            push.1.1004 mem_store  # peak1
-            push.2.1008 mem_store  # peak2
+            push.3 push.1000 mem_store  # num_leaves, 2 peaks
+            push.1 push.1004 mem_store  # peak1
+            push.2 push.1008 mem_store  # peak2
 
             push.1000 exec.mmr::pack
 
@@ -539,7 +539,7 @@ fn test_mmr_add_single() {
 
         begin
             push.{mmr_ptr} # the address of the mmr
-            push.4.3.2.1   # the new peak (stack order for [1,2,3,4])
+            push.4 push.3 push.2 push.1   # the new peak (stack order for [1,2,3,4])
             exec.mmr::add  # add the element
         end
     "
@@ -564,11 +564,11 @@ fn test_mmr_two() {
 
         begin
             push.{mmr_ptr} # first peak
-            push.4.3.2.1
+            push.4 push.3 push.2 push.1
             exec.mmr::add
 
             push.{mmr_ptr} # second peak
-            push.8.7.6.5
+            push.8 push.7 push.6 push.5
             exec.mmr::add
         end
     "
@@ -613,11 +613,11 @@ fn test_mmr_add_then_mtree_get() {
 
         begin
             push.{mmr_ptr}
-            push.{}.{}.{}.{}
+            push.{} push.{} push.{} push.{}
             exec.mmr::add
 
             push.{mmr_ptr}
-            push.{}.{}.{}.{}
+            push.{} push.{} push.{} push.{}
             exec.mmr::add
 
             push.{mmr_ptr}
@@ -656,13 +656,13 @@ fn test_add_mmr_large() {
         use miden::core::collections::mmr
 
         begin
-            push.{mmr_ptr}.0.0.0.1 exec.mmr::add
-            push.{mmr_ptr}.0.0.0.2 exec.mmr::add
-            push.{mmr_ptr}.0.0.0.3 exec.mmr::add
-            push.{mmr_ptr}.0.0.0.4 exec.mmr::add
-            push.{mmr_ptr}.0.0.0.5 exec.mmr::add
-            push.{mmr_ptr}.0.0.0.6 exec.mmr::add
-            push.{mmr_ptr}.0.0.0.7 exec.mmr::add
+            push.{mmr_ptr} push.0 push.0 push.0 push.1 exec.mmr::add
+            push.{mmr_ptr} push.0 push.0 push.0 push.2 exec.mmr::add
+            push.{mmr_ptr} push.0 push.0 push.0 push.3 exec.mmr::add
+            push.{mmr_ptr} push.0 push.0 push.0 push.4 exec.mmr::add
+            push.{mmr_ptr} push.0 push.0 push.0 push.5 exec.mmr::add
+            push.{mmr_ptr} push.0 push.0 push.0 push.6 exec.mmr::add
+            push.{mmr_ptr} push.0 push.0 push.0 push.7 exec.mmr::add
 
             push.{mmr_ptr} exec.mmr::pack
 
@@ -697,13 +697,13 @@ fn debug_mmr_peaks_vs_vm_memory() {
         use miden::core::collections::mmr
 
         begin
-            push.{mmr_ptr}.0.0.0.1 exec.mmr::add
-            push.{mmr_ptr}.0.0.0.2 exec.mmr::add
-            push.{mmr_ptr}.0.0.0.3 exec.mmr::add
-            push.{mmr_ptr}.0.0.0.4 exec.mmr::add
-            push.{mmr_ptr}.0.0.0.5 exec.mmr::add
-            push.{mmr_ptr}.0.0.0.6 exec.mmr::add
-            push.{mmr_ptr}.0.0.0.7 exec.mmr::add
+            push.{mmr_ptr} push.0 push.0 push.0 push.1 exec.mmr::add
+            push.{mmr_ptr} push.0 push.0 push.0 push.2 exec.mmr::add
+            push.{mmr_ptr} push.0 push.0 push.0 push.3 exec.mmr::add
+            push.{mmr_ptr} push.0 push.0 push.0 push.4 exec.mmr::add
+            push.{mmr_ptr} push.0 push.0 push.0 push.5 exec.mmr::add
+            push.{mmr_ptr} push.0 push.0 push.0 push.6 exec.mmr::add
+            push.{mmr_ptr} push.0 push.0 push.0 push.7 exec.mmr::add
         end
     "
     );
@@ -785,7 +785,7 @@ fn test_mmr_large_add_roundtrip() {
 
         begin
             exec.mmr::unpack
-            push.{mmr_ptr}.0.0.0.8 exec.mmr::add
+            push.{mmr_ptr} push.0 push.0 push.0 push.8 exec.mmr::add
             push.{mmr_ptr} exec.mmr::pack
 
             swapw dropw

@@ -34,15 +34,15 @@ fn setup_masm(sponge: &[u64; 12], output_len: u32, num_queries: u32, depth: u32)
     format!(
         r#"
     # Store R1 (rate word 1)
-    push.{r1_3}.{r1_2}.{r1_1}.{r1_0}
+    push.{r1_3} push.{r1_2} push.{r1_1} push.{r1_0}
     push.{R1_PTR} mem_storew_le dropw
 
     # Store R2 (rate word 2)
-    push.{r2_3}.{r2_2}.{r2_1}.{r2_0}
+    push.{r2_3} push.{r2_2} push.{r2_1} push.{r2_0}
     push.{R2_PTR} mem_storew_le dropw
 
     # Store C (capacity)
-    push.{c_3}.{c_2}.{c_1}.{c_0}
+    push.{c_3} push.{c_2} push.{c_1} push.{c_0}
     push.{C_PTR} mem_storew_le dropw
 
     # Random coin buffer state

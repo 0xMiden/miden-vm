@@ -14,13 +14,13 @@ fn test_memcopy_words() {
     use miden::core::mem
 
     begin
-        push.0.0.0.1.1000 mem_storew_be dropw
-        push.0.0.1.0.1004 mem_storew_be dropw
-        push.0.0.1.1.1008 mem_storew_be dropw
-        push.0.1.0.0.1012 mem_storew_be dropw
-        push.0.1.0.1.1016 mem_storew_be dropw
+        push.0 push.0 push.0 push.1 push.1000 mem_storew_be dropw
+        push.0 push.0 push.1 push.0 push.1004 mem_storew_be dropw
+        push.0 push.0 push.1 push.1 push.1008 mem_storew_be dropw
+        push.0 push.1 push.0 push.0 push.1012 mem_storew_be dropw
+        push.0 push.1 push.0 push.1 push.1016 mem_storew_be dropw
 
-        push.2000.1000.5 exec.mem::memcopy_words
+        push.2000 push.1000 push.5 exec.mem::memcopy_words
     end
     ";
 
@@ -130,13 +130,13 @@ fn test_memcopy_elements() {
     use miden::core::mem
 
     begin
-        push.1.2.3.4.1000 mem_storew_be dropw
-        push.5.6.7.8.1004 mem_storew_be dropw
-        push.9.10.11.12.1008 mem_storew_be dropw
-        push.13.14.15.16.1012 mem_storew_be dropw
-        push.17.18.19.20.1016 mem_storew_be dropw
+        push.1 push.2 push.3 push.4 push.1000 mem_storew_be dropw
+        push.5 push.6 push.7 push.8 push.1004 mem_storew_be dropw
+        push.9 push.10 push.11 push.12 push.1008 mem_storew_be dropw
+        push.13 push.14 push.15 push.16 push.1012 mem_storew_be dropw
+        push.17 push.18 push.19 push.20 push.1016 mem_storew_be dropw
 
-        push.2002.1001.18 exec.mem::memcopy_elements
+        push.2002 push.1001 push.18 exec.mem::memcopy_elements
     end
     ";
 

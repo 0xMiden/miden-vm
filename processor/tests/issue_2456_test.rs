@@ -15,7 +15,7 @@ fn test_issue_2456_statically_linked_library_call() {
 
     let test_module_source = "
         pub proc foo
-            push.3.4
+            push.3 push.4
             add
             swapw dropw
         end
@@ -33,7 +33,7 @@ fn test_issue_2456_statically_linked_library_call() {
         use test::module_1
 
         begin
-            push.1.2
+            push.1 push.2
             call.module_1::foo
             dropw dropw dropw dropw
         end

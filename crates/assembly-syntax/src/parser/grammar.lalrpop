@@ -285,14 +285,6 @@ CommaDelimitedAllowTrailing<T>: Vec<T> = {
     }
 };
 
-// dot-delimited with at least one element
-#[inline]
-DotDelimited<T>: Vec<T> = {
-    <mut v:(<T> ".")*> <e:T> => {
-        v.push(e);
-        v
-    }
-};
 
 
 // TOP-LEVEL FORMS
@@ -1712,25 +1704,14 @@ Push: SmallOpsVec = {
         ))]
     },
 
-    <l:@L> "push" "." <values:DotDelimited<IntOrHexImm>> <r:@R> =>? {
-        let ops = values.into_iter().enumerate().map(|(i, imm)| {
-            let span = imm.span();
-            // Include the "push" token in the first item's span
-            let span = if i == 0 {
-                span!(source_id, l, span.end().to_u32())
-            } else {
-                span
-            };
-            Op::Inst(Span::new(span, match imm {
+    <l:@L> "push" "." <imm:IntOrHexImm> <r:@R> => {
+        smallvec![Op::Inst(Span::new(
+            span!(source_id, l, r),
+            match imm {
                 Immediate::Constant(name) => Instruction::Push(Immediate::Constant(name)),
                 Immediate::Value(value) => Instruction::Push(Immediate::Value(value.map(PushValue::Int)))
-            }))
-        }).collect::<SmallOpsVec>();
-        if ops.len() > 16 {
-            Err(ParseError::User { error: ParsingError::PushOverflow { span: span!(source_id, l, r), count: ops.len() } })
-        } else {
-            Ok(ops)
-        }
+            }
+        ))]
     }
 }
 

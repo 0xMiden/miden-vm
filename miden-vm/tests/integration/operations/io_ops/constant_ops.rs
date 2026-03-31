@@ -29,13 +29,13 @@ fn push_one() {
 fn push_many() {
     let base_op = "push";
 
-    // --- multiple values with separators --------------------------------------------------------
-    let asm_op = format!("{base_op}.17.0x13.23");
+    // --- multiple values as individual push instructions ----------------------------------------
+    let asm_op = format!("{base_op}.17 {base_op}.0x13 {base_op}.23");
     let test = build_op_test!(asm_op);
     test.expect_stack(&[23, 19, 17]);
 
-    // --- push the maximum number of decimal values (16) -------------------------------------
-    let asm_op = format!("{base_op}.16.17.18.19.20.21.22.23.24.25.26.27.28.29.30.31");
+    // --- push 16 decimal values as individual push instructions --------------------------------
+    let asm_op = (16..32).map(|i| format!("{base_op}.{i}")).collect::<Vec<_>>().join(" ");
     let mut expected = Vec::with_capacity(16);
     for i in (16..32).rev() {
         expected.push(i);
@@ -44,8 +44,8 @@ fn push_many() {
     let test = build_op_test!(asm_op);
     test.expect_stack(&expected);
 
-    // --- push hexadecimal values with period separators between values ----------------------
-    let asm_op = format!("{base_op}.0x0A.0x64.0x03E8.0x2710.0x0186A0");
+    // --- push hexadecimal values as individual push instructions --------------------------------
+    let asm_op = format!("{base_op}.0x0A {base_op}.0x64 {base_op}.0x03E8 {base_op}.0x2710 {base_op}.0x0186A0");
     let mut expected = Vec::with_capacity(5);
     for i in (1..=5).rev() {
         expected.push(10_u64.pow(i));
@@ -54,8 +54,8 @@ fn push_many() {
     let test = build_op_test!(asm_op);
     test.expect_stack(&expected);
 
-    // --- push a mixture of decimal and single-element hexadecimal values --------------------
-    let asm_op = format!("{base_op}.2.4.8.0x10.0x20.0x40.128.0x0100");
+    // --- push a mixture of decimal and hexadecimal values --------------------------------------
+    let asm_op = format!("{base_op}.2 {base_op}.4 {base_op}.8 {base_op}.0x10 {base_op}.0x20 {base_op}.0x40 {base_op}.128 {base_op}.0x0100");
     let mut expected = Vec::with_capacity(8);
     for i in (1_u32..=8).rev() {
         expected.push(2_u64.pow(i));

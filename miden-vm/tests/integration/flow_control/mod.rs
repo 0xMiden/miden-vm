@@ -306,13 +306,13 @@ fn call_in_syscall() {
             loc_loadw_be.0 assertz assertz assertz assertz
 
             # Write to memory locals, which should not affect context 0 memory
-            push.5.6.7.8 loc_storew_be.0 dropw
+            push.5 push.6 push.7 push.8 loc_storew_be.0 dropw
 
             # Syscall back into context 0
             syscall.second_kernel_entry
 
             # Ensure that procedure locals were untouched
-            loc_loadw_be.0 push.5.6.7.8 assert_eqw
+            loc_loadw_be.0 push.5 push.6 push.7 push.8 assert_eqw
         end
 
         # CONTEXT 0 FUNCTIONS
@@ -325,7 +325,7 @@ fn call_in_syscall() {
 
             # Write to procedure locals. We will later ensure that this write didn't affect procedure locals
             # in first_kernel_entry.
-            push.9.10.11.12 loc_storew_be.0 dropw
+            push.9 push.10 push.11 push.12 loc_storew_be.0 dropw
         end
 
         @locals(4)
@@ -334,13 +334,13 @@ fn call_in_syscall() {
             loc_loadw_be.0 assertz assertz assertz assertz
 
             # Write to memory locals. We will ensure at the end that these values are still present
-            push.1.2.3.4 loc_storew_be.0 dropw
+            push.1 push.2 push.3 push.4 loc_storew_be.0 dropw
 
             # Call userland, which will syscall back into context 0
             call.userland
 
             # Ensure that procedure locals were untouched
-            loc_loadw_be.0 push.1.2.3.4 assert_eqw
+            loc_loadw_be.0 push.1 push.2 push.3 push.4 assert_eqw
         end
     ";
 
@@ -463,7 +463,7 @@ fn dynexec_with_procref() {
     use external::module
 
     proc foo
-        push.1.2
+        push.1 push.2
         u32wrapping_add
     end
 
@@ -624,7 +624,7 @@ fn procref() -> Result<(), Report> {
 
     @locals(4)
     pub proc foo
-        push.3.4
+        push.3 push.4
     end
     ";
 
@@ -651,7 +651,7 @@ fn procref() -> Result<(), Report> {
 
     @locals(4)
     proc foo
-        push.3.4
+        push.3 push.4
     end
 
     begin

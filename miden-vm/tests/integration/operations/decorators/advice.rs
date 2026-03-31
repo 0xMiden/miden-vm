@@ -443,7 +443,7 @@ fn run_insert_mem_with_max_size(
         r#"begin
             {mem_stores}
             push.{end_addr} push.{start_addr}
-            push.1.2.3.4
+            push.1 push.2 push.3 push.4
             adv.insert_mem
             dropw drop drop
         end"#,

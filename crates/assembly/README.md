@@ -91,8 +91,8 @@ the library, as shown next:
 use core::math::u64
 
 begin
-    push.1.0
-    push.2.0
+    push.1 push.0
+    push.2 push.0
     exec.u64::wrapping_add
 end
 ```
@@ -196,7 +196,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Assemble our program
     let program = assembler.assemble_program("
 begin
-    push.1.2
+    push.1 push.2
     syscall.foo
 end
 ")?;

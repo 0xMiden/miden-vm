@@ -167,7 +167,7 @@ pub proc pipe_words_to_memory
   # element to `len % 8` where `len` is the length of the hashed sequence. Since `len % 8`
   # is either equal to 0 or 4,  this is determined by the `needs_padding` flag multiplied
   # by 4. (7 cycles)
-  dup.2 mul.4 push.0.0.0
+  dup.2 mul.4 push.0 push.0 push.0
   movup.3
   # => [C, write_ptr, end_ptr, needs_padding, ...]
   # (C is the capacity word)

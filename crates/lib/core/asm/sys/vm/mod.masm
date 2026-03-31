@@ -91,7 +91,7 @@ pub proc verify_proof
     # --- Get constants -------------------------------------------------------
 
     # Push RELATION_DIGEST, then move log(trace_length) back to top.
-    push.RELATION_DIGEST_3.RELATION_DIGEST_2.RELATION_DIGEST_1.RELATION_DIGEST_0
+    push.RELATION_DIGEST_3 push.RELATION_DIGEST_2 push.RELATION_DIGEST_1 push.RELATION_DIGEST_0
     movup.4
     # => [log(trace_length), rd0, rd1, rd2, rd3]
 

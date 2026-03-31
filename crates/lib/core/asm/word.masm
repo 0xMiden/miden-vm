@@ -115,7 +115,7 @@ pub proc gt(rhs: word, lhs: word) -> i1
     exec.arrange_words_adjacent_le
     # => [l_3, r_3, l_2, r_2, l_1, r_1, l_0, r_0]
 
-    push.1.0
+    push.1 push.0
     # => [is_lhs_less, continue, l_3, r_3, l_2, r_2, l_1, r_1, l_0, r_0]
 
     repeat.4
@@ -181,7 +181,7 @@ pub proc lt(rhs: word, lhs: word) -> i1
     exec.arrange_words_adjacent_le
     # => [l_3, r_3, l_2, r_2, l_1, r_1, l_0, r_0]
 
-    push.1.0
+    push.1 push.0
     # => [is_lhs_greater, continue, l_3, r_3, l_2, r_2, l_1, r_1, l_0, r_0]
 
     repeat.4

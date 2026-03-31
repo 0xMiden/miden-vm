@@ -128,7 +128,7 @@ pub proc prepare_stack_deep_queries_computation
 
     # Store pointers to alpha, memory region to store trace row for current query and a fresh
     # accumulator value i.e., (0, 0).
-    push.0.0
+    push.0 push.0
     exec.constants::deep_rand_alpha_nd_ptr
     exec.constants::current_trace_row_ptr
     exec.constants::tmp2 mem_storew_le

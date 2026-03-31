@@ -41,7 +41,7 @@ pub proc load_and_horner_eval_ood_frames
     # => [alpha_0, alpha_1]
 
     # Save the random challenge
-    push.0.0 movup.3 movup.3
+    push.0 push.0 movup.3 movup.3
     exec.constants::deep_rand_alpha_nd_ptr mem_storew_le
     # => [Y]
 
@@ -51,7 +51,7 @@ pub proc load_and_horner_eval_ood_frames
 
     ### a) Set up the initial accumulator and the pointers to alpha and a pointer to some memory
     ###    region to which we save the OOD.
-    push.0.0
+    push.0 push.0
     exec.constants::deep_rand_alpha_nd_ptr
     exec.constants::ood_evaluations_ptr
     # => [ood_evaluations_ptr, deep_rand_alpha_ptr, 0, 0, Y]
@@ -76,13 +76,13 @@ pub proc load_and_horner_eval_ood_frames
     # => [ood_frame_ptr, alpha_ptr, acc0, acc1, Y, C, Y]
     movup.3 neg
     movup.3 neg
-    push.0.0
+    push.0 push.0
     movup.2
     movup.3
     swap.1
     exec.constants::ood_fixed_term_horner_evaluations_ptr mem_storew_le
     dropw
-    push.0.0
+    push.0 push.0
     movdn.3
     movdn.3
     # => [ood_frame_ptr, alpha_ptr, 0, 0, Y, C, Y]

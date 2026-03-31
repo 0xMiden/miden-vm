@@ -47,7 +47,7 @@ fn test_sha512_handler(bytes: &[u8]) {
             begin
                 {memory_stores}
 
-                push.{len_bytes}.{INPUT_MEMORY_ADDR}
+                push.{len_bytes} push.{INPUT_MEMORY_ADDR}
 
                 emit.event("{SHA512_HASH_BYTES_EVENT_NAME}")
                 drop drop
@@ -81,7 +81,7 @@ fn test_sha512_hash_memory_impl(bytes: &[u8]) {
             begin
                 {memory_stores}
 
-                push.{len_bytes}.{INPUT_MEMORY_ADDR}
+                push.{len_bytes} push.{INPUT_MEMORY_ADDR}
                 exec.sha512::hash_bytes_impl
 
                 exec.sys::truncate_stack
@@ -130,7 +130,7 @@ fn test_sha512_hash_memory(bytes: &[u8]) {
             begin
                 {memory_stores}
 
-                push.{len_bytes}.{INPUT_MEMORY_ADDR}
+                push.{len_bytes} push.{INPUT_MEMORY_ADDR}
                 exec.sha512::hash_bytes
 
                 exec.sys::truncate_stack
@@ -177,7 +177,7 @@ fn test_sha512_hash_bytes_documented_stack_contract() {
             begin
                 {memory_stores}
 
-                push.{len_bytes}.{INPUT_MEMORY_ADDR}
+                push.{len_bytes} push.{INPUT_MEMORY_ADDR}
                 exec.sha512::hash_bytes
 
                 # drop the digest and ensure caller stack words are preserved
@@ -212,7 +212,7 @@ fn run_sha512_with_max_hash_len(
         r#"
         begin
             {memory_stores}
-            push.{len_bytes_on_stack}.{INPUT_MEMORY_ADDR}
+            push.{len_bytes_on_stack} push.{INPUT_MEMORY_ADDR}
             emit.event("{SHA512_HASH_BYTES_EVENT_NAME}")
             drop drop
         end

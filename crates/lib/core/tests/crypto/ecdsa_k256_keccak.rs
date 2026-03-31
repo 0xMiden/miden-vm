@@ -58,7 +58,7 @@ fn test_ecdsa_verify_cases() {
                     {memory_stores}
 
                     # Call verify: [ptr_pk, ptr_digest, ptr_sig]
-                    push.{SIG_ADDR}.{DIGEST_ADDR}.{PK_ADDR}
+                    push.{SIG_ADDR} push.{DIGEST_ADDR} push.{PK_ADDR}
                     exec.ecdsa_k256_keccak::verify_prehash
                     # => [result, ...]
 
@@ -102,7 +102,7 @@ fn test_ecdsa_verify_impl_commitment() {
                 {memory_stores}
 
                 # Call verify_impl: [ptr_pk, ptr_digest, ptr_sig]
-                push.{SIG_ADDR}.{DIGEST_ADDR}.{PK_ADDR}
+                push.{SIG_ADDR} push.{DIGEST_ADDR} push.{PK_ADDR}
                 exec.ecdsa_k256_keccak::verify_prehash_impl
                 # => [COMM, TAG, result, ...]
 

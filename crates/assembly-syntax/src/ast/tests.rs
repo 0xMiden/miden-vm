@@ -494,11 +494,11 @@ fn test_ast_parsing_program_push() -> Result<(), Report> {
         r#"
     begin
         push.10 push.500 push.70000 push.5000000000
-        push.5000000000.7000000000.9000000000.11000000000
-        push.5.7
-        push.500.700
-        push.70000.90000
-        push.5000000000.7000000000
+        push.5000000000 push.7000000000 push.9000000000 push.11000000000
+        push.5 push.7
+        push.500 push.700
+        push.70000 push.90000
+        push.5000000000 push.7000000000
 
         push.0x0000000000000000010000000000000002000000000000000300000000000000
     end"#
@@ -1266,7 +1266,7 @@ fn assert_parsing_line_unmatched_begin() {
         &context,
         "\
         begin
-          push.1.2
+          push.1 push.2
 
         add
         mul"
@@ -1315,7 +1315,7 @@ fn assert_parsing_line_invalid_op() {
     begin
         repeat.3
             push.1
-            push.0.1
+            push.0 push.1
         end
 
         # some comments
@@ -1331,7 +1331,7 @@ fn assert_parsing_line_invalid_op() {
         # to test if line is correct
 
         while.true
-            push.5.7
+            push.5 push.7
             u32wrapping_add
             loc_store.4
             push.0
@@ -1354,7 +1354,7 @@ fn assert_parsing_line_invalid_op() {
         "   :                     `-- found a identifier here",
         "29 |         end",
         "   `----",
-        r#" help: expected ".", or primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
+        r#" help: expected primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
     );
 }
 
@@ -1414,7 +1414,7 @@ proc add_n_times # [n, b, a]
     push.0
     u32gt
     if.true
-        push.0.1
+        push.0 push.1
         while.true  # [total, n, b, a]
             dup.3 dup.3
             u32wrapping_add3 # [total', n, b, a]
@@ -1434,7 +1434,7 @@ proc add_n_times # [n, b, a]
 end
 
 begin
-    push.1.1.DEFAULT_CONST
+    push.1 push.1 push.DEFAULT_CONST
     exec.add_n_times
     push.20
     assert_eq
@@ -1514,10 +1514,10 @@ const A = 0x0200000000000000030000000000000004000000000000000500000000000000
 const B = [2,3,4,5]
 begin
     push.0x0200000000000000030000000000000004000000000000000500000000000000
-    push.A.6
-    push.B.6
-    push.2.3.4.5
-    push.A.B
+    push.A push.6
+    push.B push.6
+    push.2 push.3 push.4 push.5
+    push.A push.B
 end
 ";
 

@@ -77,7 +77,7 @@ fn init_seed_trace_length_too_large_has_message() {
     let source = "
         use miden::core::stark::random_coin
         begin
-            push.0.0.0.0 push.32
+            push.0 push.0 push.0 push.0 push.32
             exec.random_coin::init_seed
         end
     ";
@@ -91,8 +91,8 @@ fn generate_aux_randomness_mismatch_has_message() {
         use miden::core::stark::constants
         use miden::core::stark::random_coin
         begin
-            push.11.22.33.44 exec.constants::r1_ptr mem_storew_be dropw
-            push.99.44.11.22 exec.constants::aux_rand_nd_ptr mem_storew_be dropw
+            push.11 push.22 push.33 push.44 exec.constants::r1_ptr mem_storew_be dropw
+            push.99 push.44 push.11 push.22 exec.constants::aux_rand_nd_ptr mem_storew_be dropw
             exec.random_coin::generate_aux_randomness
         end
     ";
@@ -113,7 +113,7 @@ fn check_pow_invalid_has_message() {
             push.16 exec.constants::set_query_pow_bits
             push.0  exec.constants::set_deep_pow_bits
             push.16 exec.constants::set_folding_pow_bits
-            push.0.0.0.0 push.10
+            push.0 push.0 push.0 push.0 push.10
             exec.random_coin::init_seed
             exec.random_coin::check_query_pow
         end

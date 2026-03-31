@@ -106,7 +106,7 @@ proc process_main_segment_execution_trace
 
     # Get commitment to main segment of the execution trace
     movdn.3 movdn.2
-    push.0.0
+    push.0 push.0
     exec.constants::main_trace_com_ptr mem_loadw_le
     #=>[MAIN_TRACE_TREE_ROOT, depth, index, query_ptr]
 

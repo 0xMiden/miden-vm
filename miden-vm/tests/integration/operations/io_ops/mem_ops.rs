@@ -245,7 +245,7 @@ fn mem_stream() {
             push.4
             mem_storew_le
             dropw
-            push.12.11.10.9.8.7.6.5.4.3.2.1
+            push.12 push.11 push.10 push.9 push.8 push.7 push.6 push.5 push.4 push.3 push.2 push.1
             mem_stream
 
             exec.truncate_stack
@@ -278,7 +278,7 @@ fn mem_stream_with_hperm() {
             push.4
             mem_storew_le
             dropw
-            push.12.11.10.9.8.7.6.5.4.3.2.1
+            push.12 push.11 push.10 push.9 push.8 push.7 push.6 push.5 push.4 push.3 push.2 push.1
             mem_stream hperm
 
             exec.truncate_stack

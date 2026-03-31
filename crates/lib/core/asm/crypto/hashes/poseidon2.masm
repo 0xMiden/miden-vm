@@ -139,7 +139,7 @@ pub proc hash_words
     # => [start_addr, end_addr, is_odd, ...]
 
     # prepare hasher state (14 cycles)
-    dup.2 mul.4 push.0.0.0 movup.3 padw padw
+    dup.2 mul.4 push.0 push.0 push.0 movup.3 padw padw
     # => [R0, R1, C, start_addr, end_addr, is_odd, ...]
 
     # (4 + 3 * words cycles)
@@ -216,7 +216,7 @@ pub proc prepare_hasher_state
     # => [capacity, ptr, end_pairs_addr, num_elements%8]
 
     # prepare hasher state for Poseidon2 permutation
-    push.0.0.0 movup.3 padw padw
+    push.0 push.0 push.0 movup.3 padw padw
     # => [R0, R1, C, ptr, end_pairs_addr, num_elements%8]
 end
 

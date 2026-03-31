@@ -51,7 +51,7 @@ fn reduce_kernel_digests_upper_bound() {
             push.0  exec.constants::set_query_pow_bits
             push.0  exec.constants::set_deep_pow_bits
             push.16 exec.constants::set_folding_pow_bits
-            push.0.0.0.0 push.10
+            push.0 push.0 push.0 push.0 push.10
             exec.random_coin::init_seed
             exec.public_inputs::process_public_inputs
         end

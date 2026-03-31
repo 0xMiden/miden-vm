@@ -260,9 +260,9 @@ fn test_diagnostic_failed_assertion() {
     // No error message
     let source = "
         begin
-            push.1.2
+            push.1 push.2
             assertz
-            push.3.4
+            push.3 push.4
         end";
 
     let build_test = build_test_by_mode!(true, source, &[1, 2]);
@@ -271,10 +271,10 @@ fn test_diagnostic_failed_assertion() {
         err,
         "  x assertion failed with error code: 0",
         regex!(r#",-\[test[\d]+:4:13\]"#),
-        " 3 |             push.1.2",
+        " 3 |             push.1 push.2",
         " 4 |             assertz",
         "   :             ^^^^^^^",
-        " 5 |             push.3.4",
+        " 5 |             push.3 push.4",
         "   `----",
         "  help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met"
     );
@@ -282,9 +282,9 @@ fn test_diagnostic_failed_assertion() {
     // With error message
     let source = "
         begin
-            push.1.2
+            push.1 push.2
             assertz.err=\"some error message\"
-            push.3.4
+            push.3 push.4
         end";
 
     let build_test = build_test_by_mode!(true, source, &[1, 2]);
@@ -293,10 +293,10 @@ fn test_diagnostic_failed_assertion() {
         err,
         "  x assertion failed with error message: some error message",
         regex!(r#",-\[test[\d]+:4:13\]"#),
-        " 3 |             push.1.2",
+        " 3 |             push.1 push.2",
         " 4 |             assertz.err=\"some error message\"",
         "   :             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
-        " 5 |             push.3.4",
+        " 5 |             push.3 push.4",
         "   `----",
         "  help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met"
     );
@@ -305,9 +305,9 @@ fn test_diagnostic_failed_assertion() {
     let source = "
         const ERR_MSG = \"some error message\"
         begin
-            push.1.2
+            push.1 push.2
             assertz.err=ERR_MSG
-            push.3.4
+            push.3 push.4
         end";
 
     let build_test = build_test_by_mode!(true, source, &[1, 2]);
@@ -316,10 +316,10 @@ fn test_diagnostic_failed_assertion() {
         err,
         "  x assertion failed with error message: some error message",
         regex!(r#",-\[test[\d]+:5:13\]"#),
-        " 4 |             push.1.2",
+        " 4 |             push.1 push.2",
         " 5 |             assertz.err=ERR_MSG",
         "   :             ^^^^^^^^^^^^^^^^^^^",
-        " 6 |             push.3.4",
+        " 6 |             push.3 push.4",
         "   `----",
         "  help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met"
     );

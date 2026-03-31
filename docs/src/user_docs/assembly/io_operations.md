@@ -16,18 +16,18 @@ Miden assembly provides a set of instructions for moving data between the operan
 
 | Instruction                                                                     | Stack_input | Stack_output                                         | Notes                                                                                                                                                                                               |
 | ------------------------------------------------------------------------------- | ----------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| push._a_ <br /> - _(1-2 cycles)_ <br /> push._a_._b_ <br /> push._a_._b_._c_... | [ ... ]     | [a, ... ] <br /> [b, a, ... ] <br /> [c, b, a, ... ] | Pushes values $a$, $b$, $c$ etc. onto the stack. Up to $16$ values can be specified. All values must be valid field elements in decimal (e.g., $123$) or hexadecimal (e.g., $0x7b$) representation. |
+| push._a_ <br /> - _(1-2 cycles)_ | [ ... ]     | [a, ... ] | Pushes value $a$ onto the stack. The value must be a valid field element in decimal (e.g., $123$) or hexadecimal (e.g., $0x7b$) representation. Multiple values can be pushed using separate instructions (e.g., `push.1 push.2 push.3`). |
 | push.[_a_,_b_,_c_,_d_] <br /> - _(4 cycles)_                                     | [ ... ]     | [a, b, c, d, ... ]                                   | Pushes a word (4 field elements) onto the stack. The first element $a$ ends up on top of the stack. All values must be valid field elements in decimal or hexadecimal representation. |
 
-The value can be specified in hexadecimal form without periods between individual values as long as it describes a full word ($4$ field elements or $32$ bytes). Note that hexadecimal values separated by periods (short hexadecimal strings) are assumed to be in big-endian order, while the strings specifying whole words (long hexadecimal strings) are assumed to be in little-endian order. That is, the following are semantically equivalent:
+The value can be specified in hexadecimal form. Short hexadecimal values are assumed to be in big-endian order. A full word ($4$ field elements or $32$ bytes) can be pushed using the word literal syntax `push.[a,b,c,d]` or via a long hexadecimal string (little-endian order). That is, the following are semantically equivalent:
 
 ```
-push.0x00001234.0x00005678.0x00009012.0x0000abcd
-push.0x341200000000000078560000000000001290000000000000cdab000000000000
-push.4660.22136.36882.43981
+push.0x00001234 push.0x00005678 push.0x00009012 push.0x0000abcd
+push.[0x00001234, 0x00005678, 0x00009012, 0x0000abcd]
+push.4660 push.22136 push.36882 push.43981
 ```
 
-In both case the values must still encode valid field elements.
+In all cases the values must still encode valid field elements.
 
 #### Word literal syntax
 

@@ -226,7 +226,7 @@ pub proc init_seed
     #    ^-- R2       ^-- C (INSTANCE_SEED)
 
     # Build R1 = [lth, 0, 0, 0] on top.
-    push.0.0.0
+    push.0 push.0 push.0
     exec.constants::get_trace_length_log
     #=> [lth, 0, 0, 0, 0, 0, 0, 0, C0, C1, C2, C3, ...]
     #    ^-- R1          ^-- R2     ^-- C (INSTANCE_SEED)
@@ -474,7 +474,7 @@ end
 pub proc generate_constraint_composition_coefficients
     # Sample alpha (constraint folding challenge).
     exec.sample_ext
-    push.0.0
+    push.0 push.0
     movup.3
     movup.3
     exec.constants::composition_coef_ptr

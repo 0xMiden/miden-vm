@@ -225,7 +225,7 @@ pub proc verify_query_64
     # => [rem_ptr, rem_ptr, poe^(2^n), f_pos, ne0, ne1, rem_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
 
     movup.2
-    push.0.0.0 movup.3 exec.constants::tmp2 mem_storew_le dropw
+    push.0 push.0 push.0 movup.3 exec.constants::tmp2 mem_storew_le dropw
     # => [rem_ptr, rem_ptr, f_pos, ne0, ne1, rem_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
 
     push.0 exec.constants::tmp1 mem_loadw_le
@@ -284,7 +284,7 @@ pub proc verify_query_128
     # => [rem_ptr, rem_ptr, poe^(2^n), f_pos, ne0, ne1, rem_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
 
     movup.2
-    push.0.0.0 movup.3 exec.constants::tmp2 mem_storew_le dropw
+    push.0 push.0 push.0 movup.3 exec.constants::tmp2 mem_storew_le dropw
     # => [rem_ptr, rem_ptr, f_pos, ne0, ne1, rem_ptr, rem_ptr, x, x, x, x, x, x, x, x, ...]
 
     push.0 exec.constants::tmp1 mem_loadw_le
@@ -349,7 +349,7 @@ proc verify_64
 
     # Save a word containing a fresh accumulator for Horner evaluating the remainder polynomial,
     # a pointer to the evaluation point and a pointer to the location of the polynomial.
-    push.0.0
+    push.0 push.0
     exec.constants::tmp2 exec.constants::get_remainder_poly_address
     exec.constants::tmp1 mem_storew_le
     movup.4
@@ -428,7 +428,7 @@ proc verify_128
 
     # Save a word containing a fresh accumulator for Horner evaluating the remainder polynomial,
     # a pointer to the evaluation point and a pointer to the location of the polynomial.
-    push.0.0
+    push.0 push.0
     exec.constants::tmp2 exec.constants::get_remainder_poly_address
     exec.constants::tmp1 mem_storew_le
     movup.4

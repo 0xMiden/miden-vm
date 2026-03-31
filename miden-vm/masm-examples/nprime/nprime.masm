@@ -46,7 +46,7 @@ proc is_not_prime_should_continue
 
     # push return flags
     # [continue loop?, is prime?, prime, j, candidate, i, n, primes..]
-    push.0.1
+    push.0 push.1
 
     # a composite number have its smallest prime squared lesser than itself.
     # if the squared prime is bigger than the candidate, and provided we iterate
@@ -67,7 +67,7 @@ proc is_not_prime_should_continue
     if.true
         drop
         drop
-        push.1.0
+        push.1 push.0
     end
 
     # check mod only if should continue loop
@@ -84,7 +84,7 @@ proc is_not_prime_should_continue
         if.true
             drop
             drop
-            push.0.0
+            push.0 push.0
         end
     end
 

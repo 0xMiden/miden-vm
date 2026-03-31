@@ -257,6 +257,6 @@ pub proc verify_prehash_impl
 
     # Create TAG = [EDDSA_VERIFY_EVENT, result, 0, 0] on stack
     # Stack positions 4-7 should have [event_id, result, 0, 0] for get_stack_word(4)
-    push.0.0 dup.6 push.EDDSA_VERIFY_EVENT swapw
+    push.0 push.0 dup.6 push.EDDSA_VERIFY_EVENT swapw
     # => [COMM, TAG, result]
 end

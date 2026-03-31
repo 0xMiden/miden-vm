@@ -364,14 +364,12 @@ fn inst_with_felt_imm(name: &'static str, imm: &Immediate<crate::Felt>) -> Docum
 fn inst_with_pretty_felt_params(inst: &'static str, params: &[crate::Felt]) -> Document {
     use crate::prettier::*;
 
-    let single_line = text(inst)
-        + const_text(".")
-        + params
-            .iter()
-            .copied()
-            .map(display)
-            .reduce(|acc, doc| acc + const_text(".") + doc)
-            .unwrap_or_default();
+    let single_line = params
+        .iter()
+        .copied()
+        .map(|v| text(inst) + const_text(".") + display(v))
+        .reduce(|acc, doc| acc + const_text(" ") + doc)
+        .unwrap_or_default();
 
     let multi_line = params
         .iter()
@@ -410,7 +408,7 @@ mod tests {
             "{}",
             Instruction::PushFeltList(vec![Felt::new(3), Felt::new(4), Felt::new(8), Felt::new(9)])
         );
-        assert_eq!("push.3.4.8.9", instruction);
+        assert_eq!("push.3 push.4 push.8 push.9", instruction);
         let instruction = format!(
             "{}",
             Instruction::Push(Immediate::Value(miden_debug_types::Span::unknown(

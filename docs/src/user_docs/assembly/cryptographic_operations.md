@@ -88,7 +88,7 @@ For more examples of how `hperm` instruction is used, please see `miden::core::c
 
 Both `hash` and `hmerge` instructions are actually "macro-instructions" which are implemented using `hperm` (and other) instructions. At assembly time, these are "expanded" into the following sequences of operations:
 
-- `hash`: `padw push.0.0.0.4 swapw.2 hperm dropw swapw dropw`.
+- `hash`: `padw push.0 push.0 push.0 push.4 swapw.2 hperm dropw swapw dropw`.
 - `hmerge`: `padw swapw.2 swapw hperm dropw swapw dropw`.
 
 ### Circuits and polynomials

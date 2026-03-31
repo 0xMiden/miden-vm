@@ -261,7 +261,7 @@ proc reduce_kernel_digests
     # Store number of kernel procedures digests at TMP1 as [num_ker, 0, 0, num_ker].
     # We keep only digests_ptr on the stack (dropping the counter word since we read
     # it back from TMP1 later).
-    push.0.0 dup.2
+    push.0 push.0 dup.2
     exec.constants::tmp1 mem_storew_le
     dropw
     # => [digests_ptr, ...]
@@ -287,7 +287,7 @@ proc reduce_kernel_digests
     # => [alpha0 + op_label, alpha1, beta0, beta1, digests_ptr, ...]
 
     # Push the `horner_eval_ext` accumulator
-    push.0.0
+    push.0 push.0
     # => [acc0, acc1, alpha0 + op_label, alpha1, beta0, beta1, digests_ptr, ...]
 
     # Push the pointer to the evaluation point beta
@@ -404,7 +404,7 @@ proc reduce_kernel_digests
     # Store the result at `digests_ptr` as `[prod0, prod1, 0, 0]`
     # Note that `digests_ptr` points to the group that we just reduced above and hence it is safe
     # to overwrite it with the result.
-    push.0.0
+    push.0 push.0
     movup.3
     movup.3
     # => [prod0, prod1, 0, 0, ...]

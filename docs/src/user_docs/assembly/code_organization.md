@@ -263,8 +263,8 @@ const SAMPLE_WORD = [1,2,3,4]
 const SAMPLE_HEX_WORD = 0x0200000000000000030000000000000004000000000000000500000000000000
 
 begin
-    push.SAMPLE_WORD       # is equivalent to push.1.2.3.4
-    push.SAMPLE_HEX_WORD.6 # is equivalent to push.2.3.4.5.6
+    push.SAMPLE_WORD       # is equivalent to push.[1,2,3,4]
+    push.SAMPLE_HEX_WORD.6 # is equivalent to push.2 push.3 push.4 push.5 push.6
 end
 ```
 

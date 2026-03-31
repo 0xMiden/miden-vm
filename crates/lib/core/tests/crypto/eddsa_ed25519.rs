@@ -57,7 +57,7 @@ fn test_eddsa_verify_prehash_cases() {
             begin
                 {memory_stores}
 
-                push.{SIG_ADDR}.{K_DIGEST_ADDR}.{PK_ADDR}
+                push.{SIG_ADDR} push.{K_DIGEST_ADDR} push.{PK_ADDR}
                 exec.eddsa_ed25519::verify_prehash
 
                 exec.sys::truncate_stack
@@ -85,7 +85,7 @@ fn test_eddsa_verify_prehash_cases() {
             begin
                 {memory_stores}
 
-                push.{SIG_ADDR}.{K_DIGEST_ADDR}.{PK_ADDR}
+                push.{SIG_ADDR} push.{K_DIGEST_ADDR} push.{PK_ADDR}
                 exec.eddsa_ed25519::verify_prehash
 
                 exec.sys::truncate_stack
@@ -124,7 +124,7 @@ fn test_eddsa_verify_prehash_impl_commitment() {
             begin
                 {memory_stores}
 
-                push.{SIG_ADDR}.{K_DIGEST_ADDR}.{PK_ADDR}
+                push.{SIG_ADDR} push.{K_DIGEST_ADDR} push.{PK_ADDR}
                 exec.eddsa_ed25519::verify_prehash_impl
 
                 exec.sys::truncate_stack

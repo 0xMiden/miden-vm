@@ -15,19 +15,19 @@
 #!
 #! Functionally this routine is equivalent to https://github.com/itzmeanjan/blake3/blob/f07d32e/include/blake3.hpp#!L1709-L1713
 proc initialize_2to1
-    push.0xA54FF53A.0x3C6EF372.0xBB67AE85.0x6A09E667
+    push.0xA54FF53A push.0x3C6EF372 push.0xBB67AE85 push.0x6A09E667
     movup.4
     mem_storew_be
     movup.5
     mem_storew_be
     dropw
 
-    push.0x5BE0CD19.0x1F83D9AB.0x9B05688C.0x510E527F
+    push.0x5BE0CD19 push.0x1F83D9AB push.0x9B05688C push.0x510E527F
     movup.4
     mem_storew_be
     dropw
 
-    push.11.64.0.0
+    push.11 push.64 push.0 push.0
     movup.4
     mem_storew_be
     dropw
@@ -51,19 +51,19 @@ end
 #! Functionally this routine is equivalent to https://github.com/itzmeanjan/blake3/blob/f07d32e/include/blake3.hpp#!L1709-L1713
 #! with only difference being value of BLOCK_LEN = 32
 proc initialize_1to1
-    push.0xA54FF53A.0x3C6EF372.0xBB67AE85.0x6A09E667
+    push.0xA54FF53A push.0x3C6EF372 push.0xBB67AE85 push.0x6A09E667
     movup.4
     mem_storew_be
     movup.5
     mem_storew_be
     dropw
 
-    push.0x5BE0CD19.0x1F83D9AB.0x9B05688C.0x510E527F
+    push.0x5BE0CD19 push.0x1F83D9AB push.0x9B05688C push.0x510E527F
     movup.4
     mem_storew_be
     dropw
 
-    push.11.32.0.0
+    push.11 push.32 push.0 push.0
     movup.4
     mem_storew_be
     dropw

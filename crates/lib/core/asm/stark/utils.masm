@@ -136,7 +136,7 @@ pub proc set_up_auxiliary_inputs_ace
     # => [alpha0, alpha1, 0, 0, max_cycle_len_log, ...]
 
     movup.3 movup.3
-    push.0.0 exec.constants::z_ptr mem_loadw_le
+    push.0 push.0 exec.constants::z_ptr mem_loadw_le
     # => [z_n_0, z_n_1, z_0, z_1, alpha0, alpha1, max_cycle_len_log, ...]
 
     # Compute z_k = z^(N / max_cycle_len) via repeated squaring.
@@ -228,7 +228,7 @@ pub proc set_up_auxiliary_inputs_ace
     # ==================================================================
 
     # Compute s0 = offset^N
-    push.0.7
+    push.0 push.7
     exec.constants::get_trace_length
     exp.u32
     # => [s0, 0, ...]

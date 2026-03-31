@@ -440,11 +440,11 @@ fn get_proc_digest_by_name() -> Result<(), Report> {
 
     let testing_module_source = "
         pub proc foo
-            push.1.2 add drop
+            push.1 push.2 add drop
         end
 
         pub proc bar
-            push.5.6 sub drop
+            push.5 push.6 sub drop
         end
     ";
     let testing_module = parse_module!(&context, "test::names", testing_module_source);
@@ -503,11 +503,11 @@ fn simple_main_call() -> TestResult {
             &context,
             "\
         pub proc account_method_1
-            push.2.1 add
+            push.2 push.1 add
         end
 
         pub proc account_method_2
-            push.3.1 sub
+            push.3 push.1 sub
         end
         "
         ),
@@ -552,11 +552,11 @@ fn call_without_path() -> TestResult {
             &context,
             "\
     pub proc account_method_1
-        push.2.1 add
+        push.2 push.1 add
     end
 
     pub proc account_method_2
-        push.3.1 sub
+        push.3 push.1 sub
     end
     "
         ),
@@ -571,11 +571,11 @@ fn call_without_path() -> TestResult {
             &context,
             "\
     pub proc account_method_1
-        push.2.2 add
+        push.2 push.2 add
     end
 
     pub proc account_method_2
-        push.4.1 sub
+        push.4 push.1 sub
     end
     "
         ),
@@ -618,11 +618,11 @@ fn procref_call() -> TestResult {
             &context,
             "
         pub proc aaa
-            push.7.8
+            push.7 push.8
         end
 
         pub proc foo
-            push.1.2
+            push.1 push.2
         end"
         ),
     )?;
@@ -650,7 +650,7 @@ fn procref_call() -> TestResult {
 
         @locals(4)
         proc baz
-            push.3.4
+            push.3 push.4
         end
 
         begin
@@ -854,7 +854,7 @@ fn multiple_constants_push() -> TestResult {
         "const CONSTANT_1 = 21 \
     const CONSTANT_2 = 44 \
     begin \
-    push.CONSTANT_1.64.CONSTANT_2.72 \
+    push.CONSTANT_1 push.64 push.CONSTANT_2 push.72 \
     end"
     );
     let program = context.assemble(source)?;
@@ -2929,8 +2929,8 @@ fn module_alias() -> TestResult {
         use dummy::math::u64->bigint
 
         begin
-            push.1.0
-            push.2.0
+            push.1 push.0
+            push.2 push.0
             exec.bigint::checked_add
         end"
     );
@@ -2945,8 +2945,8 @@ fn module_alias() -> TestResult {
         use dummy::math::u64->bigint->invalidname
 
         begin
-            push.1.0
-            push.2.0
+            push.1 push.0
+            push.2 push.0
             exec.bigint->invalidname::checked_add
         end"
     );
@@ -3001,8 +3001,8 @@ fn module_alias_unused_import() -> TestResult {
         use dummy::math::u64->bigint
 
         begin
-            push.1.0
-            push.2.0
+            push.1 push.0
+            push.2 push.0
             exec.bigint::checked_add
         end"
     );
@@ -3035,8 +3035,8 @@ fn module_alias_unused_import() -> TestResult {
         use dummy::math::u64->bigint2
 
         begin
-            push.1.0
-            push.2.0
+            push.1 push.0
+            push.2 push.0
             exec.bigint::checked_add
             exec.bigint2::checked_add
         end"
@@ -4037,7 +4037,7 @@ fn test_reexported_proc_with_same_name_as_local_proc_diff_locals() {
 fn test_program_serde_simple() {
     let source = "
     begin
-        push.1.2
+        push.1 push.2
         add
         drop
     end
@@ -4060,7 +4060,7 @@ fn test_program_serde_with_decorators() {
     const EVENT_CONST = event(\"serde::evt\")
 
     proc foo
-        push.1.2 add
+        push.1 push.2 add
         debug.stack.8
     end
 
@@ -4329,7 +4329,7 @@ fn build_library_example() -> Arc<Library> {
 fn build_program_example() -> Arc<Program> {
     let source = "
     begin
-        push.1.2
+        push.1 push.2
         add
         drop
     end

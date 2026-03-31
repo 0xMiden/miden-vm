@@ -13,7 +13,7 @@ use miden_vm::DefaultHost;
 fn advice_map_loaded_before_execution() {
     let source = "\
     begin
-        push.1.1.1.1
+        push.1 push.1 push.1 push.1
         adv.push_mapval
         dropw
     end";

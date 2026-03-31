@@ -89,7 +89,7 @@ fn test_single_iteration() {
 
     begin
         # insert 1 to memory
-        push.1.1000 mem_store
+        push.1 push.1000 mem_store
 
         # mem_stream state
         push.1000 padw padw padw
@@ -118,7 +118,7 @@ fn test_single_iteration() {
 
     begin
         # insert 1 to memory
-        push.1.1000 mem_store
+        push.1 push.1000 mem_store
 
         push.1008 # end address
         push.1000 # start address
@@ -149,7 +149,7 @@ fn test_hash_one_word() {
     use miden::core::crypto::hashes::poseidon2
 
     begin
-        push.1.1000 mem_store # push data to memory
+        push.1 push.1000 mem_store # push data to memory
 
         push.1004 # end address
         push.1000 # start address
@@ -167,13 +167,13 @@ fn test_hash_one_word() {
 #[test]
 fn test_hash_even_words() {
     // checks the hash of two words
-    // With mem_storew_le: push.D.C.B.A stores [A, B, C, D]
+    // With mem_storew_le: push.D push.C push.B push.A stores [A, B, C, D]
     let even_words = "
     use miden::core::crypto::hashes::poseidon2
 
     begin
-        push.0.1.0.0.1000 mem_storew_le dropw
-        push.1.0.0.0.1004 mem_storew_le dropw
+        push.0 push.1 push.0 push.0 push.1000 mem_storew_le dropw
+        push.1 push.0 push.0 push.0 push.1004 mem_storew_le dropw
 
         push.1008 # end address
         push.1000 # start address
@@ -185,7 +185,7 @@ fn test_hash_even_words() {
     end
     ";
 
-    // push.0.1.0.0 stores [0, 0, 1, 0], push.1.0.0.0 stores [0, 0, 0, 1]
+    // push.0 push.1 push.0 push.0 stores [0, 0, 1, 0], push.1 push.0 push.0 push.0 stores [0, 0, 0, 1]
     // Total input: [0, 0, 1, 0, 0, 0, 0, 1]
     #[rustfmt::skip]
     let even_hash: Vec<u64> = build_expected_hash(&[
@@ -204,9 +204,9 @@ fn test_hash_odd_words() {
     use miden::core::crypto::hashes::poseidon2
 
     begin
-        push.0.1.0.0.1000 mem_storew_le dropw
-        push.0.0.1.0.1004 mem_storew_le dropw
-        push.0.0.0.1.1008 mem_storew_le dropw
+        push.0 push.1 push.0 push.0 push.1000 mem_storew_le dropw
+        push.0 push.0 push.1 push.0 push.1004 mem_storew_le dropw
+        push.0 push.0 push.0 push.1 push.1008 mem_storew_le dropw
 
         push.1012 # end address
         push.1000 # start address
@@ -229,14 +229,14 @@ fn test_hash_odd_words() {
 
 #[test]
 fn test_absorb_double_words_from_memory() {
-    // With mem_storew_le: push.D.C.B.A stores [A, B, C, D]
+    // With mem_storew_le: push.D push.C push.B push.A stores [A, B, C, D]
     let even_words = "
     use miden::core::sys
     use miden::core::crypto::hashes::poseidon2
 
     begin
-        push.0.0.0.1.1000 mem_storew_le dropw
-        push.0.0.1.0.1004 mem_storew_le dropw
+        push.0 push.0 push.0 push.1 push.1000 mem_storew_le dropw
+        push.0 push.0 push.1 push.0 push.1004 mem_storew_le dropw
 
         push.1008      # end address
         push.1000      # start address
@@ -248,7 +248,7 @@ fn test_absorb_double_words_from_memory() {
     end
     ";
 
-    // push.0.0.0.1 stores [1, 0, 0, 0], push.0.0.1.0 stores [0, 1, 0, 0]
+    // push.0 push.0 push.0 push.1 stores [1, 0, 0, 0], push.0 push.0 push.1 push.0 stores [0, 1, 0, 0]
     #[rustfmt::skip]
     let mut even_hash: Vec<u64> = build_expected_perm(&[
         1, 0, 0, 0, // first word of the rate
@@ -266,17 +266,17 @@ fn test_absorb_double_words_from_memory() {
 #[test]
 fn test_hash_double_words() {
     // test the standard case
-    // With mem_storew_le: push.D.C.B.A stores [A, B, C, D]
+    // With mem_storew_le: push.D push.C push.B push.A stores [A, B, C, D]
     let double_words = "
     use miden::core::sys
     use miden::core::crypto::hashes::poseidon2
 
     begin
         # store four words (two double words) in memory
-        push.0.0.0.1.1000 mem_storew_le dropw
-        push.0.0.1.0.1004 mem_storew_le dropw
-        push.0.1.0.0.1008 mem_storew_le dropw
-        push.1.0.0.0.1012 mem_storew_le dropw
+        push.0 push.0 push.0 push.1 push.1000 mem_storew_le dropw
+        push.0 push.0 push.1 push.0 push.1004 mem_storew_le dropw
+        push.0 push.1 push.0 push.0 push.1008 mem_storew_le dropw
+        push.1 push.0 push.0 push.0 push.1012 mem_storew_le dropw
 
         push.1016      # end address
         push.1000      # start address
@@ -291,7 +291,7 @@ fn test_hash_double_words() {
     end
     ";
 
-    // push.0.0.0.1 stores [1,0,0,0], push.0.0.1.0 stores [0,1,0,0], etc.
+    // push.0 push.0 push.0 push.1 stores [1,0,0,0], push.0 push.0 push.1 push.0 stores [0,1,0,0], etc.
     // Total: [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]
     #[rustfmt::skip]
     let resulting_hash: Vec<u64> = build_expected_hash(&[
@@ -309,7 +309,7 @@ fn test_hash_double_words() {
     use miden::core::crypto::hashes::poseidon2
 
     begin
-        push.1000.1000 # start and end addresses
+        push.1000 push.1000 # start and end addresses
         # => [start_addr, end_addr]
 
         exec.poseidon2::hash_double_words
@@ -329,15 +329,15 @@ fn test_hash_double_words() {
 
 #[test]
 fn test_squeeze_digest() {
-    // With mem_storew_le: push.D.C.B.A stores [A, B, C, D]
+    // With mem_storew_le: push.D push.C push.B push.A stores [A, B, C, D]
     let even_words = "
     use miden::core::crypto::hashes::poseidon2
 
     begin
-        push.0.0.0.1.1000 mem_storew_le dropw
-        push.0.0.1.0.1004 mem_storew_le dropw
-        push.0.1.0.0.1008 mem_storew_le dropw
-        push.1.0.0.0.1012 mem_storew_le dropw
+        push.0 push.0 push.0 push.1 push.1000 mem_storew_le dropw
+        push.0 push.0 push.1 push.0 push.1004 mem_storew_le dropw
+        push.0 push.1 push.0 push.0 push.1008 mem_storew_le dropw
+        push.1 push.0 push.0 push.0 push.1012 mem_storew_le dropw
 
         push.1016      # end address
         push.1000      # start address
@@ -369,14 +369,14 @@ fn test_squeeze_digest() {
 
 #[test]
 fn test_copy_digest() {
-    // With mem_storew_le: push.D.C.B.A stores [A, B, C, D]
+    // With mem_storew_le: push.D push.C push.B push.A stores [A, B, C, D]
     let copy_digest = r#"
     use miden::core::sys
     use miden::core::crypto::hashes::poseidon2
 
     begin
-        push.1.0.0.0.1000 mem_storew_le dropw
-        push.0.1.0.0.1004 mem_storew_le dropw
+        push.1 push.0 push.0 push.0 push.1000 mem_storew_le dropw
+        push.0 push.1 push.0 push.0 push.1004 mem_storew_le dropw
 
         push.1008      # end address
         push.1000      # start address
@@ -401,7 +401,7 @@ fn test_copy_digest() {
     end
     "#;
 
-    // push.1.0.0.0 stores [0, 0, 0, 1], push.0.1.0.0 stores [0, 0, 1, 0]
+    // push.1 push.0 push.0 push.0 stores [0, 0, 0, 1], push.0 push.1 push.0 push.0 stores [0, 0, 1, 0]
     #[rustfmt::skip]
     let mut resulting_stack: Vec<u64> = build_expected_perm(&[
         0, 0, 0, 1, // first word of the rate
@@ -426,11 +426,11 @@ fn test_hash_elements() {
     use miden::core::crypto::hashes::poseidon2
 
     begin
-        push.4.3.2.1.1000 mem_storew_le dropw
-        push.0.0.0.5.1004 mem_storew_le dropw
+        push.4 push.3 push.2 push.1 push.1000 mem_storew_le dropw
+        push.0 push.0 push.0 push.5 push.1004 mem_storew_le dropw
         push.11
 
-        push.5.1000
+        push.5 push.1000
 
         exec.poseidon2::hash_elements
 
@@ -452,11 +452,11 @@ fn test_hash_elements() {
     use miden::core::crypto::hashes::poseidon2
 
     begin
-        push.4.3.2.1.1000 mem_storew_le dropw
-        push.8.7.6.5.1004 mem_storew_le dropw
+        push.4 push.3 push.2 push.1 push.1000 mem_storew_le dropw
+        push.8 push.7 push.6 push.5 push.1004 mem_storew_le dropw
         push.11
 
-        push.8.1000
+        push.8 push.1000
 
         exec.poseidon2::hash_elements
 
@@ -478,13 +478,13 @@ fn test_hash_elements() {
     use miden::core::crypto::hashes::poseidon2
 
     begin
-        push.4.3.2.1.1000 mem_storew_le dropw
-        push.8.7.6.5.1004 mem_storew_le dropw
-        push.12.11.10.9.1008 mem_storew_le dropw
-        push.16.15.14.13.1012 mem_storew_le dropw
+        push.4 push.3 push.2 push.1 push.1000 mem_storew_le dropw
+        push.8 push.7 push.6 push.5 push.1004 mem_storew_le dropw
+        push.12 push.11 push.10 push.9 push.1008 mem_storew_le dropw
+        push.16 push.15 push.14 push.13 push.1012 mem_storew_le dropw
         push.11
 
-        push.15.1000
+        push.15 push.1000
 
         exec.poseidon2::hash_elements
 

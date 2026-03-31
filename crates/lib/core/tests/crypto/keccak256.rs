@@ -63,7 +63,7 @@ fn test_keccak_handler(input_u8: &[u8]) {
                 {memory_stores_source}
 
                 # Push handler inputs
-                push.{len_bytes}.{INPUT_MEMORY_ADDR}
+                push.{len_bytes} push.{INPUT_MEMORY_ADDR}
                 # => [ptr, len_bytes, ...]
 
                 emit.event("{KECCAK_HASH_BYTES_EVENT_NAME}")
@@ -108,7 +108,7 @@ fn test_keccak_hash_bytes_impl(input_u8: &[u8]) {
                 {memory_stores_source}
 
                 # Push wrapper inputs
-                push.{len_bytes}.{INPUT_MEMORY_ADDR}
+                push.{len_bytes} push.{INPUT_MEMORY_ADDR}
                 # => [ptr, len_bytes]
 
                 exec.keccak256::hash_bytes_impl
@@ -161,7 +161,7 @@ fn test_keccak_hash_bytes(input_u8: &[u8]) {
                 {memory_stores_source}
 
                 # Push wrapper inputs
-                push.{len_bytes}.{INPUT_MEMORY_ADDR}
+                push.{len_bytes} push.{INPUT_MEMORY_ADDR}
                 # => [ptr, len_bytes]
 
                 exec.keccak256::hash_bytes
@@ -328,7 +328,7 @@ fn run_keccak_with_max_hash_len(
         r#"
         begin
             {memory_stores}
-            push.{len_bytes_on_stack}.{INPUT_MEMORY_ADDR}
+            push.{len_bytes_on_stack} push.{INPUT_MEMORY_ADDR}
             emit.event("{KECCAK_HASH_BYTES_EVENT_NAME}")
             drop drop
         end

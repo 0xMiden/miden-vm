@@ -168,7 +168,7 @@ pub proc load_h_s2_and_product
     # 1) Set up the stack for loading the coefficients of the polynomials, evaluating and hashing them
 
     ## a) Set up the accumulator for `horner_eval_base` and the memory pointers
-    push.0.0
+    push.0 push.0
     locaddr.4
     movup.3
     # => [ptr, tau_inv_ptr, 0, 0, PK, ...]
