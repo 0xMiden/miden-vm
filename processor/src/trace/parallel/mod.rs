@@ -19,6 +19,7 @@ use miden_core::{
     mast::{MastForest, MastNode},
     operations::opcodes,
     program::{Kernel, MIN_STACK_DEPTH},
+    utils::{Matrix, RowMajorMatrix},
 };
 use rayon::prelude::*;
 use tracing::instrument;
@@ -161,13 +162,13 @@ pub fn build_trace_with_max_len(
 
     let range_checker = initialize_range_checker(range_checker_replay, &chiplets);
 
-    let mut core_trace_data = generate_core_trace_row_major(
+    let mut core_trace = generate_core_trace_row_major(
         core_trace_contexts,
         program_info.kernel().clone(),
         fragment_size,
     )?;
 
-    let core_trace_len = core_trace_data.len() / CORE_TRACE_WIDTH;
+    let core_trace_len = core_trace.height();
 
     // Get the number of rows for the range checker
     let range_table_len = range_checker.get_number_range_checker_rows();
@@ -186,7 +187,7 @@ pub fn build_trace_with_max_len(
                 || chiplets.into_trace(main_trace_len),
             )
         },
-        || pad_core_row_major(&mut core_trace_data, main_trace_len),
+        || pad_core_row_major(&mut core_trace, main_trace_len),
     );
 
     let ChipletsTrace {
@@ -198,7 +199,7 @@ pub fn build_trace_with_max_len(
     let main_trace = {
         let last_program_row = RowIndex::from((core_trace_len as u32).saturating_sub(1));
         MainTrace::from_parts(
-            core_trace_data,
+            core_trace,
             chiplets_mat,
             range_checker_trace.trace,
             main_trace_len,
@@ -239,12 +240,12 @@ fn compute_main_trace_length(
     core::cmp::max(trace_len, MIN_TRACE_LEN)
 }
 
-/// Generates row-major core trace in parallel from the provided trace fragment contexts.
+/// Generates the core trace in parallel as a [`RowMajorMatrix`] with width [`CORE_TRACE_WIDTH`].
 fn generate_core_trace_row_major(
     core_trace_contexts: Vec<CoreTraceFragmentContext>,
     kernel: Kernel,
     fragment_size: usize,
-) -> Result<Vec<Felt>, ExecutionError> {
+) -> Result<RowMajorMatrix<Felt>, ExecutionError> {
     let num_fragments = core_trace_contexts.len();
     let total_allocated_rows = num_fragments * fragment_size;
 
@@ -334,7 +335,7 @@ fn generate_core_trace_row_major(
         ))?,
     );
 
-    Ok(core_trace_data)
+    Ok(RowMajorMatrix::new(core_trace_data, CORE_TRACE_WIDTH))
 }
 
 /// Initializing the first row of each fragment with the appropriate stack and system state.
@@ -614,9 +615,11 @@ fn initialize_chiplets(
     Ok(chiplets)
 }
 
-/// Pads the core trace to `main_trace_len` rows (HALT template, CLK incremented per row).
-fn pad_core_row_major(core_trace_data: &mut Vec<Felt>, main_trace_len: usize) {
+/// Pads the core trace matrix to `main_trace_len` rows (HALT template, CLK incremented per row).
+fn pad_core_row_major(core_trace: &mut RowMajorMatrix<Felt>, main_trace_len: usize) {
     let w = CORE_TRACE_WIDTH;
+    debug_assert_eq!(core_trace.width(), w);
+    let core_trace_data = &mut core_trace.values;
     let total_program_rows = core_trace_data.len() / w;
     assert!(total_program_rows <= main_trace_len);
     assert!(total_program_rows > 0);

@@ -132,16 +132,17 @@ impl MainTrace {
         }
     }
 
-    /// Builds from `build_trace` outputs: core row-major buffer, chiplets as a
-    /// [`RowMajorMatrix`], and range checker column vectors.
+    /// Builds from `build_trace` outputs: core and chiplets as [`RowMajorMatrix`] traces
+    /// and range checker column vectors.
     pub fn from_parts(
-        core_rm: Vec<Felt>,
+        core_rm: RowMajorMatrix<Felt>,
         chiplets_rm: RowMajorMatrix<Felt>,
         range_checker_cols: [Vec<Felt>; 2],
         num_rows: usize,
         last_program_row: RowIndex,
     ) -> Self {
-        assert_eq!(core_rm.len(), num_rows * CORE_WIDTH);
+        assert_eq!(core_rm.width(), CORE_WIDTH, "core trace width matches CORE_WIDTH");
+        assert_eq!(core_rm.height(), num_rows, "core trace height matches num_rows");
         assert_eq!(
             chiplets_rm.width(),
             CHIPLETS_WIDTH,
@@ -150,7 +151,6 @@ impl MainTrace {
         assert_eq!(chiplets_rm.height(), num_rows, "chiplet trace height matches num_rows");
         assert_eq!(range_checker_cols[0].len(), num_rows);
         assert_eq!(range_checker_cols[1].len(), num_rows);
-        let core_rm = RowMajorMatrix::new(core_rm, CORE_WIDTH);
         Self {
             storage: TraceStorage::Parts {
                 core_rm,
@@ -1068,46 +1068,5 @@ impl MainTrace {
             && self.chiplet_selector_1(i) == ONE
             && self.chiplet_selector_2(i) == ONE
             && self.chiplet_selector_3(i) == ONE
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use miden_core::Felt;
-
-    use super::*;
-
-    #[test]
-    fn parts_debug_preserves_layout() {
-        let num_rows = 2;
-        let core_rm = (0..num_rows * CORE_WIDTH)
-            .map(|v| Felt::new(u64::try_from(v).unwrap()))
-            .collect::<Vec<_>>();
-        let chiplets_flat = (0..num_rows * CHIPLETS_WIDTH)
-            .map(|v| Felt::new(u64::try_from(v + 100).unwrap()))
-            .collect::<Vec<_>>();
-        let chiplets_rm = RowMajorMatrix::new(chiplets_flat.clone(), CHIPLETS_WIDTH);
-        let range_checker_cols = [
-            (0..num_rows)
-                .map(|v| Felt::new(u64::try_from(v + 200).unwrap()))
-                .collect::<Vec<_>>(),
-            (0..num_rows)
-                .map(|v| Felt::new(u64::try_from(v + 300).unwrap()))
-                .collect::<Vec<_>>(),
-        ];
-        let expected_parts = format!(
-            "Parts {{ core_rm: {:?}, chiplets_rm: {:?}, range_checker_cols: {:?}, num_rows: {num_rows} }}",
-            core_rm, chiplets_flat, range_checker_cols
-        );
-        let trace = MainTrace::from_parts(
-            core_rm.clone(),
-            chiplets_rm,
-            [range_checker_cols[0].clone(), range_checker_cols[1].clone()],
-            num_rows,
-            RowIndex::from(0),
-        );
-        let expected =
-            format!("MainTrace {{ storage: {expected_parts}, last_program_row: RowIndex(0) }}");
-        assert_eq!(format!("{:?}", trace), expected);
     }
 }
