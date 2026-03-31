@@ -12,8 +12,8 @@ use miden_core::{
 
 use super::{
     CHIPLETS_OFFSET, CHIPLETS_WIDTH, CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET,
-    DECODER_TRACE_WIDTH, FN_HASH_OFFSET, PADDED_TRACE_WIDTH, RANGE_CHECK_TRACE_OFFSET,
-    RANGE_CHECK_TRACE_WIDTH, RowIndex, STACK_TRACE_OFFSET, STACK_TRACE_WIDTH,
+    DECODER_TRACE_WIDTH, FN_HASH_OFFSET, RANGE_CHECK_TRACE_OFFSET, RANGE_CHECK_TRACE_WIDTH,
+    RowIndex, STACK_TRACE_OFFSET, STACK_TRACE_WIDTH, TRACE_WIDTH,
     chiplets::{
         BITWISE_A_COL_IDX, BITWISE_B_COL_IDX, BITWISE_OUTPUT_COL_IDX, HASHER_NODE_INDEX_COL_IDX,
         HASHER_STATE_COL_RANGE, MEMORY_CLK_COL_IDX, MEMORY_CTX_COL_IDX, MEMORY_IDX0_COL_IDX,
@@ -196,7 +196,7 @@ impl MainTrace {
                 num_rows,
             } => {
                 assert!(r < *num_rows, "main trace row index in bounds");
-                assert!(col < PADDED_TRACE_WIDTH, "main trace column index in bounds");
+                assert!(col < TRACE_WIDTH, "main trace column index in bounds");
 
                 if col < CORE_WIDTH {
                     core_rm.row_slice(r).expect("main trace row index in bounds")[col]
@@ -231,7 +231,7 @@ impl MainTrace {
     #[inline]
     pub fn width(&self) -> usize {
         match &self.storage {
-            TraceStorage::Parts { .. } => PADDED_TRACE_WIDTH,
+            TraceStorage::Parts { .. } => TRACE_WIDTH,
             TraceStorage::RowMajor(matrix) => matrix.width(),
             TraceStorage::Transposed { num_cols, .. } => *num_cols,
         }
@@ -249,9 +249,8 @@ impl MainTrace {
                 num_rows,
             } => {
                 let h = *num_rows;
-                let w = PADDED_TRACE_WIDTH;
+                let w = TRACE_WIDTH;
                 let cw = CHIPLETS_WIDTH;
-                let num_pad = PADDED_TRACE_WIDTH - CORE_WIDTH - 2 - cw;
 
                 let total = h * w;
                 let mut data = Vec::with_capacity(total);
@@ -274,9 +273,6 @@ impl MainTrace {
                         dst[CORE_WIDTH + 2..CORE_WIDTH + 2 + cw].copy_from_slice(
                             &chiplets_rm.row_slice(row).expect("main trace row index in bounds"),
                         );
-                        for p in 0..num_pad {
-                            dst[CORE_WIDTH + 2 + cw + p] = ZERO;
-                        }
                     }
                 };
 

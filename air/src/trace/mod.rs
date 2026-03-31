@@ -1,6 +1,5 @@
 use core::ops::Range;
 
-use chiplets::hasher::RATE_LEN;
 use miden_core::utils::range;
 
 mod challenges;
@@ -126,7 +125,6 @@ pub const CHIPLET_S3_COL_IDX: usize = CHIPLET_SELECTORS_RANGE.start + 3;
 pub const CHIPLET_S4_COL_IDX: usize = CHIPLET_SELECTORS_RANGE.start + 4;
 
 pub const TRACE_WIDTH: usize = CHIPLETS_OFFSET + CHIPLETS_WIDTH;
-pub const PADDED_TRACE_WIDTH: usize = TRACE_WIDTH.next_multiple_of(RATE_LEN);
 
 // AUXILIARY COLUMNS LAYOUT
 // ------------------------------------------------------------------------------------------------
