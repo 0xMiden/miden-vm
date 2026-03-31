@@ -30,9 +30,13 @@ impl SectionId {
     /// This section provides the encoded metadata for a compiled account component
     ///
     /// Currently, this corresponds to the serialized representation of
-    /// `miden-objects::account::AccountComponentMetadata`, i.e. name, descrioption, storage, that
+    /// `miden-protocol::account::AccountComponentMetadata`, i.e. name, descrioption, storage, that
     /// is associated with this package.
     pub const ACCOUNT_COMPONENT_METADATA: Self = Self(Cow::Borrowed("account_component_metadata"));
+    /// This section contains provenance metadata for packages assembled from project sources.
+    pub const PROJECT_SOURCE_PROVENANCE: Self = Self(Cow::Borrowed("project_source_provenance"));
+    /// This section contains the serialized kernel package linked against by an executable package.
+    pub const KERNEL: Self = Self(Cow::Borrowed("kernel"));
 
     /// Construct a user-defined (i.e. "custom") section identifier
     ///
@@ -77,6 +81,8 @@ impl FromStr for SectionId {
             "debug_sources" => Ok(Self::DEBUG_SOURCES),
             "debug_functions" => Ok(Self::DEBUG_FUNCTIONS),
             "account_component_metadata" => Ok(Self::ACCOUNT_COMPONENT_METADATA),
+            "project_source_provenance" => Ok(Self::PROJECT_SOURCE_PROVENANCE),
+            "kernel" => Ok(Self::KERNEL),
             custom => Self::custom(custom),
         }
     }
