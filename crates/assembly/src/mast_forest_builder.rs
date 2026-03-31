@@ -5,8 +5,6 @@ use alloc::{
 };
 use core::ops::{Index, IndexMut};
 
-#[cfg(test)]
-use miden_core::mast::{LoopNodeBuilder, SplitNodeBuilder};
 use miden_core::{
     Felt, Word,
     advice::AdviceMap,
@@ -21,7 +19,6 @@ use miden_core::{
 
 use super::{GlobalItemIndex, LinkerError, Procedure};
 use crate::{
-    Library,
     diagnostics::{IntoDiagnostic, Report, WrapErr},
     report,
 };
@@ -95,10 +92,10 @@ impl MastForestBuilder {
     /// to be dynamically-linked, and are inserted as an external node. Dynamically-linked libraries
     /// must be provided separately to the processor at runtime.
     pub fn new<'a>(
-        static_libraries: impl IntoIterator<Item = &'a Library>,
+        static_libraries: impl IntoIterator<Item = &'a MastForest>,
     ) -> Result<Self, Report> {
         // All statically-linked libraries are merged into a single MastForest.
-        let forests = static_libraries.into_iter().map(|lib| lib.mast_forest().as_ref());
+        let forests = static_libraries.into_iter();
         let (statically_linked_mast, _remapping) = MastForest::merge(forests).into_diagnostic()?;
         // The AdviceMap of the statically-linked forest is copied to the forest being built.
         //
@@ -670,7 +667,7 @@ impl MastForestBuilder {
 
     /// Adds a split node to the forest, and returns the [`MastNodeId`] associated with it.
     // Kept for giving tests some consistency
-    #[cfg(test)]
+    #[cfg(all(test, feature = "std"))]
     pub fn ensure_split(
         &mut self,
         left_child: MastNodeId,
@@ -678,6 +675,7 @@ impl MastForestBuilder {
         before_enter: Vec<DecoratorId>,
         after_exit: Vec<DecoratorId>,
     ) -> Result<MastNodeId, Report> {
+        use miden_core::mast::SplitNodeBuilder;
         let split = SplitNodeBuilder::new([left_child, right_child])
             .with_before_enter(before_enter)
             .with_after_exit(after_exit);
@@ -686,13 +684,14 @@ impl MastForestBuilder {
 
     /// Adds a loop node to the forest, and returns the [`MastNodeId`] associated with it.
     // Kept for giving tests some consistency
-    #[cfg(test)]
+    #[cfg(all(test, feature = "std"))]
     pub fn ensure_loop(
         &mut self,
         body: MastNodeId,
         before_enter: Vec<DecoratorId>,
         after_exit: Vec<DecoratorId>,
     ) -> Result<MastNodeId, Report> {
+        use miden_core::mast::LoopNodeBuilder;
         let loop_node = LoopNodeBuilder::new(body)
             .with_before_enter(before_enter)
             .with_after_exit(after_exit);

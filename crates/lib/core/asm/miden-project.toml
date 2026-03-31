@@ -1,0 +1,13 @@
+[package]
+name = "miden-core"
+version = "0.22.0"
+
+[lib]
+namespace = "miden::core"
+path = "mod.masm"
+
+[profile.release]
+# Always produce debug information, as it can be stripped later by the VM
+debug = true
+# Use workspace-relative file paths in debug info for portability
+trim_paths = true
