@@ -17,6 +17,7 @@
 - [BREAKING] Removed the deprecated `FastProcessor::execute_for_trace_sync()` and `execute_for_trace()` wrappers; use `execute_trace_inputs_sync()` or `execute_trace_inputs()` instead ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
 - [BREAKING] Removed the deprecated unbound `TraceBuildInputs::new()` and `TraceBuildInputs::from_program()` constructors; use `execute_trace_inputs_sync()` or `execute_trace_inputs()` instead ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
 - Added `prove_from_trace_sync(...)` for proving from pre-executed trace inputs ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
+- Refactor trace generation to row-major format ([#2937](https://github.com/0xMiden/miden-vm/pull/2937)).
 
 #### Bug Fixes
 
