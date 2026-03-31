@@ -100,10 +100,9 @@ pub fn build_trace_with_max_len(
         trace_output,
         trace_generation_context,
         program_info,
-        precompile_requests_digest,
     } = inputs;
 
-    if precompile_requests_digest != trace_output.precompile_requests_digest() {
+    if !trace_output.has_matching_precompile_requests_digest() {
         return Err(ExecutionError::Internal(
             "trace inputs do not match deferred precompile requests",
         ));

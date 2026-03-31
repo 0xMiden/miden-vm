@@ -404,8 +404,8 @@ fn test_trace_generation_at_fragment_boundaries(
         trace_from_single_fragment.precompile_requests(),
     );
     assert_eq!(
-        trace_from_fragments.final_precompile_transcript(),
-        trace_from_single_fragment.final_precompile_transcript(),
+        trace_from_fragments.final_pc_transcript,
+        trace_from_single_fragment.final_pc_transcript,
     );
 
     // Verify aux trace columns match.
@@ -994,8 +994,7 @@ fn test_build_trace_rejects_mismatched_precompile_requests() {
     );
     let mut host = DefaultHost::default();
     let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
-    let (trace_output, trace_generation_context, program_info, precompile_requests_digest) =
-        trace_inputs.into_parts();
+    let (trace_output, trace_generation_context, program_info) = trace_inputs.into_parts();
 
     let mut other_trace_output = trace_output;
     other_trace_output
@@ -1006,7 +1005,6 @@ fn test_build_trace_rejects_mismatched_precompile_requests() {
         other_trace_output,
         trace_generation_context,
         program_info,
-        precompile_requests_digest,
     ));
 
     assert!(
@@ -1266,7 +1264,7 @@ impl core::fmt::Debug for DeterministicTrace<'_> {
             .field("program_info", &trace.program_info())
             .field("stack_outputs", &trace.stack_outputs())
             .field("precompile_requests", &trace.precompile_requests())
-            .field("final_precompile_transcript", &trace.final_precompile_transcript())
+            .field("final_precompile_transcript", &trace.final_pc_transcript)
             .field("trace_len_summary", &trace.trace_len_summary())
             .finish()
     }

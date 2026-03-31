@@ -48,17 +48,8 @@ impl TraceProvingInputs {
         Self { trace_inputs, options }
     }
 
-    /// Returns the post-execution trace inputs that will be replayed into a trace.
-    pub fn trace_inputs(&self) -> &TraceBuildInputs {
-        &self.trace_inputs
-    }
-
-    /// Returns the proof-generation options used once the execution trace has been rebuilt.
-    pub fn options(&self) -> &ProvingOptions {
-        &self.options
-    }
-
-    fn into_parts(self) -> (TraceBuildInputs, ProvingOptions) {
+    /// Consumes this bundle and returns its trace inputs and proof-generation options.
+    pub fn into_parts(self) -> (TraceBuildInputs, ProvingOptions) {
         (self.trace_inputs, self.options)
     }
 }
