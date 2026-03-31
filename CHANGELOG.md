@@ -8,6 +8,7 @@
 #### Bug Fixes
 
 - Reverted `InvokeKind::ProcRef` back to `InvokeKind::Exec` in `visit_mut_procref` and added an explanatory comment (#2893).
+- Fixed secondary panic in assembly error reporting: `SourceFile::location()` could panic with "invalid source span: starting byte is out of bounds" when displaying diagnostics for unknown procedures or misspelled imports; introduced `SourceFile::try_location()` and updated callers to return `None` / fall back to column 0 instead of panicking ([#2778](https://github.com/0xMiden/miden-vm/issues/2778)).
 #### Changes
 
 - Documented that enum variants are module-level constants and must be unique within a module (#2932).

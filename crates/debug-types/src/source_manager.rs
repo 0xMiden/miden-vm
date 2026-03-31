@@ -368,7 +368,12 @@ impl DefaultSourceManagerImpl {
         self.files
             .get(span.source_id())
             .ok_or(SourceManagerError::InvalidSourceId)
-            .map(|file| file.location(span))
+            .and_then(|file| {
+                // Use `try_location` to avoid a panic when the span's byte-offset is
+                // out of bounds (e.g. spans from synthetic/incomplete source information
+                // produced during assembly diagnostics). See #2778.
+                file.try_location(span).ok_or(SourceManagerError::InvalidSourceId)
+            })
     }
 
     fn location_to_span(&self, loc: Location) -> Option<SourceSpan> {

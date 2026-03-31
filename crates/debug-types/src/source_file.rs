@@ -191,13 +191,32 @@ impl SourceFile {
         Some(SourceSpan::at(self.id, offset.0))
     }
 
-    /// Get a [FileLineCol] equivalent to the start of the given [SourceSpan]
+    /// Get a [FileLineCol] equivalent to the start of the given [SourceSpan].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the span's starting byte index is out of bounds for this file's content.
+    /// Use [`try_location`](Self::try_location) for a non-panicking variant.
     pub fn location(&self, span: SourceSpan) -> FileLineCol {
         assert_eq!(span.source_id(), self.id, "mismatched source ids");
 
         self.content
             .location(ByteIndex(span.into_range().start))
             .expect("invalid source span: starting byte is out of bounds")
+    }
+
+    /// Get a [FileLineCol] equivalent to the start of the given [SourceSpan], returning `None`
+    /// if the span's starting byte index is out of bounds for this file's content.
+    ///
+    /// This is the non-panicking variant of [`location`](Self::location). Prefer this method
+    /// when the span may originate from error-reporting paths where the byte index cannot be
+    /// guaranteed to be in-bounds (e.g. spans constructed from incomplete or synthetic source
+    /// information during assembly diagnostics). Fixes #2778.
+    pub fn try_location(&self, span: SourceSpan) -> Option<FileLineCol> {
+        if span.source_id() != self.id {
+            return None;
+        }
+        self.content.location(ByteIndex(span.into_range().start))
     }
 }
 
@@ -355,8 +374,15 @@ impl<'a> miette::SpanContents<'a> for ScopedSourceFileRef<'a> {
         let start = self.span.offset() as u32;
         let end = start + self.span.len() as u32;
         let span = SourceSpan::new(self.file.id(), start..end);
-        let loc = self.file.location(span);
-        loc.column.to_index().to_usize()
+        // Use `try_location` to avoid a panic when the span byte-offset is out of bounds.
+        // This can happen during assembly diagnostics when a procedure name, import, or
+        // decorator references a source location that was synthesised or is otherwise
+        // invalid. In that case we fall back to column 0 so the error can still be
+        // displayed rather than causing a secondary panic. See #2778.
+        self.file
+            .try_location(span)
+            .map(|loc| loc.column.to_index().to_usize())
+            .unwrap_or(0)
     }
 
     #[inline]
