@@ -7,6 +7,7 @@
 #### Bug Fixes
 
 - Reverted `InvokeKind::ProcRef` back to `InvokeKind::Exec` in `visit_mut_procref` and added an explanatory comment (#2893).
+- Fixed `FastProcessor` so `after_exit` trace decorators execute when tracing is enabled without debug mode, and added a tracing-only regression test.
 #### Changes
 
 - Documented that enum variants are module-level constants and must be unique within a module (#2932).
