@@ -250,8 +250,15 @@ impl Memory {
         // set the previous address and clock cycle to the first address and clock cycle of the
         // trace; we also adjust the clock cycle so that delta value for the first row would end
         // up being ZERO. if the trace is empty, return without any further processing.
+        //
+        // NOTE: `wrapping_sub(1)` is intentional here. When the first memory access occurs at
+        // clock cycle 0 (clk == 0), subtracting 1 wraps to u64::MAX. The subsequent delta
+        // computation `clk - prev_clk` then yields `0 - u64::MAX`, which also wraps back to 1.
+        // This happens to be the correct delta (consecutive-clock access at the same address).
+        // Using plain `- 1` would panic in debug builds; `wrapping_sub` makes the intent explicit
+        // and ensures consistent behaviour across debug and release builds. See #2828.
         let (mut prev_ctx, mut prev_addr, mut prev_clk) = match self.get_first_row_info() {
-            Some((ctx, addr, clk)) => (ctx, addr, clk.as_canonical_u64() - 1),
+            Some((ctx, addr, clk)) => (ctx, addr, clk.as_canonical_u64().wrapping_sub(1)),
             None => return,
         };
 
@@ -291,9 +298,15 @@ impl Memory {
     pub fn fill_trace(self, trace: &mut TraceFragment) {
         debug_assert_eq!(self.trace_len(), trace.len(), "inconsistent trace lengths");
 
-        // set the pervious address and clock cycle to the first address and clock cycle of the
+        // set the previous address and clock cycle to the first address and clock cycle of the
         // trace; we also adjust the clock cycle so that delta value for the first row would end
         // up being ZERO. if the trace is empty, return without any further processing.
+        //
+        // NOTE: `clk - ONE` uses Felt field arithmetic. When clk == ZERO this wraps to P - 1
+        // (the largest field element). The subsequent delta `clk - prev_clk` then evaluates to
+        // `0 - (P - 1) == 1` in the field, which is the correct delta for a first access at
+        // clock 0. This relies on field-element wrap-around semantics and is intentional.
+        // See #2828.
         let (mut prev_ctx, mut prev_addr, mut prev_clk) = match self.get_first_row_info() {
             Some((ctx, addr, clk)) => (Felt::from(ctx), Felt::from_u32(addr), clk - ONE),
             None => return,

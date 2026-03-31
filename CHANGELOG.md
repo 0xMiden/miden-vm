@@ -8,6 +8,8 @@
 #### Bug Fixes
 
 - Reverted `InvokeKind::ProcRef` back to `InvokeKind::Exec` in `visit_mut_procref` and added an explanatory comment (#2893).
+- Documented and stabilised the wrapping-subtraction semantics used to initialise `prev_clk` in `Memory::append_range_checks` and `Memory::fill_trace`; replaced the implicit `- 1` with `wrapping_sub(1)` so the intent is explicit and debug builds no longer overflow ([#2828](https://github.com/0xMiden/miden-vm/issues/2828)).
+
 #### Changes
 
 - Documented that enum variants are module-level constants and must be unique within a module (#2932).
