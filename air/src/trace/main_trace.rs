@@ -386,7 +386,7 @@ impl MainTrace {
 
                 #[cfg(feature = "concurrent")]
                 {
-                    use rayon::prelude::*;
+                    use miden_crypto::parallel::*;
                     let rows_per_chunk = ROW_MAJOR_CHUNK_SIZE;
                     data.par_chunks_mut(rows_per_chunk * w).enumerate().for_each(
                         |(chunk_idx, chunk)| {
@@ -427,7 +427,7 @@ impl MainTrace {
 
                 #[cfg(feature = "concurrent")]
                 {
-                    use rayon::prelude::*;
+                    use miden_crypto::parallel::*;
                     let rows_per_chunk = ROW_MAJOR_CHUNK_SIZE;
                     data.par_chunks_mut(rows_per_chunk * target_width).enumerate().for_each(
                         |(chunk_idx, chunk)| {
@@ -510,7 +510,7 @@ impl MainTrace {
 
                 #[cfg(feature = "concurrent")]
                 {
-                    use rayon::prelude::*;
+                    use miden_crypto::parallel::*;
                     let rows_per_chunk = ROW_MAJOR_CHUNK_SIZE;
                     data.par_chunks_mut(rows_per_chunk * target_width).enumerate().for_each(
                         |(chunk_idx, chunk)| {
