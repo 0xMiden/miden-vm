@@ -775,7 +775,7 @@ pub(crate) struct ExecutedTraceBinding {
     program_info: ProgramInfo,
     stack_outputs: StackOutputs,
     final_pc_transcript_state: PrecompileTranscriptState,
-    advice_provider_fingerprint: [u8; 32],
+    precompile_requests_digest: [u8; 32],
 }
 
 impl ExecutedTraceBinding {
@@ -783,13 +783,13 @@ impl ExecutedTraceBinding {
         program_info: ProgramInfo,
         stack_outputs: StackOutputs,
         final_pc_transcript_state: PrecompileTranscriptState,
-        advice_provider_fingerprint: [u8; 32],
+        precompile_requests_digest: [u8; 32],
     ) -> Self {
         Self {
             program_info,
             stack_outputs,
             final_pc_transcript_state,
-            advice_provider_fingerprint,
+            precompile_requests_digest,
         }
     }
 
@@ -805,8 +805,8 @@ impl ExecutedTraceBinding {
         self.final_pc_transcript_state
     }
 
-    pub(crate) fn advice_provider_fingerprint(&self) -> &[u8; 32] {
-        &self.advice_provider_fingerprint
+    pub(crate) fn precompile_requests_digest(&self) -> &[u8; 32] {
+        &self.precompile_requests_digest
     }
 }
 

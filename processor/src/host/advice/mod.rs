@@ -94,6 +94,7 @@ impl AdviceProvider {
     ///
     /// The fingerprint is insensitive to advice-map insertion order and Merkle-store insertion
     /// order, but it still reflects advice-stack order and precompile-request order.
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn fingerprint(&self) -> [u8; 32] {
         let stack = self.stack.iter().copied().collect::<Vec<_>>().to_bytes();
@@ -125,6 +126,14 @@ impl AdviceProvider {
             .into_iter(),
         )
         .into()
+    }
+
+    /// Returns a digest of deferred precompile requests only.
+    ///
+    /// This is used as a cheap post-execution consistency check for trace-building inputs.
+    #[must_use]
+    pub(crate) fn precompile_requests_digest(&self) -> [u8; 32] {
+        Blake3_256::hash(&self.pc_requests.to_bytes()).into()
     }
 
     // ADVICE STACK

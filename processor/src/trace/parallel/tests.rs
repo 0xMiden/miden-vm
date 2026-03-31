@@ -7,12 +7,14 @@ use miden_air::trace::{
 };
 use miden_core::{
     Felt, Word,
+    events::EventId,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
         JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor, MastNodeExt,
         SplitNodeBuilder,
     },
     operations::{Operation, opcodes},
+    precompile::PrecompileRequest,
     program::{Kernel, Program, ProgramInfo, StackInputs},
 };
 use miden_utils_testing::{get_column_name, rand::rand_array};
@@ -1065,10 +1067,10 @@ fn test_build_trace_rejects_mismatched_execution_output() {
     );
 }
 
-/// Verifies that `build_trace` rejects compatibility bundles that reuse a matching stack output
-/// but carry a different final advice-provider state.
+/// Verifies that `build_trace` rejects compatibility bundles that reuse matching public outputs
+/// but carry different deferred precompile requests.
 #[test]
-fn test_build_trace_rejects_mismatched_advice_provider() {
+fn test_build_trace_rejects_mismatched_precompile_requests() {
     const MAX_FRAGMENT_SIZE: usize = 1 << 20;
 
     let program = basic_block_program_small();
@@ -1085,28 +1087,10 @@ fn test_build_trace_rejects_mismatched_advice_provider() {
     let execution_binding = trace_inputs.execution_binding().clone();
     let (execution_output, trace_generation_context) = trace_inputs.into_parts();
 
-    let other_processor = FastProcessor::new_with_options(
-        StackInputs::new(DEFAULT_STACK).unwrap(),
-        AdviceInputs::default().with_stack_values([99]).unwrap(),
-        ExecutionOptions::default()
-            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
-            .unwrap(),
-    );
-    let mut other_host = DefaultHost::default();
-    let (other_execution_output, _) = other_processor
-        .execute_trace_inputs_sync(&program, &mut other_host)
-        .unwrap()
-        .into_parts();
-
-    assert_eq!(execution_output.stack, other_execution_output.stack);
-    assert_eq!(
-        execution_output.final_pc_transcript.state(),
-        other_execution_output.final_pc_transcript.state()
-    );
-    assert_ne!(
-        execution_output.advice.fingerprint(),
-        other_execution_output.advice.fingerprint()
-    );
+    let mut other_execution_output = execution_output;
+    other_execution_output
+        .advice
+        .extend_precompile_requests([PrecompileRequest::new(EventId::from_u64(7), vec![1, 2, 3])]);
 
     let result = build_trace(TraceBuildInputs::with_execution_binding(
         other_execution_output,
