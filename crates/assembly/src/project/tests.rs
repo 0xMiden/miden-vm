@@ -813,7 +813,8 @@ end
     let error = context
         .assemble_library_package(&root_manifest, None)
         .expect_err("runtime dependency digest conflicts should fail");
-    assert!(error.to_string().contains("conflicting runtime dependency 'runtime'"));
+    assert!(error.to_string().contains("dependency resolution failed"));
+    assert!(error.to_string().contains("runtime"));
 }
 
 #[test]
@@ -2057,7 +2058,7 @@ fn preassembled_libraries_fall_back_to_embedded_kernel_when_store_artifact_is_un
 }
 
 #[test]
-fn preassembled_libraries_without_store_or_embedded_kernel_leave_runtime_kernel_to_caller() {
+fn preassembled_libraries_without_store_or_embedded_kernel_cannot_reconstruct_program() {
     let tempdir = TempDir::new().unwrap();
     write_transitive_kernel_program_project(tempdir.path());
     let mid_manifest = tempdir.path().join("mid").join("miden-project.toml");
@@ -2073,23 +2074,11 @@ fn preassembled_libraries_without_store_or_embedded_kernel_leave_runtime_kernel_
     let root_manifest =
         write_preassembled_kernel_executable_project(tempdir.path(), &mid_package_path);
     let mut context = TestContext::new();
-    let package = context
+    let error = context
         .assemble_executable_package(&root_manifest, Some("main"), None)
-        .expect("executable package build should succeed without an available kernel artifact");
-
-    assert!(
-        package
-            .manifest
-            .dependencies()
-            .any(|dependency| dependency.kind == TargetType::Kernel)
-    );
-    assert!(!package.sections.iter().any(|section| section.id == SectionId::KERNEL));
-
-    let round_tripped_program = MastPackage::read_from_bytes(&package.to_bytes())
-        .expect("serialized executable package should round-trip")
-        .try_into_program()
-        .expect("packages without a recoverable kernel should still convert to a program");
-    assert!(round_tripped_program.kernel().is_empty());
+        .expect_err("packages with unresolved kernel runtime dependencies must be rejected");
+    assert!(error.to_string().contains("dependency resolution failed"));
+    assert!(error.to_string().contains("kernelpkg"));
 }
 
 #[test]
@@ -2129,7 +2118,7 @@ fn embedded_kernel_package_must_match_runtime_dependency() {
 }
 
 #[test]
-fn executable_packages_without_embedded_kernel_section_fall_back_to_empty_kernel() {
+fn executable_packages_without_embedded_kernel_section_are_rejected() {
     let tempdir = TempDir::new().unwrap();
     let manifest_path = write_kernel_program_project(tempdir.path());
 
@@ -2141,11 +2130,10 @@ fn executable_packages_without_embedded_kernel_section_fall_back_to_empty_kernel
         .expect("serialized executable package should round-trip");
     round_tripped_package.sections.retain(|section| section.id != SectionId::KERNEL);
 
-    let round_tripped_program = round_tripped_package
+    let error = round_tripped_package
         .try_into_program()
-        .expect("packages without embedded kernels should still convert to a program");
-
-    assert!(round_tripped_program.kernel().is_empty());
+        .expect_err("packages without embedded kernels should be rejected");
+    assert!(error.to_string().contains("does not embed the kernel package required"));
 }
 
 #[test]
