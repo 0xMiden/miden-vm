@@ -195,17 +195,16 @@ pub fn build_trace_with_max_len(
         aux_builder: chiplets_aux_builder,
     } = chiplets_trace;
 
+    let last_program_row = RowIndex::from((core_trace_len as u32).saturating_sub(1));
+
     // Create the MainTrace
-    let main_trace = {
-        let last_program_row = RowIndex::from((core_trace_len as u32).saturating_sub(1));
-        MainTrace::from_parts(
-            core_trace,
-            chiplets_mat,
-            range_checker_trace.trace,
-            main_trace_len,
-            last_program_row,
-        )
-    };
+    let main_trace = MainTrace::from_parts(
+        core_trace,
+        chiplets_mat,
+        range_checker_trace.trace,
+        main_trace_len,
+        last_program_row,
+    );
 
     // Create aux trace builders
     let aux_trace_builders = AuxTraceBuilders {
@@ -213,6 +212,7 @@ pub fn build_trace_with_max_len(
         range: range_checker_trace.aux_builder,
         chiplets: chiplets_aux_builder,
         stack: StackAuxTraceBuilder,
+        last_program_row,
     };
 
     Ok(ExecutionTrace::new_from_parts(

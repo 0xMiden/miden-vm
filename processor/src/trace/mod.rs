@@ -400,6 +400,8 @@ pub struct AuxTraceBuilders {
     pub(crate) stack: stack::AuxTraceBuilder,
     pub(crate) range: range::AuxTraceBuilder,
     pub(crate) chiplets: chiplets::AuxTraceBuilder,
+    /// Index of the last row that was executed (not a padding row).
+    pub(crate) last_program_row: RowIndex,
 }
 
 impl AuxTraceBuilders {
@@ -456,35 +458,9 @@ impl<EF: ExtensionField<Felt>> AuxBuilder<Felt, EF> for AuxTraceBuilders {
     ) -> (RowMajorMatrix<EF>, Vec<EF>) {
         let _span = tracing::info_span!("build_aux_trace").entered();
 
-        // Transpose the row-major main trace into column-major `MainTrace` needed by the
-        // auxiliary trace builders. The last program row is the point where the clock
-        // (column 0) stops incrementing.
         let main_for_aux = {
-            let num_rows = main.height();
-            // Find the last program row by binary search on the clock column.
-            let clk0 = main.get(0, 0).expect("valid indices");
-            let last_program_row = if num_rows <= 1 {
-                0
-            } else if main.get(num_rows - 1, 0).expect("valid indices")
-                == clk0 + Felt::new((num_rows - 1) as u64)
-            {
-                num_rows - 1
-            } else {
-                let mut lo = 1usize;
-                let mut hi = num_rows - 1;
-                while lo < hi {
-                    let mid = lo + (hi - lo) / 2;
-                    let expected = clk0 + Felt::new(mid as u64);
-                    if main.get(mid, 0).expect("valid indices") == expected {
-                        lo = mid + 1;
-                    } else {
-                        hi = mid;
-                    }
-                }
-                lo - 1
-            };
             let transposed = main.transpose();
-            MainTrace::from_transposed(transposed, RowIndex::from(last_program_row))
+            MainTrace::from_transposed(transposed, self.last_program_row)
         };
 
         let aux_columns = self.build_aux_columns(&main_for_aux, challenges);
