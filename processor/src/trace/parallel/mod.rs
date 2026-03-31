@@ -678,11 +678,15 @@ fn pad_core_row_major(core_trace: &mut RowMajorMatrix<Felt>, main_trace_len: usi
 
     // Pad CLK trace - fill with index values
 
-    core_trace_data.reserve(num_padding_rows * w);
-    for idx in 0..num_padding_rows {
-        template[CLK_COL_IDX] = Felt::from_u32((total_program_rows + idx) as u32);
-        core_trace_data.extend_from_slice(&template);
-    }
+    let pad_start = total_program_rows * w;
+    core_trace_data.resize(pad_start + num_padding_rows * w, ZERO);
+    core_trace_data[pad_start..]
+        .par_chunks_mut(w)
+        .enumerate()
+        .for_each(|(idx, row)| {
+            row.copy_from_slice(&template);
+            row[CLK_COL_IDX] = Felt::from_u32((total_program_rows + idx) as u32);
+        });
 }
 
 /// Uses the provided `CoreTraceFragmentContext` to build and return a `ReplayProcessor` and
