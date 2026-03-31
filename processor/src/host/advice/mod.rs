@@ -6,13 +6,11 @@ use alloc::{
 use miden_core::{
     Felt, Word,
     advice::{AdviceInputs, AdviceMap},
-    crypto::{
-        hash::Blake3_256,
-        merkle::{InnerNodeInfo, MerklePath, MerkleStore, NodeIndex},
-    },
+    crypto::merkle::{InnerNodeInfo, MerklePath, MerkleStore, NodeIndex},
     precompile::PrecompileRequest,
-    serde::Serializable,
 };
+#[cfg(test)]
+use miden_core::{crypto::hash::Blake3_256, serde::Serializable};
 
 mod errors;
 pub use errors::AdviceError;
@@ -60,6 +58,7 @@ pub struct AdviceProvider {
 
 impl AdviceProvider {
     #[cfg(test)]
+    #[allow(dead_code)]
     pub(crate) fn merkle_store(&self) -> &MerkleStore {
         &self.store
     }
@@ -126,14 +125,6 @@ impl AdviceProvider {
             .into_iter(),
         )
         .into()
-    }
-
-    /// Returns a digest of deferred precompile requests only.
-    ///
-    /// This is used as a cheap post-execution consistency check for trace-building inputs.
-    #[must_use]
-    pub(crate) fn precompile_requests_digest(&self) -> [u8; 32] {
-        Blake3_256::hash(&self.pc_requests.to_bytes()).into()
     }
 
     // ADVICE STACK

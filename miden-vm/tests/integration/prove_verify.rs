@@ -3,6 +3,7 @@
 use alloc::sync::Arc;
 
 use miden_assembly::{Assembler, DefaultSourceManager};
+use miden_processor::ExecutionOptions;
 use miden_prover::{AdviceInputs, ProvingOptions, StackInputs, prove_sync};
 use miden_verifier::verify;
 use miden_vm::{DefaultHost, HashFunction};
@@ -28,9 +29,15 @@ fn test_blake3_256_prove_verify() {
     let options = ProvingOptions::with_96_bit_security(HashFunction::Blake3_256);
 
     println!("Proving with Blake3_256...");
-    let (stack_outputs, proof) =
-        prove_sync(&program, stack_inputs, advice_inputs, &mut host, options)
-            .expect("Proving failed");
+    let (stack_outputs, proof) = prove_sync(
+        &program,
+        stack_inputs,
+        advice_inputs,
+        &mut host,
+        ExecutionOptions::default(),
+        options,
+    )
+    .expect("Proving failed");
 
     println!("Proof generated successfully!");
     println!("Verifying proof...");
@@ -66,9 +73,15 @@ fn test_keccak_prove_verify() {
 
     // Prove the program
     println!("Proving with Keccak...");
-    let (stack_outputs, proof) =
-        prove_sync(&program, stack_inputs, advice_inputs, &mut host, options)
-            .expect("Proving failed");
+    let (stack_outputs, proof) = prove_sync(
+        &program,
+        stack_inputs,
+        advice_inputs,
+        &mut host,
+        ExecutionOptions::default(),
+        options,
+    )
+    .expect("Proving failed");
 
     println!("Proof generated successfully!");
     println!("Stack outputs: {:?}", stack_outputs);
@@ -106,9 +119,15 @@ fn test_rpo_prove_verify() {
 
     // Prove the program
     println!("Proving with RPO...");
-    let (stack_outputs, proof) =
-        prove_sync(&program, stack_inputs, advice_inputs, &mut host, options)
-            .expect("Proving failed");
+    let (stack_outputs, proof) = prove_sync(
+        &program,
+        stack_inputs,
+        advice_inputs,
+        &mut host,
+        ExecutionOptions::default(),
+        options,
+    )
+    .expect("Proving failed");
 
     println!("Proof generated successfully!");
     println!("Stack outputs: {:?}", stack_outputs);
@@ -142,9 +161,15 @@ fn test_poseidon2_prove_verify() {
     let options = ProvingOptions::with_96_bit_security(HashFunction::Poseidon2);
 
     println!("Proving with Poseidon2...");
-    let (stack_outputs, proof) =
-        prove_sync(&program, stack_inputs, advice_inputs, &mut host, options)
-            .expect("Proving failed");
+    let (stack_outputs, proof) = prove_sync(
+        &program,
+        stack_inputs,
+        advice_inputs,
+        &mut host,
+        ExecutionOptions::default(),
+        options,
+    )
+    .expect("Proving failed");
 
     println!("Proof generated successfully!");
     println!("Stack outputs: {:?}", stack_outputs);
@@ -178,9 +203,15 @@ fn test_rpx_prove_verify() {
     let options = ProvingOptions::with_96_bit_security(HashFunction::Rpx256);
 
     println!("Proving with RPX...");
-    let (stack_outputs, proof) =
-        prove_sync(&program, stack_inputs, advice_inputs, &mut host, options)
-            .expect("Proving failed");
+    let (stack_outputs, proof) = prove_sync(
+        &program,
+        stack_inputs,
+        advice_inputs,
+        &mut host,
+        ExecutionOptions::default(),
+        options,
+    )
+    .expect("Proving failed");
 
     println!("Proof generated successfully!");
     println!("Stack outputs: {:?}", stack_outputs);
@@ -207,7 +238,9 @@ mod fast_parallel {
     use miden_processor::{
         ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs, trace::build_trace,
     };
-    use miden_prover::{config, prove_stark};
+    use miden_prover::{
+        ProvingOptions, TraceProvingInputs, config, prove_from_trace_sync, prove_stark,
+    };
     use miden_verifier::verify;
     use miden_vm::DefaultHost;
 
@@ -246,7 +279,7 @@ mod fast_parallel {
             .execute_trace_inputs_sync(&program, &mut host)
             .expect("Fast processor execution failed");
 
-        let fast_stack_outputs = trace_inputs.execution_output().stack;
+        let fast_stack_outputs = *trace_inputs.stack_outputs();
 
         // Build trace using parallel trace generation
         let trace = build_trace(trace_inputs).unwrap();
@@ -278,5 +311,38 @@ mod fast_parallel {
         // Verify the proof
         verify(program.into(), stack_inputs, fast_stack_outputs, proof)
             .expect("Verification failed");
+    }
+
+    #[test]
+    fn test_prove_from_trace_sync() {
+        let source = "
+            begin
+                repeat.128
+                    swap dup.1 add
+                end
+            end
+        ";
+
+        let program = Assembler::default().assemble_program(source).unwrap();
+        let stack_inputs = StackInputs::try_from_ints([0, 1]).unwrap();
+        let advice_inputs = AdviceInputs::default();
+        let mut host =
+            DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
+
+        let execution_options = ExecutionOptions::default()
+            .with_core_trace_fragment_size(FRAGMENT_SIZE)
+            .unwrap();
+        let trace_inputs =
+            FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options)
+                .execute_trace_inputs_sync(&program, &mut host)
+                .expect("Fast processor execution failed");
+
+        let (stack_outputs, proof) = prove_from_trace_sync(TraceProvingInputs::new(
+            trace_inputs,
+            ProvingOptions::with_96_bit_security(HashFunction::Blake3_256),
+        ))
+        .expect("prove_from_trace_sync failed");
+
+        verify(program.into(), stack_inputs, stack_outputs, proof).expect("Verification failed");
     }
 }

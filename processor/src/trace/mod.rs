@@ -9,10 +9,10 @@ use miden_air::{
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     },
 };
+use miden_core::{crypto::hash::Blake3_256, serde::Serializable};
 
 use crate::{
-    AdviceProvider, Felt, MIN_STACK_DEPTH, Program, ProgramInfo, StackInputs, StackOutputs, Word,
-    ZERO,
+    Felt, MIN_STACK_DEPTH, Program, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
     fast::ExecutionOutput,
     field::{ExtensionField, QuadFelt},
     precompile::{PrecompileRequest, PrecompileTranscript},
@@ -46,10 +46,46 @@ pub use utils::{ChipletsLengths, TraceLenSummary};
 /// Inputs required to build an execution trace from pre-executed data.
 #[derive(Debug)]
 pub struct TraceBuildInputs {
-    execution_output: ExecutionOutput,
+    trace_output: TraceBuildOutput,
     trace_generation_context: TraceGenerationContext,
     program_info: ProgramInfo,
-    execution_binding: trace_state::ExecutedTraceBinding,
+    precompile_requests_digest: [u8; 32],
+}
+
+#[derive(Debug)]
+pub(crate) struct TraceBuildOutput {
+    stack_outputs: StackOutputs,
+    final_pc_transcript: PrecompileTranscript,
+    precompile_requests: Vec<PrecompileRequest>,
+}
+
+impl TraceBuildOutput {
+    fn from_execution_output(execution_output: ExecutionOutput) -> Self {
+        let ExecutionOutput {
+            stack,
+            mut advice,
+            memory: _,
+            final_pc_transcript,
+        } = execution_output;
+
+        Self {
+            stack_outputs: stack,
+            final_pc_transcript,
+            precompile_requests: advice.take_precompile_requests(),
+        }
+    }
+
+    fn stack_outputs(&self) -> &StackOutputs {
+        &self.stack_outputs
+    }
+
+    fn final_precompile_transcript(&self) -> PrecompileTranscript {
+        self.final_pc_transcript
+    }
+
+    fn precompile_requests_digest(&self) -> [u8; 32] {
+        Blake3_256::hash(&self.precompile_requests.to_bytes()).into()
+    }
 }
 
 impl TraceBuildInputs {
@@ -58,27 +94,26 @@ impl TraceBuildInputs {
         execution_output: ExecutionOutput,
         trace_generation_context: TraceGenerationContext,
     ) -> Self {
+        let trace_output = TraceBuildOutput::from_execution_output(execution_output);
         let program_info = program.to_info();
         Self {
-            execution_binding: trace_state::ExecutedTraceBinding::new(
-                program_info.clone(),
-                execution_output.stack,
-                execution_output.final_pc_transcript.state(),
-                execution_output.advice.precompile_requests_digest(),
-            ),
-            execution_output,
+            precompile_requests_digest: trace_output.precompile_requests_digest(),
+            trace_output,
             trace_generation_context,
             program_info,
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn execution_binding(&self) -> &trace_state::ExecutedTraceBinding {
-        &self.execution_binding
+    pub fn stack_outputs(&self) -> &StackOutputs {
+        self.trace_output.stack_outputs()
     }
 
-    pub fn execution_output(&self) -> &ExecutionOutput {
-        &self.execution_output
+    pub fn precompile_requests(&self) -> &[PrecompileRequest] {
+        &self.trace_output.precompile_requests
+    }
+
+    pub fn final_precompile_transcript(&self) -> PrecompileTranscript {
+        self.trace_output.final_precompile_transcript()
     }
 
     pub fn trace_generation_context(&self) -> &TraceGenerationContext {
@@ -91,8 +126,15 @@ impl TraceBuildInputs {
 
     #[cfg(any(test, feature = "testing"))]
     #[allow(dead_code)]
-    pub(crate) fn into_parts(self) -> (ExecutionOutput, TraceGenerationContext) {
-        (self.execution_output, self.trace_generation_context)
+    pub(crate) fn into_parts(
+        self,
+    ) -> (TraceBuildOutput, TraceGenerationContext, ProgramInfo, [u8; 32]) {
+        (
+            self.trace_output,
+            self.trace_generation_context,
+            self.program_info,
+            self.precompile_requests_digest,
+        )
     }
 
     #[cfg(any(test, feature = "testing"))]
@@ -102,38 +144,17 @@ impl TraceBuildInputs {
     }
 
     #[cfg(test)]
-    pub(crate) fn with_program_info(
-        program: &Program,
-        execution_output: ExecutionOutput,
+    pub(crate) fn from_parts(
+        trace_output: TraceBuildOutput,
         trace_generation_context: TraceGenerationContext,
         program_info: ProgramInfo,
-    ) -> Self {
-        let execution_binding = trace_state::ExecutedTraceBinding::new(
-            program.to_info(),
-            execution_output.stack,
-            execution_output.final_pc_transcript.state(),
-            execution_output.advice.precompile_requests_digest(),
-        );
-        Self::with_execution_binding(
-            execution_output,
-            trace_generation_context,
-            program_info,
-            execution_binding,
-        )
-    }
-
-    #[cfg(test)]
-    pub(crate) fn with_execution_binding(
-        execution_output: ExecutionOutput,
-        trace_generation_context: TraceGenerationContext,
-        program_info: ProgramInfo,
-        execution_binding: trace_state::ExecutedTraceBinding,
+        precompile_requests_digest: [u8; 32],
     ) -> Self {
         Self {
-            execution_output,
+            trace_output,
             trace_generation_context,
             program_info,
-            execution_binding,
+            precompile_requests_digest,
         }
     }
 }
@@ -147,7 +168,8 @@ impl TraceBuildInputs {
 /// - Main traces of System, Decoder, Operand Stack, Range Checker, and Chiplets.
 /// - Auxiliary trace builders.
 /// - Information about the program (program hash and the kernel).
-/// - Information about execution outputs (stack state, advice provider, and precompile transcript).
+/// - Information about execution outputs (stack state, deferred precompile requests, and the final
+///   precompile transcript).
 /// - Summary of trace lengths of the main trace components.
 #[derive(Debug)]
 pub struct ExecutionTrace {
@@ -155,7 +177,7 @@ pub struct ExecutionTrace {
     aux_trace_builders: AuxTraceBuilders,
     program_info: ProgramInfo,
     stack_outputs: StackOutputs,
-    advice: AdviceProvider,
+    precompile_requests: Vec<PrecompileRequest>,
     final_pc_transcript: PrecompileTranscript,
     trace_len_summary: TraceLenSummary,
 }
@@ -164,20 +186,26 @@ impl ExecutionTrace {
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
 
-    pub fn new_from_parts(
+    pub(crate) fn new_from_parts(
         program_info: ProgramInfo,
-        execution_output: ExecutionOutput,
+        trace_output: TraceBuildOutput,
         main_trace: MainTrace,
         aux_trace_builders: AuxTraceBuilders,
         trace_len_summary: TraceLenSummary,
     ) -> Self {
+        let TraceBuildOutput {
+            stack_outputs,
+            final_pc_transcript,
+            precompile_requests,
+        } = trace_output;
+
         Self {
             main_trace,
             aux_trace_builders,
             program_info,
-            stack_outputs: execution_output.stack,
-            advice: execution_output.advice,
-            final_pc_transcript: execution_output.final_pc_transcript,
+            stack_outputs,
+            precompile_requests,
+            final_pc_transcript,
             trace_len_summary,
         }
     }
@@ -232,7 +260,7 @@ impl ExecutionTrace {
 
     /// Returns the precompile requests generated during program execution.
     pub fn precompile_requests(&self) -> &[PrecompileRequest] {
-        self.advice.precompile_requests()
+        &self.precompile_requests
     }
 
     /// Moves all accumulated precompile requests out of the trace, leaving it empty.
@@ -240,7 +268,7 @@ impl ExecutionTrace {
     /// Intended for proof packaging, where requests are serialized into the proof and no longer
     /// needed in the trace after consumption.
     pub fn take_precompile_requests(&mut self) -> Vec<PrecompileRequest> {
-        self.advice.take_precompile_requests()
+        core::mem::take(&mut self.precompile_requests)
     }
 
     /// Returns the final precompile transcript after executing all precompile requests.
@@ -293,14 +321,10 @@ impl ExecutionTrace {
         &self.trace_len_summary
     }
 
-    /// Returns the final advice provider state.
-    pub fn advice_provider(&self) -> &AdviceProvider {
-        &self.advice
-    }
-
-    /// Destructures this execution trace into the process’s final stack and advice states.
-    pub fn into_outputs(self) -> (StackOutputs, AdviceProvider) {
-        (self.stack_outputs, self.advice)
+    /// Destructures this execution trace into the process's final stack outputs, deferred
+    /// precompile requests, and final precompile transcript.
+    pub fn into_outputs(self) -> (StackOutputs, Vec<PrecompileRequest>, PrecompileTranscript) {
+        (self.stack_outputs, self.precompile_requests, self.final_pc_transcript)
     }
 
     // DEBUG CONSTRAINT CHECKING

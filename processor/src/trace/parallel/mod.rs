@@ -97,23 +97,16 @@ pub fn build_trace_with_max_len(
     max_trace_len: usize,
 ) -> Result<ExecutionTrace, ExecutionError> {
     let TraceBuildInputs {
-        execution_output,
+        trace_output,
         trace_generation_context,
         program_info,
-        execution_binding,
+        precompile_requests_digest,
     } = inputs;
 
-    if execution_binding.program_info() != &program_info {
-        return Err(ExecutionError::Internal("trace inputs do not match program info"));
-    }
-
-    if execution_binding.stack_outputs() != &execution_output.stack
-        || execution_binding.final_pc_transcript_state()
-            != execution_output.final_pc_transcript.state()
-        || execution_binding.precompile_requests_digest()
-            != &execution_output.advice.precompile_requests_digest()
-    {
-        return Err(ExecutionError::Internal("trace inputs do not match execution output"));
+    if precompile_requests_digest != trace_output.precompile_requests_digest() {
+        return Err(ExecutionError::Internal(
+            "trace inputs do not match deferred precompile requests",
+        ));
     }
 
     let TraceGenerationContext {
@@ -211,7 +204,7 @@ pub fn build_trace_with_max_len(
 
     Ok(ExecutionTrace::new_from_parts(
         program_info,
-        execution_output,
+        trace_output,
         main_trace,
         aux_trace_builders,
         trace_len_summary,

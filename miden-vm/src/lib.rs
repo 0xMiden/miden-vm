@@ -18,7 +18,7 @@ pub use miden_processor::{
     TraceGenerationContext, ZERO, advice, crypto, execute, field, operation::Operation, serde,
     trace, trace::ExecutionTrace, utils,
 };
-pub use miden_prover::{InputError, ProvingOptions, StackOutputs, Word, prove};
+pub use miden_prover::{InputError, ProvingOptions, StackOutputs, TraceProvingInputs, Word, prove};
 #[cfg(not(target_arch = "wasm32"))]
 pub use miden_prover::{prove_from_trace_sync, prove_sync};
 pub use miden_verifier::VerificationError;

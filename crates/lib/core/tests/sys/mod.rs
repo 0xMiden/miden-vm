@@ -13,7 +13,7 @@ use miden_core::{
 };
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
-    DefaultHost, ProcessorState, Program, StackInputs,
+    DefaultHost, ExecutionOptions, ProcessorState, Program, StackInputs,
     advice::{AdviceInputs, AdviceMutation},
     event::{EventError, EventHandler},
 };
@@ -158,9 +158,15 @@ fn log_precompile_request_procedure() {
         .expect("failed to register dummy handler");
 
     let options = ProvingOptions::with_96_bit_security(HashFunction::Blake3_256);
-    let (stack_outputs, proof) =
-        miden_utils_testing::prove_sync(&program, stack_inputs, advice_inputs, &mut host, options)
-            .expect("failed to generate proof for log_precompile helper");
+    let (stack_outputs, proof) = miden_utils_testing::prove_sync(
+        &program,
+        stack_inputs,
+        advice_inputs,
+        &mut host,
+        ExecutionOptions::default(),
+        options,
+    )
+    .expect("failed to generate proof for log_precompile helper");
 
     // Proof should include the single deferred request that we expect.
     assert_eq!(proof.precompile_requests().len(), 1);
