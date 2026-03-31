@@ -139,9 +139,10 @@ impl MainTrace {
         num_rows: usize,
         last_program_row: RowIndex,
     ) -> Self {
-        debug_assert_eq!(core_rm.len(), num_rows * CORE_WIDTH);
-        debug_assert_eq!(chiplets_rm.len(), num_rows * CHIPLETS_WIDTH);
-        debug_assert_eq!(range_checker_cols[0].len(), num_rows);
+        assert_eq!(core_rm.len(), num_rows * CORE_WIDTH);
+        assert_eq!(chiplets_rm.len(), num_rows * CHIPLETS_WIDTH);
+        assert_eq!(range_checker_cols[0].len(), num_rows);
+        assert_eq!(range_checker_cols[1].len(), num_rows);
         Self {
             storage: TraceStorage::Parts {
                 core_rm,
@@ -172,8 +173,14 @@ impl MainTrace {
         let r = row.as_usize();
         match &self.storage {
             TraceStorage::Parts {
-                core_rm, chiplets_rm, range_checker_cols, ..
+                core_rm,
+                chiplets_rm,
+                range_checker_cols,
+                num_rows,
             } => {
+                assert!(r < *num_rows, "main trace row index in bounds");
+                assert!(col < PADDED_TRACE_WIDTH, "main trace column index in bounds");
+
                 if col < CORE_WIDTH {
                     core_rm[r * CORE_WIDTH + col]
                 } else {
@@ -188,16 +195,16 @@ impl MainTrace {
                 }
             },
             TraceStorage::RowMajor(matrix) => {
-                if cfg!(debug_assertions) {
-                    matrix.get(r, col).expect("main trace row/col in bounds")
-                } else {
-                    // SAFETY: indices come from trace iteration and match `matrix` dimensions.
-                    unsafe { matrix.get_unchecked(r, col) }
-                }
+                let row_slice = matrix.row_slice(r).expect("main trace row index in bounds");
+                assert!(col < row_slice.len(), "main trace column index in bounds");
+                row_slice[col]
             },
-            TraceStorage::Transposed { matrix, num_rows, .. } => {
-                debug_assert!(r < *num_rows && col < matrix.height());
-                unsafe { matrix.get_unchecked(col, r) }
+            TraceStorage::Transposed { matrix, num_cols, .. } => {
+                let col_slice = matrix.row_slice(col).expect("main trace column index in bounds");
+                assert!(r < col_slice.len(), "main trace row index in bounds");
+                debug_assert_eq!(col_slice.len(), matrix.width());
+                debug_assert_eq!(matrix.height(), *num_cols);
+                col_slice[r]
             },
         }
     }
