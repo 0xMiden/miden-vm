@@ -125,7 +125,18 @@ pub enum ProjectDependencyNodeProvenance {
         path: PathBuf,
         /// The version of the preassembled package
         selected: Version,
+        /// The target kind of the preassembled package
+        kind: crate::TargetType,
+        /// The dependency requirements declared by the preassembled package manifest
+        requirements: BTreeMap<PackageId, PreassembledDependencyMetadata>,
     },
+}
+
+/// The manifest dependency metadata pinned for a preassembled package.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreassembledDependencyMetadata {
+    pub version: Version,
+    pub kind: crate::TargetType,
 }
 
 /// Represents information about a package whose provenance is a Miden project in source form.
@@ -779,6 +790,7 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
         }
 
         let mut dependencies = Vec::with_capacity(package.manifest.num_dependencies());
+        let requirements = package_requirements(&package);
         let mut solver_dependencies = BTreeMap::new();
         for dependency in package.manifest.dependencies() {
             solver_dependencies.insert(
@@ -802,6 +814,8 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
                 provenance: ProjectDependencyNodeProvenance::Preassembled {
                     path,
                     selected: selected.clone(),
+                    kind: package.kind,
+                    requirements,
                 },
                 version: selected.version.clone(),
             },
@@ -1059,6 +1073,24 @@ struct GitCheckout {
     checkout_path: PathBuf,
     manifest_path: PathBuf,
     resolved_revision: Arc<str>,
+}
+
+fn package_requirements(
+    package: &MastPackage,
+) -> BTreeMap<PackageId, PreassembledDependencyMetadata> {
+    package
+        .manifest
+        .dependencies()
+        .map(|dependency| {
+            (
+                dependency.name.clone(),
+                PreassembledDependencyMetadata {
+                    version: Version::new(dependency.version.clone(), dependency.digest),
+                    kind: dependency.kind,
+                },
+            )
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -1630,6 +1662,7 @@ mod tests {
             ProjectDependencyNodeProvenance::Preassembled {
                 ref path,
                 ref selected,
+                ..
             } if path == &package_path.canonicalize().unwrap()
                 && *selected == Version::new("1.0.0".parse().unwrap(), digest)
         );
