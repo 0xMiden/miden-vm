@@ -108,6 +108,7 @@ hkdf             = { default-features = false, version = "0.12" }
 k256             = { features = ["ecdh", "ecdsa", "pkcs8"], version = "0.13" }
 num              = { default-features = false, features = ["alloc", "libm"], version = "0.4" }
 num-complex      = { default-features = false, version = "0.4" }
+once_cell        = { default-features = false, features = ["alloc", "critical-section"], version = "1.21" }
 proptest         = { default-features = false, features = ["alloc"], optional = true, version = "1.7" }
 rand             = { default-features = false, version = "0.9" }
 rand-utils       = { optional = true, package = "winter-rand-utils", version = "0.13" }

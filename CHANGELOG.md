@@ -8,6 +8,7 @@
 - [BREAKING] Removed `WORD_SIZE_FELTS` and `WORD_SIZE_BYTES` from `miden-field` in favor of `Word::NUM_FELTS` and `Word::SERIALIZED_SIZE`, respectively. The values remain the same.
 - [BREAKING] `WORD_SIZE` has been removed from `miden-crypto` in favor of `Word::NUM_FELTS`. Clients will need to update references to the constant, but `Word` will already be in scope as it is re-exported from `miden-crypto`.
 - [BREAKING] Removed implementations of `Deref` and `DerefMut` for `Felt`.
+- [BREAKING] Update `Poseidon2` instance to match Plonky3 one ([#905](https://github.com/0xMiden/crypto/pull/905)).
 
 ## 0.23.0 (2026-03-11)
 

@@ -1,31 +1,33 @@
-use super::{Felt, STATE_WIDTH};
-
 // HASH FUNCTION DEFINING CONSTANTS
 // ================================================================================================
+use miden_field::Felt;
+use p3_goldilocks::{
+    GOLDILOCKS_POSEIDON2_HALF_FULL_ROUNDS, GOLDILOCKS_POSEIDON2_PARTIAL_ROUNDS_12,
+};
 
-/// Number of external rounds.
-pub(crate) const NUM_EXTERNAL_ROUNDS: usize = 8;
+use super::STATE_WIDTH;
+
 /// Number of either initial or terminal external rounds.
-pub(crate) const NUM_EXTERNAL_ROUNDS_HALF: usize = NUM_EXTERNAL_ROUNDS / 2;
+pub(crate) const NUM_EXTERNAL_ROUNDS_HALF: usize = GOLDILOCKS_POSEIDON2_HALF_FULL_ROUNDS;
 /// Number of internal rounds.
-pub(crate) const NUM_INTERNAL_ROUNDS: usize = 22;
+pub(crate) const NUM_INTERNAL_ROUNDS: usize = GOLDILOCKS_POSEIDON2_PARTIAL_ROUNDS_12;
 
 // DIAGONAL MATRIX USED IN INTERNAL ROUNDS
 // ================================================================================================
 
 pub(crate) const MAT_DIAG: [Felt; STATE_WIDTH] = [
-    Felt::new(0xc3b6c08e23ba9300),
-    Felt::new(0xd84b5de94a324fb6),
-    Felt::new(0x0d0c371c5b35b84f),
-    Felt::new(0x7964f570e7188037),
-    Felt::new(0x5daf18bbd996604b),
-    Felt::new(0x6743bc47b9595257),
-    Felt::new(0x5528b9362c59bb70),
-    Felt::new(0xac45e25b7127b68b),
-    Felt::new(0xa2077d7dfbb606b5),
-    Felt::new(0xf3faac6faee378ae),
-    Felt::new(0x0c6388b51545e883),
-    Felt::new(0xd27dbb6944917b60),
+    Felt::new(0xfffffffeffffffff),
+    Felt::new(0x0000000000000001),
+    Felt::new(0x0000000000000002),
+    Felt::new(0x7fffffff80000001),
+    Felt::new(0x0000000000000003),
+    Felt::new(0x0000000000000004),
+    Felt::new(0x7fffffff80000000),
+    Felt::new(0xfffffffefffffffe),
+    Felt::new(0xfffffffefffffffd),
+    Felt::new(0xbfffffff40000001),
+    Felt::new(0x3fffffffc0000000),
+    Felt::new(0xdfffffff20000001),
 ];
 
 // ROUND CONSTANTS
@@ -173,3 +175,37 @@ pub(crate) const ARK_EXT_TERMINAL: [[Felt; STATE_WIDTH]; 4] = [
         Felt::new(0x962deba3e9a2cd94),
     ],
 ];
+
+#[cfg(test)]
+mod tests {
+    use p3_goldilocks::{
+        GOLDILOCKS_POSEIDON2_RC_12_EXTERNAL_FINAL, GOLDILOCKS_POSEIDON2_RC_12_EXTERNAL_INITIAL,
+        GOLDILOCKS_POSEIDON2_RC_12_INTERNAL, MATRIX_DIAG_12_GOLDILOCKS,
+    };
+
+    use super::*;
+
+    #[test]
+    fn test_mat_diag() {
+        assert_eq!(MAT_DIAG, MATRIX_DIAG_12_GOLDILOCKS.map(Felt::from));
+    }
+
+    #[test]
+    fn test_ark_ext_initial() {
+        for (i, &ark) in ARK_EXT_INITIAL.iter().enumerate() {
+            assert_eq!(ark, GOLDILOCKS_POSEIDON2_RC_12_EXTERNAL_INITIAL[i].map(Felt::from));
+        }
+    }
+
+    #[test]
+    fn test_ark_int() {
+        assert_eq!(ARK_INT, GOLDILOCKS_POSEIDON2_RC_12_INTERNAL.map(Felt::from));
+    }
+
+    #[test]
+    fn test_ark_ext_terminal() {
+        for (i, &ark) in ARK_EXT_TERMINAL.iter().enumerate() {
+            assert_eq!(ark, GOLDILOCKS_POSEIDON2_RC_12_EXTERNAL_FINAL[i].map(Felt::from));
+        }
+    }
+}
