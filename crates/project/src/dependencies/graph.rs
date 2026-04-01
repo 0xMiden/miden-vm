@@ -15,14 +15,10 @@ use miden_assembly_syntax::{
     Report,
     debuginfo::{DefaultSourceManager, SourceManager, Uri},
 };
-use miden_core::{
-    serde::Deserializable,
-    utils::{DisplayHex, hash_string_to_word},
-};
+use miden_core::utils::{DisplayHex, hash_string_to_word};
 use miden_mast_package::Package as MastPackage;
 use miden_package_registry::{
-    InMemoryPackageRegistry, PackageId, PackageRecord, PackageRegistry, PackageRequirements,
-    PackageResolver, Version,
+    InMemoryPackageRegistry, PackageId, PackageRecord, PackageRegistry, PackageResolver, Version,
 };
 
 use crate::{
@@ -445,60 +441,6 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
                 .map_err(|error| Report::msg(error.to_string()))?;
         }
 
-        for node in graph.nodes.values() {
-            let ProjectDependencyNodeProvenance::Preassembled { path, .. } =
-                &node.graph_node.provenance
-            else {
-                continue;
-            };
-
-            let bytes = std::fs::read(path).map_err(|error| Report::msg(error.to_string()))?;
-            let package = MastPackage::read_from_bytes(&bytes)
-                .map_err(|error| Report::msg(error.to_string()))?;
-            let Some(kernel_dependency) = package.kernel_runtime_dependency()? else {
-                continue;
-            };
-            let Some(kernel_package) = read_embedded_kernel_package(&package)? else {
-                continue;
-            };
-            let kernel_version =
-                Version::new(kernel_package.version.clone(), kernel_package.digest());
-            let kernel_requirements = package_requirements(&kernel_package);
-            if kernel_package.name != kernel_dependency.name
-                || kernel_package.version != kernel_dependency.version
-                || kernel_package.digest() != kernel_dependency.digest
-            {
-                continue;
-            }
-            if let Some(existing) =
-                self.registry.get_exact_version(&kernel_dependency.name, &kernel_version)
-            {
-                if existing.dependencies() != &kernel_requirements {
-                    return Err(Report::msg(format!(
-                        "embedded kernel package '{}@{}' conflicts with registry dependency metadata",
-                        kernel_package.name, kernel_version
-                    )));
-                }
-                continue;
-            }
-            if let Some(existing) =
-                registry.get_exact_version(&kernel_package.name, &kernel_version)
-            {
-                if existing.dependencies() != &kernel_requirements {
-                    return Err(Report::msg(format!(
-                        "embedded kernel package '{}@{}' conflicts with dependency metadata from another preassembled package",
-                        kernel_package.name, kernel_version
-                    )));
-                }
-                continue;
-            }
-
-            let record = PackageRecord::new(kernel_version, kernel_requirements);
-            registry
-                .insert_record(kernel_package.name.clone(), record)
-                .map_err(|error| Report::msg(error.to_string()))?;
-        }
-
         let mut pending = BTreeSet::new();
         for node in graph.nodes.values() {
             for dependency in node.solver_dependencies.keys() {
@@ -531,9 +473,16 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
                 continue;
             }
 
-            if let Some(versions) = registry.available_versions(&package) {
-                for dependency in versions.values().flat_map(|record| record.dependencies().keys())
-                {
+            let Some(versions) = self.registry.available_versions(&package) else {
+                continue;
+            };
+
+            for record in versions.values() {
+                registry
+                    .insert_record(package.clone(), record.clone())
+                    .map_err(|error| Report::msg(error.to_string()))?;
+
+                for dependency in record.dependencies().keys() {
                     if local_packages.contains(dependency) {
                         return Err(Report::msg(format!(
                             "dependency conflict for '{dependency}': local source or preassembled dependency conflicts with a registry dependency"
@@ -541,26 +490,6 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
                     }
                     if !copied.contains(dependency) {
                         pending.insert(dependency.clone());
-                    }
-                }
-                continue;
-            }
-
-            if let Some(versions) = self.registry.available_versions(&package) {
-                for record in versions.values() {
-                    registry
-                        .insert_record(package.clone(), record.clone())
-                        .map_err(|error| Report::msg(error.to_string()))?;
-
-                    for dependency in record.dependencies().keys() {
-                        if local_packages.contains(dependency) {
-                            return Err(Report::msg(format!(
-                                "dependency conflict for '{dependency}': local source or preassembled dependency conflicts with a registry dependency"
-                            )));
-                        }
-                        if !copied.contains(dependency) {
-                            pending.insert(dependency.clone());
-                        }
                     }
                 }
             }
@@ -836,38 +765,9 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
             self.ensure_version_satisfies(expected_name, requirement, selected.clone())?;
         }
 
-        let embedded_kernel = read_embedded_kernel_package(&package)?;
-        let mut dependencies = Vec::with_capacity(package.manifest.num_dependencies());
-        let mut solver_dependencies = BTreeMap::new();
-        for dependency in package.manifest.dependencies() {
-            solver_dependencies.insert(
-                dependency.name.clone(),
-                VersionRequirement::Exact(Version::new(
-                    dependency.version.clone(),
-                    dependency.digest,
-                )),
-            );
-
-            let satisfies_via_embedded_kernel = dependency.kind
-                == miden_mast_package::TargetType::Kernel
-                && embedded_kernel.as_ref().is_some_and(|kernel_package| {
-                    kernel_package.name == dependency.name
-                        && kernel_package.version == dependency.version
-                        && kernel_package.digest() == dependency.digest
-                });
-            if satisfies_via_embedded_kernel {
-                continue;
-            }
-
-            dependencies.push(ProjectDependencyEdge {
-                dependency: dependency.name.clone(),
-                linkage: Linkage::Dynamic,
-            });
-        }
-
         Ok(CollectedDependencyNode {
             graph_node: ProjectDependencyNode {
-                dependencies,
+                dependencies: Vec::new(),
                 name: PackageId::from(expected_name),
                 provenance: ProjectDependencyNodeProvenance::Preassembled {
                     path,
@@ -875,7 +775,7 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
                 },
                 version: selected.version.clone(),
             },
-            solver_dependencies,
+            solver_dependencies: BTreeMap::new(),
         })
     }
 
@@ -1131,55 +1031,6 @@ struct GitCheckout {
     resolved_revision: Arc<str>,
 }
 
-fn read_embedded_kernel_package(package: &MastPackage) -> Result<Option<MastPackage>, Report> {
-    let mut sections = package
-        .sections
-        .iter()
-        .filter(|section| section.id == miden_mast_package::SectionId::KERNEL);
-    match sections.next() {
-        Some(section) => {
-            if sections.next().is_some() {
-                return Err(Report::msg(format!(
-                    "package '{}' contains multiple '{}' sections",
-                    package.name,
-                    miden_mast_package::SectionId::KERNEL
-                )));
-            }
-            let kernel_package =
-                MastPackage::read_from_bytes(section.data.as_ref()).map_err(|error| {
-                    Report::msg(format!(
-                        "failed to decode embedded kernel package for '{}': {error}",
-                        package.name
-                    ))
-                })?;
-            if !kernel_package.is_kernel() {
-                return Err(Report::msg(format!(
-                    "embedded kernel package for '{}' is not marked as a kernel package",
-                    package.name
-                )));
-            }
-            Ok(Some(kernel_package))
-        },
-        None => Ok(None),
-    }
-}
-
-fn package_requirements(package: &MastPackage) -> PackageRequirements {
-    package
-        .manifest
-        .dependencies()
-        .map(|dependency| {
-            (
-                dependency.name.clone(),
-                VersionRequirement::Exact(Version::new(
-                    dependency.version.clone(),
-                    dependency.digest,
-                )),
-            )
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use alloc::{boxed::Box, string::ToString};
@@ -1190,7 +1041,7 @@ mod tests {
         debuginfo::{DefaultSourceManager, SourceManagerExt, Span},
     };
     use miden_core::{assert_matches, serde::Serializable, utils::hash_string_to_word};
-    use miden_mast_package::{Package as MastPackage, Section, SectionId, TargetType};
+    use miden_mast_package::{Package as MastPackage, TargetType};
     use miden_package_registry::{PackageIndex, PackageRecord, PackageRegistry, PackageVersions};
     use tempfile::TempDir;
 
@@ -1752,361 +1603,6 @@ mod tests {
             } if path == &package_path.canonicalize().unwrap()
                 && *selected == Version::new("1.0.0".parse().unwrap(), digest)
         );
-    }
-
-    #[test]
-    fn preassembled_path_dependency_propagates_runtime_dependencies_into_resolution() {
-        let tempdir = TempDir::new().unwrap();
-        let runtime_package = build_registry_test_package("runtime", "1.0.0");
-        let runtime_version =
-            Version::new(runtime_package.version.clone(), runtime_package.digest());
-        let dep_package = MastPackage::generate(
-            "dep".into(),
-            "1.0.0".parse().unwrap(),
-            TargetType::Library,
-            [miden_mast_package::Dependency {
-                name: PackageId::from("runtime"),
-                version: runtime_version.version.clone(),
-                kind: TargetType::Library,
-                digest: runtime_package.digest(),
-            }],
-        );
-        let dep_package_path = tempdir.path().join("dep.masp");
-        fs::write(&dep_package_path, dep_package.to_bytes()).unwrap();
-
-        let root_dir = tempdir.path().join("root");
-        let root_manifest = write_package(
-            &root_dir,
-            "root",
-            "1.0.0",
-            Some("export.foo\nend\n"),
-            [Dependency::new(
-                Span::unknown("dep".into()),
-                DependencyVersionScheme::Path {
-                    path: Span::unknown(Uri::from(dep_package_path.as_path())),
-                    version: None,
-                },
-                Linkage::Dynamic,
-            )],
-        );
-
-        let mut registry = TestRegistry::default();
-        registry
-            .insert_record(
-                PackageId::from("runtime"),
-                PackageRecord::new(runtime_version.clone(), std::iter::empty()),
-            )
-            .unwrap();
-
-        let graph = builder(&registry, &tempdir.path().join("git"))
-            .build_from_path(&root_manifest)
-            .unwrap();
-        let dep = graph.get(&PackageId::from("dep")).unwrap();
-        let runtime = graph.get(&PackageId::from("runtime")).unwrap();
-
-        assert_eq!(
-            dep.dependencies,
-            vec![ProjectDependencyEdge {
-                dependency: PackageId::from("runtime"),
-                linkage: Linkage::Dynamic,
-            }]
-        );
-        assert_matches!(
-            runtime.provenance,
-            ProjectDependencyNodeProvenance::Registry { ref selected, .. }
-                if *selected == runtime_version
-        );
-    }
-
-    #[test]
-    fn preassembled_path_dependency_keeps_embedded_kernel_in_solver_requirements() {
-        let tempdir = TempDir::new().unwrap();
-        let kernel_package = MastPackage::generate(
-            "kernelpkg".into(),
-            "1.0.0".parse().unwrap(),
-            TargetType::Kernel,
-            [],
-        );
-        let kernel_version = Version::new(kernel_package.version.clone(), kernel_package.digest());
-        let mut dep_package = MastPackage::generate(
-            "dep".into(),
-            "1.0.0".parse().unwrap(),
-            TargetType::Executable,
-            [miden_mast_package::Dependency {
-                name: PackageId::from("kernelpkg"),
-                version: kernel_version.version.clone(),
-                kind: TargetType::Kernel,
-                digest: kernel_package.digest(),
-            }],
-        );
-        dep_package
-            .sections
-            .push(Section::new(SectionId::KERNEL, kernel_package.to_bytes()));
-
-        let dep_package_path = tempdir.path().join("dep.masp");
-        fs::write(&dep_package_path, dep_package.to_bytes()).unwrap();
-
-        let registry = TestRegistry::default();
-        let node = builder(&registry, &tempdir.path().join("git"))
-            .load_preassembled_dependency(&dep_package_path, "dep", None)
-            .unwrap();
-
-        assert!(node.graph_node.dependencies.is_empty());
-        assert_eq!(
-            node.solver_dependencies,
-            BTreeMap::from([(
-                PackageId::from("kernelpkg"),
-                VersionRequirement::Exact(kernel_version),
-            )])
-        );
-    }
-
-    #[test]
-    fn preassembled_path_dependency_uses_embedded_kernel_when_registry_only_has_other_versions() {
-        let tempdir = TempDir::new().unwrap();
-        let kernel_package = MastPackage::generate(
-            "kernelpkg".into(),
-            "1.0.0".parse().unwrap(),
-            TargetType::Kernel,
-            [],
-        );
-        let kernel_version = Version::new(kernel_package.version.clone(), kernel_package.digest());
-        let mut dep_package = MastPackage::generate(
-            "dep".into(),
-            "1.0.0".parse().unwrap(),
-            TargetType::Executable,
-            [miden_mast_package::Dependency {
-                name: PackageId::from("kernelpkg"),
-                version: kernel_version.version.clone(),
-                kind: TargetType::Kernel,
-                digest: kernel_package.digest(),
-            }],
-        );
-        dep_package
-            .sections
-            .push(Section::new(SectionId::KERNEL, kernel_package.to_bytes()));
-        let dep_package_path = tempdir.path().join("dep.masp");
-        fs::write(&dep_package_path, dep_package.to_bytes()).unwrap();
-
-        let root_dir = tempdir.path().join("root");
-        let root_manifest = write_package(
-            &root_dir,
-            "root",
-            "1.0.0",
-            Some("export.foo\nend\n"),
-            [Dependency::new(
-                Span::unknown("dep".into()),
-                DependencyVersionScheme::Path {
-                    path: Span::unknown(Uri::from(dep_package_path.as_path())),
-                    version: None,
-                },
-                Linkage::Dynamic,
-            )],
-        );
-
-        let other_kernel = MastPackage::generate(
-            "kernelpkg".into(),
-            "2.0.0".parse().unwrap(),
-            TargetType::Kernel,
-            [],
-        );
-        let mut registry = TestRegistry::default();
-        registry
-            .insert_record(
-                PackageId::from("kernelpkg"),
-                PackageRecord::new(
-                    Version::new(other_kernel.version.clone(), other_kernel.digest()),
-                    std::iter::empty(),
-                ),
-            )
-            .unwrap();
-
-        let graph = builder(&registry, &tempdir.path().join("git"))
-            .build_from_path(&root_manifest)
-            .unwrap();
-        let dep = graph.get(&PackageId::from("dep")).unwrap();
-
-        assert!(graph.get(&PackageId::from("kernelpkg")).is_none());
-        assert!(dep.dependencies.is_empty());
-    }
-
-    #[test]
-    fn preassembled_path_dependency_rejects_non_kernel_embedded_sections() {
-        let tempdir = TempDir::new().unwrap();
-        let embedded_package = MastPackage::generate(
-            "kernelpkg".into(),
-            "1.0.0".parse().unwrap(),
-            TargetType::Library,
-            [],
-        );
-        let embedded_version =
-            Version::new(embedded_package.version.clone(), embedded_package.digest());
-        let mut dep_package = MastPackage::generate(
-            "dep".into(),
-            "1.0.0".parse().unwrap(),
-            TargetType::Executable,
-            [miden_mast_package::Dependency {
-                name: PackageId::from("kernelpkg"),
-                version: embedded_version.version.clone(),
-                kind: TargetType::Kernel,
-                digest: embedded_package.digest(),
-            }],
-        );
-        dep_package
-            .sections
-            .push(Section::new(SectionId::KERNEL, embedded_package.to_bytes()));
-
-        let dep_package_path = tempdir.path().join("dep.masp");
-        fs::write(&dep_package_path, dep_package.to_bytes()).unwrap();
-
-        let registry = TestRegistry::default();
-        let error = builder(&registry, &tempdir.path().join("git"))
-            .load_preassembled_dependency(&dep_package_path, "dep", None)
-            .err()
-            .expect("non-kernel embedded sections must be rejected");
-
-        assert!(error.to_string().contains("not marked as a kernel package"));
-    }
-
-    #[test]
-    fn preassembled_path_dependencies_deduplicate_identical_embedded_kernels_in_resolution() {
-        let tempdir = TempDir::new().unwrap();
-        let kernel_package = MastPackage::generate(
-            "kernelpkg".into(),
-            "1.0.0".parse().unwrap(),
-            TargetType::Kernel,
-            [],
-        );
-        let kernel_version = Version::new(kernel_package.version.clone(), kernel_package.digest());
-        for name in ["dep-a", "dep-b"] {
-            let mut dep_package = MastPackage::generate(
-                name.into(),
-                "1.0.0".parse().unwrap(),
-                TargetType::Executable,
-                [miden_mast_package::Dependency {
-                    name: PackageId::from("kernelpkg"),
-                    version: kernel_version.version.clone(),
-                    kind: TargetType::Kernel,
-                    digest: kernel_package.digest(),
-                }],
-            );
-            dep_package
-                .sections
-                .push(Section::new(SectionId::KERNEL, kernel_package.to_bytes()));
-            fs::write(tempdir.path().join(format!("{name}.masp")), dep_package.to_bytes()).unwrap();
-        }
-
-        let root_dir = tempdir.path().join("root");
-        let root_manifest = write_package(
-            &root_dir,
-            "root",
-            "1.0.0",
-            Some("export.foo\nend\n"),
-            [
-                Dependency::new(
-                    Span::unknown("dep-a".into()),
-                    DependencyVersionScheme::Path {
-                        path: Span::unknown(Uri::from(tempdir.path().join("dep-a.masp").as_path())),
-                        version: None,
-                    },
-                    Linkage::Dynamic,
-                ),
-                Dependency::new(
-                    Span::unknown("dep-b".into()),
-                    DependencyVersionScheme::Path {
-                        path: Span::unknown(Uri::from(tempdir.path().join("dep-b.masp").as_path())),
-                        version: None,
-                    },
-                    Linkage::Dynamic,
-                ),
-            ],
-        );
-
-        let registry = TestRegistry::default();
-        let graph = builder(&registry, &tempdir.path().join("git"))
-            .build_from_path(&root_manifest)
-            .unwrap();
-
-        assert!(graph.get(&PackageId::from("kernelpkg")).is_none());
-        assert!(graph.get(&PackageId::from("dep-a")).is_some());
-        assert!(graph.get(&PackageId::from("dep-b")).is_some());
-    }
-
-    #[test]
-    fn preassembled_path_dependencies_reject_conflicting_embedded_kernel_metadata() {
-        let tempdir = TempDir::new().unwrap();
-        let kernel_package = MastPackage::generate(
-            "kernelpkg".into(),
-            "1.0.0".parse().unwrap(),
-            TargetType::Kernel,
-            [],
-        );
-        let conflicting_kernel = MastPackage::from_library(
-            kernel_package.name.clone(),
-            kernel_package.version.clone(),
-            TargetType::Kernel,
-            kernel_package.mast.clone(),
-            [miden_mast_package::Dependency {
-                name: PackageId::from("runtime"),
-                version: "1.0.0".parse().unwrap(),
-                kind: TargetType::Library,
-                digest: hash_string_to_word("runtime"),
-            }],
-        );
-        let kernel_version = Version::new(kernel_package.version.clone(), kernel_package.digest());
-
-        for (name, embedded_kernel) in
-            [("dep-a", kernel_package.as_ref()), ("dep-b", conflicting_kernel.as_ref())]
-        {
-            let mut dep_package = MastPackage::generate(
-                name.into(),
-                "1.0.0".parse().unwrap(),
-                TargetType::Executable,
-                [miden_mast_package::Dependency {
-                    name: PackageId::from("kernelpkg"),
-                    version: kernel_version.version.clone(),
-                    kind: TargetType::Kernel,
-                    digest: kernel_package.digest(),
-                }],
-            );
-            dep_package
-                .sections
-                .push(Section::new(SectionId::KERNEL, embedded_kernel.to_bytes()));
-            fs::write(tempdir.path().join(format!("{name}.masp")), dep_package.to_bytes()).unwrap();
-        }
-
-        let root_dir = tempdir.path().join("root");
-        let root_manifest = write_package(
-            &root_dir,
-            "root",
-            "1.0.0",
-            Some("export.foo\nend\n"),
-            [
-                Dependency::new(
-                    Span::unknown("dep-a".into()),
-                    DependencyVersionScheme::Path {
-                        path: Span::unknown(Uri::from(tempdir.path().join("dep-a.masp").as_path())),
-                        version: None,
-                    },
-                    Linkage::Dynamic,
-                ),
-                Dependency::new(
-                    Span::unknown("dep-b".into()),
-                    DependencyVersionScheme::Path {
-                        path: Span::unknown(Uri::from(tempdir.path().join("dep-b.masp").as_path())),
-                        version: None,
-                    },
-                    Linkage::Dynamic,
-                ),
-            ],
-        );
-
-        let registry = TestRegistry::default();
-        let error = builder(&registry, &tempdir.path().join("git"))
-            .build_from_path(&root_manifest)
-            .expect_err("conflicting embedded kernel metadata must be rejected");
-
-        assert!(error.to_string().contains("conflicts with dependency metadata"));
     }
 
     #[test]
