@@ -8,6 +8,8 @@
 #### Bug Fixes
 
 - Reverted `InvokeKind::ProcRef` back to `InvokeKind::Exec` in `visit_mut_procref` and added an explanatory comment (#2893).
+- Corrected memory trace docs to align same-word delta encoding, first-row delta initialization, and `f_scw` semantics with the implementation (#2815).
+
 #### Changes
 
 - Documented that enum variants are module-level constants and must be unique within a module (#2932).
