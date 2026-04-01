@@ -347,6 +347,7 @@ mod tests {
             DebugVarLocation::Memory(0xdead_beef),
             DebugVarLocation::Const(Felt::new(999)),
             DebugVarLocation::Local(-3),
+            DebugVarLocation::FrameBase { global_index: 20, byte_offset: -12 },
             DebugVarLocation::Expression(vec![0x10, 0x20, 0x30]),
         ];
 
