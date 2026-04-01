@@ -813,8 +813,9 @@ end
     let error = context
         .assemble_library_package(&root_manifest, None)
         .expect_err("runtime dependency digest conflicts should fail");
-    assert!(error.to_string().contains("dependency resolution failed"));
-    assert!(error.to_string().contains("runtime"));
+    let error = error.to_string();
+    assert!(error.contains("dependency resolution failed"));
+    assert!(error.contains("there is no version of runtime"));
 }
 
 #[test]
@@ -2160,6 +2161,230 @@ end
         .assemble(ProjectTargetSelector::Library, "dev")
         .expect_err("mutating the preassembled artifact after graph construction should fail");
     assert!(error.to_string().contains("no longer matches the dependency graph selection"));
+}
+
+#[test]
+fn preassembled_dependency_must_match_graph_selected_runtime_dependencies() {
+    let tempdir = TempDir::new().unwrap();
+    let runtime_v1 = Arc::<MastPackage>::from(MastPackage::generate(
+        "runtime".into(),
+        "1.0.0".parse().unwrap(),
+        TargetType::Library,
+        [],
+    ));
+    let runtime_v2 = Arc::<MastPackage>::from(MastPackage::generate(
+        "runtime".into(),
+        "1.0.1".parse().unwrap(),
+        TargetType::Library,
+        [],
+    ));
+    let dep_package_path = tempdir.path().join("dep.masp");
+    let dep_v1 = MastPackage::from_library(
+        "dep".into(),
+        "1.0.0".parse().unwrap(),
+        TargetType::Library,
+        runtime_v1.mast.clone(),
+        [miden_mast_package::Dependency {
+            name: PackageId::from("runtime"),
+            version: runtime_v1.version.clone(),
+            kind: TargetType::Library,
+            digest: runtime_v1.digest(),
+        }],
+    );
+    dep_v1.write_to_file(&dep_package_path).unwrap();
+
+    let root_dir = tempdir.path().join("root");
+    let root_manifest = root_dir.join("miden-project.toml");
+    write_file(
+        &root_manifest,
+        r#"[package]
+name = "root"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+
+[dependencies]
+dep = { path = "../dep.masp" }
+"#,
+    );
+    write_file(
+        &root_dir.join("lib.masm"),
+        r#"pub proc entry
+    exec.::dep::foo
+end
+"#,
+    );
+
+    let mut context = TestContext::new();
+    context.registry_mut().add_package(runtime_v1.clone());
+    let mut project_assembler = context.project_assembler_for_path(&root_manifest).unwrap();
+    let dep_v2 = MastPackage::from_library(
+        "dep".into(),
+        "1.0.0".parse().unwrap(),
+        TargetType::Library,
+        runtime_v1.mast.clone(),
+        [miden_mast_package::Dependency {
+            name: PackageId::from("runtime"),
+            version: runtime_v2.version.clone(),
+            kind: TargetType::Library,
+            digest: runtime_v2.digest(),
+        }],
+    );
+    dep_v2.write_to_file(&dep_package_path).unwrap();
+
+    let error = project_assembler.assemble(ProjectTargetSelector::Library, "dev").expect_err(
+        "changing preassembled dependency metadata after graph construction should fail",
+    );
+    assert!(
+        error
+            .to_string()
+            .contains("no longer matches the dependency graph dependency requirements")
+    );
+}
+
+#[test]
+fn preassembled_dependency_must_match_graph_selected_dependency_kinds() {
+    let tempdir = TempDir::new().unwrap();
+    let runtime = Arc::<MastPackage>::from(MastPackage::generate(
+        "runtime".into(),
+        "1.0.0".parse().unwrap(),
+        TargetType::Library,
+        [],
+    ));
+    let dep_package_path = tempdir.path().join("dep.masp");
+    let dep_v1 = MastPackage::from_library(
+        "dep".into(),
+        "1.0.0".parse().unwrap(),
+        TargetType::Library,
+        runtime.mast.clone(),
+        [miden_mast_package::Dependency {
+            name: PackageId::from("runtime"),
+            version: runtime.version.clone(),
+            kind: TargetType::Library,
+            digest: runtime.digest(),
+        }],
+    );
+    dep_v1.write_to_file(&dep_package_path).unwrap();
+
+    let root_dir = tempdir.path().join("root");
+    let root_manifest = root_dir.join("miden-project.toml");
+    write_file(
+        &root_manifest,
+        r#"[package]
+name = "root"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+
+[dependencies]
+dep = { path = "../dep.masp" }
+"#,
+    );
+    write_file(
+        &root_dir.join("lib.masm"),
+        r#"pub proc entry
+    exec.::dep::foo
+end
+"#,
+    );
+
+    let mut context = TestContext::new();
+    context.registry_mut().add_package(runtime.clone());
+    let mut project_assembler = context.project_assembler_for_path(&root_manifest).unwrap();
+    let dep_v2 = MastPackage::from_library(
+        "dep".into(),
+        "1.0.0".parse().unwrap(),
+        TargetType::Library,
+        runtime.mast.clone(),
+        [miden_mast_package::Dependency {
+            name: PackageId::from("runtime"),
+            version: runtime.version.clone(),
+            kind: TargetType::Kernel,
+            digest: runtime.digest(),
+        }],
+    );
+    dep_v2.write_to_file(&dep_package_path).unwrap();
+
+    let error = project_assembler
+        .assemble(ProjectTargetSelector::Library, "dev")
+        .expect_err("changing preassembled dependency kinds after graph construction should fail");
+    assert!(
+        error
+            .to_string()
+            .contains("no longer matches the dependency graph dependency requirements")
+    );
+}
+
+#[test]
+fn preassembled_package_must_match_graph_selected_target_kind() {
+    let tempdir = TempDir::new().unwrap();
+    let runtime = Arc::<MastPackage>::from(MastPackage::generate(
+        "runtime".into(),
+        "1.0.0".parse().unwrap(),
+        TargetType::Library,
+        [],
+    ));
+    let dep_package_path = tempdir.path().join("dep.masp");
+    let dep_v1 = MastPackage::from_library(
+        "dep".into(),
+        "1.0.0".parse().unwrap(),
+        TargetType::Library,
+        runtime.mast.clone(),
+        [miden_mast_package::Dependency {
+            name: PackageId::from("runtime"),
+            version: runtime.version.clone(),
+            kind: TargetType::Library,
+            digest: runtime.digest(),
+        }],
+    );
+    dep_v1.write_to_file(&dep_package_path).unwrap();
+
+    let root_dir = tempdir.path().join("root");
+    let root_manifest = root_dir.join("miden-project.toml");
+    write_file(
+        &root_manifest,
+        r#"[package]
+name = "root"
+version = "1.0.0"
+
+[lib]
+path = "lib.masm"
+
+[dependencies]
+dep = { path = "../dep.masp" }
+"#,
+    );
+    write_file(
+        &root_dir.join("lib.masm"),
+        r#"pub proc entry
+    exec.::dep::foo
+end
+"#,
+    );
+
+    let mut context = TestContext::new();
+    context.registry_mut().add_package(runtime.clone());
+    let mut project_assembler = context.project_assembler_for_path(&root_manifest).unwrap();
+    let dep_v2 = MastPackage::from_library(
+        "dep".into(),
+        "1.0.0".parse().unwrap(),
+        TargetType::Kernel,
+        runtime.mast.clone(),
+        [miden_mast_package::Dependency {
+            name: PackageId::from("runtime"),
+            version: runtime.version.clone(),
+            kind: TargetType::Library,
+            digest: runtime.digest(),
+        }],
+    );
+    dep_v2.write_to_file(&dep_package_path).unwrap();
+
+    let error = project_assembler
+        .assemble(ProjectTargetSelector::Library, "dev")
+        .expect_err("changing preassembled package kind after graph construction should fail");
+    assert!(error.to_string().contains("no longer matches the dependency graph target kind"));
 }
 
 fn write_kernel_program_project(root: &FsPath) -> PathBuf {
