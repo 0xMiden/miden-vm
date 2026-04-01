@@ -930,7 +930,6 @@ impl MastForestBuilder {
         self.pending_asm_op_mappings.push((node_id, vec![(0, asm_op_id)]));
         Ok(())
     }
-
 }
 
 impl Index<MastNodeId> for MastForestBuilder {
@@ -1205,8 +1204,9 @@ mod tests {
 
         let num_ops = PROCEDURE_INLINING_THRESHOLD * 1024;
         let large_ops = vec![Operation::Add; num_ops];
-        let large_block_id =
-            builder.ensure_block(large_ops, Vec::new(), vec![], vec![], vec![], vec![]).unwrap();
+        let large_block_id = builder
+            .ensure_block(large_ops, Vec::new(), vec![], vec![], vec![], vec![])
+            .unwrap();
         builder.mast_forest.make_root(large_block_id);
 
         let small_block_id = builder

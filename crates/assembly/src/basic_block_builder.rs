@@ -231,9 +231,14 @@ impl BasicBlockBuilder<'_> {
             let asm_ops = core::mem::take(&mut self.asm_ops);
             let debug_vars: Vec<(usize, DebugVarId)> = self.debug_vars.drain(..).collect();
 
-            let basic_block_node_id =
-                self.mast_forest_builder
-                    .ensure_block(ops, decorators, asm_ops, debug_vars, vec![], vec![])?;
+            let basic_block_node_id = self.mast_forest_builder.ensure_block(
+                ops,
+                decorators,
+                asm_ops,
+                debug_vars,
+                vec![],
+                vec![],
+            )?;
 
             Ok(Some(basic_block_node_id))
         } else {
