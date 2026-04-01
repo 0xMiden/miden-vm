@@ -12,7 +12,7 @@ use alloc::vec::Vec;
 
 use assert_matches::assert_matches;
 
-use super::{Config, Result};
+use super::{Config, Result, test_utils::UNUSED_ENTRY_COUNT};
 use crate::{
     EMPTY_WORD, Map, Set, Word,
     merkle::{
@@ -626,6 +626,118 @@ fn entry_count() -> Result<()> {
     // current tree or a historical tree.
     assert_eq!(forest.entry_count(TreeId::new(lineage_1, version_1))?, 3);
     assert_eq!(forest.entry_count(TreeId::new(lineage_1, version_2))?, 3);
+
+    Ok(())
+}
+
+#[test]
+fn entry_count_historical_across_versions() -> Result<()> {
+    let backend = ForestInMemoryBackend::new();
+    let mut forest = Forest::new(backend)?;
+    let mut rng = ContinuousRng::new([0x23; 32]);
+
+    let lineage: LineageId = rng.value();
+    let version_1: VersionId = rng.value();
+
+    // Version 1: Insert 2 entries.
+    let key_1: Word = rng.value();
+    let value_1: Word = rng.value();
+    let key_2: Word = rng.value();
+    let value_2: Word = rng.value();
+
+    let mut ops = SmtUpdateBatch::empty();
+    ops.add_insert(key_1, value_1);
+    ops.add_insert(key_2, value_2);
+    forest.add_lineage(lineage, version_1, ops)?;
+
+    // Version 2: Insert 1 more entry (total 3).
+    let version_2 = version_1 + 1;
+    let key_3: Word = rng.value();
+    let value_3: Word = rng.value();
+
+    let mut ops = SmtUpdateBatch::empty();
+    ops.add_insert(key_3, value_3);
+    forest.update_tree(lineage, version_2, ops)?;
+
+    // Version 3: Remove 1 entry (total 2).
+    let version_3 = version_2 + 1;
+    let mut ops = SmtUpdateBatch::empty();
+    ops.add_remove(key_1);
+    forest.update_tree(lineage, version_3, ops)?;
+
+    // Verify entry counts for all versions.
+    assert_eq!(forest.entry_count(TreeId::new(lineage, version_1))?, 2);
+    assert_eq!(forest.entry_count(TreeId::new(lineage, version_2))?, 3);
+    assert_eq!(forest.entry_count(TreeId::new(lineage, version_3))?, 2);
+
+    Ok(())
+}
+
+#[test]
+fn entry_count_historical_across_versions_via_update_forest() -> Result<()> {
+    let backend = ForestInMemoryBackend::new();
+    let mut forest = Forest::new(backend)?;
+    let mut rng = ContinuousRng::new([0x24; 32]);
+
+    // Set up two lineages so we exercise the update_forest path (which updates multiple lineages
+    // in a single batch).
+    let lineage_a: LineageId = rng.value();
+    let lineage_b: LineageId = rng.value();
+    let version_1: VersionId = rng.value();
+
+    // Version 1: lineage_a gets 2 entries, lineage_b gets 1 entry.
+    let a_key_1: Word = rng.value();
+    let a_value_1: Word = rng.value();
+    let a_key_2: Word = rng.value();
+    let a_value_2: Word = rng.value();
+    let b_key_1: Word = rng.value();
+    let b_value_1: Word = rng.value();
+
+    let mut ops_a = SmtUpdateBatch::empty();
+    ops_a.add_insert(a_key_1, a_value_1);
+    ops_a.add_insert(a_key_2, a_value_2);
+    forest.add_lineage(lineage_a, version_1, ops_a)?;
+
+    let mut ops_b = SmtUpdateBatch::empty();
+    ops_b.add_insert(b_key_1, b_value_1);
+    forest.add_lineage(lineage_b, version_1, ops_b)?;
+
+    // Version 2 via update_forest: add 1 entry to lineage_a (total 3), add 2 entries to
+    // lineage_b (total 3).
+    let version_2 = version_1 + 1;
+    let a_key_3: Word = rng.value();
+    let a_value_3: Word = rng.value();
+    let b_key_2: Word = rng.value();
+    let b_value_2: Word = rng.value();
+    let b_key_3: Word = rng.value();
+    let b_value_3: Word = rng.value();
+
+    let mut batch = SmtForestUpdateBatch::empty();
+    batch.operations(lineage_a).add_insert(a_key_3, a_value_3);
+    batch.operations(lineage_b).add_insert(b_key_2, b_value_2);
+    batch.operations(lineage_b).add_insert(b_key_3, b_value_3);
+    forest.update_forest(version_2, batch)?;
+
+    // Version 3 via update_forest: remove 1 entry from lineage_a (total 2), add 1 entry to
+    // lineage_b (total 4).
+    let version_3 = version_2 + 1;
+    let b_key_4: Word = rng.value();
+    let b_value_4: Word = rng.value();
+
+    let mut batch = SmtForestUpdateBatch::empty();
+    batch.operations(lineage_a).add_remove(a_key_1);
+    batch.operations(lineage_b).add_insert(b_key_4, b_value_4);
+    forest.update_forest(version_3, batch)?;
+
+    // Verify historical entry counts for lineage_a.
+    assert_eq!(forest.entry_count(TreeId::new(lineage_a, version_1))?, 2);
+    assert_eq!(forest.entry_count(TreeId::new(lineage_a, version_2))?, 3);
+    assert_eq!(forest.entry_count(TreeId::new(lineage_a, version_3))?, 2);
+
+    // Verify historical entry counts for lineage_b.
+    assert_eq!(forest.entry_count(TreeId::new(lineage_b, version_1))?, 1);
+    assert_eq!(forest.entry_count(TreeId::new(lineage_b, version_2))?, 3);
+    assert_eq!(forest.entry_count(TreeId::new(lineage_b, version_3))?, 4);
 
     Ok(())
 }
@@ -1311,7 +1423,9 @@ fn truncate_removes_emptied_lineages_from_non_empty_histories() {
     let mut history = History::empty(4);
     let nodes = NodeChanges::default();
     let changed_keys = ChangedKeys::default();
-    history.add_version(rand_value(), 5, nodes, changed_keys).unwrap();
+    history
+        .add_version(rand_value(), 5, nodes, changed_keys, UNUSED_ENTRY_COUNT)
+        .unwrap();
     assert_eq!(history.num_versions(), 1);
 
     let lineage_data = LineageData {
@@ -1356,10 +1470,10 @@ fn truncate_retains_non_empty_lineages_in_non_empty_histories() {
     let nodes = NodeChanges::default();
     let changed_keys = ChangedKeys::default();
     history
-        .add_version(rand_value(), 5, nodes.clone(), changed_keys.clone())
+        .add_version(rand_value(), 5, nodes.clone(), changed_keys.clone(), UNUSED_ENTRY_COUNT)
         .unwrap();
     history
-        .add_version(rand_value(), 8, nodes.clone(), changed_keys.clone())
+        .add_version(rand_value(), 8, nodes.clone(), changed_keys.clone(), UNUSED_ENTRY_COUNT)
         .unwrap();
     assert_eq!(history.num_versions(), 2);
 
@@ -1449,13 +1563,12 @@ fn entries_with_fallible_backend() -> Result<()> {
 }
 
 #[test]
-fn entry_count_with_fallible_backend() -> Result<()> {
+fn entry_count_historical_bypasses_fallible_entries_iterator() -> Result<()> {
     let backend = FallibleEntriesBackend::new();
     let mut forest = LargeSmtForest::new(backend)?;
     let mut rng = ContinuousRng::new([0xfb; 32]);
 
-    // Add a lineage with more than 3 entries at version V1 so we can verify that the iteration
-    // stops at the failure point and does not silently count additional entries.
+    // Add a lineage with 5 entries at version V1.
     let lineage: LineageId = rng.value();
     let version_1: VersionId = rng.value();
     let key_1: Word = rng.value();
@@ -1487,9 +1600,10 @@ fn entry_count_with_fallible_backend() -> Result<()> {
     forest.update_tree(lineage, version_2, operations)?;
 
     // Query entry_count for the historical version V1.
-    // This takes the WithHistory iteration path, which will hit our fallible iterator.
+    // With the stored entry count optimization, this no longer iterates through entries,
+    // so it succeeds even with a fallible backend.
     let result = forest.entry_count(TreeId::new(lineage, version_1));
-    assert_matches!(result, Err(LargeSmtForestError::Unspecified(msg)) if msg == "simulated read failure");
+    assert_eq!(result?, 5);
 
     Ok(())
 }

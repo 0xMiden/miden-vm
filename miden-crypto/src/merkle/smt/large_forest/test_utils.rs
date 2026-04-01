@@ -1,6 +1,9 @@
 #![cfg(test)]
 //! This module contains utility functions for testing the large forest.
 
+/// Placeholder entry count for tests that do not exercise or assert entry count behavior.
+pub const UNUSED_ENTRY_COUNT: usize = 0;
+
 use alloc::{string::ToString, vec::Vec};
 use core::error::Error;
 

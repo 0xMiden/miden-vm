@@ -131,7 +131,8 @@ impl History {
     }
 
     /// Adds a version to the history with the provided `root` and represented by the changes from
-    /// the current tree given in `nodes` and `leaves`.
+    /// the current tree given in `nodes` and `changed_keys`, with `entry_count` as the total
+    /// number of entries for the tree that corresponds to this version.
     ///
     /// If adding this version would result in exceeding `self.max_count` historical versions, then
     /// the oldest of the versions is automatically removed.
@@ -157,6 +158,7 @@ impl History {
         version_id: VersionId,
         nodes: NodeChanges,
         changed_keys: ChangedKeys,
+        entry_count: usize,
     ) -> Result<()> {
         // We need to fail early if the provided new version is not monotonic with respect to the
         // latest version in the history.
@@ -185,13 +187,15 @@ impl History {
             }
         }
 
-        self.deltas.push_back(Delta::new(root, version_id, nodes, changed_keys));
+        self.deltas
+            .push_back(Delta::new(root, version_id, nodes, changed_keys, entry_count));
 
         Ok(())
     }
 
-    /// Adds a version to the history and represented by the changes from the current tree given
-    /// `mutations`.
+    /// Adds a version to the history, represented by the changes from the current tree given
+    /// `mutations`, with `entry_count` corresponding to the number of entries in the full tree
+    /// corresponding to this version.
     ///
     /// If adding this version would result in exceeding `self.max_count` historical versions, then
     /// the oldest of the versions is automatically removed.
@@ -214,6 +218,7 @@ impl History {
         &mut self,
         version_id: VersionId,
         mutations: MutationSet,
+        entry_count: usize,
     ) -> Result<()> {
         let mut changed_keys = ChangedKeys::default();
         mutations.new_pairs.into_iter().for_each(|(k, v)| {
@@ -232,7 +237,7 @@ impl History {
             .collect();
 
         // Now we can simply delegate to the standard function.
-        self.add_version(mutations.new_root, version_id, node_changes, changed_keys)
+        self.add_version(mutations.new_root, version_id, node_changes, changed_keys, entry_count)
     }
 
     /// Returns the index in the sequence of deltas of the version that corresponds to the provided
@@ -396,6 +401,12 @@ impl<'history> HistoryView<'history> {
     pub fn changed_keys(&self) -> impl Iterator<Item = (Word, Word)> + 'history {
         self.delta.changed_keys.iter().map(|(k, v)| (*k, *v))
     }
+
+    /// Returns the total number of entries in the tree at this historical version.
+    #[must_use]
+    pub fn entry_count(&self) -> usize {
+        self.delta.entry_count
+    }
 }
 
 // DELTA
@@ -436,19 +447,30 @@ struct Delta {
     /// represented by the delta. This includes pairs that either add or mutate a value under a
     /// key, and pairs where the value is the `EMPTY_WORD` and hence represent removals.
     changed_keys: ChangedKeys,
+
+    /// The total number of entries that existed in the tree at the version represented by this
+    /// delta, stored eagerly to avoid recomputation.
+    entry_count: usize,
 }
 
 impl Delta {
     /// Creates a new delta with the provided `root`, representing the provided changes to the
-    /// `nodes` in the merkle tree, and using `added_keys` and `removed_keys` to represent the
-    /// changes to entries in the tree.
+    /// `nodes` in the merkle tree, using `changed_keys` to represent the changes to entries in
+    /// the tree, and storing `entry_count` as the total number of entries at this version.
     #[must_use]
     fn new(
         root: RootValue,
         version_id: VersionId,
         nodes: NodeChanges,
         changed_keys: ChangedKeys,
+        entry_count: usize,
     ) -> Self {
-        Self { root, version_id, nodes, changed_keys }
+        Self {
+            root,
+            version_id,
+            nodes,
+            changed_keys,
+            entry_count,
+        }
     }
 }
