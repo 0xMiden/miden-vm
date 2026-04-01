@@ -19,6 +19,10 @@
 - Added `prove_from_trace_sync(...)` for proving from pre-executed trace inputs ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
 - Refactor trace generation to row-major format ([#2937](https://github.com/0xMiden/miden-vm/pull/2937)).
 
+#### Fixes
+
+- Fixed stale `ReplayProcessor` doc comment links to `ExecutionTracer` after module-structure refactors.
+
 ## 0.22.0 (2025-03-18)
 
 #### Enhancements
