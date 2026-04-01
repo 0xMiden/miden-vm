@@ -150,12 +150,11 @@ impl MastForestBuilder {
         }
 
         // Register all pending debug variable mappings in sorted node order.
-        // Like AssemblyOps, the CSR structure requires sequential node registration.
-        let mut debug_var_mappings = core::mem::take(&mut self.pending_debug_var_mappings);
-        debug_var_mappings.sort_by_key(|(node_id, _)| *node_id);
-        // Keep only the first registration per node_id (duplicates come from deduplication).
-        let mut seen_debug_var_node_ids = BTreeSet::new();
-        debug_var_mappings.retain(|(node_id, _)| seen_debug_var_node_ids.insert(*node_id));
+        // The CSR structure requires sequential node registration.
+        // Debug vars are included in the block fingerprint, so blocks with different
+        // debug vars are not deduplicated. The dedup here is only a safety measure.
+        let debug_var_mappings =
+            deduplicate_debug_var_mappings(core::mem::take(&mut self.pending_debug_var_mappings));
 
         for (node_id, debug_vars) in debug_var_mappings {
             self.mast_forest
@@ -198,6 +197,23 @@ fn compute_operations_and_adjust_mappings(
 fn deduplicate_asm_op_mappings(
     mut mappings: Vec<(MastNodeId, Vec<(usize, AsmOpId)>)>,
 ) -> Vec<(MastNodeId, Vec<(usize, AsmOpId)>)> {
+    mappings.sort_by_key(|(node_id, _)| *node_id);
+
+    let mut seen_node_ids = BTreeSet::new();
+    mappings
+        .into_iter()
+        .filter(|(node_id, _)| seen_node_ids.insert(*node_id))
+        .collect()
+}
+
+/// Deduplicates debug variable mappings by node_id (keeps first registration).
+///
+/// Since debug vars are included in the block fingerprint, blocks with different debug vars
+/// will not be deduplicated. This function is a safety measure to handle any remaining
+/// duplicate registrations (e.g. from control flow node deduplication).
+fn deduplicate_debug_var_mappings(
+    mut mappings: Vec<(MastNodeId, Vec<(usize, miden_core::mast::DebugVarId)>)>,
+) -> Vec<(MastNodeId, Vec<(usize, miden_core::mast::DebugVarId)>)> {
     mappings.sort_by_key(|(node_id, _)| *node_id);
 
     let mut seen_node_ids = BTreeSet::new();
@@ -626,9 +642,9 @@ impl MastForestBuilder {
     /// Each entry is `(op_idx, DebugVarId)` where `op_idx` is the operation index the debug
     /// variable corresponds to.
     ///
-    /// Note: AssemblyOps and debug variables are only registered for newly created nodes. If a
-    /// duplicate node already exists in the forest (deduplication), they are ignored since the
-    /// existing node already has its metadata registered.
+    /// Note: Debug variables are included in the block fingerprint, so blocks with identical
+    /// operations but different debug variables will not be deduplicated. AssemblyOps are not
+    /// part of the fingerprint, so they are only registered for newly created nodes.
     ///
     /// The actual registration of both AssemblyOp and debug variable mappings is deferred until
     /// `build()` is called, to ensure nodes are registered in sequential order as required by
@@ -642,9 +658,13 @@ impl MastForestBuilder {
         before_enter: Vec<DecoratorId>,
         after_exit: Vec<DecoratorId>,
     ) -> Result<MastNodeId, Report> {
+        // Include debug vars in the builder so they are part of the block fingerprint.
+        // This prevents deduplication of blocks with identical operations but different
+        // debug variables, preserving per-scope variable information for the debugger.
         let block = BasicBlockNodeBuilder::new(operations, decorators)
             .with_before_enter(before_enter)
-            .with_after_exit(after_exit);
+            .with_after_exit(after_exit)
+            .with_debug_vars(debug_vars.clone());
         let (node_id, is_new) = self.ensure_node_exists(block)?;
 
         // Only register AssemblyOps for newly created nodes.
@@ -665,7 +685,8 @@ impl MastForestBuilder {
         }
 
         // Only register debug variables for newly created nodes.
-        // Deduplicated nodes already have their debug vars registered.
+        // Blocks with different debug vars now have different fingerprints,
+        // so deduplication only occurs when vars are truly identical.
         if is_new && !debug_vars.is_empty() {
             self.pending_debug_var_mappings.push((node_id, debug_vars));
         }
