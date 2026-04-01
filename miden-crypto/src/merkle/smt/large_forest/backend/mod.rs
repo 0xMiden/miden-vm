@@ -111,6 +111,14 @@ where
     ///
     /// It is the responsibility of the forest to ensure lineage existence before querying the
     /// backend. The backend must return an error if the lineage does not exist.
+    ///
+    /// # Expected Behavior
+    ///
+    /// Implementations must guarantee the following behavior in addition to the global invariants:
+    ///
+    /// - This method must be **cheap** to call, not requiring network or disk I/O to service the
+    ///   result. This usually implies in-memory caching of the data.
+    /// - This method must not return errors other than if the lineage does not exist.
     fn entry_count(&self, lineage: LineageId) -> Result<usize>;
 
     /// Returns an iterator that yields the populated (key-value) entries for the specified

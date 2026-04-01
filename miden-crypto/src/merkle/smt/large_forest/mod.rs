@@ -678,14 +678,9 @@ impl<B: Backend> LargeSmtForest<B> {
     ///
     /// # Performance
     ///
-    /// Due to the way that tree data is stored, this method exhibits a split performance profile.
-    ///
-    /// - If querying for a `tree` that is the latest in its lineage, the time to return a result
-    ///   should be constant.
-    /// - If querying for a `tree` that is a historical version, the time to return a result will be
-    ///   linear in the number of entries in the tree. This is because an overlaid iterator has to
-    ///   be created to yield the correct entries for the historical version, and then queried for
-    ///   its length.
+    /// This method should always return its result in constant time. The exact performance profile
+    /// to do this is dependent on the backend for the most recent tree, but for historical trees
+    /// will be the same regardless of the backend in use.
     ///
     /// # Errors
     ///
@@ -715,19 +710,7 @@ impl<B: Backend> LargeSmtForest<B> {
             return Err(LargeSmtForestError::UnknownTree(tree));
         };
 
-        // In the general case there is no faster path than doing the iteration to merge the
-        // history with the full tree, so we just count the iterator.
-        //
-        // We have to do it this way to avoid silently swallowing errors during iteration.
-        let iterator =
-            EntriesIterator::new_with_history(self.backend.entries(tree.lineage())?, view);
-        let mut count = 0;
-        for entry in iterator {
-            entry?;
-            count += 1;
-        }
-
-        Ok(count)
+        Ok(view.entry_count())
     }
 
     /// Returns an iterator that yields the entries in the specified `tree`.
@@ -865,6 +848,16 @@ impl<B: Backend> LargeSmtForest<B> {
             return Err(LargeSmtForestError::UnknownLineage(lineage));
         };
 
+        // We capture the entry count before the backend update, as this is the count for the
+        // version being pushed into history. This must precede `update_tree` because the backend
+        // entry count changes after that call.
+        //
+        // By the contract of the `Backend` trait, `entry_count` is expected to be extremely cheap,
+        // and only fail if the lineage in question is missing. Versions of this method that are
+        // expensive to call, or that can fail due to I/O or other such reasons, are considered
+        // non-conformant.
+        let old_entry_count = self.backend.entry_count(lineage)?;
+
         // We now know that we have a valid lineage and a valid version, so we perform the update in
         // the backend.
         let reversion_set = self.backend.update_tree(lineage, new_version, updates)?;
@@ -888,7 +881,11 @@ impl<B: Backend> LargeSmtForest<B> {
         // hence should only ever fail due to a programmer bug so we panic if it does fail.
         lineage_data
             .history
-            .add_version_from_mutation_set(lineage_data.latest_version, reversion_set)
+            .add_version_from_mutation_set(
+                lineage_data.latest_version,
+                reversion_set,
+                old_entry_count,
+            )
             .unwrap_or_else(|_| {
                 panic!("Unable to add valid version {} to history", lineage_data.latest_version)
             });
@@ -1018,6 +1015,22 @@ impl<B: Backend> LargeSmtForest<B> {
             })
             .collect::<Result<Vec<_>>>()?;
 
+        // We capture the entry counts before the backend update, as these are the counts for the
+        // versions being pushed into history. This must precede `update_forest` because the
+        // backend entry counts change after that call. We capture for all lineages eagerly
+        // (including those that may produce no-op updates) to keep the logic simple and consistent
+        // with `update_tree`, and use a map to eliminate any accidental dependencies on iteration
+        // order.
+        //
+        // By the contract of the `Backend` trait, `entry_count` is expected to be extremely cheap,
+        // and only fail if the lineage in question is missing. Versions of this method that are
+        // expensive to call, or that can fail due to I/O or other such reasons, are considered
+        // non-conformant.
+        let old_entry_counts: Map<LineageId, usize> = updates
+            .lineages()
+            .map(|lineage| Ok((*lineage, self.backend.entry_count(*lineage)?)))
+            .collect::<Result<_>>()?;
+
         // With the preconditions checked we can call into the backend to perform the updates, and
         // we forward all errors as this will be correct for conformant backend implementations.
         let reversion_sets = self.backend.update_forest(new_version, updates)?;
@@ -1027,6 +1040,8 @@ impl<B: Backend> LargeSmtForest<B> {
         reversion_sets
             .into_iter()
             .map(|(lineage, reversion)| {
+                // Known to exist by construction, so the bare index is safe.
+                let old_entry_count = old_entry_counts[&lineage];
                 let lineage_data = self
                     .lineage_data
                     .get_mut(&lineage)
@@ -1049,7 +1064,11 @@ impl<B: Backend> LargeSmtForest<B> {
                 // hence should only ever fail due to a programmer bug so we panic if it does fail.
                 lineage_data
                     .history
-                    .add_version_from_mutation_set(lineage_data.latest_version, reversion)
+                    .add_version_from_mutation_set(
+                        lineage_data.latest_version,
+                        reversion,
+                        old_entry_count,
+                    )
                     .unwrap_or_else(|_| {
                         panic!(
                             "Unable to add valid version {} to history",
