@@ -349,8 +349,7 @@ impl Assembler {
             TargetType::Kernel => {
                 if !self.kernel().is_empty() {
                     return Err(Report::msg(format!(
-                        "duplicate kernels present in the dependency graph: '{}@{
-    }' conflicts with another kernel we've already linked",
+                        "duplicate kernels present in the dependency graph: '{}@{}' conflicts with another kernel we've already linked",
                         &package.name, &package.version
                     )));
                 }

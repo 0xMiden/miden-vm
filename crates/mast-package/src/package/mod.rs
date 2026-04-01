@@ -179,13 +179,21 @@ impl Package {
             && let Some(entrypoint) = self.mast.mast_forest().find_procedure_root(digest)
         {
             let mast_forest = self.mast.mast_forest().clone();
-            match self.try_embedded_kernel_library()? {
-                Some(kernel_library) => Ok(Program::with_kernel(
+            let kernel_dependency = self.kernel_runtime_dependency()?.cloned();
+            match (self.try_embedded_kernel_library()?, kernel_dependency) {
+                (Some(kernel_library), _) => Ok(Program::with_kernel(
                     mast_forest,
                     entrypoint,
                     kernel_library.kernel().clone(),
                 )),
-                None => Ok(Program::new(mast_forest, entrypoint)),
+                (None, Some(kernel_dependency)) => Err(Report::msg(format!(
+                    "package '{}' declares kernel runtime dependency '{}@{}#{}', but does not embed the kernel package required to reconstruct a program",
+                    self.name,
+                    kernel_dependency.name,
+                    kernel_dependency.version,
+                    kernel_dependency.digest
+                ))),
+                (None, None) => Ok(Program::new(mast_forest, entrypoint)),
             }
         } else {
             Err(Report::msg(format!(
