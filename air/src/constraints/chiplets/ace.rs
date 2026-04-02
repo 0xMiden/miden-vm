@@ -32,7 +32,7 @@ use miden_core::field::PrimeCharacteristicRing;
 use super::selectors::{ace_chiplet_flag, memory_chiplet_flag};
 use crate::{
     Felt, MainTraceRow,
-    constraints::tagging::{TaggingAirBuilderExt},
+    constraints::tagging::TaggingAirBuilderExt,
     trace::chiplets::ace::{
         CLK_IDX, CTX_IDX, EVAL_OP_IDX, ID_0_IDX, ID_1_IDX, PTR_IDX, READ_NUM_EVAL_IDX,
         SELECTOR_BLOCK_IDX, SELECTOR_START_IDX, V_0_0_IDX, V_0_1_IDX, V_1_0_IDX, V_1_1_IDX,
@@ -45,14 +45,6 @@ use crate::{
 
 // ACE chiplet offset from CHIPLETS_OFFSET (after s0, s1, s2, s3).
 const ACE_OFFSET: usize = 4;
-
-// TAGGING IDS
-// ================================================================================================
-
-
-
-
-
 
 // ENTRY POINTS
 // ================================================================================================
@@ -152,8 +144,8 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     // BINARY CONSTRAINTS
     // ==========================================================================
 
-    builder.assert_zero(ace_flag.clone() * sstart.clone() * (sstart.clone() - one.clone()),);
-    builder.assert_zero(ace_flag.clone() * sblock.clone() * (sblock.clone() - one.clone()),);
+    builder.assert_zero(ace_flag.clone() * sstart.clone() * (sstart.clone() - one.clone()));
+    builder.assert_zero(ace_flag.clone() * sblock.clone() * (sblock.clone() - one.clone()));
 
     // ==========================================================================
     // SECTION/BLOCK FLAGS CONSTRAINTS
@@ -166,19 +158,25 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     let f_end = binary_or((one.clone() - s3_next.clone()) * sstart_next.clone(), s3_next.clone());
 
     // Last row of ACE chiplet cannot be section start
-    builder.assert_zero(ace_flag.clone() * flag_ace_last.clone() * sstart.clone(),);
+    builder.assert_zero(ace_flag.clone() * flag_ace_last.clone() * sstart.clone());
     // Prevent consecutive section starts within ACE chiplet
-    builder.assert_zero(ace_flag.clone() * flag_ace_next.clone() * sstart.clone() * sstart_next.clone(),);
+    builder.assert_zero(
+        ace_flag.clone() * flag_ace_next.clone() * sstart.clone() * sstart_next.clone(),
+    );
     // Sections must start with READ blocks (not EVAL): f_eval = 0 when f_start
-    builder.assert_zero(ace_flag.clone() * sstart.clone() * sblock.clone(),);
+    builder.assert_zero(ace_flag.clone() * sstart.clone() * sblock.clone());
     // EVAL blocks cannot be followed by READ blocks within same section
-    builder.assert_zero(ace_flag.clone()
+    builder.assert_zero(
+        ace_flag.clone()
             * flag_ace_next.clone()
             * f_next.clone()
             * sblock.clone()
-            * (one.clone() - sblock_next.clone()),);
+            * (one.clone() - sblock_next.clone()),
+    );
     // Sections must end with EVAL blocks (not READ)
-    builder.assert_zero(ace_flag.clone() * is_transition.clone() * f_end.clone() * (one.clone() - sblock.clone()),);
+    builder.assert_zero(
+        ace_flag.clone() * is_transition.clone() * f_end.clone() * (one.clone() - sblock.clone()),
+    );
 
     // ==========================================================================
     // SECTION CONSTRAINTS (within section)
@@ -201,17 +199,18 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     // Node ID decrements: -2 in READ, -1 in EVAL
     // id0 = id0' + 2 * f_read + f_eval
     let expected_id0 = id0_next.clone() + f_read.clone().double() + f_eval.clone();
-    builder.assert_zero(within_section_gate.clone() * (ctx_next.clone() - ctx.clone()),);
-    builder.assert_zero(within_section_gate.clone() * (clk_next.clone() - clk.clone()),);
-    builder.assert_zero(within_section_gate.clone() * (ptr_next.clone() - expected_ptr_next),);
-    builder.assert_zero(within_section_gate * (id0.clone() - expected_id0),);
+    builder.assert_zero(within_section_gate.clone() * (ctx_next.clone() - ctx.clone()));
+    builder.assert_zero(within_section_gate.clone() * (clk_next.clone() - clk.clone()));
+    builder.assert_zero(within_section_gate.clone() * (ptr_next.clone() - expected_ptr_next));
+    builder.assert_zero(within_section_gate * (id0.clone() - expected_id0));
 
     // ==========================================================================
     // READ BLOCK CONSTRAINTS
     // ==========================================================================
 
     // In READ block, the two node IDs should be consecutive (id1 = id0 - 1)
-    builder.assert_zero(ace_flag.clone() * f_read.clone() * (id1.clone() - id0.clone() + one.clone()),);
+    builder
+        .assert_zero(ace_flag.clone() * f_read.clone() * (id1.clone() - id0.clone() + one.clone()));
 
     // READ→EVAL transition occurs when n_eval matches the first EVAL id0.
     // n_eval is constant across READ rows and encodes (num_eval_rows - 1).
@@ -219,24 +218,28 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     let f_read_next = one.clone() - sblock_next.clone();
     let f_eval_next = sblock_next.clone();
     let selected = f_read_next * n_eval_next.clone() + f_eval_next * id0_next.clone();
-    builder.assert_zero(is_transition.clone() * ace_flag.clone() * f_read.clone() * (selected - n_eval),);
+    builder.assert_zero(
+        is_transition.clone() * ace_flag.clone() * f_read.clone() * (selected - n_eval),
+    );
 
     // ==========================================================================
     // EVAL BLOCK CONSTRAINTS
     // ==========================================================================
 
     // op must be -1, 0, or 1: op * (op - 1) * (op + 1) = 0
-    builder.assert_zero(ace_flag.clone()
+    builder.assert_zero(
+        ace_flag.clone()
             * f_eval.clone()
             * op.clone()
             * (op.clone() - one.clone())
-            * (op.clone() + one.clone()),);
+            * (op.clone() + one.clone()),
+    );
 
     // Arithmetic operation constraints
     let eval_gate = ace_flag.clone() * f_eval.clone();
     let (expected_0, expected_1) = compute_arithmetic_expected::<AB>(op, v1_0, v1_1, v2_0, v2_1);
-    builder.assert_zero(eval_gate.clone() * (expected_0 - v0_0.clone()),);
-    builder.assert_zero(eval_gate.clone() * (expected_1 - v0_1.clone()),);
+    builder.assert_zero(eval_gate.clone() * (expected_0 - v0_0.clone()));
+    builder.assert_zero(eval_gate.clone() * (expected_1 - v0_1.clone()));
 
     // ==========================================================================
     // FINALIZATION CONSTRAINTS
@@ -266,7 +269,7 @@ pub fn enforce_ace_constraints_first_row<AB>(
     let one: AB::Expr = AB::Expr::ONE;
 
     // First row of ACE must have sstart' = 1
-    builder.assert_zero(flag_next_row_first_ace * (sstart_next - one),);
+    builder.assert_zero(flag_next_row_first_ace * (sstart_next - one));
 }
 
 // INTERNAL HELPERS

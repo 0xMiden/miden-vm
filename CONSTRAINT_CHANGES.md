@@ -19,3 +19,8 @@ resolving merge conflicts in this file.
 **No constraint changes.** (441 base + 24 ext)
 
 ---
+## 3. refactor: remove empty section headers and apply lint fixes
+
+**No constraint changes.** (441 base + 24 ext)
+
+---

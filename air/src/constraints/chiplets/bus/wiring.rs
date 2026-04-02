@@ -35,8 +35,7 @@ use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess}
 use crate::{
     Felt, MainTraceRow,
     constraints::{
-        bus::indices::V_WIRING,
-        chiplets::selectors::ace_chiplet_flag,
+        bus::indices::V_WIRING, chiplets::selectors::ace_chiplet_flag,
         tagging::TaggingAirBuilderExt,
     },
     trace::{

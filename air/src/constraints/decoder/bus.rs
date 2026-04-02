@@ -216,9 +216,6 @@ pub fn enforce_bus<AB>(
     enforce_op_group_table_constraint(builder, local, next, op_flags, challenges);
 }
 
-// CONSTRAINT HELPERS
-// ================================================================================================
-
 // BLOCK STACK TABLE (p1)
 // ================================================================================================
 

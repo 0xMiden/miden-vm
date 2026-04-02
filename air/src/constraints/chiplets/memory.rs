@@ -35,7 +35,7 @@ use miden_crypto::stark::air::LiftedAirBuilder;
 use super::selectors::memory_chiplet_flag;
 use crate::{
     Felt, MainTraceRow,
-    constraints::tagging::{TaggingAirBuilderExt},
+    constraints::tagging::TaggingAirBuilderExt,
     trace::{
         CHIPLETS_OFFSET,
         chiplets::{
@@ -46,13 +46,6 @@ use crate::{
         },
     },
 };
-
-// TAGGING IDS
-// ================================================================================================
-
-
-
-
 
 // ENTRY POINTS
 // ================================================================================================
@@ -112,15 +105,15 @@ pub fn enforce_memory_constraints_all_rows<AB>(
 
     // Binary constraints
     let gate = memory_flag.clone();
-    builder.assert_zero(gate.clone() * cols.is_read.clone() * (cols.is_read.clone() - one.clone()),);
-    builder.assert_zero(gate.clone() * cols.is_word.clone() * (cols.is_word.clone() - one.clone()),);
-    builder.assert_zero(gate.clone() * cols.idx0.clone() * (cols.idx0.clone() - one.clone()),);
-    builder.assert_zero(gate * cols.idx1.clone() * (cols.idx1.clone() - one),);
+    builder.assert_zero(gate.clone() * cols.is_read.clone() * (cols.is_read.clone() - one.clone()));
+    builder.assert_zero(gate.clone() * cols.is_word.clone() * (cols.is_word.clone() - one.clone()));
+    builder.assert_zero(gate.clone() * cols.idx0.clone() * (cols.idx0.clone() - one.clone()));
+    builder.assert_zero(gate * cols.idx1.clone() * (cols.idx1.clone() - one));
 
     // For word access, idx bits must be zero (only element accesses use idx0/idx1).
     let word_gate = memory_flag.clone() * cols.is_word.clone();
-    builder.assert_zero(word_gate.clone() * cols.idx0.clone(),);
-    builder.assert_zero(word_gate * cols.idx1.clone(),);
+    builder.assert_zero(word_gate.clone() * cols.idx0.clone());
+    builder.assert_zero(word_gate * cols.idx1.clone());
 }
 
 /// Enforce memory first row initialization constraints.
@@ -145,10 +138,10 @@ pub fn enforce_memory_constraints_first_row<AB>(
 
     // First row: if v'[i] is not written to, then v'[i] = 0
     let gate = flag_next_row_first_memory;
-    builder.assert_zero(gate.clone() * c0 * cols_next.values[0].clone(),);
-    builder.assert_zero(gate.clone() * c1 * cols_next.values[1].clone(),);
-    builder.assert_zero(gate.clone() * c2 * cols_next.values[2].clone(),);
-    builder.assert_zero(gate * c3 * cols_next.values[3].clone(),);
+    builder.assert_zero(gate.clone() * c0 * cols_next.values[0].clone());
+    builder.assert_zero(gate.clone() * c1 * cols_next.values[1].clone());
+    builder.assert_zero(gate.clone() * c2 * cols_next.values[2].clone());
+    builder.assert_zero(gate * c3 * cols_next.values[3].clone());
 }
 
 /// Enforce memory transition constraints (all rows except last).
@@ -187,16 +180,20 @@ pub fn enforce_memory_constraints_all_rows_except_last<AB>(
     // ==========================================================================
     // DELTA CONSTRAINTS (monotonicity)
     // ==========================================================================
-    builder.assert_zero(flag_memory_active_not_last.clone()
-            * (deltas.computed_delta.clone() - deltas.delta_next.clone()),);
+    builder.assert_zero(
+        flag_memory_active_not_last.clone()
+            * (deltas.computed_delta.clone() - deltas.delta_next.clone()),
+    );
 
     // ==========================================================================
     // SAME CONTEXT/WORD FLAG
     // ==========================================================================
     // f_scw' = !n0 * !n1
-    builder.assert_zero(flag_memory_active_not_last.clone()
+    builder.assert_zero(
+        flag_memory_active_not_last.clone()
             * (cols_next.flag_same_ctx_word.clone()
-                - (one.clone() - deltas.n0.clone()) * (one.clone() - deltas.n1.clone())),);
+                - (one.clone() - deltas.n0.clone()) * (one.clone() - deltas.n1.clone())),
+    );
 
     // ==========================================================================
     // SAME CONTEXT/WORD READ-ONLY CONSTRAINTS
@@ -227,10 +224,10 @@ pub fn enforce_memory_constraints_all_rows_except_last<AB>(
             * (v_next - cols_next.flag_same_ctx_word.clone() * v)
     };
 
-    builder.assert_zero(constrain_value(c0, cols.values[0].clone(), cols_next.values[0].clone()),);
-    builder.assert_zero(constrain_value(c1, cols.values[1].clone(), cols_next.values[1].clone()),);
-    builder.assert_zero(constrain_value(c2, cols.values[2].clone(), cols_next.values[2].clone()),);
-    builder.assert_zero(constrain_value(c3, cols.values[3].clone(), cols_next.values[3].clone()),);
+    builder.assert_zero(constrain_value(c0, cols.values[0].clone(), cols_next.values[0].clone()));
+    builder.assert_zero(constrain_value(c1, cols.values[1].clone(), cols_next.values[1].clone()));
+    builder.assert_zero(constrain_value(c2, cols.values[2].clone(), cols_next.values[2].clone()));
+    builder.assert_zero(constrain_value(c3, cols.values[3].clone(), cols_next.values[3].clone()));
 }
 
 // INTERNAL HELPERS
@@ -412,13 +409,13 @@ fn enforce_delta_inverse_constraints<AB>(
     let gate_not_n0 = gate.clone() * not_n0.clone();
 
     // n0 is binary
-    builder.assert_zero(gate * n0.clone() * (n0.clone() - one.clone()),);
+    builder.assert_zero(gate * n0.clone() * (n0.clone() - one.clone()));
     // !n0 => ctx_delta = 0
-    builder.assert_zero(gate_not_n0.clone() * ctx_delta.clone(),);
+    builder.assert_zero(gate_not_n0.clone() * ctx_delta.clone());
     // !n0 and n1 is binary
-    builder.assert_zero(gate_not_n0.clone() * n1.clone() * (n1.clone() - one.clone()),);
+    builder.assert_zero(gate_not_n0.clone() * n1.clone() * (n1.clone() - one.clone()));
     // !n0 and !n1 => addr_delta = 0
-    builder.assert_zero(gate_not_n0 * not_n1 * addr_delta.clone(),);
+    builder.assert_zero(gate_not_n0 * not_n1 * addr_delta.clone());
 }
 
 /// Enforce read-only access when context and word address are unchanged.
@@ -441,10 +438,12 @@ fn enforce_scw_readonly_constraint<AB>(
     let is_write_next = one.clone() - cols_next.is_read.clone();
     let any_write = is_write + is_write_next;
 
-    builder.assert_zero(flag_memory_active_not_last
+    builder.assert_zero(
+        flag_memory_active_not_last
             * cols_next.flag_same_ctx_word.clone()
             * clk_no_change
-            * any_write,);
+            * any_write,
+    );
 }
 
 /// Memory chiplet flag for current row active and continuing to next row.

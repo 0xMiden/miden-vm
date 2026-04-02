@@ -181,9 +181,6 @@ const DECODER_NAMES: [&str; NUM_CONSTRAINTS] = [
     "decoder.control_flow.sp_complement",
 ];
 
-/// Tag metadata for this constraint group.
-
-// Relative offsets into DECODER_NAMES by constraint group.
 const IN_SPAN_BASE: usize = 0;
 
 /// The degrees of the decoder constraints.
@@ -370,7 +367,9 @@ fn enforce_in_span_constraints<AB>(
     // Constraint 2: After SPAN, the next row must be inside a span.
     // span_flag * (1 - sp') = 0
     let span_flag = op_flags.span();
-    builder.when_transition().assert_zero(span_flag * (AB::Expr::ONE - sp_next.clone()));
+    builder
+        .when_transition()
+        .assert_zero(span_flag * (AB::Expr::ONE - sp_next.clone()));
 
     // Constraint 3: After RESPAN, the next row must be inside a span.
     // respan_flag * (1 - sp') = 0
@@ -508,9 +507,9 @@ fn enforce_general_constraints<AB>(
     for i in 0..5 {
         let hi: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + i].clone().into();
         let hi_next: AB::Expr = next.decoder[decoder_cols::HASHER_STATE_OFFSET + i].clone().into();
-        builder.when_transition().assert_zero(
-            f_end.clone() * f_repeat_next.clone() * (hi_next - hi),
-        );
+        builder
+            .when_transition()
+            .assert_zero(f_end.clone() * f_repeat_next.clone() * (hi_next - hi));
     }
 
     // HALT is absorbing: it can only be followed by HALT.
@@ -560,30 +559,32 @@ fn enforce_group_count_constraints<AB>(
     // Constraint 1: Inside a span, gc can only stay the same or decrement by 1.
     // sp * delta_gc * (delta_gc - 1) = 0
     // This ensures: if sp=1 and delta_gc != 0, then delta_gc must equal 1
-    builder.when_transition().assert_zero(
-        sp.clone() * delta_gc.clone() * (delta_gc.clone() - AB::Expr::ONE),
-    );
+    builder
+        .when_transition()
+        .assert_zero(sp.clone() * delta_gc.clone() * (delta_gc.clone() - AB::Expr::ONE));
 
     // Constraint 2: If gc decrements and this is not a PUSH-immediate row,
     // then h0 must be zero (no immediate value packed into the group).
     // sp * delta_gc * (1 - is_push) * h0 = 0
-    builder.when_transition().assert_zero(
-        sp.clone() * delta_gc.clone() * (AB::Expr::ONE - is_push.clone()) * h0,
-    );
+    builder
+        .when_transition()
+        .assert_zero(sp.clone() * delta_gc.clone() * (AB::Expr::ONE - is_push.clone()) * h0);
 
     // Constraint 3: SPAN/RESPAN/PUSH must consume a group immediately.
     // (span_flag + respan_flag + is_push) * (delta_gc - 1) = 0
     let span_flag = op_flags.span();
     let respan_flag = op_flags.respan();
-    builder.when_transition().assert_zero(
-        (span_flag + respan_flag + is_push) * (delta_gc.clone() - AB::Expr::ONE),
-    );
+    builder
+        .when_transition()
+        .assert_zero((span_flag + respan_flag + is_push) * (delta_gc.clone() - AB::Expr::ONE));
 
     // Constraint 4: If the next op is END or RESPAN, gc cannot decrement on this row.
     // delta_gc * (end' + respan') = 0
     let end_next = op_flags_next.end();
     let respan_next = op_flags_next.respan();
-    builder.when_transition().assert_zero(delta_gc.clone() * (end_next + respan_next));
+    builder
+        .when_transition()
+        .assert_zero(delta_gc.clone() * (end_next + respan_next));
 
     // Constraint 5: END closes the span, so gc must be 0.
     // end_flag * gc = 0
@@ -631,7 +632,9 @@ fn enforce_op_group_decoding_constraints<AB>(
     // (h0 - h0' * 2^7 - op') = 0 under the combined flag.
     let op_group_base = AB::Expr::from_u16(1u16 << 7);
     let h0_shift = h0.clone() - h0_next * op_group_base - op_next;
-    builder.when_transition().assert_zero((f_span + f_respan + is_push + f_sgc) * h0_shift);
+    builder
+        .when_transition()
+        .assert_zero((f_span + f_respan + is_push + f_sgc) * h0_shift);
 
     // If the next op is END or RESPAN, the current h0 must be 0 (no pending group).
     let end_next = op_flags_next.end();
@@ -688,7 +691,9 @@ fn enforce_op_index_constraints<AB>(
 
     // Constraint 1: SPAN/RESPAN start a fresh group, so ox' = 0.
     // (span_flag + respan_flag) * ox' = 0
-    builder.when_transition().assert_zero((span_flag + respan_flag) * ox_next.clone());
+    builder
+        .when_transition()
+        .assert_zero((span_flag + respan_flag) * ox_next.clone());
 
     // Constraint 2: When a new group starts inside a span, ox' = 0.
     // sp * ng * ox' = 0
@@ -697,7 +702,9 @@ fn enforce_op_index_constraints<AB>(
     // Constraint 3: When staying in the same group, ox increments by 1.
     // sp * sp' * (1 - ng) * (ox' - ox - 1) = 0
     let delta_ox = ox_next - ox.clone() - AB::Expr::ONE;
-    builder.when_transition().assert_zero(sp * sp_next * (AB::Expr::ONE - ng) * delta_ox);
+    builder
+        .when_transition()
+        .assert_zero(sp * sp_next * (AB::Expr::ONE - ng) * delta_ox);
 
     // Constraint 4: ox must be in range [0, 8] (9 ops per group).
     // ∏_{i=0}^{8}(ox - i) = 0
@@ -736,9 +743,8 @@ fn enforce_batch_flags_constraints<AB>(
     let span_or_respan = f_span + f_respan;
 
     // When SPAN or RESPAN, exactly one batch flag must be set.
-    builder.assert_zero(
-        span_or_respan.clone() - (f_g1.clone() + f_g2.clone() + f_g4.clone() + f_g8),
-    );
+    builder
+        .assert_zero(span_or_respan.clone() - (f_g1.clone() + f_g2.clone() + f_g4.clone() + f_g8));
 
     // When not SPAN/RESPAN, all batch flags must be zero.
     builder.assert_zero(
@@ -801,7 +807,9 @@ fn enforce_block_address_constraints<AB>(
     // respan_flag * (addr' - addr - HASH_CYCLE_LEN) = 0
     let hash_cycle_len: AB::Expr = AB::Expr::from_u16(HASH_CYCLE_LEN as u16);
     let respan_flag = op_flags.respan();
-    builder.when_transition().assert_zero(respan_flag * (addr_next - addr.clone() - hash_cycle_len));
+    builder
+        .when_transition()
+        .assert_zero(respan_flag * (addr_next - addr.clone() - hash_cycle_len));
 
     // Constraint 3: HALT forces addr = 0.
     // halt_flag * addr = 0

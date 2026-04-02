@@ -31,7 +31,7 @@ use super::{
 };
 use crate::{
     Felt, MainTraceRow,
-    constraints::tagging::{TaggingAirBuilderExt},
+    constraints::tagging::TaggingAirBuilderExt,
     trace::{
         CHIPLETS_OFFSET,
         chiplets::{
@@ -57,13 +57,6 @@ pub const NUM_PERIODIC_COLUMNS: usize = HASHER_NUM_PERIODIC_COLUMNS + 2;
 
 /// Number of bits processed per row.
 const NUM_BITS_PER_ROW: usize = 4;
-
-// TAGGING IDS
-// ================================================================================================
-
-
-
-
 
 // ENTRY POINTS
 // ================================================================================================
@@ -106,11 +99,14 @@ pub fn enforce_bitwise_constraints<AB>(
     // ==========================================================================
 
     // op_flag must be binary (0 for AND, 1 for XOR)
-    builder.assert_zero(bitwise_flag.clone() * cols.op_flag.clone() * (cols.op_flag.clone() - one.clone()),);
+    builder.assert_zero(
+        bitwise_flag.clone() * cols.op_flag.clone() * (cols.op_flag.clone() - one.clone()),
+    );
 
     // op_flag must remain constant within the 8-row cycle (can only change when k1=0)
     let gate_transition = k_transition.clone() * bitwise_flag.clone();
-    builder.assert_zero(gate_transition.clone() * (cols.op_flag.clone() - cols_next.op_flag.clone()),);
+    builder
+        .assert_zero(gate_transition.clone() * (cols.op_flag.clone() - cols_next.op_flag.clone()));
 
     // ==========================================================================
     // INPUT DECOMPOSITION CONSTRAINTS
@@ -119,11 +115,15 @@ pub fn enforce_bitwise_constraints<AB>(
     // Bit decomposition columns must be binary
     let gate = bitwise_flag.clone();
     for i in 0..NUM_BITS_PER_ROW {
-        builder.assert_zero(gate.clone() * cols.a_bits[i].clone() * (cols.a_bits[i].clone() - one.clone()),);
+        builder.assert_zero(
+            gate.clone() * cols.a_bits[i].clone() * (cols.a_bits[i].clone() - one.clone()),
+        );
     }
 
     for i in 0..NUM_BITS_PER_ROW {
-        builder.assert_zero(gate.clone() * cols.b_bits[i].clone() * (cols.b_bits[i].clone() - one.clone()),);
+        builder.assert_zero(
+            gate.clone() * cols.b_bits[i].clone() * (cols.b_bits[i].clone() - one.clone()),
+        );
     }
 
     // First row of cycle (k0=1): a = aggregated bits, b = aggregated bits
@@ -141,7 +141,7 @@ pub fn enforce_bitwise_constraints<AB>(
         cols_next.a.clone() - (cols.a.clone() * sixteen.clone() + a_agg_next),
         cols_next.b.clone() - (cols.b.clone() * sixteen.clone() + b_agg_next),
     ] {
-        builder.assert_zero(gate_transition.clone() * expr,);
+        builder.assert_zero(gate_transition.clone() * expr);
     }
 
     // ==========================================================================
@@ -149,7 +149,7 @@ pub fn enforce_bitwise_constraints<AB>(
     // ==========================================================================
 
     // Transition rows (k1=1): output_prev' = output
-    builder.assert_zero(gate_transition * (cols_next.prev_output.clone() - cols.output.clone()),);
+    builder.assert_zero(gate_transition * (cols_next.prev_output.clone() - cols.output.clone()));
 
     // Every row: output = 16*output_prev + bitwise_result
     let a_and_b = compute_limb_and(&cols.a_bits, &cols.b_bits);
@@ -161,7 +161,7 @@ pub fn enforce_bitwise_constraints<AB>(
         + a_and_b.clone()
         + cols.op_flag.clone() * (a_xor_b.clone() - a_and_b);
 
-    builder.assert_zero(bitwise_flag * (cols.output.clone() - expected_z),);
+    builder.assert_zero(bitwise_flag * (cols.output.clone() - expected_z));
 }
 
 // INTERNAL HELPERS

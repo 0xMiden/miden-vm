@@ -30,9 +30,6 @@
 //! | SOUT      | 0  | 0  | 1  | row 31             | State output (full) |
 use miden_core::field::PrimeCharacteristicRing;
 
-// INTERNAL HELPERS
-// ================================================================================================
-
 // INITIALIZATION FLAGS (row 0 of 32-row cycle)
 // ================================================================================================
 

@@ -23,10 +23,7 @@ use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::AirBuilder;
 
 use super::{HasherColumns, HasherFlags};
-use crate::{
-    Felt,
-    constraints::tagging::TaggingAirBuilderExt,
-};
+use crate::{Felt, constraints::tagging::TaggingAirBuilderExt};
 
 // CONSTRAINT HELPERS
 // ================================================================================================
@@ -66,12 +63,10 @@ pub(super) fn enforce_selector_consistency<AB>(
     // Use a combined gate to share `hasher_flag * stability_gate` across both stability
     // constraints.
     let gate = hasher_flag.clone() * stability_gate;
-    builder.when_transition().assert_zeros(
-        [
-            gate.clone() * (cols_next.s1.clone() - cols.s1.clone()),
-            gate * (cols_next.s2.clone() - cols.s2.clone()),
-        ],
-    );
+    builder.when_transition().assert_zeros([
+        gate.clone() * (cols_next.s1.clone() - cols.s1.clone()),
+        gate * (cols_next.s2.clone() - cols.s2.clone()),
+    ]);
 
     // Continuation constraint: hasher_flag * flag_cont * s0' = 0.
     // (Single constraint, so no batching benefit beyond using `.when(gate)`.)

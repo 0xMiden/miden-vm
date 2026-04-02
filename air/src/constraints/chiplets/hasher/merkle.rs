@@ -22,10 +22,7 @@ use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::AirBuilder;
 
 use super::{HasherColumns, HasherFlags};
-use crate::{
-    Felt,
-    constraints::tagging::TaggingAirBuilderExt,
-};
+use crate::{Felt, constraints::tagging::TaggingAirBuilderExt};
 
 // CONSTRAINT HELPERS
 // ================================================================================================
@@ -126,9 +123,9 @@ pub(super) fn enforce_merkle_absorb_state<AB>(
     // Constraint 1: Capacity reset to zero (batched).
     // Use a combined gate to share `hasher_flag * f_absorb` across all 4 lanes.
     let gate_absorb = hasher_flag.clone() * f_absorb.clone();
-    builder.when_transition().assert_zeros(
-        core::array::from_fn::<_, 4, _>(|i| gate_absorb.clone() * cap_next[i].clone()),
-    );
+    builder.when_transition().assert_zeros(core::array::from_fn::<_, 4, _>(|i| {
+        gate_absorb.clone() * cap_next[i].clone()
+    }));
 
     // -------------------------------------------------------------------------
     // Digest Placement Constraints
@@ -137,18 +134,14 @@ pub(super) fn enforce_merkle_absorb_state<AB>(
     // Constraint 2: If b=0, digest goes to rate0 (h'[0..4] = h[0..4])
     let f_b0 = f_absorb.clone() * (one.clone() - b.clone());
     let gate_b0 = hasher_flag.clone() * f_b0;
-    builder.when_transition().assert_zeros(
-        core::array::from_fn::<_, 4, _>(|i| {
-            gate_b0.clone() * (rate0_next[i].clone() - digest[i].clone())
-        }),
-    );
+    builder.when_transition().assert_zeros(core::array::from_fn::<_, 4, _>(|i| {
+        gate_b0.clone() * (rate0_next[i].clone() - digest[i].clone())
+    }));
 
     // Constraint 3: If b=1, digest goes to rate1 (h'[4..8] = h[0..4])
     let f_b1 = f_absorb * b;
     let gate_b1 = hasher_flag * f_b1;
-    builder.when_transition().assert_zeros(
-        core::array::from_fn::<_, 4, _>(|i| {
-            gate_b1.clone() * (rate1_next[i].clone() - digest[i].clone())
-        }),
-    );
+    builder.when_transition().assert_zeros(core::array::from_fn::<_, 4, _>(|i| {
+        gate_b1.clone() * (rate1_next[i].clone() - digest[i].clone())
+    }));
 }

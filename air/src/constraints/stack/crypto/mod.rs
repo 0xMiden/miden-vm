@@ -8,15 +8,9 @@ use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 
 use crate::{
     MainTraceRow,
-    constraints::{
-        ext_field::QuadFeltExpr,
-        op_flags::OpFlags,
-    },
+    constraints::{ext_field::QuadFeltExpr, op_flags::OpFlags},
     trace::decoder::USER_OP_HELPERS_OFFSET,
 };
-
-// CONSTANTS
-// ================================================================================================
 
 // ENTRY POINTS
 // ================================================================================================
@@ -53,12 +47,12 @@ fn enforce_cryptostream_constraints<AB>(
     let eight: AB::Expr = AB::Expr::from_u16(8);
     let gate = op_flags.cryptostream();
 
-    builder.when_transition().assert_zero(
-        gate.clone() * (next.stack[8].clone().into() - local.stack[8].clone().into()),
-    );
-    builder.when_transition().assert_zero(
-        gate.clone() * (next.stack[9].clone().into() - local.stack[9].clone().into()),
-    );
+    builder
+        .when_transition()
+        .assert_zero(gate.clone() * (next.stack[8].clone().into() - local.stack[8].clone().into()));
+    builder
+        .when_transition()
+        .assert_zero(gate.clone() * (next.stack[9].clone().into() - local.stack[9].clone().into()));
     builder.when_transition().assert_zero(
         gate.clone() * (next.stack[10].clone().into() - local.stack[10].clone().into()),
     );
@@ -75,9 +69,9 @@ fn enforce_cryptostream_constraints<AB>(
     builder.when_transition().assert_zero(
         gate.clone() * (next.stack[14].clone().into() - local.stack[14].clone().into()),
     );
-    builder.when_transition().assert_zero(
-        gate * (next.stack[15].clone().into() - local.stack[15].clone().into()),
-    );
+    builder
+        .when_transition()
+        .assert_zero(gate * (next.stack[15].clone().into() - local.stack[15].clone().into()));
 }
 
 fn enforce_hornerbase_constraints<AB>(

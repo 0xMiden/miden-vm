@@ -26,10 +26,7 @@ use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::AirBuilder;
 
 use super::selectors::{ace_chiplet_flag, kernel_rom_chiplet_flag};
-use crate::{
-    Felt, MainTraceRow,
-    constraints::tagging::{TaggingAirBuilderExt},
-};
+use crate::{Felt, MainTraceRow, constraints::tagging::TaggingAirBuilderExt};
 
 // CONSTANTS
 // ================================================================================================
@@ -43,13 +40,6 @@ const R0_IDX: usize = 1;
 const R1_IDX: usize = 2;
 const R2_IDX: usize = 3;
 const R3_IDX: usize = 4;
-
-// TAGGING CONSTANTS
-// ================================================================================================
-
-
-
-
 
 // ENTRY POINTS
 // ================================================================================================

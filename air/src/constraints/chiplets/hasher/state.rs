@@ -21,10 +21,7 @@ use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 use super::periodic::{
     P_ARK_EXT_START, P_ARK_INT, P_CYCLE_ROW_0, P_IS_EXTERNAL, P_IS_INTERNAL, STATE_WIDTH,
 };
-use crate::{
-    Felt,
-    constraints::tagging::TaggingAirBuilderExt,
-};
+use crate::{Felt, constraints::tagging::TaggingAirBuilderExt};
 
 // CONSTRAINT HELPERS
 // ================================================================================================
@@ -84,25 +81,25 @@ pub fn enforce_permutation_steps<AB>(
 
     // Use combined gates to share `hasher_flag * step_type` across all lanes.
     let gate_init = hasher_flag.clone() * is_init_linear;
-    builder.when_transition().assert_zeros(
-        core::array::from_fn::<_, STATE_WIDTH, _>(|i| {
+    builder
+        .when_transition()
+        .assert_zeros(core::array::from_fn::<_, STATE_WIDTH, _>(|i| {
             gate_init.clone() * (h_next[i].clone() - expected_init[i].clone())
-        }),
-    );
+        }));
 
     let gate_ext = hasher_flag.clone() * is_external;
-    builder.when_transition().assert_zeros(
-        core::array::from_fn::<_, STATE_WIDTH, _>(|i| {
+    builder
+        .when_transition()
+        .assert_zeros(core::array::from_fn::<_, STATE_WIDTH, _>(|i| {
             gate_ext.clone() * (h_next[i].clone() - expected_ext[i].clone())
-        }),
-    );
+        }));
 
     let gate_int = hasher_flag * is_internal;
-    builder.when_transition().assert_zeros(
-        core::array::from_fn::<_, STATE_WIDTH, _>(|i| {
+    builder
+        .when_transition()
+        .assert_zeros(core::array::from_fn::<_, STATE_WIDTH, _>(|i| {
             gate_int.clone() * (h_next[i].clone() - expected_int[i].clone())
-        }),
-    );
+        }));
 }
 
 /// Enforces ABP capacity preservation constraint.
@@ -120,11 +117,9 @@ pub fn enforce_abp_capacity_preservation<AB>(
 {
     // Use a combined gate to share `hasher_flag * f_abp` across all 4 lanes.
     let gate = hasher_flag * f_abp;
-    builder.when_transition().assert_zeros(
-        core::array::from_fn::<_, 4, _>(|i| {
-            gate.clone() * (h_cap_next[i].clone() - h_cap[i].clone())
-        }),
-    );
+    builder.when_transition().assert_zeros(core::array::from_fn::<_, 4, _>(|i| {
+        gate.clone() * (h_cap_next[i].clone() - h_cap[i].clone())
+    }));
 }
 
 // =============================================================================

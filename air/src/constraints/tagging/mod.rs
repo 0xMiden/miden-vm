@@ -21,4 +21,3 @@ mod state;
 pub use enabled::*;
 #[cfg(not(all(any(test, feature = "testing"), feature = "std")))]
 pub use fallback::*;
-
