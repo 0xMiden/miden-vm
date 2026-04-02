@@ -414,3 +414,8 @@ kernel_rom.rs:70-73→62-65. Identical assertion expressions (`assert_eq(krom_ne
 **No constraint changes.** (446 base + 24 ext)
 
 ---
+## 41. fix: use core::array for no-std compatibility
+
+**No constraint changes.** (446 base + 24 ext)
+
+---

@@ -24,7 +24,7 @@
 //! - `left_shift_at(i)`: stack shifts left at position i
 //! - `right_shift_at(i)`: stack shifts right at position i
 
-use std::array;
+use core::array;
 
 use miden_core::{
     field::{Algebra, PrimeCharacteristicRing},
