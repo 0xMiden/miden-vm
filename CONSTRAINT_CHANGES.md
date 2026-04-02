@@ -349,3 +349,8 @@ Sign flip: `assert_zero(gate * x.not())` → `when(gate).assert_one(x)`. Polynom
 </details>
 
 ---
+## 36. refactor: flatten single-file stack constraint modules into sibling files
+
+**No constraint changes.** (446 base + 24 ext)
+
+---
