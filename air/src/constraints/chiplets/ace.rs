@@ -36,18 +36,8 @@ use crate::{
         constants::{F_1, F_4},
         utils::{BoolNot, binary_or},
     },
-    trace::chiplets::ace::{
-        CLK_IDX, CTX_IDX, EVAL_OP_IDX, ID_0_IDX, ID_1_IDX, PTR_IDX, READ_NUM_EVAL_IDX,
-        SELECTOR_BLOCK_IDX, SELECTOR_START_IDX, V_0_0_IDX, V_0_1_IDX, V_1_0_IDX, V_1_1_IDX,
-        V_2_0_IDX, V_2_1_IDX,
-    },
+    trace::{AceCols, chiplets::borrow_chiplet},
 };
-
-// CONSTANTS
-// ================================================================================================
-
-// ACE chiplet offset from CHIPLETS_OFFSET (after s0, s1, s2, s3).
-const ACE_OFFSET: usize = 4;
 
 // ENTRY POINTS
 // ================================================================================================
@@ -65,31 +55,34 @@ pub fn enforce_ace_constraints_all_rows<AB>(
 
     let ace_flag = flags.is_active.clone();
 
-    // Load ACE columns
-    let sstart: AB::Expr = load_ace_col::<AB>(local, SELECTOR_START_IDX);
-    let sstart_next: AB::Expr = load_ace_col::<AB>(next, SELECTOR_START_IDX);
-    let sblock: AB::Expr = load_ace_col::<AB>(local, SELECTOR_BLOCK_IDX);
-    let sblock_next: AB::Expr = load_ace_col::<AB>(next, SELECTOR_BLOCK_IDX);
-    let ctx: AB::Expr = load_ace_col::<AB>(local, CTX_IDX);
-    let ctx_next: AB::Expr = load_ace_col::<AB>(next, CTX_IDX);
-    let ptr: AB::Expr = load_ace_col::<AB>(local, PTR_IDX);
-    let ptr_next: AB::Expr = load_ace_col::<AB>(next, PTR_IDX);
-    let clk: AB::Expr = load_ace_col::<AB>(local, CLK_IDX);
-    let clk_next: AB::Expr = load_ace_col::<AB>(next, CLK_IDX);
-    let op: AB::Expr = load_ace_col::<AB>(local, EVAL_OP_IDX);
-    let id0: AB::Expr = load_ace_col::<AB>(local, ID_0_IDX);
-    let id0_next: AB::Expr = load_ace_col::<AB>(next, ID_0_IDX);
-    let id1: AB::Expr = load_ace_col::<AB>(local, ID_1_IDX);
-    // n_eval stores (num_eval_rows - 1) so READ→EVAL switches when id0' == n_eval.
-    let n_eval: AB::Expr = load_ace_col::<AB>(local, READ_NUM_EVAL_IDX);
-    let n_eval_next: AB::Expr = load_ace_col::<AB>(next, READ_NUM_EVAL_IDX);
+    // Zero-copy borrow of ACE columns from chiplets[4..20]
+    let ace: &AceCols<AB::Var> = borrow_chiplet(&local.chiplets[4..20]);
+    let ace_next: &AceCols<AB::Var> = borrow_chiplet(&next.chiplets[4..20]);
 
-    let v0_0: AB::Expr = load_ace_col::<AB>(local, V_0_0_IDX);
-    let v0_1: AB::Expr = load_ace_col::<AB>(local, V_0_1_IDX);
-    let v1_0: AB::Expr = load_ace_col::<AB>(local, V_1_0_IDX);
-    let v1_1: AB::Expr = load_ace_col::<AB>(local, V_1_1_IDX);
-    let v2_0: AB::Expr = load_ace_col::<AB>(local, V_2_0_IDX);
-    let v2_1: AB::Expr = load_ace_col::<AB>(local, V_2_1_IDX);
+    let sstart: AB::Expr = ace.s_start.into();
+    let sstart_next: AB::Expr = ace_next.s_start.into();
+    let sblock: AB::Expr = ace.s_block.into();
+    let sblock_next: AB::Expr = ace_next.s_block.into();
+    let ctx: AB::Expr = ace.ctx.into();
+    let ctx_next: AB::Expr = ace_next.ctx.into();
+    let ptr: AB::Expr = ace.ptr.into();
+    let ptr_next: AB::Expr = ace_next.ptr.into();
+    let clk: AB::Expr = ace.clk.into();
+    let clk_next: AB::Expr = ace_next.clk.into();
+    let op: AB::Expr = ace.eval_op.into();
+    let id0: AB::Expr = ace.shared[0].into();
+    let id0_next: AB::Expr = ace_next.shared[0].into();
+    let id1: AB::Expr = ace.shared[3].into();
+    // n_eval stores (num_eval_rows - 1) so READ→EVAL switches when id0' == n_eval.
+    let n_eval: AB::Expr = ace.read().num_eval.into();
+    let n_eval_next: AB::Expr = ace_next.read().num_eval.into();
+
+    let v0_0: AB::Expr = ace.shared[1].into();
+    let v0_1: AB::Expr = ace.shared[2].into();
+    let v1_0: AB::Expr = ace.shared[4].into();
+    let v1_1: AB::Expr = ace.shared[5].into();
+    let v2_0: AB::Expr = ace.eval().v_2[0].into();
+    let v2_1: AB::Expr = ace.eval().v_2[1].into();
 
     // Precomputed ACE transition flag (bakes in is_transition)
     let ace_transition = flags.is_transition.clone();
@@ -205,16 +198,6 @@ pub fn enforce_ace_constraints_all_rows<AB>(
 
 // INTERNAL HELPERS
 // ================================================================================================
-
-/// Load a column from the ACE section of chiplets.
-fn load_ace_col<AB>(row: &MainTraceRow<AB::Var>, ace_col_idx: usize) -> AB::Expr
-where
-    AB: MidenAirBuilder,
-{
-    // ACE columns start after s0, s1, s2, s3 (4 selectors)
-    let local_idx = ACE_OFFSET + ace_col_idx;
-    row.chiplets[local_idx].into()
-}
 
 /// Compute expected EVAL block outputs (v0) from op and operands.
 ///
