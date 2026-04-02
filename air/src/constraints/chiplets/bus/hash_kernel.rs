@@ -26,30 +26,17 @@ use crate::{
         utils::BoolNot,
     },
     trace::{
-        CHIPLETS_OFFSET, Challenges, LOG_PRECOMPILE_LABEL,
+        Challenges, HasherCols, LOG_PRECOMPILE_LABEL,
         bus_types::{CHIPLETS_BUS, LOG_PRECOMPILE_TRANSCRIPT, SIBLING_TABLE},
         chiplets::{
-            HASHER_NODE_INDEX_COL_IDX, HASHER_SELECTOR_COL_RANGE, HASHER_STATE_COL_RANGE,
-            NUM_ACE_SELECTORS,
-            ace::{
-                ACE_INSTRUCTION_ID1_OFFSET, ACE_INSTRUCTION_ID2_OFFSET, CLK_IDX, CTX_IDX,
-                EVAL_OP_IDX, ID_1_IDX, ID_2_IDX, PTR_IDX, SELECTOR_BLOCK_IDX, V_0_0_IDX, V_0_1_IDX,
-                V_1_0_IDX, V_1_1_IDX,
-            },
+            borrow_chiplet,
+            ace::{ACE_INSTRUCTION_ID1_OFFSET, ACE_INSTRUCTION_ID2_OFFSET},
             memory::{MEMORY_READ_ELEMENT_LABEL, MEMORY_READ_WORD_LABEL},
         },
         decoder::USER_OP_HELPERS_OFFSET,
         log_precompile::{HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE},
     },
 };
-
-// CONSTANTS
-// ================================================================================================
-
-// Column offsets relative to chiplets array.
-const S_START: usize = HASHER_SELECTOR_COL_RANGE.start - CHIPLETS_OFFSET;
-const H_START: usize = HASHER_STATE_COL_RANGE.start - CHIPLETS_OFFSET;
-const IDX_COL: usize = HASHER_NODE_INDEX_COL_IDX - CHIPLETS_OFFSET;
 
 // ENTRY POINTS
 // ================================================================================================
@@ -99,18 +86,21 @@ pub fn enforce_hash_kernel_constraint<AB>(
 
     let is_hasher = selectors.hasher.is_active.clone();
 
+    let hasher: &HasherCols<AB::Var> = borrow_chiplet(&local.chiplets[1..17]);
+    let hasher_next: &HasherCols<AB::Var> = borrow_chiplet(&next.chiplets[1..17]);
+
     // Hasher operation selectors (only meaningful within hasher chiplet)
-    let s0 = local.chiplets[S_START];
-    let s1 = local.chiplets[S_START + 1];
-    let s2 = local.chiplets[S_START + 2];
+    let s0 = hasher.selectors[0];
+    let s1 = hasher.selectors[1];
+    let s2 = hasher.selectors[2];
 
     // Node index for sibling table
-    let node_index = local.chiplets[IDX_COL];
-    let node_index_next = next.chiplets[IDX_COL];
+    let node_index = hasher.node_index;
+    let node_index_next = hasher_next.node_index;
 
     // Hasher state for sibling values
-    let h: [AB::Expr; 12] = core::array::from_fn(|i| local.chiplets[H_START + i].into());
-    let h_next: [AB::Expr; 12] = core::array::from_fn(|i| next.chiplets[H_START + i].into());
+    let h: [AB::Expr; 12] = core::array::from_fn(|i| hasher.state[i].into());
+    let h_next: [AB::Expr; 12] = core::array::from_fn(|i| hasher_next.state[i].into());
 
     // =========================================================================
     // SIBLING TABLE FLAGS AND VALUES
@@ -152,45 +142,34 @@ pub fn enforce_hash_kernel_constraint<AB>(
 
     let is_ace_row: AB::Expr = selectors.ace.is_active.clone();
 
-    // Block selector determines read (0) vs eval (1)
-    let block_selector = local.chiplets[NUM_ACE_SELECTORS + SELECTOR_BLOCK_IDX];
+    let ace: &crate::trace::AceCols<AB::Var> = borrow_chiplet(&local.chiplets[4..20]);
 
-    let f_ace_read: AB::Expr = is_ace_row.clone() * AB::Expr::from(block_selector).not();
-    let f_ace_eval: AB::Expr = is_ace_row * block_selector;
-
-    // ACE columns for memory messages
-    let ace_clk = local.chiplets[NUM_ACE_SELECTORS + CLK_IDX];
-    let ace_ctx = local.chiplets[NUM_ACE_SELECTORS + CTX_IDX];
-    let ace_ptr = local.chiplets[NUM_ACE_SELECTORS + PTR_IDX];
+    let f_ace_read: AB::Expr = is_ace_row.clone() * AB::Expr::from(ace.s_block).not();
+    let f_ace_eval: AB::Expr = is_ace_row * ace.s_block;
 
     // Word read value: label + ctx + ptr + clk + 4-lane value.
     let v_ace_word = {
-        let v0_0 = local.chiplets[NUM_ACE_SELECTORS + V_0_0_IDX];
-        let v0_1 = local.chiplets[NUM_ACE_SELECTORS + V_0_1_IDX];
-        let v1_0 = local.chiplets[NUM_ACE_SELECTORS + V_1_0_IDX];
-        let v1_1 = local.chiplets[NUM_ACE_SELECTORS + V_1_1_IDX];
         let label: AB::Expr = Felt::from_u8(MEMORY_READ_WORD_LABEL).into();
-
         challenges.encode(
             CHIPLETS_BUS,
             [
                 label,
-                ace_ctx.into(),
-                ace_ptr.into(),
-                ace_clk.into(),
-                v0_0.into(),
-                v0_1.into(),
-                v1_0.into(),
-                v1_1.into(),
+                ace.ctx.into(),
+                ace.ptr.into(),
+                ace.clk.into(),
+                ace.shared[1].into(), // v_0_0
+                ace.shared[2].into(), // v_0_1
+                ace.shared[4].into(), // v_1_0
+                ace.shared[5].into(), // v_1_1
             ],
         )
     };
 
     // Element read value: label + ctx + ptr + clk + element.
     let v_ace_element = {
-        let id_1 = local.chiplets[NUM_ACE_SELECTORS + ID_1_IDX];
-        let id_2 = local.chiplets[NUM_ACE_SELECTORS + ID_2_IDX];
-        let eval_op = local.chiplets[NUM_ACE_SELECTORS + EVAL_OP_IDX];
+        let id_1 = ace.shared[3]; // ID_1
+        let id_2 = ace.shared[6]; // ID_2
+        let eval_op = ace.eval_op;
 
         let offset1: AB::Expr = ACE_INSTRUCTION_ID1_OFFSET.into();
         let offset2: AB::Expr = ACE_INSTRUCTION_ID2_OFFSET.into();
@@ -198,7 +177,7 @@ pub fn enforce_hash_kernel_constraint<AB>(
         let label: AB::Expr = Felt::from_u8(MEMORY_READ_ELEMENT_LABEL).into();
 
         challenges
-            .encode(CHIPLETS_BUS, [label, ace_ctx.into(), ace_ptr.into(), ace_clk.into(), element])
+            .encode(CHIPLETS_BUS, [label, ace.ctx.into(), ace.ptr.into(), ace.clk.into(), element])
     };
 
     // =========================================================================

@@ -292,3 +292,8 @@ Helper `enforce_decoder_selector` inlined into call site. Expression restructure
 **No constraint changes.** (446 base + 24 ext)
 
 ---
+## 29. refactor: migrate chiplet bus wiring + hash_kernel to typed cols
+
+**No constraint changes.** (446 base + 24 ext)
+
+---

@@ -34,21 +34,8 @@ use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 use crate::{
     MainTraceRow, MidenAirBuilder,
     constraints::{bus::indices::V_WIRING, chiplets::selectors::ChipletSelectors, utils::BoolNot},
-    trace::{
-        Challenges,
-        bus_types::ACE_WIRING_BUS,
-        chiplets::ace::{
-            CLK_IDX, CTX_IDX, ID_0_IDX, ID_1_IDX, ID_2_IDX, M_0_IDX, M_1_IDX, SELECTOR_BLOCK_IDX,
-            V_0_0_IDX, V_0_1_IDX, V_1_0_IDX, V_1_1_IDX, V_2_0_IDX, V_2_1_IDX,
-        },
-    },
+    trace::{AceCols, Challenges, bus_types::ACE_WIRING_BUS, chiplets::borrow_chiplet},
 };
-
-// CONSTANTS
-// ================================================================================================
-
-// ACE chiplet offset from CHIPLETS_OFFSET (after s0, s1, s2, s3).
-const ACE_OFFSET: usize = 4;
 
 // ENTRY POINTS
 // ================================================================================================
@@ -80,8 +67,11 @@ pub fn enforce_wiring_bus_constraint<AB>(
 
     let ace_flag = selectors.ace.is_active.clone();
 
+    // Zero-copy borrow of ACE columns from chiplets[4..20].
+    let ace: &AceCols<AB::Var> = borrow_chiplet(&local.chiplets[4..20]);
+
     // Block selector: sblock = 0 for READ, sblock = 1 for EVAL.
-    let sblock: AB::Expr = load_ace_col::<AB>(local, SELECTOR_BLOCK_IDX);
+    let sblock: AB::Expr = ace.s_block.into();
     let is_eval = sblock.clone();
     let is_read = sblock.not();
 
@@ -89,16 +79,28 @@ pub fn enforce_wiring_bus_constraint<AB>(
     // Load ACE columns.
     // ---------------------------------------------------------------------
 
-    let clk: AB::Expr = load_ace_col::<AB>(local, CLK_IDX);
-    let ctx: AB::Expr = load_ace_col::<AB>(local, CTX_IDX);
+    let clk: AB::Expr = ace.clk.into();
+    let ctx: AB::Expr = ace.ctx.into();
 
-    let wire_0 = load_ace_wire::<AB>(local, ID_0_IDX, V_0_0_IDX, V_0_1_IDX);
-    let wire_1 = load_ace_wire::<AB>(local, ID_1_IDX, V_1_0_IDX, V_1_1_IDX);
-    let wire_2 = load_ace_wire::<AB>(local, ID_2_IDX, V_2_0_IDX, V_2_1_IDX);
-    let m0: AB::Expr = load_ace_col::<AB>(local, M_0_IDX);
+    let wire_0 = AceWire {
+        id: ace.shared[0].into(),
+        v0: ace.shared[1].into(),
+        v1: ace.shared[2].into(),
+    };
+    let wire_1 = AceWire {
+        id: ace.shared[3].into(),
+        v0: ace.shared[4].into(),
+        v1: ace.shared[5].into(),
+    };
+    let wire_2 = AceWire {
+        id: ace.shared[6].into(),
+        v0: ace.shared[7].into(),
+        v1: ace.shared[8].into(),
+    };
+    let m0: AB::Expr = ace.read().m_0.into();
     // On READ rows this column stores m1 (fan-out for wire_1). On EVAL rows it is v2_1,
     // but we only use it under the READ gate below.
-    let m1: AB::Expr = load_ace_col::<AB>(local, M_1_IDX);
+    let m1: AB::Expr = ace.read().m_1.into();
 
     // ---------------------------------------------------------------------
     // Wire value computation.
@@ -158,23 +160,6 @@ struct AceWire<Expr> {
     v1: Expr,
 }
 
-/// Load an ACE wire (id, v0, v1) from the chiplet slice.
-fn load_ace_wire<AB>(
-    row: &MainTraceRow<AB::Var>,
-    id_idx: usize,
-    v0_idx: usize,
-    v1_idx: usize,
-) -> AceWire<AB::Expr>
-where
-    AB: MidenAirBuilder,
-{
-    AceWire {
-        id: load_ace_col::<AB>(row, id_idx),
-        v0: load_ace_col::<AB>(row, v0_idx),
-        v1: load_ace_col::<AB>(row, v1_idx),
-    }
-}
-
 /// Encode an ACE wire using the wiring-bus challenge vector.
 fn encode_wire<AB>(
     challenges: &Challenges<AB::ExprEF>,
@@ -191,11 +176,3 @@ where
     )
 }
 
-/// Load a column from the ACE section of chiplets.
-fn load_ace_col<AB>(row: &MainTraceRow<AB::Var>, ace_col_idx: usize) -> AB::Expr
-where
-    AB: MidenAirBuilder,
-{
-    let local_idx = ACE_OFFSET + ace_col_idx;
-    row.chiplets[local_idx].into()
-}
