@@ -8,8 +8,8 @@ use miden_core::{
 };
 
 use super::{
-    CHIPLETS_OFFSET, CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FN_HASH_OFFSET, MainCols,
-    RowIndex, STACK_TRACE_OFFSET,
+    CHIPLETS_OFFSET, CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FN_HASH_OFFSET, RowIndex,
+    STACK_TRACE_OFFSET,
     chiplets::{
         BITWISE_A_COL_IDX, BITWISE_B_COL_IDX, BITWISE_OUTPUT_COL_IDX, HASHER_NODE_INDEX_COL_IDX,
         HASHER_STATE_COL_RANGE, MEMORY_CLK_COL_IDX, MEMORY_CTX_COL_IDX, MEMORY_IDX0_COL_IDX,
@@ -31,13 +31,6 @@ use super::{
 
 const DECODER_HASHER_RANGE: Range<usize> =
     range(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET, NUM_HASHER_COLUMNS);
-
-// MAIN TRACE ROW
-// ================================================================================================
-
-/// Backwards-compatible alias. Constraint code uses this name; new code can use
-/// [`MainCols`] directly.
-pub type MainTraceRow<T> = MainCols<T>;
 
 // MAIN TRACE MATRIX
 // ================================================================================================
