@@ -66,7 +66,7 @@ pub fn enforce_main<AB>(
     // When depth > 16, overflow must be 1; when depth = 16, satisfied for any h0.
     {
         let depth = local.stack.b0;
-        builder.assert_zero(op_flags.overflow().not() * (depth.into() - F_16));
+        builder.when(op_flags.overflow().not()).assert_eq(depth, F_16);
     }
 
     enforce_overflow_index_constraints(builder, local, next, op_flags);
@@ -163,11 +163,15 @@ fn enforce_overflow_index_constraints<AB>(
     let last_stack_item_next = next.stack[15];
 
     // On right shift, the overflow address should be set to current clk
-    let right_shift_constraint = (overflow_addr_next.into() - clk.into()) * op_flags.right_shift();
-    builder.when_transition().assert_zero(right_shift_constraint);
+    builder
+        .when_transition()
+        .when(op_flags.right_shift())
+        .assert_eq(overflow_addr_next, clk);
 
     // On left shift when depth = 16 (no overflow), last stack item should be zero
-    let left_shift_constraint =
-        op_flags.overflow().not() * op_flags.left_shift() * last_stack_item_next.into();
-    builder.when_transition().assert_zero(left_shift_constraint);
+    builder
+        .when_transition()
+        .when(op_flags.overflow().not())
+        .when(op_flags.left_shift())
+        .assert_zero(last_stack_item_next);
 }

@@ -109,7 +109,7 @@ where
     builder.assert_bool(sel[0]);
 
     // s1..s4 are binary when their prefix selectors are all 1.
-    // Use cumulative products to reduce multiplications.
+    // Cumulative products gate each selector on its prefix being active.
     let s01 = s0.clone() * s1.clone();
     let s012 = s01.clone() * s2.clone();
     let s0123 = s012.clone() * s3.clone();
@@ -123,19 +123,18 @@ where
     // STABILITY CONSTRAINTS (transition only)
     // ==========================================================================
     // Once a selector becomes 1, it must stay 1 (forbids 1→0 transitions).
-    // Rewritten with cumulative products:
-    //   s0 * (s0' - s0) = 0
-    //   s01 * (s1' - s1) = 0  etc.
+    // Each selector's next value must equal its current value when its prefix is active.
 
     let s01234 = s0123.clone() * s4.clone();
 
+    // Selectors are stable: once set to 1, they remain 1.
     {
-        let mut transition = builder.when_transition();
-        transition.when(s0.clone()).assert_eq(sel_next[0], sel[0]);
-        transition.when(s01.clone()).assert_eq(sel_next[1], sel[1]);
-        transition.when(s012.clone()).assert_eq(sel_next[2], sel[2]);
-        transition.when(s0123.clone()).assert_eq(sel_next[3], sel[3]);
-        transition.when(s01234.clone()).assert_eq(sel_next[4], sel[4]);
+        let builder = &mut builder.when_transition();
+        builder.when(s0.clone()).assert_eq(sel_next[0], sel[0]);
+        builder.when(s01.clone()).assert_eq(sel_next[1], sel[1]);
+        builder.when(s012.clone()).assert_eq(sel_next[2], sel[2]);
+        builder.when(s0123.clone()).assert_eq(sel_next[3], sel[3]);
+        builder.when(s01234.clone()).assert_eq(sel_next[4], sel[4]);
     }
 
     // ==========================================================================
@@ -144,14 +143,13 @@ where
     // All selectors must be 1 in the last row. This ensures every chiplet's
     // is_active flag is zero on the last row, making chiplet-gated constraints
     // vanish without explicit when_transition() guards.
-
     {
-        let mut last = builder.when_last_row();
-        last.assert_one(sel[0]);
-        last.assert_one(sel[1]);
-        last.assert_one(sel[2]);
-        last.assert_one(sel[3]);
-        last.assert_one(sel[4]);
+        let builder = &mut builder.when_last_row();
+        builder.assert_one(sel[0]);
+        builder.assert_one(sel[1]);
+        builder.assert_one(sel[2]);
+        builder.assert_one(sel[3]);
+        builder.assert_one(sel[4]);
     }
 
     // ==========================================================================

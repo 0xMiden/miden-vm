@@ -70,12 +70,12 @@ fn enforce_hornerbase_constraints<AB>(
     // enforce the algebraic relationships that must hold between the helpers, the
     // coefficients on the stack, and the accumulator update. These constraints
     // also implicitly bind the helper values to the required power relations.
-    let gate = op_flags.hornerbase();
+    // All HORNERBASE constraints share this gate.
+    let horner_builder = &mut builder.when(op_flags.hornerbase());
 
-    // The lower 14 stack registers remain unchanged during HORNERBASE.
+    // Stack registers preserved during transition.
     {
-        let transition_gate = builder.is_transition() * gate.clone();
-        let builder = &mut builder.when(transition_gate);
+        let builder = &mut horner_builder.when_transition();
         for i in 0..14 {
             builder.assert_eq(next.stack[i], local.stack[i]);
         }
@@ -132,19 +132,15 @@ fn enforce_hornerbase_constraints<AB>(
         tmp1 * alpha3 + alpha2.clone() * c[5].into() + alpha.clone() * c[6].into() + c[7].into();
     let [acc_exp_0, acc_exp_1] = acc_expected.into_parts();
 
-    // tmp constraints (non-transition)
-    {
-        let builder = &mut builder.when(gate.clone());
-        builder.assert_eq(tmp0_0, tmp0_exp_0);
-        builder.assert_eq(tmp0_1, tmp0_exp_1);
-        builder.assert_eq(tmp1_0, tmp1_exp_0);
-        builder.assert_eq(tmp1_1, tmp1_exp_1);
-    }
+    // Intermediate temporaries match expected polynomial evaluations.
+    horner_builder.assert_eq(tmp0_0, tmp0_exp_0);
+    horner_builder.assert_eq(tmp0_1, tmp0_exp_1);
+    horner_builder.assert_eq(tmp1_0, tmp1_exp_0);
+    horner_builder.assert_eq(tmp1_1, tmp1_exp_1);
 
-    // accumulator update constraints (transition)
+    // Accumulator updated to next Horner step during transition.
     {
-        let transition_gate = builder.is_transition() * gate;
-        let builder = &mut builder.when(transition_gate);
+        let builder = &mut horner_builder.when_transition();
         builder.assert_eq(acc0_next, acc_exp_0);
         builder.assert_eq(acc1_next, acc_exp_1);
     }
@@ -162,12 +158,12 @@ fn enforce_hornerext_constraints<AB>(
     // a smaller helper set. As with HORNERBASE, helper values are supplied via
     // decoder columns, and the constraints below bind them to the required
     // power relations and accumulator update.
-    let gate = op_flags.hornerext();
+    // All HORNEREXT constraints share this gate.
+    let horner_builder = &mut builder.when(op_flags.hornerext());
 
-    // The lower 14 stack registers are unchanged by HORNEREXT.
+    // Stack registers preserved during transition.
     {
-        let transition_gate = builder.is_transition() * gate.clone();
-        let builder = &mut builder.when(transition_gate);
+        let builder = &mut horner_builder.when_transition();
         for i in 0..14 {
             builder.assert_eq(next.stack[i], local.stack[i]);
         }
@@ -216,17 +212,13 @@ fn enforce_hornerext_constraints<AB>(
     let acc_expected: QuadFeltExpr<AB::Expr> = tmp_alpha2 + alpha * c2 + c3;
     let [acc_exp_0, acc_exp_1] = acc_expected.into_parts();
 
-    // tmp constraints (non-transition)
-    {
-        let builder = &mut builder.when(gate.clone());
-        builder.assert_eq(tmp0, tmp_exp_0);
-        builder.assert_eq(tmp1, tmp_exp_1);
-    }
+    // Intermediate temporaries match expected polynomial evaluations.
+    horner_builder.assert_eq(tmp0, tmp_exp_0);
+    horner_builder.assert_eq(tmp1, tmp_exp_1);
 
-    // accumulator update constraints (transition)
+    // Accumulator updated to next Horner step during transition.
     {
-        let transition_gate = builder.is_transition() * gate;
-        let builder = &mut builder.when(transition_gate);
+        let builder = &mut horner_builder.when_transition();
         builder.assert_eq(acc0_next, acc_exp_0);
         builder.assert_eq(acc1_next, acc_exp_1);
     }

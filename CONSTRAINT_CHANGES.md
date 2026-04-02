@@ -322,3 +322,30 @@ Helper `enforce_decoder_selector` inlined into call site. Expression restructure
 **No constraint changes.** (446 base + 24 ext)
 
 ---
+## 35. refactor: apply constraint style rules — when() decomposition, semantic assertions
+
+**10 updated** | 460 unchanged
+
+Sign flip: `assert_zero(gate * x.not())` → `when(gate).assert_one(x)`. Polynomial negated but equivalent.
+
+<details>
+<summary>10 constraint changes</summary>
+
+**Updated:**
+
+| # | Before | After | Interpretation |
+|---|--------|-------|----------------|
+| 1 | `chiplets/ace.rs:121` | `chiplets/ace.rs:132` | ace.rs:121→132. Gate extraction: `assert_zero(ace_transition * f_next * sblock * sblock_next.not())` → `when(ace_transition).when(f_next).when(sblock).assert_one(sblock_next)`. Sign flip + compound gate decomposed into `when()` chain. Equivalent. |
+| 2 | `chiplets/ace.rs:125` | `chiplets/ace.rs:136` | ace.rs:125→136. Gate extraction: `assert_zero(ace_flag * f_end * sblock.not())` → `when(ace_flag).when(f_end).assert_one(sblock)`. Sign flip + gate decomposition. Equivalent. |
+| 3 | `decoder/mod.rs:129` | `decoder/mod.rs:129` | decoder:129. Sign flip: `when_transition().assert_zero(span_flag * sp_next.not())` → `when_transition().when(span_flag).assert_one(sp_next)`. Equivalent. |
+| 4 | `decoder/mod.rs:133` | `decoder/mod.rs:133` | decoder:133. Sign flip: `when_transition().assert_zero(respan_flag * sp_next.not())` → `when_transition().when(respan_flag).assert_one(sp_next)`. Equivalent. |
+| 5 | `decoder/mod.rs:217` | `decoder/mod.rs:225` | decoder:217→225. Gate extraction into `when(f_repeat)` scope: `assert_zero(f_repeat * s0.not())` → `when(f_repeat).assert_one(s0)`. Sign flip + gate moved to scoped builder. Equivalent. |
+| 6 | `decoder/mod.rs:218` | `decoder/mod.rs:226` | decoder:218→226. Gate extraction into `when(f_repeat)` scope: `assert_zero(f_repeat * is_loop_body.not())` → `when(f_repeat).assert_one(is_loop_body)`. Sign flip + gate moved to scoped builder. Equivalent. |
+| 7 | `decoder/mod.rs:237` | `decoder/mod.rs:245` | decoder:237→245. Sign flip: `when_transition().assert_zero(f_halt * f_halt_next.not())` → `when_transition().when(f_halt).assert_one(f_halt_next)`. Equivalent. |
+| 8 | `stack/ops/mod.rs:313` | `stack/ops/mod.rs:227` | stack/ops:313→227 (CSWAP). Gained `is_transition` factor: gate `builder.is_transition() * is_cswap` was manually computed, now `when_transition()` hoisted to function scope. Polynomial restructured but algebraically identical — `is_transition * is_cswap` present in both. Equivalent. |
+| 9 | `stack/ops/mod.rs:324` | `stack/ops/mod.rs:237` | stack/ops:324→237 (CSWAPW). Gained `is_transition` factor: same restructuring as CSWAP — manually computed `builder.is_transition() * is_cswapw` gate replaced by function-level `when_transition()`. Algebraically identical. Equivalent. |
+| 10 | `stack/ops/mod.rs:341` | `stack/ops/mod.rs:253` | stack/ops:341→253 (ASSERT). **Gained `is_transition` factor** not present before. Before: `when(is_assert).assert_one(s0)` (all rows). After: `when_transition().when(is_assert).assert_one(s0)` (transition rows only). Semantically equivalent because `is_assert` is an op flag that is zero on the last row (no operation executes there), so the constraint was already vacuous on the last row. |
+
+</details>
+
+---

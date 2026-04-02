@@ -28,6 +28,7 @@
 //! | m0        | Wire bus multiplicity for node 0               |
 
 use miden_core::field::PrimeCharacteristicRing;
+use miden_crypto::stark::air::AirBuilder;
 
 use super::selectors::ChipletFlags;
 use crate::{
@@ -91,14 +92,18 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     // ==========================================================================
 
     // First row of ACE must have sstart' = 1
-    builder.assert_zero(flags.next_is_first.clone() * (sstart_next.clone() - F_1));
+    builder.when(flags.next_is_first.clone()).assert_one(sstart_next.clone());
 
     // ==========================================================================
     // BINARY CONSTRAINTS
     // ==========================================================================
 
-    builder.assert_zero(ace_flag.clone() * sstart.clone() * (sstart.clone() - AB::Expr::ONE));
-    builder.assert_zero(ace_flag.clone() * sblock.clone() * (sblock.clone() - AB::Expr::ONE));
+    // When ACE is active, section flags must be boolean.
+    {
+        let builder = &mut builder.when(ace_flag.clone());
+        builder.assert_bool(sstart.clone());
+        builder.assert_bool(sblock.clone());
+    }
 
     // ==========================================================================
     // SECTION/BLOCK FLAGS CONSTRAINTS
@@ -111,18 +116,24 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     let f_end = binary_or(s3_next.into().not() * sstart_next.clone(), s3_next.into());
 
     // Last row of ACE chiplet cannot be section start
-    builder.assert_zero(ace_last.clone() * sstart.clone());
+    builder.when(ace_last.clone()).assert_zero(sstart.clone());
     // Prevent consecutive section starts within ACE chiplet
-    builder.assert_zero(ace_transition.clone() * sstart.clone() * sstart_next.clone());
-    // Sections must start with READ blocks (not EVAL): f_eval = 0 when f_start
-    builder.assert_zero(ace_flag.clone() * sstart.clone() * sblock.clone());
+    builder
+        .when(ace_transition.clone())
+        .when(sstart.clone())
+        .assert_zero(sstart_next.clone());
+    // Sections must start with READ blocks (not EVAL): sblock = 0 when sstart = 1
+    builder.when(ace_flag.clone()).when(sstart.clone()).assert_zero(sblock.clone());
     // EVAL blocks cannot be followed by READ blocks within same section
     builder
-        .assert_zero(ace_transition.clone() * f_next.clone() * sblock.clone() * sblock_next.not());
+        .when(ace_transition.clone())
+        .when(f_next.clone())
+        .when(sblock.clone())
+        .assert_one(sblock_next.clone());
     // Sections must end with EVAL blocks (not READ).
     // f_end fires on the last ACE row or on section boundaries. Since ace_flag = 0 on
     // the trace's last row (last-row invariant), no when_transition() guard is needed.
-    builder.assert_zero(ace_flag.clone() * f_end.clone() * sblock.not());
+    builder.when(ace_flag.clone()).when(f_end.clone()).assert_one(sblock.clone());
 
     // ==========================================================================
     // SECTION CONSTRAINTS (within section)
@@ -132,31 +143,32 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     let f_read = sblock.not();
     let f_eval = sblock.clone();
 
-    // Context consistency within a section
-    // Use a combined gate to share `ace_transition * flag_within_section`
-    // across all within-section transition constraints.
-    let within_section_gate = ace_transition.clone() * flag_within_section.clone();
+    // Within-section transitions: context, clock, pointer, and node ID consistency.
+    {
+        let builder = &mut builder.when(ace_transition.clone() * flag_within_section.clone());
+        builder.assert_eq(ctx_next.clone(), ctx.clone());
+        builder.assert_eq(clk_next.clone(), clk.clone());
 
-    // Memory pointer increments: +4 in READ, +1 in EVAL
-    // ptr' = ptr + 4 * f_read + f_eval
-    let expected_ptr_next = ptr.clone() + f_read.clone() * F_4 + f_eval.clone();
+        // Memory pointer increments: +4 in READ, +1 in EVAL
+        // ptr' = ptr + 4 * f_read + f_eval
+        let expected_ptr_next = ptr.clone() + f_read.clone() * F_4 + f_eval.clone();
+        builder.assert_eq(ptr_next.clone(), expected_ptr_next);
 
-    // Node ID decrements: -2 in READ, -1 in EVAL
-    // id0 = id0' + 2 * f_read + f_eval
-    let expected_id0 = id0_next.clone() + f_read.clone().double() + f_eval.clone();
-    builder.assert_zero(within_section_gate.clone() * (ctx_next.clone() - ctx.clone()));
-    builder.assert_zero(within_section_gate.clone() * (clk_next.clone() - clk.clone()));
-    builder.assert_zero(within_section_gate.clone() * (ptr_next.clone() - expected_ptr_next));
-    builder.assert_zero(within_section_gate * (id0.clone() - expected_id0));
+        // Node ID decrements: -2 in READ, -1 in EVAL
+        // id0 = id0' + 2 * f_read + f_eval
+        let expected_id0 = id0_next.clone() + f_read.clone().double() + f_eval.clone();
+        builder.assert_eq(id0.clone(), expected_id0);
+    }
 
     // ==========================================================================
     // READ BLOCK CONSTRAINTS
     // ==========================================================================
 
     // In READ block, the two node IDs should be consecutive (id1 = id0 - 1)
-    builder.assert_zero(
-        ace_flag.clone() * f_read.clone() * (id1.clone() - id0.clone() + AB::Expr::ONE),
-    );
+    builder
+        .when(ace_flag.clone())
+        .when(f_read.clone())
+        .assert_eq(id1.clone(), id0.clone() - F_1);
 
     // READ→EVAL transition occurs when n_eval matches the first EVAL id0.
     // n_eval is constant across READ rows and encodes (num_eval_rows - 1).
@@ -164,34 +176,39 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     let f_read_next = sblock_next.not();
     let f_eval_next = sblock_next.clone();
     let selected = f_read_next * n_eval_next.clone() + f_eval_next * id0_next.clone();
-    builder.assert_zero(ace_transition.clone() * f_read.clone() * (selected - n_eval));
+    builder
+        .when(ace_transition.clone())
+        .when(f_read.clone())
+        .assert_eq(selected, n_eval);
 
     // ==========================================================================
     // EVAL BLOCK CONSTRAINTS
     // ==========================================================================
 
-    // op must be -1, 0, or 1: op * (op - 1) * (op + 1) = 0
-    builder.assert_zero(
-        ace_flag.clone() * f_eval.clone() * op.clone() * (op.clone() - F_1) * (op.clone() + F_1),
-    );
+    // EVAL block: op ternary validity and arithmetic operation result.
+    {
+        let builder = &mut builder.when(ace_flag.clone() * f_eval.clone());
+        // op must be -1, 0, or 1: ternary validity (intrinsic, do not decompose)
+        builder.assert_zero(op.clone() * (op.clone() - F_1) * (op.clone() + F_1));
 
-    // Arithmetic operation constraints
-    let eval_gate = ace_flag.clone() * f_eval.clone();
-    let (expected_0, expected_1) = compute_arithmetic_expected::<AB>(op, v1_0, v1_1, v2_0, v2_1);
-    builder.assert_zero(eval_gate.clone() * (expected_0 - v0_0.clone()));
-    builder.assert_zero(eval_gate.clone() * (expected_1 - v0_1.clone()));
+        let (expected_0, expected_1) =
+            compute_arithmetic_expected::<AB>(op, v1_0, v1_1, v2_0, v2_1);
+        builder.assert_eq(expected_0, v0_0.clone());
+        builder.assert_eq(expected_1, v0_1.clone());
+    }
 
     // ==========================================================================
     // FINALIZATION CONSTRAINTS
     // ==========================================================================
 
-    // At section end: v0 = 0, id0 = 0
-    // Use a combined gate to share `ace_flag * f_end` across all finalization constraints.
+    // At section end: result value and node ID must be zero.
     // No when_transition() needed: ace_flag = 0 on the last row (last-row invariant).
-    let gate = ace_flag * f_end;
-    builder.assert_zero(gate.clone() * v0_0);
-    builder.assert_zero(gate.clone() * v0_1);
-    builder.assert_zero(gate * id0);
+    {
+        let builder = &mut builder.when(ace_flag * f_end);
+        builder.assert_zero(v0_0);
+        builder.assert_zero(v0_1);
+        builder.assert_zero(id0);
+    }
 }
 
 // INTERNAL HELPERS

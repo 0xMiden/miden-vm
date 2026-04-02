@@ -24,16 +24,14 @@
 use alloc::vec::Vec;
 
 use miden_core::field::PrimeCharacteristicRing;
+use miden_crypto::stark::air::AirBuilder;
 
 use super::{
     hasher::periodic::NUM_PERIODIC_COLUMNS as HASHER_NUM_PERIODIC_COLUMNS, selectors::ChipletFlags,
 };
 use crate::{
     Felt, MainTraceRow, MidenAirBuilder,
-    constraints::{
-        constants::{F_1, F_16},
-        utils::horner_eval_bits,
-    },
+    constraints::{constants::F_16, utils::horner_eval_bits},
     trace::BitwiseCols,
 };
 
@@ -83,31 +81,33 @@ pub fn enforce_bitwise_constraints<AB>(
     let a_bits_next: [AB::Expr; 4] = cols_next.a_bits.map(Into::into);
     let b_bits_next: [AB::Expr; 4] = cols_next.b_bits.map(Into::into);
 
+    // All bitwise constraints are gated on the bitwise chiplet being active.
+    let bitwise_builder = &mut builder.when(bitwise_flag);
+
     // ==========================================================================
     // OPERATION FLAG CONSTRAINTS
     // ==========================================================================
 
     // op_flag must be binary (0 for AND, 1 for XOR)
     let op_flag: AB::Expr = cols.op_flag.into();
-    builder.assert_zero(bitwise_flag.clone() * op_flag.clone() * (op_flag.clone() - F_1));
+    bitwise_builder.assert_bool(op_flag.clone());
 
     // op_flag must remain constant within the 8-row cycle (can only change when k1=0)
     let op_flag_next: AB::Expr = cols_next.op_flag.into();
-    let gate_transition = k_transition.clone() * bitwise_flag.clone();
-    builder.assert_zero(gate_transition.clone() * (op_flag.clone() - op_flag_next));
+    bitwise_builder
+        .when(k_transition.clone())
+        .assert_eq(op_flag.clone(), op_flag_next);
 
     // ==========================================================================
     // INPUT DECOMPOSITION CONSTRAINTS
     // ==========================================================================
 
     // Bit decomposition columns must be binary
-    let gate = bitwise_flag.clone();
     for bit in &a_bits {
-        builder.assert_zero(gate.clone() * bit.clone() * (bit.clone() - F_1));
+        bitwise_builder.assert_bool(bit.clone());
     }
-
     for bit in &b_bits {
-        builder.assert_zero(gate.clone() * bit.clone() * (bit.clone() - F_1));
+        bitwise_builder.assert_bool(bit.clone());
     }
 
     // First row of cycle (k0=1): a = aggregated bits, b = aggregated bits
@@ -116,9 +116,12 @@ pub fn enforce_bitwise_constraints<AB>(
     let a: AB::Expr = cols.a.into();
     let b: AB::Expr = cols.b.into();
     let prev_output: AB::Expr = cols.prev_output.into();
-    let gate_first = k_first.clone() * bitwise_flag.clone();
-    for expr in [a.clone() - a_agg, b.clone() - b_agg, prev_output.clone()] {
-        builder.assert_zero(gate_first.clone() * expr);
+    // First row: input aggregation must match, and previous output must be zero.
+    {
+        let builder = &mut bitwise_builder.when(k_first);
+        builder.assert_eq(a.clone(), a_agg);
+        builder.assert_eq(b.clone(), b_agg);
+        builder.assert_zero(prev_output.clone());
     }
 
     // Transition rows (k1=1): a' = 16*a + agg(a'_bits), b' = 16*b + agg(b'_bits)
@@ -126,8 +129,11 @@ pub fn enforce_bitwise_constraints<AB>(
     let b_agg_next = horner_eval_bits(&b_bits_next);
     let a_next: AB::Expr = cols_next.a.into();
     let b_next: AB::Expr = cols_next.b.into();
-    for expr in [a_next - (a.clone() * F_16 + a_agg_next), b_next - (b * F_16 + b_agg_next)] {
-        builder.assert_zero(gate_transition.clone() * expr);
+    // Transition rows: inputs aggregate with 16x shift.
+    {
+        let builder = &mut bitwise_builder.when(k_transition.clone());
+        builder.assert_eq(a_next, a * F_16 + a_agg_next);
+        builder.assert_eq(b_next, b * F_16 + b_agg_next);
     }
 
     // ==========================================================================
@@ -137,7 +143,7 @@ pub fn enforce_bitwise_constraints<AB>(
     // Transition rows (k1=1): output_prev' = output
     let output: AB::Expr = cols.output.into();
     let prev_output_next: AB::Expr = cols_next.prev_output.into();
-    builder.assert_zero(gate_transition * (prev_output_next - output.clone()));
+    bitwise_builder.when(k_transition).assert_eq(prev_output_next, output.clone());
 
     // Every row: output = 16*output_prev + bitwise_result
 
@@ -157,7 +163,7 @@ pub fn enforce_bitwise_constraints<AB>(
     // Equivalent: z = zp * 16 + a_and_b + op_flag * (a_xor_b - a_and_b)
     let expected_z = prev_output * F_16 + a_and_b.clone() + op_flag * (a_xor_b - a_and_b);
 
-    builder.assert_zero(bitwise_flag * (output - expected_z));
+    bitwise_builder.assert_eq(output, expected_z);
 }
 
 // =============================================================================

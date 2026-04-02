@@ -126,11 +126,11 @@ fn enforce_in_span_constraints<AB>(
 
     // Constraint 2: span_flag * (1 - sp') = 0
     let span_flag = op_flags.span();
-    builder.when_transition().assert_zero(span_flag * sp_next.clone().not());
+    builder.when_transition().when(span_flag).assert_one(sp_next.clone());
 
     // Constraint 3: respan_flag * (1 - sp') = 0
     let respan_flag = op_flags.respan();
-    builder.when_transition().assert_zero(respan_flag * sp_next.not());
+    builder.when_transition().when(respan_flag).assert_one(sp_next);
 }
 
 /// Enforces that the extra columns (e0, e1) are correctly computed from op bits.
@@ -171,12 +171,16 @@ where
 
     // U32 prefix pattern: b6=1, b5=0, b4=0. Under this prefix, b0 must be 0.
     let u32_prefix = b6.clone() * b5.clone().not() * b4.not();
-    builder.assert_zero(u32_prefix * b0.clone());
+    builder.when(u32_prefix).assert_zero(b0.clone());
 
     // Very-high prefix pattern: b6=1, b5=1. Under this prefix, b0 and b1 must be 0.
     let very_high_prefix = b6 * b5;
-    builder.assert_zero(very_high_prefix.clone() * b0);
-    builder.assert_zero(very_high_prefix * b1);
+    // When very-high prefix is active, both b0 and b1 must be zero.
+    {
+        let builder = &mut builder.when(very_high_prefix);
+        builder.assert_zero(b0);
+        builder.assert_zero(b1);
+    }
 }
 
 /// Enforces general decoder constraints derived from opcode semantics.
@@ -202,39 +206,43 @@ fn enforce_general_constraints<AB>(
 
     // SPLIT/LOOP: top stack value must be binary (branch selector).
     let split_or_loop = op_flags.split() + op_flags.loop_op();
-    let s0_binary = s0 * (s0 - F_1);
-    builder.assert_zero(split_or_loop * s0_binary);
+    builder.when(split_or_loop).assert_bool(s0);
 
     // DYN: the first half holds the callee digest; the second half must be zero.
-    let f_dyn = op_flags.dyn_op();
-    for i in 0..4 {
-        builder.assert_zero(f_dyn.clone() * dec.hasher_state[4 + i]);
+    // When DYN is active, h4..h7 must be zeroed.
+    {
+        let builder = &mut builder.when(op_flags.dyn_op());
+        for i in 0..4 {
+            builder.assert_zero(dec.hasher_state[4 + i]);
+        }
     }
 
     // REPEAT: top stack must be 1 and we must be in a loop body (h4=1).
-    let f_repeat = op_flags.repeat();
     let end_flags = dec.end_block_flags();
-    builder.assert_zero(f_repeat.clone() * s0.into().not());
-    builder.assert_zero(f_repeat * end_flags.is_loop_body.into().not());
+    // When REPEAT is active, s0 and loop-body flag must both be 1.
+    {
+        let builder = &mut builder.when(op_flags.repeat());
+        builder.assert_one(s0);
+        builder.assert_one(end_flags.is_loop_body);
+    }
 
     // END inside a loop: if is_loop flag is set, top stack must be 0.
     let f_end = op_flags.end();
-    builder.assert_zero(f_end.clone() * end_flags.is_loop * s0);
+    builder.when(f_end.clone()).when(end_flags.is_loop).assert_zero(s0);
 
     // END followed by REPEAT: carry h0..h4 into the next row.
-    let f_repeat_next = op_flags_next.repeat();
-    for i in 0..5 {
-        let hi = dec.hasher_state[i];
-        let hi_next = dec_next.hasher_state[i];
-        builder
-            .when_transition()
-            .assert_zero(f_end.clone() * f_repeat_next.clone() * (hi_next - hi));
+    {
+        let gate = builder.is_transition() * f_end.clone() * op_flags_next.repeat();
+        let builder = &mut builder.when(gate);
+        for i in 0..5 {
+            builder.assert_eq(dec_next.hasher_state[i], dec.hasher_state[i]);
+        }
     }
 
     // HALT is absorbing: it can only be followed by HALT.
     let f_halt = op_flags.halt();
     let f_halt_next = op_flags_next.halt();
-    builder.when_transition().assert_zero(f_halt * f_halt_next.not());
+    builder.when_transition().when(f_halt).assert_one(f_halt_next);
 }
 
 /// Enforces group count (gc) constraints.
@@ -277,16 +285,16 @@ fn enforce_group_count_constraints<AB>(
     // Constraint 1: Inside a span, gc can only stay the same or decrement by 1.
     // sp * delta_gc * (delta_gc - 1) = 0
     // This ensures: if sp=1 and delta_gc != 0, then delta_gc must equal 1
-    builder
-        .when_transition()
-        .assert_zero(sp.clone() * delta_gc.clone() * (delta_gc.clone() - F_1));
-
     // Constraint 2: If gc decrements and this is not a PUSH-immediate row,
     // then h0 must be zero (no immediate value packed into the group).
     // sp * delta_gc * (1 - is_push) * h0 = 0
-    builder
-        .when_transition()
-        .assert_zero(sp.clone() * delta_gc.clone() * is_push.not() * h0);
+    // When inside a span (transition), gc delta is boolean and non-push decrements clear h0.
+    {
+        let gate = builder.is_transition() * sp.clone();
+        let builder = &mut builder.when(gate);
+        builder.assert_bool(delta_gc.clone());
+        builder.when(delta_gc.clone()).when(is_push.not()).assert_zero(h0);
+    }
 
     // Constraint 3: SPAN/RESPAN/PUSH must consume a group immediately.
     // (span_flag + respan_flag + is_push) * (delta_gc - 1) = 0
@@ -294,20 +302,19 @@ fn enforce_group_count_constraints<AB>(
     let respan_flag = op_flags.respan();
     builder
         .when_transition()
-        .assert_zero((span_flag + respan_flag + is_push) * (delta_gc.clone() - F_1));
+        .when(span_flag + respan_flag + is_push)
+        .assert_one(delta_gc.clone());
 
     // Constraint 4: If the next op is END or RESPAN, gc cannot decrement on this row.
     // delta_gc * (end' + respan') = 0
     let end_next = op_flags_next.end();
     let respan_next = op_flags_next.respan();
-    builder
-        .when_transition()
-        .assert_zero(delta_gc.clone() * (end_next + respan_next));
+    builder.when_transition().when(delta_gc).assert_zero(end_next + respan_next);
 
     // Constraint 5: END closes the span, so gc must be 0.
     // end_flag * gc = 0
     let end_flag = op_flags.end();
-    builder.assert_zero(end_flag * gc);
+    builder.when(end_flag).assert_zero(gc);
 }
 
 /// Enforces op group decoding constraints for the `h0` register.
@@ -353,12 +360,13 @@ fn enforce_op_group_decoding_constraints<AB>(
     let h0_shift = h0 - h0_next * F_128 - op_next;
     builder
         .when_transition()
-        .assert_zero((f_span + f_respan + is_push + f_sgc) * h0_shift);
+        .when(f_span + f_respan + is_push + f_sgc)
+        .assert_zero(h0_shift);
 
     // If the next op is END or RESPAN, the current h0 must be 0 (no pending group).
     let end_next = op_flags_next.end();
     let respan_next = op_flags_next.respan();
-    builder.when_transition().assert_zero(sp * (end_next + respan_next) * h0);
+    builder.when_transition().when(sp).when(end_next + respan_next).assert_zero(h0);
 }
 
 /// Enforces op index (ox) constraints.
@@ -412,16 +420,25 @@ fn enforce_op_index_constraints<AB>(
     // (span_flag + respan_flag) * ox' = 0
     builder
         .when_transition()
-        .assert_zero((span_flag + respan_flag) * ox_next.clone());
+        .when(span_flag + respan_flag)
+        .assert_zero(ox_next.clone());
 
     // Constraint 2: When a new group starts inside a span, ox' = 0.
     // sp * ng * ox' = 0
-    builder.when_transition().assert_zero(sp.clone() * ng.clone() * ox_next.clone());
+    builder
+        .when_transition()
+        .when(sp.clone())
+        .when(ng.clone())
+        .assert_zero(ox_next.clone());
 
     // Constraint 3: When staying in the same group, ox increments by 1.
     // sp * sp' * (1 - ng) * (ox' - ox - 1) = 0
-    let delta_ox = ox_next - ox.clone() - F_1;
-    builder.when_transition().assert_zero(sp * sp_next * ng.not() * delta_ox);
+    builder
+        .when_transition()
+        .when(sp)
+        .when(sp_next)
+        .when(ng.not())
+        .assert_eq(ox_next, ox.clone() + F_1);
 
     // Constraint 4: ox must be in range [0, 8] (9 ops per group).
     // ∏_{i=0}^{8}(ox - i) = 0
@@ -460,29 +477,33 @@ fn enforce_batch_flags_constraints<AB>(
     let span_or_respan = f_span + f_respan;
 
     // When SPAN or RESPAN, exactly one batch flag must be set.
-    builder
-        .assert_zero(span_or_respan.clone() - (f_g1.clone() + f_g2.clone() + f_g4.clone() + f_g8));
+    builder.assert_eq(span_or_respan.clone(), f_g1.clone() + f_g2.clone() + f_g4.clone() + f_g8);
 
     // When not SPAN/RESPAN, all batch flags must be zero.
-    builder.assert_zero(
-        span_or_respan.not()
-            * (dec.batch_flags[0].into() + dec.batch_flags[1].into() + dec.batch_flags[2].into()),
+    builder.when(span_or_respan.not()).assert_zero(
+        dec.batch_flags[0].into() + dec.batch_flags[1].into() + dec.batch_flags[2].into(),
     );
 
     // When batch has <=4 groups, h4..h7 must be zero (unused lanes).
-    let small_batch = f_g1.clone() + f_g2.clone() + f_g4.clone();
-    for i in 0..4 {
-        builder.assert_zero(small_batch.clone() * dec.hasher_state[4 + i]);
+    // Zero the upper hasher lanes for batches with at most 4 groups.
+    {
+        let builder = &mut builder.when(f_g1.clone() + f_g2.clone() + f_g4.clone());
+        for i in 0..4 {
+            builder.assert_zero(dec.hasher_state[4 + i]);
+        }
     }
 
     // When batch has <=2 groups, h2..h3 must be zero (unused lanes).
-    let tiny_batch = f_g1.clone() + f_g2.clone();
-    for i in 0..2 {
-        builder.assert_zero(tiny_batch.clone() * dec.hasher_state[2 + i]);
+    // Zero h2..h3 for batches with at most 2 groups.
+    {
+        let builder = &mut builder.when(f_g1.clone() + f_g2.clone());
+        for i in 0..2 {
+            builder.assert_zero(dec.hasher_state[2 + i]);
+        }
     }
 
     // When batch has 1 group, h1 must be zero (unused lane).
-    builder.assert_zero(f_g1 * dec.hasher_state[1]);
+    builder.when(f_g1).assert_zero(dec.hasher_state[1]);
 }
 
 /// Enforces block address (addr) constraints.
@@ -513,17 +534,18 @@ fn enforce_block_address_constraints<AB>(
 
     // Constraint 1: Inside a span, address must stay the same.
     // sp * (addr' - addr) = 0
-    builder.when_transition().assert_zero(sp * (addr_next.clone() - addr.clone()));
+    builder.when_transition().when(sp).assert_eq(addr_next.clone(), addr.clone());
 
     // Constraint 2: RESPAN moves to the next hash block (Poseidon2 = 32 rows).
     // respan_flag * (addr' - addr - HASH_CYCLE_LEN) = 0
     let respan_flag = op_flags.respan();
     builder
         .when_transition()
-        .assert_zero(respan_flag * (addr_next - addr.clone() - HASH_CYCLE_LEN_FELT));
+        .when(respan_flag)
+        .assert_eq(addr_next, addr.clone() + HASH_CYCLE_LEN_FELT);
 
     // Constraint 3: HALT forces addr = 0.
     // halt_flag * addr = 0
     let halt_flag = op_flags.halt();
-    builder.assert_zero(halt_flag * addr);
+    builder.when(halt_flag).assert_zero(addr);
 }

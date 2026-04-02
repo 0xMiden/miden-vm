@@ -358,7 +358,11 @@ fn compute_memory_word_request<AB: MidenAirBuilder>(
     challenges: &Challenges<AB::ExprEF>,
     is_read: bool,
 ) -> AB::ExprEF {
-    let label = if is_read { MEMORY_READ_WORD_LABEL } else { MEMORY_WRITE_WORD_LABEL };
+    let label = if is_read {
+        MEMORY_READ_WORD_LABEL
+    } else {
+        MEMORY_WRITE_WORD_LABEL
+    };
     let label: AB::Expr = Felt::from_u8(label).into();
     let ctx: AB::Expr = local.system.ctx.into();
     let clk: AB::Expr = local.system.clk.into();
@@ -382,13 +386,20 @@ fn compute_memory_element_request<AB: MidenAirBuilder>(
     challenges: &Challenges<AB::ExprEF>,
     is_read: bool,
 ) -> AB::ExprEF {
-    let label = if is_read { MEMORY_READ_ELEMENT_LABEL } else { MEMORY_WRITE_ELEMENT_LABEL };
+    let label = if is_read {
+        MEMORY_READ_ELEMENT_LABEL
+    } else {
+        MEMORY_WRITE_ELEMENT_LABEL
+    };
     let label: AB::Expr = Felt::from_u8(label).into();
     let ctx: AB::Expr = local.system.ctx.into();
     let clk: AB::Expr = local.system.clk.into();
     let addr: AB::Expr = local.stack.top[0].into();
-    let element: AB::Expr =
-        if is_read { next.stack.top[0].into() } else { local.stack.top[1].into() };
+    let element: AB::Expr = if is_read {
+        next.stack.top[0].into()
+    } else {
+        local.stack.top[1].into()
+    };
 
     challenges.encode(CHIPLETS_BUS, [label, ctx, addr, clk, element])
 }
@@ -420,10 +431,8 @@ fn compute_two_word_request<AB: MidenAirBuilder>(
         [label.clone(), ctx.into(), addr.into(), clk.into(), w0, w1, w2, w3],
     );
     let addr2: AB::Expr = addr.into();
-    let msg2 = challenges.encode(
-        CHIPLETS_BUS,
-        [label, ctx.into(), addr2 + F_4, clk.into(), w4, w5, w6, w7],
-    );
+    let msg2 = challenges
+        .encode(CHIPLETS_BUS, [label, ctx.into(), addr2 + F_4, clk.into(), w4, w5, w6, w7]);
 
     msg1 * msg2
 }

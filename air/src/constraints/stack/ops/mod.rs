@@ -110,141 +110,58 @@ pub fn enforce_main<AB>(
     let is_caller = op_flags.caller();
     let is_sdepth = op_flags.sdepth();
 
+    // All constraints are gated by op flags which vanish on the last row.
+    let builder = &mut builder.when_transition();
+
     // PAD
-    {
-        let gate = builder.is_transition() * is_pad;
-        builder.when(gate).assert_zero(s0_next);
-    }
+    builder.when(is_pad).assert_zero(s0_next);
 
     // DUP*
-    {
-        let gate = builder.is_transition() * is_dup;
-        builder.when(gate).assert_eq(s0_next, s0);
-    }
-    {
-        let gate = builder.is_transition() * is_dup1;
-        builder.when(gate).assert_eq(s0_next, s1);
-    }
-    {
-        let gate = builder.is_transition() * is_dup2;
-        builder.when(gate).assert_eq(s0_next, s2);
-    }
-    {
-        let gate = builder.is_transition() * is_dup3;
-        builder.when(gate).assert_eq(s0_next, s3);
-    }
-    {
-        let gate = builder.is_transition() * is_dup4;
-        builder.when(gate).assert_eq(s0_next, s4);
-    }
-    {
-        let gate = builder.is_transition() * is_dup5;
-        builder.when(gate).assert_eq(s0_next, s5);
-    }
-    {
-        let gate = builder.is_transition() * is_dup6;
-        builder.when(gate).assert_eq(s0_next, s6);
-    }
-    {
-        let gate = builder.is_transition() * is_dup7;
-        builder.when(gate).assert_eq(s0_next, s7);
-    }
-    {
-        let gate = builder.is_transition() * is_dup9;
-        builder.when(gate).assert_eq(s0_next, s9);
-    }
-    {
-        let gate = builder.is_transition() * is_dup11;
-        builder.when(gate).assert_eq(s0_next, s11);
-    }
-    {
-        let gate = builder.is_transition() * is_dup13;
-        builder.when(gate).assert_eq(s0_next, s13);
-    }
-    {
-        let gate = builder.is_transition() * is_dup15;
-        builder.when(gate).assert_eq(s0_next, s15);
-    }
+    builder.when(is_dup).assert_eq(s0_next, s0);
+    builder.when(is_dup1).assert_eq(s0_next, s1);
+    builder.when(is_dup2).assert_eq(s0_next, s2);
+    builder.when(is_dup3).assert_eq(s0_next, s3);
+    builder.when(is_dup4).assert_eq(s0_next, s4);
+    builder.when(is_dup5).assert_eq(s0_next, s5);
+    builder.when(is_dup6).assert_eq(s0_next, s6);
+    builder.when(is_dup7).assert_eq(s0_next, s7);
+    builder.when(is_dup9).assert_eq(s0_next, s9);
+    builder.when(is_dup11).assert_eq(s0_next, s11);
+    builder.when(is_dup13).assert_eq(s0_next, s13);
+    builder.when(is_dup15).assert_eq(s0_next, s15);
 
     // CLK
-    {
-        let clk = local.system.clk;
-        let gate = builder.is_transition() * is_clk;
-        builder.when(gate).assert_eq(s0_next, clk);
-    }
+    let clk = local.system.clk;
+    builder.when(is_clk).assert_eq(s0_next, clk);
 
-    // SWAP
+    // SWAP: exchange top two stack elements.
     {
-        let gate = builder.is_transition() * is_swap;
-        let builder = &mut builder.when(gate);
+        let builder = &mut builder.when(is_swap);
         builder.assert_eq(s0_next, s1);
         builder.assert_eq(s1_next, s0);
     }
 
     // MOVUP
-    {
-        let gate = builder.is_transition() * is_movup2;
-        builder.when(gate).assert_eq(s0_next, s2);
-    }
-    {
-        let gate = builder.is_transition() * is_movup3;
-        builder.when(gate).assert_eq(s0_next, s3);
-    }
-    {
-        let gate = builder.is_transition() * is_movup4;
-        builder.when(gate).assert_eq(s0_next, s4);
-    }
-    {
-        let gate = builder.is_transition() * is_movup5;
-        builder.when(gate).assert_eq(s0_next, s5);
-    }
-    {
-        let gate = builder.is_transition() * is_movup6;
-        builder.when(gate).assert_eq(s0_next, s6);
-    }
-    {
-        let gate = builder.is_transition() * is_movup7;
-        builder.when(gate).assert_eq(s0_next, s7);
-    }
-    {
-        let gate = builder.is_transition() * is_movup8;
-        builder.when(gate).assert_eq(s0_next, s8);
-    }
+    builder.when(is_movup2).assert_eq(s0_next, s2);
+    builder.when(is_movup3).assert_eq(s0_next, s3);
+    builder.when(is_movup4).assert_eq(s0_next, s4);
+    builder.when(is_movup5).assert_eq(s0_next, s5);
+    builder.when(is_movup6).assert_eq(s0_next, s6);
+    builder.when(is_movup7).assert_eq(s0_next, s7);
+    builder.when(is_movup8).assert_eq(s0_next, s8);
 
     // MOVDN
-    {
-        let gate = builder.is_transition() * is_movdn2;
-        builder.when(gate).assert_eq(s2_next, s0);
-    }
-    {
-        let gate = builder.is_transition() * is_movdn3;
-        builder.when(gate).assert_eq(s3_next, s0);
-    }
-    {
-        let gate = builder.is_transition() * is_movdn4;
-        builder.when(gate).assert_eq(s4_next, s0);
-    }
-    {
-        let gate = builder.is_transition() * is_movdn5;
-        builder.when(gate).assert_eq(s5_next, s0);
-    }
-    {
-        let gate = builder.is_transition() * is_movdn6;
-        builder.when(gate).assert_eq(s6_next, s0);
-    }
-    {
-        let gate = builder.is_transition() * is_movdn7;
-        builder.when(gate).assert_eq(s7_next, s0);
-    }
-    {
-        let gate = builder.is_transition() * is_movdn8;
-        builder.when(gate).assert_eq(s8_next, s0);
-    }
+    builder.when(is_movdn2).assert_eq(s2_next, s0);
+    builder.when(is_movdn3).assert_eq(s3_next, s0);
+    builder.when(is_movdn4).assert_eq(s4_next, s0);
+    builder.when(is_movdn5).assert_eq(s5_next, s0);
+    builder.when(is_movdn6).assert_eq(s6_next, s0);
+    builder.when(is_movdn7).assert_eq(s7_next, s0);
+    builder.when(is_movdn8).assert_eq(s8_next, s0);
 
-    // SWAPW
+    // SWAPW: exchange first and second words.
     {
-        let gate = builder.is_transition() * is_swapw;
-        let builder = &mut builder.when(gate);
+        let builder = &mut builder.when(is_swapw);
         builder.assert_eq(s0_next, s4);
         builder.assert_eq(s1_next, s5);
         builder.assert_eq(s2_next, s6);
@@ -255,10 +172,9 @@ pub fn enforce_main<AB>(
         builder.assert_eq(s7_next, s3);
     }
 
-    // SWAPW2
+    // SWAPW2: exchange first and third words.
     {
-        let gate = builder.is_transition() * is_swapw2;
-        let builder = &mut builder.when(gate);
+        let builder = &mut builder.when(is_swapw2);
         builder.assert_eq(s0_next, s8);
         builder.assert_eq(s1_next, s9);
         builder.assert_eq(s2_next, s10);
@@ -269,10 +185,9 @@ pub fn enforce_main<AB>(
         builder.assert_eq(s11_next, s3);
     }
 
-    // SWAPW3
+    // SWAPW3: exchange first and fourth words.
     {
-        let gate = builder.is_transition() * is_swapw3;
-        let builder = &mut builder.when(gate);
+        let builder = &mut builder.when(is_swapw3);
         builder.assert_eq(s0_next, s12);
         builder.assert_eq(s1_next, s13);
         builder.assert_eq(s2_next, s14);
@@ -283,10 +198,9 @@ pub fn enforce_main<AB>(
         builder.assert_eq(s15_next, s3);
     }
 
-    // SWAPDW
+    // SWAPDW: exchange first and second double-words.
     {
-        let gate = builder.is_transition() * is_swapdw;
-        let builder = &mut builder.when(gate);
+        let builder = &mut builder.when(is_swapdw);
         builder.assert_eq(s0_next, s8);
         builder.assert_eq(s1_next, s9);
         builder.assert_eq(s2_next, s10);
@@ -314,8 +228,7 @@ pub fn enforce_main<AB>(
 
     // Conditional swap equations for the top two stack items.
     {
-        let gate = builder.is_transition() * is_cswap;
-        let builder = &mut builder.when(gate);
+        let builder = &mut builder.when(is_cswap);
         builder.assert_eq(s0_next, cswap_c * s2.into() + cswap_c_inv.clone() * s1.into());
         builder.assert_eq(s1_next, cswap_c * s1.into() + cswap_c_inv.clone() * s2.into());
     }
@@ -325,8 +238,7 @@ pub fn enforce_main<AB>(
 
     // Conditional swap equations for the top two words.
     {
-        let gate = builder.is_transition() * is_cswapw;
-        let builder = &mut builder.when(gate);
+        let builder = &mut builder.when(is_cswapw);
         builder.assert_eq(s0_next, cswap_c * s5.into() + cswap_c_inv.clone() * s1.into());
         builder.assert_eq(s1_next, cswap_c * s6.into() + cswap_c_inv.clone() * s2.into());
         builder.assert_eq(s2_next, cswap_c * s7.into() + cswap_c_inv.clone() * s3.into());
@@ -334,7 +246,7 @@ pub fn enforce_main<AB>(
         builder.assert_eq(s4_next, cswap_c * s1.into() + cswap_c_inv.clone() * s5.into());
         builder.assert_eq(s5_next, cswap_c * s2.into() + cswap_c_inv.clone() * s6.into());
         builder.assert_eq(s6_next, cswap_c * s3.into() + cswap_c_inv.clone() * s7.into());
-        builder.assert_eq(s7_next, cswap_c * s4.into() + cswap_c_inv.clone() * s8.into());
+        builder.assert_eq(s7_next, cswap_c * s4.into() + cswap_c_inv * s8.into());
     }
 
     // ASSERT: top element must be 1 (shift handled by stack general).
@@ -342,8 +254,7 @@ pub fn enforce_main<AB>(
 
     // CALLER: load fn_hash into the top 4 stack elements.
     {
-        let gate = builder.is_transition() * is_caller;
-        let builder = &mut builder.when(gate);
+        let builder = &mut builder.when(is_caller);
         builder.assert_eq(s0_next, fn_hash_0);
         builder.assert_eq(s1_next, fn_hash_1);
         builder.assert_eq(s2_next, fn_hash_2);
@@ -351,8 +262,5 @@ pub fn enforce_main<AB>(
     }
 
     // SDEPTH: push current stack depth to the top.
-    {
-        let gate = builder.is_transition() * is_sdepth;
-        builder.when(gate).assert_eq(s0_next, stack_depth);
-    }
+    builder.when(is_sdepth).assert_eq(s0_next, stack_depth);
 }

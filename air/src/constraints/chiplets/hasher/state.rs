@@ -16,6 +16,7 @@
 //! - S-box: x^7
 
 use miden_core::{chiplets::hasher::Hasher, field::PrimeCharacteristicRing};
+use miden_crypto::stark::air::AirBuilder;
 
 use super::periodic::{
     P_ARK_EXT_START, P_ARK_INT, P_CYCLE_ROW_0, P_IS_EXTERNAL, P_IS_INTERNAL, STATE_WIDTH,
@@ -78,21 +79,29 @@ pub fn enforce_permutation_steps<AB>(
     // Enforce step constraints
     // -------------------------------------------------------------------------
 
-    // Use combined gates to share `hasher_flag * step_type` across all lanes.
-    let gate_init = hasher_flag.clone() * is_init_linear;
-    builder.assert_zeros(core::array::from_fn::<_, STATE_WIDTH, _>(|i| {
-        gate_init.clone() * (h_next[i].clone() - expected_init[i].clone())
-    }));
+    let builder = &mut builder.when(hasher_flag);
 
-    let gate_ext = hasher_flag.clone() * is_external;
-    builder.assert_zeros(core::array::from_fn::<_, STATE_WIDTH, _>(|i| {
-        gate_ext.clone() * (h_next[i].clone() - expected_ext[i].clone())
-    }));
-
-    let gate_int = hasher_flag * is_internal;
-    builder.assert_zeros(core::array::from_fn::<_, STATE_WIDTH, _>(|i| {
-        gate_int.clone() * (h_next[i].clone() - expected_int[i].clone())
-    }));
+    // Init linear step (row 0): h' = M_E(h).
+    {
+        let builder = &mut builder.when(is_init_linear);
+        for i in 0..STATE_WIDTH {
+            builder.assert_eq(h_next[i].clone(), expected_init[i].clone());
+        }
+    }
+    // External round step: h' = M_E(S-box(h + ark_ext)).
+    {
+        let builder = &mut builder.when(is_external);
+        for i in 0..STATE_WIDTH {
+            builder.assert_eq(h_next[i].clone(), expected_ext[i].clone());
+        }
+    }
+    // Internal round step: h' = M_I(h with lane0 substituted).
+    {
+        let builder = &mut builder.when(is_internal);
+        for i in 0..STATE_WIDTH {
+            builder.assert_eq(h_next[i].clone(), expected_int[i].clone());
+        }
+    }
 }
 
 /// Enforces ABP capacity preservation constraint.
@@ -108,11 +117,11 @@ pub fn enforce_abp_capacity_preservation<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    // Use a combined gate to share `hasher_flag * f_abp` across all 4 lanes.
-    let gate = hasher_flag * f_abp;
-    builder.assert_zeros(core::array::from_fn::<_, 4, _>(|i| {
-        gate.clone() * (h_cap_next[i].clone() - h_cap[i].clone())
-    }));
+    // ABP capacity must be preserved across permutation.
+    let builder = &mut builder.when(hasher_flag * f_abp);
+    for i in 0..4 {
+        builder.assert_eq(h_cap_next[i].clone(), h_cap[i].clone());
+    }
 }
 
 // =============================================================================

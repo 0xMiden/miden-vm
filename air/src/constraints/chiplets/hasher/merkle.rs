@@ -19,6 +19,7 @@
 //! | MUA  | Merkle Update Absorb | Absorb next sibling (new path) |
 
 use miden_core::field::PrimeCharacteristicRing;
+use miden_crypto::stark::air::AirBuilder;
 
 use super::HasherFlags;
 use crate::{MidenAirBuilder, constraints::utils::BoolNot, trace::HasherCols};
@@ -50,12 +51,14 @@ pub(super) fn enforce_node_index_constraints<AB>(
     let node_index: AB::Expr = cols.node_index.into();
     let node_index_next: AB::Expr = cols_next.node_index.into();
 
+    let builder = &mut builder.when(hasher_flag);
+
     // -------------------------------------------------------------------------
     // Output Index Constraint
     // -------------------------------------------------------------------------
 
     // Constraint 1: Index must be 0 on output rows.
-    builder.assert_zero(hasher_flag.clone() * flags.f_out.clone() * node_index.clone());
+    builder.when(flags.f_out.clone()).assert_zero(node_index.clone());
 
     // -------------------------------------------------------------------------
     // Index Shift Constraint
@@ -65,22 +68,19 @@ pub(super) fn enforce_node_index_constraints<AB>(
     let f_out = flags.f_out.clone();
 
     // Direction bit: b = i - 2*i'
-    // This is the bit discarded when shifting index right by 1.
     let b = node_index.clone() - node_index_next.clone().double();
 
     // Constraint 2: b must be binary when shifting (b^2 - b = 0)
-    let gate = hasher_flag.clone() * f_shift.clone();
-    builder.assert_zero(gate * (b.square() - b.clone()));
+    builder.when(f_shift.clone()).assert_bool(b.clone());
 
     // -------------------------------------------------------------------------
     // Index Stability Constraint
     // -------------------------------------------------------------------------
 
     // Constraint 3: Index unchanged when not shifting or outputting
-    // keep = 1 - f_out - f_shift
-    let keep = AB::Expr::ONE - f_out - f_shift;
-    let gate = hasher_flag.clone() * keep;
-    builder.assert_zero(gate * (node_index_next.clone() - node_index.clone()));
+    // f_out and f_shift are mutually exclusive, so their sum is binary.
+    let keep = (f_out + f_shift).not();
+    builder.when(keep).assert_eq(node_index_next, node_index);
 }
 
 /// Enforces state constraints for Merkle absorb operations (MPA/MVA/MUA on row 31).
@@ -115,32 +115,34 @@ pub(super) fn enforce_merkle_absorb_state<AB>(
     let node_index_next: AB::Expr = cols_next.node_index.into();
     let b = node_index - node_index_next.double();
 
+    // All constraints in this function are active during Merkle absorb.
+    let absorb_builder = &mut builder.when(hasher_flag * f_absorb);
+
     // -------------------------------------------------------------------------
     // Capacity Reset Constraint
     // -------------------------------------------------------------------------
 
-    // Constraint 1: Capacity reset to zero (batched).
-    // Use a combined gate to share `hasher_flag * f_absorb` across all 4 lanes.
-    let gate_absorb = hasher_flag.clone() * f_absorb.clone();
-    builder.assert_zeros(core::array::from_fn::<_, 4, _>(|i| {
-        gate_absorb.clone() * cap_next[i].clone()
-    }));
+    // Capacity reset to zero during absorb.
+    for cap in &cap_next {
+        absorb_builder.assert_zero(cap.clone());
+    }
 
     // -------------------------------------------------------------------------
     // Digest Placement Constraints
     // -------------------------------------------------------------------------
 
-    // Constraint 2: If b=0, digest goes to rate0 (h'[0..4] = h[0..4])
-    let f_b0 = f_absorb.clone() * b.not();
-    let gate_b0 = hasher_flag.clone() * f_b0;
-    builder.assert_zeros(core::array::from_fn::<_, 4, _>(|i| {
-        gate_b0.clone() * (rate0_next[i].clone() - digest[i].clone())
-    }));
-
-    // Constraint 3: If b=1, digest goes to rate1 (h'[4..8] = h[0..4])
-    let f_b1 = f_absorb * b;
-    let gate_b1 = hasher_flag * f_b1;
-    builder.assert_zeros(core::array::from_fn::<_, 4, _>(|i| {
-        gate_b1.clone() * (rate1_next[i].clone() - digest[i].clone())
-    }));
+    // b=0: digest goes to rate0 (h'[0..4] = h[0..4]).
+    {
+        let builder = &mut absorb_builder.when(b.not());
+        for i in 0..4 {
+            builder.assert_eq(rate0_next[i].clone(), digest[i].clone());
+        }
+    }
+    // b=1: digest goes to rate1 (h'[4..8] = h[0..4]).
+    {
+        let builder = &mut absorb_builder.when(b);
+        for i in 0..4 {
+            builder.assert_eq(rate1_next[i].clone(), digest[i].clone());
+        }
+    }
 }

@@ -19,7 +19,7 @@
 //! | MVA       | 1  | 1  | 0  | Merkle verify absorb |
 //! | MUA       | 1  | 1  | 1  | Merkle update absorb |
 
-use miden_core::field::PrimeCharacteristicRing;
+use miden_crypto::stark::air::AirBuilder;
 
 use super::HasherFlags;
 use crate::{MidenAirBuilder, constraints::utils::BoolNot, trace::HasherCols};
@@ -56,28 +56,31 @@ pub(super) fn enforce_selector_consistency<AB>(
     let s1_next: AB::Expr = cols_next.selectors[1].into();
     let s2_next: AB::Expr = cols_next.selectors[2].into();
 
+    let builder = &mut builder.when(hasher_flag);
+
     // -------------------------------------------------------------------------
     // Constraint 1: Selector stability
     // -------------------------------------------------------------------------
     // s[1] and s[2] unchanged unless f_out or f_out_next.
     // Constraint: (1 - f_out - f_out_next) * (s[i]' - s[i]) = 0
     // Note: f_out and f_out_next are mutually exclusive (row30 vs row31), so no overlap.
-    let stability_gate = AB::Expr::ONE - flags.f_out.clone() - flags.f_out_next.clone();
+    // f_out and f_out_next are mutually exclusive (row30 vs row31), so their sum is binary.
+    let stability_gate = (flags.f_out.clone() + flags.f_out_next.clone()).not();
 
-    // Use a combined gate to share `hasher_flag * stability_gate` across both stability
-    // constraints.
-    let gate = hasher_flag.clone() * stability_gate;
-    builder.assert_zeros([gate.clone() * (s1_next - s1.clone()), gate * (s2_next - s2)]);
+    // Selector stability: s1, s2 unchanged outside output boundaries.
+    {
+        let builder = &mut builder.when(stability_gate);
+        builder.assert_eq(s1_next, s1.clone());
+        builder.assert_eq(s2_next, s2);
+    }
 
-    // Continuation constraint: hasher_flag * flag_cont * s0' = 0.
-    // (Single constraint, so no batching benefit beyond using `.when(gate)`.)
-    let gate = hasher_flag.clone() * flags.f_continuation();
-    builder.assert_zero(gate * s0_next);
+    // Continuation constraint: s0' = 0 after absorb operations.
+    builder.when(flags.f_continuation()).assert_zero(s0_next);
 
     // -------------------------------------------------------------------------
     // Constraint 3: Invalid selector combinations rejection
     // -------------------------------------------------------------------------
     // On row31, if s0 = 0 then s1 must be 0. This prevents (0,1,*) combinations.
     // Constraint: row31 * (1 - s0) * s1 = 0
-    builder.assert_zero(hasher_flag * flags.cycle_row_31.clone() * s0.not() * s1);
+    builder.when(flags.cycle_row_31.clone()).when(s0.not()).assert_zero(s1);
 }
