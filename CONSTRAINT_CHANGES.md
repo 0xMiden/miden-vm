@@ -109,3 +109,20 @@ Identical assertion expressions; fingerprints changed because scoped builder gat
 </details>
 
 ---
+## 15. refactor: enforce all chiplet selectors are 1 in last row
+
+**5 added** | 465 unchanged
+
+5 new last-row constraints enforce chiplet selectors s0–s4 equal 1 at the final trace row (`builder.when_last_row().assert_one(sel[i])` for i in 0..5). Source-extraction artifact: 3 of 5 expressions display the `let builder = &mut builder.when_last_row()` binding instead of the actual `builder.assert_one(sel[i])` call; all 5 fingerprints correspond to genuine `assert_one` assertions on distinct selector columns.
+
+**Added:**
+
+| # | Location | Expression |
+|---|----------|------------|
+| 1 | `chiplets/selectors.rs:147` | `let mut last = builder.when_last_row();` |
+| 2 | `chiplets/selectors.rs:148` | `let mut last = builder.when_last_row();` |
+| 3 | `chiplets/selectors.rs:149` | `let mut last = builder.when_last_row();` |
+| 4 | `chiplets/selectors.rs:150` | `last.assert_one(local.chiplets[4]);` |
+| 5 | `chiplets/selectors.rs:151` | `last.assert_one(local.chiplets[4]);` |
+
+---

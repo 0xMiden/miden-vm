@@ -28,6 +28,13 @@
 //!
 //! 1. **Binary constraints**: Each selector is binary when it could be active
 //! 2. **Stability constraints**: Once a selector becomes 1, it stays 1 (no 1→0 transitions)
+//! 3. **Last-row invariant**: All selectors must be 1 in the last row
+//!
+//! The last-row invariant (s0 = s1 = s2 = s3 = s4 = 1 on the final row) guarantees
+//! that every chiplet's `is_active` flag is zero on the last row. Combined with the
+//! `(1 - s_n')` factor in the precomputed flags, this makes chiplet-gated constraints
+//! automatically vanish on the last row without needing explicit `when_transition()`
+//! guards.
 
 use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::AirBuilder;
@@ -126,6 +133,22 @@ where
         transition.when(s012.clone()).assert_eq(next.chiplets[2], local.chiplets[2]);
         transition.when(s0123.clone()).assert_eq(next.chiplets[3], local.chiplets[3]);
         transition.when(s01234.clone()).assert_eq(next.chiplets[4], local.chiplets[4]);
+    }
+
+    // ==========================================================================
+    // LAST-ROW INVARIANT
+    // ==========================================================================
+    // All selectors must be 1 in the last row. This ensures every chiplet's
+    // is_active flag is zero on the last row, making chiplet-gated constraints
+    // vanish without explicit when_transition() guards.
+
+    {
+        let mut last = builder.when_last_row();
+        last.assert_one(local.chiplets[0]);
+        last.assert_one(local.chiplets[1]);
+        last.assert_one(local.chiplets[2]);
+        last.assert_one(local.chiplets[3]);
+        last.assert_one(local.chiplets[4]);
     }
 
     // ==========================================================================
