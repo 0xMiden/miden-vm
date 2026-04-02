@@ -26,7 +26,6 @@ use crate::{
         Challenges,
         bus_types::STACK_OVERFLOW_TABLE,
         decoder::HASHER_STATE_RANGE,
-        stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX},
     },
 };
 
@@ -68,13 +67,13 @@ pub fn enforce_bus<AB>(
     // Current row values
     let clk = local.system.clk;
     let s15 = local.stack[15];
-    let b0 = local.stack[B0_COL_IDX];
-    let b1 = local.stack[B1_COL_IDX];
-    let h0 = local.stack[H0_COL_IDX];
+    let b0 = local.stack.b0;
+    let b1 = local.stack.b1;
+    let h0 = local.stack.h0;
 
     // Next row values (needed for removal)
     let s15_next = next.stack[15];
-    let b1_next = next.stack[B1_COL_IDX];
+    let b1_next = next.stack.b1;
 
     // Hasher state element 5, used by DYNCALL to store the new overflow table pointer.
     let hasher_state_5 = local.decoder[HASHER_STATE_RANGE.start + 5];

@@ -27,10 +27,7 @@ use miden_core::{field::PrimeCharacteristicRing, operations::opcodes};
 use crate::trace::decoder::NUM_OP_BITS;
 use crate::{
     constraints::utils::BoolNot,
-    trace::{
-        decoder::{IS_LOOP_FLAG_COL_IDX, OP_BITS_EXTRA_COLS_RANGE, OP_BITS_RANGE},
-        stack::{B0_COL_IDX, H0_COL_IDX},
-    },
+    trace::decoder::{IS_LOOP_FLAG_COL_IDX, OP_BITS_EXTRA_COLS_RANGE, OP_BITS_RANGE},
 };
 
 // CONSTANTS
@@ -140,12 +137,12 @@ where
 
     #[inline]
     fn overflow_register(&self) -> T {
-        self.stack[H0_COL_IDX].clone()
+        self.stack.h0.clone()
     }
 
     #[inline]
     fn stack_depth(&self) -> T {
-        self.stack[B0_COL_IDX].clone()
+        self.stack.b0.clone()
     }
 
     #[inline]
@@ -186,12 +183,12 @@ where
 
     #[inline]
     fn overflow_register(&self) -> E {
-        self.row.stack[H0_COL_IDX].clone().into()
+        self.row.stack.h0.clone().into()
     }
 
     #[inline]
     fn stack_depth(&self) -> E {
-        self.row.stack[B0_COL_IDX].clone().into()
+        self.row.stack.b0.clone().into()
     }
 
     #[inline]

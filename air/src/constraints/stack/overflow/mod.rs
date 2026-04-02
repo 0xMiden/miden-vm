@@ -32,10 +32,7 @@ use miden_crypto::stark::air::AirBuilder;
 use crate::{
     MainTraceRow, MidenAirBuilder,
     constraints::{constants::*, op_flags::OpFlags, utils::BoolNot},
-    trace::{
-        decoder::{IS_CALL_FLAG_COL_IDX, IS_SYSCALL_FLAG_COL_IDX},
-        stack::{B0_COL_IDX, B1_COL_IDX},
-    },
+    trace::decoder::{IS_CALL_FLAG_COL_IDX, IS_SYSCALL_FLAG_COL_IDX},
 };
 
 // ENTRY POINTS
@@ -57,10 +54,10 @@ pub fn enforce_main<AB>(
     AB: MidenAirBuilder,
 {
     // Boundary constraints: stack depth and overflow pointer must start/end clean.
-    builder.when_first_row().assert_eq(local.stack[B0_COL_IDX], F_16);
-    builder.when_last_row().assert_eq(local.stack[B0_COL_IDX], F_16);
-    builder.when_first_row().assert_zero(local.stack[B1_COL_IDX]);
-    builder.when_last_row().assert_zero(local.stack[B1_COL_IDX]);
+    builder.when_first_row().assert_eq(local.stack.b0, F_16);
+    builder.when_last_row().assert_eq(local.stack.b0, F_16);
+    builder.when_first_row().assert_zero(local.stack.b1);
+    builder.when_last_row().assert_zero(local.stack.b1);
 
     // Transition constraints: depth bookkeeping, overflow flag, and pointer updates.
     enforce_stack_depth_constraints(builder, local, next, op_flags);
@@ -68,7 +65,7 @@ pub fn enforce_main<AB>(
     // Overflow flag: (1 - overflow) * (depth - 16) = 0
     // When depth > 16, overflow must be 1; when depth = 16, satisfied for any h0.
     {
-        let depth = local.stack[B0_COL_IDX];
+        let depth = local.stack.b0;
         builder.assert_zero(op_flags.overflow().not() * (AB::Expr::from(depth) - F_16));
     }
 
@@ -95,8 +92,8 @@ fn enforce_stack_depth_constraints<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    let depth = local.stack[B0_COL_IDX];
-    let depth_next = next.stack[B0_COL_IDX];
+    let depth = local.stack.b0;
+    let depth_next = next.stack.b0;
 
     // Flag for CALL, DYNCALL, or SYSCALL operations
     let call_or_dyncall_or_syscall = op_flags.call() + op_flags.dyncall() + op_flags.syscall();
@@ -161,7 +158,7 @@ fn enforce_overflow_index_constraints<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    let overflow_addr_next = next.stack[B1_COL_IDX];
+    let overflow_addr_next = next.stack.b1;
     let clk = local.system.clk;
     let last_stack_item_next = next.stack[15];
 
