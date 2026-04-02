@@ -143,17 +143,23 @@ fn run_masp_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
 
     let program_hash: [u8; 32] = program.hash().into();
 
+    let exec_options = ExecutionOptions::new(
+        Some(params.max_cycles),
+        params.expected_cycles,
+        ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
+        params.trace,
+        !params.release,
+    )
+    .map_err(|err| Report::msg(format!("{err}")))?;
+
     let processor = FastProcessor::new(stack_inputs)
         .with_advice(advice_inputs)
-        .with_debugging(!params.release)
-        .with_tracing(!params.release);
+        .with_options(exec_options);
 
-    let (execution_output, trace_generation_context) = processor
-        .execute_for_trace_sync(&program, &mut host)
+    let trace_inputs = processor
+        .execute_trace_inputs_sync(&program, &mut host)
         .wrap_err("Failed to execute program")?;
-
-    let trace = build_trace(execution_output, trace_generation_context, program.to_info())
-        .wrap_err("Failed to build trace")?;
+    let trace = build_trace(trace_inputs).wrap_err("Failed to build trace")?;
 
     Ok((trace, program_hash))
 }
@@ -204,17 +210,23 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
 
     let program_hash: [u8; 32] = program.hash().into();
 
+    let exec_options = ExecutionOptions::new(
+        Some(params.max_cycles),
+        params.expected_cycles,
+        ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
+        params.trace,
+        !params.release,
+    )
+    .map_err(|err| Report::msg(format!("{err}")))?;
+
     let processor = FastProcessor::new(stack_inputs)
         .with_advice(advice_inputs)
-        .with_debugging(!params.release)
-        .with_tracing(!params.release);
+        .with_options(exec_options);
 
-    let (execution_output, trace_generation_context) = processor
-        .execute_for_trace_sync(&program, &mut host)
+    let trace_inputs = processor
+        .execute_trace_inputs_sync(&program, &mut host)
         .wrap_err("Failed to execute program")?;
-
-    let trace = build_trace(execution_output, trace_generation_context, program.to_info())
-        .wrap_err("Failed to build trace")?;
+    let trace = build_trace(trace_inputs).wrap_err("Failed to build trace")?;
 
     Ok((trace, program_hash))
 }

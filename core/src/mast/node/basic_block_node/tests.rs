@@ -329,6 +329,25 @@ fn build_group_chunks(batches: &[OpBatch]) -> impl Iterator<Item = &[Operation]>
     batches.iter().flat_map(|opbatch| opbatch.group_chunks())
 }
 
+fn basic_block_from_batch(batch: OpBatch) -> BasicBlockNode {
+    let digest = hasher::hash_elements(batch.groups());
+    BasicBlockNodeBuilder::from_op_batches(vec![batch], Vec::new(), digest)
+        .build()
+        .expect("basic block should build")
+}
+
+fn basic_block_from_batches(op_batches: Vec<OpBatch>) -> BasicBlockNode {
+    BasicBlockNode {
+        op_batches,
+        digest: Word::default(),
+        decorators: DecoratorStore::Owned {
+            decorators: DecoratorList::new(),
+            before_enter: Vec::new(),
+            after_exit: Vec::new(),
+        },
+    }
+}
+
 // PROPTESTS FOR BATCH CREATION INVARIANTS
 // ================================================================================================
 
@@ -349,6 +368,12 @@ proptest! {
         for batch in &batches {
             assert!(batch.num_groups <= BATCH_SIZE);
             assert!(batch.num_groups.is_power_of_two());
+        }
+        // All non-final batches must be full.
+        for (idx, batch) in batches.iter().enumerate() {
+            if idx + 1 < batches.len() {
+                assert_eq!(batch.num_groups, BATCH_SIZE);
+            }
         }
 
         // The total number of operations should be preserved, modulo padding
@@ -409,6 +434,163 @@ proptest! {
             }
         }
     }
+}
+
+#[test]
+fn test_validate_immediate_commitment_rejects_opcode_group_mismatch() {
+    let ops = vec![Operation::Add];
+    let indptr = [0usize, 1, 1, 1, 1, 1, 1, 1, 1];
+    let mut groups = [ZERO; BATCH_SIZE];
+    groups[0] = ZERO;
+    let batch = OpBatch::new_from_parts(ops, indptr, [false; BATCH_SIZE], groups, 1);
+
+    let node = basic_block_from_batch(batch);
+    let err = node.validate_batch_invariants().unwrap_err();
+    assert!(err.contains("committed opcode group"));
+}
+
+#[test]
+fn test_validate_immediate_commitment_rejects_immediate_value_mismatch() {
+    let imm = Felt::new(1);
+    let ops = vec![Operation::Push(imm), Operation::Add];
+    let indptr = [0usize, 2, 2, 2, 2, 2, 2, 2, 2];
+    let mut groups = [ZERO; BATCH_SIZE];
+    groups[0] = build_group(&ops);
+    groups[1] = Felt::new(2);
+    let batch = OpBatch::new_from_parts(ops, indptr, [false; BATCH_SIZE], groups, 2);
+
+    let node = basic_block_from_batch(batch);
+    let err = node.validate_batch_invariants().unwrap_err();
+    assert!(err.contains("push immediate value mismatch"));
+}
+
+#[test]
+fn test_validate_immediate_commitment_rejects_overlap_with_op_group() {
+    let ops = vec![Operation::Push(ONE), Operation::Add, Operation::Add];
+    let indptr = [0usize, 2, 3, 3, 3, 3, 3, 3, 3];
+    let mut groups = [ZERO; BATCH_SIZE];
+    groups[0] = build_group(&ops[..2]);
+    groups[1] = build_group(&ops[2..3]);
+    let batch = OpBatch::new_from_parts(ops, indptr, [false; BATCH_SIZE], groups, 2);
+
+    let node = basic_block_from_batch(batch);
+    let err = node.validate_batch_invariants().unwrap_err();
+    assert!(err.contains("overlaps operation group"));
+}
+
+#[test]
+fn test_validate_immediate_commitment_rejects_nonzero_empty_group() {
+    let ops = vec![Operation::Add];
+    let indptr = [0usize, 1, 1, 1, 1, 1, 1, 1, 1];
+    let mut groups = [ZERO; BATCH_SIZE];
+    groups[0] = build_group(&ops);
+    groups[1] = Felt::new(9);
+    let batch = OpBatch::new_from_parts(ops, indptr, [false; BATCH_SIZE], groups, 2);
+
+    let node = basic_block_from_batch(batch);
+    let err = node.validate_batch_invariants().unwrap_err();
+    assert!(err.contains("empty group must be zero"));
+}
+
+#[test]
+fn validate_batch_invariants_rejects_padded_empty_group() {
+    let ops = vec![Operation::Add];
+    let indptr = [0, 0, 1, 1, 1, 1, 1, 1, 1];
+    let mut padding = [false; BATCH_SIZE];
+    padding[0] = true;
+    let groups = [ZERO; BATCH_SIZE];
+    let batch = OpBatch::new_from_parts(ops, indptr, padding, groups, 2);
+
+    let block = basic_block_from_batches(vec![batch]);
+    let result = block.validate_batch_invariants();
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn validate_batch_invariants_rejects_padded_group_without_noop() {
+    let ops = vec![Operation::Add];
+    let indptr = [0, 1, 1, 1, 1, 1, 1, 1, 1];
+    let mut padding = [false; BATCH_SIZE];
+    padding[0] = true;
+    let groups = [ZERO; BATCH_SIZE];
+    let batch = OpBatch::new_from_parts(ops, indptr, padding, groups, 1);
+
+    let block = basic_block_from_batches(vec![batch]);
+    let result = block.validate_batch_invariants();
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn validate_batch_invariants_accepts_padded_group_with_noop() {
+    let ops = vec![Operation::Add, Operation::Noop];
+    let indptr = [0, 2, 2, 2, 2, 2, 2, 2, 2];
+    let mut padding = [false; BATCH_SIZE];
+    padding[0] = true;
+    let mut groups = [ZERO; BATCH_SIZE];
+    groups[0] = build_group(&ops);
+    let batch = OpBatch::new_from_parts(ops, indptr, padding, groups, 1);
+
+    let block = basic_block_from_batches(vec![batch]);
+    let result = block.validate_batch_invariants();
+
+    assert!(result.is_ok());
+}
+
+#[test]
+fn validate_batch_invariants_rejects_malformed_indptr_without_panicking() {
+    let ops = vec![Operation::Add];
+    let mut indptr = [0usize; BATCH_SIZE + 1];
+    indptr[1] = 2;
+    let batch = OpBatch {
+        ops,
+        indptr,
+        padding: [false; BATCH_SIZE],
+        groups: [ZERO; BATCH_SIZE],
+        num_groups: 1,
+    };
+
+    let block = basic_block_from_batches(vec![batch]);
+    let result = block.validate_batch_invariants();
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn validate_padding_semantics_rejects_malformed_metadata_without_panicking() {
+    let mut indptr = [0usize; BATCH_SIZE + 1];
+    indptr[1] = 2;
+    let mut padding = [false; BATCH_SIZE];
+    padding[0] = true;
+    let batch = OpBatch {
+        ops: vec![Operation::Add],
+        indptr,
+        padding,
+        groups: [ZERO; BATCH_SIZE],
+        num_groups: 1,
+    };
+
+    let result = batch.validate_padding_semantics();
+
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("invalid group bounds"));
+}
+
+#[test]
+fn validate_padding_semantics_rejects_num_groups_overflow_without_panicking() {
+    let batch = OpBatch {
+        ops: vec![Operation::Noop],
+        indptr: [0usize; BATCH_SIZE + 1],
+        padding: [false; BATCH_SIZE],
+        groups: [ZERO; BATCH_SIZE],
+        num_groups: BATCH_SIZE + 1,
+    };
+
+    let result = batch.validate_padding_semantics();
+
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("exceeds BATCH_SIZE"));
 }
 
 fn decorator_strategy(

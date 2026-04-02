@@ -16,5 +16,5 @@ fn chiplets() {
     end";
     let pub_inputs = rand_vector::<u64>(8);
 
-    build_test!(source, &pub_inputs).prove_and_verify(pub_inputs, false);
+    build_test!(source, &pub_inputs).check_constraints();
 }

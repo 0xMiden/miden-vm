@@ -357,10 +357,11 @@ fn test_frie2f4() {
     // --- build stack inputs ---------------------------------------------
     // FastProcessor::new expects inputs in natural order: first element goes to top.
     // After Push(42), the stack layout becomes:
-    //   [v0, v1, v2, v3, v4, v5, v6, v7, f_pos, d_seg, poe, pe1, pe0, a1, a0, cptr, ...]
-    //    ^0   1   2   3   4   5   6   7    8      9    10   11   12  13  14   15
+    //   [v0, v1, v2, v3, v4, v5, v6, v7, f_pos, p, poe, pe0, pe1, a0, a1, cptr, ...]
+    //    ^0   1   2   3   4   5   6   7    8     9  10   11   12   13  14   15
     //
-    // With d_seg=2, query_values[2] = (v4, v5) must equal prev_value = (pe0, pe1).
+    // p is the bit-reversed tree index; the instruction computes d_seg = p & 3.
+    // With p=38 (d_seg=2, f_pos=9), query_values[2] = (v4, v5) must equal prev_value = (pe0, pe1).
     let previous_value: [Felt; 2] = [Felt::from_u32(10), Felt::from_u32(11)];
     let stack_inputs = StackInputs::new(&[
         Felt::from_u32(16), // pos 0 -> pos 1 (v1) after push
@@ -371,12 +372,12 @@ fn test_frie2f4() {
         Felt::from_u32(11), // pos 5 -> pos 6 (v6) after push
         Felt::from_u32(10), // pos 6 -> pos 7 (v7) after push
         Felt::from_u32(9),  // pos 7 -> pos 8 (f_pos) after push
-        Felt::from_u32(2),  // pos 8 -> pos 9 (d_seg=2) after push
+        Felt::from_u32(38), // pos 8 -> pos 9 (p=4*9+2=38, d_seg=2) after push
         Felt::from_u32(7),  // pos 9 -> pos 10 (poe) after push
-        previous_value[1],  // pos 10 -> pos 11 (pe1) after push
-        previous_value[0],  // pos 11 -> pos 12 (pe0) after push
-        Felt::from_u32(3),  // pos 12 -> pos 13 (a1) after push
-        Felt::from_u32(2),  // pos 13 -> pos 14 (a0) after push
+        previous_value[0],  // pos 10 -> pos 11 (pe0) after push
+        previous_value[1],  // pos 11 -> pos 12 (pe1) after push
+        Felt::from_u32(2),  // pos 12 -> pos 13 (a0) after push
+        Felt::from_u32(3),  // pos 13 -> pos 14 (a1) after push
         Felt::from_u32(1),  // pos 14 -> pos 15 (cptr) after push
         Felt::from_u32(0),  // pos 15 -> overflow after push
     ])
@@ -472,7 +473,7 @@ fn test_call_node_preserves_stack_overflow_table() {
     );
 
     // Execute the program
-    let result = processor.execute_sync_mut(&program, &mut host).unwrap();
+    let result = processor.execute_mut_sync(&program, &mut host).unwrap();
 
     assert_eq!(
         result.get_num_elements(16),
@@ -568,6 +569,46 @@ fn test_external_node_decorator_sequencing() {
         execution_order[2].1 > execution_order[1].1,
         "after_exit should execute after external node operations"
     );
+}
+
+/// Tests that `ExecutionError::Internal` is correctly emitted when the continuation stack grows
+/// past the maximum allowed size.
+#[test]
+fn test_continuation_stack_limit_exceeded() {
+    let mut host = DefaultHost::default();
+
+    // Build a program with deeply nested join nodes. Each join node pushes 2 continuations
+    // (FinishJoin + StartNode) onto the continuation stack before executing its first child.
+    // With `depth` levels of nesting, the continuation stack will grow to approximately
+    // `2 * depth` entries.
+    let program = {
+        let mut forest = MastForest::new();
+
+        // Create a simple leaf basic block (just a noop).
+        let leaf_id = BasicBlockNodeBuilder::new(vec![Operation::Noop], Vec::new())
+            .add_to_forest(&mut forest)
+            .unwrap();
+
+        // Nest join nodes: join(join(join(..., leaf), leaf), leaf)
+        // Each level adds ~2 continuations to the stack.
+        let depth = 10;
+        let mut current = leaf_id;
+        for _ in 0..depth {
+            current = JoinNodeBuilder::new([current, leaf_id]).add_to_forest(&mut forest).unwrap();
+        }
+
+        forest.make_root(current);
+        Program::new(forest.into(), current)
+    };
+
+    // Set a very small continuation stack limit that will be exceeded by the nested joins.
+    let options = ExecutionOptions::default().with_max_num_continuations(3);
+
+    let processor =
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options);
+    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+
+    assert_matches!(err, ExecutionError::Internal(msg) if msg.contains("continuation stack"));
 }
 
 // TEST HELPERS

@@ -1,4 +1,4 @@
-use alloc::vec::Vec;
+use alloc::{string::String, vec::Vec};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -112,6 +112,58 @@ impl OpBatch {
     /// Returns the number of groups in this batch.
     pub fn num_groups(&self) -> usize {
         self.num_groups
+    }
+
+    /// Validates that padding metadata matches group contents.
+    ///
+    /// Checks:
+    /// - Empty groups cannot be marked as padded.
+    /// - Padded groups must end with a NOOP operation.
+    pub(crate) fn validate_padding_semantics(&self) -> Result<(), String> {
+        if self.num_groups > BATCH_SIZE {
+            return Err(format!(
+                "invalid batch metadata: num_groups {} exceeds BATCH_SIZE {}",
+                self.num_groups, BATCH_SIZE
+            ));
+        }
+
+        for group_idx in 0..self.num_groups {
+            let is_padded = *self
+                .padding
+                .get(group_idx)
+                .ok_or_else(|| format!("group {}: missing padding metadata", group_idx))?;
+            if !is_padded {
+                continue;
+            }
+
+            let group_start = *self
+                .indptr
+                .get(group_idx)
+                .ok_or_else(|| format!("group {}: missing indptr start", group_idx))?;
+            let group_end = *self
+                .indptr
+                .get(group_idx + 1)
+                .ok_or_else(|| format!("group {}: missing indptr end", group_idx))?;
+
+            if group_start == group_end {
+                return Err(format!("group {}: empty group cannot be marked as padded", group_idx));
+            }
+            if group_start > group_end {
+                return Err(format!("group {}: invalid group bounds", group_idx));
+            }
+
+            let last_op_idx = group_end - 1;
+            let last_op = self
+                .ops
+                .get(last_op_idx)
+                .ok_or_else(|| format!("group {}: invalid group bounds", group_idx))?;
+
+            if *last_op != Operation::Noop {
+                return Err(format!("group {}: padded group must end with NOOP", group_idx));
+            }
+        }
+
+        Ok(())
     }
 
     /// Creates a new OpBatch from its constituent parts.
@@ -255,6 +307,51 @@ impl OpBatch {
         ((after_this_group_index + 1)..self.num_groups())
             .find(|&candidate_group_index| is_op_group(candidate_group_index))
     }
+}
+
+// HELPERS
+// ================================================================================================
+
+/// Returns the immediate placements for the operation group at `group_idx`.
+///
+/// Validates that immediate values map to empty groups and remain in-bounds.
+pub(crate) fn collect_immediate_placements(
+    ops: &[Operation],
+    indptr: &[usize; BATCH_SIZE + 1],
+    group_idx: usize,
+    max_groups: usize,
+    num_groups: Option<usize>,
+) -> Result<(Vec<(usize, Felt)>, usize), String> {
+    let start = indptr[group_idx];
+    let end = indptr[group_idx + 1];
+    let mut next_group_idx = group_idx + 1;
+    let mut placements = Vec::new();
+
+    for op in &ops[start..end] {
+        if let Some(imm) = op.imm_value() {
+            if next_group_idx >= max_groups {
+                return Err(String::from("push immediate exceeds group slots"));
+            }
+            if let Some(num_groups) = num_groups
+                && next_group_idx >= num_groups
+            {
+                return Err(format!(
+                    "push immediate index {} exceeds num_groups {}",
+                    next_group_idx, num_groups
+                ));
+            }
+            if indptr[next_group_idx] != indptr[next_group_idx + 1] {
+                return Err(format!(
+                    "push immediate overlaps operation group at index {}",
+                    next_group_idx
+                ));
+            }
+            placements.push((next_group_idx, imm));
+            next_group_idx += 1;
+        }
+    }
+
+    Ok((placements, next_group_idx))
 }
 
 // OPERATION BATCH ACCUMULATOR

@@ -138,11 +138,8 @@ fn build_trace(
         Program::with_kernel(mast_forest.into(), basic_block_id, kernel)
     };
 
-    let (execution_output, trace_generation_context) =
-        processor.execute_for_trace_sync(&program, &mut host).unwrap();
-    let trace =
-        crate::trace::build_trace(execution_output, trace_generation_context, program.to_info())
-            .unwrap();
+    let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
+    let trace = crate::trace::build_trace(trace_inputs).unwrap();
 
     let trace_len = trace.get_trace_len();
 
@@ -158,7 +155,6 @@ fn build_trace(
 /// Validate the hasher trace output by the hperm operation. The full hasher trace is tested in
 /// the Hasher module, so this just tests the ChipletsTrace selectors and the initial columns
 /// of the hasher trace.
-#[expect(clippy::needless_range_loop)]
 fn validate_hasher_trace(trace: &ChipletsTrace, start: usize, end: usize) {
     // The selectors should match the hasher selectors
     for row in start..end {

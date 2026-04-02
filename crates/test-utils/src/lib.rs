@@ -37,13 +37,11 @@ pub use miden_processor::{
     trace::ExecutionTrace,
 };
 use miden_processor::{
-    DefaultDebugHandler, DefaultHost, ExecutionOutput, FastProcessor, Program,
-    event::EventHandler,
-    trace::{build_trace, execution_tracer::TraceGenerationContext},
+    DefaultDebugHandler, DefaultHost, ExecutionOutput, FastProcessor, Program, TraceBuildInputs,
+    event::EventHandler, trace::build_trace,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use miden_prover::prove_sync;
-use miden_prover::utils::range;
 pub use miden_prover::{ProvingOptions, prove};
 pub use miden_verifier::verify;
 pub use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
@@ -223,6 +221,29 @@ impl Test {
         }
     }
 
+    /// Adds kernel source to this test so it is assembled and linked during compilation.
+    #[track_caller]
+    pub fn with_kernel(self, kernel_source: impl ToString) -> Self {
+        self.with_kernel_source(
+            format!("kernel{}", core::panic::Location::caller().line()),
+            kernel_source,
+        )
+    }
+
+    /// Adds kernel source to this test so it is assembled and linked during compilation.
+    pub fn with_kernel_source(
+        mut self,
+        kernel_name: impl Into<String>,
+        kernel_source: impl ToString,
+    ) -> Self {
+        self.kernel_source = Some(self.source_manager.load(
+            SourceLanguage::Masm,
+            kernel_name.into().into(),
+            kernel_source.to_string(),
+        ));
+        self
+    }
+
     /// Add an extra module to link in during assembly
     pub fn add_module(&mut self, path: impl AsRef<Path>, source: impl ToString) {
         self.add_modules.push((path.as_ref().into(), source.to_string()));
@@ -284,8 +305,9 @@ impl Test {
         let execution_output = processor.execute_sync(&program, &mut host).unwrap();
 
         // validate the memory state
-        for (addr, mem_value) in
-            (range(mem_start_addr as usize, expected_mem.len())).zip(expected_mem.iter())
+        for (addr, mem_value) in ((mem_start_addr as usize)
+            ..(mem_start_addr as usize + expected_mem.len()))
+            .zip(expected_mem.iter())
         {
             let mem_state = execution_output
                 .memory
@@ -392,14 +414,14 @@ impl Test {
                     .with_core_trace_fragment_size(FRAGMENT_SIZE)
                     .unwrap(),
             );
-            fast_processor.execute_for_trace_sync(&program, &mut host)
+            fast_processor.execute_trace_inputs_sync(&program, &mut host)
         };
 
         // compare fast and slow processors' stack outputs
         self.assert_result_with_step_execution(&fast_stack_result);
 
-        fast_stack_result.and_then(|(execution_output, trace_generation_ctx)| {
-            let trace = build_trace(execution_output, trace_generation_ctx, program.to_info())?;
+        fast_stack_result.and_then(|trace_inputs| {
+            let trace = build_trace(trace_inputs)?;
 
             assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
             Ok(trace)
@@ -455,9 +477,13 @@ impl Test {
         }
     }
 
-    /// Compiles the test's code into a program, then generates and verifies a proof of execution
-    /// using the given public inputs and the specified number of stack outputs. When `test_fail`
-    /// is true, this function will force a failure by modifying the first output.
+    /// Compiles the test's code into a program, then generates and verifies a STARK proof of
+    /// execution. When `test_fail` is true, forces a failure by modifying the first output.
+    ///
+    /// Prefer [`check_constraints`](Self::check_constraints) for constraint validation — it is
+    /// much faster and provides better error diagnostics. Use this method only when you need to
+    /// exercise the full STARK prove/verify pipeline (e.g., testing proof serialization,
+    /// verifier logic, or precompile request handling).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn prove_and_verify(&self, pub_inputs: Vec<u64>, test_fail: bool) {
         let (program, mut host) = self.get_program_and_host();
@@ -481,6 +507,30 @@ impl Test {
             let result = miden_verifier::verify(program_info, stack_inputs, stack_outputs, proof);
             assert!(result.is_ok(), "error: {result:?}");
         }
+    }
+
+    /// Executes the test program and checks all AIR constraints without generating a STARK proof.
+    ///
+    /// This is the recommended way to validate constraints in tests. It delegates to
+    /// [`ExecutionTrace::check_constraints`], which is much faster than the
+    /// full prove/verify pipeline and provides better error diagnostics. Use
+    /// [`prove_and_verify`](Self::prove_and_verify) only when you need to exercise the
+    /// complete STARK proof generation and verification flow.
+    ///
+    /// # Panics
+    ///
+    /// Panics if execution fails or if any AIR constraint evaluates to nonzero on any row.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[track_caller]
+    pub fn check_constraints(&self) {
+        let trace = self
+            .execute()
+            .inspect_err(|_err| {
+                #[cfg(feature = "std")]
+                std::eprintln!("{}", PrintDiagnostic::new_without_color(_err))
+            })
+            .expect("failed to execute");
+        trace.check_constraints();
     }
 
     /// Returns the last state of the stack after executing a test.
@@ -523,7 +573,7 @@ impl Test {
 
     fn assert_result_with_step_execution(
         &self,
-        fast_result: &Result<(ExecutionOutput, TraceGenerationContext), ExecutionError>,
+        fast_result: &Result<TraceBuildInputs, ExecutionError>,
     ) {
         fn compare_results(
             left_result: Result<StackOutputs, &ExecutionError>,
@@ -578,7 +628,7 @@ impl Test {
         };
 
         compare_results(
-            fast_result.as_ref().map(|(output, _)| output.stack),
+            fast_result.as_ref().map(|trace_inputs| trace_inputs.execution_output().stack),
             &fast_result_by_step,
             "fast processor",
             "fast processor by step",
@@ -674,33 +724,45 @@ pub fn get_column_name(col_idx: usize) -> String {
 
         // Decoder columns
         i if i == DECODER_TRACE_OFFSET + ADDR_COL_IDX => "decoder_addr".to_string(),
-        i if range(DECODER_TRACE_OFFSET + OP_BITS_OFFSET, NUM_OP_BITS).contains(&i) => {
+        i if (DECODER_TRACE_OFFSET + OP_BITS_OFFSET
+            ..DECODER_TRACE_OFFSET + OP_BITS_OFFSET + NUM_OP_BITS)
+            .contains(&i) =>
+        {
             format!("op_bits[{}]", i - (DECODER_TRACE_OFFSET + OP_BITS_OFFSET))
         },
-        i if range(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET, NUM_HASHER_COLUMNS).contains(&i) => {
+        i if (DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET
+            ..DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + NUM_HASHER_COLUMNS)
+            .contains(&i) =>
+        {
             format!("hasher_state[{}]", i - (DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET))
         },
         i if i == DECODER_TRACE_OFFSET + IN_SPAN_COL_IDX => "in_span".to_string(),
         i if i == DECODER_TRACE_OFFSET + GROUP_COUNT_COL_IDX => "group_count".to_string(),
         i if i == DECODER_TRACE_OFFSET + OP_INDEX_COL_IDX => "op_index".to_string(),
-        i if range(DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET, NUM_OP_BATCH_FLAGS)
+        i if (DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET
+            ..DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET + NUM_OP_BATCH_FLAGS)
             .contains(&i) =>
         {
             format!("op_batch_flag[{}]", i - (DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET))
         },
-        i if range(DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET, NUM_OP_BITS_EXTRA_COLS)
+        i if (DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET
+            ..DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + NUM_OP_BITS_EXTRA_COLS)
             .contains(&i) =>
         {
             format!("op_bits_extra[{}]", i - (DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET))
         },
-        i if range(DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET, NUM_OP_BITS_EXTRA_COLS)
+        i if (DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET
+            ..DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + NUM_OP_BITS_EXTRA_COLS)
             .contains(&i) =>
         {
             format!("op_bits_extra[{}]", i - (DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET))
         },
 
         // Stack columns
-        i if range(STACK_TRACE_OFFSET + STACK_TOP_OFFSET, MIN_STACK_DEPTH).contains(&i) => {
+        i if (STACK_TRACE_OFFSET + STACK_TOP_OFFSET
+            ..STACK_TRACE_OFFSET + STACK_TOP_OFFSET + MIN_STACK_DEPTH)
+            .contains(&i) =>
+        {
             format!("stack[{}]", i - (STACK_TRACE_OFFSET + STACK_TOP_OFFSET))
         },
         i if i == STACK_TRACE_OFFSET + B0_COL_IDX => "stack_b0".to_string(),

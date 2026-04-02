@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use crate::{
-    BreakReason, Host, Stopper,
+    BaseHost, BreakReason, Stopper,
     continuation_stack::Continuation,
     execution::{ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation},
     mast::{JoinNode, MastForest, MastNodeId},
@@ -23,7 +23,7 @@ pub(super) fn start_join_node<P, H, S, T>(
 ) -> ControlFlow<BreakReason>
 where
     P: Processor,
-    H: Host,
+    H: BaseHost,
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
@@ -44,7 +44,13 @@ where
     state.continuation_stack.push_start_node(join_node.first());
 
     // Finalize the clock cycle corresponding to the JOIN operation.
-    finalize_clock_cycle(state.processor, state.tracer, state.stopper, current_forest)
+    finalize_clock_cycle(
+        state.processor,
+        state.tracer,
+        state.stopper,
+        state.continuation_stack,
+        current_forest,
+    )
 }
 
 /// Executes the finish phase of a Join node.
@@ -56,7 +62,7 @@ pub(super) fn finish_join_node<P, H, S, T>(
 ) -> ControlFlow<BreakReason>
 where
     P: Processor,
-    H: Host,
+    H: BaseHost,
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
@@ -72,6 +78,7 @@ where
         state.processor,
         state.tracer,
         state.stopper,
+        state.continuation_stack,
         || Some(Continuation::AfterExitDecorators(node_id)),
         current_forest,
     )?;

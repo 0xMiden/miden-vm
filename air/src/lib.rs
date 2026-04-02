@@ -19,6 +19,7 @@ use miden_crypto::stark::air::{
     ReducedAuxValues, ReductionError, VarLenPublicInputs, WindowAccess,
 };
 
+pub mod ace;
 pub mod config;
 mod constraints;
 
@@ -33,9 +34,12 @@ mod export {
         serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
         utils::ToElements,
     };
-    pub use miden_crypto::stark::air::{
-        AirBuilder, AuxBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder,
-        PermutationAirBuilder,
+    pub use miden_crypto::stark::{
+        air::{
+            AirBuilder, AirWitness, AuxBuilder, BaseAir, ExtensionBuilder, LiftedAir,
+            LiftedAirBuilder, PermutationAirBuilder,
+        },
+        debug,
     };
 }
 

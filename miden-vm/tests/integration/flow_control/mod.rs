@@ -2,9 +2,10 @@ use alloc::sync::Arc;
 
 use miden_assembly::{Assembler, PathBuf, Report, ast::ModuleKind};
 use miden_core_lib::CoreLibrary;
-use miden_debug_types::{SourceLanguage, SourceManager};
 use miden_processor::{ExecutionError, Word, operation::OperationError};
-use miden_utils_testing::{StackInputs, Test, build_test, expect_exec_error_matches, push_inputs};
+use miden_utils_testing::{
+    StackInputs, Test, build_debug_test, build_test, expect_exec_error_matches, push_inputs,
+};
 use miden_vm::Module;
 
 // SIMPLE FLOW CONTROL TESTS
@@ -199,7 +200,7 @@ fn local_fn_call() {
     let test = build_test!(source, &[]);
     test.expect_stack(&[2, 1]);
 
-    test.prove_and_verify(vec![], false);
+    test.check_constraints();
 }
 
 #[test]
@@ -224,7 +225,7 @@ fn local_fn_call_with_mem_access() {
     let test = build_test!(source, &[7, 3]);
     test.expect_stack(&[1]);
 
-    test.prove_and_verify(vec![7, 3], false);
+    test.check_constraints();
 }
 
 #[test]
@@ -240,17 +241,10 @@ fn simple_syscall() {
             syscall.foo
         end";
 
-    // TODO: update and use macro?
-    let mut test = Test::new(&format!("test{}", line!()), program_source, false);
-    test.stack_inputs = StackInputs::try_from_ints([1, 2]).unwrap();
-    test.kernel_source = Some(test.source_manager.load(
-        SourceLanguage::Masm,
-        format!("kernel{}", line!()).into(),
-        kernel_source.to_string(),
-    ));
+    let test = build_test!(program_source, &[1, 2]).with_kernel(kernel_source);
     test.expect_stack(&[3]);
 
-    test.prove_and_verify(vec![1, 2], false);
+    test.check_constraints();
 }
 
 #[test]
@@ -273,19 +267,12 @@ fn simple_syscall_2() {
             syscall.bar
         end";
 
-    // TODO: update and use macro?
-    let mut test = Test::new(&format!("test{}", line!()), program_source, false);
     // Stack [1, 2, 3, 2, 2] with 1 on top
     // foo(1+2=3), foo(3+3=6), bar(6*2=12), bar(12*2=24) => 24
-    test.stack_inputs = StackInputs::try_from_ints([1, 2, 3, 2, 2]).unwrap();
-    test.kernel_source = Some(test.source_manager.load(
-        SourceLanguage::Masm,
-        format!("kernel{}", line!()).into(),
-        kernel_source.to_string(),
-    ));
+    let test = build_test!(program_source, &[1, 2, 3, 2, 2]).with_kernel(kernel_source);
     test.expect_stack(&[24]);
 
-    test.prove_and_verify(vec![1, 2, 3, 2, 2], false);
+    test.check_constraints();
 }
 
 /// Tests that `CALL`ing from a syscall context works correctly, especially in terms of properly
@@ -354,15 +341,10 @@ fn call_in_syscall() {
             call.new_ctx
         end";
 
-    let mut test = Test::new(&format!("test{}", line!()), program_source, false);
-    test.kernel_source = Some(test.source_manager.load(
-        SourceLanguage::Masm,
-        format!("kernel{}", line!()).into(),
-        kernel_source.to_string(),
-    ));
+    let test = build_test!(program_source).with_kernel(kernel_source);
     test.expect_stack(&[]);
 
-    test.prove_and_verify(Vec::new(), false);
+    test.check_constraints();
 }
 
 /// Tests that syscalling back into context 0 uses a different overflow table with each call.
@@ -393,15 +375,9 @@ fn root_context_separate_overflows() {
         drop swap.15
     end";
 
-    let mut test = Test::new(&format!("test{}", line!()), program_source, false);
-    test.stack_inputs = StackInputs::try_from_ints([100]).unwrap();
-    test.kernel_source = Some(test.source_manager.load(
-        SourceLanguage::Masm,
-        format!("kernel{}", line!()).into(),
-        kernel_source.to_string(),
-    ));
+    let test = build_test!(program_source, &[100]).with_kernel(kernel_source);
     test.expect_stack(&[100]);
-    test.prove_and_verify(vec![100], false);
+    test.check_constraints();
 }
 
 // DYNAMIC CODE EXECUTION
@@ -454,7 +430,7 @@ fn simple_dyn_exec() {
 
     test.expect_stack(&[6]);
 
-    test.prove_and_verify(stack_init.to_vec(), false);
+    test.check_constraints();
 }
 
 #[test]
@@ -549,7 +525,7 @@ fn simple_dyncall() {
 
     test.expect_stack(&[6]);
 
-    test.prove_and_verify(stack_init.to_vec(), false);
+    test.check_constraints();
 }
 
 /// Calls `bar` dynamically, which issues a syscall. We ensure that the `caller` instruction in the
@@ -582,13 +558,7 @@ fn dyncall_with_syscall_and_caller() {
             movupw.3 dropw movupw.3 dropw
         end";
 
-    // Set up the test with kernel
-    let mut test = Test::new(&format!("test{}", line!()), program_source, true);
-    test.kernel_source = Some(test.source_manager.load(
-        SourceLanguage::Masm,
-        format!("kernel{}", line!()).into(),
-        kernel_source.to_string(),
-    ));
+    let test = build_debug_test!(program_source).with_kernel(kernel_source);
 
     // Compile to get the hash of `bar`
     let (program, _kernel) = test.compile().unwrap();
@@ -610,7 +580,7 @@ fn dyncall_with_syscall_and_caller() {
         1,
     ]);
 
-    test.prove_and_verify(vec![], false);
+    test.check_constraints();
 }
 
 // PROCREF INSTRUCTION
@@ -682,6 +652,6 @@ fn procref() -> Result<(), Report> {
         mast_roots[1][3].as_canonical_u64(),
     ]);
 
-    test.prove_and_verify(vec![], false);
+    test.check_constraints();
     Ok(())
 }

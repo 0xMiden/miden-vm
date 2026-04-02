@@ -4982,7 +4982,7 @@ end
 }
 
 #[test]
-fn imported_error_message_alias_is_rejected_without_panicking() {
+fn imported_error_message_alias_is_resolved_without_panicking() {
     use std::{
         panic::{AssertUnwindSafe, catch_unwind},
         sync::Arc,
@@ -5019,9 +5019,9 @@ end
     }));
 
     assert!(assembled.is_ok(), "assembler panicked during assembly");
-    let assembled = assembled.unwrap();
-    let err = assembled.expect_err("expected assembly to return an error");
-    assert_diagnostic!(err, "undefined symbol reference");
+    assembled
+        .unwrap()
+        .expect("expected imported error message alias to assemble successfully");
 }
 
 #[test]
@@ -5158,6 +5158,184 @@ fn test_cross_module_constant_resolution_as_local_definition() -> TestResult {
 
     Ok(())
 }
+
+#[test]
+fn test_cross_module_constant_reexport_chain_in_procedure_scope() -> TestResult {
+    let context = TestContext::new();
+
+    let a = parse_module!(
+        &context,
+        "dcrc::a",
+        r#"
+            pub const VAL = 99
+            pub proc use_val
+                push.VAL
+                drop
+            end
+        "#
+    );
+
+    let b = parse_module!(
+        &context,
+        "dcrc::b",
+        r#"
+            use dcrc::a
+            pub const STEP = a::VAL + 1
+            pub proc dummy
+                push.STEP
+                drop
+            end
+        "#
+    );
+
+    let c = parse_module!(
+        &context,
+        "dcrc::c",
+        r#"
+            use dcrc::b
+            pub const FINAL_VAL = b::STEP + 1
+            pub proc dummy
+                push.FINAL_VAL
+                drop
+            end
+        "#
+    );
+
+    let lib = Assembler::new(context.source_manager()).assemble_library([a, b, c])?;
+
+    let src = source_file!(
+        &context,
+        r#"
+            use dcrc::c
+            const LOCAL = c::FINAL_VAL
+            begin
+                push.LOCAL
+                drop
+            end
+        "#
+    );
+
+    let _program = Assembler::new(context.source_manager())
+        .with_dynamic_library(lib)?
+        .assemble_program(src)?;
+
+    Ok(())
+}
+
+#[test]
+fn test_issue_2696_imported_constant_with_private_dependency() -> TestResult {
+    let context = TestContext::new();
+
+    let memory = parse_module!(
+        &context,
+        "wallet::memory",
+        r#"
+            const ACCOUNT_ID_AND_NONCE_OFFSET = 4
+            pub const ACCOUNT_ID_SUFFIX_OFFSET = ACCOUNT_ID_AND_NONCE_OFFSET + 2
+        "#
+    );
+
+    let account = parse_module!(
+        &context,
+        "wallet::account",
+        r#"
+            use wallet::memory::ACCOUNT_ID_SUFFIX_OFFSET
+
+            pub proc use_suffix
+                push.ACCOUNT_ID_SUFFIX_OFFSET
+                drop
+            end
+        "#
+    );
+
+    Assembler::new(context.source_manager()).assemble_library([memory, account])?;
+
+    Ok(())
+}
+
+#[test]
+fn test_cross_module_constant_cycle_in_procedure_scope_is_structured_error() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let context = TestContext::new();
+
+    let a = parse_module!(
+        &context,
+        "cycle::a",
+        r#"
+            use cycle::b
+
+            pub proc use_cycle
+                push.A
+                drop
+            end
+
+            pub const A = b::B + 1
+        "#
+    );
+
+    let b = parse_module!(
+        &context,
+        "cycle::b",
+        r#"
+            use cycle::a
+            pub const B = a::A + 1
+        "#
+    );
+
+    let assembled = catch_unwind(AssertUnwindSafe(|| {
+        Assembler::new(context.source_manager()).assemble_library([a, b])
+    }));
+
+    assert!(assembled.is_ok(), "assembler panicked during assembly");
+    let err = assembled.unwrap().expect_err("expected cyclic constants to be rejected");
+    assert_diagnostic!(&err, "constant evaluation terminated due to infinite recursion");
+    assert_diagnostic!(&err, "pub const A = b::B + 1");
+    assert_diagnostic!(&err, "pub const B = a::A + 1");
+}
+
+#[test]
+fn imported_error_message_cycle_is_rejected_without_panicking() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let context = TestContext::new();
+
+    let a = parse_module!(
+        &context,
+        "cycle::errs::a",
+        r#"
+            use cycle::errs::b
+
+            pub proc use_cycle
+                assert.err=ERR_A
+            end
+
+            pub const ERR_A = b::ERR_B
+        "#
+    );
+
+    let b = parse_module!(
+        &context,
+        "cycle::errs::b",
+        r#"
+            use cycle::errs::a
+            pub const ERR_B = a::ERR_A
+        "#
+    );
+
+    let assembled = catch_unwind(AssertUnwindSafe(|| {
+        Assembler::new(context.source_manager()).assemble_library([a, b])
+    }));
+
+    assert!(assembled.is_ok(), "assembler panicked during assembly");
+    let err = assembled
+        .unwrap()
+        .expect_err("expected cyclic error message constants to be rejected");
+    assert_diagnostic!(&err, "constant evaluation terminated due to infinite recursion");
+    assert_diagnostic!(&err, "pub const ERR_A = b::ERR_B");
+    assert_diagnostic!(&err, "pub const ERR_B = a::ERR_A");
+}
+
 #[test]
 fn test_cross_module_quoted_identifier_resolution() -> TestResult {
     let context = TestContext::default();
@@ -5464,6 +5642,45 @@ end
         .assemble_program(program_src)
         .expect_err("expected syscall without kernel to be rejected");
     assert_diagnostic!(err, "invalid syscall");
+}
+
+#[test]
+fn regression_kernel_exports_are_syscall_only_for_all_non_syscall_entrypoints() {
+    let context = TestContext::default();
+    let source_manager = context.source_manager();
+
+    let kernel_src = r#"
+pub proc k1
+    push.1
+end
+"#;
+
+    let kernel = Assembler::new(source_manager.clone())
+        .assemble_kernel(kernel_src)
+        .expect("kernel assembly must succeed");
+
+    let cases = vec![
+        (
+            "exec",
+            "proc user\n    exec.::$kernel::k1\nend\n\nbegin\n    call.user\nend\n".to_string(),
+        ),
+        (
+            "call",
+            "proc user\n    call.::$kernel::k1\nend\n\nbegin\n    call.user\nend\n".to_string(),
+        ),
+        (
+            "procref",
+            "proc user\n    procref.::$kernel::k1\n    dropw\nend\n\nbegin\n    call.user\nend\n"
+                .to_string(),
+        ),
+    ];
+
+    for (kind, program_src) in cases {
+        let err = Assembler::with_kernel(source_manager.clone(), kernel.clone())
+            .assemble_program(program_src)
+            .expect_err(&format!("kernel exports should be syscall-only, but {kind} succeeded"));
+        assert_diagnostic!(err, "syscall");
+    }
 }
 
 #[test]

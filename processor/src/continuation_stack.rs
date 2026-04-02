@@ -185,6 +185,11 @@ impl ContinuationStack {
     // PUBLIC ACCESSORS
     // --------------------------------------------------------------------------------------------
 
+    /// Returns the number of continuations on the stack.
+    pub fn len(&self) -> usize {
+        self.stack.len()
+    }
+
     /// Peeks at the next continuation to execute without removing it.
     ///
     /// Note that more than one continuation may execute in the same clock cycle. To get all

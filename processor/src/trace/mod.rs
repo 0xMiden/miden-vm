@@ -2,20 +2,19 @@ use alloc::vec::Vec;
 #[cfg(any(test, feature = "testing"))]
 use core::ops::Range;
 
-#[cfg(feature = "std")]
-use miden_air::trace::PADDED_TRACE_WIDTH;
 use miden_air::{
-    AuxBuilder, PublicInputs,
+    AirWitness, AuxBuilder, ProcessorAir, PublicInputs, debug,
     trace::{
-        DECODER_TRACE_OFFSET, MainTrace, STACK_TRACE_OFFSET,
+        DECODER_TRACE_OFFSET, MainTrace, PADDED_TRACE_WIDTH, TRACE_WIDTH,
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     },
 };
 
 use crate::{
-    AdviceProvider, Felt, MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
+    AdviceProvider, Felt, MIN_STACK_DEPTH, Program, ProgramInfo, StackInputs, StackOutputs, Word,
+    ZERO,
     fast::ExecutionOutput,
-    field::ExtensionField,
+    field::{ExtensionField, QuadFelt},
     precompile::{PrecompileRequest, PrecompileTranscript},
     utils::{ColMatrix, Matrix, RowMajorMatrix},
 };
@@ -25,7 +24,7 @@ use miden_air::trace::Challenges;
 use utils::{AuxColumnBuilder, TraceFragment};
 
 pub mod chiplets;
-pub mod execution_tracer;
+pub(crate) mod execution_tracer;
 
 mod decoder;
 mod parallel;
@@ -39,9 +38,105 @@ mod tests;
 // RE-EXPORTS
 // ================================================================================================
 
+pub use execution_tracer::TraceGenerationContext;
 pub use miden_air::trace::RowIndex;
 pub use parallel::{CORE_TRACE_WIDTH, build_trace, build_trace_with_max_len};
 pub use utils::{ChipletsLengths, TraceLenSummary};
+
+/// Inputs required to build an execution trace from pre-executed data.
+#[derive(Debug)]
+pub struct TraceBuildInputs {
+    execution_output: ExecutionOutput,
+    trace_generation_context: TraceGenerationContext,
+    program_info: ProgramInfo,
+    execution_binding: trace_state::ExecutedTraceBinding,
+}
+
+impl TraceBuildInputs {
+    pub(crate) fn from_execution(
+        program: &Program,
+        execution_output: ExecutionOutput,
+        trace_generation_context: TraceGenerationContext,
+    ) -> Self {
+        let program_info = program.to_info();
+        Self {
+            execution_binding: trace_state::ExecutedTraceBinding::new(
+                program_info.clone(),
+                execution_output.stack,
+                execution_output.final_pc_transcript.state(),
+                execution_output.advice.fingerprint(),
+            ),
+            execution_output,
+            trace_generation_context,
+            program_info,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn execution_binding(&self) -> &trace_state::ExecutedTraceBinding {
+        &self.execution_binding
+    }
+
+    pub fn execution_output(&self) -> &ExecutionOutput {
+        &self.execution_output
+    }
+
+    pub fn trace_generation_context(&self) -> &TraceGenerationContext {
+        &self.trace_generation_context
+    }
+
+    pub fn program_info(&self) -> &ProgramInfo {
+        &self.program_info
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    #[allow(dead_code)]
+    pub(crate) fn into_parts(self) -> (ExecutionOutput, TraceGenerationContext) {
+        (self.execution_output, self.trace_generation_context)
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    #[allow(dead_code)]
+    pub(crate) fn trace_generation_context_mut(&mut self) -> &mut TraceGenerationContext {
+        &mut self.trace_generation_context
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_program_info(
+        program: &Program,
+        execution_output: ExecutionOutput,
+        trace_generation_context: TraceGenerationContext,
+        program_info: ProgramInfo,
+    ) -> Self {
+        let execution_binding = trace_state::ExecutedTraceBinding::new(
+            program.to_info(),
+            execution_output.stack,
+            execution_output.final_pc_transcript.state(),
+            execution_output.advice.fingerprint(),
+        );
+        Self::with_execution_binding(
+            execution_output,
+            trace_generation_context,
+            program_info,
+            execution_binding,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_execution_binding(
+        execution_output: ExecutionOutput,
+        trace_generation_context: TraceGenerationContext,
+        program_info: ProgramInfo,
+        execution_binding: trace_state::ExecutedTraceBinding,
+    ) -> Self {
+        Self {
+            execution_output,
+            trace_generation_context,
+            program_info,
+            execution_binding,
+        }
+    }
+}
 
 // VM EXECUTION TRACE
 // ================================================================================================
@@ -156,18 +251,19 @@ impl ExecutionTrace {
     /// Returns the initial state of the top 16 stack registers.
     pub fn init_stack_state(&self) -> StackInputs {
         let mut result = [ZERO; MIN_STACK_DEPTH];
+        let row = RowIndex::from(0_u32);
         for (i, result) in result.iter_mut().enumerate() {
-            *result = self.main_trace.get_column(i + STACK_TRACE_OFFSET)[0];
+            *result = self.main_trace.stack_element(i, row);
         }
         result.into()
     }
 
     /// Returns the final state of the top 16 stack registers.
     pub fn last_stack_state(&self) -> StackOutputs {
-        let last_step = self.last_step();
+        let last_step = RowIndex::from(self.last_step());
         let mut result = [ZERO; MIN_STACK_DEPTH];
         for (i, result) in result.iter_mut().enumerate() {
-            *result = self.main_trace.get_column(i + STACK_TRACE_OFFSET)[last_step];
+            *result = self.main_trace.stack_element(i, last_step);
         }
         result.into()
     }
@@ -175,9 +271,9 @@ impl ExecutionTrace {
     /// Returns helper registers state at the specified `clk` of the VM
     pub fn get_user_op_helpers_at(&self, clk: u32) -> [Felt; NUM_USER_OP_HELPERS] {
         let mut result = [ZERO; NUM_USER_OP_HELPERS];
+        let row = RowIndex::from(clk);
         for (i, result) in result.iter_mut().enumerate() {
-            *result = self.main_trace.get_column(DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + i)
-                [clk as usize];
+            *result = self.main_trace.get(row, DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + i);
         }
         result
     }
@@ -205,6 +301,54 @@ impl ExecutionTrace {
     /// Destructures this execution trace into the process’s final stack and advice states.
     pub fn into_outputs(self) -> (StackOutputs, AdviceProvider) {
         (self.stack_outputs, self.advice)
+    }
+
+    // DEBUG CONSTRAINT CHECKING
+    // --------------------------------------------------------------------------------------------
+
+    /// Validates this execution trace against all AIR constraints without generating a STARK
+    /// proof.
+    ///
+    /// This is the recommended way to test trace correctness. It is much faster than full STARK
+    /// proving and provides better error diagnostics (panics on the first constraint violation
+    /// with the instance and row index).
+    ///
+    /// # Panics
+    ///
+    /// Panics if any AIR constraint evaluates to nonzero.
+    pub fn check_constraints(&self) {
+        let public_inputs = self.public_inputs();
+        let trace_matrix = self.to_row_major_matrix();
+
+        let (public_values, kernel_felts) = public_inputs.to_air_inputs();
+        let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
+
+        let aux_builder = self.aux_trace_builders();
+
+        // Derive deterministic challenges by hashing public values with Poseidon2.
+        // The 4-element digest maps directly to 2 QuadFelt challenges.
+        let digest = crate::crypto::hash::Poseidon2::hash_elements(&public_values);
+        let challenges =
+            [QuadFelt::new([digest[0], digest[1]]), QuadFelt::new([digest[2], digest[3]])];
+
+        let witness = AirWitness::new(&trace_matrix, &public_values, var_len_public_inputs);
+        debug::check_constraints(&ProcessorAir, witness, &aux_builder, &challenges);
+    }
+
+    /// Returns the main trace as a row-major matrix for proving.
+    ///
+    /// Only includes the first [`TRACE_WIDTH`] columns (excluding padding columns added for
+    /// Poseidon2 rate alignment), which is the width expected by the AIR.
+    // TODO: the padding columns can be removed once we use the lifted-stark's virtual trace
+    // alignment, which pads to the required rate width without materializing extra columns.
+    pub fn to_row_major_matrix(&self) -> RowMajorMatrix<Felt> {
+        let stored_w = self.main_trace.width();
+        if stored_w == TRACE_WIDTH {
+            return self.main_trace.to_row_major();
+        }
+
+        assert_eq!(stored_w, PADDED_TRACE_WIDTH);
+        self.main_trace.to_row_major_stripped(TRACE_WIDTH)
     }
 
     // HELPER METHODS
@@ -270,10 +414,27 @@ impl AuxTraceBuilders {
         // the expanded challenges to all sub-builders.
         let challenges = Challenges::<E>::new(challenges[0], challenges[1]);
 
-        let decoder_cols = self.decoder.build_aux_columns(main_trace, &challenges);
-        let stack_cols = self.stack.build_aux_columns(main_trace, &challenges);
-        let range_cols = self.range.build_aux_columns(main_trace, &challenges);
-        let chiplets_cols = self.chiplets.build_aux_columns(main_trace, &challenges);
+        let (decoder_cols, stack_cols, range_cols, chiplets_cols) = {
+            let ((decoder_cols, stack_cols), (range_cols, chiplets_cols)) = rayon::join(
+                || {
+                    rayon::join(
+                        || self.decoder.build_aux_columns(main_trace, &challenges),
+                        || self.stack.build_aux_columns(main_trace, &challenges),
+                    )
+                },
+                || {
+                    rayon::join(
+                        || self.range.build_aux_columns(main_trace, &challenges),
+                        || {
+                            let [a, b, c] =
+                                self.chiplets.build_aux_columns(main_trace, &challenges);
+                            vec![a, b, c]
+                        },
+                    )
+                },
+            );
+            (decoder_cols, stack_cols, range_cols, chiplets_cols)
+        };
 
         decoder_cols
             .into_iter()
@@ -286,11 +447,6 @@ impl AuxTraceBuilders {
 
 // PLONKY3 AUX TRACE BUILDER
 // ================================================================================================
-//
-// Implements the upstream `AuxBuilder` trait from `p3_miden_lifted_air` directly on
-// `AuxTraceBuilders`. Plonky3 uses row-major matrices while our existing aux trace building logic
-// uses column-major format. This impl adapts between the two by converting the main trace from
-// row-major to column-major, delegating to the existing logic, and converting the result back.
 
 impl<EF: ExtensionField<Felt>> AuxBuilder<Felt, EF> for AuxTraceBuilders {
     fn build_aux_trace(
@@ -303,33 +459,48 @@ impl<EF: ExtensionField<Felt>> AuxBuilder<Felt, EF> for AuxTraceBuilders {
         // Transpose the row-major main trace into column-major `MainTrace` needed by the
         // auxiliary trace builders. The last program row is the point where the clock
         // (column 0) stops incrementing.
-        let main_trace_col_major = {
+        let main_for_aux = {
             let num_rows = main.height();
-            // Detect last program row from row-major layout using column 0 (clock).
-            let last_program_row = (1..num_rows)
-                .find(|&i| {
-                    main.get(i, 0).expect("valid indices")
-                        != main.get(i - 1, 0).expect("valid indices") + Felt::ONE
-                })
-                .map_or(num_rows - 1, |i| i - 1);
+            // Find the last program row by binary search on the clock column.
+            let clk0 = main.get(0, 0).expect("valid indices");
+            let last_program_row = if num_rows <= 1 {
+                0
+            } else if main.get(num_rows - 1, 0).expect("valid indices")
+                == clk0 + Felt::new((num_rows - 1) as u64)
+            {
+                num_rows - 1
+            } else {
+                let mut lo = 1usize;
+                let mut hi = num_rows - 1;
+                while lo < hi {
+                    let mid = lo + (hi - lo) / 2;
+                    let expected = clk0 + Felt::new(mid as u64);
+                    if main.get(mid, 0).expect("valid indices") == expected {
+                        lo = mid + 1;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                lo - 1
+            };
             let transposed = main.transpose();
-            let columns: Vec<Vec<Felt>> = transposed.row_slices().map(|row| row.to_vec()).collect();
-            MainTrace::new(ColMatrix::new(columns), last_program_row.into())
+            MainTrace::from_transposed(transposed, RowIndex::from(last_program_row))
         };
 
-        // Build auxiliary columns in column-major format.
-        let aux_columns = self.build_aux_columns(&main_trace_col_major, challenges);
+        let aux_columns = self.build_aux_columns(&main_for_aux, challenges);
         assert!(!aux_columns.is_empty(), "aux columns should not be empty");
 
-        // Flatten column-major aux columns into a contiguous buffer, then transpose
-        // to the row-major layout expected by the lifted prover.
         let trace_len = main.height();
         let num_ef_cols = aux_columns.len();
-        let mut col_major_data = Vec::with_capacity(trace_len * num_ef_cols);
-        for col in aux_columns {
-            col_major_data.extend_from_slice(&col);
+        for col in &aux_columns {
+            debug_assert_eq!(col.len(), trace_len, "aux column length must match main height");
         }
-        let aux_trace = RowMajorMatrix::new(col_major_data, trace_len).transpose();
+
+        let mut flat = Vec::with_capacity(trace_len * num_ef_cols);
+        for col in &aux_columns {
+            flat.extend_from_slice(col);
+        }
+        let aux_trace = RowMajorMatrix::new(flat, trace_len).transpose();
 
         // Extract the last row from the row-major aux trace for Fiat-Shamir.
         let last_row = aux_trace

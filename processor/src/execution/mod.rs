@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use crate::{
-    BreakReason, ContextId, Host, Kernel, Stopper, Word,
+    BaseHost, BreakReason, ContextId, Kernel, Stopper, Word,
     continuation_stack::{Continuation, ContinuationStack},
     mast::{MastForest, MastNode, MastNodeId},
     processor::{Processor, SystemInterface},
@@ -58,9 +58,9 @@ pub(crate) struct ExecutionState<'a, P, H, S, T> {
 /// # Tracing
 ///
 /// Different processor implementations will need to record different pieces of information as the
-/// the program is executed. For example, the [`crate::FastProcessor::execute_for_trace`]
-/// execution mode needs to build a [`crate::fast::execution_tracer::TraceGenerationContext`] which
-/// records information necessary to build the trace at each clock cycle, while the
+/// the program is executed. For example, the [`crate::FastProcessor::execute_trace_inputs`]
+/// execution mode needs to build a [`crate::TraceGenerationContext`] which records information
+/// necessary to build the trace at each clock cycle, while the
 /// [`crate::parallel::core_trace_fragment::CoreTraceFragmentFiller`] needs to build the trace
 /// essentially by recording the processor state at each clock cycle. For this purpose, the
 /// [`Self::execute_impl`] method takes in [`Tracer`] argument that abstracts away the "information
@@ -101,7 +101,7 @@ pub(crate) struct ExecutionState<'a, P, H, S, T> {
 ///             // Handle user-initiated break (e.g., propagate break reason)
 ///         },
 ///         InternalBreakReason::Emit { basic_block_node_id, op_idx, continuation } => {
-///             // Handle Emit operation (e.g., call `Host::on_event`)
+///             // Handle Emit operation (e.g., call `SyncHost::on_event`)
 ///             self.op_emit(...);
 ///    
 ///             // As per `InternalBreakReason::Emit` documentation, we call `finish_emit_op_execution`
@@ -132,7 +132,7 @@ pub(crate) fn execute_impl<P, S, T>(
     continuation_stack: &mut ContinuationStack,
     current_forest: &mut Arc<MastForest>,
     kernel: &Kernel,
-    host: &mut impl Host,
+    host: &mut impl BaseHost,
     tracer: &mut T,
     stopper: &S,
 ) -> ControlFlow<InternalBreakReason>
@@ -369,6 +369,7 @@ fn finalize_clock_cycle<P, S, T>(
     processor: &mut P,
     tracer: &mut T,
     stopper: &S,
+    continuation_stack: &ContinuationStack,
     current_forest: &Arc<MastForest>,
 ) -> ControlFlow<BreakReason>
 where
@@ -376,7 +377,14 @@ where
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
-    finalize_clock_cycle_with_continuation(processor, tracer, stopper, || None, current_forest)
+    finalize_clock_cycle_with_continuation(
+        processor,
+        tracer,
+        stopper,
+        continuation_stack,
+        || None,
+        current_forest,
+    )
 }
 
 /// This function marks the end of a clock cycle.
@@ -388,6 +396,7 @@ fn finalize_clock_cycle_with_continuation<P, S, T>(
     processor: &mut P,
     tracer: &mut T,
     stopper: &S,
+    continuation_stack: &ContinuationStack,
     continuation_after_stop: impl FnOnce() -> Option<Continuation>,
     current_forest: &Arc<MastForest>,
 ) -> ControlFlow<BreakReason>
@@ -400,6 +409,7 @@ where
         processor,
         tracer,
         stopper,
+        continuation_stack,
         continuation_after_stop,
         OperationHelperRegisters::Empty,
         current_forest,
@@ -430,6 +440,7 @@ fn finalize_clock_cycle_with_continuation_and_op_helpers<P, S, T>(
     processor: &mut P,
     tracer: &mut T,
     stopper: &S,
+    continuation_stack: &ContinuationStack,
     continuation_after_stop: impl FnOnce() -> Option<Continuation>,
     op_helper_registers: OperationHelperRegisters,
     current_forest: &Arc<MastForest>,
@@ -445,7 +456,7 @@ where
     // Increment the processor clock.
     processor.system_mut().increment_clock();
 
-    stopper.should_stop(processor, continuation_after_stop)
+    stopper.should_stop(processor, continuation_stack, continuation_after_stop)
 }
 
 /// Returns the next context ID that would be created given the current state.

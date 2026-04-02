@@ -258,7 +258,7 @@ pub trait SourceManagerExt: SourceManager {
             .map(|s| SourceContent::new(lang, uri.clone(), s))
             .map_err(|source| {
                 SourceManagerError::custom_with_source(
-                    alloc::format!("failed to load filed at `{}`", path.display()),
+                    alloc::format!("failed to load file at `{}`", path.display()),
                     source,
                 )
             })?;

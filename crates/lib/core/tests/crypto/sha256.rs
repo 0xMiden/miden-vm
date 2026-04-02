@@ -21,7 +21,7 @@ fn sha256_hash_bytes() {
             .map(|&bytes| u32::from_be_bytes(bytes) as u64)
             .rev()
             .collect::<Vec<u64>>(),
-        vec![length_in_bytes as u64; 1],
+        vec![length_in_bytes; 1],
     ]
     .concat();
 

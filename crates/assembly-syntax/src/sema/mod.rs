@@ -134,6 +134,15 @@ pub fn analyze(
 
     // Simplify all constant declarations
     analyzer.simplify_constants();
+    for item in module.items_mut().iter_mut() {
+        let Export::Constant(constant) = item else {
+            continue;
+        };
+        constant.value = analyzer
+            .get_constant(&constant.name)
+            .expect("semantic analysis tracks all module constants")
+            .clone();
+    }
 
     // Define enums now that all constant declarations have been discovered
     for mut ty in enums {
@@ -204,7 +213,6 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) -> Result<()
 
                 // Next, verify invoke targets:
                 //
-                // * Kernel procedures cannot use `syscall` or `call`
                 // * Mark imports as used if they have at least one call to a procedure defined in
                 //   that module
                 // * Verify that all external callees have a matching import

@@ -17,7 +17,7 @@ A STARK-based virtual machine.
 
 Miden VM is a zero-knowledge virtual machine written in Rust. For any program executed on Miden VM, a STARK-based proof of execution can be automatically generated. This proof can then be used by anyone to verify that the program was executed correctly without the need for re-executing the program or even knowing the contents of the program.
 
-The Miden VM uses Plonky3 as the proving system, although with some modifications. See the [`p3-miden`](https://github.com/0xMiden/p3-miden) repository for more information.
+The Miden VM uses [Plonky3](https://github.com/0xMiden/Plonky3) as the proving system, although with some modifications. See the [`p3-miden`](https://github.com/0xMiden/p3-miden) repository for more information.
 
 In the latest stable release, most of the core features of the VM have been stabilized, and most of the STARK proof generation has been implemented. We are still making changes to the VM internals and external interfaces, so you should expect some breaking changes with each new release.
 
@@ -83,77 +83,57 @@ The documentation in the `docs/` folder is built using Docusaurus and is automat
 
 ## Performance
 
-> **Note:** The benchmarks in this section are outdated and need to be updated following the migration to the Plonky3 backend. Additionally, 128-bit security level is not currently supported.
-
-The benchmarks below should be viewed only as a rough guide for expected future performance. The reasons for this are twofold:
-
-1. Not all constraints have been implemented yet, and we expect that there will be some slowdown once constraint evaluation is completed.
-2. Many optimizations have not been applied yet, and we expect that there will be some speedup once we dedicate some time to performance optimizations.
-
-Overall, we don't expect the benchmarks to change significantly, but there will definitely be some deviation from the below numbers in the future.
+The benchmarks below should be viewed only as a rough guide for expected future performance. The reasons that many optimizations have not been applied yet, and we expect that there will be some speedup once we dedicate some time to performance optimizations.
 
 A few general notes on performance:
 
-- Execution time is dominated by proof generation time. In fact, the time needed to run the program is usually under 1% of the time needed to generate the proof.
+- Execution time is dominated by proof generation time. In fact, the time needed to run the program is usually under 0.01% of the time needed to generate the proof.
 - Proof verification time is really fast. In most cases it is under 1 ms, but sometimes gets as high as 2 ms or 3 ms.
 - Proof generation process is dynamically adjustable. In general, there is a trade-off between execution time, proof size, and security level (i.e. for a given security level, we can reduce proof size by increasing execution time, up to a point).
 - Both proof generation and proof verification times are greatly influenced by the hash function used in the STARK protocol. In the benchmarks below, we use BLAKE3, which is a really fast hash function.
 
 ### Single-core prover performance
 
-When executed on a single CPU core, the current version of Miden VM operates at around 20 - 25 KHz. In the benchmarks below, the VM executes a [Fibonacci calculator](miden-vm/README.md#fibonacci-calculator) program on Apple M1 Pro CPU in a single thread. The generated proofs have a target security level of 96 bits.
+When executed on a single CPU core, the current version of Miden VM operates at around 20 - 25 KHz. In the benchmarks below, the VM executes a [Blake3 example](miden-vm/masm-examples/hashing/blake3_1to1/) program on Apple M4 Max CPU in a single thread. The generated proofs have a target security level of 96 bits.
 
 |   VM cycles    | Execution time | Proving time | RAM consumed | Proof size |
 | :------------: | :------------: | :----------: | :----------: | :--------: |
-| 2<sup>10</sup> |      1 ms      |    60 ms     |    20 MB     |   46 KB    |
-| 2<sup>12</sup> |      2 ms      |    180 ms    |    52 MB     |   56 KB    |
-| 2<sup>14</sup> |      8 ms      |    680 ms    |    240 MB    |   65 KB    |
-| 2<sup>16</sup> |     28 ms      |   2.7 sec    |    950 MB    |   75 KB    |
-| 2<sup>18</sup> |     81 ms      |   11.4 sec   |    3.7 GB    |   87 KB    |
-| 2<sup>20</sup> |     310 ms     |   47.5 sec   |    14 GB     |   100 KB   |
+| 2<sup>14</sup> |    0.3 ms      |    885 ms    |    200 MB    |   80 KB    |
+| 2<sup>16</sup> |    0.7 ms      |   3.6 sec    |    750 MB    |  100 KB    |
+| 2<sup>18</sup> |    1.2 ms      |  14.7 sec    |    2.9 GB    |  116 KB    |
+| 2<sup>20</sup> |    11.1 ms     |   59 sec     |    11 GB     |  136 KB    |
 
 As can be seen from the above, proving time roughly doubles with every doubling in the number of cycles, but proof size grows much slower.
 
-We can also generate proofs at a higher security level. The cost of doing so is roughly doubling of proving time and roughly 40% increase in proof size. In the benchmarks below, the same Fibonacci calculator program was executed on Apple M1 Pro CPU at 128-bit target security level:
-
-|   VM cycles    | Execution time | Proving time | RAM consumed | Proof size |
-| :------------: | :------------: | :----------: | :----------: | :--------: |
-| 2<sup>10</sup> |      1 ms      |    120 ms    |    30 MB     |   61 KB    |
-| 2<sup>12</sup> |      2 ms      |    460 ms    |    106 MB    |   77 KB    |
-| 2<sup>14</sup> |      8 ms      |   1.4 sec    |    500 MB    |   90 KB    |
-| 2<sup>16</sup> |     27 ms      |   4.9 sec    |    2.0 GB    |   103 KB   |
-| 2<sup>18</sup> |     81 ms      |   20.1 sec   |    8.0 GB    |   121 KB   |
-| 2<sup>20</sup> |     310 ms     |   90.3 sec   |   20.0 GB    |   138 KB   |
-
 ### Multi-core prover performance
 
-STARK proof generation is massively parallelizable. Thus, by taking advantage of multiple CPU cores we can dramatically reduce proof generation time. For example, when executed on an 8-core CPU (Apple M1 Pro), the current version of Miden VM operates at around 140 KHz. And when executed on a 64-core CPU (Amazon Graviton 3), the VM operates at around 250 KHz.
+STARK proof generation is massively parallelizable. Thus, by taking advantage of multiple CPU cores we can dramatically reduce proof generation time. For example, when executed on an 16-core CPU (Apple M4 Max), the current version of Miden VM operates at around 170 KHz. And when executed on a 64-core CPU (Amazon Graviton 4), the VM operates at around 200 KHz.
 
-In the benchmarks below, the VM executes the same Fibonacci calculator program for 2<sup>20</sup> cycles at 96-bit target security level:
+In the benchmarks below, the VM executes the same Blake3 example program for 2<sup>20</sup> cycles at 96-bit target security level:
 
 | Machine                        | Execution time | Proving time | Execution % | Implied Frequency |
 | ------------------------------ | :------------: | :----------: | :---------: | :---------------: |
-| Apple M1 Pro (16 threads)      |     310 ms     |   7.0 sec    |    4.2%     |      140 KHz      |
-| Apple M2 Max (16 threads)      |     280 ms     |   5.8 sec    |    4.5%     |      170 KHz      |
-| AMD Ryzen 9 5950X (16 threads) |     270 ms     |   10.0 sec   |    2.6%     |      100 KHz      |
-| Amazon Graviton 3 (64 threads) |     330 ms     |   3.6 sec    |    8.5%     |      265 KHz      |
+| Apple M1 Pro (16 threads)      |     14.5 ms    |   14.7 sec   |    0.1%     |      70 KHz       |
+| Apple M4 Max (16 threads)      |     11.1 ms    |   5.9 sec    |    0.2%     |      170 KHz      |
+| Amazon Graviton 4 (64 threads) |     10.7 ms    |   5.7 sec    |    0.2%     |      175 KHz      |
+| AMD EPYC 9R45 (64 threads)     |     7.5 ms     |   4.5 sec    |    0.2%     |      220 KHz      |
+| AMD Ryzen 9 9950X (16 threads) |     7.6 ms     |   7.6 sec    |    0.1%     |      138 KHz      |
+| AMD Ryzen 9 9950X (32 threads) |     7.3 ms     |   6.8 sec    |    0.1%     |      154 KHz      |
 
-### Recursive proofs
+### Recursing-friendly proofs
 
-Proofs in the above benchmarks are generated using BLAKE3 hash function. While this hash function is very fast, it is not very efficient to execute in Miden VM. Thus, proofs generated using BLAKE3 are not well-suited for recursive proof verification. To support efficient recursive proofs, we need to use an arithmetization-friendly hash function. Miden VM natively supports Poseidon2, which is one such hash function. One of the downsides of arithmetization-friendly hash functions is that they are considerably slower than regular hash functions.
+Proofs in the above benchmarks are generated using BLAKE3 hash function. While this hash function is very fast, it is not very efficient to execute in Miden VM. Thus, proofs generated using BLAKE3 are not well-suited for recursive proof verification. To support efficient recursive proofs, we need to use an arithmetization-friendly hash function. Miden VM natively supports Poseidon2, which is one such hash function. One of the downsides of arithmetization-friendly hash functions is that they are noticeably slower than regular hash functions.
 
-In the benchmarks below we execute the same Fibonacci calculator program for 2<sup>20</sup> cycles at 96-bit target security level using Poseidon2 hash function instead of BLAKE3:
+In the benchmarks below we execute the same Blake3 example program for 2<sup>20</sup> cycles at 96-bit target security level using Poseidon2 hash function instead of BLAKE3:
 
-| Machine                        | Execution time | Proving time | Proving time (HW) |
-| ------------------------------ | :------------: | :----------: | :---------------: |
-| Apple M1 Pro (16 threads)      |     310 ms     |   94.3 sec   |     42.0 sec      |
-| Apple M2 Max (16 threads)      |     280 ms     |   75.1 sec   |     20.9 sec      |
-| AMD Ryzen 9 5950X (16 threads) |     270 ms     |   59.3 sec   |                   |
-| Amazon Graviton 3 (64 threads) |     330 ms     |   21.7 sec   |     14.9 sec      |
-
-### STARK Proving System
-
-Miden VM uses [Plonky3](https://github.com/0xMiden/Plonky3), a modular STARK proving framework.
+| Machine                        | Execution time | Proving time | Slowdown vs BLAKE3 |
+| ------------------------------ | :------------: | :----------: | :----------------: |
+| Apple M1 Pro (16 threads)      |     14.5 ms    |   31.9 sec   |     2.2x           |
+| Apple M4 Max (16 threads)      |     11.1 ms    |   12.9 sec   |     2.2x           |
+| Amazon Graviton 4 (64 threads) |     10.7 ms    |   9.5 sec    |     1.7x           |
+| AMD EPYC 9R45 (64 threads)     |     7.5 ms     |   8.6 sec    |     1.9x           |
+| AMD Ryzen 9 9950X (16 threads) |     7.4 ms     |   18.9 sec   |     2.5x           |
+| AMD Ryzen 9 9950X (32 threads) |     7.3 ms     |   14.8 sec   |     2.2x           |
 
 ## References
 

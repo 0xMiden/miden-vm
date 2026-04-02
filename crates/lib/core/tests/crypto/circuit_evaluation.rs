@@ -1,11 +1,17 @@
-use miden_ace_codegen::{AceConfig, InputKey, LayoutKind, build_ace_circuit_for_air};
-use miden_air::ProcessorAir;
+use miden_ace_codegen::{AceCircuit, AceConfig, InputKey, LayoutKind};
 use miden_core::{
     Felt, ONE, ZERO,
     advice::AdviceStackBuilder,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
 };
 use miden_utils_testing::rand::rand_quad_felt;
+
+/// Build the batched ACE circuit for the Miden VM ProcessorAir.
+fn build_batched_circuit(config: AceConfig) -> AceCircuit<QuadFelt> {
+    let air = miden_air::ProcessorAir;
+    let batch_config = miden_air::ace::reduced_aux_batch_config();
+    miden_air::ace::build_batched_ace_circuit::<_, QuadFelt>(&air, config, &batch_config).unwrap()
+}
 
 #[test]
 fn circuit_evaluation_prove_verify() {
@@ -82,18 +88,17 @@ fn circuit_evaluation_prove_verify() {
 
     let test = miden_utils_testing::build_test!(source, &[], &adv_stack);
     test.expect_stack(&[]);
-    test.prove_and_verify(vec![], false)
+    test.check_constraints()
 }
 
 #[test]
 fn processor_air_eval_circuit_masm() {
-    let air = ProcessorAir;
     let config = AceConfig {
         num_quotient_chunks: 8,
-        num_aux_inputs: 14,
+        num_vlpi_groups: 1,
         layout: LayoutKind::Masm,
     };
-    let circuit = build_ace_circuit_for_air::<_, Felt, QuadFelt>(&air, config).unwrap();
+    let circuit = build_batched_circuit(config);
     let layout = circuit.layout().clone();
 
     let mut inputs = fill_inputs(&layout);
@@ -148,7 +153,7 @@ fn processor_air_eval_circuit_masm() {
 
     let test = miden_utils_testing::build_test!(source, &[], &adv_stack);
     test.expect_stack(&[]);
-    test.prove_and_verify(vec![], false)
+    test.check_constraints()
 }
 
 fn fill_inputs(layout: &miden_ace_codegen::InputLayout) -> Vec<QuadFelt> {

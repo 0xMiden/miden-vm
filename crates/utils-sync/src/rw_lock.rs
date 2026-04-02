@@ -119,7 +119,6 @@ unsafe impl RawRwLock for Spinlock {
                     let next = self.state.load(Ordering::Relaxed);
                     if s == next {
                         hint::spin_loop();
-                        continue;
                     } else {
                         s = next;
                         break;

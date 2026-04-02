@@ -1,61 +1,76 @@
 use std::array;
 
-use miden_air::{FieldExtension, HashFunction, PublicInputs};
+use miden_air::PublicInputs;
 use miden_assembly::Assembler;
 use miden_core::{
-    Felt, FieldElement, QuadFelt, WORD_SIZE, Word, ZERO, precompile::PrecompileTranscriptState,
+    Felt, WORD_SIZE,
+    field::{BasedVectorSpace, PrimeCharacteristicRing, QuadFelt},
+    precompile::PrecompileTranscriptState,
+    proof::HashFunction,
 };
-use miden_processor::{
-    DefaultHost, Program, ProgramInfo,
-    crypto::RandomCoin,
-};
-use miden_utils_testing::{
-    AdviceInputs, ProvingOptions, StackInputs, VerifierError, proptest::proptest, prove,
-};
+use miden_processor::{DefaultHost, Program, ProgramInfo};
+use miden_utils_testing::{AdviceInputs, ProvingOptions, StackInputs, prove_sync};
 use rand::{Rng, RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use rstest::rstest;
-use verifier_recursive::{VerifierData, generate_advice_inputs};
+use verifier_recursive::{VerifierData, VerifierError, generate_advice_inputs};
 
+mod ace_circuit;
+mod ace_read_check;
+mod batch_query_gen;
 mod verifier_recursive;
 
-// Note: Changes to Miden VM may cause this test to fail when some of the assumptions documented
-// in `crates/lib/core/asm/sys/vm/mod.masm` are violated.
-#[rstest]
-#[case(None)]
-#[case(Some(KERNEL_EVEN_NUM_PROC))]
-#[case(Some(KERNEL_ODD_NUM_PROC))]
-#[ignore = "re-enable once we're done implementing all constraints in airscript"]
-fn stark_verifier_e2f4(#[case] kernel: Option<&str>) {
-    // An example MASM program to be verified inside Miden VM.
-    let example_source = "begin
-            repeat.320
-                swap dup.1 add
-            end
-            u32split drop
-        end";
+// RECURSIVE VERIFIER TESTS
+// ================================================================================================
 
-    let mut stack_inputs = vec![0_u64; 16];
-    stack_inputs[15] = 0;
-    stack_inputs[14] = 1;
+#[test]
+fn stark_verifier_e2f4_small() {
+    let inputs = fib_stack_inputs();
+    let data = generate_recursive_verifier_data(EXAMPLE_FIB_SMALL, inputs, None).unwrap();
+    run_recursive_verifier(&data);
+}
 
-    let VerifierData {
-        initial_stack,
-        advice_stack: tape,
-        store,
-        advice_map,
-    } = generate_recursive_verifier_data(example_source, stack_inputs, kernel).unwrap();
+#[test]
+fn stark_verifier_e2f4_large() {
+    let inputs = fib_stack_inputs();
+    let data = generate_recursive_verifier_data(EXAMPLE_FIB_LARGE, inputs, None).unwrap();
+    run_recursive_verifier(&data);
+}
 
-    // Verify inside Miden VM
-    let source = "
-        use miden::core::sys::vm
-        begin
-            exec.vm::verify_proof
-        end
-        ";
+#[test]
+fn stark_verifier_e2f4_with_kernel_even() {
+    let inputs = fib_stack_inputs();
+    let data = generate_recursive_verifier_data(
+        EXAMPLE_FIB_KERNEL_SMALL,
+        inputs,
+        Some(KERNEL_EVEN_NUM_PROC),
+    )
+    .unwrap();
+    run_recursive_verifier(&data);
+}
 
-    let test = build_test!(source, &initial_stack, &tape, store, advice_map);
-    test.expect_stack(&[]);
+#[test]
+fn stark_verifier_e2f4_with_kernel_odd() {
+    let inputs = fib_stack_inputs();
+    let data = generate_recursive_verifier_data(
+        EXAMPLE_FIB_KERNEL_SMALL,
+        inputs,
+        Some(KERNEL_ODD_NUM_PROC),
+    )
+    .unwrap();
+    run_recursive_verifier(&data);
+}
+
+#[test]
+fn stark_verifier_e2f4_with_kernel_single() {
+    let inputs = fib_stack_inputs();
+    let data = generate_recursive_verifier_data(
+        EXAMPLE_FIB_KERNEL_SMALL,
+        inputs,
+        Some(KERNEL_SINGLE_PROC),
+    )
+    .unwrap();
+    run_recursive_verifier(&data);
 }
 
 // Helper function for recursive verification
@@ -64,31 +79,34 @@ pub fn generate_recursive_verifier_data(
     stack_inputs: Vec<u64>,
     kernel: Option<&str>,
 ) -> Result<VerifierData, VerifierError> {
-    let program = {
+    let (program, kernel_lib) = {
         match kernel {
             Some(kernel) => {
                 let context = miden_assembly::testing::TestContext::new();
                 let kernel_lib =
                     Assembler::new(context.source_manager()).assemble_kernel(kernel).unwrap();
-                let assembler = Assembler::with_kernel(context.source_manager(), kernel_lib);
+                let assembler =
+                    Assembler::with_kernel(context.source_manager(), kernel_lib.clone());
                 let program: Program = assembler.assemble_program(source).unwrap();
-                program
+                (program, Some(kernel_lib))
             },
             None => {
                 let program: Program = Assembler::default().assemble_program(source).unwrap();
-                program
+                (program, None)
             },
         }
     };
     let stack_inputs = StackInputs::try_from_ints(stack_inputs).unwrap();
     let advice_inputs = AdviceInputs::default();
     let mut host = DefaultHost::default();
+    if let Some(ref kernel_lib) = kernel_lib {
+        host.load_library(kernel_lib.mast_forest()).unwrap();
+    }
 
-    let options =
-        ProvingOptions::new(27, 8, 0, FieldExtension::Quadratic, 4, 127, HashFunction::Poseidon2);
+    let options = ProvingOptions::new(HashFunction::Poseidon2);
 
     let (stack_outputs, proof) =
-        prove(&program, stack_inputs, advice_inputs, &mut host, options).unwrap();
+        prove_sync(&program, stack_inputs, advice_inputs, &mut host, options).unwrap();
 
     let program_info = ProgramInfo::from(program);
 
@@ -99,9 +117,69 @@ pub fn generate_recursive_verifier_data(
         stack_outputs,
         PrecompileTranscriptState::default(),
     );
-    let (_, proof, _precompile_requests) = proof.into_parts();
-    Ok(generate_advice_inputs(proof, pub_inputs).unwrap())
+    let (_, proof_bytes, _precompile_requests) = proof.into_parts();
+    let data = generate_advice_inputs(&proof_bytes, pub_inputs).unwrap();
+    Ok(data)
 }
+
+/// Run the recursive verifier MASM program with the given VerifierData.
+fn run_recursive_verifier(data: &VerifierData) {
+    let source = "
+        use miden::core::sys::vm
+        begin
+            exec.vm::verify_proof
+        end
+        ";
+    let test = build_test!(
+        source,
+        &data.initial_stack,
+        &data.advice_stack,
+        data.store.clone(),
+        data.advice_map.clone()
+    );
+    let (output, _host) = test.execute_for_output().expect("recursive verifier execution failed");
+
+    // Cross-check: extract READ section, sanity-check values, evaluate circuit in Rust.
+    ace_read_check::cross_check_ace_circuit(&output);
+}
+
+// EXAMPLE PROGRAMS
+// ================================================================================================
+
+/// repeat.320 -> log_trace_height=10 -> FRI remainder degree < 64 -> verify_64 path
+const EXAMPLE_FIB_SMALL: &str = "begin
+        repeat.320
+            swap dup.1 add
+        end
+        u32split drop
+    end";
+
+/// repeat.400 -> log_trace_height=11 -> FRI remainder degree < 128 -> verify_128 path
+const EXAMPLE_FIB_LARGE: &str = "begin
+        repeat.400
+            swap dup.1 add
+        end
+        u32split drop
+    end";
+
+/// Like EXAMPLE_FIB_SMALL but with a syscall, for kernel-aware tests.
+const EXAMPLE_FIB_KERNEL_SMALL: &str = "begin
+        syscall.foo
+        repeat.320
+            swap dup.1 add
+        end
+        u32split drop
+    end";
+
+fn fib_stack_inputs() -> Vec<u64> {
+    let mut inputs = vec![0_u64; 16];
+    inputs[15] = 0;
+    inputs[14] = 1;
+    inputs
+}
+
+// VARIABLE LENGTH PUBLIC INPUTS TESTS
+// ================================================================================================
 
 #[rstest]
 #[case(0)]
@@ -111,29 +189,16 @@ pub fn generate_recursive_verifier_data(
 #[case(8)]
 #[case(1000)]
 fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
-    // STARK parameters
-    let num_queries = 27;
-    let log_trace_len = 10;
-    let grinding_bits = 16;
-    let num_constraints = 200;
-    let trace_info = 0x50010810;
-    let num_fixed_len_pi_padded = 40;
-    let mut initial_stack = vec![
-        log_trace_len,
-        num_queries,
-        grinding_bits,
-        num_constraints,
-        trace_info,
-        num_fixed_len_pi_padded,
-    ];
-    initial_stack.reverse();
+    // init_seed expects [log(trace_length), rd0, rd1, rd2, rd3, ...]
+    let log_trace_length = 10_u64;
+    // Relation digest values are arbitrary here; the test only validates VLPI reduction.
+    let rd = [1_u64, 2, 3, 4];
+    let initial_stack = vec![log_trace_length, rd[0], rd[1], rd[2], rd[3]];
 
-    // Seeded random number generator for reproducibility
     let seed = [0_u8; 32];
     let mut rng = ChaCha20Rng::from_seed(seed);
 
-    // 1) Generate fixed length public inputs
-
+    // 1) Generate fixed-length public inputs
     let input_operand_stack: [u64; 16] = array::from_fn(|_| rng.next_u64());
     let output_operand_stack: [u64; 16] = array::from_fn(|_| rng.next_u64());
     let program_digest: [u64; 4] = array::from_fn(|_| rng.next_u64());
@@ -141,129 +206,68 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
     let mut fixed_length_public_inputs = input_operand_stack.to_vec();
     fixed_length_public_inputs.extend_from_slice(&output_operand_stack);
     fixed_length_public_inputs.extend_from_slice(&program_digest);
-    let fix_len_pi_with_padding = fixed_length_public_inputs.len().next_multiple_of(8);
-    fixed_length_public_inputs.resize(fix_len_pi_with_padding, 0);
+    fixed_length_public_inputs.resize(fixed_length_public_inputs.len().next_multiple_of(8), 0);
 
-    // 2) Generate the variable length public inputs, i.e., the kernel procedures digests
-
-    let num_elements_kernel_proc_digests = num_kernel_proc_digests * WORD_SIZE.next_multiple_of(8);
+    // 2) Generate the variable-length public inputs (kernel procedure digests)
     let kernel_procedures_digests =
         generate_kernel_procedures_digests(&mut rng, num_kernel_proc_digests);
 
     // 3) Generate the auxiliary randomness
-
     let auxiliary_rand_values: [u64; 4] = array::from_fn(|_| rng.next_u64());
 
     // 4) Build the advice stack
-
-    let mut advice_stack = vec![num_elements_kernel_proc_digests as u64];
-    advice_stack.extend_from_slice(&fixed_length_public_inputs);
+    let mut advice_stack = fixed_length_public_inputs.clone();
+    advice_stack.push(num_kernel_proc_digests as u64);
     advice_stack.extend_from_slice(&kernel_procedures_digests);
     advice_stack.extend_from_slice(&auxiliary_rand_values);
-    advice_stack.push(num_kernel_proc_digests as u64);
 
-    // 5) Compute the expected randomness-reduced value of all the kernel procedures digests
-
+    // 5) Compute the expected reduced value
     let beta =
         QuadFelt::new([Felt::new(auxiliary_rand_values[0]), Felt::new(auxiliary_rand_values[1])]);
     let alpha =
         QuadFelt::new([Felt::new(auxiliary_rand_values[2]), Felt::new(auxiliary_rand_values[3])]);
-    let reduced_value_inv =
-        reduce_kernel_procedures_digests(&kernel_procedures_digests, alpha, beta).inv();
-    let [reduced_value_inv_0, reduced_value_inv_1] = reduced_value_inv.to_base_elements();
 
-    // 6) Run the test
+    let reduced_value = reduce_kernel_procedures_digests(&kernel_procedures_digests, alpha, beta);
+    let coeffs: &[Felt] = reduced_value.as_basis_coefficients_slice();
 
-    let source = format!(
-        "
+    // 6) Run process_public_inputs and verify the reduced value in memory
+    let source = "
         use miden::core::stark::random_coin
         use miden::core::stark::constants
         use miden::core::sys::vm::public_inputs
 
         begin
-            # 1) Initialize the FS transcript
             exec.random_coin::init_seed
-            # => [C, ...]
-
-            # 2) Process the public inputs
             exec.public_inputs::process_public_inputs
-            # => [...]
-
-            # 3) Load the reduced value of all kernel procedures digests
-            #    Note that the memory layout is as follows:
-            #    [..., a_0, ..., a_[m-1], b_0, b_1, 0, 0, alpha0, alpha1, beta0, beta1, OOD-evaluations-start, ...]
-            #
-            #    where:
-            #
-            #    i) [a_0, ..., a[m-1]] are the fixed length public inputs,
-            #    ii) [b_0, b_1] is the reduced value of all kernel procedures digests,
-            #    iii) [alpha0, alpha1, beta0, beta1] is the auxiliary randomness,
-            #    iv) [OOD-evaluations-start, ...] the start of the section that will hold the OOD evaluations,
-            #
-            #    Note that [b_0, b_1, 0, 0, alpha0, alpha1, beta0, beta1, OOD-evaluations-start, ...] will hold temporarily
-            #    the kernel procedures digests, but there will be later on overwritten by the reduced value, the auxiliary
-            #    randomness, and the OOD evaluations.
-            padw
-            exec.constants::ood_evaluations_ptr
-            sub.8
-            mem_loadw_be
-
-            # 4) Compare with the expected result, including the padding
-            push.{reduced_value_inv_0}
-            push.{reduced_value_inv_1}
-            push.0.0
-            eqw assert
-
-            # 5) Clean up the stack
-            dropw dropw
         end
-        "
-    );
+        ";
 
     let test = build_test!(source, &initial_stack, &advice_stack);
-    test.expect_stack(&[]);
-}
+    let (output, _host) = test.execute_for_output().expect("execution failed");
 
-#[test]
-fn generate_query_indices() {
-    let source = TEST_RANDOM_INDICES_GENERATION;
+    use miden_processor::ContextId;
+    let ctx = ContextId::root();
 
-    let num_queries = 27;
-    let lde_log_size = 18;
-    let lde_size = 1 << lde_log_size;
+    // Read reduced kernel value from var_len_ptr (in ACE READ section)
+    let var_len_addr_ptr = 3223322666_u32; // VARIABLE_LEN_PUBLIC_INPUTS_ADDRESS_PTR
+    let var_len_ptr = output
+        .memory
+        .read_element(ctx, Felt::from_u32(var_len_addr_ptr))
+        .unwrap()
+        .as_canonical_u64() as u32;
+    let masm_0 = output.memory.read_element(ctx, Felt::from_u32(var_len_ptr)).unwrap();
+    let masm_1 = output.memory.read_element(ctx, Felt::from_u32(var_len_ptr + 1)).unwrap();
 
-    let input_stack = vec![num_queries as u64, lde_log_size as u64, lde_size as u64];
-
-    let seed = Word::default();
-    let mut coin = RandomCoin::new(seed);
-    let indices = coin
-        .draw_integers(num_queries, lde_size, 0)
-        .expect("should not fail to generate the indices");
-
-    let advice_stack: Vec<u64> = indices.iter().rev().map(|index| *index as u64).collect();
-
-    let test = build_test!(source, &input_stack, &advice_stack);
-
-    test.expect_stack(&[]);
-}
-
-proptest! {
-    #[test]
-    fn generate_query_indices_proptest(num_queries in 7..150_usize, lde_log_size in 9..32_usize) {
-        let source = TEST_RANDOM_INDICES_GENERATION;
-        let lde_size = 1 << lde_log_size;
-
-        let seed = Word::default();
-        let mut coin = RandomCoin::new(seed);
-        let indices = coin
-            .draw_integers(num_queries, lde_size, 0)
-            .expect("should not fail to generate the indices");
-        let advice_stack: Vec<u64> = indices.iter().rev().map(|index| *index as u64).collect();
-
-        let input_stack = vec![num_queries as u64, lde_log_size as u64, lde_size as u64];
-        let test = build_test!(source, &input_stack, &advice_stack);
-        test.prop_expect_stack(&[])?;
-    }
+    assert_eq!(
+        masm_0.as_canonical_u64(),
+        coeffs[0].as_canonical_u64(),
+        "kernel_reduced coord 0 mismatch (nk={num_kernel_proc_digests})"
+    );
+    assert_eq!(
+        masm_1.as_canonical_u64(),
+        coeffs[1].as_canonical_u64(),
+        "kernel_reduced coord 1 mismatch (nk={num_kernel_proc_digests})"
+    );
 }
 
 // HELPERS
@@ -306,15 +310,28 @@ fn reduce_kernel_procedures_digests(
 fn reduce_digest(digest: &[u64], alpha: QuadFelt, beta: QuadFelt) -> QuadFelt {
     const KERNEL_OP_LABEL: Felt = Felt::new(48);
     alpha
-        + KERNEL_OP_LABEL.into()
+        + QuadFelt::from(KERNEL_OP_LABEL)
         + beta
             * digest
                 .iter()
-                .fold(QuadFelt::ZERO, |acc, coef| acc * beta + QuadFelt::from(*coef))
+                .fold(QuadFelt::ZERO, |acc, coef| acc * beta + QuadFelt::from(Felt::new(*coef)))
 }
 
 // CONSTANTS
 // ===============================================================================================
+
+const KERNEL_SINGLE_PROC: &str = r#"
+        pub proc foo
+            add
+        end"#;
+
+const KERNEL_EVEN_NUM_PROC: &str = r#"
+        pub proc foo
+            add
+        end
+        pub proc bar
+            div
+        end"#;
 
 const KERNEL_ODD_NUM_PROC: &str = r#"
         pub proc foo
@@ -326,69 +343,3 @@ const KERNEL_ODD_NUM_PROC: &str = r#"
         pub proc baz
             mul
         end"#;
-
-const KERNEL_EVEN_NUM_PROC: &str = r#"
-        pub proc foo
-            add
-        end
-        pub proc bar
-            div
-        end"#;
-
-const TEST_RANDOM_INDICES_GENERATION: &str = r#"
-        const QUERY_ADDRESS = 1024
-
-        use miden::core::stark::random_coin
-        use miden::core::stark::constants
-
-        begin
-            exec.constants::set_lde_domain_size
-            exec.constants::set_lde_domain_log_size
-            exec.constants::set_number_queries
-            push.QUERY_ADDRESS exec.constants::set_fri_queries_address
-
-            exec.random_coin::load_random_coin_state
-            hperm
-            hperm
-            exec.random_coin::store_random_coin_state
-
-            exec.random_coin::generate_list_indices
-
-            exec.constants::get_lde_domain_log_size
-            exec.constants::get_number_queries neg
-            push.QUERY_ADDRESS
-            # => [query_ptr, loop_counter, lde_size_log, ...]
-
-            push.1
-            while.true
-                dup add.3 mem_load
-                movdn.3
-                # => [query_ptr, loop_counter, lde_size_log, query_index, ...]
-                dup
-                add.2 mem_load
-                dup.3 assert_eq
-
-                add.4
-                # => [query_ptr + 4, loop_counter, lde_size_log, query_index, ...]
-
-                swap add.1 swap
-                # => [query_ptr + 4, loop_counter, lde_size_log, query_index, ...]
-
-                dup.1 neq.0
-                # => [?, query_ptr + 4, loop_counter + 1, lde_size_log, query_index, ...]
-            end
-            drop drop drop
-
-            exec.constants::get_number_queries neg
-            push.1
-            while.true
-                swap
-                adv_push.1
-                assert_eq
-                add.1
-                dup
-                neq.0
-            end
-            drop
-        end
-        "#;

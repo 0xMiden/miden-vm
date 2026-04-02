@@ -3,12 +3,12 @@ use std::hint::black_box;
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{ExecutionOptions, FastProcessor, advice::AdviceInputs, trace};
-use miden_vm::{Assembler, DefaultHost, StackInputs, execute, internal::InputFile};
+use miden_vm::{Assembler, DefaultHost, StackInputs, internal::InputFile};
 use tokio::runtime::Runtime;
 use walkdir::WalkDir;
 
 /// The size of each trace fragment (in rows) when executing programs for trace generation.
-const TRACE_FRAGMENT_SIZE: usize = 4096;
+const TRACE_FRAGMENT_SIZE: usize = 1024;
 
 /// Benchmark the execution of all the masm examples in the `masm-examples` directory.
 fn build_trace(c: &mut Criterion) {
@@ -77,52 +77,9 @@ fn build_trace(c: &mut Criterion) {
                             (host, program.clone(), processor)
                         },
                         |(mut host, program, processor)| async move {
-                            let (execution_output, trace_generation_context) =
-                                processor.execute_for_trace(&program, &mut host).await.unwrap();
-
-                            let trace = trace::build_trace(
-                                execution_output,
-                                trace_generation_context,
-                                program.to_info(),
-                            )
-                            .unwrap();
-                            black_box(trace);
-                        },
-                        BatchSize::SmallInput,
-                    );
-                });
-
-                // LEGACY EXECUTE
-                // --------------------------------
-                group.bench_function(format!("{file_stem}_legacy"), |bench| {
-                    let mut assembler = Assembler::default();
-                    assembler
-                        .link_dynamic_library(CoreLibrary::default())
-                        .expect("failed to load core library");
-
-                    let program = assembler
-                        .assemble_program(&source)
-                        .expect("Failed to compile test source.");
-
-                    bench.to_async(Runtime::new().unwrap()).iter_batched(
-                        || {
-                            let host = DefaultHost::default()
-                                .with_library(&CoreLibrary::default())
-                                .unwrap();
-                            let advice_inputs = advice_inputs.clone();
-
-                            (host, stack_inputs, advice_inputs, program.clone())
-                        },
-                        |(mut host, stack_inputs, advice_inputs, program)| async move {
-                            let trace = execute(
-                                &program,
-                                stack_inputs,
-                                advice_inputs,
-                                &mut host,
-                                ExecutionOptions::default(),
-                            )
-                            .await
-                            .unwrap();
+                            let trace_inputs =
+                                processor.execute_trace_inputs(&program, &mut host).await.unwrap();
+                            let trace = trace::build_trace(trace_inputs).unwrap();
                             black_box(trace);
                         },
                         BatchSize::SmallInput,
@@ -132,7 +89,6 @@ fn build_trace(c: &mut Criterion) {
             // If we can't access the entry, just skip it
             Err(err) => {
                 eprintln!("Failed to access file: {entry:?} with error {err:?}");
-                continue;
             },
         }
     }

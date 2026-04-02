@@ -6,8 +6,12 @@ use alloc::{
 use miden_core::{
     Felt, Word,
     advice::{AdviceInputs, AdviceMap},
-    crypto::merkle::{InnerNodeInfo, MerkleError, MerklePath, MerkleStore, NodeIndex},
+    crypto::{
+        hash::Blake3_256,
+        merkle::{InnerNodeInfo, MerklePath, MerkleStore, NodeIndex},
+    },
     precompile::PrecompileRequest,
+    serde::Serializable,
 };
 
 mod errors;
@@ -46,7 +50,7 @@ const MAX_ADVICE_STACK_SIZE: usize = 1 << 17;
 ///      or,
 ///    - used to produce a STARK proof using a precompile VM, which can be verified in the epilog of
 ///      the program.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AdviceProvider {
     stack: VecDeque<Felt>,
     map: AdviceMap,
@@ -84,6 +88,43 @@ impl AdviceProvider {
             },
         }
         Ok(())
+    }
+
+    /// Returns a stable fingerprint of the advice state.
+    ///
+    /// The fingerprint is insensitive to advice-map insertion order and Merkle-store insertion
+    /// order, but it still reflects advice-stack order and precompile-request order.
+    #[must_use]
+    pub(crate) fn fingerprint(&self) -> [u8; 32] {
+        let stack = self.stack.iter().copied().collect::<Vec<_>>().to_bytes();
+        let map = self.map.to_bytes();
+        let mut store_nodes = self
+            .store
+            .inner_nodes()
+            .map(|info| (info.value, info.left, info.right))
+            .collect::<Vec<_>>();
+        store_nodes.sort_unstable_by(|lhs, rhs| {
+            lhs.0
+                .cmp(&rhs.0)
+                .then_with(|| lhs.1.cmp(&rhs.1))
+                .then_with(|| lhs.2.cmp(&rhs.2))
+        });
+        let store = store_nodes
+            .into_iter()
+            .flat_map(|(value, left, right)| [value, left, right])
+            .collect::<Vec<_>>()
+            .to_bytes();
+        let precompile_requests = self.pc_requests.to_bytes();
+        Blake3_256::hash_iter(
+            [
+                stack.as_slice(),
+                map.as_slice(),
+                store.as_slice(),
+                precompile_requests.as_slice(),
+            ]
+            .into_iter(),
+        )
+        .into()
     }
 
     // ADVICE STACK
@@ -333,13 +374,7 @@ impl AdviceProvider {
         let index = NodeIndex::from_elements(&depth, &index)
             .map_err(|_| AdviceError::InvalidMerkleTreeNodeIndex { depth, index })?;
 
-        // TODO: switch to `MerkleStore::has_path()` once this method is implemented (#2795)
-        match self.store.get_path(root, index) {
-            Ok(_) => Ok(true),
-            Err(MerkleError::RootNotInStore(..)) => Ok(false),
-            Err(MerkleError::NodeIndexNotFoundInStore(..)) => Ok(false),
-            Err(err) => Err(AdviceError::MerkleStoreLookupFailed(err)),
-        }
+        Ok(self.store.has_path(root, index))
     }
 
     /// Returns a path to a node at the specified depth and index in a Merkle tree with the
@@ -513,5 +548,42 @@ impl AdviceProviderInterface for AdviceProvider {
         value: Word,
     ) -> Result<Option<MerklePath>, AdviceError> {
         self.update_merkle_node(root, depth, index, value).map(|(path, _)| Some(path))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AdviceProvider;
+    use crate::{
+        AdviceInputs, Felt, Word,
+        crypto::merkle::{MerkleStore, MerkleTree},
+    };
+
+    fn make_leaf(seed: u64) -> Word {
+        [Felt::new(seed), Felt::new(seed + 1), Felt::new(seed + 2), Felt::new(seed + 3)].into()
+    }
+
+    #[test]
+    fn fingerprint_is_stable_across_merkle_store_insertion_order() {
+        let tree_a =
+            MerkleTree::new([make_leaf(1), make_leaf(5), make_leaf(9), make_leaf(13)]).unwrap();
+        let tree_b =
+            MerkleTree::new([make_leaf(17), make_leaf(21), make_leaf(25), make_leaf(29)]).unwrap();
+
+        let mut store_a = MerkleStore::default();
+        store_a.extend(tree_a.inner_nodes());
+        store_a.extend(tree_b.inner_nodes());
+
+        let mut store_b = MerkleStore::default();
+        store_b.extend(tree_b.inner_nodes());
+        store_b.extend(tree_a.inner_nodes());
+
+        assert_eq!(store_a, store_b);
+
+        let provider_a = AdviceProvider::from(AdviceInputs::default().with_merkle_store(store_a));
+        let provider_b = AdviceProvider::from(AdviceInputs::default().with_merkle_store(store_b));
+
+        assert_eq!(provider_a, provider_b);
+        assert_eq!(provider_a.fingerprint(), provider_b.fingerprint());
     }
 }

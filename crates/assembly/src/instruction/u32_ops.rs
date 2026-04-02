@@ -400,7 +400,7 @@ pub fn u32popcnt(span_builder: &mut BasicBlockBuilder) {
 /// leading zeros of the value using non-deterministic technique (i.e. it takes help of advice
 /// provider).
 ///
-/// This operation takes 41 VM cycles.
+/// This operation takes 48 VM cycles.
 pub fn u32clz(block_builder: &mut BasicBlockBuilder) {
     block_builder.push_system_event(SystemEvent::U32Clz);
     block_builder.push_op(AdvPop); // [clz, n, ...]
@@ -567,7 +567,7 @@ fn prepare_bitwise<const MAX_VALUE: u8>(
 ///
 /// `[clz, n, ... ] -> [clz, ... ]`
 ///
-/// VM cycles: 41
+/// VM cycles: 48
 fn verify_clz(block_builder: &mut BasicBlockBuilder) {
     // [clz, n, ...]
     #[rustfmt::skip]
@@ -606,10 +606,12 @@ fn verify_clz(block_builder: &mut BasicBlockBuilder) {
         //
         // #=> [n & mask, (2^(32 - clz) - 1 / 2) + 1, clz, is_zero]
         Dup3, Eqz, MovDn3, MovUp4, U32and,
-        // 6. Assert that the masked input, and the mask representing `clz` leading zeros, followed
-        // by at least one trailing one, if `clz < 32`, are equal; OR that the input was zero if `clz`
-        // is 32.
-        Eq, MovUp2, Or, Assert(ZERO),
+        // 6. Enforce the zero boundary exactly:
+        //    n == 0 iff clz == 32.
+        Dup2, Push(Felt::from_u8(32)), Eq, MovUp4, Dup1, Eq, Assert(ZERO),
+        // 7. Assert that the masked input matches the expected boundary bitmask for non-zero
+        // inputs, and allow the zero-input branch only via the bound zero flag from step 6.
+        MovDn2, Eq, Or, Assert(ZERO),
     ];
 
     block_builder.push_ops(ops_group_2);

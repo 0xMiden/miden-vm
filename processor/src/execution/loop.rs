@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use crate::{
-    BreakReason, Host, MapExecErr, ONE, Stopper, ZERO,
+    BaseHost, BreakReason, MapExecErr, ONE, Stopper, ZERO,
     continuation_stack::Continuation,
     execution::{ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation},
     mast::{LoopNode, MastForest, MastNodeId},
@@ -24,7 +24,7 @@ pub(super) fn start_loop_node<P, H, S, T>(
 ) -> ControlFlow<BreakReason>
 where
     P: Processor,
-    H: Host,
+    H: BaseHost,
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
@@ -53,13 +53,23 @@ where
 
     // execute the loop body as long as the condition is true
     if condition == ONE {
-        // Push the loop to check condition again after body
-        // executes
+        // Push the loop to check condition again after body executes.
+        //
+        // WARNING: if we eventually push another continuation in between the `FinishLoop` and the
+        // `StartNode` continuations, then the logic in `ExecutionTracer::start_clock_cycle()` that
+        // computes the value for the `is_loop_body` flag will be incorrect and needs to be
+        // adjusted.
         state.continuation_stack.push_finish_loop_entered(current_node_id);
         state.continuation_stack.push_start_node(loop_node.body());
 
         // Finalize the clock cycle corresponding to the LOOP operation.
-        finalize_clock_cycle(state.processor, state.tracer, state.stopper, current_forest)
+        finalize_clock_cycle(
+            state.processor,
+            state.tracer,
+            state.stopper,
+            state.continuation_stack,
+            current_forest,
+        )
     } else if condition == ZERO {
         // Start and exit the loop immediately - corresponding to adding a LOOP and END row
         // immediately since there is no body to execute.
@@ -69,6 +79,7 @@ where
             state.processor,
             state.tracer,
             state.stopper,
+            state.continuation_stack,
             || {
                 Some(Continuation::FinishLoop {
                     node_id: current_node_id,
@@ -103,7 +114,7 @@ pub(super) fn finish_loop_node<P, H, S, T>(
 ) -> ControlFlow<BreakReason>
 where
     P: Processor,
-    H: Host,
+    H: BaseHost,
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
@@ -144,7 +155,13 @@ where
         state.continuation_stack.push_start_node(loop_node.body());
 
         // Finalize the clock cycle corresponding to the REPEAT operation.
-        finalize_clock_cycle(state.processor, state.tracer, state.stopper, current_forest)
+        finalize_clock_cycle(
+            state.processor,
+            state.tracer,
+            state.stopper,
+            state.continuation_stack,
+            current_forest,
+        )
     } else if condition == ZERO {
         // Exit the loop - start the clock cycle corresponding to the END operation.
         state.tracer.start_clock_cycle(
@@ -177,6 +194,7 @@ where
             state.processor,
             state.tracer,
             state.stopper,
+            state.continuation_stack,
             || Some(Continuation::AfterExitDecorators(current_node_id)),
             current_forest,
         )?;

@@ -46,11 +46,9 @@ where
     Ok(OperationHelperRegisters::Empty)
 }
 
-/// Overwrites the top four stack items with the hash of a function which initiated the current
-/// SYSCALL.
-///
-/// # Errors
-/// Returns an error if the VM is not currently executing a SYSCALL block.
+/// Overwrites the top four stack items with the value of the CALLER_HASH register, which is the
+/// hash of the procedure that initiated the most recent SYSCALL, or ZERO if not in a syscall
+/// context.
 #[inline(always)]
 pub(super) fn op_caller<P: Processor>(
     processor: &mut P,

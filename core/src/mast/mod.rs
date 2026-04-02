@@ -45,6 +45,7 @@ use serde::{Deserialize, Serialize};
 mod node;
 #[cfg(any(test, feature = "arbitrary"))]
 pub use node::arbitrary;
+pub(crate) use node::collect_immediate_placements;
 pub use node::{
     BasicBlockNode, BasicBlockNodeBuilder, CallNode, CallNodeBuilder, DecoratedOpLink,
     DecoratorOpLinkIterator, DecoratorStore, DynNode, DynNodeBuilder, ExternalNode,
@@ -1202,7 +1203,7 @@ pub fn error_code_from_msg(msg: impl AsRef<str>) -> Felt {
 // ================================================================================================
 
 /// Represents the types of errors that can occur when dealing with MAST forest.
-#[derive(Debug, thiserror::Error, PartialEq)]
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum MastForestError {
     #[error("MAST forest decorator count exceeds the maximum of {} decorators", u32::MAX)]
     TooManyDecorators,

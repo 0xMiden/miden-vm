@@ -11,7 +11,7 @@ const M_DOUBLE = 24578
 const M_SQUARE = 151019521
 const SQUARE_NORM_BOUND = 34034726
 const MEMORY_POINTER_OFFSET_OF_HASH_TO_POINT_POLY_FROM_PRODUCT_POLY = 1024
-const FALCON_DIV_EVENT = event("miden::core::crypto::dsa::falcon512poseidon2::falcon_div")
+const FALCON_DIV_EVENT = event("miden::core::crypto::dsa::falcon512_poseidon2::falcon_div")
 
 # MODULAR REDUCTION FALCON PRIME
 # =============================================================================================
@@ -50,7 +50,7 @@ pub proc mod_12289
     u32widening_madd swap
     # => [t1, t0, M * qlo % 32, a_hi, a_lo, ...] where t = t1 * 2^32 + t0 and t = M * qhi + overflow
     # Note by the bound on x - r = q * M, we are guaranteed that t1 = 0
-    drop
+    assertz.err="comparison failed: quotient overflow"
     # => [M * q / 2^32, (M * q) % 2^32, a_hi, a_lo, ...]
     # => [res_hi, res_lo, a_hi, a_lo, ...]
 
@@ -71,7 +71,7 @@ pub proc mod_12289
     movup.3
     u32overflowing_add
     # => [flag, final_res_hi, final_res_lo, r, a_hi, a_lo, ...] flag should be 0 by the bound on inputs
-    drop
+    assertz.err="comparison failed: addition overflow"
     # => [final_res_hi, final_res_lo, r, a_hi, a_lo, ...]
 
     movup.3

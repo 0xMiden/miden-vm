@@ -6,8 +6,7 @@ use miden_core::{
     },
     operations::Operation,
 };
-use miden_debug_types::{SourceLanguage, SourceManager};
-use miden_utils_testing::{MIN_STACK_DEPTH, StackInputs, Test, Word, build_op_test, build_test};
+use miden_utils_testing::{MIN_STACK_DEPTH, Word, build_op_test, build_test};
 
 use super::TRUNCATE_STACK_PROC;
 
@@ -183,21 +182,14 @@ fn caller() {
             call.bar
         end";
 
-    // TODO: update and use macro?
-    let mut test = Test::new(&format!("test{}", line!()), program_source, false);
-    test.stack_inputs = StackInputs::try_from_ints([1, 2, 3, 4, 5]).unwrap();
-    test.kernel_source = Some(test.source_manager.load(
-        SourceLanguage::Masm,
-        format!("kernel{}", line!()).into(),
-        kernel_source.to_string(),
-    ));
+    let test = build_test!(program_source, &[1, 2, 3, 4, 5]).with_kernel(kernel_source);
 
     // top 4 elements should be overwritten with the hash of `bar` procedure, but the 5th
     // element should remain untouched (position 4 in input [1,2,3,4,5] is 5)
     let bar_hash = build_bar_hash();
     test.expect_stack(&[bar_hash[0], bar_hash[1], bar_hash[2], bar_hash[3], 5]);
 
-    test.prove_and_verify(vec![1, 2, 3, 4, 5], false);
+    test.check_constraints();
 }
 
 fn build_bar_hash() -> [u64; 4] {
