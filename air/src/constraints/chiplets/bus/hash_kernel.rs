@@ -75,9 +75,6 @@ pub fn enforce_hash_kernel_constraint<AB>(
         (aux_local[B_HASH_KERNEL], aux_next[B_HASH_KERNEL])
     };
 
-    let one = AB::Expr::ONE;
-    let one_ef = AB::ExprEF::ONE;
-
     // =========================================================================
     // PERIODIC VALUES
     // =========================================================================
@@ -96,7 +93,7 @@ pub fn enforce_hash_kernel_constraint<AB>(
 
     // Hasher chiplet rows have s0 = 0 (chiplet selector).
     let chiplet_selector: AB::Expr = local.chiplets[0].into();
-    let is_hasher: AB::Expr = one.clone() - chiplet_selector.clone();
+    let is_hasher = AB::Expr::ONE - chiplet_selector.clone();
 
     // Hasher operation selectors (only meaningful within hasher chiplet)
     let s0: AB::Expr = local.chiplets[S_START].into();
@@ -129,7 +126,7 @@ pub fn enforce_hash_kernel_constraint<AB>(
     // Compute sibling values based on bit b (LSB of node index).
     // The hasher constraints enforce that b is binary on shift rows.
     let b: AB::Expr = node_index.clone() - node_index_next.clone().double();
-    let is_b_zero = one.clone() - b.clone();
+    let is_b_zero = AB::Expr::ONE - b.clone();
     let is_b_one = b;
 
     // Sibling value for current row (uses current hasher state).
@@ -151,12 +148,12 @@ pub fn enforce_hash_kernel_constraint<AB>(
     let chiplet_s2: AB::Expr = local.chiplets[2].into();
 
     let is_ace_row: AB::Expr =
-        chiplet_selector.clone() * chiplet_s1.clone() * chiplet_s2.clone() * (one.clone() - s3);
+        chiplet_selector.clone() * chiplet_s1.clone() * chiplet_s2.clone() * (AB::Expr::ONE - s3);
 
     // Block selector determines read (0) vs eval (1)
     let block_selector: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + SELECTOR_BLOCK_IDX].into();
 
-    let f_ace_read: AB::Expr = is_ace_row.clone() * (one.clone() - block_selector.clone());
+    let f_ace_read: AB::Expr = is_ace_row.clone() * (AB::Expr::ONE - block_selector.clone());
     let f_ace_eval: AB::Expr = is_ace_row * block_selector;
 
     // ACE columns for memory messages
@@ -170,7 +167,7 @@ pub fn enforce_hash_kernel_constraint<AB>(
         let v0_1: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + V_0_1_IDX].into();
         let v1_0: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + V_1_0_IDX].into();
         let v1_1: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + V_1_1_IDX].into();
-        let label: AB::Expr = AB::Expr::from(Felt::from_u8(MEMORY_READ_WORD_LABEL));
+        let label: AB::Expr = Felt::from_u8(MEMORY_READ_WORD_LABEL).into();
 
         challenges.encode([
             label,
@@ -190,10 +187,10 @@ pub fn enforce_hash_kernel_constraint<AB>(
         let id_2: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + ID_2_IDX].into();
         let eval_op: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + EVAL_OP_IDX].into();
 
-        let offset1: AB::Expr = AB::Expr::from(ACE_INSTRUCTION_ID1_OFFSET);
-        let offset2: AB::Expr = AB::Expr::from(ACE_INSTRUCTION_ID2_OFFSET);
-        let element = id_1 + id_2 * offset1 + (eval_op + one.clone()) * offset2;
-        let label: AB::Expr = AB::Expr::from(Felt::from_u8(MEMORY_READ_ELEMENT_LABEL));
+        let offset1: AB::Expr = ACE_INSTRUCTION_ID1_OFFSET.into();
+        let offset2: AB::Expr = ACE_INSTRUCTION_ID2_OFFSET.into();
+        let element = id_1 + id_2 * offset1 + (eval_op + AB::Expr::ONE) * offset2;
+        let label: AB::Expr = Felt::from_u8(MEMORY_READ_ELEMENT_LABEL).into();
 
         challenges.encode([label, ace_ctx, ace_ptr, ace_clk, element])
     };
@@ -213,7 +210,7 @@ pub fn enforce_hash_kernel_constraint<AB>(
     let cap_next: [AB::Expr; 4] =
         core::array::from_fn(|i| next.stack[STACK_CAP_NEXT_RANGE.start + i].into());
 
-    let log_label: AB::Expr = AB::Expr::from(Felt::from_u8(LOG_PRECOMPILE_LABEL));
+    let log_label: AB::Expr = Felt::from_u8(LOG_PRECOMPILE_LABEL).into();
 
     // CAP_PREV value (request - removed).
     let v_cap_prev = challenges.encode([
@@ -249,13 +246,13 @@ pub fn enforce_hash_kernel_constraint<AB>(
         + v_ace_word * f_ace_read
         + v_ace_element * f_ace_eval
         + v_cap_prev * f_logprecompile.clone()
-        + (one_ef.clone() - request_flag_sum);
+        + (AB::ExprEF::ONE - request_flag_sum);
 
     let response_flag_sum = f_mv.clone() + f_mva.clone() + f_logprecompile.clone();
     let responses: AB::ExprEF = v_sibling_curr * f_mv
         + v_sibling_next * f_mva
         + v_cap_next * f_logprecompile
-        + (one_ef - response_flag_sum);
+        + (AB::ExprEF::ONE - response_flag_sum);
 
     // Running product constraint: p' * requests = p * responses
     let p_local_ef: AB::ExprEF = p_local.into();

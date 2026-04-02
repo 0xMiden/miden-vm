@@ -26,8 +26,7 @@ use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::AirBuilder;
 
 use super::selectors::{ace_chiplet_flag, kernel_rom_chiplet_flag};
-use crate::{MainTraceRow, MidenAirBuilder};
-
+use crate::{MainTraceRow, MidenAirBuilder, constraints::constants::F_1};
 // CONSTANTS
 // ================================================================================================
 
@@ -77,15 +76,14 @@ pub fn enforce_kernel_rom_constraints<AB>(
     let r3: AB::Expr = load_kernel_rom_col::<AB>(local, R3_IDX);
     let r3_next: AB::Expr = load_kernel_rom_col::<AB>(next, R3_IDX);
 
-    let one: AB::Expr = AB::Expr::ONE;
-
     // Gate transition constraints by is_transition() to avoid last-row access.
     // ==========================================================================
     // SELECTOR CONSTRAINT
     // ==========================================================================
 
     // sfirst must be binary
-    builder.assert_zero(kernel_rom_flag.clone() * sfirst.clone() * (sfirst.clone() - one.clone()));
+    builder
+        .assert_zero(kernel_rom_flag.clone() * sfirst.clone() * (sfirst.clone() - AB::Expr::ONE));
 
     // ==========================================================================
     // DIGEST CONTIGUITY CONSTRAINTS
@@ -93,8 +91,8 @@ pub fn enforce_kernel_rom_constraints<AB>(
 
     // When sfirst' = 0 (not the start of a new digest block) and s4' = 0 (not exiting kernel ROM),
     // the digest values must remain unchanged.
-    let not_exiting = one.clone() - s4_next.clone();
-    let not_new_block = one.clone() - sfirst_next.clone();
+    let not_exiting = AB::Expr::ONE - s4_next.clone();
+    let not_new_block = AB::Expr::ONE - sfirst_next.clone();
     let contiguity_condition = not_exiting * not_new_block;
 
     // Use a combined gate to share `kernel_rom_flag * contiguity_condition` across all 4 lanes.
@@ -110,13 +108,13 @@ pub fn enforce_kernel_rom_constraints<AB>(
 
     // s0..s2 are stable once 1 (selector constraints), so ACE -> kernel ROM transition is
     // determined by s3' = 1 and s4' = 0.
-    let kernel_rom_next = s3_next * (one.clone() - s4_next.clone());
+    let kernel_rom_next = s3_next * (AB::Expr::ONE - s4_next.clone());
     let flag_next_row_first_kernel_rom = ace_flag * kernel_rom_next;
 
     // First row of kernel ROM must have sfirst' = 1.
     builder
         .when_transition()
-        .assert_zero(flag_next_row_first_kernel_rom * (sfirst_next - one));
+        .assert_zero(flag_next_row_first_kernel_rom * (sfirst_next - F_1));
 }
 
 // INTERNAL HELPERS

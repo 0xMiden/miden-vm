@@ -54,3 +54,8 @@ resolving merge conflicts in this file.
 **No constraint changes.** (441 base + 24 ext)
 
 ---
+## 10. refactor: inline field constants and centralize in constants.rs
+
+**No constraint changes.** (441 base + 24 ext)
+
+---

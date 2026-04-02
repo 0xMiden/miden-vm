@@ -10,7 +10,10 @@
 use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::AirBuilder;
 
-use crate::{MainTraceRow, MidenAirBuilder, constraints::op_flags::OpFlags};
+use crate::{
+    MainTraceRow, MidenAirBuilder,
+    constraints::{constants::*, op_flags::OpFlags},
+};
 
 // ENTRY POINT
 // ================================================================================================
@@ -248,7 +251,7 @@ pub fn enforce_main<AB>(
     let cswap_c_inv = AB::Expr::ONE - cswap_c.clone();
 
     // Binary constraint for the cswap selector (must be 0 or 1).
-    builder.assert_zero(is_cswap.clone() * (cswap_c.clone() * (cswap_c.clone() - AB::Expr::ONE)));
+    builder.assert_zero(is_cswap.clone() * (cswap_c.clone() * (cswap_c.clone() - F_1)));
 
     // Conditional swap equations for the top two stack items.
     builder.when_transition().assert_zeros([
@@ -259,7 +262,7 @@ pub fn enforce_main<AB>(
     ]);
 
     // Binary constraint for the cswapw selector (same selector as cswap).
-    builder.assert_zero(is_cswapw.clone() * (cswap_c.clone() * (cswap_c.clone() - AB::Expr::ONE)));
+    builder.assert_zero(is_cswapw.clone() * (cswap_c.clone() * (cswap_c.clone() - F_1)));
 
     // Conditional swap equations for the top two words.
     builder.when_transition().assert_zeros([
@@ -282,7 +285,7 @@ pub fn enforce_main<AB>(
     ]);
 
     // ASSERT: top element must be 1 (shift handled by stack general).
-    builder.assert_zero(is_assert * (s0 - AB::Expr::ONE));
+    builder.assert_zero(is_assert * (s0 - F_1));
 
     // CALLER: load fn_hash into the top 4 stack elements.
     builder.when_transition().assert_zeros([

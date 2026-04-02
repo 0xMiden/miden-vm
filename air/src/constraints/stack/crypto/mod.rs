@@ -3,12 +3,11 @@
 //! This module enforces crypto-related stack ops:
 //! CRYPTOSTREAM, HORNERBASE, and HORNEREXT.
 
-use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
     MainTraceRow, MidenAirBuilder,
-    constraints::{ext_field::QuadFeltExpr, op_flags::OpFlags},
+    constraints::{constants::F_8, ext_field::QuadFeltExpr, op_flags::OpFlags},
     trace::decoder::USER_OP_HELPERS_OFFSET,
 };
 
@@ -44,7 +43,6 @@ fn enforce_cryptostream_constraints<AB>(
     // that track the stream offset. Those counters advance by 8 (one word) per row.
     // Everything is gated by the op flag, so the constraints are active only when
     // CRYPTOSTREAM is executed.
-    let eight: AB::Expr = AB::Expr::from_u16(8);
     let gate = op_flags.cryptostream();
 
     builder
@@ -59,12 +57,12 @@ fn enforce_cryptostream_constraints<AB>(
     builder
         .when_transition()
         .assert_zero(gate.clone() * (next.stack[11].into() - local.stack[11].into()));
-    builder.when_transition().assert_zero(
-        gate.clone() * (next.stack[12].into() - (local.stack[12].into() + eight.clone())),
-    );
     builder
         .when_transition()
-        .assert_zero(gate.clone() * (next.stack[13].into() - (local.stack[13].into() + eight)));
+        .assert_zero(gate.clone() * (next.stack[12].into() - (local.stack[12].into() + F_8)));
+    builder
+        .when_transition()
+        .assert_zero(gate.clone() * (next.stack[13].into() - (local.stack[13].into() + F_8)));
     builder
         .when_transition()
         .assert_zero(gate.clone() * (next.stack[14].into() - local.stack[14].into()));

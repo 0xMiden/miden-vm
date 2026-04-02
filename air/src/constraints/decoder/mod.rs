@@ -41,8 +41,11 @@ use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
-    MainTraceRow, MidenAirBuilder,
-    constraints::op_flags::{ExprDecoderAccess, OpFlags},
+    Felt, MainTraceRow, MidenAirBuilder,
+    constraints::{
+        constants::{F_1, F_128, HASH_CYCLE_LEN_FELT},
+        op_flags::{ExprDecoderAccess, OpFlags},
+    },
     trace::decoder as decoder_cols,
 };
 
@@ -57,9 +60,6 @@ const ADDR_OFFSET: usize = 0;
 /// Index offsets within the decoder array for op bits (b0-b6).
 /// Op bits start at index 1 in the decoder (after addr at index 0).
 const OP_BITS_OFFSET: usize = 1;
-
-/// Hash cycle length for Poseidon2 (32 rows per permutation).
-const HASH_CYCLE_LEN: u64 = 32;
 
 /// Number of operation bits.
 const NUM_OP_BITS: usize = 7;
@@ -90,9 +90,9 @@ fn op_bits_to_value<AB>(bits: &[AB::Expr; NUM_OP_BITS]) -> AB::Expr
 where
     AB: MidenAirBuilder,
 {
-    bits.iter().enumerate().fold(AB::Expr::ZERO, |acc, (i, bit)| {
-        acc + bit.clone() * AB::Expr::from_u16(1u16 << i)
-    })
+    bits.iter()
+        .enumerate()
+        .fold(AB::Expr::ZERO, |acc, (i, bit)| acc + bit.clone() * AB::F::from_u16(1u16 << i))
 }
 
 // ENTRY POINTS
@@ -340,7 +340,7 @@ fn enforce_general_constraints<AB>(
 
     // SPLIT/LOOP: top stack value must be binary (branch selector).
     let split_or_loop = op_flags.split() + op_flags.loop_op();
-    let s0_binary = s0.clone() * (s0.clone() - AB::Expr::ONE);
+    let s0_binary = s0.clone() * (s0.clone() - F_1);
     builder.assert_zero(split_or_loop * s0_binary);
 
     // DYN: the first half holds the callee digest; the second half must be zero.
@@ -420,7 +420,7 @@ fn enforce_group_count_constraints<AB>(
     // This ensures: if sp=1 and delta_gc != 0, then delta_gc must equal 1
     builder
         .when_transition()
-        .assert_zero(sp.clone() * delta_gc.clone() * (delta_gc.clone() - AB::Expr::ONE));
+        .assert_zero(sp.clone() * delta_gc.clone() * (delta_gc.clone() - F_1));
 
     // Constraint 2: If gc decrements and this is not a PUSH-immediate row,
     // then h0 must be zero (no immediate value packed into the group).
@@ -435,7 +435,7 @@ fn enforce_group_count_constraints<AB>(
     let respan_flag = op_flags.respan();
     builder
         .when_transition()
-        .assert_zero((span_flag + respan_flag + is_push) * (delta_gc.clone() - AB::Expr::ONE));
+        .assert_zero((span_flag + respan_flag + is_push) * (delta_gc.clone() - F_1));
 
     // Constraint 4: If the next op is END or RESPAN, gc cannot decrement on this row.
     // delta_gc * (end' + respan') = 0
@@ -489,8 +489,7 @@ fn enforce_op_group_decoding_constraints<AB>(
 
     // When SPAN/RESPAN/PUSH or when gc doesn't change, shift h0 by op'.
     // (h0 - h0' * 2^7 - op') = 0 under the combined flag.
-    let op_group_base = AB::Expr::from_u16(1u16 << 7);
-    let h0_shift = h0.clone() - h0_next * op_group_base - op_next;
+    let h0_shift = h0.clone() - h0_next * F_128 - op_next;
     builder
         .when_transition()
         .assert_zero((f_span + f_respan + is_push + f_sgc) * h0_shift);
@@ -560,7 +559,7 @@ fn enforce_op_index_constraints<AB>(
 
     // Constraint 3: When staying in the same group, ox increments by 1.
     // sp * sp' * (1 - ng) * (ox' - ox - 1) = 0
-    let delta_ox = ox_next - ox.clone() - AB::Expr::ONE;
+    let delta_ox = ox_next - ox.clone() - F_1;
     builder
         .when_transition()
         .assert_zero(sp * sp_next * (AB::Expr::ONE - ng) * delta_ox);
@@ -569,7 +568,7 @@ fn enforce_op_index_constraints<AB>(
     // ∏_{i=0}^{8}(ox - i) = 0
     let mut range_check = ox.clone();
     for i in 1..=8u64 {
-        range_check *= ox.clone() - AB::Expr::from_u16(i as u16);
+        range_check *= ox.clone() - Felt::new(i);
     }
     builder.assert_zero(range_check);
 }
@@ -664,11 +663,10 @@ fn enforce_block_address_constraints<AB>(
 
     // Constraint 2: RESPAN moves to the next hash block (Poseidon2 = 32 rows).
     // respan_flag * (addr' - addr - HASH_CYCLE_LEN) = 0
-    let hash_cycle_len: AB::Expr = AB::Expr::from_u16(HASH_CYCLE_LEN as u16);
     let respan_flag = op_flags.respan();
     builder
         .when_transition()
-        .assert_zero(respan_flag * (addr_next - addr.clone() - hash_cycle_len));
+        .assert_zero(respan_flag * (addr_next - addr.clone() - HASH_CYCLE_LEN_FELT));
 
     // Constraint 3: HALT forces addr = 0.
     // halt_flag * addr = 0

@@ -34,6 +34,7 @@ use miden_core::field::PrimeCharacteristicRing;
 use super::selectors::memory_chiplet_flag;
 use crate::{
     MainTraceRow, MidenAirBuilder,
+    constraints::constants::{F_1, TWO_POW_16},
     trace::{
         CHIPLETS_OFFSET,
         chiplets::{
@@ -44,7 +45,6 @@ use crate::{
         },
     },
 };
-
 // ENTRY POINTS
 // ================================================================================================
 
@@ -99,14 +99,12 @@ pub fn enforce_memory_constraints_all_rows<AB>(
     // Load memory columns using typed struct
     let cols: MemoryColumns<AB::Expr> = MemoryColumns::from_row::<AB>(local);
 
-    let one: AB::Expr = AB::Expr::ONE;
-
     // Binary constraints
     let gate = memory_flag.clone();
-    builder.assert_zero(gate.clone() * cols.is_read.clone() * (cols.is_read.clone() - one.clone()));
-    builder.assert_zero(gate.clone() * cols.is_word.clone() * (cols.is_word.clone() - one.clone()));
-    builder.assert_zero(gate.clone() * cols.idx0.clone() * (cols.idx0.clone() - one.clone()));
-    builder.assert_zero(gate * cols.idx1.clone() * (cols.idx1.clone() - one));
+    builder.assert_zero(gate.clone() * cols.is_read.clone() * (cols.is_read.clone() - F_1));
+    builder.assert_zero(gate.clone() * cols.is_word.clone() * (cols.is_word.clone() - F_1));
+    builder.assert_zero(gate.clone() * cols.idx0.clone() * (cols.idx0.clone() - F_1));
+    builder.assert_zero(gate * cols.idx1.clone() * (cols.idx1.clone() - F_1));
 
     // For word access, idx bits must be zero (only element accesses use idx0/idx1).
     let word_gate = memory_flag.clone() * cols.is_word.clone();
@@ -129,10 +127,8 @@ pub fn enforce_memory_constraints_first_row<AB>(
     // Load first memory row columns using typed struct
     let cols_next: MemoryColumns<AB::Expr> = MemoryColumns::from_row::<AB>(cols_first);
 
-    let one: AB::Expr = AB::Expr::ONE;
-
     // Compute constraint flags for all 4 word elements
-    let [c0, c1, c2, c3] = cols_next.compute_value_constraint_flags(one.clone());
+    let [c0, c1, c2, c3] = cols_next.compute_value_constraint_flags(AB::Expr::ONE);
 
     // First row: if v'[i] is not written to, then v'[i] = 0
     let gate = flag_next_row_first_memory;
@@ -161,9 +157,7 @@ pub fn enforce_memory_constraints_all_rows_except_last<AB>(
     let cols: MemoryColumns<AB::Expr> = MemoryColumns::from_row::<AB>(local);
     let cols_next: MemoryColumns<AB::Expr> = MemoryColumns::from_row::<AB>(next);
 
-    let one: AB::Expr = AB::Expr::ONE;
-
-    let deltas = MemoryDeltas::new::<AB>(&cols, &cols_next, one.clone());
+    let deltas = MemoryDeltas::new::<AB>(&cols, &cols_next, AB::Expr::ONE);
 
     // ==========================================================================
     // DELTA INVERSE CONSTRAINTS
@@ -172,7 +166,7 @@ pub fn enforce_memory_constraints_all_rows_except_last<AB>(
         builder,
         flag_memory_active_not_last.clone(),
         &deltas,
-        one.clone(),
+        AB::Expr::ONE,
     );
 
     // ==========================================================================
@@ -190,7 +184,7 @@ pub fn enforce_memory_constraints_all_rows_except_last<AB>(
     builder.assert_zero(
         flag_memory_active_not_last.clone()
             * (cols_next.flag_same_ctx_word.clone()
-                - (one.clone() - deltas.n0.clone()) * (one.clone() - deltas.n1.clone())),
+                - (AB::Expr::ONE - deltas.n0.clone()) * (AB::Expr::ONE - deltas.n1.clone())),
     );
 
     // ==========================================================================
@@ -202,7 +196,7 @@ pub fn enforce_memory_constraints_all_rows_except_last<AB>(
         &cols,
         &cols_next,
         &deltas,
-        one.clone(),
+        AB::Expr::ONE,
     );
 
     // ==========================================================================
@@ -210,7 +204,7 @@ pub fn enforce_memory_constraints_all_rows_except_last<AB>(
     // ==========================================================================
 
     // Compute constraint flags for all 4 elements
-    let [c0, c1, c2, c3] = cols_next.compute_value_constraint_flags(one.clone());
+    let [c0, c1, c2, c3] = cols_next.compute_value_constraint_flags(AB::Expr::ONE);
 
     // When v'[i] is not written to:
     // - if f_scw' = 1: v'[i] = v[i] (copy from previous)
@@ -257,7 +251,7 @@ where
         let ctx_delta = cols_next.ctx.clone() - cols.ctx.clone();
         let addr_delta = cols_next.word_addr.clone() - cols.word_addr.clone();
         let clk_delta = cols_next.clk.clone() - cols.clk.clone();
-        let two_pow_16: E = AB::Expr::from_u32(1 << 16).into();
+        let two_pow_16: E = AB::Expr::from(TWO_POW_16).into();
 
         // n0 = ctx_delta * d_inv'
         // n1 = addr_delta * d_inv'

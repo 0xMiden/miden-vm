@@ -32,6 +32,7 @@ use miden_core::field::PrimeCharacteristicRing;
 use super::selectors::{ace_chiplet_flag, memory_chiplet_flag};
 use crate::{
     MainTraceRow, MidenAirBuilder,
+    constraints::constants::{F_1, F_4},
     trace::chiplets::ace::{
         CLK_IDX, CTX_IDX, EVAL_OP_IDX, ID_0_IDX, ID_1_IDX, PTR_IDX, READ_NUM_EVAL_IDX,
         SELECTOR_BLOCK_IDX, SELECTOR_START_IDX, V_0_0_IDX, V_0_1_IDX, V_1_0_IDX, V_1_1_IDX,
@@ -126,15 +127,12 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     let v2_0: AB::Expr = load_ace_col::<AB>(local, V_2_0_IDX);
     let v2_1: AB::Expr = load_ace_col::<AB>(local, V_2_1_IDX);
 
-    let one: AB::Expr = AB::Expr::ONE;
-    let four: AB::Expr = AB::Expr::from_u32(4);
-
     // Gate all transition constraints by is_transition() to avoid last-row issues
     let is_transition: AB::Expr = builder.is_transition();
 
     // ACE continuing to the next row (not transitioning out).
     // Includes is_transition because it reads next-row values.
-    let flag_ace_next = is_transition.clone() * (one.clone() - s3_next.clone());
+    let flag_ace_next = is_transition.clone() * (AB::Expr::ONE - s3_next.clone());
     // Last ACE row (next row transitions out of ACE).
     // Includes is_transition because it reads next-row values.
     let flag_ace_last = is_transition.clone() * s3_next.clone();
@@ -143,18 +141,18 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     // BINARY CONSTRAINTS
     // ==========================================================================
 
-    builder.assert_zero(ace_flag.clone() * sstart.clone() * (sstart.clone() - one.clone()));
-    builder.assert_zero(ace_flag.clone() * sblock.clone() * (sblock.clone() - one.clone()));
+    builder.assert_zero(ace_flag.clone() * sstart.clone() * (sstart.clone() - AB::Expr::ONE));
+    builder.assert_zero(ace_flag.clone() * sblock.clone() * (sblock.clone() - AB::Expr::ONE));
 
     // ==========================================================================
     // SECTION/BLOCK FLAGS CONSTRAINTS
     // ==========================================================================
 
-    let f_next = one.clone() - sstart_next.clone();
+    let f_next = AB::Expr::ONE - sstart_next.clone();
 
     // Sections must end with EVAL blocks (not READ).
     // OR(t*a, t*b) = t*OR(a, b) when t is binary.
-    let f_end = binary_or((one.clone() - s3_next.clone()) * sstart_next.clone(), s3_next.clone());
+    let f_end = binary_or((AB::Expr::ONE - s3_next.clone()) * sstart_next.clone(), s3_next.clone());
 
     // Last row of ACE chiplet cannot be section start
     builder.assert_zero(ace_flag.clone() * flag_ace_last.clone() * sstart.clone());
@@ -170,19 +168,19 @@ pub fn enforce_ace_constraints_all_rows<AB>(
             * flag_ace_next.clone()
             * f_next.clone()
             * sblock.clone()
-            * (one.clone() - sblock_next.clone()),
+            * (AB::Expr::ONE - sblock_next.clone()),
     );
     // Sections must end with EVAL blocks (not READ)
     builder.assert_zero(
-        ace_flag.clone() * is_transition.clone() * f_end.clone() * (one.clone() - sblock.clone()),
+        ace_flag.clone() * is_transition.clone() * f_end.clone() * (AB::Expr::ONE - sblock.clone()),
     );
 
     // ==========================================================================
     // SECTION CONSTRAINTS (within section)
     // ==========================================================================
 
-    let flag_within_section = one.clone() - sstart_next.clone();
-    let f_read = one.clone() - sblock.clone();
+    let flag_within_section = AB::Expr::ONE - sstart_next.clone();
+    let f_read = AB::Expr::ONE - sblock.clone();
     let f_eval = sblock.clone();
 
     // Context consistency within a section
@@ -193,7 +191,7 @@ pub fn enforce_ace_constraints_all_rows<AB>(
 
     // Memory pointer increments: +4 in READ, +1 in EVAL
     // ptr' = ptr + 4 * f_read + f_eval
-    let expected_ptr_next = ptr.clone() + four.clone() * f_read.clone() + f_eval.clone();
+    let expected_ptr_next = ptr.clone() + f_read.clone() * F_4 + f_eval.clone();
 
     // Node ID decrements: -2 in READ, -1 in EVAL
     // id0 = id0' + 2 * f_read + f_eval
@@ -208,13 +206,14 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     // ==========================================================================
 
     // In READ block, the two node IDs should be consecutive (id1 = id0 - 1)
-    builder
-        .assert_zero(ace_flag.clone() * f_read.clone() * (id1.clone() - id0.clone() + one.clone()));
+    builder.assert_zero(
+        ace_flag.clone() * f_read.clone() * (id1.clone() - id0.clone() + AB::Expr::ONE),
+    );
 
     // READ→EVAL transition occurs when n_eval matches the first EVAL id0.
     // n_eval is constant across READ rows and encodes (num_eval_rows - 1).
     // Enforce: f_read * (f_read' * n_eval' + f_eval' * id0' - n_eval) = 0
-    let f_read_next = one.clone() - sblock_next.clone();
+    let f_read_next = AB::Expr::ONE - sblock_next.clone();
     let f_eval_next = sblock_next.clone();
     let selected = f_read_next * n_eval_next.clone() + f_eval_next * id0_next.clone();
     builder.assert_zero(
@@ -227,11 +226,7 @@ pub fn enforce_ace_constraints_all_rows<AB>(
 
     // op must be -1, 0, or 1: op * (op - 1) * (op + 1) = 0
     builder.assert_zero(
-        ace_flag.clone()
-            * f_eval.clone()
-            * op.clone()
-            * (op.clone() - one.clone())
-            * (op.clone() + one.clone()),
+        ace_flag.clone() * f_eval.clone() * op.clone() * (op.clone() - F_1) * (op.clone() + F_1),
     );
 
     // Arithmetic operation constraints
@@ -265,10 +260,8 @@ pub fn enforce_ace_constraints_first_row<AB>(
     AB: MidenAirBuilder,
 {
     let sstart_next: AB::Expr = load_ace_col::<AB>(next, SELECTOR_START_IDX);
-    let one: AB::Expr = AB::Expr::ONE;
-
     // First row of ACE must have sstart' = 1
-    builder.assert_zero(flag_next_row_first_ace * (sstart_next - one));
+    builder.assert_zero(flag_next_row_first_ace * (sstart_next - F_1));
 }
 
 // INTERNAL HELPERS

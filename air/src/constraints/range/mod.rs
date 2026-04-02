@@ -6,11 +6,11 @@
 //!
 //! Bus constraints for the range checker are in `bus`.
 
-use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
     MainTraceRow, MidenAirBuilder,
+    constraints::constants::*,
     trace::{RANGE_CHECK_TRACE_OFFSET, range},
 };
 
@@ -51,8 +51,7 @@ where
     builder.when_first_row().assert_zero(v);
 
     // Last row: V[last] = 65535 (2^16 - 1)
-    let sixty_five_k = AB::Expr::from_u32(65535);
-    builder.when_last_row().assert_eq(v, sixty_five_k);
+    builder.when_last_row().assert_eq(v, TWO_POW_16_MINUS_1);
 }
 
 /// Enforces the transition constraint for the range checker V column.
@@ -74,25 +73,16 @@ pub fn enforce_range_transition_constraint<AB>(
     let change_v = v_next - v;
 
     // Powers of 3: {1, 3, 9, 27, 81, 243, 729, 2187}
-    let one_expr = AB::Expr::ONE;
-    let three = AB::Expr::from_u16(3);
-    let nine = AB::Expr::from_u16(9);
-    let twenty_seven = AB::Expr::from_u16(27);
-    let eighty_one = AB::Expr::from_u16(81);
-    let two_forty_three = AB::Expr::from_u16(243);
-    let seven_twenty_nine = AB::Expr::from_u16(729);
-    let two_one_eight_seven = AB::Expr::from_u16(2187);
-
     // Note: Extra factor of change_v allows V to stay constant (change_v = 0) during padding
     builder.when_transition().assert_zero(
         change_v.clone()
-            * (change_v.clone() - one_expr)
-            * (change_v.clone() - three)
-            * (change_v.clone() - nine)
-            * (change_v.clone() - twenty_seven)
-            * (change_v.clone() - eighty_one)
-            * (change_v.clone() - two_forty_three)
-            * (change_v.clone() - seven_twenty_nine)
-            * (change_v - two_one_eight_seven),
+            * (change_v.clone() - F_1)
+            * (change_v.clone() - F_3)
+            * (change_v.clone() - F_9)
+            * (change_v.clone() - F_27)
+            * (change_v.clone() - F_81)
+            * (change_v.clone() - F_243)
+            * (change_v.clone() - F_729)
+            * (change_v - F_2187),
     );
 }

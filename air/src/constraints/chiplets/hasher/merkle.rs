@@ -48,8 +48,6 @@ pub(super) fn enforce_node_index_constraints<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    let one: AB::Expr = AB::Expr::ONE;
-
     // -------------------------------------------------------------------------
     // Output Index Constraint
     // -------------------------------------------------------------------------
@@ -66,7 +64,7 @@ pub(super) fn enforce_node_index_constraints<AB>(
 
     // Direction bit: b = i - 2*i'
     // This is the bit discarded when shifting index right by 1.
-    let b = cols.node_index.clone() - AB::Expr::TWO * cols_next.node_index.clone();
+    let b = cols.node_index.clone() - cols_next.node_index.clone().double();
 
     // Constraint 2: b must be binary when shifting (b^2 - b = 0)
     let gate = hasher_flag.clone() * f_shift.clone();
@@ -78,7 +76,7 @@ pub(super) fn enforce_node_index_constraints<AB>(
 
     // Constraint 3: Index unchanged when not shifting or outputting
     // keep = 1 - f_out - f_shift
-    let keep = one.clone() - f_out - f_shift;
+    let keep = AB::Expr::ONE - f_out - f_shift;
     let gate = hasher_flag.clone() * keep;
     builder
         .when_transition()
@@ -105,7 +103,6 @@ pub(super) fn enforce_merkle_absorb_state<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    let one: AB::Expr = AB::Expr::ONE;
     let f_absorb = flags.f_merkle_absorb();
 
     let digest = cols.digest();
@@ -114,7 +111,7 @@ pub(super) fn enforce_merkle_absorb_state<AB>(
     let cap_next = cols_next.capacity();
 
     // Direction bit: b = i - 2*i'
-    let b = cols.node_index.clone() - AB::Expr::TWO * cols_next.node_index.clone();
+    let b = cols.node_index.clone() - cols_next.node_index.clone().double();
 
     // -------------------------------------------------------------------------
     // Capacity Reset Constraint
@@ -132,7 +129,7 @@ pub(super) fn enforce_merkle_absorb_state<AB>(
     // -------------------------------------------------------------------------
 
     // Constraint 2: If b=0, digest goes to rate0 (h'[0..4] = h[0..4])
-    let f_b0 = f_absorb.clone() * (one.clone() - b.clone());
+    let f_b0 = f_absorb.clone() * (AB::Expr::ONE - b.clone());
     let gate_b0 = hasher_flag.clone() * f_b0;
     builder.when_transition().assert_zeros(core::array::from_fn::<_, 4, _>(|i| {
         gate_b0.clone() * (rate0_next[i].clone() - digest[i].clone())

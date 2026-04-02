@@ -31,7 +31,7 @@ use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
     MainTraceRow, MidenAirBuilder,
-    constraints::op_flags::OpFlags,
+    constraints::{constants::*, op_flags::OpFlags},
     trace::{
         decoder::{IS_CALL_FLAG_COL_IDX, IS_SYSCALL_FLAG_COL_IDX},
         stack::{B0_COL_IDX, B1_COL_IDX},
@@ -57,12 +57,10 @@ pub fn enforce_main<AB>(
     AB: MidenAirBuilder,
 {
     // Boundary constraints: stack depth and overflow pointer must start/end clean.
-    let sixteen: AB::Expr = AB::Expr::from_u16(16);
-    let zero: AB::Expr = AB::Expr::ZERO;
-    builder.when_first_row().assert_eq(local.stack[B0_COL_IDX], sixteen.clone());
-    builder.when_last_row().assert_eq(local.stack[B0_COL_IDX], sixteen);
-    builder.when_first_row().assert_eq(local.stack[B1_COL_IDX], zero.clone());
-    builder.when_last_row().assert_eq(local.stack[B1_COL_IDX], zero);
+    builder.when_first_row().assert_eq(local.stack[B0_COL_IDX], F_16);
+    builder.when_last_row().assert_eq(local.stack[B0_COL_IDX], F_16);
+    builder.when_first_row().assert_zero(local.stack[B1_COL_IDX]);
+    builder.when_last_row().assert_zero(local.stack[B1_COL_IDX]);
 
     // Transition constraints: depth bookkeeping, overflow flag, and pointer updates.
     enforce_stack_depth_constraints(builder, local, next, op_flags);
@@ -135,7 +133,7 @@ fn enforce_stack_depth_constraints<AB>(
     let right_shift_part = op_flags.right_shift();
 
     // CALL/SYSCALL/DYNCALL: depth resets to 16 when entering a new context.
-    let call_part = call_or_dyncall_or_syscall * (depth_next - AB::Expr::from_u16(16));
+    let call_part = call_or_dyncall_or_syscall * (depth_next - F_16);
 
     // Combined constraint: normal depth update + shift effects + call reset = 0.
     builder
@@ -163,7 +161,7 @@ fn enforce_overflow_flag_constraints<AB>(
     // (1 - overflow) * (depth - 16) = 0
     // When depth > 16, overflow must be 1 (meaning h0 = 1/(depth - 16))
     // When depth = 16, this constraint is satisfied regardless of overflow
-    let constraint = (AB::Expr::ONE - op_flags.overflow()) * (depth - AB::Expr::from_u16(16));
+    let constraint = (AB::Expr::ONE - op_flags.overflow()) * (depth - F_16);
 
     builder.assert_zero(constraint);
 }

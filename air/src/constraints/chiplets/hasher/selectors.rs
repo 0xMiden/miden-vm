@@ -23,7 +23,7 @@ use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::AirBuilder;
 
 use super::{HasherColumns, HasherFlags};
-use crate::MidenAirBuilder;
+use crate::{MidenAirBuilder, constraints::constants::F_1};
 
 // CONSTRAINT HELPERS
 // ================================================================================================
@@ -50,15 +50,13 @@ pub(super) fn enforce_selector_consistency<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    let one: AB::Expr = AB::Expr::ONE;
-
     // -------------------------------------------------------------------------
     // Constraint 1: Selector stability
     // -------------------------------------------------------------------------
     // s[1] and s[2] unchanged unless f_out or f_out_next.
     // Constraint: (1 - f_out - f_out_next) * (s[i]' - s[i]) = 0
     // Note: f_out and f_out_next are mutually exclusive (row30 vs row31), so no overlap.
-    let stability_gate = one.clone() - flags.f_out.clone() - flags.f_out_next.clone();
+    let stability_gate = AB::Expr::ONE - flags.f_out.clone() - flags.f_out_next.clone();
 
     // Use a combined gate to share `hasher_flag * stability_gate` across both stability
     // constraints.
@@ -81,7 +79,7 @@ pub(super) fn enforce_selector_consistency<AB>(
     builder.assert_zero(
         hasher_flag
             * flags.cycle_row_31.clone()
-            * (one.clone() - cols.s0.clone())
+            * (AB::Expr::ONE - cols.s0.clone())
             * cols.s1.clone(),
     );
 }
@@ -102,8 +100,8 @@ pub fn enforce_selector_booleanity<AB>(
     let s1: AB::Expr = s1.into();
     let s2: AB::Expr = s2.into();
     builder.assert_zeros([
-        hasher_flag.clone() * s0.clone() * (s0 - AB::Expr::ONE),
-        hasher_flag.clone() * s1.clone() * (s1 - AB::Expr::ONE),
-        hasher_flag * s2.clone() * (s2 - AB::Expr::ONE),
+        hasher_flag.clone() * s0.clone() * (s0 - F_1),
+        hasher_flag.clone() * s1.clone() * (s1 - F_1),
+        hasher_flag * s2.clone() * (s2 - F_1),
     ]);
 }

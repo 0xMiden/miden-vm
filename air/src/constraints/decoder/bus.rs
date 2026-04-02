@@ -29,8 +29,8 @@ use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 
 use crate::{
-    MainTraceRow, MidenAirBuilder,
-    constraints::{bus::indices::P1_BLOCK_STACK, op_flags::OpFlags},
+    Felt, MainTraceRow, MidenAirBuilder,
+    constraints::{bus::indices::P1_BLOCK_STACK, constants::*, op_flags::OpFlags},
     trace::Challenges,
 };
 
@@ -180,7 +180,7 @@ where
 {
     OP_BIT_WEIGHTS.iter().enumerate().fold(AB::Expr::ZERO, |acc, (i, weight)| {
         let bit: AB::Expr = row.decoder[1 + i].into();
-        acc + bit * AB::Expr::from_u16(*weight)
+        acc + bit * Felt::new(*weight as u64)
     })
 }
 
@@ -253,10 +253,6 @@ pub fn enforce_block_stack_table_constraint<AB>(
         (aux_local[P1_BLOCK_STACK], aux_next[P1_BLOCK_STACK])
     };
 
-    let one = AB::Expr::ONE;
-    let zero = AB::Expr::ZERO;
-    let one_ef = AB::ExprEF::ONE;
-
     // Helper to convert trace value to base field expression
     let to_expr = |v: AB::Var| -> AB::Expr { v.into() };
 
@@ -304,7 +300,6 @@ pub fn enforce_block_stack_table_constraint<AB>(
         to_expr(next.fn_hash[2]),
         to_expr(next.fn_hash[3]),
     ];
-
     // =========================================================================
     // MESSAGE BUILDERS
     // =========================================================================
@@ -328,7 +323,7 @@ pub fn enforce_block_stack_table_constraint<AB>(
     let is_end = op_flags.end();
 
     // JOIN/SPLIT/SPAN/DYN: insert(addr', addr, 0, 0, 0, 0, 0, 0, 0, 0)
-    let msg_simple = encoders.simple(&addr_next, &addr_local, &zero);
+    let msg_simple = encoders.simple(&addr_next, &addr_local, &AB::Expr::ZERO);
     let v_join = msg_simple.clone() * is_join.clone();
     let v_split = msg_simple.clone() * is_split.clone();
     let v_span = msg_simple.clone() * is_span.clone();
@@ -339,14 +334,14 @@ pub fn enforce_block_stack_table_constraint<AB>(
     let v_loop = msg_loop * is_loop.clone();
 
     // RESPAN: insert(addr', h1', 0, 0, 0, 0, 0, 0, 0, 0)
-    let msg_respan_insert = encoders.simple(&addr_next, &h1_next, &zero);
+    let msg_respan_insert = encoders.simple(&addr_next, &h1_next, &AB::Expr::ZERO);
     let v_respan = msg_respan_insert * is_respan.clone();
 
     // CALL/SYSCALL: insert(addr', addr, 0, ctx, fmp, b0, b1, fn_hash[0..4])
     let msg_call = encoders.full(
         &addr_next,
         &addr_local,
-        &zero,
+        &AB::Expr::ZERO,
         &ctx_local,
         &b0_local,
         &b1_local,
@@ -359,7 +354,7 @@ pub fn enforce_block_stack_table_constraint<AB>(
     let msg_dyncall = encoders.full(
         &addr_next,
         &addr_local,
-        &zero,
+        &AB::Expr::ZERO,
         &ctx_local,
         &h4_local,
         &h5_local,
@@ -383,18 +378,18 @@ pub fn enforce_block_stack_table_constraint<AB>(
         v_join + v_split + v_span + v_dyn + v_loop + v_respan + v_call + v_syscall + v_dyncall;
 
     // Response side: insertion_sum + (1 - insert_flag_sum)
-    let response = insertion_sum + (one_ef.clone() - insert_flag_sum);
+    let response = insertion_sum + (AB::ExprEF::ONE - insert_flag_sum);
 
     // =========================================================================
     // REMOVAL CONTRIBUTIONS (u_xxx = f_xxx * message)
     // =========================================================================
 
     // RESPAN removal: remove(addr, h1', 0, 0, 0, 0, 0, 0, 0, 0)
-    let msg_respan_remove = encoders.simple(&addr_local, &h1_next, &zero);
+    let msg_respan_remove = encoders.simple(&addr_local, &h1_next, &AB::Expr::ZERO);
     let u_respan = msg_respan_remove * is_respan.clone();
 
     // END for simple blocks: remove(addr, addr', is_loop_flag, 0, 0, 0, 0, 0, 0, 0)
-    let is_simple_end = one.clone() - is_call_flag.clone() - is_syscall_flag.clone();
+    let is_simple_end = AB::Expr::ONE - is_call_flag.clone() - is_syscall_flag.clone();
     let msg_end_simple = encoders.simple(&addr_local, &addr_next, &is_loop_flag);
     let end_simple_gate = is_end.clone() * is_simple_end;
     let u_end_simple = msg_end_simple * end_simple_gate;
@@ -425,7 +420,7 @@ pub fn enforce_block_stack_table_constraint<AB>(
     let removal_sum = u_end + u_respan;
 
     // Request side: removal_sum + (1 - remove_flag_sum)
-    let request = removal_sum + (one_ef.clone() - remove_flag_sum);
+    let request = removal_sum + (AB::ExprEF::ONE - remove_flag_sum);
 
     // =========================================================================
     // RUNNING PRODUCT CONSTRAINT
@@ -498,10 +493,6 @@ pub fn enforce_block_hash_table_constraint<AB>(
         )
     };
 
-    let one = AB::Expr::ONE;
-    let zero = AB::Expr::ZERO;
-    let one_ef = AB::ExprEF::ONE;
-
     // Helper to convert trace value to base field expression
     let to_expr = |v: AB::Var| -> AB::Expr { v.into() };
 
@@ -511,7 +502,6 @@ pub fn enforce_block_hash_table_constraint<AB>(
 
     // Parent block ID (next row's address for all insertions)
     let parent_id = to_expr(next.decoder[decoder_cols::ADDR]);
-
     // Hasher state for child hashes
     // First half: h[0..4]
     let h0 = to_expr(local.decoder[decoder_cols::HASHER_STATE_OFFSET]);
@@ -554,7 +544,7 @@ pub fn enforce_block_hash_table_constraint<AB>(
 
     // is_first_child = 1 when next op is NOT end/repeat/halt
     let is_not_first_child = is_end_next + is_repeat_next + is_halt_next;
-    let is_first_child = one.clone() - is_not_first_child;
+    let is_first_child = AB::Expr::ONE - is_not_first_child;
 
     // =========================================================================
     // MESSAGE BUILDERS
@@ -582,32 +572,41 @@ pub fn enforce_block_hash_table_constraint<AB>(
 
     // JOIN: Insert both children
     // Left child (is_first_child=1): hash from first half
-    let msg_join_left = encoder.encode(&parent_id, [&h0, &h1, &h2, &h3], &one, &zero);
+    let msg_join_left =
+        encoder.encode(&parent_id, [&h0, &h1, &h2, &h3], &AB::Expr::ONE, &AB::Expr::ZERO);
     // Right child (is_first_child=0): hash from second half
-    let msg_join_right = encoder.encode(&parent_id, [&h4, &h5, &h6, &h7], &zero, &zero);
+    let msg_join_right =
+        encoder.encode(&parent_id, [&h4, &h5, &h6, &h7], &AB::Expr::ZERO, &AB::Expr::ZERO);
     let v_join = (msg_join_left * msg_join_right) * is_join.clone();
 
     // SPLIT: Insert selected child based on s0
     // If s0=1: left child (h0-h3), else right child (h4-h7)
-    let split_h0 = s0.clone() * h0.clone() + (one.clone() - s0.clone()) * h4.clone();
-    let split_h1 = s0.clone() * h1.clone() + (one.clone() - s0.clone()) * h5.clone();
-    let split_h2 = s0.clone() * h2.clone() + (one.clone() - s0.clone()) * h6.clone();
-    let split_h3 = s0.clone() * h3.clone() + (one.clone() - s0.clone()) * h7.clone();
-    let msg_split =
-        encoder.encode(&parent_id, [&split_h0, &split_h1, &split_h2, &split_h3], &zero, &zero);
+    let split_h0 = s0.clone() * h0.clone() + (AB::Expr::ONE - s0.clone()) * h4.clone();
+    let split_h1 = s0.clone() * h1.clone() + (AB::Expr::ONE - s0.clone()) * h5.clone();
+    let split_h2 = s0.clone() * h2.clone() + (AB::Expr::ONE - s0.clone()) * h6.clone();
+    let split_h3 = s0.clone() * h3.clone() + (AB::Expr::ONE - s0.clone()) * h7.clone();
+    let msg_split = encoder.encode(
+        &parent_id,
+        [&split_h0, &split_h1, &split_h2, &split_h3],
+        &AB::Expr::ZERO,
+        &AB::Expr::ZERO,
+    );
     let v_split = msg_split * is_split.clone();
 
     // LOOP: Conditionally insert body if s0=1
-    let msg_loop = encoder.encode(&parent_id, [&h0, &h1, &h2, &h3], &zero, &one);
+    let msg_loop =
+        encoder.encode(&parent_id, [&h0, &h1, &h2, &h3], &AB::Expr::ZERO, &AB::Expr::ONE);
     // When s0=1: insert msg_loop; when s0=0: multiply by 1 (no insertion)
-    let v_loop = (msg_loop * s0.clone() + (one_ef.clone() - s0.clone())) * is_loop.clone();
+    let v_loop = (msg_loop * s0.clone() + (AB::ExprEF::ONE - s0.clone())) * is_loop.clone();
 
     // REPEAT: Insert loop body
-    let msg_repeat = encoder.encode(&parent_id, [&h0, &h1, &h2, &h3], &zero, &one);
+    let msg_repeat =
+        encoder.encode(&parent_id, [&h0, &h1, &h2, &h3], &AB::Expr::ZERO, &AB::Expr::ONE);
     let v_repeat = msg_repeat * is_repeat.clone();
 
     // DYN/DYNCALL/CALL/SYSCALL: Insert child hash from first half
-    let msg_call_like = encoder.encode(&parent_id, [&h0, &h1, &h2, &h3], &zero, &zero);
+    let msg_call_like =
+        encoder.encode(&parent_id, [&h0, &h1, &h2, &h3], &AB::Expr::ZERO, &AB::Expr::ZERO);
     let v_dyn = msg_call_like.clone() * is_dyn.clone();
     let v_dyncall = msg_call_like.clone() * is_dyncall.clone();
     let v_call = msg_call_like.clone() * is_call.clone();
@@ -632,7 +631,7 @@ pub fn enforce_block_hash_table_constraint<AB>(
         + v_dyncall
         + v_call
         + v_syscall
-        + (one_ef.clone() - insert_flag_sum);
+        + (AB::ExprEF::ONE - insert_flag_sum);
 
     // =========================================================================
     // REQUEST CONTRIBUTIONS (removals)
@@ -649,7 +648,7 @@ pub fn enforce_block_hash_table_constraint<AB>(
     let u_end = msg_end * is_end.clone();
 
     // Request side
-    let request = u_end + (one_ef.clone() - is_end);
+    let request = u_end + (AB::ExprEF::ONE - is_end);
 
     // =========================================================================
     // RUNNING PRODUCT CONSTRAINT
@@ -731,9 +730,6 @@ pub fn enforce_op_group_table_constraint<AB>(
         )
     };
 
-    let one = AB::Expr::ONE;
-    let one_ef = AB::ExprEF::ONE;
-
     // Helper to convert trace value to base field expression
     let to_expr = |v: AB::Var| -> AB::Expr { v.into() };
 
@@ -792,34 +788,21 @@ pub fn enforce_op_group_table_constraint<AB>(
     // OP_BATCH_2_GROUPS = [0, 0, 1] -> f_g2 = (1-c0) * (1-c1) * c2
     // OP_BATCH_1_GROUPS = [0, 1, 1] -> f_g1 = (1-c0) * c1 * c2
     let f_g8 = c0.clone();
-    let f_g4 = (one.clone() - c0.clone()) * c1.clone() * (one.clone() - c2.clone());
-    let f_g2 = (one.clone() - c0.clone()) * (one.clone() - c1.clone()) * c2.clone();
-
-    // =========================================================================
-    // CONSTANTS
-    // =========================================================================
-
-    // Build base field constants.
-    let two = AB::Expr::from_u16(2);
-    let three = AB::Expr::from_u16(3);
-    let four = AB::Expr::from_u16(4);
-    let five = AB::Expr::from_u16(5);
-    let six = AB::Expr::from_u16(6);
-    let seven = AB::Expr::from_u16(7);
-    let onetwentyeight = AB::Expr::from_u16(128);
+    let f_g4 = (AB::Expr::ONE - c0.clone()) * c1.clone() * (AB::Expr::ONE - c2.clone());
+    let f_g2 = (AB::Expr::ONE - c0.clone()) * (AB::Expr::ONE - c1.clone()) * c2.clone();
 
     // =========================================================================
     // RESPONSE (insertions during SPAN/RESPAN)
     // =========================================================================
 
     // Build messages for each group: v_i = msg(block_id', gc - i, h_i)
-    let v_1 = encoder.encode(&block_id_insert, &(gc.clone() - one.clone()), &h1);
-    let v_2 = encoder.encode(&block_id_insert, &(gc.clone() - two.clone()), &h2);
-    let v_3 = encoder.encode(&block_id_insert, &(gc.clone() - three.clone()), &h3);
-    let v_4 = encoder.encode(&block_id_insert, &(gc.clone() - four.clone()), &h4);
-    let v_5 = encoder.encode(&block_id_insert, &(gc.clone() - five.clone()), &h5);
-    let v_6 = encoder.encode(&block_id_insert, &(gc.clone() - six.clone()), &h6);
-    let v_7 = encoder.encode(&block_id_insert, &(gc.clone() - seven.clone()), &h7);
+    let v_1 = encoder.encode(&block_id_insert, &(gc.clone() - F_1), &h1);
+    let v_2 = encoder.encode(&block_id_insert, &(gc.clone() - F_2), &h2);
+    let v_3 = encoder.encode(&block_id_insert, &(gc.clone() - F_3), &h3);
+    let v_4 = encoder.encode(&block_id_insert, &(gc.clone() - F_4), &h4);
+    let v_5 = encoder.encode(&block_id_insert, &(gc.clone() - F_5), &h5);
+    let v_6 = encoder.encode(&block_id_insert, &(gc.clone() - F_6), &h6);
+    let v_7 = encoder.encode(&block_id_insert, &(gc.clone() - F_7), &h7);
 
     // Compute products for each batch size
     let prod_3 = v_1.clone() * v_2.clone() * v_3.clone();
@@ -835,7 +818,7 @@ pub fn enforce_op_group_table_constraint<AB>(
     let response = (v_1.clone() * f_g2.clone())
         + (prod_3 * f_g4.clone())
         + (prod_7 * f_g8.clone())
-        + (one_ef.clone() - (f_g2 + f_g4 + f_g8));
+        + (AB::ExprEF::ONE - (f_g2 + f_g4 + f_g8));
 
     // =========================================================================
     // REQUEST (removals when group count decrements inside span)
@@ -854,14 +837,14 @@ pub fn enforce_op_group_table_constraint<AB>(
     //
     // When PUSH: the immediate value is on the stack (s0')
     // Otherwise: the group value is h0' * 128 + op_code'
-    let group_value_non_push = h0_next * onetwentyeight + op_code_next;
-    let group_value = is_push.clone() * s0_next + (one.clone() - is_push) * group_value_non_push;
+    let group_value_non_push = h0_next * F_128 + op_code_next;
+    let group_value = is_push.clone() * s0_next + (AB::Expr::ONE - is_push) * group_value_non_push;
 
     // Removal message: u = msg(block_id, gc, group_value)
     let u = encoder.encode(&block_id_remove, &gc, &group_value);
 
     // Request formula: f_dg * u + (1 - f_dg)
-    let request = u * f_dg.clone() + (one_ef.clone() - f_dg);
+    let request = u * f_dg.clone() + (AB::ExprEF::ONE - f_dg);
 
     // =========================================================================
     // RUNNING PRODUCT CONSTRAINT

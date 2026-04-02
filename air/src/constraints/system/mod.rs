@@ -34,7 +34,10 @@ use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
     MainTraceRow, MidenAirBuilder,
-    constraints::op_flags::{ExprDecoderAccess, OpFlags},
+    constraints::{
+        constants::F_1,
+        op_flags::{ExprDecoderAccess, OpFlags},
+    },
     trace::decoder::HASHER_STATE_OFFSET,
 };
 
@@ -67,7 +70,7 @@ pub(crate) fn enforce_clock_constraint<AB>(
 {
     builder.when_first_row().assert_zero(local.clk);
 
-    builder.when_transition().assert_eq(next.clk, local.clk + AB::Expr::ONE);
+    builder.when_transition().assert_eq(next.clk, local.clk + F_1);
 }
 
 /// Enforces execution context transition constraints.
@@ -89,7 +92,7 @@ pub(crate) fn enforce_ctx_constraints<AB>(
     let f_end = op_flags.end();
 
     let call_dyncall_flag = f_call.clone() + f_dyncall.clone();
-    let expected_new_ctx = clk + AB::Expr::ONE;
+    let expected_new_ctx = clk + F_1;
     builder
         .when_transition()
         .assert_zero(call_dyncall_flag * (ctx_next.clone() - expected_new_ctx));
