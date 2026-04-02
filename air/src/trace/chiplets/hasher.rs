@@ -21,11 +21,23 @@ use super::{Felt, HASH_KERNEL_VTABLE_AUX_TRACE_OFFSET, ONE, ZERO, create_range};
 // ================================================================================================
 
 /// Hasher chiplet columns (16 columns), viewed from `chiplets[1..17]`.
+///
+/// ## Layout
+///
+/// ```text
+/// | selectors[3] |     state[12]                                        | node_index |
+/// |              | rate0[4] (= digest) | rate1[4]     | capacity[4]     |            |
+/// | s0, s1, s2   | h0  h1  h2  h3      | h4  h5  h6  h7 | h8  h9  h10 h11 | i      |
+/// ```
+///
+/// The state holds a Poseidon2 sponge in `[RATE0, RATE1, CAPACITY]` layout.
+/// Helper methods `rate0()`, `rate1()`, `capacity()`, and `digest()` provide
+/// sub-views into the state array.
 #[repr(C)]
 pub struct HasherCols<T> {
     /// Hasher-internal selectors hs0, hs1, hs2.
     pub selectors: [T; NUM_SELECTORS],
-    /// Poseidon2 state (12 field elements).
+    /// Poseidon2 state (12 field elements: 8 rate + 4 capacity).
     pub state: [T; STATE_WIDTH],
     /// Merkle tree node index.
     pub node_index: T,

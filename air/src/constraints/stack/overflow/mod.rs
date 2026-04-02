@@ -66,7 +66,7 @@ pub fn enforce_main<AB>(
     // When depth > 16, overflow must be 1; when depth = 16, satisfied for any h0.
     {
         let depth = local.stack.b0;
-        builder.assert_zero(op_flags.overflow().not() * (AB::Expr::from(depth) - F_16));
+        builder.assert_zero(op_flags.overflow().not() * (depth.into() - F_16));
     }
 
     enforce_overflow_index_constraints(builder, local, next, op_flags);
@@ -126,7 +126,7 @@ fn enforce_stack_depth_constraints<AB>(
     // - We still need to suppress the raw (b0' - b0) term on END-of-call rows, hence the mask.
     let normal_mask =
         AB::Expr::ONE - call_or_dyncall_or_syscall.clone() - call_or_dyncall_or_syscall_end;
-    let depth_delta_part = (AB::Expr::from(depth_next) - AB::Expr::from(depth)) * normal_mask;
+    let depth_delta_part = (depth_next.into() - depth.into()) * normal_mask;
 
     // Left shift with non-empty overflow: when f_shl=1 and f_ov=1, depth must decrement by 1.
     // This contributes +1 to the LHS, enforcing b0' = b0 - 1.
@@ -137,7 +137,7 @@ fn enforce_stack_depth_constraints<AB>(
     let right_shift_part = op_flags.right_shift();
 
     // CALL/SYSCALL/DYNCALL: depth resets to 16 when entering a new context.
-    let call_part = call_or_dyncall_or_syscall * (AB::Expr::from(depth_next) - F_16);
+    let call_part = call_or_dyncall_or_syscall * (depth_next.into() - F_16);
 
     // Combined constraint: normal depth update + shift effects + call reset = 0.
     builder
@@ -163,12 +163,11 @@ fn enforce_overflow_index_constraints<AB>(
     let last_stack_item_next = next.stack[15];
 
     // On right shift, the overflow address should be set to current clk
-    let right_shift_constraint =
-        (AB::Expr::from(overflow_addr_next) - AB::Expr::from(clk)) * op_flags.right_shift();
+    let right_shift_constraint = (overflow_addr_next.into() - clk.into()) * op_flags.right_shift();
     builder.when_transition().assert_zero(right_shift_constraint);
 
     // On left shift when depth = 16 (no overflow), last stack item should be zero
     let left_shift_constraint =
-        op_flags.overflow().not() * op_flags.left_shift() * AB::Expr::from(last_stack_item_next);
+        op_flags.overflow().not() * op_flags.left_shift() * last_stack_item_next.into();
     builder.when_transition().assert_zero(left_shift_constraint);
 }

@@ -29,8 +29,8 @@ use crate::{
         Challenges, HasherCols, LOG_PRECOMPILE_LABEL,
         bus_types::{CHIPLETS_BUS, LOG_PRECOMPILE_TRANSCRIPT, SIBLING_TABLE},
         chiplets::{
-            borrow_chiplet,
             ace::{ACE_INSTRUCTION_ID1_OFFSET, ACE_INSTRUCTION_ID2_OFFSET},
+            borrow_chiplet,
             memory::{MEMORY_READ_ELEMENT_LABEL, MEMORY_READ_WORD_LABEL},
         },
         decoder::USER_OP_HELPERS_OFFSET,
@@ -120,7 +120,7 @@ pub fn enforce_hash_kernel_constraint<AB>(
 
     // Compute sibling values based on bit b (LSB of node index).
     // The hasher constraints enforce that b is binary on shift rows.
-    let b: AB::Expr = node_index - AB::Expr::from(node_index_next).double();
+    let b: AB::Expr = node_index - node_index_next.into().double();
     let is_b_zero = b.not();
     let is_b_one = b;
 
@@ -142,9 +142,11 @@ pub fn enforce_hash_kernel_constraint<AB>(
 
     let is_ace_row: AB::Expr = selectors.ace.is_active.clone();
 
+    // ACE columns start at chiplets[4..20] (after s0, s1, s2, s3 selectors).
     let ace: &crate::trace::AceCols<AB::Var> = borrow_chiplet(&local.chiplets[4..20]);
 
-    let f_ace_read: AB::Expr = is_ace_row.clone() * AB::Expr::from(ace.s_block).not();
+    // Block selector determines read (0) vs eval (1).
+    let f_ace_read: AB::Expr = is_ace_row.clone() * ace.s_block.into().not();
     let f_ace_eval: AB::Expr = is_ace_row * ace.s_block;
 
     // Word read value: label + ctx + ptr + clk + 4-lane value.

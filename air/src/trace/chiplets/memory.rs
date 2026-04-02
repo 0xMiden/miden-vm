@@ -6,6 +6,9 @@ use super::{Felt, ONE, Range, ZERO, create_range};
 // ================================================================================================
 
 /// Memory chiplet columns (15 columns), viewed from `chiplets[3..18]`.
+///
+/// When reading from a new word (first access to a context/word pair), the `values`
+/// are initialized to zero.
 #[repr(C)]
 pub struct MemoryCols<T> {
     /// Read/write flag (0 = write, 1 = read).

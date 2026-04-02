@@ -110,7 +110,7 @@ pub fn enforce_ace_constraints_all_rows<AB>(
 
     // Sections must end with EVAL blocks (not READ).
     // OR(t*a, t*b) = t*OR(a, b) when t is binary.
-    let f_end = binary_or(AB::Expr::from(s3_next).not() * sstart_next.clone(), s3_next.into());
+    let f_end = binary_or(s3_next.into().not() * sstart_next.clone(), s3_next.into());
 
     // Last row of ACE chiplet cannot be section start
     builder.assert_zero(ace_last.clone() * sstart.clone());

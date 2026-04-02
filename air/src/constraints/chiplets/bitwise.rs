@@ -127,10 +127,7 @@ pub fn enforce_bitwise_constraints<AB>(
     let b_agg_next = horner_eval_bits(&b_bits_next);
     let a_next: AB::Expr = cols_next.a.into();
     let b_next: AB::Expr = cols_next.b.into();
-    for expr in [
-        a_next - (a.clone() * F_16 + a_agg_next),
-        b_next - (b * F_16 + b_agg_next),
-    ] {
+    for expr in [a_next - (a.clone() * F_16 + a_agg_next), b_next - (b * F_16 + b_agg_next)] {
         builder.assert_zero(gate_transition.clone() * expr);
     }
 
@@ -159,8 +156,7 @@ pub fn enforce_bitwise_constraints<AB>(
 
     // z = zp * 16 + (op_flag ? a_xor_b : a_and_b)
     // Equivalent: z = zp * 16 + a_and_b + op_flag * (a_xor_b - a_and_b)
-    let expected_z =
-        prev_output * F_16 + a_and_b.clone() + op_flag * (a_xor_b - a_and_b);
+    let expected_z = prev_output * F_16 + a_and_b.clone() + op_flag * (a_xor_b - a_and_b);
 
     builder.assert_zero(bitwise_flag * (output - expected_z));
 }

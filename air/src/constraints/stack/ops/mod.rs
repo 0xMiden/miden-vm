@@ -307,7 +307,7 @@ pub fn enforce_main<AB>(
 
     // CSWAP / CSWAPW: conditional swaps using s0 as the selector.
     let cswap_c = s0;
-    let cswap_c_inv = AB::Expr::from(cswap_c).not();
+    let cswap_c_inv = cswap_c.into().not();
 
     // Binary constraint for the cswap selector (must be 0 or 1).
     builder.when(is_cswap.clone()).assert_bool(cswap_c);

@@ -87,7 +87,7 @@ pub fn enforce_main<AB>(
     enforce_block_address_constraints(builder, dec, dec_next, op_flags);
 
     // When outside a basic block (sp=0), only control flow ops can execute: sp + fctrl = 1
-    builder.assert_one(AB::Expr::from(dec.in_span) + op_flags.control_flow());
+    builder.assert_one(dec.in_span.into() + op_flags.control_flow());
 }
 
 // CONSTRAINT HELPERS
@@ -115,20 +115,20 @@ fn enforce_in_span_constraints<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    let sp: AB::Expr = dec.in_span.into();
+    let sp = dec.in_span;
     let sp_next: AB::Expr = dec_next.in_span.into();
 
     // Boundary: execution starts outside any basic block.
-    builder.when_first_row().assert_zero(sp.clone());
+    builder.when_first_row().assert_zero(sp);
 
     // Constraint 1: sp is binary, so span state is well-formed.
     builder.assert_bool(sp);
 
-    // Constraint 2: After SPAN, the next row must be inside a span.
+    // Constraint 2: span_flag * (1 - sp') = 0
     let span_flag = op_flags.span();
     builder.when_transition().assert_zero(span_flag * sp_next.clone().not());
 
-    // Constraint 3: After RESPAN, the next row must be inside a span.
+    // Constraint 3: respan_flag * (1 - sp') = 0
     let respan_flag = op_flags.respan();
     builder.when_transition().assert_zero(respan_flag * sp_next.not());
 }
@@ -214,8 +214,8 @@ fn enforce_general_constraints<AB>(
     // REPEAT: top stack must be 1 and we must be in a loop body (h4=1).
     let f_repeat = op_flags.repeat();
     let end_flags = dec.end_block_flags();
-    builder.assert_zero(f_repeat.clone() * AB::Expr::from(s0).not());
-    builder.assert_zero(f_repeat * AB::Expr::from(end_flags.is_loop_body).not());
+    builder.assert_zero(f_repeat.clone() * s0.into().not());
+    builder.assert_zero(f_repeat * end_flags.is_loop_body.into().not());
 
     // END inside a loop: if is_loop flag is set, top stack must be 0.
     let f_end = op_flags.end();
@@ -466,9 +466,7 @@ fn enforce_batch_flags_constraints<AB>(
     // When not SPAN/RESPAN, all batch flags must be zero.
     builder.assert_zero(
         span_or_respan.not()
-            * (AB::Expr::from(dec.batch_flags[0])
-                + AB::Expr::from(dec.batch_flags[1])
-                + AB::Expr::from(dec.batch_flags[2])),
+            * (dec.batch_flags[0].into() + dec.batch_flags[1].into() + dec.batch_flags[2].into()),
     );
 
     // When batch has <=4 groups, h4..h7 must be zero (unused lanes).

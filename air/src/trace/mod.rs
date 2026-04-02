@@ -20,15 +20,14 @@ mod rows;
 pub use rows::{RowIndex, RowIndexError};
 
 mod main_trace;
-pub use main_trace::{MainTrace, MainTraceRow};
-pub use miden_crypto::stark::air::AuxBuilder;
-
 // RE-EXPORTS: column structs
 pub use chiplets::{
     AceCols, AceEvalCols, AceReadCols, BitwiseCols, ChipletsView, HasherCols, KernelRomCols,
     MemoryCols,
 };
 pub use decoder::{DecoderCols, EndBlockFlags};
+pub use main_trace::{MainTrace, MainTraceRow};
+pub use miden_crypto::stark::air::AuxBuilder;
 pub use range::RangeCols;
 pub use stack::StackCols;
 pub use system::SystemCols;
@@ -411,10 +410,7 @@ mod tests {
     #[test]
     fn col_map_decoder() {
         assert_eq!(MAIN_COL_MAP.decoder.addr, DECODER_TRACE_OFFSET + decoder::ADDR_COL_IDX);
-        assert_eq!(
-            MAIN_COL_MAP.decoder.op_bits[0],
-            DECODER_TRACE_OFFSET + decoder::OP_BITS_OFFSET
-        );
+        assert_eq!(MAIN_COL_MAP.decoder.op_bits[0], DECODER_TRACE_OFFSET + decoder::OP_BITS_OFFSET);
         assert_eq!(
             MAIN_COL_MAP.decoder.op_bits[6],
             DECODER_TRACE_OFFSET + decoder::OP_BITS_OFFSET + 6
@@ -423,18 +419,12 @@ mod tests {
             MAIN_COL_MAP.decoder.hasher_state[0],
             DECODER_TRACE_OFFSET + decoder::HASHER_STATE_OFFSET
         );
-        assert_eq!(
-            MAIN_COL_MAP.decoder.in_span,
-            DECODER_TRACE_OFFSET + decoder::IN_SPAN_COL_IDX
-        );
+        assert_eq!(MAIN_COL_MAP.decoder.in_span, DECODER_TRACE_OFFSET + decoder::IN_SPAN_COL_IDX);
         assert_eq!(
             MAIN_COL_MAP.decoder.group_count,
             DECODER_TRACE_OFFSET + decoder::GROUP_COUNT_COL_IDX
         );
-        assert_eq!(
-            MAIN_COL_MAP.decoder.op_index,
-            DECODER_TRACE_OFFSET + decoder::OP_INDEX_COL_IDX
-        );
+        assert_eq!(MAIN_COL_MAP.decoder.op_index, DECODER_TRACE_OFFSET + decoder::OP_INDEX_COL_IDX);
         assert_eq!(
             MAIN_COL_MAP.decoder.batch_flags[0],
             DECODER_TRACE_OFFSET + decoder::OP_BATCH_FLAGS_OFFSET
@@ -466,7 +456,8 @@ mod tests {
         assert_eq!(MAIN_COL_MAP.chiplets[19], CHIPLETS_OFFSET + 19);
     }
 
-    // --- Auxiliary trace column map vs legacy constants -------------------------------------------
+    // --- Auxiliary trace column map vs legacy constants
+    // -------------------------------------------
 
     #[test]
     fn aux_col_map() {

@@ -22,11 +22,7 @@ use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 use crate::{
     MainTraceRow, MidenAirBuilder,
     constraints::{bus::indices::P1_STACK, constants::F_16, op_flags::OpFlags, utils::BoolNot},
-    trace::{
-        Challenges,
-        bus_types::STACK_OVERFLOW_TABLE,
-        decoder::HASHER_STATE_RANGE,
-    },
+    trace::{Challenges, bus_types::STACK_OVERFLOW_TABLE, decoder::HASHER_STATE_RANGE},
 };
 
 // ENTRY POINTS

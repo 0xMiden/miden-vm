@@ -175,4 +175,3 @@ where
         [clk.clone(), ctx.clone(), wire.id.clone(), wire.v0.clone(), wire.v1.clone()],
     )
 }
-

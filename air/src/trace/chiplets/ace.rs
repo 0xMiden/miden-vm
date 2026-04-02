@@ -4,6 +4,23 @@ use crate::trace::chiplets::Felt;
 // ================================================================================================
 
 /// ACE chiplet columns (16 columns), viewed from `chiplets[4..20]`.
+///
+/// The `shared[10]` array is interpreted differently depending on `s_block`:
+///
+/// ```text
+/// Index  | READ (s_block=0)       | EVAL (s_block=1)
+/// -------+------------------------+-------------------
+///  0     | id_0                   | id_0
+///  1..2  | v_0 (QuadFelt)         | v_0 (QuadFelt)
+///  3     | id_1                   | id_1
+///  4..5  | v_1 (QuadFelt)         | v_1 (QuadFelt)
+///  6     | num_eval               | id_2
+///  7     | (unused)               | v_2[0]
+///  8     | m_1 (wire-1 mult)      | v_2[1]
+///  9     | m_0 (wire-0 mult)      | m_0 (wire-0 mult)
+/// ```
+///
+/// Use `ace.read()` / `ace.eval()` for typed overlays.
 #[repr(C)]
 pub struct AceCols<T> {
     /// Start-of-circuit flag.

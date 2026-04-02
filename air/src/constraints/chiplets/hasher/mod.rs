@@ -186,9 +186,7 @@ pub fn enforce_hasher_constraints<AB>(
     }
 
     // Selector booleanity
-    builder
-        .when(ctx.hasher_flag.clone())
-        .assert_bools(ctx.cols.selectors);
+    builder.when(ctx.hasher_flag.clone()).assert_bools(ctx.cols.selectors);
 
     // Selector consistency
     selectors::enforce_selector_consistency(

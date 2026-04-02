@@ -990,8 +990,7 @@ pub fn generate_test_row(opcode: usize) -> crate::MainTraceRow<miden_core::Felt>
     let bit_4 = op_bits[4];
     row[OP_BITS_EXTRA_COLS_RANGE.start + crate::trace::DECODER_TRACE_OFFSET] =
         bit_6 * (Felt::ONE - bit_5) * bit_4;
-    row[OP_BITS_EXTRA_COLS_RANGE.start + 1 + crate::trace::DECODER_TRACE_OFFSET] =
-        bit_6 * bit_5;
+    row[OP_BITS_EXTRA_COLS_RANGE.start + 1 + crate::trace::DECODER_TRACE_OFFSET] = bit_6 * bit_5;
 
     // Safety: MainCols is #[repr(C)] with the same layout as [Felt; TRACE_WIDTH].
     unsafe { core::mem::transmute::<[Felt; TRACE_WIDTH], crate::MainTraceRow<Felt>>(row) }

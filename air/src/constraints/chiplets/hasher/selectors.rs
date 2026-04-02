@@ -67,10 +67,7 @@ pub(super) fn enforce_selector_consistency<AB>(
     // Use a combined gate to share `hasher_flag * stability_gate` across both stability
     // constraints.
     let gate = hasher_flag.clone() * stability_gate;
-    builder.assert_zeros([
-        gate.clone() * (s1_next - s1.clone()),
-        gate * (s2_next - s2),
-    ]);
+    builder.assert_zeros([gate.clone() * (s1_next - s1.clone()), gate * (s2_next - s2)]);
 
     // Continuation constraint: hasher_flag * flag_cont * s0' = 0.
     // (Single constraint, so no batching benefit beyond using `.when(gate)`.)

@@ -4,6 +4,9 @@ use super::{Felt, ONE, Range, ZERO, create_range};
 // ================================================================================================
 
 /// Bitwise chiplet columns (13 columns), viewed from `chiplets[2..15]`.
+///
+/// Bit decomposition columns (`a_bits`, `b_bits`) are in **little-endian** order:
+/// `value = bits[0] + 2*bits[1] + 4*bits[2] + 8*bits[3]`.
 #[repr(C)]
 pub struct BitwiseCols<T> {
     /// Operation flag: 0 = AND, 1 = XOR.

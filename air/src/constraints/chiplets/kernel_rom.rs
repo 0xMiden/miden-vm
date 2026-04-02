@@ -51,7 +51,7 @@ pub fn enforce_kernel_rom_constraints<AB>(
     let krom: &KernelRomCols<AB::Var> = borrow_chiplet(&local.chiplets[5..10]);
     let krom_next: &KernelRomCols<AB::Var> = borrow_chiplet(&next.chiplets[5..10]);
 
-    let not_s4_next = AB::Expr::from(s4_next).not();
+    let not_s4_next = s4_next.into().not();
 
     // ==========================================================================
     // SELECTOR CONSTRAINT
@@ -66,7 +66,7 @@ pub fn enforce_kernel_rom_constraints<AB>(
 
     // When sfirst' = 0 (not the start of a new digest block) and s4' = 0 (not exiting kernel ROM),
     // the digest values must remain unchanged.
-    let contiguity_condition = not_s4_next * AB::Expr::from(krom_next.s_first).not();
+    let contiguity_condition = not_s4_next * krom_next.s_first.into().not();
 
     // Use a combined gate to share `kernel_rom_flag * contiguity_condition` across all 4 lanes.
     {

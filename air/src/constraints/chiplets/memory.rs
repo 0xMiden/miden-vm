@@ -118,10 +118,10 @@ pub fn enforce_memory_constraints_first_row<AB>(
 
     // First row: if v'[i] is not written to, then v'[i] = 0
     let gate = flag_next_row_first_memory;
-    builder.assert_zero(gate.clone() * c0 * AB::Expr::from(cols_next.values[0]));
-    builder.assert_zero(gate.clone() * c1 * AB::Expr::from(cols_next.values[1]));
-    builder.assert_zero(gate.clone() * c2 * AB::Expr::from(cols_next.values[2]));
-    builder.assert_zero(gate * c3 * AB::Expr::from(cols_next.values[3]));
+    builder.assert_zero(gate.clone() * c0 * cols_next.values[0].into());
+    builder.assert_zero(gate.clone() * c1 * cols_next.values[1].into());
+    builder.assert_zero(gate.clone() * c2 * cols_next.values[2].into());
+    builder.assert_zero(gate * c3 * cols_next.values[3].into());
 }
 
 /// Enforce memory transition constraints (all rows except last).
@@ -197,7 +197,7 @@ pub fn enforce_memory_constraints_all_rows_except_last<AB>(
     let constrain_value = |c: AB::Expr, v: AB::Var, v_next: AB::Var| {
         flag_memory_active_not_last.clone()
             * c
-            * (AB::Expr::from(v_next) - is_same_ctx_and_word_next.clone() * AB::Expr::from(v))
+            * (v_next.into() - is_same_ctx_and_word_next.clone() * v.into())
     };
 
     builder.assert_zero(constrain_value(c0, cols.values[0], cols_next.values[0]));
@@ -232,11 +232,10 @@ fn compute_memory_deltas<AB>(
 where
     AB: MidenAirBuilder,
 {
-    let ctx_delta: AB::Expr = AB::Expr::from(cols_next.ctx) - AB::Expr::from(cols.ctx);
-    let addr_delta: AB::Expr =
-        AB::Expr::from(cols_next.word_addr) - AB::Expr::from(cols.word_addr);
-    let clk_delta: AB::Expr = AB::Expr::from(cols_next.clk) - AB::Expr::from(cols.clk);
-    let two_pow_16: AB::Expr = AB::Expr::from(TWO_POW_16);
+    let ctx_delta: AB::Expr = cols_next.ctx.into() - cols.ctx.into();
+    let addr_delta: AB::Expr = cols_next.word_addr.into() - cols.word_addr.into();
+    let clk_delta: AB::Expr = cols_next.clk.into() - cols.clk.into();
+    let two_pow_16: AB::Expr = TWO_POW_16.into();
     let d_inv_next: AB::Expr = cols_next.d_inv.into();
 
     // n0 = ctx_delta * d_inv'
@@ -245,8 +244,7 @@ where
     let n1 = addr_delta.clone() * d_inv_next.clone();
 
     // delta_next = d1' * 2^16 + d0'
-    let delta_next: AB::Expr =
-        AB::Expr::from(cols_next.d1) * two_pow_16 + AB::Expr::from(cols_next.d0);
+    let delta_next: AB::Expr = cols_next.d1.into() * two_pow_16 + cols_next.d0.into();
 
     let one = AB::Expr::ONE;
 
@@ -273,8 +271,8 @@ where
 ///
 /// For each element i:
 /// - Read operation: c_i = 1 (always constrain)
-/// - Write operation, element access, element i selected: c_i = 0 (being written, no
-///   constraining needed)
+/// - Write operation, element access, element i selected: c_i = 0 (being written, no constraining
+///   needed)
 /// - Write operation, otherwise: c_i = 1 (not being written, constrain)
 ///
 /// Logic: c_i = is_read + is_write * is_element * !f_i
@@ -358,13 +356,13 @@ fn enforce_scw_readonly_constraint<AB>(
     let one = AB::Expr::ONE;
     let clk_no_change = one.clone() - deltas.clk_delta.clone() * deltas.d_inv_next.clone();
 
-    let is_write = one.clone() - AB::Expr::from(cols.is_read);
-    let is_write_next = one - AB::Expr::from(cols_next.is_read);
+    let is_write = one.clone() - cols.is_read.into();
+    let is_write_next = one - cols_next.is_read.into();
     let any_write = is_write + is_write_next;
 
     builder.assert_zero(
         flag_memory_active_not_last
-            * AB::Expr::from(cols_next.is_same_ctx_and_word)
+            * cols_next.is_same_ctx_and_word.into()
             * clk_no_change
             * any_write,
     );
