@@ -407,8 +407,8 @@ fn compute_memory_word_request<AB: MidenAirBuilder>(
     let label: AB::Expr = Felt::from_u8(label).into();
 
     // Context and clock from system columns
-    let ctx: AB::Expr = local.ctx.into();
-    let clk: AB::Expr = local.clk.into();
+    let ctx: AB::Expr = local.system.ctx.into();
+    let clk: AB::Expr = local.system.clk.into();
 
     // Address is at stack[0]
     let addr: AB::Expr = local.stack[0].into();
@@ -452,8 +452,8 @@ fn compute_memory_element_request<AB: MidenAirBuilder>(
     let label: AB::Expr = Felt::from_u8(label).into();
 
     // Context and clock from system columns
-    let ctx: AB::Expr = local.ctx.into();
-    let clk: AB::Expr = local.clk.into();
+    let ctx: AB::Expr = local.system.ctx.into();
+    let clk: AB::Expr = local.system.clk.into();
 
     // Address is at stack[0]
     let addr: AB::Expr = local.stack[0].into();
@@ -477,8 +477,8 @@ fn compute_mstream_request<AB: MidenAirBuilder>(
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     let label: AB::Expr = Felt::from_u8(MEMORY_READ_WORD_LABEL).into();
-    let ctx: AB::Expr = local.ctx.into();
-    let clk: AB::Expr = local.clk.into();
+    let ctx: AB::Expr = local.system.ctx.into();
+    let clk: AB::Expr = local.system.clk.into();
     let addr: AB::Expr = local.stack[12].into();
 
     // First word: next.stack[0..4] at addr
@@ -525,8 +525,8 @@ fn compute_pipe_request<AB: MidenAirBuilder>(
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     let label: AB::Expr = Felt::from_u8(MEMORY_WRITE_WORD_LABEL).into();
-    let ctx: AB::Expr = local.ctx.into();
-    let clk: AB::Expr = local.clk.into();
+    let ctx: AB::Expr = local.system.ctx.into();
+    let clk: AB::Expr = local.system.clk.into();
     let addr: AB::Expr = local.stack[12].into();
 
     // First word to addr: next.stack[0..4]
@@ -574,8 +574,8 @@ fn compute_cryptostream_request<AB: MidenAirBuilder>(
 ) -> AB::ExprEF {
     let read_label: AB::Expr = Felt::from_u8(MEMORY_READ_WORD_LABEL).into();
     let write_label: AB::Expr = Felt::from_u8(MEMORY_WRITE_WORD_LABEL).into();
-    let ctx: AB::Expr = local.ctx.into();
-    let clk: AB::Expr = local.clk.into();
+    let ctx: AB::Expr = local.system.ctx.into();
+    let clk: AB::Expr = local.system.clk.into();
     let src: AB::Expr = local.stack[12].into();
     let dst: AB::Expr = local.stack[13].into();
 
@@ -648,8 +648,8 @@ fn compute_hornerbase_request<AB: MidenAirBuilder>(
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     let label: AB::Expr = Felt::from_u8(MEMORY_READ_ELEMENT_LABEL).into();
-    let ctx: AB::Expr = local.ctx.into();
-    let clk: AB::Expr = local.clk.into();
+    let ctx: AB::Expr = local.system.ctx.into();
+    let clk: AB::Expr = local.system.clk.into();
     let addr: AB::Expr = local.stack[13].into();
 
     // Helper registers hold eval_point_0 and eval_point_1
@@ -674,8 +674,8 @@ fn compute_hornerext_request<AB: MidenAirBuilder>(
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     let label: AB::Expr = Felt::from_u8(MEMORY_READ_WORD_LABEL).into();
-    let ctx: AB::Expr = local.ctx.into();
-    let clk: AB::Expr = local.clk.into();
+    let ctx: AB::Expr = local.system.ctx.into();
+    let clk: AB::Expr = local.system.clk.into();
     let addr: AB::Expr = local.stack[13].into();
 
     // Helpers 0..3 hold eval_point_0, eval_point_1, mem_junk_0, mem_junk_1
@@ -846,7 +846,7 @@ fn compute_hasher_response<AB: MidenAirBuilder>(
     let node_index_next = next.chiplets[HASHER_NODE_INDEX_COL_IDX - CHIPLETS_OFFSET];
 
     // addr_next = row + 1 (using clk as proxy since clk = row in the trace)
-    let addr_next: AB::Expr = local.clk + AB::Expr::ONE;
+    let addr_next: AB::Expr = local.system.clk + AB::Expr::ONE;
 
     // Build message values for each operation type using canonical labels.
     let label_bp = TRANSITION_LINEAR_HASH.into();
@@ -1202,8 +1202,8 @@ fn compute_ace_request<AB: MidenAirBuilder>(
     let label: AB::Expr = ACE_INIT_LABEL.into();
 
     // Context and clock from system columns
-    let ctx: AB::Expr = local.ctx.into();
-    let clk: AB::Expr = local.clk.into();
+    let ctx: AB::Expr = local.system.ctx.into();
+    let clk: AB::Expr = local.system.clk.into();
 
     // Stack values
     let ptr = local.stack[0];
@@ -1602,8 +1602,8 @@ fn compute_fmp_write_request<AB: MidenAirBuilder>(
     let label: AB::Expr = Felt::from_u8(MEMORY_WRITE_ELEMENT_LABEL).into();
 
     // ctx from next row (new execution context)
-    let ctx: AB::Expr = next.ctx.into();
-    let clk: AB::Expr = local.clk.into();
+    let ctx: AB::Expr = next.system.ctx.into();
+    let clk: AB::Expr = local.system.clk.into();
     let addr: AB::Expr = FMP_ADDR.into();
     let element: AB::Expr = FMP_INIT_VALUE.into();
 
@@ -1619,8 +1619,8 @@ fn compute_dyn_callee_hash_read<AB: MidenAirBuilder>(
 ) -> AB::ExprEF {
     let label: AB::Expr = Felt::from_u8(MEMORY_READ_WORD_LABEL).into();
 
-    let ctx: AB::Expr = local.ctx.into();
-    let clk: AB::Expr = local.clk.into();
+    let ctx: AB::Expr = local.system.ctx.into();
+    let clk: AB::Expr = local.system.clk.into();
     let addr: AB::Expr = local.stack[0].into();
 
     // The callee hash is read into decoder hasher state first half

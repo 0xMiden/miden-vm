@@ -1,8 +1,8 @@
-use core::ops::Range;
+use core::ops::{Index, IndexMut, Range};
 
 use miden_core::{Felt, ONE, ZERO, operations::Operation, utils::range};
 
-use super::DECODER_AUX_TRACE_OFFSET;
+use super::{DECODER_AUX_TRACE_OFFSET, DECODER_TRACE_WIDTH};
 
 // COLUMN STRUCTS
 // ================================================================================================
@@ -59,6 +59,24 @@ pub struct EndBlockFlags<T> {
     pub is_loop: T,
     pub is_call: T,
     pub is_syscall: T,
+}
+
+/// Flat index access for backwards compatibility during migration.
+impl<T> Index<usize> for DecoderCols<T> {
+    type Output = T;
+    fn index(&self, idx: usize) -> &T {
+        assert!(idx < DECODER_TRACE_WIDTH, "decoder column index {idx} out of bounds");
+        // Safety: DecoderCols is #[repr(C)] with all T-sized fields, so it is layout-
+        // compatible with [T; DECODER_TRACE_WIDTH].
+        unsafe { &*(self as *const Self as *const T).add(idx) }
+    }
+}
+
+impl<T> IndexMut<usize> for DecoderCols<T> {
+    fn index_mut(&mut self, idx: usize) -> &mut T {
+        assert!(idx < DECODER_TRACE_WIDTH, "decoder column index {idx} out of bounds");
+        unsafe { &mut *(self as *mut Self as *mut T).add(idx) }
+    }
 }
 
 // CONSTANTS

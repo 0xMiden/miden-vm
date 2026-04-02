@@ -1,19 +1,15 @@
 use alloc::vec::Vec;
-use core::{
-    borrow::{Borrow, BorrowMut},
-    ops::{Deref, Range},
-};
+use core::ops::{Deref, Range};
 
 use miden_core::{
-    Felt, ONE, WORD_SIZE, Word, ZERO,
+    Felt, ONE, Word, ZERO,
     field::PrimeCharacteristicRing,
     utils::{ColMatrix, RowMajorMatrix, range},
 };
 
 use super::{
-    CHIPLETS_OFFSET, CHIPLETS_WIDTH, CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET,
-    DECODER_TRACE_WIDTH, FN_HASH_OFFSET, RANGE_CHECK_TRACE_WIDTH, RowIndex, STACK_TRACE_OFFSET,
-    STACK_TRACE_WIDTH,
+    CHIPLETS_OFFSET, CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FN_HASH_OFFSET, MainCols,
+    RowIndex, STACK_TRACE_OFFSET,
     chiplets::{
         BITWISE_A_COL_IDX, BITWISE_B_COL_IDX, BITWISE_OUTPUT_COL_IDX, HASHER_NODE_INDEX_COL_IDX,
         HASHER_STATE_COL_RANGE, MEMORY_CLK_COL_IDX, MEMORY_CTX_COL_IDX, MEMORY_IDX0_COL_IDX,
@@ -43,52 +39,9 @@ const DECODER_HASHER_RANGE: Range<usize> =
 // MAIN TRACE ROW
 // ================================================================================================
 
-/// Column layout of the main trace row.
-///
-/// This is the legacy flat-field layout used by constraint code. Once all constraints
-/// are migrated to [`MainCols`](super::MainCols), this will become a type alias.
-#[derive(Debug)]
-#[repr(C)]
-pub struct MainTraceRow<T> {
-    // System
-    pub clk: T,
-    pub ctx: T,
-    pub fn_hash: [T; WORD_SIZE],
-
-    // Decoder
-    pub decoder: [T; DECODER_TRACE_WIDTH],
-
-    // Stack
-    pub stack: [T; STACK_TRACE_WIDTH],
-
-    // Range checker
-    pub range: [T; RANGE_CHECK_TRACE_WIDTH],
-
-    // Chiplets
-    pub chiplets: [T; CHIPLETS_WIDTH],
-}
-
-impl<T> Borrow<MainTraceRow<T>> for [T] {
-    fn borrow(&self) -> &MainTraceRow<T> {
-        debug_assert_eq!(self.len(), crate::TRACE_WIDTH);
-        let (prefix, shorts, suffix) = unsafe { self.align_to::<MainTraceRow<T>>() };
-        debug_assert!(prefix.is_empty(), "Alignment should match");
-        debug_assert!(suffix.is_empty(), "Alignment should match");
-        debug_assert_eq!(shorts.len(), 1);
-        &shorts[0]
-    }
-}
-
-impl<T> BorrowMut<MainTraceRow<T>> for [T] {
-    fn borrow_mut(&mut self) -> &mut MainTraceRow<T> {
-        debug_assert_eq!(self.len(), crate::TRACE_WIDTH);
-        let (prefix, shorts, suffix) = unsafe { self.align_to_mut::<MainTraceRow<T>>() };
-        debug_assert!(prefix.is_empty(), "Alignment should match");
-        debug_assert!(suffix.is_empty(), "Alignment should match");
-        debug_assert_eq!(shorts.len(), 1);
-        &mut shorts[0]
-    }
-}
+/// Backwards-compatible alias. Constraint code uses this name; new code can use
+/// [`MainCols`] directly.
+pub type MainTraceRow<T> = MainCols<T>;
 
 // MAIN TRACE MATRIX
 // ================================================================================================

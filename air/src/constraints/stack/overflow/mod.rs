@@ -162,7 +162,7 @@ fn enforce_overflow_index_constraints<AB>(
     AB: MidenAirBuilder,
 {
     let overflow_addr_next = next.stack[B1_COL_IDX];
-    let clk = local.clk;
+    let clk = local.system.clk;
     let last_stack_item_next = next.stack[15];
 
     // On right shift, the overflow address should be set to current clk

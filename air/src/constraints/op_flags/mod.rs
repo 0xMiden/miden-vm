@@ -975,44 +975,29 @@ pub const fn get_op_index(opcode: u8) -> usize {
 /// - All other columns are zero
 #[cfg(test)]
 pub fn generate_test_row(opcode: usize) -> crate::MainTraceRow<miden_core::Felt> {
-    use miden_core::{ONE, ZERO};
+    use miden_core::{Felt, ZERO};
 
-    use crate::trace::{
-        CHIPLETS_WIDTH, DECODER_TRACE_WIDTH, RANGE_CHECK_TRACE_WIDTH, STACK_TRACE_WIDTH,
-        decoder::OP_BITS_EXTRA_COLS_RANGE,
-    };
+    use crate::trace::{TRACE_WIDTH, decoder::OP_BITS_EXTRA_COLS_RANGE};
 
-    // Get op bits for this opcode
     let op_bits = get_op_bits(opcode);
 
-    // Initialize decoder array with zeros
-    let mut decoder = [ZERO; DECODER_TRACE_WIDTH];
-
-    // Set op bits (indices 1-7 in decoder, after addr column at index 0)
+    // Build a flat zeroed row, then set the decoder op bits via the col map.
+    let mut row = [ZERO; TRACE_WIDTH];
     for (i, &bit) in op_bits.iter().enumerate() {
-        decoder[OP_BITS_RANGE.start + i] = bit;
+        row[OP_BITS_RANGE.start + crate::trace::DECODER_TRACE_OFFSET + i] = bit;
     }
 
-    // Compute and set op bits extra columns for degree reduction
+    // Compute and set op bits extra columns for degree reduction.
     let bit_6 = op_bits[6];
     let bit_5 = op_bits[5];
     let bit_4 = op_bits[4];
+    row[OP_BITS_EXTRA_COLS_RANGE.start + crate::trace::DECODER_TRACE_OFFSET] =
+        bit_6 * (Felt::ONE - bit_5) * bit_4;
+    row[OP_BITS_EXTRA_COLS_RANGE.start + 1 + crate::trace::DECODER_TRACE_OFFSET] =
+        bit_6 * bit_5;
 
-    // op_bit_extra[0] = bit_6 * (1 - bit_5) * bit_4 (degree 5 flag)
-    decoder[OP_BITS_EXTRA_COLS_RANGE.start] = bit_6 * (ONE - bit_5) * bit_4;
-
-    // op_bit_extra[1] = bit_6 * bit_5 (degree 4 flag)
-    decoder[OP_BITS_EXTRA_COLS_RANGE.start + 1] = bit_6 * bit_5;
-
-    crate::MainTraceRow {
-        clk: ZERO,
-        ctx: ZERO,
-        fn_hash: [ZERO; 4],
-        decoder,
-        stack: [ZERO; STACK_TRACE_WIDTH],
-        range: [ZERO; RANGE_CHECK_TRACE_WIDTH],
-        chiplets: [ZERO; CHIPLETS_WIDTH],
-    }
+    // Safety: MainCols is #[repr(C)] with the same layout as [Felt; TRACE_WIDTH].
+    unsafe { core::mem::transmute::<[Felt; TRACE_WIDTH], crate::MainTraceRow<Felt>>(row) }
 }
 
 /// Returns a 7-bit array representation of an opcode.

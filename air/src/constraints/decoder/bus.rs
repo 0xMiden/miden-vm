@@ -265,14 +265,14 @@ pub fn enforce_block_stack_table_constraint<AB>(
     let s0: AB::Expr = local.stack[0].into();
 
     // Context info for CALL/SYSCALL/DYNCALL insertions (from current row)
-    let ctx_local: AB::Expr = local.ctx.into();
+    let ctx_local: AB::Expr = local.system.ctx.into();
     let b0_local: AB::Expr = local.stack[stack_cols::B0].into();
     let b1_local: AB::Expr = local.stack[stack_cols::B1].into();
     let fn_hash_local: [AB::Expr; 4] = [
-        local.fn_hash[0].into(),
-        local.fn_hash[1].into(),
-        local.fn_hash[2].into(),
-        local.fn_hash[3].into(),
+        local.system.fn_hash[0].into(),
+        local.system.fn_hash[1].into(),
+        local.system.fn_hash[2].into(),
+        local.system.fn_hash[3].into(),
     ];
 
     // Hasher state for DYNCALL (h4, h5 contain post-shift stack state)
@@ -285,14 +285,14 @@ pub fn enforce_block_stack_table_constraint<AB>(
     let is_syscall_flag: AB::Expr = local.decoder[decoder_cols::IS_SYSCALL_FLAG].into();
 
     // Context info for END after CALL/SYSCALL (from next row)
-    let ctx_next: AB::Expr = next.ctx.into();
+    let ctx_next: AB::Expr = next.system.ctx.into();
     let b0_next: AB::Expr = next.stack[stack_cols::B0].into();
     let b1_next: AB::Expr = next.stack[stack_cols::B1].into();
     let fn_hash_next: [AB::Expr; 4] = [
-        next.fn_hash[0].into(),
-        next.fn_hash[1].into(),
-        next.fn_hash[2].into(),
-        next.fn_hash[3].into(),
+        next.system.fn_hash[0].into(),
+        next.system.fn_hash[1].into(),
+        next.system.fn_hash[2].into(),
+        next.system.fn_hash[3].into(),
     ];
     // =========================================================================
     // MESSAGE BUILDERS

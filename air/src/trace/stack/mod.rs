@@ -1,6 +1,8 @@
-use core::ops::Range;
+use core::ops::{Index, Range};
 
 use miden_core::{program::MIN_STACK_DEPTH, utils::range};
+
+use super::STACK_TRACE_WIDTH;
 
 // COLUMN STRUCTS
 // ================================================================================================
@@ -16,6 +18,15 @@ pub struct StackCols<T> {
     pub b1: T,
     /// Helper: 1/(b0 - 16) when b0 != 16, else 0.
     pub h0: T,
+}
+
+/// Flat index access for backwards compatibility during migration.
+impl<T> Index<usize> for StackCols<T> {
+    type Output = T;
+    fn index(&self, idx: usize) -> &T {
+        assert!(idx < STACK_TRACE_WIDTH, "stack column index {idx} out of bounds");
+        unsafe { &*(self as *const Self as *const T).add(idx) }
+    }
 }
 
 // CONSTANTS

@@ -66,7 +66,7 @@ pub fn enforce_bus<AB>(
     // -------------------------------------------------------------------------
 
     // Current row values
-    let clk = local.clk;
+    let clk = local.system.clk;
     let s15 = local.stack[15];
     let b0 = local.stack[B0_COL_IDX];
     let b1 = local.stack[B1_COL_IDX];

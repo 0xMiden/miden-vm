@@ -54,8 +54,8 @@ pub fn enforce_main<AB>(
 {
     // Clock: starts at 0, increments by 1
     {
-        builder.when_first_row().assert_zero(local.clk);
-        builder.when_transition().assert_eq(next.clk, local.clk + F_1);
+        builder.when_first_row().assert_zero(local.system.clk);
+        builder.when_transition().assert_eq(next.system.clk, local.system.clk + F_1);
     }
 
     let op_flags = OpFlags::new(ExprDecoderAccess::new(local));
@@ -66,9 +66,9 @@ pub fn enforce_main<AB>(
 
     // Execution context transition constraints (see module doc for transition table)
     {
-        let ctx = local.ctx;
-        let ctx_next = next.ctx;
-        let clk = local.clk;
+        let ctx = local.system.ctx;
+        let ctx_next = next.system.ctx;
+        let clk = local.system.clk;
 
         let call_dyncall_flag = f_call.clone() + f_dyncall.clone();
         let change_ctx_flag =
@@ -91,14 +91,14 @@ pub fn enforce_main<AB>(
         {
             let builder = &mut builder.when(f_load);
             for i in 0..4 {
-                builder.assert_eq(next.fn_hash[i], local.decoder[HASHER_STATE_OFFSET + i]);
+                builder.assert_eq(next.system.fn_hash[i], local.decoder[HASHER_STATE_OFFSET + i]);
             }
         }
 
         {
             let builder = &mut builder.when(f_preserve);
             for i in 0..4 {
-                builder.assert_eq(next.fn_hash[i], local.fn_hash[i]);
+                builder.assert_eq(next.system.fn_hash[i], local.system.fn_hash[i]);
             }
         }
     }

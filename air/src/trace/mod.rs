@@ -49,7 +49,7 @@ pub struct MainCols<T> {
     pub decoder: DecoderCols<T>,
     pub stack: StackCols<T>,
     pub range: RangeCols<T>,
-    chiplets: [T; CHIPLETS_WIDTH],
+    pub chiplets: [T; CHIPLETS_WIDTH],
 }
 
 impl<T> Borrow<MainCols<T>> for [T] {

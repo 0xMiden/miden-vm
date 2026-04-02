@@ -44,10 +44,10 @@ pub fn enforce_main<AB>(
     let s15 = local.stack[15];
     let stack_depth = local.stack[16];
 
-    let fn_hash_0 = local.fn_hash[0];
-    let fn_hash_1 = local.fn_hash[1];
-    let fn_hash_2 = local.fn_hash[2];
-    let fn_hash_3 = local.fn_hash[3];
+    let fn_hash_0 = local.system.fn_hash[0];
+    let fn_hash_1 = local.system.fn_hash[1];
+    let fn_hash_2 = local.system.fn_hash[2];
+    let fn_hash_3 = local.system.fn_hash[3];
 
     let s0_next = next.stack[0];
     let s1_next = next.stack[1];
@@ -168,7 +168,7 @@ pub fn enforce_main<AB>(
 
     // CLK
     {
-        let clk = local.clk;
+        let clk = local.system.clk;
         let gate = builder.is_transition() * is_clk;
         builder.when(gate).assert_eq(s0_next, clk);
     }
