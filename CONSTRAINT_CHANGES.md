@@ -312,3 +312,8 @@ Helper `enforce_decoder_selector` inlined into call site. Expression restructure
 **No constraint changes.** (446 base + 24 ext)
 
 ---
+## 33. chore: format imports in chiplet constraint files
+
+**No constraint changes.** (446 base + 24 ext)
+
+---

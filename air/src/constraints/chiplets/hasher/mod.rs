@@ -41,8 +41,7 @@ use miden_crypto::stark::air::AirBuilder;
 pub use periodic::{STATE_WIDTH, periodic_columns};
 
 use crate::{
-    MainTraceRow, MidenAirBuilder,
-    constraints::chiplets::selectors::ChipletFlags,
+    MainTraceRow, MidenAirBuilder, constraints::chiplets::selectors::ChipletFlags,
     trace::HasherCols,
 };
 
