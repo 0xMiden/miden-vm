@@ -47,41 +47,10 @@ use crate::{
         op_flags::{ExprDecoderAccess, OpFlags},
         utils::BoolNot,
     },
-    trace::decoder as decoder_cols,
+    trace::DecoderCols,
 };
 
 pub mod bus;
-
-// CONSTANTS
-// ================================================================================================
-
-/// Index offset for block address column within decoder (column 0).
-const ADDR_OFFSET: usize = 0;
-
-/// Index offsets within the decoder array for op bits (b0-b6).
-/// Op bits start at index 1 in the decoder (after addr at index 0).
-const OP_BITS_OFFSET: usize = 1;
-
-/// Number of operation bits.
-const NUM_OP_BITS: usize = 7;
-
-/// Index offset for in-span column within decoder.
-const IN_SPAN_OFFSET: usize = 16;
-
-/// Index offset for group count column within decoder.
-const GROUP_COUNT_OFFSET: usize = 17;
-
-/// Index offset for operation index column within decoder.
-const OP_INDEX_OFFSET: usize = 18;
-
-/// Index offset for batch flags within decoder.
-const BATCH_FLAGS_OFFSET: usize = 19;
-
-/// Number of batch flag columns.
-const NUM_BATCH_FLAGS: usize = 3;
-
-/// Index offset for extra columns (e0, e1) within decoder.
-const EXTRA_COLS_OFFSET: usize = 22;
 
 // ENTRY POINTS
 // ================================================================================================
@@ -95,97 +64,30 @@ pub fn enforce_main<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    // Load decoder columns using typed struct
-    let cols: DecoderColumns<AB::Expr> = DecoderColumns::from_row::<AB>(local);
-    let cols_next: DecoderColumns<AB::Expr> = DecoderColumns::from_row::<AB>(next);
+    let dec = &local.decoder;
+    let dec_next = &next.decoder;
     let op_flags_next = OpFlags::new(ExprDecoderAccess::<AB::Var, AB::Expr>::new(next));
 
-    enforce_in_span_constraints(builder, &cols, &cols_next, op_flags);
+    enforce_in_span_constraints(builder, dec, dec_next, op_flags);
 
     // Op bits must be binary
-    builder.assert_bools(cols.op_bits.clone());
+    builder.assert_bools(dec.op_bits);
 
-    enforce_extra_columns(builder, &cols);
-    enforce_op_bit_group_constraints(builder, &cols);
+    enforce_extra_columns(builder, dec);
+    enforce_op_bit_group_constraints(builder, dec);
 
     // Batch flags must be binary
-    builder.assert_bools(cols.batch_flags.clone());
+    builder.assert_bools(dec.batch_flags);
 
     enforce_general_constraints(builder, local, next, op_flags, &op_flags_next);
-    enforce_group_count_constraints(builder, &cols, &cols_next, local, op_flags, &op_flags_next);
-    enforce_op_group_decoding_constraints(
-        builder,
-        &cols,
-        &cols_next,
-        local,
-        next,
-        op_flags,
-        &op_flags_next,
-    );
-    enforce_op_index_constraints(builder, &cols, &cols_next, op_flags);
-    enforce_batch_flags_constraints(builder, &cols, local, op_flags);
-    enforce_block_address_constraints(builder, &cols, &cols_next, op_flags);
+    enforce_group_count_constraints(builder, dec, dec_next, op_flags, &op_flags_next);
+    enforce_op_group_decoding_constraints(builder, dec, dec_next, op_flags, &op_flags_next);
+    enforce_op_index_constraints(builder, dec, dec_next, op_flags);
+    enforce_batch_flags_constraints(builder, dec, op_flags);
+    enforce_block_address_constraints(builder, dec, dec_next, op_flags);
 
     // When outside a basic block (sp=0), only control flow ops can execute: sp + fctrl = 1
-    {
-        let sp = cols.in_span.clone();
-        builder.assert_one(sp + op_flags.control_flow());
-    }
-}
-
-// INTERNAL HELPERS
-// ================================================================================================
-
-/// Typed access to decoder columns.
-///
-/// This struct provides named access to decoder columns, eliminating error-prone
-/// index arithmetic. Created from a `MainTraceRow` reference.
-///
-/// ## Layout
-/// - `addr`: Block address (row address in hasher table)
-/// - `op_bits[0..7]`: Operation bits b0-b6 encoding the opcode
-/// - `in_span`: In-span flag (sp) - 1 when inside basic block
-/// - `group_count`: Group count (gc) - remaining operation groups
-/// - `op_index`: Operation index (ox) - position within group (0-8)
-/// - `batch_flags[0..3]`: Batch flags c0, c1, c2
-/// - `extra[0..2]`: Extra columns e0, e1 for degree reduction
-///
-/// Note: the 8 decoder hasher-state lanes live in the decoder trace but are not included here.
-/// Constraints which depend on these lanes access them directly via `MainTraceRow` accessors.
-pub struct DecoderColumns<E> {
-    /// Block address (row address in hasher table)
-    pub addr: E,
-    /// Operation bits b0-b6 (7 bits encoding the opcode)
-    pub op_bits: [E; NUM_OP_BITS],
-    /// In-span flag (1 when inside basic block, 0 otherwise)
-    pub in_span: E,
-    /// Group count (remaining operation groups in current span)
-    pub group_count: E,
-    /// Operation index (position within current operation group, 0-8)
-    pub op_index: E,
-    /// Batch flags c0, c1, c2 (encode number of groups in current batch)
-    pub batch_flags: [E; NUM_BATCH_FLAGS],
-    /// Extra columns e0, e1 for degree reduction
-    pub extra: [E; 2],
-}
-
-impl<E: Clone> DecoderColumns<E> {
-    /// Extract decoder columns from a main trace row.
-    pub fn from_row<AB>(row: &MainTraceRow<AB::Var>) -> Self
-    where
-        AB: MidenAirBuilder,
-        AB::Var: Into<E> + Clone,
-    {
-        DecoderColumns {
-            addr: row.decoder[ADDR_OFFSET].into(),
-            op_bits: core::array::from_fn(|i| row.decoder[OP_BITS_OFFSET + i].into()),
-            in_span: row.decoder[IN_SPAN_OFFSET].into(),
-            group_count: row.decoder[GROUP_COUNT_OFFSET].into(),
-            op_index: row.decoder[OP_INDEX_OFFSET].into(),
-            batch_flags: core::array::from_fn(|i| row.decoder[BATCH_FLAGS_OFFSET + i].into()),
-            extra: core::array::from_fn(|i| row.decoder[EXTRA_COLS_OFFSET + i].into()),
-        }
-    }
+    builder.assert_one(AB::Expr::from(dec.in_span) + op_flags.control_flow());
 }
 
 // CONSTRAINT HELPERS
@@ -207,14 +109,14 @@ impl<E: Clone> DecoderColumns<E> {
 /// 3. After RESPAN operation, sp' = 1: respan_flag * (1 - sp') = 0
 fn enforce_in_span_constraints<AB>(
     builder: &mut AB,
-    cols: &DecoderColumns<AB::Expr>,
-    cols_next: &DecoderColumns<AB::Expr>,
+    dec: &DecoderCols<AB::Var>,
+    dec_next: &DecoderCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
-    let sp = cols.in_span.clone();
-    let sp_next = cols_next.in_span.clone();
+    let sp: AB::Expr = dec.in_span.into();
+    let sp_next: AB::Expr = dec_next.in_span.into();
 
     // Boundary: execution starts outside any basic block.
     builder.when_first_row().assert_zero(sp.clone());
@@ -223,12 +125,10 @@ fn enforce_in_span_constraints<AB>(
     builder.assert_bool(sp);
 
     // Constraint 2: After SPAN, the next row must be inside a span.
-    // span_flag * (1 - sp') = 0
     let span_flag = op_flags.span();
-    builder.when_transition().assert_zero(span_flag * sp_next.not());
+    builder.when_transition().assert_zero(span_flag * sp_next.clone().not());
 
     // Constraint 3: After RESPAN, the next row must be inside a span.
-    // respan_flag * (1 - sp') = 0
     let respan_flag = op_flags.respan();
     builder.when_transition().assert_zero(respan_flag * sp_next.not());
 }
@@ -238,51 +138,42 @@ fn enforce_in_span_constraints<AB>(
 /// These columns are used for degree reduction in operation flag computation:
 /// - e0 = b6 * (1 - b5) * b4
 /// - e1 = b6 * b5
-fn enforce_extra_columns<AB>(builder: &mut AB, cols: &DecoderColumns<AB::Expr>)
+fn enforce_extra_columns<AB>(builder: &mut AB, dec: &DecoderCols<AB::Var>)
 where
     AB: MidenAirBuilder,
 {
-    let b4 = cols.op_bits[4].clone();
-    let b5 = cols.op_bits[5].clone();
-    let b6 = cols.op_bits[6].clone();
-
-    let e0 = cols.extra[0].clone();
-    let e1 = cols.extra[1].clone();
+    let b4: AB::Expr = dec.op_bits[4].into();
+    let b5: AB::Expr = dec.op_bits[5].into();
+    let b6: AB::Expr = dec.op_bits[6].into();
 
     // e0 = b6 * (1 - b5) * b4.
-    // This extra register exists to reduce the degree of op-flag selectors for the
-    // `101...` opcode group (see docs/src/design/stack/op_constraints.md).
-    let expected_e0 = b6.clone() * b5.not() * b4;
-    builder.assert_eq(e0, expected_e0);
+    let expected_e0 = b6.clone() * b5.clone().not() * b4;
+    builder.assert_eq(dec.extra[0], expected_e0);
 
     // e1 = b6 * b5.
-    // This extra register exists to reduce the degree of op-flag selectors for the
-    // `11...` opcode group (see docs/src/design/stack/op_constraints.md).
     let expected_e1 = b6 * b5;
-    builder.assert_eq(e1, expected_e1);
+    builder.assert_eq(dec.extra[1], expected_e1);
 }
 
 /// Enforces opcode-bit constraints for grouped opcode families.
 ///
 /// - U32 ops (prefix `100`) must have b0 = 0.
 /// - Very-high-degree ops (prefix `11`) must have b0 = b1 = 0.
-fn enforce_op_bit_group_constraints<AB>(builder: &mut AB, cols: &DecoderColumns<AB::Expr>)
+fn enforce_op_bit_group_constraints<AB>(builder: &mut AB, dec: &DecoderCols<AB::Var>)
 where
     AB: MidenAirBuilder,
 {
-    let b0 = cols.op_bits[0].clone();
-    let b1 = cols.op_bits[1].clone();
-    let b4 = cols.op_bits[4].clone();
-    let b5 = cols.op_bits[5].clone();
-    let b6 = cols.op_bits[6].clone();
+    let b0: AB::Expr = dec.op_bits[0].into();
+    let b1: AB::Expr = dec.op_bits[1].into();
+    let b4: AB::Expr = dec.op_bits[4].into();
+    let b5: AB::Expr = dec.op_bits[5].into();
+    let b6: AB::Expr = dec.op_bits[6].into();
 
-    // U32 prefix pattern: b6=1, b5=0, b4=0. Under this prefix, b0 must be 0 to
-    // eliminate invalid opcodes in the U32 opcode subset.
-    let u32_prefix = b6.clone() * b5.not() * b4.not();
+    // U32 prefix pattern: b6=1, b5=0, b4=0. Under this prefix, b0 must be 0.
+    let u32_prefix = b6.clone() * b5.clone().not() * b4.not();
     builder.assert_zero(u32_prefix * b0.clone());
 
-    // Very-high prefix pattern: b6=1, b5=1. Under this prefix, b0 and b1 must be 0
-    // to eliminate invalid opcodes in the very-high opcode subset.
+    // Very-high prefix pattern: b6=1, b5=1. Under this prefix, b0 and b1 must be 0.
     let very_high_prefix = b6 * b5;
     builder.assert_zero(very_high_prefix.clone() * b0);
     builder.assert_zero(very_high_prefix * b1);
@@ -305,6 +196,8 @@ fn enforce_general_constraints<AB>(
 ) where
     AB: MidenAirBuilder,
 {
+    let dec = &local.decoder;
+    let dec_next = &next.decoder;
     let s0 = local.stack[0];
 
     // SPLIT/LOOP: top stack value must be binary (branch selector).
@@ -315,26 +208,24 @@ fn enforce_general_constraints<AB>(
     // DYN: the first half holds the callee digest; the second half must be zero.
     let f_dyn = op_flags.dyn_op();
     for i in 0..4 {
-        let hi = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 4 + i];
-        builder.assert_zero(f_dyn.clone() * hi);
+        builder.assert_zero(f_dyn.clone() * dec.hasher_state[4 + i]);
     }
 
     // REPEAT: top stack must be 1 and we must be in a loop body (h4=1).
     let f_repeat = op_flags.repeat();
-    let h4 = local.decoder[decoder_cols::IS_LOOP_BODY_FLAG_COL_IDX];
+    let end_flags = dec.end_block_flags();
     builder.assert_zero(f_repeat.clone() * AB::Expr::from(s0).not());
-    builder.assert_zero(f_repeat * AB::Expr::from(h4).not());
+    builder.assert_zero(f_repeat * AB::Expr::from(end_flags.is_loop_body).not());
 
     // END inside a loop: if is_loop flag is set, top stack must be 0.
     let f_end = op_flags.end();
-    let h5 = local.decoder[decoder_cols::IS_LOOP_FLAG_COL_IDX];
-    builder.assert_zero(f_end.clone() * h5 * s0);
+    builder.assert_zero(f_end.clone() * end_flags.is_loop * s0);
 
     // END followed by REPEAT: carry h0..h4 into the next row.
     let f_repeat_next = op_flags_next.repeat();
     for i in 0..5 {
-        let hi = local.decoder[decoder_cols::HASHER_STATE_OFFSET + i];
-        let hi_next = next.decoder[decoder_cols::HASHER_STATE_OFFSET + i];
+        let hi = dec.hasher_state[i];
+        let hi_next = dec_next.hasher_state[i];
         builder
             .when_transition()
             .assert_zero(f_end.clone() * f_repeat_next.clone() * (hi_next - hi));
@@ -365,18 +256,17 @@ fn enforce_general_constraints<AB>(
 /// 3. During SPAN/RESPAN, gc must decrement by 1: (span_flag + respan_flag) * (1 - delta_gc) = 0
 fn enforce_group_count_constraints<AB>(
     builder: &mut AB,
-    cols: &DecoderColumns<AB::Expr>,
-    cols_next: &DecoderColumns<AB::Expr>,
-    local: &MainTraceRow<AB::Var>,
+    dec: &DecoderCols<AB::Var>,
+    dec_next: &DecoderCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
     op_flags_next: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
-    let sp = cols.in_span.clone();
-    let gc = cols.group_count.clone();
-    let gc_next = cols_next.group_count.clone();
-    let h0 = local.decoder[decoder_cols::HASHER_STATE_OFFSET];
+    let sp: AB::Expr = dec.in_span.into();
+    let gc: AB::Expr = dec.group_count.into();
+    let gc_next: AB::Expr = dec_next.group_count.into();
+    let h0 = dec.hasher_state[0];
 
     // delta_gc = gc - gc' (how much gc decrements; expected to be 0 or 1)
     let delta_gc = gc.clone() - gc_next;
@@ -427,20 +317,18 @@ fn enforce_group_count_constraints<AB>(
 /// When the next op is END or RESPAN, the buffer must be empty (h0 = 0).
 fn enforce_op_group_decoding_constraints<AB>(
     builder: &mut AB,
-    cols: &DecoderColumns<AB::Expr>,
-    cols_next: &DecoderColumns<AB::Expr>,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    dec: &DecoderCols<AB::Var>,
+    dec_next: &DecoderCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
     op_flags_next: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
-    let sp = cols.in_span.clone();
-    let sp_next = cols_next.in_span.clone();
+    let sp: AB::Expr = dec.in_span.into();
+    let sp_next: AB::Expr = dec_next.in_span.into();
 
-    let gc = cols.group_count.clone();
-    let gc_next = cols_next.group_count.clone();
+    let gc: AB::Expr = dec.group_count.into();
+    let gc_next: AB::Expr = dec_next.group_count.into();
     let delta_gc = gc - gc_next;
 
     let f_span = op_flags.span();
@@ -448,17 +336,17 @@ fn enforce_op_group_decoding_constraints<AB>(
     let is_push = op_flags.push();
 
     // f_sgc is set when gc stays the same inside a basic block.
-    let f_sgc = sp.clone() * sp_next * delta_gc.not();
+    let f_sgc = sp.clone() * sp_next * delta_gc.clone().not();
 
-    let h0 = local.decoder[decoder_cols::HASHER_STATE_OFFSET];
-    let h0_next = next.decoder[decoder_cols::HASHER_STATE_OFFSET];
+    let h0 = dec.hasher_state[0];
+    let h0_next = dec_next.hasher_state[0];
 
     // Compute op' from next-row op bits (b0' + 2*b1' + ... + 64*b6').
-    let op_next = cols_next
+    let op_next = dec_next
         .op_bits
         .iter()
         .enumerate()
-        .fold(AB::Expr::ZERO, |acc, (i, bit)| acc + bit.clone() * AB::F::from_u16(1u16 << i));
+        .fold(AB::Expr::ZERO, |acc, (i, &bit)| acc + bit * AB::F::from_u16(1u16 << i));
 
     // When SPAN/RESPAN/PUSH or when gc doesn't change, shift h0 by op'.
     // (h0 - h0' * 2^7 - op') = 0 under the combined flag.
@@ -494,18 +382,18 @@ fn enforce_op_group_decoding_constraints<AB>(
 ///    (ox-7) * (ox-8) = 0
 fn enforce_op_index_constraints<AB>(
     builder: &mut AB,
-    cols: &DecoderColumns<AB::Expr>,
-    cols_next: &DecoderColumns<AB::Expr>,
+    dec: &DecoderCols<AB::Var>,
+    dec_next: &DecoderCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
-    let sp = cols.in_span.clone();
-    let sp_next = cols_next.in_span.clone();
-    let gc = cols.group_count.clone();
-    let gc_next = cols_next.group_count.clone();
-    let ox = cols.op_index.clone();
-    let ox_next = cols_next.op_index.clone();
+    let sp: AB::Expr = dec.in_span.into();
+    let sp_next: AB::Expr = dec_next.in_span.into();
+    let gc: AB::Expr = dec.group_count.into();
+    let gc_next: AB::Expr = dec_next.group_count.into();
+    let ox: AB::Expr = dec.op_index.into();
+    let ox_next: AB::Expr = dec_next.op_index.into();
 
     // delta_gc = gc - gc' (how much gc decrements; 1 when entering new group)
     let delta_gc = gc.clone() - gc_next;
@@ -551,21 +439,20 @@ fn enforce_op_index_constraints<AB>(
 ///   the group values; unused lanes must be zeroed.
 fn enforce_batch_flags_constraints<AB>(
     builder: &mut AB,
-    cols: &DecoderColumns<AB::Expr>,
-    local: &MainTraceRow<AB::Var>,
+    dec: &DecoderCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
-    let bc0 = cols.batch_flags[0].clone();
-    let bc1 = cols.batch_flags[1].clone();
-    let bc2 = cols.batch_flags[2].clone();
+    let bc0: AB::Expr = dec.batch_flags[0].into();
+    let bc1: AB::Expr = dec.batch_flags[1].into();
+    let bc2: AB::Expr = dec.batch_flags[2].into();
 
     // Batch flag decoding matches trace::decoder batch encodings.
     let f_g8 = bc0.clone();
     let not_bc0 = bc0.not();
-    let f_g4 = not_bc0.clone() * bc1.clone() * bc2.not();
-    let f_g2 = not_bc0.clone() * bc1.not() * bc2.clone();
+    let f_g4 = not_bc0.clone() * bc1.clone() * bc2.clone().not();
+    let f_g2 = not_bc0.clone() * bc1.clone().not() * bc2.clone();
     let f_g1 = not_bc0 * bc1 * bc2;
 
     let f_span = op_flags.span();
@@ -579,28 +466,25 @@ fn enforce_batch_flags_constraints<AB>(
     // When not SPAN/RESPAN, all batch flags must be zero.
     builder.assert_zero(
         span_or_respan.not()
-            * (cols.batch_flags[0].clone()
-                + cols.batch_flags[1].clone()
-                + cols.batch_flags[2].clone()),
+            * (AB::Expr::from(dec.batch_flags[0])
+                + AB::Expr::from(dec.batch_flags[1])
+                + AB::Expr::from(dec.batch_flags[2])),
     );
 
     // When batch has <=4 groups, h4..h7 must be zero (unused lanes).
     let small_batch = f_g1.clone() + f_g2.clone() + f_g4.clone();
     for i in 0..4 {
-        let hi = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 4 + i];
-        builder.assert_zero(small_batch.clone() * hi);
+        builder.assert_zero(small_batch.clone() * dec.hasher_state[4 + i]);
     }
 
     // When batch has <=2 groups, h2..h3 must be zero (unused lanes).
     let tiny_batch = f_g1.clone() + f_g2.clone();
     for i in 0..2 {
-        let hi = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 2 + i];
-        builder.assert_zero(tiny_batch.clone() * hi);
+        builder.assert_zero(tiny_batch.clone() * dec.hasher_state[2 + i]);
     }
 
     // When batch has 1 group, h1 must be zero (unused lane).
-    let h1 = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 1];
-    builder.assert_zero(f_g1 * h1);
+    builder.assert_zero(f_g1 * dec.hasher_state[1]);
 }
 
 /// Enforces block address (addr) constraints.
@@ -619,15 +503,15 @@ fn enforce_batch_flags_constraints<AB>(
 /// 3. HALT has addr = 0: halt_flag * addr = 0
 fn enforce_block_address_constraints<AB>(
     builder: &mut AB,
-    cols: &DecoderColumns<AB::Expr>,
-    cols_next: &DecoderColumns<AB::Expr>,
+    dec: &DecoderCols<AB::Var>,
+    dec_next: &DecoderCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
-    let sp = cols.in_span.clone();
-    let addr = cols.addr.clone();
-    let addr_next = cols_next.addr.clone();
+    let sp: AB::Expr = dec.in_span.into();
+    let addr: AB::Expr = dec.addr.into();
+    let addr_next: AB::Expr = dec_next.addr.into();
 
     // Constraint 1: Inside a span, address must stay the same.
     // sp * (addr' - addr) = 0

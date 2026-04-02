@@ -262,3 +262,8 @@ Helper `enforce_decoder_selector` inlined into call site. Expression restructure
 **No constraint changes.** (446 base + 24 ext)
 
 ---
+## 23. refactor: migrate decoder constraints to DecoderCols named fields
+
+**No constraint changes.** (446 base + 24 ext)
+
+---
