@@ -31,7 +31,7 @@ pub fn enforce_main<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    selectors::enforce_chiplet_selectors(builder, local, next);
+    let _selectors = selectors::build_chiplet_selectors(builder, local, next);
     hasher::enforce_hasher_constraints(builder, local, next);
     bitwise::enforce_bitwise_constraints(builder, local, next);
     memory::enforce_memory_constraints(builder, local, next);

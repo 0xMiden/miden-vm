@@ -69,3 +69,8 @@ resolving merge conflicts in this file.
 **No constraint changes.** (441 base + 24 ext)
 
 ---
+## 13. refactor: add ChipletFlags/ChipletSelectors structs with precomputed flags
+
+**No constraint changes.** (441 base + 24 ext)
+
+---
