@@ -48,12 +48,9 @@ use crate::{
         Challenges,
         bus_types::CHIPLETS_BUS,
         chiplets::{
-            NUM_ACE_SELECTORS, NUM_KERNEL_ROM_SELECTORS,
-            ace::{
-                ACE_INIT_LABEL, CLK_IDX, CTX_IDX, ID_0_IDX, PTR_IDX, READ_NUM_EVAL_IDX,
-                SELECTOR_START_IDX,
-            },
-            bitwise::{self, BITWISE_AND_LABEL, BITWISE_XOR_LABEL},
+            AceCols, BitwiseCols, HasherCols, KernelRomCols, MemoryCols, borrow_chiplet,
+            ace::ACE_INIT_LABEL,
+            bitwise::{BITWISE_AND_LABEL, BITWISE_XOR_LABEL},
             hasher::{
                 HASH_CYCLE_LEN, LINEAR_HASH_LABEL, MP_VERIFY_LABEL, MR_UPDATE_NEW_LABEL,
                 MR_UPDATE_OLD_LABEL, RETURN_HASH_LABEL, RETURN_STATE_LABEL,
@@ -280,8 +277,8 @@ pub fn enforce_chiplets_bus_constraint<AB>(
     let is_memory: AB::Expr = selectors.memory.is_active.clone();
 
     // ACE response only on start rows (ace_start_selector = 1)
-    let ace_start_selector: AB::Expr =
-        local.chiplets[NUM_ACE_SELECTORS + SELECTOR_START_IDX].into();
+    let ace: &AceCols<AB::Var> = borrow_chiplet(&local.chiplets[4..20]);
+    let ace_start_selector: AB::Expr = ace.s_start.into();
     let is_ace: AB::Expr = selectors.ace.is_active.clone() * ace_start_selector;
 
     let is_kernel_rom: AB::Expr = selectors.kernel_rom.is_active.clone();
@@ -363,22 +360,17 @@ fn compute_bitwise_response<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
-    use crate::trace::chiplets::NUM_BITWISE_SELECTORS;
-
-    // Bitwise chiplet columns start at NUM_BITWISE_SELECTORS=2 in local.chiplets
-    let bw_offset = NUM_BITWISE_SELECTORS;
+    let bw: &BitwiseCols<AB::Var> = borrow_chiplet(&local.chiplets[2..15]);
 
     // Get bitwise operation selector and compute label
-    // The AND/XOR selector is at bitwise[0] = local.chiplets[bw_offset]
     // label = (1 - sel) * AND_LABEL + sel * XOR_LABEL
-    let sel: AB::Expr = local.chiplets[bw_offset].into();
+    let sel: AB::Expr = bw.op_flag.into();
     let one_minus_sel = sel.not();
     let label = one_minus_sel * BITWISE_AND_LABEL + sel.clone() * BITWISE_XOR_LABEL;
 
-    // Bitwise chiplet data columns (offset by bw_offset + bitwise internal indices)
-    let a: AB::Expr = local.chiplets[bw_offset + bitwise::A_COL_IDX].into();
-    let b: AB::Expr = local.chiplets[bw_offset + bitwise::B_COL_IDX].into();
-    let z: AB::Expr = local.chiplets[bw_offset + bitwise::OUTPUT_COL_IDX].into();
+    let a: AB::Expr = bw.a.into();
+    let b: AB::Expr = bw.b.into();
+    let z: AB::Expr = bw.output.into();
 
     challenges.encode(CHIPLETS_BUS, [label, a, b, z])
 }
@@ -706,18 +698,15 @@ fn compute_memory_response<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
-    use crate::trace::chiplets::{NUM_MEMORY_SELECTORS, memory};
+    let mem: &MemoryCols<AB::Var> = borrow_chiplet(&local.chiplets[3..18]);
 
-    // Memory chiplet columns (offset by NUM_MEMORY_SELECTORS=3 for s0, s1, s2 selectors)
-    // local.chiplets is relative to CHIPLETS_OFFSET, memory columns start at index 3
-    let mem_offset = NUM_MEMORY_SELECTORS;
-    let is_read: AB::Expr = local.chiplets[mem_offset + memory::IS_READ_COL_IDX].into();
-    let is_word: AB::Expr = local.chiplets[mem_offset + memory::IS_WORD_ACCESS_COL_IDX].into();
-    let ctx: AB::Expr = local.chiplets[mem_offset + memory::CTX_COL_IDX].into();
-    let word: AB::Expr = local.chiplets[mem_offset + memory::WORD_COL_IDX].into();
-    let idx0: AB::Expr = local.chiplets[mem_offset + memory::IDX0_COL_IDX].into();
-    let idx1: AB::Expr = local.chiplets[mem_offset + memory::IDX1_COL_IDX].into();
-    let clk: AB::Expr = local.chiplets[mem_offset + memory::CLK_COL_IDX].into();
+    let is_read: AB::Expr = mem.is_read.into();
+    let is_word: AB::Expr = mem.is_word.into();
+    let ctx: AB::Expr = mem.ctx.into();
+    let word: AB::Expr = mem.word_addr.into();
+    let idx0: AB::Expr = mem.idx0.into();
+    let idx1: AB::Expr = mem.idx1.into();
+    let clk: AB::Expr = mem.clk.into();
 
     // Compute address: addr = word + idx1 * F_2 + idx0
     let addr: AB::Expr = word + idx1.clone() * F_2 + idx0.clone();
@@ -736,10 +725,10 @@ fn compute_memory_response<AB: MidenAirBuilder>(
     let label = is_write * write_label + is_read * read_label;
 
     // Get value columns (v0, v1, v2, v3)
-    let v0: AB::Expr = local.chiplets[mem_offset + memory::V_COL_RANGE.start].into();
-    let v1: AB::Expr = local.chiplets[mem_offset + memory::V_COL_RANGE.start + 1].into();
-    let v2: AB::Expr = local.chiplets[mem_offset + memory::V_COL_RANGE.start + 2].into();
-    let v3: AB::Expr = local.chiplets[mem_offset + memory::V_COL_RANGE.start + 3].into();
+    let v0: AB::Expr = mem.values[0].into();
+    let v1: AB::Expr = mem.values[1].into();
+    let v2: AB::Expr = mem.values[2].into();
+    let v3: AB::Expr = mem.values[3].into();
 
     // For element access, select the correct element based on idx0, idx1:
     // - (0,0) -> v0, (1,0) -> v1, (0,1) -> v2, (1,1) -> v3
@@ -783,19 +772,14 @@ fn compute_hasher_response<AB: MidenAirBuilder>(
     cycle_row_0: AB::Expr,
     cycle_row_31: AB::Expr,
 ) -> HasherResponse<AB::ExprEF, AB::Expr> {
-    use crate::trace::{
-        CHIPLETS_OFFSET,
-        chiplets::{HASHER_NODE_INDEX_COL_IDX, HASHER_STATE_COL_RANGE},
-    };
+    let h: &HasherCols<AB::Var> = borrow_chiplet(&local.chiplets[1..17]);
+    let h_next: &HasherCols<AB::Var> = borrow_chiplet(&next.chiplets[1..17]);
 
     // Hasher is active when chiplets[0] == 0
     let hasher_active = AB::Expr::from(local.chiplets[0]).not();
 
-    // Hasher selectors (when hasher is active, chiplets[0]=0)
-    // chiplets[1..4] are the hasher's internal selectors s0, s1, s2
-    let hs0 = local.chiplets[1];
-    let hs1 = local.chiplets[2];
-    let hs2 = local.chiplets[3];
+    // Hasher selectors s0, s1, s2
+    let [hs0, hs1, hs2] = h.selectors;
 
     // Negated selectors (reused across multiple flag expressions)
     let not_hs0 = hs0.into().not();
@@ -830,20 +814,14 @@ fn compute_hasher_response<AB: MidenAirBuilder>(
         hasher_active.clone() * cycle_row_31.clone() * hs0 * not_hs1.clone() * not_hs2.clone();
 
     // Get current hasher state (12 elements) and node index
-    let state: [AB::Expr; 12] = core::array::from_fn(|i| {
-        let col_idx = HASHER_STATE_COL_RANGE.start - CHIPLETS_OFFSET + i;
-        local.chiplets[col_idx].into()
-    });
-    let node_index = local.chiplets[HASHER_NODE_INDEX_COL_IDX - CHIPLETS_OFFSET];
+    let state: [AB::Expr; 12] = core::array::from_fn(|i| h.state[i].into());
+    let node_index = h.node_index;
 
     // Get next row's hasher state (for f_abp)
-    let state_next: [AB::Expr; 12] = core::array::from_fn(|i| {
-        let col_idx = HASHER_STATE_COL_RANGE.start - CHIPLETS_OFFSET + i;
-        next.chiplets[col_idx].into()
-    });
+    let state_next: [AB::Expr; 12] = core::array::from_fn(|i| h_next.state[i].into());
 
     // Get next row's node_index for computing the node_index bit
-    let node_index_next = next.chiplets[HASHER_NODE_INDEX_COL_IDX - CHIPLETS_OFFSET];
+    let node_index_next = h_next.node_index;
 
     // addr_next = row + 1 (using clk as proxy since clk = row in the trace)
     let addr_next: AB::Expr = local.system.clk + AB::Expr::ONE;
@@ -1231,20 +1209,21 @@ fn compute_ace_response<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
+    let ace: &AceCols<AB::Var> = borrow_chiplet(&local.chiplets[4..20]);
+
     // Label is ACE_INIT_LABEL
     let label: AB::Expr = ACE_INIT_LABEL.into();
 
-    // Read values from ACE chiplet columns (offset by NUM_ACE_SELECTORS)
-    let clk: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + CLK_IDX].into();
-    let ctx: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + CTX_IDX].into();
-    let ptr: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + PTR_IDX].into();
+    let clk: AB::Expr = ace.clk.into();
+    let ctx: AB::Expr = ace.ctx.into();
+    let ptr: AB::Expr = ace.ptr.into();
 
-    // num_eval_rows = READ_NUM_EVAL_IDX value + 1
-    let read_num_eval = local.chiplets[NUM_ACE_SELECTORS + READ_NUM_EVAL_IDX];
+    // num_eval_rows = read().num_eval + 1
+    let read_num_eval = ace.read().num_eval;
     let num_eval_rows: AB::Expr = read_num_eval + F_1;
 
-    // id_0 from ID_0_IDX
-    let id_0 = local.chiplets[NUM_ACE_SELECTORS + ID_0_IDX];
+    // id_0 from read overlay
+    let id_0 = ace.read().id_0;
 
     // num_read_rows = id_0 + 1 - num_eval_rows
     let num_read_rows: AB::Expr = id_0 + F_1 - num_eval_rows.clone();
@@ -1267,23 +1246,25 @@ fn compute_kernel_rom_response<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
-    // s_first flag is at CHIPLETS_OFFSET + 5 (after 5 selectors), which is chiplets[5]
-    let s_first = local.chiplets[NUM_KERNEL_ROM_SELECTORS];
+    let krom: &KernelRomCols<AB::Var> = borrow_chiplet(&local.chiplets[5..10]);
 
     // Label depends on s_first:
     // label = s_first * INIT_LABEL + (1 - s_first) * CALL_LABEL
+    let s_first = krom.s_first;
     let init_label: AB::Expr = KERNEL_PROC_INIT_LABEL.into();
     let call_label: AB::Expr = KERNEL_PROC_CALL_LABEL.into();
     let label: AB::Expr = s_first * init_label + AB::Expr::from(s_first).not() * call_label;
 
-    // Kernel procedure digest (root0..root3) at columns 6, 7, 8, 9 relative to chiplets
-    // These are at NUM_KERNEL_ROM_SELECTORS + 1..5 (after s_first which is at +0)
-    let root0 = local.chiplets[NUM_KERNEL_ROM_SELECTORS + 1];
-    let root1 = local.chiplets[NUM_KERNEL_ROM_SELECTORS + 2];
-    let root2 = local.chiplets[NUM_KERNEL_ROM_SELECTORS + 3];
-    let root3 = local.chiplets[NUM_KERNEL_ROM_SELECTORS + 4];
-
-    challenges.encode(CHIPLETS_BUS, [label, root0.into(), root1.into(), root2.into(), root3.into()])
+    challenges.encode(
+        CHIPLETS_BUS,
+        [
+            label,
+            krom.root[0].into(),
+            krom.root[1].into(),
+            krom.root[2].into(),
+            krom.root[3].into(),
+        ],
+    )
 }
 
 // CONTROL BLOCK REQUEST HELPERS
