@@ -17,26 +17,17 @@ use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 
 use crate::{
     MainTraceRow, MidenAirBuilder,
-    constraints::utils::BoolNot,
-    trace::{
-        CHIPLET_S0_COL_IDX, CHIPLET_S1_COL_IDX, CHIPLET_S2_COL_IDX, CHIPLETS_OFFSET, Challenges,
-        bus_types::RANGE_CHECK_BUS, chiplets, decoder, range,
-    },
+    constraints::{chiplets::selectors::ChipletSelectors, utils::BoolNot},
+    trace::{Challenges, bus_types::RANGE_CHECK_BUS, decoder, range},
 };
 
 // CONSTANTS
 // ================================================================================================
 
-// --- SLICE-RELATIVE INDICES ---------------------------------------------------------------------
 const STACK_LOOKUP_BASE: usize = decoder::USER_OP_HELPERS_OFFSET;
 const OP_BIT_4_COL_IDX: usize = decoder::OP_BITS_RANGE.start + 4;
 const OP_BIT_5_COL_IDX: usize = decoder::OP_BITS_RANGE.start + 5;
 const OP_BIT_6_COL_IDX: usize = decoder::OP_BITS_RANGE.start + 6;
-const CHIPLET_S0_IDX: usize = CHIPLET_S0_COL_IDX - CHIPLETS_OFFSET;
-const CHIPLET_S1_IDX: usize = CHIPLET_S1_COL_IDX - CHIPLETS_OFFSET;
-const CHIPLET_S2_IDX: usize = CHIPLET_S2_COL_IDX - CHIPLETS_OFFSET;
-const MEMORY_D0_IDX: usize = chiplets::MEMORY_D0_COL_IDX - CHIPLETS_OFFSET;
-const MEMORY_D1_IDX: usize = chiplets::MEMORY_D1_COL_IDX - CHIPLETS_OFFSET;
 
 // ENTRY POINTS
 // ================================================================================================
@@ -60,6 +51,7 @@ pub fn enforce_bus<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
+    selectors: &ChipletSelectors<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
@@ -75,9 +67,9 @@ pub fn enforce_bus<AB>(
     let alpha = &challenges.bus_prefix[RANGE_CHECK_BUS];
 
     // Denominators for LogUp
-    // Memory lookups: mv0 = alpha + chiplets[MEMORY_D0], mv1 = alpha + chiplets[MEMORY_D1]
-    let mv0: AB::ExprEF = alpha.clone() + local.chiplets[MEMORY_D0_IDX].into();
-    let mv1: AB::ExprEF = alpha.clone() + local.chiplets[MEMORY_D1_IDX].into();
+    let mem = local.memory();
+    let mv0: AB::ExprEF = alpha.clone() + mem.d0.into();
+    let mv1: AB::ExprEF = alpha.clone() + mem.d1.into();
 
     // Stack lookups: sv0-sv3 = alpha + decoder helper columns
     let sv0: AB::ExprEF = alpha.clone() + local.decoder[STACK_LOOKUP_BASE].into();
@@ -100,11 +92,8 @@ pub fn enforce_bus<AB>(
     let u32_rc_op = local.decoder[OP_BIT_6_COL_IDX] * not_5 * not_4;
     let sflag_rc_mem = range_check.clone() * memory_lookups.clone() * u32_rc_op;
 
-    // chiplets_memory_flag = s0 * s1 * (1 - s2)
-    let s_0 = local.chiplets[CHIPLET_S0_IDX];
-    let s_1 = local.chiplets[CHIPLET_S1_IDX];
-    let s_2 = local.chiplets[CHIPLET_S2_IDX];
-    let chiplets_memory_flag = s_0 * s_1 * s_2.into().not();
+    // chiplets_memory_flag = s0 * s1 * (1 - s2), i.e. memory is active
+    let chiplets_memory_flag = selectors.memory.is_active.clone();
     let mflag_rc_stack = range_check * stack_lookups.clone() * chiplets_memory_flag;
 
     // LogUp transition constraint terms

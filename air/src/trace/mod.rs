@@ -22,8 +22,7 @@ pub use rows::{RowIndex, RowIndexError};
 mod main_trace;
 // RE-EXPORTS: column structs
 pub use chiplets::{
-    AceCols, AceEvalCols, AceReadCols, BitwiseCols, ChipletsView, HasherCols, KernelRomCols,
-    MemoryCols,
+    AceCols, AceEvalCols, AceReadCols, BitwiseCols, HasherCols, KernelRomCols, MemoryCols,
 };
 pub use decoder::{DecoderCols, EndBlockFlags};
 pub use main_trace::{MainTrace, MainTraceRow};
@@ -40,15 +39,48 @@ pub use system::SystemCols;
 /// This `#[repr(C)]` struct provides typed, named access to every column. It can be
 /// borrowed zero-copy from a raw `[T; TRACE_WIDTH]` slice via `Borrow<MainCols<T>>`.
 ///
-/// Chiplet columns are private because the 20 columns are a union — their interpretation
-/// depends on which chiplet is active. Access goes through [`ChipletsView`].
+/// Chiplet columns are not public because the 20 columns are a union — their interpretation
+/// depends on which chiplet is active. Access goes through typed accessors like
+/// [`MainCols::hasher()`], [`MainCols::bitwise()`], etc.
 #[repr(C)]
 pub struct MainCols<T> {
     pub system: SystemCols<T>,
     pub decoder: DecoderCols<T>,
     pub stack: StackCols<T>,
     pub range: RangeCols<T>,
-    pub chiplets: [T; CHIPLETS_WIDTH],
+    pub(crate) chiplets: [T; CHIPLETS_WIDTH],
+}
+
+impl<T> MainCols<T> {
+    /// Returns the 5 shared chiplet selector columns `[s0, s1, s2, s3, s4]`.
+    pub fn chiplet_selectors(&self) -> &[T; 5] {
+        self.chiplets[0..5].try_into().unwrap()
+    }
+
+    /// Returns a typed borrow of the hasher chiplet columns (chiplets\[1..17\]).
+    pub fn hasher(&self) -> &HasherCols<T> {
+        chiplets::borrow_chiplet(&self.chiplets[1..17])
+    }
+
+    /// Returns a typed borrow of the bitwise chiplet columns (chiplets\[2..15\]).
+    pub fn bitwise(&self) -> &BitwiseCols<T> {
+        chiplets::borrow_chiplet(&self.chiplets[2..15])
+    }
+
+    /// Returns a typed borrow of the memory chiplet columns (chiplets\[3..18\]).
+    pub fn memory(&self) -> &MemoryCols<T> {
+        chiplets::borrow_chiplet(&self.chiplets[3..18])
+    }
+
+    /// Returns a typed borrow of the ACE chiplet columns (chiplets\[4..20\]).
+    pub fn ace(&self) -> &AceCols<T> {
+        chiplets::borrow_chiplet(&self.chiplets[4..20])
+    }
+
+    /// Returns a typed borrow of the kernel ROM chiplet columns (chiplets\[5..10\]).
+    pub fn kernel_rom(&self) -> &KernelRomCols<T> {
+        chiplets::borrow_chiplet(&self.chiplets[5..10])
+    }
 }
 
 impl<T> Borrow<MainCols<T>> for [T] {

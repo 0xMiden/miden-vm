@@ -28,7 +28,6 @@ use super::selectors::ChipletFlags;
 use crate::{
     MainTraceRow, MidenAirBuilder,
     constraints::utils::BoolNot,
-    trace::{KernelRomCols, chiplets::borrow_chiplet},
 };
 
 // ENTRY POINTS
@@ -43,13 +42,12 @@ pub fn enforce_kernel_rom_constraints<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    let s4_next = next.chiplets[4];
+    let s4_next = next.chiplet_selectors()[4];
 
     let kernel_rom_flag = flags.is_active.clone();
 
-    // Zero-copy borrow of kernel ROM columns (sfirst + 4-word digest).
-    let krom: &KernelRomCols<AB::Var> = borrow_chiplet(&local.chiplets[5..10]);
-    let krom_next: &KernelRomCols<AB::Var> = borrow_chiplet(&next.chiplets[5..10]);
+    let krom = local.kernel_rom();
+    let krom_next = next.kernel_rom();
 
     let not_s4_next = s4_next.into().not();
 

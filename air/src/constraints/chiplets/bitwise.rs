@@ -34,7 +34,7 @@ use crate::{
         constants::{F_1, F_16},
         utils::horner_eval_bits,
     },
-    trace::{BitwiseCols, chiplets::borrow_chiplet},
+    trace::BitwiseCols,
 };
 
 // CONSTANTS
@@ -74,9 +74,8 @@ pub fn enforce_bitwise_constraints<AB>(
 
     let bitwise_flag = flags.is_active.clone();
 
-    // Load bitwise columns via zero-copy borrow into the typed struct
-    let cols: &BitwiseCols<AB::Var> = borrow_chiplet(&local.chiplets[2..15]);
-    let cols_next: &BitwiseCols<AB::Var> = borrow_chiplet(&next.chiplets[2..15]);
+    let cols: &BitwiseCols<AB::Var> = local.bitwise();
+    let cols_next: &BitwiseCols<AB::Var> = next.bitwise();
 
     // Convert bit arrays to AB::Expr for arithmetic
     let a_bits: [AB::Expr; 4] = cols.a_bits.map(Into::into);

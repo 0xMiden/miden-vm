@@ -43,7 +43,7 @@ pub use periodic::{STATE_WIDTH, periodic_columns};
 use crate::{
     MainTraceRow, MidenAirBuilder,
     constraints::chiplets::selectors::ChipletFlags,
-    trace::{HasherCols, chiplets::borrow_chiplet},
+    trace::HasherCols,
 };
 
 /// Precomputed hasher flags derived from selectors and cycle markers.
@@ -134,8 +134,8 @@ where
         };
 
         let hasher_flag = flags.is_active.clone();
-        let cols: &HasherCols<AB::Var> = borrow_chiplet(&local.chiplets[1..17]);
-        let cols_next: &HasherCols<AB::Var> = borrow_chiplet(&next.chiplets[1..17]);
+        let cols: &HasherCols<AB::Var> = local.hasher();
+        let cols_next: &HasherCols<AB::Var> = next.hasher();
         let hasher_flags = compute_hasher_flags::<AB>(&periodic, cols, cols_next);
 
         HasherContext::<AB> {

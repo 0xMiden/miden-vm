@@ -36,7 +36,7 @@ use crate::{
         constants::{F_1, TWO_POW_16},
         utils::BoolNot,
     },
-    trace::{MemoryCols, chiplets::borrow_chiplet},
+    trace::MemoryCols,
 };
 
 // ENTRY POINTS
@@ -79,7 +79,7 @@ pub fn enforce_memory_constraints_all_rows<AB>(
 {
     let memory_flag = flags.is_active.clone();
 
-    let cols: &MemoryCols<AB::Var> = borrow_chiplet(&local.chiplets[3..18]);
+    let cols: &MemoryCols<AB::Var> = local.memory();
 
     let is_read: AB::Expr = cols.is_read.into();
     let is_word: AB::Expr = cols.is_word.into();
@@ -111,7 +111,7 @@ pub fn enforce_memory_constraints_first_row<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    let cols_next: &MemoryCols<AB::Var> = borrow_chiplet(&cols_first.chiplets[3..18]);
+    let cols_next: &MemoryCols<AB::Var> = cols_first.memory();
 
     // Compute constraint flags for all 4 word elements
     let [c0, c1, c2, c3] = compute_value_constraint_flags::<AB>(cols_next);
@@ -139,8 +139,8 @@ pub fn enforce_memory_constraints_all_rows_except_last<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    let cols: &MemoryCols<AB::Var> = borrow_chiplet(&local.chiplets[3..18]);
-    let cols_next: &MemoryCols<AB::Var> = borrow_chiplet(&next.chiplets[3..18]);
+    let cols: &MemoryCols<AB::Var> = local.memory();
+    let cols_next: &MemoryCols<AB::Var> = next.memory();
 
     let deltas = compute_memory_deltas::<AB>(cols, cols_next);
 

@@ -34,7 +34,7 @@ use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 use crate::{
     MainTraceRow, MidenAirBuilder,
     constraints::{bus::indices::V_WIRING, chiplets::selectors::ChipletSelectors, utils::BoolNot},
-    trace::{AceCols, Challenges, bus_types::ACE_WIRING_BUS, chiplets::borrow_chiplet},
+    trace::{Challenges, bus_types::ACE_WIRING_BUS},
 };
 
 // ENTRY POINTS
@@ -67,8 +67,7 @@ pub fn enforce_wiring_bus_constraint<AB>(
 
     let ace_flag = selectors.ace.is_active.clone();
 
-    // Zero-copy borrow of ACE columns from chiplets[4..20].
-    let ace: &AceCols<AB::Var> = borrow_chiplet(&local.chiplets[4..20]);
+    let ace = local.ace();
 
     // Block selector: sblock = 0 for READ, sblock = 1 for EVAL.
     let sblock: AB::Expr = ace.s_block.into();

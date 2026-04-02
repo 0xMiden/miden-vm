@@ -85,25 +85,28 @@ pub fn build_chiplet_selectors<AB>(
 where
     AB: MidenAirBuilder,
 {
-    // Load selector columns (chiplets[0..5] are the selectors)
-    let s0: AB::Expr = local.chiplets[0].into();
-    let s1: AB::Expr = local.chiplets[1].into();
-    let s2: AB::Expr = local.chiplets[2].into();
-    let s3: AB::Expr = local.chiplets[3].into();
-    let s4: AB::Expr = local.chiplets[4].into();
+    // Load selector columns via typed accessor
+    let sel = local.chiplet_selectors();
+    let sel_next = next.chiplet_selectors();
 
-    let s0_next: AB::Expr = next.chiplets[0].into();
-    let s1_next: AB::Expr = next.chiplets[1].into();
-    let s2_next: AB::Expr = next.chiplets[2].into();
-    let s3_next: AB::Expr = next.chiplets[3].into();
-    let s4_next: AB::Expr = next.chiplets[4].into();
+    let s0: AB::Expr = sel[0].into();
+    let s1: AB::Expr = sel[1].into();
+    let s2: AB::Expr = sel[2].into();
+    let s3: AB::Expr = sel[3].into();
+    let s4: AB::Expr = sel[4].into();
+
+    let s0_next: AB::Expr = sel_next[0].into();
+    let s1_next: AB::Expr = sel_next[1].into();
+    let s2_next: AB::Expr = sel_next[2].into();
+    let s3_next: AB::Expr = sel_next[3].into();
+    let s4_next: AB::Expr = sel_next[4].into();
 
     // ==========================================================================
     // BINARY CONSTRAINTS
     // ==========================================================================
 
     // s0 is always binary
-    builder.assert_bool(local.chiplets[0]);
+    builder.assert_bool(sel[0]);
 
     // s1..s4 are binary when their prefix selectors are all 1.
     // Use cumulative products to reduce multiplications.
@@ -111,10 +114,10 @@ where
     let s012 = s01.clone() * s2.clone();
     let s0123 = s012.clone() * s3.clone();
 
-    builder.when(local.chiplets[0]).assert_bool(local.chiplets[1]);
-    builder.when(s01.clone()).assert_bool(local.chiplets[2]);
-    builder.when(s012.clone()).assert_bool(local.chiplets[3]);
-    builder.when(s0123.clone()).assert_bool(local.chiplets[4]);
+    builder.when(sel[0]).assert_bool(sel[1]);
+    builder.when(s01.clone()).assert_bool(sel[2]);
+    builder.when(s012.clone()).assert_bool(sel[3]);
+    builder.when(s0123.clone()).assert_bool(sel[4]);
 
     // ==========================================================================
     // STABILITY CONSTRAINTS (transition only)
@@ -128,11 +131,11 @@ where
 
     {
         let mut transition = builder.when_transition();
-        transition.when(s0.clone()).assert_eq(next.chiplets[0], local.chiplets[0]);
-        transition.when(s01.clone()).assert_eq(next.chiplets[1], local.chiplets[1]);
-        transition.when(s012.clone()).assert_eq(next.chiplets[2], local.chiplets[2]);
-        transition.when(s0123.clone()).assert_eq(next.chiplets[3], local.chiplets[3]);
-        transition.when(s01234.clone()).assert_eq(next.chiplets[4], local.chiplets[4]);
+        transition.when(s0.clone()).assert_eq(sel_next[0], sel[0]);
+        transition.when(s01.clone()).assert_eq(sel_next[1], sel[1]);
+        transition.when(s012.clone()).assert_eq(sel_next[2], sel[2]);
+        transition.when(s0123.clone()).assert_eq(sel_next[3], sel[3]);
+        transition.when(s01234.clone()).assert_eq(sel_next[4], sel[4]);
     }
 
     // ==========================================================================
@@ -144,11 +147,11 @@ where
 
     {
         let mut last = builder.when_last_row();
-        last.assert_one(local.chiplets[0]);
-        last.assert_one(local.chiplets[1]);
-        last.assert_one(local.chiplets[2]);
-        last.assert_one(local.chiplets[3]);
-        last.assert_one(local.chiplets[4]);
+        last.assert_one(sel[0]);
+        last.assert_one(sel[1]);
+        last.assert_one(sel[2]);
+        last.assert_one(sel[3]);
+        last.assert_one(sel[4]);
     }
 
     // ==========================================================================

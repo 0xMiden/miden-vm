@@ -26,11 +26,10 @@ use crate::{
         utils::BoolNot,
     },
     trace::{
-        Challenges, HasherCols, LOG_PRECOMPILE_LABEL,
+        Challenges, LOG_PRECOMPILE_LABEL,
         bus_types::{CHIPLETS_BUS, LOG_PRECOMPILE_TRANSCRIPT, SIBLING_TABLE},
         chiplets::{
             ace::{ACE_INSTRUCTION_ID1_OFFSET, ACE_INSTRUCTION_ID2_OFFSET},
-            borrow_chiplet,
             memory::{MEMORY_READ_ELEMENT_LABEL, MEMORY_READ_WORD_LABEL},
         },
         decoder::USER_OP_HELPERS_OFFSET,
@@ -86,8 +85,8 @@ pub fn enforce_hash_kernel_constraint<AB>(
 
     let is_hasher = selectors.hasher.is_active.clone();
 
-    let hasher: &HasherCols<AB::Var> = borrow_chiplet(&local.chiplets[1..17]);
-    let hasher_next: &HasherCols<AB::Var> = borrow_chiplet(&next.chiplets[1..17]);
+    let hasher = local.hasher();
+    let hasher_next = next.hasher();
 
     // Hasher operation selectors (only meaningful within hasher chiplet)
     let s0 = hasher.selectors[0];
@@ -142,8 +141,7 @@ pub fn enforce_hash_kernel_constraint<AB>(
 
     let is_ace_row: AB::Expr = selectors.ace.is_active.clone();
 
-    // ACE columns start at chiplets[4..20] (after s0, s1, s2, s3 selectors).
-    let ace: &crate::trace::AceCols<AB::Var> = borrow_chiplet(&local.chiplets[4..20]);
+    let ace = local.ace();
 
     // Block selector determines read (0) vs eval (1).
     let f_ace_read: AB::Expr = is_ace_row.clone() * ace.s_block.into().not();

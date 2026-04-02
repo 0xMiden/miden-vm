@@ -36,7 +36,6 @@ use crate::{
         constants::{F_1, F_4},
         utils::{BoolNot, binary_or},
     },
-    trace::{AceCols, chiplets::borrow_chiplet},
 };
 
 // ENTRY POINTS
@@ -51,13 +50,12 @@ pub fn enforce_ace_constraints_all_rows<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    let s3_next = next.chiplets[3];
+    let s3_next = next.chiplet_selectors()[3];
 
     let ace_flag = flags.is_active.clone();
 
-    // Zero-copy borrow of ACE columns from chiplets[4..20]
-    let ace: &AceCols<AB::Var> = borrow_chiplet(&local.chiplets[4..20]);
-    let ace_next: &AceCols<AB::Var> = borrow_chiplet(&next.chiplets[4..20]);
+    let ace = local.ace();
+    let ace_next = next.ace();
 
     let sstart: AB::Expr = ace.s_start.into();
     let sstart_next: AB::Expr = ace_next.s_start.into();

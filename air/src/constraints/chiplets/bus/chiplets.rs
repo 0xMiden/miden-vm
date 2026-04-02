@@ -48,10 +48,8 @@ use crate::{
         Challenges,
         bus_types::CHIPLETS_BUS,
         chiplets::{
-            AceCols, BitwiseCols, HasherCols, KernelRomCols, MemoryCols,
             ace::ACE_INIT_LABEL,
             bitwise::{BITWISE_AND_LABEL, BITWISE_XOR_LABEL},
-            borrow_chiplet,
             hasher::{
                 HASH_CYCLE_LEN, LINEAR_HASH_LABEL, MP_VERIFY_LABEL, MR_UPDATE_NEW_LABEL,
                 MR_UPDATE_OLD_LABEL, RETURN_HASH_LABEL, RETURN_STATE_LABEL,
@@ -278,8 +276,7 @@ pub fn enforce_chiplets_bus_constraint<AB>(
     let is_memory: AB::Expr = selectors.memory.is_active.clone();
 
     // ACE response only on start rows (ace_start_selector = 1)
-    let ace: &AceCols<AB::Var> = borrow_chiplet(&local.chiplets[4..20]);
-    let ace_start_selector: AB::Expr = ace.s_start.into();
+    let ace_start_selector: AB::Expr = local.ace().s_start.into();
     let is_ace: AB::Expr = selectors.ace.is_active.clone() * ace_start_selector;
 
     let is_kernel_rom: AB::Expr = selectors.kernel_rom.is_active.clone();
@@ -289,6 +286,7 @@ pub fn enforce_chiplets_bus_constraint<AB>(
         local,
         next,
         challenges,
+        selectors,
         cycle_row_0.into(),
         cycle_row_31.into(),
     );
@@ -361,8 +359,7 @@ fn compute_bitwise_response<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
-    // Bitwise columns start at chiplets[2] (after s0, s1 selectors).
-    let bw: &BitwiseCols<AB::Var> = borrow_chiplet(&local.chiplets[2..15]);
+    let bw = local.bitwise();
 
     // Get bitwise operation selector and compute label
     // label = (1 - sel) * AND_LABEL + sel * XOR_LABEL
@@ -700,8 +697,7 @@ fn compute_memory_response<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
-    // Memory columns start at chiplets[3] (after s0, s1, s2 selectors).
-    let mem: &MemoryCols<AB::Var> = borrow_chiplet(&local.chiplets[3..18]);
+    let mem = local.memory();
 
     let is_read: AB::Expr = mem.is_read.into();
     let is_word: AB::Expr = mem.is_word.into();
@@ -772,15 +768,14 @@ fn compute_hasher_response<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
+    selectors: &ChipletSelectors<AB::Expr>,
     cycle_row_0: AB::Expr,
     cycle_row_31: AB::Expr,
 ) -> HasherResponse<AB::ExprEF, AB::Expr> {
-    // Hasher columns start at chiplets[1] (after s0 selector).
-    let h: &HasherCols<AB::Var> = borrow_chiplet(&local.chiplets[1..17]);
-    let h_next: &HasherCols<AB::Var> = borrow_chiplet(&next.chiplets[1..17]);
+    let h = local.hasher();
+    let h_next = next.hasher();
 
-    // Hasher is active when chiplets[0] == 0
-    let hasher_active = local.chiplets[0].into().not();
+    let hasher_active = selectors.hasher.is_active.clone();
 
     // Hasher internal selectors (hs0, hs1, hs2)
     let [hs0, hs1, hs2] = h.selectors;
@@ -1213,8 +1208,7 @@ fn compute_ace_response<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
-    // ACE columns start at chiplets[4] (after s0, s1, s2, s3 selectors).
-    let ace: &AceCols<AB::Var> = borrow_chiplet(&local.chiplets[4..20]);
+    let ace = local.ace();
 
     // Label is ACE_INIT_LABEL
     let label: AB::Expr = ACE_INIT_LABEL.into();
@@ -1251,8 +1245,7 @@ fn compute_kernel_rom_response<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
-    // Kernel ROM columns start at chiplets[5] (after s0, s1, s2, s3, s4 selectors).
-    let krom: &KernelRomCols<AB::Var> = borrow_chiplet(&local.chiplets[5..10]);
+    let krom = local.kernel_rom();
 
     // Label depends on s_first:
     // label = s_first * INIT_LABEL + (1 - s_first) * CALL_LABEL
