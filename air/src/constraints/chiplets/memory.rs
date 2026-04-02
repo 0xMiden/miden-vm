@@ -30,11 +30,10 @@
 use core::ops::{Add, Mul, Sub};
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::LiftedAirBuilder;
 
 use super::selectors::memory_chiplet_flag;
 use crate::{
-    Felt, MainTraceRow,
+    MainTraceRow, MidenAirBuilder,
     trace::{
         CHIPLETS_OFFSET,
         chiplets::{
@@ -55,7 +54,7 @@ pub fn enforce_memory_constraints<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: MidenAirBuilder,
 {
     let s0: AB::Expr = local.chiplets[0].clone().into();
     let s1: AB::Expr = local.chiplets[1].clone().into();
@@ -89,7 +88,7 @@ pub fn enforce_memory_constraints_all_rows<AB>(
     local: &MainTraceRow<AB::Var>,
     _next: &MainTraceRow<AB::Var>,
 ) where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: MidenAirBuilder,
 {
     // Compute memory active flag from top-level selectors
     let s0: AB::Expr = local.chiplets[0].clone().into();
@@ -125,7 +124,7 @@ pub fn enforce_memory_constraints_first_row<AB>(
     cols_first: &MainTraceRow<AB::Var>,
     flag_next_row_first_memory: AB::Expr,
 ) where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: MidenAirBuilder,
 {
     // Load first memory row columns using typed struct
     let cols_next: MemoryColumns<AB::Expr> = MemoryColumns::from_row::<AB>(cols_first);
@@ -156,7 +155,7 @@ pub fn enforce_memory_constraints_all_rows_except_last<AB>(
     next: &MainTraceRow<AB::Var>,
     flag_memory_active_not_last: AB::Expr,
 ) where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: MidenAirBuilder,
 {
     // Load columns using typed struct
     let cols: MemoryColumns<AB::Expr> = MemoryColumns::from_row::<AB>(local);
@@ -252,7 +251,7 @@ where
 {
     fn new<AB>(cols: &MemoryColumns<E>, cols_next: &MemoryColumns<E>, one: E) -> Self
     where
-        AB: LiftedAirBuilder<F = Felt>,
+        AB: MidenAirBuilder,
         AB::Expr: Into<E>,
     {
         let ctx_delta = cols_next.ctx.clone() - cols.ctx.clone();
@@ -320,7 +319,7 @@ impl<E: Clone> MemoryColumns<E> {
     /// Extract memory columns from a main trace row.
     pub fn from_row<AB>(row: &MainTraceRow<AB::Var>) -> Self
     where
-        AB: LiftedAirBuilder<F = Felt>,
+        AB: MidenAirBuilder,
         AB::Var: Into<E> + Clone,
     {
         let load = |global_idx: usize| {
@@ -393,7 +392,7 @@ fn enforce_delta_inverse_constraints<AB>(
     deltas: &MemoryDeltas<AB::Expr>,
     one: AB::Expr,
 ) where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: MidenAirBuilder,
 {
     let n0 = deltas.n0.clone();
     let n1 = deltas.n1.clone();
@@ -426,7 +425,7 @@ fn enforce_scw_readonly_constraint<AB>(
     deltas: &MemoryDeltas<AB::Expr>,
     one: AB::Expr,
 ) where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: MidenAirBuilder,
 {
     // If ctx/word are unchanged and clk_delta = 0, both rows must be reads.
     // Constraint: f_scw' * (1 - clk_delta * d_inv') * (is_write + is_write') = 0

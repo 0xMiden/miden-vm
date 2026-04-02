@@ -23,9 +23,9 @@
 //!
 //! 4. **Top binary**: Enforced by the specific op constraints that require it.
 
-use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
+use miden_crypto::stark::air::AirBuilder;
 
-use crate::{MainTraceRow, constraints::op_flags::OpFlags};
+use crate::{MainTraceRow, MidenAirBuilder, constraints::op_flags::OpFlags};
 
 // ENTRY POINTS
 // ================================================================================================
@@ -40,7 +40,7 @@ pub fn enforce_main<AB>(
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     // For each position i, the constraint ensures that the next value is consistent
     // with the current value based on the shift flags:

@@ -24,14 +24,13 @@
 use alloc::vec::Vec;
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::LiftedAirBuilder;
 
 use super::{
     hasher::periodic::NUM_PERIODIC_COLUMNS as HASHER_NUM_PERIODIC_COLUMNS,
     selectors::bitwise_chiplet_flag,
 };
 use crate::{
-    Felt, MainTraceRow,
+    Felt, MainTraceRow, MidenAirBuilder,
     trace::{
         CHIPLETS_OFFSET,
         chiplets::{
@@ -68,7 +67,7 @@ pub fn enforce_bitwise_constraints<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: MidenAirBuilder,
 {
     let (k_first, k_transition) = {
         // Clone out what we need to avoid holding a borrow of `builder` while asserting

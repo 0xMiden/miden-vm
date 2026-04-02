@@ -33,10 +33,10 @@
 //! - Processor: processor/src/chiplets/aux_trace/bus/
 
 use miden_core::{FMP_ADDR, FMP_INIT_VALUE, field::PrimeCharacteristicRing, operations::opcodes};
-use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess};
+use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 
 use crate::{
-    Felt, MainTraceRow,
+    Felt, MainTraceRow, MidenAirBuilder,
     constraints::{
         bus::indices::B_CHIPLETS,
         chiplets::{bitwise::P_BITWISE_K_TRANSITION, hasher},
@@ -89,7 +89,7 @@ pub fn enforce_chiplets_bus_constraint<AB>(
     op_flags: &OpFlags<AB::Expr>,
     challenges: &Challenges<AB::ExprEF>,
 ) where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: MidenAirBuilder,
 {
     // Auxiliary trace must be present.
 
@@ -332,7 +332,7 @@ pub fn enforce_chiplets_bus_constraint<AB>(
 /// Format: alpha + beta^0*label + beta^1*a + beta^2*b + beta^3*z
 ///
 /// Stack layout for U32AND/U32XOR: [a, b, ...] -> [z, ...]
-fn compute_bitwise_request<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_bitwise_request<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
@@ -352,7 +352,7 @@ fn compute_bitwise_request<AB: LiftedAirBuilder<F = Felt>>(
 /// Computes the bitwise chiplet response message value.
 ///
 /// Format: alpha + beta^0*label + beta^1*a + beta^2*b + beta^3*z
-fn compute_bitwise_response<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_bitwise_response<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
@@ -387,7 +387,7 @@ fn compute_bitwise_response<AB: LiftedAirBuilder<F = Felt>>(
 ///
 /// Stack layout for MLOADW: [addr, ...] -> [word[0], word[1], word[2], word[3], ...]
 /// Stack layout for MSTOREW: [addr, word[0], word[1], word[2], word[3], ...]
-fn compute_memory_word_request<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_memory_word_request<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
@@ -432,7 +432,7 @@ fn compute_memory_word_request<AB: LiftedAirBuilder<F = Felt>>(
 /// Computes the memory element request message value.
 ///
 /// Format: alpha + beta^0*label + beta^1*ctx + beta^2*addr + beta^3*clk + beta^4*element
-fn compute_memory_element_request<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_memory_element_request<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
@@ -465,7 +465,7 @@ fn compute_memory_element_request<AB: LiftedAirBuilder<F = Felt>>(
 }
 
 /// Computes the MSTREAM request message value (two word reads).
-fn compute_mstream_request<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_mstream_request<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
@@ -518,7 +518,7 @@ fn compute_mstream_request<AB: LiftedAirBuilder<F = Felt>>(
 }
 
 /// Computes the PIPE request message value (two word writes).
-fn compute_pipe_request<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_pipe_request<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
@@ -571,7 +571,7 @@ fn compute_pipe_request<AB: LiftedAirBuilder<F = Felt>>(
 }
 
 /// Computes the CRYPTOSTREAM request value (two word reads + two word writes).
-fn compute_cryptostream_request<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_cryptostream_request<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
@@ -636,7 +636,7 @@ fn compute_cryptostream_request<AB: LiftedAirBuilder<F = Felt>>(
 }
 
 /// Computes the HORNERBASE request value (two element reads).
-fn compute_hornerbase_request<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_hornerbase_request<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
@@ -660,7 +660,7 @@ fn compute_hornerbase_request<AB: LiftedAirBuilder<F = Felt>>(
 }
 
 /// Computes the HORNEREXT request value (one word read).
-fn compute_hornerext_request<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_hornerext_request<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
@@ -695,7 +695,7 @@ fn compute_hornerext_request<AB: LiftedAirBuilder<F = Felt>>(
 /// The memory chiplet uses different labels for read/write and element/word operations.
 /// Address is computed as: word + 2*idx1 + idx0
 /// For element access, the correct element is selected based on idx0, idx1.
-fn compute_memory_response<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_memory_response<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
@@ -771,7 +771,7 @@ struct HasherResponse<EF, E> {
 /// The hasher responds at two cycle positions:
 /// - Row 0: Initialization (f_bp, f_mp, f_mv, f_mu)
 /// - Row 31: Output/Absorption (f_hout, f_sout, f_abp)
-fn compute_hasher_response<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_hasher_response<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
@@ -991,7 +991,7 @@ fn compute_hasher_response<AB: LiftedAirBuilder<F = Felt>>(
 /// The combined request is the product of these two message values.
 ///
 /// Stack layout: [s0, s1, ..., s11, ...] -> [s0', s1', ..., s11', ...]
-fn compute_hperm_request<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_hperm_request<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
@@ -1041,7 +1041,7 @@ fn compute_hperm_request<AB: LiftedAirBuilder<F = Felt>>(
 ///
 /// LOG_PRECOMPILE absorbs `[COMM, TAG]` with capacity `CAP_PREV` and returns `[R0, R1, CAP_NEXT]`.
 /// The request is the product of input (LINEAR_HASH + 16) and output (RETURN_STATE + 32) messages.
-fn compute_log_precompile_request<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_log_precompile_request<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
@@ -1128,7 +1128,7 @@ fn compute_log_precompile_request<AB: LiftedAirBuilder<F = Felt>>(
 /// Format: header + state where:
 /// - header = alpha + beta^0 * transition_label + beta^1 * addr + beta^2 * node_index
 /// - state = sum(beta^(3+i) * hasher_state[i]) for i in 0..12
-fn compute_hasher_message<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_hasher_message<AB: MidenAirBuilder>(
     challenges: &Challenges<AB::ExprEF>,
     transition_label: AB::Expr,
     addr: AB::Expr,
@@ -1155,7 +1155,7 @@ fn compute_hasher_message<AB: LiftedAirBuilder<F = Felt>>(
 }
 
 /// Computes a hasher message for a 4-lane word.
-fn compute_hasher_word_message<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_hasher_word_message<AB: MidenAirBuilder>(
     challenges: &Challenges<AB::ExprEF>,
     transition_label: AB::Expr,
     addr: AB::Expr,
@@ -1174,7 +1174,7 @@ fn compute_hasher_word_message<AB: LiftedAirBuilder<F = Felt>>(
 }
 
 /// Computes a hasher message for an 8-lane rate.
-fn compute_hasher_rate_message<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_hasher_rate_message<AB: MidenAirBuilder>(
     challenges: &Challenges<AB::ExprEF>,
     transition_label: AB::Expr,
     addr: AB::Expr,
@@ -1205,7 +1205,7 @@ fn compute_hasher_rate_message<AB: LiftedAirBuilder<F = Felt>>(
 ///         + beta^4*num_read_rows + beta^5*num_eval_rows
 ///
 /// Stack layout for EVALCIRCUIT: [ptr, num_read_rows, num_eval_rows, ...]
-fn compute_ace_request<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_ace_request<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
@@ -1235,7 +1235,7 @@ fn compute_ace_request<AB: LiftedAirBuilder<F = Felt>>(
 /// - ptr from PTR_IDX
 /// - num_eval_rows computed from READ_NUM_EVAL_IDX + 1
 /// - num_read_rows = id_0 + 1 - num_eval_rows
-fn compute_ace_response<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_ace_response<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
@@ -1272,7 +1272,7 @@ fn compute_ace_response<AB: LiftedAirBuilder<F = Felt>>(
 /// The label depends on s_first flag:
 /// - s_first=1: KERNEL_PROC_INIT_LABEL (responding to verifier/public input init request)
 /// - s_first=0: KERNEL_PROC_CALL_LABEL (responding to decoder SYSCALL request)
-fn compute_kernel_rom_response<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_kernel_rom_response<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
@@ -1331,7 +1331,7 @@ impl ControlBlockOp {
 /// - transition_label = LINEAR_HASH_LABEL + 16 = 3 + 16 = 19
 /// - addr_next = decoder address at next row (from next row's addr column)
 /// - hasher_state = rate lanes from decoder hasher columns + opcode in capacity domain position
-fn compute_control_block_request<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_control_block_request<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
@@ -1376,7 +1376,7 @@ fn compute_control_block_request<AB: LiftedAirBuilder<F = Felt>>(
 /// CALL sends:
 /// 1. Control block request (with decoder hasher state)
 /// 2. FMP initialization write request (to set up new execution context)
-fn compute_call_request<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_call_request<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
@@ -1396,7 +1396,7 @@ fn compute_call_request<AB: LiftedAirBuilder<F = Felt>>(
 /// DYN sends:
 /// 1. Control block request (with zeros for hasher state since callee is dynamic)
 /// 2. Memory read request for callee hash from stack[0]
-fn compute_dyn_request<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_dyn_request<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
@@ -1417,7 +1417,7 @@ fn compute_dyn_request<AB: LiftedAirBuilder<F = Felt>>(
 /// 1. Control block request (with zeros for hasher state since callee is dynamic)
 /// 2. Memory read request for callee hash from stack[0]
 /// 3. FMP initialization write request
-fn compute_dyncall_request<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_dyncall_request<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
@@ -1440,7 +1440,7 @@ fn compute_dyncall_request<AB: LiftedAirBuilder<F = Felt>>(
 /// SYSCALL sends:
 /// 1. Control block request (with decoder hasher state)
 /// 2. Kernel ROM lookup request (to verify kernel procedure)
-fn compute_syscall_request<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_syscall_request<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
@@ -1464,7 +1464,7 @@ fn compute_syscall_request<AB: LiftedAirBuilder<F = Felt>>(
 /// Computes the SPAN block request message value.
 ///
 /// Format: header + full 12-lane sponge state (8 rate lanes + 4 capacity lanes zeroed)
-fn compute_span_request<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_span_request<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
@@ -1501,7 +1501,7 @@ fn compute_span_request<AB: LiftedAirBuilder<F = Felt>>(
 /// Computes the RESPAN block request message value.
 ///
 /// Rate occupies message positions 3..10 (after label/addr/node_index).
-fn compute_respan_request<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_respan_request<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
@@ -1529,7 +1529,7 @@ fn compute_respan_request<AB: LiftedAirBuilder<F = Felt>>(
 /// Computes the END block request message value.
 ///
 /// Digest occupies message positions 3..6 (after label/addr/node_index).
-fn compute_end_request<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_end_request<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
@@ -1548,7 +1548,7 @@ fn compute_end_request<AB: LiftedAirBuilder<F = Felt>>(
 }
 
 /// Computes control block request with zeros for hasher state (for DYN/DYNCALL).
-fn compute_control_block_request_zeros<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_control_block_request_zeros<AB: MidenAirBuilder>(
     _local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
@@ -1585,7 +1585,7 @@ fn compute_control_block_request_zeros<AB: LiftedAirBuilder<F = Felt>>(
 /// Computes the FMP initialization write request.
 ///
 /// This writes FMP_INIT_VALUE to FMP_ADDR in the new context.
-fn compute_fmp_write_request<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_fmp_write_request<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
@@ -1604,7 +1604,7 @@ fn compute_fmp_write_request<AB: LiftedAirBuilder<F = Felt>>(
 /// Computes the callee hash read request for DYN/DYNCALL.
 ///
 /// Reads a word from the address at stack[0] containing the callee hash.
-fn compute_dyn_callee_hash_read<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_dyn_callee_hash_read<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
@@ -1631,7 +1631,7 @@ fn compute_dyn_callee_hash_read<AB: LiftedAirBuilder<F = Felt>>(
 /// MPVERIFY sends two messages:
 /// 1. Input: node value at RATE1 (indices 4..8)
 /// 2. Output: root value at RATE1 (indices 4..8)
-fn compute_mpverify_request<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_mpverify_request<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
@@ -1676,7 +1676,7 @@ fn compute_mpverify_request<AB: LiftedAirBuilder<F = Felt>>(
 /// 2. Output old: old root at RATE0
 /// 3. Input new: new node value at RATE0
 /// 4. Output new: new root at RATE0
-fn compute_mrupdate_request<AB: LiftedAirBuilder<F = Felt>>(
+fn compute_mrupdate_request<AB: MidenAirBuilder>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,

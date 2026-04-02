@@ -38,10 +38,10 @@
 //! - `e0, e1`: Extra columns for degree reduction
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
+use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
-    MainTraceRow,
+    MainTraceRow, MidenAirBuilder,
     constraints::op_flags::{ExprDecoderAccess, OpFlags},
     trace::decoder as decoder_cols,
 };
@@ -147,7 +147,7 @@ pub const CONSTRAINT_DEGREES: [usize; NUM_CONSTRAINTS] = [
 /// Computes the opcode value from op bits: `b0 + 2*b1 + ... + 64*b6`.
 fn op_bits_to_value<AB>(bits: &[AB::Expr; NUM_OP_BITS]) -> AB::Expr
 where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     bits.iter().enumerate().fold(AB::Expr::ZERO, |acc, (i, bit)| {
         acc + bit.clone() * AB::Expr::from_u16(1u16 << i)
@@ -164,7 +164,7 @@ pub fn enforce_main<AB>(
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     // Load decoder columns using typed struct
     let cols: DecoderColumns<AB::Expr> = DecoderColumns::from_row::<AB>(local);
@@ -233,7 +233,7 @@ impl<E: Clone> DecoderColumns<E> {
     /// Extract decoder columns from a main trace row.
     pub fn from_row<AB>(row: &MainTraceRow<AB::Var>) -> Self
     where
-        AB: LiftedAirBuilder,
+        AB: MidenAirBuilder,
         AB::Var: Into<E> + Clone,
     {
         DecoderColumns {
@@ -273,7 +273,7 @@ fn enforce_in_span_constraints<AB>(
     cols_next: &DecoderColumns<AB::Expr>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     let sp = cols.in_span.clone();
     let sp_next = cols_next.in_span.clone();
@@ -303,7 +303,7 @@ fn enforce_in_span_constraints<AB>(
 /// For each bit bi: bi * (bi - 1) = 0
 fn enforce_op_bits_binary<AB>(builder: &mut AB, cols: &DecoderColumns<AB::Expr>)
 where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     for i in 0..NUM_OP_BITS {
         // Each opcode bit must be 0 or 1 to make decoding deterministic.
@@ -319,7 +319,7 @@ where
 /// - e1 = b6 * b5
 fn enforce_extra_columns<AB>(builder: &mut AB, cols: &DecoderColumns<AB::Expr>)
 where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     let b4 = cols.op_bits[4].clone();
     let b5 = cols.op_bits[5].clone();
@@ -347,7 +347,7 @@ where
 /// - Very-high-degree ops (prefix `11`) must have b0 = b1 = 0.
 fn enforce_op_bit_group_constraints<AB>(builder: &mut AB, cols: &DecoderColumns<AB::Expr>)
 where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     let b0 = cols.op_bits[0].clone();
     let b1 = cols.op_bits[1].clone();
@@ -372,7 +372,7 @@ where
 /// For each flag ci: ci * (ci - 1) = 0
 fn enforce_batch_flags_binary<AB>(builder: &mut AB, cols: &DecoderColumns<AB::Expr>)
 where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     for i in 0..NUM_BATCH_FLAGS {
         // Batch flags are selectors; they must be boolean.
@@ -396,7 +396,7 @@ fn enforce_general_constraints<AB>(
     op_flags: &OpFlags<AB::Expr>,
     op_flags_next: &OpFlags<AB::Expr>,
 ) where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     let s0: AB::Expr = local.stack[0].clone().into();
 
@@ -464,7 +464,7 @@ fn enforce_group_count_constraints<AB>(
     op_flags: &OpFlags<AB::Expr>,
     op_flags_next: &OpFlags<AB::Expr>,
 ) where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     let sp = cols.in_span.clone();
     let gc = cols.group_count.clone();
@@ -527,7 +527,7 @@ fn enforce_op_group_decoding_constraints<AB>(
     op_flags: &OpFlags<AB::Expr>,
     op_flags_next: &OpFlags<AB::Expr>,
 ) where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     let sp = cols.in_span.clone();
     let sp_next = cols_next.in_span.clone();
@@ -588,7 +588,7 @@ fn enforce_op_index_constraints<AB>(
     cols_next: &DecoderColumns<AB::Expr>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     let sp = cols.in_span.clone();
     let sp_next = cols_next.in_span.clone();
@@ -647,7 +647,7 @@ fn enforce_batch_flags_constraints<AB>(
     local: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     let bc0 = cols.batch_flags[0].clone();
     let bc1 = cols.batch_flags[1].clone();
@@ -714,7 +714,7 @@ fn enforce_block_address_constraints<AB>(
     cols_next: &DecoderColumns<AB::Expr>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     let sp = cols.in_span.clone();
     let addr = cols.addr.clone();
@@ -755,7 +755,7 @@ fn enforce_control_flow_constraints<AB>(
     cols: &DecoderColumns<AB::Expr>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     let sp = cols.in_span.clone();
 
@@ -765,6 +765,6 @@ fn enforce_control_flow_constraints<AB>(
     builder.assert_zero(AB::Expr::ONE - sp - ctrl_flag);
 }
 
-fn assert_zero_first_row<AB: LiftedAirBuilder>(builder: &mut AB, _idx: usize, expr: AB::Expr) {
+fn assert_zero_first_row<AB: MidenAirBuilder>(builder: &mut AB, _idx: usize, expr: AB::Expr) {
     builder.when_first_row().assert_zero(expr);
 }

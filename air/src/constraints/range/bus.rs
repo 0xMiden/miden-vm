@@ -14,10 +14,10 @@
 //! responses come from the range table (V column with multiplicity).
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess};
+use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 
 use crate::{
-    MainTraceRow,
+    MainTraceRow, MidenAirBuilder,
     trace::{
         CHIPLET_S0_COL_IDX, CHIPLET_S1_COL_IDX, CHIPLET_S2_COL_IDX, CHIPLETS_OFFSET,
         RANGE_CHECK_TRACE_OFFSET, chiplets, decoder, range,
@@ -60,7 +60,7 @@ const RANGE_V_COL_IDX: usize = range::V_COL_IDX - RANGE_CHECK_TRACE_OFFSET;
 /// - Range response: range V column with multiplicity range M column
 pub fn enforce_bus<AB>(builder: &mut AB, local: &MainTraceRow<AB::Var>)
 where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     // In Miden VM, auxiliary trace is always present
 

@@ -12,10 +12,10 @@
 //! `alpha + sum_i beta^i * element[i]`.
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess};
+use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 
 use crate::{
-    Felt, MainTraceRow,
+    Felt, MainTraceRow, MidenAirBuilder,
     constraints::{
         bus::indices::B_HASH_KERNEL,
         chiplets::hasher::{flags, periodic},
@@ -62,7 +62,7 @@ pub fn enforce_hash_kernel_constraint<AB>(
     op_flags: &OpFlags<AB::Expr>,
     challenges: &Challenges<AB::ExprEF>,
 ) where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: MidenAirBuilder,
 {
     // =========================================================================
     // AUXILIARY TRACE ACCESS
@@ -284,7 +284,7 @@ fn compute_sibling_b0<AB>(
     h: &[AB::Expr; 12],
 ) -> AB::ExprEF
 where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: MidenAirBuilder,
 {
     challenges.encode_sparse(
         SIBLING_B0_LAYOUT,
@@ -301,7 +301,7 @@ fn compute_sibling_b1<AB>(
     h: &[AB::Expr; 12],
 ) -> AB::ExprEF
 where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: MidenAirBuilder,
 {
     challenges.encode_sparse(
         SIBLING_B1_LAYOUT,

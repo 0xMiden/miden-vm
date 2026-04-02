@@ -27,10 +27,10 @@
 //!    - On left shift with depth = 16: stack[15]' = 0 (no item to restore)
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
+use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
-    MainTraceRow,
+    MainTraceRow, MidenAirBuilder,
     constraints::op_flags::OpFlags,
     trace::{
         decoder::{IS_CALL_FLAG_COL_IDX, IS_SYSCALL_FLAG_COL_IDX},
@@ -54,7 +54,7 @@ pub fn enforce_main<AB>(
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     // Boundary constraints: stack depth and overflow pointer must start/end clean.
     let sixteen: AB::Expr = AB::Expr::from_u16(16);
@@ -96,7 +96,7 @@ fn enforce_stack_depth_constraints<AB>(
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     let depth: AB::Expr = local.stack[B0_COL_IDX].clone().into();
     let depth_next: AB::Expr = next.stack[B0_COL_IDX].clone().into();
@@ -164,7 +164,7 @@ fn enforce_overflow_flag_constraints<AB>(
     local: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     let depth: AB::Expr = local.stack[B0_COL_IDX].clone().into();
 
@@ -187,7 +187,7 @@ fn enforce_overflow_index_constraints<AB>(
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     let overflow_addr_next: AB::Expr = next.stack[B1_COL_IDX].clone().into();
     let clk: AB::Expr = local.clk.clone().into();

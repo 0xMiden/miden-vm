@@ -28,11 +28,10 @@
 //! | m0        | Wire bus multiplicity for node 0               |
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::LiftedAirBuilder;
 
 use super::selectors::{ace_chiplet_flag, memory_chiplet_flag};
 use crate::{
-    Felt, MainTraceRow,
+    MainTraceRow, MidenAirBuilder,
     trace::chiplets::ace::{
         CLK_IDX, CTX_IDX, EVAL_OP_IDX, ID_0_IDX, ID_1_IDX, PTR_IDX, READ_NUM_EVAL_IDX,
         SELECTOR_BLOCK_IDX, SELECTOR_START_IDX, V_0_0_IDX, V_0_1_IDX, V_1_0_IDX, V_1_1_IDX,
@@ -55,7 +54,7 @@ pub fn enforce_ace_constraints<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: MidenAirBuilder,
 {
     // Load selectors
     let s0: AB::Expr = local.chiplets[0].clone().into();
@@ -90,7 +89,7 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: MidenAirBuilder,
 {
     // Compute ACE active flag from top-level selectors
     let s0: AB::Expr = local.chiplets[0].clone().into();
@@ -263,7 +262,7 @@ pub fn enforce_ace_constraints_first_row<AB>(
     next: &MainTraceRow<AB::Var>,
     flag_next_row_first_ace: AB::Expr,
 ) where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: MidenAirBuilder,
 {
     let sstart_next: AB::Expr = load_ace_col::<AB>(next, SELECTOR_START_IDX);
     let one: AB::Expr = AB::Expr::ONE;
@@ -278,7 +277,7 @@ pub fn enforce_ace_constraints_first_row<AB>(
 /// Load a column from the ACE section of chiplets.
 fn load_ace_col<AB>(row: &MainTraceRow<AB::Var>, ace_col_idx: usize) -> AB::Expr
 where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: MidenAirBuilder,
 {
     // ACE columns start after s0, s1, s2, s3 (4 selectors)
     let local_idx = ACE_OFFSET + ace_col_idx;
@@ -299,7 +298,7 @@ fn compute_arithmetic_expected<AB>(
     v2_1: AB::Expr,
 ) -> (AB::Expr, AB::Expr)
 where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: MidenAirBuilder,
 {
     use crate::constraints::ext_field::QuadFeltExpr;
 

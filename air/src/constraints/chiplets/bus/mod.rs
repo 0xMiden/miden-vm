@@ -10,9 +10,7 @@ pub mod chiplets;
 pub mod hash_kernel;
 pub mod wiring;
 
-use miden_crypto::stark::air::LiftedAirBuilder;
-
-use crate::{Felt, MainTraceRow, constraints::op_flags::OpFlags, trace::Challenges};
+use crate::{MainTraceRow, MidenAirBuilder, constraints::op_flags::OpFlags, trace::Challenges};
 
 /// Enforces chiplets bus constraints.
 pub fn enforce_bus<AB>(
@@ -22,7 +20,7 @@ pub fn enforce_bus<AB>(
     op_flags: &OpFlags<AB::Expr>,
     challenges: &Challenges<AB::ExprEF>,
 ) where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: MidenAirBuilder,
 {
     hash_kernel::enforce_hash_kernel_constraint(builder, local, next, op_flags, challenges);
     chiplets::enforce_chiplets_bus_constraint(builder, local, next, op_flags, challenges);

@@ -29,3 +29,8 @@ resolving merge conflicts in this file.
 **No constraint changes.** (441 base + 24 ext)
 
 ---
+## 5. refactor: introduce MidenAirBuilder trait alias
+
+**No constraint changes.** (441 base + 24 ext)
+
+---

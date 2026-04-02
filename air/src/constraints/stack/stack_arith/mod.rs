@@ -5,9 +5,12 @@
 //! (U32SPLIT/U32ADD/U32ADD3/U32SUB/U32MUL/U32MADD/U32DIV/U32ASSERT2).
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
+use miden_crypto::stark::air::AirBuilder;
 
-use crate::{MainTraceRow, constraints::op_flags::OpFlags, trace::decoder::USER_OP_HELPERS_OFFSET};
+use crate::{
+    MainTraceRow, MidenAirBuilder, constraints::op_flags::OpFlags,
+    trace::decoder::USER_OP_HELPERS_OFFSET,
+};
 
 // ENTRY POINTS
 // ================================================================================================
@@ -19,7 +22,7 @@ pub fn enforce_main<AB>(
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     let s0: AB::Expr = local.stack[0].clone().into();
     let s1: AB::Expr = local.stack[1].clone().into();

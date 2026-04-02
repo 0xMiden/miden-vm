@@ -18,10 +18,10 @@
 //! `alpha + beta^0 * clk + beta^1 * val + beta^2 * prev`
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess};
+use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 
 use crate::{
-    MainTraceRow,
+    MainTraceRow, MidenAirBuilder,
     constraints::{bus::indices::P1_STACK, op_flags::OpFlags},
     trace::{
         Challenges,
@@ -45,7 +45,7 @@ pub fn enforce_bus<AB>(
     op_flags: &OpFlags<AB::Expr>,
     challenges: &Challenges<AB::ExprEF>,
 ) where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     // Auxiliary trace must be present.
 

@@ -41,6 +41,16 @@ mod export {
 
 pub use export::*;
 
+// MIDEN AIR BUILDER
+// ================================================================================================
+
+/// Convenience super-trait that pins `LiftedAirBuilder` to our field.
+///
+/// All constraint functions in this crate should be generic over `AB: MidenAirBuilder`
+/// instead of spelling out the full `LiftedAirBuilder<F = Felt>` bound.
+pub trait MidenAirBuilder: LiftedAirBuilder<F = Felt> {}
+impl<T: LiftedAirBuilder<F = Felt>> MidenAirBuilder for T {}
+
 // PUBLIC INPUTS
 // ================================================================================================
 
@@ -326,7 +336,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
         Ok(ReducedAuxValues { prod, sum })
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: MidenAirBuilder>(&self, builder: &mut AB) {
         use crate::constraints;
 
         let main = builder.main();

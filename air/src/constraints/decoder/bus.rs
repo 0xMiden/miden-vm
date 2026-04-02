@@ -26,10 +26,10 @@
 //! - air‑script constraints: `constraints/decoder.air`.
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess};
+use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 
 use crate::{
-    MainTraceRow,
+    MainTraceRow, MidenAirBuilder,
     constraints::{bus::indices::P1_BLOCK_STACK, op_flags::OpFlags},
     trace::Challenges,
 };
@@ -41,11 +41,11 @@ use crate::{
 const OP_BIT_WEIGHTS: [u16; 7] = [1, 2, 4, 8, 16, 32, 64];
 
 /// Encoders for block stack table (p1) messages.
-struct BlockStackEncoders<'a, AB: LiftedAirBuilder> {
+struct BlockStackEncoders<'a, AB: MidenAirBuilder> {
     challenges: &'a Challenges<AB::ExprEF>,
 }
 
-impl<'a, AB: LiftedAirBuilder> BlockStackEncoders<'a, AB> {
+impl<'a, AB: MidenAirBuilder> BlockStackEncoders<'a, AB> {
     fn new(challenges: &'a Challenges<AB::ExprEF>) -> Self {
         Self { challenges }
     }
@@ -82,11 +82,11 @@ impl<'a, AB: LiftedAirBuilder> BlockStackEncoders<'a, AB> {
 }
 
 /// Encoder for block hash table (p2) messages.
-struct BlockHashEncoder<'a, AB: LiftedAirBuilder> {
+struct BlockHashEncoder<'a, AB: MidenAirBuilder> {
     challenges: &'a Challenges<AB::ExprEF>,
 }
 
-impl<'a, AB: LiftedAirBuilder> BlockHashEncoder<'a, AB> {
+impl<'a, AB: MidenAirBuilder> BlockHashEncoder<'a, AB> {
     fn new(challenges: &'a Challenges<AB::ExprEF>) -> Self {
         Self { challenges }
     }
@@ -112,11 +112,11 @@ impl<'a, AB: LiftedAirBuilder> BlockHashEncoder<'a, AB> {
 }
 
 /// Encoder for op group table (p3) messages.
-struct OpGroupEncoder<'a, AB: LiftedAirBuilder> {
+struct OpGroupEncoder<'a, AB: MidenAirBuilder> {
     challenges: &'a Challenges<AB::ExprEF>,
 }
 
-impl<'a, AB: LiftedAirBuilder> OpGroupEncoder<'a, AB> {
+impl<'a, AB: MidenAirBuilder> OpGroupEncoder<'a, AB> {
     fn new(challenges: &'a Challenges<AB::ExprEF>) -> Self {
         Self { challenges }
     }
@@ -176,7 +176,7 @@ mod op_group_cols {
 /// Decodes opcode bits from a trace row into an opcode value.
 fn opcode_from_row<AB>(row: &MainTraceRow<AB::Var>) -> AB::Expr
 where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     OP_BIT_WEIGHTS.iter().enumerate().fold(AB::Expr::ZERO, |acc, (i, weight)| {
         let bit: AB::Expr = row.decoder[1 + i].clone().into();
@@ -195,7 +195,7 @@ pub fn enforce_bus<AB>(
     op_flags: &OpFlags<AB::Expr>,
     challenges: &Challenges<AB::ExprEF>,
 ) where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     enforce_block_stack_table_constraint(builder, local, next, op_flags, challenges);
     enforce_block_hash_table_constraint(builder, local, next, op_flags, challenges);
@@ -241,7 +241,7 @@ pub fn enforce_block_stack_table_constraint<AB>(
     op_flags: &OpFlags<AB::Expr>,
     challenges: &Challenges<AB::ExprEF>,
 ) where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     // Auxiliary trace must be present
 
@@ -483,7 +483,7 @@ pub fn enforce_block_hash_table_constraint<AB>(
     op_flags: &OpFlags<AB::Expr>,
     challenges: &Challenges<AB::ExprEF>,
 ) where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     // Auxiliary trace must be present
 
@@ -716,7 +716,7 @@ pub fn enforce_op_group_table_constraint<AB>(
     op_flags: &OpFlags<AB::Expr>,
     challenges: &Challenges<AB::ExprEF>,
 ) where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     // Auxiliary trace must be present
 

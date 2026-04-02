@@ -20,10 +20,10 @@
 //! | MUA       | 1  | 1  | 1  | Merkle update absorb |
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
+use miden_crypto::stark::air::AirBuilder;
 
 use super::{HasherColumns, HasherFlags};
-use crate::Felt;
+use crate::MidenAirBuilder;
 
 // CONSTRAINT HELPERS
 // ================================================================================================
@@ -48,7 +48,7 @@ pub(super) fn enforce_selector_consistency<AB>(
     cols_next: &HasherColumns<AB::Expr>,
     flags: &HasherFlags<AB::Expr>,
 ) where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: MidenAirBuilder,
 {
     let one: AB::Expr = AB::Expr::ONE;
 
@@ -96,7 +96,7 @@ pub fn enforce_selector_booleanity<AB>(
     s1: AB::Var,
     s2: AB::Var,
 ) where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: MidenAirBuilder,
 {
     let s0: AB::Expr = s0.into();
     let s1: AB::Expr = s1.into();

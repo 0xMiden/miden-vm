@@ -19,10 +19,10 @@
 //! | MUA  | Merkle Update Absorb | Absorb next sibling (new path) |
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
+use miden_crypto::stark::air::AirBuilder;
 
 use super::{HasherColumns, HasherFlags};
-use crate::Felt;
+use crate::MidenAirBuilder;
 
 // CONSTRAINT HELPERS
 // ================================================================================================
@@ -46,7 +46,7 @@ pub(super) fn enforce_node_index_constraints<AB>(
     cols_next: &HasherColumns<AB::Expr>,
     flags: &HasherFlags<AB::Expr>,
 ) where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: MidenAirBuilder,
 {
     let one: AB::Expr = AB::Expr::ONE;
 
@@ -103,7 +103,7 @@ pub(super) fn enforce_merkle_absorb_state<AB>(
     cols_next: &HasherColumns<AB::Expr>,
     flags: &HasherFlags<AB::Expr>,
 ) where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: MidenAirBuilder,
 {
     let one: AB::Expr = AB::Expr::ONE;
     let f_absorb = flags.f_merkle_absorb();

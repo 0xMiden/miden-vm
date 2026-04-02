@@ -18,9 +18,7 @@ pub mod kernel_rom;
 pub mod memory;
 pub mod selectors;
 
-use miden_crypto::stark::air::LiftedAirBuilder;
-
-use crate::{Felt, MainTraceRow};
+use crate::{MainTraceRow, MidenAirBuilder};
 
 // ENTRY POINTS
 // ================================================================================================
@@ -31,7 +29,7 @@ pub fn enforce_main<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: MidenAirBuilder,
 {
     selectors::enforce_chiplet_selectors(builder, local, next);
     hasher::enforce_hasher_constraints(builder, local, next);

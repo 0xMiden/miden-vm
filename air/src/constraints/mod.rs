@@ -22,9 +22,9 @@
 //!
 //! Additional components (decoder, chiplets) are introduced in later constraint chunks.
 
-use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess};
+use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 
-use crate::{Felt, MainTraceRow, trace::Challenges};
+use crate::{MainTraceRow, MidenAirBuilder, trace::Challenges};
 
 pub mod bus;
 pub mod chiplets;
@@ -45,7 +45,7 @@ pub fn enforce_main<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: MidenAirBuilder,
 {
     system::enforce_main(builder, local, next);
     range::enforce_main(builder, local, next);
@@ -67,7 +67,7 @@ pub fn enforce_bus<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: MidenAirBuilder,
 {
     let r = builder.permutation_randomness();
     let challenges = Challenges::<AB::ExprEF>::new(r[0].into(), r[1].into());
@@ -91,7 +91,7 @@ pub fn enforce_bus<AB>(
 /// finals that satisfy the bus identity without matching the actual trace.
 fn enforce_bus_boundary<AB>(builder: &mut AB)
 where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: MidenAirBuilder,
 {
     // First row: running products = 1, LogUp sums = 0.
     enforce_bus_first_row(builder);
@@ -102,7 +102,7 @@ where
 
 fn enforce_bus_first_row<AB>(builder: &mut AB)
 where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: MidenAirBuilder,
 {
     use bus::indices::*;
 
@@ -131,7 +131,7 @@ where
 
 fn enforce_bus_last_row<AB>(builder: &mut AB)
 where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: MidenAirBuilder,
 {
     use crate::trace::AUX_TRACE_WIDTH;
 

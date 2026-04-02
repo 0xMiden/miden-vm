@@ -23,10 +23,10 @@
 //! 3. First row: when entering kernel ROM, sfirst' must be 1
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
+use miden_crypto::stark::air::AirBuilder;
 
 use super::selectors::{ace_chiplet_flag, kernel_rom_chiplet_flag};
-use crate::{Felt, MainTraceRow};
+use crate::{MainTraceRow, MidenAirBuilder};
 
 // CONSTANTS
 // ================================================================================================
@@ -50,7 +50,7 @@ pub fn enforce_kernel_rom_constraints<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: MidenAirBuilder,
 {
     // Chiplet selector columns; kernel ROM rows are selected by (s0..s4).
     let s0: AB::Expr = local.chiplets[0].clone().into();
@@ -125,7 +125,7 @@ pub fn enforce_kernel_rom_constraints<AB>(
 /// Load a column from the kernel ROM section of chiplets.
 fn load_kernel_rom_col<AB>(row: &MainTraceRow<AB::Var>, col_idx: usize) -> AB::Expr
 where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: MidenAirBuilder,
 {
     // Kernel ROM columns start after s0, s1, s2, s3, s4 (5 selectors)
     let local_idx = KERNEL_ROM_OFFSET + col_idx;

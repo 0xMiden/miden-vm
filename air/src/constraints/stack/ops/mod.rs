@@ -8,9 +8,9 @@
 //! rewrites of stack positions for these op groups.
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
+use miden_crypto::stark::air::AirBuilder;
 
-use crate::{MainTraceRow, constraints::op_flags::OpFlags};
+use crate::{MainTraceRow, MidenAirBuilder, constraints::op_flags::OpFlags};
 
 // ENTRY POINT
 // ================================================================================================
@@ -22,7 +22,7 @@ pub fn enforce_main<AB>(
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     let s0: AB::Expr = local.stack[0].clone().into();
     let s1: AB::Expr = local.stack[1].clone().into();
