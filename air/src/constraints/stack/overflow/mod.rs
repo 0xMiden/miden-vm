@@ -64,7 +64,14 @@ pub fn enforce_main<AB>(
 
     // Transition constraints: depth bookkeeping, overflow flag, and pointer updates.
     enforce_stack_depth_constraints(builder, local, next, op_flags);
-    enforce_overflow_flag_constraints(builder, local, op_flags);
+
+    // Overflow flag: (1 - overflow) * (depth - 16) = 0
+    // When depth > 16, overflow must be 1; when depth = 16, satisfied for any h0.
+    {
+        let depth = local.stack[B0_COL_IDX];
+        builder.assert_zero(op_flags.overflow().not() * (AB::Expr::from(depth) - F_16));
+    }
+
     enforce_overflow_index_constraints(builder, local, next, op_flags);
 }
 
@@ -139,31 +146,6 @@ fn enforce_stack_depth_constraints<AB>(
     builder
         .when_transition()
         .assert_zero(depth_delta_part + left_shift_part - right_shift_part + call_part);
-}
-
-/// Enforces overflow flag constraints.
-///
-/// The overflow flag h0 must satisfy:
-/// - (1 - overflow) * (b0 - 16) = 0
-///
-/// This ensures:
-/// - When b0 = 16 (no overflow): the constraint is satisfied for any h0
-/// - When b0 > 16 (overflow): h0 must be set such that overflow = (b0 - 16) * h0 = 1
-fn enforce_overflow_flag_constraints<AB>(
-    builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    op_flags: &OpFlags<AB::Expr>,
-) where
-    AB: MidenAirBuilder,
-{
-    let depth = local.stack[B0_COL_IDX];
-
-    // (1 - overflow) * (depth - 16) = 0
-    // When depth > 16, overflow must be 1 (meaning h0 = 1/(depth - 16))
-    // When depth = 16, this constraint is satisfied regardless of overflow
-    let constraint = op_flags.overflow().not() * (AB::Expr::from(depth) - F_16);
-
-    builder.assert_zero(constraint);
 }
 
 /// Enforces overflow bookkeeping index constraints.

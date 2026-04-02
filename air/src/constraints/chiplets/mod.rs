@@ -38,6 +38,6 @@ pub fn enforce_main<AB>(
     hasher::enforce_hasher_constraints(builder, local, next, &selectors.hasher);
     bitwise::enforce_bitwise_constraints(builder, local, next, &selectors.bitwise);
     memory::enforce_memory_constraints(builder, local, next, &selectors.memory);
-    ace::enforce_ace_constraints(builder, local, next, &selectors.ace);
+    ace::enforce_ace_constraints_all_rows(builder, local, next, &selectors.ace);
     kernel_rom::enforce_kernel_rom_constraints(builder, local, next, &selectors.kernel_rom);
 }

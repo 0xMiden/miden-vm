@@ -75,31 +75,17 @@ pub fn enforce_bus<AB>(
     let challenges = Challenges::<AB::ExprEF>::new(r[0].into(), r[1].into());
     let op_flags = op_flags::OpFlags::new(op_flags::ExprDecoderAccess::<_, AB::Expr>::new(local));
 
-    enforce_bus_boundary(builder);
+    // First row: running products = 1, LogUp sums = 0.
+    enforce_bus_first_row(builder);
+
+    // Last row: bind aux trace to committed finals checked by `reduced_aux_values`,
+    // preventing a malicious prover from committing arbitrary finals.
+    enforce_bus_last_row(builder);
 
     range::bus::enforce_bus(builder, local, &challenges);
     stack::bus::enforce_bus(builder, local, next, &op_flags, &challenges);
     decoder::bus::enforce_bus(builder, local, next, &op_flags, &challenges);
     chiplets::bus::enforce_bus(builder, local, next, &op_flags, &challenges, selectors);
-}
-
-/// Enforces boundary constraints on all auxiliary columns.
-///
-/// **First row:** running-product columns start at 1, LogUp sums start at 0.
-///
-/// **Last row:** each aux column must equal its committed final value (from
-/// `permutation_values`). This binds the aux trace polynomial to the values checked
-/// by `reduced_aux_values`, preventing a malicious prover from committing arbitrary
-/// finals that satisfy the bus identity without matching the actual trace.
-fn enforce_bus_boundary<AB>(builder: &mut AB)
-where
-    AB: MidenAirBuilder,
-{
-    // First row: running products = 1, LogUp sums = 0.
-    enforce_bus_first_row(builder);
-
-    // Last row: bind aux trace to committed finals checked by `reduced_aux_values`.
-    enforce_bus_last_row(builder);
 }
 
 fn enforce_bus_first_row<AB>(builder: &mut AB)

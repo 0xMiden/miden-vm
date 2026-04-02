@@ -83,19 +83,6 @@ const NUM_BATCH_FLAGS: usize = 3;
 /// Index offset for extra columns (e0, e1) within decoder.
 const EXTRA_COLS_OFFSET: usize = 22;
 
-// SMALL HELPERS
-// ================================================================================================
-
-/// Computes the opcode value from op bits: `b0 + 2*b1 + ... + 64*b6`.
-fn op_bits_to_value<AB>(bits: &[AB::Expr; NUM_OP_BITS]) -> AB::Expr
-where
-    AB: MidenAirBuilder,
-{
-    bits.iter()
-        .enumerate()
-        .fold(AB::Expr::ZERO, |acc, (i, bit)| acc + bit.clone() * AB::F::from_u16(1u16 << i))
-}
-
 // ENTRY POINTS
 // ================================================================================================
 
@@ -114,10 +101,16 @@ pub fn enforce_main<AB>(
     let op_flags_next = OpFlags::new(ExprDecoderAccess::<AB::Var, AB::Expr>::new(next));
 
     enforce_in_span_constraints(builder, &cols, &cols_next, op_flags);
-    enforce_op_bits_binary(builder, &cols);
+
+    // Op bits must be binary
+    builder.assert_bools(cols.op_bits.clone());
+
     enforce_extra_columns(builder, &cols);
     enforce_op_bit_group_constraints(builder, &cols);
-    enforce_batch_flags_binary(builder, &cols);
+
+    // Batch flags must be binary
+    builder.assert_bools(cols.batch_flags.clone());
+
     enforce_general_constraints(builder, local, next, op_flags, &op_flags_next);
     enforce_group_count_constraints(builder, &cols, &cols_next, local, op_flags, &op_flags_next);
     enforce_op_group_decoding_constraints(
@@ -132,7 +125,12 @@ pub fn enforce_main<AB>(
     enforce_op_index_constraints(builder, &cols, &cols_next, op_flags);
     enforce_batch_flags_constraints(builder, &cols, local, op_flags);
     enforce_block_address_constraints(builder, &cols, &cols_next, op_flags);
-    enforce_control_flow_constraints(builder, &cols, op_flags);
+
+    // When outside a basic block (sp=0), only control flow ops can execute: sp + fctrl = 1
+    {
+        let sp = cols.in_span.clone();
+        builder.assert_one(sp + op_flags.control_flow());
+    }
 }
 
 // INTERNAL HELPERS
@@ -235,20 +233,6 @@ fn enforce_in_span_constraints<AB>(
     builder.when_transition().assert_zero(respan_flag * sp_next.not());
 }
 
-/// Enforces that all operation bits (b0-b6) are binary (0 or 1).
-///
-/// For each bit bi: bi * (bi - 1) = 0
-fn enforce_op_bits_binary<AB>(builder: &mut AB, cols: &DecoderColumns<AB::Expr>)
-where
-    AB: MidenAirBuilder,
-{
-    for i in 0..NUM_OP_BITS {
-        // Each opcode bit must be 0 or 1 to make decoding deterministic.
-        let bit = cols.op_bits[i].clone();
-        builder.assert_bool(bit);
-    }
-}
-
 /// Enforces that the extra columns (e0, e1) are correctly computed from op bits.
 ///
 /// These columns are used for degree reduction in operation flag computation:
@@ -302,20 +286,6 @@ where
     let very_high_prefix = b6 * b5;
     builder.assert_zero(very_high_prefix.clone() * b0);
     builder.assert_zero(very_high_prefix * b1);
-}
-
-/// Enforces that batch flags (c0, c1, c2) are binary.
-///
-/// For each flag ci: ci * (ci - 1) = 0
-fn enforce_batch_flags_binary<AB>(builder: &mut AB, cols: &DecoderColumns<AB::Expr>)
-where
-    AB: MidenAirBuilder,
-{
-    for i in 0..NUM_BATCH_FLAGS {
-        // Batch flags are selectors; they must be boolean.
-        let flag = cols.batch_flags[i].clone();
-        builder.assert_bool(flag);
-    }
 }
 
 /// Enforces general decoder constraints derived from opcode semantics.
@@ -484,7 +454,11 @@ fn enforce_op_group_decoding_constraints<AB>(
     let h0_next = next.decoder[decoder_cols::HASHER_STATE_OFFSET];
 
     // Compute op' from next-row op bits (b0' + 2*b1' + ... + 64*b6').
-    let op_next = op_bits_to_value::<AB>(&cols_next.op_bits);
+    let op_next = cols_next
+        .op_bits
+        .iter()
+        .enumerate()
+        .fold(AB::Expr::ZERO, |acc, (i, bit)| acc + bit.clone() * AB::F::from_u16(1u16 << i));
 
     // When SPAN/RESPAN/PUSH or when gc doesn't change, shift h0 by op'.
     // (h0 - h0' * 2^7 - op') = 0 under the combined flag.
@@ -670,31 +644,4 @@ fn enforce_block_address_constraints<AB>(
     // halt_flag * addr = 0
     let halt_flag = op_flags.halt();
     builder.assert_zero(halt_flag * addr);
-}
-
-/// Enforces control flow constraints.
-///
-/// When outside a basic block (sp = 0), only control flow operations can execute.
-/// This is expressed as: fctrl = 1 - sp, or equivalently: (1 - sp) * (1 - fctrl) = 0
-///
-/// Control flow operations include:
-/// - SPAN, JOIN, SPLIT, LOOP (block start operations)
-/// - END, REPEAT, RESPAN, HALT (block transition operations)
-/// - DYN, DYNCALL, CALL, SYSCALL (procedure invocations)
-///
-/// Constraints:
-/// 1. When sp = 0, control_flow must be 1: (1 - sp) * (1 - fctrl) = 0
-fn enforce_control_flow_constraints<AB>(
-    builder: &mut AB,
-    cols: &DecoderColumns<AB::Expr>,
-    op_flags: &OpFlags<AB::Expr>,
-) where
-    AB: MidenAirBuilder,
-{
-    let sp = cols.in_span.clone();
-
-    // Constraint: sp and control_flow must be complementary.
-    // 1 - sp - fctrl = 0
-    let ctrl_flag = op_flags.control_flow();
-    builder.assert_zero(AB::Expr::ONE - sp - ctrl_flag);
 }

@@ -52,38 +52,11 @@ pub fn enforce_main<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    enforce_clock_constraint(builder, local, next);
-    enforce_ctx_constraints(builder, local, next);
-    enforce_fn_hash_constraints(builder, local, next);
-}
-
-// CONSTRAINT HELPERS
-// ================================================================================================
-
-/// Enforces the clock constraint: clk' = clk + 1.
-pub(crate) fn enforce_clock_constraint<AB>(
-    builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
-) where
-    AB: MidenAirBuilder,
-{
-    builder.when_first_row().assert_zero(local.clk);
-
-    builder.when_transition().assert_eq(next.clk, local.clk + F_1);
-}
-
-/// Enforces execution context transition constraints.
-pub(crate) fn enforce_ctx_constraints<AB>(
-    builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
-) where
-    AB: MidenAirBuilder,
-{
-    let ctx = local.ctx;
-    let ctx_next = next.ctx;
-    let clk = local.clk;
+    // Clock: starts at 0, increments by 1
+    {
+        builder.when_first_row().assert_zero(local.clk);
+        builder.when_transition().assert_eq(next.clk, local.clk + F_1);
+    }
 
     let op_flags = OpFlags::new(ExprDecoderAccess::new(local));
     let f_call = op_flags.call();
@@ -91,35 +64,28 @@ pub(crate) fn enforce_ctx_constraints<AB>(
     let f_dyncall = op_flags.dyncall();
     let f_end = op_flags.end();
 
-    let call_dyncall_flag = f_call.clone() + f_dyncall.clone();
-    let change_ctx_flag = f_call + f_syscall.clone() + f_dyncall + f_end;
-    let default_flag = change_ctx_flag.not();
-
+    // Execution context transition constraints (see module doc for transition table)
     {
+        let ctx = local.ctx;
+        let ctx_next = next.ctx;
+        let clk = local.clk;
+
+        let call_dyncall_flag = f_call.clone() + f_dyncall.clone();
+        let change_ctx_flag =
+            f_call.clone() + f_syscall.clone() + f_dyncall.clone() + f_end.clone();
+        let default_flag = change_ctx_flag.not();
+
         let builder = &mut builder.when_transition();
         builder.when(call_dyncall_flag).assert_eq(ctx_next, clk + F_1);
         builder.when(f_syscall).assert_zero(ctx_next);
         builder.when(default_flag).assert_eq(ctx_next, ctx);
     }
-}
 
-/// Enforces function hash transition constraints.
-pub(crate) fn enforce_fn_hash_constraints<AB>(
-    builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
-) where
-    AB: MidenAirBuilder,
-{
-    let op_flags = OpFlags::new(ExprDecoderAccess::new(local));
-    let f_call = op_flags.call();
-    let f_dyncall = op_flags.dyncall();
-    let f_end = op_flags.end();
-
-    let f_load = f_call.clone() + f_dyncall.clone();
-    let f_preserve = (f_load.clone() + f_end).not();
-
+    // Function hash transition constraints (see module doc for transition table)
     {
+        let f_load = f_call + f_dyncall;
+        let f_preserve = (f_load.clone() + f_end).not();
+
         let builder = &mut builder.when_transition();
 
         {

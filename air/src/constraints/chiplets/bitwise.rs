@@ -30,7 +30,10 @@ use super::{
 };
 use crate::{
     Felt, MainTraceRow, MidenAirBuilder,
-    constraints::constants::{F_1, F_16},
+    constraints::{
+        constants::{F_1, F_16},
+        utils::horner_eval_bits,
+    },
     trace::{
         CHIPLETS_OFFSET,
         chiplets::{
@@ -111,16 +114,16 @@ pub fn enforce_bitwise_constraints<AB>(
     }
 
     // First row of cycle (k0=1): a = aggregated bits, b = aggregated bits
-    let a_agg = aggregate_limbs(&cols.a_bits);
-    let b_agg = aggregate_limbs(&cols.b_bits);
+    let a_agg = horner_eval_bits(&cols.a_bits);
+    let b_agg = horner_eval_bits(&cols.b_bits);
     let gate_first = k_first.clone() * bitwise_flag.clone();
     for expr in [cols.a.clone() - a_agg, cols.b.clone() - b_agg, cols.prev_output.clone()] {
         builder.assert_zero(gate_first.clone() * expr);
     }
 
     // Transition rows (k1=1): a' = 16*a + agg(a'_bits), b' = 16*b + agg(b'_bits)
-    let a_agg_next = aggregate_limbs(&cols_next.a_bits);
-    let b_agg_next = aggregate_limbs(&cols_next.b_bits);
+    let a_agg_next = horner_eval_bits(&cols_next.a_bits);
+    let b_agg_next = horner_eval_bits(&cols_next.b_bits);
     for expr in [
         cols_next.a.clone() - (cols.a.clone() * F_16 + a_agg_next),
         cols_next.b.clone() - (cols.b.clone() * F_16 + b_agg_next),
@@ -136,8 +139,18 @@ pub fn enforce_bitwise_constraints<AB>(
     builder.assert_zero(gate_transition * (cols_next.prev_output.clone() - cols.output.clone()));
 
     // Every row: output = 16*output_prev + bitwise_result
-    let a_and_b = compute_limb_and(&cols.a_bits, &cols.b_bits);
-    let a_xor_b = compute_limb_xor(&cols.a_bits, &cols.b_bits);
+
+    // Compute AND of 4-bit limbs: sum(2^i * (a[i] * b[i]))
+    let a_and_b_bits: [_; 4] =
+        core::array::from_fn(|i| cols.a_bits[i].clone() * cols.b_bits[i].clone());
+    let a_and_b = horner_eval_bits(&a_and_b_bits);
+
+    // Compute XOR of 4-bit limbs: sum(2^i * (a[i] + b[i] - 2*a[i]*b[i]))
+    // Reuses a_and_b_bits: xor_bit = a + b - 2*and_bit
+    let a_xor_b_bits: [_; 4] = core::array::from_fn(|i| {
+        cols.a_bits[i].clone() + cols.b_bits[i].clone() - a_and_b_bits[i].clone().double()
+    });
+    let a_xor_b = horner_eval_bits(&a_xor_b_bits);
 
     // z = zp * 16 + (op_flag ? a_xor_b : a_and_b)
     // Equivalent: z = zp * 16 + a_and_b + op_flag * (a_xor_b - a_and_b)
@@ -196,40 +209,6 @@ impl<E: Clone> BitwiseColumns<E> {
             output: row.chiplets[z_idx].clone().into(),
         }
     }
-}
-
-/// Aggregate 4 bits into a value (little-endian): sum(2^i * limb[i])
-/// Uses Horner's method: ((b3*2 + b2)*2 + b1)*2 + b0
-fn aggregate_limbs<E: PrimeCharacteristicRing>(limbs: &[E; 4]) -> E {
-    limbs
-        .iter()
-        .rev()
-        .cloned()
-        .reduce(|acc, bit| acc.double() + bit)
-        .expect("non-empty array")
-}
-
-/// Compute AND of 4-bit limbs: sum(2^i * (a[i] * b[i]))
-/// Uses Horner's method for aggregation
-fn compute_limb_and<E: PrimeCharacteristicRing>(a: &[E; 4], b: &[E; 4]) -> E {
-    (0..4)
-        .rev()
-        .map(|i| a[i].clone() * b[i].clone())
-        .reduce(|acc, bit| acc.double() + bit)
-        .expect("non-empty range")
-}
-
-/// Compute XOR of 4-bit limbs: sum(2^i * (a[i] + b[i] - 2*a[i]*b[i]))
-/// Uses Horner's method for aggregation
-fn compute_limb_xor<E: PrimeCharacteristicRing>(a: &[E; 4], b: &[E; 4]) -> E {
-    (0..4)
-        .rev()
-        .map(|i| {
-            let and_bit = a[i].clone() * b[i].clone();
-            a[i].clone() + b[i].clone() - and_bit.double()
-        })
-        .reduce(|acc, bit| acc.double() + bit)
-        .expect("non-empty range")
 }
 
 // =============================================================================

@@ -181,20 +181,6 @@ mod op_group_cols {
     pub const BATCH_FLAG_2: usize = BATCH_FLAGS_OFFSET + 2;
 }
 
-// HELPERS
-// ================================================================================================
-
-/// Decodes opcode bits from a trace row into an opcode value.
-fn opcode_from_row<AB>(row: &MainTraceRow<AB::Var>) -> AB::Expr
-where
-    AB: MidenAirBuilder,
-{
-    OP_BIT_WEIGHTS.iter().enumerate().fold(AB::Expr::ZERO, |acc, (i, weight)| {
-        let bit = row.decoder[1 + i];
-        acc + bit * Felt::new(*weight as u64)
-    })
-}
-
 // ENTRY POINTS
 // ================================================================================================
 
@@ -834,7 +820,11 @@ pub fn enforce_op_group_table_constraint<AB>(
     let f_dg = sp * delta_gc;
 
     // Compute op_code' from next row's opcode bits (b0' + 2*b1' + ... + 64*b6').
-    let op_code_next = opcode_from_row::<AB>(next);
+    let op_code_next =
+        OP_BIT_WEIGHTS.iter().enumerate().fold(AB::Expr::ZERO, |acc, (i, weight)| {
+            let bit = next.decoder[1 + i];
+            acc + bit * Felt::new(*weight as u64)
+        });
 
     // Removal value formula:
     // u = (h0' * 128 + op_code') * (1 - is_push) + s0' * is_push

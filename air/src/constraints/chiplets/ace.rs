@@ -34,7 +34,7 @@ use crate::{
     MainTraceRow, MidenAirBuilder,
     constraints::{
         constants::{F_1, F_4},
-        utils::BoolNot,
+        utils::{BoolNot, binary_or},
     },
     trace::chiplets::ace::{
         CLK_IDX, CTX_IDX, EVAL_OP_IDX, ID_0_IDX, ID_1_IDX, PTR_IDX, READ_NUM_EVAL_IDX,
@@ -51,23 +51,6 @@ const ACE_OFFSET: usize = 4;
 
 // ENTRY POINTS
 // ================================================================================================
-
-/// Enforce ACE chiplet constraints with transition handling.
-pub fn enforce_ace_constraints<AB>(
-    builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
-    flags: &ChipletFlags<AB::Expr>,
-) where
-    AB: MidenAirBuilder,
-{
-    // ACE constraints on all rows (already internally gated)
-    enforce_ace_constraints_all_rows(builder, local, next, flags);
-
-    // ACE first row constraints (transitioning from memory to ACE)
-    let flag_next_row_first_ace = flags.next_is_first.clone();
-    enforce_ace_constraints_first_row(builder, local, next, flag_next_row_first_ace);
-}
 
 /// Enforce ACE chiplet constraints that apply to all rows.
 pub fn enforce_ace_constraints_all_rows<AB>(
@@ -111,6 +94,13 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     // Precomputed ACE transition flag (bakes in is_transition)
     let ace_transition = flags.is_transition.clone();
     let ace_last = flags.is_last.clone();
+
+    // ==========================================================================
+    // FIRST ROW CONSTRAINTS
+    // ==========================================================================
+
+    // First row of ACE must have sstart' = 1
+    builder.assert_zero(flags.next_is_first.clone() * (sstart_next.clone() - F_1));
 
     // ==========================================================================
     // BINARY CONSTRAINTS
@@ -213,22 +203,6 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     builder.assert_zero(gate * id0);
 }
 
-/// Enforce ACE first row constraints.
-///
-/// On the first row of ACE chiplet, sstart' must be 1.
-pub fn enforce_ace_constraints_first_row<AB>(
-    builder: &mut AB,
-    _local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
-    flag_next_row_first_ace: AB::Expr,
-) where
-    AB: MidenAirBuilder,
-{
-    let sstart_next: AB::Expr = load_ace_col::<AB>(next, SELECTOR_START_IDX);
-    // First row of ACE must have sstart' = 1
-    builder.assert_zero(flag_next_row_first_ace * (sstart_next - F_1));
-}
-
 // INTERNAL HELPERS
 // ================================================================================================
 
@@ -278,16 +252,4 @@ where
     );
 
     expected.into_parts().into()
-}
-
-/// Computes binary OR: `a + b - a * b`
-///
-/// Assumes both a and b are binary (0 or 1).
-/// Returns 1 if either a=1 or b=1.
-#[inline]
-pub fn binary_or<E>(a: E, b: E) -> E
-where
-    E: Clone + core::ops::Add<Output = E> + core::ops::Sub<Output = E> + core::ops::Mul<Output = E>,
-{
-    a.clone() + b.clone() - a * b
 }

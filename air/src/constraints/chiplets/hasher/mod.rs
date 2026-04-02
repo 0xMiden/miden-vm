@@ -36,6 +36,7 @@ pub mod selectors;
 pub mod state;
 
 use miden_core::field::PrimeCharacteristicRing;
+use miden_crypto::stark::air::AirBuilder;
 // Re-export commonly used items
 pub use periodic::{STATE_WIDTH, periodic_columns};
 
@@ -62,32 +63,49 @@ struct HasherFlags<E> {
     pub f_mu: E,
 }
 
-impl<E: PrimeCharacteristicRing + Clone> HasherFlags<E> {
+// ================================================================================================
+// COMPOSITE FLAGS
+// ================================================================================================
+
+impl<E: PrimeCharacteristicRing> HasherFlags<E> {
+    /// Merkle operation active flag.
+    ///
+    /// True when any Merkle operation (MP, MV, MU, MPA, MVA, MUA) is active.
+    /// Used for gating index shift constraints.
+    ///
+    /// # Degree
+    /// - Depends on constituent flags, typically 4
     #[inline]
     fn f_merkle_active(&self) -> E {
-        flags::f_merkle_active(
-            self.f_mp.clone(),
-            self.f_mv.clone(),
-            self.f_mu.clone(),
-            self.f_mpa.clone(),
-            self.f_mva.clone(),
-            self.f_mua.clone(),
-        )
+        self.f_mp.clone()
+            + self.f_mv.clone()
+            + self.f_mu.clone()
+            + self.f_mpa.clone()
+            + self.f_mva.clone()
+            + self.f_mua.clone()
     }
 
+    /// Merkle absorb flag (row 31 only).
+    ///
+    /// True when absorbing the next node during Merkle path computation.
+    ///
+    /// # Degree
+    /// - Depends on constituent flags, typically 4
     #[inline]
     fn f_merkle_absorb(&self) -> E {
-        flags::f_merkle_absorb(self.f_mpa.clone(), self.f_mva.clone(), self.f_mua.clone())
+        self.f_mpa.clone() + self.f_mva.clone() + self.f_mua.clone()
     }
 
+    /// Continuation flag for hashing operations.
+    ///
+    /// True when operation continues to next cycle (ABP, MPA, MVA, MUA).
+    /// Constrains s0' = 0 to ensure proper sequencing.
+    ///
+    /// # Degree
+    /// - Depends on constituent flags, typically 4
     #[inline]
     fn f_continuation(&self) -> E {
-        flags::f_continuation(
-            self.f_abp.clone(),
-            self.f_mpa.clone(),
-            self.f_mva.clone(),
-            self.f_mua.clone(),
-        )
+        self.f_abp.clone() + self.f_mpa.clone() + self.f_mva.clone() + self.f_mua.clone()
     }
 }
 
@@ -223,32 +241,7 @@ pub fn enforce_hasher_constraints<AB>(
 {
     let ctx = HasherContext::<AB>::new(builder, local, next, flags);
 
-    enforce_permutation(builder, &ctx);
-    // Enforce selector booleanity using raw vars.
-    let cols_var: HasherColumns<AB::Var> = HasherColumns::<AB::Var>::from_row(local);
-    selectors::enforce_selector_booleanity(
-        builder,
-        ctx.hasher_flag.clone(),
-        cols_var.s0,
-        cols_var.s1,
-        cols_var.s2,
-    );
-    enforce_selector_consistency(builder, &ctx);
-    enforce_abp_capacity(builder, &ctx);
-    enforce_merkle_constraints(builder, &ctx);
-}
-
-// INTERNAL HELPERS
-// ================================================================================================
-
-/// Enforce Poseidon2 permutation step constraints.
-///
-/// Delegates to [`state::enforce_permutation_steps`] with proper column extraction.
-fn enforce_permutation<AB>(builder: &mut AB, ctx: &HasherContext<AB>)
-where
-    AB: MidenAirBuilder,
-{
-    // Enforce permutation steps
+    // Permutation step constraints
     state::enforce_permutation_steps(
         builder,
         ctx.hasher_flag.clone(),
@@ -256,15 +249,16 @@ where
         &ctx.cols_next.state,
         &ctx.periodic,
     );
-}
 
-/// Enforce selector consistency constraints.
-///
-/// Delegates to [`selectors::enforce_selector_consistency`] with proper column extraction.
-fn enforce_selector_consistency<AB>(builder: &mut AB, ctx: &HasherContext<AB>)
-where
-    AB: MidenAirBuilder,
-{
+    // Selector booleanity
+    {
+        let cols_var: HasherColumns<AB::Var> = HasherColumns::<AB::Var>::from_row(local);
+        builder
+            .when(ctx.hasher_flag.clone())
+            .assert_bools([cols_var.s0, cols_var.s1, cols_var.s2]);
+    }
+
+    // Selector consistency
     selectors::enforce_selector_consistency(
         builder,
         ctx.hasher_flag.clone(),
@@ -272,13 +266,8 @@ where
         &ctx.cols_next,
         &ctx.flags,
     );
-}
 
-/// Enforce ABP capacity preservation on row 31 of the cycle.
-fn enforce_abp_capacity<AB>(builder: &mut AB, ctx: &HasherContext<AB>)
-where
-    AB: MidenAirBuilder,
-{
+    // ABP capacity preservation on row 31 of the cycle
     state::enforce_abp_capacity_preservation(
         builder,
         ctx.hasher_flag.clone(),
@@ -286,16 +275,8 @@ where
         &ctx.cols.capacity(),
         &ctx.cols_next.capacity(),
     );
-}
 
-/// Enforce Merkle path constraints.
-///
-/// Delegates to [`merkle`] module functions for index and state constraints.
-fn enforce_merkle_constraints<AB>(builder: &mut AB, ctx: &HasherContext<AB>)
-where
-    AB: MidenAirBuilder,
-{
-    // Node index constraints
+    // Merkle node index constraints
     merkle::enforce_node_index_constraints(
         builder,
         ctx.hasher_flag.clone(),
