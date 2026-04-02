@@ -284,8 +284,7 @@ mod tests {
         assert_eq!(cols.len(), NUM_PERIODIC_COLUMNS);
 
         // Hasher columns (first 18) have period 32; bitwise columns (last 2) have period 8.
-        let (hasher_cols, bitwise_cols) =
-            cols.split_at(size_of::<HasherPeriodicCols<u8>>());
+        let (hasher_cols, bitwise_cols) = cols.split_at(size_of::<HasherPeriodicCols<u8>>());
         for col in hasher_cols {
             assert_eq!(col.len(), HASH_CYCLE_LEN);
         }

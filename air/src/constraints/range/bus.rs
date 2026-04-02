@@ -18,16 +18,8 @@ use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 use crate::{
     MainTraceRow, MidenAirBuilder,
     constraints::{chiplets::selectors::ChipletSelectors, utils::BoolNot},
-    trace::{Challenges, bus_types::RANGE_CHECK_BUS, decoder, range},
+    trace::{Challenges, bus_types::RANGE_CHECK_BUS, range},
 };
-
-// CONSTANTS
-// ================================================================================================
-
-const STACK_LOOKUP_BASE: usize = decoder::USER_OP_HELPERS_OFFSET;
-const OP_BIT_4_COL_IDX: usize = decoder::OP_BITS_RANGE.start + 4;
-const OP_BIT_5_COL_IDX: usize = decoder::OP_BITS_RANGE.start + 5;
-const OP_BIT_6_COL_IDX: usize = decoder::OP_BITS_RANGE.start + 6;
 
 // ENTRY POINTS
 // ================================================================================================
@@ -72,10 +64,11 @@ pub fn enforce_bus<AB>(
     let mv1: AB::ExprEF = alpha.clone() + mem.d1.into();
 
     // Stack lookups: sv0-sv3 = alpha + decoder helper columns
-    let sv0: AB::ExprEF = alpha.clone() + local.decoder[STACK_LOOKUP_BASE].into();
-    let sv1: AB::ExprEF = alpha.clone() + local.decoder[STACK_LOOKUP_BASE + 1].into();
-    let sv2: AB::ExprEF = alpha.clone() + local.decoder[STACK_LOOKUP_BASE + 2].into();
-    let sv3: AB::ExprEF = alpha.clone() + local.decoder[STACK_LOOKUP_BASE + 3].into();
+    let helpers = local.decoder.user_op_helpers();
+    let sv0: AB::ExprEF = alpha.clone() + helpers[0].into();
+    let sv1: AB::ExprEF = alpha.clone() + helpers[1].into();
+    let sv2: AB::ExprEF = alpha.clone() + helpers[2].into();
+    let sv3: AB::ExprEF = alpha.clone() + helpers[3].into();
 
     // Range check value: alpha + range V column
     let range_check: AB::ExprEF = alpha.clone() + local.range.value.into();
@@ -87,9 +80,9 @@ pub fn enforce_bus<AB>(
 
     // Flags for conditional inclusion
     // u32_rc_op = op_bit[6] * (1 - op_bit[5]) * (1 - op_bit[4])
-    let not_4 = local.decoder[OP_BIT_4_COL_IDX].into().not();
-    let not_5 = local.decoder[OP_BIT_5_COL_IDX].into().not();
-    let u32_rc_op = local.decoder[OP_BIT_6_COL_IDX] * not_5 * not_4;
+    let not_4 = local.decoder.op_bits[4].into().not();
+    let not_5 = local.decoder.op_bits[5].into().not();
+    let u32_rc_op = local.decoder.op_bits[6] * not_5 * not_4;
     let sflag_rc_mem = range_check.clone() * memory_lookups.clone() * u32_rc_op;
 
     // chiplets_memory_flag = s0 * s1 * (1 - s2), i.e. memory is active

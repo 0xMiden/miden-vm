@@ -395,3 +395,17 @@ kernel_rom.rs:70-73→62-65. Identical assertion expressions (`assert_eq(krom_ne
 | 5 | `chiplets/kernel_rom.rs:73` | `chiplets/kernel_rom.rs:65` | kernel_rom.rs:70-73→62-65. Identical assertion expressions (`assert_eq(krom_next.root[i], krom.root[i])`); fingerprints changed because the upstream gate lost a redundant `(1 - s4')` factor. Old gate: `flags.is_transition * (1 - s4') * (1 - s_first')`. New gate: `flags.is_transition * (1 - s_first')`. Since `flags.is_transition` for kernel_rom already includes `(1 - s4')` (from selectors.rs:193: `kernel_rom_transition = is_transition_flag * s0123 * not_s4_next`), the old code was squaring `(1 - s4')²` which equals `(1 - s4')` on binary values. Polynomial changed (lost squared factor) but semantically equivalent on valid traces. |
 
 ---
+## 39. refactor: simplify op_flags with bit-selector pattern and iterative expansion
+
+**4 updated** | 466 unchanged
+
+**Updated:**
+
+| # | Before | After | Interpretation |
+|---|--------|-------|----------------|
+| 1 | `stack/general.rs:76` | `stack/general.rs:76` |  |
+| 2 | `stack/general.rs:76` | `stack/general.rs:76` |  |
+| 3 | `stack/general.rs:76` | `stack/general.rs:76` |  |
+| 4 | `stack/general.rs:76` | `stack/general.rs:76` |  |
+
+---

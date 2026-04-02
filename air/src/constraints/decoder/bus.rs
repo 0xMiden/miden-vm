@@ -525,13 +525,9 @@ pub fn enforce_block_hash_table_constraint<AB>(
     //
     // Note: END (112), REPEAT (116), HALT (124) are all degree-4 operations,
     // so is_first_child has degree 4.
-    let accessor_next =
-        crate::constraints::op_flags::ExprDecoderAccess::<AB::Var, AB::Expr>::new(next);
-    let op_flags_next = OpFlags::new(accessor_next);
-
-    let is_end_next = op_flags_next.end();
-    let is_repeat_next = op_flags_next.repeat();
-    let is_halt_next = op_flags_next.halt();
+    let is_end_next = op_flags.end_next();
+    let is_repeat_next = op_flags.repeat_next();
+    let is_halt_next = op_flags.halt_next();
 
     // is_first_child = 1 when next op is NOT end/repeat/halt
     let is_not_first_child = is_end_next + is_repeat_next + is_halt_next;

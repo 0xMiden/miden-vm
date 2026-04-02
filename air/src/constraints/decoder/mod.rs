@@ -44,7 +44,7 @@ use crate::{
     Felt, MainTraceRow, MidenAirBuilder,
     constraints::{
         constants::{F_1, F_128, HASH_CYCLE_LEN_FELT},
-        op_flags::{ExprDecoderAccess, OpFlags},
+        op_flags::OpFlags,
         utils::BoolNot,
     },
     trace::DecoderCols,
@@ -66,7 +66,6 @@ pub fn enforce_main<AB>(
 {
     let dec = &local.decoder;
     let dec_next = &next.decoder;
-    let op_flags_next = OpFlags::new(ExprDecoderAccess::<AB::Var, AB::Expr>::new(next));
 
     enforce_in_span_constraints(builder, dec, dec_next, op_flags);
 
@@ -79,9 +78,9 @@ pub fn enforce_main<AB>(
     // Batch flags must be binary
     builder.assert_bools(dec.batch_flags);
 
-    enforce_general_constraints(builder, local, next, op_flags, &op_flags_next);
-    enforce_group_count_constraints(builder, dec, dec_next, op_flags, &op_flags_next);
-    enforce_op_group_decoding_constraints(builder, dec, dec_next, op_flags, &op_flags_next);
+    enforce_general_constraints(builder, local, next, op_flags);
+    enforce_group_count_constraints(builder, dec, dec_next, op_flags);
+    enforce_op_group_decoding_constraints(builder, dec, dec_next, op_flags);
     enforce_op_index_constraints(builder, dec, dec_next, op_flags);
     enforce_batch_flags_constraints(builder, dec, op_flags);
     enforce_block_address_constraints(builder, dec, dec_next, op_flags);
@@ -196,7 +195,6 @@ fn enforce_general_constraints<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
-    op_flags_next: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
@@ -232,7 +230,7 @@ fn enforce_general_constraints<AB>(
 
     // END followed by REPEAT: carry h0..h4 into the next row.
     {
-        let gate = builder.is_transition() * f_end.clone() * op_flags_next.repeat();
+        let gate = builder.is_transition() * f_end.clone() * op_flags.repeat_next();
         let builder = &mut builder.when(gate);
         for i in 0..5 {
             builder.assert_eq(dec_next.hasher_state[i], dec.hasher_state[i]);
@@ -241,7 +239,7 @@ fn enforce_general_constraints<AB>(
 
     // HALT is absorbing: it can only be followed by HALT.
     let f_halt = op_flags.halt();
-    let f_halt_next = op_flags_next.halt();
+    let f_halt_next = op_flags.halt_next();
     builder.when_transition().when(f_halt).assert_one(f_halt_next);
 }
 
@@ -267,7 +265,6 @@ fn enforce_group_count_constraints<AB>(
     dec: &DecoderCols<AB::Var>,
     dec_next: &DecoderCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
-    op_flags_next: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
@@ -307,8 +304,8 @@ fn enforce_group_count_constraints<AB>(
 
     // Constraint 4: If the next op is END or RESPAN, gc cannot decrement on this row.
     // delta_gc * (end' + respan') = 0
-    let end_next = op_flags_next.end();
-    let respan_next = op_flags_next.respan();
+    let end_next = op_flags.end_next();
+    let respan_next = op_flags.respan_next();
     builder.when_transition().when(delta_gc).assert_zero(end_next + respan_next);
 
     // Constraint 5: END closes the span, so gc must be 0.
@@ -327,7 +324,6 @@ fn enforce_op_group_decoding_constraints<AB>(
     dec: &DecoderCols<AB::Var>,
     dec_next: &DecoderCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
-    op_flags_next: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
@@ -364,8 +360,8 @@ fn enforce_op_group_decoding_constraints<AB>(
         .assert_zero(h0_shift);
 
     // If the next op is END or RESPAN, the current h0 must be 0 (no pending group).
-    let end_next = op_flags_next.end();
-    let respan_next = op_flags_next.respan();
+    let end_next = op_flags.end_next();
+    let respan_next = op_flags.respan_next();
     builder.when_transition().when(sp).when(end_next + respan_next).assert_zero(h0);
 }
 

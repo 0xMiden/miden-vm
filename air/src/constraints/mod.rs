@@ -29,7 +29,7 @@ pub mod chiplets;
 pub mod constants;
 pub mod decoder;
 pub mod ext_field;
-mod op_flags;
+pub(crate) mod op_flags;
 pub mod public_inputs;
 pub mod range;
 pub mod stack;
@@ -45,15 +45,14 @@ pub fn enforce_main<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     selectors: &ChipletSelectors<AB::Expr>,
+    op_flags: &op_flags::OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
-    system::enforce_main(builder, local, next);
+    system::enforce_main(builder, local, next, op_flags);
     range::enforce_main(builder, local, next);
-
-    let op_flags = op_flags::OpFlags::new(op_flags::ExprDecoderAccess::<_, AB::Expr>::new(local));
-    stack::enforce_main(builder, local, next, &op_flags);
-    decoder::enforce_main(builder, local, next, &op_flags);
+    stack::enforce_main(builder, local, next, op_flags);
+    decoder::enforce_main(builder, local, next, op_flags);
     chiplets::enforce_main(builder, local, next, selectors);
 }
 
@@ -68,12 +67,12 @@ pub fn enforce_bus<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     selectors: &ChipletSelectors<AB::Expr>,
+    op_flags: &op_flags::OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
     let r = builder.permutation_randomness();
     let challenges = Challenges::<AB::ExprEF>::new(r[0].into(), r[1].into());
-    let op_flags = op_flags::OpFlags::new(op_flags::ExprDecoderAccess::<_, AB::Expr>::new(local));
 
     // First row: running products = 1, LogUp sums = 0.
     enforce_bus_first_row(builder);
@@ -83,9 +82,9 @@ pub fn enforce_bus<AB>(
     enforce_bus_last_row(builder);
 
     range::bus::enforce_bus(builder, local, &challenges, selectors);
-    stack::bus::enforce_bus(builder, local, next, &op_flags, &challenges);
-    decoder::bus::enforce_bus(builder, local, next, &op_flags, &challenges);
-    chiplets::bus::enforce_bus(builder, local, next, &op_flags, &challenges, selectors);
+    stack::bus::enforce_bus(builder, local, next, op_flags, &challenges);
+    decoder::bus::enforce_bus(builder, local, next, op_flags, &challenges);
+    chiplets::bus::enforce_bus(builder, local, next, op_flags, &challenges, selectors);
 }
 
 fn enforce_bus_first_row<AB>(builder: &mut AB)

@@ -14,15 +14,14 @@ use super::{
     NUM_DEGREE_4_OPS, NUM_DEGREE_5_OPS, NUM_DEGREE_6_OPS, NUM_DEGREE_7_OPS, OpFlags,
     generate_test_row, get_op_bits, get_op_index,
 };
-use crate::trace::decoder::IS_LOOP_FLAG_COL_IDX;
-
 // HELPER
 // ================================================================================================
 
 /// Creates OpFlags from an opcode using a generated test row.
 fn op_flags_for_opcode(opcode: usize) -> OpFlags<Felt> {
     let row = generate_test_row(opcode);
-    OpFlags::new(&row)
+    let row_next = generate_test_row(0); // next row defaults to NOOP
+    OpFlags::new(&row.decoder, &row.stack, &row_next.decoder)
 }
 
 fn naive_flag(bits: &[Felt; 7], opcode: u8) -> Felt {
@@ -550,8 +549,9 @@ fn composite_end_flags() {
 
     // END with loop flag: left shift (need to modify the row)
     let mut row = generate_test_row(opcodes::END.into());
-    row.decoder[IS_LOOP_FLAG_COL_IDX] = ONE;
-    let op_flags_loop = OpFlags::new(&row);
+    row.decoder.hasher_state[5] = ONE; // is_loop flag
+    let row_next = generate_test_row(0);
+    let op_flags_loop: OpFlags<Felt> = OpFlags::new(&row.decoder, &row.stack, &row_next.decoder);
 
     for i in 0..16 {
         assert_eq!(

@@ -33,11 +33,7 @@ use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
     MainTraceRow, MidenAirBuilder,
-    constraints::{
-        constants::F_1,
-        op_flags::{ExprDecoderAccess, OpFlags},
-        utils::BoolNot,
-    },
+    constraints::{constants::F_1, op_flags::OpFlags, utils::BoolNot},
     trace::decoder::HASHER_STATE_OFFSET,
 };
 
@@ -49,6 +45,7 @@ pub fn enforce_main<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
+    op_flags: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
@@ -57,8 +54,6 @@ pub fn enforce_main<AB>(
         builder.when_first_row().assert_zero(local.system.clk);
         builder.when_transition().assert_eq(next.system.clk, local.system.clk + F_1);
     }
-
-    let op_flags = OpFlags::new(ExprDecoderAccess::new(local));
     let f_call = op_flags.call();
     let f_syscall = op_flags.syscall();
     let f_dyncall = op_flags.dyncall();
