@@ -25,19 +25,11 @@
 use miden_crypto::stark::air::AirBuilder;
 
 use super::selectors::ChipletFlags;
-use crate::{MainTraceRow, MidenAirBuilder, constraints::utils::BoolNot};
-// CONSTANTS
-// ================================================================================================
-
-// Kernel ROM chiplet offset from CHIPLETS_OFFSET (after s0, s1, s2, s3, s4).
-const KERNEL_ROM_OFFSET: usize = 5;
-
-// Column indices within the kernel ROM chiplet
-const SFIRST_IDX: usize = 0;
-const R0_IDX: usize = 1;
-const R1_IDX: usize = 2;
-const R2_IDX: usize = 3;
-const R3_IDX: usize = 4;
+use crate::{
+    MainTraceRow, MidenAirBuilder,
+    constraints::utils::BoolNot,
+    trace::{KernelRomCols, chiplets::borrow_chiplet},
+};
 
 // ENTRY POINTS
 // ================================================================================================
@@ -55,17 +47,9 @@ pub fn enforce_kernel_rom_constraints<AB>(
 
     let kernel_rom_flag = flags.is_active.clone();
 
-    // Load kernel ROM columns (sfirst + 4-word digest).
-    let sfirst = load_kernel_rom_col::<AB>(local, SFIRST_IDX);
-    let sfirst_next = load_kernel_rom_col::<AB>(next, SFIRST_IDX);
-    let r0 = load_kernel_rom_col::<AB>(local, R0_IDX);
-    let r0_next = load_kernel_rom_col::<AB>(next, R0_IDX);
-    let r1 = load_kernel_rom_col::<AB>(local, R1_IDX);
-    let r1_next = load_kernel_rom_col::<AB>(next, R1_IDX);
-    let r2 = load_kernel_rom_col::<AB>(local, R2_IDX);
-    let r2_next = load_kernel_rom_col::<AB>(next, R2_IDX);
-    let r3 = load_kernel_rom_col::<AB>(local, R3_IDX);
-    let r3_next = load_kernel_rom_col::<AB>(next, R3_IDX);
+    // Zero-copy borrow of kernel ROM columns (sfirst + 4-word digest).
+    let krom: &KernelRomCols<AB::Var> = borrow_chiplet(&local.chiplets[5..10]);
+    let krom_next: &KernelRomCols<AB::Var> = borrow_chiplet(&next.chiplets[5..10]);
 
     let not_s4_next = AB::Expr::from(s4_next).not();
 
@@ -74,7 +58,7 @@ pub fn enforce_kernel_rom_constraints<AB>(
     // ==========================================================================
 
     // sfirst must be binary
-    builder.when(kernel_rom_flag.clone()).assert_bool(sfirst.clone());
+    builder.when(kernel_rom_flag.clone()).assert_bool(krom.s_first);
 
     // ==========================================================================
     // DIGEST CONTIGUITY CONSTRAINTS
@@ -82,16 +66,16 @@ pub fn enforce_kernel_rom_constraints<AB>(
 
     // When sfirst' = 0 (not the start of a new digest block) and s4' = 0 (not exiting kernel ROM),
     // the digest values must remain unchanged.
-    let contiguity_condition = not_s4_next * sfirst_next.not();
+    let contiguity_condition = not_s4_next * AB::Expr::from(krom_next.s_first).not();
 
     // Use a combined gate to share `kernel_rom_flag * contiguity_condition` across all 4 lanes.
     {
         let transition_gate = flags.is_transition.clone() * contiguity_condition;
         let builder = &mut builder.when(transition_gate);
-        builder.assert_eq(r0_next, r0);
-        builder.assert_eq(r1_next, r1);
-        builder.assert_eq(r2_next, r2);
-        builder.assert_eq(r3_next, r3);
+        builder.assert_eq(krom_next.root[0], krom.root[0]);
+        builder.assert_eq(krom_next.root[1], krom.root[1]);
+        builder.assert_eq(krom_next.root[2], krom.root[2]);
+        builder.assert_eq(krom_next.root[3], krom.root[3]);
     }
 
     // ==========================================================================
@@ -101,18 +85,5 @@ pub fn enforce_kernel_rom_constraints<AB>(
     // First row of kernel ROM must have sfirst' = 1.
     // Uses the precomputed next_is_first flag to detect ACE→KernelROM boundary.
     let flag_next_row_first_kernel_rom = flags.next_is_first.clone();
-    builder.when(flag_next_row_first_kernel_rom).assert_one(sfirst_next);
-}
-
-// INTERNAL HELPERS
-// ================================================================================================
-
-/// Load a column from the kernel ROM section of chiplets.
-fn load_kernel_rom_col<AB>(row: &MainTraceRow<AB::Var>, col_idx: usize) -> AB::Expr
-where
-    AB: MidenAirBuilder,
-{
-    // Kernel ROM columns start after s0, s1, s2, s3, s4 (5 selectors)
-    let local_idx = KERNEL_ROM_OFFSET + col_idx;
-    row.chiplets[local_idx].into()
+    builder.when(flag_next_row_first_kernel_rom).assert_one(krom_next.s_first);
 }
