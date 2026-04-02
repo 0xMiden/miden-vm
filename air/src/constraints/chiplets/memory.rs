@@ -56,10 +56,10 @@ pub fn enforce_memory_constraints<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    let s0: AB::Expr = local.chiplets[0].clone().into();
-    let s1: AB::Expr = local.chiplets[1].clone().into();
-    let s1_next: AB::Expr = next.chiplets[1].clone().into();
-    let s2_next: AB::Expr = next.chiplets[2].clone().into();
+    let s0: AB::Expr = local.chiplets[0].into();
+    let s1: AB::Expr = local.chiplets[1].into();
+    let s1_next: AB::Expr = next.chiplets[1].into();
+    let s2_next: AB::Expr = next.chiplets[2].into();
 
     let is_transition: AB::Expr = builder.is_transition();
 
@@ -91,9 +91,9 @@ pub fn enforce_memory_constraints_all_rows<AB>(
     AB: MidenAirBuilder,
 {
     // Compute memory active flag from top-level selectors
-    let s0: AB::Expr = local.chiplets[0].clone().into();
-    let s1: AB::Expr = local.chiplets[1].clone().into();
-    let s2: AB::Expr = local.chiplets[2].clone().into();
+    let s0: AB::Expr = local.chiplets[0].into();
+    let s1: AB::Expr = local.chiplets[1].into();
+    let s2: AB::Expr = local.chiplets[2].into();
     let memory_flag = memory_chiplet_flag(s0, s1, s2);
 
     // Load memory columns using typed struct
@@ -324,7 +324,7 @@ impl<E: Clone> MemoryColumns<E> {
     {
         let load = |global_idx: usize| {
             let local_idx = global_idx - CHIPLETS_OFFSET;
-            row.chiplets[local_idx].clone().into()
+            row.chiplets[local_idx].into()
         };
 
         MemoryColumns {

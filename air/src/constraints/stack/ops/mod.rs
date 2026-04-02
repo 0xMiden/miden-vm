@@ -24,45 +24,45 @@ pub fn enforce_main<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    let s0: AB::Expr = local.stack[0].clone().into();
-    let s1: AB::Expr = local.stack[1].clone().into();
-    let s2: AB::Expr = local.stack[2].clone().into();
-    let s3: AB::Expr = local.stack[3].clone().into();
-    let s4: AB::Expr = local.stack[4].clone().into();
-    let s5: AB::Expr = local.stack[5].clone().into();
-    let s6: AB::Expr = local.stack[6].clone().into();
-    let s7: AB::Expr = local.stack[7].clone().into();
-    let s8: AB::Expr = local.stack[8].clone().into();
-    let s9: AB::Expr = local.stack[9].clone().into();
-    let s10: AB::Expr = local.stack[10].clone().into();
-    let s11: AB::Expr = local.stack[11].clone().into();
-    let s12: AB::Expr = local.stack[12].clone().into();
-    let s13: AB::Expr = local.stack[13].clone().into();
-    let s14: AB::Expr = local.stack[14].clone().into();
-    let s15: AB::Expr = local.stack[15].clone().into();
-    let stack_depth: AB::Expr = local.stack[16].clone().into();
+    let s0: AB::Expr = local.stack[0].into();
+    let s1: AB::Expr = local.stack[1].into();
+    let s2: AB::Expr = local.stack[2].into();
+    let s3: AB::Expr = local.stack[3].into();
+    let s4: AB::Expr = local.stack[4].into();
+    let s5: AB::Expr = local.stack[5].into();
+    let s6: AB::Expr = local.stack[6].into();
+    let s7: AB::Expr = local.stack[7].into();
+    let s8: AB::Expr = local.stack[8].into();
+    let s9: AB::Expr = local.stack[9].into();
+    let s10: AB::Expr = local.stack[10].into();
+    let s11: AB::Expr = local.stack[11].into();
+    let s12: AB::Expr = local.stack[12].into();
+    let s13: AB::Expr = local.stack[13].into();
+    let s14: AB::Expr = local.stack[14].into();
+    let s15: AB::Expr = local.stack[15].into();
+    let stack_depth: AB::Expr = local.stack[16].into();
 
-    let fn_hash_0: AB::Expr = local.fn_hash[0].clone().into();
-    let fn_hash_1: AB::Expr = local.fn_hash[1].clone().into();
-    let fn_hash_2: AB::Expr = local.fn_hash[2].clone().into();
-    let fn_hash_3: AB::Expr = local.fn_hash[3].clone().into();
+    let fn_hash_0: AB::Expr = local.fn_hash[0].into();
+    let fn_hash_1: AB::Expr = local.fn_hash[1].into();
+    let fn_hash_2: AB::Expr = local.fn_hash[2].into();
+    let fn_hash_3: AB::Expr = local.fn_hash[3].into();
 
-    let s0_next: AB::Expr = next.stack[0].clone().into();
-    let s1_next: AB::Expr = next.stack[1].clone().into();
-    let s2_next: AB::Expr = next.stack[2].clone().into();
-    let s3_next: AB::Expr = next.stack[3].clone().into();
-    let s4_next: AB::Expr = next.stack[4].clone().into();
-    let s5_next: AB::Expr = next.stack[5].clone().into();
-    let s6_next: AB::Expr = next.stack[6].clone().into();
-    let s7_next: AB::Expr = next.stack[7].clone().into();
-    let s8_next: AB::Expr = next.stack[8].clone().into();
-    let s9_next: AB::Expr = next.stack[9].clone().into();
-    let s10_next: AB::Expr = next.stack[10].clone().into();
-    let s11_next: AB::Expr = next.stack[11].clone().into();
-    let s12_next: AB::Expr = next.stack[12].clone().into();
-    let s13_next: AB::Expr = next.stack[13].clone().into();
-    let s14_next: AB::Expr = next.stack[14].clone().into();
-    let s15_next: AB::Expr = next.stack[15].clone().into();
+    let s0_next: AB::Expr = next.stack[0].into();
+    let s1_next: AB::Expr = next.stack[1].into();
+    let s2_next: AB::Expr = next.stack[2].into();
+    let s3_next: AB::Expr = next.stack[3].into();
+    let s4_next: AB::Expr = next.stack[4].into();
+    let s5_next: AB::Expr = next.stack[5].into();
+    let s6_next: AB::Expr = next.stack[6].into();
+    let s7_next: AB::Expr = next.stack[7].into();
+    let s8_next: AB::Expr = next.stack[8].into();
+    let s9_next: AB::Expr = next.stack[9].into();
+    let s10_next: AB::Expr = next.stack[10].into();
+    let s11_next: AB::Expr = next.stack[11].into();
+    let s12_next: AB::Expr = next.stack[12].into();
+    let s13_next: AB::Expr = next.stack[13].into();
+    let s14_next: AB::Expr = next.stack[14].into();
+    let s15_next: AB::Expr = next.stack[15].into();
 
     let is_pad = op_flags.pad();
     let is_dup = op_flags.dup();
@@ -132,7 +132,7 @@ pub fn enforce_main<AB>(
         .assert_zero(is_dup15 * (s0_next.clone() - s15.clone()));
 
     // CLK
-    let clk: AB::Expr = local.clk.clone().into();
+    let clk: AB::Expr = local.clk.into();
     builder.when_transition().assert_zero(is_clk * (s0_next.clone() - clk));
 
     // SWAP

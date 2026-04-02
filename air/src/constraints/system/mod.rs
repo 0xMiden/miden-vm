@@ -65,11 +65,9 @@ pub(crate) fn enforce_clock_constraint<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    builder.when_first_row().assert_zero(local.clk.clone());
+    builder.when_first_row().assert_zero(local.clk);
 
-    builder
-        .when_transition()
-        .assert_eq(next.clk.clone(), local.clk.clone() + AB::Expr::ONE);
+    builder.when_transition().assert_eq(next.clk, local.clk + AB::Expr::ONE);
 }
 
 /// Enforces execution context transition constraints.
@@ -80,9 +78,9 @@ pub(crate) fn enforce_ctx_constraints<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    let ctx: AB::Expr = local.ctx.clone().into();
-    let ctx_next: AB::Expr = next.ctx.clone().into();
-    let clk: AB::Expr = local.clk.clone().into();
+    let ctx: AB::Expr = local.ctx.into();
+    let ctx_next: AB::Expr = next.ctx.into();
+    let clk: AB::Expr = local.clk.into();
 
     let op_flags = OpFlags::new(ExprDecoderAccess::new(local));
     let f_call = op_flags.call();
@@ -123,15 +121,15 @@ pub(crate) fn enforce_fn_hash_constraints<AB>(
         .when_transition()
         .when(f_load.clone())
         .assert_zeros(core::array::from_fn::<_, 4, _>(|i| {
-            let fn_hash_i_next: AB::Expr = next.fn_hash[i].clone().into();
-            let decoder_h_i: AB::Expr = local.decoder[HASHER_STATE_OFFSET + i].clone().into();
+            let fn_hash_i_next: AB::Expr = next.fn_hash[i].into();
+            let decoder_h_i: AB::Expr = local.decoder[HASHER_STATE_OFFSET + i].into();
             fn_hash_i_next - decoder_h_i
         }));
 
     builder.when_transition().when(f_preserve.clone()).assert_zeros(
         core::array::from_fn::<_, 4, _>(|i| {
-            let fn_hash_i: AB::Expr = local.fn_hash[i].clone().into();
-            let fn_hash_i_next: AB::Expr = next.fn_hash[i].clone().into();
+            let fn_hash_i: AB::Expr = local.fn_hash[i].into();
+            let fn_hash_i_next: AB::Expr = next.fn_hash[i].into();
             fn_hash_i_next - fn_hash_i
         }),
     );

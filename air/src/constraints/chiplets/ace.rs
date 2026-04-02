@@ -57,11 +57,11 @@ pub fn enforce_ace_constraints<AB>(
     AB: MidenAirBuilder,
 {
     // Load selectors
-    let s0: AB::Expr = local.chiplets[0].clone().into();
-    let s1: AB::Expr = local.chiplets[1].clone().into();
-    let s2: AB::Expr = local.chiplets[2].clone().into();
-    let s2_next: AB::Expr = next.chiplets[2].clone().into();
-    let s3_next: AB::Expr = next.chiplets[3].clone().into();
+    let s0: AB::Expr = local.chiplets[0].into();
+    let s1: AB::Expr = local.chiplets[1].into();
+    let s2: AB::Expr = local.chiplets[2].into();
+    let s2_next: AB::Expr = next.chiplets[2].into();
+    let s3_next: AB::Expr = next.chiplets[3].into();
 
     // Gate transition constraints by is_transition() to avoid last-row issues
     let is_transition: AB::Expr = builder.is_transition();
@@ -92,11 +92,11 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     AB: MidenAirBuilder,
 {
     // Compute ACE active flag from top-level selectors
-    let s0: AB::Expr = local.chiplets[0].clone().into();
-    let s1: AB::Expr = local.chiplets[1].clone().into();
-    let s2: AB::Expr = local.chiplets[2].clone().into();
-    let s3: AB::Expr = local.chiplets[3].clone().into();
-    let s3_next: AB::Expr = next.chiplets[3].clone().into();
+    let s0: AB::Expr = local.chiplets[0].into();
+    let s1: AB::Expr = local.chiplets[1].into();
+    let s2: AB::Expr = local.chiplets[2].into();
+    let s3: AB::Expr = local.chiplets[3].into();
+    let s3_next: AB::Expr = next.chiplets[3].into();
 
     let ace_flag = ace_chiplet_flag(s0.clone(), s1.clone(), s2.clone(), s3.clone());
 
@@ -281,7 +281,7 @@ where
 {
     // ACE columns start after s0, s1, s2, s3 (4 selectors)
     let local_idx = ACE_OFFSET + ace_col_idx;
-    row.chiplets[local_idx].clone().into()
+    row.chiplets[local_idx].into()
 }
 
 /// Compute expected EVAL block outputs (v0) from op and operands.

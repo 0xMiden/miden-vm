@@ -77,10 +77,10 @@ pub fn enforce_wiring_bus_constraint<AB>(
     // Chiplet selectors.
     // ---------------------------------------------------------------------
 
-    let s0: AB::Expr = local.chiplets[0].clone().into();
-    let s1: AB::Expr = local.chiplets[1].clone().into();
-    let s2: AB::Expr = local.chiplets[2].clone().into();
-    let s3: AB::Expr = local.chiplets[3].clone().into();
+    let s0: AB::Expr = local.chiplets[0].into();
+    let s1: AB::Expr = local.chiplets[1].into();
+    let s2: AB::Expr = local.chiplets[2].into();
+    let s3: AB::Expr = local.chiplets[3].into();
     let ace_flag = ace_chiplet_flag(s0, s1, s2, s3);
 
     // Block selector: sblock = 0 for READ, sblock = 1 for EVAL.
@@ -197,5 +197,5 @@ where
     AB: MidenAirBuilder,
 {
     let local_idx = ACE_OFFSET + ace_col_idx;
-    row.chiplets[local_idx].clone().into()
+    row.chiplets[local_idx].into()
 }

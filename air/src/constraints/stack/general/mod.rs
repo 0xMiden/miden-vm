@@ -55,9 +55,9 @@ pub fn enforce_main<AB>(
     // next[0] * flag_sum = no_shift[0] * current[0] + left_shift[1] * current[1]
     {
         let flag_sum = op_flags.no_shift_at(0) + op_flags.left_shift_at(1);
-        let expected = op_flags.no_shift_at(0) * local.stack[0].clone().into()
-            + op_flags.left_shift_at(1) * local.stack[1].clone().into();
-        let actual: AB::Expr = next.stack[0].clone().into();
+        let expected = op_flags.no_shift_at(0) * local.stack[0].into()
+            + op_flags.left_shift_at(1) * local.stack[1].into();
+        let actual: AB::Expr = next.stack[0].into();
 
         builder.when_transition().assert_zero(actual * flag_sum - expected);
     }
@@ -68,10 +68,10 @@ pub fn enforce_main<AB>(
             + op_flags.left_shift_at(i + 1)
             + op_flags.right_shift_at(i - 1);
 
-        let expected = op_flags.no_shift_at(i) * local.stack[i].clone().into()
-            + op_flags.left_shift_at(i + 1) * local.stack[i + 1].clone().into()
-            + op_flags.right_shift_at(i - 1) * local.stack[i - 1].clone().into();
-        let actual: AB::Expr = next.stack[i].clone().into();
+        let expected = op_flags.no_shift_at(i) * local.stack[i].into()
+            + op_flags.left_shift_at(i + 1) * local.stack[i + 1].into()
+            + op_flags.right_shift_at(i - 1) * local.stack[i - 1].into();
+        let actual: AB::Expr = next.stack[i].into();
 
         builder.when_transition().assert_zero(actual * flag_sum - expected);
     }
@@ -80,9 +80,9 @@ pub fn enforce_main<AB>(
     // next[15] * flag_sum = no_shift[15] * current[15] + right_shift[14] * current[14]
     {
         let flag_sum = op_flags.no_shift_at(15) + op_flags.right_shift_at(14);
-        let expected = op_flags.no_shift_at(15) * local.stack[15].clone().into()
-            + op_flags.right_shift_at(14) * local.stack[14].clone().into();
-        let actual: AB::Expr = next.stack[15].clone().into();
+        let expected = op_flags.no_shift_at(15) * local.stack[15].into()
+            + op_flags.right_shift_at(14) * local.stack[14].into();
+        let actual: AB::Expr = next.stack[15].into();
 
         builder.when_transition().assert_zero(actual * flag_sum - expected);
     }

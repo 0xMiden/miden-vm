@@ -53,13 +53,13 @@ pub fn enforce_kernel_rom_constraints<AB>(
     AB: MidenAirBuilder,
 {
     // Chiplet selector columns; kernel ROM rows are selected by (s0..s4).
-    let s0: AB::Expr = local.chiplets[0].clone().into();
-    let s1: AB::Expr = local.chiplets[1].clone().into();
-    let s2: AB::Expr = local.chiplets[2].clone().into();
-    let s3: AB::Expr = local.chiplets[3].clone().into();
-    let s4: AB::Expr = local.chiplets[4].clone().into();
-    let s3_next: AB::Expr = next.chiplets[3].clone().into();
-    let s4_next: AB::Expr = next.chiplets[4].clone().into();
+    let s0: AB::Expr = local.chiplets[0].into();
+    let s1: AB::Expr = local.chiplets[1].into();
+    let s2: AB::Expr = local.chiplets[2].into();
+    let s3: AB::Expr = local.chiplets[3].into();
+    let s4: AB::Expr = local.chiplets[4].into();
+    let s3_next: AB::Expr = next.chiplets[3].into();
+    let s4_next: AB::Expr = next.chiplets[4].into();
 
     let kernel_rom_flag =
         kernel_rom_chiplet_flag(s0.clone(), s1.clone(), s2.clone(), s3.clone(), s4.clone());
@@ -129,5 +129,5 @@ where
 {
     // Kernel ROM columns start after s0, s1, s2, s3, s4 (5 selectors)
     let local_idx = KERNEL_ROM_OFFSET + col_idx;
-    row.chiplets[local_idx].clone().into()
+    row.chiplets[local_idx].into()
 }

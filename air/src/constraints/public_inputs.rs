@@ -40,7 +40,7 @@ where
     builder
         .when_first_row()
         .assert_zeros(core::array::from_fn::<_, STACK_DEPTH, _>(|i| {
-            let stack_i: AB::Expr = local.stack[i].clone().into();
+            let stack_i: AB::Expr = local.stack[i].into();
             let pv_i: AB::Expr = si[i].into();
             stack_i - pv_i
         }));
@@ -49,7 +49,7 @@ where
     builder
         .when_last_row()
         .assert_zeros(core::array::from_fn::<_, STACK_DEPTH, _>(|i| {
-            let stack_i: AB::Expr = local.stack[i].clone().into();
+            let stack_i: AB::Expr = local.stack[i].into();
             let pv_i: AB::Expr = so[i].into();
             stack_i - pv_i
         }));

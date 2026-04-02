@@ -41,17 +41,17 @@ pub fn enforce_chiplet_selectors<AB>(
     AB: MidenAirBuilder,
 {
     // Load selector columns (chiplets[0..5] are the selectors)
-    let s0: AB::Expr = local.chiplets[0].clone().into();
-    let s1: AB::Expr = local.chiplets[1].clone().into();
-    let s2: AB::Expr = local.chiplets[2].clone().into();
-    let s3: AB::Expr = local.chiplets[3].clone().into();
-    let s4: AB::Expr = local.chiplets[4].clone().into();
+    let s0: AB::Expr = local.chiplets[0].into();
+    let s1: AB::Expr = local.chiplets[1].into();
+    let s2: AB::Expr = local.chiplets[2].into();
+    let s3: AB::Expr = local.chiplets[3].into();
+    let s4: AB::Expr = local.chiplets[4].into();
 
-    let s0_next: AB::Expr = next.chiplets[0].clone().into();
-    let s1_next: AB::Expr = next.chiplets[1].clone().into();
-    let s2_next: AB::Expr = next.chiplets[2].clone().into();
-    let s3_next: AB::Expr = next.chiplets[3].clone().into();
-    let s4_next: AB::Expr = next.chiplets[4].clone().into();
+    let s0_next: AB::Expr = next.chiplets[0].into();
+    let s1_next: AB::Expr = next.chiplets[1].into();
+    let s2_next: AB::Expr = next.chiplets[2].into();
+    let s3_next: AB::Expr = next.chiplets[3].into();
+    let s4_next: AB::Expr = next.chiplets[4].into();
 
     let one: AB::Expr = AB::Expr::ONE;
 

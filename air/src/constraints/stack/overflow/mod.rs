@@ -61,16 +61,12 @@ pub fn enforce_main<AB>(
     let zero: AB::Expr = AB::Expr::ZERO;
     builder
         .when_first_row()
-        .assert_zero(local.stack[B0_COL_IDX].clone().into() - sixteen.clone());
-    builder
-        .when_last_row()
-        .assert_zero(local.stack[B0_COL_IDX].clone().into() - sixteen);
+        .assert_zero(local.stack[B0_COL_IDX].into() - sixteen.clone());
+    builder.when_last_row().assert_zero(local.stack[B0_COL_IDX].into() - sixteen);
     builder
         .when_first_row()
-        .assert_zero(local.stack[B1_COL_IDX].clone().into() - zero.clone());
-    builder
-        .when_last_row()
-        .assert_zero(local.stack[B1_COL_IDX].clone().into() - zero);
+        .assert_zero(local.stack[B1_COL_IDX].into() - zero.clone());
+    builder.when_last_row().assert_zero(local.stack[B1_COL_IDX].into() - zero);
 
     // Transition constraints: depth bookkeeping, overflow flag, and pointer updates.
     enforce_stack_depth_constraints(builder, local, next, op_flags);
@@ -98,15 +94,15 @@ fn enforce_stack_depth_constraints<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    let depth: AB::Expr = local.stack[B0_COL_IDX].clone().into();
-    let depth_next: AB::Expr = next.stack[B0_COL_IDX].clone().into();
+    let depth: AB::Expr = local.stack[B0_COL_IDX].into();
+    let depth_next: AB::Expr = next.stack[B0_COL_IDX].into();
 
     // Flag for CALL, DYNCALL, or SYSCALL operations
     let call_or_dyncall_or_syscall = op_flags.call() + op_flags.dyncall() + op_flags.syscall();
 
     // Flag for END operation that ends a CALL/DYNCALL or SYSCALL block
-    let is_call_or_dyncall_end: AB::Expr = local.decoder[IS_CALL_FLAG_COL_IDX].clone().into();
-    let is_syscall_end: AB::Expr = local.decoder[IS_SYSCALL_FLAG_COL_IDX].clone().into();
+    let is_call_or_dyncall_end: AB::Expr = local.decoder[IS_CALL_FLAG_COL_IDX].into();
+    let is_syscall_end: AB::Expr = local.decoder[IS_SYSCALL_FLAG_COL_IDX].into();
     let call_or_dyncall_or_syscall_end = op_flags.end() * (is_call_or_dyncall_end + is_syscall_end);
 
     // Invariants relied on here:
@@ -166,7 +162,7 @@ fn enforce_overflow_flag_constraints<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    let depth: AB::Expr = local.stack[B0_COL_IDX].clone().into();
+    let depth: AB::Expr = local.stack[B0_COL_IDX].into();
 
     // (1 - overflow) * (depth - 16) = 0
     // When depth > 16, overflow must be 1 (meaning h0 = 1/(depth - 16))
@@ -189,9 +185,9 @@ fn enforce_overflow_index_constraints<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    let overflow_addr_next: AB::Expr = next.stack[B1_COL_IDX].clone().into();
-    let clk: AB::Expr = local.clk.clone().into();
-    let last_stack_item_next: AB::Expr = next.stack[15].clone().into();
+    let overflow_addr_next: AB::Expr = next.stack[B1_COL_IDX].into();
+    let clk: AB::Expr = local.clk.into();
+    let last_stack_item_next: AB::Expr = next.stack[15].into();
 
     // On right shift, the overflow address should be set to current clk
     let right_shift_constraint = (overflow_addr_next - clk) * op_flags.right_shift();

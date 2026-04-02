@@ -45,10 +45,10 @@ pub fn enforce_range_boundary_constraints<AB>(builder: &mut AB, local: &MainTrac
 where
     AB: MidenAirBuilder,
 {
-    let v = local.range[RANGE_V_COL_IDX].clone();
+    let v = local.range[RANGE_V_COL_IDX];
 
     // First row: V[0] = 0
-    builder.when_first_row().assert_zero(v.clone());
+    builder.when_first_row().assert_zero(v);
 
     // Last row: V[last] = 65535 (2^16 - 1)
     let sixty_five_k = AB::Expr::from_u32(65535);
@@ -69,8 +69,8 @@ pub fn enforce_range_transition_constraint<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    let v = local.range[RANGE_V_COL_IDX].clone();
-    let v_next = next.range[RANGE_V_COL_IDX].clone();
+    let v = local.range[RANGE_V_COL_IDX];
+    let v_next = next.range[RANGE_V_COL_IDX];
     let change_v = v_next - v;
 
     // Powers of 3: {1, 3, 9, 27, 81, 243, 729, 2187}

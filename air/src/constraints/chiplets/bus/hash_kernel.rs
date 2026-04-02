@@ -95,22 +95,21 @@ pub fn enforce_hash_kernel_constraint<AB>(
     // =========================================================================
 
     // Hasher chiplet rows have s0 = 0 (chiplet selector).
-    let chiplet_selector: AB::Expr = local.chiplets[0].clone().into();
+    let chiplet_selector: AB::Expr = local.chiplets[0].into();
     let is_hasher: AB::Expr = one.clone() - chiplet_selector.clone();
 
     // Hasher operation selectors (only meaningful within hasher chiplet)
-    let s0: AB::Expr = local.chiplets[S_START].clone().into();
-    let s1: AB::Expr = local.chiplets[S_START + 1].clone().into();
-    let s2: AB::Expr = local.chiplets[S_START + 2].clone().into();
+    let s0: AB::Expr = local.chiplets[S_START].into();
+    let s1: AB::Expr = local.chiplets[S_START + 1].into();
+    let s2: AB::Expr = local.chiplets[S_START + 2].into();
 
     // Node index for sibling table
-    let node_index: AB::Expr = local.chiplets[IDX_COL].clone().into();
-    let node_index_next: AB::Expr = next.chiplets[IDX_COL].clone().into();
+    let node_index: AB::Expr = local.chiplets[IDX_COL].into();
+    let node_index_next: AB::Expr = next.chiplets[IDX_COL].into();
 
     // Hasher state for sibling values
-    let h: [AB::Expr; 12] = core::array::from_fn(|i| local.chiplets[H_START + i].clone().into());
-    let h_next: [AB::Expr; 12] =
-        core::array::from_fn(|i| next.chiplets[H_START + i].clone().into());
+    let h: [AB::Expr; 12] = core::array::from_fn(|i| local.chiplets[H_START + i].into());
+    let h_next: [AB::Expr; 12] = core::array::from_fn(|i| next.chiplets[H_START + i].into());
 
     // =========================================================================
     // SIBLING TABLE FLAGS AND VALUES
@@ -147,31 +146,30 @@ pub fn enforce_hash_kernel_constraint<AB>(
     // =========================================================================
 
     // ACE chiplet selector: s0=1, s1=1, s2=1, s3=0
-    let s3: AB::Expr = local.chiplets[3].clone().into();
-    let chiplet_s1: AB::Expr = local.chiplets[1].clone().into();
-    let chiplet_s2: AB::Expr = local.chiplets[2].clone().into();
+    let s3: AB::Expr = local.chiplets[3].into();
+    let chiplet_s1: AB::Expr = local.chiplets[1].into();
+    let chiplet_s2: AB::Expr = local.chiplets[2].into();
 
     let is_ace_row: AB::Expr =
         chiplet_selector.clone() * chiplet_s1.clone() * chiplet_s2.clone() * (one.clone() - s3);
 
     // Block selector determines read (0) vs eval (1)
-    let block_selector: AB::Expr =
-        local.chiplets[NUM_ACE_SELECTORS + SELECTOR_BLOCK_IDX].clone().into();
+    let block_selector: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + SELECTOR_BLOCK_IDX].into();
 
     let f_ace_read: AB::Expr = is_ace_row.clone() * (one.clone() - block_selector.clone());
     let f_ace_eval: AB::Expr = is_ace_row * block_selector;
 
     // ACE columns for memory messages
-    let ace_clk: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + CLK_IDX].clone().into();
-    let ace_ctx: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + CTX_IDX].clone().into();
-    let ace_ptr: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + PTR_IDX].clone().into();
+    let ace_clk: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + CLK_IDX].into();
+    let ace_ctx: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + CTX_IDX].into();
+    let ace_ptr: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + PTR_IDX].into();
 
     // Word read value: label + ctx + ptr + clk + 4-lane value.
     let v_ace_word = {
-        let v0_0: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + V_0_0_IDX].clone().into();
-        let v0_1: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + V_0_1_IDX].clone().into();
-        let v1_0: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + V_1_0_IDX].clone().into();
-        let v1_1: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + V_1_1_IDX].clone().into();
+        let v0_0: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + V_0_0_IDX].into();
+        let v0_1: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + V_0_1_IDX].into();
+        let v1_0: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + V_1_0_IDX].into();
+        let v1_1: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + V_1_1_IDX].into();
         let label: AB::Expr = AB::Expr::from(Felt::from_u8(MEMORY_READ_WORD_LABEL));
 
         challenges.encode([
@@ -188,9 +186,9 @@ pub fn enforce_hash_kernel_constraint<AB>(
 
     // Element read value: label + ctx + ptr + clk + element.
     let v_ace_element = {
-        let id_1: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + ID_1_IDX].clone().into();
-        let id_2: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + ID_2_IDX].clone().into();
-        let eval_op: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + EVAL_OP_IDX].clone().into();
+        let id_1: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + ID_1_IDX].into();
+        let id_2: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + ID_2_IDX].into();
+        let eval_op: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + EVAL_OP_IDX].into();
 
         let offset1: AB::Expr = AB::Expr::from(ACE_INSTRUCTION_ID1_OFFSET);
         let offset2: AB::Expr = AB::Expr::from(ACE_INSTRUCTION_ID2_OFFSET);
@@ -208,14 +206,12 @@ pub fn enforce_hash_kernel_constraint<AB>(
 
     // CAP_PREV from helper registers (provided and constrained by the decoder logic).
     let cap_prev: [AB::Expr; 4] = core::array::from_fn(|i| {
-        local.decoder[USER_OP_HELPERS_OFFSET + HELPER_CAP_PREV_RANGE.start + i]
-            .clone()
-            .into()
+        local.decoder[USER_OP_HELPERS_OFFSET + HELPER_CAP_PREV_RANGE.start + i].into()
     });
 
     // CAP_NEXT from next-row stack.
     let cap_next: [AB::Expr; 4] =
-        core::array::from_fn(|i| next.stack[STACK_CAP_NEXT_RANGE.start + i].clone().into());
+        core::array::from_fn(|i| next.stack[STACK_CAP_NEXT_RANGE.start + i].into());
 
     let log_label: AB::Expr = AB::Expr::from(Felt::from_u8(LOG_PRECOMPILE_LABEL));
 

@@ -49,29 +49,28 @@ fn enforce_cryptostream_constraints<AB>(
 
     builder
         .when_transition()
-        .assert_zero(gate.clone() * (next.stack[8].clone().into() - local.stack[8].clone().into()));
+        .assert_zero(gate.clone() * (next.stack[8].into() - local.stack[8].into()));
     builder
         .when_transition()
-        .assert_zero(gate.clone() * (next.stack[9].clone().into() - local.stack[9].clone().into()));
+        .assert_zero(gate.clone() * (next.stack[9].into() - local.stack[9].into()));
+    builder
+        .when_transition()
+        .assert_zero(gate.clone() * (next.stack[10].into() - local.stack[10].into()));
+    builder
+        .when_transition()
+        .assert_zero(gate.clone() * (next.stack[11].into() - local.stack[11].into()));
     builder.when_transition().assert_zero(
-        gate.clone() * (next.stack[10].clone().into() - local.stack[10].clone().into()),
-    );
-    builder.when_transition().assert_zero(
-        gate.clone() * (next.stack[11].clone().into() - local.stack[11].clone().into()),
-    );
-    builder.when_transition().assert_zero(
-        gate.clone()
-            * (next.stack[12].clone().into() - (local.stack[12].clone().into() + eight.clone())),
-    );
-    builder.when_transition().assert_zero(
-        gate.clone() * (next.stack[13].clone().into() - (local.stack[13].clone().into() + eight)),
-    );
-    builder.when_transition().assert_zero(
-        gate.clone() * (next.stack[14].clone().into() - local.stack[14].clone().into()),
+        gate.clone() * (next.stack[12].into() - (local.stack[12].into() + eight.clone())),
     );
     builder
         .when_transition()
-        .assert_zero(gate * (next.stack[15].clone().into() - local.stack[15].clone().into()));
+        .assert_zero(gate.clone() * (next.stack[13].into() - (local.stack[13].into() + eight)));
+    builder
+        .when_transition()
+        .assert_zero(gate.clone() * (next.stack[14].into() - local.stack[14].into()));
+    builder
+        .when_transition()
+        .assert_zero(gate * (next.stack[15].into() - local.stack[15].into()));
 }
 
 fn enforce_hornerbase_constraints<AB>(
@@ -92,28 +91,28 @@ fn enforce_hornerbase_constraints<AB>(
 
     // The lower 14 stack registers remain unchanged during HORNERBASE.
     for i in 0..14 {
-        builder.when_transition().assert_zero(
-            gate.clone() * (next.stack[i].clone().into() - local.stack[i].clone().into()),
-        );
+        builder
+            .when_transition()
+            .assert_zero(gate.clone() * (next.stack[i].into() - local.stack[i].into()));
     }
 
     // Decoder helper columns contain alpha components and intermediate temporaries.
     // We read them starting at USER_OP_HELPERS_OFFSET to avoid hardcoding column indices.
     let base = USER_OP_HELPERS_OFFSET;
-    let a0: AB::Expr = local.decoder[base].clone().into();
-    let a1: AB::Expr = local.decoder[base + 1].clone().into();
-    let tmp1_0: AB::Expr = local.decoder[base + 2].clone().into();
-    let tmp1_1: AB::Expr = local.decoder[base + 3].clone().into();
-    let tmp0_0: AB::Expr = local.decoder[base + 4].clone().into();
-    let tmp0_1: AB::Expr = local.decoder[base + 5].clone().into();
+    let a0: AB::Expr = local.decoder[base].into();
+    let a1: AB::Expr = local.decoder[base + 1].into();
+    let tmp1_0: AB::Expr = local.decoder[base + 2].into();
+    let tmp1_1: AB::Expr = local.decoder[base + 3].into();
+    let tmp0_0: AB::Expr = local.decoder[base + 4].into();
+    let tmp0_1: AB::Expr = local.decoder[base + 5].into();
 
-    let acc0: AB::Expr = local.stack[14].clone().into();
-    let acc1: AB::Expr = local.stack[15].clone().into();
-    let acc0_next: AB::Expr = next.stack[14].clone().into();
-    let acc1_next: AB::Expr = next.stack[15].clone().into();
+    let acc0: AB::Expr = local.stack[14].into();
+    let acc1: AB::Expr = local.stack[15].into();
+    let acc0_next: AB::Expr = next.stack[14].into();
+    let acc1_next: AB::Expr = next.stack[15].into();
 
     // Coefficients are read from the bottom of the stack.
-    let c: [AB::Expr; 8] = core::array::from_fn(|i| local.stack[i].clone().into());
+    let c: [AB::Expr; 8] = core::array::from_fn(|i| local.stack[i].into());
 
     // Quadratic extension view (Fp2 with u^2 = 7):
     // - alpha = (a0, a1), acc = (acc0, acc1)
@@ -172,25 +171,25 @@ fn enforce_hornerext_constraints<AB>(
 
     // The lower 14 stack registers are unchanged by HORNEREXT.
     for i in 0..14 {
-        builder.when_transition().assert_zero(
-            gate.clone() * (next.stack[i].clone().into() - local.stack[i].clone().into()),
-        );
+        builder
+            .when_transition()
+            .assert_zero(gate.clone() * (next.stack[i].into() - local.stack[i].into()));
     }
 
     // Helper columns and accumulator values.
     let base = USER_OP_HELPERS_OFFSET;
-    let a0: AB::Expr = local.decoder[base].clone().into();
-    let a1: AB::Expr = local.decoder[base + 1].clone().into();
-    let tmp0: AB::Expr = local.decoder[base + 4].clone().into();
-    let tmp1: AB::Expr = local.decoder[base + 5].clone().into();
+    let a0: AB::Expr = local.decoder[base].into();
+    let a1: AB::Expr = local.decoder[base + 1].into();
+    let tmp0: AB::Expr = local.decoder[base + 4].into();
+    let tmp1: AB::Expr = local.decoder[base + 5].into();
 
-    let acc0: AB::Expr = local.stack[14].clone().into();
-    let acc1: AB::Expr = local.stack[15].clone().into();
-    let acc0_next: AB::Expr = next.stack[14].clone().into();
-    let acc1_next: AB::Expr = next.stack[15].clone().into();
+    let acc0: AB::Expr = local.stack[14].into();
+    let acc1: AB::Expr = local.stack[15].into();
+    let acc0_next: AB::Expr = next.stack[14].into();
+    let acc1_next: AB::Expr = next.stack[15].into();
 
     // Coefficients live at the bottom of the stack.
-    let s: [AB::Expr; 8] = core::array::from_fn(|i| local.stack[i].clone().into());
+    let s: [AB::Expr; 8] = core::array::from_fn(|i| local.stack[i].into());
 
     // Quadratic extension view (Fp2 with u^2 = 7):
     // - alpha = (a0, a1), acc = (acc0, acc1), tmp = (tmp0, tmp1)

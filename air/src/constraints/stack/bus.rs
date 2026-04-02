@@ -68,18 +68,18 @@ pub fn enforce_bus<AB>(
     // -------------------------------------------------------------------------
 
     // Current row values
-    let clk: AB::Expr = local.clk.clone().into();
-    let s15: AB::Expr = local.stack[15].clone().into();
-    let b0: AB::Expr = local.stack[B0_COL_IDX].clone().into();
-    let b1: AB::Expr = local.stack[B1_COL_IDX].clone().into();
-    let h0: AB::Expr = local.stack[H0_COL_IDX].clone().into();
+    let clk: AB::Expr = local.clk.into();
+    let s15: AB::Expr = local.stack[15].into();
+    let b0: AB::Expr = local.stack[B0_COL_IDX].into();
+    let b1: AB::Expr = local.stack[B1_COL_IDX].into();
+    let h0: AB::Expr = local.stack[H0_COL_IDX].into();
 
     // Next row values (needed for removal)
-    let s15_next: AB::Expr = next.stack[15].clone().into();
-    let b1_next: AB::Expr = next.stack[B1_COL_IDX].clone().into();
+    let s15_next: AB::Expr = next.stack[15].into();
+    let b1_next: AB::Expr = next.stack[B1_COL_IDX].into();
 
     // Hasher state element 5, used by DYNCALL to store the new overflow table pointer.
-    let hasher_state_5: AB::Expr = local.decoder[HASHER_STATE_RANGE.start + 5].clone().into();
+    let hasher_state_5: AB::Expr = local.decoder[HASHER_STATE_RANGE.start + 5].into();
 
     // -------------------------------------------------------------------------
     // Overflow condition: (b0 - 16) * h0 = 1 when overflow is non-empty
