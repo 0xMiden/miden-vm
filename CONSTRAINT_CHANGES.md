@@ -409,3 +409,8 @@ kernel_rom.rs:70-73→62-65. Identical assertion expressions (`assert_eq(krom_ne
 | 4 | `stack/general.rs:76` | `stack/general.rs:76` |  |
 
 ---
+## 40. refactor: use Algebra trait bound and remove op_flags indirection
+
+**No constraint changes.** (446 base + 24 ext)
+
+---

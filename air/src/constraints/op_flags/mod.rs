@@ -26,14 +26,14 @@
 
 use std::array;
 
-use miden_core::{field::PrimeCharacteristicRing, operations::opcodes};
+use miden_core::{
+    field::{Algebra, PrimeCharacteristicRing},
+    operations::opcodes,
+};
 
 #[cfg(test)]
 use crate::trace::decoder::{NUM_OP_BITS, OP_BITS_RANGE};
-use crate::{
-    constraints::utils::BoolNot,
-    trace::{DecoderCols, StackCols},
-};
+use crate::trace::{DecoderCols, StackCols};
 
 // CONSTANTS
 // ================================================================================================
@@ -80,11 +80,6 @@ const DEGREE_4_OPCODE_ENDS: usize = DEGREE_4_OPCODE_STARTS + 31;
 
 /// Op bit selectors: `bits[k][0]` = 1 - b_k (negation), `bits[k][1]` = b_k (value).
 type OpBits<E> = [[E; 2]; 7];
-
-/// Creates a closure `b(k, v)` that clones the selector for bit `k` with value `v`.
-fn bit_selector<E: Clone>(bits: &OpBits<E>) -> impl Fn(usize, usize) -> E + '_ {
-    move |k, v| bits[k][v].clone()
-}
 
 /// Builds a prefix sum from sparse `(index, delta)` pairs.
 ///
@@ -142,43 +137,6 @@ pub struct OpFlags<E> {
     halt_next: E,
 }
 
-/// Pre-b0 intermediate flags captured before the final bit split.
-///
-/// These are degree-6 products (all bits except b0) that pair adjacent opcodes
-/// sharing all bits except the LSB. Used by composite shift flag computation.
-struct PreB0Flags<E> {
-    /// MOVUP{2..8} | MOVDN{2..8} paired flags, indexed 0..7 for widths 2..8.
-    movup_or_movdn: [E; 7],
-    /// SWAPW2 | SWAPW3 paired flag.
-    swapw2_or_swapw3: E,
-    /// ADVPOPW | EXPACC paired flag.
-    advpopw_or_expacc: E,
-}
-
-/// Composite flag results: shift arrays, scalar flags, and control flow.
-struct CompositeFlags<E> {
-    no_shift: [E; NUM_STACK_IMPACT_FLAGS],
-    left_shift: [E; NUM_STACK_IMPACT_FLAGS],
-    right_shift: [E; NUM_STACK_IMPACT_FLAGS],
-    left_shift_scalar: E,
-    right_shift_scalar: E,
-    control_flow: E,
-    u32_rc_op: E,
-    overflow: E,
-}
-
-macro_rules! op_flag_getters {
-    ($array:ident, $( $(#[$meta:meta])* $name:ident => $op:expr ),* $(,)?) => {
-        $(
-            $(#[$meta])*
-            #[inline(always)]
-            pub fn $name(&self) -> E {
-                self.$array[get_op_index($op)].clone()
-            }
-        )*
-    };
-}
-
 impl<E> OpFlags<E>
 where
     E: PrimeCharacteristicRing,
@@ -200,30 +158,30 @@ where
         decoder_next: &DecoderCols<V>,
     ) -> Self
     where
-        V: Copy + Into<E>,
+        V: Copy,
+        E: Algebra<V>,
     {
-        // Op bit selectors: b(k, v) returns bit k with value v (0=negated, 1=value).
+        // Op bit selectors: bits[k][v] returns bit k with value v (0=negated, 1=value).
         let bits: OpBits<E> = array::from_fn(|k| {
-            let val: E = decoder.op_bits[k].into();
-            let neg = val.clone().not();
-            [neg, val]
+            let val = decoder.op_bits[k];
+            [E::ONE - val, val.into()]
         });
-        let b = bit_selector(&bits);
-
         // --- Precomputed multi-bit selector products ---
-        // Each array is built iteratively: prev[i>>1] * b(next_bit, i&1).
+        // Each array is built iteratively: prev[i>>1] * bits[next_bit][i&1].
         // MSB expanded first so index = MSB*2^(n-1) + ... + LSB.
 
         // b32: index = b3*2 + b2. Shared by degree-6, degree-5, and degree-7.
-        let b32: [E; 4] = array::from_fn(|i| b(3, i >> 1) * b(2, i & 1));
+        let b32: [E; 4] = array::from_fn(|i| bits[3][i >> 1].clone() * bits[2][i & 1].clone());
         // b321: index = b3*4 + b2*2 + b1. Used by degree-6 and degree-7 (with nb6 prefix).
-        let b321: [E; 8] = array::from_fn(|i| b32[i >> 1].clone() * b(1, i & 1));
+        let b321: [E; 8] = array::from_fn(|i| b32[i >> 1].clone() * bits[1][i & 1].clone());
         // b3210: index = b3*8 + b2*4 + b1*2 + b0. Used by degree-5.
-        let b3210: [E; 16] = array::from_fn(|i| b321[i >> 1].clone() * b(0, i & 1));
+        let b3210: [E; 16] = array::from_fn(|i| b321[i >> 1].clone() * bits[0][i & 1].clone());
         // b432: index = b4*4 + b3*2 + b2. Used by degree-4. Reuses b32.
-        let b432: [E; 8] = array::from_fn(|i| b(4, i >> 2) * b32[i & 3].clone());
+        let b432: [E; 8] = array::from_fn(|i| bits[4][i >> 2].clone() * b32[i & 3].clone());
         // b654: index = b5*2 + b4 (b6 always negated). Used by degree-7.
-        let b654: [E; 4] = array::from_fn(|i| b(5, i >> 1) * b(4, i & 1) * b(6, 0));
+        let b654: [E; 4] = array::from_fn(|i| {
+            bits[5][i >> 1].clone() * bits[4][i & 1].clone() * bits[6][0].clone()
+        });
         // b654321: all bits except b0. index = b5*16 + b4*8 + b3*4 + b2*2 + b1. Reuses b321.
         let b654321: [E; 32] = array::from_fn(|i| b654[i >> 3].clone() * b321[i & 7].clone());
 
@@ -245,7 +203,7 @@ where
             advpopw_or_expacc: b654321[opcodes::ADVPOPW as usize >> 1].clone(),
         };
         let degree7_op_flags: [E; NUM_DEGREE_7_OPS] =
-            array::from_fn(|i| b654321[i >> 1].clone() * b(0, i & 1));
+            array::from_fn(|i| b654321[i >> 1].clone() * bits[0][i & 1].clone());
 
         // --- Degree-6 flags (opcodes 64-79, u32 operations) ---
         // Prefix `100` (b6=1, b5=0, b4=0), discriminated by [b1, b2, b3].
@@ -254,7 +212,7 @@ where
         // - 2: U32MUL       - 3: U32DIV
         // - 4: U32SPLIT     - 5: U32ASSERT2
         // - 6: U32ADD3      - 7: U32MADD
-        let degree6_prefix = b(6, 1) * b(5, 0) * b(4, 0);
+        let degree6_prefix = bits[6][1].clone() * bits[5][0].clone() * bits[4][0].clone();
         let degree6_op_flags: [E; NUM_DEGREE_6_OPS] =
             array::from_fn(|i| degree6_prefix.clone() * b321[i].clone());
 
@@ -280,12 +238,12 @@ where
         // - 2: SYSCALL        - 3: CALL
         // - 4: END            - 5: REPEAT
         // - 6: RESPAN         - 7: HALT
-        let degree4_extra: E = decoder.extra[1].into();
+        let degree4_extra = decoder.extra[1];
         let degree4_op_flags: [E; NUM_DEGREE_4_OPS] =
-            array::from_fn(|i| degree4_extra.clone() * b432[i].clone());
+            array::from_fn(|i| b432[i].clone() * degree4_extra);
 
         // --- Composite flags ---
-        let composite = Self::compute_composite_flags(
+        let composite = Self::compute_composite_flags::<V>(
             &bits,
             &degree7_op_flags,
             &pre_b0,
@@ -304,18 +262,20 @@ where
         // - RESPAN = 0b0111_1000 → prefix * b3' * (1-b2')
         // - HALT   = 0b0111_1100 → prefix * b3' * b2'
         let (end_next, repeat_next, respan_next, halt_next) = {
-            let e1_next: E = decoder_next.extra[1].into();
-            let b4_next: E = decoder_next.op_bits[4].into();
-            let b3_next: E = decoder_next.op_bits[3].into();
-            let b2_next: E = decoder_next.op_bits[2].into();
-            let prefix = e1_next * b4_next;
-            let nb3 = b3_next.clone().not();
-            let nb2 = b2_next.clone().not();
+            let prefix: E = decoder_next.extra[1].into();
+            let prefix = prefix * decoder_next.op_bits[4];
+            // b32_next[i] = b3'[i>>1] * b2'[i&1], same pattern as b32 above.
+            let b32_next: [E; 4] = {
+                let b3 = decoder_next.op_bits[3];
+                let b2 = decoder_next.op_bits[2];
+                let bits_next: [[E; 2]; 2] = [[E::ONE - b2, b2.into()], [E::ONE - b3, b3.into()]];
+                array::from_fn(|i| bits_next[1][i >> 1].clone() * bits_next[0][i & 1].clone())
+            };
             (
-                prefix.clone() * nb3.clone() * nb2.clone(),
-                prefix.clone() * nb3 * b2_next.clone(),
-                prefix.clone() * b3_next.clone() * nb2,
-                prefix * b3_next * b2_next,
+                prefix.clone() * b32_next[0].clone(), // END:    (1-b3') * (1-b2')
+                prefix.clone() * b32_next[1].clone(), // REPEAT: (1-b3') * b2'
+                prefix.clone() * b32_next[2].clone(), // RESPAN: b3' * (1-b2')
+                prefix * b32_next[3].clone(),         // HALT:   b3' * b2'
             )
         };
 
@@ -360,21 +320,24 @@ where
         stack: &StackCols<V>,
     ) -> CompositeFlags<E>
     where
-        V: Copy + Into<E>,
+        V: Copy,
+        E: Algebra<V>,
     {
-        let b = bit_selector(bits);
-
         // --- Low-degree prefix selectors for scalar shift flags ---
         // per spec: https://0xmiden.github.io/miden-vm/design/stack/op_constraints.html#shift-left-flag
 
         // Prefix `010`: (1-b6)*b5*(1-b4) — degree 3, covers left-shift degree-7 ops
-        let prefix_010 = b(6, 0) * b(5, 1) * b(4, 0);
+        let prefix_010 = bits[6][0].clone() * bits[5][1].clone() * bits[4][0].clone();
 
         // Prefix `011`: (1-b6)*b5*b4 — degree 3, covers right-shift degree-7 ops
-        let prefix_011 = b(6, 0) * b(5, 1) * b(4, 1);
+        let prefix_011 = bits[6][0].clone() * bits[5][1].clone() * bits[4][1].clone();
 
         // Prefix `10011`: b6*(1-b5)*(1-b4)*b3*b2 — degree 5, covers U32ADD3 and U32MADD
-        let add3_madd_prefix = b(6, 1) * b(5, 0) * b(4, 0) * b(3, 1) * b(2, 1);
+        let add3_madd_prefix = bits[6][1].clone()
+            * bits[5][0].clone()
+            * bits[4][0].clone()
+            * bits[3][1].clone()
+            * bits[2][1].clone();
 
         // --- Named flag references ---
         // Degree-7 individual flags used in composite computation.
@@ -439,11 +402,11 @@ where
             // Reconstruct from the degree-7 seed: (1-b5)*(1-b4) was at f[0], times b6.
             // This is equivalent to the degree-6 prefix b6*(1-b5)*(1-b4).
             // We recompute to avoid depending on intermediate degree-7 state.
-            b(6, 1) * b(5, 0) * b(4, 0)
+            bits[6][1].clone() * bits[5][0].clone() * bits[4][0].clone()
         };
 
         // Flag of prefix `1000` — u32 arithmetic operations (U32ADD..U32DIV)
-        let f1000 = f100.clone() * b(3, 0);
+        let f1000 = f100.clone() * bits[3][0].clone();
 
         // Flag of prefix `011` — degree-7 right-shift operations (PAD..CLK range subset)
         // Computed as sum of the two pre-b0-split halves that correspond to b5=1,b4=1
@@ -492,8 +455,8 @@ where
         let left_change_1_flag = f0100 - f_assert.clone();
 
         // --- END operation with loop flag ---
-        let is_loop_end: E = decoder.end_block_flags().is_loop.into();
-        let shift_left_on_end = f_end.clone() * is_loop_end.clone();
+        let is_loop_end = decoder.end_block_flags().is_loop;
+        let shift_left_on_end = f_end.clone() * is_loop_end;
 
         // --- No-shift composite flags ---
         //
@@ -525,7 +488,7 @@ where
             f_respan.clone(),
             f_halt.clone(),
             f_call.clone(),
-        ]) + f_end.clone() * is_loop_end.not();
+        ]) + f_end.clone() * (E::ONE - is_loop_end);
         let d4 = E::sum_array::<5>(&[
             pre_b0.movup_or_movdn[1].clone(),
             pre_b0.advpopw_or_expacc.clone(),
@@ -570,7 +533,7 @@ where
 
         // Sum of all MOVUP|MOVDN pre-b0 pairs, then split by b0.
         let f_all_mov_pair = E::sum_array::<7>(&pre_b0.movup_or_movdn);
-        let f_all_movdn = f_all_mov_pair.clone() * b(0, 1);
+        let f_all_movdn = f_all_mov_pair.clone() * bits[0][1].clone();
 
         let d1 = E::sum_array::<11>(&[
             f_assert.clone(),
@@ -613,7 +576,7 @@ where
         //   8   | -= MOVUP8
         //  9-15 | (same as 8)
 
-        let f_all_movup = f_all_mov_pair * b(0, 0);
+        let f_all_movup = f_all_mov_pair * bits[0][0].clone();
 
         let right_shift = prefix_sum_sparse::<NUM_STACK_IMPACT_FLAGS, _>(&[
             (0, f011 + f_push.clone() + f_all_movup),
@@ -660,22 +623,23 @@ where
         //
         // IMPORTANT: If a new control flow operation is added, it MUST be included here,
         // otherwise the decoder constraint will fail when executing that operation.
-        let degree_5_flag: E = decoder.extra[0].into();
-        let degree_4_flag: E = decoder.extra[1].into();
+        let degree_5_flag = decoder.extra[0];
+        let degree_4_flag = decoder.extra[1];
         let control_flow = E::sum_array::<6>(&[
-            degree_5_flag * b(3, 0) * b(2, 1),        // SPAN, JOIN, SPLIT, LOOP
-            degree_4_flag * b(4, 1),                  // END, REPEAT, RESPAN, HALT
-            f_dyncall,                                // DYNCALL
-            deg5[get_op_index(opcodes::DYN)].clone(), // DYN
-            f_syscall,                                // SYSCALL
-            f_call,                                   // CALL
+            bits[3][0].clone() * bits[2][1].clone() * degree_5_flag, // SPAN, JOIN, SPLIT, LOOP
+            bits[4][1].clone() * degree_4_flag,                      // END, REPEAT, RESPAN, HALT
+            f_dyncall,                                               // DYNCALL
+            deg5[get_op_index(opcodes::DYN)].clone(),                // DYN
+            f_syscall,                                               // SYSCALL
+            f_call,                                                  // CALL
         ]);
 
         // Flag if current operation is a degree-6 u32 operation
         let u32_rc_op = f100;
 
         // Flag if overflow table contains values
-        let overflow = (Into::<E>::into(stack.b0) - E::from_u64(16)) * Into::<E>::into(stack.h0);
+        let overflow: E = stack.b0.into();
+        let overflow = (overflow - E::from_u64(16)) * stack.h0;
 
         CompositeFlags {
             no_shift,
@@ -689,6 +653,118 @@ where
         }
     }
 
+    // ------ Composite Flags ---------------------------------------------------------------------
+
+    /// Returns the flag for when the stack item at the specified depth remains unchanged.
+    #[inline(always)]
+    pub fn no_shift_at(&self, index: usize) -> E {
+        self.no_shift_flags[index].clone()
+    }
+
+    /// Returns the flag for when the stack item at the specified depth shifts left.
+    /// Left shift is not defined on position 0, so returns default for index 0.
+    #[inline(always)]
+    pub fn left_shift_at(&self, index: usize) -> E {
+        self.left_shift_flags[index].clone()
+    }
+
+    /// Returns the flag for when the stack item at the specified depth shifts right.
+    #[inline(always)]
+    pub fn right_shift_at(&self, index: usize) -> E {
+        self.right_shift_flags[index].clone()
+    }
+
+    /// Returns the flag when the stack operation shifts the stack to the right.
+    /// Degree: 6
+    #[inline(always)]
+    pub fn right_shift(&self) -> E {
+        self.right_shift.clone()
+    }
+
+    /// Returns the flag when the stack operation shifts the stack to the left.
+    ///
+    /// Note: `DYNCALL` still shifts the stack, but it is handled via the per-position
+    /// `left_shift_at` flags. The aggregate `left_shift` flag only gates the generic
+    /// helper/overflow constraints, which do not apply to `DYNCALL` because those
+    /// helper columns are reused for the context switch and the overflow pointer is
+    /// stored in decoder hasher state (h5), not in the usual helper/stack columns.
+    /// Degree: 5
+    #[inline(always)]
+    pub fn left_shift(&self) -> E {
+        self.left_shift.clone()
+    }
+
+    /// Returns the flag when the current operation is a control flow operation.
+    ///
+    /// Control flow operations are the only operations allowed to execute when outside a basic
+    /// block (i.e., when in_span = 0). This includes:
+    /// - Block starters: SPAN, JOIN, SPLIT, LOOP
+    /// - Block transitions: END, REPEAT, RESPAN, HALT
+    /// - Dynamic execution: DYN, DYNCALL
+    /// - Procedure calls: CALL, SYSCALL
+    ///
+    /// Used by the decoder constraint: `(1 - in_span) * (1 - control_flow) = 0`
+    ///
+    /// Degree: 3
+    #[inline(always)]
+    pub fn control_flow(&self) -> E {
+        self.control_flow.clone()
+    }
+
+    /// Returns the flag indicating whether the overflow stack contains values.
+    /// Degree: 2
+    #[inline(always)]
+    pub fn overflow(&self) -> E {
+        self.overflow.clone()
+    }
+
+    // ------ Next-row flags -------------------------------------------------------------------
+
+    /// Returns the flag for END on the next row. Degree: 4
+    #[inline(always)]
+    pub fn end_next(&self) -> E {
+        self.end_next.clone()
+    }
+
+    /// Returns the flag for REPEAT on the next row. Degree: 4
+    #[inline(always)]
+    pub fn repeat_next(&self) -> E {
+        self.repeat_next.clone()
+    }
+
+    /// Returns the flag for RESPAN on the next row. Degree: 4
+    #[inline(always)]
+    pub fn respan_next(&self) -> E {
+        self.respan_next.clone()
+    }
+
+    /// Returns the flag for HALT on the next row. Degree: 4
+    #[inline(always)]
+    pub fn halt_next(&self) -> E {
+        self.halt_next.clone()
+    }
+
+    /// Returns the flag when the current operation is a u32 operation requiring range checks.
+    #[expect(dead_code)]
+    #[inline(always)]
+    pub fn u32_rc_op(&self) -> E {
+        self.u32_rc_op.clone()
+    }
+}
+
+macro_rules! op_flag_getters {
+    ($array:ident, $( $(#[$meta:meta])* $name:ident => $op:expr ),* $(,)?) => {
+        $(
+            $(#[$meta])*
+            #[inline(always)]
+            pub fn $name(&self) -> E {
+                self.$array[get_op_index($op)].clone()
+            }
+        )*
+    };
+}
+
+impl<E: PrimeCharacteristicRing> OpFlags<E> {
     // STATE ACCESSORS
     // ============================================================================================
 
@@ -900,135 +976,35 @@ where
         /// Operation Flag of CRYPTOSTREAM operation.
         cryptostream => opcodes::CRYPTOSTREAM,
     );
-
-    // ------ Composite Flags ---------------------------------------------------------------------
-
-    /// Returns the flag for when the stack item at the specified depth remains unchanged.
-    #[inline(always)]
-    pub fn no_shift_at(&self, index: usize) -> E {
-        self.no_shift_flags[index].clone()
-    }
-
-    /// Returns the flag for when the stack item at the specified depth shifts left.
-    /// Left shift is not defined on position 0, so returns default for index 0.
-    #[inline(always)]
-    pub fn left_shift_at(&self, index: usize) -> E {
-        self.left_shift_flags[index].clone()
-    }
-
-    /// Returns the flag for when the stack item at the specified depth shifts right.
-    #[inline(always)]
-    pub fn right_shift_at(&self, index: usize) -> E {
-        self.right_shift_flags[index].clone()
-    }
-
-    /// Returns the flag when the stack operation shifts the stack to the right.
-    /// Degree: 6
-    #[inline(always)]
-    pub fn right_shift(&self) -> E {
-        self.right_shift.clone()
-    }
-
-    /// Returns the flag when the stack operation shifts the stack to the left.
-    ///
-    /// Note: `DYNCALL` still shifts the stack, but it is handled via the per-position
-    /// `left_shift_at` flags. The aggregate `left_shift` flag only gates the generic
-    /// helper/overflow constraints, which do not apply to `DYNCALL` because those
-    /// helper columns are reused for the context switch and the overflow pointer is
-    /// stored in decoder hasher state (h5), not in the usual helper/stack columns.
-    /// Degree: 5
-    #[inline(always)]
-    pub fn left_shift(&self) -> E {
-        self.left_shift.clone()
-    }
-
-    /// Returns the flag when the current operation is a control flow operation.
-    ///
-    /// Control flow operations are the only operations allowed to execute when outside a basic
-    /// block (i.e., when in_span = 0). This includes:
-    /// - Block starters: SPAN, JOIN, SPLIT, LOOP
-    /// - Block transitions: END, REPEAT, RESPAN, HALT
-    /// - Dynamic execution: DYN, DYNCALL
-    /// - Procedure calls: CALL, SYSCALL
-    ///
-    /// Used by the decoder constraint: `(1 - in_span) * (1 - control_flow) = 0`
-    ///
-    /// Degree: 3
-    #[inline(always)]
-    pub fn control_flow(&self) -> E {
-        self.control_flow.clone()
-    }
-
-    /// Returns the flag indicating whether the overflow stack contains values.
-    /// Degree: 2
-    #[inline(always)]
-    pub fn overflow(&self) -> E {
-        self.overflow.clone()
-    }
-
-    // ------ Next-row flags -------------------------------------------------------------------
-
-    /// Returns the flag for END on the next row. Degree: 4
-    #[inline(always)]
-    pub fn end_next(&self) -> E {
-        self.end_next.clone()
-    }
-
-    /// Returns the flag for REPEAT on the next row. Degree: 4
-    #[inline(always)]
-    pub fn repeat_next(&self) -> E {
-        self.repeat_next.clone()
-    }
-
-    /// Returns the flag for RESPAN on the next row. Degree: 4
-    #[inline(always)]
-    pub fn respan_next(&self) -> E {
-        self.respan_next.clone()
-    }
-
-    /// Returns the flag for HALT on the next row. Degree: 4
-    #[inline(always)]
-    pub fn halt_next(&self) -> E {
-        self.halt_next.clone()
-    }
-
-    // TEST ACCESSORS
-    // ============================================================================================
-
-    /// Returns the flag when the current operation is a u32 operation requiring range checks.
-    #[cfg(test)]
-    #[inline(always)]
-    pub fn u32_rc_op(&self) -> E {
-        self.u32_rc_op.clone()
-    }
-
-    /// Returns reference to degree 7 operation flags array (for testing).
-    #[cfg(test)]
-    pub fn degree7_op_flags(&self) -> &[E; NUM_DEGREE_7_OPS] {
-        &self.degree7_op_flags
-    }
-
-    /// Returns reference to degree 6 operation flags array (for testing).
-    #[cfg(test)]
-    pub fn degree6_op_flags(&self) -> &[E; NUM_DEGREE_6_OPS] {
-        &self.degree6_op_flags
-    }
-
-    /// Returns reference to degree 5 operation flags array (for testing).
-    #[cfg(test)]
-    pub fn degree5_op_flags(&self) -> &[E; NUM_DEGREE_5_OPS] {
-        &self.degree5_op_flags
-    }
-
-    /// Returns reference to degree 4 operation flags array (for testing).
-    #[cfg(test)]
-    pub fn degree4_op_flags(&self) -> &[E; NUM_DEGREE_4_OPS] {
-        &self.degree4_op_flags
-    }
 }
 
 // INTERNAL HELPERS
 // ================================================================================================
+
+/// Pre-b0 intermediate flags captured before the final bit split.
+///
+/// These are degree-6 products (all bits except b0) that pair adjacent opcodes
+/// sharing all bits except the LSB. Used by composite shift flag computation.
+struct PreB0Flags<E> {
+    /// MOVUP{2..8} | MOVDN{2..8} paired flags, indexed 0..7 for widths 2..8.
+    movup_or_movdn: [E; 7],
+    /// SWAPW2 | SWAPW3 paired flag.
+    swapw2_or_swapw3: E,
+    /// ADVPOPW | EXPACC paired flag.
+    advpopw_or_expacc: E,
+}
+
+/// Composite flag results: shift arrays, scalar flags, and control flow.
+struct CompositeFlags<E> {
+    no_shift: [E; NUM_STACK_IMPACT_FLAGS],
+    left_shift: [E; NUM_STACK_IMPACT_FLAGS],
+    right_shift: [E; NUM_STACK_IMPACT_FLAGS],
+    left_shift_scalar: E,
+    right_shift_scalar: E,
+    control_flow: E,
+    u32_rc_op: E,
+    overflow: E,
+}
 
 /// Maps opcode of an operation to the index in its respective degree flag array.
 pub const fn get_op_index(opcode: u8) -> usize {
