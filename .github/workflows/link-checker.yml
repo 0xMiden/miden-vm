@@ -8,6 +8,7 @@ on:
         required: false
         default: false
         type: boolean
+  workflow_dispatch: {}
   schedule:
     # runs once a day at 01:00 UTC (adjust as needed)
     - cron: '0 1 * * *'
@@ -28,7 +29,7 @@ jobs:
           if [ "${{ github.event_name }}" = "schedule" ]; then
             echo "fail_fast=false" >> $GITHUB_OUTPUT
           else
-            echo "fail_fast=${{ inputs.fail-fast }}" >> $GITHUB_OUTPUT
+            echo "fail_fast=${{ inputs.fail-fast || 'false' }}" >> $GITHUB_OUTPUT
           fi
 
       - name: Link Checker
@@ -49,8 +50,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Open issue on failure (only if fail-fast is false and issues are enabled)
-        if: steps.lychee.outputs.exit_code != 0 && steps.flags.outputs.fail_fast != 'true' && github.repository == github.event.repository.full_name && !github.event.repository.fork
+      - name: Open issue on failure (only if fail-fast is false and not a fork)
+        if: steps.lychee.outputs.exit_code != 0 && steps.flags.outputs.fail_fast != 'true' && !github.event.repository.fork
         uses: peter-evans/create-issue-from-file@v5
         with:
           title: Link Checker Report
