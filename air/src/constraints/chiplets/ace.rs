@@ -112,9 +112,6 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     let ace_transition = selectors.ace.is_transition.clone();
     let ace_last = selectors.ace.is_last.clone();
 
-    // Gate for transition constraints that need is_transition (for next-row access safety)
-    let is_transition: AB::Expr = builder.is_transition();
-
     // ==========================================================================
     // BINARY CONSTRAINTS
     // ==========================================================================
@@ -139,11 +136,12 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     // Sections must start with READ blocks (not EVAL): f_eval = 0 when f_start
     builder.assert_zero(ace_flag.clone() * sstart.clone() * sblock.clone());
     // EVAL blocks cannot be followed by READ blocks within same section
-    builder.assert_zero(
-        ace_transition.clone() * f_next.clone() * sblock.clone() * sblock_next.not(),
-    );
-    // Sections must end with EVAL blocks (not READ)
-    builder.assert_zero(ace_flag.clone() * is_transition.clone() * f_end.clone() * sblock.not());
+    builder
+        .assert_zero(ace_transition.clone() * f_next.clone() * sblock.clone() * sblock_next.not());
+    // Sections must end with EVAL blocks (not READ).
+    // f_end fires on the last ACE row or on section boundaries. Since ace_flag = 0 on
+    // the trace's last row (last-row invariant), no when_transition() guard is needed.
+    builder.assert_zero(ace_flag.clone() * f_end.clone() * sblock.not());
 
     // ==========================================================================
     // SECTION CONSTRAINTS (within section)
@@ -207,9 +205,9 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     // ==========================================================================
 
     // At section end: v0 = 0, id0 = 0
-    // Use a combined gate to share `ace_flag * is_transition * f_end` across all finalization
-    // constraints.
-    let gate = ace_flag * is_transition * f_end;
+    // Use a combined gate to share `ace_flag * f_end` across all finalization constraints.
+    // No when_transition() needed: ace_flag = 0 on the last row (last-row invariant).
+    let gate = ace_flag * f_end;
     builder.assert_zero(gate.clone() * v0_0);
     builder.assert_zero(gate.clone() * v0_1);
     builder.assert_zero(gate * id0);

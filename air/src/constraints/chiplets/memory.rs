@@ -428,4 +428,3 @@ fn enforce_scw_readonly_constraint<AB>(
             * any_write,
     );
 }
-

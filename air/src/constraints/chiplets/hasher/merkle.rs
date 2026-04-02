@@ -19,7 +19,6 @@
 //! | MUA  | Merkle Update Absorb | Absorb next sibling (new path) |
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::AirBuilder;
 
 use super::{HasherColumns, HasherFlags};
 use crate::{MidenAirBuilder, constraints::utils::BoolNot};
@@ -68,7 +67,7 @@ pub(super) fn enforce_node_index_constraints<AB>(
 
     // Constraint 2: b must be binary when shifting (b^2 - b = 0)
     let gate = hasher_flag.clone() * f_shift.clone();
-    builder.when_transition().assert_zero(gate * (b.square() - b.clone()));
+    builder.assert_zero(gate * (b.square() - b.clone()));
 
     // -------------------------------------------------------------------------
     // Index Stability Constraint
@@ -78,9 +77,7 @@ pub(super) fn enforce_node_index_constraints<AB>(
     // keep = 1 - f_out - f_shift
     let keep = AB::Expr::ONE - f_out - f_shift;
     let gate = hasher_flag.clone() * keep;
-    builder
-        .when_transition()
-        .assert_zero(gate * (cols_next.node_index.clone() - cols.node_index.clone()));
+    builder.assert_zero(gate * (cols_next.node_index.clone() - cols.node_index.clone()));
 }
 
 /// Enforces state constraints for Merkle absorb operations (MPA/MVA/MUA on row 31).
@@ -120,7 +117,7 @@ pub(super) fn enforce_merkle_absorb_state<AB>(
     // Constraint 1: Capacity reset to zero (batched).
     // Use a combined gate to share `hasher_flag * f_absorb` across all 4 lanes.
     let gate_absorb = hasher_flag.clone() * f_absorb.clone();
-    builder.when_transition().assert_zeros(core::array::from_fn::<_, 4, _>(|i| {
+    builder.assert_zeros(core::array::from_fn::<_, 4, _>(|i| {
         gate_absorb.clone() * cap_next[i].clone()
     }));
 
@@ -131,14 +128,14 @@ pub(super) fn enforce_merkle_absorb_state<AB>(
     // Constraint 2: If b=0, digest goes to rate0 (h'[0..4] = h[0..4])
     let f_b0 = f_absorb.clone() * b.not();
     let gate_b0 = hasher_flag.clone() * f_b0;
-    builder.when_transition().assert_zeros(core::array::from_fn::<_, 4, _>(|i| {
+    builder.assert_zeros(core::array::from_fn::<_, 4, _>(|i| {
         gate_b0.clone() * (rate0_next[i].clone() - digest[i].clone())
     }));
 
     // Constraint 3: If b=1, digest goes to rate1 (h'[4..8] = h[0..4])
     let f_b1 = f_absorb * b;
     let gate_b1 = hasher_flag * f_b1;
-    builder.when_transition().assert_zeros(core::array::from_fn::<_, 4, _>(|i| {
+    builder.assert_zeros(core::array::from_fn::<_, 4, _>(|i| {
         gate_b1.clone() * (rate1_next[i].clone() - digest[i].clone())
     }));
 }

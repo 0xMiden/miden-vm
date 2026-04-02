@@ -18,8 +18,9 @@ pub mod kernel_rom;
 pub mod memory;
 pub mod selectors;
 
-use crate::{MainTraceRow, MidenAirBuilder};
 use selectors::ChipletSelectors;
+
+use crate::{MainTraceRow, MidenAirBuilder};
 
 // ENTRY POINTS
 // ================================================================================================

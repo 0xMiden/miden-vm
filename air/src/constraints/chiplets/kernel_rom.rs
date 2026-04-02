@@ -86,8 +86,7 @@ pub fn enforce_kernel_rom_constraints<AB>(
 
     // Use a combined gate to share `kernel_rom_flag * contiguity_condition` across all 4 lanes.
     {
-        let transition_gate =
-            selectors.kernel_rom.is_transition.clone() * contiguity_condition;
+        let transition_gate = selectors.kernel_rom.is_transition.clone() * contiguity_condition;
         let builder = &mut builder.when(transition_gate);
         builder.assert_eq(r0_next, r0);
         builder.assert_eq(r1_next, r1);

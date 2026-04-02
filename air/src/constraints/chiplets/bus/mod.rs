@@ -24,7 +24,11 @@ pub fn enforce_bus<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    hash_kernel::enforce_hash_kernel_constraint(builder, local, next, op_flags, challenges, selectors);
-    chiplets::enforce_chiplets_bus_constraint(builder, local, next, op_flags, challenges, selectors);
+    hash_kernel::enforce_hash_kernel_constraint(
+        builder, local, next, op_flags, challenges, selectors,
+    );
+    chiplets::enforce_chiplets_bus_constraint(
+        builder, local, next, op_flags, challenges, selectors,
+    );
     wiring::enforce_wiring_bus_constraint(builder, local, next, challenges, selectors);
 }

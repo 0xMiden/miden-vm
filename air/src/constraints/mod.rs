@@ -19,10 +19,10 @@
 //!
 //! Additional components (decoder, chiplets) are introduced in later constraint chunks.
 
+use chiplets::selectors::ChipletSelectors;
 use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 
 use crate::{MainTraceRow, MidenAirBuilder, trace::Challenges};
-use chiplets::selectors::ChipletSelectors;
 
 pub mod bus;
 pub mod chiplets;
