@@ -26,12 +26,3 @@ pub fn horner_eval_bits<const N: usize, E: PrimeCharacteristicRing>(limbs: &[E; 
         .reduce(|acc, bit| acc.double() + bit)
         .expect("non-empty array")
 }
-
-/// Computes binary OR: `a + b - a * b`
-///
-/// Assumes both a and b are binary (0 or 1).
-/// Returns 1 if either a=1 or b=1.
-#[inline]
-pub fn binary_or<E: PrimeCharacteristicRing>(a: E, b: E) -> E {
-    a.clone() + b.clone() - a * b
-}

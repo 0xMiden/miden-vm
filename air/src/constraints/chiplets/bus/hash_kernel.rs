@@ -153,10 +153,10 @@ pub fn enforce_hash_kernel_constraint<AB>(
                 ace.ctx.into(),
                 ace.ptr.into(),
                 ace.clk.into(),
-                ace.shared[1].into(), // v_0_0
-                ace.shared[2].into(), // v_0_1
-                ace.shared[4].into(), // v_1_0
-                ace.shared[5].into(), // v_1_1
+                ace.v_0.0.into(), // v_0_0
+                ace.v_0.1.into(), // v_0_1
+                ace.v_1.0.into(), // v_1_0
+                ace.v_1.1.into(), // v_1_1
             ],
         )
     };
@@ -164,8 +164,8 @@ pub fn enforce_hash_kernel_constraint<AB>(
     // Element read value: label + ctx + ptr + clk + element.
     let v_ace_element = {
         let label: AB::Expr = Felt::from_u8(MEMORY_READ_ELEMENT_LABEL).into();
-        let id_1 = ace.shared[3]; // ID_1
-        let id_2 = ace.shared[6]; // ID_2
+        let id_1 = ace.id_1; // ID_1
+        let id_2 = ace.eval().id_2; // ID_2
         let eval_op = ace.eval_op;
 
         let offset1: AB::Expr = ACE_INSTRUCTION_ID1_OFFSET.into();

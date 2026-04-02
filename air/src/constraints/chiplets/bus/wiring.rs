@@ -82,19 +82,19 @@ pub fn enforce_wiring_bus_constraint<AB>(
     let ctx: AB::Expr = ace.ctx.into();
 
     let wire_0 = AceWire {
-        id: ace.shared[0].into(),
-        v0: ace.shared[1].into(),
-        v1: ace.shared[2].into(),
+        id: ace.id_0.into(),
+        v0: ace.v_0.0.into(),
+        v1: ace.v_0.1.into(),
     };
     let wire_1 = AceWire {
-        id: ace.shared[3].into(),
-        v0: ace.shared[4].into(),
-        v1: ace.shared[5].into(),
+        id: ace.id_1.into(),
+        v0: ace.v_1.0.into(),
+        v1: ace.v_1.1.into(),
     };
     let wire_2 = AceWire {
-        id: ace.shared[6].into(),
-        v0: ace.shared[7].into(),
-        v1: ace.shared[8].into(),
+        id: ace.eval().id_2.into(),
+        v0: ace.eval().v_2.0.into(),
+        v1: ace.eval().v_2.1.into(),
     };
     let m0: AB::Expr = ace.read().m_0.into();
     // On READ rows this column stores m1 (fan-out for wire_1). On EVAL rows it is v2_1,

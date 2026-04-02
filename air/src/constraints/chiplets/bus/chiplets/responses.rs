@@ -101,7 +101,7 @@ where
         let ctx: AB::Expr = ace.ctx.into();
         let ptr: AB::Expr = ace.ptr.into();
         let num_eval_rows: AB::Expr = ace.read().num_eval + F_1;
-        let num_read_rows: AB::Expr = ace.read().id_0 + F_1 - num_eval_rows.clone();
+        let num_read_rows: AB::Expr = ace.id_0 + F_1 - num_eval_rows.clone();
         challenges.encode(CHIPLETS_BUS, [label, clk, ctx, ptr, num_read_rows, num_eval_rows])
     };
 

@@ -354,3 +354,27 @@ Sign flip: `assert_zero(gate * x.not())` → `when(gate).assert_one(x)`. Polynom
 **No constraint changes.** (446 base + 24 ext)
 
 ---
+## 37. refactor: type ACE shared columns into named fields with QuadFeltExpr
+
+**7 updated** | 463 unchanged
+
+ACE shared columns restructured from flat `shared[10]` array to named fields with `QuadFeltExpr<T>`. 4 of 7 constraints moved into `assert_eq_quad()` via `QuadFeltAirBuilder` — source extraction artifact shows `self.assert_eq(lhs.N, rhs.N)` at ext_field.rs instead of the call site. The underlying assertions are identical: per-component `assert_eq` / `assert_zero` pairs, with the gate changed from `ace_flag * f_end` to `is_last + is_transition * sstart_next` (see per-constraint entries below for gate equivalence). Equivalent.
+
+<details>
+<summary>7 constraint changes</summary>
+
+**Updated:**
+
+| # | Before | After | Interpretation |
+|---|--------|-------|----------------|
+| 1 | `chiplets/ace.rs:132` | `chiplets/ace.rs:108` | ace.rs:132→108. Sign flip: `assert_one(sblock_next)` → `assert_zero(f_read_next)` where `f_read_next = 1 - sblock_next`. `assert_one(x)` = `assert_zero(1-x)`. Equivalent. |
+| 2 | `chiplets/ace.rs:136` | `ext_field.rs:155` | ACE shared columns restructured from flat `shared[10]` array to named fields with `QuadFeltExpr<T>`. 4 of 7 constraints moved into `assert_eq_quad()` via `QuadFeltAirBuilder` — source extraction artifact shows `self.assert_eq(lhs.N, rhs.N)` at ext_field.rs instead of the call site. The underlying assertions are identical: per-component `assert_eq` / `assert_zero` pairs, with the gate changed from `ace_flag * f_end` to `is_last + is_transition * sstart_next` (see per-constraint entries below for gate equivalence). Equivalent. |
+| 3 | `chiplets/ace.rs:196` | `ext_field.rs:154` | ACE shared columns restructured from flat `shared[10]` array to named fields with `QuadFeltExpr<T>`. 4 of 7 constraints moved into `assert_eq_quad()` via `QuadFeltAirBuilder` — source extraction artifact shows `self.assert_eq(lhs.N, rhs.N)` at ext_field.rs instead of the call site. The underlying assertions are identical: per-component `assert_eq` / `assert_zero` pairs, with the gate changed from `ace_flag * f_end` to `is_last + is_transition * sstart_next` (see per-constraint entries below for gate equivalence). Equivalent. |
+| 4 | `chiplets/ace.rs:197` | `ext_field.rs:155` | ACE shared columns restructured from flat `shared[10]` array to named fields with `QuadFeltExpr<T>`. 4 of 7 constraints moved into `assert_eq_quad()` via `QuadFeltAirBuilder` — source extraction artifact shows `self.assert_eq(lhs.N, rhs.N)` at ext_field.rs instead of the call site. The underlying assertions are identical: per-component `assert_eq` / `assert_zero` pairs, with the gate changed from `ace_flag * f_end` to `is_last + is_transition * sstart_next` (see per-constraint entries below for gate equivalence). Equivalent. |
+| 5 | `chiplets/ace.rs:208` | `ext_field.rs:154` | ACE shared columns restructured from flat `shared[10]` array to named fields with `QuadFeltExpr<T>`. 4 of 7 constraints moved into `assert_eq_quad()` via `QuadFeltAirBuilder` — source extraction artifact shows `self.assert_eq(lhs.N, rhs.N)` at ext_field.rs instead of the call site. The underlying assertions are identical: per-component `assert_eq` / `assert_zero` pairs, with the gate changed from `ace_flag * f_end` to `is_last + is_transition * sstart_next` (see per-constraint entries below for gate equivalence). Equivalent. |
+| 6 | `chiplets/ace.rs:209` | `chiplets/ace.rs:202` | ACE shared columns restructured from flat `shared[10]` array to named fields with `QuadFeltExpr<T>`. 4 of 7 constraints moved into `assert_eq_quad()` via `QuadFeltAirBuilder` — source extraction artifact shows `self.assert_eq(lhs.N, rhs.N)` at ext_field.rs instead of the call site. The underlying assertions are identical: per-component `assert_eq` / `assert_zero` pairs, with the gate changed from `ace_flag * f_end` to `is_last + is_transition * sstart_next` (see per-constraint entries below for gate equivalence). Equivalent. |
+| 7 | `chiplets/ace.rs:210` | `chiplets/ace.rs:208` | ace.rs:210→208. Column rename: `assert_zero(id0)` → `assert_zero(local.id_0)`. Same column (`shared[0]` = `id_0`). Gate changed from `ace_flag * f_end` to new `f_end` (see be0e→820472 entry for gate equivalence proof). Equivalent. |
+
+</details>
+
+---

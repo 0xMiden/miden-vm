@@ -172,8 +172,8 @@ const _: () = assert!(size_of::<HasherCols<u8>>() == 16);
 const _: () = assert!(size_of::<BitwiseCols<u8>>() == 13);
 const _: () = assert!(size_of::<MemoryCols<u8>>() == 15);
 const _: () = assert!(size_of::<AceCols<u8>>() == 16);
-const _: () = assert!(size_of::<AceReadCols<u8>>() == 10);
-const _: () = assert!(size_of::<AceEvalCols<u8>>() == 10);
+const _: () = assert!(size_of::<AceReadCols<u8>>() == 4);
+const _: () = assert!(size_of::<AceEvalCols<u8>>() == 4);
 const _: () = assert!(size_of::<KernelRomCols<u8>>() == 5);
 
 // CONSTANTS
