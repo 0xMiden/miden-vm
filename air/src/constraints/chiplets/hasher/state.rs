@@ -21,7 +21,7 @@ use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 use super::periodic::{
     P_ARK_EXT_START, P_ARK_INT, P_CYCLE_ROW_0, P_IS_EXTERNAL, P_IS_INTERNAL, STATE_WIDTH,
 };
-use crate::{Felt, constraints::tagging::TaggingAirBuilderExt};
+use crate::Felt;
 
 // CONSTRAINT HELPERS
 // ================================================================================================
@@ -41,7 +41,7 @@ pub fn enforce_permutation_steps<AB>(
     h_next: &[AB::Expr; STATE_WIDTH],
     periodic: &[AB::PeriodicVar],
 ) where
-    AB: TaggingAirBuilderExt<F = Felt>,
+    AB: LiftedAirBuilder<F = Felt>,
 {
     // Cycle markers and step selectors
     let cycle_row_0: AB::Expr = periodic[P_CYCLE_ROW_0].into();
@@ -113,7 +113,7 @@ pub fn enforce_abp_capacity_preservation<AB>(
     h_cap: &[AB::Expr; 4],
     h_cap_next: &[AB::Expr; 4],
 ) where
-    AB: TaggingAirBuilderExt<F = Felt>,
+    AB: LiftedAirBuilder<F = Felt>,
 {
     // Use a combined gate to share `hasher_flag * f_abp` across all 4 lanes.
     let gate = hasher_flag * f_abp;

@@ -18,7 +18,6 @@ use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess}
 
 use crate::{
     MainTraceRow,
-    constraints::tagging::{TaggingAirBuilderExt, ids::TAG_RANGE_BUS_BASE},
     trace::{
         CHIPLET_S0_COL_IDX, CHIPLET_S1_COL_IDX, CHIPLET_S2_COL_IDX, CHIPLETS_OFFSET,
         RANGE_CHECK_TRACE_OFFSET, chiplets, decoder, range,
@@ -40,11 +39,6 @@ const MEMORY_D0_IDX: usize = chiplets::MEMORY_D0_COL_IDX - CHIPLETS_OFFSET;
 const MEMORY_D1_IDX: usize = chiplets::MEMORY_D1_COL_IDX - CHIPLETS_OFFSET;
 const RANGE_M_COL_IDX: usize = range::M_COL_IDX - RANGE_CHECK_TRACE_OFFSET;
 const RANGE_V_COL_IDX: usize = range::V_COL_IDX - RANGE_CHECK_TRACE_OFFSET;
-
-// TAGGING CONSTANTS
-// ================================================================================================
-
-const RANGE_BUS_NAME: &str = "range.bus.transition";
 
 // ENTRY POINTS
 // ================================================================================================
@@ -130,15 +124,7 @@ where
 
     // Main constraint: b_next * lookups = b * lookups + rc_term - s0_term - s1_term - s2_term -
     // s3_term - m0_term - m1_term
-    builder.tagged(TAG_RANGE_BUS_BASE, RANGE_BUS_NAME, |builder| {
-        builder.when_transition().assert_zero_ext(
-            b_next_term - b_term - rc_term
-                + s0_term
-                + s1_term
-                + s2_term
-                + s3_term
-                + m0_term
-                + m1_term,
-        );
-    });
+    builder.when_transition().assert_zero_ext(
+        b_next_term - b_term - rc_term + s0_term + s1_term + s2_term + s3_term + m0_term + m1_term,
+    );
 }

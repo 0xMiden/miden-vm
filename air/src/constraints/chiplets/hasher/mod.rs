@@ -42,7 +42,6 @@ pub use periodic::{STATE_WIDTH, periodic_columns};
 
 use crate::{
     Felt, MainTraceRow,
-    constraints::tagging::TaggingAirBuilderExt,
     trace::{
         CHIPLETS_OFFSET,
         chiplets::{HASHER_NODE_INDEX_COL_IDX, HASHER_SELECTOR_COL_RANGE, HASHER_STATE_COL_RANGE},
@@ -158,7 +157,7 @@ impl<E: Clone> HasherColumns<E> {
     }
 }
 
-struct HasherContext<AB: TaggingAirBuilderExt<F = Felt>> {
+struct HasherContext<AB: LiftedAirBuilder<F = Felt>> {
     pub cols: HasherColumns<AB::Expr>,
     pub cols_next: HasherColumns<AB::Expr>,
     pub flags: HasherFlags<AB::Expr>,
@@ -168,7 +167,7 @@ struct HasherContext<AB: TaggingAirBuilderExt<F = Felt>> {
 
 impl<AB> HasherContext<AB>
 where
-    AB: TaggingAirBuilderExt<F = Felt>,
+    AB: LiftedAirBuilder<F = Felt>,
 {
     pub fn new(
         builder: &mut AB,
@@ -218,7 +217,7 @@ pub fn enforce_hasher_constraints<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: TaggingAirBuilderExt<F = Felt>,
+    AB: LiftedAirBuilder<F = Felt>,
 {
     let ctx = HasherContext::<AB>::new(builder, local, next);
 
@@ -245,7 +244,7 @@ pub fn enforce_hasher_constraints<AB>(
 /// Delegates to [`state::enforce_permutation_steps`] with proper column extraction.
 fn enforce_permutation<AB>(builder: &mut AB, ctx: &HasherContext<AB>)
 where
-    AB: TaggingAirBuilderExt<F = Felt>,
+    AB: LiftedAirBuilder<F = Felt>,
 {
     // Enforce permutation steps
     state::enforce_permutation_steps(
@@ -262,7 +261,7 @@ where
 /// Delegates to [`selectors::enforce_selector_consistency`] with proper column extraction.
 fn enforce_selector_consistency<AB>(builder: &mut AB, ctx: &HasherContext<AB>)
 where
-    AB: TaggingAirBuilderExt<F = Felt>,
+    AB: LiftedAirBuilder<F = Felt>,
 {
     selectors::enforce_selector_consistency(
         builder,
@@ -276,7 +275,7 @@ where
 /// Enforce ABP capacity preservation on row 31 of the cycle.
 fn enforce_abp_capacity<AB>(builder: &mut AB, ctx: &HasherContext<AB>)
 where
-    AB: TaggingAirBuilderExt<F = Felt>,
+    AB: LiftedAirBuilder<F = Felt>,
 {
     state::enforce_abp_capacity_preservation(
         builder,
@@ -292,7 +291,7 @@ where
 /// Delegates to [`merkle`] module functions for index and state constraints.
 fn enforce_merkle_constraints<AB>(builder: &mut AB, ctx: &HasherContext<AB>)
 where
-    AB: TaggingAirBuilderExt<F = Felt>,
+    AB: LiftedAirBuilder<F = Felt>,
 {
     // Node index constraints
     merkle::enforce_node_index_constraints(

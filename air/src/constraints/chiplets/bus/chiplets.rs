@@ -41,7 +41,6 @@ use crate::{
         bus::indices::B_CHIPLETS,
         chiplets::{bitwise::P_BITWISE_K_TRANSITION, hasher},
         op_flags::OpFlags,
-        tagging::{TaggingAirBuilderExt, ids::TAG_CHIPLETS_BUS_BASE},
     },
     trace::{
         Challenges,
@@ -69,10 +68,6 @@ use crate::{
         },
     },
 };
-
-/// Tag ID and namespace for the main chiplets bus transition constraint.
-const CHIPLET_BUS_ID: usize = TAG_CHIPLETS_BUS_BASE;
-const CHIPLET_BUS_NAMESPACE: &str = "chiplets.bus.chiplets.transition";
 
 // ENTRY POINTS
 // ================================================================================================
@@ -326,9 +321,7 @@ pub fn enforce_chiplets_bus_constraint<AB>(
 
     let lhs: AB::ExprEF = Into::<AB::ExprEF>::into(b_next_val) * requests;
     let rhs: AB::ExprEF = Into::<AB::ExprEF>::into(b_local_val) * responses;
-    builder.tagged(CHIPLET_BUS_ID, CHIPLET_BUS_NAMESPACE, |builder| {
-        builder.when_transition().assert_zero_ext(lhs - rhs);
-    });
+    builder.when_transition().assert_zero_ext(lhs - rhs);
 }
 
 // BITWISE MESSAGE HELPERS

@@ -35,7 +35,6 @@ pub mod public_inputs;
 pub mod range;
 pub mod stack;
 pub mod system;
-pub mod tagging;
 
 // ENTRY POINTS
 // ================================================================================================
@@ -106,10 +105,6 @@ where
     AB: LiftedAirBuilder<F = Felt>,
 {
     use bus::indices::*;
-    use tagging::{TaggingAirBuilderExt, ids::TAG_BUS_BOUNDARY_BASE};
-
-    const N: usize = 8;
-    let ids: [usize; N] = core::array::from_fn(|i| TAG_BUS_BOUNDARY_BASE + i);
 
     let aux = builder.permutation();
     let aux_local = aux.current_slice();
@@ -123,33 +118,24 @@ where
     let b_rng = aux_local[B_RANGE];
     let v_wir = aux_local[V_WIRING];
 
-    builder.tagged_list(ids, "bus.boundary.first_row", |builder| {
-        let mut first = builder.when_first_row();
-        first.assert_one_ext(p1);
-        first.assert_one_ext(p2);
-        first.assert_one_ext(p3);
-        first.assert_one_ext(s_aux);
-        first.assert_one_ext(b_hk);
-        first.assert_one_ext(b_ch);
-        first.assert_zero_ext(b_rng);
-        first.assert_zero_ext(v_wir);
-    });
+    let mut first = builder.when_first_row();
+    first.assert_one_ext(p1);
+    first.assert_one_ext(p2);
+    first.assert_one_ext(p3);
+    first.assert_one_ext(s_aux);
+    first.assert_one_ext(b_hk);
+    first.assert_one_ext(b_ch);
+    first.assert_zero_ext(b_rng);
+    first.assert_zero_ext(v_wir);
 }
 
 fn enforce_bus_last_row<AB>(builder: &mut AB)
 where
     AB: LiftedAirBuilder<F = Felt>,
 {
-    use tagging::{
-        TaggingAirBuilderExt,
-        ids::{TAG_BUS_BOUNDARY_BASE, TAG_BUS_BOUNDARY_FIRST_ROW_COUNT},
-    };
-
     use crate::trace::AUX_TRACE_WIDTH;
 
     const N: usize = AUX_TRACE_WIDTH;
-    let ids: [usize; N] =
-        core::array::from_fn(|i| TAG_BUS_BOUNDARY_BASE + TAG_BUS_BOUNDARY_FIRST_ROW_COUNT + i);
 
     let cols: [AB::VarEF; N] = {
         let aux = builder.permutation();
@@ -161,10 +147,8 @@ where
         core::array::from_fn(|i| f[i].clone().into())
     };
 
-    builder.tagged_list(ids, "bus.boundary.last_row", |builder| {
-        let mut last = builder.when_last_row();
-        for (col, expected) in cols.into_iter().zip(finals) {
-            last.assert_eq_ext(col, expected);
-        }
-    });
+    let mut last = builder.when_last_row();
+    for (col, expected) in cols.into_iter().zip(finals) {
+        last.assert_eq_ext(col, expected);
+    }
 }

@@ -20,7 +20,6 @@ use crate::{
         bus::indices::B_HASH_KERNEL,
         chiplets::hasher::{flags, periodic},
         op_flags::OpFlags,
-        tagging::TaggingAirBuilderExt,
     },
     trace::{
         CHIPLETS_OFFSET, Challenges, LOG_PRECOMPILE_LABEL,
@@ -63,7 +62,7 @@ pub fn enforce_hash_kernel_constraint<AB>(
     op_flags: &OpFlags<AB::Expr>,
     challenges: &Challenges<AB::ExprEF>,
 ) where
-    AB: TaggingAirBuilderExt<F = Felt>,
+    AB: LiftedAirBuilder<F = Felt>,
 {
     // =========================================================================
     // AUXILIARY TRACE ACCESS

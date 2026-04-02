@@ -42,10 +42,7 @@ use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 
 use crate::{
     MainTraceRow,
-    constraints::{
-        op_flags::{ExprDecoderAccess, OpFlags},
-        tagging::{TaggingAirBuilderExt, ids::TAG_DECODER_BASE},
-    },
+    constraints::op_flags::{ExprDecoderAccess, OpFlags},
     trace::decoder as decoder_cols,
 };
 
@@ -104,82 +101,6 @@ const EXTRA_COLS_OFFSET: usize = 22;
 /// - 1 control flow constraint (1 - sp - f_ctrl = 0)
 #[allow(dead_code)]
 pub const NUM_CONSTRAINTS: usize = 57;
-
-/// Base ID for decoder constraints (inclusive).
-const DECODER_BASE_ID: usize = TAG_DECODER_BASE;
-
-/// Decoder constraint namespaces in assertion order.
-const DECODER_NAMES: [&str; NUM_CONSTRAINTS] = [
-    // in-span constraints (boundary first, then transition rules)
-    "decoder.in_span.first_row",
-    "decoder.in_span.binary",
-    "decoder.in_span.span",
-    "decoder.in_span.respan",
-    // op bits binary (b0..b6)
-    "decoder.op_bits.b0.binary",
-    "decoder.op_bits.b1.binary",
-    "decoder.op_bits.b2.binary",
-    "decoder.op_bits.b3.binary",
-    "decoder.op_bits.b4.binary",
-    "decoder.op_bits.b5.binary",
-    "decoder.op_bits.b6.binary",
-    // extra columns (e0, e1)
-    "decoder.extra.e0",
-    "decoder.extra.e1",
-    // op-bit group constraints
-    "decoder.op_bits.u32_prefix.b0",
-    "decoder.op_bits.very_high.b0",
-    "decoder.op_bits.very_high.b1",
-    // batch flags binary (c0..c2)
-    "decoder.batch_flags.c0.binary",
-    "decoder.batch_flags.c1.binary",
-    "decoder.batch_flags.c2.binary",
-    // general constraints
-    "decoder.general.split_loop.s0.binary",
-    "decoder.general.dyn.h4.zero",
-    "decoder.general.dyn.h5.zero",
-    "decoder.general.dyn.h6.zero",
-    "decoder.general.dyn.h7.zero",
-    "decoder.general.repeat.s0.one",
-    "decoder.general.repeat.h4.one",
-    "decoder.general.end.loop.s0.zero",
-    "decoder.general.end_repeat.h0.carry",
-    "decoder.general.end_repeat.h1.carry",
-    "decoder.general.end_repeat.h2.carry",
-    "decoder.general.end_repeat.h3.carry",
-    "decoder.general.end_repeat.h4.carry",
-    "decoder.general.halt.next",
-    // group count constraints
-    "decoder.group_count.delta.binary",
-    "decoder.group_count.decrement.h0_or_imm",
-    "decoder.group_count.span_decrement",
-    "decoder.group_count.end_or_respan.hold",
-    "decoder.group_count.end.zero",
-    // op group decoding constraints
-    "decoder.op_group.shift",
-    "decoder.op_group.end_or_respan.h0.zero",
-    // op index constraints
-    "decoder.op_index.span_respan.reset",
-    "decoder.op_index.new_group.reset",
-    "decoder.op_index.increment",
-    "decoder.op_index.range",
-    // batch flag constraints and zeroing rules
-    "decoder.batch_flags.span_sum",
-    "decoder.batch_flags.zero_when_not_span",
-    "decoder.batch_flags.h4.zero",
-    "decoder.batch_flags.h5.zero",
-    "decoder.batch_flags.h6.zero",
-    "decoder.batch_flags.h7.zero",
-    "decoder.batch_flags.h2.zero",
-    "decoder.batch_flags.h3.zero",
-    "decoder.batch_flags.h1.zero",
-    // block address constraints
-    "decoder.addr.hold_in_span",
-    "decoder.addr.respan.increment",
-    "decoder.addr.halt.zero",
-    // control flow constraint
-    "decoder.control_flow.sp_complement",
-];
 
 const IN_SPAN_BASE: usize = 0;
 
@@ -243,7 +164,7 @@ pub fn enforce_main<AB>(
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: TaggingAirBuilderExt,
+    AB: LiftedAirBuilder,
 {
     // Load decoder columns using typed struct
     let cols: DecoderColumns<AB::Expr> = DecoderColumns::from_row::<AB>(local);
@@ -352,7 +273,7 @@ fn enforce_in_span_constraints<AB>(
     cols_next: &DecoderColumns<AB::Expr>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: TaggingAirBuilderExt,
+    AB: LiftedAirBuilder,
 {
     let sp = cols.in_span.clone();
     let sp_next = cols_next.in_span.clone();
@@ -382,7 +303,7 @@ fn enforce_in_span_constraints<AB>(
 /// For each bit bi: bi * (bi - 1) = 0
 fn enforce_op_bits_binary<AB>(builder: &mut AB, cols: &DecoderColumns<AB::Expr>)
 where
-    AB: TaggingAirBuilderExt,
+    AB: LiftedAirBuilder,
 {
     for i in 0..NUM_OP_BITS {
         // Each opcode bit must be 0 or 1 to make decoding deterministic.
@@ -398,7 +319,7 @@ where
 /// - e1 = b6 * b5
 fn enforce_extra_columns<AB>(builder: &mut AB, cols: &DecoderColumns<AB::Expr>)
 where
-    AB: TaggingAirBuilderExt,
+    AB: LiftedAirBuilder,
 {
     let b4 = cols.op_bits[4].clone();
     let b5 = cols.op_bits[5].clone();
@@ -426,7 +347,7 @@ where
 /// - Very-high-degree ops (prefix `11`) must have b0 = b1 = 0.
 fn enforce_op_bit_group_constraints<AB>(builder: &mut AB, cols: &DecoderColumns<AB::Expr>)
 where
-    AB: TaggingAirBuilderExt,
+    AB: LiftedAirBuilder,
 {
     let b0 = cols.op_bits[0].clone();
     let b1 = cols.op_bits[1].clone();
@@ -451,7 +372,7 @@ where
 /// For each flag ci: ci * (ci - 1) = 0
 fn enforce_batch_flags_binary<AB>(builder: &mut AB, cols: &DecoderColumns<AB::Expr>)
 where
-    AB: TaggingAirBuilderExt,
+    AB: LiftedAirBuilder,
 {
     for i in 0..NUM_BATCH_FLAGS {
         // Batch flags are selectors; they must be boolean.
@@ -475,7 +396,7 @@ fn enforce_general_constraints<AB>(
     op_flags: &OpFlags<AB::Expr>,
     op_flags_next: &OpFlags<AB::Expr>,
 ) where
-    AB: TaggingAirBuilderExt,
+    AB: LiftedAirBuilder,
 {
     let s0: AB::Expr = local.stack[0].clone().into();
 
@@ -543,7 +464,7 @@ fn enforce_group_count_constraints<AB>(
     op_flags: &OpFlags<AB::Expr>,
     op_flags_next: &OpFlags<AB::Expr>,
 ) where
-    AB: TaggingAirBuilderExt,
+    AB: LiftedAirBuilder,
 {
     let sp = cols.in_span.clone();
     let gc = cols.group_count.clone();
@@ -606,7 +527,7 @@ fn enforce_op_group_decoding_constraints<AB>(
     op_flags: &OpFlags<AB::Expr>,
     op_flags_next: &OpFlags<AB::Expr>,
 ) where
-    AB: TaggingAirBuilderExt,
+    AB: LiftedAirBuilder,
 {
     let sp = cols.in_span.clone();
     let sp_next = cols_next.in_span.clone();
@@ -667,7 +588,7 @@ fn enforce_op_index_constraints<AB>(
     cols_next: &DecoderColumns<AB::Expr>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: TaggingAirBuilderExt,
+    AB: LiftedAirBuilder,
 {
     let sp = cols.in_span.clone();
     let sp_next = cols_next.in_span.clone();
@@ -726,7 +647,7 @@ fn enforce_batch_flags_constraints<AB>(
     local: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: TaggingAirBuilderExt,
+    AB: LiftedAirBuilder,
 {
     let bc0 = cols.batch_flags[0].clone();
     let bc1 = cols.batch_flags[1].clone();
@@ -793,7 +714,7 @@ fn enforce_block_address_constraints<AB>(
     cols_next: &DecoderColumns<AB::Expr>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: TaggingAirBuilderExt,
+    AB: LiftedAirBuilder,
 {
     let sp = cols.in_span.clone();
     let addr = cols.addr.clone();
@@ -834,7 +755,7 @@ fn enforce_control_flow_constraints<AB>(
     cols: &DecoderColumns<AB::Expr>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: TaggingAirBuilderExt,
+    AB: LiftedAirBuilder,
 {
     let sp = cols.in_span.clone();
 
@@ -844,10 +765,6 @@ fn enforce_control_flow_constraints<AB>(
     builder.assert_zero(AB::Expr::ONE - sp - ctrl_flag);
 }
 
-fn assert_zero_first_row<AB: TaggingAirBuilderExt>(builder: &mut AB, idx: usize, expr: AB::Expr) {
-    let id = DECODER_BASE_ID + idx;
-    let name = DECODER_NAMES[idx];
-    builder.tagged(id, name, |builder| {
-        builder.when_first_row().assert_zero(expr);
-    });
+fn assert_zero_first_row<AB: LiftedAirBuilder>(builder: &mut AB, _idx: usize, expr: AB::Expr) {
+    builder.when_first_row().assert_zero(expr);
 }

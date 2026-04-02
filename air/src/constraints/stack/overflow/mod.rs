@@ -31,36 +31,12 @@ use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 
 use crate::{
     MainTraceRow,
-    constraints::{
-        op_flags::OpFlags,
-        tagging::{
-            TaggingAirBuilderExt,
-            ids::{TAG_STACK_OVERFLOW_BASE, TAG_STACK_OVERFLOW_COUNT},
-        },
-    },
+    constraints::op_flags::OpFlags,
     trace::{
         decoder::{IS_CALL_FLAG_COL_IDX, IS_SYSCALL_FLAG_COL_IDX},
         stack::{B0_COL_IDX, B1_COL_IDX},
     },
 };
-
-// CONSTANTS
-// ================================================================================================
-
-/// Base tag ID for stack overflow constraints.
-const STACK_OVERFLOW_BASE_ID: usize = TAG_STACK_OVERFLOW_BASE;
-
-/// Tag namespaces for stack overflow constraints (boundary + transition).
-const STACK_OVERFLOW_NAMES: [&str; TAG_STACK_OVERFLOW_COUNT] = [
-    "stack.overflow.depth.first_row",
-    "stack.overflow.depth.last_row",
-    "stack.overflow.addr.first_row",
-    "stack.overflow.addr.last_row",
-    "stack.overflow.depth.transition",
-    "stack.overflow.flag.transition",
-    "stack.overflow.addr.transition",
-    "stack.overflow.zero_insert.transition",
-];
 
 // ENTRY POINTS
 // ================================================================================================
@@ -83,26 +59,18 @@ pub fn enforce_main<AB>(
     // Boundary constraints: stack depth and overflow pointer must start/end clean.
     let sixteen: AB::Expr = AB::Expr::from_u16(16);
     let zero: AB::Expr = AB::Expr::ZERO;
-    builder.tagged(STACK_OVERFLOW_BASE_ID, STACK_OVERFLOW_NAMES[0], |builder| {
-        builder
-            .when_first_row()
-            .assert_zero(local.stack[B0_COL_IDX].clone().into() - sixteen.clone());
-    });
-    builder.tagged(STACK_OVERFLOW_BASE_ID + 1, STACK_OVERFLOW_NAMES[1], |builder| {
-        builder
-            .when_last_row()
-            .assert_zero(local.stack[B0_COL_IDX].clone().into() - sixteen);
-    });
-    builder.tagged(STACK_OVERFLOW_BASE_ID + 2, STACK_OVERFLOW_NAMES[2], |builder| {
-        builder
-            .when_first_row()
-            .assert_zero(local.stack[B1_COL_IDX].clone().into() - zero.clone());
-    });
-    builder.tagged(STACK_OVERFLOW_BASE_ID + 3, STACK_OVERFLOW_NAMES[3], |builder| {
-        builder
-            .when_last_row()
-            .assert_zero(local.stack[B1_COL_IDX].clone().into() - zero);
-    });
+    builder
+        .when_first_row()
+        .assert_zero(local.stack[B0_COL_IDX].clone().into() - sixteen.clone());
+    builder
+        .when_last_row()
+        .assert_zero(local.stack[B0_COL_IDX].clone().into() - sixteen);
+    builder
+        .when_first_row()
+        .assert_zero(local.stack[B1_COL_IDX].clone().into() - zero.clone());
+    builder
+        .when_last_row()
+        .assert_zero(local.stack[B1_COL_IDX].clone().into() - zero);
 
     // Transition constraints: depth bookkeeping, overflow flag, and pointer updates.
     enforce_stack_depth_constraints(builder, local, next, op_flags);
@@ -178,11 +146,9 @@ fn enforce_stack_depth_constraints<AB>(
     let call_part = call_or_dyncall_or_syscall * (depth_next - AB::Expr::from_u16(16));
 
     // Combined constraint: normal depth update + shift effects + call reset = 0.
-    builder.tagged(STACK_OVERFLOW_BASE_ID + 4, STACK_OVERFLOW_NAMES[4], |builder| {
-        builder
-            .when_transition()
-            .assert_zero(depth_delta_part + left_shift_part - right_shift_part + call_part);
-    });
+    builder
+        .when_transition()
+        .assert_zero(depth_delta_part + left_shift_part - right_shift_part + call_part);
 }
 
 /// Enforces overflow flag constraints.
@@ -207,9 +173,7 @@ fn enforce_overflow_flag_constraints<AB>(
     // When depth = 16, this constraint is satisfied regardless of overflow
     let constraint = (AB::Expr::ONE - op_flags.overflow()) * (depth - AB::Expr::from_u16(16));
 
-    builder.tagged(STACK_OVERFLOW_BASE_ID + 5, STACK_OVERFLOW_NAMES[5], |builder| {
-        builder.assert_zero(constraint);
-    });
+    builder.assert_zero(constraint);
 }
 
 /// Enforces overflow bookkeeping index constraints.
@@ -231,14 +195,10 @@ fn enforce_overflow_index_constraints<AB>(
 
     // On right shift, the overflow address should be set to current clk
     let right_shift_constraint = (overflow_addr_next - clk) * op_flags.right_shift();
-    builder.tagged(STACK_OVERFLOW_BASE_ID + 6, STACK_OVERFLOW_NAMES[6], |builder| {
-        builder.when_transition().assert_zero(right_shift_constraint);
-    });
+    builder.when_transition().assert_zero(right_shift_constraint);
 
     // On left shift when depth = 16 (no overflow), last stack item should be zero
     let left_shift_constraint =
         (AB::Expr::ONE - op_flags.overflow()) * op_flags.left_shift() * last_stack_item_next;
-    builder.tagged(STACK_OVERFLOW_BASE_ID + 7, STACK_OVERFLOW_NAMES[7], |builder| {
-        builder.when_transition().assert_zero(left_shift_constraint);
-    });
+    builder.when_transition().assert_zero(left_shift_constraint);
 }

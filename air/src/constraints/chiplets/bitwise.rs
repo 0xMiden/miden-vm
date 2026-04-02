@@ -24,6 +24,7 @@
 use alloc::vec::Vec;
 
 use miden_core::field::PrimeCharacteristicRing;
+use miden_crypto::stark::air::LiftedAirBuilder;
 
 use super::{
     hasher::periodic::NUM_PERIODIC_COLUMNS as HASHER_NUM_PERIODIC_COLUMNS,
@@ -31,7 +32,6 @@ use super::{
 };
 use crate::{
     Felt, MainTraceRow,
-    constraints::tagging::TaggingAirBuilderExt,
     trace::{
         CHIPLETS_OFFSET,
         chiplets::{
@@ -51,10 +51,6 @@ pub const P_BITWISE_K_FIRST: usize = HASHER_NUM_PERIODIC_COLUMNS;
 /// Index of k_transition periodic column (marks non-last rows of 8-row cycle).
 pub const P_BITWISE_K_TRANSITION: usize = HASHER_NUM_PERIODIC_COLUMNS + 1;
 
-/// Total number of periodic columns (hasher + bitwise periodic columns).
-#[cfg(all(test, feature = "std"))]
-pub const NUM_PERIODIC_COLUMNS: usize = HASHER_NUM_PERIODIC_COLUMNS + 2;
-
 /// Number of bits processed per row.
 const NUM_BITS_PER_ROW: usize = 4;
 
@@ -72,7 +68,7 @@ pub fn enforce_bitwise_constraints<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: TaggingAirBuilderExt<F = Felt>,
+    AB: LiftedAirBuilder<F = Felt>,
 {
     let (k_first, k_transition) = {
         // Clone out what we need to avoid holding a borrow of `builder` while asserting

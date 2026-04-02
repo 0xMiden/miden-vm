@@ -34,10 +34,7 @@ use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess}
 
 use crate::{
     Felt, MainTraceRow,
-    constraints::{
-        bus::indices::V_WIRING, chiplets::selectors::ace_chiplet_flag,
-        tagging::TaggingAirBuilderExt,
-    },
+    constraints::{bus::indices::V_WIRING, chiplets::selectors::ace_chiplet_flag},
     trace::{
         Challenges,
         chiplets::ace::{
@@ -63,7 +60,7 @@ pub fn enforce_wiring_bus_constraint<AB>(
     _next: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) where
-    AB: TaggingAirBuilderExt<F = Felt>,
+    AB: LiftedAirBuilder<F = Felt>,
 {
     // ---------------------------------------------------------------------
     // Auxiliary trace access.

@@ -24,3 +24,8 @@ resolving merge conflicts in this file.
 **No constraint changes.** (441 base + 24 ext)
 
 ---
+## 4. refactor: remove constraint tagging infrastructure
+
+**No constraint changes.** (441 base + 24 ext)
+
+---

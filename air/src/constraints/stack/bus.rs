@@ -22,21 +22,13 @@ use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess}
 
 use crate::{
     MainTraceRow,
-    constraints::{
-        bus::indices::P1_STACK,
-        op_flags::OpFlags,
-        tagging::{TaggingAirBuilderExt, ids::TAG_STACK_OVERFLOW_BUS_BASE},
-    },
+    constraints::{bus::indices::P1_STACK, op_flags::OpFlags},
     trace::{
         Challenges,
         decoder::HASHER_STATE_RANGE,
         stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX},
     },
 };
-
-/// Tag ID and namespace for the stack overflow bus transition constraint.
-const STACK_OVERFLOW_BUS_ID: usize = TAG_STACK_OVERFLOW_BUS_BASE;
-const STACK_OVERFLOW_BUS_NAME: &str = "stack.overflow.bus.transition";
 
 // ENTRY POINTS
 // ================================================================================================
@@ -142,7 +134,5 @@ pub fn enforce_bus<AB>(
     let lhs = p1_next.into() * request;
     let rhs = p1_local.into() * response;
 
-    builder.tagged(STACK_OVERFLOW_BUS_ID, STACK_OVERFLOW_BUS_NAME, |builder| {
-        builder.when_transition().assert_zero_ext(lhs - rhs);
-    });
+    builder.when_transition().assert_zero_ext(lhs - rhs);
 }

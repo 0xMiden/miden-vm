@@ -25,44 +25,7 @@
 
 use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 
-use crate::{
-    MainTraceRow,
-    constraints::{
-        op_flags::OpFlags,
-        tagging::{
-            TaggingAirBuilderExt,
-            ids::{TAG_STACK_GENERAL_BASE, TAG_STACK_GENERAL_COUNT},
-        },
-    },
-};
-
-// CONSTANTS
-// ================================================================================================
-
-/// Number of general stack constraints.
-/// 16 constraints for stack item transitions.
-pub const NUM_CONSTRAINTS: usize = TAG_STACK_GENERAL_COUNT;
-
-/// Tag base ID for stack general constraints.
-/// Tag namespaces for stack general constraints.
-const STACK_GENERAL_NAMES: [&str; NUM_CONSTRAINTS] = [
-    "stack.general.transition.0",
-    "stack.general.transition.1",
-    "stack.general.transition.2",
-    "stack.general.transition.3",
-    "stack.general.transition.4",
-    "stack.general.transition.5",
-    "stack.general.transition.6",
-    "stack.general.transition.7",
-    "stack.general.transition.8",
-    "stack.general.transition.9",
-    "stack.general.transition.10",
-    "stack.general.transition.11",
-    "stack.general.transition.12",
-    "stack.general.transition.13",
-    "stack.general.transition.14",
-    "stack.general.transition.15",
-];
+use crate::{MainTraceRow, constraints::op_flags::OpFlags};
 
 // ENTRY POINTS
 // ================================================================================================
@@ -96,13 +59,11 @@ pub fn enforce_main<AB>(
             + op_flags.left_shift_at(1) * local.stack[1].clone().into();
         let actual: AB::Expr = next.stack[0].clone().into();
 
-        builder.tagged(TAG_STACK_GENERAL_BASE, STACK_GENERAL_NAMES[0], |builder| {
-            builder.when_transition().assert_zero(actual * flag_sum - expected);
-        });
+        builder.when_transition().assert_zero(actual * flag_sum - expected);
     }
 
     // Positions 1-14: all three shift types possible.
-    for (i, &namespace) in STACK_GENERAL_NAMES.iter().enumerate().take(15).skip(1) {
+    for i in 1..15 {
         let flag_sum = op_flags.no_shift_at(i)
             + op_flags.left_shift_at(i + 1)
             + op_flags.right_shift_at(i - 1);
@@ -112,10 +73,7 @@ pub fn enforce_main<AB>(
             + op_flags.right_shift_at(i - 1) * local.stack[i - 1].clone().into();
         let actual: AB::Expr = next.stack[i].clone().into();
 
-        let id = TAG_STACK_GENERAL_BASE + i;
-        builder.tagged(id, namespace, |builder| {
-            builder.when_transition().assert_zero(actual * flag_sum - expected);
-        });
+        builder.when_transition().assert_zero(actual * flag_sum - expected);
     }
 
     // Position 15: no left shift (handled by overflow constraints)
@@ -126,8 +84,6 @@ pub fn enforce_main<AB>(
             + op_flags.right_shift_at(14) * local.stack[14].clone().into();
         let actual: AB::Expr = next.stack[15].clone().into();
 
-        builder.tagged(TAG_STACK_GENERAL_BASE + 15, STACK_GENERAL_NAMES[15], |builder| {
-            builder.when_transition().assert_zero(actual * flag_sum - expected);
-        });
+        builder.when_transition().assert_zero(actual * flag_sum - expected);
     }
 }

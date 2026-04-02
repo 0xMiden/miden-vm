@@ -23,30 +23,7 @@
 use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 
-use crate::{
-    Felt, MainTraceRow,
-    constraints::tagging::{TaggingAirBuilderExt, ids::TAG_CHIPLETS_BASE},
-};
-
-// TAGGING IDS
-// ================================================================================================
-
-/// Base ID for chiplet selector constraints.
-const CHIPLET_SELECTORS_BASE_ID: usize = TAG_CHIPLETS_BASE;
-
-/// Constraint namespaces in assertion order.
-const CHIPLET_SELECTORS_NAMES: [&str; 10] = [
-    "chiplets.selectors.s0.binary",
-    "chiplets.selectors.s1.binary",
-    "chiplets.selectors.s2.binary",
-    "chiplets.selectors.s3.binary",
-    "chiplets.selectors.s4.binary",
-    "chiplets.selectors.s0.stability",
-    "chiplets.selectors.s1.stability",
-    "chiplets.selectors.s2.stability",
-    "chiplets.selectors.s3.stability",
-    "chiplets.selectors.s4.stability",
-];
+use crate::{Felt, MainTraceRow};
 
 // ENTRY POINTS
 // ================================================================================================
@@ -84,41 +61,31 @@ pub fn enforce_chiplet_selectors<AB>(
     // Each selector is binary when it could be active
 
     // s0 is always binary
-    builder.tagged(CHIPLET_SELECTORS_BASE_ID, CHIPLET_SELECTORS_NAMES[0], |builder| {
-        builder.assert_zero(s0.clone() * (s0.clone() - one.clone()));
-    });
+    builder.assert_zero(s0.clone() * (s0.clone() - one.clone()));
 
     // s1 is binary when s0 = 1 (bitwise, memory, ACE, or kernel ROM could be active)
-    builder.tagged(CHIPLET_SELECTORS_BASE_ID + 1, CHIPLET_SELECTORS_NAMES[1], |builder| {
-        builder.when(s0.clone()).assert_zero(s1.clone() * (s1.clone() - one.clone()));
-    });
+    builder.when(s0.clone()).assert_zero(s1.clone() * (s1.clone() - one.clone()));
 
     // s2 is binary when s0 = 1 and s1 = 1 (memory, ACE, or kernel ROM could be active)
-    builder.tagged(CHIPLET_SELECTORS_BASE_ID + 2, CHIPLET_SELECTORS_NAMES[2], |builder| {
-        builder
-            .when(s0.clone())
-            .when(s1.clone())
-            .assert_zero(s2.clone() * (s2.clone() - one.clone()));
-    });
+    builder
+        .when(s0.clone())
+        .when(s1.clone())
+        .assert_zero(s2.clone() * (s2.clone() - one.clone()));
 
     // s3 is binary when s0 = s1 = s2 = 1 (ACE or kernel ROM could be active)
-    builder.tagged(CHIPLET_SELECTORS_BASE_ID + 3, CHIPLET_SELECTORS_NAMES[3], |builder| {
-        builder
-            .when(s0.clone())
-            .when(s1.clone())
-            .when(s2.clone())
-            .assert_zero(s3.clone() * (s3.clone() - one.clone()));
-    });
+    builder
+        .when(s0.clone())
+        .when(s1.clone())
+        .when(s2.clone())
+        .assert_zero(s3.clone() * (s3.clone() - one.clone()));
 
     // s4 is binary when s0 = s1 = s2 = s3 = 1 (kernel ROM could be active)
-    builder.tagged(CHIPLET_SELECTORS_BASE_ID + 4, CHIPLET_SELECTORS_NAMES[4], |builder| {
-        builder
-            .when(s0.clone())
-            .when(s1.clone())
-            .when(s2.clone())
-            .when(s3.clone())
-            .assert_zero(s4.clone() * (s4.clone() - one.clone()));
-    });
+    builder
+        .when(s0.clone())
+        .when(s1.clone())
+        .when(s2.clone())
+        .when(s3.clone())
+        .assert_zero(s4.clone() * (s4.clone() - one.clone()));
 
     // ==========================================================================
     // STABILITY CONSTRAINTS (transition only)
@@ -126,54 +93,44 @@ pub fn enforce_chiplet_selectors<AB>(
     // Once a selector becomes 1, it must stay 1 (forbids 1→0 transitions)
 
     // s0' = s0 when s0 = 1
-    builder.tagged(CHIPLET_SELECTORS_BASE_ID + 5, CHIPLET_SELECTORS_NAMES[5], |builder| {
-        builder
-            .when_transition()
-            .when(s0.clone())
-            .assert_zero(s0_next.clone() - s0.clone());
-    });
+    builder
+        .when_transition()
+        .when(s0.clone())
+        .assert_zero(s0_next.clone() - s0.clone());
 
     // s1' = s1 when s0 = 1 and s1 = 1
-    builder.tagged(CHIPLET_SELECTORS_BASE_ID + 6, CHIPLET_SELECTORS_NAMES[6], |builder| {
-        builder
-            .when_transition()
-            .when(s0.clone())
-            .when(s1.clone())
-            .assert_zero(s1_next.clone() - s1.clone());
-    });
+    builder
+        .when_transition()
+        .when(s0.clone())
+        .when(s1.clone())
+        .assert_zero(s1_next.clone() - s1.clone());
 
     // s2' = s2 when s0 = s1 = s2 = 1
-    builder.tagged(CHIPLET_SELECTORS_BASE_ID + 7, CHIPLET_SELECTORS_NAMES[7], |builder| {
-        builder
-            .when_transition()
-            .when(s0.clone())
-            .when(s1.clone())
-            .when(s2.clone())
-            .assert_zero(s2_next.clone() - s2.clone());
-    });
+    builder
+        .when_transition()
+        .when(s0.clone())
+        .when(s1.clone())
+        .when(s2.clone())
+        .assert_zero(s2_next.clone() - s2.clone());
 
     // s3' = s3 when s0 = s1 = s2 = s3 = 1
-    builder.tagged(CHIPLET_SELECTORS_BASE_ID + 8, CHIPLET_SELECTORS_NAMES[8], |builder| {
-        builder
-            .when_transition()
-            .when(s0.clone())
-            .when(s1.clone())
-            .when(s2.clone())
-            .when(s3.clone())
-            .assert_zero(s3_next.clone() - s3.clone());
-    });
+    builder
+        .when_transition()
+        .when(s0.clone())
+        .when(s1.clone())
+        .when(s2.clone())
+        .when(s3.clone())
+        .assert_zero(s3_next.clone() - s3.clone());
 
     // s4' = s4 when s0 = s1 = s2 = s3 = s4 = 1
-    builder.tagged(CHIPLET_SELECTORS_BASE_ID + 9, CHIPLET_SELECTORS_NAMES[9], |builder| {
-        builder
-            .when_transition()
-            .when(s0)
-            .when(s1)
-            .when(s2)
-            .when(s3)
-            .when(s4.clone())
-            .assert_zero(s4_next - s4);
-    });
+    builder
+        .when_transition()
+        .when(s0)
+        .when(s1)
+        .when(s2)
+        .when(s3)
+        .when(s4.clone())
+        .assert_zero(s4_next - s4);
 }
 
 // INTERNAL HELPERS

@@ -35,7 +35,6 @@ use miden_crypto::stark::air::LiftedAirBuilder;
 use super::selectors::memory_chiplet_flag;
 use crate::{
     Felt, MainTraceRow,
-    constraints::tagging::TaggingAirBuilderExt,
     trace::{
         CHIPLETS_OFFSET,
         chiplets::{
@@ -56,7 +55,7 @@ pub fn enforce_memory_constraints<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: TaggingAirBuilderExt<F = Felt>,
+    AB: LiftedAirBuilder<F = Felt>,
 {
     let s0: AB::Expr = local.chiplets[0].clone().into();
     let s1: AB::Expr = local.chiplets[1].clone().into();
@@ -90,7 +89,7 @@ pub fn enforce_memory_constraints_all_rows<AB>(
     local: &MainTraceRow<AB::Var>,
     _next: &MainTraceRow<AB::Var>,
 ) where
-    AB: TaggingAirBuilderExt<F = Felt>,
+    AB: LiftedAirBuilder<F = Felt>,
 {
     // Compute memory active flag from top-level selectors
     let s0: AB::Expr = local.chiplets[0].clone().into();
@@ -126,7 +125,7 @@ pub fn enforce_memory_constraints_first_row<AB>(
     cols_first: &MainTraceRow<AB::Var>,
     flag_next_row_first_memory: AB::Expr,
 ) where
-    AB: TaggingAirBuilderExt<F = Felt>,
+    AB: LiftedAirBuilder<F = Felt>,
 {
     // Load first memory row columns using typed struct
     let cols_next: MemoryColumns<AB::Expr> = MemoryColumns::from_row::<AB>(cols_first);
@@ -157,7 +156,7 @@ pub fn enforce_memory_constraints_all_rows_except_last<AB>(
     next: &MainTraceRow<AB::Var>,
     flag_memory_active_not_last: AB::Expr,
 ) where
-    AB: TaggingAirBuilderExt<F = Felt>,
+    AB: LiftedAirBuilder<F = Felt>,
 {
     // Load columns using typed struct
     let cols: MemoryColumns<AB::Expr> = MemoryColumns::from_row::<AB>(local);
@@ -394,7 +393,7 @@ fn enforce_delta_inverse_constraints<AB>(
     deltas: &MemoryDeltas<AB::Expr>,
     one: AB::Expr,
 ) where
-    AB: TaggingAirBuilderExt<F = Felt>,
+    AB: LiftedAirBuilder<F = Felt>,
 {
     let n0 = deltas.n0.clone();
     let n1 = deltas.n1.clone();
@@ -427,7 +426,7 @@ fn enforce_scw_readonly_constraint<AB>(
     deltas: &MemoryDeltas<AB::Expr>,
     one: AB::Expr,
 ) where
-    AB: TaggingAirBuilderExt<F = Felt>,
+    AB: LiftedAirBuilder<F = Felt>,
 {
     // If ctx/word are unchanged and clk_delta = 0, both rows must be reads.
     // Constraint: f_scw' * (1 - clk_delta * d_inv') * (is_write + is_write') = 0

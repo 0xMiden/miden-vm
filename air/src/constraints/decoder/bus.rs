@@ -30,26 +30,12 @@ use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess}
 
 use crate::{
     MainTraceRow,
-    constraints::{
-        bus::indices::P1_BLOCK_STACK,
-        op_flags::OpFlags,
-        tagging::{TaggingAirBuilderExt, ids::TAG_DECODER_BUS_BASE},
-    },
+    constraints::{bus::indices::P1_BLOCK_STACK, op_flags::OpFlags},
     trace::Challenges,
 };
 
 // CONSTANTS
 // ================================================================================================
-
-/// Base ID for decoder bus constraints.
-const DECODER_BUS_BASE_ID: usize = TAG_DECODER_BUS_BASE;
-
-/// Decoder bus constraint namespaces in assertion order.
-const DECODER_BUS_NAMES: [&str; 3] = [
-    "decoder.bus.p1.transition",
-    "decoder.bus.p2.transition",
-    "decoder.bus.p3.transition",
-];
 
 /// Weights for opcode bit decoding: b0 + 2*b1 + ... + 64*b6.
 const OP_BIT_WEIGHTS: [u16; 7] = [1, 2, 4, 8, 16, 32, 64];
@@ -449,9 +435,7 @@ pub fn enforce_block_stack_table_constraint<AB>(
     let lhs: AB::ExprEF = p1_next.into() * request;
     let rhs: AB::ExprEF = p1_local.into() * response;
 
-    builder.tagged(DECODER_BUS_BASE_ID, DECODER_BUS_NAMES[0], |builder| {
-        builder.when_transition().assert_zero_ext(lhs - rhs);
-    });
+    builder.when_transition().assert_zero_ext(lhs - rhs);
 }
 
 // BLOCK HASH TABLE (p2)
@@ -675,9 +659,7 @@ pub fn enforce_block_hash_table_constraint<AB>(
     let lhs: AB::ExprEF = p2_next.into() * request;
     let rhs: AB::ExprEF = p2_local.into() * response;
 
-    builder.tagged(DECODER_BUS_BASE_ID + 1, DECODER_BUS_NAMES[1], |builder| {
-        builder.when_transition().assert_zero_ext(lhs - rhs);
-    });
+    builder.when_transition().assert_zero_ext(lhs - rhs);
 }
 
 // OP GROUP TABLE (p3)
@@ -889,7 +871,5 @@ pub fn enforce_op_group_table_constraint<AB>(
     let lhs: AB::ExprEF = p3_next.into() * request;
     let rhs: AB::ExprEF = p3_local.into() * response;
 
-    builder.tagged(DECODER_BUS_BASE_ID + 2, DECODER_BUS_NAMES[2], |builder| {
-        builder.when_transition().assert_zero_ext(lhs - rhs);
-    });
+    builder.when_transition().assert_zero_ext(lhs - rhs);
 }
