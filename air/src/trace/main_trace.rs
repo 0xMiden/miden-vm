@@ -199,30 +199,25 @@ impl MainTrace {
                 assert!(col < TRACE_WIDTH, "main trace column index in bounds");
 
                 if col < CORE_WIDTH {
-                    core_rm.row_slice(r).expect("main trace row index in bounds")[col]
+                    core_rm.get(r, col).expect("main trace row index in bounds")
                 } else {
                     let nc = col - CORE_WIDTH;
                     if nc < RANGE_CHECK_TRACE_WIDTH {
                         range_checker_cols[nc][r]
                     } else if nc < RANGE_CHECK_TRACE_WIDTH + CHIPLETS_WIDTH {
                         let cc = nc - RANGE_CHECK_TRACE_WIDTH;
-                        chiplets_rm.row_slice(r).expect("main trace row index in bounds")[cc]
+                        chiplets_rm.get(r, cc).expect("main trace row index in bounds")
                     } else {
                         ZERO
                     }
                 }
             },
             TraceStorage::RowMajor(matrix) => {
-                let row_slice = matrix.row_slice(r).expect("main trace row index in bounds");
-                assert!(col < row_slice.len(), "main trace column index in bounds");
-                row_slice[col]
+                matrix.get(r, col).expect("main trace row and column index in bounds")
             },
             TraceStorage::Transposed { matrix, num_cols, .. } => {
-                let col_slice = matrix.row_slice(col).expect("main trace column index in bounds");
-                assert!(r < col_slice.len(), "main trace row index in bounds");
-                debug_assert_eq!(col_slice.len(), matrix.width());
                 debug_assert_eq!(matrix.height(), *num_cols);
-                col_slice[r]
+                matrix.get(col, r).expect("main trace row and column index in bounds")
             },
         }
     }
@@ -488,9 +483,7 @@ impl MainTrace {
             } => {
                 if col_idx < CORE_WIDTH {
                     (0..*num_rows)
-                        .map(|r| {
-                            core_rm.row_slice(r).expect("main trace row index in bounds")[col_idx]
-                        })
+                        .map(|r| core_rm.get(r, col_idx).expect("main trace row index in bounds"))
                         .collect()
                 } else {
                     let nc = col_idx - CORE_WIDTH;
@@ -500,8 +493,7 @@ impl MainTrace {
                         let cc = nc - RANGE_CHECK_TRACE_WIDTH;
                         (0..*num_rows)
                             .map(|r| {
-                                chiplets_rm.row_slice(r).expect("main trace row index in bounds")
-                                    [cc]
+                                chiplets_rm.get(r, cc).expect("main trace row index in bounds")
                             })
                             .collect()
                     } else {
@@ -512,10 +504,9 @@ impl MainTrace {
             TraceStorage::RowMajor(_) => {
                 (0..h).map(|r| self.get(RowIndex::from(r), col_idx)).collect()
             },
-            TraceStorage::Transposed { matrix, .. } => {
-                let row_slice = matrix.row_slice(col_idx).expect("column index in bounds");
-                row_slice[..h].to_vec()
-            },
+            TraceStorage::Transposed { matrix, .. } => (0..h)
+                .map(|r| matrix.get(col_idx, r).expect("main trace row and column index in bounds"))
+                .collect(),
         }
     }
 

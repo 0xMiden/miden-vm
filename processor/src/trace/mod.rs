@@ -337,9 +337,6 @@ impl ExecutionTrace {
     }
 
     /// Returns the main trace as a row-major matrix for proving.
-    ///
-    /// The lifted STARK prover applies Poseidon2 rate alignment virtually
-    /// when committing, so no extra padding columns are needed.
     pub fn to_row_major_matrix(&self) -> Arc<RowMajorMatrix<Felt>> {
         let row_major = self.main_trace.to_row_major();
         debug_assert_eq!(row_major.width(), TRACE_WIDTH);
