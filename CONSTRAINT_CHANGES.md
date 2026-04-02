@@ -378,3 +378,20 @@ ACE shared columns restructured from flat `shared[10]` array to named fields wit
 </details>
 
 ---
+## 38. refactor: type periodic columns into named structs and simplify chiplet constraints
+
+**5 updated** | 465 unchanged
+
+kernel_rom.rs:70-73→62-65. Identical assertion expressions (`assert_eq(krom_next.root[i], krom.root[i])`); fingerprints changed because the upstream gate lost a redundant `(1 - s4')` factor. Old gate: `flags.is_transition * (1 - s4') * (1 - s_first')`. New gate: `flags.is_transition * (1 - s_first')`. Since `flags.is_transition` for kernel_rom already includes `(1 - s4')` (from selectors.rs:193: `kernel_rom_transition = is_transition_flag * s0123 * not_s4_next`), the old code was squaring `(1 - s4')²` which equals `(1 - s4')` on binary values. Polynomial changed (lost squared factor) but semantically equivalent on valid traces.
+
+**Updated:**
+
+| # | Before | After | Interpretation |
+|---|--------|-------|----------------|
+| 1 | `chiplets/bitwise.rs:146` | `chiplets/bitwise.rs:122` | bitwise.rs:146→122. Sign flip: `assert_eq(prev_output_next, output)` → `assert_eq(output, prev_output_next)`. `assert_eq(a, b)` is `assert_zero(a - b)` so swapping arguments negates the polynomial. Equivalent. |
+| 2 | `chiplets/kernel_rom.rs:70` | `chiplets/kernel_rom.rs:62` | kernel_rom.rs:70-73→62-65. Identical assertion expressions (`assert_eq(krom_next.root[i], krom.root[i])`); fingerprints changed because the upstream gate lost a redundant `(1 - s4')` factor. Old gate: `flags.is_transition * (1 - s4') * (1 - s_first')`. New gate: `flags.is_transition * (1 - s_first')`. Since `flags.is_transition` for kernel_rom already includes `(1 - s4')` (from selectors.rs:193: `kernel_rom_transition = is_transition_flag * s0123 * not_s4_next`), the old code was squaring `(1 - s4')²` which equals `(1 - s4')` on binary values. Polynomial changed (lost squared factor) but semantically equivalent on valid traces. |
+| 3 | `chiplets/kernel_rom.rs:71` | `chiplets/kernel_rom.rs:63` | kernel_rom.rs:70-73→62-65. Identical assertion expressions (`assert_eq(krom_next.root[i], krom.root[i])`); fingerprints changed because the upstream gate lost a redundant `(1 - s4')` factor. Old gate: `flags.is_transition * (1 - s4') * (1 - s_first')`. New gate: `flags.is_transition * (1 - s_first')`. Since `flags.is_transition` for kernel_rom already includes `(1 - s4')` (from selectors.rs:193: `kernel_rom_transition = is_transition_flag * s0123 * not_s4_next`), the old code was squaring `(1 - s4')²` which equals `(1 - s4')` on binary values. Polynomial changed (lost squared factor) but semantically equivalent on valid traces. |
+| 4 | `chiplets/kernel_rom.rs:72` | `chiplets/kernel_rom.rs:64` | kernel_rom.rs:70-73→62-65. Identical assertion expressions (`assert_eq(krom_next.root[i], krom.root[i])`); fingerprints changed because the upstream gate lost a redundant `(1 - s4')` factor. Old gate: `flags.is_transition * (1 - s4') * (1 - s_first')`. New gate: `flags.is_transition * (1 - s_first')`. Since `flags.is_transition` for kernel_rom already includes `(1 - s4')` (from selectors.rs:193: `kernel_rom_transition = is_transition_flag * s0123 * not_s4_next`), the old code was squaring `(1 - s4')²` which equals `(1 - s4')` on binary values. Polynomial changed (lost squared factor) but semantically equivalent on valid traces. |
+| 5 | `chiplets/kernel_rom.rs:73` | `chiplets/kernel_rom.rs:65` | kernel_rom.rs:70-73→62-65. Identical assertion expressions (`assert_eq(krom_next.root[i], krom.root[i])`); fingerprints changed because the upstream gate lost a redundant `(1 - s4')` factor. Old gate: `flags.is_transition * (1 - s4') * (1 - s_first')`. New gate: `flags.is_transition * (1 - s_first')`. Since `flags.is_transition` for kernel_rom already includes `(1 - s4')` (from selectors.rs:193: `kernel_rom_transition = is_transition_flag * s0123 * not_s4_next`), the old code was squaring `(1 - s4')²` which equals `(1 - s4')` on binary values. Polynomial changed (lost squared factor) but semantically equivalent on valid traces. |
+
+---

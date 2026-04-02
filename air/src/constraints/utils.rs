@@ -15,7 +15,9 @@ impl<T: PrimeCharacteristicRing> BoolNot for T {}
 ///
 /// Evaluates as `((limbs[N-1]*2 + limbs[N-2])*2 + ...)*2 + limbs[0]`.
 #[inline]
-pub fn horner_eval_bits<const N: usize, E: PrimeCharacteristicRing>(limbs: &[E; N]) -> E {
+pub fn horner_eval_bits<const N: usize, T: Clone + Into<E>, E: PrimeCharacteristicRing>(
+    limbs: &[T; N],
+) -> E {
     const {
         assert! { N >= 1};
     }
@@ -23,6 +25,7 @@ pub fn horner_eval_bits<const N: usize, E: PrimeCharacteristicRing>(limbs: &[E; 
         .iter()
         .rev()
         .cloned()
+        .map(Into::into)
         .reduce(|acc, bit| acc.double() + bit)
         .expect("non-empty array")
 }

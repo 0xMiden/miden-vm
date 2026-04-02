@@ -21,29 +21,16 @@
 //! | zp        | Previous aggregated output        |
 //! | z         | Current aggregated output         |
 
-use alloc::vec::Vec;
+use core::{array, borrow::Borrow};
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::AirBuilder;
 
-use super::{
-    hasher::periodic::NUM_PERIODIC_COLUMNS as HASHER_NUM_PERIODIC_COLUMNS, selectors::ChipletFlags,
-};
+use super::selectors::ChipletFlags;
 use crate::{
-    Felt, MainTraceRow, MidenAirBuilder,
+    AirBuilder, MainTraceRow, MidenAirBuilder,
     constraints::{constants::F_16, utils::horner_eval_bits},
-    trace::BitwiseCols,
+    trace::{BitwiseCols, chiplets::PeriodicCols},
 };
-
-// CONSTANTS
-// ================================================================================================
-
-/// Index of k_first periodic column (marks first row of 8-row cycle).
-/// Placed after hasher periodic columns.
-pub const P_BITWISE_K_FIRST: usize = HASHER_NUM_PERIODIC_COLUMNS;
-
-/// Index of k_transition periodic column (marks non-last rows of 8-row cycle).
-pub const P_BITWISE_K_TRANSITION: usize = HASHER_NUM_PERIODIC_COLUMNS + 1;
 
 // ENTRY POINTS
 // ================================================================================================
@@ -62,24 +49,14 @@ pub fn enforce_bitwise_constraints<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    let (k_first, k_transition) = {
-        // Clone out what we need to avoid holding a borrow of `builder` while asserting
-        // constraints.
-        let periodic = builder.periodic_values();
-        debug_assert!(periodic.len() > P_BITWISE_K_TRANSITION);
-        (periodic[P_BITWISE_K_FIRST].into(), periodic[P_BITWISE_K_TRANSITION].into())
-    };
+    let periodic: &PeriodicCols<_> = builder.periodic_values().borrow();
+    let k_first = periodic.bitwise.k_first;
+    let k_transition = periodic.bitwise.k_transition;
 
     let bitwise_flag = flags.is_active.clone();
 
     let cols: &BitwiseCols<AB::Var> = local.bitwise();
     let cols_next: &BitwiseCols<AB::Var> = next.bitwise();
-
-    // Convert bit arrays to AB::Expr for arithmetic
-    let a_bits: [AB::Expr; 4] = cols.a_bits.map(Into::into);
-    let b_bits: [AB::Expr; 4] = cols.b_bits.map(Into::into);
-    let a_bits_next: [AB::Expr; 4] = cols_next.a_bits.map(Into::into);
-    let b_bits_next: [AB::Expr; 4] = cols_next.b_bits.map(Into::into);
 
     // All bitwise constraints are gated on the bitwise chiplet being active.
     let bitwise_builder = &mut builder.when(bitwise_flag);
@@ -89,51 +66,50 @@ pub fn enforce_bitwise_constraints<AB>(
     // ==========================================================================
 
     // op_flag must be binary (0 for AND, 1 for XOR)
-    let op_flag: AB::Expr = cols.op_flag.into();
-    bitwise_builder.assert_bool(op_flag.clone());
+    let op_flag = cols.op_flag;
+    bitwise_builder.assert_bool(op_flag);
 
     // op_flag must remain constant within the 8-row cycle (can only change when k1=0)
-    let op_flag_next: AB::Expr = cols_next.op_flag.into();
-    bitwise_builder
-        .when(k_transition.clone())
-        .assert_eq(op_flag.clone(), op_flag_next);
+    let op_flag_next = cols_next.op_flag;
+    bitwise_builder.when(k_transition).assert_eq(op_flag, op_flag_next);
 
     // ==========================================================================
     // INPUT DECOMPOSITION CONSTRAINTS
     // ==========================================================================
+    let (a, a_bits) = (cols.a, cols.a_bits);
+    let (b, b_bits) = (cols.b, cols.b_bits);
 
     // Bit decomposition columns must be binary
-    for bit in &a_bits {
-        bitwise_builder.assert_bool(bit.clone());
-    }
-    for bit in &b_bits {
-        bitwise_builder.assert_bool(bit.clone());
-    }
+    bitwise_builder.assert_bools(a_bits);
+    bitwise_builder.assert_bools(b_bits);
 
     // First row of cycle (k0=1): a = aggregated bits, b = aggregated bits
-    let a_agg = horner_eval_bits(&a_bits);
-    let b_agg = horner_eval_bits(&b_bits);
-    let a: AB::Expr = cols.a.into();
-    let b: AB::Expr = cols.b.into();
-    let prev_output: AB::Expr = cols.prev_output.into();
     // First row: input aggregation must match, and previous output must be zero.
     {
         let builder = &mut bitwise_builder.when(k_first);
-        builder.assert_eq(a.clone(), a_agg);
-        builder.assert_eq(b.clone(), b_agg);
-        builder.assert_zero(prev_output.clone());
+
+        let a_expected = horner_eval_bits(&a_bits);
+        builder.assert_eq(a, a_expected);
+
+        let b_expected = horner_eval_bits(&b_bits);
+        builder.assert_eq(b, b_expected);
+
+        builder.assert_zero(cols.prev_output);
     }
 
+    let (a_next, a_next_bits) = (cols_next.a, cols_next.a_bits);
+    let (b_next, b_next_bits) = (cols_next.b, cols_next.b_bits);
+
     // Transition rows (k1=1): a' = 16*a + agg(a'_bits), b' = 16*b + agg(b'_bits)
-    let a_agg_next = horner_eval_bits(&a_bits_next);
-    let b_agg_next = horner_eval_bits(&b_bits_next);
-    let a_next: AB::Expr = cols_next.a.into();
-    let b_next: AB::Expr = cols_next.b.into();
     // Transition rows: inputs aggregate with 16x shift.
     {
-        let builder = &mut bitwise_builder.when(k_transition.clone());
-        builder.assert_eq(a_next, a * F_16 + a_agg_next);
-        builder.assert_eq(b_next, b * F_16 + b_agg_next);
+        let builder = &mut bitwise_builder.when(k_transition);
+
+        let a_next_expected = a * F_16 + horner_eval_bits(&a_next_bits);
+        builder.assert_eq(a_next, a_next_expected);
+
+        let b_next_expected = b * F_16 + horner_eval_bits(&b_next_bits);
+        builder.assert_eq(b_next, b_next_expected);
     }
 
     // ==========================================================================
@@ -141,62 +117,27 @@ pub fn enforce_bitwise_constraints<AB>(
     // ==========================================================================
 
     // Transition rows (k1=1): output_prev' = output
-    let output: AB::Expr = cols.output.into();
-    let prev_output_next: AB::Expr = cols_next.prev_output.into();
-    bitwise_builder.when(k_transition).assert_eq(prev_output_next, output.clone());
+    let output = cols.output;
+    let prev_output_next = cols_next.prev_output;
+    bitwise_builder.when(k_transition).assert_eq(output, prev_output_next);
 
     // Every row: output = 16*output_prev + bitwise_result
 
     // Compute AND of 4-bit limbs: sum(2^i * (a[i] * b[i]))
-    let a_and_b_bits: [AB::Expr; 4] =
-        core::array::from_fn(|i| a_bits[i].clone() * b_bits[i].clone());
-    let a_and_b = horner_eval_bits(&a_and_b_bits);
+    let a_and_b_bits: [AB::Expr; 4] = array::from_fn(|i| a_bits[i] * b_bits[i]);
+    let a_and_b: AB::Expr = horner_eval_bits(&a_and_b_bits);
 
     // Compute XOR of 4-bit limbs: sum(2^i * (a[i] + b[i] - 2*a[i]*b[i]))
     // Reuses a_and_b_bits: xor_bit = a + b - 2*and_bit
-    let a_xor_b_bits: [AB::Expr; 4] = core::array::from_fn(|i| {
-        a_bits[i].clone() + b_bits[i].clone() - a_and_b_bits[i].clone().double()
-    });
-    let a_xor_b = horner_eval_bits(&a_xor_b_bits);
+    let a_xor_b_bits: [AB::Expr; 4] =
+        array::from_fn(|i| a_bits[i] + b_bits[i] - a_and_b_bits[i].clone().double());
+    let a_xor_b: AB::Expr = horner_eval_bits(&a_xor_b_bits);
 
     // z = zp * 16 + (op_flag ? a_xor_b : a_and_b)
     // Equivalent: z = zp * 16 + a_and_b + op_flag * (a_xor_b - a_and_b)
-    let expected_z = prev_output * F_16 + a_and_b.clone() + op_flag * (a_xor_b - a_and_b);
+    let zp = cols.prev_output;
+    let expected_z = zp * F_16 + a_and_b.clone() + op_flag * (a_xor_b - a_and_b);
 
-    bitwise_builder.assert_eq(output, expected_z);
-}
-
-// =============================================================================
-// PERIODIC COLUMNS
-// =============================================================================
-
-/// Generate periodic columns for the bitwise chiplet.
-///
-/// Returns [k_first, k_transition] where:
-/// - k_first: [1, 0, 0, 0, 0, 0, 0, 0] (period 8)
-/// - k_transition: [1, 1, 1, 1, 1, 1, 1, 0] (period 8)
-pub fn periodic_columns() -> [Vec<Felt>; 2] {
-    let k_first = vec![
-        Felt::ONE,
-        Felt::ZERO,
-        Felt::ZERO,
-        Felt::ZERO,
-        Felt::ZERO,
-        Felt::ZERO,
-        Felt::ZERO,
-        Felt::ZERO,
-    ];
-
-    let k_transition = vec![
-        Felt::ONE,
-        Felt::ONE,
-        Felt::ONE,
-        Felt::ONE,
-        Felt::ONE,
-        Felt::ONE,
-        Felt::ONE,
-        Felt::ZERO,
-    ];
-
-    [k_first, k_transition]
+    let z = cols.output;
+    bitwise_builder.assert_eq(z, expected_z);
 }

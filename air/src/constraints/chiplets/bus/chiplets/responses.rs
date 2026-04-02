@@ -3,7 +3,7 @@
 //! Each chiplet row contributes a response message to the chiplets bus. This module computes
 //! those message values, organized by chiplet type.
 
-use core::array;
+use core::{array, borrow::Borrow};
 
 use miden_core::field::PrimeCharacteristicRing;
 
@@ -15,15 +15,12 @@ use super::{
 };
 use crate::{
     Felt, MainTraceRow, MidenAirBuilder,
-    constraints::{
-        chiplets::{bitwise::P_BITWISE_K_TRANSITION, hasher, selectors::ChipletSelectors},
-        constants::*,
-        utils::BoolNot,
-    },
+    constraints::{chiplets::selectors::ChipletSelectors, constants::*, utils::BoolNot},
     trace::{
         Challenges,
         bus_types::CHIPLETS_BUS,
         chiplets::{
+            PeriodicCols,
             ace::ACE_INIT_LABEL,
             bitwise::{BITWISE_AND_LABEL, BITWISE_XOR_LABEL},
             kernel_rom::{KERNEL_PROC_CALL_LABEL, KERNEL_PROC_INIT_LABEL},
@@ -53,17 +50,13 @@ where
     AB: MidenAirBuilder,
 {
     // --- Periodic columns for hasher cycle detection and bitwise gating ---
-    let (cycle_row_0, cycle_row_31, k_transition) = {
-        let p = builder.periodic_values();
-        let cycle_row_0 = p[hasher::periodic::P_CYCLE_ROW_0];
-        let cycle_row_31 = p[hasher::periodic::P_CYCLE_ROW_31];
-        let k_transition = p[P_BITWISE_K_TRANSITION];
-        (cycle_row_0, cycle_row_31, k_transition)
-    };
+    let periodic: &PeriodicCols<_> = builder.periodic_values().borrow();
+    let cycle_row_0 = periodic.hasher.cycle_row_0.into();
+    let cycle_row_31 = periodic.hasher.cycle_row_31.into();
+    let k_transition = periodic.bitwise.k_transition.into();
 
     // --- Response flags ---
-    let is_bitwise_responding: AB::Expr =
-        selectors.bitwise.is_active.clone() * k_transition.into().not();
+    let is_bitwise_responding: AB::Expr = selectors.bitwise.is_active.clone() * k_transition.not();
     let is_memory: AB::Expr = selectors.memory.is_active.clone();
     let ace_start: AB::Expr = local.ace().s_start.into();
     let is_ace: AB::Expr = selectors.ace.is_active.clone() * ace_start;
@@ -75,8 +68,8 @@ where
         next,
         challenges,
         selectors,
-        cycle_row_0.into(),
-        cycle_row_31.into(),
+        cycle_row_0,
+        cycle_row_31,
     );
 
     // Bitwise response

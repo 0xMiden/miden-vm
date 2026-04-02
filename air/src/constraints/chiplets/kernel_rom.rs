@@ -39,34 +39,26 @@ pub fn enforce_kernel_rom_constraints<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    let s4_next = next.chiplet_selectors()[4];
-
-    let kernel_rom_flag = flags.is_active.clone();
-
     let krom = local.kernel_rom();
     let krom_next = next.kernel_rom();
-
-    let not_s4_next = s4_next.into().not();
 
     // ==========================================================================
     // SELECTOR CONSTRAINT
     // ==========================================================================
 
     // sfirst must be binary
-    builder.when(kernel_rom_flag.clone()).assert_bool(krom.s_first);
+    builder.when(flags.is_active.clone()).assert_bool(krom.s_first);
 
     // ==========================================================================
     // DIGEST CONTIGUITY CONSTRAINTS
     // ==========================================================================
 
-    // When sfirst' = 0 (not the start of a new digest block) and s4' = 0 (not exiting kernel ROM),
-    // the digest values must remain unchanged.
-    let contiguity_condition = not_s4_next * krom_next.s_first.into().not();
-
-    // Use a combined gate to share `kernel_rom_flag * contiguity_condition` across all 4 lanes.
+    // In all rows but last, ensure that the digest repeats except when the next
+    // row is the start of a new digest (i.e., s_first' = 0)
     {
-        let transition_gate = flags.is_transition.clone() * contiguity_condition;
-        let builder = &mut builder.when(transition_gate);
+        let gate = flags.is_transition.clone() * krom_next.s_first.into().not();
+        let builder = &mut builder.when(gate);
+
         builder.assert_eq(krom_next.root[0], krom.root[0]);
         builder.assert_eq(krom_next.root[1], krom.root[1]);
         builder.assert_eq(krom_next.root[2], krom.root[2]);
@@ -79,6 +71,5 @@ pub fn enforce_kernel_rom_constraints<AB>(
 
     // First row of kernel ROM must have sfirst' = 1.
     // Uses the precomputed next_is_first flag to detect ACE→KernelROM boundary.
-    let flag_next_row_first_kernel_rom = flags.next_is_first.clone();
-    builder.when(flag_next_row_first_kernel_rom).assert_one(krom_next.s_first);
+    builder.when(flags.next_is_first.clone()).assert_one(krom_next.s_first);
 }

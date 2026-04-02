@@ -18,10 +18,10 @@
 use miden_core::{chiplets::hasher::Hasher, field::PrimeCharacteristicRing};
 use miden_crypto::stark::air::AirBuilder;
 
-use super::periodic::{
-    P_ARK_EXT_START, P_ARK_INT, P_CYCLE_ROW_0, P_IS_EXTERNAL, P_IS_INTERNAL, STATE_WIDTH,
+use crate::{
+    MidenAirBuilder,
+    trace::chiplets::{HasherPeriodicCols, hasher::STATE_WIDTH},
 };
-use crate::MidenAirBuilder;
 
 // CONSTRAINT HELPERS
 // ================================================================================================
@@ -39,22 +39,19 @@ pub fn enforce_permutation_steps<AB>(
     hasher_flag: AB::Expr,
     h: &[AB::Expr; STATE_WIDTH],
     h_next: &[AB::Expr; STATE_WIDTH],
-    periodic: &[AB::PeriodicVar],
+    periodic: &HasherPeriodicCols<AB::PeriodicVar>,
 ) where
     AB: MidenAirBuilder,
 {
     // Cycle markers and step selectors
-    let cycle_row_0: AB::Expr = periodic[P_CYCLE_ROW_0].into();
-    let is_external: AB::Expr = periodic[P_IS_EXTERNAL].into();
-    let is_internal: AB::Expr = periodic[P_IS_INTERNAL].into();
+    let cycle_row_0: AB::Expr = periodic.cycle_row_0.into();
+    let is_external: AB::Expr = periodic.is_external.into();
+    let is_internal: AB::Expr = periodic.is_internal.into();
     let is_init_linear = cycle_row_0.clone();
 
     // External round constants
-    let mut ark_ext = [AB::Expr::ZERO; STATE_WIDTH];
-    for lane in 0..STATE_WIDTH {
-        ark_ext[lane] = periodic[P_ARK_EXT_START + lane].into();
-    }
-    let ark_int: AB::Expr = periodic[P_ARK_INT].into();
+    let ark_ext: [AB::Expr; STATE_WIDTH] = periodic.ark_ext.map(Into::into);
+    let ark_int: AB::Expr = periodic.ark_int.into();
 
     // -------------------------------------------------------------------------
     // Compute expected next states for each step type

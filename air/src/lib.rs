@@ -205,9 +205,7 @@ impl BaseAir<Felt> for ProcessorAir {
 
 impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
     fn periodic_columns(&self) -> Vec<Vec<Felt>> {
-        let mut cols = constraints::chiplets::hasher::periodic_columns();
-        cols.extend(constraints::chiplets::bitwise::periodic_columns());
-        cols
+        trace::chiplets::PeriodicCols::periodic_columns()
     }
 
     fn num_randomness(&self) -> usize {

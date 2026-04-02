@@ -3,7 +3,6 @@
 //! This module implements constraints for the hasher chiplet, organized into sub-modules:
 //!
 //! - [`flags`]: Operation flag computation functions
-//! - [`periodic`]: Periodic column definitions (cycle markers, round constants)
 //! - [`selectors`]: Selector logic constraints
 //! - [`state`]: Permutation state constraints
 //! - [`merkle`]: Merkle tree operation constraints
@@ -31,18 +30,21 @@
 
 pub mod flags;
 pub mod merkle;
-pub mod periodic;
 pub mod selectors;
 pub mod state;
 
+use core::borrow::Borrow;
+
 use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::AirBuilder;
-// Re-export commonly used items
-pub use periodic::{STATE_WIDTH, periodic_columns};
 
 use crate::{
-    MainTraceRow, MidenAirBuilder, constraints::chiplets::selectors::ChipletFlags,
-    trace::HasherCols,
+    MainTraceRow, MidenAirBuilder,
+    constraints::chiplets::selectors::ChipletFlags,
+    trace::{
+        HasherCols,
+        chiplets::{HasherPeriodicCols, PeriodicCols, hasher::STATE_WIDTH},
+    },
 };
 
 /// Precomputed hasher flags derived from selectors and cycle markers.
@@ -110,7 +112,7 @@ struct HasherContext<'a, AB: MidenAirBuilder> {
     pub cols_next: &'a HasherCols<AB::Var>,
     pub flags: HasherFlags<AB::Expr>,
     pub hasher_flag: AB::Expr,
-    pub periodic: [AB::PeriodicVar; periodic::NUM_PERIODIC_COLUMNS],
+    pub periodic: HasherPeriodicCols<AB::PeriodicVar>,
 }
 
 impl<'a, AB> HasherContext<'a, AB>
@@ -123,26 +125,19 @@ where
         next: &'a MainTraceRow<AB::Var>,
         flags: &ChipletFlags<AB::Expr>,
     ) -> Self {
-        let periodic: [AB::PeriodicVar; periodic::NUM_PERIODIC_COLUMNS] = {
-            let periodic = builder.periodic_values();
-            debug_assert!(
-                periodic.len() >= periodic::NUM_PERIODIC_COLUMNS,
-                "not enough periodic values for hasher constraints"
-            );
-            core::array::from_fn(|i| periodic[i])
-        };
+        let periodic: &PeriodicCols<_> = builder.periodic_values().borrow();
 
         let hasher_flag = flags.is_active.clone();
         let cols: &HasherCols<AB::Var> = local.hasher();
         let cols_next: &HasherCols<AB::Var> = next.hasher();
-        let hasher_flags = compute_hasher_flags::<AB>(&periodic, cols, cols_next);
+        let hasher_flags = compute_hasher_flags::<AB>(&periodic.hasher, cols, cols_next);
 
         HasherContext::<AB> {
             cols,
             cols_next,
             flags: hasher_flags,
             hasher_flag,
-            periodic,
+            periodic: periodic.hasher,
         }
     }
 }
@@ -229,17 +224,17 @@ pub fn enforce_hasher_constraints<AB>(
 }
 
 fn compute_hasher_flags<AB>(
-    periodic: &[AB::PeriodicVar],
+    periodic: &HasherPeriodicCols<AB::PeriodicVar>,
     cols: &HasherCols<AB::Var>,
     cols_next: &HasherCols<AB::Var>,
 ) -> HasherFlags<AB::Expr>
 where
     AB: MidenAirBuilder,
 {
-    let cycle_row_31: AB::Expr = periodic[periodic::P_CYCLE_ROW_31].into();
+    let cycle_row_31: AB::Expr = periodic.cycle_row_31.into();
 
-    let cycle_row_0: AB::Expr = periodic[periodic::P_CYCLE_ROW_0].into();
-    let cycle_row_30: AB::Expr = periodic[periodic::P_CYCLE_ROW_30].into();
+    let cycle_row_0: AB::Expr = periodic.cycle_row_0.into();
+    let cycle_row_30: AB::Expr = periodic.cycle_row_30.into();
 
     let s0: AB::Expr = cols.selectors[0].into();
     let s1: AB::Expr = cols.selectors[1].into();

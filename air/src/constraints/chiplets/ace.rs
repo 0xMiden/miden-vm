@@ -62,7 +62,7 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     // Derived section flags
     let s_start = local.s_start;
     let s_start_next = next.s_start;
-    let s_transition = AB::Expr::from(s_start_next).not();
+    let s_transition = s_start_next.into().not();
 
     // ==========================================================================
     // FIRST ROW CONSTRAINTS
@@ -84,8 +84,8 @@ pub fn enforce_ace_constraints_all_rows<AB>(
 
     let f_eval = local.s_block;
     let f_eval_next = next.s_block;
-    let f_read = AB::Expr::from(f_eval).not();
-    let f_read_next = AB::Expr::from(f_eval_next).not();
+    let f_read = f_eval.into().not();
+    let f_read_next = f_eval_next.into().not();
 
     // ==========================================================================
     // SECTION/BLOCK FLAGS CONSTRAINTS

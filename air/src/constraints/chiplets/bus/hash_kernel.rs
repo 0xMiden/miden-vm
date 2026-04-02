@@ -11,6 +11,8 @@
 //! The request/response values use the standard message format:
 //! `alpha + sum_i beta^i * element[i]`.
 
+use core::borrow::Borrow;
+
 use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 
@@ -18,10 +20,7 @@ use crate::{
     Felt, MainTraceRow, MidenAirBuilder,
     constraints::{
         bus::indices::B_HASH_KERNEL,
-        chiplets::{
-            hasher::{flags, periodic},
-            selectors::ChipletSelectors,
-        },
+        chiplets::{hasher::flags, selectors::ChipletSelectors},
         op_flags::OpFlags,
         utils::BoolNot,
     },
@@ -29,6 +28,7 @@ use crate::{
         Challenges, LOG_PRECOMPILE_LABEL,
         bus_types::{CHIPLETS_BUS, LOG_PRECOMPILE_TRANSCRIPT, SIBLING_TABLE},
         chiplets::{
+            PeriodicCols,
             ace::{ACE_INSTRUCTION_ID1_OFFSET, ACE_INSTRUCTION_ID2_OFFSET},
             memory::{MEMORY_READ_ELEMENT_LABEL, MEMORY_READ_WORD_LABEL},
         },
@@ -70,13 +70,9 @@ pub fn enforce_hash_kernel_constraint<AB>(
     // PERIODIC VALUES
     // =========================================================================
 
-    let (cycle_row_0, cycle_row_31) = {
-        // Clone only the periodic values we need (avoids per-eval `to_vec()` allocation).
-        let p = builder.periodic_values();
-        let cycle_row_0: AB::Expr = p[periodic::P_CYCLE_ROW_0].into();
-        let cycle_row_31: AB::Expr = p[periodic::P_CYCLE_ROW_31].into();
-        (cycle_row_0, cycle_row_31)
-    };
+    let periodic: &PeriodicCols<_> = builder.periodic_values().borrow();
+    let cycle_row_0 = periodic.hasher.cycle_row_0.into();
+    let cycle_row_31 = periodic.hasher.cycle_row_31.into();
 
     // =========================================================================
     // COMMON VALUES
