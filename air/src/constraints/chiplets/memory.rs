@@ -27,8 +27,6 @@
 //! Range checks should include `w0`, `w1`, and `4 * w1`; the extra term
 //! prevents wraparound, and Goldilocks satisfies P > 2^18 so this is sound.
 
-use core::ops::{Add, Mul, Sub};
-
 use miden_core::field::PrimeCharacteristicRing;
 
 use super::selectors::ChipletFlags;
@@ -38,16 +36,9 @@ use crate::{
         constants::{F_1, TWO_POW_16},
         utils::BoolNot,
     },
-    trace::{
-        CHIPLETS_OFFSET,
-        chiplets::{
-            MEMORY_CLK_COL_IDX, MEMORY_CTX_COL_IDX, MEMORY_D_INV_COL_IDX, MEMORY_D0_COL_IDX,
-            MEMORY_D1_COL_IDX, MEMORY_FLAG_SAME_CONTEXT_AND_WORD, MEMORY_IDX0_COL_IDX,
-            MEMORY_IDX1_COL_IDX, MEMORY_IS_READ_COL_IDX, MEMORY_IS_WORD_ACCESS_COL_IDX,
-            MEMORY_V_COL_RANGE, MEMORY_WORD_COL_IDX,
-        },
-    },
+    trace::{MemoryCols, chiplets::borrow_chiplet},
 };
+
 // ENTRY POINTS
 // ================================================================================================
 
@@ -88,20 +79,24 @@ pub fn enforce_memory_constraints_all_rows<AB>(
 {
     let memory_flag = flags.is_active.clone();
 
-    // Load memory columns using typed struct
-    let cols: MemoryColumns<AB::Expr> = MemoryColumns::from_row::<AB>(local);
+    let cols: &MemoryCols<AB::Var> = borrow_chiplet(&local.chiplets[3..18]);
+
+    let is_read: AB::Expr = cols.is_read.into();
+    let is_word: AB::Expr = cols.is_word.into();
+    let idx0: AB::Expr = cols.idx0.into();
+    let idx1: AB::Expr = cols.idx1.into();
 
     // Binary constraints
     let gate = memory_flag.clone();
-    builder.assert_zero(gate.clone() * cols.is_read.clone() * (cols.is_read.clone() - F_1));
-    builder.assert_zero(gate.clone() * cols.is_word.clone() * (cols.is_word.clone() - F_1));
-    builder.assert_zero(gate.clone() * cols.idx0.clone() * (cols.idx0.clone() - F_1));
-    builder.assert_zero(gate * cols.idx1.clone() * (cols.idx1.clone() - F_1));
+    builder.assert_zero(gate.clone() * is_read.clone() * (is_read - F_1));
+    builder.assert_zero(gate.clone() * is_word.clone() * (is_word.clone() - F_1));
+    builder.assert_zero(gate.clone() * idx0.clone() * (idx0.clone() - F_1));
+    builder.assert_zero(gate * idx1.clone() * (idx1.clone() - F_1));
 
     // For word access, idx bits must be zero (only element accesses use idx0/idx1).
-    let word_gate = memory_flag.clone() * cols.is_word.clone();
-    builder.assert_zero(word_gate.clone() * cols.idx0.clone());
-    builder.assert_zero(word_gate * cols.idx1.clone());
+    let word_gate = memory_flag.clone() * is_word;
+    builder.assert_zero(word_gate.clone() * idx0);
+    builder.assert_zero(word_gate * idx1);
 }
 
 /// Enforce memory first row initialization constraints.
@@ -116,18 +111,17 @@ pub fn enforce_memory_constraints_first_row<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    // Load first memory row columns using typed struct
-    let cols_next: MemoryColumns<AB::Expr> = MemoryColumns::from_row::<AB>(cols_first);
+    let cols_next: &MemoryCols<AB::Var> = borrow_chiplet(&cols_first.chiplets[3..18]);
 
     // Compute constraint flags for all 4 word elements
-    let [c0, c1, c2, c3] = cols_next.compute_value_constraint_flags(AB::Expr::ONE);
+    let [c0, c1, c2, c3] = compute_value_constraint_flags::<AB>(cols_next);
 
     // First row: if v'[i] is not written to, then v'[i] = 0
     let gate = flag_next_row_first_memory;
-    builder.assert_zero(gate.clone() * c0 * cols_next.values[0].clone());
-    builder.assert_zero(gate.clone() * c1 * cols_next.values[1].clone());
-    builder.assert_zero(gate.clone() * c2 * cols_next.values[2].clone());
-    builder.assert_zero(gate * c3 * cols_next.values[3].clone());
+    builder.assert_zero(gate.clone() * c0 * AB::Expr::from(cols_next.values[0]));
+    builder.assert_zero(gate.clone() * c1 * AB::Expr::from(cols_next.values[1]));
+    builder.assert_zero(gate.clone() * c2 * AB::Expr::from(cols_next.values[2]));
+    builder.assert_zero(gate * c3 * AB::Expr::from(cols_next.values[3]));
 }
 
 /// Enforce memory transition constraints (all rows except last).
@@ -145,11 +139,10 @@ pub fn enforce_memory_constraints_all_rows_except_last<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    // Load columns using typed struct
-    let cols: MemoryColumns<AB::Expr> = MemoryColumns::from_row::<AB>(local);
-    let cols_next: MemoryColumns<AB::Expr> = MemoryColumns::from_row::<AB>(next);
+    let cols: &MemoryCols<AB::Var> = borrow_chiplet(&local.chiplets[3..18]);
+    let cols_next: &MemoryCols<AB::Var> = borrow_chiplet(&next.chiplets[3..18]);
 
-    let deltas = MemoryDeltas::new::<AB>(&cols, &cols_next, AB::Expr::ONE);
+    let deltas = compute_memory_deltas::<AB>(cols, cols_next);
 
     // ==========================================================================
     // DELTA INVERSE CONSTRAINTS
@@ -173,9 +166,10 @@ pub fn enforce_memory_constraints_all_rows_except_last<AB>(
     // SAME CONTEXT/WORD FLAG
     // ==========================================================================
     // f_scw' = !n0 * !n1
+    let is_same_ctx_and_word_next: AB::Expr = cols_next.is_same_ctx_and_word.into();
     builder.assert_zero(
         flag_memory_active_not_last.clone()
-            * (cols_next.flag_same_ctx_word.clone() - deltas.n0.not() * deltas.n1.not()),
+            * (is_same_ctx_and_word_next.clone() - deltas.n0.not() * deltas.n1.not()),
     );
 
     // ==========================================================================
@@ -184,10 +178,9 @@ pub fn enforce_memory_constraints_all_rows_except_last<AB>(
     enforce_scw_readonly_constraint::<AB>(
         builder,
         flag_memory_active_not_last.clone(),
-        &cols,
-        &cols_next,
+        cols,
+        cols_next,
         &deltas,
-        AB::Expr::ONE,
     );
 
     // ==========================================================================
@@ -195,22 +188,22 @@ pub fn enforce_memory_constraints_all_rows_except_last<AB>(
     // ==========================================================================
 
     // Compute constraint flags for all 4 elements
-    let [c0, c1, c2, c3] = cols_next.compute_value_constraint_flags(AB::Expr::ONE);
+    let [c0, c1, c2, c3] = compute_value_constraint_flags::<AB>(cols_next);
 
     // When v'[i] is not written to:
     // - if f_scw' = 1: v'[i] = v[i] (copy from previous)
     // - if f_scw' = 0: v'[i] = 0 (initialize to zero)
     // Simplified: v'[i] = f_scw' * v[i]
-    let constrain_value = |c: AB::Expr, v: AB::Expr, v_next: AB::Expr| {
+    let constrain_value = |c: AB::Expr, v: AB::Var, v_next: AB::Var| {
         flag_memory_active_not_last.clone()
             * c
-            * (v_next - cols_next.flag_same_ctx_word.clone() * v)
+            * (AB::Expr::from(v_next) - is_same_ctx_and_word_next.clone() * AB::Expr::from(v))
     };
 
-    builder.assert_zero(constrain_value(c0, cols.values[0].clone(), cols_next.values[0].clone()));
-    builder.assert_zero(constrain_value(c1, cols.values[1].clone(), cols_next.values[1].clone()));
-    builder.assert_zero(constrain_value(c2, cols.values[2].clone(), cols_next.values[2].clone()));
-    builder.assert_zero(constrain_value(c3, cols.values[3].clone(), cols_next.values[3].clone()));
+    builder.assert_zero(constrain_value(c0, cols.values[0], cols_next.values[0]));
+    builder.assert_zero(constrain_value(c1, cols.values[1], cols_next.values[1]));
+    builder.assert_zero(constrain_value(c2, cols.values[2], cols_next.values[2]));
+    builder.assert_zero(constrain_value(c3, cols.values[3], cols_next.values[3]));
 }
 
 // INTERNAL HELPERS
@@ -228,142 +221,90 @@ struct MemoryDeltas<E> {
     n1: E,
     delta_next: E,
     computed_delta: E,
+    d_inv_next: E,
 }
 
-impl<E> MemoryDeltas<E>
+/// Compute derived delta values from two consecutive memory rows.
+fn compute_memory_deltas<AB>(
+    cols: &MemoryCols<AB::Var>,
+    cols_next: &MemoryCols<AB::Var>,
+) -> MemoryDeltas<AB::Expr>
 where
-    E: Clone + Add<Output = E> + Sub<Output = E> + Mul<Output = E>,
+    AB: MidenAirBuilder,
 {
-    fn new<AB>(cols: &MemoryColumns<E>, cols_next: &MemoryColumns<E>, one: E) -> Self
-    where
-        AB: MidenAirBuilder,
-        AB::Expr: Into<E>,
-    {
-        let ctx_delta = cols_next.ctx.clone() - cols.ctx.clone();
-        let addr_delta = cols_next.word_addr.clone() - cols.word_addr.clone();
-        let clk_delta = cols_next.clk.clone() - cols.clk.clone();
-        let two_pow_16: E = AB::Expr::from(TWO_POW_16).into();
+    let ctx_delta: AB::Expr = AB::Expr::from(cols_next.ctx) - AB::Expr::from(cols.ctx);
+    let addr_delta: AB::Expr =
+        AB::Expr::from(cols_next.word_addr) - AB::Expr::from(cols.word_addr);
+    let clk_delta: AB::Expr = AB::Expr::from(cols_next.clk) - AB::Expr::from(cols.clk);
+    let two_pow_16: AB::Expr = AB::Expr::from(TWO_POW_16);
+    let d_inv_next: AB::Expr = cols_next.d_inv.into();
 
-        // n0 = ctx_delta * d_inv'
-        // n1 = addr_delta * d_inv'
-        let n0 = ctx_delta.clone() * cols_next.d_inv.clone();
-        let n1 = addr_delta.clone() * cols_next.d_inv.clone();
+    // n0 = ctx_delta * d_inv'
+    // n1 = addr_delta * d_inv'
+    let n0 = ctx_delta.clone() * d_inv_next.clone();
+    let n1 = addr_delta.clone() * d_inv_next.clone();
 
-        // delta_next = d1' * 2^16 + d0'
-        let delta_next = cols_next.d1.clone() * two_pow_16 + cols_next.d0.clone();
+    // delta_next = d1' * 2^16 + d0'
+    let delta_next: AB::Expr =
+        AB::Expr::from(cols_next.d1) * two_pow_16 + AB::Expr::from(cols_next.d0);
 
-        // n0 * ctx_delta + !n0 * (n1 * addr_delta + !n1 * clk_delta) = delta_next
-        let computed_delta = n0.clone() * ctx_delta.clone()
-            + (one.clone() - n0.clone())
-                * (n1.clone() * addr_delta.clone() + (one - n1.clone()) * clk_delta.clone());
+    let one = AB::Expr::ONE;
 
-        Self {
-            ctx_delta,
-            addr_delta,
-            clk_delta,
-            n0,
-            n1,
-            delta_next,
-            computed_delta,
-        }
+    // n0 * ctx_delta + !n0 * (n1 * addr_delta + !n1 * clk_delta) = delta_next
+    let computed_delta = n0.clone() * ctx_delta.clone()
+        + (one.clone() - n0.clone())
+            * (n1.clone() * addr_delta.clone() + (one - n1.clone()) * clk_delta.clone());
+
+    MemoryDeltas {
+        ctx_delta,
+        addr_delta,
+        clk_delta,
+        n0,
+        n1,
+        delta_next,
+        computed_delta,
+        d_inv_next,
     }
 }
 
-/// Typed access to memory chiplet columns.
+/// Compute constraint flags c_0, c_1, c_2, c_3 for value consistency constraints.
 ///
-/// This struct provides named access to memory columns, eliminating error-prone
-/// index arithmetic. Created from a `MainTraceRow` reference.
-pub struct MemoryColumns<E> {
-    /// Read/write selector: 1=read, 0=write
-    pub is_read: E,
-    /// Element/word access: 0=element, 1=word
-    pub is_word: E,
-    /// Context ID
-    pub ctx: E,
-    /// Word address
-    pub word_addr: E,
-    /// First bit of element index
-    pub idx0: E,
-    /// Second bit of element index
-    pub idx1: E,
-    /// Clock cycle
-    pub clk: E,
-    /// Memory word values (4 elements)
-    pub values: [E; 4],
-    /// Delta low 16 bits
-    pub d0: E,
-    /// Delta high 16 bits
-    pub d1: E,
-    /// Delta inverse
-    pub d_inv: E,
-    /// Same context/word flag
-    pub flag_same_ctx_word: E,
-}
+/// c_i = 1 when v[i] needs to be constrained (not being written to), 0 otherwise.
+///
+/// For each element i:
+/// - Read operation: c_i = 1 (always constrain)
+/// - Write operation, element access, element i selected: c_i = 0 (being written, no
+///   constraining needed)
+/// - Write operation, otherwise: c_i = 1 (not being written, constrain)
+///
+/// Logic: c_i = is_read + is_write * is_element * !f_i
+///            = is_read + (1 - is_read) * (1 - is_word) * (1 - f_i)
+fn compute_value_constraint_flags<AB>(cols: &MemoryCols<AB::Var>) -> [AB::Expr; 4]
+where
+    AB: MidenAirBuilder,
+{
+    let one = AB::Expr::ONE;
+    let is_read: AB::Expr = cols.is_read.into();
+    let is_word: AB::Expr = cols.is_word.into();
+    let idx0: AB::Expr = cols.idx0.into();
+    let idx1: AB::Expr = cols.idx1.into();
 
-impl<E: Clone> MemoryColumns<E> {
-    /// Extract memory columns from a main trace row.
-    pub fn from_row<AB>(row: &MainTraceRow<AB::Var>) -> Self
-    where
-        AB: MidenAirBuilder,
-        AB::Var: Into<E> + Clone,
-    {
-        let load = |global_idx: usize| {
-            let local_idx = global_idx - CHIPLETS_OFFSET;
-            row.chiplets[local_idx].into()
-        };
+    let is_write = one.clone() - is_read.clone();
+    let is_element = one.clone() - is_word;
 
-        MemoryColumns {
-            is_read: load(MEMORY_IS_READ_COL_IDX),
-            is_word: load(MEMORY_IS_WORD_ACCESS_COL_IDX),
-            ctx: load(MEMORY_CTX_COL_IDX),
-            word_addr: load(MEMORY_WORD_COL_IDX),
-            idx0: load(MEMORY_IDX0_COL_IDX),
-            idx1: load(MEMORY_IDX1_COL_IDX),
-            clk: load(MEMORY_CLK_COL_IDX),
-            values: core::array::from_fn(|i| load(MEMORY_V_COL_RANGE.start + i)),
-            d0: load(MEMORY_D0_COL_IDX),
-            d1: load(MEMORY_D1_COL_IDX),
-            d_inv: load(MEMORY_D_INV_COL_IDX),
-            flag_same_ctx_word: load(MEMORY_FLAG_SAME_CONTEXT_AND_WORD),
-        }
-    }
+    // Element selection flags (f_i = 1 when idx0,idx1 select element i)
+    let f0 = (one.clone() - idx1.clone()) * (one.clone() - idx0.clone());
+    let f1 = (one.clone() - idx1.clone()) * idx0.clone();
+    let f2 = idx1.clone() * (one.clone() - idx0.clone());
+    let f3 = idx1 * idx0;
 
-    /// Compute constraint flags c_0, c_1, c_2, c_3 for value consistency constraints.
-    ///
-    /// c_i = 1 when v[i] needs to be constrained (not being written to), 0 otherwise.
-    ///
-    /// For each element i:
-    /// - Read operation: c_i = 1 (always constrain)
-    /// - Write operation, element access, element i selected: c_i = 0 (being written, no
-    ///   constraining needed)
-    /// - Write operation, otherwise: c_i = 1 (not being written, constrain)
-    ///
-    /// Logic: c_i = is_read + is_write * is_element * !f_i
-    ///            = is_read + (1 - is_read) * (1 - is_word) * (1 - f_i)
-    pub fn compute_value_constraint_flags<One>(&self, one: One) -> [E; 4]
-    where
-        E: Add<Output = E> + Sub<Output = E> + Mul<Output = E>,
-        One: Into<E>,
-    {
-        let one = one.into();
+    // c_i = is_read + is_write * is_element * !f_i
+    let compute_c = |f_i: AB::Expr| {
+        let not_f_i = one.clone() - f_i;
+        is_read.clone() + is_write.clone() * is_element.clone() * not_f_i
+    };
 
-        let is_write = one.clone() - self.is_read.clone();
-        let is_element = one.clone() - self.is_word.clone();
-
-        // Element selection flags (f_i = 1 when idx0,idx1 select element i)
-        let f0 = (one.clone() - self.idx1.clone()) * (one.clone() - self.idx0.clone());
-        let f1 = (one.clone() - self.idx1.clone()) * self.idx0.clone();
-        let f2 = self.idx1.clone() * (one.clone() - self.idx0.clone());
-        let f3 = self.idx1.clone() * self.idx0.clone();
-
-        // c_i = is_read + is_write * is_element * !f_i
-        let compute_c = |f_i: E| {
-            let not_f_i = one.clone() - f_i;
-            self.is_read.clone() + is_write.clone() * is_element.clone() * not_f_i
-        };
-
-        [compute_c(f0), compute_c(f1), compute_c(f2), compute_c(f3)]
-    }
+    [compute_c(f0), compute_c(f1), compute_c(f2), compute_c(f3)]
 }
 
 /// Enforce delta inverse constraints for ctx/addr/clk monotonicity.
@@ -389,41 +330,41 @@ fn enforce_delta_inverse_constraints<AB>(
     let not_n1 = one.clone() - n1.clone();
 
     let gate = flag_memory_active_not_last;
-    let gate_not_n0 = gate.clone() * not_n0.clone();
+    let gate_not_n0 = gate.clone() * not_n0;
 
     // n0 is binary
-    builder.assert_zero(gate * n0.clone() * (n0.clone() - one.clone()));
+    builder.assert_zero(gate * n0.clone() * (n0 - one.clone()));
     // !n0 => ctx_delta = 0
-    builder.assert_zero(gate_not_n0.clone() * ctx_delta.clone());
+    builder.assert_zero(gate_not_n0.clone() * ctx_delta);
     // !n0 and n1 is binary
-    builder.assert_zero(gate_not_n0.clone() * n1.clone() * (n1.clone() - one.clone()));
+    builder.assert_zero(gate_not_n0.clone() * n1.clone() * (n1 - one));
     // !n0 and !n1 => addr_delta = 0
-    builder.assert_zero(gate_not_n0 * not_n1 * addr_delta.clone());
+    builder.assert_zero(gate_not_n0 * not_n1 * addr_delta);
 }
 
 /// Enforce read-only access when context and word address are unchanged.
 fn enforce_scw_readonly_constraint<AB>(
     builder: &mut AB,
     flag_memory_active_not_last: AB::Expr,
-    cols: &MemoryColumns<AB::Expr>,
-    cols_next: &MemoryColumns<AB::Expr>,
+    cols: &MemoryCols<AB::Var>,
+    cols_next: &MemoryCols<AB::Var>,
     deltas: &MemoryDeltas<AB::Expr>,
-    one: AB::Expr,
 ) where
     AB: MidenAirBuilder,
 {
     // If ctx/word are unchanged and clk_delta = 0, both rows must be reads.
     // Constraint: f_scw' * (1 - clk_delta * d_inv') * (is_write + is_write') = 0
 
-    let clk_no_change = one.clone() - deltas.clk_delta.clone() * cols_next.d_inv.clone();
+    let one = AB::Expr::ONE;
+    let clk_no_change = one.clone() - deltas.clk_delta.clone() * deltas.d_inv_next.clone();
 
-    let is_write = one.clone() - cols.is_read.clone();
-    let is_write_next = one.clone() - cols_next.is_read.clone();
+    let is_write = one.clone() - AB::Expr::from(cols.is_read);
+    let is_write_next = one - AB::Expr::from(cols_next.is_read);
     let any_write = is_write + is_write_next;
 
     builder.assert_zero(
         flag_memory_active_not_last
-            * cols_next.flag_same_ctx_word.clone()
+            * AB::Expr::from(cols_next.is_same_ctx_and_word)
             * clk_no_change
             * any_write,
     );

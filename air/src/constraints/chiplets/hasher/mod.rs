@@ -43,10 +43,7 @@ pub use periodic::{STATE_WIDTH, periodic_columns};
 use crate::{
     MainTraceRow, MidenAirBuilder,
     constraints::chiplets::selectors::ChipletFlags,
-    trace::{
-        CHIPLETS_OFFSET,
-        chiplets::{HASHER_NODE_INDEX_COL_IDX, HASHER_SELECTOR_COL_RANGE, HASHER_STATE_COL_RANGE},
-    },
+    trace::{HasherCols, chiplets::borrow_chiplet},
 };
 
 /// Precomputed hasher flags derived from selectors and cycle markers.
@@ -109,88 +106,22 @@ impl<E: PrimeCharacteristicRing> HasherFlags<E> {
     }
 }
 
-/// Typed access to hasher chiplet columns.
-///
-/// This struct provides named access to hasher columns, eliminating error-prone
-/// index arithmetic. Created from a `MainTraceRow` reference.
-///
-/// ## Layout
-/// - `s0, s1, s2`: Selector columns determining operation type
-/// - `state[0..12]`: Poseidon2 state (RATE0[0..4], RATE1[4..8], CAP[8..12])
-/// - `node_index`: Merkle tree node index
-pub struct HasherColumns<E> {
-    /// Selector 0
-    pub s0: E,
-    /// Selector 1
-    pub s1: E,
-    /// Selector 2
-    pub s2: E,
-    /// Full Poseidon2 state (12 elements)
-    pub state: [E; STATE_WIDTH],
-    /// Node index for Merkle operations
-    pub node_index: E,
-}
-
-impl<E: Clone> HasherColumns<E> {
-    /// Extract hasher columns from a main trace row.
-    pub fn from_row<V>(row: &MainTraceRow<V>) -> Self
-    where
-        V: Into<E> + Clone,
-    {
-        let s_start = HASHER_SELECTOR_COL_RANGE.start - CHIPLETS_OFFSET;
-        let h_start = HASHER_STATE_COL_RANGE.start - CHIPLETS_OFFSET;
-        let idx_col = HASHER_NODE_INDEX_COL_IDX - CHIPLETS_OFFSET;
-
-        HasherColumns {
-            s0: row.chiplets[s_start].clone().into(),
-            s1: row.chiplets[s_start + 1].clone().into(),
-            s2: row.chiplets[s_start + 2].clone().into(),
-            state: core::array::from_fn(|i| row.chiplets[h_start + i].clone().into()),
-            node_index: row.chiplets[idx_col].clone().into(),
-        }
-    }
-
-    /// Get the digest (first 4 elements of state, same as rate0).
-    #[inline]
-    pub fn digest(&self) -> [E; 4] {
-        core::array::from_fn(|i| self.state[i].clone())
-    }
-
-    /// Get rate0 (state[0..4]).
-    #[inline]
-    pub fn rate0(&self) -> [E; 4] {
-        core::array::from_fn(|i| self.state[i].clone())
-    }
-
-    /// Get rate1 (state[4..8]).
-    #[inline]
-    pub fn rate1(&self) -> [E; 4] {
-        core::array::from_fn(|i| self.state[4 + i].clone())
-    }
-
-    /// Get capacity (state[8..12]).
-    #[inline]
-    pub fn capacity(&self) -> [E; 4] {
-        core::array::from_fn(|i| self.state[8 + i].clone())
-    }
-}
-
-struct HasherContext<AB: MidenAirBuilder> {
-    pub cols: HasherColumns<AB::Expr>,
-    pub cols_next: HasherColumns<AB::Expr>,
+struct HasherContext<'a, AB: MidenAirBuilder> {
+    pub cols: &'a HasherCols<AB::Var>,
+    pub cols_next: &'a HasherCols<AB::Var>,
     pub flags: HasherFlags<AB::Expr>,
     pub hasher_flag: AB::Expr,
     pub periodic: [AB::PeriodicVar; periodic::NUM_PERIODIC_COLUMNS],
 }
 
-impl<AB> HasherContext<AB>
+impl<'a, AB> HasherContext<'a, AB>
 where
     AB: MidenAirBuilder,
 {
     pub fn new(
         builder: &mut AB,
-        local: &MainTraceRow<AB::Var>,
-        next: &MainTraceRow<AB::Var>,
+        local: &'a MainTraceRow<AB::Var>,
+        next: &'a MainTraceRow<AB::Var>,
         flags: &ChipletFlags<AB::Expr>,
     ) -> Self {
         let periodic: [AB::PeriodicVar; periodic::NUM_PERIODIC_COLUMNS] = {
@@ -203,14 +134,14 @@ where
         };
 
         let hasher_flag = flags.is_active.clone();
-        let cols: HasherColumns<AB::Expr> = HasherColumns::from_row(local);
-        let cols_next: HasherColumns<AB::Expr> = HasherColumns::from_row(next);
-        let flags = compute_hasher_flags::<AB>(&periodic, &cols, &cols_next);
+        let cols: &HasherCols<AB::Var> = borrow_chiplet(&local.chiplets[1..17]);
+        let cols_next: &HasherCols<AB::Var> = borrow_chiplet(&next.chiplets[1..17]);
+        let hasher_flags = compute_hasher_flags::<AB>(&periodic, cols, cols_next);
 
         HasherContext::<AB> {
             cols,
             cols_next,
-            flags,
+            flags: hasher_flags,
             hasher_flag,
             periodic,
         }
@@ -242,46 +173,51 @@ pub fn enforce_hasher_constraints<AB>(
     let ctx = HasherContext::<AB>::new(builder, local, next, flags);
 
     // Permutation step constraints
-    state::enforce_permutation_steps(
-        builder,
-        ctx.hasher_flag.clone(),
-        &ctx.cols.state,
-        &ctx.cols_next.state,
-        &ctx.periodic,
-    );
+    {
+        let state: [AB::Expr; STATE_WIDTH] = ctx.cols.state.map(Into::into);
+        let state_next: [AB::Expr; STATE_WIDTH] = ctx.cols_next.state.map(Into::into);
+        state::enforce_permutation_steps(
+            builder,
+            ctx.hasher_flag.clone(),
+            &state,
+            &state_next,
+            &ctx.periodic,
+        );
+    }
 
     // Selector booleanity
-    {
-        let cols_var: HasherColumns<AB::Var> = HasherColumns::<AB::Var>::from_row(local);
-        builder
-            .when(ctx.hasher_flag.clone())
-            .assert_bools([cols_var.s0, cols_var.s1, cols_var.s2]);
-    }
+    builder
+        .when(ctx.hasher_flag.clone())
+        .assert_bools(ctx.cols.selectors);
 
     // Selector consistency
     selectors::enforce_selector_consistency(
         builder,
         ctx.hasher_flag.clone(),
-        &ctx.cols,
-        &ctx.cols_next,
+        ctx.cols,
+        ctx.cols_next,
         &ctx.flags,
     );
 
     // ABP capacity preservation on row 31 of the cycle
-    state::enforce_abp_capacity_preservation(
-        builder,
-        ctx.hasher_flag.clone(),
-        ctx.flags.f_abp.clone(),
-        &ctx.cols.capacity(),
-        &ctx.cols_next.capacity(),
-    );
+    {
+        let cap: [AB::Expr; 4] = ctx.cols.capacity().map(Into::into);
+        let cap_next: [AB::Expr; 4] = ctx.cols_next.capacity().map(Into::into);
+        state::enforce_abp_capacity_preservation(
+            builder,
+            ctx.hasher_flag.clone(),
+            ctx.flags.f_abp.clone(),
+            &cap,
+            &cap_next,
+        );
+    }
 
     // Merkle node index constraints
     merkle::enforce_node_index_constraints(
         builder,
         ctx.hasher_flag.clone(),
-        &ctx.cols,
-        &ctx.cols_next,
+        ctx.cols,
+        ctx.cols_next,
         &ctx.flags,
     );
 
@@ -289,16 +225,16 @@ pub fn enforce_hasher_constraints<AB>(
     merkle::enforce_merkle_absorb_state(
         builder,
         ctx.hasher_flag.clone(),
-        &ctx.cols,
-        &ctx.cols_next,
+        ctx.cols,
+        ctx.cols_next,
         &ctx.flags,
     );
 }
 
 fn compute_hasher_flags<AB>(
     periodic: &[AB::PeriodicVar],
-    cols: &HasherColumns<AB::Expr>,
-    cols_next: &HasherColumns<AB::Expr>,
+    cols: &HasherCols<AB::Var>,
+    cols_next: &HasherCols<AB::Var>,
 ) -> HasherFlags<AB::Expr>
 where
     AB: MidenAirBuilder,
@@ -308,11 +244,11 @@ where
     let cycle_row_0: AB::Expr = periodic[periodic::P_CYCLE_ROW_0].into();
     let cycle_row_30: AB::Expr = periodic[periodic::P_CYCLE_ROW_30].into();
 
-    let s0 = cols.s0.clone();
-    let s1 = cols.s1.clone();
-    let s2 = cols.s2.clone();
-    let s0_next = cols_next.s0.clone();
-    let s1_next = cols_next.s1.clone();
+    let s0: AB::Expr = cols.selectors[0].into();
+    let s1: AB::Expr = cols.selectors[1].into();
+    let s2: AB::Expr = cols.selectors[2].into();
+    let s0_next: AB::Expr = cols_next.selectors[0].into();
+    let s1_next: AB::Expr = cols_next.selectors[1].into();
 
     let f_mp = flags::f_mp(cycle_row_0.clone(), s0.clone(), s1.clone(), s2.clone());
     let f_mv = flags::f_mv(cycle_row_0.clone(), s0.clone(), s1.clone(), s2.clone());

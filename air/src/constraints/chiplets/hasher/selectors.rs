@@ -21,8 +21,8 @@
 
 use miden_core::field::PrimeCharacteristicRing;
 
-use super::{HasherColumns, HasherFlags};
-use crate::{MidenAirBuilder, constraints::utils::BoolNot};
+use super::HasherFlags;
+use crate::{MidenAirBuilder, constraints::utils::BoolNot, trace::HasherCols};
 
 // CONSTRAINT HELPERS
 // ================================================================================================
@@ -43,12 +43,19 @@ use crate::{MidenAirBuilder, constraints::utils::BoolNot};
 pub(super) fn enforce_selector_consistency<AB>(
     builder: &mut AB,
     hasher_flag: AB::Expr,
-    cols: &HasherColumns<AB::Expr>,
-    cols_next: &HasherColumns<AB::Expr>,
+    cols: &HasherCols<AB::Var>,
+    cols_next: &HasherCols<AB::Var>,
     flags: &HasherFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
+    let s0: AB::Expr = cols.selectors[0].into();
+    let s1: AB::Expr = cols.selectors[1].into();
+    let s2: AB::Expr = cols.selectors[2].into();
+    let s0_next: AB::Expr = cols_next.selectors[0].into();
+    let s1_next: AB::Expr = cols_next.selectors[1].into();
+    let s2_next: AB::Expr = cols_next.selectors[2].into();
+
     // -------------------------------------------------------------------------
     // Constraint 1: Selector stability
     // -------------------------------------------------------------------------
@@ -61,19 +68,19 @@ pub(super) fn enforce_selector_consistency<AB>(
     // constraints.
     let gate = hasher_flag.clone() * stability_gate;
     builder.assert_zeros([
-        gate.clone() * (cols_next.s1.clone() - cols.s1.clone()),
-        gate * (cols_next.s2.clone() - cols.s2.clone()),
+        gate.clone() * (s1_next - s1.clone()),
+        gate * (s2_next - s2),
     ]);
 
     // Continuation constraint: hasher_flag * flag_cont * s0' = 0.
     // (Single constraint, so no batching benefit beyond using `.when(gate)`.)
     let gate = hasher_flag.clone() * flags.f_continuation();
-    builder.assert_zero(gate * cols_next.s0.clone());
+    builder.assert_zero(gate * s0_next);
 
     // -------------------------------------------------------------------------
     // Constraint 3: Invalid selector combinations rejection
     // -------------------------------------------------------------------------
     // On row31, if s0 = 0 then s1 must be 0. This prevents (0,1,*) combinations.
     // Constraint: row31 * (1 - s0) * s1 = 0
-    builder.assert_zero(hasher_flag * flags.cycle_row_31.clone() * cols.s0.not() * cols.s1.clone());
+    builder.assert_zero(hasher_flag * flags.cycle_row_31.clone() * s0.not() * s1);
 }

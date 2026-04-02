@@ -47,9 +47,6 @@ pub const P_BITWISE_K_FIRST: usize = HASHER_NUM_PERIODIC_COLUMNS;
 /// Index of k_transition periodic column (marks non-last rows of 8-row cycle).
 pub const P_BITWISE_K_TRANSITION: usize = HASHER_NUM_PERIODIC_COLUMNS + 1;
 
-/// Number of bits processed per row.
-const NUM_BITS_PER_ROW: usize = 4;
-
 // ENTRY POINTS
 // ================================================================================================
 
@@ -106,12 +103,12 @@ pub fn enforce_bitwise_constraints<AB>(
 
     // Bit decomposition columns must be binary
     let gate = bitwise_flag.clone();
-    for i in 0..NUM_BITS_PER_ROW {
-        builder.assert_zero(gate.clone() * a_bits[i].clone() * (a_bits[i].clone() - F_1));
+    for bit in &a_bits {
+        builder.assert_zero(gate.clone() * bit.clone() * (bit.clone() - F_1));
     }
 
-    for i in 0..NUM_BITS_PER_ROW {
-        builder.assert_zero(gate.clone() * b_bits[i].clone() * (b_bits[i].clone() - F_1));
+    for bit in &b_bits {
+        builder.assert_zero(gate.clone() * bit.clone() * (bit.clone() - F_1));
     }
 
     // First row of cycle (k0=1): a = aggregated bits, b = aggregated bits

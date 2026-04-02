@@ -20,8 +20,8 @@
 
 use miden_core::field::PrimeCharacteristicRing;
 
-use super::{HasherColumns, HasherFlags};
-use crate::{MidenAirBuilder, constraints::utils::BoolNot};
+use super::HasherFlags;
+use crate::{MidenAirBuilder, constraints::utils::BoolNot, trace::HasherCols};
 
 // CONSTRAINT HELPERS
 // ================================================================================================
@@ -41,18 +41,21 @@ use crate::{MidenAirBuilder, constraints::utils::BoolNot};
 pub(super) fn enforce_node_index_constraints<AB>(
     builder: &mut AB,
     hasher_flag: AB::Expr,
-    cols: &HasherColumns<AB::Expr>,
-    cols_next: &HasherColumns<AB::Expr>,
+    cols: &HasherCols<AB::Var>,
+    cols_next: &HasherCols<AB::Var>,
     flags: &HasherFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
+    let node_index: AB::Expr = cols.node_index.into();
+    let node_index_next: AB::Expr = cols_next.node_index.into();
+
     // -------------------------------------------------------------------------
     // Output Index Constraint
     // -------------------------------------------------------------------------
 
     // Constraint 1: Index must be 0 on output rows.
-    builder.assert_zero(hasher_flag.clone() * flags.f_out.clone() * cols.node_index.clone());
+    builder.assert_zero(hasher_flag.clone() * flags.f_out.clone() * node_index.clone());
 
     // -------------------------------------------------------------------------
     // Index Shift Constraint
@@ -63,7 +66,7 @@ pub(super) fn enforce_node_index_constraints<AB>(
 
     // Direction bit: b = i - 2*i'
     // This is the bit discarded when shifting index right by 1.
-    let b = cols.node_index.clone() - cols_next.node_index.clone().double();
+    let b = node_index.clone() - node_index_next.clone().double();
 
     // Constraint 2: b must be binary when shifting (b^2 - b = 0)
     let gate = hasher_flag.clone() * f_shift.clone();
@@ -77,7 +80,7 @@ pub(super) fn enforce_node_index_constraints<AB>(
     // keep = 1 - f_out - f_shift
     let keep = AB::Expr::ONE - f_out - f_shift;
     let gate = hasher_flag.clone() * keep;
-    builder.assert_zero(gate * (cols_next.node_index.clone() - cols.node_index.clone()));
+    builder.assert_zero(gate * (node_index_next.clone() - node_index.clone()));
 }
 
 /// Enforces state constraints for Merkle absorb operations (MPA/MVA/MUA on row 31).
@@ -94,21 +97,23 @@ pub(super) fn enforce_node_index_constraints<AB>(
 pub(super) fn enforce_merkle_absorb_state<AB>(
     builder: &mut AB,
     hasher_flag: AB::Expr,
-    cols: &HasherColumns<AB::Expr>,
-    cols_next: &HasherColumns<AB::Expr>,
+    cols: &HasherCols<AB::Var>,
+    cols_next: &HasherCols<AB::Var>,
     flags: &HasherFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
     let f_absorb = flags.f_merkle_absorb();
 
-    let digest = cols.digest();
-    let rate0_next = cols_next.rate0();
-    let rate1_next = cols_next.rate1();
-    let cap_next = cols_next.capacity();
+    let digest: [AB::Expr; 4] = cols.digest().map(Into::into);
+    let rate0_next: [AB::Expr; 4] = cols_next.rate0().map(Into::into);
+    let rate1_next: [AB::Expr; 4] = cols_next.rate1().map(Into::into);
+    let cap_next: [AB::Expr; 4] = cols_next.capacity().map(Into::into);
 
     // Direction bit: b = i - 2*i'
-    let b = cols.node_index.clone() - cols_next.node_index.clone().double();
+    let node_index: AB::Expr = cols.node_index.into();
+    let node_index_next: AB::Expr = cols_next.node_index.into();
+    let b = node_index - node_index_next.double();
 
     // -------------------------------------------------------------------------
     // Capacity Reset Constraint

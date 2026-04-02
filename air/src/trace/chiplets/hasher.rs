@@ -55,6 +55,16 @@ impl<T: Copy> HasherCols<T> {
     pub fn digest(&self) -> [T; DIGEST_LEN] {
         [self.state[0], self.state[1], self.state[2], self.state[3]]
     }
+
+    /// Returns rate0 (state[0..4]).
+    pub fn rate0(&self) -> [T; DIGEST_LEN] {
+        [self.state[0], self.state[1], self.state[2], self.state[3]]
+    }
+
+    /// Returns rate1 (state[4..8]).
+    pub fn rate1(&self) -> [T; DIGEST_LEN] {
+        [self.state[4], self.state[5], self.state[6], self.state[7]]
+    }
 }
 
 // TYPES ALIASES
