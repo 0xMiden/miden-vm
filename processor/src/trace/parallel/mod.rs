@@ -385,6 +385,40 @@ fn fixup_stack_and_system_rows(
     }
 }
 
+/// Decoder trace columns for a synthetic HALT row: opcode bits, hasher state, and `op_bit_extra`.
+///
+/// When `last_row_start` is `Some`, the first four hasher columns are copied from that row offset
+/// in `core_trace_data` (program hash propagation). When `None`, those columns must already be
+/// zero in `row`.
+fn write_halt_decoder_columns(
+    row: &mut [Felt],
+    core_trace_data: &[Felt],
+    last_row_start: Option<usize>,
+) {
+    debug_assert!(row.len() >= DECODER_TRACE_OFFSET + DECODER_TRACE_WIDTH);
+
+    let halt_opcode = opcodes::HALT;
+    for i in 0..NUM_OP_BITS {
+        row[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + i] = Felt::from_u8((halt_opcode >> i) & 1);
+    }
+
+    if let Some(ls) = last_row_start {
+        for i in 0..4 {
+            let col_idx = DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + i;
+            row[col_idx] = core_trace_data[ls + col_idx];
+        }
+    }
+
+    for i in 4..NUM_HASHER_COLUMNS {
+        let col_idx = DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + i;
+        row[col_idx] = ZERO;
+    }
+
+    // First `op_bit_extra` column: unused for HALT (leave zero). Second column: product of the
+    // two most significant HALT bits (both are 1).
+    row[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + 1] = ONE;
+}
+
 /// Appends a HALT row (`num_rows_before` is the row count before append).
 ///
 /// This ensures that the trace ends with at least one HALT operation, which is necessary to satisfy
@@ -407,29 +441,8 @@ fn push_halt_opcode_row(
     row[STACK_TRACE_OFFSET..STACK_TRACE_OFFSET + STACK_TRACE_WIDTH]
         .copy_from_slice(last_stack_state);
 
-    // Pad op_bits columns with HALT opcode bits
-    let halt_opcode = opcodes::HALT;
-    for bit_idx in 0..NUM_OP_BITS {
-        row[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + bit_idx] =
-            Felt::from_u8((halt_opcode >> bit_idx) & 1);
-    }
-
-    // Pad hasher state columns (8 columns)
-    // - First 4 columns: copy the last value (to propagate program hash)
-    // - Remaining 4 columns: fill with ZEROs
-    if num_rows_before > 0 {
-        let last_row_start = (num_rows_before - 1) * w;
-        // For first 4 hasher columns, copy the last value to propagate program hash
-        for hasher_col_idx in 0..4 {
-            let col_idx = DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + hasher_col_idx;
-            row[col_idx] = core_trace_data[last_row_start + col_idx];
-        }
-    }
-
-    // Pad op_bit_extra columns (2 columns)
-    // - First column: do nothing (pre-filled with ZEROs, HALT doesn't use this)
-    // - Second column: fill with ONEs (product of two most significant HALT bits, both are 1)
-    row[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + 1] = ONE;
+    let last_row_start = (num_rows_before > 0).then(|| (num_rows_before - 1) * w);
+    write_halt_decoder_columns(&mut row, core_trace_data, last_row_start);
 
     core_trace_data.extend_from_slice(&row);
 }
@@ -636,31 +649,7 @@ fn pad_core_row_major(core_trace: &mut RowMajorMatrix<Felt>, main_trace_len: usi
     // ------------------------
 
     let mut template = [ZERO; CORE_TRACE_WIDTH];
-    // Pad op_bits columns with HALT opcode bits
-    let halt_opcode = opcodes::HALT;
-    for i in 0..NUM_OP_BITS {
-        let bit_value = Felt::from_u8((halt_opcode >> i) & 1);
-        template[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + i] = bit_value;
-    }
-    // Pad hasher state columns (8 columns)
-    // - First 4 columns: copy the last value (to propagate program hash)
-    // - Remaining 4 columns: fill with ZEROs
-    for i in 0..NUM_HASHER_COLUMNS {
-        let col_idx = DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + i;
-        template[col_idx] = if i < 4 {
-            // For first 4 hasher columns, copy the last value to propagate program hash
-            // Safety: per our documented safety guarantees, we know that `total_program_rows > 0`,
-            // and row `total_program_rows - 1` is initialized.
-            core_trace_data[last_row_start + col_idx]
-        } else {
-            ZERO
-        };
-    }
-
-    // Pad op_bit_extra columns (2 columns)
-    // - First column: do nothing (filled with ZEROs, HALT doesn't use this)
-    // - Second column: fill with ONEs (product of two most significant HALT bits, both are 1)
-    template[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + 1] = ONE;
+    write_halt_decoder_columns(&mut template, core_trace_data, Some(last_row_start));
 
     // Stack columns
     // ------------------------

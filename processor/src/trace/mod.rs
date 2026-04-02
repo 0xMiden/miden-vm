@@ -340,16 +340,7 @@ impl ExecutionTrace {
     pub fn to_row_major_matrix(&self) -> Arc<RowMajorMatrix<Felt>> {
         let row_major = self.main_trace.to_row_major();
         debug_assert_eq!(row_major.width(), TRACE_WIDTH);
-
-        let shared = Arc::new(row_major);
-        let for_transpose = shared.clone();
-        let lock = self.aux_trace_builders.precomputed_main_transpose.clone();
-        rayon::spawn(move || {
-            let transposed = Arc::new(for_transpose.transpose());
-            let _ = lock.set(transposed);
-        });
-
-        shared
+        self.aux_trace_builders.to_arc_row_major(row_major)
     }
 
     // HELPER METHODS
@@ -404,6 +395,31 @@ pub struct AuxTraceBuilders {
 }
 
 impl AuxTraceBuilders {
+    /// Wraps row-major `main` in [`Arc`], spawns a background `transpose()` into
+    /// [`Self::precomputed_main_transpose`], and returns the row-major [`Arc`] for proving.
+    pub(crate) fn to_arc_row_major(
+        &self,
+        row_major: RowMajorMatrix<Felt>,
+    ) -> Arc<RowMajorMatrix<Felt>> {
+        let shared = Arc::new(row_major);
+        let for_transpose = shared.clone();
+        let lock = self.precomputed_main_transpose.clone();
+        rayon::spawn(move || {
+            let transposed = Arc::new(for_transpose.transpose());
+            let _ = lock.set(transposed);
+        });
+        shared
+    }
+
+    fn main_trace_for_aux(&self, main: &RowMajorMatrix<Felt>) -> MainTrace {
+        if let Some(t) = self.precomputed_main_transpose.get() {
+            MainTrace::from_transposed_arc(t.clone(), self.last_program_row)
+        } else {
+            let transposed = main.transpose();
+            MainTrace::from_transposed(transposed, self.last_program_row)
+        }
+    }
+
     /// Builds auxiliary columns for all trace segments given the main trace and challenges.
     ///
     /// This is the internal column-major version used by the processor.
@@ -457,12 +473,7 @@ impl<EF: ExtensionField<Felt>> AuxBuilder<Felt, EF> for AuxTraceBuilders {
     ) -> (RowMajorMatrix<EF>, Vec<EF>) {
         let _span = tracing::info_span!("build_aux_trace").entered();
 
-        let main_for_aux = if let Some(t) = self.precomputed_main_transpose.get() {
-            MainTrace::from_transposed_arc(t.clone(), self.last_program_row)
-        } else {
-            let transposed = main.transpose();
-            MainTrace::from_transposed(transposed, self.last_program_row)
-        };
+        let main_for_aux = self.main_trace_for_aux(main);
 
         let aux_columns = self.build_aux_columns(&main_for_aux, challenges);
         assert!(!aux_columns.is_empty(), "aux columns should not be empty");
