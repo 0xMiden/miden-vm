@@ -8,6 +8,8 @@
 #### Bug Fixes
 
 - Reverted `InvokeKind::ProcRef` back to `InvokeKind::Exec` in `visit_mut_procref` and added an explanatory comment (#2893).
+- Fixed the release dry-run publish cycle between `miden-air` and `miden-ace-codegen`, and preserved leaf-only DAG imports with explicit snapshots ([#2931](https://github.com/0xMiden/miden-vm/pull/2931)).
+
 #### Changes
 
 - Documented that enum variants are module-level constants and must be unique within a module (#2932).
@@ -19,6 +21,10 @@
 - Added `prove_from_trace_sync(...)` for proving from pre-executed trace inputs ([#2865](https://github.com/0xMiden/miden-vm/pull/2865)).
 - Refactor trace generation to row-major format ([#2937](https://github.com/0xMiden/miden-vm/pull/2937)).
 - Refactor and improve trace generation ([#2953](https://github.com/0xMiden/miden-vm/pull/2953)).
+
+#### Fixes
+
+- Fixed stale `ReplayProcessor` doc comment links to `ExecutionTracer` after module-structure refactors.
 
 ## 0.22.0 (2025-03-18)
 
