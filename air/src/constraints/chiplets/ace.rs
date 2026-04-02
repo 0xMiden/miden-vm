@@ -61,11 +61,11 @@ pub fn enforce_ace_constraints<AB>(
     AB: MidenAirBuilder,
 {
     // Load selectors
-    let s0: AB::Expr = local.chiplets[0].into();
-    let s1: AB::Expr = local.chiplets[1].into();
-    let s2: AB::Expr = local.chiplets[2].into();
-    let s2_next: AB::Expr = next.chiplets[2].into();
-    let s3_next: AB::Expr = next.chiplets[3].into();
+    let s0 = local.chiplets[0];
+    let s1 = local.chiplets[1];
+    let s2 = local.chiplets[2];
+    let s2_next = next.chiplets[2];
+    let s3_next = next.chiplets[3];
 
     // Gate transition constraints by is_transition() to avoid last-row issues
     let is_transition: AB::Expr = builder.is_transition();
@@ -80,9 +80,9 @@ pub fn enforce_ace_constraints<AB>(
     // 2. When not in ACE, chiplets[4] is s4 (selector), not sstart
     // 3. Without the s3'=0 check, we'd read the wrong column
     // Must be gated by is_transition since it accesses next-row values
-    let memory_flag = memory_chiplet_flag(s0, s1, s2);
+    let memory_flag = memory_chiplet_flag(s0.into(), s1.into(), s2.into());
     // ace_next = s2' * !s3'
-    let ace_next = s2_next * s3_next.not();
+    let ace_next: AB::Expr = s2_next.into() * AB::Expr::from(s3_next).not();
     let flag_next_row_first_ace = is_transition * memory_flag * ace_next;
     enforce_ace_constraints_first_row(builder, local, next, flag_next_row_first_ace);
 }
@@ -96,13 +96,13 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     AB: MidenAirBuilder,
 {
     // Compute ACE active flag from top-level selectors
-    let s0: AB::Expr = local.chiplets[0].into();
-    let s1: AB::Expr = local.chiplets[1].into();
-    let s2: AB::Expr = local.chiplets[2].into();
-    let s3: AB::Expr = local.chiplets[3].into();
-    let s3_next: AB::Expr = next.chiplets[3].into();
+    let s0 = local.chiplets[0];
+    let s1 = local.chiplets[1];
+    let s2 = local.chiplets[2];
+    let s3 = local.chiplets[3];
+    let s3_next = next.chiplets[3];
 
-    let ace_flag = ace_chiplet_flag(s0.clone(), s1.clone(), s2.clone(), s3.clone());
+    let ace_flag = ace_chiplet_flag(s0.into(), s1.into(), s2.into(), s3.into());
 
     // Load ACE columns
     let sstart: AB::Expr = load_ace_col::<AB>(local, SELECTOR_START_IDX);
@@ -135,10 +135,10 @@ pub fn enforce_ace_constraints_all_rows<AB>(
 
     // ACE continuing to the next row (not transitioning out).
     // Includes is_transition because it reads next-row values.
-    let flag_ace_next = is_transition.clone() * s3_next.not();
+    let flag_ace_next = is_transition.clone() * AB::Expr::from(s3_next).not();
     // Last ACE row (next row transitions out of ACE).
     // Includes is_transition because it reads next-row values.
-    let flag_ace_last = is_transition.clone() * s3_next.clone();
+    let flag_ace_last = is_transition.clone() * s3_next;
 
     // ==========================================================================
     // BINARY CONSTRAINTS
@@ -155,7 +155,7 @@ pub fn enforce_ace_constraints_all_rows<AB>(
 
     // Sections must end with EVAL blocks (not READ).
     // OR(t*a, t*b) = t*OR(a, b) when t is binary.
-    let f_end = binary_or(s3_next.not() * sstart_next.clone(), s3_next.clone());
+    let f_end = binary_or(AB::Expr::from(s3_next).not() * sstart_next.clone(), s3_next.into());
 
     // Last row of ACE chiplet cannot be section start
     builder.assert_zero(ace_flag.clone() * flag_ace_last.clone() * sstart.clone());

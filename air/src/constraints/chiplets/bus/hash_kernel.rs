@@ -93,17 +93,17 @@ pub fn enforce_hash_kernel_constraint<AB>(
     // =========================================================================
 
     // Hasher chiplet rows have s0 = 0 (chiplet selector).
-    let chiplet_selector: AB::Expr = local.chiplets[0].into();
-    let is_hasher = chiplet_selector.not();
+    let chiplet_selector = local.chiplets[0];
+    let is_hasher = AB::Expr::from(chiplet_selector).not();
 
     // Hasher operation selectors (only meaningful within hasher chiplet)
-    let s0: AB::Expr = local.chiplets[S_START].into();
-    let s1: AB::Expr = local.chiplets[S_START + 1].into();
-    let s2: AB::Expr = local.chiplets[S_START + 2].into();
+    let s0 = local.chiplets[S_START];
+    let s1 = local.chiplets[S_START + 1];
+    let s2 = local.chiplets[S_START + 2];
 
     // Node index for sibling table
-    let node_index: AB::Expr = local.chiplets[IDX_COL].into();
-    let node_index_next: AB::Expr = next.chiplets[IDX_COL].into();
+    let node_index = local.chiplets[IDX_COL];
+    let node_index_next = next.chiplets[IDX_COL];
 
     // Hasher state for sibling values
     let h: [AB::Expr; 12] = core::array::from_fn(|i| local.chiplets[H_START + i].into());
@@ -115,85 +115,89 @@ pub fn enforce_hash_kernel_constraint<AB>(
 
     // MU/MUA flags (requests - remove siblings during new path).
     let f_mu: AB::Expr =
-        is_hasher.clone() * flags::f_mu(cycle_row_0.clone(), s0.clone(), s1.clone(), s2.clone());
+        is_hasher.clone() * flags::f_mu(cycle_row_0.clone(), s0.into(), s1.into(), s2.into());
     let f_mua: AB::Expr =
-        is_hasher.clone() * flags::f_mua(cycle_row_31.clone(), s0.clone(), s1.clone(), s2.clone());
+        is_hasher.clone() * flags::f_mua(cycle_row_31.clone(), s0.into(), s1.into(), s2.into());
 
     // MV/MVA flags (responses - add siblings during old path).
     let f_mv: AB::Expr =
-        is_hasher.clone() * flags::f_mv(cycle_row_0.clone(), s0.clone(), s1.clone(), s2.clone());
-    let f_mva: AB::Expr = is_hasher.clone() * flags::f_mva(cycle_row_31.clone(), s0, s1, s2);
+        is_hasher.clone() * flags::f_mv(cycle_row_0.clone(), s0.into(), s1.into(), s2.into());
+    let f_mva: AB::Expr =
+        is_hasher.clone() * flags::f_mva(cycle_row_31.clone(), s0.into(), s1.into(), s2.into());
 
     // Compute sibling values based on bit b (LSB of node index).
     // The hasher constraints enforce that b is binary on shift rows.
-    let b: AB::Expr = node_index.clone() - node_index_next.clone().double();
+    let b: AB::Expr = node_index - AB::Expr::from(node_index_next).double();
     let is_b_zero = b.not();
     let is_b_one = b;
 
     // Sibling value for current row (uses current hasher state).
     // b selects which half of the rate holds the sibling.
-    let v_sibling_curr = compute_sibling_b0::<AB>(challenges, &node_index, &h) * is_b_zero.clone()
-        + compute_sibling_b1::<AB>(challenges, &node_index, &h) * is_b_one.clone();
+    let node_index_expr: AB::Expr = node_index.into();
+    let v_sibling_curr = compute_sibling_b0::<AB>(challenges, &node_index_expr, &h)
+        * is_b_zero.clone()
+        + compute_sibling_b1::<AB>(challenges, &node_index_expr, &h) * is_b_one.clone();
 
     // Sibling value for next row (used by MVA/MUA on the transition row).
-    let v_sibling_next = compute_sibling_b0::<AB>(challenges, &node_index, &h_next) * is_b_zero
-        + compute_sibling_b1::<AB>(challenges, &node_index, &h_next) * is_b_one;
+    let v_sibling_next = compute_sibling_b0::<AB>(challenges, &node_index_expr, &h_next)
+        * is_b_zero
+        + compute_sibling_b1::<AB>(challenges, &node_index_expr, &h_next) * is_b_one;
 
     // =========================================================================
     // ACE MEMORY FLAGS AND VALUES
     // =========================================================================
 
     // ACE chiplet selector: s0=1, s1=1, s2=1, s3=0
-    let s3: AB::Expr = local.chiplets[3].into();
-    let chiplet_s1: AB::Expr = local.chiplets[1].into();
-    let chiplet_s2: AB::Expr = local.chiplets[2].into();
+    let s3 = local.chiplets[3];
+    let chiplet_s1 = local.chiplets[1];
+    let chiplet_s2 = local.chiplets[2];
 
     let is_ace_row: AB::Expr =
-        chiplet_selector.clone() * chiplet_s1.clone() * chiplet_s2.clone() * s3.not();
+        chiplet_selector * chiplet_s1 * chiplet_s2 * AB::Expr::from(s3).not();
 
     // Block selector determines read (0) vs eval (1)
-    let block_selector: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + SELECTOR_BLOCK_IDX].into();
+    let block_selector = local.chiplets[NUM_ACE_SELECTORS + SELECTOR_BLOCK_IDX];
 
-    let f_ace_read: AB::Expr = is_ace_row.clone() * block_selector.not();
+    let f_ace_read: AB::Expr = is_ace_row.clone() * AB::Expr::from(block_selector).not();
     let f_ace_eval: AB::Expr = is_ace_row * block_selector;
 
     // ACE columns for memory messages
-    let ace_clk: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + CLK_IDX].into();
-    let ace_ctx: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + CTX_IDX].into();
-    let ace_ptr: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + PTR_IDX].into();
+    let ace_clk = local.chiplets[NUM_ACE_SELECTORS + CLK_IDX];
+    let ace_ctx = local.chiplets[NUM_ACE_SELECTORS + CTX_IDX];
+    let ace_ptr = local.chiplets[NUM_ACE_SELECTORS + PTR_IDX];
 
     // Word read value: label + ctx + ptr + clk + 4-lane value.
     let v_ace_word = {
-        let v0_0: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + V_0_0_IDX].into();
-        let v0_1: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + V_0_1_IDX].into();
-        let v1_0: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + V_1_0_IDX].into();
-        let v1_1: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + V_1_1_IDX].into();
+        let v0_0 = local.chiplets[NUM_ACE_SELECTORS + V_0_0_IDX];
+        let v0_1 = local.chiplets[NUM_ACE_SELECTORS + V_0_1_IDX];
+        let v1_0 = local.chiplets[NUM_ACE_SELECTORS + V_1_0_IDX];
+        let v1_1 = local.chiplets[NUM_ACE_SELECTORS + V_1_1_IDX];
         let label: AB::Expr = Felt::from_u8(MEMORY_READ_WORD_LABEL).into();
 
         challenges.encode([
             label,
-            ace_ctx.clone(),
-            ace_ptr.clone(),
-            ace_clk.clone(),
-            v0_0,
-            v0_1,
-            v1_0,
-            v1_1,
+            ace_ctx.into(),
+            ace_ptr.into(),
+            ace_clk.into(),
+            v0_0.into(),
+            v0_1.into(),
+            v1_0.into(),
+            v1_1.into(),
         ])
     };
 
     // Element read value: label + ctx + ptr + clk + element.
     let v_ace_element = {
-        let id_1: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + ID_1_IDX].into();
-        let id_2: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + ID_2_IDX].into();
-        let eval_op: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + EVAL_OP_IDX].into();
+        let id_1 = local.chiplets[NUM_ACE_SELECTORS + ID_1_IDX];
+        let id_2 = local.chiplets[NUM_ACE_SELECTORS + ID_2_IDX];
+        let eval_op = local.chiplets[NUM_ACE_SELECTORS + EVAL_OP_IDX];
 
         let offset1: AB::Expr = ACE_INSTRUCTION_ID1_OFFSET.into();
         let offset2: AB::Expr = ACE_INSTRUCTION_ID2_OFFSET.into();
         let element = id_1 + id_2 * offset1 + (eval_op + AB::Expr::ONE) * offset2;
         let label: AB::Expr = Felt::from_u8(MEMORY_READ_ELEMENT_LABEL).into();
 
-        challenges.encode([label, ace_ctx, ace_ptr, ace_clk, element])
+        challenges.encode([label, ace_ctx.into(), ace_ptr.into(), ace_clk.into(), element])
     };
 
     // =========================================================================

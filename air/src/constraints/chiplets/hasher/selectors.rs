@@ -94,12 +94,9 @@ pub fn enforce_selector_booleanity<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    let s0: AB::Expr = s0.into();
-    let s1: AB::Expr = s1.into();
-    let s2: AB::Expr = s2.into();
     builder.assert_zeros([
-        hasher_flag.clone() * s0.clone() * (s0 - F_1),
-        hasher_flag.clone() * s1.clone() * (s1 - F_1),
-        hasher_flag * s2.clone() * (s2 - F_1),
+        hasher_flag.clone() * s0 * (s0 - F_1),
+        hasher_flag.clone() * s1 * (s1 - F_1),
+        hasher_flag * s2 * (s2 - F_1),
     ]);
 }

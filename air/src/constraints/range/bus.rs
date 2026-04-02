@@ -95,16 +95,16 @@ where
 
     // Flags for conditional inclusion
     // u32_rc_op = op_bit[6] * (1 - op_bit[5]) * (1 - op_bit[4])
-    let not_4: AB::Expr = local.decoder[OP_BIT_4_COL_IDX].into().not();
-    let not_5: AB::Expr = local.decoder[OP_BIT_5_COL_IDX].into().not();
-    let u32_rc_op: AB::Expr = local.decoder[OP_BIT_6_COL_IDX].into() * not_5 * not_4;
+    let not_4 = local.decoder[OP_BIT_4_COL_IDX].into().not();
+    let not_5 = local.decoder[OP_BIT_5_COL_IDX].into().not();
+    let u32_rc_op = local.decoder[OP_BIT_6_COL_IDX] * not_5 * not_4;
     let sflag_rc_mem = range_check.clone() * memory_lookups.clone() * u32_rc_op;
 
     // chiplets_memory_flag = s0 * s1 * (1 - s2)
-    let s_0: AB::Expr = local.chiplets[CHIPLET_S0_IDX].into();
-    let s_1: AB::Expr = local.chiplets[CHIPLET_S1_IDX].into();
-    let s_2: AB::Expr = local.chiplets[CHIPLET_S2_IDX].into();
-    let chiplets_memory_flag = s_0 * s_1 * s_2.not();
+    let s_0 = local.chiplets[CHIPLET_S0_IDX];
+    let s_1 = local.chiplets[CHIPLET_S1_IDX];
+    let s_2 = local.chiplets[CHIPLET_S2_IDX];
+    let chiplets_memory_flag = s_0 * s_1 * s_2.into().not();
     let mflag_rc_stack = range_check * stack_lookups.clone() * chiplets_memory_flag;
 
     // LogUp transition constraint terms
@@ -119,7 +119,7 @@ where
     let s3_term = sflag_rc_mem * sv0 * sv1 * sv2;
 
     // Memory lookup removal terms
-    let m0_term: AB::ExprEF = mflag_rc_stack.clone() * mv1;
+    let m0_term = mflag_rc_stack.clone() * mv1;
     let m1_term = mflag_rc_stack * mv0;
 
     // Main constraint: b_next * lookups = b * lookups + rc_term - s0_term - s1_term - s2_term -

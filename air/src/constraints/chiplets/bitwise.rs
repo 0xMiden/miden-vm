@@ -79,9 +79,9 @@ pub fn enforce_bitwise_constraints<AB>(
     };
 
     // Compute bitwise active flag from top-level selectors
-    let s0: AB::Expr = local.chiplets[0].into();
-    let s1: AB::Expr = local.chiplets[1].into();
-    let bitwise_flag = bitwise_chiplet_flag(s0, s1);
+    let s0 = local.chiplets[0];
+    let s1 = local.chiplets[1];
+    let bitwise_flag = bitwise_chiplet_flag(s0.into(), s1.into());
 
     // Load bitwise columns using typed struct
     let cols: BitwiseColumns<AB::Expr> = BitwiseColumns::from_row(local);

@@ -335,36 +335,36 @@ fn enforce_general_constraints<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    let s0: AB::Expr = local.stack[0].into();
+    let s0 = local.stack[0];
 
     // SPLIT/LOOP: top stack value must be binary (branch selector).
     let split_or_loop = op_flags.split() + op_flags.loop_op();
-    let s0_binary = s0.clone() * (s0.clone() - F_1);
+    let s0_binary = s0 * (s0 - F_1);
     builder.assert_zero(split_or_loop * s0_binary);
 
     // DYN: the first half holds the callee digest; the second half must be zero.
     let f_dyn = op_flags.dyn_op();
     for i in 0..4 {
-        let hi: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 4 + i].into();
+        let hi = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 4 + i];
         builder.assert_zero(f_dyn.clone() * hi);
     }
 
     // REPEAT: top stack must be 1 and we must be in a loop body (h4=1).
     let f_repeat = op_flags.repeat();
-    let h4: AB::Expr = local.decoder[decoder_cols::IS_LOOP_BODY_FLAG_COL_IDX].into();
-    builder.assert_zero(f_repeat.clone() * s0.not());
-    builder.assert_zero(f_repeat * h4.not());
+    let h4 = local.decoder[decoder_cols::IS_LOOP_BODY_FLAG_COL_IDX];
+    builder.assert_zero(f_repeat.clone() * AB::Expr::from(s0).not());
+    builder.assert_zero(f_repeat * AB::Expr::from(h4).not());
 
     // END inside a loop: if is_loop flag is set, top stack must be 0.
     let f_end = op_flags.end();
-    let h5: AB::Expr = local.decoder[decoder_cols::IS_LOOP_FLAG_COL_IDX].into();
+    let h5 = local.decoder[decoder_cols::IS_LOOP_FLAG_COL_IDX];
     builder.assert_zero(f_end.clone() * h5 * s0);
 
     // END followed by REPEAT: carry h0..h4 into the next row.
     let f_repeat_next = op_flags_next.repeat();
     for i in 0..5 {
-        let hi: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + i].into();
-        let hi_next: AB::Expr = next.decoder[decoder_cols::HASHER_STATE_OFFSET + i].into();
+        let hi = local.decoder[decoder_cols::HASHER_STATE_OFFSET + i];
+        let hi_next = next.decoder[decoder_cols::HASHER_STATE_OFFSET + i];
         builder
             .when_transition()
             .assert_zero(f_end.clone() * f_repeat_next.clone() * (hi_next - hi));
@@ -406,7 +406,7 @@ fn enforce_group_count_constraints<AB>(
     let sp = cols.in_span.clone();
     let gc = cols.group_count.clone();
     let gc_next = cols_next.group_count.clone();
-    let h0: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET].into();
+    let h0 = local.decoder[decoder_cols::HASHER_STATE_OFFSET];
 
     // delta_gc = gc - gc' (how much gc decrements; expected to be 0 or 1)
     let delta_gc = gc.clone() - gc_next;
@@ -480,15 +480,15 @@ fn enforce_op_group_decoding_constraints<AB>(
     // f_sgc is set when gc stays the same inside a basic block.
     let f_sgc = sp.clone() * sp_next * delta_gc.not();
 
-    let h0: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET].into();
-    let h0_next: AB::Expr = next.decoder[decoder_cols::HASHER_STATE_OFFSET].into();
+    let h0 = local.decoder[decoder_cols::HASHER_STATE_OFFSET];
+    let h0_next = next.decoder[decoder_cols::HASHER_STATE_OFFSET];
 
     // Compute op' from next-row op bits (b0' + 2*b1' + ... + 64*b6').
     let op_next = op_bits_to_value::<AB>(&cols_next.op_bits);
 
     // When SPAN/RESPAN/PUSH or when gc doesn't change, shift h0 by op'.
     // (h0 - h0' * 2^7 - op') = 0 under the combined flag.
-    let h0_shift = h0.clone() - h0_next * F_128 - op_next;
+    let h0_shift = h0 - h0_next * F_128 - op_next;
     builder
         .when_transition()
         .assert_zero((f_span + f_respan + is_push + f_sgc) * h0_shift);
@@ -613,19 +613,19 @@ fn enforce_batch_flags_constraints<AB>(
     // When batch has <=4 groups, h4..h7 must be zero (unused lanes).
     let small_batch = f_g1.clone() + f_g2.clone() + f_g4.clone();
     for i in 0..4 {
-        let hi: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 4 + i].into();
+        let hi = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 4 + i];
         builder.assert_zero(small_batch.clone() * hi);
     }
 
     // When batch has <=2 groups, h2..h3 must be zero (unused lanes).
     let tiny_batch = f_g1.clone() + f_g2.clone();
     for i in 0..2 {
-        let hi: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 2 + i].into();
+        let hi = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 2 + i];
         builder.assert_zero(tiny_batch.clone() * hi);
     }
 
     // When batch has 1 group, h1 must be zero (unused lane).
-    let h1: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 1].into();
+    let h1 = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 1];
     builder.assert_zero(f_g1 * h1);
 }
 

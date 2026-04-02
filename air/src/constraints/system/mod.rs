@@ -29,7 +29,6 @@
 //! Note: END operation's restoration is handled by the block stack table (bus-based),
 //! not by these constraints. These constraints only handle the non-END cases.
 
-use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
@@ -82,9 +81,9 @@ pub(crate) fn enforce_ctx_constraints<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    let ctx: AB::Expr = local.ctx.into();
-    let ctx_next: AB::Expr = next.ctx.into();
-    let clk: AB::Expr = local.clk.into();
+    let ctx = local.ctx;
+    let ctx_next = next.ctx;
+    let clk = local.clk;
 
     let op_flags = OpFlags::new(ExprDecoderAccess::new(local));
     let f_call = op_flags.call();
@@ -93,16 +92,15 @@ pub(crate) fn enforce_ctx_constraints<AB>(
     let f_end = op_flags.end();
 
     let call_dyncall_flag = f_call.clone() + f_dyncall.clone();
-    let expected_new_ctx = clk + F_1;
-    builder
-        .when_transition()
-        .assert_zero(call_dyncall_flag * (ctx_next.clone() - expected_new_ctx));
-
-    builder.when_transition().assert_zero(f_syscall.clone() * ctx_next.clone());
-
-    let change_ctx_flag = f_call + f_syscall + f_dyncall + f_end;
+    let change_ctx_flag = f_call + f_syscall.clone() + f_dyncall + f_end;
     let default_flag = change_ctx_flag.not();
-    builder.when_transition().assert_zero(default_flag * (ctx_next - ctx));
+
+    {
+        let builder = &mut builder.when_transition();
+        builder.when(call_dyncall_flag).assert_eq(ctx_next, clk + F_1);
+        builder.when(f_syscall).assert_zero(ctx_next);
+        builder.when(default_flag).assert_eq(ctx_next, ctx);
+    }
 }
 
 /// Enforces function hash transition constraints.
@@ -119,22 +117,23 @@ pub(crate) fn enforce_fn_hash_constraints<AB>(
     let f_end = op_flags.end();
 
     let f_load = f_call.clone() + f_dyncall.clone();
-    let f_preserve = AB::Expr::ONE - (f_load.clone() + f_end);
+    let f_preserve = (f_load.clone() + f_end).not();
 
-    builder
-        .when_transition()
-        .when(f_load.clone())
-        .assert_zeros(core::array::from_fn::<_, 4, _>(|i| {
-            let fn_hash_i_next: AB::Expr = next.fn_hash[i].into();
-            let decoder_h_i: AB::Expr = local.decoder[HASHER_STATE_OFFSET + i].into();
-            fn_hash_i_next - decoder_h_i
-        }));
+    {
+        let builder = &mut builder.when_transition();
 
-    builder.when_transition().when(f_preserve.clone()).assert_zeros(
-        core::array::from_fn::<_, 4, _>(|i| {
-            let fn_hash_i: AB::Expr = local.fn_hash[i].into();
-            let fn_hash_i_next: AB::Expr = next.fn_hash[i].into();
-            fn_hash_i_next - fn_hash_i
-        }),
-    );
+        {
+            let builder = &mut builder.when(f_load);
+            for i in 0..4 {
+                builder.assert_eq(next.fn_hash[i], local.decoder[HASHER_STATE_OFFSET + i]);
+            }
+        }
+
+        {
+            let builder = &mut builder.when(f_preserve);
+            for i in 0..4 {
+                builder.assert_eq(next.fn_hash[i], local.fn_hash[i]);
+            }
+        }
+    }
 }

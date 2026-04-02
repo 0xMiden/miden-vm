@@ -128,40 +128,40 @@ pub fn enforce_chiplets_bus_constraint<AB>(
     // =========================================================================
 
     // --- Hasher request flags ---
-    let f_hperm: AB::Expr = op_flags.hperm();
-    let f_mpverify: AB::Expr = op_flags.mpverify();
-    let f_mrupdate: AB::Expr = op_flags.mrupdate();
+    let f_hperm = op_flags.hperm();
+    let f_mpverify = op_flags.mpverify();
+    let f_mrupdate = op_flags.mrupdate();
 
     // --- Control block flags ---
-    let f_join: AB::Expr = op_flags.join();
-    let f_split: AB::Expr = op_flags.split();
-    let f_loop: AB::Expr = op_flags.loop_op();
-    let f_call: AB::Expr = op_flags.call();
-    let f_dyn: AB::Expr = op_flags.dyn_op();
-    let f_dyncall: AB::Expr = op_flags.dyncall();
-    let f_syscall: AB::Expr = op_flags.syscall();
-    let f_span: AB::Expr = op_flags.span();
-    let f_respan: AB::Expr = op_flags.respan();
-    let f_end: AB::Expr = op_flags.end();
+    let f_join = op_flags.join();
+    let f_split = op_flags.split();
+    let f_loop = op_flags.loop_op();
+    let f_call = op_flags.call();
+    let f_dyn = op_flags.dyn_op();
+    let f_dyncall = op_flags.dyncall();
+    let f_syscall = op_flags.syscall();
+    let f_span = op_flags.span();
+    let f_respan = op_flags.respan();
+    let f_end = op_flags.end();
 
     // --- Memory request flags ---
-    let f_mload: AB::Expr = op_flags.mload();
-    let f_mstore: AB::Expr = op_flags.mstore();
-    let f_mloadw: AB::Expr = op_flags.mloadw();
-    let f_mstorew: AB::Expr = op_flags.mstorew();
-    let f_hornerbase: AB::Expr = op_flags.hornerbase();
-    let f_hornerext: AB::Expr = op_flags.hornerext();
-    let f_mstream: AB::Expr = op_flags.mstream();
-    let f_pipe: AB::Expr = op_flags.pipe();
-    let f_cryptostream: AB::Expr = op_flags.cryptostream();
+    let f_mload = op_flags.mload();
+    let f_mstore = op_flags.mstore();
+    let f_mloadw = op_flags.mloadw();
+    let f_mstorew = op_flags.mstorew();
+    let f_hornerbase = op_flags.hornerbase();
+    let f_hornerext = op_flags.hornerext();
+    let f_mstream = op_flags.mstream();
+    let f_pipe = op_flags.pipe();
+    let f_cryptostream = op_flags.cryptostream();
 
     // --- Bitwise request flags ---
-    let f_u32and: AB::Expr = op_flags.u32and();
-    let f_u32xor: AB::Expr = op_flags.u32xor();
+    let f_u32and = op_flags.u32and();
+    let f_u32xor = op_flags.u32xor();
 
     // --- ACE and log_precompile request flags ---
-    let f_evalcircuit: AB::Expr = op_flags.evalcircuit();
-    let f_logprecompile: AB::Expr = op_flags.log_precompile();
+    let f_evalcircuit = op_flags.evalcircuit();
+    let f_logprecompile = op_flags.log_precompile();
 
     // --- Hasher request values ---
     let v_hperm = compute_hperm_request::<AB>(local, next, challenges);
@@ -201,7 +201,7 @@ pub fn enforce_chiplets_bus_constraint<AB>(
     let v_logprecompile = compute_log_precompile_request::<AB>(local, next, challenges);
 
     // Sum of request flags (hasher + control blocks + memory + bitwise + ACE + log_precompile)
-    let request_flag_sum: AB::Expr = f_hperm.clone()
+    let request_flag_sum = f_hperm.clone()
         + f_mpverify.clone()
         + f_mrupdate.clone()
         + f_join.clone()
@@ -265,9 +265,9 @@ pub fn enforce_chiplets_bus_constraint<AB>(
     // --- Get periodic columns we need for hasher cycle detection and bitwise cycle gating ---
     let (cycle_row_0, cycle_row_31, k_transition) = {
         let p = builder.periodic_values();
-        let cycle_row_0: AB::Expr = p[hasher::periodic::P_CYCLE_ROW_0].into();
-        let cycle_row_31: AB::Expr = p[hasher::periodic::P_CYCLE_ROW_31].into();
-        let k_transition: AB::Expr = p[P_BITWISE_K_TRANSITION].into();
+        let cycle_row_0 = p[hasher::periodic::P_CYCLE_ROW_0];
+        let cycle_row_31 = p[hasher::periodic::P_CYCLE_ROW_31];
+        let k_transition = p[P_BITWISE_K_TRANSITION];
         (cycle_row_0, cycle_row_31, k_transition)
     };
 
@@ -281,7 +281,7 @@ pub fn enforce_chiplets_bus_constraint<AB>(
     // Bitwise chiplet active: s0=1, s1=0
     // Bitwise responds only on last row of 8-row cycle (when k_transition=0)
     let is_bitwise_row: AB::Expr = chiplet_s0.clone() * chiplet_s1.not();
-    let is_bitwise_responding: AB::Expr = is_bitwise_row * k_transition.not();
+    let is_bitwise_responding: AB::Expr = is_bitwise_row * k_transition.into().not();
 
     // Memory chiplet active: s0=1, s1=1, s2=0
     let is_memory: AB::Expr = chiplet_s0.clone() * chiplet_s1.clone() * chiplet_s2.not();
@@ -302,8 +302,13 @@ pub fn enforce_chiplets_bus_constraint<AB>(
         * chiplet_s4.not();
 
     // --- Hasher response (complex, depends on cycle position and selectors) ---
-    let hasher_response =
-        compute_hasher_response::<AB>(local, next, challenges, cycle_row_0, cycle_row_31);
+    let hasher_response = compute_hasher_response::<AB>(
+        local,
+        next,
+        challenges,
+        cycle_row_0.into(),
+        cycle_row_31.into(),
+    );
 
     // --- Bitwise response ---
     let v_bitwise = compute_bitwise_response::<AB>(local, challenges);
@@ -424,7 +429,7 @@ fn compute_memory_word_request<AB: MidenAirBuilder>(
     let addr: AB::Expr = local.stack[0].into();
 
     // Word values depend on read vs write
-    let (w0, w1, w2, w3) = if is_read {
+    let (w0, w1, w2, w3): (AB::Expr, AB::Expr, AB::Expr, AB::Expr) = if is_read {
         // MLOADW: word comes from next stack state
         (
             next.stack[0].into(),
@@ -469,7 +474,7 @@ fn compute_memory_element_request<AB: MidenAirBuilder>(
     let addr: AB::Expr = local.stack[0].into();
 
     // Element value
-    let element = if is_read {
+    let element: AB::Expr = if is_read {
         // MLOAD: element comes from next stack[0]
         next.stack[0].into()
     } else {
@@ -492,20 +497,10 @@ fn compute_mstream_request<AB: MidenAirBuilder>(
     let addr: AB::Expr = local.stack[12].into();
 
     // First word: next.stack[0..4] at addr
-    let word1 = [
-        next.stack[0].into(),
-        next.stack[1].into(),
-        next.stack[2].into(),
-        next.stack[3].into(),
-    ];
+    let word1: [AB::Expr; 4] = core::array::from_fn(|i| next.stack[i].into());
 
     // Second word: next.stack[4..8] at addr + 4
-    let word2 = [
-        next.stack[4].into(),
-        next.stack[5].into(),
-        next.stack[6].into(),
-        next.stack[7].into(),
-    ];
+    let word2: [AB::Expr; 4] = core::array::from_fn(|i| next.stack[4 + i].into());
 
     let msg1 = challenges.encode([
         label.clone(),
@@ -544,20 +539,10 @@ fn compute_pipe_request<AB: MidenAirBuilder>(
     let addr: AB::Expr = local.stack[12].into();
 
     // First word to addr: next.stack[0..4]
-    let word1 = [
-        next.stack[0].into(),
-        next.stack[1].into(),
-        next.stack[2].into(),
-        next.stack[3].into(),
-    ];
+    let word1: [AB::Expr; 4] = core::array::from_fn(|i| next.stack[i].into());
 
     // Second word to addr + 4: next.stack[4..8]
-    let word2 = [
-        next.stack[4].into(),
-        next.stack[5].into(),
-        next.stack[6].into(),
-        next.stack[7].into(),
-    ];
+    let word2: [AB::Expr; 4] = core::array::from_fn(|i| next.stack[4 + i].into());
 
     let msg1 = challenges.encode([
         label.clone(),
@@ -597,9 +582,9 @@ fn compute_cryptostream_request<AB: MidenAirBuilder>(
     let src: AB::Expr = local.stack[12].into();
     let dst: AB::Expr = local.stack[13].into();
 
-    let rate: [AB::Expr; 8] = core::array::from_fn(|i| local.stack[i].into());
+    let rate: [AB::Var; 8] = core::array::from_fn(|i| local.stack[i]);
     let cipher: [AB::Expr; 8] = core::array::from_fn(|i| next.stack[i].into());
-    let plain: [AB::Expr; 8] = core::array::from_fn(|i| cipher[i].clone() - rate[i].clone());
+    let plain: [AB::Expr; 8] = core::array::from_fn(|i| cipher[i].clone() - rate[i]);
 
     let read_msg1 = challenges.encode([
         read_label.clone(),
@@ -661,12 +646,13 @@ fn compute_hornerbase_request<AB: MidenAirBuilder>(
     // Helper registers hold eval_point_0 and eval_point_1
     let helper0_idx = USER_OP_HELPERS_OFFSET;
     let helper1_idx = helper0_idx + 1;
-    let eval0: AB::Expr = local.decoder[helper0_idx].into();
-    let eval1: AB::Expr = local.decoder[helper1_idx].into();
+    let eval0 = local.decoder[helper0_idx];
+    let eval1 = local.decoder[helper1_idx];
 
-    let msg0 = challenges.encode([label.clone(), ctx.clone(), addr.clone(), clk.clone(), eval0]);
+    let msg0 =
+        challenges.encode([label.clone(), ctx.clone(), addr.clone(), clk.clone(), eval0.into()]);
 
-    let msg1 = challenges.encode([label, ctx, addr + F_1, clk, eval1]);
+    let msg1 = challenges.encode([label, ctx, addr + F_1, clk, eval1.into()]);
 
     msg0 * msg1
 }
@@ -683,22 +669,17 @@ fn compute_hornerext_request<AB: MidenAirBuilder>(
 
     // Helpers 0..3 hold eval_point_0, eval_point_1, mem_junk_0, mem_junk_1
     let base = USER_OP_HELPERS_OFFSET;
-    let word = [
-        local.decoder[base].into(),
-        local.decoder[base + 1].into(),
-        local.decoder[base + 2].into(),
-        local.decoder[base + 3].into(),
-    ];
+    let word: [AB::Var; 4] = core::array::from_fn(|i| local.decoder[base + i]);
 
     challenges.encode([
         label,
         ctx,
         addr,
         clk,
-        word[0].clone(),
-        word[1].clone(),
-        word[2].clone(),
-        word[3].clone(),
+        word[0].into(),
+        word[1].into(),
+        word[2].into(),
+        word[3].into(),
     ])
 }
 
@@ -724,7 +705,7 @@ fn compute_memory_response<AB: MidenAirBuilder>(
     let idx1: AB::Expr = local.chiplets[mem_offset + memory::IDX1_COL_IDX].into();
     let clk: AB::Expr = local.chiplets[mem_offset + memory::CLK_COL_IDX].into();
 
-    // Compute address: addr = word + 2*idx1 + idx0
+    // Compute address: addr = word + idx1 * F_2 + idx0
     let addr: AB::Expr = word + idx1.clone() * F_2 + idx0.clone();
 
     // Derived flags
@@ -738,7 +719,7 @@ fn compute_memory_response<AB: MidenAirBuilder>(
     let read_word_label: AB::Expr = Felt::from_u8(MEMORY_READ_WORD_LABEL).into();
     let write_label = is_element.clone() * write_element_label + is_word.clone() * write_word_label;
     let read_label = is_element.clone() * read_element_label + is_word.clone() * read_word_label;
-    let label = is_write * write_label + is_read.clone() * read_label;
+    let label = is_write * write_label + is_read * read_label;
 
     // Get value columns (v0, v1, v2, v3)
     let v0: AB::Expr = local.chiplets[mem_offset + memory::V_COL_RANGE.start].into();
@@ -794,37 +775,31 @@ fn compute_hasher_response<AB: MidenAirBuilder>(
     };
 
     // Hasher is active when chiplets[0] == 0
-    let hasher_active: AB::Expr = local.chiplets[0].into().not();
+    let hasher_active = AB::Expr::from(local.chiplets[0]).not();
 
     // Hasher selectors (when hasher is active, chiplets[0]=0)
     // chiplets[1..4] are the hasher's internal selectors s0, s1, s2
-    let hs0: AB::Expr = local.chiplets[1].into();
-    let hs1: AB::Expr = local.chiplets[2].into();
-    let hs2: AB::Expr = local.chiplets[3].into();
+    let hs0 = local.chiplets[1];
+    let hs1 = local.chiplets[2];
+    let hs2 = local.chiplets[3];
 
     // Negated selectors (reused across multiple flag expressions)
-    let not_hs0 = hs0.not();
-    let not_hs1 = hs1.not();
-    let not_hs2 = hs2.not();
+    let not_hs0 = hs0.into().not();
+    let not_hs1 = hs1.into().not();
+    let not_hs2 = hs2.into().not();
 
     // Compute operation flags (each flag is active at most once)
     // All hasher flags require hasher_active (chiplets[0] == 0)
     // Row 0 flags:
     // f_bp = hasher_active * cycle_row_0 * s0 * !s1 * !s2
-    let f_bp = hasher_active.clone()
-        * cycle_row_0.clone()
-        * hs0.clone()
-        * not_hs1.clone()
-        * not_hs2.clone();
+    let f_bp =
+        hasher_active.clone() * cycle_row_0.clone() * hs0 * not_hs1.clone() * not_hs2.clone();
     // f_mp = hasher_active * cycle_row_0 * s0 * !s1 * s2
-    let f_mp =
-        hasher_active.clone() * cycle_row_0.clone() * hs0.clone() * not_hs1.clone() * hs2.clone();
+    let f_mp = hasher_active.clone() * cycle_row_0.clone() * hs0 * not_hs1.clone() * hs2;
     // f_mv = hasher_active * cycle_row_0 * s0 * s1 * !s2
-    let f_mv =
-        hasher_active.clone() * cycle_row_0.clone() * hs0.clone() * hs1.clone() * not_hs2.clone();
+    let f_mv = hasher_active.clone() * cycle_row_0.clone() * hs0 * hs1 * not_hs2.clone();
     // f_mu = hasher_active * cycle_row_0 * s0 * s1 * s2
-    let f_mu =
-        hasher_active.clone() * cycle_row_0.clone() * hs0.clone() * hs1.clone() * hs2.clone();
+    let f_mu = hasher_active.clone() * cycle_row_0.clone() * hs0 * hs1 * hs2;
 
     // Row 31 flags:
     // f_hout = hasher_active * cycle_row_31 * !s0 * !s1 * !s2
@@ -834,24 +809,18 @@ fn compute_hasher_response<AB: MidenAirBuilder>(
         * not_hs1.clone()
         * not_hs2.clone();
     // f_sout = hasher_active * cycle_row_31 * !s0 * !s1 * s2
-    let f_sout = hasher_active.clone()
-        * cycle_row_31.clone()
-        * not_hs0.clone()
-        * not_hs1.clone()
-        * hs2.clone();
+    let f_sout =
+        hasher_active.clone() * cycle_row_31.clone() * not_hs0.clone() * not_hs1.clone() * hs2;
     // f_abp = hasher_active * cycle_row_31 * s0 * !s1 * !s2
-    let f_abp = hasher_active.clone()
-        * cycle_row_31.clone()
-        * hs0.clone()
-        * not_hs1.clone()
-        * not_hs2.clone();
+    let f_abp =
+        hasher_active.clone() * cycle_row_31.clone() * hs0 * not_hs1.clone() * not_hs2.clone();
 
     // Get current hasher state (12 elements) and node index
     let state: [AB::Expr; 12] = core::array::from_fn(|i| {
         let col_idx = HASHER_STATE_COL_RANGE.start - CHIPLETS_OFFSET + i;
         local.chiplets[col_idx].into()
     });
-    let node_index: AB::Expr = local.chiplets[HASHER_NODE_INDEX_COL_IDX - CHIPLETS_OFFSET].into();
+    let node_index = local.chiplets[HASHER_NODE_INDEX_COL_IDX - CHIPLETS_OFFSET];
 
     // Get next row's hasher state (for f_abp)
     let state_next: [AB::Expr; 12] = core::array::from_fn(|i| {
@@ -860,11 +829,10 @@ fn compute_hasher_response<AB: MidenAirBuilder>(
     });
 
     // Get next row's node_index for computing the node_index bit
-    let node_index_next: AB::Expr =
-        next.chiplets[HASHER_NODE_INDEX_COL_IDX - CHIPLETS_OFFSET].into();
+    let node_index_next = next.chiplets[HASHER_NODE_INDEX_COL_IDX - CHIPLETS_OFFSET];
 
     // addr_next = row + 1 (using clk as proxy since clk = row in the trace)
-    let addr_next: AB::Expr = local.clk.into() + AB::Expr::ONE;
+    let addr_next: AB::Expr = local.clk + AB::Expr::ONE;
 
     // Build message values for each operation type using canonical labels.
     let label_bp = TRANSITION_LINEAR_HASH.into();
@@ -880,7 +848,7 @@ fn compute_hasher_response<AB: MidenAirBuilder>(
         challenges,
         label_bp,
         addr_next.clone(),
-        node_index.clone(),
+        node_index.into(),
         &state,
     );
 
@@ -889,7 +857,7 @@ fn compute_hasher_response<AB: MidenAirBuilder>(
         challenges,
         label_sout,
         addr_next.clone(),
-        node_index.clone(),
+        node_index.into(),
         &state,
     );
 
@@ -899,7 +867,7 @@ fn compute_hasher_response<AB: MidenAirBuilder>(
     // - bit=0: use RATE0 (state[0..4])
     // - bit=1: use RATE1 (state[4..8])
     // The bit can be computed as: bit = node_index - 2 * node_index_next
-    let bit = node_index.clone() - node_index_next.clone() * F_2;
+    let bit = node_index - node_index_next * F_2;
 
     // Leaf word uses RATE0 or RATE1 depending on bit:
     // bit=0: use state[0..4] (RATE0)
@@ -915,21 +883,21 @@ fn compute_hasher_response<AB: MidenAirBuilder>(
         challenges,
         label_mp,
         addr_next.clone(),
-        node_index.clone(),
+        node_index.into(),
         &leaf_word,
     );
     let v_mv = compute_hasher_word_message::<AB>(
         challenges,
         label_mv,
         addr_next.clone(),
-        node_index.clone(),
+        node_index.into(),
         &leaf_word,
     );
     let v_mu = compute_hasher_word_message::<AB>(
         challenges,
         label_mu,
         addr_next.clone(),
-        node_index.clone(),
+        node_index.into(),
         &leaf_word,
     );
 
@@ -941,7 +909,7 @@ fn compute_hasher_response<AB: MidenAirBuilder>(
         challenges,
         label_hout,
         addr_next.clone(),
-        node_index.clone(),
+        node_index.into(),
         &result_word,
     );
 
@@ -961,7 +929,7 @@ fn compute_hasher_response<AB: MidenAirBuilder>(
         challenges,
         label_abp,
         addr_next.clone(),
-        node_index.clone(),
+        node_index.into(),
         &rate_next,
     );
 
@@ -1027,8 +995,7 @@ fn compute_hperm_request<AB: MidenAirBuilder>(
     // Output message: transition_label = RETURN_STATE_LABEL + 32 = 9 + 32 = 41
     // addr_next = addr + (HASH_CYCLE_LEN - 1) = addr + 31
     let output_label: AB::Expr = TRANSITION_RETURN_STATE.into();
-    let addr_offset: AB::Expr = HASH_CYCLE_OFFSET.into();
-    let addr_next = addr + addr_offset;
+    let addr_next = addr + HASH_CYCLE_OFFSET;
 
     let output_msg = compute_hasher_message::<AB>(
         challenges,
@@ -1056,50 +1023,47 @@ fn compute_log_precompile_request<AB: MidenAirBuilder>(
     let addr: AB::Expr = local.decoder[helper_base + HELPER_ADDR_IDX].into();
 
     // CAP_PREV from helper registers (4 lanes)
-    let cap_prev: [AB::Expr; 4] = core::array::from_fn(|i| {
-        local.decoder[helper_base + HELPER_CAP_PREV_RANGE.start + i].into()
-    });
+    let cap_prev: [AB::Var; 4] =
+        core::array::from_fn(|i| local.decoder[helper_base + HELPER_CAP_PREV_RANGE.start + i]);
 
     // COMM and TAG from the current stack
-    let comm: [AB::Expr; 4] =
-        core::array::from_fn(|i| local.stack[STACK_COMM_RANGE.start + i].into());
-    let tag: [AB::Expr; 4] =
-        core::array::from_fn(|i| local.stack[STACK_TAG_RANGE.start + i].into());
+    let comm: [AB::Var; 4] = core::array::from_fn(|i| local.stack[STACK_COMM_RANGE.start + i]);
+    let tag: [AB::Var; 4] = core::array::from_fn(|i| local.stack[STACK_TAG_RANGE.start + i]);
 
     // Input state [COMM, TAG, CAP_PREV]
     let state_input: [AB::Expr; 12] = [
-        comm[0].clone(),
-        comm[1].clone(),
-        comm[2].clone(),
-        comm[3].clone(),
-        tag[0].clone(),
-        tag[1].clone(),
-        tag[2].clone(),
-        tag[3].clone(),
-        cap_prev[0].clone(),
-        cap_prev[1].clone(),
-        cap_prev[2].clone(),
-        cap_prev[3].clone(),
+        comm[0].into(),
+        comm[1].into(),
+        comm[2].into(),
+        comm[3].into(),
+        tag[0].into(),
+        tag[1].into(),
+        tag[2].into(),
+        tag[3].into(),
+        cap_prev[0].into(),
+        cap_prev[1].into(),
+        cap_prev[2].into(),
+        cap_prev[3].into(),
     ];
 
     // Output state from next stack [R0, R1, CAP_NEXT]
-    let r0: [AB::Expr; 4] = core::array::from_fn(|i| next.stack[STACK_R0_RANGE.start + i].into());
-    let r1: [AB::Expr; 4] = core::array::from_fn(|i| next.stack[STACK_R1_RANGE.start + i].into());
-    let cap_next: [AB::Expr; 4] =
-        core::array::from_fn(|i| next.stack[STACK_CAP_NEXT_RANGE.start + i].into());
+    let r0: [AB::Var; 4] = core::array::from_fn(|i| next.stack[STACK_R0_RANGE.start + i]);
+    let r1: [AB::Var; 4] = core::array::from_fn(|i| next.stack[STACK_R1_RANGE.start + i]);
+    let cap_next: [AB::Var; 4] =
+        core::array::from_fn(|i| next.stack[STACK_CAP_NEXT_RANGE.start + i]);
     let state_output: [AB::Expr; 12] = [
-        r0[0].clone(),
-        r0[1].clone(),
-        r0[2].clone(),
-        r0[3].clone(),
-        r1[0].clone(),
-        r1[1].clone(),
-        r1[2].clone(),
-        r1[3].clone(),
-        cap_next[0].clone(),
-        cap_next[1].clone(),
-        cap_next[2].clone(),
-        cap_next[3].clone(),
+        r0[0].into(),
+        r0[1].into(),
+        r0[2].into(),
+        r0[3].into(),
+        r1[0].into(),
+        r1[1].into(),
+        r1[2].into(),
+        r1[3].into(),
+        cap_next[0].into(),
+        cap_next[1].into(),
+        cap_next[2].into(),
+        cap_next[3].into(),
     ];
 
     // Input message: LINEAR_HASH_LABEL + 16
@@ -1114,11 +1078,10 @@ fn compute_log_precompile_request<AB: MidenAirBuilder>(
 
     // Output message: RETURN_STATE_LABEL + 32 with addr offset by HASH_CYCLE_LEN - 1
     let output_label: AB::Expr = TRANSITION_RETURN_STATE.into();
-    let addr_offset: AB::Expr = HASH_CYCLE_OFFSET.into();
     let output_msg = compute_hasher_message::<AB>(
         challenges,
         output_label,
-        addr + addr_offset,
+        addr + HASH_CYCLE_OFFSET,
         AB::Expr::ZERO,
         &state_output,
     );
@@ -1220,11 +1183,11 @@ fn compute_ace_request<AB: MidenAirBuilder>(
     let clk: AB::Expr = local.clk.into();
 
     // Stack values
-    let ptr: AB::Expr = local.stack[0].into();
-    let num_read_rows: AB::Expr = local.stack[1].into();
-    let num_eval_rows: AB::Expr = local.stack[2].into();
+    let ptr = local.stack[0];
+    let num_read_rows = local.stack[1];
+    let num_eval_rows = local.stack[2];
 
-    challenges.encode([label, clk, ctx, ptr, num_read_rows, num_eval_rows])
+    challenges.encode([label, clk, ctx, ptr.into(), num_read_rows.into(), num_eval_rows.into()])
 }
 
 /// Computes the ACE chiplet response message value.
@@ -1251,11 +1214,11 @@ fn compute_ace_response<AB: MidenAirBuilder>(
     let ptr: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + PTR_IDX].into();
 
     // num_eval_rows = READ_NUM_EVAL_IDX value + 1
-    let read_num_eval: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + READ_NUM_EVAL_IDX].into();
+    let read_num_eval = local.chiplets[NUM_ACE_SELECTORS + READ_NUM_EVAL_IDX];
     let num_eval_rows: AB::Expr = read_num_eval + F_1;
 
     // id_0 from ID_0_IDX
-    let id_0: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + ID_0_IDX].into();
+    let id_0 = local.chiplets[NUM_ACE_SELECTORS + ID_0_IDX];
 
     // num_read_rows = id_0 + 1 - num_eval_rows
     let num_read_rows: AB::Expr = id_0 + F_1 - num_eval_rows.clone();
@@ -1279,22 +1242,22 @@ fn compute_kernel_rom_response<AB: MidenAirBuilder>(
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     // s_first flag is at CHIPLETS_OFFSET + 5 (after 5 selectors), which is chiplets[5]
-    let s_first: AB::Expr = local.chiplets[NUM_KERNEL_ROM_SELECTORS].into();
+    let s_first = local.chiplets[NUM_KERNEL_ROM_SELECTORS];
 
     // Label depends on s_first:
     // label = s_first * INIT_LABEL + (1 - s_first) * CALL_LABEL
     let init_label: AB::Expr = KERNEL_PROC_INIT_LABEL.into();
     let call_label: AB::Expr = KERNEL_PROC_CALL_LABEL.into();
-    let label: AB::Expr = s_first.clone() * init_label + s_first.not() * call_label;
+    let label: AB::Expr = s_first * init_label + AB::Expr::from(s_first).not() * call_label;
 
     // Kernel procedure digest (root0..root3) at columns 6, 7, 8, 9 relative to chiplets
     // These are at NUM_KERNEL_ROM_SELECTORS + 1..5 (after s_first which is at +0)
-    let root0: AB::Expr = local.chiplets[NUM_KERNEL_ROM_SELECTORS + 1].into();
-    let root1: AB::Expr = local.chiplets[NUM_KERNEL_ROM_SELECTORS + 2].into();
-    let root2: AB::Expr = local.chiplets[NUM_KERNEL_ROM_SELECTORS + 3].into();
-    let root3: AB::Expr = local.chiplets[NUM_KERNEL_ROM_SELECTORS + 4].into();
+    let root0 = local.chiplets[NUM_KERNEL_ROM_SELECTORS + 1];
+    let root1 = local.chiplets[NUM_KERNEL_ROM_SELECTORS + 2];
+    let root2 = local.chiplets[NUM_KERNEL_ROM_SELECTORS + 3];
+    let root3 = local.chiplets[NUM_KERNEL_ROM_SELECTORS + 4];
 
-    challenges.encode([label, root0, root1, root2, root3])
+    challenges.encode([label, root0.into(), root1.into(), root2.into(), root3.into()])
 }
 
 // CONTROL BLOCK REQUEST HELPERS
@@ -1343,11 +1306,11 @@ fn compute_control_block_request<AB: MidenAirBuilder>(
     let transition_label: AB::Expr = TRANSITION_LINEAR_HASH.into();
 
     // addr_next = next row's decoder address
-    let addr_next: AB::Expr = next.decoder[ADDR_COL_IDX].into();
+    let addr_next = next.decoder[ADDR_COL_IDX];
 
     // Get decoder hasher state (8 elements)
-    let hasher_state: [AB::Expr; 8] =
-        core::array::from_fn(|i| local.decoder[HASHER_STATE_RANGE.start + i].into());
+    let hasher_state: [AB::Var; 8] =
+        core::array::from_fn(|i| local.decoder[HASHER_STATE_RANGE.start + i]);
 
     // op_code as domain in capacity position
     let op_code: AB::Expr = Felt::from_u8(op.opcode()).into();
@@ -1356,21 +1319,27 @@ fn compute_control_block_request<AB: MidenAirBuilder>(
     // [RATE0: h[0..4], RATE1: h[4..8], CAPACITY: [0, domain, 0, 0]]
     // LE layout: RATE0 at 0..4, RATE1 at 4..8, CAPACITY at 8..12
     let state: [AB::Expr; 12] = [
-        hasher_state[0].clone(),
-        hasher_state[1].clone(),
-        hasher_state[2].clone(),
-        hasher_state[3].clone(),
-        hasher_state[4].clone(),
-        hasher_state[5].clone(),
-        hasher_state[6].clone(),
-        hasher_state[7].clone(),
+        hasher_state[0].into(),
+        hasher_state[1].into(),
+        hasher_state[2].into(),
+        hasher_state[3].into(),
+        hasher_state[4].into(),
+        hasher_state[5].into(),
+        hasher_state[6].into(),
+        hasher_state[7].into(),
         AB::Expr::ZERO,
         op_code, // domain at CAPACITY_DOMAIN_IDX = 9
         AB::Expr::ZERO,
         AB::Expr::ZERO,
     ];
 
-    compute_hasher_message::<AB>(challenges, transition_label, addr_next, AB::Expr::ZERO, &state)
+    compute_hasher_message::<AB>(
+        challenges,
+        transition_label,
+        addr_next.into(),
+        AB::Expr::ZERO,
+        &state,
+    )
 }
 
 /// Computes the CALL request message value.
@@ -1452,13 +1421,14 @@ fn compute_syscall_request<AB: MidenAirBuilder>(
         compute_control_block_request::<AB>(local, next, challenges, ControlBlockOp::Syscall);
 
     // Kernel ROM lookup request (digest from first 4 elements of decoder hasher state)
-    let root0: AB::Expr = local.decoder[HASHER_STATE_RANGE.start].into();
-    let root1: AB::Expr = local.decoder[HASHER_STATE_RANGE.start + 1].into();
-    let root2: AB::Expr = local.decoder[HASHER_STATE_RANGE.start + 2].into();
-    let root3: AB::Expr = local.decoder[HASHER_STATE_RANGE.start + 3].into();
+    let root0 = local.decoder[HASHER_STATE_RANGE.start];
+    let root1 = local.decoder[HASHER_STATE_RANGE.start + 1];
+    let root2 = local.decoder[HASHER_STATE_RANGE.start + 2];
+    let root3 = local.decoder[HASHER_STATE_RANGE.start + 3];
 
     let label: AB::Expr = KERNEL_PROC_CALL_LABEL.into();
-    let kernel_req = challenges.encode([label, root0, root1, root2, root3]);
+    let kernel_req =
+        challenges.encode([label, root0.into(), root1.into(), root2.into(), root3.into()]);
 
     control_req * kernel_req
 }
@@ -1475,29 +1445,35 @@ fn compute_span_request<AB: MidenAirBuilder>(
     let transition_label: AB::Expr = TRANSITION_LINEAR_HASH.into();
 
     // addr_next = next row's decoder address
-    let addr_next: AB::Expr = next.decoder[ADDR_COL_IDX].into();
+    let addr_next = next.decoder[ADDR_COL_IDX];
 
     // Get decoder hasher state (8 elements)
-    let hasher_state: [AB::Expr; 8] =
-        core::array::from_fn(|i| local.decoder[HASHER_STATE_RANGE.start + i].into());
+    let hasher_state: [AB::Var; 8] =
+        core::array::from_fn(|i| local.decoder[HASHER_STATE_RANGE.start + i]);
 
     // Build full 12-lane state with capacity zeroed
     let state: [AB::Expr; 12] = [
-        hasher_state[0].clone(),
-        hasher_state[1].clone(),
-        hasher_state[2].clone(),
-        hasher_state[3].clone(),
-        hasher_state[4].clone(),
-        hasher_state[5].clone(),
-        hasher_state[6].clone(),
-        hasher_state[7].clone(),
+        hasher_state[0].into(),
+        hasher_state[1].into(),
+        hasher_state[2].into(),
+        hasher_state[3].into(),
+        hasher_state[4].into(),
+        hasher_state[5].into(),
+        hasher_state[6].into(),
+        hasher_state[7].into(),
         AB::Expr::ZERO,
         AB::Expr::ZERO,
         AB::Expr::ZERO,
         AB::Expr::ZERO,
     ];
 
-    compute_hasher_message::<AB>(challenges, transition_label, addr_next, AB::Expr::ZERO, &state)
+    compute_hasher_message::<AB>(
+        challenges,
+        transition_label,
+        addr_next.into(),
+        AB::Expr::ZERO,
+        &state,
+    )
 }
 
 /// Computes the RESPAN block request message value.
@@ -1512,7 +1488,7 @@ fn compute_respan_request<AB: MidenAirBuilder>(
     let transition_label: AB::Expr = TRANSITION_LINEAR_HASH_ABP.into();
 
     // RESPAN message uses addr_next - 1, where addr_next is the next row's decoder address
-    let addr_next: AB::Expr = next.decoder[ADDR_COL_IDX].into();
+    let addr_next = next.decoder[ADDR_COL_IDX];
     let addr_for_msg = addr_next - F_1;
 
     // Get decoder hasher state (8 elements)
@@ -1539,7 +1515,7 @@ fn compute_end_request<AB: MidenAirBuilder>(
     let transition_label: AB::Expr = TRANSITION_RETURN_HASH.into();
 
     // addr = decoder.addr + (HASH_CYCLE_LEN - 1) = addr + 31
-    let addr: AB::Expr = local.decoder[ADDR_COL_IDX].into() + HASH_CYCLE_OFFSET;
+    let addr: AB::Expr = local.decoder[ADDR_COL_IDX] + HASH_CYCLE_OFFSET;
 
     // Get digest from decoder hasher state (first 4 elements)
     let digest: [AB::Expr; 4] =
@@ -1559,7 +1535,7 @@ fn compute_control_block_request_zeros<AB: MidenAirBuilder>(
     let transition_label: AB::Expr = TRANSITION_LINEAR_HASH.into();
 
     // addr_next = next row's decoder address
-    let addr_next: AB::Expr = next.decoder[ADDR_COL_IDX].into();
+    let addr_next = next.decoder[ADDR_COL_IDX];
 
     // op_code as domain
     let op_code: AB::Expr = Felt::from_u8(opcode).into();
@@ -1580,7 +1556,13 @@ fn compute_control_block_request_zeros<AB: MidenAirBuilder>(
         AB::Expr::ZERO,
     ];
 
-    compute_hasher_message::<AB>(challenges, transition_label, addr_next, AB::Expr::ZERO, &state)
+    compute_hasher_message::<AB>(
+        challenges,
+        transition_label,
+        addr_next.into(),
+        AB::Expr::ZERO,
+        &state,
+    )
 }
 
 /// Computes the FMP initialization write request.
@@ -1616,12 +1598,12 @@ fn compute_dyn_callee_hash_read<AB: MidenAirBuilder>(
     let addr: AB::Expr = local.stack[0].into();
 
     // The callee hash is read into decoder hasher state first half
-    let w0: AB::Expr = local.decoder[HASHER_STATE_RANGE.start].into();
-    let w1: AB::Expr = local.decoder[HASHER_STATE_RANGE.start + 1].into();
-    let w2: AB::Expr = local.decoder[HASHER_STATE_RANGE.start + 2].into();
-    let w3: AB::Expr = local.decoder[HASHER_STATE_RANGE.start + 3].into();
+    let w0 = local.decoder[HASHER_STATE_RANGE.start];
+    let w1 = local.decoder[HASHER_STATE_RANGE.start + 1];
+    let w2 = local.decoder[HASHER_STATE_RANGE.start + 2];
+    let w3 = local.decoder[HASHER_STATE_RANGE.start + 3];
 
-    challenges.encode([label, ctx, addr, clk, w0, w1, w2, w3])
+    challenges.encode([label, ctx, addr, clk, w0.into(), w1.into(), w2.into(), w3.into()])
 }
 
 // MPVERIFY/MRUPDATE REQUEST HELPERS
@@ -1638,26 +1620,25 @@ fn compute_mpverify_request<AB: MidenAirBuilder>(
 ) -> AB::ExprEF {
     use crate::trace::decoder::USER_OP_HELPERS_OFFSET;
 
-    let helper_0: AB::Expr = local.decoder[USER_OP_HELPERS_OFFSET].into();
-    let merkle_cycle_len: AB::Expr = HASH_CYCLE_LEN_FELT.into();
+    let helper_0 = local.decoder[USER_OP_HELPERS_OFFSET];
 
     // Stack layout: [node_value0..3, node_depth, node_index, root0..3, ...]
     let node_value: [AB::Expr; 4] = core::array::from_fn(|i| local.stack[i].into());
-    let node_depth: AB::Expr = local.stack[4].into();
-    let node_index: AB::Expr = local.stack[5].into();
+    let node_depth = local.stack[4];
+    let node_index = local.stack[5];
     let root: [AB::Expr; 4] = core::array::from_fn(|i| local.stack[6 + i].into());
 
     let input_label: AB::Expr = TRANSITION_MP_VERIFY.into();
     let input_msg = compute_hasher_word_message::<AB>(
         challenges,
         input_label,
-        helper_0.clone(),
-        node_index.clone(),
+        helper_0.into(),
+        node_index.into(),
         &node_value,
     );
 
     // addr_next = helper_0 + node_depth * merkle_cycle_len - 1
-    let output_addr = helper_0 + node_depth * merkle_cycle_len - F_1;
+    let output_addr = helper_0 + node_depth * HASH_CYCLE_LEN_FELT - F_1;
     let output_label: AB::Expr = TRANSITION_RETURN_HASH.into();
     let output_msg = compute_hasher_word_message::<AB>(
         challenges,
@@ -1684,14 +1665,12 @@ fn compute_mrupdate_request<AB: MidenAirBuilder>(
 ) -> AB::ExprEF {
     use crate::trace::decoder::USER_OP_HELPERS_OFFSET;
 
-    let helper_0: AB::Expr = local.decoder[USER_OP_HELPERS_OFFSET].into();
-    let merkle_cycle_len: AB::Expr = HASH_CYCLE_LEN_FELT.into();
-    let two_merkle_cycles: AB::Expr = merkle_cycle_len.clone() + merkle_cycle_len.clone();
+    let helper_0 = local.decoder[USER_OP_HELPERS_OFFSET];
 
     // Stack layout: [old_node0..3, depth, index, old_root0..3, new_node0..3, ...]
     let old_node: [AB::Expr; 4] = core::array::from_fn(|i| local.stack[i].into());
-    let depth: AB::Expr = local.stack[4].into();
-    let index: AB::Expr = local.stack[5].into();
+    let depth = local.stack[4];
+    let index = local.stack[5];
     let old_root: [AB::Expr; 4] = core::array::from_fn(|i| local.stack[6 + i].into());
     let new_node: [AB::Expr; 4] = core::array::from_fn(|i| local.stack[10 + i].into());
     // New root is at next.stack[0..4]
@@ -1701,12 +1680,12 @@ fn compute_mrupdate_request<AB: MidenAirBuilder>(
     let input_old_msg = compute_hasher_word_message::<AB>(
         challenges,
         input_old_label,
-        helper_0.clone(),
-        index.clone(),
+        helper_0.into(),
+        index.into(),
         &old_node,
     );
 
-    let output_old_addr = helper_0.clone() + depth.clone() * merkle_cycle_len.clone() - F_1;
+    let output_old_addr = helper_0 + depth * HASH_CYCLE_LEN_FELT - F_1;
     let output_old_label: AB::Expr = TRANSITION_RETURN_HASH.into();
     let output_old_msg = compute_hasher_word_message::<AB>(
         challenges,
@@ -1716,16 +1695,17 @@ fn compute_mrupdate_request<AB: MidenAirBuilder>(
         &old_root,
     );
 
-    let input_new_addr = helper_0.clone() + depth.clone() * merkle_cycle_len.clone();
+    let input_new_addr = helper_0 + depth * HASH_CYCLE_LEN_FELT;
     let input_new_label: AB::Expr = TRANSITION_MR_UPDATE_NEW.into();
     let input_new_msg = compute_hasher_word_message::<AB>(
         challenges,
         input_new_label,
         input_new_addr,
-        index,
+        index.into(),
         &new_node,
     );
 
+    let two_merkle_cycles = HASH_CYCLE_LEN_FELT + HASH_CYCLE_LEN_FELT;
     let output_new_addr = helper_0 + depth * two_merkle_cycles - F_1;
     let output_new_msg = compute_hasher_word_message::<AB>(
         challenges,

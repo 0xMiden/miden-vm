@@ -65,18 +65,18 @@ pub fn enforce_bus<AB>(
     // -------------------------------------------------------------------------
 
     // Current row values
-    let clk: AB::Expr = local.clk.into();
-    let s15: AB::Expr = local.stack[15].into();
-    let b0: AB::Expr = local.stack[B0_COL_IDX].into();
-    let b1: AB::Expr = local.stack[B1_COL_IDX].into();
-    let h0: AB::Expr = local.stack[H0_COL_IDX].into();
+    let clk = local.clk;
+    let s15 = local.stack[15];
+    let b0 = local.stack[B0_COL_IDX];
+    let b1 = local.stack[B1_COL_IDX];
+    let h0 = local.stack[H0_COL_IDX];
 
     // Next row values (needed for removal)
-    let s15_next: AB::Expr = next.stack[15].into();
-    let b1_next: AB::Expr = next.stack[B1_COL_IDX].into();
+    let s15_next = next.stack[15];
+    let b1_next = next.stack[B1_COL_IDX];
 
     // Hasher state element 5, used by DYNCALL to store the new overflow table pointer.
-    let hasher_state_5: AB::Expr = local.decoder[HASHER_STATE_RANGE.start + 5].into();
+    let hasher_state_5 = local.decoder[HASHER_STATE_RANGE.start + 5];
 
     // -------------------------------------------------------------------------
     // Overflow condition: (b0 - 16) * h0 = 1 when overflow is non-empty
@@ -97,14 +97,14 @@ pub fn enforce_bus<AB>(
     // -------------------------------------------------------------------------
 
     // Response row value (adding to table during right_shift):
-    let response_row = challenges.encode([clk.clone(), s15.clone(), b1.clone()]);
+    let response_row = challenges.encode([clk.into(), s15.into(), b1.into()]);
 
     // Request row value for left_shift (removing from table):
-    let request_row_left = challenges.encode([b1.clone(), s15_next.clone(), b1_next.clone()]);
+    let request_row_left = challenges.encode([b1.into(), s15_next.into(), b1_next.into()]);
 
     // Request row value for dyncall (removing from table):
     let request_row_dyncall =
-        challenges.encode([b1.clone(), s15_next.clone(), hasher_state_5.clone()]);
+        challenges.encode([b1.into(), s15_next.into(), hasher_state_5.into()]);
 
     // -------------------------------------------------------------------------
     // Compute response and request terms

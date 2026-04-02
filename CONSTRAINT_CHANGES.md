@@ -64,3 +64,8 @@ resolving merge conflicts in this file.
 **No constraint changes.** (441 base + 24 ext)
 
 ---
+## 12. refactor: defer Var-to-Expr conversions and simplify array construction
+
+**No constraint changes.** (441 base + 24 ext)
+
+---

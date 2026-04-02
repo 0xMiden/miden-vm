@@ -37,20 +37,20 @@ where
         core::array::from_fn(|i| pv[n - TAIL_LEN + STACK_DEPTH + i]);
 
     // First row: stack[i] == stack_inputs[i]
-    builder
-        .when_first_row()
-        .assert_zeros(core::array::from_fn::<_, STACK_DEPTH, _>(|i| {
-            let stack_i: AB::Expr = local.stack[i].into();
-            let pv_i: AB::Expr = si[i].into();
-            stack_i - pv_i
-        }));
+    {
+        let builder = &mut builder.when_first_row();
+        #[allow(clippy::needless_range_loop)]
+        for i in 0..STACK_DEPTH {
+            builder.assert_eq(local.stack[i], si[i]);
+        }
+    }
 
     // Last row: stack[i] == stack_outputs[i]
-    builder
-        .when_last_row()
-        .assert_zeros(core::array::from_fn::<_, STACK_DEPTH, _>(|i| {
-            let stack_i: AB::Expr = local.stack[i].into();
-            let pv_i: AB::Expr = so[i].into();
-            stack_i - pv_i
-        }));
+    {
+        let builder = &mut builder.when_last_row();
+        #[allow(clippy::needless_range_loop)]
+        for i in 0..STACK_DEPTH {
+            builder.assert_eq(local.stack[i], so[i]);
+        }
+    }
 }

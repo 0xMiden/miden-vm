@@ -76,11 +76,11 @@ pub fn enforce_wiring_bus_constraint<AB>(
     // Chiplet selectors.
     // ---------------------------------------------------------------------
 
-    let s0: AB::Expr = local.chiplets[0].into();
-    let s1: AB::Expr = local.chiplets[1].into();
-    let s2: AB::Expr = local.chiplets[2].into();
-    let s3: AB::Expr = local.chiplets[3].into();
-    let ace_flag = ace_chiplet_flag(s0, s1, s2, s3);
+    let s0 = local.chiplets[0];
+    let s1 = local.chiplets[1];
+    let s2 = local.chiplets[2];
+    let s3 = local.chiplets[3];
+    let ace_flag = ace_chiplet_flag(s0.into(), s1.into(), s2.into(), s3.into());
 
     // Block selector: sblock = 0 for READ, sblock = 1 for EVAL.
     let sblock: AB::Expr = load_ace_col::<AB>(local, SELECTOR_BLOCK_IDX);

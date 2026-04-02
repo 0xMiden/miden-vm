@@ -183,7 +183,7 @@ where
             core::array::from_fn(|i| periodic[i])
         };
 
-        let hasher_flag: AB::Expr = local.chiplets[0].into().not();
+        let hasher_flag = local.chiplets[0].into().not();
         let cols: HasherColumns<AB::Expr> = HasherColumns::from_row(local);
         let cols_next: HasherColumns<AB::Expr> = HasherColumns::from_row(next);
         let flags = compute_hasher_flags::<AB>(&periodic, &cols, &cols_next);

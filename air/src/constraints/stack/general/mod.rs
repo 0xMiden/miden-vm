@@ -57,7 +57,7 @@ pub fn enforce_main<AB>(
         let flag_sum = op_flags.no_shift_at(0) + op_flags.left_shift_at(1);
         let expected = op_flags.no_shift_at(0) * local.stack[0].into()
             + op_flags.left_shift_at(1) * local.stack[1].into();
-        let actual: AB::Expr = next.stack[0].into();
+        let actual = next.stack[0];
 
         builder.when_transition().assert_zero(actual * flag_sum - expected);
     }
@@ -71,7 +71,7 @@ pub fn enforce_main<AB>(
         let expected = op_flags.no_shift_at(i) * local.stack[i].into()
             + op_flags.left_shift_at(i + 1) * local.stack[i + 1].into()
             + op_flags.right_shift_at(i - 1) * local.stack[i - 1].into();
-        let actual: AB::Expr = next.stack[i].into();
+        let actual = next.stack[i];
 
         builder.when_transition().assert_zero(actual * flag_sum - expected);
     }
@@ -82,7 +82,7 @@ pub fn enforce_main<AB>(
         let flag_sum = op_flags.no_shift_at(15) + op_flags.right_shift_at(14);
         let expected = op_flags.no_shift_at(15) * local.stack[15].into()
             + op_flags.right_shift_at(14) * local.stack[14].into();
-        let actual: AB::Expr = next.stack[15].into();
+        let actual = next.stack[15];
 
         builder.when_transition().assert_zero(actual * flag_sum - expected);
     }

@@ -43,32 +43,17 @@ fn enforce_cryptostream_constraints<AB>(
     // that track the stream offset. Those counters advance by 8 (one word) per row.
     // Everything is gated by the op flag, so the constraints are active only when
     // CRYPTOSTREAM is executed.
-    let gate = op_flags.cryptostream();
+    let gate = builder.is_transition() * op_flags.cryptostream();
+    let builder = &mut builder.when(gate);
 
-    builder
-        .when_transition()
-        .assert_zero(gate.clone() * (next.stack[8].into() - local.stack[8].into()));
-    builder
-        .when_transition()
-        .assert_zero(gate.clone() * (next.stack[9].into() - local.stack[9].into()));
-    builder
-        .when_transition()
-        .assert_zero(gate.clone() * (next.stack[10].into() - local.stack[10].into()));
-    builder
-        .when_transition()
-        .assert_zero(gate.clone() * (next.stack[11].into() - local.stack[11].into()));
-    builder
-        .when_transition()
-        .assert_zero(gate.clone() * (next.stack[12].into() - (local.stack[12].into() + F_8)));
-    builder
-        .when_transition()
-        .assert_zero(gate.clone() * (next.stack[13].into() - (local.stack[13].into() + F_8)));
-    builder
-        .when_transition()
-        .assert_zero(gate.clone() * (next.stack[14].into() - local.stack[14].into()));
-    builder
-        .when_transition()
-        .assert_zero(gate * (next.stack[15].into() - local.stack[15].into()));
+    builder.assert_eq(next.stack[8], local.stack[8]);
+    builder.assert_eq(next.stack[9], local.stack[9]);
+    builder.assert_eq(next.stack[10], local.stack[10]);
+    builder.assert_eq(next.stack[11], local.stack[11]);
+    builder.assert_eq(next.stack[12], local.stack[12].into() + F_8);
+    builder.assert_eq(next.stack[13], local.stack[13].into() + F_8);
+    builder.assert_eq(next.stack[14], local.stack[14]);
+    builder.assert_eq(next.stack[15], local.stack[15]);
 }
 
 fn enforce_hornerbase_constraints<AB>(
@@ -88,29 +73,31 @@ fn enforce_hornerbase_constraints<AB>(
     let gate = op_flags.hornerbase();
 
     // The lower 14 stack registers remain unchanged during HORNERBASE.
-    for i in 0..14 {
-        builder
-            .when_transition()
-            .assert_zero(gate.clone() * (next.stack[i].into() - local.stack[i].into()));
+    {
+        let transition_gate = builder.is_transition() * gate.clone();
+        let builder = &mut builder.when(transition_gate);
+        for i in 0..14 {
+            builder.assert_eq(next.stack[i], local.stack[i]);
+        }
     }
 
     // Decoder helper columns contain alpha components and intermediate temporaries.
     // We read them starting at USER_OP_HELPERS_OFFSET to avoid hardcoding column indices.
     let base = USER_OP_HELPERS_OFFSET;
-    let a0: AB::Expr = local.decoder[base].into();
-    let a1: AB::Expr = local.decoder[base + 1].into();
-    let tmp1_0: AB::Expr = local.decoder[base + 2].into();
-    let tmp1_1: AB::Expr = local.decoder[base + 3].into();
-    let tmp0_0: AB::Expr = local.decoder[base + 4].into();
-    let tmp0_1: AB::Expr = local.decoder[base + 5].into();
+    let a0 = local.decoder[base];
+    let a1 = local.decoder[base + 1];
+    let tmp1_0 = local.decoder[base + 2];
+    let tmp1_1 = local.decoder[base + 3];
+    let tmp0_0 = local.decoder[base + 4];
+    let tmp0_1 = local.decoder[base + 5];
 
-    let acc0: AB::Expr = local.stack[14].into();
-    let acc1: AB::Expr = local.stack[15].into();
-    let acc0_next: AB::Expr = next.stack[14].into();
-    let acc1_next: AB::Expr = next.stack[15].into();
+    let acc0 = local.stack[14];
+    let acc1 = local.stack[15];
+    let acc0_next = next.stack[14];
+    let acc1_next = next.stack[15];
 
     // Coefficients are read from the bottom of the stack.
-    let c: [AB::Expr; 8] = core::array::from_fn(|i| local.stack[i].into());
+    let c: [AB::Var; 8] = core::array::from_fn(|i| local.stack[i]);
 
     // Quadratic extension view (Fp2 with u^2 = 7):
     // - alpha = (a0, a1), acc = (acc0, acc1)
@@ -132,25 +119,35 @@ fn enforce_hornerbase_constraints<AB>(
 
     // tmp0 = acc * alpha^2 + (c0 * alpha + c1)
     let tmp0_expected: QuadFeltExpr<AB::Expr> =
-        acc_alpha2 + alpha.clone() * c[0].clone() + c[1].clone();
+        acc_alpha2 + alpha.clone() * c[0].into() + c[1].into();
     let [tmp0_exp_0, tmp0_exp_1] = tmp0_expected.into_parts();
 
     // tmp1 = tmp0 * alpha^3 + (c2 * alpha^2 + c3 * alpha + c4)
     let tmp1_expected: QuadFeltExpr<AB::Expr> =
-        tmp0_alpha3 + alpha2.clone() * c[2].clone() + alpha.clone() * c[3].clone() + c[4].clone();
+        tmp0_alpha3 + alpha2.clone() * c[2].into() + alpha.clone() * c[3].into() + c[4].into();
     let [tmp1_exp_0, tmp1_exp_1] = tmp1_expected.into_parts();
 
     // acc' = tmp1 * alpha^3 + (alpha^2 * c5 + alpha * c6 + c7)
     let acc_expected: QuadFeltExpr<AB::Expr> =
-        tmp1 * alpha3 + alpha2.clone() * c[5].clone() + alpha.clone() * c[6].clone() + c[7].clone();
+        tmp1 * alpha3 + alpha2.clone() * c[5].into() + alpha.clone() * c[6].into() + c[7].into();
     let [acc_exp_0, acc_exp_1] = acc_expected.into_parts();
 
-    builder.assert_zero(gate.clone() * (tmp0_0 - tmp0_exp_0));
-    builder.assert_zero(gate.clone() * (tmp0_1 - tmp0_exp_1));
-    builder.assert_zero(gate.clone() * (tmp1_0 - tmp1_exp_0));
-    builder.assert_zero(gate.clone() * (tmp1_1 - tmp1_exp_1));
-    builder.when_transition().assert_zero(gate.clone() * (acc0_next - acc_exp_0));
-    builder.when_transition().assert_zero(gate * (acc1_next - acc_exp_1));
+    // tmp constraints (non-transition)
+    {
+        let builder = &mut builder.when(gate.clone());
+        builder.assert_eq(tmp0_0, tmp0_exp_0);
+        builder.assert_eq(tmp0_1, tmp0_exp_1);
+        builder.assert_eq(tmp1_0, tmp1_exp_0);
+        builder.assert_eq(tmp1_1, tmp1_exp_1);
+    }
+
+    // accumulator update constraints (transition)
+    {
+        let transition_gate = builder.is_transition() * gate;
+        let builder = &mut builder.when(transition_gate);
+        builder.assert_eq(acc0_next, acc_exp_0);
+        builder.assert_eq(acc1_next, acc_exp_1);
+    }
 }
 
 fn enforce_hornerext_constraints<AB>(
@@ -168,26 +165,28 @@ fn enforce_hornerext_constraints<AB>(
     let gate = op_flags.hornerext();
 
     // The lower 14 stack registers are unchanged by HORNEREXT.
-    for i in 0..14 {
-        builder
-            .when_transition()
-            .assert_zero(gate.clone() * (next.stack[i].into() - local.stack[i].into()));
+    {
+        let transition_gate = builder.is_transition() * gate.clone();
+        let builder = &mut builder.when(transition_gate);
+        for i in 0..14 {
+            builder.assert_eq(next.stack[i], local.stack[i]);
+        }
     }
 
     // Helper columns and accumulator values.
     let base = USER_OP_HELPERS_OFFSET;
-    let a0: AB::Expr = local.decoder[base].into();
-    let a1: AB::Expr = local.decoder[base + 1].into();
-    let tmp0: AB::Expr = local.decoder[base + 4].into();
-    let tmp1: AB::Expr = local.decoder[base + 5].into();
+    let a0 = local.decoder[base];
+    let a1 = local.decoder[base + 1];
+    let tmp0 = local.decoder[base + 4];
+    let tmp1 = local.decoder[base + 5];
 
-    let acc0: AB::Expr = local.stack[14].into();
-    let acc1: AB::Expr = local.stack[15].into();
-    let acc0_next: AB::Expr = next.stack[14].into();
-    let acc1_next: AB::Expr = next.stack[15].into();
+    let acc0 = local.stack[14];
+    let acc1 = local.stack[15];
+    let acc0_next = next.stack[14];
+    let acc1_next = next.stack[15];
 
     // Coefficients live at the bottom of the stack.
-    let s: [AB::Expr; 8] = core::array::from_fn(|i| local.stack[i].into());
+    let s: [AB::Var; 8] = core::array::from_fn(|i| local.stack[i]);
 
     // Quadratic extension view (Fp2 with u^2 = 7):
     // - alpha = (a0, a1), acc = (acc0, acc1), tmp = (tmp0, tmp1)
@@ -217,8 +216,18 @@ fn enforce_hornerext_constraints<AB>(
     let acc_expected: QuadFeltExpr<AB::Expr> = tmp_alpha2 + alpha * c2 + c3;
     let [acc_exp_0, acc_exp_1] = acc_expected.into_parts();
 
-    builder.assert_zero(gate.clone() * (tmp0 - tmp_exp_0));
-    builder.assert_zero(gate.clone() * (tmp1 - tmp_exp_1));
-    builder.when_transition().assert_zero(gate.clone() * (acc0_next - acc_exp_0));
-    builder.when_transition().assert_zero(gate * (acc1_next - acc_exp_1));
+    // tmp constraints (non-transition)
+    {
+        let builder = &mut builder.when(gate.clone());
+        builder.assert_eq(tmp0, tmp_exp_0);
+        builder.assert_eq(tmp1, tmp_exp_1);
+    }
+
+    // accumulator update constraints (transition)
+    {
+        let transition_gate = builder.is_transition() * gate;
+        let builder = &mut builder.when(transition_gate);
+        builder.assert_eq(acc0_next, acc_exp_0);
+        builder.assert_eq(acc1_next, acc_exp_1);
+    }
 }

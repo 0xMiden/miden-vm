@@ -179,7 +179,7 @@ where
     AB: MidenAirBuilder,
 {
     OP_BIT_WEIGHTS.iter().enumerate().fold(AB::Expr::ZERO, |acc, (i, weight)| {
-        let bit: AB::Expr = row.decoder[1 + i].into();
+        let bit = row.decoder[1 + i];
         acc + bit * Felt::new(*weight as u64)
     })
 }
@@ -253,52 +253,49 @@ pub fn enforce_block_stack_table_constraint<AB>(
         (aux_local[P1_BLOCK_STACK], aux_next[P1_BLOCK_STACK])
     };
 
-    // Helper to convert trace value to base field expression
-    let to_expr = |v: AB::Var| -> AB::Expr { v.into() };
-
     // =========================================================================
     // TRACE VALUE EXTRACTION
     // =========================================================================
 
     // Block addresses
-    let addr_local = to_expr(local.decoder[decoder_cols::ADDR]);
-    let addr_next = to_expr(next.decoder[decoder_cols::ADDR]);
+    let addr_local: AB::Expr = local.decoder[decoder_cols::ADDR].into();
+    let addr_next: AB::Expr = next.decoder[decoder_cols::ADDR].into();
 
     // Hasher state element 1 (for RESPAN parent_id)
-    let h1_next = to_expr(next.decoder[decoder_cols::HASHER_STATE_OFFSET + 1]);
+    let h1_next: AB::Expr = next.decoder[decoder_cols::HASHER_STATE_OFFSET + 1].into();
 
     // Stack top (for LOOP is_loop condition)
-    let s0 = to_expr(local.stack[0]);
+    let s0: AB::Expr = local.stack[0].into();
 
     // Context info for CALL/SYSCALL/DYNCALL insertions (from current row)
-    let ctx_local = to_expr(local.ctx);
-    let b0_local = to_expr(local.stack[stack_cols::B0]);
-    let b1_local = to_expr(local.stack[stack_cols::B1]);
+    let ctx_local: AB::Expr = local.ctx.into();
+    let b0_local: AB::Expr = local.stack[stack_cols::B0].into();
+    let b1_local: AB::Expr = local.stack[stack_cols::B1].into();
     let fn_hash_local: [AB::Expr; 4] = [
-        to_expr(local.fn_hash[0]),
-        to_expr(local.fn_hash[1]),
-        to_expr(local.fn_hash[2]),
-        to_expr(local.fn_hash[3]),
+        local.fn_hash[0].into(),
+        local.fn_hash[1].into(),
+        local.fn_hash[2].into(),
+        local.fn_hash[3].into(),
     ];
 
     // Hasher state for DYNCALL (h4, h5 contain post-shift stack state)
-    let h4_local = to_expr(local.decoder[decoder_cols::HASHER_STATE_OFFSET + 4]);
-    let h5_local = to_expr(local.decoder[decoder_cols::HASHER_STATE_OFFSET + 5]);
+    let h4_local: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 4].into();
+    let h5_local: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 5].into();
 
     // Flags for END context detection
-    let is_loop_flag = to_expr(local.decoder[decoder_cols::IS_LOOP_FLAG]);
-    let is_call_flag = to_expr(local.decoder[decoder_cols::IS_CALL_FLAG]);
-    let is_syscall_flag = to_expr(local.decoder[decoder_cols::IS_SYSCALL_FLAG]);
+    let is_loop_flag: AB::Expr = local.decoder[decoder_cols::IS_LOOP_FLAG].into();
+    let is_call_flag: AB::Expr = local.decoder[decoder_cols::IS_CALL_FLAG].into();
+    let is_syscall_flag: AB::Expr = local.decoder[decoder_cols::IS_SYSCALL_FLAG].into();
 
     // Context info for END after CALL/SYSCALL (from next row)
-    let ctx_next = to_expr(next.ctx);
-    let b0_next = to_expr(next.stack[stack_cols::B0]);
-    let b1_next = to_expr(next.stack[stack_cols::B1]);
+    let ctx_next: AB::Expr = next.ctx.into();
+    let b0_next: AB::Expr = next.stack[stack_cols::B0].into();
+    let b1_next: AB::Expr = next.stack[stack_cols::B1].into();
     let fn_hash_next: [AB::Expr; 4] = [
-        to_expr(next.fn_hash[0]),
-        to_expr(next.fn_hash[1]),
-        to_expr(next.fn_hash[2]),
-        to_expr(next.fn_hash[3]),
+        next.fn_hash[0].into(),
+        next.fn_hash[1].into(),
+        next.fn_hash[2].into(),
+        next.fn_hash[3].into(),
     ];
     // =========================================================================
     // MESSAGE BUILDERS
@@ -397,7 +394,7 @@ pub fn enforce_block_stack_table_constraint<AB>(
     // END for CALL/SYSCALL: remove(addr, addr', is_loop_flag, ctx', b0', b1', fn_hash'[0..4])
     // Note: The is_loop value is the is_loop_flag from the current row (same as simple END)
     // Context values come from the next row's dedicated columns (not hasher state)
-    let is_call_or_syscall = is_call_flag.clone() + is_syscall_flag.clone();
+    let is_call_or_syscall = is_call_flag + is_syscall_flag;
     let msg_end_call = encoders.full(
         &addr_local,
         &addr_next,
@@ -493,39 +490,36 @@ pub fn enforce_block_hash_table_constraint<AB>(
         )
     };
 
-    // Helper to convert trace value to base field expression
-    let to_expr = |v: AB::Var| -> AB::Expr { v.into() };
-
     // =========================================================================
     // TRACE VALUE EXTRACTION
     // =========================================================================
 
     // Parent block ID (next row's address for all insertions)
-    let parent_id = to_expr(next.decoder[decoder_cols::ADDR]);
+    let parent_id: AB::Expr = next.decoder[decoder_cols::ADDR].into();
     // Hasher state for child hashes
     // First half: h[0..4]
-    let h0 = to_expr(local.decoder[decoder_cols::HASHER_STATE_OFFSET]);
-    let h1 = to_expr(local.decoder[decoder_cols::HASHER_STATE_OFFSET + 1]);
-    let h2 = to_expr(local.decoder[decoder_cols::HASHER_STATE_OFFSET + 2]);
-    let h3 = to_expr(local.decoder[decoder_cols::HASHER_STATE_OFFSET + 3]);
+    let h0: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET].into();
+    let h1: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 1].into();
+    let h2: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 2].into();
+    let h3: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 3].into();
     // Second half: h[4..8]
-    let h4 = to_expr(local.decoder[decoder_cols::HASHER_STATE_OFFSET + 4]);
-    let h5 = to_expr(local.decoder[decoder_cols::HASHER_STATE_OFFSET + 5]);
-    let h6 = to_expr(local.decoder[decoder_cols::HASHER_STATE_OFFSET + 6]);
-    let h7 = to_expr(local.decoder[decoder_cols::HASHER_STATE_OFFSET + 7]);
+    let h4: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 4].into();
+    let h5: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 5].into();
+    let h6: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 6].into();
+    let h7: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 7].into();
 
     // Stack top (for SPLIT and LOOP conditions)
-    let s0: AB::Expr = to_expr(local.stack[0]);
+    let s0: AB::Expr = local.stack[0].into();
 
     // For END: block hash comes from current row's hasher state first half
-    let end_parent_id = to_expr(next.decoder[decoder_cols::ADDR]);
+    let end_parent_id = parent_id.clone();
     let end_hash_0 = h0.clone();
     let end_hash_1 = h1.clone();
     let end_hash_2 = h2.clone();
     let end_hash_3 = h3.clone();
 
     // is_loop_body flag for END (stored at hasher_state[4] = IS_LOOP_BODY_FLAG)
-    let is_loop_body_flag = to_expr(local.decoder[decoder_cols::HASHER_STATE_OFFSET + 4]);
+    let is_loop_body_flag: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 4].into();
 
     // is_first_child detection for END:
     // A block is first_child if the NEXT row's opcode is NOT (END, REPEAT, or HALT).
@@ -731,41 +725,38 @@ pub fn enforce_op_group_table_constraint<AB>(
         )
     };
 
-    // Helper to convert trace value to base field expression
-    let to_expr = |v: AB::Var| -> AB::Expr { v.into() };
-
     // =========================================================================
     // TRACE VALUE EXTRACTION
     // =========================================================================
 
     // Block ID (next row's address for insertions, current for removals)
-    let block_id_insert = to_expr(next.decoder[decoder_cols::ADDR]);
-    let block_id_remove = to_expr(local.decoder[decoder_cols::ADDR]);
+    let block_id_insert: AB::Expr = next.decoder[decoder_cols::ADDR].into();
+    let block_id_remove: AB::Expr = local.decoder[decoder_cols::ADDR].into();
 
     // Group count
-    let gc = to_expr(local.decoder[op_group_cols::GROUP_COUNT]);
-    let gc_next = to_expr(next.decoder[op_group_cols::GROUP_COUNT]);
+    let gc: AB::Expr = local.decoder[op_group_cols::GROUP_COUNT].into();
+    let gc_next: AB::Expr = next.decoder[op_group_cols::GROUP_COUNT].into();
 
     // Hasher state for group values (h1-h7, h0 is decoded immediately)
-    let h1 = to_expr(local.decoder[decoder_cols::HASHER_STATE_OFFSET + 1]);
-    let h2 = to_expr(local.decoder[decoder_cols::HASHER_STATE_OFFSET + 2]);
-    let h3 = to_expr(local.decoder[decoder_cols::HASHER_STATE_OFFSET + 3]);
-    let h4 = to_expr(local.decoder[decoder_cols::HASHER_STATE_OFFSET + 4]);
-    let h5 = to_expr(local.decoder[decoder_cols::HASHER_STATE_OFFSET + 5]);
-    let h6 = to_expr(local.decoder[decoder_cols::HASHER_STATE_OFFSET + 6]);
-    let h7 = to_expr(local.decoder[decoder_cols::HASHER_STATE_OFFSET + 7]);
+    let h1: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 1].into();
+    let h2: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 2].into();
+    let h3: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 3].into();
+    let h4: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 4].into();
+    let h5: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 5].into();
+    let h6: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 6].into();
+    let h7: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 7].into();
 
     // Batch flag columns (c0, c1, c2)
-    let c0 = to_expr(local.decoder[op_group_cols::BATCH_FLAG_0]);
-    let c1 = to_expr(local.decoder[op_group_cols::BATCH_FLAG_1]);
-    let c2 = to_expr(local.decoder[op_group_cols::BATCH_FLAG_2]);
+    let c0: AB::Expr = local.decoder[op_group_cols::BATCH_FLAG_0].into();
+    let c1: AB::Expr = local.decoder[op_group_cols::BATCH_FLAG_1].into();
+    let c2: AB::Expr = local.decoder[op_group_cols::BATCH_FLAG_2].into();
 
     // For removal: h0' and s0' from next row
-    let h0_next = to_expr(next.decoder[decoder_cols::HASHER_STATE_OFFSET]);
-    let s0_next = to_expr(next.stack[0]);
+    let h0_next: AB::Expr = next.decoder[decoder_cols::HASHER_STATE_OFFSET].into();
+    let s0_next: AB::Expr = next.stack[0].into();
 
     // is_in_span flag (sp)
-    let sp = to_expr(local.decoder[op_group_cols::IS_IN_SPAN]);
+    let sp = local.decoder[op_group_cols::IS_IN_SPAN];
 
     // =========================================================================
     // MESSAGE BUILDER

@@ -59,21 +59,21 @@ pub fn enforce_memory_constraints<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    let s0: AB::Expr = local.chiplets[0].into();
-    let s1: AB::Expr = local.chiplets[1].into();
-    let s1_next: AB::Expr = next.chiplets[1].into();
-    let s2_next: AB::Expr = next.chiplets[2].into();
+    let s0 = local.chiplets[0];
+    let s1 = local.chiplets[1];
+    let s1_next = next.chiplets[1];
+    let s2_next = next.chiplets[2];
 
     let is_transition: AB::Expr = builder.is_transition();
 
     enforce_memory_constraints_all_rows(builder, local, next);
 
     let flag_next_row_first_memory = is_transition.clone()
-        * flag_next_row_first_memory(s0.clone(), s1.clone(), s1_next, s2_next.clone());
+        * flag_next_row_first_memory(s0.into(), s1.into(), s1_next.into(), s2_next.into());
     enforce_memory_constraints_first_row(builder, local, next, flag_next_row_first_memory);
 
     let flag_memory_active_not_last =
-        is_transition * flag_memory_active_not_last_row(s0, s1, s2_next);
+        is_transition * flag_memory_active_not_last_row(s0.into(), s1.into(), s2_next.into());
     enforce_memory_constraints_all_rows_except_last(
         builder,
         local,
@@ -94,10 +94,10 @@ pub fn enforce_memory_constraints_all_rows<AB>(
     AB: MidenAirBuilder,
 {
     // Compute memory active flag from top-level selectors
-    let s0: AB::Expr = local.chiplets[0].into();
-    let s1: AB::Expr = local.chiplets[1].into();
-    let s2: AB::Expr = local.chiplets[2].into();
-    let memory_flag = memory_chiplet_flag(s0, s1, s2);
+    let s0 = local.chiplets[0];
+    let s1 = local.chiplets[1];
+    let s2 = local.chiplets[2];
+    let memory_flag = memory_chiplet_flag(s0.into(), s1.into(), s2.into());
 
     // Load memory columns using typed struct
     let cols: MemoryColumns<AB::Expr> = MemoryColumns::from_row::<AB>(local);
