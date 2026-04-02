@@ -424,3 +424,16 @@ kernel_rom.rs:70-73→62-65. Identical assertion expressions (`assert_eq(krom_ne
 **No constraint changes.** (446 base + 24 ext)
 
 ---
+## 43. refactor(decoder): inline all constraint helpers into enforce_main and rewrite documentation
+
+**3 updated** | 467 unchanged
+
+**Updated:**
+
+| # | Before | After | Interpretation |
+|---|--------|-------|----------------|
+| 1 | `decoder/mod.rs:173` | `decoder/mod.rs:208` |  |
+| 2 | `decoder/mod.rs:180` | `decoder/mod.rs:214` |  |
+| 3 | `decoder/mod.rs:181` | `decoder/mod.rs:213` |  |
+
+---
