@@ -7,6 +7,13 @@ exclude = [
     '^file:///.*\.png$',                        # Image files
     '^file:///.*\.svg$',                        # SVG files
     '^https://www.gnu.org/software/make/manual/make\.html$',  # GNU make manual
+    '^https://crates\.io/crates/miden-',        # miden-* crates not yet published on crates.io
+    '^https://crates\.io/crates/once_cell',     # moved to std::sync::OnceLock
+    '^https://crates\.io/crates/tracing',       # temporarily unavailable
+    '^https://nakamoto\.com/',                  # site is down
+    '^https://vitalik\.eth\.limo/',            # site frequently times out
+    '^https://github\.com/example/',            # placeholder example URLs
+    '^https://en\.wikipedia\.org/wiki/Metal_', # malformed URL with unencoded bracket
 ]
 
 # Exclude these filesystem paths from getting checked.
@@ -15,4 +22,3 @@ exclude_path = [
     "node_modules/*",
     "target/*",
 ]
-
