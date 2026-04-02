@@ -61,7 +61,6 @@ impl<EF: PrimeCharacteristicRing> Challenges<EF> {
     pub fn encode<BF, const K: usize>(&self, bus: usize, elems: [BF; K]) -> EF
     where
         EF: Mul<BF, Output = EF> + AddAssign,
-        BF: Clone,
     {
         const { assert!(K <= MAX_MESSAGE_WIDTH, "Message length exceeds beta_powers capacity") };
         debug_assert!(
@@ -69,8 +68,8 @@ impl<EF: PrimeCharacteristicRing> Challenges<EF> {
             "Bus index {bus} exceeds NUM_BUS_TYPES ({NUM_BUS_TYPES})"
         );
         let mut acc = self.bus_prefix[bus].clone();
-        for (i, elem) in elems.iter().enumerate() {
-            acc += self.beta_powers[i].clone() * elem.clone();
+        for (i, elem) in elems.into_iter().enumerate() {
+            acc += self.beta_powers[i].clone() * elem;
         }
         acc
     }
@@ -88,22 +87,20 @@ impl<EF: PrimeCharacteristicRing> Challenges<EF> {
     ) -> EF
     where
         EF: Mul<BF, Output = EF> + AddAssign,
-        BF: Clone,
     {
         debug_assert!(
             bus < NUM_BUS_TYPES,
             "Bus index {bus} exceeds NUM_BUS_TYPES ({NUM_BUS_TYPES})"
         );
         let mut acc = self.bus_prefix[bus].clone();
-        for i in 0..K {
-            let idx = layout[i];
+        for (idx, value) in layout.into_iter().zip(values) {
             debug_assert!(
                 idx < self.beta_powers.len(),
                 "encode_sparse index {} exceeds beta_powers length ({})",
                 idx,
                 self.beta_powers.len()
             );
-            acc += self.beta_powers[idx].clone() * values[i].clone();
+            acc += self.beta_powers[idx].clone() * value;
         }
         acc
     }

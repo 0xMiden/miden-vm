@@ -32,7 +32,6 @@ use crate::{
             ace::{ACE_INSTRUCTION_ID1_OFFSET, ACE_INSTRUCTION_ID2_OFFSET},
             memory::{MEMORY_READ_ELEMENT_LABEL, MEMORY_READ_WORD_LABEL},
         },
-        decoder::USER_OP_HELPERS_OFFSET,
         log_precompile::{HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE},
     },
 };
@@ -97,9 +96,9 @@ pub fn enforce_hash_kernel_constraint<AB>(
     let node_index = hasher.node_index;
     let node_index_next = hasher_next.node_index;
 
-    // Hasher state for sibling values
-    let h: [AB::Expr; 12] = core::array::from_fn(|i| hasher.state[i].into());
-    let h_next: [AB::Expr; 12] = core::array::from_fn(|i| hasher_next.state[i].into());
+    // Hasher state for sibling values (kept as Var; converted to Expr on demand)
+    let h = &hasher.state;
+    let h_next = &hasher_next.state;
 
     // =========================================================================
     // SIBLING TABLE FLAGS AND VALUES
@@ -125,15 +124,12 @@ pub fn enforce_hash_kernel_constraint<AB>(
 
     // Sibling value for current row (uses current hasher state).
     // b selects which half of the rate holds the sibling.
-    let node_index_expr: AB::Expr = node_index.into();
-    let v_sibling_curr = compute_sibling_b0::<AB>(challenges, &node_index_expr, &h)
-        * is_b_zero.clone()
-        + compute_sibling_b1::<AB>(challenges, &node_index_expr, &h) * is_b_one.clone();
+    let v_sibling_curr = compute_sibling_b0::<AB>(challenges, node_index, h) * is_b_zero.clone()
+        + compute_sibling_b1::<AB>(challenges, node_index, h) * is_b_one.clone();
 
     // Sibling value for next row (used by MVA/MUA on the transition row).
-    let v_sibling_next = compute_sibling_b0::<AB>(challenges, &node_index_expr, &h_next)
-        * is_b_zero
-        + compute_sibling_b1::<AB>(challenges, &node_index_expr, &h_next) * is_b_one;
+    let v_sibling_next = compute_sibling_b0::<AB>(challenges, node_index, h_next) * is_b_zero
+        + compute_sibling_b1::<AB>(challenges, node_index, h_next) * is_b_one;
 
     // =========================================================================
     // ACE MEMORY FLAGS AND VALUES
@@ -167,6 +163,7 @@ pub fn enforce_hash_kernel_constraint<AB>(
 
     // Element read value: label + ctx + ptr + clk + element.
     let v_ace_element = {
+        let label: AB::Expr = Felt::from_u8(MEMORY_READ_ELEMENT_LABEL).into();
         let id_1 = ace.shared[3]; // ID_1
         let id_2 = ace.shared[6]; // ID_2
         let eval_op = ace.eval_op;
@@ -174,8 +171,6 @@ pub fn enforce_hash_kernel_constraint<AB>(
         let offset1: AB::Expr = ACE_INSTRUCTION_ID1_OFFSET.into();
         let offset2: AB::Expr = ACE_INSTRUCTION_ID2_OFFSET.into();
         let element = id_1 + id_2 * offset1 + (eval_op + AB::Expr::ONE) * offset2;
-        let label: AB::Expr = Felt::from_u8(MEMORY_READ_ELEMENT_LABEL).into();
-
         challenges
             .encode(CHIPLETS_BUS, [label, ace.ctx.into(), ace.ptr.into(), ace.clk.into(), element])
     };
@@ -187,13 +182,11 @@ pub fn enforce_hash_kernel_constraint<AB>(
     let f_logprecompile: AB::Expr = op_flags.log_precompile();
 
     // CAP_PREV from helper registers (provided and constrained by the decoder logic).
-    let cap_prev: [AB::Expr; 4] = core::array::from_fn(|i| {
-        local.decoder[USER_OP_HELPERS_OFFSET + HELPER_CAP_PREV_RANGE.start + i].into()
-    });
+    let helpers = local.decoder.user_op_helpers();
+    let cap_prev = &helpers[HELPER_CAP_PREV_RANGE];
 
     // CAP_NEXT from next-row stack.
-    let cap_next: [AB::Expr; 4] =
-        core::array::from_fn(|i| next.stack[STACK_CAP_NEXT_RANGE.start + i].into());
+    let cap_next = &next.stack.top[STACK_CAP_NEXT_RANGE];
 
     let log_label: AB::Expr = Felt::from_u8(LOG_PRECOMPILE_LABEL).into();
 
@@ -202,10 +195,10 @@ pub fn enforce_hash_kernel_constraint<AB>(
         LOG_PRECOMPILE_TRANSCRIPT,
         [
             log_label.clone(),
-            cap_prev[0].clone(),
-            cap_prev[1].clone(),
-            cap_prev[2].clone(),
-            cap_prev[3].clone(),
+            cap_prev[0].into(),
+            cap_prev[1].into(),
+            cap_prev[2].into(),
+            cap_prev[3].into(),
         ],
     );
 
@@ -214,10 +207,10 @@ pub fn enforce_hash_kernel_constraint<AB>(
         LOG_PRECOMPILE_TRANSCRIPT,
         [
             log_label,
-            cap_next[0].clone(),
-            cap_next[1].clone(),
-            cap_next[2].clone(),
-            cap_next[3].clone(),
+            cap_next[0].into(),
+            cap_next[1].into(),
+            cap_next[2].into(),
+            cap_next[3].into(),
         ],
     );
 
@@ -264,8 +257,8 @@ const SIBLING_B1_LAYOUT: [usize; 5] = [2, 3, 4, 5, 6];
 
 fn compute_sibling_b0<AB>(
     challenges: &Challenges<AB::ExprEF>,
-    node_index: &AB::Expr,
-    h: &[AB::Expr; 12],
+    node_index: AB::Var,
+    h: &[AB::Var; 12],
 ) -> AB::ExprEF
 where
     AB: MidenAirBuilder,
@@ -273,7 +266,7 @@ where
     challenges.encode_sparse(
         SIBLING_TABLE,
         SIBLING_B0_LAYOUT,
-        [node_index.clone(), h[4].clone(), h[5].clone(), h[6].clone(), h[7].clone()],
+        [node_index.into(), h[4].into(), h[5].into(), h[6].into(), h[7].into()],
     )
 }
 
@@ -282,8 +275,8 @@ where
 /// Message layout: alpha[0] (constant) + alpha[3] * node_index + alpha[4..7] * h[0..3].
 fn compute_sibling_b1<AB>(
     challenges: &Challenges<AB::ExprEF>,
-    node_index: &AB::Expr,
-    h: &[AB::Expr; 12],
+    node_index: AB::Var,
+    h: &[AB::Var; 12],
 ) -> AB::ExprEF
 where
     AB: MidenAirBuilder,
@@ -291,6 +284,6 @@ where
     challenges.encode_sparse(
         SIBLING_TABLE,
         SIBLING_B1_LAYOUT,
-        [node_index.clone(), h[0].clone(), h[1].clone(), h[2].clone(), h[3].clone()],
+        [node_index.into(), h[0].into(), h[1].into(), h[2].into(), h[3].into()],
     )
 }
