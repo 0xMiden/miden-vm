@@ -20,7 +20,7 @@ use crate::{
     constraints::utils::BoolNot,
     trace::{
         CHIPLET_S0_COL_IDX, CHIPLET_S1_COL_IDX, CHIPLET_S2_COL_IDX, CHIPLETS_OFFSET, Challenges,
-        RANGE_CHECK_TRACE_OFFSET, bus_types::RANGE_CHECK_BUS, chiplets, decoder, range,
+        bus_types::RANGE_CHECK_BUS, chiplets, decoder, range,
     },
 };
 
@@ -37,8 +37,6 @@ const CHIPLET_S1_IDX: usize = CHIPLET_S1_COL_IDX - CHIPLETS_OFFSET;
 const CHIPLET_S2_IDX: usize = CHIPLET_S2_COL_IDX - CHIPLETS_OFFSET;
 const MEMORY_D0_IDX: usize = chiplets::MEMORY_D0_COL_IDX - CHIPLETS_OFFSET;
 const MEMORY_D1_IDX: usize = chiplets::MEMORY_D1_COL_IDX - CHIPLETS_OFFSET;
-const RANGE_M_COL_IDX: usize = range::M_COL_IDX - RANGE_CHECK_TRACE_OFFSET;
-const RANGE_V_COL_IDX: usize = range::V_COL_IDX - RANGE_CHECK_TRACE_OFFSET;
 
 // ENTRY POINTS
 // ================================================================================================
@@ -88,7 +86,7 @@ pub fn enforce_bus<AB>(
     let sv3: AB::ExprEF = alpha.clone() + local.decoder[STACK_LOOKUP_BASE + 3].into();
 
     // Range check value: alpha + range V column
-    let range_check: AB::ExprEF = alpha.clone() + local.range[RANGE_V_COL_IDX].into();
+    let range_check: AB::ExprEF = alpha.clone() + local.range.value.into();
 
     // Combined lookup denominators
     let memory_lookups = mv0.clone() * mv1.clone();
@@ -112,7 +110,7 @@ pub fn enforce_bus<AB>(
     // LogUp transition constraint terms
     let b_next_term = b_next.into() * lookups.clone();
     let b_term = b_local.into() * lookups;
-    let rc_term = stack_lookups * memory_lookups * local.range[RANGE_M_COL_IDX].into();
+    let rc_term = stack_lookups * memory_lookups * local.range.multiplicity.into();
 
     // Stack lookup removal terms
     let s0_term = sflag_rc_mem.clone() * sv1.clone() * sv2.clone() * sv3.clone();

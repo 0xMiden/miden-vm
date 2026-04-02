@@ -8,19 +8,9 @@
 
 use miden_crypto::stark::air::AirBuilder;
 
-use crate::{
-    MainTraceRow, MidenAirBuilder,
-    constraints::constants::*,
-    trace::{RANGE_CHECK_TRACE_OFFSET, range},
-};
+use crate::{MainTraceRow, MidenAirBuilder, constraints::constants::*};
 
 pub mod bus;
-
-// CONSTANTS
-// ================================================================================================
-
-// --- SLICE-RELATIVE INDICES ---------------------------------------------------------------------
-const RANGE_V_COL_IDX: usize = range::V_COL_IDX - RANGE_CHECK_TRACE_OFFSET;
 
 // ENTRY POINTS
 // ================================================================================================
@@ -33,8 +23,8 @@ pub fn enforce_main<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    let v = local.range[RANGE_V_COL_IDX];
-    let v_next = next.range[RANGE_V_COL_IDX];
+    let v = local.range.value;
+    let v_next = next.range.value;
 
     // Range checker boundaries: V[0] = 0, V[last] = 2^16 - 1
     {
