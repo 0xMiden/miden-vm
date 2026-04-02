@@ -1180,6 +1180,45 @@ fn mast_forest_merge_op_indexed_decorators_preservation() {
     );
 }
 
+#[test]
+fn mast_forest_merge_preserves_asm_op_mappings_for_deduplicated_nodes() {
+    let mut forest_without_asm = MastForest::new();
+    let without_asm_block_id = block_foo().add_to_forest(&mut forest_without_asm).unwrap();
+    forest_without_asm.make_root(without_asm_block_id);
+
+    let mut forest_with_asm = MastForest::new();
+    let with_asm_block_id = block_foo().add_to_forest(&mut forest_with_asm).unwrap();
+    forest_with_asm.make_root(with_asm_block_id);
+
+    let asm_op = AssemblyOp::new(None, "proc::foo".into(), 1, "mul".into());
+    let asm_op_id = forest_with_asm.debug_info_mut().add_asm_op(asm_op.clone()).unwrap();
+    forest_with_asm
+        .debug_info_mut()
+        .register_asm_ops(with_asm_block_id, 2, vec![(0, asm_op_id)])
+        .unwrap();
+
+    // Mapping from the second forest must be preserved even when the node was already deduped
+    // after merging the first forest.
+    let (merged_without_then_with, root_maps_without_then_with) =
+        MastForest::merge([&forest_without_asm, &forest_with_asm]).unwrap();
+    let mapped_with_asm_root = root_maps_without_then_with.map_root(1, &with_asm_block_id).unwrap();
+
+    assert_eq!(
+        merged_without_then_with.get_assembly_op(mapped_with_asm_root, Some(0)),
+        Some(&asm_op),
+    );
+
+    // Reverse order should behave identically.
+    let (merged_with_then_without, root_maps_with_then_without) =
+        MastForest::merge([&forest_with_asm, &forest_without_asm]).unwrap();
+    let mapped_with_asm_root = root_maps_with_then_without.map_root(0, &with_asm_block_id).unwrap();
+
+    assert_eq!(
+        merged_with_then_without.get_assembly_op(mapped_with_asm_root, Some(0)),
+        Some(&asm_op),
+    );
+}
+
 /// Merging two forests preserves procedure names, asm ops, and debug vars
 /// with correct node-ID remapping.
 #[test]
