@@ -70,7 +70,7 @@ const DEGREE_5_OPCODE_ENDS: usize = DEGREE_5_OPCODE_STARTS + 15;
 const DEGREE_4_OPCODE_STARTS: usize = DEGREE_5_OPCODE_ENDS + 1;
 
 /// Opcode at which degree 4 operations end.
-#[allow(dead_code)]
+#[cfg(test)]
 const DEGREE_4_OPCODE_ENDS: usize = DEGREE_4_OPCODE_STARTS + 31;
 
 // INTERNAL HELPERS
@@ -897,13 +897,6 @@ where
         self.control_flow.clone()
     }
 
-    /// Returns the flag when the current operation is a u32 operation requiring range checks.
-    #[inline(always)]
-    #[allow(dead_code)]
-    pub fn u32_rc_op(&self) -> E {
-        self.u32_rc_op.clone()
-    }
-
     /// Returns the flag indicating whether the overflow stack contains values.
     /// Degree: 2
     #[inline(always)]
@@ -913,6 +906,13 @@ where
 
     // TEST ACCESSORS
     // ============================================================================================
+
+    /// Returns the flag when the current operation is a u32 operation requiring range checks.
+    #[cfg(test)]
+    #[inline(always)]
+    pub fn u32_rc_op(&self) -> E {
+        self.u32_rc_op.clone()
+    }
 
     /// Returns reference to degree 7 operation flags array (for testing).
     #[cfg(test)]

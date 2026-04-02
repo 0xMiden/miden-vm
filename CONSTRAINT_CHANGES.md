@@ -39,3 +39,8 @@ resolving merge conflicts in this file.
 **No constraint changes.** (441 base + 24 ext)
 
 ---
+## 7. refactor: remove dead code and unnecessary allow(dead_code) annotations
+
+**No constraint changes.** (441 base + 24 ext)
+
+---
