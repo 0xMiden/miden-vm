@@ -59,14 +59,10 @@ pub fn enforce_main<AB>(
     // Boundary constraints: stack depth and overflow pointer must start/end clean.
     let sixteen: AB::Expr = AB::Expr::from_u16(16);
     let zero: AB::Expr = AB::Expr::ZERO;
-    builder
-        .when_first_row()
-        .assert_zero(local.stack[B0_COL_IDX].into() - sixteen.clone());
-    builder.when_last_row().assert_zero(local.stack[B0_COL_IDX].into() - sixteen);
-    builder
-        .when_first_row()
-        .assert_zero(local.stack[B1_COL_IDX].into() - zero.clone());
-    builder.when_last_row().assert_zero(local.stack[B1_COL_IDX].into() - zero);
+    builder.when_first_row().assert_eq(local.stack[B0_COL_IDX], sixteen.clone());
+    builder.when_last_row().assert_eq(local.stack[B0_COL_IDX], sixteen);
+    builder.when_first_row().assert_eq(local.stack[B1_COL_IDX], zero.clone());
+    builder.when_last_row().assert_eq(local.stack[B1_COL_IDX], zero);
 
     // Transition constraints: depth bookkeeping, overflow flag, and pointer updates.
     enforce_stack_depth_constraints(builder, local, next, op_flags);

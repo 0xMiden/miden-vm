@@ -435,7 +435,7 @@ pub fn enforce_block_stack_table_constraint<AB>(
     let lhs: AB::ExprEF = p1_next.into() * request;
     let rhs: AB::ExprEF = p1_local.into() * response;
 
-    builder.when_transition().assert_zero_ext(lhs - rhs);
+    builder.when_transition().assert_eq_ext(lhs, rhs);
 }
 
 // BLOCK HASH TABLE (p2)
@@ -659,7 +659,7 @@ pub fn enforce_block_hash_table_constraint<AB>(
     let lhs: AB::ExprEF = p2_next.into() * request;
     let rhs: AB::ExprEF = p2_local.into() * response;
 
-    builder.when_transition().assert_zero_ext(lhs - rhs);
+    builder.when_transition().assert_eq_ext(lhs, rhs);
 }
 
 // OP GROUP TABLE (p3)
@@ -871,5 +871,5 @@ pub fn enforce_op_group_table_constraint<AB>(
     let lhs: AB::ExprEF = p3_next.into() * request;
     let rhs: AB::ExprEF = p3_local.into() * response;
 
-    builder.when_transition().assert_zero_ext(lhs - rhs);
+    builder.when_transition().assert_eq_ext(lhs, rhs);
 }

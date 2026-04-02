@@ -49,3 +49,8 @@ resolving merge conflicts in this file.
 **No constraint changes.** (441 base + 24 ext)
 
 ---
+## 9. refactor: use semantic assertion methods in constraint code
+
+**No constraint changes.** (441 base + 24 ext)
+
+---

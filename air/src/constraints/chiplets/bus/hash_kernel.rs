@@ -263,7 +263,7 @@ pub fn enforce_hash_kernel_constraint<AB>(
 
     builder
         .when_transition()
-        .assert_zero_ext(p_next_ef * requests - p_local_ef * responses);
+        .assert_eq_ext(p_next_ef * requests, p_local_ef * responses);
 }
 
 // INTERNAL HELPERS

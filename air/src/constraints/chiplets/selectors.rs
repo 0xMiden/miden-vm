@@ -53,31 +53,26 @@ pub fn enforce_chiplet_selectors<AB>(
     let s3_next: AB::Expr = next.chiplets[3].into();
     let s4_next: AB::Expr = next.chiplets[4].into();
 
-    let one: AB::Expr = AB::Expr::ONE;
-
     // ==========================================================================
     // BINARY CONSTRAINTS
     // ==========================================================================
     // Each selector is binary when it could be active
 
     // s0 is always binary
-    builder.assert_zero(s0.clone() * (s0.clone() - one.clone()));
+    builder.assert_bool(s0.clone());
 
     // s1 is binary when s0 = 1 (bitwise, memory, ACE, or kernel ROM could be active)
-    builder.when(s0.clone()).assert_zero(s1.clone() * (s1.clone() - one.clone()));
+    builder.when(s0.clone()).assert_bool(s1.clone());
 
     // s2 is binary when s0 = 1 and s1 = 1 (memory, ACE, or kernel ROM could be active)
-    builder
-        .when(s0.clone())
-        .when(s1.clone())
-        .assert_zero(s2.clone() * (s2.clone() - one.clone()));
+    builder.when(s0.clone()).when(s1.clone()).assert_bool(s2.clone());
 
     // s3 is binary when s0 = s1 = s2 = 1 (ACE or kernel ROM could be active)
     builder
         .when(s0.clone())
         .when(s1.clone())
         .when(s2.clone())
-        .assert_zero(s3.clone() * (s3.clone() - one.clone()));
+        .assert_bool(s3.clone());
 
     // s4 is binary when s0 = s1 = s2 = s3 = 1 (kernel ROM could be active)
     builder
@@ -85,7 +80,7 @@ pub fn enforce_chiplet_selectors<AB>(
         .when(s1.clone())
         .when(s2.clone())
         .when(s3.clone())
-        .assert_zero(s4.clone() * (s4.clone() - one.clone()));
+        .assert_bool(s4.clone());
 
     // ==========================================================================
     // STABILITY CONSTRAINTS (transition only)
@@ -96,14 +91,14 @@ pub fn enforce_chiplet_selectors<AB>(
     builder
         .when_transition()
         .when(s0.clone())
-        .assert_zero(s0_next.clone() - s0.clone());
+        .assert_eq(s0_next.clone(), s0.clone());
 
     // s1' = s1 when s0 = 1 and s1 = 1
     builder
         .when_transition()
         .when(s0.clone())
         .when(s1.clone())
-        .assert_zero(s1_next.clone() - s1.clone());
+        .assert_eq(s1_next.clone(), s1.clone());
 
     // s2' = s2 when s0 = s1 = s2 = 1
     builder
@@ -111,7 +106,7 @@ pub fn enforce_chiplet_selectors<AB>(
         .when(s0.clone())
         .when(s1.clone())
         .when(s2.clone())
-        .assert_zero(s2_next.clone() - s2.clone());
+        .assert_eq(s2_next.clone(), s2.clone());
 
     // s3' = s3 when s0 = s1 = s2 = s3 = 1
     builder
@@ -120,7 +115,7 @@ pub fn enforce_chiplet_selectors<AB>(
         .when(s1.clone())
         .when(s2.clone())
         .when(s3.clone())
-        .assert_zero(s3_next.clone() - s3.clone());
+        .assert_eq(s3_next.clone(), s3.clone());
 
     // s4' = s4 when s0 = s1 = s2 = s3 = s4 = 1
     builder
@@ -130,7 +125,7 @@ pub fn enforce_chiplet_selectors<AB>(
         .when(s2)
         .when(s3)
         .when(s4.clone())
-        .assert_zero(s4_next - s4);
+        .assert_eq(s4_next, s4);
 }
 
 // INTERNAL HELPERS

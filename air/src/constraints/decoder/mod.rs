@@ -221,8 +221,7 @@ fn enforce_in_span_constraints<AB>(
     builder.when_first_row().assert_zero(sp.clone());
 
     // Constraint 1: sp is binary, so span state is well-formed.
-    let sp_binary = sp.clone() * (sp - AB::Expr::ONE);
-    builder.assert_zero(sp_binary);
+    builder.assert_bool(sp);
 
     // Constraint 2: After SPAN, the next row must be inside a span.
     // span_flag * (1 - sp') = 0
@@ -247,7 +246,7 @@ where
     for i in 0..NUM_OP_BITS {
         // Each opcode bit must be 0 or 1 to make decoding deterministic.
         let bit = cols.op_bits[i].clone();
-        builder.assert_zero(bit.clone() * (bit - AB::Expr::ONE));
+        builder.assert_bool(bit);
     }
 }
 
@@ -271,13 +270,13 @@ where
     // This extra register exists to reduce the degree of op-flag selectors for the
     // `101...` opcode group (see docs/src/design/stack/op_constraints.md).
     let expected_e0 = b6.clone() * (AB::Expr::ONE - b5.clone()) * b4;
-    builder.assert_zero(e0 - expected_e0);
+    builder.assert_eq(e0, expected_e0);
 
     // e1 = b6 * b5.
     // This extra register exists to reduce the degree of op-flag selectors for the
     // `11...` opcode group (see docs/src/design/stack/op_constraints.md).
     let expected_e1 = b6 * b5;
-    builder.assert_zero(e1 - expected_e1);
+    builder.assert_eq(e1, expected_e1);
 }
 
 /// Enforces opcode-bit constraints for grouped opcode families.
@@ -316,7 +315,7 @@ where
     for i in 0..NUM_BATCH_FLAGS {
         // Batch flags are selectors; they must be boolean.
         let flag = cols.batch_flags[i].clone();
-        builder.assert_zero(flag.clone() * (flag - AB::Expr::ONE));
+        builder.assert_bool(flag);
     }
 }
 

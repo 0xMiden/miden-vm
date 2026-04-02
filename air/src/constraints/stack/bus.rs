@@ -134,5 +134,5 @@ pub fn enforce_bus<AB>(
     let lhs = p1_next.into() * request;
     let rhs = p1_local.into() * response;
 
-    builder.when_transition().assert_zero_ext(lhs - rhs);
+    builder.when_transition().assert_eq_ext(lhs, rhs);
 }

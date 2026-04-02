@@ -321,7 +321,7 @@ pub fn enforce_chiplets_bus_constraint<AB>(
 
     let lhs: AB::ExprEF = Into::<AB::ExprEF>::into(b_next_val) * requests;
     let rhs: AB::ExprEF = Into::<AB::ExprEF>::into(b_local_val) * responses;
-    builder.when_transition().assert_zero_ext(lhs - rhs);
+    builder.when_transition().assert_eq_ext(lhs, rhs);
 }
 
 // BITWISE MESSAGE HELPERS
