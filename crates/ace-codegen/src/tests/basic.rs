@@ -146,7 +146,7 @@ fn test_verifier_dag_matches_manual_eval() {
     let vanishing = z_pow_n - EF::ONE;
     let expected = acc - eval_quotient(&layout, &inputs) * vanishing;
 
-    let actual = eval_dag(&artifacts.dag.nodes, artifacts.dag.root, &inputs, &layout);
+    let actual = eval_dag(artifacts.dag.nodes(), artifacts.dag.root(), &inputs, &layout);
     assert_eq!(actual, expected);
 }
 
@@ -163,7 +163,7 @@ fn test_emitted_circuit_matches_dag_eval() {
     let inputs = build_inputs(&layout);
 
     let circuit = emit_circuit(&artifacts.dag, layout.clone()).unwrap();
-    let dag_value = eval_dag(&artifacts.dag.nodes, artifacts.dag.root, &inputs, &layout);
+    let dag_value = eval_dag(artifacts.dag.nodes(), artifacts.dag.root(), &inputs, &layout);
     let circuit_value = circuit.eval(&inputs).expect("circuit eval");
     assert_eq!(circuit_value, dag_value);
 }
