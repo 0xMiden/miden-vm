@@ -7,7 +7,7 @@ use crate::{
     crypto::hash::Blake3_256,
     mast::{
         DecoratedLinksIter, DecoratedOpLink, DecoratorId, DecoratorStore, MastForest,
-        MastForestError, MastNode, MastNodeFingerprint, MastNodeId, debuginfo::DebugVarId,
+        MastForestError, MastNode, MastNodeFingerprint, MastNodeId,
     },
     operations::{DecoratorList, Operation},
     prettier::PrettyPrint,
@@ -1412,7 +1412,6 @@ pub struct BasicBlockNodeBuilder {
     operation_data: OperationData,
     before_enter: Vec<DecoratorId>,
     after_exit: Vec<DecoratorId>,
-    debug_vars: Vec<(usize, DebugVarId)>,
     digest: Option<Word>,
 }
 
@@ -1425,7 +1424,6 @@ impl BasicBlockNodeBuilder {
             operation_data: OperationData::Raw { operations, decorators },
             before_enter: Vec::new(),
             after_exit: Vec::new(),
-            debug_vars: Vec::new(),
             digest: None,
         }
     }
@@ -1445,23 +1443,8 @@ impl BasicBlockNodeBuilder {
             operation_data: OperationData::Batched { op_batches, decorators },
             before_enter: Vec::new(),
             after_exit: Vec::new(),
-            debug_vars: Vec::new(),
             digest: Some(digest),
         }
-    }
-
-    /// Sets the debug variable mappings for this basic block.
-    ///
-    /// Debug vars are included in the block fingerprint, so blocks with identical operations
-    /// but different debug variables will not be deduplicated.
-    pub fn with_debug_vars(mut self, debug_vars: Vec<(usize, DebugVarId)>) -> Self {
-        self.debug_vars = debug_vars;
-        self
-    }
-
-    /// Returns the debug variable mappings for this basic block.
-    pub fn debug_vars(&self) -> &[(usize, DebugVarId)] {
-        &self.debug_vars
     }
 
     /// Builds the BasicBlockNode with the specified decorators.
@@ -1715,29 +1698,18 @@ impl MastForestContributor for BasicBlockNodeBuilder {
             }
         }
 
-        // Collect debug variable data for fingerprinting.
-        // This ensures blocks with identical operations but different debug variables
-        // are not deduplicated, preserving per-scope variable information for the debugger.
-        let mut debug_var_data = Vec::new();
-        for (op_idx, var_id) in &self.debug_vars {
-            debug_var_data.extend_from_slice(&op_idx.to_le_bytes());
-            debug_var_data.extend_from_slice(&var_id.as_u32().to_le_bytes());
-        }
-
         // Create iterator of slices from all collected data
         let decorator_bytes_iter = before_enter_bytes
             .iter()
             .map(|bytes| bytes.as_slice())
             .chain(core::iter::once(op_decorator_data.as_slice()))
             .chain(after_exit_bytes.iter().map(|bytes| bytes.as_slice()))
-            .chain(core::iter::once(assert_data.as_slice()))
-            .chain(core::iter::once(debug_var_data.as_slice()));
+            .chain(core::iter::once(assert_data.as_slice()));
 
         if self.before_enter.is_empty()
             && self.after_exit.is_empty()
             && adjusted_decorators.is_empty()
             && assert_data.is_empty()
-            && self.debug_vars.is_empty()
         {
             Ok(MastNodeFingerprint::new(digest))
         } else {

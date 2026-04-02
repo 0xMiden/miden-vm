@@ -151,8 +151,8 @@ impl MastForestBuilder {
 
         // Register all pending debug variable mappings in sorted node order.
         // The CSR structure requires sequential node registration.
-        // Debug vars are included in the block fingerprint, so blocks with different
-        // debug vars are not deduplicated. The dedup here is only a safety measure.
+        // Debug vars are included in the augmented dedup fingerprint, so blocks with
+        // different debug vars are not deduplicated. The dedup here is only a safety measure.
         let debug_var_mappings =
             deduplicate_debug_var_mappings(core::mem::take(&mut self.pending_debug_var_mappings));
 
@@ -206,11 +206,34 @@ fn deduplicate_asm_op_mappings(
         .collect()
 }
 
+/// Serializes debug variable mappings into bytes for fingerprint augmentation.
+fn serialize_debug_vars(debug_vars: &[(usize, miden_core::mast::DebugVarId)]) -> Vec<u8> {
+    let mut data = Vec::with_capacity(debug_vars.len() * 8);
+    for (op_idx, var_id) in debug_vars {
+        data.extend_from_slice(&op_idx.to_le_bytes());
+        data.extend_from_slice(&var_id.as_u32().to_le_bytes());
+    }
+    data
+}
+
+/// Looks up and serializes the debug vars for a given node from the pending mappings.
+fn serialize_debug_vars_for_node(
+    pending: &[(MastNodeId, Vec<(usize, miden_core::mast::DebugVarId)>)],
+    node_id: MastNodeId,
+) -> Vec<u8> {
+    for (id, vars) in pending {
+        if *id == node_id {
+            return serialize_debug_vars(vars);
+        }
+    }
+    Vec::new()
+}
+
 /// Deduplicates debug variable mappings by node_id (keeps first registration).
 ///
-/// Since debug vars are included in the block fingerprint, blocks with different debug vars
-/// will not be deduplicated. This function is a safety measure to handle any remaining
-/// duplicate registrations (e.g. from control flow node deduplication).
+/// Debug vars are included in the augmented dedup fingerprint, so blocks with different
+/// debug vars will not be deduplicated. This function is a safety measure to handle any
+/// remaining duplicate registrations (e.g. from control flow node deduplication).
 fn deduplicate_debug_var_mappings(
     mut mappings: Vec<(MastNodeId, Vec<(usize, miden_core::mast::DebugVarId)>)>,
 ) -> Vec<(MastNodeId, Vec<(usize, miden_core::mast::DebugVarId)>)> {
@@ -642,9 +665,10 @@ impl MastForestBuilder {
     /// Each entry is `(op_idx, DebugVarId)` where `op_idx` is the operation index the debug
     /// variable corresponds to.
     ///
-    /// Note: Debug variables are included in the block fingerprint, so blocks with identical
-    /// operations but different debug variables will not be deduplicated. AssemblyOps are not
-    /// part of the fingerprint, so they are only registered for newly created nodes.
+    /// Note: Debug variables are kept external to the block builder but are included in
+    /// the dedup fingerprint so that blocks with identical operations but different debug
+    /// variables are not deduplicated. AssemblyOps are not part of the fingerprint, so they
+    /// are only registered for newly created nodes.
     ///
     /// The actual registration of both AssemblyOp and debug variable mappings is deferred until
     /// `build()` is called, to ensure nodes are registered in sequential order as required by
@@ -658,14 +682,31 @@ impl MastForestBuilder {
         before_enter: Vec<DecoratorId>,
         after_exit: Vec<DecoratorId>,
     ) -> Result<MastNodeId, Report> {
-        // Include debug vars in the builder so they are part of the block fingerprint.
-        // This prevents deduplication of blocks with identical operations but different
-        // debug variables, preserving per-scope variable information for the debugger.
         let block = BasicBlockNodeBuilder::new(operations, decorators)
             .with_before_enter(before_enter)
-            .with_after_exit(after_exit)
-            .with_debug_vars(debug_vars.clone());
-        let (node_id, is_new) = self.ensure_node_exists(block)?;
+            .with_after_exit(after_exit);
+
+        // Compute the base fingerprint from the builder, then augment with debug var
+        // data to make the dedup key sensitive to debug variables without storing them
+        // on the builder itself.
+        let base_fingerprint = block
+            .fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)
+            .expect("hash_by_node_id should contain the fingerprints of all children of `node`");
+        let dedup_fingerprint =
+            base_fingerprint.augment_with_data(&serialize_debug_vars(&debug_vars));
+
+        let (node_id, is_new) =
+            if let Some(node_id) = self.node_id_by_fingerprint.get(&dedup_fingerprint) {
+                (*node_id, false)
+            } else {
+                let new_node_id = block
+                    .add_to_forest(&mut self.mast_forest)
+                    .into_diagnostic()
+                    .wrap_err("assembler failed to add new node")?;
+                self.node_id_by_fingerprint.insert(dedup_fingerprint, new_node_id);
+                self.hash_by_node_id.insert(new_node_id, dedup_fingerprint);
+                (new_node_id, true)
+            };
 
         // Only register AssemblyOps for newly created nodes.
         // Deduplicated nodes already have their asm_ops registered from when they were first added.
@@ -685,7 +726,7 @@ impl MastForestBuilder {
         }
 
         // Only register debug variables for newly created nodes.
-        // Blocks with different debug vars now have different fingerprints,
+        // Blocks with different debug vars have different augmented fingerprints,
         // so deduplication only occurs when vars are truly identical.
         if is_new && !debug_vars.is_empty() {
             self.pending_debug_var_mappings.push((node_id, debug_vars));
@@ -895,8 +936,15 @@ impl MastForestBuilder {
         // Extract the existing node and convert it to a builder
         let mut decorated_builder = self.mast_forest[node_id].clone().to_builder(&self.mast_forest);
         decorated_builder.append_before_enter(decorator_ids);
-        let new_node_fingerprint =
+        let base_fingerprint =
             decorated_builder.fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)?;
+
+        // Re-augment the fingerprint with this node's debug vars so the dedup key
+        // stays consistent with what ensure_block() originally computed.
+        let debug_vars_data =
+            serialize_debug_vars_for_node(&self.pending_debug_var_mappings, node_id);
+        let new_node_fingerprint = base_fingerprint.augment_with_data(&debug_vars_data);
+
         self.mast_forest[node_id] = decorated_builder.build(&self.mast_forest)?;
 
         self.hash_by_node_id.insert(node_id, new_node_fingerprint);
@@ -912,8 +960,15 @@ impl MastForestBuilder {
         // Extract the existing node and convert it to a builder
         let mut decorated_builder = self.mast_forest[node_id].clone().to_builder(&self.mast_forest);
         decorated_builder.append_after_exit(decorator_ids);
-        let new_node_fingerprint =
+        let base_fingerprint =
             decorated_builder.fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)?;
+
+        // Re-augment the fingerprint with this node's debug vars so the dedup key
+        // stays consistent with what ensure_block() originally computed.
+        let debug_vars_data =
+            serialize_debug_vars_for_node(&self.pending_debug_var_mappings, node_id);
+        let new_node_fingerprint = base_fingerprint.augment_with_data(&debug_vars_data);
+
         self.mast_forest[node_id] = decorated_builder.build(&self.mast_forest)?;
 
         self.hash_by_node_id.insert(node_id, new_node_fingerprint);
