@@ -23,7 +23,7 @@ pub mod config;
 mod constraints;
 
 pub mod trace;
-use trace::{AUX_TRACE_WIDTH, MainTraceRow, TRACE_WIDTH};
+use trace::{AUX_TRACE_WIDTH, MainTraceRow, TRACE_WIDTH, bus_types};
 
 // RE-EXPORTS
 // ================================================================================================
@@ -375,15 +375,18 @@ fn program_hash_message<EF: ExtensionField<Felt>>(
     challenges: &trace::Challenges<EF>,
     program_hash: &Word,
 ) -> EF {
-    challenges.encode([
-        Felt::ZERO, // parent_id = 0 (root block)
-        program_hash[0],
-        program_hash[1],
-        program_hash[2],
-        program_hash[3],
-        Felt::ZERO, // is_first_child = false
-        Felt::ZERO, // is_loop_body = false
-    ])
+    challenges.encode(
+        bus_types::BLOCK_HASH_TABLE,
+        [
+            Felt::ZERO, // parent_id = 0 (root block)
+            program_hash[0],
+            program_hash[1],
+            program_hash[2],
+            program_hash[3],
+            Felt::ZERO, // is_first_child = false
+            Felt::ZERO, // is_loop_body = false
+        ],
+    )
 }
 
 /// Returns the pair of (initial, final) log-precompile transcript messages for the
@@ -397,13 +400,10 @@ fn transcript_messages<EF: ExtensionField<Felt>>(
 ) -> (EF, EF) {
     let encode = |state: PrecompileTranscriptState| {
         let cap: &[Felt] = state.as_ref();
-        challenges.encode([
-            Felt::from_u8(trace::LOG_PRECOMPILE_LABEL),
-            cap[0],
-            cap[1],
-            cap[2],
-            cap[3],
-        ])
+        challenges.encode(
+            bus_types::LOG_PRECOMPILE_TRANSCRIPT,
+            [Felt::from_u8(trace::LOG_PRECOMPILE_LABEL), cap[0], cap[1], cap[2], cap[3]],
+        )
     };
     (encode(PrecompileTranscriptState::default()), encode(final_state))
 }
@@ -416,13 +416,16 @@ fn kernel_proc_message<EF: ExtensionField<Felt>>(
     challenges: &trace::Challenges<EF>,
     digest: &Word,
 ) -> EF {
-    challenges.encode([
-        trace::chiplets::kernel_rom::KERNEL_PROC_INIT_LABEL,
-        digest[0],
-        digest[1],
-        digest[2],
-        digest[3],
-    ])
+    challenges.encode(
+        bus_types::CHIPLETS_BUS,
+        [
+            trace::chiplets::kernel_rom::KERNEL_PROC_INIT_LABEL,
+            digest[0],
+            digest[1],
+            digest[2],
+            digest[3],
+        ],
+    )
 }
 
 /// Reduces kernel procedure digests from var-len public inputs into a multiset product.

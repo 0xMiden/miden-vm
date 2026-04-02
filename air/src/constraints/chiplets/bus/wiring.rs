@@ -36,6 +36,7 @@ use crate::{
     constraints::{bus::indices::V_WIRING, chiplets::selectors::ChipletSelectors, utils::BoolNot},
     trace::{
         Challenges,
+        bus_types::ACE_WIRING_BUS,
         chiplets::ace::{
             CLK_IDX, CTX_IDX, ID_0_IDX, ID_1_IDX, ID_2_IDX, M_0_IDX, M_1_IDX, SELECTOR_BLOCK_IDX,
             V_0_0_IDX, V_0_1_IDX, V_1_0_IDX, V_1_1_IDX, V_2_0_IDX, V_2_1_IDX,
@@ -184,7 +185,10 @@ fn encode_wire<AB>(
 where
     AB: MidenAirBuilder,
 {
-    challenges.encode([clk.clone(), ctx.clone(), wire.id.clone(), wire.v0.clone(), wire.v1.clone()])
+    challenges.encode(
+        ACE_WIRING_BUS,
+        [clk.clone(), ctx.clone(), wire.id.clone(), wire.v0.clone(), wire.v1.clone()],
+    )
 }
 
 /// Load a column from the ACE section of chiplets.

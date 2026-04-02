@@ -46,6 +46,7 @@ use crate::{
     },
     trace::{
         Challenges,
+        bus_types::CHIPLETS_BUS,
         chiplets::{
             NUM_ACE_SELECTORS, NUM_KERNEL_ROM_SELECTORS,
             ace::{
@@ -352,7 +353,7 @@ fn compute_bitwise_request<AB: MidenAirBuilder>(
     let b: AB::Expr = local.stack[1].into();
     let z: AB::Expr = next.stack[0].into();
 
-    challenges.encode([label, a, b, z])
+    challenges.encode(CHIPLETS_BUS, [label, a, b, z])
 }
 
 /// Computes the bitwise chiplet response message value.
@@ -379,7 +380,7 @@ fn compute_bitwise_response<AB: MidenAirBuilder>(
     let b: AB::Expr = local.chiplets[bw_offset + bitwise::B_COL_IDX].into();
     let z: AB::Expr = local.chiplets[bw_offset + bitwise::OUTPUT_COL_IDX].into();
 
-    challenges.encode([label, a, b, z])
+    challenges.encode(CHIPLETS_BUS, [label, a, b, z])
 }
 
 // MEMORY MESSAGE HELPERS
@@ -431,7 +432,7 @@ fn compute_memory_word_request<AB: MidenAirBuilder>(
         )
     };
 
-    challenges.encode([label, ctx, addr, clk, w0, w1, w2, w3])
+    challenges.encode(CHIPLETS_BUS, [label, ctx, addr, clk, w0, w1, w2, w3])
 }
 
 /// Computes the memory element request message value.
@@ -466,7 +467,7 @@ fn compute_memory_element_request<AB: MidenAirBuilder>(
         local.stack[1].into()
     };
 
-    challenges.encode([label, ctx, addr, clk, element])
+    challenges.encode(CHIPLETS_BUS, [label, ctx, addr, clk, element])
 }
 
 /// Computes the MSTREAM request message value (two word reads).
@@ -486,27 +487,33 @@ fn compute_mstream_request<AB: MidenAirBuilder>(
     // Second word: next.stack[4..8] at addr + 4
     let word2: [AB::Expr; 4] = core::array::from_fn(|i| next.stack[4 + i].into());
 
-    let msg1 = challenges.encode([
-        label.clone(),
-        ctx.clone(),
-        addr.clone(),
-        clk.clone(),
-        word1[0].clone(),
-        word1[1].clone(),
-        word1[2].clone(),
-        word1[3].clone(),
-    ]);
+    let msg1 = challenges.encode(
+        CHIPLETS_BUS,
+        [
+            label.clone(),
+            ctx.clone(),
+            addr.clone(),
+            clk.clone(),
+            word1[0].clone(),
+            word1[1].clone(),
+            word1[2].clone(),
+            word1[3].clone(),
+        ],
+    );
 
-    let msg2 = challenges.encode([
-        label,
-        ctx,
-        addr + F_4,
-        clk,
-        word2[0].clone(),
-        word2[1].clone(),
-        word2[2].clone(),
-        word2[3].clone(),
-    ]);
+    let msg2 = challenges.encode(
+        CHIPLETS_BUS,
+        [
+            label,
+            ctx,
+            addr + F_4,
+            clk,
+            word2[0].clone(),
+            word2[1].clone(),
+            word2[2].clone(),
+            word2[3].clone(),
+        ],
+    );
 
     msg1 * msg2
 }
@@ -528,27 +535,33 @@ fn compute_pipe_request<AB: MidenAirBuilder>(
     // Second word to addr + 4: next.stack[4..8]
     let word2: [AB::Expr; 4] = core::array::from_fn(|i| next.stack[4 + i].into());
 
-    let msg1 = challenges.encode([
-        label.clone(),
-        ctx.clone(),
-        addr.clone(),
-        clk.clone(),
-        word1[0].clone(),
-        word1[1].clone(),
-        word1[2].clone(),
-        word1[3].clone(),
-    ]);
+    let msg1 = challenges.encode(
+        CHIPLETS_BUS,
+        [
+            label.clone(),
+            ctx.clone(),
+            addr.clone(),
+            clk.clone(),
+            word1[0].clone(),
+            word1[1].clone(),
+            word1[2].clone(),
+            word1[3].clone(),
+        ],
+    );
 
-    let msg2 = challenges.encode([
-        label,
-        ctx,
-        addr + F_4,
-        clk,
-        word2[0].clone(),
-        word2[1].clone(),
-        word2[2].clone(),
-        word2[3].clone(),
-    ]);
+    let msg2 = challenges.encode(
+        CHIPLETS_BUS,
+        [
+            label,
+            ctx,
+            addr + F_4,
+            clk,
+            word2[0].clone(),
+            word2[1].clone(),
+            word2[2].clone(),
+            word2[3].clone(),
+        ],
+    );
 
     msg1 * msg2
 }
@@ -570,49 +583,61 @@ fn compute_cryptostream_request<AB: MidenAirBuilder>(
     let cipher: [AB::Expr; 8] = core::array::from_fn(|i| next.stack[i].into());
     let plain: [AB::Expr; 8] = core::array::from_fn(|i| cipher[i].clone() - rate[i]);
 
-    let read_msg1 = challenges.encode([
-        read_label.clone(),
-        ctx.clone(),
-        src.clone(),
-        clk.clone(),
-        plain[0].clone(),
-        plain[1].clone(),
-        plain[2].clone(),
-        plain[3].clone(),
-    ]);
+    let read_msg1 = challenges.encode(
+        CHIPLETS_BUS,
+        [
+            read_label.clone(),
+            ctx.clone(),
+            src.clone(),
+            clk.clone(),
+            plain[0].clone(),
+            plain[1].clone(),
+            plain[2].clone(),
+            plain[3].clone(),
+        ],
+    );
 
-    let read_msg2 = challenges.encode([
-        read_label,
-        ctx.clone(),
-        src + F_4,
-        clk.clone(),
-        plain[4].clone(),
-        plain[5].clone(),
-        plain[6].clone(),
-        plain[7].clone(),
-    ]);
+    let read_msg2 = challenges.encode(
+        CHIPLETS_BUS,
+        [
+            read_label,
+            ctx.clone(),
+            src + F_4,
+            clk.clone(),
+            plain[4].clone(),
+            plain[5].clone(),
+            plain[6].clone(),
+            plain[7].clone(),
+        ],
+    );
 
-    let write_msg1 = challenges.encode([
-        write_label.clone(),
-        ctx.clone(),
-        dst.clone(),
-        clk.clone(),
-        cipher[0].clone(),
-        cipher[1].clone(),
-        cipher[2].clone(),
-        cipher[3].clone(),
-    ]);
+    let write_msg1 = challenges.encode(
+        CHIPLETS_BUS,
+        [
+            write_label.clone(),
+            ctx.clone(),
+            dst.clone(),
+            clk.clone(),
+            cipher[0].clone(),
+            cipher[1].clone(),
+            cipher[2].clone(),
+            cipher[3].clone(),
+        ],
+    );
 
-    let write_msg2 = challenges.encode([
-        write_label,
-        ctx,
-        dst + F_4,
-        clk,
-        cipher[4].clone(),
-        cipher[5].clone(),
-        cipher[6].clone(),
-        cipher[7].clone(),
-    ]);
+    let write_msg2 = challenges.encode(
+        CHIPLETS_BUS,
+        [
+            write_label,
+            ctx,
+            dst + F_4,
+            clk,
+            cipher[4].clone(),
+            cipher[5].clone(),
+            cipher[6].clone(),
+            cipher[7].clone(),
+        ],
+    );
 
     read_msg1 * read_msg2 * write_msg1 * write_msg2
 }
@@ -633,10 +658,12 @@ fn compute_hornerbase_request<AB: MidenAirBuilder>(
     let eval0 = local.decoder[helper0_idx];
     let eval1 = local.decoder[helper1_idx];
 
-    let msg0 =
-        challenges.encode([label.clone(), ctx.clone(), addr.clone(), clk.clone(), eval0.into()]);
+    let msg0 = challenges.encode(
+        CHIPLETS_BUS,
+        [label.clone(), ctx.clone(), addr.clone(), clk.clone(), eval0.into()],
+    );
 
-    let msg1 = challenges.encode([label, ctx, addr + F_1, clk, eval1.into()]);
+    let msg1 = challenges.encode(CHIPLETS_BUS, [label, ctx, addr + F_1, clk, eval1.into()]);
 
     msg0 * msg1
 }
@@ -655,16 +682,19 @@ fn compute_hornerext_request<AB: MidenAirBuilder>(
     let base = USER_OP_HELPERS_OFFSET;
     let word: [AB::Var; 4] = core::array::from_fn(|i| local.decoder[base + i]);
 
-    challenges.encode([
-        label,
-        ctx,
-        addr,
-        clk,
-        word[0].into(),
-        word[1].into(),
-        word[2].into(),
-        word[3].into(),
-    ])
+    challenges.encode(
+        CHIPLETS_BUS,
+        [
+            label,
+            ctx,
+            addr,
+            clk,
+            word[0].into(),
+            word[1].into(),
+            word[2].into(),
+            word[3].into(),
+        ],
+    )
 }
 
 /// Computes the memory chiplet response message value.
@@ -722,11 +752,11 @@ fn compute_memory_response<AB: MidenAirBuilder>(
         + v3.clone() * idx0.clone() * idx1.clone();
 
     // Element access: include the selected element in the last slot.
-    let element_msg =
-        challenges.encode([label.clone(), ctx.clone(), addr.clone(), clk.clone(), element]);
+    let element_msg = challenges
+        .encode(CHIPLETS_BUS, [label.clone(), ctx.clone(), addr.clone(), clk.clone(), element]);
 
     // Word access: include all 4 values.
-    let word_msg = challenges.encode([label, ctx, addr, clk, v0, v1, v2, v3]);
+    let word_msg = challenges.encode(CHIPLETS_BUS, [label, ctx, addr, clk, v0, v1, v2, v3]);
 
     // Select based on is_word
     element_msg * is_element + word_msg * is_word
@@ -1085,23 +1115,26 @@ fn compute_hasher_message<AB: MidenAirBuilder>(
     node_index: AB::Expr,
     state: &[AB::Expr; 12],
 ) -> AB::ExprEF {
-    challenges.encode([
-        transition_label,
-        addr,
-        node_index,
-        state[0].clone(),
-        state[1].clone(),
-        state[2].clone(),
-        state[3].clone(),
-        state[4].clone(),
-        state[5].clone(),
-        state[6].clone(),
-        state[7].clone(),
-        state[8].clone(),
-        state[9].clone(),
-        state[10].clone(),
-        state[11].clone(),
-    ])
+    challenges.encode(
+        CHIPLETS_BUS,
+        [
+            transition_label,
+            addr,
+            node_index,
+            state[0].clone(),
+            state[1].clone(),
+            state[2].clone(),
+            state[3].clone(),
+            state[4].clone(),
+            state[5].clone(),
+            state[6].clone(),
+            state[7].clone(),
+            state[8].clone(),
+            state[9].clone(),
+            state[10].clone(),
+            state[11].clone(),
+        ],
+    )
 }
 
 /// Computes a hasher message for a 4-lane word.
@@ -1112,15 +1145,18 @@ fn compute_hasher_word_message<AB: MidenAirBuilder>(
     node_index: AB::Expr,
     word: &[AB::Expr; 4],
 ) -> AB::ExprEF {
-    challenges.encode([
-        transition_label,
-        addr,
-        node_index,
-        word[0].clone(),
-        word[1].clone(),
-        word[2].clone(),
-        word[3].clone(),
-    ])
+    challenges.encode(
+        CHIPLETS_BUS,
+        [
+            transition_label,
+            addr,
+            node_index,
+            word[0].clone(),
+            word[1].clone(),
+            word[2].clone(),
+            word[3].clone(),
+        ],
+    )
 }
 
 /// Computes a hasher message for an 8-lane rate.
@@ -1131,19 +1167,22 @@ fn compute_hasher_rate_message<AB: MidenAirBuilder>(
     node_index: AB::Expr,
     rate: &[AB::Expr; 8],
 ) -> AB::ExprEF {
-    challenges.encode([
-        transition_label,
-        addr,
-        node_index,
-        rate[0].clone(),
-        rate[1].clone(),
-        rate[2].clone(),
-        rate[3].clone(),
-        rate[4].clone(),
-        rate[5].clone(),
-        rate[6].clone(),
-        rate[7].clone(),
-    ])
+    challenges.encode(
+        CHIPLETS_BUS,
+        [
+            transition_label,
+            addr,
+            node_index,
+            rate[0].clone(),
+            rate[1].clone(),
+            rate[2].clone(),
+            rate[3].clone(),
+            rate[4].clone(),
+            rate[5].clone(),
+            rate[6].clone(),
+            rate[7].clone(),
+        ],
+    )
 }
 
 // ACE MESSAGE HELPERS
@@ -1171,7 +1210,10 @@ fn compute_ace_request<AB: MidenAirBuilder>(
     let num_read_rows = local.stack[1];
     let num_eval_rows = local.stack[2];
 
-    challenges.encode([label, clk, ctx, ptr.into(), num_read_rows.into(), num_eval_rows.into()])
+    challenges.encode(
+        CHIPLETS_BUS,
+        [label, clk, ctx, ptr.into(), num_read_rows.into(), num_eval_rows.into()],
+    )
 }
 
 /// Computes the ACE chiplet response message value.
@@ -1207,7 +1249,7 @@ fn compute_ace_response<AB: MidenAirBuilder>(
     // num_read_rows = id_0 + 1 - num_eval_rows
     let num_read_rows: AB::Expr = id_0 + F_1 - num_eval_rows.clone();
 
-    challenges.encode([label, clk, ctx, ptr, num_read_rows, num_eval_rows])
+    challenges.encode(CHIPLETS_BUS, [label, clk, ctx, ptr, num_read_rows, num_eval_rows])
 }
 
 // KERNEL ROM MESSAGE HELPERS
@@ -1241,7 +1283,7 @@ fn compute_kernel_rom_response<AB: MidenAirBuilder>(
     let root2 = local.chiplets[NUM_KERNEL_ROM_SELECTORS + 3];
     let root3 = local.chiplets[NUM_KERNEL_ROM_SELECTORS + 4];
 
-    challenges.encode([label, root0.into(), root1.into(), root2.into(), root3.into()])
+    challenges.encode(CHIPLETS_BUS, [label, root0.into(), root1.into(), root2.into(), root3.into()])
 }
 
 // CONTROL BLOCK REQUEST HELPERS
@@ -1411,8 +1453,8 @@ fn compute_syscall_request<AB: MidenAirBuilder>(
     let root3 = local.decoder[HASHER_STATE_RANGE.start + 3];
 
     let label: AB::Expr = KERNEL_PROC_CALL_LABEL.into();
-    let kernel_req =
-        challenges.encode([label, root0.into(), root1.into(), root2.into(), root3.into()]);
+    let kernel_req = challenges
+        .encode(CHIPLETS_BUS, [label, root0.into(), root1.into(), root2.into(), root3.into()]);
 
     control_req * kernel_req
 }
@@ -1565,7 +1607,7 @@ fn compute_fmp_write_request<AB: MidenAirBuilder>(
     let addr: AB::Expr = FMP_ADDR.into();
     let element: AB::Expr = FMP_INIT_VALUE.into();
 
-    challenges.encode([label, ctx, addr, clk, element])
+    challenges.encode(CHIPLETS_BUS, [label, ctx, addr, clk, element])
 }
 
 /// Computes the callee hash read request for DYN/DYNCALL.
@@ -1587,7 +1629,10 @@ fn compute_dyn_callee_hash_read<AB: MidenAirBuilder>(
     let w2 = local.decoder[HASHER_STATE_RANGE.start + 2];
     let w3 = local.decoder[HASHER_STATE_RANGE.start + 3];
 
-    challenges.encode([label, ctx, addr, clk, w0.into(), w1.into(), w2.into(), w3.into()])
+    challenges.encode(
+        CHIPLETS_BUS,
+        [label, ctx, addr, clk, w0.into(), w1.into(), w2.into(), w3.into()],
+    )
 }
 
 // MPVERIFY/MRUPDATE REQUEST HELPERS

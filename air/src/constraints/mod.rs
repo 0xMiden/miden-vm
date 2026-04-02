@@ -77,7 +77,7 @@ pub fn enforce_bus<AB>(
 
     enforce_bus_boundary(builder);
 
-    range::bus::enforce_bus(builder, local);
+    range::bus::enforce_bus(builder, local, &challenges);
     stack::bus::enforce_bus(builder, local, next, &op_flags, &challenges);
     decoder::bus::enforce_bus(builder, local, next, &op_flags, &challenges);
     chiplets::bus::enforce_bus(builder, local, next, &op_flags, &challenges, selectors);

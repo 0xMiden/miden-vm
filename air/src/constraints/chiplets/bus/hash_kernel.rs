@@ -27,6 +27,7 @@ use crate::{
     },
     trace::{
         CHIPLETS_OFFSET, Challenges, LOG_PRECOMPILE_LABEL,
+        bus_types::{CHIPLETS_BUS, LOG_PRECOMPILE_TRANSCRIPT, SIBLING_TABLE},
         chiplets::{
             HASHER_NODE_INDEX_COL_IDX, HASHER_SELECTOR_COL_RANGE, HASHER_STATE_COL_RANGE,
             NUM_ACE_SELECTORS,
@@ -170,16 +171,19 @@ pub fn enforce_hash_kernel_constraint<AB>(
         let v1_1 = local.chiplets[NUM_ACE_SELECTORS + V_1_1_IDX];
         let label: AB::Expr = Felt::from_u8(MEMORY_READ_WORD_LABEL).into();
 
-        challenges.encode([
-            label,
-            ace_ctx.into(),
-            ace_ptr.into(),
-            ace_clk.into(),
-            v0_0.into(),
-            v0_1.into(),
-            v1_0.into(),
-            v1_1.into(),
-        ])
+        challenges.encode(
+            CHIPLETS_BUS,
+            [
+                label,
+                ace_ctx.into(),
+                ace_ptr.into(),
+                ace_clk.into(),
+                v0_0.into(),
+                v0_1.into(),
+                v1_0.into(),
+                v1_1.into(),
+            ],
+        )
     };
 
     // Element read value: label + ctx + ptr + clk + element.
@@ -193,7 +197,8 @@ pub fn enforce_hash_kernel_constraint<AB>(
         let element = id_1 + id_2 * offset1 + (eval_op + AB::Expr::ONE) * offset2;
         let label: AB::Expr = Felt::from_u8(MEMORY_READ_ELEMENT_LABEL).into();
 
-        challenges.encode([label, ace_ctx.into(), ace_ptr.into(), ace_clk.into(), element])
+        challenges
+            .encode(CHIPLETS_BUS, [label, ace_ctx.into(), ace_ptr.into(), ace_clk.into(), element])
     };
 
     // =========================================================================
@@ -214,22 +219,28 @@ pub fn enforce_hash_kernel_constraint<AB>(
     let log_label: AB::Expr = Felt::from_u8(LOG_PRECOMPILE_LABEL).into();
 
     // CAP_PREV value (request - removed).
-    let v_cap_prev = challenges.encode([
-        log_label.clone(),
-        cap_prev[0].clone(),
-        cap_prev[1].clone(),
-        cap_prev[2].clone(),
-        cap_prev[3].clone(),
-    ]);
+    let v_cap_prev = challenges.encode(
+        LOG_PRECOMPILE_TRANSCRIPT,
+        [
+            log_label.clone(),
+            cap_prev[0].clone(),
+            cap_prev[1].clone(),
+            cap_prev[2].clone(),
+            cap_prev[3].clone(),
+        ],
+    );
 
     // CAP_NEXT value (response - inserted).
-    let v_cap_next = challenges.encode([
-        log_label,
-        cap_next[0].clone(),
-        cap_next[1].clone(),
-        cap_next[2].clone(),
-        cap_next[3].clone(),
-    ]);
+    let v_cap_next = challenges.encode(
+        LOG_PRECOMPILE_TRANSCRIPT,
+        [
+            log_label,
+            cap_next[0].clone(),
+            cap_next[1].clone(),
+            cap_next[2].clone(),
+            cap_next[3].clone(),
+        ],
+    );
 
     // =========================================================================
     // RUNNING PRODUCT CONSTRAINT
@@ -281,6 +292,7 @@ where
     AB: MidenAirBuilder,
 {
     challenges.encode_sparse(
+        SIBLING_TABLE,
         SIBLING_B0_LAYOUT,
         [node_index.clone(), h[4].clone(), h[5].clone(), h[6].clone(), h[7].clone()],
     )
@@ -298,6 +310,7 @@ where
     AB: MidenAirBuilder,
 {
     challenges.encode_sparse(
+        SIBLING_TABLE,
         SIBLING_B1_LAYOUT,
         [node_index.clone(), h[0].clone(), h[1].clone(), h[2].clone(), h[3].clone()],
     )

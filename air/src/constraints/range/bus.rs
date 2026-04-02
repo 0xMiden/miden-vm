@@ -19,8 +19,8 @@ use crate::{
     MainTraceRow, MidenAirBuilder,
     constraints::utils::BoolNot,
     trace::{
-        CHIPLET_S0_COL_IDX, CHIPLET_S1_COL_IDX, CHIPLET_S2_COL_IDX, CHIPLETS_OFFSET,
-        RANGE_CHECK_TRACE_OFFSET, chiplets, decoder, range,
+        CHIPLET_S0_COL_IDX, CHIPLET_S1_COL_IDX, CHIPLET_S2_COL_IDX, CHIPLETS_OFFSET, Challenges,
+        RANGE_CHECK_TRACE_OFFSET, bus_types::RANGE_CHECK_BUS, chiplets, decoder, range,
     },
 };
 
@@ -58,8 +58,11 @@ const RANGE_V_COL_IDX: usize = range::V_COL_IDX - RANGE_CHECK_TRACE_OFFSET;
 /// - Stack lookups (4): decoder helper columns (USER_OP_HELPERS_OFFSET..+4)
 /// - Memory lookups (2): memory delta limbs (MEMORY_D0, MEMORY_D1)
 /// - Range response: range V column with multiplicity range M column
-pub fn enforce_bus<AB>(builder: &mut AB, local: &MainTraceRow<AB::Var>)
-where
+pub fn enforce_bus<AB>(
+    builder: &mut AB,
+    local: &MainTraceRow<AB::Var>,
+    challenges: &Challenges<AB::ExprEF>,
+) where
     AB: MidenAirBuilder,
 {
     // In Miden VM, auxiliary trace is always present
@@ -71,22 +74,21 @@ where
     let b_local = aux_local[range::B_RANGE_COL_IDX];
     let b_next = aux_next[range::B_RANGE_COL_IDX];
 
-    let challenges = builder.permutation_randomness();
-    let alpha = challenges[0];
+    let alpha = &challenges.bus_prefix[RANGE_CHECK_BUS];
 
     // Denominators for LogUp
     // Memory lookups: mv0 = alpha + chiplets[MEMORY_D0], mv1 = alpha + chiplets[MEMORY_D1]
-    let mv0: AB::ExprEF = alpha.into() + local.chiplets[MEMORY_D0_IDX].into();
-    let mv1: AB::ExprEF = alpha.into() + local.chiplets[MEMORY_D1_IDX].into();
+    let mv0: AB::ExprEF = alpha.clone() + local.chiplets[MEMORY_D0_IDX].into();
+    let mv1: AB::ExprEF = alpha.clone() + local.chiplets[MEMORY_D1_IDX].into();
 
     // Stack lookups: sv0-sv3 = alpha + decoder helper columns
-    let sv0: AB::ExprEF = alpha.into() + local.decoder[STACK_LOOKUP_BASE].into();
-    let sv1: AB::ExprEF = alpha.into() + local.decoder[STACK_LOOKUP_BASE + 1].into();
-    let sv2: AB::ExprEF = alpha.into() + local.decoder[STACK_LOOKUP_BASE + 2].into();
-    let sv3: AB::ExprEF = alpha.into() + local.decoder[STACK_LOOKUP_BASE + 3].into();
+    let sv0: AB::ExprEF = alpha.clone() + local.decoder[STACK_LOOKUP_BASE].into();
+    let sv1: AB::ExprEF = alpha.clone() + local.decoder[STACK_LOOKUP_BASE + 1].into();
+    let sv2: AB::ExprEF = alpha.clone() + local.decoder[STACK_LOOKUP_BASE + 2].into();
+    let sv3: AB::ExprEF = alpha.clone() + local.decoder[STACK_LOOKUP_BASE + 3].into();
 
     // Range check value: alpha + range V column
-    let range_check: AB::ExprEF = alpha.into() + local.range[RANGE_V_COL_IDX].into();
+    let range_check: AB::ExprEF = alpha.clone() + local.range[RANGE_V_COL_IDX].into();
 
     // Combined lookup denominators
     let memory_lookups = mv0.clone() * mv1.clone();

@@ -31,7 +31,10 @@ use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 use crate::{
     Felt, MainTraceRow, MidenAirBuilder,
     constraints::{bus::indices::P1_BLOCK_STACK, constants::*, op_flags::OpFlags, utils::BoolNot},
-    trace::Challenges,
+    trace::{
+        Challenges,
+        bus_types::{BLOCK_HASH_TABLE, BLOCK_STACK_TABLE, OP_GROUP_TABLE},
+    },
 };
 
 // CONSTANTS
@@ -52,7 +55,8 @@ impl<'a, AB: MidenAirBuilder> BlockStackEncoders<'a, AB> {
 
     /// Encodes `[block_id, parent_id, is_loop]`.
     fn simple(&self, block_id: &AB::Expr, parent_id: &AB::Expr, is_loop: &AB::Expr) -> AB::ExprEF {
-        self.challenges.encode([block_id.clone(), parent_id.clone(), is_loop.clone()])
+        self.challenges
+            .encode(BLOCK_STACK_TABLE, [block_id.clone(), parent_id.clone(), is_loop.clone()])
     }
 
     /// Encodes `[block_id, parent_id, is_loop, ctx, depth, overflow, fn_hash[0..4]]`.
@@ -66,18 +70,21 @@ impl<'a, AB: MidenAirBuilder> BlockStackEncoders<'a, AB> {
         overflow: &AB::Expr,
         fh: &[AB::Expr; 4],
     ) -> AB::ExprEF {
-        self.challenges.encode([
-            block_id.clone(),
-            parent_id.clone(),
-            is_loop.clone(),
-            ctx.clone(),
-            depth.clone(),
-            overflow.clone(),
-            fh[0].clone(),
-            fh[1].clone(),
-            fh[2].clone(),
-            fh[3].clone(),
-        ])
+        self.challenges.encode(
+            BLOCK_STACK_TABLE,
+            [
+                block_id.clone(),
+                parent_id.clone(),
+                is_loop.clone(),
+                ctx.clone(),
+                depth.clone(),
+                overflow.clone(),
+                fh[0].clone(),
+                fh[1].clone(),
+                fh[2].clone(),
+                fh[3].clone(),
+            ],
+        )
     }
 }
 
@@ -99,15 +106,18 @@ impl<'a, AB: MidenAirBuilder> BlockHashEncoder<'a, AB> {
         first_child: &AB::Expr,
         loop_body: &AB::Expr,
     ) -> AB::ExprEF {
-        self.challenges.encode([
-            parent.clone(),
-            hash[0].clone(),
-            hash[1].clone(),
-            hash[2].clone(),
-            hash[3].clone(),
-            first_child.clone(),
-            loop_body.clone(),
-        ])
+        self.challenges.encode(
+            BLOCK_HASH_TABLE,
+            [
+                parent.clone(),
+                hash[0].clone(),
+                hash[1].clone(),
+                hash[2].clone(),
+                hash[3].clone(),
+                first_child.clone(),
+                loop_body.clone(),
+            ],
+        )
     }
 }
 
@@ -123,7 +133,8 @@ impl<'a, AB: MidenAirBuilder> OpGroupEncoder<'a, AB> {
 
     /// Encodes `[block_id, group_count, op_value]`.
     fn encode(&self, block_id: &AB::Expr, group_count: &AB::Expr, value: &AB::Expr) -> AB::ExprEF {
-        self.challenges.encode([block_id.clone(), group_count.clone(), value.clone()])
+        self.challenges
+            .encode(OP_GROUP_TABLE, [block_id.clone(), group_count.clone(), value.clone()])
     }
 }
 

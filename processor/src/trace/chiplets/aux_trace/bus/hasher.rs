@@ -2,6 +2,7 @@ use core::fmt::{Display, Formatter, Result as FmtResult};
 
 use miden_air::trace::{
     Challenges, MainTrace, RowIndex, bus_message,
+    bus_types::CHIPLETS_BUS,
     chiplets::{
         hasher,
         hasher::{
@@ -28,8 +29,8 @@ use crate::{
 //
 // All hasher chiplet bus messages use a common encoding structure:
 //
-//   challenges.alpha                     = alpha (randomness base, accessed directly)
-//   challenges.beta_powers[0]            = beta^0 (label: transition type)
+//   challenges.bus_prefix[CHIPLETS_BUS]                     = alpha (randomness base, accessed
+// directly)   challenges.beta_powers[0]            = beta^0 (label: transition type)
 //   challenges.beta_powers[1]            = beta^1 (addr: hasher chiplet address)
 //   challenges.beta_powers[2]            = beta^2 (node_index: Merkle path position, 0 for
 // non-Merkle ops)   challenges.beta_powers[3..10]        = beta^3..beta^10 (state[0..7]: RATE0 ||
@@ -74,7 +75,7 @@ fn hasher_message_value<E, const N: usize>(
 where
     E: ExtensionField<Felt>,
 {
-    let mut acc = challenges.alpha
+    let mut acc = challenges.bus_prefix[CHIPLETS_BUS]
         + challenges.beta_powers[bus_message::LABEL_IDX] * transition_label
         + challenges.beta_powers[bus_message::ADDR_IDX] * addr_next
         + challenges.beta_powers[bus_message::NODE_INDEX_IDX] * node_index;
@@ -95,7 +96,7 @@ fn header_rate_value<E>(
 where
     E: ExtensionField<Felt>,
 {
-    let mut acc = challenges.alpha
+    let mut acc = challenges.bus_prefix[CHIPLETS_BUS]
         + challenges.beta_powers[bus_message::LABEL_IDX] * transition_label
         + challenges.beta_powers[bus_message::ADDR_IDX] * addr;
     for (i, &elem) in state.iter().enumerate() {
@@ -116,7 +117,7 @@ fn header_digest_value<E>(
 where
     E: ExtensionField<Felt>,
 {
-    let mut acc = challenges.alpha
+    let mut acc = challenges.bus_prefix[CHIPLETS_BUS]
         + challenges.beta_powers[bus_message::LABEL_IDX] * transition_label
         + challenges.beta_powers[bus_message::ADDR_IDX] * addr;
     for (i, &elem) in digest.iter().enumerate() {

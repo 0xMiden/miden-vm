@@ -24,6 +24,7 @@ use crate::{
     constraints::{bus::indices::P1_STACK, constants::F_16, op_flags::OpFlags, utils::BoolNot},
     trace::{
         Challenges,
+        bus_types::STACK_OVERFLOW_TABLE,
         decoder::HASHER_STATE_RANGE,
         stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX},
     },
@@ -97,14 +98,15 @@ pub fn enforce_bus<AB>(
     // -------------------------------------------------------------------------
 
     // Response row value (adding to table during right_shift):
-    let response_row = challenges.encode([clk.into(), s15.into(), b1.into()]);
+    let response_row = challenges.encode(STACK_OVERFLOW_TABLE, [clk.into(), s15.into(), b1.into()]);
 
     // Request row value for left_shift (removing from table):
-    let request_row_left = challenges.encode([b1.into(), s15_next.into(), b1_next.into()]);
+    let request_row_left =
+        challenges.encode(STACK_OVERFLOW_TABLE, [b1.into(), s15_next.into(), b1_next.into()]);
 
     // Request row value for dyncall (removing from table):
-    let request_row_dyncall =
-        challenges.encode([b1.into(), s15_next.into(), hasher_state_5.into()]);
+    let request_row_dyncall = challenges
+        .encode(STACK_OVERFLOW_TABLE, [b1.into(), s15_next.into(), hasher_state_5.into()]);
 
     // -------------------------------------------------------------------------
     // Compute response and request terms

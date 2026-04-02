@@ -1,5 +1,6 @@
 use miden_air::trace::{
-    AUX_TRACE_RAND_CHALLENGES, chiplets::hasher::HASH_CYCLE_LEN, range::B_RANGE_COL_IDX,
+    AUX_TRACE_RAND_CHALLENGES, Challenges, bus_types::RANGE_CHECK_BUS,
+    chiplets::hasher::HASH_CYCLE_LEN, range::B_RANGE_COL_IDX,
 };
 use miden_core::{ONE, ZERO, field::Field, operations::Operation};
 use miden_utils_testing::rand::rand_array;
@@ -17,7 +18,8 @@ fn b_range_trace_stack() {
     let trace = build_trace_from_ops(operations, &stack);
 
     let rand_elements = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let alpha = rand_elements[0];
+    let challenges = Challenges::new(rand_elements[0], rand_elements[1]);
+    let alpha = challenges.bus_prefix[RANGE_CHECK_BUS];
     let aux_columns = trace.build_aux_trace(&rand_elements).unwrap();
     let b_range = aux_columns.get_column(B_RANGE_COL_IDX);
 
@@ -88,7 +90,8 @@ fn b_range_trace_mem() {
     let trace = build_trace_from_ops(operations, &stack);
 
     let rand_elements = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let alpha = rand_elements[0];
+    let challenges = Challenges::new(rand_elements[0], rand_elements[1]);
+    let alpha = challenges.bus_prefix[RANGE_CHECK_BUS];
     let aux_columns = trace.build_aux_trace(&rand_elements).unwrap();
     let b_range = aux_columns.get_column(B_RANGE_COL_IDX);
 

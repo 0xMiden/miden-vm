@@ -204,3 +204,28 @@ Identical assertion expressions; fingerprints changed because scoped builder gat
 </details>
 
 ---
+## 17. refactor: add per-bus domain separation to Challenges encoding
+
+**8 updated** | 462 unchanged
+
+> **Intentional non-equivalent change.** Per-bus domain tag added to `Challenges` encoding. 8 bus constraints affected: chiplets bus (1), hash_kernel bus (1), wiring bus (1), decoder bus (3), range bus (1), stack bus (1). Each polynomial now includes a distinct domain separator constant. Source expressions are identical before/after — the change is in how `Challenges` computes the encoding, not in the assertion code.
+
+<details>
+<summary>8 constraint changes</summary>
+
+**Updated:**
+
+| # | Before | After | Interpretation |
+|---|--------|-------|----------------|
+| 1 | `chiplets/bus/chiplets.rs:330` | `chiplets/bus/chiplets.rs:331` | **Intentional non-equivalent change.** Per-bus domain tag added to `Challenges` encoding. 8 bus constraints affected: chiplets bus (1), hash_kernel bus (1), wiring bus (1), decoder bus (3), range bus (1), stack bus (1). Each polynomial now includes a distinct domain separator constant. Source expressions are identical before/after — the change is in how `Challenges` computes the encoding, not in the assertion code. |
+| 2 | `chiplets/bus/hash_kernel.rs:264` | `chiplets/bus/hash_kernel.rs:275` | **Intentional non-equivalent change.** Per-bus domain tag added to `Challenges` encoding. 8 bus constraints affected: chiplets bus (1), hash_kernel bus (1), wiring bus (1), decoder bus (3), range bus (1), stack bus (1). Each polynomial now includes a distinct domain separator constant. Source expressions are identical before/after — the change is in how `Challenges` computes the encoding, not in the assertion code. |
+| 3 | `chiplets/bus/wiring.rs:147` | `chiplets/bus/wiring.rs:148` | **Intentional non-equivalent change.** Per-bus domain tag added to `Challenges` encoding. 8 bus constraints affected: chiplets bus (1), hash_kernel bus (1), wiring bus (1), decoder bus (3), range bus (1), stack bus (1). Each polynomial now includes a distinct domain separator constant. Source expressions are identical before/after — the change is in how `Challenges` computes the encoding, not in the assertion code. |
+| 4 | `decoder/bus.rs:430` | `decoder/bus.rs:441` | **Intentional non-equivalent change.** Per-bus domain tag added to `Challenges` encoding. 8 bus constraints affected: chiplets bus (1), hash_kernel bus (1), wiring bus (1), decoder bus (3), range bus (1), stack bus (1). Each polynomial now includes a distinct domain separator constant. Source expressions are identical before/after — the change is in how `Challenges` computes the encoding, not in the assertion code. |
+| 5 | `decoder/bus.rs:656` | `decoder/bus.rs:667` | **Intentional non-equivalent change.** Per-bus domain tag added to `Challenges` encoding. 8 bus constraints affected: chiplets bus (1), hash_kernel bus (1), wiring bus (1), decoder bus (3), range bus (1), stack bus (1). Each polynomial now includes a distinct domain separator constant. Source expressions are identical before/after — the change is in how `Challenges` computes the encoding, not in the assertion code. |
+| 6 | `decoder/bus.rs:850` | `decoder/bus.rs:861` | **Intentional non-equivalent change.** Per-bus domain tag added to `Challenges` encoding. 8 bus constraints affected: chiplets bus (1), hash_kernel bus (1), wiring bus (1), decoder bus (3), range bus (1), stack bus (1). Each polynomial now includes a distinct domain separator constant. Source expressions are identical before/after — the change is in how `Challenges` computes the encoding, not in the assertion code. |
+| 7 | `range/bus.rs:127` | `range/bus.rs:129` | **Intentional non-equivalent change.** Per-bus domain tag added to `Challenges` encoding. 8 bus constraints affected: chiplets bus (1), hash_kernel bus (1), wiring bus (1), decoder bus (3), range bus (1), stack bus (1). Each polynomial now includes a distinct domain separator constant. Source expressions are identical before/after — the change is in how `Challenges` computes the encoding, not in the assertion code. |
+| 8 | `stack/bus.rs:133` | `stack/bus.rs:135` | **Intentional non-equivalent change.** Per-bus domain tag added to `Challenges` encoding. 8 bus constraints affected: chiplets bus (1), hash_kernel bus (1), wiring bus (1), decoder bus (3), range bus (1), stack bus (1). Each polynomial now includes a distinct domain separator constant. Source expressions are identical before/after — the change is in how `Challenges` computes the encoding, not in the assertion code. |
+
+</details>
+
+---

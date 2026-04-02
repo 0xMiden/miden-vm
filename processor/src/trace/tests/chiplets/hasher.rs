@@ -916,7 +916,7 @@ fn build_expected(
 ) -> Felt {
     let first_cycle_row = addr_to_cycle_row(addr) == 0;
     let transition_label = if first_cycle_row { label + 16_u8 } else { label + 32_u8 };
-    let header = challenges.alpha
+    let header = challenges.bus_prefix[miden_air::trace::bus_types::CHIPLETS_BUS]
         + challenges.beta_powers[0] * Felt::from_u8(transition_label)
         + challenges.beta_powers[1] * addr
         + challenges.beta_powers[2] * index;
