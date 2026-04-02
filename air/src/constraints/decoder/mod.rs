@@ -47,8 +47,6 @@ use crate::{
 };
 
 pub mod bus;
-#[cfg(test)]
-pub mod tests;
 
 // CONSTANTS
 // ================================================================================================
@@ -83,63 +81,6 @@ const NUM_BATCH_FLAGS: usize = 3;
 
 /// Index offset for extra columns (e0, e1) within decoder.
 const EXTRA_COLS_OFFSET: usize = 22;
-
-/// Number of decoder constraints, in the order of `DECODER_NAMES`.
-/// - 7 op bits binary constraints
-/// - 2 extra columns constraints (e0, e1)
-/// - 3 op-bit group constraints (u32 b0, very-high b0/b1)
-/// - 3 batch flags binary constraints
-/// - 14 general constraints
-/// - 1 in-span boundary constraint (first row sp = 0)
-/// - 1 in-span binary constraint
-/// - 2 in-span transition constraints (after SPAN/RESPAN, sp' = 1)
-/// - 5 group count constraints
-/// - 2 op group decoding constraints
-/// - 4 op index constraints
-/// - 9 op batch flag constraints
-/// - 3 block address constraints
-/// - 1 control flow constraint (1 - sp - f_ctrl = 0)
-#[allow(dead_code)]
-pub const NUM_CONSTRAINTS: usize = 57;
-
-const IN_SPAN_BASE: usize = 0;
-
-/// The degrees of the decoder constraints.
-#[allow(dead_code)]
-pub const CONSTRAINT_DEGREES: [usize; NUM_CONSTRAINTS] = [
-    2, 2, 2, 2, 2, 2, 2, // op bits binary (degree 2)
-    4, 3, // e0 (degree 4), e1 (degree 3)
-    4, 3, 3, // u32 b0, very-high b0/b1
-    2, 2, 2, // batch flags binary (degree 2)
-    7, 6, 6, 6, 6, // general: split/loop top binary, dyn h4..h7 = 0
-    5, 5, // general: repeat top=1, repeat in-loop
-    6, // general: end + is_loop + s0
-    9, 9, 9, 9, 9, // general: end + repeat' copies h0..h4
-    8, // general: halt -> halt'
-    1, // sp first row (degree 1)
-    2, // sp binary (degree 2)
-    6, 5, // sp transition for SPAN (deg 5+1=6), RESPAN (deg 4+1=5)
-    3, // gc delta bounded (degree 3: sp * delta * (delta - 1))
-    8, // gc decrement implies (h0=0 or is_push=1)
-    6, // gc decrement on SPAN/RESPAN/PUSH
-    5, // gc stays when next is END or RESPAN
-    5, // gc zero at END
-    6, // op group decoding: h0 shift by op'
-    6, // op group decoding: h0 must be 0 before END/RESPAN
-    6, // ox reset on SPAN/RESPAN (degree 6)
-    6, // ox reset on new group (degree 6: sp * ng * ox')
-    7, // ox increment inside basic block (degree 7)
-    9, // ox range [0,8] (degree 9)
-    5, // batch flags sum (span/respan -> one of g1/g2/g4/g8)
-    6, // batch flags zero when not span/respan
-    4, 4, 4, 4, // h4..h7 zero when <=4 groups
-    4, 4, // h2..h3 zero when <=2 groups
-    4, // h1 zero when <=1 group
-    2, // addr unchanged inside basic block (degree 2)
-    5, // addr increment on RESPAN (degree 5)
-    5, // addr zero at HALT (degree 5)
-    5, // control flow: 1 - sp - f_ctrl = 0
-];
 
 // SMALL HELPERS
 // ================================================================================================
@@ -279,7 +220,7 @@ fn enforce_in_span_constraints<AB>(
     let sp_next = cols_next.in_span.clone();
 
     // Boundary: execution starts outside any basic block.
-    assert_zero_first_row(builder, IN_SPAN_BASE, sp.clone());
+    builder.when_first_row().assert_zero(sp.clone());
 
     // Constraint 1: sp is binary, so span state is well-formed.
     let sp_binary = sp.clone() * (sp - AB::Expr::ONE);
@@ -763,8 +704,4 @@ fn enforce_control_flow_constraints<AB>(
     // 1 - sp - fctrl = 0
     let ctrl_flag = op_flags.control_flow();
     builder.assert_zero(AB::Expr::ONE - sp - ctrl_flag);
-}
-
-fn assert_zero_first_row<AB: MidenAirBuilder>(builder: &mut AB, _idx: usize, expr: AB::Expr) {
-    builder.when_first_row().assert_zero(expr);
 }

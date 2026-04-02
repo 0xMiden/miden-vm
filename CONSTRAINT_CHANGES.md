@@ -34,3 +34,8 @@ resolving merge conflicts in this file.
 **No constraint changes.** (441 base + 24 ext)
 
 ---
+## 6. refactor: remove unused decoder constants and inline last assert wrapper
+
+**No constraint changes.** (441 base + 24 ext)
+
+---
