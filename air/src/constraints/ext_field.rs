@@ -51,6 +51,11 @@ impl<E> QuadFeltExpr<E> {
 // ================================================================================================
 
 impl<E: PrimeCharacteristicRing> QuadFeltExpr<E> {
+    /// Returns `self + self`.
+    pub fn double(self) -> Self {
+        Self(self.0.double(), self.1.double())
+    }
+
     /// Returns `self * self`.
     pub fn square(self) -> Self {
         let w = E::from_u16(W);
@@ -59,7 +64,7 @@ impl<E: PrimeCharacteristicRing> QuadFeltExpr<E> {
         let a1_sq = self.1.clone() * self.1.clone();
         let a0_a1 = self.0 * self.1;
         let c0 = a0_sq + w * a1_sq;
-        let c1 = a0_a1.clone() + a0_a1;
+        let c1 = a0_a1.double();
         Self(c0, c1)
     }
 

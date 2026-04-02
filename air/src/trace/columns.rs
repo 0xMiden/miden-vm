@@ -11,12 +11,10 @@ use core::{
 };
 
 use super::{
-    AceCols, AceEvalCols, AceReadCols, BitwiseCols, HasherCols, KernelRomCols, MemoryCols,
-    RangeCols, StackCols, SystemCols,
-    chiplets,
-    {AUX_TRACE_WIDTH, CHIPLETS_WIDTH, TRACE_WIDTH},
+    AUX_TRACE_WIDTH, AceCols, AceEvalCols, AceReadCols, BitwiseCols, CHIPLETS_WIDTH, HasherCols,
+    KernelRomCols, MemoryCols, RangeCols, StackCols, SystemCols, TRACE_WIDTH, chiplets,
+    decoder::DecoderCols,
 };
-use super::decoder::DecoderCols;
 
 // MAIN TRACE COLUMN STRUCT
 // ================================================================================================

@@ -18,13 +18,13 @@ pub use rows::{RowIndex, RowIndexError};
 
 mod main_trace;
 // RE-EXPORTS: column structs (from columns.rs)
-pub use columns::{
-    AuxCols, MainCols, MainTraceRow, MAIN_COL_MAP, NUM_MAIN_COLS, NUM_AUX_COLS, AUX_COL_MAP,
-    indices_arr,
-};
 // RE-EXPORTS: sub-module column structs
 pub use chiplets::{
     AceCols, AceEvalCols, AceReadCols, BitwiseCols, HasherCols, KernelRomCols, MemoryCols,
+};
+pub use columns::{
+    AUX_COL_MAP, AuxCols, MAIN_COL_MAP, MainCols, MainTraceRow, NUM_AUX_COLS, NUM_MAIN_COLS,
+    indices_arr,
 };
 pub use decoder::{DecoderCols, EndBlockFlags};
 pub use main_trace::MainTrace;
