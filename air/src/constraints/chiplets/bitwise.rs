@@ -34,13 +34,7 @@ use crate::{
         constants::{F_1, F_16},
         utils::horner_eval_bits,
     },
-    trace::{
-        CHIPLETS_OFFSET,
-        chiplets::{
-            BITWISE_A_COL_IDX, BITWISE_A_COL_RANGE, BITWISE_B_COL_IDX, BITWISE_B_COL_RANGE,
-            BITWISE_OUTPUT_COL_IDX, BITWISE_PREV_OUTPUT_COL_IDX, BITWISE_SELECTOR_COL_IDX,
-        },
-    },
+    trace::{BitwiseCols, chiplets::borrow_chiplet},
 };
 
 // CONSTANTS
@@ -83,21 +77,28 @@ pub fn enforce_bitwise_constraints<AB>(
 
     let bitwise_flag = flags.is_active.clone();
 
-    // Load bitwise columns using typed struct
-    let cols: BitwiseColumns<AB::Expr> = BitwiseColumns::from_row(local);
-    let cols_next: BitwiseColumns<AB::Expr> = BitwiseColumns::from_row(next);
+    // Load bitwise columns via zero-copy borrow into the typed struct
+    let cols: &BitwiseCols<AB::Var> = borrow_chiplet(&local.chiplets[2..15]);
+    let cols_next: &BitwiseCols<AB::Var> = borrow_chiplet(&next.chiplets[2..15]);
+
+    // Convert bit arrays to AB::Expr for arithmetic
+    let a_bits: [AB::Expr; 4] = cols.a_bits.map(Into::into);
+    let b_bits: [AB::Expr; 4] = cols.b_bits.map(Into::into);
+    let a_bits_next: [AB::Expr; 4] = cols_next.a_bits.map(Into::into);
+    let b_bits_next: [AB::Expr; 4] = cols_next.b_bits.map(Into::into);
 
     // ==========================================================================
     // OPERATION FLAG CONSTRAINTS
     // ==========================================================================
 
     // op_flag must be binary (0 for AND, 1 for XOR)
-    builder.assert_zero(bitwise_flag.clone() * cols.op_flag.clone() * (cols.op_flag.clone() - F_1));
+    let op_flag: AB::Expr = cols.op_flag.into();
+    builder.assert_zero(bitwise_flag.clone() * op_flag.clone() * (op_flag.clone() - F_1));
 
     // op_flag must remain constant within the 8-row cycle (can only change when k1=0)
+    let op_flag_next: AB::Expr = cols_next.op_flag.into();
     let gate_transition = k_transition.clone() * bitwise_flag.clone();
-    builder
-        .assert_zero(gate_transition.clone() * (cols.op_flag.clone() - cols_next.op_flag.clone()));
+    builder.assert_zero(gate_transition.clone() * (op_flag.clone() - op_flag_next));
 
     // ==========================================================================
     // INPUT DECOMPOSITION CONSTRAINTS
@@ -106,27 +107,32 @@ pub fn enforce_bitwise_constraints<AB>(
     // Bit decomposition columns must be binary
     let gate = bitwise_flag.clone();
     for i in 0..NUM_BITS_PER_ROW {
-        builder.assert_zero(gate.clone() * cols.a_bits[i].clone() * (cols.a_bits[i].clone() - F_1));
+        builder.assert_zero(gate.clone() * a_bits[i].clone() * (a_bits[i].clone() - F_1));
     }
 
     for i in 0..NUM_BITS_PER_ROW {
-        builder.assert_zero(gate.clone() * cols.b_bits[i].clone() * (cols.b_bits[i].clone() - F_1));
+        builder.assert_zero(gate.clone() * b_bits[i].clone() * (b_bits[i].clone() - F_1));
     }
 
     // First row of cycle (k0=1): a = aggregated bits, b = aggregated bits
-    let a_agg = horner_eval_bits(&cols.a_bits);
-    let b_agg = horner_eval_bits(&cols.b_bits);
+    let a_agg = horner_eval_bits(&a_bits);
+    let b_agg = horner_eval_bits(&b_bits);
+    let a: AB::Expr = cols.a.into();
+    let b: AB::Expr = cols.b.into();
+    let prev_output: AB::Expr = cols.prev_output.into();
     let gate_first = k_first.clone() * bitwise_flag.clone();
-    for expr in [cols.a.clone() - a_agg, cols.b.clone() - b_agg, cols.prev_output.clone()] {
+    for expr in [a.clone() - a_agg, b.clone() - b_agg, prev_output.clone()] {
         builder.assert_zero(gate_first.clone() * expr);
     }
 
     // Transition rows (k1=1): a' = 16*a + agg(a'_bits), b' = 16*b + agg(b'_bits)
-    let a_agg_next = horner_eval_bits(&cols_next.a_bits);
-    let b_agg_next = horner_eval_bits(&cols_next.b_bits);
+    let a_agg_next = horner_eval_bits(&a_bits_next);
+    let b_agg_next = horner_eval_bits(&b_bits_next);
+    let a_next: AB::Expr = cols_next.a.into();
+    let b_next: AB::Expr = cols_next.b.into();
     for expr in [
-        cols_next.a.clone() - (cols.a.clone() * F_16 + a_agg_next),
-        cols_next.b.clone() - (cols.b.clone() * F_16 + b_agg_next),
+        a_next - (a.clone() * F_16 + a_agg_next),
+        b_next - (b * F_16 + b_agg_next),
     ] {
         builder.assert_zero(gate_transition.clone() * expr);
     }
@@ -136,79 +142,30 @@ pub fn enforce_bitwise_constraints<AB>(
     // ==========================================================================
 
     // Transition rows (k1=1): output_prev' = output
-    builder.assert_zero(gate_transition * (cols_next.prev_output.clone() - cols.output.clone()));
+    let output: AB::Expr = cols.output.into();
+    let prev_output_next: AB::Expr = cols_next.prev_output.into();
+    builder.assert_zero(gate_transition * (prev_output_next - output.clone()));
 
     // Every row: output = 16*output_prev + bitwise_result
 
     // Compute AND of 4-bit limbs: sum(2^i * (a[i] * b[i]))
-    let a_and_b_bits: [_; 4] =
-        core::array::from_fn(|i| cols.a_bits[i].clone() * cols.b_bits[i].clone());
+    let a_and_b_bits: [AB::Expr; 4] =
+        core::array::from_fn(|i| a_bits[i].clone() * b_bits[i].clone());
     let a_and_b = horner_eval_bits(&a_and_b_bits);
 
     // Compute XOR of 4-bit limbs: sum(2^i * (a[i] + b[i] - 2*a[i]*b[i]))
     // Reuses a_and_b_bits: xor_bit = a + b - 2*and_bit
-    let a_xor_b_bits: [_; 4] = core::array::from_fn(|i| {
-        cols.a_bits[i].clone() + cols.b_bits[i].clone() - a_and_b_bits[i].clone().double()
+    let a_xor_b_bits: [AB::Expr; 4] = core::array::from_fn(|i| {
+        a_bits[i].clone() + b_bits[i].clone() - a_and_b_bits[i].clone().double()
     });
     let a_xor_b = horner_eval_bits(&a_xor_b_bits);
 
     // z = zp * 16 + (op_flag ? a_xor_b : a_and_b)
     // Equivalent: z = zp * 16 + a_and_b + op_flag * (a_xor_b - a_and_b)
-    let expected_z = cols.prev_output.clone() * F_16
-        + a_and_b.clone()
-        + cols.op_flag.clone() * (a_xor_b.clone() - a_and_b);
+    let expected_z =
+        prev_output * F_16 + a_and_b.clone() + op_flag * (a_xor_b - a_and_b);
 
-    builder.assert_zero(bitwise_flag * (cols.output.clone() - expected_z));
-}
-
-// INTERNAL HELPERS
-// ================================================================================================
-
-/// Typed access to bitwise chiplet columns.
-///
-/// This struct provides named access to bitwise columns, eliminating error-prone
-/// index arithmetic. Created from a `MainTraceRow` reference.
-pub struct BitwiseColumns<E> {
-    /// Operation flag: 0=AND, 1=XOR
-    pub op_flag: E,
-    /// Aggregated value of input a
-    pub a: E,
-    /// Aggregated value of input b
-    pub b: E,
-    /// 4-bit decomposition of a (little-endian)
-    pub a_bits: [E; NUM_BITS_PER_ROW],
-    /// 4-bit decomposition of b (little-endian)
-    pub b_bits: [E; NUM_BITS_PER_ROW],
-    /// Previous aggregated output
-    pub prev_output: E,
-    /// Current aggregated output
-    pub output: E,
-}
-
-impl<E: Clone> BitwiseColumns<E> {
-    /// Extract bitwise columns from a main trace row.
-    pub fn from_row<V>(row: &MainTraceRow<V>) -> Self
-    where
-        V: Into<E> + Clone,
-    {
-        let op_idx = BITWISE_SELECTOR_COL_IDX - CHIPLETS_OFFSET;
-        let a_idx = BITWISE_A_COL_IDX - CHIPLETS_OFFSET;
-        let b_idx = BITWISE_B_COL_IDX - CHIPLETS_OFFSET;
-        let a_bits_start = BITWISE_A_COL_RANGE.start - CHIPLETS_OFFSET;
-        let b_bits_start = BITWISE_B_COL_RANGE.start - CHIPLETS_OFFSET;
-        let zp_idx = BITWISE_PREV_OUTPUT_COL_IDX - CHIPLETS_OFFSET;
-        let z_idx = BITWISE_OUTPUT_COL_IDX - CHIPLETS_OFFSET;
-
-        BitwiseColumns {
-            op_flag: row.chiplets[op_idx].clone().into(),
-            a: row.chiplets[a_idx].clone().into(),
-            b: row.chiplets[b_idx].clone().into(),
-            a_bits: core::array::from_fn(|i| row.chiplets[a_bits_start + i].clone().into()),
-            b_bits: core::array::from_fn(|i| row.chiplets[b_bits_start + i].clone().into()),
-            prev_output: row.chiplets[zp_idx].clone().into(),
-            output: row.chiplets[z_idx].clone().into(),
-        }
-    }
+    builder.assert_zero(bitwise_flag * (output - expected_z));
 }
 
 // =============================================================================
