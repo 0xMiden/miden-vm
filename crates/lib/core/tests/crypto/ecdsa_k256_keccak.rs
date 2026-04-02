@@ -213,8 +213,8 @@ fn test_ecdsa_verify_bis_wrapper() {
         ",
     );
 
-    let mut test = build_debug_test!(&source);
-    test.add_event_handler(EVENT_ECDSA_SIG_TO_STACK, EcdsaSignatureHandler::new(&secret_key));
+    let test = build_debug_test!(&source)
+        .with_event_handler(EVENT_ECDSA_SIG_TO_STACK, EcdsaSignatureHandler::new(&secret_key));
 
     test.expect_stack(&[]);
 }

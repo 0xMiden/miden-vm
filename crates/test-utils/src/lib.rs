@@ -244,6 +244,40 @@ impl Test {
         self
     }
 
+    /// Sets the stack inputs for this test using stack-ordered values.
+    #[track_caller]
+    pub fn with_stack_inputs(mut self, stack_inputs: impl AsRef<[u64]>) -> Self {
+        self.stack_inputs = StackInputs::try_from_ints(stack_inputs.as_ref().to_vec()).unwrap();
+        self
+    }
+
+    /// Adds a library to link in during assembly.
+    pub fn with_library(mut self, library: impl Into<Library>) -> Self {
+        self.libraries.push(library.into());
+        self
+    }
+
+    /// Adds a handler for a specific event when running the `Host`.
+    pub fn with_event_handler(mut self, event: EventName, handler: impl EventHandler) -> Self {
+        self.add_event_handler(event, handler);
+        self
+    }
+
+    /// Adds handlers for specific events when running the `Host`.
+    pub fn with_event_handlers(
+        mut self,
+        handlers: Vec<(EventName, Arc<dyn EventHandler>)>,
+    ) -> Self {
+        self.add_event_handlers(handlers);
+        self
+    }
+
+    /// Adds an extra module to link in during assembly.
+    pub fn with_module(mut self, path: impl AsRef<Path>, source: impl ToString) -> Self {
+        self.add_module(path, source);
+        self
+    }
+
     /// Add an extra module to link in during assembly
     pub fn add_module(&mut self, path: impl AsRef<Path>, source: impl ToString) {
         self.add_modules.push((path.as_ref().into(), source.to_string()));

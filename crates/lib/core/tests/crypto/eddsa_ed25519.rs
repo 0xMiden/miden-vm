@@ -262,8 +262,8 @@ fn test_eddsa_verify_high_level_wrapper() {
         ",
     );
 
-    let mut test = build_debug_test!(&source);
-    test.add_event_handler(EVENT_EDDSA_SIG_TO_STACK, EddsaSignatureHandler::new(&secret_key));
+    let test = build_debug_test!(&source)
+        .with_event_handler(EVENT_EDDSA_SIG_TO_STACK, EddsaSignatureHandler::new(&secret_key));
 
     test.expect_stack(&[]);
     test.execute().unwrap();

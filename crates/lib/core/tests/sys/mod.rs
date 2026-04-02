@@ -122,8 +122,7 @@ fn log_precompile_request_procedure() {
 
     let handler = DummyLogPrecompileHandler { event_id, calldata: calldata.clone() };
 
-    let mut test = build_debug_test!(&source, &[]);
-    test.add_event_handler(EVENT_NAME, handler.clone());
+    let test = build_debug_test!(&source, &[]).with_event_handler(EVENT_NAME, handler.clone());
 
     let trace = test.execute().expect("failed to execute log_precompile test");
 
