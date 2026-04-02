@@ -14,3 +14,8 @@ resolving merge conflicts in this file.
 **No constraint changes.** (441 base + 24 ext)
 
 ---
+## 2. refactor: inline trivial assert wrappers in stack and decoder modules
+
+**No constraint changes.** (441 base + 24 ext)
+
+---

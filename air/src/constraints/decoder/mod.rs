@@ -226,14 +226,6 @@ pub const CONSTRAINT_DEGREES: [usize; NUM_CONSTRAINTS] = [
 // SMALL HELPERS
 // ================================================================================================
 
-/// Asserts a value is binary (0 or 1): `x * (x - 1) = 0`.
-fn assert_binary<AB>(builder: &mut AB, value: AB::Expr)
-where
-    AB: TaggingAirBuilderExt,
-{
-    assert_zero_integrity(builder, value.clone() * (value - AB::Expr::ONE));
-}
-
 /// Computes the opcode value from op bits: `b0 + 2*b1 + ... + 64*b6`.
 fn op_bits_to_value<AB>(bits: &[AB::Expr; NUM_OP_BITS]) -> AB::Expr
 where
@@ -373,17 +365,17 @@ fn enforce_in_span_constraints<AB>(
 
     // Constraint 1: sp is binary, so span state is well-formed.
     let sp_binary = sp.clone() * (sp - AB::Expr::ONE);
-    assert_zero_integrity(builder, sp_binary);
+    builder.assert_zero(sp_binary);
 
     // Constraint 2: After SPAN, the next row must be inside a span.
     // span_flag * (1 - sp') = 0
     let span_flag = op_flags.span();
-    assert_zero_transition(builder, span_flag * (AB::Expr::ONE - sp_next.clone()));
+    builder.when_transition().assert_zero(span_flag * (AB::Expr::ONE - sp_next.clone()));
 
     // Constraint 3: After RESPAN, the next row must be inside a span.
     // respan_flag * (1 - sp') = 0
     let respan_flag = op_flags.respan();
-    assert_zero_transition(builder, respan_flag * (AB::Expr::ONE - sp_next));
+    builder.when_transition().assert_zero(respan_flag * (AB::Expr::ONE - sp_next));
 }
 
 /// Enforces that all operation bits (b0-b6) are binary (0 or 1).
@@ -395,7 +387,8 @@ where
 {
     for i in 0..NUM_OP_BITS {
         // Each opcode bit must be 0 or 1 to make decoding deterministic.
-        assert_binary(builder, cols.op_bits[i].clone());
+        let bit = cols.op_bits[i].clone();
+        builder.assert_zero(bit.clone() * (bit - AB::Expr::ONE));
     }
 }
 
@@ -419,13 +412,13 @@ where
     // This extra register exists to reduce the degree of op-flag selectors for the
     // `101...` opcode group (see docs/src/design/stack/op_constraints.md).
     let expected_e0 = b6.clone() * (AB::Expr::ONE - b5.clone()) * b4;
-    assert_zero_integrity(builder, e0 - expected_e0);
+    builder.assert_zero(e0 - expected_e0);
 
     // e1 = b6 * b5.
     // This extra register exists to reduce the degree of op-flag selectors for the
     // `11...` opcode group (see docs/src/design/stack/op_constraints.md).
     let expected_e1 = b6 * b5;
-    assert_zero_integrity(builder, e1 - expected_e1);
+    builder.assert_zero(e1 - expected_e1);
 }
 
 /// Enforces opcode-bit constraints for grouped opcode families.
@@ -445,13 +438,13 @@ where
     // U32 prefix pattern: b6=1, b5=0, b4=0. Under this prefix, b0 must be 0 to
     // eliminate invalid opcodes in the U32 opcode subset.
     let u32_prefix = b6.clone() * (AB::Expr::ONE - b5.clone()) * (AB::Expr::ONE - b4);
-    assert_zero_integrity(builder, u32_prefix * b0.clone());
+    builder.assert_zero(u32_prefix * b0.clone());
 
     // Very-high prefix pattern: b6=1, b5=1. Under this prefix, b0 and b1 must be 0
     // to eliminate invalid opcodes in the very-high opcode subset.
     let very_high_prefix = b6 * b5;
-    assert_zero_integrity(builder, very_high_prefix.clone() * b0);
-    assert_zero_integrity(builder, very_high_prefix * b1);
+    builder.assert_zero(very_high_prefix.clone() * b0);
+    builder.assert_zero(very_high_prefix * b1);
 }
 
 /// Enforces that batch flags (c0, c1, c2) are binary.
@@ -463,7 +456,8 @@ where
 {
     for i in 0..NUM_BATCH_FLAGS {
         // Batch flags are selectors; they must be boolean.
-        assert_binary(builder, cols.batch_flags[i].clone());
+        let flag = cols.batch_flags[i].clone();
+        builder.assert_zero(flag.clone() * (flag - AB::Expr::ONE));
     }
 }
 
@@ -489,33 +483,32 @@ fn enforce_general_constraints<AB>(
     // SPLIT/LOOP: top stack value must be binary (branch selector).
     let split_or_loop = op_flags.split() + op_flags.loop_op();
     let s0_binary = s0.clone() * (s0.clone() - AB::Expr::ONE);
-    assert_zero_integrity(builder, split_or_loop * s0_binary);
+    builder.assert_zero(split_or_loop * s0_binary);
 
     // DYN: the first half holds the callee digest; the second half must be zero.
     let f_dyn = op_flags.dyn_op();
     for i in 0..4 {
         let hi: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 4 + i].clone().into();
-        assert_zero_integrity(builder, f_dyn.clone() * hi);
+        builder.assert_zero(f_dyn.clone() * hi);
     }
 
     // REPEAT: top stack must be 1 and we must be in a loop body (h4=1).
     let f_repeat = op_flags.repeat();
     let h4: AB::Expr = local.decoder[decoder_cols::IS_LOOP_BODY_FLAG_COL_IDX].clone().into();
-    assert_zero_integrity(builder, f_repeat.clone() * (AB::Expr::ONE - s0.clone()));
-    assert_zero_integrity(builder, f_repeat * (AB::Expr::ONE - h4));
+    builder.assert_zero(f_repeat.clone() * (AB::Expr::ONE - s0.clone()));
+    builder.assert_zero(f_repeat * (AB::Expr::ONE - h4));
 
     // END inside a loop: if is_loop flag is set, top stack must be 0.
     let f_end = op_flags.end();
     let h5: AB::Expr = local.decoder[decoder_cols::IS_LOOP_FLAG_COL_IDX].clone().into();
-    assert_zero_integrity(builder, f_end.clone() * h5 * s0);
+    builder.assert_zero(f_end.clone() * h5 * s0);
 
     // END followed by REPEAT: carry h0..h4 into the next row.
     let f_repeat_next = op_flags_next.repeat();
     for i in 0..5 {
         let hi: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + i].clone().into();
         let hi_next: AB::Expr = next.decoder[decoder_cols::HASHER_STATE_OFFSET + i].clone().into();
-        assert_zero_transition(
-            builder,
+        builder.when_transition().assert_zero(
             f_end.clone() * f_repeat_next.clone() * (hi_next - hi),
         );
     }
@@ -523,7 +516,7 @@ fn enforce_general_constraints<AB>(
     // HALT is absorbing: it can only be followed by HALT.
     let f_halt = op_flags.halt();
     let f_halt_next = op_flags_next.halt();
-    assert_zero_transition(builder, f_halt * (AB::Expr::ONE - f_halt_next));
+    builder.when_transition().assert_zero(f_halt * (AB::Expr::ONE - f_halt_next));
 }
 
 /// Enforces group count (gc) constraints.
@@ -567,16 +560,14 @@ fn enforce_group_count_constraints<AB>(
     // Constraint 1: Inside a span, gc can only stay the same or decrement by 1.
     // sp * delta_gc * (delta_gc - 1) = 0
     // This ensures: if sp=1 and delta_gc != 0, then delta_gc must equal 1
-    assert_zero_transition(
-        builder,
+    builder.when_transition().assert_zero(
         sp.clone() * delta_gc.clone() * (delta_gc.clone() - AB::Expr::ONE),
     );
 
     // Constraint 2: If gc decrements and this is not a PUSH-immediate row,
     // then h0 must be zero (no immediate value packed into the group).
     // sp * delta_gc * (1 - is_push) * h0 = 0
-    assert_zero_transition(
-        builder,
+    builder.when_transition().assert_zero(
         sp.clone() * delta_gc.clone() * (AB::Expr::ONE - is_push.clone()) * h0,
     );
 
@@ -584,8 +575,7 @@ fn enforce_group_count_constraints<AB>(
     // (span_flag + respan_flag + is_push) * (delta_gc - 1) = 0
     let span_flag = op_flags.span();
     let respan_flag = op_flags.respan();
-    assert_zero_transition(
-        builder,
+    builder.when_transition().assert_zero(
         (span_flag + respan_flag + is_push) * (delta_gc.clone() - AB::Expr::ONE),
     );
 
@@ -593,12 +583,12 @@ fn enforce_group_count_constraints<AB>(
     // delta_gc * (end' + respan') = 0
     let end_next = op_flags_next.end();
     let respan_next = op_flags_next.respan();
-    assert_zero_transition(builder, delta_gc.clone() * (end_next + respan_next));
+    builder.when_transition().assert_zero(delta_gc.clone() * (end_next + respan_next));
 
     // Constraint 5: END closes the span, so gc must be 0.
     // end_flag * gc = 0
     let end_flag = op_flags.end();
-    assert_zero_integrity(builder, end_flag * gc);
+    builder.assert_zero(end_flag * gc);
 }
 
 /// Enforces op group decoding constraints for the `h0` register.
@@ -641,12 +631,12 @@ fn enforce_op_group_decoding_constraints<AB>(
     // (h0 - h0' * 2^7 - op') = 0 under the combined flag.
     let op_group_base = AB::Expr::from_u16(1u16 << 7);
     let h0_shift = h0.clone() - h0_next * op_group_base - op_next;
-    assert_zero_transition(builder, (f_span + f_respan + is_push + f_sgc) * h0_shift);
+    builder.when_transition().assert_zero((f_span + f_respan + is_push + f_sgc) * h0_shift);
 
     // If the next op is END or RESPAN, the current h0 must be 0 (no pending group).
     let end_next = op_flags_next.end();
     let respan_next = op_flags_next.respan();
-    assert_zero_transition(builder, sp * (end_next + respan_next) * h0);
+    builder.when_transition().assert_zero(sp * (end_next + respan_next) * h0);
 }
 
 /// Enforces op index (ox) constraints.
@@ -698,16 +688,16 @@ fn enforce_op_index_constraints<AB>(
 
     // Constraint 1: SPAN/RESPAN start a fresh group, so ox' = 0.
     // (span_flag + respan_flag) * ox' = 0
-    assert_zero_transition(builder, (span_flag + respan_flag) * ox_next.clone());
+    builder.when_transition().assert_zero((span_flag + respan_flag) * ox_next.clone());
 
     // Constraint 2: When a new group starts inside a span, ox' = 0.
     // sp * ng * ox' = 0
-    assert_zero_transition(builder, sp.clone() * ng.clone() * ox_next.clone());
+    builder.when_transition().assert_zero(sp.clone() * ng.clone() * ox_next.clone());
 
     // Constraint 3: When staying in the same group, ox increments by 1.
     // sp * sp' * (1 - ng) * (ox' - ox - 1) = 0
     let delta_ox = ox_next - ox.clone() - AB::Expr::ONE;
-    assert_zero_transition(builder, sp * sp_next * (AB::Expr::ONE - ng) * delta_ox);
+    builder.when_transition().assert_zero(sp * sp_next * (AB::Expr::ONE - ng) * delta_ox);
 
     // Constraint 4: ox must be in range [0, 8] (9 ops per group).
     // ∏_{i=0}^{8}(ox - i) = 0
@@ -715,7 +705,7 @@ fn enforce_op_index_constraints<AB>(
     for i in 1..=8u64 {
         range_check *= ox.clone() - AB::Expr::from_u16(i as u16);
     }
-    assert_zero_integrity(builder, range_check);
+    builder.assert_zero(range_check);
 }
 
 /// Enforces op batch flag constraints and associated hasher-state zeroing rules.
@@ -746,14 +736,12 @@ fn enforce_batch_flags_constraints<AB>(
     let span_or_respan = f_span + f_respan;
 
     // When SPAN or RESPAN, exactly one batch flag must be set.
-    assert_zero_integrity(
-        builder,
+    builder.assert_zero(
         span_or_respan.clone() - (f_g1.clone() + f_g2.clone() + f_g4.clone() + f_g8),
     );
 
     // When not SPAN/RESPAN, all batch flags must be zero.
-    assert_zero_integrity(
-        builder,
+    builder.assert_zero(
         (AB::Expr::ONE - span_or_respan)
             * (cols.batch_flags[0].clone()
                 + cols.batch_flags[1].clone()
@@ -764,19 +752,19 @@ fn enforce_batch_flags_constraints<AB>(
     let small_batch = f_g1.clone() + f_g2.clone() + f_g4.clone();
     for i in 0..4 {
         let hi: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 4 + i].clone().into();
-        assert_zero_integrity(builder, small_batch.clone() * hi);
+        builder.assert_zero(small_batch.clone() * hi);
     }
 
     // When batch has <=2 groups, h2..h3 must be zero (unused lanes).
     let tiny_batch = f_g1.clone() + f_g2.clone();
     for i in 0..2 {
         let hi: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 2 + i].clone().into();
-        assert_zero_integrity(builder, tiny_batch.clone() * hi);
+        builder.assert_zero(tiny_batch.clone() * hi);
     }
 
     // When batch has 1 group, h1 must be zero (unused lane).
     let h1: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 1].clone().into();
-    assert_zero_integrity(builder, f_g1 * h1);
+    builder.assert_zero(f_g1 * h1);
 }
 
 /// Enforces block address (addr) constraints.
@@ -807,18 +795,18 @@ fn enforce_block_address_constraints<AB>(
 
     // Constraint 1: Inside a span, address must stay the same.
     // sp * (addr' - addr) = 0
-    assert_zero_transition(builder, sp * (addr_next.clone() - addr.clone()));
+    builder.when_transition().assert_zero(sp * (addr_next.clone() - addr.clone()));
 
     // Constraint 2: RESPAN moves to the next hash block (Poseidon2 = 32 rows).
     // respan_flag * (addr' - addr - HASH_CYCLE_LEN) = 0
     let hash_cycle_len: AB::Expr = AB::Expr::from_u16(HASH_CYCLE_LEN as u16);
     let respan_flag = op_flags.respan();
-    assert_zero_transition(builder, respan_flag * (addr_next - addr.clone() - hash_cycle_len));
+    builder.when_transition().assert_zero(respan_flag * (addr_next - addr.clone() - hash_cycle_len));
 
     // Constraint 3: HALT forces addr = 0.
     // halt_flag * addr = 0
     let halt_flag = op_flags.halt();
-    assert_zero_integrity(builder, halt_flag * addr);
+    builder.assert_zero(halt_flag * addr);
 }
 
 /// Enforces control flow constraints.
@@ -845,15 +833,7 @@ fn enforce_control_flow_constraints<AB>(
     // Constraint: sp and control_flow must be complementary.
     // 1 - sp - fctrl = 0
     let ctrl_flag = op_flags.control_flow();
-    assert_zero_integrity(builder, AB::Expr::ONE - sp - ctrl_flag);
-}
-
-fn assert_zero_transition<AB: TaggingAirBuilderExt>(builder: &mut AB, expr: AB::Expr) {
-    builder.when_transition().assert_zero(expr);
-}
-
-fn assert_zero_integrity<AB: TaggingAirBuilderExt>(builder: &mut AB, expr: AB::Expr) {
-    builder.assert_zero(expr);
+    builder.assert_zero(AB::Expr::ONE - sp - ctrl_flag);
 }
 
 fn assert_zero_first_row<AB: TaggingAirBuilderExt>(builder: &mut AB, idx: usize, expr: AB::Expr) {

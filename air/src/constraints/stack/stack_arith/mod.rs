@@ -9,10 +9,7 @@ use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 
 use crate::{
     MainTraceRow,
-    constraints::{
-        op_flags::OpFlags,
-        tagging::TaggingAirBuilderExt,
-    },
+    constraints::op_flags::OpFlags,
     trace::decoder::USER_OP_HELPERS_OFFSET,
 };
 
@@ -81,53 +78,45 @@ pub fn enforce_main<AB>(
     // -------------------------------------------------------------------------
     // Field ops
     // -------------------------------------------------------------------------
-    assert_zero(builder,is_add * (s0_next.clone() - (s0.clone() + s1.clone())));
-    assert_zero(builder,is_neg * (s0_next.clone() + s0.clone()));
-    assert_zero(builder,is_mul * (s0_next.clone() - s0.clone() * s1.clone()));
-    assert_zero(builder,is_inv * (s0_next.clone() * s0.clone() - AB::Expr::ONE));
-    assert_zero(builder,is_incr * (s0_next.clone() - s0.clone() - AB::Expr::ONE));
+    builder.when_transition().assert_zero(is_add * (s0_next.clone() - (s0.clone() + s1.clone())));
+    builder.when_transition().assert_zero(is_neg * (s0_next.clone() + s0.clone()));
+    builder.when_transition().assert_zero(is_mul * (s0_next.clone() - s0.clone() * s1.clone()));
+    builder.when_transition().assert_zero(is_inv * (s0_next.clone() * s0.clone() - AB::Expr::ONE));
+    builder.when_transition().assert_zero(is_incr * (s0_next.clone() - s0.clone() - AB::Expr::ONE));
 
-    assert_zero_integrity(
-        builder,
+    builder.assert_zero(
         is_not.clone() * (s0.clone() * (s0.clone() - AB::Expr::ONE)),
     );
-    assert_zero(builder,is_not * (s0.clone() + s0_next.clone() - AB::Expr::ONE));
+    builder.when_transition().assert_zero(is_not * (s0.clone() + s0_next.clone() - AB::Expr::ONE));
 
-    assert_zero_integrity(
-        builder,
+    builder.assert_zero(
         is_and.clone() * (s0.clone() * (s0.clone() - AB::Expr::ONE)),
     );
-    assert_zero_integrity(
-        builder,
+    builder.assert_zero(
         is_and.clone() * (s1.clone() * (s1.clone() - AB::Expr::ONE)),
     );
-    assert_zero(builder,is_and * (s0_next.clone() - s0.clone() * s1.clone()));
+    builder.when_transition().assert_zero(is_and * (s0_next.clone() - s0.clone() * s1.clone()));
 
-    assert_zero_integrity(
-        builder,
+    builder.assert_zero(
         is_or.clone() * (s0.clone() * (s0.clone() - AB::Expr::ONE)),
     );
-    assert_zero_integrity(
-        builder,
+    builder.assert_zero(
         is_or.clone() * (s1.clone() * (s1.clone() - AB::Expr::ONE)),
     );
-    assert_zero(
-        builder,
+    builder.when_transition().assert_zero(
         is_or * (s0_next.clone() - (s0.clone() + s1.clone() - s0.clone() * s1.clone())),
     );
 
     // EQ: if s0 != s1, h0 acts as 1/(s0 - s1) and forces s0' = 0; if equal, s0' = 1.
     let eq_diff = s0.clone() - s1.clone();
-    assert_zero(builder,is_eq.clone() * (eq_diff.clone() * s0_next.clone()));
-    assert_zero(
-        builder,
+    builder.when_transition().assert_zero(is_eq.clone() * (eq_diff.clone() * s0_next.clone()));
+    builder.when_transition().assert_zero(
         is_eq * (s0_next.clone() - (AB::Expr::ONE - eq_diff * uop_h0.clone())),
     );
 
     // EQZ: if s0 != 0, h0 acts as 1/s0 and forces s0' = 0; if zero, s0' = 1.
-    assert_zero(builder,is_eqz.clone() * (s0.clone() * s0_next.clone()));
-    assert_zero(
-        builder,
+    builder.when_transition().assert_zero(is_eqz.clone() * (s0.clone() * s0_next.clone()));
+    builder.when_transition().assert_zero(
         is_eqz * (s0_next.clone() - (AB::Expr::ONE - s0.clone() * uop_h0.clone())),
     );
 
@@ -142,18 +131,16 @@ pub fn enforce_main<AB>(
     let exp_val = uop_h0.clone();
     let two: AB::Expr = AB::Expr::from_u16(2);
 
-    assert_zero(builder,is_expacc.clone() * (exp_next - exp.clone() * exp.clone()));
-    assert_zero(
-        builder,
+    builder.when_transition().assert_zero(is_expacc.clone() * (exp_next - exp.clone() * exp.clone()));
+    builder.when_transition().assert_zero(
         is_expacc.clone()
             * (exp_val.clone() - AB::Expr::ONE - (exp - AB::Expr::ONE) * exp_bit.clone()),
     );
-    assert_zero(builder,is_expacc.clone() * (acc_next - acc * exp_val));
-    assert_zero(
-        builder,
+    builder.when_transition().assert_zero(is_expacc.clone() * (acc_next - acc * exp_val));
+    builder.when_transition().assert_zero(
         is_expacc.clone() * (exp_b - exp_b_next * two - exp_bit.clone()),
     );
-    assert_zero(builder,is_expacc * (exp_bit.clone() * (exp_bit - AB::Expr::ONE)));
+    builder.when_transition().assert_zero(is_expacc * (exp_bit.clone() * (exp_bit - AB::Expr::ONE)));
 
     let ext_b0 = s0.clone();
     let ext_b1 = s1.clone();
@@ -167,14 +154,12 @@ pub fn enforce_main<AB>(
     let ext_a1_b1 = ext_a1.clone() * ext_b1.clone();
 
     let seven: AB::Expr = AB::Expr::from_u16(7);
-    assert_zero(builder,is_ext2mul.clone() * (ext_d0 - ext_b0.clone()));
-    assert_zero(builder,is_ext2mul.clone() * (ext_d1 - ext_b1.clone()));
-    assert_zero(
-        builder,
+    builder.when_transition().assert_zero(is_ext2mul.clone() * (ext_d0 - ext_b0.clone()));
+    builder.when_transition().assert_zero(is_ext2mul.clone() * (ext_d1 - ext_b1.clone()));
+    builder.when_transition().assert_zero(
         is_ext2mul.clone() * (ext_c0 - (ext_a0_b0.clone() + seven.clone() * ext_a1_b1.clone())),
     );
-    assert_zero(
-        builder,
+    builder.when_transition().assert_zero(
         is_ext2mul * (ext_c1 - ((ext_a0 + ext_a1) * (ext_b0 + ext_b1) - ext_a0_b0 - ext_a1_b1)),
     );
 
@@ -195,8 +180,7 @@ pub fn enforce_main<AB>(
     // Element validity check for u32split/u32mul/u32madd.
     let u32_split_mul_madd = is_u32split.clone() + is_u32mul.clone() + is_u32madd.clone();
     let u32_v_hi_comp = AB::Expr::ONE - uop_h4.clone() * (two_pow_32_minus_one - u32_v_hi.clone());
-    assert_zero_integrity(
-        builder,
+    builder.assert_zero(
         u32_split_mul_madd * (u32_v_hi_comp * u32_v_lo.clone()),
     );
 
@@ -205,66 +189,45 @@ pub fn enforce_main<AB>(
         + is_u32add3.clone()
         + is_u32mul.clone()
         + is_u32madd.clone();
-    assert_zero(
-        builder,
+    builder.when_transition().assert_zero(
         u32_two_outputs.clone() * (s0_next.clone() - u32_v_lo.clone()),
     );
-    assert_zero(builder,u32_two_outputs * (s1_next.clone() - u32_v_hi.clone()));
+    builder.when_transition().assert_zero(u32_two_outputs * (s1_next.clone() - u32_v_hi.clone()));
 
-    assert_zero_integrity(builder,is_u32split * (s0.clone() - u32_v64.clone()));
-    assert_zero_integrity(
-        builder,
+    builder.assert_zero(is_u32split * (s0.clone() - u32_v64.clone()));
+    builder.assert_zero(
         is_u32add * (s0.clone() + s1.clone() - u32_v48.clone()),
     );
-    assert_zero_integrity(
-        builder,
+    builder.assert_zero(
         is_u32add3 * (s0.clone() + s1.clone() + s2.clone() - u32_v48.clone()),
     );
 
-    assert_zero(
-        builder,
+    builder.when_transition().assert_zero(
         is_u32sub.clone()
             * (s1.clone() - (s0.clone() + s1_next.clone() - s0_next.clone() * two_pow_32.clone())),
     );
-    assert_zero(
-        builder,
+    builder.when_transition().assert_zero(
         is_u32sub.clone() * (s0_next.clone() * (s0_next.clone() - AB::Expr::ONE)),
     );
-    assert_zero(builder,is_u32sub * (s1_next.clone() - u32_v_lo.clone()));
+    builder.when_transition().assert_zero(is_u32sub * (s1_next.clone() - u32_v_lo.clone()));
 
-    assert_zero_integrity(
-        builder,
+    builder.assert_zero(
         is_u32mul * (s0.clone() * s1.clone() - u32_v64.clone()),
     );
-    assert_zero_integrity(
-        builder,
+    builder.assert_zero(
         is_u32madd * (s0.clone() * s1.clone() + s2 - u32_v64.clone()),
     );
 
-    assert_zero(
-        builder,
+    builder.when_transition().assert_zero(
         is_u32div.clone() * (s1.clone() - (s0.clone() * s1_next.clone() + s0_next.clone())),
     );
-    assert_zero(
-        builder,
+    builder.when_transition().assert_zero(
         is_u32div.clone() * (s1.clone() - s1_next.clone() - u32_v_lo.clone()),
     );
-    assert_zero(
-        builder,
+    builder.when_transition().assert_zero(
         is_u32div * (s0.clone() - s0_next.clone() - (u32_v_hi.clone() + AB::Expr::ONE)),
     );
 
-    assert_zero(builder,is_u32assert2.clone() * (s0_next - u32_v_hi.clone()));
-    assert_zero(builder,is_u32assert2 * (s1_next - u32_v_lo));
-}
-
-// CONSTRAINT HELPERS
-// ================================================================================================
-
-fn assert_zero<AB: TaggingAirBuilderExt>(builder: &mut AB, expr: AB::Expr) {
-    builder.when_transition().assert_zero(expr);
-}
-
-fn assert_zero_integrity<AB: TaggingAirBuilderExt>(builder: &mut AB, expr: AB::Expr) {
-    builder.assert_zero(expr);
+    builder.when_transition().assert_zero(is_u32assert2.clone() * (s0_next - u32_v_hi.clone()));
+    builder.when_transition().assert_zero(is_u32assert2 * (s1_next - u32_v_lo));
 }

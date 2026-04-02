@@ -11,7 +11,6 @@ use crate::{
     constraints::{
         ext_field::QuadFeltExpr,
         op_flags::OpFlags,
-        tagging::TaggingAirBuilderExt,
     },
     trace::decoder::USER_OP_HELPERS_OFFSET,
 };
@@ -54,37 +53,29 @@ fn enforce_cryptostream_constraints<AB>(
     let eight: AB::Expr = AB::Expr::from_u16(8);
     let gate = op_flags.cryptostream();
 
-    assert_zero(
-        builder,
+    builder.when_transition().assert_zero(
         gate.clone() * (next.stack[8].clone().into() - local.stack[8].clone().into()),
     );
-    assert_zero(
-        builder,
+    builder.when_transition().assert_zero(
         gate.clone() * (next.stack[9].clone().into() - local.stack[9].clone().into()),
     );
-    assert_zero(
-        builder,
+    builder.when_transition().assert_zero(
         gate.clone() * (next.stack[10].clone().into() - local.stack[10].clone().into()),
     );
-    assert_zero(
-        builder,
+    builder.when_transition().assert_zero(
         gate.clone() * (next.stack[11].clone().into() - local.stack[11].clone().into()),
     );
-    assert_zero(
-        builder,
+    builder.when_transition().assert_zero(
         gate.clone()
             * (next.stack[12].clone().into() - (local.stack[12].clone().into() + eight.clone())),
     );
-    assert_zero(
-        builder,
+    builder.when_transition().assert_zero(
         gate.clone() * (next.stack[13].clone().into() - (local.stack[13].clone().into() + eight)),
     );
-    assert_zero(
-        builder,
+    builder.when_transition().assert_zero(
         gate.clone() * (next.stack[14].clone().into() - local.stack[14].clone().into()),
     );
-    assert_zero(
-        builder,
+    builder.when_transition().assert_zero(
         gate * (next.stack[15].clone().into() - local.stack[15].clone().into()),
     );
 }
@@ -107,8 +98,7 @@ fn enforce_hornerbase_constraints<AB>(
 
     // The lower 14 stack registers remain unchanged during HORNERBASE.
     for i in 0..14 {
-        assert_zero(
-            builder,
+        builder.when_transition().assert_zero(
             gate.clone() * (next.stack[i].clone().into() - local.stack[i].clone().into()),
         );
     }
@@ -164,12 +154,12 @@ fn enforce_hornerbase_constraints<AB>(
         tmp1 * alpha3 + alpha2.clone() * c[5].clone() + alpha.clone() * c[6].clone() + c[7].clone();
     let [acc_exp_0, acc_exp_1] = acc_expected.into_parts();
 
-    assert_zero_integrity(builder,gate.clone() * (tmp0_0 - tmp0_exp_0));
-    assert_zero_integrity(builder,gate.clone() * (tmp0_1 - tmp0_exp_1));
-    assert_zero_integrity(builder,gate.clone() * (tmp1_0 - tmp1_exp_0));
-    assert_zero_integrity(builder,gate.clone() * (tmp1_1 - tmp1_exp_1));
-    assert_zero(builder,gate.clone() * (acc0_next - acc_exp_0));
-    assert_zero(builder,gate * (acc1_next - acc_exp_1));
+    builder.assert_zero(gate.clone() * (tmp0_0 - tmp0_exp_0));
+    builder.assert_zero(gate.clone() * (tmp0_1 - tmp0_exp_1));
+    builder.assert_zero(gate.clone() * (tmp1_0 - tmp1_exp_0));
+    builder.assert_zero(gate.clone() * (tmp1_1 - tmp1_exp_1));
+    builder.when_transition().assert_zero(gate.clone() * (acc0_next - acc_exp_0));
+    builder.when_transition().assert_zero(gate * (acc1_next - acc_exp_1));
 }
 
 fn enforce_hornerext_constraints<AB>(
@@ -188,8 +178,7 @@ fn enforce_hornerext_constraints<AB>(
 
     // The lower 14 stack registers are unchanged by HORNEREXT.
     for i in 0..14 {
-        assert_zero(
-            builder,
+        builder.when_transition().assert_zero(
             gate.clone() * (next.stack[i].clone().into() - local.stack[i].clone().into()),
         );
     }
@@ -237,16 +226,8 @@ fn enforce_hornerext_constraints<AB>(
     let acc_expected: QuadFeltExpr<AB::Expr> = tmp_alpha2 + alpha * c2 + c3;
     let [acc_exp_0, acc_exp_1] = acc_expected.into_parts();
 
-    assert_zero_integrity(builder,gate.clone() * (tmp0 - tmp_exp_0));
-    assert_zero_integrity(builder,gate.clone() * (tmp1 - tmp_exp_1));
-    assert_zero(builder,gate.clone() * (acc0_next - acc_exp_0));
-    assert_zero(builder,gate * (acc1_next - acc_exp_1));
-}
-
-fn assert_zero<AB: TaggingAirBuilderExt>(builder: &mut AB, expr: AB::Expr) {
-    builder.when_transition().assert_zero(expr);
-}
-
-fn assert_zero_integrity<AB: TaggingAirBuilderExt>(builder: &mut AB, expr: AB::Expr) {
-    builder.assert_zero(expr);
+    builder.assert_zero(gate.clone() * (tmp0 - tmp_exp_0));
+    builder.assert_zero(gate.clone() * (tmp1 - tmp_exp_1));
+    builder.when_transition().assert_zero(gate.clone() * (acc0_next - acc_exp_0));
+    builder.when_transition().assert_zero(gate * (acc1_next - acc_exp_1));
 }
