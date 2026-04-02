@@ -17,6 +17,46 @@ pub use miden_core::{Word, crypto::hash::Poseidon2 as Hasher};
 
 use super::{Felt, HASH_KERNEL_VTABLE_AUX_TRACE_OFFSET, ONE, ZERO, create_range};
 
+// COLUMN STRUCTS
+// ================================================================================================
+
+/// Hasher chiplet columns (16 columns), viewed from `chiplets[1..17]`.
+#[repr(C)]
+pub struct HasherCols<T> {
+    /// Hasher-internal selectors hs0, hs1, hs2.
+    pub selectors: [T; NUM_SELECTORS],
+    /// Poseidon2 state (12 field elements).
+    pub state: [T; STATE_WIDTH],
+    /// Merkle tree node index.
+    pub node_index: T,
+}
+
+impl<T: Copy> HasherCols<T> {
+    /// Returns the rate portion of the state (state[0..8]).
+    pub fn rate(&self) -> [T; RATE_LEN] {
+        [
+            self.state[0],
+            self.state[1],
+            self.state[2],
+            self.state[3],
+            self.state[4],
+            self.state[5],
+            self.state[6],
+            self.state[7],
+        ]
+    }
+
+    /// Returns the capacity portion of the state (state[8..12]).
+    pub fn capacity(&self) -> [T; CAPACITY_LEN] {
+        [self.state[8], self.state[9], self.state[10], self.state[11]]
+    }
+
+    /// Returns the digest portion of the state (state[0..4]).
+    pub fn digest(&self) -> [T; DIGEST_LEN] {
+        [self.state[0], self.state[1], self.state[2], self.state[3]]
+    }
+}
+
 // TYPES ALIASES
 // ================================================================================================
 

@@ -1,4 +1,18 @@
+use miden_core::WORD_SIZE;
+
 use super::Felt;
+
+// COLUMN STRUCTS
+// ================================================================================================
+
+/// Kernel ROM chiplet columns (5 columns), viewed from `chiplets[5..10]`.
+#[repr(C)]
+pub struct KernelRomCols<T> {
+    /// First-row-of-hash flag.
+    pub s_first: T,
+    /// Kernel procedure root digest.
+    pub root: [T; WORD_SIZE],
+}
 
 // CONSTANTS
 // ================================================================================================

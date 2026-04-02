@@ -19,9 +19,9 @@ use super::{
         HASHER_STATE_COL_RANGE, MEMORY_CLK_COL_IDX, MEMORY_CTX_COL_IDX, MEMORY_IDX0_COL_IDX,
         MEMORY_IDX1_COL_IDX, MEMORY_V_COL_RANGE, MEMORY_WORD_COL_IDX, NUM_ACE_SELECTORS,
         ace::{
-            CLK_IDX, CTX_IDX, EVAL_OP_IDX, ID_0_IDX, ID_1_IDX, ID_2_IDX, M_0_IDX, M_1_IDX, PTR_IDX,
-            READ_NUM_EVAL_IDX, SELECTOR_BLOCK_IDX, SELECTOR_START_IDX, V_0_0_IDX, V_0_1_IDX,
-            V_1_0_IDX, V_1_1_IDX, V_2_0_IDX, V_2_1_IDX,
+            CLK_IDX, CTX_IDX, EVAL_OP_IDX, ID_0_IDX, ID_1_IDX, ID_2_IDX, M_0_IDX, M_1_IDX,
+            PTR_IDX, READ_NUM_EVAL_IDX, SELECTOR_BLOCK_IDX, SELECTOR_START_IDX, V_0_0_IDX,
+            V_0_1_IDX, V_1_0_IDX, V_1_1_IDX, V_2_0_IDX, V_2_1_IDX,
         },
         hasher::{DIGEST_LEN, HASH_CYCLE_LEN, LAST_CYCLE_ROW, STATE_WIDTH},
     },
@@ -44,6 +44,9 @@ const DECODER_HASHER_RANGE: Range<usize> =
 // ================================================================================================
 
 /// Column layout of the main trace row.
+///
+/// This is the legacy flat-field layout used by constraint code. Once all constraints
+/// are migrated to [`MainCols`](super::MainCols), this will become a type alias.
 #[derive(Debug)]
 #[repr(C)]
 pub struct MainTraceRow<T> {

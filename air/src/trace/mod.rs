@@ -1,4 +1,8 @@
-use core::ops::Range;
+use core::{
+    borrow::{Borrow, BorrowMut},
+    mem::size_of,
+    ops::Range,
+};
 
 use chiplets::hasher::RATE_LEN;
 use miden_core::utils::range;
@@ -10,6 +14,7 @@ pub mod chiplets;
 pub mod decoder;
 pub mod range;
 pub mod stack;
+mod system;
 
 mod rows;
 pub use rows::{RowIndex, RowIndexError};
@@ -17,6 +22,128 @@ pub use rows::{RowIndex, RowIndexError};
 mod main_trace;
 pub use main_trace::{MainTrace, MainTraceRow};
 pub use miden_crypto::stark::air::AuxBuilder;
+
+// RE-EXPORTS: column structs
+pub use chiplets::{
+    AceCols, AceEvalCols, AceReadCols, BitwiseCols, ChipletsView, HasherCols, KernelRomCols,
+    MemoryCols,
+};
+pub use decoder::{DecoderCols, EndBlockFlags};
+pub use range::RangeCols;
+pub use stack::StackCols;
+pub use system::SystemCols;
+
+// MAIN TRACE COLUMN STRUCT
+// ================================================================================================
+
+/// Column layout of the main execution trace (71 columns).
+///
+/// This `#[repr(C)]` struct provides typed, named access to every column. It can be
+/// borrowed zero-copy from a raw `[T; TRACE_WIDTH]` slice via `Borrow<MainCols<T>>`.
+///
+/// Chiplet columns are private because the 20 columns are a union — their interpretation
+/// depends on which chiplet is active. Access goes through [`ChipletsView`].
+#[repr(C)]
+pub struct MainCols<T> {
+    pub system: SystemCols<T>,
+    pub decoder: DecoderCols<T>,
+    pub stack: StackCols<T>,
+    pub range: RangeCols<T>,
+    chiplets: [T; CHIPLETS_WIDTH],
+}
+
+impl<T> Borrow<MainCols<T>> for [T] {
+    fn borrow(&self) -> &MainCols<T> {
+        debug_assert_eq!(self.len(), TRACE_WIDTH);
+        let (prefix, shorts, suffix) = unsafe { self.align_to::<MainCols<T>>() };
+        debug_assert!(prefix.is_empty() && suffix.is_empty() && shorts.len() == 1);
+        &shorts[0]
+    }
+}
+
+impl<T> BorrowMut<MainCols<T>> for [T] {
+    fn borrow_mut(&mut self) -> &mut MainCols<T> {
+        debug_assert_eq!(self.len(), TRACE_WIDTH);
+        let (prefix, shorts, suffix) = unsafe { self.align_to_mut::<MainCols<T>>() };
+        debug_assert!(prefix.is_empty() && suffix.is_empty() && shorts.len() == 1);
+        &mut shorts[0]
+    }
+}
+
+// CONST INDEX MAP
+// ================================================================================================
+
+/// Generates an array `[0, 1, 2, ..., N-1]` at compile time.
+pub const fn indices_arr<const N: usize>() -> [usize; N] {
+    let mut arr = [0; N];
+    let mut i = 0;
+    while i < N {
+        arr[i] = i;
+        i += 1;
+    }
+    arr
+}
+
+/// Number of columns in the main trace, derived from the struct layout.
+pub const NUM_MAIN_COLS: usize = size_of::<MainCols<u8>>();
+
+/// Compile-time index map: each field holds its column index.
+///
+/// Example: `MAIN_COL_MAP.decoder.addr == 6`, `MAIN_COL_MAP.stack.top[0] == 30`.
+pub const MAIN_COL_MAP: MainCols<usize> = {
+    assert!(NUM_MAIN_COLS == TRACE_WIDTH);
+    unsafe { core::mem::transmute(indices_arr::<NUM_MAIN_COLS>()) }
+};
+
+// AUXILIARY TRACE COLUMN STRUCT
+// ================================================================================================
+
+/// Column layout of the auxiliary execution trace (8 columns).
+#[repr(C)]
+pub struct AuxCols<T> {
+    /// Decoder: block stack table running product.
+    pub p1_block_stack: T,
+    /// Decoder: block hash table running product.
+    pub p2_block_hash: T,
+    /// Decoder: op group table running product.
+    pub p3_op_group: T,
+    /// Stack overflow running product.
+    pub stack_overflow: T,
+    /// Range checker LogUp sum.
+    pub range_check: T,
+    /// Hash-kernel virtual table bus.
+    pub hash_kernel_vtable: T,
+    /// Chiplets bus running product.
+    pub chiplets_bus: T,
+    /// ACE wiring LogUp sum.
+    pub ace_wiring: T,
+}
+
+/// Number of columns in the auxiliary trace, derived from the struct layout.
+pub const NUM_AUX_COLS: usize = size_of::<AuxCols<u8>>();
+
+/// Compile-time index map for auxiliary columns.
+pub const AUX_COL_MAP: AuxCols<usize> = {
+    assert!(NUM_AUX_COLS == AUX_TRACE_WIDTH);
+    unsafe { core::mem::transmute(indices_arr::<NUM_AUX_COLS>()) }
+};
+
+// COMPILE-TIME SIZE ASSERTIONS
+// ================================================================================================
+
+const _: () = assert!(size_of::<MainCols<u8>>() == TRACE_WIDTH);
+const _: () = assert!(size_of::<AuxCols<u8>>() == AUX_TRACE_WIDTH);
+const _: () = assert!(size_of::<SystemCols<u8>>() == 6);
+const _: () = assert!(size_of::<DecoderCols<u8>>() == 24);
+const _: () = assert!(size_of::<StackCols<u8>>() == 19);
+const _: () = assert!(size_of::<RangeCols<u8>>() == 2);
+const _: () = assert!(size_of::<HasherCols<u8>>() == 16);
+const _: () = assert!(size_of::<BitwiseCols<u8>>() == 13);
+const _: () = assert!(size_of::<MemoryCols<u8>>() == 15);
+const _: () = assert!(size_of::<AceCols<u8>>() == 16);
+const _: () = assert!(size_of::<AceReadCols<u8>>() == 10);
+const _: () = assert!(size_of::<AceEvalCols<u8>>() == 10);
+const _: () = assert!(size_of::<KernelRomCols<u8>>() == 5);
 
 // CONSTANTS
 // ================================================================================================
@@ -262,4 +389,94 @@ pub mod bus_types {
     pub const ACE_WIRING_BUS: usize = 8;
     /// Total number of distinct bus interaction types.
     pub const NUM_BUS_TYPES: usize = 9;
+}
+
+// TESTS
+// ================================================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- Main trace column map vs legacy constants -----------------------------------------------
+
+    #[test]
+    fn col_map_system() {
+        assert_eq!(MAIN_COL_MAP.system.clk, CLK_COL_IDX);
+        assert_eq!(MAIN_COL_MAP.system.ctx, CTX_COL_IDX);
+        assert_eq!(MAIN_COL_MAP.system.fn_hash[0], FN_HASH_OFFSET);
+        assert_eq!(MAIN_COL_MAP.system.fn_hash[3], FN_HASH_OFFSET + 3);
+    }
+
+    #[test]
+    fn col_map_decoder() {
+        assert_eq!(MAIN_COL_MAP.decoder.addr, DECODER_TRACE_OFFSET + decoder::ADDR_COL_IDX);
+        assert_eq!(
+            MAIN_COL_MAP.decoder.op_bits[0],
+            DECODER_TRACE_OFFSET + decoder::OP_BITS_OFFSET
+        );
+        assert_eq!(
+            MAIN_COL_MAP.decoder.op_bits[6],
+            DECODER_TRACE_OFFSET + decoder::OP_BITS_OFFSET + 6
+        );
+        assert_eq!(
+            MAIN_COL_MAP.decoder.hasher_state[0],
+            DECODER_TRACE_OFFSET + decoder::HASHER_STATE_OFFSET
+        );
+        assert_eq!(
+            MAIN_COL_MAP.decoder.in_span,
+            DECODER_TRACE_OFFSET + decoder::IN_SPAN_COL_IDX
+        );
+        assert_eq!(
+            MAIN_COL_MAP.decoder.group_count,
+            DECODER_TRACE_OFFSET + decoder::GROUP_COUNT_COL_IDX
+        );
+        assert_eq!(
+            MAIN_COL_MAP.decoder.op_index,
+            DECODER_TRACE_OFFSET + decoder::OP_INDEX_COL_IDX
+        );
+        assert_eq!(
+            MAIN_COL_MAP.decoder.batch_flags[0],
+            DECODER_TRACE_OFFSET + decoder::OP_BATCH_FLAGS_OFFSET
+        );
+        assert_eq!(
+            MAIN_COL_MAP.decoder.extra[0],
+            DECODER_TRACE_OFFSET + decoder::OP_BITS_EXTRA_COLS_OFFSET
+        );
+    }
+
+    #[test]
+    fn col_map_stack() {
+        assert_eq!(MAIN_COL_MAP.stack.top[0], STACK_TRACE_OFFSET + stack::STACK_TOP_OFFSET);
+        assert_eq!(MAIN_COL_MAP.stack.top[15], STACK_TRACE_OFFSET + 15);
+        assert_eq!(MAIN_COL_MAP.stack.b0, STACK_TRACE_OFFSET + stack::B0_COL_IDX);
+        assert_eq!(MAIN_COL_MAP.stack.b1, STACK_TRACE_OFFSET + stack::B1_COL_IDX);
+        assert_eq!(MAIN_COL_MAP.stack.h0, STACK_TRACE_OFFSET + stack::H0_COL_IDX);
+    }
+
+    #[test]
+    fn col_map_range() {
+        assert_eq!(MAIN_COL_MAP.range.multiplicity, range::M_COL_IDX);
+        assert_eq!(MAIN_COL_MAP.range.value, range::V_COL_IDX);
+    }
+
+    #[test]
+    fn col_map_chiplets() {
+        assert_eq!(MAIN_COL_MAP.chiplets[0], CHIPLETS_OFFSET);
+        assert_eq!(MAIN_COL_MAP.chiplets[19], CHIPLETS_OFFSET + 19);
+    }
+
+    // --- Auxiliary trace column map vs legacy constants -------------------------------------------
+
+    #[test]
+    fn aux_col_map() {
+        assert_eq!(AUX_COL_MAP.p1_block_stack, DECODER_AUX_TRACE_OFFSET);
+        assert_eq!(AUX_COL_MAP.p2_block_hash, DECODER_AUX_TRACE_OFFSET + 1);
+        assert_eq!(AUX_COL_MAP.p3_op_group, DECODER_AUX_TRACE_OFFSET + 2);
+        assert_eq!(AUX_COL_MAP.stack_overflow, STACK_AUX_TRACE_OFFSET);
+        assert_eq!(AUX_COL_MAP.range_check, RANGE_CHECK_AUX_TRACE_OFFSET);
+        assert_eq!(AUX_COL_MAP.hash_kernel_vtable, HASH_KERNEL_VTABLE_AUX_TRACE_OFFSET);
+        assert_eq!(AUX_COL_MAP.chiplets_bus, CHIPLETS_BUS_AUX_TRACE_OFFSET);
+        assert_eq!(AUX_COL_MAP.ace_wiring, ACE_CHIPLET_WIRING_BUS_OFFSET);
+    }
 }

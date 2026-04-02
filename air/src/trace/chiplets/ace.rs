@@ -1,5 +1,79 @@
 use crate::trace::chiplets::Felt;
 
+// COLUMN STRUCTS
+// ================================================================================================
+
+/// ACE chiplet columns (16 columns), viewed from `chiplets[4..20]`.
+#[repr(C)]
+pub struct AceCols<T> {
+    /// Start-of-circuit flag.
+    pub s_start: T,
+    /// Block selector: 0 = READ, 1 = EVAL.
+    pub s_block: T,
+    /// Memory context.
+    pub ctx: T,
+    /// Pointer for memory read.
+    pub ptr: T,
+    /// Clock cycle.
+    pub clk: T,
+    /// Evaluation operation selector.
+    pub eval_op: T,
+    /// Dual-mode columns (interpretation depends on s_block).
+    pub shared: [T; 10],
+}
+
+impl<T> AceCols<T> {
+    /// Returns a READ-mode overlay of the shared columns.
+    pub fn read(&self) -> &AceReadCols<T> {
+        super::borrow_chiplet(&self.shared)
+    }
+
+    /// Returns an EVAL-mode overlay of the shared columns.
+    pub fn eval(&self) -> &AceEvalCols<T> {
+        super::borrow_chiplet(&self.shared)
+    }
+}
+
+/// READ mode overlay for ACE shared columns (10 columns).
+#[repr(C)]
+pub struct AceReadCols<T> {
+    /// ID of the first wire.
+    pub id_0: T,
+    /// Value of the first wire (QuadFelt).
+    pub v_0: [T; 2],
+    /// ID of the second wire.
+    pub id_1: T,
+    /// Value of the second wire (QuadFelt).
+    pub v_1: [T; 2],
+    /// Number of eval rows.
+    pub num_eval: T,
+    /// Unused column.
+    pub unused: T,
+    /// Multiplicity of the second wire.
+    pub m_1: T,
+    /// Multiplicity of the first wire.
+    pub m_0: T,
+}
+
+/// EVAL mode overlay for ACE shared columns (10 columns).
+#[repr(C)]
+pub struct AceEvalCols<T> {
+    /// ID of the first wire.
+    pub id_0: T,
+    /// Value of the first wire (QuadFelt).
+    pub v_0: [T; 2],
+    /// ID of the second wire.
+    pub id_1: T,
+    /// Value of the second wire (QuadFelt).
+    pub v_1: [T; 2],
+    /// ID of the third wire.
+    pub id_2: T,
+    /// Value of the third wire (QuadFelt).
+    pub v_2: [T; 2],
+    /// Multiplicity of the first wire.
+    pub m_0: T,
+}
+
 // --- CONSTANTS ----------------------------------------------------------------------------------
 
 /// Unique label ACE operation, computed as the chiplet selector with the bits reversed, plus one.

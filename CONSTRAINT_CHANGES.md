@@ -247,3 +247,8 @@ Helper `enforce_decoder_selector` inlined into call site. Expression restructure
 | 1 | `decoder/mod.rs:699` | `decoder/mod.rs:132` | Helper `enforce_decoder_selector` inlined into call site. Expression restructured: `assert_zero(ONE - sp - ctrl_flag)` → `assert_one(sp + control_flow())`. Polynomial sign-flipped (`-(1 - sp - ctrl)` vs `sp + ctrl - 1`) but both assert the same zero. Moved from decoder/mod.rs:699 to decoder/mod.rs:132. |
 
 ---
+## 20. refactor: add typed column structs, col map, and Borrow impls
+
+**No constraint changes.** (446 base + 24 ext)
+
+---

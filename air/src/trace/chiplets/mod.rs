@@ -2,13 +2,104 @@ use core::ops::Range;
 
 use miden_core::{Felt, ONE, ZERO, utils::range as create_range};
 
-use super::{CHIPLETS_OFFSET, HASH_KERNEL_VTABLE_AUX_TRACE_OFFSET};
+use super::{CHIPLETS_OFFSET, CHIPLETS_WIDTH, HASH_KERNEL_VTABLE_AUX_TRACE_OFFSET};
 
 pub mod ace;
 pub mod bitwise;
 pub mod hasher;
 pub mod kernel_rom;
 pub mod memory;
+
+// RE-EXPORTS
+// ================================================================================================
+
+pub use ace::{AceCols, AceEvalCols, AceReadCols};
+pub use bitwise::BitwiseCols;
+pub use hasher::HasherCols;
+pub use kernel_rom::KernelRomCols;
+pub use memory::MemoryCols;
+
+// CHIPLETS VIEW
+// ================================================================================================
+
+/// Encapsulated view into the chiplet columns for both the current and next row.
+///
+/// The 20 chiplet columns are a union — their interpretation depends on which chiplet
+/// is active. This view bundles both rows and provides typed accessors for each chiplet.
+pub struct ChipletsView<'a, V> {
+    local: &'a [V; CHIPLETS_WIDTH],
+    next: &'a [V; CHIPLETS_WIDTH],
+}
+
+impl<'a, V> ChipletsView<'a, V> {
+    pub fn new(local: &'a super::MainCols<V>, next: &'a super::MainCols<V>) -> Self {
+        Self {
+            local: &local.chiplets,
+            next: &next.chiplets,
+        }
+    }
+
+    /// Returns the 5 shared chiplet selector values for the current row.
+    pub fn selectors_local(&self) -> [V; NUM_KERNEL_ROM_SELECTORS]
+    where
+        V: Copy,
+    {
+        [self.local[0], self.local[1], self.local[2], self.local[3], self.local[4]]
+    }
+
+    /// Returns the 5 shared chiplet selector values for the next row.
+    pub fn selectors_next(&self) -> [V; NUM_KERNEL_ROM_SELECTORS]
+    where
+        V: Copy,
+    {
+        [self.next[0], self.next[1], self.next[2], self.next[3], self.next[4]]
+    }
+
+    // --- Per-chiplet zero-copy borrows ---
+
+    pub fn hasher_local(&self) -> &HasherCols<V> {
+        borrow_chiplet(&self.local[1..17])
+    }
+    pub fn hasher_next(&self) -> &HasherCols<V> {
+        borrow_chiplet(&self.next[1..17])
+    }
+
+    pub fn bitwise_local(&self) -> &BitwiseCols<V> {
+        borrow_chiplet(&self.local[2..15])
+    }
+    pub fn bitwise_next(&self) -> &BitwiseCols<V> {
+        borrow_chiplet(&self.next[2..15])
+    }
+
+    pub fn memory_local(&self) -> &MemoryCols<V> {
+        borrow_chiplet(&self.local[3..18])
+    }
+    pub fn memory_next(&self) -> &MemoryCols<V> {
+        borrow_chiplet(&self.next[3..18])
+    }
+
+    pub fn ace_local(&self) -> &AceCols<V> {
+        borrow_chiplet(&self.local[4..20])
+    }
+    pub fn ace_next(&self) -> &AceCols<V> {
+        borrow_chiplet(&self.next[4..20])
+    }
+
+    pub fn kernel_rom_local(&self) -> &KernelRomCols<V> {
+        borrow_chiplet(&self.local[5..10])
+    }
+    pub fn kernel_rom_next(&self) -> &KernelRomCols<V> {
+        borrow_chiplet(&self.next[5..10])
+    }
+}
+
+/// Zero-copy cast from a slice to a `#[repr(C)]` chiplet column struct.
+pub fn borrow_chiplet<T, S>(slice: &[T]) -> &S {
+    let (prefix, cols, suffix) = unsafe { slice.align_to::<S>() };
+    debug_assert!(prefix.is_empty() && suffix.is_empty() && cols.len() == 1);
+    &cols[0]
+}
+
 // CONSTANTS
 // ================================================================================================
 
