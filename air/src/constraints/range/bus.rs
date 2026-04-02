@@ -13,11 +13,11 @@
 //! Where requests come from stack (4 lookups) and memory (2 lookups), and
 //! responses come from the range table (V column with multiplicity).
 
-use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 
 use crate::{
     MainTraceRow, MidenAirBuilder,
+    constraints::utils::BoolNot,
     trace::{
         CHIPLET_S0_COL_IDX, CHIPLET_S1_COL_IDX, CHIPLET_S2_COL_IDX, CHIPLETS_OFFSET,
         RANGE_CHECK_TRACE_OFFSET, chiplets, decoder, range,
@@ -95,8 +95,8 @@ where
 
     // Flags for conditional inclusion
     // u32_rc_op = op_bit[6] * (1 - op_bit[5]) * (1 - op_bit[4])
-    let not_4 = AB::Expr::ONE - local.decoder[OP_BIT_4_COL_IDX].into();
-    let not_5 = AB::Expr::ONE - local.decoder[OP_BIT_5_COL_IDX].into();
+    let not_4: AB::Expr = local.decoder[OP_BIT_4_COL_IDX].into().not();
+    let not_5: AB::Expr = local.decoder[OP_BIT_5_COL_IDX].into().not();
     let u32_rc_op: AB::Expr = local.decoder[OP_BIT_6_COL_IDX].into() * not_5 * not_4;
     let sflag_rc_mem = range_check.clone() * memory_lookups.clone() * u32_rc_op;
 
@@ -104,7 +104,7 @@ where
     let s_0: AB::Expr = local.chiplets[CHIPLET_S0_IDX].into();
     let s_1: AB::Expr = local.chiplets[CHIPLET_S1_IDX].into();
     let s_2: AB::Expr = local.chiplets[CHIPLET_S2_IDX].into();
-    let chiplets_memory_flag = s_0 * s_1 * (AB::Expr::ONE - s_2);
+    let chiplets_memory_flag = s_0 * s_1 * s_2.not();
     let mflag_rc_stack = range_check * stack_lookups.clone() * chiplets_memory_flag;
 
     // LogUp transition constraint terms

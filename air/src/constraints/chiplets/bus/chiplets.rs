@@ -42,6 +42,7 @@ use crate::{
         chiplets::{bitwise::P_BITWISE_K_TRANSITION, hasher},
         constants::*,
         op_flags::OpFlags,
+        utils::BoolNot,
     },
     trace::{
         Challenges,
@@ -254,7 +255,7 @@ pub fn enforce_chiplets_bus_constraint<AB>(
         + v_u32xor * f_u32xor.clone()
         + v_evalcircuit * f_evalcircuit.clone()
         + v_logprecompile * f_logprecompile.clone()
-        + (AB::ExprEF::ONE - request_flag_sum);
+        + request_flag_sum.not();
 
     // =========================================================================
     // COMPUTE RESPONSE MULTIPLIER
@@ -279,19 +280,16 @@ pub fn enforce_chiplets_bus_constraint<AB>(
 
     // Bitwise chiplet active: s0=1, s1=0
     // Bitwise responds only on last row of 8-row cycle (when k_transition=0)
-    let is_bitwise_row: AB::Expr = chiplet_s0.clone() * (AB::Expr::ONE - chiplet_s1.clone());
-    let is_bitwise_responding: AB::Expr = is_bitwise_row * (AB::Expr::ONE - k_transition);
+    let is_bitwise_row: AB::Expr = chiplet_s0.clone() * chiplet_s1.not();
+    let is_bitwise_responding: AB::Expr = is_bitwise_row * k_transition.not();
 
     // Memory chiplet active: s0=1, s1=1, s2=0
-    let is_memory: AB::Expr =
-        chiplet_s0.clone() * chiplet_s1.clone() * (AB::Expr::ONE - chiplet_s2.clone());
+    let is_memory: AB::Expr = chiplet_s0.clone() * chiplet_s1.clone() * chiplet_s2.not();
 
     // ACE chiplet active: s0=1, s1=1, s2=1, s3=0
     // Response only on start rows (ace_start_selector = 1)
-    let is_ace_row: AB::Expr = chiplet_s0.clone()
-        * chiplet_s1.clone()
-        * chiplet_s2.clone()
-        * (AB::Expr::ONE - chiplet_s3.clone());
+    let is_ace_row: AB::Expr =
+        chiplet_s0.clone() * chiplet_s1.clone() * chiplet_s2.clone() * chiplet_s3.not();
     let ace_start_selector: AB::Expr =
         local.chiplets[NUM_ACE_SELECTORS + SELECTOR_START_IDX].into();
     let is_ace: AB::Expr = is_ace_row * ace_start_selector;
@@ -301,7 +299,7 @@ pub fn enforce_chiplets_bus_constraint<AB>(
         * chiplet_s1.clone()
         * chiplet_s2.clone()
         * chiplet_s3.clone()
-        * (AB::Expr::ONE - chiplet_s4.clone());
+        * chiplet_s4.not();
 
     // --- Hasher response (complex, depends on cycle position and selectors) ---
     let hasher_response =
@@ -384,7 +382,7 @@ fn compute_bitwise_response<AB: MidenAirBuilder>(
     // The AND/XOR selector is at bitwise[0] = local.chiplets[bw_offset]
     // label = (1 - sel) * AND_LABEL + sel * XOR_LABEL
     let sel: AB::Expr = local.chiplets[bw_offset].into();
-    let one_minus_sel = AB::Expr::ONE - sel.clone();
+    let one_minus_sel = sel.not();
     let label = one_minus_sel * BITWISE_AND_LABEL + sel.clone() * BITWISE_XOR_LABEL;
 
     // Bitwise chiplet data columns (offset by bw_offset + bitwise internal indices)
@@ -729,16 +727,18 @@ fn compute_memory_response<AB: MidenAirBuilder>(
     // Compute address: addr = word + 2*idx1 + idx0
     let addr: AB::Expr = word + idx1.clone() * F_2 + idx0.clone();
 
+    // Derived flags
+    let is_element = is_word.not();
+    let is_write = is_read.not();
+
     // Compute label from flags using the canonical constants.
     let write_element_label: AB::Expr = Felt::from_u8(MEMORY_WRITE_ELEMENT_LABEL).into();
     let write_word_label: AB::Expr = Felt::from_u8(MEMORY_WRITE_WORD_LABEL).into();
     let read_element_label: AB::Expr = Felt::from_u8(MEMORY_READ_ELEMENT_LABEL).into();
     let read_word_label: AB::Expr = Felt::from_u8(MEMORY_READ_WORD_LABEL).into();
-    let write_label = (AB::Expr::ONE - is_word.clone()) * write_element_label
-        + is_word.clone() * write_word_label;
-    let read_label =
-        (AB::Expr::ONE - is_word.clone()) * read_element_label + is_word.clone() * read_word_label;
-    let label = (AB::Expr::ONE - is_read.clone()) * write_label + is_read.clone() * read_label;
+    let write_label = is_element.clone() * write_element_label + is_word.clone() * write_word_label;
+    let read_label = is_element.clone() * read_element_label + is_word.clone() * read_word_label;
+    let label = is_write * write_label + is_read.clone() * read_label;
 
     // Get value columns (v0, v1, v2, v3)
     let v0: AB::Expr = local.chiplets[mem_offset + memory::V_COL_RANGE.start].into();
@@ -749,14 +749,12 @@ fn compute_memory_response<AB: MidenAirBuilder>(
     // For element access, select the correct element based on idx0, idx1:
     // - (0,0) -> v0, (1,0) -> v1, (0,1) -> v2, (1,1) -> v3
     // element = v0*(1-idx0)*(1-idx1) + v1*idx0*(1-idx1) + v2*(1-idx0)*idx1 + v3*idx0*idx1
-    let element: AB::Expr =
-        v0.clone() * (AB::Expr::ONE - idx0.clone()) * (AB::Expr::ONE - idx1.clone())
-            + v1.clone() * idx0.clone() * (AB::Expr::ONE - idx1.clone())
-            + v2.clone() * (AB::Expr::ONE - idx0.clone()) * idx1.clone()
-            + v3.clone() * idx0.clone() * idx1.clone();
-
-    // For word access, all v0..v3 are used
-    let is_element = AB::Expr::ONE - is_word.clone();
+    let not_idx0 = idx0.not();
+    let not_idx1 = idx1.not();
+    let element: AB::Expr = v0.clone() * not_idx0.clone() * not_idx1.clone()
+        + v1.clone() * idx0.clone() * not_idx1
+        + v2.clone() * not_idx0 * idx1.clone()
+        + v3.clone() * idx0.clone() * idx1.clone();
 
     // Element access: include the selected element in the last slot.
     let element_msg =
@@ -796,13 +794,18 @@ fn compute_hasher_response<AB: MidenAirBuilder>(
     };
 
     // Hasher is active when chiplets[0] == 0
-    let hasher_active: AB::Expr = AB::Expr::ONE - local.chiplets[0].into();
+    let hasher_active: AB::Expr = local.chiplets[0].into().not();
 
     // Hasher selectors (when hasher is active, chiplets[0]=0)
     // chiplets[1..4] are the hasher's internal selectors s0, s1, s2
     let hs0: AB::Expr = local.chiplets[1].into();
     let hs1: AB::Expr = local.chiplets[2].into();
     let hs2: AB::Expr = local.chiplets[3].into();
+
+    // Negated selectors (reused across multiple flag expressions)
+    let not_hs0 = hs0.not();
+    let not_hs1 = hs1.not();
+    let not_hs2 = hs2.not();
 
     // Compute operation flags (each flag is active at most once)
     // All hasher flags require hasher_active (chiplets[0] == 0)
@@ -811,20 +814,14 @@ fn compute_hasher_response<AB: MidenAirBuilder>(
     let f_bp = hasher_active.clone()
         * cycle_row_0.clone()
         * hs0.clone()
-        * (AB::Expr::ONE - hs1.clone())
-        * (AB::Expr::ONE - hs2.clone());
+        * not_hs1.clone()
+        * not_hs2.clone();
     // f_mp = hasher_active * cycle_row_0 * s0 * !s1 * s2
-    let f_mp = hasher_active.clone()
-        * cycle_row_0.clone()
-        * hs0.clone()
-        * (AB::Expr::ONE - hs1.clone())
-        * hs2.clone();
+    let f_mp =
+        hasher_active.clone() * cycle_row_0.clone() * hs0.clone() * not_hs1.clone() * hs2.clone();
     // f_mv = hasher_active * cycle_row_0 * s0 * s1 * !s2
-    let f_mv = hasher_active.clone()
-        * cycle_row_0.clone()
-        * hs0.clone()
-        * hs1.clone()
-        * (AB::Expr::ONE - hs2.clone());
+    let f_mv =
+        hasher_active.clone() * cycle_row_0.clone() * hs0.clone() * hs1.clone() * not_hs2.clone();
     // f_mu = hasher_active * cycle_row_0 * s0 * s1 * s2
     let f_mu =
         hasher_active.clone() * cycle_row_0.clone() * hs0.clone() * hs1.clone() * hs2.clone();
@@ -833,21 +830,21 @@ fn compute_hasher_response<AB: MidenAirBuilder>(
     // f_hout = hasher_active * cycle_row_31 * !s0 * !s1 * !s2
     let f_hout = hasher_active.clone()
         * cycle_row_31.clone()
-        * (AB::Expr::ONE - hs0.clone())
-        * (AB::Expr::ONE - hs1.clone())
-        * (AB::Expr::ONE - hs2.clone());
+        * not_hs0.clone()
+        * not_hs1.clone()
+        * not_hs2.clone();
     // f_sout = hasher_active * cycle_row_31 * !s0 * !s1 * s2
     let f_sout = hasher_active.clone()
         * cycle_row_31.clone()
-        * (AB::Expr::ONE - hs0.clone())
-        * (AB::Expr::ONE - hs1.clone())
+        * not_hs0.clone()
+        * not_hs1.clone()
         * hs2.clone();
     // f_abp = hasher_active * cycle_row_31 * s0 * !s1 * !s2
     let f_abp = hasher_active.clone()
         * cycle_row_31.clone()
         * hs0.clone()
-        * (AB::Expr::ONE - hs1.clone())
-        * (AB::Expr::ONE - hs2.clone());
+        * not_hs1.clone()
+        * not_hs2.clone();
 
     // Get current hasher state (12 elements) and node index
     let state: [AB::Expr; 12] = core::array::from_fn(|i| {
@@ -907,11 +904,12 @@ fn compute_hasher_response<AB: MidenAirBuilder>(
     // Leaf word uses RATE0 or RATE1 depending on bit:
     // bit=0: use state[0..4] (RATE0)
     // bit=1: use state[4..8] (RATE1)
+    let not_bit = bit.not();
     let leaf_word: [AB::Expr; 4] = [
-        (AB::Expr::ONE - bit.clone()) * state[0].clone() + bit.clone() * state[4].clone(),
-        (AB::Expr::ONE - bit.clone()) * state[1].clone() + bit.clone() * state[5].clone(),
-        (AB::Expr::ONE - bit.clone()) * state[2].clone() + bit.clone() * state[6].clone(),
-        (AB::Expr::ONE - bit.clone()) * state[3].clone() + bit.clone() * state[7].clone(),
+        not_bit.clone() * state[0].clone() + bit.clone() * state[4].clone(),
+        not_bit.clone() * state[1].clone() + bit.clone() * state[5].clone(),
+        not_bit.clone() * state[2].clone() + bit.clone() * state[6].clone(),
+        not_bit * state[3].clone() + bit.clone() * state[7].clone(),
     ];
     let v_mp = compute_hasher_word_message::<AB>(
         challenges,
@@ -1287,7 +1285,7 @@ fn compute_kernel_rom_response<AB: MidenAirBuilder>(
     // label = s_first * INIT_LABEL + (1 - s_first) * CALL_LABEL
     let init_label: AB::Expr = KERNEL_PROC_INIT_LABEL.into();
     let call_label: AB::Expr = KERNEL_PROC_CALL_LABEL.into();
-    let label: AB::Expr = s_first.clone() * init_label + (AB::Expr::ONE - s_first) * call_label;
+    let label: AB::Expr = s_first.clone() * init_label + s_first.not() * call_label;
 
     // Kernel procedure digest (root0..root3) at columns 6, 7, 8, 9 relative to chiplets
     // These are at NUM_KERNEL_ROM_SELECTORS + 1..5 (after s_first which is at +0)

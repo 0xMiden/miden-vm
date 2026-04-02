@@ -33,6 +33,7 @@ pub mod public_inputs;
 pub mod range;
 pub mod stack;
 pub mod system;
+pub mod utils;
 
 // ENTRY POINTS
 // ================================================================================================

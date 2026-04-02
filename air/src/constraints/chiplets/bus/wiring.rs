@@ -29,12 +29,11 @@
 //!
 //! Boundary constraints for v_wiring are handled by the wrapper AIR (aux_finals).
 
-use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 
 use crate::{
     MainTraceRow, MidenAirBuilder,
-    constraints::{bus::indices::V_WIRING, chiplets::selectors::ace_chiplet_flag},
+    constraints::{bus::indices::V_WIRING, chiplets::selectors::ace_chiplet_flag, utils::BoolNot},
     trace::{
         Challenges,
         chiplets::ace::{
@@ -86,7 +85,7 @@ pub fn enforce_wiring_bus_constraint<AB>(
     // Block selector: sblock = 0 for READ, sblock = 1 for EVAL.
     let sblock: AB::Expr = load_ace_col::<AB>(local, SELECTOR_BLOCK_IDX);
     let is_eval = sblock.clone();
-    let is_read = AB::Expr::ONE - sblock;
+    let is_read = sblock.not();
 
     // ---------------------------------------------------------------------
     // Load ACE columns.

@@ -34,7 +34,10 @@ use miden_core::field::PrimeCharacteristicRing;
 use super::selectors::memory_chiplet_flag;
 use crate::{
     MainTraceRow, MidenAirBuilder,
-    constraints::constants::{F_1, TWO_POW_16},
+    constraints::{
+        constants::{F_1, TWO_POW_16},
+        utils::BoolNot,
+    },
     trace::{
         CHIPLETS_OFFSET,
         chiplets::{
@@ -183,8 +186,7 @@ pub fn enforce_memory_constraints_all_rows_except_last<AB>(
     // f_scw' = !n0 * !n1
     builder.assert_zero(
         flag_memory_active_not_last.clone()
-            * (cols_next.flag_same_ctx_word.clone()
-                - (AB::Expr::ONE - deltas.n0.clone()) * (AB::Expr::ONE - deltas.n1.clone())),
+            * (cols_next.flag_same_ctx_word.clone() - deltas.n0.not() * deltas.n1.not()),
     );
 
     // ==========================================================================
@@ -441,7 +443,7 @@ fn enforce_scw_readonly_constraint<AB>(
 /// Memory chiplet flag for current row active and continuing to next row.
 pub fn flag_memory_active_not_last_row<E: PrimeCharacteristicRing>(s0: E, s1: E, s2_next: E) -> E {
     // Memory active when s0 = s1 = 1 and not transitioning out (s2' = 0)
-    s0 * s1 * (E::ONE - s2_next)
+    s0 * s1 * s2_next.not()
 }
 
 /// Flag for transitioning into memory chiplet (first row of memory).
@@ -452,5 +454,5 @@ pub fn flag_next_row_first_memory<E: PrimeCharacteristicRing>(
     s2_next: E,
 ) -> E {
     // Current row is bitwise (!s1), next row is memory (s1' & !s2')
-    (E::ONE - s1) * s0.clone() * s1_next * (E::ONE - s2_next)
+    s1.not() * s0.clone() * s1_next * s2_next.not()
 }

@@ -30,6 +30,8 @@
 //! | SOUT      | 0  | 0  | 1  | row 31             | State output (full) |
 use miden_core::field::PrimeCharacteristicRing;
 
+use crate::constraints::utils::BoolNot;
+
 // INITIALIZATION FLAGS (row 0 of 32-row cycle)
 // ================================================================================================
 
@@ -47,7 +49,7 @@ pub fn f_bp<E>(cycle_row_0: E, s0: E, s1: E, s2: E) -> E
 where
     E: PrimeCharacteristicRing,
 {
-    cycle_row_0 * s0 * (E::ONE - s1) * (E::ONE - s2)
+    cycle_row_0 * s0 * s1.not() * s2.not()
 }
 
 /// MP: Merkle Path verification flag `(1,0,1)` on cycle row 0.
@@ -63,7 +65,7 @@ pub fn f_mp<E>(cycle_row_0: E, s0: E, s1: E, s2: E) -> E
 where
     E: PrimeCharacteristicRing,
 {
-    cycle_row_0 * s0 * (E::ONE - s1) * s2
+    cycle_row_0 * s0 * s1.not() * s2
 }
 
 /// MV: Merkle Verify (old root) flag `(1,1,0)` on cycle row 0.
@@ -79,7 +81,7 @@ pub fn f_mv<E>(cycle_row_0: E, s0: E, s1: E, s2: E) -> E
 where
     E: PrimeCharacteristicRing,
 {
-    cycle_row_0 * s0 * s1 * (E::ONE - s2)
+    cycle_row_0 * s0 * s1 * s2.not()
 }
 
 /// MU: Merkle Update (new root) flag `(1,1,1)` on cycle row 0.
@@ -115,7 +117,7 @@ pub fn f_abp<E>(cycle_row_31: E, s0: E, s1: E, s2: E) -> E
 where
     E: PrimeCharacteristicRing,
 {
-    cycle_row_31 * s0 * (E::ONE - s1) * (E::ONE - s2)
+    cycle_row_31 * s0 * s1.not() * s2.not()
 }
 
 /// MPA: Merkle Path Absorb flag `(1,0,1)` on cycle row 31.
@@ -131,7 +133,7 @@ pub fn f_mpa<E>(cycle_row_31: E, s0: E, s1: E, s2: E) -> E
 where
     E: PrimeCharacteristicRing,
 {
-    cycle_row_31 * s0 * (E::ONE - s1) * s2
+    cycle_row_31 * s0 * s1.not() * s2
 }
 
 /// MVA: Merkle Verify Absorb flag `(1,1,0)` on cycle row 31.
@@ -147,7 +149,7 @@ pub fn f_mva<E>(cycle_row_31: E, s0: E, s1: E, s2: E) -> E
 where
     E: PrimeCharacteristicRing,
 {
-    cycle_row_31 * s0 * s1 * (E::ONE - s2)
+    cycle_row_31 * s0 * s1 * s2.not()
 }
 
 /// MUA: Merkle Update Absorb flag `(1,1,1)` on cycle row 31.
@@ -184,7 +186,7 @@ pub fn f_hout<E>(cycle_row_31: E, s0: E, s1: E, s2: E) -> E
 where
     E: PrimeCharacteristicRing,
 {
-    cycle_row_31 * (E::ONE - s0) * (E::ONE - s1) * (E::ONE - s2)
+    cycle_row_31 * s0.not() * s1.not() * s2.not()
 }
 
 /// SOUT: State Output flag `(0,0,1)` on cycle row 31.
@@ -201,7 +203,7 @@ pub fn f_sout<E>(cycle_row_31: E, s0: E, s1: E, s2: E) -> E
 where
     E: PrimeCharacteristicRing,
 {
-    cycle_row_31 * (E::ONE - s0) * (E::ONE - s1) * s2
+    cycle_row_31 * s0.not() * s1.not() * s2
 }
 
 /// Combined output flag: `f_hout | f_sout` = `(0,0,*)` on cycle row 31.
@@ -217,7 +219,7 @@ pub fn f_out<E>(cycle_row_31: E, s0: E, s1: E) -> E
 where
     E: PrimeCharacteristicRing,
 {
-    cycle_row_31 * (E::ONE - s0) * (E::ONE - s1)
+    cycle_row_31 * s0.not() * s1.not()
 }
 
 /// Lookahead output flag on cycle row 30.
@@ -234,7 +236,7 @@ pub fn f_out_next<E>(cycle_row_30: E, s0_next: E, s1_next: E) -> E
 where
     E: PrimeCharacteristicRing,
 {
-    cycle_row_30 * (E::ONE - s0_next) * (E::ONE - s1_next)
+    cycle_row_30 * s0_next.not() * s1_next.not()
 }
 
 // ================================================================================================

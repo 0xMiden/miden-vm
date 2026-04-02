@@ -23,7 +23,10 @@ use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::AirBuilder;
 
 use super::{HasherColumns, HasherFlags};
-use crate::{MidenAirBuilder, constraints::constants::F_1};
+use crate::{
+    MidenAirBuilder,
+    constraints::{constants::F_1, utils::BoolNot},
+};
 
 // CONSTRAINT HELPERS
 // ================================================================================================
@@ -76,12 +79,7 @@ pub(super) fn enforce_selector_consistency<AB>(
     // -------------------------------------------------------------------------
     // On row31, if s0 = 0 then s1 must be 0. This prevents (0,1,*) combinations.
     // Constraint: row31 * (1 - s0) * s1 = 0
-    builder.assert_zero(
-        hasher_flag
-            * flags.cycle_row_31.clone()
-            * (AB::Expr::ONE - cols.s0.clone())
-            * cols.s1.clone(),
-    );
+    builder.assert_zero(hasher_flag * flags.cycle_row_31.clone() * cols.s0.not() * cols.s1.clone());
 }
 
 /// Enforces that selector columns are binary.

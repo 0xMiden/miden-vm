@@ -45,6 +45,7 @@ use crate::{
     constraints::{
         constants::{F_1, F_128, HASH_CYCLE_LEN_FELT},
         op_flags::{ExprDecoderAccess, OpFlags},
+        utils::BoolNot,
     },
     trace::decoder as decoder_cols,
 };
@@ -226,14 +227,12 @@ fn enforce_in_span_constraints<AB>(
     // Constraint 2: After SPAN, the next row must be inside a span.
     // span_flag * (1 - sp') = 0
     let span_flag = op_flags.span();
-    builder
-        .when_transition()
-        .assert_zero(span_flag * (AB::Expr::ONE - sp_next.clone()));
+    builder.when_transition().assert_zero(span_flag * sp_next.not());
 
     // Constraint 3: After RESPAN, the next row must be inside a span.
     // respan_flag * (1 - sp') = 0
     let respan_flag = op_flags.respan();
-    builder.when_transition().assert_zero(respan_flag * (AB::Expr::ONE - sp_next));
+    builder.when_transition().assert_zero(respan_flag * sp_next.not());
 }
 
 /// Enforces that all operation bits (b0-b6) are binary (0 or 1).
@@ -269,7 +268,7 @@ where
     // e0 = b6 * (1 - b5) * b4.
     // This extra register exists to reduce the degree of op-flag selectors for the
     // `101...` opcode group (see docs/src/design/stack/op_constraints.md).
-    let expected_e0 = b6.clone() * (AB::Expr::ONE - b5.clone()) * b4;
+    let expected_e0 = b6.clone() * b5.not() * b4;
     builder.assert_eq(e0, expected_e0);
 
     // e1 = b6 * b5.
@@ -295,7 +294,7 @@ where
 
     // U32 prefix pattern: b6=1, b5=0, b4=0. Under this prefix, b0 must be 0 to
     // eliminate invalid opcodes in the U32 opcode subset.
-    let u32_prefix = b6.clone() * (AB::Expr::ONE - b5.clone()) * (AB::Expr::ONE - b4);
+    let u32_prefix = b6.clone() * b5.not() * b4.not();
     builder.assert_zero(u32_prefix * b0.clone());
 
     // Very-high prefix pattern: b6=1, b5=1. Under this prefix, b0 and b1 must be 0
@@ -353,8 +352,8 @@ fn enforce_general_constraints<AB>(
     // REPEAT: top stack must be 1 and we must be in a loop body (h4=1).
     let f_repeat = op_flags.repeat();
     let h4: AB::Expr = local.decoder[decoder_cols::IS_LOOP_BODY_FLAG_COL_IDX].into();
-    builder.assert_zero(f_repeat.clone() * (AB::Expr::ONE - s0.clone()));
-    builder.assert_zero(f_repeat * (AB::Expr::ONE - h4));
+    builder.assert_zero(f_repeat.clone() * s0.not());
+    builder.assert_zero(f_repeat * h4.not());
 
     // END inside a loop: if is_loop flag is set, top stack must be 0.
     let f_end = op_flags.end();
@@ -374,7 +373,7 @@ fn enforce_general_constraints<AB>(
     // HALT is absorbing: it can only be followed by HALT.
     let f_halt = op_flags.halt();
     let f_halt_next = op_flags_next.halt();
-    builder.when_transition().assert_zero(f_halt * (AB::Expr::ONE - f_halt_next));
+    builder.when_transition().assert_zero(f_halt * f_halt_next.not());
 }
 
 /// Enforces group count (gc) constraints.
@@ -427,7 +426,7 @@ fn enforce_group_count_constraints<AB>(
     // sp * delta_gc * (1 - is_push) * h0 = 0
     builder
         .when_transition()
-        .assert_zero(sp.clone() * delta_gc.clone() * (AB::Expr::ONE - is_push.clone()) * h0);
+        .assert_zero(sp.clone() * delta_gc.clone() * is_push.not() * h0);
 
     // Constraint 3: SPAN/RESPAN/PUSH must consume a group immediately.
     // (span_flag + respan_flag + is_push) * (delta_gc - 1) = 0
@@ -479,7 +478,7 @@ fn enforce_op_group_decoding_constraints<AB>(
     let is_push = op_flags.push();
 
     // f_sgc is set when gc stays the same inside a basic block.
-    let f_sgc = sp.clone() * sp_next * (AB::Expr::ONE - delta_gc.clone());
+    let f_sgc = sp.clone() * sp_next * delta_gc.not();
 
     let h0: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET].into();
     let h0_next: AB::Expr = next.decoder[decoder_cols::HASHER_STATE_OFFSET].into();
@@ -560,9 +559,7 @@ fn enforce_op_index_constraints<AB>(
     // Constraint 3: When staying in the same group, ox increments by 1.
     // sp * sp' * (1 - ng) * (ox' - ox - 1) = 0
     let delta_ox = ox_next - ox.clone() - F_1;
-    builder
-        .when_transition()
-        .assert_zero(sp * sp_next * (AB::Expr::ONE - ng) * delta_ox);
+    builder.when_transition().assert_zero(sp * sp_next * ng.not() * delta_ox);
 
     // Constraint 4: ox must be in range [0, 8] (9 ops per group).
     // ∏_{i=0}^{8}(ox - i) = 0
@@ -592,9 +589,10 @@ fn enforce_batch_flags_constraints<AB>(
 
     // Batch flag decoding matches trace::decoder batch encodings.
     let f_g8 = bc0.clone();
-    let f_g4 = (AB::Expr::ONE - bc0.clone()) * bc1.clone() * (AB::Expr::ONE - bc2.clone());
-    let f_g2 = (AB::Expr::ONE - bc0.clone()) * (AB::Expr::ONE - bc1.clone()) * bc2.clone();
-    let f_g1 = (AB::Expr::ONE - bc0) * bc1 * bc2;
+    let not_bc0 = bc0.not();
+    let f_g4 = not_bc0.clone() * bc1.clone() * bc2.not();
+    let f_g2 = not_bc0.clone() * bc1.not() * bc2.clone();
+    let f_g1 = not_bc0 * bc1 * bc2;
 
     let f_span = op_flags.span();
     let f_respan = op_flags.respan();
@@ -606,7 +604,7 @@ fn enforce_batch_flags_constraints<AB>(
 
     // When not SPAN/RESPAN, all batch flags must be zero.
     builder.assert_zero(
-        (AB::Expr::ONE - span_or_respan)
+        span_or_respan.not()
             * (cols.batch_flags[0].clone()
                 + cols.batch_flags[1].clone()
                 + cols.batch_flags[2].clone()),

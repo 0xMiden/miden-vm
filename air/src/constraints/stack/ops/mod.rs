@@ -7,12 +7,11 @@
 //! Stack shifting is enforced in the general stack constraints; here we only cover explicit
 //! rewrites of stack positions for these op groups.
 
-use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
     MainTraceRow, MidenAirBuilder,
-    constraints::{constants::*, op_flags::OpFlags},
+    constraints::{constants::*, op_flags::OpFlags, utils::BoolNot},
 };
 
 // ENTRY POINT
@@ -248,7 +247,7 @@ pub fn enforce_main<AB>(
 
     // CSWAP / CSWAPW: conditional swaps using s0 as the selector.
     let cswap_c = s0.clone();
-    let cswap_c_inv = AB::Expr::ONE - cswap_c.clone();
+    let cswap_c_inv = cswap_c.not();
 
     // Binary constraint for the cswap selector (must be 0 or 1).
     builder.assert_zero(is_cswap.clone() * (cswap_c.clone() * (cswap_c.clone() - F_1)));

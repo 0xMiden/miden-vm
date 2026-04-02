@@ -37,6 +37,7 @@ use crate::{
     constraints::{
         constants::F_1,
         op_flags::{ExprDecoderAccess, OpFlags},
+        utils::BoolNot,
     },
     trace::decoder::HASHER_STATE_OFFSET,
 };
@@ -100,7 +101,7 @@ pub(crate) fn enforce_ctx_constraints<AB>(
     builder.when_transition().assert_zero(f_syscall.clone() * ctx_next.clone());
 
     let change_ctx_flag = f_call + f_syscall + f_dyncall + f_end;
-    let default_flag = AB::Expr::ONE - change_ctx_flag;
+    let default_flag = change_ctx_flag.not();
     builder.when_transition().assert_zero(default_flag * (ctx_next - ctx));
 }
 

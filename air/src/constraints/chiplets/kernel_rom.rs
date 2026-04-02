@@ -26,7 +26,10 @@ use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::AirBuilder;
 
 use super::selectors::{ace_chiplet_flag, kernel_rom_chiplet_flag};
-use crate::{MainTraceRow, MidenAirBuilder, constraints::constants::F_1};
+use crate::{
+    MainTraceRow, MidenAirBuilder,
+    constraints::{constants::F_1, utils::BoolNot},
+};
 // CONSTANTS
 // ================================================================================================
 
@@ -91,8 +94,8 @@ pub fn enforce_kernel_rom_constraints<AB>(
 
     // When sfirst' = 0 (not the start of a new digest block) and s4' = 0 (not exiting kernel ROM),
     // the digest values must remain unchanged.
-    let not_exiting = AB::Expr::ONE - s4_next.clone();
-    let not_new_block = AB::Expr::ONE - sfirst_next.clone();
+    let not_exiting = s4_next.not();
+    let not_new_block = sfirst_next.not();
     let contiguity_condition = not_exiting * not_new_block;
 
     // Use a combined gate to share `kernel_rom_flag * contiguity_condition` across all 4 lanes.
@@ -108,7 +111,7 @@ pub fn enforce_kernel_rom_constraints<AB>(
 
     // s0..s2 are stable once 1 (selector constraints), so ACE -> kernel ROM transition is
     // determined by s3' = 1 and s4' = 0.
-    let kernel_rom_next = s3_next * (AB::Expr::ONE - s4_next.clone());
+    let kernel_rom_next = s3_next * s4_next.not();
     let flag_next_row_first_kernel_rom = ace_flag * kernel_rom_next;
 
     // First row of kernel ROM must have sfirst' = 1.

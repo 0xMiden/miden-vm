@@ -25,9 +25,12 @@ use miden_core::{field::PrimeCharacteristicRing, operations::opcodes};
 
 #[cfg(test)]
 use crate::trace::decoder::NUM_OP_BITS;
-use crate::trace::{
-    decoder::{IS_LOOP_FLAG_COL_IDX, OP_BITS_EXTRA_COLS_RANGE, OP_BITS_RANGE},
-    stack::{B0_COL_IDX, H0_COL_IDX},
+use crate::{
+    constraints::utils::BoolNot,
+    trace::{
+        decoder::{IS_LOOP_FLAG_COL_IDX, OP_BITS_EXTRA_COLS_RANGE, OP_BITS_RANGE},
+        stack::{B0_COL_IDX, H0_COL_IDX},
+    },
 };
 
 // CONSTANTS
@@ -203,7 +206,7 @@ fn binary_not<E>(x: E) -> E
 where
     E: Clone + core::ops::Sub<Output = E> + PrimeCharacteristicRing,
 {
-    E::ONE - x
+    x.not()
 }
 
 #[derive(Clone)]

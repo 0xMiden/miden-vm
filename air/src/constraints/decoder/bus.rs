@@ -30,7 +30,7 @@ use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 
 use crate::{
     Felt, MainTraceRow, MidenAirBuilder,
-    constraints::{bus::indices::P1_BLOCK_STACK, constants::*, op_flags::OpFlags},
+    constraints::{bus::indices::P1_BLOCK_STACK, constants::*, op_flags::OpFlags, utils::BoolNot},
     trace::Challenges,
 };
 
@@ -378,7 +378,7 @@ pub fn enforce_block_stack_table_constraint<AB>(
         v_join + v_split + v_span + v_dyn + v_loop + v_respan + v_call + v_syscall + v_dyncall;
 
     // Response side: insertion_sum + (1 - insert_flag_sum)
-    let response = insertion_sum + (AB::ExprEF::ONE - insert_flag_sum);
+    let response = insertion_sum + insert_flag_sum.not();
 
     // =========================================================================
     // REMOVAL CONTRIBUTIONS (u_xxx = f_xxx * message)
@@ -420,7 +420,7 @@ pub fn enforce_block_stack_table_constraint<AB>(
     let removal_sum = u_end + u_respan;
 
     // Request side: removal_sum + (1 - remove_flag_sum)
-    let request = removal_sum + (AB::ExprEF::ONE - remove_flag_sum);
+    let request = removal_sum + remove_flag_sum.not();
 
     // =========================================================================
     // RUNNING PRODUCT CONSTRAINT
@@ -544,7 +544,7 @@ pub fn enforce_block_hash_table_constraint<AB>(
 
     // is_first_child = 1 when next op is NOT end/repeat/halt
     let is_not_first_child = is_end_next + is_repeat_next + is_halt_next;
-    let is_first_child = AB::Expr::ONE - is_not_first_child;
+    let is_first_child = is_not_first_child.not();
 
     // =========================================================================
     // MESSAGE BUILDERS
@@ -581,10 +581,11 @@ pub fn enforce_block_hash_table_constraint<AB>(
 
     // SPLIT: Insert selected child based on s0
     // If s0=1: left child (h0-h3), else right child (h4-h7)
-    let split_h0 = s0.clone() * h0.clone() + (AB::Expr::ONE - s0.clone()) * h4.clone();
-    let split_h1 = s0.clone() * h1.clone() + (AB::Expr::ONE - s0.clone()) * h5.clone();
-    let split_h2 = s0.clone() * h2.clone() + (AB::Expr::ONE - s0.clone()) * h6.clone();
-    let split_h3 = s0.clone() * h3.clone() + (AB::Expr::ONE - s0.clone()) * h7.clone();
+    let not_s0 = s0.not();
+    let split_h0 = s0.clone() * h0.clone() + not_s0.clone() * h4.clone();
+    let split_h1 = s0.clone() * h1.clone() + not_s0.clone() * h5.clone();
+    let split_h2 = s0.clone() * h2.clone() + not_s0.clone() * h6.clone();
+    let split_h3 = s0.clone() * h3.clone() + not_s0 * h7.clone();
     let msg_split = encoder.encode(
         &parent_id,
         [&split_h0, &split_h1, &split_h2, &split_h3],
@@ -631,7 +632,7 @@ pub fn enforce_block_hash_table_constraint<AB>(
         + v_dyncall
         + v_call
         + v_syscall
-        + (AB::ExprEF::ONE - insert_flag_sum);
+        + insert_flag_sum.not();
 
     // =========================================================================
     // REQUEST CONTRIBUTIONS (removals)
@@ -648,7 +649,7 @@ pub fn enforce_block_hash_table_constraint<AB>(
     let u_end = msg_end * is_end.clone();
 
     // Request side
-    let request = u_end + (AB::ExprEF::ONE - is_end);
+    let request = u_end + is_end.not();
 
     // =========================================================================
     // RUNNING PRODUCT CONSTRAINT
@@ -788,8 +789,9 @@ pub fn enforce_op_group_table_constraint<AB>(
     // OP_BATCH_2_GROUPS = [0, 0, 1] -> f_g2 = (1-c0) * (1-c1) * c2
     // OP_BATCH_1_GROUPS = [0, 1, 1] -> f_g1 = (1-c0) * c1 * c2
     let f_g8 = c0.clone();
-    let f_g4 = (AB::Expr::ONE - c0.clone()) * c1.clone() * (AB::Expr::ONE - c2.clone());
-    let f_g2 = (AB::Expr::ONE - c0.clone()) * (AB::Expr::ONE - c1.clone()) * c2.clone();
+    let not_c0 = c0.not();
+    let f_g4 = not_c0.clone() * c1.clone() * c2.not();
+    let f_g2 = not_c0 * c1.not() * c2.clone();
 
     // =========================================================================
     // RESPONSE (insertions during SPAN/RESPAN)
@@ -838,13 +840,13 @@ pub fn enforce_op_group_table_constraint<AB>(
     // When PUSH: the immediate value is on the stack (s0')
     // Otherwise: the group value is h0' * 128 + op_code'
     let group_value_non_push = h0_next * F_128 + op_code_next;
-    let group_value = is_push.clone() * s0_next + (AB::Expr::ONE - is_push) * group_value_non_push;
+    let group_value = is_push.clone() * s0_next + is_push.not() * group_value_non_push;
 
     // Removal message: u = msg(block_id, gc, group_value)
     let u = encoder.encode(&block_id_remove, &gc, &group_value);
 
     // Request formula: f_dg * u + (1 - f_dg)
-    let request = u * f_dg.clone() + (AB::ExprEF::ONE - f_dg);
+    let request = u * f_dg.clone() + f_dg.not();
 
     // =========================================================================
     // RUNNING PRODUCT CONSTRAINT

@@ -41,6 +41,7 @@ pub use periodic::{STATE_WIDTH, periodic_columns};
 
 use crate::{
     MainTraceRow, MidenAirBuilder,
+    constraints::utils::BoolNot,
     trace::{
         CHIPLETS_OFFSET,
         chiplets::{HASHER_NODE_INDEX_COL_IDX, HASHER_SELECTOR_COL_RANGE, HASHER_STATE_COL_RANGE},
@@ -182,7 +183,7 @@ where
             core::array::from_fn(|i| periodic[i])
         };
 
-        let hasher_flag: AB::Expr = AB::Expr::ONE - local.chiplets[0].into();
+        let hasher_flag: AB::Expr = local.chiplets[0].into().not();
         let cols: HasherColumns<AB::Expr> = HasherColumns::from_row(local);
         let cols_next: HasherColumns<AB::Expr> = HasherColumns::from_row(next);
         let flags = compute_hasher_flags::<AB>(&periodic, &cols, &cols_next);

@@ -17,12 +17,11 @@
 //! Each row in the overflow table is encoded as:
 //! `alpha + beta^0 * clk + beta^1 * val + beta^2 * prev`
 
-use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 
 use crate::{
     MainTraceRow, MidenAirBuilder,
-    constraints::{bus::indices::P1_STACK, constants::F_16, op_flags::OpFlags},
+    constraints::{bus::indices::P1_STACK, constants::F_16, op_flags::OpFlags, utils::BoolNot},
     trace::{
         Challenges,
         decoder::HASHER_STATE_RANGE,
@@ -112,7 +111,7 @@ pub fn enforce_bus<AB>(
     // -------------------------------------------------------------------------
 
     // Response: right_shift * response_row + (1 - right_shift)
-    let response: AB::ExprEF = response_row * right_shift.clone() + (AB::ExprEF::ONE - right_shift);
+    let response: AB::ExprEF = response_row * right_shift.clone() + right_shift.not();
 
     // Request flags
     let left_flag: AB::Expr = left_shift * is_non_empty_overflow.clone();
@@ -122,7 +121,7 @@ pub fn enforce_bus<AB>(
     // Request: left_flag * left_value + dyncall_flag * dyncall_value + (1 - sum(flags))
     let request: AB::ExprEF = request_row_left * left_flag.clone()
         + request_row_dyncall * dyncall_flag.clone()
-        + (AB::ExprEF::ONE - request_flag_sum);
+        + request_flag_sum.not();
 
     // -------------------------------------------------------------------------
     // Main running product constraint

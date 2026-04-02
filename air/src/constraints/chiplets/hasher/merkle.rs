@@ -22,7 +22,7 @@ use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::AirBuilder;
 
 use super::{HasherColumns, HasherFlags};
-use crate::MidenAirBuilder;
+use crate::{MidenAirBuilder, constraints::utils::BoolNot};
 
 // CONSTRAINT HELPERS
 // ================================================================================================
@@ -129,7 +129,7 @@ pub(super) fn enforce_merkle_absorb_state<AB>(
     // -------------------------------------------------------------------------
 
     // Constraint 2: If b=0, digest goes to rate0 (h'[0..4] = h[0..4])
-    let f_b0 = f_absorb.clone() * (AB::Expr::ONE - b.clone());
+    let f_b0 = f_absorb.clone() * b.not();
     let gate_b0 = hasher_flag.clone() * f_b0;
     builder.when_transition().assert_zeros(core::array::from_fn::<_, 4, _>(|i| {
         gate_b0.clone() * (rate0_next[i].clone() - digest[i].clone())

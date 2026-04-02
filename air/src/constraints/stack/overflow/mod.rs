@@ -31,7 +31,7 @@ use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
     MainTraceRow, MidenAirBuilder,
-    constraints::{constants::*, op_flags::OpFlags},
+    constraints::{constants::*, op_flags::OpFlags, utils::BoolNot},
     trace::{
         decoder::{IS_CALL_FLAG_COL_IDX, IS_SYSCALL_FLAG_COL_IDX},
         stack::{B0_COL_IDX, B1_COL_IDX},
@@ -161,7 +161,7 @@ fn enforce_overflow_flag_constraints<AB>(
     // (1 - overflow) * (depth - 16) = 0
     // When depth > 16, overflow must be 1 (meaning h0 = 1/(depth - 16))
     // When depth = 16, this constraint is satisfied regardless of overflow
-    let constraint = (AB::Expr::ONE - op_flags.overflow()) * (depth - F_16);
+    let constraint = op_flags.overflow().not() * (depth - F_16);
 
     builder.assert_zero(constraint);
 }
@@ -189,6 +189,6 @@ fn enforce_overflow_index_constraints<AB>(
 
     // On left shift when depth = 16 (no overflow), last stack item should be zero
     let left_shift_constraint =
-        (AB::Expr::ONE - op_flags.overflow()) * op_flags.left_shift() * last_stack_item_next;
+        op_flags.overflow().not() * op_flags.left_shift() * last_stack_item_next;
     builder.when_transition().assert_zero(left_shift_constraint);
 }

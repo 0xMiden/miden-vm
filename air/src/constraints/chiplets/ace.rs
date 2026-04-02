@@ -32,7 +32,10 @@ use miden_core::field::PrimeCharacteristicRing;
 use super::selectors::{ace_chiplet_flag, memory_chiplet_flag};
 use crate::{
     MainTraceRow, MidenAirBuilder,
-    constraints::constants::{F_1, F_4},
+    constraints::{
+        constants::{F_1, F_4},
+        utils::BoolNot,
+    },
     trace::chiplets::ace::{
         CLK_IDX, CTX_IDX, EVAL_OP_IDX, ID_0_IDX, ID_1_IDX, PTR_IDX, READ_NUM_EVAL_IDX,
         SELECTOR_BLOCK_IDX, SELECTOR_START_IDX, V_0_0_IDX, V_0_1_IDX, V_1_0_IDX, V_1_1_IDX,
@@ -79,7 +82,7 @@ pub fn enforce_ace_constraints<AB>(
     // Must be gated by is_transition since it accesses next-row values
     let memory_flag = memory_chiplet_flag(s0, s1, s2);
     // ace_next = s2' * !s3'
-    let ace_next = s2_next * (AB::Expr::ONE - s3_next);
+    let ace_next = s2_next * s3_next.not();
     let flag_next_row_first_ace = is_transition * memory_flag * ace_next;
     enforce_ace_constraints_first_row(builder, local, next, flag_next_row_first_ace);
 }
@@ -132,7 +135,7 @@ pub fn enforce_ace_constraints_all_rows<AB>(
 
     // ACE continuing to the next row (not transitioning out).
     // Includes is_transition because it reads next-row values.
-    let flag_ace_next = is_transition.clone() * (AB::Expr::ONE - s3_next.clone());
+    let flag_ace_next = is_transition.clone() * s3_next.not();
     // Last ACE row (next row transitions out of ACE).
     // Includes is_transition because it reads next-row values.
     let flag_ace_last = is_transition.clone() * s3_next.clone();
@@ -148,11 +151,11 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     // SECTION/BLOCK FLAGS CONSTRAINTS
     // ==========================================================================
 
-    let f_next = AB::Expr::ONE - sstart_next.clone();
+    let f_next = sstart_next.not();
 
     // Sections must end with EVAL blocks (not READ).
     // OR(t*a, t*b) = t*OR(a, b) when t is binary.
-    let f_end = binary_or((AB::Expr::ONE - s3_next.clone()) * sstart_next.clone(), s3_next.clone());
+    let f_end = binary_or(s3_next.not() * sstart_next.clone(), s3_next.clone());
 
     // Last row of ACE chiplet cannot be section start
     builder.assert_zero(ace_flag.clone() * flag_ace_last.clone() * sstart.clone());
@@ -168,19 +171,17 @@ pub fn enforce_ace_constraints_all_rows<AB>(
             * flag_ace_next.clone()
             * f_next.clone()
             * sblock.clone()
-            * (AB::Expr::ONE - sblock_next.clone()),
+            * sblock_next.not(),
     );
     // Sections must end with EVAL blocks (not READ)
-    builder.assert_zero(
-        ace_flag.clone() * is_transition.clone() * f_end.clone() * (AB::Expr::ONE - sblock.clone()),
-    );
+    builder.assert_zero(ace_flag.clone() * is_transition.clone() * f_end.clone() * sblock.not());
 
     // ==========================================================================
     // SECTION CONSTRAINTS (within section)
     // ==========================================================================
 
-    let flag_within_section = AB::Expr::ONE - sstart_next.clone();
-    let f_read = AB::Expr::ONE - sblock.clone();
+    let flag_within_section = sstart_next.not();
+    let f_read = sblock.not();
     let f_eval = sblock.clone();
 
     // Context consistency within a section
@@ -213,7 +214,7 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     // READ→EVAL transition occurs when n_eval matches the first EVAL id0.
     // n_eval is constant across READ rows and encodes (num_eval_rows - 1).
     // Enforce: f_read * (f_read' * n_eval' + f_eval' * id0' - n_eval) = 0
-    let f_read_next = AB::Expr::ONE - sblock_next.clone();
+    let f_read_next = sblock_next.not();
     let f_eval_next = sblock_next.clone();
     let selected = f_read_next * n_eval_next.clone() + f_eval_next * id0_next.clone();
     builder.assert_zero(
