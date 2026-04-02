@@ -24,7 +24,7 @@
 
 use miden_crypto::stark::air::AirBuilder;
 
-use super::selectors::ChipletSelectors;
+use super::selectors::ChipletFlags;
 use crate::{MainTraceRow, MidenAirBuilder, constraints::utils::BoolNot};
 // CONSTANTS
 // ================================================================================================
@@ -47,13 +47,13 @@ pub fn enforce_kernel_rom_constraints<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    selectors: &ChipletSelectors<AB::Expr>,
+    flags: &ChipletFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
     let s4_next = next.chiplets[4];
 
-    let kernel_rom_flag = selectors.kernel_rom.is_active.clone();
+    let kernel_rom_flag = flags.is_active.clone();
 
     // Load kernel ROM columns (sfirst + 4-word digest).
     let sfirst = load_kernel_rom_col::<AB>(local, SFIRST_IDX);
@@ -86,7 +86,7 @@ pub fn enforce_kernel_rom_constraints<AB>(
 
     // Use a combined gate to share `kernel_rom_flag * contiguity_condition` across all 4 lanes.
     {
-        let transition_gate = selectors.kernel_rom.is_transition.clone() * contiguity_condition;
+        let transition_gate = flags.is_transition.clone() * contiguity_condition;
         let builder = &mut builder.when(transition_gate);
         builder.assert_eq(r0_next, r0);
         builder.assert_eq(r1_next, r1);
@@ -99,8 +99,8 @@ pub fn enforce_kernel_rom_constraints<AB>(
     // ==========================================================================
 
     // First row of kernel ROM must have sfirst' = 1.
-    // Uses selectors.ace.is_last to detect ACE→KernelROM boundary.
-    let flag_next_row_first_kernel_rom = selectors.kernel_rom.next_is_first.clone();
+    // Uses the precomputed next_is_first flag to detect ACE→KernelROM boundary.
+    let flag_next_row_first_kernel_rom = flags.next_is_first.clone();
     builder.when(flag_next_row_first_kernel_rom).assert_one(sfirst_next);
 }
 

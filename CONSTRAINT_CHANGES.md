@@ -229,3 +229,8 @@ Identical assertion expressions; fingerprints changed because scoped builder gat
 </details>
 
 ---
+## 18. refactor: narrow per-chiplet constraint functions to &ChipletFlags
+
+**No constraint changes.** (446 base + 24 ext)
+
+---

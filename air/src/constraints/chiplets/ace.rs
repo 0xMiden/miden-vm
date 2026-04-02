@@ -29,7 +29,7 @@
 
 use miden_core::field::PrimeCharacteristicRing;
 
-use super::selectors::ChipletSelectors;
+use super::selectors::ChipletFlags;
 use crate::{
     MainTraceRow, MidenAirBuilder,
     constraints::{
@@ -57,15 +57,15 @@ pub fn enforce_ace_constraints<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    selectors: &ChipletSelectors<AB::Expr>,
+    flags: &ChipletFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
     // ACE constraints on all rows (already internally gated)
-    enforce_ace_constraints_all_rows(builder, local, next, selectors);
+    enforce_ace_constraints_all_rows(builder, local, next, flags);
 
     // ACE first row constraints (transitioning from memory to ACE)
-    let flag_next_row_first_ace = selectors.ace.next_is_first.clone();
+    let flag_next_row_first_ace = flags.next_is_first.clone();
     enforce_ace_constraints_first_row(builder, local, next, flag_next_row_first_ace);
 }
 
@@ -74,13 +74,13 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    selectors: &ChipletSelectors<AB::Expr>,
+    flags: &ChipletFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
     let s3_next = next.chiplets[3];
 
-    let ace_flag = selectors.ace.is_active.clone();
+    let ace_flag = flags.is_active.clone();
 
     // Load ACE columns
     let sstart: AB::Expr = load_ace_col::<AB>(local, SELECTOR_START_IDX);
@@ -109,8 +109,8 @@ pub fn enforce_ace_constraints_all_rows<AB>(
     let v2_1: AB::Expr = load_ace_col::<AB>(local, V_2_1_IDX);
 
     // Precomputed ACE transition flag (bakes in is_transition)
-    let ace_transition = selectors.ace.is_transition.clone();
-    let ace_last = selectors.ace.is_last.clone();
+    let ace_transition = flags.is_transition.clone();
+    let ace_last = flags.is_last.clone();
 
     // ==========================================================================
     // BINARY CONSTRAINTS

@@ -31,7 +31,7 @@ use core::ops::{Add, Mul, Sub};
 
 use miden_core::field::PrimeCharacteristicRing;
 
-use super::selectors::ChipletSelectors;
+use super::selectors::ChipletFlags;
 use crate::{
     MainTraceRow, MidenAirBuilder,
     constraints::{
@@ -56,16 +56,16 @@ pub fn enforce_memory_constraints<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
-    selectors: &ChipletSelectors<AB::Expr>,
+    flags: &ChipletFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
-    enforce_memory_constraints_all_rows(builder, local, next, selectors);
+    enforce_memory_constraints_all_rows(builder, local, next, flags);
 
-    let flag_next_row_first_memory = selectors.memory.next_is_first.clone();
+    let flag_next_row_first_memory = flags.next_is_first.clone();
     enforce_memory_constraints_first_row(builder, local, next, flag_next_row_first_memory);
 
-    let flag_memory_active_not_last = selectors.memory.is_transition.clone();
+    let flag_memory_active_not_last = flags.is_transition.clone();
     enforce_memory_constraints_all_rows_except_last(
         builder,
         local,
@@ -82,11 +82,11 @@ pub fn enforce_memory_constraints_all_rows<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,
     _next: &MainTraceRow<AB::Var>,
-    selectors: &ChipletSelectors<AB::Expr>,
+    flags: &ChipletFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
-    let memory_flag = selectors.memory.is_active.clone();
+    let memory_flag = flags.is_active.clone();
 
     // Load memory columns using typed struct
     let cols: MemoryColumns<AB::Expr> = MemoryColumns::from_row::<AB>(local);
