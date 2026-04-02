@@ -51,7 +51,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Open issue on failure (only if fail-fast is false and not a fork)
-        if: steps.lychee.outputs.exit_code != 0 && steps.flags.outputs.fail_fast != 'true' && !github.event.repository.fork
+        if: ${{ steps.lychee.outputs.exit_code != 0 && steps.flags.outputs.fail_fast != 'true' && !github.event.repository.fork }}
         uses: peter-evans/create-issue-from-file@v5
         with:
           title: Link Checker Report
