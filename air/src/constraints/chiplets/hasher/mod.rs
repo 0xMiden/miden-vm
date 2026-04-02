@@ -41,7 +41,7 @@ pub use periodic::{STATE_WIDTH, periodic_columns};
 
 use crate::{
     MainTraceRow, MidenAirBuilder,
-    constraints::utils::BoolNot,
+    constraints::chiplets::selectors::ChipletSelectors,
     trace::{
         CHIPLETS_OFFSET,
         chiplets::{HASHER_NODE_INDEX_COL_IDX, HASHER_SELECTOR_COL_RANGE, HASHER_STATE_COL_RANGE},
@@ -173,6 +173,7 @@ where
         builder: &mut AB,
         local: &MainTraceRow<AB::Var>,
         next: &MainTraceRow<AB::Var>,
+        selectors: &ChipletSelectors<AB::Expr>,
     ) -> Self {
         let periodic: [AB::PeriodicVar; periodic::NUM_PERIODIC_COLUMNS] = {
             let periodic = builder.periodic_values();
@@ -183,7 +184,7 @@ where
             core::array::from_fn(|i| periodic[i])
         };
 
-        let hasher_flag = local.chiplets[0].into().not();
+        let hasher_flag = selectors.hasher.is_active.clone();
         let cols: HasherColumns<AB::Expr> = HasherColumns::from_row(local);
         let cols_next: HasherColumns<AB::Expr> = HasherColumns::from_row(next);
         let flags = compute_hasher_flags::<AB>(&periodic, &cols, &cols_next);
@@ -216,10 +217,11 @@ pub fn enforce_hasher_constraints<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
+    selectors: &ChipletSelectors<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
-    let ctx = HasherContext::<AB>::new(builder, local, next);
+    let ctx = HasherContext::<AB>::new(builder, local, next, selectors);
 
     enforce_permutation(builder, &ctx);
     // Enforce selector booleanity using raw vars.

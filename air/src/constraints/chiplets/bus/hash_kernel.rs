@@ -18,7 +18,10 @@ use crate::{
     Felt, MainTraceRow, MidenAirBuilder,
     constraints::{
         bus::indices::B_HASH_KERNEL,
-        chiplets::hasher::{flags, periodic},
+        chiplets::{
+            hasher::{flags, periodic},
+            selectors::ChipletSelectors,
+        },
         op_flags::OpFlags,
         utils::BoolNot,
     },
@@ -62,6 +65,7 @@ pub fn enforce_hash_kernel_constraint<AB>(
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
     challenges: &Challenges<AB::ExprEF>,
+    selectors: &ChipletSelectors<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
@@ -92,9 +96,7 @@ pub fn enforce_hash_kernel_constraint<AB>(
     // COMMON VALUES
     // =========================================================================
 
-    // Hasher chiplet rows have s0 = 0 (chiplet selector).
-    let chiplet_selector = local.chiplets[0];
-    let is_hasher = AB::Expr::from(chiplet_selector).not();
+    let is_hasher = selectors.hasher.is_active.clone();
 
     // Hasher operation selectors (only meaningful within hasher chiplet)
     let s0 = local.chiplets[S_START];
@@ -147,13 +149,7 @@ pub fn enforce_hash_kernel_constraint<AB>(
     // ACE MEMORY FLAGS AND VALUES
     // =========================================================================
 
-    // ACE chiplet selector: s0=1, s1=1, s2=1, s3=0
-    let s3 = local.chiplets[3];
-    let chiplet_s1 = local.chiplets[1];
-    let chiplet_s2 = local.chiplets[2];
-
-    let is_ace_row: AB::Expr =
-        chiplet_selector * chiplet_s1 * chiplet_s2 * AB::Expr::from(s3).not();
+    let is_ace_row: AB::Expr = selectors.ace.is_active.clone();
 
     // Block selector determines read (0) vs eval (1)
     let block_selector = local.chiplets[NUM_ACE_SELECTORS + SELECTOR_BLOCK_IDX];

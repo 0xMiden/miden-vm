@@ -27,7 +27,7 @@ use miden_core::field::PrimeCharacteristicRing;
 
 use super::{
     hasher::periodic::NUM_PERIODIC_COLUMNS as HASHER_NUM_PERIODIC_COLUMNS,
-    selectors::bitwise_chiplet_flag,
+    selectors::ChipletSelectors,
 };
 use crate::{
     Felt, MainTraceRow, MidenAirBuilder,
@@ -67,6 +67,7 @@ pub fn enforce_bitwise_constraints<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
+    selectors: &ChipletSelectors<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
@@ -78,10 +79,7 @@ pub fn enforce_bitwise_constraints<AB>(
         (periodic[P_BITWISE_K_FIRST].into(), periodic[P_BITWISE_K_TRANSITION].into())
     };
 
-    // Compute bitwise active flag from top-level selectors
-    let s0 = local.chiplets[0];
-    let s1 = local.chiplets[1];
-    let bitwise_flag = bitwise_chiplet_flag(s0.into(), s1.into());
+    let bitwise_flag = selectors.bitwise.is_active.clone();
 
     // Load bitwise columns using typed struct
     let cols: BitwiseColumns<AB::Expr> = BitwiseColumns::from_row(local);

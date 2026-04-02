@@ -31,7 +31,7 @@ use core::ops::{Add, Mul, Sub};
 
 use miden_core::field::PrimeCharacteristicRing;
 
-use super::selectors::memory_chiplet_flag;
+use super::selectors::ChipletSelectors;
 use crate::{
     MainTraceRow, MidenAirBuilder,
     constraints::{
@@ -56,24 +56,16 @@ pub fn enforce_memory_constraints<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
+    selectors: &ChipletSelectors<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
-    let s0 = local.chiplets[0];
-    let s1 = local.chiplets[1];
-    let s1_next = next.chiplets[1];
-    let s2_next = next.chiplets[2];
+    enforce_memory_constraints_all_rows(builder, local, next, selectors);
 
-    let is_transition: AB::Expr = builder.is_transition();
-
-    enforce_memory_constraints_all_rows(builder, local, next);
-
-    let flag_next_row_first_memory = is_transition.clone()
-        * flag_next_row_first_memory(s0.into(), s1.into(), s1_next.into(), s2_next.into());
+    let flag_next_row_first_memory = selectors.memory.next_is_first.clone();
     enforce_memory_constraints_first_row(builder, local, next, flag_next_row_first_memory);
 
-    let flag_memory_active_not_last =
-        is_transition * flag_memory_active_not_last_row(s0.into(), s1.into(), s2_next.into());
+    let flag_memory_active_not_last = selectors.memory.is_transition.clone();
     enforce_memory_constraints_all_rows_except_last(
         builder,
         local,
@@ -90,14 +82,11 @@ pub fn enforce_memory_constraints_all_rows<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,
     _next: &MainTraceRow<AB::Var>,
+    selectors: &ChipletSelectors<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
-    // Compute memory active flag from top-level selectors
-    let s0 = local.chiplets[0];
-    let s1 = local.chiplets[1];
-    let s2 = local.chiplets[2];
-    let memory_flag = memory_chiplet_flag(s0.into(), s1.into(), s2.into());
+    let memory_flag = selectors.memory.is_active.clone();
 
     // Load memory columns using typed struct
     let cols: MemoryColumns<AB::Expr> = MemoryColumns::from_row::<AB>(local);
@@ -440,19 +429,3 @@ fn enforce_scw_readonly_constraint<AB>(
     );
 }
 
-/// Memory chiplet flag for current row active and continuing to next row.
-pub fn flag_memory_active_not_last_row<E: PrimeCharacteristicRing>(s0: E, s1: E, s2_next: E) -> E {
-    // Memory active when s0 = s1 = 1 and not transitioning out (s2' = 0)
-    s0 * s1 * s2_next.not()
-}
-
-/// Flag for transitioning into memory chiplet (first row of memory).
-pub fn flag_next_row_first_memory<E: PrimeCharacteristicRing>(
-    s0: E,
-    s1: E,
-    s1_next: E,
-    s2_next: E,
-) -> E {
-    // Current row is bitwise (!s1), next row is memory (s1' & !s2')
-    s1.not() * s0.clone() * s1_next * s2_next.not()
-}

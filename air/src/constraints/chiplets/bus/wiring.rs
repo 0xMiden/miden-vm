@@ -33,7 +33,7 @@ use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 
 use crate::{
     MainTraceRow, MidenAirBuilder,
-    constraints::{bus::indices::V_WIRING, chiplets::selectors::ace_chiplet_flag, utils::BoolNot},
+    constraints::{bus::indices::V_WIRING, chiplets::selectors::ChipletSelectors, utils::BoolNot},
     trace::{
         Challenges,
         chiplets::ace::{
@@ -58,6 +58,7 @@ pub fn enforce_wiring_bus_constraint<AB>(
     local: &MainTraceRow<AB::Var>,
     _next: &MainTraceRow<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
+    selectors: &ChipletSelectors<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
@@ -76,11 +77,7 @@ pub fn enforce_wiring_bus_constraint<AB>(
     // Chiplet selectors.
     // ---------------------------------------------------------------------
 
-    let s0 = local.chiplets[0];
-    let s1 = local.chiplets[1];
-    let s2 = local.chiplets[2];
-    let s3 = local.chiplets[3];
-    let ace_flag = ace_chiplet_flag(s0.into(), s1.into(), s2.into(), s3.into());
+    let ace_flag = selectors.ace.is_active.clone();
 
     // Block selector: sblock = 0 for READ, sblock = 1 for EVAL.
     let sblock: AB::Expr = load_ace_col::<AB>(local, SELECTOR_BLOCK_IDX);

@@ -39,7 +39,7 @@ use crate::{
     Felt, MainTraceRow, MidenAirBuilder,
     constraints::{
         bus::indices::B_CHIPLETS,
-        chiplets::{bitwise::P_BITWISE_K_TRANSITION, hasher},
+        chiplets::{bitwise::P_BITWISE_K_TRANSITION, hasher, selectors::ChipletSelectors},
         constants::*,
         op_flags::OpFlags,
         utils::BoolNot,
@@ -110,6 +110,7 @@ pub fn enforce_chiplets_bus_constraint<AB>(
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
     challenges: &Challenges<AB::ExprEF>,
+    selectors: &ChipletSelectors<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
@@ -271,35 +272,18 @@ pub fn enforce_chiplets_bus_constraint<AB>(
         (cycle_row_0, cycle_row_31, k_transition)
     };
 
-    // --- Chiplet selector flags (from chiplets columns) ---
-    let chiplet_s0: AB::Expr = local.chiplets[0].into();
-    let chiplet_s1: AB::Expr = local.chiplets[1].into();
-    let chiplet_s2: AB::Expr = local.chiplets[2].into();
-    let chiplet_s3: AB::Expr = local.chiplets[3].into();
-    let chiplet_s4: AB::Expr = local.chiplets[4].into();
+    // --- Chiplet selector flags (from precomputed selectors) ---
+    let is_bitwise_responding: AB::Expr =
+        selectors.bitwise.is_active.clone() * k_transition.into().not();
 
-    // Bitwise chiplet active: s0=1, s1=0
-    // Bitwise responds only on last row of 8-row cycle (when k_transition=0)
-    let is_bitwise_row: AB::Expr = chiplet_s0.clone() * chiplet_s1.not();
-    let is_bitwise_responding: AB::Expr = is_bitwise_row * k_transition.into().not();
+    let is_memory: AB::Expr = selectors.memory.is_active.clone();
 
-    // Memory chiplet active: s0=1, s1=1, s2=0
-    let is_memory: AB::Expr = chiplet_s0.clone() * chiplet_s1.clone() * chiplet_s2.not();
-
-    // ACE chiplet active: s0=1, s1=1, s2=1, s3=0
-    // Response only on start rows (ace_start_selector = 1)
-    let is_ace_row: AB::Expr =
-        chiplet_s0.clone() * chiplet_s1.clone() * chiplet_s2.clone() * chiplet_s3.not();
+    // ACE response only on start rows (ace_start_selector = 1)
     let ace_start_selector: AB::Expr =
         local.chiplets[NUM_ACE_SELECTORS + SELECTOR_START_IDX].into();
-    let is_ace: AB::Expr = is_ace_row * ace_start_selector;
+    let is_ace: AB::Expr = selectors.ace.is_active.clone() * ace_start_selector;
 
-    // Kernel ROM chiplet active: s0=1, s1=1, s2=1, s3=1, s4=0
-    let is_kernel_rom: AB::Expr = chiplet_s0.clone()
-        * chiplet_s1.clone()
-        * chiplet_s2.clone()
-        * chiplet_s3.clone()
-        * chiplet_s4.not();
+    let is_kernel_rom: AB::Expr = selectors.kernel_rom.is_active.clone();
 
     // --- Hasher response (complex, depends on cycle position and selectors) ---
     let hasher_response = compute_hasher_response::<AB>(

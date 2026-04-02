@@ -19,6 +19,7 @@ pub mod memory;
 pub mod selectors;
 
 use crate::{MainTraceRow, MidenAirBuilder};
+use selectors::ChipletSelectors;
 
 // ENTRY POINTS
 // ================================================================================================
@@ -28,13 +29,14 @@ pub fn enforce_main<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
+    selectors: &ChipletSelectors<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
-    let _selectors = selectors::build_chiplet_selectors(builder, local, next);
-    hasher::enforce_hasher_constraints(builder, local, next);
-    bitwise::enforce_bitwise_constraints(builder, local, next);
-    memory::enforce_memory_constraints(builder, local, next);
-    ace::enforce_ace_constraints(builder, local, next);
-    kernel_rom::enforce_kernel_rom_constraints(builder, local, next);
+    // Selector constraints are already enforced in build_chiplet_selectors (called from lib.rs).
+    hasher::enforce_hasher_constraints(builder, local, next, selectors);
+    bitwise::enforce_bitwise_constraints(builder, local, next, selectors);
+    memory::enforce_memory_constraints(builder, local, next, selectors);
+    ace::enforce_ace_constraints(builder, local, next, selectors);
+    kernel_rom::enforce_kernel_rom_constraints(builder, local, next, selectors);
 }

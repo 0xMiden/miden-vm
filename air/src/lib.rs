@@ -349,11 +349,15 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
         let local: &MainTraceRow<AB::Var> = (*local).borrow();
         let next: &MainTraceRow<AB::Var> = (*next).borrow();
 
+        // Build chiplet selectors once, pass to both main and bus constraints.
+        let selectors =
+            constraints::chiplets::selectors::build_chiplet_selectors(builder, local, next);
+
         // Main trace constraints.
-        constraints::enforce_main(builder, local, next);
+        constraints::enforce_main(builder, local, next, &selectors);
 
         // Auxiliary (bus) constraints.
-        constraints::enforce_bus(builder, local, next);
+        constraints::enforce_bus(builder, local, next, &selectors);
 
         // Public inputs boundary constraints.
         constraints::public_inputs::enforce_main(builder, local);

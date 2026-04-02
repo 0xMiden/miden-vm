@@ -22,6 +22,7 @@
 use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 
 use crate::{MainTraceRow, MidenAirBuilder, trace::Challenges};
+use chiplets::selectors::ChipletSelectors;
 
 pub mod bus;
 pub mod chiplets;
@@ -43,6 +44,7 @@ pub fn enforce_main<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
+    selectors: &ChipletSelectors<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
@@ -52,7 +54,7 @@ pub fn enforce_main<AB>(
     let op_flags = op_flags::OpFlags::new(op_flags::ExprDecoderAccess::<_, AB::Expr>::new(local));
     stack::enforce_main(builder, local, next, &op_flags);
     decoder::enforce_main(builder, local, next, &op_flags);
-    chiplets::enforce_main(builder, local, next);
+    chiplets::enforce_main(builder, local, next, selectors);
 }
 
 /// Enforces all auxiliary (bus) constraints: boundary + transition.
@@ -65,6 +67,7 @@ pub fn enforce_bus<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
+    selectors: &ChipletSelectors<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
@@ -77,7 +80,7 @@ pub fn enforce_bus<AB>(
     range::bus::enforce_bus(builder, local);
     stack::bus::enforce_bus(builder, local, next, &op_flags, &challenges);
     decoder::bus::enforce_bus(builder, local, next, &op_flags, &challenges);
-    chiplets::bus::enforce_bus(builder, local, next, &op_flags, &challenges);
+    chiplets::bus::enforce_bus(builder, local, next, &op_flags, &challenges, selectors);
 }
 
 /// Enforces boundary constraints on all auxiliary columns.

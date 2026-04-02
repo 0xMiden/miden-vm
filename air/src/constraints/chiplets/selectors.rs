@@ -202,29 +202,3 @@ where
     }
 }
 
-// INTERNAL HELPERS
-// ================================================================================================
-
-/// Bitwise chiplet active flag: `s0 * !s1`.
-#[inline]
-pub fn bitwise_chiplet_flag<E: PrimeCharacteristicRing>(s0: E, s1: E) -> E {
-    s0 * s1.not()
-}
-
-/// Memory chiplet active flag: `s0 * s1 * !s2`.
-#[inline]
-pub fn memory_chiplet_flag<E: PrimeCharacteristicRing>(s0: E, s1: E, s2: E) -> E {
-    s0 * s1 * s2.not()
-}
-
-/// ACE chiplet active flag: `s0 * s1 * s2 * !s3`.
-#[inline]
-pub fn ace_chiplet_flag<E: PrimeCharacteristicRing>(s0: E, s1: E, s2: E, s3: E) -> E {
-    s0 * s1 * s2 * s3.not()
-}
-
-/// Kernel ROM chiplet active flag: `s0 * s1 * s2 * s3 * !s4`.
-#[inline]
-pub fn kernel_rom_chiplet_flag<E: PrimeCharacteristicRing>(s0: E, s1: E, s2: E, s3: E, s4: E) -> E {
-    s0 * s1 * s2 * s3 * s4.not()
-}

@@ -24,7 +24,7 @@
 
 use miden_crypto::stark::air::AirBuilder;
 
-use super::selectors::{ace_chiplet_flag, kernel_rom_chiplet_flag};
+use super::selectors::ChipletSelectors;
 use crate::{MainTraceRow, MidenAirBuilder, constraints::utils::BoolNot};
 // CONSTANTS
 // ================================================================================================
@@ -47,21 +47,13 @@ pub fn enforce_kernel_rom_constraints<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
+    selectors: &ChipletSelectors<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
-    // Chiplet selector columns; kernel ROM rows are selected by (s0..s4).
-    let s0 = local.chiplets[0];
-    let s1 = local.chiplets[1];
-    let s2 = local.chiplets[2];
-    let s3 = local.chiplets[3];
-    let s4 = local.chiplets[4];
-    let s3_next = next.chiplets[3];
     let s4_next = next.chiplets[4];
 
-    let kernel_rom_flag =
-        kernel_rom_chiplet_flag(s0.into(), s1.into(), s2.into(), s3.into(), s4.into());
-    let ace_flag = ace_chiplet_flag(s0.into(), s1.into(), s2.into(), s3.into());
+    let kernel_rom_flag = selectors.kernel_rom.is_active.clone();
 
     // Load kernel ROM columns (sfirst + 4-word digest).
     let sfirst = load_kernel_rom_col::<AB>(local, SFIRST_IDX);
@@ -77,7 +69,6 @@ pub fn enforce_kernel_rom_constraints<AB>(
 
     let not_s4_next = AB::Expr::from(s4_next).not();
 
-    // Gate transition constraints by is_transition() to avoid last-row access.
     // ==========================================================================
     // SELECTOR CONSTRAINT
     // ==========================================================================
@@ -91,11 +82,12 @@ pub fn enforce_kernel_rom_constraints<AB>(
 
     // When sfirst' = 0 (not the start of a new digest block) and s4' = 0 (not exiting kernel ROM),
     // the digest values must remain unchanged.
-    let contiguity_condition = not_s4_next.clone() * sfirst_next.not();
+    let contiguity_condition = not_s4_next * sfirst_next.not();
 
     // Use a combined gate to share `kernel_rom_flag * contiguity_condition` across all 4 lanes.
     {
-        let transition_gate = builder.is_transition() * kernel_rom_flag * contiguity_condition;
+        let transition_gate =
+            selectors.kernel_rom.is_transition.clone() * contiguity_condition;
         let builder = &mut builder.when(transition_gate);
         builder.assert_eq(r0_next, r0);
         builder.assert_eq(r1_next, r1);
@@ -107,16 +99,10 @@ pub fn enforce_kernel_rom_constraints<AB>(
     // FIRST ROW CONSTRAINT
     // ==========================================================================
 
-    // s0..s2 are stable once 1 (selector constraints), so ACE -> kernel ROM transition is
-    // determined by s3' = 1 and s4' = 0.
-    let kernel_rom_next = s3_next * not_s4_next;
-    let flag_next_row_first_kernel_rom = ace_flag * kernel_rom_next;
-
     // First row of kernel ROM must have sfirst' = 1.
-    builder
-        .when_transition()
-        .when(flag_next_row_first_kernel_rom)
-        .assert_one(sfirst_next);
+    // Uses selectors.ace.is_last to detect ACE→KernelROM boundary.
+    let flag_next_row_first_kernel_rom = selectors.kernel_rom.next_is_first.clone();
+    builder.when(flag_next_row_first_kernel_rom).assert_one(sfirst_next);
 }
 
 // INTERNAL HELPERS
