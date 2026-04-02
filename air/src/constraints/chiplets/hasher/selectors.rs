@@ -20,39 +20,12 @@
 //! | MUA       | 1  | 1  | 1  | Merkle update absorb |
 
 use miden_core::field::PrimeCharacteristicRing;
+use miden_crypto::stark::air::AirBuilder;
 
 use super::{HasherColumns, HasherFlags};
 use crate::{
     Felt,
-    constraints::tagging::{
-        TagGroup, TaggingAirBuilderExt, tagged_assert_zero, tagged_assert_zero_integrity,
-        tagged_assert_zeros, tagged_assert_zeros_integrity,
-    },
-};
-
-// TAGGING NAMESPACES
-// ================================================================================================
-
-const SELECTOR_BOOL_NAMESPACE: &str = "chiplets.hasher.selectors.binary";
-const SELECTOR_STABILITY_NAMESPACE: &str = "chiplets.hasher.selectors.stability";
-const SELECTOR_CONT_NAMESPACE: &str = "chiplets.hasher.selectors.continuation";
-const SELECTOR_INVALID_NAMESPACE: &str = "chiplets.hasher.selectors.invalid";
-
-const SELECTOR_BOOL_NAMES: [&str; 3] = [SELECTOR_BOOL_NAMESPACE; 3];
-const SELECTOR_CONSIST_NAMES: [&str; 4] = [
-    SELECTOR_STABILITY_NAMESPACE,
-    SELECTOR_STABILITY_NAMESPACE,
-    SELECTOR_CONT_NAMESPACE,
-    SELECTOR_INVALID_NAMESPACE,
-];
-
-const SELECTOR_BOOL_TAGS: TagGroup = TagGroup {
-    base: super::HASHER_SELECTOR_BOOL_BASE_ID,
-    names: &SELECTOR_BOOL_NAMES,
-};
-const SELECTOR_CONSIST_TAGS: TagGroup = TagGroup {
-    base: super::HASHER_SELECTOR_CONSIST_BASE_ID,
-    names: &SELECTOR_CONSIST_NAMES,
+    constraints::tagging::TaggingAirBuilderExt,
 };
 
 // CONSTRAINT HELPERS
@@ -93,12 +66,7 @@ pub(super) fn enforce_selector_consistency<AB>(
     // Use a combined gate to share `hasher_flag * stability_gate` across both stability
     // constraints.
     let gate = hasher_flag.clone() * stability_gate;
-    let mut idx = 0;
-    tagged_assert_zeros(
-        builder,
-        &SELECTOR_CONSIST_TAGS,
-        &mut idx,
-        SELECTOR_STABILITY_NAMESPACE,
+    builder.when_transition().assert_zeros(
         [
             gate.clone() * (cols_next.s1.clone() - cols.s1.clone()),
             gate * (cols_next.s2.clone() - cols.s2.clone()),
@@ -108,17 +76,14 @@ pub(super) fn enforce_selector_consistency<AB>(
     // Continuation constraint: hasher_flag * flag_cont * s0' = 0.
     // (Single constraint, so no batching benefit beyond using `.when(gate)`.)
     let gate = hasher_flag.clone() * flags.f_continuation();
-    tagged_assert_zero(builder, &SELECTOR_CONSIST_TAGS, &mut idx, gate * cols_next.s0.clone());
+    builder.when_transition().assert_zero(gate * cols_next.s0.clone());
 
     // -------------------------------------------------------------------------
     // Constraint 3: Invalid selector combinations rejection
     // -------------------------------------------------------------------------
     // On row31, if s0 = 0 then s1 must be 0. This prevents (0,1,*) combinations.
     // Constraint: row31 * (1 - s0) * s1 = 0
-    tagged_assert_zero_integrity(
-        builder,
-        &SELECTOR_CONSIST_TAGS,
-        &mut idx,
+    builder.assert_zero(
         hasher_flag
             * flags.cycle_row_31.clone()
             * (one.clone() - cols.s0.clone())
@@ -141,16 +106,9 @@ pub fn enforce_selector_booleanity<AB>(
     let s0: AB::Expr = s0.into();
     let s1: AB::Expr = s1.into();
     let s2: AB::Expr = s2.into();
-    let mut idx = 0;
-    tagged_assert_zeros_integrity(
-        builder,
-        &SELECTOR_BOOL_TAGS,
-        &mut idx,
-        SELECTOR_BOOL_NAMESPACE,
-        [
-            hasher_flag.clone() * s0.clone() * (s0 - AB::Expr::ONE),
-            hasher_flag.clone() * s1.clone() * (s1 - AB::Expr::ONE),
-            hasher_flag * s2.clone() * (s2 - AB::Expr::ONE),
-        ],
-    );
+    builder.assert_zeros([
+        hasher_flag.clone() * s0.clone() * (s0 - AB::Expr::ONE),
+        hasher_flag.clone() * s1.clone() * (s1 - AB::Expr::ONE),
+        hasher_flag * s2.clone() * (s2 - AB::Expr::ONE),
+    ]);
 }

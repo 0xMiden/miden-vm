@@ -35,7 +35,7 @@ use miden_crypto::stark::air::LiftedAirBuilder;
 use super::selectors::memory_chiplet_flag;
 use crate::{
     Felt, MainTraceRow,
-    constraints::tagging::{TagGroup, TaggingAirBuilderExt, tagged_assert_zero_integrity},
+    constraints::tagging::{TaggingAirBuilderExt},
     trace::{
         CHIPLETS_OFFSET,
         chiplets::{
@@ -50,67 +50,9 @@ use crate::{
 // TAGGING IDS
 // ================================================================================================
 
-pub const MEMORY_BASE_ID: usize = super::bitwise::BITWISE_BASE_ID + super::bitwise::BITWISE_COUNT;
-pub const MEMORY_COUNT: usize = 21;
-const MEMORY_BINARY_BASE_ID: usize = MEMORY_BASE_ID;
-const MEMORY_WORD_IDX_BASE_ID: usize = MEMORY_BASE_ID + 4;
-const MEMORY_FIRST_ROW_BASE_ID: usize = MEMORY_BASE_ID + 6;
-const MEMORY_DELTA_INV_BASE_ID: usize = MEMORY_BASE_ID + 10;
-const MEMORY_DELTA_TRANSITION_ID: usize = MEMORY_BASE_ID + 14;
-const MEMORY_SCW_FLAG_ID: usize = MEMORY_BASE_ID + 15;
-const MEMORY_SCW_READS_ID: usize = MEMORY_BASE_ID + 16;
-const MEMORY_VALUE_CONSIST_BASE_ID: usize = MEMORY_BASE_ID + 17;
 
-const MEMORY_BINARY_NAMESPACE: &str = "chiplets.memory.binary";
-const MEMORY_WORD_IDX_NAMESPACE: &str = "chiplets.memory.word_idx.zero";
-const MEMORY_FIRST_ROW_NAMESPACE: &str = "chiplets.memory.first_row.zero";
-const MEMORY_DELTA_INV_NAMESPACE: &str = "chiplets.memory.delta.inv";
-const MEMORY_DELTA_TRANSITION_NAMESPACE: &str = "chiplets.memory.delta.transition";
-const MEMORY_SCW_FLAG_NAMESPACE: &str = "chiplets.memory.scw.flag";
-const MEMORY_SCW_READS_NAMESPACE: &str = "chiplets.memory.scw.reads";
-const MEMORY_VALUE_CONSIST_NAMESPACE: &str = "chiplets.memory.value.consistency";
 
-const MEMORY_BINARY_NAMES: [&str; 4] = [MEMORY_BINARY_NAMESPACE; 4];
-const MEMORY_WORD_IDX_NAMES: [&str; 2] = [MEMORY_WORD_IDX_NAMESPACE; 2];
-const MEMORY_FIRST_ROW_NAMES: [&str; 4] = [MEMORY_FIRST_ROW_NAMESPACE; 4];
-const MEMORY_DELTA_INV_NAMES: [&str; 4] = [MEMORY_DELTA_INV_NAMESPACE; 4];
-const MEMORY_DELTA_TRANSITION_NAMES: [&str; 1] = [MEMORY_DELTA_TRANSITION_NAMESPACE; 1];
-const MEMORY_SCW_FLAG_NAMES: [&str; 1] = [MEMORY_SCW_FLAG_NAMESPACE; 1];
-const MEMORY_SCW_READS_NAMES: [&str; 1] = [MEMORY_SCW_READS_NAMESPACE; 1];
-const MEMORY_VALUE_CONSIST_NAMES: [&str; 4] = [MEMORY_VALUE_CONSIST_NAMESPACE; 4];
 
-const MEMORY_BINARY_TAGS: TagGroup = TagGroup {
-    base: MEMORY_BINARY_BASE_ID,
-    names: &MEMORY_BINARY_NAMES,
-};
-const MEMORY_WORD_IDX_TAGS: TagGroup = TagGroup {
-    base: MEMORY_WORD_IDX_BASE_ID,
-    names: &MEMORY_WORD_IDX_NAMES,
-};
-const MEMORY_FIRST_ROW_TAGS: TagGroup = TagGroup {
-    base: MEMORY_FIRST_ROW_BASE_ID,
-    names: &MEMORY_FIRST_ROW_NAMES,
-};
-const MEMORY_DELTA_INV_TAGS: TagGroup = TagGroup {
-    base: MEMORY_DELTA_INV_BASE_ID,
-    names: &MEMORY_DELTA_INV_NAMES,
-};
-const MEMORY_DELTA_TRANSITION_TAGS: TagGroup = TagGroup {
-    base: MEMORY_DELTA_TRANSITION_ID,
-    names: &MEMORY_DELTA_TRANSITION_NAMES,
-};
-const MEMORY_SCW_FLAG_TAGS: TagGroup = TagGroup {
-    base: MEMORY_SCW_FLAG_ID,
-    names: &MEMORY_SCW_FLAG_NAMES,
-};
-const MEMORY_SCW_READS_TAGS: TagGroup = TagGroup {
-    base: MEMORY_SCW_READS_ID,
-    names: &MEMORY_SCW_READS_NAMES,
-};
-const MEMORY_VALUE_CONSIST_TAGS: TagGroup = TagGroup {
-    base: MEMORY_VALUE_CONSIST_BASE_ID,
-    names: &MEMORY_VALUE_CONSIST_NAMES,
-};
 
 // ENTRY POINTS
 // ================================================================================================
@@ -170,47 +112,15 @@ pub fn enforce_memory_constraints_all_rows<AB>(
 
     // Binary constraints
     let gate = memory_flag.clone();
-    let mut idx = 0;
-    tagged_assert_zero_integrity(
-        builder,
-        &MEMORY_BINARY_TAGS,
-        &mut idx,
-        gate.clone() * cols.is_read.clone() * (cols.is_read.clone() - one.clone()),
-    );
-    tagged_assert_zero_integrity(
-        builder,
-        &MEMORY_BINARY_TAGS,
-        &mut idx,
-        gate.clone() * cols.is_word.clone() * (cols.is_word.clone() - one.clone()),
-    );
-    tagged_assert_zero_integrity(
-        builder,
-        &MEMORY_BINARY_TAGS,
-        &mut idx,
-        gate.clone() * cols.idx0.clone() * (cols.idx0.clone() - one.clone()),
-    );
-    tagged_assert_zero_integrity(
-        builder,
-        &MEMORY_BINARY_TAGS,
-        &mut idx,
-        gate * cols.idx1.clone() * (cols.idx1.clone() - one),
-    );
+    builder.assert_zero(gate.clone() * cols.is_read.clone() * (cols.is_read.clone() - one.clone()),);
+    builder.assert_zero(gate.clone() * cols.is_word.clone() * (cols.is_word.clone() - one.clone()),);
+    builder.assert_zero(gate.clone() * cols.idx0.clone() * (cols.idx0.clone() - one.clone()),);
+    builder.assert_zero(gate * cols.idx1.clone() * (cols.idx1.clone() - one),);
 
     // For word access, idx bits must be zero (only element accesses use idx0/idx1).
     let word_gate = memory_flag.clone() * cols.is_word.clone();
-    let mut idx = 0;
-    tagged_assert_zero_integrity(
-        builder,
-        &MEMORY_WORD_IDX_TAGS,
-        &mut idx,
-        word_gate.clone() * cols.idx0.clone(),
-    );
-    tagged_assert_zero_integrity(
-        builder,
-        &MEMORY_WORD_IDX_TAGS,
-        &mut idx,
-        word_gate * cols.idx1.clone(),
-    );
+    builder.assert_zero(word_gate.clone() * cols.idx0.clone(),);
+    builder.assert_zero(word_gate * cols.idx1.clone(),);
 }
 
 /// Enforce memory first row initialization constraints.
@@ -235,31 +145,10 @@ pub fn enforce_memory_constraints_first_row<AB>(
 
     // First row: if v'[i] is not written to, then v'[i] = 0
     let gate = flag_next_row_first_memory;
-    let mut idx = 0;
-    tagged_assert_zero_integrity(
-        builder,
-        &MEMORY_FIRST_ROW_TAGS,
-        &mut idx,
-        gate.clone() * c0 * cols_next.values[0].clone(),
-    );
-    tagged_assert_zero_integrity(
-        builder,
-        &MEMORY_FIRST_ROW_TAGS,
-        &mut idx,
-        gate.clone() * c1 * cols_next.values[1].clone(),
-    );
-    tagged_assert_zero_integrity(
-        builder,
-        &MEMORY_FIRST_ROW_TAGS,
-        &mut idx,
-        gate.clone() * c2 * cols_next.values[2].clone(),
-    );
-    tagged_assert_zero_integrity(
-        builder,
-        &MEMORY_FIRST_ROW_TAGS,
-        &mut idx,
-        gate * c3 * cols_next.values[3].clone(),
-    );
+    builder.assert_zero(gate.clone() * c0 * cols_next.values[0].clone(),);
+    builder.assert_zero(gate.clone() * c1 * cols_next.values[1].clone(),);
+    builder.assert_zero(gate.clone() * c2 * cols_next.values[2].clone(),);
+    builder.assert_zero(gate * c3 * cols_next.values[3].clone(),);
 }
 
 /// Enforce memory transition constraints (all rows except last).
@@ -298,28 +187,16 @@ pub fn enforce_memory_constraints_all_rows_except_last<AB>(
     // ==========================================================================
     // DELTA CONSTRAINTS (monotonicity)
     // ==========================================================================
-    let mut idx = 0;
-    tagged_assert_zero_integrity(
-        builder,
-        &MEMORY_DELTA_TRANSITION_TAGS,
-        &mut idx,
-        flag_memory_active_not_last.clone()
-            * (deltas.computed_delta.clone() - deltas.delta_next.clone()),
-    );
+    builder.assert_zero(flag_memory_active_not_last.clone()
+            * (deltas.computed_delta.clone() - deltas.delta_next.clone()),);
 
     // ==========================================================================
     // SAME CONTEXT/WORD FLAG
     // ==========================================================================
     // f_scw' = !n0 * !n1
-    let mut idx = 0;
-    tagged_assert_zero_integrity(
-        builder,
-        &MEMORY_SCW_FLAG_TAGS,
-        &mut idx,
-        flag_memory_active_not_last.clone()
+    builder.assert_zero(flag_memory_active_not_last.clone()
             * (cols_next.flag_same_ctx_word.clone()
-                - (one.clone() - deltas.n0.clone()) * (one.clone() - deltas.n1.clone())),
-    );
+                - (one.clone() - deltas.n0.clone()) * (one.clone() - deltas.n1.clone())),);
 
     // ==========================================================================
     // SAME CONTEXT/WORD READ-ONLY CONSTRAINTS
@@ -350,31 +227,10 @@ pub fn enforce_memory_constraints_all_rows_except_last<AB>(
             * (v_next - cols_next.flag_same_ctx_word.clone() * v)
     };
 
-    let mut idx = 0;
-    tagged_assert_zero_integrity(
-        builder,
-        &MEMORY_VALUE_CONSIST_TAGS,
-        &mut idx,
-        constrain_value(c0, cols.values[0].clone(), cols_next.values[0].clone()),
-    );
-    tagged_assert_zero_integrity(
-        builder,
-        &MEMORY_VALUE_CONSIST_TAGS,
-        &mut idx,
-        constrain_value(c1, cols.values[1].clone(), cols_next.values[1].clone()),
-    );
-    tagged_assert_zero_integrity(
-        builder,
-        &MEMORY_VALUE_CONSIST_TAGS,
-        &mut idx,
-        constrain_value(c2, cols.values[2].clone(), cols_next.values[2].clone()),
-    );
-    tagged_assert_zero_integrity(
-        builder,
-        &MEMORY_VALUE_CONSIST_TAGS,
-        &mut idx,
-        constrain_value(c3, cols.values[3].clone(), cols_next.values[3].clone()),
-    );
+    builder.assert_zero(constrain_value(c0, cols.values[0].clone(), cols_next.values[0].clone()),);
+    builder.assert_zero(constrain_value(c1, cols.values[1].clone(), cols_next.values[1].clone()),);
+    builder.assert_zero(constrain_value(c2, cols.values[2].clone(), cols_next.values[2].clone()),);
+    builder.assert_zero(constrain_value(c3, cols.values[3].clone(), cols_next.values[3].clone()),);
 }
 
 // INTERNAL HELPERS
@@ -555,35 +411,14 @@ fn enforce_delta_inverse_constraints<AB>(
     let gate = flag_memory_active_not_last;
     let gate_not_n0 = gate.clone() * not_n0.clone();
 
-    let mut idx = 0;
     // n0 is binary
-    tagged_assert_zero_integrity(
-        builder,
-        &MEMORY_DELTA_INV_TAGS,
-        &mut idx,
-        gate * n0.clone() * (n0.clone() - one.clone()),
-    );
+    builder.assert_zero(gate * n0.clone() * (n0.clone() - one.clone()),);
     // !n0 => ctx_delta = 0
-    tagged_assert_zero_integrity(
-        builder,
-        &MEMORY_DELTA_INV_TAGS,
-        &mut idx,
-        gate_not_n0.clone() * ctx_delta.clone(),
-    );
+    builder.assert_zero(gate_not_n0.clone() * ctx_delta.clone(),);
     // !n0 and n1 is binary
-    tagged_assert_zero_integrity(
-        builder,
-        &MEMORY_DELTA_INV_TAGS,
-        &mut idx,
-        gate_not_n0.clone() * n1.clone() * (n1.clone() - one.clone()),
-    );
+    builder.assert_zero(gate_not_n0.clone() * n1.clone() * (n1.clone() - one.clone()),);
     // !n0 and !n1 => addr_delta = 0
-    tagged_assert_zero_integrity(
-        builder,
-        &MEMORY_DELTA_INV_TAGS,
-        &mut idx,
-        gate_not_n0 * not_n1 * addr_delta.clone(),
-    );
+    builder.assert_zero(gate_not_n0 * not_n1 * addr_delta.clone(),);
 }
 
 /// Enforce read-only access when context and word address are unchanged.
@@ -606,16 +441,10 @@ fn enforce_scw_readonly_constraint<AB>(
     let is_write_next = one.clone() - cols_next.is_read.clone();
     let any_write = is_write + is_write_next;
 
-    let mut idx = 0;
-    tagged_assert_zero_integrity(
-        builder,
-        &MEMORY_SCW_READS_TAGS,
-        &mut idx,
-        flag_memory_active_not_last
+    builder.assert_zero(flag_memory_active_not_last
             * cols_next.flag_same_ctx_word.clone()
             * clk_no_change
-            * any_write,
-    );
+            * any_write,);
 }
 
 /// Memory chiplet flag for current row active and continuing to next row.

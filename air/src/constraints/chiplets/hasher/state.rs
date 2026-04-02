@@ -16,44 +16,14 @@
 //! - S-box: x^7
 
 use miden_core::{chiplets::hasher::Hasher, field::PrimeCharacteristicRing};
-use miden_crypto::stark::air::LiftedAirBuilder;
+use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 
 use super::periodic::{
     P_ARK_EXT_START, P_ARK_INT, P_CYCLE_ROW_0, P_IS_EXTERNAL, P_IS_INTERNAL, STATE_WIDTH,
 };
 use crate::{
     Felt,
-    constraints::tagging::{TagGroup, TaggingAirBuilderExt, tagged_assert_zeros},
-};
-
-// TAGGING NAMESPACES
-// ================================================================================================
-
-const PERM_INIT_NAMESPACE: &str = "chiplets.hasher.permutation.init";
-const PERM_EXT_NAMESPACE: &str = "chiplets.hasher.permutation.external";
-const PERM_INT_NAMESPACE: &str = "chiplets.hasher.permutation.internal";
-const ABP_CAP_NAMESPACE: &str = "chiplets.hasher.abp.capacity";
-
-const PERM_INIT_NAMES: [&str; STATE_WIDTH] = [PERM_INIT_NAMESPACE; STATE_WIDTH];
-const PERM_EXT_NAMES: [&str; STATE_WIDTH] = [PERM_EXT_NAMESPACE; STATE_WIDTH];
-const PERM_INT_NAMES: [&str; STATE_WIDTH] = [PERM_INT_NAMESPACE; STATE_WIDTH];
-const ABP_CAP_NAMES: [&str; 4] = [ABP_CAP_NAMESPACE; 4];
-
-const PERM_INIT_TAGS: TagGroup = TagGroup {
-    base: super::HASHER_PERM_INIT_BASE_ID,
-    names: &PERM_INIT_NAMES,
-};
-const PERM_EXT_TAGS: TagGroup = TagGroup {
-    base: super::HASHER_PERM_EXT_BASE_ID,
-    names: &PERM_EXT_NAMES,
-};
-const PERM_INT_TAGS: TagGroup = TagGroup {
-    base: super::HASHER_PERM_INT_BASE_ID,
-    names: &PERM_INT_NAMES,
-};
-const ABP_CAP_TAGS: TagGroup = TagGroup {
-    base: super::HASHER_ABP_BASE_ID,
-    names: &ABP_CAP_NAMES,
+    constraints::tagging::TaggingAirBuilderExt,
 };
 
 // CONSTRAINT HELPERS
@@ -114,36 +84,21 @@ pub fn enforce_permutation_steps<AB>(
 
     // Use combined gates to share `hasher_flag * step_type` across all lanes.
     let gate_init = hasher_flag.clone() * is_init_linear;
-    let mut idx = 0;
-    tagged_assert_zeros(
-        builder,
-        &PERM_INIT_TAGS,
-        &mut idx,
-        PERM_INIT_NAMESPACE,
+    builder.when_transition().assert_zeros(
         core::array::from_fn::<_, STATE_WIDTH, _>(|i| {
             gate_init.clone() * (h_next[i].clone() - expected_init[i].clone())
         }),
     );
 
     let gate_ext = hasher_flag.clone() * is_external;
-    let mut idx = 0;
-    tagged_assert_zeros(
-        builder,
-        &PERM_EXT_TAGS,
-        &mut idx,
-        PERM_EXT_NAMESPACE,
+    builder.when_transition().assert_zeros(
         core::array::from_fn::<_, STATE_WIDTH, _>(|i| {
             gate_ext.clone() * (h_next[i].clone() - expected_ext[i].clone())
         }),
     );
 
     let gate_int = hasher_flag * is_internal;
-    let mut idx = 0;
-    tagged_assert_zeros(
-        builder,
-        &PERM_INT_TAGS,
-        &mut idx,
-        PERM_INT_NAMESPACE,
+    builder.when_transition().assert_zeros(
         core::array::from_fn::<_, STATE_WIDTH, _>(|i| {
             gate_int.clone() * (h_next[i].clone() - expected_int[i].clone())
         }),
@@ -165,12 +120,7 @@ pub fn enforce_abp_capacity_preservation<AB>(
 {
     // Use a combined gate to share `hasher_flag * f_abp` across all 4 lanes.
     let gate = hasher_flag * f_abp;
-    let mut idx = 0;
-    tagged_assert_zeros(
-        builder,
-        &ABP_CAP_TAGS,
-        &mut idx,
-        ABP_CAP_NAMESPACE,
+    builder.when_transition().assert_zeros(
         core::array::from_fn::<_, 4, _>(|i| {
             gate.clone() * (h_cap_next[i].clone() - h_cap[i].clone())
         }),

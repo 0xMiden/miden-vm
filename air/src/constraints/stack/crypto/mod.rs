@@ -4,89 +4,20 @@
 //! CRYPTOSTREAM, HORNERBASE, and HORNEREXT.
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::LiftedAirBuilder;
+use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
 
 use crate::{
     MainTraceRow,
     constraints::{
         ext_field::QuadFeltExpr,
         op_flags::OpFlags,
-        tagging::{
-            TagGroup, TaggingAirBuilderExt, ids::TAG_STACK_CRYPTO_BASE, tagged_assert_zero,
-            tagged_assert_zero_integrity,
-        },
+        tagging::TaggingAirBuilderExt,
     },
     trace::decoder::USER_OP_HELPERS_OFFSET,
 };
 
 // CONSTANTS
 // ================================================================================================
-
-/// Number of crypto op constraints.
-#[allow(dead_code)]
-pub const NUM_CONSTRAINTS: usize = 46;
-
-/// Base tag ID for crypto op constraints.
-const STACK_CRYPTO_BASE_ID: usize = TAG_STACK_CRYPTO_BASE;
-
-/// Tag namespaces for crypto op constraints.
-const STACK_CRYPTO_NAMES: [&str; NUM_CONSTRAINTS] = [
-    // CRYPTOSTREAM (8)
-    "stack.crypto.cryptostream",
-    "stack.crypto.cryptostream",
-    "stack.crypto.cryptostream",
-    "stack.crypto.cryptostream",
-    "stack.crypto.cryptostream",
-    "stack.crypto.cryptostream",
-    "stack.crypto.cryptostream",
-    "stack.crypto.cryptostream",
-    // HORNERBASE (20)
-    "stack.crypto.hornerbase",
-    "stack.crypto.hornerbase",
-    "stack.crypto.hornerbase",
-    "stack.crypto.hornerbase",
-    "stack.crypto.hornerbase",
-    "stack.crypto.hornerbase",
-    "stack.crypto.hornerbase",
-    "stack.crypto.hornerbase",
-    "stack.crypto.hornerbase",
-    "stack.crypto.hornerbase",
-    "stack.crypto.hornerbase",
-    "stack.crypto.hornerbase",
-    "stack.crypto.hornerbase",
-    "stack.crypto.hornerbase",
-    "stack.crypto.hornerbase",
-    "stack.crypto.hornerbase",
-    "stack.crypto.hornerbase",
-    "stack.crypto.hornerbase",
-    "stack.crypto.hornerbase",
-    "stack.crypto.hornerbase",
-    // HORNEREXT (18)
-    "stack.crypto.hornerext",
-    "stack.crypto.hornerext",
-    "stack.crypto.hornerext",
-    "stack.crypto.hornerext",
-    "stack.crypto.hornerext",
-    "stack.crypto.hornerext",
-    "stack.crypto.hornerext",
-    "stack.crypto.hornerext",
-    "stack.crypto.hornerext",
-    "stack.crypto.hornerext",
-    "stack.crypto.hornerext",
-    "stack.crypto.hornerext",
-    "stack.crypto.hornerext",
-    "stack.crypto.hornerext",
-    "stack.crypto.hornerext",
-    "stack.crypto.hornerext",
-    "stack.crypto.hornerext",
-    "stack.crypto.hornerext",
-];
-
-/// Tag metadata for this constraint group.
-const STACK_CRYPTO_TAGS: TagGroup = TagGroup {
-    base: STACK_CRYPTO_BASE_ID,
-    names: &STACK_CRYPTO_NAMES,
-};
 
 // ENTRY POINTS
 // ================================================================================================
@@ -100,10 +31,9 @@ pub fn enforce_main<AB>(
 ) where
     AB: LiftedAirBuilder,
 {
-    let mut idx = 0usize;
-    enforce_cryptostream_constraints(builder, local, next, op_flags, &mut idx);
-    enforce_hornerbase_constraints(builder, local, next, op_flags, &mut idx);
-    enforce_hornerext_constraints(builder, local, next, op_flags, &mut idx);
+    enforce_cryptostream_constraints(builder, local, next, op_flags);
+    enforce_hornerbase_constraints(builder, local, next, op_flags);
+    enforce_hornerext_constraints(builder, local, next, op_flags);
 }
 
 // CONSTRAINT HELPERS
@@ -114,7 +44,6 @@ fn enforce_cryptostream_constraints<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
-    idx: &mut usize,
 ) where
     AB: LiftedAirBuilder,
 {
@@ -127,43 +56,35 @@ fn enforce_cryptostream_constraints<AB>(
 
     assert_zero(
         builder,
-        idx,
         gate.clone() * (next.stack[8].clone().into() - local.stack[8].clone().into()),
     );
     assert_zero(
         builder,
-        idx,
         gate.clone() * (next.stack[9].clone().into() - local.stack[9].clone().into()),
     );
     assert_zero(
         builder,
-        idx,
         gate.clone() * (next.stack[10].clone().into() - local.stack[10].clone().into()),
     );
     assert_zero(
         builder,
-        idx,
         gate.clone() * (next.stack[11].clone().into() - local.stack[11].clone().into()),
     );
     assert_zero(
         builder,
-        idx,
         gate.clone()
             * (next.stack[12].clone().into() - (local.stack[12].clone().into() + eight.clone())),
     );
     assert_zero(
         builder,
-        idx,
         gate.clone() * (next.stack[13].clone().into() - (local.stack[13].clone().into() + eight)),
     );
     assert_zero(
         builder,
-        idx,
         gate.clone() * (next.stack[14].clone().into() - local.stack[14].clone().into()),
     );
     assert_zero(
         builder,
-        idx,
         gate * (next.stack[15].clone().into() - local.stack[15].clone().into()),
     );
 }
@@ -173,7 +94,6 @@ fn enforce_hornerbase_constraints<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
-    idx: &mut usize,
 ) where
     AB: LiftedAirBuilder,
 {
@@ -189,7 +109,6 @@ fn enforce_hornerbase_constraints<AB>(
     for i in 0..14 {
         assert_zero(
             builder,
-            idx,
             gate.clone() * (next.stack[i].clone().into() - local.stack[i].clone().into()),
         );
     }
@@ -245,12 +164,12 @@ fn enforce_hornerbase_constraints<AB>(
         tmp1 * alpha3 + alpha2.clone() * c[5].clone() + alpha.clone() * c[6].clone() + c[7].clone();
     let [acc_exp_0, acc_exp_1] = acc_expected.into_parts();
 
-    assert_zero_integrity(builder, idx, gate.clone() * (tmp0_0 - tmp0_exp_0));
-    assert_zero_integrity(builder, idx, gate.clone() * (tmp0_1 - tmp0_exp_1));
-    assert_zero_integrity(builder, idx, gate.clone() * (tmp1_0 - tmp1_exp_0));
-    assert_zero_integrity(builder, idx, gate.clone() * (tmp1_1 - tmp1_exp_1));
-    assert_zero(builder, idx, gate.clone() * (acc0_next - acc_exp_0));
-    assert_zero(builder, idx, gate * (acc1_next - acc_exp_1));
+    assert_zero_integrity(builder,gate.clone() * (tmp0_0 - tmp0_exp_0));
+    assert_zero_integrity(builder,gate.clone() * (tmp0_1 - tmp0_exp_1));
+    assert_zero_integrity(builder,gate.clone() * (tmp1_0 - tmp1_exp_0));
+    assert_zero_integrity(builder,gate.clone() * (tmp1_1 - tmp1_exp_1));
+    assert_zero(builder,gate.clone() * (acc0_next - acc_exp_0));
+    assert_zero(builder,gate * (acc1_next - acc_exp_1));
 }
 
 fn enforce_hornerext_constraints<AB>(
@@ -258,7 +177,6 @@ fn enforce_hornerext_constraints<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
-    idx: &mut usize,
 ) where
     AB: LiftedAirBuilder,
 {
@@ -272,7 +190,6 @@ fn enforce_hornerext_constraints<AB>(
     for i in 0..14 {
         assert_zero(
             builder,
-            idx,
             gate.clone() * (next.stack[i].clone().into() - local.stack[i].clone().into()),
         );
     }
@@ -320,20 +237,16 @@ fn enforce_hornerext_constraints<AB>(
     let acc_expected: QuadFeltExpr<AB::Expr> = tmp_alpha2 + alpha * c2 + c3;
     let [acc_exp_0, acc_exp_1] = acc_expected.into_parts();
 
-    assert_zero_integrity(builder, idx, gate.clone() * (tmp0 - tmp_exp_0));
-    assert_zero_integrity(builder, idx, gate.clone() * (tmp1 - tmp_exp_1));
-    assert_zero(builder, idx, gate.clone() * (acc0_next - acc_exp_0));
-    assert_zero(builder, idx, gate * (acc1_next - acc_exp_1));
+    assert_zero_integrity(builder,gate.clone() * (tmp0 - tmp_exp_0));
+    assert_zero_integrity(builder,gate.clone() * (tmp1 - tmp_exp_1));
+    assert_zero(builder,gate.clone() * (acc0_next - acc_exp_0));
+    assert_zero(builder,gate * (acc1_next - acc_exp_1));
 }
 
-fn assert_zero<AB: TaggingAirBuilderExt>(builder: &mut AB, idx: &mut usize, expr: AB::Expr) {
-    tagged_assert_zero(builder, &STACK_CRYPTO_TAGS, idx, expr);
+fn assert_zero<AB: TaggingAirBuilderExt>(builder: &mut AB, expr: AB::Expr) {
+    builder.when_transition().assert_zero(expr);
 }
 
-fn assert_zero_integrity<AB: TaggingAirBuilderExt>(
-    builder: &mut AB,
-    idx: &mut usize,
-    expr: AB::Expr,
-) {
-    tagged_assert_zero_integrity(builder, &STACK_CRYPTO_TAGS, idx, expr);
+fn assert_zero_integrity<AB: TaggingAirBuilderExt>(builder: &mut AB, expr: AB::Expr) {
+    builder.assert_zero(expr);
 }

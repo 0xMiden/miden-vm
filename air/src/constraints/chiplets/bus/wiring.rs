@@ -30,16 +30,14 @@
 //! Boundary constraints for v_wiring are handled by the wrapper AIR (aux_finals).
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::{LiftedAirBuilder, WindowAccess};
+use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess};
 
 use crate::{
     Felt, MainTraceRow,
     constraints::{
         bus::indices::V_WIRING,
         chiplets::selectors::ace_chiplet_flag,
-        tagging::{
-            TagGroup, TaggingAirBuilderExt, ids::TAG_WIRING_BUS_BASE, tagged_assert_zero_ext,
-        },
+        tagging::TaggingAirBuilderExt,
     },
     trace::{
         Challenges,
@@ -55,15 +53,6 @@ use crate::{
 
 // ACE chiplet offset from CHIPLETS_OFFSET (after s0, s1, s2, s3).
 const ACE_OFFSET: usize = 4;
-
-/// Tag IDs and namespaces for wiring bus constraints.
-const WIRING_BUS_BASE_ID: usize = TAG_WIRING_BUS_BASE;
-const WIRING_BUS_NAME: &str = "chiplets.bus.wiring.transition";
-const WIRING_BUS_NAMES: [&str; 1] = [WIRING_BUS_NAME; 1];
-const WIRING_BUS_TAGS: TagGroup = TagGroup {
-    base: WIRING_BUS_BASE_ID,
-    names: &WIRING_BUS_NAMES,
-};
 
 // ENTRY POINTS
 // ================================================================================================
@@ -163,8 +152,7 @@ pub fn enforce_wiring_bus_constraint<AB>(
     let rhs = read_terms * read_gate + eval_terms * eval_gate;
     let wiring_constraint = delta * common_den - rhs;
 
-    let mut idx = 0;
-    tagged_assert_zero_ext(builder, &WIRING_BUS_TAGS, &mut idx, wiring_constraint);
+    builder.when_transition().assert_zero_ext(wiring_constraint);
 }
 
 // INTERNAL HELPERS

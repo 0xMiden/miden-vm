@@ -23,13 +23,12 @@
 //! 3. First row: when entering kernel ROM, sfirst' must be 1
 
 use miden_core::field::PrimeCharacteristicRing;
+use miden_crypto::stark::air::AirBuilder;
 
 use super::selectors::{ace_chiplet_flag, kernel_rom_chiplet_flag};
 use crate::{
     Felt, MainTraceRow,
-    constraints::tagging::{
-        TagGroup, TaggingAirBuilderExt, tagged_assert_zero, tagged_assert_zero_integrity,
-    },
+    constraints::tagging::{TaggingAirBuilderExt},
 };
 
 // CONSTANTS
@@ -48,32 +47,9 @@ const R3_IDX: usize = 4;
 // TAGGING CONSTANTS
 // ================================================================================================
 
-pub(super) const KERNEL_ROM_BASE_ID: usize =
-    super::memory::MEMORY_BASE_ID + super::memory::MEMORY_COUNT + super::ace::ACE_COUNT;
-const KERNEL_ROM_SFIRST_ID: usize = KERNEL_ROM_BASE_ID;
-const KERNEL_ROM_DIGEST_BASE_ID: usize = KERNEL_ROM_BASE_ID + 1;
-const KERNEL_ROM_FIRST_ROW_ID: usize = KERNEL_ROM_BASE_ID + 5;
 
-const KERNEL_ROM_SFIRST_NAMESPACE: &str = "chiplets.kernel_rom.sfirst.binary";
-const KERNEL_ROM_DIGEST_NAMESPACE: &str = "chiplets.kernel_rom.digest.contiguity";
-const KERNEL_ROM_FIRST_ROW_NAMESPACE: &str = "chiplets.kernel_rom.first_row.start";
 
-const KERNEL_ROM_SFIRST_NAMES: [&str; 1] = [KERNEL_ROM_SFIRST_NAMESPACE; 1];
-const KERNEL_ROM_DIGEST_NAMES: [&str; 4] = [KERNEL_ROM_DIGEST_NAMESPACE; 4];
-const KERNEL_ROM_FIRST_ROW_NAMES: [&str; 1] = [KERNEL_ROM_FIRST_ROW_NAMESPACE; 1];
 
-const KERNEL_ROM_SFIRST_TAGS: TagGroup = TagGroup {
-    base: KERNEL_ROM_SFIRST_ID,
-    names: &KERNEL_ROM_SFIRST_NAMES,
-};
-const KERNEL_ROM_DIGEST_TAGS: TagGroup = TagGroup {
-    base: KERNEL_ROM_DIGEST_BASE_ID,
-    names: &KERNEL_ROM_DIGEST_NAMES,
-};
-const KERNEL_ROM_FIRST_ROW_TAGS: TagGroup = TagGroup {
-    base: KERNEL_ROM_FIRST_ROW_ID,
-    names: &KERNEL_ROM_FIRST_ROW_NAMES,
-};
 
 // ENTRY POINTS
 // ================================================================================================
@@ -119,13 +95,7 @@ pub fn enforce_kernel_rom_constraints<AB>(
     // ==========================================================================
 
     // sfirst must be binary
-    let mut idx = 0;
-    tagged_assert_zero_integrity(
-        builder,
-        &KERNEL_ROM_SFIRST_TAGS,
-        &mut idx,
-        kernel_rom_flag.clone() * sfirst.clone() * (sfirst.clone() - one.clone()),
-    );
+    builder.assert_zero(kernel_rom_flag.clone() * sfirst.clone() * (sfirst.clone() - one.clone()));
 
     // ==========================================================================
     // DIGEST CONTIGUITY CONSTRAINTS
@@ -139,11 +109,10 @@ pub fn enforce_kernel_rom_constraints<AB>(
 
     // Use a combined gate to share `kernel_rom_flag * contiguity_condition` across all 4 lanes.
     let gate = kernel_rom_flag * contiguity_condition;
-    let mut idx = 0;
-    tagged_assert_zero(builder, &KERNEL_ROM_DIGEST_TAGS, &mut idx, gate.clone() * (r0_next - r0));
-    tagged_assert_zero(builder, &KERNEL_ROM_DIGEST_TAGS, &mut idx, gate.clone() * (r1_next - r1));
-    tagged_assert_zero(builder, &KERNEL_ROM_DIGEST_TAGS, &mut idx, gate.clone() * (r2_next - r2));
-    tagged_assert_zero(builder, &KERNEL_ROM_DIGEST_TAGS, &mut idx, gate * (r3_next - r3));
+    builder.when_transition().assert_zero(gate.clone() * (r0_next - r0));
+    builder.when_transition().assert_zero(gate.clone() * (r1_next - r1));
+    builder.when_transition().assert_zero(gate.clone() * (r2_next - r2));
+    builder.when_transition().assert_zero(gate * (r3_next - r3));
 
     // ==========================================================================
     // FIRST ROW CONSTRAINT
@@ -155,13 +124,9 @@ pub fn enforce_kernel_rom_constraints<AB>(
     let flag_next_row_first_kernel_rom = ace_flag * kernel_rom_next;
 
     // First row of kernel ROM must have sfirst' = 1.
-    let mut idx = 0;
-    tagged_assert_zero(
-        builder,
-        &KERNEL_ROM_FIRST_ROW_TAGS,
-        &mut idx,
-        flag_next_row_first_kernel_rom * (sfirst_next - one),
-    );
+    builder
+        .when_transition()
+        .assert_zero(flag_next_row_first_kernel_rom * (sfirst_next - one));
 }
 
 // INTERNAL HELPERS

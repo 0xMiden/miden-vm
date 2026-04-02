@@ -9,3 +9,8 @@ resolving merge conflicts in this file.
 
 ---
 
+## 1. refactor: inline tagged_assert_zero variants, remove tagging indirection
+
+**No constraint changes.** (441 base + 24 ext)
+
+---

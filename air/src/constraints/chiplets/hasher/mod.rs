@@ -42,29 +42,12 @@ pub use periodic::{STATE_WIDTH, periodic_columns};
 
 use crate::{
     Felt, MainTraceRow,
-    constraints::tagging::{TaggingAirBuilderExt, ids::TAG_CHIPLETS_BASE},
+    constraints::tagging::TaggingAirBuilderExt,
     trace::{
         CHIPLETS_OFFSET,
         chiplets::{HASHER_NODE_INDEX_COL_IDX, HASHER_SELECTOR_COL_RANGE, HASHER_STATE_COL_RANGE},
     },
 };
-
-// TAGGING IDS
-// ================================================================================================
-
-/// Base ID for hasher chiplet constraints (next after chiplet selectors).
-pub(super) const HASHER_BASE_ID: usize = TAG_CHIPLETS_BASE + 10;
-pub(super) const HASHER_PERM_INIT_BASE_ID: usize = HASHER_BASE_ID;
-pub(super) const HASHER_PERM_EXT_BASE_ID: usize = HASHER_PERM_INIT_BASE_ID + STATE_WIDTH;
-pub(super) const HASHER_PERM_INT_BASE_ID: usize = HASHER_PERM_EXT_BASE_ID + STATE_WIDTH;
-pub(super) const HASHER_SELECTOR_BOOL_BASE_ID: usize = HASHER_PERM_INT_BASE_ID + STATE_WIDTH;
-pub(super) const HASHER_SELECTOR_CONSIST_BASE_ID: usize = HASHER_SELECTOR_BOOL_BASE_ID + 3;
-pub(super) const HASHER_ABP_BASE_ID: usize = HASHER_SELECTOR_CONSIST_BASE_ID + 4;
-pub(super) const HASHER_OUTPUT_IDX_ID: usize = HASHER_ABP_BASE_ID + 4;
-pub(super) const HASHER_MERKLE_INDEX_BASE_ID: usize = HASHER_OUTPUT_IDX_ID + 1;
-pub(super) const HASHER_MERKLE_ABSORB_BASE_ID: usize = HASHER_MERKLE_INDEX_BASE_ID + 2;
-
-const OUTPUT_INDEX_NAMESPACE: &str = "chiplets.hasher.output.index";
 
 /// Precomputed hasher flags derived from selectors and cycle markers.
 struct HasherFlags<E> {

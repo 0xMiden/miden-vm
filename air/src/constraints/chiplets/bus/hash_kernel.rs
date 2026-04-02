@@ -12,7 +12,7 @@
 //! `alpha + sum_i beta^i * element[i]`.
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::{LiftedAirBuilder, WindowAccess};
+use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess};
 
 use crate::{
     Felt, MainTraceRow,
@@ -20,9 +20,7 @@ use crate::{
         bus::indices::B_HASH_KERNEL,
         chiplets::hasher::{flags, periodic},
         op_flags::OpFlags,
-        tagging::{
-            TagGroup, TaggingAirBuilderExt, ids::TAG_HASH_KERNEL_BUS_BASE, tagged_assert_zero_ext,
-        },
+        tagging::TaggingAirBuilderExt,
     },
     trace::{
         CHIPLETS_OFFSET, Challenges, LOG_PRECOMPILE_LABEL,
@@ -48,15 +46,6 @@ use crate::{
 const S_START: usize = HASHER_SELECTOR_COL_RANGE.start - CHIPLETS_OFFSET;
 const H_START: usize = HASHER_STATE_COL_RANGE.start - CHIPLETS_OFFSET;
 const IDX_COL: usize = HASHER_NODE_INDEX_COL_IDX - CHIPLETS_OFFSET;
-
-/// Tag ID and namespace for the hash-kernel (virtual table) bus transition constraint.
-const HASH_KERNEL_BUS_ID: usize = TAG_HASH_KERNEL_BUS_BASE;
-const HASH_KERNEL_BUS_NAMESPACE: &str = "chiplets.bus.hash_kernel.transition";
-const HASH_KERNEL_BUS_NAMES: [&str; 1] = [HASH_KERNEL_BUS_NAMESPACE; 1];
-const HASH_KERNEL_BUS_TAGS: TagGroup = TagGroup {
-    base: HASH_KERNEL_BUS_ID,
-    names: &HASH_KERNEL_BUS_NAMES,
-};
 
 // ENTRY POINTS
 // ================================================================================================
@@ -277,13 +266,9 @@ pub fn enforce_hash_kernel_constraint<AB>(
     let p_local_ef: AB::ExprEF = p_local.into();
     let p_next_ef: AB::ExprEF = p_next.into();
 
-    let mut idx = 0;
-    tagged_assert_zero_ext(
-        builder,
-        &HASH_KERNEL_BUS_TAGS,
-        &mut idx,
-        p_next_ef * requests - p_local_ef * responses,
-    );
+    builder
+        .when_transition()
+        .assert_zero_ext(p_next_ef * requests - p_local_ef * responses);
 }
 
 // INTERNAL HELPERS
