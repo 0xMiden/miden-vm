@@ -511,6 +511,7 @@ impl MainTrace {
     }
 
     /// Iterates over all columns (materialises each one).
+    #[cfg(any(test, feature = "testing"))]
     pub fn columns(&self) -> impl Iterator<Item = Vec<Felt>> + '_ {
         (0..self.width()).map(|c| self.get_column(c))
     }
