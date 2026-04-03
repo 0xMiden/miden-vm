@@ -105,6 +105,7 @@ impl TraceBuildInputs {
         }
     }
 
+    /// Returns the stack outputs captured for the execution being replayed.
     pub fn stack_outputs(&self) -> &StackOutputs {
         &self.trace_output.stack_outputs
     }
@@ -124,6 +125,7 @@ impl TraceBuildInputs {
         &self.program_info
     }
 
+    // Kept for mismatch and edge-case tests that mutate replay inputs directly.
     #[cfg(any(test, feature = "testing"))]
     #[allow(dead_code)]
     pub(crate) fn into_parts(self) -> (TraceBuildOutput, TraceGenerationContext, ProgramInfo) {
@@ -131,10 +133,12 @@ impl TraceBuildInputs {
     }
 
     #[cfg(any(test, feature = "testing"))]
+    /// Returns the trace replay context captured during execution.
     pub fn trace_generation_context(&self) -> &TraceGenerationContext {
         &self.trace_generation_context
     }
 
+    // Kept for tests that force invalid replay contexts without widening the public API.
     #[cfg(any(test, feature = "testing"))]
     #[allow(dead_code)]
     pub(crate) fn trace_generation_context_mut(&mut self) -> &mut TraceGenerationContext {
