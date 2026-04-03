@@ -65,7 +65,7 @@ impl TraceBuildOutput {
             stack,
             mut advice,
             memory: _,
-            final_pc_transcript,
+            final_precompile_transcript,
         } = execution_output;
 
         Self {

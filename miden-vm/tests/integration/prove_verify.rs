@@ -471,7 +471,7 @@ mod fast_parallel {
     };
     use miden_core_lib::CoreLibrary;
     use miden_processor::{
-        DefaultHost, ExecutionOptions, FastProcessor, ProcessorState, StackInputs,
+        DefaultHost, ExecutionOptions, FastProcessor, ProcessorState, StackInputs, StackOutputs,
         advice::{AdviceInputs, AdviceMutation},
         event::{EventError, EventHandler},
         trace::build_trace,
@@ -592,6 +592,56 @@ mod fast_parallel {
 
     #[test]
     fn test_prove_from_trace_sync_preserves_precompile_requests() {
+        let LoggedPrecompileProofFixture {
+            program,
+            stack_inputs,
+            stack_outputs,
+            proof,
+            verifier_registry,
+            expected_transcript,
+        } = prove_logged_precompile_fixture(HashFunction::Blake3_256);
+
+        let (_, pc_transcript_digest) = verify_with_precompiles(
+            program.into(),
+            stack_inputs,
+            stack_outputs,
+            proof,
+            &verifier_registry,
+        )
+        .expect("proof verification with precompiles failed");
+        assert_eq!(expected_transcript.finalize(), pc_transcript_digest);
+    }
+
+    #[test]
+    fn test_poseidon2_recursive_verify_with_precompile_requests() {
+        let LoggedPrecompileProofFixture {
+            program,
+            stack_inputs,
+            stack_outputs,
+            proof,
+            verifier_registry,
+            expected_transcript,
+        } = prove_logged_precompile_fixture(HashFunction::Poseidon2);
+
+        super::assert_recursive_verify(
+            program.to_info(),
+            stack_inputs,
+            stack_outputs,
+            expected_transcript.state(),
+            &proof,
+        );
+
+        verify_with_precompiles(
+            program.into(),
+            stack_inputs,
+            stack_outputs,
+            proof,
+            &verifier_registry,
+        )
+        .expect("proof verification with precompiles failed");
+    }
+
+    fn prove_logged_precompile_fixture(hash_fn: HashFunction) -> LoggedPrecompileProofFixture {
         const NUM_ITERATIONS: usize = 256;
         let fixtures = logged_precompile_fixtures(NUM_ITERATIONS);
 
@@ -638,7 +688,7 @@ mod fast_parallel {
 
         let (stack_outputs, proof) = prove_from_trace_sync(TraceProvingInputs::new(
             trace_inputs,
-            ProvingOptions::with_96_bit_security(HashFunction::Blake3_256),
+            ProvingOptions::with_96_bit_security(hash_fn),
         ))
         .expect("prove_from_trace_sync failed");
 
@@ -663,15 +713,23 @@ mod fast_parallel {
         }
         assert_eq!(transcript.finalize(), expected_transcript.finalize());
 
-        let (_, transcript_digest) = verify_with_precompiles(
-            program.into(),
+        LoggedPrecompileProofFixture {
+            program,
             stack_inputs,
             stack_outputs,
             proof,
-            &verifier_registry,
-        )
-        .expect("proof verification with precompiles failed");
-        assert_eq!(expected_transcript.finalize(), transcript_digest);
+            verifier_registry,
+            expected_transcript,
+        }
+    }
+
+    struct LoggedPrecompileProofFixture {
+        program: Program,
+        stack_inputs: StackInputs,
+        stack_outputs: StackOutputs,
+        proof: ExecutionProof,
+        verifier_registry: PrecompileVerifierRegistry,
+        expected_transcript: PrecompileTranscript,
     }
 
     fn logged_precompile_fixtures(num_iterations: usize) -> Vec<LoggedPrecompileFixture> {

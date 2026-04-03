@@ -191,7 +191,7 @@ fn log_precompile_request_procedure() {
     );
 
     let program_info = ProgramInfo::from(program);
-    let (_, transcript_digest) = miden_verifier::verify_with_precompiles(
+    let (_, pc_transcript_digest) = miden_verifier::verify_with_precompiles(
         program_info,
         stack_inputs,
         stack_outputs,
@@ -199,7 +199,7 @@ fn log_precompile_request_procedure() {
         &verifier_registry,
     )
     .expect("proof verification with precompiles failed");
-    assert_eq!(transcript.finalize(), transcript_digest);
+    assert_eq!(transcript.finalize(), pc_transcript_digest);
 }
 
 #[derive(Clone)]
