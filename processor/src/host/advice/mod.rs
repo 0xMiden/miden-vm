@@ -58,7 +58,7 @@ pub struct AdviceProvider {
 
 impl AdviceProvider {
     #[cfg(test)]
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub(crate) fn merkle_store(&self) -> &MerkleStore {
         &self.store
     }

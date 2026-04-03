@@ -15,7 +15,7 @@ use crate::{
     Felt, MIN_STACK_DEPTH, Program, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
     fast::ExecutionOutput,
     field::{ExtensionField, QuadFelt},
-    precompile::{PrecompileRequest, PrecompileTranscript},
+    precompile::{PrecompileRequest, PrecompileTranscript, PrecompileTranscriptDigest},
     utils::{ColMatrix, Matrix, RowMajorMatrix},
 };
 
@@ -54,7 +54,7 @@ pub struct TraceBuildInputs {
 #[derive(Debug)]
 pub(crate) struct TraceBuildOutput {
     stack_outputs: StackOutputs,
-    final_pc_transcript: PrecompileTranscript,
+    final_precompile_transcript: PrecompileTranscript,
     precompile_requests: Vec<PrecompileRequest>,
     precompile_requests_digest: [u8; 32],
 }
@@ -70,7 +70,7 @@ impl TraceBuildOutput {
 
         Self {
             stack_outputs: stack,
-            final_pc_transcript,
+            final_precompile_transcript,
             precompile_requests: advice.take_precompile_requests(),
             precompile_requests_digest: [0; 32],
         }
@@ -117,7 +117,12 @@ impl TraceBuildInputs {
 
     /// Returns the final precompile transcript observed during execution.
     pub fn final_precompile_transcript(&self) -> &PrecompileTranscript {
-        &self.trace_output.final_pc_transcript
+        &self.trace_output.final_precompile_transcript
+    }
+
+    /// Returns the digest of the final precompile transcript observed during execution.
+    pub fn precompile_transcript_digest(&self) -> PrecompileTranscriptDigest {
+        self.final_precompile_transcript().finalize()
     }
 
     /// Returns the program info captured for the execution being replayed.
@@ -127,7 +132,7 @@ impl TraceBuildInputs {
 
     // Kept for mismatch and edge-case tests that mutate replay inputs directly.
     #[cfg(any(test, feature = "testing"))]
-    #[allow(dead_code)]
+    #[cfg_attr(all(feature = "testing", not(test)), expect(dead_code))]
     pub(crate) fn into_parts(self) -> (TraceBuildOutput, TraceGenerationContext, ProgramInfo) {
         (self.trace_output, self.trace_generation_context, self.program_info)
     }
@@ -140,7 +145,7 @@ impl TraceBuildInputs {
 
     // Kept for tests that force invalid replay contexts without widening the public API.
     #[cfg(any(test, feature = "testing"))]
-    #[allow(dead_code)]
+    #[cfg_attr(all(feature = "testing", not(test)), expect(dead_code))]
     pub(crate) fn trace_generation_context_mut(&mut self) -> &mut TraceGenerationContext {
         &mut self.trace_generation_context
     }
@@ -178,7 +183,7 @@ pub struct ExecutionTrace {
     program_info: ProgramInfo,
     stack_outputs: StackOutputs,
     precompile_requests: Vec<PrecompileRequest>,
-    final_pc_transcript: PrecompileTranscript,
+    final_precompile_transcript: PrecompileTranscript,
     trace_len_summary: TraceLenSummary,
 }
 
@@ -195,7 +200,7 @@ impl ExecutionTrace {
     ) -> Self {
         let TraceBuildOutput {
             stack_outputs,
-            final_pc_transcript,
+            final_precompile_transcript,
             precompile_requests,
             ..
         } = trace_output;
@@ -206,7 +211,7 @@ impl ExecutionTrace {
             program_info,
             stack_outputs,
             precompile_requests,
-            final_pc_transcript,
+            final_precompile_transcript,
             trace_len_summary,
         }
     }
@@ -235,7 +240,7 @@ impl ExecutionTrace {
             self.program_info.clone(),
             self.init_stack_state(),
             self.stack_outputs,
-            self.final_pc_transcript.state(),
+            self.final_precompile_transcript.state(),
         )
     }
 
@@ -266,12 +271,17 @@ impl ExecutionTrace {
 
     /// Returns the final precompile transcript observed during execution.
     pub fn final_precompile_transcript(&self) -> PrecompileTranscript {
-        self.final_pc_transcript
+        self.final_precompile_transcript
+    }
+
+    /// Returns the digest of the final precompile transcript observed during execution.
+    pub fn precompile_transcript_digest(&self) -> PrecompileTranscriptDigest {
+        self.final_precompile_transcript().finalize()
     }
 
     /// Returns the owned execution outputs required for proof packaging.
     pub fn into_outputs(self) -> (StackOutputs, Vec<PrecompileRequest>, PrecompileTranscript) {
-        (self.stack_outputs, self.precompile_requests, self.final_pc_transcript)
+        (self.stack_outputs, self.precompile_requests, self.final_precompile_transcript)
     }
 
     /// Returns the initial state of the top 16 stack registers.

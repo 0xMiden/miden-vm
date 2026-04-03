@@ -3,8 +3,12 @@
 use alloc::sync::Arc;
 
 use miden_assembly::{Assembler, DefaultSourceManager};
+use miden_core::{precompile::PrecompileTranscriptState, proof::ExecutionProof};
+use miden_core_lib::CoreLibrary;
 use miden_processor::ExecutionOptions;
-use miden_prover::{AdviceInputs, ProvingOptions, StackInputs, prove_sync};
+use miden_prover::{
+    AdviceInputs, ProgramInfo, ProvingOptions, PublicInputs, StackInputs, StackOutputs, prove_sync,
+};
 use miden_verifier::verify;
 use miden_vm::{DefaultHost, HashFunction};
 
@@ -13,6 +17,7 @@ fn assert_prove_verify(
     hash_fn: HashFunction,
     hash_name: &str,
     print_stack_outputs: bool,
+    verify_recursively: bool,
 ) {
     let program = Assembler::default().assemble_program(source).unwrap();
     let stack_inputs = StackInputs::try_from_ints([0, 1]).unwrap();
@@ -37,11 +42,53 @@ fn assert_prove_verify(
         println!("Stack outputs: {:?}", stack_outputs);
     }
 
+    if verify_recursively {
+        assert_recursive_verify(
+            program.to_info(),
+            stack_inputs,
+            stack_outputs,
+            PrecompileTranscriptState::default(),
+            &proof,
+        );
+    }
+
     println!("Verifying proof...");
     let security_level =
         verify(program.into(), stack_inputs, stack_outputs, proof).expect("Verification failed");
 
     println!("Verification successful! Security level: {}", security_level);
+}
+
+fn assert_recursive_verify(
+    program_info: ProgramInfo,
+    stack_inputs: StackInputs,
+    stack_outputs: StackOutputs,
+    pc_transcript_state: PrecompileTranscriptState,
+    proof: &ExecutionProof,
+) {
+    assert_eq!(proof.hash_fn(), HashFunction::Poseidon2);
+
+    let pub_inputs =
+        PublicInputs::new(program_info, stack_inputs, stack_outputs, pc_transcript_state);
+    let verifier_inputs =
+        recursive_verifier::generate_advice_inputs(proof.stark_proof(), pub_inputs);
+
+    let source = "
+        use miden::core::sys::vm
+        begin
+            exec.vm::verify_proof
+        end
+    ";
+
+    let mut test = crate::build_test!(
+        source,
+        &verifier_inputs.initial_stack,
+        &verifier_inputs.advice_stack,
+        verifier_inputs.store,
+        verifier_inputs.advice_map
+    );
+    test.libraries.push(CoreLibrary::default().library().clone());
+    test.execute().expect("recursive verifier execution failed");
 }
 
 #[test]
@@ -55,7 +102,7 @@ fn test_blake3_256_prove_verify() {
         end
     ";
 
-    assert_prove_verify(source, HashFunction::Blake3_256, "Blake3_256", false);
+    assert_prove_verify(source, HashFunction::Blake3_256, "Blake3_256", false, false);
 }
 
 #[test]
@@ -69,7 +116,7 @@ fn test_keccak_prove_verify() {
         end
     ";
 
-    assert_prove_verify(source, HashFunction::Keccak, "Keccak", true);
+    assert_prove_verify(source, HashFunction::Keccak, "Keccak", true, false);
 }
 
 #[test]
@@ -83,7 +130,7 @@ fn test_rpo_prove_verify() {
         end
     ";
 
-    assert_prove_verify(source, HashFunction::Rpo256, "RPO", true);
+    assert_prove_verify(source, HashFunction::Rpo256, "RPO", true, false);
 }
 
 #[test]
@@ -97,7 +144,7 @@ fn test_poseidon2_prove_verify() {
         end
     ";
 
-    assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", true);
+    assert_prove_verify(source, HashFunction::Poseidon2, "Poseidon2", true, true);
 }
 
 /// Test end-to-end proving and verification with RPX
@@ -112,7 +159,297 @@ fn test_rpx_prove_verify() {
         end
     ";
 
-    assert_prove_verify(source, HashFunction::Rpx256, "RPX", true);
+    assert_prove_verify(source, HashFunction::Rpx256, "RPX", true, false);
+}
+
+mod recursive_verifier {
+    use alloc::vec::Vec;
+
+    use miden_core::{
+        Felt, WORD_SIZE, Word,
+        field::{BasedVectorSpace, QuadFelt},
+    };
+    use miden_crypto::stark::{
+        StarkConfig,
+        air::AirInstance,
+        challenger::CanObserve,
+        fri::PcsTranscript,
+        lmcs::{BatchProof, Lmcs},
+        proof::StarkTranscript,
+    };
+    use miden_prover::{ProcessorAir, PublicInputs, config};
+    use miden_utils_testing::crypto::{MerklePath, MerkleStore, PartialMerkleTree};
+
+    type Challenge = QuadFelt;
+    type P2Config = config::Poseidon2Config;
+    type P2Lmcs = <P2Config as StarkConfig<Felt, Challenge>>::Lmcs;
+
+    pub struct VerifierInputs {
+        pub initial_stack: Vec<u64>,
+        pub advice_stack: Vec<u64>,
+        pub store: MerkleStore,
+        pub advice_map: Vec<(Word, Vec<Felt>)>,
+    }
+
+    pub fn generate_advice_inputs(proof_bytes: &[u8], pub_inputs: PublicInputs) -> VerifierInputs {
+        let params = config::pcs_params();
+        let config = config::poseidon2_config(params);
+        let (log_trace_height, transcript_data): (u8, _) =
+            bincode::deserialize(proof_bytes).expect("failed to deserialize proof bytes");
+        let log_trace_height = log_trace_height as usize;
+
+        let (public_values, kernel_felts) = pub_inputs.to_air_inputs();
+        let mut challenger = config.challenger();
+        config::observe_protocol_params(&mut challenger, log_trace_height as u64);
+        challenger.observe_slice(&public_values);
+        let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
+        config::observe_var_len_public_inputs(&mut challenger, var_len_public_inputs, &[WORD_SIZE]);
+
+        let air = ProcessorAir;
+        let instance = AirInstance {
+            log_trace_height: log_trace_height as u8,
+            public_values: &public_values,
+            var_len_public_inputs,
+        };
+
+        let (stark, _digest) =
+            StarkTranscript::from_proof(&config, &[(&air, instance)], &transcript_data, challenger)
+                .expect("failed to replay verifier transcript");
+
+        let kernel_digests: Vec<Word> = kernel_felts
+            .chunks_exact(4)
+            .map(|chunk| Word::new([chunk[0], chunk[1], chunk[2], chunk[3]]))
+            .collect();
+
+        build_advice(&config, &stark, log_trace_height, pub_inputs, &kernel_digests)
+    }
+
+    fn build_advice(
+        config: &P2Config,
+        stark: &StarkTranscript<Challenge, P2Lmcs>,
+        log_trace_height: usize,
+        pub_inputs: PublicInputs,
+        kernel_digests: &[Word],
+    ) -> VerifierInputs {
+        let pcs = &stark.pcs_transcript;
+        let mut advice_stack = Vec::new();
+
+        let params = config::pcs_params();
+        advice_stack.push(params.num_queries() as u64);
+        advice_stack.push(params.query_pow_bits() as u64);
+        advice_stack.push(config::DEEP_POW_BITS as u64);
+        advice_stack.push(config::FOLDING_POW_BITS as u64);
+
+        advice_stack.extend_from_slice(&build_fixed_len_inputs(&pub_inputs));
+        advice_stack.push(kernel_digests.len() as u64);
+        advice_stack.extend_from_slice(&build_kernel_digest_advice(kernel_digests));
+
+        let alpha = stark.randomness[0];
+        let beta = stark.randomness[1];
+        let beta_coeffs: &[Felt] = beta.as_basis_coefficients_slice();
+        let alpha_coeffs: &[Felt] = alpha.as_basis_coefficients_slice();
+        advice_stack.extend_from_slice(&[
+            beta_coeffs[0].as_canonical_u64(),
+            beta_coeffs[1].as_canonical_u64(),
+            alpha_coeffs[0].as_canonical_u64(),
+            alpha_coeffs[1].as_canonical_u64(),
+        ]);
+
+        advice_stack.extend_from_slice(&commitment_to_u64s(stark.main_commit));
+        advice_stack.extend_from_slice(&commitment_to_u64s(stark.aux_commit));
+
+        if let Some(aux_values) = stark.all_aux_values.first() {
+            advice_stack.extend_from_slice(&challenges_to_u64s(aux_values));
+        }
+
+        advice_stack.extend_from_slice(&commitment_to_u64s(stark.quotient_commit));
+
+        let deep_alpha = pcs.deep_transcript.challenge_columns;
+        let deep_coeffs: &[Felt] = deep_alpha.as_basis_coefficients_slice();
+        advice_stack.extend_from_slice(&[
+            deep_coeffs[1].as_canonical_u64(),
+            deep_coeffs[0].as_canonical_u64(),
+        ]);
+
+        append_ood_evaluations(&mut advice_stack, pcs);
+        advice_stack.push(pcs.deep_transcript.pow_witness.as_canonical_u64());
+
+        for round in &pcs.fri_transcript.rounds {
+            advice_stack.extend_from_slice(&commitment_to_u64s(round.commitment));
+            advice_stack.push(round.pow_witness.as_canonical_u64());
+        }
+
+        let final_poly = &pcs.fri_transcript.final_poly;
+        let remainder_base: Vec<Felt> = QuadFelt::flatten_to_base(final_poly.to_vec());
+        advice_stack.extend(remainder_base.iter().map(|felt| felt.as_canonical_u64()));
+        advice_stack.push(pcs.query_pow_witness.as_canonical_u64());
+
+        let (store, advice_map) = build_merkle_data(config, stark, log_trace_height);
+        VerifierInputs {
+            initial_stack: vec![log_trace_height as u64],
+            advice_stack,
+            store,
+            advice_map,
+        }
+    }
+
+    fn append_ood_evaluations<L>(advice_stack: &mut Vec<u64>, pcs: &PcsTranscript<Challenge, L>)
+    where
+        L: Lmcs<F = Felt>,
+    {
+        let evals = &pcs.deep_transcript.evals;
+        let mut local_values = Vec::new();
+        let mut next_values = Vec::new();
+
+        for group in evals {
+            for matrix in group {
+                let width = matrix.width;
+                let values = matrix.values.as_slice();
+                local_values.extend_from_slice(&values[..width]);
+                if values.len() > width {
+                    next_values.extend_from_slice(&values[width..2 * width]);
+                }
+            }
+        }
+
+        advice_stack.extend_from_slice(&challenges_to_u64s(&local_values));
+        advice_stack.extend_from_slice(&challenges_to_u64s(&next_values));
+    }
+
+    fn build_merkle_data(
+        config: &P2Config,
+        stark: &StarkTranscript<Challenge, P2Lmcs>,
+        log_trace_height: usize,
+    ) -> (MerkleStore, Vec<(Word, Vec<Felt>)>) {
+        let pcs = &stark.pcs_transcript;
+        let lmcs = config.lmcs();
+        let log_blowup = config::pcs_params().log_blowup() as usize;
+        let log_lde_height = log_trace_height + log_blowup;
+
+        let mut partial_trees = Vec::new();
+        let mut advice_map = Vec::new();
+
+        for batch_proof in &pcs.deep_openings {
+            let (trees, entries) =
+                batch_proof_to_merkle(lmcs, batch_proof, log_lde_height, &pcs.tree_indices);
+            partial_trees.extend(trees);
+            advice_map.extend(entries);
+        }
+
+        let log_arity = config::LOG_FOLDING_ARITY as usize;
+        for (round_idx, batch_proof) in pcs.fri_openings.iter().enumerate() {
+            let log_folded = log_arity * (round_idx + 1);
+            let round_indices: Vec<usize> =
+                pcs.tree_indices.iter().map(|&index| index >> log_folded).collect();
+            let fri_log_height = log_lde_height - log_folded;
+            let (trees, entries) =
+                batch_proof_to_merkle(lmcs, batch_proof, fri_log_height, &round_indices);
+            partial_trees.extend(trees);
+            advice_map.extend(entries);
+        }
+
+        let mut store = MerkleStore::new();
+        for tree in &partial_trees {
+            store.extend(tree.inner_nodes());
+        }
+
+        (store, advice_map)
+    }
+
+    fn batch_proof_to_merkle<L>(
+        lmcs: &L,
+        batch_proof: &L::BatchProof,
+        log_height: usize,
+        query_indices: &[usize],
+    ) -> (Vec<PartialMerkleTree>, Vec<(Word, Vec<Felt>)>)
+    where
+        L: Lmcs<F = Felt>,
+        L::Commitment: Copy + Into<[Felt; 4]> + PartialEq,
+        L::BatchProof: AsLmcsBatchProof<Felt, L::Commitment>,
+    {
+        let batch = batch_proof.as_batch_proof();
+        let widths = infer_widths(batch);
+        let single_proofs = batch
+            .single_proofs(lmcs, &widths, log_height as u8)
+            .expect("failed to reconstruct Merkle paths");
+
+        let mut paths = Vec::new();
+        let mut advice_entries = Vec::new();
+
+        for &index in query_indices {
+            let proof = single_proofs.get(&index).expect("missing opening for query index");
+            let leaf_data = proof.rows.as_slice().to_vec();
+            let leaf_hash = lmcs.hash(proof.rows.iter_rows());
+            let leaf_word = Word::new(leaf_hash.into());
+            let merkle_path = MerklePath::new(
+                proof
+                    .siblings
+                    .iter()
+                    .map(|commitment| Word::new((*commitment).into()))
+                    .collect(),
+            );
+
+            paths.push((index as u64, leaf_word, merkle_path));
+            advice_entries.push((leaf_word, leaf_data));
+        }
+
+        let tree =
+            PartialMerkleTree::with_paths(paths).expect("failed to build partial Merkle tree");
+        (vec![tree], advice_entries)
+    }
+
+    trait AsLmcsBatchProof<F, C> {
+        fn as_batch_proof(&self) -> &BatchProof<F, C>;
+    }
+
+    impl<F, C> AsLmcsBatchProof<F, C> for BatchProof<F, C> {
+        fn as_batch_proof(&self) -> &BatchProof<F, C> {
+            self
+        }
+    }
+
+    fn infer_widths<F, C>(batch: &BatchProof<F, C>) -> Vec<usize> {
+        batch
+            .openings
+            .values()
+            .next()
+            .map(|opening| opening.rows.iter_rows().map(|row| row.len()).collect())
+            .unwrap_or_default()
+    }
+
+    fn build_kernel_digest_advice(kernel_digests: &[Word]) -> Vec<u64> {
+        let mut result = Vec::with_capacity(kernel_digests.len() * 8);
+        for digest in kernel_digests {
+            let mut padded: Vec<u64> =
+                digest.as_elements().iter().map(|felt| felt.as_canonical_u64()).collect();
+            padded.resize(8, 0);
+            padded.reverse();
+            result.extend_from_slice(&padded);
+        }
+        result
+    }
+
+    fn build_fixed_len_inputs(pub_inputs: &PublicInputs) -> Vec<u64> {
+        let mut felts = Vec::<Felt>::new();
+        felts.extend_from_slice(pub_inputs.program_info().program_hash().as_elements());
+        felts.extend_from_slice(pub_inputs.stack_inputs().as_ref());
+        felts.extend_from_slice(pub_inputs.stack_outputs().as_ref());
+        felts.extend_from_slice(pub_inputs.pc_transcript_state().as_ref());
+
+        let mut fixed_len: Vec<u64> = felts.iter().map(|felt| felt.as_canonical_u64()).collect();
+        fixed_len.resize(fixed_len.len().next_multiple_of(8), 0);
+        fixed_len
+    }
+
+    fn commitment_to_u64s<C: Copy + Into<[Felt; 4]>>(commitment: C) -> Vec<u64> {
+        let felts: [Felt; 4] = commitment.into();
+        felts.iter().map(|felt| felt.as_canonical_u64()).collect()
+    }
+
+    fn challenges_to_u64s(challenges: &[Challenge]) -> Vec<u64> {
+        let base: Vec<Felt> = QuadFelt::flatten_to_base(challenges.to_vec());
+        base.iter().map(|felt| felt.as_canonical_u64()).collect()
+    }
 }
 
 // ================================================================================================

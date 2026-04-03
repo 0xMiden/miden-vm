@@ -404,8 +404,8 @@ fn test_trace_generation_at_fragment_boundaries(
         trace_from_single_fragment.precompile_requests(),
     );
     assert_eq!(
-        trace_from_fragments.final_pc_transcript,
-        trace_from_single_fragment.final_pc_transcript,
+        trace_from_fragments.final_precompile_transcript,
+        trace_from_single_fragment.final_precompile_transcript,
     );
 
     // Verify aux trace columns match.
@@ -1264,7 +1264,7 @@ impl core::fmt::Debug for DeterministicTrace<'_> {
             .field("program_info", &trace.program_info())
             .field("stack_outputs", &trace.stack_outputs())
             .field("precompile_requests", &trace.precompile_requests())
-            .field("final_precompile_transcript", &trace.final_pc_transcript)
+            .field("final_precompile_transcript", &trace.final_precompile_transcript)
             .field("trace_len_summary", &trace.trace_len_summary())
             .finish()
     }
