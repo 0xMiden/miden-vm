@@ -44,3 +44,7 @@ miden-assembly = { path = ".", default-features = false, features = ["testing"] 
 miden-mast-package = { workspace = true, features = ["arbitrary"] }
 insta = { workspace = true }
 proptest = { workspace = true, features = ["std"] }
+
+[package.metadata.cargo-udeps.ignore]
+# Self-reference to dev-dependency is a false positive: enables "testing" feature for tests
+development = ["miden-assembly"]

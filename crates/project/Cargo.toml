@@ -35,8 +35,13 @@ toml = { version = "1.0", default-features = false, features = ["serde", "parse"
 [dev-dependencies]
 miden-core.workspace = true
 miden-test-serde-macros.workspace = true
+# serde_json is used by miden-test-serde-macros generated code
 serde_json.workspace = true
 toml = { version = "1.0", default-features = false, features = ["std", "serde", "parse"] }
+
+[package.metadata.cargo-udeps.ignore]
+# These are only referenced by generated test code when the `arbitrary` feature is enabled.
+development = ["miden-test-serde-macros", "serde_json"]
 
 [lints.rust]
 # This is needed until this warning appears in stable when this is commented out. Currently, it

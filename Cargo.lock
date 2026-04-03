@@ -1652,7 +1652,6 @@ dependencies = [
  "loom",
  "once_cell",
  "parking_lot",
- "proptest",
 ]
 
 [[package]]

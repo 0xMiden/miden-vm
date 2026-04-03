@@ -20,15 +20,22 @@ std = ["dep:parking_lot"]
 
 [dependencies]
 lock_api = { version = "0.4", features = ["arc_lock"] }
+# Used in no-std builds for OnceLockCompat
 once_cell = { version = "1.21", default-features = false, features = ["alloc", "race"] }
 parking_lot = { version = "0.12", optional = true }
 
+[target.'cfg(loom)'.dependencies]
+# loom is only used in tests via cfg(loom)
+loom = "0.7"
+
 [dev-dependencies]
 loom = "0.7"
-proptest.workspace = true
 
-[target.'cfg(loom)'.dependencies]
-loom = "0.7"
+[package.metadata.cargo-udeps.ignore]
+# once_cell is used in no-std builds via OnceLockCompat
+# loom is cfg-gated and only compiled when tests are run with `--cfg loom`
+normal = ["once_cell", "loom"]
+development = ["loom"]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }

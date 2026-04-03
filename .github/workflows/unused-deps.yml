@@ -1,0 +1,41 @@
+# Runs unused dependency check for crate consumers.
+name: Unused dependency check
+
+permissions:
+  contents: read
+  issues: write
+
+on:
+  schedule:
+    # Run daily at 00:00 UTC
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  unused-dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-udeps
+      # Normally running cargo-udeps requires use of a nightly compiler.
+      # In order to have a more stable and less noisy experience, we instead
+      # use the stable toolchain and enable nightly features via RUSTC_BOOTSTRAP.
+      - name: Run cargo-udeps
+        id: udeps
+        run: |
+          set -euo pipefail
+          # `miden-vm` has optional CLI dependencies behind non-default features,
+          # so check the workspace default targets separately from that package.
+          RUSTC_BOOTSTRAP=1 cargo udeps --workspace --all-targets --exclude miden-vm
+          RUSTC_BOOTSTRAP=1 cargo udeps -p miden-vm --all-targets --all-features
+      - uses: JasonEtco/create-an-issue@v2
+        if: ${{ failure() && steps.udeps.outcome == 'failure' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          update_existing: true
+          filename: .github/templates/UNUSED_DEPS_ISSUE.md

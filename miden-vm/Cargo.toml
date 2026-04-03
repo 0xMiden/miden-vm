@@ -74,6 +74,7 @@ miden-crypto.workspace = true
 miden-debug-types.workspace = true
 miden-processor.workspace = true
 miden-prover.workspace = true
+# Used directly in CLI verify.rs and utils.rs
 miden-mast-package.workspace = true
 miden-core-lib.workspace = true
 miden-verifier.workspace = true

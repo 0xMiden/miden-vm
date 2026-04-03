@@ -20,9 +20,16 @@ proc-macro = true
 proc-macro2 = "1.0"
 quote = "1.0"
 syn = { workspace = true, features = ["derive", "extra-traits", "full"] }
+# Used in generated test code
 proptest.workspace = true
 proptest-derive.workspace = true
 
 [dev-dependencies]
 proptest = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+
+[package.metadata.cargo-udeps.ignore]
+# Dependencies used in generated proc-macro code are false positives
+normal = ["proptest", "proptest-derive"]
+# Dev-dependencies are only exercised by doctests for the generated examples
+development = ["proptest", "serde"]
