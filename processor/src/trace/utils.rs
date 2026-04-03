@@ -13,6 +13,31 @@ use crate::{
 #[cfg(test)]
 use crate::{operation::Operation, utils::ToElements};
 
+// ROW-MAJOR TRACE WRITER
+// ================================================================================================
+
+/// Row-major flat buffer writer (`write_row` is a single `copy_from_slice`).
+#[derive(Debug)]
+pub struct RowMajorTraceWriter<'a, E> {
+    data: &'a mut [E],
+    width: usize,
+}
+
+impl<'a, E: Copy> RowMajorTraceWriter<'a, E> {
+    pub fn new(data: &'a mut [E], width: usize) -> Self {
+        debug_assert_eq!(data.len() % width, 0, "buffer length must be a multiple of width");
+        Self { data, width }
+    }
+
+    /// Writes one row; `values.len()` must equal `width`.
+    #[inline(always)]
+    pub fn write_row(&mut self, row: usize, values: &[E]) {
+        debug_assert_eq!(values.len(), self.width);
+        let start = row * self.width;
+        self.data[start..start + self.width].copy_from_slice(values);
+    }
+}
+
 // TRACE FRAGMENT
 // ================================================================================================
 

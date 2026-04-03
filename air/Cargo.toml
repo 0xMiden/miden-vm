@@ -35,4 +35,5 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+miden-ace-codegen = { workspace = true, features = ["testing"] }
 proptest.workspace = true

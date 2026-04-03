@@ -1,4 +1,4 @@
-use alloc::boxed::Box;
+use alloc::{boxed::Box, vec::Vec};
 use core::{
     fmt::{Display, Formatter},
     ops::{Add, AddAssign, Bound, Index, IndexMut, Mul, RangeBounds, Sub, SubAssign},
@@ -268,6 +268,13 @@ impl<T> Index<RowIndex> for [T] {
 impl<T> IndexMut<RowIndex> for [T] {
     fn index_mut(&mut self, i: RowIndex) -> &mut Self::Output {
         &mut self[i.0 as usize]
+    }
+}
+
+impl<T> Index<RowIndex> for Vec<T> {
+    type Output = T;
+    fn index(&self, i: RowIndex) -> &Self::Output {
+        &self.as_slice()[i]
     }
 }
 
