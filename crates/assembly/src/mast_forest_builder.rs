@@ -454,8 +454,9 @@ impl MastForestBuilder {
 
         let mut operations: Vec<Operation> = Vec::new();
         let mut decorators = DecoratorList::new();
-        // Track asm_ops being accumulated for merged blocks, with adjusted indices
+        // Track asm_ops and debug_vars being accumulated for merged blocks, with adjusted indices
         let mut merged_asm_ops: Vec<(usize, AsmOpId)> = Vec::new();
+        let mut merged_debug_vars: Vec<(usize, miden_core::mast::DebugVarId)> = Vec::new();
 
         let mut merged_basic_blocks: Vec<MastNodeId> = Vec::new();
 
@@ -484,8 +485,13 @@ impl MastForestBuilder {
                 };
                 let ops_offset = operations.len();
 
-                // Transfer any pending asm_ops for this block to the merged result
+                // Transfer any pending asm_ops and debug_vars for this block to the merged result
                 self.transfer_asm_ops_for_merge(basic_block_id, ops_offset, &mut merged_asm_ops);
+                self.transfer_debug_vars_for_merge(
+                    basic_block_id,
+                    ops_offset,
+                    &mut merged_debug_vars,
+                );
 
                 // Add decorators with adjusted indices
                 for (op_idx, decorator) in block_decorators {
@@ -499,10 +505,12 @@ impl MastForestBuilder {
                     let block_ops = core::mem::take(&mut operations);
                     let block_decorators = core::mem::take(&mut decorators);
                     let block_asm_ops = core::mem::take(&mut merged_asm_ops);
-                    let merged_basic_block_id = self.ensure_block_with_asm_op_ids(
+                    let block_debug_vars = core::mem::take(&mut merged_debug_vars);
+                    let merged_basic_block_id = self.ensure_block_with_asm_op_and_debug_var_ids(
                         block_ops,
                         block_decorators,
                         block_asm_ops,
+                        block_debug_vars,
                         vec![],
                         vec![],
                     )?;
@@ -517,10 +525,11 @@ impl MastForestBuilder {
         self.merged_basic_block_ids.extend(contiguous_basic_block_ids.iter());
 
         if !operations.is_empty() || !decorators.is_empty() {
-            let merged_basic_block = self.ensure_block_with_asm_op_ids(
+            let merged_basic_block = self.ensure_block_with_asm_op_and_debug_var_ids(
                 operations,
                 decorators,
                 merged_asm_ops,
+                merged_debug_vars,
                 vec![],
                 vec![],
             )?;
@@ -554,24 +563,68 @@ impl MastForestBuilder {
         }
     }
 
-    /// Like ensure_block but takes pre-existing AsmOpIds instead of AssemblyOps.
-    /// Used when merging blocks that already have their asm_ops registered.
-    fn ensure_block_with_asm_op_ids(
+    /// Helper to transfer pending debug_vars from a block being merged.
+    /// Removes the debug_vars from pending_debug_var_mappings and adds them to the merged list
+    /// with indices adjusted by the given offset.
+    fn transfer_debug_vars_for_merge(
+        &mut self,
+        source_block_id: MastNodeId,
+        ops_offset: usize,
+        merged_debug_vars: &mut Vec<(usize, miden_core::mast::DebugVarId)>,
+    ) {
+        let (matched, rest): (Vec<_>, Vec<_>) =
+            core::mem::take(&mut self.pending_debug_var_mappings)
+                .into_iter()
+                .partition(|(node_id, _)| *node_id == source_block_id);
+
+        self.pending_debug_var_mappings = rest;
+
+        for (_, debug_vars) in matched {
+            merged_debug_vars.extend(
+                debug_vars.into_iter().map(|(op_idx, var_id)| (op_idx + ops_offset, var_id)),
+            );
+        }
+    }
+
+    /// Like ensure_block but takes pre-existing AsmOpIds and DebugVarIds instead of raw
+    /// AssemblyOps. Used when merging blocks that already have their metadata registered.
+    fn ensure_block_with_asm_op_and_debug_var_ids(
         &mut self,
         operations: Vec<Operation>,
         decorators: DecoratorList,
         asm_op_ids: Vec<(usize, AsmOpId)>,
+        debug_vars: Vec<(usize, miden_core::mast::DebugVarId)>,
         before_enter: Vec<DecoratorId>,
         after_exit: Vec<DecoratorId>,
     ) -> Result<MastNodeId, Report> {
         let block = BasicBlockNodeBuilder::new(operations, decorators)
             .with_before_enter(before_enter)
             .with_after_exit(after_exit);
-        let (node_id, is_new) = self.ensure_node_exists(block)?;
 
-        // Only register AssemblyOps for newly created nodes.
+        let base_fingerprint = block
+            .fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)
+            .expect("hash_by_node_id should contain the fingerprints of all children of `node`");
+        let dedup_fingerprint =
+            base_fingerprint.augment_with_data(&serialize_debug_vars(&debug_vars));
+
+        let (node_id, is_new) =
+            if let Some(node_id) = self.node_id_by_fingerprint.get(&dedup_fingerprint) {
+                (*node_id, false)
+            } else {
+                let new_node_id = block
+                    .add_to_forest(&mut self.mast_forest)
+                    .into_diagnostic()
+                    .wrap_err("assembler failed to add new node")?;
+                self.node_id_by_fingerprint.insert(dedup_fingerprint, new_node_id);
+                self.hash_by_node_id.insert(new_node_id, dedup_fingerprint);
+                (new_node_id, true)
+            };
+
         if is_new && !asm_op_ids.is_empty() {
             self.pending_asm_op_mappings.push((node_id, asm_op_ids));
+        }
+        if is_new && !debug_vars.is_empty() {
+            self.pending_debug_var_mappings.push((node_id, debug_vars));
         }
 
         Ok(node_id)
