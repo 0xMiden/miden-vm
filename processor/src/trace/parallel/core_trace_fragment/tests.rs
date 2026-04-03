@@ -813,7 +813,6 @@ fn test_loop_node_repeat_decoding() {
 
 #[test]
 #[rustfmt::skip]
-#[expect(clippy::needless_range_loop)]
 fn test_call_decoding() {
     
     // build a program which looks like this:
@@ -1107,7 +1106,6 @@ fn test_call_decoding() {
 
 #[test]
 #[rustfmt::skip]
-#[expect(clippy::needless_range_loop)]
 fn test_syscall_decoding() {
 
     // build a program which looks like this:

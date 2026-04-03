@@ -9,8 +9,9 @@ use super::{
         trace_state::{
             BlockAddressReplay, BlockStackReplay, DecoderState, StackState, SystemState,
         },
+        utils::RowMajorTraceWriter,
     },
-    core_trace_fragment::{BasicBlockContext, CoreTraceFragment},
+    core_trace_fragment::BasicBlockContext,
     processor::ReplayProcessor,
 };
 use crate::{
@@ -53,8 +54,8 @@ pub(crate) struct TracerFinalState {
 /// final state of the tracer (or the error, if one was encountered).
 #[derive(Debug)]
 pub(crate) struct CoreTraceGenerationTracer<'a> {
-    /// The trace fragment being populated with rows by this tracer.
-    fragment: &'a mut CoreTraceFragment<'a>,
+    /// The writer for the core trace fragment.
+    writer: RowMajorTraceWriter<'a, Felt>,
     /// The index of the next row to write in the trace fragment.
     row_write_index: usize,
 
@@ -107,13 +108,13 @@ pub(crate) struct CoreTraceGenerationTracer<'a> {
 
 impl<'a> CoreTraceGenerationTracer<'a> {
     pub fn new(
-        fragment: &'a mut CoreTraceFragment<'a>,
+        writer: RowMajorTraceWriter<'a, Felt>,
         decoder_state: DecoderState,
         block_address_replay: BlockAddressReplay,
         block_stack_replay: BlockStackReplay,
     ) -> Self {
         Self {
-            fragment,
+            writer,
             row_write_index: 0,
             decoder_state,
             block_address_replay,
@@ -635,7 +636,7 @@ fn get_node_in_forest(
 
 #[cfg(test)]
 mod tests {
-    use alloc::{vec, vec::Vec};
+    use alloc::vec;
 
     use miden_core::mast::{DynNodeBuilder, MastForestContributor};
 
@@ -649,6 +650,7 @@ mod tests {
                 MastForestResolutionReplay, MemoryReadsReplay, StackOverflowReplay, StackState,
                 SystemState,
             },
+            utils::RowMajorTraceWriter,
         },
     };
 
@@ -704,18 +706,11 @@ mod tests {
             1u32.into(),
         );
 
-        // Create a minimal CoreTraceFragment — its contents are unused by the method under
-        // test.
-        let mut columns_data: Vec<Vec<Felt>> =
-            (0..CORE_TRACE_WIDTH).map(|_| vec![ZERO; 1]).collect();
-        let column_slices: Vec<&mut [Felt]> =
-            columns_data.iter_mut().map(|v| v.as_mut_slice()).collect();
-        let mut fragment = CoreTraceFragment {
-            columns: column_slices.try_into().expect("CORE_TRACE_WIDTH columns"),
-        };
+        let mut buffer = vec![ZERO; CORE_TRACE_WIDTH];
+        let writer = RowMajorTraceWriter::new(&mut buffer, CORE_TRACE_WIDTH);
 
         let tracer = CoreTraceGenerationTracer::new(
-            &mut fragment,
+            writer,
             DecoderState { current_addr: ZERO, parent_addr: ZERO },
             BlockAddressReplay::default(),
             BlockStackReplay::default(),
