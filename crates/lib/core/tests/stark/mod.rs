@@ -8,7 +8,7 @@ use miden_core::{
     precompile::PrecompileTranscriptState,
     proof::HashFunction,
 };
-use miden_processor::{DefaultHost, Program, ProgramInfo};
+use miden_processor::{DefaultHost, ExecutionOptions, Program, ProgramInfo};
 use miden_utils_testing::{AdviceInputs, ProvingOptions, StackInputs, prove_sync};
 use rand::{Rng, RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
@@ -105,8 +105,15 @@ pub fn generate_recursive_verifier_data(
 
     let options = ProvingOptions::new(HashFunction::Poseidon2);
 
-    let (stack_outputs, proof) =
-        prove_sync(&program, stack_inputs, advice_inputs, &mut host, options).unwrap();
+    let (stack_outputs, proof) = prove_sync(
+        &program,
+        stack_inputs,
+        advice_inputs,
+        &mut host,
+        ExecutionOptions::default(),
+        options,
+    )
+    .unwrap();
 
     let program_info = ProgramInfo::from(program);
 
