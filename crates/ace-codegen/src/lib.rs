@@ -59,9 +59,12 @@ pub enum AceError {
     InvalidInputLayout { message: String },
 }
 
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
+
 pub use crate::{
     circuit::{AceCircuit, emit_circuit},
-    dag::{AceDag, DagBuilder, NodeId},
+    dag::{AceDag, DagBuilder, DagSnapshot, NodeId, NodeKind},
     encode::EncodedCircuit,
     layout::{InputCounts, InputKey, InputLayout},
     pipeline::{
