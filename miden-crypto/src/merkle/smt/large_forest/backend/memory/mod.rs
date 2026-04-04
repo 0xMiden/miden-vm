@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 use crate::{
     EMPTY_WORD, Map, Word,
     merkle::smt::{
-        Smt, SmtProof, VersionId,
+        LeafIndex, SMT_DEPTH, Smt, SmtLeaf, SmtProof, VersionId,
         large_forest::{
             Backend,
             backend::{BackendError, MutationSet, Result},
@@ -52,6 +52,23 @@ impl Backend for InMemoryBackend {
     fn open(&self, lineage: LineageId, key: Word) -> Result<SmtProof> {
         let tree = self.trees.get(&lineage).ok_or(BackendError::UnknownLineage(lineage))?;
         Ok(tree.tree.open(&key))
+    }
+
+    /// Returns the leaf stored at `leaf_index` in the SMT with the specified `lineage`.
+    ///
+    /// If no leaf is explicitly stored at the given index, an empty leaf for that index is
+    /// returned.
+    ///
+    /// # Errors
+    ///
+    /// - [`BackendError::UnknownLineage`] if the provided `lineage` is one not known by this
+    ///   backend.
+    fn get_leaf(&self, lineage: LineageId, leaf_index: LeafIndex<SMT_DEPTH>) -> Result<SmtLeaf> {
+        let tree = self.trees.get(&lineage).ok_or(BackendError::UnknownLineage(lineage))?;
+        Ok(tree
+            .tree
+            .get_leaf_by_index(leaf_index)
+            .unwrap_or_else(|| SmtLeaf::new_empty(leaf_index)))
     }
 
     /// Returns the value associated with the provided `key` in the SMT with the specified

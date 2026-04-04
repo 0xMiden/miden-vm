@@ -15,7 +15,7 @@ use crate::{
     merkle::{
         MerkleError,
         smt::{
-            SmtProof,
+            LeafIndex, SMT_DEPTH, SmtLeaf, SmtProof,
             large_forest::{
                 operation::{SmtForestUpdateBatch, SmtUpdateBatch},
                 root::{LineageId, TreeEntry, TreeWithRoot, VersionId},
@@ -82,6 +82,14 @@ where
     /// It is the responsibility of the forest to ensure lineage existence before querying the
     /// backend. The backend must return an error if the lineage does not exist.
     fn open(&self, lineage: LineageId, key: Word) -> Result<SmtProof>;
+
+    /// Returns the leaf stored at the provided `leaf_index` in the SMT with the specified
+    /// `lineage`. If no leaf is explicitly stored at the given index, the backend must return
+    /// an empty leaf for that index.
+    ///
+    /// It is the responsibility of the forest to ensure lineage existence before querying the
+    /// backend. The backend must return an error if the lineage does not exist.
+    fn get_leaf(&self, lineage: LineageId, leaf_index: LeafIndex<SMT_DEPTH>) -> Result<SmtLeaf>;
 
     /// Returns the value associated with the provided `key` in the SMT with the specified
     /// `lineage`, or [`None`] if no such value exists.

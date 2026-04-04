@@ -255,6 +255,24 @@ impl Backend for PersistentBackend {
         Ok(SmtProof::new_unchecked(merkle_path, leaf))
     }
 
+    /// Returns the leaf stored at `leaf_index` in the SMT with the specified `lineage`.
+    ///
+    /// If no leaf is explicitly stored at the given index, an empty leaf for that index is
+    /// returned.
+    ///
+    /// # Errors
+    ///
+    /// - [`BackendError::UnknownLineage`] if the provided `lineage` is not known by the backend.
+    /// - [`BackendError::Internal`] if the backing database cannot be accessed for some reason.
+    fn get_leaf(&self, lineage: LineageId, leaf_index: LeafIndex<SMT_DEPTH>) -> Result<SmtLeaf> {
+        if !self.lineages.contains_key(&lineage) {
+            return Err(BackendError::UnknownLineage(lineage));
+        }
+
+        let key = LeafKey { lineage, index: leaf_index.position() };
+        Ok(self.load_leaf_raw(&key)?.unwrap_or_else(|| SmtLeaf::new_empty(leaf_index)))
+    }
+
     /// Returns the value associated with the provided `key` in the specified `lineage`, or [`None`]
     /// if no such value exists.
     ///
@@ -1249,14 +1267,15 @@ impl PersistentBackend {
             .collect()
     }
 
-    /// Gets the leaf from disk in the provided `lineage` that would contain `key`.
-    fn load_leaf_for(&self, lineage: LineageId, key: Word) -> Result<Option<SmtLeaf>> {
+    /// Gets the leaf with the provided `key` from disk, or returns [`None`] if it is not stored.
+    ///
+    /// # Errors
+    ///
+    /// - [`BackendError::Internal`] if the database cannot be successfully queried.
+    #[inline(always)]
+    fn load_leaf_raw(&self, key: &LeafKey) -> Result<Option<SmtLeaf>> {
         let col = self.cf(LEAVES_CF)?;
-        let key_bytes = LeafKey {
-            lineage,
-            index: LeafIndex::from(key).position(),
-        }
-        .to_bytes();
+        let key_bytes = key.to_bytes();
         let leaf_bytes = self.db.get_cf(col, key_bytes)?;
         let leaf = match leaf_bytes {
             Some(bytes) => Some(SmtLeaf::read_from_bytes_with_budget(&bytes, bytes.len())?),
@@ -1264,6 +1283,19 @@ impl PersistentBackend {
         };
 
         Ok(leaf)
+    }
+
+    /// Gets the leaf from disk in the provided `lineage` that would contain `key`.
+    ///
+    /// # Errors
+    ///
+    /// - [`BackendError::Internal`] if the database cannot be successfully queried.
+    fn load_leaf_for(&self, lineage: LineageId, key: Word) -> Result<Option<SmtLeaf>> {
+        let key = LeafKey {
+            lineage,
+            index: LeafIndex::from(key).position(),
+        };
+        self.load_leaf_raw(&key)
     }
 
     /// Gets the column family corresponding to the subtree with root index `index`.

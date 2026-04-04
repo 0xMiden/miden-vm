@@ -24,7 +24,7 @@ use crate::{
                 LineageData,
                 history::{ChangedKeys, History, NodeChanges},
                 root::{LineageId, TreeEntry, TreeWithRoot},
-                test_utils::FallibleEntriesBackend,
+                test_utils::{FALLIBLE_READ_FAILURE_MESSAGE, FallibleEntriesBackend},
             },
         },
     },
@@ -1552,7 +1552,11 @@ fn entries_with_fallible_backend() -> Result<()> {
 
     // Third item should be the simulated error.
     let third = iter.next();
-    assert_matches!(&third, Some(Err(LargeSmtForestError::Unspecified(msg))) if msg == "simulated read failure");
+    assert_matches!(
+        &third,
+        Some(Err(LargeSmtForestError::Unspecified(message)))
+            if message == FALLIBLE_READ_FAILURE_MESSAGE
+    );
 
     // After faulting, the iterator must yield None — the remaining entries (4th, 5th) are never
     // returned.

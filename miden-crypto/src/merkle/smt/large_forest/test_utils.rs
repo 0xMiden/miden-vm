@@ -7,14 +7,16 @@ pub const UNUSED_ENTRY_COUNT: usize = 0;
 use alloc::{string::ToString, vec::Vec};
 use core::error::Error;
 
+use itertools::Itertools;
 use miden_field::{Felt, Word};
 use proptest::prelude::*;
 
 use crate::{
     EMPTY_WORD, Map, ONE, ZERO,
     merkle::smt::{
-        Backend, ForestInMemoryBackend, ForestOperation, LeafIndex, LineageId, MAX_LEAF_ENTRIES,
-        SMT_DEPTH, SmtForestUpdateBatch, SmtProof, SmtUpdateBatch, VersionId,
+        Backend, ForestInMemoryBackend, ForestOperation, LargeSmtForest, LeafIndex, LineageId,
+        MAX_LEAF_ENTRIES, RootInfo, SMT_DEPTH, Smt, SmtForestUpdateBatch, SmtProof, SmtUpdateBatch,
+        TreeId, VersionId,
         large_forest::{
             backend::{BackendError, Result as BackendResult},
             root::{TreeEntry, TreeWithRoot},
@@ -31,6 +33,9 @@ const MIN_BATCH_ENTRIES: usize = 0;
 
 /// The maximum number of entries that can be included in a batch.
 const MAX_BATCH_ENTRIES: usize = 300;
+
+/// The message used by [`FallibleEntriesBackend`] to simulate an iteration failure.
+pub const FALLIBLE_READ_FAILURE_MESSAGE: &str = "simulated read failure";
 
 // UTILS
 // ================================================================================================
@@ -51,6 +56,12 @@ pub fn arbitrary_lineage() -> impl Strategy<Value = LineageId> {
     prop::array::uniform32(any::<u8>()).prop_map(LineageId::new)
 }
 
+/// Generates two distinct lineage identifiers.
+pub fn arbitrary_distinct_lineages() -> impl Strategy<Value = (LineageId, LineageId)> {
+    (arbitrary_lineage(), arbitrary_lineage())
+        .prop_filter("lineages must be distinct", |(a, b)| a != b)
+}
+
 /// Generates an arbitrary version identifier.
 pub fn arbitrary_version() -> impl Strategy<Value = VersionId> {
     // As the proptests occasionally increment the version they are given, we exclude u64::MAX just
@@ -66,6 +77,11 @@ pub fn arbitrary_felt() -> impl Strategy<Value = Felt> {
 /// Generates an arbitrary valid word value.
 pub fn arbitrary_word() -> impl Strategy<Value = Word> {
     prop_oneof![prop::array::uniform4(arbitrary_felt()).prop_map(Word::new), Just(Word::empty()),]
+}
+
+/// Generates a non-empty word value.
+pub fn arbitrary_non_empty_word() -> impl Strategy<Value = Word> {
+    arbitrary_word().prop_filter("word must be non-empty", |word| *word != EMPTY_WORD)
 }
 
 /// Generates a random number of unique (non-overlapping) key-value pairs.
@@ -113,6 +129,115 @@ pub fn arbitrary_batch() -> impl Strategy<Value = SmtUpdateBatch> {
     })
 }
 
+/// Builds a reference [`Smt`] by applying `initial` to an empty tree.
+pub fn build_tree(initial: SmtUpdateBatch) -> core::result::Result<Smt, TestCaseError> {
+    let mut tree = Smt::new();
+    apply_batch(&mut tree, initial)?;
+    Ok(tree)
+}
+
+/// Applies a batch to the provided reference [`Smt`].
+pub fn apply_batch(
+    tree: &mut Smt,
+    batch: SmtUpdateBatch,
+) -> core::result::Result<(), TestCaseError> {
+    let mutations = tree
+        .compute_mutations(batch.consume().into_iter().map(Into::<(Word, Word)>::into))
+        .map_err(to_fail)?;
+    tree.apply_mutations(mutations).map_err(to_fail)
+}
+
+/// Collects the keys affected by a batch using the batch's canonicalized ordering and deduping.
+pub fn batch_keys(batch: &SmtUpdateBatch) -> Vec<Word> {
+    batch.clone().consume().into_iter().map(|operation| operation.key()).collect()
+}
+
+/// Sorts tree entries explicitly by `(key, value)` so tests compare sets without constraining
+/// backend iteration order.
+pub fn sorted_tree_entries(tree: &Smt) -> Vec<TreeEntry> {
+    let mut entries = tree
+        .entries()
+        .map(|(key, value)| TreeEntry { key: *key, value: *value })
+        .collect_vec();
+    entries.sort_by_key(|entry| (entry.key, entry.value));
+    entries
+}
+
+/// Sorts forest entries explicitly by `(key, value)` so tests compare observable contents rather
+/// than relying on unspecified iterator ordering.
+pub fn sorted_forest_entries<B: Backend>(
+    forest: &LargeSmtForest<B>,
+    tree: TreeId,
+) -> core::result::Result<Vec<TreeEntry>, TestCaseError> {
+    let mut entries = forest
+        .entries(tree)
+        .map_err(to_fail)?
+        .collect::<crate::merkle::smt::large_forest::Result<Vec<_>>>()
+        .map_err(to_fail)?;
+    entries.sort_by_key(|entry| (entry.key, entry.value));
+    Ok(entries)
+}
+
+fn word_to_option(value: Word) -> Option<Word> {
+    if value == EMPTY_WORD { None } else { Some(value) }
+}
+
+/// Asserts that the forest and reference tree agree on entries, counts, key lookups, and openings.
+pub fn assert_tree_queries_match<B: Backend>(
+    forest: &LargeSmtForest<B>,
+    tree_id: TreeId,
+    reference: &Smt,
+    sample_keys: &[Word],
+    assert_openings: bool,
+) -> core::result::Result<(), TestCaseError> {
+    let forest_entries = sorted_forest_entries(forest, tree_id)?;
+    let reference_entries = sorted_tree_entries(reference);
+    let reference_entry_count = reference_entries.len();
+    prop_assert_eq!(forest_entries, reference_entries);
+    prop_assert_eq!(forest.entry_count(tree_id).map_err(to_fail)?, reference_entry_count);
+
+    for key in sample_keys {
+        prop_assert_eq!(
+            forest.get(tree_id, *key).map_err(to_fail)?,
+            word_to_option(reference.get_value(key))
+        );
+        if assert_openings {
+            prop_assert_eq!(forest.open(tree_id, *key).map_err(to_fail)?, reference.open(key));
+        }
+    }
+
+    Ok(())
+}
+
+/// Asserts that the forest metadata for `lineage` matches the provided sequence of versions.
+pub fn assert_lineage_metadata<B: Backend>(
+    forest: &LargeSmtForest<B>,
+    lineage: LineageId,
+    versions: &[(VersionId, Word)],
+) -> core::result::Result<(), TestCaseError> {
+    let (latest_version, latest_root) =
+        versions.last().copied().expect("lineage must be non-empty");
+
+    prop_assert_eq!(forest.latest_version(lineage), Some(latest_version));
+    prop_assert_eq!(forest.latest_root(lineage), Some(latest_root));
+    prop_assert_eq!(
+        forest.lineage_roots(lineage).expect("lineage must be present").collect_vec(),
+        versions.iter().rev().map(|(_, root)| *root).collect_vec()
+    );
+
+    for (idx, (version, root)) in versions.iter().enumerate() {
+        let tree = TreeId::new(lineage, *version);
+        let expected = if idx + 1 == versions.len() {
+            RootInfo::LatestVersion(*root)
+        } else {
+            RootInfo::HistoricalVersion(*root)
+        };
+        prop_assert_eq!(forest.root_info(tree), expected);
+    }
+
+    Ok(())
+}
+
 // FALLIBLE ENTRIES BACKEND
 // ================================================================================================
 
@@ -148,7 +273,7 @@ impl<I: Iterator<Item = BackendResult<TreeEntry>>> Iterator for FallibleIter<I> 
         if self.count <= 2 {
             self.inner.next()
         } else {
-            Some(Err(BackendError::Unspecified("simulated read failure".into())))
+            Some(Err(BackendError::Unspecified(FALLIBLE_READ_FAILURE_MESSAGE.into())))
         }
     }
 }
@@ -156,6 +281,14 @@ impl<I: Iterator<Item = BackendResult<TreeEntry>>> Iterator for FallibleIter<I> 
 impl Backend for FallibleEntriesBackend {
     fn open(&self, lineage: LineageId, key: Word) -> BackendResult<SmtProof> {
         self.inner.open(lineage, key)
+    }
+
+    fn get_leaf(
+        &self,
+        lineage: LineageId,
+        leaf_index: LeafIndex<SMT_DEPTH>,
+    ) -> BackendResult<crate::merkle::smt::SmtLeaf> {
+        self.inner.get_leaf(lineage, leaf_index)
     }
 
     fn get(&self, lineage: LineageId, key: Word) -> BackendResult<Option<Word>> {
