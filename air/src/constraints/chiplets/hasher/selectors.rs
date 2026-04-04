@@ -22,7 +22,10 @@
 use miden_crypto::stark::air::AirBuilder;
 
 use super::HasherFlags;
-use crate::{MidenAirBuilder, constraints::utils::BoolNot, trace::HasherCols};
+use crate::{
+    MidenAirBuilder,
+    constraints::{chiplets::columns::HasherCols, utils::BoolNot},
+};
 
 // CONSTRAINT HELPERS
 // ================================================================================================

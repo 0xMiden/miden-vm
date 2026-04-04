@@ -24,7 +24,8 @@ pub mod config;
 mod constraints;
 
 pub mod trace;
-use trace::{AUX_TRACE_WIDTH, MainTraceRow, TRACE_WIDTH, bus_types};
+use constraints::columns::MainTraceRow;
+use trace::{AUX_TRACE_WIDTH, TRACE_WIDTH, bus_types};
 
 // RE-EXPORTS
 // ================================================================================================
@@ -209,7 +210,7 @@ impl BaseAir<Felt> for ProcessorAir {
 
 impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
     fn periodic_columns(&self) -> Vec<Vec<Felt>> {
-        trace::chiplets::PeriodicCols::periodic_columns()
+        constraints::chiplets::columns::PeriodicCols::periodic_columns()
     }
 
     fn num_randomness(&self) -> usize {

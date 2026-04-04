@@ -19,8 +19,8 @@ use miden_core::{chiplets::hasher::Hasher, field::PrimeCharacteristicRing};
 use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
-    MidenAirBuilder,
-    trace::chiplets::{HasherPeriodicCols, hasher::STATE_WIDTH},
+    MidenAirBuilder, constraints::chiplets::columns::HasherPeriodicCols,
+    trace::chiplets::hasher::STATE_WIDTH,
 };
 
 // CONSTRAINT HELPERS

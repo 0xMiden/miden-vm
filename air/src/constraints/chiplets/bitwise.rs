@@ -28,8 +28,11 @@ use miden_core::field::PrimeCharacteristicRing;
 use super::selectors::ChipletFlags;
 use crate::{
     AirBuilder, MainTraceRow, MidenAirBuilder,
-    constraints::{constants::F_16, utils::horner_eval_bits},
-    trace::{BitwiseCols, chiplets::PeriodicCols},
+    constraints::{
+        chiplets::columns::{BitwiseCols, PeriodicCols},
+        constants::F_16,
+        utils::horner_eval_bits,
+    },
 };
 
 // ENTRY POINTS

@@ -17,68 +17,6 @@ pub use miden_core::{Word, crypto::hash::Poseidon2 as Hasher};
 
 use super::{Felt, HASH_KERNEL_VTABLE_AUX_TRACE_OFFSET, ONE, ZERO, create_range};
 
-// COLUMN STRUCTS
-// ================================================================================================
-
-/// Hasher chiplet columns (16 columns), viewed from `chiplets[1..17]`.
-///
-/// ## Layout
-///
-/// ```text
-/// | selectors[3] |     state[12]                                        | node_index |
-/// |              | rate0[4] (= digest) | rate1[4]     | capacity[4]     |            |
-/// | s0, s1, s2   | h0  h1  h2  h3      | h4  h5  h6  h7 | h8  h9  h10 h11 | i      |
-/// ```
-///
-/// The state holds a Poseidon2 sponge in `[RATE0, RATE1, CAPACITY]` layout.
-/// Helper methods `rate0()`, `rate1()`, `capacity()`, and `digest()` provide
-/// sub-views into the state array.
-#[repr(C)]
-pub struct HasherCols<T> {
-    /// Hasher-internal selectors hs0, hs1, hs2.
-    pub selectors: [T; NUM_SELECTORS],
-    /// Poseidon2 state (12 field elements: 8 rate + 4 capacity).
-    pub state: [T; STATE_WIDTH],
-    /// Merkle tree node index.
-    pub node_index: T,
-}
-
-impl<T: Copy> HasherCols<T> {
-    /// Returns the rate portion of the state (state[0..8]).
-    pub fn rate(&self) -> [T; RATE_LEN] {
-        [
-            self.state[0],
-            self.state[1],
-            self.state[2],
-            self.state[3],
-            self.state[4],
-            self.state[5],
-            self.state[6],
-            self.state[7],
-        ]
-    }
-
-    /// Returns the capacity portion of the state (state[8..12]).
-    pub fn capacity(&self) -> [T; CAPACITY_LEN] {
-        [self.state[8], self.state[9], self.state[10], self.state[11]]
-    }
-
-    /// Returns the digest portion of the state (state[0..4]).
-    pub fn digest(&self) -> [T; DIGEST_LEN] {
-        [self.state[0], self.state[1], self.state[2], self.state[3]]
-    }
-
-    /// Returns rate0 (state[0..4]).
-    pub fn rate0(&self) -> [T; DIGEST_LEN] {
-        [self.state[0], self.state[1], self.state[2], self.state[3]]
-    }
-
-    /// Returns rate1 (state[4..8]).
-    pub fn rate1(&self) -> [T; DIGEST_LEN] {
-        [self.state[4], self.state[5], self.state[6], self.state[7]]
-    }
-}
-
 // TYPES ALIASES
 // ================================================================================================
 

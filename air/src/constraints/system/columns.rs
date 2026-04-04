@@ -1,8 +1,5 @@
 use miden_core::WORD_SIZE;
 
-// SYSTEM COLUMNS
-// ================================================================================================
-
 /// System columns in the main execution trace (6 columns).
 ///
 /// These columns track global execution state: clock cycle, execution context, and

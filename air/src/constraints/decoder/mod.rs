@@ -66,16 +66,18 @@
 //! | PUSH      | f_push       |   5    |
 //! | f_ctrl    | (composite)  |   5    |
 
+pub mod columns;
+
 use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
     Felt, MainTraceRow, MidenAirBuilder,
     constraints::{
         constants::{F_1, F_128, HASH_CYCLE_LEN_FELT},
+        decoder::columns::DecoderCols,
         op_flags::OpFlags,
         utils::{BoolNot, horner_eval_bits},
     },
-    trace::DecoderCols,
 };
 
 pub mod bus;

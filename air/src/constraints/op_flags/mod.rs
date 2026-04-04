@@ -31,9 +31,9 @@ use miden_core::{
     operations::opcodes,
 };
 
+use crate::constraints::{decoder::columns::DecoderCols, stack::columns::StackCols};
 #[cfg(test)]
 use crate::trace::decoder::{NUM_OP_BITS, OP_BITS_RANGE};
-use crate::trace::{DecoderCols, StackCols};
 
 // CONSTANTS
 // ================================================================================================

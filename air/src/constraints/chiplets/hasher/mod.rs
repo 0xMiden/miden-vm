@@ -40,11 +40,11 @@ use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
     MainTraceRow, MidenAirBuilder,
-    constraints::chiplets::selectors::ChipletFlags,
-    trace::{
-        HasherCols,
-        chiplets::{HasherPeriodicCols, PeriodicCols, hasher::STATE_WIDTH},
+    constraints::chiplets::{
+        columns::{HasherCols, HasherPeriodicCols, PeriodicCols},
+        selectors::ChipletFlags,
     },
+    trace::chiplets::hasher::STATE_WIDTH,
 };
 
 /// Precomputed hasher flags derived from selectors and cycle markers.

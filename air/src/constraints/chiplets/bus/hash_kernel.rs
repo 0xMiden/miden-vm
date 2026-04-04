@@ -20,7 +20,7 @@ use crate::{
     Felt, MainTraceRow, MidenAirBuilder,
     constraints::{
         bus::indices::B_HASH_KERNEL,
-        chiplets::{hasher::flags, selectors::ChipletSelectors},
+        chiplets::{columns::PeriodicCols, hasher::flags, selectors::ChipletSelectors},
         op_flags::OpFlags,
         utils::BoolNot,
     },
@@ -28,7 +28,6 @@ use crate::{
         Challenges, LOG_PRECOMPILE_LABEL,
         bus_types::{CHIPLETS_BUS, LOG_PRECOMPILE_TRANSCRIPT, SIBLING_TABLE},
         chiplets::{
-            PeriodicCols,
             ace::{ACE_INSTRUCTION_ID1_OFFSET, ACE_INSTRUCTION_ID2_OFFSET},
             memory::{MEMORY_READ_ELEMENT_LABEL, MEMORY_READ_WORD_LABEL},
         },

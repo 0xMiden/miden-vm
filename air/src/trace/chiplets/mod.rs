@@ -9,25 +9,6 @@ pub mod bitwise;
 pub mod hasher;
 pub mod kernel_rom;
 pub mod memory;
-pub mod periodic;
-
-// RE-EXPORTS
-// ================================================================================================
-
-pub use ace::{AceCols, AceEvalCols, AceReadCols};
-pub use bitwise::BitwiseCols;
-pub use hasher::HasherCols;
-pub use kernel_rom::KernelRomCols;
-pub use memory::MemoryCols;
-pub use periodic::{BitwisePeriodicCols, HasherPeriodicCols, PeriodicCols};
-
-/// Zero-copy cast from a slice to a `#[repr(C)]` chiplet column struct.
-pub(crate) fn borrow_chiplet<T, S>(slice: &[T]) -> &S {
-    let (prefix, cols, suffix) = unsafe { slice.align_to::<S>() };
-    debug_assert!(prefix.is_empty() && suffix.is_empty() && cols.len() == 1);
-    &cols[0]
-}
-
 // CONSTANTS
 // ================================================================================================
 

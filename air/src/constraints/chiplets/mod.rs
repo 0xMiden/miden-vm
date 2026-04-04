@@ -13,6 +13,7 @@
 pub mod ace;
 pub mod bitwise;
 pub mod bus;
+pub mod columns;
 pub mod hasher;
 pub mod kernel_rom;
 pub mod memory;

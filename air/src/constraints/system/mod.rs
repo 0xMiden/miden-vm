@@ -29,6 +29,8 @@
 //! Note: END operation's restoration is handled by the block stack table (bus-based),
 //! not by these constraints. These constraints only handle the non-END cases.
 
+pub mod columns;
+
 use miden_crypto::stark::air::AirBuilder;
 
 use crate::{

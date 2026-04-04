@@ -26,6 +26,7 @@ use crate::{MainTraceRow, MidenAirBuilder, trace::Challenges};
 
 pub mod bus;
 pub mod chiplets;
+pub mod columns;
 pub mod constants;
 pub mod decoder;
 pub mod ext_field;

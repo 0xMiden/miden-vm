@@ -7,31 +7,16 @@ mod challenges;
 pub use challenges::Challenges;
 
 pub mod chiplets;
-mod columns;
 pub mod decoder;
 pub mod range;
 pub mod stack;
-mod system;
 
 mod rows;
 pub use rows::{RowIndex, RowIndexError};
 
 mod main_trace;
-// RE-EXPORTS: column structs (from columns.rs)
-// RE-EXPORTS: sub-module column structs
-pub use chiplets::{
-    AceCols, AceEvalCols, AceReadCols, BitwiseCols, HasherCols, KernelRomCols, MemoryCols,
-};
-pub use columns::{
-    AUX_COL_MAP, AuxCols, MAIN_COL_MAP, MainCols, MainTraceRow, NUM_AUX_COLS, NUM_MAIN_COLS,
-    indices_arr,
-};
-pub use decoder::{DecoderCols, EndBlockFlags};
-pub use main_trace::MainTrace;
+pub use main_trace::{MainTrace, MainTraceRow};
 pub use miden_crypto::stark::air::AuxBuilder;
-pub use range::RangeCols;
-pub use stack::StackCols;
-pub use system::SystemCols;
 
 // CONSTANTS
 // ================================================================================================
@@ -277,86 +262,4 @@ pub mod bus_types {
     pub const ACE_WIRING_BUS: usize = 8;
     /// Total number of distinct bus interaction types.
     pub const NUM_BUS_TYPES: usize = 9;
-}
-
-// TESTS
-// ================================================================================================
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // --- Main trace column map vs legacy constants -----------------------------------------------
-
-    #[test]
-    fn col_map_system() {
-        assert_eq!(MAIN_COL_MAP.system.clk, CLK_COL_IDX);
-        assert_eq!(MAIN_COL_MAP.system.ctx, CTX_COL_IDX);
-        assert_eq!(MAIN_COL_MAP.system.fn_hash[0], FN_HASH_OFFSET);
-        assert_eq!(MAIN_COL_MAP.system.fn_hash[3], FN_HASH_OFFSET + 3);
-    }
-
-    #[test]
-    fn col_map_decoder() {
-        assert_eq!(MAIN_COL_MAP.decoder.addr, DECODER_TRACE_OFFSET + decoder::ADDR_COL_IDX);
-        assert_eq!(MAIN_COL_MAP.decoder.op_bits[0], DECODER_TRACE_OFFSET + decoder::OP_BITS_OFFSET);
-        assert_eq!(
-            MAIN_COL_MAP.decoder.op_bits[6],
-            DECODER_TRACE_OFFSET + decoder::OP_BITS_OFFSET + 6
-        );
-        assert_eq!(
-            MAIN_COL_MAP.decoder.hasher_state[0],
-            DECODER_TRACE_OFFSET + decoder::HASHER_STATE_OFFSET
-        );
-        assert_eq!(MAIN_COL_MAP.decoder.in_span, DECODER_TRACE_OFFSET + decoder::IN_SPAN_COL_IDX);
-        assert_eq!(
-            MAIN_COL_MAP.decoder.group_count,
-            DECODER_TRACE_OFFSET + decoder::GROUP_COUNT_COL_IDX
-        );
-        assert_eq!(MAIN_COL_MAP.decoder.op_index, DECODER_TRACE_OFFSET + decoder::OP_INDEX_COL_IDX);
-        assert_eq!(
-            MAIN_COL_MAP.decoder.batch_flags[0],
-            DECODER_TRACE_OFFSET + decoder::OP_BATCH_FLAGS_OFFSET
-        );
-        assert_eq!(
-            MAIN_COL_MAP.decoder.extra[0],
-            DECODER_TRACE_OFFSET + decoder::OP_BITS_EXTRA_COLS_OFFSET
-        );
-    }
-
-    #[test]
-    fn col_map_stack() {
-        assert_eq!(MAIN_COL_MAP.stack.top[0], STACK_TRACE_OFFSET + stack::STACK_TOP_OFFSET);
-        assert_eq!(MAIN_COL_MAP.stack.top[15], STACK_TRACE_OFFSET + 15);
-        assert_eq!(MAIN_COL_MAP.stack.b0, STACK_TRACE_OFFSET + stack::B0_COL_IDX);
-        assert_eq!(MAIN_COL_MAP.stack.b1, STACK_TRACE_OFFSET + stack::B1_COL_IDX);
-        assert_eq!(MAIN_COL_MAP.stack.h0, STACK_TRACE_OFFSET + stack::H0_COL_IDX);
-    }
-
-    #[test]
-    fn col_map_range() {
-        assert_eq!(MAIN_COL_MAP.range.multiplicity, range::M_COL_IDX);
-        assert_eq!(MAIN_COL_MAP.range.value, range::V_COL_IDX);
-    }
-
-    #[test]
-    fn col_map_chiplets() {
-        assert_eq!(MAIN_COL_MAP.chiplets[0], CHIPLETS_OFFSET);
-        assert_eq!(MAIN_COL_MAP.chiplets[19], CHIPLETS_OFFSET + 19);
-    }
-
-    // --- Auxiliary trace column map vs legacy constants
-    // -------------------------------------------
-
-    #[test]
-    fn aux_col_map() {
-        assert_eq!(AUX_COL_MAP.p1_block_stack, DECODER_AUX_TRACE_OFFSET);
-        assert_eq!(AUX_COL_MAP.p2_block_hash, DECODER_AUX_TRACE_OFFSET + 1);
-        assert_eq!(AUX_COL_MAP.p3_op_group, DECODER_AUX_TRACE_OFFSET + 2);
-        assert_eq!(AUX_COL_MAP.stack_overflow, STACK_AUX_TRACE_OFFSET);
-        assert_eq!(AUX_COL_MAP.range_check, RANGE_CHECK_AUX_TRACE_OFFSET);
-        assert_eq!(AUX_COL_MAP.hash_kernel_vtable, HASH_KERNEL_VTABLE_AUX_TRACE_OFFSET);
-        assert_eq!(AUX_COL_MAP.chiplets_bus, CHIPLETS_BUS_AUX_TRACE_OFFSET);
-        assert_eq!(AUX_COL_MAP.ace_wiring, ACE_CHIPLET_WIRING_BUS_OFFSET);
-    }
 }

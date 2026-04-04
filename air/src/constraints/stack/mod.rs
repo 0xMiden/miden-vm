@@ -4,6 +4,7 @@
 //! and stack overflow constraints.
 
 pub mod bus;
+pub mod columns;
 pub mod crypto;
 pub mod general;
 pub mod ops;

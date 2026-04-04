@@ -1,21 +1,28 @@
 use alloc::vec::Vec;
-use core::ops::Range;
+use core::{
+    borrow::{Borrow, BorrowMut},
+    ops::Range,
+};
 
 use miden_core::{
-    Felt, ONE, Word, ZERO,
+    Felt, ONE, WORD_SIZE, Word, ZERO,
     field::PrimeCharacteristicRing,
     utils::{Matrix, RowMajorMatrix, range},
 };
 
 use super::{
     CHIPLETS_OFFSET, CHIPLETS_WIDTH, CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET,
-    FN_HASH_OFFSET, PADDED_TRACE_WIDTH, RANGE_CHECK_TRACE_OFFSET, RANGE_CHECK_TRACE_WIDTH,
-    RowIndex, STACK_TRACE_OFFSET,
+    DECODER_TRACE_WIDTH, FN_HASH_OFFSET, PADDED_TRACE_WIDTH, RANGE_CHECK_TRACE_OFFSET,
+    RANGE_CHECK_TRACE_WIDTH, RowIndex, STACK_TRACE_OFFSET, STACK_TRACE_WIDTH,
     chiplets::{
         BITWISE_A_COL_IDX, BITWISE_B_COL_IDX, BITWISE_OUTPUT_COL_IDX, HASHER_NODE_INDEX_COL_IDX,
         HASHER_STATE_COL_RANGE, MEMORY_CLK_COL_IDX, MEMORY_CTX_COL_IDX, MEMORY_IDX0_COL_IDX,
         MEMORY_IDX1_COL_IDX, MEMORY_V_COL_RANGE, MEMORY_WORD_COL_IDX, NUM_ACE_SELECTORS,
-        ace::{ACE_COL_MAP, ACE_EVAL_COL_MAP, ACE_READ_COL_MAP, MODE_OFFSET},
+        ace::{
+            CLK_IDX, CTX_IDX, EVAL_OP_IDX, ID_0_IDX, ID_1_IDX, ID_2_IDX, M_0_IDX, M_1_IDX, PTR_IDX,
+            READ_NUM_EVAL_IDX, SELECTOR_BLOCK_IDX, SELECTOR_START_IDX, V_0_0_IDX, V_0_1_IDX,
+            V_1_0_IDX, V_1_1_IDX, V_2_0_IDX, V_2_1_IDX,
+        },
         hasher::{DIGEST_LEN, HASH_CYCLE_LEN, LAST_CYCLE_ROW, STATE_WIDTH},
     },
     decoder::{
@@ -32,6 +39,53 @@ use super::{
 
 const DECODER_HASHER_RANGE: Range<usize> =
     range(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET, NUM_HASHER_COLUMNS);
+
+// MAIN TRACE ROW
+// ================================================================================================
+
+/// Column layout of the main trace row.
+#[derive(Debug)]
+#[repr(C)]
+pub struct MainTraceRow<T> {
+    // System
+    pub clk: T,
+    pub ctx: T,
+    pub fn_hash: [T; WORD_SIZE],
+
+    // Decoder
+    pub decoder: [T; DECODER_TRACE_WIDTH],
+
+    // Stack
+    pub stack: [T; STACK_TRACE_WIDTH],
+
+    // Range checker
+    pub range: [T; RANGE_CHECK_TRACE_WIDTH],
+
+    // Chiplets
+    pub chiplets: [T; CHIPLETS_WIDTH],
+}
+
+impl<T> Borrow<MainTraceRow<T>> for [T] {
+    fn borrow(&self) -> &MainTraceRow<T> {
+        debug_assert_eq!(self.len(), crate::TRACE_WIDTH);
+        let (prefix, shorts, suffix) = unsafe { self.align_to::<MainTraceRow<T>>() };
+        debug_assert!(prefix.is_empty(), "Alignment should match");
+        debug_assert!(suffix.is_empty(), "Alignment should match");
+        debug_assert_eq!(shorts.len(), 1);
+        &shorts[0]
+    }
+}
+
+impl<T> BorrowMut<MainTraceRow<T>> for [T] {
+    fn borrow_mut(&mut self) -> &mut MainTraceRow<T> {
+        debug_assert_eq!(self.len(), crate::TRACE_WIDTH);
+        let (prefix, shorts, suffix) = unsafe { self.align_to_mut::<MainTraceRow<T>>() };
+        debug_assert!(prefix.is_empty(), "Alignment should match");
+        debug_assert!(suffix.is_empty(), "Alignment should match");
+        debug_assert_eq!(shorts.len(), 1);
+        &mut shorts[0]
+    }
+}
 
 // MAIN TRACE MATRIX
 // ================================================================================================
@@ -797,43 +851,43 @@ impl MainTrace {
     }
 
     pub fn chiplet_ace_start_selector(&self, i: RowIndex) -> Felt {
-        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + ACE_COL_MAP.s_start)
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + SELECTOR_START_IDX)
     }
 
     pub fn chiplet_ace_block_selector(&self, i: RowIndex) -> Felt {
-        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + ACE_COL_MAP.s_block)
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + SELECTOR_BLOCK_IDX)
     }
 
     pub fn chiplet_ace_ctx(&self, i: RowIndex) -> Felt {
-        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + ACE_COL_MAP.ctx)
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + CTX_IDX)
     }
 
     pub fn chiplet_ace_ptr(&self, i: RowIndex) -> Felt {
-        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + ACE_COL_MAP.ptr)
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + PTR_IDX)
     }
 
     pub fn chiplet_ace_clk(&self, i: RowIndex) -> Felt {
-        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + ACE_COL_MAP.clk)
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + CLK_IDX)
     }
 
     pub fn chiplet_ace_eval_op(&self, i: RowIndex) -> Felt {
-        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + ACE_COL_MAP.eval_op)
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + EVAL_OP_IDX)
     }
 
     pub fn chiplet_ace_num_eval_rows(&self, i: RowIndex) -> Felt {
-        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + MODE_OFFSET + ACE_READ_COL_MAP.num_eval)
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + READ_NUM_EVAL_IDX)
     }
 
     pub fn chiplet_ace_id_0(&self, i: RowIndex) -> Felt {
-        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + ACE_COL_MAP.id_0)
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + ID_0_IDX)
     }
 
     pub fn chiplet_ace_v_0_0(&self, i: RowIndex) -> Felt {
-        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + ACE_COL_MAP.v_0.0)
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + V_0_0_IDX)
     }
 
     pub fn chiplet_ace_v_0_1(&self, i: RowIndex) -> Felt {
-        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + ACE_COL_MAP.v_0.1)
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + V_0_1_IDX)
     }
 
     pub fn chiplet_ace_wire_0(&self, i: RowIndex) -> [Felt; 3] {
@@ -845,15 +899,15 @@ impl MainTrace {
     }
 
     pub fn chiplet_ace_id_1(&self, i: RowIndex) -> Felt {
-        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + ACE_COL_MAP.id_1)
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + ID_1_IDX)
     }
 
     pub fn chiplet_ace_v_1_0(&self, i: RowIndex) -> Felt {
-        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + ACE_COL_MAP.v_1.0)
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + V_1_0_IDX)
     }
 
     pub fn chiplet_ace_v_1_1(&self, i: RowIndex) -> Felt {
-        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + ACE_COL_MAP.v_1.1)
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + V_1_1_IDX)
     }
 
     pub fn chiplet_ace_wire_1(&self, i: RowIndex) -> [Felt; 3] {
@@ -865,15 +919,15 @@ impl MainTrace {
     }
 
     pub fn chiplet_ace_id_2(&self, i: RowIndex) -> Felt {
-        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + MODE_OFFSET + ACE_EVAL_COL_MAP.id_2)
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + ID_2_IDX)
     }
 
     pub fn chiplet_ace_v_2_0(&self, i: RowIndex) -> Felt {
-        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + MODE_OFFSET + ACE_EVAL_COL_MAP.v_2.0)
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + V_2_0_IDX)
     }
 
     pub fn chiplet_ace_v_2_1(&self, i: RowIndex) -> Felt {
-        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + MODE_OFFSET + ACE_EVAL_COL_MAP.v_2.1)
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + V_2_1_IDX)
     }
 
     pub fn chiplet_ace_wire_2(&self, i: RowIndex) -> [Felt; 3] {
@@ -885,11 +939,11 @@ impl MainTrace {
     }
 
     pub fn chiplet_ace_m_1(&self, i: RowIndex) -> Felt {
-        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + MODE_OFFSET + ACE_READ_COL_MAP.m_1)
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + M_1_IDX)
     }
 
     pub fn chiplet_ace_m_0(&self, i: RowIndex) -> Felt {
-        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + MODE_OFFSET + ACE_READ_COL_MAP.m_0)
+        self.get(i, CHIPLETS_OFFSET + NUM_ACE_SELECTORS + M_0_IDX)
     }
 
     pub fn chiplet_ace_is_read_row(&self, i: RowIndex) -> bool {

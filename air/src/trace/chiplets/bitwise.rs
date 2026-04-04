@@ -1,30 +1,5 @@
 use super::{Felt, ONE, Range, ZERO, create_range};
 
-// COLUMN STRUCTS
-// ================================================================================================
-
-/// Bitwise chiplet columns (13 columns), viewed from `chiplets[2..15]`.
-///
-/// Bit decomposition columns (`a_bits`, `b_bits`) are in **little-endian** order:
-/// `value = bits[0] + 2*bits[1] + 4*bits[2] + 8*bits[3]`.
-#[repr(C)]
-pub struct BitwiseCols<T> {
-    /// Operation flag: 0 = AND, 1 = XOR.
-    pub op_flag: T,
-    /// Aggregated input a.
-    pub a: T,
-    /// Aggregated input b.
-    pub b: T,
-    /// 4-bit decomposition of a.
-    pub a_bits: [T; NUM_DECOMP_BITS],
-    /// 4-bit decomposition of b.
-    pub b_bits: [T; NUM_DECOMP_BITS],
-    /// Previous aggregated output.
-    pub prev_output: T,
-    /// Current aggregated output.
-    pub output: T,
-}
-
 // CONSTANTS
 // ================================================================================================
 

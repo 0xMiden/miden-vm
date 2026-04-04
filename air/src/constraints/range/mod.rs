@@ -6,6 +6,8 @@
 //!
 //! Bus constraints for the range checker are in `bus`.
 
+pub mod columns;
+
 use miden_crypto::stark::air::AirBuilder;
 
 use crate::{MainTraceRow, MidenAirBuilder, constraints::constants::*};

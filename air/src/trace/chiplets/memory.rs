@@ -2,41 +2,6 @@ use miden_core::WORD_SIZE;
 
 use super::{Felt, ONE, Range, ZERO, create_range};
 
-// COLUMN STRUCTS
-// ================================================================================================
-
-/// Memory chiplet columns (15 columns), viewed from `chiplets[3..18]`.
-///
-/// When reading from a new word (first access to a context/word pair), the `values`
-/// are initialized to zero.
-#[repr(C)]
-pub struct MemoryCols<T> {
-    /// Read/write flag (0 = write, 1 = read).
-    pub is_read: T,
-    /// Element/word flag (0 = element, 1 = word).
-    pub is_word: T,
-    /// Memory context ID.
-    pub ctx: T,
-    /// Word address.
-    pub word_addr: T,
-    /// First bit of the address index within the word.
-    pub idx0: T,
-    /// Second bit of the address index within the word.
-    pub idx1: T,
-    /// Clock cycle of the memory access.
-    pub clk: T,
-    /// Values stored at this context/word/clock after the operation.
-    pub values: [T; WORD_SIZE],
-    /// Lower 16 bits of delta.
-    pub d0: T,
-    /// Upper 16 bits of delta.
-    pub d1: T,
-    /// Inverse of delta.
-    pub d_inv: T,
-    /// Flag: same context and same word as previous operation.
-    pub is_same_ctx_and_word: T,
-}
-
 // CONSTANTS
 // ================================================================================================
 

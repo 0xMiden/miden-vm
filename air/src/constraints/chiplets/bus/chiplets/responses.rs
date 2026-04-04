@@ -15,12 +15,15 @@ use super::{
 };
 use crate::{
     Felt, MainTraceRow, MidenAirBuilder,
-    constraints::{chiplets::selectors::ChipletSelectors, constants::*, utils::BoolNot},
+    constraints::{
+        chiplets::{columns::PeriodicCols, selectors::ChipletSelectors},
+        constants::*,
+        utils::BoolNot,
+    },
     trace::{
         Challenges,
         bus_types::CHIPLETS_BUS,
         chiplets::{
-            PeriodicCols,
             ace::ACE_INIT_LABEL,
             bitwise::{BITWISE_AND_LABEL, BITWISE_XOR_LABEL},
             kernel_rom::{KERNEL_PROC_CALL_LABEL, KERNEL_PROC_INIT_LABEL},

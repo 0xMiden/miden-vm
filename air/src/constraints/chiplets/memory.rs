@@ -33,8 +33,7 @@ use miden_crypto::stark::air::AirBuilder;
 use super::selectors::ChipletFlags;
 use crate::{
     MainTraceRow, MidenAirBuilder,
-    constraints::{constants::TWO_POW_16, utils::BoolNot},
-    trace::MemoryCols,
+    constraints::{chiplets::columns::MemoryCols, constants::TWO_POW_16, utils::BoolNot},
 };
 
 // ENTRY POINTS
