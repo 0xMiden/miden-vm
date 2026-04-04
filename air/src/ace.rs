@@ -110,7 +110,9 @@ where
     let partial = builder.add(constraint_root, term2);
     let root = builder.add(partial, term3);
 
-    AceDag { nodes: builder.into_nodes(), root }
+    let mut dag = AceDag { nodes: builder.into_nodes(), root };
+    dag.compact();
+    dag
 }
 
 /// Build the running-product identity check.

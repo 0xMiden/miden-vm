@@ -94,3 +94,72 @@ pub struct AceDag<EF> {
     /// Root node of the verifier equation.
     pub root: NodeId,
 }
+
+impl<EF: Clone> AceDag<EF> {
+    /// Remove unreachable nodes and compact the node vector.
+    ///
+    /// After compaction, `nodes` contains only nodes reachable from `root`,
+    /// in the same topological order. All `NodeId` references are remapped
+    /// to reflect the new contiguous indices.
+    pub fn compact(&mut self) {
+        let n = self.nodes.len();
+        if n == 0 {
+            return;
+        }
+
+        // Mark reachable nodes via DFS from root.
+        let mut reachable = vec![false; n];
+        let mut stack = vec![self.root.0];
+        while let Some(idx) = stack.pop() {
+            if reachable[idx] {
+                continue;
+            }
+            reachable[idx] = true;
+            match &self.nodes[idx] {
+                NodeKind::Add(a, b) | NodeKind::Sub(a, b) | NodeKind::Mul(a, b) => {
+                    stack.push(a.0);
+                    stack.push(b.0);
+                },
+                NodeKind::Neg(a) => {
+                    stack.push(a.0);
+                },
+                NodeKind::Input(_) | NodeKind::Constant(_) => {},
+            }
+        }
+
+        // Build old-to-new index remapping.
+        let mut remap = vec![0usize; n];
+        let mut new_len = 0usize;
+        for i in 0..n {
+            if reachable[i] {
+                remap[i] = new_len;
+                new_len += 1;
+            }
+        }
+
+        // Early exit if nothing was removed.
+        if new_len == n {
+            return;
+        }
+
+        // Build compacted node vec with remapped ids.
+        let mut new_nodes = Vec::with_capacity(new_len);
+        for (i, node) in self.nodes.iter().enumerate() {
+            if !reachable[i] {
+                continue;
+            }
+            let remapped = match node {
+                NodeKind::Input(k) => NodeKind::Input(*k),
+                NodeKind::Constant(v) => NodeKind::Constant(v.clone()),
+                NodeKind::Add(a, b) => NodeKind::Add(NodeId(remap[a.0]), NodeId(remap[b.0])),
+                NodeKind::Sub(a, b) => NodeKind::Sub(NodeId(remap[a.0]), NodeId(remap[b.0])),
+                NodeKind::Mul(a, b) => NodeKind::Mul(NodeId(remap[a.0]), NodeId(remap[b.0])),
+                NodeKind::Neg(a) => NodeKind::Neg(NodeId(remap[a.0])),
+            };
+            new_nodes.push(remapped);
+        }
+
+        self.nodes = new_nodes;
+        self.root = NodeId(remap[self.root.0]);
+    }
+}

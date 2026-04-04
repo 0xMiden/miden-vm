@@ -171,11 +171,11 @@ fn regenerate_ace_circuit_data() {
         let start = config.find(marker).expect("RELATION_DIGEST not found in config.rs");
         let block_start = start + marker.len();
         let block_end = config[block_start..].find("];").unwrap() + block_start;
-        let new_block = relation_digest
+        let mut new_block: String = relation_digest
             .iter()
             .map(|f| format!("\n    Felt::new({}),", f.as_canonical_u64()))
-            .collect::<String>()
-            + "\n";
+            .collect();
+        new_block.push('\n');
         config.replace_range(block_start..block_end, &new_block);
         write_file(config_path, &config);
         println!("wrote air/src/config.rs (RELATION_DIGEST)");
