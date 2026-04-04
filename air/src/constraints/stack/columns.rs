@@ -1,14 +1,10 @@
-use core::ops::Index;
-
 use miden_core::program::MIN_STACK_DEPTH;
-
-use crate::trace::STACK_TRACE_WIDTH;
 
 /// Stack columns in the main execution trace (19 columns).
 #[repr(C)]
 pub struct StackCols<T> {
     /// Top 16 stack elements s0-s15.
-    pub top: [T; MIN_STACK_DEPTH],
+    pub(crate) top: [T; MIN_STACK_DEPTH],
     /// Stack depth.
     pub b0: T,
     /// Overflow table parent address.
@@ -17,11 +13,16 @@ pub struct StackCols<T> {
     pub h0: T,
 }
 
-/// Flat index access for backwards compatibility during migration.
-impl<T> Index<usize> for StackCols<T> {
-    type Output = T;
-    fn index(&self, idx: usize) -> &T {
-        assert!(idx < STACK_TRACE_WIDTH, "stack column index {idx} out of bounds");
-        unsafe { &*(self as *const Self as *const T).add(idx) }
+impl<T: Copy> StackCols<T> {
+    /// Returns the stack element at position `idx` (0 = top of stack).
+    pub fn get(&self, idx: usize) -> T {
+        self.top[idx]
+    }
+}
+
+impl<T> StackCols<T> {
+    /// Returns a slice of stack elements for the given range.
+    pub fn elements(&self, range: impl core::slice::SliceIndex<[T], Output = [T]>) -> &[T] {
+        &self.top[range]
     }
 }

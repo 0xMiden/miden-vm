@@ -20,9 +20,9 @@
 use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 
 use crate::{
-    MainTraceRow, MidenAirBuilder,
+    MainCols, MidenAirBuilder,
     constraints::{bus::indices::P1_STACK, constants::F_16, op_flags::OpFlags, utils::BoolNot},
-    trace::{Challenges, bus_types::STACK_OVERFLOW_TABLE, decoder::HASHER_STATE_RANGE},
+    trace::{Challenges, bus_types::STACK_OVERFLOW_TABLE},
 };
 
 // ENTRY POINTS
@@ -35,8 +35,8 @@ use crate::{
 /// - Removing rows when (left_shift OR dyncall) AND overflow is non-empty
 pub fn enforce_bus<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
     challenges: &Challenges<AB::ExprEF>,
 ) where
@@ -62,17 +62,17 @@ pub fn enforce_bus<AB>(
 
     // Current row values
     let clk = local.system.clk;
-    let s15 = local.stack[15];
+    let s15 = local.stack.get(15);
     let b0 = local.stack.b0;
     let b1 = local.stack.b1;
     let h0 = local.stack.h0;
 
     // Next row values (needed for removal)
-    let s15_next = next.stack[15];
+    let s15_next = next.stack.get(15);
     let b1_next = next.stack.b1;
 
     // Hasher state element 5, used by DYNCALL to store the new overflow table pointer.
-    let hasher_state_5 = local.decoder[HASHER_STATE_RANGE.start + 5];
+    let hasher_state_5 = local.decoder.hasher_state[5];
 
     // -------------------------------------------------------------------------
     // Overflow condition: (b0 - 16) * h0 = 1 when overflow is non-empty

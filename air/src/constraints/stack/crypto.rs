@@ -20,7 +20,7 @@ use miden_core::{Felt, field::PrimeCharacteristicRing};
 use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
-    MainTraceRow, MidenAirBuilder,
+    MainCols, MidenAirBuilder,
     constraints::{
         constants::{F_3, F_4, F_8},
         ext_field::{QuadFeltAirBuilder, QuadFeltExpr},
@@ -40,8 +40,8 @@ const TAU3_INV: Felt = Felt::new(281474976710656);
 /// Enforces crypto operation constraints.
 pub fn enforce_main<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
@@ -71,8 +71,8 @@ pub fn enforce_main<AB>(
 ///   s[14..16]  padding            (preserved)
 fn enforce_cryptostream_constraints<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
@@ -125,8 +125,8 @@ fn enforce_cryptostream_constraints<AB>(
 ///   acc' = tmp1 · α³ + (c5·α² + c6·α + c7)
 fn enforce_hornerbase_constraints<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
@@ -202,8 +202,8 @@ fn enforce_hornerbase_constraints<AB>(
 ///   acc' = tmp · α² + (c2·α + c3)
 fn enforce_hornerext_constraints<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
@@ -311,8 +311,8 @@ fn enforce_hornerext_constraints<AB>(
 /// fold4 pairs conjugate points: (q0, q2) and (q1, q3).
 fn enforce_frie2f4_constraints<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,

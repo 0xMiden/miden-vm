@@ -92,10 +92,6 @@ impl<T> BorrowMut<MainCols<T>> for [T] {
     }
 }
 
-/// Backwards-compatible alias. Constraint code uses this name; new code can use
-/// [`MainCols`] directly.
-pub type MainTraceRow<T> = MainCols<T>;
-
 // CONST INDEX MAP
 // ================================================================================================
 
@@ -110,8 +106,7 @@ pub const fn indices_arr<const N: usize>() -> [usize; N] {
     arr
 }
 
-/// Number of columns in the main trace, derived from the struct layout.
-#[allow(dead_code)]
+/// Number of columns in the main trace (71), derived from the struct layout.
 pub const NUM_MAIN_COLS: usize = size_of::<MainCols<u8>>();
 
 /// Compile-time index map: each field holds its column index.
@@ -147,8 +142,7 @@ pub struct AuxCols<T> {
     pub ace_wiring: T,
 }
 
-/// Number of columns in the auxiliary trace, derived from the struct layout.
-#[allow(dead_code)]
+/// Number of columns in the auxiliary trace (8), derived from the struct layout.
 pub const NUM_AUX_COLS: usize = size_of::<AuxCols<u8>>();
 
 /// Compile-time index map for auxiliary columns.
@@ -158,22 +152,34 @@ pub const AUX_COL_MAP: AuxCols<usize> = {
     unsafe { core::mem::transmute(indices_arr::<NUM_AUX_COLS>()) }
 };
 
-// COMPILE-TIME SIZE ASSERTIONS
+// COLUMN COUNTS
 // ================================================================================================
 
-const _: () = assert!(size_of::<MainCols<u8>>() == TRACE_WIDTH);
-const _: () = assert!(size_of::<AuxCols<u8>>() == AUX_TRACE_WIDTH);
-const _: () = assert!(size_of::<SystemCols<u8>>() == 6);
-const _: () = assert!(size_of::<DecoderCols<u8>>() == 24);
-const _: () = assert!(size_of::<StackCols<u8>>() == 19);
-const _: () = assert!(size_of::<RangeCols<u8>>() == 2);
-const _: () = assert!(size_of::<HasherCols<u8>>() == 16);
-const _: () = assert!(size_of::<BitwiseCols<u8>>() == 13);
-const _: () = assert!(size_of::<MemoryCols<u8>>() == 15);
-const _: () = assert!(size_of::<AceCols<u8>>() == 16);
-const _: () = assert!(size_of::<AceReadCols<u8>>() == 4);
-const _: () = assert!(size_of::<AceEvalCols<u8>>() == 4);
-const _: () = assert!(size_of::<KernelRomCols<u8>>() == 5);
+pub const NUM_SYSTEM_COLS: usize = size_of::<SystemCols<u8>>();
+pub const NUM_DECODER_COLS: usize = size_of::<DecoderCols<u8>>();
+pub const NUM_STACK_COLS: usize = size_of::<StackCols<u8>>();
+pub const NUM_RANGE_COLS: usize = size_of::<RangeCols<u8>>();
+pub const NUM_HASHER_COLS: usize = size_of::<HasherCols<u8>>();
+pub const NUM_BITWISE_COLS: usize = size_of::<BitwiseCols<u8>>();
+pub const NUM_MEMORY_COLS: usize = size_of::<MemoryCols<u8>>();
+pub const NUM_ACE_COLS: usize = size_of::<AceCols<u8>>();
+pub const NUM_ACE_READ_COLS: usize = size_of::<AceReadCols<u8>>();
+pub const NUM_ACE_EVAL_COLS: usize = size_of::<AceEvalCols<u8>>();
+pub const NUM_KERNEL_ROM_COLS: usize = size_of::<KernelRomCols<u8>>();
+
+const _: () = assert!(NUM_MAIN_COLS == TRACE_WIDTH);
+const _: () = assert!(NUM_AUX_COLS == AUX_TRACE_WIDTH);
+const _: () = assert!(NUM_SYSTEM_COLS == 6);
+const _: () = assert!(NUM_DECODER_COLS == 24);
+const _: () = assert!(NUM_STACK_COLS == 19);
+const _: () = assert!(NUM_RANGE_COLS == 2);
+const _: () = assert!(NUM_HASHER_COLS == 16);
+const _: () = assert!(NUM_BITWISE_COLS == 13);
+const _: () = assert!(NUM_MEMORY_COLS == 15);
+const _: () = assert!(NUM_ACE_COLS == 16);
+const _: () = assert!(NUM_ACE_READ_COLS == 4);
+const _: () = assert!(NUM_ACE_EVAL_COLS == 4);
+const _: () = assert!(NUM_KERNEL_ROM_COLS == 5);
 
 // TESTS
 // ================================================================================================

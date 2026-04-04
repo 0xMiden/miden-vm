@@ -30,9 +30,8 @@ use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
-    MainTraceRow, MidenAirBuilder,
+    MainCols, MidenAirBuilder,
     constraints::{constants::*, op_flags::OpFlags, utils::BoolNot},
-    trace::decoder::{IS_CALL_FLAG_COL_IDX, IS_SYSCALL_FLAG_COL_IDX},
 };
 
 // ENTRY POINTS
@@ -47,8 +46,8 @@ use crate::{
 /// 4. Last stack item is zeroed on left shift when depth = 16
 pub fn enforce_main<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
@@ -86,8 +85,8 @@ pub fn enforce_main<AB>(
 /// The END operation exiting a CALL/SYSCALL block is handled separately via multiset constraints.
 fn enforce_stack_depth_constraints<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
@@ -99,8 +98,8 @@ fn enforce_stack_depth_constraints<AB>(
     let call_or_dyncall_or_syscall = op_flags.call() + op_flags.dyncall() + op_flags.syscall();
 
     // Flag for END operation that ends a CALL/DYNCALL or SYSCALL block
-    let is_call_or_dyncall_end = local.decoder[IS_CALL_FLAG_COL_IDX];
-    let is_syscall_end = local.decoder[IS_SYSCALL_FLAG_COL_IDX];
+    let is_call_or_dyncall_end = local.decoder.hasher_state[6];
+    let is_syscall_end = local.decoder.hasher_state[7];
     let call_or_dyncall_or_syscall_end = op_flags.end() * (is_call_or_dyncall_end + is_syscall_end);
 
     // Invariants relied on here:
@@ -152,15 +151,15 @@ fn enforce_stack_depth_constraints<AB>(
 /// 2. On left shift with depth = 16: stack[15]' = 0 (no item to restore from overflow)
 fn enforce_overflow_index_constraints<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
     let overflow_addr_next = next.stack.b1;
     let clk = local.system.clk;
-    let last_stack_item_next = next.stack[15];
+    let last_stack_item_next = next.stack.get(15);
 
     // On right shift, the overflow address should be set to current clk
     builder

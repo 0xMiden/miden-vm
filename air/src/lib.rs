@@ -24,7 +24,7 @@ pub mod config;
 mod constraints;
 
 pub mod trace;
-use constraints::columns::MainTraceRow;
+use constraints::columns::MainCols;
 use trace::{AUX_TRACE_WIDTH, TRACE_WIDTH, bus_types};
 
 // RE-EXPORTS
@@ -349,8 +349,8 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
         let next = main.next_slice();
 
         // Use structured column access via MainTraceCols
-        let local: &MainTraceRow<AB::Var> = (*local).borrow();
-        let next: &MainTraceRow<AB::Var> = (*next).borrow();
+        let local: &MainCols<AB::Var> = (*local).borrow();
+        let next: &MainCols<AB::Var> = (*next).borrow();
 
         // Build chiplet selectors and op flags once, shared by main and bus constraints.
         let selectors =

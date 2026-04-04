@@ -226,7 +226,7 @@ pub struct AceEvalCols<T> {
 // ACE COLUMN INDEX MAPS
 // ================================================================================================
 
-/// Compile-time index map for the top-level ACE chiplet columns.
+/// Compile-time index map for the top-level ACE chiplet columns (16 columns).
 #[allow(dead_code)]
 pub const ACE_COL_MAP: AceCols<usize> = {
     assert!(size_of::<AceCols<u8>>() == 16);

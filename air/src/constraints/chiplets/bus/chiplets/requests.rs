@@ -13,7 +13,7 @@ use super::{
     TRANSITION_RETURN_STATE,
 };
 use crate::{
-    Felt, MainTraceRow, MidenAirBuilder,
+    Felt, MainCols, MidenAirBuilder,
     constraints::{constants::*, op_flags::OpFlags, utils::BoolNot},
     trace::{
         Challenges,
@@ -87,8 +87,8 @@ pub(super) fn encode_hasher_rate<AB: MidenAirBuilder>(
 /// Returns `sum(flag_i * value_i) + (1 - sum(flag_i))` where each `(flag_i, value_i)` pair
 /// corresponds to a VM operation that sends a message to a chiplet.
 pub fn compute_request_multiplier<AB>(
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF
@@ -333,8 +333,8 @@ where
 ///
 /// Format: alpha + beta^0*label + beta^1*a + beta^2*b + beta^3*z
 fn compute_bitwise_request<AB: MidenAirBuilder>(
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
     is_xor: bool,
 ) -> AB::ExprEF {
@@ -353,8 +353,8 @@ fn compute_bitwise_request<AB: MidenAirBuilder>(
 ///
 /// Format: alpha + beta^0*label + beta^1*ctx + beta^2*addr + beta^3*clk + beta^4..7 * word
 fn compute_memory_word_request<AB: MidenAirBuilder>(
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
     is_read: bool,
 ) -> AB::ExprEF {
@@ -381,8 +381,8 @@ fn compute_memory_word_request<AB: MidenAirBuilder>(
 ///
 /// Format: alpha + beta^0*label + beta^1*ctx + beta^2*addr + beta^3*clk + beta^4*element
 fn compute_memory_element_request<AB: MidenAirBuilder>(
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
     is_read: bool,
 ) -> AB::ExprEF {
@@ -408,8 +408,8 @@ fn compute_memory_element_request<AB: MidenAirBuilder>(
 ///
 /// Both words come from `next.stack[0..8]`. The label determines read (MSTREAM) vs write (PIPE).
 fn compute_two_word_request<AB: MidenAirBuilder>(
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
     is_read: bool,
 ) -> AB::ExprEF {
@@ -439,8 +439,8 @@ fn compute_two_word_request<AB: MidenAirBuilder>(
 
 /// Computes the CRYPTOSTREAM request value (two word reads + two word writes).
 fn compute_cryptostream_request<AB: MidenAirBuilder>(
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     let read_label: AB::Expr = Felt::from_u8(MEMORY_READ_WORD_LABEL).into();
@@ -503,8 +503,8 @@ impl ControlBlockOp {
 ///
 /// 12-lane sponge: decoder hasher_state as rate + opcode in capacity domain position.
 fn compute_control_block_request<AB: MidenAirBuilder>(
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
     op: ControlBlockOp,
 ) -> AB::ExprEF {
@@ -535,7 +535,7 @@ fn compute_control_block_request<AB: MidenAirBuilder>(
 
 /// Computes control block request with zeros for hasher state (DYN/DYNCALL).
 fn compute_control_block_request_zeros<AB: MidenAirBuilder>(
-    next: &MainTraceRow<AB::Var>,
+    next: &MainCols<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
     opcode: u8,
 ) -> AB::ExprEF {
@@ -565,8 +565,8 @@ fn compute_control_block_request_zeros<AB: MidenAirBuilder>(
 
 /// SPAN: full 12-lane sponge state (hasher state as rate, capacity zeroed).
 fn compute_span_request<AB: MidenAirBuilder>(
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     let hs = local.decoder.hasher_state;
@@ -595,8 +595,8 @@ fn compute_span_request<AB: MidenAirBuilder>(
 
 /// RESPAN: 8-lane rate absorption.
 fn compute_respan_request<AB: MidenAirBuilder>(
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     let addr_for_msg = next.decoder.addr - F_1;
@@ -612,8 +612,8 @@ fn compute_respan_request<AB: MidenAirBuilder>(
 
 /// FMP initialization write request (used by CALL and DYNCALL).
 fn compute_fmp_write_request<AB: MidenAirBuilder>(
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     let label: AB::Expr = Felt::from_u8(MEMORY_WRITE_ELEMENT_LABEL).into();
@@ -624,7 +624,7 @@ fn compute_fmp_write_request<AB: MidenAirBuilder>(
 
 /// Callee hash word read from stack[0] address (used by DYN and DYNCALL).
 fn compute_dyn_callee_hash_read<AB: MidenAirBuilder>(
-    local: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     let label: AB::Expr = Felt::from_u8(MEMORY_READ_WORD_LABEL).into();
@@ -643,8 +643,8 @@ fn compute_dyn_callee_hash_read<AB: MidenAirBuilder>(
 
 /// HPERM: input state from stack[0..12] + output state from next stack[0..12].
 fn compute_hperm_request<AB: MidenAirBuilder>(
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     let addr = local.decoder.user_op_helpers()[0];
@@ -668,7 +668,7 @@ fn compute_hperm_request<AB: MidenAirBuilder>(
 
 /// MPVERIFY: input node value + output root verification.
 fn compute_mpverify_request<AB: MidenAirBuilder>(
-    local: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     let helper_0 = local.decoder.user_op_helpers()[0];
@@ -695,8 +695,8 @@ fn compute_mpverify_request<AB: MidenAirBuilder>(
 
 /// MRUPDATE: four messages for old/new path input/output.
 fn compute_mrupdate_request<AB: MidenAirBuilder>(
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     let helper_0 = local.decoder.user_op_helpers()[0];
@@ -742,8 +742,8 @@ fn compute_mrupdate_request<AB: MidenAirBuilder>(
 
 /// LOG_PRECOMPILE: absorbs [COMM, TAG] with capacity CAP_PREV, returns [R0, R1, CAP_NEXT].
 fn compute_log_precompile_request<AB: MidenAirBuilder>(
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     let helpers = local.decoder.user_op_helpers();

@@ -14,7 +14,7 @@ use super::{
     requests::{encode_hasher_rate, encode_hasher_state, encode_hasher_word},
 };
 use crate::{
-    Felt, MainTraceRow, MidenAirBuilder,
+    Felt, MainCols, MidenAirBuilder,
     constraints::{
         chiplets::{columns::PeriodicCols, selectors::ChipletSelectors},
         constants::*,
@@ -44,8 +44,8 @@ use crate::{
 /// corresponds to a chiplet row that sends a response message.
 pub fn compute_response_multiplier<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
     selectors: &ChipletSelectors<AB::Expr>,
 ) -> AB::ExprEF
@@ -149,8 +149,8 @@ struct HasherResponse<EF, E> {
 /// - Row 0: Initialization (f_bp, f_mp, f_mv, f_mu)
 /// - Row 31: Output/Absorption (f_hout, f_sout, f_abp)
 fn compute_hasher_response<AB: MidenAirBuilder>(
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
     selectors: &ChipletSelectors<AB::Expr>,
     cycle_row_0: AB::Expr,
@@ -283,7 +283,7 @@ fn compute_hasher_response<AB: MidenAirBuilder>(
 /// The memory chiplet uses different labels for read/write and element/word operations.
 /// For element access, the correct element is selected based on idx0, idx1.
 fn compute_memory_response<AB: MidenAirBuilder>(
-    local: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF {
     let mem = local.memory();

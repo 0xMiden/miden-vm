@@ -10,7 +10,7 @@ pub mod columns;
 
 use miden_crypto::stark::air::AirBuilder;
 
-use crate::{MainTraceRow, MidenAirBuilder, constraints::constants::*};
+use crate::{MainCols, MidenAirBuilder, constraints::constants::*};
 
 pub mod bus;
 
@@ -18,11 +18,8 @@ pub mod bus;
 // ================================================================================================
 
 /// Enforces range checker main-trace constraints.
-pub fn enforce_main<AB>(
-    builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
-) where
+pub fn enforce_main<AB>(builder: &mut AB, local: &MainCols<AB::Var>, next: &MainCols<AB::Var>)
+where
     AB: MidenAirBuilder,
 {
     let v = local.range.value;

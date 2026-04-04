@@ -32,7 +32,7 @@ use miden_crypto::stark::air::AirBuilder;
 
 use super::selectors::ChipletFlags;
 use crate::{
-    MainTraceRow, MidenAirBuilder,
+    MainCols, MidenAirBuilder,
     constraints::{chiplets::columns::MemoryCols, constants::TWO_POW_16, utils::BoolNot},
 };
 
@@ -48,8 +48,8 @@ use crate::{
 /// over clock change.
 pub fn enforce_memory_constraints<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     flags: &ChipletFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,

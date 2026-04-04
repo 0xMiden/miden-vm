@@ -18,7 +18,7 @@ mod responses;
 use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 
 use crate::{
-    Felt, MainTraceRow, MidenAirBuilder,
+    Felt, MainCols, MidenAirBuilder,
     constraints::{
         bus::indices::B_CHIPLETS, chiplets::selectors::ChipletSelectors, op_flags::OpFlags,
     },
@@ -57,8 +57,8 @@ const HASH_CYCLE_OFFSET: Felt = Felt::new((HASH_CYCLE_LEN - 1) as u64);
 /// Enforces the chiplets bus constraint: `b_chiplets' * requests = b_chiplets * responses`.
 pub fn enforce_chiplets_bus_constraint<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
     challenges: &Challenges<AB::ExprEF>,
     selectors: &ChipletSelectors<AB::Expr>,

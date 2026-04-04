@@ -10,7 +10,7 @@
 use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
-    MainTraceRow, MidenAirBuilder,
+    MainCols, MidenAirBuilder,
     constraints::{op_flags::OpFlags, utils::BoolNot},
 };
 
@@ -20,51 +20,51 @@ use crate::{
 /// Enforces stack operation constraints for PAD/DUP/CLK/SWAP/MOV/SWAPW/CSWAP.
 pub fn enforce_main<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
-    let s0 = local.stack[0];
-    let s1 = local.stack[1];
-    let s2 = local.stack[2];
-    let s3 = local.stack[3];
-    let s4 = local.stack[4];
-    let s5 = local.stack[5];
-    let s6 = local.stack[6];
-    let s7 = local.stack[7];
-    let s8 = local.stack[8];
-    let s9 = local.stack[9];
-    let s10 = local.stack[10];
-    let s11 = local.stack[11];
-    let s12 = local.stack[12];
-    let s13 = local.stack[13];
-    let s14 = local.stack[14];
-    let s15 = local.stack[15];
-    let stack_depth = local.stack[16];
+    let s0 = local.stack.get(0);
+    let s1 = local.stack.get(1);
+    let s2 = local.stack.get(2);
+    let s3 = local.stack.get(3);
+    let s4 = local.stack.get(4);
+    let s5 = local.stack.get(5);
+    let s6 = local.stack.get(6);
+    let s7 = local.stack.get(7);
+    let s8 = local.stack.get(8);
+    let s9 = local.stack.get(9);
+    let s10 = local.stack.get(10);
+    let s11 = local.stack.get(11);
+    let s12 = local.stack.get(12);
+    let s13 = local.stack.get(13);
+    let s14 = local.stack.get(14);
+    let s15 = local.stack.get(15);
+    let stack_depth = local.stack.b0;
 
     let fn_hash_0 = local.system.fn_hash[0];
     let fn_hash_1 = local.system.fn_hash[1];
     let fn_hash_2 = local.system.fn_hash[2];
     let fn_hash_3 = local.system.fn_hash[3];
 
-    let s0_next = next.stack[0];
-    let s1_next = next.stack[1];
-    let s2_next = next.stack[2];
-    let s3_next = next.stack[3];
-    let s4_next = next.stack[4];
-    let s5_next = next.stack[5];
-    let s6_next = next.stack[6];
-    let s7_next = next.stack[7];
-    let s8_next = next.stack[8];
-    let s9_next = next.stack[9];
-    let s10_next = next.stack[10];
-    let s11_next = next.stack[11];
-    let s12_next = next.stack[12];
-    let s13_next = next.stack[13];
-    let s14_next = next.stack[14];
-    let s15_next = next.stack[15];
+    let s0_next = next.stack.get(0);
+    let s1_next = next.stack.get(1);
+    let s2_next = next.stack.get(2);
+    let s3_next = next.stack.get(3);
+    let s4_next = next.stack.get(4);
+    let s5_next = next.stack.get(5);
+    let s6_next = next.stack.get(6);
+    let s7_next = next.stack.get(7);
+    let s8_next = next.stack.get(8);
+    let s9_next = next.stack.get(9);
+    let s10_next = next.stack.get(10);
+    let s11_next = next.stack.get(11);
+    let s12_next = next.stack.get(12);
+    let s13_next = next.stack.get(13);
+    let s14_next = next.stack.get(14);
+    let s15_next = next.stack.get(15);
 
     let is_pad = op_flags.pad();
     let is_dup = op_flags.dup();

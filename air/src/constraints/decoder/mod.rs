@@ -71,7 +71,7 @@ pub mod columns;
 use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
-    Felt, MainTraceRow, MidenAirBuilder,
+    Felt, MainCols, MidenAirBuilder,
     constraints::{
         constants::{F_1, F_128, HASH_CYCLE_LEN_FELT},
         decoder::columns::DecoderCols,
@@ -88,8 +88,8 @@ pub mod bus;
 /// Enforces decoder main-trace constraints (entry point).
 pub fn enforce_main<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
@@ -233,7 +233,7 @@ pub fn enforce_main<AB>(
     // HALT      | f_halt => f_halt'                   | absorbing / terminal state
 
     // SPLIT/LOOP: branch selector must be binary.
-    let branch_condition = local.stack[0];
+    let branch_condition = local.stack.get(0);
     builder
         .when(op_flags.split() + op_flags.loop_op())
         .assert_bool(branch_condition);
@@ -249,7 +249,7 @@ pub fn enforce_main<AB>(
     // REPEAT: top-of-stack must be 1 (loop condition true) and we must be inside an
     // active loop body (is_loop_body = h4 = 1).
     {
-        let loop_condition = local.stack[0];
+        let loop_condition = local.stack.get(0);
         let builder = &mut builder.when(op_flags.repeat());
         builder.assert_one(loop_condition);
         builder.assert_one(is_loop_body);
@@ -257,7 +257,7 @@ pub fn enforce_main<AB>(
 
     // END inside a loop: when ending a loop block (is_loop = h5 = 1), top-of-stack must
     // be 0 — the loop exits because the condition became false.
-    let loop_condition = local.stack[0];
+    let loop_condition = local.stack.get(0);
     builder.when(op_flags.end()).when(is_loop).assert_zero(loop_condition);
 
     // END followed by REPEAT: carry the block hash (h0..h3) and the is_loop_body flag

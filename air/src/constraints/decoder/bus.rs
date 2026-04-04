@@ -29,7 +29,7 @@ use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 
 use crate::{
-    Felt, MainTraceRow, MidenAirBuilder,
+    Felt, MainCols, MidenAirBuilder,
     constraints::{bus::indices::P1_BLOCK_STACK, constants::*, op_flags::OpFlags, utils::BoolNot},
     trace::{
         Challenges,
@@ -138,57 +138,14 @@ impl<'a, AB: MidenAirBuilder> OpGroupEncoder<'a, AB> {
     }
 }
 
-/// Decoder column indices (relative to decoder trace).
-mod decoder_cols {
-    /// Block address column.
-    pub const ADDR: usize = 0;
-    /// Hasher state offset within decoder trace.
-    pub const HASHER_STATE_OFFSET: usize = 8;
-    /// is_loop_flag column (hasher_state[5]).
-    pub const IS_LOOP_FLAG: usize = HASHER_STATE_OFFSET + 5;
-    /// is_call_flag column (hasher_state[6]).
-    pub const IS_CALL_FLAG: usize = HASHER_STATE_OFFSET + 6;
-    /// is_syscall_flag column (hasher_state[7]).
-    pub const IS_SYSCALL_FLAG: usize = HASHER_STATE_OFFSET + 7;
-}
-
-/// Stack column indices (relative to stack trace).
-mod stack_cols {
-    /// B0 column - stack depth.
-    pub const B0: usize = 16;
-    /// B1 column - overflow address.
-    pub const B1: usize = 17;
-}
-
-/// Op group table column indices (relative to decoder trace).
-mod op_group_cols {
-    /// HASHER_STATE_RANGE.end (hasher state is 8 columns starting at offset 8).
-    const HASHER_STATE_END: usize = super::decoder_cols::HASHER_STATE_OFFSET + 8;
-
-    /// is_in_span flag column.
-    pub const IS_IN_SPAN: usize = HASHER_STATE_END;
-
-    /// Group count column.
-    pub const GROUP_COUNT: usize = IS_IN_SPAN + 1;
-
-    /// Op index column (not used directly here but defines layout).
-    const OP_INDEX: usize = GROUP_COUNT + 1;
-
-    /// Batch flag columns (c0, c1, c2).
-    const BATCH_FLAGS_OFFSET: usize = OP_INDEX + 1;
-    pub const BATCH_FLAG_0: usize = BATCH_FLAGS_OFFSET;
-    pub const BATCH_FLAG_1: usize = BATCH_FLAGS_OFFSET + 1;
-    pub const BATCH_FLAG_2: usize = BATCH_FLAGS_OFFSET + 2;
-}
-
 // ENTRY POINTS
 // ================================================================================================
 
 /// Enforces all decoder bus constraints (p1, p2, p3).
 pub fn enforce_bus<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
     challenges: &Challenges<AB::ExprEF>,
 ) where
@@ -233,8 +190,8 @@ pub fn enforce_bus<AB>(
 /// - CALL/SYSCALL/DYNCALL: 11 elements with context `[..., ctx, fmp, b0, b1, fn_hash[0..4]]`
 pub fn enforce_block_stack_table_constraint<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
     challenges: &Challenges<AB::ExprEF>,
 ) where
@@ -255,19 +212,19 @@ pub fn enforce_block_stack_table_constraint<AB>(
     // =========================================================================
 
     // Block addresses
-    let addr_local: AB::Expr = local.decoder[decoder_cols::ADDR].into();
-    let addr_next: AB::Expr = next.decoder[decoder_cols::ADDR].into();
+    let addr_local: AB::Expr = local.decoder.addr.into();
+    let addr_next: AB::Expr = next.decoder.addr.into();
 
     // Hasher state element 1 (for RESPAN parent_id)
-    let h1_next: AB::Expr = next.decoder[decoder_cols::HASHER_STATE_OFFSET + 1].into();
+    let h1_next: AB::Expr = next.decoder.hasher_state[1].into();
 
     // Stack top (for LOOP is_loop condition)
-    let s0: AB::Expr = local.stack[0].into();
+    let s0: AB::Expr = local.stack.get(0).into();
 
     // Context info for CALL/SYSCALL/DYNCALL insertions (from current row)
     let ctx_local: AB::Expr = local.system.ctx.into();
-    let b0_local: AB::Expr = local.stack[stack_cols::B0].into();
-    let b1_local: AB::Expr = local.stack[stack_cols::B1].into();
+    let b0_local: AB::Expr = local.stack.b0.into();
+    let b1_local: AB::Expr = local.stack.b1.into();
     let fn_hash_local: [AB::Expr; 4] = [
         local.system.fn_hash[0].into(),
         local.system.fn_hash[1].into(),
@@ -276,18 +233,18 @@ pub fn enforce_block_stack_table_constraint<AB>(
     ];
 
     // Hasher state for DYNCALL (h4, h5 contain post-shift stack state)
-    let h4_local: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 4].into();
-    let h5_local: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 5].into();
+    let h4_local: AB::Expr = local.decoder.hasher_state[4].into();
+    let h5_local: AB::Expr = local.decoder.hasher_state[5].into();
 
     // Flags for END context detection
-    let is_loop_flag: AB::Expr = local.decoder[decoder_cols::IS_LOOP_FLAG].into();
-    let is_call_flag: AB::Expr = local.decoder[decoder_cols::IS_CALL_FLAG].into();
-    let is_syscall_flag: AB::Expr = local.decoder[decoder_cols::IS_SYSCALL_FLAG].into();
+    let is_loop_flag: AB::Expr = local.decoder.hasher_state[5].into();
+    let is_call_flag: AB::Expr = local.decoder.hasher_state[6].into();
+    let is_syscall_flag: AB::Expr = local.decoder.hasher_state[7].into();
 
     // Context info for END after CALL/SYSCALL (from next row)
     let ctx_next: AB::Expr = next.system.ctx.into();
-    let b0_next: AB::Expr = next.stack[stack_cols::B0].into();
-    let b1_next: AB::Expr = next.stack[stack_cols::B1].into();
+    let b0_next: AB::Expr = next.stack.b0.into();
+    let b1_next: AB::Expr = next.stack.b1.into();
     let fn_hash_next: [AB::Expr; 4] = [
         next.system.fn_hash[0].into(),
         next.system.fn_hash[1].into(),
@@ -467,8 +424,8 @@ pub fn enforce_block_stack_table_constraint<AB>(
 /// ```
 pub fn enforce_block_hash_table_constraint<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
     challenges: &Challenges<AB::ExprEF>,
 ) where
@@ -492,21 +449,21 @@ pub fn enforce_block_hash_table_constraint<AB>(
     // =========================================================================
 
     // Parent block ID (next row's address for all insertions)
-    let parent_id: AB::Expr = next.decoder[decoder_cols::ADDR].into();
+    let parent_id: AB::Expr = next.decoder.addr.into();
     // Hasher state for child hashes
     // First half: h[0..4]
-    let h0: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET].into();
-    let h1: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 1].into();
-    let h2: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 2].into();
-    let h3: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 3].into();
+    let h0: AB::Expr = local.decoder.hasher_state[0].into();
+    let h1: AB::Expr = local.decoder.hasher_state[1].into();
+    let h2: AB::Expr = local.decoder.hasher_state[2].into();
+    let h3: AB::Expr = local.decoder.hasher_state[3].into();
     // Second half: h[4..8]
-    let h4: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 4].into();
-    let h5: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 5].into();
-    let h6: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 6].into();
-    let h7: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 7].into();
+    let h4: AB::Expr = local.decoder.hasher_state[4].into();
+    let h5: AB::Expr = local.decoder.hasher_state[5].into();
+    let h6: AB::Expr = local.decoder.hasher_state[6].into();
+    let h7: AB::Expr = local.decoder.hasher_state[7].into();
 
     // Stack top (for SPLIT and LOOP conditions)
-    let s0: AB::Expr = local.stack[0].into();
+    let s0: AB::Expr = local.stack.get(0).into();
 
     // For END: block hash comes from current row's hasher state first half
     let end_parent_id = parent_id.clone();
@@ -516,7 +473,7 @@ pub fn enforce_block_hash_table_constraint<AB>(
     let end_hash_3 = h3.clone();
 
     // is_loop_body flag for END (stored at hasher_state[4] = IS_LOOP_BODY_FLAG)
-    let is_loop_body_flag: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 4].into();
+    let is_loop_body_flag: AB::Expr = local.decoder.hasher_state[4].into();
 
     // is_first_child detection for END:
     // A block is first_child if the NEXT row's opcode is NOT (END, REPEAT, or HALT).
@@ -698,8 +655,8 @@ pub fn enforce_block_hash_table_constraint<AB>(
 /// - Total constraint: degree 9
 pub fn enforce_op_group_table_constraint<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
     challenges: &Challenges<AB::ExprEF>,
 ) where
@@ -723,33 +680,33 @@ pub fn enforce_op_group_table_constraint<AB>(
     // =========================================================================
 
     // Block ID (next row's address for insertions, current for removals)
-    let block_id_insert: AB::Expr = next.decoder[decoder_cols::ADDR].into();
-    let block_id_remove: AB::Expr = local.decoder[decoder_cols::ADDR].into();
+    let block_id_insert: AB::Expr = next.decoder.addr.into();
+    let block_id_remove: AB::Expr = local.decoder.addr.into();
 
     // Group count
-    let gc: AB::Expr = local.decoder[op_group_cols::GROUP_COUNT].into();
-    let gc_next: AB::Expr = next.decoder[op_group_cols::GROUP_COUNT].into();
+    let gc: AB::Expr = local.decoder.group_count.into();
+    let gc_next: AB::Expr = next.decoder.group_count.into();
 
     // Hasher state for group values (h1-h7, h0 is decoded immediately)
-    let h1: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 1].into();
-    let h2: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 2].into();
-    let h3: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 3].into();
-    let h4: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 4].into();
-    let h5: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 5].into();
-    let h6: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 6].into();
-    let h7: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 7].into();
+    let h1: AB::Expr = local.decoder.hasher_state[1].into();
+    let h2: AB::Expr = local.decoder.hasher_state[2].into();
+    let h3: AB::Expr = local.decoder.hasher_state[3].into();
+    let h4: AB::Expr = local.decoder.hasher_state[4].into();
+    let h5: AB::Expr = local.decoder.hasher_state[5].into();
+    let h6: AB::Expr = local.decoder.hasher_state[6].into();
+    let h7: AB::Expr = local.decoder.hasher_state[7].into();
 
     // Batch flag columns (c0, c1, c2)
-    let c0: AB::Expr = local.decoder[op_group_cols::BATCH_FLAG_0].into();
-    let c1: AB::Expr = local.decoder[op_group_cols::BATCH_FLAG_1].into();
-    let c2: AB::Expr = local.decoder[op_group_cols::BATCH_FLAG_2].into();
+    let c0: AB::Expr = local.decoder.batch_flags[0].into();
+    let c1: AB::Expr = local.decoder.batch_flags[1].into();
+    let c2: AB::Expr = local.decoder.batch_flags[2].into();
 
     // For removal: h0' and s0' from next row
-    let h0_next: AB::Expr = next.decoder[decoder_cols::HASHER_STATE_OFFSET].into();
-    let s0_next: AB::Expr = next.stack[0].into();
+    let h0_next: AB::Expr = next.decoder.hasher_state[0].into();
+    let s0_next: AB::Expr = next.stack.get(0).into();
 
     // is_in_span flag (sp)
-    let sp = local.decoder[op_group_cols::IS_IN_SPAN];
+    let sp = local.decoder.in_span;
 
     // =========================================================================
     // MESSAGE BUILDER
@@ -818,7 +775,7 @@ pub fn enforce_op_group_table_constraint<AB>(
     // Compute op_code' from next row's opcode bits (b0' + 2*b1' + ... + 64*b6').
     let op_code_next =
         OP_BIT_WEIGHTS.iter().enumerate().fold(AB::Expr::ZERO, |acc, (i, weight)| {
-            let bit = next.decoder[1 + i];
+            let bit = next.decoder.op_bits[i];
             acc + bit * Felt::new(*weight as u64)
         });
 

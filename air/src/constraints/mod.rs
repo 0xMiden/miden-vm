@@ -22,7 +22,7 @@
 use chiplets::selectors::ChipletSelectors;
 use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 
-use crate::{MainTraceRow, MidenAirBuilder, trace::Challenges};
+use crate::{MainCols, MidenAirBuilder, trace::Challenges};
 
 pub mod bus;
 pub mod chiplets;
@@ -43,8 +43,8 @@ pub mod utils;
 /// Enforces all main trace constraints.
 pub fn enforce_main<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     selectors: &ChipletSelectors<AB::Expr>,
     op_flags: &op_flags::OpFlags<AB::Expr>,
 ) where
@@ -65,8 +65,8 @@ pub fn enforce_main<AB>(
 ///   3. **`reduced_aux_values`** -- final values satisfy bus identities
 pub fn enforce_bus<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     selectors: &ChipletSelectors<AB::Expr>,
     op_flags: &op_flags::OpFlags<AB::Expr>,
 ) where

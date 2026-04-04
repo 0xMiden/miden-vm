@@ -1053,7 +1053,7 @@ fn accumulate_depth_deltas<const N: usize, E: PrimeCharacteristicRing>(
 /// - Op bits extra columns are computed for degree reduction
 /// - All other columns are zero
 #[cfg(test)]
-pub fn generate_test_row(opcode: usize) -> crate::MainTraceRow<miden_core::Felt> {
+pub fn generate_test_row(opcode: usize) -> crate::MainCols<miden_core::Felt> {
     use miden_core::{Felt, ZERO};
 
     use crate::trace::{TRACE_WIDTH, decoder::OP_BITS_EXTRA_COLS_RANGE};
@@ -1075,7 +1075,7 @@ pub fn generate_test_row(opcode: usize) -> crate::MainTraceRow<miden_core::Felt>
     row[OP_BITS_EXTRA_COLS_RANGE.start + 1 + crate::trace::DECODER_TRACE_OFFSET] = bit_6 * bit_5;
 
     // Safety: MainCols is #[repr(C)] with the same layout as [Felt; TRACE_WIDTH].
-    unsafe { core::mem::transmute::<[Felt; TRACE_WIDTH], crate::MainTraceRow<Felt>>(row) }
+    unsafe { core::mem::transmute::<[Felt; TRACE_WIDTH], crate::MainCols<Felt>>(row) }
 }
 
 /// Returns a 7-bit array representation of an opcode.

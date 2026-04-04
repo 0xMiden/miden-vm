@@ -39,7 +39,7 @@ use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
-    MainTraceRow, MidenAirBuilder,
+    MainCols, MidenAirBuilder,
     constraints::chiplets::{
         columns::{HasherCols, HasherPeriodicCols, PeriodicCols},
         selectors::ChipletFlags,
@@ -121,8 +121,8 @@ where
 {
     pub fn new(
         builder: &mut AB,
-        local: &'a MainTraceRow<AB::Var>,
-        next: &'a MainTraceRow<AB::Var>,
+        local: &'a MainCols<AB::Var>,
+        next: &'a MainCols<AB::Var>,
         flags: &ChipletFlags<AB::Expr>,
     ) -> Self {
         let periodic: &PeriodicCols<_> = builder.periodic_values().borrow();
@@ -158,8 +158,8 @@ where
 /// The hasher chiplet is active when `chiplets[0] = 0` (i.e., `!s0` at the chiplet level).
 pub fn enforce_hasher_constraints<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     flags: &ChipletFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,

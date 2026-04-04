@@ -16,7 +16,7 @@
 use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 
 use crate::{
-    MainTraceRow, MidenAirBuilder,
+    MainCols, MidenAirBuilder,
     constraints::{chiplets::selectors::ChipletSelectors, utils::BoolNot},
     trace::{Challenges, bus_types::RANGE_CHECK_BUS, range},
 };
@@ -41,7 +41,7 @@ use crate::{
 /// - Range response: range V column with multiplicity range M column
 pub fn enforce_bus<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
     selectors: &ChipletSelectors<AB::Expr>,
 ) where

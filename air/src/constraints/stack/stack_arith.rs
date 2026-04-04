@@ -8,9 +8,8 @@ use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
-    MainTraceRow, MidenAirBuilder,
+    MainCols, MidenAirBuilder,
     constraints::{constants::*, op_flags::OpFlags},
-    trace::decoder::USER_OP_HELPERS_OFFSET,
 };
 
 // ENTRY POINTS
@@ -19,33 +18,32 @@ use crate::{
 /// Enforces stack arith/u32 constraints.
 pub fn enforce_main<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
-    let s0: AB::Expr = local.stack[0].into();
-    let s1: AB::Expr = local.stack[1].into();
-    let s2: AB::Expr = local.stack[2].into();
-    let s3: AB::Expr = local.stack[3].into();
+    let s0: AB::Expr = local.stack.get(0).into();
+    let s1: AB::Expr = local.stack.get(1).into();
+    let s2: AB::Expr = local.stack.get(2).into();
+    let s3: AB::Expr = local.stack.get(3).into();
 
-    let s0_next: AB::Expr = next.stack[0].into();
-    let s1_next: AB::Expr = next.stack[1].into();
-    let s2_next: AB::Expr = next.stack[2].into();
-    let s3_next: AB::Expr = next.stack[3].into();
+    let s0_next: AB::Expr = next.stack.get(0).into();
+    let s1_next: AB::Expr = next.stack.get(1).into();
+    let s2_next: AB::Expr = next.stack.get(2).into();
+    let s3_next: AB::Expr = next.stack.get(3).into();
 
-    // Decoder helper columns: h0..h5 are stored starting at USER_OP_HELPERS_OFFSET.
-    // These helpers are op-specific and are validated by the constraints below.
+    // Decoder helper columns: hasher_state[2..8] are user-op helpers.
     // - h0 is used as an inverse witness (EQ/EQZ) or exp_val (EXPACC).
     // - h1..h4 hold u32 limbs / range-check witnesses for u32 ops.
     // - h5 is currently unused in this module.
-    let base = USER_OP_HELPERS_OFFSET;
-    let uop_h0: AB::Expr = local.decoder[base].into();
-    let uop_h1: AB::Expr = local.decoder[base + 1].into();
-    let uop_h2: AB::Expr = local.decoder[base + 2].into();
-    let uop_h3: AB::Expr = local.decoder[base + 3].into();
-    let uop_h4: AB::Expr = local.decoder[base + 4].into();
+    let [uop_h0, uop_h1, uop_h2, uop_h3, uop_h4, _] = local.decoder.user_op_helpers();
+    let uop_h0: AB::Expr = uop_h0.into();
+    let uop_h1: AB::Expr = uop_h1.into();
+    let uop_h2: AB::Expr = uop_h2.into();
+    let uop_h3: AB::Expr = uop_h3.into();
+    let uop_h4: AB::Expr = uop_h4.into();
 
     // Field ops.
     let is_add = op_flags.add();

@@ -25,7 +25,7 @@
 use miden_crypto::stark::air::AirBuilder;
 
 use super::selectors::ChipletFlags;
-use crate::{MainTraceRow, MidenAirBuilder, constraints::utils::BoolNot};
+use crate::{MainCols, MidenAirBuilder, constraints::utils::BoolNot};
 
 // ENTRY POINTS
 // ================================================================================================
@@ -33,8 +33,8 @@ use crate::{MainTraceRow, MidenAirBuilder, constraints::utils::BoolNot};
 /// Enforce kernel ROM chiplet constraints.
 pub fn enforce_kernel_rom_constraints<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     flags: &ChipletFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,

@@ -32,7 +32,7 @@
 use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 
 use crate::{
-    MainTraceRow, MidenAirBuilder,
+    MainCols, MidenAirBuilder,
     constraints::{bus::indices::V_WIRING, chiplets::selectors::ChipletSelectors, utils::BoolNot},
     trace::{Challenges, bus_types::ACE_WIRING_BUS},
 };
@@ -43,8 +43,8 @@ use crate::{
 /// Enforces the ACE wiring bus constraint.
 pub fn enforce_wiring_bus_constraint<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    _next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    _next: &MainCols<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
     selectors: &ChipletSelectors<AB::Expr>,
 ) where

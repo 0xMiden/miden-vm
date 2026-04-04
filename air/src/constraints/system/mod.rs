@@ -34,9 +34,8 @@ pub mod columns;
 use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
-    MainTraceRow, MidenAirBuilder,
+    MainCols, MidenAirBuilder,
     constraints::{constants::F_1, op_flags::OpFlags, utils::BoolNot},
-    trace::decoder::HASHER_STATE_OFFSET,
 };
 
 // ENTRY POINTS
@@ -45,8 +44,8 @@ use crate::{
 /// Enforces system constraints.
 pub fn enforce_main<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
@@ -88,7 +87,7 @@ pub fn enforce_main<AB>(
         {
             let builder = &mut builder.when(f_load);
             for i in 0..4 {
-                builder.assert_eq(next.system.fn_hash[i], local.decoder[HASHER_STATE_OFFSET + i]);
+                builder.assert_eq(next.system.fn_hash[i], local.decoder.hasher_state[i]);
             }
         }
 

@@ -11,13 +11,13 @@ pub mod hash_kernel;
 pub mod wiring;
 
 use super::selectors::ChipletSelectors;
-use crate::{MainTraceRow, MidenAirBuilder, constraints::op_flags::OpFlags, trace::Challenges};
+use crate::{MainCols, MidenAirBuilder, constraints::op_flags::OpFlags, trace::Challenges};
 
 /// Enforces chiplets bus constraints.
 pub fn enforce_bus<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
     challenges: &Challenges<AB::ExprEF>,
     selectors: &ChipletSelectors<AB::Expr>,

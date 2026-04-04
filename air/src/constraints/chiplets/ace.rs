@@ -32,7 +32,7 @@ use miden_crypto::stark::air::AirBuilder;
 
 use super::selectors::ChipletFlags;
 use crate::{
-    MainTraceRow, MidenAirBuilder,
+    MainCols, MidenAirBuilder,
     constraints::{
         constants::{F_1, F_4},
         ext_field::{QuadFeltAirBuilder, QuadFeltExpr},
@@ -46,8 +46,8 @@ use crate::{
 /// Enforce ACE chiplet constraints that apply to all rows.
 pub fn enforce_ace_constraints_all_rows<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     flags: &ChipletFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,

@@ -6,7 +6,7 @@
 
 use miden_crypto::stark::air::AirBuilder;
 
-use crate::{MainTraceRow, MidenAirBuilder};
+use crate::{MainCols, MidenAirBuilder};
 
 // CONSTANTS
 // ================================================================================================
@@ -24,7 +24,7 @@ const TAIL_LEN: usize = STACK_DEPTH + STACK_DEPTH + 4;
 ///
 /// - First row: `stack[i] == stack_inputs[i]` for i in 0..16
 /// - Last row:  `stack[i] == stack_outputs[i]` for i in 0..16
-pub fn enforce_main<AB>(builder: &mut AB, local: &MainTraceRow<AB::Var>)
+pub fn enforce_main<AB>(builder: &mut AB, local: &MainCols<AB::Var>)
 where
     AB: MidenAirBuilder,
 {
@@ -41,7 +41,7 @@ where
         let builder = &mut builder.when_first_row();
         #[allow(clippy::needless_range_loop)]
         for i in 0..STACK_DEPTH {
-            builder.assert_eq(local.stack[i], si[i]);
+            builder.assert_eq(local.stack.get(i), si[i]);
         }
     }
 
@@ -50,7 +50,7 @@ where
         let builder = &mut builder.when_last_row();
         #[allow(clippy::needless_range_loop)]
         for i in 0..STACK_DEPTH {
-            builder.assert_eq(local.stack[i], so[i]);
+            builder.assert_eq(local.stack.get(i), so[i]);
         }
     }
 }

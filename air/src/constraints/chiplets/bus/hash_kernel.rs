@@ -17,7 +17,7 @@ use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 
 use crate::{
-    Felt, MainTraceRow, MidenAirBuilder,
+    Felt, MainCols, MidenAirBuilder,
     constraints::{
         bus::indices::B_HASH_KERNEL,
         chiplets::{columns::PeriodicCols, hasher::flags, selectors::ChipletSelectors},
@@ -46,8 +46,8 @@ use crate::{
 /// 3. Log precompile transcript tracking
 pub fn enforce_hash_kernel_constraint<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
     challenges: &Challenges<AB::ExprEF>,
     selectors: &ChipletSelectors<AB::Expr>,
