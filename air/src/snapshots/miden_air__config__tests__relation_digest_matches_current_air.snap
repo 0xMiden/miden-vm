@@ -1,0 +1,7 @@
+---
+source: air/src/config.rs
+expression: snapshot
+---
+num_inputs: 844
+num_eval_gates: 5708
+relation_digest: [7146701420942358995, 16695142668729645701, 14567476034871177319, 3329211964454984258]

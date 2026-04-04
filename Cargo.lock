@@ -1266,6 +1266,7 @@ dependencies = [
 name = "miden-air"
 version = "0.23.0"
 dependencies = [
+ "insta",
  "miden-ace-codegen",
  "miden-core",
  "miden-crypto",

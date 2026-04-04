@@ -9,7 +9,8 @@ const MASM_CONFIG: AceConfig = AceConfig {
     layout: LayoutKind::Masm,
 };
 
-const REGEN_CMD: &str = "cargo test --release -p miden-core-lib generate_constraints_eval_masm_data -- --ignored --nocapture";
+const REGEN_CMD: &str =
+    "cargo test --release -p miden-core-lib regenerate_ace_circuit_data -- --ignored";
 
 /// Build the batched ACE circuit for the Miden VM ProcessorAir.
 pub fn build_batched_circuit(config: AceConfig) -> AceCircuit<QuadFelt> {
@@ -42,29 +43,51 @@ where
         .unwrap_or_else(|| panic!("constant {name} not found in {file_label}"))
 }
 
-/// Read MASM source from a path relative to the crate manifest directory.
-fn read_masm(rel_path: &str) -> String {
+/// Replace a MASM constant declaration in-place: `const NAME = OLD` → `const NAME = NEW`.
+fn replace_masm_const(content: &mut String, name: &str, new_value: &str) {
+    let prefix = format!("const {name} = ");
+    let line_start = content.find(&prefix).unwrap_or_else(|| panic!("const {name} not found"));
+    let line_end = content[line_start..]
+        .find('\n')
+        .map(|i| line_start + i)
+        .unwrap_or(content.len());
+    content.replace_range(line_start..line_end, &format!("{prefix}{new_value}"));
+}
+
+/// Read a file relative to the crate manifest directory.
+fn read_file(rel_path: &str) -> String {
     let path = format!("{}/{rel_path}", env!("CARGO_MANIFEST_DIR"));
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("failed to read {path}: {e}"))
+}
+
+/// Write a file relative to the crate manifest directory.
+fn write_file(rel_path: &str, contents: &str) {
+    let path = format!("{}/{rel_path}", env!("CARGO_MANIFEST_DIR"));
+    std::fs::write(&path, contents).unwrap_or_else(|e| panic!("failed to write {path}: {e}"));
 }
 
 // GENERATOR
 // ================================================================================================
 
+/// Regenerate all ACE circuit-derived files from the current AIR.
+///
+/// Writes:
+///   1. `asm/sys/vm/constraints_eval.masm` — circuit constants + adv_map data
+///   2. `asm/sys/vm/mod.masm` — RELATION_DIGEST_0..3
+///   3. `../../../air/src/config.rs` — RELATION_DIGEST constant
+///
+/// Run with: cargo test --release -p miden-core-lib regenerate_ace_circuit_data -- --ignored
 #[test]
-#[ignore = "run manually to regenerate constraints_eval.masm data"]
+#[ignore = "run manually to regenerate ACE circuit data in MASM and Rust files"]
 #[allow(clippy::print_stdout)]
-fn generate_constraints_eval_masm_data() {
+fn regenerate_ace_circuit_data() {
     let circuit = build_batched_circuit(MASM_CONFIG);
     let encoded = circuit.to_ace().unwrap();
 
     let num_vars = encoded.num_vars();
     let num_eval = encoded.num_eval_rows();
-    let num_inputs = encoded.num_inputs();
-    let num_constants = encoded.num_constants();
     let instructions = encoded.instructions();
     let size_in_felt = encoded.size_in_felt();
-    let hash = encoded.circuit_hash();
 
     assert_eq!(
         size_in_felt % 8,
@@ -73,48 +96,92 @@ fn generate_constraints_eval_masm_data() {
     );
     let num_adv_pipe = size_in_felt / 8;
 
-    println!("=== ACE Circuit Data for constraints_eval.masm ===");
-    println!("NUM_INPUTS_CIRCUIT = {num_vars}");
-    println!("NUM_EVAL_GATES_CIRCUIT = {num_eval}");
-    println!("num_inputs (READ slots) = {num_inputs}");
-    println!("num_constants = {num_constants}");
-    println!("size_in_felt = {size_in_felt}");
-    println!("num_adv_pipe (repeat.N) = {num_adv_pipe}");
-    println!();
+    let circuit_commitment: [Felt; 4] = encoded.circuit_hash().into();
+    let relation_digest = compute_relation_digest(&circuit_commitment);
 
-    println!(
-        "CIRCUIT_COMMITMENT hash = [{}, {}, {}, {}]",
-        hash[0].as_canonical_u64(),
-        hash[1].as_canonical_u64(),
-        hash[2].as_canonical_u64(),
-        hash[3].as_canonical_u64()
-    );
+    // --- 1. Write constraints_eval.masm ---
+    {
+        let mut masm = read_file("asm/sys/vm/constraints_eval.masm");
 
-    let circuit_commitment: [Felt; 4] = hash.into();
-    let rd = compute_relation_digest(&circuit_commitment);
-    println!();
-    println!("# RELATION_DIGEST constants for sys/vm/mod.masm:");
-    for (i, elem) in rd.iter().enumerate() {
-        println!("const RELATION_DIGEST_{i} = {}", elem.as_canonical_u64());
-    }
-    println!();
+        // Update constants.
+        replace_masm_const(&mut masm, "NUM_INPUTS_CIRCUIT", &num_vars.to_string());
+        replace_masm_const(&mut masm, "NUM_EVAL_GATES_CIRCUIT", &num_eval.to_string());
 
-    println!("adv_map CIRCUIT_COMMITMENT = [");
-    for (i, chunk) in instructions.chunks(8).enumerate() {
-        let vals: Vec<String> = chunk.iter().map(|f| f.as_canonical_u64().to_string()).collect();
-        let line = vals.join(",");
-        if i < num_adv_pipe - 1 {
-            println!("    {line},");
-        } else {
-            println!("    {line}");
+        // Update repeat.N inside load_ace_circuit_description.
+        let proc_start = masm.find("proc load_ace_circuit_description").unwrap();
+        if let Some(repeat_offset) = masm[proc_start..].find("repeat.") {
+            let abs = proc_start + repeat_offset;
+            let end = masm[abs..].find('\n').map(|i| abs + i).unwrap_or(masm.len());
+            masm.replace_range(abs..end, &format!("repeat.{num_adv_pipe}"));
         }
-    }
-    println!("]");
 
-    let layout = circuit.layout();
-    println!();
-    println!("Layout total_inputs = {}", layout.total_inputs);
-    println!("Layout counts = {:?}", layout.counts);
+        // Replace adv_map data block and its section header (everything from
+        // `# CONSTRAINT EVALUATION` to EOF).
+        let section_marker = "# CONSTRAINT EVALUATION CIRCUIT DESCRIPTION";
+        let section_start = masm.find(section_marker).unwrap();
+        masm.truncate(section_start);
+        let trimmed = masm.trim_end().len();
+        masm.truncate(trimmed);
+
+        // Write section header and data block.
+        let adv_marker = "adv_map CIRCUIT_COMMITMENT = [";
+        masm.push_str("\n\n# CONSTRAINT EVALUATION CIRCUIT DESCRIPTION\n");
+        masm.push_str("# =================================================================================================\n\n");
+        masm.push_str(adv_marker);
+        masm.push('\n');
+
+        // Write instruction data in rows of 8.
+        for (i, chunk) in instructions.chunks(8).enumerate() {
+            let vals: Vec<String> =
+                chunk.iter().map(|f| f.as_canonical_u64().to_string()).collect();
+            let line = vals.join(",");
+            if i < num_adv_pipe - 1 {
+                masm.push_str(&format!("    {line},\n"));
+            } else {
+                masm.push_str(&format!("    {line}\n"));
+            }
+        }
+        masm.push_str("]\n");
+
+        write_file("asm/sys/vm/constraints_eval.masm", &masm);
+        println!(
+            "wrote asm/sys/vm/constraints_eval.masm ({num_vars} inputs, {num_eval} eval gates, repeat.{num_adv_pipe})"
+        );
+    }
+
+    // --- 2. Write RELATION_DIGEST in mod.masm ---
+    {
+        let mut masm = read_file("asm/sys/vm/mod.masm");
+        for (i, elem) in relation_digest.iter().enumerate() {
+            replace_masm_const(
+                &mut masm,
+                &format!("RELATION_DIGEST_{i}"),
+                &elem.as_canonical_u64().to_string(),
+            );
+        }
+        write_file("asm/sys/vm/mod.masm", &masm);
+        println!("wrote asm/sys/vm/mod.masm (RELATION_DIGEST)");
+    }
+
+    // --- 3. Write RELATION_DIGEST in air/src/config.rs ---
+    {
+        let config_path = "../../../air/src/config.rs";
+        let mut config = read_file(config_path);
+        let marker = "pub const RELATION_DIGEST: [Felt; 4] = [";
+        let start = config.find(marker).expect("RELATION_DIGEST not found in config.rs");
+        let block_start = start + marker.len();
+        let block_end = config[block_start..].find("];").unwrap() + block_start;
+        let new_block = relation_digest
+            .iter()
+            .map(|f| format!("\n    Felt::new({}),", f.as_canonical_u64()))
+            .collect::<String>()
+            + "\n";
+        config.replace_range(block_start..block_end, &new_block);
+        write_file(config_path, &config);
+        println!("wrote air/src/config.rs (RELATION_DIGEST)");
+    }
+
+    println!("done — run `cargo test -p miden-air --lib` to update the insta snapshot");
 }
 
 // STALENESS CHECKS
@@ -123,8 +190,7 @@ fn generate_constraints_eval_masm_data() {
 /// Verify that the ACE circuit constants in `constraints_eval.masm` match the current AIR.
 ///
 /// If this test fails after changing AIR constraints, regenerate with:
-///   cargo test --release -p miden-core-lib generate_constraints_eval_masm_data -- --ignored
-/// --nocapture
+///   cargo test --release -p miden-core-lib regenerate_ace_circuit_data -- --ignored
 #[test]
 fn constraints_eval_masm_matches_air() {
     let circuit = build_batched_circuit(MASM_CONFIG);
@@ -141,7 +207,7 @@ fn constraints_eval_masm_matches_air() {
     let expected_adv_pipe = size_in_felt / 8;
     let expected_hash = encoded.circuit_hash();
 
-    let masm = read_masm("asm/sys/vm/constraints_eval.masm");
+    let masm = read_file("asm/sys/vm/constraints_eval.masm");
 
     let actual_num_inputs: usize =
         parse_masm_const(&masm, "NUM_INPUTS_CIRCUIT", "constraints_eval.masm");
@@ -206,7 +272,7 @@ fn relation_digest_matches_air() {
     );
 
     // 2. Verify the MASM constants in sys/vm/mod.masm.
-    let masm = read_masm("asm/sys/vm/mod.masm");
+    let masm = read_file("asm/sys/vm/mod.masm");
     let masm_digest: [Felt; 4] = core::array::from_fn(|i| {
         let name = format!("RELATION_DIGEST_{i}");
         Felt::new(parse_masm_const::<u64>(&masm, &name, "sys/vm/mod.masm"))
