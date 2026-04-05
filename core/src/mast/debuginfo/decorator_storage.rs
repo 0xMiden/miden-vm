@@ -282,10 +282,14 @@ impl OpToDecoratorIds {
             }
         }
 
-        if *self.op_indptr_for_dec_ids.last().unwrap() != self.decorator_ids.len() {
+        let &last_op_ptr = self
+            .op_indptr_for_dec_ids
+            .last()
+            .ok_or_else(|| "op_indptr_for_dec_ids is unexpectedly empty".to_string())?;
+        if last_op_ptr != self.decorator_ids.len() {
             return Err(format!(
                 "op_indptr_for_dec_ids end {} doesn't match decorator_ids length {}",
-                self.op_indptr_for_dec_ids.last().unwrap(),
+                last_op_ptr,
                 self.decorator_ids.len()
             ));
         }
@@ -311,10 +315,13 @@ impl OpToDecoratorIds {
 
         // Node pointers must be valid indices into op_indptr
         let max_node_ptr = self.op_indptr_for_dec_ids.len() - 1;
-        if *node_slice.last().unwrap() > max_node_ptr {
+        let &last_node_ptr = node_slice
+            .last()
+            .ok_or_else(|| "node_indptr_for_op_idx is unexpectedly empty".to_string())?;
+        if last_node_ptr > max_node_ptr {
             return Err(format!(
                 "node_indptr_for_op_idx end {} exceeds op_indptr bounds {}",
-                node_slice.last().unwrap(),
+                last_node_ptr,
                 max_node_ptr
             ));
         }
@@ -431,14 +438,18 @@ impl OpToDecoratorIds {
                 .map_err(|_| DecoratorIndexError::OperationIndex { node, operation: op_start })?;
         } else {
             // Build op->decorator CSR for this node
-            let max_op_idx = decorators_info.last().unwrap().0; // input is sorted by op index
+            let max_op_idx = decorators_info
+                .last()
+                .ok_or(DecoratorIndexError::InternalStructure)?
+                .0; // input is sorted by op index
             let mut it = decorators_info.into_iter().peekable();
 
             for op in 0..=max_op_idx {
                 // pointer to start of decorator IDs for op
                 self.op_indptr_for_dec_ids.push(self.decorator_ids.len());
                 while it.peek().is_some_and(|(i, _)| *i == op) {
-                    self.decorator_ids.push(it.next().unwrap().1);
+                    self.decorator_ids
+                        .push(it.next().ok_or(DecoratorIndexError::InternalStructure)?.1);
                 }
             }
             // final sentinel for this node
