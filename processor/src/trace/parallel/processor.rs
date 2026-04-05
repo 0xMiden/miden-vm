@@ -5,7 +5,7 @@ use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     WORD_SIZE, Word, ZERO,
     field::PrimeField64,
-    mast::{BasicBlockNode, MastForest, MastNodeId},
+    mast::{MastForest, MastNodeId},
     precompile::PrecompileTranscriptState,
     program::{Kernel, MIN_STACK_DEPTH},
     utils::range,
@@ -464,17 +464,6 @@ impl Processor for ReplayProcessor {
         _node_id: MastNodeId,
         _op_idx_in_block: usize,
         _current_forest: &MastForest,
-        _host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason> {
-        // do nothing - we don't execute decorators in this processor
-        ControlFlow::Continue(())
-    }
-
-    fn execute_end_of_block_decorators(
-        &self,
-        _basic_block_node: &BasicBlockNode,
-        _node_id: MastNodeId,
-        _current_forest: &Arc<MastForest>,
         _host: &mut impl BaseHost,
     ) -> ControlFlow<BreakReason> {
         // do nothing - we don't execute decorators in this processor

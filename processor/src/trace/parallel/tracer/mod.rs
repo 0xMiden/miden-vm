@@ -599,10 +599,7 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
                         flags.to_hasher_state_second_word(),
                     )?;
                 },
-                FinishExternal(_)
-                | EnterForest(_)
-                | AfterExitDecorators(_)
-                | AfterExitDecoratorsBasicBlock(_) => {
+                FinishExternal(_) | EnterForest(_) | AfterExitDecorators(_) => {
                     unreachable!(
                         "Tracer contract guarantees that these continuations do not occur here"
                     )

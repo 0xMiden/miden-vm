@@ -59,6 +59,7 @@
 - Redesigned the hasher chiplet to use a controller/permutation split architecture with permutation calls deduplication ([#2927](https://github.com/0xMiden/miden-vm/pull/2927)).
 - Cached repeated test compilations to speed up assembler tests without changing coverage, and fixed the core library build watch path ([#3047](https://github.com/0xMiden/miden-vm/pull/3047)).
 - Documented that enum variants are module-level constants and must be unique within a module ([#2932]((https://github.com/0xMiden/miden-vm/pull/2932)).
+- [BREAKING] Removed `Continuation::AfterExitDecoratorsBasicBlock`. New MAST merges operation-indexed decorators at the post-last-op sentinel index into `after_exit` at build time; execution uses `AfterExitDecorators` only, with legacy forests still supported ([#2633](https://github.com/0xMiden/miden-vm/issues/2633)).
 - Refactor trace generation to row-major format ([#2937](https://github.com/0xMiden/miden-vm/pull/2937)).
 - Documented non-overlap requirement for `memcopy_words`, `memcopy_elements`, and AEAD encrypt/decrypt procedures ([#2941](https://github.com/0xMiden/miden-vm/pull/2941)).
 - Clarified that `mmr::get` fails for positions outside the current MMR rather than returning a sentinel value ([#3001](https://github.com/0xMiden/miden-vm/issues/3001)).
