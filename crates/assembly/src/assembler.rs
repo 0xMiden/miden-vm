@@ -1205,7 +1205,9 @@ impl Assembler {
                     }
 
                     if let Some(decorator_ids) = block_builder.drain_decorators() {
-                        // Attach the decorators before the first instance of the repeated node
+                        // Attach decorators before the first iteration. We must carry
+                        // debug vars from the original node into the dedup fingerprint,
+                        // otherwise two blocks with identical ops but different vars alias.
                         let first_repeat_builder = block_builder.mast_forest_builder()
                             [repeat_node_id]
                             .clone()
@@ -1213,7 +1215,10 @@ impl Assembler {
                             .with_before_enter(decorator_ids);
                         let first_repeat_node_id = block_builder
                             .mast_forest_builder_mut()
-                            .ensure_node(first_repeat_builder)?;
+                            .ensure_node_preserving_debug_vars(
+                                first_repeat_builder,
+                                repeat_node_id,
+                            )?;
 
                         body_node_ids.push(first_repeat_node_id);
                         let remaining_iterations =

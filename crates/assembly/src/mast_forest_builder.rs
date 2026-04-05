@@ -681,6 +681,50 @@ impl MastForestBuilder {
         Ok(node_id)
     }
 
+    /// Like [`Self::ensure_node`], but includes debug vars from `source_node_id` in the
+    /// dedup fingerprint and copies them to the new node. Used when cloning a node (e.g.
+    /// the repeat path) so that the rebuilt node keeps the same dedup semantics as the
+    /// original. No-op when the source has no debug vars.
+    pub(crate) fn ensure_node_preserving_debug_vars(
+        &mut self,
+        builder: impl MastForestContributor,
+        source_node_id: MastNodeId,
+    ) -> Result<MastNodeId, Report> {
+        let base_fingerprint = builder
+            .fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)
+            .expect("hash_by_node_id should contain the fingerprints of all children of `node`");
+
+        // Augment with the source node's debug vars, matching ensure_block() semantics.
+        let debug_vars_data =
+            serialize_debug_vars_for_node(&self.pending_debug_var_mappings, source_node_id);
+        let dedup_fingerprint = base_fingerprint.augment_with_data(&debug_vars_data);
+
+        if let Some(node_id) = self.node_id_by_fingerprint.get(&dedup_fingerprint) {
+            Ok(*node_id)
+        } else {
+            let new_node_id = builder
+                .add_to_forest(&mut self.mast_forest)
+                .into_diagnostic()
+                .wrap_err("assembler failed to add new node")?;
+            self.node_id_by_fingerprint.insert(dedup_fingerprint, new_node_id);
+            self.hash_by_node_id.insert(new_node_id, dedup_fingerprint);
+
+            // Carry over debug var registration from the source node.
+            let debug_vars: Option<Vec<_>> = self
+                .pending_debug_var_mappings
+                .iter()
+                .find(|(id, _)| *id == source_node_id)
+                .map(|(_, vars)| vars.clone());
+            if let Some(vars) = debug_vars
+                && !vars.is_empty()
+            {
+                self.pending_debug_var_mappings.push((new_node_id, vars));
+            }
+
+            Ok(new_node_id)
+        }
+    }
+
     /// Adds a node to the forest if it doesn't already exist.
     ///
     /// Returns `(node_id, is_new)` where `is_new` is true if the node was newly added,
@@ -1347,5 +1391,114 @@ mod tests {
         assert_eq!(merged_blocks.len(), 2);
         assert_eq!(merged_blocks[0], large_block_id);
         assert_eq!(merged_blocks[1], small_block_id);
+    }
+
+    /// Cloning a block with debug vars via `to_builder().with_before_enter()` must
+    /// propagate those vars to the new node (exercises the assembler repeat path).
+    #[test]
+    fn test_ensure_node_preserving_debug_vars_on_cloned_block() {
+        use miden_core::operations::{DebugVarInfo, DebugVarLocation};
+
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+
+        let var_info = DebugVarInfo::new("x", DebugVarLocation::Stack(0));
+        let var_id = builder.add_debug_var(var_info).unwrap();
+
+        let block_id = builder
+            .ensure_block(
+                vec![Operation::Add],
+                Vec::new(),
+                vec![],
+                vec![(0, var_id)],
+                vec![],
+                vec![],
+            )
+            .unwrap();
+
+        let decorator_id = builder.ensure_decorator(Decorator::Trace(42)).unwrap();
+
+        // Simulate the repeat path: clone + add before_enter + preserve debug vars.
+        let rebuilt_builder = builder.mast_forest[block_id]
+            .clone()
+            .to_builder(builder.mast_forest())
+            .with_before_enter(vec![decorator_id]);
+        let cloned_id =
+            builder.ensure_node_preserving_debug_vars(rebuilt_builder, block_id).unwrap();
+
+        assert_ne!(cloned_id, block_id);
+
+        let (forest, _remapping) = builder.build();
+
+        let cloned_vars = forest.debug_info().debug_vars_for_node(cloned_id);
+        assert_eq!(cloned_vars.len(), 1, "cloned node should have debug vars");
+        assert_eq!(cloned_vars[0].1, var_id);
+
+        let original_vars = forest.debug_info().debug_vars_for_node(block_id);
+        assert_eq!(original_vars.len(), 1, "original should keep its debug vars");
+        assert_eq!(original_vars[0].1, var_id);
+    }
+
+    /// Same-ops blocks with different debug vars must not alias after clone + before_enter.
+    #[test]
+    fn test_ensure_node_preserving_debug_vars_prevents_aliasing() {
+        use miden_core::operations::{DebugVarInfo, DebugVarLocation};
+
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+
+        let var_x_id = builder
+            .add_debug_var(DebugVarInfo::new("x", DebugVarLocation::Stack(0)))
+            .unwrap();
+        let var_y_id = builder
+            .add_debug_var(DebugVarInfo::new("y", DebugVarLocation::Stack(1)))
+            .unwrap();
+
+        // Same ops, different debug vars -- should not dedup.
+        let block_a = builder
+            .ensure_block(
+                vec![Operation::Add],
+                Vec::new(),
+                vec![],
+                vec![(0, var_x_id)],
+                vec![],
+                vec![],
+            )
+            .unwrap();
+        let block_b = builder
+            .ensure_block(
+                vec![Operation::Add],
+                Vec::new(),
+                vec![],
+                vec![(0, var_y_id)],
+                vec![],
+                vec![],
+            )
+            .unwrap();
+
+        assert_ne!(block_a, block_b);
+
+        let decorator_id = builder.ensure_decorator(Decorator::Trace(1)).unwrap();
+
+        let rebuilt_a = builder.mast_forest[block_a]
+            .clone()
+            .to_builder(builder.mast_forest())
+            .with_before_enter(vec![decorator_id]);
+        let cloned_a = builder.ensure_node_preserving_debug_vars(rebuilt_a, block_a).unwrap();
+
+        let rebuilt_b = builder.mast_forest[block_b]
+            .clone()
+            .to_builder(builder.mast_forest())
+            .with_before_enter(vec![decorator_id]);
+        let cloned_b = builder.ensure_node_preserving_debug_vars(rebuilt_b, block_b).unwrap();
+
+        assert_ne!(cloned_a, cloned_b, "different debug vars must prevent dedup");
+
+        let (forest, _remapping) = builder.build();
+        let vars_a = forest.debug_info().debug_vars_for_node(cloned_a);
+        let vars_b = forest.debug_info().debug_vars_for_node(cloned_b);
+
+        assert_eq!(vars_a.len(), 1);
+        assert_eq!(vars_a[0].1, var_x_id, "cloned_a should have var x");
+        assert_eq!(vars_b.len(), 1);
+        assert_eq!(vars_b[0].1, var_y_id, "cloned_b should have var y");
     }
 }
