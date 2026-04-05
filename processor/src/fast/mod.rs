@@ -534,9 +534,10 @@ impl FastProcessor {
             .get_node_by_id(node_id)
             .expect("internal error: node id {node_id} not found in current forest");
 
-        // Basic blocks may still carry legacy op-indexed decorators at the sentinel index (padded op
-        // count). New MAST merges those into `after_exit` at build time; execute them here first so
-        // order matches historical `execute_end_of_block_decorators` + `after_exit`.
+        // Basic blocks may still carry legacy op-indexed decorators at the sentinel index (padded
+        // op count). New MAST merges those into `after_exit` at build time; execute them
+        // here first so order matches historical `execute_end_of_block_decorators` +
+        // `after_exit`.
         if let MastNode::Block(bb) = node {
             let num_ops = bb.num_operations() as usize;
             for decorator in current_forest.decorators_for_op(node_id, num_ops) {

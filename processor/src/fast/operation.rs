@@ -125,7 +125,6 @@ impl Processor for FastProcessor {
 
         ControlFlow::Continue(())
     }
-
 }
 
 impl HasherInterface for FastProcessor {

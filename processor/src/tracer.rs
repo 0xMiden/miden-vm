@@ -73,8 +73,8 @@ pub trait Tracer {
     /// - Continuation::FinishExternal: because external nodes are resolved before starting a clock
     ///   cycle,
     /// - Continuation::EnterForest: because entering a new forest does not consume a clock cycle,
-    /// - Continuation::AfterExitDecorators: because after-exit decorators are executed at the end of
-    ///   an `END` operation; never at the start of a clock cycle
+    /// - Continuation::AfterExitDecorators: because after-exit decorators are executed at the end
+    ///   of an `END` operation; never at the start of a clock cycle
     ///
     /// Additionally, [miden_core::mast::ExternalNode] nodes are guaranteed to be resolved before
     /// this method is called.
