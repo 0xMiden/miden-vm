@@ -321,8 +321,7 @@ impl OpToDecoratorIds {
         if last_node_ptr > max_node_ptr {
             return Err(format!(
                 "node_indptr_for_op_idx end {} exceeds op_indptr bounds {}",
-                last_node_ptr,
-                max_node_ptr
+                last_node_ptr, max_node_ptr
             ));
         }
 
@@ -438,10 +437,8 @@ impl OpToDecoratorIds {
                 .map_err(|_| DecoratorIndexError::OperationIndex { node, operation: op_start })?;
         } else {
             // Build op->decorator CSR for this node
-            let max_op_idx = decorators_info
-                .last()
-                .ok_or(DecoratorIndexError::InternalStructure)?
-                .0; // input is sorted by op index
+            let max_op_idx =
+                decorators_info.last().ok_or(DecoratorIndexError::InternalStructure)?.0; // input is sorted by op index
             let mut it = decorators_info.into_iter().peekable();
 
             for op in 0..=max_op_idx {

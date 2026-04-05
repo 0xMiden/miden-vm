@@ -295,8 +295,7 @@ impl OpToDebugVarIds {
         if last_node_ptr > max_node_ptr {
             return Err(format!(
                 "node_indptr_for_op_idx end {} exceeds op_indptr bounds {}",
-                last_node_ptr,
-                max_node_ptr
+                last_node_ptr, max_node_ptr
             ));
         }
 
@@ -363,10 +362,8 @@ impl OpToDebugVarIds {
                 .push(op_start)
                 .map_err(|_| DecoratorIndexError::OperationIndex { node, operation: op_start })?;
         } else {
-            let max_op_idx = debug_vars_info
-                .last()
-                .ok_or(DecoratorIndexError::InternalStructure)?
-                .0;
+            let max_op_idx =
+                debug_vars_info.last().ok_or(DecoratorIndexError::InternalStructure)?.0;
             let mut it = debug_vars_info.into_iter().peekable();
 
             for op in 0..=max_op_idx {
