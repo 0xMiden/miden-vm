@@ -1,4 +1,3 @@
-use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use miden_air::trace::{RowIndex, chiplets::hasher::HasherState};
@@ -8,7 +7,7 @@ use crate::{
     advice::AdviceError,
     crypto::merkle::MerklePath,
     errors::OperationError,
-    mast::{BasicBlockNode, MastForest, MastNodeId},
+    mast::{MastForest, MastNodeId},
     precompile::PrecompileTranscriptState,
 };
 
@@ -89,17 +88,6 @@ pub(crate) trait Processor: Sized {
         node_id: MastNodeId,
         op_idx_in_block: usize,
         current_forest: &MastForest,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason>;
-
-    /// Executes any decorator in a basic block that is to be executed after all operations in the
-    /// block. This only differs from `execute_after_exit_decorators` in that these decorators are
-    /// stored in the basic block node itself.
-    fn execute_end_of_block_decorators(
-        &self,
-        basic_block_node: &BasicBlockNode,
-        node_id: MastNodeId,
-        current_forest: &Arc<MastForest>,
         host: &mut impl BaseHost,
     ) -> ControlFlow<BreakReason>;
 }

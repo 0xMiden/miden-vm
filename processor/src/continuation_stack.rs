@@ -47,7 +47,7 @@ pub enum Continuation {
     /// Process the finish phase of a basic block node.
     ///
     /// This corresponds to incrementing the clock to account for the inserted END operation, and
-    /// then executing `AfterExitDecoratorsBasicBlock`.
+    /// then executing `AfterExitDecorators`.
     FinishBasicBlock(MastNodeId),
     /// Enter a new MAST forest, where all subsequent `MastNodeId`s will be relative to this forest.
     ///
@@ -56,12 +56,6 @@ pub enum Continuation {
     EnterForest(Arc<MastForest>),
     /// Process the `after_exit` decorators of the given node.
     AfterExitDecorators(MastNodeId),
-    /// Process the `after_exit` decorators of the basic block node.
-    ///
-    /// Similar to `AfterExitDecorators`, but also executes all operation-level decorators that
-    /// refer to after the last operation in the basic block. See
-    /// [`miden_core::mast::BasicBlockNode`] for more details.
-    AfterExitDecoratorsBasicBlock(MastNodeId),
 }
 
 impl Continuation {
@@ -88,10 +82,7 @@ impl Continuation {
             | Respan { node_id: _, batch_index: _ }
             | FinishBasicBlock(_) => true,
 
-            FinishExternal(_)
-            | EnterForest(_)
-            | AfterExitDecorators(_)
-            | AfterExitDecoratorsBasicBlock(_) => false,
+            FinishExternal(_) | EnterForest(_) | AfterExitDecorators(_) => false,
         }
     }
 }

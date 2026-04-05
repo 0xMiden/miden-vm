@@ -33,6 +33,31 @@ mod tests;
 /// Maximum number of operations per group.
 pub const GROUP_SIZE: usize = 9;
 
+/// Op-indexed decorators at padded index `num_padded_ops` run after the last operation; merge them
+/// into `after_exit` (before any existing `after_exit` ids), preserving relative order.
+pub(crate) fn merge_sentinel_op_decorators_into_after_exit(
+    op_batches: &[OpBatch],
+    padded_decorators: DecoratorList,
+    after_exit: Vec<DecoratorId>,
+) -> (DecoratorList, Vec<DecoratorId>) {
+    let num_padded_ops: usize = op_batches.iter().map(|b| b.ops().len()).sum();
+    let mut rest = DecoratorList::with_capacity(padded_decorators.len());
+    let mut sentinel = Vec::new();
+    for (idx, id) in padded_decorators {
+        if idx == num_padded_ops {
+            sentinel.push(id);
+        } else {
+            debug_assert!(
+                idx < num_padded_ops,
+                "decorator op index {idx} exceeds padded op count {num_padded_ops}"
+            );
+            rest.push((idx, id));
+        }
+    }
+    let after_merged: Vec<DecoratorId> = sentinel.into_iter().chain(after_exit).collect();
+    (rest, after_merged)
+}
+
 /// Maximum number of groups per batch.
 pub const BATCH_SIZE: usize = 8;
 const _: [(); 1] = [(); ((BATCH_SIZE & (BATCH_SIZE - 1)) == 0) as usize];
@@ -1481,13 +1506,19 @@ impl BasicBlockNodeBuilder {
             },
         };
 
+        let (padded_decorators, after_exit) = merge_sentinel_op_decorators_into_after_exit(
+            &op_batches,
+            padded_decorators,
+            self.after_exit.clone(),
+        );
+
         Ok(BasicBlockNode {
             op_batches,
             digest,
             decorators: DecoratorStore::Owned {
                 decorators: padded_decorators,
                 before_enter: self.before_enter.clone(),
-                after_exit: self.after_exit.clone(),
+                after_exit,
             },
         })
     }
@@ -1594,6 +1625,12 @@ impl MastForestContributor for BasicBlockNodeBuilder {
             },
         };
 
+        let (padded_decorators, after_exit) = merge_sentinel_op_decorators_into_after_exit(
+            &op_batches,
+            padded_decorators,
+            self.after_exit.clone(),
+        );
+
         // Add decorator info to the forest storage
         forest
             .debug_info
@@ -1601,7 +1638,7 @@ impl MastForestContributor for BasicBlockNodeBuilder {
             .map_err(MastForestError::DecoratorError)?;
 
         // Add node-level decorators to the centralized NodeToDecoratorIds for efficient access
-        forest.register_node_decorators(future_node_id, &self.before_enter, &self.after_exit);
+        forest.register_node_decorators(future_node_id, &self.before_enter, &after_exit);
 
         // Create the node in the forest with Linked variant from the start
         let node_id = forest
