@@ -6,13 +6,11 @@ use alloc::{
 use miden_core::{
     Felt, Word,
     advice::{AdviceInputs, AdviceMap},
-    crypto::{
-        hash::Blake3_256,
-        merkle::{InnerNodeInfo, MerklePath, MerkleStore, NodeIndex},
-    },
+    crypto::merkle::{InnerNodeInfo, MerklePath, MerkleStore, NodeIndex},
     precompile::PrecompileRequest,
-    serde::Serializable,
 };
+#[cfg(test)]
+use miden_core::{crypto::hash::Blake3_256, serde::Serializable};
 
 mod errors;
 pub use errors::AdviceError;
@@ -60,6 +58,7 @@ pub struct AdviceProvider {
 
 impl AdviceProvider {
     #[cfg(test)]
+    #[expect(dead_code)]
     pub(crate) fn merkle_store(&self) -> &MerkleStore {
         &self.store
     }
@@ -94,6 +93,7 @@ impl AdviceProvider {
     ///
     /// The fingerprint is insensitive to advice-map insertion order and Merkle-store insertion
     /// order, but it still reflects advice-stack order and precompile-request order.
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn fingerprint(&self) -> [u8; 32] {
         let stack = self.stack.iter().copied().collect::<Vec<_>>().to_bytes();

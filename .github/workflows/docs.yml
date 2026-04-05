@@ -28,11 +28,17 @@ jobs:
   docs:
     name: Generate and deploy crate documentation
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
 
       - name: Generate documentation
         run: |
@@ -40,23 +46,39 @@ jobs:
           rustup default stable
           make doc
 
-      - name: Prepare publish tree
+      - name: Prepare GitHub Pages artifact
         run: |
           set -euo pipefail
-          mkdir -p .gh-pages-publish/docs
-          if git ls-remote --heads origin gh-pages | grep -q gh-pages; then
-            git fetch --depth=1 origin gh-pages
-            git worktree add --detach .gh-pages-worktree FETCH_HEAD
-            rsync -a --delete --exclude ".git" .gh-pages-worktree/ .gh-pages-publish/
-            git worktree remove .gh-pages-worktree --force
-          fi
-          rm -rf .gh-pages-publish/docs
-          mkdir -p .gh-pages-publish/docs
-          rsync -a --delete target/doc/ .gh-pages-publish/docs/
-          touch .gh-pages-publish/.nojekyll
+          mkdir -p _site/docs
+
+          # Publish a single Pages artifact so the live site does not depend on
+          # whichever Pages source GitHub happens to be configured to read.
+          cat > _site/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <title>Redirecting to docs.miden.xyz</title>
+            <link rel="canonical" href="https://docs.miden.xyz/miden-vm/">
+            <meta http-equiv="refresh" content="0; url=https://docs.miden.xyz/miden-vm/">
+          </head>
+          <body>
+            <h1>Miden VM Documentation Has Moved</h1>
+            <p>This site has moved to
+               <a href="https://docs.miden.xyz/miden-vm/">docs.miden.xyz/miden-vm</a>.
+               You will be redirected automatically.</p>
+          </body>
+          </html>
+          EOF
+
+          rsync -a --delete target/doc/ _site/docs/
+          touch _site/.nojekyll
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./_site
 
       - name: Deploy documentation
-        uses: peaceiris/actions-gh-pages@373f7f263a76c20808c831209c920827a82a2847 # pin@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./.gh-pages-publish
+        id: deployment
+        uses: actions/deploy-pages@v4
