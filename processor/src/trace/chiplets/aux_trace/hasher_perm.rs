@@ -33,6 +33,14 @@ pub fn build_perm_link_running_sum<E: ExtensionField<Felt>>(
     let num_rows = main_trace.num_rows();
     let mut running_sum = vec![E::ZERO; num_rows];
 
+    // The hasher is always the first chiplet, so its trace starts at row 0.
+    // This invariant is required for the cycle_pos calculation below.
+    assert!(
+        main_trace.is_hash_row(RowIndex::from(0u32)),
+        "hasher chiplet must start at row 0"
+    );
+
+    // TODO: batch inversion
     for row_idx in 0..(num_rows - 1) {
         let row: RowIndex = (row_idx as u32).into();
 
@@ -42,16 +50,16 @@ pub fn build_perm_link_running_sum<E: ExtensionField<Felt>>(
         }
 
         let perm_seg = main_trace.chiplet_perm_seg(row);
-        let hs0 = main_trace.chiplet_selector_1(row);
-        let hs1 = main_trace.chiplet_selector_2(row);
+        let hs1 = main_trace.chiplet_selector_1(row);
+        let hs2 = main_trace.chiplet_selector_2(row);
 
         if perm_seg == Felt::ZERO {
             // Controller region
-            if hs0 == Felt::ONE {
+            if hs1 == Felt::ONE {
                 // Controller input row: +1/msg_in
                 let msg_in = encode_perm_link_message(main_trace, row, challenges, LABEL_IN);
                 running_sum[row_idx + 1] = running_sum[row_idx] + msg_in.inverse();
-            } else if hs0 == Felt::ZERO && hs1 == Felt::ZERO {
+            } else if hs1 == Felt::ZERO && hs2 == Felt::ZERO {
                 // Controller output row (RETURN_HASH or RETURN_STATE with s0=0, s1=0): +1/msg_out
                 let msg_out = encode_perm_link_message(main_trace, row, challenges, LABEL_OUT);
                 running_sum[row_idx + 1] = running_sum[row_idx] + msg_out.inverse();
