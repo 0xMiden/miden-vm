@@ -53,6 +53,14 @@ pub const HASHER_RATE_COL_RANGE: Range<usize> = Range {
 };
 /// The index of the hasher's node index column in the execution trace.
 pub const HASHER_NODE_INDEX_COL_IDX: usize = HASHER_STATE_COL_RANGE.end;
+/// The index of the hasher's mrupdate_id column in the execution trace.
+pub const HASHER_MRUPDATE_ID_COL_IDX: usize = HASHER_TRACE_OFFSET + hasher::MRUPDATE_ID_COL_IDX;
+/// The index of the hasher's is_boundary column in the execution trace.
+pub const HASHER_IS_BOUNDARY_COL_IDX: usize = HASHER_TRACE_OFFSET + hasher::IS_BOUNDARY_COL_IDX;
+/// The index of the hasher's direction_bit column in the execution trace.
+pub const HASHER_DIRECTION_BIT_COL_IDX: usize = HASHER_TRACE_OFFSET + hasher::DIRECTION_BIT_COL_IDX;
+/// The index of the hasher's perm_seg column in the execution trace.
+pub const HASHER_PERM_SEG_COL_IDX: usize = HASHER_TRACE_OFFSET + hasher::PERM_SEG_COL_IDX;
 
 // --- GLOBALLY-INDEXED CHIPLET COLUMN ACCESSORS: BITWISE -----------------------------------------
 
@@ -123,3 +131,7 @@ pub const MEMORY_D_INV_COL_IDX: usize = MEMORY_TRACE_OFFSET + memory::D_INV_COL_
 /// and same word as the previous operation.
 pub const MEMORY_FLAG_SAME_CONTEXT_AND_WORD: usize =
     MEMORY_TRACE_OFFSET + memory::FLAG_SAME_CONTEXT_AND_WORD;
+/// The index of the memory's word address low 16-bit limb column in the execution trace.
+pub const MEMORY_WORD_ADDR_LO_COL_IDX: usize = MEMORY_TRACE_OFFSET + memory::WORD_ADDR_LO_COL_IDX;
+/// The index of the memory's word address high 16-bit limb column in the execution trace.
+pub const MEMORY_WORD_ADDR_HI_COL_IDX: usize = MEMORY_TRACE_OFFSET + memory::WORD_ADDR_HI_COL_IDX;

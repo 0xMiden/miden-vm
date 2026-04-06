@@ -148,12 +148,15 @@ impl AuxTraceBuilder {
             current_value = new_value;
         }
 
-        // at this point, all range checks from user operations and the range checker should be
-        // matched - so, the last value must be ZERO;
-        assert_eq!(current_value, E::ZERO);
+        // At this point, b_range accounts for all cycle-based range check lookups (deltas from
+        // memory and stack) matched against the range checker table. The range table also contains
+        // entries for memory address decomposition (w0, w1, 4*w1) whose LogUp requests are on the
+        // wiring bus, not b_range. So b_range may have a non-zero residual equal to the sum of
+        // w0/w1/4*w1 LogUp fractions. The combined balance (b_range + v_wiring) is checked via
+        // reduced_aux_values.
 
         if b_range_idx < b_range.len() - 1 {
-            b_range[(b_range_idx + 1)..].fill(MaybeUninit::new(E::ZERO));
+            b_range[(b_range_idx + 1)..].fill(MaybeUninit::new(current_value));
         }
 
         // all elements are now initialized

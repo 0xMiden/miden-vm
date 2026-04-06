@@ -9,7 +9,7 @@ use miden_core::field::Field;
 
 use super::{
     AUX_TRACE_RAND_CHALLENGES, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, HASH_CYCLE_LEN,
-    LAST_CYCLE_ROW, ONE, Operation, build_trace_from_ops, rand_array, rand_value,
+    ONE, Operation, build_trace_from_ops, rand_array, rand_value,
 };
 
 /// Tests the generation of the `b_chip` bus column when only bitwise lookups are included. It
@@ -61,19 +61,24 @@ fn b_chip_trace_bitwise() {
     assert_eq!(ONE, b_chip[0]);
 
     // At cycle 0 the span hash initialization is requested from the decoder and provided by the
-    // hash chiplet, so the trace should still equal one.
+    // hasher (both at main trace row 0), so they cancel and b_chip stays ONE.
     assert_eq!(ONE, b_chip[1]);
 
-    // The first bitwise request from the stack is sent when the `U32and` operation is executed at
-    // cycle 1, so the request is included in the next row. (The trace begins by executing `span`).
-    let value = build_expected_bitwise(
+    // At row 1, two things happen simultaneously:
+    // - The hasher provides the HOUT response (span hash result) at controller output row 1
+    // - The decoder sends the first U32and bitwise request (user op at cycle 1)
+    // We treat the HOUT response as a black box and extract it from the bus column.
+    let bitwise_1_value = build_expected_bitwise(
         &challenges,
         BITWISE_AND_LABEL,
         Felt::from_u32(a),
         Felt::from_u32(b),
         Felt::from_u32(a & b),
     );
-    let mut expected = value.inverse();
+    // b_chip[2] = ONE * hout_response * bitwise_1.inverse()
+    // so hout_response = b_chip[2] * bitwise_1
+    let hout_response = b_chip[2] * bitwise_1_value;
+    let mut expected = hout_response * bitwise_1_value.inverse();
     assert_eq!(expected, b_chip[2]);
 
     // Nothing changes during user operations with no requests to the Chiplets.
@@ -83,7 +88,6 @@ fn b_chip_trace_bitwise() {
 
     // The second bitwise request from the stack is sent when the `U32and` operation is executed at
     // cycle 4, so the request is included in the next row.
-    // After Push(a) then Push(b), stack is [b, a, ...] so operands are (s0=b, s1=a).
     let value = build_expected_bitwise(
         &challenges,
         BITWISE_AND_LABEL,
@@ -101,7 +105,6 @@ fn b_chip_trace_bitwise() {
 
     // The third bitwise request from the stack is sent when the `U32xor` operation is executed at
     // cycle 15, so the request is included in the next row.
-    // After Push(a) then Push(b), stack is [b, a, ...] so operands are (s0=b, s1=a).
     let value = build_expected_bitwise(
         &challenges,
         BITWISE_XOR_LABEL,
@@ -117,47 +120,40 @@ fn b_chip_trace_bitwise() {
         assert_eq!(expected, b_chip[row]);
     }
 
-    // At cycle 21 the decoder requests the span hash. Since this test focuses on bitwise lookups,
-    // we treat the hasher bus messages as a black box and extract their multiplicands directly from
-    // the bus column.
+    // At cycle 21 the decoder requests the span hash result (END). This should cancel with the
+    // HOUT response that was provided earlier at row 1.
     assert_ne!(expected, b_chip[22]);
-    let span_request_mult = b_chip[22] * b_chip[21].inverse();
-    expected *= span_request_mult;
+    let span_end_request = b_chip[22] * b_chip[21].inverse();
+    expected *= span_end_request;
     assert_eq!(expected, b_chip[22]);
+    // Verify the HOUT response and END request cancel.
+    assert_eq!(hout_response * span_end_request, ONE);
 
-    // Nothing changes until the hasher provides the result of the `SPAN` hash at the end of the
-    // hasher cycle.
-    for row in 23..HASH_CYCLE_LEN {
+    // The hasher trace in the dispatch/compute split has:
+    // - Hasher controller rows 0-1 (already processed above)
+    // - Hasher padding rows 2-31 (selectors [0,1,0] = neither input nor output, no bus activity)
+    // - Hasher permutation segment rows 32-63 (no bus activity on chiplets bus)
+    // So nothing changes until the bitwise segment.
+    let hasher_trace_len = 2 * HASH_CYCLE_LEN; // controller(32 padded) + perm(32)
+    for row in 23..hasher_trace_len {
         assert_eq!(expected, b_chip[row]);
     }
 
-    // At the end of the hasher cycle, the hasher provides the `SPAN` hash. Its multiplicand should
-    // cancel out the earlier request.
-    assert_ne!(expected, b_chip[HASH_CYCLE_LEN]);
-    let span_response_mult = b_chip[HASH_CYCLE_LEN] * b_chip[LAST_CYCLE_ROW].inverse();
-    assert_eq!(span_request_mult * span_response_mult, ONE);
-    expected *= span_response_mult;
-    assert_eq!(expected, b_chip[HASH_CYCLE_LEN]);
-
-    // Bitwise responses will be provided during the bitwise segment of the Chiplets trace, which
-    // starts after the hash for the span block. Responses are provided at the last row of the
-    // Bitwise chiplet's operation cycle.
-    let response_1_row = HASH_CYCLE_LEN + OP_CYCLE_LEN;
+    // Bitwise responses are provided during the bitwise segment, which starts after the hasher.
+    let response_1_row = hasher_trace_len + OP_CYCLE_LEN;
     let response_2_row = response_1_row + OP_CYCLE_LEN;
     let response_3_row = response_2_row + OP_CYCLE_LEN;
 
     // Nothing changes until the Bitwise chiplet responds.
-    for row in (HASH_CYCLE_LEN + 1)..response_1_row {
+    for row in hasher_trace_len..response_1_row {
         assert_eq!(expected, b_chip[row]);
     }
 
-    // At the end of the first bitwise cycle, the response for `U32and` is provided by the Bitwise
-    // chiplet.
+    // At the end of the first bitwise cycle, the response for `U32and` is provided.
     expected *= build_expected_bitwise_from_trace(&trace, &challenges, (response_1_row - 1).into());
     assert_eq!(expected, b_chip[response_1_row]);
 
-    // At the end of the next bitwise cycle, the response for `U32and` is provided by the Bitwise
-    // chiplet.
+    // At the end of the next bitwise cycle, the response for `U32and` is provided.
     for row in (response_1_row + 1)..response_2_row {
         assert_eq!(expected, b_chip[row]);
     }
@@ -169,8 +165,7 @@ fn b_chip_trace_bitwise() {
         assert_eq!(expected, b_chip[row]);
     }
 
-    // At the end of the next bitwise cycle, the response for `U32and` is provided by the Bitwise
-    // chiplet.
+    // At the end of the next bitwise cycle, the response for `U32xor` is provided.
     expected *= build_expected_bitwise_from_trace(&trace, &challenges, (response_3_row - 1).into());
     assert_eq!(expected, b_chip[response_3_row]);
 

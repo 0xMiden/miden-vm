@@ -24,6 +24,7 @@
 - [BREAKING] Reduced the prove-from-trace API to post-execution trace inputs: `TraceBuildInputs` no longer carries full execution output, `prove_from_trace_sync()` takes `TraceProvingInputs`, and `ProvingOptions` no longer include `ExecutionOptions` ([#2948](https://github.com/0xMiden/miden-vm/pull/2948)).
 - [BREAKING] Removed `Continuation::AfterExitDecoratorsBasicBlock`. New MAST merges operation-indexed decorators at the post-last-op sentinel index into `after_exit` at build time; execution uses `AfterExitDecorators` only, with legacy forests still supported ([#2633](https://github.com/0xMiden/miden-vm/issues/2633)).
 - Refactor trace generation to row-major format ([#2937](https://github.com/0xMiden/miden-vm/pull/2937)).
+- Redesigned the hasher chiplet to use a controller/permutation split architecture with permutation calls deduplication ([#2927](https://github.com/0xMiden/miden-vm/pull/2927)).
 
 #### Fixes
 
