@@ -3,7 +3,6 @@ use core::mem::MaybeUninit;
 
 use miden_air::trace::{
     Challenges, MainTrace, RowIndex,
-    bus_types::RANGE_CHECK_BUS,
     range::{M_COL_IDX, V_COL_IDX},
 };
 
@@ -69,7 +68,7 @@ impl AuxTraceBuilder {
         challenges: &Challenges<E>,
     ) -> Vec<E> {
         // run batch inversion on the lookup values
-        let divisors = get_divisors(&self.lookup_values, challenges.bus_prefix[RANGE_CHECK_BUS]);
+        let divisors = get_divisors(&self.lookup_values, challenges.bus_prefix.range_check_bus);
 
         // allocate memory for the running sum column and set the initial value to ZERO
         let mut b_range: Vec<MaybeUninit<E>> = uninit_vector(main_trace.num_rows());

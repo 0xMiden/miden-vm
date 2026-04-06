@@ -909,22 +909,22 @@ fn build_expected(
 ) -> Felt {
     let first_cycle_row = addr_to_cycle_row(addr) == 0;
     let transition_label = if first_cycle_row { label + 16_u8 } else { label + 32_u8 };
-    let header = challenges.bus_prefix[miden_air::trace::bus_types::CHIPLETS_BUS]
-        + challenges.beta_powers[0] * Felt::from_u8(transition_label)
-        + challenges.beta_powers[1] * addr
-        + challenges.beta_powers[2] * index;
+    let header = challenges.bus_prefix.chiplets_bus
+        + challenges.beta_powers.label * Felt::from_u8(transition_label)
+        + challenges.beta_powers.addr * addr
+        + challenges.beta_powers.node_index * index;
     let mut value = header;
 
     if (first_cycle_row && label == LINEAR_HASH_LABEL) || label == RETURN_STATE_LABEL {
         // include the entire state (words a, b, c)
-        value += build_value(&challenges.beta_powers[3..15], &state);
+        value += build_value(&challenges.beta_powers.sponge_state(), &state);
     } else if label == LINEAR_HASH_LABEL {
         // Include the next absorbed rate portion of the state (RATE0 || RATE1).
         // With LE sponge layout [RATE0, RATE1, CAP], rate is at indices 0..8.
-        value += build_value(&challenges.beta_powers[3..11], &next_state[0..RATE_LEN]);
+        value += build_value(&challenges.beta_powers.state, &next_state[0..RATE_LEN]);
     } else if label == RETURN_HASH_LABEL {
         // include the digest (word b)
-        value += build_value(&challenges.beta_powers[3..7], &state[DIGEST_RANGE]);
+        value += build_value(&challenges.beta_powers.state[..4], &state[DIGEST_RANGE]);
     } else {
         assert!(
             label == MP_VERIFY_LABEL
@@ -934,8 +934,8 @@ fn build_expected(
         let bit = index.as_canonical_u64() & 1;
         // For Merkle operations, RATE0 and RATE1 hold the two child digests.
         // With LE sponge layout [RATE0, RATE1, CAP], they are at indices 0..4 and 4..8.
-        let left_word = build_value(&challenges.beta_powers[3..7], &state[0..4]);
-        let right_word = build_value(&challenges.beta_powers[3..7], &state[4..8]);
+        let left_word = build_value(&challenges.beta_powers.state[..4], &state[0..4]);
+        let right_word = build_value(&challenges.beta_powers.state[..4], &state[4..8]);
 
         value += Felt::new(1 - bit) * left_word + Felt::new(bit) * right_word;
     }

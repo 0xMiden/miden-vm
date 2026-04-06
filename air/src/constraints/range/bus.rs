@@ -18,7 +18,7 @@ use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 use crate::{
     MainCols, MidenAirBuilder,
     constraints::{chiplets::selectors::ChipletSelectors, utils::BoolNot},
-    trace::{Challenges, bus_types::RANGE_CHECK_BUS, range},
+    trace::{Challenges, range},
 };
 
 // ENTRY POINTS
@@ -56,7 +56,7 @@ pub fn enforce_bus<AB>(
     let b_local = aux_local[range::B_RANGE_COL_IDX];
     let b_next = aux_next[range::B_RANGE_COL_IDX];
 
-    let alpha = &challenges.bus_prefix[RANGE_CHECK_BUS];
+    let alpha = &challenges.bus_prefix.range_check_bus;
 
     // Denominators for LogUp
     let mem = local.memory();

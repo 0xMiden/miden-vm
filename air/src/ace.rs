@@ -49,7 +49,8 @@ pub enum MessageElement {
 pub enum ProductFactor {
     /// Claimed final value of an auxiliary trace column, by column index.
     BusBoundary(usize),
-    /// A bus message computed from its elements as `bus_prefix[bus] + sum(beta^i * elements[i])`.
+    /// A bus message computed from its elements as the bus-specific prefix plus
+    /// `sum(beta^i * elements[i])` (same convention as [`trace::Challenges::encode`]).
     /// The first field is the bus type index (see `trace::bus_types`).
     Message(usize, Vec<MessageElement>),
     /// Multiset product reduced from variable-length public inputs, by group index.
@@ -157,9 +158,9 @@ where
     sum
 }
 
-/// Encode a bus message as `bus_prefix[bus] + sum(beta^i * elements[i])`.
+/// Encode a bus message as the bus-specific prefix plus `sum(beta^i * elements[i])`.
 ///
-/// The bus prefix provides domain separation: `bus_prefix[bus] = alpha + (bus+1) * gamma`
+/// The bus prefix provides domain separation: `alpha + (bus+1) * gamma` for each bus index.
 /// where `gamma = beta^MAX_MESSAGE_WIDTH`. This matches [`trace::Challenges::encode`].
 fn encode_bus_message<EF>(
     builder: &mut DagBuilder<EF>,

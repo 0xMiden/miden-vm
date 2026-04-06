@@ -15,7 +15,6 @@ use memory::{
 };
 use miden_air::trace::{
     Challenges, MainTrace, RowIndex,
-    bus_types::CHIPLETS_BUS,
     chiplets::{
         hasher::LINEAR_HASH_LABEL,
         memory::{
@@ -183,12 +182,10 @@ fn encode_control_block_without_state<E>(challenges: &Challenges<E>, addr: Felt,
 where
     E: ExtensionField<Felt>,
 {
-    use miden_air::trace::bus_message;
-
-    challenges.bus_prefix[CHIPLETS_BUS]
-        + challenges.beta_powers[bus_message::LABEL_IDX] * Felt::from_u8(LINEAR_HASH_LABEL + 16)
-        + challenges.beta_powers[bus_message::ADDR_IDX] * addr
-        + challenges.beta_powers[bus_message::CAPACITY_DOMAIN_IDX] * op_code
+    challenges.bus_prefix.chiplets_bus
+        + challenges.beta_powers.label * Felt::from_u8(LINEAR_HASH_LABEL + 16)
+        + challenges.beta_powers.addr * addr
+        + *challenges.beta_powers.capacity_domain() * op_code
 }
 
 /// Builds requests made on a `DYN` operation.
