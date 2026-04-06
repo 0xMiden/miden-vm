@@ -1,0 +1,46 @@
+name: Prepare changelog release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version, e.g. 0.23.0
+        required: true
+        type: string
+      date:
+        description: Release date in YYYY-MM-DD format. Defaults to today if empty.
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare changelog release
+        run: |
+          if [ -n "${{ inputs.date }}" ]; then
+            ./scripts/prepare-changelog-release.py --version "${{ inputs.version }}" --date "${{ inputs.date }}"
+          else
+            ./scripts/prepare-changelog-release.py --version "${{ inputs.version }}"
+          fi
+
+      - name: Commit prepared changelog
+        run: |
+          if git diff --quiet -- CHANGELOG.md .changes; then
+            echo "No changelog changes were produced."
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md .changes
+          git commit -m "chore(changelog): prepare ${{ inputs.version }}"
+          git push

@@ -1,0 +1,222 @@
+name: Draft changelog fragment
+
+on:
+  pull_request_target:
+    branches:
+      - main
+      - next
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+
+permissions:
+  models: read
+  pull-requests: write
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.event.pull_request.number }}"
+  cancel-in-progress: true
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect PR context
+        id: context
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const pr = context.payload.pull_request;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner,
+              repo,
+              pull_number: pr.number,
+              per_page: 100,
+            });
+
+            const hasNoChangelog = (pr.labels || []).some(label => label.name === 'no changelog');
+            const hasFragment = files.some(file => /^\.changes\/unreleased\/.+\.md$/.test(file.filename));
+            const shouldRun = !hasNoChangelog && !hasFragment;
+
+            const changedFiles = files.map(file => file.filename).join('\n') || '(no changed files reported)';
+
+            const diffSections = [];
+            let totalChars = 0;
+            for (const file of files) {
+              const patch = file.patch || '[diff omitted by GitHub]';
+              const truncatedPatch = patch.length > 4000 ? `${patch.slice(0, 4000)}\n...[truncated]` : patch;
+              const section = `### ${file.filename}\n${truncatedPatch}`;
+              if (totalChars + section.length > 20000) {
+                diffSections.push('...[additional diff omitted]');
+                break;
+              }
+              diffSections.push(section);
+              totalChars += section.length;
+            }
+
+            const tempDir = process.env.RUNNER_TEMP;
+            const inputsDir = path.join(tempDir, 'changelog-fragment-inputs');
+            fs.mkdirSync(inputsDir, { recursive: true });
+
+            const bodyPath = path.join(inputsDir, 'body.txt');
+            const titlePath = path.join(inputsDir, 'title.txt');
+            const changedFilesPath = path.join(inputsDir, 'changed_files.txt');
+            const diffPath = path.join(inputsDir, 'diff.txt');
+            const promptPath = path.join(inputsDir, 'prompt.prompt.yml');
+
+            fs.writeFileSync(bodyPath, pr.body || '');
+            fs.writeFileSync(titlePath, pr.title || '');
+            fs.writeFileSync(changedFilesPath, changedFiles);
+            fs.writeFileSync(diffPath, diffSections.join('\n\n'));
+            fs.writeFileSync(promptPath, `messages:
+              - role: system
+                content: |-
+                  You draft changelog fragments for a Rust workspace.
+                  Return JSON only.
+                  Pick the smallest accurate kind from: breaking, change, enhancement, fix.
+                  Write a single concise, user-facing summary sentence.
+                  Do not mention tests, reviews, CI, or implementation details unless they matter to users.
+                  Only set crate when a single obvious crate is central to the change; otherwise use an empty string.
+              - role: user
+                content: |-
+                  Draft a changelog fragment from this pull request.
+
+                  Pull request URL:
+                  {{pr_url}}
+
+                  Pull request title:
+                  {{title}}
+
+                  Pull request body:
+                  {{body}}
+
+                  Changed files:
+                  {{changed_files}}
+
+                  Unified diff:
+                  {{diff}}
+            model: openai/gpt-4.1-mini
+            responseFormat: json_schema
+            jsonSchema: |-
+              {
+                "name": "changelog_fragment",
+                "strict": true,
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": ["breaking", "change", "enhancement", "fix"]
+                    },
+                    "crate": {
+                      "type": "string"
+                    },
+                    "summary": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["kind", "crate", "summary"],
+                  "additionalProperties": false
+                }
+              }
+            modelParameters:
+              temperature: 0.2
+              maxCompletionTokens: 250
+            `);
+
+            core.setOutput('should_run', shouldRun ? 'true' : 'false');
+            core.setOutput('pr_number', String(pr.number));
+            core.setOutput('pr_url', pr.html_url);
+            core.setOutput('body_path', bodyPath);
+            core.setOutput('title_path', titlePath);
+            core.setOutput('changed_files_path', changedFilesPath);
+            core.setOutput('diff_path', diffPath);
+            core.setOutput('prompt_path', promptPath);
+
+      - name: Run AI inference
+        if: ${{ steps.context.outputs.should_run == 'true' }}
+        id: inference
+        uses: actions/ai-inference@v1
+        with:
+          prompt-file: ${{ steps.context.outputs.prompt_path }}
+          input: |
+            pr_url: ${{ steps.context.outputs.pr_url }}
+          file_input: |
+            title: ${{ steps.context.outputs.title_path }}
+            body: ${{ steps.context.outputs.body_path }}
+            changed_files: ${{ steps.context.outputs.changed_files_path }}
+            diff: ${{ steps.context.outputs.diff_path }}
+
+      - name: Comment fragment instructions
+        if: ${{ steps.context.outputs.should_run == 'true' }}
+        env:
+          PR_NUMBER: ${{ steps.context.outputs.pr_number }}
+          PR_URL: ${{ steps.context.outputs.pr_url }}
+          RESPONSE_FILE: ${{ steps.inference.outputs.response-file }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const prNumber = process.env.PR_NUMBER;
+            const prUrl = process.env.PR_URL;
+            const response = JSON.parse(fs.readFileSync(process.env.RESPONSE_FILE, 'utf8'));
+            const marker = '<!-- changelog-fragment-draft -->';
+            const kind = response.kind;
+            const crate = response.crate || '';
+            const summary = response.summary;
+            const repoFragmentPath = `.changes/unreleased/${prNumber}.${kind}.md`;
+
+            const frontMatter = [
+              '---',
+              `kind: ${kind}`,
+              `pr: ${prUrl}`,
+              ...(crate ? [`crate: ${crate}`] : []),
+              '---',
+              '',
+              summary,
+            ];
+            const fragment = frontMatter.join('\n');
+            const body = [
+              marker,
+              'This pull request does not include a changelog fragment and is not labeled `no changelog`.',
+              '',
+              `Please add a file at \`${repoFragmentPath}\` with content like:`,
+              '',
+              '```md',
+              fragment,
+              '```',
+              '',
+              'If no changelog entry is needed, ask a maintainer to apply the `no changelog` label.',
+            ].join('\n');
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+
+            const existing = comments.find(comment =>
+              comment.user?.login === 'github-actions[bot]' && comment.body?.includes(marker)
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              });
+            }

@@ -1,5 +1,4 @@
 # Runs changelog related jobs.
-# CI job heavily inspired by: https://github.com/tarides/changelog-check-action
 
 name: changelog
 
@@ -25,5 +24,5 @@ jobs:
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           NO_CHANGELOG_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'no changelog') }}
-        run: ./scripts/check-changelog.sh "${{ inputs.changelog }}"
+        run: ./scripts/check-changelog.sh
         shell: bash
