@@ -173,8 +173,6 @@ pub trait SequentialCommit {
 // ================================================================================================
 
 mod batch_inversion {
-    use alloc::vec::Vec;
-
     use p3_maybe_rayon::prelude::*;
 
     use super::{Felt, ONE, ZERO, field::Field};
@@ -185,14 +183,12 @@ mod batch_inversion {
     pub fn batch_inversion_allow_zeros(values: &mut [Felt]) {
         const CHUNK_SIZE: usize = 1024;
 
-        // We need to work with a copy since we're modifying in place
-        let input: Vec<Felt> = values.to_vec();
-
-        input.par_chunks(CHUNK_SIZE).zip(values.par_chunks_mut(CHUNK_SIZE)).for_each(
-            |(input_chunk, output_chunk)| {
-                batch_inversion_helper(input_chunk, output_chunk);
-            },
-        );
+        values.par_chunks_mut(CHUNK_SIZE).for_each(|output_chunk| {
+            let len = output_chunk.len();
+            let mut scratch = [ZERO; CHUNK_SIZE];
+            scratch[..len].copy_from_slice(output_chunk);
+            batch_inversion_helper(&scratch[..len], output_chunk);
+        });
     }
 
     /// Montgomery's trick for batch inversion, handling zeros.
@@ -228,6 +224,8 @@ mod batch_inversion {
 
     #[cfg(test)]
     mod tests {
+        use alloc::vec::Vec;
+
         use super::*;
 
         #[test]
@@ -239,6 +237,25 @@ mod batch_inversion {
             assert_eq!(column[1], ZERO);
             assert_eq!(column[2], Felt::new(4).inverse());
             assert_eq!(column[3], Felt::new(5).inverse());
+        }
+
+        #[test]
+        fn test_batch_inversion_allow_zeros_spans_fixed_chunks() {
+            let mut v: Vec<Felt> = (1_u64..=2050).map(Felt::new).collect();
+            let expected: Vec<Felt> = v.iter().copied().map(|x| x.inverse()).collect();
+            batch_inversion_allow_zeros(&mut v);
+            assert_eq!(v, expected);
+        }
+
+        #[test]
+        fn test_batch_inversion_allow_zeros_zero_on_chunk_boundary() {
+            let mut v = vec![Felt::new(7); 1025];
+            v[1023] = ZERO;
+            batch_inversion_allow_zeros(&mut v);
+            assert_eq!(v[1023], ZERO);
+            for i in (0..1023).chain(1024..1025) {
+                assert_eq!(v[i], Felt::new(7).inverse());
+            }
         }
     }
 }
