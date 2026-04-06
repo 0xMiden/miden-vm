@@ -205,14 +205,14 @@ impl SiblingTableRow {
         // we need to compute the 2nd and the 3rd word values for other purposes as well.
         let lsb = self.index.as_canonical_u64() & 1;
         if lsb == 0 {
-            challenges.bus_prefix[miden_air::trace::bus_types::SIBLING_TABLE]
+            challenges.bus_prefix.sibling_table
                 + challenges.beta_powers[2] * self.index
                 + challenges.beta_powers[7] * self.sibling[0]
                 + challenges.beta_powers[8] * self.sibling[1]
                 + challenges.beta_powers[9] * self.sibling[2]
                 + challenges.beta_powers[10] * self.sibling[3]
         } else {
-            challenges.bus_prefix[miden_air::trace::bus_types::SIBLING_TABLE]
+            challenges.bus_prefix.sibling_table
                 + challenges.beta_powers[2] * self.index
                 + challenges.beta_powers[3] * self.sibling[0]
                 + challenges.beta_powers[4] * self.sibling[1]

@@ -882,7 +882,7 @@ impl BlockStackTableRow {
     /// at least 12 coefficients.
     pub fn to_value<E: ExtensionField<Felt>>(&self, challenges: &Challenges<E>) -> E {
         let is_loop = if self.is_loop { ONE } else { ZERO };
-        challenges.bus_prefix[miden_air::trace::bus_types::BLOCK_STACK_TABLE]
+        challenges.bus_prefix.block_stack_table
             + challenges.beta_powers[0] * self.block_id
             + challenges.beta_powers[1] * self.parent_id
             + challenges.beta_powers[2] * is_loop
@@ -917,7 +917,7 @@ impl OpGroupTableRow {
     /// Reduces this row to a single field element in the field specified by E. This requires
     /// at least 4 coefficients.
     pub fn to_value<E: ExtensionField<Felt>>(&self, challenges: &Challenges<E>) -> E {
-        challenges.bus_prefix[miden_air::trace::bus_types::OP_GROUP_TABLE]
+        challenges.bus_prefix.op_group_table
             + challenges.beta_powers[0] * self.batch_id
             + challenges.beta_powers[1] * self.group_pos
             + challenges.beta_powers[2] * self.group_value

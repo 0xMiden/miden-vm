@@ -4,7 +4,7 @@ use chiplets::hasher::RATE_LEN;
 use miden_core::utils::range;
 
 mod challenges;
-pub use challenges::Challenges;
+pub use challenges::{BusPrefix, Challenges};
 
 pub mod chiplets;
 pub mod decoder;
@@ -237,7 +237,8 @@ pub mod bus_message {
 ///
 /// Each constant identifies a distinct bus interaction type. When encoding a message,
 /// the bus index is passed to [`Challenges::encode`] or [`Challenges::encode_sparse`],
-/// which uses `bus_prefix[bus]` as the additive base instead of bare `alpha`.
+/// which uses `bus_prefix.prefix_for_bus(bus)` (or the corresponding named field) as the additive
+/// base instead of bare `alpha`.
 ///
 /// This ensures messages from different buses are always distinct, even if they share
 /// the same coefficient layout and labels. This is a prerequisite for a future unified bus.
