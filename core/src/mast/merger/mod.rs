@@ -7,6 +7,7 @@ use crate::{
         MastNode, MastNodeBuilder, MastNodeFingerprint, MastNodeId, MultiMastForestIteratorItem,
         MultiMastForestNodeIter,
     },
+    serde::Serializable,
     utils::{DenseIdMap, IndexVec},
 };
 
@@ -231,8 +232,14 @@ impl MastForestMerger {
             &self.decorator_id_mappings[forest_idx],
         )?;
 
-        let node_fingerprint =
+        let base_fingerprint =
             remapped_builder.fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)?;
+
+        // Augment with the source node's debug vars so same-ops/different-vars
+        // blocks from different forests are not collapsed.
+        let debug_var_data =
+            serialize_debug_var_content_for_node(original_forests[forest_idx], merging_id);
+        let node_fingerprint = base_fingerprint.augment_with_data(&debug_var_data);
 
         match self.lookup_node_by_fingerprint(&node_fingerprint) {
             Some(matching_node_id) => {
@@ -390,6 +397,31 @@ impl MastForestMerger {
     ) -> Result<MastNodeBuilder, MastForestError> {
         super::build_node_with_remapped_ids(merging_id, src, original_forest, nmap, dmap)
     }
+}
+
+// HELPERS
+// ================================================================================================
+
+/// Serializes the actual debug var *content* (name, location, etc.) for a node,
+/// producing a stable byte sequence suitable for fingerprint augmentation.
+///
+/// Unlike the assembler's `serialize_debug_vars` (which serializes `(op_idx, DebugVarId)` pairs),
+/// this serializes the resolved DebugVarInfo so that two forests assigning different DebugVarIds
+/// to identical variables still produce the same fingerprint contribution.
+fn serialize_debug_var_content_for_node(forest: &MastForest, node_id: MastNodeId) -> Vec<u8> {
+    let entries = forest.debug_info().debug_vars_for_node(node_id);
+    if entries.is_empty() {
+        return Vec::new();
+    }
+
+    let mut data = Vec::new();
+    for (op_idx, var_id) in entries {
+        data.extend_from_slice(&op_idx.to_le_bytes());
+        if let Some(info) = forest.debug_info().debug_var(var_id) {
+            info.write_into(&mut data);
+        }
+    }
+    data
 }
 
 // MAST FOREST ROOT MAP

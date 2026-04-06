@@ -1229,3 +1229,97 @@ fn compact_preserves_debug_metadata() {
     let vars = compacted.debug_info().debug_vars_for_node(compacted_id);
     assert_eq!(vars.len(), 1, "compacted node must keep debug var");
 }
+
+/// Two basic blocks with the same ops but different debug vars must stay
+/// distinct after MastForest::merge (the merger must not collapse them).
+#[test]
+fn merge_keeps_blocks_with_different_debug_vars_distinct() {
+    // Forest A: block [Mul, Add] with debug var "x" at stack 0.
+    let mut forest_a = MastForest::new();
+    let dvar_a = forest_a
+        .add_debug_var(DebugVarInfo::new("x", DebugVarLocation::Stack(0)))
+        .unwrap();
+    let block_a = block_foo().add_to_forest(&mut forest_a).unwrap();
+    forest_a
+        .debug_info_mut()
+        .register_op_indexed_debug_vars(block_a, vec![(0, dvar_a)])
+        .unwrap();
+    forest_a.make_root(block_a);
+
+    // Forest B: identical block [Mul, Add] but with debug var "y" at stack 1.
+    let mut forest_b = MastForest::new();
+    let dvar_b = forest_b
+        .add_debug_var(DebugVarInfo::new("y", DebugVarLocation::Stack(1)))
+        .unwrap();
+    let block_b = block_foo().add_to_forest(&mut forest_b).unwrap();
+    forest_b
+        .debug_info_mut()
+        .register_op_indexed_debug_vars(block_b, vec![(0, dvar_b)])
+        .unwrap();
+    forest_b.make_root(block_b);
+
+    let (merged, root_map) = MastForest::merge([&forest_a, &forest_b]).unwrap();
+
+    let new_a = root_map.map_root(0, &block_a).unwrap();
+    let new_b = root_map.map_root(1, &block_b).unwrap();
+
+    // The blocks must be distinct -- different debug vars must prevent dedup.
+    assert_ne!(new_a, new_b, "same-ops blocks with different debug vars must not be collapsed");
+
+    // Each must have its own debug var.
+    let vars_a = merged.debug_info().debug_vars_for_node(new_a);
+    let vars_b = merged.debug_info().debug_vars_for_node(new_b);
+    assert_eq!(vars_a.len(), 1);
+    assert_eq!(vars_b.len(), 1);
+
+    let info_a = merged.debug_info().debug_var(vars_a[0].1).unwrap();
+    let info_b = merged.debug_info().debug_var(vars_b[0].1).unwrap();
+    assert_eq!(info_a.name(), "x");
+    assert_eq!(info_b.name(), "y");
+}
+
+/// Debug vars are only representable on basic block nodes. The builder API
+/// (`ensure_block`) is the sole entry point for attaching debug vars, and
+/// control-flow nodes (Join, Split, Loop, Call, Dyn) have no `debug_vars`
+/// parameter. This test verifies that after assembly, non-block nodes carry
+/// no debug vars.
+#[test]
+fn non_basic_block_nodes_have_no_debug_vars() {
+    use crate::mast::{JoinNodeBuilder, SplitNodeBuilder};
+
+    let mut forest = MastForest::new();
+
+    // Two leaf blocks (no debug vars).
+    let block_a = block_foo().add_to_forest(&mut forest).unwrap();
+    let block_b = block_bar().add_to_forest(&mut forest).unwrap();
+
+    // Join node wrapping the two.
+    let join = JoinNodeBuilder::new([block_a, block_b]);
+    let join_id = join.add_to_forest(&mut forest).unwrap();
+
+    // Split node wrapping the two.
+    let split = SplitNodeBuilder::new([block_a, block_b]);
+    let split_id = split.add_to_forest(&mut forest).unwrap();
+
+    // Loop node.
+    let loop_node = LoopNodeBuilder::new(block_a);
+    let loop_id = loop_node.add_to_forest(&mut forest).unwrap();
+
+    forest.make_root(join_id);
+    forest.make_root(split_id);
+    forest.make_root(loop_id);
+
+    // None of these control-flow nodes should have debug vars.
+    assert!(
+        forest.debug_info().debug_vars_for_node(join_id).is_empty(),
+        "join node must not carry debug vars"
+    );
+    assert!(
+        forest.debug_info().debug_vars_for_node(split_id).is_empty(),
+        "split node must not carry debug vars"
+    );
+    assert!(
+        forest.debug_info().debug_vars_for_node(loop_id).is_empty(),
+        "loop node must not carry debug vars"
+    );
+}
