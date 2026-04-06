@@ -1,7 +1,7 @@
 use core::fmt::{Display, Formatter, Result as FmtResult};
 
 use miden_air::trace::{
-    Challenges, MainTrace, RowIndex, bus_message,
+    Challenges, MainTrace, RowIndex,
     chiplets::{
         hasher,
         hasher::{
@@ -29,13 +29,13 @@ use crate::{
 // All hasher chiplet bus messages use a common encoding structure:
 //
 //   challenges.bus_prefix.chiplets_bus   = alpha + gamma (chiplet bus domain separation)
-//   challenges.beta_powers[0]            = beta^0 (label: transition type)
-//   challenges.beta_powers[1]            = beta^1 (addr: hasher chiplet address)
-//   challenges.beta_powers[2]            = beta^2 (node_index: Merkle path position, 0 for
+//   challenges.beta_powers.label         = beta^0 (label: transition type)
+//   challenges.beta_powers.addr          = beta^1 (addr: hasher chiplet address)
+//   challenges.beta_powers.node_index    = beta^2 (node_index: Merkle path position, 0 for
 // non-Merkle ops)
-//   challenges.beta_powers[3..10]        = beta^3..beta^10 (state[0..7]: RATE0 || RATE1 in sponge
+//   challenges.beta_powers.state[0..8]   = beta^3..beta^10 (state[0..7]: RATE0 || RATE1 in sponge
 // order)
-//   challenges.beta_powers[11..14]       = beta^11..beta^14 (capacity[0..3]: domain separation)
+//   challenges.beta_powers.capacity[0..4] = beta^11..beta^14 (capacity[0..3]: domain separation)
 //
 // Message encoding: alpha + beta^0*label + beta^1*addr + beta^2*node_index
 //                   + beta^3*state[0] + ... + beta^10*state[7]
@@ -45,7 +45,7 @@ use crate::{
 // - Full state messages (HPERM, LOG_PRECOMPILE): all 12 state elements (rate + capacity)
 // - Rate-only messages (SPAN, RESPAN): skip node_index and capacity, use label + addr + state[0..7]
 // - Digest messages (END block): label + addr + RATE0 digest (state[0..3])
-// - Control block messages: rate + one capacity element (beta_powers[12]) for op_code
+// - Control block messages: rate + one capacity element (capacity_domain / beta^12) for op_code
 // - Tree operation messages (MPVERIFY, MRUPDATE): include node_index
 
 // HASHER MESSAGE CONSTANTS AND HELPERS
@@ -60,6 +60,16 @@ const RETURN_STATE_LABEL_END: Felt = Felt::new((RETURN_STATE_LABEL + 32) as u64)
 const MP_VERIFY_LABEL_START: Felt = Felt::new((MP_VERIFY_LABEL + 16) as u64);
 const MR_UPDATE_OLD_LABEL_START: Felt = Felt::new((MR_UPDATE_OLD_LABEL + 16) as u64);
 const MR_UPDATE_NEW_LABEL_START: Felt = Felt::new((MR_UPDATE_NEW_LABEL + 16) as u64);
+
+/// `beta^(STATE_START_IDX + i)` for sponge `state[i]` (rate then capacity coefficients).
+#[inline(always)]
+fn beta_for_sponge_elem<E: ExtensionField<Felt>>(challenges: &Challenges<E>, i: usize) -> E {
+    if i < 8 {
+        challenges.beta_powers.state[i]
+    } else {
+        challenges.beta_powers.capacity[i - 8]
+    }
+}
 
 /// Encodes hasher message as **alpha + <beta, [label, addr, node_index, state...]>**
 ///
@@ -76,11 +86,11 @@ where
     E: ExtensionField<Felt>,
 {
     let mut acc = challenges.bus_prefix.chiplets_bus
-        + challenges.beta_powers[bus_message::LABEL_IDX] * transition_label
-        + challenges.beta_powers[bus_message::ADDR_IDX] * addr_next
-        + challenges.beta_powers[bus_message::NODE_INDEX_IDX] * node_index;
+        + challenges.beta_powers.label * transition_label
+        + challenges.beta_powers.addr * addr_next
+        + challenges.beta_powers.node_index * node_index;
     for (i, &elem) in state.iter().enumerate() {
-        acc += challenges.beta_powers[bus_message::STATE_START_IDX + i] * elem;
+        acc += beta_for_sponge_elem(challenges, i) * elem;
     }
     acc
 }
@@ -97,10 +107,10 @@ where
     E: ExtensionField<Felt>,
 {
     let mut acc = challenges.bus_prefix.chiplets_bus
-        + challenges.beta_powers[bus_message::LABEL_IDX] * transition_label
-        + challenges.beta_powers[bus_message::ADDR_IDX] * addr;
+        + challenges.beta_powers.label * transition_label
+        + challenges.beta_powers.addr * addr;
     for (i, &elem) in state.iter().enumerate() {
-        acc += challenges.beta_powers[bus_message::STATE_START_IDX + i] * elem;
+        acc += challenges.beta_powers.state[i] * elem;
     }
     acc
 }
@@ -118,10 +128,10 @@ where
     E: ExtensionField<Felt>,
 {
     let mut acc = challenges.bus_prefix.chiplets_bus
-        + challenges.beta_powers[bus_message::LABEL_IDX] * transition_label
-        + challenges.beta_powers[bus_message::ADDR_IDX] * addr;
+        + challenges.beta_powers.label * transition_label
+        + challenges.beta_powers.addr * addr;
     for (i, &elem) in digest.iter().enumerate() {
-        acc += challenges.beta_powers[bus_message::STATE_START_IDX + i] * elem;
+        acc += challenges.beta_powers.state[i] * elem;
     }
     acc
 }
@@ -748,7 +758,7 @@ where
             self.addr_next,
             self.decoder_hasher_state,
         );
-        acc += challenges.beta_powers[bus_message::CAPACITY_DOMAIN_IDX] * self.op_code;
+        acc += *challenges.beta_powers.capacity_domain() * self.op_code;
         acc
     }
 

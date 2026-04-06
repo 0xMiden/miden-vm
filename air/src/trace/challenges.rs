@@ -19,12 +19,63 @@ use miden_core::field::PrimeCharacteristicRing;
 
 use super::{
     MAX_MESSAGE_WIDTH,
+    bus_message::{
+        ADDR_IDX, CAPACITY_COEFF_END_IDX, CAPACITY_START_IDX, LABEL_IDX, NODE_INDEX_IDX,
+        STATE_COEFF_END_IDX, STATE_START_IDX,
+    },
     bus_types::{
         ACE_WIRING_BUS, BLOCK_HASH_TABLE, BLOCK_STACK_TABLE, CHIPLETS_BUS,
         LOG_PRECOMPILE_TRANSCRIPT, NUM_BUS_TYPES, OP_GROUP_TABLE, RANGE_CHECK_BUS, SIBLING_TABLE,
         STACK_OVERFLOW_TABLE,
     },
 };
+
+/// Precomputed powers `beta^0 .. beta^(MAX_MESSAGE_WIDTH-1)` for bus message dot products.
+///
+/// Layout matches [`super::bus_message`].
+#[derive(Clone, Debug)]
+pub struct BetaPowers<EF> {
+    pub label: EF,
+    pub addr: EF,
+    pub node_index: EF,
+    pub state: [EF; 8],
+    pub capacity: [EF; 4],
+    pub beta_pow_15: EF,
+}
+
+impl<EF: Clone> BetaPowers<EF> {
+    /// Coefficient `beta^i` for `i < MAX_MESSAGE_WIDTH` (see [`super::bus_message`] indices).
+    #[inline(always)]
+    pub fn at(&self, idx: usize) -> &EF {
+        match idx {
+            LABEL_IDX => &self.label,
+            ADDR_IDX => &self.addr,
+            NODE_INDEX_IDX => &self.node_index,
+            STATE_START_IDX..=STATE_COEFF_END_IDX => &self.state[idx - STATE_START_IDX],
+            CAPACITY_START_IDX..=CAPACITY_COEFF_END_IDX => &self.capacity[idx - CAPACITY_START_IDX],
+            x if x == MAX_MESSAGE_WIDTH - 1 => &self.beta_pow_15,
+            _ => unreachable!("beta power index {idx} out of range (< {MAX_MESSAGE_WIDTH})"),
+        }
+    }
+
+    /// `beta^CAPACITY_DOMAIN_IDX` — second capacity slot (e.g. control-block `op_code`).
+    #[inline(always)]
+    pub fn capacity_domain(&self) -> &EF {
+        &self.capacity[super::bus_message::CAPACITY_DOMAIN_IDX - CAPACITY_START_IDX]
+    }
+
+    /// Dense `beta^3 ..= beta^14`: Hasher rate coefficients then capacity (12 elements).
+    #[inline(always)]
+    pub fn sponge_state(&self) -> [EF; 12] {
+        core::array::from_fn(|i| {
+            if i < 8 {
+                self.state[i].clone()
+            } else {
+                self.capacity[i - 8].clone()
+            }
+        })
+    }
+}
 
 /// Per-bus domain separation constants: each field is `alpha + (bus_const + 1) * gamma`
 /// where `gamma = beta^MAX_MESSAGE_WIDTH` (see [`Challenges::new`]).
@@ -65,7 +116,7 @@ impl<EF> BusPrefix<EF> {
 /// Encodes multiset/LogUp contributions as **per-bus prefix + \<beta, message\>**.
 ///
 /// - `alpha`: randomness base (kept public for direct access by range checker etc.)
-/// - `beta_powers`: precomputed powers `[beta^0, beta^1, ..., beta^(MAX_MESSAGE_WIDTH-1)]`
+/// - `beta_powers`: precomputed powers `beta^0 .. beta^(MAX_MESSAGE_WIDTH-1)` (see [`BetaPowers`])
 /// - `bus_prefix`: per-bus domain separation (see [`BusPrefix`])
 ///
 /// The challenges are derived from permutation randomness:
@@ -75,19 +126,27 @@ impl<EF> BusPrefix<EF> {
 /// Precomputed once and passed by reference to all bus components.
 pub struct Challenges<EF: PrimeCharacteristicRing> {
     pub alpha: EF,
-    pub beta_powers: [EF; MAX_MESSAGE_WIDTH],
+    pub beta_powers: BetaPowers<EF>,
     pub bus_prefix: BusPrefix<EF>,
 }
 
 impl<EF: PrimeCharacteristicRing> Challenges<EF> {
     /// Builds `alpha`, precomputed `beta` powers, and per-bus prefixes.
     pub fn new(alpha: EF, beta: EF) -> Self {
-        let mut beta_powers = core::array::from_fn(|_| EF::ONE);
+        let mut arr: [EF; MAX_MESSAGE_WIDTH] = core::array::from_fn(|_| EF::ONE);
         for i in 1..MAX_MESSAGE_WIDTH {
-            beta_powers[i] = beta_powers[i - 1].clone() * beta.clone();
+            arr[i] = arr[i - 1].clone() * beta.clone();
         }
         // gamma = beta^MAX_MESSAGE_WIDTH (one power beyond the message range)
-        let gamma = beta_powers[MAX_MESSAGE_WIDTH - 1].clone() * beta;
+        let gamma = arr[MAX_MESSAGE_WIDTH - 1].clone() * beta;
+        let beta_powers = BetaPowers {
+            label: arr[LABEL_IDX].clone(),
+            addr: arr[ADDR_IDX].clone(),
+            node_index: arr[NODE_INDEX_IDX].clone(),
+            state: core::array::from_fn(|i| arr[STATE_START_IDX + i].clone()),
+            capacity: core::array::from_fn(|i| arr[CAPACITY_START_IDX + i].clone()),
+            beta_pow_15: arr[MAX_MESSAGE_WIDTH - 1].clone(),
+        };
         let term = |k: u32| alpha.clone() + gamma.clone() * EF::from_u32(k);
         let bus_prefix = BusPrefix {
             chiplets_bus: term(1),
@@ -103,7 +162,7 @@ impl<EF: PrimeCharacteristicRing> Challenges<EF> {
         Self { alpha, beta_powers, bus_prefix }
     }
 
-    /// Encodes as **prefix_for_bus(bus) + sum(beta_powers\[i\] * elem\[i\])** with K consecutive
+    /// Encodes as **prefix_for_bus(bus) + sum(beta_powers.at(i) * elem\[i\])** with K consecutive
     /// elements.
     ///
     /// The `bus` parameter selects the bus interaction type for domain separation.
@@ -119,12 +178,12 @@ impl<EF: PrimeCharacteristicRing> Challenges<EF> {
         );
         let mut acc = self.bus_prefix.prefix_for_bus(bus).clone();
         for (i, elem) in elems.into_iter().enumerate() {
-            acc += self.beta_powers[i].clone() * elem;
+            acc += self.beta_powers.at(i).clone() * elem;
         }
         acc
     }
 
-    /// Encodes as **prefix_for_bus(bus) + sum(beta_powers\[layout\[i\]\] * values\[i\])** using
+    /// Encodes as **prefix_for_bus(bus) + sum(beta_powers.at(layout\[i\]) * values\[i\])** using
     /// sparse positions.
     ///
     /// The `bus` parameter selects the bus interaction type for domain separation.
@@ -145,12 +204,10 @@ impl<EF: PrimeCharacteristicRing> Challenges<EF> {
         let mut acc = self.bus_prefix.prefix_for_bus(bus).clone();
         for (idx, value) in layout.into_iter().zip(values) {
             debug_assert!(
-                idx < self.beta_powers.len(),
-                "encode_sparse index {} exceeds beta_powers length ({})",
-                idx,
-                self.beta_powers.len()
+                idx < MAX_MESSAGE_WIDTH,
+                "encode_sparse index {idx} exceeds beta_powers range ({MAX_MESSAGE_WIDTH})"
             );
-            acc += self.beta_powers[idx].clone() * value;
+            acc += self.beta_powers.at(idx).clone() * value;
         }
         acc
     }

@@ -206,18 +206,18 @@ impl SiblingTableRow {
         let lsb = self.index.as_canonical_u64() & 1;
         if lsb == 0 {
             challenges.bus_prefix.sibling_table
-                + challenges.beta_powers[2] * self.index
-                + challenges.beta_powers[7] * self.sibling[0]
-                + challenges.beta_powers[8] * self.sibling[1]
-                + challenges.beta_powers[9] * self.sibling[2]
-                + challenges.beta_powers[10] * self.sibling[3]
+                + challenges.beta_powers.node_index * self.index
+                + challenges.beta_powers.state[4] * self.sibling[0]
+                + challenges.beta_powers.state[5] * self.sibling[1]
+                + challenges.beta_powers.state[6] * self.sibling[2]
+                + challenges.beta_powers.state[7] * self.sibling[3]
         } else {
             challenges.bus_prefix.sibling_table
-                + challenges.beta_powers[2] * self.index
-                + challenges.beta_powers[3] * self.sibling[0]
-                + challenges.beta_powers[4] * self.sibling[1]
-                + challenges.beta_powers[5] * self.sibling[2]
-                + challenges.beta_powers[6] * self.sibling[3]
+                + challenges.beta_powers.node_index * self.index
+                + challenges.beta_powers.state[0] * self.sibling[0]
+                + challenges.beta_powers.state[1] * self.sibling[1]
+                + challenges.beta_powers.state[2] * self.sibling[2]
+                + challenges.beta_powers.state[3] * self.sibling[3]
         }
     }
 }

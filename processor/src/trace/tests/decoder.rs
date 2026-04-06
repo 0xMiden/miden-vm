@@ -883,17 +883,17 @@ impl BlockStackTableRow {
     pub fn to_value<E: ExtensionField<Felt>>(&self, challenges: &Challenges<E>) -> E {
         let is_loop = if self.is_loop { ONE } else { ZERO };
         challenges.bus_prefix.block_stack_table
-            + challenges.beta_powers[0] * self.block_id
-            + challenges.beta_powers[1] * self.parent_id
-            + challenges.beta_powers[2] * is_loop
-            + challenges.beta_powers[3] * Felt::from_u32(u32::from(self.parent_ctx))
-            + challenges.beta_powers[4] * self.parent_fmp
-            + challenges.beta_powers[5] * Felt::from_u32(self.parent_stack_depth)
-            + challenges.beta_powers[6] * self.parent_next_overflow_addr
-            + challenges.beta_powers[7] * self.parent_fn_hash[0]
-            + challenges.beta_powers[8] * self.parent_fn_hash[1]
-            + challenges.beta_powers[9] * self.parent_fn_hash[2]
-            + challenges.beta_powers[10] * self.parent_fn_hash[3]
+            + challenges.beta_powers.label * self.block_id
+            + challenges.beta_powers.addr * self.parent_id
+            + challenges.beta_powers.node_index * is_loop
+            + challenges.beta_powers.state[0] * Felt::from_u32(u32::from(self.parent_ctx))
+            + challenges.beta_powers.state[1] * self.parent_fmp
+            + challenges.beta_powers.state[2] * Felt::from_u32(self.parent_stack_depth)
+            + challenges.beta_powers.state[3] * self.parent_next_overflow_addr
+            + challenges.beta_powers.state[4] * self.parent_fn_hash[0]
+            + challenges.beta_powers.state[5] * self.parent_fn_hash[1]
+            + challenges.beta_powers.state[6] * self.parent_fn_hash[2]
+            + challenges.beta_powers.state[7] * self.parent_fn_hash[3]
     }
 }
 
@@ -918,8 +918,8 @@ impl OpGroupTableRow {
     /// at least 4 coefficients.
     pub fn to_value<E: ExtensionField<Felt>>(&self, challenges: &Challenges<E>) -> E {
         challenges.bus_prefix.op_group_table
-            + challenges.beta_powers[0] * self.batch_id
-            + challenges.beta_powers[1] * self.group_pos
-            + challenges.beta_powers[2] * self.group_value
+            + challenges.beta_powers.label * self.batch_id
+            + challenges.beta_powers.addr * self.group_pos
+            + challenges.beta_powers.node_index * self.group_value
     }
 }

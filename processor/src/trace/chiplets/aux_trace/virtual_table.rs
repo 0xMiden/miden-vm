@@ -100,11 +100,11 @@ const RATE0_RANGE: core::ops::Range<usize> = 0..DIGEST_LEN;
 /// Range for RATE1 (second rate word) in sponge state.
 const RATE1_RANGE: core::ops::Range<usize> = DIGEST_LEN..(2 * DIGEST_LEN);
 
-/// Node is left child (lsb=0), sibling is right child at RATE1: alpha + beta_powers[2]*index +
-/// beta_powers[7..10]*sibling
+/// Node is left child (lsb=0), sibling is right child at RATE1: alpha +
+/// beta_powers.node_index*index + beta_powers.state[4..8]*sibling
 const SIBLING_RATE1_LAYOUT: [usize; 5] = [2, 7, 8, 9, 10];
-/// Node is right child (lsb=1), sibling is left child at RATE0: alpha + beta_powers[2]*index +
-/// beta_powers[3..6]*sibling
+/// Node is right child (lsb=1), sibling is left child at RATE0: alpha +
+/// beta_powers.node_index*index + beta_powers.state[0..4]*sibling
 const SIBLING_RATE0_LAYOUT: [usize; 5] = [2, 3, 4, 5, 6];
 
 /// Extracts the node index and sibling word from the trace and encodes a sibling table entry.

@@ -4,7 +4,7 @@ use chiplets::hasher::RATE_LEN;
 use miden_core::utils::range;
 
 mod challenges;
-pub use challenges::{BusPrefix, Challenges};
+pub use challenges::{BetaPowers, BusPrefix, Challenges};
 
 pub mod chiplets;
 pub mod decoder;
@@ -188,45 +188,53 @@ pub const MAX_MESSAGE_WIDTH: usize = 16;
 /// Bus message coefficient indices.
 ///
 /// These define the standard positions for encoding bus messages using the pattern:
-/// `alpha + sum(beta_powers\[i\] * elem\[i\])` where:
+/// `alpha + sum(beta_powers.at(i) * elem\[i\])` where:
 /// - `alpha` is the randomness base (accessed directly as `.alpha`)
-/// - `beta_powers\[i\] = beta^i` are the powers of beta
+/// - `beta_powers.at(i) = beta^i` are the powers of beta (see [`BetaPowers::at`])
 ///
-/// These indices refer to positions in the `beta_powers` array, not including alpha.
+/// These indices refer to positions in [`Challenges::beta_powers`] ([`BetaPowers`]), not including
+/// alpha.
 ///
 /// This layout is shared between:
 /// - AIR constraint builders (symbolic expressions): `Challenges<AB::ExprEF>`
 /// - Processor auxiliary trace builders (concrete field elements): `Challenges<E>`
 pub mod bus_message {
-    /// Label coefficient index: `beta_powers[0] = beta^0`.
+    /// Label coefficient index: `beta_powers.label` (`beta^0`).
     ///
     /// Used for transition type/operation label.
     pub const LABEL_IDX: usize = 0;
 
-    /// Address coefficient index: `beta_powers[1] = beta^1`.
+    /// Address coefficient index: `beta_powers.addr` (`beta^1`).
     ///
     /// Used for chiplet address.
     pub const ADDR_IDX: usize = 1;
 
-    /// Node index coefficient index: `beta_powers[2] = beta^2`.
+    /// Node index coefficient index: `beta_powers.node_index` (`beta^2`).
     ///
     /// Used for Merkle path position. Set to 0 for non-Merkle operations (SPAN, RESPAN, HPERM,
     /// etc.).
     pub const NODE_INDEX_IDX: usize = 2;
 
-    /// State start coefficient index: `beta_powers[3] = beta^3`.
+    /// State start coefficient index: `beta_powers.state[0] = beta^3`.
     ///
     /// Beginning of hasher state. Hasher state occupies 8 consecutive coefficients:
-    /// `beta_powers[3..11]` (beta^3..beta^10) for `state[0..7]` (rate portion: RATE0 || RATE1).
+    /// `beta_powers.state[0..8]` (`beta^3..beta^10`) for `state[0..7]` (rate portion: RATE0 ||
+    /// RATE1).
     pub const STATE_START_IDX: usize = 3;
 
-    /// Capacity start coefficient index: `beta_powers[11] = beta^11`.
+    /// Inclusive end index for the eight `state` coefficients (`beta^3..=beta^10`).
+    pub const STATE_COEFF_END_IDX: usize = STATE_START_IDX + 7;
+
+    /// Capacity start coefficient index: `beta_powers.capacity[0] = beta^11`.
     ///
     /// Beginning of hasher capacity. Hasher capacity occupies 4 consecutive coefficients:
-    /// `beta_powers[11..15]` (beta^11..beta^14) for `capacity[0..3]`.
+    /// `beta_powers.capacity[0..4]` (`beta^11..beta^14`) for `capacity[0..3]`.
     pub const CAPACITY_START_IDX: usize = 11;
 
-    /// Capacity domain coefficient index: `beta_powers[12] = beta^12`.
+    /// Inclusive end index for the four `capacity` coefficients (`beta^11..=beta^14`).
+    pub const CAPACITY_COEFF_END_IDX: usize = CAPACITY_START_IDX + 3;
+
+    /// Capacity domain coefficient index: (`beta^12`).
     ///
     /// Second capacity element. Used for encoding operation-specific data (e.g., op_code in control
     /// block messages).
