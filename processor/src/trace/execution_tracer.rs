@@ -1,6 +1,8 @@
 use alloc::{sync::Arc, vec::Vec};
 
-use miden_air::trace::chiplets::hasher::{HASH_CYCLE_LEN, HASH_CYCLE_LEN_FELT, STATE_WIDTH};
+use miden_air::trace::chiplets::hasher::{
+    CONTROLLER_ROWS_PER_PERM_FELT, CONTROLLER_ROWS_PER_PERMUTATION, STATE_WIDTH,
+};
 use miden_core::{FMP_ADDR, FMP_INIT_VALUE, operations::Operation};
 
 use super::{
@@ -528,7 +530,7 @@ impl Tracer for ExecutionTracer {
                 ),
             },
             Continuation::Respan { node_id: _, batch_index: _ } => {
-                self.block_stack.peek_mut().addr += HASH_CYCLE_LEN_FELT;
+                self.block_stack.peek_mut().addr += CONTROLLER_ROWS_PER_PERM_FELT;
             },
             Continuation::FinishLoop { node_id: _, was_entered }
                 if was_entered && processor.stack_get(0) == ONE =>
@@ -677,7 +679,7 @@ impl Tracer for ExecutionTracer {
         clk: RowIndex,
     ) {
         self.memory_reads.record_read_word(words[0], addr, ctx, clk);
-        self.memory_reads.record_read_word(words[1], addr + Felt::new(4), ctx, clk);
+        self.memory_reads.record_read_word(words[1], addr + PTR_OFFSET_WORD, ctx, clk);
     }
 
     #[inline(always)]
@@ -705,17 +707,17 @@ impl Tracer for ExecutionTracer {
     ) {
         self.memory_reads.record_read_word(plaintext[0], src_addr, ctx, clk);
         self.memory_reads
-            .record_read_word(plaintext[1], src_addr + Felt::new(4), ctx, clk);
+            .record_read_word(plaintext[1], src_addr + PTR_OFFSET_WORD, ctx, clk);
         self.memory_writes.record_write_word(ciphertext[0], dst_addr, ctx, clk);
         self.memory_writes
-            .record_write_word(ciphertext[1], dst_addr + Felt::new(4), ctx, clk);
+            .record_write_word(ciphertext[1], dst_addr + PTR_OFFSET_WORD, ctx, clk);
     }
 
     #[inline(always)]
     fn record_pipe(&mut self, words: [Word; 2], addr: Felt, ctx: ContextId, clk: RowIndex) {
         self.advice.record_pop_stack_dword(words);
         self.memory_writes.record_write_word(words[0], addr, ctx, clk);
-        self.memory_writes.record_write_word(words[1], addr + Felt::new(4), ctx, clk);
+        self.memory_writes.record_write_word(words[1], addr + PTR_OFFSET_WORD, ctx, clk);
     }
 
     #[inline(always)]
@@ -816,9 +818,8 @@ impl Tracer for ExecutionTracer {
 // HASHER CHIPLET SHIM
 // ================================================================================================
 
-/// The number of hasher rows per permutation operation. This is used to compute the address for
-/// the next operation in the hasher chiplet.
-const NUM_HASHER_ROWS_PER_PERMUTATION: u32 = HASH_CYCLE_LEN as u32;
+/// The number of controller rows per permutation request (input + output = 2), as u32.
+const NUM_HASHER_ROWS_PER_PERMUTATION: u32 = CONTROLLER_ROWS_PER_PERMUTATION as u32;
 
 /// Implements a shim for the hasher chiplet, where the responses of the hasher chiplet are emulated
 /// and recorded for later replay.

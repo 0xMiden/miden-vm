@@ -55,6 +55,7 @@ rand = { version = "0.9", default-features = false }
 rand_chacha = { version = "0.9", default-features = false }
 rstest = { version = "0.26" }
 bincode.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 
 [build-dependencies]

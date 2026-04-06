@@ -109,7 +109,7 @@ proptest! {
         let mut processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
 
         // Push v0 to the top of the stack
-        // This shifts everything down by one position, moving end_ptr to overflow
+        // This shifts everything down by one position, moving end_ptr to overflow portion of the stack
         let v0 = query_values[0].as_basis_coefficients_slice()[0];
         op_push(&mut processor, v0).unwrap();
         processor.system_mut().increment_clock();

@@ -7,13 +7,15 @@ use miden_air::trace::{
 };
 use miden_core::{
     Felt, Word,
+    events::EventId,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
         JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor, MastNodeExt,
         SplitNodeBuilder,
     },
     operations::{Operation, opcodes},
-    program::{Kernel, Program, ProgramInfo, StackInputs},
+    precompile::PrecompileRequest,
+    program::{Kernel, Program, StackInputs},
 };
 use miden_utils_testing::{get_column_name, rand::rand_array};
 use pretty_assertions::assert_eq;
@@ -396,20 +398,15 @@ fn test_trace_generation_at_fragment_boundaries(
         trace_from_single_fragment.trace_len_summary(),
     );
 
-    // Verify merkle store data match deterministically.
-    let merkle_nodes_from_fragments: alloc::collections::BTreeMap<_, _> = trace_from_fragments
-        .advice_provider()
-        .merkle_store()
-        .inner_nodes()
-        .map(|info| (info.value, (info.left, info.right)))
-        .collect();
-    let merkle_nodes_from_single: alloc::collections::BTreeMap<_, _> = trace_from_single_fragment
-        .advice_provider()
-        .merkle_store()
-        .inner_nodes()
-        .map(|info| (info.value, (info.left, info.right)))
-        .collect();
-    assert_eq!(merkle_nodes_from_fragments, merkle_nodes_from_single,);
+    // Verify deferred precompile data match deterministically.
+    assert_eq!(
+        trace_from_fragments.precompile_requests(),
+        trace_from_single_fragment.precompile_requests(),
+    );
+    assert_eq!(
+        trace_from_fragments.final_precompile_transcript,
+        trace_from_single_fragment.final_precompile_transcript,
+    );
 
     // Verify aux trace columns match.
     let rand_elements = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
@@ -980,95 +977,10 @@ fn test_build_trace_returns_err_on_bad_node_id_in_hasher_replay() {
     );
 }
 
-/// Verifies that `build_trace` rejects tampered `ProgramInfo` even when the rest of the trace
-/// inputs came from a valid execution.
+/// Verifies that `build_trace` rejects compatibility bundles that reuse matching public outputs
+/// but carry different deferred precompile requests.
 #[test]
-fn test_build_trace_returns_err_on_mismatched_program_info() {
-    const MAX_FRAGMENT_SIZE: usize = 1 << 20;
-
-    let program = basic_block_program_small();
-    let other_program = join_program();
-
-    let processor = FastProcessor::new_with_options(
-        StackInputs::new(DEFAULT_STACK).unwrap(),
-        AdviceInputs::default(),
-        ExecutionOptions::default()
-            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
-            .unwrap(),
-    );
-    let mut host = DefaultHost::default();
-    let (execution_output, trace_generation_context) =
-        processor.execute_trace_inputs_sync(&program, &mut host).unwrap().into_parts();
-
-    let result = build_trace(TraceBuildInputs::with_program_info(
-        &program,
-        execution_output,
-        trace_generation_context,
-        other_program.to_info(),
-    ));
-
-    assert!(
-        matches!(result, Err(ExecutionError::Internal("trace inputs do not match program info"))),
-        "expected program-info mismatch error, got: {result:?}"
-    );
-}
-
-/// Verifies that `build_trace` rejects compatibility bundles that mix an `ExecutionOutput` from a
-/// different run of the same program.
-#[test]
-fn test_build_trace_rejects_mismatched_execution_output() {
-    const MAX_FRAGMENT_SIZE: usize = 1 << 20;
-    const OTHER_STACK: &[Felt] = &[Felt::new(4), Felt::new(5), Felt::new(6)];
-
-    let program = join_program();
-
-    let processor = FastProcessor::new_with_options(
-        StackInputs::new(DEFAULT_STACK).unwrap(),
-        AdviceInputs::default(),
-        ExecutionOptions::default()
-            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
-            .unwrap(),
-    );
-    let mut host = DefaultHost::default();
-    let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
-    let execution_binding = trace_inputs.execution_binding().clone();
-    let (execution_output, trace_generation_context) = trace_inputs.into_parts();
-
-    let other_processor = FastProcessor::new_with_options(
-        StackInputs::new(OTHER_STACK).unwrap(),
-        AdviceInputs::default(),
-        ExecutionOptions::default()
-            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
-            .unwrap(),
-    );
-    let mut other_host = DefaultHost::default();
-    let (other_execution_output, _) = other_processor
-        .execute_trace_inputs_sync(&program, &mut other_host)
-        .unwrap()
-        .into_parts();
-
-    assert_ne!(execution_output.stack, other_execution_output.stack);
-
-    let result = build_trace(TraceBuildInputs::with_execution_binding(
-        other_execution_output,
-        trace_generation_context,
-        program.to_info(),
-        execution_binding,
-    ));
-
-    assert!(
-        matches!(
-            result,
-            Err(ExecutionError::Internal("trace inputs do not match execution output"))
-        ),
-        "expected execution-output mismatch error, got: {result:?}"
-    );
-}
-
-/// Verifies that `build_trace` rejects compatibility bundles that reuse a matching stack output
-/// but carry a different final advice-provider state.
-#[test]
-fn test_build_trace_rejects_mismatched_advice_provider() {
+fn test_build_trace_rejects_mismatched_precompile_requests() {
     const MAX_FRAGMENT_SIZE: usize = 1 << 20;
 
     let program = basic_block_program_small();
@@ -1082,79 +994,27 @@ fn test_build_trace_rejects_mismatched_advice_provider() {
     );
     let mut host = DefaultHost::default();
     let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
-    let execution_binding = trace_inputs.execution_binding().clone();
-    let (execution_output, trace_generation_context) = trace_inputs.into_parts();
+    let (trace_output, trace_generation_context, program_info) = trace_inputs.into_parts();
 
-    let other_processor = FastProcessor::new_with_options(
-        StackInputs::new(DEFAULT_STACK).unwrap(),
-        AdviceInputs::default().with_stack_values([99]).unwrap(),
-        ExecutionOptions::default()
-            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
-            .unwrap(),
-    );
-    let mut other_host = DefaultHost::default();
-    let (other_execution_output, _) = other_processor
-        .execute_trace_inputs_sync(&program, &mut other_host)
-        .unwrap()
-        .into_parts();
+    let mut other_trace_output = trace_output;
+    other_trace_output
+        .precompile_requests
+        .push(PrecompileRequest::new(EventId::from_u64(7), vec![1, 2, 3]));
 
-    assert_eq!(execution_output.stack, other_execution_output.stack);
-    assert_eq!(
-        execution_output.final_pc_transcript.state(),
-        other_execution_output.final_pc_transcript.state()
-    );
-    assert_ne!(
-        execution_output.advice.fingerprint(),
-        other_execution_output.advice.fingerprint()
-    );
-
-    let result = build_trace(TraceBuildInputs::with_execution_binding(
-        other_execution_output,
+    let result = build_trace(TraceBuildInputs::from_parts(
+        other_trace_output,
         trace_generation_context,
-        program.to_info(),
-        execution_binding,
+        program_info,
     ));
 
     assert!(
         matches!(
             result,
-            Err(ExecutionError::Internal("trace inputs do not match execution output"))
+            Err(ExecutionError::Internal(
+                "trace inputs do not match deferred precompile requests"
+            ))
         ),
-        "expected execution-output mismatch error, got: {result:?}"
-    );
-}
-
-/// Verifies that `build_trace` rejects tampered `ProgramInfo` even when it preserves the same
-/// entrypoint hash but swaps in a different kernel.
-#[test]
-fn test_build_trace_returns_err_on_mismatched_kernel_with_same_program_hash() {
-    const MAX_FRAGMENT_SIZE: usize = 1 << 20;
-
-    let program = basic_block_program_small();
-    let other_program =
-        ProgramInfo::new(program.hash(), Kernel::new(&[join_program().hash()]).unwrap());
-
-    let processor = FastProcessor::new_with_options(
-        StackInputs::new(DEFAULT_STACK).unwrap(),
-        AdviceInputs::default(),
-        ExecutionOptions::default()
-            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
-            .unwrap(),
-    );
-    let mut host = DefaultHost::default();
-    let (execution_output, trace_generation_context) =
-        processor.execute_trace_inputs_sync(&program, &mut host).unwrap().into_parts();
-
-    let result = build_trace(TraceBuildInputs::with_program_info(
-        &program,
-        execution_output,
-        trace_generation_context,
-        other_program,
-    ));
-
-    assert!(
-        matches!(result, Err(ExecutionError::Internal("trace inputs do not match program info"))),
-        "expected program-info mismatch error, got: {result:?}"
+        "expected deferred-precompile-request mismatch error, got: {result:?}"
     );
 }
 
@@ -1399,19 +1259,12 @@ impl core::fmt::Debug for DeterministicTrace<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let trace = self.0;
 
-        // Collect merkle store nodes into a sorted BTreeMap for deterministic output
-        let sorted_nodes: alloc::collections::BTreeMap<_, _> = trace
-            .advice_provider()
-            .merkle_store()
-            .inner_nodes()
-            .map(|info| (info.value, (info.left, info.right)))
-            .collect();
-
         f.debug_struct("ExecutionTrace")
             .field("main_trace", trace.main_trace())
             .field("program_info", &trace.program_info())
             .field("stack_outputs", &trace.stack_outputs())
-            .field("merkle_store_nodes", &sorted_nodes)
+            .field("precompile_requests", &trace.precompile_requests())
+            .field("final_precompile_transcript", &trace.final_precompile_transcript)
             .field("trace_len_summary", &trace.trace_len_summary())
             .finish()
     }
