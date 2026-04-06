@@ -539,50 +539,42 @@ impl MastForestBuilder {
         Ok(merged_basic_blocks)
     }
 
-    /// Helper to transfer pending asm_ops from a block being merged.
-    /// Removes the asm_ops from pending_asm_op_mappings and adds them to the merged list
-    /// with indices adjusted by the given offset.
+    /// Copies pending asm_ops from a source block into the merged list with adjusted indices.
+    ///
+    /// The source block's entries are left in `pending_asm_op_mappings` so that if it
+    /// survives removal (e.g. it's a procedure root or referenced child), its metadata
+    /// is still registered during `build()`.
     fn transfer_asm_ops_for_merge(
-        &mut self,
+        &self,
         source_block_id: MastNodeId,
         ops_offset: usize,
         merged_asm_ops: &mut Vec<(usize, AsmOpId)>,
     ) {
-        // Partition pending mappings into those matching source_block_id and the rest
-        let (matched, rest): (Vec<_>, Vec<_>) = core::mem::take(&mut self.pending_asm_op_mappings)
-            .into_iter()
-            .partition(|(node_id, _)| *node_id == source_block_id);
-
-        self.pending_asm_op_mappings = rest;
-
-        // Add matched asm_ops to merged list with adjusted indices
-        for (_, asm_ops) in matched {
-            merged_asm_ops.extend(
-                asm_ops.into_iter().map(|(op_idx, asm_op_id)| (op_idx + ops_offset, asm_op_id)),
-            );
+        for (node_id, asm_ops) in &self.pending_asm_op_mappings {
+            if *node_id == source_block_id {
+                merged_asm_ops.extend(
+                    asm_ops.iter().map(|(op_idx, asm_op_id)| (op_idx + ops_offset, *asm_op_id)),
+                );
+            }
         }
     }
 
-    /// Helper to transfer pending debug_vars from a block being merged.
-    /// Removes the debug_vars from pending_debug_var_mappings and adds them to the merged list
-    /// with indices adjusted by the given offset.
+    /// Copies pending debug_vars from a source block into the merged list with adjusted indices.
+    ///
+    /// Same as `transfer_asm_ops_for_merge`: source entries are kept so surviving blocks
+    /// retain their metadata.
     fn transfer_debug_vars_for_merge(
-        &mut self,
+        &self,
         source_block_id: MastNodeId,
         ops_offset: usize,
         merged_debug_vars: &mut Vec<(usize, miden_core::mast::DebugVarId)>,
     ) {
-        let (matched, rest): (Vec<_>, Vec<_>) =
-            core::mem::take(&mut self.pending_debug_var_mappings)
-                .into_iter()
-                .partition(|(node_id, _)| *node_id == source_block_id);
-
-        self.pending_debug_var_mappings = rest;
-
-        for (_, debug_vars) in matched {
-            merged_debug_vars.extend(
-                debug_vars.into_iter().map(|(op_idx, var_id)| (op_idx + ops_offset, var_id)),
-            );
+        for (node_id, debug_vars) in &self.pending_debug_var_mappings {
+            if *node_id == source_block_id {
+                merged_debug_vars.extend(
+                    debug_vars.iter().map(|(op_idx, var_id)| (op_idx + ops_offset, *var_id)),
+                );
+            }
         }
     }
 
@@ -1500,5 +1492,59 @@ mod tests {
         assert_eq!(vars_a[0].1, var_x_id, "cloned_a should have var x");
         assert_eq!(vars_b.len(), 1);
         assert_eq!(vars_b[0].1, var_y_id, "cloned_b should have var y");
+    }
+
+    /// A small procedure root that gets merged into a larger block must keep its own
+    /// debug vars and asm ops, since the root node survives removal.
+    #[test]
+    fn test_merged_root_block_keeps_metadata() {
+        use miden_core::operations::{AssemblyOp, DebugVarInfo, DebugVarLocation};
+
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+
+        let var_id = builder
+            .add_debug_var(DebugVarInfo::new("x", DebugVarLocation::Stack(0)))
+            .unwrap();
+        let asm_op = AssemblyOp::new(None, "test".into(), 1, "add".into());
+
+        // Small block that will be a procedure root -- should_merge returns true for
+        // small roots, so it will be folded into the merged block.
+        let root_block = builder
+            .ensure_block(
+                vec![Operation::Add],
+                Vec::new(),
+                vec![(0, asm_op)],
+                vec![(0, var_id)],
+                vec![],
+                vec![],
+            )
+            .unwrap();
+        builder.mast_forest.make_root(root_block);
+
+        // Second block to merge with.
+        let other_block = builder
+            .ensure_block(vec![Operation::Mul], Vec::new(), vec![], vec![], vec![], vec![])
+            .unwrap();
+
+        let merged = builder.merge_basic_blocks(&[root_block, other_block]).unwrap();
+        // Root was small enough to merge, so we get one merged block.
+        assert_eq!(merged.len(), 1);
+        let merged_id = merged[0];
+        assert_ne!(merged_id, root_block);
+
+        let (forest, remapping) = builder.build();
+
+        // The root block survives removal (it's a procedure root).
+        let final_root_id = remapping.get(&root_block).copied().unwrap_or(root_block);
+        assert!(forest.is_procedure_root(final_root_id), "root should survive");
+
+        // Root block must still have its debug vars.
+        let root_vars = forest.debug_info().debug_vars_for_node(final_root_id);
+        assert_eq!(root_vars.len(), 1, "root must keep its debug vars after merge");
+        assert_eq!(root_vars[0].1, var_id);
+
+        // Root block must still have its asm op.
+        let root_asm = forest.debug_info().first_asm_op_for_node(final_root_id);
+        assert!(root_asm.is_some(), "root must keep its asm op after merge");
     }
 }
