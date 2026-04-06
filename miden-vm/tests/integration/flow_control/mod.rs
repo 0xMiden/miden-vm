@@ -3,9 +3,7 @@ use alloc::sync::Arc;
 use miden_assembly::{Assembler, PathBuf, Report, ast::ModuleKind};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{ExecutionError, Word, operation::OperationError};
-use miden_utils_testing::{
-    StackInputs, Test, build_debug_test, build_test, expect_exec_error_matches, push_inputs,
-};
+use miden_utils_testing::{build_debug_test, build_test, expect_exec_error_matches, push_inputs};
 use miden_vm::Module;
 
 // SIMPLE FLOW CONTROL TESTS
@@ -423,10 +421,7 @@ fn simple_dyn_exec() {
         3,
     ];
 
-    let test = Test {
-        stack_inputs: StackInputs::try_from_ints(stack_init).unwrap(),
-        ..Test::new(&format!("test{}", line!()), program_source, true)
-    };
+    let test = build_debug_test!(program_source).with_stack_inputs(stack_init);
 
     test.expect_stack(&[6]);
 
@@ -457,16 +452,16 @@ fn dynexec_with_procref() {
         swap drop
     end";
 
-    let mut test = build_test!(program_source, &[]);
-    test.libraries.push(CoreLibrary::default().library().clone());
-    test.add_module(
-        "external::module",
-        "\
-        pub proc func
-            u32wrapping_add.1
-        end
-        ",
-    );
+    let test = build_test!(program_source, &[])
+        .with_library(CoreLibrary::default().library().clone())
+        .with_module(
+            "external::module",
+            "\
+            pub proc func
+                u32wrapping_add.1
+            end
+            ",
+        );
 
     test.expect_stack(&[4]);
 }
@@ -516,12 +511,11 @@ fn simple_dyncall() {
         3,
     ];
 
-    let mut test = Test {
-        stack_inputs: StackInputs::try_from_ints(stack_init).unwrap(),
-        libraries: vec![CoreLibrary::default().into()],
-        ..Test::new(&format!("test{}", line!()), program_source, false)
-    };
-    test.add_event_handlers(CoreLibrary::default().handlers());
+    let core_lib = CoreLibrary::default();
+    let test = build_test!(program_source)
+        .with_stack_inputs(stack_init)
+        .with_library(core_lib.library().clone())
+        .with_event_handlers(core_lib.handlers());
 
     test.expect_stack(&[6]);
 
@@ -633,9 +627,9 @@ fn procref() -> Result<(), Report> {
     end";
 
     let core_lib = CoreLibrary::default();
-    let mut test = build_test!(source, &[]);
-    test.libraries.push(core_lib.library().clone());
-    test.add_event_handlers(core_lib.handlers());
+    let test = build_test!(source, &[])
+        .with_library(core_lib.library().clone())
+        .with_event_handlers(core_lib.handlers());
 
     // procref pushes element[0] on top
     // Word from procedure_digests stores elements in BE order (word[0] = high)
