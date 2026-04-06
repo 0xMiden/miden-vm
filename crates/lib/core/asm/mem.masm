@@ -14,8 +14,22 @@ use miden::core::crypto::hashes::poseidon2
 #! - read_ptr is the memory pointer where the words to copy are stored.
 #! - write_ptr is the memory pointer where the words will be copied.
 #!
+#! # Panics
+#!
+#! Panics if the source range `[read_ptr, read_ptr + 4*n)` and destination range
+#! `[write_ptr, write_ptr + 4*n)` overlap.
+#!
 #! Total cycles: 15 + 16 * num_words
 pub proc memcopy_words
+  # Assert source and destination ranges do not overlap.
+  # Non-overlap: write_ptr >= read_ptr + 4*n OR read_ptr >= write_ptr + 4*n
+  dup mul.4
+  dup dup.3 add
+  dup.4 swap u32gte
+  swap dup.4 add
+  dup.3 swap u32gte
+  or assert.err="source and destination ranges must not overlap"
+
   # The loop variable is changed with an add instead of sub because the former
   # uses one fewer cycle. So here the counter is negated. (1 cycles)
   # stack: [-n, read_ptr, write_ptr, ...]
@@ -70,8 +84,21 @@ end
 #! - read_ptr is the memory pointer where the elements to copy are stored.
 #! - write_ptr is the memory pointer where the elements will be copied.
 #!
+#! # Panics
+#!
+#! Panics if the source range `[read_ptr, read_ptr + n)` and destination range
+#! `[write_ptr, write_ptr + n)` overlap.
+#!
 #! Total cycles: 7 + 14 * num_elements
 pub proc memcopy_elements
+    # Assert source and destination ranges do not overlap.
+    # Non-overlap: write_ptr >= read_ptr + n OR read_ptr >= write_ptr + n
+    dup dup.2 add
+    dup.3 swap u32gte
+    dup.1 dup.4 add
+    dup.3 swap u32gte
+    or assert.err="source and destination ranges must not overlap"
+
     # The loop variable is changed with an `add` instead of `sub` because the former uses one fewer 
     # cycle. So here the counter is negated. (1 cycle)
     neg

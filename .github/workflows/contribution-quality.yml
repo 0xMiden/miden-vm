@@ -1,8 +1,8 @@
 name: Contribution Quality
 
-# Use pull_request_target to get write permissions for fork PRs.
-# IMPORTANT: This workflow runs in the context of the BASE branch, not the PR branch.
-# Do NOT checkout or run code from the PR itself, only inspect PR metadata via the API.
+# Use pull_request_target so the workflow can safely comment/label on PRs.
+# IMPORTANT: This runs in the context of the BASE branch, not the PR branch.
+# Do NOT checkout or run code from the PR itself; only inspect PR metadata via the API.
 on:
   pull_request_target:
     types: [opened, reopened, edited, synchronize, ready_for_review]
@@ -28,8 +28,7 @@ jobs:
   gate:
     if: >
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' &&
-       github.event.pull_request.head.repo.fork == true)
+      github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
     env:
       DISPATCH_PR_NUMBER: ${{ inputs.pr_number }}
@@ -64,24 +63,46 @@ jobs:
               repo: context.repo.repo,
               pull_number: prNumber
             });
-            core.setOutput('author_association', pr.author_association || 'NONE');
+            core.setOutput('author_login', pr.user?.login || '');
             core.setOutput('draft', pr.draft ? 'true' : 'false');
             core.setOutput('body', (pr.body || '').replace(/\r/g,''));
             core.setOutput('number', String(pr.number));
 
-      - name: Skip trusted or drafts (unless forced)
+      - name: Resolve author permission
+        id: perm
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const login = "${{ steps.pr.outputs.author_login }}".toLowerCase();
+            let permission = 'none';
+            try {
+              const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                username: login,
+              });
+              permission = (data.permission || 'none').toLowerCase();
+            } catch (error) {
+              if (error.status !== 404) {
+                core.warning(`Failed to resolve collaborator permission for ${login}: ${error.message}`);
+              }
+            }
+
+            const skip = ['admin', 'maintain', 'write'].includes(permission);
+            core.info(`author=${login} permission=${permission} skip=${skip}`);
+            core.setOutput('permission', permission);
+            core.setOutput('skip', skip ? 'true' : 'false');
+
+      - name: Skip trusted authors or drafts (unless forced)
         id: gate
         run: |
-          assoc="${{ steps.pr.outputs.author_association }}"
           draft="${{ steps.pr.outputs.draft }}"
           force="${{ steps.ctx.outputs.force_all }}"
+          skip_by_permission="${{ steps.perm.outputs.skip }}"
           if [ "$force" = "true" ]; then
             echo "skip=false" >> "$GITHUB_OUTPUT"
           else
-            case "$assoc" in
-              OWNER|COLLABORATOR|MEMBER) echo "skip=true"  >> "$GITHUB_OUTPUT" ;;
-              *)                         echo "skip=false" >> "$GITHUB_OUTPUT" ;;
-            esac
+            [ "$skip_by_permission" = "true" ] && echo "skip=true" >> "$GITHUB_OUTPUT" || echo "skip=false" >> "$GITHUB_OUTPUT"
             [ "$draft" = "true" ] && echo "skip=true" >> "$GITHUB_OUTPUT" || true
           fi
 

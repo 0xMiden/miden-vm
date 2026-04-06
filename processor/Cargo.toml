@@ -19,7 +19,7 @@ bench = false
 doctest = false
 
 [features]
-concurrent = ["std"]
+concurrent = ["std", "miden-air/concurrent"]
 default = ["std"]
 std = [
     "miden-core/std",

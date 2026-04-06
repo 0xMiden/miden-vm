@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::{CHIPLETS_WIDTH, chiplets::hasher::HasherState};
-use miden_core::{mast::OpBatch, program::Kernel};
+use miden_core::{mast::OpBatch, program::Kernel, utils::RowMajorMatrix};
 
 use crate::{
     Felt, ONE, Word, ZERO,
@@ -37,7 +37,7 @@ mod tests;
 // ================================================================================================
 
 pub struct ChipletsTrace {
-    pub(crate) trace: [Vec<Felt>; CHIPLETS_WIDTH],
+    pub(crate) trace: Vec<Felt>,
     pub(crate) aux_builder: AuxTraceBuilder,
 }
 
@@ -226,8 +226,15 @@ impl Chiplets {
             .expect("failed to convert vector to array");
         let ace_hint = self.fill_trace(&mut trace);
 
+        let mut col_flat = Vec::with_capacity(CHIPLETS_WIDTH * trace_len);
+        for col in &trace {
+            col_flat.extend_from_slice(col);
+        }
+        let col_mat = RowMajorMatrix::new(col_flat, trace_len);
+        let row_mat = col_mat.transpose();
+
         ChipletsTrace {
-            trace,
+            trace: row_mat.values,
             aux_builder: AuxTraceBuilder::new(ace_hint),
         }
     }
@@ -240,7 +247,6 @@ impl Chiplets {
     /// to identify each individual chiplet trace in addition to padding to fill the rest of
     /// the trace.
     fn fill_trace(self, trace: &mut [Vec<Felt>; CHIPLETS_WIDTH]) -> AceHints {
-        // get the rows where:usize  chiplets begin.
         let bitwise_start: usize = self.bitwise_start().into();
         let memory_start: usize = self.memory_start().into();
         let ace_start: usize = self.ace_start().into();

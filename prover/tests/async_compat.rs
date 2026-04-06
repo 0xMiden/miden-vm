@@ -3,7 +3,7 @@ use std::sync::Arc;
 use miden_assembly::Assembler;
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 use miden_processor::{
-    BaseHost, DefaultHost, Felt, FutureMaybeSend, Host, ProcessorState, Word,
+    BaseHost, DefaultHost, ExecutionOptions, Felt, FutureMaybeSend, Host, ProcessorState, Word,
     advice::AdviceMutation,
     event::{EventError, EventName},
     mast::MastForest,
@@ -68,18 +68,31 @@ async fn prove_async_matches_prove() {
     let program = simple_program();
     let stack_inputs = StackInputs::new(&[Felt::new(0), Felt::new(1)]).unwrap();
     let advice_inputs = AdviceInputs::default();
+    let execution_options = ExecutionOptions::default();
     let options = ProvingOptions::default();
 
     let mut sync_host = DefaultHost::default();
-    let (sync_outputs, sync_proof) =
-        prove_sync(&program, stack_inputs, advice_inputs.clone(), &mut sync_host, options.clone())
-            .unwrap();
+    let (sync_outputs, sync_proof) = prove_sync(
+        &program,
+        stack_inputs,
+        advice_inputs.clone(),
+        &mut sync_host,
+        execution_options,
+        options.clone(),
+    )
+    .unwrap();
 
     let mut async_host = DefaultHost::default();
-    let (async_outputs, async_proof) =
-        prove(&program, stack_inputs, advice_inputs, &mut async_host, options)
-            .await
-            .unwrap();
+    let (async_outputs, async_proof) = prove(
+        &program,
+        stack_inputs,
+        advice_inputs,
+        &mut async_host,
+        execution_options,
+        options,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(sync_outputs, async_outputs);
     assert_eq!(sync_proof.hash_fn(), async_proof.hash_fn());
@@ -101,6 +114,7 @@ async fn prove_async_supports_async_only_host_events() {
         StackInputs::default(),
         AdviceInputs::default(),
         &mut host,
+        ExecutionOptions::default(),
         ProvingOptions::default(),
     )
     .await

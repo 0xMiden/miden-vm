@@ -221,6 +221,29 @@ impl Test {
         }
     }
 
+    /// Adds kernel source to this test so it is assembled and linked during compilation.
+    #[track_caller]
+    pub fn with_kernel(self, kernel_source: impl ToString) -> Self {
+        self.with_kernel_source(
+            format!("kernel{}", core::panic::Location::caller().line()),
+            kernel_source,
+        )
+    }
+
+    /// Adds kernel source to this test so it is assembled and linked during compilation.
+    pub fn with_kernel_source(
+        mut self,
+        kernel_name: impl Into<String>,
+        kernel_source: impl ToString,
+    ) -> Self {
+        self.kernel_source = Some(self.source_manager.load(
+            SourceLanguage::Masm,
+            kernel_name.into().into(),
+            kernel_source.to_string(),
+        ));
+        self
+    }
+
     /// Add an extra module to link in during assembly
     pub fn add_module(&mut self, path: impl AsRef<Path>, source: impl ToString) {
         self.add_modules.push((path.as_ref().into(), source.to_string()));
@@ -470,6 +493,7 @@ impl Test {
             stack_inputs,
             self.advice_inputs.clone(),
             &mut host,
+            miden_processor::ExecutionOptions::default(),
             ProvingOptions::default(),
         )
         .unwrap();
@@ -605,7 +629,7 @@ impl Test {
         };
 
         compare_results(
-            fast_result.as_ref().map(|trace_inputs| trace_inputs.execution_output().stack),
+            fast_result.as_ref().map(|trace_inputs| *trace_inputs.stack_outputs()),
             &fast_result_by_step,
             "fast processor",
             "fast processor by step",

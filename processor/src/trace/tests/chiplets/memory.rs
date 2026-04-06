@@ -29,7 +29,6 @@ use super::{
 /// for this test we set those values explicitly, enforcing only that the same initial and final
 /// values are requested & provided.
 #[test]
-#[expect(clippy::needless_range_loop)]
 fn b_chip_trace_mem() {
     const FOUR: Felt = Felt::new(4);
 
