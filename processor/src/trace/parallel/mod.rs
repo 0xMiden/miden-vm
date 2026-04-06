@@ -19,7 +19,9 @@ use miden_core::{
     mast::{MastForest, MastNode},
     operations::opcodes,
     program::{Kernel, MIN_STACK_DEPTH},
+    utils::{Matrix, RowMajorMatrix},
 };
+use once_cell::sync::OnceCell;
 use rayon::prelude::*;
 use tracing::instrument;
 
@@ -29,6 +31,7 @@ use crate::{
     errors::MapExecErrNoCtx,
     trace::{
         AuxTraceBuilders, ChipletsLengths, ExecutionTrace, TraceBuildInputs, TraceLenSummary,
+        chiplets::ChipletsTrace,
         parallel::{processor::ReplayProcessor, tracer::CoreTraceGenerationTracer},
         range::RangeChecker,
         utils::RowMajorTraceWriter,
@@ -153,13 +156,13 @@ pub fn build_trace_with_max_len(
 
     let range_checker = initialize_range_checker(range_checker_replay, &chiplets);
 
-    let mut core_trace_data = generate_core_trace_row_major(
+    let mut core_trace = generate_core_trace_row_major(
         core_trace_contexts,
         program_info.kernel().clone(),
         fragment_size,
     )?;
 
-    let core_trace_len = core_trace_data.len() / CORE_TRACE_WIDTH;
+    let core_trace_len = core_trace.height();
 
     // Get the number of rows for the range checker
     let range_table_len = range_checker.get_number_range_checker_rows();
@@ -178,27 +181,33 @@ pub fn build_trace_with_max_len(
                 || chiplets.into_trace(main_trace_len),
             )
         },
-        || pad_core_row_major(&mut core_trace_data, main_trace_len),
+        || pad_core_row_major(&mut core_trace, main_trace_len),
     );
 
+    let ChipletsTrace {
+        trace: chiplets_mat,
+        aux_builder: chiplets_aux_builder,
+    } = chiplets_trace;
+
+    let last_program_row = RowIndex::from((core_trace_len as u32).saturating_sub(1));
+
     // Create the MainTrace
-    let main_trace = {
-        let last_program_row = RowIndex::from((core_trace_len as u32).saturating_sub(1));
-        MainTrace::from_parts(
-            core_trace_data,
-            chiplets_trace.trace,
-            range_checker_trace.trace,
-            main_trace_len,
-            last_program_row,
-        )
-    };
+    let main_trace = MainTrace::from_parts(
+        core_trace,
+        chiplets_mat,
+        range_checker_trace.trace,
+        main_trace_len,
+        last_program_row,
+    );
 
     // Create aux trace builders
     let aux_trace_builders = AuxTraceBuilders {
         decoder: DecoderAuxTraceBuilder::default(),
         range: range_checker_trace.aux_builder,
-        chiplets: chiplets_trace.aux_builder,
+        chiplets: chiplets_aux_builder,
         stack: StackAuxTraceBuilder,
+        last_program_row,
+        precomputed_main_transpose: Arc::new(OnceCell::new()),
     };
 
     Ok(ExecutionTrace::new_from_parts(
@@ -226,12 +235,12 @@ fn compute_main_trace_length(
     core::cmp::max(trace_len, MIN_TRACE_LEN)
 }
 
-/// Generates row-major core trace in parallel from the provided trace fragment contexts.
+/// Generates the core trace in parallel as a [`RowMajorMatrix`] with width [`CORE_TRACE_WIDTH`].
 fn generate_core_trace_row_major(
     core_trace_contexts: Vec<CoreTraceFragmentContext>,
     kernel: Kernel,
     fragment_size: usize,
-) -> Result<Vec<Felt>, ExecutionError> {
+) -> Result<RowMajorMatrix<Felt>, ExecutionError> {
     let num_fragments = core_trace_contexts.len();
     let total_allocated_rows = num_fragments * fragment_size;
 
@@ -321,7 +330,7 @@ fn generate_core_trace_row_major(
         ))?,
     );
 
-    Ok(core_trace_data)
+    Ok(RowMajorMatrix::new(core_trace_data, CORE_TRACE_WIDTH))
 }
 
 /// Initializing the first row of each fragment with the appropriate stack and system state.
@@ -369,6 +378,40 @@ fn fixup_stack_and_system_rows(
     }
 }
 
+/// Decoder trace columns for a synthetic HALT row: opcode bits, hasher state, and `op_bit_extra`.
+///
+/// When `last_row_start` is `Some`, the first four hasher columns are copied from that row offset
+/// in `core_trace_data` (program hash propagation). When `None`, those columns must already be
+/// zero in `row`.
+fn write_halt_decoder_columns(
+    row: &mut [Felt],
+    core_trace_data: &[Felt],
+    last_row_start: Option<usize>,
+) {
+    debug_assert!(row.len() >= DECODER_TRACE_OFFSET + DECODER_TRACE_WIDTH);
+
+    let halt_opcode = opcodes::HALT;
+    for i in 0..NUM_OP_BITS {
+        row[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + i] = Felt::from_u8((halt_opcode >> i) & 1);
+    }
+
+    if let Some(ls) = last_row_start {
+        for i in 0..4 {
+            let col_idx = DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + i;
+            row[col_idx] = core_trace_data[ls + col_idx];
+        }
+    }
+
+    for i in 4..NUM_HASHER_COLUMNS {
+        let col_idx = DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + i;
+        row[col_idx] = ZERO;
+    }
+
+    // First `op_bit_extra` column: unused for HALT (leave zero). Second column: product of the
+    // two most significant HALT bits (both are 1).
+    row[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + 1] = ONE;
+}
+
 /// Appends a HALT row (`num_rows_before` is the row count before append).
 ///
 /// This ensures that the trace ends with at least one HALT operation, which is necessary to satisfy
@@ -391,29 +434,8 @@ fn push_halt_opcode_row(
     row[STACK_TRACE_OFFSET..STACK_TRACE_OFFSET + STACK_TRACE_WIDTH]
         .copy_from_slice(last_stack_state);
 
-    // Pad op_bits columns with HALT opcode bits
-    let halt_opcode = opcodes::HALT;
-    for bit_idx in 0..NUM_OP_BITS {
-        row[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + bit_idx] =
-            Felt::from_u8((halt_opcode >> bit_idx) & 1);
-    }
-
-    // Pad hasher state columns (8 columns)
-    // - First 4 columns: copy the last value (to propagate program hash)
-    // - Remaining 4 columns: fill with ZEROs
-    if num_rows_before > 0 {
-        let last_row_start = (num_rows_before - 1) * w;
-        // For first 4 hasher columns, copy the last value to propagate program hash
-        for hasher_col_idx in 0..4 {
-            let col_idx = DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + hasher_col_idx;
-            row[col_idx] = core_trace_data[last_row_start + col_idx];
-        }
-    }
-
-    // Pad op_bit_extra columns (2 columns)
-    // - First column: do nothing (pre-filled with ZEROs, HALT doesn't use this)
-    // - Second column: fill with ONEs (product of two most significant HALT bits, both are 1)
-    row[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + 1] = ONE;
+    let last_row_start = (num_rows_before > 0).then(|| (num_rows_before - 1) * w);
+    write_halt_decoder_columns(&mut row, core_trace_data, last_row_start);
 
     core_trace_data.extend_from_slice(&row);
 }
@@ -601,9 +623,11 @@ fn initialize_chiplets(
     Ok(chiplets)
 }
 
-/// Pads the core trace to `main_trace_len` rows (HALT template, CLK incremented per row).
-fn pad_core_row_major(core_trace_data: &mut Vec<Felt>, main_trace_len: usize) {
+/// Pads the core trace matrix to `main_trace_len` rows (HALT template, CLK incremented per row).
+fn pad_core_row_major(core_trace: &mut RowMajorMatrix<Felt>, main_trace_len: usize) {
     let w = CORE_TRACE_WIDTH;
+    debug_assert_eq!(core_trace.width(), w);
+    let core_trace_data = &mut core_trace.values;
     let total_program_rows = core_trace_data.len() / w;
     assert!(total_program_rows <= main_trace_len);
     assert!(total_program_rows > 0);
@@ -618,31 +642,7 @@ fn pad_core_row_major(core_trace_data: &mut Vec<Felt>, main_trace_len: usize) {
     // ------------------------
 
     let mut template = [ZERO; CORE_TRACE_WIDTH];
-    // Pad op_bits columns with HALT opcode bits
-    let halt_opcode = opcodes::HALT;
-    for i in 0..NUM_OP_BITS {
-        let bit_value = Felt::from_u8((halt_opcode >> i) & 1);
-        template[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + i] = bit_value;
-    }
-    // Pad hasher state columns (8 columns)
-    // - First 4 columns: copy the last value (to propagate program hash)
-    // - Remaining 4 columns: fill with ZEROs
-    for i in 0..NUM_HASHER_COLUMNS {
-        let col_idx = DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + i;
-        template[col_idx] = if i < 4 {
-            // For first 4 hasher columns, copy the last value to propagate program hash
-            // Safety: per our documented safety guarantees, we know that `total_program_rows > 0`,
-            // and row `total_program_rows - 1` is initialized.
-            core_trace_data[last_row_start + col_idx]
-        } else {
-            ZERO
-        };
-    }
-
-    // Pad op_bit_extra columns (2 columns)
-    // - First column: do nothing (filled with ZEROs, HALT doesn't use this)
-    // - Second column: fill with ONEs (product of two most significant HALT bits, both are 1)
-    template[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + 1] = ONE;
+    write_halt_decoder_columns(&mut template, core_trace_data, Some(last_row_start));
 
     // Stack columns
     // ------------------------
@@ -660,11 +660,15 @@ fn pad_core_row_major(core_trace_data: &mut Vec<Felt>, main_trace_len: usize) {
 
     // Pad CLK trace - fill with index values
 
-    core_trace_data.reserve(num_padding_rows * w);
-    for idx in 0..num_padding_rows {
-        template[CLK_COL_IDX] = Felt::from_u32((total_program_rows + idx) as u32);
-        core_trace_data.extend_from_slice(&template);
-    }
+    let pad_start = total_program_rows * w;
+    core_trace_data.resize(pad_start + num_padding_rows * w, ZERO);
+    core_trace_data[pad_start..]
+        .par_chunks_mut(w)
+        .enumerate()
+        .for_each(|(idx, row)| {
+            row.copy_from_slice(&template);
+            row[CLK_COL_IDX] = Felt::from_u32((total_program_rows + idx) as u32);
+        });
 }
 
 /// Uses the provided `CoreTraceFragmentContext` to build and return a `ReplayProcessor` and

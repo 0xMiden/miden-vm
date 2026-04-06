@@ -37,8 +37,10 @@ mod tests;
 // TRACE
 // ================================================================================================
 
+/// Stacked chiplets segment of the main trace in row-major layout: `num_rows` × [`CHIPLETS_WIDTH`]
+/// field elements (`num_rows` is the padded main trace length passed to [`Chiplets::into_trace`]).
 pub struct ChipletsTrace {
-    pub(crate) trace: Vec<Felt>,
+    pub(crate) trace: RowMajorMatrix<Felt>,
     pub(crate) aux_builder: AuxTraceBuilder,
 }
 
@@ -236,7 +238,7 @@ impl Chiplets {
         let row_mat = col_mat.transpose();
 
         ChipletsTrace {
-            trace: row_mat.values,
+            trace: row_mat,
             aux_builder: AuxTraceBuilder::new(ace_hint),
         }
     }

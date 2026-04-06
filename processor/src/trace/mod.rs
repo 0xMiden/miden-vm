@@ -1,15 +1,16 @@
-use alloc::vec::Vec;
+use alloc::{sync::Arc, vec::Vec};
 #[cfg(any(test, feature = "testing"))]
 use core::ops::Range;
 
 use miden_air::{
     AirWitness, AuxBuilder, ProcessorAir, PublicInputs, debug,
     trace::{
-        DECODER_TRACE_OFFSET, MainTrace, PADDED_TRACE_WIDTH, TRACE_WIDTH,
+        DECODER_TRACE_OFFSET, MainTrace, TRACE_WIDTH,
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     },
 };
 use miden_core::{crypto::hash::Blake3_256, serde::Serializable};
+use once_cell::sync::OnceCell;
 
 use crate::{
     Felt, MIN_STACK_DEPTH, Program, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
@@ -357,24 +358,15 @@ impl ExecutionTrace {
         let challenges =
             [QuadFelt::new([digest[0], digest[1]]), QuadFelt::new([digest[2], digest[3]])];
 
-        let witness = AirWitness::new(&trace_matrix, &public_values, var_len_public_inputs);
+        let witness = AirWitness::new(trace_matrix.as_ref(), &public_values, var_len_public_inputs);
         debug::check_constraints(&ProcessorAir, witness, &aux_builder, &challenges);
     }
 
     /// Returns the main trace as a row-major matrix for proving.
-    ///
-    /// Only includes the first [`TRACE_WIDTH`] columns (excluding padding columns added for
-    /// Poseidon2 rate alignment), which is the width expected by the AIR.
-    // TODO: the padding columns can be removed once we use the lifted-stark's virtual trace
-    // alignment, which pads to the required rate width without materializing extra columns.
-    pub fn to_row_major_matrix(&self) -> RowMajorMatrix<Felt> {
-        let stored_w = self.main_trace.width();
-        if stored_w == TRACE_WIDTH {
-            return self.main_trace.to_row_major();
-        }
-
-        assert_eq!(stored_w, PADDED_TRACE_WIDTH);
-        self.main_trace.to_row_major_stripped(TRACE_WIDTH)
+    pub fn to_row_major_matrix(&self) -> Arc<RowMajorMatrix<Felt>> {
+        let row_major = self.main_trace.to_row_major();
+        debug_assert_eq!(row_major.width(), TRACE_WIDTH);
+        self.aux_trace_builders.to_arc_row_major(row_major)
     }
 
     // HELPER METHODS
@@ -389,15 +381,10 @@ impl ExecutionTrace {
     // --------------------------------------------------------------------------------------------
     #[cfg(feature = "std")]
     pub fn print(&self) {
-        use miden_air::trace::TRACE_WIDTH;
-
-        let mut row = [ZERO; PADDED_TRACE_WIDTH];
+        let mut row = [ZERO; TRACE_WIDTH];
         for i in 0..self.length() {
             self.main_trace.read_row_into(i, &mut row);
-            std::println!(
-                "{:?}",
-                row.iter().take(TRACE_WIDTH).map(|v| v.as_canonical_u64()).collect::<Vec<_>>()
-            );
+            std::println!("{:?}", row.map(|v| v.as_canonical_u64()));
         }
     }
 
@@ -426,9 +413,39 @@ pub struct AuxTraceBuilders {
     pub(crate) stack: stack::AuxTraceBuilder,
     pub(crate) range: range::AuxTraceBuilder,
     pub(crate) chiplets: chiplets::AuxTraceBuilder,
+    /// Index of the last row that was executed (not a padding row).
+    pub(crate) last_program_row: RowIndex,
+    /// Filled by [`ExecutionTrace::to_row_major_matrix`] with `main.transpose()` for reuse in
+    /// [`AuxBuilder::build_aux_trace`].
+    pub(crate) precomputed_main_transpose: Arc<OnceCell<Arc<RowMajorMatrix<Felt>>>>,
 }
 
 impl AuxTraceBuilders {
+    /// Wraps row-major `main` in [`Arc`], spawns a background `transpose()` into
+    /// [`Self::precomputed_main_transpose`], and returns the row-major [`Arc`] for proving.
+    pub(crate) fn to_arc_row_major(
+        &self,
+        row_major: RowMajorMatrix<Felt>,
+    ) -> Arc<RowMajorMatrix<Felt>> {
+        let shared = Arc::new(row_major);
+        let for_transpose = shared.clone();
+        let lock = self.precomputed_main_transpose.clone();
+        rayon::spawn(move || {
+            let transposed = Arc::new(for_transpose.transpose());
+            let _ = lock.set(transposed);
+        });
+        shared
+    }
+
+    fn main_trace_for_aux(&self, main: &RowMajorMatrix<Felt>) -> MainTrace {
+        if let Some(t) = self.precomputed_main_transpose.get() {
+            MainTrace::from_transposed_arc(t.clone(), self.last_program_row)
+        } else {
+            let transposed = main.transpose();
+            MainTrace::from_transposed(transposed, self.last_program_row)
+        }
+    }
+
     /// Builds auxiliary columns for all trace segments given the main trace and challenges.
     ///
     /// This is the internal column-major version used by the processor.
@@ -482,36 +499,7 @@ impl<EF: ExtensionField<Felt>> AuxBuilder<Felt, EF> for AuxTraceBuilders {
     ) -> (RowMajorMatrix<EF>, Vec<EF>) {
         let _span = tracing::info_span!("build_aux_trace").entered();
 
-        // Transpose the row-major main trace into column-major `MainTrace` needed by the
-        // auxiliary trace builders. The last program row is the point where the clock
-        // (column 0) stops incrementing.
-        let main_for_aux = {
-            let num_rows = main.height();
-            // Find the last program row by binary search on the clock column.
-            let clk0 = main.get(0, 0).expect("valid indices");
-            let last_program_row = if num_rows <= 1 {
-                0
-            } else if main.get(num_rows - 1, 0).expect("valid indices")
-                == clk0 + Felt::new((num_rows - 1) as u64)
-            {
-                num_rows - 1
-            } else {
-                let mut lo = 1usize;
-                let mut hi = num_rows - 1;
-                while lo < hi {
-                    let mid = lo + (hi - lo) / 2;
-                    let expected = clk0 + Felt::new(mid as u64);
-                    if main.get(mid, 0).expect("valid indices") == expected {
-                        lo = mid + 1;
-                    } else {
-                        hi = mid;
-                    }
-                }
-                lo - 1
-            };
-            let transposed = main.transpose();
-            MainTrace::from_transposed(transposed, RowIndex::from(last_program_row))
-        };
+        let main_for_aux = self.main_trace_for_aux(main);
 
         let aux_columns = self.build_aux_columns(&main_for_aux, challenges);
         assert!(!aux_columns.is_empty(), "aux columns should not be empty");
