@@ -1,3 +1,5 @@
+use alloc::sync::Arc;
+
 use super::*;
 use crate::{
     Felt, ONE, Word,
@@ -6,7 +8,7 @@ use crate::{
         LoopNodeBuilder,
         node::{MastForestContributor, MastNodeExt},
     },
-    operations::{DebugOptions, Decorator, Operation},
+    operations::{AssemblyOp, DebugOptions, DebugVarInfo, DebugVarLocation, Decorator, Operation},
     utils::Idx,
 };
 
@@ -1113,4 +1115,117 @@ fn mast_forest_merge_op_indexed_decorators_preservation() {
         merged.decorators().len(),
         "Every decorator in merged forest should be referenced at least once (no orphans)"
     );
+}
+
+/// Merging two forests preserves procedure names, asm ops, and debug vars
+/// with correct node-ID remapping.
+#[test]
+fn merge_preserves_debug_metadata() {
+    // Forest A: one block with asm op + debug var + procedure name.
+    let mut forest_a = MastForest::new();
+    let asm_op = AssemblyOp::new(None, "test".into(), 1, "add".into());
+    let asm_id_a = forest_a.debug_info_mut().add_asm_op(asm_op).unwrap();
+    let dvar_a = forest_a
+        .add_debug_var(DebugVarInfo::new("x", DebugVarLocation::Stack(0)))
+        .unwrap();
+
+    let block_a_id = block_foo().add_to_forest(&mut forest_a).unwrap();
+    let num_ops_a = forest_a[block_a_id].get_basic_block().unwrap().num_operations() as usize;
+    forest_a
+        .debug_info_mut()
+        .register_asm_ops(block_a_id, num_ops_a, vec![(0, asm_id_a)])
+        .unwrap();
+    forest_a
+        .debug_info_mut()
+        .register_op_indexed_debug_vars(block_a_id, vec![(0, dvar_a)])
+        .unwrap();
+    forest_a.make_root(block_a_id);
+    let digest_a = forest_a[block_a_id].digest();
+    forest_a.insert_procedure_name(digest_a, Arc::from("proc_a"));
+
+    // Forest B: different block with its own asm op + debug var + procedure name.
+    let mut forest_b = MastForest::new();
+    let asm_op_b = AssemblyOp::new(None, "test".into(), 1, "and".into());
+    let asm_id_b = forest_b.debug_info_mut().add_asm_op(asm_op_b).unwrap();
+    let dvar_b = forest_b
+        .add_debug_var(DebugVarInfo::new("y", DebugVarLocation::Stack(1)))
+        .unwrap();
+
+    let block_b_id = block_bar().add_to_forest(&mut forest_b).unwrap();
+    let num_ops_b = forest_b[block_b_id].get_basic_block().unwrap().num_operations() as usize;
+    forest_b
+        .debug_info_mut()
+        .register_asm_ops(block_b_id, num_ops_b, vec![(0, asm_id_b)])
+        .unwrap();
+    forest_b
+        .debug_info_mut()
+        .register_op_indexed_debug_vars(block_b_id, vec![(0, dvar_b)])
+        .unwrap();
+    forest_b.make_root(block_b_id);
+    let digest_b = forest_b[block_b_id].digest();
+    forest_b.insert_procedure_name(digest_b, Arc::from("proc_b"));
+
+    // Merge.
+    let (merged, root_map) = MastForest::merge([&forest_a, &forest_b]).unwrap();
+
+    // Both procedure names must be present.
+    assert_eq!(merged.procedure_name(&digest_a), Some("proc_a"));
+    assert_eq!(merged.procedure_name(&digest_b), Some("proc_b"));
+
+    // Both nodes must have asm ops.
+    let new_a = root_map.map_root(0, &block_a_id).unwrap();
+    let new_b = root_map.map_root(1, &block_b_id).unwrap();
+
+    assert!(
+        merged.debug_info().first_asm_op_for_node(new_a).is_some(),
+        "merged node A must have asm op"
+    );
+    assert!(
+        merged.debug_info().first_asm_op_for_node(new_b).is_some(),
+        "merged node B must have asm op"
+    );
+
+    // Both nodes must have debug vars.
+    let vars_a = merged.debug_info().debug_vars_for_node(new_a);
+    let vars_b = merged.debug_info().debug_vars_for_node(new_b);
+    assert_eq!(vars_a.len(), 1, "merged node A must have debug var");
+    assert_eq!(vars_b.len(), 1, "merged node B must have debug var");
+}
+
+/// compact() (which is a self-merge) must keep debug metadata intact.
+#[test]
+fn compact_preserves_debug_metadata() {
+    let mut forest = MastForest::new();
+    let asm_op = AssemblyOp::new(None, "test".into(), 1, "add".into());
+    let asm_id = forest.debug_info_mut().add_asm_op(asm_op).unwrap();
+    let dvar = forest
+        .add_debug_var(DebugVarInfo::new("z", DebugVarLocation::Stack(2)))
+        .unwrap();
+
+    let block_id = block_foo().add_to_forest(&mut forest).unwrap();
+    let num_ops = forest[block_id].get_basic_block().unwrap().num_operations() as usize;
+    forest
+        .debug_info_mut()
+        .register_asm_ops(block_id, num_ops, vec![(0, asm_id)])
+        .unwrap();
+    forest
+        .debug_info_mut()
+        .register_op_indexed_debug_vars(block_id, vec![(0, dvar)])
+        .unwrap();
+    forest.make_root(block_id);
+    let digest = forest[block_id].digest();
+    forest.insert_procedure_name(digest, Arc::from("my_proc"));
+
+    let (compacted, _root_map) = forest.compact();
+
+    // Find the node by digest in the compacted forest.
+    let compacted_id = compacted.find_procedure_root(digest).expect("root should survive compact");
+
+    assert_eq!(compacted.procedure_name(&digest), Some("my_proc"));
+    assert!(
+        compacted.debug_info().first_asm_op_for_node(compacted_id).is_some(),
+        "compacted node must keep asm op"
+    );
+    let vars = compacted.debug_info().debug_vars_for_node(compacted_id);
+    assert_eq!(vars.len(), 1, "compacted node must keep debug var");
 }

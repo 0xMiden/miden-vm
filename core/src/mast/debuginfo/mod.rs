@@ -370,6 +370,11 @@ impl DebugInfo {
         self.asm_ops.get(asm_op_id)
     }
 
+    /// Returns all `(op_idx, AsmOpId)` pairs for the given node.
+    pub fn asm_ops_for_node(&self, node_id: MastNodeId) -> Vec<(usize, AsmOpId)> {
+        self.asm_op_storage.asm_ops_for_node(node_id)
+    }
+
     // ASSEMBLY OP MUTATORS
     // --------------------------------------------------------------------------------------------
 
