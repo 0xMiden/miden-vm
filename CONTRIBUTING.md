@@ -100,6 +100,11 @@ For example, a new change to the AIR crate might have the following message: `fe
 ### Versioning
 We use [semver](https://semver.org/) naming convention.
 
+### Changelog fragments
+- Normal PRs should add a changelog fragment under `.changes/unreleased/` instead of editing `CHANGELOG.md`.
+- If a PR does not need a changelog entry, ask a maintainer to apply the `no changelog` label.
+- Fragment format details live in `.changes/README.md`.
+
 &nbsp;
 
 ## Pre-PR checklist
@@ -110,6 +115,7 @@ We use [semver](https://semver.org/) naming convention.
 5. Documentation/comments updated for all changes according to our documentation convention.
 6. Clippy and Rustfmt linting passed.
 7. New branch rebased from `next`.
+8. A changelog fragment was added in `.changes/unreleased/`, or the PR has the `no changelog` label.
 
 &nbsp;
 
