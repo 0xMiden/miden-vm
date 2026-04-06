@@ -347,3 +347,54 @@ fn test_decrypt_with_wrong_key() {
     // Should fail with assertion error
     assert!(test.execute().is_err(), "Wrong key should cause assertion failure");
 }
+
+#[test]
+fn test_encrypt_fails_on_overlap() {
+    // With num_blocks=1, encrypt uses (1+1)*8 = 16 elements per range.
+    // Source [1000, 1016) and dest [1008, 1024) overlap at [1008, 1016).
+    let source = r#"
+    use miden::core::crypto::aead
+
+    begin
+        push.[10,11,12,13] push.1000 mem_storew_le dropw
+        push.[14,15,16,17] push.1004 mem_storew_le dropw
+
+        push.1              # num_blocks
+        push.1008           # dst_ptr (overlaps with source)
+        push.1000           # src_ptr
+        push.[1,2,3,4]      # nonce
+        push.[5,6,7,8]      # key
+        exec.aead::encrypt
+    end
+    "#;
+
+    let test = build_test!(source, &[]);
+    expect_assert_error_message!(test, contains "overlap");
+}
+
+#[test]
+fn test_decrypt_fails_on_overlap() {
+    // With num_blocks=1, decrypt uses (1+1)*8 = 16 elements per range.
+    // Source [1000, 1016) and dest [1008, 1024) overlap at [1008, 1016).
+    let source = r#"
+    use miden::core::crypto::aead
+
+    begin
+        push.[10,11,12,13] push.1000 mem_storew_le dropw
+        push.[14,15,16,17] push.1004 mem_storew_le dropw
+        push.[18,19,20,21] push.1008 mem_storew_le dropw
+        push.[22,23,24,25] push.1012 mem_storew_le dropw
+        push.[0,0,0,0] push.1016 mem_storew_le dropw
+
+        push.1              # num_blocks
+        push.1008           # dst_ptr (overlaps with source)
+        push.1000           # src_ptr
+        push.[1,2,3,4]      # nonce
+        push.[5,6,7,8]      # key
+        exec.aead::decrypt
+    end
+    "#;
+
+    let test = build_test!(source, &[]);
+    expect_assert_error_message!(test, contains "overlap");
+}

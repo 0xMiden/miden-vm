@@ -493,6 +493,7 @@ impl Test {
             stack_inputs,
             self.advice_inputs.clone(),
             &mut host,
+            miden_processor::ExecutionOptions::default(),
             ProvingOptions::default(),
         )
         .unwrap();
@@ -628,7 +629,7 @@ impl Test {
         };
 
         compare_results(
-            fast_result.as_ref().map(|trace_inputs| trace_inputs.execution_output().stack),
+            fast_result.as_ref().map(|trace_inputs| *trace_inputs.stack_outputs()),
             &fast_result_by_step,
             "fast processor",
             "fast processor by step",
