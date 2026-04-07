@@ -421,12 +421,9 @@ impl Library {
             self.write_into(&mut file);
             Ok(())
         })
-        .map_err(|p| {
-            match p.downcast::<std::io::Error>() {
-                // SAFETY: It is guaranteed safe to read Box<std::io::Error>
-                Ok(err) => unsafe { core::ptr::read(&*err) },
-                Err(err) => std::panic::resume_unwind(err),
-            }
+        .map_err(|p| match p.downcast::<std::io::Error>() {
+            Ok(err) => *err,
+            Err(err) => std::panic::resume_unwind(err),
         })?
     }
 
