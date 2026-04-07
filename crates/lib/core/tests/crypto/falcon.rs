@@ -283,8 +283,8 @@ fn test_move_sig_to_adv_stack() {
     let adv_stack = vec![];
     let store = MerkleStore::new();
 
-    let mut test = build_debug_test!(source, &op_stack, &adv_stack, store, advice_map.into_iter());
-    test.add_event_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature);
+    let test = build_debug_test!(source, &op_stack, &adv_stack, store, advice_map.into_iter())
+        .with_event_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature);
     test.expect_stack(&[])
 }
 
@@ -296,8 +296,8 @@ fn falcon_execution() {
     let message = random_word();
     let (source, op_stack, adv_stack, store, advice_map) = generate_test(sk, message);
 
-    let mut test = build_debug_test!(&source, &op_stack, &adv_stack, store, advice_map.into_iter());
-    test.add_event_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature);
+    let test = build_debug_test!(&source, &op_stack, &adv_stack, store, advice_map.into_iter())
+        .with_event_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature);
     test.expect_stack(&[])
 }
 
@@ -387,9 +387,9 @@ fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo:
     // Use the upstream test builder directly so we do not auto-register the honest
     // falcon_div handler from CoreLibrary.
     let core_lib = miden_core_lib::CoreLibrary::default();
-    let mut test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack);
-    test.libraries.push(core_lib.library().clone());
-    test.add_event_handler(FALCON_DIV, malicious_falcon_div);
+    let test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack)
+        .with_library(core_lib.library().clone())
+        .with_event_handler(FALCON_DIV, malicious_falcon_div);
 
     // Hardened mod_12289 must reject forged advice.
     expect_exec_error_matches!(
@@ -434,9 +434,9 @@ fn test_mod_12289_rejects_forged_addition_overflow() {
     let adv_stack: Vec<u64> = vec![];
 
     let core_lib = miden_core_lib::CoreLibrary::default();
-    let mut test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack);
-    test.libraries.push(core_lib.library().clone());
-    test.add_event_handler(FALCON_DIV, malicious_falcon_div);
+    let test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack)
+        .with_library(core_lib.library().clone())
+        .with_event_handler(FALCON_DIV, malicious_falcon_div);
 
     expect_exec_error_matches!(
         test,

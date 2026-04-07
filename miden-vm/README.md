@@ -92,8 +92,10 @@ callers. `prove_sync()` takes the following arguments:
 
 - `program: &Program` - a reference to a Miden program to be executed.
 - `stack_inputs: StackInputs` - a set of public inputs with which to execute the program.
+- `advice_inputs: AdviceInputs` - the initial nondeterministic inputs available to the VM.
 - `host: Host` - an instance of a `Host` which can be used to supply non-deterministic inputs to the VM and receive messages from the VM.
-- `options: ProvingOptions` - config parameters for proof generation. The default options target 96-bit security level.
+- `execution_options: ExecutionOptions` - VM execution parameters such as cycle limits and trace fragmentation.
+- `options: ProvingOptions` - proof-generation parameters. The default options target 96-bit security level.
 
 If the program is executed successfully, the function returns a tuple with 2 elements:
 
@@ -110,7 +112,7 @@ use miden_vm::{
     advice::AdviceInputs,
     assembly::DefaultSourceManager,
     field::PrimeField64,
-    Assembler, DefaultHost, ProvingOptions, Program, prove_sync, StackInputs
+    Assembler, DefaultHost, ExecutionOptions, ProvingOptions, Program, prove_sync, StackInputs
 };
 
 // instantiate the assembler
@@ -125,6 +127,7 @@ let (outputs, proof) = prove_sync(
     StackInputs::default(),       // we won't provide any inputs
     AdviceInputs::default(),      // we don't need any initial advice inputs
     &mut DefaultHost::default(),  // we'll be using a default host
+    ExecutionOptions::default(),  // we'll use default VM execution options
     ProvingOptions::default(),    // we'll be using default options
 )
 .unwrap();
@@ -226,6 +229,7 @@ let (outputs, proof) = miden_vm::prove_sync(
     stack_inputs,
     AdviceInputs::default(), // without initial advice inputs
     &mut host,
+    miden_vm::ExecutionOptions::default(), // use default VM execution options
     ProvingOptions::default(), // use default proving options
 )
 .unwrap();

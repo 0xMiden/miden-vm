@@ -4,7 +4,7 @@
 //! Currently implemented:
 //! - b_hash_kernel: hash-kernel virtual table bus
 //! - b_chiplets: main chiplets communication bus
-//! - b_wiring: ACE wiring bus
+//! - b_wiring: ACE wiring bus + memory range checks + hasher perm-link
 
 pub mod chiplets;
 pub mod hash_kernel;

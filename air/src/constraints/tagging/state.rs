@@ -65,6 +65,23 @@ pub fn with_tag<R>(ids: Vec<usize>, namespace: &'static str, f: impl FnOnce() ->
     result
 }
 
+/// Peek at the current tag context without consuming it.
+/// Returns (id, namespace) if a tag is active, or None if not.
+#[cfg(test)]
+#[allow(dead_code)]
+pub fn peek_tag() -> Option<(usize, &'static str)> {
+    TAG_STACK.with(|stack| {
+        let stack = stack.borrow();
+        stack.last().and_then(|ctx| {
+            if ctx.next < ctx.ids.len() {
+                Some((ctx.ids[ctx.next], ctx.namespace))
+            } else {
+                None
+            }
+        })
+    })
+}
+
 /// Consume the next tag ID for the current tagged context.
 ///
 /// Panics if called outside a tagged block or if the block emits too many assertions.

@@ -18,7 +18,7 @@ use crate::{
     Felt, MainTraceRow,
     constraints::{
         bus::indices::B_HASH_KERNEL,
-        chiplets::hasher::{flags, periodic},
+        chiplets::hasher::flags,
         op_flags::OpFlags,
         tagging::{
             TagGroup, TaggingAirBuilderExt, ids::TAG_HASH_KERNEL_BUS_BASE, tagged_assert_zero_ext,
@@ -27,8 +27,8 @@ use crate::{
     trace::{
         CHIPLETS_OFFSET, Challenges, LOG_PRECOMPILE_LABEL,
         chiplets::{
-            HASHER_NODE_INDEX_COL_IDX, HASHER_SELECTOR_COL_RANGE, HASHER_STATE_COL_RANGE,
-            NUM_ACE_SELECTORS,
+            HASHER_MRUPDATE_ID_COL_IDX, HASHER_NODE_INDEX_COL_IDX, HASHER_PERM_SEG_COL_IDX,
+            HASHER_SELECTOR_COL_RANGE, HASHER_STATE_COL_RANGE, NUM_ACE_SELECTORS,
             ace::{
                 ACE_INSTRUCTION_ID1_OFFSET, ACE_INSTRUCTION_ID2_OFFSET, CLK_IDX, CTX_IDX,
                 EVAL_OP_IDX, ID_1_IDX, ID_2_IDX, PTR_IDX, SELECTOR_BLOCK_IDX, V_0_0_IDX, V_0_1_IDX,
@@ -48,6 +48,8 @@ use crate::{
 const S_START: usize = HASHER_SELECTOR_COL_RANGE.start - CHIPLETS_OFFSET;
 const H_START: usize = HASHER_STATE_COL_RANGE.start - CHIPLETS_OFFSET;
 const IDX_COL: usize = HASHER_NODE_INDEX_COL_IDX - CHIPLETS_OFFSET;
+const MRUPDATE_ID_COL: usize = HASHER_MRUPDATE_ID_COL_IDX - CHIPLETS_OFFSET;
+const PERM_SEG_COL: usize = HASHER_PERM_SEG_COL_IDX - CHIPLETS_OFFSET;
 
 /// Tag ID and namespace for the hash-kernel (virtual table) bus transition constraint.
 const HASH_KERNEL_BUS_ID: usize = TAG_HASH_KERNEL_BUS_BASE;
@@ -91,18 +93,6 @@ pub fn enforce_hash_kernel_constraint<AB>(
     let one_ef = AB::ExprEF::ONE;
 
     // =========================================================================
-    // PERIODIC VALUES
-    // =========================================================================
-
-    let (cycle_row_0, cycle_row_31) = {
-        // Clone only the periodic values we need (avoids per-eval `to_vec()` allocation).
-        let p = builder.periodic_values();
-        let cycle_row_0: AB::Expr = p[periodic::P_CYCLE_ROW_0].into();
-        let cycle_row_31: AB::Expr = p[periodic::P_CYCLE_ROW_31].into();
-        (cycle_row_0, cycle_row_31)
-    };
-
-    // =========================================================================
     // COMMON VALUES
     // =========================================================================
 
@@ -110,49 +100,43 @@ pub fn enforce_hash_kernel_constraint<AB>(
     let chiplet_selector: AB::Expr = local.chiplets[0].clone().into();
     let is_hasher: AB::Expr = one.clone() - chiplet_selector.clone();
 
-    // Hasher operation selectors (only meaningful within hasher chiplet)
+    // Hasher controller flag: active on hasher controller rows (perm_seg=0), not on
+    // hasher permutation segment rows (perm_seg=1).
+    let perm_seg: AB::Expr = local.chiplets[PERM_SEG_COL].clone().into();
+    let controller_flag: AB::Expr = is_hasher.clone() * (one.clone() - perm_seg);
+
+    // Hasher operation selectors (only meaningful on hasher controller rows)
     let s0: AB::Expr = local.chiplets[S_START].clone().into();
     let s1: AB::Expr = local.chiplets[S_START + 1].clone().into();
     let s2: AB::Expr = local.chiplets[S_START + 2].clone().into();
 
-    // Node index for sibling table
+    // Node index and mrupdate_id for sibling table
     let node_index: AB::Expr = local.chiplets[IDX_COL].clone().into();
     let node_index_next: AB::Expr = next.chiplets[IDX_COL].clone().into();
+    let mrupdate_id: AB::Expr = local.chiplets[MRUPDATE_ID_COL].clone().into();
 
     // Hasher state for sibling values
     let h: [AB::Expr; 12] = core::array::from_fn(|i| local.chiplets[H_START + i].clone().into());
-    let h_next: [AB::Expr; 12] =
-        core::array::from_fn(|i| next.chiplets[H_START + i].clone().into());
 
     // =========================================================================
     // SIBLING TABLE FLAGS AND VALUES
     // =========================================================================
 
-    // MU/MUA flags (requests - remove siblings during new path).
-    let f_mu: AB::Expr =
-        is_hasher.clone() * flags::f_mu(cycle_row_0.clone(), s0.clone(), s1.clone(), s2.clone());
-    let f_mua: AB::Expr =
-        is_hasher.clone() * flags::f_mua(cycle_row_31.clone(), s0.clone(), s1.clone(), s2.clone());
+    // In the controller/perm split, sibling table operations happen on controller input rows
+    // for MU (new path - requests/removes) and MV (old path - responses/adds).
+    // All MU/MV input rows participate (not just is_start=1).
+    let f_mu: AB::Expr = controller_flag.clone() * flags::f_mu(s0.clone(), s1.clone(), s2.clone());
+    let f_mv: AB::Expr = controller_flag.clone() * flags::f_mv(s0.clone(), s1.clone(), s2.clone());
 
-    // MV/MVA flags (responses - add siblings during old path).
-    let f_mv: AB::Expr =
-        is_hasher.clone() * flags::f_mv(cycle_row_0.clone(), s0.clone(), s1.clone(), s2.clone());
-    let f_mva: AB::Expr = is_hasher.clone() * flags::f_mva(cycle_row_31.clone(), s0, s1, s2);
-
-    // Compute sibling values based on bit b (LSB of node index).
-    // The hasher constraints enforce that b is binary on shift rows.
+    // Direction bit b = input_node_index - 2 * output_node_index (next row is the paired output).
     let b: AB::Expr = node_index.clone() - node_index_next.clone().double();
     let is_b_zero = one.clone() - b.clone();
     let is_b_one = b;
 
-    // Sibling value for current row (uses current hasher state).
-    // b selects which half of the rate holds the sibling.
-    let v_sibling_curr = compute_sibling_b0::<AB>(challenges, &node_index, &h) * is_b_zero.clone()
-        + compute_sibling_b1::<AB>(challenges, &node_index, &h) * is_b_one.clone();
-
-    // Sibling value for next row (used by MVA/MUA on the transition row).
-    let v_sibling_next = compute_sibling_b0::<AB>(challenges, &node_index, &h_next) * is_b_zero
-        + compute_sibling_b1::<AB>(challenges, &node_index, &h_next) * is_b_one;
+    // Sibling value from the current input row's state, including mrupdate_id for domain
+    // separation. b selects which half of the rate holds the sibling.
+    let v_sibling = compute_sibling_b0::<AB>(challenges, &mrupdate_id, &node_index, &h) * is_b_zero
+        + compute_sibling_b1::<AB>(challenges, &mrupdate_id, &node_index, &h) * is_b_one;
 
     // =========================================================================
     // ACE MEMORY FLAGS AND VALUES
@@ -255,23 +239,17 @@ pub fn enforce_hash_kernel_constraint<AB>(
 
     // Include the identity term when no request/response flag is set on a row.
     // Flags are mutually exclusive by construction (chiplet selectors + op flags).
-    let request_flag_sum = f_mu.clone()
-        + f_mua.clone()
-        + f_ace_read.clone()
-        + f_ace_eval.clone()
-        + f_logprecompile.clone();
-    let requests: AB::ExprEF = v_sibling_curr.clone() * f_mu.clone()
-        + v_sibling_next.clone() * f_mua.clone()
+    let request_flag_sum =
+        f_mu.clone() + f_ace_read.clone() + f_ace_eval.clone() + f_logprecompile.clone();
+    let requests: AB::ExprEF = v_sibling.clone() * f_mu
         + v_ace_word * f_ace_read
         + v_ace_element * f_ace_eval
         + v_cap_prev * f_logprecompile.clone()
         + (one_ef.clone() - request_flag_sum);
 
-    let response_flag_sum = f_mv.clone() + f_mva.clone() + f_logprecompile.clone();
-    let responses: AB::ExprEF = v_sibling_curr * f_mv
-        + v_sibling_next * f_mva
-        + v_cap_next * f_logprecompile
-        + (one_ef - response_flag_sum);
+    let response_flag_sum = f_mv.clone() + f_logprecompile.clone();
+    let responses: AB::ExprEF =
+        v_sibling * f_mv + v_cap_next * f_logprecompile + (one_ef - response_flag_sum);
 
     // Running product constraint: p' * requests = p * responses
     let p_local_ef: AB::ExprEF = p_local.into();
@@ -289,13 +267,20 @@ pub fn enforce_hash_kernel_constraint<AB>(
 // INTERNAL HELPERS
 // ================================================================================================
 
-/// Sibling at h[4..7]: positions [2, 7, 8, 9, 10].
-const SIBLING_B0_LAYOUT: [usize; 5] = [2, 7, 8, 9, 10];
-/// Sibling at h[0..3]: positions [2, 3, 4, 5, 6].
-const SIBLING_B1_LAYOUT: [usize; 5] = [2, 3, 4, 5, 6];
+/// Sibling at h[4..8] (b=0): positions [1, 2, 7, 8, 9, 10].
+/// Position 1 = mrupdate_id, position 2 = node_index, positions 7-10 = sibling (rate1).
+const SIBLING_B0_LAYOUT: [usize; 6] = [1, 2, 7, 8, 9, 10];
 
+/// Sibling at h[0..4] (b=1): positions [1, 2, 3, 4, 5, 6].
+/// Position 1 = mrupdate_id, position 2 = node_index, positions 3-6 = sibling (rate0).
+const SIBLING_B1_LAYOUT: [usize; 6] = [1, 2, 3, 4, 5, 6];
+
+/// Compute sibling value when b=0 (sibling at h[4..8], i.e., rate1).
+///
+/// Message: `alpha + beta[1]*mrupdate_id + beta[2]*node_index + beta[7..11]*h[4..8]`
 fn compute_sibling_b0<AB>(
     challenges: &Challenges<AB::ExprEF>,
+    mrupdate_id: &AB::Expr,
     node_index: &AB::Expr,
     h: &[AB::Expr; 12],
 ) -> AB::ExprEF
@@ -304,15 +289,23 @@ where
 {
     challenges.encode_sparse(
         SIBLING_B0_LAYOUT,
-        [node_index.clone(), h[4].clone(), h[5].clone(), h[6].clone(), h[7].clone()],
+        [
+            mrupdate_id.clone(),
+            node_index.clone(),
+            h[4].clone(),
+            h[5].clone(),
+            h[6].clone(),
+            h[7].clone(),
+        ],
     )
 }
 
-/// Compute sibling value when b=1 (sibling at h[0..3]).
+/// Compute sibling value when b=1 (sibling at h[0..4], i.e., rate0).
 ///
-/// Message layout: alpha[0] (constant) + alpha[3] * node_index + alpha[4..7] * h[0..3].
+/// Message: `alpha + beta[1]*mrupdate_id + beta[2]*node_index + beta[3..7]*h[0..4]`
 fn compute_sibling_b1<AB>(
     challenges: &Challenges<AB::ExprEF>,
+    mrupdate_id: &AB::Expr,
     node_index: &AB::Expr,
     h: &[AB::Expr; 12],
 ) -> AB::ExprEF
@@ -321,6 +314,13 @@ where
 {
     challenges.encode_sparse(
         SIBLING_B1_LAYOUT,
-        [node_index.clone(), h[0].clone(), h[1].clone(), h[2].clone(), h[3].clone()],
+        [
+            mrupdate_id.clone(),
+            node_index.clone(),
+            h[0].clone(),
+            h[1].clone(),
+            h[2].clone(),
+            h[3].clone(),
+        ],
     )
 }
