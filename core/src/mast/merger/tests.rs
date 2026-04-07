@@ -1153,3 +1153,56 @@ fn mast_forest_merge_preserves_asm_op_mappings_for_deduplicated_nodes() {
         Some(&asm_op),
     );
 }
+
+#[test]
+fn mast_forest_merge_prefers_richer_asm_op_mappings_for_deduplicated_nodes() {
+    let mut forest_coarse = MastForest::new();
+    let coarse_block_id = block_foo().add_to_forest(&mut forest_coarse).unwrap();
+    forest_coarse.make_root(coarse_block_id);
+
+    let mut forest_rich = MastForest::new();
+    let rich_block_id = block_foo().add_to_forest(&mut forest_rich).unwrap();
+    forest_rich.make_root(rich_block_id);
+
+    let asm_mul = AssemblyOp::new(None, "proc::foo".into(), 1, "mul".into());
+    let asm_add = AssemblyOp::new(None, "proc::foo".into(), 1, "add".into());
+
+    let coarse_mul_id = forest_coarse.debug_info_mut().add_asm_op(asm_mul.clone()).unwrap();
+    forest_coarse
+        .debug_info_mut()
+        .register_asm_ops(coarse_block_id, 2, vec![(0, coarse_mul_id)])
+        .unwrap();
+
+    let rich_mul_id = forest_rich.debug_info_mut().add_asm_op(asm_mul.clone()).unwrap();
+    let rich_add_id = forest_rich.debug_info_mut().add_asm_op(asm_add.clone()).unwrap();
+    forest_rich
+        .debug_info_mut()
+        .register_asm_ops(rich_block_id, 2, vec![(0, rich_mul_id), (1, rich_add_id)])
+        .unwrap();
+
+    // Coarse + rich should keep the richer mapping at op 1.
+    let (merged_coarse_then_rich, root_maps_coarse_then_rich) =
+        MastForest::merge([&forest_coarse, &forest_rich]).unwrap();
+    let mapped_rich_root = root_maps_coarse_then_rich.map_root(1, &rich_block_id).unwrap();
+    assert_eq!(
+        merged_coarse_then_rich.get_assembly_op(mapped_rich_root, Some(0)),
+        Some(&asm_mul)
+    );
+    assert_eq!(
+        merged_coarse_then_rich.get_assembly_op(mapped_rich_root, Some(1)),
+        Some(&asm_add)
+    );
+
+    // Rich + coarse should be identical.
+    let (merged_rich_then_coarse, root_maps_rich_then_coarse) =
+        MastForest::merge([&forest_rich, &forest_coarse]).unwrap();
+    let mapped_rich_root = root_maps_rich_then_coarse.map_root(0, &rich_block_id).unwrap();
+    assert_eq!(
+        merged_rich_then_coarse.get_assembly_op(mapped_rich_root, Some(0)),
+        Some(&asm_mul)
+    );
+    assert_eq!(
+        merged_rich_then_coarse.get_assembly_op(mapped_rich_root, Some(1)),
+        Some(&asm_add)
+    );
+}

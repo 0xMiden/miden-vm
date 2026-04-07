@@ -1,4 +1,9 @@
-use alloc::{collections::BTreeMap, string::String, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, btree_map::Entry},
+    string::String,
+    vec::Vec,
+};
+use core::cmp::Ordering;
 
 use miden_debug_types::Location;
 
@@ -365,13 +370,152 @@ impl MastForestMerger {
             return Ok(());
         }
 
-        // We may see the same merged node multiple times due deduplication. Keep the first
-        // mapping we encounter for that node.
-        self.pending_asm_op_mappings
-            .entry(merged_node_id)
-            .or_insert((num_operations, asm_ops));
+        self.merge_pending_asm_op_mapping(merged_node_id, num_operations, asm_ops);
 
         Ok(())
+    }
+
+    /// Adds or merges asm-op mappings for a merged node.
+    ///
+    /// Nodes can be visited multiple times due to deduplication across input forests. In that
+    /// case, we merge compatible mappings and resolve conflicts deterministically, favoring the
+    /// richer source mapping.
+    fn merge_pending_asm_op_mapping(
+        &mut self,
+        merged_node_id: MastNodeId,
+        num_operations: usize,
+        asm_ops: Vec<(usize, AsmOpId)>,
+    ) {
+        match self.pending_asm_op_mappings.entry(merged_node_id) {
+            Entry::Vacant(entry) => {
+                entry.insert((num_operations, asm_ops));
+            },
+            Entry::Occupied(mut entry) => {
+                let (existing_num_operations, existing_asm_ops) = entry.get_mut();
+                let merged_num_operations =
+                    core::cmp::max(*existing_num_operations, num_operations);
+                let merged_asm_ops =
+                    Self::merge_asm_op_mappings(merged_num_operations, existing_asm_ops, &asm_ops);
+                *existing_num_operations = merged_num_operations;
+                *existing_asm_ops = merged_asm_ops;
+            },
+        }
+    }
+
+    /// Merges two sparse asm-op mappings for the same node.
+    ///
+    /// Compatible entries are unified. Conflicts are resolved deterministically by preferring the
+    /// richer mapping.
+    fn merge_asm_op_mappings(
+        num_operations: usize,
+        lhs: &[(usize, AsmOpId)],
+        rhs: &[(usize, AsmOpId)],
+    ) -> Vec<(usize, AsmOpId)> {
+        let lhs_expanded = Self::expand_asm_op_mapping(num_operations, lhs);
+        let rhs_expanded = Self::expand_asm_op_mapping(num_operations, rhs);
+        let preference = Self::compare_asm_op_mapping_specificity(num_operations, lhs, rhs);
+
+        let mut merged = Vec::with_capacity(num_operations);
+        for op_idx in 0..num_operations {
+            let merged_asm_op = match (lhs_expanded[op_idx], rhs_expanded[op_idx]) {
+                (Some(lhs_asm_op), Some(rhs_asm_op)) if lhs_asm_op == rhs_asm_op => {
+                    Some(lhs_asm_op)
+                },
+                (Some(lhs_asm_op), Some(rhs_asm_op)) => Some(match preference {
+                    Ordering::Greater => lhs_asm_op,
+                    Ordering::Less => rhs_asm_op,
+                    Ordering::Equal => {
+                        if u32::from(lhs_asm_op) <= u32::from(rhs_asm_op) {
+                            lhs_asm_op
+                        } else {
+                            rhs_asm_op
+                        }
+                    },
+                }),
+                (Some(asm_op), None) | (None, Some(asm_op)) => Some(asm_op),
+                (None, None) => None,
+            };
+            merged.push(merged_asm_op);
+        }
+
+        Self::compress_asm_op_mapping(&merged)
+    }
+
+    /// Expands sparse mapping transitions into per-operation mapping.
+    fn expand_asm_op_mapping(
+        num_operations: usize,
+        asm_ops: &[(usize, AsmOpId)],
+    ) -> Vec<Option<AsmOpId>> {
+        let mut expanded = vec![None; num_operations];
+        for (i, (start_op_idx, asm_op_id)) in asm_ops.iter().copied().enumerate() {
+            if start_op_idx >= num_operations {
+                break;
+            }
+            let end_op_idx =
+                asm_ops.get(i + 1).map(|(op_idx, _)| *op_idx).unwrap_or(num_operations);
+            expanded[start_op_idx..end_op_idx].fill(Some(asm_op_id));
+        }
+        expanded
+    }
+
+    /// Compresses per-operation mapping into sparse transition points.
+    fn compress_asm_op_mapping(asm_ops: &[Option<AsmOpId>]) -> Vec<(usize, AsmOpId)> {
+        let mut compressed = Vec::new();
+        let mut previous_asm_op = None;
+
+        for (op_idx, asm_op) in asm_ops.iter().copied().enumerate() {
+            if asm_op == previous_asm_op {
+                continue;
+            }
+
+            if let Some(asm_op) = asm_op {
+                compressed.push((op_idx, asm_op));
+            }
+            previous_asm_op = asm_op;
+        }
+
+        compressed
+    }
+
+    /// Compares mapping richness for deterministic conflict resolution.
+    ///
+    /// Richer mapping means:
+    /// 1. More transition points.
+    /// 2. If tied, larger covered suffix of operations.
+    /// 3. If still tied, lexicographically larger sparse mapping.
+    fn compare_asm_op_mapping_specificity(
+        num_operations: usize,
+        lhs: &[(usize, AsmOpId)],
+        rhs: &[(usize, AsmOpId)],
+    ) -> Ordering {
+        let transitions_cmp = lhs.len().cmp(&rhs.len());
+        if !transitions_cmp.is_eq() {
+            return transitions_cmp;
+        }
+
+        let coverage = |mapping: &[(usize, AsmOpId)]| {
+            mapping
+                .first()
+                .map(|(op_idx, _)| num_operations.saturating_sub(*op_idx))
+                .unwrap_or(0)
+        };
+        let coverage_cmp = coverage(lhs).cmp(&coverage(rhs));
+        if !coverage_cmp.is_eq() {
+            return coverage_cmp;
+        }
+
+        for ((lhs_op_idx, lhs_asm_op), (rhs_op_idx, rhs_asm_op)) in lhs.iter().zip(rhs.iter()) {
+            let op_idx_cmp = lhs_op_idx.cmp(rhs_op_idx);
+            if !op_idx_cmp.is_eq() {
+                return op_idx_cmp;
+            }
+            let asm_op_cmp = u32::from(*lhs_asm_op).cmp(&u32::from(*rhs_asm_op));
+            if !asm_op_cmp.is_eq() {
+                return asm_op_cmp;
+            }
+        }
+
+        Ordering::Equal
     }
 
     /// Registers all merged asm-op mappings into the merged forest.
