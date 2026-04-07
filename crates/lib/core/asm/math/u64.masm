@@ -936,9 +936,9 @@ pub proc rotr(n: u32, a: u64) -> u64
     add
     # [lo1 + hi2, lo2, borrow, shift_amt == 0, ...]
     # c_lo = lo1 + hi2 (overflow wraps to low bits)
-    # This add is safe: hi2 is only the carry-out bit from
-    # a_hi * 2^complement_shift + hi1, so hi2 is 0 when complement_shift = 0 and 1 otherwise.
-    # When hi2 = 1, lo1 = a_lo << complement_shift is even, so lo1 + hi2 still stays below 2^32.
+    # This add is safe: hi2 is the high limb of a_hi * 2^complement_shift + hi1, so
+    # hi2 < 2^complement_shift, while lo1 = (a_lo * 2^complement_shift) mod 2^32 is a multiple
+    # of 2^complement_shift. Thus lo1 <= 2^32 - 2^complement_shift, and lo1 + hi2 < 2^32.
 
     swap
     # [lo2, c_lo, borrow, shift_amt == 0, ...]
