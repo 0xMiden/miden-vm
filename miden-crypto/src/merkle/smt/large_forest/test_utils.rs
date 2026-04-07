@@ -71,7 +71,7 @@ pub fn arbitrary_version() -> impl Strategy<Value = VersionId> {
 
 /// Generates an arbitrary valid felt value.
 pub fn arbitrary_felt() -> impl Strategy<Value = Felt> {
-    prop_oneof![any::<u64>().prop_map(Felt::new), Just(ZERO), Just(ONE)]
+    prop_oneof![any::<u64>().prop_map(Felt::new_unchecked), Just(ZERO), Just(ONE)]
 }
 
 /// Generates an arbitrary valid word value.

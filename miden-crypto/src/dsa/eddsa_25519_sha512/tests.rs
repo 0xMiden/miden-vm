@@ -56,8 +56,18 @@ fn test_compute_challenge_k_equivalence() {
     // Test with multiple different messages
     let messages = [
         Word::default(),
-        Word::from([Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]),
-        Word::from([Felt::new(42), Felt::new(100), Felt::new(255), Felt::new(1000)]),
+        Word::from([
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+        ]),
+        Word::from([
+            Felt::new_unchecked(42),
+            Felt::new_unchecked(100),
+            Felt::new_unchecked(255),
+            Felt::new_unchecked(1000),
+        ]),
     ];
 
     for message in messages {
@@ -77,8 +87,12 @@ fn test_compute_challenge_k_equivalence() {
         assert!(result_standard, "Signature should be valid");
 
         // Test with wrong message - both should fail
-        let wrong_message =
-            Word::from([Felt::new(999), Felt::new(888), Felt::new(777), Felt::new(666)]);
+        let wrong_message = Word::from([
+            Felt::new_unchecked(999),
+            Felt::new_unchecked(888),
+            Felt::new_unchecked(777),
+            Felt::new_unchecked(666),
+        ]);
         let wrong_k_hash = pk.compute_challenge_k(wrong_message, &signature);
 
         assert!(matches!(

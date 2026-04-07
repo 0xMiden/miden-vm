@@ -126,7 +126,15 @@ impl Word {
     /// ```
     /// use miden_field::{Felt, Word, word};
     /// let word = word!("0x1000000000000000200000000000000030000000000000004000000000000000");
-    /// assert_eq!(word, Word::new([Felt::new(16), Felt::new(32), Felt::new(48), Felt::new(64)]));
+    /// assert_eq!(
+    ///     word,
+    ///     Word::new([
+    ///         Felt::new_unchecked(16),
+    ///         Felt::new_unchecked(32),
+    ///         Felt::new_unchecked(48),
+    ///         Felt::new_unchecked(64)
+    ///     ])
+    /// );
     /// ```
     #[cfg(not(all(target_family = "wasm", miden)))]
     pub const fn parse(hex: &str) -> Result<Self, &'static str> {
@@ -183,10 +191,10 @@ impl Word {
         }
 
         Ok(Self::new([
-            Felt::new(felts[0]),
-            Felt::new(felts[1]),
-            Felt::new(felts[2]),
-            Felt::new(felts[3]),
+            Felt::new_unchecked(felts[0]),
+            Felt::new_unchecked(felts[1]),
+            Felt::new_unchecked(felts[2]),
+            Felt::new_unchecked(felts[3]),
         ]))
     }
 
@@ -721,7 +729,7 @@ impl Deserializable for Word {
                     "value not in the appropriate range",
                 )));
             }
-            *inner = Felt::new(e);
+            *inner = Felt::new_unchecked(e);
         }
 
         Ok(Self::new(inner))

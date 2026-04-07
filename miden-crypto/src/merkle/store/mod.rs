@@ -41,7 +41,7 @@ pub struct StoreNode {
 /// # use miden_crypto::hash::poseidon2::Poseidon2;
 /// # use miden_crypto::field::PrimeCharacteristicRing;
 /// # const fn int_to_node(value: u64) -> Word {
-/// #     Word::new([Felt::new(value), ZERO, ZERO, ZERO])
+/// #     Word::new([Felt::new_unchecked(value), ZERO, ZERO, ZERO])
 /// # }
 /// # let A = int_to_node(1);
 /// # let B = int_to_node(2);

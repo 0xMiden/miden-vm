@@ -112,7 +112,7 @@ benchmark_with_setup_data! {
     || {
         let secret_keys: Vec<Falcon512SecretKey> = (0..KEYGEN_ITERATIONS).map(|_| Falcon512SecretKey::new()).collect();
         let messages: Vec<Word> =
-            (0..KEYGEN_ITERATIONS).map(|i| Word::new([Felt::new(i as u64); 4])).collect();
+            (0..KEYGEN_ITERATIONS).map(|i| Word::new([Felt::new_unchecked(i as u64); 4])).collect();
         (secret_keys, messages)
     },
     |b: &mut criterion::Bencher, (secret_keys, messages): &(Vec<Falcon512SecretKey>, Vec<Word>)| {
@@ -133,7 +133,7 @@ benchmark_with_setup_data! {
     || {
         let secret_keys: Vec<Falcon512SecretKey> = (0..KEYGEN_ITERATIONS).map(|_| Falcon512SecretKey::new()).collect();
         let messages: Vec<Word> =
-            (0..KEYGEN_ITERATIONS).map(|i| Word::new([Felt::new(i as u64); 4])).collect();
+            (0..KEYGEN_ITERATIONS).map(|i| Word::new([Felt::new_unchecked(i as u64); 4])).collect();
         let rngs: Vec<_> = (0..KEYGEN_ITERATIONS).map(|_| rng()).collect();
         (secret_keys, messages, rngs)
     },
@@ -163,7 +163,7 @@ benchmark_with_setup_data! {
             (0..KEYGEN_ITERATIONS).map(|_| Falcon512SecretKey::with_rng(&mut rng)).collect();
         let public_keys: Vec<Falcon512PublicKey> = secret_keys.iter().map(|sk| sk.public_key()).collect();
         let messages: Vec<Word> =
-            (0..KEYGEN_ITERATIONS).map(|i| Word::new([Felt::new(i as u64); 4])).collect();
+            (0..KEYGEN_ITERATIONS).map(|i| Word::new([Felt::new_unchecked(i as u64); 4])).collect();
         let signatures: Vec<falcon512_poseidon2::Signature> = secret_keys
             .iter()
             .zip(messages.iter())
@@ -245,7 +245,7 @@ benchmark_with_setup_data! {
     || {
         let secret_keys: Vec<ecdsa_k256_keccak::SecretKey> = (0..KEYGEN_ITERATIONS).map(|_| ecdsa_k256_keccak::SecretKey::new()).collect();
         let messages: Vec<Word> =
-            (0..KEYGEN_ITERATIONS).map(|i| Word::new([Felt::new(i as u64); 4])).collect();
+            (0..KEYGEN_ITERATIONS).map(|i| Word::new([Felt::new_unchecked(i as u64); 4])).collect();
         (secret_keys, messages)
     },
     |b: &mut criterion::Bencher, (secret_keys, messages): &(Vec<ecdsa_k256_keccak::SecretKey>, Vec<Word>)| {
@@ -272,7 +272,7 @@ benchmark_with_setup_data! {
             (0..KEYGEN_ITERATIONS).map(|_| ecdsa_k256_keccak::SecretKey::with_rng(&mut rng)).collect();
         let public_keys: Vec<ecdsa_k256_keccak::PublicKey> = secret_keys.iter().map(|sk| sk.public_key()).collect();
         let messages: Vec<Word> =
-            (0..KEYGEN_ITERATIONS).map(|i| Word::new([Felt::new(i as u64); 4])).collect();
+            (0..KEYGEN_ITERATIONS).map(|i| Word::new([Felt::new_unchecked(i as u64); 4])).collect();
         let signatures: Vec<ecdsa_k256_keccak::Signature> = secret_keys
             .iter_mut()
             .zip(messages.iter())
@@ -354,7 +354,7 @@ benchmark_with_setup_data! {
     || {
         let secret_keys: Vec<eddsa_25519_sha512::SecretKey> = (0..KEYGEN_ITERATIONS).map(|_| eddsa_25519_sha512::SecretKey::new()).collect();
         let messages: Vec<Word> =
-            (0..KEYGEN_ITERATIONS).map(|i| Word::new([Felt::new(i as u64); 4])).collect();
+            (0..KEYGEN_ITERATIONS).map(|i| Word::new([Felt::new_unchecked(i as u64); 4])).collect();
         (secret_keys, messages)
     },
     |b: &mut criterion::Bencher, (secret_keys, messages): &(Vec<eddsa_25519_sha512::SecretKey>, Vec<Word>)| {
@@ -379,7 +379,7 @@ benchmark_with_setup_data! {
             (0..KEYGEN_ITERATIONS).map(|_| eddsa_25519_sha512::SecretKey::with_rng(&mut rng)).collect();
         let public_keys: Vec<eddsa_25519_sha512::PublicKey> = secret_keys.iter().map(|sk| sk.public_key()).collect();
         let messages: Vec<Word> =
-            (0..KEYGEN_ITERATIONS).map(|i| Word::new([Felt::new(i as u64); 4])).collect();
+            (0..KEYGEN_ITERATIONS).map(|i| Word::new([Felt::new_unchecked(i as u64); 4])).collect();
         let signatures: Vec<eddsa_25519_sha512::Signature> = secret_keys
             .iter()
             .zip(messages.iter())

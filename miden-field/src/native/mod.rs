@@ -49,12 +49,21 @@ impl Felt {
     /// The number of bytes which this field element occupies in memory.
     pub const NUM_BYTES: usize = Goldilocks::NUM_BYTES;
 
-    /// Creates a new field element from any `u64`.
+    /// Constructs a new field element from the provided `value`.
+    ///
+    /// # Errors
+    ///
+    /// - [`FeltFromIntError`] if the provided `value` is not a valid input.
+    pub fn new(value: u64) -> Result<Self, FeltFromIntError> {
+        Felt::from_canonical_checked(value).ok_or(FeltFromIntError(value))
+    }
+
+    /// Creates a new field element from any `u64` without performing reduction.
     ///
     /// Any `u64` value is accepted. No reduction is performed since Goldilocks uses a
     /// non-canonical internal representation.
     #[inline]
-    pub const fn new(value: u64) -> Self {
+    pub const fn new_unchecked(value: u64) -> Self {
         Self(Goldilocks::new(value))
     }
 
@@ -190,7 +199,7 @@ impl PrimeCharacteristicRing for Felt {
 
     #[inline]
     fn from_bool(value: bool) -> Self {
-        Self::new(value.into())
+        Self::new_unchecked(value.into())
     }
 
     #[inline]
@@ -403,7 +412,7 @@ impl TryFrom<u64> for Felt {
     type Error = FeltFromIntError;
 
     fn try_from(int: u64) -> Result<Felt, Self::Error> {
-        Felt::from_canonical_checked(int).ok_or(FeltFromIntError(int))
+        Felt::new(int)
     }
 }
 
@@ -605,11 +614,11 @@ mod arbitrary {
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            let canonical = (0u64..Felt::ORDER).prop_map(Felt::new).boxed();
+            let canonical = (0u64..Felt::ORDER).prop_map(Felt::new_unchecked).boxed();
             // Goldilocks uses representation where values above the field order are valid and
             // represent wrapped field elements. Generate such values 1/5 of the time to exercise
             // this behavior.
-            let non_canonical = (Felt::ORDER..=u64::MAX).prop_map(Felt::new).boxed();
+            let non_canonical = (Felt::ORDER..=u64::MAX).prop_map(Felt::new_unchecked).boxed();
             prop_oneof![4 => canonical, 1 => non_canonical].no_shrink().boxed()
         }
     }

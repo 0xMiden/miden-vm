@@ -77,6 +77,9 @@ impl Felt {
     /// The field modulus, `2^64 - 2^32 + 1`.
     pub const ORDER_U64: u64 = 0xffff_ffff_0000_0001;
 
+    /// Alias for [`Self::ORDER_U64`], matching the native API surface.
+    pub const ORDER: u64 = Self::ORDER_U64;
+
     /// Field element representing zero.
     pub const ZERO: Self = Self { inner: f32::from_bits(0) };
 
@@ -86,15 +89,27 @@ impl Felt {
     /// Field element representing two.
     pub const TWO: Self = Self { inner: f32::from_bits(2) };
 
-    /// Creates a new field element from any `u64`.
+    /// Constructs a new field element from the provided `value`.
+    ///
+    /// # Errors
+    ///
+    /// - [`FeltFromIntError`] if the provided `value` is not a valid input.
+    pub fn new(value: u64) -> Result<Self, FeltFromIntError> {
+        Felt::from_canonical_checked(value).ok_or(FeltFromIntError(value))
+    }
+
+    /// Creates a new field element from any `u64` without performing reduction.
+    ///
+    /// Any `u64` value is accepted. No validation is performed; the value is passed directly
+    /// to the VM intrinsic.
     #[inline(always)]
-    pub fn new(value: u64) -> Self {
+    pub fn new_unchecked(value: u64) -> Self {
         unsafe { extern_from_u64_unchecked(value) }
     }
 
     #[inline(always)]
     pub fn from_canonical_checked(int: u64) -> Option<Self> {
-        (int < Self::ORDER_U64).then(|| Self::new(int))
+        (int < Self::ORDER_U64).then(|| Self::new_unchecked(int))
     }
 
     #[inline(always)]
@@ -202,6 +217,14 @@ impl From<u8> for Felt {
 impl From<usize> for Felt {
     fn from(value: usize) -> Self {
         Self::from(value as u32)
+    }
+}
+
+impl TryFrom<u64> for Felt {
+    type Error = FeltFromIntError;
+
+    fn try_from(int: u64) -> Result<Felt, Self::Error> {
+        Felt::new(int)
     }
 }
 
@@ -341,5 +364,19 @@ impl core::hash::Hash for Felt {
     #[inline]
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         core::hash::Hash::hash(&self.as_canonical_u64(), state);
+    }
+}
+
+// ERRORS
+// ================================================================================================
+
+#[derive(Debug, thiserror::Error)]
+#[error("integer {0} is equal to or exceeds the felt modulus {modulus}", modulus = Felt::ORDER)]
+pub struct FeltFromIntError(u64);
+
+impl FeltFromIntError {
+    /// Returns the integer for which the conversion failed.
+    pub fn as_u64(&self) -> u64 {
+        self.0
     }
 }

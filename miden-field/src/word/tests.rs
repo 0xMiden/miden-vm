@@ -94,7 +94,7 @@ proptest! {
 
     #[test]
     fn word_felt_conversion_roundtrip(elements in prop::array::uniform4(any::<u64>())) {
-        let elements = elements.map(Felt::new);
+        let elements = elements.map(Felt::new_unchecked);
 
         let word: Word = elements.into();
         let round_trip: [Felt; Word::NUM_ELEMENTS] = word.into();
@@ -135,10 +135,23 @@ proptest! {
 
 #[test]
 fn word_elements_array_layout_roundtrip() {
-    let mut word = Word::new([Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
+    let mut word = Word::new([
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(4),
+    ]);
 
     let elements = word.as_elements_array();
-    assert_eq!(elements, &[Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
+    assert_eq!(
+        elements,
+        &[
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4)
+        ]
+    );
 
     let base = core::ptr::addr_of!(word.a);
     assert_eq!(elements.as_ptr(), base);
@@ -147,8 +160,8 @@ fn word_elements_array_layout_roundtrip() {
     assert_eq!(core::ptr::addr_of!(word.d), unsafe { base.add(3) });
 
     let elements_mut = word.as_elements_array_mut();
-    elements_mut[2] = Felt::new(42);
-    assert_eq!(word.c, Felt::new(42));
+    elements_mut[2] = Felt::new_unchecked(42);
+    assert_eq!(word.c, Felt::new_unchecked(42));
 }
 
 proptest! {
@@ -167,8 +180,8 @@ proptest! {
         let mut expected = word.into_elements();
         for idx in 0..Word::NUM_ELEMENTS {
             let value = values[idx];
-            expected[idx] = Felt::new(value);
-            word[idx] = Felt::new(value);
+            expected[idx] = Felt::new_unchecked(value);
+            word[idx] = Felt::new_unchecked(value);
         }
         prop_assert_eq!(word.into_elements(), expected);
     }
@@ -176,7 +189,7 @@ proptest! {
     #[test]
     fn word_index_mut_range_updates_slice(word in any::<Word>(), v0 in any::<u64>(), v1 in any::<u64>()) {
         let mut word = word;
-        let expected = [Felt::new(v0), Felt::new(v1)];
+        let expected = [Felt::new_unchecked(v0), Felt::new_unchecked(v1)];
 
         word[1..3].copy_from_slice(&expected);
         prop_assert_eq!(word[1], expected[0]);
@@ -224,10 +237,10 @@ fn word_macro(#[case] input: &str) {
 }
 
 #[rstest::rstest]
-#[case::first_nibble("0x1000000000000000000000000000000000000000000000000000000000000000", crate::Word::new([Felt::new(16), Felt::new(0), Felt::new(0), Felt::new(0)]))]
-#[case::second_nibble("0x0100000000000000000000000000000000000000000000000000000000000000", crate::Word::new([Felt::new(1), Felt::new(0), Felt::new(0), Felt::new(0)]))]
-#[case::all_first_nibbles("0x1000000000000000100000000000000010000000000000001000000000000000", crate::Word::new([Felt::new(16), Felt::new(16), Felt::new(16), Felt::new(16)]))]
-#[case::all_first_nibbles_asc("0x1000000000000000200000000000000030000000000000004000000000000000", crate::Word::new([Felt::new(16), Felt::new(32), Felt::new(48), Felt::new(64)]))]
+#[case::first_nibble("0x1000000000000000000000000000000000000000000000000000000000000000", crate::Word::new([Felt::new_unchecked(16), Felt::new_unchecked(0), Felt::new_unchecked(0), Felt::new_unchecked(0)]))]
+#[case::second_nibble("0x0100000000000000000000000000000000000000000000000000000000000000", crate::Word::new([Felt::new_unchecked(1), Felt::new_unchecked(0), Felt::new_unchecked(0), Felt::new_unchecked(0)]))]
+#[case::all_first_nibbles("0x1000000000000000100000000000000010000000000000001000000000000000", crate::Word::new([Felt::new_unchecked(16), Felt::new_unchecked(16), Felt::new_unchecked(16), Felt::new_unchecked(16)]))]
+#[case::all_first_nibbles_asc("0x1000000000000000200000000000000030000000000000004000000000000000", crate::Word::new([Felt::new_unchecked(16), Felt::new_unchecked(32), Felt::new_unchecked(48), Felt::new_unchecked(64)]))]
 fn word_macro_endianness(#[case] input: &str, #[case] expected: crate::Word) {
     let uut = word!(input);
     assert_eq!(uut, expected);

@@ -441,7 +441,7 @@ impl Distribution<SecretKey> for StandardUniform {
             Uniform::new(0, Felt::ORDER).expect("should not fail given the size of the field");
         for r in res.iter_mut() {
             let sampled_integer = uni_dist.sample(rng);
-            *r = Felt::new(sampled_integer);
+            *r = Felt::new_unchecked(sampled_integer);
         }
         SecretKey(res)
     }
@@ -611,7 +611,7 @@ impl Distribution<Nonce> for StandardUniform {
             Uniform::new(0, Felt::ORDER).expect("should not fail given the size of the field");
         for r in res.iter_mut() {
             let sampled_integer = uni_dist.sample(rng);
-            *r = Felt::new(sampled_integer);
+            *r = Felt::new_unchecked(sampled_integer);
         }
         Nonce(res)
     }

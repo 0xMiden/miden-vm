@@ -44,8 +44,8 @@ mod tests;
 /// // Insert multiple key-value pairs
 /// let mut entries = Vec::new();
 /// for i in 0..MAX_LEAF_ENTRIES {
-///     let key = Word::new([Felt::new(i as u64); Word::NUM_ELEMENTS]);
-///     let value = Word::new([Felt::new((i + 1) as u64); Word::NUM_ELEMENTS]);
+///     let key = Word::new([Felt::new_unchecked(i as u64); Word::NUM_ELEMENTS]);
+///     let value = Word::new([Felt::new_unchecked((i + 1) as u64); Word::NUM_ELEMENTS]);
 ///     entries.push((key, value));
 /// }
 /// let new_root = forest.batch_insert(new_root, entries.into_iter()).unwrap();

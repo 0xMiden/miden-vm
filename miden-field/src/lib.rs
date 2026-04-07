@@ -12,7 +12,7 @@ extern crate alloc;
 #[cfg(all(target_family = "wasm", miden))]
 mod wasm_miden;
 #[cfg(all(target_family = "wasm", miden))]
-pub use wasm_miden::Felt;
+pub use wasm_miden::{Felt, FeltFromIntError};
 
 #[cfg(not(all(target_family = "wasm", miden)))]
 mod native;

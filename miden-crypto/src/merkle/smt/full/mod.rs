@@ -670,12 +670,34 @@ fn test_smt_serialization_deserialization() {
     // Smt with values
     let smt_leaves_2: [(Word, Word); 2] = [
         (
-            Word::new([Felt::new(105), Felt::new(106), Felt::new(107), Felt::new(108)]),
-            [Felt::new(5_u64), Felt::new(6_u64), Felt::new(7_u64), Felt::new(8_u64)].into(),
+            Word::new([
+                Felt::new_unchecked(105),
+                Felt::new_unchecked(106),
+                Felt::new_unchecked(107),
+                Felt::new_unchecked(108),
+            ]),
+            [
+                Felt::new_unchecked(5_u64),
+                Felt::new_unchecked(6_u64),
+                Felt::new_unchecked(7_u64),
+                Felt::new_unchecked(8_u64),
+            ]
+            .into(),
         ),
         (
-            Word::new([Felt::new(101), Felt::new(102), Felt::new(103), Felt::new(104)]),
-            [Felt::new(1_u64), Felt::new(2_u64), Felt::new(3_u64), Felt::new(4_u64)].into(),
+            Word::new([
+                Felt::new_unchecked(101),
+                Felt::new_unchecked(102),
+                Felt::new_unchecked(103),
+                Felt::new_unchecked(104),
+            ]),
+            [
+                Felt::new_unchecked(1_u64),
+                Felt::new_unchecked(2_u64),
+                Felt::new_unchecked(3_u64),
+                Felt::new_unchecked(4_u64),
+            ]
+            .into(),
         ),
     ];
     let smt = Smt::with_entries(smt_leaves_2).unwrap();
@@ -690,12 +712,34 @@ fn smt_with_sorted_entries() {
     // Smt with sorted values
     let smt_leaves_2: [(Word, Word); 2] = [
         (
-            Word::new([Felt::new(101), Felt::new(102), Felt::new(103), Felt::new(104)]),
-            [Felt::new(1_u64), Felt::new(2_u64), Felt::new(3_u64), Felt::new(4_u64)].into(),
+            Word::new([
+                Felt::new_unchecked(101),
+                Felt::new_unchecked(102),
+                Felt::new_unchecked(103),
+                Felt::new_unchecked(104),
+            ]),
+            [
+                Felt::new_unchecked(1_u64),
+                Felt::new_unchecked(2_u64),
+                Felt::new_unchecked(3_u64),
+                Felt::new_unchecked(4_u64),
+            ]
+            .into(),
         ),
         (
-            Word::new([Felt::new(105), Felt::new(106), Felt::new(107), Felt::new(108)]),
-            [Felt::new(5_u64), Felt::new(6_u64), Felt::new(7_u64), Felt::new(8_u64)].into(),
+            Word::new([
+                Felt::new_unchecked(105),
+                Felt::new_unchecked(106),
+                Felt::new_unchecked(107),
+                Felt::new_unchecked(108),
+            ]),
+            [
+                Felt::new_unchecked(5_u64),
+                Felt::new_unchecked(6_u64),
+                Felt::new_unchecked(7_u64),
+                Felt::new_unchecked(8_u64),
+            ]
+            .into(),
         ),
     ];
 

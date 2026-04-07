@@ -48,7 +48,12 @@ fn create_sparse_subtree() -> Subtree {
     let root_index = NodeIndex::new(ROOT_DEPTH, 0).unwrap();
     let mut subtree = Subtree::new(root_index);
 
-    let mut child_hash: Word = Word::new([Felt::new(1), Felt::new(1), Felt::new(1), Felt::new(1)]);
+    let mut child_hash: Word = Word::new([
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(1),
+    ]);
     let mut current_idx = NodeIndex::new(ROOT_DEPTH + SUBTREE_DEPTH - 1, 0).unwrap();
 
     for _ in 0..SUBTREE_DEPTH {

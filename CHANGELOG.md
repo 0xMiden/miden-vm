@@ -10,7 +10,7 @@
 - [BREAKING] Removed implementations of `Deref` and `DerefMut` for `Felt`.
 - [BREAKING] Update `Poseidon2` instance to match Plonky3 one ([#905](https://github.com/0xMiden/crypto/pull/905)).
 - Use per-chunk scratch space for batch inversion ([#933](https://github.com/0xMiden/crypto/pull/933)).
-
+- [BREAKING] Changed the signature of `Felt::new` to perform reduction, and raise an error if the input is invalid. Retained the old behavior as `Felt::new_unchecked`, as its usage may lead to incorrect results.
 
 ## 0.23.0 (2026-03-11)
 

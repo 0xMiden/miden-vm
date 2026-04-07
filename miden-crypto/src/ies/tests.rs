@@ -29,7 +29,7 @@ fn arbitrary_bytes() -> impl Strategy<Value = Vec<u8>> {
 fn arbitrary_field_elements() -> impl Strategy<Value = Vec<crate::Felt>> {
     (1usize..100, any::<u64>()).prop_map(|(len, seed)| {
         let mut rng = ChaCha20Rng::seed_from_u64(seed);
-        (0..len).map(|_| crate::Felt::new(rng.next_u64())).collect()
+        (0..len).map(|_| crate::Felt::new_unchecked(rng.next_u64())).collect()
     })
 }
 
@@ -133,7 +133,11 @@ mod k256_xchacha_tests {
     #[test]
     fn test_k256_xchacha_elements_roundtrip() {
         let mut rng = rand::rng();
-        let plaintext = vec![crate::Felt::new(42), crate::Felt::new(1337), crate::Felt::new(9999)];
+        let plaintext = vec![
+            crate::Felt::new_unchecked(42),
+            crate::Felt::new_unchecked(1337),
+            crate::Felt::new_unchecked(9999),
+        ];
         let secret_key = SecretKey::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::K256XChaCha20Poly1305(public_key);
@@ -150,8 +154,13 @@ mod k256_xchacha_tests {
     #[test]
     fn test_k256_xchacha_elements_with_associated_data() {
         let mut rng = rand::rng();
-        let plaintext = vec![crate::Felt::new(100), crate::Felt::new(200), crate::Felt::new(300)];
-        let associated_data = vec![crate::Felt::new(999), crate::Felt::new(888)];
+        let plaintext = vec![
+            crate::Felt::new_unchecked(100),
+            crate::Felt::new_unchecked(200),
+            crate::Felt::new_unchecked(300),
+        ];
+        let associated_data =
+            vec![crate::Felt::new_unchecked(999), crate::Felt::new_unchecked(888)];
         let secret_key = SecretKey::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::K256XChaCha20Poly1305(public_key);
@@ -267,7 +276,11 @@ mod x25519_xchacha_tests {
     #[test]
     fn test_x25519_xchacha_elements_roundtrip() {
         let mut rng = rand::rng();
-        let plaintext = vec![crate::Felt::new(42), crate::Felt::new(1337), crate::Felt::new(9999)];
+        let plaintext = vec![
+            crate::Felt::new_unchecked(42),
+            crate::Felt::new_unchecked(1337),
+            crate::Felt::new_unchecked(9999),
+        ];
         let secret_key = SecretKey25519::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::X25519XChaCha20Poly1305(public_key);
@@ -284,8 +297,13 @@ mod x25519_xchacha_tests {
     #[test]
     fn test_x25519_xchacha_elements_with_associated_data() {
         let mut rng = rand::rng();
-        let plaintext = vec![crate::Felt::new(100), crate::Felt::new(200), crate::Felt::new(300)];
-        let associated_data = vec![crate::Felt::new(999), crate::Felt::new(888)];
+        let plaintext = vec![
+            crate::Felt::new_unchecked(100),
+            crate::Felt::new_unchecked(200),
+            crate::Felt::new_unchecked(300),
+        ];
+        let associated_data =
+            vec![crate::Felt::new_unchecked(999), crate::Felt::new_unchecked(888)];
         let secret_key = SecretKey25519::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::X25519XChaCha20Poly1305(public_key);
@@ -454,7 +472,8 @@ mod k256_aead_poseidon2_tests {
     fn test_k256_aead_poseidon2_field_elements_roundtrip() {
         use crate::Felt;
         let mut rng = rand::rng();
-        let plaintext = vec![Felt::new(1), Felt::new(2), Felt::new(3)];
+        let plaintext =
+            vec![Felt::new_unchecked(1), Felt::new_unchecked(2), Felt::new_unchecked(3)];
         let secret_key = SecretKey::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::K256AeadPoseidon2(public_key);
@@ -472,8 +491,8 @@ mod k256_aead_poseidon2_tests {
     fn test_k256_aead_poseidon2_field_elements_with_associated_data() {
         use crate::Felt;
         let mut rng = rand::rng();
-        let plaintext = vec![Felt::new(10), Felt::new(20)];
-        let associated_data = vec![Felt::new(100), Felt::new(200)];
+        let plaintext = vec![Felt::new_unchecked(10), Felt::new_unchecked(20)];
+        let associated_data = vec![Felt::new_unchecked(100), Felt::new_unchecked(200)];
         let secret_key = SecretKey::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::K256AeadPoseidon2(public_key);
@@ -590,7 +609,8 @@ mod x25519_aead_poseidon2_tests {
     fn test_x25519_aead_poseidon2_field_elements_roundtrip() {
         use crate::Felt;
         let mut rng = rand::rng();
-        let plaintext = vec![Felt::new(1), Felt::new(2), Felt::new(3)];
+        let plaintext =
+            vec![Felt::new_unchecked(1), Felt::new_unchecked(2), Felt::new_unchecked(3)];
         let secret_key = SecretKey25519::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::X25519AeadPoseidon2(public_key);
@@ -608,8 +628,8 @@ mod x25519_aead_poseidon2_tests {
     fn test_x25519_aead_poseidon2_field_elements_with_associated_data() {
         use crate::Felt;
         let mut rng = rand::rng();
-        let plaintext = vec![Felt::new(10), Felt::new(20)];
-        let associated_data = vec![Felt::new(100), Felt::new(200)];
+        let plaintext = vec![Felt::new_unchecked(10), Felt::new_unchecked(20)];
+        let associated_data = vec![Felt::new_unchecked(100), Felt::new_unchecked(200)];
         let secret_key = SecretKey25519::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::X25519AeadPoseidon2(public_key);
@@ -940,7 +960,7 @@ mod integration_tests {
             let unsealing_key = UnsealingKey::X25519AeadPoseidon2(secret_key);
 
             // Test field elements encryption
-            let field_elements: Vec<Felt> = field_values.iter().map(|&v| Felt::new(v)).collect();
+            let field_elements: Vec<Felt> = field_values.iter().map(|&v| Felt::new_unchecked(v)).collect();
             let sealed_elements = sealing_key.seal_elements(&mut rng, &field_elements).unwrap();
             let decrypted_elements = unsealing_key.unseal_elements(sealed_elements).unwrap();
             prop_assert_eq!(field_elements.clone(), decrypted_elements);

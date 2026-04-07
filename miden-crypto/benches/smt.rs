@@ -128,8 +128,8 @@ benchmark_batch! {
     |b: &mut criterion::Bencher, insert_count: usize| {
         let entries = generate_smt_entries(256);
         let mut smt = Smt::with_entries(entries).unwrap();
-        let new_key = Word::new([Felt::new(999), Felt::new(1000), Felt::new(1001), Felt::new(1002)]);
-        let new_value = Word::new([Felt::new(1003), Felt::new(1004), Felt::new(1005), Felt::new(1006)]);
+        let new_key = Word::new([Felt::new_unchecked(999), Felt::new_unchecked(1000), Felt::new_unchecked(1001), Felt::new_unchecked(1002)]);
+        let new_value = Word::new([Felt::new_unchecked(1003), Felt::new_unchecked(1004), Felt::new_unchecked(1005), Felt::new_unchecked(1006)]);
 
         b.iter(|| {
             for _ in 0..insert_count {
@@ -284,7 +284,7 @@ benchmark_batch! {
         let entries = generate_simple_smt_entries(256);
         let mut smt = SimpleSmt::<32>::with_leaves(entries).unwrap();
         let new_index = LeafIndex::<32>::new(999).unwrap();
-        let new_value = Word::new([Felt::new(1000), Felt::new(1001), Felt::new(1002), Felt::new(1003)]);
+        let new_value = Word::new([Felt::new_unchecked(1000), Felt::new_unchecked(1001), Felt::new_unchecked(1002), Felt::new_unchecked(1003)]);
 
         b.iter(|| {
             for _ in 0..insert_count {
@@ -413,10 +413,10 @@ benchmark_batch! {
             .map(|i| {
                 let index = LeafIndex::<32>::new(1000u64 + i as u64).unwrap();
                 let value = Word::new([
-                    Felt::new((1000 + i) as u64),
-                    Felt::new((1001 + i) as u64),
-                    Felt::new((1002 + i) as u64),
-                    Felt::new((1003 + i) as u64),
+                    Felt::new_unchecked((1000 + i) as u64),
+                    Felt::new_unchecked((1001 + i) as u64),
+                    Felt::new_unchecked((1002 + i) as u64),
+                    Felt::new_unchecked((1003 + i) as u64),
                 ]);
                 (index, value)
             })
@@ -452,8 +452,8 @@ benchmark_multi! {
                         let key = Word::new([
                             generate_value(&mut seed),
                             ONE,
-                            Felt::new(n),
-                            Felt::new(leaf_index),
+                            Felt::new_unchecked(n),
+                            Felt::new_unchecked(leaf_index),
                         ]);
                         let value = generate_word(&mut seed);
                         (key, value)
@@ -499,7 +499,7 @@ benchmark_multi! {
                 let entries: Vec<(Word, Word)> = (0..pair_count)
                     .map(|i| {
                         let leaf_index: u8 = generate_value(&mut seed);
-                        let key = Word::new([ONE, ONE, Felt::new(i), Felt::new(leaf_index as u64)]);
+                        let key = Word::new([ONE, ONE, Felt::new_unchecked(i), Felt::new_unchecked(leaf_index as u64)]);
                         let value = generate_word(&mut seed);
                         (key, value)
                     })

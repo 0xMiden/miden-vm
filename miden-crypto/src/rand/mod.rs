@@ -90,7 +90,7 @@ impl Randomizable for Felt {
             let value = u64::from_le_bytes(bytes);
             // Ensure the value is within the field modulus
             if value < Felt::ORDER {
-                Some(Felt::new(value))
+                Some(Felt::new_unchecked(value))
             } else {
                 None
             }
@@ -145,9 +145,13 @@ pub trait FeltRng: RngCore {
 pub fn random_felt() -> Felt {
     use rand::Rng;
     let mut rng = rand::rng();
-    // Goldilocks field order is 2^64 - 2^32 + 1
-    // Generate a random u64 and reduce modulo the field order
-    Felt::new(rng.random::<u64>())
+    // We use the `Felt::new` constructor to do rejection sampling here. It should effectively
+    // never repeat, but nevertheless gives us the correct distribution.
+    loop {
+        if let Ok(felt) = Felt::new(rng.random::<u64>()) {
+            return felt;
+        }
+    }
 }
 
 /// Generates a random word (4 field elements) for testing purposes.

@@ -49,14 +49,14 @@ proptest! {
     /// `Felt::new` matches `Goldilocks::new` for the same input.
     #[test]
     fn felt_new_matches_goldilocks_new(x in any::<u64>()) {
-        prop_assert_eq!(Felt::new(x), Goldilocks::new(x));
+        prop_assert_eq!(Felt::new_unchecked(x), Goldilocks::new(x));
     }
 
     /// Core arithmetic operations match `Goldilocks`.
     #[test]
     fn felt_arithmetic_matches_goldilocks(a in any::<u64>(), b in any::<u64>()) {
-        let fa = Felt::new(a);
-        let fb = Felt::new(b);
+        let fa = Felt::new_unchecked(a);
+        let fb = Felt::new_unchecked(b);
         let ga = Goldilocks::new(a);
         let gb = Goldilocks::new(b);
 
@@ -88,7 +88,7 @@ proptest! {
     /// `Field` and `PrimeCharacteristicRing` operations match `Goldilocks`.
     #[test]
     fn felt_field_methods_match_goldilocks(a in any::<u64>(), exp in any::<u64>(), shift in any::<u8>()) {
-        let fa = Felt::new(a);
+        let fa = Felt::new_unchecked(a);
         let ga = Goldilocks::new(a);
 
         prop_assert_eq!(
@@ -123,8 +123,8 @@ proptest! {
     /// Formatting, ordering, and hashing match `Goldilocks`.
     #[test]
     fn felt_misc_traits_match_goldilocks(a in any::<u64>(), b in any::<u64>()) {
-        let fa = Felt::new(a);
-        let fb = Felt::new(b);
+        let fa = Felt::new_unchecked(a);
+        let fb = Felt::new_unchecked(b);
         let ga = Goldilocks::new(a);
         let gb = Goldilocks::new(b);
 
@@ -176,7 +176,7 @@ proptest! {
     /// Iterated operations (`Sum`/`Product`) match `Goldilocks`.
     #[test]
     fn felt_iterators_match_goldilocks(xs in prop::collection::vec(any::<u64>(), 0..64)) {
-        let felts: Vec<Felt> = xs.iter().copied().map(Felt::new).collect();
+        let felts: Vec<Felt> = xs.iter().copied().map(Felt::new_unchecked).collect();
         let golds: Vec<Goldilocks> = xs.iter().copied().map(Goldilocks::new).collect();
 
         let fs = felts.iter().copied().sum::<Felt>();
@@ -225,11 +225,11 @@ fn felt_constants_match_goldilocks() {
 
     assert_eq!(<Felt as Field>::order(), <Goldilocks as Field>::order());
     assert_eq!(
-        <Felt as PrimeField>::as_canonical_biguint(&Felt::new(u64::MAX)),
+        <Felt as PrimeField>::as_canonical_biguint(&Felt::new_unchecked(u64::MAX)),
         <Goldilocks as PrimeField>::as_canonical_biguint(&Goldilocks::new(u64::MAX)),
     );
     assert_eq!(
-        Felt::new(u64::MAX).as_canonical_u64(),
+        Felt::new_unchecked(u64::MAX).as_canonical_u64(),
         Goldilocks::new(u64::MAX).as_canonical_u64()
     );
 }
@@ -287,9 +287,9 @@ fn felt_injective_monomial_matches_goldilocks() {
     let inputs = [
         Felt::ZERO,
         Felt::ONE,
-        Felt::new(Felt::ORDER),
-        Felt::new(u64::MAX),
-        Felt::new(100),
+        Felt::new_unchecked(Felt::ORDER),
+        Felt::new_unchecked(u64::MAX),
+        Felt::new_unchecked(100),
     ];
 
     for f in inputs {

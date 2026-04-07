@@ -18,8 +18,9 @@ fn generate_entries(pair_count: u64) -> Vec<(Word, Word)> {
     (0..pair_count)
         .map(|i| {
             let leaf_index = ((i as f64 / pair_count as f64) * (pair_count as f64)) as u64;
-            let key = Word::new([ONE, ONE, Felt::new(i), Felt::new(leaf_index)]);
-            let value = Word::new([ONE, ONE, ONE, Felt::new(i)]);
+            let key =
+                Word::new([ONE, ONE, Felt::new_unchecked(i), Felt::new_unchecked(leaf_index)]);
+            let value = Word::new([ONE, ONE, ONE, Felt::new_unchecked(i)]);
             (key, value)
         })
         .collect()
@@ -40,7 +41,7 @@ fn generate_updates(entries: Vec<(Word, Word)>, updates: usize) -> Vec<(Word, Wo
             let value = if rng.random_bool(REMOVAL_PROBABILITY) {
                 EMPTY_WORD
             } else {
-                Word::new([ONE, ONE, ONE, Felt::new(rng.random())])
+                Word::new([ONE, ONE, ONE, Felt::new_unchecked(rng.random())])
             };
             (key, value)
         })
@@ -278,8 +279,13 @@ fn test_compute_mutations_rejects_interleaved_duplicate_keys() {
     let smt = LargeSmt::<_>::with_entries(storage, vec![]).unwrap();
 
     // Two different keys that map to the same leaf (same most significant felt)
-    let key_1 = Word::from([ONE, ONE, ONE, Felt::new(42)]);
-    let key_2 = Word::from([Felt::new(2), Felt::new(2), Felt::new(2), Felt::new(42)]);
+    let key_1 = Word::from([ONE, ONE, ONE, Felt::new_unchecked(42)]);
+    let key_2 = Word::from([
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(42),
+    ]);
 
     let value_1 = Word::new([ONE; Word::NUM_ELEMENTS]);
     let value_2 = Word::new([Felt::from_u32(2_u32); Word::NUM_ELEMENTS]);
@@ -389,9 +395,19 @@ fn test_mutations_revert() {
     let storage = MemoryStorage::new();
     let mut smt = LargeSmt::<_>::new(storage).unwrap();
 
-    let key_1: Word = Word::new([ONE, ONE, ONE, Felt::new(1)]);
-    let key_2: Word = Word::new([Felt::new(2), Felt::new(2), Felt::new(2), Felt::new(2)]);
-    let key_3: Word = Word::new([Felt::new(0), Felt::new(0), Felt::new(0), Felt::new(3)]);
+    let key_1: Word = Word::new([ONE, ONE, ONE, Felt::new_unchecked(1)]);
+    let key_2: Word = Word::new([
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(2),
+    ]);
+    let key_3: Word = Word::new([
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(3),
+    ]);
 
     let value_1 = Word::new([ONE; Word::NUM_ELEMENTS]);
     let value_2 = Word::new([Felt::from_u32(2_u32); Word::NUM_ELEMENTS]);
@@ -466,12 +482,32 @@ fn test_insert_batch_empty_tree() {
 
     let entries = vec![
         (
-            crate::Word::new([Felt::new(1), Felt::new(0), Felt::new(0), Felt::new(0)]),
-            crate::Word::new([Felt::new(10), Felt::new(20), Felt::new(30), Felt::new(40)]),
+            crate::Word::new([
+                Felt::new_unchecked(1),
+                Felt::new_unchecked(0),
+                Felt::new_unchecked(0),
+                Felt::new_unchecked(0),
+            ]),
+            crate::Word::new([
+                Felt::new_unchecked(10),
+                Felt::new_unchecked(20),
+                Felt::new_unchecked(30),
+                Felt::new_unchecked(40),
+            ]),
         ),
         (
-            crate::Word::new([Felt::new(2), Felt::new(0), Felt::new(0), Felt::new(0)]),
-            crate::Word::new([Felt::new(11), Felt::new(22), Felt::new(33), Felt::new(44)]),
+            crate::Word::new([
+                Felt::new_unchecked(2),
+                Felt::new_unchecked(0),
+                Felt::new_unchecked(0),
+                Felt::new_unchecked(0),
+            ]),
+            crate::Word::new([
+                Felt::new_unchecked(11),
+                Felt::new_unchecked(22),
+                Felt::new_unchecked(33),
+                Felt::new_unchecked(44),
+            ]),
         ),
     ];
 
@@ -491,13 +527,23 @@ fn test_insert_batch_with_deletions() {
     let mut smt = LargeSmt::new(storage).unwrap();
 
     // Initial data
-    let key_1 = crate::Word::new([ONE, ONE, ONE, Felt::new(1)]);
-    let key_2 = crate::Word::new([Felt::new(2), Felt::new(2), Felt::new(2), Felt::new(2)]);
-    let key_3 = crate::Word::new([Felt::new(0), Felt::new(0), Felt::new(0), Felt::new(3)]);
+    let key_1 = crate::Word::new([ONE, ONE, ONE, Felt::new_unchecked(1)]);
+    let key_2 = crate::Word::new([
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(2),
+    ]);
+    let key_3 = crate::Word::new([
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(3),
+    ]);
 
     let value_1 = crate::Word::new([ONE; Word::NUM_ELEMENTS]);
-    let value_2 = crate::Word::new([Felt::new(2); Word::NUM_ELEMENTS]);
-    let value_3 = crate::Word::new([Felt::new(3); Word::NUM_ELEMENTS]);
+    let value_2 = crate::Word::new([Felt::new_unchecked(2); Word::NUM_ELEMENTS]);
+    let value_3 = crate::Word::new([Felt::new_unchecked(3); Word::NUM_ELEMENTS]);
 
     smt.insert(key_1, value_1).unwrap();
     smt.insert(key_2, value_2).unwrap();
@@ -521,7 +567,7 @@ fn test_insert_batch_no_mutations() {
     let storage = MemoryStorage::new();
     let mut smt = LargeSmt::new(storage).unwrap();
 
-    let key_1 = crate::Word::new([ONE, ONE, ONE, Felt::new(1)]);
+    let key_1 = crate::Word::new([ONE, ONE, ONE, Felt::new_unchecked(1)]);
     let value_1 = crate::Word::new([ONE; Word::NUM_ELEMENTS]);
 
     smt.insert(key_1, value_1).unwrap();
@@ -569,8 +615,13 @@ fn test_flat_layout_index_zero_unused_in_instance() {
     // Index 0 should always be EMPTY_WORD (unused)
     assert_eq!(in_memory_nodes[0], EMPTY_WORD, "Index 0 should be EMPTY_WORD (unused)");
 
-    let key = Word::new([ONE, ONE, ONE, Felt::new(1)]);
-    let value = Word::new([Felt::new(42), Felt::new(43), Felt::new(44), Felt::new(45)]);
+    let key = Word::new([ONE, ONE, ONE, Felt::new_unchecked(1)]);
+    let value = Word::new([
+        Felt::new_unchecked(42),
+        Felt::new_unchecked(43),
+        Felt::new_unchecked(44),
+        Felt::new_unchecked(45),
+    ]);
     smt.insert(key, value).unwrap();
 
     let in_memory_nodes = smt.in_memory_nodes();
@@ -589,8 +640,13 @@ fn test_flat_layout_after_insertion() {
     let storage = MemoryStorage::new();
     let mut smt = LargeSmt::<_>::new(storage).unwrap();
 
-    let key = Word::new([ONE, ONE, ONE, Felt::new(1)]);
-    let value = Word::new([Felt::new(42), Felt::new(43), Felt::new(44), Felt::new(45)]);
+    let key = Word::new([ONE, ONE, ONE, Felt::new_unchecked(1)]);
+    let value = Word::new([
+        Felt::new_unchecked(42),
+        Felt::new_unchecked(43),
+        Felt::new_unchecked(44),
+        Felt::new_unchecked(45),
+    ]);
 
     smt.insert(key, value).unwrap();
 
@@ -627,8 +683,8 @@ fn test_flat_layout_children_relationship() {
         (0..num_samples).map(|_| rng.random::<u64>() % (1 << 20)).collect();
 
     for leaf_value in &leaf_indices {
-        let key = Word::new([ONE, ONE, ONE, Felt::new(*leaf_value)]);
-        let value = Word::new([Felt::new(*leaf_value * 10); 4]);
+        let key = Word::new([ONE, ONE, ONE, Felt::new_unchecked(*leaf_value)]);
+        let value = Word::new([Felt::new_unchecked(*leaf_value * 10); 4]);
         smt.insert(key, value).unwrap();
     }
 

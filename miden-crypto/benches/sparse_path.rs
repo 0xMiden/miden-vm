@@ -101,7 +101,12 @@ benchmark_with_setup_data!(
         // Insert a few sparse entries
         for i in [0u64, 100, 500, 1000] {
             let leaf_idx = LeafIndex::new(i).unwrap();
-            let value = Word::new([Felt::new(i), Felt::new(i), Felt::new(i), Felt::new(i)]);
+            let value = Word::new([
+                Felt::new_unchecked(i),
+                Felt::new_unchecked(i),
+                Felt::new_unchecked(i),
+                Felt::new_unchecked(i),
+            ]);
             tree.insert(leaf_idx, value);
             indices.push(i);
             values.push(value);

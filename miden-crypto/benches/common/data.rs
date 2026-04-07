@@ -50,12 +50,14 @@ pub fn generate_byte_array_random(size: usize) -> Vec<u8> {
 
 /// Generate field element array with sequential values
 pub fn generate_felt_array_sequential(size: usize) -> Vec<Felt> {
-    (0..size).map(|i| Felt::new(i as u64)).collect()
+    (0..size).map(|i| Felt::new_unchecked(i as u64)).collect()
 }
 
 /// Generate byte array of specified size with random data
 pub fn generate_felt_array_random(size: usize) -> Vec<Felt> {
-    iter::from_fn(|| Some(Felt::new(rand_value::<u64>()))).take(size).collect()
+    iter::from_fn(|| Some(Felt::new_unchecked(rand_value::<u64>())))
+        .take(size)
+        .collect()
 }
 
 // === Word and Value Generation ===
@@ -77,7 +79,12 @@ pub enum WordPattern {
 pub fn generate_word(seed: &mut [u8; 32]) -> Word {
     *seed = prng_array(*seed);
     let nums: [u64; 4] = prng_array(*seed);
-    Word::new([Felt::new(nums[0]), Felt::new(nums[1]), Felt::new(nums[2]), Felt::new(nums[3])])
+    Word::new([
+        Felt::new_unchecked(nums[0]),
+        Felt::new_unchecked(nums[1]),
+        Felt::new_unchecked(nums[2]),
+        Felt::new_unchecked(nums[3]),
+    ])
 }
 
 /// Generate a generic value from seed using PRNG
@@ -92,13 +99,21 @@ pub fn generate_value<T: miden_crypto::rand::Randomizable + std::fmt::Debug + Cl
 /// Generate word using specified pattern
 pub fn generate_word_pattern(i: u64, pattern: WordPattern) -> Word {
     match pattern {
-        WordPattern::MerkleStandard => Word::new([Felt::new(i), ONE, ONE, Felt::new(i)]),
-        WordPattern::Sequential => {
-            Word::new([Felt::new(i), Felt::new(i + 1), Felt::new(i + 2), Felt::new(i + 3)])
+        WordPattern::MerkleStandard => {
+            Word::new([Felt::new_unchecked(i), ONE, ONE, Felt::new_unchecked(i)])
         },
-        WordPattern::SpreadSequential => {
-            Word::new([Felt::new(i), Felt::new(i + 4), Felt::new(i + 8), Felt::new(i + 12)])
-        },
+        WordPattern::Sequential => Word::new([
+            Felt::new_unchecked(i),
+            Felt::new_unchecked(i + 1),
+            Felt::new_unchecked(i + 2),
+            Felt::new_unchecked(i + 3),
+        ]),
+        WordPattern::SpreadSequential => Word::new([
+            Felt::new_unchecked(i),
+            Felt::new_unchecked(i + 4),
+            Felt::new_unchecked(i + 8),
+            Felt::new_unchecked(i + 12),
+        ]),
         WordPattern::Random => {
             let mut seed = [0u8; 32];
             seed[0..8].copy_from_slice(&i.to_le_bytes());
@@ -123,7 +138,12 @@ pub fn prepare_smt_entries(pair_count: u64, seed: &mut [u8; 32]) -> Vec<(Word, W
         .map(|i| {
             let count = pair_count as f64;
             let idx = ((i as f64 / count) * (count)) as u64;
-            let key = Word::new([generate_value(seed), ONE, Felt::new(i), Felt::new(idx)]);
+            let key = Word::new([
+                generate_value(seed),
+                ONE,
+                Felt::new_unchecked(i),
+                Felt::new_unchecked(idx),
+            ]);
             let value = generate_word(seed);
             (key, value)
         })

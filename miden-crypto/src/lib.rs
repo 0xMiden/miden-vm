@@ -230,18 +230,23 @@ mod batch_inversion {
 
         #[test]
         fn test_batch_inversion_allow_zeros() {
-            let mut column = Vec::from([Felt::new(2), ZERO, Felt::new(4), Felt::new(5)]);
+            let mut column = Vec::from([
+                Felt::new_unchecked(2),
+                ZERO,
+                Felt::new_unchecked(4),
+                Felt::new_unchecked(5),
+            ]);
             batch_inversion_allow_zeros(&mut column);
 
-            assert_eq!(column[0], Felt::new(2).inverse());
+            assert_eq!(column[0], Felt::new_unchecked(2).inverse());
             assert_eq!(column[1], ZERO);
-            assert_eq!(column[2], Felt::new(4).inverse());
-            assert_eq!(column[3], Felt::new(5).inverse());
+            assert_eq!(column[2], Felt::new_unchecked(4).inverse());
+            assert_eq!(column[3], Felt::new_unchecked(5).inverse());
         }
 
         #[test]
         fn test_batch_inversion_allow_zeros_spans_fixed_chunks() {
-            let mut v: Vec<Felt> = (1_u64..=2050).map(Felt::new).collect();
+            let mut v: Vec<Felt> = (1_u64..=2050).map(Felt::new_unchecked).collect();
             let expected: Vec<Felt> = v.iter().copied().map(|x| x.inverse()).collect();
             batch_inversion_allow_zeros(&mut v);
             assert_eq!(v, expected);
@@ -249,12 +254,12 @@ mod batch_inversion {
 
         #[test]
         fn test_batch_inversion_allow_zeros_zero_on_chunk_boundary() {
-            let mut v = vec![Felt::new(7); 1025];
+            let mut v = vec![Felt::new_unchecked(7); 1025];
             v[1023] = ZERO;
             batch_inversion_allow_zeros(&mut v);
             assert_eq!(v[1023], ZERO);
             for i in (0..1023).chain(1024..1025) {
-                assert_eq!(v[i], Felt::new(7).inverse());
+                assert_eq!(v[i], Felt::new_unchecked(7).inverse());
             }
         }
     }

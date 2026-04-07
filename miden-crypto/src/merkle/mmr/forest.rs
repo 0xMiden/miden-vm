@@ -523,7 +523,7 @@ pub(crate) fn largest_tree_from_mask(mask: usize) -> Forest {
 
 impl From<Forest> for Felt {
     fn from(value: Forest) -> Self {
-        Felt::new(value.0 as u64)
+        Felt::new_unchecked(value.0 as u64)
     }
 }
 

@@ -175,7 +175,7 @@ impl Nonce {
             buffer[..5].copy_from_slice(bytes);
             // we can safely (without overflow) create a new Felt from u64 value here since this
             // value contains at most 5 bytes
-            result[i] = Felt::new(u64::from_le_bytes(buffer));
+            result[i] = Felt::new_unchecked(u64::from_le_bytes(buffer));
         }
 
         result

@@ -312,15 +312,43 @@ impl<S: SmtStorage> LargeSmt<S> {
     /// let entries = vec![
     ///     // Insert new entries
     ///     (
-    ///         Word::new([Felt::new(1), Felt::new(0), Felt::new(0), Felt::new(0)]),
-    ///         Word::new([Felt::new(10), Felt::new(20), Felt::new(30), Felt::new(40)]),
+    ///         Word::new([
+    ///             Felt::new_unchecked(1),
+    ///             Felt::new_unchecked(0),
+    ///             Felt::new_unchecked(0),
+    ///             Felt::new_unchecked(0),
+    ///         ]),
+    ///         Word::new([
+    ///             Felt::new_unchecked(10),
+    ///             Felt::new_unchecked(20),
+    ///             Felt::new_unchecked(30),
+    ///             Felt::new_unchecked(40),
+    ///         ]),
     ///     ),
     ///     (
-    ///         Word::new([Felt::new(2), Felt::new(0), Felt::new(0), Felt::new(0)]),
-    ///         Word::new([Felt::new(11), Felt::new(22), Felt::new(33), Felt::new(44)]),
+    ///         Word::new([
+    ///             Felt::new_unchecked(2),
+    ///             Felt::new_unchecked(0),
+    ///             Felt::new_unchecked(0),
+    ///             Felt::new_unchecked(0),
+    ///         ]),
+    ///         Word::new([
+    ///             Felt::new_unchecked(11),
+    ///             Felt::new_unchecked(22),
+    ///             Felt::new_unchecked(33),
+    ///             Felt::new_unchecked(44),
+    ///         ]),
     ///     ),
     ///     // Delete an entry
-    ///     (Word::new([Felt::new(3), Felt::new(0), Felt::new(0), Felt::new(0)]), EMPTY_WORD),
+    ///     (
+    ///         Word::new([
+    ///             Felt::new_unchecked(3),
+    ///             Felt::new_unchecked(0),
+    ///             Felt::new_unchecked(0),
+    ///             Felt::new_unchecked(0),
+    ///         ]),
+    ///         EMPTY_WORD,
+    ///     ),
     /// ];
     ///
     /// let new_root = smt.insert_batch(entries)?;

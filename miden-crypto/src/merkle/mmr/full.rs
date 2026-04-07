@@ -496,7 +496,7 @@ mod tests {
     #[test]
     fn test_serialization() {
         let nodes = (0u64..128u64)
-            .map(|value| Word::new([ZERO, ZERO, ZERO, Felt::new(value)]))
+            .map(|value| Word::new([ZERO, ZERO, ZERO, Felt::new_unchecked(value)]))
             .collect::<Vec<_>>();
 
         let mmr = Mmr::try_from_iter(nodes).unwrap();
