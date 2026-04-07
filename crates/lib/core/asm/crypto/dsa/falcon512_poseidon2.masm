@@ -57,8 +57,7 @@ pub proc mod_12289
     adv_push.1
     # Advice values are untrusted. U32SUB/U32ADD only constrain their output limbs in the AIR,
     # so we must validate the remainder before feeding it into u32 arithmetic.
-    u32assert
-    dup
+    dup u32assert2
     push.M
     u32overflowing_sub
     # => [borrow, diff, r, res_hi, res_lo, a_hi, a_lo, ...]

@@ -692,6 +692,8 @@ pub proc shr(n: u32, a: u64) -> u64
     add
     # [c_lo, quot1, !borrow, ...]
     # c_lo = rem1 * multiplier + quot2
+    # This add is safe: when !borrow=1, multiplier = 2^32 / pow_lo and rem1 < pow_lo, so
+    # rem1 * multiplier <= 2^32 - multiplier and adding quot2 < multiplier stays below 2^32.
 
     # --- STEP 9: Conditional swap to get final result ---
     dup.2
@@ -934,6 +936,9 @@ pub proc rotr(n: u32, a: u64) -> u64
     add
     # [lo1 + hi2, lo2, borrow, shift_amt == 0, ...]
     # c_lo = lo1 + hi2 (overflow wraps to low bits)
+    # This add is safe: hi2 is only the carry-out bit from
+    # a_hi * 2^complement_shift + hi1, so hi2 is 0 when complement_shift = 0 and 1 otherwise.
+    # When hi2 = 1, lo1 = a_lo << complement_shift is even, so lo1 + hi2 still stays below 2^32.
 
     swap
     # [lo2, c_lo, borrow, shift_amt == 0, ...]
