@@ -56,12 +56,12 @@ fn test_sha512_handler(bytes: &[u8]) {
     );
 
     let test = build_debug_test!(source, &[]);
-    let output = test.execute().unwrap();
+    let (output, _) = test.execute_for_output().unwrap();
 
-    let advice_stack: Vec<_> = output.advice_provider().stack().to_vec();
+    let advice_stack: Vec<_> = output.advice.stack().to_vec();
     assert_eq!(advice_stack, preimage.digest().as_ref());
 
-    let deferred = output.advice_provider().precompile_requests().to_vec();
+    let deferred = output.advice.precompile_requests().to_vec();
     assert_eq!(deferred.len(), 1);
     let request = &deferred[0];
     assert_eq!(request.calldata(), preimage.as_ref());
@@ -90,13 +90,13 @@ fn test_sha512_hash_memory_impl(bytes: &[u8]) {
     );
 
     let test = build_debug_test!(source, &[]);
-    let output = test.execute().unwrap();
-    let stack = output.stack_outputs();
+    let (output, _) = test.execute_for_output().unwrap();
+    let stack = &output.stack;
 
     // we cannot check the digest since it overflows the stack.
     // we check it in test_sha512_hash_memory
 
-    let deferred = output.advice_provider().precompile_requests().to_vec();
+    let deferred = output.advice.precompile_requests().to_vec();
     assert_eq!(deferred.len(), 1);
     let request = &deferred[0];
     assert_eq!(request.event_id(), SHA512_HASH_BYTES_EVENT_NAME.to_event_id());
@@ -111,7 +111,7 @@ fn test_sha512_hash_memory_impl(bytes: &[u8]) {
     assert_eq!(precompile_commitment, verifier_commitment, "commitment mismatch");
 
     assert!(
-        output.advice_provider().stack().is_empty(),
+        output.advice.stack().is_empty(),
         "advice stack must be empty after hash_memory_impl"
     );
 }

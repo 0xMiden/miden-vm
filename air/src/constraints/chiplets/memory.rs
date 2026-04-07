@@ -17,15 +17,15 @@
 //! | d0, d1    | Delta tracking columns                         |
 //! | d_inv     | Delta inverse                                  |
 //! | f_scw     | Same context/word flag                         |
+//! | w0        | Lower 16 bits of word index (word_addr / 4)   |
+//! | w1        | Upper 16 bits of word index (word_addr / 4)   |
 //!
-//! ## Address range checks (TODO)
+//! ## Address range checks
 //!
-//! The trace stores a word address plus idx bits, i.e. `addr = 4 * w_addr + idx`.
-//! To fully range-check addresses, we plan to commit to 16-bit limbs of `w_addr`
-//! (w0, w1) and enforce:
-//!   addr = 4 * (w0 + 2^16 * w1) + idx0 + 2 * idx1.
-//! Range checks should include `w0`, `w1`, and `4 * w1`; the extra term
-//! prevents wraparound, and Goldilocks satisfies P > 2^18 so this is sound.
+//! The constraint `word_addr = 4 * (w0 + 2^16 * w1)` decomposes the word address
+//! into 16-bit limbs. Combined with range checks on `w0`, `w1`, and `4 * w1` via
+//! the wiring bus, this proves all memory addresses are valid 32-bit values.
+//! The `4 * w1` check prevents Goldilocks field wraparound (P > 2^18).
 
 use core::ops::{Add, Mul, Sub};
 
@@ -42,7 +42,8 @@ use crate::{
             MEMORY_CLK_COL_IDX, MEMORY_CTX_COL_IDX, MEMORY_D_INV_COL_IDX, MEMORY_D0_COL_IDX,
             MEMORY_D1_COL_IDX, MEMORY_FLAG_SAME_CONTEXT_AND_WORD, MEMORY_IDX0_COL_IDX,
             MEMORY_IDX1_COL_IDX, MEMORY_IS_READ_COL_IDX, MEMORY_IS_WORD_ACCESS_COL_IDX,
-            MEMORY_V_COL_RANGE, MEMORY_WORD_COL_IDX,
+            MEMORY_V_COL_RANGE, MEMORY_WORD_ADDR_HI_COL_IDX, MEMORY_WORD_ADDR_LO_COL_IDX,
+            MEMORY_WORD_COL_IDX,
         },
     },
 };
@@ -51,7 +52,7 @@ use crate::{
 // ================================================================================================
 
 pub const MEMORY_BASE_ID: usize = super::bitwise::BITWISE_BASE_ID + super::bitwise::BITWISE_COUNT;
-pub const MEMORY_COUNT: usize = 21;
+pub const MEMORY_COUNT: usize = 22;
 const MEMORY_BINARY_BASE_ID: usize = MEMORY_BASE_ID;
 const MEMORY_WORD_IDX_BASE_ID: usize = MEMORY_BASE_ID + 4;
 const MEMORY_FIRST_ROW_BASE_ID: usize = MEMORY_BASE_ID + 6;
@@ -60,6 +61,7 @@ const MEMORY_DELTA_TRANSITION_ID: usize = MEMORY_BASE_ID + 14;
 const MEMORY_SCW_FLAG_ID: usize = MEMORY_BASE_ID + 15;
 const MEMORY_SCW_READS_ID: usize = MEMORY_BASE_ID + 16;
 const MEMORY_VALUE_CONSIST_BASE_ID: usize = MEMORY_BASE_ID + 17;
+const MEMORY_ADDR_DECOMP_BASE_ID: usize = MEMORY_BASE_ID + 21;
 
 const MEMORY_BINARY_NAMESPACE: &str = "chiplets.memory.binary";
 const MEMORY_WORD_IDX_NAMESPACE: &str = "chiplets.memory.word_idx.zero";
@@ -69,6 +71,7 @@ const MEMORY_DELTA_TRANSITION_NAMESPACE: &str = "chiplets.memory.delta.transitio
 const MEMORY_SCW_FLAG_NAMESPACE: &str = "chiplets.memory.scw.flag";
 const MEMORY_SCW_READS_NAMESPACE: &str = "chiplets.memory.scw.reads";
 const MEMORY_VALUE_CONSIST_NAMESPACE: &str = "chiplets.memory.value.consistency";
+const MEMORY_ADDR_DECOMP_NAMESPACE: &str = "chiplets.memory.addr.decomposition";
 
 const MEMORY_BINARY_NAMES: [&str; 4] = [MEMORY_BINARY_NAMESPACE; 4];
 const MEMORY_WORD_IDX_NAMES: [&str; 2] = [MEMORY_WORD_IDX_NAMESPACE; 2];
@@ -210,6 +213,21 @@ pub fn enforce_memory_constraints_all_rows<AB>(
         &MEMORY_WORD_IDX_TAGS,
         &mut idx,
         word_gate * cols.idx1.clone(),
+    );
+
+    // Address decomposition: word_addr = 4 * (w0 + 2^16 * w1)
+    // This proves that the word address is a valid 32-bit value (when combined with
+    // range checks on w0, w1, and 4*w1 via the wiring bus).
+    let word_index = cols.w0.clone() + AB::Expr::from_u64(1 << 16) * cols.w1.clone();
+    let addr_decomp_tags = TagGroup {
+        base: MEMORY_ADDR_DECOMP_BASE_ID,
+        names: &[MEMORY_ADDR_DECOMP_NAMESPACE],
+    };
+    tagged_assert_zero_integrity(
+        builder,
+        &addr_decomp_tags,
+        &mut 0,
+        memory_flag * (cols.word_addr.clone() - AB::Expr::from_u64(4) * word_index),
     );
 }
 
@@ -462,6 +480,10 @@ pub struct MemoryColumns<E> {
     pub d_inv: E,
     /// Same context/word flag
     pub flag_same_ctx_word: E,
+    /// Lower 16 bits of word index (word_addr / 4)
+    pub w0: E,
+    /// Upper 16 bits of word index (word_addr / 4)
+    pub w1: E,
 }
 
 impl<E: Clone> MemoryColumns<E> {
@@ -489,6 +511,8 @@ impl<E: Clone> MemoryColumns<E> {
             d1: load(MEMORY_D1_COL_IDX),
             d_inv: load(MEMORY_D_INV_COL_IDX),
             flag_same_ctx_word: load(MEMORY_FLAG_SAME_CONTEXT_AND_WORD),
+            w0: load(MEMORY_WORD_ADDR_LO_COL_IDX),
+            w1: load(MEMORY_WORD_ADDR_HI_COL_IDX),
         }
     }
 

@@ -221,6 +221,63 @@ impl Test {
         }
     }
 
+    /// Adds kernel source to this test so it is assembled and linked during compilation.
+    #[track_caller]
+    pub fn with_kernel(self, kernel_source: impl ToString) -> Self {
+        self.with_kernel_source(
+            format!("kernel{}", core::panic::Location::caller().line()),
+            kernel_source,
+        )
+    }
+
+    /// Adds kernel source to this test so it is assembled and linked during compilation.
+    pub fn with_kernel_source(
+        mut self,
+        kernel_name: impl Into<String>,
+        kernel_source: impl ToString,
+    ) -> Self {
+        self.kernel_source = Some(self.source_manager.load(
+            SourceLanguage::Masm,
+            kernel_name.into().into(),
+            kernel_source.to_string(),
+        ));
+        self
+    }
+
+    /// Sets the stack inputs for this test using stack-ordered values.
+    #[track_caller]
+    pub fn with_stack_inputs(mut self, stack_inputs: impl AsRef<[u64]>) -> Self {
+        self.stack_inputs = StackInputs::try_from_ints(stack_inputs.as_ref().to_vec()).unwrap();
+        self
+    }
+
+    /// Adds a library to link in during assembly.
+    pub fn with_library(mut self, library: impl Into<Library>) -> Self {
+        self.libraries.push(library.into());
+        self
+    }
+
+    /// Adds a handler for a specific event when running the `Host`.
+    pub fn with_event_handler(mut self, event: EventName, handler: impl EventHandler) -> Self {
+        self.add_event_handler(event, handler);
+        self
+    }
+
+    /// Adds handlers for specific events when running the `Host`.
+    pub fn with_event_handlers(
+        mut self,
+        handlers: Vec<(EventName, Arc<dyn EventHandler>)>,
+    ) -> Self {
+        self.add_event_handlers(handlers);
+        self
+    }
+
+    /// Adds an extra module to link in during assembly.
+    pub fn with_module(mut self, path: impl AsRef<Path>, source: impl ToString) -> Self {
+        self.add_module(path, source);
+        self
+    }
+
     /// Add an extra module to link in during assembly
     pub fn add_module(&mut self, path: impl AsRef<Path>, source: impl ToString) {
         self.add_modules.push((path.as_ref().into(), source.to_string()));
@@ -470,6 +527,7 @@ impl Test {
             stack_inputs,
             self.advice_inputs.clone(),
             &mut host,
+            miden_processor::ExecutionOptions::default(),
             ProvingOptions::default(),
         )
         .unwrap();
@@ -605,7 +663,7 @@ impl Test {
         };
 
         compare_results(
-            fast_result.as_ref().map(|trace_inputs| trace_inputs.execution_output().stack),
+            fast_result.as_ref().map(|trace_inputs| *trace_inputs.stack_outputs()),
             &fast_result_by_step,
             "fast processor",
             "fast processor by step",

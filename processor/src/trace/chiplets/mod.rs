@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::{CHIPLETS_WIDTH, chiplets::hasher::HasherState};
-use miden_core::{mast::OpBatch, program::Kernel};
+use miden_core::{mast::OpBatch, program::Kernel, utils::RowMajorMatrix};
 
 use crate::{
     Felt, ONE, Word, ZERO,
@@ -14,8 +14,6 @@ use bitwise::Bitwise;
 
 mod hasher;
 use hasher::Hasher;
-#[cfg(test)]
-pub(crate) use hasher::init_state_from_words;
 
 mod memory;
 use memory::Memory;
@@ -32,13 +30,14 @@ mod aux_trace;
 pub use aux_trace::AuxTraceBuilder;
 
 #[cfg(test)]
+#[allow(clippy::needless_range_loop)]
 mod tests;
 
 // TRACE
 // ================================================================================================
 
 pub struct ChipletsTrace {
-    pub(crate) trace: [Vec<Felt>; CHIPLETS_WIDTH],
+    pub(crate) trace: Vec<Felt>,
     pub(crate) aux_builder: AuxTraceBuilder,
 }
 
@@ -54,8 +53,7 @@ pub struct ChipletsTrace {
 /// * Hasher segment: contains the trace and selector for the hasher chiplet. This segment fills the
 ///   first rows of the trace up to the length of the hasher `trace_len`.
 ///   - column 0: selector column with values set to ZERO
-///   - columns 1-16: execution trace of hash chiplet
-///   - columns 17-20: unused columns padded with ZERO
+///   - columns 1-20: execution trace of hash chiplet
 ///
 /// * Bitwise segment: contains the trace and selectors for the bitwise chiplet. This segment begins
 ///   at the end of the hasher segment and fills the next rows of the trace for the `trace_len` of
@@ -70,8 +68,8 @@ pub struct ChipletsTrace {
 ///   the memory chiplet.
 ///   - column 0-1: selector columns with values set to ONE
 ///   - column 2: selector column with values set to ZERO
-///   - columns 3-17: execution trace of memory chiplet
-///   - columns 18-20: unused columns padded with ZERO
+///   - columns 3-19: execution trace of memory chiplet
+///   - column 20: unused column padded with ZERO
 ///
 /// * ACE segment: contains the trace and selectors for the arithmetic circuit evaluation chiplet.
 ///   This segment begins at the end of the memory segment and fills the next rows of the trace for
@@ -99,13 +97,13 @@ pub struct ChipletsTrace {
 /// The following is a pictorial representation of the chiplet module:
 ///
 /// ```text
-///             +---+--------------------------------------------------------------+------+
-///             | 0 |                                                              |------|
-///             | . |         Hash chiplet                                         |------|
-///             | . |         16 columns                                           |------|
-///             | . |       constraint degree 8                                    |------|
-///             | 0 |                                                              |------|
-///             +---+---+------------------------------------------------------+---+------+
+///             +---+---------------------------------------------------------------------+
+///             | 0 |                                                                     |
+///             | . |         Hash chiplet                                                |
+///             | . |         20 columns                                                  |
+///             | . |       constraint degree 9                                           |
+///             | 0 |                                                                     |
+///             +---+---+------------------------------------------------------+----------+
 ///             | 1 | 0 |                                                      |----------|
 ///             | . | . |                  Bitwise chiplet                     |----------|
 ///             | . | . |                    13 columns                        |----------|
@@ -115,15 +113,15 @@ pub struct ChipletsTrace {
 ///             | . +---+---+--------------------------------------------------+-----+----+
 ///             | . | 1 | 0 |                                                        |----|
 ///             | . | . | . |            Memory chiplet                              |----|
-///             | . | . | . |              15 columns                                |----|
+///             | . | . | . |              17 columns                                |----|
 ///             | . | . | . |          constraint degree 9                           |----|
 ///             | . | . | 0 |                                                        |----|
 ///             | . + . +---+---+----------------------------------------------------+----+
-///             | . | . | 1 | 0 |                                                         |
-///             | . | . | . | . |          ACE chiplet                                    |
-///             | . | . | . | . |            16 columns                                   |
-///             | . | . | . | . |        constraint degree 5                              |
-///             | . | . | . | 0 |                                                         |
+///             | . | . | 1 | 0 |                                                    |----|
+///             | . | . | . | . |          ACE chiplet                               |----|
+///             | . | . | . | . |            16 columns                              |----|
+///             | . | . | . | . |        constraint degree 5                         |----|
+///             | . | . | . | 0 |                                                    |----|
 ///             | . + . | . +---+---+---------------------------+-------------------------+
 ///             | . | . | . | 1 | 0 |                           |-------------------------|
 ///             | . | . | . | . | . |     Kernel ROM chiplet    |-------------------------|
@@ -228,8 +226,15 @@ impl Chiplets {
             .expect("failed to convert vector to array");
         let ace_hint = self.fill_trace(&mut trace);
 
+        let mut col_flat = Vec::with_capacity(CHIPLETS_WIDTH * trace_len);
+        for col in &trace {
+            col_flat.extend_from_slice(col);
+        }
+        let col_mat = RowMajorMatrix::new(col_flat, trace_len);
+        let row_mat = col_mat.transpose();
+
         ChipletsTrace {
-            trace,
+            trace: row_mat.values,
             aux_builder: AuxTraceBuilder::new(ace_hint),
         }
     }
@@ -242,7 +247,6 @@ impl Chiplets {
     /// to identify each individual chiplet trace in addition to padding to fill the rest of
     /// the trace.
     fn fill_trace(self, trace: &mut [Vec<Felt>; CHIPLETS_WIDTH]) -> AceHints {
-        // get the rows where:usize  chiplets begin.
         let bitwise_start: usize = self.bitwise_start().into();
         let memory_start: usize = self.memory_start().into();
         let ace_start: usize = self.ace_start().into();
@@ -301,27 +305,25 @@ impl Chiplets {
                     kernel_rom_fragment.push_column_slice(rest);
                 },
                 15 | 16 => {
-                    // columns 15 and 16 are relevant only for the hasher, memory and ace chiplets
+                    // columns 15 and 16 are relevant for the hasher, memory and ace chiplets
                     let rest = hasher_fragment.push_column_slice(column);
                     // skip bitwise chiplet
                     let (_, rest) = rest.split_at_mut(bitwise.trace_len());
                     let rest = memory_fragment.push_column_slice(rest);
                     ace_fragment.push_column_slice(rest);
                 },
-                17 => {
-                    // column 17 is relevant only for the memory chiplet
-                    // skip the hasher and bitwise chiplets
-                    let (_, rest) = column.split_at_mut(hasher.trace_len() + bitwise.trace_len());
+                17..=19 => {
+                    // columns 17-19 are relevant for hasher, memory, and ace chiplets
+                    // (hasher: mrupdate_id/is_start/is_final; memory: f_scw/w0/w1; ace columns)
+                    let rest = hasher_fragment.push_column_slice(column);
+                    // skip bitwise chiplet
+                    let (_, rest) = rest.split_at_mut(bitwise.trace_len());
                     let rest = memory_fragment.push_column_slice(rest);
                     ace_fragment.push_column_slice(rest);
                 },
-                18 | 19 => {
-                    // column 18 and 19 are relevant only for the ACE chiplet
-                    // skip the hasher, bitwise and memory chiplets
-                    let (_, rest) = column.split_at_mut(
-                        hasher.trace_len() + bitwise.trace_len() + memory.trace_len(),
-                    );
-                    ace_fragment.push_column_slice(rest);
+                20 => {
+                    // column 20 is relevant only for the hasher chiplet (perm_seg)
+                    hasher_fragment.push_column_slice(column);
                 },
                 _ => panic!("invalid column index"),
             }
