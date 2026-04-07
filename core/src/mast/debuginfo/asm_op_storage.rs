@@ -88,6 +88,11 @@ impl OpToAsmOpId {
         self.inner.num_elements()
     }
 
+    /// Returns all sparse `(op_idx, asm_op_id)` entries for a node, if the node exists.
+    pub fn asm_ops_for_node(&self, node_id: MastNodeId) -> Option<&[(usize, AsmOpId)]> {
+        self.inner.row(node_id)
+    }
+
     /// Registers AssemblyOps for a node's operations.
     ///
     /// `asm_ops` is a list of `(op_idx, asm_op_id)` pairs. The `op_idx` values must be strictly

@@ -37,6 +37,7 @@ pub(crate) struct MastForestMerger {
     hash_by_node_id: IndexVec<MastNodeId, MastNodeFingerprint>,
     decorators_by_hash: BTreeMap<Blake3Digest<32>, DecoratorId>,
     asm_op_id_by_value: BTreeMap<AssemblyOpKey, AsmOpId>,
+    asm_op_value_by_id: BTreeMap<AsmOpId, AssemblyOpKey>,
     /// Mappings from old decorator and node ids to their new ids.
     ///
     /// Any decorator in `mast_forest` is present as the target of some mapping in this map.
@@ -80,6 +81,7 @@ impl MastForestMerger {
             hash_by_node_id: IndexVec::new(),
             decorators_by_hash: BTreeMap::new(),
             asm_op_id_by_value: BTreeMap::new(),
+            asm_op_value_by_id: BTreeMap::new(),
             mast_forest: MastForest::new(),
             decorator_id_mappings,
             node_id_mappings,
@@ -322,8 +324,8 @@ impl MastForestMerger {
 
     /// Merges AssemblyOp source mappings for a single node.
     ///
-    /// For basic blocks we preserve op-indexed source mapping transitions. For control-flow nodes
-    /// we preserve the node-level mapping at operation index 0.
+    /// For basic blocks we preserve op-indexed source mapping transitions. For non-basic-block
+    /// nodes we preserve all sparse transitions as stored in debug info.
     fn merge_node_asm_ops(
         &mut self,
         source_forest: &MastForest,
@@ -356,13 +358,26 @@ impl MastForestMerger {
                 (num_operations, asm_ops)
             },
             _ => {
-                let Some(asm_op) = source_forest.debug_info.first_asm_op_for_node(source_node_id)
+                let Some(source_asm_ops) =
+                    source_forest.debug_info.asm_ops_for_node(source_node_id)
                 else {
                     return Ok(());
                 };
 
-                let merged_asm_op_id = self.intern_asm_op(asm_op)?;
-                (1, vec![(0, merged_asm_op_id)])
+                let mut asm_ops = Vec::with_capacity(source_asm_ops.len());
+                for (op_idx, asm_op_id) in source_asm_ops.iter().copied() {
+                    let asm_op = source_forest
+                        .debug_info
+                        .asm_op(asm_op_id)
+                        .expect("asm-op mapping should reference a valid assembly op");
+                    let merged_asm_op_id = self.intern_asm_op(asm_op)?;
+                    asm_ops.push((op_idx, merged_asm_op_id));
+                }
+
+                let num_operations =
+                    source_asm_ops.last().map(|(op_idx, _)| op_idx + 1).unwrap_or(0);
+
+                (num_operations, asm_ops)
             },
         };
 
@@ -394,8 +409,12 @@ impl MastForestMerger {
                 let (existing_num_operations, existing_asm_ops) = entry.get_mut();
                 let merged_num_operations =
                     core::cmp::max(*existing_num_operations, num_operations);
-                let merged_asm_ops =
-                    Self::merge_asm_op_mappings(merged_num_operations, existing_asm_ops, &asm_ops);
+                let merged_asm_ops = Self::merge_asm_op_mappings(
+                    merged_num_operations,
+                    existing_asm_ops,
+                    &asm_ops,
+                    &self.asm_op_value_by_id,
+                );
                 *existing_num_operations = merged_num_operations;
                 *existing_asm_ops = merged_asm_ops;
             },
@@ -410,10 +429,20 @@ impl MastForestMerger {
         num_operations: usize,
         lhs: &[(usize, AsmOpId)],
         rhs: &[(usize, AsmOpId)],
+        asm_op_value_by_id: &BTreeMap<AsmOpId, AssemblyOpKey>,
     ) -> Vec<(usize, AsmOpId)> {
         let lhs_expanded = Self::expand_asm_op_mapping(num_operations, lhs);
         let rhs_expanded = Self::expand_asm_op_mapping(num_operations, rhs);
         let preference = Self::compare_asm_op_mapping_specificity(num_operations, lhs, rhs);
+
+        if preference.is_eq()
+            && Self::has_conflicting_asm_op_assignments(&lhs_expanded, &rhs_expanded)
+        {
+            return match Self::compare_asm_op_mapping_value_key(lhs, rhs, asm_op_value_by_id) {
+                Ordering::Greater | Ordering::Equal => lhs.to_vec(),
+                Ordering::Less => rhs.to_vec(),
+            };
+        }
 
         let mut merged = Vec::with_capacity(num_operations);
         for op_idx in 0..num_operations {
@@ -424,13 +453,7 @@ impl MastForestMerger {
                 (Some(lhs_asm_op), Some(rhs_asm_op)) => Some(match preference {
                     Ordering::Greater => lhs_asm_op,
                     Ordering::Less => rhs_asm_op,
-                    Ordering::Equal => {
-                        if u32::from(lhs_asm_op) <= u32::from(rhs_asm_op) {
-                            lhs_asm_op
-                        } else {
-                            rhs_asm_op
-                        }
-                    },
+                    Ordering::Equal => lhs_asm_op,
                 }),
                 (Some(asm_op), None) | (None, Some(asm_op)) => Some(asm_op),
                 (None, None) => None,
@@ -439,6 +462,44 @@ impl MastForestMerger {
         }
 
         Self::compress_asm_op_mapping(&merged)
+    }
+
+    fn has_conflicting_asm_op_assignments(
+        lhs_expanded: &[Option<AsmOpId>],
+        rhs_expanded: &[Option<AsmOpId>],
+    ) -> bool {
+        lhs_expanded.iter().zip(rhs_expanded.iter()).any(|(lhs_entry, rhs_entry)| {
+            match (lhs_entry, rhs_entry) {
+                (Some(lhs_asm_op), Some(rhs_asm_op)) => lhs_asm_op != rhs_asm_op,
+                _ => false,
+            }
+        })
+    }
+
+    fn compare_asm_op_mapping_value_key(
+        lhs: &[(usize, AsmOpId)],
+        rhs: &[(usize, AsmOpId)],
+        asm_op_value_by_id: &BTreeMap<AsmOpId, AssemblyOpKey>,
+    ) -> Ordering {
+        for ((lhs_op_idx, lhs_asm_op), (rhs_op_idx, rhs_asm_op)) in lhs.iter().zip(rhs.iter()) {
+            let op_idx_cmp = lhs_op_idx.cmp(rhs_op_idx);
+            if !op_idx_cmp.is_eq() {
+                return op_idx_cmp;
+            }
+
+            let lhs_key = asm_op_value_by_id
+                .get(lhs_asm_op)
+                .expect("asm-op id should resolve to a value key");
+            let rhs_key = asm_op_value_by_id
+                .get(rhs_asm_op)
+                .expect("asm-op id should resolve to a value key");
+            let key_cmp = lhs_key.cmp(rhs_key);
+            if !key_cmp.is_eq() {
+                return key_cmp;
+            }
+        }
+
+        lhs.len().cmp(&rhs.len())
     }
 
     /// Expands sparse mapping transitions into per-operation mapping.
@@ -482,7 +543,6 @@ impl MastForestMerger {
     /// Richer mapping means:
     /// 1. More transition points.
     /// 2. If tied, larger covered suffix of operations.
-    /// 3. If still tied, lexicographically larger sparse mapping.
     fn compare_asm_op_mapping_specificity(
         num_operations: usize,
         lhs: &[(usize, AsmOpId)],
@@ -502,17 +562,6 @@ impl MastForestMerger {
         let coverage_cmp = coverage(lhs).cmp(&coverage(rhs));
         if !coverage_cmp.is_eq() {
             return coverage_cmp;
-        }
-
-        for ((lhs_op_idx, lhs_asm_op), (rhs_op_idx, rhs_asm_op)) in lhs.iter().zip(rhs.iter()) {
-            let op_idx_cmp = lhs_op_idx.cmp(rhs_op_idx);
-            if !op_idx_cmp.is_eq() {
-                return op_idx_cmp;
-            }
-            let asm_op_cmp = u32::from(*lhs_asm_op).cmp(&u32::from(*rhs_asm_op));
-            if !asm_op_cmp.is_eq() {
-                return asm_op_cmp;
-            }
         }
 
         Ordering::Equal
@@ -538,7 +587,8 @@ impl MastForestMerger {
         }
 
         let asm_op_id = self.mast_forest.debug_info.add_asm_op(asm_op.clone())?;
-        self.asm_op_id_by_value.insert(key, asm_op_id);
+        self.asm_op_id_by_value.insert(key.clone(), asm_op_id);
+        self.asm_op_value_by_id.insert(asm_op_id, key);
 
         Ok(asm_op_id)
     }
