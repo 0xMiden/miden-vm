@@ -25,6 +25,7 @@
 - Refactor trace generation to row-major format ([#2937](https://github.com/0xMiden/miden-vm/pull/2937)).
 - Documented non-overlap requirement for `memcopy_words`, `memcopy_elements`, and AEAD encrypt/decrypt procedures ([#2941](https://github.com/0xMiden/miden-vm/pull/2941)).
 - Added chainable `Test` builders for common test setup in `miden-utils-testing` ([#2957](https://github.com/0xMiden/miden-vm/pull/2957)).
+- Speed-up AUX range check trace generation by changing divisors to a flat Vec layout ([#2966](https://github.com/0xMiden/miden-vm/pull/2966)).
 
 #### Fixes
 
