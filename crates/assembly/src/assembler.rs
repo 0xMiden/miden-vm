@@ -410,7 +410,7 @@ impl Assembler {
     pub fn assemble_library(
         self,
         modules: impl IntoIterator<Item = impl Parse>,
-    ) -> Result<Arc<Library>, Report> {
+    ) -> Result<Library, Report> {
         let modules = modules
             .into_iter()
             .map(|module| {
@@ -424,7 +424,8 @@ impl Assembler {
             })
             .collect::<Result<Vec<_>, Report>>()?;
 
-        Ok(self.assemble_library_modules(modules, TargetType::Library)?.into_artifact())
+        let library = self.assemble_library_modules(modules, TargetType::Library)?.into_artifact();
+        Ok(Arc::unwrap_or_clone(library))
     }
 
     /// Assemble a [Library] from a standard Miden Assembly project layout, using the provided
@@ -466,7 +467,7 @@ impl Assembler {
         self,
         dir: impl AsRef<std::path::Path>,
         namespace: impl AsRef<Path>,
-    ) -> Result<Arc<Library>, Report> {
+    ) -> Result<Library, Report> {
         use miden_assembly_syntax::parser;
 
         let dir = dir.as_ref();

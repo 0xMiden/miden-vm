@@ -66,8 +66,7 @@ fn test_diagnostic_advice_map_key_already_present() {
                 .clone()
                 .with_advice_map(AdviceMap::from_iter([(Word::default(), vec![ZERO])])),
         );
-        Arc::make_mut(&mut lib_2)
-            .extend_advice_map(AdviceMap::from_iter([(Word::default(), vec![ONE])]));
+        lib_2.extend_advice_map(AdviceMap::from_iter([(Word::default(), vec![ONE])]));
 
         (lib_1, lib_2)
     };

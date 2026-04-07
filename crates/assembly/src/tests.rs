@@ -4342,6 +4342,7 @@ fn build_library_example() -> Arc<Library> {
     Assembler::new(context.source_manager())
         .assemble_library(modules.iter().cloned())
         .expect("failed to assemble library")
+        .into()
 }
 
 fn build_program_example() -> Arc<Library> {

@@ -213,7 +213,7 @@ impl TestContext {
     pub fn assemble_library(
         &self,
         modules: impl IntoIterator<Item = Box<Module>>,
-    ) -> Result<Arc<Library>, Report> {
+    ) -> Result<Library, Report> {
         self.assembler().assemble_library(modules)
     }
 
@@ -452,7 +452,7 @@ mod package_features {
                 name.into(),
                 version.parse().unwrap(),
                 TargetType::Library,
-                library,
+                Arc::new(library),
                 dependencies.into_iter().map(|(name, version, kind, digest)| Dependency {
                     name: name.into(),
                     version: version.parse().unwrap(),
