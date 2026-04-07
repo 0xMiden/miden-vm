@@ -30,7 +30,7 @@ const FALCON_DIV_EVENT = event("miden::core::crypto::dsa::falcon512_poseidon2::f
 #! Note that it is the responsibility of the calling procedure to ensure that `a_hi` and `a_lo` are
 #! within the appropriate range i.e., they are u32-s.
 #!
-#! Cycles: 28
+#! Cycles: 29
 pub proc mod_12289
     emit.FALCON_DIV_EVENT
     # the advice stack contains now [qhi, qlo, r, ...] where q = qhi * 2^32 + qlo is quotient
