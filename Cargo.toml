@@ -75,9 +75,6 @@ midenc-hir-type  = { version = "0.5", default-features = false }
 # Serialization
 bincode = "1.3"
 
-# Constraints to resolve duplicates
-windows-sys = "0.61"
-
 # Third-party crates
 criterion       = { version = "0.7" }
 derive_more     = { version = "2.0", features = ["from"] }
