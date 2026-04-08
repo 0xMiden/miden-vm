@@ -299,10 +299,12 @@ impl MastForestMerger {
     /// Transfers procedure names, asm ops, and debug vars from the source forests
     /// into the merged forest, remapping all IDs along the way.
     ///
-    /// When two source nodes map to the same merged node (dedup), the first forest's
-    /// metadata wins.
+    /// Procedure names are merged separately by digest. Per-node asm-op and debug-var
+    /// metadata are remapped by node ID, and when two source nodes map to the same merged
+    /// node (dedup), the first forest's per-node metadata wins.
     fn merge_debug_metadata(&mut self, forests: &[&MastForest]) -> Result<(), MastForestError> {
-        // Procedure names are keyed by digest, no node-ID remapping needed.
+        // Procedure names are keyed by digest, so no node-ID remapping is needed here.
+        // Note: later inserts currently overwrite earlier names for the same digest.
         for forest in forests.iter() {
             self.mast_forest.debug_info.extend_procedure_names(
                 forest.debug_info.procedure_names().map(|(d, n)| (d, n.clone())),
