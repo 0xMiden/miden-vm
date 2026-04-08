@@ -17,15 +17,15 @@
 //! | d0, d1    | Lower/upper 16 bits of the active delta        |
 //! | d_inv     | Inverse of the active delta (docs: column `t`) |
 //! | f_scw     | Same context/word flag                         |
+//! | w0        | Lower 16 bits of word index (word_addr / 4)   |
+//! | w1        | Upper 16 bits of word index (word_addr / 4)   |
 //!
-//! ## Address range checks (TODO)
+//! ## Address range checks
 //!
-//! The trace stores a word address plus idx bits, i.e. `addr = 4 * w_addr + idx`.
-//! To fully range-check addresses, we plan to commit to 16-bit limbs of `w_addr`
-//! (w0, w1) and enforce:
-//!   addr = 4 * (w0 + 2^16 * w1) + idx0 + 2 * idx1.
-//! Range checks should include `w0`, `w1`, and `4 * w1`; the extra term
-//! prevents wraparound, and Goldilocks satisfies P > 2^18 so this is sound.
+//! The constraint `word_addr = 4 * (w0 + 2^16 * w1)` decomposes the word address
+//! into 16-bit limbs. Combined with range checks on `w0`, `w1`, and `4 * w1` via
+//! the wiring bus, this proves all memory addresses are valid 32-bit values.
+//! The `4 * w1` check prevents Goldilocks field wraparound (P > 2^18).
 
 use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::AirBuilder;

@@ -5,514 +5,564 @@ sidebar_position: 2
 
 # Hash chiplet
 
-Miden VM "offloads" all hash-related computations to a separate _hash processor_. This chiplet supports executing the [Poseidon2](https://eprint.iacr.org/2023/323) hash function in the following settings:
+The hash chiplet executes all Poseidon2-based hashing performed by the VM. In the
+current design it is split into two regions:
 
-- A single permutation of Poseidon2.
-- A simple 2-to-1 hash.
-- A linear hash of $n$ field elements.
-- Merkle path verification.
+1. **Controller region** (`perm_seg = 0`) records hash requests as compact
+   `(input, output)` row pairs and communicates with the rest of the VM via the
+   chiplets bus.
+2. **Permutation segment** (`perm_seg = 1`) executes Poseidon2 permutations in a
+   dedicated compute region, using one packed 16-row cycle per unique input
+   state.
+
+This separation lets the VM **deduplicate permutations**: if the same input
+state is requested multiple times, the controller records multiple requests but
+the permutation segment executes the permutation only once and carries the
+request count as a multiplicity.
+
+## Supported operations
+
+The chiplet supports:
+
+- a single Poseidon2 permutation (`HPERM` / full-state return),
+- a 2-to-1 hash,
+- sequential sponge hashing of many rate blocks,
+- Merkle path verification,
 - Merkle root update.
 
-The chiplet can be thought of as having a small instruction set of $11$ instructions. These instructions are listed below, and examples of how these instructions are used by the chiplet are described in the following sections.
+These operations are encoded by the three **hasher-internal selector** columns
+`(s0, s1, s2)` on controller rows:
 
-| Instruction | Description | Cycles | Context | Notes |
-| ----------- | ----------- | ------ | ------- | ----- |
-| `HR` | Executes a single round of the VM's native hash function | $0$-$30$, $32$-$62$, $64$-$94$... (not $31$, $63$, $95$...) | Any | |
-| `BP` | Initiates computation of a single permutation, a 2-to-1 hash, or a linear hash of many elements | Multiples of $32$ ($0$, $32$, $64$...) | Start of computation | Concurrent with `HR` |
-| `MP` | Initiates Merkle path verification computation | Multiples of $32$ | Start of computation | Concurrent with `HR` |
-| `MV` | Initiates Merkle path verification for the "old" node value | Multiples of $32$ | Merkle root update | Concurrent with `HR` |
-| `MU` | Initiates Merkle path verification for the "new" node value | Multiples of $32$ | Merkle root update | Concurrent with `HR` |
-| `HOUT` | Returns the "output" portion of the hasher state (indices $[0,4)$) | $32n-1$ ($31$, $63$, $95$...) | End of computation | |
-| `SOUT` | Returns entire hasher state | $32n-1$ ($31$, $63$, $95$...) | End of computation | Only after `BP` |
-| `ABP` | Absorbs a new set of elements into the hasher state | $32n-1$ ($31$, $63$, $95$...) | Linear hash (multi-block) | Only after `BP` |
-| `MPA` | Absorbs the next Merkle path node into the hasher state | $32n-1$ ($31$, $63$, $95$...) | Merkle path verification | Only after `MP` |
-| `MVA` | Absorbs the next Merkle path node into the hasher state during Merkle path verification for the "old" node value | $32n-1$ ($31$, $63$, $95$...) | Merkle root update | Only after `MV` |
-| `MUA` | Absorbs the next Merkle path node into the hasher state during Merkle path verification for the "new" node value | $32n-1$ ($31$, $63$, $95$...) | Merkle root update | Only after `MU` |
+| Selectors | Meaning |
+|-----------|---------|
+| `(1, 0, 0)` | sponge input / linear hash input |
+| `(1, 0, 1)` | Merkle path verify input |
+| `(1, 1, 0)` | Merkle update old-path input |
+| `(1, 1, 1)` | Merkle update new-path input |
+| `(0, 0, 0)` | return digest |
+| `(0, 0, 1)` | return full state |
+| `(0, 1, 0)` | controller padding |
 
-## Chiplet trace
+On permutation rows these same columns are **not selectors**: they are reused as
+witness columns for packed internal rounds.
 
-Execution trace table of the chiplet consists of $16$ trace columns and $3$ periodic columns. The structure of the table is such that a single permutation of the hash function can be computed using $32$ table rows. The layout of a single 32-row cycle is summarized below (rows omitted are identical permutation rows).
+## Trace layout
 
-| Row (mod 32) | $k_2$ | $k_1$ | $k_0$ | $s_0,s_1,s_2$ | RATE0 ($h_0..h_3$) | RATE1 ($h_4..h_7$) | CAP ($h_8..h_{11}$) | $i$ |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0 | 1 | 0 | 0 | op-specific | input rate0 | input rate1 | input capacity | index |
-| 1 | 0 | 0 | 0 | op-specific | permutation state | permutation state | permutation state | index |
-| ... | ... | ... | ... | ... | ... | ... | ... | ... |
-| 30 | 0 | 1 | 0 | op-specific | permutation state | permutation state | permutation state | index |
-| 31 | 0 | 0 | 1 | op-specific | state (post-permutation) | state (post-permutation) | state (post-permutation) | index |
+Within the chiplets segment, the hasher occupies **20 columns**:
 
-The meaning of the columns is as follows:
+| Columns | Purpose |
+|---------|---------|
+| `s0, s1, s2` | controller selectors / permutation witnesses |
+| `h0..h11` | Poseidon2 state = `[RATE0, RATE1, CAPACITY]` |
+| `node_index` | Merkle node index on controller rows; permutation multiplicity on perm rows |
+| `mrupdate_id` | domain separator for sibling-table entries |
+| `is_boundary` | 1 on first controller input and last controller output of an operation |
+| `direction_bit` | propagated Merkle direction bit on controller rows |
+| `perm_seg` | 0 = controller region, 1 = permutation segment |
 
-- Three periodic columns $k_0$, $k_1$, and $k_2$ are used to help select the instruction executed at a given row. All of these columns contain patterns which repeat every $32$ rows. For $k_0$ the pattern is $31$ zeros followed by $1$ one, helping us identify the last row in the cycle. For $k_1$ the pattern is $30$ zeros, $1$ one, and $1$ zero, which can be used to identify the second-to-last row in a cycle. For $k_2$ the pattern is $1$ one followed by $31$ zeros, which can identify the first row in the cycle.
-- Three selector columns $s_0$, $s_1$, and $s_2$. These columns can contain only binary values (ones or zeros), and they are also used to help select the instruction to execute at a given row.
-- Twelve hasher state columns $h_0, ..., h_{11}$. These columns are used to hold the hasher state for each round of the hash function permutation. The state is laid out as follows:
-  - The first eight columns ($h_0, ..., h_7$) are reserved for the rate elements of the state, arranged as two 4-element words (RATE0, RATE1). Once the permutation is complete, the hash output is located in the first rate word ($h_0, ..., h_3$).
-  - The last four columns ($h_8, ..., h_{11}$) are reserved for capacity elements of the state. When the state is initialized for hash computations, $h_8$ should be set to $0$ if the number of elements to be hashed is a multiple of the rate width ($8$). Otherwise, $h_8$ should be set to $1$. $h_9$ should be set to the domain value if a domain has been provided (as in the case of [control block hashing](../programs.md#program-hash-computation)). The remaining capacity lanes ($h_{10}$, $h_{11}$) are set to $0$.
-- One index column $i$. This column is used to help with Merkle path verification and Merkle root update computations.
+The Poseidon2 state is stored in little-endian sponge order:
 
-In addition to the columns described above, the chiplet relies on two running product columns which are used to facilitate multiset checks (similar to the ones described [here](https://hackmd.io/@relgabizon/ByFgSDA7D)). These columns are:
-
-- $b_{chip}$ - which is used to tie the chiplet table with the main VM's stack and decoder. That is, values representing inputs consumed by the chiplet and outputs produced by the chiplet are multiplied into $b_{chip}$, while the main VM stack (or decoder) divides them out of $b_{chip}$. Thus, if the sets of inputs and outputs between the main VM stack and hash chiplet are the same, the value of $b_{chip}$ should be equal to $1$ at the start and the end of the execution trace.
-- $p_1$ - which is used to keep track of the _sibling_ table used for Merkle root update computations. Specifically, when a root for the old leaf value is computed, we add an entry for all sibling nodes to the table (i.e., we multiply $p_1$ by the values representing these entries). When the root for the new leaf value is computed, we remove the entries for the nodes from the table (i.e., we divide $p_1$ by the value representing these entries). Thus, if both computations used the same set of sibling nodes (in the same order), the sibling table should be empty by the time Merkle root update procedure completes (i.e., the value of $p_1$ would be $1$).
-
-## Instruction flags
-
-As mentioned above, chiplet instructions are encoded using a combination of periodic and selector columns. These columns can be used to compute a binary flag for each instruction. Thus, when a flag for a given instruction is set to $1$, the chiplet executes this instruction. Formulas for computing instruction flags are listed below.
-
-| Flag       | Value                                                 | Notes                                                                                             |
-| ---------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| $f_{rpr}$  | $1 - k_0$                                             | Set to $1$ on the first $31$ steps of every $32$-step cycle.                                        |
-| $f_{bp}$   | $k_2 \cdot s_0 \cdot (1 - s_1) \cdot (1 - s_2)$       | Set to $1$ when selector flags are $(1, 0, 0)$ on rows which are multiples of $32$.                |
-| $f_{mp}$   | $k_2 \cdot s_0 \cdot (1 - s_1) \cdot s_2$             | Set to $1$ when selector flags are $(1, 0, 1)$ on rows which are multiples of $32$.                |
-| $f_{mv}$   | $k_2 \cdot s_0 \cdot s_1 \cdot (1 - s_2)$             | Set to $1$ when selector flags are $(1, 1, 0)$ on rows which are multiples of $32$.                |
-| $f_{mu}$   | $k_2 \cdot s_0 \cdot s_1 \cdot s_2$                   | Set to $1$ when selector flags are $(1, 1, 1)$ on rows which are multiples of $32$.                |
-| $f_{hout}$ | $k_0 \cdot (1 - s_0) \cdot (1 - s_1) \cdot (1 - s_2)$ | Set to $1$ when selector flags are $(0, 0, 0)$ on rows which are $1$ less than a multiple of $32$. |
-| $f_{sout}$ | $k_0 \cdot (1 - s_0) \cdot (1 - s_1) \cdot s_2$       | Set to $1$ when selector flags are $(0, 0, 1)$ on rows which are $1$ less than a multiple of $32$. |
-| $f_{abp}$  | $k_0 \cdot s_0 \cdot (1 - s_1) \cdot (1 - s_2)$       | Set to $1$ when selector flags are $(1, 0, 0)$ on rows which are $1$ less than a multiple of $32$. |
-| $f_{mpa}$  | $k_0 \cdot s_0 \cdot (1 - s_1) \cdot s_2$             | Set to $1$ when selector flags are $(1, 0, 1)$ on rows which are $1$ less than a multiple of $32$. |
-| $f_{mva}$  | $k_0 \cdot s_0 \cdot s_1 \cdot (1 - s_2)$             | Set to $1$ when selector flags are $(1, 1, 0)$ on rows which are $1$ less than a multiple of $32$. |
-| $f_{mua}$  | $k_0 \cdot s_0 \cdot s_1 \cdot s_2$                   | Set to $1$ when selector flags are $(1, 1, 1)$ on rows which are $1$ less than a multiple of $32$. |
-
-A few additional notes about flag values:
-
-- With the exception of $f_{rpr}$, all flags are mutually exclusive. That is, if one flag is set to $1$, all other flats are set to $0$.
-- With the exception of $f_{rpr}$, computing flag values involves $3$ multiplications, and thus the degree of these flags is $4$.
-- We can also define a flag $f_{out} = k_0 \cdot (1 - s_0) \cdot (1 - s_1)$. This flag will be set to $1$ when either $f_{hout}=1$ or $f_{sout}=1$ in the current row.
-- We can define a flag $f_{out}' = k_1 \cdot (1 - s_0') \cdot (1 - s_1')$. This flag will be set to $1$ when either $f_{hout}=1$ or $f_{sout}=1$ in the next row.
-
-We also impose the following restrictions on how values in selector columns can be updated:
-
-- Values in columns $s_1$ and $s_2$ must be copied over from one row to the next, unless $f_{out} = 1$ or $f_{out}' = 1$ indicating the `hout` or `sout` flag is set for the current or the next row.
-- Value in $s_0$ must be set to $1$ if $f_{out}=1$ for the previous row, and to $0$ if any of the flags $f_{abp}$, $f_{mpa}$, $f_{mva}$, or $f_{mua}$ are set to $1$ for the previous row.
-
-The above rules ensure that we must finish one computation before starting another, and we can't change the type of the computation before the computation is finished.
-
-## Computation examples
-
-### Single permutation
-
-Computing a single permutation of Poseidon2 hash function involves the following steps:
-
-1. Initialize hasher state with $12$ field elements.
-2. Apply Poseidon2 permutation.
-3. Return the entire hasher state as output.
-
-The chiplet accomplishes the above by executing the following instructions:
-
-```
-[BP, HR]                                    // init state and execute a hash round (concurrently)
-HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
-HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
-HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
-SOUT                                        // return the entire state as output
+```text
+[h0..h11] = [RATE0(4), RATE1(4), CAPACITY(4)]
 ```
 
-Execution trace for this computation would look as illustrated below.
+`RATE0` (`h0..h3`) is always the digest word.
 
-| Row (mod 32) | $k_2$ | $k_1$ | $k_0$ | $s_0,s_1,s_2$ | RATE0 ($h_0..h_3$) | RATE1 ($h_4..h_7$) | CAP ($h_8..h_{11}$) | $i$ |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0 | 1 | 0 | 0 | BP | $a_0..a_3$ | $a_4..a_7$ | $a_8..a_{11}$ | $i$ |
-| 1 | 0 | 0 | 0 | HR | permute | permute | permute | $i$ |
-| ... | ... | ... | ... | ... | ... | ... | ... | ... |
-| 31 | 0 | 0 | 1 | SOUT | $b_0..b_3$ | $b_4..b_7$ | $b_8..b_{11}$ | $i$ |
+## Design invariants
 
-In the above $\{a_0, ..., a_{11}\}$ is the input state of the hasher, and $\{b_0, ..., b_{11}\}$ is the output state of the hasher.
+The current hasher design relies on a few invariants
 
-### Simple 2-to-1 hash
+- **`perm_seg` is the authoritative controller/permutation discriminator.**  
+  When `perm_seg = 0`, the row is in the controller region and `s0/s1/s2` are interpreted as
+  controller selectors. When `perm_seg = 1`, the row is in the permutation segment and
+  `s0/s1/s2` are interpreted as witness columns, not selectors.
 
-Computing a 2-to-1 hash involves the following steps:
+- **Only controller rows participate in the external chiplets interface.**  
+  The controller region is the only region that sends or receives hasher messages on
+  `b_chiplets`. The permutation segment is internal compute only.
 
-1. Initialize hasher state with $8$ field elements, setting the second capacity element to $domain$ if the domain is provided (as in the case of [control block hashing](../programs.md#program-hash-computation)) or else $0$, and the remaining capacity elements to $0$.
-2. Apply Poseidon2 permutation.
-3. Return elements $[0, 4)$ of the hasher state as output.
+- **Permutation cycles are aligned.**  
+  Entering the permutation segment can happen only at packed cycle row `0`, and leaving the
+  hasher while still in the permutation segment can happen only at packed cycle row `15`.
 
-The chiplet accomplishes the above by executing the following instructions:
+- **Multiplicity is cycle-wide.**  
+  On permutation rows, `node_index` is repurposed as a multiplicity counter. It must stay
+  constant within a cycle so that one multiplicity is attached to the entire permutation.
 
+- **Witness reuse is explicit.**  
+  On packed internal rows, `s0/s1/s2` carry witness values for internal-round S-box outputs.
+  On row `11`, only `s0` is used as a witness. Unused witness slots are constrained to zero.
+
+- **Merkle routing happens entirely in the controller region.**  
+  Merkle-specific values (`node_index`, `direction_bit`, `mrupdate_id`) have controller
+  semantics only. The permutation segment does not carry Merkle routing meaning.
+
+- **Sibling-table balancing is partitioned by `mrupdate_id`.**  
+  The old-path and new-path legs of a single `MRUPDATE` share the same `mrupdate_id`, and
+  different updates use different IDs. This prevents sibling entries from unrelated updates
+  from cancelling each other.
+
+## Controller region
+
+Each hash request is recorded as a pair of consecutive rows:
+
+- **input row** (`s0 = 1`) contains the pre-permutation state,
+- **output row** (`s0 = 0, s1 = 0`) contains the post-permutation state.
+
+These two rows are the rows that participate in the chiplets bus. The controller
+region is then padded to a multiple of `HASH_CYCLE_LEN = 16` before the
+permutation segment begins.
+
+### Multi-batch sponge hashing
+
+Sequential hashing is represented as a chain of controller pairs:
+
+- first input row has `is_boundary = 1`,
+- middle continuation rows have `is_boundary = 0`,
+- final output row has `is_boundary = 1`.
+
+Across continuation boundaries, the next input row overwrites the rate lanes but
+must preserve the previous permutation's capacity word. This is enforced by the
+AIR.
+
+### Merkle operations
+
+For Merkle verification / update, the controller also carries:
+
+- `node_index`,
+- `direction_bit`,
+- `mrupdate_id` (for the old/new path pairing used by `MRUPDATE`).
+
+The controller AIR enforces:
+
+- index decomposition `idx = 2 * idx_next + direction_bit` on Merkle input rows,
+- direction bit booleanity,
+- continuity of the shifted index across non-final controller boundaries,
+- zero capacity on Merkle input rows,
+- digest routing into the correct rate half for the next path step.
+
+## Permutation segment
+
+After the padded controller region, the chiplet appends one permutation cycle for
+ each unique input state. Each cycle has length **16**.
+
+### Packed 16-row schedule
+
+The 31-step Poseidon2 schedule
+
+- init linear,
+- 4 initial external rounds,
+- 22 internal rounds,
+- 4 terminal external rounds
+
+is packed into 16 rows as follows:
+
+| Row | Meaning |
+|-----|---------|
+| 0 | `init + ext1` |
+| 1 | `ext2` |
+| 2 | `ext3` |
+| 3 | `ext4` |
+| 4 | `int1 + int2 + int3` |
+| 5 | `int4 + int5 + int6` |
+| 6 | `int7 + int8 + int9` |
+| 7 | `int10 + int11 + int12` |
+| 8 | `int13 + int14 + int15` |
+| 9 | `int16 + int17 + int18` |
+| 10 | `int19 + int20 + int21` |
+| 11 | `int22 + ext5` |
+| 12 | `ext6` |
+| 13 | `ext7` |
+| 14 | `ext8` |
+| 15 | boundary / final state |
+
+The state stored on each permutation row is the **pre-transition** state for
+that packed step, and row 15 stores the final permutation output.
+
+### Periodic columns
+
+The AIR uses 16 periodic columns:
+
+- 4 step-type selectors:
+  - `is_init_ext`,
+  - `is_ext`,
+  - `is_packed_int`,
+  - `is_int_ext`,
+- 12 shared round-constant columns.
+
+The packed schedule uses the shared round-constant columns as follows:
+
+- external rows use all 12 external round constants,
+- packed-internal rows use `ark[0..2]` for the 3 internal round constants,
+- row 11 uses terminal external constants, while the final internal constant is
+  embedded directly in the constraint.
+
+### Witness columns on permutation rows
+
+On permutation rows, `(s0, s1, s2)` hold witness values:
+
+- rows `4..10`: `s0, s1, s2` are the three S-box outputs for the packed internal
+  rounds,
+- row `11`: `s0` is the S-box output for the final internal round,
+- all other permutation rows: unused witness slots are constrained to zero.
+
+Reusing `s0/s1/s2` as witnesses keeps the packed internal rows within the degree-9
+budget.
+
+Independently, `perm_seg` is the authoritative controller/permutation
+discriminator: any consumer that interprets `s0/s1/s2` as selectors must first
+gate on `perm_seg = 0` (equivalently, `controller_flag`). On permutation rows
+these columns are witnesses, not selectors.
+
+## Buses
+
+<a id="multiset-check-constraints"></a>
+
+The hasher participates in three different lookup constructions.
+
+<a id="chiplets-bus-constraints"></a>
+
+### 1. Chiplets bus (`b_chiplets`)
+
+The controller region sends and receives the chiplets-bus messages used by:
+
+- the decoder,
+- the stack,
+- the recursive verifier.
+
+Examples:
+
+- sponge start: full 12-lane state,
+- sponge continuation: rate only,
+- Merkle input: selected leaf word,
+- return digest / return state.
+
+Permutation rows do **not** touch this bus.
+
+### 2. Hasher permutation-link on `v_wiring`
+
+A LogUp running sum links the controller rows to the permutation segment:
+
+- controller input rows contribute `+1/msg_in`,
+- controller output rows contribute `+1/msg_out`,
+- permutation row 0 contributes `-m/msg_in`,
+- permutation row 15 contributes `-m/msg_out`,
+
+where `m` is the multiplicity stored in `node_index` on permutation rows.
+
+This is the mechanism that makes permutation deduplication sound.
+
+Because `v_wiring` is a shared bus, the AIR also forces it to stay constant on
+rows where none of its stacked contributors are active. In particular, on
+bitwise rows, kernel-ROM rows, and trailing chiplet padding rows, the hasher-side
+wiring relation contributes an `idle_flag * delta` term so those rows cannot let
+`v_wiring` drift before the final boundary.
+
+<a id="sibling-table-constraints"></a>
+
+### 3. Hash-kernel virtual table (`b_hash_kernel`)
+
+During `MRUPDATE`, the chiplet inserts sibling entries on the old-path leg and
+removes them on the new-path leg. The running product must balance, ensuring
+that both legs use the same siblings.
+
+## Main AIR obligations
+
+At a high level, the hasher AIR enforces:
+
+- selector booleanity on controller rows,
+- `perm_seg` confinement, booleanity, monotonicity, and cycle alignment,
+- structural confinement of `is_boundary` and `direction_bit`,
+- well-formed controller `(input, output)` pairing,
+- packed Poseidon2 permutation transitions in the permutation segment,
+- capacity preservation across sponge continuation boundaries,
+- Merkle index, routing, and capacity-zeroing rules,
+- zero `mrupdate_id` on permutation rows and correct progression on controller rows.
+
+The high-degree Poseidon2 step constraints are gated by `perm_seg` and periodic
+step selectors, keeping the overall degree within the system limit.
+
+## Detailed constraint structure
+
+The full set of constraints is in `air/src/constraints/chiplets/hasher/*`.
+
+This section does **not** attempt to describe every constraint. Instead,
+it records the key structural constraints and representative formulas that
+capture the key design decisions.
+
+## Representative AIR formulas
+
+The following formulas capture the most important structure of the current
+hasher AIR.
+
+### Controller selectors, lifecycle, and `perm_seg`
+
+On **controller rows**, `s0/s1/s2` are ordinary selectors. On **permutation
+rows**, they are witness columns. As a result, the AIR treats `perm_seg` as the
+authoritative controller/permutation discriminator.
+
+Concretely, the AIR enforces:
+
+- `perm_seg` is binary,
+- `perm_seg` can only be non-zero on hasher rows,
+- once `perm_seg` becomes `1` inside the hasher region it cannot return to `0`,
+- entering the permutation segment can happen only at packed cycle row `0`,
+- exiting the hasher while still in the permutation segment can happen only at
+  packed cycle row `15`,
+- `node_index` is constant on all non-boundary permutation rows, so a single
+  multiplicity is attached to the whole cycle.
+
+The first-row controller constraint is intentionally strong:
+
+```text
+s0 * (1 - perm_seg) = 1
 ```
-[BP, HR]                                    // init state and execute a hash round (concurrently)
-HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
-HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
-HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
-HOUT                                        // return elements 0, 1, 2, 3 of the state as output (the digest)
+
+This forces the first hasher row to be a controller input row and prevents a
+permutation row from masquerading as one by placing an arbitrary witness value in
+`s0`.
+
+The controller structure is then completed by:
+
+- input-row adjacency: an input row must be followed by an output row,
+- output non-adjacency: two controller output rows cannot be adjacent,
+- padding stability: once controller padding begins, no new controller operation
+  can appear after it.
+
+### Packed Poseidon2 transition constraints
+
+The permutation segment uses four transition types plus a boundary row.
+
+#### 1. Row 0: merged init + first external round
+
+The packed row-0 transition is:
+
+```text
+h_next = M_E(S(M_E(h) + ark))
 ```
 
-Execution trace for this computation would look as illustrated below.
+This merges the initial external linear layer with the first external round while
+keeping only one S-box layer over affine expressions.
 
-| Row (mod 32) | $k_2$ | $k_1$ | $k_0$ | $s_0,s_1,s_2$ | RATE0 ($h_0..h_3$) | RATE1 ($h_4..h_7$) | CAP ($h_8..h_{11}$) | $i$ |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0 | 1 | 0 | 0 | BP | $a_0..a_3$ | $b_0..b_3$ | $0,\,domain,\,0,\,0$ | $i$ |
-| 1 | 0 | 0 | 0 | HR | permute | permute | permute | $i$ |
-| ... | ... | ... | ... | ... | ... | ... | ... | ... |
-| 31 | 0 | 0 | 1 | HOUT | $c_0..c_3$ | unused | unused | $i$ |
+#### 2. Rows 1-3 and 12-14: single external rounds
 
-In the above, we compute the following:
+Each such row enforces:
 
-$$
-\{c_0, c_1, c_2, c_3\} \leftarrow hash(\{a_0, a_1, a_2, a_3\}, \{b_0, b_1, b_2, b_3\})
-$$
-
-### Linear hash of n elements
-
-Computing a linear hash of $n$ elements consists of the following steps:
-
-1. Initialize hasher state with the first $8$ elements, setting the first capacity register to $0$ if $n$ is a multiple of the rate width ($8$) or else $1$, and the remaining capacity elements to $0$.
-2. Apply Poseidon2 permutation.
-3. Absorb the next set of elements into the state (up to $8$ elements), while keeping capacity elements unchanged.
-4. Repeat steps 2 and 3 until all $n$ elements have been absorbed.
-5. Return elements $[0, 4)$ of the hasher state as output.
-
-The chiplet accomplishes the above by executing the following instructions (for hashing $16$ elements):
-
-```
-[BP, HR]                                    // init state and execute a hash round (concurrently)
-HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
-HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
-HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
-ABP                                         // absorb the next set of elements into the state
-HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
-HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
-HR HR HR HR HR HR HR HR HR HR HR            // execute 11 more hash rounds
-HOUT                                        // return elements 0, 1, 2, 3 of the state as output (the digest)
+```text
+h_next = M_E(S(h + ark))
 ```
 
-Execution trace for this computation would look as illustrated below.
+where `ark` is the row's external round-constant vector.
 
-| Row (mod 32) | $k_2$ | $k_1$ | $k_0$ | $s_0,s_1,s_2$ | RATE0 ($h_0..h_3$) | RATE1 ($h_4..h_7$) | CAP ($h_8..h_{11}$) | $i$ |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0 | 1 | 0 | 0 | BP | $a_0..a_3$ | $a_4..a_7$ | $p,\,0,\,0,\,0$ | $i$ |
-| 1 | 0 | 0 | 0 | HR | permute | permute | permute | $i$ |
-| ... | ... | ... | ... | ... | ... | ... | ... | ... |
-| 31 | 0 | 0 | 1 | ABP | $b_0..b_3$ | $b_4..b_7$ | (carry) | $i$ |
-| 32 | 1 | 0 | 0 | BP | $b_0..b_3$ | $b_4..b_7$ | (carry) | $i$ |
-| ... | ... | ... | ... | ... | ... | ... | ... | ... |
-| 63 | 0 | 0 | 1 | HOUT | $r_0..r_3$ | unused | unused | $i$ |
+#### 3. Rows 4-10: packed triples of internal rounds
 
-In the above, the value absorbed into hasher state between rows $31$ and $32$ is the next batch of
-$8$ input elements, which overwrite the rate lanes. Thus, if we define these elements as $b_i$ for
-$i \in [0, 8)$, the above computes the following:
+These rows use `s0/s1/s2` as witnesses for the three internal-round S-box
+outputs. If we define:
 
-$$
-\{r_0, r_1, r_2, r_3\} \leftarrow hash(a_0, ..., a_7, b_0, ..., b_7)
-$$
+- `y^(0) = h`,
+- `w_k = (y^(k)[0] + ark_k)^7` for `k in {0,1,2}`,
+- `y^(k+1) = M_I(y^(k) with lane 0 replaced by w_k)`,
 
-### Verify Merkle path
+then the row enforces:
 
-Verifying a Merkle path involves the following steps:
+- three witness equations `w_k - (y^(k)[0] + ark_k)^7 = 0`, and
+- `h_next = y^(3)`.
 
-1. Initialize hasher state with the leaf and the first node of the path, setting all capacity elements to $0$s.
-   a. Also, initialize the index register to the leaf's index value.
-2. Apply Poseidon2 permutation.
-   a. Make sure the index value doesn't change during this step.
-3. Copy the result of the hash to the next row, and absorb the next node of the Merkle path into the hasher state.
-   a. Remove a single bit from the index, and use it to determine how to place the copied result and absorbed node in the state.
-4. Repeat steps 2 and 3 until all nodes of the Merkle path have been absorbed.
-5. Return elements $[0, 4)$ of the hasher state as output.
-   a. Also, make sure the index value has been reduced to $0$.
+This is the core packing idea, namely the witness equations carry the nonlinearity,
+while the final next-state relation stays affine.
 
-The chiplet accomplishes the above by executing the following instructions (for Merkle tree of depth $3$):
+#### 4. Row 11: merged final internal round + first terminal external round
 
-```
-[MP, HR]                                    // init state and execute a hash round (concurrently)
-HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
-HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
-HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
-MPA                                         // copy result & absorb the next node into the state
-HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
-HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
-HR HR HR HR HR HR HR HR HR HR HR            // execute 11 more hash rounds
-HOUT                                        // return elements 0, 1, 2, 3 of the state as output (the digest)
+Row 11 uses only `s0` as a witness:
+
+```text
+w0 = (h[0] + ARK_INT[21])^7
 ```
 
-Suppose we have a Merkle tree as illustrated below. This Merkle tree has $4$ leaves, each of which consists of $4$ field elements. For example, leaf $a$ consists of elements $a_0, a_1, a_2, a_3$, leaf be consists of elements $b_0, b_1, b_2, b_3$ etc.
+Then:
 
-![hash_merkle_tree](../../img/design/chiplets/hasher/hash_merkle_tree.png)
-
-If we wanted to verify that leaf $d$ is in fact in the tree, we'd need to compute the following hashes:
-
-$$
-r \leftarrow hash(e, hash(c, d))
-$$
-
-And if $r = g$, we can be convinced that $d$ is in fact in the tree at position $3$. Execution trace for this computation would look as illustrated below.
-
-| Row (mod 32) | $k_2$ | $k_1$ | $k_0$ | $s_0,s_1,s_2$ | RATE0 ($h_0..h_3$) | RATE1 ($h_4..h_7$) | CAP ($h_8..h_{11}$) | $i$ |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0 | 1 | 0 | 0 | MP | $c_0..c_3$ | $d_0..d_3$ | $0,0,0,0$ | $3$ |
-| 1 | 0 | 0 | 0 | HR | permute | permute | permute | $3$ |
-| ... | ... | ... | ... | ... | ... | ... | ... | ... |
-| 31 | 0 | 0 | 1 | MPA | $e_0..e_3$ | $f_0..f_3$ | $0,0,0,0$ | $3$ |
-| 32 | 1 | 0 | 0 | MP | $e_0..e_3$ | $f_0..f_3$ | $0,0,0,0$ | $1$ |
-| ... | ... | ... | ... | ... | ... | ... | ... | ... |
-| 63 | 0 | 0 | 1 | HOUT | $g_0..g_3$ | unused | unused | $0$ |
-
-In the above, the prover provides values for nodes $c$ and $e$ non-deterministically.
-The index $i$ remains constant throughout a permutation and is shifted at the `MPA` row, so it
-changes only between cycles.
-
-### Update Merkle root
-
-Updating a node in a Merkle tree (which also updates the root of the tree) can be simulated by verifying two Merkle paths: the path that starts with the old leaf and the path that starts with the new leaf.
-
-Suppose we have the same Merkle tree as in the previous example, and we want to replace node $d$ with node $d'$. The computations we'd need to perform are:
-
-$$
-r \leftarrow hash(e, hash(c, d))
-r' \leftarrow hash(e, hash(c, d'))
-$$
-
-Then, as long as $r = g$, and the same values were used for $c$ and $e$ in both computations, we can be convinced that the new root of the tree is $r'$.
-
-The chiplet accomplishes the above by executing the following instructions:
-
-```
-// verify the old merkle path
-[MV, HR]                                    // init state and execute a hash round (concurrently)
-HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
-HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
-HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
-MVA                                         // copy result & absorb the next node into the state
-HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
-HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
-HR HR HR HR HR HR HR HR HR HR HR            // execute 11 more hash rounds
-HOUT                                        // return elements 0, 1, 2, 3 of the state as output (the digest)
-
-// verify the new merkle path
-[MU, HR]                                    // init state and execute a hash round (concurrently)
-HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
-HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
-HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
-MUA                                         // copy result & absorb the next node into the state
-HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
-HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
-HR HR HR HR HR HR HR HR HR HR HR            // execute 11 more hash rounds
-HOUT                                        // return elements 0, 1, 2, 3 of the state as output (the digest)
+```text
+y = M_I(h with lane 0 replaced by w0)
+h_next = M_E(S(y + ark))
 ```
 
-The semantics of `MV` and `MU` instructions are similar to the semantics of `MP` instruction from the previous example (and `MVA` and `MUA` are similar to `MPA`) with one important difference: `MV*` instructions add the absorbed node (together with its index in the tree) to permutation column $p_1$, while `MU*` instructions remove the absorbed node (together with its index in the tree) from $p_1$. Thus, if the same nodes were used during both Merkle path verification, the state of $p_1$ should not change. This mechanism is used to ensure that the same internal nodes were used in both computations.
+#### 5. Row 15: boundary / final state
 
-## AIR constraints
+The final row of the packed cycle stores the final permutation output and has no
+next-state permutation-step constraint.
 
-When describing AIR constraints, we adopt the following notation: for column $x$, we denote the value in the current row simply as $x$, and the value in the next row of the column as $x'$. Thus, all transition constraints described in this note work with two consecutive rows of the execution trace.
+### Unused witness zeroing
 
-### Selector columns constraints
+Because `s0/s1/s2` are witnesses on permutation rows, the AIR also constrains
+unused witness slots to zero:
 
-For selector columns, first we must ensure that only binary values are allowed in these columns. This can be done with the following constraints:
+- rows `0..3` and `12..15`: `w0 = w1 = w2 = 0`,
+- row `11`: `w1 = w2 = 0`.
 
-$$
-s_0^2 - s_0 = 0 \text{ | degree} = 2
-s_1^2 - s_1 = 0 \text{ | degree} = 2
-s_2^2 - s_2 = 0 \text{ | degree} = 2
-$$
+These constraints are primarily defensive they make permutation rows maximally inert and reduce the
+chance that some other selector consumer accidentally interprets witness values
+as controller selectors.
 
-Next, we need to make sure that unless $f_{out}=1$ or $f_{out}'=1$, the values in columns $s_1$ and $s_2$ are copied over to the next row. This can be done with the following constraints:
+### Sponge continuation capacity preservation
 
-$$
-(s_1' - s_1) \cdot (1 - f_{out}') \cdot (1 - f_{out}) = 0  \text{ | degree} = 7
-(s_2' - s_2) \cdot (1 - f_{out}') \cdot (1 - f_{out}) = 0  \text{ | degree} = 7
-$$
+For multi-batch sponge hashing, the next controller input row overwrites the rate
+lanes but must preserve the previous permutation's capacity word. The AIR
+therefore enforces capacity equality across controller continuation boundaries:
 
-Next, we need to enforce that if any of $f_{abp}, f_{mpa}, f_{mva}, f_{mua}$ flags is set to $1$, the next value of $s_0$ is $0$. In all other cases, $s_0$ should be unconstrained. These flags will only be set for rows that are 1 less than a multiple of 32 (the last row of each cycle). This can be done with the following constraint:
+- only when the next row is a controller sponge input,
+- only when that next row is not a boundary row.
 
-$$
-s_0' \cdot (f_{abp} + f_{mpa} + f_{mva} + f_{mua})= 0  \text{ | degree} = 5
-$$
+This is the key invariant that makes `RESPAN` represent continued sponge
+absorption rather than a fresh hash.
 
-Lastly, we need to make sure that no invalid combinations of flags are allowed. This can be done with the following constraints:
+### Merkle controller constraints
 
-$$
-k_0 \cdot (1 - s_0) \cdot s_1 = 0 \text{ | degree} = 3
-$$
+Merkle operations are expressed entirely in the controller region.
 
-The above constraints enforce that on every step which is one less than a multiple of $32$, if $s_0 = 0$, then $s_1$ must also be set to $0$. Basically, if we set $s_0=0$, then we must make sure that either $f_{hout}=1$ or $f_{sout}=1$.
+The AIR enforces:
 
-### Node index constraints
+- index decomposition on Merkle input rows:
 
-Node index column $i$ is relevant only for Merkle path verification and Merkle root update computations, but to simplify the overall constraint system, the same constraints will be imposed on this column for all computations.
+```text
+idx = 2 * idx_next + direction_bit
+```
 
-Overall, we want values in the index column to behave as follows:
+- direction-bit booleanity,
+- continuity of the shifted index across non-final output -> next-input
+  boundaries,
+- zero capacity on Merkle input rows,
+- `node_index = 0` on digest-return (`HOUT`) rows.
 
-- When we start a new computation, we should be able to set $i$ to an arbitrary value.
-- When a computation is finished, value in $i$ must be $0$.
-- When we absorb a new node into the hasher state we must shift the value in $i$ by one bit to the right.
-- In all other cases value in $i$ should not change.
+In addition, on non-final Merkle boundaries the output row carries the next
+step's `direction_bit`, allowing the AIR to route the current digest into either
+`RATE0` or `RATE1` of the next Merkle input row.
 
-A shift by one bit to the right can be described with the following equation: $i = 2 \cdot i' + b$, where $b$ is the value of the bit which is discarded. Thus, as long as $b$ is a binary value, the shift to the right is performed correctly, and this can be enforced with the following constraint:
+### `mrupdate_id` and sibling-table soundness
 
-$$
-b^2 - b = 0
-$$
+`MRUPDATE` executes two Merkle legs:
 
-Since we want to enforce this constraint only when a new node is absorbed into the hasher state, we'll define a flag for when this should happen as follows:
+- old-path verification,
+- new-path verification.
 
-$$
-f_{an} = f_{mp} + f_{mv} + f_{mu} + f_{mpa} + f_{mva} + f_{mua}
-$$
+To prevent sibling entries from different `MRUPDATE` operations from cancelling
+against each other, the chiplet introduces a dedicated `mrupdate_id` column.
+The AIR enforces:
 
-And then the full constraint would looks as follows:
+- `mrupdate_id` increments once per `MRUPDATE` start,
+- it stays constant through the old/new legs of that same update,
+- it is zero on all permutation rows.
 
-$$
-f_{an} \cdot (b^2 - b) = 0  \text{ | degree} = 6
-$$
+Sibling-table messages on `b_hash_kernel` include `mrupdate_id`, so the running
+product only balances if the old and new paths of the **same** update use the
+same siblings.
 
-Next, to make sure when a computation is finished $i=0$, we can use the following constraint:
+### Bus constraints
 
-$$
-f_{out} \cdot i = 0 \text{ | degree} = 4
-$$
+The hasher participates in three different lookup relations.
 
-Finally, to make sure that the value in $i$ is copied over to the next row unless we are absorbing a new row or the computation is finished, we impose the following constraint:
+#### Chiplets bus (`b_chiplets`)
 
-$$
-(1 - f_{an} - f_{out}) \cdot (i' - i) = 0 \text{ | degree} = 5
-$$
+Only controller rows contribute here. The chiplets bus carries the external VM
+interface messages:
 
-To satisfy these constraints for computations not related to Merkle paths (i.e., 2-to-1 hash and liner hash of elements), we can set $i = 0$ at the start of the computation. This guarantees that $i$ will remain $0$ until the end of the computation.
+- full-state sponge start,
+- rate-only sponge continuation,
+- selected Merkle leaf word,
+- digest return,
+- full-state return.
 
-### Hasher state constraints
+Permutation rows do not contribute.
 
-Hasher state columns $h_0, ..., h_{11}$ should behave as follows:
+#### Permutation-link LogUp on `v_wiring`
 
-- For the first $31$ rows of every $32$-row cycle (i.e., when $k_0=0$), we need to apply [Poseidon2](https://eprint.iacr.org/2023/323) round constraints to the hasher state. For brevity, we omit these constraints from this note.
-- On the $32$nd row of every $32$-row cycle, we apply the constraints based on which transition flag is set as described in the table below.
+The permutation-link relation binds controller requests to the permutation
+segment by balancing:
 
-Specifically, when absorbing the next set of elements into the state during linear hash computation (i.e., $f_{abp} = 1$), the last $4$ elements (the capacity portion) are carried over to the next row. For $j \in [0, 4)$ this can be described as follows:
+- controller input rows against permutation row `0`, and
+- controller output rows against permutation row `15`.
 
-$$
-f_{abp} \cdot (h'_{j+8} - h_{j+8}) = 0 \text{ | degree} = 5
-$$
+In common-denominator form, the hasher-side AIR enforces:
 
-When absorbing the next node during Merkle path computation (i.e., $f_{mp} + f_{mv} + f_{mu}=1$), the result of the previous hash ($h_0, ..., h_3$) is copied over either to $(h_0', ..., h_3')$ or to $(h_4', ..., h_7')$ depending on the value of $b$, which is defined in the same way as in the previous section. For $j \in [0, 4)$ this can be described as follows:
+```text
+hasher_flag * (delta * msg_in * msg_out
+              - msg_out * (f_in  - f_p_in  * m)
+              - msg_in  * (f_out - f_p_out * m))
++ idle_flag * delta
+```
 
-$$
-(f_{mp} + f_{mv} + f_{mu}) \cdot ((1 - b) \cdot (h_{j}' - h_{j}) + b \cdot (h_{j + 4}' - h_{j})) = 0 \text{ | degree} = 6
-$$
+where `m` is the permutation multiplicity and `idle_flag` covers rows where the
+shared `v_wiring` accumulator must propagate unchanged.
 
-Note, that when a computation is completed (i.e., $f_{out}=1$), the next hasher state is unconstrained.
+This is the core mechanism for memoization.
 
-### Multiset check constraints
+#### Hash-kernel virtual table (`b_hash_kernel`)
 
-In this sections we describe constraints which enforce updates for [multiset check columns](../lookups/multiset.md) $b_{chip}$ and $p_1$. These columns can be updated only on rows which are multiples of $32$ or $1$ less than a multiple of $32$. On all other rows the values in the columns remain the same.
+The hasher uses this running product for two logically separate purposes:
 
-To simplify description of the constraints, we define the following variables. Below, we denote random values sent by the verifier after the prover commits to the main execution trace as $\alpha_0$, $\alpha_1$, $\alpha_2$ etc.
+- sibling-table balancing for `MRUPDATE`,
+- precompile transcript state tracking for `LOG_PRECOMPILE`.
 
-$$
-m = op_{label} + 2^4 \cdot k_2 + 2^5 \cdot k_0
-v_h = \alpha_0 + \alpha_1 \cdot m + \alpha_2 \cdot (clk + 1) + \alpha_3 \cdot i
-v_a = \sum_{j=0}^{3}(\alpha_{j+4} \cdot h_j)
-v_b = \sum_{j=0}^{3}(\alpha_{j+8} \cdot h_{j+4})
-v_c = \sum_{j=0}^{3}(\alpha_{j+12} \cdot h_{j+8})
-v_d = \sum_{j=0}^{3}(\alpha_{j+4} \cdot h_{j+4})
-$$
+For the sibling-table part, the old-path leg inserts siblings and the new-path
+leg removes them. Because the entries are keyed by `(mrupdate_id, node_index,
+sibling_word)`, unrelated updates cannot cancel each other.
 
-Message slot layout is fixed: slots $0..3$ use $\alpha_{4..7}$, slots $4..7$ use
-$\alpha_{8..11}$, and slots $8..11$ use $\alpha_{12..15}$. For partial messages,
-we place the payload into slots $0..7$ and set capacity slots $8..11$ to zero.
-Leaf/output messages use only slots $0..3$.
+## Implementation map
 
-In the above:
+The hasher design is implemented across the following files:
 
-- $m$ is a _transition label_, composed of the [operation label](./index.md#operation-labels) and the periodic columns that uniquely identify each transition function. The values in the $k_0$ and $k_2$ periodic columns are included to identify the row in the hash cycle where the operation occurs. They serve to differentiate between operations that share selectors but occur at different rows in the cycle, such as `BP`, which uses $op_{linhash}$ at the first row in the cycle to initiate a linear hash, and `ABP`, which uses $op_{linhash}$ at the last row in the cycle to absorb new elements.
-- $v_h$ is a _common header_ which is a combination of the transition label, a unique row address, and the node index. For the unique row address, the `clk` column from the system component is used, but we add $1$, because the system's `clk` column starts at $0$.
-- $v_a$, $v_b$, $v_c$ are the rate0, rate1, and capacity words (4 elements each).
-- $v_d$ reuses the rate0 alpha slice on the rate1 word. This is used for Merkle leaf encoding
-  when the right child is selected. For next-row values, $v_d'$ is defined the same way using $h'$.
+- `air/src/constraints/chiplets/hasher/selectors.rs`  
+  Controller structure, `perm_seg` rules, lifecycle, and padding constraints.
 
-#### Chiplets bus constraints
+- `air/src/constraints/chiplets/hasher/state.rs`  
+  Packed Poseidon2 transition constraints, witness usage, and unused-witness
+  zeroing rules.
 
-As described previously, the [chiplets bus](./index.md#chiplets-bus) $b_{chip}$, implemented as a running product column, is used to tie the hash chiplet with the main VM's stack and decoder. When receiving inputs from or returning results to the stack (or decoder), the hash chiplet multiplies $b_{chip}$ by their respective values. On the other side, when sending inputs to the hash chiplet or receiving results from the chiplet, the stack (or decoder) divides $b_{chip}$ by their values.
+- `air/src/constraints/chiplets/hasher/merkle.rs`  
+  Merkle index decomposition, continuity, routing, and zero-capacity rules.
 
-In the section below we describe only the hash chiplet side of the constraints (i.e., multiplying $b_{chip}$ by relevant values). We define the values which are to be multiplied into $b_{chip}$ for each operation as follows:
+- `air/src/constraints/chiplets/hasher/periodic.rs`  
+  Packed 16-row schedule and periodic round-constant encoding.
 
-When starting a new simple or linear hash computation (i.e., $f_{bp}=1$) or when returning the entire state of the hasher ($f_{sout}=1$), the entire hasher state is included into $b_{chip}$:
+- `air/src/constraints/chiplets/bus/chiplets.rs`  
+  Hasher messages visible to the rest of the VM.
 
-$$
-v_{all} = v_h + v_a + v_b + v_c
-$$
+- `air/src/constraints/chiplets/bus/wiring.rs`  
+  Controller-to-permutation permutation-link relation on `v_wiring`.
 
-When starting a Merkle path computation (i.e., $f_{mp} + f_{mv} + f_{mu} = 1$), we include the leaf of the path into $b_{chip}$. The leaf is selected from the state based on value of $b$ (defined as in the previous section):
+- `air/src/constraints/chiplets/bus/hash_kernel.rs`  
+  Sibling-table and `log_precompile`-related hasher interactions.
 
-$$
-v_{leaf} = v_h + (1-b) \cdot v_a + b \cdot v_d
-$$
+- `processor/src/trace/chiplets/hasher/trace.rs`  
+  Trace generation for the controller and packed permutation segment.
 
-When absorbing a new set of elements into the state while computing a linear hash (i.e., $f_{abp}=1$), we include the next rate (state slots $0..7$) into $b_{chip}$:
+- `processor/src/trace/chiplets/aux_trace/hasher_perm.rs`  
+  Auxiliary trace generation for the permutation-link running sum.
 
-$$
-v_{abp} = v_h + v_a' + v_b'
-$$
+## Soundness-critical design points
 
-When a computation is complete (i.e., $f_{hout}=1$), we include the first rate word of the hasher state (the result) into $b_{chip}$:
+A few aspects of the packed design are especially important:
 
-$$
-v_{res} = v_h + v_a
-$$
+1. **Controller/permutation separation.** Only controller rows can interact with
+   the external chiplets bus; only permutation rows can satisfy the packed
+   Poseidon2 transition constraints.
+2. **Cycle alignment.** The permutation segment can start only at cycle row 0 and
+   can end only at cycle row 15.
+3. **Multiplicity constancy.** `node_index` is constant inside a permutation
+   cycle, so a single multiplicity is attached to the whole cycle.
+4. **Witness reuse hardening.** Unused witness slots are forced to zero, and the
+   first-row controller constraint explicitly forbids a permutation row from
+   masquerading as the first controller row.
 
-Using the above values, we can describe the constraints for updating column $b_{chip}$ as follows.
+## References
 
-$$
-b_{chip}' = b_{chip} \cdot ((f_{bp} + f_{sout}) \cdot v_{all} + (f_{mp} + f_{mv} + f_{mu}) \cdot v_{leaf} + f_{abp} \cdot v_{abp} + f_{hout} \cdot v_{res} +
-1 - (f_{bp} + f_{mp} + f_{mv} + f_{mu} + f_{abp} + f_{out}))
-$$
+Implementation files:
 
-The above constraint reduces to the following under various flag conditions:
-
-| Condition      | Applied constraint                    |
-| -------------- | ------------------------------------- |
-| $f_{bp} = 1$   | $b_{chip}' = b_{chip} \cdot v_{all}$  |
-| $f_{sout} = 1$ | $b_{chip}' = b_{chip} \cdot v_{all}$  |
-| $f_{mp} = 1$   | $b_{chip}' = b_{chip} \cdot v_{leaf}$ |
-| $f_{mv} = 1$   | $b_{chip}' = b_{chip} \cdot v_{leaf}$ |
-| $f_{mu} = 1$   | $b_{chip}' = b_{chip} \cdot v_{leaf}$ |
-| $f_{abp} = 1$  | $b_{chip}' = b_{chip} \cdot v_{abp}$  |
-| $f_{hout} = 1$ | $b_{chip}' = b_{chip} \cdot v_{res}$  |
-| Otherwise      | $b_{chip}' = b_{chip}$                |
-
-Note that the degree of the above constraint is $7$.
-
-#### Sibling table constraints
-
-_Note: Although this table is described independently, it is implemented as part of the [chiplets virtual table](../chiplets/index.md#chiplets-virtual-table), which combines all virtual tables required by any of the chiplets into a single master table._
-
-As mentioned previously, the sibling table (represented by running column $p_1$) is used to keep track of sibling nodes used during Merkle root update computations. For this computation, we need to enforce the following rules:
-
-- When computing the old Merkle root, whenever a new sibling node is absorbed into the hasher state (i.e., $f_{mv} + f_{mva} = 1$), an entry for this sibling should be included into $p_1$.
-- When computing the new Merkle root, whenever a new sibling node is absorbed into the hasher state (i.e., $f_{mu} + f_{mua} = 1$), the entry for this sibling should be removed from $p_1$.
-
-To simplify the description of the constraints, we use variables $v_a$ and $v_b$ defined above and define the value representing an entry in the sibling table as follows:
-
-$$
-v_{sib0} = \alpha_0 + \alpha_3 \cdot i + v_b
-
-v_{sib1} = \alpha_0 + \alpha_3 \cdot i + v_a
-
-v_{sibling} = (1-b) \cdot v_{sib0} + b \cdot v_{sib1}
-$$
-
-Using the above value, we can define the constraint for updating $p_1$ as follows:
-
-$$
-p_1' \cdot \left( (f_{mv} + f_{mva}) \cdot v_{sibling} + 1 - (f_{mv} + f_{mva}) \right) =
-p_1 \cdot \left( (f_{mu} + f_{mua}) \cdot v_{sibling} + 1 - (f_{mu} + f_{mua}) \right)
-$$
-
-The above constraint reduces to the following under various flag conditions:
-
-| Condition     | Applied constraint             |
-| ------------- | ------------------------------ |
-| $f_{mv} = 1$  | $p_1' \cdot v_{sibling} = p_1$ |
-| $f_{mva} = 1$ | $p_1' \cdot v_{sibling} = p_1$ |
-| $f_{mu} = 1$  | $p_1' = p_1 \cdot v_{sibling}$ |
-| $f_{mua} = 1$ | $p_1' = p_1 \cdot v_{sibling}$ |
-| Otherwise     | $p_1' = p_1$                   |
-
-Note that the degree of the above constraint is $7$.
-
-To make sure computation of the old Merkle root is immediately followed by the computation of the new Merkle root, we impose the following constraint:
-
-$$
-(f_{bp} + f_{mp} + f_{mv}) \cdot (1 - p_1) = 0 \text{ | degree} = 5
-$$
-
-The above means that whenever we start a new computation which is not the computation of the new Merkle root, the sibling table must be empty. Thus, after the hash chiplet computes the old Merkle root, the only way to clear the table is to compute the new Merkle root.
-
-Together with boundary constraints enforcing that $p_1=1$ at the first and last rows of the running product column which implements the sibling table, the above constraints ensure that if a node was included into $p_1$ as a part of computing the old Merkle root, the same node must be removed from $p_1$ as a part of computing the new Merkle root. These two boundary constraints are described as part of the [chiplets virtual table constraints](../chiplets/index.md#chiplets-virtual-table-constraints).
+- `air/src/constraints/chiplets/hasher/mod.rs`
+- `air/src/constraints/chiplets/hasher/selectors.rs`
+- `air/src/constraints/chiplets/hasher/state.rs`
+- `air/src/constraints/chiplets/hasher/merkle.rs`
+- `air/src/constraints/chiplets/hasher/periodic.rs`
+- `processor/src/trace/chiplets/hasher/trace.rs`
+- `processor/src/trace/chiplets/aux_trace/hasher_perm.rs`
+- `air/src/constraints/chiplets/bus/chiplets.rs`
+- `air/src/constraints/chiplets/bus/wiring.rs`

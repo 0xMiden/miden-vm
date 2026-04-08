@@ -266,9 +266,7 @@ where
     let q_times_v = builder.mul(quotient, vanishing);
     let root = builder.sub(acc, q_times_v);
 
-    let mut dag = AceDag { nodes: builder.into_nodes(), root };
-    dag.compact();
-    dag
+    builder.build(root)
 }
 
 fn build_periodic_nodes<EF>(

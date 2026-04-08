@@ -73,11 +73,12 @@ use miden_crypto::stark::air::AirBuilder;
 use crate::{
     Felt, MainCols, MidenAirBuilder,
     constraints::{
-        constants::{F_1, F_128, HASH_CYCLE_LEN_FELT},
+        constants::{F_1, F_128},
         decoder::columns::DecoderCols,
         op_flags::OpFlags,
         utils::{BoolNot, horner_eval_bits},
     },
+    trace::chiplets::hasher::CONTROLLER_ROWS_PER_PERM_FELT,
 };
 
 pub mod bus;
@@ -474,21 +475,21 @@ pub fn enforce_main<AB>(
     // Block address (addr) constraints
     // =============================================
     // The block address links decoder rows to the hasher table, which computes Poseidon2
-    // hashes of MAST node contents. Each Poseidon2 hash computation occupies
-    // HASH_CYCLE_LEN = 32 rows in the hasher table.
+    // hashes of MAST node contents. Each hash uses a controller input/output pair
+    // (CONTROLLER_ROWS_PER_PERMUTATION = 2 rows in the hasher table).
     //
     // When RESPAN starts a new batch within the same span, the hasher table needs a new
-    // 32-row block, so addr increments by HASH_CYCLE_LEN.
+    // controller pair, so addr increments by CONTROLLER_ROWS_PER_PERMUTATION.
 
     // Inside a basic block, addr must stay the same (all ops in one batch share the same
     // hasher-table address).
     builder.when_transition().when(in_span).assert_eq(addr_next, addr);
 
-    // RESPAN moves to the next hash block (addr += 32).
+    // RESPAN moves to the next hash block (addr += CONTROLLER_ROWS_PER_PERMUTATION).
     builder
         .when_transition()
         .when(op_flags.respan())
-        .assert_eq(addr_next, addr + HASH_CYCLE_LEN_FELT);
+        .assert_eq(addr_next, addr + CONTROLLER_ROWS_PER_PERM_FELT);
 
     // HALT forces addr = 0 (execution ends at the root block).
     builder.when(op_flags.halt()).assert_zero(addr);

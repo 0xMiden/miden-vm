@@ -94,7 +94,7 @@ where
     EF: ExtensionField<Felt>,
 {
     let constraint_root = constraint_dag.root;
-    let mut builder = DagBuilder::from_nodes(constraint_dag.nodes);
+    let mut builder = DagBuilder::from_dag(constraint_dag);
 
     // Build product_check.
     let product_check = build_product_check(&mut builder, config);
@@ -110,9 +110,7 @@ where
     let partial = builder.add(constraint_root, term2);
     let root = builder.add(partial, term3);
 
-    let mut dag = AceDag { nodes: builder.into_nodes(), root };
-    dag.compact();
-    dag
+    builder.build(root)
 }
 
 /// Build the running-product identity check.

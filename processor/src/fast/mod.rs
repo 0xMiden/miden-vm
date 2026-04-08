@@ -144,7 +144,7 @@ impl FastProcessor {
             stack,
             advice: self.advice,
             memory: self.memory,
-            final_pc_transcript: self.pc_transcript,
+            final_precompile_transcript: self.pc_transcript,
         }
     }
 
@@ -634,7 +634,7 @@ pub struct ExecutionOutput {
     pub stack: StackOutputs,
     pub advice: AdviceProvider,
     pub memory: Memory,
-    pub final_pc_transcript: PrecompileTranscript,
+    pub final_precompile_transcript: PrecompileTranscript,
 }
 
 // EXECUTION CONTEXT INFO

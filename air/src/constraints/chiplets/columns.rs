@@ -3,12 +3,14 @@
 use alloc::{vec, vec::Vec};
 use core::{borrow::Borrow, mem::size_of};
 
-use miden_core::{Felt, WORD_SIZE, chiplets::hasher::Hasher};
+use miden_core::{Felt, WORD_SIZE};
 
 use super::super::{columns::indices_arr, ext_field::QuadFeltExpr};
+#[cfg(test)]
+use crate::trace::chiplets::hasher::HASH_CYCLE_LEN;
 use crate::trace::chiplets::{
     bitwise::NUM_DECOMP_BITS,
-    hasher::{CAPACITY_LEN, DIGEST_LEN, HASH_CYCLE_LEN, NUM_SELECTORS, RATE_LEN, STATE_WIDTH},
+    hasher::{CAPACITY_LEN, DIGEST_LEN, NUM_SELECTORS, RATE_LEN, STATE_WIDTH},
 };
 
 // HELPERS
@@ -24,14 +26,14 @@ pub fn borrow_chiplet<T, S>(slice: &[T]) -> &S {
 // HASHER COLUMNS
 // ================================================================================================
 
-/// Hasher chiplet columns (16 columns), viewed from `chiplets[1..17]`.
+/// Hasher chiplet columns (19 columns), viewed from `chiplets[1..20]`.
 ///
 /// ## Layout
 ///
 /// ```text
-/// | selectors[3] |     state[12]                                        | node_index |
-/// |              | rate0[4] (= digest) | rate1[4]     | capacity[4]     |            |
-/// | s0, s1, s2   | h0  h1  h2  h3      | h4  h5  h6  h7 | h8  h9  h10 h11 | i      |
+/// | selectors[3] |     state[12]                                   | extra cols           |
+/// |              | rate0[4] (= digest) | rate1[4]   | capacity[4]  |                      |
+/// | s0, s1, s2   | h0..h3             | h4..h7     | h8..h11      | i  mr  bnd  dir  seg |
 /// ```
 ///
 /// The state holds a Poseidon2 sponge in `[RATE0, RATE1, CAPACITY]` layout.
@@ -45,6 +47,14 @@ pub struct HasherCols<T> {
     pub state: [T; STATE_WIDTH],
     /// Merkle tree node index.
     pub node_index: T,
+    /// Domain separator for sibling table across MRUPDATE ops.
+    pub mrupdate_id: T,
+    /// 1 on boundary rows (first input or last output of each permutation).
+    pub is_boundary: T,
+    /// Direction bit for Merkle path verification.
+    pub direction_bit: T,
+    /// Permutation segment counter.
+    pub perm_seg: T,
 }
 
 impl<T: Copy> HasherCols<T> {
@@ -290,27 +300,34 @@ pub struct PeriodicCols<T> {
     pub bitwise: BitwisePeriodicCols<T>,
 }
 
-/// Hasher chiplet periodic columns (18 columns, period = 32 rows).
+/// Hasher chiplet periodic columns (16 columns, period = 16 rows).
 ///
-/// Provides cycle-position markers, step-type selectors, and Poseidon2 round constants
-/// for the hasher chiplet.
+/// Provides step-type selectors and Poseidon2 round constants for the hasher chiplet.
+/// The hasher operates on a 16-row cycle (15 transitions + 1 boundary row).
+///
+/// ## Layout
+///
+/// | Index | Name           | Description |
+/// |-------|----------------|-------------|
+/// | 0     | is_init_ext    | 1 on row 0 (init linear + first external round) |
+/// | 1     | is_ext         | 1 on rows 1-3, 12-14 (single external round) |
+/// | 2     | is_packed_int  | 1 on rows 4-10 (3 packed internal rounds) |
+/// | 3     | is_int_ext     | 1 on row 11 (int22 + ext5 merged) |
+/// | 4-15  | ark[0..12]     | Shared round constants |
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct HasherPeriodicCols<T> {
-    /// 1 on first row of 32-row cycle, 0 elsewhere.
-    pub cycle_row_0: T,
-    /// 1 on penultimate row (lookahead for output).
-    pub cycle_row_30: T,
-    /// 1 on final row (boundary/output row).
-    pub cycle_row_31: T,
-    /// 1 on external round rows (1-4, 27-30).
-    pub is_external: T,
-    /// 1 on internal round rows (5-26).
-    pub is_internal: T,
-    /// External round constants per lane (12 lanes), non-zero on external-round rows.
-    pub ark_ext: [T; STATE_WIDTH],
-    /// Internal round constant (lane 0 only), non-zero on internal-round rows (5-26).
-    pub ark_int: T,
+    /// 1 on row 0 (init linear + first external round).
+    pub is_init_ext: T,
+    /// 1 on rows 1-3, 12-14 (single external round).
+    pub is_ext: T,
+    /// 1 on rows 4-10 (3 packed internal rounds).
+    pub is_packed_int: T,
+    /// 1 on row 11 (int22 + ext5 merged).
+    pub is_int_ext: T,
+    /// Shared round constants (12 lanes). Carry external round constants on external
+    /// rows, and internal round constants in ark[0..2] on packed-internal rows.
+    pub ark: [T; STATE_WIDTH],
 }
 
 /// Bitwise chiplet periodic columns (2 columns, period = 8 rows).
@@ -326,53 +343,19 @@ pub struct BitwisePeriodicCols<T> {
 // PERIODIC COLUMN GENERATION
 // ================================================================================================
 
-#[allow(clippy::new_without_default)]
 impl HasherPeriodicCols<Vec<Felt>> {
-    /// Generate periodic columns for the Poseidon2 hasher chiplet.
-    #[allow(clippy::needless_range_loop)]
-    pub fn new() -> Self {
-        let mut cycle_row_0 = vec![Felt::ZERO; HASH_CYCLE_LEN];
-        let mut cycle_row_30 = vec![Felt::ZERO; HASH_CYCLE_LEN];
-        let mut cycle_row_31 = vec![Felt::ZERO; HASH_CYCLE_LEN];
-        cycle_row_0[0] = Felt::ONE;
-        cycle_row_30[30] = Felt::ONE;
-        cycle_row_31[31] = Felt::ONE;
-
-        let mut is_external = vec![Felt::ZERO; HASH_CYCLE_LEN];
-        let mut is_internal = vec![Felt::ZERO; HASH_CYCLE_LEN];
-
-        for r in 1..=4 {
-            is_external[r] = Felt::ONE;
-        }
-        for r in 27..=30 {
-            is_external[r] = Felt::ONE;
-        }
-        for r in 5..=26 {
-            is_internal[r] = Felt::ONE;
-        }
-
-        let ark_ext = core::array::from_fn(|lane| {
-            let mut col = vec![Felt::ZERO; HASH_CYCLE_LEN];
-            for r in 1..=4 {
-                col[r] = Hasher::ARK_EXT_INITIAL[r - 1][lane];
-            }
-            for r in 27..=30 {
-                col[r] = Hasher::ARK_EXT_TERMINAL[r - 27][lane];
-            }
-            col
-        });
-
-        let mut ark_int = vec![Felt::ZERO; HASH_CYCLE_LEN];
-        ark_int[5..=26].copy_from_slice(&Hasher::ARK_INT);
+    /// Generate periodic columns from the hasher periodic module.
+    pub fn from_periodic_columns() -> Self {
+        use super::hasher::periodic;
+        let flat = periodic::periodic_columns();
+        assert_eq!(flat.len(), periodic::NUM_PERIODIC_COLUMNS);
 
         Self {
-            cycle_row_0,
-            cycle_row_30,
-            cycle_row_31,
-            is_external,
-            is_internal,
-            ark_ext,
-            ark_int,
+            is_init_ext: flat[periodic::P_IS_INIT_EXT].clone(),
+            is_ext: flat[periodic::P_IS_EXT].clone(),
+            is_packed_int: flat[periodic::P_IS_PACKED_INT].clone(),
+            is_int_ext: flat[periodic::P_IS_INT_EXT].clone(),
+            ark: core::array::from_fn(|i| flat[periodic::P_ARK_START + i].clone()),
         }
     }
 }
@@ -411,53 +394,20 @@ impl PeriodicCols<Vec<Felt>> {
     /// Generate all chiplet periodic columns as a flat `Vec<Vec<Felt>>`.
     pub fn periodic_columns() -> Vec<Vec<Felt>> {
         let HasherPeriodicCols {
-            cycle_row_0,
-            cycle_row_30,
-            cycle_row_31,
-            is_external,
-            is_internal,
-            ark_ext:
-                [
-                    ark_0,
-                    ark_1,
-                    ark_2,
-                    ark_3,
-                    ark_4,
-                    ark_5,
-                    ark_6,
-                    ark_7,
-                    ark_8,
-                    ark_9,
-                    ark_10,
-                    ark_11,
-                ],
-            ark_int,
-        } = HasherPeriodicCols::new();
+            is_init_ext,
+            is_ext,
+            is_packed_int,
+            is_int_ext,
+            ark,
+        } = HasherPeriodicCols::from_periodic_columns();
 
         let BitwisePeriodicCols { k_first, k_transition } = BitwisePeriodicCols::new();
 
-        vec![
-            cycle_row_0,
-            cycle_row_30,
-            cycle_row_31,
-            is_external,
-            is_internal,
-            ark_0,
-            ark_1,
-            ark_2,
-            ark_3,
-            ark_4,
-            ark_5,
-            ark_6,
-            ark_7,
-            ark_8,
-            ark_9,
-            ark_10,
-            ark_11,
-            ark_int,
-            k_first,
-            k_transition,
-        ]
+        let mut cols = vec![is_init_ext, is_ext, is_packed_int, is_int_ext];
+        cols.extend(ark);
+        cols.push(k_first);
+        cols.push(k_transition);
+        cols
     }
 }
 
@@ -474,8 +424,8 @@ impl<T> Borrow<PeriodicCols<T>> for [T] {
 }
 
 const _: () = {
-    assert!(size_of::<PeriodicCols<u8>>() == 20);
-    assert!(size_of::<HasherPeriodicCols<u8>>() == 18);
+    assert!(size_of::<PeriodicCols<u8>>() == 18);
+    assert!(size_of::<HasherPeriodicCols<u8>>() == 16);
     assert!(size_of::<BitwisePeriodicCols<u8>>() == 2);
 };
 
@@ -498,42 +448,23 @@ mod tests {
     }
 
     #[test]
-    fn hasher_cycle_markers_are_exclusive() {
-        let h = HasherPeriodicCols::new();
-        for (row_idx, ((row0, row30), row31)) in
-            h.cycle_row_0.iter().zip(&h.cycle_row_30).zip(&h.cycle_row_31).enumerate()
-        {
-            assert_eq!(*row0 * (*row0 - Felt::ONE), Felt::ZERO);
-            assert_eq!(*row30 * (*row30 - Felt::ONE), Felt::ZERO);
-            assert_eq!(*row31 * (*row31 - Felt::ONE), Felt::ZERO);
-
-            assert_eq!(*row0 * *row30, Felt::ZERO);
-            assert_eq!(*row0 * *row31, Felt::ZERO);
-            assert_eq!(*row30 * *row31, Felt::ZERO);
-
-            let expected = match row_idx {
-                0 | 30 | 31 => Felt::ONE,
-                _ => Felt::ZERO,
-            };
-            assert_eq!(*row0 + *row30 + *row31, expected);
-        }
-    }
-
-    #[test]
     fn hasher_step_selectors_are_exclusive() {
-        let h = HasherPeriodicCols::new();
-        for (row_idx, (is_ext, is_int)) in h.is_external.iter().zip(&h.is_internal).enumerate() {
-            assert_eq!(*is_ext * (*is_ext - Felt::ONE), Felt::ZERO);
-            assert_eq!(*is_int * (*is_int - Felt::ONE), Felt::ZERO);
+        let h = HasherPeriodicCols::from_periodic_columns();
+        for row in 0..HASH_CYCLE_LEN {
+            let init_ext = h.is_init_ext[row];
+            let ext = h.is_ext[row];
+            let packed_int = h.is_packed_int[row];
+            let int_ext = h.is_int_ext[row];
 
-            assert_eq!(*is_ext * *is_int, Felt::ZERO);
+            // Each selector is binary.
+            assert_eq!(init_ext * (init_ext - Felt::ONE), Felt::ZERO);
+            assert_eq!(ext * (ext - Felt::ONE), Felt::ZERO);
+            assert_eq!(packed_int * (packed_int - Felt::ONE), Felt::ZERO);
+            assert_eq!(int_ext * (int_ext - Felt::ONE), Felt::ZERO);
 
-            let expected = match row_idx {
-                1..=4 | 27..=30 => (Felt::ONE, Felt::ZERO),
-                5..=26 => (Felt::ZERO, Felt::ONE),
-                _ => (Felt::ZERO, Felt::ZERO),
-            };
-            assert_eq!((*is_ext, *is_int), expected);
+            // At most one selector is active per row.
+            let sum = init_ext + ext + packed_int + int_ext;
+            assert!(sum == Felt::ZERO || sum == Felt::ONE, "row {row}: sum = {sum}");
         }
     }
 }

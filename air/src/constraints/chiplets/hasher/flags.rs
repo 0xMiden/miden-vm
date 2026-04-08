@@ -1,240 +1,130 @@
 //! Hasher chiplet flag computation functions.
 //!
-//! This module provides functions to compute operation flags for the hasher chiplet.
-//! Each flag identifies when a specific operation is active based on selector values
-//! and cycle position.
+//! In the controller/permutation split architecture, flags are pure selector expressions
+//! with no periodic column dependencies. They identify the operation type on controller rows.
 //!
-//! ## Unused Flags
+//! ## Controller Input Flags (s0=1)
 //!
-//! Some flags are defined but unused (`#[allow(dead_code)]`):
+//! | Flag | s0 | s1 | s2 | Operation |
+//! |------|----|----|----|--------------------|
+//! | f_sponge | 1  | 0  | 0  | Sponge mode (linear hash / 2-to-1 hash / HPERM) |
+//! | f_mp | 1  | 0  | 1  | Merkle path verify |
+//! | f_mv | 1  | 1  | 0  | Merkle verify (old root) |
+//! | f_mu | 1  | 1  | 1  | Merkle update (new root) |
 //!
-//! - **`f_bp`**: BP (Begin Permutation) needs no special constraints - the round function
-//!   constraints apply identically regardless of which operation started it.
-//! - **`f_hout`, `f_sout`**: The combined `f_out` flag suffices for hasher constraints.
+//! ## Controller Output Flags (s0=0, s1=0)
 //!
-//! ## Selector Encoding
+//! | Flag   | s0 | s1 | s2 | Operation |
+//! |--------|----|----|----|--------------------|
+//! | f_hout | 0  | 0  | 0  | Return digest |
+//! | f_sout | 0  | 0  | 1  | Return full state |
 //!
-//! The hasher uses 3 selector columns `s[0..2]` to encode operations:
+//! ## Permutation Segment
 //!
-//! | Operation | s0 | s1 | s2 | Cycle Position     | Description |
-//! |-----------|----|----|----|--------------------|-------------|
-//! | BP        | 1  | 0  | 0  | row 0              | Begin permutation |
-//! | MP        | 1  | 0  | 1  | row 0              | Merkle path verify |
-//! | MV        | 1  | 1  | 0  | row 0              | Merkle verify (old root) |
-//! | MU        | 1  | 1  | 1  | row 0              | Merkle update (new root) |
-//! | ABP       | 1  | 0  | 0  | row 31             | Absorb for linear hash |
-//! | MPA       | 1  | 0  | 1  | row 31             | Merkle path absorb |
-//! | MVA       | 1  | 1  | 0  | row 31             | Merkle verify absorb |
-//! | MUA       | 1  | 1  | 1  | row 31             | Merkle update absorb |
-//! | HOUT      | 0  | 0  | 0  | row 31             | Hash output (digest) |
-//! | SOUT      | 0  | 0  | 1  | row 31             | State output (full) |
+//! Perm segment rows are identified by `perm_seg=1`. No operation-specific flags apply
+//! on perm rows.
+
 use miden_core::field::PrimeCharacteristicRing;
 
-use crate::constraints::utils::BoolNot;
-
-// INITIALIZATION FLAGS (row 0 of 32-row cycle)
+// CONTROLLER INPUT FLAGS
 // ================================================================================================
 
-/// BP: Begin Permutation flag `(1,0,0)` on cycle row 0.
+/// Sponge-mode input flag `(1,0,0)`.
 ///
-/// Initiates single permutation, 2-to-1 hash, or linear hash computation.
+/// Active on controller input rows for sponge-mode operations: linear hash (multi-batch
+/// span), single 2-to-1 hash, or HPERM. In sponge mode, capacity is set once and carried
+/// through across continuations (as opposed to tree mode, where capacity is zeroed at
+/// every level).
 ///
-/// # Degree
-/// - Periodic: 1 (cycle_row_0)
-/// - Selectors: 3 (s0 * !s1 * !s2)
-/// - Total: 4
+/// # Degree: 3 (s0 * !s1 * !s2)
+#[inline]
+pub fn f_sponge<E: PrimeCharacteristicRing>(s0: E, s1: E, s2: E) -> E {
+    s0 * (E::ONE - s1) * (E::ONE - s2)
+}
+
+/// MP: Merkle Path verification input flag `(1,0,1)`.
+///
+/// Active on MPVERIFY controller input rows. MPVERIFY is a read-only path check --
+/// it does not interact with the sibling table.
+///
+/// # Degree: 3 (s0 * !s1 * s2)
 #[inline]
 #[allow(dead_code)]
-pub fn f_bp<E>(cycle_row_0: E, s0: E, s1: E, s2: E) -> E
-where
-    E: PrimeCharacteristicRing,
-{
-    cycle_row_0 * s0 * s1.not() * s2.not()
+pub fn f_mp<E: PrimeCharacteristicRing>(s0: E, s1: E, s2: E) -> E {
+    s0 * (E::ONE - s1) * s2
 }
 
-/// MP: Merkle Path verification flag `(1,0,1)` on cycle row 0.
+/// MV: old-path leg of MRUPDATE, input flag `(1,1,0)`.
 ///
-/// Initiates standard Merkle path verification computation.
+/// Active on MR_UPDATE_OLD controller input rows. Each MV row inserts a sibling
+/// into the virtual sibling table via the hash_kernel bus.
 ///
-/// # Degree
-/// - Periodic: 1 (cycle_row_0)
-/// - Selectors: 3 (s0 * !s1 * s2)
-/// - Total: 4
+/// # Degree: 3 (s0 * s1 * !s2)
 #[inline]
-pub fn f_mp<E>(cycle_row_0: E, s0: E, s1: E, s2: E) -> E
-where
-    E: PrimeCharacteristicRing,
-{
-    cycle_row_0 * s0 * s1.not() * s2
+pub fn f_mv<E: PrimeCharacteristicRing>(s0: E, s1: E, s2: E) -> E {
+    s0 * s1 * (E::ONE - s2)
 }
 
-/// MV: Merkle Verify (old root) flag `(1,1,0)` on cycle row 0.
+/// MU: new-path leg of MRUPDATE, input flag `(1,1,1)`.
 ///
-/// Begins verification for old leaf value during Merkle root update.
+/// Active on MR_UPDATE_NEW controller input rows. Each MU row removes a sibling
+/// from the virtual sibling table. The table balance ensures the same siblings
+/// are used for both the old and new paths.
 ///
-/// # Degree
-/// - Periodic: 1 (cycle_row_0)
-/// - Selectors: 3 (s0 * s1 * !s2)
-/// - Total: 4
+/// # Degree: 3 (s0 * s1 * s2)
 #[inline]
-pub fn f_mv<E>(cycle_row_0: E, s0: E, s1: E, s2: E) -> E
-where
-    E: PrimeCharacteristicRing,
-{
-    cycle_row_0 * s0 * s1 * s2.not()
+pub fn f_mu<E: PrimeCharacteristicRing>(s0: E, s1: E, s2: E) -> E {
+    s0 * s1 * s2
 }
 
-/// MU: Merkle Update (new root) flag `(1,1,1)` on cycle row 0.
-///
-/// Starts verification for new leaf value during Merkle root update.
-///
-/// # Degree
-/// - Periodic: 1 (cycle_row_0)
-/// - Selectors: 3 (s0 * s1 * s2)
-/// - Total: 4
-#[inline]
-pub fn f_mu<E>(cycle_row_0: E, s0: E, s1: E, s2: E) -> E
-where
-    E: PrimeCharacteristicRing,
-{
-    cycle_row_0 * s0 * s1 * s2
-}
-
-// ================================================================================================
-// ABSORPTION FLAGS (row 31 of 32-row cycle)
+// CONTROLLER OUTPUT FLAGS
 // ================================================================================================
 
-/// ABP: Absorb for linear hash flag `(1,0,0)` on cycle row 31.
+/// HOUT: Hash Output (digest return) flag `(0,0,0)`.
 ///
-/// Absorbs next set of elements into hasher state during linear hash computation.
-///
-/// # Degree
-/// - Periodic: 1 (cycle_row_31)
-/// - Selectors: 3 (s0 * !s1 * !s2)
-/// - Total: 4
+/// # Degree: 3 (!s0 * !s1 * !s2)
 #[inline]
-pub fn f_abp<E>(cycle_row_31: E, s0: E, s1: E, s2: E) -> E
-where
-    E: PrimeCharacteristicRing,
-{
-    cycle_row_31 * s0 * s1.not() * s2.not()
+pub fn f_hout<E: PrimeCharacteristicRing>(s0: E, s1: E, s2: E) -> E {
+    (E::ONE - s0) * (E::ONE - s1) * (E::ONE - s2)
 }
 
-/// MPA: Merkle Path Absorb flag `(1,0,1)` on cycle row 31.
+/// SOUT: State Output (full state return) flag `(0,0,1)`.
 ///
-/// Absorbs next Merkle path node during standard verification.
-///
-/// # Degree
-/// - Periodic: 1 (cycle_row_31)
-/// - Selectors: 3 (s0 * !s1 * s2)
-/// - Total: 4
-#[inline]
-pub fn f_mpa<E>(cycle_row_31: E, s0: E, s1: E, s2: E) -> E
-where
-    E: PrimeCharacteristicRing,
-{
-    cycle_row_31 * s0 * s1.not() * s2
-}
-
-/// MVA: Merkle Verify Absorb flag `(1,1,0)` on cycle row 31.
-///
-/// Absorbs next node during "old" leaf verification (Merkle root update).
-///
-/// # Degree
-/// - Periodic: 1 (cycle_row_31)
-/// - Selectors: 3 (s0 * s1 * !s2)
-/// - Total: 4
-#[inline]
-pub fn f_mva<E>(cycle_row_31: E, s0: E, s1: E, s2: E) -> E
-where
-    E: PrimeCharacteristicRing,
-{
-    cycle_row_31 * s0 * s1 * s2.not()
-}
-
-/// MUA: Merkle Update Absorb flag `(1,1,1)` on cycle row 31.
-///
-/// Absorbs next node during "new" leaf verification (Merkle root update).
-///
-/// # Degree
-/// - Periodic: 1 (cycle_row_31)
-/// - Selectors: 3 (s0 * s1 * s2)
-/// - Total: 4
-#[inline]
-pub fn f_mua<E>(cycle_row_31: E, s0: E, s1: E, s2: E) -> E
-where
-    E: PrimeCharacteristicRing,
-{
-    cycle_row_31 * s0 * s1 * s2
-}
-
-// ================================================================================================
-// OUTPUT FLAGS (row 31 of 32-row cycle)
-// ================================================================================================
-
-/// HOUT: Hash Output flag `(0,0,0)` on cycle row 31.
-///
-/// Returns the 4-element hash result (digest).
-///
-/// # Degree
-/// - Periodic: 1 (cycle_row_31)
-/// - Selectors: 3 (!s0 * !s1 * !s2)
-/// - Total: 4
+/// # Degree: 3 (!s0 * !s1 * s2)
 #[inline]
 #[allow(dead_code)]
-pub fn f_hout<E>(cycle_row_31: E, s0: E, s1: E, s2: E) -> E
-where
-    E: PrimeCharacteristicRing,
-{
-    cycle_row_31 * s0.not() * s1.not() * s2.not()
+pub fn f_sout<E: PrimeCharacteristicRing>(s0: E, s1: E, s2: E) -> E {
+    (E::ONE - s0) * (E::ONE - s1) * s2
 }
 
-/// SOUT: State Output flag `(0,0,1)` on cycle row 31.
+// COMPOSITE FLAGS
+// ================================================================================================
+
+/// Any controller input row flag.
 ///
-/// Returns the entire 12-element hasher state.
-///
-/// # Degree
-/// - Periodic: 1 (cycle_row_31)
-/// - Selectors: 3 (!s0 * !s1 * s2)
-/// - Total: 4
+/// # Degree: 1 (s0)
 #[inline]
 #[allow(dead_code)]
-pub fn f_sout<E>(cycle_row_31: E, s0: E, s1: E, s2: E) -> E
-where
-    E: PrimeCharacteristicRing,
-{
-    cycle_row_31 * s0.not() * s1.not() * s2
+pub fn f_input<E: PrimeCharacteristicRing>(s0: E) -> E {
+    s0
 }
 
-/// Combined output flag: `f_hout | f_sout` = `(0,0,*)` on cycle row 31.
+/// Any controller output row flag.
 ///
-/// True when any output operation is active (HOUT or SOUT).
-///
-/// # Degree
-/// - Periodic: 1 (cycle_row_31)
-/// - Selectors: 2 (!s0 * !s1)
-/// - Total: 3
+/// # Degree: 2 (!s0 * !s1)
 #[inline]
-pub fn f_out<E>(cycle_row_31: E, s0: E, s1: E) -> E
-where
-    E: PrimeCharacteristicRing,
-{
-    cycle_row_31 * s0.not() * s1.not()
+#[allow(dead_code)]
+pub fn f_output<E: PrimeCharacteristicRing>(s0: E, s1: E) -> E {
+    (E::ONE - s0) * (E::ONE - s1)
 }
 
-/// Lookahead output flag on cycle row 30.
+/// Any Merkle input row flag (MP or MV or MU).
 ///
-/// True when the *next* row will be an output operation.
-/// Used for selector stability constraints.
+/// `s0 * (s1 + s2 - s1*s2)` which equals `s0 * (1 - (1-s1)*(1-s2))`.
+/// This is 1 when s0=1 and at least one of s1,s2 is 1.
 ///
-/// # Degree
-/// - Periodic: 1 (cycle_row_30)
-/// - Next selectors: 2 (!s0' * !s1')
-/// - Total: 3
+/// # Degree: 3
 #[inline]
-pub fn f_out_next<E>(cycle_row_30: E, s0_next: E, s1_next: E) -> E
-where
-    E: PrimeCharacteristicRing,
-{
-    cycle_row_30 * s0_next.not() * s1_next.not()
+pub fn f_merkle_input<E: PrimeCharacteristicRing>(s0: E, s1: E, s2: E) -> E {
+    s0 * (s1.clone() + s2.clone() - s1 * s2)
 }

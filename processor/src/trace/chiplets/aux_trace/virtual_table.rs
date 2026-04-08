@@ -100,52 +100,52 @@ const RATE0_RANGE: core::ops::Range<usize> = 0..DIGEST_LEN;
 /// Range for RATE1 (second rate word) in sponge state.
 const RATE1_RANGE: core::ops::Range<usize> = DIGEST_LEN..(2 * DIGEST_LEN);
 
-/// Node is left child (lsb=0), sibling is right child at RATE1: alpha + beta_powers[2]*index +
-/// beta_powers[7..10]*sibling
-const SIBLING_RATE1_LAYOUT: [usize; 5] = [2, 7, 8, 9, 10];
-/// Node is right child (lsb=1), sibling is left child at RATE0: alpha + beta_powers[2]*index +
-/// beta_powers[3..6]*sibling
-const SIBLING_RATE0_LAYOUT: [usize; 5] = [2, 3, 4, 5, 6];
+/// Node is left child (lsb=0), sibling is right child at RATE1.
+/// Layout: [mrupdate_id, node_index, h[4], h[5], h[6], h[7]]
+const SIBLING_RATE1_LAYOUT: [usize; 6] = [1, 2, 7, 8, 9, 10];
+/// Node is right child (lsb=1), sibling is left child at RATE0.
+/// Layout: [mrupdate_id, node_index, h[0], h[1], h[2], h[3]]
+const SIBLING_RATE0_LAYOUT: [usize; 6] = [1, 2, 3, 4, 5, 6];
 
-/// Extracts the node index and sibling word from the trace and encodes a sibling table entry.
+/// Extracts the node index, mrupdate_id, and sibling word from a controller input row
+/// and encodes a sibling table entry.
 ///
-/// The node index comes from `row`, while the sibling state comes from `state_row`
-/// (which may be `row` or `row + 1` depending on whether this is an absorb or
-/// absorb-next cycle).
+/// In the controller/perm split, the sibling is always in the current row's state
+/// (no need to look at the next row).
 #[inline(always)]
 fn encode_sibling_from_trace<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     challenges: &Challenges<E>,
     row: RowIndex,
-    state_row: RowIndex,
 ) -> E {
     let index = main_trace.chiplet_node_index(row);
+    let mrupdate_id = main_trace.chiplet_mrupdate_id(row);
     let lsb = index.as_canonical_u64() & 1;
+    let state = main_trace.chiplet_hasher_state(row);
     let (layout, sibling) = if lsb == 0 {
         // Node is left child, sibling is right child at RATE1
-        (SIBLING_RATE1_LAYOUT, &main_trace.chiplet_hasher_state(state_row)[RATE1_RANGE])
+        (SIBLING_RATE1_LAYOUT, &state[RATE1_RANGE])
     } else {
         // Node is right child, sibling is left child at RATE0
-        (SIBLING_RATE0_LAYOUT, &main_trace.chiplet_hasher_state(state_row)[RATE0_RANGE])
+        (SIBLING_RATE0_LAYOUT, &state[RATE0_RANGE])
     };
     challenges.encode_sparse(
         SIBLING_TABLE,
         layout,
-        [index, sibling[0], sibling[1], sibling[2], sibling[3]],
+        [mrupdate_id, index, sibling[0], sibling[1], sibling[2], sibling[3]],
     )
 }
 
-/// Constructs the removals from the table when the hasher absorbs a new sibling node while
-/// computing the new Merkle root.
+/// Constructs the removals from the table for MU (new path) controller input rows.
+///
+/// In the controller/perm split, all MU input rows participate (not just init rows).
 fn chiplets_vtable_remove_sibling<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     challenges: &Challenges<E>,
     row: RowIndex,
 ) -> E {
     if main_trace.f_mu(row) {
-        encode_sibling_from_trace(main_trace, challenges, row, row)
-    } else if main_trace.f_mua(row) {
-        encode_sibling_from_trace(main_trace, challenges, row, row + 1)
+        encode_sibling_from_trace(main_trace, challenges, row)
     } else {
         E::ONE
     }
@@ -154,17 +154,14 @@ fn chiplets_vtable_remove_sibling<E: ExtensionField<Felt>>(
 // VIRTUAL TABLE RESPONSES
 // ================================================================================================
 
-/// Constructs the inclusions to the table when the hasher absorbs a new sibling node while
-/// computing the old Merkle root.
+/// Constructs the inclusions to the table for MV (old path) controller input rows.
 fn chiplets_vtable_add_sibling<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     challenges: &Challenges<E>,
     row: RowIndex,
 ) -> E {
     if main_trace.f_mv(row) {
-        encode_sibling_from_trace(main_trace, challenges, row, row)
-    } else if main_trace.f_mva(row) {
-        encode_sibling_from_trace(main_trace, challenges, row, row + 1)
+        encode_sibling_from_trace(main_trace, challenges, row)
     } else {
         E::ONE
     }

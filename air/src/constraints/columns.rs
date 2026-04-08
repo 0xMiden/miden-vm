@@ -48,9 +48,9 @@ impl<T> MainCols<T> {
         self.chiplets[0..5].try_into().unwrap()
     }
 
-    /// Returns a typed borrow of the hasher chiplet columns (chiplets\[1..17\]).
+    /// Returns a typed borrow of the hasher chiplet columns (chiplets\[1..21\]).
     pub fn hasher(&self) -> &HasherCols<T> {
-        borrow_chiplet(&self.chiplets[1..17])
+        borrow_chiplet(&self.chiplets[1..21])
     }
 
     /// Returns a typed borrow of the bitwise chiplet columns (chiplets\[2..15\]).
@@ -173,7 +173,7 @@ const _: () = assert!(NUM_SYSTEM_COLS == 6);
 const _: () = assert!(NUM_DECODER_COLS == 24);
 const _: () = assert!(NUM_STACK_COLS == 19);
 const _: () = assert!(NUM_RANGE_COLS == 2);
-const _: () = assert!(NUM_HASHER_COLS == 16);
+const _: () = assert!(NUM_HASHER_COLS == 20);
 const _: () = assert!(NUM_BITWISE_COLS == 13);
 const _: () = assert!(NUM_MEMORY_COLS == 15);
 const _: () = assert!(NUM_ACE_COLS == 16);
@@ -250,7 +250,7 @@ mod tests {
     #[test]
     fn col_map_chiplets() {
         assert_eq!(MAIN_COL_MAP.chiplets[0], CHIPLETS_OFFSET);
-        assert_eq!(MAIN_COL_MAP.chiplets[19], CHIPLETS_OFFSET + 19);
+        assert_eq!(MAIN_COL_MAP.chiplets[20], CHIPLETS_OFFSET + 20);
     }
 
     // --- Auxiliary trace column map vs legacy constants

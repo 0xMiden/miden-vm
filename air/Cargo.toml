@@ -36,4 +36,5 @@ tracing.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
+miden-ace-codegen = { workspace = true, features = ["testing"] }
 proptest.workspace = true

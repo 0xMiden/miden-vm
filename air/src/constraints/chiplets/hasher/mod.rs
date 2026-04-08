@@ -1,269 +1,279 @@
 //! Hasher chiplet constraints.
 //!
-//! This module implements constraints for the hasher chiplet, organized into sub-modules:
+//! The hasher chiplet uses a dispatch/compute split architecture:
+//! - The **hasher controller** (dispatch, `perm_seg=0`) records permutation requests as compact
+//!   (input, output) row pairs and responds to the chiplets bus.
+//! - The **hasher permutation segment** (compute, `perm_seg=1`) executes Poseidon2 permutations as
+//!   16-row cycles, one per unique input state.
 //!
-//! - [`flags`]: Operation flag computation functions
-//! - [`selectors`]: Selector logic constraints
-//! - [`state`]: Permutation state constraints
-//! - [`merkle`]: Merkle tree operation constraints
+//! A LogUp perm-link bus on the shared `v_wiring` column binds the two regions.
 //!
-//! ## Hasher Operations
+//! ## Sub-modules
 //!
-//! The hasher supports:
-//! 1. Single permutation of Poseidon2
-//! 2. 2-to-1 hash (merge)
-//! 3. Linear hash of n field elements
-//! 4. Merkle path verification
-//! 5. Merkle root update
+//! - [`flags`]: Operation flag computation functions (pure selector expressions)
+//! - [`periodic`]: Periodic column definitions (cycle markers, round constants)
+//! - [`selectors`]: Selector, structural, and lifecycle constraints
+//! - [`state`]: Poseidon2 round transition constraints (permutation segment only)
+//! - [`merkle`]: Merkle tree operation constraints (controller only)
 //!
-//! ## Column Layout (within chiplet, offset by selectors)
+//! ## Column Layout (20 columns)
 //!
-//! | Column   | Purpose |
-//! |----------|---------|
-//! | s[0..2]  | Selector flags |
-//! | h[0..12) | Hasher state (RATE0, RATE1, CAP) |
-//! | i        | Node index (for Merkle operations) |
-//!
-//! ## References
-//!
-//! - [Hasher chiplet design](https://0xmiden.github.io/miden-vm/design/chiplets/hasher.html)
+//! | Column       | Purpose |
+//! |--------------|---------|
+//! | s0, s1, s2   | Selectors (operation type / row type) |
+//! | h[0..12)     | Hasher state (RATE0, RATE1, CAP) |
+//! | node_index   | Merkle tree node index on controller rows; reused for request multiplicity on perm segment rows |
+//! | mrupdate_id  | Domain separator for sibling table |
+//! | is_boundary  | 1 on boundary rows (first input or last output) |
+//! | direction_bit| Merkle direction bit (0 on non-Merkle / perm rows) |
+//! | perm_seg     | 0 = hasher controller, 1 = hasher permutation segment |
 
 pub mod flags;
 pub mod merkle;
+pub mod periodic;
 pub mod selectors;
 pub mod state;
 
 use core::borrow::Borrow;
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::AirBuilder;
+pub use periodic::STATE_WIDTH;
 
 use crate::{
     MainCols, MidenAirBuilder,
-    constraints::chiplets::{
-        columns::{HasherCols, HasherPeriodicCols, PeriodicCols},
-        selectors::ChipletFlags,
-    },
-    trace::chiplets::hasher::STATE_WIDTH,
+    constraints::chiplets::columns::{HasherCols, HasherPeriodicCols, PeriodicCols},
 };
 
-/// Precomputed hasher flags derived from selectors and cycle markers.
-struct HasherFlags<E> {
-    pub cycle_row_31: E,
-    pub f_abp: E,
-    pub f_mpa: E,
-    pub f_mva: E,
-    pub f_mua: E,
-    pub f_out: E,
-    pub f_out_next: E,
-    pub f_mp: E,
-    pub f_mv: E,
-    pub f_mu: E,
-}
-
-// ================================================================================================
-// COMPOSITE FLAGS
+// HASHER EXPRESSION WRAPPER
 // ================================================================================================
 
-impl<E: PrimeCharacteristicRing> HasherFlags<E> {
-    /// Merkle operation active flag.
-    ///
-    /// True when any Merkle operation (MP, MV, MU, MPA, MVA, MUA) is active.
-    /// Used for gating index shift constraints.
-    ///
-    /// # Degree
-    /// - Depends on constituent flags, typically 4
+/// Expression-level view of hasher columns, created by converting from `HasherCols<AB::Var>`.
+///
+/// This provides the same field names as the old `HasherColumns<E>` type, allowing constraint
+/// code to work with `AB::Expr` values.
+pub struct HasherExprs<E> {
+    pub s0: E,
+    pub s1: E,
+    pub s2: E,
+    pub state: [E; STATE_WIDTH],
+    pub node_index: E,
+    pub mrupdate_id: E,
+    pub is_boundary: E,
+    pub direction_bit: E,
+    pub perm_seg: E,
+}
+
+impl<E: Clone> HasherExprs<E> {
     #[inline]
-    fn f_merkle_active(&self) -> E {
-        self.f_mp.clone()
-            + self.f_mv.clone()
-            + self.f_mu.clone()
-            + self.f_mpa.clone()
-            + self.f_mva.clone()
-            + self.f_mua.clone()
+    pub fn rate0(&self) -> [E; 4] {
+        core::array::from_fn(|i| self.state[i].clone())
     }
 
-    /// Merkle absorb flag (row 31 only).
-    ///
-    /// True when absorbing the next node during Merkle path computation.
-    ///
-    /// # Degree
-    /// - Depends on constituent flags, typically 4
     #[inline]
-    fn f_merkle_absorb(&self) -> E {
-        self.f_mpa.clone() + self.f_mva.clone() + self.f_mua.clone()
+    pub fn rate1(&self) -> [E; 4] {
+        core::array::from_fn(|i| self.state[4 + i].clone())
     }
 
-    /// Continuation flag for hashing operations.
-    ///
-    /// True when operation continues to next cycle (ABP, MPA, MVA, MUA).
-    /// Constrains s0' = 0 to ensure proper sequencing.
-    ///
-    /// # Degree
-    /// - Depends on constituent flags, typically 4
     #[inline]
-    fn f_continuation(&self) -> E {
-        self.f_abp.clone() + self.f_mpa.clone() + self.f_mva.clone() + self.f_mua.clone()
+    pub fn capacity(&self) -> [E; 4] {
+        core::array::from_fn(|i| self.state[8 + i].clone())
     }
 }
 
-struct HasherContext<'a, AB: MidenAirBuilder> {
-    pub cols: &'a HasherCols<AB::Var>,
-    pub cols_next: &'a HasherCols<AB::Var>,
-    pub flags: HasherFlags<AB::Expr>,
-    pub hasher_flag: AB::Expr,
-    pub periodic: HasherPeriodicCols<AB::PeriodicVar>,
-}
-
-impl<'a, AB> HasherContext<'a, AB>
-where
-    AB: MidenAirBuilder,
-{
-    pub fn new(
-        builder: &mut AB,
-        local: &'a MainCols<AB::Var>,
-        next: &'a MainCols<AB::Var>,
-        flags: &ChipletFlags<AB::Expr>,
-    ) -> Self {
-        let periodic: &PeriodicCols<_> = builder.periodic_values().borrow();
-
-        let hasher_flag = flags.is_active.clone();
-        let cols: &HasherCols<AB::Var> = local.hasher();
-        let cols_next: &HasherCols<AB::Var> = next.hasher();
-        let hasher_flags = compute_hasher_flags::<AB>(&periodic.hasher, cols, cols_next);
-
-        HasherContext::<AB> {
-            cols,
-            cols_next,
-            flags: hasher_flags,
-            hasher_flag,
-            periodic: periodic.hasher,
-        }
+impl<E: PrimeCharacteristicRing + Clone> HasherExprs<E> {
+    /// Returns the controller flag (1 on controller rows, 0 on perm segment rows).
+    #[inline]
+    pub fn controller_flag(&self) -> E {
+        E::ONE - self.perm_seg.clone()
     }
 }
 
-// ENTRY POINTS
+/// Convert `HasherCols<Var>` to `HasherExprs<Expr>` for use in constraint expressions.
+fn hasher_exprs<AB: MidenAirBuilder>(cols: &HasherCols<AB::Var>) -> HasherExprs<AB::Expr> {
+    HasherExprs {
+        s0: cols.selectors[0].into(),
+        s1: cols.selectors[1].into(),
+        s2: cols.selectors[2].into(),
+        state: core::array::from_fn(|i| cols.state[i].into()),
+        node_index: cols.node_index.into(),
+        mrupdate_id: cols.mrupdate_id.into(),
+        is_boundary: cols.is_boundary.into(),
+        direction_bit: cols.direction_bit.into(),
+        perm_seg: cols.perm_seg.into(),
+    }
+}
+
+// ENTRY POINT
 // ================================================================================================
 
 /// Enforce all hasher chiplet constraints.
-///
-/// This is the main entry point for hasher constraints, enforcing:
-/// 1. Permutation step constraints
-/// 2. Selector constraints
-/// 3. Boundary constraints
-/// 4. Merkle operation constraints
-///
-/// ## Chiplet Activation
 ///
 /// The hasher chiplet is active when `chiplets[0] = 0` (i.e., `!s0` at the chiplet level).
 pub fn enforce_hasher_constraints<AB>(
     builder: &mut AB,
     local: &MainCols<AB::Var>,
     next: &MainCols<AB::Var>,
-    flags: &ChipletFlags<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
-    let ctx = HasherContext::<AB>::new(builder, local, next, flags);
+    // Extract periodic columns into local copies to avoid borrow conflicts.
+    let periodic_hasher: HasherPeriodicCols<AB::PeriodicVar> = {
+        let periodic: &PeriodicCols<AB::PeriodicVar> = builder.periodic_values().borrow();
+        periodic.hasher
+    };
 
-    // Permutation step constraints
-    {
-        let state: [AB::Expr; STATE_WIDTH] = ctx.cols.state.map(Into::into);
-        let state_next: [AB::Expr; STATE_WIDTH] = ctx.cols_next.state.map(Into::into);
-        state::enforce_permutation_steps(
-            builder,
-            ctx.hasher_flag.clone(),
-            &state,
-            &state_next,
-            &ctx.periodic,
-        );
-    }
+    let hasher_flag: AB::Expr =
+        AB::Expr::ONE - Into::<AB::Expr>::into(local.chiplet_selectors()[0]);
+    let cols = hasher_exprs::<AB>(local.hasher());
+    let cols_next = hasher_exprs::<AB>(next.hasher());
 
-    // Selector booleanity
-    builder.when(ctx.hasher_flag.clone()).assert_bools(ctx.cols.selectors);
+    // --- Selector booleanity (controller rows only; perm segment selectors are don't-care) ---
+    selectors::enforce_selector_booleanity(builder, hasher_flag.clone(), &cols);
 
-    // Selector consistency
-    selectors::enforce_selector_consistency(
+    // --- perm_seg constraints ---
+    let hasher_flag_next: AB::Expr =
+        AB::Expr::ONE - Into::<AB::Expr>::into(next.chiplet_selectors()[0]);
+    // Derive (1 - cycle_row_15) = selector_sum. The boundary row (row 15) is the
+    // only row where all 4 selectors are 0. The perm_seg constraints use this in the
+    // form (1 - cycle_row_N) to gate multiplicity constancy and cycle alignment.
+    let selector_sum: AB::Expr = Into::<AB::Expr>::into(periodic_hasher.is_init_ext)
+        + Into::<AB::Expr>::into(periodic_hasher.is_ext)
+        + Into::<AB::Expr>::into(periodic_hasher.is_packed_int)
+        + Into::<AB::Expr>::into(periodic_hasher.is_int_ext);
+    selectors::enforce_perm_seg_constraints(
         builder,
-        ctx.hasher_flag.clone(),
-        ctx.cols,
-        ctx.cols_next,
-        &ctx.flags,
+        hasher_flag.clone(),
+        hasher_flag_next,
+        &cols,
+        &cols_next,
+        selector_sum,
     );
 
-    // ABP capacity preservation on row 31 of the cycle
-    {
-        let cap: [AB::Expr; 4] = ctx.cols.capacity().map(Into::into);
-        let cap_next: [AB::Expr; 4] = ctx.cols_next.capacity().map(Into::into);
-        state::enforce_abp_capacity_preservation(
-            builder,
-            ctx.hasher_flag.clone(),
-            ctx.flags.f_abp.clone(),
-            &cap,
-            &cap_next,
-        );
-    }
+    // --- Structural confinement (is_boundary, direction_bit) ---
+    selectors::enforce_structural_confinement(builder, hasher_flag.clone(), &cols);
 
-    // Merkle node index constraints
-    merkle::enforce_node_index_constraints(
+    // --- Lifecycle booleanity ---
+    selectors::enforce_lifecycle_booleanity(builder, hasher_flag.clone(), &cols);
+
+    // --- Controller adjacency (input -> output) ---
+    selectors::enforce_controller_adjacency(builder, hasher_flag.clone(), &cols, &cols_next);
+
+    // --- Controller pairing (first-row boundary + output non-adjacency) ---
+    selectors::enforce_controller_pairing(builder, hasher_flag.clone(), &cols, &cols_next);
+
+    // --- Permutation step constraints (perm segment only) ---
+    // Gate by perm_seg alone (degree 1), NOT hasher_flag * perm_seg (degree 2).
+    // This is sound because `enforce_perm_seg_constraints` explicitly confines perm_seg to
+    // hasher rows: (1 - hasher_flag) * perm_seg = 0. Keeping the gate at degree 1 is critical:
+    // the S-box has degree 7, and with the periodic selector (degree 1), the total constraint
+    // degree is 1 + 1 + 7 = 9, which matches the system's max degree.
+    let perm_gate = cols.perm_seg.clone();
+    // On permutation rows, s0/s1/s2 serve as witness columns for packed internal rounds.
+    let witnesses: [AB::Expr; 3] = [cols.s0.clone(), cols.s1.clone(), cols.s2.clone()];
+    state::enforce_permutation_steps(
         builder,
-        ctx.hasher_flag.clone(),
-        ctx.cols,
-        ctx.cols_next,
-        &ctx.flags,
+        perm_gate,
+        &cols.state,
+        &cols_next.state,
+        &witnesses,
+        &periodic_hasher,
     );
 
-    // Merkle absorb state constraints
-    merkle::enforce_merkle_absorb_state(
-        builder,
-        ctx.hasher_flag.clone(),
-        ctx.cols,
-        ctx.cols_next,
-        &ctx.flags,
-    );
+    // --- mrupdate_id constraints ---
+    enforce_mrupdate_id_constraints(builder, hasher_flag.clone(), &cols, &cols_next);
+
+    // --- Sponge capacity preservation ---
+    enforce_respan_capacity(builder, hasher_flag.clone(), next, &cols, &cols_next);
+
+    // --- Tree constraints ---
+    merkle::enforce_node_index_constraints(builder, hasher_flag.clone(), &cols, &cols_next);
+    merkle::enforce_merkle_input_state(builder, hasher_flag.clone(), &cols);
+    merkle::enforce_merkle_digest_routing(builder, hasher_flag, &cols, &cols_next);
 }
 
-fn compute_hasher_flags<AB>(
-    periodic: &HasherPeriodicCols<AB::PeriodicVar>,
-    cols: &HasherCols<AB::Var>,
-    cols_next: &HasherCols<AB::Var>,
-) -> HasherFlags<AB::Expr>
-where
+// INTERNAL CONSTRAINT FUNCTIONS
+// ================================================================================================
+
+/// Enforces mrupdate_id progression and zero-on-perm constraints.
+///
+/// On controller rows: mrupdate_id increments by 1 on MV start rows, stays constant otherwise.
+/// On perm segment rows: mrupdate_id must be zero.
+fn enforce_mrupdate_id_constraints<AB>(
+    builder: &mut AB,
+    hasher_flag: AB::Expr,
+    cols: &HasherExprs<AB::Expr>,
+    cols_next: &HasherExprs<AB::Expr>,
+) where
     AB: MidenAirBuilder,
 {
-    let cycle_row_31: AB::Expr = periodic.cycle_row_31.into();
+    let controller_flag = cols.controller_flag();
+    let controller_flag_next = cols_next.controller_flag();
 
-    let cycle_row_0: AB::Expr = periodic.cycle_row_0.into();
-    let cycle_row_30: AB::Expr = periodic.cycle_row_30.into();
+    // f_mv_start_next: MV input on next row with is_boundary=1.
+    let f_mv_next = flags::f_mv(cols_next.s0.clone(), cols_next.s1.clone(), cols_next.s2.clone());
+    let f_mv_start_next = f_mv_next * cols_next.is_boundary.clone();
 
-    let s0: AB::Expr = cols.selectors[0].into();
-    let s1: AB::Expr = cols.selectors[1].into();
-    let s2: AB::Expr = cols.selectors[2].into();
-    let s0_next: AB::Expr = cols_next.selectors[0].into();
-    let s1_next: AB::Expr = cols_next.selectors[1].into();
+    // On controller->controller transitions: id_next = id + f_mv_start_next.
+    // controller_flag_next in the outer gate prevents firing at the controller->perm boundary.
+    // Degree 7: hasher_flag(1) * controller_flag(1) * controller_flag_next(1)
+    //           * (id_next - id - f_mv_start_next) where f_mv_start is degree 4.
+    builder.assert_zero(
+        hasher_flag.clone()
+            * controller_flag
+            * controller_flag_next
+            * (cols_next.mrupdate_id.clone() - cols.mrupdate_id.clone() - f_mv_start_next),
+    );
 
-    let f_mp = flags::f_mp(cycle_row_0.clone(), s0.clone(), s1.clone(), s2.clone());
-    let f_mv = flags::f_mv(cycle_row_0.clone(), s0.clone(), s1.clone(), s2.clone());
-    let f_mu = flags::f_mu(cycle_row_0.clone(), s0.clone(), s1.clone(), s2.clone());
+    // On perm segment rows: mrupdate_id = 0
+    // Degree 3: hasher_flag(1) * perm_seg(1) * mrupdate_id(1).
+    builder.assert_zero(hasher_flag * cols.perm_seg.clone() * cols.mrupdate_id.clone());
+}
 
-    let f_abp = flags::f_abp(cycle_row_31.clone(), s0.clone(), s1.clone(), s2.clone());
-    let f_mpa = flags::f_mpa(cycle_row_31.clone(), s0.clone(), s1.clone(), s2.clone());
-    let f_mva = flags::f_mva(cycle_row_31.clone(), s0.clone(), s1.clone(), s2.clone());
-    let f_mua = flags::f_mua(cycle_row_31.clone(), s0.clone(), s1.clone(), s2.clone());
+/// Enforces capacity preservation across LINEAR_HASH continuation boundaries.
+///
+/// When the next row is a LINEAR_HASH continuation input (f_sponge_next=1, is_boundary_next=0),
+/// the capacity h[8..12] must be preserved from the current row to the next.
+///
+/// ## Gate (degree 7)
+///
+/// `hasher_flag * hasher_flag_next * f_sponge_next * (1 - is_boundary_next)` * state_diff
+///
+/// - `hasher_flag_next` ensures the next row's columns are hasher columns (not garbage from another
+///   chiplet at a boundary).
+/// - `f_sponge_next` is needed to restrict to LINEAR_HASH continuations only.
+fn enforce_respan_capacity<AB>(
+    builder: &mut AB,
+    hasher_flag: AB::Expr,
+    next: &MainCols<AB::Var>,
+    cols: &HasherExprs<AB::Expr>,
+    cols_next: &HasherExprs<AB::Expr>,
+) where
+    AB: MidenAirBuilder,
+{
+    // hasher_flag_next: next row is also a hasher row
+    let hasher_flag_next: AB::Expr =
+        AB::Expr::ONE - Into::<AB::Expr>::into(next.chiplet_selectors()[0]);
 
-    let f_out = flags::f_out(cycle_row_31.clone(), s0, s1.clone());
-    let f_out_next = flags::f_out_next(cycle_row_30, s0_next, s1_next);
+    // f_sponge_next: next row is a sponge-mode controller input (s0=1, s1=0, s2=0).
+    // Must also check controller_flag_next because on perm rows s0/s1/s2 hold witness
+    // values (not selectors), and a witness could accidentally match the sponge pattern.
+    let controller_flag_next = cols_next.controller_flag();
+    let f_sponge_next =
+        flags::f_sponge(cols_next.s0.clone(), cols_next.s1.clone(), cols_next.s2.clone());
 
-    HasherFlags {
-        cycle_row_31,
-        f_abp,
-        f_mpa,
-        f_mva,
-        f_mua,
-        f_out,
-        f_out_next,
-        f_mp,
-        f_mv,
-        f_mu,
-    }
+    // Gate degree: hasher_flag(1) * hasher_flag_next(1) * controller_flag_next(1)
+    //              * f_sponge_next(3) * (1-is_boundary)(1) = 7.
+    // Constraint degree: gate(7) * state_diff(1) = 8.
+    let gate = hasher_flag
+        * hasher_flag_next
+        * controller_flag_next
+        * f_sponge_next
+        * (AB::Expr::ONE - cols_next.is_boundary.clone());
+
+    state::enforce_respan_capacity_preservation(
+        builder,
+        gate,
+        &cols.capacity(),
+        &cols_next.capacity(),
+    );
 }

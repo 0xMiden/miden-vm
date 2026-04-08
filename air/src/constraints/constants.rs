@@ -27,4 +27,3 @@ pub const TWO_POW_16_MINUS_1: Felt = Felt::new(65535);
 pub const TWO_POW_32: Felt = Felt::new(1 << 32);
 pub const TWO_POW_32_MINUS_1: Felt = Felt::new((1u64 << 32) - 1);
 pub const TWO_POW_48: Felt = Felt::new(1 << 48);
-pub const HASH_CYCLE_LEN_FELT: Felt = Felt::new(32);

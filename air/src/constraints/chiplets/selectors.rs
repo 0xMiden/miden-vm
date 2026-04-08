@@ -60,7 +60,9 @@ pub struct ChipletFlags<E> {
 /// Precomputed flags for all chiplets.
 #[derive(Clone)]
 pub struct ChipletSelectors<E> {
-    pub hasher: ChipletFlags<E>,
+    // TODO: hasher constraints currently compute their own flag instead of using this.
+    // Will be wired up during the bus constraint refactor.
+    pub _hasher: ChipletFlags<E>,
     pub bitwise: ChipletFlags<E>,
     pub memory: ChipletFlags<E>,
     pub ace: ChipletFlags<E>,
@@ -193,7 +195,7 @@ where
     let kernel_rom_transition = is_transition_flag * s0123 * not_s4_next;
 
     ChipletSelectors {
-        hasher: ChipletFlags {
+        _hasher: ChipletFlags {
             is_active: is_hasher,
             is_transition: hasher_transition,
             is_last: is_hasher_last,

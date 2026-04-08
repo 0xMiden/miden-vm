@@ -1,3 +1,5 @@
+use core::sync::atomic::{AtomicUsize, Ordering};
+
 use miden_crypto::{
     field::TwoAdicField,
     stark::dft::{NaiveDft, TwoAdicSubgroupDft},
@@ -5,14 +7,32 @@ use miden_crypto::{
 
 use crate::layout::InputKey;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct DagId(usize);
+
+impl DagId {
+    pub(crate) fn fresh() -> Self {
+        static NEXT_DAG_ID: AtomicUsize = AtomicUsize::new(0);
+
+        Self(NEXT_DAG_ID.fetch_add(1, Ordering::Relaxed))
+    }
+}
+
 /// Identifier for a node in the DAG.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct NodeId(pub(super) usize);
+pub struct NodeId {
+    pub(super) dag_id: DagId,
+    pub(super) index: usize,
+}
 
 impl NodeId {
     /// Return the underlying node index.
     pub const fn index(self) -> usize {
-        self.0
+        self.index
+    }
+
+    pub(super) const fn in_dag(index: usize, dag_id: DagId) -> Self {
+        Self { dag_id, index }
     }
 }
 
@@ -89,77 +109,59 @@ impl<EF> PeriodicColumnData<EF> {
 /// A built DAG with a designated root.
 #[derive(Debug)]
 pub struct AceDag<EF> {
+    dag_id: DagId,
     /// Topologically ordered nodes.
     pub nodes: Vec<NodeKind<EF>>,
     /// Root node of the verifier equation.
     pub root: NodeId,
 }
 
-impl<EF: Clone> AceDag<EF> {
-    /// Remove unreachable nodes and compact the node vector.
-    ///
-    /// After compaction, `nodes` contains only nodes reachable from `root`,
-    /// in the same topological order. All `NodeId` references are remapped
-    /// to reflect the new contiguous indices.
-    pub fn compact(&mut self) {
-        let n = self.nodes.len();
-        if n == 0 {
-            return;
-        }
+/// Exported DAG data that preserves the source DAG id across imports.
+#[derive(Debug, Clone)]
+pub struct DagSnapshot<EF> {
+    nodes: Vec<NodeKind<EF>>,
+    root: NodeId,
+    source_dag_id: DagId,
+}
 
-        // Mark reachable nodes via DFS from root.
-        let mut reachable = vec![false; n];
-        let mut stack = vec![self.root.0];
-        while let Some(idx) = stack.pop() {
-            if reachable[idx] {
-                continue;
-            }
-            reachable[idx] = true;
-            match &self.nodes[idx] {
-                NodeKind::Add(a, b) | NodeKind::Sub(a, b) | NodeKind::Mul(a, b) => {
-                    stack.push(a.0);
-                    stack.push(b.0);
-                },
-                NodeKind::Neg(a) => {
-                    stack.push(a.0);
-                },
-                NodeKind::Input(_) | NodeKind::Constant(_) => {},
-            }
-        }
+impl<EF> AceDag<EF> {
+    pub(crate) fn from_parts(dag_id: DagId, nodes: Vec<NodeKind<EF>>, root: NodeId) -> Self {
+        Self { dag_id, nodes, root }
+    }
 
-        // Build old-to-new index remapping.
-        let mut remap = vec![0usize; n];
-        let mut new_len = 0usize;
-        for i in 0..n {
-            if reachable[i] {
-                remap[i] = new_len;
-                new_len += 1;
-            }
-        }
+    pub(crate) fn nodes(&self) -> &[NodeKind<EF>] {
+        &self.nodes
+    }
 
-        // Early exit if nothing was removed.
-        if new_len == n {
-            return;
-        }
+    pub(crate) fn into_nodes(self) -> Vec<NodeKind<EF>> {
+        self.nodes
+    }
 
-        // Build compacted node vec with remapped ids.
-        let mut new_nodes = Vec::with_capacity(new_len);
-        for (i, node) in self.nodes.iter().enumerate() {
-            if !reachable[i] {
-                continue;
-            }
-            let remapped = match node {
-                NodeKind::Input(k) => NodeKind::Input(*k),
-                NodeKind::Constant(v) => NodeKind::Constant(v.clone()),
-                NodeKind::Add(a, b) => NodeKind::Add(NodeId(remap[a.0]), NodeId(remap[b.0])),
-                NodeKind::Sub(a, b) => NodeKind::Sub(NodeId(remap[a.0]), NodeId(remap[b.0])),
-                NodeKind::Mul(a, b) => NodeKind::Mul(NodeId(remap[a.0]), NodeId(remap[b.0])),
-                NodeKind::Neg(a) => NodeKind::Neg(NodeId(remap[a.0])),
-            };
-            new_nodes.push(remapped);
-        }
+    pub(crate) fn dag_id(&self) -> DagId {
+        self.dag_id
+    }
 
-        self.nodes = new_nodes;
-        self.root = NodeId(remap[self.root.0]);
+    pub fn root(&self) -> NodeId {
+        self.root
+    }
+
+    /// Consume the DAG and return an exported snapshot that can be re-imported later.
+    pub fn into_snapshot(self) -> DagSnapshot<EF> {
+        DagSnapshot {
+            nodes: self.nodes,
+            root: self.root,
+            source_dag_id: self.dag_id,
+        }
+    }
+}
+
+impl<EF> DagSnapshot<EF> {
+    /// Root node of the verifier equation.
+    pub fn root(&self) -> NodeId {
+        self.root
+    }
+
+    pub(super) fn into_parts(self) -> (DagId, Vec<NodeKind<EF>>, NodeId) {
+        (self.source_dag_id, self.nodes, self.root)
     }
 }

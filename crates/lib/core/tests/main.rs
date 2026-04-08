@@ -5,11 +5,9 @@ extern crate alloc;
 macro_rules! build_test {
     ($($params:tt)+) => {{
         let core_lib = miden_core_lib::CoreLibrary::default();
-        let mut test = miden_utils_testing::build_test_by_mode!(false, $($params)+);
-        test.libraries.push(core_lib.library().clone());
-        test.add_event_handlers(core_lib.handlers());
-
-        test
+        miden_utils_testing::build_test_by_mode!(false, $($params)+)
+            .with_library(core_lib.library().clone())
+            .with_event_handlers(core_lib.handlers())
     }}
 }
 
@@ -18,11 +16,9 @@ macro_rules! build_test {
 macro_rules! build_debug_test {
     ($($params:tt)+) => {{
         let core_lib = miden_core_lib::CoreLibrary::default();
-        let mut test = miden_utils_testing::build_test_by_mode!(true, $($params)+);
-        test.libraries.push(core_lib.library().clone());
-        test.add_event_handlers(core_lib.handlers());
-
-        test
+        miden_utils_testing::build_test_by_mode!(true, $($params)+)
+            .with_library(core_lib.library().clone())
+            .with_event_handlers(core_lib.handlers())
     }}
 }
 

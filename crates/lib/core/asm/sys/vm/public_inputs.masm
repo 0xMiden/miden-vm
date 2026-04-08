@@ -1,7 +1,6 @@
 use miden::core::stark::constants
 use miden::core::stark::random_coin
 use miden::core::stark::public_inputs
-
 use miden::core::crypto::hashes::poseidon2
 
 # PUBLIC INPUTS PROCESSING FOR MIDEN VM RECURSIVE VERIFIER
