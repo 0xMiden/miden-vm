@@ -15,6 +15,7 @@ use miden_core::{
         MastNodeFingerprint, MastNodeId, Remapping, SubtreeIterator,
     },
     operations::{AssemblyOp, Decorator, DecoratorList, Operation},
+    serde::Serializable,
 };
 
 use super::{GlobalItemIndex, LinkerError, Procedure};
@@ -206,24 +207,33 @@ fn deduplicate_asm_op_mappings(
         .collect()
 }
 
-/// Serializes debug variable mappings into bytes for fingerprint augmentation.
-fn serialize_debug_vars(debug_vars: &[(usize, miden_core::mast::DebugVarId)]) -> Vec<u8> {
-    let mut data = Vec::with_capacity(debug_vars.len() * 8);
+/// Serializes debug variable content into bytes for fingerprint augmentation.
+///
+/// This uses the resolved [`DebugVarInfo`] payload rather than raw `DebugVarId`s so
+/// dedup depends on variable semantics, not allocation order.
+fn serialize_debug_vars(
+    forest: &MastForest,
+    debug_vars: &[(usize, miden_core::mast::DebugVarId)],
+) -> Vec<u8> {
+    let mut data = Vec::new();
     for (op_idx, var_id) in debug_vars {
         data.extend_from_slice(&op_idx.to_le_bytes());
-        data.extend_from_slice(&var_id.as_u32().to_le_bytes());
+        if let Some(debug_var) = forest.debug_info().debug_var(*var_id) {
+            debug_var.write_into(&mut data);
+        }
     }
     data
 }
 
 /// Looks up and serializes the debug vars for a given node from the pending mappings.
 fn serialize_debug_vars_for_node(
+    forest: &MastForest,
     pending: &[(MastNodeId, Vec<(usize, miden_core::mast::DebugVarId)>)],
     node_id: MastNodeId,
 ) -> Vec<u8> {
     for (id, vars) in pending {
         if *id == node_id {
-            return serialize_debug_vars(vars);
+            return serialize_debug_vars(forest, vars);
         }
     }
     Vec::new()
@@ -596,8 +606,8 @@ impl MastForestBuilder {
         let base_fingerprint = block
             .fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)
             .expect("hash_by_node_id should contain the fingerprints of all children of `node`");
-        let dedup_fingerprint =
-            base_fingerprint.augment_with_data(&serialize_debug_vars(&debug_vars));
+        let dedup_fingerprint = base_fingerprint
+            .augment_with_data(&serialize_debug_vars(&self.mast_forest, &debug_vars));
 
         let (node_id, is_new) =
             if let Some(node_id) = self.node_id_by_fingerprint.get(&dedup_fingerprint) {
@@ -687,8 +697,11 @@ impl MastForestBuilder {
             .expect("hash_by_node_id should contain the fingerprints of all children of `node`");
 
         // Augment with the source node's debug vars, matching ensure_block() semantics.
-        let debug_vars_data =
-            serialize_debug_vars_for_node(&self.pending_debug_var_mappings, source_node_id);
+        let debug_vars_data = serialize_debug_vars_for_node(
+            &self.mast_forest,
+            &self.pending_debug_var_mappings,
+            source_node_id,
+        );
         let dedup_fingerprint = base_fingerprint.augment_with_data(&debug_vars_data);
 
         if let Some(node_id) = self.node_id_by_fingerprint.get(&dedup_fingerprint) {
@@ -781,8 +794,8 @@ impl MastForestBuilder {
         let base_fingerprint = block
             .fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)
             .expect("hash_by_node_id should contain the fingerprints of all children of `node`");
-        let dedup_fingerprint =
-            base_fingerprint.augment_with_data(&serialize_debug_vars(&debug_vars));
+        let dedup_fingerprint = base_fingerprint
+            .augment_with_data(&serialize_debug_vars(&self.mast_forest, &debug_vars));
 
         let (node_id, is_new) =
             if let Some(node_id) = self.node_id_by_fingerprint.get(&dedup_fingerprint) {
@@ -1030,8 +1043,11 @@ impl MastForestBuilder {
 
         // Re-augment the fingerprint with this node's debug vars so the dedup key
         // stays consistent with what ensure_block() originally computed.
-        let debug_vars_data =
-            serialize_debug_vars_for_node(&self.pending_debug_var_mappings, node_id);
+        let debug_vars_data = serialize_debug_vars_for_node(
+            &self.mast_forest,
+            &self.pending_debug_var_mappings,
+            node_id,
+        );
         let new_node_fingerprint = base_fingerprint.augment_with_data(&debug_vars_data);
 
         self.mast_forest[node_id] = decorated_builder.build(&self.mast_forest)?;
@@ -1054,8 +1070,11 @@ impl MastForestBuilder {
 
         // Re-augment the fingerprint with this node's debug vars so the dedup key
         // stays consistent with what ensure_block() originally computed.
-        let debug_vars_data =
-            serialize_debug_vars_for_node(&self.pending_debug_var_mappings, node_id);
+        let debug_vars_data = serialize_debug_vars_for_node(
+            &self.mast_forest,
+            &self.pending_debug_var_mappings,
+            node_id,
+        );
         let new_node_fingerprint = base_fingerprint.augment_with_data(&debug_vars_data);
 
         self.mast_forest[node_id] = decorated_builder.build(&self.mast_forest)?;
@@ -1492,6 +1511,48 @@ mod tests {
         assert_eq!(vars_a[0].1, var_x_id, "cloned_a should have var x");
         assert_eq!(vars_b.len(), 1);
         assert_eq!(vars_b[0].1, var_y_id, "cloned_b should have var y");
+    }
+
+    /// Same-content debug vars should not prevent block dedup just because they
+    /// were allocated different DebugVarIds.
+    #[test]
+    fn test_ensure_block_dedups_identical_debug_var_payloads() {
+        use miden_core::operations::{DebugVarInfo, DebugVarLocation};
+
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+
+        let var_a = builder
+            .add_debug_var(DebugVarInfo::new("x", DebugVarLocation::Stack(0)))
+            .unwrap();
+        let var_b = builder
+            .add_debug_var(DebugVarInfo::new("x", DebugVarLocation::Stack(0)))
+            .unwrap();
+
+        let block_a = builder
+            .ensure_block(
+                vec![Operation::Add],
+                Vec::new(),
+                vec![],
+                vec![(0, var_a)],
+                vec![],
+                vec![],
+            )
+            .unwrap();
+        let block_b = builder
+            .ensure_block(
+                vec![Operation::Add],
+                Vec::new(),
+                vec![],
+                vec![(0, var_b)],
+                vec![],
+                vec![],
+            )
+            .unwrap();
+
+        assert_eq!(
+            block_a, block_b,
+            "same op stream plus same DebugVarInfo payload should dedup to one node"
+        );
     }
 
     /// A small procedure root that gets merged into a larger block must keep its own

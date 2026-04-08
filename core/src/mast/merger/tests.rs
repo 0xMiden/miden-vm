@@ -1278,6 +1278,70 @@ fn merge_keeps_blocks_with_different_debug_vars_distinct() {
     assert_eq!(info_b.name(), "y");
 }
 
+/// Two blocks with identical structure and debug vars but different asm-op
+/// metadata must stay distinct after merge so diagnostics keep the right source
+/// mapping.
+#[test]
+fn merge_keeps_blocks_with_different_asm_ops_distinct() {
+    let mut forest_a = MastForest::new();
+    let asm_id_a = forest_a
+        .debug_info_mut()
+        .add_asm_op(AssemblyOp::new(None, "ctx_a".into(), 1, "mul add".into()))
+        .unwrap();
+    let dvar_a = forest_a
+        .add_debug_var(DebugVarInfo::new("x", DebugVarLocation::Stack(0)))
+        .unwrap();
+    let block_a = block_foo().add_to_forest(&mut forest_a).unwrap();
+    let num_ops_a = forest_a[block_a].get_basic_block().unwrap().num_operations() as usize;
+    forest_a
+        .debug_info_mut()
+        .register_asm_ops(block_a, num_ops_a, vec![(0, asm_id_a)])
+        .unwrap();
+    forest_a
+        .debug_info_mut()
+        .register_op_indexed_debug_vars(block_a, vec![(0, dvar_a)])
+        .unwrap();
+    forest_a.make_root(block_a);
+
+    let mut forest_b = MastForest::new();
+    let asm_id_b = forest_b
+        .debug_info_mut()
+        .add_asm_op(AssemblyOp::new(None, "ctx_b".into(), 1, "mul add".into()))
+        .unwrap();
+    let dvar_b = forest_b
+        .add_debug_var(DebugVarInfo::new("x", DebugVarLocation::Stack(0)))
+        .unwrap();
+    let block_b = block_foo().add_to_forest(&mut forest_b).unwrap();
+    let num_ops_b = forest_b[block_b].get_basic_block().unwrap().num_operations() as usize;
+    forest_b
+        .debug_info_mut()
+        .register_asm_ops(block_b, num_ops_b, vec![(0, asm_id_b)])
+        .unwrap();
+    forest_b
+        .debug_info_mut()
+        .register_op_indexed_debug_vars(block_b, vec![(0, dvar_b)])
+        .unwrap();
+    forest_b.make_root(block_b);
+
+    let (merged, root_map) = MastForest::merge([&forest_a, &forest_b]).unwrap();
+
+    let new_a = root_map.map_root(0, &block_a).unwrap();
+    let new_b = root_map.map_root(1, &block_b).unwrap();
+
+    assert_ne!(
+        new_a, new_b,
+        "same-structure blocks with different AssemblyOps must not collapse"
+    );
+    assert_eq!(
+        merged.debug_info().first_asm_op_for_node(new_a).unwrap().context_name(),
+        "ctx_a"
+    );
+    assert_eq!(
+        merged.debug_info().first_asm_op_for_node(new_b).unwrap().context_name(),
+        "ctx_b"
+    );
+}
+
 /// Debug vars are only representable on basic block nodes. The builder API
 /// (`ensure_block`) is the sole entry point for attaching debug vars, and
 /// control-flow nodes (Join, Split, Loop, Call, Dyn) have no `debug_vars`

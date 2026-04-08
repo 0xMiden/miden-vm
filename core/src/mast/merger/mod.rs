@@ -239,7 +239,11 @@ impl MastForestMerger {
         // blocks from different forests are not collapsed.
         let debug_var_data =
             serialize_debug_var_content_for_node(original_forests[forest_idx], merging_id);
-        let node_fingerprint = base_fingerprint.augment_with_data(&debug_var_data);
+        let asm_op_data =
+            serialize_asm_op_content_for_node(original_forests[forest_idx], merging_id);
+        let node_fingerprint = base_fingerprint
+            .augment_with_data(&debug_var_data)
+            .augment_with_data(&asm_op_data);
 
         match self.lookup_node_by_fingerprint(&node_fingerprint) {
             Some(matching_node_id) => {
@@ -419,6 +423,38 @@ fn serialize_debug_var_content_for_node(forest: &MastForest, node_id: MastNodeId
         data.extend_from_slice(&op_idx.to_le_bytes());
         if let Some(info) = forest.debug_info().debug_var(var_id) {
             info.write_into(&mut data);
+        }
+    }
+    data
+}
+
+/// Serializes the actual asm-op content for a node, producing a stable byte
+/// sequence suitable for fingerprint augmentation.
+///
+/// This ensures that nodes with identical structure but different source-mapping
+/// metadata do not collapse during merge.
+fn serialize_asm_op_content_for_node(forest: &MastForest, node_id: MastNodeId) -> Vec<u8> {
+    let entries = forest.debug_info().asm_ops_for_node(node_id);
+    if entries.is_empty() {
+        return Vec::new();
+    }
+
+    let mut data = Vec::new();
+    for (op_idx, asm_op_id) in entries {
+        data.extend_from_slice(&op_idx.to_le_bytes());
+        if let Some(asm_op) = forest.debug_info().asm_op(asm_op_id) {
+            asm_op.context_name().write_into(&mut data);
+            asm_op.op().write_into(&mut data);
+            asm_op.num_cycles().write_into(&mut data);
+            match asm_op.location() {
+                Some(location) => {
+                    data.push(1);
+                    location.uri.write_into(&mut data);
+                    data.extend_from_slice(&u32::from(location.start).to_le_bytes());
+                    data.extend_from_slice(&u32::from(location.end).to_le_bytes());
+                },
+                None => data.push(0),
+            }
         }
     }
     data
