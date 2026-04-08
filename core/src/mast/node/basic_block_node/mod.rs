@@ -1472,39 +1472,46 @@ impl BasicBlockNodeBuilder {
         }
     }
 
-    /// Builds the BasicBlockNode with the specified decorators.
-    pub fn build(self) -> Result<BasicBlockNode, MastForestError> {
-        let (op_batches, digest, padded_decorators) = match self.operation_data {
+    /// Batches operations (if raw), adjusts decorator indices to padded form, and returns digest.
+    ///
+    /// Used by [`BasicBlockNodeBuilder::build`], [`MastForestContributor::add_to_forest`], and
+    /// [`MastForestContributor::fingerprint_for_node`] so fingerprinting matches the built node
+    /// before sentinel op-decorators are merged into `after_exit`.
+    fn prepare_op_batches_and_padded_decorators(
+        &self,
+    ) -> Result<(Vec<OpBatch>, Word, DecoratorList), MastForestError> {
+        match &self.operation_data {
             OperationData::Raw { operations, decorators } => {
                 if operations.is_empty() {
                     return Err(MastForestError::EmptyBasicBlock);
                 }
 
-                // Validate decorators list (only in debug mode).
                 #[cfg(debug_assertions)]
-                validate_decorators(operations.len(), &decorators);
+                validate_decorators(operations.len(), decorators);
 
-                let (op_batches, computed_digest) = batch_and_hash_ops(operations);
-                // Batch operations (adds padding NOOPs)
-                // Adjust decorators from raw to padded indices
-                let padded_decorators = BasicBlockNode::adjust_decorators(decorators, &op_batches);
-
-                // Use the forced digest if provided, otherwise use the computed digest
+                let (op_batches, computed_digest) = batch_and_hash_ops(operations.clone());
                 let digest = self.digest.unwrap_or(computed_digest);
+                let padded_decorators =
+                    BasicBlockNode::adjust_decorators(decorators.clone(), &op_batches);
 
-                (op_batches, digest, padded_decorators)
+                Ok((op_batches, digest, padded_decorators))
             },
             OperationData::Batched { op_batches, decorators } => {
                 if op_batches.is_empty() {
                     return Err(MastForestError::EmptyBasicBlock);
                 }
 
-                // Decorators are already padded - no adjustment needed!
                 let digest = self.digest.expect("digest must be set for batched operations");
 
-                (op_batches, digest, decorators)
+                Ok((op_batches.clone(), digest, decorators.clone()))
             },
-        };
+        }
+    }
+
+    /// Builds the BasicBlockNode with the specified decorators.
+    pub fn build(self) -> Result<BasicBlockNode, MastForestError> {
+        let (op_batches, digest, padded_decorators) =
+            self.prepare_op_batches_and_padded_decorators()?;
 
         let (padded_decorators, after_exit) = merge_sentinel_op_decorators_into_after_exit(
             &op_batches,
@@ -1517,7 +1524,7 @@ impl BasicBlockNodeBuilder {
             digest,
             decorators: DecoratorStore::Owned {
                 decorators: padded_decorators,
-                before_enter: self.before_enter.clone(),
+                before_enter: self.before_enter,
                 after_exit,
             },
         })
@@ -1591,39 +1598,8 @@ impl MastForestContributor for BasicBlockNodeBuilder {
         // Determine the node ID that will be assigned
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
 
-        // Process based on operation data type
-        let (op_batches, digest, padded_decorators) = match self.operation_data {
-            OperationData::Raw { operations, decorators } => {
-                if operations.is_empty() {
-                    return Err(MastForestError::EmptyBasicBlock);
-                }
-
-                // Validate decorators list (only in debug mode).
-                #[cfg(debug_assertions)]
-                validate_decorators(operations.len(), &decorators);
-
-                // Batch operations (adds padding NOOPs)
-                let (op_batches, computed_digest) = batch_and_hash_ops(operations);
-
-                // Use the forced digest if provided, otherwise use the computed digest
-                let digest = self.digest.unwrap_or(computed_digest);
-
-                // Adjust decorator indices from raw to padded
-                let padded_decorators = BasicBlockNode::adjust_decorators(decorators, &op_batches);
-
-                (op_batches, digest, padded_decorators)
-            },
-            OperationData::Batched { op_batches, decorators } => {
-                if op_batches.is_empty() {
-                    return Err(MastForestError::EmptyBasicBlock);
-                }
-
-                // Decorators are already padded - no adjustment needed!
-                let digest = self.digest.expect("digest must be set for batched operations");
-
-                (op_batches, digest, decorators)
-            },
-        };
+        let (op_batches, digest, padded_decorators) =
+            self.prepare_op_batches_and_padded_decorators()?;
 
         let (padded_decorators, after_exit) = merge_sentinel_op_decorators_into_after_exit(
             &op_batches,
@@ -1658,61 +1634,35 @@ impl MastForestContributor for BasicBlockNodeBuilder {
         forest: &MastForest,
         _hash_by_node_id: &impl LookupByIdx<MastNodeId, MastNodeFingerprint>,
     ) -> Result<MastNodeFingerprint, MastForestError> {
-        // For BasicBlockNode, we need to implement custom logic because BasicBlock has special
-        // decorator handling with operation indices that other nodes don't have
+        // Match `build` / `add_to_forest`: merge sentinel op decorators into
+        // `after_exit`, then hash op-level entries as raw indices (same as pre-merge raw form when
+        // no sentinel is present).
+        let (op_batches, digest, padded_decorators) =
+            self.prepare_op_batches_and_padded_decorators()?;
+        let (rest_padded, after_exit_merged) = merge_sentinel_op_decorators_into_after_exit(
+            &op_batches,
+            padded_decorators,
+            self.after_exit.clone(),
+        );
 
-        // Process based on operation data type
-        let (op_batches, digest, raw_decorators) = match &self.operation_data {
-            OperationData::Raw { operations, decorators } => {
-                // Compute digest - use forced digest if available, otherwise compute normally
-                let (op_batches, computed_digest) = batch_and_hash_ops(operations.clone());
-                let digest = self.digest.unwrap_or(computed_digest);
-
-                // Decorators are already in raw form - no conversion needed
-                #[cfg(debug_assertions)]
-                {
-                    validate_decorators(operations.len(), decorators);
-                }
-
-                (op_batches, digest, decorators.clone())
-            },
-            OperationData::Batched { op_batches, decorators } => {
-                let digest = self.digest.expect("digest must be set for batched operations");
-
-                // Convert from padded to raw indices for fingerprinting
-                let pad2raw = PaddedToRawPrefix::new(op_batches);
-                let raw_decorators: Vec<(usize, DecoratorId)> = decorators
-                    .iter()
-                    .map(|(padded_idx, decorator_id)| {
-                        let raw_idx = padded_idx - pad2raw[*padded_idx];
-                        (raw_idx, *decorator_id)
-                    })
-                    .collect();
-
-                (op_batches.clone(), digest, raw_decorators)
-            },
-        };
-
-        // Collect before_enter decorator fingerprints
         let before_enter_bytes: Vec<[u8; 32]> = self
             .before_enter
             .iter()
             .map(|&id| *forest[id].fingerprint().as_bytes())
             .collect();
 
-        // Collect op-indexed decorator data (using raw indices)
-        let adjusted_decorators = raw_decorators;
-
-        // Collect op-indexed decorator data
-        let mut op_decorator_data = Vec::with_capacity(adjusted_decorators.len() * 33);
-        for (raw_op_idx, decorator_id) in &adjusted_decorators {
-            op_decorator_data.extend_from_slice(&raw_op_idx.to_le_bytes());
+        let pad2raw = PaddedToRawPrefix::new(&op_batches);
+        let mut op_decorator_data = Vec::with_capacity(rest_padded.len() * 33);
+        for (padded_idx, decorator_id) in rest_padded.iter() {
+            let raw_idx = *padded_idx - pad2raw[*padded_idx];
+            op_decorator_data.extend_from_slice(&raw_idx.to_le_bytes());
             op_decorator_data.extend_from_slice(forest[*decorator_id].fingerprint().as_bytes());
         }
 
-        // Collect after_exit decorator fingerprints
-        let after_exit_bytes: Vec<[u8; 32]> =
-            self.after_exit.iter().map(|&id| *forest[id].fingerprint().as_bytes()).collect();
+        let after_exit_bytes: Vec<[u8; 32]> = after_exit_merged
+            .iter()
+            .map(|&id| *forest[id].fingerprint().as_bytes())
+            .collect();
 
         // Collect assert operation data
         let mut assert_data = Vec::new();
@@ -1744,8 +1694,8 @@ impl MastForestContributor for BasicBlockNodeBuilder {
             .chain(core::iter::once(assert_data.as_slice()));
 
         if self.before_enter.is_empty()
-            && self.after_exit.is_empty()
-            && adjusted_decorators.is_empty()
+            && after_exit_merged.is_empty()
+            && rest_padded.is_empty()
             && assert_data.is_empty()
         {
             Ok(MastNodeFingerprint::new(digest))

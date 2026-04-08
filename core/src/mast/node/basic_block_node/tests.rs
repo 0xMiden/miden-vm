@@ -985,6 +985,31 @@ fn test_basic_block_fingerprint_uses_forced_digest() {
     );
 }
 
+/// Sentinel raw index `operations.len()` merges into `after_exit`; fingerprint must match explicit
+/// `after_exit` (MastForestContributor invariant for dedup / merges).
+#[test]
+fn test_basic_block_fingerprint_sentinel_matches_explicit_after_exit() {
+    let mut forest = MastForest::new();
+    let deco = forest.add_decorator(Decorator::Trace(7)).expect("decorator");
+    let ops = vec![Operation::Noop];
+    let map = IndexVec::new();
+
+    let builder_sentinel = BasicBlockNodeBuilder::new(ops.clone(), vec![(1, deco)]);
+    let builder_explicit =
+        BasicBlockNodeBuilder::new(ops.clone(), vec![]).with_after_exit(vec![deco]);
+
+    let fp_s = builder_sentinel.fingerprint_for_node(&forest, &map).expect("fp sentinel");
+    let fp_e = builder_explicit.fingerprint_for_node(&forest, &map).expect("fp explicit");
+    assert_eq!(fp_s, fp_e, "sentinel vs explicit after_exit should fingerprint the same");
+
+    let node_s = BasicBlockNodeBuilder::new(ops.clone(), vec![(1, deco)]).build().unwrap();
+    let node_e = BasicBlockNodeBuilder::new(ops, vec![])
+        .with_after_exit(vec![deco])
+        .build()
+        .unwrap();
+    assert_eq!(node_s, node_e);
+}
+
 /// Test that BasicBlockNode -> to_builder -> build preserves structure and decorators
 #[test]
 fn test_to_builder_identity() {
