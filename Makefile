@@ -7,6 +7,7 @@ help:
 # -- variables --------------------------------------------------------------------------------------
 
 ALL_FEATURES_EXCEPT_ROCKSDB="concurrent executable internal serde std"
+MIDEN_STARK_TEST_PACKAGES=-p miden-lifted-air -p miden-lifted-stark -p miden-stateful-hasher -p miden-stark-transcript
 WARNINGS=RUSTDOCFLAGS="-D warnings"
 
 # -- linting --------------------------------------------------------------------------------------
@@ -96,6 +97,10 @@ test-smt-concurrent: ## Run only concurrent SMT tests
 test-docs:
 	cargo test --doc --all-features --profile test-release
 
+.PHONY: test-p3-parallel
+test-p3-parallel: ## Run Miden STARK crate tests with the parallel feature enabled
+	cargo test $(MIDEN_STARK_TEST_PACKAGES) -F miden-lifted-stark/parallel
+
 .PHONY: test-large-smt
 test-large-smt: ## Run only large SMT tests
 	cargo nextest run --success-output immediate --profile large-smt --cargo-profile test-release --features rocksdb
@@ -110,9 +115,8 @@ check: ## Check all targets and features for errors without code generation
 	cargo check --all-targets --all-features
 
 .PHONY: check-features
-check-features: ## Check miden-crypto feature combinations
-	cargo check -p miden-crypto --all-targets --no-default-features
-	cargo check -p miden-crypto --all-targets --features ${ALL_FEATURES_EXCEPT_ROCKSDB}
+check-features: ## Check curated feature combinations across the integrated workspace
+	./scripts/check-features.sh
 
 .PHONY: check-fuzz
 check-fuzz: ## Check miden-crypto-fuzz compilation

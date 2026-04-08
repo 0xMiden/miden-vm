@@ -45,7 +45,7 @@ pub mod parallel {
 pub mod stark {
     //! Lifted STARK proving system based on Plonky3.
     //!
-    //! Sub-modules from `p3-miden-lifted-stark`:
+    //! Sub-modules from `miden-lifted-stark`:
     //! - [`proof`] — [`proof::StarkProof`], [`proof::StarkDigest`], [`proof::StarkOutput`],
     //!   [`proof::StarkTranscript`]
     //! - [`air`] — AIR traits, builders, symbolic types (includes all of `p3-air`)
@@ -64,9 +64,9 @@ pub mod stark {
     //! - [`symmetric`] — Symmetric cryptographic primitives
 
     // Top-level types from lifted-stark
-    pub use p3_miden_lifted_stark::{GenericStarkConfig, StarkConfig};
+    pub use miden_lifted_stark::{GenericStarkConfig, StarkConfig};
     // Lifted-stark sub-modules (re-exported as-is)
-    pub use p3_miden_lifted_stark::{
+    pub use miden_lifted_stark::{
         air, debug, fri, hasher, lmcs, proof, prover, transcript, verifier,
     };
 

@@ -103,3 +103,21 @@ jobs:
           rustup update --no-self-update nightly
           rustup default nightly
           make doc
+
+  test-p3-parallel:
+    name: test Miden STARK crates parallel ${{ matrix.toolchain }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [stable, nightly]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@main
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - name: Run Miden STARK crate parallel tests
+        run: |
+          rustup update --no-self-update ${{ matrix.toolchain }}
+          rustup default ${{ matrix.toolchain }}
+          make test-p3-parallel

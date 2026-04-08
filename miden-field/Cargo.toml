@@ -17,29 +17,29 @@ crate-type = ["rlib"]
 
 # dependendies for both off-chain and on-chain targets
 [dependencies]
-thiserror = { default-features = false, version = "2.0" }
+thiserror = { workspace = true }
 
 # dependendies for the off-chain target only
 [target.'cfg(not(all(target_family = "wasm", miden)))'.dependencies]
-miden-serde-utils = { workspace = true }
-num-bigint        = { default-features = false, version = "0.4" }
-p3-challenger     = { default-features = false, version = "0.5" }
-p3-field          = { default-features = false, version = "0.5" }
-p3-goldilocks     = { default-features = false, version = "0.5" }
-paste             = { version = "1.0.15" }
-proptest          = { default-features = false, features = ["alloc", "std"], optional = true, version = "1.7" }
-rand              = { default-features = false, version = "0.10" }
-serde             = { default-features = false, features = ["derive"], version = "1.0" }
-subtle            = { default-features = false, version = "2.6" }
+miden-serde-utils       = { workspace = true }
+num-bigint              = { default-features = false, version = "0.4" }
+p3-challenger.workspace = true
+p3-field.workspace      = true
+p3-goldilocks.workspace = true
+paste                   = { version = "1.0.15" }
+proptest                = { default-features = false, features = ["alloc", "std"], optional = true, version = "1.7" }
+rand                    = { default-features = false, version = "0.10" }
+serde                   = { default-features = false, features = ["derive"], version = "1.0" }
+subtle                  = { default-features = false, version = "2.6" }
 
 [features]
 default = []
 testing = ["dep:proptest"]
 
 [dev-dependencies]
-proptest = { default-features = false, features = ["alloc", "std"], version = "1.7" }
+proptest = { features = ["alloc", "std"], workspace = true }
 rand     = { default-features = false, version = "0.10" }
-rstest   = { version = "0.26" }
+rstest   = { workspace = true }
 
 [lints]
 workspace = true

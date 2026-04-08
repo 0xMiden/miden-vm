@@ -1,0 +1,22 @@
+[package]
+description            = "Stateful sponge-like hashers for cryptographic hashing"
+edition                = "2024"
+homepage               = "https://github.com/0xMiden/crypto/tree/main/crates"
+license                = "MIT OR Apache-2.0"
+name                   = "miden-stateful-hasher"
+readme                 = "../README.md"
+repository             = "https://github.com/0xMiden/crypto"
+rust-version.workspace = true
+version.workspace      = true
+
+[dependencies]
+p3-field.workspace     = true
+p3-symmetric.workspace = true
+
+[dev-dependencies]
+p3-bn254.workspace       = true
+p3-goldilocks.workspace  = true
+p3-mersenne-31.workspace = true
+
+[lints]
+workspace = true

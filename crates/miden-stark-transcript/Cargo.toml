@@ -1,0 +1,19 @@
+[package]
+description            = "Transcript channels for Fiat-Shamir protocols with raw field/commitment storage"
+edition                = "2024"
+homepage               = "https://github.com/0xMiden/crypto/tree/main/crates"
+license                = "MIT OR Apache-2.0"
+name                   = "miden-stark-transcript"
+readme                 = "../README.md"
+repository             = "https://github.com/0xMiden/crypto"
+rust-version.workspace = true
+version.workspace      = true
+
+[dependencies]
+p3-challenger.workspace = true
+p3-field.workspace      = true
+serde.workspace         = true
+thiserror.workspace     = true
+
+[lints]
+workspace = true

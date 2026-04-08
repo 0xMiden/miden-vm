@@ -2,17 +2,15 @@
 
 set -euo pipefail
 
-# Script to check all feature combinations compile without warnings
-# This script ensures that warnings are treated as errors for CI
+# Script to check all feature combinations compile without warnings.
+# This script ensures that warnings are treated as errors for CI.
 
 echo "Checking all feature combinations with cargo-hack..."
 
-# Set environment variables to treat warnings as errors
+# Set environment variables to treat warnings as errors.
 export RUSTFLAGS="-D warnings"
+export MIDEN_BUILD_LIB_DOCS=1
 
-# Run cargo-hack with comprehensive feature checking
-# Note: We exclude 'default' to test non-default feature combinations
-# and use --each-feature to test each feature individually
 cargo hack check \
     --workspace \
     --each-feature \
@@ -20,4 +18,10 @@ cargo hack check \
     --all-targets
 
 echo ""
+echo "Checking targeted multi-feature combinations..."
+
+# `cargo hack --each-feature` does not cover combinations like
+# `miden-lifted-stark/testing,parallel`.
+cargo check -p miden-lifted-stark --all-targets --features testing,parallel
+
 echo "All feature combinations compiled successfully!"
