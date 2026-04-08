@@ -59,6 +59,7 @@ use miden_assembly_syntax::{
     library::{ItemInfo, ModuleInfo},
 };
 use miden_core::{Word, advice::AdviceMap, program::Kernel};
+use miden_project::Linkage;
 use smallvec::{SmallVec, smallvec};
 
 pub use self::{
@@ -156,22 +157,22 @@ impl Linker {
         }
     }
 
-    /// Registers `library` and all of its modules with the linker, according to its kind
+    /// Registers `library` and all of its modules with the linker, according to its linkage
     pub fn link_library(&mut self, library: LinkLibrary) -> Result<(), LinkerError> {
         use alloc::collections::btree_map::Entry;
 
-        match self.libraries.entry(*library.library.digest()) {
+        match self.libraries.entry(library.mast.commitment()) {
             Entry::Vacant(entry) => {
                 entry.insert(library.clone());
-                self.link_assembled_modules(library.library.module_infos())
+                self.link_assembled_modules(library.module_infos)
             },
             Entry::Occupied(mut entry) => {
                 let prev = entry.get_mut();
 
                 // If the same library is linked both dynamically and statically, prefer static
                 // linking always.
-                if matches!(prev.kind, LinkLibraryKind::Dynamic) {
-                    prev.kind = library.kind;
+                if matches!(prev.linkage, Linkage::Dynamic) {
+                    prev.linkage = library.linkage;
                 }
 
                 Ok(())
@@ -356,6 +357,33 @@ impl Linker {
         graph.kernel_index = Some(kernel_index);
         graph.kernel = kernel;
         graph
+    }
+
+    /// Add a kernel to the linker after the linker is initially constructed.
+    ///
+    /// This cannot cause any issues with modules already added to the linker (if any), as they
+    /// cannot have directly depended on the kernel, or an error would have been raised.
+    ///
+    /// This will panic if the kernel is empty, or the provided kernel module info is not valid for
+    /// a kernel.
+    pub(super) fn link_with_kernel(
+        &mut self,
+        kernel: Kernel,
+        kernel_module: ModuleInfo,
+    ) -> Result<(), LinkerError> {
+        assert!(self.kernel.is_empty());
+        assert!(!kernel.is_empty());
+        assert!(
+            kernel_module.path().is_kernel_path(),
+            "invalid root kernel module path: {}",
+            kernel_module.path()
+        );
+        log::debug!(target: "linker", "modifying linker with kernel {}", kernel_module.path());
+        let kernel_index = self.link_assembled_module(kernel_module)?;
+        self.kernel_index = Some(kernel_index);
+        self.kernel = kernel;
+
+        Ok(())
     }
 
     pub fn kernel(&self) -> &Kernel {

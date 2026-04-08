@@ -6,12 +6,12 @@
 //!
 //! #### Metadata
 //! - `name` (`String`)
-//! - `version` (optional, [`miden_assembly_syntax::Version`] serialized as a `String`)
+//! - `version` ([`miden_assembly_syntax::Version`] serialized as a `String`)
 //! - `description` (optional, `String`)
-//! - `kind` (`u8`, see [`crate::PackageKind`])
+//! - `kind` (`u8`, see [`crate::TargetType`])
 //!
 //! #### Code
-//! - `mast` (see [`crate::MastArtifact`])
+//! - `mast` (see [`miden_assembly_syntax::Library`])
 //!
 //! #### Manifest
 //! - `manifest` (see [`crate::PackageManifest`])
@@ -20,7 +20,6 @@
 //! - `sections` (a vector of zero or more [`crate::Section`])
 
 use alloc::{
-    collections::BTreeMap,
     format,
     string::{String, ToString},
     sync::Arc,
@@ -33,12 +32,11 @@ use miden_assembly_syntax::{
 };
 use miden_core::{
     Word,
-    program::Program,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
-use super::{ConstantExport, PackageKind, ProcedureExport, TypeExport};
-use crate::{Dependency, MastArtifact, Package, PackageExport, PackageManifest, Section};
+use super::{ConstantExport, PackageId, ProcedureExport, TargetType, TypeExport};
+use crate::{Dependency, Package, PackageExport, PackageManifest, Section};
 
 // CONSTANTS
 // ================================================================================================
@@ -46,16 +44,10 @@ use crate::{Dependency, MastArtifact, Package, PackageExport, PackageManifest, S
 /// Magic string for detecting that a file is serialized [`Package`]
 const MAGIC_PACKAGE: &[u8; 5] = b"MASP\0";
 
-/// Magic string indicating a Program artifact.
-const MAGIC_PROGRAM: &[u8; 4] = b"PRG\0";
-
-/// Magic string indicating a Library artifact.
-const MAGIC_LIBRARY: &[u8; 4] = b"LIB\0";
-
 /// The format version.
 ///
 /// If future modifications are made to this format, the version should be incremented by 1.
-const VERSION: [u8; 3] = [3, 0, 0];
+const VERSION: [u8; 3] = [4, 0, 0];
 
 // PACKAGE SERIALIZATION/DESERIALIZATION
 // ================================================================================================
@@ -70,7 +62,7 @@ impl Serializable for Package {
         self.name.write_into(target);
 
         // Write package version
-        self.version.as_ref().map(|v| v.to_string()).write_into(target);
+        self.version.to_string().write_into(target);
 
         // Write package description
         self.description.write_into(target);
@@ -110,28 +102,23 @@ impl Deserializable for Package {
         }
 
         // Read package name
-        let name = String::read_from(source)?;
+        let name = PackageId::read_from(source)?;
 
         // Read package version
-        let version = Option::<String>::read_from(source)?;
-        let version = match version {
-            Some(version) => Some(
-                crate::Version::parse(&version)
-                    .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?,
-            ),
-            None => None,
-        };
+        let version = String::read_from(source)?
+            .parse::<crate::Version>()
+            .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
 
         // Read package description
         let description = Option::<String>::read_from(source)?;
 
         // Read package kind
         let kind_tag = source.read_u8()?;
-        let kind = PackageKind::try_from(kind_tag)
+        let kind = TargetType::try_from(kind_tag)
             .map_err(|e| DeserializationError::InvalidValue(e.to_string()))?;
 
         // Read MAST artifact
-        let mast = MastArtifact::read_from(source)?;
+        let mast = Arc::new(Library::read_from(source)?);
 
         // Read manifest
         let manifest = PackageManifest::read_from(source)?;
@@ -151,41 +138,6 @@ impl Deserializable for Package {
     }
 }
 
-// MAST ARTIFACT SERIALIZATION/DESERIALIZATION
-// ================================================================================================
-
-impl Serializable for MastArtifact {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        match self {
-            Self::Executable(program) => {
-                target.write_bytes(MAGIC_PROGRAM);
-                program.write_into(target);
-            },
-            Self::Library(library) => {
-                target.write_bytes(MAGIC_LIBRARY);
-                library.write_into(target);
-            },
-        }
-    }
-}
-
-impl Deserializable for MastArtifact {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let tag: [u8; 4] = source.read_array()?;
-
-        if &tag == MAGIC_PROGRAM {
-            Program::read_from(source).map(Arc::new).map(MastArtifact::Executable)
-        } else if &tag == MAGIC_LIBRARY {
-            Library::read_from(source).map(Arc::new).map(MastArtifact::Library)
-        } else {
-            Err(DeserializationError::InvalidValue(format!(
-                "invalid MAST artifact tag: {:?}",
-                &tag
-            )))
-        }
-    }
-}
-
 // PACKAGE MANIFEST SERIALIZATION/DESERIALIZATION
 // ================================================================================================
 
@@ -195,6 +147,8 @@ impl serde::Serialize for PackageManifest {
     where
         S: serde::Serializer,
     {
+        use alloc::collections::BTreeMap;
+
         use miden_assembly_syntax::Path;
         use serde::ser::SerializeStruct;
 
@@ -254,7 +208,9 @@ impl<'de> serde::Deserialize<'de> for PackageManifest {
                 let dependencies = seq
                     .next_element::<Vec<Dependency>>()?
                     .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
-                Ok(PackageManifest::new(exports).with_dependencies(dependencies))
+                PackageManifest::new(exports)
+                    .and_then(|manifest| manifest.with_dependencies(dependencies))
+                    .map_err(serde::de::Error::custom)
             }
 
             fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
@@ -282,7 +238,9 @@ impl<'de> serde::Deserialize<'de> for PackageManifest {
                 let exports = exports.ok_or_else(|| serde::de::Error::missing_field("exports"))?;
                 let dependencies =
                     dependencies.ok_or_else(|| serde::de::Error::missing_field("dependencies"))?;
-                Ok(PackageManifest::new(exports).with_dependencies(dependencies))
+                PackageManifest::new(exports)
+                    .and_then(|manifest| manifest.with_dependencies(dependencies))
+                    .map_err(serde::de::Error::custom)
             }
         }
 
@@ -314,16 +272,17 @@ impl Deserializable for PackageManifest {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         // Read exports
         let exports_len = source.read_usize()?;
-        let mut exports = BTreeMap::new();
+        let mut exports = Vec::with_capacity(exports_len);
         for _ in 0..exports_len {
-            let export = PackageExport::read_from(source)?;
-            exports.insert(export.path().clone(), export);
+            exports.push(PackageExport::read_from(source)?);
         }
 
         // Read dependencies
         let dependencies = Vec::<Dependency>::read_from(source)?;
 
-        Ok(Self { exports, dependencies })
+        PackageManifest::new(exports)
+            .and_then(|manifest| manifest.with_dependencies(dependencies))
+            .map_err(|error| DeserializationError::InvalidValue(error.to_string()))
     }
 }
 
@@ -418,13 +377,7 @@ impl Deserializable for TypeExport {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{
-        collections::BTreeMap,
-        string::{String, ToString},
-        sync::Arc,
-        vec,
-        vec::Vec,
-    };
+    use alloc::{collections::BTreeMap, string::ToString, sync::Arc, vec, vec::Vec};
 
     use miden_assembly_syntax::{
         Library,
@@ -439,11 +392,14 @@ mod tests {
             SliceReader,
         },
     };
+    #[cfg(feature = "serde")]
+    use serde_json::{json, to_value};
 
-    use super::{
-        MAGIC_PACKAGE, MastArtifact, Package, PackageExport, PackageKind, PackageManifest, VERSION,
+    use super::{MAGIC_PACKAGE, Package, PackageExport, PackageManifest, VERSION};
+    use crate::{
+        Dependency, ManifestValidationError, PackageId, TargetType,
+        package::manifest::ProcedureExport as PackageProcedureExport,
     };
-    use crate::package::manifest::ProcedureExport as PackageProcedureExport;
 
     fn build_forest() -> (MastForest, MastNodeId) {
         let mut forest = MastForest::new();
@@ -460,7 +416,7 @@ mod tests {
         Arc::from(path.into_boxed_path())
     }
 
-    fn build_library() -> Library {
+    fn build_library() -> Arc<Library> {
         let (forest, node_id) = build_forest();
         let path = absolute_path("test::proc");
         let export = LibraryProcedureExport::new(node_id, Arc::clone(&path));
@@ -468,7 +424,7 @@ mod tests {
         let mut exports = BTreeMap::new();
         exports.insert(path, LibraryExport::Procedure(export));
 
-        Library::new(Arc::new(forest), exports).expect("failed to build library")
+        Arc::new(Library::new(Arc::new(forest), exports).expect("failed to build library"))
     }
 
     fn build_package() -> Package {
@@ -484,16 +440,26 @@ mod tests {
             attributes: AttributeSet::default(),
         });
 
-        let manifest = PackageManifest::new([export]);
+        let manifest =
+            PackageManifest::new([export]).expect("test package manifest should be valid");
 
         Package {
-            name: String::from("test_pkg"),
-            version: None,
+            name: PackageId::from("test_pkg"),
+            version: crate::Version::new(0, 0, 0),
             description: None,
-            kind: PackageKind::Library,
-            mast: MastArtifact::Library(Arc::new(library)),
+            kind: TargetType::Library,
+            mast: library,
             manifest,
             sections: Vec::new(),
+        }
+    }
+
+    fn build_dependency() -> Dependency {
+        Dependency {
+            name: PackageId::from("dep"),
+            kind: TargetType::Library,
+            version: crate::Version::new(1, 0, 0),
+            digest: Default::default(),
         }
     }
 
@@ -504,7 +470,7 @@ mod tests {
         bytes.write_bytes(MAGIC_PACKAGE);
         bytes.write_bytes(&VERSION);
         package.name.write_into(&mut bytes);
-        package.version.as_ref().map(|v| v.to_string()).write_into(&mut bytes);
+        package.version.to_string().write_into(&mut bytes);
         package.description.write_into(&mut bytes);
         bytes.write_u8(package.kind.into());
         package.mast.write_into(&mut bytes);
@@ -531,5 +497,121 @@ mod tests {
         let mut reader = BudgetedReader::new(SliceReader::new(&bytes), bytes.len());
         let err = Package::read_from(&mut reader).unwrap_err();
         assert!(matches!(err, DeserializationError::InvalidValue(_)));
+    }
+
+    #[test]
+    fn package_manifest_new_rejects_duplicate_export_paths() {
+        let library = build_library();
+        let path = absolute_path("test::proc");
+        let node_id = library.get_export_node_id(path.as_ref());
+        let digest = library.mast_forest()[node_id].digest();
+        let export = PackageExport::Procedure(PackageProcedureExport {
+            path: path.clone(),
+            digest,
+            signature: None,
+            attributes: AttributeSet::default(),
+        });
+
+        let err = PackageManifest::new([export.clone(), export])
+            .expect_err("duplicate export paths should be rejected by constructors");
+        assert_eq!(err, ManifestValidationError::DuplicateExport(path));
+    }
+
+    #[test]
+    fn package_manifest_add_dependency_rejects_duplicate_dependencies() {
+        let mut manifest =
+            PackageManifest::new([]).expect("empty package manifest should be valid");
+        let dependency = build_dependency();
+
+        manifest
+            .add_dependency(dependency.clone())
+            .expect("first dependency should be accepted");
+        let err = manifest
+            .add_dependency(dependency)
+            .expect_err("duplicate dependencies should be rejected by helpers");
+        assert_eq!(err, ManifestValidationError::DuplicateDependency(PackageId::from("dep")));
+    }
+
+    #[test]
+    fn package_manifest_rejects_duplicate_export_paths() {
+        let library = build_library();
+        let path = absolute_path("test::proc");
+        let node_id = library.get_export_node_id(path.as_ref());
+        let digest = library.mast_forest()[node_id].digest();
+        let export = PackageExport::Procedure(PackageProcedureExport {
+            path,
+            digest,
+            signature: None,
+            attributes: AttributeSet::default(),
+        });
+
+        let mut bytes = Vec::new();
+        bytes.write_usize(2);
+        export.write_into(&mut bytes);
+        export.write_into(&mut bytes);
+        bytes.write_usize(0);
+
+        let mut reader = SliceReader::new(&bytes);
+        let err = PackageManifest::read_from(&mut reader)
+            .expect_err("duplicate export paths should be rejected during deserialization");
+        assert!(matches!(err, DeserializationError::InvalidValue(_)));
+    }
+
+    #[test]
+    fn package_manifest_rejects_duplicate_dependencies() {
+        let dependency = build_dependency();
+
+        let mut bytes = Vec::new();
+        bytes.write_usize(0);
+        bytes.write_usize(2);
+        dependency.write_into(&mut bytes);
+        dependency.write_into(&mut bytes);
+
+        let mut reader = SliceReader::new(&bytes);
+        let err = PackageManifest::read_from(&mut reader)
+            .expect_err("duplicate dependencies should be rejected during deserialization");
+        assert!(matches!(err, DeserializationError::InvalidValue(_)));
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_package_manifest_rejects_duplicate_export_paths() {
+        let library = build_library();
+        let path = absolute_path("test::proc");
+        let node_id = library.get_export_node_id(path.as_ref());
+        let digest = library.mast_forest()[node_id].digest();
+        let export = PackageExport::Procedure(PackageProcedureExport {
+            path,
+            digest,
+            signature: None,
+            attributes: AttributeSet::default(),
+        });
+        let export = to_value(&export).expect("export should serialize");
+
+        let manifest = serde_json::to_string(&json!({
+            "exports": [export.clone(), export],
+            "dependencies": [],
+        }))
+        .expect("manifest should serialize to JSON");
+        let err = serde_json::from_str::<PackageManifest>(&manifest)
+            .expect_err("serde deserialization should reject duplicate export paths");
+        let message = err.to_string();
+        assert!(message.contains("duplicate export path"));
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_package_manifest_rejects_duplicate_dependencies() {
+        let dependency = to_value(build_dependency()).expect("dependency should serialize");
+
+        let manifest = serde_json::to_string(&json!({
+            "exports": [],
+            "dependencies": [dependency.clone(), dependency],
+        }))
+        .expect("manifest should serialize to JSON");
+        let err = serde_json::from_str::<PackageManifest>(&manifest)
+            .expect_err("serde deserialization should reject duplicate dependencies");
+        let message = err.to_string();
+        assert!(message.contains("duplicate dependency"));
     }
 }

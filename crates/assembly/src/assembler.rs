@@ -1,13 +1,18 @@
-use alloc::{collections::BTreeMap, string::ToString, sync::Arc, vec::Vec};
+pub(super) mod debuginfo;
+mod error;
+mod product;
 
+use alloc::{boxed::Box, collections::BTreeMap, string::ToString, sync::Arc, vec::Vec};
+
+use debuginfo::DebugInfoSections;
 use miden_assembly_syntax::{
     KernelLibrary, Library, MAX_REPEAT_COUNT, Parse, ParseOptions, SemanticAnalysisError,
     ast::{
         self, Ident, InvocationTarget, InvokeKind, ItemIndex, ModuleKind, SymbolResolution,
         Visibility, types::FunctionType,
     },
-    debuginfo::{DefaultSourceManager, SourceFile, SourceManager, SourceSpan, Spanned},
-    diagnostics::{Diagnostic, IntoDiagnostic, RelatedLabel, Report, miette},
+    debuginfo::{DefaultSourceManager, SourceManager, SourceSpan, Spanned},
+    diagnostics::{IntoDiagnostic, RelatedLabel, Report},
     library::{ConstantExport, ItemInfo, LibraryExport, ProcedureExport, TypeExport},
 };
 use miden_core::{
@@ -19,15 +24,16 @@ use miden_core::{
     operations::{AssemblyOp, Operation},
     program::{Kernel, Program},
 };
+use miden_mast_package::PackageManifest;
+use miden_project::{Linkage, TargetType};
 
+use self::{error::AssemblerError, product::AssemblyProduct};
 use crate::{
     GlobalItemIndex, ModuleIndex, Procedure, ProcedureContext,
     ast::Path,
     basic_block_builder::{BasicBlockBuilder, BasicBlockOrDecorators},
     fmp::{fmp_end_frame_sequence, fmp_initialization_sequence, fmp_start_frame_sequence},
-    linker::{
-        LinkLibrary, LinkLibraryKind, Linker, LinkerError, SymbolItem, SymbolResolutionContext,
-    },
+    linker::{LinkLibrary, Linker, LinkerError, SymbolItem, SymbolResolutionContext},
     mast_forest_builder::MastForestBuilder,
 };
 
@@ -36,19 +42,6 @@ use crate::{
 /// This limit is intended to prevent stack overflows from maliciously deep block nesting while
 /// remaining far above typical program structure depth.
 pub(crate) const MAX_CONTROL_FLOW_NESTING: usize = 256;
-
-#[derive(Debug, thiserror::Error, Diagnostic)]
-enum AssemblerError {
-    #[error("control-flow nesting depth exceeded")]
-    #[diagnostic(help("control-flow nesting exceeded the maximum depth of {max_depth}"))]
-    ControlFlowNestingDepthExceeded {
-        #[label("control-flow nesting exceeded the configured depth limit here")]
-        span: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        max_depth: usize,
-    },
-}
 
 // ASSEMBLER
 // ================================================================================================
@@ -103,19 +96,28 @@ pub struct Assembler {
     /// The source manager to use for compilation and source location information
     source_manager: Arc<dyn SourceManager>,
     /// The linker instance used internally to link assembler inputs
-    linker: Linker,
+    linker: Box<Linker>,
+    /// The debug information gathered during assembly
+    pub(super) debug_info: DebugInfoSections,
     /// Whether to treat warning diagnostics as errors
     warnings_as_errors: bool,
+    /// Whether to preserve debug information in the assembled artifact.
+    pub(super) emit_debug_info: bool,
+    /// Whether to trim source file paths in debug information.
+    pub(super) trim_paths: bool,
 }
 
 impl Default for Assembler {
     fn default() -> Self {
         let source_manager = Arc::new(DefaultSourceManager::default());
-        let linker = Linker::new(source_manager.clone());
+        let linker = Box::new(Linker::new(source_manager.clone()));
         Self {
             source_manager,
             linker,
+            debug_info: Default::default(),
             warnings_as_errors: false,
+            emit_debug_info: true,
+            trim_paths: false,
         }
     }
 }
@@ -125,18 +127,21 @@ impl Default for Assembler {
 impl Assembler {
     /// Start building an [Assembler]
     pub fn new(source_manager: Arc<dyn SourceManager>) -> Self {
-        let linker = Linker::new(source_manager.clone());
+        let linker = Box::new(Linker::new(source_manager.clone()));
         Self {
             source_manager,
             linker,
+            debug_info: Default::default(),
             warnings_as_errors: false,
+            emit_debug_info: true,
+            trim_paths: false,
         }
     }
 
     /// Start building an [`Assembler`] with a kernel defined by the provided [KernelLibrary].
     pub fn with_kernel(source_manager: Arc<dyn SourceManager>, kernel_lib: KernelLibrary) -> Self {
         let (kernel, kernel_module, _) = kernel_lib.into_parts();
-        let linker = Linker::with_kernel(source_manager.clone(), kernel, kernel_module);
+        let linker = Box::new(Linker::with_kernel(source_manager.clone(), kernel, kernel_module));
         Self {
             source_manager,
             linker,
@@ -149,6 +154,18 @@ impl Assembler {
     /// When true, any warning diagnostics that are emitted will be promoted to errors.
     pub fn with_warnings_as_errors(mut self, yes: bool) -> Self {
         self.warnings_as_errors = yes;
+        self
+    }
+
+    #[cfg(feature = "std")]
+    pub(crate) fn with_emit_debug_info(mut self, yes: bool) -> Self {
+        self.emit_debug_info = yes;
+        self
+    }
+
+    #[cfg(feature = "std")]
+    pub(crate) fn with_trim_paths(mut self, yes: bool) -> Self {
+        self.trim_paths = yes;
         self
     }
 }
@@ -245,24 +262,21 @@ impl Assembler {
     /// The way in which procedures referenced in `library` will be linked by the final artifact is
     /// determined by `kind`:
     ///
-    /// * [`LinkLibraryKind::Dynamic`] inserts a reference to the procedure in the assembled MAST,
-    ///   but not the MAST of the procedure itself. Consequently, it is necessary to provide both
-    ///   the assembled artifact _and_ `library` to the VM when executing the program, otherwise the
+    /// * [`Linkage::Dynamic`] inserts a reference to the procedure in the assembled MAST, but not
+    ///   the MAST of the procedure itself. Consequently, it is necessary to provide both the
+    ///   assembled artifact _and_ `library` to the VM when executing the program, otherwise the
     ///   procedure reference will not be resolvable at runtime.
-    /// * [`LinkLibraryKind::Static`] includes the MAST of the referenced procedure in the final
-    ///   artifact, including any code reachable from that procedure contained in `library`. The
-    ///   resulting artifact does not require `library` to be provided to the VM when executing it,
-    ///   as all procedure references were resolved ahead of time.
+    /// * [`Linkage::Static`] includes the MAST of the referenced procedure in the final artifact,
+    ///   including any code reachable from that procedure contained in `library`. The resulting
+    ///   artifact does not require `library` to be provided to the VM when executing it, as all
+    ///   procedure references were resolved ahead of time.
     pub fn link_library(
         &mut self,
         library: impl AsRef<Library>,
-        kind: LinkLibraryKind,
+        linkage: Linkage,
     ) -> Result<(), Report> {
         self.linker
-            .link_library(LinkLibrary {
-                library: Arc::new(library.as_ref().clone()),
-                kind,
-            })
+            .link_library(LinkLibrary::from_library(library.as_ref()).with_linkage(linkage))
             .map_err(Report::from)
     }
 
@@ -292,9 +306,8 @@ impl Assembler {
     /// example, unexpected procedure paths or source locations in diagnostics - it could be due
     /// to this edge case.
     pub fn link_dynamic_library(&mut self, library: impl AsRef<Library>) -> Result<(), Report> {
-        self.linker
-            .link_library(LinkLibrary::dynamic(Arc::new(library.as_ref().clone())))
-            .map_err(Report::from)
+        let library = LinkLibrary::from_library(library.as_ref()).with_linkage(Linkage::Dynamic);
+        self.linker.link_library(library).map_err(Report::from)
     }
 
     /// Dynamically link against `library` during assembly.
@@ -314,9 +327,8 @@ impl Assembler {
     /// Static linking produces larger binaries, but allows you to produce self-contained artifacts
     /// that avoid the requirement that you provide `library` to the VM at runtime.
     pub fn link_static_library(&mut self, library: impl AsRef<Library>) -> Result<(), Report> {
-        self.linker
-            .link_library(LinkLibrary::r#static(Arc::new(library.as_ref().clone())))
-            .map_err(Report::from)
+        let library = LinkLibrary::from_library(library.as_ref()).with_linkage(Linkage::Static);
+        self.linker.link_library(library).map_err(Report::from)
     }
 
     /// Statically link against `library` during assembly.
@@ -325,6 +337,37 @@ impl Assembler {
     pub fn with_static_library(mut self, library: impl AsRef<Library>) -> Result<Self, Report> {
         self.link_static_library(library)?;
         Ok(self)
+    }
+
+    /// Link against `package` with the specified linkage mode during assembly.
+    pub fn link_package(
+        &mut self,
+        package: Arc<miden_mast_package::Package>,
+        linkage: Linkage,
+    ) -> Result<(), Report> {
+        match package.kind {
+            TargetType::Kernel => {
+                if !self.kernel().is_empty() {
+                    return Err(Report::msg(format!(
+                        "duplicate kernels present in the dependency graph: '{}@{}' conflicts with another kernel we've already linked",
+                        &package.name, &package.version
+                    )));
+                }
+
+                let kernel_module = package.kernel_module_info()?;
+                let kernel = package.to_kernel()?;
+                self.linker.link_with_kernel(kernel, kernel_module)?;
+                Ok(())
+            },
+            TargetType::Executable => {
+                Err(Report::msg("cannot add executable packages to an assembler"))
+            },
+            _ => {
+                self.linker
+                    .link_library(LinkLibrary::from_package(package).with_linkage(linkage))?;
+                Ok(())
+            },
+        }
     }
 }
 
@@ -343,6 +386,11 @@ impl Assembler {
         self.linker.kernel()
     }
 
+    #[cfg(any(feature = "std", all(test, feature = "std")))]
+    pub(crate) fn source_manager(&self) -> Arc<dyn SourceManager> {
+        self.source_manager.clone()
+    }
+
     #[cfg(any(test, feature = "testing"))]
     #[doc(hidden)]
     pub fn linker(&self) -> &Linker {
@@ -359,9 +407,9 @@ impl Assembler {
     ///
     /// Returns an error if parsing or compilation of the specified modules fails.
     pub fn assemble_library(
-        mut self,
+        self,
         modules: impl IntoIterator<Item = impl Parse>,
-    ) -> Result<Library, Report> {
+    ) -> Result<Arc<Library>, Report> {
         let modules = modules
             .into_iter()
             .map(|module| {
@@ -375,9 +423,7 @@ impl Assembler {
             })
             .collect::<Result<Vec<_>, Report>>()?;
 
-        let module_indices = self.linker.link(modules)?;
-
-        self.assemble_common(&module_indices)
+        Ok(self.assemble_library_modules(modules, TargetType::Library)?.into_artifact())
     }
 
     /// Assemble a [Library] from a standard Miden Assembly project layout, using the provided
@@ -419,7 +465,7 @@ impl Assembler {
         self,
         dir: impl AsRef<std::path::Path>,
         namespace: impl AsRef<Path>,
-    ) -> Result<Library, Report> {
+    ) -> Result<Arc<Library>, Report> {
         use miden_assembly_syntax::parser;
 
         let dir = dir.as_ref();
@@ -436,7 +482,7 @@ impl Assembler {
     /// # Errors
     ///
     /// Returns an error if parsing or compilation of the specified modules fails.
-    pub fn assemble_kernel(mut self, module: impl Parse) -> Result<KernelLibrary, Report> {
+    pub fn assemble_kernel(self, module: impl Parse) -> Result<KernelLibrary, Report> {
         let module = module.parse_with_options(
             self.source_manager.clone(),
             ParseOptions {
@@ -446,10 +492,7 @@ impl Assembler {
             },
         )?;
 
-        let module_indices = self.linker.link_kernel(module)?;
-
-        self.assemble_common(&module_indices)
-            .and_then(|lib| KernelLibrary::try_from(lib).map_err(Report::new))
+        self.assemble_kernel_module(module)?.into_kernel_library()
     }
 
     /// Assemble a [KernelLibrary] from a standard Miden Assembly kernel project layout.
@@ -480,10 +523,14 @@ impl Assembler {
     }
 
     /// Shared code used by both [`Self::assemble_library`] and [`Self::assemble_kernel`].
-    fn assemble_common(mut self, module_indices: &[ModuleIndex]) -> Result<Library, Report> {
+    fn assemble_library_product(
+        mut self,
+        module_indices: &[ModuleIndex],
+        kind: TargetType,
+    ) -> Result<AssemblyProduct, Report> {
         let staticlibs = self.linker.libraries().filter_map(|lib| {
-            if matches!(lib.kind, LinkLibraryKind::Static) {
-                Some(lib.library.as_ref())
+            if matches!(lib.linkage, Linkage::Static) {
+                Some(lib.mast.as_ref())
             } else {
                 None
             }
@@ -537,7 +584,7 @@ impl Assembler {
             }
         }
 
-        Ok(Library::new(mast_forest.into(), exports)?)
+        self.finish_library_product(mast_forest, exports, kind)
     }
 
     /// The purpose of this function is, for any given symbol in the set of modules being compiled
@@ -658,7 +705,7 @@ impl Assembler {
     ///
     /// Returns an error if parsing or compilation of the specified program fails, or if the source
     /// doesn't have an entrypoint.
-    pub fn assemble_program(mut self, source: impl Parse) -> Result<Program, Report> {
+    pub fn assemble_program(self, source: impl Parse) -> Result<Program, Report> {
         let options = ParseOptions {
             kind: ModuleKind::Executable,
             warnings_as_errors: self.warnings_as_errors,
@@ -667,6 +714,33 @@ impl Assembler {
 
         let program = source.parse_with_options(self.source_manager.clone(), options)?;
         assert!(program.is_executable());
+
+        self.assemble_executable_modules(program, [])?.into_program()
+    }
+
+    pub(crate) fn assemble_library_modules(
+        mut self,
+        modules: impl IntoIterator<Item = Box<ast::Module>>,
+        kind: TargetType,
+    ) -> Result<AssemblyProduct, Report> {
+        let module_indices = self.linker.link(modules)?;
+        self.assemble_library_product(&module_indices, kind)
+    }
+
+    pub(crate) fn assemble_kernel_module(
+        mut self,
+        module: Box<ast::Module>,
+    ) -> Result<AssemblyProduct, Report> {
+        let module_indices = self.linker.link_kernel(module)?;
+        self.assemble_library_product(&module_indices, TargetType::Kernel)
+    }
+
+    pub(crate) fn assemble_executable_modules(
+        mut self,
+        program: Box<ast::Module>,
+        support_modules: impl IntoIterator<Item = Box<ast::Module>>,
+    ) -> Result<AssemblyProduct, Report> {
+        self.linker.link_modules(support_modules)?;
 
         // Recompute graph with executable module, and start compiling
         let module_index = self.linker.link([program])?[0];
@@ -681,8 +755,8 @@ impl Assembler {
 
         // Compile the linked module graph rooted at the entrypoint
         let staticlibs = self.linker.libraries().filter_map(|lib| {
-            if matches!(lib.kind, LinkLibraryKind::Static) {
-                Some(lib.library.as_ref())
+            if matches!(lib.linkage, Linkage::Static) {
+                Some(lib.mast.as_ref())
             } else {
                 None
             }
@@ -703,11 +777,94 @@ impl Assembler {
         let (mast_forest, id_remappings) = mast_forest_builder.build();
         let entry_node_id = *id_remappings.get(&entry_node_id).unwrap_or(&entry_node_id);
 
-        Ok(Program::with_kernel(
-            mast_forest.into(),
-            entry_node_id,
-            self.linker.kernel().clone(),
+        self.finish_program_product(mast_forest, entry_node_id, self.linker.kernel().clone())
+    }
+
+    fn finish_library_product(
+        &self,
+        mut mast_forest: miden_core::mast::MastForest,
+        exports: BTreeMap<Arc<Path>, LibraryExport>,
+        kind: TargetType,
+    ) -> Result<AssemblyProduct, Report> {
+        self.apply_debug_options(&mut mast_forest);
+
+        let library = Library::new(Arc::new(mast_forest), exports)?;
+        let manifest = PackageManifest::from_library(&library);
+        let debug_info = self.emit_debug_info.then(|| {
+            #[cfg_attr(not(feature = "std"), expect(unused_mut))]
+            let mut debug_info = self.debug_info.clone();
+            #[cfg(feature = "std")]
+            if let Some(trimmer) = self.source_path_trimmer() {
+                debug_info.trim_paths(&trimmer);
+            }
+            debug_info
+        });
+
+        Ok(AssemblyProduct::new(kind, Arc::new(library), None, manifest, debug_info))
+    }
+
+    fn finish_program_product(
+        &self,
+        mut mast_forest: miden_core::mast::MastForest,
+        entrypoint: MastNodeId,
+        kernel: Kernel,
+    ) -> Result<AssemblyProduct, Report> {
+        self.apply_debug_options(&mut mast_forest);
+
+        let mast = Arc::new(mast_forest);
+        let entry: Arc<Path> =
+            ast::Path::exec_path().join(ast::ProcedureName::MAIN_PROC_NAME).into();
+        let entrypoint = LibraryExport::Procedure(ProcedureExport {
+            node: entrypoint,
+            path: entry.clone(),
+            signature: None,
+            attributes: Default::default(),
+        });
+        let library = Arc::new(Library::new(mast, BTreeMap::from_iter([(entry, entrypoint)]))?);
+        let manifest = PackageManifest::from_library(&library);
+        let debug_info = self.emit_debug_info.then(|| {
+            #[cfg_attr(not(feature = "std"), expect(unused_mut))]
+            let mut debug_info = self.debug_info.clone();
+            #[cfg(feature = "std")]
+            if let Some(trimmer) = self.source_path_trimmer() {
+                debug_info.trim_paths(&trimmer);
+            }
+            debug_info
+        });
+
+        Ok(AssemblyProduct::new(
+            TargetType::Executable,
+            library,
+            Some(kernel),
+            manifest,
+            debug_info,
         ))
+    }
+
+    fn apply_debug_options(&self, mast_forest: &mut miden_core::mast::MastForest) {
+        if !self.emit_debug_info {
+            mast_forest.clear_debug_info();
+            return;
+        }
+
+        if self.trim_paths {
+            #[cfg(feature = "std")]
+            if let Some(trimmer) = self.source_path_trimmer() {
+                mast_forest.debug_info_mut().rewrite_source_locations(
+                    |location| trimmer.trim_location(location),
+                    |location| trimmer.trim_file_line_col(location),
+                );
+            }
+        }
+    }
+
+    #[cfg(feature = "std")]
+    fn source_path_trimmer(&self) -> Option<debuginfo::SourcePathTrimmer> {
+        if !self.trim_paths {
+            return None;
+        }
+
+        std::env::current_dir().ok().map(debuginfo::SourcePathTrimmer::new)
     }
 
     /// Compile the uncompiled procedure in the linked module graph which are members of the
@@ -770,7 +927,7 @@ impl Assembler {
                 SymbolItem::Procedure(proc) => {
                     let proc = proc.borrow();
                     let num_locals = proc.num_locals();
-                    let path = module_path.join(proc.name().as_str()).into();
+                    let path = Arc::<Path>::from(module_path.join(proc.name().as_str()));
                     let signature = self.linker.resolve_signature(procedure_gid)?;
                     let is_program_entrypoint =
                         root.is_program_entrypoint && root.proc_id == procedure_gid;
@@ -778,9 +935,9 @@ impl Assembler {
                     let pctx = ProcedureContext::new(
                         procedure_gid,
                         is_program_entrypoint,
-                        path,
+                        path.clone(),
                         proc.visibility(),
-                        signature,
+                        signature.clone(),
                         module_kind.is_kernel(),
                         self.source_manager.clone(),
                     )
@@ -794,6 +951,10 @@ impl Assembler {
                     // MAST forest. This is because while we won't insert a duplicate node for the
                     // procedure body node itself, all nodes that make up the procedure body would
                     // be added to the forest.
+
+                    // Record the debug info for this procedure
+                    self.debug_info
+                        .register_procedure_debug_info(&procedure, self.source_manager.as_ref())?;
 
                     // Cache the compiled procedure
                     drop(proc);

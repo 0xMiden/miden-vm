@@ -16,12 +16,14 @@ mod instruction;
 pub mod linker;
 mod mast_forest_builder;
 mod procedure;
+#[cfg(feature = "std")]
+mod project;
 
 #[cfg(test)]
 mod mast_forest_merger_tests;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
-#[cfg(test)]
+#[cfg(all(test, feature = "std"))]
 mod tests;
 
 // Re-exported for downstream crates
@@ -38,9 +40,12 @@ pub use miden_assembly_syntax::{
 /// Syntax components for the Miden Assembly AST
 /// Merkelized abstract syntax tree (MAST) components defining Miden VM programs.
 pub use miden_core::{mast, serde, utils};
+pub use miden_mast_package as package;
 
 #[doc(hidden)]
 pub use self::linker::{LinkLibraryKind, LinkerError};
+#[cfg(feature = "std")]
+pub use self::project::{ProjectAssembler, ProjectSourceInputs, ProjectTargetSelector};
 pub use self::{
     assembler::Assembler,
     procedure::{Procedure, ProcedureContext},
