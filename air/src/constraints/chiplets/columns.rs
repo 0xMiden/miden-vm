@@ -3,14 +3,12 @@
 use alloc::{vec, vec::Vec};
 use core::{borrow::Borrow, mem::size_of};
 
-use miden_core::{Felt, WORD_SIZE};
+use miden_core::{Felt, WORD_SIZE, chiplets::hasher::Hasher};
 
 use super::super::{columns::indices_arr, ext_field::QuadFeltExpr};
-#[cfg(test)]
-use crate::trace::chiplets::hasher::HASH_CYCLE_LEN;
 use crate::trace::chiplets::{
     bitwise::NUM_DECOMP_BITS,
-    hasher::{CAPACITY_LEN, DIGEST_LEN, NUM_SELECTORS, RATE_LEN, STATE_WIDTH},
+    hasher::{CAPACITY_LEN, DIGEST_LEN, HASH_CYCLE_LEN, NUM_SELECTORS, RATE_LEN, STATE_WIDTH},
 };
 
 // HELPERS
@@ -343,19 +341,94 @@ pub struct BitwisePeriodicCols<T> {
 // PERIODIC COLUMN GENERATION
 // ================================================================================================
 
+#[allow(clippy::new_without_default)]
 impl HasherPeriodicCols<Vec<Felt>> {
-    /// Generate periodic columns from the hasher periodic module.
-    pub fn from_periodic_columns() -> Self {
-        use super::hasher::periodic;
-        let flat = periodic::periodic_columns();
-        assert_eq!(flat.len(), periodic::NUM_PERIODIC_COLUMNS);
+    /// Generate periodic columns for the Poseidon2 hasher chiplet.
+    ///
+    /// All columns repeat every 16 rows, matching one permutation cycle.
+    ///
+    /// The 4 selector columns identify the row type. The 12 ark columns carry either
+    /// external round constants (on external rows) or internal round constants in
+    /// `ark[0..2]` (on packed-internal rows).
+    ///
+    /// ## 16-Row Schedule
+    ///
+    /// ```text
+    /// Row  Transition              Selector
+    /// 0    init + ext1             is_init_ext
+    /// 1-3  ext2-ext4               is_ext
+    /// 4-10 3x packed internal      is_packed_int
+    /// 11   int22 + ext5            is_int_ext
+    /// 12-14 ext6-ext8              is_ext
+    /// 15   boundary                (none)
+    /// ```
+    #[allow(clippy::needless_range_loop)]
+    pub fn new() -> Self {
+        // -------------------------------------------------------------------------
+        // Selectors
+        // -------------------------------------------------------------------------
+        let mut is_init_ext = vec![Felt::ZERO; HASH_CYCLE_LEN];
+        let mut is_ext = vec![Felt::ZERO; HASH_CYCLE_LEN];
+        let mut is_packed_int = vec![Felt::ZERO; HASH_CYCLE_LEN];
+        let mut is_int_ext = vec![Felt::ZERO; HASH_CYCLE_LEN];
+
+        is_init_ext[0] = Felt::ONE;
+
+        for r in [1, 2, 3, 12, 13, 14] {
+            is_ext[r] = Felt::ONE;
+        }
+
+        for r in 4..=10 {
+            is_packed_int[r] = Felt::ONE;
+        }
+
+        is_int_ext[11] = Felt::ONE;
+
+        // -------------------------------------------------------------------------
+        // Shared round constants (12 columns)
+        // -------------------------------------------------------------------------
+        // On external rows (0-3, 11-14): hold per-lane external round constants.
+        // On packed-internal rows (4-10): ark[0..2] hold 3 internal round constants,
+        //   ark[3..12] are zero.
+        // On boundary (row 15): all zero.
+        let ark = core::array::from_fn(|lane| {
+            let mut col = vec![Felt::ZERO; HASH_CYCLE_LEN];
+
+            // Row 0 (init+ext1): first initial external round constants
+            col[0] = Hasher::ARK_EXT_INITIAL[0][lane];
+
+            // Rows 1-3 (ext2, ext3, ext4): remaining initial external round constants
+            for r in 1..=3 {
+                col[r] = Hasher::ARK_EXT_INITIAL[r][lane];
+            }
+
+            // Rows 4-10 (packed internal): internal constants in lanes 0-2 only
+            if lane < 3 {
+                for triple in 0..7_usize {
+                    let row = 4 + triple;
+                    let ark_idx = triple * 3 + lane;
+                    col[row] = Hasher::ARK_INT[ark_idx];
+                }
+            }
+
+            // Row 11 (int22+ext5): terminal external round 0 constants
+            // (internal constant ARK_INT[21] is hardcoded in the constraint)
+            col[11] = Hasher::ARK_EXT_TERMINAL[0][lane];
+
+            // Rows 12-14 (ext6, ext7, ext8): remaining terminal external round constants
+            for r in 12..=14 {
+                col[r] = Hasher::ARK_EXT_TERMINAL[r - 11][lane];
+            }
+
+            col
+        });
 
         Self {
-            is_init_ext: flat[periodic::P_IS_INIT_EXT].clone(),
-            is_ext: flat[periodic::P_IS_EXT].clone(),
-            is_packed_int: flat[periodic::P_IS_PACKED_INT].clone(),
-            is_int_ext: flat[periodic::P_IS_INT_EXT].clone(),
-            ark: core::array::from_fn(|i| flat[periodic::P_ARK_START + i].clone()),
+            is_init_ext,
+            is_ext,
+            is_packed_int,
+            is_int_ext,
+            ark,
         }
     }
 }
@@ -398,16 +471,31 @@ impl PeriodicCols<Vec<Felt>> {
             is_ext,
             is_packed_int,
             is_int_ext,
-            ark,
-        } = HasherPeriodicCols::from_periodic_columns();
+            ark: [a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11],
+        } = HasherPeriodicCols::new();
 
         let BitwisePeriodicCols { k_first, k_transition } = BitwisePeriodicCols::new();
 
-        let mut cols = vec![is_init_ext, is_ext, is_packed_int, is_int_ext];
-        cols.extend(ark);
-        cols.push(k_first);
-        cols.push(k_transition);
-        cols
+        vec![
+            is_init_ext,
+            is_ext,
+            is_packed_int,
+            is_int_ext,
+            a0,
+            a1,
+            a2,
+            a3,
+            a4,
+            a5,
+            a6,
+            a7,
+            a8,
+            a9,
+            a10,
+            a11,
+            k_first,
+            k_transition,
+        ]
     }
 }
 
@@ -449,7 +537,7 @@ mod tests {
 
     #[test]
     fn hasher_step_selectors_are_exclusive() {
-        let h = HasherPeriodicCols::from_periodic_columns();
+        let h = HasherPeriodicCols::new();
         for row in 0..HASH_CYCLE_LEN {
             let init_ext = h.is_init_ext[row];
             let ext = h.is_ext[row];
@@ -465,6 +553,69 @@ mod tests {
             // At most one selector is active per row.
             let sum = init_ext + ext + packed_int + int_ext;
             assert!(sum == Felt::ZERO || sum == Felt::ONE, "row {row}: sum = {sum}");
+        }
+    }
+
+    #[test]
+    fn external_round_constants_correct() {
+        let h = HasherPeriodicCols::new();
+
+        // Row 0: ARK_EXT_INITIAL[0]
+        for lane in 0..STATE_WIDTH {
+            assert_eq!(h.ark[lane][0], Hasher::ARK_EXT_INITIAL[0][lane]);
+        }
+
+        // Rows 1-3: ARK_EXT_INITIAL[1..3]
+        for r in 1..=3 {
+            for lane in 0..STATE_WIDTH {
+                assert_eq!(h.ark[lane][r], Hasher::ARK_EXT_INITIAL[r][lane]);
+            }
+        }
+
+        // Row 11: ARK_EXT_TERMINAL[0]
+        for lane in 0..STATE_WIDTH {
+            assert_eq!(h.ark[lane][11], Hasher::ARK_EXT_TERMINAL[0][lane]);
+        }
+
+        // Rows 12-14: ARK_EXT_TERMINAL[1..3]
+        for r in 12..=14 {
+            for lane in 0..STATE_WIDTH {
+                assert_eq!(h.ark[lane][r], Hasher::ARK_EXT_TERMINAL[r - 11][lane]);
+            }
+        }
+    }
+
+    #[test]
+    fn internal_round_constants_correct() {
+        let h = HasherPeriodicCols::new();
+
+        // Rows 4-10: packed internal round constants in ark[0..2]
+        for triple in 0..7_usize {
+            let row = 4 + triple;
+            for k in 0..3 {
+                let ark_idx = triple * 3 + k;
+                assert_eq!(
+                    h.ark[k][row],
+                    Hasher::ARK_INT[ark_idx],
+                    "mismatch at row {row}, int constant {k} (ARK_INT[{ark_idx}])"
+                );
+            }
+            // ark[3..12] must be zero on packed-internal rows
+            for lane in 3..STATE_WIDTH {
+                assert_eq!(
+                    h.ark[lane][row],
+                    Felt::ZERO,
+                    "ark[{lane}] nonzero at packed-int row {row}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn boundary_row_all_zero() {
+        let h = HasherPeriodicCols::new();
+        for (lane, col) in h.ark.iter().enumerate() {
+            assert_eq!(col[15], Felt::ZERO, "ark column {lane} nonzero at row 15");
         }
     }
 }

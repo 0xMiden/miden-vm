@@ -11,7 +11,6 @@
 //! ## Sub-modules
 //!
 //! - [`flags`]: Operation flag computation functions (pure selector expressions)
-//! - [`periodic`]: Periodic column definitions (cycle markers, round constants)
 //! - [`selectors`]: Selector, structural, and lifecycle constraints
 //! - [`state`]: Poseidon2 round transition constraints (permutation segment only)
 //! - [`merkle`]: Merkle tree operation constraints (controller only)
@@ -30,15 +29,14 @@
 
 pub mod flags;
 pub mod merkle;
-pub mod periodic;
 pub mod selectors;
 pub mod state;
 
 use core::borrow::Borrow;
 
 use miden_core::field::PrimeCharacteristicRing;
-pub use periodic::STATE_WIDTH;
 
+pub use crate::trace::chiplets::hasher::STATE_WIDTH;
 use crate::{
     MainCols, MidenAirBuilder,
     constraints::chiplets::columns::{HasherCols, HasherPeriodicCols, PeriodicCols},

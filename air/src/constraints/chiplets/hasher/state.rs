@@ -19,7 +19,7 @@
 use miden_core::{chiplets::hasher::Hasher, field::PrimeCharacteristicRing};
 use miden_crypto::stark::air::LiftedAirBuilder;
 
-use super::periodic::STATE_WIDTH;
+use super::STATE_WIDTH;
 use crate::{Felt, MidenAirBuilder, constraints::chiplets::columns::HasherPeriodicCols};
 
 // CONSTRAINT HELPERS
