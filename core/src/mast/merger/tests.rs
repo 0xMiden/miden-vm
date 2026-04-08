@@ -1387,3 +1387,170 @@ fn non_basic_block_nodes_have_no_debug_vars() {
         "loop node must not carry debug vars"
     );
 }
+
+/// Identical debug var content from two forests collapses to one node.
+#[test]
+fn merge_deduplicates_blocks_with_same_debug_vars() {
+    let mut forest_a = MastForest::new();
+    let dvar_a = forest_a
+        .add_debug_var(DebugVarInfo::new("x", DebugVarLocation::Stack(0)))
+        .unwrap();
+    let block_a = block_foo().add_to_forest(&mut forest_a).unwrap();
+    forest_a
+        .debug_info_mut()
+        .register_op_indexed_debug_vars(block_a, vec![(0, dvar_a)])
+        .unwrap();
+    forest_a.make_root(block_a);
+
+    let mut forest_b = MastForest::new();
+    let dvar_b = forest_b
+        .add_debug_var(DebugVarInfo::new("x", DebugVarLocation::Stack(0)))
+        .unwrap();
+    let block_b = block_foo().add_to_forest(&mut forest_b).unwrap();
+    forest_b
+        .debug_info_mut()
+        .register_op_indexed_debug_vars(block_b, vec![(0, dvar_b)])
+        .unwrap();
+    forest_b.make_root(block_b);
+
+    let (merged, root_map) = MastForest::merge([&forest_a, &forest_b]).unwrap();
+    let new_a = root_map.map_root(0, &block_a).unwrap();
+    let new_b = root_map.map_root(1, &block_b).unwrap();
+
+    assert_eq!(new_a, new_b, "identical content must dedup to one node");
+    assert_eq!(merged.debug_info().debug_vars_for_node(new_a).len(), 1);
+}
+
+/// Different debug vars prevent compact from collapsing same-ops blocks.
+#[test]
+fn compact_keeps_blocks_with_different_debug_vars_distinct() {
+    let mut forest = MastForest::new();
+    let var_x = forest
+        .add_debug_var(DebugVarInfo::new("x", DebugVarLocation::Stack(0)))
+        .unwrap();
+    let var_y = forest
+        .add_debug_var(DebugVarInfo::new("y", DebugVarLocation::Stack(1)))
+        .unwrap();
+
+    let block_a = block_foo().add_to_forest(&mut forest).unwrap();
+    forest
+        .debug_info_mut()
+        .register_op_indexed_debug_vars(block_a, vec![(0, var_x)])
+        .unwrap();
+    forest.make_root(block_a);
+
+    let block_b = block_foo().add_to_forest(&mut forest).unwrap();
+    forest
+        .debug_info_mut()
+        .register_op_indexed_debug_vars(block_b, vec![(0, var_y)])
+        .unwrap();
+    forest.make_root(block_b);
+
+    let (compacted, root_map) = forest.compact();
+    let new_a = root_map.map_root(0, &block_a).unwrap();
+    let new_b = root_map.map_root(0, &block_b).unwrap();
+
+    assert_ne!(new_a, new_b, "different debug vars must survive compact");
+
+    let info_a = compacted
+        .debug_info()
+        .debug_var(compacted.debug_info().debug_vars_for_node(new_a)[0].1)
+        .unwrap();
+    let info_b = compacted
+        .debug_info()
+        .debug_var(compacted.debug_info().debug_vars_for_node(new_b)[0].1)
+        .unwrap();
+    assert_eq!(info_a.name(), "x");
+    assert_eq!(info_b.name(), "y");
+}
+
+/// Procedure names survive compact.
+#[test]
+fn compact_preserves_procedure_names() {
+    let mut forest = MastForest::new();
+    let block_id = block_foo().add_to_forest(&mut forest).unwrap();
+    forest.make_root(block_id);
+    let digest = forest[block_id].digest();
+    forest.insert_procedure_name(digest, Arc::from("my_fn"));
+
+    let (compacted, _) = forest.compact();
+
+    assert_eq!(compacted.procedure_name(&digest), Some("my_fn"));
+}
+
+/// Three-way merge keeps debug vars and asm ops on every root.
+#[test]
+fn merge_three_forests_preserves_all_metadata() {
+    let blocks = [block_foo, block_bar, block_qux];
+    let var_names = ["a", "b", "c"];
+    let ctx_names = ["ctx_1", "ctx_2", "ctx_3"];
+    let mut forests = Vec::new();
+
+    for i in 0..3 {
+        let mut f = MastForest::new();
+        let dvar = f
+            .add_debug_var(DebugVarInfo::new(var_names[i], DebugVarLocation::Stack(i as u8)))
+            .unwrap();
+        let asm = AssemblyOp::new(None, ctx_names[i].into(), 1, "op".into());
+        let asm_id = f.debug_info_mut().add_asm_op(asm).unwrap();
+
+        let block = blocks[i]().add_to_forest(&mut f).unwrap();
+        let num_ops = f[block].get_basic_block().unwrap().num_operations() as usize;
+        f.debug_info_mut().register_asm_ops(block, num_ops, vec![(0, asm_id)]).unwrap();
+        f.debug_info_mut()
+            .register_op_indexed_debug_vars(block, vec![(0, dvar)])
+            .unwrap();
+        f.make_root(block);
+        forests.push(f);
+    }
+
+    let refs: Vec<&MastForest> = forests.iter().collect();
+    let (merged, _) = MastForest::merge(refs).unwrap();
+
+    assert_eq!(merged.procedure_roots().len(), 3);
+    for root_id in merged.procedure_roots() {
+        assert_eq!(merged.debug_info().debug_vars_for_node(*root_id).len(), 1);
+        assert!(merged.debug_info().first_asm_op_for_node(*root_id).is_some());
+    }
+}
+
+/// External placeholder doesn't clobber the concrete node's asm ops / debug vars.
+#[test]
+fn merge_concrete_metadata_survives_external_placeholder() {
+    let mut forest_concrete = MastForest::new();
+    let asm = AssemblyOp::new(None, "real_ctx".into(), 1, "mul".into());
+    let asm_id = forest_concrete.debug_info_mut().add_asm_op(asm).unwrap();
+    let dvar = forest_concrete
+        .add_debug_var(DebugVarInfo::new("v", DebugVarLocation::Stack(0)))
+        .unwrap();
+    let block_id = block_foo().add_to_forest(&mut forest_concrete).unwrap();
+    let num_ops = forest_concrete[block_id].get_basic_block().unwrap().num_operations() as usize;
+    forest_concrete
+        .debug_info_mut()
+        .register_asm_ops(block_id, num_ops, vec![(0, asm_id)])
+        .unwrap();
+    forest_concrete
+        .debug_info_mut()
+        .register_op_indexed_debug_vars(block_id, vec![(0, dvar)])
+        .unwrap();
+    forest_concrete.make_root(block_id);
+    let digest = forest_concrete[block_id].digest();
+
+    let mut forest_external = MastForest::new();
+    let ext_id = ExternalNodeBuilder::new(digest).add_to_forest(&mut forest_external).unwrap();
+    forest_external.make_root(ext_id);
+
+    // external first, concrete second
+    let (merged, root_map) = MastForest::merge([&forest_external, &forest_concrete]).unwrap();
+    let merged_id = root_map.map_root(1, &block_id).unwrap();
+
+    assert!(
+        merged.debug_info().first_asm_op_for_node(merged_id).is_some(),
+        "concrete asm-op must survive merge with external placeholder"
+    );
+    assert_eq!(
+        merged.debug_info().debug_vars_for_node(merged_id).len(),
+        1,
+        "concrete debug var must survive merge with external placeholder"
+    );
+}
