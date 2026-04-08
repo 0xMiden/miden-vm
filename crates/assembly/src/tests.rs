@@ -16,7 +16,10 @@ use miden_core::{
     Felt, Word, assert_matches,
     events::EventId,
     field::PrimeField64,
-    mast::{MastNodeExt, MastNodeId},
+    mast::{
+        CallNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastNodeExt,
+        MastNodeId, SplitNodeBuilder,
+    },
     operations::Operation,
     program::Program,
     serde::{Deserializable, Serializable},
@@ -4425,7 +4428,11 @@ fn nested_blocks() -> Result<(), Report> {
             .unwrap();
 
         expected_mast_forest_builder
-            .ensure_syscall(kernel_foo_node_id, vec![], vec![])
+            .ensure_node(
+                CallNodeBuilder::new_syscall(kernel_foo_node_id)
+                    .with_before_enter(vec![])
+                    .with_after_exit(vec![]),
+            )
             .unwrap()
     };
 
@@ -4515,7 +4522,11 @@ fn nested_blocks() -> Result<(), Report> {
         )
         .unwrap();
     let r#if1 = expected_mast_forest_builder
-        .ensure_split(r#true1, r#false1, vec![], vec![])
+        .ensure_node(
+            SplitNodeBuilder::new([r#true1, r#false1])
+                .with_before_enter(vec![])
+                .with_after_exit(vec![]),
+        )
         .unwrap();
 
     let r#true3 = expected_mast_forest_builder
@@ -4539,7 +4550,11 @@ fn nested_blocks() -> Result<(), Report> {
         )
         .unwrap();
     let r#true2 = expected_mast_forest_builder
-        .ensure_split(r#true3, r#false3, vec![], vec![])
+        .ensure_node(
+            SplitNodeBuilder::new([r#true3, r#false3])
+                .with_before_enter(vec![])
+                .with_after_exit(vec![]),
+        )
         .unwrap();
 
     let r#while = {
@@ -4558,7 +4573,13 @@ fn nested_blocks() -> Result<(), Report> {
             )
             .unwrap();
 
-        expected_mast_forest_builder.ensure_loop(body_node_id, vec![], vec![]).unwrap()
+        expected_mast_forest_builder
+            .ensure_node(
+                LoopNodeBuilder::new(body_node_id)
+                    .with_before_enter(vec![])
+                    .with_after_exit(vec![]),
+            )
+            .unwrap()
     };
     let push_13_basic_block_id = expected_mast_forest_builder
         .ensure_block(
@@ -4572,10 +4593,18 @@ fn nested_blocks() -> Result<(), Report> {
         .unwrap();
 
     let r#false2 = expected_mast_forest_builder
-        .ensure_join(push_13_basic_block_id, r#while, vec![], vec![])
+        .ensure_node(
+            JoinNodeBuilder::new([push_13_basic_block_id, r#while])
+                .with_before_enter(vec![])
+                .with_after_exit(vec![]),
+        )
         .unwrap();
     let nested = expected_mast_forest_builder
-        .ensure_split(r#true2, r#false2, vec![], vec![])
+        .ensure_node(
+            SplitNodeBuilder::new([r#true2, r#false2])
+                .with_before_enter(vec![])
+                .with_after_exit(vec![]),
+        )
         .unwrap();
 
     let combined_node_id = expected_mast_forest_builder

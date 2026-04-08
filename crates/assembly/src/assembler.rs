@@ -1140,19 +1140,15 @@ impl Assembler {
                         next_depth,
                     )?;
 
+                    let asm_op = self.create_asmop_decorator(span, "if.true", proc_ctx);
                     let mut split_builder = SplitNodeBuilder::new([then_blk, else_blk]);
                     if let Some(decorator_ids) = block_builder.drain_decorators() {
                         split_builder.append_before_enter(decorator_ids);
                     }
 
-                    let split_node_id =
-                        block_builder.mast_forest_builder_mut().ensure_node(split_builder)?;
-
-                    // Add an assembly operation to the if node.
-                    let asm_op = self.create_asmop_decorator(span, "if.true", proc_ctx);
-                    block_builder
+                    let split_node_id = block_builder
                         .mast_forest_builder_mut()
-                        .register_node_asm_op(split_node_id, asm_op)?;
+                        .ensure_node_with_asm_op(split_builder, asm_op)?;
 
                     body_node_ids.push(split_node_id);
                 },
@@ -1205,9 +1201,10 @@ impl Assembler {
                     }
 
                     if let Some(decorator_ids) = block_builder.drain_decorators() {
-                        // Attach decorators before the first iteration. We must carry
-                        // debug vars from the original node into the dedup fingerprint,
-                        // otherwise two blocks with identical ops but different vars alias.
+                        // Attach decorators before the first iteration. We must carry the
+                        // original node's external metadata into the dedup fingerprint,
+                        // otherwise structurally identical nodes with different source mappings
+                        // can alias.
                         let first_repeat_builder = block_builder.mast_forest_builder()
                             [repeat_node_id]
                             .clone()
@@ -1274,14 +1271,10 @@ impl Assembler {
                         loop_builder.append_before_enter(decorator_ids);
                     }
 
-                    let loop_node_id =
-                        block_builder.mast_forest_builder_mut().ensure_node(loop_builder)?;
-
-                    // Add an assembly operation to the loop node.
                     let asm_op = self.create_asmop_decorator(span, "while.true", proc_ctx);
-                    block_builder
+                    let loop_node_id = block_builder
                         .mast_forest_builder_mut()
-                        .register_node_asm_op(loop_node_id, asm_op)?;
+                        .ensure_node_with_asm_op(loop_builder, asm_op)?;
 
                     body_node_ids.push(loop_node_id);
                 },
