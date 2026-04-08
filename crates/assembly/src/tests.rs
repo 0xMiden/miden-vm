@@ -358,16 +358,15 @@ fn library_procedure_collision() -> Result<(), Report> {
     // make sure lib2 has the expected exports (i.e., bar1 and bar2)
     assert_eq!(lib2.num_exports(), 2);
 
-    // Now that AssemblyOps are stored separately in DebugInfo (not as Decorator::AsmOp),
-    // identical procedures ARE deduplicated because their MAST fingerprints are the same.
-    // The debug info (AssemblyOps) is stored separately and doesn't affect deduplication.
+    // AssemblyOp metadata now participates in assembler-side deduplication, so a re-exported
+    // procedure and a locally defined procedure with the same operations remain distinct when
+    // their source mappings differ.
     let lib2_bar_bar1 = QualifiedProcedureName::from_str("lib2::bar::bar1").unwrap();
     let lib2_bar_bar2 = QualifiedProcedureName::from_str("lib2::bar::bar2").unwrap();
-    assert_eq!(lib2.get_export_node_id(&lib2_bar_bar1), lib2.get_export_node_id(&lib2_bar_bar2));
+    assert_ne!(lib2.get_export_node_id(&lib2_bar_bar1), lib2.get_export_node_id(&lib2_bar_bar2));
 
-    // With deduplication restored, we expect fewer nodes than before when debug decorators
-    // prevented deduplication. The identical procedures now share the same node.
-    assert_eq!(lib2.mast_forest().num_nodes(), 5);
+    // Keeping those procedures distinct adds one more node to the library forest.
+    assert_eq!(lib2.mast_forest().num_nodes(), 6);
 
     Ok(())
 }
@@ -4717,11 +4716,10 @@ fn duplicate_procedure() {
     "#;
 
     let program = context.assemble(program_source).unwrap();
-    // Now that AssemblyOps are stored separately in DebugInfo (not as Decorator::AsmOp),
-    // identical procedures ARE deduplicated because their MAST fingerprints are the same.
-    // foo and bar have identical code, so they share the same MAST node. The entrypoint
-    // is a separate procedure, so we have 2 procedures total.
-    assert_eq!(program.num_procedures(), 2);
+    // AssemblyOp metadata now participates in assembler-side deduplication. Even though
+    // `foo` and `bar` have the same operations, they carry different source mappings and
+    // therefore must remain distinct procedures. The entrypoint is a third procedure.
+    assert_eq!(program.num_procedures(), 3);
 }
 
 #[test]

@@ -207,6 +207,59 @@ fn deduplicate_asm_op_mappings(
         .collect()
 }
 
+fn append_serialized_asm_op(data: &mut Vec<u8>, op_idx: usize, asm_op: &AssemblyOp) {
+    data.extend_from_slice(&op_idx.to_le_bytes());
+    asm_op.context_name().write_into(data);
+    asm_op.op().write_into(data);
+    asm_op.num_cycles().write_into(data);
+    match asm_op.location() {
+        Some(location) => {
+            data.push(1);
+            location.uri.write_into(data);
+            data.extend_from_slice(&u32::from(location.start).to_le_bytes());
+            data.extend_from_slice(&u32::from(location.end).to_le_bytes());
+        },
+        None => data.push(0),
+    }
+}
+
+/// Serializes AssemblyOp content into bytes for fingerprint augmentation.
+///
+/// This uses the resolved [`AssemblyOp`] payload rather than raw `AsmOpId`s so dedup depends on
+/// source-mapping semantics, not allocation order.
+fn serialize_asm_ops(asm_ops: &[(usize, AssemblyOp)]) -> Vec<u8> {
+    let mut data = Vec::new();
+    for (op_idx, asm_op) in asm_ops {
+        append_serialized_asm_op(&mut data, *op_idx, asm_op);
+    }
+    data
+}
+
+/// Serializes AssemblyOp content referenced by `AsmOpId`s into bytes for fingerprint augmentation.
+fn serialize_asm_op_ids(forest: &MastForest, asm_op_ids: &[(usize, AsmOpId)]) -> Vec<u8> {
+    let mut data = Vec::new();
+    for (op_idx, asm_op_id) in asm_op_ids {
+        if let Some(asm_op) = forest.debug_info().asm_op(*asm_op_id) {
+            append_serialized_asm_op(&mut data, *op_idx, asm_op);
+        }
+    }
+    data
+}
+
+/// Looks up and serializes the asm ops for a given node from the pending mappings.
+fn serialize_asm_ops_for_node(
+    forest: &MastForest,
+    pending: &[(MastNodeId, Vec<(usize, AsmOpId)>)],
+    node_id: MastNodeId,
+) -> Vec<u8> {
+    for (id, asm_ops) in pending {
+        if *id == node_id {
+            return serialize_asm_op_ids(forest, asm_ops);
+        }
+    }
+    Vec::new()
+}
+
 /// Serializes debug variable content into bytes for fingerprint augmentation.
 ///
 /// This uses the resolved [`DebugVarInfo`] payload rather than raw `DebugVarId`s so
@@ -607,6 +660,7 @@ impl MastForestBuilder {
             .fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)
             .expect("hash_by_node_id should contain the fingerprints of all children of `node`");
         let dedup_fingerprint = base_fingerprint
+            .augment_with_data(&serialize_asm_op_ids(&self.mast_forest, &asm_op_ids))
             .augment_with_data(&serialize_debug_vars(&self.mast_forest, &debug_vars));
 
         let (node_id, is_new) =
@@ -683,10 +737,9 @@ impl MastForestBuilder {
         Ok(node_id)
     }
 
-    /// Like [`Self::ensure_node`], but includes debug vars from `source_node_id` in the
-    /// dedup fingerprint and copies them to the new node. Used when cloning a node (e.g.
-    /// the repeat path) so that the rebuilt node keeps the same dedup semantics as the
-    /// original. No-op when the source has no debug vars.
+    /// Like [`Self::ensure_node`], but includes external metadata from `source_node_id` in the
+    /// dedup fingerprint and copies it to the new node. Used when cloning a node (e.g. the
+    /// repeat path) so that the rebuilt node keeps the same dedup semantics as the original.
     pub(crate) fn ensure_node_preserving_debug_vars(
         &mut self,
         builder: impl MastForestContributor,
@@ -696,13 +749,20 @@ impl MastForestBuilder {
             .fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)
             .expect("hash_by_node_id should contain the fingerprints of all children of `node`");
 
-        // Augment with the source node's debug vars, matching ensure_block() semantics.
+        // Augment with the source node's external metadata, matching ensure_block() semantics.
+        let asm_ops_data = serialize_asm_ops_for_node(
+            &self.mast_forest,
+            &self.pending_asm_op_mappings,
+            source_node_id,
+        );
         let debug_vars_data = serialize_debug_vars_for_node(
             &self.mast_forest,
             &self.pending_debug_var_mappings,
             source_node_id,
         );
-        let dedup_fingerprint = base_fingerprint.augment_with_data(&debug_vars_data);
+        let dedup_fingerprint = base_fingerprint
+            .augment_with_data(&asm_ops_data)
+            .augment_with_data(&debug_vars_data);
 
         if let Some(node_id) = self.node_id_by_fingerprint.get(&dedup_fingerprint) {
             Ok(*node_id)
@@ -713,6 +773,18 @@ impl MastForestBuilder {
                 .wrap_err("assembler failed to add new node")?;
             self.node_id_by_fingerprint.insert(dedup_fingerprint, new_node_id);
             self.hash_by_node_id.insert(new_node_id, dedup_fingerprint);
+
+            // Carry over AssemblyOp registration from the source node.
+            let asm_ops: Option<Vec<_>> = self
+                .pending_asm_op_mappings
+                .iter()
+                .find(|(id, _)| *id == source_node_id)
+                .map(|(_, asm_ops)| asm_ops.clone());
+            if let Some(asm_ops) = asm_ops
+                && !asm_ops.is_empty()
+            {
+                self.pending_asm_op_mappings.push((new_node_id, asm_ops));
+            }
 
             // Carry over debug var registration from the source node.
             let debug_vars: Option<Vec<_>> = self
@@ -767,10 +839,9 @@ impl MastForestBuilder {
     /// Each entry is `(op_idx, DebugVarId)` where `op_idx` is the operation index the debug
     /// variable corresponds to.
     ///
-    /// Note: Debug variables are kept external to the block builder but are included in
-    /// the dedup fingerprint so that blocks with identical operations but different debug
-    /// variables are not deduplicated. AssemblyOps are not part of the fingerprint, so they
-    /// are only registered for newly created nodes.
+    /// Note: AssemblyOps and debug variables are kept external to the block builder but are
+    /// included in the dedup fingerprint so that blocks with identical operations but different
+    /// metadata are not deduplicated.
     ///
     /// The actual registration of both AssemblyOp and debug variable mappings is deferred until
     /// `build()` is called, to ensure nodes are registered in sequential order as required by
@@ -788,13 +859,14 @@ impl MastForestBuilder {
             .with_before_enter(before_enter)
             .with_after_exit(after_exit);
 
-        // Compute the base fingerprint from the builder, then augment with debug var
-        // data to make the dedup key sensitive to debug variables without storing them
-        // on the builder itself.
+        // Compute the base fingerprint from the builder, then augment with external metadata
+        // so the dedup key stays sensitive to source mappings without storing them on the
+        // builder itself.
         let base_fingerprint = block
             .fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)
             .expect("hash_by_node_id should contain the fingerprints of all children of `node`");
         let dedup_fingerprint = base_fingerprint
+            .augment_with_data(&serialize_asm_ops(&asm_ops))
             .augment_with_data(&serialize_debug_vars(&self.mast_forest, &debug_vars));
 
         let (node_id, is_new) =
@@ -1041,14 +1113,18 @@ impl MastForestBuilder {
         let base_fingerprint =
             decorated_builder.fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)?;
 
-        // Re-augment the fingerprint with this node's debug vars so the dedup key
+        // Re-augment the fingerprint with this node's external metadata so the dedup key
         // stays consistent with what ensure_block() originally computed.
+        let asm_ops_data =
+            serialize_asm_ops_for_node(&self.mast_forest, &self.pending_asm_op_mappings, node_id);
         let debug_vars_data = serialize_debug_vars_for_node(
             &self.mast_forest,
             &self.pending_debug_var_mappings,
             node_id,
         );
-        let new_node_fingerprint = base_fingerprint.augment_with_data(&debug_vars_data);
+        let new_node_fingerprint = base_fingerprint
+            .augment_with_data(&asm_ops_data)
+            .augment_with_data(&debug_vars_data);
 
         self.mast_forest[node_id] = decorated_builder.build(&self.mast_forest)?;
 
@@ -1068,14 +1144,18 @@ impl MastForestBuilder {
         let base_fingerprint =
             decorated_builder.fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)?;
 
-        // Re-augment the fingerprint with this node's debug vars so the dedup key
+        // Re-augment the fingerprint with this node's external metadata so the dedup key
         // stays consistent with what ensure_block() originally computed.
+        let asm_ops_data =
+            serialize_asm_ops_for_node(&self.mast_forest, &self.pending_asm_op_mappings, node_id);
         let debug_vars_data = serialize_debug_vars_for_node(
             &self.mast_forest,
             &self.pending_debug_var_mappings,
             node_id,
         );
-        let new_node_fingerprint = base_fingerprint.augment_with_data(&debug_vars_data);
+        let new_node_fingerprint = base_fingerprint
+            .augment_with_data(&asm_ops_data)
+            .augment_with_data(&debug_vars_data);
 
         self.mast_forest[node_id] = decorated_builder.build(&self.mast_forest)?;
 
@@ -1552,6 +1632,88 @@ mod tests {
         assert_eq!(
             block_a, block_b,
             "same op stream plus same DebugVarInfo payload should dedup to one node"
+        );
+    }
+
+    /// Same-ops blocks with different AssemblyOps must not alias during assembly.
+    #[test]
+    fn test_ensure_block_keeps_different_asm_ops_distinct() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+
+        let block_a = builder
+            .ensure_block(
+                vec![Operation::Add],
+                Vec::new(),
+                vec![(0, AssemblyOp::new(None, "ctx_a".into(), 1, "add".into()))],
+                vec![],
+                vec![],
+                vec![],
+            )
+            .unwrap();
+        let block_b = builder
+            .ensure_block(
+                vec![Operation::Add],
+                Vec::new(),
+                vec![(0, AssemblyOp::new(None, "ctx_b".into(), 1, "add".into()))],
+                vec![],
+                vec![],
+                vec![],
+            )
+            .unwrap();
+
+        assert_ne!(
+            block_a, block_b,
+            "same op stream plus different AssemblyOp payload must not dedup"
+        );
+
+        let (forest, _remapping) = builder.build();
+        assert_eq!(
+            forest.debug_info().first_asm_op_for_node(block_a).unwrap().context_name(),
+            "ctx_a"
+        );
+        assert_eq!(
+            forest.debug_info().first_asm_op_for_node(block_b).unwrap().context_name(),
+            "ctx_b"
+        );
+    }
+
+    /// Cloning a block with AssemblyOps via `to_builder().with_before_enter()` must
+    /// preserve those asm ops on the new node.
+    #[test]
+    fn test_ensure_node_preserving_debug_vars_on_cloned_block_keeps_asm_ops() {
+        let mut builder = MastForestBuilder::new(&[]).unwrap();
+
+        let block_id = builder
+            .ensure_block(
+                vec![Operation::Add],
+                Vec::new(),
+                vec![(0, AssemblyOp::new(None, "ctx".into(), 1, "add".into()))],
+                vec![],
+                vec![],
+                vec![],
+            )
+            .unwrap();
+
+        let decorator_id = builder.ensure_decorator(Decorator::Trace(7)).unwrap();
+
+        let rebuilt_builder = builder.mast_forest[block_id]
+            .clone()
+            .to_builder(builder.mast_forest())
+            .with_before_enter(vec![decorator_id]);
+        let cloned_id =
+            builder.ensure_node_preserving_debug_vars(rebuilt_builder, block_id).unwrap();
+
+        assert_ne!(cloned_id, block_id);
+
+        let (forest, _remapping) = builder.build();
+
+        assert_eq!(
+            forest.debug_info().first_asm_op_for_node(cloned_id).unwrap().context_name(),
+            "ctx"
+        );
+        assert_eq!(
+            forest.debug_info().first_asm_op_for_node(block_id).unwrap().context_name(),
+            "ctx"
         );
     }
 
