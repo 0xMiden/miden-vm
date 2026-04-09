@@ -765,6 +765,46 @@ fn mast_forest_merge_multiple_external_nodes_with_decorator() {
     }
 }
 
+#[test]
+fn mast_forest_merge_preserves_asm_op_mappings_from_external_replacement() {
+    let mut forest_with_external = MastForest::new();
+    let foo_digest = block_foo().build().unwrap().digest();
+    let external_id = ExternalNodeBuilder::new(foo_digest)
+        .add_to_forest(&mut forest_with_external)
+        .unwrap();
+    forest_with_external.make_root(external_id);
+
+    let external_asm_op = AssemblyOp::new(None, "proc::caller".into(), 1, "call.foo".into());
+    let external_asm_op_id = forest_with_external
+        .debug_info_mut()
+        .add_asm_op(external_asm_op.clone())
+        .unwrap();
+    forest_with_external
+        .debug_info_mut()
+        .register_asm_ops(external_id, 1, vec![(0, external_asm_op_id)])
+        .unwrap();
+
+    let mut forest_with_block = MastForest::new();
+    let block_id = block_foo().add_to_forest(&mut forest_with_block).unwrap();
+    forest_with_block.make_root(block_id);
+
+    let (merged_ext_then_block, root_maps_ext_then_block) =
+        MastForest::merge([&forest_with_external, &forest_with_block]).unwrap();
+    let mapped_external_root = root_maps_ext_then_block.map_root(0, &external_id).unwrap();
+    assert_eq!(
+        merged_ext_then_block.get_assembly_op(mapped_external_root, None),
+        Some(&external_asm_op),
+    );
+
+    let (merged_block_then_ext, root_maps_block_then_ext) =
+        MastForest::merge([&forest_with_block, &forest_with_external]).unwrap();
+    let mapped_external_root = root_maps_block_then_ext.map_root(1, &external_id).unwrap();
+    assert_eq!(
+        merged_block_then_ext.get_assembly_op(mapped_external_root, None),
+        Some(&external_asm_op),
+    );
+}
+
 /// Tests that dependencies between External nodes are correctly resolved.
 ///
 /// [External(foo), Call(0) = qux]

@@ -171,6 +171,12 @@ impl MastForestMerger {
                         .get(replacement_mast_node_id)
                         .expect("every merged node id should be mapped");
 
+                    self.merge_node_asm_ops(
+                        forests[replaced_forest_idx],
+                        replaced_mast_node_id,
+                        mapped_replacement,
+                    )?;
+
                     // SAFETY: The iterator only yields valid forest indices, so it is safe to index
                     // directly.
                     self.node_id_mappings[replaced_forest_idx]
