@@ -1,6 +1,7 @@
-use alloc::{collections::BTreeMap, vec::Vec};
+use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
 use crate::{
+    LexicographicWord,
     crypto::hash::Blake3Digest,
     mast::{
         DecoratorId, MastForest, MastForestContributor, MastForestError, MastNode, MastNodeBuilder,
@@ -158,6 +159,8 @@ impl MastForestMerger {
             self.merge_roots(forest_idx, forest)?;
         }
 
+        self.merge_procedure_names(&forests);
+
         Ok(())
     }
 
@@ -280,6 +283,59 @@ impl MastForestMerger {
         }
 
         Ok(())
+    }
+
+    /// Merges procedure names from all input forests into the merged forest.
+    ///
+    /// The merge uses the following priority rules:
+    ///
+    /// 1. A name from a concrete (non-external) root always wins over a name from an external
+    ///    (placeholder) root for the same digest.
+    /// 2. When two concrete roots provide different names for the same digest, the
+    ///    lexicographically smallest name is chosen for determinism.
+    /// 3. A placeholder name is used as a fallback when no concrete root provides a name for that
+    ///    digest.
+    /// 4. When two placeholders provide different names, the lexicographically smallest name is
+    ///    chosen for determinism.
+    fn merge_procedure_names(&mut self, forests: &[&MastForest]) {
+        // For each digest, track the best name found so far and whether it came from a concrete
+        // root.
+        let mut best_names: BTreeMap<LexicographicWord, (Arc<str>, bool)> = BTreeMap::new();
+
+        for forest in forests {
+            for (digest, name) in forest.debug_info.procedure_names() {
+                let is_concrete = forest
+                    .find_procedure_root(digest)
+                    .map(|root_id| !forest[root_id].is_external())
+                    .unwrap_or(true);
+
+                let key = LexicographicWord::from(digest);
+
+                match best_names.get(&key) {
+                    Some((existing_name, existing_is_concrete)) => {
+                        let should_replace = match (is_concrete, *existing_is_concrete) {
+                            // Concrete always beats placeholder.
+                            (true, false) => true,
+                            // Placeholder never beats concrete.
+                            (false, true) => false,
+                            // Same kind: pick lexicographically smallest for determinism.
+                            _ => name.as_ref() < existing_name.as_ref(),
+                        };
+
+                        if should_replace {
+                            best_names.insert(key, (name.clone(), is_concrete));
+                        }
+                    },
+                    None => {
+                        best_names.insert(key, (name.clone(), is_concrete));
+                    },
+                }
+            }
+        }
+
+        for (digest, (name, _)) in best_names {
+            self.mast_forest.debug_info.insert_procedure_name(digest.into_inner(), name);
+        }
     }
 
     // HELPERS

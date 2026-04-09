@@ -1,3 +1,5 @@
+use alloc::sync::Arc;
+
 use super::*;
 use crate::{
     Felt, ONE, Word,
@@ -1113,4 +1115,104 @@ fn mast_forest_merge_op_indexed_decorators_preservation() {
         merged.decorators().len(),
         "Every decorator in merged forest should be referenced at least once (no orphans)"
     );
+}
+
+/// Tests that a concrete root's procedure name wins over an external placeholder's name for the
+/// same digest.
+///
+/// Forest A: External(foo_digest) with name "foo_placeholder"
+/// Forest B: Block(foo) with name "foo_concrete"
+///
+/// The merged forest should have "foo_concrete" regardless of merge order.
+#[test]
+fn mast_forest_merge_concrete_name_wins_over_placeholder() {
+    let foo_block = block_foo().build().unwrap();
+    let foo_digest = foo_block.digest();
+
+    // Forest A: external placeholder with a name
+    let mut forest_a = MastForest::new();
+    let id_ext = ExternalNodeBuilder::new(foo_digest).add_to_forest(&mut forest_a).unwrap();
+    forest_a.make_root(id_ext);
+    forest_a
+        .debug_info
+        .insert_procedure_name(foo_digest, Arc::from("foo_placeholder"));
+
+    // Forest B: concrete block with a name
+    let mut forest_b = MastForest::new();
+    let id_foo = block_foo().add_to_forest(&mut forest_b).unwrap();
+    forest_b.make_root(id_foo);
+    forest_b.debug_info.insert_procedure_name(foo_digest, Arc::from("foo_concrete"));
+
+    // Merge A+B: concrete should win
+    let (merged_ab, _) = MastForest::merge([&forest_a, &forest_b]).unwrap();
+    assert_eq!(merged_ab.procedure_name(&foo_digest), Some("foo_concrete"));
+
+    // Merge B+A: concrete should still win
+    let (merged_ba, _) = MastForest::merge([&forest_b, &forest_a]).unwrap();
+    assert_eq!(merged_ba.procedure_name(&foo_digest), Some("foo_concrete"));
+}
+
+/// Tests that a placeholder name is used as fallback when the concrete root has no name.
+///
+/// Forest A: External(foo_digest) with name "foo_fallback"
+/// Forest B: Block(foo) with no procedure name
+///
+/// The merged forest should use "foo_fallback" since the concrete root provides no name.
+#[test]
+fn mast_forest_merge_placeholder_name_as_fallback() {
+    let foo_block = block_foo().build().unwrap();
+    let foo_digest = foo_block.digest();
+
+    // Forest A: external placeholder with a name
+    let mut forest_a = MastForest::new();
+    let id_ext = ExternalNodeBuilder::new(foo_digest).add_to_forest(&mut forest_a).unwrap();
+    forest_a.make_root(id_ext);
+    forest_a.debug_info.insert_procedure_name(foo_digest, Arc::from("foo_fallback"));
+
+    // Forest B: concrete block without a name
+    let mut forest_b = MastForest::new();
+    let id_foo = block_foo().add_to_forest(&mut forest_b).unwrap();
+    forest_b.make_root(id_foo);
+    // No procedure name inserted for forest B
+
+    // Merge A+B: placeholder should serve as fallback
+    let (merged_ab, _) = MastForest::merge([&forest_a, &forest_b]).unwrap();
+    assert_eq!(merged_ab.procedure_name(&foo_digest), Some("foo_fallback"));
+
+    // Merge B+A: same result
+    let (merged_ba, _) = MastForest::merge([&forest_b, &forest_a]).unwrap();
+    assert_eq!(merged_ba.procedure_name(&foo_digest), Some("foo_fallback"));
+}
+
+/// Tests deterministic procedure name selection when two concrete roots provide different names
+/// for the same digest.
+///
+/// Forest A: Block(foo) with name "beta_name"
+/// Forest B: Block(foo) with name "alpha_name"
+///
+/// The lexicographically smallest name ("alpha_name") should be chosen regardless of merge order.
+#[test]
+fn mast_forest_merge_deterministic_procedure_names() {
+    let foo_block = block_foo().build().unwrap();
+    let foo_digest = foo_block.digest();
+
+    // Forest A: concrete block with a name
+    let mut forest_a = MastForest::new();
+    let id_foo_a = block_foo().add_to_forest(&mut forest_a).unwrap();
+    forest_a.make_root(id_foo_a);
+    forest_a.debug_info.insert_procedure_name(foo_digest, Arc::from("beta_name"));
+
+    // Forest B: same concrete block with a different name
+    let mut forest_b = MastForest::new();
+    let id_foo_b = block_foo().add_to_forest(&mut forest_b).unwrap();
+    forest_b.make_root(id_foo_b);
+    forest_b.debug_info.insert_procedure_name(foo_digest, Arc::from("alpha_name"));
+
+    // Merge A+B: lexicographically smallest should win
+    let (merged_ab, _) = MastForest::merge([&forest_a, &forest_b]).unwrap();
+    assert_eq!(merged_ab.procedure_name(&foo_digest), Some("alpha_name"));
+
+    // Merge B+A: same result (deterministic)
+    let (merged_ba, _) = MastForest::merge([&forest_b, &forest_a]).unwrap();
+    assert_eq!(merged_ba.procedure_name(&foo_digest), Some("alpha_name"));
 }

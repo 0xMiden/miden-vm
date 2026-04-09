@@ -5,6 +5,7 @@
 #### Fixes
 - Rejected non-syscall references to exported kernel procedures in the linker ([#2902](https://github.com/0xMiden/miden-vm/issues/2902)).
 - Reverted the `MainTrace` typed row storage change that caused a large `blake3_1to1` trace-building regression ([#2949](https://github.com/0xMiden/miden-vm/pull/2949)).
+- Fixed `MastForest::merge` to transfer procedure names, prefer concrete root metadata over external placeholders, and choose the lexicographically smallest name when two concrete roots disagree ([#2982](https://github.com/0xMiden/miden-vm/issues/2982)).
 #### Bug Fixes
 
 - Replaced unsound `ptr::read` with safe unbox in panic recovery, removing UB from potential double-drop ([#2934](https://github.com/0xMiden/miden-vm/pull/2934)).
