@@ -15,7 +15,7 @@ use alloc::{
 };
 
 use miden_assembly_syntax::{
-    KernelLibrary, Library, Report, ast::QualifiedProcedureName, library::ModuleInfo,
+    KernelLibrary, Library, Report, ast::QualifiedProcedureName, library::ModuleDescriptor,
 };
 use miden_core::{Word, program::Kernel, serde::Deserializable};
 #[cfg(feature = "serde")]
@@ -122,10 +122,11 @@ impl Package {
         matches!(self.kind, TargetType::Kernel)
     }
 
-    /// Get the [ModuleInfo] corresponding to the kernel module, if this package contains the kernel
-    pub fn kernel_module_info(&self) -> Result<ModuleInfo, Report> {
+    /// Get the [ModuleDescriptor] corresponding to the kernel module, if this package contains
+    /// the kernel
+    pub fn kernel_module_descriptor(&self) -> Result<ModuleDescriptor, Report> {
         self.mast
-            .module_infos()
+            .module_descriptors()
             .find(|mi| mi.path().is_kernel_path())
             .ok_or_else(|| Report::msg("invalid kernel package: does not contain kernel module"))
     }
@@ -341,7 +342,7 @@ impl Package {
 
         let module = self
             .mast
-            .module_infos()
+            .module_descriptors()
             .find(|info| info.path() == entrypoint.namespace())
             .ok_or_else(|| {
                 Report::msg(format!(

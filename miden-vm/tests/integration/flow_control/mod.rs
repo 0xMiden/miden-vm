@@ -604,9 +604,9 @@ fn procref() -> Result<(), Report> {
             .assemble_library([module])
             .unwrap();
 
-        let module_info = library.module_infos().next().unwrap();
+        let module_descriptor = library.module_descriptors().next().unwrap();
 
-        module_info.procedure_digests().collect()
+        module_descriptor.procedure_digests().collect()
     };
 
     let source = "

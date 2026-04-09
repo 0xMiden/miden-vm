@@ -426,10 +426,10 @@ fn get_module_by_path() -> Result<(), Report> {
         .assemble_library(modules.iter().cloned())
         .unwrap();
 
-    let foo_module_info = bundle.module_infos().next().unwrap();
-    assert_eq!(foo_module_info.path(), &PathBuf::new("::test::foo").unwrap());
+    let foo_module_descriptor = bundle.module_descriptors().next().unwrap();
+    assert_eq!(foo_module_descriptor.path(), &PathBuf::new("::test::foo").unwrap());
 
-    let (_, foo_proc) = foo_module_info.procedures().next().unwrap();
+    let (_, foo_proc) = foo_module_descriptor.procedures().next().unwrap();
     assert_eq!(foo_proc.name, ProcedureName::new("foo").unwrap());
 
     Ok(())

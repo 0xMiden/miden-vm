@@ -56,7 +56,7 @@ use miden_assembly_syntax::{
         Module, ModuleIndex, Path, SymbolResolution, Visibility, types,
     },
     debuginfo::{SourceManager, SourceSpan, Span, Spanned},
-    library::{ItemInfo, ModuleInfo},
+    library::{ItemInfo, ModuleDescriptor},
 };
 use miden_core::{Word, advice::AdviceMap, program::Kernel};
 use miden_project::Linkage;
@@ -164,7 +164,7 @@ impl Linker {
         match self.libraries.entry(library.mast.commitment()) {
             Entry::Vacant(entry) => {
                 entry.insert(library.clone());
-                self.link_assembled_modules(library.module_infos)
+                self.link_assembled_modules(library.module_descriptors)
             },
             Entry::Occupied(mut entry) => {
                 let prev = entry.get_mut();
@@ -186,7 +186,7 @@ impl Linker {
     /// [`Self::link_library`] if you wish to statically link a set of assembled modules.
     pub fn link_assembled_modules(
         &mut self,
-        modules: impl IntoIterator<Item = ModuleInfo>,
+        modules: impl IntoIterator<Item = ModuleDescriptor>,
     ) -> Result<(), LinkerError> {
         for module in modules {
             self.link_assembled_module(module)?;
@@ -201,7 +201,7 @@ impl Linker {
     /// [`Self::link_library`] if you wish to statically link `module`.
     pub fn link_assembled_module(
         &mut self,
-        module: ModuleInfo,
+        module: ModuleDescriptor,
     ) -> Result<ModuleIndex, LinkerError> {
         log::debug!(target: "linker", "adding pre-assembled module {} to module graph", module.path());
 
@@ -339,7 +339,7 @@ impl Linker {
     pub(super) fn with_kernel(
         source_manager: Arc<dyn SourceManager>,
         kernel: Kernel,
-        kernel_module: ModuleInfo,
+        kernel_module: ModuleDescriptor,
     ) -> Self {
         assert!(!kernel.is_empty());
         assert!(
@@ -369,7 +369,7 @@ impl Linker {
     pub(super) fn link_with_kernel(
         &mut self,
         kernel: Kernel,
-        kernel_module: ModuleInfo,
+        kernel_module: ModuleDescriptor,
     ) -> Result<(), LinkerError> {
         assert!(self.kernel.is_empty());
         assert!(!kernel.is_empty());

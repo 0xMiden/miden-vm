@@ -27,6 +27,7 @@
 - Documented non-overlap requirement for `memcopy_words`, `memcopy_elements`, and AEAD encrypt/decrypt procedures ([#2941](https://github.com/0xMiden/miden-vm/pull/2941)).
 - Added chainable `Test` builders for common test setup in `miden-utils-testing` ([#2957](https://github.com/0xMiden/miden-vm/pull/2957)).
 - Speed-up AUX range check trace generation by changing divisors to a flat Vec layout ([#2966](https://github.com/0xMiden/miden-vm/pull/2966)).
+- [BREAKING] Renamed `ModuleInfo` to `ModuleDescriptor` and `module_infos()` to `module_descriptors()` across the assembly crates ([#2928](https://github.com/0xMiden/miden-vm/issues/2928)).
 ## 0.22.1
 
 #### Enhancements

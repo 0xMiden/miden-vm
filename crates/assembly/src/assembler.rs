@@ -354,7 +354,7 @@ impl Assembler {
                     )));
                 }
 
-                let kernel_module = package.kernel_module_info()?;
+                let kernel_module = package.kernel_module_descriptor()?;
                 let kernel = package.to_kernel()?;
                 self.linker.link_with_kernel(kernel, kernel_module)?;
                 Ok(())

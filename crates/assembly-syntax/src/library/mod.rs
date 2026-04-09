@@ -18,7 +18,7 @@ use crate::ast::{AttributeSet, Ident, Path, PathBuf, ProcedureName};
 mod error;
 mod module;
 
-pub use module::{ConstantInfo, ItemInfo, ModuleInfo, ProcedureInfo, TypeInfo};
+pub use module::{ConstantInfo, ItemInfo, ModuleDescriptor, ProcedureInfo, TypeInfo};
 pub use semver::{Error as VersionError, Version};
 
 pub use self::error::LibraryError;
@@ -362,16 +362,16 @@ impl Library {
 
 /// Conversions
 impl Library {
-    /// Returns an iterator over the module infos of the library.
-    pub fn module_infos(&self) -> impl Iterator<Item = ModuleInfo> {
-        let mut modules_by_path: BTreeMap<Arc<Path>, ModuleInfo> = BTreeMap::new();
+    /// Returns an iterator over the module descriptors of the library.
+    pub fn module_descriptors(&self) -> impl Iterator<Item = ModuleDescriptor> {
+        let mut modules_by_path: BTreeMap<Arc<Path>, ModuleDescriptor> = BTreeMap::new();
 
         for export in self.exports.values() {
             let module_name =
                 Arc::from(export.path().parent().unwrap().to_path_buf().into_boxed_path());
             let module = modules_by_path
                 .entry(Arc::clone(&module_name))
-                .or_insert_with(|| ModuleInfo::new(module_name, None));
+                .or_insert_with(|| ModuleDescriptor::new(module_name, None));
             match export {
                 LibraryExport::Procedure(ProcedureExport { node, path, signature, attributes }) => {
                     let proc_digest = self.mast_forest[*node].digest();
@@ -463,7 +463,7 @@ pub struct KernelLibrary {
     #[cfg_attr(feature = "serde", serde(skip))]
     kernel: Kernel,
     #[cfg_attr(feature = "serde", serde(skip))]
-    kernel_info: ModuleInfo,
+    kernel_descriptor: ModuleDescriptor,
     library: Arc<Library>,
 }
 
@@ -496,8 +496,8 @@ impl KernelLibrary {
     }
 
     /// Destructures this kernel library into individual parts.
-    pub fn into_parts(self) -> (Kernel, ModuleInfo, Arc<MastForest>) {
-        (self.kernel, self.kernel_info, self.library.mast_forest().clone())
+    pub fn into_parts(self) -> (Kernel, ModuleDescriptor, Arc<MastForest>) {
+        (self.kernel, self.kernel_descriptor, self.library.mast_forest().clone())
     }
 }
 
@@ -508,7 +508,7 @@ impl TryFrom<Arc<Library>> for KernelLibrary {
         let kernel_path = Arc::from(Path::kernel_path().to_path_buf().into_boxed_path());
         let mut proc_digests = Vec::with_capacity(library.exports.len());
 
-        let mut kernel_module = ModuleInfo::new(Arc::clone(&kernel_path), None);
+        let mut kernel_module = ModuleDescriptor::new(Arc::clone(&kernel_path), None);
 
         for export in library.exports.values() {
             match export {
@@ -557,7 +557,7 @@ impl TryFrom<Arc<Library>> for KernelLibrary {
 
         Ok(Self {
             kernel,
-            kernel_info: kernel_module,
+            kernel_descriptor: kernel_module,
             library,
         })
     }
@@ -754,7 +754,7 @@ impl<'de> serde::Deserialize<'de> for Library {
 /// NOTE: Serialization of libraries is likely to be deprecated in a future release
 impl Serializable for KernelLibrary {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        let Self { kernel: _, kernel_info: _, library } = self;
+        let Self { kernel: _, kernel_descriptor: _, library } = self;
 
         library.write_into(target);
     }

@@ -176,7 +176,7 @@ mod tests {
     fn test_compile() {
         let path = Path::new("::miden::core::math::u64::overflowing_add");
         let core_lib = CoreLibrary::default();
-        let exists = core_lib.0.module_infos().any(|module| {
+        let exists = core_lib.0.module_descriptors().any(|module| {
             module.procedures().any(|(_, proc)| &module.path().join(&proc.name) == path)
         });
 
