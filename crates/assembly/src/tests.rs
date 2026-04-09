@@ -10,7 +10,11 @@ use std::{
 };
 
 use miden_assembly_syntax::{
-    MAX_REPEAT_COUNT, ast::Path, diagnostics::WrapErr, library::LibraryExport,
+    MAX_REPEAT_COUNT,
+    ast::Path,
+    debuginfo::{DefaultSourceManager, SourceManager},
+    diagnostics::WrapErr,
+    library::LibraryExport,
 };
 use miden_core::{
     Felt, Word, assert_matches,
@@ -5788,4 +5792,37 @@ fn test_linking_recursive_expansion_via_renamed_aliases() -> TestResult {
     let _ = assembler.assemble_library([a_lib, b_lib])?;
 
     Ok(())
+}
+
+#[test]
+fn assemble_library_with_mismatched_source_manager_returns_error() {
+    // Source manager A: used by the assembler.
+    // Parse a short module to populate SourceId(0) in this manager.
+    let sm_a: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+    let _dummy = Module::parser(ModuleKind::Library)
+        .parse_str("lib::dummy", "pub proc dummy\n  push.1\nend", sm_a.clone())
+        .unwrap();
+
+    let assembler = Assembler::new(sm_a);
+
+    // Source manager B: external, used to parse the module we will assemble.
+    // Its SourceId(0) points to a different file.
+    let sm_b: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+    let long_source = "\
+# padding line to push the procedure definition past the short file length
+# more padding to ensure the byte offset exceeds the boundary
+# even more padding for good measure here to be absolutely sure
+pub proc bar
+  push.1
+  push.2
+  add
+end";
+    let module = Module::parser(ModuleKind::Library)
+        .parse_str("lib::external", long_source, sm_b)
+        .unwrap();
+
+    let result = assembler.assemble_library([module]);
+    let err = result.expect_err("should fail with source manager mismatch");
+    let msg = err.to_string();
+    assert!(msg.contains("source manager mismatch"), "unexpected error: {msg}");
 }
