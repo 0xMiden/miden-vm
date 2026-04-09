@@ -115,7 +115,7 @@ pub struct ProjectFile {
         serde(
             default,
             rename = "profile",
-            deserialize_with = "super::profile::deserialize_profiles_table",
+            with = "super::profile::serialization",
             skip_serializing_if = "Vec::is_empty"
         )
     )]
@@ -434,6 +434,16 @@ impl Validate for ProjectFile {
 
             // 2a. Check for conflicting paths
             let span = target.span();
+            if target.path.is_none() {
+                invalid_config.push(RelatedError::wrap(
+                    RelatedLabel::error("missing binary target path")
+                        .with_labeled_span(
+                            span,
+                            "binary targets must specify the path to their entrypoint module",
+                        )
+                        .with_source_file(Some(source.clone())),
+                ));
+            }
             if let Some(path) = target.path.clone() {
                 match target_paths.entry(path) {
                     Entry::Vacant(entry) => {

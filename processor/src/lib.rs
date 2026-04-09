@@ -112,6 +112,14 @@ pub async fn execute(
 }
 
 /// Synchronous wrapper for the async `execute()` function.
+///
+/// This method is only available on non-wasm32 targets. On wasm32, use the async `execute()`
+/// method directly since wasm32 runs in the browser's event loop.
+///
+/// # Panics
+/// Panics if called from within an existing Tokio runtime. Use the async `execute()` method
+/// instead in async contexts.
+#[cfg(not(target_family = "wasm"))]
 #[tracing::instrument("execute_program_sync", skip_all)]
 pub fn execute_sync(
     program: &Program,

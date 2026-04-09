@@ -1,12 +1,12 @@
 use std::{fs, path::Path, sync::Arc};
 
 use miden_assembly::{
-    Assembler, DefaultSourceManager, KernelLibrary,
+    Assembler, DefaultSourceManager,
     diagnostics::{IntoDiagnostic, Report, WrapErr},
 };
 use miden_core::program::Program;
 use miden_core_lib::CoreLibrary;
-use miden_mast_package::{MastArtifact, Package};
+use miden_mast_package::Package;
 use miden_prover::serde::Deserializable;
 
 use crate::cli::data::{Libraries, ProgramFile};
@@ -18,13 +18,7 @@ pub fn get_masp_program(path: &Path) -> Result<Program, Report> {
     let package = Package::read_from_bytes(&bytes)
         .into_diagnostic()
         .wrap_err("Failed to deserialize package")?;
-    let program_arc = match package.into_mast_artifact() {
-        MastArtifact::Executable(prog_arc) => prog_arc,
-        _ => return Err(Report::msg("The provided package is not a program package.")),
-    };
-    // Unwrap the Arc. If multiple references exist, clone the inner program.
-    let program = Arc::try_unwrap(program_arc).unwrap_or_else(|arc| (*arc).clone());
-    Ok(program)
+    package.try_into_program()
 }
 
 /// Returns a `Program` type from a `.masm` assembly file.
@@ -55,23 +49,7 @@ pub fn get_masm_program(
                         format!("Failed to deserialize kernel package `{}`", kernel_path.display())
                     })?;
 
-                match package.into_mast_artifact() {
-                    MastArtifact::Library(lib) => {
-                        let library = Arc::try_unwrap(lib).unwrap_or_else(|arc| (*arc).clone());
-                        KernelLibrary::try_from(library).wrap_err_with(|| {
-                            format!(
-                                "The package `{}` is not a valid kernel package",
-                                kernel_path.display()
-                            )
-                        })?
-                    },
-                    MastArtifact::Executable(_) => {
-                        return Err(Report::msg(format!(
-                            "Kernel package `{}` contains a program, not a kernel library",
-                            kernel_path.display()
-                        )));
-                    },
-                }
+                package.try_into_kernel_library()?
             },
             "masm" => {
                 // Compile kernel from assembly source

@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 
 pub use self::{
     dependency::DependencySpec,
-    package::{PackageConfig, PackageDetail, ProjectFile},
+    package::{PackageConfig, PackageDetail, PackageTable, ProjectFile},
     profile::Profile,
     target::{BinTarget, LibTarget},
     workspace::WorkspaceFile,
@@ -127,7 +127,7 @@ pub(crate) enum ProjectFileError {
         #[label(primary)]
         label: Label,
     },
-    #[error("invalid dependency specification")]
+    #[error("invalid dependency specification: {}", label.label().unwrap_or(""))]
     InvalidPackageDependency {
         #[source_code]
         source_file: Arc<SourceFile>,
@@ -154,6 +154,16 @@ pub(crate) enum ProjectFileError {
         source_file: Arc<SourceFile>,
         #[label(primary)]
         span: Label,
+    },
+    #[error("duplicate workspace member package name '{name}'")]
+    DuplicateWorkspaceMember {
+        name: String,
+        #[source_code]
+        source_file: Arc<SourceFile>,
+        #[label(primary, "duplicate workspace member")]
+        span: SourceSpan,
+        #[label("previous workspace member")]
+        prev: SourceSpan,
     },
     #[error("no profile named '{name}' has been defined yet")]
     UnknownProfile {
