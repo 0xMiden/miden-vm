@@ -198,6 +198,11 @@ impl Procedure {
 // ------------------------------------------------------------------------------------------------
 /// Public accessors
 impl Procedure {
+    /// Returns source span of this procedure.
+    pub fn span(&self) -> &SourceSpan {
+        &self.span
+    }
+
     /// Returns a reference to the fully-qualified name of this procedure
     pub fn path(&self) -> &Arc<Path> {
         &self.path

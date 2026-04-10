@@ -170,6 +170,11 @@ impl Profile {
         self.trim_paths
     }
 
+    /// Get the metadata table for this profile
+    pub fn metadata(&self) -> &Metadata {
+        &self.metadata
+    }
+
     /// Returns true if `key` is defined in the custom metadata associated with this profile.
     #[inline]
     pub fn contains_key<Q>(&self, key: &Q) -> bool

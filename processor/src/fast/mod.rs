@@ -445,6 +445,12 @@ impl FastProcessor {
         &self.memory
     }
 
+    /// Consumes the processor and returns the advice provider, memory, and precompile
+    /// transcript.
+    pub fn into_parts(self) -> (AdviceProvider, Memory, PrecompileTranscript) {
+        (self.advice, self.memory, self.pc_transcript)
+    }
+
     /// Returns a reference to the execution options.
     pub fn execution_options(&self) -> &ExecutionOptions {
         &self.options

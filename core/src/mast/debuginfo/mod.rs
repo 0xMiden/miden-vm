@@ -46,6 +46,7 @@ use alloc::{
     vec::Vec,
 };
 
+use miden_debug_types::{FileLineCol, Location};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -369,6 +370,25 @@ impl DebugInfo {
     /// Adds an AssemblyOp and returns its ID.
     pub fn add_asm_op(&mut self, asm_op: AssemblyOp) -> Result<AsmOpId, MastForestError> {
         self.asm_ops.push(asm_op).map_err(|_| MastForestError::TooManyDecorators)
+    }
+
+    /// Rewrites the source-backed locations stored in this debug info.
+    pub fn rewrite_source_locations(
+        &mut self,
+        mut rewrite_location: impl FnMut(Location) -> Location,
+        mut rewrite_file_line_col: impl FnMut(FileLineCol) -> FileLineCol,
+    ) {
+        for asm_op in self.asm_ops.iter_mut() {
+            if let Some(location) = asm_op.location().cloned() {
+                asm_op.set_location(rewrite_location(location));
+            }
+        }
+
+        for debug_var in self.debug_vars.iter_mut() {
+            if let Some(location) = debug_var.location().cloned() {
+                debug_var.set_location(rewrite_file_line_col(location));
+            }
+        }
     }
 
     /// Registers operation-indexed AssemblyOps for a node.

@@ -15,7 +15,7 @@ use super::{
     TraceFragment, V_COL_RANGE, WORD_ADDR_HI_COL_IDX, WORD_ADDR_LO_COL_IDX, WORD_COL_IDX,
     segment::{MemoryAccessType, MemoryOperation},
 };
-use crate::{ContextId, MemoryAddress, MemoryError};
+use crate::{ContextId, MemoryAddress, MemoryError, trace::range::RangeChecker};
 
 #[test]
 fn mem_init() {
@@ -453,6 +453,17 @@ fn mem_get_state_at() {
         ]
     );
     assert_eq!(mem.get_state_at(3.into(), clk), vec![]);
+}
+
+#[test]
+fn append_range_checks_does_not_panic_when_first_access_clk_is_zero() {
+    let mut mem = Memory::default();
+    mem.write(ContextId::root(), ZERO, 0.into(), ONE).unwrap();
+
+    let mut range_checker = RangeChecker::new();
+    mem.append_range_checks(0.into(), &mut range_checker);
+
+    assert!(range_checker.trace_len() > 0);
 }
 
 // HELPER STRUCT & FUNCTIONS

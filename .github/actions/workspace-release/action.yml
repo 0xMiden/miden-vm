@@ -34,15 +34,8 @@ runs:
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
 
-    - name: Cache cargo registry and git index
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-
+    - name: Cache Rust build artifacts
+      uses: WarpBuilds/rust-cache@v2
 
     - name: Cleanup large tools for build space
       uses: ./.github/actions/cleanup-runner

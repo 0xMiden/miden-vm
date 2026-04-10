@@ -26,6 +26,16 @@ A Miden project, at its most basic, is comprised of two things:
 
 The above is the simplest form of project, oriented towards building a single Miden package. However, Miden projects may also be organized into workspaces, similar to how Cargo supports organizing Rust crates into workspaces.
 
+## Versioning model
+
+Miden projects and assembled Miden packages are related, but they are not versioned in exactly the same way:
+
+- A source project is versioned by the semantic version declared in `miden-project.toml` under `[package].version`
+- An assembled package preserves that semantic version, but also has a content digest derived from the assembled MAST artifact
+- Only assembled packages have digests
+- In a package registry, the exact published identity of an assembled package is `name + semver + digest`
+- Exact dependency requirements therefore use the `semver#digest` form, e.g. `0.1.0#0x...`
+
 ## Workspaces
 
 A Miden workspace is a meta-project that consists of one or more sub-projects that correspond to packages. A workspace is comprised of:
@@ -47,12 +57,22 @@ members = []
 [workspace.package]
 version = "0.1.0"
 
-[dependencies]
+[workspace.dependencies]
 ```
 
 This represents an empty workspace for a new project at version `0.1.0`.
 
 The next step is to create subdirectories for each sub-project, and initialize those as called for by the tooling of the language used in that project.
+
+Workspace members can inherit package metadata from `[workspace.package]` using dotted-key syntax in their own `[package]` table. For example:
+
+```toml
+[package]
+name = "app"
+version.workspace = true
+```
+
+The same form applies to other inheritable package metadata fields, e.g. `description.workspace = true`.
 
 For examples of Miden Assembly and Rust-based projects, see the section below titled [Defining a project](#defining-a-project).
 
@@ -120,7 +140,7 @@ path = "main2.masm"
 When assembling an executable/bin target, all modules in the same directory as 
 `path` are provided to the assembler, _except_ the root modules of other executable targets. This allows the executable targets to build on top of the `[lib]` target easily. If you _don't_ want this behavior, simply ensure that the `[lib]` target and any `[[bin]]` targets locate their sources in separate subdirectories, e.g. `lib/mod.masm` and `primary/main.masm`/`alternate/main.masm` for the example above.
 
-There is a special caveat to be aware of when requesting assembly of an executable target from a project with multiple targets (either a `[lib]` and a `[[bin]]`, multiple `[[bin]]` targets, or both): the name of the package produced for the executable targets must be disambiguated, and so the name of the executable target is appended to the project name. For example, in our example project defined above, assembling the `primary` target would produce a package named `foo#primary`.
+There is a special caveat to be aware of when requesting assembly of an executable target from a project with multiple targets (either a `[lib]` and a `[[bin]]`, multiple `[[bin]]` targets, or both): the name of the package produced for the executable targets must be disambiguated, and so the name of the executable target is appended to the project name. For example, in our example project defined above, assembling the `primary` target would produce a package named `foo:primary`.
 
 
 ### Default target
@@ -149,13 +169,15 @@ Dependencies are declared in `miden-project.toml` in one of the following forms:
 a = "=0.1.0"
 # A specific package, given by its content digest
 b = "0x......"
+# A specific published package version, given by semantic version and digest
+c = "0.1.0#0x......"
 # A path dependency
-c = { path = "../c" }
-d = { path = "../c", version = "~> 0.1.0" }
+d = { path = "../d" }
+e = { path = "../d", version = "~> 0.1.0" }
 # A git dependency
-e = { git = "https://github.com/example/e", branch = "main" }
-f = { git = "https://github.com/example/f", rev = "deadbeef" }
-g = { git = "https://github.com/example/g", rev = "deadbeef", version = "~> 0.1.0" }
+f = { git = "https://github.com/example/f", branch = "main" }
+g = { git = "https://github.com/example/g", rev = "deadbeef" }
+h = { git = "https://github.com/example/h", rev = "deadbeef", version = "~> 0.1.0" }
 ```
 
 #### Linkage
@@ -178,17 +200,40 @@ NOTE: Kernel dependencies are always statically-linked into executable targets,
 and dynamically-linked for library targets, and it is not possible to change
 this behavior.
 
+#### Workspace dependencies
+
+Workspace-level shared dependencies are declared under `[workspace.dependencies]`, and inherited by members using `dep.workspace = true` (or the equivalent table form).
+
+When an inherited workspace dependency resolves to a member of the current workspace:
+
+- it resolves to that member's current source project, not to a package registry entry
+- the effective dependency version is the version currently declared by that member's manifest
+- any explicit semantic requirement carried on the workspace dependency declaration does not override the member's current source version
+- member projects may still override the linkage mode locally
+
 #### Semantics
 
-* `a` specifies a semantic version requirement, these would be evaluated against a package registry implementation
-* `b` specifies a package digest, essentially this acts as a stricter SemVer requirement of the form `=MAJ.MIN.PATCH`, where what is required is a version that has exactly the given digest. This form is also evaluated against a package registry implementation.
-* `c` specifies that the package sources (or a package artifact) can be found at the given path. The version is inferred from the package at that path, but is essentially equivalent to `version = "*"`.
-* `d` is the same as `c`, except it specifies a semantic version requirement that _MUST_ match the package found at `path`
-* `e` specifies that the package sources can be found by cloning the `git` repo, and checking out the `main` branch.
-* `f` is the same as `e`, except it provides a specific revision in the `git` repo instead
-* `g` is the same as `f`, except it specifies a semantic version requirement that _MUST_ match the package found in the cloned repo
+* `a` specifies a semantic version requirement, evaluated against a package registry implementation
+* `b` specifies a digest-only requirement, evaluated against a package registry implementation. A plain digest-only lookup selects the latest matching published version; if additional semantic constraints on the same dependency are introduced transitively, the dependency solver intersects those constraints and can select a compatible shared-digest version instead.
+* `c` specifies an exact published package version, including both semantic version and digest
+* `d` specifies that the package sources (or a package artifact) can be found at the given path. If no `version` is provided, the current version declared by the referenced source/artifact is used as-is.
+* `e` is the same as `d`, except it specifies a semantic version requirement that _MUST_ match the package found at `path`
+* `f` specifies that the package sources can be found by cloning the `git` repo, and checking out the `main` branch. If no `version` is provided, the current version declared by the checked out sources is used as-is.
+* `g` is the same as `f`, except it provides a specific revision in the `git` repo instead
+* `h` is the same as `g`, except it specifies a semantic version requirement that _MUST_ match the package found in the cloned repo
 
 In cases where the dependency is resolved to project sources and _not_ an assembled package, the behavior would be to assemble those dependencies first, and then link against them when assembling the current project. This is most useful when linking against packages which are _not_ contracts, or where the contracts are deployed together as a unit.
+
+#### Source dependency reuse and provenance
+
+When a dependency is resolved from workspace/path/git project sources, `ProjectAssembler` assembles that dependency before linking it into the current package, and publishes it into the package store used for the current assembly session.
+
+Before re-assembling such a dependency, `ProjectAssembler` will try to reuse an already-registered package with the same package name and semantic version. Reuse is allowed only when the recorded source provenance matches:
+
+- path/workspace dependencies are compared using the effective manifest/source inputs that affect the assembled package
+- git dependencies are compared using the repository URI plus the resolved revision
+
+If a package with the same name and semantic version is already registered with different provenance, or with missing provenance, the assembler will require the semantic version to be bumped before proceeding.
 
 **NOTE:** Currently there is no canonical package registry, so the resolution of the first two forms described above is dependent on the specific tool that is doing the resolution, namely, how it populates the package index for the resolver provided by this crate.
 

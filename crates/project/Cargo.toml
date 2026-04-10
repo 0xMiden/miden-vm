@@ -16,26 +16,28 @@ edition.workspace = true
 [features]
 default = ["std", "serde"]
 arbitrary = ["std", "dep:proptest-derive", "dep:proptest", "miden-assembly-syntax/arbitrary"]
-resolver = ["std", "dep:pubgrub", "dep:smallvec"]
-std = ["miden-assembly-syntax/std", "serde/std", "thiserror/std", "toml/std"]
-serde = ["dep:serde", "dep:serde-untagged", "miden-assembly-syntax/serde", "miden-core/serde"]
+resolver = ["std", "miden-package-registry/resolver"]
+std = ["miden-assembly-syntax/std", "serde/std", "thiserror/std", "toml/std", "miden-package-registry/std", "miden-package-registry/resolver", "tempfile/getrandom"]
+serde = ["dep:serde", "dep:serde-untagged", "miden-assembly-syntax/serde", "miden-core/serde", "miden-package-registry/serde", "toml/serde", "toml/parse", "toml/display"]
 
 [dependencies]
 miden-assembly-syntax.workspace = true
 miden-core.workspace = true
+miden-mast-package.workspace = true
+miden-package-registry.workspace = true
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
-pubgrub = { version = "0.3", optional = true }
 serde = { workspace = true, optional = true }
 serde-untagged = { workspace = true, optional = true }
-smallvec = { workspace = true, optional = true }
 thiserror.workspace = true
-toml = { version = "1.0", default-features = false, features = ["serde", "parse"] }
+toml = { version = "1.0", default-features = false }
 
 [dev-dependencies]
 miden-core.workspace = true
+miden-mast-package = { workspace = true, features = ["arbitrary"] }
 miden-test-serde-macros.workspace = true
 serde_json.workspace = true
+tempfile.workspace = true
 toml = { version = "1.0", default-features = false, features = ["std", "serde", "parse"] }
 
 [lints.rust]

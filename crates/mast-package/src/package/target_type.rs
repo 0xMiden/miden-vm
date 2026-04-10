@@ -29,7 +29,7 @@ pub enum TargetType {
     /// An account component
     AccountComponent = 3,
     /// A note script
-    NoteScript = 4,
+    Note = 4,
     /// A transaction script
     TransactionScript = 5,
 }
@@ -52,7 +52,7 @@ impl TargetType {
             Self::Executable => "executable",
             Self::Kernel => "kernel",
             Self::AccountComponent => "account-component",
-            Self::NoteScript => "note",
+            Self::Note => "note",
             Self::TransactionScript => "transaction-script",
         }
     }
@@ -70,7 +70,7 @@ impl TryFrom<u8> for TargetType {
             1 => Ok(Self::Executable),
             2 => Ok(Self::Kernel),
             3 => Ok(Self::AccountComponent),
-            4 => Ok(Self::NoteScript),
+            4 => Ok(Self::Note),
             5 => Ok(Self::TransactionScript),
             _ => Err(InvalidTargetTypeError::Tag(value)),
         }
@@ -99,7 +99,7 @@ impl core::str::FromStr for TargetType {
             "bin" | "program" | "executable" => Ok(Self::Executable),
             "kernel" => Ok(Self::Kernel),
             "account" | "account-component" => Ok(Self::AccountComponent),
-            "note" => Ok(Self::NoteScript),
+            "note" => Ok(Self::Note),
             "tx-script" | "transaction-script" => Ok(Self::TransactionScript),
             s => Err(InvalidTargetTypeError::Name(s.to_string().into_boxed_str())),
         }
@@ -135,6 +135,27 @@ impl<'de> Deserialize<'de> for TargetType {
         } else {
             let tag = u8::deserialize(deserializer)?;
             Self::try_from(tag).map_err(|err| DeError::custom(err.to_string()))
+        }
+    }
+}
+
+mod serialization {
+    use alloc::string::ToString;
+
+    use miden_core::serde::*;
+
+    use super::TargetType;
+
+    impl Serializable for TargetType {
+        fn write_into<W: ByteWriter>(&self, target: &mut W) {
+            target.write_u8(*self as u8);
+        }
+    }
+
+    impl Deserializable for TargetType {
+        fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+            TargetType::try_from(source.read_u8()?)
+                .map_err(|err| DeserializationError::InvalidValue(err.to_string()))
         }
     }
 }

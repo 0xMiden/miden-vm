@@ -1,0 +1,11 @@
+[package]
+name = "miden-protocol"
+version = "0.1.0"
+
+[lib]
+namespace = "miden::protocol"
+path = "mod.masm"
+
+[dependencies]
+miden-utils = { workspace = true, linkage = "dynamic" }
+miden-tx.workspace = true
