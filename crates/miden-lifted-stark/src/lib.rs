@@ -53,6 +53,7 @@ extern crate alloc;
 mod config;
 mod coset;
 pub mod debug;
+pub mod instance;
 pub mod lmcs;
 mod pcs;
 pub mod proof;
@@ -63,6 +64,7 @@ pub mod verifier;
 pub use config::{GenericStarkConfig, StarkConfig};
 pub use coset::LiftedCoset;
 pub use debug::{check_constraints, check_constraints_multi};
+pub use instance::{AirInstance, AirWitness};
 pub use lmcs::{
     Lmcs, LmcsError, LmcsTree, OpenedRows,
     bitrev::{BitReversibleMatrix, materialize_bitrev},
@@ -152,9 +154,7 @@ pub mod air {
         AirBuilder,
         AirBuilderWithContext,
         // Lifted AIR types
-        AirInstance,
         AirValidationError,
-        AirWitness,
         AuxBuilder,
         BaseAir,
         EmptyWindow,
@@ -171,7 +171,6 @@ pub mod air {
         VarLenPublicInputs,
         WindowAccess,
         log2_strict_u8,
-        validate_instances,
     };
 
     /// Symbolic constraint analysis types from upstream p3-air.

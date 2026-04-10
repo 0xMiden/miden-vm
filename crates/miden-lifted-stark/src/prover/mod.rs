@@ -113,11 +113,17 @@
 //!
 //! # Multi-trace ordering
 //!
-//! For [`prove_multi`], `instances` must be provided in ascending trace height order
-//! (smallest first). This is a protocol-level requirement.
+//! For [`prove_multi`], `instances` must currently be provided in ascending trace
+//! height order (smallest first).
 //!
-//! Internally, quotient numerators are accumulated using cyclic extension before a
-//! single vanishing division on the largest quotient domain.
+//! Internally, traces are committed and quotient numerators are accumulated in
+//! ascending height order ("trace order") using cyclic extension, before a single
+//! vanishing division on the largest quotient domain.
+//!
+//! TODO(0xMiden/crypto#941): Accept instances in any order. The prover will compute
+//! a permutation `π: trace_id → air_id`, observe it into the transcript, reorder
+//! instances for commitment, and replace Horner accumulation with explicit
+//! `β^{π(t)}` weighting.
 
 extern crate alloc;
 
@@ -131,17 +137,23 @@ use alloc::{vec, vec::Vec};
 use commit::commit_traces;
 use constraints::{evaluate_constraints_into, layout::get_constraint_layout};
 use miden_lifted_air::{
-    AirValidationError, AirWitness, AuxBuilder, LiftedAir, VarLenPublicInputs, log2_strict_u8,
-    validate_instances,
+    AirValidationError, AuxBuilder, LiftedAir, VarLenPublicInputs, log2_strict_u8,
 };
 use miden_stark_transcript::{Channel, ProverChannel, ProverTranscript};
+use p3_challenger::CanObserve;
 use p3_field::{BasedVectorSpace, ExtensionField, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use periodic::PeriodicLde;
 use thiserror::Error;
 use tracing::{info_span, instrument};
 
-use crate::{StarkConfig, coset::LiftedCoset, pcs::prover::open_with_channel, proof::StarkOutput};
+use crate::{
+    StarkConfig,
+    coset::LiftedCoset,
+    instance::{AirWitness, validate_inputs},
+    pcs::prover::open_with_channel,
+    proof::{StarkOutput, StarkProof},
+};
 
 /// Errors that can occur during proving.
 #[derive(Debug, Error)]
@@ -194,9 +206,9 @@ where
 /// `public_values`). This lets callers keep public inputs out of the proof when they
 /// are available out-of-band.
 ///
-/// Instances must be provided in ascending height order (smallest first). Each trace
-/// may have a different height that is a power of 2. The quotient numerators are
-/// accumulated using cyclic extension:
+/// Instances must currently be provided in ascending height order (smallest first).
+/// Each trace may have a different height that is a power of 2. The quotient
+/// numerators are accumulated using cyclic extension:
 ///
 /// 1. Compute numerator N₀ on the smallest quotient domain.
 /// 2. For each subsequent trace `j`:
@@ -210,8 +222,8 @@ where
 ///
 /// # Arguments
 /// - `config`: STARK configuration (PCS params, LMCS, DFT)
-/// - `instances`: Pairs of (AIR, witness) sorted by trace height (ascending).
-/// - `channel`: Prover channel for transcript/proof I/O
+/// - `instances`: Pairs of (AIR, witness, aux_builder)
+/// - `challenger`: Fiat-Shamir challenger (heights are observed before use)
 ///
 /// # Returns
 /// `Ok(StarkOutput { digest, proof })` on success, or a `ProverError` if validation fails.
@@ -219,7 +231,7 @@ where
 pub fn prove_multi<F, EF, A, B, SC>(
     config: &SC,
     instances: &[(&A, AirWitness<'_, F>, &B)],
-    challenger: SC::Challenger,
+    mut challenger: SC::Challenger,
 ) -> Result<StarkOutput<F, EF, SC>, ProverError>
 where
     F: TwoAdicField,
@@ -228,21 +240,31 @@ where
     A: LiftedAir<F, EF>,
     B: AuxBuilder<F, EF>,
 {
-    let mut channel = ProverTranscript::new(challenger);
-    // Validate AIR properties, witness dimensions, and ascending height.
-    // Prover additionally checks that each trace width matches its AIR.
-    let verifier_instances: Vec<_> = instances
-        .iter()
-        .map(|(air, w, _)| {
-            let expected = air.width();
-            let actual = w.trace.width();
-            if actual != expected {
-                return Err(AirValidationError::WidthMismatch { expected, actual });
+    // Build verifier-side view and compute log trace heights from witness traces.
+    let verifier_instances: Vec<_> =
+        instances.iter().map(|(air, w, _)| (*air, w.to_instance())).collect();
+    let log_trace_heights: Vec<u8> =
+        instances.iter().map(|(_, w, _)| log2_strict_u8(w.trace.height())).collect();
+
+    // Validate AIR structure, instance dimensions, heights, and trace widths.
+    let log_max_trace_height = validate_inputs(&verifier_instances, &log_trace_heights)?;
+    for (air, w, _) in instances {
+        if w.trace.width() != air.width() {
+            return Err(AirValidationError::WidthMismatch {
+                expected: air.width(),
+                actual: w.trace.width(),
             }
-            Ok((*air, w.to_instance()?))
-        })
-        .collect::<Result<_, _>>()?;
-    let log_max_trace_height = validate_instances(&verifier_instances)?;
+            .into());
+        }
+    }
+
+    // Observe log trace heights into the challenger before creating the transcript.
+    for &h in &log_trace_heights {
+        challenger.observe(F::from_u8(h));
+    }
+
+    let mut channel = ProverTranscript::new(challenger);
+
     let log_blowup = config.pcs().log_blowup();
 
     // Infer constraint degree from symbolic AIR analysis (max across all AIRs)
@@ -263,7 +285,12 @@ where
     let max_quotient_coset = max_lde_coset.quotient_domain(log_constraint_degree);
     let max_quotient_height = max_quotient_coset.lde_height();
 
-    // 1. Commit all main traces
+    // 1. Commit all main traces (trace order — ascending height).
+    //
+    // TODO(0xMiden/crypto#941): Reorder traces by π before committing. The
+    // permutation observation already happens above (log_trace_heights); after
+    // permutation support, the heights will be observed in trace order.
+    //
     // Clone with blowup × capacity so the DFT resize doesn't reallocate.
     let blowup = 1 << log_blowup as usize;
     let main_traces: Vec<_> = instances
@@ -340,10 +367,16 @@ where
 
     // 5. Evaluate constraints and accumulate with beta folding.
     //
-    // Single accumulator, processed in ascending trace height order:
+    // Single accumulator, processed in trace order (ascending height):
     //   1. Cyclically extend accumulator to the next quotient height
-    //   2. Multiply every element by beta
+    //   2. Multiply every element by beta (Horner)
     //   3. Add constraint evaluations in-place: acc[i] += eval(i)
+    //
+    // TODO(0xMiden/crypto#941): Replace Horner accumulation with explicit beta powers.
+    // Iterate in trace order, but weight each term by β^{π(trace_id)} instead of
+    // scaling the entire accumulator by β. Cyclic extension handles domain growth
+    // only (decoupled from beta). The verifier accumulates Σ_a β^a · C_a(...) in
+    // AIR order, which equals Σ_t β^{π(t)} · C_{π(t)}(trace[t]).
     //
     // Pre-allocate with LDE capacity so commit_quotient's resize doesn't reallocate.
     let constraint_degree = 1 << log_constraint_degree as usize;
@@ -443,6 +476,7 @@ where
         )
     });
 
-    let (digest, proof) = channel.finalize();
+    let (digest, transcript) = channel.finalize();
+    let proof = StarkProof { log_trace_heights, transcript };
     Ok(StarkOutput { digest, proof })
 }

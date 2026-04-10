@@ -13,7 +13,7 @@ use p3_symmetric::{Hash, TruncatedPermutation};
 use rand::{SeedableRng, rngs::SmallRng};
 
 pub use super::{Felt, PackedFelt, QuadFelt};
-use crate::testing::TEST_SEED;
+use crate::{AirWitness, testing::TEST_SEED};
 
 // =============================================================================
 // Base field/hash configuration
@@ -138,7 +138,7 @@ pub fn generate_pow4_trace(start: Felt, height: usize) -> RowMajorMatrix<Felt> {
 /// Prove and verify from pre-built prover instances.
 ///
 /// Runs the full prove → verify → transcript-reparse cycle.
-pub fn prove_and_verify_instances<A, B>(instances: &[(&A, crate::air::AirWitness<'_, Felt>, &B)])
+pub fn prove_and_verify_instances<A, B>(instances: &[(&A, AirWitness<'_, Felt>, &B)])
 where
     A: crate::air::LiftedAir<Felt, QuadFelt>,
     B: crate::air::AuxBuilder<Felt, QuadFelt>,
@@ -149,7 +149,7 @@ where
         .expect("proving should succeed");
 
     let verifier_instances: Vec<_> =
-        instances.iter().map(|(a, w, _)| (*a, w.to_instance().unwrap())).collect();
+        instances.iter().map(|(a, w, _)| (*a, w.to_instance())).collect();
 
     let verifier_digest = crate::verifier::verify_multi(
         &config,
@@ -184,7 +184,7 @@ pub fn prove_and_verify<A, B>(
 {
     let prover_instances: Vec<_> = instances
         .iter()
-        .map(|(t, pv)| (air, crate::air::AirWitness::new(t, pv, &[]), aux_builder))
+        .map(|(t, pv)| (air, AirWitness::new(t, pv, &[]), aux_builder))
         .collect();
 
     prove_and_verify_instances(&prover_instances);

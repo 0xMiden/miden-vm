@@ -326,6 +326,8 @@ pub enum TracePart {
 pub enum AirValidationError {
     #[error("no instances provided")]
     Empty,
+    /// TODO(0xMiden/crypto#941): Remove once `validate_inputs` computes the
+    /// permutation instead of rejecting non-ascending heights.
     #[error("instances not in ascending height order")]
     NotAscending,
     #[error("periodic column {index}: length must be positive power of two, got {length}")]

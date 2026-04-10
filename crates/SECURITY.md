@@ -161,7 +161,8 @@ at the outer protocol layer.
 
 ### Lifted STARK (`miden-lifted-stark/src/{prover,verifier}`)
 
-- [ ] Instances are provided in ascending height order; heights are powers of two.
+- [ ] Log trace heights are observed into the challenger; heights are powers of two
+      and in ascending order.
 - [ ] The verifier's OOD evaluation point projection `y_j = z^{r_j}` matches
       the prover's lifted commitment domains.
 - [ ] Quotient chunk reconstruction (`reconstruct_quotient`) matches the prover's

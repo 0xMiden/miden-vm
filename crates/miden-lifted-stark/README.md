@@ -21,9 +21,9 @@ miden-lifted-stark              ← this crate
 └── miden-lifted-air            ← AIR traits (aux columns, periodic columns)
 ```
 
-The system supports **multiple traces of different heights** (power-of-two,
-ascending order). Shorter traces are virtually lifted to the maximum height
-via LMCS upsampling, so the PCS and verifier operate on a single uniform view.
+The system supports **multiple traces of different power-of-two heights**.
+Shorter traces are virtually lifted to the maximum height via LMCS upsampling,
+so the PCS and verifier operate on a single uniform view.
 
 ## Notation
 
@@ -185,11 +185,11 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 | Item | Purpose |
 |------|---------|
 | `prover::prove_single` | Prove a single-AIR STARK |
-| `prover::prove_multi` | Prove a multi-trace STARK (ascending heights) |
-| `air::AirWitness` | Prover witness (trace + public values) |
+| `prover::prove_multi` | Prove a multi-trace STARK |
+| `AirWitness` | Prover witness (trace + public values) |
 | `verifier::verify_single` | Verify a single-AIR proof |
 | `verifier::verify_multi` | Verify a multi-trace proof |
-| `air::AirInstance` | Verifier instance (log height + public values) |
+| `AirInstance` | Verifier instance (public values + variable-length inputs) |
 | `Transcript` | Structured transcript view (alias for `proof::StarkTranscript`) |
 | `StarkConfig` | PCS params + LMCS + DFT configuration |
 | `coset::LiftedCoset` | Domain operations: selectors, vanishing, coset shifts |
@@ -213,8 +213,10 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 
 ## Conventions & Assumptions
 
-- **Ascending height order** — Traces must be supplied in ascending height
-  order (shortest first). The prover and verifier both validate this.
+- **Ascending height order** — Traces must currently be supplied in ascending
+  height order (shortest first). The prover and verifier both validate this.
+  Log trace heights are carried in the proof and observed into the Fiat-Shamir
+  challenger, so the input ordering defines the protocol identity.
 - **Power-of-two heights** — All trace heights are powers of two.
 - **Bit-reversed storage** — All evaluation matrices are in bit-reversed order.
 - **Constraint degree** — Fixed at `D = 4` (`LOG_CONSTRAINT_DEGREE = 2`).

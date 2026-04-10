@@ -14,23 +14,40 @@ extern crate alloc;
 
 use alloc::{vec, vec::Vec};
 
-use miden_lifted_air::{AirInstance, LiftedAir, validate_instances};
+use miden_lifted_air::LiftedAir;
 use miden_stark_transcript::{Channel, TranscriptData, VerifierChannel, VerifierTranscript};
-use p3_challenger::CanFinalizeDigest;
-use p3_field::{ExtensionField, Field, TwoAdicField};
+use p3_challenger::{CanFinalizeDigest, CanObserve};
+use p3_field::{ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
 
 use crate::{
     StarkConfig,
     coset::LiftedCoset,
+    instance::{AirInstance, validate_inputs},
     lmcs::{Lmcs, utils::aligned_len},
     pcs::proof::PcsTranscript,
     verifier::VerifierError,
 };
 
-/// STARK proof: raw transcript data (field elements and commitments) produced by
-/// the prover and consumed by the verifier.
-pub type StarkProof<F, EF, SC> =
-    TranscriptData<F, <<SC as StarkConfig<F, EF>>::Lmcs as Lmcs>::Commitment>;
+/// Commitment type alias for convenience.
+type Commitment<F, EF, SC> = <<SC as StarkConfig<F, EF>>::Lmcs as Lmcs>::Commitment;
+
+/// STARK proof: log trace heights plus raw transcript data (field elements and
+/// commitments) produced by the prover and consumed by the verifier.
+///
+/// The `log_trace_heights` are absorbed into the Fiat-Shamir challenger at the
+/// start of both prover and verifier, but they are **not** part of the
+/// `TranscriptData` (they are not sent/received through the transcript channel).
+///
+/// TODO(0xMiden/crypto#941): Heights are currently in AIR order (matching input).
+/// After permutation support, the proof will also carry (or the heights will
+/// implicitly encode) the permutation `π: trace_id → air_id`.
+#[derive(Clone)]
+pub struct StarkProof<F: TwoAdicField, EF: ExtensionField<F>, SC: StarkConfig<F, EF>> {
+    /// Log₂ of the trace height for each AIR instance.
+    pub log_trace_heights: Vec<u8>,
+    /// Raw transcript data (field elements and commitments).
+    pub transcript: TranscriptData<F, Commitment<F, EF, SC>>,
+}
 
 /// Transcript digest: the challenger's native binding digest that commits to
 /// the entire prover–verifier interaction. The prover and verifier must produce
@@ -43,7 +60,7 @@ pub type StarkDigest<F, EF, SC> =
 pub struct StarkOutput<F: TwoAdicField, EF: ExtensionField<F>, SC: StarkConfig<F, EF>> {
     /// Transcript digest committing to the entire prover–verifier interaction.
     pub digest: StarkDigest<F, EF, SC>,
-    /// Raw transcript data consumed by the verifier.
+    /// Proof data consumed by the verifier.
     pub proof: StarkProof<F, EF, SC>,
 }
 
@@ -88,7 +105,8 @@ where
 {
     /// Parse a STARK transcript from proof data and a challenger.
     ///
-    /// Mirrors steps 1–9 of [`verify_multi`](crate::verifier::verify_multi):
+    /// Mirrors steps 0–9 of [`verify_multi`](crate::verifier::verify_multi):
+    /// 0. Observe log trace heights into the challenger
     /// 1. Receive main trace commitment
     /// 2. Sample randomness for auxiliary traces
     /// 3. Receive auxiliary trace commitment
@@ -105,16 +123,22 @@ where
     pub fn from_proof<A, SC>(
         config: &SC,
         instances: &[(&A, AirInstance<'_, L::F>)],
-        proof: &TranscriptData<L::F, L::Commitment>,
-        challenger: SC::Challenger,
+        proof: &StarkProof<L::F, EF, SC>,
+        mut challenger: SC::Challenger,
     ) -> Result<(Self, StarkDigest<L::F, EF, SC>), VerifierError>
     where
         A: LiftedAir<L::F, EF>,
         SC: StarkConfig<L::F, EF, Lmcs = L>,
     {
-        let log_max_trace_height = validate_instances(instances)?;
+        // Observe log trace heights into the challenger (not part of transcript data).
+        for &h in &proof.log_trace_heights {
+            let f: L::F = PrimeCharacteristicRing::from_u8(h);
+            challenger.observe(f);
+        }
 
-        let mut channel = VerifierTranscript::from_data(challenger, proof);
+        let log_max_trace_height = validate_inputs(instances, &proof.log_trace_heights)?;
+
+        let mut channel = VerifierTranscript::from_data(challenger, &proof.transcript);
         let log_blowup = config.pcs().log_blowup();
         let alignment = config.lmcs().alignment();
 

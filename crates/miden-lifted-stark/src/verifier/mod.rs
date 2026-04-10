@@ -41,8 +41,13 @@
 //!
 //! # Multi-trace ordering
 //!
-//! For [`verify_multi`], `instances` must be provided in ascending trace height order
-//! (smallest first). This is a protocol-level requirement.
+//! For [`verify_multi`], `instances` must currently be provided in ascending trace
+//! height order (smallest first).
+//!
+//! TODO(0xMiden/crypto#941): Accept instances in any order. The verifier will read
+//! the permutation `π` from the proof, iterate in AIR order, and index OOD evals
+//! via `π⁻¹(air_id)`. The constraint circuit is stable — only the indexing of
+//! opened values changes.
 
 extern crate alloc;
 
@@ -54,10 +59,10 @@ use core::marker::PhantomData;
 
 use constraints::{ConstraintFolder, reconstruct_quotient, row_to_packed_ext};
 use miden_lifted_air::{
-    AirInstance, AirValidationError, LiftedAir, ReducedAuxValues, ReductionError, RowWindow,
-    VarLenPublicInputs, validate_instances,
+    AirValidationError, LiftedAir, ReducedAuxValues, ReductionError, RowWindow, VarLenPublicInputs,
 };
 use miden_stark_transcript::{Channel, TranscriptError, VerifierChannel, VerifierTranscript};
+use p3_challenger::CanObserve;
 use p3_field::{ExtensionField, TwoAdicField};
 use p3_matrix::Matrix;
 use periodic::PeriodicPolys;
@@ -66,6 +71,7 @@ use thiserror::Error;
 use crate::{
     StarkConfig,
     coset::LiftedCoset,
+    instance::{AirInstance, validate_inputs},
     pcs::verifier::{PcsError, verify_aligned},
     proof::{StarkDigest, StarkProof},
 };
@@ -100,22 +106,16 @@ pub enum VerifierError {
 /// already observed all variable statement inputs (in particular `public_values`).
 /// This lets callers keep public inputs out of the proof when they are available
 /// out-of-band. See the module-level docs for guidance.
+///
 /// This is a convenience wrapper around [`verify_multi`] for the single-AIR case.
 ///
-/// # Arguments
-/// - `config`: STARK configuration (PCS params, LMCS, DFT)
-/// - `air`: The AIR definition
-/// - `log_trace_height`: Log₂ of the trace height
-/// - `public_values`: Public values for this AIR
-/// - `var_len_public_inputs`: Variable-length public inputs for bus identity checks
-/// - `channel`: Verifier channel for transcript
+/// Log trace height is extracted from the proof transcript (not passed as a parameter).
 ///
 /// # Returns
 /// `Ok(())` on success, or a `VerifierError` if verification fails.
 pub fn verify_single<F, EF, A, SC>(
     config: &SC,
     air: &A,
-    log_trace_height: u8,
     public_values: &[F],
     var_len_public_inputs: VarLenPublicInputs<'_, F>,
     proof: &StarkProof<F, EF, SC>,
@@ -127,11 +127,7 @@ where
     SC: StarkConfig<F, EF>,
     A: LiftedAir<F, EF>,
 {
-    let instance = AirInstance {
-        log_trace_height,
-        public_values,
-        var_len_public_inputs,
-    };
+    let instance = AirInstance { public_values, var_len_public_inputs };
     verify_multi(config, &[(air, instance)], proof, challenger)
 }
 
@@ -142,14 +138,14 @@ where
 /// `public_values`). This lets callers keep public inputs out of the proof when they
 /// are available out-of-band.
 ///
-/// Instances must be provided in ascending height order (smallest first). Each trace
-/// may have a different height that is a power of 2. The verifier mirrors the prover's
-/// protocol:
+/// Log trace heights are extracted from the proof transcript rather than from
+/// the instance data. The verifier mirrors the prover's protocol:
 ///
-/// 1. Receive commitments and sample challenges in the same order as the prover
-/// 2. For each AIR, evaluate constraints at the lifted OOD point yⱼ = z^{rⱼ}
-/// 3. Accumulate folded constraints with β: acc = acc·β + foldedⱼ
-/// 4. Check quotient identity: `acc == Q(z) * Z_{H_max}(z)`
+/// 1. Observe log trace heights and validate
+/// 2. Receive commitments and sample challenges in the same order as the prover
+/// 3. For each AIR, evaluate constraints at the lifted OOD point yⱼ = z^{rⱼ}
+/// 4. Accumulate folded constraints with β: acc = acc·β + foldedⱼ
+/// 5. Check quotient identity: `acc == Q(z) * Z_{H_max}(z)`
 ///
 /// Lifting ensures correctness: for a trace of height nⱼ lifted by factor rⱼ,
 /// the committed codeword corresponds to the lifted polynomial `p_lift(X) = p(X^{rⱼ})`.
@@ -159,8 +155,9 @@ where
 ///
 /// # Arguments
 /// - `config`: STARK configuration (PCS params, LMCS, DFT)
-/// - `instances`: Pairs of (AIR, instance) sorted by trace height (ascending)
-/// - `channel`: Verifier channel for transcript/proof I/O
+/// - `instances`: Pairs of (AIR, instance)
+/// - `proof`: STARK proof containing log trace heights and transcript data
+/// - `challenger`: Fiat-Shamir challenger (heights are observed before use)
 ///
 /// # Returns
 /// `Ok(())` on success, or a `VerifierError` if verification fails.
@@ -168,7 +165,7 @@ pub fn verify_multi<F, EF, A, SC>(
     config: &SC,
     instances: &[(&A, AirInstance<'_, F>)],
     proof: &StarkProof<F, EF, SC>,
-    challenger: SC::Challenger,
+    mut challenger: SC::Challenger,
 ) -> Result<StarkDigest<F, EF, SC>, VerifierError>
 where
     F: TwoAdicField,
@@ -176,9 +173,16 @@ where
     SC: StarkConfig<F, EF>,
     A: LiftedAir<F, EF>,
 {
-    let mut channel = VerifierTranscript::from_data(challenger, proof);
-    // Validate AIR properties, instance dimensions, and ascending height.
-    let log_max_trace_height = validate_instances(instances)?;
+    // Observe log trace heights into the challenger (not part of transcript data).
+    let log_trace_heights = &proof.log_trace_heights;
+    for &h in log_trace_heights {
+        challenger.observe(F::from_u8(h));
+    }
+
+    // Validate AIR structure, instance dimensions, and height constraints.
+    let log_max_trace_height = validate_inputs(instances, log_trace_heights)?;
+
+    let mut channel = VerifierTranscript::from_data(challenger, &proof.transcript);
 
     let log_blowup = config.pcs().log_blowup();
 
@@ -268,17 +272,26 @@ where
     // 9. Group indices for accessing opened matrices: [main, aux, quotient].
     let (main_g, aux_g, quot_g) = (0, 1, 2);
 
-    // 10. Per-AIR constraint evaluation and beta accumulation
+    // 10. Per-AIR constraint evaluation and beta accumulation.
     //
     // opened[g] has one matrix per AIR (for main/aux) or one matrix total (quotient).
     // Each matrix has N=2 rows: row 0 = local (z), row 1 = next (z·h).
+    //
+    // Currently instances are in trace order (ascending height, enforced by caller),
+    // so j indexes both AIR and trace position directly.
+    //
+    // TODO(0xMiden/crypto#941): Iterate in AIR order instead. For each air_id,
+    // index opened values via π⁻¹(air_id) to get the OOD evals for that AIR's
+    // trace slot. Accumulate Σ_a β^a · C_a(ood_evals[π⁻¹(a)]). The Horner-style
+    // `accumulated = accumulated * beta + ...` is replaced by explicit β^{air_id}
+    // weighting.
     debug_assert_eq!(opened[main_g].len(), instances.len());
     debug_assert_eq!(opened[aux_g].len(), instances.len());
     let mut accumulated = EF::ZERO;
     let mut reduced_aux = ReducedAuxValues::<EF>::identity();
 
     for (j, (air, inst)) in instances.iter().enumerate() {
-        let coset_j = LiftedCoset::new(inst.log_trace_height, log_blowup, log_max_trace_height);
+        let coset_j = LiftedCoset::new(log_trace_heights[j], log_blowup, log_max_trace_height);
 
         // opened[main_g][j] is a 2-row RowMajorMatrix (local, next) already truncated.
         let main_window = RowWindow::from_view(&opened[main_g][j].as_view());

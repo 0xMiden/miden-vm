@@ -3,8 +3,8 @@
 use std::fmt;
 
 use miden_lifted_stark::{
-    StarkConfig,
-    air::{AirInstance, AirWitness, BaseAir, LiftedAir, LiftedAirBuilder, log2_strict_u8},
+    AirInstance, AirWitness, StarkConfig,
+    air::{BaseAir, LiftedAir, LiftedAirBuilder},
     prove_multi,
     testing::airs::{
         ZeroAuxBuilder, blake3::LiftedBlake3Air, keccak::LiftedKeccakAir, miden::DummyMidenAir,
@@ -13,7 +13,7 @@ use miden_lifted_stark::{
     verify_multi,
 };
 use p3_field::Field;
-use p3_matrix::{Matrix, dense::RowMajorMatrix};
+use p3_matrix::dense::RowMajorMatrix;
 use tracing::info_span;
 
 use crate::{
@@ -131,21 +131,19 @@ where
         .in_scope(|| prove_multi(config, &instances, config.challenger()).expect("proving failed"));
 
     let result = RunResult {
-        proof_size_bytes: output.proof.size_in_bytes(),
-        field_elems: output.proof.fields().len(),
-        commitments: output.proof.commitments().len(),
+        proof_size_bytes: output.proof.transcript.size_in_bytes(),
+        field_elems: output.proof.transcript.fields().len(),
+        commitments: output.proof.transcript.commitments().len(),
     };
 
     if !cli.no_verify {
         info_span!("verify").in_scope(|| {
             let verifier_instances: Vec<_> = airs
                 .iter()
-                .zip(traces)
-                .map(|(air, trace)| {
+                .map(|air| {
                     (
                         air,
                         AirInstance {
-                            log_trace_height: log2_strict_u8(trace.height()),
                             public_values: &[],
                             var_len_public_inputs: &[],
                         },

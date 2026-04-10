@@ -10,7 +10,7 @@ use crate::{
     VerifierError,
     air::{
         AirBuilder, AuxBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder,
-        WindowAccess, log2_strict_u8,
+        WindowAccess,
     },
     prove_single,
     testing::configs::goldilocks_poseidon2::{
@@ -157,7 +157,6 @@ fn malformed_transcript_is_rejected() {
     let air = TinyAir::new(vec![]);
 
     let (trace, public_values) = instance(0, 4);
-    let log_trace_height = log2_strict_u8(trace.height());
 
     let output = prove_single(
         &config,
@@ -171,32 +170,18 @@ fn malformed_transcript_is_rejected() {
     .expect("proving should succeed");
 
     // Baseline should verify
-    let _digest = verify_single(
-        &config,
-        &air,
-        log_trace_height,
-        &public_values,
-        &[],
-        &output.proof,
-        test_challenger(),
-    )
-    .expect("baseline proof should verify");
+    let _digest =
+        verify_single(&config, &air, &public_values, &[], &output.proof, test_challenger())
+            .expect("baseline proof should verify");
 
     // Extra field element should cause rejection
-    let (mut fields, commitments) = output.proof.into_parts();
+    let mut bad_proof = output.proof;
+    let (mut fields, commitments) = bad_proof.transcript.into_parts();
     fields.push(Felt::ONE);
-    let bad_transcript = TranscriptData::new(fields, commitments);
+    bad_proof.transcript = TranscriptData::new(fields, commitments);
 
-    let err = verify_single(
-        &config,
-        &air,
-        log_trace_height,
-        &public_values,
-        &[],
-        &bad_transcript,
-        test_challenger(),
-    )
-    .expect_err("extra transcript data should fail verification");
+    let err = verify_single(&config, &air, &public_values, &[], &bad_proof, test_challenger())
+        .expect_err("extra transcript data should fail verification");
     assert!(matches!(
         err,
         VerifierError::Transcript(crate::transcript::TranscriptError::TrailingData)

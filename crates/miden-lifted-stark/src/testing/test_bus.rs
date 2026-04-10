@@ -7,9 +7,10 @@ use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
+    AirInstance, AirWitness,
     air::{
-        AirBuilder, AirInstance, AuxBuilder, BaseAir, ExtensionBuilder, LiftedAir,
-        LiftedAirBuilder, ReducedAuxValues, VarLenPublicInputs, WindowAccess, log2_strict_u8,
+        AirBuilder, AuxBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder,
+        ReducedAuxValues, VarLenPublicInputs, WindowAccess,
     },
     prove_multi,
     testing::configs::goldilocks_poseidon2::{
@@ -205,16 +206,12 @@ fn bus_identity_check() {
     let var_len_pi: [&[Felt]; 2] = [&input_0, &input_1];
 
     // Prove
-    let prover_instances = [(
-        &air,
-        miden_lifted_air::AirWitness::new(&trace, &public_values, &var_len_pi),
-        &aux_builder,
-    )];
+    let prover_instances =
+        [(&air, AirWitness::new(&trace, &public_values, &var_len_pi), &aux_builder)];
     let output =
         prove_multi(&config, &prover_instances, test_challenger()).expect("proving should succeed");
 
     let instance = AirInstance {
-        log_trace_height: log2_strict_u8(height),
         public_values: &public_values,
         var_len_public_inputs: &var_len_pi,
     };
@@ -245,11 +242,8 @@ fn bus_wrong_var_len_pi_fails() {
     let input_1 = [pi_1];
     let var_len_pi: [&[Felt]; 2] = [&input_0, &input_1];
 
-    let prover_instances = [(
-        &air,
-        miden_lifted_air::AirWitness::new(&trace, &public_values, &var_len_pi),
-        &aux_builder,
-    )];
+    let prover_instances =
+        [(&air, AirWitness::new(&trace, &public_values, &var_len_pi), &aux_builder)];
     let output =
         prove_multi(&config, &prover_instances, test_challenger()).expect("proving should succeed");
 
@@ -259,7 +253,6 @@ fn bus_wrong_var_len_pi_fails() {
     let wrong_var_len_pi: [&[Felt]; 2] = [&wrong_input_0, &input_1];
 
     let instance = AirInstance {
-        log_trace_height: log2_strict_u8(height),
         public_values: &public_values,
         var_len_public_inputs: &wrong_var_len_pi,
     };
@@ -292,18 +285,14 @@ fn bus_wrong_input_count_fails() {
     let input_1 = [pi_1];
     let var_len_pi: [&[Felt]; 2] = [&input_0, &input_1];
 
-    let prover_instances = [(
-        &air,
-        miden_lifted_air::AirWitness::new(&trace, &public_values, &var_len_pi),
-        &aux_builder,
-    )];
+    let prover_instances =
+        [(&air, AirWitness::new(&trace, &public_values, &var_len_pi), &aux_builder)];
     let output =
         prove_multi(&config, &prover_instances, test_challenger()).expect("proving should succeed");
 
     // Verify with WRONG input count (1 instead of 2)
     let only_one: [&[Felt]; 1] = [&input_0];
     let instance = AirInstance {
-        log_trace_height: log2_strict_u8(height),
         public_values: &public_values,
         var_len_public_inputs: &only_one,
     };

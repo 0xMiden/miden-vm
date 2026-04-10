@@ -6,9 +6,9 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
-    Lmcs, VerifierError,
+    AirWitness, Lmcs, VerifierError,
     air::{
-        AirBuilder, AirWitness, AuxBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder,
+        AirBuilder, AuxBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder,
         WindowAccess,
     },
     prove_multi,
@@ -149,16 +149,15 @@ fn multi_trace_rejects_trailing_transcript_data() {
     let output =
         prove_multi(&config, &prover_instances, test_challenger()).expect("proving should succeed");
 
-    let (mut fields, commitments) = output.proof.into_parts();
+    let mut bad_proof = output.proof;
+    let (mut fields, commitments) = bad_proof.transcript.into_parts();
     fields.push(Felt::ONE);
-    let bad_transcript = TranscriptData::new(fields, commitments);
+    bad_proof.transcript = TranscriptData::new(fields, commitments);
 
-    let verifier_instances: Vec<_> = prover_instances
-        .iter()
-        .map(|(a, w, _)| (*a, w.to_instance().unwrap()))
-        .collect();
+    let verifier_instances: Vec<_> =
+        prover_instances.iter().map(|(a, w, _)| (*a, w.to_instance())).collect();
 
-    let err = verify_multi(&config, &verifier_instances, &bad_transcript, test_challenger())
+    let err = verify_multi(&config, &verifier_instances, &bad_proof, test_challenger())
         .expect_err("extra transcript data should fail verification");
     assert!(matches!(
         err,

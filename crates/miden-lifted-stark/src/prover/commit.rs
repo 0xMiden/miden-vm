@@ -184,7 +184,9 @@ where
 {
     assert!(!traces.is_empty(), "at least one trace required");
 
-    // Validate traces are sorted by height
+    // Validate traces are sorted by height.
+    // TODO(0xMiden/crypto#941): Remove this assertion once prove_multi reorders
+    // traces by π before calling commit_traces.
     assert!(
         traces.windows(2).all(|w| w[0].height() <= w[1].height()),
         "traces must be sorted by height in ascending order"
