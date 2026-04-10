@@ -19,9 +19,9 @@
 //!
 //! ## Validated properties
 //!
-//! These are checked by [`air::LiftedAir::validate`]
-//! and [`air::AirInstance::validate`], and enforced
-//! by both prover and verifier before proceeding:
+//! These are checked by [`air::LiftedAir::validate`] and by the internal
+//! instance validator in [`instance`], and enforced by both prover and
+//! verifier before proceeding:
 //!
 //! - **No preprocessed trace** — the lifted protocol does not support them.
 //! - **Positive aux width** — every AIR must have an auxiliary trace.

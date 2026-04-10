@@ -319,9 +319,8 @@ pub enum TracePart {
 
 /// Errors from AIR validation.
 ///
-/// Returned by [`LiftedAir::validate`],
-/// [`AirInstance::validate`](crate::AirInstance::validate), and
-/// [`validate_instances`](crate::validate_instances).
+/// Returned by [`LiftedAir::validate`] and by the instance-validation entry
+/// point in `miden-lifted-stark` (`instance::validate_inputs`).
 #[derive(Debug, Error)]
 pub enum AirValidationError {
     #[error("no instances provided")]

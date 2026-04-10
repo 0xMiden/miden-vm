@@ -44,7 +44,7 @@ pub use values::ReducedAuxValues;
 /// [`LiftedAir::num_var_len_public_inputs`](crate::LiftedAir::num_var_len_public_inputs).
 ///
 /// **Commitment:** callers **must** bind these inputs to the Fiat-Shamir
-/// challenger state, just like [`public_values`](crate::AirInstance::public_values).
+/// challenger state, just like the AIR's public values.
 pub type VarLenPublicInputs<'a, F> = &'a [&'a [F]];
 
 /// Boxed error returned by

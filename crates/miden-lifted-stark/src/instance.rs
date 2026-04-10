@@ -130,8 +130,7 @@ where
 /// Verifier instance: public values and variable-length inputs.
 ///
 /// Both the prover and verifier carry `var_len_public_inputs`. The verifier uses
-/// them in [`LiftedAir::reduced_aux_values`](miden_lifted_air::LiftedAir::reduced_aux_values)
-/// for the cross-AIR identity check.
+/// them in [`LiftedAir::reduced_aux_values`] for the cross-AIR identity check.
 ///
 /// Log trace heights are not part of the instance — they are carried in the
 /// [`StarkProof`](crate::StarkProof) and absorbed into the Fiat-Shamir state.
