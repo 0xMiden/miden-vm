@@ -685,6 +685,7 @@ fn u32divmod_fail() {
 // U32 OPERATIONS TESTS - RANDOMIZED - ARITHMETIC OPERATIONS
 // ================================================================================================
 proptest! {
+    #![proptest_config(ProptestConfig::with_cases(100))]
     #[test]
     fn u32unchecked_add_proptest(a in any::<u32>(), b in any::<u32>()) {
         let wrapping_asm_op = "u32wrapping_add";

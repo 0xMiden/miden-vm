@@ -144,7 +144,7 @@ impl FastProcessor {
             stack,
             advice: self.advice,
             memory: self.memory,
-            final_pc_transcript: self.pc_transcript,
+            final_precompile_transcript: self.pc_transcript,
         }
     }
 
@@ -445,6 +445,12 @@ impl FastProcessor {
         &self.memory
     }
 
+    /// Consumes the processor and returns the advice provider, memory, and precompile
+    /// transcript.
+    pub fn into_parts(self) -> (AdviceProvider, Memory, PrecompileTranscript) {
+        (self.advice, self.memory, self.pc_transcript)
+    }
+
     /// Returns a reference to the execution options.
     pub fn execution_options(&self) -> &ExecutionOptions {
         &self.options
@@ -634,7 +640,7 @@ pub struct ExecutionOutput {
     pub stack: StackOutputs,
     pub advice: AdviceProvider,
     pub memory: Memory,
-    pub final_pc_transcript: PrecompileTranscript,
+    pub final_precompile_transcript: PrecompileTranscript,
 }
 
 // EXECUTION CONTEXT INFO

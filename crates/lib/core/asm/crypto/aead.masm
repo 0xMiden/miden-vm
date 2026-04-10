@@ -113,8 +113,11 @@ end
 #! - Plaintext must be at word-aligned addresses (addr % 4 == 0)
 #! - Each block is 8 field elements (2 words)
 #! - Blocks must be stored contiguously in memory
-#! - src_ptr and dst_ptr MUST be different (in-place encryption not supported)
-#!   This is because crypto_stream reads and writes in the same clock cycle
+#!
+#! # Panics
+#!
+#! Panics if the source and destination memory ranges overlap
+#! (in-place encryption not supported).
 #!
 #! Padding:
 #! - Padding is AUTOMATIC - caller should NOT pad the plaintext
@@ -133,6 +136,15 @@ pub proc encrypt
     # Alignment errors are caught by the VM memory subsystem. Incorrect num_blocks
     # will cause the procedure to encrypt the wrong amount of data, but this is safe -
     # the resulting tag will authenticate whatever was actually encrypted.
+
+    # Assert source and destination memory ranges do not overlap.
+    # Uses (num_blocks+1)*8 as conservative range size for both sides.
+    dup.10 add.1 mul.8
+    dup dup.10 add
+    dup.11 swap u32gte
+    swap dup.11 add
+    dup.10 swap u32gte
+    or assert.err="source and destination ranges must not overlap"
 
     exec.init_state
     # => [rate(8), capacity(4), src_ptr, dst_ptr, num_blocks, ...]
@@ -262,7 +274,11 @@ end
 #!
 #! Memory Requirements:
 #! - Same as encrypt: word-aligned addresses, contiguous blocks
-#! - src_ptr and dst_ptr MUST be different (in-place operation not supported)
+#!
+#! # Panics
+#!
+#! Panics if the source and destination memory ranges overlap
+#! (in-place decryption not supported).
 #!
 #! Security:
 #! - Tag verification happens in the MASM procedure via re-encryption
@@ -298,6 +314,14 @@ pub proc decrypt
     # Alignment errors are caught by the VM memory subsystem. Incorrect num_blocks
     # values are caught by tag verification - if num_blocks doesn't match what was
     # used during encryption, the tag comparison will fail and execution will halt.
+
+    # Assert source and destination memory ranges do not overlap.
+    dup.10 add.1 mul.8
+    dup dup.10 add
+    dup.11 swap u32gte
+    swap dup.11 add
+    dup.10 swap u32gte
+    or assert.err="source and destination ranges must not overlap"
 
     # Compute the pointer to the tag for later use
     # tag is at src_ptr + (num_blocks + 1) * 8 because of automatic padding block

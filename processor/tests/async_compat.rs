@@ -108,10 +108,7 @@ async fn fast_processor_execute_for_trace_async_matches_sync() {
         .await
         .unwrap();
 
-    assert_eq!(
-        sync_trace_inputs.execution_output().stack,
-        async_trace_inputs.execution_output().stack
-    );
+    assert_eq!(sync_trace_inputs.stack_outputs(), async_trace_inputs.stack_outputs());
     assert_eq!(
         sync_trace_inputs.trace_generation_context().fragment_size,
         async_trace_inputs.trace_generation_context().fragment_size

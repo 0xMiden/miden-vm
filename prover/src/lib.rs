@@ -29,11 +29,30 @@ mod proving_options;
 pub use miden_air::{DeserializationError, ProcessorAir, PublicInputs, config};
 pub use miden_core::proof::{ExecutionProof, HashFunction};
 pub use miden_processor::{
-    ExecutionError, ExecutionOutput, FutureMaybeSend, Host, InputError, ProgramInfo, StackInputs,
-    StackOutputs, SyncHost, TraceBuildInputs, TraceGenerationContext, Word, advice::AdviceInputs,
-    crypto, field, serde, utils,
+    ExecutionError, ExecutionOptions, ExecutionOutput, FutureMaybeSend, Host, InputError,
+    ProgramInfo, StackInputs, StackOutputs, SyncHost, TraceBuildInputs, TraceGenerationContext,
+    Word, advice::AdviceInputs, crypto, field, serde, utils,
 };
 pub use proving_options::ProvingOptions;
+
+/// Inputs required to prove from pre-executed trace data.
+#[derive(Debug)]
+pub struct TraceProvingInputs {
+    trace_inputs: TraceBuildInputs,
+    options: ProvingOptions,
+}
+
+impl TraceProvingInputs {
+    /// Creates a new bundle of post-execution trace inputs and proof-generation options.
+    pub fn new(trace_inputs: TraceBuildInputs, options: ProvingOptions) -> Self {
+        Self { trace_inputs, options }
+    }
+
+    /// Consumes this bundle and returns its trace inputs and proof-generation options.
+    pub fn into_parts(self) -> (TraceBuildInputs, ProvingOptions) {
+        (self.trace_inputs, self.options)
+    }
+}
 
 // PROVER
 // ================================================================================================
@@ -42,9 +61,11 @@ pub use proving_options::ProvingOptions;
 /// proof of the program's execution.
 ///
 /// - `stack_inputs` specifies the initial state of the stack for the VM.
+/// - `advice_inputs` provides the initial nondeterministic inputs for the VM.
 /// - `host` specifies the host environment which contain non-deterministic (secret) inputs for the
 ///   prover.
-/// - `options` defines parameters for STARK proof generation.
+/// - `execution_options` defines VM execution parameters such as cycle limits and fragmentation.
+/// - `proving_options` defines parameters for STARK proof generation.
 ///
 /// # Errors
 /// Returns an error if program execution or STARK proof generation fails for any reason.
@@ -54,41 +75,42 @@ pub async fn prove(
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
     host: &mut impl Host,
-    options: ProvingOptions,
+    execution_options: ExecutionOptions,
+    proving_options: ProvingOptions,
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
     // execute the program to create an execution trace using FastProcessor
-    let processor =
-        FastProcessor::new_with_options(stack_inputs, advice_inputs, *options.execution_options());
+    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options);
 
     let trace_inputs = processor.execute_trace_inputs(program, host).await?;
-    prove_from_trace_sync(trace_inputs, options)
+    prove_from_trace_sync(TraceProvingInputs::new(trace_inputs, proving_options))
 }
 
-/// Synchronous wrapper for the async `prove()` function.
+/// Synchronous wrapper for [`prove()`].
 #[instrument("prove_program_sync", skip_all)]
 pub fn prove_sync(
     program: &Program,
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
     host: &mut impl SyncHost,
-    options: ProvingOptions,
+    execution_options: ExecutionOptions,
+    proving_options: ProvingOptions,
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
-    let processor =
-        FastProcessor::new_with_options(stack_inputs, advice_inputs, *options.execution_options());
+    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, execution_options);
 
     let trace_inputs = processor.execute_trace_inputs_sync(program, host)?;
-    prove_from_trace_sync(trace_inputs, options)
+    prove_from_trace_sync(TraceProvingInputs::new(trace_inputs, proving_options))
 }
 
 /// Builds an execution trace from pre-executed trace inputs and proves it synchronously.
 ///
 /// This is useful when program execution has already happened elsewhere and only trace building
-/// plus proof generation remain.
+/// plus proof generation remain. The execution settings are already reflected in the supplied
+/// `TraceBuildInputs`, so only proof-generation options remain in this API.
 #[instrument("prove_trace_sync", skip_all)]
 pub fn prove_from_trace_sync(
-    trace_inputs: TraceBuildInputs,
-    options: ProvingOptions,
+    inputs: TraceProvingInputs,
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
+    let (trace_inputs, options) = inputs.into_parts();
     let trace = build_trace(trace_inputs)?;
     prove_execution_trace(trace, options)
 }
@@ -146,7 +168,6 @@ fn prove_execution_trace(
 
     Ok((stack_outputs, proof))
 }
-
 // STARK PROOF GENERATION
 // ================================================================================================
 

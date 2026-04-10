@@ -68,14 +68,14 @@ fn test_ecdsa_verify_cases() {
         );
 
         let test = build_debug_test!(source, &[]);
-        let output = test.execute().unwrap();
+        let (output, _) = test.execute_for_output().unwrap();
 
         // Assert result
-        let result = output.stack_outputs().get_element(0).unwrap();
+        let result = output.stack.get_element(0).unwrap();
         assert_eq!(result, Felt::from_bool(expected_valid));
 
         // Verify the precompile request was logged with the right event ID
-        let deferred = output.advice_provider().precompile_requests().to_vec();
+        let deferred = output.advice.precompile_requests().to_vec();
         assert_eq!(deferred.len(), 1);
         assert_eq!(deferred[0], request.as_precompile_request());
     }
@@ -112,8 +112,8 @@ fn test_ecdsa_verify_impl_commitment() {
         );
 
         let test = build_debug_test!(source, &[]);
-        let output = test.execute().unwrap();
-        let stack = output.stack_outputs();
+        let (output, _) = test.execute_for_output().unwrap();
+        let stack = output.stack;
 
         // Verify stack layout: [COMM (0-3), TAG (4-7), result (at position 8), ...]
         // TAG = [event_id, result, 0, 0] where TAG[1]=result is at position 5
@@ -137,11 +137,11 @@ fn test_ecdsa_verify_impl_commitment() {
             "result does not match expected validity"
         );
 
-        let deferred = output.advice_provider().precompile_requests().to_vec();
+        let deferred = output.advice.precompile_requests().to_vec();
         assert_eq!(deferred.len(), 1, "expected a single deferred request");
         assert_eq!(deferred[0], request.as_precompile_request());
 
-        let advice_stack = output.advice_provider().stack();
+        let advice_stack = output.advice.stack();
         assert!(advice_stack.is_empty(), "advice stack should be empty after verify_impl");
     }
 }
@@ -213,8 +213,8 @@ fn test_ecdsa_verify_bis_wrapper() {
         ",
     );
 
-    let mut test = build_debug_test!(&source);
-    test.add_event_handler(EVENT_ECDSA_SIG_TO_STACK, EcdsaSignatureHandler::new(&secret_key));
+    let test = build_debug_test!(&source)
+        .with_event_handler(EVENT_ECDSA_SIG_TO_STACK, EcdsaSignatureHandler::new(&secret_key));
 
     test.expect_stack(&[]);
 }

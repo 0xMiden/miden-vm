@@ -1,5 +1,4 @@
 use core::fmt;
-use std::collections::BTreeSet;
 
 use miden_core::{LexicographicWord, Word};
 use pubgrub::VersionSet as _;
@@ -9,20 +8,20 @@ use super::pubgrub_compat::SemverPubgrub;
 use crate::{SemVer, Version, VersionReq, VersionRequirement};
 
 /// This type is an implementation detail of the dependency resolver provided by
-/// [`super::PackageIndex`].
+/// [`super::InMemoryPackageRegistry`].
 ///
 /// A [VersionSet], as implied by the name, provides set semantics for semantic versioning ranges
 /// that may also be further constrained by specific content digests that are considered to be part
 /// of the set.
 ///
-/// * The empty set is represented as a range that cannot contain any version
+/// * The empty set is represented as a range that cannot contain any version, with no digest filter
 /// * The complete (aka "full") set is represented as an unbounded range with an empty content
 ///   digest filter, equivalent to the semantic versioning constraint `*`
+/// * A digest-only constraint is represented as a semantic range paired with a digest filter. When
+///   unconstrained by semver, that range is `*`.
 /// * Set intersection is performed by finding the overlap in the ranges of the two sets, and then
 ///   if either set has a content digest filter, only permitting content digests that are present in
-///   both sets. It is not guaranteed that a given content digest is included in the semantic
-///   version intersection, rather _either_ the digest or the semantic version of the intersection
-///   is used for matching a package.
+///   both sets.
 /// * Set complement is performed by negating the range of versions included in the set. The
 ///   resulting set will always have an empty content digest filter.
 /// * Set containment for a version `v` is determined as follows:
@@ -41,6 +40,7 @@ pub struct VersionSet {
 }
 
 /// Represents an additional filter on the versions considered a member of a [VersionSet].
+#[derive(Debug)]
 pub enum VersionSetFilter<'a> {
     /// Matches any version, regardless of content digest
     Any,
@@ -74,6 +74,35 @@ impl VersionSet {
             VersionSetFilter::Digest(&self.digests)
         }
     }
+
+    /// Returns true if this set constrains only the artifact digest, not the semantic version.
+    pub fn is_digest_only(&self) -> bool {
+        !self.digests.is_empty() && self.range == SemverPubgrub::full()
+    }
+
+    /// Construct a set for a digest requirement constrained to the semantic versions currently
+    /// available for that digest.
+    pub fn from_available_digest<'a>(
+        digest: Word,
+        versions: impl IntoIterator<Item = &'a Version>,
+    ) -> Self {
+        let digest = LexicographicWord::new(digest);
+        let mut range = SemverPubgrub::empty();
+        let mut matched = false;
+
+        for version in versions {
+            if version.digest.as_ref() == Some(&digest) {
+                range = range.union(&SemverPubgrub::singleton(version.version.clone()));
+                matched = true;
+            }
+        }
+
+        if !matched {
+            Self::empty()
+        } else {
+            Self { range, digests: smallvec![digest] }
+        }
+    }
 }
 
 impl Default for VersionSet {
@@ -86,7 +115,7 @@ impl Default for VersionSet {
 impl From<Word> for VersionSet {
     fn from(value: Word) -> Self {
         Self {
-            range: SemverPubgrub::empty(),
+            range: SemverPubgrub::full(),
             digests: smallvec![LexicographicWord::new(value)],
         }
     }
@@ -134,6 +163,7 @@ impl From<VersionRequirement> for VersionSet {
         match value {
             VersionRequirement::Digest(digest) => Self::from(digest.into_inner()),
             VersionRequirement::Semantic(req) => Self::from(req.inner()),
+            VersionRequirement::Exact(version) => Self::from(version),
         }
     }
 }
@@ -183,29 +213,122 @@ impl pubgrub::VersionSet for VersionSet {
     }
 
     fn intersection(&self, other: &Self) -> Self {
+        use alloc::collections::BTreeSet;
+
         if self.digests.is_empty() && other.digests.is_empty() {
             return Self::from(self.range.intersection(&other.range));
         }
 
-        let ldigests = BTreeSet::from_iter(self.digests.iter());
-        let rdigests = BTreeSet::from_iter(other.digests.iter());
-        let digests = ldigests.intersection(&rdigests).map(|d| **d).collect::<SmallVec<[_; _]>>();
-        // If either set contained specific digests, but the intersection does not, then we must
-        // return an empty set, as the expectation would be that at least one digest remains in a
-        // non-empty intersection.
-        if digests.is_empty() && !(self.digests.is_empty() || other.digests.is_empty()) {
-            Self::empty()
-        } else {
-            let range = self.range.intersection(&other.range);
-            Self { range, digests }
+        let digests = match (self.digests.is_empty(), other.digests.is_empty()) {
+            (true, false) => other.digests.clone(),
+            (false, true) => self.digests.clone(),
+            (false, false) => {
+                let ldigests = BTreeSet::from_iter(self.digests.iter());
+                let rdigests = BTreeSet::from_iter(other.digests.iter());
+                ldigests.intersection(&rdigests).map(|d| **d).collect::<SmallVec<[_; _]>>()
+            },
+            (true, true) => SmallVec::new(),
+        };
+
+        // If both sides constrained the digest but no digest satisfies both filters, the
+        // intersection is empty regardless of the semantic range.
+        if digests.is_empty() && !self.digests.is_empty() && !other.digests.is_empty() {
+            return Self::empty();
         }
+
+        let range = self.range.intersection(&other.range);
+        if range.is_empty() {
+            return Self::empty();
+        }
+
+        Self { range, digests }
     }
 
     fn contains(&self, v: &Self::V) -> bool {
-        if let Some(digest) = v.digest.as_ref() {
-            self.digests.contains(digest)
-        } else {
+        if self.digests.is_empty() {
             self.range.contains(&v.version)
+        } else if let Some(digest) = v.digest.as_ref() {
+            self.digests.contains(digest) && self.range.contains(&v.version)
+        } else {
+            false
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use miden_core::crypto::hash::Rpo256;
+
+    use super::*;
+
+    #[test]
+    fn version_set_contains_requires_both_digest_and_semver() {
+        let digest = Rpo256::hash(b"same-digest");
+        let set = VersionSet::from(Version::new("1.0.0".parse().unwrap(), digest));
+        let candidate = Version::new("9.9.9".parse().unwrap(), digest);
+
+        assert!(
+            !<VersionSet as pubgrub::VersionSet>::contains(&set, &candidate),
+            "set {set} unexpectedly contains {candidate}"
+        );
+    }
+
+    #[test]
+    fn digest_and_semantic_intersection_preserves_both_constraints() {
+        let digest = Rpo256::hash(b"shared-digest");
+        let set = <VersionSet as pubgrub::VersionSet>::intersection(
+            &VersionSet::from(digest),
+            &VersionSet::from("^1.0.0".parse::<VersionReq>().unwrap()),
+        );
+
+        let matching = Version::new("1.2.3".parse().unwrap(), digest);
+        let wrong_semver = Version::new("2.0.0".parse().unwrap(), digest);
+        let wrong_digest = Version::new("1.2.3".parse().unwrap(), Rpo256::hash(b"other-digest"));
+
+        assert!(
+            <VersionSet as pubgrub::VersionSet>::contains(&set, &matching),
+            "set {set} should contain {matching}"
+        );
+        assert!(
+            !<VersionSet as pubgrub::VersionSet>::contains(&set, &wrong_semver),
+            "set {set} unexpectedly contains {wrong_semver}"
+        );
+        assert!(
+            !<VersionSet as pubgrub::VersionSet>::contains(&set, &wrong_digest),
+            "set {set} unexpectedly contains {wrong_digest}"
+        );
+    }
+
+    #[test]
+    fn semantic_range_contains_digest_qualified_versions() {
+        let set = VersionSet::from("^1.0.0".parse::<VersionReq>().unwrap());
+        let digest = Rpo256::hash(b"same-version-digest");
+        let candidate = Version::new("1.2.3".parse().unwrap(), digest);
+
+        assert!(
+            <VersionSet as pubgrub::VersionSet>::contains(&set, &candidate),
+            "semantic set {set} should contain {candidate}"
+        );
+    }
+
+    #[test]
+    fn empty_digest_constrained_intersection_stays_empty() {
+        let digest = Rpo256::hash(b"revived-digest");
+        let impossible = <VersionSet as pubgrub::VersionSet>::intersection(
+            &VersionSet::from(Version::new("1.0.0".parse().unwrap(), digest)),
+            &VersionSet::from("=2.0.0".parse::<VersionReq>().unwrap()),
+        );
+
+        let revived = <VersionSet as pubgrub::VersionSet>::intersection(
+            &impossible,
+            &VersionSet::from("^3.0.0".parse::<VersionReq>().unwrap()),
+        );
+        let candidate = Version::new("3.1.0".parse().unwrap(), digest);
+
+        assert_eq!(revived, VersionSet::empty());
+        assert!(
+            !<VersionSet as pubgrub::VersionSet>::contains(&revived, &candidate),
+            "set {revived} unexpectedly revived impossible candidate {candidate}"
+        );
     }
 }

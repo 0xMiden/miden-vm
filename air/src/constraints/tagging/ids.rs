@@ -58,7 +58,8 @@ pub const TAG_DECODER_COUNT: usize = 57;
 /// Base ID for the chiplets constraint group.
 pub const TAG_CHIPLETS_BASE: usize = TAG_DECODER_BASE + TAG_DECODER_COUNT;
 /// Number of chiplets constraints in this group.
-pub const TAG_CHIPLETS_COUNT: usize = 136;
+/// selectors(10) + hasher(100) + bitwise(17) + memory(22) + ace(20) + kernel_rom(6) = 175
+pub const TAG_CHIPLETS_COUNT: usize = 175;
 
 /// Base ID for the bus boundary constraint group.
 /// 8 first-row (aux columns pinned to identity) + 8 last-row (aux columns bound to finals) = 16.
@@ -95,8 +96,8 @@ pub const TAG_CHIPLETS_BUS_COUNT: usize = 1;
 
 /// Base ID for the wiring bus constraint.
 pub const TAG_WIRING_BUS_BASE: usize = TAG_CHIPLETS_BUS_BASE + TAG_CHIPLETS_BUS_COUNT;
-/// Number of wiring bus constraints in this group.
-pub const TAG_WIRING_BUS_COUNT: usize = 1;
+/// Number of wiring bus constraints in this group (ACE + memory range + hasher perm-link).
+pub const TAG_WIRING_BUS_COUNT: usize = 3;
 
 /// Base ID for the public inputs boundary constraint group.
 pub const TAG_PUBLIC_INPUTS_BASE: usize = TAG_WIRING_BUS_BASE + TAG_WIRING_BUS_COUNT;
