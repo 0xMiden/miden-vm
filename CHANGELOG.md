@@ -12,6 +12,7 @@
 - Use per-chunk scratch space for batch inversion ([#933](https://github.com/0xMiden/crypto/pull/933)).
 - [BREAKING] Changed the signature of `Felt::new` to perform reduction, and raise an error if the input is invalid. Retained the old behavior as `Felt::new_unchecked`, as its usage may lead to incorrect results.
 - Optimize field operations for `Goldilocks` ([#926](https://github.com/0xMiden/crypto/pull/926)).
+- [BREAKING] Moved log trace heights from `AirInstance` into `StarkProof` and observe them into the Fiat-Shamir challenger ([#956](https://github.com/0xMiden/crypto/pull/956)).
 
 ## 0.23.0 (2026-03-11)
 
