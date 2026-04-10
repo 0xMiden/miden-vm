@@ -4119,7 +4119,7 @@ fn vendoring() -> TestResult {
         let mod1 = mod_parser
             .parse(PathBuf::new("test::mod1").unwrap(), source, context.source_manager())
             .unwrap();
-        Assembler::default().assemble_library([mod1]).unwrap()
+        Assembler::new(context.source_manager()).assemble_library([mod1]).unwrap()
     };
 
     let lib = {
@@ -4128,7 +4128,7 @@ fn vendoring() -> TestResult {
             .parse(PathBuf::new("test::mod2").unwrap(), source, context.source_manager())
             .unwrap();
 
-        let mut assembler = Assembler::default();
+        let mut assembler = Assembler::new(context.source_manager());
         assembler.link_static_library(vendor_lib)?;
         assembler.assemble_library([mod2]).unwrap()
     };
@@ -4144,7 +4144,7 @@ fn vendoring() -> TestResult {
     let expected_lib = {
         let source = source_file!(&context, "pub proc foo push.1 end");
         let mod2 = mod_parser.parse("test::expected", source, context.source_manager()).unwrap();
-        Assembler::default().assemble_library([mod2]).unwrap()
+        Assembler::new(context.source_manager()).assemble_library([mod2]).unwrap()
     };
 
     // 3. Verify that the expected library (which has push.1) has AssemblyOps
@@ -5101,7 +5101,7 @@ fn test_assembler_debug_info_present() {
     let module = parse_module!(&context, "test::foo", source);
 
     // Test: With debug mode always enabled (issue #1821), debug info should always be present
-    let assembler = Assembler::default();
+    let assembler = Assembler::new(context.source_manager());
     let library = assembler.assemble_library([module]).unwrap();
     let mast_forest = library.mast_forest();
 
@@ -5796,29 +5796,14 @@ fn test_linking_recursive_expansion_via_renamed_aliases() -> TestResult {
 
 #[test]
 fn assemble_library_with_mismatched_source_manager_returns_error() {
-    // Source manager A: used by the assembler.
-    // Parse a short module to populate SourceId(0) in this manager.
+    // Source manager A: used by the assembler (empty — no files loaded).
     let sm_a: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
-    let _dummy = Module::parser(ModuleKind::Library)
-        .parse_str("lib::dummy", "pub proc dummy\n  push.1\nend", sm_a.clone())
-        .unwrap();
-
     let assembler = Assembler::new(sm_a);
 
     // Source manager B: external, used to parse the module we will assemble.
-    // Its SourceId(0) points to a different file.
     let sm_b: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
-    let long_source = "\
-# padding line to push the procedure definition past the short file length
-# more padding to ensure the byte offset exceeds the boundary
-# even more padding for good measure here to be absolutely sure
-pub proc bar
-  push.1
-  push.2
-  add
-end";
     let module = Module::parser(ModuleKind::Library)
-        .parse_str("lib::external", long_source, sm_b)
+        .parse_str("lib::external", "pub proc bar\n  push.1\n  push.2\n  add\nend", sm_b)
         .unwrap();
 
     let result = assembler.assemble_library([module]);

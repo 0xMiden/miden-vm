@@ -316,6 +316,7 @@ impl Linker {
             module.path().into(),
         )
         .with_advice_map(module.advice_map().clone())
+        .with_source_file(Some(module.source_file().clone()))
         .with_symbols(symbols);
 
         self.modules.push(link_module);

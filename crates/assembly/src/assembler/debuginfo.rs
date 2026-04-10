@@ -18,7 +18,7 @@ use crate::{
         TypeExpr,
         types::{StructType, Type},
     },
-    debuginfo::SourceManager,
+    debuginfo::{SourceFile, SourceManager},
     diagnostics::{Report, report},
 };
 
@@ -50,25 +50,32 @@ impl DebugInfoSections {
         &mut self,
         procedure: &Procedure,
         source_manager: &dyn SourceManager,
+        module_source_file: Option<&SourceFile>,
     ) -> Result<(), Report> {
         let span = *procedure.span();
 
-        // If the source id doesn't exist in this source manager, skip debug info
-        // registration (the span may be synthetic or from a deserialized module).
-        if source_manager.get(span.source_id()).is_err() {
+        // If no source file is available, skip debug info registration
+        // (the module is synthetic or was deserialized without source info).
+        let Some(source_file) = module_source_file else {
             return Ok(());
+        };
+
+        // Verify the source file belongs to this source manager.
+        if !source_manager.is_manager_of(source_file) {
+            return Err(report!(
+                "source manager mismatch for procedure '{}': the module's source file \
+                 is not owned by the assembler's source manager",
+                procedure.path(),
+            ));
         }
 
-        // The source id exists, so file_line_col should succeed. If it doesn't, the
-        // span's byte offsets are out of bounds for the file at that source id, which
-        // indicates the module was parsed with a different source manager.
-        let file_line_col = source_manager.file_line_col(span).map_err(|err| {
-            report!(
-                "source manager mismatch for procedure '{}': the module's source spans \
-                 are incompatible with the assembler's source manager ({err})",
-                procedure.path(),
-            )
-        })?;
+        let file_line_col =
+            source_manager.file_line_col(span).map_err(|err| {
+                report!(
+                    "failed to resolve source location for procedure '{}': {err}",
+                    procedure.path(),
+                )
+            })?;
 
         let path_id = self.debug_sources_section.add_string(Arc::from(file_line_col.uri.path()));
         let file_id = self
