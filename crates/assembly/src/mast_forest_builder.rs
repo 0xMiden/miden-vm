@@ -91,6 +91,10 @@ pub struct MastForestBuilder {
     /// (which happens when `ensure_block` deduplicates a basic block and returns an
     /// already-existing `MastNodeId`).
     pending_debug_var_mappings: Vec<(MastNodeId, Vec<(usize, miden_core::mast::DebugVarId)>)>,
+    /// When false, asm ops and debug vars are not included in the dedup
+    /// fingerprint. This avoids keeping duplicate nodes in stripped builds
+    /// where the metadata that justified the split has been discarded.
+    emit_debug_info: bool,
 }
 
 impl MastForestBuilder {
@@ -116,8 +120,27 @@ impl MastForestBuilder {
         Ok(MastForestBuilder {
             mast_forest,
             statically_linked_mast: Arc::new(statically_linked_mast),
+            emit_debug_info: true,
             ..Self::default()
         })
+    }
+
+    /// When set to true, asm ops and debug vars participate in the dedup
+    /// fingerprint so nodes with different source metadata stay distinct.
+    /// When false (release builds), only ops and decorators matter.
+    pub fn set_emit_debug_info(&mut self, emit: bool) {
+        self.emit_debug_info = emit;
+    }
+
+    /// Augments a fingerprint with metadata bytes only when debug info is
+    /// being emitted. In stripped builds this is a no-op so identical-ops
+    /// nodes collapse back to a single node.
+    fn maybe_augment(&self, fp: MastNodeFingerprint, data: &[u8]) -> MastNodeFingerprint {
+        if self.emit_debug_info {
+            fp.augment_with_data(data)
+        } else {
+            fp
+        }
     }
 
     /// Returns a reference to the underlying [`MastForest`].
@@ -695,9 +718,13 @@ impl MastForestBuilder {
         let base_fingerprint = block
             .fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)
             .expect("hash_by_node_id should contain the fingerprints of all children of `node`");
-        let dedup_fingerprint = base_fingerprint
-            .augment_with_data(&serialize_asm_op_ids(&self.mast_forest, &asm_op_ids))
-            .augment_with_data(&serialize_debug_vars(&self.mast_forest, &debug_vars));
+        let dedup_fingerprint = self.maybe_augment(
+            self.maybe_augment(
+                base_fingerprint,
+                &serialize_asm_op_ids(&self.mast_forest, &asm_op_ids),
+            ),
+            &serialize_debug_vars(&self.mast_forest, &debug_vars),
+        );
 
         let (node_id, is_new) =
             if let Some(node_id) = self.node_id_by_fingerprint.get(&dedup_fingerprint) {
@@ -784,7 +811,7 @@ impl MastForestBuilder {
             .fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)
             .expect("hash_by_node_id should contain the fingerprints of all children of `node`");
         let dedup_fingerprint =
-            base_fingerprint.augment_with_data(&serialize_asm_ops(&[(0, asm_op.clone())]));
+            self.maybe_augment(base_fingerprint, &serialize_asm_ops(&[(0, asm_op.clone())]));
 
         if let Some(node_id) = self.node_id_by_fingerprint.get(&dedup_fingerprint) {
             Ok(*node_id)
@@ -831,9 +858,8 @@ impl MastForestBuilder {
             &self.pending_debug_var_mappings,
             source_node_id,
         );
-        let dedup_fingerprint = base_fingerprint
-            .augment_with_data(&asm_ops_data)
-            .augment_with_data(&debug_vars_data);
+        let dedup_fingerprint = self
+            .maybe_augment(self.maybe_augment(base_fingerprint, &asm_ops_data), &debug_vars_data);
 
         if let Some(node_id) = self.node_id_by_fingerprint.get(&dedup_fingerprint) {
             Ok(*node_id)
@@ -887,9 +913,8 @@ impl MastForestBuilder {
             serialize_asm_ops_from_forest_node(&self.statically_linked_mast, source_node_id);
         let debug_vars_data =
             serialize_debug_vars_from_forest_node(&self.statically_linked_mast, source_node_id);
-        let dedup_fingerprint = base_fingerprint
-            .augment_with_data(&asm_ops_data)
-            .augment_with_data(&debug_vars_data);
+        let dedup_fingerprint = self
+            .maybe_augment(self.maybe_augment(base_fingerprint, &asm_ops_data), &debug_vars_data);
 
         if let Some(node_id) = self.node_id_by_fingerprint.get(&dedup_fingerprint) {
             return Ok(*node_id);
@@ -1007,9 +1032,10 @@ impl MastForestBuilder {
         let base_fingerprint = block
             .fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)
             .expect("hash_by_node_id should contain the fingerprints of all children of `node`");
-        let dedup_fingerprint = base_fingerprint
-            .augment_with_data(&serialize_asm_ops(&asm_ops))
-            .augment_with_data(&serialize_debug_vars(&self.mast_forest, &debug_vars));
+        let dedup_fingerprint = self.maybe_augment(
+            self.maybe_augment(base_fingerprint, &serialize_asm_ops(&asm_ops)),
+            &serialize_debug_vars(&self.mast_forest, &debug_vars),
+        );
 
         let (node_id, is_new) =
             if let Some(node_id) = self.node_id_by_fingerprint.get(&dedup_fingerprint) {
@@ -1128,7 +1154,7 @@ impl MastForestBuilder {
         // same-ops procedures carry different source metadata (asm ops / debug vars).
         // Link every match so all aliases keep their metadata in the target forest.
         let matching_roots: Vec<MastNodeId> = (0..self.statically_linked_mast.num_nodes())
-            .map(|i| MastNodeId::new_unchecked(i))
+            .map(MastNodeId::new_unchecked)
             .filter(|&id| {
                 self.statically_linked_mast.is_procedure_root(id)
                     && self.statically_linked_mast[id].digest() == mast_root
@@ -1187,9 +1213,8 @@ impl MastForestBuilder {
             &self.pending_debug_var_mappings,
             node_id,
         );
-        let new_node_fingerprint = base_fingerprint
-            .augment_with_data(&asm_ops_data)
-            .augment_with_data(&debug_vars_data);
+        let new_node_fingerprint = self
+            .maybe_augment(self.maybe_augment(base_fingerprint, &asm_ops_data), &debug_vars_data);
 
         self.mast_forest[node_id] = decorated_builder.build(&self.mast_forest)?;
 
@@ -1218,9 +1243,8 @@ impl MastForestBuilder {
             &self.pending_debug_var_mappings,
             node_id,
         );
-        let new_node_fingerprint = base_fingerprint
-            .augment_with_data(&asm_ops_data)
-            .augment_with_data(&debug_vars_data);
+        let new_node_fingerprint = self
+            .maybe_augment(self.maybe_augment(base_fingerprint, &asm_ops_data), &debug_vars_data);
 
         self.mast_forest[node_id] = decorated_builder.build(&self.mast_forest)?;
 
