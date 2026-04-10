@@ -1124,21 +1124,43 @@ impl MastForestBuilder {
     ///   the inserted subtree is returned.
     /// * If dynamically-linked, then an external node is inserted, and its MastNodeId is returned
     pub fn ensure_external_link(&mut self, mast_root: Word) -> Result<MastNodeId, Report> {
-        if let Some(root_id) = self.statically_linked_mast.find_procedure_root(mast_root) {
-            // First, collect and copy all decorators from the subtree
-            self.collect_decorators_from_subtree(&root_id)?;
+        // Collect all roots with this digest — there can be more than one when
+        // same-ops procedures carry different source metadata (asm ops / debug vars).
+        // Link every match so all aliases keep their metadata in the target forest.
+        let matching_roots: Vec<MastNodeId> = (0..self.statically_linked_mast.num_nodes())
+            .map(|i| MastNodeId::new_unchecked(i))
+            .filter(|&id| {
+                self.statically_linked_mast.is_procedure_root(id)
+                    && self.statically_linked_mast[id].digest() == mast_root
+            })
+            .collect();
 
-            // Then copy all nodes with remapped children and decorators
-            for old_id in SubtreeIterator::new(&root_id, &self.statically_linked_mast.clone()) {
-                let node = self.statically_linked_mast[old_id].clone();
-                let builder = self.build_with_remapped_ids(old_id, node)?;
-                let new_id = self.ensure_node_from_statically_linked_source(builder, old_id)?;
-                self.statically_linked_mast_remapping.insert(old_id, new_id);
-            }
-            Ok(root_id.remap(&self.statically_linked_mast_remapping))
-        } else {
-            self.ensure_node(ExternalNodeBuilder::new(mast_root))
+        if matching_roots.is_empty() {
+            return self.ensure_node(ExternalNodeBuilder::new(mast_root));
         }
+
+        let mut first = None;
+        for root_id in matching_roots {
+            let new_id = self.copy_statically_linked_subtree(root_id)?;
+            first.get_or_insert(new_id);
+        }
+        Ok(first.unwrap())
+    }
+
+    /// Copies a subtree from the statically linked forest into the builder's forest.
+    fn copy_statically_linked_subtree(
+        &mut self,
+        root_id: MastNodeId,
+    ) -> Result<MastNodeId, Report> {
+        self.collect_decorators_from_subtree(&root_id)?;
+
+        for old_id in SubtreeIterator::new(&root_id, &self.statically_linked_mast.clone()) {
+            let node = self.statically_linked_mast[old_id].clone();
+            let builder = self.build_with_remapped_ids(old_id, node)?;
+            let new_id = self.ensure_node_from_statically_linked_source(builder, old_id)?;
+            self.statically_linked_mast_remapping.insert(old_id, new_id);
+        }
+        Ok(root_id.remap(&self.statically_linked_mast_remapping))
     }
 
     /// Adds a list of decorators to the provided node to be executed before the node executes.
@@ -1900,5 +1922,116 @@ mod tests {
         // Root block must still have its asm op.
         let root_asm = forest.debug_info().first_asm_op_for_node(final_root_id);
         assert!(root_asm.is_some(), "root must keep its asm op after merge");
+    }
+
+    /// Two same-digest roots with different asm ops stay distinct when
+    /// linked by exact node ID.
+    #[test]
+    fn test_static_link_exact_node_preserves_alias_metadata() {
+        let mut source_builder = MastForestBuilder::new(&[]).unwrap();
+
+        let alias_a = source_builder
+            .ensure_block(
+                vec![Operation::Add],
+                Vec::new(),
+                vec![(0, AssemblyOp::new(None, "alias_a".into(), 1, "add".into()))],
+                vec![],
+                vec![],
+                vec![],
+            )
+            .unwrap();
+        let alias_b = source_builder
+            .ensure_block(
+                vec![Operation::Add],
+                Vec::new(),
+                vec![(0, AssemblyOp::new(None, "alias_b".into(), 1, "add".into()))],
+                vec![],
+                vec![],
+                vec![],
+            )
+            .unwrap();
+        source_builder.mast_forest.make_root(alias_a);
+        source_builder.mast_forest.make_root(alias_b);
+
+        let (static_forest, _remapping) = source_builder.build();
+        assert_eq!(static_forest[alias_a].digest(), static_forest[alias_b].digest());
+
+        // Exact path via internal API — gets alias_b's metadata.
+        let mut exact_builder = MastForestBuilder::new([&static_forest]).unwrap();
+        let exact_alias_b = {
+            let node = exact_builder.statically_linked_mast[alias_b].clone();
+            let builder = exact_builder.build_with_remapped_ids(alias_b, node).unwrap();
+            exact_builder
+                .ensure_node_from_statically_linked_source(builder, alias_b)
+                .unwrap()
+        };
+        let (exact_forest, _) = exact_builder.build();
+        assert_eq!(
+            exact_forest
+                .debug_info()
+                .first_asm_op_for_node(exact_alias_b)
+                .unwrap()
+                .context_name(),
+            "alias_b"
+        );
+    }
+
+    /// Digest-based linking copies all same-digest roots into the forest,
+    /// but always returns the first match.
+    ///
+    /// TODO: the caller can't pick a specific alias because the
+    /// API only takes a digest. Needs a source MastNodeId threaded from
+    /// ProcedureInfo through the linker.
+    #[test]
+    fn test_static_link_by_digest_links_all_aliases() {
+        let mut source_builder = MastForestBuilder::new(&[]).unwrap();
+
+        let alias_a = source_builder
+            .ensure_block(
+                vec![Operation::Add],
+                Vec::new(),
+                vec![(0, AssemblyOp::new(None, "alias_a".into(), 1, "add".into()))],
+                vec![],
+                vec![],
+                vec![],
+            )
+            .unwrap();
+        let alias_b = source_builder
+            .ensure_block(
+                vec![Operation::Add],
+                Vec::new(),
+                vec![(0, AssemblyOp::new(None, "alias_b".into(), 1, "add".into()))],
+                vec![],
+                vec![],
+                vec![],
+            )
+            .unwrap();
+        source_builder.mast_forest.make_root(alias_a);
+        source_builder.mast_forest.make_root(alias_b);
+
+        let (static_forest, _) = source_builder.build();
+
+        let mut builder = MastForestBuilder::new([&static_forest]).unwrap();
+        let linked = builder.ensure_external_link(static_forest[alias_a].digest()).unwrap();
+        // Save alias_b's remapped ID before build() consumes the builder.
+        let alias_b_remapped = alias_b.remap(&builder.statically_linked_mast_remapping);
+        let (forest, _) = builder.build();
+
+        // The returned node is the first match.
+        assert_eq!(
+            forest.debug_info().first_asm_op_for_node(linked).unwrap().context_name(),
+            "alias_a",
+        );
+
+        // But both aliases were linked — alias_b is also in the forest.
+        assert_ne!(linked, alias_b_remapped);
+        assert_eq!(
+            forest
+                .debug_info()
+                .first_asm_op_for_node(alias_b_remapped)
+                .unwrap()
+                .context_name(),
+            "alias_b",
+        );
     }
 }

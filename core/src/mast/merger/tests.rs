@@ -1554,3 +1554,30 @@ fn merge_concrete_metadata_survives_external_placeholder() {
         "concrete debug var must survive merge with external placeholder"
     );
 }
+
+/// First name wins when two forests name the same digest.
+#[test]
+fn merge_procedure_names_first_name_wins() {
+    let mut forest_a = MastForest::new();
+    let block_a = block_foo().add_to_forest(&mut forest_a).unwrap();
+    forest_a.make_root(block_a);
+    let digest = forest_a[block_a].digest();
+    forest_a.insert_procedure_name(digest, Arc::from("alias_a"));
+
+    let mut forest_b = MastForest::new();
+    let block_b = block_foo().add_to_forest(&mut forest_b).unwrap();
+    forest_b.make_root(block_b);
+    assert_eq!(forest_b[block_b].digest(), digest);
+    forest_b.insert_procedure_name(digest, Arc::from("alias_b"));
+
+    let (merged, root_map) = MastForest::merge([&forest_a, &forest_b]).unwrap();
+    let new_a = root_map.map_root(0, &block_a).unwrap();
+    let new_b = root_map.map_root(1, &block_b).unwrap();
+
+    assert_eq!(new_a, new_b);
+    assert_eq!(
+        merged.procedure_name(&digest),
+        Some("alias_a"),
+        "first forest's name must stick"
+    );
+}
