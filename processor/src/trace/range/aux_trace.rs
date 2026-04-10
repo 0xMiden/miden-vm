@@ -98,8 +98,7 @@ impl AuxTraceBuilder {
             let mut new_value = current_value;
             // include the operation lookups
             for lookup in range_checks.iter() {
-                let value = divisors.get(lookup).expect("invalid lookup value");
-                new_value -= *value;
+                new_value -= divisors[*lookup as usize];
             }
             b_range[b_range_idx].write(new_value);
             current_value = new_value;
@@ -130,17 +129,14 @@ impl AuxTraceBuilder {
             let mut new_value = current_value;
             if *multiplicity != ZERO {
                 // add the value in the range checker: multiplicity / (alpha + lookup)
-                let value = divisors
-                    .get(&(lookup.as_canonical_u64() as u16))
-                    .expect("invalid lookup value");
-                new_value = current_value + *value * *multiplicity;
+                new_value =
+                    current_value + divisors[lookup.as_canonical_u64() as usize] * *multiplicity;
             }
 
             // subtract the range checks requested by operations
             if let Some(range_checks) = self.cycle_lookups.get(&(row_idx as u32).into()) {
                 for lookup in range_checks.iter() {
-                    let value = divisors.get(lookup).expect("invalid lookup value");
-                    new_value -= *value;
+                    new_value -= divisors[*lookup as usize];
                 }
             }
 
@@ -167,7 +163,7 @@ impl AuxTraceBuilder {
 /// Runs batch inversion on all range check lookup values and returns a map which maps each value
 /// to the divisor used for including it in the LogUp lookup. In other words, the map contains
 /// mappings of x to 1/(alpha + x).
-fn get_divisors<E: ExtensionField<Felt>>(lookup_values: &[u16], alpha: E) -> BTreeMap<u16, E> {
+fn get_divisors<E: ExtensionField<Felt>>(lookup_values: &[u16], alpha: E) -> Vec<E> {
     // run batch inversion on the lookup values
     let mut values: Vec<MaybeUninit<E>> = uninit_vector(lookup_values.len());
     let mut inv_values: Vec<MaybeUninit<E>> = uninit_vector(lookup_values.len());
@@ -189,11 +185,11 @@ fn get_divisors<E: ExtensionField<Felt>>(lookup_values: &[u16], alpha: E) -> BTr
 
     // multiply the accumulated product by the original values to compute the inverses, then
     // build a map of inverses for the lookup values
-    let mut log_values = BTreeMap::new();
+    let mut log_values = vec![E::ZERO; 1 << 16];
     for i in (0..lookup_values.len()).rev() {
         inv_values[i] *= acc;
         acc *= values[i];
-        log_values.insert(lookup_values[i], inv_values[i]);
+        log_values[lookup_values[i] as usize] = inv_values[i];
     }
 
     log_values

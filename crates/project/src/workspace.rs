@@ -1,5 +1,9 @@
 #[cfg(feature = "std")]
-use std::{boxed::Box, path::Path, string::ToString};
+use std::{
+    boxed::Box,
+    path::Path,
+    string::{String, ToString},
+};
 
 #[cfg(all(feature = "std", feature = "serde"))]
 use miden_assembly_syntax::debuginfo::SourceManager;
@@ -71,7 +75,7 @@ impl Workspace {
 
         use crate::ast::ProjectFileError;
 
-        let mut file = ast::WorkspaceFile::parse(source.clone())?;
+        let file = ast::WorkspaceFile::parse(source.clone())?;
 
         let manifest_uri = source.content().uri();
         let manifest_path = if manifest_uri.scheme().is_none_or(|scheme| scheme == "file") {
@@ -80,12 +84,13 @@ impl Workspace {
             None
         };
 
-        let members = core::mem::take(&mut file.workspace.members);
+        let members = file.workspace.members.clone();
 
         let mut workspace = Box::new(Workspace {
             manifest_path: manifest_path.clone(),
             members: Vec::with_capacity(members.len()),
         });
+        let mut seen_member_names = Map::<String, SourceSpan>::default();
 
         for member in members {
             let Some(workspace_root) = workspace.workspace_root() else {
@@ -124,6 +129,16 @@ impl Workspace {
                 }
             })?;
             let package = Package::load_from_workspace(member_manifest, &file)?;
+            let package_name = package.name().inner().to_string();
+            if let Some(prev) = seen_member_names.insert(package_name.clone(), member.span()) {
+                return Err(ProjectFileError::DuplicateWorkspaceMember {
+                    name: package_name,
+                    source_file: source.clone(),
+                    span: member.span(),
+                    prev,
+                }
+                .into());
+            }
             workspace.members.push(Arc::from(package));
         }
 

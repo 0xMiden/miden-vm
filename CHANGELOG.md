@@ -7,6 +7,7 @@
 - Reverted the `MainTrace` typed row storage change that caused a large `blake3_1to1` trace-building regression ([#2949](https://github.com/0xMiden/miden-vm/pull/2949)).
 #### Bug Fixes
 
+- Replaced unsound `ptr::read` with safe unbox in panic recovery, removing UB from potential double-drop ([#2934](https://github.com/0xMiden/miden-vm/pull/2934)).
 - Reverted `InvokeKind::ProcRef` back to `InvokeKind::Exec` in `visit_mut_procref` and added an explanatory comment (#2893).
 - Fixed `FastProcessor` so `after_exit` trace decorators execute when tracing is enabled without debug mode, and added a tracing-only regression test.
 - Fixed the release dry-run publish cycle between `miden-air` and `miden-ace-codegen`, and preserved leaf-only DAG imports with explicit snapshots ([#2931](https://github.com/0xMiden/miden-vm/pull/2931)).
@@ -26,6 +27,12 @@
 - Refactor trace generation to row-major format ([#2937](https://github.com/0xMiden/miden-vm/pull/2937)).
 - Documented non-overlap requirement for `memcopy_words`, `memcopy_elements`, and AEAD encrypt/decrypt procedures ([#2941](https://github.com/0xMiden/miden-vm/pull/2941)).
 - Added chainable `Test` builders for common test setup in `miden-utils-testing` ([#2957](https://github.com/0xMiden/miden-vm/pull/2957)).
+- Speed-up AUX range check trace generation by changing divisors to a flat Vec layout ([#2966](https://github.com/0xMiden/miden-vm/pull/2966)).
+## 0.22.1
+
+#### Enhancements
+
+- Added `FastProcessor::into_parts()` to extract advice provider, memory, and precompile transcript after step-based execution ([#2901](https://github.com/0xMiden/miden-vm/pull/2901)).
 
 #### Fixes
 
@@ -65,6 +72,7 @@
 - In `ExecutionTracer`, we no longer record node flags in `CoreTraceFragmentContext` when entering a node (they are redundant) ([#2866](https://github.com/0xMiden/miden-vm/pull/2866))
 - Updated the recursive STARK verifier to work with the lifted-STARK / `p3-miden` backend ([#2869](https://github.com/0xMiden/miden-vm/pull/2869)).
 - Switched Keccak STARK config to use stateful binary sponge with `[Felt; VECTOR_LEN]` packing, and reorganized `config.rs` into per-hash-family sections ([#2874](https://github.com/0xMiden/miden-vm/pull/2874)).
+- Add support to the `Assembler` for assembling Miden projects to Miden packages ([#2877](https://github.com/0xMiden/miden-vm/pull/2877))
 
 #### Fixes
 - Fixed C-like enum validation and constant materialization in `define_enum` ([#2887](https://github.com/0xMiden/miden-vm/pull/2887)).
