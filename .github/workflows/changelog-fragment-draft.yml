@@ -1,6 +1,6 @@
 name: Draft changelog fragment
 
-on:
+on: # zizmor: ignore[dangerous-triggers] Metadata-only PR comment job; it never checks out or runs PR code.
   pull_request_target:
     branches:
       - main
@@ -8,8 +8,9 @@ on:
     types: [opened, reopened, synchronize, labeled, unlabeled]
 
 permissions:
+  issues: write
   models: read
-  pull-requests: write
+  pull-requests: read
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.event.pull_request.number }}"
@@ -21,7 +22,7 @@ jobs:
     steps:
       - name: Collect PR context
         id: context
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # pin@v7
         with:
           script: |
             const fs = require('fs');
@@ -139,7 +140,7 @@ jobs:
       - name: Run AI inference
         if: ${{ steps.context.outputs.should_run == 'true' }}
         id: inference
-        uses: actions/ai-inference@v1
+        uses: actions/ai-inference@b81b2afb8390ee6839b494a404766bef6493c7d9 # pin@v1
         with:
           prompt-file: ${{ steps.context.outputs.prompt_path }}
           input: |
@@ -156,7 +157,7 @@ jobs:
           PR_NUMBER: ${{ steps.context.outputs.pr_number }}
           PR_URL: ${{ steps.context.outputs.pr_url }}
           RESPONSE_FILE: ${{ steps.inference.outputs.response-file }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # pin@v7
         with:
           script: |
             const fs = require('fs');
@@ -166,7 +167,21 @@ jobs:
             const marker = '<!-- changelog-fragment-draft -->';
             const kind = response.kind;
             const crate = response.crate || '';
-            const summary = response.summary;
+            const summary = String(response.summary || '').replace(/\s+/g, ' ').trim();
+
+            if (!['breaking', 'change', 'enhancement', 'fix'].includes(kind)) {
+              core.setFailed(`Unexpected changelog kind from AI response: ${kind}`);
+              return;
+            }
+            if (crate && !/^[a-z0-9][a-z0-9-]*$/.test(crate)) {
+              core.setFailed(`Unexpected changelog crate from AI response: ${crate}`);
+              return;
+            }
+            if (!summary || summary.includes('```')) {
+              core.setFailed('Unexpected changelog summary from AI response.');
+              return;
+            }
+
             const repoFragmentPath = `.changes/unreleased/${prNumber}.${kind}.md`;
 
             const frontMatter = [
