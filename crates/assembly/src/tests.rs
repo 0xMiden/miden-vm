@@ -5866,3 +5866,70 @@ fn test_linking_recursive_expansion_via_renamed_aliases() -> TestResult {
 
     Ok(())
 }
+
+// UNUSED CONSTANTS
+// ================================================================================================
+
+#[test]
+fn unused_constant_warning() {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "
+        const UNUSED = 42
+
+        begin
+            push.1
+        end"
+    );
+
+    assert_assembler_diagnostic!(
+        context,
+        source,
+        "syntax error",
+        "help: see emitted diagnostics for details",
+        "unused constant",
+        regex!(r#",-\[test[\d]+:2:9\]"#),
+        "1 |",
+        "2 |         const UNUSED = 42",
+        "  :         ^^^^^^^^^^^^^^^^^",
+        "3 |",
+        "  `----",
+        " help: this constant is never used and can be safely removed"
+    );
+}
+
+#[test]
+fn used_constant_no_warning() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "
+        const MY_CONST = 42
+
+        begin
+            push.MY_CONST
+        end"
+    );
+
+    let _program = context.assemble(source)?;
+    Ok(())
+}
+
+#[test]
+fn public_constant_no_warning() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "
+        pub const EXPORTED = 42
+
+        pub proc foo
+            push.1
+        end"
+    );
+
+    let module = context.parse_module_with_path("test::lib", source)?;
+    let _library = context.assemble_library([module])?;
+    Ok(())
+}

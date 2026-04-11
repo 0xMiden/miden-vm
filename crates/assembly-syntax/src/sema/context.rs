@@ -17,6 +17,10 @@ use crate::ast::{
 /// This maintains the state for semantic analysis of a single [Module].
 pub struct AnalysisContext {
     constants: BTreeMap<Ident, Constant>,
+    used_constants: BTreeSet<Ident>,
+    /// When set, `get()` will not count a reference to this constant as a use.
+    /// This is used during constant simplification to exclude self-references.
+    simplifying_constant: Option<Ident>,
     imported: BTreeSet<Ident>,
     procedures: BTreeSet<ProcedureName>,
     errors: Vec<SemanticAnalysisError>,
@@ -38,6 +42,10 @@ impl constants::ConstEnvironment for AnalysisContext {
     #[inline]
     fn get(&mut self, name: &Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
         if let Some(constant) = self.constants.get(name) {
+            let is_self_ref = self.simplifying_constant.as_ref() == Some(name);
+            if !is_self_ref {
+                self.used_constants.insert(name.clone());
+            }
             Ok(Some(CachedConstantValue::Miss(&constant.value)))
         } else if self.imported.contains(name) {
             // We don't have the definition available yet
@@ -67,6 +75,8 @@ impl AnalysisContext {
     pub fn new(source_file: Arc<SourceFile>, source_manager: Arc<dyn SourceManager>) -> Self {
         Self {
             constants: Default::default(),
+            used_constants: Default::default(),
+            simplifying_constant: None,
             imported: Default::default(),
             procedures: Default::default(),
             errors: Default::default(),
@@ -96,6 +106,20 @@ impl AnalysisContext {
 
     pub fn register_imported_name(&mut self, name: Ident) {
         self.imported.insert(name);
+    }
+
+    /// Returns true if the constant has been referenced by another constant or
+    /// by a procedure body, or is publicly visible.
+    pub fn is_constant_used(&self, constant: &Constant) -> bool {
+        constant.visibility.is_public() || self.used_constants.contains(&constant.name)
+    }
+
+    /// Mark a constant as used.
+    ///
+    /// This is used for constants created as a side effect of other declarations
+    /// (e.g. advice map entries) that should not trigger unused constant warnings.
+    pub fn mark_constant_used(&mut self, name: &Ident) {
+        self.used_constants.insert(name.clone());
     }
 
     /// Define a new constant `constant`
@@ -133,6 +157,7 @@ impl AnalysisContext {
         let constants = self.constants.keys().cloned().collect::<Vec<_>>();
 
         for constant in constants.iter() {
+            self.simplifying_constant = Some(constant.clone());
             let expr = ConstantExpr::Var(Span::new(
                 constant.span(),
                 PathBuf::from(constant.clone()).into(),
@@ -145,6 +170,7 @@ impl AnalysisContext {
                     self.errors.push(err);
                 },
             }
+            self.simplifying_constant = None;
         }
     }
 
