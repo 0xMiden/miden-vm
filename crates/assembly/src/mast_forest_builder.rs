@@ -1149,28 +1149,16 @@ impl MastForestBuilder {
     /// * If statically-linked, then the entire subtree is copied, and the MastNodeId of the root of
     ///   the inserted subtree is returned.
     /// * If dynamically-linked, then an external node is inserted, and its MastNodeId is returned
+    ///
+    /// TODO(#2990): when multiple roots share the same digest but carry
+    /// different metadata, this always picks the first match. Needs a source
+    /// MastNodeId threaded from ProcedureInfo through the linker.
     pub fn ensure_external_link(&mut self, mast_root: Word) -> Result<MastNodeId, Report> {
-        // Collect all roots with this digest — there can be more than one when
-        // same-ops procedures carry different source metadata (asm ops / debug vars).
-        // Link every match so all aliases keep their metadata in the target forest.
-        let matching_roots: Vec<MastNodeId> = (0..self.statically_linked_mast.num_nodes())
-            .map(MastNodeId::new_unchecked)
-            .filter(|&id| {
-                self.statically_linked_mast.is_procedure_root(id)
-                    && self.statically_linked_mast[id].digest() == mast_root
-            })
-            .collect();
-
-        if matching_roots.is_empty() {
-            return self.ensure_node(ExternalNodeBuilder::new(mast_root));
+        if let Some(root_id) = self.statically_linked_mast.find_procedure_root(mast_root) {
+            self.copy_statically_linked_subtree(root_id)
+        } else {
+            self.ensure_node(ExternalNodeBuilder::new(mast_root))
         }
-
-        let mut first = None;
-        for root_id in matching_roots {
-            let new_id = self.copy_statically_linked_subtree(root_id)?;
-            first.get_or_insert(new_id);
-        }
-        Ok(first.unwrap())
     }
 
     /// Copies a subtree from the statically linked forest into the builder's forest.
@@ -2000,14 +1988,10 @@ mod tests {
         );
     }
 
-    /// Digest-based linking copies all same-digest roots into the forest,
-    /// but always returns the first match.
-    ///
-    /// TODO: the caller can't pick a specific alias because the
-    /// API only takes a digest. Needs a source MastNodeId threaded from
-    /// ProcedureInfo through the linker.
+    /// Digest-based linking imports only the selected alias, not all
+    /// same-digest roots. The unselected alias must not leak into the forest.
     #[test]
-    fn test_static_link_by_digest_links_all_aliases() {
+    fn test_static_link_by_digest_imports_only_selected_alias() {
         let mut source_builder = MastForestBuilder::new(&[]).unwrap();
 
         let alias_a = source_builder
@@ -2037,25 +2021,81 @@ mod tests {
 
         let mut builder = MastForestBuilder::new([&static_forest]).unwrap();
         let linked = builder.ensure_external_link(static_forest[alias_a].digest()).unwrap();
-        // Save alias_b's remapped ID before build() consumes the builder.
-        let alias_b_remapped = alias_b.remap(&builder.statically_linked_mast_remapping);
+        builder.mast_forest.make_root(linked);
         let (forest, _) = builder.build();
 
-        // The returned node is the first match.
+        // Only one node should be in the forest — the selected alias.
+        assert_eq!(forest.num_nodes(), 1, "only the selected alias should be imported");
         assert_eq!(
             forest.debug_info().first_asm_op_for_node(linked).unwrap().context_name(),
             "alias_a",
         );
+    }
 
-        // But both aliases were linked — alias_b is also in the forest.
-        assert_ne!(linked, alias_b_remapped);
+    /// Digest-based linking picks the first root, so the second alias gets
+    /// the wrong metadata. Fixing this needs #2990.
+    #[test]
+    #[ignore = "requires #2990: source MastNodeId in ProcedureInfo"]
+    fn repro_statically_linked_same_digest_root_uses_first_alias_metadata() {
+        let mut source_builder = MastForestBuilder::new(&[]).unwrap();
+
+        let alias_a = source_builder
+            .ensure_block(
+                vec![Operation::Add],
+                Vec::new(),
+                vec![(0, AssemblyOp::new(None, "alias_a".into(), 1, "add".into()))],
+                vec![],
+                vec![],
+                vec![],
+            )
+            .unwrap();
+        let alias_b = source_builder
+            .ensure_block(
+                vec![Operation::Add],
+                Vec::new(),
+                vec![(0, AssemblyOp::new(None, "alias_b".into(), 1, "add".into()))],
+                vec![],
+                vec![],
+                vec![],
+            )
+            .unwrap();
+        source_builder.mast_forest.make_root(alias_a);
+        source_builder.mast_forest.make_root(alias_b);
+
+        let (static_forest, _remapping) = source_builder.build();
+        assert_eq!(static_forest[alias_a].digest(), static_forest[alias_b].digest());
+
+        let mut exact_builder = MastForestBuilder::new([&static_forest]).unwrap();
+        let exact_alias_b = {
+            let node = exact_builder.statically_linked_mast[alias_b].clone();
+            let builder = exact_builder.build_with_remapped_ids(alias_b, node).unwrap();
+            exact_builder
+                .ensure_node_from_statically_linked_source(builder, alias_b)
+                .unwrap()
+        };
+        let (exact_forest, _) = exact_builder.build();
+
+        let mut digest_builder = MastForestBuilder::new([&static_forest]).unwrap();
+        let linked_alias_b =
+            digest_builder.ensure_external_link(static_forest[alias_b].digest()).unwrap();
+        let (linked_forest, _) = digest_builder.build();
+
         assert_eq!(
-            forest
+            exact_forest
                 .debug_info()
-                .first_asm_op_for_node(alias_b_remapped)
+                .first_asm_op_for_node(exact_alias_b)
+                .unwrap()
+                .context_name(),
+            "alias_b"
+        );
+        assert_eq!(
+            linked_forest
+                .debug_info()
+                .first_asm_op_for_node(linked_alias_b)
                 .unwrap()
                 .context_name(),
             "alias_b",
+            "linking the second same-digest root by digest should preserve that root's metadata",
         );
     }
 }
