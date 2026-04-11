@@ -66,10 +66,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          artifact_dir="${RUNNER_TEMP}/blake3-nonregression"
-          worktree_dir="${RUNNER_TEMP}/blake3-nonregression-worktrees"
+          run_root="${RUNNER_TEMP}/blake3-nonregression-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          artifact_dir="${run_root}/artifacts"
+          worktree_dir="${run_root}/worktrees"
           mkdir -p "${artifact_dir}" "${worktree_dir}"
           {
+            echo "run_root=${run_root}"
             echo "artifact_dir=${artifact_dir}"
             echo "worktree_dir=${worktree_dir}"
           } >> "${GITHUB_OUTPUT}"
@@ -87,9 +89,35 @@ jobs:
         run: |
           set -euo pipefail
 
+          resolve_commit() {
+            local ref="$1"
+            git rev-parse --verify --end-of-options "${ref}^{commit}"
+          }
+
+          fetch_commit_if_needed() {
+            local ref="$1"
+            local fetch_log
+            if resolve_commit "${ref}" >/dev/null 2>&1; then
+              return 0
+            fi
+            fetch_log="$(mktemp)"
+            if git fetch --no-tags --depth=1 origin "${ref}" >"${fetch_log}" 2>&1; then
+              rm -f "${fetch_log}"
+              resolve_commit "${ref}" >/dev/null 2>&1
+              return $?
+            fi
+            if grep -Eqi "couldn't find remote ref|not our ref|unadvertised object|reference is not a tree|no such remote ref" "${fetch_log}"; then
+              rm -f "${fetch_log}"
+              return 2
+            fi
+            cat "${fetch_log}" >&2
+            rm -f "${fetch_log}"
+            return 1
+          }
+
           if [[ "${EVENT_NAME}" == "push" ]]; then
-            baseline_ref="${BEFORE_SHA}"
             current_ref="${GITHUB_SHA}"
+            baseline_ref="${BEFORE_SHA}"
             threshold_pct="5"
             rayon_threads="8"
           else
@@ -125,12 +153,36 @@ jobs:
             baseline_ref="${current_ref}^"
           fi
 
-          current_sha="$(git rev-parse "${current_ref}")"
-          if git rev-parse "${baseline_ref}" >/dev/null 2>&1; then
-            baseline_sha="$(git rev-parse "${baseline_ref}")"
-          else
-            baseline_sha="$(git rev-parse "${current_sha}^")"
+          current_sha="$(resolve_commit "${current_ref}")"
+          fetch_status=0
+
+          if [[ "${EVENT_NAME}" == "push" && "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" ]]; then
+            if fetch_commit_if_needed "${baseline_ref}"; then
+              fetch_status=0
+            else
+              fetch_status=$?
+            fi
           fi
+
+          if [[ "${EVENT_NAME}" == "push" && "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" && ${fetch_status} -eq 0 ]]; then
+            baseline_sha="$(resolve_commit "${baseline_ref}")"
+          elif [[ "${EVENT_NAME}" == "push" && "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" && ${fetch_status} -eq 2 ]]; then
+            echo "push baseline ${baseline_ref} is no longer available; refusing to compare against current_sha^" >&2
+            exit 1
+          elif resolve_commit "${baseline_ref}" >/dev/null 2>&1; then
+            baseline_sha="$(resolve_commit "${baseline_ref}")"
+          elif [[ "${EVENT_NAME}" == "push" && "${BEFORE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
+            baseline_ref="${current_sha}^"
+            baseline_sha="$(resolve_commit "${current_sha}^")"
+          elif [[ "${EVENT_NAME}" == "workflow_dispatch" && -z "${INPUT_BASELINE_REF}" ]]; then
+            baseline_ref="${current_sha}^"
+            baseline_sha="$(resolve_commit "${current_sha}^")"
+          else
+            echo "baseline_ref must resolve to a commit: ${baseline_ref}" >&2
+            exit 1
+          fi
+
+          baseline_ref="${baseline_sha}"
 
           {
             echo "baseline_ref=${baseline_ref}"
@@ -240,12 +292,14 @@ jobs:
       - name: Remove worktrees
         if: always()
         env:
+          RUN_ROOT: ${{ steps.dirs.outputs.run_root }}
           WORKTREE_DIR: ${{ steps.dirs.outputs.worktree_dir }}
         shell: bash
         run: |
           set -euo pipefail
           git worktree remove --force "${WORKTREE_DIR}/baseline" || true
           git worktree remove --force "${WORKTREE_DIR}/current" || true
+          rm -rf "${RUN_ROOT}"
 
       - name: Fail on regression
         if: steps.compare.outputs.regression == 'true'

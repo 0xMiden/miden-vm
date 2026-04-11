@@ -283,6 +283,12 @@ def percent_delta(current: float | None, baseline: float | None) -> float | None
     return ((current - baseline) / baseline) * 100.0
 
 
+def format_optional_delta(current: float | None, baseline: float | None) -> str:
+    if current is None or baseline is None:
+        return "n/a"
+    return format_delta(current - baseline)
+
+
 def build_stage_rows(
     baseline: dict[str, Any],
     current: dict[str, Any],
@@ -326,7 +332,9 @@ def compare_results(
     slowdown_rows = [
         row
         for row in stage_rows
-        if row["delta_pct"] is not None and row["stage"] != "prove_program_sync"
+        if row["delta_pct"] is not None
+        and row["delta_pct"] > 0
+        and row["stage"] != "prove_program_sync"
     ]
     slowdown_rows.sort(key=lambda row: row["delta_pct"], reverse=True)
 
@@ -374,14 +382,14 @@ def summary_markdown(result: dict[str, Any]) -> str:
             "| build wall | "
             f"{format_ms(result['baseline_build_wall_ms'])} | "
             f"{format_ms(result['current_build_wall_ms'])} | "
-            f"{format_delta((result['current_build_wall_ms'] or 0.0) - (result['baseline_build_wall_ms'] or 0.0))} | "
+            f"{format_optional_delta(result['current_build_wall_ms'], result['baseline_build_wall_ms'])} | "
             f"{format_pct(percent_delta(result['current_build_wall_ms'], result['baseline_build_wall_ms']))} |"
         ),
         (
             "| prove wall | "
             f"{format_ms(result['baseline_prove_wall_ms'])} | "
             f"{format_ms(result['current_prove_wall_ms'])} | "
-            f"{format_delta((result['current_prove_wall_ms'] or 0.0) - (result['baseline_prove_wall_ms'] or 0.0))} | "
+            f"{format_optional_delta(result['current_prove_wall_ms'], result['baseline_prove_wall_ms'])} | "
             f"{format_pct(percent_delta(result['current_prove_wall_ms'], result['baseline_prove_wall_ms']))} |"
         ),
         (
