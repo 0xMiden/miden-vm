@@ -171,6 +171,13 @@ pub fn analyze(
         }
     }
 
+    // Check unused constants
+    for constant in module.constants() {
+        if !analyzer.is_constant_used(constant) {
+            analyzer.error(SemanticAnalysisError::UnusedConstant { span: constant.span });
+        }
+    }
+
     analyzer.into_result().map(move |_| module)
 }
 
@@ -328,6 +335,7 @@ fn add_advice_map_entry(
         ConstantExpr::Word(Span::new(entry.span, WordValue(*key))),
     );
     context.define_constant(module, cst);
+    context.mark_constant_used(&entry.name);
     match module.advice_map.get(&key) {
         Some(_) => {
             context.error(SemanticAnalysisError::AdvMapKeyAlreadyDefined { span: entry.span });
