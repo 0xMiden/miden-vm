@@ -285,9 +285,13 @@ fn serialize_asm_ops_for_node(
 
 /// Looks up and serializes the asm ops registered for a node in an existing forest.
 fn serialize_asm_ops_from_forest_node(forest: &MastForest, node_id: MastNodeId) -> Vec<u8> {
-    let entries = forest.debug_info().asm_ops_for_node(node_id);
+    let mut entries = forest.debug_info().asm_ops_for_node(node_id);
     if entries.is_empty() {
         return Vec::new();
+    }
+
+    if let MastNode::Block(block) = &forest[node_id] {
+        entries = BasicBlockNode::unadjust_asm_op_indices(entries, block.op_batches());
     }
 
     let mut data = Vec::new();
@@ -927,7 +931,10 @@ impl MastForestBuilder {
         self.node_id_by_fingerprint.insert(dedup_fingerprint, new_node_id);
         self.hash_by_node_id.insert(new_node_id, dedup_fingerprint);
 
-        let asm_ops = self.statically_linked_mast.debug_info().asm_ops_for_node(source_node_id);
+        let mut asm_ops = self.statically_linked_mast.debug_info().asm_ops_for_node(source_node_id);
+        if let MastNode::Block(block) = &self.statically_linked_mast[source_node_id] {
+            asm_ops = BasicBlockNode::unadjust_asm_op_indices(asm_ops, block.op_batches());
+        }
         if !asm_ops.is_empty() {
             let mut remapped_asm_ops = Vec::with_capacity(asm_ops.len());
             for (op_idx, asm_op_id) in asm_ops {
@@ -1880,6 +1887,69 @@ mod tests {
         let local_vars = forest.debug_info().debug_vars_for_node(local_block_id);
         assert_eq!(forest.debug_info().debug_var(copied_vars[0].1).unwrap().name(), "x");
         assert_eq!(forest.debug_info().debug_var(local_vars[0].1).unwrap().name(), "y");
+    }
+
+    #[test]
+    fn test_statically_linked_padded_block_dedups_with_equivalent_local_block() {
+        let mut source_builder = MastForestBuilder::new(&[]).unwrap();
+        let ops = vec![
+            Operation::Push(Felt::new(1)),
+            Operation::Drop,
+            Operation::Drop,
+            Operation::Drop,
+            Operation::Drop,
+            Operation::Drop,
+            Operation::Drop,
+            Operation::Push(Felt::new(2)),
+            Operation::Push(Felt::new(3)),
+        ];
+        let asm_op = AssemblyOp::new(None, "padded_ctx".into(), 1, "push.3".into());
+
+        let static_block = source_builder
+            .ensure_block(
+                ops.clone(),
+                Vec::new(),
+                vec![(8, asm_op.clone())],
+                vec![],
+                vec![],
+                vec![],
+            )
+            .unwrap();
+        source_builder.mast_forest.make_root(static_block);
+
+        let (static_forest, _) = source_builder.build();
+        let expected_padded_idx = static_forest.debug_info().asm_ops_for_node(static_block)[0].0;
+
+        let mut builder = MastForestBuilder::new([&static_forest]).unwrap();
+        let copied_block_id =
+            builder.ensure_external_link(static_forest[static_block].digest()).unwrap();
+        let local_block_id = builder
+            .ensure_block(ops, Vec::new(), vec![(8, asm_op)], vec![], vec![], vec![])
+            .unwrap();
+
+        assert_eq!(
+            copied_block_id, local_block_id,
+            "copied padded blocks should dedup with equivalent local blocks",
+        );
+
+        let (forest, remapping) = builder.build();
+        let final_block_id = remapping.get(&copied_block_id).copied().unwrap_or(copied_block_id);
+
+        assert!(
+            forest
+                .debug_info()
+                .asm_op_for_operation(final_block_id, expected_padded_idx - 1)
+                .is_none(),
+            "the asm op must not be attached before its padded operation index",
+        );
+        assert_eq!(
+            forest
+                .debug_info()
+                .asm_op_for_operation(final_block_id, expected_padded_idx)
+                .unwrap()
+                .context_name(),
+            "padded_ctx",
+        );
     }
 
     /// A small procedure root that gets merged into a larger block must keep its own
