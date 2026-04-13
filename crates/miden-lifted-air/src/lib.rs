@@ -15,7 +15,7 @@ pub mod auxiliary;
 mod builder;
 mod util;
 
-pub use air::{AirValidationError, LiftedAir, TracePart};
+pub use air::{AirStructureError, LiftedAir, TracePart};
 pub use auxiliary::{AuxBuilder, ReducedAuxValues, ReductionError, VarLenPublicInputs};
 pub use builder::LiftedAirBuilder;
 pub use util::log2_strict_u8;

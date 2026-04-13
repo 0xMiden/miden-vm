@@ -16,13 +16,13 @@ use alloc::{vec, vec::Vec};
 
 use miden_lifted_air::LiftedAir;
 use miden_stark_transcript::{Channel, TranscriptData, VerifierChannel, VerifierTranscript};
-use p3_challenger::{CanFinalizeDigest, CanObserve};
-use p3_field::{ExtensionField, Field, PrimeCharacteristicRing, TwoAdicField};
+use p3_challenger::CanFinalizeDigest;
+use p3_field::{ExtensionField, Field, TwoAdicField};
 
 use crate::{
     StarkConfig,
     coset::LiftedCoset,
-    instance::{AirInstance, validate_inputs},
+    instance::{AirInstance, InstanceShapes, validate_inputs},
     lmcs::{Lmcs, utils::aligned_len},
     pcs::proof::PcsTranscript,
     verifier::VerifierError,
@@ -31,22 +31,46 @@ use crate::{
 /// Commitment type alias for convenience.
 type Commitment<F, EF, SC> = <<SC as StarkConfig<F, EF>>::Lmcs as Lmcs>::Commitment;
 
-/// STARK proof: log trace heights plus raw transcript data (field elements and
-/// commitments) produced by the prover and consumed by the verifier.
+/// STARK proof: per-instance shape metadata plus raw transcript data.
 ///
-/// The `log_trace_heights` are absorbed into the Fiat-Shamir challenger at the
-/// start of both prover and verifier, but they are **not** part of the
-/// `TranscriptData` (they are not sent/received through the transcript channel).
+/// `instance_shapes` is absorbed into the Fiat-Shamir challenger by both
+/// prover and verifier before any transcript interaction; it is not part of
+/// `transcript` and does not travel through the transcript channel.
 ///
-/// TODO(0xMiden/crypto#941): Heights are currently in AIR order (matching input).
-/// After permutation support, the proof will also carry (or the heights will
-/// implicitly encode) the permutation `π: trace_id → air_id`.
+/// TODO(0xMiden/crypto#941): once `InstanceShapes` also carries the
+/// permutation `π: trace_id → air_id`, both the Fiat-Shamir encoding and the
+/// downstream indexing will need to be updated.
 #[derive(Clone)]
 pub struct StarkProof<F: TwoAdicField, EF: ExtensionField<F>, SC: StarkConfig<F, EF>> {
-    /// Log₂ of the trace height for each AIR instance.
-    pub log_trace_heights: Vec<u8>,
-    /// Raw transcript data (field elements and commitments).
+    pub instance_shapes: InstanceShapes,
     pub transcript: TranscriptData<F, Commitment<F, EF, SC>>,
+}
+
+impl<F, EF, SC> core::fmt::Debug for StarkProof<F, EF, SC>
+where
+    F: TwoAdicField + core::fmt::Debug,
+    EF: ExtensionField<F>,
+    SC: StarkConfig<F, EF>,
+    Commitment<F, EF, SC>: core::fmt::Debug,
+{
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("StarkProof")
+            .field("instance_shapes", &self.instance_shapes)
+            .field("transcript", &self.transcript)
+            .finish()
+    }
+}
+
+impl<F, EF, SC> StarkProof<F, EF, SC>
+where
+    F: TwoAdicField,
+    EF: ExtensionField<F>,
+    SC: StarkConfig<F, EF>,
+{
+    /// Total byte size of the proof (shape metadata + transcript data).
+    pub fn size_in_bytes(&self) -> usize {
+        self.instance_shapes.size_in_bytes() + self.transcript.size_in_bytes()
+    }
 }
 
 /// Transcript digest: the challenger's native binding digest that commits to
@@ -130,13 +154,9 @@ where
         A: LiftedAir<L::F, EF>,
         SC: StarkConfig<L::F, EF, Lmcs = L>,
     {
-        // Observe log trace heights into the challenger (not part of transcript data).
-        for &h in &proof.log_trace_heights {
-            let f: L::F = PrimeCharacteristicRing::from_u8(h);
-            challenger.observe(f);
-        }
+        proof.instance_shapes.observe::<L::F, _>(&mut challenger);
 
-        let log_max_trace_height = validate_inputs(instances, &proof.log_trace_heights)?;
+        let log_max_trace_height = validate_inputs(instances, &proof.instance_shapes)?;
 
         let mut channel = VerifierTranscript::from_data(challenger, &proof.transcript);
         let log_blowup = config.pcs().log_blowup();

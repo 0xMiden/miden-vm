@@ -175,16 +175,16 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
     ///   (`aux_width() > 0`).
     /// - **Well-formed periodic columns** — each periodic column must be non-empty and have a
     ///   power-of-two length.
-    fn validate(&self) -> Result<(), AirValidationError> {
+    fn validate(&self) -> Result<(), AirStructureError> {
         if self.preprocessed_trace().is_some() {
-            return Err(AirValidationError::PreprocessedTrace);
+            return Err(AirStructureError::PreprocessedTrace);
         }
         if self.aux_width() == 0 {
-            return Err(AirValidationError::ZeroAuxWidth);
+            return Err(AirStructureError::ZeroAuxWidth);
         }
         for (i, col) in self.periodic_columns().iter().enumerate() {
             if col.is_empty() || !col.len().is_power_of_two() {
-                return Err(AirValidationError::InvalidPeriodicColumn {
+                return Err(AirStructureError::InvalidPeriodicColumn {
                     index: i,
                     length: col.len(),
                 });
@@ -270,11 +270,11 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
     fn is_valid_builder<AB: LiftedAirBuilder<F = F>>(
         &self,
         builder: &AB,
-    ) -> Result<(), AirValidationError> {
+    ) -> Result<(), AirStructureError> {
         let check =
-            |part: TracePart, expected: usize, actual: usize| -> Result<(), AirValidationError> {
+            |part: TracePart, expected: usize, actual: usize| -> Result<(), AirStructureError> {
                 if actual != expected {
-                    return Err(AirValidationError::BuilderMismatch { part, expected, actual });
+                    return Err(AirStructureError::BuilderMismatch { part, expected, actual });
                 }
                 Ok(())
             };
@@ -317,18 +317,10 @@ pub enum TracePart {
     PeriodicValues,
 }
 
-/// Errors from AIR validation.
-///
-/// Returned by [`LiftedAir::validate`] and by the instance-validation entry
-/// point in `miden-lifted-stark` (`instance::validate_inputs`).
+/// Errors intrinsic to a single AIR definition, independent of any instance
+/// data. Returned by [`LiftedAir::validate`] and [`LiftedAir::is_valid_builder`].
 #[derive(Debug, Error)]
-pub enum AirValidationError {
-    #[error("no instances provided")]
-    Empty,
-    /// TODO(0xMiden/crypto#941): Remove once `validate_inputs` computes the
-    /// permutation instead of rejecting non-ascending heights.
-    #[error("instances not in ascending height order")]
-    NotAscending,
+pub enum AirStructureError {
     #[error("periodic column {index}: length must be positive power of two, got {length}")]
     InvalidPeriodicColumn { index: usize, length: usize },
     #[error("preprocessed traces are not supported")]
@@ -341,14 +333,4 @@ pub enum AirValidationError {
     },
     #[error("aux width must be positive")]
     ZeroAuxWidth,
-    #[error("trace height {height} is not a power of two")]
-    InvalidTraceHeight { height: usize },
-    #[error("trace width mismatch: expected {expected}, got {actual}")]
-    WidthMismatch { expected: usize, actual: usize },
-    #[error("public values length mismatch: expected {expected}, got {actual}")]
-    PublicValuesMismatch { expected: usize, actual: usize },
-    #[error("var-len public inputs count mismatch: expected {expected}, got {actual}")]
-    VarLenPublicInputsMismatch { expected: usize, actual: usize },
-    #[error("trace height {trace_height} is less than max periodic column length {max_period}")]
-    TraceHeightBelowPeriod { trace_height: usize, max_period: usize },
 }

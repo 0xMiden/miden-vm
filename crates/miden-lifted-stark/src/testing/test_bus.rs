@@ -303,8 +303,8 @@ fn bus_wrong_input_count_fails() {
     assert!(
         matches!(
             err,
-            crate::VerifierError::Air(
-                miden_lifted_air::AirValidationError::VarLenPublicInputsMismatch { .. }
+            crate::VerifierError::Instance(
+                crate::InstanceValidationError::VarLenPublicInputsMismatch { .. }
             )
         ),
         "expected VarLenPublicInputsMismatch, got {err:?}"

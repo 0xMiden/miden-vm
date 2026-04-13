@@ -131,7 +131,7 @@ where
         .in_scope(|| prove_multi(config, &instances, config.challenger()).expect("proving failed"));
 
     let result = RunResult {
-        proof_size_bytes: output.proof.transcript.size_in_bytes(),
+        proof_size_bytes: output.proof.size_in_bytes(),
         field_elems: output.proof.transcript.fields().len(),
         commitments: output.proof.transcript.commitments().len(),
     };

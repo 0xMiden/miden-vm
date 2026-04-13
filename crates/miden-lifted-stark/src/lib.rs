@@ -64,7 +64,7 @@ pub mod verifier;
 pub use config::{GenericStarkConfig, StarkConfig};
 pub use coset::LiftedCoset;
 pub use debug::{check_constraints, check_constraints_multi};
-pub use instance::{AirInstance, AirWitness};
+pub use instance::{AirInstance, AirWitness, InstanceShapes, InstanceValidationError};
 pub use lmcs::{
     Lmcs, LmcsError, LmcsTree, OpenedRows,
     bitrev::{BitReversibleMatrix, materialize_bitrev},
@@ -154,7 +154,7 @@ pub mod air {
         AirBuilder,
         AirBuilderWithContext,
         // Lifted AIR types
-        AirValidationError,
+        AirStructureError,
         AuxBuilder,
         BaseAir,
         EmptyWindow,

@@ -11,13 +11,20 @@
 //! # Fiat-Shamir / transcript binding (initial challenger state)
 //!
 //! This crate intentionally does **not** prescribe the *initial* transcript state.
-//! In particular, the verifier APIs here take the statement out-of-band (AIR(s),
-//! instance metadata like trace heights, and `public_values`).
+//! The verifier APIs here take the statement (AIR(s), `public_values`, and
+//! `var_len_public_inputs`) out-of-band, and assume the challenger passed in
+//! has already observed all variable inputs that are not carried on the proof.
 //!
-//! The protocol implementation assumes that all inputs that may vary (including
-//! `public_values`) have already been observed by the challenger passed in.
-//! This is required so callers can avoid including large public inputs in the proof
-//! when they are available out-of-band.
+//! Instance shape metadata is the one exception: log trace heights ride on
+//! [`StarkProof::instance_shapes`] and [`verify_multi`] observes them itself
+//! before any transcript interaction. Callers must not pre-observe them, or
+//! they'll be absorbed twice.
+//!
+//! The protocol implementation assumes that all out-of-band inputs that may
+//! vary (in particular `public_values` and `var_len_public_inputs`) have
+//! already been observed by the challenger passed in. This is required so
+//! callers can avoid including large public inputs in the proof when they are
+//! available out-of-band.
 //!
 //! If your application treats any of these inputs as untrusted, you must
 //! authenticate them by binding them into the Fiat-Shamir challenger state
@@ -59,10 +66,9 @@ use core::marker::PhantomData;
 
 use constraints::{ConstraintFolder, reconstruct_quotient, row_to_packed_ext};
 use miden_lifted_air::{
-    AirValidationError, LiftedAir, ReducedAuxValues, ReductionError, RowWindow, VarLenPublicInputs,
+    LiftedAir, ReducedAuxValues, ReductionError, RowWindow, VarLenPublicInputs,
 };
 use miden_stark_transcript::{Channel, TranscriptError, VerifierChannel, VerifierTranscript};
-use p3_challenger::CanObserve;
 use p3_field::{ExtensionField, TwoAdicField};
 use p3_matrix::Matrix;
 use periodic::PeriodicPolys;
@@ -71,7 +77,7 @@ use thiserror::Error;
 use crate::{
     StarkConfig,
     coset::LiftedCoset,
-    instance::{AirInstance, validate_inputs},
+    instance::{AirInstance, InstanceValidationError, validate_inputs},
     pcs::verifier::{PcsError, verify_aligned},
     proof::{StarkDigest, StarkProof},
 };
@@ -79,8 +85,8 @@ use crate::{
 /// Errors that can occur during verification.
 #[derive(Debug, Error)]
 pub enum VerifierError {
-    #[error("AIR validation failed: {0}")]
-    Air(#[from] AirValidationError),
+    #[error("instance validation failed: {0}")]
+    Instance(#[from] InstanceValidationError),
     #[error("PCS verification failed: {0}")]
     Pcs(#[from] PcsError),
     #[error("transcript error: {0}")]
@@ -173,14 +179,11 @@ where
     SC: StarkConfig<F, EF>,
     A: LiftedAir<F, EF>,
 {
-    // Observe log trace heights into the challenger (not part of transcript data).
-    let log_trace_heights = &proof.log_trace_heights;
-    for &h in log_trace_heights {
-        challenger.observe(F::from_u8(h));
-    }
+    let instance_shapes = &proof.instance_shapes;
+    instance_shapes.observe::<F, _>(&mut challenger);
 
-    // Validate AIR structure, instance dimensions, and height constraints.
-    let log_max_trace_height = validate_inputs(instances, log_trace_heights)?;
+    let log_max_trace_height = validate_inputs(instances, instance_shapes)?;
+    let log_trace_heights = instance_shapes.log_trace_heights();
 
     let mut channel = VerifierTranscript::from_data(challenger, &proof.transcript);
 
@@ -327,7 +330,7 @@ where
             _phantom: PhantomData,
         };
 
-        air.is_valid_builder(&folder)?;
+        air.is_valid_builder(&folder).map_err(InstanceValidationError::from)?;
         air.eval(&mut folder);
 
         // Accumulate: acc = acc * beta + folded_j

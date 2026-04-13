@@ -136,11 +136,8 @@ use alloc::{vec, vec::Vec};
 
 use commit::commit_traces;
 use constraints::{evaluate_constraints_into, layout::get_constraint_layout};
-use miden_lifted_air::{
-    AirValidationError, AuxBuilder, LiftedAir, VarLenPublicInputs, log2_strict_u8,
-};
+use miden_lifted_air::{AuxBuilder, LiftedAir, VarLenPublicInputs, log2_strict_u8};
 use miden_stark_transcript::{Channel, ProverChannel, ProverTranscript};
-use p3_challenger::CanObserve;
 use p3_field::{BasedVectorSpace, ExtensionField, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use periodic::PeriodicLde;
@@ -150,7 +147,7 @@ use tracing::{info_span, instrument};
 use crate::{
     StarkConfig,
     coset::LiftedCoset,
-    instance::{AirWitness, validate_inputs},
+    instance::{AirWitness, InstanceShapes, InstanceValidationError, validate_inputs},
     pcs::prover::open_with_channel,
     proof::{StarkOutput, StarkProof},
 };
@@ -158,8 +155,8 @@ use crate::{
 /// Errors that can occur during proving.
 #[derive(Debug, Error)]
 pub enum ProverError {
-    #[error("AIR validation failed: {0}")]
-    Air(#[from] AirValidationError),
+    #[error("instance validation failed: {0}")]
+    Instance(#[from] InstanceValidationError),
     #[error(
         "constraint degree exceeds blowup: \
          log_quotient_degree {log_quotient_degree} > log_blowup {log_blowup}"
@@ -240,17 +237,16 @@ where
     A: LiftedAir<F, EF>,
     B: AuxBuilder<F, EF>,
 {
-    // Build verifier-side view and compute log trace heights from witness traces.
     let verifier_instances: Vec<_> =
         instances.iter().map(|(air, w, _)| (*air, w.to_instance())).collect();
-    let log_trace_heights: Vec<u8> =
-        instances.iter().map(|(_, w, _)| log2_strict_u8(w.trace.height())).collect();
+    let trace_heights: Vec<usize> = instances.iter().map(|(_, w, _)| w.trace.height()).collect();
+    let instance_shapes = InstanceShapes::from_trace_heights(trace_heights)?;
 
     // Validate AIR structure, instance dimensions, heights, and trace widths.
-    let log_max_trace_height = validate_inputs(&verifier_instances, &log_trace_heights)?;
+    let log_max_trace_height = validate_inputs(&verifier_instances, &instance_shapes)?;
     for (air, w, _) in instances {
         if w.trace.width() != air.width() {
-            return Err(AirValidationError::WidthMismatch {
+            return Err(InstanceValidationError::WidthMismatch {
                 expected: air.width(),
                 actual: w.trace.width(),
             }
@@ -258,10 +254,8 @@ where
         }
     }
 
-    // Observe log trace heights into the challenger before creating the transcript.
-    for &h in &log_trace_heights {
-        challenger.observe(F::from_u8(h));
-    }
+    // Observe shape metadata before creating the transcript.
+    instance_shapes.observe::<F, _>(&mut challenger);
 
     let mut channel = ProverTranscript::new(challenger);
 
@@ -287,9 +281,8 @@ where
 
     // 1. Commit all main traces (trace order — ascending height).
     //
-    // TODO(0xMiden/crypto#941): Reorder traces by π before committing. The
-    // permutation observation already happens above (log_trace_heights); after
-    // permutation support, the heights will be observed in trace order.
+    // TODO(0xMiden/crypto#941): reorder traces by π before committing, and
+    // observe heights in trace order alongside π in `InstanceShapes::observe`.
     //
     // Clone with blowup × capacity so the DFT resize doesn't reallocate.
     let blowup = 1 << log_blowup as usize;
@@ -477,6 +470,6 @@ where
     });
 
     let (digest, transcript) = channel.finalize();
-    let proof = StarkProof { log_trace_heights, transcript };
+    let proof = StarkProof { instance_shapes, transcript };
     Ok(StarkOutput { digest, proof })
 }
