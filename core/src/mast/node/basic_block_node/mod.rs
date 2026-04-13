@@ -125,6 +125,10 @@ impl BasicBlockNode {
 impl BasicBlockNode {
     /// Returns a new [`BasicBlockNode`] instantiated with the specified operations and decorators.
     ///
+    /// Raw decorator indices are adjusted for padding, then op-indexed decorators at the
+    /// post-last-op sentinel are merged into `after_exit`, matching
+    /// [`BasicBlockNodeBuilder::build`].
+    ///
     /// Returns an error if:
     /// - `operations` vector is empty.
     #[cfg(any(test, feature = "arbitrary"))]
@@ -143,15 +147,20 @@ impl BasicBlockNode {
         let (op_batches, digest) = batch_and_hash_ops(operations);
         // the prior line may have inserted some padding Noops in the op_batches
         // the decorator mapping should still point to the correct operation when that happens
-        let reflowed_decorators = BasicBlockNode::adjust_decorators(decorators, &op_batches);
+        let padded_decorators = BasicBlockNode::adjust_decorators(decorators, &op_batches);
+        let (padded_decorators, after_exit) = merge_sentinel_op_decorators_into_after_exit(
+            &op_batches,
+            padded_decorators,
+            Vec::new(),
+        );
 
         Ok(Self {
             op_batches,
             digest,
             decorators: DecoratorStore::Owned {
-                decorators: reflowed_decorators,
+                decorators: padded_decorators,
                 before_enter: Vec::new(),
-                after_exit: Vec::new(),
+                after_exit,
             },
         })
     }
