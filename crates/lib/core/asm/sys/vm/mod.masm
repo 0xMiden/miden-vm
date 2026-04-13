@@ -23,10 +23,10 @@ const ACCEPTABLE_FOLDING_POW_BITS = 4
 # protocol choice: hash function, field, blowup factor, FRI folding factor, coset
 # offset, max remainder degree, etc. It must be bumped when any of these change.
 # CIRCUIT_COMMITMENT covers the AIR constraints (via the encoded ACE circuit hash).
-const RELATION_DIGEST_0 = 16753999095069209749
-const RELATION_DIGEST_1 = 3000218963419794895
-const RELATION_DIGEST_2 = 17430234164954570749
-const RELATION_DIGEST_3 = 2842245351926280525
+const RELATION_DIGEST_0 = 12952584900624618601
+const RELATION_DIGEST_1 = 17431123814194016201
+const RELATION_DIGEST_2 = 12196348556572003574
+const RELATION_DIGEST_3 = 17423847387340980550
 
 #! Loads security parameters from the advice stack and stores them in memory.
 #!

@@ -12,8 +12,8 @@ use core::{
 
 use super::{
     chiplets::columns::{
-        AceCols, AceEvalCols, AceReadCols, BitwiseCols, HasherCols, KernelRomCols, MemoryCols,
-        borrow_chiplet,
+        AceCols, AceEvalCols, AceReadCols, BitwiseCols, ControllerCols, KernelRomCols, MemoryCols,
+        PermutationCols, borrow_chiplet,
     },
     decoder::columns::DecoderCols,
     range::columns::RangeCols,
@@ -32,25 +32,40 @@ use crate::trace::{AUX_TRACE_WIDTH, CHIPLETS_WIDTH, TRACE_WIDTH};
 ///
 /// Chiplet columns are not public because the 20 columns are a union — their interpretation
 /// depends on which chiplet is active. Access goes through typed accessors like
-/// [`MainCols::hasher()`], [`MainCols::bitwise()`], etc.
+/// [`MainCols::permutation()`], [`MainCols::controller()`], [`MainCols::bitwise()`], etc.
+///
+/// The `perm_seg` column is separated from the chiplets array because it is consumed
+/// exclusively by the chiplet selector system (`s_perm`), not by any chiplet's constraint
+/// code.
 #[repr(C)]
 pub struct MainCols<T> {
     pub system: SystemCols<T>,
     pub decoder: DecoderCols<T>,
     pub stack: StackCols<T>,
     pub range: RangeCols<T>,
-    pub(crate) chiplets: [T; CHIPLETS_WIDTH],
+    pub(crate) chiplets: [T; CHIPLETS_WIDTH - 1],
+    /// Permutation segment selector (`s_perm`): consumed by `build_chiplet_selectors`.
+    pub perm_seg: T,
 }
 
 impl<T> MainCols<T> {
-    /// Returns the 5 shared chiplet selector columns `[s0, s1, s2, s3, s4]`.
-    pub fn chiplet_selectors(&self) -> &[T; 5] {
-        self.chiplets[0..5].try_into().unwrap()
-    }
-
-    /// Returns a typed borrow of the hasher chiplet columns (chiplets\[1..21\]).
-    pub fn hasher(&self) -> &HasherCols<T> {
-        borrow_chiplet(&self.chiplets[1..21])
+    /// Returns the 6 chiplet selector columns `[s_ctrl, s_perm, s1, s2, s3, s4]`.
+    ///
+    /// `s_ctrl = chiplets[0]` and `s_perm = perm_seg` are the two physical selectors
+    /// for the controller and permutation sub-chiplets. `s1..s4` subdivide the
+    /// remaining chiplets under the virtual `s0 = 1 - (s_ctrl + s_perm)`.
+    pub fn chiplet_selectors(&self) -> [T; 6]
+    where
+        T: Copy,
+    {
+        [
+            self.chiplets[0],
+            self.perm_seg,
+            self.chiplets[1],
+            self.chiplets[2],
+            self.chiplets[3],
+            self.chiplets[4],
+        ]
     }
 
     /// Returns a typed borrow of the bitwise chiplet columns (chiplets\[2..15\]).
@@ -64,13 +79,26 @@ impl<T> MainCols<T> {
     }
 
     /// Returns a typed borrow of the ACE chiplet columns (chiplets\[4..20\]).
+    ///
+    /// Spans `chiplets[4..20]` (16 cols). Since `chiplets` has 20 elements (indices
+    /// 0..19), this is `chiplets[4..20]` = `chiplets[4..]` (all 16 remaining).
     pub fn ace(&self) -> &AceCols<T> {
-        borrow_chiplet(&self.chiplets[4..20])
+        borrow_chiplet(&self.chiplets[4..])
     }
 
     /// Returns a typed borrow of the kernel ROM chiplet columns (chiplets\[5..10\]).
     pub fn kernel_rom(&self) -> &KernelRomCols<T> {
         borrow_chiplet(&self.chiplets[5..10])
+    }
+
+    /// Returns a typed borrow of the permutation sub-chiplet columns (chiplets\[1..20\]).
+    pub fn permutation(&self) -> &PermutationCols<T> {
+        borrow_chiplet(&self.chiplets[1..])
+    }
+
+    /// Returns a typed borrow of the controller sub-chiplet columns (chiplets\[1..20\]).
+    pub fn controller(&self) -> &ControllerCols<T> {
+        borrow_chiplet(&self.chiplets[1..])
     }
 }
 
@@ -159,7 +187,6 @@ pub const NUM_SYSTEM_COLS: usize = size_of::<SystemCols<u8>>();
 pub const NUM_DECODER_COLS: usize = size_of::<DecoderCols<u8>>();
 pub const NUM_STACK_COLS: usize = size_of::<StackCols<u8>>();
 pub const NUM_RANGE_COLS: usize = size_of::<RangeCols<u8>>();
-pub const NUM_HASHER_COLS: usize = size_of::<HasherCols<u8>>();
 pub const NUM_BITWISE_COLS: usize = size_of::<BitwiseCols<u8>>();
 pub const NUM_MEMORY_COLS: usize = size_of::<MemoryCols<u8>>();
 pub const NUM_ACE_COLS: usize = size_of::<AceCols<u8>>();
@@ -173,7 +200,6 @@ const _: () = assert!(NUM_SYSTEM_COLS == 6);
 const _: () = assert!(NUM_DECODER_COLS == 24);
 const _: () = assert!(NUM_STACK_COLS == 19);
 const _: () = assert!(NUM_RANGE_COLS == 2);
-const _: () = assert!(NUM_HASHER_COLS == 20);
 const _: () = assert!(NUM_BITWISE_COLS == 13);
 const _: () = assert!(NUM_MEMORY_COLS == 15);
 const _: () = assert!(NUM_ACE_COLS == 16);
@@ -250,7 +276,9 @@ mod tests {
     #[test]
     fn col_map_chiplets() {
         assert_eq!(MAIN_COL_MAP.chiplets[0], CHIPLETS_OFFSET);
-        assert_eq!(MAIN_COL_MAP.chiplets[20], CHIPLETS_OFFSET + 20);
+        assert_eq!(MAIN_COL_MAP.chiplets[19], CHIPLETS_OFFSET + 19);
+        // perm_seg is a separate field after chiplets[0..20]
+        assert_eq!(MAIN_COL_MAP.perm_seg, CHIPLETS_OFFSET + 20);
     }
 
     // --- Auxiliary trace column map vs legacy constants

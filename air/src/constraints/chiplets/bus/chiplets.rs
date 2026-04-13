@@ -93,7 +93,7 @@ pub fn enforce_chiplets_bus_constraint<AB>(
     next: &MainCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
     challenges: &Challenges<AB::ExprEF>,
-    _selectors: &ChipletSelectors<AB::Expr>,
+    selectors: &ChipletSelectors<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
@@ -252,41 +252,27 @@ pub fn enforce_chiplets_bus_constraint<AB>(
     let periodic: &PeriodicCols<AB::PeriodicVar> = builder.periodic_values().borrow();
     let k_transition: AB::Expr = periodic.bitwise.k_transition.into();
 
-    // --- Chiplet selector flags (from chiplets columns) ---
-    let chiplet_s0: AB::Expr = local.chiplet_selectors()[0].into();
-    let chiplet_s1: AB::Expr = local.chiplet_selectors()[1].into();
-    let chiplet_s2: AB::Expr = local.chiplet_selectors()[2].into();
-    let chiplet_s3: AB::Expr = local.chiplet_selectors()[3].into();
-    let chiplet_s4: AB::Expr = local.chiplet_selectors()[4].into();
+    // --- Chiplet response flags (from precomputed ChipletSelectors) ---
+    // Bitwise responds only on the last row of its 8-row cycle (k_transition=0).
+    let is_bitwise_responding: AB::Expr =
+        selectors.bitwise.is_active.clone() * (AB::Expr::ONE - k_transition);
 
-    // Bitwise chiplet active: s0=1, s1=0
-    // Bitwise responds only on last row of 8-row cycle (when k_transition=0)
-    let is_bitwise_row: AB::Expr = chiplet_s0.clone() * (AB::Expr::ONE - chiplet_s1.clone());
-    let is_bitwise_responding: AB::Expr = is_bitwise_row * (AB::Expr::ONE - k_transition);
+    let is_memory: AB::Expr = selectors.memory.is_active.clone();
 
-    // Memory chiplet active: s0=1, s1=1, s2=0
-    let is_memory: AB::Expr =
-        chiplet_s0.clone() * chiplet_s1.clone() * (AB::Expr::ONE - chiplet_s2.clone());
-
-    // ACE chiplet active: s0=1, s1=1, s2=1, s3=0
-    // Response only on start rows (ace_start_selector = 1)
-    let is_ace_row: AB::Expr = chiplet_s0.clone()
-        * chiplet_s1.clone()
-        * chiplet_s2.clone()
-        * (AB::Expr::ONE - chiplet_s3.clone());
+    // ACE responds only on start rows (ace_start_selector = 1).
     let ace_start_selector: AB::Expr =
         local.chiplets[NUM_ACE_SELECTORS + SELECTOR_START_IDX].into();
-    let is_ace: AB::Expr = is_ace_row * ace_start_selector;
+    let is_ace: AB::Expr = selectors.ace.is_active.clone() * ace_start_selector;
 
-    // Kernel ROM chiplet active: s0=1, s1=1, s2=1, s3=1, s4=0
-    let is_kernel_rom: AB::Expr = chiplet_s0.clone()
-        * chiplet_s1.clone()
-        * chiplet_s2.clone()
-        * chiplet_s3.clone()
-        * (AB::Expr::ONE - chiplet_s4.clone());
+    let is_kernel_rom: AB::Expr = selectors.kernel_rom.is_active.clone();
 
     // --- Hasher response (complex, depends on cycle position and selectors) ---
-    let hasher_response = compute_hasher_response::<AB>(local, next, challenges);
+    let hasher_response = compute_hasher_response::<AB>(
+        local,
+        next,
+        challenges,
+        selectors.controller.is_active.clone(),
+    );
 
     // --- Bitwise response ---
     let v_bitwise = compute_bitwise_response::<AB>(local, challenges);
@@ -797,44 +783,37 @@ struct HasherResponse<EF, E> {
 
 /// Computes the hasher chiplet response.
 ///
-/// Only hasher controller rows (dispatch, perm_seg=0) produce bus responses.
-/// Hasher permutation segment rows (compute, perm_seg=1) do not contribute.
+/// Only hasher controller rows (dispatch, `s_ctrl = 1`) produce bus responses.
+/// Hasher permutation segment rows (compute, `s_perm = 1`) do not contribute.
 ///
-/// **Controller input rows** (s0=1, perm_seg=0):
-/// - Sponge start (is_boundary=1, s1=0, s2=0): full 12-element state
-/// - Sponge continuation (is_boundary=0, s1=0, s2=0): rate-only 8 elements (RESPAN)
-/// - Tree start (is_boundary=1, s1=1 or s2=1): leaf word
+/// **Controller input rows** (`s0 = 1`):
+/// - Sponge start (`is_boundary=1`, `s1=0`, `s2=0`): full 12-element state
+/// - Sponge continuation (`is_boundary=0`, `s1=0`, `s2=0`): rate-only 8 elements (RESPAN)
+/// - Tree start (`is_boundary=1`, `s1=1` or `s2=1`): leaf word
 ///
-/// **Controller output rows** (s0=0, s1=0, perm_seg=0):
-/// - HOUT (s2=0): digest
-/// - SOUT (s2=1) + is_boundary=1: full 12-element state
+/// **Controller output rows** (`s0 = 0`, `s1 = 0`):
+/// - HOUT (`s2=0`): digest
+/// - SOUT (`s2=1`) + `is_boundary=1`: full 12-element state
 ///
-/// No response on: hasher permutation segment rows, padding rows ([0,1,0]),
-/// tree continuations (is_boundary=0), or intermediate SOUT (is_boundary=0).
+/// No response on: hasher permutation segment rows, padding rows (`s0=0, s1=1`),
+/// tree continuations (`is_boundary=0`), or intermediate SOUT (`is_boundary=0`).
 fn compute_hasher_response<AB: MidenAirBuilder>(
     local: &MainCols<AB::Var>,
     next: &MainCols<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
+    controller_flag: AB::Expr,
 ) -> HasherResponse<AB::ExprEF, AB::Expr> {
     use crate::trace::{
         CHIPLETS_OFFSET,
-        chiplets::{
-            HASHER_IS_BOUNDARY_COL_IDX, HASHER_NODE_INDEX_COL_IDX, HASHER_PERM_SEG_COL_IDX,
-            HASHER_STATE_COL_RANGE,
-        },
+        chiplets::{HASHER_IS_BOUNDARY_COL_IDX, HASHER_NODE_INDEX_COL_IDX, HASHER_STATE_COL_RANGE},
     };
 
     let one = AB::Expr::ONE;
 
-    // Controller flag: hasher active AND not in perm segment
-    let hasher_active: AB::Expr = one.clone() - local.chiplets[0].into();
-    let perm_seg: AB::Expr = local.chiplets[HASHER_PERM_SEG_COL_IDX - CHIPLETS_OFFSET].into();
-    let controller_flag = hasher_active * (one.clone() - perm_seg);
-
     // Hasher internal selectors
-    let hs0: AB::Expr = local.chiplets[1].into();
-    let hs1: AB::Expr = local.chiplets[2].into();
-    let hs2: AB::Expr = local.chiplets[3].into();
+    let s0: AB::Expr = local.chiplets[1].into();
+    let s1: AB::Expr = local.chiplets[2].into();
+    let s2: AB::Expr = local.chiplets[3].into();
 
     // Lifecycle columns
     let is_boundary: AB::Expr = local.chiplets[HASHER_IS_BOUNDARY_COL_IDX - CHIPLETS_OFFSET].into();
@@ -850,33 +829,31 @@ fn compute_hasher_response<AB: MidenAirBuilder>(
 
     // --- Response flags (inner, without controller_flag to keep degree low) ---
     //
-    // controller_flag (degree 2) is factored out and applied to the entire response sum,
-    // keeping the max flag*message degree at 6 instead of 8.
+    // controller_flag (degree 1, = s_ctrl) is factored out and applied to the entire response
+    // sum, keeping the max inner flag*message degree at 6 and the final degree at 7.
 
     // Sponge start: input, s1=0, s2=0, is_boundary=1
-    let f_sponge_start = hs0.clone()
-        * (one.clone() - hs1.clone())
-        * (one.clone() - hs2.clone())
-        * is_boundary.clone();
+    let f_sponge_start =
+        s0.clone() * (one.clone() - s1.clone()) * (one.clone() - s2.clone()) * is_boundary.clone();
 
     // Sponge continuation (RESPAN): input, s1=0, s2=0, is_boundary=0
-    let f_sponge_respan = hs0.clone()
-        * (one.clone() - hs1.clone())
-        * (one.clone() - hs2.clone())
+    let f_sponge_respan = s0.clone()
+        * (one.clone() - s1.clone())
+        * (one.clone() - s2.clone())
         * (one.clone() - is_boundary.clone());
 
     // Merkle tree op start inputs (only is_boundary=1 produces response)
-    let f_mp_start = hs0.clone() * (one.clone() - hs1.clone()) * hs2.clone() * is_boundary.clone();
-    let f_mv_start = hs0.clone() * hs1.clone() * (one.clone() - hs2.clone()) * is_boundary.clone();
-    let f_mu_start = hs0.clone() * hs1.clone() * hs2.clone() * is_boundary.clone();
+    let f_mp_start = s0.clone() * (one.clone() - s1.clone()) * s2.clone() * is_boundary.clone();
+    let f_mv_start = s0.clone() * s1.clone() * (one.clone() - s2.clone()) * is_boundary.clone();
+    let f_mu_start = s0.clone() * s1.clone() * s2.clone() * is_boundary.clone();
 
     // HOUT output (always responds)
     let f_hout =
-        (one.clone() - hs0.clone()) * (one.clone() - hs1.clone()) * (one.clone() - hs2.clone());
+        (one.clone() - s0.clone()) * (one.clone() - s1.clone()) * (one.clone() - s2.clone());
 
     // SOUT output with is_boundary=1 only (HPERM return)
     let f_sout_final =
-        (one.clone() - hs0.clone()) * (one.clone() - hs1.clone()) * hs2.clone() * is_boundary;
+        (one.clone() - s0.clone()) * (one.clone() - s1.clone()) * s2.clone() * is_boundary;
 
     // --- Message values ---
 
@@ -958,7 +935,7 @@ fn compute_hasher_response<AB: MidenAirBuilder>(
     //
     // The inner flag_sum and sum are computed without controller_flag. The controller_flag
     // is applied as a multiplicative factor to the entire sum, keeping the degree within
-    // budget: inner_flag(4) * message(2) = 6, * controller_flag(2) = 8.
+    // budget: inner_flag(4) * message(2) = 6, * controller_flag(1) = 7.
 
     let inner_flag_sum = f_sponge_start.clone()
         + f_sponge_respan.clone()

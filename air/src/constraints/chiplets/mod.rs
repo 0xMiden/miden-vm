@@ -1,8 +1,9 @@
-//! Chiplets constraints module (partial).
+//! Chiplets constraints module.
 //!
 //! Currently we implement:
-//! - chiplet selector constraints
-//! - hasher chiplet main-trace constraints
+//! - chiplet selector constraints (including hasher internal selectors)
+//! - permutation sub-chiplet main-trace constraints
+//! - controller sub-chiplet main-trace constraints
 //! - bitwise chiplet main-trace constraints
 //! - memory chiplet main-trace constraints
 //! - ACE chiplet main-trace constraints
@@ -14,9 +15,10 @@ pub mod ace;
 pub mod bitwise;
 pub mod bus;
 pub mod columns;
-pub mod hasher;
+pub mod hasher_control;
 pub mod kernel_rom;
 pub mod memory;
+pub mod permutation;
 pub mod selectors;
 
 use selectors::ChipletSelectors;
@@ -35,8 +37,13 @@ pub fn enforce_main<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    // Selector constraints are already enforced in build_chiplet_selectors (called from lib.rs).
-    hasher::enforce_hasher_constraints(builder, local, next);
+    // Selector constraints (including hasher internal selectors) are enforced in
+    // build_chiplet_selectors (called from lib.rs).
+
+    // Hasher sub-chiplets: permutation + controller.
+    permutation::enforce_permutation_constraints(builder, local, next, &selectors.permutation);
+    hasher_control::enforce_controller_constraints(builder, local, next, &selectors.controller);
+
     bitwise::enforce_bitwise_constraints(builder, local, next, &selectors.bitwise);
     memory::enforce_memory_constraints(builder, local, next, &selectors.memory);
     ace::enforce_ace_constraints_all_rows(builder, local, next, &selectors.ace);

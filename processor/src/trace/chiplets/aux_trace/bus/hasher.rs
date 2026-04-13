@@ -554,20 +554,22 @@ where
 
     // --- Precompute common values -----------------------------------------------
 
-    let selector0 = main_trace.chiplet_selector_0(row);
     let selector1 = main_trace.chiplet_selector_1(row);
     let selector2 = main_trace.chiplet_selector_2(row);
     let selector3 = main_trace.chiplet_selector_3(row);
-    let op_label = get_op_label(selector0, selector1, selector2, selector3);
+    // Hasher labels are computed with s0=0 (the old chiplet-level selector for hasher).
+    // chiplet_selector_0 is now s_ctrl (1 on controller rows), but labels encode
+    // [0, s0, s1, s2] to match the label constants defined in hasher.rs.
+    let op_label = get_op_label(ZERO, selector1, selector2, selector3);
     let addr_next = Felt::from(row + 1);
     let state = main_trace.chiplet_hasher_state(row);
     let node_index = main_trace.chiplet_node_index(row);
 
     // Hasher-internal selectors (not chiplet-level selectors).
     // chiplet selector1 = hasher s0, selector2 = hasher s1, selector3 = hasher s2.
-    let hs0 = selector1;
-    let hs1 = selector2;
-    let hs2 = selector3;
+    let s0 = selector1;
+    let s1 = selector2;
+    let s2 = selector3;
 
     let is_boundary = main_trace.chiplet_is_boundary(row);
 
@@ -583,7 +585,7 @@ where
     // The branches below are mutually exclusive. Each either returns a non-identity
     // response or falls through to return E::ONE (identity = no response).
 
-    if hs0 == ONE && hs1 == ZERO && hs2 == ZERO && is_boundary == ONE {
+    if s0 == ONE && s1 == ZERO && s2 == ZERO && is_boundary == ONE {
         // Sponge start (LINEAR_HASH, is_boundary=1): full 12-element state.
         // Matches SPAN / control block start request.
         let label = op_label + LABEL_OFFSET_START;
@@ -600,7 +602,7 @@ where
         _debugger.add_response(alloc::boxed::Box::new(msg), challenges);
 
         value
-    } else if hs0 == ONE && hs1 == ZERO && hs2 == ZERO {
+    } else if s0 == ONE && s1 == ZERO && s2 == ZERO {
         // Sponge continuation (LINEAR_HASH, is_boundary=0): rate-only message.
         // Label uses OUTPUT_LABEL_OFFSET because the decoder's RESPAN request uses
         // LINEAR_HASH_LABEL + 32.
@@ -620,7 +622,7 @@ where
         }
 
         value
-    } else if hs0 == ONE && (hs1 == ONE || hs2 == ONE) && is_boundary == ONE {
+    } else if s0 == ONE && (s1 == ONE || s2 == ONE) && is_boundary == ONE {
         // Tree start (MP_VERIFY / MR_UPDATE_OLD / MR_UPDATE_NEW, is_boundary=1): leaf word
         // selected by direction bit. Matches MPVERIFY / MRUPDATE first-input request.
         // Tree continuation inputs (is_boundary=0) produce no response.
@@ -649,7 +651,7 @@ where
         }
 
         value
-    } else if hs0 == ZERO && hs1 == ZERO && hs2 == ZERO {
+    } else if s0 == ZERO && s1 == ZERO && s2 == ZERO {
         // HOUT -- RETURN_HASH (0,0,0): digest-only response.
         // Matches END / MPVERIFY output / MRUPDATE output.
         let label = op_label + LABEL_OFFSET_END;
@@ -668,7 +670,7 @@ where
         }
 
         value
-    } else if hs0 == ZERO && hs1 == ZERO && hs2 == ONE && is_boundary == ONE {
+    } else if s0 == ZERO && s1 == ZERO && s2 == ONE && is_boundary == ONE {
         // SOUT final -- RETURN_STATE (0,0,1) with is_boundary=1: full 12-element state.
         // Matches HPERM output request. Intermediate SOUT (is_boundary=0) produces no response.
         let label = op_label + LABEL_OFFSET_END;
@@ -686,7 +688,7 @@ where
 
         value
     } else {
-        // No response: padding rows (hs0=0, hs1=1), tree continuations (is_boundary=0),
+        // No response: padding rows (s0=0, s1=1), tree continuations (is_boundary=0),
         // intermediate SOUT (is_boundary=0), or any other non-responding row.
         E::ONE
     }

@@ -753,9 +753,9 @@ impl MainTrace {
         self.get(i, CHIPLETS_OFFSET + 5)
     }
 
-    /// Returns `true` if a row is part of the hash chiplet.
+    /// Returns `true` if a row is part of the hash chiplet (controller or permutation).
     pub fn is_hash_row(&self, i: RowIndex) -> bool {
-        self.chiplet_selector_0(i) == ZERO
+        self.chiplet_selector_0(i) == ONE || self.chiplet_perm_seg(i) == ONE
     }
 
     /// Returns the (full) state of the hasher chiplet at row i.
@@ -805,8 +805,11 @@ impl MainTrace {
     }
 
     /// Returns `true` if a row is part of the bitwise chiplet.
+    /// Active when virtual s0=1 (s_ctrl=0, s_perm=0) and s1=0.
     pub fn is_bitwise_row(&self, i: RowIndex) -> bool {
-        self.chiplet_selector_0(i) == ONE && self.chiplet_selector_1(i) == ZERO
+        self.chiplet_selector_0(i) == ZERO
+            && self.chiplet_perm_seg(i) == ZERO
+            && self.chiplet_selector_1(i) == ZERO
     }
 
     /// Returns the bitwise column holding the aggregated value of input `a` at row i.
@@ -825,8 +828,10 @@ impl MainTrace {
     }
 
     /// Returns `true` if a row is part of the memory chiplet.
+    /// Active when virtual s0=1 (s_ctrl=0, s_perm=0) and s1=1, s2=0.
     pub fn is_memory_row(&self, i: RowIndex) -> bool {
-        self.chiplet_selector_0(i) == ONE
+        self.chiplet_selector_0(i) == ZERO
+            && self.chiplet_perm_seg(i) == ZERO
             && self.chiplet_selector_1(i) == ONE
             && self.chiplet_selector_2(i) == ZERO
     }
@@ -877,8 +882,10 @@ impl MainTrace {
     }
 
     /// Returns `true` if a row is part of the ACE chiplet.
+    /// Active when virtual s0=1 (s_ctrl=0, s_perm=0) and s1=1, s2=1, s3=0.
     pub fn is_ace_row(&self, i: RowIndex) -> bool {
-        self.chiplet_selector_0(i) == ONE
+        self.chiplet_selector_0(i) == ZERO
+            && self.chiplet_perm_seg(i) == ZERO
             && self.chiplet_selector_1(i) == ONE
             && self.chiplet_selector_2(i) == ONE
             && self.chiplet_selector_3(i) == ZERO
@@ -989,8 +996,10 @@ impl MainTrace {
     }
 
     /// Returns `true` if a row is part of the kernel chiplet.
+    /// Active when virtual s0=1 (s_ctrl=0, s_perm=0) and s1=1, s2=1, s3=1, s4=0.
     pub fn is_kernel_row(&self, i: RowIndex) -> bool {
-        self.chiplet_selector_0(i) == ONE
+        self.chiplet_selector_0(i) == ZERO
+            && self.chiplet_perm_seg(i) == ZERO
             && self.chiplet_selector_1(i) == ONE
             && self.chiplet_selector_2(i) == ONE
             && self.chiplet_selector_3(i) == ONE
@@ -1041,7 +1050,7 @@ impl MainTrace {
     /// These rows appear during the old-path leg of a Merkle root update (MRUPDATE). Each
     /// MV input row inserts a sibling into the virtual sibling table via the hash_kernel bus.
     pub fn f_mv(&self, i: RowIndex) -> bool {
-        self.chiplet_selector_0(i) == ZERO        // hasher chiplet
+        self.chiplet_selector_0(i) == ONE         // s_ctrl=1 (controller row)
             && self.chiplet_perm_seg(i) == ZERO   // controller region
             && self.chiplet_selector_1(i) == ONE  // s0=1 (input row)
             && self.chiplet_selector_2(i) == ONE  // s1=1 (MR_UPDATE_OLD)
@@ -1054,7 +1063,7 @@ impl MainTrace {
     /// MU input row removes a sibling from the virtual sibling table via the hash_kernel bus.
     /// The sibling table balance ensures the old and new paths use the same siblings.
     pub fn f_mu(&self, i: RowIndex) -> bool {
-        self.chiplet_selector_0(i) == ZERO        // hasher chiplet
+        self.chiplet_selector_0(i) == ONE         // s_ctrl=1 (controller row)
             && self.chiplet_perm_seg(i) == ZERO   // controller region
             && self.chiplet_selector_1(i) == ONE  // s0=1 (input row)
             && self.chiplet_selector_2(i) == ONE  // s1=1 (MR_UPDATE_NEW)

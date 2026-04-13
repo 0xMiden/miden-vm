@@ -21,26 +21,115 @@ pub fn borrow_chiplet<T, S>(slice: &[T]) -> &S {
     &cols[0]
 }
 
-// HASHER COLUMNS
+// PERMUTATION COLUMNS
 // ================================================================================================
 
-/// Hasher chiplet columns (19 columns), viewed from `chiplets[1..20]`.
+/// Permutation chiplet columns (19 columns), viewed from `chiplets[1..20]`.
 ///
-/// ## Layout
+/// Logical overlay for permutation segment rows (`s_perm = 1`). The 3 witness columns
+/// `w0..w2` share the same physical columns as the controller's `s0/s1/s2` selectors,
+/// and `multiplicity` shares the same physical column as the controller's `node_index`.
 ///
-/// ```text
-/// | selectors[3] |     state[12]                                   | extra cols           |
-/// |              | rate0[4] (= digest) | rate1[4]   | capacity[4]  |                      |
-/// | s0, s1, s2   | h0..h3             | h4..h7     | h8..h11      | i  mr  bnd  dir  seg |
-/// ```
+/// `s_ctrl` (= `chiplets[0]`) and `s_perm` (= `perm_seg`) are consumed by the chiplet
+/// selector system and are NOT part of this overlay.
 ///
 /// The state holds a Poseidon2 sponge in `[RATE0, RATE1, CAPACITY]` layout.
 /// Helper methods `rate0()`, `rate1()`, `capacity()`, and `digest()` provide
 /// sub-views into the state array.
+///
+/// ## Layout
+///
+/// ```text
+/// | witnesses[3] |     state[12]                                   | extra cols  |
+/// |              | rate0[4] (= digest) | rate1[4]   | capacity[4]  |             |
+/// | w0, w1, w2   | h0..h3             | h4..h7     | h8..h11      | m  --  --  -- |
+/// ```
 #[repr(C)]
-pub struct HasherCols<T> {
-    /// Hasher-internal selectors hs0, hs1, hs2.
-    pub selectors: [T; NUM_SELECTORS],
+pub struct PermutationCols<T> {
+    /// S-box witness columns (same physical columns as hasher selectors).
+    pub witnesses: [T; NUM_SELECTORS],
+    /// Poseidon2 state (12 field elements: 8 rate + 4 capacity).
+    pub state: [T; STATE_WIDTH],
+    /// Request multiplicity (same physical column as node_index).
+    pub multiplicity: T,
+    /// Zero on perm rows (same physical column as mrupdate_id).
+    pub _mrupdate_id: T,
+    /// Zero on perm rows (same physical column as is_boundary).
+    pub _is_boundary: T,
+    /// Zero on perm rows (same physical column as direction_bit).
+    pub _direction_bit: T,
+}
+
+impl<T: Copy> PermutationCols<T> {
+    /// Returns the rate portion of the state (state[0..8]).
+    pub fn rate(&self) -> [T; RATE_LEN] {
+        [
+            self.state[0],
+            self.state[1],
+            self.state[2],
+            self.state[3],
+            self.state[4],
+            self.state[5],
+            self.state[6],
+            self.state[7],
+        ]
+    }
+
+    /// Returns the capacity portion of the state (state[8..12]).
+    pub fn capacity(&self) -> [T; CAPACITY_LEN] {
+        [self.state[8], self.state[9], self.state[10], self.state[11]]
+    }
+
+    /// Returns the digest portion of the state (state[0..4]).
+    pub fn digest(&self) -> [T; DIGEST_LEN] {
+        [self.state[0], self.state[1], self.state[2], self.state[3]]
+    }
+
+    /// Returns rate0 (state[0..4]).
+    pub fn rate0(&self) -> [T; DIGEST_LEN] {
+        [self.state[0], self.state[1], self.state[2], self.state[3]]
+    }
+
+    /// Returns rate1 (state[4..8]).
+    pub fn rate1(&self) -> [T; DIGEST_LEN] {
+        [self.state[4], self.state[5], self.state[6], self.state[7]]
+    }
+}
+
+// CONTROLLER COLUMNS
+// ================================================================================================
+
+/// Controller chiplet columns (19 columns), viewed from `chiplets[1..20]`.
+///
+/// Logical overlay for controller rows (`s_ctrl = 1`). `s0` distinguishes input rows
+/// (`s0 = 1`) from output/padding rows (`s0 = 0`). The physical layout mirrors
+/// [`PermutationCols`], but column names reflect the controller/permutation split.
+///
+/// `s_ctrl` (= `chiplets[0]`) and `s_perm` (= `perm_seg`) are consumed by the chiplet
+/// selector system and are NOT part of this overlay. Because the chiplet-level
+/// non-hasher selector is only ever a virtual expression (`1 - s_ctrl - s_perm`) and is
+/// never a named column or struct field, there is no name collision with the
+/// controller-internal `s0` defined here.
+///
+/// The state holds a Poseidon2 sponge in `[RATE0, RATE1, CAPACITY]` layout.
+/// Helper methods `rate0()`, `rate1()`, `capacity()`, and `digest()` provide
+/// sub-views into the state array.
+///
+/// ## Layout
+///
+/// ```text
+/// | s0 s1 s2 |     state[12]                                   | extra cols      |
+/// |          | rate0[4] (= digest) | rate1[4]   | capacity[4]  |                 |
+/// |          | h0..h3             | h4..h7     | h8..h11      | i  mr  bnd  dir |
+/// ```
+#[repr(C)]
+pub struct ControllerCols<T> {
+    /// Hasher-internal sub-selector: `s0 = 1` on controller input rows, 0 on output/padding.
+    pub s0: T,
+    /// Operation sub-selector s1.
+    pub s1: T,
+    /// Operation sub-selector s2.
+    pub s2: T,
     /// Poseidon2 state (12 field elements: 8 rate + 4 capacity).
     pub state: [T; STATE_WIDTH],
     /// Merkle tree node index.
@@ -51,11 +140,9 @@ pub struct HasherCols<T> {
     pub is_boundary: T,
     /// Direction bit for Merkle path verification.
     pub direction_bit: T,
-    /// Permutation segment counter.
-    pub perm_seg: T,
 }
 
-impl<T: Copy> HasherCols<T> {
+impl<T: Copy> ControllerCols<T> {
     /// Returns the rate portion of the state (state[0..8]).
     pub fn rate(&self) -> [T; RATE_LEN] {
         [
@@ -515,6 +602,11 @@ const _: () = {
     assert!(size_of::<PeriodicCols<u8>>() == 18);
     assert!(size_of::<HasherPeriodicCols<u8>>() == 16);
     assert!(size_of::<BitwisePeriodicCols<u8>>() == 2);
+
+    // PermutationCols and ControllerCols overlay chiplets[1..20] (19 columns,
+    // excluding perm_seg which is consumed by the chiplet selector system).
+    assert!(size_of::<PermutationCols<u8>>() == 19);
+    assert!(size_of::<ControllerCols<u8>>() == 19);
 };
 
 #[cfg(test)]

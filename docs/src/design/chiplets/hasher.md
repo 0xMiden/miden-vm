@@ -6,19 +6,25 @@ sidebar_position: 2
 # Hash chiplet
 
 The hash chiplet executes all Poseidon2-based hashing performed by the VM. In the
-current design it is split into two regions:
+current design it is split into two **sub-chiplets** that each own their own
+chiplet-level selector in the shared chiplet tri-state selector system:
 
-1. **Controller region** (`perm_seg = 0`) records hash requests as compact
-   `(input, output)` row pairs and communicates with the rest of the VM via the
-   chiplets bus.
-2. **Permutation segment** (`perm_seg = 1`) executes Poseidon2 permutations in a
-   dedicated compute region, using one packed 16-row cycle per unique input
-   state.
+1. **Controller** (`s_ctrl = 1`) records hash requests as compact `(input, output)`
+   row pairs and communicates with the rest of the VM via the chiplets bus.
+2. **Permutation** (`s_perm = 1`) executes Poseidon2 permutations in a dedicated
+   compute region, using one packed 16-row cycle per unique input state.
 
 This separation lets the VM **deduplicate permutations**: if the same input
 state is requested multiple times, the controller records multiple requests but
 the permutation segment executes the permutation only once and carries the
 request count as a multiplicity.
+
+The two physical selectors `s_ctrl` (= `chiplets[0]`) and `s_perm` (= `perm_seg`,
+the last chiplets column) partition hasher rows. The virtual selector
+`s0 = 1 - s_ctrl - s_perm` covers all non-hasher rows and is subdivided by
+`s1..s4` into the remaining chiplets (bitwise, memory, ACE, kernel ROM). The
+transition rules `ctrl → ctrl | perm`, `perm → perm | s0`, `s0 → s0` enforce
+the trace ordering.
 
 ## Supported operations
 
@@ -30,35 +36,45 @@ The chiplet supports:
 - Merkle path verification,
 - Merkle root update.
 
-These operations are encoded by the three **hasher-internal selector** columns
-`(s0, s1, s2)` on controller rows:
+These operations are encoded by the three **hasher-internal sub-selector** columns
+`(s0, s1, s2)` on controller rows. These are the `ControllerCols` fields and live
+in `chiplets[1..4]`. They are separate from the chiplet-level virtual
+`s0 = 1 - s_ctrl - s_perm` (which is only ever an expression inside the chiplet
+selector system, never a physical column or struct field).
 
-| Selectors | Meaning |
-|-----------|---------|
+| Sub-selectors | Meaning |
+|---------------|---------|
 | `(1, 0, 0)` | sponge input / linear hash input |
 | `(1, 0, 1)` | Merkle path verify input |
 | `(1, 1, 0)` | Merkle update old-path input |
 | `(1, 1, 1)` | Merkle update new-path input |
-| `(0, 0, 0)` | return digest |
-| `(0, 0, 1)` | return full state |
-| `(0, 1, 0)` | controller padding |
+| `(0, 0, 0)` | return digest (HOUT) |
+| `(0, 0, 1)` | return full state (SOUT) |
+| `(0, 1, *)` | controller padding |
 
-On permutation rows these same columns are **not selectors**: they are reused as
-witness columns for packed internal rounds.
+On permutation rows these same physical columns are **not selectors**: they are
+reused as witness columns `(w0, w1, w2)` for the packed internal rounds.
 
 ## Trace layout
 
-Within the chiplets segment, the hasher occupies **20 columns**:
+Within the chiplets segment, the hasher occupies **20 columns** split between the
+two sub-chiplets. The chiplet-level selectors `s_ctrl` (= `chiplets[0]`) and
+`s_perm` (= `perm_seg`, the separate 20th column) select which sub-chiplet owns
+the current row. The remaining 19 columns (`chiplets[1..20]`) are a **union**
+whose interpretation depends on which sub-chiplet is active.
 
-| Columns | Purpose |
-|---------|---------|
-| `s0, s1, s2` | controller selectors / permutation witnesses |
-| `h0..h11` | Poseidon2 state = `[RATE0, RATE1, CAPACITY]` |
-| `node_index` | Merkle node index on controller rows; permutation multiplicity on perm rows |
-| `mrupdate_id` | domain separator for sibling-table entries |
-| `is_boundary` | 1 on first controller input and last controller output of an operation |
-| `direction_bit` | propagated Merkle direction bit on controller rows |
-| `perm_seg` | 0 = controller region, 1 = permutation segment |
+| Physical column(s) | Controller (`s_ctrl = 1`) | Permutation (`s_perm = 1`) |
+|-------------------|---------------------------|----------------------------|
+| `chiplets[0]`     | `s_ctrl = 1` (controller gate)   | `s_ctrl = 0` |
+| `perm_seg`        | `s_perm = 0`                     | `s_perm = 1` (perm gate) |
+| `chiplets[1]`     | `s0` (input / output-or-pad)    | `w0` (S-box witness) |
+| `chiplets[2]`     | `s1` (operation sub-selector)    | `w1` (S-box witness) |
+| `chiplets[3]`     | `s2` (operation sub-selector)    | `w2` (S-box witness) |
+| `h0..h11`         | Poseidon2 state `[RATE0, RATE1, CAPACITY]` | Poseidon2 state |
+| `node_index`      | Merkle node index                | Request multiplicity |
+| `mrupdate_id`     | Domain separator for sibling table | Zero (enforced) |
+| `is_boundary`     | 1 on first/last controller row   | Zero (enforced) |
+| `direction_bit`   | Merkle path direction bit        | Zero (enforced) |
 
 The Poseidon2 state is stored in little-endian sponge order:
 
@@ -68,39 +84,60 @@ The Poseidon2 state is stored in little-endian sponge order:
 
 `RATE0` (`h0..h3`) is always the digest word.
 
+In the constraint code, the union layout is modeled by two typed column structs
+`ControllerCols` and `PermutationCols` that overlay the same `chiplets[1..20]`
+range with sub-chiplet-specific field names (see
+`air/src/constraints/chiplets/columns.rs`).
+
 ## Design invariants
 
-The current hasher design relies on a few invariants
+The current hasher design relies on a few invariants.
 
-- **`perm_seg` is the authoritative controller/permutation discriminator.**  
-  When `perm_seg = 0`, the row is in the controller region and `s0/s1/s2` are interpreted as
-  controller selectors. When `perm_seg = 1`, the row is in the permutation segment and
-  `s0/s1/s2` are interpreted as witness columns, not selectors.
+- **`s_ctrl` / `s_perm` are the authoritative sub-chiplet discriminators.**  
+  Controller rows have `s_ctrl = 1, s_perm = 0`; permutation rows have
+  `s_ctrl = 0, s_perm = 1`. Non-hasher rows have `s_ctrl = s_perm = 0`. The
+  tri-state constraints in `selectors.rs` enforce booleanity of each selector and
+  of their sum, so at most one fires on any row. On controller rows, `s0/s1/s2`
+  are interpreted as sub-selectors; on permutation rows the same physical
+  columns hold S-box witnesses.
+
+- **Trace ordering is enforced by selector transitions.**  
+  The transitions `ctrl → ctrl | perm`, `perm → perm | s0`, and `s0 → s0`
+  guarantee that the controller section comes first, the permutation section
+  comes second, and any remaining chiplets follow in the `s0` region.
 
 - **Only controller rows participate in the external chiplets interface.**  
-  The controller region is the only region that sends or receives hasher messages on
-  `b_chiplets`. The permutation segment is internal compute only.
+  The controller is the only sub-chiplet that sends or receives hasher messages
+  on `b_chiplets`. The permutation segment is internal compute only.
 
 - **Permutation cycles are aligned.**  
-  Entering the permutation segment can happen only at packed cycle row `0`, and leaving the
-  hasher while still in the permutation segment can happen only at packed cycle row `15`.
+  Entering the permutation segment can happen only at packed cycle row `0`, and
+  leaving the hasher while still in the permutation segment can happen only at
+  packed cycle row `15`. These alignment constraints live in `permutation/mod.rs`
+  and use the precomputed `next_is_first` and `is_last` flags from
+  [`ChipletFlags`].
 
 - **Multiplicity is cycle-wide.**  
-  On permutation rows, `node_index` is repurposed as a multiplicity counter. It must stay
-  constant within a cycle so that one multiplicity is attached to the entire permutation.
+  On permutation rows, the column physically shared with `node_index` is
+  interpreted as a multiplicity counter. It must stay constant within a cycle
+  so that one multiplicity is attached to the entire permutation.
 
 - **Witness reuse is explicit.**  
-  On packed internal rows, `s0/s1/s2` carry witness values for internal-round S-box outputs.
-  On row `11`, only `s0` is used as a witness. Unused witness slots are constrained to zero.
+  On packed internal rows, `(s0, s1, s2)` carry witness values for
+  internal-round S-box outputs (`w0, w1, w2`). On row `11`, only `w0` is used.
+  Unused witness slots are constrained to zero. Similarly, `mrupdate_id`,
+  `is_boundary`, and `direction_bit` are forced to zero on permutation rows so
+  they cannot leak controller-side meaning into the permutation gate.
 
 - **Merkle routing happens entirely in the controller region.**  
-  Merkle-specific values (`node_index`, `direction_bit`, `mrupdate_id`) have controller
-  semantics only. The permutation segment does not carry Merkle routing meaning.
+  Merkle-specific values (`node_index`, `direction_bit`, `mrupdate_id`) have
+  controller semantics only. The permutation segment does not carry Merkle
+  routing meaning.
 
 - **Sibling-table balancing is partitioned by `mrupdate_id`.**  
-  The old-path and new-path legs of a single `MRUPDATE` share the same `mrupdate_id`, and
-  different updates use different IDs. This prevents sibling entries from unrelated updates
-  from cancelling each other.
+  The old-path and new-path legs of a single `MRUPDATE` share the same
+  `mrupdate_id`, and different updates use different IDs. This prevents sibling
+  entries from unrelated updates from cancelling each other.
 
 ## Controller region
 
@@ -199,20 +236,23 @@ The packed schedule uses the shared round-constant columns as follows:
 
 ### Witness columns on permutation rows
 
-On permutation rows, `(s0, s1, s2)` hold witness values:
+On permutation rows, `(s0, s1, s2)` — the same physical columns that hold
+the hasher-internal sub-selectors on controller rows — hold witness values
+`(w0, w1, w2)`:
 
-- rows `4..10`: `s0, s1, s2` are the three S-box outputs for the packed internal
-  rounds,
-- row `11`: `s0` is the S-box output for the final internal round,
+- rows `4..10`: `w0, w1, w2` are the three S-box outputs for the packed
+  internal rounds,
+- row `11`: `w0` is the S-box output for the final internal round,
 - all other permutation rows: unused witness slots are constrained to zero.
 
-Reusing `s0/s1/s2` as witnesses keeps the packed internal rows within the degree-9
-budget.
+Reusing these physical columns as witnesses keeps the packed internal rows
+within the degree-9 budget.
 
-Independently, `perm_seg` is the authoritative controller/permutation
-discriminator: any consumer that interprets `s0/s1/s2` as selectors must first
-gate on `perm_seg = 0` (equivalently, `controller_flag`). On permutation rows
-these columns are witnesses, not selectors.
+The chiplet-level selectors `s_ctrl` and `s_perm` are the authoritative
+sub-chiplet discriminators: any consumer that needs to interpret the shared
+columns as controller sub-selectors must first gate on `s_ctrl = 1`. The
+constraint code does this via the precomputed `ControllerFlags::is_active`
+(= `s_ctrl`) and `PermutationCols::witnesses` accessors.
 
 ## Buses
 
@@ -270,21 +310,39 @@ that both legs use the same siblings.
 
 At a high level, the hasher AIR enforces:
 
-- selector booleanity on controller rows,
-- `perm_seg` confinement, booleanity, monotonicity, and cycle alignment,
-- structural confinement of `is_boundary` and `direction_bit`,
-- well-formed controller `(input, output)` pairing,
+- chiplet tri-state selector partition and transition rules for `s_ctrl` and
+  `s_perm` (in `selectors.rs`, shared with other chiplets),
+- `s0/s1/s2` sub-selector booleanity on controller rows,
+- well-formed controller `(input, output)` pairing (adjacency, output
+  non-adjacency, padding stability, first-row boundary),
+- structural confinement of `is_boundary`, `direction_bit`, and `mrupdate_id`
+  on both sub-chiplets (zero on permutation rows; booleanity on controller
+  rows),
 - packed Poseidon2 permutation transitions in the permutation segment,
+- permutation cycle alignment (entry at cycle row 0, exit at cycle row 15) and
+  multiplicity constancy within a cycle,
 - capacity preservation across sponge continuation boundaries,
-- Merkle index, routing, and capacity-zeroing rules,
-- zero `mrupdate_id` on permutation rows and correct progression on controller rows.
+- Merkle index decomposition, cross-step index continuity, direction-bit
+  forward propagation, digest routing, and capacity-zeroing rules,
+- `mrupdate_id` progression on controller-to-controller transitions.
 
-The high-degree Poseidon2 step constraints are gated by `perm_seg` and periodic
-step selectors, keeping the overall degree within the system limit.
+The high-degree Poseidon2 step constraints are gated by the degree-1 `s_perm`
+selector and by periodic step selectors, which keeps the overall constraint
+degree at the system's max of 9.
 
 ## Detailed constraint structure
 
-The full set of constraints is in `air/src/constraints/chiplets/hasher/*`.
+The full set of constraints is split across:
+
+- `air/src/constraints/chiplets/selectors.rs` — chiplet tri-state selector
+  system, booleanity, transition rules, precomputed `ChipletFlags`.
+- `air/src/constraints/chiplets/hasher_control/` — controller sub-chiplet:
+  lifecycle, Merkle routing, capacity preservation, `mrupdate_id` progression.
+- `air/src/constraints/chiplets/permutation/` — permutation sub-chiplet: cycle
+  alignment, multiplicity constancy, unused-column zeroing, packed Poseidon2
+  step constraints.
+- `air/src/constraints/chiplets/columns.rs` — `ControllerCols`,
+  `PermutationCols`, and `HasherPeriodicCols` definitions.
 
 This section does **not** attempt to describe every constraint. Instead,
 it records the key structural constraints and representative formulas that
@@ -295,32 +353,41 @@ capture the key design decisions.
 The following formulas capture the most important structure of the current
 hasher AIR.
 
-### Controller selectors, lifecycle, and `perm_seg`
+### Controller selectors, lifecycle, and the tri-state selector system
 
-On **controller rows**, `s0/s1/s2` are ordinary selectors. On **permutation
-rows**, they are witness columns. As a result, the AIR treats `perm_seg` as the
-authoritative controller/permutation discriminator.
+On **controller rows** (`s_ctrl = 1`), `s0/s1/s2` are ordinary sub-selectors.
+On **permutation rows** (`s_perm = 1`), the same physical columns are witness
+columns `w0/w1/w2`. The chiplet-level `s_ctrl` and `s_perm` are the authoritative
+discriminators between the two sub-chiplets.
 
-Concretely, the AIR enforces:
+The tri-state selector system in `selectors.rs` enforces:
 
-- `perm_seg` is binary,
-- `perm_seg` can only be non-zero on hasher rows,
-- once `perm_seg` becomes `1` inside the hasher region it cannot return to `0`,
-- entering the permutation segment can happen only at packed cycle row `0`,
-- exiting the hasher while still in the permutation segment can happen only at
-  packed cycle row `15`,
-- `node_index` is constant on all non-boundary permutation rows, so a single
-  multiplicity is attached to the whole cycle.
+- booleanity of `s_ctrl`, `s_perm`, and their sum `s_ctrl + s_perm` (so at most
+  one can be 1 on any given row),
+- transition rules:
+  - `s_ctrl = 1 → s_ctrl' + s_perm' = 1` (a controller row must be followed by
+    another controller row or the first permutation row),
+  - `s_perm = 1 → s_ctrl' = 0` (once in permutation, the hasher cannot return
+    to the controller),
+  - `s0 = 1 → s_ctrl' = 0 ∧ s_perm' = 0` (once in the non-hasher region, stay
+    there),
+- a last-row invariant that forces `s_ctrl = s_perm = 0` on the final trace row,
+  so every chiplet's `is_active` flag vanishes there.
+
+Permutation cycle alignment (entry at cycle row 0, exit at cycle row 15) and
+multiplicity constancy are enforced by the permutation sub-chiplet in
+`permutation/mod.rs` using the precomputed `next_is_first` and `is_last`
+flags from `ChipletFlags`.
 
 The first-row controller constraint is intentionally strong:
 
 ```text
-s0 * (1 - perm_seg) = 1
+s_ctrl * s0 = 1  (on the first trace row)
 ```
 
-This forces the first hasher row to be a controller input row and prevents a
-permutation row from masquerading as one by placing an arbitrary witness value in
-`s0`.
+This forces the first hasher row to be a controller *input* row (`s_ctrl = 1`
+AND `s0 = 1`). Because `s0` is a witness column on permutation rows, this
+also rules out a permutation row masquerading as the first row.
 
 The controller structure is then completed by:
 
@@ -356,8 +423,8 @@ where `ark` is the row's external round-constant vector.
 
 #### 3. Rows 4-10: packed triples of internal rounds
 
-These rows use `s0/s1/s2` as witnesses for the three internal-round S-box
-outputs. If we define:
+These rows use the shared physical columns `(s0, s1, s2)` as witnesses
+`(w0, w1, w2)` for the three internal-round S-box outputs. If we define:
 
 - `y^(0) = h`,
 - `w_k = (y^(k)[0] + ark_k)^7` for `k in {0,1,2}`,
@@ -368,12 +435,12 @@ then the row enforces:
 - three witness equations `w_k - (y^(k)[0] + ark_k)^7 = 0`, and
 - `h_next = y^(3)`.
 
-This is the core packing idea, namely the witness equations carry the nonlinearity,
-while the final next-state relation stays affine.
+This is the core packing idea: the witness equations carry the nonlinearity,
+while the final next-state relation stays affine in the trace columns.
 
 #### 4. Row 11: merged final internal round + first terminal external round
 
-Row 11 uses only `s0` as a witness:
+Row 11 uses only `w0` as a witness:
 
 ```text
 w0 = (h[0] + ARK_INT[21])^7
@@ -386,6 +453,11 @@ y = M_I(h with lane 0 replaced by w0)
 h_next = M_E(S(y + ark))
 ```
 
+The internal round constant `ARK_INT[21]` is hard-coded in the constraint
+rather than read from a periodic column: row 11 is the only row gated by
+`is_int_ext`, so a periodic column would waste 15 zero slots to deliver one
+value.
+
 #### 5. Row 15: boundary / final state
 
 The final row of the packed cycle stores the final permutation output and has no
@@ -393,15 +465,20 @@ next-state permutation-step constraint.
 
 ### Unused witness zeroing
 
-Because `s0/s1/s2` are witnesses on permutation rows, the AIR also constrains
-unused witness slots to zero:
+Because the physical columns that hold `s0/s1/s2` on controller rows become
+witnesses `w0/w1/w2` on permutation rows, the AIR constrains unused witness
+slots to zero:
 
 - rows `0..3` and `12..15`: `w0 = w1 = w2 = 0`,
 - row `11`: `w1 = w2 = 0`.
 
-These constraints are primarily defensive they make permutation rows maximally inert and reduce the
-chance that some other selector consumer accidentally interprets witness values
-as controller selectors.
+Similarly, `mrupdate_id`, `is_boundary`, and `direction_bit` are forced to
+zero on all permutation rows (see `PermutationCols::_mrupdate_id`,
+`_is_boundary`, `_direction_bit`).
+
+These constraints are primarily defensive: they make permutation rows inert
+with respect to any constraint that might read the shared columns as if they
+were controller sub-selectors or routing metadata.
 
 ### Sponge continuation capacity preservation
 
@@ -427,15 +504,27 @@ The AIR enforces:
 idx = 2 * idx_next + direction_bit
 ```
 
-- direction-bit booleanity,
-- continuity of the shifted index across non-final output -> next-input
+- direction-bit booleanity on Merkle input rows,
+- `direction_bit = 0` on sponge input rows and `HOUT` output rows (confinement),
+- continuity of the shifted index across non-final output → next-input
   boundaries,
 - zero capacity on Merkle input rows,
-- `node_index = 0` on digest-return (`HOUT`) rows.
+- `node_index = 0` on sponge input rows and on digest-return (`HOUT`) rows.
 
 In addition, on non-final Merkle boundaries the output row carries the next
-step's `direction_bit`, allowing the AIR to route the current digest into either
-`RATE0` or `RATE1` of the next Merkle input row.
+step's `direction_bit` (forward propagation), allowing the AIR to route the
+current digest into either `RATE0` or `RATE1` of the next Merkle input row.
+
+A small degree optimization is used for the Merkle-next gate: instead of
+computing the full `f_merkle_input_next` (degree 3) to detect that the next
+row is a Merkle input, the routing constraints use a lightweight
+`s1' + s2'` expression (degree 1) which is nonzero exactly on Merkle inputs
+(`(0,1), (1,0), (1,1)`) and zero on sponge inputs. The non-unit value `2`
+on MU rows is harmless because the constraint is gated by `on_output * (1 -
+is_boundary)`, and the digest routing equation is linear in the gate. A
+malicious prover cannot bypass routing by mislabeling a Merkle input as
+sponge: the chiplets bus would then fire a sponge message with no matching
+decoder request.
 
 ### `mrupdate_id` and sibling-table soundness
 
@@ -510,33 +599,55 @@ sibling_word)`, unrelated updates cannot cancel each other.
 
 The hasher design is implemented across the following files:
 
-- `air/src/constraints/chiplets/hasher/selectors.rs`  
-  Controller structure, `perm_seg` rules, lifecycle, and padding constraints.
+- `air/src/constraints/chiplets/selectors.rs`  
+  Chiplet-level tri-state selector system (`s_ctrl`, `s_perm`, virtual `s0`,
+  `s1..s4`), booleanity, transition rules, last-row invariant, and precomputed
+  `ChipletFlags` (`is_active`, `is_transition`, `is_last`, `next_is_first`) for
+  every chiplet.
 
-- `air/src/constraints/chiplets/hasher/state.rs`  
-  Packed Poseidon2 transition constraints, witness usage, and unused-witness
-  zeroing rules.
+- `air/src/constraints/chiplets/hasher_control/mod.rs`  
+  Controller sub-chiplet entry point: first-row boundary, sub-selector
+  booleanity, input/output/padding adjacency, `mrupdate_id` progression,
+  RESPAN capacity preservation.
 
-- `air/src/constraints/chiplets/hasher/merkle.rs`  
-  Merkle index decomposition, continuity, routing, and zero-capacity rules.
+- `air/src/constraints/chiplets/hasher_control/flags.rs`  
+  Pre-computed `ControllerFlags` struct: sub-operation flags
+  (`on_sponge`, `on_merkle_input`, `on_hout`, `on_sout`, `on_padding`) and
+  next-row flags used by transition constraints.
 
-- `air/src/constraints/chiplets/hasher/periodic.rs`  
-  Packed 16-row schedule and periodic round-constant encoding.
+- `air/src/constraints/chiplets/hasher_control/merkle.rs`  
+  Merkle index decomposition, direction-bit booleanity/confinement/forward
+  propagation, zero-capacity rule for Merkle inputs, cross-step index
+  continuity, and digest routing.
+
+- `air/src/constraints/chiplets/permutation/mod.rs`  
+  Permutation sub-chiplet entry point: Poseidon2 step gating, cycle alignment
+  (entry at row 0, exit at row 15), multiplicity constancy, and structural
+  zeroing of unused metadata columns.
+
+- `air/src/constraints/chiplets/permutation/state.rs`  
+  Packed 16-row Poseidon2 transition constraints and unused-witness zeroing.
+
+- `air/src/constraints/chiplets/columns.rs`  
+  `ControllerCols`, `PermutationCols`, and `HasherPeriodicCols` (including the
+  packed 16-row schedule and round-constant encoding).
 
 - `air/src/constraints/chiplets/bus/chiplets.rs`  
-  Hasher messages visible to the rest of the VM.
+  Hasher messages visible to the rest of the VM via `b_chiplets`.
 
 - `air/src/constraints/chiplets/bus/wiring.rs`  
-  Controller-to-permutation permutation-link relation on `v_wiring`.
+  Controller-to-permutation perm-link relation on the shared `v_wiring`
+  column.
 
 - `air/src/constraints/chiplets/bus/hash_kernel.rs`  
-  Sibling-table and `log_precompile`-related hasher interactions.
+  Sibling-table balancing and `log_precompile`-related hasher interactions
+  on `b_hash_kernel`.
 
 - `processor/src/trace/chiplets/hasher/trace.rs`  
   Trace generation for the controller and packed permutation segment.
 
 - `processor/src/trace/chiplets/aux_trace/hasher_perm.rs`  
-  Auxiliary trace generation for the permutation-link running sum.
+  Auxiliary trace generation for the perm-link running sum.
 
 ## Soundness-critical design points
 
@@ -557,12 +668,15 @@ A few aspects of the packed design are especially important:
 
 Implementation files:
 
-- `air/src/constraints/chiplets/hasher/mod.rs`
-- `air/src/constraints/chiplets/hasher/selectors.rs`
-- `air/src/constraints/chiplets/hasher/state.rs`
-- `air/src/constraints/chiplets/hasher/merkle.rs`
-- `air/src/constraints/chiplets/hasher/periodic.rs`
-- `processor/src/trace/chiplets/hasher/trace.rs`
-- `processor/src/trace/chiplets/aux_trace/hasher_perm.rs`
+- `air/src/constraints/chiplets/selectors.rs`
+- `air/src/constraints/chiplets/columns.rs`
+- `air/src/constraints/chiplets/hasher_control/mod.rs`
+- `air/src/constraints/chiplets/hasher_control/flags.rs`
+- `air/src/constraints/chiplets/hasher_control/merkle.rs`
+- `air/src/constraints/chiplets/permutation/mod.rs`
+- `air/src/constraints/chiplets/permutation/state.rs`
 - `air/src/constraints/chiplets/bus/chiplets.rs`
 - `air/src/constraints/chiplets/bus/wiring.rs`
+- `air/src/constraints/chiplets/bus/hash_kernel.rs`
+- `processor/src/trace/chiplets/hasher/trace.rs`
+- `processor/src/trace/chiplets/aux_trace/hasher_perm.rs`

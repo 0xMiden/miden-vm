@@ -17,15 +17,13 @@ use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess}
 use crate::{
     Felt, MainCols, MidenAirBuilder,
     constraints::{
-        bus::indices::B_HASH_KERNEL,
-        chiplets::{hasher::flags, selectors::ChipletSelectors},
-        op_flags::OpFlags,
+        bus::indices::B_HASH_KERNEL, chiplets::selectors::ChipletSelectors, op_flags::OpFlags,
     },
     trace::{
         CHIPLETS_OFFSET, Challenges, LOG_PRECOMPILE_LABEL, bus_types,
         chiplets::{
-            HASHER_MRUPDATE_ID_COL_IDX, HASHER_NODE_INDEX_COL_IDX, HASHER_PERM_SEG_COL_IDX,
-            HASHER_SELECTOR_COL_RANGE, HASHER_STATE_COL_RANGE, NUM_ACE_SELECTORS,
+            HASHER_MRUPDATE_ID_COL_IDX, HASHER_NODE_INDEX_COL_IDX, HASHER_SELECTOR_COL_RANGE,
+            HASHER_STATE_COL_RANGE, NUM_ACE_SELECTORS,
             ace::{
                 ACE_INSTRUCTION_ID1_OFFSET, ACE_INSTRUCTION_ID2_OFFSET, CLK_IDX, CTX_IDX,
                 EVAL_OP_IDX, ID_1_IDX, ID_2_IDX, PTR_IDX, SELECTOR_BLOCK_IDX, V_0_0_IDX, V_0_1_IDX,
@@ -45,7 +43,6 @@ const S_START: usize = HASHER_SELECTOR_COL_RANGE.start - CHIPLETS_OFFSET;
 const H_START: usize = HASHER_STATE_COL_RANGE.start - CHIPLETS_OFFSET;
 const IDX_COL: usize = HASHER_NODE_INDEX_COL_IDX - CHIPLETS_OFFSET;
 const MRUPDATE_ID_COL: usize = HASHER_MRUPDATE_ID_COL_IDX - CHIPLETS_OFFSET;
-const PERM_SEG_COL: usize = HASHER_PERM_SEG_COL_IDX - CHIPLETS_OFFSET;
 
 // ENTRY POINTS
 // ================================================================================================
@@ -62,7 +59,7 @@ pub fn enforce_hash_kernel_constraint<AB>(
     next: &MainCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
     challenges: &Challenges<AB::ExprEF>,
-    _selectors: &ChipletSelectors<AB::Expr>,
+    selectors: &ChipletSelectors<AB::Expr>,
 ) where
     AB: MidenAirBuilder,
 {
@@ -84,16 +81,12 @@ pub fn enforce_hash_kernel_constraint<AB>(
     // COMMON VALUES
     // =========================================================================
 
-    // Hasher chiplet rows have s0 = 0 (chiplet selector).
-    let chiplet_selector: AB::Expr = local.chiplet_selectors()[0].into();
-    let is_hasher: AB::Expr = one.clone() - chiplet_selector.clone();
+    // Controller flag from the precomputed chiplet selectors.
+    let controller_flag: AB::Expr = selectors.controller.is_active.clone();
 
-    // Hasher controller flag: active on hasher controller rows (perm_seg=0), not on
-    // hasher permutation segment rows (perm_seg=1).
-    let perm_seg: AB::Expr = local.chiplets[PERM_SEG_COL].into();
-    let controller_flag: AB::Expr = is_hasher.clone() * (one.clone() - perm_seg);
-
-    // Hasher operation selectors (only meaningful on hasher controller rows)
+    // Hasher operation selectors (only meaningful on hasher controller rows).
+    // On controller rows: `s0=1` = input row, `(s0,s1,s2)` encodes the operation.
+    // On permutation rows these columns hold S-box witnesses — gated out by controller_flag.
     let s0: AB::Expr = local.chiplets[S_START].into();
     let s1: AB::Expr = local.chiplets[S_START + 1].into();
     let s2: AB::Expr = local.chiplets[S_START + 2].into();
@@ -113,8 +106,10 @@ pub fn enforce_hash_kernel_constraint<AB>(
     // In the controller/perm split, sibling table operations happen on controller input rows
     // for MU (new path - requests/removes) and MV (old path - responses/adds).
     // All MU/MV input rows participate (not just is_start=1).
-    let f_mu: AB::Expr = controller_flag.clone() * flags::f_mu(s0.clone(), s1.clone(), s2.clone());
-    let f_mv: AB::Expr = controller_flag.clone() * flags::f_mv(s0.clone(), s1.clone(), s2.clone());
+    // f_mu = s0 * s1 * s2, f_mv = s0 * s1 * !s2
+    let f_mu: AB::Expr = controller_flag.clone() * s0.clone() * s1.clone() * s2.clone();
+    let f_mv: AB::Expr =
+        controller_flag.clone() * s0.clone() * s1.clone() * (AB::Expr::ONE - s2.clone());
 
     // Direction bit b = input_node_index - 2 * output_node_index (next row is the paired output).
     let b: AB::Expr = node_index.clone() - node_index_next.clone().double();
@@ -130,13 +125,8 @@ pub fn enforce_hash_kernel_constraint<AB>(
     // ACE MEMORY FLAGS AND VALUES
     // =========================================================================
 
-    // ACE chiplet selector: s0=1, s1=1, s2=1, s3=0
-    let s3: AB::Expr = local.chiplets[3].into();
-    let chiplet_s1: AB::Expr = local.chiplets[1].into();
-    let chiplet_s2: AB::Expr = local.chiplets[2].into();
-
-    let is_ace_row: AB::Expr =
-        chiplet_selector.clone() * chiplet_s1.clone() * chiplet_s2.clone() * (one.clone() - s3);
+    // ACE row flag from the precomputed chiplet selectors.
+    let is_ace_row: AB::Expr = selectors.ace.is_active.clone();
 
     // Block selector determines read (0) vs eval (1)
     let block_selector: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + SELECTOR_BLOCK_IDX].into();
