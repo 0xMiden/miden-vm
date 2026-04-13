@@ -611,6 +611,33 @@ fn test_continuation_stack_limit_exceeded() {
     assert_matches!(err, ExecutionError::Internal(msg) if msg.contains("continuation stack"));
 }
 
+/// Tests that a continuation stack size exactly equal to `max_num_continuations` succeeds.
+#[test]
+fn test_continuation_stack_limit_exactly_max_continuations_succeeds() {
+    let mut host = DefaultHost::default();
+
+    let program = {
+        let mut forest = MastForest::new();
+
+        let leaf_id = BasicBlockNodeBuilder::new(vec![Operation::Noop], Vec::new())
+            .add_to_forest(&mut forest)
+            .unwrap();
+
+        let root = JoinNodeBuilder::new([leaf_id, leaf_id]).add_to_forest(&mut forest).unwrap();
+        forest.make_root(root);
+        Program::new(forest.into(), root)
+    };
+
+    // A single join peaks at three continuations after the join start step:
+    // FinishJoin(root), StartNode(second), StartNode(first).
+    let options = ExecutionOptions::default().with_max_num_continuations(3);
+
+    let processor =
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options);
+
+    processor.execute_sync(&program, &mut host).unwrap();
+}
+
 // TEST HELPERS
 // -----------------------------------------------------------------------------------------------
 
