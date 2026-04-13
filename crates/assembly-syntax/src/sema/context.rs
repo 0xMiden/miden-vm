@@ -1,6 +1,6 @@
 use alloc::{
     boxed::Box,
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     sync::Arc,
     vec::Vec,
 };
@@ -19,8 +19,11 @@ pub struct AnalysisContext {
     constants: BTreeMap<Ident, Constant>,
     cached_constant_values: BTreeMap<Ident, ConstantValue>,
     used_constants: BTreeSet<Ident>,
-    /// When set, `get()` will not count a reference to this constant as a use.
-    /// This is used during constant simplification to exclude self-references.
+    /// Edges from a constant to the constants it references.
+    /// Used to compute transitive usage from real roots.
+    constant_deps: BTreeMap<Ident, BTreeSet<Ident>>,
+    /// When set, references are recorded as constant-to-constant edges
+    /// rather than marking the target as directly used.
     simplifying_constant: Option<Ident>,
     imported: BTreeSet<Ident>,
     procedures: BTreeSet<ProcedureName>,
@@ -45,7 +48,11 @@ impl constants::ConstEnvironment for AnalysisContext {
         if self.constants.contains_key(name) {
             let is_self_ref = self.simplifying_constant.as_ref() == Some(name);
             if !is_self_ref {
-                self.used_constants.insert(name.clone());
+                if let Some(ref parent) = self.simplifying_constant {
+                    self.constant_deps.entry(parent.clone()).or_default().insert(name.clone());
+                } else {
+                    self.used_constants.insert(name.clone());
+                }
             }
             if let Some(value) = self.cached_constant_values.get(name) {
                 return Ok(Some(CachedConstantValue::Hit(value)));
@@ -94,6 +101,7 @@ impl AnalysisContext {
             constants: Default::default(),
             cached_constant_values: Default::default(),
             used_constants: Default::default(),
+            constant_deps: Default::default(),
             simplifying_constant: None,
             imported: Default::default(),
             procedures: Default::default(),
@@ -138,6 +146,29 @@ impl AnalysisContext {
     /// (e.g. advice map entries) that should not trigger unused constant warnings.
     pub fn mark_constant_used(&mut self, name: &Ident) {
         self.used_constants.insert(name.clone());
+    }
+
+    /// Propagate usage from real roots through constant-to-constant edges.
+    ///
+    /// A constant is considered truly used if it is public, directly referenced
+    /// by a procedure body, or transitively referenced by such a constant.
+    /// This must be called before checking for unused constants.
+    pub fn resolve_constant_usage(&mut self) {
+        let mut worklist: VecDeque<Ident> = self.used_constants.iter().cloned().collect();
+        for (name, constant) in &self.constants {
+            if constant.visibility.is_public() {
+                worklist.push_back(name.clone());
+            }
+        }
+        while let Some(name) = worklist.pop_front() {
+            if let Some(deps) = self.constant_deps.get(&name) {
+                for dep in deps {
+                    if self.used_constants.insert(dep.clone()) {
+                        worklist.push_back(dep.clone());
+                    }
+                }
+            }
+        }
     }
 
     /// Define a new constant `constant`
