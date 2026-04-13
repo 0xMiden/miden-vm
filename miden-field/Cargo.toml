@@ -26,6 +26,7 @@ num-bigint              = { default-features = false, version = "0.4" }
 p3-challenger.workspace = true
 p3-field.workspace      = true
 p3-goldilocks.workspace = true
+p3-util.workspace       = true
 paste                   = { version = "1.0.15" }
 proptest                = { default-features = false, features = ["alloc", "std"], optional = true, version = "1.7" }
 rand                    = { default-features = false, version = "0.10" }

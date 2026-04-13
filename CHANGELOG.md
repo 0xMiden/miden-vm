@@ -5,12 +5,13 @@
 - Adds `LargeSmtForest::add_lineages` which provides an efficient means of adding multiple new lineages at once ([#910](https://github.com/0xMiden/crypto/pull/910)).
 - [BREAKING] Removed `LexicographicWord` as `Word` itself now implements the correct comparison behavior. Any place where the former is used should be able to seamlessly swap to the latter.
 - Added `Serializable` and `Deserializable` instances for `Arc<str>`.
-- [BREAKING] Removed `WORD_SIZE_FELTS` and `WORD_SIZE_BYTES` from `miden-field` in favor of `Word::NUM_FELTS` and `Word::SERIALIZED_SIZE`, respectively. The values remain the same.
-- [BREAKING] `WORD_SIZE` has been removed from `miden-crypto` in favor of `Word::NUM_FELTS`. Clients will need to update references to the constant, but `Word` will already be in scope as it is re-exported from `miden-crypto`.
+- [BREAKING] Removed `WORD_SIZE_FELTS` and `WORD_SIZE_BYTES` from `miden-field` in favor of `Word::NUM_ELEMENTS` and `Word::SERIALIZED_SIZE`, respectively. The values remain the same.
+- [BREAKING] `WORD_SIZE` has been removed from `miden-crypto` in favor of `Word::NUM_ELEMENTS`. Clients will need to update references to the constant, but `Word` will already be in scope as it is re-exported from `miden-crypto`.
 - [BREAKING] Removed implementations of `Deref` and `DerefMut` for `Felt`.
 - [BREAKING] Update `Poseidon2` instance to match Plonky3 one ([#905](https://github.com/0xMiden/crypto/pull/905)).
 - Use per-chunk scratch space for batch inversion ([#933](https://github.com/0xMiden/crypto/pull/933)).
 - [BREAKING] Changed the signature of `Felt::new` to perform reduction, and raise an error if the input is invalid. Retained the old behavior as `Felt::new_unchecked`, as its usage may lead to incorrect results.
+- Optimize field operations for `Goldilocks` ([#926](https://github.com/0xMiden/crypto/pull/926)).
 
 ## 0.23.0 (2026-03-11)
 
