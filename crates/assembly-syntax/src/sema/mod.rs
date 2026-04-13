@@ -172,6 +172,7 @@ pub fn analyze(
     }
 
     // Check unused constants
+    analyzer.resolve_constant_usage();
     for constant in module.constants() {
         if !analyzer.is_constant_used(constant) {
             analyzer.error(SemanticAnalysisError::UnusedConstant { span: constant.span });
