@@ -1,5 +1,6 @@
 [profile.default]
-default-filter = 'not (test(merkle::smt::full::concurrent) or test(merkle::smt::full::large) or binary(rocksdb_large_smt))'
+# The large-SMT module path is merkle::smt::large::...
+default-filter = 'not (test(merkle::smt::full::concurrent) or test(merkle::smt::large) or binary(rocksdb_large_smt))'
 fail-fast      = false
 failure-output = "immediate-final"
 
@@ -9,6 +10,6 @@ fail-fast      = false
 failure-output = "immediate-final"
 
 [profile.large-smt]
-default-filter = '(test(merkle::smt::full::large) or binary(rocksdb_large_smt))'
+default-filter = '(test(merkle::smt::large) or binary(rocksdb_large_smt))'
 fail-fast      = false
 failure-output = "immediate-final"

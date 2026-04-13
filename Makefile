@@ -102,7 +102,7 @@ test-p3-parallel: ## Run Miden STARK crate tests with the parallel feature enabl
 	cargo test $(MIDEN_STARK_TEST_PACKAGES) -F miden-lifted-stark/parallel
 
 .PHONY: test-large-smt
-test-large-smt: ## Run only large SMT tests
+test-large-smt: ## Run large SMT unit tests and RocksDB integration tests
 	cargo nextest run --success-output immediate --profile large-smt --cargo-profile test-release --features rocksdb
 
 .PHONY: test

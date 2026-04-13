@@ -18,13 +18,12 @@ permissions:
 
 jobs:
   test:
-    name: test ${{matrix.toolchain}} on ${{matrix.os}} with ${{matrix.args}}
-    runs-on: ${{matrix.os}}-latest
+    name: test ${{matrix.toolchain}} on ubuntu with ${{matrix.args}}
+    runs-on: warp-ubuntu-latest-x64-4x
     strategy:
       fail-fast: false
       matrix:
-        toolchain: [stable, nightly]
-        os: [ubuntu]
+        toolchain: [stable]
         args: [default, no-std, large-smt]
     timeout-minutes: 30
     steps:
@@ -32,6 +31,9 @@ jobs:
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       - uses: taiki-e/install-action@nextest
+      - uses: WarpBuilds/rust-cache@v2
+        with:
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install LLVM/Clang
         if: ${{ matrix.args == 'large-smt' }}
         uses: ./.github/actions/install-llvm
@@ -45,18 +47,21 @@ jobs:
 
   test-smt-concurrent:
     name: test-smt-concurrent ${{ matrix.toolchain }}
-    runs-on: ubuntu-latest
+    runs-on: warp-ubuntu-latest-x64-4x
     if: ${{ github.event_name == 'pull_request' && (github.base_ref == 'main' || github.base_ref == 'next') }}
     strategy:
       fail-fast: false
       matrix:
-        toolchain: [stable, nightly]
+        toolchain: [stable]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@main
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       - uses: taiki-e/install-action@nextest
+      - uses: WarpBuilds/rust-cache@v2
+        with:
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Perform concurrent SMT tests
         run: |
           rustup update --no-self-update ${{matrix.toolchain}}
