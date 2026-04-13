@@ -14,11 +14,13 @@ jobs:
     name: test on warp-ubuntu-latest-x64-4x
     runs-on: warp-ubuntu-latest-x64-4x
     steps:
-      - uses: actions/checkout@main
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
-      - uses: taiki-e/install-action@nextest
-      - uses: WarpBuilds/rust-cache@v2
+      - uses: taiki-e/install-action@e9fe1d0c24b9415d0c0be1429c063ba3e3a8b277 # nextest
+      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
         with:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
@@ -32,10 +34,12 @@ jobs:
     name: doc-tests
     runs-on: warp-ubuntu-latest-x64-4x
     steps:
-      - uses: actions/checkout@main
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
-      - uses: WarpBuilds/rust-cache@v2
+      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
         with:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
@@ -48,10 +52,12 @@ jobs:
     runs-on: warp-ubuntu-latest-x64-4x
     needs: [test, doc-tests]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
-      - uses: WarpBuilds/rust-cache@v2
+      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
         with:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
@@ -100,10 +106,12 @@ jobs:
     name: run masm examples
     runs-on: warp-ubuntu-latest-x64-4x
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
-      - uses: WarpBuilds/rust-cache@v2
+      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
         with:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
@@ -115,15 +123,17 @@ jobs:
     name: check all feature combinations
     runs-on: warp-ubuntu-latest-x64-4x
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
-      - uses: WarpBuilds/rust-cache@v2
+      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
         with:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
         run: rustup update --no-self-update
       - name: Install cargo-hack
-        uses: taiki-e/install-action@cargo-hack
+        uses: taiki-e/install-action@f5d11b430651d1f6ce680bbd182b55307055de52 # cargo-hack
       - name: Check all feature combinations
         run: make check-features

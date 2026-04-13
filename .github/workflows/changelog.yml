@@ -15,7 +15,7 @@ on:
 
 jobs:
   changelog-reusable:
-    uses: 0xMiden/.github/.github/workflows/changelog.yml@main
+    uses: 0xMiden/.github/.github/workflows/changelog.yml@d34ae3cd29234c5aa4d3ab57635b30563471c3c3
 
   changelog:
     runs-on: ubuntu-latest

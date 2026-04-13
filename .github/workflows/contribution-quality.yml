@@ -17,14 +17,15 @@ on:
         type: choice
         options: ["false", "true"]
 
-permissions:
-  contents: read
-  pull-requests: write
-  issues: write
+permissions: {}
 
 jobs:
   contribution-quality-reusable:
-    uses: 0xMiden/.github/.github/workflows/contribution-quality.yml@main
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    uses: 0xMiden/.github/.github/workflows/contribution-quality.yml@d34ae3cd29234c5aa4d3ab57635b30563471c3c3
     with:
       pr_number: ${{ github.event.inputs.pr_number || '' }}
       force_all: ${{ github.event.inputs.force_all || 'false' }}

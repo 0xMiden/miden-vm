@@ -16,10 +16,11 @@ jobs:
     name: cargo-deny on ubuntu-latest
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: taiki-e/install-action@v2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          tool: cargo-deny
+          persist-credentials: false
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --version 0.19.1 --locked
       - name: Check dependencies with cargo-deny
         run: cargo deny check
 
@@ -27,7 +28,9 @@ jobs:
     name: clippy nightly on ubuntu-latest
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       - name: Clippy
@@ -40,7 +43,9 @@ jobs:
     name: rustfmt check nightly on ubuntu-latest
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       - name: Rustfmt
@@ -53,7 +58,9 @@ jobs:
     name: doc stable on ubuntu-latest
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       - name: Build docs
