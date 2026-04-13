@@ -315,9 +315,10 @@ At a high level, the hasher AIR enforces:
 - `s0/s1/s2` sub-selector booleanity on controller rows,
 - well-formed controller `(input, output)` pairing (adjacency, output
   non-adjacency, padding stability, first-row boundary),
-- structural confinement of `is_boundary`, `direction_bit`, and `mrupdate_id`
-  on both sub-chiplets (zero on permutation rows; booleanity on controller
-  rows),
+- structural confinement on both sub-chiplets: `is_boundary`, `direction_bit`,
+  and `mrupdate_id` are zero on permutation rows, and `is_boundary` /
+  `direction_bit` are boolean on controller rows (`mrupdate_id` is a free
+  integer counter whose only controller-side rule is the progression below),
 - packed Poseidon2 permutation transitions in the permutation segment,
 - permutation cycle alignment (entry at cycle row 0, exit at cycle row 15) and
   multiplicity constancy within a cycle,
