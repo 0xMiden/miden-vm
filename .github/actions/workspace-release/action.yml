@@ -46,7 +46,7 @@ runs:
     # Install cargo-msrv for MSRV checks
     - name: Install cargo-msrv
       shell: bash
-      run: cargo install cargo-msrv
+      run: cargo install cargo-msrv --version 0.19.3 --locked
 
     # Keep your existing MSRV check
     - name: Check MSRV
