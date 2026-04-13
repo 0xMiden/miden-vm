@@ -57,14 +57,8 @@ runs:
       shell: bash
       run: cargo binstall --no-confirm --force cargo-msrv
 
-    - name: Install Rust 1.91 for cargo-msrv
-      shell: bash
-      run: rustup toolchain install 1.91
-
     - name: Check MSRV
       shell: bash
-      env:
-        RUSTUP_TOOLCHAIN: "1.91"
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
         ./scripts/check-msrv.sh

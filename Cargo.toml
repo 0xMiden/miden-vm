@@ -94,7 +94,7 @@ x25519-dalek     = { default-features = false, version = "2.0" }
 clap               = { features = ["derive"], version = "4" }
 criterion          = { features = ["html_reports"], version = "0.8" }
 postcard           = { default-features = false, features = ["alloc"], version = "1" }
-rand               = { default-features = false, version = "0.10.0" }
+rand               = { default-features = false, version = "0.10" }
 serde              = { default-features = false, features = ["alloc", "derive"], version = "1.0" }
 thiserror          = { default-features = false, version = "2.0" }
 tracing            = { default-features = false, features = ["attributes"], version = "0.1.37" }
