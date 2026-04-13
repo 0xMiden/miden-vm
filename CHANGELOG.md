@@ -38,7 +38,12 @@
 
 - Fixed stale `ReplayProcessor` doc comment links to `ExecutionTracer` after module-structure refactors.
 
-## 0.22.0 (2025-03-18)
+## 0.22.1 (2026-04-07)
+
+- Implemented project assembly ([#2877](https://github.com/0xMiden/miden-vm/pull/2877)).
+- Added `FastProcessor::into_parts()` to extract advice provider, memory, and precompile transcript after step-based execution ([#2901](https://github.com/0xMiden/miden-vm/pull/2901)).
+
+## 0.22.0 (2026-03-18)
 
 #### Enhancements
 

@@ -7,11 +7,11 @@ const PRINTLN_ADDR = SYSCALL_TABLE_ADDR + 2
 #! Initializes the kernel environment
 pub proc init
     procref.is_valid_syscall
-    mem_storew_be.SYSCALL_TABLE_ADDR
+    mem_storew_le.SYSCALL_TABLE_ADDR
     procref.$kernel::sys::panic
-    mem_storew_be.PANIC_ADDR
+    mem_storew_le.PANIC_ADDR
     procref.$kernel::io::println
-    mem_storew_be.PRINTLN_ADDR
+    mem_storew_le.PRINTLN_ADDR
 end
 
 #! Execute one of this kernel's syscalls
@@ -24,7 +24,7 @@ pub proc system_call
     # validate syscall id
     dup.0 mem_load.SYSCALL_TABLE_ADDR dynexec
     # invoke the syscall
-    add.SYSCALL_TABLE_ADDR mem_loadw_be dynexec
+    add.SYSCALL_TABLE_ADDR mem_loadw_le dynexec
 end
 
 proc is_valid_syscall
