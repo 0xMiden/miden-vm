@@ -277,6 +277,15 @@ impl Linker {
     pub fn link_module(&mut self, module: &mut Module) -> Result<ModuleIndex, LinkerError> {
         log::debug!(target: "linker", "adding unprocessed module {}", module.path());
 
+        // Reject the module early if it was parsed with a different source manager.
+        // Compiling a mismatched module would use the wrong source manager for span
+        // resolution, which can produce garbled diagnostics or panics.
+        if let Some(source_file) = module.source_file()
+            && !self.source_manager.is_manager_of(source_file)
+        {
+            return Err(LinkerError::SourceManagerMismatch { path: module.path().into() });
+        }
+
         let is_duplicate = self.find_module_index(module.path()).is_some();
         if is_duplicate {
             return Err(LinkerError::DuplicateModule { path: module.path().into() });
@@ -316,7 +325,7 @@ impl Linker {
             module.path().into(),
         )
         .with_advice_map(module.advice_map().clone())
-        .with_source_file(Some(module.source_file().clone()))
+        .with_source_file(module.source_file().cloned())
         .with_symbols(symbols);
 
         self.modules.push(link_module);

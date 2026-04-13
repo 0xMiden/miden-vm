@@ -5,10 +5,7 @@ use miden_core::{
     advice::AdviceMap,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
-use miden_debug_types::{
-    SourceContent, SourceFile, SourceId, SourceLanguage, SourceManager, SourceSpan, Span, Spanned,
-    Uri,
-};
+use miden_debug_types::{SourceFile, SourceManager, SourceSpan, Span, Spanned};
 use miden_utils_diagnostics::Report;
 use smallvec::SmallVec;
 
@@ -129,11 +126,15 @@ pub struct Module {
     pub(crate) items: Vec<Export>,
     /// AdviceMap that this module expects to be loaded in the host before executing.
     pub(crate) advice_map: AdviceMap,
-    /// The source file from which this module was parsed.
+    /// The source file from which this module was parsed, if any.
     ///
-    /// This is used to verify that the source manager used during assembly is the same one that
-    /// was used to parse this module, via pointer identity ([`SourceManager::is_manager_of`]).
-    source_file: Arc<SourceFile>,
+    /// This is `None` for programmatically-constructed modules (e.g. `new_kernel()`,
+    /// `new_executable()`) that have no backing source text.
+    ///
+    /// When present, it is used to verify that the source manager used during assembly is the
+    /// same one that was used to parse this module, via pointer identity
+    /// ([`SourceManager::is_manager_of`]).
+    source_file: Option<Arc<SourceFile>>,
 }
 
 /// Constants
@@ -152,7 +153,11 @@ impl Module {
 impl Module {
     /// Creates a new [Module] with the specified `kind` and fully-qualified path, e.g.
     /// `std::math::u64`.
-    pub fn new(kind: ModuleKind, path: impl AsRef<Path>, source_file: Arc<SourceFile>) -> Self {
+    pub fn new(
+        kind: ModuleKind,
+        path: impl AsRef<Path>,
+        source_file: Option<Arc<SourceFile>>,
+    ) -> Self {
         let path = path.as_ref().to_absolute().into_owned();
         Self {
             span: Default::default(),
@@ -167,21 +172,12 @@ impl Module {
 
     /// An alias for creating the default, but empty, `#kernel` [Module].
     pub fn new_kernel() -> Self {
-        Self::new(ModuleKind::Kernel, Path::kernel_path(), Self::empty_source_file())
+        Self::new(ModuleKind::Kernel, Path::kernel_path(), None)
     }
 
     /// An alias for creating the default, but empty, `$exec` [Module].
     pub fn new_executable() -> Self {
-        Self::new(ModuleKind::Executable, Path::exec_path(), Self::empty_source_file())
-    }
-
-    /// Creates a synthetic, empty [`SourceFile`] for programmatically constructed modules
-    /// that have no backing source text.
-    fn empty_source_file() -> Arc<SourceFile> {
-        Arc::new(SourceFile::from_raw_parts(
-            SourceId::default(),
-            SourceContent::new(SourceLanguage::Masm, Uri::from("synthetic"), String::new()),
-        ))
+        Self::new(ModuleKind::Executable, Path::exec_path(), None)
     }
 
     /// Specifies the source span in the source file in which this module was defined, that covers
@@ -458,9 +454,11 @@ impl Module {
         &self.advice_map
     }
 
-    /// Returns the source file from which this module was parsed.
-    pub fn source_file(&self) -> &Arc<SourceFile> {
-        &self.source_file
+    /// Returns the source file from which this module was parsed, if any.
+    ///
+    /// Returns `None` for programmatically-constructed modules that have no backing source text.
+    pub fn source_file(&self) -> Option<&Arc<SourceFile>> {
+        self.source_file.as_ref()
     }
 
     /// Get an iterator over the constants defined in this module.

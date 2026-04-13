@@ -11,8 +11,8 @@ use std::{
 
 use miden_assembly_syntax::{
     MAX_REPEAT_COUNT,
-    ast::Path,
-    debuginfo::{DefaultSourceManager, SourceManager},
+    ast::{Block, Instruction, Op, Path, Procedure, Visibility},
+    debuginfo::{DefaultSourceManager, SourceManager, Span},
     diagnostics::WrapErr,
     library::LibraryExport,
 };
@@ -5795,19 +5795,45 @@ fn test_linking_recursive_expansion_via_renamed_aliases() -> TestResult {
 }
 
 #[test]
-fn assemble_library_with_mismatched_source_manager_returns_error() {
-    // Source manager A: used by the assembler (empty — no files loaded).
+fn mismatched_source_manager_caught_before_lowering() {
+    // Source manager A (assembler's): pre-load a short file so it occupies SourceId(0).
     let sm_a: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+    let _dummy = Module::parser(ModuleKind::Library)
+        .parse_str("lib::dummy", "pub proc dummy\n  nop\nend", sm_a.clone())
+        .unwrap();
+
     let assembler = Assembler::new(sm_a);
 
-    // Source manager B: external, used to parse the module we will assemble.
+    // Source manager B (external): parse a module whose code will trigger a compile error
+    // during lowering. `loc_loadw_be.2` fails because 2 is not word-aligned (must be a
+    // multiple of 4). The error formatting tries to resolve the instruction's source span
+    // via the assembler's source manager, which returns the wrong file.
     let sm_b: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
     let module = Module::parser(ModuleKind::Library)
-        .parse_str("lib::external", "pub proc bar\n  push.1\n  push.2\n  add\nend", sm_b)
+        .parse_str("lib::external", "@locals(4) pub proc bar\n  loc_loadw_be.2\nend", sm_b)
         .unwrap();
 
     let result = assembler.assemble_library([module]);
     let err = result.expect_err("should fail with source manager mismatch");
     let msg = err.to_string();
     assert!(msg.contains("source manager mismatch"), "unexpected error: {msg}");
+}
+
+#[test]
+fn programmatic_module_without_source_file_assembles_ok() -> TestResult {
+    let context = TestContext::default();
+
+    let mut module = Module::new(ModuleKind::Library, "lib::programmatic", None);
+    let nop_body = Block::new(Default::default(), vec![Op::Inst(Span::unknown(Instruction::Nop))]);
+    let procedure = Procedure::new(
+        Default::default(),
+        Visibility::Public,
+        "nop_proc".parse().unwrap(),
+        0,
+        nop_body,
+    );
+    module.define_procedure(procedure, context.source_manager()).unwrap();
+
+    context.assemble_library([alloc::boxed::Box::new(module)])?;
+    Ok(())
 }
