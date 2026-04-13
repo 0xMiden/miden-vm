@@ -5856,3 +5856,59 @@ fn public_constant_no_warning() -> TestResult {
     let _library = context.assemble_library([module])?;
     Ok(())
 }
+
+#[test]
+fn chained_unused_constants_both_warn() {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "
+        const A = 1
+        const B = A
+
+        begin
+            push.1
+        end"
+    );
+
+    assert_assembler_diagnostic!(
+        context,
+        source,
+        "syntax error",
+        "help: see emitted diagnostics for details",
+        "unused constant",
+        regex!(r#",-\[test[\d]+:2:9\]"#),
+        "1 |",
+        "2 |         const A = 1",
+        "  :         ^^^^^^^^^^^",
+        "3 |",
+        "  `----",
+        " help: this constant is never used and can be safely removed",
+        "unused constant",
+        regex!(r#",-\[test[\d]+:3:9\]"#),
+        "2 |",
+        "3 |         const B = A",
+        "  :         ^^^^^^^^^^^",
+        "4 |",
+        "  `----",
+        " help: this constant is never used and can be safely removed"
+    );
+}
+
+#[test]
+fn chained_constant_used_transitively() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "
+        const A = 1
+        const B = A
+
+        begin
+            push.B
+        end"
+    );
+
+    let _program = context.assemble(source)?;
+    Ok(())
+}
