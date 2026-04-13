@@ -12,6 +12,7 @@ use miden_lifted_air::{AirStructureError, LiftedAir, VarLenPublicInputs, log2_st
 use p3_challenger::CanObserve;
 use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::pcs::params::MAX_LOG_DOMAIN_SIZE;
@@ -97,7 +98,7 @@ impl<'a, F> AirWitness<'a, F> {
 ///
 /// TODO(0xMiden/crypto#941): also carry the permutation `π: trace_id → air_id`
 /// so the prover and verifier can accept instances in arbitrary order.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct InstanceShapes {
     // `pub(crate)` so in-crate tests can construct malformed shapes to
     // exercise the verifier-path validation in `validate_inputs`. External

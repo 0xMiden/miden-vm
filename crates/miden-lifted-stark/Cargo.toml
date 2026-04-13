@@ -34,6 +34,7 @@ p3-poseidon2-air = { optional = true, workspace = true }
 
 # Third-party
 rand.workspace      = true
+serde.workspace     = true
 thiserror.workspace = true
 tracing.workspace   = true
 

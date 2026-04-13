@@ -18,6 +18,7 @@ use miden_lifted_air::LiftedAir;
 use miden_stark_transcript::{Channel, TranscriptData, VerifierChannel, VerifierTranscript};
 use p3_challenger::CanFinalizeDigest;
 use p3_field::{ExtensionField, Field, TwoAdicField};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     StarkConfig,
@@ -40,7 +41,10 @@ type Commitment<F, EF, SC> = <<SC as StarkConfig<F, EF>>::Lmcs as Lmcs>::Commitm
 /// TODO(0xMiden/crypto#941): once `InstanceShapes` also carries the
 /// permutation `π: trace_id → air_id`, both the Fiat-Shamir encoding and the
 /// downstream indexing will need to be updated.
-#[derive(Clone)]
+// Bounds target `Commitment` directly; `SC` itself isn't `Serialize`/`Debug`.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(serialize = "TranscriptData<F, Commitment<F, EF, SC>>: Serialize"))]
+#[serde(bound(deserialize = "TranscriptData<F, Commitment<F, EF, SC>>: Deserialize<'de>"))]
 pub struct StarkProof<F: TwoAdicField, EF: ExtensionField<F>, SC: StarkConfig<F, EF>> {
     pub instance_shapes: InstanceShapes,
     pub transcript: TranscriptData<F, Commitment<F, EF, SC>>,
@@ -86,6 +90,22 @@ pub struct StarkOutput<F: TwoAdicField, EF: ExtensionField<F>, SC: StarkConfig<F
     pub digest: StarkDigest<F, EF, SC>,
     /// Proof data consumed by the verifier.
     pub proof: StarkProof<F, EF, SC>,
+}
+
+impl<F, EF, SC> core::fmt::Debug for StarkOutput<F, EF, SC>
+where
+    F: TwoAdicField + core::fmt::Debug,
+    EF: ExtensionField<F>,
+    SC: StarkConfig<F, EF>,
+    StarkDigest<F, EF, SC>: core::fmt::Debug,
+    Commitment<F, EF, SC>: core::fmt::Debug,
+{
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("StarkOutput")
+            .field("digest", &self.digest)
+            .field("proof", &self.proof)
+            .finish()
+    }
 }
 
 /// Structured transcript view for the full lifted STARK protocol.
