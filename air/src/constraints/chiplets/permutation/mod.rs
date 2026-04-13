@@ -54,10 +54,15 @@ pub fn enforce_permutation_constraints<AB>(
     let cols_next = next.permutation();
 
     // not_cycle_end: 1 on perm-cycle rows 0-14, 0 on the cycle boundary row 15.
-    let not_cycle_end: AB::Expr = Into::<AB::Expr>::into(periodic_hasher.is_init_ext)
-        + Into::<AB::Expr>::into(periodic_hasher.is_ext)
-        + Into::<AB::Expr>::into(periodic_hasher.is_packed_int)
-        + Into::<AB::Expr>::into(periodic_hasher.is_int_ext);
+    let not_cycle_end: AB::Expr = [
+        periodic_hasher.is_init_ext,
+        periodic_hasher.is_ext,
+        periodic_hasher.is_packed_int,
+        periodic_hasher.is_int_ext,
+    ]
+    .map(Into::into)
+    .into_iter()
+    .sum();
 
     // --- Poseidon2 permutation step constraints ---
     // Gate by is_active (= s_perm, degree 1) alone. This is sound because
@@ -76,9 +81,12 @@ pub fn enforce_permutation_constraints<AB>(
     // --- Structural confinement on perm rows ---
     // is_boundary, direction_bit, and mrupdate_id are unused on permutation rows
     // and must be zero to avoid accidental coupling with controller-side logic.
-    builder.when(flags.is_active.clone()).assert_zero(cols._is_boundary);
-    builder.when(flags.is_active.clone()).assert_zero(cols._direction_bit);
-    builder.when(flags.is_active.clone()).assert_zero(cols._mrupdate_id);
+    {
+        let builder = &mut builder.when(flags.is_active.clone());
+        builder.assert_zero(cols._is_boundary);
+        builder.assert_zero(cols._direction_bit);
+        builder.assert_zero(cols._mrupdate_id);
+    }
 
     // --- Multiplicity constancy within perm cycles ---
     // On perm rows that are NOT the cycle boundary (row 15), multiplicity must stay
