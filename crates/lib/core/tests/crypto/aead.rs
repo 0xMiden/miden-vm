@@ -373,6 +373,56 @@ fn test_encrypt_fails_on_overlap() {
 }
 
 #[test]
+fn test_encrypt_does_not_overwrite_source_adjacent_memory() {
+    let source = r#"
+    use miden::core::crypto::aead
+
+    begin
+        # Store one plaintext block at address 1000.
+        push.[11,12,13,14] push.1000 mem_storew_le dropw
+        push.[15,16,17,18] push.1004 mem_storew_le dropw
+
+        # Store unrelated data immediately after the plaintext buffer.
+        push.[91,92,93,94] push.1008 mem_storew_le dropw
+        push.[95,96,97,98] push.1012 mem_storew_le dropw
+
+        push.1
+        push.2000
+        push.1000
+        push.[1,2,3,4]
+        push.[5,6,7,8]
+        exec.aead::encrypt
+        dropw
+    end
+    "#;
+
+    build_test!(source, &[]).expect_stack_and_memory(&[], 1008, &[91, 92, 93, 94, 95, 96, 97, 98]);
+}
+
+#[test]
+fn test_encrypt_zero_blocks_does_not_overwrite_source_memory() {
+    let source = r#"
+    use miden::core::crypto::aead
+
+    begin
+        # Store unrelated data at src_ptr; encrypt with num_blocks = 0 should not touch it.
+        push.[41,42,43,44] push.1000 mem_storew_le dropw
+        push.[45,46,47,48] push.1004 mem_storew_le dropw
+
+        push.0
+        push.2000
+        push.1000
+        push.[1,2,3,4]
+        push.[5,6,7,8]
+        exec.aead::encrypt
+        dropw
+    end
+    "#;
+
+    build_test!(source, &[]).expect_stack_and_memory(&[], 1000, &[41, 42, 43, 44, 45, 46, 47, 48]);
+}
+
+#[test]
 fn test_decrypt_fails_on_overlap() {
     // With num_blocks=1, decrypt uses (1+1)*8 = 16 elements per range.
     // Source [1000, 1016) and dest [1008, 1024) overlap at [1008, 1016).
