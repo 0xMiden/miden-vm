@@ -1,16 +1,27 @@
-use std::io;
+use alloc::{
+    format,
+    string::{String, ToString},
+    vec::Vec,
+};
+use std::{fs, io, println};
 
 use miden_ace_codegen::{AceCircuit, AceConfig, LayoutKind};
 use miden_air::ProcessorAir;
-use miden_core::{field::QuadFelt, Felt};
+use miden_core::{Felt, field::QuadFelt};
 
-pub const REGEN_CMD: &str = "cargo run --package miden-core-lib --features constraints-tools --bin regenerate-constraints";
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Mode {
+    Check,
+    Write,
+}
+
 const MASM_CONFIG: AceConfig = AceConfig {
     num_quotient_chunks: 8,
     num_vlpi_groups: 1,
     layout: LayoutKind::Masm,
 };
-pub const RELATION_DIGEST_PATHS: (&str, &str) = ("asm/sys/vm/mod.masm", "asm/sys/vm/constraints_eval.masm");
+pub const RELATION_DIGEST_PATHS: (&str, &str) =
+    ("asm/sys/vm/mod.masm", "asm/sys/vm/constraints_eval.masm");
 
 const PROTOCOL_ID: u64 = 0;
 const AIR_CONFIG_PATH: &str = "../../../air/src/config.rs";
@@ -64,7 +75,7 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
     let num_eval_gates = encoded.num_eval_rows();
     let instructions = encoded.instructions();
     let size_in_felt = encoded.size_in_felt();
-    if size_in_felt % 8 != 0 {
+    if !size_in_felt.is_multiple_of(8) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
@@ -86,9 +97,13 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
             &num_eval_gates.to_string(),
         );
 
-        let proc_start = constraints_eval
-            .find("proc load_ace_circuit_description")
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "proc load_ace_circuit_description not found"))?;
+        let proc_start =
+            constraints_eval.find("proc load_ace_circuit_description").ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "proc load_ace_circuit_description not found",
+                )
+            })?;
         if let Some(repeat_offset) = constraints_eval[proc_start..].find("repeat.") {
             let abs = proc_start + repeat_offset;
             let end = constraints_eval[abs..]
@@ -99,9 +114,9 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
         }
 
         let section_marker = "# CONSTRAINT EVALUATION CIRCUIT DESCRIPTION";
-        let section_start = constraints_eval
-            .find(section_marker)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "constraints section marker not found"))?;
+        let section_start = constraints_eval.find(section_marker).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, "constraints section marker not found")
+        })?;
         constraints_eval.truncate(section_start);
         let trimmed = constraints_eval.trim_end().len();
         constraints_eval.truncate(trimmed);
@@ -134,14 +149,17 @@ fn compute_artifacts() -> io::Result<ComputedArtifacts> {
 
     let mut air_config = read_file(AIR_CONFIG_PATH);
     let marker = "pub const RELATION_DIGEST: [Felt; 4] = [";
-    let start = air_config
-        .find(marker)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "RELATION_DIGEST not found in config.rs"))?;
+    let start = air_config.find(marker).ok_or_else(|| {
+        io::Error::new(io::ErrorKind::NotFound, "RELATION_DIGEST not found in config.rs")
+    })?;
     let block_start = start + marker.len();
-    let block_end = air_config[block_start..]
-        .find("];")
-        .map(|idx| idx + block_start)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "RELATION_DIGEST terminator not found"))?;
+    let block_end =
+        air_config[block_start..]
+            .find("];")
+            .map(|idx| idx + block_start)
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::NotFound, "RELATION_DIGEST terminator not found")
+            })?;
     let mut new_block: String = relation_digest
         .iter()
         .map(|f| format!("\n    Felt::new({}),", f.as_canonical_u64()))
@@ -179,8 +197,9 @@ fn write_artifacts(artifact: &ComputedArtifacts) -> io::Result<()> {
 pub fn constraints_eval_masm_matches_air() -> Result<(), String> {
     let artifact = compute_artifacts().map_err(|e| e.to_string())?;
     let masm = read_file(RELATION_DIGEST_PATHS.1);
-    let actual_num_inputs: usize = parse_masm_const(&masm, "NUM_INPUTS_CIRCUIT", "constraints_eval.masm")
-        .map_err(|e| e.to_string())?;
+    let actual_num_inputs: usize =
+        parse_masm_const(&masm, "NUM_INPUTS_CIRCUIT", "constraints_eval.masm")
+            .map_err(|e| e.to_string())?;
     let actual_num_eval: usize =
         parse_masm_const(&masm, "NUM_EVAL_GATES_CIRCUIT", "constraints_eval.masm")
             .map_err(|e| e.to_string())?;
@@ -205,20 +224,18 @@ pub fn constraints_eval_masm_matches_air() -> Result<(), String> {
         .split(',')
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
-        .map(|s| Felt::new(s.parse::<u64>().map_err(|_| "invalid u64 in adv_map".to_string())?))
-        .collect();
+        .map(|s| {
+            s.parse::<u64>()
+                .map(Felt::new)
+                .map_err(|_| "invalid u64 in adv_map".to_string())
+        })
+        .collect::<Result<_, _>>()?;
     let actual_hash = miden_utils_testing::crypto::Poseidon2::hash_elements(&actual_data);
 
-    let actual_hash_u64: Vec<u64> = actual_hash
-        .as_elements()
-        .iter()
-        .map(|f| f.as_canonical_u64())
-        .collect();
-    let expected_hash_u64: Vec<u64> = artifact
-        .circuit_commitment
-        .iter()
-        .map(|f| f.as_canonical_u64())
-        .collect();
+    let actual_hash_u64: Vec<u64> =
+        actual_hash.as_elements().iter().map(|f| f.as_canonical_u64()).collect();
+    let expected_hash_u64: Vec<u64> =
+        artifact.circuit_commitment.iter().map(|f| f.as_canonical_u64()).collect();
 
     if actual_num_inputs != artifact.num_inputs {
         return Err(format!(
@@ -258,7 +275,7 @@ pub fn relation_digest_matches_air() -> Result<(), String> {
     for (i, slot) in masm_digest.iter_mut().enumerate() {
         let name = format!("RELATION_DIGEST_{i}");
         *slot = parse_masm_const::<u64>(&masm, &name, "sys/vm/mod.masm")
-            .map(|v| Felt::new(v))
+            .map(Felt::new)
             .map_err(|e| e.to_string())?;
     }
 
@@ -269,22 +286,23 @@ pub fn relation_digest_matches_air() -> Result<(), String> {
     Ok(())
 }
 
-fn parse_masm_const<T: core::str::FromStr>(masm: &str, name: &str, file_label: &str) -> Result<T, String>
+fn parse_masm_const<T: core::str::FromStr>(
+    masm: &str,
+    name: &str,
+    file_label: &str,
+) -> Result<T, String>
 where
     T::Err: core::fmt::Debug,
 {
     let prefix = format!("const {name} = ");
-    masm
-        .lines()
+    masm.lines()
         .find_map(|line| line.trim().strip_prefix(&prefix).and_then(|v| v.parse::<T>().ok()))
         .ok_or_else(|| format!("constant {name} not found in {file_label}"))
 }
 
 fn replace_masm_const(content: &mut String, name: &str, new_value: &str) {
     let prefix = format!("const {name} = ");
-    let line_start = content
-        .find(&prefix)
-        .unwrap_or_else(|| panic!("const {name} not found"));
+    let line_start = content.find(&prefix).unwrap_or_else(|| panic!("const {name} not found"));
     let line_end = content[line_start..]
         .find('\n')
         .map(|i| line_start + i)
@@ -294,17 +312,13 @@ fn replace_masm_const(content: &mut String, name: &str, new_value: &str) {
 
 fn read_file(rel_path: &str) -> String {
     let path = format!("{}/{}", env!("CARGO_MANIFEST_DIR"), rel_path);
-    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("failed to read {path}: {e}"))
+    fs::read_to_string(&path).unwrap_or_else(|e| panic!("failed to read {path}: {e}"))
 }
 
 fn write_file(rel_path: &str, contents: &str) -> io::Result<()> {
     let path = format!("{}/{}", env!("CARGO_MANIFEST_DIR"), rel_path);
-    std::fs::write(&path, contents).map_err(|e| {
-        io::Error::new(
-            e.kind(),
-            format!("failed to write {path}: {e}"),
-        )
-    })
+    fs::write(&path, contents)
+        .map_err(|e| io::Error::new(e.kind(), format!("failed to write {path}: {e}")))
 }
 
 struct ComputedArtifacts {
