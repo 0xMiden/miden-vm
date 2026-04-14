@@ -2,6 +2,8 @@
 
 pub mod dsa;
 pub mod handlers;
+#[cfg(any(test, feature = "constraints-tools"))]
+pub mod constraints_regen;
 
 extern crate alloc;
 

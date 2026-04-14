@@ -28,6 +28,7 @@ path = "tests/main.rs"
 [features]
 default = ["std"]
 std = ["miden-assembly/std", "miden-utils-sync/std"]
+constraints-tools = ["dep:miden-air", "dep:miden-ace-codegen", "dep:miden-utils-testing"]
 
 [dependencies]
 # Miden dependencies
@@ -36,6 +37,9 @@ miden-core.workspace = true
 miden-crypto.workspace = true
 miden-processor.workspace = true
 miden-utils-sync.workspace = true
+miden-air = { workspace = true, optional = true }
+miden-ace-codegen = { workspace = true, optional = true }
+miden-utils-testing = { workspace = true, optional = true }
 
 # External dependencies
 thiserror.workspace = true
@@ -63,3 +67,8 @@ env_logger.workspace = true
 fs-err = { version = "3.1" }
 miden-assembly = { workspace = true, features = ["std"] }
 miden-package-registry = { workspace = true, features = ["resolver"] }
+
+[[bin]]
+name = "regenerate-constraints"
+path = "src/bin/regenerate-constraints.rs"
+required-features = ["constraints-tools"]
