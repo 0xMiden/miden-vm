@@ -305,13 +305,13 @@ mod tests {
     use crate::{ProcessorAir, ace};
 
     const PROTOCOL_ID: u64 = 0;
-    const REGEN_CMD: &str =
-        "cargo test --release -p miden-core-lib regenerate_ace_circuit_data -- --ignored";
+    const REGEN_HINT: &str = "cargo run -p miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write";
 
     /// Snapshot test: catches any AIR change that alters the constraint circuit.
     ///
     /// If this test fails, regenerate with:
-    ///   cargo test --release -p miden-core-lib regenerate_ace_circuit_data -- --ignored
+    ///   cargo run -p miden-core-lib --features constraints-tools --bin regenerate-constraints --
+    /// --write
     #[test]
     fn relation_digest_matches_current_air() {
         let config = AceConfig {
@@ -345,7 +345,7 @@ mod tests {
             super::RELATION_DIGEST.iter().map(|f| f.as_canonical_u64()).collect();
         assert_eq!(
             actual, expected,
-            "RELATION_DIGEST in config.rs is stale. Regenerate: {REGEN_CMD}"
+            "RELATION_DIGEST in config.rs is stale. Regenerate with: {REGEN_HINT}"
         );
     }
 }
