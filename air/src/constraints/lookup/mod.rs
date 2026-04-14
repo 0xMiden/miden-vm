@@ -21,6 +21,7 @@ pub mod bus_id;
 pub(crate) mod buses;
 pub mod challenges;
 pub mod chiplet_air;
+pub mod column_oracle;
 pub mod constraint;
 #[cfg(test)]
 pub mod dual_builder;
@@ -33,10 +34,11 @@ pub mod prover;
 pub use builder::{EncodedLookupGroup, LookupBatch, LookupBuilder, LookupColumn, LookupGroup};
 pub use bus_id::NUM_BUS_IDS;
 pub use challenges::LookupChallenges;
+pub use column_oracle::{ColumnOracleBuilder, collect_column_oracle_folds};
 pub use constraint::ConstraintLookupBuilder;
 #[cfg(test)]
 pub use dual_builder::{DualBuilder, GroupMismatch};
-pub use fractions::{LookupFractions, accumulate_slow};
+pub use fractions::{LookupFractions, accumulate, accumulate_slow};
 pub use message::LookupMessage;
 pub use miden_air::MidenLookupAir;
 pub use prover::{ProverLookupBuilder, build_lookup_fractions};

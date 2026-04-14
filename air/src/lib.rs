@@ -30,8 +30,9 @@ mod constraints;
 /// [`build_lookup_fractions`] without the rest of `constraints::lookup` leaking.
 pub mod lookup {
     pub use crate::constraints::lookup::{
-        LookupChallenges, LookupFractions, MidenLookupAir, ProverLookupBuilder, accumulate_slow,
-        build_lookup_fractions,
+        ColumnOracleBuilder, LookupAir, LookupChallenges, LookupFractions, MidenLookupAir,
+        ProverLookupBuilder, accumulate, accumulate_slow, build_lookup_fractions,
+        collect_column_oracle_folds,
     };
 }
 

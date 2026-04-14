@@ -25,7 +25,7 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_core::field::{ExtensionField, Field};
+use miden_core::field::{ExtensionField, Field, batch_multiplicative_inverse};
 
 use super::{LookupAir, LookupBuilder};
 
@@ -197,6 +197,89 @@ where
     aux
 }
 
+// FUSED ACCUMULATOR (FAST PATH)
+// ================================================================================================
+
+/// Fused batch-inversion + per-column partial-sum accumulator.
+///
+/// Computes the same result as [`accumulate_slow`] but amortizes field inversion across the
+/// whole batch using Montgomery's trick via
+/// [`miden_core::field::batch_multiplicative_inverse`] — **one inversion + O(N) multiplications**
+/// total, versus N inversions in the slow path. On a long trace this is the difference between
+/// a single heavy inversion and thousands.
+///
+/// ## Algorithm
+///
+/// **Pass A** (batched denominator inversion). Extract the flat denominator stream
+/// `d[0..N]` from `fractions.fractions()` and invert the whole slice in one shot. The
+/// underlying p3 helper implements the prefix-product + single-inversion + backward-sweep
+/// trick, chunked for instruction-level parallelism internally.
+///
+/// **Pass B** (per-column partial-sum walk). Walk `counts` in `num_cols`-sized chunks (one
+/// chunk per row), with a single cursor into `fractions` + the `d_inv` buffer. For each
+/// (row, column) slice, add `m_i · d_inv_i` into a `[EF; num_cols]` running register and
+/// copy the register's column value into `aux[col][row + 1]`. Memory-access pattern is
+/// identical to [`accumulate_slow`], so this function is a drop-in replacement wherever the
+/// slow oracle was used.
+///
+/// ## Panics
+///
+/// Panics if any stored denominator is zero (would indicate an upstream bug — real bus
+/// encodings never produce zero because of the non-zero `bus_prefix[bus]` term).
+pub fn accumulate<F, EF>(fractions: &LookupFractions<F, EF>) -> Vec<Vec<EF>>
+where
+    F: Field,
+    EF: ExtensionField<F>,
+{
+    let num_cols = fractions.num_columns();
+    let num_rows = fractions.num_rows();
+    let mut aux: Vec<Vec<EF>> = (0..num_cols).map(|_| vec![EF::ZERO; num_rows + 1]).collect();
+
+    let flat_fractions = fractions.fractions();
+    let flat_counts = fractions.counts();
+    debug_assert_eq!(
+        flat_counts.len(),
+        num_rows * num_cols,
+        "counts length {} != num_rows * num_cols {}",
+        flat_counts.len(),
+        num_rows * num_cols,
+    );
+
+    // Early-out on empty trace: no inversions, no walk.
+    if flat_fractions.is_empty() {
+        return aux;
+    }
+
+    // Pass A: batch-invert every denominator in one shot. Extracting into `denoms` is an
+    // O(N) copy; the inversion itself is ~3N multiplications + 1 field inversion, chunked
+    // for ILP inside `batch_multiplicative_inverse`.
+    let denoms: Vec<EF> = flat_fractions.iter().map(|&(_, d)| d).collect();
+    let d_inv = batch_multiplicative_inverse(&denoms);
+    debug_assert_eq!(d_inv.len(), flat_fractions.len());
+
+    // Pass B: per-column partial-sum walk, identical shape to `accumulate_slow`.
+    let mut running = vec![EF::ZERO; num_cols];
+    let mut cursor = 0usize;
+    for (row, row_counts) in flat_counts.chunks(num_cols).enumerate() {
+        for (col, &count) in row_counts.iter().enumerate() {
+            for i in 0..count {
+                let (m, _) = flat_fractions[cursor + i];
+                running[col] += d_inv[cursor + i] * m;
+            }
+            aux[col][row + 1] = running[col];
+            cursor += count;
+        }
+    }
+    debug_assert_eq!(
+        cursor,
+        flat_fractions.len(),
+        "cursor {cursor} != total fractions {}",
+        flat_fractions.len(),
+    );
+
+    aux
+}
+
 // TESTS
 // ================================================================================================
 
@@ -313,5 +396,72 @@ mod tests {
         assert!(fx.counts.capacity() >= 10 * 2);
         assert!(fx.fractions.is_empty());
         assert!(fx.counts.is_empty());
+    }
+
+    /// The fused `accumulate` path must be bit-exact against `accumulate_slow` on arbitrary
+    /// inputs. This test drives a deterministic PRNG to build a random fixture that respects
+    /// the declared shape, then asserts the two paths produce identical per-column output
+    /// arrays.
+    #[test]
+    fn accumulate_matches_accumulate_slow_random() {
+        // Small deterministic LCG — we don't need cryptographic quality, just a
+        // reproducible stream. Seed picked arbitrarily.
+        struct Lcg(u64);
+        impl Lcg {
+            fn next(&mut self) -> u64 {
+                self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                self.0
+            }
+            fn felt(&mut self) -> Felt {
+                // Take the high 32 bits to avoid the near-zero-biasing of low bits.
+                Felt::new(self.next() >> 32)
+            }
+            fn quad(&mut self) -> QuadFelt {
+                QuadFelt::new([self.felt(), self.felt()])
+            }
+        }
+
+        const SHAPE: [usize; 3] = [2, 1, 3];
+        const NUM_ROWS: usize = 32;
+
+        let mut rng = Lcg(0x00c0_ffee_beef_c0de);
+        let mut fx: LookupFractions<Felt, QuadFelt> = LookupFractions {
+            fractions: Vec::with_capacity(NUM_ROWS * SHAPE.iter().sum::<usize>()),
+            counts: Vec::with_capacity(NUM_ROWS * SHAPE.len()),
+            shape: SHAPE.to_vec(),
+            num_rows: NUM_ROWS,
+            num_cols: SHAPE.len(),
+        };
+
+        // Build the flat fractions + counts row-major. Per (row, col), randomize a count
+        // in `0..=shape[col]` and push that many random `(m, d)` pairs with non-zero `d`.
+        for _row in 0..NUM_ROWS {
+            for &max_count in &SHAPE {
+                let count = (rng.next() as usize) % (max_count + 1);
+                for _ in 0..count {
+                    let m = rng.felt();
+                    // Rejection sample until we get a non-zero denominator. With a 64-bit
+                    // Goldilocks field and random draws, this basically never loops.
+                    let d = loop {
+                        let candidate = rng.quad();
+                        if candidate != QuadFelt::ZERO {
+                            break candidate;
+                        }
+                    };
+                    fx.fractions.push((m, d));
+                }
+                fx.counts.push(count);
+            }
+        }
+
+        let slow = accumulate_slow(&fx);
+        let fast = accumulate(&fx);
+        assert_eq!(slow.len(), fast.len(), "column count mismatch");
+        for (col, (slow_col, fast_col)) in slow.iter().zip(fast.iter()).enumerate() {
+            assert_eq!(slow_col.len(), fast_col.len(), "col {col} row count mismatch");
+            for (row, (s, f)) in slow_col.iter().zip(fast_col.iter()).enumerate() {
+                assert_eq!(s, f, "col {col} row {row} differs: slow={s:?} fast={f:?}");
+            }
+        }
     }
 }
