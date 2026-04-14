@@ -12,11 +12,11 @@
 
 use miden_core::field::PrimeCharacteristicRing;
 
-use crate::{
-    Felt,
-    constraints::{
-        logup_msg::{BlockStackMsg, RangeMsg},
-        lookup::{LookupBatch, LookupBuilder, LookupColumn, LookupGroup, buses::MainTraceContext},
+use crate::constraints::{
+    logup_msg::{BlockStackMsg, RangeMsg},
+    lookup::{
+        LookupBatch, LookupColumn, LookupGroup,
+        main_air::{MainBusContext, MainLookupBuilder},
     },
 };
 
@@ -24,9 +24,9 @@ use crate::{
 #[allow(clippy::too_many_lines)]
 pub(in crate::constraints::lookup) fn emit_block_stack_and_range_table<LB>(
     builder: &mut LB,
-    ctx: &MainTraceContext<LB>,
+    ctx: &MainBusContext<LB>,
 ) where
-    LB: LookupBuilder<F = Felt>,
+    LB: MainLookupBuilder,
 {
     let local = ctx.local;
     let next = ctx.next;
@@ -70,74 +70,110 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_table<LB>(
         col.group(|g| {
             // JOIN/SPLIT/SPAN/DYN: simple push with `is_loop = 0`.
             let f = op_flags.join() + op_flags.split() + op_flags.span() + op_flags.dyn_op();
-            g.add(f, || BlockStackMsg::Simple {
-                block_id: addr_next.into(),
-                parent_id: addr.into(),
-                is_loop: LB::Expr::ZERO,
+            g.add(f, || {
+                let block_id = addr_next.into();
+                let parent_id = addr.into();
+                let is_loop = LB::Expr::ZERO;
+                BlockStackMsg::Simple { block_id, parent_id, is_loop }
             });
 
             // LOOP: push with is_loop = s0.
-            g.add(op_flags.loop_op(), || BlockStackMsg::Simple {
-                block_id: addr_next.into(),
-                parent_id: addr.into(),
-                is_loop: s0.into(),
+            g.add(op_flags.loop_op(), || {
+                let block_id = addr_next.into();
+                let parent_id = addr.into();
+                let is_loop = s0.into();
+                BlockStackMsg::Simple { block_id, parent_id, is_loop }
             });
 
             // DYNCALL: full push with h[4]/h[5] as fmp/depth.
-            g.add(op_flags.dyncall(), || BlockStackMsg::Full {
-                block_id: addr_next.into(),
-                parent_id: addr.into(),
-                is_loop: LB::Expr::ZERO,
-                ctx: sys_ctx.into(),
-                fmp: h4.into(),
-                depth: h5.into(),
-                fn_hash: fn_hash.map(Into::into),
+            g.add(op_flags.dyncall(), || {
+                let block_id = addr_next.into();
+                let parent_id = addr.into();
+                let is_loop = LB::Expr::ZERO;
+                let ctx = sys_ctx.into();
+                let fmp = h4.into();
+                let depth = h5.into();
+                let fn_hash = fn_hash.map(LB::Expr::from);
+                BlockStackMsg::Full {
+                    block_id,
+                    parent_id,
+                    is_loop,
+                    ctx,
+                    fmp,
+                    depth,
+                    fn_hash,
+                }
             });
 
             // CALL/SYSCALL: full push saving the caller context.
             let f = op_flags.call() + op_flags.syscall();
-            g.add(f, || BlockStackMsg::Full {
-                block_id: addr_next.into(),
-                parent_id: addr.into(),
-                is_loop: LB::Expr::ZERO,
-                ctx: sys_ctx.into(),
-                fmp: b0.into(),
-                depth: b1.into(),
-                fn_hash: fn_hash.map(Into::into),
+            g.add(f, || {
+                let block_id = addr_next.into();
+                let parent_id = addr.into();
+                let is_loop = LB::Expr::ZERO;
+                let ctx = sys_ctx.into();
+                let fmp = b0.into();
+                let depth = b1.into();
+                let fn_hash = fn_hash.map(LB::Expr::from);
+                BlockStackMsg::Full {
+                    block_id,
+                    parent_id,
+                    is_loop,
+                    ctx,
+                    fmp,
+                    depth,
+                    fn_hash,
+                }
             });
 
             // END (simple blocks): pop with the stored is_loop.
             let f = op_flags.end()
                 * (LB::Expr::ONE - end_flags.is_call.into() - end_flags.is_syscall.into());
-            g.remove(f, || BlockStackMsg::Simple {
-                block_id: addr.into(),
-                parent_id: addr_next.into(),
-                is_loop: end_flags.is_loop.into(),
+            g.remove(f, || {
+                let block_id = addr.into();
+                let parent_id = addr_next.into();
+                let is_loop = end_flags.is_loop.into();
+                BlockStackMsg::Simple { block_id, parent_id, is_loop }
             });
 
             // END (after CALL/SYSCALL): pop with restored caller context.
             let f = op_flags.end() * (end_flags.is_call.into() + end_flags.is_syscall.into());
-            g.remove(f, || BlockStackMsg::Full {
-                block_id: addr.into(),
-                parent_id: addr_next.into(),
-                is_loop: end_flags.is_loop.into(),
-                ctx: sys_ctx_next.into(),
-                fmp: b0_next.into(),
-                depth: b1_next.into(),
-                fn_hash: fn_hash_next.map(Into::into),
+            g.remove(f, || {
+                let block_id = addr.into();
+                let parent_id = addr_next.into();
+                let is_loop = end_flags.is_loop.into();
+                let ctx = sys_ctx_next.into();
+                let fmp = b0_next.into();
+                let depth = b1_next.into();
+                let fn_hash = fn_hash_next.map(LB::Expr::from);
+                BlockStackMsg::Full {
+                    block_id,
+                    parent_id,
+                    is_loop,
+                    ctx,
+                    fmp,
+                    depth,
+                    fn_hash,
+                }
             });
 
             // RESPAN: simultaneous push + pop — one batch under the RESPAN flag.
             g.batch(op_flags.respan(), |b| {
+                let block_id_add = addr_next.into();
+                let parent_id_add = h1_next.into();
+                let is_loop_add = LB::Expr::ZERO;
                 b.add(BlockStackMsg::Simple {
-                    block_id: addr_next.into(),
-                    parent_id: h1_next.into(),
-                    is_loop: LB::Expr::ZERO,
+                    block_id: block_id_add,
+                    parent_id: parent_id_add,
+                    is_loop: is_loop_add,
                 });
+                let block_id_rem = addr.into();
+                let parent_id_rem = h1_next.into();
+                let is_loop_rem = LB::Expr::ZERO;
                 b.remove(BlockStackMsg::Simple {
-                    block_id: addr.into(),
-                    parent_id: h1_next.into(),
-                    is_loop: LB::Expr::ZERO,
+                    block_id: block_id_rem,
+                    parent_id: parent_id_rem,
+                    is_loop: is_loop_rem,
                 });
             });
         });
@@ -148,7 +184,10 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_table<LB>(
         // `RationalSet::always(challenges, |b| b.insert(range_m, RangeMsg { ... }))` by
         // gating the single insertion with `LB::Expr::ONE`.
         col.group(|g| {
-            g.insert(LB::Expr::ONE, range_m.into(), || RangeMsg { value: range_v.into() });
+            g.insert(LB::Expr::ONE, range_m.into(), || {
+                let value = range_v.into();
+                RangeMsg { value }
+            });
         });
     });
 }

@@ -14,10 +14,12 @@ use core::array;
 use miden_core::{FMP_ADDR, FMP_INIT_VALUE, field::PrimeCharacteristicRing, operations::opcodes};
 
 use crate::{
-    Felt,
     constraints::{
         logup_msg::{AceInitMsg, BitwiseMsg, HasherMsg, KernelRomMsg, MemoryHeader},
-        lookup::{LookupBatch, LookupBuilder, LookupColumn, LookupGroup, buses::MainTraceContext},
+        lookup::{
+            LookupBatch, LookupColumn, LookupGroup,
+            main_air::{MainBusContext, MainLookupBuilder},
+        },
     },
     trace::{
         chiplets::hasher::HASH_CYCLE_LEN,
@@ -32,9 +34,9 @@ use crate::{
 #[allow(clippy::too_many_lines)]
 pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
     builder: &mut LB,
-    main_ctx: &MainTraceContext<LB>,
+    main_ctx: &MainBusContext<LB>,
 ) where
-    LB: LookupBuilder<F = Felt>,
+    LB: MainLookupBuilder,
 {
     let local = main_ctx.local;
     let next = main_ctx.next;
@@ -72,66 +74,69 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
     builder.column(|col| {
         col.group(|g| {
             // --- Control-block removes (JOIN / SPLIT / LOOP / SPAN / CALL / SYSCALL) ---
-            // `h` is a `[Var; 8]` captured by copy; each closure materializes a fresh
-            // `[Expr; 8]` via `.map(Into::into)` at call time.
+            // `h` is a `[Var; 8]` captured by copy; each closure shadows it with a fresh
+            // `[Expr; 8]` via `.map(LB::Expr::from)` at call time.
             g.remove(op_flags.join(), move || {
-                HasherMsg::control_block(addr_next.into(), &h.map(Into::into), opcodes::JOIN)
+                let parent = addr_next.into();
+                let h = h.map(LB::Expr::from);
+                HasherMsg::control_block(parent, &h, opcodes::JOIN)
             });
             g.remove(op_flags.split(), move || {
-                HasherMsg::control_block(addr_next.into(), &h.map(Into::into), opcodes::SPLIT)
+                let parent = addr_next.into();
+                let h = h.map(LB::Expr::from);
+                HasherMsg::control_block(parent, &h, opcodes::SPLIT)
             });
             g.remove(op_flags.loop_op(), move || {
-                HasherMsg::control_block(addr_next.into(), &h.map(Into::into), opcodes::LOOP)
+                let parent = addr_next.into();
+                let h = h.map(LB::Expr::from);
+                HasherMsg::control_block(parent, &h, opcodes::LOOP)
             });
             g.remove(op_flags.span(), move || {
                 // SPAN is encoded with opcode 0 at the `β¹²` slot.
-                HasherMsg::control_block(addr_next.into(), &h.map(Into::into), 0)
+                let parent = addr_next.into();
+                let h = h.map(LB::Expr::from);
+                HasherMsg::control_block(parent, &h, 0)
             });
 
             // CALL: control-block remove + FMP write under a fresh header (ctx_next / FMP_ADDR /
             // clk).
             g.batch(op_flags.call(), move |b| {
-                b.remove(HasherMsg::control_block(
-                    addr_next.into(),
-                    &h.map(Into::into),
-                    opcodes::CALL,
-                ));
-                b.remove(
-                    MemoryHeader {
-                        ctx: sys_ctx_next.into(),
-                        addr: FMP_ADDR.into(),
-                        clk: clk.into(),
-                    }
-                    .write_element(FMP_INIT_VALUE.into()),
-                );
+                let parent = addr_next.into();
+                let h = h.map(LB::Expr::from);
+                b.remove(HasherMsg::control_block(parent, &h, opcodes::CALL));
+                let fmp_header = MemoryHeader {
+                    ctx: sys_ctx_next.into(),
+                    addr: FMP_ADDR.into(),
+                    clk: clk.into(),
+                };
+                b.remove(fmp_header.write_element(FMP_INIT_VALUE.into()));
             });
 
             // SYSCALL: control-block remove + kernel-ROM call with the h[0..4] digest.
             g.batch(op_flags.syscall(), move |b| {
-                b.remove(HasherMsg::control_block(
-                    addr_next.into(),
-                    &h.map(Into::into),
-                    opcodes::SYSCALL,
-                ));
-                b.remove(KernelRomMsg::call(array::from_fn(|i| h[i].into())));
+                let parent = addr_next.into();
+                let digest = array::from_fn(|i| h[i].into());
+                let h = h.map(LB::Expr::from);
+                b.remove(HasherMsg::control_block(parent, &h, opcodes::SYSCALL));
+                b.remove(KernelRomMsg::call(digest));
             });
 
             // --- RESPAN ---
             g.remove(op_flags.respan(), move || {
-                HasherMsg::absorption(
-                    Into::<LB::Expr>::into(addr_next) - LB::Expr::ONE,
-                    h.map(Into::into),
-                )
+                let addr_next: LB::Expr = addr_next.into();
+                let parent = addr_next - LB::Expr::ONE;
+                let h = h.map(LB::Expr::from);
+                HasherMsg::absorption(parent, h)
             });
 
             // --- END ---
             {
                 let last_off = last_off.clone();
                 g.remove(op_flags.end(), move || {
-                    HasherMsg::return_hash(
-                        Into::<LB::Expr>::into(addr) + last_off,
-                        array::from_fn(|i| h[i].into()),
-                    )
+                    let addr: LB::Expr = addr.into();
+                    let parent = addr + last_off;
+                    let h = array::from_fn(|i| h[i].into());
+                    HasherMsg::return_hash(parent, h)
                 });
             }
 
@@ -139,9 +144,11 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
             {
                 let mem_header = mem_header.clone();
                 g.batch(op_flags.dyn_op(), move |b| {
+                    let parent = addr_next.into();
                     let zeros8: [LB::Expr; 8] = array::from_fn(|_| LB::Expr::ZERO);
-                    b.remove(HasherMsg::control_block(addr_next.into(), &zeros8, opcodes::DYN));
-                    b.remove(mem_header.read_word(array::from_fn(|i| h[i].into())));
+                    b.remove(HasherMsg::control_block(parent, &zeros8, opcodes::DYN));
+                    let word = array::from_fn(|i| h[i].into());
+                    b.remove(mem_header.read_word(word));
                 });
             }
 
@@ -149,17 +156,17 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
             {
                 let mem_header = mem_header.clone();
                 g.batch(op_flags.dyncall(), move |b| {
+                    let parent = addr_next.into();
                     let zeros8: [LB::Expr; 8] = array::from_fn(|_| LB::Expr::ZERO);
-                    b.remove(HasherMsg::control_block(addr_next.into(), &zeros8, opcodes::DYNCALL));
-                    b.remove(mem_header.read_word(array::from_fn(|i| h[i].into())));
-                    b.remove(
-                        MemoryHeader {
-                            ctx: sys_ctx_next.into(),
-                            addr: FMP_ADDR.into(),
-                            clk: clk.into(),
-                        }
-                        .write_element(FMP_INIT_VALUE.into()),
-                    );
+                    b.remove(HasherMsg::control_block(parent, &zeros8, opcodes::DYNCALL));
+                    let word = array::from_fn(|i| h[i].into());
+                    b.remove(mem_header.read_word(word));
+                    let fmp_header = MemoryHeader {
+                        ctx: sys_ctx_next.into(),
+                        addr: FMP_ADDR.into(),
+                        clk: clk.into(),
+                    };
+                    b.remove(fmp_header.write_element(FMP_INIT_VALUE.into()));
                 });
             }
 
@@ -167,11 +174,12 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
             {
                 let last_off = last_off.clone();
                 g.batch(op_flags.hperm(), move |b| {
-                    let stk_state: [LB::Expr; 12] = array::from_fn(|i| stk.get(i).into());
-                    let stk_next_state: [LB::Expr; 12] = array::from_fn(|i| stk_next.get(i).into());
-                    let helper0_e: LB::Expr = helper0.into();
-                    b.remove(HasherMsg::linear_hash_init(helper0_e.clone(), stk_state));
-                    b.remove(HasherMsg::return_state(helper0_e + last_off, stk_next_state));
+                    let helper0: LB::Expr = helper0.into();
+                    let stk_state = array::from_fn(|i| stk.get(i).into());
+                    let stk_next_state = array::from_fn(|i| stk_next.get(i).into());
+                    b.remove(HasherMsg::linear_hash_init(helper0.clone(), stk_state));
+                    let return_addr = helper0 + last_off;
+                    b.remove(HasherMsg::return_state(return_addr, stk_next_state));
                 });
             }
 
@@ -179,20 +187,14 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
             {
                 let cycle_len = cycle_len.clone();
                 g.batch(op_flags.mpverify(), move |b| {
-                    let helper0_e: LB::Expr = helper0.into();
-                    let mp_index: LB::Expr = stk.get(5).into();
+                    let helper0: LB::Expr = helper0.into();
+                    let mp_index = stk.get(5).into();
                     let mp_depth: LB::Expr = stk.get(4).into();
-                    let stk_word_0: [LB::Expr; 4] = array::from_fn(|i| stk.get(i).into());
-                    let old_root: [LB::Expr; 4] = array::from_fn(|i| stk.get(6 + i).into());
-                    b.remove(HasherMsg::merkle_verify_init(
-                        helper0_e.clone(),
-                        mp_index,
-                        stk_word_0,
-                    ));
-                    b.remove(HasherMsg::return_hash(
-                        helper0_e + mp_depth * cycle_len - LB::Expr::ONE,
-                        old_root,
-                    ));
+                    let stk_word_0 = array::from_fn(|i| stk.get(i).into());
+                    let old_root = array::from_fn(|i| stk.get(6 + i).into());
+                    b.remove(HasherMsg::merkle_verify_init(helper0.clone(), mp_index, stk_word_0));
+                    let return_addr = helper0 + mp_depth * cycle_len - LB::Expr::ONE;
+                    b.remove(HasherMsg::return_hash(return_addr, old_root));
                 });
             }
 
@@ -200,80 +202,86 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
             {
                 let cycle_len = cycle_len.clone();
                 g.batch(op_flags.mrupdate(), move |b| {
-                    let helper0_e: LB::Expr = helper0.into();
+                    let helper0: LB::Expr = helper0.into();
                     let mr_index: LB::Expr = stk.get(5).into();
                     let mr_depth: LB::Expr = stk.get(4).into();
-                    let stk_word_0: [LB::Expr; 4] = array::from_fn(|i| stk.get(i).into());
-                    let stk_next_word_0: [LB::Expr; 4] = array::from_fn(|i| stk_next.get(i).into());
-                    let old_root: [LB::Expr; 4] = array::from_fn(|i| stk.get(6 + i).into());
-                    let new_node: [LB::Expr; 4] = array::from_fn(|i| stk.get(10 + i).into());
+                    let stk_word_0 = array::from_fn(|i| stk.get(i).into());
+                    let stk_next_word_0 = array::from_fn(|i| stk_next.get(i).into());
+                    let old_root = array::from_fn(|i| stk.get(6 + i).into());
+                    let new_node = array::from_fn(|i| stk.get(10 + i).into());
                     b.remove(HasherMsg::merkle_old_init(
-                        helper0_e.clone(),
+                        helper0.clone(),
                         mr_index.clone(),
                         stk_word_0,
                     ));
-                    b.remove(HasherMsg::return_hash(
-                        helper0_e.clone() + mr_depth.clone() * cycle_len.clone() - LB::Expr::ONE,
-                        old_root.clone(),
-                    ));
-                    b.remove(HasherMsg::merkle_new_init(
-                        helper0_e.clone() + mr_depth.clone() * cycle_len.clone(),
-                        mr_index,
-                        new_node,
-                    ));
-                    b.remove(HasherMsg::return_hash(
-                        helper0_e + mr_depth * (cycle_len.clone() + cycle_len) - LB::Expr::ONE,
-                        stk_next_word_0,
-                    ));
+                    let old_return_addr =
+                        helper0.clone() + mr_depth.clone() * cycle_len.clone() - LB::Expr::ONE;
+                    b.remove(HasherMsg::return_hash(old_return_addr, old_root));
+                    let new_init_addr = helper0.clone() + mr_depth.clone() * cycle_len.clone();
+                    b.remove(HasherMsg::merkle_new_init(new_init_addr, mr_index, new_node));
+                    let new_return_addr =
+                        helper0 + mr_depth * (cycle_len.clone() + cycle_len) - LB::Expr::ONE;
+                    b.remove(HasherMsg::return_hash(new_return_addr, stk_next_word_0));
                 });
             }
 
             // --- MLOAD / MSTORE / MLOADW / MSTOREW (shared mem_header) ---
             {
                 let mem_header = mem_header.clone();
-                g.remove(op_flags.mload(), move || mem_header.read_element(stk_next_0.into()));
+                g.remove(op_flags.mload(), move || {
+                    let value = stk_next_0.into();
+                    mem_header.read_element(value)
+                });
             }
             {
                 let mem_header = mem_header.clone();
-                g.remove(op_flags.mstore(), move || mem_header.write_element(s1.into()));
+                g.remove(op_flags.mstore(), move || {
+                    let value = s1.into();
+                    mem_header.write_element(value)
+                });
             }
             {
                 let mem_header = mem_header.clone();
                 g.remove(op_flags.mloadw(), move || {
-                    mem_header.read_word(array::from_fn(|i| stk_next.get(i).into()))
+                    let word = array::from_fn(|i| stk_next.get(i).into());
+                    mem_header.read_word(word)
                 });
             }
             {
                 let mem_header = mem_header;
                 g.remove(op_flags.mstorew(), move || {
-                    mem_header.write_word([
-                        s1.into(),
-                        stk.get(2).into(),
-                        stk.get(3).into(),
-                        stk.get(4).into(),
-                    ])
+                    let word = [s1.into(), stk.get(2).into(), stk.get(3).into(), stk.get(4).into()];
+                    mem_header.write_word(word)
                 });
             }
 
             // --- U32AND / U32XOR ---
             g.remove(op_flags.u32and(), move || {
-                BitwiseMsg::and(s0.into(), s1.into(), stk_next_0.into())
+                let a = s0.into();
+                let b = s1.into();
+                let c = stk_next_0.into();
+                BitwiseMsg::and(a, b, c)
             });
             g.remove(op_flags.u32xor(), move || {
-                BitwiseMsg::xor(s0.into(), s1.into(), stk_next_0.into())
+                let a = s0.into();
+                let b = s1.into();
+                let c = stk_next_0.into();
+                BitwiseMsg::xor(a, b, c)
             });
 
             // --- EVALCIRCUIT ---
-            g.remove(op_flags.evalcircuit(), move || AceInitMsg {
-                clk: clk.into(),
-                ctx: sys_ctx.into(),
-                ptr: s0.into(),
-                num_read: s1.into(),
-                num_eval: stk.get(2).into(),
+            g.remove(op_flags.evalcircuit(), move || {
+                let clk = clk.into();
+                let ctx = sys_ctx.into();
+                let ptr = s0.into();
+                let num_read = s1.into();
+                let num_eval = stk.get(2).into();
+                AceInitMsg { clk, ctx, ptr, num_read, num_eval }
             });
 
             // --- LOGPRECOMPILE ---
             g.batch(op_flags.log_precompile(), move |b| {
+                let log_addr: LB::Expr = log_addr.into();
                 let logpre_in: [LB::Expr; 12] = [
                     stk.get(STACK_COMM_RANGE.start).into(),
                     stk.get(STACK_COMM_RANGE.start + 1).into(),
@@ -302,11 +310,9 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                     stk_next.get(STACK_CAP_NEXT_RANGE.start + 2).into(),
                     stk_next.get(STACK_CAP_NEXT_RANGE.start + 3).into(),
                 ];
-                b.remove(HasherMsg::linear_hash_init(log_addr.into(), logpre_in));
-                b.remove(HasherMsg::return_state(
-                    Into::<LB::Expr>::into(log_addr) + last_off,
-                    logpre_out,
-                ));
+                b.remove(HasherMsg::linear_hash_init(log_addr.clone(), logpre_in));
+                let return_addr = log_addr + last_off;
+                b.remove(HasherMsg::return_state(return_addr, logpre_out));
             });
         });
     });

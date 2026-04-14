@@ -22,11 +22,6 @@
 //! that concern is covered by the existing degree-budget test.
 
 #![cfg(test)]
-#![allow(
-    dead_code,
-    reason = "Test-only scaffolding: some fields (e.g. `public_values`) are held only so the \
-              test mirrors the LookupBuilder shape; no current bus reads them."
-)]
 
 use alloc::vec::Vec;
 use core::marker::PhantomData;
@@ -39,7 +34,7 @@ use miden_crypto::stark::air::RowWindow;
 
 use super::{
     EncodedLookupGroup, LookupBatch, LookupBuilder, LookupChallenges, LookupColumn, LookupGroup,
-    LookupMessage,
+    LookupMessage, chiplet_air::ChipletLookupBuilder, main_air::MainLookupBuilder,
 };
 
 // GROUP MISMATCH
@@ -144,6 +139,17 @@ impl<'a> LookupBuilder for DualBuilder<'a> {
         result
     }
 }
+
+// EXTENSION TRAIT IMPLS
+// ================================================================================================
+
+// Empty impls pick up the default polynomial bodies of `build_op_flags` /
+// `build_chiplet_active`. The dual builder is test-only, so it always runs through the
+// polynomial path.
+
+impl<'a> MainLookupBuilder for DualBuilder<'a> {}
+
+impl<'a> ChipletLookupBuilder for DualBuilder<'a> {}
 
 // DUAL COLUMN
 // ================================================================================================

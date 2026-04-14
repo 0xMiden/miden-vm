@@ -27,23 +27,21 @@
 
 use miden_core::field::PrimeCharacteristicRing;
 
-use crate::{
-    Felt,
-    constraints::{
-        logup_msg::AceWireMsg,
-        lookup::{
-            LookupBatch, LookupBuilder, LookupColumn, LookupGroup, buses::ChipletTraceContext,
-        },
-        utils::BoolNot,
+use crate::constraints::{
+    logup_msg::AceWireMsg,
+    lookup::{
+        LookupBatch, LookupColumn, LookupGroup,
+        chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
     },
+    utils::BoolNot,
 };
 
 /// Emit the ACE wiring bus (C3).
 pub(in crate::constraints::lookup) fn emit_ace_wiring<LB>(
     builder: &mut LB,
-    ctx: &ChipletTraceContext<LB>,
+    ctx: &ChipletBusContext<LB>,
 ) where
-    LB: LookupBuilder<F = Felt>,
+    LB: ChipletLookupBuilder,
 {
     let local = ctx.local;
     let ace_flag = ctx.chiplet_active.ace.clone();
@@ -55,35 +53,25 @@ pub(in crate::constraints::lookup) fn emit_ace_wiring<LB>(
     let ace_read = ace.read();
     let ace_eval = ace.eval();
 
+    // Raw `Var` captures — every field below is Copy and flows directly into a struct
+    // field inside the batch closure, so we skip the per-field `LB::Expr` conversion up
+    // front and do it lazily. Prefixed with `ace_` where the shorter name would clash
+    // with the outer function parameter `ctx`.
+    let ace_clk = ace.clk;
+    let ace_ctx = ace.ctx;
+    let id_0 = ace.id_0;
+    let id_1 = ace.id_1;
+    let id_2 = ace_eval.id_2;
+    let v_0 = ace.v_0;
+    let v_1 = ace.v_1;
+    let v_2 = ace_eval.v_2;
+    let m_0 = ace_read.m_0;
+    let m_1 = ace_read.m_1;
+
+    // `sblock` mixes into the wire_1 / wire_2 multiplicities; keep it as an `LB::Expr`
+    // since the `wire_1_mult` expression needs arithmetic against the already-converted
+    // `m_1`.
     let sblock: LB::Expr = ace.s_block.into();
-
-    // Shared fields across all three wires.
-    let clk: LB::Expr = ace.clk.into();
-    let sys_ctx: LB::Expr = ace.ctx.into();
-    let m0: LB::Expr = ace_read.m_0.into();
-    let m1: LB::Expr = ace_read.m_1.into();
-
-    let wire_0 = AceWireMsg {
-        clk: clk.clone(),
-        ctx: sys_ctx.clone(),
-        id: ace.id_0.into(),
-        v0: ace.v_0.0.into(),
-        v1: ace.v_0.1.into(),
-    };
-    let wire_1 = AceWireMsg {
-        clk: clk.clone(),
-        ctx: sys_ctx.clone(),
-        id: ace.id_1.into(),
-        v0: ace.v_1.0.into(),
-        v1: ace.v_1.1.into(),
-    };
-    let wire_2 = AceWireMsg {
-        clk,
-        ctx: sys_ctx,
-        id: ace_eval.id_2.into(),
-        v0: ace_eval.v_2.0.into(),
-        v1: ace_eval.v_2.1.into(),
-    };
 
     builder.column(|col| {
         col.group(|g| {
@@ -91,11 +79,37 @@ pub(in crate::constraints::lookup) fn emit_ace_wiring<LB>(
             // for wire_1 and wire_2. `wire_0`'s `m_0` is invariant across the
             // READ/EVAL split, so it lives in the batch as a plain trace-column
             // multiplicity.
-            let wire_1_mult = sblock.not() * m1 - sblock.clone();
-            let wire_2_mult = LB::Expr::ZERO - sblock;
             g.batch(ace_flag, move |b| {
-                b.insert(m0, wire_0);
+                let m_0: LB::Expr = m_0.into();
+                let m_1: LB::Expr = m_1.into();
+                let wire_1_mult = sblock.not() * m_1 - sblock.clone();
+                let wire_2_mult = LB::Expr::ZERO - sblock;
+
+                let wire_0 = AceWireMsg {
+                    clk: ace_clk.into(),
+                    ctx: ace_ctx.into(),
+                    id: id_0.into(),
+                    v0: v_0.0.into(),
+                    v1: v_0.1.into(),
+                };
+                b.insert(m_0, wire_0);
+
+                let wire_1 = AceWireMsg {
+                    clk: ace_clk.into(),
+                    ctx: ace_ctx.into(),
+                    id: id_1.into(),
+                    v0: v_1.0.into(),
+                    v1: v_1.1.into(),
+                };
                 b.insert(wire_1_mult, wire_1);
+
+                let wire_2 = AceWireMsg {
+                    clk: ace_clk.into(),
+                    ctx: ace_ctx.into(),
+                    id: id_2.into(),
+                    v0: v_2.0.into(),
+                    v1: v_2.1.into(),
+                };
                 b.insert(wire_2_mult, wire_2);
             });
         });

@@ -1,73 +1,57 @@
-//! Concrete `LookupAir` for the Miden VM processor.
+//! Aggregator `LookupAir` for the Miden VM processor.
 //!
-//! All 8 buses (M1..M5, C1..C3) are wired through the new API in the M1..M5, C1..C3 order
-//! that matches the legacy `enforce_main` / `enforce_chiplet` layout. Task #8 will wire
-//! `ProcessorAir::eval` into this `eval` via a
-//! `ConstraintLookupBuilder::new(builder, &MidenLookupAir)` call.
+//! [`MidenLookupAir`] is a thin sequencer over [`super::main_air::MainLookupAir`] (four
+//! main-trace columns in the order M1, M_2+5, M3, M4) and
+//! [`super::chiplet_air::ChipletLookupAir`] (three chiplet-trace columns in the order
+//! C1, C2, C3). The aggregated `eval` preserves the legacy `enforce_main` / `enforce_chiplet`
+//! column order so downstream consumers can grab the full 7-column picture in a single call.
 //!
-//! Each per-bus emitter lives in [`super::buses`] as a module-private
-//! `pub(super) fn emit_*` so the top-level file stays a thin routing layer. See the
-//! individual `buses/*.rs` files for the per-bus algebra.
-
-use core::borrow::Borrow;
-
-use miden_crypto::stark::air::WindowAccess;
+//! Task #8 will wire `ProcessorAir::eval` into this `eval` via a
+//! `ConstraintLookupBuilder::new(builder, &MidenLookupAir)` call. An alternative
+//! future path reaching for `MainLookupAir` and `ChipletLookupAir` independently (e.g. for
+//! an enum-dispatch wrapper) is also supported and does not require going through the
+//! aggregator.
 
 use super::{
-    LookupAir, LookupBuilder,
+    LookupAir,
     bus_id::NUM_BUS_IDS,
-    buses::{
-        ChipletTraceContext, MainTraceContext,
-        block_hash_and_op_group::emit_block_hash_and_op_group,
-        block_stack::emit_block_stack_and_range_table, chiplet_requests::emit_chiplet_requests,
-        chiplet_responses::emit_chiplet_responses, hash_kernel::emit_hash_kernel_table,
-        range_logcap::emit_range_stack_and_log_capacity, wiring::emit_ace_wiring,
-    },
+    chiplet_air::{ChipletLookupAir, ChipletLookupBuilder},
+    main_air::{MainLookupAir, MainLookupBuilder},
 };
-use crate::{Felt, MainCols};
 
 // MIDEN LOOKUP AIR
 // ================================================================================================
 
-/// The Miden VM's LogUp lookup argument.
+/// Aggregator [`LookupAir`] for the Miden VM's 7-column LogUp argument.
 ///
-/// Zero-sized. A single blanket
-/// `impl<LB: LookupBuilder<F = Felt>> LookupAir<LB> for MidenLookupAir`
-/// serves both the constraint-path
-/// [`ConstraintLookupBuilder`](super::constraint::ConstraintLookupBuilder) and
-/// the prover-path [`ProverLookupBuilder`](super::prover::ProverLookupBuilder) —
-/// the adapter passes `&self` to its constructor, which uses the
-/// `A: LookupAir<Self>` bound in §A.6 of the plan to pin the `LB` type parameter
-/// to the concrete adapter.
+/// Zero-sized; `eval` delegates to [`MainLookupAir`] and [`ChipletLookupAir`] in sequence.
+/// Consumers that want the full 7-column picture in one `eval` call reach for this type;
+/// consumers that want to address the main and chiplet halves independently (e.g. a future
+/// enum-dispatch wrapper) reach directly for the two sub-AIRs instead.
 ///
-/// Task #7 wires all 8 buses (M1..M5, C1..C3) through the new API. Until Task #8
-/// calls `MidenLookupAir::eval` from `ProcessorAir::eval`, the struct has no
-/// live consumer in `ProcessorAir`, but the comprehensive degree-budget test
-/// `miden_lookup_air_degree_within_budget` and the adapter chain around
-/// [`ConstraintLookupBuilder`](super::constraint::ConstraintLookupBuilder)
-/// exercise it.
+/// Until Task #8 calls `MidenLookupAir::eval` from `ProcessorAir::eval`, the only live
+/// consumers are the degree-budget and cached-encoding equivalence tests at the bottom of
+/// this file.
 #[derive(Copy, Clone, Debug, Default)]
-pub struct MidenLookupAir;
+pub(crate) struct MidenLookupAir;
 
 impl<LB> LookupAir<LB> for MidenLookupAir
 where
-    LB: LookupBuilder<F = Felt>,
-    // Row access: the two main-trace rows get reinterpreted as `MainCols<LB::Var>` via
-    // the blanket `Borrow<MainCols<T>> for [T]` impl in `constraints::columns`.
-    [LB::Var]: Borrow<MainCols<LB::Var>>,
+    LB: MainLookupBuilder + ChipletLookupBuilder,
 {
     fn num_columns(&self) -> usize {
-        // M1 (block-stack + range-table response), M_2+5 (block-hash queue ∪ op-group table,
-        // merged via ME), M3 (chiplet requests), M4 (range-stack + logpre capacity), plus
-        // C1..C3. 4 main + 3 chiplet = 7 columns.
+        // 4 main-trace columns (M1, M_2+5, M3, M4) + 3 chiplet-trace columns (C1, C2, C3)
+        // = 7. Hard-coded rather than computed from the sub-AIRs because the sub-AIR
+        // methods live behind the `LookupAir<LB>` trait, and resolving `LB` from inside the
+        // aggregator's impl would require a turbofish.
         7
     }
 
     fn max_message_width(&self) -> usize {
-        // `HasherMsg::State` holds the widest payload: label@β⁰, addr@β¹, node_index@β²,
-        // and state[0..12]@β³..β¹⁴, i.e. 15 slots. Every other message stays within 14 slots
-        // (the widest non-state chiplet message is `HasherMsg::Rate` at 11). Sized at 15 to
-        // leave slack-free accommodation for β¹⁴ without over-allocating.
+        // `HasherMsg::State` holds the widest payload on both sides: label@β⁰, addr@β¹,
+        // node_index@β², state[0..12]@β³..β¹⁴ — 15 slots. Every other message stays within
+        // 14 slots. Sized at 15 to leave slack-free accommodation for β¹⁴ without
+        // over-allocating. Hard-coded for the same reason as `num_columns`.
         15
     }
 
@@ -76,39 +60,8 @@ where
     }
 
     fn eval(&self, builder: &mut LB) {
-        // Hold the MainWindow as an owned value so its borrow of the underlying builder is
-        // released before we grab the per-column handle. `SymbolicAirBuilder::main` returns
-        // `RowMajorMatrix<Var>` by clone, and the lifted-stark prover-side `RowWindow` is
-        // `Copy`, so both cases survive the by-value return without extra allocations.
-        let main = builder.main();
-        let local: &MainCols<LB::Var> = main.current_slice().borrow();
-        let next: &MainCols<LB::Var> = main.next_slice().borrow();
-
-        // Precompute per-segment contexts once per eval. `MainTraceContext` builds the
-        // single shared `OpFlags` instance that the 4 main-trace emitters consume, and
-        // `ChipletTraceContext` builds the per-chiplet `is_active` snapshot that the 3
-        // chiplet-trace emitters consume. Splitting them avoids dead precompute on either
-        // side (main-trace buses never touch chiplet columns, chiplet-trace buses never
-        // touch op flags).
-        let main_ctx = MainTraceContext::<LB>::new(local, next);
-        let chiplet_ctx = ChipletTraceContext::<LB>::new(local, next);
-
-        // Main-trace LogUp columns.
-        //
-        //   M1     = block-stack + range-table response
-        //   M_2+5  = block-hash queue ∪ op-group table (merged via the ME
-        //            observation that control-flow opcodes are never in-span)
-        //   M3     = chiplet requests
-        //   M4     = range-stack + logpre capacity
-        emit_block_stack_and_range_table::<LB>(builder, &main_ctx);
-        emit_block_hash_and_op_group::<LB>(builder, &main_ctx);
-        emit_chiplet_requests::<LB>(builder, &main_ctx);
-        emit_range_stack_and_log_capacity::<LB>(builder, &main_ctx);
-
-        // Chiplet-trace LogUp columns (C1..C3) — order matches the legacy `enforce_chiplet`.
-        emit_chiplet_responses::<LB>(builder, &chiplet_ctx);
-        emit_hash_kernel_table::<LB>(builder, &chiplet_ctx);
-        emit_ace_wiring::<LB>(builder, &chiplet_ctx);
+        MainLookupAir.eval(builder);
+        ChipletLookupAir.eval(builder);
     }
 }
 

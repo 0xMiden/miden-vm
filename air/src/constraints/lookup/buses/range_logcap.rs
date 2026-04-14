@@ -7,10 +7,12 @@
 use core::array;
 
 use crate::{
-    Felt,
     constraints::{
         logup_msg::{LogCapacityMsg, RangeMsg},
-        lookup::{LookupBatch, LookupBuilder, LookupColumn, LookupGroup, buses::MainTraceContext},
+        lookup::{
+            LookupBatch, LookupColumn, LookupGroup,
+            main_air::{MainBusContext, MainLookupBuilder},
+        },
     },
     trace::log_precompile::{HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE},
 };
@@ -18,9 +20,9 @@ use crate::{
 /// Emit the range stack + log-precompile capacity bus (M4).
 pub(in crate::constraints::lookup) fn emit_range_stack_and_log_capacity<LB>(
     builder: &mut LB,
-    ctx: &MainTraceContext<LB>,
+    ctx: &MainBusContext<LB>,
 ) where
-    LB: LookupBuilder<F = Felt>,
+    LB: MainLookupBuilder,
 {
     let local = ctx.local;
     let next = ctx.next;
@@ -45,16 +47,19 @@ pub(in crate::constraints::lookup) fn emit_range_stack_and_log_capacity<LB>(
     builder.column(|col| {
         col.group(|g| {
             // U32RC: four simultaneous range-check removals under the u32rc flag.
-            g.batch(f_u32rc, |b| {
+            g.batch(f_u32rc, move |b| {
                 for helper in helpers {
-                    b.remove(RangeMsg { value: helper.into() });
+                    let value = helper.into();
+                    b.remove(RangeMsg { value });
                 }
             });
 
             // LOGPRECOMPILE: remove the old capacity, add the new one.
-            g.batch(f_log_precompile, |b| {
-                b.remove(LogCapacityMsg { capacity: cap_prev.map(Into::into) });
-                b.add(LogCapacityMsg { capacity: cap_next.map(Into::into) });
+            g.batch(f_log_precompile, move |b| {
+                let capacity_prev = cap_prev.map(LB::Expr::from);
+                b.remove(LogCapacityMsg { capacity: capacity_prev });
+                let capacity_next = cap_next.map(LB::Expr::from);
+                b.add(LogCapacityMsg { capacity: capacity_next });
             });
         });
     });

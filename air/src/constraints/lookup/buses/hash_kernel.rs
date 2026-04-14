@@ -5,7 +5,8 @@
 //! 1. **Sibling table** (`BUS_SIBLING_TABLE`) — Merkle update siblings. On hasher controller input
 //!    rows with `s0·s1 = 1`, `s2` distinguishes MU (new path, removes siblings) from MV (old path,
 //!    adds siblings). The direction bit `b = node_index − 2·node_index_next` selects which half of
-//!    `rate = h[0..8]` holds the sibling, giving four gated interactions (two add, two remove).
+//!    `rate = [rate_0, rate_1]` holds the sibling, giving four gated interactions (two add, two
+//!    remove).
 //! 2. **ACE memory reads** (`BUS_CHIPLETS`) — on ACE chiplet rows, the block selector distinguishes
 //!    word reads (`f_ace_read`) from element reads used by EVAL rows (`f_ace_eval`). Both are
 //!    removed from the chiplets bus.
@@ -20,10 +21,12 @@ use core::array;
 use miden_core::field::PrimeCharacteristicRing;
 
 use crate::{
-    Felt,
     constraints::{
         logup_msg::{MemoryHeader, MemoryMsg, SiblingMsgBitOne, SiblingMsgBitZero},
-        lookup::{LookupBuilder, LookupColumn, LookupGroup, buses::ChipletTraceContext},
+        lookup::{
+            LookupColumn, LookupGroup,
+            chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
+        },
         utils::BoolNot,
     },
     trace::chiplets::{
@@ -36,9 +39,9 @@ use crate::{
 #[allow(clippy::too_many_lines)]
 pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
     builder: &mut LB,
-    ctx: &ChipletTraceContext<LB>,
+    ctx: &ChipletBusContext<LB>,
 ) where
-    LB: LookupBuilder<F = Felt>,
+    LB: ChipletLookupBuilder,
 {
     let local = ctx.local;
     let next = ctx.next;
@@ -60,16 +63,21 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
     let f_mu_all: LB::Expr = controller_flag.clone() * hs0.clone() * hs1.clone() * hs2.clone();
     let f_mv_all: LB::Expr = controller_flag * hs0 * hs1 * hs2.not();
 
-    // Direction bit `b = node_index − 2·node_index_next`.
-    let node_index: LB::Expr = ctrl.node_index.into();
-    let node_index_next: LB::Expr = ctrl_next.node_index.into();
-    let bit: LB::Expr = node_index.clone() - node_index_next.double();
-    let one_minus_bit: LB::Expr = bit.not();
+    // Raw `Var` captures for the sibling payload fields (Copy). Each closure does its own
+    // `.into()` so the per-closure construction ends as a flat struct literal. Hasher state
+    // is split by convention into `rate_0 (4), rate_1 (4), cap (4)` — sibling messages only
+    // use the rate halves.
+    let rate_0: [LB::Var; 4] = array::from_fn(|i| ctrl.state[i]);
+    let rate_1: [LB::Var; 4] = array::from_fn(|i| ctrl.state[4 + i]);
+    let mrupdate_id = ctrl.mrupdate_id;
+    let node_index = ctrl.node_index;
 
-    // `sib_lo = h[0..4]` (rate0), `sib_hi = h[4..8]` (rate1).
-    let sib_lo: [LB::Expr; 4] = array::from_fn(|i| ctrl.state[i].into());
-    let sib_hi: [LB::Expr; 4] = array::from_fn(|i| ctrl.state[4 + i].into());
-    let mrupdate_id: LB::Expr = ctrl.mrupdate_id.into();
+    // Direction bit `b = node_index − 2·node_index_next`. The bit / one_minus_bit combine
+    // multiplicatively into the sibling flags below — they're computed once and cloned into
+    // each `g.add` / `g.remove` flag argument.
+    let node_index_next: LB::Expr = ctrl_next.node_index.into();
+    let bit: LB::Expr = node_index.into() - node_index_next.double();
+    let one_minus_bit: LB::Expr = bit.not();
 
     // --- ACE memory-read setup ---
 
@@ -83,95 +91,84 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
     let f_ace_read: LB::Expr = is_ace_row.clone() * block_sel.not();
     let f_ace_eval: LB::Expr = is_ace_row * block_sel;
 
-    // ACE memory-header fields (shared by both READ word and EVAL element interactions).
-    let ace_clk: LB::Expr = ace.clk.into();
-    let ace_ctx: LB::Expr = ace.ctx.into();
-    let ace_ptr: LB::Expr = ace.ptr.into();
-
-    // ACE READ rows expose a 4-element word pulled from the `v_0` / `v_1` pairs.
-    let ace_read_word: [LB::Expr; 4] =
-        [ace.v_0.0.into(), ace.v_0.1.into(), ace.v_1.0.into(), ace.v_1.1.into()];
-
-    // ACE EVAL rows combine `id_1 / id_2 / eval_op` into a single element. `id_2` reads
-    // through the typed EVAL overlay (same physical column as the READ overlay's
-    // `num_eval`, but the EVAL interpretation is the one the bus wants).
-    let ace_eval_element: LB::Expr = Into::<LB::Expr>::into(ace.id_1)
-        + Into::<LB::Expr>::into(ace.eval().id_2) * LB::Expr::from(ACE_INSTRUCTION_ID1_OFFSET)
-        + (Into::<LB::Expr>::into(ace.eval_op) + LB::Expr::ONE)
-            * LB::Expr::from(ACE_INSTRUCTION_ID2_OFFSET);
+    // Raw `Var` captures for ACE payload fields — each producing closure converts them
+    // via `.into()` inside its body.
+    let ace_clk = ace.clk;
+    let ace_ctx = ace.ctx;
+    let ace_ptr = ace.ptr;
+    let ace_v0 = ace.v_0;
+    let ace_v1 = ace.v_1;
+    let ace_id_1 = ace.id_1;
+    let ace_id_2 = ace.eval().id_2;
+    let ace_eval_op = ace.eval_op;
 
     builder.column(|col| {
         col.group(|g| {
             // --- SIBLING TABLE ---
             // MV adds (old path), MU removes (new path). Each splits on bit into the
-            // BitZero (sibling at h[4..8]) and BitOne (sibling at h[0..4]) variants.
-            {
-                let mr = mrupdate_id.clone();
-                let ni = node_index.clone();
-                let hi = sib_hi.clone();
-                let gate = f_mv_all.clone() * one_minus_bit.clone();
-                g.add(gate, move || SiblingMsgBitZero {
-                    mrupdate_id: mr,
-                    node_index: ni,
-                    h_hi: hi,
-                });
-            }
-            {
-                let mr = mrupdate_id.clone();
-                let ni = node_index.clone();
-                let lo = sib_lo.clone();
-                let gate = f_mv_all.clone() * bit.clone();
-                g.add(gate, move || SiblingMsgBitOne {
-                    mrupdate_id: mr,
-                    node_index: ni,
-                    h_lo: lo,
-                });
-            }
-            {
-                let mr = mrupdate_id.clone();
-                let ni = node_index.clone();
-                let hi = sib_hi;
-                let gate = f_mu_all.clone() * one_minus_bit;
-                g.remove(gate, move || SiblingMsgBitZero {
-                    mrupdate_id: mr,
-                    node_index: ni,
-                    h_hi: hi,
-                });
-            }
-            {
-                let mr = mrupdate_id;
-                let ni = node_index;
-                let lo = sib_lo;
-                let gate = f_mu_all * bit;
-                g.remove(gate, move || SiblingMsgBitOne {
-                    mrupdate_id: mr,
-                    node_index: ni,
-                    h_lo: lo,
-                });
-            }
+            // BitZero (sibling at rate_1) and BitOne (sibling at rate_0) variants.
+            let gate = f_mv_all.clone() * one_minus_bit.clone();
+            g.add(gate, move || {
+                let mrupdate_id: LB::Expr = mrupdate_id.into();
+                let node_index: LB::Expr = node_index.into();
+                let h_hi = array::from_fn(|i| rate_1[i].into());
+                SiblingMsgBitZero { mrupdate_id, node_index, h_hi }
+            });
+
+            let gate = f_mv_all * bit.clone();
+            g.add(gate, move || {
+                let mrupdate_id: LB::Expr = mrupdate_id.into();
+                let node_index: LB::Expr = node_index.into();
+                let h_lo = array::from_fn(|i| rate_0[i].into());
+                SiblingMsgBitOne { mrupdate_id, node_index, h_lo }
+            });
+
+            let gate = f_mu_all.clone() * one_minus_bit;
+            g.remove(gate, move || {
+                let mrupdate_id: LB::Expr = mrupdate_id.into();
+                let node_index: LB::Expr = node_index.into();
+                let h_hi = array::from_fn(|i| rate_1[i].into());
+                SiblingMsgBitZero { mrupdate_id, node_index, h_hi }
+            });
+
+            let gate = f_mu_all * bit;
+            g.remove(gate, move || {
+                let mrupdate_id: LB::Expr = mrupdate_id.into();
+                let node_index: LB::Expr = node_index.into();
+                let h_lo = array::from_fn(|i| rate_0[i].into());
+                SiblingMsgBitOne { mrupdate_id, node_index, h_lo }
+            });
 
             // --- ACE MEMORY READS (BUS_CHIPLETS) ---
             // Word read on READ rows.
-            {
-                let clk = ace_clk.clone();
-                let ctx = ace_ctx.clone();
-                let addr = ace_ptr.clone();
-                g.remove(f_ace_read, move || MemoryMsg::Word {
+            g.remove(f_ace_read, move || {
+                let clk = ace_clk.into();
+                let ctx = ace_ctx.into();
+                let addr = ace_ptr.into();
+                let word = [ace_v0.0.into(), ace_v0.1.into(), ace_v1.0.into(), ace_v1.1.into()];
+                MemoryMsg::Word {
                     op_value: MEMORY_READ_WORD_LABEL as u16,
                     header: MemoryHeader { ctx, addr, clk },
-                    word: ace_read_word,
-                });
-            }
+                    word,
+                }
+            });
 
             // Element read on EVAL rows.
-            g.remove(f_ace_eval, move || MemoryMsg::Element {
-                op_value: MEMORY_READ_ELEMENT_LABEL as u16,
-                header: MemoryHeader {
-                    ctx: ace_ctx,
-                    addr: ace_ptr,
-                    clk: ace_clk,
-                },
-                element: ace_eval_element,
+            g.remove(f_ace_eval, move || {
+                let clk = ace_clk.into();
+                let ctx = ace_ctx.into();
+                let addr = ace_ptr.into();
+                let id_1: LB::Expr = ace_id_1.into();
+                let id_2: LB::Expr = ace_id_2.into();
+                let eval_op: LB::Expr = ace_eval_op.into();
+                let element = id_1
+                    + id_2 * LB::Expr::from(ACE_INSTRUCTION_ID1_OFFSET)
+                    + (eval_op + LB::Expr::ONE) * LB::Expr::from(ACE_INSTRUCTION_ID2_OFFSET);
+                MemoryMsg::Element {
+                    op_value: MEMORY_READ_ELEMENT_LABEL as u16,
+                    header: MemoryHeader { ctx, addr, clk },
+                    element,
+                }
             });
         });
     });

@@ -44,11 +44,6 @@
 //! `encoded` closure is dropped unused, since the canonical description
 //! is always the cheapest path for concrete rows).
 
-#![expect(
-    dead_code,
-    reason = "ProverLookupBuilder has no live caller until the prover-side aux-trace builder is refactored to consume it."
-)]
-
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 
@@ -57,8 +52,9 @@ use miden_crypto::stark::air::RowWindow;
 
 use super::{
     EncodedLookupGroup, LookupAir, LookupBatch, LookupBuilder, LookupChallenges, LookupColumn,
-    LookupGroup, LookupMessage,
+    LookupGroup, LookupMessage, chiplet_air::ChipletLookupBuilder, main_air::MainLookupBuilder,
 };
+use crate::Felt;
 
 // PROVER LOOKUP BUILDER
 // ================================================================================================
@@ -190,6 +186,24 @@ where
         self.column_idx += 1;
         result
     }
+}
+
+// EXTENSION TRAIT IMPLS
+// ================================================================================================
+
+// Gated to `F = Felt` because the extension traits require `LookupBuilder<F = Felt>`. The
+// prover adapter is generic over `F: Field` in principle, but Miden only ever instantiates
+// it with `F = Felt`, so the narrowing is a nothing-burger in practice.
+//
+// Both impls are empty and pick up the default polynomial bodies today. The planned
+// prover-side optimization will replace these bodies with a boolean fast path that skips
+// the dead flag products for rows where decoder bits are already concrete 0/1.
+
+impl<'a, EF> MainLookupBuilder for ProverLookupBuilder<'a, Felt, EF> where EF: ExtensionField<Felt> {}
+
+impl<'a, EF> ChipletLookupBuilder for ProverLookupBuilder<'a, Felt, EF> where
+    EF: ExtensionField<Felt>
+{
 }
 
 // PROVER COLUMN

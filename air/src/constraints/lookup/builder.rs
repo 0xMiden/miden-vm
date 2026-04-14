@@ -27,17 +27,6 @@
 //! instantiates them with the concrete `F` / `EF` field types directly.
 
 // Task #6 (block-hash queue port) lands the first live
-// `LookupBuilder::main()` call via `MidenLookupAir::eval`, so the
-// trace-access method is now exercised. `periodic_values()` and
-// `public_values()` remain unused until Task #7 lands the chiplet /
-// range-check buses that read them. The narrow `expect` below covers
-// just those two methods; remove both bullets when Task #7 ports the
-// buses that consume them.
-#![expect(
-    dead_code,
-    reason = "`LookupBuilder::periodic_values` / `public_values` stay dead until Task #7 ports the buses that read them."
-)]
-
 use miden_core::field::{Algebra, ExtensionField, Field, PrimeCharacteristicRing};
 use miden_crypto::stark::air::WindowAccess;
 

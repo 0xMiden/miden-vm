@@ -1,36 +1,45 @@
-//! Per-bus emitters for the Miden VM's [`super::MidenLookupAir`].
+//! Per-bus emitters for the Miden VM's LogUp argument.
 //!
-//! Splits the Miden VM's 8 LogUp buses into one file each. Each emitter is a crate-private
+//! Splits the Miden VM's 7 LogUp buses into one file each. Each emitter is a crate-private
 //! `pub(in crate::constraints::lookup) fn emit_*` that opens a single
-//! [`super::super::LookupBuilder::column`] closure and describes the bus's interactions via
-//! [`super::super::LookupColumn::group`] or
-//! [`super::super::LookupColumn::group_with_cached_encoding`]. The emitters are routed
-//! through [`super::MidenLookupAir::eval`] in the order M1..M5, C1..C3 so the column indices
-//! line up with the legacy `enforce_main` / `enforce_chiplet` layout.
+//! [`super::LookupBuilder::column`] closure and describes the bus's interactions via
+//! [`super::LookupColumn::group`] or [`super::LookupColumn::group_with_cached_encoding`].
+//!
+//! The emitters are routed through two separate [`super::LookupAir`] implementors:
+//! - [`super::main_air::MainLookupAir`] for the main-trace buses (M1, M_2+5, M3, M4).
+//! - [`super::chiplet_air::ChipletLookupAir`] for the chiplet-trace buses (C1, C2, C3).
+//!
+//! [`super::miden_air::MidenLookupAir`] is a thin aggregator that calls both in sequence,
+//! preserving the legacy `enforce_main` / `enforce_chiplet` column order for downstream
+//! consumers that want the full 7-column picture in a single `eval` call.
 //!
 //! ## Shared precompute contexts
 //!
-//! The 4 main-trace emitters (M1, M_2+5, M3, M4) share [`MainTraceContext`], which holds
-//! the two-row `MainCols` window plus a single [`OpFlags`] instance built once per
-//! `eval`. The 3 chiplet-trace emitters (C1, C2, C3) share [`ChipletTraceContext`], which
-//! holds the same two-row window plus [`ChipletActiveFlags`] — a pure-compute snapshot of
-//! the per-chiplet `is_active` expressions produced by
-//! [`super::super::super::chiplets::selectors::build_chiplet_selectors`]'s active-flag
-//! block. Both contexts are built at the top of [`super::MidenLookupAir::eval`] and passed
-//! by reference to the matching emitters so each expensive precompute runs exactly once.
+//! The main-trace and chiplet-trace contexts live next to their respective LookupAirs:
+//! - [`super::main_air::MainBusContext`] — two-row window plus the shared
+//!   [`crate::constraints::op_flags::OpFlags`] instance consumed by the 4 main-trace emitters.
+//! - [`super::chiplet_air::ChipletBusContext`] — two-row window plus the shared
+//!   [`ChipletActiveFlags`] snapshot consumed by the 3 chiplet-trace emitters.
+//!
+//! Each context is built once per `eval` through an extension-trait hook
+//! ([`super::main_air::MainLookupBuilder::build_op_flags`] /
+//! [`super::chiplet_air::ChipletLookupBuilder::build_chiplet_active`]), so a future
+//! prover-side override can replace the polynomial construction with a cheaper boolean fast
+//! path without touching any emitter code. [`ChipletActiveFlags`] itself lives in this
+//! module because it's the pure-compute helper both the default chiplet hook and any
+//! future override want to reach for; it does not depend on either `MainCols` context type.
 //!
 //! ## Dead-code suppression
 //!
-//! Until Task #8 wires `ProcessorAir::eval` into `MidenLookupAir::eval`, the only live
-//! consumer of these emitters is the `miden_lookup_air_degree_within_budget` test in
-//! [`super::miden_air`]. The per-bus `emit_*` functions are kept discoverable from
-//! [`super::MidenLookupAir::eval`] so they are reached transitively from that test even in
-//! lib-only builds.
+//! Until Task #8 wires `ProcessorAir::eval` into the new `LookupAir` pipeline, the only
+//! live consumer of these emitters is the `miden_lookup_air_degree_within_budget` test in
+//! [`super::miden_air`]. The per-bus `emit_*` functions are kept discoverable from the
+//! aggregator's `eval` so they are reached transitively from that test even in lib-only
+//! builds.
 
 use miden_core::field::{Algebra, PrimeCharacteristicRing};
 
-use super::LookupBuilder;
-use crate::{Felt, MainCols, constraints::op_flags::OpFlags};
+use crate::MainCols;
 
 pub(in crate::constraints::lookup) mod block_hash_and_op_group;
 pub(in crate::constraints::lookup) mod block_stack;
@@ -40,81 +49,11 @@ pub(in crate::constraints::lookup) mod hash_kernel;
 pub(in crate::constraints::lookup) mod range_logcap;
 pub(in crate::constraints::lookup) mod wiring;
 
-// MAIN TRACE CONTEXT
-// ================================================================================================
-
-/// Shared context for the main-trace LogUp bus emitters (M1, M_2+5, M3, M4).
-///
-/// Built once at the top of [`super::MidenLookupAir::eval`] so every emitter reads the same
-/// row window and the same [`OpFlags`] instance. Before this split, each of the four
-/// main-trace emitters rebuilt [`OpFlags`] independently — this type collapses those into a
-/// single `OpFlags::new(...)` call per `eval`.
-///
-/// `LB::Var` is `Copy`, so borrowing the row slices through this context carries no
-/// additional cost beyond a pair of references.
-pub(in crate::constraints::lookup) struct MainTraceContext<'a, LB>
-where
-    LB: LookupBuilder<F = Felt>,
-{
-    /// Typed view of the current row.
-    pub local: &'a MainCols<LB::Var>,
-    /// Typed view of the next row.
-    pub next: &'a MainCols<LB::Var>,
-    /// Operation flags computed from `(local.decoder, local.stack, next.decoder)`.
-    pub op_flags: OpFlags<LB::Expr>,
-}
-
-impl<'a, LB> MainTraceContext<'a, LB>
-where
-    LB: LookupBuilder<F = Felt>,
-{
-    /// Build the shared main-trace context for one `eval` call.
-    pub fn new(local: &'a MainCols<LB::Var>, next: &'a MainCols<LB::Var>) -> Self {
-        let op_flags = OpFlags::<LB::Expr>::new(&local.decoder, &local.stack, &next.decoder);
-        Self { local, next, op_flags }
-    }
-}
-
-// CHIPLET TRACE CONTEXT
-// ================================================================================================
-
-/// Shared context for the chiplet-trace LogUp bus emitters (C1, C2, C3).
-///
-/// Holds the same two-row window as [`MainTraceContext`] together with a snapshot of the
-/// per-chiplet `is_active` expressions. Before this split, each chiplet-trace emitter
-/// rebuilt `s_ctrl`, `s_perm`, `virtual_s0 = 1 - s_ctrl - s_perm`, and the `s01/s012/
-/// s0123/s01234` prefix chain manually — this type collapses those into a single
-/// [`ChipletActiveFlags`] instance per `eval`. `s_ctrl` and `s_perm` now only appear
-/// inside the [`ChipletActiveFlags::from_main_cols`] constructor, matching the style rule
-/// that selector columns must not leak into individual chiplet constraint code.
-pub(in crate::constraints::lookup) struct ChipletTraceContext<'a, LB>
-where
-    LB: LookupBuilder<F = Felt>,
-{
-    /// Typed view of the current row.
-    pub local: &'a MainCols<LB::Var>,
-    /// Typed view of the next row.
-    pub next: &'a MainCols<LB::Var>,
-    /// Per-chiplet `is_active` flags, computed from `local`'s selector columns.
-    pub chiplet_active: ChipletActiveFlags<LB::Expr>,
-}
-
-impl<'a, LB> ChipletTraceContext<'a, LB>
-where
-    LB: LookupBuilder<F = Felt>,
-{
-    /// Build the shared chiplet-trace context for one `eval` call.
-    pub fn new(local: &'a MainCols<LB::Var>, next: &'a MainCols<LB::Var>) -> Self {
-        let chiplet_active = ChipletActiveFlags::<LB::Expr>::from_main_cols::<LB::Var>(local);
-        Self { local, next, chiplet_active }
-    }
-}
-
 // CHIPLET ACTIVE FLAGS
 // ================================================================================================
 
 /// Per-chiplet `is_active` expressions, mirroring the active-flag block of
-/// [`build_chiplet_selectors`](super::super::super::chiplets::selectors::build_chiplet_selectors).
+/// [`build_chiplet_selectors`](super::super::chiplets::selectors::build_chiplet_selectors).
 ///
 /// These are the only chiplet-flag flavors the LogUp buses consume —
 /// `is_transition` / `is_last` / `next_is_first` are used only by the constraint-path
@@ -123,7 +62,7 @@ where
 /// The constructor is a pure compute function: it builds the same algebra as
 /// `build_chiplet_selectors` but does NOT emit any `when` / `assert_*` calls, so it is
 /// safe to run in parallel with the constraint-path chiplet selector pass.
-pub(in crate::constraints::lookup) struct ChipletActiveFlags<E> {
+pub struct ChipletActiveFlags<E> {
     /// `is_active` for the hasher controller sub-chiplet (= `s_ctrl`).
     pub controller: E,
     /// `is_active` for the bitwise chiplet (= `s0 - s01`).
@@ -143,7 +82,7 @@ where
     /// Build the chiplet active-flag snapshot from a `MainCols` borrow.
     ///
     /// Mirrors the active-flag block of
-    /// [`build_chiplet_selectors`](super::super::super::chiplets::selectors::build_chiplet_selectors):
+    /// [`build_chiplet_selectors`](super::super::chiplets::selectors::build_chiplet_selectors):
     /// - `s_ctrl = chiplets[0]`, `s_perm = perm_seg`
     /// - virtual `s0 = 1 - s_ctrl - s_perm`
     /// - prefix chain `s01 / s012 / s0123 / s01234`

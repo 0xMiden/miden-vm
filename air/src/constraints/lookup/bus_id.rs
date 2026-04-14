@@ -6,11 +6,6 @@
 //! the original `u16` typing is no longer required because `LookupAir` indexes
 //! `Challenges::bus_prefix` with `usize` directly.
 
-#![expect(
-    dead_code,
-    reason = "Re-exports stay live until lookup buses migrate to bus_types names."
-)]
-
 use crate::trace::bus_types;
 
 pub const BUS_CHIPLETS: usize = bus_types::CHIPLETS_BUS;

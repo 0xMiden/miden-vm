@@ -39,18 +39,6 @@
 //! cheap (it builds a window over references) and not caching keeps the
 //! builder a four-field struct.
 
-// The adapter has no non-test consumer until Task #8 wires
-// `ProcessorAir::eval` through `ConstraintLookupBuilder::new`. In test
-// mode, the `miden_lookup_air_degree_within_budget` symbolic test
-// exercises it directly.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Adapter has no non-test consumer until Task #8 calls it from ProcessorAir::eval."
-    )
-)]
-
 use core::marker::PhantomData;
 
 use miden_core::field::PrimeCharacteristicRing;
@@ -58,7 +46,7 @@ use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess}
 
 use super::{
     EncodedLookupGroup, LookupAir, LookupBatch, LookupBuilder, LookupChallenges, LookupColumn,
-    LookupGroup, LookupMessage,
+    LookupGroup, LookupMessage, chiplet_air::ChipletLookupBuilder, main_air::MainLookupBuilder,
 };
 use crate::Felt;
 
@@ -186,6 +174,23 @@ where
         self.column_idx += 1;
         result
     }
+}
+
+// EXTENSION TRAIT IMPLS
+// ================================================================================================
+
+// Empty impls that pick up the default polynomial bodies of `build_op_flags` /
+// `build_chiplet_active`. A future prover-path adapter will override these on its own type;
+// the constraint path always wants the polynomial construction.
+
+impl<'ab, AB> MainLookupBuilder for ConstraintLookupBuilder<'ab, AB> where
+    AB: LiftedAirBuilder<F = Felt>
+{
+}
+
+impl<'ab, AB> ChipletLookupBuilder for ConstraintLookupBuilder<'ab, AB> where
+    AB: LiftedAirBuilder<F = Felt>
+{
 }
 
 // CONSTRAINT COLUMN
