@@ -237,7 +237,10 @@ impl Chiplets {
     /// to identify each individual chiplet trace in addition to padding to fill the rest of
     /// the trace.
     fn fill_trace(self, trace: &mut [Vec<Felt>; CHIPLETS_WIDTH]) -> AceHints {
-        let bitwise_start: usize = self.bitwise_start().into();
+        // s_ctrl (trace[0]) is 1 on the hasher's controller rows and 0 elsewhere.
+        // The controller region is the padded prefix of the hasher region; `region_lengths`
+        // returns the same padded length that `finalize_trace` will materialize later.
+        let (hasher_ctrl_len, _hasher_perm_len) = self.hasher.region_lengths();
         let memory_start: usize = self.memory_start().into();
         let ace_start: usize = self.ace_start().into();
         let kernel_rom_start: usize = self.kernel_rom_start().into();
@@ -245,17 +248,17 @@ impl Chiplets {
 
         let Chiplets { hasher, bitwise, memory, kernel_rom, ace } = self;
 
-        // Populate external selector columns for non-hasher chiplets.
-        // s1..s4 (trace[1..5]) subdivide the s0 region. s_ctrl (trace[0]) and s_perm (trace[20])
-        // are set after the hasher fills its trace (see below).
+        // Populate external selector columns. Each is a contiguous 0/1 indicator; the trace
+        // is zero-initialized, so we only memset the regions where the selector is ONE.
+        // s_perm (trace[20]) is written row-by-row by the hasher itself during fragment fill.
+        trace[0][..hasher_ctrl_len].fill(ONE); // s_ctrl: hasher controller rows
         trace[1][memory_start..].fill(ONE);
         trace[2][ace_start..].fill(ONE);
         trace[3][kernel_rom_start..].fill(ONE);
         trace[4][padding_start..].fill(ONE);
 
-        // Fill chiplet traces via fragments, then compute s_ctrl from perm_seg.
-        // The block ensures all fragment borrows are released before accessing trace directly.
-        let ace_hints = {
+        // Fill chiplet traces via fragments. The block scopes the fragment borrows.
+        {
             // allocate fragments to be filled with the respective execution traces of each chiplet
             let mut hasher_fragment = TraceFragment::new(CHIPLETS_WIDTH, hasher.trace_len());
             let mut bitwise_fragment = TraceFragment::new(CHIPLETS_WIDTH, bitwise.trace_len());
@@ -343,16 +346,7 @@ impl Chiplets {
 
             let ace_sections = ace.fill_trace(&mut ace_fragment);
             AceHints::new(ace_start, ace_sections)
-        };
-
-        // Compute s_ctrl (trace[0]) from perm_seg (trace[20]) for hasher rows.
-        // Controller rows have perm_seg=0 → s_ctrl=1. Perm rows have perm_seg=1 → s_ctrl=0.
-        // Non-hasher rows keep s_ctrl=0 (from initialization).
-        for row in 0..bitwise_start {
-            trace[0][row] = ONE - trace[20][row];
         }
-
-        ace_hints
     }
 }
 

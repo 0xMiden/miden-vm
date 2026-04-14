@@ -93,18 +93,26 @@ impl Hasher {
         }
     }
 
+    /// Returns the layout of the hasher region as `(controller_len, perm_len)`, both exact
+    /// multiples of `HASH_CYCLE_LEN`. Must be called before `fill_trace()` consumes the hasher.
+    ///
+    /// `controller_len` includes the padding rows that `finalize_trace()` will later append to
+    /// round the raw controller count up to a cycle boundary; `perm_len` is the total span of
+    /// the permutation cycles that `finalize_trace()` will emit, one per unique input state.
+    pub(super) fn region_lengths(&self) -> (usize, usize) {
+        debug_assert!(!self.finalized, "region_lengths must be called before finalization");
+        let controller_len = self.trace.trace_len().next_multiple_of(HASH_CYCLE_LEN);
+        let perm_len = self.perm_request_map.len() * HASH_CYCLE_LEN;
+        (controller_len, perm_len)
+    }
+
     /// Estimates the total trace length before finalization.
     ///
     /// This must match the actual length produced by `finalize_trace()`. The invariant is
     /// verified by a debug assertion in `fill_trace()`.
     fn estimate_trace_len(&self) -> usize {
-        let controller_len = self.trace.trace_len();
-        let padding = {
-            let remainder = controller_len % HASH_CYCLE_LEN;
-            if remainder == 0 { 0 } else { HASH_CYCLE_LEN - remainder }
-        };
-        let perm_len = self.perm_request_map.len() * HASH_CYCLE_LEN;
-        controller_len + padding + perm_len
+        let (controller_len, perm_len) = self.region_lengths();
+        controller_len + perm_len
     }
 
     // HASHING METHODS
