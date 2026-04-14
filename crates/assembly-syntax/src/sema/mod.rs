@@ -164,15 +164,19 @@ pub fn analyze(
     // Run item checks
     visit_items(&mut module, &mut analyzer)?;
 
-    // Check unused imports
+    // Check unused constants
+    analyzer.resolve_constant_usage();
+
+    // Apply deferred import references from live constants, then check unused
+    // imports. This must happen after constant liveness is resolved so that
+    // imports reached only from dead constants are correctly reported as unused.
+    analyzer.apply_live_constant_import_refs(&mut module);
     for import in module.aliases() {
         if !import.is_used() {
             analyzer.error(SemanticAnalysisError::UnusedImport { span: import.span() });
         }
     }
 
-    // Check unused constants
-    analyzer.resolve_constant_usage();
     for constant in module.constants() {
         if !analyzer.is_constant_used(constant) {
             analyzer.error(SemanticAnalysisError::UnusedConstant { span: constant.span });
@@ -248,6 +252,7 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) -> Result<()
                 log::debug!(target: "verify-invoke", "visiting constant {}", constant.name());
                 {
                     let mut visitor = VerifyInvokeTargets::new(analyzer, module, &locals, None);
+                    visitor.set_current_constant(Some(constant.name.clone()));
                     let _ = visitor.visit_mut_constant(&mut constant);
                 }
                 module.items.push(Export::Constant(constant));

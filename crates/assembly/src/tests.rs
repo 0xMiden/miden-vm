@@ -5989,3 +5989,49 @@ fn chained_constant_used_transitively() -> TestResult {
     let _program = context.assemble(source)?;
     Ok(())
 }
+
+#[test]
+fn dead_constant_does_not_mask_unused_import() {
+    let context = TestContext::default();
+    let a = "pub const BAR = 42\n\npub proc noop\n    push.1 drop\nend\n";
+    let a = parse_module!(&context, "lib::a", a);
+    let lib = Assembler::new(context.source_manager()).assemble_library([a]).unwrap();
+
+    let mut context = TestContext::default();
+    context.add_library(&lib).unwrap();
+
+    let source = source_file!(
+        &context,
+        "
+        use lib::a
+
+        const DEAD = a::BAR
+
+        begin
+            push.1
+        end"
+    );
+
+    assert_assembler_diagnostic!(
+        context,
+        source,
+        "syntax error",
+        "help: see emitted diagnostics for details",
+        "unused import",
+        regex!(r#",-\[test[\d]+:2:13\]"#),
+        "1 |",
+        "2 |         use lib::a",
+        "  :             ^^^^^^",
+        "3 |",
+        "  `----",
+        " help: this import is never used and can be safely removed",
+        "unused constant",
+        regex!(r#",-\[test[\d]+:4:9\]"#),
+        "3 |",
+        "4 |         const DEAD = a::BAR",
+        "  :         ^^^^^^^^^^^^^^^^^^^",
+        "5 |",
+        "  `----",
+        " help: this constant is never used and can be safely removed"
+    );
+}
