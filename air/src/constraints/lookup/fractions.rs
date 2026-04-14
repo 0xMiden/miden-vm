@@ -25,9 +25,18 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_core::field::{ExtensionField, Field, batch_multiplicative_inverse};
+use miden_core::{
+    field::{ExtensionField, Field},
+    utils::RowMajorMatrix,
+};
 
 use super::{LookupAir, LookupBuilder};
+
+/// Row-chunk granularity for the fused accumulator. Matches
+/// [`crate::trace::main_trace::ROW_MAJOR_CHUNK_SIZE`] so we stay consistent with the
+/// repo's row-major tuning: ~512 rows × avg shape ~3 ≈ 1.5 K fractions per chunk and
+/// ~24 KiB of chunk-local scratch, comfortably L1-resident on any modern x86/arm core.
+const ACCUMULATE_ROWS_PER_CHUNK: usize = 512;
 
 // LOOKUP FRACTIONS
 // ================================================================================================
@@ -200,40 +209,69 @@ where
 // FUSED ACCUMULATOR (FAST PATH)
 // ================================================================================================
 
-/// Fused batch-inversion + per-column partial-sum accumulator.
+/// Fused batch-inversion + per-column partial-sum accumulator, chunked and (with
+/// `concurrent`) parallelized by row.
 ///
-/// Computes the same result as [`accumulate_slow`] but amortizes field inversion across the
-/// whole batch using Montgomery's trick via
-/// [`miden_core::field::batch_multiplicative_inverse`] — **one inversion + O(N) multiplications**
-/// total, versus N inversions in the slow path. On a long trace this is the difference between
-/// a single heavy inversion and thousands.
+/// Returns a [`RowMajorMatrix<EF>`] with `num_rows + 1` rows and `num_cols` columns. Row `0`
+/// is the zero initial condition; row `r + 1` column `c` holds the running sum
+///
+/// ```text
+///   aux[r + 1][c] = Σ_{r' ≤ r} Σ_{i ∈ row r' col c fractions} m_i · d_i⁻¹
+/// ```
+///
+/// and for every row `aux[r + 1][c] - aux[r][c]` is the per-row delta the constraint system
+/// uses (matching [`accumulate_slow`] exactly).
+///
+/// ## Why a matrix and not per-column `Vec`s
+///
+/// One contiguous heap allocation of size `(num_rows + 1) * num_cols`, row-major: within a
+/// row all columns live in adjacent memory, so the per-row inner loop is a tight sequential
+/// write. The previous `Vec<Vec<EF>>` layout scattered each column on the heap and forced
+/// `num_cols` independent pointer chases per row.
 ///
 /// ## Algorithm
 ///
-/// **Pass A** (batched denominator inversion). Extract the flat denominator stream
-/// `d[0..N]` from `fractions.fractions()` and invert the whole slice in one shot. The
-/// underlying p3 helper implements the prefix-product + single-inversion + backward-sweep
-/// trick, chunked for instruction-level parallelism internally.
+/// **Prepass.** Build `row_frac_offsets: Vec<usize>` of length `num_rows + 1` so any row
+/// range `[lo, hi)` can look up its flat-fraction slice in O(1). Sequential, O(num_rows ·
+/// num_cols) `usize` adds.
 ///
-/// **Pass B** (per-column partial-sum walk). Walk `counts` in `num_cols`-sized chunks (one
-/// chunk per row), with a single cursor into `fractions` + the `d_inv` buffer. For each
-/// (row, column) slice, add `m_i · d_inv_i` into a `[EF; num_cols]` running register and
-/// copy the register's column value into `aux[col][row + 1]`. Memory-access pattern is
-/// identical to [`accumulate_slow`], so this function is a drop-in replacement wherever the
-/// slow oracle was used.
+/// **Phase 1 — chunked fused walk.** Split rows into groups of [`ACCUMULATE_ROWS_PER_CHUNK`]
+/// and process each chunk independently (serial or rayon-parallel depending on the
+/// `concurrent` feature):
+///
+/// 1. Montgomery inversion of the chunk's denominators into a chunk-local `scratch` buffer via
+///    [`invert_denoms_in_place`]: one forward prefix-product pass, one `try_inverse`, one backward
+///    sweep. Scratch fits in L1/L2 at the 512-row tuning.
+/// 2. Forward walk by row over the chunk's counts slice. The `running: Vec<EF>` register starts at
+///    `EF::ZERO` (every chunk computes a **local** prefix, ignoring earlier chunks). Each `(row,
+///    col)` writes `running[col]` directly into the chunk's output row slice.
+/// 3. Final `running` is copied into the chunk's slot in a shared `chunk_totals: Vec<EF>` (flat,
+///    length `num_chunks · num_cols`, non-overlapping writes, no locking).
+///
+/// **Phase 2 — sequential scan.** Exclusive prefix scan over `chunk_totals` produces
+/// `chunk_offsets`: the per-column global offset each chunk's local prefix needs to be
+/// shifted by. O(`num_chunks · num_cols`) adds — negligible, because `num_chunks` is
+/// typically in the tens or hundreds.
+///
+/// **Phase 3 — parallel offset add.** Second pass over the same row-chunked output slices,
+/// in lockstep with `chunk_offsets`, adding the per-column offset into every row of the
+/// chunk. Memory-bandwidth limited, trivially parallel, no inversion, no allocation.
 ///
 /// ## Panics
 ///
 /// Panics if any stored denominator is zero (would indicate an upstream bug — real bus
 /// encodings never produce zero because of the non-zero `bus_prefix[bus]` term).
-pub fn accumulate<F, EF>(fractions: &LookupFractions<F, EF>) -> Vec<Vec<EF>>
+pub fn accumulate<F, EF>(fractions: &LookupFractions<F, EF>) -> RowMajorMatrix<EF>
 where
     F: Field,
     EF: ExtensionField<F>,
 {
     let num_cols = fractions.num_columns();
     let num_rows = fractions.num_rows();
-    let mut aux: Vec<Vec<EF>> = (0..num_cols).map(|_| vec![EF::ZERO; num_rows + 1]).collect();
+    let out_rows = num_rows + 1;
+
+    // Single contiguous row-major allocation: row 0 stays at ZERO, chunks write rows 1..=num_rows.
+    let mut output_data = vec![EF::ZERO; out_rows * num_cols];
 
     let flat_fractions = fractions.fractions();
     let flat_counts = fractions.counts();
@@ -245,39 +283,214 @@ where
         num_rows * num_cols,
     );
 
-    // Early-out on empty trace: no inversions, no walk.
-    if flat_fractions.is_empty() {
-        return aux;
+    // Early-out: empty trace (no rows, or rows with zero shape) — return the zero-initialized
+    // matrix without touching anything. Row 0 is the only row and it's already ZERO.
+    if num_rows == 0 || flat_fractions.is_empty() {
+        return RowMajorMatrix::new(output_data, num_cols);
     }
 
-    // Pass A: batch-invert every denominator in one shot. Extracting into `denoms` is an
-    // O(N) copy; the inversion itself is ~3N multiplications + 1 field inversion, chunked
-    // for ILP inside `batch_multiplicative_inverse`.
-    let denoms: Vec<EF> = flat_fractions.iter().map(|&(_, d)| d).collect();
-    let d_inv = batch_multiplicative_inverse(&denoms);
-    debug_assert_eq!(d_inv.len(), flat_fractions.len());
+    // Prepass: fraction-start offset for every row (length num_rows + 1). row_frac_offsets[r] =
+    // start of row r's fractions in flat_fractions; row_frac_offsets[num_rows] = total count.
+    let row_frac_offsets = compute_row_frac_offsets(flat_counts, num_rows, num_cols);
+    debug_assert_eq!(row_frac_offsets.len(), num_rows + 1);
+    debug_assert_eq!(row_frac_offsets[num_rows], flat_fractions.len());
 
-    // Pass B: per-column partial-sum walk, identical shape to `accumulate_slow`.
-    let mut running = vec![EF::ZERO; num_cols];
-    let mut cursor = 0usize;
-    for (row, row_counts) in flat_counts.chunks(num_cols).enumerate() {
-        for (col, &count) in row_counts.iter().enumerate() {
-            for i in 0..count {
-                let (m, _) = flat_fractions[cursor + i];
-                running[col] += d_inv[cursor + i] * m;
+    // Split row 0 off the front of the output — it stays ZERO. Chunks operate on `output_tail`,
+    // which holds rows 1..=num_rows packed as `num_rows * num_cols` elements, and the row
+    // `r` of `output` corresponds to index `(r - 1) * num_cols` of `output_tail`.
+    let (row_zero, output_tail) = output_data.split_at_mut(num_cols);
+    debug_assert!(row_zero.iter().all(|v| *v == EF::ZERO));
+
+    let rows_per_chunk = ACCUMULATE_ROWS_PER_CHUNK;
+    let num_chunks = num_rows.div_ceil(rows_per_chunk);
+    let mut chunk_totals: Vec<EF> = vec![EF::ZERO; num_chunks * num_cols];
+
+    // Phase 1: fused per-chunk inversion + local-prefix walk. Each closure invocation owns a
+    // disjoint output slice + chunk_totals slot; rayon parallelizes when `concurrent` is on.
+    let phase1 = |(chunk_idx, (chunk_out, totals_slot)): (usize, (&mut [EF], &mut [EF]))| {
+        let row_lo = chunk_idx * rows_per_chunk;
+        let row_hi = (row_lo + rows_per_chunk).min(num_rows);
+        let chunk_rows = row_hi - row_lo;
+        let frac_lo = row_frac_offsets[row_lo];
+        let frac_hi = row_frac_offsets[row_hi];
+        let chunk_fracs = &flat_fractions[frac_lo..frac_hi];
+        let chunk_counts = &flat_counts[row_lo * num_cols..row_hi * num_cols];
+        debug_assert_eq!(chunk_out.len(), chunk_rows * num_cols);
+        debug_assert_eq!(totals_slot.len(), num_cols);
+
+        if chunk_fracs.is_empty() {
+            // Chunk has no fractions — its local prefix is identically ZERO for every row,
+            // the output slice is already zero from the initial allocation, and the totals
+            // slot stays at ZERO. Nothing to do.
+            debug_assert!(chunk_out.iter().all(|v| *v == EF::ZERO));
+            return;
+        }
+
+        // Chunk-local scratch for d_i⁻¹. Allocated once per chunk; reused across the
+        // forward + backward + walk passes below. Typical size at the default tuning:
+        // ~1.5 K EF elements ≈ 24 KiB, comfortably L1-resident.
+        let mut scratch: Vec<EF> = vec![EF::ZERO; chunk_fracs.len()];
+        invert_denoms_in_place(chunk_fracs, &mut scratch);
+
+        // Per-column running-sum register, starting from ZERO — this is a LOCAL prefix
+        // (the global offset from earlier chunks is added in phase 3).
+        let mut running: Vec<EF> = vec![EF::ZERO; num_cols];
+        let mut cursor = 0usize;
+        for row_in_chunk in 0..chunk_rows {
+            let row_counts = &chunk_counts[row_in_chunk * num_cols..(row_in_chunk + 1) * num_cols];
+            let out_row_base = row_in_chunk * num_cols;
+            for (col, &count) in row_counts.iter().enumerate() {
+                let mut sum = running[col];
+                for i in 0..count {
+                    let (m, _) = chunk_fracs[cursor + i];
+                    sum += scratch[cursor + i] * m;
+                }
+                running[col] = sum;
+                chunk_out[out_row_base + col] = sum;
+                cursor += count;
             }
-            aux[col][row + 1] = running[col];
-            cursor += count;
+        }
+        debug_assert_eq!(cursor, chunk_fracs.len());
+
+        totals_slot.copy_from_slice(&running);
+    };
+
+    #[cfg(not(feature = "concurrent"))]
+    {
+        output_tail
+            .chunks_mut(rows_per_chunk * num_cols)
+            .zip(chunk_totals.chunks_mut(num_cols))
+            .enumerate()
+            .for_each(phase1);
+    }
+    #[cfg(feature = "concurrent")]
+    {
+        use miden_crypto::parallel::*;
+        output_tail
+            .par_chunks_mut(rows_per_chunk * num_cols)
+            .zip(chunk_totals.par_chunks_mut(num_cols))
+            .enumerate()
+            .for_each(phase1);
+    }
+
+    // Phase 2: sequential exclusive prefix scan over chunk totals → chunk offsets. Operates
+    // on the (small) summary data: num_chunks · num_cols adds. Single serial-dependency
+    // point in the whole algorithm, and it's cheap enough that parallelizing it would cost
+    // more than it saves.
+    let mut chunk_offsets: Vec<EF> = vec![EF::ZERO; num_chunks * num_cols];
+    {
+        let mut running = vec![EF::ZERO; num_cols];
+        for c in 0..num_chunks {
+            chunk_offsets[c * num_cols..(c + 1) * num_cols].copy_from_slice(&running);
+            let totals = &chunk_totals[c * num_cols..(c + 1) * num_cols];
+            for col in 0..num_cols {
+                running[col] += totals[col];
+            }
         }
     }
-    debug_assert_eq!(
-        cursor,
-        flat_fractions.len(),
-        "cursor {cursor} != total fractions {}",
-        flat_fractions.len(),
-    );
 
-    aux
+    // Phase 3: add each chunk's global offset into every row of its local-prefix slice.
+    // Pure memory-bandwidth work — one EF read + one EF write per element — and trivially
+    // parallel because chunks own disjoint output slices.
+    let phase3 = |(chunk_out, offset): (&mut [EF], &[EF])| {
+        // Chunk 0 has a ZERO offset, so its add is a no-op; skip it to save one streaming pass.
+        if offset.iter().all(|v| *v == EF::ZERO) {
+            return;
+        }
+        for row_slice in chunk_out.chunks_exact_mut(num_cols) {
+            for col in 0..num_cols {
+                row_slice[col] += offset[col];
+            }
+        }
+    };
+
+    #[cfg(not(feature = "concurrent"))]
+    {
+        output_tail
+            .chunks_mut(rows_per_chunk * num_cols)
+            .zip(chunk_offsets.chunks(num_cols))
+            .for_each(phase3);
+    }
+    #[cfg(feature = "concurrent")]
+    {
+        use miden_crypto::parallel::*;
+        output_tail
+            .par_chunks_mut(rows_per_chunk * num_cols)
+            .zip(chunk_offsets.par_chunks(num_cols))
+            .for_each(phase3);
+    }
+
+    RowMajorMatrix::new(output_data, num_cols)
+}
+
+/// Forward scan over the flat `counts` buffer producing per-row fraction-start offsets.
+///
+/// Returns a `Vec<usize>` of length `num_rows + 1` where `offsets[r]` is the starting index
+/// of row `r`'s fractions in the flat `fractions.fractions()` buffer and `offsets[num_rows]`
+/// equals the total fraction count. Sequential (O(num_rows · num_cols) `usize` adds).
+fn compute_row_frac_offsets(flat_counts: &[usize], num_rows: usize, num_cols: usize) -> Vec<usize> {
+    debug_assert_eq!(flat_counts.len(), num_rows * num_cols);
+    let mut offsets = Vec::with_capacity(num_rows + 1);
+    let mut acc = 0usize;
+    offsets.push(0);
+    for row_counts in flat_counts.chunks(num_cols) {
+        for &count in row_counts {
+            acc += count;
+        }
+        offsets.push(acc);
+    }
+    offsets
+}
+
+/// Montgomery's trick in place: overwrite `scratch` with the per-element inverses of
+/// `chunk_fracs[i].1` using one real field inversion + O(N) multiplications.
+///
+/// Algorithm (classic Montgomery batch inversion):
+///
+/// 1. **Forward pass** — `scratch[i] = d_0 · d_1 · ... · d_i` (prefix products).
+/// 2. **One inversion** — invert `scratch[last]` to obtain the running inverse of the whole
+///    product.
+/// 3. **Backward sweep** — walk i from `last` down to `1`, compute `scratch[i] = scratch[i-1] ·
+///    running_inv` (which equals `d_i⁻¹`), then fold `d_i` back into `running_inv` so the next
+///    iteration sees the inverse of `d_0 · ... · d_{i-1}`. At the end of the sweep `running_inv =
+///    d_0⁻¹`, which we write into `scratch[0]`.
+///
+/// `scratch` must be sized to `chunk_fracs.len()` on entry; contents on entry are ignored
+/// (fully overwritten).
+///
+/// # Panics
+///
+/// Panics if the product `d_0 · d_1 · ... · d_{last}` is zero. For LogUp denominators this
+/// would indicate an upstream bug (individual `d_i` are never zero because of the nonzero
+/// `bus_prefix[bus]` term, and the product of nonzero field elements is nonzero).
+fn invert_denoms_in_place<F, EF>(chunk_fracs: &[(F, EF)], scratch: &mut [EF])
+where
+    F: Field,
+    EF: ExtensionField<F>,
+{
+    debug_assert_eq!(scratch.len(), chunk_fracs.len());
+    debug_assert!(!chunk_fracs.is_empty());
+
+    // Forward pass: prefix products.
+    let mut acc = chunk_fracs[0].1;
+    scratch[0] = acc;
+    for i in 1..chunk_fracs.len() {
+        acc *= chunk_fracs[i].1;
+        scratch[i] = acc;
+    }
+
+    // One field inversion — amortized over the whole chunk.
+    let mut running_inv = scratch[scratch.len() - 1]
+        .try_inverse()
+        .expect("LogUp denominator product must be non-zero (bus_prefix is never zero)");
+
+    // Backward sweep: in-place fill with individual inverses.
+    for i in (1..chunk_fracs.len()).rev() {
+        let d_i = chunk_fracs[i].1;
+        scratch[i] = scratch[i - 1] * running_inv;
+        running_inv *= d_i;
+    }
+    scratch[0] = running_inv;
 }
 
 // TESTS
@@ -285,13 +498,91 @@ where
 
 #[cfg(test)]
 mod tests {
-    use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
+    use miden_core::{
+        field::{PrimeCharacteristicRing, QuadFelt},
+        utils::Matrix,
+    };
 
     use super::*;
     use crate::{
         Felt,
         constraints::lookup::{LookupAir, LookupBuilder},
     };
+
+    // Small deterministic LCG — reproducible stream for random-fixture cross-check tests.
+    // We don't need cryptographic quality, just determinism.
+    struct Lcg(u64);
+    impl Lcg {
+        fn next(&mut self) -> u64 {
+            self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            self.0
+        }
+        fn felt(&mut self) -> Felt {
+            // Take the high 32 bits to avoid the near-zero-biasing of low bits.
+            Felt::new(self.next() >> 32)
+        }
+        fn quad(&mut self) -> QuadFelt {
+            QuadFelt::new([self.felt(), self.felt()])
+        }
+    }
+
+    /// Build a `LookupFractions` fixture of the given shape and row count, filled with
+    /// reproducibly-random non-zero denominators and arbitrary base-field multiplicities.
+    /// Shared helper for the cross-check tests.
+    fn random_fixture(
+        shape: &[usize],
+        num_rows: usize,
+        seed: u64,
+    ) -> LookupFractions<Felt, QuadFelt> {
+        let mut rng = Lcg(seed);
+        let mut fx: LookupFractions<Felt, QuadFelt> = LookupFractions {
+            fractions: Vec::with_capacity(num_rows * shape.iter().sum::<usize>()),
+            counts: Vec::with_capacity(num_rows * shape.len()),
+            shape: shape.to_vec(),
+            num_rows,
+            num_cols: shape.len(),
+        };
+        for _row in 0..num_rows {
+            for &max_count in shape {
+                let count = (rng.next() as usize) % (max_count + 1);
+                for _ in 0..count {
+                    let m = rng.felt();
+                    // Rejection sample until we get a non-zero denominator. With a 64-bit
+                    // Goldilocks field and random draws, this basically never loops.
+                    let d = loop {
+                        let candidate = rng.quad();
+                        if candidate != QuadFelt::ZERO {
+                            break candidate;
+                        }
+                    };
+                    fx.fractions.push((m, d));
+                }
+                fx.counts.push(count);
+            }
+        }
+        fx
+    }
+
+    /// Assert that `accumulate`'s row-major matrix output matches `accumulate_slow`'s per-column
+    /// `Vec<Vec<EF>>` output element-by-element. Shared check used by the single-chunk and
+    /// multi-chunk regression tests.
+    fn assert_matrix_matches_slow(
+        slow: &[Vec<QuadFelt>],
+        fast: &RowMajorMatrix<QuadFelt>,
+        num_cols: usize,
+        num_rows: usize,
+    ) {
+        assert_eq!(fast.width(), num_cols, "fast.width() mismatch");
+        assert_eq!(fast.height(), num_rows + 1, "fast.height() mismatch");
+        assert_eq!(slow.len(), num_cols, "slow column count mismatch");
+        for (col, slow_col) in slow.iter().enumerate() {
+            assert_eq!(slow_col.len(), num_rows + 1, "slow col {col} row count mismatch");
+            for (row, &s) in slow_col.iter().enumerate() {
+                let f = fast.values[row * num_cols + col];
+                assert_eq!(s, f, "row {row} col {col} differs: slow={s:?} fast={f:?}",);
+            }
+        }
+    }
 
     /// Minimal `LookupAir` used to drive `LookupFractions::new` without pulling in the
     /// real Miden air. Only `num_columns()` and `column_shape()` are exercised; the
@@ -398,70 +689,58 @@ mod tests {
         assert!(fx.counts.is_empty());
     }
 
-    /// The fused `accumulate` path must be bit-exact against `accumulate_slow` on arbitrary
-    /// inputs. This test drives a deterministic PRNG to build a random fixture that respects
-    /// the declared shape, then asserts the two paths produce identical per-column output
-    /// arrays.
+    /// Single-chunk random cross-check: a tiny fixture (32 rows) fits inside one
+    /// [`ACCUMULATE_ROWS_PER_CHUNK`] chunk, so phase 2's prefix scan and phase 3's offset
+    /// add are both trivial (zero offset), and this test only exercises phase 1's fused
+    /// Montgomery + walk path.
     #[test]
     fn accumulate_matches_accumulate_slow_random() {
-        // Small deterministic LCG — we don't need cryptographic quality, just a
-        // reproducible stream. Seed picked arbitrarily.
-        struct Lcg(u64);
-        impl Lcg {
-            fn next(&mut self) -> u64 {
-                self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-                self.0
-            }
-            fn felt(&mut self) -> Felt {
-                // Take the high 32 bits to avoid the near-zero-biasing of low bits.
-                Felt::new(self.next() >> 32)
-            }
-            fn quad(&mut self) -> QuadFelt {
-                QuadFelt::new([self.felt(), self.felt()])
-            }
-        }
-
         const SHAPE: [usize; 3] = [2, 1, 3];
         const NUM_ROWS: usize = 32;
+        const _: () = assert!(
+            NUM_ROWS < ACCUMULATE_ROWS_PER_CHUNK,
+            "must stay in one chunk to test phase 1",
+        );
 
-        let mut rng = Lcg(0x00c0_ffee_beef_c0de);
-        let mut fx: LookupFractions<Felt, QuadFelt> = LookupFractions {
-            fractions: Vec::with_capacity(NUM_ROWS * SHAPE.iter().sum::<usize>()),
-            counts: Vec::with_capacity(NUM_ROWS * SHAPE.len()),
-            shape: SHAPE.to_vec(),
-            num_rows: NUM_ROWS,
-            num_cols: SHAPE.len(),
-        };
-
-        // Build the flat fractions + counts row-major. Per (row, col), randomize a count
-        // in `0..=shape[col]` and push that many random `(m, d)` pairs with non-zero `d`.
-        for _row in 0..NUM_ROWS {
-            for &max_count in &SHAPE {
-                let count = (rng.next() as usize) % (max_count + 1);
-                for _ in 0..count {
-                    let m = rng.felt();
-                    // Rejection sample until we get a non-zero denominator. With a 64-bit
-                    // Goldilocks field and random draws, this basically never loops.
-                    let d = loop {
-                        let candidate = rng.quad();
-                        if candidate != QuadFelt::ZERO {
-                            break candidate;
-                        }
-                    };
-                    fx.fractions.push((m, d));
-                }
-                fx.counts.push(count);
-            }
-        }
-
+        let fx = random_fixture(&SHAPE, NUM_ROWS, 0x00c0_ffee_beef_c0de);
         let slow = accumulate_slow(&fx);
         let fast = accumulate(&fx);
-        assert_eq!(slow.len(), fast.len(), "column count mismatch");
-        for (col, (slow_col, fast_col)) in slow.iter().zip(fast.iter()).enumerate() {
-            assert_eq!(slow_col.len(), fast_col.len(), "col {col} row count mismatch");
-            for (row, (s, f)) in slow_col.iter().zip(fast_col.iter()).enumerate() {
-                assert_eq!(s, f, "col {col} row {row} differs: slow={s:?} fast={f:?}");
-            }
-        }
+        assert_matrix_matches_slow(&slow, &fast, SHAPE.len(), NUM_ROWS);
+    }
+
+    /// Multi-chunk regression test: a fixture spanning multiple
+    /// [`ACCUMULATE_ROWS_PER_CHUNK`]-row chunks (with a deliberately short trailing chunk)
+    /// exercises phase 2's exclusive prefix scan and phase 3's per-chunk offset add — the
+    /// code paths the single-chunk test can't hit. The trailing `+ 7` rows ensure the last
+    /// chunk is smaller than the others and that `num_rows % rows_per_chunk != 0`, catching
+    /// any off-by-one in the last-chunk bounds.
+    #[test]
+    fn accumulate_multi_chunk_matches_accumulate_slow() {
+        const SHAPE: [usize; 4] = [1, 2, 3, 1];
+        const NUM_ROWS: usize = ACCUMULATE_ROWS_PER_CHUNK * 3 + 7;
+
+        let fx = random_fixture(&SHAPE, NUM_ROWS, 0xdead_beef_cafe_babe);
+        let slow = accumulate_slow(&fx);
+        let fast = accumulate(&fx);
+        assert_matrix_matches_slow(&slow, &fast, SHAPE.len(), NUM_ROWS);
+    }
+
+    /// Empty-trace smoke test: `num_rows = 0` must return a 1-row, `num_cols`-wide zero
+    /// matrix (the initial condition) without touching the inversion path.
+    #[test]
+    fn accumulate_empty_trace() {
+        let shape = vec![2usize, 3, 1];
+        let num_cols = shape.len();
+        let fx: LookupFractions<Felt, QuadFelt> = LookupFractions {
+            fractions: Vec::new(),
+            counts: Vec::new(),
+            shape,
+            num_rows: 0,
+            num_cols,
+        };
+        let aux = accumulate(&fx);
+        assert_eq!(aux.width(), num_cols);
+        assert_eq!(aux.height(), 1);
+        assert!(aux.values.iter().all(|v| *v == QuadFelt::ZERO));
     }
 }

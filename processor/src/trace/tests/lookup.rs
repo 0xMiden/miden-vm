@@ -23,7 +23,10 @@ use miden_air::{
         collect_column_oracle_folds,
     },
 };
-use miden_core::field::{Field, PrimeCharacteristicRing, QuadFelt};
+use miden_core::{
+    field::{Field, PrimeCharacteristicRing, QuadFelt},
+    utils::Matrix,
+};
 
 use super::{Felt, build_trace_from_ops, rand_array};
 use crate::operation::Operation;
@@ -131,13 +134,16 @@ fn build_lookup_fractions_matches_constraint_path_oracle() {
     // --- Prover path: collect fractions and run the fused accumulator. ---
     let air = MidenLookupAir;
     let fractions = build_lookup_fractions(&air, &main_trace, &periodic, &public_vals, &challenges);
+    // `accumulate` returns a row-major matrix with `num_rows + 1` rows and `num_cols`
+    // columns; row 0 is the zero initial condition and row `r + 1` column `c` holds the
+    // running sum of `m_i · d_i⁻¹` through main-trace row `r`.
     let aux = accumulate(&fractions);
+    let aux_width = aux.width();
+    let aux_values = &aux.values;
 
     let num_rows = trace.main_trace().num_rows();
-    assert_eq!(aux.len(), 7);
-    for col_aux in &aux {
-        assert_eq!(col_aux.len(), num_rows + 1);
-    }
+    assert_eq!(aux_width, 7);
+    assert_eq!(aux.height(), num_rows + 1);
 
     // --- Constraint path: walk the trace through the oracle to collect per-row folded
     //     `(U_col, V_col)` pairs. ---
@@ -156,7 +162,8 @@ fn build_lookup_fractions_matches_constraint_path_oracle() {
                 )
             });
             let expected_delta = v_col * u_inv;
-            let actual_delta = aux[col][r + 1] - aux[col][r];
+            let actual_delta =
+                aux_values[(r + 1) * aux_width + col] - aux_values[r * aux_width + col];
             assert_eq!(
                 actual_delta, expected_delta,
                 "row {r} col {col}: prover path vs constraint path mismatch\n  \
