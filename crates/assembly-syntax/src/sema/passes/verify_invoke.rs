@@ -295,8 +295,7 @@ impl VisitMut for VerifyInvokeTargets<'_> {
             if let Some(ref const_name) = self.current_constant {
                 // Defer: record the edge so we only credit the import when this
                 // constant is proven live.
-                self.analyzer
-                    .record_constant_import_ref(const_name, module.into());
+                self.analyzer.record_constant_import_ref(const_name, module.into());
             } else if let Some(alias) =
                 self.module.aliases_mut().find(|a| a.name().as_str() == module)
             {

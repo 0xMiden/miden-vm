@@ -139,7 +139,11 @@ impl AnalysisContext {
     /// These edges are used to defer import-usage bookkeeping until after
     /// constant liveness has been resolved, so that imports reached only from
     /// dead constants are correctly reported as unused.
-    pub fn record_constant_import_ref(&mut self, constant_name: &Ident, import_name: alloc::string::String) {
+    pub fn record_constant_import_ref(
+        &mut self,
+        constant_name: &Ident,
+        import_name: alloc::string::String,
+    ) {
         self.constant_import_refs
             .entry(constant_name.clone())
             .or_default()
@@ -147,7 +151,7 @@ impl AnalysisContext {
     }
 
     /// Increment `alias.uses` only for imports that are referenced by live
-    /// constants. Must be called after [`resolve_constant_usage`].
+    /// constants. Must be called after `resolve_constant_usage`.
     pub fn apply_live_constant_import_refs(&self, module: &mut Module) {
         for (constant_name, import_names) in &self.constant_import_refs {
             if !self.used_constants.contains(constant_name) {
