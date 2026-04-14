@@ -12,12 +12,7 @@ use crate::{
     AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, StackInputs, trace::build_trace,
 };
 
-mod chiplets;
-mod decoder;
-mod hasher;
 mod lookup;
-mod range;
-mod stack;
 
 /// Size of trace fragments used in tests.
 ///

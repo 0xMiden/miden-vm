@@ -130,54 +130,16 @@ pub const PADDED_TRACE_WIDTH: usize = TRACE_WIDTH.next_multiple_of(RATE_LEN);
 
 // AUXILIARY COLUMNS LAYOUT
 // ------------------------------------------------------------------------------------------------
+//
+// The auxiliary trace is the LogUp lookup-argument segment built by
+// [`crate::lookup::MidenLookupAuxBuilder`]. It has 7 columns: 4 main-trace LogUp
+// columns (M1, M_2+5, M3, M4) followed by 3 chiplet-trace LogUp columns (C1, C2, C3).
+// The legacy multiset offsets (decoder p1/p2/p3, stack s_aux, range b_range, hash kernel
+// b_hk, chiplets bus b_ch, ACE wiring v_wiring) were removed in Milestone B alongside
+// the stateless `MidenLookupAuxBuilder` integration.
 
-//      decoder                     stack              range checks          chiplets
-//    (3 columns)                (1 column)             (1 column)          (3 column)
-// ├─────────────────────┴──────────────────────┴────────────────────┴───────────────────┤
-
-/// Decoder auxiliary columns
-pub const DECODER_AUX_TRACE_OFFSET: usize = 0;
-pub const DECODER_AUX_TRACE_WIDTH: usize = 3;
-pub const DECODER_AUX_TRACE_RANGE: Range<usize> =
-    range(DECODER_AUX_TRACE_OFFSET, DECODER_AUX_TRACE_WIDTH);
-
-/// Stack auxiliary columns
-pub const STACK_AUX_TRACE_OFFSET: usize = DECODER_AUX_TRACE_RANGE.end;
-pub const STACK_AUX_TRACE_WIDTH: usize = 1;
-pub const STACK_AUX_TRACE_RANGE: Range<usize> =
-    range(STACK_AUX_TRACE_OFFSET, STACK_AUX_TRACE_WIDTH);
-
-/// Range check auxiliary columns
-pub const RANGE_CHECK_AUX_TRACE_OFFSET: usize = STACK_AUX_TRACE_RANGE.end;
-pub const RANGE_CHECK_AUX_TRACE_WIDTH: usize = 1;
-pub const RANGE_CHECK_AUX_TRACE_RANGE: Range<usize> =
-    range(RANGE_CHECK_AUX_TRACE_OFFSET, RANGE_CHECK_AUX_TRACE_WIDTH);
-
-/// Chiplets virtual table auxiliary column.
-///
-/// This column combines two virtual tables:
-///
-/// 1. Hash chiplet's sibling table,
-/// 2. Kernel ROM chiplet's kernel procedure table.
-pub const HASH_KERNEL_VTABLE_AUX_TRACE_OFFSET: usize = RANGE_CHECK_AUX_TRACE_RANGE.end;
-pub const HASHER_AUX_TRACE_WIDTH: usize = 1;
-pub const HASHER_AUX_TRACE_RANGE: Range<usize> =
-    range(HASH_KERNEL_VTABLE_AUX_TRACE_OFFSET, HASHER_AUX_TRACE_WIDTH);
-
-/// Chiplets bus auxiliary columns.
-pub const CHIPLETS_BUS_AUX_TRACE_OFFSET: usize = HASHER_AUX_TRACE_RANGE.end;
-pub const CHIPLETS_BUS_AUX_TRACE_WIDTH: usize = 1;
-pub const CHIPLETS_BUS_AUX_TRACE_RANGE: Range<usize> =
-    range(CHIPLETS_BUS_AUX_TRACE_OFFSET, CHIPLETS_BUS_AUX_TRACE_WIDTH);
-
-/// ACE chiplet wiring bus.
-pub const ACE_CHIPLET_WIRING_BUS_OFFSET: usize = CHIPLETS_BUS_AUX_TRACE_RANGE.end;
-pub const ACE_CHIPLET_WIRING_BUS_WIDTH: usize = 1;
-pub const ACE_CHIPLET_WIRING_BUS_RANGE: Range<usize> =
-    range(ACE_CHIPLET_WIRING_BUS_OFFSET, ACE_CHIPLET_WIRING_BUS_WIDTH);
-
-/// Auxiliary trace segment width.
-pub const AUX_TRACE_WIDTH: usize = ACE_CHIPLET_WIRING_BUS_RANGE.end;
+/// Auxiliary trace segment width — see the LogUp aux trace layout above.
+pub const AUX_TRACE_WIDTH: usize = crate::LOGUP_AUX_TRACE_WIDTH;
 
 /// Number of random challenges used for auxiliary trace constraints.
 pub const AUX_TRACE_RAND_CHALLENGES: usize = 2;

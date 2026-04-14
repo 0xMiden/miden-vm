@@ -9,9 +9,6 @@ use crate::{
     utils::{assume_init_vec, uninit_vector},
 };
 
-mod aux_trace;
-pub use aux_trace::AuxTraceBuilder;
-
 #[cfg(test)]
 mod tests;
 
@@ -20,7 +17,6 @@ mod tests;
 
 pub struct RangeCheckTrace {
     pub(crate) trace: [Vec<Felt>; RANGE_CHECK_TRACE_WIDTH],
-    pub(crate) aux_builder: AuxTraceBuilder,
 }
 
 // RANGE CHECKER
@@ -153,14 +149,8 @@ impl RangeChecker {
         let [t0, t1] = trace;
         let trace = unsafe { [assume_init_vec(t0), assume_init_vec(t1)] };
 
-        RangeCheckTrace {
-            trace,
-            aux_builder: AuxTraceBuilder::new(
-                self.lookups.keys().cloned().collect(),
-                self.cycle_lookups,
-                num_padding_rows,
-            ),
-        }
+        let _ = num_padding_rows;
+        RangeCheckTrace { trace }
     }
 
     // PUBLIC ACCESSORS

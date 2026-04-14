@@ -12,8 +12,6 @@ use miden_crypto::stark::air::AirBuilder;
 
 use crate::{MainCols, MidenAirBuilder, constraints::constants::*};
 
-pub mod bus;
-
 // ENTRY POINTS
 // ================================================================================================
 

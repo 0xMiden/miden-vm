@@ -408,17 +408,6 @@ fn test_trace_generation_at_fragment_boundaries(
         trace_from_single_fragment.final_precompile_transcript,
     );
 
-    // Verify aux trace columns match.
-    let rand_elements = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let aux_from_fragments = trace_from_fragments.build_aux_trace(&rand_elements).unwrap();
-    let aux_from_single_fragment =
-        trace_from_single_fragment.build_aux_trace(&rand_elements).unwrap();
-    let aux_from_fragments =
-        aux_from_fragments.columns().map(|col| col.to_vec()).collect::<Vec<_>>();
-    let aux_from_single_fragment =
-        aux_from_single_fragment.columns().map(|col| col.to_vec()).collect::<Vec<_>>();
-    assert_eq!(aux_from_fragments, aux_from_single_fragment,);
-
     // Compare deterministic traces as a compact sanity check and to keep the snapshot stable.
     assert_eq!(
         format!("{:?}", DeterministicTrace(&trace_from_fragments)),

@@ -1,11 +1,6 @@
 #[cfg(test)]
 use miden_core::{Felt, mast::OP_GROUP_SIZE, operations::Operation};
 
-mod aux_trace;
-pub use aux_trace::AuxTraceBuilder;
-#[cfg(test)]
-pub use aux_trace::BlockHashTableRow;
-
 pub mod block_stack;
 
 // TEST HELPERS

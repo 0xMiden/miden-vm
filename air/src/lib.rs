@@ -38,7 +38,7 @@ pub mod lookup {
 
 pub mod trace;
 use constraints::columns::MainCols;
-use trace::{AUX_TRACE_WIDTH, TRACE_WIDTH, bus_types};
+use trace::{TRACE_WIDTH, bus_types};
 
 // RE-EXPORTS
 // ================================================================================================
@@ -198,7 +198,13 @@ pub const NUM_PUBLIC_VALUES: usize = WORD_SIZE + MIN_STACK_DEPTH + MIN_STACK_DEP
 pub const LOGUP_AUX_TRACE_WIDTH: usize = 7;
 
 // Public values layout offsets.
+//
+// Currently unused while `ProcessorAir::reduced_aux_values` is stubbed (Milestone B,
+// decision D3). Kept in place because the follow-up milestone will reuse them when
+// restoring real LogUp boundary checks with public-input correction terms.
+#[allow(dead_code)]
 const PV_PROGRAM_HASH: usize = 0;
+#[allow(dead_code)]
 const PV_TRANSCRIPT_STATE: usize = NUM_PUBLIC_VALUES - WORD_SIZE;
 
 /// Miden VM Processor AIR implementation.

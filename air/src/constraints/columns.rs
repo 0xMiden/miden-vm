@@ -20,7 +20,7 @@ use super::{
     stack::columns::StackCols,
     system::columns::SystemCols,
 };
-use crate::trace::{AUX_TRACE_WIDTH, CHIPLETS_WIDTH, TRACE_WIDTH};
+use crate::trace::{CHIPLETS_WIDTH, TRACE_WIDTH};
 
 // MAIN TRACE COLUMN STRUCT
 // ================================================================================================
@@ -146,42 +146,14 @@ pub const MAIN_COL_MAP: MainCols<usize> = {
     unsafe { core::mem::transmute(indices_arr::<NUM_MAIN_COLS>()) }
 };
 
-// AUXILIARY TRACE COLUMN STRUCT
-// ================================================================================================
-
-/// Column layout of the auxiliary execution trace (8 columns).
-#[repr(C)]
-pub struct AuxCols<T> {
-    /// Decoder: block stack table running product.
-    pub p1_block_stack: T,
-    /// Decoder: block hash table running product.
-    pub p2_block_hash: T,
-    /// Decoder: op group table running product.
-    pub p3_op_group: T,
-    /// Stack overflow running product.
-    pub stack_overflow: T,
-    /// Range checker LogUp sum.
-    pub range_check: T,
-    /// Hash-kernel virtual table bus.
-    pub hash_kernel_vtable: T,
-    /// Chiplets bus running product.
-    pub chiplets_bus: T,
-    /// ACE wiring LogUp sum.
-    pub ace_wiring: T,
-}
-
-/// Number of columns in the auxiliary trace (8), derived from the struct layout.
-pub const NUM_AUX_COLS: usize = size_of::<AuxCols<u8>>();
-
-/// Compile-time index map for auxiliary columns.
-#[allow(dead_code)]
-pub const AUX_COL_MAP: AuxCols<usize> = {
-    assert!(NUM_AUX_COLS == AUX_TRACE_WIDTH);
-    unsafe { core::mem::transmute(indices_arr::<NUM_AUX_COLS>()) }
-};
-
 // COLUMN COUNTS
 // ================================================================================================
+//
+// The auxiliary trace is now the LogUp lookup-argument segment built by
+// [`crate::lookup::MidenLookupAuxBuilder`] (see `air/src/constraints/lookup/`).
+// Its 7-column layout is described entirely by `MidenLookupAir::column_shape`; the
+// legacy `AuxCols<T>` struct (which mirrored the multiset bus offsets) was removed in
+// Milestone B alongside the multiset bus deletion.
 
 pub const NUM_SYSTEM_COLS: usize = size_of::<SystemCols<u8>>();
 pub const NUM_DECODER_COLS: usize = size_of::<DecoderCols<u8>>();
@@ -195,7 +167,6 @@ pub const NUM_ACE_EVAL_COLS: usize = size_of::<AceEvalCols<u8>>();
 pub const NUM_KERNEL_ROM_COLS: usize = size_of::<KernelRomCols<u8>>();
 
 const _: () = assert!(NUM_MAIN_COLS == TRACE_WIDTH);
-const _: () = assert!(NUM_AUX_COLS == AUX_TRACE_WIDTH);
 const _: () = assert!(NUM_SYSTEM_COLS == 6);
 const _: () = assert!(NUM_DECODER_COLS == 24);
 const _: () = assert!(NUM_STACK_COLS == 19);
@@ -214,9 +185,7 @@ const _: () = assert!(NUM_KERNEL_ROM_COLS == 5);
 mod tests {
     use super::*;
     use crate::trace::{
-        ACE_CHIPLET_WIRING_BUS_OFFSET, CHIPLETS_BUS_AUX_TRACE_OFFSET, CHIPLETS_OFFSET, CLK_COL_IDX,
-        CTX_COL_IDX, DECODER_AUX_TRACE_OFFSET, DECODER_TRACE_OFFSET, FN_HASH_OFFSET,
-        HASH_KERNEL_VTABLE_AUX_TRACE_OFFSET, RANGE_CHECK_AUX_TRACE_OFFSET, STACK_AUX_TRACE_OFFSET,
+        CHIPLETS_OFFSET, CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FN_HASH_OFFSET,
         STACK_TRACE_OFFSET, decoder, range, stack,
     };
 
@@ -279,20 +248,5 @@ mod tests {
         assert_eq!(MAIN_COL_MAP.chiplets[19], CHIPLETS_OFFSET + 19);
         // perm_seg is a separate field after chiplets[0..20]
         assert_eq!(MAIN_COL_MAP.perm_seg, CHIPLETS_OFFSET + 20);
-    }
-
-    // --- Auxiliary trace column map vs legacy constants
-    // -------------------------------------------
-
-    #[test]
-    fn aux_col_map() {
-        assert_eq!(AUX_COL_MAP.p1_block_stack, DECODER_AUX_TRACE_OFFSET);
-        assert_eq!(AUX_COL_MAP.p2_block_hash, DECODER_AUX_TRACE_OFFSET + 1);
-        assert_eq!(AUX_COL_MAP.p3_op_group, DECODER_AUX_TRACE_OFFSET + 2);
-        assert_eq!(AUX_COL_MAP.stack_overflow, STACK_AUX_TRACE_OFFSET);
-        assert_eq!(AUX_COL_MAP.range_check, RANGE_CHECK_AUX_TRACE_OFFSET);
-        assert_eq!(AUX_COL_MAP.hash_kernel_vtable, HASH_KERNEL_VTABLE_AUX_TRACE_OFFSET);
-        assert_eq!(AUX_COL_MAP.chiplets_bus, CHIPLETS_BUS_AUX_TRACE_OFFSET);
-        assert_eq!(AUX_COL_MAP.ace_wiring, ACE_CHIPLET_WIRING_BUS_OFFSET);
     }
 }

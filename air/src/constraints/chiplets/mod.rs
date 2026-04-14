@@ -9,11 +9,12 @@
 //! - ACE chiplet main-trace constraints
 //! - kernel ROM chiplet main-trace constraints
 //!
-//! Chiplet bus constraints are enforced in the `chiplets::bus` module.
+//! Chiplet LogUp lookup-argument constraints are emitted by
+//! [`crate::constraints::lookup::ChipletLookupAir`] and wired through
+//! `MidenLookupAir` from `ProcessorAir::eval`.
 
 pub mod ace;
 pub mod bitwise;
-pub mod bus;
 pub mod columns;
 pub mod hasher_control;
 pub mod kernel_rom;

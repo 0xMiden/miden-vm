@@ -3,7 +3,6 @@
 //! This module exposes the general stack transition, stack ops, stack arith/u32, stack crypto,
 //! and stack overflow constraints.
 
-pub mod bus;
 pub mod columns;
 pub mod crypto;
 pub mod general;

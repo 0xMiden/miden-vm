@@ -15,7 +15,7 @@ use core::ops::Range;
 
 pub use miden_core::{Word, crypto::hash::Poseidon2 as Hasher};
 
-use super::{Felt, HASH_KERNEL_VTABLE_AUX_TRACE_OFFSET, ONE, ZERO, create_range};
+use super::{Felt, ONE, ZERO, create_range};
 
 // TYPES ALIASES
 // ================================================================================================
@@ -171,8 +171,3 @@ pub const RETURN_STATE: Selectors = [ZERO, ZERO, ONE];
 pub const RETURN_STATE_LABEL: u8 = 0b1000 + 1;
 
 // NOTE: Selectors s0/s1/s2 are unconstrained on perm segment rows.
-
-// --- Column accessors in the auxiliary trace ----------------------------------------------------
-
-/// Index of the auxiliary trace column tracking the state of the sibling table.
-pub const P1_COL_IDX: usize = HASH_KERNEL_VTABLE_AUX_TRACE_OFFSET;
