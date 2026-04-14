@@ -34,20 +34,22 @@ type Commitment<F, EF, SC> = <<SC as StarkConfig<F, EF>>::Lmcs as Lmcs>::Commitm
 
 /// STARK proof: per-instance shape metadata plus raw transcript data.
 ///
-/// `instance_shapes` is absorbed into the Fiat-Shamir challenger by both
-/// prover and verifier before any transcript interaction; it is not part of
-/// `transcript` and does not travel through the transcript channel.
+/// Fields are opaque. The accessors below expose wire-format summaries
+/// (trace count, transcript sizes). Read per-instance log trace heights by
+/// parsing via [`StarkTranscript::from_proof`], which validates the shape
+/// metadata and binds it into the Fiat-Shamir challenger —
+/// [`verify_multi`](crate::verifier::verify_multi) runs the same validation.
 ///
 /// TODO(0xMiden/crypto#941): once `InstanceShapes` also carries the
-/// permutation `π: trace_id → air_id`, both the Fiat-Shamir encoding and the
-/// downstream indexing will need to be updated.
+/// permutation `π: trace_id → air_id`, the Fiat-Shamir encoding and downstream
+/// indexing will need to be updated.
 // Bounds target `Commitment` directly; `SC` itself isn't `Serialize`/`Debug`.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(serialize = "TranscriptData<F, Commitment<F, EF, SC>>: Serialize"))]
 #[serde(bound(deserialize = "TranscriptData<F, Commitment<F, EF, SC>>: Deserialize<'de>"))]
 pub struct StarkProof<F: TwoAdicField, EF: ExtensionField<F>, SC: StarkConfig<F, EF>> {
-    pub instance_shapes: InstanceShapes,
-    pub transcript: TranscriptData<F, Commitment<F, EF, SC>>,
+    pub(crate) instance_shapes: InstanceShapes,
+    pub(crate) transcript: TranscriptData<F, Commitment<F, EF, SC>>,
 }
 
 impl<F, EF, SC> core::fmt::Debug for StarkProof<F, EF, SC>
@@ -71,7 +73,22 @@ where
     EF: ExtensionField<F>,
     SC: StarkConfig<F, EF>,
 {
-    /// Total byte size of the proof (shape metadata + transcript data).
+    /// Number of traces (instances) the proof was produced for.
+    pub fn num_traces(&self) -> usize {
+        self.instance_shapes.len()
+    }
+
+    /// Number of base-field elements in the transcript.
+    pub fn num_field_elements(&self) -> usize {
+        self.transcript.fields().len()
+    }
+
+    /// Number of commitments in the transcript.
+    pub fn num_commitments(&self) -> usize {
+        self.transcript.commitments().len()
+    }
+
+    /// Total byte size of the proof.
     pub fn size_in_bytes(&self) -> usize {
         self.instance_shapes.size_in_bytes() + self.transcript.size_in_bytes()
     }
@@ -110,17 +127,20 @@ where
 
 /// Structured transcript view for the full lifted STARK protocol.
 ///
-/// Captures all commitments, sampled challenges, the OOD evaluation point, and
-/// the PCS sub-transcript (DEEP evals, FRI rounds, query openings).
-///
-/// Constructed via [`from_proof`](Self::from_proof), which mirrors steps 1–9 of
-/// [`verify_multi`](crate::verifier::verify_multi) (parse only, no constraint checks).
+/// Captures instance shape metadata, commitments, sampled challenges, the OOD
+/// evaluation point, and the PCS sub-transcript. Constructed via
+/// [`from_proof`](Self::from_proof), which mirrors steps 0–9 of
+/// [`verify_multi`](crate::verifier::verify_multi) but skips the constraint
+/// check.
 pub struct StarkTranscript<EF, L>
 where
     L: Lmcs,
     L::F: Field,
     EF: ExtensionField<L::F>,
 {
+    /// Per-instance shape metadata. Validated and observed into the challenger
+    /// by [`from_proof`](Self::from_proof).
+    pub instance_shapes: InstanceShapes,
     /// Main trace commitment.
     pub main_commit: L::Commitment,
     /// Randomness sampled for auxiliary traces.
@@ -150,7 +170,7 @@ where
     /// Parse a STARK transcript from proof data and a challenger.
     ///
     /// Mirrors steps 0–9 of [`verify_multi`](crate::verifier::verify_multi):
-    /// 0. Observe log trace heights into the challenger
+    /// 0. Validate instance shapes, then observe log trace heights into the challenger
     /// 1. Receive main trace commitment
     /// 2. Sample randomness for auxiliary traces
     /// 3. Receive auxiliary trace commitment
@@ -174,12 +194,11 @@ where
         A: LiftedAir<L::F, EF>,
         SC: StarkConfig<L::F, EF, Lmcs = L>,
     {
+        let log_blowup = config.pcs().log_blowup();
+        let log_max_trace_height = validate_inputs(instances, &proof.instance_shapes, log_blowup)?;
         proof.instance_shapes.observe::<L::F, _>(&mut challenger);
 
-        let log_max_trace_height = validate_inputs(instances, &proof.instance_shapes)?;
-
         let mut channel = VerifierTranscript::from_data(challenger, &proof.transcript);
-        let log_blowup = config.pcs().log_blowup();
         let alignment = config.lmcs().alignment();
 
         // Infer constraint degree from symbolic AIR analysis (max across all AIRs)
@@ -264,6 +283,7 @@ where
 
         Ok((
             Self {
+                instance_shapes: proof.instance_shapes.clone(),
                 main_commit,
                 randomness,
                 aux_commit,

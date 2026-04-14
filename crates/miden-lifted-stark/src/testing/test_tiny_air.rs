@@ -235,14 +235,34 @@ fn malformed_log_trace_heights_is_rejected() {
     ));
 
     // Out-of-range log height must surface as an error, not panic on
-    // `1usize << log_h` or `two_adic_generator(log_h)`.
+    // `1usize << log_h` or `two_adic_generator(log_h + log_blowup)`.
     let mut bad_proof = output.proof.clone();
     bad_proof.instance_shapes.log_trace_heights = vec![200];
     let err = verify_single(&config, &air, &public_values, &[], &bad_proof, test_challenger())
         .expect_err("oversized log trace height should fail verification");
     assert!(matches!(
         err,
-        VerifierError::Instance(InstanceValidationError::LogHeightTooLarge { log_h: 200, .. })
+        VerifierError::Instance(InstanceValidationError::LdeDomainExceedsTwoAdicity {
+            log_h: 200,
+            ..
+        })
+    ));
+
+    // Boundary case: `log_h` fits the raw bound (`log_h ≤ TWO_ADICITY`) but
+    // the LDE domain `log_h + log_blowup` does not. With `log_blowup = 2`
+    // from `TEST_PCS_PARAMS` and `Felt::TWO_ADICITY = 32`, `31 + 2 = 33 > 32`
+    // must be rejected before any `two_adic_generator` call on the LDE domain.
+    let mut bad_proof = output.proof;
+    bad_proof.instance_shapes.log_trace_heights = vec![31];
+    let err = verify_single(&config, &air, &public_values, &[], &bad_proof, test_challenger())
+        .expect_err("log_h + log_blowup exceeding two-adicity should fail verification");
+    assert!(matches!(
+        err,
+        VerifierError::Instance(InstanceValidationError::LdeDomainExceedsTwoAdicity {
+            log_h: 31,
+            log_blowup: 2,
+            ..
+        })
     ));
 }
 

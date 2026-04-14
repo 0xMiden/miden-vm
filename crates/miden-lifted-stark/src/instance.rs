@@ -10,12 +10,10 @@ use alloc::vec::Vec;
 
 use miden_lifted_air::{AirStructureError, LiftedAir, VarLenPublicInputs, log2_strict_u8};
 use p3_challenger::CanObserve;
-use p3_field::{Field, PrimeCharacteristicRing};
+use p3_field::{Field, PrimeCharacteristicRing, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-
-use crate::pcs::params::MAX_LOG_DOMAIN_SIZE;
 
 // ============================================================================
 // Instance data
@@ -190,8 +188,12 @@ pub enum InstanceValidationError {
         instances: usize,
         log_trace_heights: usize,
     },
-    #[error("log trace height {log_h} exceeds max allowed {max}")]
-    LogHeightTooLarge { log_h: u8, max: u8 },
+    #[error("LDE domain log-size {log_h} + {log_blowup} exceeds field two-adicity {two_adicity}")]
+    LdeDomainExceedsTwoAdicity {
+        log_h: u8,
+        log_blowup: u8,
+        two_adicity: usize,
+    },
 }
 
 /// Cross-check instances against their shapes and return the log of the
@@ -199,8 +201,8 @@ pub enum InstanceValidationError {
 ///
 /// Checks:
 /// - shape count matches instance count
-/// - each `log_h ≤ MAX_LOG_DOMAIN_SIZE`, guarding the downstream `1 << log_h` against wire-format
-///   shapes that didn't come from [`InstanceShapes::from_trace_heights`]
+/// - each `log_h + log_blowup ≤ F::TWO_ADICITY` (guards downstream `two_adic_generator` calls
+///   against wire-format shapes)
 /// - each AIR is structurally valid ([`LiftedAir::validate`])
 /// - each instance's public values / var-len inputs match its AIR
 /// - heights are ascending
@@ -212,9 +214,10 @@ pub enum InstanceValidationError {
 pub(crate) fn validate_inputs<F, EF, A>(
     instances: &[(&A, AirInstance<'_, F>)],
     shapes: &InstanceShapes,
+    log_blowup: u8,
 ) -> Result<u8, InstanceValidationError>
 where
-    F: Field,
+    F: TwoAdicField,
     A: LiftedAir<F, EF>,
 {
     if instances.len() != shapes.len() {
@@ -225,10 +228,11 @@ where
     }
     let mut log_prev: u8 = 0;
     for ((air, inst), &log_h) in instances.iter().zip(shapes.log_trace_heights()) {
-        if log_h > MAX_LOG_DOMAIN_SIZE {
-            return Err(InstanceValidationError::LogHeightTooLarge {
+        if log_h as usize + log_blowup as usize > F::TWO_ADICITY {
+            return Err(InstanceValidationError::LdeDomainExceedsTwoAdicity {
                 log_h,
-                max: MAX_LOG_DOMAIN_SIZE,
+                log_blowup,
+                two_adicity: F::TWO_ADICITY,
             });
         }
         air.validate()?;

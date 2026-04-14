@@ -16,9 +16,18 @@
 //! has already observed all variable inputs that are not carried on the proof.
 //!
 //! Instance shape metadata is the one exception: log trace heights ride on
-//! [`StarkProof::instance_shapes`] and [`verify_multi`] observes them itself
-//! before any transcript interaction. Callers must not pre-observe them, or
-//! they'll be absorbed twice.
+//! the opaque [`StarkProof`] and [`verify_multi`] observes them before any
+//! transcript interaction. Callers must not pre-observe them, or they'll be
+//! absorbed twice.
+//!
+//! # Statement-bound trace heights
+//!
+//! The verifier accepts whatever trace heights the proof carries; it never
+//! compares them against a caller-supplied expectation. If your statement
+//! fixes the trace size (e.g. a proof for a 2^16-row execution), parse it
+//! with
+//! [`StarkTranscript::from_proof`](crate::proof::StarkTranscript::from_proof)
+//! and check `transcript.instance_shapes.log_trace_heights()` yourself.
 //!
 //! The protocol implementation assumes that all out-of-band inputs that may
 //! vary (in particular `public_values` and `var_len_public_inputs`) have
@@ -106,19 +115,10 @@ pub enum VerifierError {
     Reduction(ReductionError),
 }
 
-/// Verify a single AIR.
+/// Verify a single AIR. Convenience wrapper around [`verify_multi`].
 ///
-/// Transcript warning: the protocol assumes the challenger inside `channel` has
-/// already observed all variable statement inputs (in particular `public_values`).
-/// This lets callers keep public inputs out of the proof when they are available
-/// out-of-band. See the module-level docs for guidance.
-///
-/// This is a convenience wrapper around [`verify_multi`] for the single-AIR case.
-///
-/// Log trace height is extracted from the proof transcript (not passed as a parameter).
-///
-/// # Returns
-/// `Ok(())` on success, or a `VerifierError` if verification fails.
+/// The caller's challenger must already have observed all variable statement
+/// inputs (e.g. `public_values`); see the module-level docs.
 pub fn verify_single<F, EF, A, SC>(
     config: &SC,
     air: &A,
@@ -139,34 +139,25 @@ where
 
 /// Verify multiple AIRs with traces of different heights.
 ///
-/// Transcript warning: the protocol assumes the challenger inside `channel` has
-/// already observed all variable statement inputs (in particular each instance's
-/// `public_values`). This lets callers keep public inputs out of the proof when they
-/// are available out-of-band.
+/// `instances` must be given in ascending trace-height order. Log trace
+/// heights are read from `proof`, validated against `F::TWO_ADICITY`, and
+/// observed into the challenger before any transcript interaction — the
+/// caller's challenger must already carry all other variable statement
+/// inputs (e.g. `public_values`).
 ///
-/// Log trace heights are extracted from the proof transcript rather than from
-/// the instance data. The verifier mirrors the prover's protocol:
+/// The verifier mirrors the prover's protocol:
 ///
-/// 1. Observe log trace heights and validate
+/// 1. Validate instance shapes and observe log trace heights into the challenger
 /// 2. Receive commitments and sample challenges in the same order as the prover
 /// 3. For each AIR, evaluate constraints at the lifted OOD point yⱼ = z^{rⱼ}
 /// 4. Accumulate folded constraints with β: acc = acc·β + foldedⱼ
 /// 5. Check quotient identity: `acc == Q(z) * Z_{H_max}(z)`
 ///
-/// Lifting ensures correctness: for a trace of height nⱼ lifted by factor rⱼ,
-/// the committed codeword corresponds to the lifted polynomial `p_lift(X) = p(X^{rⱼ})`.
-/// Opening at `[z, z * h_max]` therefore yields
-/// `[p(z^{r_j}), p(h_{n_j} * z^{r_j})]`, i.e. the local/next row pair for the original
-/// (unlifted) trace domain.
+/// Lifting: for a trace of height nⱼ lifted by factor rⱼ, the committed
+/// codeword encodes `p_lift(X) = p(X^{rⱼ})`; opening at `[z, z · h_max]`
+/// yields the local/next row pair for the original trace domain.
 ///
-/// # Arguments
-/// - `config`: STARK configuration (PCS params, LMCS, DFT)
-/// - `instances`: Pairs of (AIR, instance)
-/// - `proof`: STARK proof containing log trace heights and transcript data
-/// - `challenger`: Fiat-Shamir challenger (heights are observed before use)
-///
-/// # Returns
-/// `Ok(())` on success, or a `VerifierError` if verification fails.
+/// See the module-level docs for the statement-bound heights contract.
 pub fn verify_multi<F, EF, A, SC>(
     config: &SC,
     instances: &[(&A, AirInstance<'_, F>)],
@@ -180,14 +171,14 @@ where
     A: LiftedAir<F, EF>,
 {
     let instance_shapes = &proof.instance_shapes;
-    instance_shapes.observe::<F, _>(&mut challenger);
+    let log_blowup = config.pcs().log_blowup();
 
-    let log_max_trace_height = validate_inputs(instances, instance_shapes)?;
+    let log_max_trace_height = validate_inputs(instances, instance_shapes, log_blowup)?;
     let log_trace_heights = instance_shapes.log_trace_heights();
 
-    let mut channel = VerifierTranscript::from_data(challenger, &proof.transcript);
+    instance_shapes.observe::<F, _>(&mut challenger);
 
-    let log_blowup = config.pcs().log_blowup();
+    let mut channel = VerifierTranscript::from_data(challenger, &proof.transcript);
 
     // Infer constraint degree from symbolic AIR analysis (max across all AIRs).
     // NOTE: `log_quotient_degree()` runs symbolic eval and may panic if the AIR is

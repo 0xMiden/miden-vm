@@ -12,7 +12,7 @@
 - Use per-chunk scratch space for batch inversion ([#933](https://github.com/0xMiden/crypto/pull/933)).
 - [BREAKING] Changed the signature of `Felt::new` to perform reduction, and raise an error if the input is invalid. Retained the old behavior as `Felt::new_unchecked`, as its usage may lead to incorrect results.
 - Optimize field operations for `Goldilocks` ([#926](https://github.com/0xMiden/crypto/pull/926)).
-- [BREAKING] Moved per-instance log trace heights from `AirInstance` into `StarkProof::instance_shapes` ([#956](https://github.com/0xMiden/crypto/pull/956)). `prove_multi` / `verify_multi` now observe them into the Fiat-Shamir challenger internally — callers must stop pre-observing the heights (or they'll be bound twice) and no longer need to carry them alongside the proof.
+- [BREAKING] Per-instance log trace heights moved from `AirInstance` into `StarkProof`; `prove_multi` / `verify_multi` now observe them into the Fiat-Shamir challenger internally ([#956](https://github.com/0xMiden/crypto/pull/956)). Consumers on the temporary `(log_trace_height, proof)` serialization path must drop the wrapper and stop pre-observing the height, or it will be bound twice. `StarkProof` no longer exposes per-instance heights directly — parse the proof with `StarkTranscript::from_proof` to read them; `num_traces()` is available for the count.
 
 ## 0.23.0 (2026-03-11)
 

@@ -132,8 +132,8 @@ where
 
     let result = RunResult {
         proof_size_bytes: output.proof.size_in_bytes(),
-        field_elems: output.proof.transcript.fields().len(),
-        commitments: output.proof.transcript.commitments().len(),
+        field_elems: output.proof.num_field_elements(),
+        commitments: output.proof.num_commitments(),
     };
 
     if !cli.no_verify {

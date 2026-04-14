@@ -242,8 +242,10 @@ where
     let trace_heights: Vec<usize> = instances.iter().map(|(_, w, _)| w.trace.height()).collect();
     let instance_shapes = InstanceShapes::from_trace_heights(trace_heights)?;
 
+    let log_blowup = config.pcs().log_blowup();
+
     // Validate AIR structure, instance dimensions, heights, and trace widths.
-    let log_max_trace_height = validate_inputs(&verifier_instances, &instance_shapes)?;
+    let log_max_trace_height = validate_inputs(&verifier_instances, &instance_shapes, log_blowup)?;
     for (air, w, _) in instances {
         if w.trace.width() != air.width() {
             return Err(InstanceValidationError::WidthMismatch {
@@ -258,8 +260,6 @@ where
     instance_shapes.observe::<F, _>(&mut challenger);
 
     let mut channel = ProverTranscript::new(challenger);
-
-    let log_blowup = config.pcs().log_blowup();
 
     // Infer constraint degree from symbolic AIR analysis (max across all AIRs)
     let log_constraint_degree =
