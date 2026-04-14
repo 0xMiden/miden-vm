@@ -44,8 +44,11 @@ pub fn analyze(
     let mut analyzer = AnalysisContext::new(source.clone(), source_manager);
     analyzer.set_warnings_as_errors(warnings_as_errors);
 
-    let mut module =
-        Box::new(Module::new(kind, path, Some(source.clone())).with_span(source.source_span()));
+    let mut module = Box::new(
+        Module::new(kind, path)
+            .with_source_file(source.clone())
+            .with_span(source.source_span()),
+    );
 
     let mut forms = VecDeque::from(forms);
     let mut enums = SmallVec::<[EnumType; 1]>::new_const();

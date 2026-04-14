@@ -5796,7 +5796,6 @@ fn test_linking_recursive_expansion_via_renamed_aliases() -> TestResult {
 
 #[test]
 fn mismatched_source_manager_caught_before_lowering() {
-    // Source manager A (assembler's): pre-load a short file so it occupies SourceId(0).
     let sm_a: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
     let _dummy = Module::parser(ModuleKind::Library)
         .parse_str("lib::dummy", "pub proc dummy\n  nop\nend", sm_a.clone())
@@ -5804,10 +5803,6 @@ fn mismatched_source_manager_caught_before_lowering() {
 
     let assembler = Assembler::new(sm_a);
 
-    // Source manager B (external): parse a module whose code will trigger a compile error
-    // during lowering. `loc_loadw_be.2` fails because 2 is not word-aligned (must be a
-    // multiple of 4). The error formatting tries to resolve the instruction's source span
-    // via the assembler's source manager, which returns the wrong file.
     let sm_b: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
     let module = Module::parser(ModuleKind::Library)
         .parse_str("lib::external", "@locals(4) pub proc bar\n  loc_loadw_be.2\nend", sm_b)
@@ -5820,10 +5815,48 @@ fn mismatched_source_manager_caught_before_lowering() {
 }
 
 #[test]
+fn issue_2778_parser_api_source_manager_mismatch_is_reported_without_panic() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let assembler_source_manager: Arc<dyn SourceManager> =
+        Arc::new(DefaultSourceManager::default());
+    let parser_source_manager: Arc<dyn SourceManager> = Arc::new(DefaultSourceManager::default());
+
+    let source = r#"
+use miden::protocol::output_note
+
+@locals(1)
+pub proc create_withdraw_return_note(tag: felt, note_type: felt, recipient: word, amount_0_out: felt, amount_1_out: felt)
+    # loc.0: note_id
+    # => [tag, aux, note_type, execution_hint, PAYBACK_NOTE_RECIPIENT]
+    exec.output_note::create_note
+    # => [note_id]
+    loc_store.0
+    # => []
+end
+"#;
+    let module = Module::parser(ModuleKind::Library)
+        .parse_str("test::lib", source, parser_source_manager)
+        .unwrap();
+
+    let assembled = catch_unwind(AssertUnwindSafe(|| {
+        Assembler::new(assembler_source_manager).assemble_library([module])
+    }));
+
+    assert!(
+        assembled.is_ok(),
+        "assembler panicked while reporting a source manager mismatch"
+    );
+    let err = assembled.unwrap().expect_err("should fail with source manager mismatch");
+    let rendered = err.to_string();
+    assert!(rendered.contains("source manager mismatch"), "unexpected error: {rendered}");
+}
+
+#[test]
 fn programmatic_module_without_source_file_assembles_ok() -> TestResult {
     let context = TestContext::default();
 
-    let mut module = Module::new(ModuleKind::Library, "lib::programmatic", None);
+    let mut module = Module::new(ModuleKind::Library, "lib::programmatic");
     let nop_body = Block::new(Default::default(), vec![Op::Inst(Span::unknown(Instruction::Nop))]);
     let procedure = Procedure::new(
         Default::default(),

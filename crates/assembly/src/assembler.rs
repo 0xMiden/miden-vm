@@ -920,9 +920,9 @@ impl Assembler {
                 continue;
             }
             // Fetch procedure metadata from the graph
-            let (module_kind, module_path, module_source_file) = {
+            let (module_kind, module_path) = {
                 let module = &self.linker[procedure_gid.module];
-                (module.kind(), module.path().clone(), module.source_file().cloned())
+                (module.kind(), module.path().clone())
             };
             match self.linker[procedure_gid].item() {
                 SymbolItem::Procedure(proc) => {
@@ -954,11 +954,8 @@ impl Assembler {
                     // be added to the forest.
 
                     // Record the debug info for this procedure
-                    self.debug_info.register_procedure_debug_info(
-                        &procedure,
-                        self.source_manager.as_ref(),
-                        module_source_file.as_deref(),
-                    )?;
+                    self.debug_info
+                        .register_procedure_debug_info(&procedure, self.source_manager.as_ref())?;
 
                     // Cache the compiled procedure
                     drop(proc);

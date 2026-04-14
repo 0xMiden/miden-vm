@@ -128,12 +128,7 @@ pub struct Module {
     pub(crate) advice_map: AdviceMap,
     /// The source file from which this module was parsed, if any.
     ///
-    /// This is `None` for programmatically-constructed modules (e.g. `new_kernel()`,
-    /// `new_executable()`) that have no backing source text.
-    ///
-    /// When present, it is used to verify that the source manager used during assembly is the
-    /// same one that was used to parse this module, via pointer identity
-    /// ([`SourceManager::is_manager_of`]).
+    /// Programmatically-constructed modules do not have a backing source file.
     source_file: Option<Arc<SourceFile>>,
 }
 
@@ -153,11 +148,7 @@ impl Module {
 impl Module {
     /// Creates a new [Module] with the specified `kind` and fully-qualified path, e.g.
     /// `std::math::u64`.
-    pub fn new(
-        kind: ModuleKind,
-        path: impl AsRef<Path>,
-        source_file: Option<Arc<SourceFile>>,
-    ) -> Self {
+    pub fn new(kind: ModuleKind, path: impl AsRef<Path>) -> Self {
         let path = path.as_ref().to_absolute().into_owned();
         Self {
             span: Default::default(),
@@ -166,24 +157,30 @@ impl Module {
             kind,
             items: Default::default(),
             advice_map: Default::default(),
-            source_file,
+            source_file: None,
         }
     }
 
     /// An alias for creating the default, but empty, `#kernel` [Module].
     pub fn new_kernel() -> Self {
-        Self::new(ModuleKind::Kernel, Path::kernel_path(), None)
+        Self::new(ModuleKind::Kernel, Path::kernel_path())
     }
 
     /// An alias for creating the default, but empty, `$exec` [Module].
     pub fn new_executable() -> Self {
-        Self::new(ModuleKind::Executable, Path::exec_path(), None)
+        Self::new(ModuleKind::Executable, Path::exec_path())
     }
 
     /// Specifies the source span in the source file in which this module was defined, that covers
     /// the full definition of this module.
     pub fn with_span(mut self, span: SourceSpan) -> Self {
         self.span = span;
+        self
+    }
+
+    /// Associates the source file from which this module was parsed.
+    pub(crate) fn with_source_file(mut self, source_file: Arc<SourceFile>) -> Self {
+        self.source_file = Some(source_file);
         self
     }
 
@@ -455,8 +452,6 @@ impl Module {
     }
 
     /// Returns the source file from which this module was parsed, if any.
-    ///
-    /// Returns `None` for programmatically-constructed modules that have no backing source text.
     pub fn source_file(&self) -> Option<&Arc<SourceFile>> {
         self.source_file.as_ref()
     }

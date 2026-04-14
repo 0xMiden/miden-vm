@@ -55,7 +55,7 @@ use miden_assembly_syntax::{
         self, Alias, AttributeSet, GlobalItemIndex, InvocationTarget, InvokeKind, ItemIndex,
         Module, ModuleIndex, Path, SymbolResolution, Visibility, types,
     },
-    debuginfo::{SourceManager, SourceSpan, Span, Spanned},
+    debuginfo::{SourceFile, SourceManager, SourceSpan, Span, Spanned},
     library::{ItemInfo, ModuleInfo},
 };
 use miden_core::{Word, advice::AdviceMap, program::Kernel};
@@ -73,6 +73,13 @@ use self::{
     module::{LinkModule, ModuleSource},
     resolver::*,
 };
+
+fn source_manager_owns_file(source_manager: &dyn SourceManager, file: &SourceFile) -> bool {
+    match source_manager.get(file.id()) {
+        Ok(found) => core::ptr::addr_eq(Arc::as_ptr(&found), file),
+        Err(_) => false,
+    }
+}
 
 /// Represents the current status of a symbol in the state of the [Linker]
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
@@ -277,11 +284,8 @@ impl Linker {
     pub fn link_module(&mut self, module: &mut Module) -> Result<ModuleIndex, LinkerError> {
         log::debug!(target: "linker", "adding unprocessed module {}", module.path());
 
-        // Reject the module early if it was parsed with a different source manager.
-        // Compiling a mismatched module would use the wrong source manager for span
-        // resolution, which can produce garbled diagnostics or panics.
         if let Some(source_file) = module.source_file()
-            && !self.source_manager.is_manager_of(source_file)
+            && !source_manager_owns_file(self.source_manager.as_ref(), source_file)
         {
             return Err(LinkerError::SourceManagerMismatch { path: module.path().into() });
         }
@@ -325,7 +329,6 @@ impl Linker {
             module.path().into(),
         )
         .with_advice_map(module.advice_map().clone())
-        .with_source_file(module.source_file().cloned())
         .with_symbols(symbols);
 
         self.modules.push(link_module);

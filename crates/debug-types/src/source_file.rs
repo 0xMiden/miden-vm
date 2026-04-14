@@ -192,15 +192,20 @@ impl SourceFile {
     }
 
     /// Get a [FileLineCol] equivalent to the start of the given [SourceSpan]
-    ///
-    /// Returns `None` if the span's source id does not match this file, or if the
-    /// starting byte offset is out of bounds.
-    pub fn location(&self, span: SourceSpan) -> Option<FileLineCol> {
+    pub(crate) fn try_location(&self, span: SourceSpan) -> Option<FileLineCol> {
         if span.source_id() != self.id {
             return None;
         }
 
         self.content.location(ByteIndex(span.into_range().start))
+    }
+
+    /// Get a [FileLineCol] equivalent to the start of the given [SourceSpan]
+    pub fn location(&self, span: SourceSpan) -> FileLineCol {
+        assert_eq!(span.source_id(), self.id, "mismatched source ids");
+
+        self.try_location(span)
+            .expect("invalid source span: starting byte is out of bounds")
     }
 }
 
@@ -358,7 +363,7 @@ impl<'a> miette::SpanContents<'a> for ScopedSourceFileRef<'a> {
         let start = self.span.offset() as u32;
         let end = start + self.span.len() as u32;
         let span = SourceSpan::new(self.file.id(), start..end);
-        let loc = self.file.location(span).expect("span was constructed from this file");
+        let loc = self.file.location(span);
         loc.column.to_index().to_usize()
     }
 
