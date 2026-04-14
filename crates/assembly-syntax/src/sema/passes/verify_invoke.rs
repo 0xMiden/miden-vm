@@ -49,6 +49,9 @@ pub(crate) struct VerifyInvokeTargets<'a> {
     locals: &'a BTreeMap<String, LocalInvokeTarget>,
     used_aliases: &'a mut BTreeSet<String>,
     current_procedure: Option<ProcedureName>,
+    /// When visiting a constant export, holds the constant's name so that
+    /// import references can be deferred until constant liveness is resolved.
+    current_constant: Option<Ident>,
     invoked: BTreeSet<Invoke>,
 }
 
@@ -66,8 +69,14 @@ impl<'a> VerifyInvokeTargets<'a> {
             locals,
             used_aliases,
             current_procedure,
+            current_constant: None,
             invoked: Default::default(),
         }
+    }
+
+    /// Set the constant name whose export is currently being visited.
+    pub fn set_current_constant(&mut self, name: Option<Ident>) {
+        self.current_constant = name;
     }
 }
 
@@ -411,7 +420,14 @@ impl VisitMut for VerifyInvokeTargets<'_> {
         if let Some(name) = path.as_ident() {
             self.track_used_alias(&name);
         } else if let Some((module, _)) = path.split_first() {
-            self.track_used_alias_name(module);
+            if let Some(ref const_name) = self.current_constant {
+                // Defer: record the edge so we only credit the import when this
+                // constant is proven live.
+                self.analyzer
+                    .record_constant_import_ref(const_name, module.into());
+            } else {
+                self.track_used_alias_name(module);
+            }
         }
         ControlFlow::Continue(())
     }
