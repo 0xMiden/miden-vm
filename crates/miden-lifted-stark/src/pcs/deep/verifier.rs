@@ -71,7 +71,7 @@ impl<F: TwoAdicField, EF: ExtensionField<F>, L: Lmcs<F = F>> DeepOracle<F, EF, L
     /// Returns the oracle and per-matrix evaluations: `evals[g][m]` is a
     /// `RowMajorMatrix<EF>` with one row per evaluation point.
     pub fn new<Ch>(
-        params: &DeepParams,
+        params: DeepParams,
         eval_points: &[EF],
         commitments: Vec<(L::Commitment, Vec<usize>)>,
         log_lde_height: u8,

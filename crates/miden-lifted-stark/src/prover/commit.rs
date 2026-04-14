@@ -293,8 +293,11 @@ mod tests {
         assert_eq!(truncated_natural.width(), 2);
 
         for i in 0..8 {
-            let row: Vec<Felt> = truncated_natural.row(i).unwrap().into_iter().collect();
-            assert_eq!(row.len(), 2, "row {i} should have 2 elements");
+            assert_eq!(
+                truncated_natural.row(i).unwrap().into_iter().count(),
+                2,
+                "row {i} should have 2 elements"
+            );
         }
     }
 }

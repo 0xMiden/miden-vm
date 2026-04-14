@@ -476,7 +476,7 @@ impl SparseMerkleTree<SMT_DEPTH> for Smt {
 
             assert_eq!(root_node_hash, root);
         }
-        let num_entries = leaves.values().map(|leaf| leaf.num_entries()).sum();
+        let num_entries = leaves.values().map(SmtLeaf::num_entries).sum();
         Ok(Self { root, inner_nodes, leaves, num_entries })
     }
 

@@ -123,7 +123,7 @@ mod tests {
         let coset = LiftedCoset::unlifted(log_trace_height, log_blowup);
 
         // Build the repeated matrix (same logic as periodic_columns_matrix)
-        let max_period = columns.iter().map(|c| c.len()).max().unwrap();
+        let max_period = columns.iter().map(Vec::len).max().unwrap();
         let num_cols = columns.len();
         let mut values = Vec::with_capacity(max_period * num_cols);
         for row in 0..max_period {

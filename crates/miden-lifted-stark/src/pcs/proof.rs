@@ -99,7 +99,7 @@ where
         let num_rounds = params.fri.num_rounds(log_lde_height);
 
         let mut fri_witnesses = Vec::with_capacity(num_rounds);
-        let mut round_indices = tree_indices.clone();
+        let mut round_indices = tree_indices;
         for _round in 0..num_rounds {
             round_indices.shrink_depth(log_arity);
             let base_width = arity * EF::DIMENSION;

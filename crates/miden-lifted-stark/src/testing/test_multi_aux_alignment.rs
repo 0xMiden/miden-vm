@@ -149,7 +149,7 @@ fn multi_trace_rejects_trailing_transcript_data() {
     let output =
         prove_multi(&config, &prover_instances, test_challenger()).expect("proving should succeed");
 
-    let (mut fields, commitments) = output.proof.clone().into_parts();
+    let (mut fields, commitments) = output.proof.into_parts();
     fields.push(Felt::ONE);
     let bad_transcript = TranscriptData::new(fields, commitments);
 

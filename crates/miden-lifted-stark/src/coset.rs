@@ -63,8 +63,7 @@ impl LiftedCoset {
         let log_max_lde_height = log_max_trace_height as u16 + log_blowup as u16;
         assert!(
             log_max_lde_height <= MAX_LOG_DOMAIN_SIZE as u16,
-            "LDE height 2^{log_max_lde_height} exceeds maximum 2^{}",
-            MAX_LOG_DOMAIN_SIZE,
+            "LDE height 2^{log_max_lde_height} exceeds maximum 2^{MAX_LOG_DOMAIN_SIZE}",
         );
         Self {
             log_trace_height,
@@ -82,8 +81,7 @@ impl LiftedCoset {
         let log_lde_height = log_trace_height as u16 + log_blowup as u16;
         assert!(
             log_lde_height <= MAX_LOG_DOMAIN_SIZE as u16,
-            "LDE height 2^{log_lde_height} exceeds maximum 2^{}",
-            MAX_LOG_DOMAIN_SIZE,
+            "LDE height 2^{log_lde_height} exceeds maximum 2^{MAX_LOG_DOMAIN_SIZE}",
         );
         Self {
             log_trace_height,

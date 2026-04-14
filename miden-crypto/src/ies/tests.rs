@@ -861,7 +861,7 @@ mod protocol_tests {
     #[test]
     fn test_sealed_message_serialization_roundtrip_k256_xchacha() {
         let mut rng = rand::rng();
-        let sk = crate::dsa::ecdsa_k256_keccak::SecretKey::with_rng(&mut rng);
+        let sk = SecretKey::with_rng(&mut rng);
         let pk = sk.public_key();
         let sealing_key = SealingKey::K256XChaCha20Poly1305(pk);
         let unsealing_key = UnsealingKey::K256XChaCha20Poly1305(sk);
@@ -870,8 +870,7 @@ mod protocol_tests {
         let sealed = sealing_key.seal_bytes(&mut rng, plaintext).unwrap();
         let before = sealed.scheme_name();
         let bytes = sealed.to_bytes();
-        let sealed2 =
-            <SealedMessage as crate::utils::Deserializable>::read_from_bytes(&bytes).unwrap();
+        let sealed2 = <SealedMessage as Deserializable>::read_from_bytes(&bytes).unwrap();
         let after = sealed2.scheme_name();
         assert_eq!(before, after);
         let opened = unsealing_key.unseal_bytes(sealed2).unwrap();
@@ -890,8 +889,7 @@ mod protocol_tests {
         let sealed = sealing_key.seal_bytes(&mut rng, plaintext).unwrap();
         let before = sealed.scheme_name();
         let bytes = sealed.to_bytes();
-        let sealed2 =
-            <SealedMessage as crate::utils::Deserializable>::read_from_bytes(&bytes).unwrap();
+        let sealed2 = <SealedMessage as Deserializable>::read_from_bytes(&bytes).unwrap();
         let after = sealed2.scheme_name();
         assert_eq!(before, after);
         let opened = unsealing_key.unseal_bytes(sealed2).unwrap();
@@ -901,7 +899,7 @@ mod protocol_tests {
     #[test]
     fn test_sealed_message_serialization_roundtrip_k256_aeadrpo() {
         let mut rng = rand::rng();
-        let sk = crate::dsa::ecdsa_k256_keccak::SecretKey::with_rng(&mut rng);
+        let sk = SecretKey::with_rng(&mut rng);
         let pk = sk.public_key();
         let sealing_key = SealingKey::K256AeadPoseidon2(pk);
         let unsealing_key = UnsealingKey::K256AeadPoseidon2(sk);
@@ -910,8 +908,7 @@ mod protocol_tests {
         let sealed = sealing_key.seal_bytes(&mut rng, plaintext).unwrap();
         let before = sealed.scheme_name();
         let bytes = sealed.to_bytes();
-        let sealed2 =
-            <SealedMessage as crate::utils::Deserializable>::read_from_bytes(&bytes).unwrap();
+        let sealed2 = <SealedMessage as Deserializable>::read_from_bytes(&bytes).unwrap();
         let after = sealed2.scheme_name();
         assert_eq!(before, after);
         let opened = unsealing_key.unseal_bytes(sealed2).unwrap();
@@ -930,8 +927,7 @@ mod protocol_tests {
         let sealed = sealing_key.seal_bytes(&mut rng, plaintext).unwrap();
         let before = sealed.scheme_name();
         let bytes = sealed.to_bytes();
-        let sealed2 =
-            <SealedMessage as crate::utils::Deserializable>::read_from_bytes(&bytes).unwrap();
+        let sealed2 = <SealedMessage as Deserializable>::read_from_bytes(&bytes).unwrap();
         let after = sealed2.scheme_name();
         assert_eq!(before, after);
         let opened = unsealing_key.unseal_bytes(sealed2).unwrap();

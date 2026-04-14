@@ -227,8 +227,7 @@ fn test_fri_verify_wrong_eval() {
 
     assert!(
         matches!(result, Err(FriError::EvaluationMismatch { .. })),
-        "expected EvaluationMismatch error, got {:?}",
-        result
+        "expected EvaluationMismatch error, got {result:?}"
     );
 }
 
@@ -296,8 +295,7 @@ fn test_fri_verify_wrong_beta() {
             result,
             Err(FriError::EvaluationMismatch { .. } | FriError::FinalPolyMismatch { .. })
         ),
-        "expected EvaluationMismatch or FinalPolyMismatch error, got {:?}",
-        result
+        "expected EvaluationMismatch or FinalPolyMismatch error, got {result:?}"
     );
 }
 
@@ -384,8 +382,7 @@ fn test_final_polynomial_correctness() {
     let log_domain_size = log_poly_degree + log_blowup;
 
     let mut prover_channel = prover_channel();
-    let _fri_polys =
-        FriPolys::<Felt, QuadFelt, _>::new(&params, &lmcs, evals.clone(), &mut prover_channel);
+    let _fri_polys = FriPolys::<Felt, QuadFelt, _>::new(&params, &lmcs, evals, &mut prover_channel);
     let (_, transcript) = prover_channel.finalize();
 
     let mut v_channel = verifier_channel(&transcript);

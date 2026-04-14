@@ -106,7 +106,7 @@ proptest! {
         // We're going to need an auxiliary tree to check the behavior.
         let mut tree = Smt::new();
         let muts_1 =
-            tree.compute_mutations(Vec::from(entries_v1.clone()).into_iter()).map_err(to_fail)?;
+            tree.compute_mutations(Vec::from(entries_v1).into_iter()).map_err(to_fail)?;
         tree.apply_mutations(muts_1).map_err(to_fail)?;
         let muts_2 =
             tree.compute_mutations(Vec::from(entries_v2.clone()).into_iter()).map_err(to_fail)?;
@@ -250,7 +250,7 @@ proptest! {
         // And create a normal tree to compare against.
         let mut tree = Smt::new();
         let tree_mutations =
-            tree.compute_mutations(Vec::from(entries.clone()).into_iter()).map_err(to_fail)?;
+            tree.compute_mutations(Vec::from(entries).into_iter()).map_err(to_fail)?;
         tree.apply_mutations(tree_mutations).map_err(to_fail)?;
 
         // The root should return the same results as that.

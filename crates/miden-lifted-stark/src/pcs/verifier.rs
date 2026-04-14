@@ -74,7 +74,7 @@ where
 
     // Construct verifier's DEEP oracle (observes evals, checks PoW, samples α/β)
     let (deep_oracle, evals) = DeepOracle::<F, EF, L>::new(
-        &params.deep,
+        params.deep,
         &eval_points,
         commitments.to_vec(),
         log_lde_height,

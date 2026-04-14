@@ -629,7 +629,7 @@ impl<S: SmtStorage> LargeSmt<S> {
 
         // Go through subtrees, see if any are empty, and if so remove them
         for (_index, subtree) in loaded_subtrees.iter_mut() {
-            if subtree.as_ref().is_some_and(|s| s.is_empty()) {
+            if subtree.as_ref().is_some_and(Subtree::is_empty) {
                 *subtree = None;
             }
         }

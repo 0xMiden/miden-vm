@@ -161,7 +161,7 @@ benchmark_with_setup_data! {
         let mut rng = rand::rngs::ThreadRng::default();
         let secret_keys: Vec<Falcon512SecretKey> =
             (0..KEYGEN_ITERATIONS).map(|_| Falcon512SecretKey::with_rng(&mut rng)).collect();
-        let public_keys: Vec<Falcon512PublicKey> = secret_keys.iter().map(|sk| sk.public_key()).collect();
+        let public_keys: Vec<Falcon512PublicKey> = secret_keys.iter().map(falcon512_poseidon2::SecretKey::public_key).collect();
         let messages: Vec<Word> =
             (0..KEYGEN_ITERATIONS).map(|i| Word::new([Felt::new_unchecked(i as u64); 4])).collect();
         let signatures: Vec<falcon512_poseidon2::Signature> = secret_keys
@@ -270,7 +270,7 @@ benchmark_with_setup_data! {
         let mut rng = rand::rngs::ThreadRng::default();
         let mut secret_keys: Vec<ecdsa_k256_keccak::SecretKey> =
             (0..KEYGEN_ITERATIONS).map(|_| ecdsa_k256_keccak::SecretKey::with_rng(&mut rng)).collect();
-        let public_keys: Vec<ecdsa_k256_keccak::PublicKey> = secret_keys.iter().map(|sk| sk.public_key()).collect();
+        let public_keys: Vec<ecdsa_k256_keccak::PublicKey> = secret_keys.iter().map(ecdsa_k256_keccak::SecretKey::public_key).collect();
         let messages: Vec<Word> =
             (0..KEYGEN_ITERATIONS).map(|i| Word::new([Felt::new_unchecked(i as u64); 4])).collect();
         let signatures: Vec<ecdsa_k256_keccak::Signature> = secret_keys
@@ -377,7 +377,7 @@ benchmark_with_setup_data! {
         let mut rng = rand::rngs::ThreadRng::default();
         let secret_keys: Vec<eddsa_25519_sha512::SecretKey> =
             (0..KEYGEN_ITERATIONS).map(|_| eddsa_25519_sha512::SecretKey::with_rng(&mut rng)).collect();
-        let public_keys: Vec<eddsa_25519_sha512::PublicKey> = secret_keys.iter().map(|sk| sk.public_key()).collect();
+        let public_keys: Vec<eddsa_25519_sha512::PublicKey> = secret_keys.iter().map(eddsa_25519_sha512::SecretKey::public_key).collect();
         let messages: Vec<Word> =
             (0..KEYGEN_ITERATIONS).map(|i| Word::new([Felt::new_unchecked(i as u64); 4])).collect();
         let signatures: Vec<eddsa_25519_sha512::Signature> = secret_keys

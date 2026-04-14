@@ -231,17 +231,17 @@ fn word_macro(#[case] input: &str) {
     // Right pad to 64 hex digits (66 including prefix). This is required by the
     // Word::try_from(String) implementation.
     let padded_input = format!("{input:<66}").replace(" ", "0");
-    let expected = crate::Word::try_from(padded_input.as_str()).unwrap();
+    let expected = Word::try_from(padded_input.as_str()).unwrap();
 
     assert_eq!(uut, expected);
 }
 
 #[rstest::rstest]
-#[case::first_nibble("0x1000000000000000000000000000000000000000000000000000000000000000", crate::Word::new([Felt::new_unchecked(16), Felt::new_unchecked(0), Felt::new_unchecked(0), Felt::new_unchecked(0)]))]
-#[case::second_nibble("0x0100000000000000000000000000000000000000000000000000000000000000", crate::Word::new([Felt::new_unchecked(1), Felt::new_unchecked(0), Felt::new_unchecked(0), Felt::new_unchecked(0)]))]
-#[case::all_first_nibbles("0x1000000000000000100000000000000010000000000000001000000000000000", crate::Word::new([Felt::new_unchecked(16), Felt::new_unchecked(16), Felt::new_unchecked(16), Felt::new_unchecked(16)]))]
-#[case::all_first_nibbles_asc("0x1000000000000000200000000000000030000000000000004000000000000000", crate::Word::new([Felt::new_unchecked(16), Felt::new_unchecked(32), Felt::new_unchecked(48), Felt::new_unchecked(64)]))]
-fn word_macro_endianness(#[case] input: &str, #[case] expected: crate::Word) {
+#[case::first_nibble("0x1000000000000000000000000000000000000000000000000000000000000000", Word::new([Felt::new_unchecked(16), Felt::new_unchecked(0), Felt::new_unchecked(0), Felt::new_unchecked(0)]))]
+#[case::second_nibble("0x0100000000000000000000000000000000000000000000000000000000000000", Word::new([Felt::new_unchecked(1), Felt::new_unchecked(0), Felt::new_unchecked(0), Felt::new_unchecked(0)]))]
+#[case::all_first_nibbles("0x1000000000000000100000000000000010000000000000001000000000000000", Word::new([Felt::new_unchecked(16), Felt::new_unchecked(16), Felt::new_unchecked(16), Felt::new_unchecked(16)]))]
+#[case::all_first_nibbles_asc("0x1000000000000000200000000000000030000000000000004000000000000000", Word::new([Felt::new_unchecked(16), Felt::new_unchecked(32), Felt::new_unchecked(48), Felt::new_unchecked(64)]))]
+fn word_macro_endianness(#[case] input: &str, #[case] expected: Word) {
     let uut = word!(input);
     assert_eq!(uut, expected);
 }

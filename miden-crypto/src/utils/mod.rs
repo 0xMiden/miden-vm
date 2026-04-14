@@ -211,7 +211,7 @@ pub fn bytes_to_elements_exact(bytes: &[u8]) -> Option<Vec<Felt>> {
 /// assert_eq!(felts, vec![Felt::new_unchecked(0x04030201), Felt::new_unchecked(0x00000005)]);
 /// ```
 pub fn bytes_to_packed_u32_elements(bytes: &[u8]) -> Vec<Felt> {
-    const BYTES_PER_U32: usize = core::mem::size_of::<u32>();
+    const BYTES_PER_U32: usize = size_of::<u32>();
 
     bytes
         .chunks(BYTES_PER_U32)

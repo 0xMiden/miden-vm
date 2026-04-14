@@ -140,7 +140,7 @@ mod tests {
         let mut rng = SmallRng::seed_from_u64(42);
 
         // Random polynomial coefficients
-        let coeffs: [QuadFelt; 4] = core::array::from_fn(|_| rng.sample(StandardUniform));
+        let coeffs: [QuadFelt; 4] = array::from_fn(|_| rng.sample(StandardUniform));
 
         // Compute DFT using NaiveDft (standard order)
         let coeffs_matrix = RowMajorMatrix::new(coeffs.to_vec(), 1);

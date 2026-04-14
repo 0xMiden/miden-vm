@@ -3,6 +3,8 @@
 //! - [`AirWitness`]: Prover witness — trace + public values
 //! - [`AirInstance`]: Verifier instance — log trace height + public values
 
+use alloc::vec::Vec;
+
 use p3_field::Field;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
@@ -134,7 +136,7 @@ impl<'a, F> AirInstance<'a, F> {
             return Err(AirValidationError::VarLenPublicInputsMismatch { expected, actual });
         }
         let trace_height = 1 << self.log_trace_height as usize;
-        let max_period = air.periodic_columns().iter().map(|c| c.len()).max().unwrap_or(0);
+        let max_period = air.periodic_columns().iter().map(Vec::len).max().unwrap_or(0);
         if trace_height < max_period {
             return Err(AirValidationError::TraceHeightBelowPeriod { trace_height, max_period });
         }

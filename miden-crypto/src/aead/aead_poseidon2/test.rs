@@ -15,13 +15,13 @@ proptest! {
     #[test]
     fn prop_bytes_felts_roundtrip(bytes in prop::collection::vec(any::<u8>(), 0..500)) {
         // bytes -> felts -> bytes
-        let felts = super::bytes_to_elements_with_padding(&bytes);
-        let back = super::padded_elements_to_bytes(&felts).unwrap();
+        let felts = bytes_to_elements_with_padding(&bytes);
+        let back = padded_elements_to_bytes(&felts).unwrap();
         prop_assert_eq!(bytes, back);
 
         // And the other direction on valid encodings: felts come from bytes_to_felts,
         // so they must satisfy the padding invariant expected by felts_to_bytes.
-        let felts_roundtrip = super::bytes_to_elements_with_padding(&super::padded_elements_to_bytes(&felts).unwrap());
+        let felts_roundtrip = bytes_to_elements_with_padding(&padded_elements_to_bytes(&felts).unwrap());
         prop_assert_eq!(felts, felts_roundtrip);
     }
 

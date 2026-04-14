@@ -56,7 +56,7 @@ proptest! {
         let expected = Blake3_256::hash(&concatenated);
 
         // Test with the original iterator of slices (converting Vec<u8> to &[u8])
-        let actual = Blake3_256::hash_iter(slices.iter().map(|v| v.as_slice()));
+        let actual = Blake3_256::hash_iter(slices.iter().map(Vec::as_slice));
         assert_eq!(expected, actual);
 
         // Test with empty slices list (should produce hash of empty string)
@@ -84,7 +84,7 @@ proptest! {
         let expected = Blake3_192::hash(&concatenated);
 
         // Test with the original iterator of slices (converting Vec<u8> to &[u8])
-        let actual = Blake3_192::hash_iter(slices.iter().map(|v| v.as_slice()));
+        let actual = Blake3_192::hash_iter(slices.iter().map(Vec::as_slice));
         assert_eq!(expected, actual);
 
         // Test with empty slices list (should produce hash of empty string)

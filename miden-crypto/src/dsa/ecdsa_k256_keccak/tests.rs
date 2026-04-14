@@ -201,14 +201,14 @@ fn test_signature_from_der_recovery_id_variation() {
 fn test_signature_from_der_invalid() {
     // Empty input should fail at DER parsing stage (der error).
     match Signature::from_der(&[], 0) {
-        Err(super::DeserializationError::InvalidValue(_)) => {},
+        Err(DeserializationError::InvalidValue(_)) => {},
         other => panic!("expected InvalidValue for empty DER, got {:?}", other),
     }
 
     // Malformed/truncated DER should also fail.
     let der_bad: [u8; 2] = [0x30, 0x01];
     match Signature::from_der(&der_bad, 0) {
-        Err(super::DeserializationError::InvalidValue(_)) => {},
+        Err(DeserializationError::InvalidValue(_)) => {},
         other => panic!("expected InvalidValue for malformed DER, got {:?}", other),
     }
 }
@@ -283,14 +283,14 @@ fn test_public_key_from_der_success() {
 fn test_public_key_from_der_invalid() {
     // Empty DER.
     match PublicKey::from_der(&[]) {
-        Err(super::DeserializationError::InvalidValue(_)) => {},
+        Err(DeserializationError::InvalidValue(_)) => {},
         other => panic!("expected InvalidValue for empty DER, got {:?}", other),
     }
 
     // Malformed: SEQUENCE with zero length (missing fields).
     let der_bad: [u8; 2] = [0x30, 0x00];
     match PublicKey::from_der(&der_bad) {
-        Err(super::DeserializationError::InvalidValue(_)) => {},
+        Err(DeserializationError::InvalidValue(_)) => {},
         other => panic!("expected InvalidValue for malformed DER, got {:?}", other),
     }
 }
@@ -328,7 +328,7 @@ fn test_public_key_from_der_rejects_non_canonical_long_form_length() {
     der.extend_from_slice(&spk);
 
     match PublicKey::from_der(&der) {
-        Err(super::DeserializationError::InvalidValue(_)) => {},
+        Err(DeserializationError::InvalidValue(_)) => {},
         other => {
             panic!("expected InvalidValue for non-canonical long-form length, got {:?}", other)
         },
@@ -370,7 +370,7 @@ fn test_public_key_from_der_rejects_trailing_bytes() {
     der.push(0x00);
 
     match PublicKey::from_der(&der) {
-        Err(super::DeserializationError::InvalidValue(_)) => {},
+        Err(DeserializationError::InvalidValue(_)) => {},
         other => panic!("expected InvalidValue for DER with trailing bytes, got {:?}", other),
     }
 }
@@ -409,7 +409,7 @@ fn test_public_key_from_der_rejects_wrong_curve_oid() {
     der.extend_from_slice(&spk);
 
     match PublicKey::from_der(&der) {
-        Err(super::DeserializationError::InvalidValue(_)) => {},
+        Err(DeserializationError::InvalidValue(_)) => {},
         other => panic!("expected InvalidValue for wrong curve OID, got {:?}", other),
     }
 }
@@ -445,7 +445,7 @@ fn test_public_key_from_der_rejects_wrong_algorithm_oid() {
     der.extend_from_slice(&spk);
 
     match PublicKey::from_der(&der) {
-        Err(super::DeserializationError::InvalidValue(_)) => {},
+        Err(DeserializationError::InvalidValue(_)) => {},
         other => panic!("expected InvalidValue for wrong algorithm OID, got {:?}", other),
     }
 }

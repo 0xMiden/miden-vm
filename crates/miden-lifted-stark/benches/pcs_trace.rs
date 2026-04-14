@@ -72,7 +72,7 @@ fn main() {
                 })
             })
             .collect::<Vec<_>>();
-        all_lde_matrices.sort_by_key(|m| m.height());
+        all_lde_matrices.sort_by_key(Matrix::height);
 
         let tree = lmcs.build_aligned_tree(all_lde_matrices);
         let commitment = tree.root();

@@ -40,7 +40,7 @@ proptest! {
         let expected = Sha256::hash(&concatenated);
 
         // Test with iterator
-        let actual = Sha256::hash_iter(slices.iter().map(|v| v.as_slice()));
+        let actual = Sha256::hash_iter(slices.iter().map(Vec::as_slice));
         assert_eq!(expected, actual);
 
         // Test with empty slices list
@@ -106,7 +106,7 @@ proptest! {
         let expected = Sha512::hash(&concatenated);
 
         // Test with iterator
-        let actual = Sha512::hash_iter(slices.iter().map(|v| v.as_slice()));
+        let actual = Sha512::hash_iter(slices.iter().map(Vec::as_slice));
         assert_eq!(expected, actual);
 
         // Test with empty slices list
@@ -218,14 +218,14 @@ const SHA512_TEST_VECTORS: &[TestVector] = &[
 #[test]
 fn test_memory_layout_assumptions() {
     // Verify struct size equals inner array size (required for safe pointer casting)
-    assert_eq!(core::mem::size_of::<Sha256Digest>(), core::mem::size_of::<[u8; 32]>());
+    assert_eq!(size_of::<Sha256Digest>(), size_of::<[u8; 32]>());
 
     // Verify alignment
-    assert_eq!(core::mem::align_of::<Sha256Digest>(), core::mem::align_of::<[u8; 32]>());
+    assert_eq!(align_of::<Sha256Digest>(), align_of::<[u8; 32]>());
 
     // Same for Sha512Digest
-    assert_eq!(core::mem::size_of::<Sha512Digest>(), core::mem::size_of::<[u8; 64]>());
-    assert_eq!(core::mem::align_of::<Sha512Digest>(), core::mem::align_of::<[u8; 64]>());
+    assert_eq!(size_of::<Sha512Digest>(), size_of::<[u8; 64]>());
+    assert_eq!(align_of::<Sha512Digest>(), align_of::<[u8; 64]>());
 }
 
 #[test]

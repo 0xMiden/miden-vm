@@ -435,7 +435,7 @@ impl SecretKey {
 }
 
 impl Distribution<SecretKey> for StandardUniform {
-    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> SecretKey {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> SecretKey {
         let mut res = [ZERO; SECRET_KEY_SIZE];
         let uni_dist =
             Uniform::new(0, Felt::ORDER).expect("should not fail given the size of the field");
@@ -605,7 +605,7 @@ impl From<Nonce> for [Felt; NONCE_SIZE] {
 }
 
 impl Distribution<Nonce> for StandardUniform {
-    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> Nonce {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Nonce {
         let mut res = [ZERO; NONCE_SIZE];
         let uni_dist =
             Uniform::new(0, Felt::ORDER).expect("should not fail given the size of the field");

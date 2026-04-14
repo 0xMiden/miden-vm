@@ -132,7 +132,7 @@ impl SecretKey {
     // --------------------------------------------------------------------------------------------
 
     /// Signs a message with this secret key.
-    pub fn sign(&self, message: crate::Word) -> Signature {
+    pub fn sign(&self, message: Word) -> Signature {
         use rand::SeedableRng;
         use rand_chacha::ChaCha20Rng;
 
@@ -389,10 +389,10 @@ impl Deserializable for SecretKey {
         // big_g * f - g * big_f = p (mod X^n + 1)
         let big_g = g.fft().hadamard_div(&f.fft()).hadamard_mul(&big_f.fft()).ifft();
         let basis = [
-            g.map(|f| f.balanced_value()),
-            -f.map(|f| f.balanced_value()),
-            big_g.map(|f| f.balanced_value()),
-            -big_f.map(|f| f.balanced_value()),
+            Polynomial::new(g.to_balanced_values()),
+            -Polynomial::new(f.to_balanced_values()),
+            Polynomial::new(big_g.to_balanced_values()),
+            -Polynomial::new(big_f.to_balanced_values()),
         ];
         Ok(Self::from_short_lattice_basis(basis))
     }

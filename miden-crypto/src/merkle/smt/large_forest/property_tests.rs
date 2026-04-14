@@ -314,7 +314,7 @@ proptest! {
         let tree_info =
             forest.update_tree(lineage, version + 1, entries_v2.clone()).map_err(to_fail)?;
 
-        let tree_v1 = build_tree(entries_v1.clone())?;
+        let tree_v1 = build_tree(entries_v1)?;
         let mut tree_v2 = tree_v1.clone();
         apply_batch(&mut tree_v2, entries_v2)?;
 
@@ -341,7 +341,7 @@ proptest! {
         entries_v2 in arbitrary_batch(),
     ) {
         let mut forest = LargeSmtForest::new(ForestInMemoryBackend::new()).map_err(to_fail)?;
-        forest.add_lineage(lineage, version, entries_v1.clone()).map_err(to_fail)?;
+        forest.add_lineage(lineage, version, entries_v1).map_err(to_fail)?;
         let tree_info = forest.update_tree(lineage, version + 1, entries_v2).map_err(to_fail)?;
 
         let old_version = TreeId::new(lineage, version);
@@ -581,7 +581,7 @@ proptest! {
         entries in prop::collection::vec(arbitrary_batch(), 0..10),
     ) {
         // Build a forest update batch containing all lineages with their respective entries.
-        let mut batch = crate::merkle::smt::SmtForestUpdateBatch::empty();
+        let mut batch = SmtForestUpdateBatch::empty();
         for (i, lineage) in lineages.iter().enumerate() {
             if let Some(entry_batch) = entries.get(i) {
                 *batch.operations(*lineage) = entry_batch.clone();

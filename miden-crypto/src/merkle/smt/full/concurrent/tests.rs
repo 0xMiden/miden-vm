@@ -201,7 +201,7 @@ fn test_two_subtrees() {
     let total_computed = first_nodes.len() + second_nodes.len() + next_leaves.len();
     assert_eq!(total_computed as u64, PAIR_COUNT);
     // Verify the computed nodes of both subtrees.
-    let computed_nodes = first_nodes.clone().into_iter().chain(second_nodes);
+    let computed_nodes = first_nodes.into_iter().chain(second_nodes);
     for (index, test_node) in computed_nodes {
         let control_node = control.get_inner_node(index);
         assert_eq!(
@@ -409,7 +409,7 @@ fn test_singlethreaded_subtree_mutations() {
     const PAIR_COUNT: u64 = COLS_PER_SUBTREE * 64;
     let entries = generate_entries(PAIR_COUNT);
     let updates = generate_updates(entries.clone(), 1000);
-    let tree = Smt::with_entries_sequential(entries.clone()).unwrap();
+    let tree = Smt::with_entries_sequential(entries).unwrap();
     let control = tree.compute_mutations_sequential(updates.clone()).unwrap();
     let mut node_mutations = NodeMutations::default();
     let (mut subtree_leaves, new_pairs) =
@@ -679,7 +679,7 @@ proptest! {
     #[test]
     fn test_with_entries_consistency(entries in arb_entries()) {
         let sequential = Smt::with_entries_sequential(entries.clone()).unwrap();
-        let concurrent = Smt::with_entries(entries.clone()).unwrap();
+        let concurrent = Smt::with_entries(entries).unwrap();
         prop_assert_eq!(concurrent, sequential);
     }
 
@@ -701,7 +701,7 @@ proptest! {
         });
 
         let sequential = tree.compute_mutations_sequential(update_entries.clone()).unwrap();
-        let concurrent = tree.compute_mutations(update_entries.clone()).unwrap();
+        let concurrent = tree.compute_mutations(update_entries).unwrap();
 
         // If there are real changes, the root should change
         if has_real_changes {

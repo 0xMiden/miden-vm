@@ -124,15 +124,13 @@ impl PartialMmr {
         for &pos in &tracked_leaves {
             if pos >= num_leaves {
                 return Err(MmrError::InconsistentPartialMmr(format!(
-                    "tracked leaf position {} is out of bounds (forest has {} leaves)",
-                    pos, num_leaves
+                    "tracked leaf position {pos} is out of bounds (forest has {num_leaves} leaves)"
                 )));
             }
             let leaf_idx = InOrderIndex::from_leaf_pos(pos);
             if !nodes.contains_key(&leaf_idx) {
                 return Err(MmrError::InconsistentPartialMmr(format!(
-                    "tracked leaf at position {} has no value in nodes",
-                    pos
+                    "tracked leaf at position {pos} has no value in nodes"
                 )));
             }
         }
@@ -377,7 +375,7 @@ impl PartialMmr {
 
                 // On the next iteration, a peak will be merged. If any of its children are tracked,
                 // then we have to track the left side
-                track_left = self.is_tracked_node(&right_idx.sibling());
+                track_left = self.is_tracked_node(right_idx.sibling());
             }
             right
         };
@@ -584,7 +582,7 @@ impl PartialMmr {
                 // Check if either the left or right subtrees have nodes saved for authentication
                 // paths. If so, turn tracking on to update those paths.
                 if !track {
-                    track = self.is_tracked_node(&peak_idx);
+                    track = self.is_tracked_node(peak_idx);
                 }
 
                 // update data only contains the nodes from the right subtrees, left nodes are
@@ -595,7 +593,7 @@ impl PartialMmr {
 
                     // if the sibling peak is tracked, add this peaks to the set of
                     // authentication nodes
-                    if self.is_tracked_node(&sibling_idx) {
+                    if self.is_tracked_node(sibling_idx) {
                         self.nodes.insert(peak_idx, new);
                         inserted_nodes.push((peak_idx, new));
                     }
@@ -649,7 +647,7 @@ impl PartialMmr {
 
     /// Returns true if this [PartialMmr] tracks authentication path for the node at the specified
     /// index.
-    fn is_tracked_node(&self, node_index: &InOrderIndex) -> bool {
+    fn is_tracked_node(&self, node_index: InOrderIndex) -> bool {
         if let Some(leaf_pos) = node_index.to_leaf_pos() {
             // For leaf nodes, check if the leaf is in the tracked set.
             self.tracked_leaves.contains(&leaf_pos)
@@ -772,12 +770,12 @@ impl Deserializable for PartialMmr {
 
         // Construct MmrPeaks to validate forest/peaks consistency
         let peaks = MmrPeaks::new(forest, peaks_vec).map_err(|e| {
-            DeserializationError::InvalidValue(format!("invalid partial mmr peaks: {}", e))
+            DeserializationError::InvalidValue(format!("invalid partial mmr peaks: {e}"))
         })?;
 
         // Use validating constructor
         Self::from_parts(peaks, nodes, tracked_leaves)
-            .map_err(|e| DeserializationError::InvalidValue(format!("invalid partial mmr: {}", e)))
+            .map_err(|e| DeserializationError::InvalidValue(format!("invalid partial mmr: {e}")))
     }
 }
 
@@ -1344,7 +1342,7 @@ mod tests {
 
         // Valid case: tracked leaf with its value in nodes
         let mut nodes_with_leaf = BTreeMap::new();
-        let leaf_idx = super::InOrderIndex::from_leaf_pos(0);
+        let leaf_idx = InOrderIndex::from_leaf_pos(0);
         nodes_with_leaf.insert(leaf_idx, int_to_node(0));
         let mut tracked_valid = BTreeSet::new();
         tracked_valid.insert(0);
@@ -1386,8 +1384,7 @@ mod tests {
         let mut nodes_with_separator_12 = BTreeMap::new();
         let separator_idx_12 = InOrderIndex::read_from_bytes(&12usize.to_bytes()).unwrap();
         nodes_with_separator_12.insert(separator_idx_12, int_to_node(0));
-        let result =
-            PartialMmr::from_parts(peaks.clone(), nodes_with_separator_12, BTreeSet::new());
+        let result = PartialMmr::from_parts(peaks, nodes_with_separator_12, BTreeSet::new());
         assert!(result.is_err(), "separator index 12 should be rejected");
 
         // Invalid case: nodes with empty forest
@@ -1460,8 +1457,7 @@ mod tests {
         // Even invalid combinations should work (no validation)
         let mut invalid_tracked = BTreeSet::new();
         invalid_tracked.insert(999);
-        let partial =
-            PartialMmr::from_parts_unchecked(peaks.clone(), BTreeMap::new(), invalid_tracked);
+        let partial = PartialMmr::from_parts_unchecked(peaks, BTreeMap::new(), invalid_tracked);
         assert!(partial.tracked_leaves.contains(&999));
     }
 }

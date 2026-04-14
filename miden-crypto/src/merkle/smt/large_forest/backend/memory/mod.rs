@@ -158,7 +158,7 @@ impl Backend for InMemoryBackend {
 
         // A failure to compute mutations is a failure derived from user input, so we forward it as
         // appropriate.
-        let mutations = tree.compute_mutations(updates.into_iter().map(|o| o.into()))?;
+        let mutations = tree.compute_mutations(updates.into_iter().map(Into::into))?;
 
         // If computation of the mutations has succeeded but the application fails, then this should
         // be reported as an internal error, not a merkle error, to allow the caller to decide what
@@ -198,7 +198,7 @@ impl Backend for InMemoryBackend {
         // We compute the mutations as a precondition check, which will leave the underlying tree in
         // the same state if anything errors. Any error this yields is considered to be derived from
         // user-input and hence is forwarded as-is.
-        let mutations = tree.compute_mutations(updates.into_iter().map(|o| o.into()))?;
+        let mutations = tree.compute_mutations(updates.into_iter().map(Into::into))?;
 
         // The invariants on this method given by the `Backend` trait states that no new allocations
         // should be performed if the updates do not change the tree. As a result, we can
@@ -257,7 +257,7 @@ impl Backend for InMemoryBackend {
             .into_iter()
             .map(|(lineage, ops)| {
                 let tree = Smt::new();
-                let mutations = tree.compute_mutations(ops.into_iter().map(|o| o.into()))?;
+                let mutations = tree.compute_mutations(ops.into_iter().map(Into::into))?;
                 Ok((lineage, tree, mutations))
             })
             .collect::<Result<Vec<_>>>()?;
@@ -325,7 +325,7 @@ impl Backend for InMemoryBackend {
             .into_iter()
             .map(|(lineage, ops)| {
                 let tree = self.trees.get(&lineage).expect("Tree known to be present was not");
-                let mutations = tree.tree.compute_mutations(ops.into_iter().map(|o| o.into()))?;
+                let mutations = tree.tree.compute_mutations(ops.into_iter().map(Into::into))?;
                 Ok((lineage, mutations))
             })
             .collect::<Result<Vec<_>>>()?;

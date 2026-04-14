@@ -306,7 +306,7 @@ impl PartialSmt {
         let prev_entries = self
             .leaves
             .get(&current_index.position())
-            .map(|leaf| leaf.num_entries())
+            .map(SmtLeaf::num_entries)
             .unwrap_or(0);
         let current_entries = leaf.num_entries();
         // Only store non-empty leaves
@@ -571,7 +571,7 @@ impl Deserializable for PartialSmt {
             inner_nodes.insert(idx, node);
         }
 
-        let num_entries = leaves.values().map(|leaf| leaf.num_entries()).sum();
+        let num_entries = leaves.values().map(SmtLeaf::num_entries).sum();
 
         let partial = Self { root, num_entries, leaves, inner_nodes };
         partial.validate()?;

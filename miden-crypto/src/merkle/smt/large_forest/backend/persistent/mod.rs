@@ -531,7 +531,7 @@ impl Backend for PersistentBackend {
         let lineage_data = updates_with_batch
             .into_par_iter()
             .map(|(lineage, ops, new_meta, batch)| {
-                let ops = ops.into_iter().map(|op| op.into()).collect();
+                let ops = ops.into_iter().map(Into::into).collect();
                 let (batch, reversion, tree_data) =
                     self.update_tree_in_write_batch(batch, lineage, new_meta, version, ops)?;
                 let batch = self.write_metadata(batch, lineage, &tree_data)?;
@@ -596,23 +596,17 @@ impl Backend for PersistentBackend {
     ) -> Result<Vec<(LineageId, MutationSet)>> {
         // We first have to check our precondition that all lineages are valid, returning an error
         // as required by our contract if any lineage is unknown to the backend.
-        let updates = updates
+        let updates: Vec<_> = updates
             .into_iter()
             .map(|(lineage, ops)| {
                 if !self.lineages.contains_key(&lineage) {
                     return Err(BackendError::UnknownLineage(lineage));
                 }
-
-                Ok((lineage, ops))
+                let tree_data = self.lineages.get(&lineage).expect("Known to exist").clone();
+                Ok((lineage, ops, tree_data))
             })
             .collect::<Result<Vec<_>>>()?;
         let lineage_count = updates.len();
-        let updates = updates
-            .into_iter()
-            .map(|(lineage, ops)| {
-                (lineage, ops, self.lineages.get(&lineage).expect("Known to exist").clone())
-            })
-            .collect::<Vec<_>>();
 
         // We want to update all trees as part of an atomic update to the backing database, but we
         // also want to do this in parallel. As we cannot share a transaction directly, we instead
@@ -629,7 +623,7 @@ impl Backend for PersistentBackend {
         let lineage_data = updates_with_batch
             .into_par_iter()
             .map(|(lineage, ops, tree_data, batch)| {
-                let ops = ops.into_iter().map(|op| op.into()).collect();
+                let ops = ops.into_iter().map(Into::into).collect();
                 let (batch, reversion, tree_data) =
                     self.update_tree_in_write_batch(batch, lineage, tree_data, new_version, ops)?;
                 let batch = self.write_metadata(batch, lineage, &tree_data)?;
@@ -1102,7 +1096,7 @@ impl PersistentBackend {
             let leaf_index = LeafIndex::from(leaf_pairs[0].0);
 
             let maybe_old_leaf = leaf_map.get(&leaf_index.position()).and_then(Option::as_ref);
-            let old_entry_count = maybe_old_leaf.map(|leaf| leaf.num_entries()).unwrap_or_default();
+            let old_entry_count = maybe_old_leaf.map(SmtLeaf::num_entries).unwrap_or_default();
 
             // Whenever we change a value in the current leaf, we have to store the _old_ version of
             // that value in our reversion pairs.
@@ -1237,7 +1231,7 @@ impl PersistentBackend {
         &self,
         keys: impl Iterator<Item = &'b LeafKey>,
     ) -> Result<Vec<Option<SmtLeaf>>> {
-        let bytes = keys.map(|k| k.to_bytes()).collect::<Vec<_>>();
+        let bytes = keys.map(Serializable::to_bytes).collect::<Vec<_>>();
         self.load_leaves_raw(bytes.iter())
     }
 

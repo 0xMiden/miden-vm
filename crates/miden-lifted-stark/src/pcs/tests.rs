@@ -46,7 +46,7 @@ fn run_pcs_case(params: &PcsParams, trees: Vec<TestTree>, seed: u64) -> Result<(
     let rng = &mut SmallRng::seed_from_u64(seed);
     let lmcs = test_lmcs();
 
-    let lde_height = trees[0].leaves().last().map(|m| m.height()).unwrap_or(0);
+    let lde_height = trees[0].leaves().last().map(Matrix::height).unwrap_or(0);
     let log_lde_height = log2_strict_u8(lde_height);
     let eval_points: [QuadFelt; 2] = [rng.sample(StandardUniform), rng.sample(StandardUniform)];
 

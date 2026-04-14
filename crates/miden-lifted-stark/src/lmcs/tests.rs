@@ -243,11 +243,11 @@ fn build_tree_alignment_modes() {
     }
 
     let rows_aligned = tree_aligned.aligned_rows(0);
-    let widths_a: Vec<usize> = rows_aligned.iter_rows().map(|r| r.len()).collect();
+    let widths_a: Vec<usize> = rows_aligned.iter_rows().map(<[Felt]>::len).collect();
     assert_eq!(widths_a, widths_aligned);
 
     let rows_unaligned = tree_unaligned.rows(0);
-    let widths_u: Vec<usize> = rows_unaligned.iter_rows().map(|r| r.len()).collect();
+    let widths_u: Vec<usize> = rows_unaligned.iter_rows().map(<[Felt]>::len).collect();
     assert_eq!(widths_u, widths_unaligned);
 
     let indices = [0usize, 1usize];

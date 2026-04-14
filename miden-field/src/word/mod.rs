@@ -6,6 +6,7 @@ use core::fmt::Display;
 use core::{
     cmp::Ordering,
     hash::{Hash, Hasher},
+    mem::size_of,
     ops::{Deref, DerefMut, Index, IndexMut, Range},
     slice,
 };
@@ -64,11 +65,11 @@ pub struct Word {
 const _: () = {
     assert!(Word::NUM_ELEMENTS == 4, "Word::NUM_ELEMENTS is assumed to be 4");
     assert!(Word::SERIALIZED_SIZE == 32, "Word::SERIALIZED_SIZE is assumed to be 32");
-    assert!(core::mem::size_of::<Word>() == Word::NUM_ELEMENTS * core::mem::size_of::<Felt>());
+    assert!(size_of::<Word>() == Word::NUM_ELEMENTS * size_of::<Felt>());
     assert!(core::mem::offset_of!(Word, a) == 0);
-    assert!(core::mem::offset_of!(Word, b) == core::mem::size_of::<Felt>());
-    assert!(core::mem::offset_of!(Word, c) == 2 * core::mem::size_of::<Felt>());
-    assert!(core::mem::offset_of!(Word, d) == 3 * core::mem::size_of::<Felt>());
+    assert!(core::mem::offset_of!(Word, b) == size_of::<Felt>());
+    assert!(core::mem::offset_of!(Word, c) == 2 * size_of::<Felt>());
+    assert!(core::mem::offset_of!(Word, d) == 3 * size_of::<Felt>());
 };
 
 impl core::fmt::Debug for Word {

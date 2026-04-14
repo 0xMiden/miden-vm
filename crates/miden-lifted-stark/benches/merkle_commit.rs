@@ -37,7 +37,7 @@ fn bench_merkle_commit(c: &mut Criterion) {
 
     for &log_max_height in LOG_HEIGHTS {
         let n_leaves = 1usize << log_max_height;
-        let group_name = format!("MerkleCommit/{}/goldilocks/poseidon2/{}", n_leaves, PARALLEL_STR);
+        let group_name = format!("MerkleCommit/{n_leaves}/goldilocks/poseidon2/{PARALLEL_STR}");
         let mut group = c.benchmark_group(&group_name);
         group.throughput(Throughput::Elements(total_elements(
             &generate_matrices_from_specs::<Felt>(RELATIVE_SPECS, log_max_height),

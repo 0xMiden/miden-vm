@@ -66,7 +66,7 @@ impl SecretKey {
         // once `k256` gets a new release with a version of the `rand` dependency matching ours
         use k256::elliptic_curve::rand_core::SeedableRng;
         let mut seed = [0_u8; 32];
-        rand::RngCore::fill_bytes(rng, &mut seed);
+        RngCore::fill_bytes(rng, &mut seed);
         let mut rng = rand_hc::Hc128Rng::from_seed(seed);
 
         let signing_key = SigningKey::random(&mut rng);
@@ -168,7 +168,7 @@ impl PublicKey {
         let signature_data = k256::ecdsa::Signature::from_scalars(*signature.r(), *signature.s())
             .map_err(|_| PublicKeyError::RecoveryFailed)?;
 
-        let verifying_key = k256::ecdsa::VerifyingKey::recover_from_prehash(
+        let verifying_key = VerifyingKey::recover_from_prehash(
             &message_digest,
             &signature_data,
             RecoveryId::from_byte(signature.v()).ok_or(PublicKeyError::RecoveryFailed)?,

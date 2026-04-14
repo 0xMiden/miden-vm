@@ -142,7 +142,7 @@ where
     }
 
     fn widths(&self) -> Vec<usize> {
-        self.leaves.iter().map(|m| m.width()).collect()
+        self.leaves.iter().map(Matrix::width).collect()
     }
 
     /// Prove a batch opening and stream it into a transcript channel.
@@ -214,7 +214,8 @@ where
         assert!(!leaves.is_empty(), "cannot commit empty batch");
         debug_assert!(alignment > 0, "alignment must be non-zero");
 
-        let leaves: Vec<M> = leaves.into_iter().map(|m| m.bit_reverse_rows()).collect();
+        let leaves: Vec<M> =
+            leaves.into_iter().map(BitReversibleMatrix::bit_reverse_rows).collect();
 
         // Build leaf hashes: absorb all matrix rows into sponge states, then squeeze.
         let leaf_digests: Vec<[PD::Value; DIGEST_ELEMS]> =
@@ -589,7 +590,7 @@ mod tests {
 
     /// Upsample matrix to exactly `target_height` rows via nearest-neighbor repetition.
     fn upsample_matrix<F: Clone + Send + Sync>(
-        matrix: &impl p3_matrix::Matrix<F>,
+        matrix: &impl Matrix<F>,
         target_height: usize,
     ) -> RowMajorMatrix<F> {
         let height = matrix.height();
@@ -614,9 +615,8 @@ mod tests {
         matrices: &[RowMajorMatrix<Felt>],
         sponge: &Sponge,
     ) -> Vec<[Felt; DIGEST]> {
-        let mut states = super::build_leaf_states_upsampled::<PackedFelt, PackedFelt, _, _, _, _>(
-            matrices, sponge,
-        );
+        let mut states =
+            build_leaf_states_upsampled::<PackedFelt, PackedFelt, _, _, _, _>(matrices, sponge);
         states.iter_mut().map(|s| sponge.squeeze(s)).collect()
     }
 

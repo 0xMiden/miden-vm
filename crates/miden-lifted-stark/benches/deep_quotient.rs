@@ -41,8 +41,7 @@ fn bench_deep_quotient(c: &mut Criterion) {
 
     for &log_lde_height in LOG_HEIGHTS {
         let n_leaves = 1usize << log_lde_height;
-        let group_name =
-            format!("DEEP_Quotient/{}/goldilocks/poseidon2/{}", n_leaves, PARALLEL_STR);
+        let group_name = format!("DEEP_Quotient/{n_leaves}/goldilocks/poseidon2/{PARALLEL_STR}");
         let mut group = c.benchmark_group(&group_name);
 
         // Generate matrices using canonical specs

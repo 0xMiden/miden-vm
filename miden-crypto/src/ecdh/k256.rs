@@ -117,7 +117,7 @@ impl EphemeralSecretKey {
         // once `k256` gets a new release with a version of the `rand` dependency matching ours
         use k256::elliptic_curve::rand_core::SeedableRng;
         let mut seed = Zeroizing::new([0_u8; 32]);
-        rand::RngCore::fill_bytes(rng, &mut *seed);
+        RngCore::fill_bytes(rng, &mut *seed);
         let mut rng = rand_hc::Hc128Rng::from_seed(*seed);
 
         let sk_e = k256::ecdh::EphemeralSecret::random(&mut rng);

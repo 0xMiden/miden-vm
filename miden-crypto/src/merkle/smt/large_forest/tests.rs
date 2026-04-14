@@ -1473,7 +1473,7 @@ fn truncate_retains_non_empty_lineages_in_non_empty_histories() {
         .add_version(rand_value(), 5, nodes.clone(), changed_keys.clone(), UNUSED_ENTRY_COUNT)
         .unwrap();
     history
-        .add_version(rand_value(), 8, nodes.clone(), changed_keys.clone(), UNUSED_ENTRY_COUNT)
+        .add_version(rand_value(), 8, nodes, changed_keys, UNUSED_ENTRY_COUNT)
         .unwrap();
     assert_eq!(history.num_versions(), 2);
 

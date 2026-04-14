@@ -92,7 +92,7 @@ pub fn generate_value<T: miden_crypto::rand::Randomizable + std::fmt::Debug + Cl
     seed: &mut [u8; 32],
 ) -> T {
     *seed = prng_array(*seed);
-    let value: [T; 1] = miden_crypto::rand::test_utils::prng_array(*seed);
+    let value: [T; 1] = prng_array(*seed);
     value[0].clone()
 }
 

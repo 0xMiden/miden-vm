@@ -130,17 +130,14 @@ pub fn arbitrary_batch() -> impl Strategy<Value = SmtUpdateBatch> {
 }
 
 /// Builds a reference [`Smt`] by applying `initial` to an empty tree.
-pub fn build_tree(initial: SmtUpdateBatch) -> core::result::Result<Smt, TestCaseError> {
+pub fn build_tree(initial: SmtUpdateBatch) -> Result<Smt, TestCaseError> {
     let mut tree = Smt::new();
     apply_batch(&mut tree, initial)?;
     Ok(tree)
 }
 
 /// Applies a batch to the provided reference [`Smt`].
-pub fn apply_batch(
-    tree: &mut Smt,
-    batch: SmtUpdateBatch,
-) -> core::result::Result<(), TestCaseError> {
+pub fn apply_batch(tree: &mut Smt, batch: SmtUpdateBatch) -> Result<(), TestCaseError> {
     let mutations = tree
         .compute_mutations(batch.consume().into_iter().map(Into::<(Word, Word)>::into))
         .map_err(to_fail)?;
@@ -168,7 +165,7 @@ pub fn sorted_tree_entries(tree: &Smt) -> Vec<TreeEntry> {
 pub fn sorted_forest_entries<B: Backend>(
     forest: &LargeSmtForest<B>,
     tree: TreeId,
-) -> core::result::Result<Vec<TreeEntry>, TestCaseError> {
+) -> Result<Vec<TreeEntry>, TestCaseError> {
     let mut entries = forest
         .entries(tree)
         .map_err(to_fail)?
@@ -189,7 +186,7 @@ pub fn assert_tree_queries_match<B: Backend>(
     reference: &Smt,
     sample_keys: &[Word],
     assert_openings: bool,
-) -> core::result::Result<(), TestCaseError> {
+) -> Result<(), TestCaseError> {
     let forest_entries = sorted_forest_entries(forest, tree_id)?;
     let reference_entries = sorted_tree_entries(reference);
     let reference_entry_count = reference_entries.len();
@@ -214,7 +211,7 @@ pub fn assert_lineage_metadata<B: Backend>(
     forest: &LargeSmtForest<B>,
     lineage: LineageId,
     versions: &[(VersionId, Word)],
-) -> core::result::Result<(), TestCaseError> {
+) -> Result<(), TestCaseError> {
     let (latest_version, latest_root) =
         versions.last().copied().expect("lineage must be non-empty");
 

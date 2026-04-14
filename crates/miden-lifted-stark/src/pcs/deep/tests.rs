@@ -52,7 +52,7 @@ fn deep_quotient_end_to_end() {
     let mut prover_channel = prover_channel_with_commitment(&commitment);
     let trace_trees: &[&_] = &[&tree];
     let deep_poly = DeepPoly::from_trees::<BaseLmcs, _, 2, _>(
-        &params,
+        params,
         trace_trees,
         [z1, z2],
         log_blowup,
@@ -71,7 +71,7 @@ fn deep_quotient_end_to_end() {
     // Step 4: Verifier constructs DeepOracle with same transcript state
     let mut verifier_channel = verifier_channel_with_commitment(&transcript, &commitment);
     let (deep_oracle, _evals) =
-        DeepOracle::new(&params, &[z1, z2], commitments, log_lde_height, &mut verifier_channel)
+        DeepOracle::new(params, &[z1, z2], commitments, log_lde_height, &mut verifier_channel)
             .expect("DeepOracle construction should succeed");
 
     // Step 5: Verify at multiple query tree indices (proofs are read from transcript)

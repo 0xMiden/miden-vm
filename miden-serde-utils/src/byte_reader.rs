@@ -308,7 +308,7 @@ pub struct ReadAdapter<'a> {
     //
     // By default we attempt to satisfy reads from `reader` directly, but that is not always
     // possible.
-    buf: alloc::vec::Vec<u8>,
+    buf: Vec<u8>,
     // The position in `buf` at which we should start reading the next byte, when `buf` is
     // non-empty.
     pos: usize,
@@ -913,6 +913,7 @@ impl<R: ByteReader> ByteReader for BudgetedReader<R> {
 
 #[cfg(all(test, feature = "std"))]
 mod tests {
+    use core::mem::size_of;
     use std::io::Cursor;
 
     use super::*;
@@ -964,7 +965,7 @@ mod tests {
         const VALUE: usize = 2048;
 
         // Write VALUE to storage
-        let mut cursor = Cursor::new([0; core::mem::size_of::<usize>()]);
+        let mut cursor = Cursor::new([0; size_of::<usize>()]);
         cursor.write_usize(VALUE);
 
         // Read VALUE from storage
@@ -1047,7 +1048,7 @@ mod tests {
         // reading STR_BYTES, so the total size of our adapter's buffer should be
         // 496 + STR_BYTES.len() + size_of::<u32>();
         assert_eq!(reader.read_slice(STR_BYTES.len()).unwrap(), STR_BYTES);
-        assert_eq!(reader.buf.len(), 496 + STR_BYTES.len() + core::mem::size_of::<u32>());
+        assert_eq!(reader.buf.len(), 496 + STR_BYTES.len() + size_of::<u32>());
         // We haven't read the u32 yet
         assert_eq!(reader.pos, 509);
         assert_eq!(reader.read_u32().unwrap(), 0xbeef);
@@ -1361,7 +1362,7 @@ mod tests {
         // Serialized: 1 byte for u8 + 8 bytes for u64 = 9 bytes
         // In-memory: 8 bytes for u8 (with 7 bytes padding) + 8 bytes for u64 = 16 bytes
         assert_eq!(<(u8, u64)>::min_serialized_size(), 9);
-        assert_eq!(core::mem::size_of::<(u8, u64)>(), 16);
+        assert_eq!(size_of::<(u8, u64)>(), 16);
 
         // Verify budget calculation uses 9, not 16
         let mut data = Vec::new();

@@ -14,6 +14,7 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
+use core::mem::size_of;
 
 // ERROR
 // ================================================================================================
@@ -36,8 +37,8 @@ impl core::fmt::Display for DeserializationError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::UnexpectedEOF => write!(f, "unexpected end of file"),
-            Self::InvalidValue(msg) => write!(f, "invalid value: {}", msg),
-            Self::UnknownError(msg) => write!(f, "unknown error: {}", msg),
+            Self::InvalidValue(msg) => write!(f, "invalid value: {msg}"),
+            Self::UnknownError(msg) => write!(f, "unknown error: {msg}"),
         }
     }
 }
@@ -222,7 +223,7 @@ impl Serializable for u8 {
     }
 
     fn get_size_hint(&self) -> usize {
-        core::mem::size_of::<u8>()
+        size_of::<u8>()
     }
 }
 
@@ -232,7 +233,7 @@ impl Serializable for u16 {
     }
 
     fn get_size_hint(&self) -> usize {
-        core::mem::size_of::<u16>()
+        size_of::<u16>()
     }
 }
 
@@ -242,7 +243,7 @@ impl Serializable for u32 {
     }
 
     fn get_size_hint(&self) -> usize {
-        core::mem::size_of::<u32>()
+        size_of::<u32>()
     }
 }
 
@@ -252,7 +253,7 @@ impl Serializable for u64 {
     }
 
     fn get_size_hint(&self) -> usize {
-        core::mem::size_of::<u64>()
+        size_of::<u64>()
     }
 }
 
@@ -262,7 +263,7 @@ impl Serializable for u128 {
     }
 
     fn get_size_hint(&self) -> usize {
-        core::mem::size_of::<u128>()
+        size_of::<u128>()
     }
 }
 
@@ -288,7 +289,7 @@ impl<T: Serializable> Serializable for Option<T> {
     }
 
     fn get_size_hint(&self) -> usize {
-        core::mem::size_of::<bool>() + self.as_ref().map(|value| value.get_size_hint()).unwrap_or(0)
+        size_of::<bool>() + self.as_ref().map(Serializable::get_size_hint).unwrap_or(0)
     }
 }
 
@@ -429,7 +430,7 @@ pub trait Deserializable: Sized {
     /// Override this method for types where the serialized representation is smaller than
     /// the in-memory representation to allow more elements to be deserialized.
     fn min_serialized_size() -> usize {
-        core::mem::size_of::<Self>()
+        size_of::<Self>()
     }
 
     // PROVIDED METHODS
@@ -741,7 +742,7 @@ impl Serializable for p3_goldilocks::Goldilocks {
     }
 
     fn get_size_hint(&self) -> usize {
-        core::mem::size_of::<u64>()
+        size_of::<u64>()
     }
 }
 
@@ -752,8 +753,7 @@ impl Deserializable for p3_goldilocks::Goldilocks {
         let value = source.read_u64()?;
         Self::from_canonical_checked(value).ok_or_else(|| {
             DeserializationError::InvalidValue(format!(
-                "value {} is not a valid Goldilocks field element",
-                value
+                "value {value} is not a valid Goldilocks field element"
             ))
         })
     }

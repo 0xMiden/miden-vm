@@ -103,7 +103,7 @@ impl SmtUpdateBatch {
             .rev()
             .filter(|o| seen_keys.insert(o.key()))
             .collect::<Vec<_>>();
-        ops.sort_by_key(|o| o.key());
+        ops.sort_by_key(ForestOperation::key);
         ops
     }
 }
@@ -254,7 +254,7 @@ mod test {
 
         // If we then consume the batch, we should have the operations ordered by their key.
         let ops = batch.consume();
-        assert!(ops.is_sorted_by_key(|o| o.key()));
+        assert!(ops.is_sorted_by_key(ForestOperation::key));
 
         // Let's now make two additional operations with keys that overlay with keys from the first
         // three...
@@ -274,7 +274,7 @@ mod test {
         let ops = batch.consume();
 
         assert_eq!(ops.len(), 3);
-        assert!(ops.is_sorted_by_key(|o| o.key()));
+        assert!(ops.is_sorted_by_key(ForestOperation::key));
 
         assert!(ops.contains(&o3));
         assert!(ops.contains(&o4));
@@ -307,11 +307,11 @@ mod test {
         assert_eq!(ops.len(), 2);
 
         let t1_ops = ops.get(&t1_lineage).unwrap();
-        assert!(t1_ops.is_sorted_by_key(|o| o.key()));
+        assert!(t1_ops.is_sorted_by_key(ForestOperation::key));
         assert_eq!(t1_ops.iter().unique_by(|o| o.key()).count(), 2);
 
         let t2_ops = ops.get(&t2_lineage).unwrap();
-        assert!(t2_ops.is_sorted_by_key(|o| o.key()));
+        assert!(t2_ops.is_sorted_by_key(ForestOperation::key));
         assert_eq!(t2_ops.iter().unique_by(|o| o.key()).count(), 2);
     }
 }

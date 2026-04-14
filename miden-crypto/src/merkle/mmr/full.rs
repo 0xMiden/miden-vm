@@ -200,7 +200,7 @@ impl Mmr {
 
         let peaks: Vec<Word> = TreeSizeIterator::new(forest)
             .rev()
-            .map(|tree| tree.num_nodes())
+            .map(Forest::num_nodes)
             .scan(0, |offset, el| {
                 *offset += el;
                 Some(*offset)

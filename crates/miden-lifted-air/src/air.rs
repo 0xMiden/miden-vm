@@ -31,7 +31,7 @@ use thiserror::Error;
 use crate::{
     LiftedAirBuilder,
     auxiliary::{ReducedAuxValues, ReductionError, VarLenPublicInputs},
-    symbolic::{AirLayout, SymbolicAirBuilder, SymbolicExpressionExt},
+    symbolic::{AirLayout, SymbolicAirBuilder, SymbolicExpression, SymbolicExpressionExt},
 };
 
 /// Super-trait for AIR definitions used by the lifted STARK prover/verifier.
@@ -65,7 +65,7 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
             return None;
         }
 
-        let max_period = cols.iter().map(|col| col.len()).max()?;
+        let max_period = cols.iter().map(Vec::len).max()?;
         let num_cols = cols.len();
 
         let mut values = Vec::with_capacity(max_period * num_cols);
@@ -231,16 +231,17 @@ pub trait LiftedAir<F: Field, EF>: Sync + BaseAir<F> {
         let mut builder = SymbolicAirBuilder::<F>::new(self.air_layout());
         self.eval(&mut builder);
 
-        let base_degree = builder
-            .base_constraints()
-            .iter()
-            .map(|c| c.degree_multiple())
-            .max()
-            .unwrap_or(0);
+        let base_degree_multiple =
+            |constraint: &SymbolicExpression<F>| constraint.degree_multiple();
+        let ext_degree_multiple =
+            |constraint: &SymbolicExpressionExt<F, F>| constraint.degree_multiple();
+
+        let base_degree =
+            builder.base_constraints().iter().map(base_degree_multiple).max().unwrap_or(0);
         let ext_degree = builder
             .extension_constraints()
             .iter()
-            .map(|c: &SymbolicExpressionExt<F, F>| c.degree_multiple())
+            .map(ext_degree_multiple)
             .max()
             .unwrap_or(0);
         let constraint_degree = base_degree.max(ext_degree).max(2);

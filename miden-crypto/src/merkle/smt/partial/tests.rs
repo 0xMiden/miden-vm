@@ -643,7 +643,7 @@ fn partial_smt_deserialize_invalid_leaf() {
     // Tamper with leaf value data (after position).
     // Byte position to flip.
     let leaf_value_offset = 32 + 8 + 8 + 10;
-    let mut tampered_bytes = bytes.clone();
+    let mut tampered_bytes = bytes;
     // Flip a byte in the leaf value data to corrupt it.
     tampered_bytes[leaf_value_offset] ^= 0xff;
 

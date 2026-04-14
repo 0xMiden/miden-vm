@@ -629,9 +629,7 @@ fn test_constructors() -> Result<(), MerkleError> {
         assert_eq!(smt.open(&LeafIndex::<DEPTH>::new(key).unwrap()).path, value_path.path);
         assert!(
             store.has_path(smt.root(), index),
-            "path for key {} at depth {} must exist",
-            key,
-            DEPTH
+            "path for key {key} at depth {DEPTH} must exist"
         );
     }
 
@@ -663,15 +661,11 @@ fn test_constructors() -> Result<(), MerkleError> {
         assert_eq!(pmt.get_path(index)?, value_path1.path);
         assert!(
             store1.has_path(pmt.root(), index),
-            "path for key {} at depth {} must exist in store1",
-            key,
-            d
+            "path for key {key} at depth {d} must exist in store1"
         );
         assert!(
             store2.has_path(pmt.root(), index),
-            "path for key {} at depth {} must exist in store2",
-            key,
-            d
+            "path for key {key} at depth {d} must exist in store2"
         );
     }
 
@@ -943,7 +937,7 @@ fn check_mstore_subtree(store: &MerkleStore, subtree: &MerkleTree) {
 
         let path2 = subtree.get_path(index).unwrap();
         assert_eq!(path1.path, path2);
-        assert!(store.has_path(subtree.root(), index), "path for leaf {} must exist", i);
+        assert!(store.has_path(subtree.root(), index), "path for leaf {i} must exist");
     }
 }
 

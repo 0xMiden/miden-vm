@@ -262,7 +262,7 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
                 pairs_at_index.fold(self.get_leaf(&key), |acc, (k, v)| {
                     // Most of the time `pairs_at_index` should only contain a single entry (or
                     // none at all), as multi-leaves should be really rare.
-                    let existing_leaf = acc.clone();
+                    let existing_leaf = acc;
                     self.construct_prospective_leaf(existing_leaf, k, v)
                         .expect("current leaf should be valid")
                 })

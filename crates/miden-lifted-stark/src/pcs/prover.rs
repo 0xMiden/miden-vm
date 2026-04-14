@@ -59,7 +59,7 @@ pub fn open_with_channel<F, EF, L, M, Ch, const N: usize>(
     // ─────────────────────────────────────────────────────────────────────────
     let deep_poly = info_span!("DEEP quotient").in_scope(|| {
         DeepPoly::from_trees::<L, M, N, Ch>(
-            &params.deep,
+            params.deep,
             trace_trees,
             eval_points,
             params.fri.log_blowup,

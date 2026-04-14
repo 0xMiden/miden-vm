@@ -53,7 +53,7 @@ impl<EF> DeepPoly<EF> {
     /// Preconditions: `eval_points` must be distinct and lie outside the trace subgroup `H`
     /// and LDE evaluation coset `gK`. The outer protocol is expected to enforce this.
     pub fn from_trees<L, M, const N: usize, Ch>(
-        params: &DeepParams,
+        params: DeepParams,
         trace_trees: &[&L::Tree<M>],
         eval_points: [EF; N],
         log_blowup: u8,
@@ -107,7 +107,7 @@ impl<EF> DeepPoly<EF> {
     /// Implementation note: we fuse a sign change into the per-column coefficient stream
     /// so reduction and quotient assembly can share a single traversal over the domain.
     pub fn from_evals<L, M, const N: usize, Ch>(
-        params: &DeepParams,
+        params: DeepParams,
         trace_trees: &[&L::Tree<M>],
         batched_evals: RowList<FieldArray<EF, N>>,
         quotient: &PointQuotients<L::F, EF, N>,
@@ -165,7 +165,7 @@ impl<EF> DeepPoly<EF> {
         let point_quotient = &quotient.point_quotient;
         let n = point_quotient.len();
 
-        let group_sizes: Vec<usize> = matrices_groups.iter().map(|g| g.len()).collect();
+        let group_sizes: Vec<usize> = matrices_groups.iter().map(Vec::len).collect();
         let widths: Vec<usize> =
             matrices_groups.iter().flat_map(|g| g.iter().map(|m| m.width())).collect();
 

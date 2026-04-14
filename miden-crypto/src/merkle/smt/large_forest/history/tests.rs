@@ -37,7 +37,7 @@ fn roots() -> Result<()> {
     let root_1: Word = rng.value();
     let root_2: Word = rng.value();
     history.add_version(root_1, 0, nodes.clone(), changed_keys.clone(), UNUSED_ENTRY_COUNT)?;
-    history.add_version(root_2, 1, nodes.clone(), changed_keys.clone(), UNUSED_ENTRY_COUNT)?;
+    history.add_version(root_2, 1, nodes, changed_keys, UNUSED_ENTRY_COUNT)?;
 
     // We should be able to get all the roots.
     let roots = history.roots().collect::<Vec<_>>();
@@ -91,13 +91,7 @@ fn find_latest_corresponding_version() -> Result<()> {
         changed_keys.clone(),
         UNUSED_ENTRY_COUNT,
     )?;
-    history.add_version(
-        rng.value(),
-        v5,
-        nodes.clone(),
-        changed_keys.clone(),
-        UNUSED_ENTRY_COUNT,
-    )?;
+    history.add_version(rng.value(), v5, nodes, changed_keys, UNUSED_ENTRY_COUNT)?;
 
     // When we query for a version that is older than the oldest in the history we should get an
     // error.
@@ -162,7 +156,7 @@ fn add_version() -> Result<()> {
     // If we try and add a version with a non-monotonic version number, we should see an error.
     assert!(
         history
-            .add_version(root_3, id_1, nodes, changed_keys.clone(), UNUSED_ENTRY_COUNT)
+            .add_version(root_3, id_1, nodes, changed_keys, UNUSED_ENTRY_COUNT)
             .is_err()
     );
 
@@ -235,7 +229,7 @@ fn truncate() -> Result<()> {
 
     let root_4: Word = rng.value();
     let id_4 = 20;
-    history.add_version(root_4, id_4, nodes.clone(), changed_keys.clone(), UNUSED_ENTRY_COUNT)?;
+    history.add_version(root_4, id_4, nodes, changed_keys, UNUSED_ENTRY_COUNT)?;
 
     assert_eq!(history.num_versions(), 4);
 
@@ -279,7 +273,7 @@ fn clear() -> Result<()> {
 
     let root_2: Word = rng.value();
     let id_2 = 1;
-    history.add_version(root_2, id_2, nodes.clone(), changed_keys.clone(), UNUSED_ENTRY_COUNT)?;
+    history.add_version(root_2, id_2, nodes, changed_keys, UNUSED_ENTRY_COUNT)?;
 
     assert_eq!(history.num_versions(), 2);
 

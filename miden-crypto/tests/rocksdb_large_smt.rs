@@ -209,7 +209,7 @@ fn rocksdb_load_with_root_mismatch_returns_error() {
             assert_eq!(expected, wrong_root);
             assert_eq!(actual, actual_root);
         },
-        other => panic!("Expected RootMismatch error, got {:?}", other),
+        other => panic!("Expected RootMismatch error, got {other:?}"),
     }
 }
 
@@ -250,7 +250,7 @@ fn rocksdb_new_fails_on_non_empty_storage() {
     assert!(result.is_err(), "new() should fail on non-empty storage");
     match result.unwrap_err() {
         LargeSmtError::StorageNotEmpty => {},
-        other => panic!("Expected StorageNotEmpty error, got {:?}", other),
+        other => panic!("Expected StorageNotEmpty error, got {other:?}"),
     }
 }
 

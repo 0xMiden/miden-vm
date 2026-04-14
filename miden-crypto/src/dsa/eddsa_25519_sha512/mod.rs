@@ -53,7 +53,7 @@ impl SecretKey {
     /// Generates a new secret key using RNG.
     pub fn with_rng<R: CryptoRng + RngCore>(rng: &mut R) -> Self {
         let mut seed = [0u8; SECRET_KEY_BYTES];
-        rand::RngCore::fill_bytes(rng, &mut seed);
+        RngCore::fill_bytes(rng, &mut seed);
 
         let inner = ed25519_dalek::SigningKey::from_bytes(&seed);
 

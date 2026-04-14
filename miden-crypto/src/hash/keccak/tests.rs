@@ -39,7 +39,7 @@ proptest! {
         let expected = Keccak256::hash(&concatenated);
 
         // Test with the original iterator of slices
-        let actual = Keccak256::hash_iter(slices.iter().map(|v| v.as_slice()));
+        let actual = Keccak256::hash_iter(slices.iter().map(Vec::as_slice));
         assert_eq!(expected, actual);
 
         // Test with empty slices list (should produce hash of empty string)

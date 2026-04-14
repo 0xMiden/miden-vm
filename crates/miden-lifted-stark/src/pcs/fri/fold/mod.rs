@@ -70,7 +70,7 @@ impl FriFold {
     /// `f(β)` exactly.
     #[inline]
     pub fn fold_evals<F: TwoAdicField, EF: ExtensionField<F>>(
-        &self,
+        self,
         evals: &[EF],
         s_inv: F,
         beta: EF,
@@ -86,7 +86,7 @@ impl FriFold {
     /// Packed (SIMD) version of `fold_evals`.
     #[inline]
     fn fold_evals_packed<F: TwoAdicField, EF: ExtensionField<F>>(
-        &self,
+        self,
         evals: &[EF::ExtensionPacking],
         s_inv: F::Packing,
         beta: EF,
@@ -113,7 +113,7 @@ impl FriFold {
     ///
     /// Automatically dispatches to scalar or packed implementation based on matrix size.
     pub fn fold_matrix<F: TwoAdicField, EF: ExtensionField<F>>(
-        &self,
+        self,
         input: RowMajorMatrixView<'_, EF>,
         s_invs: &[F],
         beta: EF,
@@ -140,7 +140,7 @@ impl FriFold {
     }
 
     fn fold_matrix_packed_impl<const ARITY: usize, F, EF>(
-        &self,
+        self,
         input: RowMajorMatrixView<'_, EF>,
         s_invs: &[F],
         beta: EF,
@@ -215,7 +215,7 @@ pub mod tests {
     ///
     /// Generates a random polynomial, computes evaluations on a coset using NaiveDft,
     /// then verifies fold_evals correctly recovers f(β).
-    fn test_fold_evals_naive_dft(fold: &FriFold) {
+    fn test_fold_evals_naive_dft(fold: FriFold) {
         use p3_dft::{NaiveDft, TwoAdicSubgroupDft};
 
         let mut rng = SmallRng::seed_from_u64(42);
@@ -249,7 +249,7 @@ pub mod tests {
     ///
     /// Creates a random polynomial of degree `arity - 1`, evaluates it on a coset
     /// of size `arity`, then verifies that `fold_evals` correctly recovers `f(β)`.
-    fn test_fold_correctness<Base, Ext>(fold: &FriFold)
+    fn test_fold_correctness<Base, Ext>(fold: FriFold)
     where
         Base: TwoAdicField,
         Ext: ExtensionField<Base>,
@@ -287,7 +287,7 @@ pub mod tests {
     ///
     /// Creates a matrix large enough to trigger the packed path, then verifies
     /// the result matches row-by-row scalar `fold_evals` computation.
-    fn test_fold_matrix_scalar_packed_equivalence(fold: &FriFold) {
+    fn test_fold_matrix_scalar_packed_equivalence(fold: FriFold) {
         let rng = &mut SmallRng::seed_from_u64(42);
         let arity = fold.arity();
 
@@ -300,7 +300,7 @@ pub mod tests {
         // Generate random coset generators and their inverses
         let s_values: Vec<Felt> =
             (0..height).map(|_| rng.sample::<Felt, _>(StandardUniform)).collect();
-        let s_invs: Vec<Felt> = s_values.iter().map(|s| s.inverse()).collect();
+        let s_invs: Vec<Felt> = s_values.iter().map(Field::inverse).collect();
 
         let beta: QuadFelt = rng.sample(StandardUniform);
 
@@ -321,7 +321,7 @@ pub mod tests {
     ///
     /// After folding a degree-d polynomial, the result should have degree d/arity.
     /// Verifies by checking that high coefficients are zero after IDFT.
-    fn test_folding_preserves_low_degree(fold: &FriFold) {
+    fn test_folding_preserves_low_degree(fold: FriFold) {
         let rng = &mut SmallRng::seed_from_u64(42);
         let arity = fold.arity();
         let log_arity = fold.log_arity() as usize;
@@ -365,37 +365,36 @@ pub mod tests {
             assert_eq!(
                 *coeff,
                 QuadFelt::ZERO,
-                "Arity {arity}: High coefficient c[{i}] should be zero but was {:?}",
-                coeff
+                "Arity {arity}: High coefficient c[{i}] should be zero but was {coeff:?}"
             );
         }
     }
 
     #[test]
     fn test_fold() {
-        test_fold_correctness::<Felt, QuadFelt>(&FRI_FOLD_ARITY_2);
-        test_fold_correctness::<Felt, QuadFelt>(&FRI_FOLD_ARITY_4);
-        test_fold_correctness::<Felt, QuadFelt>(&FRI_FOLD_ARITY_8);
+        test_fold_correctness::<Felt, QuadFelt>(FRI_FOLD_ARITY_2);
+        test_fold_correctness::<Felt, QuadFelt>(FRI_FOLD_ARITY_4);
+        test_fold_correctness::<Felt, QuadFelt>(FRI_FOLD_ARITY_8);
     }
 
     #[test]
     fn test_fold_evals_against_naive_dft() {
-        test_fold_evals_naive_dft(&FRI_FOLD_ARITY_2);
-        test_fold_evals_naive_dft(&FRI_FOLD_ARITY_4);
-        test_fold_evals_naive_dft(&FRI_FOLD_ARITY_8);
+        test_fold_evals_naive_dft(FRI_FOLD_ARITY_2);
+        test_fold_evals_naive_dft(FRI_FOLD_ARITY_4);
+        test_fold_evals_naive_dft(FRI_FOLD_ARITY_8);
     }
 
     #[test]
     fn test_fold_matrix() {
-        test_fold_matrix_scalar_packed_equivalence(&FRI_FOLD_ARITY_2);
-        test_fold_matrix_scalar_packed_equivalence(&FRI_FOLD_ARITY_4);
-        test_fold_matrix_scalar_packed_equivalence(&FRI_FOLD_ARITY_8);
+        test_fold_matrix_scalar_packed_equivalence(FRI_FOLD_ARITY_2);
+        test_fold_matrix_scalar_packed_equivalence(FRI_FOLD_ARITY_4);
+        test_fold_matrix_scalar_packed_equivalence(FRI_FOLD_ARITY_8);
     }
 
     #[test]
     fn test_fold_low_degree() {
-        test_folding_preserves_low_degree(&FRI_FOLD_ARITY_2);
-        test_folding_preserves_low_degree(&FRI_FOLD_ARITY_4);
-        test_folding_preserves_low_degree(&FRI_FOLD_ARITY_8);
+        test_folding_preserves_low_degree(FRI_FOLD_ARITY_2);
+        test_folding_preserves_low_degree(FRI_FOLD_ARITY_4);
+        test_folding_preserves_low_degree(FRI_FOLD_ARITY_8);
     }
 }

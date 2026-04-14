@@ -117,7 +117,7 @@ where
     ///
     /// Preconditions match `LmcsConfig::build_tree`; panics if `leaves` is empty.
     fn build_tree<M: BitReversibleMatrix<Self::F>>(&self, leaves: Vec<M>) -> Self::Tree<M::BitRev> {
-        let tree_height = leaves.last().map(|m| m.height()).unwrap_or(0);
+        let tree_height = leaves.last().map(Matrix::height).unwrap_or(0);
         let salt = RowMajorMatrix::rand(&mut *self.rng.borrow_mut(), tree_height, SALT);
         LiftedMerkleTree::build_with_alignment::<M, PF, PD, H, C, WIDTH>(
             &self.inner.sponge,
@@ -135,7 +135,7 @@ where
         &self,
         leaves: Vec<M>,
     ) -> Self::Tree<M::BitRev> {
-        let tree_height = leaves.last().map(|m| m.height()).unwrap_or(0);
+        let tree_height = leaves.last().map(Matrix::height).unwrap_or(0);
         let salt = RowMajorMatrix::rand(&mut *self.rng.borrow_mut(), tree_height, SALT);
         LiftedMerkleTree::build_with_alignment::<M, PF, PD, H, C, WIDTH>(
             &self.inner.sponge,

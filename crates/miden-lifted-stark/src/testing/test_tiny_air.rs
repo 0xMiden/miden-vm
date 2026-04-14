@@ -183,7 +183,7 @@ fn malformed_transcript_is_rejected() {
     .expect("baseline proof should verify");
 
     // Extra field element should cause rejection
-    let (mut fields, commitments) = output.proof.clone().into_parts();
+    let (mut fields, commitments) = output.proof.into_parts();
     fields.push(Felt::ONE);
     let bad_transcript = TranscriptData::new(fields, commitments);
 

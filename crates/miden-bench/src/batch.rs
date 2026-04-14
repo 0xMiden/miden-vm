@@ -289,8 +289,7 @@ pub(crate) fn run_batch_poseidon2(
     use p3_symmetric::PaddingFreeSponge;
 
     let (perm, _, compress) = gl::test_components();
-    let leaf =
-        PaddingFreeSponge::<_, { gl::WIDTH }, { gl::RATE }, { gl::DIGEST }>::new(perm.clone());
+    let leaf = PaddingFreeSponge::<_, { gl::WIDTH }, { gl::RATE }, { gl::DIGEST }>::new(perm);
     let config = batch_config!(
         gl::PackedFelt,
         gl::PackedFelt,

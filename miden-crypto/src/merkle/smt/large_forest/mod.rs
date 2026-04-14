@@ -487,7 +487,7 @@ impl<B: Backend> LargeSmtForest<B> {
     /// advances, with earlier items being roots from versions closer to the present. The current
     /// root of the lineage will thus always be the first item yielded by the iterator.
     pub fn lineage_roots(&self, lineage: LineageId) -> Option<impl Iterator<Item = RootValue>> {
-        self.lineage_data.get(&lineage).map(|d| d.roots())
+        self.lineage_data.get(&lineage).map(LineageData::roots)
     }
 
     /// Gets the value root of the newest tree in the provided `lineage`, if that lineage is in the

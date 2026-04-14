@@ -326,7 +326,7 @@ fn test_delete_entry() {
 
     let initial_entries = vec![(key1, value1), (key2, value2), (key3, value3)];
 
-    let mut smt = LargeSmt::<_>::with_entries(storage, initial_entries.clone()).unwrap();
+    let mut smt = LargeSmt::<_>::with_entries(storage, initial_entries).unwrap();
 
     let mutations = smt.compute_mutations(vec![(key2, EMPTY_WORD)]).unwrap();
     smt.apply_mutations(mutations).unwrap();
@@ -482,13 +482,13 @@ fn test_insert_batch_empty_tree() {
 
     let entries = vec![
         (
-            crate::Word::new([
+            Word::new([
                 Felt::new_unchecked(1),
                 Felt::new_unchecked(0),
                 Felt::new_unchecked(0),
                 Felt::new_unchecked(0),
             ]),
-            crate::Word::new([
+            Word::new([
                 Felt::new_unchecked(10),
                 Felt::new_unchecked(20),
                 Felt::new_unchecked(30),
@@ -496,13 +496,13 @@ fn test_insert_batch_empty_tree() {
             ]),
         ),
         (
-            crate::Word::new([
+            Word::new([
                 Felt::new_unchecked(2),
                 Felt::new_unchecked(0),
                 Felt::new_unchecked(0),
                 Felt::new_unchecked(0),
             ]),
-            crate::Word::new([
+            Word::new([
                 Felt::new_unchecked(11),
                 Felt::new_unchecked(22),
                 Felt::new_unchecked(33),
@@ -527,23 +527,23 @@ fn test_insert_batch_with_deletions() {
     let mut smt = LargeSmt::new(storage).unwrap();
 
     // Initial data
-    let key_1 = crate::Word::new([ONE, ONE, ONE, Felt::new_unchecked(1)]);
-    let key_2 = crate::Word::new([
+    let key_1 = Word::new([ONE, ONE, ONE, Felt::new_unchecked(1)]);
+    let key_2 = Word::new([
         Felt::new_unchecked(2),
         Felt::new_unchecked(2),
         Felt::new_unchecked(2),
         Felt::new_unchecked(2),
     ]);
-    let key_3 = crate::Word::new([
+    let key_3 = Word::new([
         Felt::new_unchecked(0),
         Felt::new_unchecked(0),
         Felt::new_unchecked(0),
         Felt::new_unchecked(3),
     ]);
 
-    let value_1 = crate::Word::new([ONE; Word::NUM_ELEMENTS]);
-    let value_2 = crate::Word::new([Felt::new_unchecked(2); Word::NUM_ELEMENTS]);
-    let value_3 = crate::Word::new([Felt::new_unchecked(3); Word::NUM_ELEMENTS]);
+    let value_1 = Word::new([ONE; Word::NUM_ELEMENTS]);
+    let value_2 = Word::new([Felt::new_unchecked(2); Word::NUM_ELEMENTS]);
+    let value_3 = Word::new([Felt::new_unchecked(3); Word::NUM_ELEMENTS]);
 
     smt.insert(key_1, value_1).unwrap();
     smt.insert(key_2, value_2).unwrap();
@@ -567,8 +567,8 @@ fn test_insert_batch_no_mutations() {
     let storage = MemoryStorage::new();
     let mut smt = LargeSmt::new(storage).unwrap();
 
-    let key_1 = crate::Word::new([ONE, ONE, ONE, Felt::new_unchecked(1)]);
-    let value_1 = crate::Word::new([ONE; Word::NUM_ELEMENTS]);
+    let key_1 = Word::new([ONE, ONE, ONE, Felt::new_unchecked(1)]);
+    let value_1 = Word::new([ONE; Word::NUM_ELEMENTS]);
 
     smt.insert(key_1, value_1).unwrap();
     let root_before = smt.root();
@@ -718,16 +718,14 @@ fn test_flat_layout_children_relationship() {
             let child_on_path = if is_right_child { right_child } else { left_child };
             assert_ne!(
                 child_on_path, empty_hash,
-                "Child on path should be non-empty at depth {}, value {} (on path to leaf {})",
-                depth, node_value, leaf_value
+                "Child on path should be non-empty at depth {depth}, value {node_value} (on path to leaf {leaf_value})"
             );
 
             // Verify the parent-child hash relationship
             let node_hash = Poseidon2::merge(&[left_child, right_child]);
             assert_eq!(
                 in_memory_nodes[memory_idx], node_hash,
-                "Stored hash at memory_idx {} should match computed hash from children at depth {}, value {}",
-                memory_idx, depth, node_value
+                "Stored hash at memory_idx {memory_idx} should match computed hash from children at depth {depth}, value {node_value}"
             );
         }
     }

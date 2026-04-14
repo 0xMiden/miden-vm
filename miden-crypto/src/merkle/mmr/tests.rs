@@ -411,7 +411,7 @@ fn test_is_valid_in_order_index() {
     // Forest with 4 leaves: valid indices are 1-7
     let forest_4 = Forest::new(0b0100).unwrap();
     for i in 1..=7 {
-        assert!(forest_4.is_valid_in_order_index(&idx(i)), "index {} should be valid", i);
+        assert!(forest_4.is_valid_in_order_index(&idx(i)), "index {i} should be valid");
     }
     assert!(!forest_4.is_valid_in_order_index(&idx(8)), "beyond bounds");
 
@@ -427,8 +427,7 @@ fn test_is_valid_in_order_index() {
     for i in 1..=7 {
         assert!(
             forest_7.is_valid_in_order_index(&idx(i)),
-            "index {} should be valid in first tree",
-            i
+            "index {i} should be valid in first tree"
         );
     }
 
@@ -439,8 +438,7 @@ fn test_is_valid_in_order_index() {
     for i in 9..=11 {
         assert!(
             forest_7.is_valid_in_order_index(&idx(i)),
-            "index {} should be valid in second tree",
-            i
+            "index {i} should be valid in second tree"
         );
     }
 
@@ -462,11 +460,11 @@ fn test_is_valid_in_order_index() {
     // Tree 2 (2 leaves): indices 9-11
     let forest_6 = Forest::new(0b0110).unwrap();
     for i in 1..=7 {
-        assert!(forest_6.is_valid_in_order_index(&idx(i)), "index {} should be valid", i);
+        assert!(forest_6.is_valid_in_order_index(&idx(i)), "index {i} should be valid");
     }
     assert!(!forest_6.is_valid_in_order_index(&idx(8)), "index 8 is a separator");
     for i in 9..=11 {
-        assert!(forest_6.is_valid_in_order_index(&idx(i)), "index {} should be valid", i);
+        assert!(forest_6.is_valid_in_order_index(&idx(i)), "index {i} should be valid");
     }
     assert!(!forest_6.is_valid_in_order_index(&idx(12)), "index 12 is beyond bounds");
 }
@@ -740,12 +738,12 @@ fn test_mmr_open() {
 fn test_mmr_open_older_version() {
     let mmr = Mmr::try_from_iter(LEAVES.iter().copied()).unwrap();
 
-    fn is_even(v: &usize) -> bool {
+    fn is_even(v: usize) -> bool {
         v & 1 == 0
     }
 
     // merkle path of a node is empty if there are no elements to pair with it
-    for pos in (0..mmr.forest().num_leaves()).filter(is_even) {
+    for pos in (0..mmr.forest().num_leaves()).filter(|&v| is_even(v)) {
         let forest = Forest::new(pos + 1).unwrap();
         let proof = mmr.open_at(pos, forest).unwrap();
         assert_eq!(proof.path().forest(), forest);
@@ -1039,7 +1037,7 @@ fn test_mmr_invariants() {
         );
 
         let expected_nodes: usize =
-            TreeSizeIterator::new(mmr.forest()).map(|tree| tree.num_nodes()).sum();
+            TreeSizeIterator::new(mmr.forest()).map(Forest::num_nodes).sum();
 
         assert_eq!(
             expected_nodes,
@@ -1376,7 +1374,7 @@ fn test_partial_mmr_update_single() {
 fn test_mmr_add_invalid_odd_leaf() {
     let mmr = Mmr::try_from_iter(LEAVES.iter().copied()).unwrap();
     let acc = mmr.peaks();
-    let mut partial: PartialMmr = acc.clone().into();
+    let mut partial: PartialMmr = acc.into();
 
     let empty = MerklePath::new(Vec::new());
 

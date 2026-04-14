@@ -387,24 +387,24 @@ impl<'history> HistoryView<'history> {
     /// Queries the value of a specific `key` in a leaf in the overlay, returning the value for that
     /// `key` if it has been changed, and [`None`] otherwise.
     #[must_use]
-    pub fn value(&self, key: &Word) -> Option<Word> {
+    pub fn value(self, key: &Word) -> Option<Word> {
         self.delta.changed_keys.get(key).cloned()
     }
 
     /// Returns `true` if the key is removed by this delta, and `false` otherwise.
     #[must_use]
-    pub fn is_key_removed(&self, key: &Word) -> bool {
+    pub fn is_key_removed(self, key: &Word) -> bool {
         self.delta.changed_keys.get(key).map(Word::is_empty).unwrap_or(false)
     }
 
     /// Returns an iterator which yields the entries that are added by this view.
-    pub fn changed_keys(&self) -> impl Iterator<Item = (Word, Word)> + 'history {
+    pub fn changed_keys(self) -> impl Iterator<Item = (Word, Word)> + 'history {
         self.delta.changed_keys.iter().map(|(k, v)| (*k, *v))
     }
 
     /// Returns the total number of entries in the tree at this historical version.
     #[must_use]
-    pub fn entry_count(&self) -> usize {
+    pub fn entry_count(self) -> usize {
         self.delta.entry_count
     }
 }

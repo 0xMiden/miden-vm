@@ -5,6 +5,7 @@ use core::{
     array, fmt,
     hash::{Hash, Hasher},
     iter::{Product, Sum},
+    mem::{align_of, size_of},
     ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
 };
 
@@ -118,7 +119,7 @@ impl Felt {
     /// Plonky3's Goldilocks implementation.
     #[inline]
     pub fn as_canonical_u64_ct(&self) -> u64 {
-        let raw = raw_felt_u64(self);
+        let raw = raw_felt_u64(*self);
         // Mirrors Goldilocks::as_canonical_u64: conditional subtraction of ORDER.
         // A single subtraction is sufficient for any u64 value since 2*ORDER > u64::MAX.
         let reduced = raw.wrapping_sub(Self::ORDER);
@@ -128,14 +129,14 @@ impl Felt {
 }
 
 #[inline]
-fn raw_felt_u64(value: &Felt) -> u64 {
+fn raw_felt_u64(value: Felt) -> u64 {
     const _: () = {
-        assert!(core::mem::size_of::<Felt>() == core::mem::size_of::<u64>());
-        assert!(core::mem::align_of::<Felt>() == core::mem::align_of::<u64>());
+        assert!(size_of::<Felt>() == size_of::<u64>());
+        assert!(align_of::<Felt>() == align_of::<u64>());
         assert!(2u128 * (Felt::ORDER as u128) > u64::MAX as u128);
     };
     // SAFETY: Felt is repr(transparent) over Goldilocks, which is repr(transparent) over u64.
-    unsafe { core::mem::transmute_copy(value) }
+    unsafe { core::mem::transmute_copy(&value) }
 }
 
 /// Reinterprets a `Felt` slice as `Goldilocks`.
@@ -635,7 +636,7 @@ impl Serializable for Felt {
     }
 
     fn get_size_hint(&self) -> usize {
-        core::mem::size_of::<u64>()
+        size_of::<u64>()
     }
 }
 

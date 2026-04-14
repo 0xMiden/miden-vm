@@ -1,5 +1,3 @@
-use alloc::vec::Vec;
-
 use data::{
     DETERMINISTIC_SIGNATURE, EXPECTED_SIG, EXPECTED_SIG_POLYS, NUM_TEST_VECTORS, SK_POLYS,
     SYNC_DATA_FOR_TEST_VECTOR,
@@ -62,8 +60,7 @@ fn test_signature_gen_reference_impl() {
         let signature = sk.sign_with_rng_testing(message, &mut rng_shake);
 
         // 3. compare against the expected signature
-        let sig_coef: Vec<i16> =
-            signature.sig_poly().coefficients.iter().map(|c| c.balanced_value()).collect();
+        let sig_coef = signature.sig_poly().to_balanced_values();
         assert_eq!(sig_coef, EXPECTED_SIG_POLYS[i]);
 
         // 4. compare the encoded signatures including the nonce
