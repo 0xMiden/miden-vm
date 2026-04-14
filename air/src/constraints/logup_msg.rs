@@ -247,8 +247,7 @@ pub enum MemoryMsg<E> {
     },
 }
 
-impl<E: PrimeCharacteristicRing + Clone> MemoryMsg<E> {
-}
+impl<E: PrimeCharacteristicRing + Clone> MemoryMsg<E> {}
 
 // BITWISE MESSAGE
 // ================================================================================================
@@ -276,8 +275,7 @@ impl<E: PrimeCharacteristicRing> BitwiseMsg<E> {
     }
 }
 
-impl<E: PrimeCharacteristicRing + Clone> BitwiseMsg<E> {
-}
+impl<E: PrimeCharacteristicRing + Clone> BitwiseMsg<E> {}
 
 // DECODER MESSAGES
 // ================================================================================================
@@ -307,8 +305,7 @@ pub enum BlockStackMsg<E> {
     },
 }
 
-impl<E: PrimeCharacteristicRing + Clone> BlockStackMsg<E> {
-}
+impl<E: PrimeCharacteristicRing + Clone> BlockStackMsg<E> {}
 
 /// Block hash queue message (7 elements):
 /// `[parent, child_hash[4], is_first_child, is_loop_body]`.
@@ -339,8 +336,7 @@ pub enum BlockHashMsg<E> {
     },
 }
 
-impl<E: PrimeCharacteristicRing + Clone> BlockHashMsg<E> {
-}
+impl<E: PrimeCharacteristicRing + Clone> BlockHashMsg<E> {}
 
 /// Op group table message (3 elements): `[batch_id, group_pos, group_value]`.
 #[derive(Clone)]
@@ -367,8 +363,7 @@ impl<E: PrimeCharacteristicRing + Clone> OpGroupMsg<E> {
 // STACK MESSAGE
 // ================================================================================================
 
-/// Stack overflow table message (3 elements): `[clk, val, prev]`.
-///
+// Stack overflow table message (3 elements): `[clk, val, prev]`.
 
 // KERNEL ROM MESSAGE
 // ================================================================================================
@@ -391,7 +386,6 @@ impl<E: PrimeCharacteristicRing + Clone> KernelRomMsg<E> {
     pub fn call(digest: [E; 4]) -> Self {
         Self { label: Self::CALL_LABEL, digest }
     }
-
 }
 
 // ACE MESSAGE
@@ -423,8 +417,7 @@ pub struct RangeMsg<E> {
     pub value: E,
 }
 
-impl<E: PrimeCharacteristicRing + Clone> RangeMsg<E> {
-}
+impl<E: PrimeCharacteristicRing + Clone> RangeMsg<E> {}
 
 // LOG-PRECOMPILE CAPACITY MESSAGE
 // ================================================================================================
@@ -443,8 +436,7 @@ impl<E: PrimeCharacteristicRing + Clone> LogCapacityMsg<E> {
 // SIBLING TABLE MESSAGE
 // ================================================================================================
 
-/// Sibling table message for Merkle path operations (sparse encoding).
-///
+// Sibling table message for Merkle path operations (sparse encoding).
 
 // ACE WIRING MESSAGE
 // ================================================================================================
@@ -462,8 +454,7 @@ pub struct AceWireMsg<E> {
     pub v1: E,
 }
 
-impl<E: PrimeCharacteristicRing + Clone> AceWireMsg<E> {
-}
+impl<E: PrimeCharacteristicRing + Clone> AceWireMsg<E> {}
 
 // CHIPLET RESPONSE MESSAGES
 // ================================================================================================
@@ -484,8 +475,7 @@ pub struct MemoryResponseMsg<E> {
     pub word: [E; 4],
 }
 
-impl<E: PrimeCharacteristicRing + Clone> MemoryResponseMsg<E> {
-}
+impl<E: PrimeCharacteristicRing + Clone> MemoryResponseMsg<E> {}
 
 /// Kernel ROM response message with a pre-computed (conditional) label expression.
 ///
@@ -497,8 +487,7 @@ pub struct KernelRomResponseMsg<E> {
     pub digest: [E; 4],
 }
 
-impl<E: PrimeCharacteristicRing + Clone> KernelRomResponseMsg<E> {
-}
+impl<E: PrimeCharacteristicRing + Clone> KernelRomResponseMsg<E> {}
 
 /// Bitwise chiplet response message with a pre-computed (conditional) label expression.
 ///
@@ -512,10 +501,7 @@ pub struct BitwiseResponseMsg<E> {
     pub z: E,
 }
 
-impl<E: PrimeCharacteristicRing + Clone> BitwiseResponseMsg<E> {
-}
-
-
+impl<E: PrimeCharacteristicRing + Clone> BitwiseResponseMsg<E> {}
 
 // LOOKUP MESSAGE IMPLEMENTATIONS
 // ================================================================================================
@@ -908,8 +894,7 @@ where
 
 // --- MemoryResponseElementMsg (BUS_CHIPLETS) -----------------------------------------------------
 
-/// Chiplet-side memory response for a **read-element** operation.
-///
+// Chiplet-side memory response for a **read-element** operation.
 
 // --- KernelRomResponse{Call,Init}Msg (BUS_CHIPLETS) ----------------------------------------------
 
@@ -973,4 +958,3 @@ where
         acc
     }
 }
-
