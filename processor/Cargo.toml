@@ -42,7 +42,7 @@ miden-utils-indexing.workspace = true
 # External dependencies
 itertools.workspace = true
 paste.workspace = true
-rayon = { version = "1.10", default-features = false }
+rayon = { workspace = true }
 tracing.workspace = true
 thiserror.workspace = true
 
@@ -50,7 +50,7 @@ thiserror.workspace = true
 miden-assembly = { workspace = true, features = ["testing"] }
 miden-utils-testing.workspace = true
 insta.workspace = true
-pretty_assertions = { version = "1.4" }
+pretty_assertions = { workspace = true }
 proptest.workspace = true
-rstest = { version = "0.26" }
+rstest = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }

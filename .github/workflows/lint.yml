@@ -24,6 +24,20 @@ jobs:
       - name: Check dependencies with cargo-deny
         run: cargo deny check
 
+  workspace-inheritance:
+    name: workspace inheritance on ubuntu-latest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Install cargo-binstall
+        uses: taiki-e/install-action@b51e10a30e12f8d30315761119b1445be295e8b6 # cargo-binstall
+      - name: Install workspace inheritance checker
+        run: cargo binstall --no-confirm cargo-workspace-inheritance-check@1.2.0
+      - name: Check workspace inheritance
+        run: cargo workspace-inheritance-check --promotion-failure
+
   clippy:
     name: clippy nightly on ubuntu-latest
     runs-on: ubuntu-latest

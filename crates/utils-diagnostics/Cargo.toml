@@ -20,7 +20,7 @@ std = ["miette/fancy-no-syscall", "miette/std", "miden-crypto/std", "miden-debug
 
 [dependencies]
 miden-debug-types.workspace = true
-miette = { package = "miden-miette", version = "8.0", default-features = false, features = [
+miette = { workspace = true, features = [
     "fancy-no-syscall",
     "derive",
 ] }

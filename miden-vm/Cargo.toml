@@ -79,24 +79,24 @@ miden-core-lib.workspace = true
 miden-verifier.workspace = true
 
 # External dependencies
-clap = { version = "4.5", features = ["derive"], optional = true }
-hex = { version = "0.4", optional = true }
+clap = { workspace = true, features = ["derive"], optional = true }
+hex = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 tracing.workspace = true
-tracing-subscriber = { version = "0.3", optional = true, features = ["std", "env-filter"] }
-tracing-forest = { version = "0.2", optional = true, features = ["ansi", "smallvec"] }
+tracing-subscriber = { workspace = true, features = ["std", "env-filter"], optional = true }
+tracing-forest = { workspace = true, features = ["ansi", "smallvec"], optional = true }
 
 [dev-dependencies]
-assert_cmd = { version = "2.1" }
-bincode = { version = "1.3" }
+assert_cmd = { workspace = true }
+bincode = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio"] }
-escargot = { version = "0.5" }
+escargot = { workspace = true }
 miden-processor = { workspace = true, features = ["testing"] }
 miden-utils-testing.workspace = true
-num-bigint = { version = "0.4" }
-predicates = { version = "3.1" }
-pretty_assertions = { version = "1.4" }
+num-bigint = { workspace = true }
+predicates = { workspace = true }
+pretty_assertions = { workspace = true }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
-rand_chacha = { version = "0.9" }
-walkdir = { version = "2.5" }
+rand_chacha = { workspace = true }
+walkdir = { workspace = true }

@@ -43,14 +43,14 @@ miden-utils-diagnostics.workspace = true
 midenc-hir-type = { workspace = true, features = ["serde"] }
 
 # External dependencies
-aho-corasick = { version = "1.1", default-features = false }
+aho-corasick = { workspace = true }
 env_logger = { workspace = true, optional = true }
-lalrpop-util = { version = "0.22", default-features = false }
+lalrpop-util = { workspace = true }
 log.workspace = true
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
-regex = { version = "1.12", default-features = false, features = ["unicode", "perf"] }
-semver = { version = "1.0", default-features = false }
+regex = { workspace = true, features = ["unicode", "perf"] }
+semver = { workspace = true }
 serde = { workspace = true, optional = true }
 smallvec.workspace = true
 thiserror.workspace = true
@@ -59,9 +59,9 @@ thiserror.workspace = true
 env_logger.workspace = true
 miden-test-serde-macros.workspace = true
 proptest.workspace = true
-pretty_assertions = "1.4"
+pretty_assertions = { workspace = true }
 serde_json = { workspace = true }
 
 [build-dependencies]
-lalrpop = { version = "0.22", default-features = false }
-rustc_version = "0.4"
+lalrpop = { workspace = true }
+rustc_version = { workspace = true }
