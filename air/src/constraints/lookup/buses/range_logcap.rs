@@ -6,14 +6,11 @@
 
 use core::array;
 
-use miden_core::field::PrimeCharacteristicRing;
-
 use crate::{
-    Felt, MainCols,
+    Felt,
     constraints::{
         logup_msg::{LogCapacityMsg, RangeMsg},
-        lookup::{LookupBatch, LookupBuilder, LookupColumn, LookupGroup},
-        op_flags::OpFlags,
+        lookup::{LookupBatch, LookupBuilder, LookupColumn, LookupGroup, buses::MainTraceContext},
     },
     trace::log_precompile::{HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE},
 };
@@ -21,27 +18,27 @@ use crate::{
 /// Emit the range stack + log-precompile capacity bus (M4).
 pub(in crate::constraints::lookup) fn emit_range_stack_and_log_capacity<LB>(
     builder: &mut LB,
-    local: &MainCols<LB::Var>,
-    next: &MainCols<LB::Var>,
+    ctx: &MainTraceContext<LB>,
 ) where
     LB: LookupBuilder<F = Felt>,
 {
+    let local = ctx.local;
+    let next = ctx.next;
+    let op_flags = &ctx.op_flags;
+
     let dec = &local.decoder;
     let stk_next = &next.stack;
-
-    // U32RC flag: op_bit6 · (1-op_bit5) · (1-op_bit4) — matches the legacy expression.
-    let op_bit4: LB::Expr = dec.op_bits[4].into();
-    let op_bit5: LB::Expr = dec.op_bits[5].into();
-    let op_bit6: LB::Expr = dec.op_bits[6].into();
-    let f_u32rc: LB::Expr = op_bit6 * (LB::Expr::ONE - op_bit5) * (LB::Expr::ONE - op_bit4);
-
-    // user_op_helpers[0..4] — first 4 of the 6 helper registers.
     let user_helpers = dec.user_op_helpers();
+
+    // u32-rangecheck gate and log-precompile gate come straight from the shared `OpFlags`.
+    let f_u32rc = op_flags.u32_rc_op();
+    let f_log_precompile = op_flags.log_precompile();
+
+    // U32RC helpers: first 4 of the 6 user_op_helpers. Kept as `[Var; 4]` (Copy) so the
+    // batch closure captures them without cloning.
     let helpers: [LB::Var; 4] = array::from_fn(|i| user_helpers[i]);
 
-    // log_precompile capacity add/remove pair.
-    let op_flags = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
-    let f_log_precompile = op_flags.log_precompile();
+    // LOGPRECOMPILE capacity add/remove payloads — also raw `[Var; 4]`.
     let cap_prev: [LB::Var; 4] = array::from_fn(|i| user_helpers[HELPER_CAP_PREV_RANGE.start + i]);
     let cap_next: [LB::Var; 4] = array::from_fn(|i| stk_next.get(STACK_CAP_NEXT_RANGE.start + i));
 

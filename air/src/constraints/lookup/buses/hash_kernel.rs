@@ -10,109 +10,95 @@
 //!    word reads (`f_ace_read`) from element reads used by EVAL rows (`f_ace_eval`). Both are
 //!    removed from the chiplets bus.
 //!
-//! Selector wiring mirrors [`super::wiring`]: `s_ctrl = chiplets[0]`, `s_perm = perm_seg`,
-//! virtual `s0 = 1 − s_ctrl − s_perm`, and `s1..s3 = chiplets[1..4]`.
+//! Per-chiplet gating flows through [`ChipletTraceContext::chiplet_active`]: the controller
+//! input gate is `chiplet_active.controller`, and the ACE row gate is `chiplet_active.ace`.
+//! Hasher sub-selectors, hasher state, `node_index`, and `mrupdate_id` all come from the
+//! typed [`local.controller()`](crate::constraints::columns::MainCols::controller) overlay.
 
 use core::array;
 
 use miden_core::field::PrimeCharacteristicRing;
 
 use crate::{
-    Felt, MainCols,
+    Felt,
     constraints::{
         logup_msg::{MemoryHeader, MemoryMsg, SiblingMsgBitOne, SiblingMsgBitZero},
-        lookup::{LookupBuilder, LookupColumn, LookupGroup},
+        lookup::{LookupBuilder, LookupColumn, LookupGroup, buses::ChipletTraceContext},
+        utils::BoolNot,
     },
-    trace::{
-        CHIPLETS_OFFSET,
-        chiplets::{
-            HASHER_MRUPDATE_ID_COL_IDX, HASHER_NODE_INDEX_COL_IDX, HASHER_SELECTOR_COL_RANGE,
-            HASHER_STATE_COL_RANGE, NUM_ACE_SELECTORS,
-            ace::{
-                ACE_INSTRUCTION_ID1_OFFSET, ACE_INSTRUCTION_ID2_OFFSET, CLK_IDX, CTX_IDX,
-                EVAL_OP_IDX, ID_1_IDX, ID_2_IDX, PTR_IDX, SELECTOR_BLOCK_IDX, V_0_0_IDX, V_0_1_IDX,
-                V_1_0_IDX, V_1_1_IDX,
-            },
-            memory::{MEMORY_READ_ELEMENT_LABEL, MEMORY_READ_WORD_LABEL},
-        },
+    trace::chiplets::{
+        ace::{ACE_INSTRUCTION_ID1_OFFSET, ACE_INSTRUCTION_ID2_OFFSET},
+        memory::{MEMORY_READ_ELEMENT_LABEL, MEMORY_READ_WORD_LABEL},
     },
 };
-
-// Chiplet-local column offsets (relative to `local.chiplets[]`).
-const S_START: usize = HASHER_SELECTOR_COL_RANGE.start - CHIPLETS_OFFSET;
-const H_START: usize = HASHER_STATE_COL_RANGE.start - CHIPLETS_OFFSET;
-const IDX_COL: usize = HASHER_NODE_INDEX_COL_IDX - CHIPLETS_OFFSET;
-const MRUPDATE_ID_COL: usize = HASHER_MRUPDATE_ID_COL_IDX - CHIPLETS_OFFSET;
 
 /// Emit the hash-kernel virtual table bus (C2).
 #[allow(clippy::too_many_lines)]
 pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
     builder: &mut LB,
-    local: &MainCols<LB::Var>,
-    next: &MainCols<LB::Var>,
+    ctx: &ChipletTraceContext<LB>,
 ) where
     LB: LookupBuilder<F = Felt>,
 {
-    // Controller flag: hasher responses come from controller rows only (`s_ctrl = 1`).
-    let controller_flag: LB::Expr = local.chiplets[0].into();
+    let local = ctx.local;
+    let next = ctx.next;
 
-    // Virtual non-hasher selector `s0 = 1 − s_ctrl − s_perm` and `s1..s3` for the ACE gate.
-    let s_ctrl: LB::Expr = local.chiplets[0].into();
-    let s_perm: LB::Expr = local.perm_seg.into();
-    let virtual_s0: LB::Expr = LB::Expr::ONE - s_ctrl - s_perm;
-    let s1: LB::Expr = local.chiplets[1].into();
-    let s2: LB::Expr = local.chiplets[2].into();
-    let s3: LB::Expr = local.chiplets[3].into();
+    // --- Sibling-table setup ---
 
-    // Hasher-internal sub-selectors (controller overlay `s0/s1/s2` at chiplets[S_START..+3]).
-    let hs0: LB::Expr = local.chiplets[S_START].into();
-    let hs1: LB::Expr = local.chiplets[S_START + 1].into();
-    let hs2: LB::Expr = local.chiplets[S_START + 2].into();
+    // Typed hasher-controller overlay: sub-selectors `s0/s1/s2`, state lanes, `node_index`,
+    // `mrupdate_id`. Next-row `node_index` for the direction-bit computation.
+    let ctrl = local.controller();
+    let ctrl_next = next.controller();
 
-    // Hasher state, node_index, mrupdate_id.
-    let h: [LB::Expr; 8] = array::from_fn(|i| local.chiplets[H_START + i].into());
-    let node_index: LB::Expr = local.chiplets[IDX_COL].into();
-    let node_index_next: LB::Expr = next.chiplets[IDX_COL].into();
-    let mrupdate_id: LB::Expr = local.chiplets[MRUPDATE_ID_COL].into();
+    let hs0: LB::Expr = ctrl.s0.into();
+    let hs1: LB::Expr = ctrl.s1.into();
+    let hs2: LB::Expr = ctrl.s2.into();
 
     // Sibling flags — on controller rows, `s0·s1 = 1` selects MU/MV input rows. The new
     // layout has dropped the old 32-row cycle row filter; all MU/MV input rows participate.
+    let controller_flag = ctx.chiplet_active.controller.clone();
     let f_mu_all: LB::Expr = controller_flag.clone() * hs0.clone() * hs1.clone() * hs2.clone();
-    let f_mv_all: LB::Expr = controller_flag * hs0 * hs1 * (LB::Expr::ONE - hs2);
+    let f_mv_all: LB::Expr = controller_flag * hs0 * hs1 * hs2.not();
 
-    // Direction bit b = node_index − 2·node_index_next.
+    // Direction bit `b = node_index − 2·node_index_next`.
+    let node_index: LB::Expr = ctrl.node_index.into();
+    let node_index_next: LB::Expr = ctrl_next.node_index.into();
     let bit: LB::Expr = node_index.clone() - node_index_next.double();
-    let one_minus_bit: LB::Expr = LB::Expr::ONE - bit.clone();
+    let one_minus_bit: LB::Expr = bit.not();
 
-    // sib_lo = h[0..4] (rate0), sib_hi = h[4..8] (rate1).
-    let sib_lo: [LB::Expr; 4] = array::from_fn(|i| h[i].clone());
-    let sib_hi: [LB::Expr; 4] = array::from_fn(|i| h[4 + i].clone());
+    // `sib_lo = h[0..4]` (rate0), `sib_hi = h[4..8]` (rate1).
+    let sib_lo: [LB::Expr; 4] = array::from_fn(|i| ctrl.state[i].into());
+    let sib_hi: [LB::Expr; 4] = array::from_fn(|i| ctrl.state[4 + i].into());
+    let mrupdate_id: LB::Expr = ctrl.mrupdate_id.into();
 
-    // ACE row gate and per-row flags.
-    let is_ace_row: LB::Expr = virtual_s0 * s1 * s2 * (LB::Expr::ONE - s3);
-    let block_sel: LB::Expr = local.chiplets[NUM_ACE_SELECTORS + SELECTOR_BLOCK_IDX].into();
-    let f_ace_read: LB::Expr = is_ace_row.clone() * (LB::Expr::ONE - block_sel.clone());
+    // --- ACE memory-read setup ---
+
+    // Typed ACE chiplet overlay.
+    let ace = local.ace();
+    let block_sel: LB::Expr = ace.s_block.into();
+
+    // ACE row gate comes from the shared `chiplet_active` snapshot; per-mode split by
+    // `block_sel`.
+    let is_ace_row = ctx.chiplet_active.ace.clone();
+    let f_ace_read: LB::Expr = is_ace_row.clone() * block_sel.not();
     let f_ace_eval: LB::Expr = is_ace_row * block_sel;
 
-    let ace_clk: LB::Expr = local.chiplets[NUM_ACE_SELECTORS + CLK_IDX].into();
-    let ace_ctx: LB::Expr = local.chiplets[NUM_ACE_SELECTORS + CTX_IDX].into();
-    let ace_ptr: LB::Expr = local.chiplets[NUM_ACE_SELECTORS + PTR_IDX].into();
+    // ACE memory-header fields (shared by both READ word and EVAL element interactions).
+    let ace_clk: LB::Expr = ace.clk.into();
+    let ace_ctx: LB::Expr = ace.ctx.into();
+    let ace_ptr: LB::Expr = ace.ptr.into();
 
-    // ACE read rows expose a 4-element word pulled from the V_*_* cells.
-    let ace_read_word: [LB::Expr; 4] = [
-        local.chiplets[NUM_ACE_SELECTORS + V_0_0_IDX].into(),
-        local.chiplets[NUM_ACE_SELECTORS + V_0_1_IDX].into(),
-        local.chiplets[NUM_ACE_SELECTORS + V_1_0_IDX].into(),
-        local.chiplets[NUM_ACE_SELECTORS + V_1_1_IDX].into(),
-    ];
+    // ACE READ rows expose a 4-element word pulled from the `v_0` / `v_1` pairs.
+    let ace_read_word: [LB::Expr; 4] =
+        [ace.v_0.0.into(), ace.v_0.1.into(), ace.v_1.0.into(), ace.v_1.1.into()];
 
-    // ACE eval rows combine id_1 / id_2 / eval_op into a single element.
-    let id_1: LB::Expr = local.chiplets[NUM_ACE_SELECTORS + ID_1_IDX].into();
-    let id_2: LB::Expr = local.chiplets[NUM_ACE_SELECTORS + ID_2_IDX].into();
-    let eval_op: LB::Expr = local.chiplets[NUM_ACE_SELECTORS + EVAL_OP_IDX].into();
-    let ace_eval_element: LB::Expr = id_1
-        + id_2 * LB::Expr::from(ACE_INSTRUCTION_ID1_OFFSET)
-        + (eval_op + LB::Expr::ONE) * LB::Expr::from(ACE_INSTRUCTION_ID2_OFFSET);
+    // ACE EVAL rows combine `id_1 / id_2 / eval_op` into a single element. `id_2` reads
+    // through the typed EVAL overlay (same physical column as the READ overlay's
+    // `num_eval`, but the EVAL interpretation is the one the bus wants).
+    let ace_eval_element: LB::Expr = Into::<LB::Expr>::into(ace.id_1)
+        + Into::<LB::Expr>::into(ace.eval().id_2) * LB::Expr::from(ACE_INSTRUCTION_ID1_OFFSET)
+        + (Into::<LB::Expr>::into(ace.eval_op) + LB::Expr::ONE)
+            * LB::Expr::from(ACE_INSTRUCTION_ID2_OFFSET);
 
     builder.column(|col| {
         col.group(|g| {

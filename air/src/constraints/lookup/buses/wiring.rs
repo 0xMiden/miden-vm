@@ -19,72 +19,70 @@
 //!                + ((1 − sblock)·m_1 − sblock)/wire_1
 //!                + (−sblock)/wire_2 ]
 //! ```
+//!
+//! The `wire_2` payload reads the physical columns shared with the READ overlay's `m_1`
+//! slot — under `sblock = 1` (EVAL) they hold `v_2`, and under `sblock = 0` (READ) the
+//! `wire_2` interaction is fully suppressed via the `−sblock` multiplicity, so the
+//! interpretation collapses to the READ-mode one.
 
 use miden_core::field::PrimeCharacteristicRing;
 
 use crate::{
-    Felt, MainCols,
+    Felt,
     constraints::{
         logup_msg::AceWireMsg,
-        lookup::{LookupBatch, LookupBuilder, LookupColumn, LookupGroup},
-    },
-    trace::chiplets::ace::{
-        CLK_IDX, CTX_IDX, ID_0_IDX, ID_1_IDX, ID_2_IDX, M_0_IDX, M_1_IDX, SELECTOR_BLOCK_IDX,
-        V_0_0_IDX, V_0_1_IDX, V_1_0_IDX, V_1_1_IDX, V_2_0_IDX, V_2_1_IDX,
+        lookup::{
+            LookupBatch, LookupBuilder, LookupColumn, LookupGroup, buses::ChipletTraceContext,
+        },
+        utils::BoolNot,
     },
 };
-
-/// ACE chiplet column offset within `MainCols::chiplets` (s_ctrl + s1..s3 = 4 selector slots
-/// before the ACE data starts; s4 overlaps the first ACE column).
-const ACE_OFFSET: usize = 4;
 
 /// Emit the ACE wiring bus (C3).
 pub(in crate::constraints::lookup) fn emit_ace_wiring<LB>(
     builder: &mut LB,
-    local: &MainCols<LB::Var>,
-    _next: &MainCols<LB::Var>,
+    ctx: &ChipletTraceContext<LB>,
 ) where
     LB: LookupBuilder<F = Felt>,
 {
-    // Old layout: ace_flag = s0*s1*s2*(1-s3) where chiplets[0..4] = [s0, s1, s2, s3].
-    // New layout: virtual s0 = 1 - s_ctrl - s_perm; s1..s4 live in chiplets[1..5].
-    // ACE flag formula `s0*s1*s2*(1-s3)` is preserved (matches `is_ace = s012 - s0123`
-    // in `chiplets::selectors::build_chiplet_selectors`).
-    let s_ctrl: LB::Expr = local.chiplets[0].into();
-    let s_perm: LB::Expr = local.perm_seg.into();
-    let virtual_s0: LB::Expr = LB::Expr::ONE - s_ctrl - s_perm;
-    let s1: LB::Expr = local.chiplets[1].into();
-    let s2: LB::Expr = local.chiplets[2].into();
-    let s3: LB::Expr = local.chiplets[3].into();
+    let local = ctx.local;
+    let ace_flag = ctx.chiplet_active.ace.clone();
 
-    let ace_flag: LB::Expr = virtual_s0 * s1 * s2 * (LB::Expr::ONE - s3);
-    let sblock: LB::Expr = local.chiplets[ACE_OFFSET + SELECTOR_BLOCK_IDX].into();
+    // Typed ACE chiplet overlay. `read()` exposes `m_0` / `m_1`, `eval()` exposes `v_2`;
+    // wiring uses both overlays because its `sblock`-muxed multiplicities combine the
+    // READ and EVAL row interpretations onto one column.
+    let ace = local.ace();
+    let ace_read = ace.read();
+    let ace_eval = ace.eval();
 
-    let clk: LB::Expr = local.chiplets[ACE_OFFSET + CLK_IDX].into();
-    let ctx: LB::Expr = local.chiplets[ACE_OFFSET + CTX_IDX].into();
-    let m0: LB::Expr = local.chiplets[ACE_OFFSET + M_0_IDX].into();
-    let m1: LB::Expr = local.chiplets[ACE_OFFSET + M_1_IDX].into();
+    let sblock: LB::Expr = ace.s_block.into();
+
+    // Shared fields across all three wires.
+    let clk: LB::Expr = ace.clk.into();
+    let sys_ctx: LB::Expr = ace.ctx.into();
+    let m0: LB::Expr = ace_read.m_0.into();
+    let m1: LB::Expr = ace_read.m_1.into();
 
     let wire_0 = AceWireMsg {
         clk: clk.clone(),
-        ctx: ctx.clone(),
-        id: local.chiplets[ACE_OFFSET + ID_0_IDX].into(),
-        v0: local.chiplets[ACE_OFFSET + V_0_0_IDX].into(),
-        v1: local.chiplets[ACE_OFFSET + V_0_1_IDX].into(),
+        ctx: sys_ctx.clone(),
+        id: ace.id_0.into(),
+        v0: ace.v_0.0.into(),
+        v1: ace.v_0.1.into(),
     };
     let wire_1 = AceWireMsg {
         clk: clk.clone(),
-        ctx: ctx.clone(),
-        id: local.chiplets[ACE_OFFSET + ID_1_IDX].into(),
-        v0: local.chiplets[ACE_OFFSET + V_1_0_IDX].into(),
-        v1: local.chiplets[ACE_OFFSET + V_1_1_IDX].into(),
+        ctx: sys_ctx.clone(),
+        id: ace.id_1.into(),
+        v0: ace.v_1.0.into(),
+        v1: ace.v_1.1.into(),
     };
     let wire_2 = AceWireMsg {
         clk,
-        ctx,
-        id: local.chiplets[ACE_OFFSET + ID_2_IDX].into(),
-        v0: local.chiplets[ACE_OFFSET + V_2_0_IDX].into(),
-        v1: local.chiplets[ACE_OFFSET + V_2_1_IDX].into(),
+        ctx: sys_ctx,
+        id: ace_eval.id_2.into(),
+        v0: ace_eval.v_2.0.into(),
+        v1: ace_eval.v_2.1.into(),
     };
 
     builder.column(|col| {
@@ -93,7 +91,7 @@ pub(in crate::constraints::lookup) fn emit_ace_wiring<LB>(
             // for wire_1 and wire_2. `wire_0`'s `m_0` is invariant across the
             // READ/EVAL split, so it lives in the batch as a plain trace-column
             // multiplicity.
-            let wire_1_mult = (LB::Expr::ONE - sblock.clone()) * m1 - sblock.clone();
+            let wire_1_mult = sblock.not() * m1 - sblock.clone();
             let wire_2_mult = LB::Expr::ZERO - sblock;
             g.batch(ace_flag, move |b| {
                 b.insert(m0, wire_0);

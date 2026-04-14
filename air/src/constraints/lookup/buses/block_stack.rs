@@ -10,16 +10,13 @@
 //! - `range_table` opens a single always-active insertion with the range-table multiplicity on
 //!   `BUS_RANGE_CHECK`.
 
-use core::array;
-
 use miden_core::field::PrimeCharacteristicRing;
 
 use crate::{
-    Felt, MainCols,
+    Felt,
     constraints::{
         logup_msg::{BlockStackMsg, RangeMsg},
-        lookup::{LookupBatch, LookupBuilder, LookupColumn, LookupGroup},
-        op_flags::OpFlags,
+        lookup::{LookupBatch, LookupBuilder, LookupColumn, LookupGroup, buses::MainTraceContext},
     },
 };
 
@@ -27,24 +24,29 @@ use crate::{
 #[allow(clippy::too_many_lines)]
 pub(in crate::constraints::lookup) fn emit_block_stack_and_range_table<LB>(
     builder: &mut LB,
-    local: &MainCols<LB::Var>,
-    next: &MainCols<LB::Var>,
+    ctx: &MainTraceContext<LB>,
 ) where
     LB: LookupBuilder<F = Felt>,
 {
+    let local = ctx.local;
+    let next = ctx.next;
+    let op_flags = &ctx.op_flags;
+
     let dec = &local.decoder;
     let dec_next = &next.decoder;
     let stk = &local.stack;
     let stk_next = &next.stack;
 
+    // Raw Vars (Copy — no clones needed). `dec.hasher_state` holds `[h0..h7]` with
+    // `h[4..8]` doubling as the end-block flags (see `end_block_flags()`). DYNCALL reads
+    // `h[4]`/`h[5]` as `fmp`/`depth`; the END variants read `is_loop`/`is_call`/`is_syscall`
+    // through the typed `EndBlockFlags` overlay.
     let addr = dec.addr;
     let addr_next = dec_next.addr;
-    let h: [LB::Var; 8] = array::from_fn(|i| dec.hasher_state[i]);
+    let h4 = dec.hasher_state[4];
+    let h5 = dec.hasher_state[5];
     let h1_next = dec_next.hasher_state[1];
     let end_flags = dec.end_block_flags();
-    let is_loop_flag: LB::Expr = end_flags.is_loop.into();
-    let is_call_flag: LB::Expr = end_flags.is_call.into();
-    let is_syscall_flag: LB::Expr = end_flags.is_syscall.into();
 
     let s0 = stk.get(0);
     let b0 = stk.b0;
@@ -52,18 +54,16 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_table<LB>(
     let b0_next = stk_next.b0;
     let b1_next = stk_next.b1;
 
-    let ctx = local.system.ctx;
-    let ctx_next = next.system.ctx;
+    let sys_ctx = local.system.ctx;
+    let sys_ctx_next = next.system.ctx;
 
-    let fn_hash: [LB::Expr; 4] = local.system.fn_hash.map(Into::into);
-    let fn_hash_next: [LB::Expr; 4] = next.system.fn_hash.map(Into::into);
+    // `fn_hash` is used twice (DYNCALL, CALL/SYSCALL) and `fn_hash_next` once (END-after-
+    // CALL/SYSCALL); keep them as `[Var; 4]` and convert inside each closure.
+    let fn_hash = local.system.fn_hash;
+    let fn_hash_next = next.system.fn_hash;
 
     let range_m = local.range.multiplicity;
     let range_v = local.range.value;
-
-    // Op-flag reconstruction for the local row — the block-stack variants all gate off
-    // `local`-row flags.
-    let op_flags = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
 
     builder.column(|col| {
         // ---- Group 1: block-stack table (BUS_BLOCK_STACK_TABLE) ----
@@ -88,10 +88,10 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_table<LB>(
                 block_id: addr_next.into(),
                 parent_id: addr.into(),
                 is_loop: LB::Expr::ZERO,
-                ctx: ctx.into(),
-                fmp: h[4].into(),
-                depth: h[5].into(),
-                fn_hash: fn_hash.clone(),
+                ctx: sys_ctx.into(),
+                fmp: h4.into(),
+                depth: h5.into(),
+                fn_hash: fn_hash.map(Into::into),
             });
 
             // CALL/SYSCALL: full push saving the caller context.
@@ -100,31 +100,31 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_table<LB>(
                 block_id: addr_next.into(),
                 parent_id: addr.into(),
                 is_loop: LB::Expr::ZERO,
-                ctx: ctx.into(),
+                ctx: sys_ctx.into(),
                 fmp: b0.into(),
                 depth: b1.into(),
-                fn_hash: fn_hash.clone(),
+                fn_hash: fn_hash.map(Into::into),
             });
 
             // END (simple blocks): pop with the stored is_loop.
-            let f =
-                op_flags.end() * (LB::Expr::ONE - is_call_flag.clone() - is_syscall_flag.clone());
+            let f = op_flags.end()
+                * (LB::Expr::ONE - end_flags.is_call.into() - end_flags.is_syscall.into());
             g.remove(f, || BlockStackMsg::Simple {
                 block_id: addr.into(),
                 parent_id: addr_next.into(),
-                is_loop: is_loop_flag.clone(),
+                is_loop: end_flags.is_loop.into(),
             });
 
             // END (after CALL/SYSCALL): pop with restored caller context.
-            let f = op_flags.end() * (is_call_flag.clone() + is_syscall_flag.clone());
+            let f = op_flags.end() * (end_flags.is_call.into() + end_flags.is_syscall.into());
             g.remove(f, || BlockStackMsg::Full {
                 block_id: addr.into(),
                 parent_id: addr_next.into(),
-                is_loop: is_loop_flag.clone(),
-                ctx: ctx_next.into(),
+                is_loop: end_flags.is_loop.into(),
+                ctx: sys_ctx_next.into(),
                 fmp: b0_next.into(),
                 depth: b1_next.into(),
-                fn_hash: fn_hash_next.clone(),
+                fn_hash: fn_hash_next.map(Into::into),
             });
 
             // RESPAN: simultaneous push + pop — one batch under the RESPAN flag.

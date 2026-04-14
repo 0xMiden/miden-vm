@@ -749,7 +749,6 @@ where
     }
 
     /// Returns the flag when the current operation is a u32 operation requiring range checks.
-    #[expect(dead_code)]
     #[inline(always)]
     pub fn u32_rc_op(&self) -> E {
         self.u32_rc_op.clone()

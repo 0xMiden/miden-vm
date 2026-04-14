@@ -33,11 +33,11 @@ use core::array;
 use miden_core::field::PrimeCharacteristicRing;
 
 use crate::{
-    Felt, MainCols,
+    Felt,
     constraints::{
         logup_msg::{BlockHashMsg, OpGroupMsg},
-        lookup::{LookupBatch, LookupBuilder, LookupColumn, LookupGroup},
-        op_flags::OpFlags,
+        lookup::{LookupBatch, LookupBuilder, LookupColumn, LookupGroup, buses::MainTraceContext},
+        utils::BoolNot,
     },
 };
 
@@ -46,35 +46,27 @@ use crate::{
 #[allow(clippy::too_many_lines)]
 pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
     builder: &mut LB,
-    local: &MainCols<LB::Var>,
-    next: &MainCols<LB::Var>,
+    ctx: &MainTraceContext<LB>,
 ) where
     LB: LookupBuilder<F = Felt>,
 {
+    let local = ctx.local;
+    let next = ctx.next;
+    let op_flags = &ctx.op_flags;
+
     let dec = &local.decoder;
     let dec_next = &next.decoder;
     let stk = &local.stack;
     let stk_next = &next.stack;
 
-    // --- G_block_hash (block-hash queue) setup ---
+    // Raw Vars (Copy — captured directly in closures; `.into()` at point of use).
     let addr = dec.addr;
     let addr_next = dec_next.addr;
-    let h: [LB::Var; 8] = array::from_fn(|i| dec.hasher_state[i]);
+    let h = dec.hasher_state; // [Var; 8] — h[0..4] = first child, h[4..8] = second.
     let s0 = stk.get(0);
-    let is_loop_body_flag = dec.end_block_flags().is_loop_body;
 
-    let h_first: [LB::Expr; 4] = array::from_fn(|i| h[i].into());
-    let h_second: [LB::Expr; 4] = array::from_fn(|i| h[4 + i].into());
-    let parent: LB::Expr = addr_next.into();
-    let s0_e: LB::Expr = s0.into();
-    let split_h: [LB::Expr; 4] = array::from_fn(|i| {
-        s0_e.clone() * h[i].into() + (LB::Expr::ONE - s0_e.clone()) * h[i + 4].into()
-    });
-
-    // OpFlags::new bundles current-row flags AND degree-4 next-row control-flow flags
-    // (`end_next` / `repeat_next` / `halt_next`), so we only need a single instance.
-    let op_flags = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
-
+    // G_block_hash per-row-type flags. `f_loop_body` / `f_child` are sums of single-use
+    // op flags, bound locally since each is consumed once inside its `.add(...)` call.
     let f_join = op_flags.join();
     let f_split = op_flags.split();
     let f_loop_body = op_flags.loop_op() * s0 + op_flags.repeat();
@@ -82,94 +74,95 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
     let f_end = op_flags.end();
     let f_push = op_flags.push();
 
-    let is_first_child: LB::Expr =
-        LB::Expr::ONE - op_flags.end_next() - op_flags.repeat_next() - op_flags.halt_next();
-    let is_loop_body_e: LB::Expr = is_loop_body_flag.into();
-
-    // --- G_op_group (op-group table) setup ---
-    let batch_id: LB::Expr = addr_next.into();
+    // G_op_group per-batch-size selectors — `c0` is used in three places (g8 gate, g4's
+    // `(1 - c0)`, g2's `(1 - c0)`), `c1`/`c2` in two places each. Kept as named `LB::Expr`
+    // bindings per the style rule (used 2+ times).
     let c0: LB::Expr = dec.batch_flags[0].into();
     let c1: LB::Expr = dec.batch_flags[1].into();
     let c2: LB::Expr = dec.batch_flags[2].into();
+
+    // `group_count` is consumed by the 3 insertion batches AND the removal, so 4+ places.
     let gc_e: LB::Expr = dec.group_count.into();
-    let gc_next_e: LB::Expr = dec_next.group_count.into();
-    let in_span: LB::Expr = dec.in_span.into();
 
     builder.column(|col| {
         col.group(|g| {
             // =================== G_block_hash BLOCK HASH QUEUE ===================
             g.batch(f_join, |b| {
                 b.add(BlockHashMsg::FirstChild {
-                    parent: parent.clone(),
-                    child_hash: h_first.clone(),
+                    parent: addr_next.into(),
+                    child_hash: array::from_fn(|i| h[i].into()),
                 });
                 b.add(BlockHashMsg::Child {
-                    parent: parent.clone(),
-                    child_hash: h_second.clone(),
+                    parent: addr_next.into(),
+                    child_hash: array::from_fn(|i| h[4 + i].into()),
                 });
             });
-            g.add(f_split, || BlockHashMsg::Child {
-                parent: parent.clone(),
-                child_hash: split_h.clone(),
+
+            // SPLIT: `s0`-muxed selection between h[0..4] and h[4..8].
+            g.add(f_split, || {
+                let s0_e: LB::Expr = s0.into();
+                let child_hash: [LB::Expr; 4] = array::from_fn(|i| {
+                    s0_e.clone() * h[i].into() + (LB::Expr::ONE - s0_e.clone()) * h[i + 4].into()
+                });
+                BlockHashMsg::Child { parent: addr_next.into(), child_hash }
             });
+
             g.add(f_loop_body, || BlockHashMsg::LoopBody {
-                parent: parent.clone(),
-                child_hash: h_first.clone(),
+                parent: addr_next.into(),
+                child_hash: array::from_fn(|i| h[i].into()),
             });
+
             g.add(f_child, || BlockHashMsg::Child {
-                parent: parent.clone(),
-                child_hash: h_first.clone(),
+                parent: addr_next.into(),
+                child_hash: array::from_fn(|i| h[i].into()),
             });
+
             g.remove(f_end, || BlockHashMsg::End {
-                parent: parent.clone(),
-                child_hash: h_first.clone(),
-                is_first_child: is_first_child.clone(),
-                is_loop_body: is_loop_body_e.clone(),
+                parent: addr_next.into(),
+                child_hash: array::from_fn(|i| h[i].into()),
+                is_first_child: LB::Expr::ONE
+                    - op_flags.end_next()
+                    - op_flags.repeat_next()
+                    - op_flags.halt_next(),
+                is_loop_body: dec.end_block_flags().is_loop_body.into(),
             });
 
             // =================== G_op_group OP GROUP TABLE ===================
             // g8: c0 triggers a 7-add batch (groups 1..=7).
-            let batch_id8 = batch_id.clone();
             let gc8 = gc_e.clone();
             g.batch(c0.clone(), move |b| {
                 for i in 1u16..=7 {
-                    b.add(OpGroupMsg::new(&batch_id8, gc8.clone(), i, h[i as usize].into()));
+                    b.add(OpGroupMsg::new(&addr_next.into(), gc8.clone(), i, h[i as usize].into()));
                 }
             });
 
             // g4: (1 - c0) · c1 · (1 - c2) triggers a 3-add batch (groups 1..=3).
-            let batch_id4 = batch_id.clone();
             let gc4 = gc_e.clone();
-            g.batch(
-                (LB::Expr::ONE - c0.clone()) * c1.clone() * (LB::Expr::ONE - c2.clone()),
-                move |b| {
-                    for i in 1u16..=3 {
-                        b.add(OpGroupMsg::new(&batch_id4, gc4.clone(), i, h[i as usize].into()));
-                    }
-                },
-            );
+            g.batch(c0.not() * c1.clone() * c2.not(), move |b| {
+                for i in 1u16..=3 {
+                    b.add(OpGroupMsg::new(&addr_next.into(), gc4.clone(), i, h[i as usize].into()));
+                }
+            });
 
             // g2: (1 - c0) · (1 - c1) · c2 is a single add for group 1.
-            let batch_id2 = batch_id;
             let gc2 = gc_e.clone();
-            let h1_var = h[1];
-            let f_g2 = (LB::Expr::ONE - c0) * (LB::Expr::ONE - c1) * c2;
-            g.add(f_g2, move || OpGroupMsg::new(&batch_id2, gc2, 1, h1_var.into()));
+            let f_g2 = c0.not() * c1.not() * c2;
+            g.add(f_g2, move || OpGroupMsg::new(&addr_next.into(), gc2, 1, h[1].into()));
 
             // Removal: `in_span · (gc - gc_next)` gates a muxed removal whose
             // group_value is `is_push · stk_next[0] + (1 - is_push) · (h0_next · 128 +
             // opcode_next)`.
-            let f_rem = in_span * (gc_e.clone() - gc_next_e);
-            let h0_next: LB::Expr = dec_next.hasher_state[0].into();
+            let f_rem: LB::Expr =
+                Into::<LB::Expr>::into(dec.in_span) * (gc_e.clone() - dec_next.group_count.into());
             let opcode_next: LB::Expr = (0..7).fold(LB::Expr::ZERO, |acc, i| {
-                let bit: LB::Expr = dec_next.op_bits[i].into();
-                acc + bit * LB::Expr::from_u16(1u16 << i)
+                acc + Into::<LB::Expr>::into(dec_next.op_bits[i]) * LB::Expr::from_u16(1u16 << i)
             });
             let group_value = f_push.clone() * stk_next.get(0).into()
-                + (LB::Expr::ONE - f_push) * (h0_next * LB::Expr::from_u16(128) + opcode_next);
-            let addr_e: LB::Expr = addr.into();
+                + f_push.not()
+                    * (Into::<LB::Expr>::into(dec_next.hasher_state[0]) * LB::Expr::from_u16(128)
+                        + opcode_next);
             g.remove(f_rem, move || OpGroupMsg {
-                batch_id: addr_e,
+                batch_id: addr.into(),
                 group_pos: gc_e,
                 group_value,
             });

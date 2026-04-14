@@ -17,6 +17,7 @@ use super::{
     LookupAir, LookupBuilder,
     bus_id::NUM_BUS_IDS,
     buses::{
+        ChipletTraceContext, MainTraceContext,
         block_hash_and_op_group::emit_block_hash_and_op_group,
         block_stack::emit_block_stack_and_range_table, chiplet_requests::emit_chiplet_requests,
         chiplet_responses::emit_chiplet_responses, hash_kernel::emit_hash_kernel_table,
@@ -83,6 +84,15 @@ where
         let local: &MainCols<LB::Var> = main.current_slice().borrow();
         let next: &MainCols<LB::Var> = main.next_slice().borrow();
 
+        // Precompute per-segment contexts once per eval. `MainTraceContext` builds the
+        // single shared `OpFlags` instance that the 4 main-trace emitters consume, and
+        // `ChipletTraceContext` builds the per-chiplet `is_active` snapshot that the 3
+        // chiplet-trace emitters consume. Splitting them avoids dead precompute on either
+        // side (main-trace buses never touch chiplet columns, chiplet-trace buses never
+        // touch op flags).
+        let main_ctx = MainTraceContext::<LB>::new(local, next);
+        let chiplet_ctx = ChipletTraceContext::<LB>::new(local, next);
+
         // Main-trace LogUp columns.
         //
         //   M1     = block-stack + range-table response
@@ -90,15 +100,15 @@ where
         //            observation that control-flow opcodes are never in-span)
         //   M3     = chiplet requests
         //   M4     = range-stack + logpre capacity
-        emit_block_stack_and_range_table::<LB>(builder, local, next);
-        emit_block_hash_and_op_group::<LB>(builder, local, next);
-        emit_chiplet_requests::<LB>(builder, local, next);
-        emit_range_stack_and_log_capacity::<LB>(builder, local, next);
+        emit_block_stack_and_range_table::<LB>(builder, &main_ctx);
+        emit_block_hash_and_op_group::<LB>(builder, &main_ctx);
+        emit_chiplet_requests::<LB>(builder, &main_ctx);
+        emit_range_stack_and_log_capacity::<LB>(builder, &main_ctx);
 
         // Chiplet-trace LogUp columns (C1..C3) — order matches the legacy `enforce_chiplet`.
-        emit_chiplet_responses::<LB>(builder, local, next);
-        emit_hash_kernel_table::<LB>(builder, local, next);
-        emit_ace_wiring::<LB>(builder, local, next);
+        emit_chiplet_responses::<LB>(builder, &chiplet_ctx);
+        emit_hash_kernel_table::<LB>(builder, &chiplet_ctx);
+        emit_ace_wiring::<LB>(builder, &chiplet_ctx);
     }
 }
 
