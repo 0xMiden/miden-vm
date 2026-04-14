@@ -54,14 +54,6 @@ pub use constraint::ConstraintLookupBuilder;
 #[cfg(test)]
 pub use dual_builder::{DualBuilder, GroupMismatch};
 pub use message::LookupMessage;
-#[cfg_attr(
-    not(test),
-    expect(
-        unused_imports,
-        reason = "Consumed only by the Task #6 degree-budget test until Task #8 wires ProcessorAir::eval to it."
-    )
-)]
-pub use miden_air::MidenLookupAir;
 #[expect(
     unused_imports,
     reason = "Re-exported for Task #8 aux-trace builder; no intra-crate consumer yet."

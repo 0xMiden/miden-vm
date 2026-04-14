@@ -382,12 +382,7 @@ impl<E: PrimeCharacteristicRing + Clone> BitwiseMsg<E> {
     {
         challenges.encode(
             bus_types::CHIPLETS_BUS,
-            [
-                E::from_u16(self.op_value),
-                self.a.clone(),
-                self.b.clone(),
-                self.result.clone(),
-            ],
+            [E::from_u16(self.op_value), self.a.clone(), self.b.clone(), self.result.clone()],
         )
     }
 }
@@ -985,7 +980,7 @@ where
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_CHIPLETS;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_CHIPLETS as usize].clone();
+        let mut acc = challenges.bus_prefix[BUS_CHIPLETS].clone();
         match self {
             Self::State { label_value, addr, node_index, state } => {
                 acc += bp[0].clone() * E::from_u16(*label_value);
@@ -1026,7 +1021,7 @@ where
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_CHIPLETS;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_CHIPLETS as usize].clone();
+        let mut acc = challenges.bus_prefix[BUS_CHIPLETS].clone();
         match self {
             Self::Element { op_value, header, element } => {
                 acc += bp[0].clone() * E::from_u16(*op_value);
@@ -1059,7 +1054,7 @@ where
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_CHIPLETS;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_CHIPLETS as usize].clone();
+        let mut acc = challenges.bus_prefix[BUS_CHIPLETS].clone();
         acc += bp[0].clone() * E::from_u16(self.op_value);
         acc += bp[1].clone() * self.a.clone();
         acc += bp[2].clone() * self.b.clone();
@@ -1078,7 +1073,7 @@ where
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_BLOCK_STACK_TABLE;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_BLOCK_STACK_TABLE as usize].clone();
+        let mut acc = challenges.bus_prefix[BUS_BLOCK_STACK_TABLE].clone();
         match self {
             // `Simple` zero-pads to 10 slots in the legacy encoding. Slots `3..10`
             // contribute `β^k · 0 = 0` so they are elided from the loop.
@@ -1135,7 +1130,7 @@ where
                 is_loop_body,
             } => (parent, child_hash, is_first_child.clone(), is_loop_body.clone()),
         };
-        let mut acc = challenges.bus_prefix[BUS_BLOCK_HASH_TABLE as usize].clone();
+        let mut acc = challenges.bus_prefix[BUS_BLOCK_HASH_TABLE].clone();
         acc += bp[0].clone() * parent.clone();
         acc += bp[1].clone() * child_hash[0].clone();
         acc += bp[2].clone() * child_hash[1].clone();
@@ -1157,7 +1152,7 @@ where
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_OP_GROUP_TABLE;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_OP_GROUP_TABLE as usize].clone();
+        let mut acc = challenges.bus_prefix[BUS_OP_GROUP_TABLE].clone();
         acc += bp[0].clone() * self.batch_id.clone();
         acc += bp[1].clone() * self.group_pos.clone();
         acc += bp[2].clone() * self.group_value.clone();
@@ -1175,7 +1170,7 @@ where
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_STACK_OVERFLOW_TABLE;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_STACK_OVERFLOW_TABLE as usize].clone();
+        let mut acc = challenges.bus_prefix[BUS_STACK_OVERFLOW_TABLE].clone();
         acc += bp[0].clone() * self.clk.clone();
         acc += bp[1].clone() * self.val.clone();
         acc += bp[2].clone() * self.prev.clone();
@@ -1193,7 +1188,7 @@ where
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_CHIPLETS;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_CHIPLETS as usize].clone();
+        let mut acc = challenges.bus_prefix[BUS_CHIPLETS].clone();
         acc += bp[0].clone() * E::from_u16(self.label);
         for i in 0..4 {
             acc += bp[i + 1].clone() * self.digest[i].clone();
@@ -1212,7 +1207,7 @@ where
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_CHIPLETS;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_CHIPLETS as usize].clone();
+        let mut acc = challenges.bus_prefix[BUS_CHIPLETS].clone();
         acc += bp[0].clone() * E::from_u16(Self::LABEL);
         acc += bp[1].clone() * self.clk.clone();
         acc += bp[2].clone() * self.ctx.clone();
@@ -1233,7 +1228,7 @@ where
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_RANGE_CHECK;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_RANGE_CHECK as usize].clone();
+        let mut acc = challenges.bus_prefix[BUS_RANGE_CHECK].clone();
         acc += bp[0].clone() * self.value.clone();
         acc
     }
@@ -1249,7 +1244,7 @@ where
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_LOG_PRECOMPILE_TRANSCRIPT;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_LOG_PRECOMPILE_TRANSCRIPT as usize].clone();
+        let mut acc = challenges.bus_prefix[BUS_LOG_PRECOMPILE_TRANSCRIPT].clone();
         acc += bp[0].clone() * E::from_u16(Self::LABEL);
         for i in 0..4 {
             acc += bp[i + 1].clone() * self.capacity[i].clone();
@@ -1268,7 +1263,7 @@ where
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_ACE_WIRING;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_ACE_WIRING as usize].clone();
+        let mut acc = challenges.bus_prefix[BUS_ACE_WIRING].clone();
         acc += bp[0].clone() * self.clk.clone();
         acc += bp[1].clone() * self.ctx.clone();
         acc += bp[2].clone() * self.id.clone();
@@ -1296,7 +1291,7 @@ where
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_CHIPLETS;
         let bp = &challenges.beta_powers;
-        let prefix = challenges.bus_prefix[BUS_CHIPLETS as usize].clone();
+        let prefix = challenges.bus_prefix[BUS_CHIPLETS].clone();
 
         // Element-case denominator: [label, ctx, addr, clk, element] at β⁰..β⁴.
         let mut element_msg = prefix.clone();
@@ -1330,7 +1325,7 @@ where
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_CHIPLETS;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_CHIPLETS as usize].clone();
+        let mut acc = challenges.bus_prefix[BUS_CHIPLETS].clone();
         acc += bp[0].clone() * self.label.clone();
         for i in 0..4 {
             acc += bp[i + 1].clone() * self.digest[i].clone();
@@ -1347,7 +1342,7 @@ where
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_CHIPLETS;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_CHIPLETS as usize].clone();
+        let mut acc = challenges.bus_prefix[BUS_CHIPLETS].clone();
         acc += bp[0].clone() * self.label.clone();
         acc += bp[1].clone() * self.a.clone();
         acc += bp[2].clone() * self.b.clone();
@@ -1429,7 +1424,7 @@ where
         use super::lookup::bus_id::BUS_CHIPLETS;
         use crate::trace::chiplets::memory::MEMORY_READ_ELEMENT_LABEL;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_CHIPLETS as usize].clone();
+        let mut acc = challenges.bus_prefix[BUS_CHIPLETS].clone();
         acc += bp[0].clone() * E::from_u16(MEMORY_READ_ELEMENT_LABEL as u16);
         acc += bp[1].clone() * self.ctx.clone();
         acc += bp[2].clone() * self.addr.clone();
@@ -1448,7 +1443,7 @@ where
         use super::lookup::bus_id::BUS_CHIPLETS;
         use crate::trace::chiplets::memory::MEMORY_WRITE_ELEMENT_LABEL;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_CHIPLETS as usize].clone();
+        let mut acc = challenges.bus_prefix[BUS_CHIPLETS].clone();
         acc += bp[0].clone() * E::from_u16(MEMORY_WRITE_ELEMENT_LABEL as u16);
         acc += bp[1].clone() * self.ctx.clone();
         acc += bp[2].clone() * self.addr.clone();
@@ -1467,7 +1462,7 @@ where
         use super::lookup::bus_id::BUS_CHIPLETS;
         use crate::trace::chiplets::memory::MEMORY_READ_WORD_LABEL;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_CHIPLETS as usize].clone();
+        let mut acc = challenges.bus_prefix[BUS_CHIPLETS].clone();
         acc += bp[0].clone() * E::from_u16(MEMORY_READ_WORD_LABEL as u16);
         acc += bp[1].clone() * self.ctx.clone();
         acc += bp[2].clone() * self.addr.clone();
@@ -1488,7 +1483,7 @@ where
         use super::lookup::bus_id::BUS_CHIPLETS;
         use crate::trace::chiplets::memory::MEMORY_WRITE_WORD_LABEL;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_CHIPLETS as usize].clone();
+        let mut acc = challenges.bus_prefix[BUS_CHIPLETS].clone();
         acc += bp[0].clone() * E::from_u16(MEMORY_WRITE_WORD_LABEL as u16);
         acc += bp[1].clone() * self.ctx.clone();
         acc += bp[2].clone() * self.addr.clone();
@@ -1524,7 +1519,7 @@ where
         // KERNEL_PROC_CALL_LABEL = Felt::new(0b001111 + 1) = 16.
         const CALL_LABEL: u16 = 16;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_CHIPLETS as usize].clone();
+        let mut acc = challenges.bus_prefix[BUS_CHIPLETS].clone();
         acc += bp[0].clone() * E::from_u16(CALL_LABEL);
         for i in 0..4 {
             acc += bp[i + 1].clone() * self.digest[i].clone();
@@ -1543,7 +1538,7 @@ where
         // KERNEL_PROC_INIT_LABEL = Felt::new(0b101111 + 1) = 48.
         const INIT_LABEL: u16 = 48;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_CHIPLETS as usize].clone();
+        let mut acc = challenges.bus_prefix[BUS_CHIPLETS].clone();
         acc += bp[0].clone() * E::from_u16(INIT_LABEL);
         for i in 0..4 {
             acc += bp[i + 1].clone() * self.digest[i].clone();
@@ -1580,7 +1575,7 @@ where
         // BITWISE_AND_LABEL = Felt::new(0b001 + 1) = 2.
         const AND_LABEL: u16 = 2;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_CHIPLETS as usize].clone();
+        let mut acc = challenges.bus_prefix[BUS_CHIPLETS].clone();
         acc += bp[0].clone() * E::from_u16(AND_LABEL);
         acc += bp[1].clone() * self.a.clone();
         acc += bp[2].clone() * self.b.clone();
@@ -1599,7 +1594,7 @@ where
         // BITWISE_XOR_LABEL = Felt::new(0b101 + 1) = 6.
         const XOR_LABEL: u16 = 6;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_CHIPLETS as usize].clone();
+        let mut acc = challenges.bus_prefix[BUS_CHIPLETS].clone();
         acc += bp[0].clone() * E::from_u16(XOR_LABEL);
         acc += bp[1].clone() * self.a.clone();
         acc += bp[2].clone() * self.b.clone();
@@ -1611,22 +1606,20 @@ where
 // --- SiblingMsgBit{Zero,One} (BUS_SIBLING_TABLE, sparse β layouts) -------------------------------
 
 /// Sibling-table message when `bit = 0` — sibling lives at h[4..8] and the payload goes into
-/// β positions `[2, 7, 8, 9, 10]` (matching `SiblingMsg::B0_LAYOUT`).
-///
-/// Task #7 preserves the legacy non-contiguous β layout because the hash-kernel virtual-table
-/// responder writes into the same positions; rewriting the responder is out of scope. The
-/// `LookupMessage::encode` body below manually places `node_index` at β² and `h[4..8]` at
-/// β⁷..β¹⁰ — no assumption that the payload is contiguous.
+/// β positions `[1, 2, 7, 8, 9, 10]`, matching the 2856 running-product layout
+/// (mrupdate_id at β¹, node_index at β², sibling rate1 at β⁷..β¹⁰).
 #[derive(Clone)]
 pub struct SiblingMsgBitZero<E> {
+    pub mrupdate_id: E,
     pub node_index: E,
     pub h_hi: [E; 4],
 }
 
 /// Sibling-table message when `bit = 1` — sibling lives at h[0..4] and the payload goes into
-/// β positions `[2, 3, 4, 5, 6]` (matching `SiblingMsg::B1_LAYOUT`).
+/// β positions `[1, 2, 3, 4, 5, 6]`.
 #[derive(Clone)]
 pub struct SiblingMsgBitOne<E> {
+    pub mrupdate_id: E,
     pub node_index: E,
     pub h_lo: [E; 4],
 }
@@ -1639,8 +1632,8 @@ where
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_SIBLING_TABLE;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_SIBLING_TABLE as usize].clone();
-        // Sparse β positions [2, 7, 8, 9, 10] from `SiblingMsg::B0_LAYOUT`.
+        let mut acc = challenges.bus_prefix[BUS_SIBLING_TABLE].clone();
+        acc += bp[1].clone() * self.mrupdate_id.clone();
         acc += bp[2].clone() * self.node_index.clone();
         acc += bp[7].clone() * self.h_hi[0].clone();
         acc += bp[8].clone() * self.h_hi[1].clone();
@@ -1658,8 +1651,8 @@ where
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_SIBLING_TABLE;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_SIBLING_TABLE as usize].clone();
-        // Sparse β positions [2, 3, 4, 5, 6] from `SiblingMsg::B1_LAYOUT`.
+        let mut acc = challenges.bus_prefix[BUS_SIBLING_TABLE].clone();
+        acc += bp[1].clone() * self.mrupdate_id.clone();
         acc += bp[2].clone() * self.node_index.clone();
         acc += bp[3].clone() * self.h_lo[0].clone();
         acc += bp[4].clone() * self.h_lo[1].clone();

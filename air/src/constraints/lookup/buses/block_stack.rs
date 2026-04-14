@@ -7,8 +7,8 @@
 //!
 //! - `block_stack` opens 7 mutually-exclusive variants (JOIN/SPLIT/SPAN/DYN, LOOP, DYNCALL,
 //!   CALL/SYSCALL, two END cases, and a RESPAN batch), all on `BUS_BLOCK_STACK_TABLE`.
-//! - `range_table` opens a single always-active insertion with the range-table multiplicity
-//!   on `BUS_RANGE_CHECK`.
+//! - `range_table` opens a single always-active insertion with the range-table multiplicity on
+//!   `BUS_RANGE_CHECK`.
 
 use core::array;
 

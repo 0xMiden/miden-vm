@@ -785,8 +785,7 @@ mod tests {
         // that interaction out yields:
         //
         //   is_read · (m_0/wire_0 + m_1/wire_1)
-        // + is_eval · (m_0/wire_0 − 1/wire_1 − 1/wire_2) = m_0/wire_0
-        //   (always under ace_flag)
+        // + is_eval · (m_0/wire_0 − 1/wire_1 − 1/wire_2) = m_0/wire_0 (always under ace_flag)
         //   + ((1 − sblock) · m_1 − sblock) / wire_1
         //   + (−sblock) / wire_2
         //   = ace_flag · [ m_0/wire_0

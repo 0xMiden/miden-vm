@@ -42,10 +42,8 @@ pub(in crate::constraints::lookup) fn emit_range_stack_and_log_capacity<LB>(
     // log_precompile capacity add/remove pair.
     let op_flags = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
     let f_log_precompile = op_flags.log_precompile();
-    let cap_prev: [LB::Var; 4] =
-        array::from_fn(|i| user_helpers[HELPER_CAP_PREV_RANGE.start + i]);
-    let cap_next: [LB::Var; 4] =
-        array::from_fn(|i| stk_next.get(STACK_CAP_NEXT_RANGE.start + i));
+    let cap_prev: [LB::Var; 4] = array::from_fn(|i| user_helpers[HELPER_CAP_PREV_RANGE.start + i]);
+    let cap_next: [LB::Var; 4] = array::from_fn(|i| stk_next.get(STACK_CAP_NEXT_RANGE.start + i));
 
     builder.column(|col| {
         col.group(|g| {

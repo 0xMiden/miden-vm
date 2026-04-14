@@ -109,7 +109,7 @@ where
 mod tests {
     extern crate std;
 
-    use std::{borrow::Borrow, println, vec::Vec};
+    use std::{println, vec::Vec};
 
     use miden_core::field::QuadFelt;
     use miden_crypto::stark::air::{
