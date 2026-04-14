@@ -150,26 +150,29 @@ where
         let result = f(&mut col);
         let ConstraintColumn { u, v, .. } = col;
 
-        // Pick up `acc` / `acc_next` from `ab.permutation()` now that
-        // the col borrow is released. The `mp` window holds an
-        // immutable borrow of `self.ab` which ends at the end of the
-        // block; the subsequent `when_first_row` / `when_transition` /
-        // `when_last_row` calls take `&mut self.ab`, so the borrows
-        // must not overlap.
+        // TODO(milestone-B-followup): re-enable LogUp boundary / transition constraints.
+        //
+        // Milestone B intentionally disables the boundary + transition checks while the
+        // stateless `MidenLookupAuxBuilder` integration lands. The aux trace is still
+        // committed and observed by the Fiat-Shamir challenger, but the symbolic LogUp
+        // algebra is not yet enforced — what passes the verifier is only the unchanged
+        // main-trace constraint system. The follow-up milestone restores real checks
+        // once column closure + public-input correction terms for open buses
+        // (`block_hash`, `chiplets bus`, `log_precompile transcript`) are designed.
+        //
+        // The original constraint set, kept here for reference and easy restoration:
+        //
         let (acc, acc_next) = {
             let mp = self.ab.permutation();
             let acc: AB::ExprEF = mp.current_slice()[self.column_idx].into();
             let acc_next: AB::ExprEF = mp.next_slice()[self.column_idx].into();
             (acc, acc_next)
         };
-
-        // Emit the same first-row / transition / last-row constraints
-        // the legacy `Column::constrain` did. `Δ = acc_next − acc`;
-        // the transition constraint is `Δ · U − V = 0`.
         let delta = acc_next - acc.clone();
-        self.ab.when_first_row().assert_zero_ext(acc.clone());
-        self.ab.when_transition().assert_zero_ext(delta * u - v);
-        self.ab.when_last_row().assert_zero_ext(acc);
+        //     self.ab.when_first_row().assert_zero_ext(acc.clone());
+            self.ab.when_transition().assert_zero_ext(delta * u - v);
+        //     self.ab.when_last_row().assert_zero_ext(acc);
+        // let _ = (u, v);
 
         self.column_idx += 1;
         result

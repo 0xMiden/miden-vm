@@ -18,7 +18,7 @@ use miden_crypto::stark::{
 };
 use miden_processor::{
     FastProcessor, Program,
-    trace::{AuxTraceBuilders, ExecutionTrace, build_trace},
+    trace::{ExecutionTrace, build_trace},
 };
 use tracing::instrument;
 
@@ -26,7 +26,9 @@ mod proving_options;
 
 // EXPORTS
 // ================================================================================================
-pub use miden_air::{DeserializationError, ProcessorAir, PublicInputs, config};
+pub use miden_air::{
+    DeserializationError, ProcessorAir, PublicInputs, config, lookup::MidenLookupAuxBuilder,
+};
 pub use miden_core::proof::{ExecutionProof, HashFunction};
 pub use miden_processor::{
     ExecutionError, ExecutionOptions, ExecutionOutput, FutureMaybeSend, Host, InputError,
@@ -138,7 +140,7 @@ fn prove_execution_trace(
 
     let (public_values, kernel_felts) = trace.public_inputs().to_air_inputs();
     let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
-    let aux_builder = trace.aux_trace_builders();
+    let aux_builder = MidenLookupAuxBuilder;
 
     let params = config::pcs_params();
     let proof_bytes = match hash_fn {
@@ -180,7 +182,7 @@ pub fn prove_stark<SC>(
     trace: &RowMajorMatrix<Felt>,
     public_values: &[Felt],
     var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
-    aux_builder: &AuxTraceBuilders,
+    aux_builder: &MidenLookupAuxBuilder,
 ) -> Result<Vec<u8>, ExecutionError>
 where
     SC: StarkConfig<Felt, QuadFelt>,

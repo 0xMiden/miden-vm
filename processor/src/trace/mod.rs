@@ -4,6 +4,7 @@ use core::ops::Range;
 
 use miden_air::{
     AirWitness, AuxBuilder, ProcessorAir, PublicInputs, debug,
+    lookup::MidenLookupAuxBuilder,
     trace::{
         DECODER_TRACE_OFFSET, MainTrace, PADDED_TRACE_WIDTH, TRACE_WIDTH,
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
@@ -349,7 +350,12 @@ impl ExecutionTrace {
         let (public_values, kernel_felts) = public_inputs.to_air_inputs();
         let var_len_public_inputs: &[&[Felt]] = &[&kernel_felts];
 
-        let aux_builder = self.aux_trace_builders();
+        // Milestone B: drive the constraint debug checker through the new stateless
+        // LogUp aux builder. The legacy `aux_trace_builders()` getter still exists for
+        // now (its sub-builders are deleted in the next commit) but the constraint
+        // system has already been rewired through `MidenLookupAir`, so feeding it the
+        // legacy 8-column aux trace would mismatch `ProcessorAir::aux_width() == 7`.
+        let aux_builder = MidenLookupAuxBuilder;
 
         // Derive deterministic challenges by hashing public values with Poseidon2.
         // The 4-element digest maps directly to 2 QuadFelt challenges.

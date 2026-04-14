@@ -16,6 +16,7 @@
 
 #![allow(dead_code, unused_imports)]
 
+pub mod aux_builder;
 pub mod builder;
 pub mod bus_id;
 pub(crate) mod buses;
@@ -31,6 +32,7 @@ pub mod message;
 pub mod miden_air;
 pub mod prover;
 
+pub use aux_builder::MidenLookupAuxBuilder;
 pub use builder::{EncodedLookupGroup, LookupBatch, LookupBuilder, LookupColumn, LookupGroup};
 pub use bus_id::NUM_BUS_IDS;
 pub use challenges::LookupChallenges;

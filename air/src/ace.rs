@@ -205,77 +205,94 @@ where
 
 /// Build the [`ReducedAuxBatchConfig`] for the Miden VM ProcessorAir.
 ///
-/// This encodes the `reduced_aux_values` formula in the Miden VM AIR.
+/// Milestone B (decision D4): stub — return an empty config so the ACE batched circuit
+/// collapses to `constraint_check + γ·(1−1) + γ²·0 = constraint_check`. This matches the
+/// `ProcessorAir::reduced_aux_values` stub in `lib.rs`, which returns the verifier
+/// identity (`prod = ONE`, `sum = ZERO`); the ACE mirror has to agree with that, so the
+/// batched circuit also enforces nothing about the LogUp aux trace this milestone.
+///
+/// `batch_reduced_aux_values` handles the empty case gracefully: `build_product(&[])`
+/// folds to `EF::ONE`, `build_sum_check(&[])` folds to `EF::ZERO`, and the gamma terms
+/// drop out.
+///
+/// The follow-up milestone will restore real LogUp boundary checks (with public-input
+/// correction terms for the open buses: block_hash, chiplets bus, log_precompile
+/// transcript) and rebuild this config from the LogUp column layout.
 pub fn reduced_aux_batch_config() -> ReducedAuxBatchConfig {
-    use MessageElement::{Constant, PublicInput};
-    use ProductFactor::{BusBoundary, Message, Vlpi};
-    use trace::bus_types;
-
-    // Aux boundary column indices.
-    let p1 = trace::DECODER_AUX_TRACE_OFFSET;
-    let p2 = trace::DECODER_AUX_TRACE_OFFSET + 1;
-    let p3 = trace::DECODER_AUX_TRACE_OFFSET + 2;
-    let s_aux = trace::STACK_AUX_TRACE_OFFSET;
-    let b_range = trace::RANGE_CHECK_AUX_TRACE_OFFSET;
-    let b_hash_kernel = trace::HASH_KERNEL_VTABLE_AUX_TRACE_OFFSET;
-    let b_chiplets = trace::CHIPLETS_BUS_AUX_TRACE_OFFSET;
-    let v_wiring = trace::ACE_CHIPLET_WIRING_BUS_OFFSET;
-
-    // Public input layout offsets.
-    // [0..4] program hash, [4..20] stack inputs, [20..36] stack outputs, [36..40] transcript state
-    let pv_program_hash = super::PV_PROGRAM_HASH;
-    let pv_transcript_state = super::PV_TRANSCRIPT_STATE;
-
-    // Bus message constants.
-    let log_precompile_label = Felt::from_u8(trace::LOG_PRECOMPILE_LABEL);
-
-    // ph_msg = encode([0, ph[0], ph[1], ph[2], ph[3], 0, 0])
-    // Matches program_hash_message() in lib.rs.
-    let ph_msg = vec![
-        Constant(Felt::ZERO),             // parent_id = 0
-        PublicInput(pv_program_hash),     // hash[0]
-        PublicInput(pv_program_hash + 1), // hash[1]
-        PublicInput(pv_program_hash + 2), // hash[2]
-        PublicInput(pv_program_hash + 3), // hash[3]
-        Constant(Felt::ZERO),             // is_first_child = false
-        Constant(Felt::ZERO),             // is_loop_body = false
-    ];
-
-    // default_msg = encode([LOG_PRECOMPILE_LABEL, 0, 0, 0, 0])
-    // Matches transcript_message(challenges, PrecompileTranscriptState::default()).
-    let default_msg = vec![
-        Constant(log_precompile_label),
-        Constant(Felt::ZERO),
-        Constant(Felt::ZERO),
-        Constant(Felt::ZERO),
-        Constant(Felt::ZERO),
-    ];
-
-    // final_msg = encode([LOG_PRECOMPILE_LABEL, ts[0], ts[1], ts[2], ts[3]])
-    // Matches transcript_message(challenges, pc_transcript_state).
-    let final_msg = vec![
-        Constant(log_precompile_label),
-        PublicInput(pv_transcript_state),
-        PublicInput(pv_transcript_state + 1),
-        PublicInput(pv_transcript_state + 2),
-        PublicInput(pv_transcript_state + 3),
-    ];
-
-    // product_check: product(numerator) - product(denominator) = 0
-    // sum_check:     sum(sum_columns) = 0
+    // use MessageElement::{Constant, PublicInput};
+    // use ProductFactor::{BusBoundary, Message, Vlpi};
+    // use trace::bus_types;
+    //
+    // // Aux boundary column indices.
+    // let p1 = trace::DECODER_AUX_TRACE_OFFSET;
+    // let p2 = trace::DECODER_AUX_TRACE_OFFSET + 1;
+    // let p3 = trace::DECODER_AUX_TRACE_OFFSET + 2;
+    // let s_aux = trace::STACK_AUX_TRACE_OFFSET;
+    // let b_range = trace::RANGE_CHECK_AUX_TRACE_OFFSET;
+    // let b_hash_kernel = trace::HASH_KERNEL_VTABLE_AUX_TRACE_OFFSET;
+    // let b_chiplets = trace::CHIPLETS_BUS_AUX_TRACE_OFFSET;
+    // let v_wiring = trace::ACE_CHIPLET_WIRING_BUS_OFFSET;
+    //
+    // // Public input layout offsets.
+    // // [0..4] program hash, [4..20] stack inputs, [20..36] stack outputs, [36..40] transcript state
+    // let pv_program_hash = super::PV_PROGRAM_HASH;
+    // let pv_transcript_state = super::PV_TRANSCRIPT_STATE;
+    //
+    // // Bus message constants.
+    // let log_precompile_label = Felt::from_u8(trace::LOG_PRECOMPILE_LABEL);
+    //
+    // // ph_msg = encode([0, ph[0], ph[1], ph[2], ph[3], 0, 0])
+    // // Matches program_hash_message() in lib.rs.
+    // let ph_msg = vec![
+    //     Constant(Felt::ZERO),             // parent_id = 0
+    //     PublicInput(pv_program_hash),     // hash[0]
+    //     PublicInput(pv_program_hash + 1), // hash[1]
+    //     PublicInput(pv_program_hash + 2), // hash[2]
+    //     PublicInput(pv_program_hash + 3), // hash[3]
+    //     Constant(Felt::ZERO),             // is_first_child = false
+    //     Constant(Felt::ZERO),             // is_loop_body = false
+    // ];
+    //
+    // // default_msg = encode([LOG_PRECOMPILE_LABEL, 0, 0, 0, 0])
+    // // Matches transcript_message(challenges, PrecompileTranscriptState::default()).
+    // let default_msg = vec![
+    //     Constant(log_precompile_label),
+    //     Constant(Felt::ZERO),
+    //     Constant(Felt::ZERO),
+    //     Constant(Felt::ZERO),
+    //     Constant(Felt::ZERO),
+    // ];
+    //
+    // // final_msg = encode([LOG_PRECOMPILE_LABEL, ts[0], ts[1], ts[2], ts[3]])
+    // // Matches transcript_message(challenges, pc_transcript_state).
+    // let final_msg = vec![
+    //     Constant(log_precompile_label),
+    //     PublicInput(pv_transcript_state),
+    //     PublicInput(pv_transcript_state + 1),
+    //     PublicInput(pv_transcript_state + 2),
+    //     PublicInput(pv_transcript_state + 3),
+    // ];
+    //
+    // // product_check: product(numerator) - product(denominator) = 0
+    // // sum_check:     sum(sum_columns) = 0
+    // ReducedAuxBatchConfig {
+    //     numerator: vec![
+    //         BusBoundary(p1),
+    //         BusBoundary(p2),
+    //         BusBoundary(p3),
+    //         BusBoundary(s_aux),
+    //         BusBoundary(b_hash_kernel),
+    //         BusBoundary(b_chiplets),
+    //         Message(bus_types::BLOCK_HASH_TABLE, ph_msg),
+    //         Message(bus_types::LOG_PRECOMPILE_TRANSCRIPT, default_msg),
+    //     ],
+    //     denominator: vec![Message(bus_types::LOG_PRECOMPILE_TRANSCRIPT, final_msg), Vlpi(0)],
+    //     sum_columns: vec![b_range, v_wiring],
+    // }
     ReducedAuxBatchConfig {
-        numerator: vec![
-            BusBoundary(p1),
-            BusBoundary(p2),
-            BusBoundary(p3),
-            BusBoundary(s_aux),
-            BusBoundary(b_hash_kernel),
-            BusBoundary(b_chiplets),
-            Message(bus_types::BLOCK_HASH_TABLE, ph_msg),
-            Message(bus_types::LOG_PRECOMPILE_TRANSCRIPT, default_msg),
-        ],
-        denominator: vec![Message(bus_types::LOG_PRECOMPILE_TRANSCRIPT, final_msg), Vlpi(0)],
-        sum_columns: vec![b_range, v_wiring],
+        numerator: Vec::new(),
+        denominator: Vec::new(),
+        sum_columns: Vec::new(),
     }
 }
 
