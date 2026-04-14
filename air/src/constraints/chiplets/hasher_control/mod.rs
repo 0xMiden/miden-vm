@@ -10,23 +10,23 @@
 //!
 //! ## Sub-modules
 //!
-//! - [`flags`]: Pure row-kind [`ControllerFlags`](flags::ControllerFlags) — compositions of
-//!   `(s0, s1, s2)` on current and next rows. Contains no chiplet-level scope; combined with
+//! - [`flags`]: Pure row-kind [`ControllerFlags`](flags::ControllerFlags) — compositions of `(s0,
+//!   s1, s2)` on current and next rows. Contains no chiplet-level scope; combined with
 //!   [`ChipletFlags`] at each call site.
 //!
 //! ## Constraint layout (narrative by operation lifetime)
 //!
 //! Constraints are organized in the order an operation walks through them:
 //!
-//! 1. **Trace skeleton** — first-row boundary, selector booleanity, adjacency/stability rules
-//!    that don't depend on the operation kind. These are the trace-layout invariants.
-//! 2. **Operation start** — input is_boundary booleanity and the input→output adjacency law
-//!    that every operation hits on its first row.
-//! 3. **Sponge operations** (LINEAR_HASH / 2-to-1 / HPERM) — input state pinning plus the
-//!    respan capacity preservation that glues multi-batch spans.
-//! 4. **Merkle operations** (MP / MV / MU) — per-level input state, cross-level transitions
-//!    (index continuity, direction bit propagation, digest routing), and the MRUPDATE
-//!    domain-separator progression.
+//! 1. **Trace skeleton** — first-row boundary, selector booleanity, adjacency/stability rules that
+//!    don't depend on the operation kind. These are the trace-layout invariants.
+//! 2. **Operation start** — input is_boundary booleanity and the input→output adjacency law that
+//!    every operation hits on its first row.
+//! 3. **Sponge operations** (LINEAR_HASH / 2-to-1 / HPERM) — input state pinning plus the respan
+//!    capacity preservation that glues multi-batch spans.
+//! 4. **Merkle operations** (MP / MV / MU) — per-level input state, cross-level transitions (index
+//!    continuity, direction bit propagation, digest routing), and the MRUPDATE domain-separator
+//!    progression.
 //! 5. **Operation end** — output is_boundary booleanity and the HOUT / SOUT return-value
 //!    constraints.
 //!
@@ -106,9 +106,7 @@ pub fn enforce_controller_constraints<AB>(
     // or Merkle path level 0); `is_boundary = 0` elsewhere. Hoisted to
     // `when(is_active)` because input ∪ output ∪ padding covers every ctrl row
     // — padding forces it to 0 (§1 below) and input/output use it as a bit.
-    builder
-        .when(chiplet.is_active.clone())
-        .assert_bool(cols.is_boundary);
+    builder.when(chiplet.is_active.clone()).assert_bool(cols.is_boundary);
 
     // --- Output non-adjacency ---
     // An output row cannot be followed by another output row. Combined with the
@@ -158,9 +156,7 @@ pub fn enforce_controller_constraints<AB>(
     // adjacency rule below (which relies on `s_ctrl'` so that `s0'/s1'` are
     // binary on the next row) would have a hole at the ctrl→perm transition.
     // `chiplet.is_last = s_ctrl * (1 - s_ctrl')` fires exactly on that boundary.
-    builder
-        .when(chiplet.is_last.clone())
-        .assert_zero(rows.is_input.clone());
+    builder.when(chiplet.is_last.clone()).assert_zero(rows.is_input.clone());
 
     // --- Input→output adjacency on ctrl→ctrl transitions ---
     // On a ctrl→ctrl transition from an input row, the next row must be an
@@ -232,11 +228,11 @@ pub fn enforce_controller_constraints<AB>(
 
     // --- Merkle input state ---
     // On each Merkle input row:
-    //   - index decomposition: `idx = 2 * idx_next + direction_bit` threads
-    //     the path bits down one level at a time
+    //   - index decomposition: `idx = 2 * idx_next + direction_bit` threads the path bits down one
+    //     level at a time
     //   - direction_bit is binary (left/right child selector)
-    //   - capacity lanes h[8..12] are zeroed so each 2-to-1 compression
-    //     starts with a clean sponge capacity
+    //   - capacity lanes h[8..12] are zeroed so each 2-to-1 compression starts with a clean sponge
+    //     capacity
     // Degree: is_active(1) * is_merkle_input(3) * diff(1) = 5 (on the decomp assert).
     {
         let gate = chiplet.is_active.clone() * rows.is_merkle_input.clone();
@@ -286,17 +282,18 @@ pub fn enforce_controller_constraints<AB>(
     // - `direction_bit = 0`: digest goes to rate0 of input_{i+1} (`h_next[j]`)
     // - `direction_bit = 1`: digest goes to rate1 of input_{i+1} (`h_next[4+j]`)
     //
-    // Uses the lightweight `merkle_next_lite = s1' + s2'` (degree 1) instead of the
-    // full `is_merkle_input_next` (degree 3) to keep routing within the system's
-    // max degree of 9. See `ControllerFlags::merkle_next_lite` for the soundness
-    // argument (sponge mis-labeling is caught by the bus).
-    // Gate: is_active(1) * is_output(2) * !is_boundary(1) * merkle_next_lite(1) = 5
-    // Constraint degree: gate(5) * inner(2) = 7
+    // Uses the full `is_merkle_input_next = s0' * (s1' + s2' - s1'*s2')` (degree 3)
+    // so the gate fires exclusively on genuine Merkle input continuations. This
+    // sits the constraint at exactly the max degree of 9, trading 2 degrees of
+    // headroom for local soundness: no bus invariant is required to reject
+    // sponge-mislabeling attacks, because the `s0'` factor already forbids them.
+    // Gate: is_active(1) * is_output(2) * !is_boundary(1) * is_merkle_input_next(3) = 7
+    // Constraint degree: gate(7) * inner(2) = 9
     {
         let gate = chiplet.is_active.clone()
             * rows.is_output.clone()
             * not_boundary
-            * rows.merkle_next_lite.clone();
+            * rows.is_merkle_input_next.clone();
         let builder = &mut builder.when(gate);
 
         // Forward propagation: direction_bit on output = direction_bit on next input.

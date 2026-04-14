@@ -31,8 +31,8 @@
 //!   In sponge mode, capacity is set once on the first input and carried through across
 //!   continuations; in tree mode (Merkle ops), capacity is zeroed at every level.
 //! - **MP**: MPVERIFY — read-only Merkle path check. Does not interact with the sibling table.
-//! - **MV**: old-path leg of MRUPDATE. Each MV row inserts a sibling into the virtual sibling
-//!   table via the hash_kernel bus.
+//! - **MV**: old-path leg of MRUPDATE. Each MV row inserts a sibling into the virtual sibling table
+//!   via the hash_kernel bus.
 //! - **MU**: new-path leg of MRUPDATE. Each MU row removes a sibling from the virtual sibling
 //!   table. The table balance ensures the same siblings are used for both the old and new paths.
 
@@ -92,21 +92,6 @@ pub struct ControllerFlags<E> {
 
     /// Next row is an MV input — old-path MRUPDATE start: `s0'*s1'*(1-s2')` (deg 3).
     pub is_mv_input_next: E,
-
-    // ========================================================================
-    // Degree-optimized special
-    // ========================================================================
-    /// `s1' + s2'` — degree-1 Merkle-next indicator.
-    ///
-    /// Non-boolean (MU gives 2) but zero exactly on non-Merkle controller inputs
-    /// (sponge has `s1=s2=0`). Used in digest routing where the full
-    /// `is_merkle_input_next` (deg 3) would push the constraint over the degree cap.
-    ///
-    /// Soundness: a malicious prover could mislabel a Merkle input as sponge
-    /// (`s1=s2=0`) to zero this selector and bypass routing. This is caught by the
-    /// bus: any `(1,0,0)` input row fires `f_sponge` and generates a sponge bus
-    /// message with no matching decoder request.
-    pub merkle_next_lite: E,
 }
 
 impl<E: PrimeCharacteristicRing + Clone> ControllerFlags<E> {
@@ -141,8 +126,7 @@ impl<E: PrimeCharacteristicRing + Clone> ControllerFlags<E> {
         let is_sponge_input_next = s0n.clone() * not_s1n * not_s2n.clone();
         let is_merkle_input_next =
             s0n.clone() * (s1n.clone() + s2n.clone() - s1n.clone() * s2n.clone());
-        let is_mv_input_next = s0n * s1n.clone() * not_s2n;
-        let merkle_next_lite = s1n + s2n;
+        let is_mv_input_next = s0n * s1n * not_s2n;
 
         Self {
             is_input,
@@ -157,7 +141,6 @@ impl<E: PrimeCharacteristicRing + Clone> ControllerFlags<E> {
             is_sponge_input_next,
             is_merkle_input_next,
             is_mv_input_next,
-            merkle_next_lite,
         }
     }
 }
