@@ -12,7 +12,7 @@
 
 use miden_core::field::{Algebra, PrimeCharacteristicRing};
 
-use crate::trace::Challenges;
+use crate::trace::{Challenges, bus_types};
 
 // TRAIT
 // ================================================================================================
@@ -189,45 +189,54 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
         EF: PrimeCharacteristicRing + Algebra<E>,
     {
         match self {
-            Self::State { label_value, addr, node_index, state } => challenges.encode([
-                E::from_u16(*label_value),
-                addr.clone(),
-                node_index.clone(),
-                state[0].clone(),
-                state[1].clone(),
-                state[2].clone(),
-                state[3].clone(),
-                state[4].clone(),
-                state[5].clone(),
-                state[6].clone(),
-                state[7].clone(),
-                state[8].clone(),
-                state[9].clone(),
-                state[10].clone(),
-                state[11].clone(),
-            ]),
-            Self::Rate { label_value, addr, node_index, rate } => challenges.encode([
-                E::from_u16(*label_value),
-                addr.clone(),
-                node_index.clone(),
-                rate[0].clone(),
-                rate[1].clone(),
-                rate[2].clone(),
-                rate[3].clone(),
-                rate[4].clone(),
-                rate[5].clone(),
-                rate[6].clone(),
-                rate[7].clone(),
-            ]),
-            Self::Word { label_value, addr, node_index, word } => challenges.encode([
-                E::from_u16(*label_value),
-                addr.clone(),
-                node_index.clone(),
-                word[0].clone(),
-                word[1].clone(),
-                word[2].clone(),
-                word[3].clone(),
-            ]),
+            Self::State { label_value, addr, node_index, state } => challenges.encode(
+                bus_types::CHIPLETS_BUS,
+                [
+                    E::from_u16(*label_value),
+                    addr.clone(),
+                    node_index.clone(),
+                    state[0].clone(),
+                    state[1].clone(),
+                    state[2].clone(),
+                    state[3].clone(),
+                    state[4].clone(),
+                    state[5].clone(),
+                    state[6].clone(),
+                    state[7].clone(),
+                    state[8].clone(),
+                    state[9].clone(),
+                    state[10].clone(),
+                    state[11].clone(),
+                ],
+            ),
+            Self::Rate { label_value, addr, node_index, rate } => challenges.encode(
+                bus_types::CHIPLETS_BUS,
+                [
+                    E::from_u16(*label_value),
+                    addr.clone(),
+                    node_index.clone(),
+                    rate[0].clone(),
+                    rate[1].clone(),
+                    rate[2].clone(),
+                    rate[3].clone(),
+                    rate[4].clone(),
+                    rate[5].clone(),
+                    rate[6].clone(),
+                    rate[7].clone(),
+                ],
+            ),
+            Self::Word { label_value, addr, node_index, word } => challenges.encode(
+                bus_types::CHIPLETS_BUS,
+                [
+                    E::from_u16(*label_value),
+                    addr.clone(),
+                    node_index.clone(),
+                    word[0].clone(),
+                    word[1].clone(),
+                    word[2].clone(),
+                    word[3].clone(),
+                ],
+            ),
         }
     }
 }
@@ -313,23 +322,29 @@ impl<E: PrimeCharacteristicRing + Clone> MemoryMsg<E> {
         EF: PrimeCharacteristicRing + Algebra<E>,
     {
         match self {
-            Self::Element { op_value, header, element } => challenges.encode([
-                E::from_u16(*op_value),
-                header.ctx.clone(),
-                header.addr.clone(),
-                header.clk.clone(),
-                element.clone(),
-            ]),
-            Self::Word { op_value, header, word } => challenges.encode([
-                E::from_u16(*op_value),
-                header.ctx.clone(),
-                header.addr.clone(),
-                header.clk.clone(),
-                word[0].clone(),
-                word[1].clone(),
-                word[2].clone(),
-                word[3].clone(),
-            ]),
+            Self::Element { op_value, header, element } => challenges.encode(
+                bus_types::CHIPLETS_BUS,
+                [
+                    E::from_u16(*op_value),
+                    header.ctx.clone(),
+                    header.addr.clone(),
+                    header.clk.clone(),
+                    element.clone(),
+                ],
+            ),
+            Self::Word { op_value, header, word } => challenges.encode(
+                bus_types::CHIPLETS_BUS,
+                [
+                    E::from_u16(*op_value),
+                    header.ctx.clone(),
+                    header.addr.clone(),
+                    header.clk.clone(),
+                    word[0].clone(),
+                    word[1].clone(),
+                    word[2].clone(),
+                    word[3].clone(),
+                ],
+            ),
         }
     }
 }
@@ -365,12 +380,15 @@ impl<E: PrimeCharacteristicRing + Clone> BitwiseMsg<E> {
     where
         EF: PrimeCharacteristicRing + Algebra<E>,
     {
-        challenges.encode([
-            E::from_u16(self.op_value),
-            self.a.clone(),
-            self.b.clone(),
-            self.result.clone(),
-        ])
+        challenges.encode(
+            bus_types::CHIPLETS_BUS,
+            [
+                E::from_u16(self.op_value),
+                self.a.clone(),
+                self.b.clone(),
+                self.result.clone(),
+            ],
+        )
     }
 }
 
@@ -408,18 +426,21 @@ impl<E: PrimeCharacteristicRing + Clone> BlockStackMsg<E> {
         EF: PrimeCharacteristicRing + Algebra<E>,
     {
         match self {
-            Self::Simple { block_id, parent_id, is_loop } => challenges.encode([
-                block_id.clone(),
-                parent_id.clone(),
-                is_loop.clone(),
-                E::ZERO,
-                E::ZERO,
-                E::ZERO,
-                E::ZERO,
-                E::ZERO,
-                E::ZERO,
-                E::ZERO,
-            ]),
+            Self::Simple { block_id, parent_id, is_loop } => challenges.encode(
+                bus_types::BLOCK_STACK_TABLE,
+                [
+                    block_id.clone(),
+                    parent_id.clone(),
+                    is_loop.clone(),
+                    E::ZERO,
+                    E::ZERO,
+                    E::ZERO,
+                    E::ZERO,
+                    E::ZERO,
+                    E::ZERO,
+                    E::ZERO,
+                ],
+            ),
             Self::Full {
                 block_id,
                 parent_id,
@@ -428,18 +449,21 @@ impl<E: PrimeCharacteristicRing + Clone> BlockStackMsg<E> {
                 fmp,
                 depth,
                 fn_hash,
-            } => challenges.encode([
-                block_id.clone(),
-                parent_id.clone(),
-                is_loop.clone(),
-                ctx.clone(),
-                fmp.clone(),
-                depth.clone(),
-                fn_hash[0].clone(),
-                fn_hash[1].clone(),
-                fn_hash[2].clone(),
-                fn_hash[3].clone(),
-            ]),
+            } => challenges.encode(
+                bus_types::BLOCK_STACK_TABLE,
+                [
+                    block_id.clone(),
+                    parent_id.clone(),
+                    is_loop.clone(),
+                    ctx.clone(),
+                    fmp.clone(),
+                    depth.clone(),
+                    fn_hash[0].clone(),
+                    fn_hash[1].clone(),
+                    fn_hash[2].clone(),
+                    fn_hash[3].clone(),
+                ],
+            ),
         }
     }
 }
@@ -489,15 +513,18 @@ impl<E: PrimeCharacteristicRing + Clone> BlockHashMsg<E> {
                 is_loop_body,
             } => (parent, child_hash, is_first_child.clone(), is_loop_body.clone()),
         };
-        challenges.encode([
-            parent.clone(),
-            child_hash[0].clone(),
-            child_hash[1].clone(),
-            child_hash[2].clone(),
-            child_hash[3].clone(),
-            is_first_child,
-            is_loop_body,
-        ])
+        challenges.encode(
+            bus_types::BLOCK_HASH_TABLE,
+            [
+                parent.clone(),
+                child_hash[0].clone(),
+                child_hash[1].clone(),
+                child_hash[2].clone(),
+                child_hash[3].clone(),
+                is_first_child,
+                is_loop_body,
+            ],
+        )
     }
 }
 
@@ -526,7 +553,10 @@ impl<E: PrimeCharacteristicRing + Clone> OpGroupMsg<E> {
     where
         EF: PrimeCharacteristicRing + Algebra<E>,
     {
-        challenges.encode([self.batch_id.clone(), self.group_pos.clone(), self.group_value.clone()])
+        challenges.encode(
+            bus_types::OP_GROUP_TABLE,
+            [self.batch_id.clone(), self.group_pos.clone(), self.group_value.clone()],
+        )
     }
 }
 
@@ -549,7 +579,10 @@ impl<E: PrimeCharacteristicRing + Clone> OverflowMsg<E> {
     where
         EF: PrimeCharacteristicRing + Algebra<E>,
     {
-        challenges.encode([self.clk.clone(), self.val.clone(), self.prev.clone()])
+        challenges.encode(
+            bus_types::STACK_OVERFLOW_TABLE,
+            [self.clk.clone(), self.val.clone(), self.prev.clone()],
+        )
     }
 }
 
@@ -586,13 +619,16 @@ impl<E: PrimeCharacteristicRing + Clone> KernelRomMsg<E> {
     where
         EF: PrimeCharacteristicRing + Algebra<E>,
     {
-        challenges.encode([
-            E::from_u16(self.label),
-            self.digest[0].clone(),
-            self.digest[1].clone(),
-            self.digest[2].clone(),
-            self.digest[3].clone(),
-        ])
+        challenges.encode(
+            bus_types::CHIPLETS_BUS,
+            [
+                E::from_u16(self.label),
+                self.digest[0].clone(),
+                self.digest[1].clone(),
+                self.digest[2].clone(),
+                self.digest[3].clone(),
+            ],
+        )
     }
 }
 
@@ -617,14 +653,17 @@ impl<E: PrimeCharacteristicRing + Clone> AceInitMsg<E> {
     where
         EF: PrimeCharacteristicRing + Algebra<E>,
     {
-        challenges.encode([
-            E::from_u16(Self::LABEL),
-            self.clk.clone(),
-            self.ctx.clone(),
-            self.ptr.clone(),
-            self.num_read.clone(),
-            self.num_eval.clone(),
-        ])
+        challenges.encode(
+            bus_types::CHIPLETS_BUS,
+            [
+                E::from_u16(Self::LABEL),
+                self.clk.clone(),
+                self.ctx.clone(),
+                self.ptr.clone(),
+                self.num_read.clone(),
+                self.num_eval.clone(),
+            ],
+        )
     }
 }
 
@@ -644,7 +683,7 @@ impl<E: PrimeCharacteristicRing + Clone> RangeMsg<E> {
     where
         EF: PrimeCharacteristicRing + Algebra<E>,
     {
-        challenges.encode([self.value.clone()])
+        challenges.encode(bus_types::RANGE_CHECK_BUS, [self.value.clone()])
     }
 }
 
@@ -665,13 +704,16 @@ impl<E: PrimeCharacteristicRing + Clone> LogCapacityMsg<E> {
     where
         EF: PrimeCharacteristicRing + Algebra<E>,
     {
-        challenges.encode([
-            E::from_u16(Self::LABEL),
-            self.capacity[0].clone(),
-            self.capacity[1].clone(),
-            self.capacity[2].clone(),
-            self.capacity[3].clone(),
-        ])
+        challenges.encode(
+            bus_types::LOG_PRECOMPILE_TRANSCRIPT,
+            [
+                E::from_u16(Self::LABEL),
+                self.capacity[0].clone(),
+                self.capacity[1].clone(),
+                self.capacity[2].clone(),
+                self.capacity[3].clone(),
+            ],
+        )
     }
 }
 
@@ -706,6 +748,7 @@ impl<E: PrimeCharacteristicRing + Clone> SiblingMsg<E> {
         EF: PrimeCharacteristicRing + Algebra<E>,
     {
         let v_b0 = challenges.encode_sparse(
+            bus_types::SIBLING_TABLE,
             Self::B0_LAYOUT,
             [
                 self.node_index.clone(),
@@ -716,6 +759,7 @@ impl<E: PrimeCharacteristicRing + Clone> SiblingMsg<E> {
             ],
         );
         let v_b1 = challenges.encode_sparse(
+            bus_types::SIBLING_TABLE,
             Self::B1_LAYOUT,
             [
                 self.node_index.clone(),
@@ -750,13 +794,16 @@ impl<E: PrimeCharacteristicRing + Clone> AceWireMsg<E> {
     where
         EF: PrimeCharacteristicRing + Algebra<E>,
     {
-        challenges.encode([
-            self.clk.clone(),
-            self.ctx.clone(),
-            self.id.clone(),
-            self.v0.clone(),
-            self.v1.clone(),
-        ])
+        challenges.encode(
+            bus_types::ACE_WIRING_BUS,
+            [
+                self.clk.clone(),
+                self.ctx.clone(),
+                self.id.clone(),
+                self.v0.clone(),
+                self.v1.clone(),
+            ],
+        )
     }
 }
 
@@ -784,23 +831,29 @@ impl<E: PrimeCharacteristicRing + Clone> MemoryResponseMsg<E> {
     where
         EF: PrimeCharacteristicRing + Algebra<E>,
     {
-        let element_msg = challenges.encode([
-            self.label.clone(),
-            self.ctx.clone(),
-            self.addr.clone(),
-            self.clk.clone(),
-            self.element.clone(),
-        ]);
-        let word_msg = challenges.encode([
-            self.label.clone(),
-            self.ctx.clone(),
-            self.addr.clone(),
-            self.clk.clone(),
-            self.word[0].clone(),
-            self.word[1].clone(),
-            self.word[2].clone(),
-            self.word[3].clone(),
-        ]);
+        let element_msg = challenges.encode(
+            bus_types::CHIPLETS_BUS,
+            [
+                self.label.clone(),
+                self.ctx.clone(),
+                self.addr.clone(),
+                self.clk.clone(),
+                self.element.clone(),
+            ],
+        );
+        let word_msg = challenges.encode(
+            bus_types::CHIPLETS_BUS,
+            [
+                self.label.clone(),
+                self.ctx.clone(),
+                self.addr.clone(),
+                self.clk.clone(),
+                self.word[0].clone(),
+                self.word[1].clone(),
+                self.word[2].clone(),
+                self.word[3].clone(),
+            ],
+        );
         let is_element: E = E::ONE - self.is_word.clone();
         element_msg * is_element + word_msg * self.is_word.clone()
     }
@@ -821,13 +874,16 @@ impl<E: PrimeCharacteristicRing + Clone> KernelRomResponseMsg<E> {
     where
         EF: PrimeCharacteristicRing + Algebra<E>,
     {
-        challenges.encode([
-            self.label.clone(),
-            self.digest[0].clone(),
-            self.digest[1].clone(),
-            self.digest[2].clone(),
-            self.digest[3].clone(),
-        ])
+        challenges.encode(
+            bus_types::CHIPLETS_BUS,
+            [
+                self.label.clone(),
+                self.digest[0].clone(),
+                self.digest[1].clone(),
+                self.digest[2].clone(),
+                self.digest[3].clone(),
+            ],
+        )
     }
 }
 
@@ -848,7 +904,10 @@ impl<E: PrimeCharacteristicRing + Clone> BitwiseResponseMsg<E> {
     where
         EF: PrimeCharacteristicRing + Algebra<E>,
     {
-        challenges.encode([self.label.clone(), self.a.clone(), self.b.clone(), self.z.clone()])
+        challenges.encode(
+            bus_types::CHIPLETS_BUS,
+            [self.label.clone(), self.a.clone(), self.b.clone(), self.z.clone()],
+        )
     }
 }
 
@@ -914,7 +973,7 @@ impl_logup_message!(BitwiseResponseMsg);
 //     field needs restructuring into per-bus variants by Task #6 before they can implement the new
 //     trait.
 
-use super::lookup::{LookupChallenges, message::LookupMessage};
+use super::lookup::message::LookupMessage;
 
 // --- HasherMsg (BUS_CHIPLETS; label_value at β⁰) -------------------------------------------------
 
@@ -923,7 +982,7 @@ where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
-    fn encode(&self, challenges: &LookupChallenges<EF>) -> EF {
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_CHIPLETS;
         let bp = &challenges.beta_powers;
         let mut acc = challenges.bus_prefix[BUS_CHIPLETS as usize].clone();
@@ -964,7 +1023,7 @@ where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
-    fn encode(&self, challenges: &LookupChallenges<EF>) -> EF {
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_CHIPLETS;
         let bp = &challenges.beta_powers;
         let mut acc = challenges.bus_prefix[BUS_CHIPLETS as usize].clone();
@@ -997,7 +1056,7 @@ where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
-    fn encode(&self, challenges: &LookupChallenges<EF>) -> EF {
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_CHIPLETS;
         let bp = &challenges.beta_powers;
         let mut acc = challenges.bus_prefix[BUS_CHIPLETS as usize].clone();
@@ -1016,7 +1075,7 @@ where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
-    fn encode(&self, challenges: &LookupChallenges<EF>) -> EF {
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_BLOCK_STACK_TABLE;
         let bp = &challenges.beta_powers;
         let mut acc = challenges.bus_prefix[BUS_BLOCK_STACK_TABLE as usize].clone();
@@ -1060,7 +1119,7 @@ where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
-    fn encode(&self, challenges: &LookupChallenges<EF>) -> EF {
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_BLOCK_HASH_TABLE;
         let bp = &challenges.beta_powers;
         // Per-variant fan-in: produce the (parent, child_hash, is_first_child, is_loop_body)
@@ -1095,7 +1154,7 @@ where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
-    fn encode(&self, challenges: &LookupChallenges<EF>) -> EF {
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_OP_GROUP_TABLE;
         let bp = &challenges.beta_powers;
         let mut acc = challenges.bus_prefix[BUS_OP_GROUP_TABLE as usize].clone();
@@ -1113,7 +1172,7 @@ where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
-    fn encode(&self, challenges: &LookupChallenges<EF>) -> EF {
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_STACK_OVERFLOW_TABLE;
         let bp = &challenges.beta_powers;
         let mut acc = challenges.bus_prefix[BUS_STACK_OVERFLOW_TABLE as usize].clone();
@@ -1131,7 +1190,7 @@ where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
-    fn encode(&self, challenges: &LookupChallenges<EF>) -> EF {
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_CHIPLETS;
         let bp = &challenges.beta_powers;
         let mut acc = challenges.bus_prefix[BUS_CHIPLETS as usize].clone();
@@ -1150,7 +1209,7 @@ where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
-    fn encode(&self, challenges: &LookupChallenges<EF>) -> EF {
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_CHIPLETS;
         let bp = &challenges.beta_powers;
         let mut acc = challenges.bus_prefix[BUS_CHIPLETS as usize].clone();
@@ -1171,7 +1230,7 @@ where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
-    fn encode(&self, challenges: &LookupChallenges<EF>) -> EF {
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_RANGE_CHECK;
         let bp = &challenges.beta_powers;
         let mut acc = challenges.bus_prefix[BUS_RANGE_CHECK as usize].clone();
@@ -1187,7 +1246,7 @@ where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
-    fn encode(&self, challenges: &LookupChallenges<EF>) -> EF {
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_LOG_PRECOMPILE_TRANSCRIPT;
         let bp = &challenges.beta_powers;
         let mut acc = challenges.bus_prefix[BUS_LOG_PRECOMPILE_TRANSCRIPT as usize].clone();
@@ -1206,7 +1265,7 @@ where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
-    fn encode(&self, challenges: &LookupChallenges<EF>) -> EF {
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_ACE_WIRING;
         let bp = &challenges.beta_powers;
         let mut acc = challenges.bus_prefix[BUS_ACE_WIRING as usize].clone();
@@ -1234,7 +1293,7 @@ where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
-    fn encode(&self, challenges: &LookupChallenges<EF>) -> EF {
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_CHIPLETS;
         let bp = &challenges.beta_powers;
         let prefix = challenges.bus_prefix[BUS_CHIPLETS as usize].clone();
@@ -1268,7 +1327,7 @@ where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
-    fn encode(&self, challenges: &LookupChallenges<EF>) -> EF {
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_CHIPLETS;
         let bp = &challenges.beta_powers;
         let mut acc = challenges.bus_prefix[BUS_CHIPLETS as usize].clone();
@@ -1285,7 +1344,7 @@ where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
-    fn encode(&self, challenges: &LookupChallenges<EF>) -> EF {
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_CHIPLETS;
         let bp = &challenges.beta_powers;
         let mut acc = challenges.bus_prefix[BUS_CHIPLETS as usize].clone();
@@ -1366,7 +1425,7 @@ where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
-    fn encode(&self, challenges: &LookupChallenges<EF>) -> EF {
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_CHIPLETS;
         use crate::trace::chiplets::memory::MEMORY_READ_ELEMENT_LABEL;
         let bp = &challenges.beta_powers;
@@ -1385,7 +1444,7 @@ where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
-    fn encode(&self, challenges: &LookupChallenges<EF>) -> EF {
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_CHIPLETS;
         use crate::trace::chiplets::memory::MEMORY_WRITE_ELEMENT_LABEL;
         let bp = &challenges.beta_powers;
@@ -1404,7 +1463,7 @@ where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
-    fn encode(&self, challenges: &LookupChallenges<EF>) -> EF {
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_CHIPLETS;
         use crate::trace::chiplets::memory::MEMORY_READ_WORD_LABEL;
         let bp = &challenges.beta_powers;
@@ -1425,7 +1484,7 @@ where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
-    fn encode(&self, challenges: &LookupChallenges<EF>) -> EF {
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_CHIPLETS;
         use crate::trace::chiplets::memory::MEMORY_WRITE_WORD_LABEL;
         let bp = &challenges.beta_powers;
@@ -1460,7 +1519,7 @@ where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
-    fn encode(&self, challenges: &LookupChallenges<EF>) -> EF {
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_CHIPLETS;
         // KERNEL_PROC_CALL_LABEL = Felt::new(0b001111 + 1) = 16.
         const CALL_LABEL: u16 = 16;
@@ -1479,7 +1538,7 @@ where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
-    fn encode(&self, challenges: &LookupChallenges<EF>) -> EF {
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_CHIPLETS;
         // KERNEL_PROC_INIT_LABEL = Felt::new(0b101111 + 1) = 48.
         const INIT_LABEL: u16 = 48;
@@ -1516,7 +1575,7 @@ where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
-    fn encode(&self, challenges: &LookupChallenges<EF>) -> EF {
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_CHIPLETS;
         // BITWISE_AND_LABEL = Felt::new(0b001 + 1) = 2.
         const AND_LABEL: u16 = 2;
@@ -1535,7 +1594,7 @@ where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
-    fn encode(&self, challenges: &LookupChallenges<EF>) -> EF {
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_CHIPLETS;
         // BITWISE_XOR_LABEL = Felt::new(0b101 + 1) = 6.
         const XOR_LABEL: u16 = 6;
@@ -1577,7 +1636,7 @@ where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
-    fn encode(&self, challenges: &LookupChallenges<EF>) -> EF {
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_SIBLING_TABLE;
         let bp = &challenges.beta_powers;
         let mut acc = challenges.bus_prefix[BUS_SIBLING_TABLE as usize].clone();
@@ -1596,7 +1655,7 @@ where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
-    fn encode(&self, challenges: &LookupChallenges<EF>) -> EF {
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
         use super::lookup::bus_id::BUS_SIBLING_TABLE;
         let bp = &challenges.beta_powers;
         let mut acc = challenges.bus_prefix[BUS_SIBLING_TABLE as usize].clone();

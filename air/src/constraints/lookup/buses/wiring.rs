@@ -23,7 +23,7 @@
 use miden_core::field::PrimeCharacteristicRing;
 
 use crate::{
-    Felt, MainTraceRow,
+    Felt, MainCols,
     constraints::{
         logup_msg::AceWireMsg,
         lookup::{LookupBatch, LookupBuilder, LookupColumn, LookupGroup},
@@ -34,23 +34,30 @@ use crate::{
     },
 };
 
-/// ACE chiplet column offset (after s0, s1, s2, s3 chiplet selectors).
+/// ACE chiplet column offset within `MainCols::chiplets` (s_ctrl + s1..s3 = 4 selector slots
+/// before the ACE data starts; s4 overlaps the first ACE column).
 const ACE_OFFSET: usize = 4;
 
 /// Emit the ACE wiring bus (C3).
 pub(in crate::constraints::lookup) fn emit_ace_wiring<LB>(
     builder: &mut LB,
-    local: &MainTraceRow<LB::Var>,
-    _next: &MainTraceRow<LB::Var>,
+    local: &MainCols<LB::Var>,
+    _next: &MainCols<LB::Var>,
 ) where
     LB: LookupBuilder<F = Felt>,
 {
-    let s0: LB::Expr = local.chiplets[0].into();
+    // Old layout: ace_flag = s0*s1*s2*(1-s3) where chiplets[0..4] = [s0, s1, s2, s3].
+    // New layout: virtual s0 = 1 - s_ctrl - s_perm; s1..s4 live in chiplets[1..5].
+    // ACE flag formula `s0*s1*s2*(1-s3)` is preserved (matches `is_ace = s012 - s0123`
+    // in `chiplets::selectors::build_chiplet_selectors`).
+    let s_ctrl: LB::Expr = local.chiplets[0].into();
+    let s_perm: LB::Expr = local.perm_seg.into();
+    let virtual_s0: LB::Expr = LB::Expr::ONE - s_ctrl - s_perm;
     let s1: LB::Expr = local.chiplets[1].into();
     let s2: LB::Expr = local.chiplets[2].into();
     let s3: LB::Expr = local.chiplets[3].into();
 
-    let ace_flag: LB::Expr = s0 * s1 * s2 * (LB::Expr::ONE - s3);
+    let ace_flag: LB::Expr = virtual_s0 * s1 * s2 * (LB::Expr::ONE - s3);
     let sblock: LB::Expr = local.chiplets[ACE_OFFSET + SELECTOR_BLOCK_IDX].into();
 
     let clk: LB::Expr = local.chiplets[ACE_OFFSET + CLK_IDX].into();

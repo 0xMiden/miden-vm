@@ -384,8 +384,8 @@ impl<'g> EncodedLookupGroup for DualEncodedGroup<'g> {
         &self.challenges.beta_powers[..]
     }
 
-    fn bus_prefix(&self, bus_id: u16) -> Self::ExprEF {
-        self.challenges.bus_prefix[bus_id as usize]
+    fn bus_prefix(&self, bus_id: usize) -> Self::ExprEF {
+        self.challenges.bus_prefix[bus_id]
     }
 
     fn insert_encoded(

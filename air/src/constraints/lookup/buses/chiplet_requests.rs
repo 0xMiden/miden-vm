@@ -15,18 +15,17 @@ use core::array;
 use miden_core::{FMP_ADDR, FMP_INIT_VALUE, field::PrimeCharacteristicRing, operations::opcodes};
 
 use crate::{
-    Felt, MainTraceRow,
+    Felt, MainCols,
     constraints::{
         logup_msg::*,
         lookup::{
             EncodedLookupGroup, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
             bus_id::BUS_CHIPLETS,
         },
-        op_flags::{ExprDecoderAccess, OpFlags},
+        op_flags::OpFlags,
     },
     trace::{
         chiplets::hasher::{HASH_CYCLE_LEN, LINEAR_HASH_LABEL},
-        decoder::{ADDR_COL_IDX, HASHER_STATE_RANGE, USER_OP_HELPERS_OFFSET},
         log_precompile::{
             HELPER_ADDR_IDX, HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE, STACK_COMM_RANGE,
             STACK_R0_RANGE, STACK_R1_RANGE, STACK_TAG_RANGE,
@@ -38,8 +37,8 @@ use crate::{
 #[allow(clippy::too_many_lines)]
 pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
     builder: &mut LB,
-    local: &MainTraceRow<LB::Var>,
-    next: &MainTraceRow<LB::Var>,
+    local: &MainCols<LB::Var>,
+    next: &MainCols<LB::Var>,
 ) where
     LB: LookupBuilder<F = Felt>,
 {
@@ -191,31 +190,32 @@ where
     LB: LookupBuilder<F = Felt>,
 {
     #[allow(clippy::too_many_lines)]
-    fn new(local: &MainTraceRow<LB::Var>, next: &MainTraceRow<LB::Var>) -> Self {
+    fn new(local: &MainCols<LB::Var>, next: &MainCols<LB::Var>) -> Self {
         let dec = &local.decoder;
         let dec_next = &next.decoder;
         let stk = &local.stack;
         let stk_next = &next.stack;
 
-        let addr = dec[ADDR_COL_IDX];
-        let addr_next = dec_next[ADDR_COL_IDX];
-        let h: [LB::Var; 8] = array::from_fn(|i| dec[HASHER_STATE_RANGE.start + i]);
-        let helper0 = dec[USER_OP_HELPERS_OFFSET];
+        let addr = dec.addr;
+        let addr_next = dec_next.addr;
+        let h: [LB::Var; 8] = array::from_fn(|i| dec.hasher_state[i]);
+        let user_helpers = dec.user_op_helpers();
+        let helper0 = user_helpers[0];
 
-        let s0 = stk[0];
-        let s1 = stk[1];
-        let clk = local.clk;
-        let ctx = local.ctx;
-        let ctx_next = next.ctx;
+        let s0 = stk.get(0);
+        let s1 = stk.get(1);
+        let clk = local.system.clk;
+        let ctx = local.system.ctx;
+        let ctx_next = next.system.ctx;
 
         let he: [LB::Expr; 8] = h.map(Into::into);
         let h_first: [LB::Expr; 4] = array::from_fn(|i| he[i].clone());
-        let stk_words_0: [LB::Expr; 4] = array::from_fn(|i| stk[i].into());
-        let stk_next_words_0: [LB::Expr; 4] = array::from_fn(|i| stk_next[i].into());
-        let stk_state: [LB::Expr; 12] = array::from_fn(|i| stk[i].into());
-        let stk_next_state: [LB::Expr; 12] = array::from_fn(|i| stk_next[i].into());
-        let old_root: [LB::Expr; 4] = array::from_fn(|i| stk[6 + i].into());
-        let new_node: [LB::Expr; 4] = array::from_fn(|i| stk[10 + i].into());
+        let stk_words_0: [LB::Expr; 4] = array::from_fn(|i| stk.get(i).into());
+        let stk_next_words_0: [LB::Expr; 4] = array::from_fn(|i| stk_next.get(i).into());
+        let stk_state: [LB::Expr; 12] = array::from_fn(|i| stk.get(i).into());
+        let stk_next_state: [LB::Expr; 12] = array::from_fn(|i| stk_next.get(i).into());
+        let old_root: [LB::Expr; 4] = array::from_fn(|i| stk.get(6 + i).into());
+        let new_node: [LB::Expr; 4] = array::from_fn(|i| stk.get(10 + i).into());
 
         let addr_e: LB::Expr = addr.into();
         let addr_next_e: LB::Expr = addr_next.into();
@@ -232,33 +232,34 @@ where
         };
 
         // LOGPRECOMPILE input/output payloads.
-        let log_addr: LB::Var = dec[USER_OP_HELPERS_OFFSET + HELPER_ADDR_IDX];
+        let log_addr: LB::Var = user_helpers[HELPER_ADDR_IDX];
         let cap_prev: [LB::Var; 4] =
-            array::from_fn(|i| dec[USER_OP_HELPERS_OFFSET + HELPER_CAP_PREV_RANGE.start + i]);
-        let cap_next: [LB::Var; 4] = array::from_fn(|i| stk_next[STACK_CAP_NEXT_RANGE.start + i]);
+            array::from_fn(|i| user_helpers[HELPER_CAP_PREV_RANGE.start + i]);
+        let cap_next: [LB::Var; 4] =
+            array::from_fn(|i| stk_next.get(STACK_CAP_NEXT_RANGE.start + i));
         let logpre_in: [LB::Expr; 12] = [
-            stk[STACK_COMM_RANGE.start].into(),
-            stk[STACK_COMM_RANGE.start + 1].into(),
-            stk[STACK_COMM_RANGE.start + 2].into(),
-            stk[STACK_COMM_RANGE.start + 3].into(),
-            stk[STACK_TAG_RANGE.start].into(),
-            stk[STACK_TAG_RANGE.start + 1].into(),
-            stk[STACK_TAG_RANGE.start + 2].into(),
-            stk[STACK_TAG_RANGE.start + 3].into(),
+            stk.get(STACK_COMM_RANGE.start).into(),
+            stk.get(STACK_COMM_RANGE.start + 1).into(),
+            stk.get(STACK_COMM_RANGE.start + 2).into(),
+            stk.get(STACK_COMM_RANGE.start + 3).into(),
+            stk.get(STACK_TAG_RANGE.start).into(),
+            stk.get(STACK_TAG_RANGE.start + 1).into(),
+            stk.get(STACK_TAG_RANGE.start + 2).into(),
+            stk.get(STACK_TAG_RANGE.start + 3).into(),
             cap_prev[0].into(),
             cap_prev[1].into(),
             cap_prev[2].into(),
             cap_prev[3].into(),
         ];
         let logpre_out: [LB::Expr; 12] = [
-            stk_next[STACK_R0_RANGE.start].into(),
-            stk_next[STACK_R0_RANGE.start + 1].into(),
-            stk_next[STACK_R0_RANGE.start + 2].into(),
-            stk_next[STACK_R0_RANGE.start + 3].into(),
-            stk_next[STACK_R1_RANGE.start].into(),
-            stk_next[STACK_R1_RANGE.start + 1].into(),
-            stk_next[STACK_R1_RANGE.start + 2].into(),
-            stk_next[STACK_R1_RANGE.start + 3].into(),
+            stk_next.get(STACK_R0_RANGE.start).into(),
+            stk_next.get(STACK_R0_RANGE.start + 1).into(),
+            stk_next.get(STACK_R0_RANGE.start + 2).into(),
+            stk_next.get(STACK_R0_RANGE.start + 3).into(),
+            stk_next.get(STACK_R1_RANGE.start).into(),
+            stk_next.get(STACK_R1_RANGE.start + 1).into(),
+            stk_next.get(STACK_R1_RANGE.start + 2).into(),
+            stk_next.get(STACK_R1_RANGE.start + 3).into(),
             cap_next[0].into(),
             cap_next[1].into(),
             cap_next[2].into(),
@@ -276,7 +277,7 @@ where
         // SYSCALL requests a kernel-ROM call with the h[0..4] digest.
         let syscall_krom_msg = KernelRomMsg::call(h_first.clone());
 
-        let op_flags = OpFlags::new(ExprDecoderAccess::<LB::Var, LB::Expr>::new(local));
+        let op_flags = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
 
         Self {
             addr_e,
@@ -292,11 +293,11 @@ where
             clk_var: clk,
             s0,
             s1,
-            stk_2: stk[2],
-            stk_3: stk[3],
-            stk_4: stk[4],
-            stk_5: stk[5],
-            stk_next_0: stk_next[0],
+            stk_2: stk.get(2),
+            stk_3: stk.get(3),
+            stk_4: stk.get(4),
+            stk_5: stk.get(5),
+            stk_next_0: stk_next.get(0),
             stk_state,
             stk_next_state,
             stk_words_0,

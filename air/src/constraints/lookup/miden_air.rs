@@ -23,7 +23,7 @@ use super::{
         range_logcap::emit_range_stack_and_log_capacity, wiring::emit_ace_wiring,
     },
 };
-use crate::{Felt, MainTraceRow};
+use crate::{Felt, MainCols};
 
 // MIDEN LOOKUP AIR
 // ================================================================================================
@@ -51,9 +51,9 @@ pub struct MidenLookupAir;
 impl<LB> LookupAir<LB> for MidenLookupAir
 where
     LB: LookupBuilder<F = Felt>,
-    // Row access: the two main-trace rows get reinterpreted as `MainTraceRow<LB::Var>` via
-    // the blanket `Borrow<MainTraceRow<T>> for [T]` impl in `trace::main_trace`.
-    [LB::Var]: Borrow<MainTraceRow<LB::Var>>,
+    // Row access: the two main-trace rows get reinterpreted as `MainCols<LB::Var>` via
+    // the blanket `Borrow<MainCols<T>> for [T]` impl in `constraints::columns`.
+    [LB::Var]: Borrow<MainCols<LB::Var>>,
 {
     fn num_columns(&self) -> usize {
         // M1 (block-stack + range-table response), M_2+5 (block-hash queue ∪ op-group table,
@@ -80,8 +80,8 @@ where
         // `RowMajorMatrix<Var>` by clone, and the lifted-stark prover-side `RowWindow` is
         // `Copy`, so both cases survive the by-value return without extra allocations.
         let main = builder.main();
-        let local: &MainTraceRow<LB::Var> = main.current_slice().borrow();
-        let next: &MainTraceRow<LB::Var> = main.next_slice().borrow();
+        let local: &MainCols<LB::Var> = main.current_slice().borrow();
+        let next: &MainCols<LB::Var> = main.next_slice().borrow();
 
         // Main-trace LogUp columns.
         //
@@ -242,12 +242,7 @@ mod tests {
 
             let alpha = rng.next_quad();
             let beta = rng.next_quad();
-            let challenges = LookupChallenges::<QuadFelt>::new(
-                alpha,
-                beta,
-                <MidenLookupAir as LookupAir<DualBuilder<'_>>>::max_message_width(&air),
-                <MidenLookupAir as LookupAir<DualBuilder<'_>>>::num_bus_ids(&air),
-            );
+            let challenges = LookupChallenges::<QuadFelt>::new(alpha, beta);
 
             let main_window = RowWindow::from_two_rows(&current_row, &next_row);
             let mut mismatches: Vec<GroupMismatch> = Vec::new();

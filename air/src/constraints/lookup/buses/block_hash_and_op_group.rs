@@ -33,15 +33,11 @@ use core::array;
 use miden_core::field::PrimeCharacteristicRing;
 
 use crate::{
-    Felt, MainTraceRow,
+    Felt, MainCols,
     constraints::{
         logup_msg::{BlockHashMsg, OpGroupMsg},
         lookup::{LookupBatch, LookupBuilder, LookupColumn, LookupGroup},
-        op_flags::{ExprDecoderAccess, OpFlags},
-    },
-    trace::decoder::{
-        ADDR_COL_IDX, GROUP_COUNT_COL_IDX, HASHER_STATE_RANGE, IN_SPAN_COL_IDX,
-        IS_LOOP_BODY_FLAG_COL_IDX, OP_BATCH_FLAGS_OFFSET,
+        op_flags::OpFlags,
     },
 };
 
@@ -50,8 +46,8 @@ use crate::{
 #[allow(clippy::too_many_lines)]
 pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
     builder: &mut LB,
-    local: &MainTraceRow<LB::Var>,
-    next: &MainTraceRow<LB::Var>,
+    local: &MainCols<LB::Var>,
+    next: &MainCols<LB::Var>,
 ) where
     LB: LookupBuilder<F = Felt>,
 {
@@ -60,12 +56,12 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
     let stk = &local.stack;
     let stk_next = &next.stack;
 
-    // --- G_block_hash (block-hash queue) setup — mirrors the legacy emit_block_hash_queue ---
-    let addr = dec[ADDR_COL_IDX];
-    let addr_next = dec_next[ADDR_COL_IDX];
-    let h: [LB::Var; 8] = array::from_fn(|i| dec[HASHER_STATE_RANGE.start + i]);
-    let s0 = stk[0];
-    let is_loop_body_flag = dec[IS_LOOP_BODY_FLAG_COL_IDX];
+    // --- G_block_hash (block-hash queue) setup ---
+    let addr = dec.addr;
+    let addr_next = dec_next.addr;
+    let h: [LB::Var; 8] = array::from_fn(|i| dec.hasher_state[i]);
+    let s0 = stk.get(0);
+    let is_loop_body_flag = dec.end_block_flags().is_loop_body;
 
     let h_first: [LB::Expr; 4] = array::from_fn(|i| h[i].into());
     let h_second: [LB::Expr; 4] = array::from_fn(|i| h[4 + i].into());
@@ -75,8 +71,9 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
         s0_e.clone() * h[i].into() + (LB::Expr::ONE - s0_e.clone()) * h[i + 4].into()
     });
 
-    let op_flags = OpFlags::new(ExprDecoderAccess::<LB::Var, LB::Expr>::new(local));
-    let op_flags_next = OpFlags::new(ExprDecoderAccess::<LB::Var, LB::Expr>::new(next));
+    // OpFlags::new bundles current-row flags AND degree-4 next-row control-flow flags
+    // (`end_next` / `repeat_next` / `halt_next`), so we only need a single instance.
+    let op_flags = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
 
     let f_join = op_flags.join();
     let f_split = op_flags.split();
@@ -86,17 +83,17 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
     let f_push = op_flags.push();
 
     let is_first_child: LB::Expr =
-        LB::Expr::ONE - op_flags_next.end() - op_flags_next.repeat() - op_flags_next.halt();
+        LB::Expr::ONE - op_flags.end_next() - op_flags.repeat_next() - op_flags.halt_next();
     let is_loop_body_e: LB::Expr = is_loop_body_flag.into();
 
-    // --- G_op_group (op-group table) setup — mirrors the legacy emit_op_group_table ---
+    // --- G_op_group (op-group table) setup ---
     let batch_id: LB::Expr = addr_next.into();
-    let c0: LB::Expr = dec[OP_BATCH_FLAGS_OFFSET].into();
-    let c1: LB::Expr = dec[OP_BATCH_FLAGS_OFFSET + 1].into();
-    let c2: LB::Expr = dec[OP_BATCH_FLAGS_OFFSET + 2].into();
-    let gc_e: LB::Expr = dec[GROUP_COUNT_COL_IDX].into();
-    let gc_next_e: LB::Expr = dec_next[GROUP_COUNT_COL_IDX].into();
-    let in_span: LB::Expr = dec[IN_SPAN_COL_IDX].into();
+    let c0: LB::Expr = dec.batch_flags[0].into();
+    let c1: LB::Expr = dec.batch_flags[1].into();
+    let c2: LB::Expr = dec.batch_flags[2].into();
+    let gc_e: LB::Expr = dec.group_count.into();
+    let gc_next_e: LB::Expr = dec_next.group_count.into();
+    let in_span: LB::Expr = dec.in_span.into();
 
     builder.column(|col| {
         col.group(|g| {
@@ -163,12 +160,12 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
             // group_value is `is_push · stk_next[0] + (1 - is_push) · (h0_next · 128 +
             // opcode_next)`.
             let f_rem = in_span * (gc_e.clone() - gc_next_e);
-            let h0_next: LB::Expr = dec_next[HASHER_STATE_RANGE.start].into();
+            let h0_next: LB::Expr = dec_next.hasher_state[0].into();
             let opcode_next: LB::Expr = (0..7).fold(LB::Expr::ZERO, |acc, i| {
-                let bit: LB::Expr = dec_next[1 + i].into();
+                let bit: LB::Expr = dec_next.op_bits[i].into();
                 acc + bit * LB::Expr::from_u16(1u16 << i)
             });
-            let group_value = f_push.clone() * stk_next[0].into()
+            let group_value = f_push.clone() * stk_next.get(0).into()
                 + (LB::Expr::ONE - f_push) * (h0_next * LB::Expr::from_u16(128) + opcode_next);
             let addr_e: LB::Expr = addr.into();
             g.remove(f_rem, move || OpGroupMsg {

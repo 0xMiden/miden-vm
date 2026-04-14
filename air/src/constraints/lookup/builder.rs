@@ -439,7 +439,7 @@ pub trait EncodedLookupGroup: LookupGroup {
     /// [`LookupAir::num_bus_ids`](super::LookupAir::num_bus_ids)
     /// contract was violated. Authors should ensure every bus ID they
     /// emit satisfies `bus_id < num_bus_ids`.
-    fn bus_prefix(&self, bus_id: u16) -> Self::ExprEF;
+    fn bus_prefix(&self, bus_id: usize) -> Self::ExprEF;
 
     /// Add a flag-gated interaction whose denominator is already an
     /// extension-field expression.

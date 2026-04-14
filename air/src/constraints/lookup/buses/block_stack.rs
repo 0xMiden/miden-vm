@@ -15,15 +15,11 @@ use core::array;
 use miden_core::field::PrimeCharacteristicRing;
 
 use crate::{
-    Felt, MainTraceRow,
+    Felt, MainCols,
     constraints::{
         logup_msg::{BlockStackMsg, RangeMsg},
         lookup::{LookupBatch, LookupBuilder, LookupColumn, LookupGroup},
-        op_flags::{ExprDecoderAccess, OpFlags},
-    },
-    trace::decoder::{
-        ADDR_COL_IDX, HASHER_STATE_RANGE, IS_CALL_FLAG_COL_IDX, IS_LOOP_FLAG_COL_IDX,
-        IS_SYSCALL_FLAG_COL_IDX,
+        op_flags::OpFlags,
     },
 };
 
@@ -31,8 +27,8 @@ use crate::{
 #[allow(clippy::too_many_lines)]
 pub(in crate::constraints::lookup) fn emit_block_stack_and_range_table<LB>(
     builder: &mut LB,
-    local: &MainTraceRow<LB::Var>,
-    next: &MainTraceRow<LB::Var>,
+    local: &MainCols<LB::Var>,
+    next: &MainCols<LB::Var>,
 ) where
     LB: LookupBuilder<F = Felt>,
 {
@@ -41,32 +37,33 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_table<LB>(
     let stk = &local.stack;
     let stk_next = &next.stack;
 
-    let addr = dec[ADDR_COL_IDX];
-    let addr_next = dec_next[ADDR_COL_IDX];
-    let h: [LB::Var; 8] = array::from_fn(|i| dec[HASHER_STATE_RANGE.start + i]);
-    let h1_next = dec_next[HASHER_STATE_RANGE.start + 1];
-    let is_loop_flag: LB::Expr = dec[IS_LOOP_FLAG_COL_IDX].into();
-    let is_call_flag: LB::Expr = dec[IS_CALL_FLAG_COL_IDX].into();
-    let is_syscall_flag: LB::Expr = dec[IS_SYSCALL_FLAG_COL_IDX].into();
+    let addr = dec.addr;
+    let addr_next = dec_next.addr;
+    let h: [LB::Var; 8] = array::from_fn(|i| dec.hasher_state[i]);
+    let h1_next = dec_next.hasher_state[1];
+    let end_flags = dec.end_block_flags();
+    let is_loop_flag: LB::Expr = end_flags.is_loop.into();
+    let is_call_flag: LB::Expr = end_flags.is_call.into();
+    let is_syscall_flag: LB::Expr = end_flags.is_syscall.into();
 
-    let s0 = stk[0];
-    let b0 = stk[16];
-    let b1 = stk[17];
-    let b0_next = stk_next[16];
-    let b1_next = stk_next[17];
+    let s0 = stk.get(0);
+    let b0 = stk.b0;
+    let b1 = stk.b1;
+    let b0_next = stk_next.b0;
+    let b1_next = stk_next.b1;
 
-    let ctx = local.ctx;
-    let ctx_next = next.ctx;
+    let ctx = local.system.ctx;
+    let ctx_next = next.system.ctx;
 
-    let fn_hash: [LB::Expr; 4] = local.fn_hash.map(Into::into);
-    let fn_hash_next: [LB::Expr; 4] = next.fn_hash.map(Into::into);
+    let fn_hash: [LB::Expr; 4] = local.system.fn_hash.map(Into::into);
+    let fn_hash_next: [LB::Expr; 4] = next.system.fn_hash.map(Into::into);
 
-    let range_m = local.range[0];
-    let range_v = local.range[1];
+    let range_m = local.range.multiplicity;
+    let range_v = local.range.value;
 
     // Op-flag reconstruction for the local row — the block-stack variants all gate off
     // `local`-row flags.
-    let op_flags = OpFlags::new(ExprDecoderAccess::<LB::Var, LB::Expr>::new(local));
+    let op_flags = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
 
     builder.column(|col| {
         // ---- Group 1: block-stack table (BUS_BLOCK_STACK_TABLE) ----

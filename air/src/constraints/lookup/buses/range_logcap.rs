@@ -9,23 +9,20 @@ use core::array;
 use miden_core::field::PrimeCharacteristicRing;
 
 use crate::{
-    Felt, MainTraceRow,
+    Felt, MainCols,
     constraints::{
         logup_msg::{LogCapacityMsg, RangeMsg},
         lookup::{LookupBatch, LookupBuilder, LookupColumn, LookupGroup},
-        op_flags::{ExprDecoderAccess, OpFlags},
+        op_flags::OpFlags,
     },
-    trace::{
-        decoder::{OP_BITS_RANGE, USER_OP_HELPERS_OFFSET},
-        log_precompile::{HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE},
-    },
+    trace::log_precompile::{HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE},
 };
 
 /// Emit the range stack + log-precompile capacity bus (M4).
 pub(in crate::constraints::lookup) fn emit_range_stack_and_log_capacity<LB>(
     builder: &mut LB,
-    local: &MainTraceRow<LB::Var>,
-    next: &MainTraceRow<LB::Var>,
+    local: &MainCols<LB::Var>,
+    next: &MainCols<LB::Var>,
 ) where
     LB: LookupBuilder<F = Felt>,
 {
@@ -33,19 +30,22 @@ pub(in crate::constraints::lookup) fn emit_range_stack_and_log_capacity<LB>(
     let stk_next = &next.stack;
 
     // U32RC flag: op_bit6 · (1-op_bit5) · (1-op_bit4) — matches the legacy expression.
-    let op_bit4: LB::Expr = dec[OP_BITS_RANGE.start + 4].into();
-    let op_bit5: LB::Expr = dec[OP_BITS_RANGE.start + 5].into();
-    let op_bit6: LB::Expr = dec[OP_BITS_RANGE.start + 6].into();
+    let op_bit4: LB::Expr = dec.op_bits[4].into();
+    let op_bit5: LB::Expr = dec.op_bits[5].into();
+    let op_bit6: LB::Expr = dec.op_bits[6].into();
     let f_u32rc: LB::Expr = op_bit6 * (LB::Expr::ONE - op_bit5) * (LB::Expr::ONE - op_bit4);
 
-    let helpers: [LB::Var; 4] = array::from_fn(|i| dec[USER_OP_HELPERS_OFFSET + i]);
+    // user_op_helpers[0..4] — first 4 of the 6 helper registers.
+    let user_helpers = dec.user_op_helpers();
+    let helpers: [LB::Var; 4] = array::from_fn(|i| user_helpers[i]);
 
     // log_precompile capacity add/remove pair.
-    let op_flags = OpFlags::new(ExprDecoderAccess::<LB::Var, LB::Expr>::new(local));
+    let op_flags = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
     let f_log_precompile = op_flags.log_precompile();
     let cap_prev: [LB::Var; 4] =
-        array::from_fn(|i| dec[USER_OP_HELPERS_OFFSET + HELPER_CAP_PREV_RANGE.start + i]);
-    let cap_next: [LB::Var; 4] = array::from_fn(|i| stk_next[STACK_CAP_NEXT_RANGE.start + i]);
+        array::from_fn(|i| user_helpers[HELPER_CAP_PREV_RANGE.start + i]);
+    let cap_next: [LB::Var; 4] =
+        array::from_fn(|i| stk_next.get(STACK_CAP_NEXT_RANGE.start + i));
 
     builder.column(|col| {
         col.group(|g| {

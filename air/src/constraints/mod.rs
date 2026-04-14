@@ -31,7 +31,6 @@ pub mod constants;
 pub mod decoder;
 mod degree_audit;
 pub mod ext_field;
-pub mod logup;
 pub mod logup_msg;
 pub mod lookup;
 pub(crate) mod op_flags;
