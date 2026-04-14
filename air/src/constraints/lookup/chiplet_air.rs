@@ -18,8 +18,10 @@ use super::{
     LookupAir, LookupBuilder,
     bus_id::NUM_BUS_IDS,
     buses::{
-        ChipletActiveFlags, chiplet_responses::emit_chiplet_responses,
-        hash_kernel::emit_hash_kernel_table, wiring::emit_ace_wiring,
+        ChipletActiveFlags,
+        chiplet_responses::{self, emit_chiplet_responses},
+        hash_kernel::{self, emit_hash_kernel_table},
+        wiring::{self, emit_ace_wiring},
     },
 };
 use crate::{Felt, MainCols};
@@ -90,6 +92,13 @@ where
 #[derive(Copy, Clone, Debug, Default)]
 pub(crate) struct ChipletLookupAir;
 
+/// Per-column fraction stride: [C1, C2, C3].
+pub(crate) const CHIPLET_COLUMN_SHAPE: [usize; 3] = [
+    chiplet_responses::MAX_INTERACTIONS_PER_ROW,
+    hash_kernel::MAX_INTERACTIONS_PER_ROW,
+    wiring::MAX_INTERACTIONS_PER_ROW,
+];
+
 impl<LB> LookupAir<LB> for ChipletLookupAir
 where
     LB: ChipletLookupBuilder,
@@ -97,6 +106,10 @@ where
     fn num_columns(&self) -> usize {
         // C1 (chiplet responses), C2 (hash-kernel virtual table), C3 (ACE wiring).
         3
+    }
+
+    fn column_shape(&self) -> &[usize] {
+        &CHIPLET_COLUMN_SHAPE
     }
 
     fn max_message_width(&self) -> usize {

@@ -19,9 +19,10 @@ use super::{
     LookupAir, LookupBuilder,
     bus_id::NUM_BUS_IDS,
     buses::{
-        block_hash_and_op_group::emit_block_hash_and_op_group,
-        block_stack::emit_block_stack_and_range_table, chiplet_requests::emit_chiplet_requests,
-        range_logcap::emit_range_stack_and_log_capacity,
+        block_hash_and_op_group::{self as block_hash_and_op_group, emit_block_hash_and_op_group},
+        block_stack::{self, emit_block_stack_and_range_table},
+        chiplet_requests::{self, emit_chiplet_requests},
+        range_logcap::{self, emit_range_stack_and_log_capacity},
     },
 };
 use crate::{Felt, MainCols, constraints::op_flags::OpFlags};
@@ -105,6 +106,14 @@ where
 #[derive(Copy, Clone, Debug, Default)]
 pub(crate) struct MainLookupAir;
 
+/// Per-column fraction stride: [M1, M_2+5, M3, M4].
+pub(crate) const MAIN_COLUMN_SHAPE: [usize; 4] = [
+    block_stack::MAX_INTERACTIONS_PER_ROW,
+    block_hash_and_op_group::MAX_INTERACTIONS_PER_ROW,
+    chiplet_requests::MAX_INTERACTIONS_PER_ROW,
+    range_logcap::MAX_INTERACTIONS_PER_ROW,
+];
+
 impl<LB> LookupAir<LB> for MainLookupAir
 where
     LB: MainLookupBuilder,
@@ -113,6 +122,10 @@ where
         // M1 (block-stack + range-table response), M_2+5 (block-hash queue ∪ op-group table),
         // M3 (chiplet requests), M4 (range-stack + logpre capacity).
         4
+    }
+
+    fn column_shape(&self) -> &[usize] {
+        &MAIN_COLUMN_SHAPE
     }
 
     fn max_message_width(&self) -> usize {

@@ -24,6 +24,7 @@ pub mod chiplet_air;
 pub mod constraint;
 #[cfg(test)]
 pub mod dual_builder;
+pub mod fractions;
 pub mod main_air;
 pub mod message;
 pub mod miden_air;
@@ -35,6 +36,7 @@ pub use challenges::LookupChallenges;
 pub use constraint::ConstraintLookupBuilder;
 #[cfg(test)]
 pub use dual_builder::{DualBuilder, GroupMismatch};
+pub use fractions::{LookupFractions, accumulate_slow};
 pub use message::LookupMessage;
 pub use prover::ProverLookupBuilder;
 
@@ -71,6 +73,17 @@ pub use prover::ProverLookupBuilder;
 pub trait LookupAir<LB: LookupBuilder> {
     /// Number of permutation columns this argument occupies.
     fn num_columns(&self) -> usize;
+
+    /// Per-column upper bound on the number of fractions a single row can push.
+    ///
+    /// Length must equal [`num_columns()`](Self::num_columns). Each entry is the
+    /// **mutual-exclusion-aware** max — i.e. the largest active branch count taken across
+    /// all mutually exclusive groups inside the column, not the sum of every structural
+    /// `add` / `remove` / `insert` / `batch` push site.
+    ///
+    /// The prover-path adapter uses this to size the dense per-column fraction buffer
+    /// (`Vec::with_capacity`) so the hot row loop never re-allocates.
+    fn column_shape(&self) -> &[usize];
 
     /// Upper bound on the **payload** width of any message emitted by
     /// [`eval`](Self::eval), exclusive of the bus identifier slot.

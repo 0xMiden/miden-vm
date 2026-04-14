@@ -20,6 +20,15 @@ use crate::constraints::{
     },
 };
 
+/// Upper bound on fractions this emitter pushes into its column per row.
+///
+/// Group 1 (block-stack table): all 7 branches gate on mutually exclusive decoder-opcode
+/// flags; the largest single branch is RESPAN, whose batch emits one add + one remove = 2.
+/// Group 2 (range-table response): always-active single insert = 1.
+/// Both groups are sibling `col.group` calls on the same column and always run, so the
+/// per-row max is the sum: 2 + 1 = 3.
+pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 3;
+
 /// Emit the block-stack + range-table bus (M1).
 #[allow(clippy::too_many_lines)]
 pub(in crate::constraints::lookup) fn emit_block_stack_and_range_table<LB>(

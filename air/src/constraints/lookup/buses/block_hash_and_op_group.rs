@@ -41,6 +41,17 @@ use crate::constraints::{
     utils::{BoolNot, horner_eval_bits},
 };
 
+/// Upper bound on fractions this emitter pushes into its column per row.
+///
+/// G_block_hash (control-flow opcodes): largest branch is JOIN's 2-add batch.
+/// G_op_group (SPAN/RESPAN insertions + in-span decode removal): largest branch is g8's
+/// 7-add batch. Insertions (batch-setup rows) and the removal (in-span decode rows) are
+/// mutually exclusive by construction.
+/// The module header establishes G_block_hash and G_op_group are row-disjoint — control-flow
+/// opcodes are never in-span, and SPAN/RESPAN aren't control-flow. So the per-row max is
+/// `max(2, 7) = 7`.
+pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 7;
+
 /// Emit the merged M_2+5 column: block-hash queue (G_block_hash) + op-group table (G_op_group)
 /// as a single ME group on one column.
 #[allow(clippy::too_many_lines)]

@@ -35,6 +35,16 @@ use crate::{
     },
 };
 
+/// Upper bound on fractions this emitter pushes into its column per row.
+///
+/// Sibling-table interactions live on hasher controller rows (`chiplet_active.controller`),
+/// where the MV/MU split is further mutually exclusive (`s2` vs `1-s2`) and the direction
+/// bit `b` vs `1-b` cuts within each side — at most one of the four fires per row.
+/// ACE memory reads live on ACE rows (`chiplet_active.ace`), with `f_ace_read` and
+/// `f_ace_eval` mutually exclusive via `block_sel`. Controller rows and ACE rows are
+/// mutually exclusive via the top-level `chiplet_active` snapshot. Per-row max: 1.
+pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 1;
+
 /// Emit the hash-kernel virtual table bus (C2).
 #[allow(clippy::too_many_lines)]
 pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(

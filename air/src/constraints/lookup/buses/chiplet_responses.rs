@@ -47,6 +47,14 @@ use crate::{
 const INPUT_LABEL_OFFSET: u16 = 16;
 const OUTPUT_LABEL_OFFSET: u16 = 32;
 
+/// Upper bound on fractions this emitter pushes into its column per row.
+///
+/// All adds gate on per-chiplet `chiplet_active.*` flags which are mutually exclusive (at
+/// most one chiplet runs per row). Within the hasher branch, the 7 variants are gated by
+/// mutually exclusive `(s0, s1, s2, is_boundary)` combinations. Every other chiplet emits
+/// exactly one fraction when active. Per-row max: 1.
+pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 1;
+
 /// Emit the chiplet responses bus (C1).
 #[allow(clippy::too_many_lines)]
 pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(

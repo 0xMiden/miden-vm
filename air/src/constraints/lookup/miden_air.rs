@@ -15,8 +15,8 @@
 use super::{
     LookupAir,
     bus_id::NUM_BUS_IDS,
-    chiplet_air::{ChipletLookupAir, ChipletLookupBuilder},
-    main_air::{MainLookupAir, MainLookupBuilder},
+    chiplet_air::{CHIPLET_COLUMN_SHAPE, ChipletLookupAir, ChipletLookupBuilder},
+    main_air::{MAIN_COLUMN_SHAPE, MainLookupAir, MainLookupBuilder},
 };
 
 // MIDEN LOOKUP AIR
@@ -35,6 +35,17 @@ use super::{
 #[derive(Copy, Clone, Debug, Default)]
 pub(crate) struct MidenLookupAir;
 
+/// Full 7-column fraction stride: main then chiplet, in `eval` order.
+pub(crate) const MIDEN_COLUMN_SHAPE: [usize; 7] = [
+    MAIN_COLUMN_SHAPE[0],
+    MAIN_COLUMN_SHAPE[1],
+    MAIN_COLUMN_SHAPE[2],
+    MAIN_COLUMN_SHAPE[3],
+    CHIPLET_COLUMN_SHAPE[0],
+    CHIPLET_COLUMN_SHAPE[1],
+    CHIPLET_COLUMN_SHAPE[2],
+];
+
 impl<LB> LookupAir<LB> for MidenLookupAir
 where
     LB: MainLookupBuilder + ChipletLookupBuilder,
@@ -45,6 +56,10 @@ where
         // methods live behind the `LookupAir<LB>` trait, and resolving `LB` from inside the
         // aggregator's impl would require a turbofish.
         7
+    }
+
+    fn column_shape(&self) -> &[usize] {
+        &MIDEN_COLUMN_SHAPE
     }
 
     fn max_message_width(&self) -> usize {

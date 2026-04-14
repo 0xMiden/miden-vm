@@ -17,6 +17,12 @@ use crate::{
     trace::log_precompile::{HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE},
 };
 
+/// Upper bound on fractions this emitter pushes into its column per row.
+///
+/// U32RC batch (4 removes) vs LOGPRECOMPILE batch (1 remove + 1 add = 2). Both gated by
+/// mutually exclusive decoder-opcode flags, so the per-row max is `max(4, 2) = 4`.
+pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 4;
+
 /// Emit the range stack + log-precompile capacity bus (M4).
 pub(in crate::constraints::lookup) fn emit_range_stack_and_log_capacity<LB>(
     builder: &mut LB,

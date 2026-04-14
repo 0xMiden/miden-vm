@@ -30,6 +30,13 @@ use crate::{
     },
 };
 
+/// Upper bound on fractions this emitter pushes into its column per row.
+///
+/// Every branch here is gated by one mutually exclusive decoder-opcode flag. The heaviest
+/// branch is MRUPDATE, whose batch emits 4 removes (merkle_old_init + return_hash +
+/// merkle_new_init + return_hash). No other single branch exceeds 4.
+pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 4;
+
 /// Emit the chiplet requests bus (M3).
 #[allow(clippy::too_many_lines)]
 pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(

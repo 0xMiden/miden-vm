@@ -36,6 +36,14 @@ use crate::constraints::{
     utils::BoolNot,
 };
 
+/// Upper bound on fractions this emitter pushes into its column per row.
+///
+/// Single `ace_flag`-gated batch with three `insert` calls (wire_0, wire_1, wire_2). When
+/// the outer batch is active all three inserts push unconditionally (the prover-path
+/// `ProverBatch::insert` does not short-circuit on zero multiplicity); when the outer batch
+/// is inactive none of them push. Per-row max: 3.
+pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 3;
+
 /// Emit the ACE wiring bus (C3).
 pub(in crate::constraints::lookup) fn emit_ace_wiring<LB>(
     builder: &mut LB,

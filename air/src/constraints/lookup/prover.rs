@@ -1,5 +1,6 @@
 //! Prover-path adapter — pushes individual `(m, v)` fractions per
-//! interaction into per-column `Vec`s owned by the caller.
+//! interaction into a dense per-column flat [`LookupFractions`] buffer
+//! owned by the caller.
 //!
 //! Implements [`LookupBuilder`] for concrete base-field rows. Where the
 //! [constraint-path adapter](super::constraint::ConstraintLookupBuilder)
@@ -7,19 +8,21 @@
 //! `LiftedAirBuilder`, this adapter consumes two concrete rows of
 //! base-field values and **pushes the individual fractions** each
 //! interaction contributes — one `(multiplicity, denominator)` entry per
-//! active interaction, into a per-column `Vec` the caller owns.
+//! active interaction, appended to the current column's flat Vec inside
+//! [`LookupFractions`].
 //!
 //! ## Runtime shape
 //!
 //! The caller:
 //!
 //! 1. Builds one [`LookupChallenges<EF>`] once, outside the per-row loop.
-//! 2. Pre-allocates a `[Vec<(F, EF)>]` with exactly `air.num_columns()` entries. Each inner `Vec`
-//!    will receive the fractions for one permutation column across one row evaluation.
+//! 2. Allocates one [`LookupFractions`] once via [`LookupFractions::new`], sized from
+//!    [`LookupAir::column_shape`]. Each column's internal Vec is `Vec::with_capacity(num_rows *
+//!    shape[col])` so pushes in the row loop never re-allocate.
 //! 3. For each row pair, constructs a `ProverLookupBuilder` (cheap — just stores pointers), calls
-//!    `air.eval(&mut lb)`, drops the builder to release its borrow, reads / accumulates the
-//!    per-column `Vec`s into the aux-trace running sum, then `.clear()`s each `Vec` before the next
-//!    row.
+//!    `air.eval(&mut lb)`, then drops the builder. `column(f)` records how many fractions the row
+//!    pushed into `LookupFractions::counts_per_row[col]`, so the downstream accumulator can later
+//!    slice each row's contribution out via a running cursor without a separate offsets array.
 //!
 //! No `FractionCollector`-style cross-denominator clearing inside the
 //! adapter — LogUp's aux-trace builder consumes individual `(m, v)`
@@ -52,7 +55,8 @@ use miden_crypto::stark::air::RowWindow;
 
 use super::{
     EncodedLookupGroup, LookupAir, LookupBatch, LookupBuilder, LookupChallenges, LookupColumn,
-    LookupGroup, LookupMessage, chiplet_air::ChipletLookupBuilder, main_air::MainLookupBuilder,
+    LookupGroup, LookupMessage, chiplet_air::ChipletLookupBuilder, fractions::LookupFractions,
+    main_air::MainLookupBuilder,
 };
 use crate::Felt;
 
@@ -79,14 +83,12 @@ where
     periodic_values: &'a [F],
     public_values: &'a [F],
     challenges: &'a LookupChallenges<EF>,
-    /// One fraction list per permutation column, indexed by
-    /// [`Self::column_idx`]. Each [`LookupBuilder::column`] call
-    /// appends to the current column's list via
-    /// [`ProverGroup::add`] / `remove` / `insert` / `batch`, then
-    /// advances the cursor. The caller owns the outer slice *and*
-    /// every inner `Vec`; between rows they read out the fractions
-    /// and call `.clear()` on each `Vec` to rewind.
-    column_fractions: &'a mut [Vec<(F, EF)>],
+    /// Dense per-column fraction buffers shared across all rows. Each
+    /// [`LookupBuilder::column`] call appends the current row's fractions to the end of
+    /// `fractions.fractions[column_idx]` and pushes the row's interaction count into
+    /// `fractions.counts_per_row[column_idx]`. The outer Vecs never move or re-allocate
+    /// as long as each row stays within the declared [`LookupAir::column_shape`] bound.
+    fractions: &'a mut LookupFractions<F, EF>,
     column_idx: usize,
 }
 
@@ -95,44 +97,43 @@ where
     F: Field,
     EF: ExtensionField<F>,
 {
-    /// Create a new prover-path adapter for one row.
+    /// Create a new prover-path adapter for one row pair.
     ///
     /// - `main`: two-row window over the current and next base-field rows.
     /// - `periodic_values`: periodic columns at the current row.
     /// - `public_values`: public inputs.
     /// - `challenges`: precomputed LogUp challenges (shared across every row — the caller builds
     ///   this once outside the row loop and passes a shared reference here).
-    /// - `air`: the lookup shape (used only for a debug assertion that `column_fractions.len() ==
+    /// - `air`: the lookup shape (used only for a debug assertion that `fractions.num_columns() ==
     ///   air.num_columns()`; the builder never calls `air.eval` itself — that's the caller's job).
-    /// - `column_fractions`: pre-allocated per-column fraction lists. Must have exactly
-    ///   `air.num_columns()` entries. Each inner `Vec` is appended to by the interaction closures
-    ///   and should be cleared by the caller between rows.
+    /// - `fractions`: dense per-column fraction buffers, sized once via [`LookupFractions::new`]
+    ///   and re-used across every row of the same trace.
     ///
     /// # Panics
     ///
-    /// Panics in debug builds if `column_fractions.len() != air.num_columns()`.
+    /// Panics in debug builds if `fractions.num_columns() != air.num_columns()`.
     pub fn new<A>(
         main: RowWindow<'a, F>,
         periodic_values: &'a [F],
         public_values: &'a [F],
         challenges: &'a LookupChallenges<EF>,
         air: &A,
-        column_fractions: &'a mut [Vec<(F, EF)>],
+        fractions: &'a mut LookupFractions<F, EF>,
     ) -> Self
     where
         A: LookupAir<Self>,
     {
         debug_assert_eq!(
-            column_fractions.len(),
+            fractions.num_columns(),
             air.num_columns(),
-            "column_fractions buffer must be pre-sized to air.num_columns()",
+            "fractions buffer must be pre-sized to air.num_columns()",
         );
         Self {
             main,
             periodic_values,
             public_values,
             challenges,
-            column_fractions,
+            fractions,
             column_idx: 0,
         }
     }
@@ -175,14 +176,31 @@ where
 
     fn column<'c, R>(&'c mut self, f: impl FnOnce(&mut Self::Column<'c>) -> R) -> R {
         let idx = self.column_idx;
+        // Split-borrow `fractions.fractions` and `fractions.counts` as disjoint
+        // fields — going through a single `&mut LookupFractions` method would lock
+        // all of `self.fractions` under the GAT lifetime `'c` and block the
+        // post-closure `counts.push(...)` re-borrow.
+        let vec = &mut self.fractions.fractions;
+        let counts = &mut self.fractions.counts;
+        let shape_col = self.fractions.shape[idx];
+        let start_len = vec.len();
+
         let mut col = ProverColumn {
             challenges: self.challenges,
-            fractions: &mut self.column_fractions[idx],
+            fractions: vec,
             _phantom: PhantomData,
         };
         let result = f(&mut col);
-        // `col` drops here, releasing the borrow on `self.column_fractions[idx]`
-        // before we touch `self.column_idx`.
+        // Snapshot the end length from `col.fractions` while `col` is still alive;
+        // NLL ends the borrow on `vec` at `col`'s last use below.
+        let end_len = col.fractions.len();
+        let _ = col;
+        let pushed = end_len - start_len;
+        debug_assert!(
+            pushed <= shape_col,
+            "column {idx} stride exceeded: pushed {pushed}, shape says {shape_col}",
+        );
+        counts.push(pushed);
         self.column_idx += 1;
         result
     }
@@ -465,5 +483,170 @@ where
         }
         let v = encoded();
         self.fractions.push((multiplicity, v));
+    }
+}
+
+// TESTS
+// ================================================================================================
+
+#[cfg(test)]
+mod tests {
+    extern crate std;
+
+    use std::{vec, vec::Vec};
+
+    use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
+    use miden_crypto::stark::air::RowWindow;
+
+    use super::*;
+    use crate::{
+        Felt,
+        constraints::lookup::{LookupAir, fractions::accumulate_slow, message::LookupMessage},
+        trace::Challenges,
+    };
+
+    /// Minimal `LookupMessage` used by [`SmokeAir`] to drive a `Vec::push` into the
+    /// prover builder's fraction buffer. Encodes to `bus_prefix[0] + β⁰·value`, which is
+    /// always non-zero for non-trivial challenges (so `accumulate_slow` can `try_inverse`
+    /// without blowing up).
+    #[derive(Clone, Copy)]
+    struct SmokeMsg {
+        value: Felt,
+    }
+
+    impl LookupMessage<Felt, QuadFelt> for SmokeMsg {
+        fn encode(&self, challenges: &Challenges<QuadFelt>) -> QuadFelt {
+            challenges.bus_prefix[0] + challenges.beta_powers[0] * self.value
+        }
+    }
+
+    /// Two-column stand-in for the real Miden lookup AIR, with a handcrafted `eval` body
+    /// that respects its own shape on **every** row — no mutual-exclusion assumptions, so
+    /// random (non-trace) input data drives it without tripping the shape debug_assert.
+    ///
+    /// - Column 0 always pushes 2 fractions (one `add`, one `remove`) with shape 2.
+    /// - Column 1 pushes 1 fraction via an inside-batch `insert` with shape 1.
+    struct SmokeAir;
+
+    const SMOKE_SHAPE: [usize; 2] = [2, 1];
+
+    impl<LB> LookupAir<LB> for SmokeAir
+    where
+        LB: LookupBuilder<F = Felt, EF = QuadFelt, Expr = Felt, ExprEF = QuadFelt>,
+    {
+        fn num_columns(&self) -> usize {
+            2
+        }
+        fn column_shape(&self) -> &[usize] {
+            &SMOKE_SHAPE
+        }
+        fn max_message_width(&self) -> usize {
+            1
+        }
+        fn num_bus_ids(&self) -> usize {
+            1
+        }
+        fn eval(&self, builder: &mut LB) {
+            builder.column(|col| {
+                col.group(|g| {
+                    g.add(Felt::ONE, || SmokeMsg { value: Felt::ONE });
+                    g.remove(Felt::ONE, || SmokeMsg { value: Felt::new(2) });
+                });
+            });
+            builder.column(|col| {
+                col.group(|g| {
+                    g.batch(Felt::ONE, |b| {
+                        b.insert(Felt::ONE, SmokeMsg { value: Felt::new(3) });
+                    });
+                });
+            });
+        }
+    }
+
+    /// End-to-end collection sanity check: run `SmokeAir::eval` through
+    /// `ProverLookupBuilder` over several rows and verify the per-column counts match the
+    /// handcrafted `eval` body, that `accumulate_slow` produces a `num_rows + 1`-long
+    /// output per column starting at zero, and that the running sum monotonically grows
+    /// by the expected amount each row.
+    #[test]
+    fn prover_lookup_builder_collects_into_fractions() {
+        const NUM_ROWS: usize = 8;
+
+        let air = SmokeAir;
+
+        // Any reasonable non-zero challenges — SmokeMsg encodes to `bus_prefix[0] + v`
+        // which is non-zero as long as the challenges are.
+        let alpha = QuadFelt::new([Felt::new(7), Felt::new(11)]);
+        let beta = QuadFelt::new([Felt::new(13), Felt::new(17)]);
+        let challenges = LookupChallenges::<QuadFelt>::new(alpha, beta);
+
+        // `SmokeAir::eval` never touches the main trace, periodic columns, or public
+        // values — pass dummy zero-length slices.
+        let empty_row: Vec<Felt> = vec![];
+        let periodic_values: Vec<Felt> = vec![];
+        let public_values: Vec<Felt> = vec![];
+
+        let mut fractions = LookupFractions::<Felt, QuadFelt>::new::<
+            _,
+            ProverLookupBuilder<'_, Felt, QuadFelt>,
+        >(&air, NUM_ROWS);
+
+        for _row in 0..NUM_ROWS {
+            let window = RowWindow::from_two_rows(&empty_row, &empty_row);
+            let mut lb = ProverLookupBuilder::new(
+                window,
+                &periodic_values,
+                &public_values,
+                &challenges,
+                &air,
+                &mut fractions,
+            );
+            air.eval(&mut lb);
+        }
+
+        // Two columns, counts buffer has num_rows * num_cols entries.
+        assert_eq!(fractions.num_columns(), 2);
+        assert_eq!(fractions.shape(), &SMOKE_SHAPE);
+        assert_eq!(fractions.counts().len(), NUM_ROWS * 2);
+
+        // Per-row counts: column 0 pushes 2, column 1 pushes 1. Total = 3 per row.
+        for row_counts in fractions.counts().chunks(2) {
+            assert_eq!(row_counts, &[2, 1]);
+        }
+        assert_eq!(fractions.fractions().len(), 3 * NUM_ROWS);
+
+        // Every pushed fraction has a non-zero denominator and the expected
+        // multiplicity pattern. Within each row the builder writes col 0 (add 1,
+        // remove 1) then col 1 (insert 1 with multiplicity 1), so the flat order is
+        // [(+1, d1), (-1, d2), (+1, d3)] repeated NUM_ROWS times.
+        for (i, (m, d)) in fractions.fractions().iter().enumerate() {
+            assert_ne!(*d, QuadFelt::ZERO);
+            let expected_m = match i % 3 {
+                0 => Felt::ONE,
+                1 => Felt::NEG_ONE,
+                _ => Felt::ONE,
+            };
+            assert_eq!(*m, expected_m);
+        }
+
+        // Accumulator produces num_rows+1 entries per column, and the running sum for
+        // each column advances by a deterministic per-row delta.
+        let aux = accumulate_slow(&fractions);
+        assert_eq!(aux.len(), 2);
+        for col_aux in &aux {
+            assert_eq!(col_aux.len(), NUM_ROWS + 1);
+            assert_eq!(col_aux[0], QuadFelt::ZERO);
+        }
+
+        // Column 0 row delta = 1/d(ONE) - 1/d(TWO); column 1 row delta = 1/d(THREE).
+        let d1 = SmokeMsg { value: Felt::ONE }.encode(&challenges);
+        let d2 = SmokeMsg { value: Felt::new(2) }.encode(&challenges);
+        let d3 = SmokeMsg { value: Felt::new(3) }.encode(&challenges);
+        let delta0 = d1.try_inverse().unwrap() - d2.try_inverse().unwrap();
+        let delta1 = d3.try_inverse().unwrap();
+        for r in 0..NUM_ROWS {
+            assert_eq!(aux[0][r + 1] - aux[0][r], delta0);
+            assert_eq!(aux[1][r + 1] - aux[1][r], delta1);
+        }
     }
 }
