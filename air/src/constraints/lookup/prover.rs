@@ -47,10 +47,13 @@
 //! `encoded` closure is dropped unused, since the canonical description
 //! is always the cheapest path for concrete rows).
 
-use alloc::vec::Vec;
-use core::marker::PhantomData;
+use alloc::{vec, vec::Vec};
+use core::{borrow::Borrow, marker::PhantomData};
 
-use miden_core::field::{ExtensionField, Field};
+use miden_core::{
+    field::{ExtensionField, Field, PrimeCharacteristicRing},
+    utils::{Matrix, RowMajorMatrix},
+};
 use miden_crypto::stark::air::RowWindow;
 
 use super::{
@@ -137,6 +140,96 @@ where
             column_idx: 0,
         }
     }
+}
+
+// BUILD LOOKUP FRACTIONS DRIVER
+// ================================================================================================
+
+/// Walk a complete main trace through [`ProverLookupBuilder`] and return the dense
+/// [`LookupFractions`] buffer the collection phase produces.
+///
+/// This is the top-level entry point for the prover-side LogUp collection phase. It:
+///
+/// 1. Allocates one [`LookupFractions`] sized from [`LookupAir::column_shape`] — the hot row loop
+///    never re-allocates as long as each row stays within its declared bound.
+/// 2. For each row `r`, builds a two-row `RowWindow` over `&flat[r * w .. (r + 1) * w]` and
+///    `&flat[((r + 1) % n) * w .. ..]` (wraparound on the last row — matches the constraint path's
+///    transition wraparound).
+/// 3. Composes the per-row periodic slice by indexing each periodic column at `r % col.len()` (the
+///    columns have varying periods — hasher columns are 16, bitwise columns are 8, etc.). A single
+///    reusable `Vec<Felt>` is filled in place per row.
+/// 4. Constructs a fresh `ProverLookupBuilder` per row and calls `air.eval(&mut lb)` — the bus
+///    emitters push fractions into the flat [`LookupFractions`] buffer and record per-row counts
+///    via the split-borrow in `LookupBuilder::column`.
+///
+/// The returned [`LookupFractions`] is ready for the fused batch-inversion + partial-sum
+/// fast path (not implemented here) or for the reference [`super::accumulate_slow`].
+///
+/// # Arguments
+///
+/// - `air`: the [`LookupAir`] to evaluate (typically [`super::miden_air::MidenLookupAir`]).
+/// - `main_trace`: row-major main execution trace. Row access is zero-copy via
+///   `main_trace.values.borrow()`.
+/// - `periodic_columns`: one `Vec<Felt>` per periodic column, each with its own period (from
+///   [`crate::constraints::chiplets::columns::PeriodicCols::periodic_columns`]).
+/// - `public_values`: row-invariant public input slice.
+/// - `challenges`: precomputed LogUp challenges (shared across every row).
+///
+/// # Panics
+///
+/// Panics in debug builds if any row pushes more fractions into a column than that
+/// column's declared [`LookupAir::column_shape`] bound — this indicates the emitter's
+/// `MAX_INTERACTIONS_PER_ROW` const is too low and needs to be bumped.
+pub fn build_lookup_fractions<A, EF>(
+    air: &A,
+    main_trace: &RowMajorMatrix<Felt>,
+    periodic_columns: &[Vec<Felt>],
+    public_values: &[Felt],
+    challenges: &LookupChallenges<EF>,
+) -> LookupFractions<Felt, EF>
+where
+    EF: ExtensionField<Felt>,
+    for<'a> A: LookupAir<ProverLookupBuilder<'a, Felt, EF>>,
+{
+    let num_rows = main_trace.height();
+    let width = main_trace.width();
+    let flat: &[Felt] = main_trace.values.borrow();
+
+    let mut fractions = LookupFractions::new::<A, ProverLookupBuilder<'_, Felt, EF>>(air, num_rows);
+
+    // Per-row periodic slice, filled in place each row — no per-iteration allocation.
+    let mut periodic_row: Vec<Felt> = vec![Felt::ZERO; periodic_columns.len()];
+
+    for r in 0..num_rows {
+        // Zero-copy row slices over the flat matrix storage.
+        let curr = &flat[r * width..(r + 1) * width];
+        let nxt_idx = (r + 1) % num_rows;
+        let next = &flat[nxt_idx * width..(nxt_idx + 1) * width];
+        let window = RowWindow::from_two_rows(curr, next);
+
+        // Each periodic column is indexed at `r mod its own period`.
+        for (i, col) in periodic_columns.iter().enumerate() {
+            periodic_row[i] = col[r % col.len()];
+        }
+
+        let mut lb = ProverLookupBuilder::new(
+            window,
+            &periodic_row,
+            public_values,
+            challenges,
+            air,
+            &mut fractions,
+        );
+        air.eval(&mut lb);
+        // `lb` drops here; the next iteration reborrows `fractions` fresh.
+    }
+
+    debug_assert_eq!(
+        fractions.counts().len(),
+        num_rows * fractions.num_columns(),
+        "counts buffer should have exactly num_rows * num_cols entries after collection",
+    );
+    fractions
 }
 
 impl<'a, F, EF> LookupBuilder for ProverLookupBuilder<'a, F, EF>

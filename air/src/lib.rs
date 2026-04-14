@@ -23,6 +23,18 @@ pub mod ace;
 pub mod config;
 mod constraints;
 
+/// Public surface for the prover-side LogUp collection phase.
+///
+/// Re-exports the stable API of the internal `constraints::lookup` module so downstream
+/// crates (notably `miden-processor` tests) can drive `MidenLookupAir` through
+/// [`build_lookup_fractions`] without the rest of `constraints::lookup` leaking.
+pub mod lookup {
+    pub use crate::constraints::lookup::{
+        LookupChallenges, LookupFractions, MidenLookupAir, ProverLookupBuilder, accumulate_slow,
+        build_lookup_fractions,
+    };
+}
+
 pub mod trace;
 use constraints::columns::MainCols;
 use trace::{AUX_TRACE_WIDTH, TRACE_WIDTH, bus_types};

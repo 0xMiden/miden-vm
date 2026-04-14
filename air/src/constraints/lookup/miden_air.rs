@@ -33,7 +33,7 @@ use super::{
 /// consumers are the degree-budget and cached-encoding equivalence tests at the bottom of
 /// this file.
 #[derive(Copy, Clone, Debug, Default)]
-pub(crate) struct MidenLookupAir;
+pub struct MidenLookupAir;
 
 /// Full 7-column fraction stride: main then chiplet, in `eval` order.
 pub(crate) const MIDEN_COLUMN_SHAPE: [usize; 7] = [

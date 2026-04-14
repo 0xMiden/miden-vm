@@ -38,7 +38,8 @@ pub use constraint::ConstraintLookupBuilder;
 pub use dual_builder::{DualBuilder, GroupMismatch};
 pub use fractions::{LookupFractions, accumulate_slow};
 pub use message::LookupMessage;
-pub use prover::ProverLookupBuilder;
+pub use miden_air::MidenLookupAir;
+pub use prover::{ProverLookupBuilder, build_lookup_fractions};
 
 // LOOKUP AIR
 // ================================================================================================
