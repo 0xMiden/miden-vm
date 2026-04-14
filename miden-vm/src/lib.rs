@@ -10,7 +10,7 @@ pub use miden_assembly::{
     diagnostics,
 };
 pub use miden_core::proof::{ExecutionProof, HashFunction};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 pub use miden_processor::execute_sync;
 pub use miden_processor::{
     BaseHost, DefaultHost, ExecutionError, ExecutionOptions, ExecutionOutput, FastProcessor,
@@ -19,7 +19,7 @@ pub use miden_processor::{
     trace, trace::ExecutionTrace, utils,
 };
 pub use miden_prover::{InputError, ProvingOptions, StackOutputs, TraceProvingInputs, Word, prove};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(target_family = "wasm"))]
 pub use miden_prover::{prove_from_trace_sync, prove_sync};
 pub use miden_verifier::VerificationError;
 

@@ -1,4 +1,4 @@
-use alloc::string::String;
+use alloc::string::ToString;
 
 use miden_core::serde::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
@@ -6,47 +6,7 @@ use miden_core::serde::{
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::Word;
-
-pub(crate) mod resolver;
-
-/// The name of a dependency
-#[derive(Debug, Clone, PartialEq, Eq, derive_more::From)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent))]
-#[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(binary_serde(true))
-)]
-pub struct DependencyName(String);
-
-#[cfg(feature = "arbitrary")]
-impl proptest::arbitrary::Arbitrary for DependencyName {
-    type Parameters = ();
-    type Strategy = proptest::prelude::BoxedStrategy<Self>;
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use proptest::prelude::Strategy;
-
-        let chars = proptest::char::range('a', 'z');
-        proptest::collection::vec(chars, 4..32)
-            .prop_map(|chars| Self(String::from_iter(chars)))
-            .no_shrink()  // Pure random strings, no meaningful shrinking pattern
-            .boxed()
-    }
-}
-
-impl Serializable for DependencyName {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.0.write_into(target);
-    }
-}
-
-impl Deserializable for DependencyName {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let name = String::read_from(source)?;
-        Ok(Self(name))
-    }
-}
+use crate::{PackageId, TargetType, Version, Word};
 
 /// A package dependency
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,26 +17,48 @@ impl Deserializable for DependencyName {
     miden_test_serde_macros::serde_test(binary_serde(true))
 )]
 pub struct Dependency {
-    /// The name of the dependency.
-    /// Serves as a human-readable identifier for the dependency and a search hint for the resolver
-    pub name: DependencyName,
+    /// The package id of the dependency.
+    pub name: PackageId,
+    /// The type of package depended on.
+    pub kind: TargetType,
+    /// The semantic version of the dependency.
+    #[cfg_attr(feature = "arbitrary", proptest(value = "Version::new(0, 0, 0)"))]
+    pub version: Version,
     /// The digest of the dependency.
     /// Serves as an ultimate source of truth for identifying the dependency.
     #[cfg_attr(feature = "arbitrary", proptest(value = "Word::default()"))]
     pub digest: Word,
 }
 
+impl Dependency {
+    /// Returns the dependency name.
+    pub fn id(&self) -> &PackageId {
+        &self.name
+    }
+
+    /// Returns the dependency semantic version.
+    pub fn version(&self) -> &Version {
+        &self.version
+    }
+}
+
 impl Serializable for Dependency {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.name.0.write_into(target);
+        self.name.write_into(target);
+        self.kind.write_into(target);
+        self.version.to_string().write_into(target);
         self.digest.write_into(target);
     }
 }
 
 impl Deserializable for Dependency {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let name = DependencyName(String::read_from(source)?);
+        let name = PackageId::read_from(source)?;
+        let kind = TargetType::read_from(source)?;
+        let version = alloc::string::String::read_from(source)?
+            .parse::<Version>()
+            .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
         let digest = Word::read_from(source)?;
-        Ok(Self { name, digest })
+        Ok(Self { name, kind, version, digest })
     }
 }

@@ -23,7 +23,7 @@ pub struct LibTarget {
 pub struct BinTarget {
     /// An optional name for this target.
     ///
-    /// If unspecified, the name defaults to `$exec`.
+    /// If unspecified, the effective target name defaults to the package name.
     ///
     /// All binary target names must be unique in a project.
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]

@@ -293,13 +293,15 @@ impl Library {
 
     /// Produces a new library with the existing [`MastForest`] and where all key/values in the
     /// provided advice map are added to the internal advice map.
-    pub fn with_advice_map(self, advice_map: AdviceMap) -> Self {
-        let mut mast_forest = (*self.mast_forest).clone();
+    pub fn with_advice_map(mut self, advice_map: AdviceMap) -> Self {
+        self.extend_advice_map(advice_map);
+        self
+    }
+
+    /// Extends the advice map of this library
+    pub fn extend_advice_map(&mut self, advice_map: AdviceMap) {
+        let mast_forest = Arc::make_mut(&mut self.mast_forest);
         mast_forest.advice_map_mut().extend(advice_map);
-        Self {
-            mast_forest: Arc::new(mast_forest),
-            ..self
-        }
     }
 }
 
@@ -369,7 +371,7 @@ impl Library {
                 Arc::from(export.path().parent().unwrap().to_path_buf().into_boxed_path());
             let module = modules_by_path
                 .entry(Arc::clone(&module_name))
-                .or_insert_with(|| ModuleInfo::new(module_name));
+                .or_insert_with(|| ModuleInfo::new(module_name, None));
             match export {
                 LibraryExport::Procedure(ProcedureExport { node, path, signature, attributes }) => {
                     let proc_digest = self.mast_forest[*node].digest();
@@ -421,12 +423,9 @@ impl Library {
             self.write_into(&mut file);
             Ok(())
         })
-        .map_err(|p| {
-            match p.downcast::<std::io::Error>() {
-                // SAFETY: It is guaranteed safe to read Box<std::io::Error>
-                Ok(err) => unsafe { core::ptr::read(&*err) },
-                Err(err) => std::panic::resume_unwind(err),
-            }
+        .map_err(|p| match p.downcast::<std::io::Error>() {
+            Ok(err) => *err,
+            Err(err) => std::panic::resume_unwind(err),
         })?
     }
 
@@ -459,13 +458,13 @@ impl Library {
 /// - The number of exported procedures cannot exceed [Kernel::MAX_NUM_PROCEDURES] (i.e., 256).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Deserialize))]
-#[cfg_attr(feature = "serde", serde(try_from = "Library"))]
+#[cfg_attr(feature = "serde", serde(try_from = "Arc<Library>"))]
 pub struct KernelLibrary {
     #[cfg_attr(feature = "serde", serde(skip))]
     kernel: Kernel,
     #[cfg_attr(feature = "serde", serde(skip))]
     kernel_info: ModuleInfo,
-    library: Library,
+    library: Arc<Library>,
 }
 
 #[cfg(feature = "serde")]
@@ -498,18 +497,18 @@ impl KernelLibrary {
 
     /// Destructures this kernel library into individual parts.
     pub fn into_parts(self) -> (Kernel, ModuleInfo, Arc<MastForest>) {
-        (self.kernel, self.kernel_info, self.library.mast_forest)
+        (self.kernel, self.kernel_info, self.library.mast_forest().clone())
     }
 }
 
-impl TryFrom<Library> for KernelLibrary {
+impl TryFrom<Arc<Library>> for KernelLibrary {
     type Error = LibraryError;
 
-    fn try_from(library: Library) -> Result<Self, Self::Error> {
+    fn try_from(library: Arc<Library>) -> Result<Self, Self::Error> {
         let kernel_path = Arc::from(Path::kernel_path().to_path_buf().into_boxed_path());
         let mut proc_digests = Vec::with_capacity(library.exports.len());
 
-        let mut kernel_module = ModuleInfo::new(Arc::clone(&kernel_path));
+        let mut kernel_module = ModuleInfo::new(Arc::clone(&kernel_path), None);
 
         for export in library.exports.values() {
             match export {
@@ -764,7 +763,7 @@ impl Serializable for KernelLibrary {
 /// NOTE: Serialization of libraries is likely to be deprecated in a future release
 impl Deserializable for KernelLibrary {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let library = Library::read_from(source)?;
+        let library = Arc::new(Library::read_from(source)?);
 
         Self::try_from(library).map_err(|err| {
             DeserializationError::InvalidValue(format!(

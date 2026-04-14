@@ -11,7 +11,7 @@ use miden_air::trace::{
 };
 use miden_core::{
     Felt, ONE, Word, ZERO,
-    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
+    mast::{BasicBlockNodeBuilder, CallNodeBuilder, MastForest, MastForestContributor},
     program::{Program, StackInputs},
 };
 
@@ -134,6 +134,32 @@ fn stacked_chiplet_trace() {
     let padding_start = kernel_rom_end;
     let trace_rows = chiplets_trace[0].len();
     validate_padding(&chiplets_trace, padding_start, trace_rows);
+}
+
+#[test]
+fn regression_trace_build_does_not_panic_when_first_memory_access_clk_is_zero() {
+    let processor = FastProcessor::new(StackInputs::default());
+    let mut host = DefaultHost::default();
+
+    // A CALL entrypoint records the callee frame pointer write before the processor clock is
+    // incremented, so the first memory access is captured at clk = 0.
+    let program = {
+        let mut forest = MastForest::new();
+
+        let callee = BasicBlockNodeBuilder::new(vec![Operation::Noop], Vec::new())
+            .add_to_forest(&mut forest)
+            .unwrap();
+        forest.make_root(callee);
+
+        let entry = CallNodeBuilder::new(callee).add_to_forest(&mut forest).unwrap();
+        forest.make_root(entry);
+
+        Program::with_kernel(forest.into(), entry, Kernel::default())
+    };
+
+    let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
+
+    let _trace = crate::trace::build_trace(trace_inputs).unwrap();
 }
 
 // HELPER FUNCTIONS

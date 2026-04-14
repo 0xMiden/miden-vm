@@ -1,0 +1,4 @@
+#! Causes execution to trap
+pub proc panic
+    push.0 assert
+end
