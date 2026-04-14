@@ -52,29 +52,3 @@ pub fn build_trace_from_ops(operations: Vec<Operation>, stack: &[u64]) -> Execut
     build_trace_from_program(&program, stack)
 }
 
-/// Builds a sample trace by executing a span block containing the specified operations. Unlike the
-/// function above, this function accepts the full [AdviceInputs] object, which means it can run
-/// the programs with initialized advice provider.
-pub fn build_trace_from_ops_with_inputs(
-    operations: Vec<Operation>,
-    stack_inputs: StackInputs,
-    advice_inputs: AdviceInputs,
-) -> ExecutionTrace {
-    let mut mast_forest = MastForest::new();
-    let basic_block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
-        .add_to_forest(&mut mast_forest)
-        .unwrap();
-    mast_forest.make_root(basic_block_id);
-
-    let program = Program::new(mast_forest.into(), basic_block_id);
-    let mut host = DefaultHost::default();
-    let processor = FastProcessor::new_with_options(
-        stack_inputs,
-        advice_inputs,
-        ExecutionOptions::default()
-            .with_core_trace_fragment_size(TEST_TRACE_FRAGMENT_SIZE)
-            .unwrap(),
-    );
-    let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
-    build_trace(trace_inputs).unwrap()
-}

@@ -1,7 +1,7 @@
 use alloc::{string::String, sync::Arc};
 
 use miden_air::trace::{
-    AUX_TRACE_RAND_CHALLENGES, DECODER_TRACE_OFFSET,
+    DECODER_TRACE_OFFSET,
     chiplets::hasher::HASH_CYCLE_LEN,
     decoder::{HASHER_STATE_OFFSET, NUM_OP_BITS, OP_BITS_OFFSET},
 };
@@ -17,7 +17,7 @@ use miden_core::{
     precompile::PrecompileRequest,
     program::{Kernel, Program, StackInputs},
 };
-use miden_utils_testing::{get_column_name, rand::rand_array};
+use miden_utils_testing::get_column_name;
 use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
 
