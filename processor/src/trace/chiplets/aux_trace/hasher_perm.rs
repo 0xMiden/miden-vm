@@ -10,15 +10,11 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::{
-    Challenges, MainTrace, RowIndex,
-    chiplets::hasher::{HASH_CYCLE_LEN, STATE_WIDTH},
+    Challenges, MainTrace, RowIndex, bus_types::HASHER_PERM_LINK, chiplets::hasher::HASH_CYCLE_LEN,
 };
 use miden_core::{Felt, field::ExtensionField};
 
-/// Labels for domain-separating input vs output perm-link messages.
-///
-/// TODO: These naive labels (0 and 1) risk collisions with other messages on the shared
-/// v_wiring column (ACE wiring and memory range checks). Revisit when refactoring the buses.
+/// Labels that distinguish input vs output perm-link messages within the `HASHER_PERM_LINK` bus.
 const LABEL_IN: Felt = Felt::ZERO;
 const LABEL_OUT: Felt = Felt::ONE;
 
@@ -101,9 +97,7 @@ pub fn build_perm_link_running_sum<E: ExtensionField<Felt>>(
     running_sum
 }
 
-/// Encodes a perm-link message: `challenges.encode([label, h0, h1, ..., h11])`.
-///
-/// The message includes a domain-separation label and the full 12-element hasher state.
+/// Encodes a perm-link message on the dedicated `HASHER_PERM_LINK` bus: `[label, h0, ..., h11]`.
 fn encode_perm_link_message<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     row: RowIndex,
@@ -111,12 +105,11 @@ fn encode_perm_link_message<E: ExtensionField<Felt>>(
     label: Felt,
 ) -> E {
     let state = main_trace.chiplet_hasher_state(row);
-    // Build message manually using alpha (not bus_prefix) to match the AIR constraint
-    // in wiring.rs::encode_perm_link_message which also uses challenges.alpha directly.
-    let mut acc = challenges.alpha;
-    acc += challenges.beta_powers[0] * E::from(label);
-    for (i, &s) in state.iter().enumerate().take(STATE_WIDTH) {
-        acc += challenges.beta_powers[1 + i] * E::from(s);
-    }
-    acc
+    challenges.encode(
+        HASHER_PERM_LINK,
+        [
+            label, state[0], state[1], state[2], state[3], state[4], state[5], state[6], state[7],
+            state[8], state[9], state[10], state[11],
+        ],
+    )
 }

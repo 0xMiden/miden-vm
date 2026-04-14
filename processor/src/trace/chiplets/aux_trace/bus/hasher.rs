@@ -28,15 +28,16 @@ use crate::{
 //
 // All hasher chiplet bus messages use a common encoding structure:
 //
-//   challenges.bus_prefix[CHIPLETS_BUS]                     = alpha (randomness base, accessed
-// directly)   challenges.beta_powers[0]            = beta^0 (label: transition type)
+//   challenges.bus_prefix[CHIPLETS_BUS]  = alpha + 1*gamma (domain-separated base for this bus)
+//   challenges.beta_powers[0]            = beta^0 (label: transition type)
 //   challenges.beta_powers[1]            = beta^1 (addr: hasher chiplet address)
 //   challenges.beta_powers[2]            = beta^2 (node_index: Merkle path position, 0 for
 //                                         non-Merkle ops)
 //   challenges.beta_powers[3..10]        = beta^3..beta^10 (state[0..7]: RATE0 || RATE1)
 //   challenges.beta_powers[11..14]       = beta^11..beta^14 (capacity[0..3])
 //
-// Message encoding: alpha + beta^0*label + beta^1*addr + beta^2*node_index
+// Message encoding: bus_prefix[CHIPLETS_BUS]
+//                   + beta^0*label + beta^1*addr + beta^2*node_index
 //                   + beta^3*state[0] + ... + beta^10*state[7]
 //                   + beta^11*capacity[0] + ... + beta^14*capacity[3]
 //
@@ -70,7 +71,8 @@ fn word_to_hasher_state(word: &[Felt; WORD_SIZE]) -> [Felt; hasher::STATE_WIDTH]
     state
 }
 
-/// Encodes hasher message as **alpha + <beta, [label, addr, node_index, state...]>**
+/// Encodes hasher message as **bus_prefix[CHIPLETS_BUS] + <beta, [label, addr, node_index,
+/// state...]>**.
 ///
 /// Used for tree operations (MPVERIFY, MRUPDATE) and generic hasher messages with node_index.
 #[inline(always)]
@@ -94,7 +96,8 @@ where
     acc
 }
 
-/// Encodes hasher message as **alpha + <beta, [label, addr, _, state[0..7]]>** (skips node_index).
+/// Encodes hasher message as **bus_prefix[CHIPLETS_BUS] + <beta, [label, addr, _, state[0..7]]>**
+/// (skips node_index).
 #[inline(always)]
 fn header_rate_value<E>(
     challenges: &Challenges<E>,
@@ -114,8 +117,8 @@ where
     acc
 }
 
-/// Encodes hasher message as **alpha + <beta, [label, addr, _, digest]>** (skips node_index, digest
-/// is RATE0 only).
+/// Encodes hasher message as **bus_prefix[CHIPLETS_BUS] + <beta, [label, addr, _, digest]>**
+/// (skips node_index, digest is RATE0 only).
 #[inline(always)]
 fn header_digest_value<E>(
     challenges: &Challenges<E>,
@@ -707,8 +710,8 @@ impl<E> BusMessage<E> for ControlBlockRequestMessage
 where
     E: ExtensionField<Felt>,
 {
-    /// Encodes as **alpha + <beta, [label, addr, _, state[0..7], ..., op_code]>** (skips
-    /// node_index).
+    /// Encodes as **bus_prefix[CHIPLETS_BUS] + <beta, [label, addr, _, state[0..7], ...,
+    /// op_code]>** (skips node_index).
     fn value(&self, challenges: &Challenges<E>) -> E {
         // Header + rate portion + capacity domain element for op_code
         let mut acc = header_rate_value(

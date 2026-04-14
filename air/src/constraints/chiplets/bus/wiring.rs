@@ -293,8 +293,7 @@ where
     let f_p_out = perm_is_active * p_cycle_row_boundary;
 
     // --- Messages ---
-    // msg = challenges.encode([label, h0, h1, ..., h11]) -- 13 elements
-    // TODO: labels 0/1 risk collisions with other v_wiring contributors (see hasher_perm.rs).
+    // msg = challenges.encode(HASHER_PERM_LINK, [label, h0, h1, ..., h11]) -- 13 elements
     let msg_in = encode_perm_link_message::<AB>(local, challenges, AB::Expr::ZERO);
     let msg_out = encode_perm_link_message::<AB>(local, challenges, AB::Expr::ONE);
 
@@ -316,11 +315,7 @@ where
     perm_link_term * hasher_flag + idle_term
 }
 
-/// Encodes a perm-link message: `alpha + beta^0 * label + sum(beta^(1+i) * h[i])`.
-///
-/// Note: This uses `challenges.alpha` directly (no bus prefix domain separation) because the
-/// perm-link messages are internal to the wiring bus and don't need to match messages from
-/// other bus types.
+/// Encodes a perm-link message on the dedicated `HASHER_PERM_LINK` bus: `[label, h0, ..., h11]`.
 fn encode_perm_link_message<AB>(
     local: &MainCols<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
@@ -330,16 +325,24 @@ where
     AB: MidenAirBuilder,
 {
     let h_start = HASHER_STATE_COL_RANGE.start - CHIPLETS_OFFSET;
-
-    // Build array: [label, h0, h1, ..., h11]
-    let label_ef: AB::ExprEF = label.into();
-    let mut acc = challenges.alpha.clone() + challenges.beta_powers[0].clone() * label_ef;
-    for i in 0..12 {
-        let h_i: AB::ExprEF =
-            Into::<AB::ExprEF>::into(Into::<AB::Expr>::into(local.chiplets[h_start + i]));
-        acc += challenges.beta_powers[1 + i].clone() * h_i;
-    }
-    acc
+    challenges.encode(
+        bus_types::HASHER_PERM_LINK,
+        [
+            label,
+            local.chiplets[h_start].into(),
+            local.chiplets[h_start + 1].into(),
+            local.chiplets[h_start + 2].into(),
+            local.chiplets[h_start + 3].into(),
+            local.chiplets[h_start + 4].into(),
+            local.chiplets[h_start + 5].into(),
+            local.chiplets[h_start + 6].into(),
+            local.chiplets[h_start + 7].into(),
+            local.chiplets[h_start + 8].into(),
+            local.chiplets[h_start + 9].into(),
+            local.chiplets[h_start + 10].into(),
+            local.chiplets[h_start + 11].into(),
+        ],
+    )
 }
 
 // INTERNAL HELPERS

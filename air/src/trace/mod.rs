@@ -188,11 +188,11 @@ pub const MAX_MESSAGE_WIDTH: usize = 16;
 /// Bus message coefficient indices.
 ///
 /// These define the standard positions for encoding bus messages using the pattern:
-/// `alpha + sum(beta_powers\[i\] * elem\[i\])` where:
-/// - `alpha` is the randomness base (accessed directly as `.alpha`)
+/// `bus_prefix[bus] + sum(beta_powers\[i\] * elem\[i\])` where:
+/// - `bus_prefix[bus]` is the per-bus domain-separated base (see [`bus_types`])
 /// - `beta_powers\[i\] = beta^i` are the powers of beta
 ///
-/// These indices refer to positions in the `beta_powers` array, not including alpha.
+/// These indices refer to positions in the `beta_powers` array, not including the bus prefix.
 ///
 /// This layout is shared between:
 /// - AIR constraint builders (symbolic expressions): `Challenges<AB::ExprEF>`
@@ -260,6 +260,9 @@ pub mod bus_types {
     pub const RANGE_CHECK_BUS: usize = 7;
     /// ACE wiring bus (LogUp): verifies arithmetic circuit wire connections.
     pub const ACE_WIRING_BUS: usize = 8;
+    /// Hasher perm-link bus: links hasher controller rows to permutation segment rows on
+    /// `v_wiring`.
+    pub const HASHER_PERM_LINK: usize = 9;
     /// Total number of distinct bus interaction types.
-    pub const NUM_BUS_TYPES: usize = 9;
+    pub const NUM_BUS_TYPES: usize = 10;
 }
