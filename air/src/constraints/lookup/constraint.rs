@@ -150,29 +150,48 @@ where
         let result = f(&mut col);
         let ConstraintColumn { u, v, .. } = col;
 
-        // TODO(milestone-B-followup): re-enable LogUp boundary / transition constraints.
-        //
-        // Milestone B intentionally disables the boundary + transition checks while the
-        // stateless `MidenLookupAuxBuilder` integration lands. The aux trace is still
-        // committed and observed by the Fiat-Shamir challenger, but the symbolic LogUp
-        // algebra is not yet enforced — what passes the verifier is only the unchanged
-        // main-trace constraint system. The follow-up milestone restores real checks
-        // once column closure + public-input correction terms for open buses
-        // (`block_hash`, `chiplets bus`, `log_precompile transcript`) are designed.
-        //
-        // The original constraint set, kept here for reference and easy restoration:
-        //
+        // Pick up `acc` / `acc_next` from `ab.permutation()` now that the col borrow
+        // is released. The `mp` window holds an immutable borrow of `self.ab` which
+        // ends at the end of the block; the subsequent `when_*` calls take
+        // `&mut self.ab`, so the borrows must not overlap.
         let (acc, acc_next) = {
             let mp = self.ab.permutation();
             let acc: AB::ExprEF = mp.current_slice()[self.column_idx].into();
             let acc_next: AB::ExprEF = mp.next_slice()[self.column_idx].into();
             (acc, acc_next)
         };
-        let delta = acc_next - acc.clone();
-        //     self.ab.when_first_row().assert_zero_ext(acc.clone());
-            self.ab.when_transition().assert_zero_ext(delta * u - v);
-        //     self.ab.when_last_row().assert_zero_ext(acc);
-        // let _ = (u, v);
+
+        // LogUp boundary + transition constraints. The `MidenLookupAuxBuilder` produces
+        // an aux trace whose row 0 starts at `EF::ZERO` and whose row `r` holds the
+        // running sum of fraction contributions from rows `0..r`. The committed finals
+        // (the per-column scalar second tuple element of `build_aux_trace`) hold the
+        // full running sum across every row.
+        //
+        //   when_first_row:  acc[0] == 0
+        //   when_transition: (acc_next - acc) · U − V == 0  (rows 0..N-2)
+        //
+        // The natural "bind acc[N-1] to committed_final" check would mirror the
+        // transition constraint with `committed_final` as the wraparound next row:
+        //
+        //     when_last_row: (committed_final - acc) · U − V == 0
+        //
+        // but the symbolic builder's `when_last_row` mask multiplies the constraint
+        // expression by an extra polynomial factor that pushes the column-1 (M_2+5)
+        // last-row constraint to degree 10, exceeding the degree-9 budget. For the
+        // current milestone the last-row binding is **omitted**; soundness of the
+        // verifier-side `reduced_aux_values` boundary check then relies on the
+        // committed finals being honestly derived from the aux trace.
+        //
+        // TODO(milestone-B-followup-soundness): restore a binding constraint between
+        // `acc[N-1]` and `committed_final` without exceeding the degree budget. Options
+        // include splitting the constraint via a helper column, lowering the M_2+5
+        // column's transition degree, or moving the binding into a different
+        // mechanism that does not multiply by the `when_last_row` mask.
+        let delta_transition = acc_next - acc.clone();
+        self.ab.when_first_row().assert_zero_ext(acc);
+        self.ab.when_transition().assert_zero_ext(delta_transition * u - v);
+        // check if we can assume no iteractions happen in the last row, so we can just check dela =
+        // aux value
 
         self.column_idx += 1;
         result

@@ -1,18 +1,24 @@
 //! `v_wiring` shared bus column (C3 / `BUS_ACE_WIRING` + `BUS_HASHER_PERM_LINK`).
 //!
-//! Two sibling [`super::super::LookupColumn::group`] calls inside one
-//! [`super::super::LookupBuilder::column`] closure. Both buses are linearly independent in
-//! the extension field thanks to their distinct `bus_prefix[bus]` additive bases, so their
-//! contributions to the same column's running `(U, V)` cannot interfere.
+//! Both buses live inside **one** [`super::super::LookupColumn::group`] call. The chiplet
+//! tri-state (`s_ctrl + s_perm + s0_virtual = 1`) makes ACE rows, hasher controller rows,
+//! and hasher permutation rows pairwise mutually exclusive, so the simple-group
+//! composition `U_g += (d_i − 1)·f_i`, `V_g += m_i·f_i` is sound: at most one of the five
+//! interactions fires per row, and the column's running `(U, V)` takes MAX over per-
+//! interaction degrees rather than summing them (which a sibling-group split would do).
+//! The two buses' denominators use distinct `bus_prefix[bus]` additive bases, so even
+//! though they share the same accumulator their contributions are linearly independent in
+//! the extension field and cannot cancel across buses.
 //!
-//! ## Group 1 — ACE wiring (`BUS_ACE_WIRING`)
+//! ## ACE wiring (`BUS_ACE_WIRING`)
 //!
 //! Two READ/EVAL wire interactions gated by the ACE chiplet selector + its per-row block
 //! selector, folded into a single `ace_flag`-gated batch with `sblock`-muxed multiplicities:
 //! `wire_0` fires with the same multiplicity `m_0` on both READ and EVAL rows, so it
 //! factors out; `wire_1` and `wire_2` get `sblock`-parameterized multiplicities that recover
 //! the original rational at every row. This drops the outer selector from degree 5
-//! (`is_read`/`is_eval`) to degree 4 (`ace_flag`), bringing the column transition from 9 to 8.
+//! (`is_read`/`is_eval`) to degree 4 (`ace_flag`), bringing the batch's contribution to
+//! `(deg(U_g), deg(V_g)) = (7, 8)`.
 //!
 //! Algebraic equivalence:
 //!
@@ -29,21 +35,25 @@
 //! `wire_2` interaction is fully suppressed via the `−sblock` multiplicity, so the
 //! interpretation collapses to the READ-mode one.
 //!
-//! ## Group 2 — Hasher perm-link (`BUS_HASHER_PERM_LINK`)
+//! ## Hasher perm-link (`BUS_HASHER_PERM_LINK`)
 //!
 //! Binds hasher controller rows to permutation sub-chiplet rows. Without this bus the
 //! permutation segment is structurally independent from the controller, and a malicious
 //! prover could pair any controller `(state_in, state_out)` with any perm-cycle execution
 //! (or skip the cycle entirely). Four mutually exclusive interactions:
 //!
-//! - **Controller input** (`s_ctrl · is_input`, multiplicity `+1`, `label = 0`) — controller
-//!   side of a (state_in, state_out) pair.
+//! - **Controller input** (`s_ctrl · is_input`, multiplicity `+1`, `label = 0`) — controller side
+//!   of a (state_in, state_out) pair.
 //! - **Controller output** (`s_ctrl · is_output`, multiplicity `+1`, `label = 1`).
 //! - **Permutation row 0** (`s_perm · is_init_ext`, multiplicity `−m`, `label = 0`) — input
-//!   boundary of a Poseidon2 cycle. `m` is read from `PermutationCols.multiplicity` and is
-//!   constant within the cycle by [`crate::constraints::chiplets::permutation`].
-//! - **Permutation row 15** (`s_perm · (1 − periodic_sum)`, multiplicity `−m`, `label = 1`)
-//!   — output boundary of the same cycle.
+//!   boundary of a Poseidon2 cycle. `m` is read from `PermutationCols.multiplicity` and is constant
+//!   within the cycle by [`crate::constraints::chiplets::permutation`].
+//! - **Permutation row 15** (`s_perm · (1 − periodic_sum)`, multiplicity `−m`, `label = 1`) —
+//!   output boundary of the same cycle.
+//!
+//! The widest perm-link contribution is `f_ctrl_output` with gate degree 3 — strictly below
+//! the ACE batch's `(7, 8)` — so merging into the same group leaves the column's transition
+//! at `max(1 + 7, 8) = 8`.
 
 use core::{array, borrow::Borrow};
 
@@ -61,16 +71,17 @@ use crate::constraints::{
 
 /// Upper bound on fractions this emitter pushes into its column per row.
 ///
-/// - **ACE wiring group**: single `ace_flag`-gated batch with three `insert` calls (wire_0,
-///   wire_1, wire_2) — when active, all three push unconditionally. Per-row contribution: 3.
-/// - **Perm-link group**: four mutually exclusive interactions (controller input/output,
-///   perm row 0/15) — at most one fires per row. Per-row contribution: 1.
+/// Single group hosts both buses. The chiplet tri-state makes ACE, hasher-controller, and
+/// hasher-permutation rows pairwise mutually exclusive, so on any given row only one of:
+/// - **ACE wiring batch** on ACE rows: 3 fractions (wire_0 / wire_1 / wire_2 push unconditionally
+///   when the outer `ace_flag` fires).
+/// - **Perm-link** on hasher controller rows: 1 fraction (one of ctrl_input / ctrl_output, split by
+///   `s0`).
+/// - **Perm-link** on hasher permutation rows: 1 fraction (one of row 0 / row 15, split by the
+///   periodic cycle schedule).
 ///
-/// Both groups are sibling `col.group` calls on the same column. Even though the ACE
-/// chiplet and hasher chiplet are mutually exclusive (so per-row only one of the two
-/// groups actually fires), the conservative upper bound used by the per-column accumulator
-/// is the sum: `3 + 1 = 4`.
-pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 4;
+/// Per-row max is therefore `max(3, 1, 1) = 3`.
+pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 3;
 
 /// Emit the `v_wiring` shared column (C3): ACE wiring + hasher perm-link.
 pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
@@ -150,12 +161,18 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
     let perm_mult = perm.multiplicity;
 
     builder.column(|col| {
-        // ---- Group 1: ACE wiring (BUS_ACE_WIRING) ----
+        // Single group hosts both buses. ACE rows (`chiplet_active.ace`), controller rows
+        // (`chiplet_active.controller`), and permutation rows (`chiplet_active.permutation`)
+        // are pairwise mutually exclusive via the chiplet tri-state, so the simple-group
+        // composition is sound. Merging into one group takes MAX over per-interaction
+        // degrees instead of multiplying sibling `(U_g, V_g)` pairs — critical for keeping
+        // this column's transition inside the degree-9 budget.
         col.group(|g| {
-            // Single `ace_flag`-gated batch with `sblock`-muxed multiplicities
-            // for wire_1 and wire_2. `wire_0`'s `m_0` is invariant across the
-            // READ/EVAL split, so it lives in the batch as a plain trace-column
-            // multiplicity.
+            // ---- ACE wiring (BUS_ACE_WIRING) ----
+            //
+            // Single `ace_flag`-gated batch with `sblock`-muxed multiplicities for wire_1
+            // and wire_2. `wire_0`'s `m_0` is invariant across the READ/EVAL split, so it
+            // lives in the batch as a plain trace-column multiplicity.
             g.batch(ace_flag, move |b| {
                 let m_0: LB::Expr = m_0.into();
                 let m_1: LB::Expr = m_1.into();
@@ -189,10 +206,9 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
                 };
                 b.insert(wire_2_mult, wire_2);
             });
-        });
 
-        // ---- Group 2: hasher perm-link (BUS_HASHER_PERM_LINK) ----
-        col.group(|g| {
+            // ---- Hasher perm-link (BUS_HASHER_PERM_LINK) ----
+
             // Controller input: +1 / encode(label=0, ctrl.state).
             g.add(f_ctrl_input, move || {
                 let state: [LB::Expr; 12] = ctrl_state.map(Into::into);

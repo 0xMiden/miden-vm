@@ -405,5 +405,4 @@ impl ExecutionTrace {
     pub fn get_column_range(&self, range: Range<usize>) -> Vec<Vec<Felt>> {
         self.main_trace.get_column_range(range)
     }
-
 }

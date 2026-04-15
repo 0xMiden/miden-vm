@@ -8,10 +8,8 @@
 use alloc::vec::Vec;
 
 use miden_air::{
-    LiftedAir, ProcessorAir,
-    lookup::{
-        LookupChallenges, LookupMessage, MidenLookupAir, accumulate, build_lookup_fractions,
-    },
+    LOGUP_AUX_TRACE_WIDTH, LiftedAir, ProcessorAir,
+    lookup::{LookupChallenges, LookupMessage, MidenLookupAir, accumulate, build_lookup_fractions},
 };
 use miden_core::{
     field::{Field, PrimeCharacteristicRing, QuadFelt},
@@ -25,7 +23,7 @@ use super::{ExecutionTrace, Felt};
 // ================================================================================================
 
 /// Aggregator column indices for [`MidenLookupAir`], mirroring the `eval` order
-/// `[M1, M_2+5, M3, M4, M5, C1, C2, C3, C4]`. Keeping these constants here (rather than
+/// `[M1, M_2+5, M3, M4, M5, C1, C2, C3]`. Keeping these constants here (rather than
 /// importing from `air/`) makes any future bus re-shuffle in the AIR a visible compile-time
 /// change.
 #[allow(dead_code)]
@@ -44,10 +42,8 @@ pub(super) mod aux_col {
     pub const CHIPLET_RESPONSES: usize = 5;
     /// C2 — `BUS_CHIPLETS` (hash-kernel) + `BUS_SIBLING_TABLE`.
     pub const HASH_KERNEL_AND_SIBLING: usize = 6;
-    /// C3 — `BUS_ACE_WIRING`.
-    pub const ACE_WIRING: usize = 7;
-    /// C4 — `BUS_HASHER_PERM_LINK`.
-    pub const HASHER_PERM_LINK: usize = 8;
+    /// C3 — `BUS_ACE_WIRING` + `BUS_HASHER_PERM_LINK` (both ride the shared v_wiring column).
+    pub const V_WIRING: usize = 7;
 }
 
 // LOOKUP HARNESS
@@ -94,12 +90,16 @@ impl LookupHarness {
         let challenges = LookupChallenges::<QuadFelt>::new(alpha, beta);
 
         let air = MidenLookupAir;
-        let fractions = build_lookup_fractions(&air, &main_trace, &periodic, &public_vals, &challenges);
+        let fractions =
+            build_lookup_fractions(&air, &main_trace, &periodic, &public_vals, &challenges);
         let aux = accumulate(&fractions);
 
         let num_cols = aux.width();
         let num_rows = aux.height() - 1;
-        assert_eq!(num_cols, 9, "MidenLookupAir must produce exactly 9 aux columns");
+        assert_eq!(
+            num_cols, LOGUP_AUX_TRACE_WIDTH,
+            "MidenLookupAir must produce exactly LOGUP_AUX_TRACE_WIDTH aux columns",
+        );
         assert_eq!(
             num_rows,
             trace.main_trace().num_rows(),
@@ -154,9 +154,7 @@ impl LookupHarness {
         M: LookupMessage<Felt, QuadFelt>,
     {
         let denom = msg.encode(&self.challenges);
-        denom
-            .try_inverse()
-            .expect("encoded message denominator must be non-zero")
+        denom.try_inverse().expect("encoded message denominator must be non-zero")
     }
 
     /// Sum of `+1 / denom` for every message in `msgs`. Matches a group of "add" interactions

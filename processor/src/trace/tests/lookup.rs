@@ -16,10 +16,8 @@
 //! or terminal closure — those checks need the follow-up constraint-path round-trip
 //! oracle. Column terminals are printed to stderr for manual inspection.
 
-use alloc::vec::Vec;
-
 use miden_air::{
-    LiftedAir, ProcessorAir,
+    LOGUP_AUX_TRACE_WIDTH, LiftedAir, ProcessorAir,
     lookup::{
         LookupChallenges, MidenLookupAir, accumulate, accumulate_slow, build_lookup_fractions,
         collect_column_oracle_folds,
@@ -69,8 +67,8 @@ fn build_lookup_fractions_on_tiny_span() {
     // --- Shape bookkeeping ---
     let num_rows = trace.main_trace().num_rows();
     assert_eq!(fractions.num_rows(), num_rows);
-    assert_eq!(fractions.num_columns(), 7);
-    assert_eq!(fractions.counts().len(), num_rows * 7);
+    assert_eq!(fractions.num_columns(), LOGUP_AUX_TRACE_WIDTH);
+    assert_eq!(fractions.counts().len(), num_rows * LOGUP_AUX_TRACE_WIDTH);
 
     // --- Trace is not degenerate: at least one fraction was collected somewhere.
     //     If every column was empty the emitters, shape consts, or trace are broken. ---
@@ -83,7 +81,7 @@ fn build_lookup_fractions_on_tiny_span() {
     //     a bad emitter or a zero bus_prefix would produce a zero-denominator fraction
     //     and `try_inverse` inside `accumulate_slow` would panic. ---
     let aux = accumulate_slow(&fractions);
-    assert_eq!(aux.len(), 7);
+    assert_eq!(aux.len(), LOGUP_AUX_TRACE_WIDTH);
     for col_aux in &aux {
         assert_eq!(col_aux.len(), num_rows + 1);
         assert_eq!(col_aux[0], QuadFelt::ZERO);
@@ -144,7 +142,7 @@ fn build_lookup_fractions_matches_constraint_path_oracle() {
     let aux_values = &aux.values;
 
     let num_rows = trace.main_trace().num_rows();
-    assert_eq!(aux_width, 7);
+    assert_eq!(aux_width, LOGUP_AUX_TRACE_WIDTH);
     assert_eq!(aux.height(), num_rows + 1);
 
     // --- Constraint path: walk the trace through the oracle to collect per-row folded
@@ -155,7 +153,7 @@ fn build_lookup_fractions_matches_constraint_path_oracle() {
 
     // --- Per-(row, col) delta check. ---
     for (r, row_folds) in oracle_folds.iter().enumerate() {
-        assert_eq!(row_folds.len(), 7);
+        assert_eq!(row_folds.len(), LOGUP_AUX_TRACE_WIDTH);
         for (col, &(u_col, v_col)) in row_folds.iter().enumerate() {
             let u_inv = u_col.try_inverse().unwrap_or_else(|| {
                 panic!(
@@ -174,5 +172,57 @@ fn build_lookup_fractions_matches_constraint_path_oracle() {
                  oracle delta  = {expected_delta:?}",
             );
         }
+    }
+}
+
+/// Diagnostic: compute per-column terminals for the same Fibonacci MASM program that
+/// `test_blake3_256_prove_verify` uses, built via the `Assembler` so HALT padding rows
+/// are present. Used to isolate which columns close in-trace and which carry open
+/// boundary contributions that need to appear in `reduced_aux_values`.
+#[test]
+fn diagnostic_assembler_path_terminals() {
+    use miden_assembly::Assembler;
+
+    use super::build_trace_from_program;
+
+    let source = "
+        begin
+            repeat.149
+                swap dup.1 add
+            end
+        end
+    ";
+    let program = Assembler::default().assemble_program(source).unwrap();
+    let trace = build_trace_from_program(&program, &[0, 1]);
+
+    let main_trace = trace.main_trace().to_row_major();
+    let public_vals = trace.to_public_values();
+    let periodic = LiftedAir::<Felt, QuadFelt>::periodic_columns(&ProcessorAir);
+
+    let raw = rand_array::<Felt, 4>();
+    let alpha = QuadFelt::new([raw[0], raw[1]]);
+    let beta = QuadFelt::new([raw[2], raw[3]]);
+    let challenges = LookupChallenges::<QuadFelt>::new(alpha, beta);
+
+    let air = MidenLookupAir;
+    let fractions = build_lookup_fractions(&air, &main_trace, &periodic, &public_vals, &challenges);
+    let aux = accumulate_slow(&fractions);
+    let num_rows = trace.main_trace().num_rows();
+
+    std::eprintln!("assembler-path trace: {} rows", num_rows);
+    let labels = [
+        "M1 block_stack+range_table",
+        "M_2+5 block_hash+op_group",
+        "M3 chiplet_requests",
+        "M4 range_logcap",
+        "M5 stack_overflow",
+        "C1 chiplet_responses",
+        "C2 hash_kernel+sibling",
+        "C3 ace_wiring",
+    ];
+    for (col, col_aux) in aux.iter().enumerate() {
+        let terminal = col_aux[num_rows];
+        let label = if terminal == QuadFelt::ZERO { " (CLOSED)" } else { "" };
+        std::eprintln!("col {col} ({}) terminal = {terminal:?}{label}", labels[col]);
     }
 }

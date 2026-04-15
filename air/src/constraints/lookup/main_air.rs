@@ -1,9 +1,16 @@
 //! Main-trace LogUp lookup AIR.
 //!
-//! Owns the main-trace side of the Miden VM's LogUp argument: the five permutation columns
-//! M1, M_2+5, M3, M4, M5. Each column is described by one of the `emit_*` functions in
+//! Owns the main-trace side of the Miden VM's LogUp argument: the four permutation columns
+//! M1, M_2+5, M3, M4. Each column is described by one of the `emit_*` functions in
 //! [`super::buses`]; this module wires them together via a single [`MainBusContext`] that
 //! carries the two-row window plus a shared [`OpFlags`] instance.
+//!
+//! Column layout:
+//! - **M1**: block-stack table + u32 range checks + log-precompile capacity + range-table response
+//!   (merged — see [`super::buses::block_stack_and_range_logcap`]).
+//! - **M_2+5**: block-hash queue + op-group table.
+//! - **M3**: chiplet requests from the decoder.
+//! - **M4**: stack overflow table.
 //!
 //! The [`MainLookupBuilder`] extension trait exists so the `OpFlags` construction can diverge
 //! between the constraint path (polynomial, today's default) and the prover path (boolean
@@ -20,9 +27,8 @@ use super::{
     bus_id::NUM_BUS_IDS,
     buses::{
         block_hash_and_op_group::{self as block_hash_and_op_group, emit_block_hash_and_op_group},
-        block_stack::{self, emit_block_stack_and_range_table},
+        block_stack_and_range_logcap::{self, emit_block_stack_and_range_logcap},
         chiplet_requests::{self, emit_chiplet_requests},
-        range_logcap::{self, emit_range_stack_and_log_capacity},
         stack_overflow::{self, emit_stack_overflow},
     },
 };
@@ -100,19 +106,18 @@ where
 
 /// LogUp lookup argument over the main trace.
 ///
-/// Zero-sized. Emits five permutation columns in the order M1, M_2+5, M3, M4, M5 — matching
-/// the layout the legacy `enforce_main` held and the aggregator
-/// [`super::miden_air::MidenLookupAir`] still holds. The chiplet-trace half of the argument
+/// Zero-sized. Emits four permutation columns in the order M1, M_2+5, M3, M4. M1 packs
+/// block-stack + u32 range checks + log-precompile capacity + range-table response into
+/// one column; M4 hosts the stack overflow table. The chiplet-trace half of the argument
 /// lives in [`super::chiplet_air::ChipletLookupAir`].
 #[derive(Copy, Clone, Debug, Default)]
 pub(crate) struct MainLookupAir;
 
-/// Per-column fraction stride: [M1, M_2+5, M3, M4, M5].
-pub(crate) const MAIN_COLUMN_SHAPE: [usize; 5] = [
-    block_stack::MAX_INTERACTIONS_PER_ROW,
+/// Per-column fraction stride: [M1, M_2+5, M3, M4].
+pub(crate) const MAIN_COLUMN_SHAPE: [usize; 4] = [
+    block_stack_and_range_logcap::MAX_INTERACTIONS_PER_ROW,
     block_hash_and_op_group::MAX_INTERACTIONS_PER_ROW,
     chiplet_requests::MAX_INTERACTIONS_PER_ROW,
-    range_logcap::MAX_INTERACTIONS_PER_ROW,
     stack_overflow::MAX_INTERACTIONS_PER_ROW,
 ];
 
@@ -121,9 +126,11 @@ where
     LB: MainLookupBuilder,
 {
     fn num_columns(&self) -> usize {
-        // M1 (block-stack + range-table response), M_2+5 (block-hash queue ∪ op-group table),
-        // M3 (chiplet requests), M4 (range-stack + logpre capacity), M5 (stack overflow table).
-        5
+        // M1 (block-stack + u32rc + logpre + range-table response),
+        // M_2+5 (block-hash queue ∪ op-group table),
+        // M3 (chiplet requests),
+        // M4 (stack overflow table).
+        4
     }
 
     fn column_shape(&self) -> &[usize] {
@@ -159,10 +166,9 @@ where
         // constructor call and is released before the emitters take their own `&mut builder`.
         let ctx = MainBusContext::new(&*builder, local, next);
 
-        emit_block_stack_and_range_table::<LB>(builder, &ctx);
+        emit_block_stack_and_range_logcap::<LB>(builder, &ctx);
         emit_block_hash_and_op_group::<LB>(builder, &ctx);
         emit_chiplet_requests::<LB>(builder, &ctx);
-        emit_range_stack_and_log_capacity::<LB>(builder, &ctx);
         emit_stack_overflow::<LB>(builder, &ctx);
     }
 }

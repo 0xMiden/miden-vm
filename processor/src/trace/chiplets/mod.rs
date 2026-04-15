@@ -334,7 +334,7 @@ impl Chiplets {
                     kernel_rom.fill_trace(&mut kernel_rom_fragment);
                 });
                 s.spawn(move |_| {
-                    let _ = ace.fill_trace(&mut ace_fragment);
+                    ace.fill_trace(&mut ace_fragment);
                 });
             });
         }

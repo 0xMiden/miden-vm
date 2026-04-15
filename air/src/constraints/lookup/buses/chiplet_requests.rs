@@ -22,7 +22,7 @@ use crate::{
         },
     },
     trace::{
-        chiplets::hasher::HASH_CYCLE_LEN,
+        chiplets::hasher::CONTROLLER_ROWS_PER_PERMUTATION,
         log_precompile::{
             HELPER_ADDR_IDX, HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE, STACK_COMM_RANGE,
             STACK_R0_RANGE, STACK_R1_RANGE, STACK_TAG_RANGE,
@@ -68,8 +68,11 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
     let log_addr = user_helpers[HELPER_ADDR_IDX];
 
     // Constants reused across HPERM / MPVERIFY / MRUPDATE / END / LOGPRECOMPILE.
-    let last_off: LB::Expr = LB::Expr::from_u16((HASH_CYCLE_LEN - 1) as u16);
-    let cycle_len: LB::Expr = LB::Expr::from_u16(HASH_CYCLE_LEN as u16);
+    // Strides are measured in controller-trace rows (2 per permutation), not physical
+    // hasher sub-chiplet rows — matches the legacy chiplets-bus request addresses, which
+    // must cancel against `clk + 1` on the hasher controller output row.
+    let last_off: LB::Expr = LB::Expr::from_u16((CONTROLLER_ROWS_PER_PERMUTATION - 1) as u16);
+    let cycle_len: LB::Expr = LB::Expr::from_u16(CONTROLLER_ROWS_PER_PERMUTATION as u16);
 
     // Shared memory header for MLOAD / MSTORE / MLOADW / MSTOREW (ctx / s0 / clk).
     let mem_header = MemoryHeader {
@@ -129,9 +132,10 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
             });
 
             // --- RESPAN ---
+            // Uses `addr_next` directly: in the controller/perm split, the next row's decoder
+            // `addr` already points at the continuation input row, so no offset is needed.
             g.remove(op_flags.respan(), move || {
-                let addr_next: LB::Expr = addr_next.into();
-                let parent = addr_next - LB::Expr::ONE;
+                let parent = addr_next.into();
                 let h = h.map(LB::Expr::from);
                 HasherMsg::absorption(parent, h)
             });
@@ -261,6 +265,52 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
                     mem_header.write_word(word)
                 });
             }
+
+            // --- MSTREAM / PIPE ---
+            // Two-word memory ops. Address `stack[12]` holds the word-addressable target;
+            // the two words live at `addr` and `addr + 4`. Matches legacy
+            // `cfe62ef4f:air/src/constraints/chiplets/bus/chiplets.rs::compute_mstream_request`
+            // and `compute_pipe_request`.
+            //
+            // MSTREAM reads 8 elements from memory into `next.stack[0..8]` (MEMORY_READ_WORD).
+            // PIPE writes 8 elements from `next.stack[0..8]` into memory (MEMORY_WRITE_WORD).
+            let stream_addr = stk.get(12);
+            g.batch(op_flags.mstream(), move |b| {
+                let addr0: LB::Expr = stream_addr.into();
+                let addr1: LB::Expr = addr0.clone() + LB::Expr::from_u16(4);
+                let word0: [LB::Expr; 4] = array::from_fn(|i| stk_next.get(i).into());
+                let word1: [LB::Expr; 4] = array::from_fn(|i| stk_next.get(4 + i).into());
+                let header0 = MemoryHeader {
+                    ctx: sys_ctx.into(),
+                    addr: addr0,
+                    clk: clk.into(),
+                };
+                let header1 = MemoryHeader {
+                    ctx: sys_ctx.into(),
+                    addr: addr1,
+                    clk: clk.into(),
+                };
+                b.remove(header0.read_word(word0));
+                b.remove(header1.read_word(word1));
+            });
+            g.batch(op_flags.pipe(), move |b| {
+                let addr0: LB::Expr = stream_addr.into();
+                let addr1: LB::Expr = addr0.clone() + LB::Expr::from_u16(4);
+                let word0: [LB::Expr; 4] = array::from_fn(|i| stk_next.get(i).into());
+                let word1: [LB::Expr; 4] = array::from_fn(|i| stk_next.get(4 + i).into());
+                let header0 = MemoryHeader {
+                    ctx: sys_ctx.into(),
+                    addr: addr0,
+                    clk: clk.into(),
+                };
+                let header1 = MemoryHeader {
+                    ctx: sys_ctx.into(),
+                    addr: addr1,
+                    clk: clk.into(),
+                };
+                b.remove(header0.write_word(word0));
+                b.remove(header1.write_word(word1));
+            });
 
             // --- U32AND / U32XOR ---
             g.remove(op_flags.u32and(), move || {

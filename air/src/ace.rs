@@ -234,8 +234,8 @@ pub fn reduced_aux_batch_config() -> ReducedAuxBatchConfig {
     // let v_wiring = trace::ACE_CHIPLET_WIRING_BUS_OFFSET;
     //
     // // Public input layout offsets.
-    // // [0..4] program hash, [4..20] stack inputs, [20..36] stack outputs, [36..40] transcript state
-    // let pv_program_hash = super::PV_PROGRAM_HASH;
+    // // [0..4] program hash, [4..20] stack inputs, [20..36] stack outputs, [36..40] transcript
+    // state let pv_program_hash = super::PV_PROGRAM_HASH;
     // let pv_transcript_state = super::PV_TRANSCRIPT_STATE;
     //
     // // Bus message constants.

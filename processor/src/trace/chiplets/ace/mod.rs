@@ -66,4 +66,3 @@ impl Ace {
         self.circuit_evaluations.insert(clk, circuit_eval);
     }
 }
-

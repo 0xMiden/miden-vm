@@ -4,10 +4,10 @@
 //!
 //! ## Organization
 //!
-//! - **Main trace constraints** are evaluated by [`enforce_main`] and cover system /
-//!   range / stack / decoder / chiplets transitions.
-//! - **LogUp lookup-argument constraints** are evaluated separately through the
-//!   closure-based [`lookup::MidenLookupAir`], wired in from `ProcessorAir::eval` via
+//! - **Main trace constraints** are evaluated by [`enforce_main`] and cover system / range / stack
+//!   / decoder / chiplets transitions.
+//! - **LogUp lookup-argument constraints** are evaluated separately through the closure-based
+//!   [`lookup::MidenLookupAir`], wired in from `ProcessorAir::eval` via
 //!   [`lookup::ConstraintLookupBuilder`].
 //!
 //! The legacy multiset bus subtree (`bus.rs`, `decoder/bus.rs`, `stack/bus.rs`,

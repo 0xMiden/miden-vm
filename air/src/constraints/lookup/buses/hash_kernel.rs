@@ -1,6 +1,7 @@
-//! Hash-kernel virtual table bus (C2 / `BUS_SIBLING_TABLE` + `BUS_CHIPLETS`).
+//! Hash-kernel virtual table bus (C2 / `BUS_SIBLING_TABLE` + `BUS_CHIPLETS` +
+//! `BUS_RANGE_CHECK`).
 //!
-//! Combines two tables on a single LogUp column:
+//! Combines three tables on a single LogUp column:
 //!
 //! 1. **Sibling table** (`BUS_SIBLING_TABLE`) — Merkle update siblings. On hasher controller input
 //!    rows with `s0·s1 = 1`, `s2` distinguishes MU (new path, removes siblings) from MV (old path,
@@ -10,11 +11,21 @@
 //! 2. **ACE memory reads** (`BUS_CHIPLETS`) — on ACE chiplet rows, the block selector distinguishes
 //!    word reads (`f_ace_read`) from element reads used by EVAL rows (`f_ace_eval`). Both are
 //!    removed from the chiplets bus.
+//! 3. **Memory-side range checks** (`BUS_RANGE_CHECK`) — on memory chiplet rows, a five-remove
+//!    batch consumes the two delta limbs `d0`/`d1` and the three word-address decomposition values
+//!    `w0`, `w1`, and `4·w1`. Together these enforce `d0, d1, w0, w1 ∈ [0, 2^16)` plus `w1 ∈ [0,
+//!    2^14)` (via the `4·w1` check), which bounds `word_addr = 4·(w0 + 2^16·w1)` to the 32-bit
+//!    memory address space.
 //!
-//! Per-chiplet gating flows through [`ChipletTraceContext::chiplet_active`]: the controller
-//! input gate is `chiplet_active.controller`, and the ACE row gate is `chiplet_active.ace`.
-//! Hasher sub-selectors, hasher state, `node_index`, and `mrupdate_id` all come from the
-//! typed [`local.controller()`](crate::constraints::columns::MainCols::controller) overlay.
+//! Per-chiplet gating flows through [`ChipletBusContext::chiplet_active`]: the controller
+//! input gate is `chiplet_active.controller`, the ACE row gate is `chiplet_active.ace`, and
+//! the memory row gate is `chiplet_active.memory`. Hasher sub-selectors, hasher state,
+//! `node_index`, and `mrupdate_id` come from the typed
+//! [`local.controller()`](crate::constraints::columns::MainCols::controller) overlay;
+//! memory delta limbs come from [`local.memory()`](crate::constraints::columns::MainCols::memory).
+//! `w0` / `w1` are not in the typed `MemoryCols` view (their physical columns live in
+//! `chiplets[18..20]`, past the end of the memory overlay, shared with the ACE chiplet
+//! column space), so they are read directly from the raw chiplet slice.
 
 use core::array;
 
@@ -22,28 +33,38 @@ use miden_core::field::PrimeCharacteristicRing;
 
 use crate::{
     constraints::{
-        logup_msg::{MemoryHeader, MemoryMsg, SiblingMsgBitOne, SiblingMsgBitZero},
+        logup_msg::{MemoryHeader, MemoryMsg, RangeMsg, SiblingMsgBitOne, SiblingMsgBitZero},
         lookup::{
-            LookupColumn, LookupGroup,
+            LookupBatch, LookupColumn, LookupGroup,
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
         },
         utils::BoolNot,
     },
-    trace::chiplets::{
-        ace::{ACE_INSTRUCTION_ID1_OFFSET, ACE_INSTRUCTION_ID2_OFFSET},
-        memory::{MEMORY_READ_ELEMENT_LABEL, MEMORY_READ_WORD_LABEL},
+    trace::{
+        CHIPLETS_OFFSET,
+        chiplets::{
+            MEMORY_WORD_ADDR_HI_COL_IDX, MEMORY_WORD_ADDR_LO_COL_IDX,
+            ace::{ACE_INSTRUCTION_ID1_OFFSET, ACE_INSTRUCTION_ID2_OFFSET},
+            memory::{MEMORY_READ_ELEMENT_LABEL, MEMORY_READ_WORD_LABEL},
+        },
     },
 };
 
 /// Upper bound on fractions this emitter pushes into its column per row.
 ///
-/// Sibling-table interactions live on hasher controller rows (`chiplet_active.controller`),
-/// where the MV/MU split is further mutually exclusive (`s2` vs `1-s2`) and the direction
-/// bit `b` vs `1-b` cuts within each side — at most one of the four fires per row.
-/// ACE memory reads live on ACE rows (`chiplet_active.ace`), with `f_ace_read` and
-/// `f_ace_eval` mutually exclusive via `block_sel`. Controller rows and ACE rows are
-/// mutually exclusive via the top-level `chiplet_active` snapshot. Per-row max: 1.
-pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 1;
+/// Three row-type-disjoint interaction sets, mutually exclusive via the chiplet tri-state:
+/// - **Sibling-table** on hasher controller rows (`chiplet_active.controller`): the MV/MU split is
+///   mutually exclusive (`s2` vs `1-s2`) and the direction bit cuts within each side, so at most
+///   one of the four fires per row → 1 fraction.
+/// - **ACE memory reads** on ACE rows (`chiplet_active.ace`): `f_ace_read` / `f_ace_eval` are
+///   mutually exclusive via `block_sel` → 1 fraction.
+/// - **Memory-side range checks** on memory rows (`chiplet_active.memory`): a 5-remove batch (`d0`,
+///   `d1`, `w0`, `w1`, `4·w1`) fires unconditionally when the outer batch flag is active → 5
+///   fractions.
+///
+/// Row-type disjointness means only one set fires per row, so the per-row max is
+/// `max(1, 1, 5) = 5`.
+pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 5;
 
 /// Emit the hash-kernel virtual table bus (C2).
 #[allow(clippy::too_many_lines)]
@@ -112,6 +133,15 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
     let ace_id_2 = ace.eval().id_2;
     let ace_eval_op = ace.eval_op;
 
+    // --- Memory-side range-check setup ---
+
+    let mem_active = ctx.chiplet_active.memory.clone();
+    let mem = local.memory();
+    let mem_d0 = mem.d0;
+    let mem_d1 = mem.d1;
+    let mem_w0 = local.chiplets[MEMORY_WORD_ADDR_LO_COL_IDX - CHIPLETS_OFFSET];
+    let mem_w1 = local.chiplets[MEMORY_WORD_ADDR_HI_COL_IDX - CHIPLETS_OFFSET];
+
     builder.column(|col| {
         col.group(|g| {
             // --- SIBLING TABLE ---
@@ -179,6 +209,24 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                     header: MemoryHeader { ctx, addr, clk },
                     element,
                 }
+            });
+
+            // --- MEMORY-SIDE RANGE CHECKS (BUS_RANGE_CHECK) ---
+            // Five removes per memory-active row:
+            // - `d0`, `d1` — the two 16-bit delta limbs used by the memory chiplet's sorted-access
+            //   constraints.
+            // - `w0`, `w1`, `4·w1` — the word-address decomposition limbs. The `4·w1` check
+            //   additionally enforces `w1 ∈ [0, 2^14)`, which bounds `word_addr = 4·(w0 + 2^16·w1)
+            //   < 2^32`.
+            g.batch(mem_active, move |b| {
+                b.remove(RangeMsg { value: mem_d0.into() });
+                b.remove(RangeMsg { value: mem_d1.into() });
+                let w0: LB::Expr = mem_w0.into();
+                let w1: LB::Expr = mem_w1.into();
+                let w1_mul4 = w1.clone() * LB::Expr::from_u16(4);
+                b.remove(RangeMsg { value: w0 });
+                b.remove(RangeMsg { value: w1 });
+                b.remove(RangeMsg { value: w1_mul4 });
             });
         });
     });

@@ -11,18 +11,18 @@
 //! [`accumulate`] returns a [`RowMajorMatrix`] with `num_rows + 1` rows:
 //!
 //! - row 0 is the all-`ZERO` initial accumulator
-//! - row `r` (for `1..=num_rows`) holds the running sum **after** row `r − 1`'s
-//!   fraction contributions have been folded in
+//! - row `r` (for `1..=num_rows`) holds the running sum **after** row `r − 1`'s fraction
+//!   contributions have been folded in
 //! - row `num_rows` is therefore the global running sum across the entire trace
 //!
 //! The [`AuxBuilder`] return splits that matrix in two:
 //!
-//! - `aux_trace` is the first `num_rows` rows of the accumulator — it starts at
-//!   `ZERO` and ends at the running sum **before** the last row's contribution.
-//!   The last row's fraction contribution does **not** appear in the aux trace.
-//! - `committed_finals` is the `num_rows`-th row of the accumulator (one
-//!   `EF` per column = "width of the trace") — the full running sum across the
-//!   entire trace, observed by the Fiat-Shamir challenger.
+//! - `aux_trace` is the first `num_rows` rows of the accumulator — it starts at `ZERO` and ends at
+//!   the running sum **before** the last row's contribution. The last row's fraction contribution
+//!   does **not** appear in the aux trace.
+//! - `committed_finals` is the `num_rows`-th row of the accumulator (one `EF` per column = "width
+//!   of the trace") — the full running sum across the entire trace, observed by the Fiat-Shamir
+//!   challenger.
 //!
 //! ## Public values (Milestone B, decision D5)
 //!

@@ -22,7 +22,7 @@ use crate::trace::Challenges;
 ///
 /// Constructed via associated functions — the label is baked in by each constructor.
 /// Encodes as `[label, addr, node_index, ...payload]`.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum HasherMsg<E> {
     /// 15-element message: addr + node_index + 12-lane sponge state.
     State {
@@ -178,7 +178,7 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
 /// Common header for all memory messages: `[ctx, addr, clk]`.
 ///
 /// Call a named method to produce a [`MemoryMsg`] with the correct operation label baked in.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MemoryHeader<E> {
     pub ctx: E,
     pub addr: E,
@@ -231,7 +231,7 @@ impl<E: PrimeCharacteristicRing + Clone> MemoryHeader<E> {
 ///
 /// Constructed via methods on [`MemoryHeader`] — the operation label is baked in.
 /// Encodes as `[op_label, ctx, addr, clk, ...payload]`.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum MemoryMsg<E> {
     /// 5-element message: header + one field element.
     Element {
@@ -255,7 +255,7 @@ impl<E: PrimeCharacteristicRing + Clone> MemoryMsg<E> {}
 /// Bitwise chiplet message (4 elements): `[label, a, b, result]`.
 ///
 /// Constructed via [`BitwiseMsg::and`] or [`BitwiseMsg::xor`].
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct BitwiseMsg<E> {
     op_value: u16,
     pub a: E,
@@ -287,7 +287,7 @@ impl<E: PrimeCharacteristicRing + Clone> BitwiseMsg<E> {}
 ///
 /// `Full` — for blocks that save/restore the caller's execution context
 /// (CALL/SYSCALL/DYNCALL/END-call).
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum BlockStackMsg<E> {
     Simple {
         block_id: E,
@@ -314,7 +314,7 @@ impl<E: PrimeCharacteristicRing + Clone> BlockStackMsg<E> {}
 /// `Child` — non-first, non-loop child (is_first_child = 0, is_loop_body = 0).
 /// `LoopBody` — loop body entry (is_first_child = 0, is_loop_body = 1).
 /// `End` — removal at END; both flags are computed expressions.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum BlockHashMsg<E> {
     FirstChild {
         parent: E,
@@ -339,7 +339,7 @@ pub enum BlockHashMsg<E> {
 impl<E: PrimeCharacteristicRing + Clone> BlockHashMsg<E> {}
 
 /// Op group table message (3 elements): `[batch_id, group_pos, group_value]`.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct OpGroupMsg<E> {
     pub batch_id: E,
     pub group_pos: E,
@@ -367,7 +367,7 @@ impl<E: PrimeCharacteristicRing + Clone> OpGroupMsg<E> {
 ///
 /// `clk` is the cycle at which the value spilled past stack[15], `val` is the spilled element,
 /// and `prev` links to the previous overflow entry (the prior `b1`).
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct StackOverflowMsg<E> {
     pub clk: E,
     pub val: E,
@@ -383,7 +383,7 @@ pub struct StackOverflowMsg<E> {
 /// `label = 0` on input pairings (controller-input row ↔ perm-cycle row 0); `label = 1` on
 /// output pairings (controller-output row ↔ perm-cycle row 15). `state` carries all 12 sponge
 /// lanes (rate_0, rate_1, capacity).
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct HasherPermLinkMsg<E> {
     pub label: E,
     pub state: [E; 12],
@@ -396,7 +396,7 @@ pub struct HasherPermLinkMsg<E> {
 ///
 /// Constructed via [`KernelRomMsg::call`] (KERNEL_PROC_CALL_LABEL = 16) or
 /// [`KernelRomMsg::init`] (KERNEL_PROC_INIT_LABEL = 48).
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct KernelRomMsg<E> {
     label: u16,
     pub digest: [E; 4],
@@ -416,7 +416,7 @@ impl<E: PrimeCharacteristicRing + Clone> KernelRomMsg<E> {
 // ================================================================================================
 
 /// ACE circuit evaluation init message (6 elements): `[label, clk, ctx, ptr, num_read, num_eval]`.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AceInitMsg<E> {
     pub clk: E,
     pub ctx: E,
@@ -436,7 +436,7 @@ impl<E: PrimeCharacteristicRing + Clone> AceInitMsg<E> {
 /// Range check message (1 element): `[value]`.
 ///
 /// The denominator is `α + β⁰ · value`.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RangeMsg<E> {
     pub value: E,
 }
@@ -447,7 +447,7 @@ impl<E: PrimeCharacteristicRing + Clone> RangeMsg<E> {}
 // ================================================================================================
 
 /// Log-precompile capacity state message (5 elements): `[label, cap[4]]`.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LogCapacityMsg<E> {
     pub capacity: [E; 4],
 }
@@ -469,7 +469,7 @@ impl<E: PrimeCharacteristicRing + Clone> LogCapacityMsg<E> {
 ///
 /// Encodes a single wire entry for the ACE wiring bus (C3). Each wire carries
 /// an identifier and a two-coefficient extension-field value.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AceWireMsg<E> {
     pub clk: E,
     pub ctx: E,
@@ -488,7 +488,7 @@ impl<E: PrimeCharacteristicRing + Clone> AceWireMsg<E> {}
 /// The chiplet-side memory response must select between element access (5 fields) and
 /// word access (8 fields) based on `is_word`. The label, address, and element are all
 /// pre-computed from the chiplet columns (including the idx0/idx1 element mux).
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MemoryResponseMsg<E> {
     pub label: E,
     pub ctx: E,
@@ -505,7 +505,7 @@ impl<E: PrimeCharacteristicRing + Clone> MemoryResponseMsg<E> {}
 ///
 /// The chiplet-side label depends on `s_first`: `s_first*INIT_LABEL + (1-s_first)*CALL_LABEL`.
 /// Unlike [`KernelRomMsg`] which bakes in a fixed label, this carries the label as an expression.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct KernelRomResponseMsg<E> {
     pub label: E,
     pub digest: [E; 4],
@@ -517,7 +517,7 @@ impl<E: PrimeCharacteristicRing + Clone> KernelRomResponseMsg<E> {}
 ///
 /// The chiplet-side label is `(1-sel)*AND_LABEL + sel*XOR_LABEL`. Unlike [`BitwiseMsg`]
 /// which bakes in a fixed label, this carries the label as an expression.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct BitwiseResponseMsg<E> {
     pub label: E,
     pub a: E,
@@ -966,7 +966,7 @@ where
 /// Sibling-table message when `bit = 0` — sibling lives at h[4..8] and the payload goes into
 /// β positions `[1, 2, 7, 8, 9, 10]`, matching the 2856 running-product layout
 /// (mrupdate_id at β¹, node_index at β², sibling rate1 at β⁷..β¹⁰).
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SiblingMsgBitZero<E> {
     pub mrupdate_id: E,
     pub node_index: E,
@@ -975,7 +975,7 @@ pub struct SiblingMsgBitZero<E> {
 
 /// Sibling-table message when `bit = 1` — sibling lives at h[0..4] and the payload goes into
 /// β positions `[1, 2, 3, 4, 5, 6]`.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SiblingMsgBitOne<E> {
     pub mrupdate_id: E,
     pub node_index: E,

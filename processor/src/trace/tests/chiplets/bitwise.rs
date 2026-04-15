@@ -2,15 +2,14 @@
 //!
 //! Runs a tiny program with `U32and` + `U32xor` operations and verifies that:
 //!
-//! 1. **Main trace** (Layer 1): every bitwise op lands at the expected cycle — the test scans
-//!    the main trace by opcode and asserts the expected count per op.
+//! 1. **Main trace** (Layer 1): every bitwise op lands at the expected cycle — the test scans the
+//!    main trace by opcode and asserts the expected count per op.
 //! 2. **Per-row aux delta** (Layer 2): the delta on the M3 `CHIPLET_REQUESTS` column at each
 //!    bitwise request row equals `-1 / BitwiseMsg::{and,xor}(s0, s1, result).encode(&challenges)`,
-//!    where `s0` / `s1` are the top two stack elements at the request row and `result` is the
-//!    top of the next row. This is the strictly-stronger successor to the old
-//!    `b_chip[r]` step-by-step running-product walk — instead of pinning every intermediate
-//!    row, we pin the delta at each *request* row, which is where the algebraic invariant
-//!    actually lives.
+//!    where `s0` / `s1` are the top two stack elements at the request row and `result` is the top
+//!    of the next row. This is the strictly-stronger successor to the old `b_chip[r]` step-by-step
+//!    running-product walk — instead of pinning every intermediate row, we pin the delta at each
+//!    *request* row, which is where the algebraic invariant actually lives.
 //!
 //! **Layer 3 (column closure) is intentionally omitted.** The LogUp boundary constraints in
 //! `air/src/constraints/lookup/constraint.rs` are disabled pending a follow-up milestone, so
@@ -27,7 +26,10 @@ use alloc::vec::Vec;
 use miden_air::logup_msg::BitwiseMsg;
 use miden_core::{Felt, operations::Operation};
 
-use super::super::{build_trace_from_ops, lookup_harness::LookupHarness, lookup_harness::aux_col};
+use super::super::{
+    build_trace_from_ops,
+    lookup_harness::{LookupHarness, aux_col},
+};
 use crate::RowIndex;
 
 #[test]

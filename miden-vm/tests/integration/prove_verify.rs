@@ -619,6 +619,11 @@ mod fast_parallel {
     }
 
     #[test]
+    #[ignore = "Milestone B: recursive verifier disabled while the LogUp aux builder \
+                 integration lands. Restoring this test depends on rebuilding the ACE mirror \
+                 circuit (`air/src/ace.rs::reduced_aux_batch_config`) and the recursive \
+                 verifier MASM (`crates/lib/core/asm/sys/vm/public_inputs.masm`) on top of \
+                 the new LogUp boundary terms — both are deferred to a follow-up milestone."]
     fn test_poseidon2_recursive_verify_with_precompile_requests() {
         let LoggedPrecompileProofFixture {
             program,

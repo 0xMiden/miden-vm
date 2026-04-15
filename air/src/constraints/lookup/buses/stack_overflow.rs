@@ -1,14 +1,14 @@
-//! Stack overflow table bus (M5 / `BUS_STACK_OVERFLOW_TABLE`).
+//! Stack overflow table bus (M4 / `BUS_STACK_OVERFLOW_TABLE`).
 //!
 //! Three mutually exclusive interactions:
 //!
-//! - **Right shift** (add): when an item is pushed past stack[15], record `(clk, s15, b1)` —
-//!   the cycle, the spilled value, and the link to the previous overflow row.
-//! - **Left shift ∧ non-empty overflow** (remove): when an item is popped back from the
-//!   overflow table, consume the matching `(b1, s15', b1')` row.
+//! - **Right shift** (add): when an item is pushed past stack[15], record `(clk, s15, b1)` — the
+//!   cycle, the spilled value, and the link to the previous overflow row.
+//! - **Left shift ∧ non-empty overflow** (remove): when an item is popped back from the overflow
+//!   table, consume the matching `(b1, s15', b1')` row.
 //! - **DYNCALL ∧ non-empty overflow** (remove): DYNCALL is excluded from the `left_shift`
-//!   aggregate; it consumes `(b1, s15', hasher_state[5])` because the new overflow pointer
-//!   after a DYNCALL is staged in the decoder hasher state, not in `b1'` (which is reset).
+//!   aggregate; it consumes `(b1, s15', hasher_state[5])` because the new overflow pointer after a
+//!   DYNCALL is staged in the decoder hasher state, not in `b1'` (which is reset).
 
 use crate::constraints::{
     logup_msg::StackOverflowMsg,
@@ -25,7 +25,7 @@ use crate::constraints::{
 /// most one fires per row.
 pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 1;
 
-/// Emit the stack overflow table bus (M5).
+/// Emit the stack overflow table bus (M4).
 pub(in crate::constraints::lookup) fn emit_stack_overflow<LB>(
     builder: &mut LB,
     ctx: &MainBusContext<LB>,

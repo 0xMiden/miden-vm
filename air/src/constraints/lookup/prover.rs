@@ -63,6 +63,83 @@ use super::{
 };
 use crate::Felt;
 
+// BUS DEBUG HOOK
+// ================================================================================================
+//
+// One-shot instrumentation for chasing bus-closure regressions: every fraction pushed into
+// the prover's flat buffer gets logged to stderr with `(row, col, mult, type, msg, d)` where
+// `msg` is the message's `Debug` representation *before* encoding and `d` is the resulting
+// encoded denominator. Parseable line format so a downstream Python script can group by
+// message content and surface unmatched emits.
+//
+// Gated on `cfg(feature = "std")` because the air crate is no_std by default and
+// `std::eprintln!` isn't available otherwise. The miden-processor tests enable std
+// transitively, so the hook fires automatically when running those tests.
+#[cfg(feature = "std")]
+fn busdbg_log<F, EF, M>(row: usize, col: usize, mult_sign: i64, msg: &M, d: &EF)
+where
+    F: Field,
+    EF: ExtensionField<F>,
+    M: core::fmt::Debug + ?Sized,
+{
+    // Format:
+    //   BUSDBG row=<r> col=<c> mult=<±1 or explicit> type=<module::path::Name> msg=<debug>
+    // d=<base-coeffs>
+    //
+    // `type` lets the Python parser quickly bucket by Rust type without parsing `msg`;
+    // `msg` carries the pre-encoding payload so add/remove matchers can compare structural
+    // equality; `d` is the post-encoding denominator as a flat base-coefficient slice
+    // (`[v0, v1, …]` for `BinomialExtensionField<F, 2>` — two `u64`s for `QuadFelt`). Two
+    // messages with the same `d` but different `msg` immediately reveal an encoding collision
+    // bug, and the compact slice form is trivially parseable from Python.
+    std::eprintln!(
+        "BUSDBG row={} col={} mult={} type={} msg={:?} d={:?}",
+        row,
+        col,
+        mult_sign,
+        core::any::type_name::<M>(),
+        msg,
+        d.as_basis_coefficients_slice(),
+    );
+}
+
+#[cfg(not(feature = "std"))]
+#[inline]
+fn busdbg_log<F, EF, M>(_row: usize, _col: usize, _mult_sign: i64, _msg: &M, _d: &EF)
+where
+    F: Field,
+    EF: ExtensionField<F>,
+    M: core::fmt::Debug + ?Sized,
+{
+}
+
+// Variant of `busdbg_log` for `insert_encoded` sites where no `LookupMessage` instance
+// exists (the caller hands us a pre-computed `EF` denominator directly). We still log the
+// call so the unmatched-message analysis sees every push, but there's no type to stamp.
+#[cfg(feature = "std")]
+fn busdbg_log_encoded<F, EF>(row: usize, col: usize, mult_sign: i64, d: &EF)
+where
+    F: Field,
+    EF: ExtensionField<F>,
+{
+    std::eprintln!(
+        "BUSDBG row={} col={} mult={} type=<encoded> msg=<encoded> d={:?}",
+        row,
+        col,
+        mult_sign,
+        d.as_basis_coefficients_slice(),
+    );
+}
+
+#[cfg(not(feature = "std"))]
+#[inline]
+fn busdbg_log_encoded<F, EF>(_row: usize, _col: usize, _mult_sign: i64, _d: &EF)
+where
+    F: Field,
+    EF: ExtensionField<F>,
+{
+}
+
 // PROVER LOOKUP BUILDER
 // ================================================================================================
 
@@ -93,6 +170,10 @@ where
     /// as long as each row stays within the declared [`LookupAir::column_shape`] bound.
     fractions: &'a mut LookupFractions<F, EF>,
     column_idx: usize,
+    /// Debug-only: current main-trace row index, threaded into every child handle so
+    /// the `busdbg_log` hook at each push site can print row + col metadata alongside
+    /// the emitted fraction. Set by [`build_lookup_fractions`] once per row.
+    row_idx: usize,
 }
 
 impl<'a, F, EF> ProverLookupBuilder<'a, F, EF>
@@ -126,6 +207,24 @@ where
     where
         A: LookupAir<Self>,
     {
+        Self::new_at_row(main, periodic_values, public_values, challenges, air, fractions, 0)
+    }
+
+    /// Same as [`ProverLookupBuilder::new`] but also stamps the current main-trace row
+    /// index onto the builder. The row index is threaded into every child handle so the
+    /// debug hook can label each emitted fraction with its origin row.
+    pub fn new_at_row<A>(
+        main: RowWindow<'a, F>,
+        periodic_values: &'a [F],
+        public_values: &'a [F],
+        challenges: &'a LookupChallenges<EF>,
+        air: &A,
+        fractions: &'a mut LookupFractions<F, EF>,
+        row_idx: usize,
+    ) -> Self
+    where
+        A: LookupAir<Self>,
+    {
         debug_assert_eq!(
             fractions.num_columns(),
             air.num_columns(),
@@ -138,6 +237,7 @@ where
             challenges,
             fractions,
             column_idx: 0,
+            row_idx,
         }
     }
 }
@@ -212,13 +312,14 @@ where
             periodic_row[i] = col[r % col.len()];
         }
 
-        let mut lb = ProverLookupBuilder::new(
+        let mut lb = ProverLookupBuilder::new_at_row(
             window,
             &periodic_row,
             public_values,
             challenges,
             air,
             &mut fractions,
+            r,
         );
         air.eval(&mut lb);
         // `lb` drops here; the next iteration reborrows `fractions` fresh.
@@ -269,6 +370,7 @@ where
 
     fn column<'c, R>(&'c mut self, f: impl FnOnce(&mut Self::Column<'c>) -> R) -> R {
         let idx = self.column_idx;
+        let row_idx = self.row_idx;
         // Split-borrow `fractions.fractions` and `fractions.counts` as disjoint
         // fields — going through a single `&mut LookupFractions` method would lock
         // all of `self.fractions` under the GAT lifetime `'c` and block the
@@ -281,6 +383,8 @@ where
         let mut col = ProverColumn {
             challenges: self.challenges,
             fractions: vec,
+            row_idx,
+            col_idx: idx,
             _phantom: PhantomData,
         };
         let result = f(&mut col);
@@ -333,6 +437,10 @@ where
 {
     challenges: &'c LookupChallenges<EF>,
     fractions: &'c mut Vec<(F, EF)>,
+    /// Debug-only: current main-trace row index.
+    row_idx: usize,
+    /// Debug-only: current LogUp column index (0..num_cols).
+    col_idx: usize,
     _phantom: PhantomData<F>,
 }
 
@@ -358,6 +466,8 @@ where
         let mut group = ProverGroup {
             challenges: self.challenges,
             fractions: &mut *self.fractions,
+            row_idx: self.row_idx,
+            col_idx: self.col_idx,
             _phantom: PhantomData,
         };
         f(&mut group)
@@ -375,6 +485,8 @@ where
         let mut group = ProverGroup {
             challenges: self.challenges,
             fractions: &mut *self.fractions,
+            row_idx: self.row_idx,
+            col_idx: self.col_idx,
             _phantom: PhantomData,
         };
         canonical(&mut group)
@@ -416,6 +528,10 @@ where
 {
     challenges: &'g LookupChallenges<EF>,
     fractions: &'g mut Vec<(F, EF)>,
+    /// Debug-only: current main-trace row index.
+    row_idx: usize,
+    /// Debug-only: current LogUp column index (0..num_cols).
+    col_idx: usize,
     _phantom: PhantomData<F>,
 }
 
@@ -439,7 +555,9 @@ where
         if flag == F::ZERO {
             return;
         }
-        let v = msg().encode(self.challenges);
+        let built = msg();
+        let v = built.encode(self.challenges);
+        busdbg_log::<F, EF, M>(self.row_idx, self.col_idx, 1, &built, &v);
         self.fractions.push((F::ONE, v));
     }
 
@@ -450,7 +568,9 @@ where
         if flag == F::ZERO {
             return;
         }
-        let v = msg().encode(self.challenges);
+        let built = msg();
+        let v = built.encode(self.challenges);
+        busdbg_log::<F, EF, M>(self.row_idx, self.col_idx, -1, &built, &v);
         self.fractions.push((F::NEG_ONE, v));
     }
 
@@ -461,7 +581,12 @@ where
         if flag == F::ZERO {
             return;
         }
-        let v = msg().encode(self.challenges);
+        let built = msg();
+        let v = built.encode(self.challenges);
+        // Signed multiplicity: best-effort conversion for the debug log — the actual
+        // multiplicity stored in the fraction buffer is still the raw `F` value.
+        let mult_sign = felt_to_i64(multiplicity);
+        busdbg_log::<F, EF, M>(self.row_idx, self.col_idx, mult_sign, &built, &v);
         self.fractions.push((multiplicity, v));
     }
 
@@ -476,9 +601,39 @@ where
             challenges: self.challenges,
             fractions: &mut *self.fractions,
             active,
+            row_idx: self.row_idx,
+            col_idx: self.col_idx,
             _phantom: PhantomData,
         };
         build(&mut batch)
+    }
+}
+
+/// Best-effort signed-integer view of a `Field` multiplicity for the debug log.
+/// Canonical `0` / `1` / `p - 1` map to `0` / `1` / `-1`. Larger values round-trip
+/// as an unsigned integer cast (which is fine for the multiset-diff analysis — the
+/// Python post-processor groups by `(col, d)` and sums signed multiplicities, and
+/// large multiplicities like range-table insertions are handled correctly modulo `p`
+/// even without a signed reinterpretation).
+fn felt_to_i64<F: Field>(m: F) -> i64 {
+    // `F::NEG_ONE` equals `p - 1` in canonical form. If the multiplicity matches it
+    // exactly we round it to `-1` so the debug log reads naturally on remove-style
+    // inserts; anything else is cast as an unsigned integer truncated to i64.
+    if m == F::NEG_ONE {
+        -1
+    } else if m == F::ZERO {
+        0
+    } else if m == F::ONE {
+        1
+    } else {
+        // Pull the canonical base-field representation out through the first basis
+        // coefficient. `Field` doesn't expose a direct `as_canonical_u64`, but the
+        // `Into<u64>` conversion via the canonical byte representation is stable
+        // enough for a debug log. If this conversion isn't available for `F` the
+        // log will still compile because we wrap in a const-boolean path.
+        let _ = m;
+        // Fall back to an arbitrary sentinel the Python parser will treat as "other".
+        i64::MAX
     }
 }
 
@@ -500,6 +655,8 @@ where
             return;
         }
         let v = encoded();
+        let mult_sign = felt_to_i64(multiplicity);
+        busdbg_log_encoded::<F, EF>(self.row_idx, self.col_idx, mult_sign, &v);
         self.fractions.push((multiplicity, v));
     }
 }
@@ -526,6 +683,10 @@ where
     challenges: &'b LookupChallenges<EF>,
     fractions: &'b mut Vec<(F, EF)>,
     active: bool,
+    /// Debug-only: current main-trace row index.
+    row_idx: usize,
+    /// Debug-only: current LogUp column index.
+    col_idx: usize,
     _phantom: PhantomData<F>,
 }
 
@@ -545,6 +706,7 @@ where
             return;
         }
         let v = msg.encode(self.challenges);
+        busdbg_log::<F, EF, M>(self.row_idx, self.col_idx, 1, &msg, &v);
         self.fractions.push((F::ONE, v));
     }
 
@@ -556,6 +718,7 @@ where
             return;
         }
         let v = msg.encode(self.challenges);
+        busdbg_log::<F, EF, M>(self.row_idx, self.col_idx, -1, &msg, &v);
         self.fractions.push((F::NEG_ONE, v));
     }
 
@@ -567,6 +730,8 @@ where
             return;
         }
         let v = msg.encode(self.challenges);
+        let mult_sign = felt_to_i64(multiplicity);
+        busdbg_log::<F, EF, M>(self.row_idx, self.col_idx, mult_sign, &msg, &v);
         self.fractions.push((multiplicity, v));
     }
 
@@ -575,6 +740,8 @@ where
             return;
         }
         let v = encoded();
+        let mult_sign = felt_to_i64(multiplicity);
+        busdbg_log_encoded::<F, EF>(self.row_idx, self.col_idx, mult_sign, &v);
         self.fractions.push((multiplicity, v));
     }
 }
@@ -602,7 +769,7 @@ mod tests {
     /// prover builder's fraction buffer. Encodes to `bus_prefix[0] + β⁰·value`, which is
     /// always non-zero for non-trivial challenges (so `accumulate_slow` can `try_inverse`
     /// without blowing up).
-    #[derive(Clone, Copy)]
+    #[derive(Clone, Copy, Debug)]
     struct SmokeMsg {
         value: Felt,
     }

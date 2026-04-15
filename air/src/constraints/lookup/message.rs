@@ -41,7 +41,7 @@ use crate::trace::Challenges;
 /// a [`bus_types`](crate::trace::bus_types) constant), start the accumulator from
 /// `challenges.bus_prefix[bus_id]`, and fold each payload value against
 /// `challenges.beta_powers[k]` with straight-line arithmetic.
-pub trait LookupMessage<E, EF>
+pub trait LookupMessage<E, EF>: core::fmt::Debug
 where
     E: PrimeCharacteristicRing + Clone,
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,

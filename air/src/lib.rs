@@ -200,21 +200,16 @@ impl Deserializable for PublicInputs {
 ///   [36..40] precompile transcript state
 pub const NUM_PUBLIC_VALUES: usize = WORD_SIZE + MIN_STACK_DEPTH + MIN_STACK_DEPTH + WORD_SIZE;
 
-/// LogUp aux trace width — 5 main-trace columns (M1, M_2+5, M3, M4, M5) + 3 chiplet-trace
-/// columns (C1, C2, C3). C3 (`v_wiring`) hosts both the ACE wiring bus and the hasher
-/// perm-link bus as linearly-independent sibling groups via distinct `bus_prefix` bases.
-/// Matches `MidenLookupAir::num_columns()` and the per-row shape returned by
-/// `MidenLookupAuxBuilder::build_aux_trace`.
-pub const LOGUP_AUX_TRACE_WIDTH: usize = 8;
+/// LogUp aux trace width — 4 main-trace columns (M1, M_2+5, M3, M4) + 3 chiplet-trace
+/// columns (C1, C2, C3). M1 packs block-stack + u32rc + logpre + range-table response into
+/// a single column; C3 hosts ACE wiring + hasher perm-link. Both merged columns rely on
+/// distinct `bus_prefix[bus]` bases so their rationals remain linearly independent in the
+/// extension field. Matches `MidenLookupAir::num_columns()` and the per-row shape returned
+/// by `MidenLookupAuxBuilder::build_aux_trace`.
+pub const LOGUP_AUX_TRACE_WIDTH: usize = 7;
 
 // Public values layout offsets.
-//
-// Currently unused while `ProcessorAir::reduced_aux_values` is stubbed (Milestone B,
-// decision D3). Kept in place because the follow-up milestone will reuse them when
-// restoring real LogUp boundary checks with public-input correction terms.
-#[allow(dead_code)]
 const PV_PROGRAM_HASH: usize = 0;
-#[allow(dead_code)]
 const PV_TRANSCRIPT_STATE: usize = NUM_PUBLIC_VALUES - WORD_SIZE;
 
 /// Miden VM Processor AIR implementation.
@@ -252,8 +247,8 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
     }
 
     fn aux_width(&self) -> usize {
-        // The LogUp lookup argument occupies 8 columns — 5 main-trace columns
-        // (M1, M_2+5, M3, M4, M5) + 3 chiplet-trace columns (C1, C2, C3). Matches
+        // The LogUp lookup argument occupies 7 columns — 4 main-trace columns
+        // (M1, M_2+5, M3, M4) + 3 chiplet-trace columns (C1, C2, C3). Matches
         // `MidenLookupAir::num_columns()` and the per-row shape returned by
         // `MidenLookupAuxBuilder::build_aux_trace`.
         LOGUP_AUX_TRACE_WIDTH
@@ -275,27 +270,76 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
 
     fn reduced_aux_values(
         &self,
-        _aux_values: &[EF],
-        _challenges: &[EF],
-        _public_values: &[Felt],
-        _var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
+        aux_values: &[EF],
+        challenges: &[EF],
+        public_values: &[Felt],
+        var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
     ) -> Result<ReducedAuxValues<EF>, ReductionError>
     where
         EF: ExtensionField<Felt>,
     {
-        // Milestone B (decision D3): stub — return the verifier identity.
+        // LogUp boundary identity. The verifier checks `is_identity()` — i.e.
+        // `prod == ONE && sum == ZERO` — on the accumulated `ReducedAuxValues`
+        // across every AIR. There are no multiplicative bus checks under LogUp, so
+        // `prod = ONE`. The boundary equation lives in `sum`:
         //
-        // The verifier checks `reduced_aux.is_identity()` (i.e. `prod == ONE && sum == ZERO`)
-        // after combining contributions from every AIR. Returning the identity directly
-        // is the only safe stub; any other choice triggers `VerifierError::InvalidReducedAux`.
+        //   sum = Σ aux_finals[col]  +  total_correction
         //
-        // The LogUp boundary / transition constraints are commented out in
-        // `air/src/constraints/lookup/constraint.rs::ConstraintColumn::column`, so the aux
-        // trace is committed and observed but not symbolically constrained. The follow-up
-        // milestone will restore real boundary checks (with public-input correction terms
-        // for the open buses: block_hash, chiplets bus, log_precompile transcript) and
-        // recompute `prod` / `sum` from the LogUp column finals.
-        Ok(ReducedAuxValues { prod: EF::ONE, sum: EF::ZERO })
+        // where `total_correction` cancels the unmatched-fraction contributions from
+        // the three open buses:
+        //
+        //   c_block_hash      (M_2+5)       root program hash — the decoder's END
+        //                                   emits an unmatched remove for the root.
+        //   c_log_precompile  (M4)          transcript chain telescopes to one
+        //                                   unmatched remove of the initial-capacity
+        //                                   state and one unmatched add of the
+        //                                   final-capacity state.
+        //   c_kernel_rom      (M3 + C1)     the kernel ROM chiplet emits responses
+        //                                   for each kernel procedure init; the
+        //                                   verifier supplies the matches via VLPI[0].
+        if public_values.len() != NUM_PUBLIC_VALUES {
+            return Err(format!(
+                "expected {} public values, got {}",
+                NUM_PUBLIC_VALUES,
+                public_values.len()
+            )
+            .into());
+        }
+        let program_hash: Word = public_values[PV_PROGRAM_HASH..PV_PROGRAM_HASH + WORD_SIZE]
+            .try_into()
+            .map_err(|_| -> ReductionError { "invalid program hash slice".into() })?;
+        let pc_transcript_state: PrecompileTranscriptState = public_values
+            [PV_TRANSCRIPT_STATE..PV_TRANSCRIPT_STATE + WORD_SIZE]
+            .try_into()
+            .map_err(|_| -> ReductionError { "invalid transcript state slice".into() })?;
+
+        let challenges = trace::Challenges::<EF>::new(challenges[0], challenges[1]);
+
+        let invert = |x: EF| -> Result<EF, ReductionError> {
+            x.try_inverse()
+                .ok_or_else(|| -> ReductionError { "zero LogUp denominator".into() })
+        };
+
+        // c_block_hash = +1 / encode(BLOCK_HASH_TABLE, [0, ph[0..4], 0, 0])
+        let c_block_hash = invert(program_hash_message(&challenges, &program_hash))?;
+
+        // c_log_precompile = 1 / d_initial − 1 / d_final
+        let (initial_msg, final_msg) = transcript_messages(&challenges, pc_transcript_state);
+        let c_log_precompile = invert(initial_msg)? - invert(final_msg)?;
+
+        // c_kernel_rom = −Σ 1 / d_kernel_proc_msg_i over VLPI[0]
+        let c_kernel_rom =
+            kernel_logup_correction_from_var_len(&challenges, var_len_public_inputs)?;
+
+        let total_correction = c_block_hash + c_log_precompile + c_kernel_rom;
+
+        // Sum across all 8 LogUp columns (`LOGUP_AUX_TRACE_WIDTH == 8`).
+        let aux_sum: EF = aux_values.iter().copied().sum();
+
+        Ok(ReducedAuxValues {
+            prod: EF::ONE,
+            sum: aux_sum + total_correction,
+        })
     }
 
     fn eval<AB: MidenAirBuilder>(&self, builder: &mut AB) {
@@ -343,17 +387,15 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
 // REDUCED AUX VALUES HELPERS
 // ================================================================================================
 //
-// Milestone B (decision D3): `ProcessorAir::reduced_aux_values` is stubbed to the verifier
-// identity, so the helpers below have no live caller. They are kept in place because the
-// follow-up milestone will reuse them when restoring real LogUp boundary checks (with
-// public-input correction terms for the open buses: block_hash, chiplets bus,
-// log_precompile transcript).
+// These helpers compute the LogUp boundary correction terms used by
+// `ProcessorAir::reduced_aux_values` to cancel the unmatched-fraction contributions
+// from the three open buses (block_hash root program hash, log_precompile transcript
+// chain, kernel ROM init messages from VLPI[0]).
 
 /// Builds the program-hash bus message for the block-hash table boundary term.
 ///
 /// Must match `BlockHashTableRow::from_end().collapse()` on the prover side for the
 /// root block, which encodes `[parent_id=0, hash[0..4], is_first_child=0, is_loop_body=0]`.
-#[allow(dead_code)]
 fn program_hash_message<EF: ExtensionField<Felt>>(
     challenges: &trace::Challenges<EF>,
     program_hash: &Word,
@@ -377,7 +419,6 @@ fn program_hash_message<EF: ExtensionField<Felt>>(
 ///
 /// The initial message uses the default (zero) capacity state; the final message uses
 /// the public-input transcript state.
-#[allow(dead_code)]
 fn transcript_messages<EF: ExtensionField<Felt>>(
     challenges: &trace::Challenges<EF>,
     final_state: PrecompileTranscriptState,
@@ -396,7 +437,6 @@ fn transcript_messages<EF: ExtensionField<Felt>>(
 ///
 /// Must match `KernelRomInitMessage::value()` on the prover side, which encodes
 /// `[KERNEL_PROC_INIT_LABEL, digest[0..4]]`.
-#[allow(dead_code)]
 fn kernel_proc_message<EF: ExtensionField<Felt>>(
     challenges: &trace::Challenges<EF>,
     digest: &Word,
@@ -413,12 +453,16 @@ fn kernel_proc_message<EF: ExtensionField<Felt>>(
     )
 }
 
-/// Reduces kernel procedure digests from var-len public inputs into a multiset product.
+/// Reduces kernel procedure digests from var-len public inputs into the LogUp boundary
+/// correction term for the chiplets bus.
+///
+/// Returns `-Σ 1/d_kernel_proc_msg_i` where `d_kernel_proc_msg_i` is the encoded bus
+/// message for the i-th kernel procedure digest. The negation cancels the unmatched
+/// chiplet-side `add` contributions in columns M3 and C1.
 ///
 /// Expects exactly one variable-length public input slice containing all kernel digests
 /// as concatenated `Felt`s (i.e. `len % WORD_SIZE == 0`).
-#[allow(dead_code)]
-fn kernel_reduced_from_var_len<EF: ExtensionField<Felt>>(
+fn kernel_logup_correction_from_var_len<EF: ExtensionField<Felt>>(
     challenges: &trace::Challenges<EF>,
     var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
 ) -> Result<EF, ReductionError> {
@@ -438,10 +482,14 @@ fn kernel_reduced_from_var_len<EF: ExtensionField<Felt>>(
         )
         .into());
     }
-    let mut acc = EF::ONE;
+    let mut sum = EF::ZERO;
     for digest in kernel_felts.chunks_exact(WORD_SIZE) {
         let word: Word = [digest[0], digest[1], digest[2], digest[3]].into();
-        acc *= kernel_proc_message(challenges, &word);
+        let d = kernel_proc_message(challenges, &word);
+        let d_inv = d
+            .try_inverse()
+            .ok_or_else(|| -> ReductionError { "zero kernel ROM denominator".into() })?;
+        sum += d_inv;
     }
-    Ok(acc)
+    Ok(-sum)
 }
