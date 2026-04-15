@@ -990,7 +990,7 @@ This is the packing rule.
 
 A candidate set of groups fits in one column iff:
 
-deg(Delta) + sum_j cost(G_j) <= D_max
+`deg(Delta) + sum_j cost(G_j) <= D_max`
 
 # Why optimal packing should use this rule
 
@@ -1031,7 +1031,7 @@ current_column_degree = deg(Delta) + sum(cost(group already in column))
 
 A new group fits iff:
 
-current_column_degree + cost(new_group) <= D_max
+`current_column_degree + cost(new_group) <= D_max`
 
 If not, start a new column.
 

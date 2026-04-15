@@ -170,29 +170,29 @@ mod tests {
     #[allow(clippy::print_stdout)]
     fn miden_lookup_air_cached_encoding_equivalence() {
         /// Small deterministic PRNG. We don't need cryptographic quality — just a stable
-        /// stream of bytes we can feed into `prng_value` to get reproducible `Felt`s
-        /// across runs.
+        /// stream of reproducible `Felt`s across runs. Uses a SplitMix64-style mixer on
+        /// `(seed, counter)` to avoid pulling in `miden_crypto::rand::test_utils`, which
+        /// is gated behind a feature flag that isn't available under
+        /// `--no-default-features`.
         struct SeededRng {
-            seed: u64,
-            counter: u64,
+            state: u64,
         }
 
         impl SeededRng {
             fn new(seed: u64) -> Self {
-                Self { seed, counter: 0 }
+                Self { state: seed }
             }
 
             fn next_felt(&mut self) -> Felt {
-                let counter = self.counter;
-                self.counter = self.counter.wrapping_add(1);
-                let mix = self.seed ^ counter;
-                let sum = self.seed.wrapping_add(counter);
-                let mut out = [0u8; 32];
-                out[0..8].copy_from_slice(&self.seed.to_le_bytes());
-                out[8..16].copy_from_slice(&counter.to_le_bytes());
-                out[16..24].copy_from_slice(&mix.to_le_bytes());
-                out[24..32].copy_from_slice(&sum.to_le_bytes());
-                miden_crypto::rand::test_utils::prng_value::<Felt>(out)
+                // SplitMix64 — a tiny high-quality mixer that produces a well-distributed
+                // u64 per call. We then reduce modulo the Goldilocks prime via `Felt::new`,
+                // which is the identity for inputs already in canonical form.
+                self.state = self.state.wrapping_add(0x9E3779B97F4A7C15);
+                let mut z = self.state;
+                z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+                z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+                z ^= z >> 31;
+                Felt::new(z)
             }
 
             fn next_quad(&mut self) -> QuadFelt {
