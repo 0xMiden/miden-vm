@@ -4,6 +4,9 @@
 //! (ADD/NEG/MUL/INV/INCR/NOT/AND/OR/EQ/EQZ/EXPACC/EXT2MUL) and u32 arithmetic ops
 //! (U32SPLIT/U32ADD/U32ADD3/U32SUB/U32MUL/U32MADD/U32DIV/U32ASSERT2).
 
+#[cfg(test)]
+mod tests;
+
 use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::LiftedAirBuilder;
 
