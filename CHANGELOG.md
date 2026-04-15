@@ -13,6 +13,7 @@
 - Replaced unsound `ptr::read` with safe unbox in panic recovery, removing UB from potential double-drop ([#2934](https://github.com/0xMiden/miden-vm/pull/2934)).
 - Reverted `InvokeKind::ProcRef` back to `InvokeKind::Exec` in `visit_mut_procref` and added an explanatory comment (#2893).
 - Fixed the release dry-run publish cycle between `miden-air` and `miden-ace-codegen`, and preserved leaf-only DAG imports with explicit snapshots ([#2931](https://github.com/0xMiden/miden-vm/pull/2931)).
+- Fixed AEAD encrypt so the final padding block is written to the destination tail without overwriting memory next to the plaintext buffer ([#3008](https://github.com/0xMiden/miden-vm/pull/3008)).
 
 #### Changes
 
