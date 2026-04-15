@@ -39,10 +39,6 @@ type Commitment<F, EF, SC> = <<SC as StarkConfig<F, EF>>::Lmcs as Lmcs>::Commitm
 /// parsing via [`StarkTranscript::from_proof`], which validates the shape
 /// metadata and binds it into the Fiat-Shamir challenger —
 /// [`verify_multi`](crate::verifier::verify_multi) runs the same validation.
-///
-/// TODO(0xMiden/crypto#941): once `InstanceShapes` also carries the
-/// permutation `π: trace_id → air_id`, the Fiat-Shamir encoding and downstream
-/// indexing will need to be updated.
 // Bounds target `Commitment` directly; `SC` itself isn't `Serialize`/`Debug`.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(serialize = "TranscriptData<F, Commitment<F, EF, SC>>: Serialize"))]
@@ -174,8 +170,8 @@ where
     /// Parse a STARK transcript from proof data and a challenger.
     ///
     /// Mirrors steps 0–9 of [`verify_multi`](crate::verifier::verify_multi):
-    /// 0. Validate instance shapes, then observe log trace heights into the challenger
-    ///    and squeeze a throwaway `instance_challenge` to clear the absorb buffer
+    /// 0. Validate instance shapes, then observe log trace heights into the challenger and squeeze
+    ///    a throwaway `instance_challenge` to clear the absorb buffer
     /// 1. Receive main trace commitment
     /// 2. Sample randomness for auxiliary traces
     /// 3. Receive auxiliary trace commitment

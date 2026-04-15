@@ -47,7 +47,7 @@
 //! use p3_dft::Radix2DitParallel;
 //! use p3_field::extension::BinomialExtensionField;
 //! use crate::{StarkConfig, prove_multi};
-//! use miden_lifted_air::{AirWitness, AirInstance};
+//! use crate::{AirWitness, AirInstance};
 //! use crate::lmcs::LmcsConfig;
 //! use miden_stateful_hasher::StatefulSponge;
 //! use miden_stark_transcript::{ProverTranscript, VerifierTranscript};
@@ -79,7 +79,6 @@
 //!
 //! // --- Statement (out-of-band) ---
 //! let public_values: Vec<F> = /* ... */;
-//! let log_trace_height: usize = /* ... */;
 //!
 //! // --- Prover: bind statement into Fiat-Shamir ---
 //! let mut ch = Challenger::new(perm.clone());
@@ -96,7 +95,7 @@
 //! ch.observe_slice(&b"LSTARK0".map(|b| F::from_u8(b)));
 //! ch.observe_slice(&public_values);
 //!
-//! let instance = AirInstance { log_trace_height, public_values: &public_values, var_len_public_inputs: &[] };
+//! let instance = AirInstance { public_values: &public_values, var_len_public_inputs: &[] };
 //! let verifier_digest = crate::verify_multi(&config, &[(&air, instance)], &output.proof, ch)?;
 //! assert_eq!(output.digest, verifier_digest);
 //! ```
@@ -113,17 +112,10 @@
 //!
 //! # Multi-trace ordering
 //!
-//! For [`prove_multi`], `instances` must currently be provided in ascending trace
-//! height order (smallest first).
-//!
-//! Internally, traces are committed and quotient numerators are accumulated in
-//! ascending height order ("trace order") using cyclic extension, before a single
-//! vanishing division on the largest quotient domain.
-//!
-//! TODO(0xMiden/crypto#941): Accept instances in any order. The prover will compute
-//! a permutation `π: trace_id → air_id`, observe it into the transcript, reorder
-//! instances for commitment, and replace Horner accumulation with explicit
-//! `β^{π(t)}` weighting.
+//! [`prove_multi`] requires `instances` in ascending trace height order (smallest
+//! first). Internally, traces are committed and quotient numerators are accumulated
+//! in that order using cyclic extension, before a single vanishing division on the
+//! largest quotient domain.
 
 extern crate alloc;
 
@@ -203,7 +195,7 @@ where
 /// `public_values`). This lets callers keep public inputs out of the proof when they
 /// are available out-of-band.
 ///
-/// Instances must currently be provided in ascending height order (smallest first).
+/// Instances must be provided in ascending height order (smallest first).
 /// Each trace may have a different height that is a power of 2. The quotient
 /// numerators are accumulated using cyclic extension:
 ///
@@ -286,9 +278,6 @@ where
 
     // 1. Commit all main traces (trace order — ascending height).
     //
-    // TODO(0xMiden/crypto#941): reorder traces by π before committing, and
-    // observe heights in trace order alongside π in `InstanceShapes::observe`.
-    //
     // Clone with blowup × capacity so the DFT resize doesn't reallocate.
     let blowup = 1 << log_blowup as usize;
     let main_traces: Vec<_> = instances
@@ -369,12 +358,6 @@ where
     //   1. Cyclically extend accumulator to the next quotient height
     //   2. Multiply every element by beta (Horner)
     //   3. Add constraint evaluations in-place: acc[i] += eval(i)
-    //
-    // TODO(0xMiden/crypto#941): Replace Horner accumulation with explicit beta powers.
-    // Iterate in trace order, but weight each term by β^{π(trace_id)} instead of
-    // scaling the entire accumulator by β. Cyclic extension handles domain growth
-    // only (decoupled from beta). The verifier accumulates Σ_a β^a · C_a(...) in
-    // AIR order, which equals Σ_t β^{π(t)} · C_{π(t)}(trace[t]).
     //
     // Pre-allocate with LDE capacity so commit_quotient's resize doesn't reallocate.
     let constraint_degree = 1 << log_constraint_degree as usize;

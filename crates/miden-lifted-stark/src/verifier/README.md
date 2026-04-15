@@ -46,10 +46,10 @@ bundle extra data in the same transcript, you must manage boundaries yourself.
 
 ## Multi-trace ordering
 
-For `verify_multi`, instances must currently be provided in ascending trace
-height order (smallest first). Log trace heights are read from the proof and
-observed into the Fiat-Shamir challenger, so the protocol identity depends on
-the input ordering.
+For `verify_multi`, instances must be provided in the same order the prover
+used — ascending trace height order for the current prover. Log trace heights
+are read from the proof and observed into the Fiat-Shamir challenger, so the
+protocol identity depends on the input ordering.
 
 ## Protocol flow
 

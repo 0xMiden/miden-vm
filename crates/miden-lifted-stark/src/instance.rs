@@ -93,9 +93,6 @@ impl<'a, F> AirWitness<'a, F> {
 /// Per-instance shape metadata carried on [`StarkProof`](crate::StarkProof).
 ///
 /// Holds one log₂ trace height per instance.
-///
-/// TODO(0xMiden/crypto#941): also carry the permutation `π: trace_id → air_id`
-/// so the prover and verifier can accept instances in arbitrary order.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct InstanceShapes {
     // `pub(crate)` so in-crate tests can construct malformed shapes to
@@ -143,8 +140,6 @@ impl InstanceShapes {
 
     /// Absorb the shape metadata into a Fiat-Shamir challenger as one base
     /// field element per `log_h`.
-    ///
-    /// TODO(0xMiden/crypto#941): also observe the permutation here.
     pub(crate) fn observe<F, C>(&self, challenger: &mut C)
     where
         F: Field + PrimeCharacteristicRing,
@@ -167,8 +162,6 @@ pub enum InstanceValidationError {
     AirStructure(#[from] AirStructureError),
     #[error("no instances provided")]
     Empty,
-    /// TODO(0xMiden/crypto#941): Remove once `validate_inputs` computes the
-    /// permutation instead of rejecting non-ascending heights.
     #[error("instances not in ascending height order")]
     NotAscending,
     #[error("trace height {height} is not a power of two")]
@@ -201,16 +194,14 @@ pub enum InstanceValidationError {
 ///
 /// Checks:
 /// - shape count matches instance count
-/// - each `log_h + log_blowup ≤ F::TWO_ADICITY` (guards downstream `two_adic_generator` calls
-///   against wire-format shapes)
+/// - each `log_h + log_blowup` fits in both `F::TWO_ADICITY` and `usize::BITS - 1` (guards
+///   downstream `two_adic_generator` and `1usize << log_lde_height` against wire-format shapes; the
+///   `usize` bound only bites on 32-bit targets)
 /// - each AIR is structurally valid ([`LiftedAir::validate`])
 /// - each instance's public values / var-len inputs match its AIR
-/// - heights are ascending
+/// - heights are ascending (prover-side constraint; verifier rejects defensively)
 /// - max height ≥ 2 (needed for the 2-row transition window)
 /// - each trace height covers the AIR's longest periodic column
-///
-/// TODO(0xMiden/crypto#941): compute the permutation `π: trace_id → air_id`
-/// that sorts by ascending height instead of rejecting non-ascending input.
 pub(crate) fn validate_inputs<F, EF, A>(
     instances: &[(&A, AirInstance<'_, F>)],
     shapes: &InstanceShapes,
@@ -226,9 +217,12 @@ where
             log_trace_heights: shapes.len(),
         });
     }
+    // Upper bound on `log_h + log_blowup`: the two-adic generator must exist,
+    // and `1usize << log_lde_height` must not overflow on this target.
+    let max_log_lde_height = F::TWO_ADICITY.min((usize::BITS - 1) as usize);
     let mut log_prev: u8 = 0;
     for ((air, inst), &log_h) in instances.iter().zip(shapes.log_trace_heights()) {
-        if log_h as usize + log_blowup as usize > F::TWO_ADICITY {
+        if log_h as usize + log_blowup as usize > max_log_lde_height {
             return Err(InstanceValidationError::LdeDomainExceedsTwoAdicity {
                 log_h,
                 log_blowup,

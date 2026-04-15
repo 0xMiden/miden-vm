@@ -7,7 +7,7 @@
 //! # Usage
 //!
 //! ```ignore
-//! use miden_lifted_air::AirWitness;
+//! use miden_lifted_stark::AirWitness;
 //!
 //! // Single instance
 //! let witness = AirWitness::new(&trace, &public_values, &[]);

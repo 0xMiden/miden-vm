@@ -38,9 +38,9 @@ bind without bloating the proof.
 
 ## Multi-trace ordering
 
-For `prove_multi`, instances must currently be provided in ascending trace
-height order (smallest first). Internally, traces are committed and quotient
-numerators are accumulated in this order.
+For `prove_multi`, instances must be provided in ascending trace height order
+(smallest first). Internally, traces are committed and quotient numerators are
+accumulated in this order.
 
 Log trace heights are observed into the Fiat-Shamir challenger before the
 transcript begins, so the protocol identity depends on the input ordering.

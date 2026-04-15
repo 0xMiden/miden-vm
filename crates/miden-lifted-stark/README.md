@@ -209,13 +209,14 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 | `src/verifier/mod.rs` | `verify_single`, `verify_multi` — orchestration and identity check |
 | `src/verifier/constraints.rs` | `ConstraintFolder` — OOD constraint evaluation, quotient reconstruction |
 | `src/verifier/periodic.rs` | `PeriodicPolys` — polynomial coefficients for OOD evaluation |
-| `src/verifier/proof.rs` | `StarkTranscript` — structured transcript view |
+| `src/proof.rs` | `StarkProof`, `StarkTranscript` — proof artifact and structured transcript view |
+| `src/instance.rs` | `AirInstance`, `AirWitness`, `InstanceShapes` — protocol-level instance types |
 
 ## Conventions & Assumptions
 
-- **Ascending height order** — Traces must currently be supplied in ascending
-  height order (shortest first). The prover and verifier both validate this.
-  Log trace heights are carried in the proof and observed into the Fiat-Shamir
+- **Ascending height order** — Traces must be supplied in ascending height
+  order (shortest first). The prover and verifier both validate this. Log
+  trace heights are carried in the proof and observed into the Fiat-Shamir
   challenger, so the input ordering defines the protocol identity.
 - **Power-of-two heights** — All trace heights are powers of two.
 - **Bit-reversed storage** — All evaluation matrices are in bit-reversed order.

@@ -6,9 +6,6 @@
 //! - [`cyclic_extend_and_scale`]: Horner-style beta scaling + cyclic extension
 //! - [`divide_by_vanishing_in_place`]: Divide by Z_H on the quotient evaluation domain
 //! - [`commit_quotient`]: Decompose Q(gJ) into chunks and commit on gK
-//!
-//! TODO(0xMiden/crypto#941): Replace `cyclic_extend_and_scale` (Horner) with a
-//! cyclic-extend-only helper + explicit `β^{π(t)}` weighting per instance.
 
 use alloc::{format, vec, vec::Vec};
 
@@ -44,11 +41,6 @@ use crate::{
 /// Cyclic extension is valid because H_small is a subgroup of H_big, so
 /// evaluations repeat cyclically. The β scaling implements Horner folding for
 /// multi-trace accumulation: `acc = acc·β + Nⱼ`.
-///
-/// TODO(0xMiden/crypto#941): Decouple cyclic extension from beta scaling. After
-/// permutation support, the beta power depends on the AIR identity (`β^{π(t)}`),
-/// not the iteration position, so Horner folding no longer applies. This function
-/// will become a pure cyclic extension (no beta argument).
 pub fn cyclic_extend_and_scale<EF: Field>(accumulator: &mut Vec<EF>, target_len: usize, beta: EF) {
     if accumulator.is_empty() {
         accumulator.resize(target_len, EF::ZERO);

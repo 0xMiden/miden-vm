@@ -57,13 +57,9 @@
 //!
 //! # Multi-trace ordering
 //!
-//! For [`verify_multi`], `instances` must currently be provided in ascending trace
-//! height order (smallest first).
-//!
-//! TODO(0xMiden/crypto#941): Accept instances in any order. The verifier will read
-//! the permutation `π` from the proof, iterate in AIR order, and index OOD evals
-//! via `π⁻¹(air_id)`. The constraint circuit is stable — only the indexing of
-//! opened values changes.
+//! [`verify_multi`] requires `instances` in the same order the prover used.
+//! The current prover only emits ascending trace-height order (a prover-side
+//! cyclic-extension constraint), so non-ascending input is rejected early.
 
 extern crate alloc;
 
@@ -139,11 +135,11 @@ where
 
 /// Verify multiple AIRs with traces of different heights.
 ///
-/// `instances` must be given in ascending trace-height order. Log trace
-/// heights are read from `proof`, validated against `F::TWO_ADICITY`, and
-/// observed into the challenger before any transcript interaction — the
-/// caller's challenger must already carry all other variable statement
-/// inputs (e.g. `public_values`).
+/// `instances` must match the order the prover used — ascending trace-height
+/// order for the current prover. Log trace heights are read from `proof`,
+/// validated against `F::TWO_ADICITY`, and observed into the challenger
+/// before any transcript interaction — the caller's challenger must already
+/// carry all other variable statement inputs (e.g. `public_values`).
 ///
 /// The verifier mirrors the prover's protocol:
 ///
@@ -157,7 +153,12 @@ where
 /// codeword encodes `p_lift(X) = p(X^{rⱼ})`; opening at `[z, z · h_max]`
 /// yields the local/next row pair for the original trace domain.
 ///
-/// See the module-level docs for the statement-bound heights contract.
+/// **Statement-bound heights:** this function does not compare the proof's
+/// declared heights against any caller expectation. If your statement fixes
+/// trace dimensions, parse via
+/// [`StarkTranscript::from_proof`](crate::proof::StarkTranscript::from_proof)
+/// and check `instance_shapes.log_trace_heights()` before calling this. See
+/// the module-level docs for the full contract.
 pub fn verify_multi<F, EF, A, SC>(
     config: &SC,
     instances: &[(&A, AirInstance<'_, F>)],
@@ -186,7 +187,7 @@ where
 
     // Infer constraint degree from symbolic AIR analysis (max across all AIRs).
     // NOTE: `log_quotient_degree()` runs symbolic eval and may panic if the AIR is
-    // invalid. Callers must ensure `validate_instances` (above) passes first.
+    // invalid. Callers must ensure `validate_inputs` (above) passes first.
     let log_constraint_degree =
         instances.iter().map(|(air, _)| air.log_quotient_degree()).max().unwrap_or(1) as u8;
 
@@ -275,14 +276,8 @@ where
     // opened[g] has one matrix per AIR (for main/aux) or one matrix total (quotient).
     // Each matrix has N=2 rows: row 0 = local (z), row 1 = next (z·h).
     //
-    // Currently instances are in trace order (ascending height, enforced by caller),
-    // so j indexes both AIR and trace position directly.
-    //
-    // TODO(0xMiden/crypto#941): Iterate in AIR order instead. For each air_id,
-    // index opened values via π⁻¹(air_id) to get the OOD evals for that AIR's
-    // trace slot. Accumulate Σ_a β^a · C_a(ood_evals[π⁻¹(a)]). The Horner-style
-    // `accumulated = accumulated * beta + ...` is replaced by explicit β^{air_id}
-    // weighting.
+    // Instances are iterated in the prover's order (ascending height for the
+    // current prover), so j indexes both AIR and trace position directly.
     debug_assert_eq!(opened[main_g].len(), instances.len());
     debug_assert_eq!(opened[aux_g].len(), instances.len());
     let mut accumulated = EF::ZERO;
