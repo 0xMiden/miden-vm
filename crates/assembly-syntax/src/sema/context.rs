@@ -175,7 +175,7 @@ impl AnalysisContext {
     pub fn resolve_constant_usage(&mut self) {
         let mut worklist: VecDeque<Ident> = self.used_constants.iter().cloned().collect();
         for (name, constant) in &self.constants {
-            if constant.visibility.is_public() {
+            if constant.visibility.is_public() && self.used_constants.insert(name.clone()) {
                 worklist.push_back(name.clone());
             }
         }

@@ -5958,3 +5958,76 @@ fn dead_constant_does_not_mask_unused_import() {
         " help: this constant is never used and can be safely removed"
     );
 }
+
+#[test]
+fn dead_constant_direct_import_warns_unused_import() {
+    let context = TestContext::default();
+    let a = "pub const BAR = 42\n\npub proc noop\n    push.1 drop\nend\n";
+    let a = parse_module!(&context, "lib::a", a);
+    let lib = Assembler::new(context.source_manager()).assemble_library([a]).unwrap();
+
+    let mut context = TestContext::default();
+    context.add_library(&lib).unwrap();
+
+    let source = source_file!(
+        &context,
+        "
+        use lib::a::BAR
+
+        const DEAD = BAR
+
+        begin
+            push.1
+        end"
+    );
+
+    assert_assembler_diagnostic!(
+        context,
+        source,
+        "syntax error",
+        "help: see emitted diagnostics for details",
+        "unused import",
+        regex!(r#",-\[test[\d]+:2:13\]"#),
+        "1 |",
+        "2 |         use lib::a::BAR",
+        "  :             ^^^^^^^^^^",
+        "3 |",
+        "  `----",
+        " help: this import is never used and can be safely removed",
+        "unused constant",
+        regex!(r#",-\[test[\d]+:4:9\]"#),
+        "3 |",
+        "4 |         const DEAD = BAR",
+        "  :         ^^^^^^^^^^^^^^^^",
+        "5 |",
+        "  `----",
+        " help: this constant is never used and can be safely removed"
+    );
+}
+
+#[test]
+fn pub_constant_import_not_unused() -> TestResult {
+    let context = TestContext::default();
+    let a = "pub const BAR = 42\n\npub proc noop\n    push.1 drop\nend\n";
+    let a = parse_module!(&context, "lib::a", a);
+    let lib = Assembler::new(context.source_manager()).assemble_library([a]).unwrap();
+
+    let mut context = TestContext::default();
+    context.add_library(&lib).unwrap();
+
+    let source = source_file!(
+        &context,
+        "
+        use lib::a
+
+        pub const LIVE = a::BAR
+
+        pub proc foo
+            push.1
+        end"
+    );
+
+    let module = context.parse_module_with_path("test::lib", source)?;
+    let _library = context.assemble_library([module])?;
+    Ok(())
+}
