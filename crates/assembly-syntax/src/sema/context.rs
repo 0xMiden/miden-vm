@@ -1,6 +1,6 @@
 use alloc::{
     boxed::Box,
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     sync::Arc,
     vec::Vec,
 };
@@ -17,6 +17,16 @@ use crate::ast::{
 /// This maintains the state for semantic analysis of a single [Module].
 pub struct AnalysisContext {
     constants: BTreeMap<Ident, Constant>,
+    used_constants: BTreeSet<Ident>,
+    /// Edges from a constant to the constants it references.
+    /// Used to compute transitive usage from real roots.
+    constant_deps: BTreeMap<Ident, BTreeSet<Ident>>,
+    /// Edges from a constant to the imports it references.
+    /// Used to avoid marking imports as used when only dead constants reference them.
+    constant_import_refs: BTreeMap<Ident, BTreeSet<alloc::string::String>>,
+    /// When set, references are recorded as constant-to-constant edges
+    /// rather than marking the target as directly used.
+    simplifying_constant: Option<Ident>,
     imported: BTreeSet<Ident>,
     procedures: BTreeSet<ProcedureName>,
     errors: Vec<SemanticAnalysisError>,
@@ -38,6 +48,14 @@ impl constants::ConstEnvironment for AnalysisContext {
     #[inline]
     fn get(&mut self, name: &Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
         if let Some(constant) = self.constants.get(name) {
+            let is_self_ref = self.simplifying_constant.as_ref() == Some(name);
+            if !is_self_ref {
+                if let Some(ref parent) = self.simplifying_constant {
+                    self.constant_deps.entry(parent.clone()).or_default().insert(name.clone());
+                } else {
+                    self.used_constants.insert(name.clone());
+                }
+            }
             Ok(Some(CachedConstantValue::Miss(&constant.value)))
         } else if self.imported.contains(name) {
             // We don't have the definition available yet
@@ -67,6 +85,10 @@ impl AnalysisContext {
     pub fn new(source_file: Arc<SourceFile>, source_manager: Arc<dyn SourceManager>) -> Self {
         Self {
             constants: Default::default(),
+            used_constants: Default::default(),
+            constant_deps: Default::default(),
+            constant_import_refs: Default::default(),
+            simplifying_constant: None,
             imported: Default::default(),
             procedures: Default::default(),
             errors: Default::default(),
@@ -96,6 +118,76 @@ impl AnalysisContext {
 
     pub fn register_imported_name(&mut self, name: Ident) {
         self.imported.insert(name);
+    }
+
+    /// Returns true if the constant has been referenced by another constant or
+    /// by a procedure body, or is publicly visible.
+    pub fn is_constant_used(&self, constant: &Constant) -> bool {
+        constant.visibility.is_public() || self.used_constants.contains(&constant.name)
+    }
+
+    /// Mark a constant as used.
+    ///
+    /// This is used for constants created as a side effect of other declarations
+    /// (e.g. advice map entries) that should not trigger unused constant warnings.
+    pub fn mark_constant_used(&mut self, name: &Ident) {
+        self.used_constants.insert(name.clone());
+    }
+
+    /// Record that constant `constant_name` references import `import_name`.
+    ///
+    /// These edges are used to defer import-usage bookkeeping until after
+    /// constant liveness has been resolved, so that imports reached only from
+    /// dead constants are correctly reported as unused.
+    pub fn record_constant_import_ref(
+        &mut self,
+        constant_name: &Ident,
+        import_name: alloc::string::String,
+    ) {
+        self.constant_import_refs
+            .entry(constant_name.clone())
+            .or_default()
+            .insert(import_name);
+    }
+
+    /// Increment `alias.uses` only for imports that are referenced by live
+    /// constants. Must be called after `resolve_constant_usage`.
+    pub fn apply_live_constant_import_refs(&self, module: &mut Module) {
+        for (constant_name, import_names) in &self.constant_import_refs {
+            if !self.used_constants.contains(constant_name) {
+                continue;
+            }
+            for import_name in import_names {
+                if let Some(alias) =
+                    module.aliases_mut().find(|a| a.name().as_str() == import_name.as_str())
+                {
+                    alias.uses += 1;
+                }
+            }
+        }
+    }
+
+    /// Propagate usage from real roots through constant-to-constant edges.
+    ///
+    /// A constant is considered truly used if it is public, directly referenced
+    /// by a procedure body, or transitively referenced by such a constant.
+    /// This must be called before checking for unused constants.
+    pub fn resolve_constant_usage(&mut self) {
+        let mut worklist: VecDeque<Ident> = self.used_constants.iter().cloned().collect();
+        for (name, constant) in &self.constants {
+            if constant.visibility.is_public() && self.used_constants.insert(name.clone()) {
+                worklist.push_back(name.clone());
+            }
+        }
+        while let Some(name) = worklist.pop_front() {
+            if let Some(deps) = self.constant_deps.get(&name) {
+                for dep in deps {
+                    if self.used_constants.insert(dep.clone()) {
+                        worklist.push_back(dep.clone());
+                    }
+                }
+            }
+        }
     }
 
     /// Define a new constant `constant`
@@ -133,6 +225,7 @@ impl AnalysisContext {
         let constants = self.constants.keys().cloned().collect::<Vec<_>>();
 
         for constant in constants.iter() {
+            self.simplifying_constant = Some(constant.clone());
             let expr = ConstantExpr::Var(Span::new(
                 constant.span(),
                 PathBuf::from(constant.clone()).into(),
@@ -145,6 +238,7 @@ impl AnalysisContext {
                     self.errors.push(err);
                 },
             }
+            self.simplifying_constant = None;
         }
     }
 

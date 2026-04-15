@@ -114,6 +114,12 @@ pub enum SemanticAnalysisError {
         #[label]
         span: SourceSpan,
     },
+    #[error("unused constant")]
+    #[diagnostic(severity(Warning), help("this constant is never used and can be safely removed"))]
+    UnusedConstant {
+        #[label]
+        span: SourceSpan,
+    },
     #[error("missing import: the referenced module has not been imported")]
     #[diagnostic()]
     MissingImport {
