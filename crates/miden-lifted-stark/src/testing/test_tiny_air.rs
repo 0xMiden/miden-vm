@@ -7,12 +7,12 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
-    VerifierError,
+    AirWitness, InstanceValidationError, ProverError, VerifierError,
     air::{
         AirBuilder, AuxBuilder, BaseAir, ExtensionBuilder, LiftedAir, LiftedAirBuilder,
-        WindowAccess, log2_strict_u8,
+        WindowAccess,
     },
-    prove_single,
+    prove_multi, prove_single,
     testing::configs::goldilocks_poseidon2::{
         Felt, QuadFelt, generate_pow4_trace, prove_and_verify, test_challenger, test_config,
     },
@@ -157,7 +157,6 @@ fn malformed_transcript_is_rejected() {
     let air = TinyAir::new(vec![]);
 
     let (trace, public_values) = instance(0, 4);
-    let log_trace_height = log2_strict_u8(trace.height());
 
     let output = prove_single(
         &config,
@@ -171,36 +170,125 @@ fn malformed_transcript_is_rejected() {
     .expect("proving should succeed");
 
     // Baseline should verify
-    let _digest = verify_single(
-        &config,
-        &air,
-        log_trace_height,
-        &public_values,
-        &[],
-        &output.proof,
-        test_challenger(),
-    )
-    .expect("baseline proof should verify");
+    let _digest =
+        verify_single(&config, &air, &public_values, &[], &output.proof, test_challenger())
+            .expect("baseline proof should verify");
 
     // Extra field element should cause rejection
-    let (mut fields, commitments) = output.proof.into_parts();
+    let mut bad_proof = output.proof;
+    let (mut fields, commitments) = bad_proof.transcript.into_parts();
     fields.push(Felt::ONE);
-    let bad_transcript = TranscriptData::new(fields, commitments);
+    bad_proof.transcript = TranscriptData::new(fields, commitments);
 
-    let err = verify_single(
-        &config,
-        &air,
-        log_trace_height,
-        &public_values,
-        &[],
-        &bad_transcript,
-        test_challenger(),
-    )
-    .expect_err("extra transcript data should fail verification");
+    let err = verify_single(&config, &air, &public_values, &[], &bad_proof, test_challenger())
+        .expect_err("extra transcript data should fail verification");
     assert!(matches!(
         err,
         VerifierError::Transcript(crate::transcript::TranscriptError::TrailingData)
     ));
+}
+
+#[test]
+fn malformed_log_trace_heights_is_rejected() {
+    let config = test_config();
+    let air = TinyAir::new(vec![]);
+
+    let (trace, public_values) = instance(0, 4);
+
+    let output = prove_single(
+        &config,
+        &air,
+        &trace,
+        &public_values,
+        &[],
+        &TinyAuxBuilder,
+        test_challenger(),
+    )
+    .expect("proving should succeed");
+
+    // Push straight to the `pub(crate)` field to bypass
+    // `InstanceShapes::from_trace_heights` and exercise the verifier-path
+    // bound check in `validate_inputs`.
+    let mut bad_proof = output.proof.clone();
+    bad_proof.instance_shapes.log_trace_heights.push(2);
+    let err = verify_single(&config, &air, &public_values, &[], &bad_proof, test_challenger())
+        .expect_err("extra log trace height should fail verification");
+    assert!(matches!(
+        err,
+        VerifierError::Instance(InstanceValidationError::HeightCountMismatch {
+            instances: 1,
+            log_trace_heights: 2,
+        })
+    ));
+
+    // Empty heights → count mismatch on the other side.
+    let mut bad_proof = output.proof.clone();
+    bad_proof.instance_shapes.log_trace_heights.clear();
+    let err = verify_single(&config, &air, &public_values, &[], &bad_proof, test_challenger())
+        .expect_err("empty log trace heights should fail verification");
+    assert!(matches!(
+        err,
+        VerifierError::Instance(InstanceValidationError::HeightCountMismatch {
+            instances: 1,
+            log_trace_heights: 0,
+        })
+    ));
+
+    // Out-of-range log height must surface as an error, not panic on
+    // `1usize << log_h` or `two_adic_generator(log_h + log_blowup)`.
+    let mut bad_proof = output.proof.clone();
+    bad_proof.instance_shapes.log_trace_heights = vec![200];
+    let err = verify_single(&config, &air, &public_values, &[], &bad_proof, test_challenger())
+        .expect_err("oversized log trace height should fail verification");
+    assert!(matches!(
+        err,
+        VerifierError::Instance(InstanceValidationError::LdeDomainExceedsTwoAdicity {
+            log_h: 200,
+            ..
+        })
+    ));
+
+    // Boundary case: `log_h` fits the raw bound (`log_h ≤ TWO_ADICITY`) but
+    // the LDE domain `log_h + log_blowup` does not. With `log_blowup = 2`
+    // from `TEST_PCS_PARAMS` and `Felt::TWO_ADICITY = 32`, `31 + 2 = 33 > 32`
+    // must be rejected before any `two_adic_generator` call on the LDE domain.
+    let mut bad_proof = output.proof;
+    bad_proof.instance_shapes.log_trace_heights = vec![31];
+    let err = verify_single(&config, &air, &public_values, &[], &bad_proof, test_challenger())
+        .expect_err("log_h + log_blowup exceeding two-adicity should fail verification");
+    assert!(matches!(
+        err,
+        VerifierError::Instance(InstanceValidationError::LdeDomainExceedsTwoAdicity {
+            log_h: 31,
+            log_blowup: 2,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn prover_rejects_non_power_of_two_trace_height() {
+    // Build the witness directly (via `pub` fields) to skip the
+    // power-of-two assertion in `AirWitness::new`. `InstanceShapes::from_trace_heights`
+    // must reject it rather than panicking inside `log2_strict_u8`.
+    let config = test_config();
+    let air = TinyAir::new(vec![]);
+
+    let trace =
+        RowMajorMatrix::new(vec![Felt::from_u64(2), Felt::from_u64(16), Felt::from_u64(65536)], 1);
+    let public_values = vec![Felt::from_u64(2)];
+    let bad_witness = AirWitness {
+        trace: &trace,
+        public_values: &public_values,
+        var_len_public_inputs: &[],
+    };
+
+    let result = prove_multi(&config, &[(&air, bad_witness, &TinyAuxBuilder)], test_challenger());
+    match result {
+        Err(ProverError::Instance(InstanceValidationError::InvalidTraceHeight { height: 3 })) => {},
+        Err(other) => panic!("expected InvalidTraceHeight {{ height: 3 }}, got {other:?}"),
+        Ok(_) => panic!("non-power-of-two trace height should fail proving"),
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -11,13 +11,29 @@
 //! # Fiat-Shamir / transcript binding (initial challenger state)
 //!
 //! This crate intentionally does **not** prescribe the *initial* transcript state.
-//! In particular, the verifier APIs here take the statement out-of-band (AIR(s),
-//! instance metadata like trace heights, and `public_values`).
+//! The verifier APIs here take the statement (AIR(s), `public_values`, and
+//! `var_len_public_inputs`) out-of-band, and assume the challenger passed in
+//! has already observed all variable inputs that are not carried on the proof.
 //!
-//! The protocol implementation assumes that all inputs that may vary (including
-//! `public_values`) have already been observed by the challenger passed in.
-//! This is required so callers can avoid including large public inputs in the proof
-//! when they are available out-of-band.
+//! Instance shape metadata is the one exception: log trace heights ride on
+//! the opaque [`StarkProof`] and [`verify_multi`] observes them before any
+//! transcript interaction. Callers must not pre-observe them, or they'll be
+//! absorbed twice.
+//!
+//! # Statement-bound trace heights
+//!
+//! The verifier accepts whatever trace heights the proof carries; it never
+//! compares them against a caller-supplied expectation. If your statement
+//! fixes the trace size (e.g. a proof for a 2^16-row execution), parse it
+//! with
+//! [`StarkTranscript::from_proof`](crate::proof::StarkTranscript::from_proof)
+//! and check `transcript.instance_shapes.log_trace_heights()` yourself.
+//!
+//! The protocol implementation assumes that all out-of-band inputs that may
+//! vary (in particular `public_values` and `var_len_public_inputs`) have
+//! already been observed by the challenger passed in. This is required so
+//! callers can avoid including large public inputs in the proof when they are
+//! available out-of-band.
 //!
 //! If your application treats any of these inputs as untrusted, you must
 //! authenticate them by binding them into the Fiat-Shamir challenger state
@@ -41,8 +57,9 @@
 //!
 //! # Multi-trace ordering
 //!
-//! For [`verify_multi`], `instances` must be provided in ascending trace height order
-//! (smallest first). This is a protocol-level requirement.
+//! [`verify_multi`] requires `instances` in the same order the prover used.
+//! The current prover only emits ascending trace-height order (a prover-side
+//! cyclic-extension constraint), so non-ascending input is rejected early.
 
 extern crate alloc;
 
@@ -54,8 +71,7 @@ use core::marker::PhantomData;
 
 use constraints::{ConstraintFolder, reconstruct_quotient, row_to_packed_ext};
 use miden_lifted_air::{
-    AirInstance, AirValidationError, LiftedAir, ReducedAuxValues, ReductionError, RowWindow,
-    VarLenPublicInputs, validate_instances,
+    LiftedAir, ReducedAuxValues, ReductionError, RowWindow, VarLenPublicInputs,
 };
 use miden_stark_transcript::{Channel, TranscriptError, VerifierChannel, VerifierTranscript};
 use p3_field::{ExtensionField, TwoAdicField};
@@ -66,6 +82,7 @@ use thiserror::Error;
 use crate::{
     StarkConfig,
     coset::LiftedCoset,
+    instance::{AirInstance, InstanceValidationError, validate_inputs},
     pcs::verifier::{PcsError, verify_aligned},
     proof::{StarkDigest, StarkProof},
 };
@@ -73,8 +90,8 @@ use crate::{
 /// Errors that can occur during verification.
 #[derive(Debug, Error)]
 pub enum VerifierError {
-    #[error("AIR validation failed: {0}")]
-    Air(#[from] AirValidationError),
+    #[error("instance validation failed: {0}")]
+    Instance(#[from] InstanceValidationError),
     #[error("PCS verification failed: {0}")]
     Pcs(#[from] PcsError),
     #[error("transcript error: {0}")]
@@ -94,28 +111,13 @@ pub enum VerifierError {
     Reduction(ReductionError),
 }
 
-/// Verify a single AIR.
+/// Verify a single AIR. Convenience wrapper around [`verify_multi`].
 ///
-/// Transcript warning: the protocol assumes the challenger inside `channel` has
-/// already observed all variable statement inputs (in particular `public_values`).
-/// This lets callers keep public inputs out of the proof when they are available
-/// out-of-band. See the module-level docs for guidance.
-/// This is a convenience wrapper around [`verify_multi`] for the single-AIR case.
-///
-/// # Arguments
-/// - `config`: STARK configuration (PCS params, LMCS, DFT)
-/// - `air`: The AIR definition
-/// - `log_trace_height`: Log₂ of the trace height
-/// - `public_values`: Public values for this AIR
-/// - `var_len_public_inputs`: Variable-length public inputs for bus identity checks
-/// - `channel`: Verifier channel for transcript
-///
-/// # Returns
-/// `Ok(())` on success, or a `VerifierError` if verification fails.
+/// The caller's challenger must already have observed all variable statement
+/// inputs (e.g. `public_values`); see the module-level docs.
 pub fn verify_single<F, EF, A, SC>(
     config: &SC,
     air: &A,
-    log_trace_height: u8,
     public_values: &[F],
     var_len_public_inputs: VarLenPublicInputs<'_, F>,
     proof: &StarkProof<F, EF, SC>,
@@ -127,48 +129,41 @@ where
     SC: StarkConfig<F, EF>,
     A: LiftedAir<F, EF>,
 {
-    let instance = AirInstance {
-        log_trace_height,
-        public_values,
-        var_len_public_inputs,
-    };
+    let instance = AirInstance { public_values, var_len_public_inputs };
     verify_multi(config, &[(air, instance)], proof, challenger)
 }
 
 /// Verify multiple AIRs with traces of different heights.
 ///
-/// Transcript warning: the protocol assumes the challenger inside `channel` has
-/// already observed all variable statement inputs (in particular each instance's
-/// `public_values`). This lets callers keep public inputs out of the proof when they
-/// are available out-of-band.
+/// `instances` must match the order the prover used — ascending trace-height
+/// order for the current prover. Log trace heights are read from `proof`,
+/// validated against `F::TWO_ADICITY`, and observed into the challenger
+/// before any transcript interaction — the caller's challenger must already
+/// carry all other variable statement inputs (e.g. `public_values`).
 ///
-/// Instances must be provided in ascending height order (smallest first). Each trace
-/// may have a different height that is a power of 2. The verifier mirrors the prover's
-/// protocol:
+/// The verifier mirrors the prover's protocol:
 ///
-/// 1. Receive commitments and sample challenges in the same order as the prover
-/// 2. For each AIR, evaluate constraints at the lifted OOD point yⱼ = z^{rⱼ}
-/// 3. Accumulate folded constraints with β: acc = acc·β + foldedⱼ
-/// 4. Check quotient identity: `acc == Q(z) * Z_{H_max}(z)`
+/// 1. Validate instance shapes and observe log trace heights into the challenger
+/// 2. Receive commitments and sample challenges in the same order as the prover
+/// 3. For each AIR, evaluate constraints at the lifted OOD point yⱼ = z^{rⱼ}
+/// 4. Accumulate folded constraints with β: acc = acc·β + foldedⱼ
+/// 5. Check quotient identity: `acc == Q(z) * Z_{H_max}(z)`
 ///
-/// Lifting ensures correctness: for a trace of height nⱼ lifted by factor rⱼ,
-/// the committed codeword corresponds to the lifted polynomial `p_lift(X) = p(X^{rⱼ})`.
-/// Opening at `[z, z * h_max]` therefore yields
-/// `[p(z^{r_j}), p(h_{n_j} * z^{r_j})]`, i.e. the local/next row pair for the original
-/// (unlifted) trace domain.
+/// Lifting: for a trace of height nⱼ lifted by factor rⱼ, the committed
+/// codeword encodes `p_lift(X) = p(X^{rⱼ})`; opening at `[z, z · h_max]`
+/// yields the local/next row pair for the original trace domain.
 ///
-/// # Arguments
-/// - `config`: STARK configuration (PCS params, LMCS, DFT)
-/// - `instances`: Pairs of (AIR, instance) sorted by trace height (ascending)
-/// - `channel`: Verifier channel for transcript/proof I/O
-///
-/// # Returns
-/// `Ok(())` on success, or a `VerifierError` if verification fails.
+/// **Statement-bound heights:** this function does not compare the proof's
+/// declared heights against any caller expectation. If your statement fixes
+/// trace dimensions, parse via
+/// [`StarkTranscript::from_proof`](crate::proof::StarkTranscript::from_proof)
+/// and check `instance_shapes.log_trace_heights()` before calling this. See
+/// the module-level docs for the full contract.
 pub fn verify_multi<F, EF, A, SC>(
     config: &SC,
     instances: &[(&A, AirInstance<'_, F>)],
     proof: &StarkProof<F, EF, SC>,
-    challenger: SC::Challenger,
+    mut challenger: SC::Challenger,
 ) -> Result<StarkDigest<F, EF, SC>, VerifierError>
 where
     F: TwoAdicField,
@@ -176,15 +171,23 @@ where
     SC: StarkConfig<F, EF>,
     A: LiftedAir<F, EF>,
 {
-    let mut channel = VerifierTranscript::from_data(challenger, proof);
-    // Validate AIR properties, instance dimensions, and ascending height.
-    let log_max_trace_height = validate_instances(instances)?;
-
+    let instance_shapes = &proof.instance_shapes;
     let log_blowup = config.pcs().log_blowup();
+
+    let log_max_trace_height = validate_inputs(instances, instance_shapes, log_blowup)?;
+    let log_trace_heights = instance_shapes.log_trace_heights();
+
+    instance_shapes.observe::<F, _>(&mut challenger);
+
+    let mut channel = VerifierTranscript::from_data(challenger, &proof.transcript);
+
+    // Clear the challenger's absorb buffer after observing instance shapes by
+    // squeezing a throwaway extension element. Must mirror the prover exactly.
+    let _instance_challenge: EF = channel.sample_algebra_element::<EF>();
 
     // Infer constraint degree from symbolic AIR analysis (max across all AIRs).
     // NOTE: `log_quotient_degree()` runs symbolic eval and may panic if the AIR is
-    // invalid. Callers must ensure `validate_instances` (above) passes first.
+    // invalid. Callers must ensure `validate_inputs` (above) passes first.
     let log_constraint_degree =
         instances.iter().map(|(air, _)| air.log_quotient_degree()).max().unwrap_or(1) as u8;
 
@@ -268,17 +271,20 @@ where
     // 9. Group indices for accessing opened matrices: [main, aux, quotient].
     let (main_g, aux_g, quot_g) = (0, 1, 2);
 
-    // 10. Per-AIR constraint evaluation and beta accumulation
+    // 10. Per-AIR constraint evaluation and beta accumulation.
     //
     // opened[g] has one matrix per AIR (for main/aux) or one matrix total (quotient).
     // Each matrix has N=2 rows: row 0 = local (z), row 1 = next (z·h).
+    //
+    // Instances are iterated in the prover's order (ascending height for the
+    // current prover), so j indexes both AIR and trace position directly.
     debug_assert_eq!(opened[main_g].len(), instances.len());
     debug_assert_eq!(opened[aux_g].len(), instances.len());
     let mut accumulated = EF::ZERO;
     let mut reduced_aux = ReducedAuxValues::<EF>::identity();
 
     for (j, (air, inst)) in instances.iter().enumerate() {
-        let coset_j = LiftedCoset::new(inst.log_trace_height, log_blowup, log_max_trace_height);
+        let coset_j = LiftedCoset::new(log_trace_heights[j], log_blowup, log_max_trace_height);
 
         // opened[main_g][j] is a 2-row RowMajorMatrix (local, next) already truncated.
         let main_window = RowWindow::from_view(&opened[main_g][j].as_view());
@@ -314,7 +320,7 @@ where
             _phantom: PhantomData,
         };
 
-        air.is_valid_builder(&folder)?;
+        air.is_valid_builder(&folder).map_err(InstanceValidationError::from)?;
         air.eval(&mut folder);
 
         // Accumulate: acc = acc * beta + folded_j

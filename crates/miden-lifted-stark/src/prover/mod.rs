@@ -47,7 +47,7 @@
 //! use p3_dft::Radix2DitParallel;
 //! use p3_field::extension::BinomialExtensionField;
 //! use crate::{StarkConfig, prove_multi};
-//! use miden_lifted_air::{AirWitness, AirInstance};
+//! use crate::{AirWitness, AirInstance};
 //! use crate::lmcs::LmcsConfig;
 //! use miden_stateful_hasher::StatefulSponge;
 //! use miden_stark_transcript::{ProverTranscript, VerifierTranscript};
@@ -79,7 +79,6 @@
 //!
 //! // --- Statement (out-of-band) ---
 //! let public_values: Vec<F> = /* ... */;
-//! let log_trace_height: usize = /* ... */;
 //!
 //! // --- Prover: bind statement into Fiat-Shamir ---
 //! let mut ch = Challenger::new(perm.clone());
@@ -96,7 +95,7 @@
 //! ch.observe_slice(&b"LSTARK0".map(|b| F::from_u8(b)));
 //! ch.observe_slice(&public_values);
 //!
-//! let instance = AirInstance { log_trace_height, public_values: &public_values, var_len_public_inputs: &[] };
+//! let instance = AirInstance { public_values: &public_values, var_len_public_inputs: &[] };
 //! let verifier_digest = crate::verify_multi(&config, &[(&air, instance)], &output.proof, ch)?;
 //! assert_eq!(output.digest, verifier_digest);
 //! ```
@@ -113,11 +112,10 @@
 //!
 //! # Multi-trace ordering
 //!
-//! For [`prove_multi`], `instances` must be provided in ascending trace height order
-//! (smallest first). This is a protocol-level requirement.
-//!
-//! Internally, quotient numerators are accumulated using cyclic extension before a
-//! single vanishing division on the largest quotient domain.
+//! [`prove_multi`] requires `instances` in ascending trace height order (smallest
+//! first). Internally, traces are committed and quotient numerators are accumulated
+//! in that order using cyclic extension, before a single vanishing division on the
+//! largest quotient domain.
 
 extern crate alloc;
 
@@ -130,10 +128,7 @@ use alloc::{vec, vec::Vec};
 
 use commit::commit_traces;
 use constraints::{evaluate_constraints_into, layout::get_constraint_layout};
-use miden_lifted_air::{
-    AirValidationError, AirWitness, AuxBuilder, LiftedAir, VarLenPublicInputs, log2_strict_u8,
-    validate_instances,
-};
+use miden_lifted_air::{AuxBuilder, LiftedAir, VarLenPublicInputs, log2_strict_u8};
 use miden_stark_transcript::{Channel, ProverChannel, ProverTranscript};
 use p3_field::{BasedVectorSpace, ExtensionField, TwoAdicField};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
@@ -141,13 +136,19 @@ use periodic::PeriodicLde;
 use thiserror::Error;
 use tracing::{info_span, instrument};
 
-use crate::{StarkConfig, coset::LiftedCoset, pcs::prover::open_with_channel, proof::StarkOutput};
+use crate::{
+    StarkConfig,
+    coset::LiftedCoset,
+    instance::{AirWitness, InstanceShapes, InstanceValidationError, validate_inputs},
+    pcs::prover::open_with_channel,
+    proof::{StarkOutput, StarkProof},
+};
 
 /// Errors that can occur during proving.
 #[derive(Debug, Error)]
 pub enum ProverError {
-    #[error("AIR validation failed: {0}")]
-    Air(#[from] AirValidationError),
+    #[error("instance validation failed: {0}")]
+    Instance(#[from] InstanceValidationError),
     #[error(
         "constraint degree exceeds blowup: \
          log_quotient_degree {log_quotient_degree} > log_blowup {log_blowup}"
@@ -194,9 +195,9 @@ where
 /// `public_values`). This lets callers keep public inputs out of the proof when they
 /// are available out-of-band.
 ///
-/// Instances must be provided in ascending height order (smallest first). Each trace
-/// may have a different height that is a power of 2. The quotient numerators are
-/// accumulated using cyclic extension:
+/// Instances must be provided in ascending height order (smallest first).
+/// Each trace may have a different height that is a power of 2. The quotient
+/// numerators are accumulated using cyclic extension:
 ///
 /// 1. Compute numerator N₀ on the smallest quotient domain.
 /// 2. For each subsequent trace `j`:
@@ -210,8 +211,8 @@ where
 ///
 /// # Arguments
 /// - `config`: STARK configuration (PCS params, LMCS, DFT)
-/// - `instances`: Pairs of (AIR, witness) sorted by trace height (ascending).
-/// - `channel`: Prover channel for transcript/proof I/O
+/// - `instances`: Pairs of (AIR, witness, aux_builder)
+/// - `challenger`: Fiat-Shamir challenger (heights are observed before use)
 ///
 /// # Returns
 /// `Ok(StarkOutput { digest, proof })` on success, or a `ProverError` if validation fails.
@@ -219,7 +220,7 @@ where
 pub fn prove_multi<F, EF, A, B, SC>(
     config: &SC,
     instances: &[(&A, AirWitness<'_, F>, &B)],
-    challenger: SC::Challenger,
+    mut challenger: SC::Challenger,
 ) -> Result<StarkOutput<F, EF, SC>, ProverError>
 where
     F: TwoAdicField,
@@ -228,22 +229,34 @@ where
     A: LiftedAir<F, EF>,
     B: AuxBuilder<F, EF>,
 {
-    let mut channel = ProverTranscript::new(challenger);
-    // Validate AIR properties, witness dimensions, and ascending height.
-    // Prover additionally checks that each trace width matches its AIR.
-    let verifier_instances: Vec<_> = instances
-        .iter()
-        .map(|(air, w, _)| {
-            let expected = air.width();
-            let actual = w.trace.width();
-            if actual != expected {
-                return Err(AirValidationError::WidthMismatch { expected, actual });
-            }
-            Ok((*air, w.to_instance()?))
-        })
-        .collect::<Result<_, _>>()?;
-    let log_max_trace_height = validate_instances(&verifier_instances)?;
+    let verifier_instances: Vec<_> =
+        instances.iter().map(|(air, w, _)| (*air, w.to_instance())).collect();
+    let trace_heights: Vec<usize> = instances.iter().map(|(_, w, _)| w.trace.height()).collect();
+    let instance_shapes = InstanceShapes::from_trace_heights(trace_heights)?;
+
     let log_blowup = config.pcs().log_blowup();
+
+    // Validate AIR structure, instance dimensions, heights, and trace widths.
+    let log_max_trace_height = validate_inputs(&verifier_instances, &instance_shapes, log_blowup)?;
+    for (air, w, _) in instances {
+        if w.trace.width() != air.width() {
+            return Err(InstanceValidationError::WidthMismatch {
+                expected: air.width(),
+                actual: w.trace.width(),
+            }
+            .into());
+        }
+    }
+
+    // Observe shape metadata before creating the transcript.
+    instance_shapes.observe::<F, _>(&mut challenger);
+
+    let mut channel = ProverTranscript::new(challenger);
+
+    // Clear the challenger's absorb buffer after observing instance shapes by
+    // squeezing a throwaway extension element. This guarantees later sampled
+    // challenges depend on all prior inputs regardless of sponge state.
+    let _instance_challenge: EF = channel.sample_algebra_element::<EF>();
 
     // Infer constraint degree from symbolic AIR analysis (max across all AIRs)
     let log_constraint_degree =
@@ -263,7 +276,8 @@ where
     let max_quotient_coset = max_lde_coset.quotient_domain(log_constraint_degree);
     let max_quotient_height = max_quotient_coset.lde_height();
 
-    // 1. Commit all main traces
+    // 1. Commit all main traces (trace order — ascending height).
+    //
     // Clone with blowup × capacity so the DFT resize doesn't reallocate.
     let blowup = 1 << log_blowup as usize;
     let main_traces: Vec<_> = instances
@@ -340,9 +354,9 @@ where
 
     // 5. Evaluate constraints and accumulate with beta folding.
     //
-    // Single accumulator, processed in ascending trace height order:
+    // Single accumulator, processed in trace order (ascending height):
     //   1. Cyclically extend accumulator to the next quotient height
-    //   2. Multiply every element by beta
+    //   2. Multiply every element by beta (Horner)
     //   3. Add constraint evaluations in-place: acc[i] += eval(i)
     //
     // Pre-allocate with LDE capacity so commit_quotient's resize doesn't reallocate.
@@ -443,6 +457,7 @@ where
         )
     });
 
-    let (digest, proof) = channel.finalize();
+    let (digest, transcript) = channel.finalize();
+    let proof = StarkProof { instance_shapes, transcript };
     Ok(StarkOutput { digest, proof })
 }

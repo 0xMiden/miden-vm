@@ -184,7 +184,6 @@ where
 {
     assert!(!traces.is_empty(), "at least one trace required");
 
-    // Validate traces are sorted by height
     assert!(
         traces.windows(2).all(|w| w[0].height() <= w[1].height()),
         "traces must be sorted by height in ascending order"

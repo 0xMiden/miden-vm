@@ -2,7 +2,7 @@
 
 End-to-end verification for the lifted STARK protocol using LMCS
 commitments and the lifted FRI PCS. Supports multiple traces of different
-heights (power-of-two, ascending order) via virtual lifting.
+power-of-two heights via virtual lifting.
 
 Protocol-level overview lives in `miden-lifted-stark/README.md`.
 
@@ -12,12 +12,12 @@ Protocol-level overview lives in `miden-lifted-stark/README.md`.
 |------|---------|
 | `verify_single` | Verify a single-AIR proof |
 | `verify_multi` | Verify a multi-trace proof |
-| `AirInstance` | Bundle a log height with public values |
-| `Proof` | Raw transcript data (the proof artifact) |
+| `AirInstance` | Public values + variable-length inputs for one AIR |
+| `StarkProof` | Log trace heights + raw transcript data |
 
 ```text
-verify_single(config, air, log_trace_height, public_values, var_len_public_inputs, channel)
-verify_multi(config, &[(air, instance), ...], channel)
+verify_single(config, air, public_values, var_len_public_inputs, proof, challenger)
+verify_multi(config, &[(air, instance), ...], proof, challenger)
 ```
 
 The proof is read from the provided transcript channel. This crate does not
@@ -25,10 +25,11 @@ prescribe the *initial* challenger state used for Fiat-Shamir.
 
 ## Fiat-Shamir / statement binding
 
-The verifier APIs take the statement out-of-band (`air`, trace heights, and
-`public_values`). The protocol implementation assumes the challenger inside the
-channel has already observed all variable statement inputs (in particular
-`public_values`).
+The verifier APIs take the statement out-of-band (`air` and `public_values`).
+Log trace heights are carried in the `StarkProof` and observed into the
+Fiat-Shamir challenger at the start of verification. The protocol assumes the
+challenger has already observed all other variable statement inputs (in
+particular `public_values`).
 
 This is required to support applications that obtain public inputs out-of-band and
 do not want them duplicated inside the proof.
@@ -45,11 +46,14 @@ bundle extra data in the same transcript, you must manage boundaries yourself.
 
 ## Multi-trace ordering
 
-For `verify_multi`, instances must be provided in ascending trace height order
-(smallest first). This is a protocol-level requirement.
+For `verify_multi`, instances must be provided in the same order the prover
+used — ascending trace height order for the current prover. Log trace heights
+are read from the proof and observed into the Fiat-Shamir challenger, so the
+protocol identity depends on the input ordering.
 
 ## Protocol flow
 
+0. Observe log trace heights into the challenger (from proof, not transcript).
 1. Receive main trace commitment.
 2. Sample aux randomness.
 3. Receive aux trace commitment.
@@ -59,7 +63,7 @@ For `verify_multi`, instances must be provided in ascending trace height order
 7. Verify PCS openings at `[z, z_next]` for main, aux, and quotient.
 8. Reconstruct `Q(z)` from the opened quotient chunks.
 9. For each trace instance j, set `y_j = z^{r_j}` and evaluate folded constraints at `y_j`.
-10. Horner-accumulate across traces with `beta`.
+10. Accumulate across traces with `beta`.
 11. Check quotient identity: `accumulated == Q(z) * (z^N - 1)`.
 12. Ensure transcript is fully consumed.
 

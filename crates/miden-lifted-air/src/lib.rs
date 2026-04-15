@@ -13,13 +13,11 @@ extern crate alloc;
 mod air;
 pub mod auxiliary;
 mod builder;
-mod instance;
 mod util;
 
-pub use air::{AirValidationError, LiftedAir, TracePart};
+pub use air::{AirStructureError, LiftedAir, TracePart};
 pub use auxiliary::{AuxBuilder, ReducedAuxValues, ReductionError, VarLenPublicInputs};
 pub use builder::LiftedAirBuilder;
-pub use instance::{AirInstance, AirWitness, validate_instances};
 pub use util::log2_strict_u8;
 
 mod empty_window;

@@ -1,8 +1,8 @@
 # Lifted STARK Prover
 
 End-to-end proving for the lifted STARK protocol using LMCS commitments
-and the lifted FRI PCS. Supports multiple traces of different heights
-(power-of-two, ascending order) via virtual lifting.
+and the lifted FRI PCS. Supports multiple traces of different power-of-two
+heights via virtual lifting.
 
 Protocol-level overview lives in `miden-lifted-stark/README.md`.
 
@@ -11,12 +11,12 @@ Protocol-level overview lives in `miden-lifted-stark/README.md`.
 | Item | Purpose |
 |------|---------|
 | `prove_single` | Prove a single-AIR STARK |
-| `prove_multi` | Prove a multi-trace STARK (ascending heights) |
+| `prove_multi` | Prove a multi-trace STARK |
 | `AirWitness` | Bundle a trace with its public values |
 
 ```text
-prove_single(config, air, trace, public_values, channel)
-prove_multi(config, &[(air, witness), ...], channel)
+prove_single(config, air, trace, public_values, var_len_public_inputs, aux_builder, challenger)
+prove_multi(config, &[(air, witness, aux_builder), ...], challenger)
 ```
 
 The proof is written into the provided transcript channel. This crate does not
@@ -39,7 +39,11 @@ bind without bloating the proof.
 ## Multi-trace ordering
 
 For `prove_multi`, instances must be provided in ascending trace height order
-(smallest first). This is a protocol-level requirement.
+(smallest first). Internally, traces are committed and quotient numerators are
+accumulated in this order.
+
+Log trace heights are observed into the Fiat-Shamir challenger before the
+transcript begins, so the protocol identity depends on the input ordering.
 
 ## Protocol flow
 

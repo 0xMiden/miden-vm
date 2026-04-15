@@ -3,8 +3,8 @@
 //! The prover orchestrates the quotient pipeline (loop over instances, accumulate,
 //! divide, commit). This module provides the building blocks:
 //!
-//! - `cyclic_extend_and_scale`: Horner-style beta scaling + cyclic extension
-//! - `divide_by_vanishing_in_place`: Divide by Z_H on the quotient evaluation domain
+//! - [`cyclic_extend_and_scale`]: Horner-style beta scaling + cyclic extension
+//! - [`divide_by_vanishing_in_place`]: Divide by Z_H on the quotient evaluation domain
 //! - [`commit_quotient`]: Decompose Q(gJ) into chunks and commit on gK
 
 use alloc::{format, vec, vec::Vec};

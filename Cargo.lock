@@ -1204,6 +1204,7 @@ dependencies = [
  "p3-symmetric",
  "p3-util",
  "rand 0.10.1",
+ "serde",
  "thiserror 2.0.18",
  "tracing",
  "tracing-subscriber",

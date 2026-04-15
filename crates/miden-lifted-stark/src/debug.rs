@@ -7,7 +7,7 @@
 //! # Usage
 //!
 //! ```ignore
-//! use miden_lifted_air::AirWitness;
+//! use miden_lifted_stark::AirWitness;
 //!
 //! // Single instance
 //! let witness = AirWitness::new(&trace, &public_values, &[]);
@@ -21,11 +21,13 @@
 //! ```
 
 use miden_lifted_air::{
-    AirBuilder, AirWitness, AuxBuilder, EmptyWindow, ExtensionBuilder, LiftedAir,
-    PeriodicAirBuilder, PermutationAirBuilder, RowWindow,
+    AirBuilder, AuxBuilder, EmptyWindow, ExtensionBuilder, LiftedAir, PeriodicAirBuilder,
+    PermutationAirBuilder, RowWindow,
 };
 use p3_field::{ExtensionField, Field};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
+
+use crate::instance::AirWitness;
 
 // ============================================================================
 // Public API
