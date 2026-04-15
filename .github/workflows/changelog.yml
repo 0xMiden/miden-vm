@@ -16,19 +16,3 @@ on:
 jobs:
   changelog-reusable:
     uses: 0xMiden/.github/.github/workflows/changelog.yml@d34ae3cd29234c5aa4d3ab57635b30563471c3c3
-
-  changelog:
-    runs-on: ubuntu-latest
-    needs: changelog-reusable
-    if: always()
-    steps:
-      - name: Mirror reusable workflow result
-        env:
-          RESULT: ${{ needs.changelog-reusable.result }}
-        run: |
-          if [ "$RESULT" = "success" ] || [ "$RESULT" = "skipped" ]; then
-            exit 0
-          fi
-
-          echo "Reusable changelog workflow concluded with $RESULT" >&2
-          exit 1
