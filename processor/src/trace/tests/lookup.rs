@@ -16,6 +16,8 @@
 //! or terminal closure — those checks need the follow-up constraint-path round-trip
 //! oracle. Column terminals are printed to stderr for manual inspection.
 
+use alloc::vec::Vec;
+
 use miden_air::{
     LiftedAir, ProcessorAir,
     lookup::{

@@ -30,10 +30,18 @@ mod constraints;
 /// [`build_lookup_fractions`] without the rest of `constraints::lookup` leaking.
 pub mod lookup {
     pub use crate::constraints::lookup::{
-        ColumnOracleBuilder, LookupAir, LookupChallenges, LookupFractions, MidenLookupAir,
-        MidenLookupAuxBuilder, ProverLookupBuilder, accumulate, accumulate_slow,
+        ColumnOracleBuilder, LookupAir, LookupChallenges, LookupFractions, LookupMessage,
+        MidenLookupAir, MidenLookupAuxBuilder, ProverLookupBuilder, accumulate, accumulate_slow,
         build_lookup_fractions, collect_column_oracle_folds,
     };
+}
+
+/// Re-exports the bus-message structs from the internal `constraints::logup_msg` module so
+/// the processor's trace tests can hand-construct expected `LookupMessage` instances and
+/// encode them via `LookupMessage::encode`. Only used by tests; the structs themselves carry
+/// no data the rest of the public API does not already surface through the aux trace.
+pub mod logup_msg {
+    pub use crate::constraints::logup_msg::*;
 }
 
 pub mod trace;

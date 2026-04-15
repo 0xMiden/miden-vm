@@ -5,6 +5,8 @@ use miden_air::trace::MIN_TRACE_LEN;
 
 use super::chiplets::Chiplets;
 use crate::{Felt, RowIndex};
+#[cfg(test)]
+use crate::{operation::Operation, utils::ToElements};
 
 // ROW-MAJOR TRACE WRITER
 // ================================================================================================
@@ -269,3 +271,37 @@ pub(crate) fn split_u32_into_u16(value: u64) -> (u16, u16) {
     (hi, lo)
 }
 
+// TEST HELPERS
+// ================================================================================================
+
+/// Builds a 17-op basic block payload that straddles a RESPAN batch boundary, plus the initial
+/// values its `Push` ops emit. Consumed by decoder / hasher tests that exercise multi-batch
+/// SPAN execution.
+#[cfg(test)]
+#[allow(dead_code)]
+pub fn build_span_with_respan_ops() -> (alloc::vec::Vec<Operation>, alloc::vec::Vec<Felt>) {
+    let iv = [1, 3, 5, 7, 9, 11, 13, 15, 17].to_elements();
+    let ops = alloc::vec![
+        Operation::Push(iv[0]),
+        Operation::Push(iv[1]),
+        Operation::Push(iv[2]),
+        Operation::Push(iv[3]),
+        Operation::Push(iv[4]),
+        Operation::Push(iv[5]),
+        Operation::Push(iv[6]),
+        // next batch
+        Operation::Push(iv[7]),
+        Operation::Push(iv[8]),
+        Operation::Add,
+        // drops to make sure stack overflow is empty on exit
+        Operation::Drop,
+        Operation::Drop,
+        Operation::Drop,
+        Operation::Drop,
+        Operation::Drop,
+        Operation::Drop,
+        Operation::Drop,
+        Operation::Drop,
+    ];
+    (ops, iv)
+}
