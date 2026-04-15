@@ -261,6 +261,11 @@ where
 
     let mut channel = ProverTranscript::new(challenger);
 
+    // Clear the challenger's absorb buffer after observing instance shapes by
+    // squeezing a throwaway extension element. This guarantees later sampled
+    // challenges depend on all prior inputs regardless of sponge state.
+    let _instance_challenge: EF = channel.sample_algebra_element::<EF>();
+
     // Infer constraint degree from symbolic AIR analysis (max across all AIRs)
     let log_constraint_degree =
         instances.iter().map(|(air, ..)| air.log_quotient_degree()).max().unwrap_or(1) as u8;

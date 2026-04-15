@@ -141,6 +141,10 @@ where
     /// Per-instance shape metadata. Validated and observed into the challenger
     /// by [`from_proof`](Self::from_proof).
     pub instance_shapes: InstanceShapes,
+    /// Throwaway challenge squeezed right after observing the instance shapes,
+    /// used to clear the challenger's absorb buffer so that later sampled
+    /// challenges depend on the full shape metadata regardless of sponge state.
+    pub instance_challenge: EF,
     /// Main trace commitment.
     pub main_commit: L::Commitment,
     /// Randomness sampled for auxiliary traces.
@@ -171,6 +175,7 @@ where
     ///
     /// Mirrors steps 0–9 of [`verify_multi`](crate::verifier::verify_multi):
     /// 0. Validate instance shapes, then observe log trace heights into the challenger
+    ///    and squeeze a throwaway `instance_challenge` to clear the absorb buffer
     /// 1. Receive main trace commitment
     /// 2. Sample randomness for auxiliary traces
     /// 3. Receive auxiliary trace commitment
@@ -199,6 +204,11 @@ where
         proof.instance_shapes.observe::<L::F, _>(&mut challenger);
 
         let mut channel = VerifierTranscript::from_data(challenger, &proof.transcript);
+
+        // Clear the challenger's absorb buffer after observing instance shapes.
+        // Mirrors `prove_multi` / `verify_multi`.
+        let instance_challenge: EF = channel.sample_algebra_element::<EF>();
+
         let alignment = config.lmcs().alignment();
 
         // Infer constraint degree from symbolic AIR analysis (max across all AIRs)
@@ -284,6 +294,7 @@ where
         Ok((
             Self {
                 instance_shapes: proof.instance_shapes.clone(),
+                instance_challenge,
                 main_commit,
                 randomness,
                 aux_commit,

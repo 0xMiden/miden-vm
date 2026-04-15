@@ -180,6 +180,10 @@ where
 
     let mut channel = VerifierTranscript::from_data(challenger, &proof.transcript);
 
+    // Clear the challenger's absorb buffer after observing instance shapes by
+    // squeezing a throwaway extension element. Must mirror the prover exactly.
+    let _instance_challenge: EF = channel.sample_algebra_element::<EF>();
+
     // Infer constraint degree from symbolic AIR analysis (max across all AIRs).
     // NOTE: `log_quotient_degree()` runs symbolic eval and may panic if the AIR is
     // invalid. Callers must ensure `validate_instances` (above) passes first.
