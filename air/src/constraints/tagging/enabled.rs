@@ -14,6 +14,7 @@ pub trait TaggingAirBuilderExt: LiftedAirBuilder {
     /// Tag exactly one asserted constraint.
     ///
     /// Panics if the wrapped block emits zero or multiple assertions when tagging is enabled.
+    /// When a constraint assertion fails, the panic message includes the tag namespace and ID.
     fn tagged<R>(
         &mut self,
         id: usize,
@@ -21,9 +22,18 @@ pub trait TaggingAirBuilderExt: LiftedAirBuilder {
         f: impl FnOnce(&mut Self) -> R,
     ) -> R {
         if !super::state::is_enabled() {
-            return f(self);
+            // In debug/check_constraints mode, catch panics and annotate with tag info
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self)));
+            match result {
+                Ok(r) => r,
+                Err(e) => {
+                    std::eprintln!("CONSTRAINT FAILED: namespace='{}', id={}", namespace, id);
+                    std::panic::resume_unwind(e);
+                },
+            }
+        } else {
+            super::state::with_tag(vec![id], namespace, || f(self))
         }
-        super::state::with_tag(vec![id], namespace, || f(self))
     }
 
     /// Tag a list of asserted constraints (e.g., `assert_zeros` or per-iteration loops).
@@ -36,9 +46,17 @@ pub trait TaggingAirBuilderExt: LiftedAirBuilder {
         f: impl FnOnce(&mut Self) -> R,
     ) -> R {
         if !super::state::is_enabled() {
-            return f(self);
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self)));
+            match result {
+                Ok(r) => r,
+                Err(e) => {
+                    std::eprintln!("CONSTRAINT FAILED: namespace='{}', ids={:?}", namespace, ids);
+                    std::panic::resume_unwind(e);
+                },
+            }
+        } else {
+            super::state::with_tag(ids.to_vec(), namespace, || f(self))
         }
-        super::state::with_tag(ids.to_vec(), namespace, || f(self))
     }
 }
 

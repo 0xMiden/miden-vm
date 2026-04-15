@@ -11,14 +11,14 @@ permissions:
 
 jobs:
   test:
-    name: test on ubuntu-latest
-    runs-on: ubuntu-latest
+    name: test on warp-ubuntu-latest-x64-4x
+    runs-on: warp-ubuntu-latest-x64-4x
     steps:
       - uses: actions/checkout@main
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       - uses: taiki-e/install-action@nextest
-      - uses: Swatinem/rust-cache@v2
+      - uses: WarpBuilds/rust-cache@v2
         with:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
@@ -30,12 +30,12 @@ jobs:
 
   doc-tests:
     name: doc-tests
-    runs-on: ubuntu-latest
+    runs-on: warp-ubuntu-latest-x64-4x
     steps:
       - uses: actions/checkout@main
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
-      - uses: Swatinem/rust-cache@v2
+      - uses: WarpBuilds/rust-cache@v2
         with:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
@@ -45,13 +45,13 @@ jobs:
 
   check-core-lib-docs:
     name: check core library docs
-    runs-on: ubuntu-latest
+    runs-on: warp-ubuntu-latest-x64-4x
     needs: [test, doc-tests]
     steps:
       - uses: actions/checkout@v4
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
-      - uses: Swatinem/rust-cache@v2
+      - uses: WarpBuilds/rust-cache@v2
         with:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
@@ -83,12 +83,12 @@ jobs:
 
   run-examples:
     name: run masm examples
-    runs-on: ubuntu-latest
+    runs-on: warp-ubuntu-latest-x64-4x
     steps:
       - uses: actions/checkout@v4
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
-      - uses: Swatinem/rust-cache@v2
+      - uses: WarpBuilds/rust-cache@v2
         with:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
@@ -98,12 +98,12 @@ jobs:
 
   check-features:
     name: check all feature combinations
-    runs-on: ubuntu-latest
+    runs-on: warp-ubuntu-latest-x64-4x
     steps:
       - uses: actions/checkout@v4
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
-      - uses: Swatinem/rust-cache@v2
+      - uses: WarpBuilds/rust-cache@v2
         with:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust

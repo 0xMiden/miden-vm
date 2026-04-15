@@ -14,16 +14,21 @@ on:
     types: [opened, reopened, synchronize, labeled, unlabeled]
 
 jobs:
+  changelog-reusable:
+    uses: 0xMiden/.github/.github/workflows/changelog.yml@main
+
   changelog:
     runs-on: ubuntu-latest
+    needs: changelog-reusable
+    if: always()
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Check for changes in changelog
+      - name: Mirror reusable workflow result
         env:
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          NO_CHANGELOG_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'no changelog') }}
-        run: ./scripts/check-changelog.sh "${{ inputs.changelog }}"
-        shell: bash
+          RESULT: ${{ needs.changelog-reusable.result }}
+        run: |
+          if [ "$RESULT" = "success" ] || [ "$RESULT" = "skipped" ]; then
+            exit 0
+          fi
+
+          echo "Reusable changelog workflow concluded with $RESULT" >&2
+          exit 1

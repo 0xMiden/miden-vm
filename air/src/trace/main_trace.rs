@@ -15,15 +15,17 @@ use super::{
     DECODER_TRACE_WIDTH, FN_HASH_OFFSET, PADDED_TRACE_WIDTH, RANGE_CHECK_TRACE_OFFSET,
     RANGE_CHECK_TRACE_WIDTH, RowIndex, STACK_TRACE_OFFSET, STACK_TRACE_WIDTH,
     chiplets::{
-        BITWISE_A_COL_IDX, BITWISE_B_COL_IDX, BITWISE_OUTPUT_COL_IDX, HASHER_NODE_INDEX_COL_IDX,
-        HASHER_STATE_COL_RANGE, MEMORY_CLK_COL_IDX, MEMORY_CTX_COL_IDX, MEMORY_IDX0_COL_IDX,
-        MEMORY_IDX1_COL_IDX, MEMORY_V_COL_RANGE, MEMORY_WORD_COL_IDX, NUM_ACE_SELECTORS,
+        BITWISE_A_COL_IDX, BITWISE_B_COL_IDX, BITWISE_OUTPUT_COL_IDX, HASHER_DIRECTION_BIT_COL_IDX,
+        HASHER_IS_BOUNDARY_COL_IDX, HASHER_MRUPDATE_ID_COL_IDX, HASHER_NODE_INDEX_COL_IDX,
+        HASHER_PERM_SEG_COL_IDX, HASHER_STATE_COL_RANGE, MEMORY_CLK_COL_IDX, MEMORY_CTX_COL_IDX,
+        MEMORY_IDX0_COL_IDX, MEMORY_IDX1_COL_IDX, MEMORY_V_COL_RANGE, MEMORY_WORD_ADDR_HI_COL_IDX,
+        MEMORY_WORD_ADDR_LO_COL_IDX, MEMORY_WORD_COL_IDX, NUM_ACE_SELECTORS,
         ace::{
             CLK_IDX, CTX_IDX, EVAL_OP_IDX, ID_0_IDX, ID_1_IDX, ID_2_IDX, M_0_IDX, M_1_IDX, PTR_IDX,
             READ_NUM_EVAL_IDX, SELECTOR_BLOCK_IDX, SELECTOR_START_IDX, V_0_0_IDX, V_0_1_IDX,
             V_1_0_IDX, V_1_1_IDX, V_2_0_IDX, V_2_1_IDX,
         },
-        hasher::{DIGEST_LEN, HASH_CYCLE_LEN, LAST_CYCLE_ROW, STATE_WIDTH},
+        hasher::{DIGEST_LEN, STATE_WIDTH},
     },
     decoder::{
         GROUP_COUNT_COL_IDX, HASHER_STATE_OFFSET, IN_SPAN_COL_IDX, IS_CALL_FLAG_COL_IDX,
@@ -770,6 +772,38 @@ impl MainTrace {
         self.get(i, HASHER_NODE_INDEX_COL_IDX)
     }
 
+    /// Returns the hasher's mrupdate_id column at row i (domain separator for sibling table).
+    pub fn chiplet_mrupdate_id(&self, i: RowIndex) -> Felt {
+        self.get(i, HASHER_MRUPDATE_ID_COL_IDX)
+    }
+
+    /// Returns the hasher's is_boundary column at row i (1 on boundary rows: first input or last
+    /// output of an operation).
+    pub fn chiplet_is_boundary(&self, i: RowIndex) -> Felt {
+        self.get(i, HASHER_IS_BOUNDARY_COL_IDX)
+    }
+
+    /// Returns the hasher's direction_bit column at row i. On Merkle controller rows this holds
+    /// the direction bit extracted from the node index; zero on non-Merkle and perm segment rows.
+    pub fn chiplet_direction_bit(&self, i: RowIndex) -> Felt {
+        self.get(i, HASHER_DIRECTION_BIT_COL_IDX)
+    }
+
+    /// Returns the hasher's perm_seg column at row i (0=controller, 1=permutation segment).
+    pub fn chiplet_perm_seg(&self, i: RowIndex) -> Felt {
+        self.get(i, HASHER_PERM_SEG_COL_IDX)
+    }
+
+    /// Returns the memory's word address low 16-bit limb at row i.
+    pub fn chiplet_memory_word_addr_lo(&self, i: RowIndex) -> Felt {
+        self.get(i, MEMORY_WORD_ADDR_LO_COL_IDX)
+    }
+
+    /// Returns the memory's word address high 16-bit limb at row i.
+    pub fn chiplet_memory_word_addr_hi(&self, i: RowIndex) -> Felt {
+        self.get(i, MEMORY_WORD_ADDR_HI_COL_IDX)
+    }
+
     /// Returns `true` if a row is part of the bitwise chiplet.
     pub fn is_bitwise_row(&self, i: RowIndex) -> bool {
         self.chiplet_selector_0(i) == ONE && self.chiplet_selector_1(i) == ZERO
@@ -993,46 +1027,37 @@ impl MainTrace {
         self.get(i, CHIPLETS_OFFSET + 9)
     }
 
-    //  MERKLE PATH HASHING SELECTORS
+    // MERKLE ROOT UPDATE SELECTORS
     // --------------------------------------------------------------------------------------------
+    //
+    // The MRUPDATE operation has two legs, each traversing the same Merkle path:
+    //   - MV (Merkle Verify old path): inserts siblings into the sibling table
+    //   - MU (Merkle Update new path): removes siblings from the sibling table
+    //
+    // MPVERIFY (read-only path verification) does not interact with the sibling table.
 
-    /// Returns `true` if the hasher chiplet flags indicate the initialization of verifying
-    /// a Merkle path to an old node during Merkle root update procedure (MRUPDATE).
+    /// Returns `true` if row `i` is an MR_UPDATE_OLD (Merkle Verify) hasher controller input row.
+    ///
+    /// These rows appear during the old-path leg of a Merkle root update (MRUPDATE). Each
+    /// MV input row inserts a sibling into the virtual sibling table via the hash_kernel bus.
     pub fn f_mv(&self, i: RowIndex) -> bool {
-        i.as_usize().is_multiple_of(HASH_CYCLE_LEN)
-            && self.chiplet_selector_0(i) == ZERO
-            && self.chiplet_selector_1(i) == ONE
-            && self.chiplet_selector_2(i) == ONE
-            && self.chiplet_selector_3(i) == ZERO
+        self.chiplet_selector_0(i) == ZERO        // hasher chiplet
+            && self.chiplet_perm_seg(i) == ZERO   // controller region
+            && self.chiplet_selector_1(i) == ONE  // s0=1 (input row)
+            && self.chiplet_selector_2(i) == ONE  // s1=1 (MR_UPDATE_OLD)
+            && self.chiplet_selector_3(i) == ZERO // s2=0
     }
 
-    /// Returns `true` if the hasher chiplet flags indicate the continuation of verifying
-    /// a Merkle path to an old node during Merkle root update procedure (MRUPDATE).
-    pub fn f_mva(&self, i: RowIndex) -> bool {
-        (i.as_usize() % HASH_CYCLE_LEN == LAST_CYCLE_ROW)
-            && self.chiplet_selector_0(i) == ZERO
-            && self.chiplet_selector_1(i) == ONE
-            && self.chiplet_selector_2(i) == ONE
-            && self.chiplet_selector_3(i) == ZERO
-    }
-
-    /// Returns `true` if the hasher chiplet flags indicate the initialization of verifying
-    /// a Merkle path to a new node during Merkle root update procedure (MRUPDATE).
+    /// Returns `true` if row `i` is an MR_UPDATE_NEW (Merkle Update) hasher controller input row.
+    ///
+    /// These rows appear during the new-path leg of a Merkle root update (MRUPDATE). Each
+    /// MU input row removes a sibling from the virtual sibling table via the hash_kernel bus.
+    /// The sibling table balance ensures the old and new paths use the same siblings.
     pub fn f_mu(&self, i: RowIndex) -> bool {
-        i.as_usize().is_multiple_of(HASH_CYCLE_LEN)
-            && self.chiplet_selector_0(i) == ZERO
-            && self.chiplet_selector_1(i) == ONE
-            && self.chiplet_selector_2(i) == ONE
-            && self.chiplet_selector_3(i) == ONE
-    }
-
-    /// Returns `true` if the hasher chiplet flags indicate the continuation of verifying
-    /// a Merkle path to a new node during Merkle root update procedure (MRUPDATE).
-    pub fn f_mua(&self, i: RowIndex) -> bool {
-        (i.as_usize() % HASH_CYCLE_LEN == LAST_CYCLE_ROW)
-            && self.chiplet_selector_0(i) == ZERO
-            && self.chiplet_selector_1(i) == ONE
-            && self.chiplet_selector_2(i) == ONE
-            && self.chiplet_selector_3(i) == ONE
+        self.chiplet_selector_0(i) == ZERO        // hasher chiplet
+            && self.chiplet_perm_seg(i) == ZERO   // controller region
+            && self.chiplet_selector_1(i) == ONE  // s0=1 (input row)
+            && self.chiplet_selector_2(i) == ONE  // s1=1 (MR_UPDATE_NEW)
+            && self.chiplet_selector_3(i) == ONE // s2=1
     }
 }

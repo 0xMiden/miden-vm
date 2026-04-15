@@ -168,7 +168,6 @@ fn prove_execution_trace(
 
     Ok((stack_outputs, proof))
 }
-
 // STARK PROOF GENERATION
 // ================================================================================================
 

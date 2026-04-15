@@ -37,10 +37,7 @@ impl SetSourceId for Profile {
 }
 
 #[cfg(feature = "serde")]
-pub use self::serialization::deserialize_profiles_table;
-
-#[cfg(feature = "serde")]
-mod serialization {
+pub(super) mod serialization {
     use alloc::{sync::Arc, vec::Vec};
 
     use miden_assembly_syntax::debuginfo::Span;
@@ -79,7 +76,15 @@ mod serialization {
         }
     }
 
-    pub fn deserialize_profiles_table<'de, D>(deserializer: D) -> Result<Vec<Profile>, D::Error>
+    pub fn serialize<S>(profiles: &[Profile], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer
+            .collect_map(profiles.iter().map(|profile| (profile.name.inner().clone(), profile)))
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<Profile>, D::Error>
     where
         D: serde::Deserializer<'de>,
     {

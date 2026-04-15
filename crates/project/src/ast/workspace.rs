@@ -45,7 +45,7 @@ pub struct WorkspaceFile {
         serde(
             default,
             rename = "profile",
-            deserialize_with = "profile::deserialize_profiles_table",
+            with = "profile::serialization",
             skip_serializing_if = "Vec::is_empty"
         )
     )]

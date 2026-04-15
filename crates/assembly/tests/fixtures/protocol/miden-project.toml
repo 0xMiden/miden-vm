@@ -1,0 +1,13 @@
+[workspace]
+members = [
+    "utils",
+    "kernel",
+    "userspace",
+]
+
+[workspace.dependencies]
+miden-utils = { path = "utils", linkage = "static" }
+miden-tx = { path = "kernel" }
+
+[profile.test]
+inherits = "dev"

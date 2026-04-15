@@ -24,17 +24,19 @@ pub const STATE_WIDTH: usize = Hasher::STATE_WIDTH;
 /// Number of field elements in the rate portion of the hasher's state.
 pub const RATE_LEN: usize = 8;
 
-/// Number of "round steps" used by the hasher chiplet per permutation.
+/// Number of Poseidon2 step transitions used by the hasher reference schedule.
 ///
 /// For Poseidon2, we model the permutation as 31 step transitions. This corresponds to an
-/// initial external linear layer, 4 initial external (partial) rounds, 22 internal (full) rounds,
-/// and 4 terminal external (partial) rounds:
+/// initial external linear layer, 4 initial external rounds, 22 internal rounds, and 4 terminal
+/// external rounds:
 /// - step 0: initial external linear layer
 /// - steps 1..=4: initial external rounds
 /// - steps 5..=26: internal rounds
 /// - steps 27..=30: terminal external rounds
 ///
-/// This yields a 32-row hasher cycle (input row + 31 steps).
+/// The hasher chiplet packs this 31-step schedule into a 16-row permutation cycle, but the
+/// stepwise reference API keeps the original 31-step numbering because it is convenient for tests
+/// and cross-checking against the uncompressed permutation schedule.
 pub const NUM_ROUNDS: usize = 31;
 
 // PASS-THROUGH FUNCTIONS
@@ -192,5 +194,84 @@ mod tests {
         apply_permutation(&mut state_full);
 
         assert_eq!(state_half2, state_full, "split application doesn't match full permutation");
+    }
+
+    /// Verifies that the 16-row packed permutation schedule produces the same result
+    /// as the reference `apply_permutation`.
+    ///
+    /// The packed schedule:
+    /// - init + ext1 (merged)
+    /// - ext2, ext3, ext4
+    /// - 7 x (3 packed internal rounds)
+    /// - int22 + ext5 (merged)
+    /// - ext6, ext7, ext8
+    #[test]
+    fn packed_16row_matches_permutation() {
+        let test_states: [_; 3] = [
+            [Felt::ZERO; STATE_WIDTH],
+            core::array::from_fn(|i| Felt::new(i as u64)),
+            [
+                Felt::new(0x123456789abcdef0),
+                Felt::new(0xfedcba9876543210),
+                Felt::new(0x0011223344556677),
+                Felt::new(0x8899aabbccddeeff),
+                Felt::new(0xdeadbeefcafebabe),
+                Felt::new(0x1234567890abcdef),
+                Felt::new(0x1234567890abcdef),
+                Felt::new(0x0badc0debadf00d0),
+                Felt::new(0x1111111111111111),
+                Felt::new(0x2222222222222222),
+                Felt::new(0x3333333333333333),
+                Felt::new(0x4444444444444444),
+            ],
+        ];
+
+        for (idx, init_state) in test_states.iter().enumerate() {
+            let mut state = *init_state;
+
+            // Init + ext1 (merged)
+            Hasher::apply_matmul_external(&mut state);
+            Hasher::add_rc(&mut state, &Hasher::ARK_EXT_INITIAL[0]);
+            Hasher::apply_sbox(&mut state);
+            Hasher::apply_matmul_external(&mut state);
+
+            // Ext2, ext3, ext4
+            for r in 1..=3 {
+                Hasher::add_rc(&mut state, &Hasher::ARK_EXT_INITIAL[r]);
+                Hasher::apply_sbox(&mut state);
+                Hasher::apply_matmul_external(&mut state);
+            }
+
+            // 7 x (3 packed internal rounds)
+            for triple in 0..7_usize {
+                let base = triple * 3;
+                for k in 0..3 {
+                    state[0] += Hasher::ARK_INT[base + k];
+                    state[0] = state[0].exp_const_u64::<7>();
+                    Hasher::matmul_internal(&mut state, Hasher::MAT_DIAG);
+                }
+            }
+
+            // Int22 + ext5 (merged)
+            state[0] += Hasher::ARK_INT[21];
+            state[0] = state[0].exp_const_u64::<7>();
+            Hasher::matmul_internal(&mut state, Hasher::MAT_DIAG);
+            Hasher::add_rc(&mut state, &Hasher::ARK_EXT_TERMINAL[0]);
+            Hasher::apply_sbox(&mut state);
+            Hasher::apply_matmul_external(&mut state);
+
+            // Ext6, ext7, ext8
+            for r in 1..=3 {
+                Hasher::add_rc(&mut state, &Hasher::ARK_EXT_TERMINAL[r]);
+                Hasher::apply_sbox(&mut state);
+                Hasher::apply_matmul_external(&mut state);
+            }
+
+            // Compare with reference
+            let mut reference = *init_state;
+            apply_permutation(&mut reference);
+
+            assert_eq!(state, reference, "packed schedule mismatch for test state {idx}");
+        }
     }
 }
