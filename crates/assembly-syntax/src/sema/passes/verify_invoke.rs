@@ -290,7 +290,13 @@ impl VisitMut for VerifyInvokeTargets<'_> {
     }
     fn visit_mut_constant_ref(&mut self, path: &mut Span<Arc<Path>>) -> ControlFlow<()> {
         if let Some(name) = path.as_ident() {
-            self.track_used_alias(&name);
+            if let Some(ref const_name) = self.current_constant {
+                // Defer: record the edge so we only credit the alias when this
+                // constant is proven live.
+                self.analyzer.record_constant_import_ref(const_name, name.as_str().into());
+            } else {
+                self.track_used_alias(&name);
+            }
         } else if let Some((module, _)) = path.split_first() {
             if let Some(ref const_name) = self.current_constant {
                 // Defer: record the edge so we only credit the import when this
