@@ -1,14 +1,18 @@
-//! ACE wiring bus (C3 / `BUS_ACE_WIRING`).
+//! `v_wiring` shared bus column (C3 / `BUS_ACE_WIRING` + `BUS_HASHER_PERM_LINK`).
+//!
+//! Two sibling [`super::super::LookupColumn::group`] calls inside one
+//! [`super::super::LookupBuilder::column`] closure. Both buses are linearly independent in
+//! the extension field thanks to their distinct `bus_prefix[bus]` additive bases, so their
+//! contributions to the same column's running `(U, V)` cannot interfere.
+//!
+//! ## Group 1 — ACE wiring (`BUS_ACE_WIRING`)
 //!
 //! Two READ/EVAL wire interactions gated by the ACE chiplet selector + its per-row block
-//! selector.
-//!
-//! The two batches are folded into a single `ace_flag`-gated batch with
-//! `sblock`-muxed multiplicities: `wire_0` fires with the same multiplicity `m_0`
-//! on both READ and EVAL rows, so it factors out; `wire_1` and `wire_2` get
-//! `sblock`-parameterized multiplicities that recover the original rational at
-//! every row. This drops the outer selector from degree 5 (`is_read`/`is_eval`)
-//! to degree 4 (`ace_flag`), bringing the column transition from 9 to 8.
+//! selector, folded into a single `ace_flag`-gated batch with `sblock`-muxed multiplicities:
+//! `wire_0` fires with the same multiplicity `m_0` on both READ and EVAL rows, so it
+//! factors out; `wire_1` and `wire_2` get `sblock`-parameterized multiplicities that recover
+//! the original rational at every row. This drops the outer selector from degree 5
+//! (`is_read`/`is_eval`) to degree 4 (`ace_flag`), bringing the column transition from 9 to 8.
 //!
 //! Algebraic equivalence:
 //!
@@ -24,11 +28,30 @@
 //! slot — under `sblock = 1` (EVAL) they hold `v_2`, and under `sblock = 0` (READ) the
 //! `wire_2` interaction is fully suppressed via the `−sblock` multiplicity, so the
 //! interpretation collapses to the READ-mode one.
+//!
+//! ## Group 2 — Hasher perm-link (`BUS_HASHER_PERM_LINK`)
+//!
+//! Binds hasher controller rows to permutation sub-chiplet rows. Without this bus the
+//! permutation segment is structurally independent from the controller, and a malicious
+//! prover could pair any controller `(state_in, state_out)` with any perm-cycle execution
+//! (or skip the cycle entirely). Four mutually exclusive interactions:
+//!
+//! - **Controller input** (`s_ctrl · is_input`, multiplicity `+1`, `label = 0`) — controller
+//!   side of a (state_in, state_out) pair.
+//! - **Controller output** (`s_ctrl · is_output`, multiplicity `+1`, `label = 1`).
+//! - **Permutation row 0** (`s_perm · is_init_ext`, multiplicity `−m`, `label = 0`) — input
+//!   boundary of a Poseidon2 cycle. `m` is read from `PermutationCols.multiplicity` and is
+//!   constant within the cycle by [`crate::constraints::chiplets::permutation`].
+//! - **Permutation row 15** (`s_perm · (1 − periodic_sum)`, multiplicity `−m`, `label = 1`)
+//!   — output boundary of the same cycle.
+
+use core::{array, borrow::Borrow};
 
 use miden_core::field::PrimeCharacteristicRing;
 
 use crate::constraints::{
-    logup_msg::AceWireMsg,
+    chiplets::columns::PeriodicCols,
+    logup_msg::{AceWireMsg, HasherPermLinkMsg},
     lookup::{
         LookupBatch, LookupColumn, LookupGroup,
         chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
@@ -38,20 +61,27 @@ use crate::constraints::{
 
 /// Upper bound on fractions this emitter pushes into its column per row.
 ///
-/// Single `ace_flag`-gated batch with three `insert` calls (wire_0, wire_1, wire_2). When
-/// the outer batch is active all three inserts push unconditionally (the prover-path
-/// `ProverBatch::insert` does not short-circuit on zero multiplicity); when the outer batch
-/// is inactive none of them push. Per-row max: 3.
-pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 3;
+/// - **ACE wiring group**: single `ace_flag`-gated batch with three `insert` calls (wire_0,
+///   wire_1, wire_2) — when active, all three push unconditionally. Per-row contribution: 3.
+/// - **Perm-link group**: four mutually exclusive interactions (controller input/output,
+///   perm row 0/15) — at most one fires per row. Per-row contribution: 1.
+///
+/// Both groups are sibling `col.group` calls on the same column. Even though the ACE
+/// chiplet and hasher chiplet are mutually exclusive (so per-row only one of the two
+/// groups actually fires), the conservative upper bound used by the per-column accumulator
+/// is the sum: `3 + 1 = 4`.
+pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 4;
 
-/// Emit the ACE wiring bus (C3).
-pub(in crate::constraints::lookup) fn emit_ace_wiring<LB>(
+/// Emit the `v_wiring` shared column (C3): ACE wiring + hasher perm-link.
+pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
     builder: &mut LB,
     ctx: &ChipletBusContext<LB>,
 ) where
     LB: ChipletLookupBuilder,
 {
     let local = ctx.local;
+
+    // ---- ACE wiring captures (Group 1) ----
     let ace_flag = ctx.chiplet_active.ace.clone();
 
     // Typed ACE chiplet overlay. `read()` exposes `m_0` / `m_1`, `eval()` exposes `v_2`;
@@ -81,7 +111,46 @@ pub(in crate::constraints::lookup) fn emit_ace_wiring<LB>(
     // `m_1`.
     let sblock: LB::Expr = ace.s_block.into();
 
+    // ---- Perm-link captures (Group 2) ----
+
+    // Periodic Poseidon2 cycle selectors. `is_init_ext` is 1 on cycle row 0 only; the four
+    // selectors together cover rows 0..14, so `1 - sum` is 1 only on the cycle boundary
+    // row 15. The `permutation/mod.rs` cycle-alignment constraints pin perm row 0 to cycle
+    // row 0 and perm row 15 to cycle row 15.
+    let (perm_row0_select, perm_row15_select): (LB::Expr, LB::Expr) = {
+        let periodic: &PeriodicCols<LB::PeriodicVar> = builder.periodic_values().borrow();
+        let h = periodic.hasher;
+        let is_init_ext: LB::Expr = h.is_init_ext.into();
+        let is_ext: LB::Expr = h.is_ext.into();
+        let is_packed_int: LB::Expr = h.is_packed_int.into();
+        let is_int_ext: LB::Expr = h.is_int_ext.into();
+        let not_cycle_end = is_init_ext.clone() + is_ext + is_packed_int + is_int_ext;
+        (is_init_ext, LB::Expr::ONE - not_cycle_end)
+    };
+
+    // Controller-side row-kind flags. `is_input = s0` (deg 1); `is_output = (1-s0)*(1-s1)`
+    // (deg 2). Padding rows (`s0=0, s1=1`) are excluded automatically by both expressions.
+    let ctrl = local.controller();
+    let s0c: LB::Expr = ctrl.s0.into();
+    let s1c: LB::Expr = ctrl.s1.into();
+    let is_input = s0c.clone();
+    let is_output = (LB::Expr::ONE - s0c) * (LB::Expr::ONE - s1c);
+
+    let controller_flag = ctx.chiplet_active.controller.clone();
+    let permutation_flag = ctx.chiplet_active.permutation.clone();
+
+    let f_ctrl_input = controller_flag.clone() * is_input;
+    let f_ctrl_output = controller_flag * is_output;
+    let f_perm_row0 = permutation_flag.clone() * perm_row0_select;
+    let f_perm_row15 = permutation_flag * perm_row15_select;
+
+    let ctrl_state: [LB::Var; 12] = array::from_fn(|i| ctrl.state[i]);
+    let perm = local.permutation();
+    let perm_state: [LB::Var; 12] = array::from_fn(|i| perm.state[i]);
+    let perm_mult = perm.multiplicity;
+
     builder.column(|col| {
+        // ---- Group 1: ACE wiring (BUS_ACE_WIRING) ----
         col.group(|g| {
             // Single `ace_flag`-gated batch with `sblock`-muxed multiplicities
             // for wire_1 and wire_2. `wire_0`'s `m_0` is invariant across the
@@ -119,6 +188,36 @@ pub(in crate::constraints::lookup) fn emit_ace_wiring<LB>(
                     v1: v_2.1.into(),
                 };
                 b.insert(wire_2_mult, wire_2);
+            });
+        });
+
+        // ---- Group 2: hasher perm-link (BUS_HASHER_PERM_LINK) ----
+        col.group(|g| {
+            // Controller input: +1 / encode(label=0, ctrl.state).
+            g.add(f_ctrl_input, move || {
+                let state: [LB::Expr; 12] = ctrl_state.map(Into::into);
+                HasherPermLinkMsg { label: LB::Expr::ZERO, state }
+            });
+
+            // Controller output: +1 / encode(label=1, ctrl.state).
+            g.add(f_ctrl_output, move || {
+                let state: [LB::Expr; 12] = ctrl_state.map(Into::into);
+                HasherPermLinkMsg { label: LB::Expr::ONE, state }
+            });
+
+            // Perm row 0: -m / encode(label=0, perm.state). Multiplicity is `0 - m` so the
+            // LogUp accumulator subtracts the fraction.
+            let perm_mult_input: LB::Expr = LB::Expr::ZERO - perm_mult.into();
+            g.insert(f_perm_row0, perm_mult_input, move || {
+                let state: [LB::Expr; 12] = perm_state.map(Into::into);
+                HasherPermLinkMsg { label: LB::Expr::ZERO, state }
+            });
+
+            // Perm row 15: -m / encode(label=1, perm.state).
+            let perm_mult_output: LB::Expr = LB::Expr::ZERO - perm_mult.into();
+            g.insert(f_perm_row15, perm_mult_output, move || {
+                let state: [LB::Expr; 12] = perm_state.map(Into::into);
+                HasherPermLinkMsg { label: LB::Expr::ONE, state }
             });
         });
     });

@@ -363,7 +363,31 @@ impl<E: PrimeCharacteristicRing + Clone> OpGroupMsg<E> {
 // STACK MESSAGE
 // ================================================================================================
 
-// Stack overflow table message (3 elements): `[clk, val, prev]`.
+/// Stack overflow table message (3 elements): `[clk, val, prev]`.
+///
+/// `clk` is the cycle at which the value spilled past stack[15], `val` is the spilled element,
+/// and `prev` links to the previous overflow entry (the prior `b1`).
+#[derive(Clone)]
+pub struct StackOverflowMsg<E> {
+    pub clk: E,
+    pub val: E,
+    pub prev: E,
+}
+
+// HASHER PERM-LINK MESSAGE
+// ================================================================================================
+
+/// Hasher perm-link message (13 elements): `[label, state[0..12]]`.
+///
+/// Binds hasher controller rows to permutation sub-chiplet rows on `BUS_HASHER_PERM_LINK`.
+/// `label = 0` on input pairings (controller-input row ↔ perm-cycle row 0); `label = 1` on
+/// output pairings (controller-output row ↔ perm-cycle row 15). `state` carries all 12 sponge
+/// lanes (rate_0, rate_1, capacity).
+#[derive(Clone)]
+pub struct HasherPermLinkMsg<E> {
+    pub label: E,
+    pub state: [E; 12],
+}
 
 // KERNEL ROM MESSAGE
 // ================================================================================================
@@ -698,6 +722,24 @@ where
     }
 }
 
+// --- StackOverflowMsg (BUS_STACK_OVERFLOW_TABLE; no label) ---------------------------------------
+
+impl<E, EF> LookupMessage<E, EF> for StackOverflowMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        use super::lookup::bus_id::BUS_STACK_OVERFLOW_TABLE;
+        let bp = &challenges.beta_powers;
+        let mut acc = challenges.bus_prefix[BUS_STACK_OVERFLOW_TABLE].clone();
+        acc += bp[0].clone() * self.clk.clone();
+        acc += bp[1].clone() * self.val.clone();
+        acc += bp[2].clone() * self.prev.clone();
+        acc
+    }
+}
+
 // --- KernelRomMsg (BUS_CHIPLETS; `self.label` at β⁰) ---------------------------------------------
 
 impl<E, EF> LookupMessage<E, EF> for KernelRomMsg<E>
@@ -768,6 +810,25 @@ where
         acc += bp[0].clone() * E::from_u16(Self::LABEL);
         for i in 0..4 {
             acc += bp[i + 1].clone() * self.capacity[i].clone();
+        }
+        acc
+    }
+}
+
+// --- HasherPermLinkMsg (BUS_HASHER_PERM_LINK; `label` at β⁰) -------------------------------------
+
+impl<E, EF> LookupMessage<E, EF> for HasherPermLinkMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        use super::lookup::bus_id::BUS_HASHER_PERM_LINK;
+        let bp = &challenges.beta_powers;
+        let mut acc = challenges.bus_prefix[BUS_HASHER_PERM_LINK].clone();
+        acc += bp[0].clone() * self.label.clone();
+        for i in 0..12 {
+            acc += bp[i + 1].clone() * self.state[i].clone();
         }
         acc
     }

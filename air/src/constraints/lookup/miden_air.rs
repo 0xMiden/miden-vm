@@ -1,10 +1,11 @@
 //! Aggregator `LookupAir` for the Miden VM processor.
 //!
-//! [`MidenLookupAir`] is a thin sequencer over [`super::main_air::MainLookupAir`] (four
-//! main-trace columns in the order M1, M_2+5, M3, M4) and
+//! [`MidenLookupAir`] is a thin sequencer over [`super::main_air::MainLookupAir`] (five
+//! main-trace columns in the order M1, M_2+5, M3, M4, M5) and
 //! [`super::chiplet_air::ChipletLookupAir`] (three chiplet-trace columns in the order
-//! C1, C2, C3). The aggregated `eval` preserves the legacy `enforce_main` / `enforce_chiplet`
-//! column order so downstream consumers can grab the full 7-column picture in a single call.
+//! C1, C2, C3). The aggregated `eval` preserves the legacy `enforce_main` /
+//! `enforce_chiplet` column order so downstream consumers can grab the full 8-column
+//! picture in a single call.
 //!
 //! Task #8 will wire `ProcessorAir::eval` into this `eval` via a
 //! `ConstraintLookupBuilder::new(builder, &MidenLookupAir)` call. An alternative
@@ -22,10 +23,10 @@ use super::{
 // MIDEN LOOKUP AIR
 // ================================================================================================
 
-/// Aggregator [`LookupAir`] for the Miden VM's 7-column LogUp argument.
+/// Aggregator [`LookupAir`] for the Miden VM's 8-column LogUp argument.
 ///
 /// Zero-sized; `eval` delegates to [`MainLookupAir`] and [`ChipletLookupAir`] in sequence.
-/// Consumers that want the full 7-column picture in one `eval` call reach for this type;
+/// Consumers that want the full 8-column picture in one `eval` call reach for this type;
 /// consumers that want to address the main and chiplet halves independently (e.g. a future
 /// enum-dispatch wrapper) reach directly for the two sub-AIRs instead.
 ///
@@ -35,12 +36,13 @@ use super::{
 #[derive(Copy, Clone, Debug, Default)]
 pub struct MidenLookupAir;
 
-/// Full 7-column fraction stride: main then chiplet, in `eval` order.
-pub(crate) const MIDEN_COLUMN_SHAPE: [usize; 7] = [
+/// Full 8-column fraction stride: main then chiplet, in `eval` order.
+pub(crate) const MIDEN_COLUMN_SHAPE: [usize; 8] = [
     MAIN_COLUMN_SHAPE[0],
     MAIN_COLUMN_SHAPE[1],
     MAIN_COLUMN_SHAPE[2],
     MAIN_COLUMN_SHAPE[3],
+    MAIN_COLUMN_SHAPE[4],
     CHIPLET_COLUMN_SHAPE[0],
     CHIPLET_COLUMN_SHAPE[1],
     CHIPLET_COLUMN_SHAPE[2],
@@ -51,11 +53,11 @@ where
     LB: MainLookupBuilder + ChipletLookupBuilder,
 {
     fn num_columns(&self) -> usize {
-        // 4 main-trace columns (M1, M_2+5, M3, M4) + 3 chiplet-trace columns (C1, C2, C3)
-        // = 7. Hard-coded rather than computed from the sub-AIRs because the sub-AIR
-        // methods live behind the `LookupAir<LB>` trait, and resolving `LB` from inside the
-        // aggregator's impl would require a turbofish.
-        7
+        // 5 main-trace columns (M1, M_2+5, M3, M4, M5) + 3 chiplet-trace columns
+        // (C1, C2, C3) = 8. Hard-coded rather than computed from the sub-AIRs because
+        // the sub-AIR methods live behind the `LookupAir<LB>` trait, and resolving `LB`
+        // from inside the aggregator's impl would require a turbofish.
+        8
     }
 
     fn column_shape(&self) -> &[usize] {
@@ -122,9 +124,10 @@ mod tests {
         })
     }
 
-    /// Degree-budget test: exercises every one of the 8 buses that
-    /// [`MidenLookupAir::eval`] wires up (M1..M5, C1..C3) and asserts each extension
-    /// constraint stays within the budget.
+    /// Degree-budget test: exercises every one of the 9 buses that
+    /// [`MidenLookupAir::eval`] wires up (M1..M5 + C1..C3, with C3 hosting both ACE wiring
+    /// and the hasher perm-link as linearly-independent sibling groups) and asserts each
+    /// extension constraint stays within the budget.
     #[test]
     #[allow(clippy::print_stdout)]
     fn miden_lookup_air_degree_within_budget() {

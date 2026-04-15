@@ -200,10 +200,12 @@ impl Deserializable for PublicInputs {
 ///   [36..40] precompile transcript state
 pub const NUM_PUBLIC_VALUES: usize = WORD_SIZE + MIN_STACK_DEPTH + MIN_STACK_DEPTH + WORD_SIZE;
 
-/// LogUp aux trace width — 4 main-trace columns (M1, M_2+5, M3, M4) + 3 chiplet-trace
-/// columns (C1, C2, C3). Matches `MidenLookupAir::num_columns()` and the per-row shape
-/// returned by `MidenLookupAuxBuilder::build_aux_trace`.
-pub const LOGUP_AUX_TRACE_WIDTH: usize = 7;
+/// LogUp aux trace width — 5 main-trace columns (M1, M_2+5, M3, M4, M5) + 3 chiplet-trace
+/// columns (C1, C2, C3). C3 (`v_wiring`) hosts both the ACE wiring bus and the hasher
+/// perm-link bus as linearly-independent sibling groups via distinct `bus_prefix` bases.
+/// Matches `MidenLookupAir::num_columns()` and the per-row shape returned by
+/// `MidenLookupAuxBuilder::build_aux_trace`.
+pub const LOGUP_AUX_TRACE_WIDTH: usize = 8;
 
 // Public values layout offsets.
 //
@@ -250,12 +252,10 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
     }
 
     fn aux_width(&self) -> usize {
-        // Milestone B: the LogUp lookup argument occupies 7 columns —
-        // 4 main-trace columns (M1, M_2+5, M3, M4) + 3 chiplet-trace columns (C1, C2, C3).
-        // Matches `MidenLookupAir::num_columns()` and the per-row shape returned by
-        // `MidenLookupAuxBuilder::build_aux_trace`. The legacy `AUX_TRACE_WIDTH = 8`
-        // constant is still in `trace::mod` for now and will be removed alongside the
-        // legacy multiset offset constants in a follow-up commit.
+        // The LogUp lookup argument occupies 8 columns — 5 main-trace columns
+        // (M1, M_2+5, M3, M4, M5) + 3 chiplet-trace columns (C1, C2, C3). Matches
+        // `MidenLookupAir::num_columns()` and the per-row shape returned by
+        // `MidenLookupAuxBuilder::build_aux_trace`.
         LOGUP_AUX_TRACE_WIDTH
     }
 

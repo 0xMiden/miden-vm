@@ -17,5 +17,6 @@ pub const BUS_SIBLING_TABLE: usize = bus_types::SIBLING_TABLE;
 pub const BUS_LOG_PRECOMPILE_TRANSCRIPT: usize = bus_types::LOG_PRECOMPILE_TRANSCRIPT;
 pub const BUS_RANGE_CHECK: usize = bus_types::RANGE_CHECK_BUS;
 pub const BUS_ACE_WIRING: usize = bus_types::ACE_WIRING_BUS;
+pub const BUS_HASHER_PERM_LINK: usize = bus_types::HASHER_PERM_LINK;
 
 pub const NUM_BUS_IDS: usize = bus_types::NUM_BUS_TYPES;

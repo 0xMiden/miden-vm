@@ -21,7 +21,7 @@ use super::{
         ChipletActiveFlags,
         chiplet_responses::{self, emit_chiplet_responses},
         hash_kernel::{self, emit_hash_kernel_table},
-        wiring::{self, emit_ace_wiring},
+        wiring::{self, emit_v_wiring},
     },
 };
 use crate::{Felt, MainCols};
@@ -54,8 +54,9 @@ pub(crate) trait ChipletLookupBuilder: LookupBuilder<F = Felt> {
 ///
 /// Holds the two-row window plus a single [`ChipletActiveFlags`] snapshot built once per
 /// `eval` through [`ChipletLookupBuilder::build_chiplet_active`]. Every emitter reads
-/// `ctx.local`, `ctx.next`, and `ctx.chiplet_active.{controller,bitwise,memory,ace,kernel_rom}`
-/// directly — field access, no method indirection.
+/// `ctx.local`, `ctx.next`, and
+/// `ctx.chiplet_active.{controller,permutation,bitwise,memory,ace,kernel_rom}` directly —
+/// field access, no method indirection.
 pub(crate) struct ChipletBusContext<'a, LB>
 where
     LB: LookupBuilder<F = Felt>,
@@ -104,7 +105,8 @@ where
     LB: ChipletLookupBuilder,
 {
     fn num_columns(&self) -> usize {
-        // C1 (chiplet responses), C2 (hash-kernel virtual table), C3 (ACE wiring).
+        // C1 (chiplet responses), C2 (hash-kernel virtual table),
+        // C3 (`v_wiring`: ACE wiring + hasher perm-link).
         3
     }
 
@@ -120,9 +122,10 @@ where
     }
 
     fn num_bus_ids(&self) -> usize {
-        // Chiplet-trace emitters touch BUS_CHIPLETS, BUS_SIBLING_TABLE, BUS_RANGE_CHECK, and
-        // BUS_ACE_WIRING. The adapter's bus-prefix table is shared across every LookupAir it
-        // runs, so returning `NUM_BUS_IDS` (the total bus-type count) is the safe upper bound.
+        // Chiplet-trace emitters touch BUS_CHIPLETS, BUS_SIBLING_TABLE, BUS_RANGE_CHECK,
+        // BUS_ACE_WIRING, and BUS_HASHER_PERM_LINK. The adapter's bus-prefix table is shared
+        // across every LookupAir it runs, so returning `NUM_BUS_IDS` (the total bus-type
+        // count) is the safe upper bound.
         NUM_BUS_IDS
     }
 
@@ -135,6 +138,6 @@ where
 
         emit_chiplet_responses::<LB>(builder, &ctx);
         emit_hash_kernel_table::<LB>(builder, &ctx);
-        emit_ace_wiring::<LB>(builder, &ctx);
+        emit_v_wiring::<LB>(builder, &ctx);
     }
 }

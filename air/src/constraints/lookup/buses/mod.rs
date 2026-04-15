@@ -1,13 +1,15 @@
 //! Per-bus emitters for the Miden VM's LogUp argument.
 //!
-//! Splits the Miden VM's 7 LogUp buses into one file each. Each emitter is a crate-private
-//! `pub(in crate::constraints::lookup) fn emit_*` that opens a single
+//! The Miden VM's 9 LogUp buses are emitted across 8 columns — most columns host a single
+//! bus, but a few (M1, M4, M_2+5, C3) host two linearly-independent buses sharing one
+//! running accumulator via distinct `bus_prefix[bus]` additive bases. Each emitter is a
+//! crate-private `pub(in crate::constraints::lookup) fn emit_*` that opens a single
 //! [`super::LookupBuilder::column`] closure and describes the bus's interactions via
 //! [`super::LookupColumn::group`] or [`super::LookupColumn::group_with_cached_encoding`].
 //!
 //! The emitters are routed through two separate [`super::LookupAir`] implementors:
-//! - [`super::main_air::MainLookupAir`] for the main-trace buses (M1, M_2+5, M3, M4).
-//! - [`super::chiplet_air::ChipletLookupAir`] for the chiplet-trace buses (C1, C2, C3).
+//! - [`super::main_air::MainLookupAir`] for the main-trace columns (M1, M_2+5, M3, M4, M5).
+//! - [`super::chiplet_air::ChipletLookupAir`] for the chiplet-trace columns (C1, C2, C3).
 //!
 //! [`super::miden_air::MidenLookupAir`] is a thin aggregator that calls both in sequence,
 //! preserving the legacy `enforce_main` / `enforce_chiplet` column order for downstream
@@ -47,6 +49,7 @@ pub(in crate::constraints::lookup) mod chiplet_requests;
 pub(in crate::constraints::lookup) mod chiplet_responses;
 pub(in crate::constraints::lookup) mod hash_kernel;
 pub(in crate::constraints::lookup) mod range_logcap;
+pub(in crate::constraints::lookup) mod stack_overflow;
 pub(in crate::constraints::lookup) mod wiring;
 
 // CHIPLET ACTIVE FLAGS
@@ -65,6 +68,8 @@ pub(in crate::constraints::lookup) mod wiring;
 pub struct ChipletActiveFlags<E> {
     /// `is_active` for the hasher controller sub-chiplet (= `s_ctrl`).
     pub controller: E,
+    /// `is_active` for the hasher permutation sub-chiplet (= `s_perm = perm_seg`).
+    pub permutation: E,
     /// `is_active` for the bitwise chiplet (= `s0 - s01`).
     pub bitwise: E,
     /// `is_active` for the memory chiplet (= `s01 - s012`).
@@ -101,7 +106,7 @@ where
         let s4: E = local.chiplets[4].into();
 
         // Virtual non-hasher selector and prefix products.
-        let s0 = E::ONE - s_ctrl.clone() - s_perm;
+        let s0 = E::ONE - s_ctrl.clone() - s_perm.clone();
         let s01 = s0.clone() * s1;
         let s012 = s01.clone() * s2;
         let s0123 = s012.clone() * s3;
@@ -115,6 +120,7 @@ where
 
         Self {
             controller: s_ctrl,
+            permutation: s_perm,
             bitwise,
             memory,
             ace,
