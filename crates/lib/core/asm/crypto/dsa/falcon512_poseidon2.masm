@@ -30,7 +30,7 @@ const FALCON_DIV_EVENT = event("miden::core::crypto::dsa::falcon512_poseidon2::f
 #! Note that it is the responsibility of the calling procedure to ensure that `a_hi` and `a_lo` are
 #! within the appropriate range i.e., they are u32-s.
 #!
-#! Cycles: 27
+#! Cycles: 29
 pub proc mod_12289
     emit.FALCON_DIV_EVENT
     # the advice stack contains now [qhi, qlo, r, ...] where q = qhi * 2^32 + qlo is quotient
@@ -55,7 +55,9 @@ pub proc mod_12289
     # => [res_hi, res_lo, a_hi, a_lo, ...]
 
     adv_push.1
-    dup
+    # Advice values are untrusted. U32SUB/U32ADD only constrain their output limbs in the AIR,
+    # so we must validate the remainder before feeding it into u32 arithmetic.
+    dup u32assert2
     push.M
     u32overflowing_sub
     # => [borrow, diff, r, res_hi, res_lo, a_hi, a_lo, ...]

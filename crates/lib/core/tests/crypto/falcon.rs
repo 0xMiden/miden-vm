@@ -448,6 +448,50 @@ fn test_mod_12289_rejects_forged_addition_overflow() {
 }
 
 #[test]
+fn test_mod_12289_rejects_non_u32_remainder_advice() {
+    const FALCON_DIV: EventName =
+        EventName::new("miden::core::crypto::dsa::falcon512_poseidon2::falcon_div");
+
+    fn malicious_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
+        let a_hi = process.get_stack_item(1).as_canonical_u64();
+        let a_lo = process.get_stack_item(2).as_canonical_u64();
+        let dividend = (a_hi << 32) | a_lo;
+        let quotient = dividend / M;
+
+        let q_hi = Felt::new(quotient >> 32);
+        let q_lo = Felt::new(quotient & 0xffff_ffff);
+        let forged_remainder = Felt::new(Felt::ORDER_U64 - 1);
+
+        let remainder = AdviceMutation::extend_stack([forged_remainder]);
+        let quotient = AdviceMutation::extend_stack([q_hi, q_lo]);
+        Ok(vec![remainder, quotient])
+    }
+
+    let source = "
+        use miden::core::crypto::dsa::falcon512_poseidon2
+        begin
+            exec.falcon512_poseidon2::mod_12289
+        end
+    ";
+
+    let op_stack = vec![0, 100_000];
+    let adv_stack: Vec<u64> = vec![];
+
+    let core_lib = miden_core_lib::CoreLibrary::default();
+    let mut test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack);
+    test.libraries.push(core_lib.library().clone());
+    test.add_event_handler(FALCON_DIV, malicious_falcon_div);
+
+    expect_exec_error_matches!(
+        test,
+        ExecutionError::OperationError {
+            err: OperationError::NotU32Values { values },
+            ..
+        } if values.iter().any(|value| value.as_canonical_u64() == Felt::ORDER_U64 - 1)
+    );
+}
+
+#[test]
 fn falcon_prove_verify() {
     let sk = SecretKey::new();
     let message = random_word();
