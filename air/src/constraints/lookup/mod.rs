@@ -1,10 +1,9 @@
 //! `LookupAir` / `LookupBuilder` lookup-argument module.
 //!
-//! This module hosts the new closure-based LogUp bus API described in
-//! `docs/src/design/lookup_air_plan.md`. It coexists with the legacy
-//! `logup` / `logup_msg` modules during the multi-task refactor; the old
-//! modules will be collapsed into this one once every bus has been ported
-//! and `ProcessorAir::eval` is wired through `MidenLookupAir`.
+//! This module hosts the closure-based LogUp bus API. It coexists with the
+//! legacy `logup` / `logup_msg` modules during the multi-task refactor; the
+//! old modules will be collapsed into this one once every bus has been
+//! ported and `ProcessorAir::eval` is wired through `MidenLookupAir`.
 //!
 //! The whole subtree is gated by a single module-wide
 //! `#![allow(dead_code, unused_imports)]` because several adapters and

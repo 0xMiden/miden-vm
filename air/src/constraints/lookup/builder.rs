@@ -1,8 +1,7 @@
-//! Closure-based builder traits for the new LogUp lookup-argument API.
+//! Closure-based builder traits for the LogUp lookup-argument API.
 //!
-//! Task #2 of the lookup-air refactor (see
-//! `docs/src/design/lookup_air_plan.md`) introduces the trait stack that
-//! sits on top of `LookupAir`:
+//! The lookup-air refactor introduces the trait stack that sits on top of
+//! `LookupAir`:
 //!
 //! - [`LookupBuilder`] — the top-level handle mirroring the subset of `LiftedAirBuilder` a lookup
 //!   author actually needs (trace access plus per-column scoping). It hides `assert_*` / `when_*` /
