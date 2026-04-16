@@ -1,0 +1,185 @@
+use alloc::vec::Vec;
+
+use miden_core::{
+    Felt,
+    field::{PrimeCharacteristicRing, PrimeField64, QuadFelt},
+    operations::opcodes,
+};
+use miden_crypto::stark::{
+    air::{AirBuilder, EmptyWindow, ExtensionBuilder, PeriodicAirBuilder, PermutationAirBuilder},
+    matrix::RowMajorMatrix,
+};
+
+use super::enforce_main;
+use crate::{
+    MainTraceRow,
+    constraints::op_flags::{ExprDecoderAccess, OpFlags, generate_test_row},
+    trace::{
+        AUX_TRACE_RAND_CHALLENGES, AUX_TRACE_WIDTH, TRACE_WIDTH, decoder::USER_OP_HELPERS_OFFSET,
+    },
+};
+
+struct ConstraintEvalBuilder {
+    main: RowMajorMatrix<Felt>,
+    aux: RowMajorMatrix<QuadFelt>,
+    randomness: Vec<QuadFelt>,
+    permutation_values: Vec<QuadFelt>,
+    periodic_values: Vec<Felt>,
+    evaluations: Vec<QuadFelt>,
+}
+
+impl ConstraintEvalBuilder {
+    fn new() -> Self {
+        Self {
+            main: RowMajorMatrix::new(vec![Felt::ZERO; TRACE_WIDTH * 2], TRACE_WIDTH),
+            aux: RowMajorMatrix::new(vec![QuadFelt::ZERO; AUX_TRACE_WIDTH * 2], AUX_TRACE_WIDTH),
+            randomness: vec![QuadFelt::ZERO; AUX_TRACE_RAND_CHALLENGES],
+            permutation_values: vec![QuadFelt::ZERO; AUX_TRACE_WIDTH],
+            periodic_values: Vec::new(),
+            evaluations: Vec::new(),
+        }
+    }
+}
+
+impl AirBuilder for ConstraintEvalBuilder {
+    type F = Felt;
+    type Expr = Felt;
+    type Var = Felt;
+    type PreprocessedWindow = EmptyWindow<Felt>;
+    type MainWindow = RowMajorMatrix<Felt>;
+    type PublicVar = Felt;
+
+    fn main(&self) -> Self::MainWindow {
+        self.main.clone()
+    }
+
+    fn preprocessed(&self) -> &Self::PreprocessedWindow {
+        EmptyWindow::empty_ref()
+    }
+
+    fn is_first_row(&self) -> Self::Expr {
+        Felt::ZERO
+    }
+
+    fn is_last_row(&self) -> Self::Expr {
+        Felt::ZERO
+    }
+
+    fn is_transition_window(&self, size: usize) -> Self::Expr {
+        assert_eq!(size, 2, "stack_arith only uses 2-row transition constraints");
+        Felt::ONE
+    }
+
+    fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {
+        self.evaluations.push(QuadFelt::from(x.into()));
+    }
+
+    fn public_values(&self) -> &[Self::PublicVar] {
+        &[]
+    }
+}
+
+impl ExtensionBuilder for ConstraintEvalBuilder {
+    type EF = QuadFelt;
+    type ExprEF = QuadFelt;
+    type VarEF = QuadFelt;
+
+    fn assert_zero_ext<I>(&mut self, x: I)
+    where
+        I: Into<Self::ExprEF>,
+    {
+        self.evaluations.push(x.into());
+    }
+}
+
+impl PermutationAirBuilder for ConstraintEvalBuilder {
+    type MP = RowMajorMatrix<QuadFelt>;
+    type RandomVar = QuadFelt;
+    type PermutationVar = QuadFelt;
+
+    fn permutation(&self) -> Self::MP {
+        self.aux.clone()
+    }
+
+    fn permutation_randomness(&self) -> &[Self::RandomVar] {
+        &self.randomness
+    }
+
+    fn permutation_values(&self) -> &[Self::PermutationVar] {
+        &self.permutation_values
+    }
+}
+
+impl PeriodicAirBuilder for ConstraintEvalBuilder {
+    type PeriodicVar = Felt;
+
+    fn periodic_values(&self) -> &[Self::PeriodicVar] {
+        &self.periodic_values
+    }
+}
+
+fn set_u32_helpers(row: &mut MainTraceRow<Felt>, lo: u32, hi: u32) {
+    row.decoder[USER_OP_HELPERS_OFFSET] = Felt::new(lo as u64 & 0xffff);
+    row.decoder[USER_OP_HELPERS_OFFSET + 1] = Felt::new((lo as u64) >> 16);
+    row.decoder[USER_OP_HELPERS_OFFSET + 2] = Felt::new(hi as u64 & 0xffff);
+    row.decoder[USER_OP_HELPERS_OFFSET + 3] = Felt::new((hi as u64) >> 16);
+    row.decoder[USER_OP_HELPERS_OFFSET + 4] = Felt::ZERO;
+}
+
+fn eval_stack_arith(local: &MainTraceRow<Felt>, next: &MainTraceRow<Felt>) -> Vec<QuadFelt> {
+    let mut builder = ConstraintEvalBuilder::new();
+    let op_flags = OpFlags::new(ExprDecoderAccess::new(local));
+    enforce_main(&mut builder, local, next, &op_flags);
+    builder.evaluations
+}
+
+#[test]
+fn stack_arith_u32add_constraints_allow_non_u32_operands() {
+    let non_u32 = Felt::new(Felt::ORDER_U64 - 1);
+    assert!(non_u32.as_canonical_u64() > u32::MAX as u64);
+
+    let mut local = generate_test_row(opcodes::U32ADD as usize);
+    local.stack[0] = non_u32;
+    local.stack[1] = Felt::ONE;
+    set_u32_helpers(&mut local, 0, 0);
+
+    let op_flags: OpFlags<Felt> = OpFlags::new(ExprDecoderAccess::new(&local));
+    assert_eq!(op_flags.u32add(), Felt::ONE);
+    assert_eq!(op_flags.u32sub(), Felt::ZERO);
+
+    let mut next = generate_test_row(0);
+    next.stack[0] = Felt::ZERO;
+    next.stack[1] = Felt::ZERO;
+
+    let evaluations = eval_stack_arith(&local, &next);
+    assert!(
+        evaluations.iter().all(|value| *value == QuadFelt::ZERO),
+        "expected U32ADD constraints to accept a non-u32 operand with forged u32 outputs"
+    );
+}
+
+#[test]
+fn stack_arith_u32sub_constraints_allow_non_u32_operands() {
+    let non_u32 = Felt::new(Felt::ORDER_U64 - 1);
+    let diff = ((1u64 << 32) - 12_290) as u32;
+    assert!(non_u32.as_canonical_u64() > u32::MAX as u64);
+
+    let mut local = generate_test_row(opcodes::U32SUB as usize);
+    local.stack[0] = Felt::new(12_289);
+    local.stack[1] = non_u32;
+    set_u32_helpers(&mut local, diff, 0);
+
+    let op_flags: OpFlags<Felt> = OpFlags::new(ExprDecoderAccess::new(&local));
+    assert_eq!(op_flags.u32sub(), Felt::ONE);
+    assert_eq!(op_flags.u32add(), Felt::ZERO);
+
+    let mut next = generate_test_row(0);
+    next.stack[0] = Felt::ONE;
+    next.stack[1] = Felt::new(diff as u64);
+
+    let evaluations = eval_stack_arith(&local, &next);
+    assert!(
+        evaluations.iter().all(|value| *value == QuadFelt::ZERO),
+        "expected U32SUB constraints to accept a non-u32 operand with forged u32 outputs"
+    );
+}
