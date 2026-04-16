@@ -8,17 +8,14 @@
 //! the verifier transcript internally, and return a [`StarkDigest`] on success.
 //! The caller must check that the digest matches the prover's digest.
 //!
-//! # Fiat-Shamir / transcript binding (initial challenger state)
+//! # Fiat-Shamir / transcript binding
 //!
-//! This crate intentionally does **not** prescribe the *initial* transcript state.
-//! The verifier APIs here take the statement (AIR(s), `public_values`, and
-//! `var_len_public_inputs`) out-of-band, and assume the challenger passed in
-//! has already observed all variable inputs that are not carried on the proof.
+//! The caller must produce the same challenger state as the prover — see the
+//! prover module-level docs for the full binding contract and recommended
+//! pattern.
 //!
-//! Instance shape metadata is the one exception: log trace heights ride on
-//! the opaque [`StarkProof`] and [`verify_multi`] observes them before any
-//! transcript interaction. Callers must not pre-observe them, or they'll be
-//! absorbed twice.
+//! Log trace heights are carried on the [`StarkProof`] and observed into the
+//! challenger by [`verify_multi`]. Callers must not pre-observe them.
 //!
 //! # Statement-bound trace heights
 //!
@@ -29,37 +26,15 @@
 //! [`StarkTranscript::from_proof`](crate::proof::StarkTranscript::from_proof)
 //! and check `transcript.instance_shapes.log_trace_heights()` yourself.
 //!
-//! The protocol implementation assumes that all out-of-band inputs that may
-//! vary (in particular `public_values` and `var_len_public_inputs`) have
-//! already been observed by the challenger passed in. This is required so
-//! callers can avoid including large public inputs in the proof when they are
-//! available out-of-band.
-//!
-//! If your application treats any of these inputs as untrusted, you must
-//! authenticate them by binding them into the Fiat-Shamir challenger state
-//! (domain separation + an AIR/version tag + public inputs), in the same way on
-//! both prover and verifier.
-//!
-//! The module-level docs in the prover module show the recommended ergonomic
-//! pattern: pre-seed the challenger before passing it to `prove_multi`/`verify_multi`.
-//!
 //! # Transcript boundaries (strict consumption)
 //!
 //! [`verify_multi`] finalizes the transcript internally: it rejects proofs with
 //! trailing data (via [`TranscriptError::TrailingData`]) and returns a binding
-//! digest that must match the prover's digest. This makes it harder to
-//! accidentally accept a proof embedded inside a larger transcript with
-//! confusing boundaries.
+//! digest that must match the prover's digest.
 //!
 //! If you want to bundle extra data alongside the proof, you must manage
 //! boundaries yourself (e.g. parse and validate that data first, then pass the
 //! remaining transcript to [`verify_multi`]).
-//!
-//! # Multi-trace ordering
-//!
-//! [`verify_multi`] requires `instances` in the same order the prover used.
-//! The current prover only emits ascending trace-height order (a prover-side
-//! cyclic-extension constraint), so non-ascending input is rejected early.
 
 extern crate alloc;
 
@@ -82,7 +57,7 @@ use thiserror::Error;
 use crate::{
     StarkConfig,
     coset::LiftedCoset,
-    instance::{AirInstance, InstanceValidationError, validate_inputs},
+    instance::{AirInstance, InstanceValidationError, validate_air_order, validate_inputs},
     pcs::verifier::{PcsError, verify_aligned},
     proof::{StarkDigest, StarkProof},
 };
@@ -113,8 +88,8 @@ pub enum VerifierError {
 
 /// Verify a single AIR. Convenience wrapper around [`verify_multi`].
 ///
-/// The caller's challenger must already have observed all variable statement
-/// inputs (e.g. `public_values`); see the module-level docs.
+/// The caller's challenger must already carry the full statement binding
+/// — see the prover module-level docs.
 pub fn verify_single<F, EF, A, SC>(
     config: &SC,
     air: &A,
@@ -135,11 +110,10 @@ where
 
 /// Verify multiple AIRs with traces of different heights.
 ///
-/// `instances` must match the order the prover used — ascending trace-height
-/// order for the current prover. Log trace heights are read from `proof`,
-/// validated against `F::TWO_ADICITY`, and observed into the challenger
-/// before any transcript interaction — the caller's challenger must already
-/// carry all other variable statement inputs (e.g. `public_values`).
+/// The verifier uses [`InstanceShapes::air_order`](crate::InstanceShapes::air_order) from the proof to match
+/// the caller's instances to the proof's ordering. The caller's challenger
+/// must already carry the full statement binding (public values, AIR
+/// configuration in proof order) — see the prover module-level docs.
 ///
 /// The verifier mirrors the prover's protocol:
 ///
@@ -172,12 +146,18 @@ where
     A: LiftedAir<F, EF>,
 {
     let instance_shapes = &proof.instance_shapes;
+    let air_order = instance_shapes.air_order();
+
+    // Validate air_order and reorder caller instances to the proof's AIR ordering.
+    validate_air_order(air_order, instances.len())?;
+    let instances = instance_shapes.reorder(instances.to_vec())?;
+
     let log_blowup = config.pcs().log_blowup();
 
-    let log_max_trace_height = validate_inputs(instances, instance_shapes, log_blowup)?;
+    let log_max_trace_height = validate_inputs(&instances, instance_shapes, log_blowup)?;
     let log_trace_heights = instance_shapes.log_trace_heights();
 
-    instance_shapes.observe::<F, _>(&mut challenger);
+    instance_shapes.observe_heights::<F, _>(&mut challenger);
 
     let mut channel = VerifierTranscript::from_data(challenger, &proof.transcript);
 
@@ -276,8 +256,8 @@ where
     // opened[g] has one matrix per AIR (for main/aux) or one matrix total (quotient).
     // Each matrix has N=2 rows: row 0 = local (z), row 1 = next (z·h).
     //
-    // Instances are iterated in the prover's order (ascending height for the
-    // current prover), so j indexes both AIR and trace position directly.
+    // Instances are in the proof's AIR ordering (ascending height), so j
+    // indexes both AIR and trace position directly.
     debug_assert_eq!(opened[main_g].len(), instances.len());
     debug_assert_eq!(opened[aux_g].len(), instances.len());
     let mut accumulated = EF::ZERO;

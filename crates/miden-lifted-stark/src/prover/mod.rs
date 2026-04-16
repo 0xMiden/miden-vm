@@ -9,113 +9,78 @@
 //!
 //! # Fiat-Shamir / transcript binding (initial challenger state)
 //!
-//! This crate intentionally does **not** prescribe the *initial* transcript state.
-//! Different applications may transport some statement data out-of-band (e.g. public
-//! inputs shipped alongside a proof) and do not want it duplicated inside the proof.
+//! This crate does **not** prescribe the *initial* transcript state. The caller
+//! must bind the full statement into the Fiat-Shamir challenger before calling
+//! [`prove_multi`]. Both prover and verifier must produce identical challenger
+//! states. Concretely, the caller **MUST** observe:
 //!
-//! The flip side is that the caller must ensure the Fiat-Shamir challenger inside
-//! `channel` is initialized and bound to the statement in whatever way is appropriate
-//! for their use case.
+//! 1. **Protocol parameters** — e.g. the STARK configuration, blowup factor, and any
+//!    application-level domain separator.
 //!
-//! The protocol implementation assumes that *all inputs that may vary* (including
-//! `public_values` and `var_len_public_inputs`) have been observed by the challenger.
-//! This is required so callers can avoid including public inputs in the proof when
-//! they are available out-of-band.
+//! 2. **Public values and variable-length inputs** — `public_values` and `var_len_public_inputs`
+//!    for every instance. Without this, Fiat-Shamir challenges are independent of the statement.
 //!
-//! In particular, the caller **MUST** bind both `public_values` and
-//! `var_len_public_inputs` to the challenger state. Otherwise, Fiat-Shamir
-//! challenges sampled during proving/verification are independent of the public
-//! inputs.
+//! 3. **AIR identity and ordering** — The proof defines an ordering of AIR instances, queryable via
+//!    [`InstanceShapes::air_order`]. The `air_order` values are **not** absorbed into the
+//!    transcript, so the caller must bind both the AIR identity and the ordering into the
+//!    challenger. How this is done is up to the caller — see the examples below. If the application
+//!    has a single fixed AIR, a static domain separator suffices.
 //!
-//! Because the `air` is a concrete Rust type, you often do not need to explicitly
-//! observe it into the challenger *if your application has a single fixed AIR version
-//! compiled in*. If you support multiple AIRs/versions/protocol configurations, you
-//! should also bind some `air_id` / version tag / domain separator to prevent
-//! cross-protocol replay.
+//! ## Recommended pattern
 //!
-//! ## Recommended pattern: pre-seed the challenger (no proof bloat)
-//!
-//! The transcript channel traits do not currently expose an “observe-only” operation
-//! (observe into the challenger without recording into the proof). If you want to
-//! bind public inputs without bloating the proof, the most ergonomic pattern is to
-//! pre-seed the challenger and then construct the transcript.
-//!
+//! Pre-seed the challenger so statement data stays out of the proof:
 //!
 //! ```ignore
-//! use p3_goldilocks::{Goldilocks, Poseidon2Goldilocks};
-//! use p3_challenger::{CanObserve, DuplexChallenger};
-//! use p3_dft::Radix2DitParallel;
-//! use p3_field::extension::BinomialExtensionField;
-//! use crate::{StarkConfig, prove_multi};
-//! use crate::{AirWitness, AirInstance};
-//! use crate::lmcs::LmcsConfig;
-//! use miden_stateful_hasher::StatefulSponge;
-//! use miden_stark_transcript::{ProverTranscript, VerifierTranscript};
-//! use p3_symmetric::TruncatedPermutation;
-//! use rand::rngs::SmallRng;
-//! use rand::SeedableRng;
-//!
-//! // Concrete instantiation matching the repository's Goldilocks+Poseidon2 defaults.
-//! const WIDTH: usize = 12;
-//! const RATE: usize = 8;
-//! const DIGEST: usize = 4;
-//!
-//! type F = Goldilocks;
-//! type EF = BinomialExtensionField<F, 2>;
-//! type P = <F as p3_field::Field>::Packing;
-//! type Perm = Poseidon2Goldilocks<WIDTH>;
-//! type Challenger = DuplexChallenger<F, Perm, WIDTH, RATE>;
-//! type Sponge = StatefulSponge<Perm, WIDTH, RATE, DIGEST>;
-//! type Compress = TruncatedPermutation<Perm, 2, DIGEST, WIDTH>;
-//! type Lmcs = LmcsConfig<P, P, Sponge, Compress, WIDTH, DIGEST>;
-//! type Dft = Radix2DitParallel<F>;
-//!
-//! // --- Build config ---
-//! let mut rng = SmallRng::seed_from_u64(0);
-//! let perm = Perm::new_from_rng_128(&mut rng);
-//! let sponge = Sponge::new(perm.clone());
-//! let compress = Compress::new(perm.clone());
-//! let config = StarkConfig { pcs: /* ... */, lmcs: Lmcs::new(sponge, compress), dft: Dft::default() };
-//!
-//! // --- Statement (out-of-band) ---
-//! let public_values: Vec<F> = /* ... */;
-//!
-//! // --- Prover: bind statement into Fiat-Shamir ---
+//! // --- Bind statement into Fiat-Shamir ---
 //! let mut ch = Challenger::new(perm.clone());
-//! // Domain separator: one Goldilocks element per ASCII byte.
-//! ch.observe_slice(&b"LSTARK0".map(|b| F::from_u8(b)));
+//! ch.observe_slice(&b"MY_APP_V1".map(|b| F::from_u8(b)));  // domain separator
+//! ch.observe(F::from_u8(config.pcs().log_blowup()));        // protocol parameters
+//! // ... observe remaining protocol parameters ...
 //! ch.observe_slice(&public_values);
-//! // If your app supports multiple AIRs/versions, also observe an application-level air_id here.
-//! // --- Prover ---
-//! let witness = AirWitness::new(&trace, &public_values, &[]);
-//! let output = prove_multi(&config, &[(&air, witness, &aux_builder)], ch)?;
+//! for vl in &var_len_public_inputs {
+//!     ch.observe_slice(vl);
+//! }
+//! // For multi-AIR: bind AIR identity and ordering (see below).
 //!
-//! // --- Verifier: same binding, then verify ---
+//! // --- Prove ---
+//! let output = prove_multi(&config, &instances, ch)?;
+//!
+//! // --- Verify (identical binding) ---
 //! let mut ch = Challenger::new(perm);
-//! ch.observe_slice(&b"LSTARK0".map(|b| F::from_u8(b)));
+//! ch.observe_slice(&b"MY_APP_V1".map(|b| F::from_u8(b)));
+//! ch.observe(F::from_u8(config.pcs().log_blowup()));
+//! // ... observe remaining protocol parameters ...
 //! ch.observe_slice(&public_values);
-//!
-//! let instance = AirInstance { public_values: &public_values, var_len_public_inputs: &[] };
-//! let verifier_digest = crate::verify_multi(&config, &[(&air, instance)], &output.proof, ch)?;
+//! for vl in &var_len_public_inputs {
+//!     ch.observe_slice(vl);
+//! }
+//! let verifier_digest = verify_multi(&config, &verifier_instances, &output.proof, ch)?;
 //! assert_eq!(output.digest, verifier_digest);
 //! ```
 //!
-//! ## Alternative: write statement data into the transcript
+//! ## Multi-AIR binding examples
 //!
-//! If you do want the proof to be self-contained, you can `send_field_slice` the
-//! statement data into the transcript before calling [`prove_single`] / [`prove_multi`].
-//! In that case, the verifier must *first* read and validate those values from the
-//! transcript, and only then call [`crate::verifier::verify_multi`].
+//! The proof records an ordering of instances via [`InstanceShapes::air_order`]:
+//! `air_order()[j]` is the caller's original index of the instance at position
+//! `j`. The caller must bind the AIR identity **and** this ordering into the
+//! challenger. Two approaches:
 //!
-//! More generally, you can choose to obtain some parameters from the channel. If you
-//! do, you are responsible for validating them before use.
+//! ```text
+//! let air_order = proof.instance_shapes.air_order();
 //!
-//! # Multi-trace ordering
+//! // Option A: reorder AIRs to proof order and commit — the ordering is
+//! // implicit in the commitment.
+//! let ordered_airs: Vec<_> = air_order.iter().map(|&idx| &airs[idx as usize]).collect();
+//! let circuit = Circuit::from_airs(&ordered_airs);
+//! challenger.observe(circuit.commitment());
 //!
-//! [`prove_multi`] requires `instances` in ascending trace height order (smallest
-//! first). Internally, traces are committed and quotient numerators are accumulated
-//! in that order using cyclic extension, before a single vanishing division on the
-//! largest quotient domain.
+//! // Option B: commit to AIRs in their natural order, then observe
+//! // air_order to bind the ordering explicitly.
+//! for air in &airs {
+//!     challenger.observe(air.commitment());
+//! }
+//! challenger.observe_slice(air_order);
+//! ```
 
 extern crate alloc;
 
@@ -158,11 +123,9 @@ pub enum ProverError {
 
 /// Prove a single AIR.
 ///
-/// Transcript warning: the protocol assumes the challenger inside `channel` has
-/// already observed all variable statement inputs (in particular `public_values`
-/// and `var_len_public_inputs`). This lets callers keep public inputs out of the
-/// proof when they are available out-of-band. See the module-level docs for
-/// recommended patterns.
+/// The caller's challenger must already carry the full statement binding
+/// (protocol parameters, public values, variable-length inputs, AIR identity)
+/// — see the module-level docs.
 ///
 /// This is a convenience wrapper around [`prove_multi`] for the single-AIR case.
 ///
@@ -190,24 +153,10 @@ where
 
 /// Prove multiple AIRs with traces of different heights.
 ///
-/// Transcript warning: the protocol assumes the challenger inside `channel` has
-/// already observed all variable statement inputs (in particular each instance's
-/// `public_values`). This lets callers keep public inputs out of the proof when they
-/// are available out-of-band.
-///
-/// Instances must be provided in ascending height order (smallest first).
-/// Each trace may have a different height that is a power of 2. The quotient
-/// numerators are accumulated using cyclic extension:
-///
-/// 1. Compute numerator N₀ on the smallest quotient domain.
-/// 2. For each subsequent trace `j`:
-///    - cyclically extend the accumulator to the new (larger) quotient domain,
-///    - fold with the random challenge β: acc = acc·β + Nⱼ.
-/// 3. Divide by `Z_H` once on the largest quotient domain.
-///
-/// The ordering is important: cyclic extension only grows the accumulator (it does not
-/// shrink), and both prover and verifier must assign the same powers of `beta` to each
-/// instance's contribution.
+/// The proof records the instance ordering via [`InstanceShapes::air_order`].
+/// The caller's challenger must already carry the full statement binding
+/// (public values, AIR configuration in proof order) — see the module-level
+/// docs.
 ///
 /// # Arguments
 /// - `config`: STARK configuration (PCS params, LMCS, DFT)
@@ -229,16 +178,20 @@ where
     A: LiftedAir<F, EF>,
     B: AuxBuilder<F, EF>,
 {
-    let verifier_instances: Vec<_> =
-        instances.iter().map(|(air, w, _)| (*air, w.to_instance())).collect();
     let trace_heights: Vec<usize> = instances.iter().map(|(_, w, _)| w.trace.height()).collect();
     let instance_shapes = InstanceShapes::from_trace_heights(trace_heights)?;
+
+    // Reorder instances to the proof's AIR ordering.
+    let instances = instance_shapes.reorder(instances.to_vec())?;
+
+    let verifier_instances: Vec<_> =
+        instances.iter().map(|(air, w, _)| (*air, w.to_instance())).collect();
 
     let log_blowup = config.pcs().log_blowup();
 
     // Validate AIR structure, instance dimensions, heights, and trace widths.
     let log_max_trace_height = validate_inputs(&verifier_instances, &instance_shapes, log_blowup)?;
-    for (air, w, _) in instances {
+    for &(air, w, _) in &instances {
         if w.trace.width() != air.width() {
             return Err(InstanceValidationError::WidthMismatch {
                 expected: air.width(),
@@ -249,7 +202,7 @@ where
     }
 
     // Observe shape metadata before creating the transcript.
-    instance_shapes.observe::<F, _>(&mut challenger);
+    instance_shapes.observe_heights::<F, _>(&mut challenger);
 
     let mut channel = ProverTranscript::new(challenger);
 
@@ -306,7 +259,7 @@ where
         info_span!("build aux traces").in_scope(|| {
             let mut traces = Vec::with_capacity(instances.len());
             let mut values = Vec::with_capacity(instances.len());
-            for (air, w, aux_builder) in instances {
+            for (air, w, aux_builder) in &instances {
                 let num_rand = air.num_randomness();
                 let (aux, aux_vals) = aux_builder.build_aux_trace(w.trace, &randomness[..num_rand]);
 

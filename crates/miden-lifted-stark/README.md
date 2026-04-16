@@ -214,10 +214,10 @@ at `y_j`, and the opened trace values already correspond to `p_j(y_j)`.
 
 ## Conventions & Assumptions
 
-- **Ascending height order** — Traces must be supplied in ascending height
-  order (shortest first). The prover and verifier both validate this. Log
-  trace heights are carried in the proof and observed into the Fiat-Shamir
-  challenger, so the input ordering defines the protocol identity.
+- **AIR ordering** — The proof defines an ordering of AIR instances
+  (queryable via `InstanceShapes::air_order`). This ordering is the
+  protocol identity. The caller must bind the AIR configuration into the
+  Fiat-Shamir challenger in this order. See the prover module-level docs.
 - **Power-of-two heights** — All trace heights are powers of two.
 - **Bit-reversed storage** — All evaluation matrices are in bit-reversed order.
 - **Constraint degree** — Fixed at `D = 4` (`LOG_CONSTRAINT_DEGREE = 2`).

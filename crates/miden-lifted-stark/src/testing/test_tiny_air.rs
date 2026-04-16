@@ -211,6 +211,7 @@ fn malformed_log_trace_heights_is_rejected() {
     // bound check in `validate_inputs`.
     let mut bad_proof = output.proof.clone();
     bad_proof.instance_shapes.log_trace_heights.push(2);
+    bad_proof.instance_shapes.air_order.push(1);
     let err = verify_single(&config, &air, &public_values, &[], &bad_proof, test_challenger())
         .expect_err("extra log trace height should fail verification");
     assert!(matches!(
@@ -221,9 +222,10 @@ fn malformed_log_trace_heights_is_rejected() {
         })
     ));
 
-    // Empty heights → count mismatch on the other side.
+    // Empty heights → air_order / instance count mismatch.
     let mut bad_proof = output.proof.clone();
     bad_proof.instance_shapes.log_trace_heights.clear();
+    bad_proof.instance_shapes.air_order.clear();
     let err = verify_single(&config, &air, &public_values, &[], &bad_proof, test_challenger())
         .expect_err("empty log trace heights should fail verification");
     assert!(matches!(
@@ -312,6 +314,72 @@ fn three_traces_ascending_heights() {
         &TinyAuxBuilder,
         &[instance(0, 4), instance(1, 8), instance(2, 16)],
     );
+}
+
+// ---------------------------------------------------------------------------
+// Unordered multi-trace tests (instances not in ascending height order)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn two_traces_reversed_order() {
+    prove_and_verify(&TinyAir::new(vec![]), &TinyAuxBuilder, &[instance(1, 8), instance(0, 4)]);
+}
+
+#[test]
+fn three_traces_descending_heights() {
+    prove_and_verify(
+        &TinyAir::new(vec![]),
+        &TinyAuxBuilder,
+        &[instance(2, 16), instance(1, 8), instance(0, 4)],
+    );
+}
+
+#[test]
+fn three_traces_shuffled_order() {
+    prove_and_verify(
+        &TinyAir::new(vec![]),
+        &TinyAuxBuilder,
+        &[instance(1, 8), instance(2, 16), instance(0, 4)],
+    );
+}
+
+#[test]
+fn periodic_columns_reversed_order() {
+    prove_and_verify(&TinyAir::new(vec![2, 4]), &TinyAuxBuilder, &[instance(1, 8), instance(0, 4)]);
+}
+
+#[test]
+fn air_order_reflects_caller_order() {
+    let config = test_config();
+    let air = TinyAir::new(vec![]);
+
+    // Pass instances in reverse height order: [height=8, height=4].
+    let (t0, pv0) = instance(0, 8);
+    let (t1, pv1) = instance(1, 4);
+
+    let w0 = AirWitness::new(&t0, &pv0, &[]);
+    let w1 = AirWitness::new(&t1, &pv1, &[]);
+
+    let output = prove_multi(
+        &config,
+        &[(&air, w0, &TinyAuxBuilder), (&air, w1, &TinyAuxBuilder)],
+        test_challenger(),
+    )
+    .expect("proving should succeed");
+
+    // Proof ordering is ascending height: [height=4, height=8].
+    // Caller index 1 (height=4) is at position 0 in the proof's ordering.
+    // Caller index 0 (height=8) is at position 1 in the proof's ordering.
+    let air_order = output.proof.instance_shapes.air_order();
+    assert_eq!(
+        air_order,
+        &[1, 0],
+        "air_order should map ascending-height position → caller index"
+    );
+
+    // Log trace heights should be in ascending order.
+    let log_heights = output.proof.instance_shapes.log_trace_heights();
+    assert_eq!(log_heights, &[2, 3], "log heights should be ascending (4=2^2, 8=2^3)");
 }
 
 // ---------------------------------------------------------------------------

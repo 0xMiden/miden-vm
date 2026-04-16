@@ -25,31 +25,13 @@ prescribe the *initial* challenger state used for Fiat-Shamir.
 
 ## Fiat-Shamir / statement binding
 
-The verifier APIs take the statement out-of-band (`air` and `public_values`).
-Log trace heights are carried in the `StarkProof` and observed into the
-Fiat-Shamir challenger at the start of verification. The protocol assumes the
-challenger has already observed all other variable statement inputs (in
-particular `public_values`).
-
-This is required to support applications that obtain public inputs out-of-band and
-do not want them duplicated inside the proof.
-
-If your application treats any of these inputs as untrusted, you must authenticate
-them by binding them into the Fiat-Shamir challenger state (domain separation +
-AIR/version tag + statement metadata + public inputs), in the same way on both prover
-and verifier.
+The caller must produce the same challenger state as the prover — see the
+prover module-level docs for the full binding contract.
 
 ## Transcript boundaries
 
 `verify_multi` rejects trailing transcript data (`TranscriptNotConsumed`). If you
 bundle extra data in the same transcript, you must manage boundaries yourself.
-
-## Multi-trace ordering
-
-For `verify_multi`, instances must be provided in the same order the prover
-used — ascending trace height order for the current prover. Log trace heights
-are read from the proof and observed into the Fiat-Shamir challenger, so the
-protocol identity depends on the input ordering.
 
 ## Protocol flow
 

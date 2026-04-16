@@ -173,7 +173,7 @@ where
 
 /// Prove and verify multiple traces, each with its own public values.
 ///
-/// `instances` is a slice of `(trace, public_values)` pairs in ascending height order.
+/// `instances` is a slice of `(trace, public_values)` pairs.
 pub fn prove_and_verify<A, B>(
     air: &A,
     aux_builder: &B,

@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     StarkConfig,
     coset::LiftedCoset,
-    instance::{AirInstance, InstanceShapes, validate_inputs},
+    instance::{AirInstance, InstanceShapes, validate_air_order, validate_inputs},
     lmcs::{Lmcs, utils::aligned_len},
     pcs::proof::PcsTranscript,
     verifier::VerifierError,
@@ -195,9 +195,12 @@ where
         A: LiftedAir<L::F, EF>,
         SC: StarkConfig<L::F, EF, Lmcs = L>,
     {
+        validate_air_order(proof.instance_shapes.air_order(), instances.len())?;
+        let instances = proof.instance_shapes.reorder(instances.to_vec())?;
+
         let log_blowup = config.pcs().log_blowup();
-        let log_max_trace_height = validate_inputs(instances, &proof.instance_shapes, log_blowup)?;
-        proof.instance_shapes.observe::<L::F, _>(&mut challenger);
+        let log_max_trace_height = validate_inputs(&instances, &proof.instance_shapes, log_blowup)?;
+        proof.instance_shapes.observe_heights::<L::F, _>(&mut challenger);
 
         let mut channel = VerifierTranscript::from_data(challenger, &proof.transcript);
 
