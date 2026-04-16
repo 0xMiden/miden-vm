@@ -316,7 +316,11 @@ fn reduce_kernel_procedures_digests(
 
 fn reduce_digest(digest: &[u64], alpha: QuadFelt, beta: QuadFelt) -> QuadFelt {
     const KERNEL_OP_LABEL: Felt = Felt::new(48);
-    alpha
+    // gamma = beta^MAX_MESSAGE_WIDTH = beta^16
+    let gamma = (0..16).fold(QuadFelt::ONE, |acc, _| acc * beta);
+    // CHIPLETS_BUS = 0, so bus_prefix = alpha + (0+1) * gamma = alpha + gamma
+    let bus_prefix = alpha + gamma;
+    bus_prefix
         + QuadFelt::from(KERNEL_OP_LABEL)
         + beta
             * digest

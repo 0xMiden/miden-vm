@@ -24,7 +24,8 @@ pub mod config;
 mod constraints;
 
 pub mod trace;
-use trace::{AUX_TRACE_WIDTH, MainTraceRow, TRACE_WIDTH};
+use constraints::columns::MainCols;
+use trace::{AUX_TRACE_WIDTH, TRACE_WIDTH, bus_types};
 
 // RE-EXPORTS
 // ================================================================================================
@@ -44,6 +45,16 @@ mod export {
 }
 
 pub use export::*;
+
+// MIDEN AIR BUILDER
+// ================================================================================================
+
+/// Convenience super-trait that pins `LiftedAirBuilder` to our field.
+///
+/// All constraint functions in this crate should be generic over `AB: MidenAirBuilder`
+/// instead of spelling out the full `LiftedAirBuilder<F = Felt>` bound.
+pub trait MidenAirBuilder: LiftedAirBuilder<F = Felt> {}
+impl<T: LiftedAirBuilder<F = Felt>> MidenAirBuilder for T {}
 
 // PUBLIC INPUTS
 // ================================================================================================
@@ -199,9 +210,7 @@ impl BaseAir<Felt> for ProcessorAir {
 
 impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
     fn periodic_columns(&self) -> Vec<Vec<Felt>> {
-        let mut cols = constraints::chiplets::hasher::periodic_columns();
-        cols.extend(constraints::chiplets::bitwise::periodic_columns());
-        cols
+        constraints::chiplets::columns::PeriodicCols::periodic_columns()
     }
 
     fn num_randomness(&self) -> usize {
@@ -330,7 +339,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
         Ok(ReducedAuxValues { prod, sum })
     }
 
-    fn eval<AB: LiftedAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: MidenAirBuilder>(&self, builder: &mut AB) {
         use crate::constraints;
 
         let main = builder.main();
@@ -340,14 +349,20 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
         let next = main.next_slice();
 
         // Use structured column access via MainTraceCols
-        let local: &MainTraceRow<AB::Var> = (*local).borrow();
-        let next: &MainTraceRow<AB::Var> = (*next).borrow();
+        let local: &MainCols<AB::Var> = (*local).borrow();
+        let next: &MainCols<AB::Var> = (*next).borrow();
+
+        // Build chiplet selectors and op flags once, shared by main and bus constraints.
+        let selectors =
+            constraints::chiplets::selectors::build_chiplet_selectors(builder, local, next);
+        let op_flags =
+            constraints::op_flags::OpFlags::new(&local.decoder, &local.stack, &next.decoder);
 
         // Main trace constraints.
-        constraints::enforce_main(builder, local, next);
+        constraints::enforce_main(builder, local, next, &selectors, &op_flags);
 
         // Auxiliary (bus) constraints.
-        constraints::enforce_bus(builder, local, next);
+        constraints::enforce_bus(builder, local, next, &selectors, &op_flags);
 
         // Public inputs boundary constraints.
         constraints::public_inputs::enforce_main(builder, local);
@@ -365,15 +380,18 @@ fn program_hash_message<EF: ExtensionField<Felt>>(
     challenges: &trace::Challenges<EF>,
     program_hash: &Word,
 ) -> EF {
-    challenges.encode([
-        Felt::ZERO, // parent_id = 0 (root block)
-        program_hash[0],
-        program_hash[1],
-        program_hash[2],
-        program_hash[3],
-        Felt::ZERO, // is_first_child = false
-        Felt::ZERO, // is_loop_body = false
-    ])
+    challenges.encode(
+        bus_types::BLOCK_HASH_TABLE,
+        [
+            Felt::ZERO, // parent_id = 0 (root block)
+            program_hash[0],
+            program_hash[1],
+            program_hash[2],
+            program_hash[3],
+            Felt::ZERO, // is_first_child = false
+            Felt::ZERO, // is_loop_body = false
+        ],
+    )
 }
 
 /// Returns the pair of (initial, final) log-precompile transcript messages for the
@@ -387,13 +405,10 @@ fn transcript_messages<EF: ExtensionField<Felt>>(
 ) -> (EF, EF) {
     let encode = |state: PrecompileTranscriptState| {
         let cap: &[Felt] = state.as_ref();
-        challenges.encode([
-            Felt::from_u8(trace::LOG_PRECOMPILE_LABEL),
-            cap[0],
-            cap[1],
-            cap[2],
-            cap[3],
-        ])
+        challenges.encode(
+            bus_types::LOG_PRECOMPILE_TRANSCRIPT,
+            [Felt::from_u8(trace::LOG_PRECOMPILE_LABEL), cap[0], cap[1], cap[2], cap[3]],
+        )
     };
     (encode(PrecompileTranscriptState::default()), encode(final_state))
 }
@@ -406,13 +421,16 @@ fn kernel_proc_message<EF: ExtensionField<Felt>>(
     challenges: &trace::Challenges<EF>,
     digest: &Word,
 ) -> EF {
-    challenges.encode([
-        trace::chiplets::kernel_rom::KERNEL_PROC_INIT_LABEL,
-        digest[0],
-        digest[1],
-        digest[2],
-        digest[3],
-    ])
+    challenges.encode(
+        bus_types::CHIPLETS_BUS,
+        [
+            trace::chiplets::kernel_rom::KERNEL_PROC_INIT_LABEL,
+            digest[0],
+            digest[1],
+            digest[2],
+            digest[3],
+        ],
+    )
 }
 
 /// Reduces kernel procedure digests from var-len public inputs into a multiset product.

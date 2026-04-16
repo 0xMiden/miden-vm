@@ -85,10 +85,10 @@ pub fn pcs_params() -> PcsParams {
 /// Compile-time constant binding the Fiat-Shamir transcript to the Miden VM AIR.
 /// Must match the constants in `crates/lib/core/asm/sys/vm/mod.masm`.
 pub const RELATION_DIGEST: [Felt; 4] = [
-    Felt::new(14932224741264950205),
-    Felt::new(13231194489255299102),
-    Felt::new(9539190039789656767),
-    Felt::new(16072183680659208914),
+    Felt::new(7682526984894530630),
+    Felt::new(13019009422810970716),
+    Felt::new(16037978224454945133),
+    Felt::new(1332031755710493241),
 ];
 
 /// Observes PCS protocol parameters and per-proof trace height into the challenger.
@@ -292,4 +292,60 @@ pub fn keccak_config(params: PcsParams) -> MidenStarkConfig<KeccakLmcs, KeccakCh
     let mut challenger = SerializingChallenger64::from_hasher(vec![], Keccak256Hash {});
     challenger.observe_slice(&RELATION_DIGEST);
     GenericStarkConfig::new(params, lmcs, Radix2DitParallel::default(), challenger)
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate alloc;
+    use alloc::vec::Vec;
+
+    use miden_ace_codegen::{AceConfig, LayoutKind};
+    use miden_core::{Felt, crypto::hash::Poseidon2, field::QuadFelt};
+
+    use crate::{ProcessorAir, ace};
+
+    const PROTOCOL_ID: u64 = 0;
+    const REGEN_HINT: &str = "cargo run -p miden-core-lib --features constraints-tools --bin regenerate-constraints -- --write";
+
+    /// Snapshot test: catches any AIR change that alters the constraint circuit.
+    ///
+    /// If this test fails, regenerate with:
+    ///   cargo run -p miden-core-lib --features constraints-tools --bin regenerate-constraints --
+    /// --write
+    #[test]
+    fn relation_digest_matches_current_air() {
+        let config = AceConfig {
+            num_quotient_chunks: 8,
+            num_vlpi_groups: 1,
+            layout: LayoutKind::Masm,
+        };
+        let air = ProcessorAir;
+        let batch_config = ace::reduced_aux_batch_config();
+        let circuit =
+            ace::build_batched_ace_circuit::<_, QuadFelt>(&air, config, &batch_config).unwrap();
+        let encoded = circuit.to_ace().unwrap();
+        let circuit_commitment: [Felt; 4] = encoded.circuit_hash().into();
+
+        let input: Vec<Felt> = core::iter::once(Felt::new(PROTOCOL_ID))
+            .chain(circuit_commitment.iter().copied())
+            .collect();
+        let digest = Poseidon2::hash_elements(&input);
+        let expected: Vec<u64> =
+            digest.as_elements().iter().map(|f| f.as_canonical_u64()).collect();
+
+        let snapshot = format!(
+            "num_inputs: {}\nnum_eval_gates: {}\nrelation_digest: {:?}",
+            encoded.num_vars(),
+            encoded.num_eval_rows(),
+            expected,
+        );
+        insta::assert_snapshot!(snapshot);
+
+        let actual: Vec<u64> =
+            super::RELATION_DIGEST.iter().map(|f| f.as_canonical_u64()).collect();
+        assert_eq!(
+            actual, expected,
+            "RELATION_DIGEST in config.rs is stale. Regenerate with: {REGEN_HINT}"
+        );
+    }
 }
