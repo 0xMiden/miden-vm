@@ -268,8 +268,14 @@ pub struct MemoryCols<T> {
 
 /// ACE chiplet columns (16 columns), viewed from `chiplets[4..20]`.
 ///
-/// Common fields are stored directly. The `mode` array holds 4 columns whose
-/// interpretation depends on `s_block`:
+/// The ACE (Arithmetic Circuit Evaluator) chiplet evaluates arithmetic circuits over
+/// quadratic extension field elements. Each circuit evaluation consists of two phases:
+///
+/// 1. **READ** (`s_block=0`): loads wire values from memory into the chiplet.
+/// 2. **EVAL** (`s_block=1`): evaluates arithmetic gates on loaded wire values.
+///
+/// The first 12 columns are common to both modes. The last 4 (`mode`) are overlaid
+/// and reinterpreted depending on `s_block`:
 ///
 /// ```text
 /// mode idx | READ (s_block=0)       | EVAL (s_block=1)
@@ -283,27 +289,27 @@ pub struct MemoryCols<T> {
 /// Use `ace.read()` / `ace.eval()` for typed overlays of the mode columns.
 #[repr(C)]
 pub struct AceCols<T> {
-    /// Start-of-circuit flag.
+    /// Start-of-circuit flag (1 on the first row of a new circuit evaluation).
     pub s_start: T,
-    /// Block selector: 0 = READ, 1 = EVAL.
+    /// Block selector: 0 = READ (memory loads), 1 = EVAL (gate evaluation).
     pub s_block: T,
-    /// Memory context.
+    /// Memory context for the current circuit evaluation.
     pub ctx: T,
-    /// Pointer for memory read.
+    /// Memory pointer from which to read the next two wire values or instruction.
     pub ptr: T,
-    /// Clock cycle.
+    /// Clock cycle at which the memory read is performed.
     pub clk: T,
-    /// Evaluation operation selector.
+    /// Arithmetic operation selector (determines which gate to evaluate in EVAL mode).
     pub eval_op: T,
-    /// ID of the first wire (output wire).
+    /// ID of the first wire (output wire / left operand).
     pub id_0: T,
-    /// Value of the first wire (QuadFelt).
+    /// Value of the first wire (quadratic extension field element).
     pub v_0: QuadFeltExpr<T>,
     /// ID of the second wire (first input / left operand).
     pub id_1: T,
-    /// Value of the second wire (QuadFelt).
+    /// Value of the second wire (quadratic extension field element).
     pub v_1: QuadFeltExpr<T>,
-    /// Mode-dependent columns (interpretation depends on s_block).
+    /// Mode-dependent columns (interpretation depends on `s_block`; see table above).
     mode: [T; 4],
 }
 
@@ -342,26 +348,34 @@ impl<T: Copy> AceCols<T> {
 }
 
 /// READ mode overlay for ACE mode-dependent columns (4 columns).
+///
+/// In READ mode, the chiplet loads wire values from memory. The multiplicity columns
+/// (`m_0`, `m_1`) track how many times each wire participates in circuit gates, used
+/// by the wiring bus to verify correct wire connections.
 #[repr(C)]
 pub struct AceReadCols<T> {
-    /// Number of eval rows.
+    /// Number of EVAL rows that follow this READ block.
     pub num_eval: T,
-    /// Unused column.
+    /// Unused column (padding for layout alignment with EVAL overlay).
     pub unused: T,
-    /// Multiplicity of the second wire.
+    /// Multiplicity of the second wire (wire 1).
     pub m_1: T,
-    /// Multiplicity of the first wire.
+    /// Multiplicity of the first wire (wire 0).
     pub m_0: T,
 }
 
 /// EVAL mode overlay for ACE mode-dependent columns (4 columns).
+///
+/// In EVAL mode, the chiplet evaluates an arithmetic gate on three wires: two inputs
+/// (`id_1`, `id_2`) and one output (`id_0`). The third wire's ID and value occupy the
+/// same physical columns as `num_eval`/`unused`/`m_1` in READ mode.
 #[repr(C)]
 pub struct AceEvalCols<T> {
     /// ID of the third wire (second input / right operand).
     pub id_2: T,
     /// Value of the third wire.
     pub v_2: QuadFeltExpr<T>,
-    /// Multiplicity of the first wire.
+    /// Multiplicity of the first wire (wire 0).
     pub m_0: T,
 }
 
