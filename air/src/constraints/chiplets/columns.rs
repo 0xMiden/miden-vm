@@ -3,7 +3,7 @@
 use alloc::{vec, vec::Vec};
 use core::{borrow::Borrow, mem::size_of};
 
-use miden_core::{Felt, WORD_SIZE, chiplets::hasher::Hasher};
+use miden_core::{Felt, WORD_SIZE, chiplets::hasher::Hasher, field::PrimeCharacteristicRing};
 
 use super::super::{columns::indices_arr, ext_field::QuadFeltExpr};
 use crate::trace::chiplets::{
@@ -40,9 +40,9 @@ pub fn borrow_chiplet<T, S>(slice: &[T]) -> &S {
 /// ## Layout
 ///
 /// ```text
-/// | witnesses[3] |     state[12]                                   | extra cols  |
-/// |              | rate0[4] (= digest) | rate1[4]   | capacity[4]  |             |
-/// | w0, w1, w2   | h0..h3             | h4..h7     | h8..h11      | m  --  --  -- |
+/// | witnesses[3] | state[12]                                    | extra cols      |
+/// |              | rate0[4] (= digest) | rate1[4] | capacity[4] |                 |
+/// | w0, w1, w2   | h0..h3              | h4..h7   | h8..h11     | m  --  --  --   |
 /// ```
 #[repr(C)]
 pub struct PermutationCols<T> {
@@ -52,12 +52,9 @@ pub struct PermutationCols<T> {
     pub state: [T; STATE_WIDTH],
     /// Request multiplicity (same physical column as node_index).
     pub multiplicity: T,
-    /// Zero on perm rows (same physical column as mrupdate_id).
-    pub _mrupdate_id: T,
-    /// Zero on perm rows (same physical column as is_boundary).
-    pub _is_boundary: T,
-    /// Zero on perm rows (same physical column as direction_bit).
-    pub _direction_bit: T,
+    /// Physical slots for controller columns mrupdate_id, is_boundary, and direction_bit.
+    /// These must be zero on permutation rows; access via [`Self::unused_padding()`] only.
+    _unused: [T; 3],
 }
 
 impl<T: Copy> PermutationCols<T> {
@@ -94,6 +91,12 @@ impl<T: Copy> PermutationCols<T> {
     pub fn rate1(&self) -> [T; DIGEST_LEN] {
         [self.state[4], self.state[5], self.state[6], self.state[7]]
     }
+
+    /// Returns the 3 padding columns (mrupdate_id, is_boundary, direction_bit) that must
+    /// be zero on permutation rows.
+    pub fn unused_padding(&self) -> [T; 3] {
+        self._unused
+    }
 }
 
 // CONTROLLER COLUMNS
@@ -118,9 +121,9 @@ impl<T: Copy> PermutationCols<T> {
 /// ## Layout
 ///
 /// ```text
-/// | s0 s1 s2 |     state[12]                                   | extra cols      |
-/// |          | rate0[4] (= digest) | rate1[4]   | capacity[4]  |                 |
-/// |          | h0..h3             | h4..h7     | h8..h11      | i  mr  bnd  dir |
+/// | s0 s1 s2 | state[12]                                    | extra cols      |
+/// |          | rate0[4] (= digest) | rate1[4] | capacity[4] |                 |
+/// |          | h0..h3              | h4..h7   | h8..h11     | i  mr  bnd  dir |
 /// ```
 #[repr(C)]
 pub struct ControllerCols<T> {
@@ -176,6 +179,28 @@ impl<T: Copy> ControllerCols<T> {
     pub fn rate1(&self) -> [T; DIGEST_LEN] {
         [self.state[4], self.state[5], self.state[6], self.state[7]]
     }
+
+    /// Merkle-update new-path flag: `s0 * s1 * s2`.
+    ///
+    /// Active on controller input rows that insert the new Merkle path into the sibling
+    /// table (request/remove side of the running product).
+    pub fn f_mu<E: PrimeCharacteristicRing>(&self) -> E
+    where
+        T: Into<E>,
+    {
+        self.s0.into() * self.s1.into() * self.s2.into()
+    }
+
+    /// Merkle-verify / old-path flag: `s0 * s1 * (1 - s2)`.
+    ///
+    /// Active on controller input rows that extract the old Merkle path from the sibling
+    /// table (response/add side of the running product).
+    pub fn f_mv<E: PrimeCharacteristicRing>(&self) -> E
+    where
+        T: Into<E>,
+    {
+        self.s0.into() * self.s1.into() * (E::ONE - self.s2.into())
+    }
 }
 
 // BITWISE COLUMNS
@@ -208,8 +233,8 @@ pub struct BitwiseCols<T> {
 
 /// Memory chiplet columns (15 columns), viewed from `chiplets[3..18]`.
 ///
-/// When reading from a new word (first access to a context/word pair), the `values`
-/// are initialized to zero.
+/// When reading from a new word address (first access to a context/addr pair), the
+/// `values` are initialized to zero.
 #[repr(C)]
 pub struct MemoryCols<T> {
     /// Read/write flag (0 = write, 1 = read).
@@ -234,8 +259,8 @@ pub struct MemoryCols<T> {
     pub d1: T,
     /// Inverse of delta.
     pub d_inv: T,
-    /// Flag: same context and same word as previous operation.
-    pub is_same_ctx_and_word: T,
+    /// Flag: same context and same word address as previous operation (docs: `f_sca`).
+    pub is_same_ctx_and_addr: T,
 }
 
 // ACE COLUMNS
@@ -294,6 +319,28 @@ impl<T> AceCols<T> {
     }
 }
 
+impl<T: Copy> AceCols<T> {
+    /// ACE read flag: `1 - s_block`.
+    ///
+    /// Active on ACE rows in READ mode (memory word reads for circuit inputs).
+    pub fn f_read<E: PrimeCharacteristicRing>(&self) -> E
+    where
+        T: Into<E>,
+    {
+        E::ONE - self.s_block.into()
+    }
+
+    /// ACE eval flag: `s_block`.
+    ///
+    /// Active on ACE rows in EVAL mode (circuit gate evaluation).
+    pub fn f_eval<E: PrimeCharacteristicRing>(&self) -> E
+    where
+        T: Into<E>,
+    {
+        self.s_block.into()
+    }
+}
+
 /// READ mode overlay for ACE mode-dependent columns (4 columns).
 #[repr(C)]
 pub struct AceReadCols<T> {
@@ -312,7 +359,7 @@ pub struct AceReadCols<T> {
 pub struct AceEvalCols<T> {
     /// ID of the third wire (second input / right operand).
     pub id_2: T,
-    /// Value of the third wire (QuadFelt).
+    /// Value of the third wire.
     pub v_2: QuadFeltExpr<T>,
     /// Multiplicity of the first wire.
     pub m_0: T,

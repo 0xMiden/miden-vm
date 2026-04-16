@@ -17,7 +17,7 @@ use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};
 
 use crate::{
     MainCols, MidenAirBuilder,
-    constraints::{chiplets::selectors::ChipletSelectors, utils::BoolNot},
+    constraints::{chiplets::selectors::ChipletSelectors, op_flags::OpFlags},
     trace::{Challenges, bus_types::RANGE_CHECK_BUS, range},
 };
 
@@ -42,6 +42,7 @@ use crate::{
 pub fn enforce_bus<AB>(
     builder: &mut AB,
     local: &MainCols<AB::Var>,
+    op_flags: &OpFlags<AB::Expr>,
     challenges: &Challenges<AB::ExprEF>,
     selectors: &ChipletSelectors<AB::Expr>,
 ) where
@@ -79,10 +80,7 @@ pub fn enforce_bus<AB>(
     let lookups = range_check.clone() * stack_lookups.clone() * memory_lookups.clone();
 
     // Flags for conditional inclusion
-    // u32_rc_op = op_bit[6] * (1 - op_bit[5]) * (1 - op_bit[4])
-    let not_4 = local.decoder.op_bits[4].into().not();
-    let not_5 = local.decoder.op_bits[5].into().not();
-    let u32_rc_op = local.decoder.op_bits[6] * not_5 * not_4;
+    let u32_rc_op = op_flags.u32_rc_op();
     let sflag_rc_mem = range_check.clone() * memory_lookups.clone() * u32_rc_op;
 
     // chiplets_memory_flag = s0 * s1 * (1 - s2), i.e. memory is active

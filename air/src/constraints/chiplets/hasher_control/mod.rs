@@ -96,7 +96,6 @@ pub fn enforce_controller_constraints<AB>(
     // NOTE: these are the only direct references to the raw `s0/s1/s2` columns
     // in the controller constraint body — booleanity is inherent to the columns
     // themselves and cannot be expressed through a composed row-kind flag.
-
     builder
         .when(chiplet.is_active.clone())
         .assert_bools([cols.s0, cols.s1, cols.s2]);

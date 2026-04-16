@@ -102,8 +102,9 @@ pub fn enforce_wiring_bus_constraint<AB>(
     };
 
     // --- Chiplet region flags (from precomputed ChipletSelectors) ---
-    // The hasher flag fires on both controller and permutation rows; the ace/memory
-    // flags are the already-computed `is_active` products under virtual s0.
+    // hasher_flag covers both controller and permutation rows (their selector products
+    // are mutually exclusive, so addition gives the union). ace_flag and memory_flag
+    // come directly from the precomputed `is_active` selector products.
     let ace_flag = selectors.ace.is_active.clone();
     let memory_flag = selectors.memory.is_active.clone();
     let hasher_flag =

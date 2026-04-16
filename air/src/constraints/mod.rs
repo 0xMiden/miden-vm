@@ -82,7 +82,7 @@ pub fn enforce_bus<AB>(
     // preventing a malicious prover from committing arbitrary finals.
     enforce_bus_last_row(builder);
 
-    range::bus::enforce_bus(builder, local, &challenges, selectors);
+    range::bus::enforce_bus(builder, local, op_flags, &challenges, selectors);
     stack::bus::enforce_bus(builder, local, next, op_flags, &challenges);
     decoder::bus::enforce_bus(builder, local, next, op_flags, &challenges);
     chiplets::bus::enforce_bus(builder, local, next, op_flags, &challenges, selectors);

@@ -16,7 +16,7 @@
 //! | v0-v3     | Memory word values                             |
 //! | d0, d1    | Lower/upper 16 bits of the active delta        |
 //! | d_inv     | Inverse of the active delta (docs: column `t`) |
-//! | f_scw     | Same context/word flag                         |
+//! | f_sca     | Same context/addr flag (`is_same_ctx_and_addr`) |
 //! | w0        | Lower 16 bits of word index (word_addr / 4)   |
 //! | w1        | Upper 16 bits of word index (word_addr / 4)   |
 //!
@@ -41,11 +41,11 @@ use crate::{
 
 /// Enforce all memory chiplet constraints.
 ///
-/// The memory trace is sorted by (ctx, word_addr, clk). Consecutive rows are compared
-/// via deltas to enforce monotonicity of this ordering. A priority-select mechanism
+/// The memory trace is ordered by (ctx, addr, clk). Consecutive rows are compared
+/// via deltas to enforce monotonicity of this ordering. A select mechanism
 /// using `ctx_changed` and `addr_changed` (docs: `n0`, `n1`) determines which delta
-/// is active: context change takes priority over address change, which takes priority
-/// over clock change.
+/// is active: context change takes precedence over address change, which takes
+/// precedence over clock change.
 pub fn enforce_memory_constraints<AB>(
     builder: &mut AB,
     local: &MainCols<AB::Var>,
@@ -95,12 +95,12 @@ pub fn enforce_memory_constraints<AB>(
     // ==========================================================================
     // TRANSITION CONSTRAINTS (all rows except last)
     // ==========================================================================
-    // Enforces: delta inverse, monotonicity, same-context/word flag, read-only,
+    // Enforces: delta inverse, monotonicity, same-context/addr flag, read-only,
     // and value consistency.
     let builder = &mut builder.when(flags.is_transition.clone());
 
     // --- delta inverse ---
-    // d_inv (docs: column `t`) is shared across all three priority levels (ctx, addr, clk).
+    // d_inv (docs: column `t`) is shared across all three delta levels (ctx, addr, clk).
     // The assert_bool + assert_zero pairs below form conditional inverses that force d_inv
     // to the correct value at each level.
     let d_inv_next = cols_next.d_inv;
@@ -134,12 +134,14 @@ pub fn enforce_memory_constraints<AB>(
         builder.when(same_addr.clone()).assert_zero(addr_delta.clone());
     }
 
-    // --- same context/word flag ---
-    // f_scw' = 1 when both context and word address are unchanged between rows.
+    // --- same context/addr flag ---
+    // f_sca' = 1 when both context and word address are unchanged between rows.
+    // Stored in a dedicated column for degree reduction (same_ctx * same_addr is
+    // degree 4; the column lets downstream constraints use it at degree 1).
     // Not constrained in the first row (intentional — first-row constraints use
-    // not_written flags directly, not f_scw).
-    let f_scw_next = cols_next.is_same_ctx_and_word;
-    builder.assert_eq(f_scw_next, same_ctx.clone() * same_addr.clone());
+    // not_written flags directly, not f_sca).
+    let same_ctx_and_addr = cols_next.is_same_ctx_and_addr;
+    builder.assert_eq(same_ctx_and_addr, same_ctx.clone() * same_addr.clone());
 
     // --- monotonicity ---
     // The priority-selected delta must equal the range-checked decomposition.
@@ -160,7 +162,7 @@ pub fn enforce_memory_constraints<AB>(
     builder.assert_eq(computed_delta, delta_next);
 
     // --- read-only constraint ---
-    // When context/word are unchanged (f_scw'=1) and the clock doesn't advance,
+    // When context/addr are unchanged (f_sca'=1) and the clock doesn't advance,
     // both operations must be reads.
     //
     // clk_no_change = 1 - clk_delta * d_inv is used as a when() gate. Unlike the ctx
@@ -175,18 +177,18 @@ pub fn enforce_memory_constraints<AB>(
         let is_write_next = cols_next.is_read.into().not();
         let any_write = is_write + is_write_next;
 
-        builder.when(f_scw_next).when(clk_no_change).assert_zero(any_write);
+        builder.when(same_ctx_and_addr).when(clk_no_change).assert_zero(any_write);
     }
 
     // --- value consistency ---
     // Values not being written must follow the consistency rule:
-    //   same context/word (f_scw'=1): v'[i] = v[i]  (copy from previous row)
-    //   new context/word  (f_scw'=0): v'[i] = 0      (initialize to zero)
-    // Combined: v'[i] = f_scw' * v[i]
+    //   same context/addr (f_sca'=1): v'[i] = v[i]  (copy from previous row)
+    //   new context/addr  (f_sca'=0): v'[i] = 0      (initialize to zero)
+    // Combined: v'[i] = f_sca' * v[i]
     let values = cols.values;
     let values_next = cols_next.values;
     for (i, nw) in not_written.into_iter().enumerate() {
-        builder.when(nw).assert_eq(values_next[i], f_scw_next * values[i]);
+        builder.when(nw).assert_eq(values_next[i], same_ctx_and_addr * values[i]);
     }
 }
 
@@ -204,7 +206,7 @@ pub fn enforce_memory_constraints<AB>(
 /// - **Element write** (`is_word=0, is_read=0`): flag = 0 for the selected element, 1 for the other
 ///   three
 ///
-/// Corresponds to `c_i` in the docs, with `selected[i]` ≡ docs' `f_i`.
+/// Corresponds to `c_i` in the docs, with `selected[i]` ≡ `f_i`.
 ///
 /// Formula: `not_written[i] = is_read + is_write * is_element * !selected[i]`
 fn compute_not_written_flags<AB>(cols: &MemoryCols<AB::Var>) -> [AB::Expr; 4]

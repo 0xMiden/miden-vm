@@ -251,8 +251,8 @@ within the degree-9 budget.
 The chiplet-level selectors `s_ctrl` and `s_perm` are the authoritative
 sub-chiplet discriminators: any consumer that needs to interpret the shared
 columns as controller sub-selectors must first gate on `s_ctrl = 1`. The
-constraint code does this via the precomputed `ControllerFlags::is_active`
-(= `s_ctrl`) and `PermutationCols::witnesses` accessors.
+constraint code does this by gating on `s_ctrl = 1` via the precomputed chiplet
+selectors, while permutation rows access the same physical columns as witnesses.
 
 ## Buses
 
@@ -474,8 +474,7 @@ slots to zero:
 - row `11`: `w1 = w2 = 0`.
 
 Similarly, `mrupdate_id`, `is_boundary`, and `direction_bit` are forced to
-zero on all permutation rows (see `PermutationCols::_mrupdate_id`,
-`_is_boundary`, `_direction_bit`).
+zero on all permutation rows (see `PermutationCols::unused_padding()`).
 
 These constraints are primarily defensive: they make permutation rows inert
 with respect to any constraint that might read the shared columns as if they

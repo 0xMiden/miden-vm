@@ -34,8 +34,8 @@ use super::{MAX_MESSAGE_WIDTH, bus_types::NUM_BUS_TYPES};
 pub struct Challenges<EF: PrimeCharacteristicRing> {
     pub alpha: EF,
     pub beta_powers: [EF; MAX_MESSAGE_WIDTH],
-    /// Per-bus domain separation: `bus_prefix[i] = alpha + (i+1) * gamma`
-    /// where `gamma = beta^MAX_MESSAGE_WIDTH`.
+    /// Per-bus prefix: `bus_prefix[i] = alpha + (i+1) * gamma`
+    /// where `gamma = beta^MAX_MESSAGE_WIDTH` and `(i+1)` is the domain separator.
     pub bus_prefix: [EF; NUM_BUS_TYPES],
 }
 
@@ -56,7 +56,7 @@ impl<EF: PrimeCharacteristicRing> Challenges<EF> {
     /// Encodes as **bus_prefix\[bus\] + sum(beta_powers\[i\] * elem\[i\])** with K consecutive
     /// elements.
     ///
-    /// The `bus` parameter selects the bus interaction type for domain separation.
+    /// The `bus` parameter is the bus index used for domain separation.
     #[inline(always)]
     pub fn encode<BF, const K: usize>(&self, bus: usize, elems: [BF; K]) -> EF
     where
@@ -77,7 +77,7 @@ impl<EF: PrimeCharacteristicRing> Challenges<EF> {
     /// Encodes as **bus_prefix\[bus\] + sum(beta_powers\[layout\[i\]\] * values\[i\])** using
     /// sparse positions.
     ///
-    /// The `bus` parameter selects the bus interaction type for domain separation.
+    /// The `bus` parameter is the bus index used for domain separation.
     #[inline(always)]
     pub fn encode_sparse<BF, const K: usize>(
         &self,

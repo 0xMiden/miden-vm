@@ -22,12 +22,12 @@ use crate::{
     trace::{
         CHIPLETS_OFFSET, Challenges, LOG_PRECOMPILE_LABEL, bus_types,
         chiplets::{
-            HASHER_MRUPDATE_ID_COL_IDX, HASHER_NODE_INDEX_COL_IDX, HASHER_SELECTOR_COL_RANGE,
-            HASHER_STATE_COL_RANGE, NUM_ACE_SELECTORS,
+            HASHER_MRUPDATE_ID_COL_IDX, HASHER_NODE_INDEX_COL_IDX, HASHER_STATE_COL_RANGE,
+            NUM_ACE_SELECTORS,
             ace::{
                 ACE_INSTRUCTION_ID1_OFFSET, ACE_INSTRUCTION_ID2_OFFSET, CLK_IDX, CTX_IDX,
-                EVAL_OP_IDX, ID_1_IDX, ID_2_IDX, PTR_IDX, SELECTOR_BLOCK_IDX, V_0_0_IDX, V_0_1_IDX,
-                V_1_0_IDX, V_1_1_IDX,
+                EVAL_OP_IDX, ID_1_IDX, ID_2_IDX, PTR_IDX, V_0_0_IDX, V_0_1_IDX, V_1_0_IDX,
+                V_1_1_IDX,
             },
             memory::{MEMORY_READ_ELEMENT_LABEL, MEMORY_READ_WORD_LABEL},
         },
@@ -39,7 +39,6 @@ use crate::{
 // ================================================================================================
 
 // Column offsets relative to chiplets array.
-const S_START: usize = HASHER_SELECTOR_COL_RANGE.start - CHIPLETS_OFFSET;
 const H_START: usize = HASHER_STATE_COL_RANGE.start - CHIPLETS_OFFSET;
 const IDX_COL: usize = HASHER_NODE_INDEX_COL_IDX - CHIPLETS_OFFSET;
 const MRUPDATE_ID_COL: usize = HASHER_MRUPDATE_ID_COL_IDX - CHIPLETS_OFFSET;
@@ -87,9 +86,7 @@ pub fn enforce_hash_kernel_constraint<AB>(
     // Hasher operation selectors (only meaningful on hasher controller rows).
     // On controller rows: `s0=1` = input row, `(s0,s1,s2)` encodes the operation.
     // On permutation rows these columns hold S-box witnesses — gated out by controller_flag.
-    let s0: AB::Expr = local.chiplets[S_START].into();
-    let s1: AB::Expr = local.chiplets[S_START + 1].into();
-    let s2: AB::Expr = local.chiplets[S_START + 2].into();
+    let ctrl = local.controller();
 
     // Node index and mrupdate_id for sibling table
     let node_index: AB::Expr = local.chiplets[IDX_COL].into();
@@ -106,10 +103,10 @@ pub fn enforce_hash_kernel_constraint<AB>(
     // In the controller/perm split, sibling table operations happen on controller input rows
     // for MU (new path - requests/removes) and MV (old path - responses/adds).
     // All MU/MV input rows participate (not just is_start=1).
-    // f_mu = s0 * s1 * s2, f_mv = s0 * s1 * !s2
-    let f_mu: AB::Expr = controller_flag.clone() * s0.clone() * s1.clone() * s2.clone();
-    let f_mv: AB::Expr =
-        controller_flag.clone() * s0.clone() * s1.clone() * (AB::Expr::ONE - s2.clone());
+    // f_mu = s0 * s1 * s2
+    let f_mu: AB::Expr = controller_flag.clone() * ctrl.f_mu();
+    // f_mv = s0 * s1 * !s2
+    let f_mv: AB::Expr = controller_flag.clone() * ctrl.f_mv();
 
     // Direction bit b = input_node_index - 2 * output_node_index (next row is the paired output).
     let b: AB::Expr = node_index.clone() - node_index_next.clone().double();
@@ -127,12 +124,10 @@ pub fn enforce_hash_kernel_constraint<AB>(
 
     // ACE row flag from the precomputed chiplet selectors.
     let is_ace_row: AB::Expr = selectors.ace.is_active.clone();
+    let ace = local.ace();
 
-    // Block selector determines read (0) vs eval (1)
-    let block_selector: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + SELECTOR_BLOCK_IDX].into();
-
-    let f_ace_read: AB::Expr = is_ace_row.clone() * (one.clone() - block_selector.clone());
-    let f_ace_eval: AB::Expr = is_ace_row * block_selector;
+    let f_ace_read: AB::Expr = is_ace_row.clone() * ace.f_read();
+    let f_ace_eval: AB::Expr = is_ace_row * ace.f_eval();
 
     // ACE columns for memory messages
     let ace_clk: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + CLK_IDX].into();

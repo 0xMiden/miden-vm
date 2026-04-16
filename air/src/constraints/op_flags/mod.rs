@@ -9,12 +9,12 @@
 //! Each opcode is 7 bits `[b0, b1, b2, b3, b4, b5, b6]` (b0 = LSB):
 //!
 //! ```text
-//!   b6 b5 b4 | Degree | Opcodes  | Description
-//!   ---------+--------+----------+---------------------------
-//!    0  *  *  |   7    |  0 - 63  | All 7 bits discriminate
-//!    1  0  0  |   6    | 64 - 79  | u32 ops (b0 unused)
-//!    1  0  1  |   5    | 80 - 95  | Uses extra[0] column
-//!    1  1  *  |   4    | 96 - 127 | Uses extra[1] column
+//! b6 b5 b4 | Degree | Opcodes  | Description
+//! ---------+--------+----------+---------------------------
+//!  0  *  * |   7    |  0 - 63  | All 7 bits discriminate
+//!  1  0  0 |   6    | 64 - 79  | u32 ops (b0 unused)
+//!  1  0  1 |   5    | 80 - 95  | Uses extra[0] column
+//!  1  1  * |   4    | 96 - 127 | Uses extra[1] column
 //! ```
 //!
 //! ## Composite Flags
@@ -749,7 +749,6 @@ where
     }
 
     /// Returns the flag when the current operation is a u32 operation requiring range checks.
-    #[expect(dead_code)]
     #[inline(always)]
     pub fn u32_rc_op(&self) -> E {
         self.u32_rc_op.clone()

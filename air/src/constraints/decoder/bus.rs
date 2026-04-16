@@ -23,7 +23,6 @@
 //! - Processor tables: `processor/src/decoder/aux_trace/block_stack_table.rs` (p1),
 //!   `processor/src/decoder/aux_trace/block_hash_table.rs` (p2),
 //!   `processor/src/decoder/aux_trace/op_group_table.rs` (p3).
-//! - air‑script constraints: `constraints/decoder.air`.
 
 use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::{ExtensionBuilder, WindowAccess};

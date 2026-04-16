@@ -22,7 +22,7 @@
 //! - state = sum(beta^(3+i) * hasher_state[i]) for i in 0..12
 //!
 //! ### Bitwise Chiplet Messages (5 elements)
-//! Format: alpha + beta^0*label + beta^1*a + beta^2*b + beta^3*z
+//! Format: bus_prefix[CHIPLETS_BUS] + beta^0*label + beta^1*a + beta^2*b + beta^3*z
 //!
 //! ### Memory Chiplet Messages (6-9 elements)
 //! Element format: alpha + beta^0*label + ... + beta^4*element
@@ -307,7 +307,7 @@ pub fn enforce_chiplets_bus_constraint<AB>(
 
     let lhs: AB::ExprEF = Into::<AB::ExprEF>::into(b_next_val) * requests;
     let rhs: AB::ExprEF = Into::<AB::ExprEF>::into(b_local_val) * responses;
-    builder.when_transition().assert_zero_ext(lhs - rhs);
+    builder.when_transition().assert_eq_ext(lhs, rhs);
 }
 
 // BITWISE MESSAGE HELPERS
@@ -315,7 +315,7 @@ pub fn enforce_chiplets_bus_constraint<AB>(
 
 /// Computes the bitwise request message value.
 ///
-/// Format: alpha + beta^0*label + beta^1*a + beta^2*b + beta^3*z
+/// Format: bus_prefix[CHIPLETS_BUS] + beta^0*label + beta^1*a + beta^2*b + beta^3*z
 ///
 /// Stack layout for U32AND/U32XOR: [a, b, ...] -> [z, ...]
 fn compute_bitwise_request<AB: MidenAirBuilder>(
@@ -337,7 +337,7 @@ fn compute_bitwise_request<AB: MidenAirBuilder>(
 
 /// Computes the bitwise chiplet response message value.
 ///
-/// Format: alpha + beta^0*label + beta^1*a + beta^2*b + beta^3*z
+/// Format: bus_prefix[CHIPLETS_BUS] + beta^0*label + beta^1*a + beta^2*b + beta^3*z
 fn compute_bitwise_response<AB: MidenAirBuilder>(
     local: &MainCols<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
@@ -368,7 +368,7 @@ fn compute_bitwise_response<AB: MidenAirBuilder>(
 
 /// Computes the memory word request message value.
 ///
-/// Format: alpha + beta^0*label + beta^1*ctx + beta^2*addr + beta^3*clk +
+/// Format: bus_prefix[CHIPLETS_BUS] + beta^0*label + beta^1*ctx + beta^2*addr + beta^3*clk +
 /// beta^4..beta^7 * word
 ///
 /// Stack layout for MLOADW: [addr, ...] -> [word[0], word[1], word[2], word[3], ...]
@@ -417,7 +417,8 @@ fn compute_memory_word_request<AB: MidenAirBuilder>(
 
 /// Computes the memory element request message value.
 ///
-/// Format: alpha + beta^0*label + beta^1*ctx + beta^2*addr + beta^3*clk + beta^4*element
+/// Format: bus_prefix[CHIPLETS_BUS] + beta^0*label + beta^1*ctx + beta^2*addr + beta^3*clk +
+/// beta^4*element
 fn compute_memory_element_request<AB: MidenAirBuilder>(
     local: &MainCols<AB::Var>,
     next: &MainCols<AB::Var>,
@@ -1192,7 +1193,7 @@ fn compute_hasher_rate_message<AB: MidenAirBuilder>(
 
 /// Computes the ACE request message value.
 ///
-/// Format: alpha + beta^0*label + beta^1*clk + beta^2*ctx + beta^3*ptr
+/// Format: bus_prefix[CHIPLETS_BUS] + beta^0*label + beta^1*clk + beta^2*ctx + beta^3*ptr
 ///         + beta^4*num_read_rows + beta^5*num_eval_rows
 ///
 /// Stack layout for EVALCIRCUIT: [ptr, num_read_rows, num_eval_rows, ...]
@@ -1217,7 +1218,7 @@ fn compute_ace_request<AB: MidenAirBuilder>(
 
 /// Computes the ACE chiplet response message value.
 ///
-/// Format: alpha + beta^0*label + beta^1*clk + beta^2*ctx + beta^3*ptr
+/// Format: bus_prefix[CHIPLETS_BUS] + beta^0*label + beta^1*clk + beta^2*ctx + beta^3*ptr
 ///         + beta^4*num_read_rows + beta^5*num_eval_rows
 ///
 /// The chiplet reads from its internal columns:
@@ -1256,7 +1257,7 @@ fn compute_ace_response<AB: MidenAirBuilder>(
 
 /// Computes the kernel ROM chiplet response message value.
 ///
-/// Format: alpha + beta^0*label + beta^1*digest[0] + beta^2*digest[1]
+/// Format: bus_prefix[CHIPLETS_BUS] + beta^0*label + beta^1*digest[0] + beta^2*digest[1]
 ///         + beta^3*digest[2] + beta^4*digest[3]
 ///
 /// The label depends on s_first flag:
