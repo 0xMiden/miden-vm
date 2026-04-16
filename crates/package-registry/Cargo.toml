@@ -23,7 +23,7 @@ serde = ["dep:serde", "miden-assembly-syntax/serde", "miden-core/serde", "miden-
 miden-assembly-syntax.workspace = true
 miden-core.workspace = true
 miden-mast-package.workspace = true
-pubgrub = { workspace = true, optional = true }
+pubgrub = { version = "0.3", optional = true }
 serde = { workspace = true, optional = true }
 smallvec = { workspace = true, optional = true }
 thiserror.workspace = true

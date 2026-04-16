@@ -42,7 +42,7 @@ miden-utils-indexing.workspace = true
 # External dependencies
 itertools.workspace = true
 paste.workspace = true
-rayon = { workspace = true }
+rayon = { version = "1.10", default-features = false }
 tracing.workspace = true
 thiserror.workspace = true
 

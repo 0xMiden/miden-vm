@@ -31,7 +31,7 @@ miden-crypto.workspace = true
 miden-processor = { workspace = true, features = ["testing"] }
 miden-prover.workspace = true
 miden-verifier.workspace = true
-test-case = { workspace = true }
+test-case = "3.2"
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 pretty_assertions = { workspace = true, default-features = false, features = [

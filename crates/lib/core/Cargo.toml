@@ -51,10 +51,10 @@ miden-processor = { workspace = true, features = ["testing"] }
 miden-prover.workspace = true
 miden-utils-testing.workspace = true
 miden-verifier.workspace = true
-num = { workspace = true }
+num = { version = "0.4" }
 num-bigint = { workspace = true }
 pretty_assertions = { workspace = true, features = ["std"] }
-rand = { workspace = true }
+rand = { version = "0.9", default-features = false }
 rand_chacha = { workspace = true }
 rstest = { workspace = true }
 bincode.workspace = true
@@ -63,7 +63,7 @@ serde_json.workspace = true
 
 [build-dependencies]
 env_logger.workspace = true
-fs-err = { workspace = true }
+fs-err = { version = "3.1" }
 miden-assembly = { workspace = true, features = ["std"] }
 miden-package-registry = { workspace = true, features = ["resolver"] }
 

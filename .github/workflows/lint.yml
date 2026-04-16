@@ -32,11 +32,11 @@ jobs:
         with:
           persist-credentials: false
       - name: Install cargo-binstall
-        uses: taiki-e/install-action@b51e10a30e12f8d30315761119b1445be295e8b6 # cargo-binstall
+        uses: taiki-e/install-action@c1596c3b5e0949d3aaac0490d189c853cc35deb2 # cargo-binstall
       - name: Install workspace inheritance checker
         run: cargo binstall --no-confirm cargo-workspace-inheritance-check@1.2.0
       - name: Check workspace inheritance
-        run: cargo workspace-inheritance-check --promotion-failure
+        run: cargo workspace-inheritance-check --promotion-threshold 2 --promotion-failure
 
   clippy:
     name: clippy nightly on ubuntu-latest

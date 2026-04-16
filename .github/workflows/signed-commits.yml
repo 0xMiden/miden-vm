@@ -27,6 +27,11 @@ jobs:
             const login = (context.payload.pull_request.user?.login || '').toLowerCase();
             let permission = 'none';
             try {
+              // Signed-commit checks only apply to maintainers.
+              // GitHub repo roles are too broad here because most access
+              // comes from org team permissions, so this probe reads the
+              // PR author's effective repo write access and decides who
+              // should be asked to sign commits.
               const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
                 owner: context.repo.owner,
                 repo: context.repo.repo,

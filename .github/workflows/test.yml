@@ -19,7 +19,7 @@ jobs:
           persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
-      - uses: taiki-e/install-action@e9fe1d0c24b9415d0c0be1429c063ba3e3a8b277 # nextest
+      - uses: taiki-e/install-action@dd81e62c198605dea8507fed3fb6834da354ded4 # nextest
       - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # v2.9.1
         with:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
@@ -134,6 +134,6 @@ jobs:
       - name: Install rust
         run: rustup update --no-self-update
       - name: Install cargo-hack
-        uses: taiki-e/install-action@f5d11b430651d1f6ce680bbd182b55307055de52 # cargo-hack
+        uses: taiki-e/install-action@36052feccaae5f79088f0d62a11f9bac2a9e2ec0 # cargo-hack
       - name: Check all feature combinations
         run: make check-features
