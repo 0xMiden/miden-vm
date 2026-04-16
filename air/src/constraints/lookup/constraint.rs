@@ -45,8 +45,8 @@ use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess};
 
 use super::{
-    EncodedLookupGroup, LookupAir, LookupBatch, LookupBuilder, LookupChallenges, LookupColumn,
-    LookupGroup, LookupMessage, chiplet_air::ChipletLookupBuilder, main_air::MainLookupBuilder,
+    LookupAir, LookupBatch, LookupBuilder, LookupChallenges, LookupColumn, LookupGroup,
+    LookupMessage, chiplet_air::ChipletLookupBuilder, main_air::MainLookupBuilder,
 };
 use crate::Felt;
 
@@ -254,12 +254,6 @@ where
         Self: 'g,
         AB: 'g;
 
-    type EncodedGroup<'g>
-        = ConstraintGroup<'g, AB>
-    where
-        Self: 'g,
-        AB: 'g;
-
     fn group<'g, R>(&'g mut self, f: impl FnOnce(&mut Self::Group<'g>) -> R) -> R {
         let mut group = ConstraintGroup {
             challenges: self.challenges,
@@ -276,7 +270,7 @@ where
     fn group_with_cached_encoding<'g, R>(
         &'g mut self,
         _canonical: impl FnOnce(&mut Self::Group<'g>) -> R,
-        encoded: impl FnOnce(&mut Self::EncodedGroup<'g>) -> R,
+        encoded: impl FnOnce(&mut Self::Group<'g>) -> R,
     ) -> R {
         // Constraint path: only the `encoded` closure runs; the
         // `canonical` closure is dropped unused. This matches the plan's
@@ -299,12 +293,9 @@ where
 
 /// Per-group handle for the constraint path.
 ///
-/// Serves both the simple [`LookupGroup`] surface and the
-/// [`EncodedLookupGroup`] super-trait (bus prefixes, β powers,
-/// `insert_encoded`). This mirrors [`super::prover::ProverGroup`] which
-/// likewise serves both roles — the encoded variant's extra methods just
-/// expose the precomputed challenge tables that `ConstraintGroup` already
-/// holds.
+/// Implements [`LookupGroup`] with working `beta_powers`, `bus_prefix`,
+/// and `insert_encoded` overrides (the constraint path always has the
+/// precomputed challenge tables available).
 ///
 /// Accumulates an internal `(U_g, V_g)` pair as the author calls
 /// `add` / `remove` / `insert` / `batch`. The column consumes the pair
@@ -389,12 +380,7 @@ where
         self.v += n * flag;
         result
     }
-}
 
-impl<'a, AB> EncodedLookupGroup for ConstraintGroup<'a, AB>
-where
-    AB: LiftedAirBuilder<F = Felt>,
-{
     fn beta_powers(&self) -> &[Self::ExprEF] {
         &self.challenges.beta_powers[..]
     }

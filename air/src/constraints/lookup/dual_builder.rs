@@ -33,8 +33,8 @@ use miden_core::{
 use miden_crypto::stark::air::RowWindow;
 
 use super::{
-    EncodedLookupGroup, LookupBatch, LookupBuilder, LookupChallenges, LookupColumn, LookupGroup,
-    LookupMessage, chiplet_air::ChipletLookupBuilder, main_air::MainLookupBuilder,
+    LookupBatch, LookupBuilder, LookupChallenges, LookupColumn, LookupGroup, LookupMessage,
+    chiplet_air::ChipletLookupBuilder, main_air::MainLookupBuilder,
 };
 
 // GROUP MISMATCH
@@ -162,7 +162,7 @@ impl<'a> ChipletLookupBuilder for DualBuilder<'a> {}
 /// Holds no running `(U, V)` pair — the test only compares per-group
 /// contributions, not column-level folds. Each `group` or
 /// `group_with_cached_encoding` call runs its closure against a fresh
-/// [`DualGroup`] / [`DualEncodedGroup`] seeded with `(u, v) = (ONE, ZERO)`.
+/// [`DualGroup`] seeded with `(u, v) = (ONE, ZERO)`.
 pub struct DualColumn<'c> {
     challenges: &'c LookupChallenges<QuadFelt>,
     mismatches: &'c mut Vec<GroupMismatch>,
@@ -176,11 +176,6 @@ impl<'c> LookupColumn for DualColumn<'c> {
 
     type Group<'g>
         = DualGroup<'g>
-    where
-        Self: 'g;
-
-    type EncodedGroup<'g>
-        = DualEncodedGroup<'g>
     where
         Self: 'g;
 
@@ -204,7 +199,7 @@ impl<'c> LookupColumn for DualColumn<'c> {
     fn group_with_cached_encoding<'g, R>(
         &'g mut self,
         canonical: impl FnOnce(&mut Self::Group<'g>) -> R,
-        encoded: impl FnOnce(&mut Self::EncodedGroup<'g>) -> R,
+        encoded: impl FnOnce(&mut Self::Group<'g>) -> R,
     ) -> R {
         // Run both closures against their own independent state machines
         // seeded to `(u, v) = (ONE, ZERO)`, then compare the final pairs.
@@ -214,7 +209,7 @@ impl<'c> LookupColumn for DualColumn<'c> {
             v: QuadFelt::ZERO,
             _phantom: PhantomData,
         };
-        let mut g_encoded = DualEncodedGroup {
+        let mut g_encoded = DualGroup {
             challenges: self.challenges,
             u: QuadFelt::ONE,
             v: QuadFelt::ZERO,
@@ -295,62 +290,7 @@ impl<'g> LookupGroup for DualGroup<'g> {
         self.v += n * flag;
         result
     }
-}
 
-// DUAL ENCODED GROUP
-// ================================================================================================
-
-/// Cached-encoding group handle for [`DualColumn`].
-///
-/// Same `(U_g, V_g)` semantics as [`DualGroup`] but also implements
-/// [`EncodedLookupGroup`] so bus authors can reach for the precomputed
-/// `beta_powers` and `bus_prefix` tables through it. Used for the
-/// encoded closure of `group_with_cached_encoding`.
-pub struct DualEncodedGroup<'g> {
-    challenges: &'g LookupChallenges<QuadFelt>,
-    u: QuadFelt,
-    v: QuadFelt,
-    _phantom: PhantomData<&'g ()>,
-}
-
-impl<'g> LookupGroup for DualEncodedGroup<'g> {
-    type Expr = Felt;
-    type ExprEF = QuadFelt;
-
-    type Batch<'b>
-        = DualBatch<'b>
-    where
-        Self: 'b;
-
-    fn insert<M>(&mut self, flag: Self::Expr, multiplicity: Self::Expr, msg: impl FnOnce() -> M)
-    where
-        M: LookupMessage<Self::Expr, Self::ExprEF>,
-    {
-        let v_msg = msg().encode(self.challenges);
-        self.u += (v_msg - QuadFelt::ONE) * flag;
-        self.v += flag * multiplicity;
-    }
-
-    fn batch<'b, R>(
-        &'b mut self,
-        flag: Self::Expr,
-        build: impl FnOnce(&mut Self::Batch<'b>) -> R,
-    ) -> R {
-        let mut batch = DualBatch {
-            challenges: self.challenges,
-            n: QuadFelt::ZERO,
-            d: QuadFelt::ONE,
-            _phantom: PhantomData,
-        };
-        let result = build(&mut batch);
-        let DualBatch { n, d, .. } = batch;
-        self.u += (d - QuadFelt::ONE) * flag;
-        self.v += n * flag;
-        result
-    }
-}
-
-impl<'g> EncodedLookupGroup for DualEncodedGroup<'g> {
     fn beta_powers(&self) -> &[Self::ExprEF] {
         &self.challenges.beta_powers[..]
     }
@@ -376,7 +316,7 @@ impl<'g> EncodedLookupGroup for DualEncodedGroup<'g> {
 // DUAL BATCH
 // ================================================================================================
 
-/// Batch handle for [`DualGroup`] / [`DualEncodedGroup`].
+/// Batch handle for [`DualGroup`].
 ///
 /// Mirrors [`super::constraint::ConstraintBatch`]: tracks an internal
 /// `(N, D)` pair and absorbs each interaction via the cross-multiplication

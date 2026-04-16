@@ -57,8 +57,8 @@ use miden_core::{
 use miden_crypto::stark::air::RowWindow;
 
 use super::{
-    EncodedLookupGroup, LookupAir, LookupBatch, LookupBuilder, LookupChallenges, LookupColumn,
-    LookupGroup, LookupMessage, chiplet_air::ChipletLookupBuilder, fractions::LookupFractions,
+    LookupAir, LookupBatch, LookupBuilder, LookupChallenges, LookupColumn, LookupGroup,
+    LookupMessage, chiplet_air::ChipletLookupBuilder, fractions::LookupFractions,
     main_air::MainLookupBuilder,
 };
 use crate::Felt;
@@ -469,11 +469,6 @@ where
     where
         Self: 'g;
 
-    type EncodedGroup<'g>
-        = ProverGroup<'g, F, EF>
-    where
-        Self: 'g;
-
     fn group<'g, R>(&'g mut self, f: impl FnOnce(&mut Self::Group<'g>) -> R) -> R {
         let mut group = ProverGroup {
             challenges: self.challenges,
@@ -488,7 +483,7 @@ where
     fn group_with_cached_encoding<'g, R>(
         &'g mut self,
         canonical: impl FnOnce(&mut Self::Group<'g>) -> R,
-        _encoded: impl FnOnce(&mut Self::EncodedGroup<'g>) -> R,
+        _encoded: impl FnOnce(&mut Self::Group<'g>) -> R,
     ) -> R {
         // Prover path: only the `canonical` closure runs; the `encoded`
         // closure is dropped unused. Both closures must describe
@@ -526,13 +521,12 @@ where
 /// `(U_g, V_g)` algebra, which silently assumes flag is 0 or 1 —
 /// non-boolean flags produce wrong results on both sides.
 ///
-/// ## Encoded-group collapse
+/// ## Encoded-group methods
 ///
-/// The same type is used for both `LookupColumn::Group` and
-/// `LookupColumn::EncodedGroup` — cached-encoding fast paths don't help
-/// on the prover side (`msg.encode()` is the cheapest form with `F:
-/// Copy`), so `EncodedLookupGroup::insert_encoded` is just a thin
-/// wrapper that pushes a caller-computed `EF` directly.
+/// The encoding primitives (`beta_powers`, `bus_prefix`, `insert_encoded`)
+/// use the default panicking implementations from [`LookupGroup`] — the
+/// prover path always runs the `canonical` closure, never the `encoded`
+/// one, so these methods should never be reached.
 pub struct ProverGroup<'g, F, EF>
 where
     F: Field,
@@ -646,37 +640,6 @@ fn felt_to_i64<F: Field>(m: F) -> i64 {
         let _ = m;
         // Fall back to an arbitrary sentinel the Python parser will treat as "other".
         i64::MAX
-    }
-}
-
-/// The prover path always runs the `canonical` closure (which uses the simple
-/// [`LookupGroup`] surface), never the `encoded` closure. These methods exist
-/// only to satisfy the `EncodedGroup: EncodedLookupGroup` GAT bound on
-/// [`LookupColumn`]. Calling them is a bug — use `msg.encode()` instead.
-impl<'g, F, EF> EncodedLookupGroup for ProverGroup<'g, F, EF>
-where
-    F: Field,
-    EF: ExtensionField<F>,
-{
-    fn beta_powers(&self) -> &[Self::ExprEF] {
-        debug_assert!(false, "prover path should not call beta_powers — use msg.encode()");
-        &self.challenges.beta_powers[..]
-    }
-
-    fn bus_prefix(&self, bus_id: usize) -> Self::ExprEF {
-        debug_assert!(false, "prover path should not call bus_prefix — use msg.encode()");
-        self.challenges.bus_prefix[bus_id]
-    }
-
-    fn insert_encoded(&mut self, flag: F, multiplicity: F, encoded: impl FnOnce() -> EF) {
-        debug_assert!(false, "prover path should not call insert_encoded — use msg.encode()");
-        if flag == F::ZERO {
-            return;
-        }
-        let v = encoded();
-        let mult_sign = felt_to_i64(multiplicity);
-        busdbg_log_encoded::<F, EF>(self.row_idx, self.col_idx, mult_sign, &v);
-        self.fractions.push((multiplicity, v));
     }
 }
 

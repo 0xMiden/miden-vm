@@ -14,9 +14,9 @@
 //!   βⁱ · payload.
 //! - [`LookupBatch`] — a short-lived handle returned inside [`LookupGroup::batch`]. Represents a
 //!   set of simultaneous interactions that share the outer group's flag.
-//! - [`EncodedLookupGroup`] — super-trait of [`LookupGroup`] that exposes the encoding primitives
-//!   (`bus_prefix`, `beta_powers`, `insert_encoded`). Only handed out on the constraint path of
-//!   [`LookupColumn::group_with_cached_encoding`], so the simple path never sees challenges.
+//! - [`LookupGroup`] also exposes optional encoding primitives (`bus_prefix`, `beta_powers`,
+//!   `insert_encoded`) for the cached-encoding path. Default implementations panic; only the
+//!   constraint-path adapter overrides them with real bodies.
 //!
 //! No adapter impls live in this file — they arrive in Task #3 (constraint
 //! path) and Task #4 (prover path). The bounds here are therefore chosen
@@ -190,15 +190,6 @@ pub trait LookupColumn {
     where
         Self: 'a;
 
-    /// Per-group handle used for the cached-encoding constraint-path
-    /// closure. Implements [`EncodedLookupGroup`] (a sub-trait of
-    /// [`LookupGroup`]), so the author can still call `add` / `remove` /
-    /// `insert` / `batch` inside it *and* reach for the encoding
-    /// primitives (`alpha`, `beta_powers`, `insert_encoded`).
-    type EncodedGroup<'a>: EncodedLookupGroup<Expr = Self::Expr, ExprEF = Self::ExprEF>
-    where
-        Self: 'a;
-
     /// Open a group using the simple, challenge-free API.
     ///
     /// Every interaction added inside the closure is folded into this
@@ -216,10 +207,10 @@ pub trait LookupColumn {
     /// - `canonical` runs on the prover path. It sees the simple [`LookupGroup`] surface — no
     ///   challenges, no `insert_encoded`. Zero-valued flag closures are skipped by the backing
     ///   fraction collector.
-    /// - `encoded` runs on the constraint path. It sees the [`EncodedLookupGroup`] super-trait,
-    ///   exposing `alpha()`, `beta_powers()`, and `insert_encoded`. Authors use this to precompute
-    ///   shared encoding fragments (e.g. a common `α + β·addr` prefix) and reuse them across
-    ///   mutually-exclusive variants.
+    /// - `encoded` runs on the constraint path. It sees the same [`LookupGroup`] surface, plus the
+    ///   encoding primitives `beta_powers()`, `bus_prefix()`, and `insert_encoded()`. Authors use
+    ///   this to precompute shared encoding fragments (e.g. a common `α + β·addr` prefix) and reuse
+    ///   them across mutually-exclusive variants.
     ///
     /// Both closures must produce mathematically identical `(U, V)`
     /// pairs; the split is purely an optimization for expensive
@@ -228,7 +219,7 @@ pub trait LookupColumn {
     fn group_with_cached_encoding<'a, R>(
         &'a mut self,
         canonical: impl FnOnce(&mut Self::Group<'a>) -> R,
-        encoded: impl FnOnce(&mut Self::EncodedGroup<'a>) -> R,
+        encoded: impl FnOnce(&mut Self::Group<'a>) -> R,
     ) -> R;
 }
 
@@ -318,6 +309,73 @@ pub trait LookupGroup {
         flag: Self::Expr,
         build: impl FnOnce(&mut Self::Batch<'a>) -> R,
     ) -> R;
+
+    // ---- encoding primitives (cached-encoding path only) ----
+
+    /// Precomputed powers `[β⁰, β¹, …, β^(W-1)]`, where
+    /// `W = max_message_width` from the enclosing
+    /// [`LookupAir`](super::LookupAir).
+    ///
+    /// The slice length is exactly `W` — there is **no** trailing `β^W`
+    /// entry, because that power is the per-bus step baked into every
+    /// [`LookupChallenges::bus_prefix`](super::LookupChallenges) entry
+    /// at builder-construction time. Authors that want to build their
+    /// own encoded denominator loop should iterate over `beta_powers()`
+    /// directly and slice to their own message width.
+    ///
+    /// Returned as extension-field expressions; the adapter materializes
+    /// the powers once at construction time (as `AB::ExprEF` on the
+    /// constraint path) and serves them back by reference.
+    ///
+    /// # Panics
+    ///
+    /// Default implementation panics — only valid inside the `encoded`
+    /// closure of [`LookupColumn::group_with_cached_encoding`].
+    fn beta_powers(&self) -> &[Self::ExprEF] {
+        panic!("beta_powers() is only available inside the `encoded` closure of group_with_cached_encoding")
+    }
+
+    /// Look up the precomputed bus prefix
+    /// `bus_prefix[bus_id] = α + (bus_id + 1) · β^W` for the given
+    /// coarse bus ID.
+    ///
+    /// Returns an owned [`Self::ExprEF`] by cloning the entry — the
+    /// underlying storage is a `Box<[ExprEF]>` on the adapter and
+    /// `ExprEF` is typically a ring element, so cloning is cheap.
+    ///
+    /// # Panics
+    ///
+    /// Default implementation panics — only valid inside the `encoded`
+    /// closure of [`LookupColumn::group_with_cached_encoding`].
+    /// Also panics if `bus_id` is out of bounds of the adapter's
+    /// `num_bus_ids`.
+    fn bus_prefix(&self, bus_id: usize) -> Self::ExprEF {
+        let _ = bus_id;
+        panic!("bus_prefix() is only available inside the `encoded` closure of group_with_cached_encoding")
+    }
+
+    /// Add a flag-gated interaction whose denominator is already an
+    /// extension-field expression.
+    ///
+    /// - `flag`: base-field selector. Zero flags are skipped by the prover-path adapter
+    ///   (constraint-path evaluates unconditionally).
+    /// - `multiplicity`: base-field signed multiplicity.
+    /// - `encoded`: closure producing the final denominator. Run once on the constraint path. On
+    ///   the prover path the adapter may skip the call entirely when `flag == 0`.
+    ///
+    /// # Panics
+    ///
+    /// Default implementation panics — only valid inside the `encoded`
+    /// closure of [`LookupColumn::group_with_cached_encoding`].
+    fn insert_encoded(
+        &mut self,
+        flag: Self::Expr,
+        multiplicity: Self::Expr,
+        encoded: impl FnOnce() -> Self::ExprEF,
+    ) {
+        let _ = (flag, multiplicity, encoded);
+        panic!("insert_encoded() is only available inside the `encoded` closure of group_with_cached_encoding")
+    }
 }
 
 // LOOKUP BATCH
@@ -377,9 +435,8 @@ pub trait LookupBatch {
 
     /// Absorb an interaction with an already-encoded denominator.
     ///
-    /// Symmetric with
-    /// [`EncodedLookupGroup::insert_encoded`](super::EncodedLookupGroup::insert_encoded),
-    /// but at the batch scope: the closure returns the final
+    /// Symmetric with [`LookupGroup::insert_encoded`], but at the batch
+    /// scope: the closure returns the final
     /// `Self::ExprEF` value that would otherwise come out of
     /// [`LookupMessage::encode`], and the batch folds it into its
     /// running `(N, D)` pair directly. Use this when you are inside an
@@ -395,69 +452,3 @@ pub trait LookupBatch {
     fn insert_encoded(&mut self, multiplicity: Self::Expr, encoded: impl FnOnce() -> Self::ExprEF);
 }
 
-// ENCODED LOOKUP GROUP
-// ================================================================================================
-
-/// Extension of [`LookupGroup`] that exposes the encoding primitives.
-///
-/// Only handed out on the constraint path of
-/// [`LookupColumn::group_with_cached_encoding`] — the simple path keeps
-/// challenges invisible. Use this to precompute shared encoding fragments
-/// (e.g. `β⁰·addr + β¹·node_index`) once and splice the per-variant
-/// bus prefix plus tail into each `insert_encoded` call.
-///
-/// `insert_encoded`'s closure returns the *final* denominator expression,
-/// already-encoded in `Self::ExprEF`. Adapters treat the result as if it
-/// had been produced by hand-reading a
-/// [`LookupChallenges`](super::LookupChallenges) entry and folding in
-/// the payload, so the trait imposes no shape on what lives inside the
-/// closure.
-pub trait EncodedLookupGroup: LookupGroup {
-    /// Precomputed powers `[β⁰, β¹, …, β^(W-1)]`, where
-    /// `W = max_message_width` from the enclosing
-    /// [`LookupAir`](super::LookupAir).
-    ///
-    /// The slice length is exactly `W` — there is **no** trailing `β^W`
-    /// entry, because that power is the per-bus step baked into every
-    /// [`LookupChallenges::bus_prefix`](super::LookupChallenges) entry
-    /// at builder-construction time. Authors that want to build their
-    /// own encoded denominator loop should iterate over `beta_powers()`
-    /// directly and slice to their own message width.
-    ///
-    /// Returned as extension-field expressions; the adapter materializes
-    /// the powers once at construction time (as `AB::ExprEF` on the
-    /// constraint path) and serves them back by reference.
-    fn beta_powers(&self) -> &[Self::ExprEF];
-
-    /// Look up the precomputed bus prefix
-    /// `bus_prefix[bus_id] = α + (bus_id + 1) · β^W` for the given
-    /// coarse bus ID.
-    ///
-    /// Returns an owned [`Self::ExprEF`] by cloning the entry — the
-    /// underlying storage is a `Box<[ExprEF]>` on the adapter and
-    /// `ExprEF` is typically a ring element, so cloning is cheap.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `bus_id as usize` is out of bounds of the adapter's
-    /// `num_bus_ids` — which can only happen if the
-    /// [`LookupAir::num_bus_ids`](super::LookupAir::num_bus_ids)
-    /// contract was violated. Authors should ensure every bus ID they
-    /// emit satisfies `bus_id < num_bus_ids`.
-    fn bus_prefix(&self, bus_id: usize) -> Self::ExprEF;
-
-    /// Add a flag-gated interaction whose denominator is already an
-    /// extension-field expression.
-    ///
-    /// - `flag`: base-field selector. Zero flags are skipped by the prover-path adapter
-    ///   (constraint-path evaluates unconditionally).
-    /// - `multiplicity`: base-field signed multiplicity.
-    /// - `encoded`: closure producing the final denominator. Run once on the constraint path. On
-    ///   the prover path the adapter may skip the call entirely when `flag == 0`.
-    fn insert_encoded(
-        &mut self,
-        flag: Self::Expr,
-        multiplicity: Self::Expr,
-        encoded: impl FnOnce() -> Self::ExprEF,
-    );
-}

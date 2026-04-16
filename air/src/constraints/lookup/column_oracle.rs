@@ -62,8 +62,8 @@ use miden_core::{
 use miden_crypto::stark::air::RowWindow;
 
 use super::{
-    EncodedLookupGroup, LookupAir, LookupBatch, LookupBuilder, LookupChallenges, LookupColumn,
-    LookupGroup, LookupMessage, chiplet_air::ChipletLookupBuilder, main_air::MainLookupBuilder,
+    LookupAir, LookupBatch, LookupBuilder, LookupChallenges, LookupColumn, LookupGroup,
+    LookupMessage, chiplet_air::ChipletLookupBuilder, main_air::MainLookupBuilder,
 };
 
 // COLUMN ORACLE BUILDER
@@ -202,11 +202,6 @@ impl<'c> LookupColumn for OracleColumn<'c> {
     where
         Self: 'g;
 
-    type EncodedGroup<'g>
-        = OracleGroup<'g>
-    where
-        Self: 'g;
-
     fn group<'g, R>(&'g mut self, f: impl FnOnce(&mut Self::Group<'g>) -> R) -> R {
         let mut group = OracleGroup {
             challenges: self.challenges,
@@ -221,7 +216,7 @@ impl<'c> LookupColumn for OracleColumn<'c> {
     fn group_with_cached_encoding<'g, R>(
         &'g mut self,
         canonical: impl FnOnce(&mut Self::Group<'g>) -> R,
-        _encoded: impl FnOnce(&mut Self::EncodedGroup<'g>) -> R,
+        _encoded: impl FnOnce(&mut Self::Group<'g>) -> R,
     ) -> R {
         // Oracle runs only the canonical closure. The
         // `miden_lookup_air_cached_encoding_equivalence` test already guarantees canonical
@@ -245,10 +240,9 @@ impl<'c> LookupColumn for OracleColumn<'c> {
 /// formulas as [`super::dual_builder::DualGroup`] / [`super::constraint::ConstraintGroup`].
 ///
 /// Used for both the plain `group(...)` path and the canonical closure of
-/// `group_with_cached_encoding` — the two types are collapsed since the oracle runs only
-/// the canonical path. Also implements [`EncodedLookupGroup`] to satisfy the associated
-/// `EncodedGroup` type bound, even though [`OracleColumn::group_with_cached_encoding`]
-/// never actually invokes the encoded closure.
+/// `group_with_cached_encoding`. The encoding primitives (`beta_powers`,
+/// `bus_prefix`, `insert_encoded`) are provided for trait completeness
+/// even though the oracle only runs canonical closures.
 pub struct OracleGroup<'g> {
     challenges: &'g LookupChallenges<QuadFelt>,
     u: QuadFelt,
@@ -293,9 +287,7 @@ impl<'g> LookupGroup for OracleGroup<'g> {
         self.v += n * flag;
         result
     }
-}
 
-impl<'g> EncodedLookupGroup for OracleGroup<'g> {
     fn beta_powers(&self) -> &[Self::ExprEF] {
         &self.challenges.beta_powers[..]
     }
