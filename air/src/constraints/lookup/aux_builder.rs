@@ -112,8 +112,8 @@ where
         let mut data = full.values;
         let committed: Vec<EF> = data.split_off(num_rows * num_cols);
         debug_assert_eq!(committed.len(), num_cols);
+
         let aux_trace = RowMajorMatrix::new(data, num_cols);
-        debug_assert_eq!(aux_trace.values.len(), num_rows * num_cols);
 
         (aux_trace, committed)
     }

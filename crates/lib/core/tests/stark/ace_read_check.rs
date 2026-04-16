@@ -102,8 +102,8 @@ pub fn cross_check_ace_circuit(output: &ExecutionOutput) {
         layout: LayoutKind::Masm,
     };
 
-    let batch_config = miden_air::ace::reduced_aux_batch_config();
-    let circuit = build_batched_ace_circuit::<_, QuadFelt>(&ProcessorAir, config, &batch_config)
+    let boundary_config = miden_air::ace::logup_boundary_config();
+    let circuit = build_batched_ace_circuit::<_, QuadFelt>(&ProcessorAir, config, &boundary_config)
         .expect("ace circuit");
     let layout = circuit.layout();
 

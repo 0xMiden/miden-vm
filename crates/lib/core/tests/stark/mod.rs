@@ -4,7 +4,7 @@ use miden_air::PublicInputs;
 use miden_assembly::Assembler;
 use miden_core::{
     Felt, WORD_SIZE,
-    field::{BasedVectorSpace, PrimeCharacteristicRing, QuadFelt},
+    field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
     precompile::PrecompileTranscriptState,
     proof::HashFunction,
 };
@@ -308,10 +308,13 @@ fn reduce_kernel_procedures_digests(
     alpha: QuadFelt,
     beta: QuadFelt,
 ) -> QuadFelt {
-    kernel_procedures_digests
+    // LogUp kernel ROM boundary correction: kernel_corr = -Σ_i 1 / term_i
+    -kernel_procedures_digests
         .chunks(2 * WORD_SIZE)
         .map(|digest| reduce_digest(digest, alpha, beta))
-        .fold(QuadFelt::ONE, |acc, term| acc * term)
+        .fold(QuadFelt::ZERO, |acc, term| {
+            acc + term.try_inverse().expect("zero kernel ROM denominator")
+        })
 }
 
 fn reduce_digest(digest: &[u64], alpha: QuadFelt, beta: QuadFelt) -> QuadFelt {

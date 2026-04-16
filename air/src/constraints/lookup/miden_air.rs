@@ -36,8 +36,11 @@ use super::{
 #[derive(Copy, Clone, Debug, Default)]
 pub struct MidenLookupAir;
 
-/// Full 7-column fraction stride: main then chiplet, in `eval` order.
-pub(crate) const MIDEN_COLUMN_SHAPE: [usize; 7] = [
+/// Full 8-column fraction stride: 4 main + 3 chiplet + 1 padding, in `eval` order.
+/// The 8th column has no interactions and stays zero; it exists so that the aux trace
+/// width is word-aligned (8 EF elements = 4 words), keeping the MASM recursive
+/// verifier's Fiat-Shamir absorption aligned with the prover.
+pub(crate) const MIDEN_COLUMN_SHAPE: [usize; 8] = [
     MAIN_COLUMN_SHAPE[0],
     MAIN_COLUMN_SHAPE[1],
     MAIN_COLUMN_SHAPE[2],
@@ -45,6 +48,7 @@ pub(crate) const MIDEN_COLUMN_SHAPE: [usize; 7] = [
     CHIPLET_COLUMN_SHAPE[0],
     CHIPLET_COLUMN_SHAPE[1],
     CHIPLET_COLUMN_SHAPE[2],
+    0, // padding column — no interactions
 ];
 
 impl<LB> LookupAir<LB> for MidenLookupAir
@@ -52,11 +56,8 @@ where
     LB: MainLookupBuilder + ChipletLookupBuilder,
 {
     fn num_columns(&self) -> usize {
-        // 4 main-trace columns (M1, M_2+5, M3, M4) + 3 chiplet-trace columns
-        // (C1, C2, C3) = 7. Hard-coded rather than computed from the sub-AIRs because
-        // the sub-AIR methods live behind the `LookupAir<LB>` trait, and resolving `LB`
-        // from inside the aggregator's impl would require a turbofish.
-        7
+        // 4 main-trace + 3 chiplet-trace + 1 padding = 8.
+        8
     }
 
     fn column_shape(&self) -> &[usize] {
@@ -78,6 +79,9 @@ where
     fn eval(&self, builder: &mut LB) {
         MainLookupAir.eval(builder);
         ChipletLookupAir.eval(builder);
+        // Padding column — no interactions, stays zero. Keeps the aux trace width at 8
+        // (word-aligned) for MASM Fiat-Shamir transcript compatibility.
+        builder.column(|_| {});
     }
 }
 

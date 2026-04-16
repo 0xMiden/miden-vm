@@ -200,13 +200,12 @@ impl Deserializable for PublicInputs {
 ///   [36..40] precompile transcript state
 pub const NUM_PUBLIC_VALUES: usize = WORD_SIZE + MIN_STACK_DEPTH + MIN_STACK_DEPTH + WORD_SIZE;
 
-/// LogUp aux trace width — 4 main-trace columns (M1, M_2+5, M3, M4) + 3 chiplet-trace
-/// columns (C1, C2, C3). M1 packs block-stack + u32rc + logpre + range-table response into
-/// a single column; C3 hosts ACE wiring + hasher perm-link. Both merged columns rely on
-/// distinct `bus_prefix[bus]` bases so their rationals remain linearly independent in the
-/// extension field. Matches `MidenLookupAir::num_columns()` and the per-row shape returned
-/// by `MidenLookupAuxBuilder::build_aux_trace`.
-pub const LOGUP_AUX_TRACE_WIDTH: usize = 7;
+/// LogUp aux trace width reported to the framework. The LogUp argument uses 7 real
+/// columns (4 main-trace + 3 chiplet-trace); we pad to 8 so the MASM recursive
+/// verifier's Fiat-Shamir transcript (which absorbs aux boundary values as 4 words =
+/// 8 EF elements) stays aligned with the prover. The 8th column is always zero and
+/// unconstrained.
+pub const LOGUP_AUX_TRACE_WIDTH: usize = 8;
 
 // Public values layout offsets.
 const PV_PROGRAM_HASH: usize = 0;

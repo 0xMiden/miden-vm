@@ -17,8 +17,9 @@ use miden::core::crypto::hashes::poseidon2
 #   anchor -->  [ aux_rand: beta0,beta1,alpha0,alpha1 ]   (loaded ND here, verified in random_coin)
 #
 # The FLPI are the input/output stacks (32), program digest (4), and precompile state (4).
-# The VLPI reduction is the product-inverse of (alpha + op_label + beta * digest_i) over
-# all kernel procedure digests, enabling the bus interaction check.
+# The VLPI reduction is the LogUp kernel ROM boundary correction
+#     kernel_corr = -Σ_i 1 / kernel_proc_message(digest_i)
+# which is the negated sum of reciprocals of all kernel procedure messages.
 #
 # Advice stack consumption order:
 #   1. fixed-length PI (40 base felts)         -- load_public_inputs
@@ -268,7 +269,8 @@ end
 #! Outputs: [...]
 #!
 #! where `digests_ptr` is a pointer to the kernel procedures digests. The reduced value
-#! (kernel_reduced) is stored as [prod0, prod1, 0, 0] at the original `digests_ptr`.
+#! `kernel_corr = -Σ_i 1 / kernel_proc_message(digest_i)` is stored as
+#! [kernel_corr0, kernel_corr1, 0, 0] at the original `digests_ptr`.
 proc reduce_kernel_digests
     # Assert that the number of kernel procedures is at most 1023
     dup u32lt.1024 assert.err="number of kernel procedures must be less than 1024"
@@ -402,11 +404,11 @@ proc reduce_kernel_digests
     exec.constants::tmp1 push.3 add mem_load
     # => [N, termN_0, termN_1, ..., term1_0, term1_1, ...]
 
-    # We now need to multiply all of the reduced values.
-    # We push the multiplicative identity element, the number of elements to multiply, and a boolean
+    # Accumulate the sum of reciprocals: acc = Σ 1/term_i.
+    # We push the additive identity element, the number of elements to accumulate, and a boolean
     # flag to enter or not the loop.
     push.0
-    push.1
+    push.0
     movup.2
     dup
     push.0
@@ -416,7 +418,11 @@ proc reduce_kernel_digests
     while.true
         sub.1 movdn.4
         # => [acc0, acc1, term1_0, term1_1, n - 1, ..., termn_0, termn_1, ...]
-        ext2mul
+        movup.3 movup.3
+        # => [term1_0, term1_1, acc0, acc1, n - 1, ...]
+        ext2inv
+        # => [inv_t0, inv_t1, acc0, acc1, n - 1, ...]
+        ext2add
         # => [acc0', acc1', n - 1, ..., termn_0, termn_1, ...]
         movup.2
         dup
@@ -424,13 +430,15 @@ proc reduce_kernel_digests
         neq
         # => [loop, n - 1, acc0', acc1', term1_0, term1_1, ..., termn_0, termn_1, ...]
     end
-    # => [0, prod0, prod1, ...] where prod is the resulting product
+    # => [0, sum0, sum1, ...] where sum = Σ 1/term_i
 
-    # The product of all kernel_proc_messages is kernel_reduced.
+    # Negate to get kernel_corr = -Σ 1/term_i.
     drop
-    # => [prod0, prod1, ...]
+    # => [sum0, sum1, ...]
+    ext2neg
+    # => [kernel_corr0, kernel_corr1, ...]
 
-    # Store the result at `digests_ptr` as `[prod0, prod1, 0, 0]`
+    # Store the result at `digests_ptr` as `[kernel_corr0, kernel_corr1, 0, 0]`
     # Note that `digests_ptr` points to the group that we just reduced above and hence it is safe
     # to overwrite it with the result.
     push.0.0
