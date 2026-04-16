@@ -34,9 +34,8 @@ use crate::trace::{AUX_TRACE_WIDTH, CHIPLETS_WIDTH, TRACE_WIDTH};
 /// depends on which chiplet is active. Access goes through typed accessors like
 /// [`MainCols::permutation()`], [`MainCols::controller()`], [`MainCols::bitwise()`], etc.
 ///
-/// The `perm_seg` column is separated from the chiplets array because it is consumed
-/// exclusively by the chiplet selector system (`s_perm`), not by any chiplet's constraint
-/// code.
+/// The `s_perm` column is separated from the chiplets array because it is consumed
+/// exclusively by the chiplet selector system, not by any chiplet's constraint code.
 #[repr(C)]
 pub struct MainCols<T> {
     pub system: SystemCols<T>,
@@ -44,14 +43,14 @@ pub struct MainCols<T> {
     pub stack: StackCols<T>,
     pub range: RangeCols<T>,
     pub(crate) chiplets: [T; CHIPLETS_WIDTH - 1],
-    /// Permutation segment selector (`s_perm`): consumed by `build_chiplet_selectors`.
-    pub perm_seg: T,
+    /// Permutation segment selector: consumed by `build_chiplet_selectors`.
+    pub s_perm: T,
 }
 
 impl<T> MainCols<T> {
     /// Returns the 6 chiplet selector columns `[s_ctrl, s_perm, s1, s2, s3, s4]`.
     ///
-    /// `s_ctrl = chiplets[0]` and `s_perm = perm_seg` are the two physical selectors
+    /// `s_ctrl = chiplets[0]` and `s_perm` are the two physical selectors
     /// for the controller and permutation sub-chiplets. `s1..s4` subdivide the
     /// remaining chiplets under the virtual `s0 = 1 - (s_ctrl + s_perm)`.
     pub fn chiplet_selectors(&self) -> [T; 6]
@@ -60,7 +59,7 @@ impl<T> MainCols<T> {
     {
         [
             self.chiplets[0],
-            self.perm_seg,
+            self.s_perm,
             self.chiplets[1],
             self.chiplets[2],
             self.chiplets[3],
@@ -277,8 +276,8 @@ mod tests {
     fn col_map_chiplets() {
         assert_eq!(MAIN_COL_MAP.chiplets[0], CHIPLETS_OFFSET);
         assert_eq!(MAIN_COL_MAP.chiplets[19], CHIPLETS_OFFSET + 19);
-        // perm_seg is a separate field after chiplets[0..20]
-        assert_eq!(MAIN_COL_MAP.perm_seg, CHIPLETS_OFFSET + 20);
+        // s_perm is a separate field after chiplets[0..20]
+        assert_eq!(MAIN_COL_MAP.s_perm, CHIPLETS_OFFSET + 20);
     }
 
     // --- Auxiliary trace column map vs legacy constants

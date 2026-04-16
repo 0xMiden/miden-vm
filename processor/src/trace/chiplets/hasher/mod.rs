@@ -47,11 +47,11 @@ fn key_to_state(key: &StateKey) -> HasherState {
 ///
 /// This component uses a controller/permutation split architecture:
 ///
-/// - **Controller region** (perm_seg=0): pairs of (input, output) rows for each permutation
-///   request. Input rows (s0=1) capture the operation type and pre-permutation state. Output rows
-///   (s0=0, s1=0) capture the post-permutation state.
+/// - **Controller region** (s_perm=0): pairs of (input, output) rows for each permutation request.
+///   Input rows (s0=1) capture the operation type and pre-permutation state. Output rows (s0=0,
+///   s1=0) capture the post-permutation state.
 ///
-/// - **Permutation segment** (perm_seg=1): one 16-row Poseidon2 cycle per unique input state.
+/// - **Permutation segment** (s_perm=1): one 16-row Poseidon2 cycle per unique input state.
 ///   Multiplicity is stored in the node_index column. Linked to controller rows via the hasher_perm
 ///   LogUp bus.
 ///
@@ -60,7 +60,7 @@ fn key_to_state(key: &StateKey) -> HasherState {
 ///
 /// ## Trace layout (20 columns)
 ///
-///   s0  s1  s2  h0..h11  idx  mrupdate_id  is_boundary  direction_bit  perm_seg
+///   s0  s1  s2  h0..h11  idx  mrupdate_id  is_boundary  direction_bit  s_perm
 /// ├────┴───┴───┴────────┴────┴────────────┴─────────┴─────────┴────────┤
 #[derive(Debug, Default)]
 pub struct Hasher {

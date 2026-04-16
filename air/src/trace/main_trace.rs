@@ -17,7 +17,7 @@ use super::{
     chiplets::{
         BITWISE_A_COL_IDX, BITWISE_B_COL_IDX, BITWISE_OUTPUT_COL_IDX, HASHER_DIRECTION_BIT_COL_IDX,
         HASHER_IS_BOUNDARY_COL_IDX, HASHER_MRUPDATE_ID_COL_IDX, HASHER_NODE_INDEX_COL_IDX,
-        HASHER_PERM_SEG_COL_IDX, HASHER_STATE_COL_RANGE, MEMORY_CLK_COL_IDX, MEMORY_CTX_COL_IDX,
+        HASHER_S_PERM_COL_IDX, HASHER_STATE_COL_RANGE, MEMORY_CLK_COL_IDX, MEMORY_CTX_COL_IDX,
         MEMORY_IDX0_COL_IDX, MEMORY_IDX1_COL_IDX, MEMORY_V_COL_RANGE, MEMORY_WORD_ADDR_HI_COL_IDX,
         MEMORY_WORD_ADDR_LO_COL_IDX, MEMORY_WORD_COL_IDX, NUM_ACE_SELECTORS,
         ace::{
@@ -755,7 +755,7 @@ impl MainTrace {
 
     /// Returns `true` if a row is part of the hash chiplet (controller or permutation).
     pub fn is_hash_row(&self, i: RowIndex) -> bool {
-        self.chiplet_selector_0(i) == ONE || self.chiplet_perm_seg(i) == ONE
+        self.chiplet_selector_0(i) == ONE || self.chiplet_s_perm(i) == ONE
     }
 
     /// Returns the (full) state of the hasher chiplet at row i.
@@ -789,9 +789,9 @@ impl MainTrace {
         self.get(i, HASHER_DIRECTION_BIT_COL_IDX)
     }
 
-    /// Returns the hasher's perm_seg column at row i (0=controller, 1=permutation segment).
-    pub fn chiplet_perm_seg(&self, i: RowIndex) -> Felt {
-        self.get(i, HASHER_PERM_SEG_COL_IDX)
+    /// Returns the hasher's s_perm column at row i (0=controller, 1=permutation segment).
+    pub fn chiplet_s_perm(&self, i: RowIndex) -> Felt {
+        self.get(i, HASHER_S_PERM_COL_IDX)
     }
 
     /// Returns the memory's word address low 16-bit limb at row i.
@@ -808,7 +808,7 @@ impl MainTrace {
     /// Active when virtual s0=1 (s_ctrl=0, s_perm=0) and s1=0.
     pub fn is_bitwise_row(&self, i: RowIndex) -> bool {
         self.chiplet_selector_0(i) == ZERO
-            && self.chiplet_perm_seg(i) == ZERO
+            && self.chiplet_s_perm(i) == ZERO
             && self.chiplet_selector_1(i) == ZERO
     }
 
@@ -831,7 +831,7 @@ impl MainTrace {
     /// Active when virtual s0=1 (s_ctrl=0, s_perm=0) and s1=1, s2=0.
     pub fn is_memory_row(&self, i: RowIndex) -> bool {
         self.chiplet_selector_0(i) == ZERO
-            && self.chiplet_perm_seg(i) == ZERO
+            && self.chiplet_s_perm(i) == ZERO
             && self.chiplet_selector_1(i) == ONE
             && self.chiplet_selector_2(i) == ZERO
     }
@@ -885,7 +885,7 @@ impl MainTrace {
     /// Active when virtual s0=1 (s_ctrl=0, s_perm=0) and s1=1, s2=1, s3=0.
     pub fn is_ace_row(&self, i: RowIndex) -> bool {
         self.chiplet_selector_0(i) == ZERO
-            && self.chiplet_perm_seg(i) == ZERO
+            && self.chiplet_s_perm(i) == ZERO
             && self.chiplet_selector_1(i) == ONE
             && self.chiplet_selector_2(i) == ONE
             && self.chiplet_selector_3(i) == ZERO
@@ -999,7 +999,7 @@ impl MainTrace {
     /// Active when virtual s0=1 (s_ctrl=0, s_perm=0) and s1=1, s2=1, s3=1, s4=0.
     pub fn is_kernel_row(&self, i: RowIndex) -> bool {
         self.chiplet_selector_0(i) == ZERO
-            && self.chiplet_perm_seg(i) == ZERO
+            && self.chiplet_s_perm(i) == ZERO
             && self.chiplet_selector_1(i) == ONE
             && self.chiplet_selector_2(i) == ONE
             && self.chiplet_selector_3(i) == ONE
@@ -1051,7 +1051,7 @@ impl MainTrace {
     /// MV input row inserts a sibling into the virtual sibling table via the hash_kernel bus.
     pub fn f_mv(&self, i: RowIndex) -> bool {
         self.chiplet_selector_0(i) == ONE         // s_ctrl=1 (controller row)
-            && self.chiplet_perm_seg(i) == ZERO   // controller region
+            && self.chiplet_s_perm(i) == ZERO   // controller region
             && self.chiplet_selector_1(i) == ONE  // s0=1 (input row)
             && self.chiplet_selector_2(i) == ONE  // s1=1 (MR_UPDATE_OLD)
             && self.chiplet_selector_3(i) == ZERO // s2=0
@@ -1064,7 +1064,7 @@ impl MainTrace {
     /// The sibling table balance ensures the old and new paths use the same siblings.
     pub fn f_mu(&self, i: RowIndex) -> bool {
         self.chiplet_selector_0(i) == ONE         // s_ctrl=1 (controller row)
-            && self.chiplet_perm_seg(i) == ZERO   // controller region
+            && self.chiplet_s_perm(i) == ZERO   // controller region
             && self.chiplet_selector_1(i) == ONE  // s0=1 (input row)
             && self.chiplet_selector_2(i) == ONE  // s1=1 (MR_UPDATE_NEW)
             && self.chiplet_selector_3(i) == ONE // s2=1

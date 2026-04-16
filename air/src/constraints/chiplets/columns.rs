@@ -30,7 +30,7 @@ pub fn borrow_chiplet<T, S>(slice: &[T]) -> &S {
 /// `w0..w2` share the same physical columns as the controller's `s0/s1/s2` selectors,
 /// and `multiplicity` shares the same physical column as the controller's `node_index`.
 ///
-/// `s_ctrl` (= `chiplets[0]`) and `s_perm` (= `perm_seg`) are consumed by the chiplet
+/// `s_ctrl` (= `chiplets[0]`) and `s_perm` (= `MainCols::s_perm`) are consumed by the chiplet
 /// selector system and are NOT part of this overlay.
 ///
 /// The state holds a Poseidon2 sponge in `[RATE0, RATE1, CAPACITY]` layout.
@@ -108,7 +108,7 @@ impl<T: Copy> PermutationCols<T> {
 /// (`s0 = 1`) from output/padding rows (`s0 = 0`). The physical layout mirrors
 /// [`PermutationCols`], but column names reflect the controller/permutation split.
 ///
-/// `s_ctrl` (= `chiplets[0]`) and `s_perm` (= `perm_seg`) are consumed by the chiplet
+/// `s_ctrl` (= `chiplets[0]`) and `s_perm` (= `MainCols::s_perm`) are consumed by the chiplet
 /// selector system and are NOT part of this overlay. Because the chiplet-level
 /// non-hasher selector is only ever a virtual expression (`1 - s_ctrl - s_perm`) and is
 /// never a named column or struct field, there is no name collision with the
@@ -665,7 +665,7 @@ const _: () = {
     assert!(size_of::<BitwisePeriodicCols<u8>>() == 2);
 
     // PermutationCols and ControllerCols overlay chiplets[1..20] (19 columns,
-    // excluding perm_seg which is consumed by the chiplet selector system).
+    // excluding s_perm which is consumed by the chiplet selector system).
     assert!(size_of::<PermutationCols<u8>>() == 19);
     assert!(size_of::<ControllerCols<u8>>() == 19);
 };

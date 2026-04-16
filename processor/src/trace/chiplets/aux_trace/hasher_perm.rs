@@ -45,13 +45,13 @@ pub fn build_perm_link_running_sum<E: ExtensionField<Felt>>(
             continue;
         }
 
-        let perm_seg = main_trace.chiplet_perm_seg(row);
+        let s_perm = main_trace.chiplet_s_perm(row);
         // Hasher-internal sub-selectors (only meaningful on controller rows):
         // s0 = chiplets[1] (input flag), s1 = chiplets[2].
         let s0 = main_trace.chiplet_selector_1(row);
         let s1 = main_trace.chiplet_selector_2(row);
 
-        if perm_seg == Felt::ZERO {
+        if s_perm == Felt::ZERO {
             // Controller region
             if s0 == Felt::ONE {
                 // Controller input row: +1/msg_in

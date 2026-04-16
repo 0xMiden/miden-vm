@@ -204,7 +204,7 @@ where
 ///
 /// This is a SEPARATE constraint from the ACE wiring, using its own delta from the
 /// V_WIRING aux column. It subtracts 3 LogUp fractions per memory row:
-/// 1/(alpha_rc+w0) + 1/(alpha_rc+w1) + 1/(alpha_rc+4w1).
+/// 1/(prefix+w0) + 1/(prefix+w1) + 1/(prefix+4w1).
 ///
 /// Uses `bus_prefix[RANGE_CHECK_BUS]` to match the range checker's encoding.
 fn compute_memory_term<AB>(
@@ -216,16 +216,16 @@ fn compute_memory_term<AB>(
 where
     AB: MidenAirBuilder,
 {
-    let alpha = &challenges.bus_prefix[bus_types::RANGE_CHECK_BUS];
+    let prefix = &challenges.bus_prefix[bus_types::RANGE_CHECK_BUS];
 
     // Load word-index limbs
     let w0: AB::Expr = local.chiplets[MEMORY_WORD_ADDR_LO_COL_IDX - CHIPLETS_OFFSET].into();
     let w1: AB::Expr = local.chiplets[MEMORY_WORD_ADDR_HI_COL_IDX - CHIPLETS_OFFSET].into();
     let w1_mul4: AB::Expr = w1.clone() * AB::Expr::from_u16(4);
 
-    let den0: AB::ExprEF = alpha.clone() + Into::<AB::ExprEF>::into(w0);
-    let den1: AB::ExprEF = alpha.clone() + Into::<AB::ExprEF>::into(w1);
-    let den2: AB::ExprEF = alpha.clone() + Into::<AB::ExprEF>::into(w1_mul4);
+    let den0: AB::ExprEF = prefix.clone() + Into::<AB::ExprEF>::into(w0);
+    let den1: AB::ExprEF = prefix.clone() + Into::<AB::ExprEF>::into(w1);
+    let den2: AB::ExprEF = prefix.clone() + Into::<AB::ExprEF>::into(w1_mul4);
 
     // Common denominator and numerator
     let common_den = den0.clone() * den1.clone() * den2.clone();
@@ -242,11 +242,11 @@ where
 /// Computes the hasher perm-link contribution to the wiring bus and enforces idle propagation.
 ///
 /// This links hasher controller rows (dispatch) to hasher permutation segment (compute):
-/// - Hasher controller input (perm_seg=0, s0=1): +1/msg_in
-/// - Hasher controller output (perm_seg=0, s0=0, s1=0): +1/msg_out
+/// - Hasher controller input (s_perm=0, s0=1): +1/msg_in
+/// - Hasher controller output (s_perm=0, s0=0, s1=0): +1/msg_out
 /// - Hasher permutation cycle row 0 (`is_init_ext = 1`): -m/msg_in
-/// - Hasher permutation boundary row (cycle row 15, i.e. `perm_seg=1` and all row-type selectors
-///   are 0): -m/msg_out
+/// - Hasher permutation boundary row (cycle row 15, i.e. `s_perm=1` and all row-type selectors are
+///   0): -m/msg_out
 /// - Idle bitwise / kernel-ROM / padding rows: `delta = 0`
 ///
 /// Common-denominator form:

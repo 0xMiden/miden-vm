@@ -19,8 +19,8 @@ state is requested multiple times, the controller records multiple requests but
 the permutation segment executes the permutation only once and carries the
 request count as a multiplicity.
 
-The two physical selectors `s_ctrl` (= `chiplets[0]`) and `s_perm` (= `perm_seg`,
-the last chiplets column) partition hasher rows. The virtual selector
+The two physical selectors `s_ctrl` (= `chiplets[0]`) and `s_perm`
+(the last chiplets column) partition hasher rows. The virtual selector
 `s0 = 1 - s_ctrl - s_perm` covers all non-hasher rows and is subdivided by
 `s1..s4` into the remaining chiplets (bitwise, memory, ACE, kernel ROM). The
 transition rules `ctrl → ctrl | perm`, `perm → perm | s0`, `s0 → s0` enforce
@@ -59,14 +59,14 @@ reused as witness columns `(w0, w1, w2)` for the packed internal rounds.
 
 Within the chiplets segment, the hasher occupies **20 columns** split between the
 two sub-chiplets. The chiplet-level selectors `s_ctrl` (= `chiplets[0]`) and
-`s_perm` (= `perm_seg`, the separate 20th column) select which sub-chiplet owns
+`s_perm` (the separate 20th column) select which sub-chiplet owns
 the current row. The remaining 19 columns (`chiplets[1..20]`) are a **union**
 whose interpretation depends on which sub-chiplet is active.
 
 | Physical column(s) | Controller (`s_ctrl = 1`) | Permutation (`s_perm = 1`) |
 |-------------------|---------------------------|----------------------------|
 | `chiplets[0]`     | `s_ctrl = 1` (controller gate)   | `s_ctrl = 0` |
-| `perm_seg`        | `s_perm = 0`                     | `s_perm = 1` (perm gate) |
+| `s_perm`          | `s_perm = 0`                     | `s_perm = 1` (perm gate) |
 | `chiplets[1]`     | `s0` (input / output-or-pad)    | `w0` (S-box witness) |
 | `chiplets[2]`     | `s1` (operation sub-selector)    | `w1` (S-box witness) |
 | `chiplets[3]`     | `s2` (operation sub-selector)    | `w2` (S-box witness) |

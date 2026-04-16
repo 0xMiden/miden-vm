@@ -9,7 +9,7 @@
 //!
 //! Rows contribute either a request term, a response term, or the identity (when no flag is set).
 //! The request/response values use the standard message format:
-//! `alpha + sum_i beta^i * element[i]`.
+//! `bus_prefix[bus] + sum_i beta^i * element[i]`.
 
 use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess};
@@ -243,7 +243,8 @@ const SIBLING_B1_LAYOUT: [usize; 6] = [1, 2, 3, 4, 5, 6];
 
 /// Compute sibling value when b=0 (sibling at h[4..8], i.e., rate1).
 ///
-/// Message: `alpha + beta[1]*mrupdate_id + beta[2]*node_index + beta[7..11]*h[4..8]`
+/// Message: `bus_prefix[SIBLING_TABLE] + beta[1]*mrupdate_id + beta[2]*node_index +
+/// beta[7..11]*h[4..8]`
 fn compute_sibling_b0<AB>(
     challenges: &Challenges<AB::ExprEF>,
     mrupdate_id: &AB::Expr,
@@ -269,7 +270,8 @@ where
 
 /// Compute sibling value when b=1 (sibling at h[0..4], i.e., rate0).
 ///
-/// Message: `alpha + beta[1]*mrupdate_id + beta[2]*node_index + beta[3..7]*h[0..4]`
+/// Message: `bus_prefix[SIBLING_TABLE] + beta[1]*mrupdate_id + beta[2]*node_index +
+/// beta[3..7]*h[0..4]`
 fn compute_sibling_b1<AB>(
     challenges: &Challenges<AB::ExprEF>,
     mrupdate_id: &AB::Expr,

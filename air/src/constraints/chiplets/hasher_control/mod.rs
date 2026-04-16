@@ -157,6 +157,17 @@ pub fn enforce_controller_constraints<AB>(
     // `chiplet.is_last = s_ctrl * (1 - s_ctrl')` fires exactly on that boundary.
     builder.when(chiplet.is_last.clone()).assert_zero(rows.is_input.clone());
 
+    // --- No non-final output at the ctrl→perm boundary ---
+    // Defensive: an output row at the ctrl→perm boundary must be final
+    // (is_boundary = 1). Without this, a non-final output (is_boundary = 0)
+    // would expect a continuation input that never comes, since the next row
+    // belongs to the permutation segment.
+    // Degree: is_last(2) * is_output(2) * inner(1) = 5.
+    builder
+        .when(chiplet.is_last.clone())
+        .when(rows.is_output.clone())
+        .assert_one(cols.is_boundary);
+
     // --- Input→output adjacency on ctrl→ctrl transitions ---
     // On a ctrl→ctrl transition from an input row, the next row must be an
     // output row. `is_transition` carries the `s_ctrl'` factor, so on this

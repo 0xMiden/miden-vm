@@ -320,7 +320,7 @@ impl Chiplets {
                         ace_fragment.push_column_slice(rest);
                     },
                     20 => {
-                        // column 20 is relevant only for the hasher chiplet (perm_seg = s_perm)
+                        // column 20 is relevant only for the hasher chiplet (s_perm)
                         hasher_fragment.push_column_slice(column);
                     },
                     _ => panic!("invalid column index"),

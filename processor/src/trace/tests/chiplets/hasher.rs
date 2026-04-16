@@ -338,8 +338,8 @@ fn hasher_response_at(
     challenges: &Challenges<Felt>,
     row: RowIndex,
 ) -> Felt {
-    let perm_seg = trace.main_trace.chiplet_perm_seg(row);
-    if perm_seg == ONE {
+    let s_perm = trace.main_trace.chiplet_s_perm(row);
+    if s_perm == ONE {
         return ONE; // perm segment: no response
     }
 

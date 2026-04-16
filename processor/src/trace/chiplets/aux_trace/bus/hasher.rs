@@ -551,7 +551,7 @@ where
     E: ExtensionField<Felt>,
 {
     // Permutation segment rows never produce chiplets bus responses.
-    if main_trace.chiplet_perm_seg(row) == ONE {
+    if main_trace.chiplet_s_perm(row) == ONE {
         return E::ONE;
     }
 

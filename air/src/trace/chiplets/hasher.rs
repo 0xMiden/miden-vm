@@ -111,12 +111,12 @@ pub const IS_BOUNDARY_COL_IDX: usize = MRUPDATE_ID_COL_IDX + 1;
 /// bit from the node index. Zero on non-Merkle rows and perm segment rows.
 pub const DIRECTION_BIT_COL_IDX: usize = IS_BOUNDARY_COL_IDX + 1;
 
-/// Index of the perm_seg column (0 = controller region, 1 = permutation segment).
-pub const PERM_SEG_COL_IDX: usize = DIRECTION_BIT_COL_IDX + 1;
+/// Index of the s_perm column (0 = controller region, 1 = permutation segment).
+pub const S_PERM_COL_IDX: usize = DIRECTION_BIT_COL_IDX + 1;
 
 /// Number of columns in Hasher execution trace.
-/// 3 selectors + 12 state + node_index + mrupdate_id + is_boundary + direction_bit + perm_seg = 20.
-pub const TRACE_WIDTH: usize = PERM_SEG_COL_IDX + 1;
+/// 3 selectors + 12 state + node_index + mrupdate_id + is_boundary + direction_bit + s_perm = 20.
+pub const TRACE_WIDTH: usize = S_PERM_COL_IDX + 1;
 
 /// Number of controller rows per permutation request (one input + one output).
 pub const CONTROLLER_ROWS_PER_PERMUTATION: usize = 2;
