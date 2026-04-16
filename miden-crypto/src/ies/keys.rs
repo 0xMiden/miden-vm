@@ -306,10 +306,10 @@ impl Deserializable for SealingKey {
 
 /// Secret key for unsealing messages.
 pub enum UnsealingKey {
-    K256XChaCha20Poly1305(crate::dsa::ecdsa_k256_keccak::SecretKey),
-    X25519XChaCha20Poly1305(crate::dsa::eddsa_25519_sha512::SecretKey),
-    K256AeadPoseidon2(crate::dsa::ecdsa_k256_keccak::SecretKey),
-    X25519AeadPoseidon2(crate::dsa::eddsa_25519_sha512::SecretKey),
+    K256XChaCha20Poly1305(crate::dsa::ecdsa_k256_keccak::KeyExchangeKey),
+    X25519XChaCha20Poly1305(crate::dsa::eddsa_25519_sha512::KeyExchangeKey),
+    K256AeadPoseidon2(crate::dsa::ecdsa_k256_keccak::KeyExchangeKey),
+    X25519AeadPoseidon2(crate::dsa::eddsa_25519_sha512::KeyExchangeKey),
 }
 
 impl UnsealingKey {
@@ -385,19 +385,19 @@ impl Deserializable for UnsealingKey {
 
         match scheme {
             IesScheme::K256XChaCha20Poly1305 => {
-                let key = crate::dsa::ecdsa_k256_keccak::SecretKey::read_from(source)?;
+                let key = crate::dsa::ecdsa_k256_keccak::KeyExchangeKey::read_from(source)?;
                 Ok(UnsealingKey::K256XChaCha20Poly1305(key))
             },
             IesScheme::X25519XChaCha20Poly1305 => {
-                let key = crate::dsa::eddsa_25519_sha512::SecretKey::read_from(source)?;
+                let key = crate::dsa::eddsa_25519_sha512::KeyExchangeKey::read_from(source)?;
                 Ok(UnsealingKey::X25519XChaCha20Poly1305(key))
             },
             IesScheme::K256AeadPoseidon2 => {
-                let key = crate::dsa::ecdsa_k256_keccak::SecretKey::read_from(source)?;
+                let key = crate::dsa::ecdsa_k256_keccak::KeyExchangeKey::read_from(source)?;
                 Ok(UnsealingKey::K256AeadPoseidon2(key))
             },
             IesScheme::X25519AeadPoseidon2 => {
-                let key = crate::dsa::eddsa_25519_sha512::SecretKey::read_from(source)?;
+                let key = crate::dsa::eddsa_25519_sha512::KeyExchangeKey::read_from(source)?;
                 Ok(UnsealingKey::X25519AeadPoseidon2(key))
             },
         }

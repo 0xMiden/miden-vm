@@ -9,13 +9,13 @@
 //!
 //! ```
 //! use miden_crypto::{
-//!     dsa::eddsa_25519_sha512::SecretKey,
+//!     dsa::eddsa_25519_sha512::KeyExchangeKey,
 //!     ies::{SealingKey, UnsealingKey},
 //! };
 //! use rand::rng;
 //!
 //! let mut rng = rng();
-//! let secret_key = SecretKey::with_rng(&mut rng);
+//! let secret_key = KeyExchangeKey::with_rng(&mut rng);
 //! let public_key = secret_key.public_key();
 //!
 //! let sealing_key = SealingKey::X25519XChaCha20Poly1305(public_key);

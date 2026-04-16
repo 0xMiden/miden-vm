@@ -19,14 +19,13 @@ use k256::{AffinePoint, elliptic_curve::sec1::ToEncodedPoint, sha2::Sha256};
 use rand::{CryptoRng, RngCore};
 
 use crate::{
-    dsa::ecdsa_k256_keccak::{PUBLIC_KEY_BYTES, PublicKey, SecretKey},
+    dsa::ecdsa_k256_keccak::{KeyExchangeKey, PUBLIC_KEY_BYTES, PublicKey},
     ecdh::KeyAgreementScheme,
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing},
     },
 };
-
 // SHARED SECRET
 // ================================================================================================
 
@@ -187,7 +186,7 @@ impl KeyAgreementScheme for K256 {
     type EphemeralSecretKey = EphemeralSecretKey;
     type EphemeralPublicKey = EphemeralPublicKey;
 
-    type SecretKey = SecretKey;
+    type SecretKey = KeyExchangeKey;
     type PublicKey = PublicKey;
 
     type SharedSecret = SharedSecret;
@@ -235,7 +234,7 @@ impl KeyAgreementScheme for K256 {
 mod test {
     use super::{EphemeralPublicKey, EphemeralSecretKey};
     use crate::{
-        dsa::ecdsa_k256_keccak::SecretKey,
+        dsa::ecdsa_k256_keccak::KeyExchangeKey,
         rand::test_utils::seeded_rng,
         utils::{Deserializable, Serializable},
     };
@@ -245,7 +244,7 @@ mod test {
         let mut rng = seeded_rng([0u8; 32]);
 
         // 1. Generate the static key-pair for Alice
-        let sk = SecretKey::with_rng(&mut rng);
+        let sk = KeyExchangeKey::with_rng(&mut rng);
         let pk = sk.public_key();
 
         // 2. Generate the ephemeral key-pair for Bob

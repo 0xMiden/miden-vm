@@ -8,9 +8,9 @@ use rand_chacha::ChaCha20Rng;
 
 use crate::{
     dsa::{
-        ecdsa_k256_keccak::{PUBLIC_KEY_BYTES as K256_PUBLIC_KEY_BYTES, SecretKey},
+        ecdsa_k256_keccak::PUBLIC_KEY_BYTES as K256_PUBLIC_KEY_BYTES,
         eddsa_25519_sha512::{
-            PUBLIC_KEY_BYTES as X25519_PUBLIC_KEY_BYTES, SecretKey as SecretKey25519,
+            KeyExchangeKey as KeyExchangeKey25519, PUBLIC_KEY_BYTES as X25519_PUBLIC_KEY_BYTES,
         },
     },
     ies::{keys::EphemeralPublicKey, *},
@@ -99,12 +99,13 @@ macro_rules! test_basic_roundtrip {
 /// K256 + XChaCha20-Poly1305 test suite
 mod k256_xchacha_tests {
     use super::*;
+    use crate::dsa::ecdsa_k256_keccak::KeyExchangeKey;
 
     #[test]
     fn test_k256_xchacha_bytes_roundtrip() {
         let mut rng = rand::rng();
         let plaintext = b"test bytes encryption";
-        let secret_key = SecretKey::with_rng(&mut rng);
+        let secret_key = KeyExchangeKey::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::K256XChaCha20Poly1305(public_key);
         let unsealing_key = UnsealingKey::K256XChaCha20Poly1305(secret_key);
@@ -116,7 +117,7 @@ mod k256_xchacha_tests {
         let mut rng = rand::rng();
         let plaintext = b"test bytes with associated data";
         let associated_data = b"authentication context";
-        let secret_key = SecretKey::with_rng(&mut rng);
+        let secret_key = KeyExchangeKey::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::K256XChaCha20Poly1305(public_key);
         let unsealing_key = UnsealingKey::K256XChaCha20Poly1305(secret_key);
@@ -138,7 +139,7 @@ mod k256_xchacha_tests {
             crate::Felt::new_unchecked(1337),
             crate::Felt::new_unchecked(9999),
         ];
-        let secret_key = SecretKey::with_rng(&mut rng);
+        let secret_key = KeyExchangeKey::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::K256XChaCha20Poly1305(public_key);
         let unsealing_key = UnsealingKey::K256XChaCha20Poly1305(secret_key);
@@ -161,7 +162,7 @@ mod k256_xchacha_tests {
         ];
         let associated_data =
             vec![crate::Felt::new_unchecked(999), crate::Felt::new_unchecked(888)];
-        let secret_key = SecretKey::with_rng(&mut rng);
+        let secret_key = KeyExchangeKey::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::K256XChaCha20Poly1305(public_key);
         let unsealing_key = UnsealingKey::K256XChaCha20Poly1305(secret_key);
@@ -181,7 +182,7 @@ mod k256_xchacha_tests {
         let plaintext = b"test invalid associated data";
         let correct_ad = b"correct context";
         let incorrect_ad = b"wrong context";
-        let secret_key = SecretKey::with_rng(&mut rng);
+        let secret_key = KeyExchangeKey::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::K256XChaCha20Poly1305(public_key);
         let sealed = sealing_key
@@ -199,7 +200,7 @@ mod k256_xchacha_tests {
             associated_data in arbitrary_bytes()
         ) {
             let mut rng = rand::rng();
-            let secret_key = SecretKey::with_rng(&mut rng);
+            let secret_key = KeyExchangeKey::with_rng(&mut rng);
             let public_key = secret_key.public_key();
             let sealing_key = SealingKey::K256XChaCha20Poly1305(public_key);
             let unsealing_key = UnsealingKey::K256XChaCha20Poly1305(secret_key);
@@ -212,7 +213,7 @@ mod k256_xchacha_tests {
             associated_data in arbitrary_field_elements()
         ) {
             let mut rng = rand::rng();
-            let secret_key = SecretKey::with_rng(&mut rng);
+            let secret_key = KeyExchangeKey::with_rng(&mut rng);
             let public_key = secret_key.public_key();
             let sealing_key = SealingKey::K256XChaCha20Poly1305(public_key);
             let unsealing_key = UnsealingKey::K256XChaCha20Poly1305(secret_key);
@@ -225,9 +226,9 @@ mod k256_xchacha_tests {
         ) {
             prop_assume!(!plaintext.is_empty());
             let mut rng = rand::rng();
-            let secret1 = SecretKey::with_rng(&mut rng);
+            let secret1 = KeyExchangeKey::with_rng(&mut rng);
             let public1 = secret1.public_key();
-            let secret2 = SecretKey::with_rng(&mut rng);
+            let secret2 = KeyExchangeKey::with_rng(&mut rng);
             let sealing_key = SealingKey::K256XChaCha20Poly1305(public1);
             let sealed = sealing_key.seal_bytes(&mut rng, &plaintext).unwrap();
             let unsealing_key = UnsealingKey::K256XChaCha20Poly1305(secret2);
@@ -247,7 +248,7 @@ mod x25519_xchacha_tests {
     fn test_x25519_xchacha_bytes_roundtrip() {
         let mut rng = rand::rng();
         let plaintext = b"test bytes encryption";
-        let secret_key = SecretKey25519::with_rng(&mut rng);
+        let secret_key = KeyExchangeKey25519::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::X25519XChaCha20Poly1305(public_key);
         let unsealing_key = UnsealingKey::X25519XChaCha20Poly1305(secret_key);
@@ -259,7 +260,7 @@ mod x25519_xchacha_tests {
         let mut rng = rand::rng();
         let plaintext = b"test bytes with associated data";
         let associated_data = b"authentication context";
-        let secret_key = SecretKey25519::with_rng(&mut rng);
+        let secret_key = KeyExchangeKey25519::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::X25519XChaCha20Poly1305(public_key);
         let unsealing_key = UnsealingKey::X25519XChaCha20Poly1305(secret_key);
@@ -281,7 +282,7 @@ mod x25519_xchacha_tests {
             crate::Felt::new_unchecked(1337),
             crate::Felt::new_unchecked(9999),
         ];
-        let secret_key = SecretKey25519::with_rng(&mut rng);
+        let secret_key = KeyExchangeKey25519::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::X25519XChaCha20Poly1305(public_key);
         let unsealing_key = UnsealingKey::X25519XChaCha20Poly1305(secret_key);
@@ -304,7 +305,7 @@ mod x25519_xchacha_tests {
         ];
         let associated_data =
             vec![crate::Felt::new_unchecked(999), crate::Felt::new_unchecked(888)];
-        let secret_key = SecretKey25519::with_rng(&mut rng);
+        let secret_key = KeyExchangeKey25519::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::X25519XChaCha20Poly1305(public_key);
         let unsealing_key = UnsealingKey::X25519XChaCha20Poly1305(secret_key);
@@ -324,7 +325,7 @@ mod x25519_xchacha_tests {
         let plaintext = b"test invalid associated data";
         let correct_ad = b"correct context";
         let incorrect_ad = b"wrong context";
-        let secret_key = SecretKey25519::with_rng(&mut rng);
+        let secret_key = KeyExchangeKey25519::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::X25519XChaCha20Poly1305(public_key);
         let sealed = sealing_key
@@ -342,7 +343,7 @@ mod x25519_xchacha_tests {
         let mut rng = rand::rng();
         let plaintext = b"malleability check";
 
-        let secret_key = SecretKey25519::with_rng(&mut rng);
+        let secret_key = KeyExchangeKey25519::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::X25519XChaCha20Poly1305(public_key);
         let unsealing_key = UnsealingKey::X25519XChaCha20Poly1305(secret_key);
@@ -377,7 +378,7 @@ mod x25519_xchacha_tests {
             associated_data in arbitrary_bytes()
         ) {
             let mut rng = rand::rng();
-            let secret_key = SecretKey25519::with_rng(&mut rng);
+            let secret_key = KeyExchangeKey25519::with_rng(&mut rng);
             let public_key = secret_key.public_key();
             let sealing_key = SealingKey::X25519XChaCha20Poly1305(public_key);
             let unsealing_key = UnsealingKey::X25519XChaCha20Poly1305(secret_key);
@@ -390,7 +391,7 @@ mod x25519_xchacha_tests {
             associated_data in arbitrary_field_elements()
         ) {
             let mut rng = rand::rng();
-            let secret_key = SecretKey25519::with_rng(&mut rng);
+            let secret_key = KeyExchangeKey25519::with_rng(&mut rng);
             let public_key = secret_key.public_key();
             let sealing_key = SealingKey::X25519XChaCha20Poly1305(public_key);
             let unsealing_key = UnsealingKey::X25519XChaCha20Poly1305(secret_key);
@@ -403,9 +404,9 @@ mod x25519_xchacha_tests {
         ) {
             prop_assume!(!plaintext.is_empty());
             let mut rng = rand::rng();
-            let secret1 = SecretKey25519::with_rng(&mut rng);
+            let secret1 = KeyExchangeKey25519::with_rng(&mut rng);
             let public1 = secret1.public_key();
-            let secret2 = SecretKey25519::with_rng(&mut rng);
+            let secret2 = KeyExchangeKey25519::with_rng(&mut rng);
             let sealing_key = SealingKey::X25519XChaCha20Poly1305(public1);
             let sealed = sealing_key.seal_bytes(&mut rng, &plaintext).unwrap();
             let unsealing_key = UnsealingKey::X25519XChaCha20Poly1305(secret2);
@@ -418,13 +419,14 @@ mod x25519_xchacha_tests {
 /// K256 + AeadPoseidon2 test suite
 mod k256_aead_poseidon2_tests {
     use super::*;
+    use crate::dsa::ecdsa_k256_keccak::KeyExchangeKey;
 
     // BYTES TESTS
     #[test]
     fn test_k256_aead_poseidon2_bytes_roundtrip() {
         let mut rng = rand::rng();
         let plaintext = b"test bytes encryption";
-        let secret_key = SecretKey::with_rng(&mut rng);
+        let secret_key = KeyExchangeKey::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::K256AeadPoseidon2(public_key);
         let unsealing_key = UnsealingKey::K256AeadPoseidon2(secret_key);
@@ -436,7 +438,7 @@ mod k256_aead_poseidon2_tests {
         let mut rng = rand::rng();
         let plaintext = b"test bytes with associated data";
         let associated_data = b"authentication context";
-        let secret_key = SecretKey::with_rng(&mut rng);
+        let secret_key = KeyExchangeKey::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::K256AeadPoseidon2(public_key);
         let unsealing_key = UnsealingKey::K256AeadPoseidon2(secret_key);
@@ -456,7 +458,7 @@ mod k256_aead_poseidon2_tests {
         let plaintext = b"test invalid associated data";
         let correct_ad = b"correct context";
         let incorrect_ad = b"wrong context";
-        let secret_key = SecretKey::with_rng(&mut rng);
+        let secret_key = KeyExchangeKey::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::K256AeadPoseidon2(public_key);
         let sealed = sealing_key
@@ -474,7 +476,7 @@ mod k256_aead_poseidon2_tests {
         let mut rng = rand::rng();
         let plaintext =
             vec![Felt::new_unchecked(1), Felt::new_unchecked(2), Felt::new_unchecked(3)];
-        let secret_key = SecretKey::with_rng(&mut rng);
+        let secret_key = KeyExchangeKey::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::K256AeadPoseidon2(public_key);
         let unsealing_key = UnsealingKey::K256AeadPoseidon2(secret_key);
@@ -493,7 +495,7 @@ mod k256_aead_poseidon2_tests {
         let mut rng = rand::rng();
         let plaintext = vec![Felt::new_unchecked(10), Felt::new_unchecked(20)];
         let associated_data = vec![Felt::new_unchecked(100), Felt::new_unchecked(200)];
-        let secret_key = SecretKey::with_rng(&mut rng);
+        let secret_key = KeyExchangeKey::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::K256AeadPoseidon2(public_key);
         let unsealing_key = UnsealingKey::K256AeadPoseidon2(secret_key);
@@ -514,7 +516,7 @@ mod k256_aead_poseidon2_tests {
             associated_data in arbitrary_bytes()
         ) {
             let mut rng = rand::rng();
-            let secret_key = SecretKey::with_rng(&mut rng);
+            let secret_key = KeyExchangeKey::with_rng(&mut rng);
             let public_key = secret_key.public_key();
             let sealing_key = SealingKey::K256AeadPoseidon2(public_key);
             let unsealing_key = UnsealingKey::K256AeadPoseidon2(secret_key);
@@ -527,7 +529,7 @@ mod k256_aead_poseidon2_tests {
             associated_data in arbitrary_field_elements()
         ) {
             let mut rng = rand::rng();
-            let secret_key = SecretKey::with_rng(&mut rng);
+            let secret_key = KeyExchangeKey::with_rng(&mut rng);
             let public_key = secret_key.public_key();
             let sealing_key = SealingKey::K256AeadPoseidon2(public_key);
             let unsealing_key = UnsealingKey::K256AeadPoseidon2(secret_key);
@@ -540,9 +542,9 @@ mod k256_aead_poseidon2_tests {
         ) {
             prop_assume!(!plaintext.is_empty());
             let mut rng = rand::rng();
-            let secret1 = SecretKey::with_rng(&mut rng);
+            let secret1 = KeyExchangeKey::with_rng(&mut rng);
             let public1 = secret1.public_key();
-            let secret2 = SecretKey::with_rng(&mut rng);
+            let secret2 = KeyExchangeKey::with_rng(&mut rng);
             let sealing_key = SealingKey::K256AeadPoseidon2(public1);
             let sealed = sealing_key.seal_bytes(&mut rng, &plaintext).unwrap();
             let unsealing_key = UnsealingKey::K256AeadPoseidon2(secret2);
@@ -561,7 +563,7 @@ mod x25519_aead_poseidon2_tests {
     fn test_x25519_aead_poseidon2_bytes_roundtrip() {
         let mut rng = rand::rng();
         let plaintext = b"test bytes encryption";
-        let secret_key = SecretKey25519::with_rng(&mut rng);
+        let secret_key = KeyExchangeKey25519::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::X25519AeadPoseidon2(public_key);
         let unsealing_key = UnsealingKey::X25519AeadPoseidon2(secret_key);
@@ -573,7 +575,7 @@ mod x25519_aead_poseidon2_tests {
         let mut rng = rand::rng();
         let plaintext = b"test bytes with associated data";
         let associated_data = b"authentication context";
-        let secret_key = SecretKey25519::with_rng(&mut rng);
+        let secret_key = KeyExchangeKey25519::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::X25519AeadPoseidon2(public_key);
         let unsealing_key = UnsealingKey::X25519AeadPoseidon2(secret_key);
@@ -593,7 +595,7 @@ mod x25519_aead_poseidon2_tests {
         let plaintext = b"test invalid associated data";
         let correct_ad = b"correct context";
         let incorrect_ad = b"wrong context";
-        let secret_key = SecretKey25519::with_rng(&mut rng);
+        let secret_key = KeyExchangeKey25519::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::X25519AeadPoseidon2(public_key);
         let sealed = sealing_key
@@ -611,7 +613,7 @@ mod x25519_aead_poseidon2_tests {
         let mut rng = rand::rng();
         let plaintext =
             vec![Felt::new_unchecked(1), Felt::new_unchecked(2), Felt::new_unchecked(3)];
-        let secret_key = SecretKey25519::with_rng(&mut rng);
+        let secret_key = KeyExchangeKey25519::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::X25519AeadPoseidon2(public_key);
         let unsealing_key = UnsealingKey::X25519AeadPoseidon2(secret_key);
@@ -630,7 +632,7 @@ mod x25519_aead_poseidon2_tests {
         let mut rng = rand::rng();
         let plaintext = vec![Felt::new_unchecked(10), Felt::new_unchecked(20)];
         let associated_data = vec![Felt::new_unchecked(100), Felt::new_unchecked(200)];
-        let secret_key = SecretKey25519::with_rng(&mut rng);
+        let secret_key = KeyExchangeKey25519::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::X25519AeadPoseidon2(public_key);
         let unsealing_key = UnsealingKey::X25519AeadPoseidon2(secret_key);
@@ -651,7 +653,7 @@ mod x25519_aead_poseidon2_tests {
             associated_data in arbitrary_bytes()
         ) {
             let mut rng = rand::rng();
-            let secret_key = SecretKey25519::with_rng(&mut rng);
+            let secret_key = KeyExchangeKey25519::with_rng(&mut rng);
             let public_key = secret_key.public_key();
             let sealing_key = SealingKey::X25519AeadPoseidon2(public_key);
             let unsealing_key = UnsealingKey::X25519AeadPoseidon2(secret_key);
@@ -664,7 +666,7 @@ mod x25519_aead_poseidon2_tests {
             associated_data in arbitrary_field_elements()
         ) {
             let mut rng = rand::rng();
-            let secret_key = SecretKey25519::with_rng(&mut rng);
+            let secret_key = KeyExchangeKey25519::with_rng(&mut rng);
             let public_key = secret_key.public_key();
             let sealing_key = SealingKey::X25519AeadPoseidon2(public_key);
             let unsealing_key = UnsealingKey::X25519AeadPoseidon2(secret_key);
@@ -677,9 +679,9 @@ mod x25519_aead_poseidon2_tests {
         ) {
             prop_assume!(!plaintext.is_empty());
             let mut rng = rand::rng();
-            let secret1 = SecretKey25519::with_rng(&mut rng);
+            let secret1 = KeyExchangeKey25519::with_rng(&mut rng);
             let public1 = secret1.public_key();
-            let secret2 = SecretKey25519::with_rng(&mut rng);
+            let secret2 = KeyExchangeKey25519::with_rng(&mut rng);
             let sealing_key = SealingKey::X25519AeadPoseidon2(public1);
             let sealed = sealing_key.seal_bytes(&mut rng, &plaintext).unwrap();
             let unsealing_key = UnsealingKey::X25519AeadPoseidon2(secret2);
@@ -714,6 +716,7 @@ mod ephemeral_public_key_tests {
 /// Tests scheme mismatch detection between different IES variants
 mod scheme_compatibility_tests {
     use super::*;
+    use crate::dsa::ecdsa_k256_keccak::KeyExchangeKey;
 
     #[test]
     fn test_scheme_mismatch_k256_xchacha_vs_aead_poseidon2() {
@@ -721,13 +724,13 @@ mod scheme_compatibility_tests {
         let plaintext = b"test scheme mismatch";
 
         // Seal with K256XChaCha20Poly1305
-        let secret_key = SecretKey::with_rng(&mut rng);
+        let secret_key = KeyExchangeKey::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::K256XChaCha20Poly1305(public_key);
         let sealed = sealing_key.seal_bytes(&mut rng, plaintext).unwrap();
 
         // Try to unseal with K256AeadPoseidon2 (should fail)
-        let secret_key2 = SecretKey::with_rng(&mut rng);
+        let secret_key2 = KeyExchangeKey::with_rng(&mut rng);
         let unsealing_key = UnsealingKey::K256AeadPoseidon2(secret_key2);
         let result = unsealing_key.unseal_bytes(sealed);
         assert!(result.is_err());
@@ -739,13 +742,13 @@ mod scheme_compatibility_tests {
         let plaintext = b"test scheme mismatch";
 
         // Seal with X25519XChaCha20Poly1305
-        let secret_key = SecretKey25519::with_rng(&mut rng);
+        let secret_key = KeyExchangeKey25519::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::X25519XChaCha20Poly1305(public_key);
         let sealed = sealing_key.seal_bytes(&mut rng, plaintext).unwrap();
 
         // Try to unseal with X25519AeadPoseidon2 (should fail)
-        let secret_key2 = SecretKey25519::with_rng(&mut rng);
+        let secret_key2 = KeyExchangeKey25519::with_rng(&mut rng);
         let unsealing_key = UnsealingKey::X25519AeadPoseidon2(secret_key2);
         let result = unsealing_key.unseal_bytes(sealed);
         assert!(result.is_err());
@@ -757,13 +760,13 @@ mod scheme_compatibility_tests {
         let plaintext = b"test cross-curve mismatch";
 
         // Seal with K256XChaCha20Poly1305
-        let secret_k256 = SecretKey::with_rng(&mut rng);
+        let secret_k256 = KeyExchangeKey::with_rng(&mut rng);
         let public_k256 = secret_k256.public_key();
         let sealing_key = SealingKey::K256XChaCha20Poly1305(public_k256);
         let sealed = sealing_key.seal_bytes(&mut rng, plaintext).unwrap();
 
         // Try to unseal with X25519XChaCha20Poly1305 (should fail)
-        let secret_x25519 = SecretKey25519::with_rng(&mut rng);
+        let secret_x25519 = KeyExchangeKey25519::with_rng(&mut rng);
         let unsealing_key = UnsealingKey::X25519XChaCha20Poly1305(secret_x25519);
         let result = unsealing_key.unseal_bytes(sealed);
         assert!(result.is_err());
@@ -776,9 +779,9 @@ mod scheme_compatibility_tests {
         ) {
             let mut rng = rand::rng();
             // Create keys for different schemes
-            let secret_k256 = SecretKey::with_rng(&mut rng);
+            let secret_k256 = KeyExchangeKey::with_rng(&mut rng);
             let public_k256 = secret_k256.public_key();
-            let secret_x25519 = SecretKey25519::with_rng(&mut rng);
+            let secret_x25519 = KeyExchangeKey25519::with_rng(&mut rng);
 
             // Seal with K256XChaCha20Poly1305
             let sealing_key = SealingKey::K256XChaCha20Poly1305(public_k256);
@@ -799,11 +802,12 @@ mod scheme_compatibility_tests {
 /// Tests for IES protocol-level functionality
 mod protocol_tests {
     use super::*;
+    use crate::dsa::ecdsa_k256_keccak::KeyExchangeKey;
 
     #[test]
     fn test_ephemeral_key_serialization_k256() {
         let mut rng = rand::rng();
-        let secret_key = SecretKey::with_rng(&mut rng);
+        let secret_key = KeyExchangeKey::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::K256XChaCha20Poly1305(public_key);
         let sealed = sealing_key.seal_bytes(&mut rng, b"test").unwrap();
@@ -820,7 +824,7 @@ mod protocol_tests {
     #[test]
     fn test_ephemeral_key_serialization_x25519() {
         let mut rng = rand::rng();
-        let secret_key = SecretKey25519::with_rng(&mut rng);
+        let secret_key = KeyExchangeKey25519::with_rng(&mut rng);
         let public_key = secret_key.public_key();
         let sealing_key = SealingKey::X25519XChaCha20Poly1305(public_key);
         let sealed = sealing_key.seal_bytes(&mut rng, b"test").unwrap();
@@ -840,7 +844,7 @@ mod protocol_tests {
             plaintext in arbitrary_bytes()
         ) {
             let mut rng = rand::rng();
-            let secret_key = SecretKey::with_rng(&mut rng);
+            let secret_key = KeyExchangeKey::with_rng(&mut rng);
             let public_key = secret_key.public_key();
             let sealing_key = SealingKey::K256XChaCha20Poly1305(public_key);
             let sealed = sealing_key.seal_bytes(&mut rng, &plaintext).unwrap();
@@ -861,7 +865,7 @@ mod protocol_tests {
     #[test]
     fn test_sealed_message_serialization_roundtrip_k256_xchacha() {
         let mut rng = rand::rng();
-        let sk = SecretKey::with_rng(&mut rng);
+        let sk = KeyExchangeKey::with_rng(&mut rng);
         let pk = sk.public_key();
         let sealing_key = SealingKey::K256XChaCha20Poly1305(pk);
         let unsealing_key = UnsealingKey::K256XChaCha20Poly1305(sk);
@@ -880,7 +884,7 @@ mod protocol_tests {
     #[test]
     fn test_sealed_message_serialization_roundtrip_x25519_xchacha() {
         let mut rng = rand::rng();
-        let sk = crate::dsa::eddsa_25519_sha512::SecretKey::with_rng(&mut rng);
+        let sk = crate::dsa::eddsa_25519_sha512::KeyExchangeKey::with_rng(&mut rng);
         let pk = sk.public_key();
         let sealing_key = SealingKey::X25519XChaCha20Poly1305(pk);
         let unsealing_key = UnsealingKey::X25519XChaCha20Poly1305(sk);
@@ -899,7 +903,7 @@ mod protocol_tests {
     #[test]
     fn test_sealed_message_serialization_roundtrip_k256_aeadrpo() {
         let mut rng = rand::rng();
-        let sk = SecretKey::with_rng(&mut rng);
+        let sk = KeyExchangeKey::with_rng(&mut rng);
         let pk = sk.public_key();
         let sealing_key = SealingKey::K256AeadPoseidon2(pk);
         let unsealing_key = UnsealingKey::K256AeadPoseidon2(sk);
@@ -918,7 +922,7 @@ mod protocol_tests {
     #[test]
     fn test_sealed_message_serialization_roundtrip_x25519_aeadrpo() {
         let mut rng = rand::rng();
-        let sk = crate::dsa::eddsa_25519_sha512::SecretKey::with_rng(&mut rng);
+        let sk = crate::dsa::eddsa_25519_sha512::KeyExchangeKey::with_rng(&mut rng);
         let pk = sk.public_key();
         let sealing_key = SealingKey::X25519AeadPoseidon2(pk);
         let unsealing_key = UnsealingKey::X25519AeadPoseidon2(sk);
@@ -942,6 +946,7 @@ mod protocol_tests {
 /// Integration and regression tests
 mod integration_tests {
     use super::*;
+    use crate::dsa::ecdsa_k256_keccak::KeyExchangeKey;
 
     proptest! {
         #[test]
@@ -950,7 +955,7 @@ mod integration_tests {
         ) {
             use crate::Felt;
             let mut rng = rand::rng();
-            let secret_key = SecretKey25519::with_rng(&mut rng);
+            let secret_key = KeyExchangeKey25519::with_rng(&mut rng);
             let public_key = secret_key.public_key();
             let sealing_key = SealingKey::X25519AeadPoseidon2(public_key);
             let unsealing_key = UnsealingKey::X25519AeadPoseidon2(secret_key);
@@ -976,9 +981,9 @@ mod integration_tests {
             let mut rng = rand::rng();
 
             // Create two different key pairs
-            let secret1 = SecretKey::with_rng(&mut rng);
+            let secret1 = KeyExchangeKey::with_rng(&mut rng);
             let public1 = secret1.public_key();
-            let secret2 = SecretKey::with_rng(&mut rng);
+            let secret2 = KeyExchangeKey::with_rng(&mut rng);
             let public2 = secret2.public_key();
 
             let sealing_key1 = SealingKey::K256AeadPoseidon2(public1);
@@ -998,7 +1003,7 @@ mod integration_tests {
 
 mod keys_serialization_tests {
     use super::*;
-    use crate::utils::ByteReader;
+    use crate::{dsa::ecdsa_k256_keccak::KeyExchangeKey, utils::ByteReader};
 
     fn assert_roundtrip(sealing_key: SealingKey) {
         let expected_scheme = sealing_key.scheme();
@@ -1046,20 +1051,22 @@ mod keys_serialization_tests {
     fn sample_sealing_keys() -> Vec<SealingKey> {
         let mut rng = rand::rng();
         vec![
-            SealingKey::K256XChaCha20Poly1305(SecretKey::with_rng(&mut rng).public_key()),
-            SealingKey::X25519XChaCha20Poly1305(SecretKey25519::with_rng(&mut rng).public_key()),
-            SealingKey::K256AeadPoseidon2(SecretKey::with_rng(&mut rng).public_key()),
-            SealingKey::X25519AeadPoseidon2(SecretKey25519::with_rng(&mut rng).public_key()),
+            SealingKey::K256XChaCha20Poly1305(KeyExchangeKey::with_rng(&mut rng).public_key()),
+            SealingKey::X25519XChaCha20Poly1305(
+                KeyExchangeKey25519::with_rng(&mut rng).public_key(),
+            ),
+            SealingKey::K256AeadPoseidon2(KeyExchangeKey::with_rng(&mut rng).public_key()),
+            SealingKey::X25519AeadPoseidon2(KeyExchangeKey25519::with_rng(&mut rng).public_key()),
         ]
     }
 
     fn sample_unsealing_keys() -> Vec<UnsealingKey> {
         let mut rng = rand::rng();
         vec![
-            UnsealingKey::K256XChaCha20Poly1305(SecretKey::with_rng(&mut rng)),
-            UnsealingKey::X25519XChaCha20Poly1305(SecretKey25519::with_rng(&mut rng)),
-            UnsealingKey::K256AeadPoseidon2(SecretKey::with_rng(&mut rng)),
-            UnsealingKey::X25519AeadPoseidon2(SecretKey25519::with_rng(&mut rng)),
+            UnsealingKey::K256XChaCha20Poly1305(KeyExchangeKey::with_rng(&mut rng)),
+            UnsealingKey::X25519XChaCha20Poly1305(KeyExchangeKey25519::with_rng(&mut rng)),
+            UnsealingKey::K256AeadPoseidon2(KeyExchangeKey::with_rng(&mut rng)),
+            UnsealingKey::X25519AeadPoseidon2(KeyExchangeKey25519::with_rng(&mut rng)),
         ]
     }
 
