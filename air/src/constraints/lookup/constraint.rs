@@ -135,7 +135,10 @@ where
         self.ab.public_values()
     }
 
-    fn column<'a, R>(&'a mut self, f: impl FnOnce(&mut Self::Column<'a>) -> R) -> R {
+    fn next_column<'a, R>(
+        &'a mut self,
+        f: impl FnOnce(&mut Self::Column<'a>) -> R,
+    ) -> R {
         // Open the column with an empty `(U, V) = (1, 0)` accumulator.
         // The column only holds a shared borrow of the challenges and
         // the two running-pair slots — the `&mut AB` stays on the
@@ -150,48 +153,38 @@ where
         let result = f(&mut col);
         let ConstraintColumn { u, v, .. } = col;
 
-        // Pick up `acc` / `acc_next` from `ab.permutation()` now that the col borrow
-        // is released. The `mp` window holds an immutable borrow of `self.ab` which
-        // ends at the end of the block; the subsequent `when_*` calls take
-        // `&mut self.ab`, so the borrows must not overlap.
-        let (acc, acc_next) = {
+        // Pick up `acc` / `acc_next` from `ab.permutation()` and the committed
+        // final from `ab.permutation_values()` now that the column borrow is released.
+        let (acc, acc_next, committed_final) = {
             let mp = self.ab.permutation();
             let acc: AB::ExprEF = mp.current_slice()[self.column_idx].into();
             let acc_next: AB::ExprEF = mp.next_slice()[self.column_idx].into();
-            (acc, acc_next)
+            let committed_final: AB::ExprEF =
+                self.ab.permutation_values()[self.column_idx].clone().into();
+            (acc, acc_next, committed_final)
         };
 
-        // LogUp boundary + transition constraints. The `MidenLookupAuxBuilder` produces
-        // an aux trace whose row 0 starts at `EF::ZERO` and whose row `r` holds the
-        // running sum of fraction contributions from rows `0..r`. The committed finals
-        // (the per-column scalar second tuple element of `build_aux_trace`) hold the
-        // full running sum across every row.
+        // LogUp boundary + transition + last-row constraints.
         //
         //   when_first_row:  acc[0] == 0
-        //   when_transition: (acc_next - acc) · U − V == 0  (rows 0..N-2)
+        //   when_transition: (acc_next - acc) · U − V == 0          (rows 0..N-2)
+        //   when_last_row:   acc == committed_final
         //
-        // The natural "bind acc[N-1] to committed_final" check would mirror the
-        // transition constraint with `committed_final` as the wraparound next row:
+        // ## Last-row binding
         //
-        //     when_last_row: (committed_final - acc) · U − V == 0
+        // The natural closing check is `when_last_row: (committed_final − acc) · U − V`,
+        // but `when_last_row`'s selector multiplies the expression by an extra polynomial
+        // factor that pushes M_2+5 to degree 10, exceeding the degree-9 budget.
         //
-        // but the symbolic builder's `when_last_row` mask multiplies the constraint
-        // expression by an extra polynomial factor that pushes the column-1 (M_2+5)
-        // last-row constraint to degree 10, exceeding the degree-9 budget. For the
-        // current milestone the last-row binding is **omitted**; soundness of the
-        // verifier-side `reduced_aux_values` boundary check then relies on the
-        // committed finals being honestly derived from the aux trace.
+        // Our model assumes the last row of the AIR never fires any interactions: on the
+        // last row `U = 1, V = 0` for every column. This allows a lower-degree closing
+        // constraint — simply binding the accumulator to the committed final value:
         //
-        // TODO(milestone-B-followup-soundness): restore a binding constraint between
-        // `acc[N-1]` and `committed_final` without exceeding the degree budget. Options
-        // include splitting the constraint via a helper column, lowering the M_2+5
-        // column's transition degree, or moving the binding into a different
-        // mechanism that does not multiply by the `when_last_row` mask.
+        //   `when_last_row: acc − committed_final == 0`    (degree 1 + selector)
         let delta_transition = acc_next - acc.clone();
-        self.ab.when_first_row().assert_zero_ext(acc);
+        self.ab.when_first_row().assert_zero_ext(acc.clone());
         self.ab.when_transition().assert_zero_ext(delta_transition * u - v);
-        // check if we can assume no iteractions happen in the last row, so we can just check dela =
-        // aux value
+        self.ab.when_last_row().assert_eq_ext(acc , committed_final);
 
         self.column_idx += 1;
         result
@@ -262,7 +255,7 @@ where
         AB: 'g;
 
     type EncodedGroup<'g>
-        = ConstraintGroupEncoded<'g, AB>
+        = ConstraintGroup<'g, AB>
     where
         Self: 'g,
         AB: 'g;
@@ -288,25 +281,30 @@ where
         // Constraint path: only the `encoded` closure runs; the
         // `canonical` closure is dropped unused. This matches the plan's
         // split where `canonical` is the prover-path description.
-        let mut group = ConstraintGroupEncoded {
-            inner: ConstraintGroup {
-                challenges: self.challenges,
-                u: AB::ExprEF::ONE,
-                v: AB::ExprEF::ZERO,
-                _phantom: PhantomData,
-            },
+        let mut group = ConstraintGroup {
+            challenges: self.challenges,
+            u: AB::ExprEF::ONE,
+            v: AB::ExprEF::ZERO,
+            _phantom: PhantomData,
         };
         let result = encoded(&mut group);
-        let ConstraintGroup { u, v, .. } = group.inner;
+        let ConstraintGroup { u, v, .. } = group;
         self.fold_group(u, v);
         result
     }
 }
 
-// CONSTRAINT GROUP (SIMPLE PATH)
+// CONSTRAINT GROUP
 // ================================================================================================
 
-/// Simple-path group handle — does not expose α / β.
+/// Per-group handle for the constraint path.
+///
+/// Serves both the simple [`LookupGroup`] surface and the
+/// [`EncodedLookupGroup`] super-trait (bus prefixes, β powers,
+/// `insert_encoded`). This mirrors [`super::prover::ProverGroup`] which
+/// likewise serves both roles — the encoded variant's extra methods just
+/// expose the precomputed challenge tables that `ConstraintGroup` already
+/// holds.
 ///
 /// Accumulates an internal `(U_g, V_g)` pair as the author calls
 /// `add` / `remove` / `insert` / `batch`. The column consumes the pair
@@ -393,77 +391,16 @@ where
     }
 }
 
-// CONSTRAINT GROUP (ENCODED PATH)
-// ================================================================================================
-
-/// Cached-encoding group handle — exposes the precomputed bus prefixes
-/// and β powers so the author can build shared encoding fragments once
-/// and splice them into `insert_encoded` calls.
-///
-/// Implements [`LookupGroup`] by delegating to an inner
-/// [`ConstraintGroup`] that owns the same `(U_g, V_g)` accumulator,
-/// plus [`EncodedLookupGroup`] for the `beta_powers` / `bus_prefix` /
-/// `insert_encoded` primitives.
-pub struct ConstraintGroupEncoded<'a, AB>
-where
-    AB: LiftedAirBuilder<F = Felt> + 'a,
-{
-    inner: ConstraintGroup<'a, AB>,
-}
-
-impl<'a, AB> LookupGroup for ConstraintGroupEncoded<'a, AB>
-where
-    AB: LiftedAirBuilder<F = Felt>,
-{
-    type Expr = AB::Expr;
-    type ExprEF = AB::ExprEF;
-
-    type Batch<'b>
-        = ConstraintBatch<'b, AB>
-    where
-        Self: 'b,
-        AB: 'b;
-
-    fn add<M>(&mut self, flag: Self::Expr, msg: impl FnOnce() -> M)
-    where
-        M: LookupMessage<Self::Expr, Self::ExprEF>,
-    {
-        self.inner.add(flag, msg);
-    }
-
-    fn remove<M>(&mut self, flag: Self::Expr, msg: impl FnOnce() -> M)
-    where
-        M: LookupMessage<Self::Expr, Self::ExprEF>,
-    {
-        self.inner.remove(flag, msg);
-    }
-
-    fn insert<M>(&mut self, flag: Self::Expr, multiplicity: Self::Expr, msg: impl FnOnce() -> M)
-    where
-        M: LookupMessage<Self::Expr, Self::ExprEF>,
-    {
-        self.inner.insert(flag, multiplicity, msg);
-    }
-
-    fn batch<'b, R>(
-        &'b mut self,
-        flag: Self::Expr,
-        build: impl FnOnce(&mut Self::Batch<'b>) -> R,
-    ) -> R {
-        self.inner.batch(flag, build)
-    }
-}
-
-impl<'a, AB> EncodedLookupGroup for ConstraintGroupEncoded<'a, AB>
+impl<'a, AB> EncodedLookupGroup for ConstraintGroup<'a, AB>
 where
     AB: LiftedAirBuilder<F = Felt>,
 {
     fn beta_powers(&self) -> &[Self::ExprEF] {
-        &self.inner.challenges.beta_powers[..]
+        &self.challenges.beta_powers[..]
     }
 
     fn bus_prefix(&self, bus_id: usize) -> Self::ExprEF {
-        self.inner.challenges.bus_prefix[bus_id].clone()
+        self.challenges.bus_prefix[bus_id].clone()
     }
 
     fn insert_encoded(
@@ -476,8 +413,8 @@ where
         // comes straight from the user's pre-computed closure instead
         // of a `LookupMessage::encode` call.
         let v = encoded();
-        self.inner.u += (v - AB::ExprEF::ONE) * flag.clone();
-        self.inner.v += flag * multiplicity;
+        self.u += (v - AB::ExprEF::ONE) * flag.clone();
+        self.v += flag * multiplicity;
     }
 }
 

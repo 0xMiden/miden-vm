@@ -142,7 +142,7 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
     let mem_w0 = local.chiplets[MEMORY_WORD_ADDR_LO_COL_IDX - CHIPLETS_OFFSET];
     let mem_w1 = local.chiplets[MEMORY_WORD_ADDR_HI_COL_IDX - CHIPLETS_OFFSET];
 
-    builder.column(|col| {
+    builder.next_column(|col| {
         col.group(|g| {
             // --- SIBLING TABLE ---
             // MV adds (old path), MU removes (new path). Each splits on bit into the

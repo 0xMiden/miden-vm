@@ -106,7 +106,7 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
     let gc_next: LB::Expr = dec_next.group_count.into();
     let f_rem = in_span * (gc.clone() - gc_next);
 
-    builder.column(|col| {
+    builder.next_column(|col| {
         col.group(|g| {
             // =================== G_block_hash BLOCK HASH QUEUE ===================
 

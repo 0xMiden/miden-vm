@@ -147,16 +147,11 @@ pub trait LookupBuilder: Sized {
     ///    or [`LookupColumn::group_with_cached_encoding`].
     /// 3. Finalizing the column on close (emitting boundary + transition constraints, or draining
     ///    the column's fraction pair).
-    /// 4. Advancing to the next permutation column index so the next `column(…)` call targets a
-    ///    fresh accumulator.
+    /// 4. Advancing to the next permutation column index so the next call targets a fresh
+    ///    accumulator.
     ///
     /// The closure's return value is forwarded unchanged.
-    ///
-    /// The lifetime `'a` on the `Self::Column<'a>` handle is tied to the
-    /// `&'a mut self` borrow so that `Self: 'a` is implied by the
-    /// outlives relation on the method receiver, rather than leaving it
-    /// as a higher-ranked `for<'c> …` constraint.
-    fn column<'a, R>(&'a mut self, f: impl FnOnce(&mut Self::Column<'a>) -> R) -> R;
+    fn next_column<'a, R>(&'a mut self, f: impl FnOnce(&mut Self::Column<'a>) -> R) -> R;
 }
 
 // LOOKUP COLUMN
@@ -274,14 +269,26 @@ pub trait LookupGroup {
     ///
     /// `msg` is deferred so the adapter can skip both the construction
     /// and the encoding when `flag == 0` on the prover path.
+    ///
+    /// The default delegates to [`insert`](Self::insert) with multiplicity `ONE`.
+    /// Adapters may override for optimization (e.g. the constraint path avoids
+    /// the redundant `flag * ONE` symbolic node).
     fn add<M>(&mut self, flag: Self::Expr, msg: impl FnOnce() -> M)
     where
-        M: LookupMessage<Self::Expr, Self::ExprEF>;
+        M: LookupMessage<Self::Expr, Self::ExprEF>,
+    {
+        self.insert(flag, Self::Expr::ONE, msg);
+    }
 
     /// Add a single interaction with multiplicity `-1`, gated by `flag`.
+    ///
+    /// The default delegates to [`insert`](Self::insert) with multiplicity `NEG_ONE`.
     fn remove<M>(&mut self, flag: Self::Expr, msg: impl FnOnce() -> M)
     where
-        M: LookupMessage<Self::Expr, Self::ExprEF>;
+        M: LookupMessage<Self::Expr, Self::ExprEF>,
+    {
+        self.insert(flag, Self::Expr::NEG_ONE, msg);
+    }
 
     /// Add a single interaction with explicit signed multiplicity, gated
     /// by `flag`.
@@ -344,14 +351,24 @@ pub trait LookupBatch {
     type ExprEF: PrimeCharacteristicRing + Clone + Algebra<Self::Expr>;
 
     /// Absorb an interaction with multiplicity `+1`.
+    ///
+    /// The default delegates to [`insert`](Self::insert) with multiplicity `ONE`.
     fn add<M>(&mut self, msg: M)
     where
-        M: LookupMessage<Self::Expr, Self::ExprEF>;
+        M: LookupMessage<Self::Expr, Self::ExprEF>,
+    {
+        self.insert(Self::Expr::ONE, msg);
+    }
 
     /// Absorb an interaction with multiplicity `-1`.
+    ///
+    /// The default delegates to [`insert`](Self::insert) with multiplicity `NEG_ONE`.
     fn remove<M>(&mut self, msg: M)
     where
-        M: LookupMessage<Self::Expr, Self::ExprEF>;
+        M: LookupMessage<Self::Expr, Self::ExprEF>,
+    {
+        self.insert(Self::Expr::NEG_ONE, msg);
+    }
 
     /// Absorb an interaction with arbitrary signed multiplicity.
     fn insert<M>(&mut self, multiplicity: Self::Expr, msg: M)

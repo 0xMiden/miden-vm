@@ -81,7 +81,7 @@ where
         ChipletLookupAir.eval(builder);
         // Padding column — no interactions, stays zero. Keeps the aux trace width at 8
         // (word-aligned) for MASM Fiat-Shamir transcript compatibility.
-        builder.column(|_| {});
+        builder.next_column(|_| {});
     }
 }
 

@@ -160,7 +160,7 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
     let perm_state: [LB::Var; 12] = array::from_fn(|i| perm.state[i]);
     let perm_mult = perm.multiplicity;
 
-    builder.column(|col| {
+    builder.next_column(|col| {
         // Single group hosts both buses. ACE rows (`chiplet_active.ace`), controller rows
         // (`chiplet_active.controller`), and permutation rows (`chiplet_active.permutation`)
         // are pairwise mutually exclusive via the chiplet tri-state, so the simple-group

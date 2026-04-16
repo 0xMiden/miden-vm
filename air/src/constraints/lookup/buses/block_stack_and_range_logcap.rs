@@ -151,7 +151,7 @@ pub(in crate::constraints::lookup) fn emit_block_stack_and_range_logcap<LB>(
     let cap_prev: [LB::Var; 4] = array::from_fn(|i| user_helpers[HELPER_CAP_PREV_RANGE.start + i]);
     let cap_next: [LB::Var; 4] = array::from_fn(|i| stk_next.get(STACK_CAP_NEXT_RANGE.start + i));
 
-    builder.column(|col| {
+    builder.next_column(|col| {
         // ──────────── Main group: all opcode-gated interactions ────────────
         col.group(|g| {
             // ---- Block-stack table (BUS_BLOCK_STACK_TABLE) ----

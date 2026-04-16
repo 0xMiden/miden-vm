@@ -173,6 +173,11 @@ where
     /// Debug-only: current main-trace row index, threaded into every child handle so
     /// the `busdbg_log` hook at each push site can print row + col metadata alongside
     /// the emitted fraction. Set by [`build_lookup_fractions`] once per row.
+    ///
+    /// Under `no_std` (where `busdbg_log` is a no-op) the compiler eliminates all
+    /// loads/stores of this field, so it has zero runtime cost. The field itself remains
+    /// unconditionally to avoid cfg noise on every constructor and child-handle creation;
+    /// a future `BusDebugger` refactor may consolidate this into a single gated type.
     row_idx: usize,
 }
 
@@ -368,7 +373,10 @@ where
         self.public_values
     }
 
-    fn column<'c, R>(&'c mut self, f: impl FnOnce(&mut Self::Column<'c>) -> R) -> R {
+    fn next_column<'c, R>(
+        &'c mut self,
+        f: impl FnOnce(&mut Self::Column<'c>) -> R,
+    ) -> R {
         let idx = self.column_idx;
         let row_idx = self.row_idx;
         // Split-borrow `fractions.fractions` and `fractions.counts` as disjoint
@@ -411,8 +419,12 @@ where
 // it with `F = Felt`, so the narrowing is a nothing-burger in practice.
 //
 // Both impls are empty and pick up the default polynomial bodies today. The planned
-// prover-side optimization will replace these bodies with a boolean fast path that skips
-// the dead flag products for rows where decoder bits are already concrete 0/1.
+// prover-side optimization will override `build_op_flags` / `build_chiplet_active` with a
+// boolean fast path: on the prover side the decoder bits in each row are already concrete
+// 0/1, so `OpFlags` / `ChipletActiveFlags` can be evaluated via boolean algebra (bitwise
+// AND/OR on the known-boolean columns) instead of the polynomial products the constraint
+// path needs. This avoids multiplying through dead-flag products that are guaranteed zero
+// and cuts the per-row fraction-collection cost significantly.
 
 impl<'a, EF> MainLookupBuilder for ProverLookupBuilder<'a, Felt, EF> where EF: ExtensionField<Felt> {}
 
@@ -437,9 +449,9 @@ where
 {
     challenges: &'c LookupChallenges<EF>,
     fractions: &'c mut Vec<(F, EF)>,
-    /// Debug-only: current main-trace row index.
+    /// Debug-only: current main-trace row index (see [`ProverLookupBuilder::row_idx`]).
     row_idx: usize,
-    /// Debug-only: current LogUp column index (0..num_cols).
+    /// Debug-only: current LogUp column index (0..num_cols). Only consumed by `busdbg_log`.
     col_idx: usize,
     _phantom: PhantomData<F>,
 }
@@ -528,9 +540,9 @@ where
 {
     challenges: &'g LookupChallenges<EF>,
     fractions: &'g mut Vec<(F, EF)>,
-    /// Debug-only: current main-trace row index.
+    /// Debug-only: current main-trace row index (see [`ProverLookupBuilder::row_idx`]).
     row_idx: usize,
-    /// Debug-only: current LogUp column index (0..num_cols).
+    /// Debug-only: current LogUp column index. Only consumed by `busdbg_log`.
     col_idx: usize,
     _phantom: PhantomData<F>,
 }
@@ -637,20 +649,27 @@ fn felt_to_i64<F: Field>(m: F) -> i64 {
     }
 }
 
+/// The prover path always runs the `canonical` closure (which uses the simple
+/// [`LookupGroup`] surface), never the `encoded` closure. These methods exist
+/// only to satisfy the `EncodedGroup: EncodedLookupGroup` GAT bound on
+/// [`LookupColumn`]. Calling them is a bug — use `msg.encode()` instead.
 impl<'g, F, EF> EncodedLookupGroup for ProverGroup<'g, F, EF>
 where
     F: Field,
     EF: ExtensionField<F>,
 {
     fn beta_powers(&self) -> &[Self::ExprEF] {
+        debug_assert!(false, "prover path should not call beta_powers — use msg.encode()");
         &self.challenges.beta_powers[..]
     }
 
     fn bus_prefix(&self, bus_id: usize) -> Self::ExprEF {
+        debug_assert!(false, "prover path should not call bus_prefix — use msg.encode()");
         self.challenges.bus_prefix[bus_id]
     }
 
     fn insert_encoded(&mut self, flag: F, multiplicity: F, encoded: impl FnOnce() -> EF) {
+        debug_assert!(false, "prover path should not call insert_encoded — use msg.encode()");
         if flag == F::ZERO {
             return;
         }
@@ -683,9 +702,9 @@ where
     challenges: &'b LookupChallenges<EF>,
     fractions: &'b mut Vec<(F, EF)>,
     active: bool,
-    /// Debug-only: current main-trace row index.
+    /// Debug-only: current main-trace row index (see [`ProverLookupBuilder::row_idx`]).
     row_idx: usize,
-    /// Debug-only: current LogUp column index.
+    /// Debug-only: current LogUp column index. Only consumed by `busdbg_log`.
     col_idx: usize,
     _phantom: PhantomData<F>,
 }
@@ -807,13 +826,13 @@ mod tests {
             1
         }
         fn eval(&self, builder: &mut LB) {
-            builder.column(|col| {
+            builder.next_column(|col| {
                 col.group(|g| {
                     g.add(Felt::ONE, || SmokeMsg { value: Felt::ONE });
                     g.remove(Felt::ONE, || SmokeMsg { value: Felt::new(2) });
                 });
             });
-            builder.column(|col| {
+            builder.next_column(|col| {
                 col.group(|g| {
                     g.batch(Felt::ONE, |b| {
                         b.insert(Felt::ONE, SmokeMsg { value: Felt::new(3) });

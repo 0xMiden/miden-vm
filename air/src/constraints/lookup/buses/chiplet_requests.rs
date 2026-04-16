@@ -81,7 +81,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_requests<LB>(
         clk: clk.into(),
     };
 
-    builder.column(|col| {
+    builder.next_column(|col| {
         col.group(|g| {
             // --- Control-block removes (JOIN / SPLIT / LOOP / SPAN / CALL / SYSCALL) ---
             // `h` is a `[Var; 8]` captured by copy; each closure shadows it with a fresh

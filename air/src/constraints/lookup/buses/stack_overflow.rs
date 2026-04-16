@@ -49,7 +49,7 @@ pub(in crate::constraints::lookup) fn emit_stack_overflow<LB>(
     let f_left_overflow = op_flags.left_shift() * f_overflow.clone();
     let f_dyncall_overflow = op_flags.dyncall() * f_overflow;
 
-    builder.column(|col| {
+    builder.next_column(|col| {
         col.group(|g| {
             // Right shift: push `(clk, s15, b1)` onto the overflow table.
             g.add(op_flags.right_shift(), || StackOverflowMsg {

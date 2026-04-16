@@ -149,7 +149,10 @@ impl<'a> LookupBuilder for ColumnOracleBuilder<'a> {
         self.public_values
     }
 
-    fn column<'c, R>(&'c mut self, f: impl FnOnce(&mut Self::Column<'c>) -> R) -> R {
+    fn next_column<'c, R>(
+        &'c mut self,
+        f: impl FnOnce(&mut Self::Column<'c>) -> R,
+    ) -> R {
         let idx = self.column_idx;
         let mut col = OracleColumn {
             challenges: self.challenges,
@@ -261,26 +264,6 @@ impl<'g> LookupGroup for OracleGroup<'g> {
     where
         Self: 'b;
 
-    fn add<M>(&mut self, flag: Self::Expr, msg: impl FnOnce() -> M)
-    where
-        M: LookupMessage<Self::Expr, Self::ExprEF>,
-    {
-        // `add` = multiplicity +1 → `V_g += flag · 1 = flag`.
-        let v_msg = msg().encode(self.challenges);
-        self.u += (v_msg - QuadFelt::ONE) * flag;
-        self.v += flag;
-    }
-
-    fn remove<M>(&mut self, flag: Self::Expr, msg: impl FnOnce() -> M)
-    where
-        M: LookupMessage<Self::Expr, Self::ExprEF>,
-    {
-        // `remove` = multiplicity −1 → `V_g -= flag`.
-        let v_msg = msg().encode(self.challenges);
-        self.u += (v_msg - QuadFelt::ONE) * flag;
-        self.v -= flag;
-    }
-
     fn insert<M>(&mut self, flag: Self::Expr, multiplicity: Self::Expr, msg: impl FnOnce() -> M)
     where
         M: LookupMessage<Self::Expr, Self::ExprEF>,
@@ -351,28 +334,6 @@ pub struct OracleBatch<'b> {
 impl<'b> LookupBatch for OracleBatch<'b> {
     type Expr = Felt;
     type ExprEF = QuadFelt;
-
-    fn add<M>(&mut self, msg: M)
-    where
-        M: LookupMessage<Self::Expr, Self::ExprEF>,
-    {
-        // `m = +1`: `(N, D) ← (N·v + D, D·v)`.
-        let v_msg = msg.encode(self.challenges);
-        let d_prev = self.d;
-        self.n = self.n * v_msg + d_prev;
-        self.d *= v_msg;
-    }
-
-    fn remove<M>(&mut self, msg: M)
-    where
-        M: LookupMessage<Self::Expr, Self::ExprEF>,
-    {
-        // `m = -1`: `(N, D) ← (N·v - D, D·v)`.
-        let v_msg = msg.encode(self.challenges);
-        let d_prev = self.d;
-        self.n = self.n * v_msg - d_prev;
-        self.d *= v_msg;
-    }
 
     fn insert<M>(&mut self, multiplicity: Self::Expr, msg: M)
     where

@@ -123,7 +123,10 @@ impl<'a> LookupBuilder for DualBuilder<'a> {
         self.public_values
     }
 
-    fn column<'c, R>(&'c mut self, f: impl FnOnce(&mut Self::Column<'c>) -> R) -> R {
+    fn next_column<'c, R>(
+        &'c mut self,
+        f: impl FnOnce(&mut Self::Column<'c>) -> R,
+    ) -> R {
         // Reset the group counter at the start of every column so each
         // `GroupMismatch` carries a column-local index.
         self.group_idx_within_column = 0;
@@ -261,26 +264,6 @@ impl<'g> LookupGroup for DualGroup<'g> {
     where
         Self: 'b;
 
-    fn add<M>(&mut self, flag: Self::Expr, msg: impl FnOnce() -> M)
-    where
-        M: LookupMessage<Self::Expr, Self::ExprEF>,
-    {
-        // `add` = multiplicity +1 → `V_g += flag · 1 = flag`.
-        let v_msg = msg().encode(self.challenges);
-        self.u += (v_msg - QuadFelt::ONE) * flag;
-        self.v += flag;
-    }
-
-    fn remove<M>(&mut self, flag: Self::Expr, msg: impl FnOnce() -> M)
-    where
-        M: LookupMessage<Self::Expr, Self::ExprEF>,
-    {
-        // `remove` = multiplicity −1 → `V_g += flag · (−1) = −flag`.
-        let v_msg = msg().encode(self.challenges);
-        self.u += (v_msg - QuadFelt::ONE) * flag;
-        self.v -= flag;
-    }
-
     fn insert<M>(&mut self, flag: Self::Expr, multiplicity: Self::Expr, msg: impl FnOnce() -> M)
     where
         M: LookupMessage<Self::Expr, Self::ExprEF>,
@@ -338,24 +321,6 @@ impl<'g> LookupGroup for DualEncodedGroup<'g> {
         = DualBatch<'b>
     where
         Self: 'b;
-
-    fn add<M>(&mut self, flag: Self::Expr, msg: impl FnOnce() -> M)
-    where
-        M: LookupMessage<Self::Expr, Self::ExprEF>,
-    {
-        let v_msg = msg().encode(self.challenges);
-        self.u += (v_msg - QuadFelt::ONE) * flag;
-        self.v += flag;
-    }
-
-    fn remove<M>(&mut self, flag: Self::Expr, msg: impl FnOnce() -> M)
-    where
-        M: LookupMessage<Self::Expr, Self::ExprEF>,
-    {
-        let v_msg = msg().encode(self.challenges);
-        self.u += (v_msg - QuadFelt::ONE) * flag;
-        self.v -= flag;
-    }
 
     fn insert<M>(&mut self, flag: Self::Expr, multiplicity: Self::Expr, msg: impl FnOnce() -> M)
     where
@@ -427,28 +392,6 @@ pub struct DualBatch<'b> {
 impl<'b> LookupBatch for DualBatch<'b> {
     type Expr = Felt;
     type ExprEF = QuadFelt;
-
-    fn add<M>(&mut self, msg: M)
-    where
-        M: LookupMessage<Self::Expr, Self::ExprEF>,
-    {
-        // `m = 1`: `(N, D) ← (N·v + D, D·v)`.
-        let v_msg = msg.encode(self.challenges);
-        let d_prev = self.d;
-        self.n = self.n * v_msg + d_prev;
-        self.d *= v_msg;
-    }
-
-    fn remove<M>(&mut self, msg: M)
-    where
-        M: LookupMessage<Self::Expr, Self::ExprEF>,
-    {
-        // `m = −1`: `(N, D) ← (N·v − D, D·v)`.
-        let v_msg = msg.encode(self.challenges);
-        let d_prev = self.d;
-        self.n = self.n * v_msg - d_prev;
-        self.d *= v_msg;
-    }
 
     fn insert<M>(&mut self, multiplicity: Self::Expr, msg: M)
     where

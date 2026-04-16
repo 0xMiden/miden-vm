@@ -143,7 +143,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
 
     // --- Emit everything into a single LogUp column ---
 
-    builder.column(|col| {
+    builder.next_column(|col| {
         col.group(|g| {
             // Sponge start: full 12-lane state, node_index = 0.
             g.add(f_sponge_start, || {
