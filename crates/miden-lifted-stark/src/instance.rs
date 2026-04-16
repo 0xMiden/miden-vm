@@ -111,8 +111,7 @@ impl InstanceShapes {
     /// Determines the proof's AIR ordering by sorting instances by
     /// `(log_trace_height, caller_index)`. The resulting
     /// [`air_order`](Self::air_order) maps each position in the proof's
-    /// ordering back to the caller's original index. Use
-    /// [`reorder`](Self::reorder) to permute caller-ordered data to match.
+    /// ordering back to the caller's original index.
     pub fn from_trace_heights(trace_heights: Vec<usize>) -> Result<Self, InstanceValidationError> {
         let log_heights: Vec<u8> = trace_heights
             .iter()
@@ -150,28 +149,21 @@ impl InstanceShapes {
         &self.air_order
     }
 
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.log_trace_heights.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.log_trace_heights.is_empty()
     }
 
     /// Reorder `data` from the caller's natural order to the proof's AIR
     /// ordering. Returns a `Vec` where position `j` holds
     /// `data[air_order[j]]`.
     ///
-    /// Returns an error if `data.len() != self.len()`.
-    pub fn reorder<T>(&self, mut data: Vec<T>) -> Result<Vec<T>, InstanceValidationError> {
-        if data.len() != self.len() {
-            return Err(InstanceValidationError::HeightCountMismatch {
-                instances: data.len(),
-                log_trace_heights: self.len(),
-            });
-        }
-        let mut placed = vec![false; self.len()];
-        for start in 0..self.len() {
+    /// Validates that `air_order` is a valid permutation before applying it.
+    /// Returns an error if lengths mismatch or if `air_order` is malformed.
+    pub(crate) fn reorder<T>(&self, mut data: Vec<T>) -> Result<Vec<T>, InstanceValidationError> {
+        let n = data.len();
+        validate_air_order(&self.air_order, n)?;
+        let mut placed = vec![false; n];
+        for start in 0..n {
             if placed[start] {
                 continue;
             }
@@ -241,8 +233,12 @@ pub enum InstanceValidationError {
         log_blowup: u8,
         two_adicity: usize,
     },
+    #[error("air_order length {air_order} does not match instance count {instances}")]
+    AirOrderLengthMismatch { instances: usize, air_order: usize },
     #[error("invalid air_order permutation for {count} instances")]
     InvalidAirOrder { count: usize },
+    #[error("log trace heights are not in ascending order")]
+    HeightsNotAscending,
 }
 
 /// Cross-check instances against their shapes and return the log of the
@@ -301,8 +297,9 @@ where
                 actual: inst.var_len_public_inputs.len(),
             });
         }
-        // Internal invariant: callers must sort before calling validate_inputs.
-        debug_assert!(log_h >= log_prev, "instances not in ascending height order (internal bug)");
+        if log_h < log_prev {
+            return Err(InstanceValidationError::HeightsNotAscending);
+        }
         let trace_height = 1usize << log_h as usize;
         let max_period = air.periodic_columns().iter().map(Vec::len).max().unwrap_or(0);
         if trace_height < max_period {
@@ -329,9 +326,9 @@ pub(crate) fn validate_air_order(
     n: usize,
 ) -> Result<(), InstanceValidationError> {
     if air_order.len() != n {
-        return Err(InstanceValidationError::HeightCountMismatch {
+        return Err(InstanceValidationError::AirOrderLengthMismatch {
             instances: n,
-            log_trace_heights: air_order.len(),
+            air_order: air_order.len(),
         });
     }
     let mut seen = vec![false; n];

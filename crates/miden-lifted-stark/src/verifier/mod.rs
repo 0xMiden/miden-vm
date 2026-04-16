@@ -88,7 +88,7 @@ pub enum VerifierError {
 
 /// Verify a single AIR. Convenience wrapper around [`verify_multi`].
 ///
-/// The caller's challenger must already carry the full statement binding
+/// The caller's challenger must already be bound to the full statement
 /// — see the prover module-level docs.
 pub fn verify_single<F, EF, A, SC>(
     config: &SC,
@@ -110,10 +110,11 @@ where
 
 /// Verify multiple AIRs with traces of different heights.
 ///
-/// The verifier uses [`InstanceShapes::air_order`](crate::InstanceShapes::air_order) from the proof to match
-/// the caller's instances to the proof's ordering. The caller's challenger
-/// must already carry the full statement binding (public values, AIR
-/// configuration in proof order) — see the prover module-level docs.
+/// The verifier uses [`InstanceShapes::air_order`](crate::InstanceShapes::air_order) from the proof
+/// to match the caller's instances to the proof's ordering. The caller's challenger
+/// must already be bound to the full statement (protocol parameters, AIR
+/// configurations, AIR ordering, and public inputs — both fixed and
+/// variable-length) — see the prover module-level docs.
 ///
 /// The verifier mirrors the prover's protocol:
 ///

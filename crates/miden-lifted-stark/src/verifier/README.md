@@ -35,19 +35,20 @@ bundle extra data in the same transcript, you must manage boundaries yourself.
 
 ## Protocol flow
 
-0. Observe log trace heights into the challenger (from proof, not transcript).
-1. Receive main trace commitment.
-2. Sample aux randomness.
-3. Receive aux trace commitment.
-4. Sample constraint folding challenge `alpha` and cross-trace accumulator `beta`.
-5. Receive quotient commitment.
-6. Sample OOD point `z` (rejection-sampled outside trace domain), derive `z_next`.
-7. Verify PCS openings at `[z, z_next]` for main, aux, and quotient.
-8. Reconstruct `Q(z)` from the opened quotient chunks.
-9. For each trace instance j, set `y_j = z^{r_j}` and evaluate folded constraints at `y_j`.
-10. Accumulate across traces with `beta`.
-11. Check quotient identity: `accumulated == Q(z) * (z^N - 1)`.
-12. Ensure transcript is fully consumed.
+0. Validate `air_order` from the proof and reorder caller instances to match.
+1. Observe log trace heights into the challenger (from proof, not transcript).
+2. Receive main trace commitment.
+3. Sample aux randomness.
+4. Receive aux trace commitment.
+5. Sample constraint folding challenge `alpha` and cross-trace accumulator `beta`.
+6. Receive quotient commitment.
+7. Sample OOD point `z` (rejection-sampled outside trace domain), derive `z_next`.
+8. Verify PCS openings at `[z, z_next]` for main, aux, and quotient.
+9. Reconstruct `Q(z)` from the opened quotient chunks.
+10. For each trace instance j, set `y_j = z^{r_j}` and evaluate folded constraints at `y_j`.
+11. Accumulate across traces with `beta`.
+12. Check quotient identity: `accumulated == Q(z) * (z^N - 1)`.
+13. Ensure transcript is fully consumed.
 
 ## Mathematical background
 

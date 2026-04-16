@@ -216,9 +216,9 @@ fn malformed_log_trace_heights_is_rejected() {
         .expect_err("extra log trace height should fail verification");
     assert!(matches!(
         err,
-        VerifierError::Instance(InstanceValidationError::HeightCountMismatch {
+        VerifierError::Instance(InstanceValidationError::AirOrderLengthMismatch {
             instances: 1,
-            log_trace_heights: 2,
+            air_order: 2,
         })
     ));
 
@@ -230,9 +230,9 @@ fn malformed_log_trace_heights_is_rejected() {
         .expect_err("empty log trace heights should fail verification");
     assert!(matches!(
         err,
-        VerifierError::Instance(InstanceValidationError::HeightCountMismatch {
+        VerifierError::Instance(InstanceValidationError::AirOrderLengthMismatch {
             instances: 1,
-            log_trace_heights: 0,
+            air_order: 0,
         })
     ));
 

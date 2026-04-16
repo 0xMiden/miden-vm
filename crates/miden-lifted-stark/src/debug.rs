@@ -85,13 +85,12 @@ pub fn check_constraints_multi<F, EF, A, B>(
 {
     assert!(!instances.is_empty(), "no instances provided");
 
-    // Sort by ascending trace height (stable, preserving caller order among equal heights).
+    // Sort by (trace_height, caller_index) to match InstanceShapes::from_trace_heights.
     let mut perm: Vec<usize> = (0..instances.len()).collect();
-    perm.sort_by_key(|&i| instances[i].1.trace.height());
+    perm.sort_by_key(|&i| (instances[i].1.trace.height(), i));
 
-    for (protocol_idx, &orig_idx) in perm.iter().enumerate() {
+    for (i, &orig_idx) in perm.iter().enumerate() {
         let &(air, ref witness, aux_builder) = &instances[orig_idx];
-        let i = protocol_idx;
 
         air.validate()
             .unwrap_or_else(|e| panic!("AIR validation failed for instance {i}: {e}"));

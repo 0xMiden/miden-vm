@@ -69,9 +69,18 @@ where
     EF: ExtensionField<F>,
     SC: StarkConfig<F, EF>,
 {
+    /// The AIR ordering used by the proof: `air_order()[j]` is the caller's
+    /// original index of the instance at position `j`.
+    ///
+    /// Read this before building the Fiat-Shamir challenger so you can bind
+    /// AIR configurations and the ordering — see the prover module-level docs.
+    pub fn air_order(&self) -> &[u32] {
+        self.instance_shapes.air_order()
+    }
+
     /// Number of traces (instances) the proof was produced for.
     pub fn num_traces(&self) -> usize {
-        self.instance_shapes.len()
+        self.instance_shapes.log_trace_heights.len()
     }
 
     /// Number of base-field elements in the transcript.

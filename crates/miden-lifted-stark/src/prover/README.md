@@ -25,8 +25,8 @@ prescribe the *initial* challenger state used for Fiat-Shamir.
 ## Fiat-Shamir / transcript binding
 
 The caller must bind protocol parameters, public values, variable-length
-public inputs, and the AIR identity and ordering into the challenger before
-calling `prove_multi`. See the Rust module-level docs for the full contract
+public inputs, AIR configurations, and `air_order` into the challenger
+before calling `prove_multi`. See the Rust module-level docs for the full contract
 and code examples.
 
 ## Protocol flow

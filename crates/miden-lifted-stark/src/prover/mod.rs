@@ -20,11 +20,13 @@
 //! 2. **Public values and variable-length inputs** — `public_values` and `var_len_public_inputs`
 //!    for every instance. Without this, Fiat-Shamir challenges are independent of the statement.
 //!
-//! 3. **AIR identity and ordering** — The proof defines an ordering of AIR instances, queryable via
-//!    [`InstanceShapes::air_order`]. The `air_order` values are **not** absorbed into the
-//!    transcript, so the caller must bind both the AIR identity and the ordering into the
-//!    challenger. How this is done is up to the caller — see the examples below. If the application
-//!    has a single fixed AIR, a static domain separator suffices.
+//! 3. **AIR configurations and `air_order`** — The proof defines an ordering of AIR instances
+//!    (`air_order()[j]` is the caller's original index at proof position `j`), queryable via
+//!    [`InstanceShapes::air_order`]. The ordering is deterministic: instances are sorted by
+//!    `(log_trace_height, caller_index)`. Neither the AIR configurations nor `air_order` are
+//!    absorbed into the transcript, so the caller must bind both into the challenger. How this is
+//!    done is up to the caller — see the examples below. The prover can precompute `air_order` via
+//!    [`InstanceShapes::from_trace_heights`]; the verifier reads it from the proof.
 //!
 //! ## Recommended pattern
 //!
@@ -40,7 +42,7 @@
 //! for vl in &var_len_public_inputs {
 //!     ch.observe_slice(vl);
 //! }
-//! // For multi-AIR: bind AIR identity and ordering (see below).
+//! // For multi-AIR: bind AIR configurations and air_order (see below).
 //!
 //! // --- Prove ---
 //! let output = prove_multi(&config, &instances, ch)?;
@@ -60,13 +62,13 @@
 //!
 //! ## Multi-AIR binding examples
 //!
-//! The proof records an ordering of instances via [`InstanceShapes::air_order`]:
-//! `air_order()[j]` is the caller's original index of the instance at position
-//! `j`. The caller must bind the AIR identity **and** this ordering into the
-//! challenger. Two approaches:
-//!
 //! ```text
-//! let air_order = proof.instance_shapes.air_order();
+//! // Prover: precompute air_order before building the challenger.
+//! let shapes = InstanceShapes::from_trace_heights(trace_heights)?;
+//! let air_order = shapes.air_order();
+//!
+//! // Verifier: read air_order from the proof.
+//! let air_order = proof.air_order();
 //!
 //! // Option A: reorder AIRs to proof order and commit — the ordering is
 //! // implicit in the commitment.
@@ -123,9 +125,9 @@ pub enum ProverError {
 
 /// Prove a single AIR.
 ///
-/// The caller's challenger must already carry the full statement binding
-/// (protocol parameters, public values, variable-length inputs, AIR identity)
-/// — see the module-level docs.
+/// The caller's challenger must already be bound to the full statement
+/// (protocol parameters, AIR configuration, public values, and
+/// variable-length inputs) — see the module-level docs.
 ///
 /// This is a convenience wrapper around [`prove_multi`] for the single-AIR case.
 ///
@@ -153,10 +155,9 @@ where
 
 /// Prove multiple AIRs with traces of different heights.
 ///
-/// The proof records the instance ordering via [`InstanceShapes::air_order`].
-/// The caller's challenger must already carry the full statement binding
-/// (public values, AIR configuration in proof order) — see the module-level
-/// docs.
+/// The caller's challenger must already be bound to the full statement
+/// (protocol parameters, AIR configurations, AIR ordering, and public
+/// inputs — both fixed and variable-length) — see the module-level docs.
 ///
 /// # Arguments
 /// - `config`: STARK configuration (PCS params, LMCS, DFT)
