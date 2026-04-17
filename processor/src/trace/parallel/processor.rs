@@ -255,7 +255,7 @@ impl StackInterface for ReplayProcessor {
     }
 
     fn get_word(&self, start_idx: usize) -> Word {
-        debug_assert!(start_idx < MIN_STACK_DEPTH - 4);
+        debug_assert!(start_idx <= MIN_STACK_DEPTH - WORD_SIZE);
 
         let word_start_idx = MIN_STACK_DEPTH - start_idx - 4;
         let mut result: [Felt; WORD_SIZE] =
@@ -274,7 +274,7 @@ impl StackInterface for ReplayProcessor {
     }
 
     fn set_word(&mut self, start_idx: usize, word: &Word) {
-        debug_assert!(start_idx < MIN_STACK_DEPTH - 4);
+        debug_assert!(start_idx <= MIN_STACK_DEPTH - WORD_SIZE);
         let word_start_idx = MIN_STACK_DEPTH - start_idx - 4;
 
         // Reverse so word[0] ends up at the top of stack (highest internal index)
@@ -504,5 +504,47 @@ impl Stopper for ReplayStopper {
         } else {
             ControlFlow::Continue(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::trace::trace_state::{
+        AdviceReplay, ExecutionContextReplay, HasherResponseReplay, MastForestResolutionReplay,
+        MemoryReadsReplay, StackOverflowReplay, StackState, SystemState,
+    };
+
+    fn build_replay_processor() -> ReplayProcessor {
+        let system = SystemState {
+            clk: 0_u32.into(),
+            ctx: ContextId::root(),
+            fn_hash: Word::default(),
+            pc_transcript_state: Word::default(),
+        };
+        let stack = StackState::new([ZERO; MIN_STACK_DEPTH], MIN_STACK_DEPTH, ZERO);
+
+        ReplayProcessor::new(
+            system,
+            stack,
+            StackOverflowReplay::default(),
+            ExecutionContextReplay::default(),
+            AdviceReplay::default(),
+            MemoryReadsReplay::default(),
+            HasherResponseReplay::default(),
+            MastForestResolutionReplay::default(),
+            1_u32.into(),
+        )
+    }
+
+    #[test]
+    fn stack_set_word_allows_max_start_idx() {
+        let mut processor = build_replay_processor();
+        let start_idx = MIN_STACK_DEPTH - WORD_SIZE;
+        let word = [Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)].into();
+
+        processor.set_word(start_idx, &word);
+
+        assert_eq!(processor.get_word(start_idx), word);
     }
 }
