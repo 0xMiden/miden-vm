@@ -1,6 +1,6 @@
 use miden_air::trace::{
-    ACE_CHIPLET_WIRING_BUS_OFFSET, AUX_TRACE_RAND_CHALLENGES, chiplets::hasher::HASH_CYCLE_LEN,
-    range::B_RANGE_COL_IDX,
+    ACE_CHIPLET_WIRING_BUS_OFFSET, AUX_TRACE_RAND_CHALLENGES, Challenges, bus_types,
+    chiplets::hasher::HASH_CYCLE_LEN, range::B_RANGE_COL_IDX,
 };
 use miden_core::{ONE, ZERO, field::Field, operations::Operation};
 use miden_utils_testing::{rand::rand_array, stack};
@@ -18,7 +18,8 @@ fn b_range_trace_stack() {
     let trace = build_trace_from_ops(operations, &stack);
 
     let rand_elements = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let alpha = rand_elements[0];
+    let challenges = Challenges::new(rand_elements[0], rand_elements[1]);
+    let alpha = challenges.bus_prefix[bus_types::RANGE_CHECK_BUS];
     let aux_columns = trace.build_aux_trace(&rand_elements).unwrap();
     let b_range = aux_columns.get_column(B_RANGE_COL_IDX);
 
@@ -117,7 +118,8 @@ fn b_range_trace_mem() {
     let trace = build_trace_from_ops(operations, &stack_input);
 
     let rand_elements = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
-    let alpha = rand_elements[0];
+    let challenges = Challenges::new(rand_elements[0], rand_elements[1]);
+    let alpha = challenges.bus_prefix[bus_types::RANGE_CHECK_BUS];
     let aux_columns = trace.build_aux_trace(&rand_elements).unwrap();
     let b_range = aux_columns.get_column(B_RANGE_COL_IDX);
     let v_wiring = aux_columns.get_column(ACE_CHIPLET_WIRING_BUS_OFFSET);
@@ -213,16 +215,17 @@ fn b_range_trace_mem() {
     );
 
     // Verify the wiring bus residual matches the expected value.
-    //   v_wiring_final = -4/(alpha + w0) - 2/(alpha + 4*w1)
-    //                  = -4/(alpha + 1)  - 2/(alpha + 4)
+    // The wiring bus uses bus_prefix[RANGE_CHECK_BUS] for memory address range checks
+    // (same as b_range) so they balance to zero.
+    let alpha_w = challenges.bus_prefix[bus_types::RANGE_CHECK_BUS];
     let num_memory_rows = Felt::from_u8(2);
-    let w0_contribution = (alpha + w0).inverse() * num_memory_rows; // 2/(alpha+1) from w0
-    let w1_contribution = (alpha + w1).inverse() * num_memory_rows; // 2/(alpha+1) from w1
-    let four_w1_contribution = (alpha + four_w1).inverse() * num_memory_rows; // 2/(alpha+4) from 4*w1
+    let w0_contribution = (alpha_w + w0).inverse() * num_memory_rows;
+    let w1_contribution = (alpha_w + w1).inverse() * num_memory_rows;
+    let four_w1_contribution = (alpha_w + four_w1).inverse() * num_memory_rows;
     let expected_wiring_residual = -(w0_contribution + w1_contribution + four_w1_contribution);
     assert_eq!(
         v_wiring_final, expected_wiring_residual,
-        "v_wiring residual should equal -(2/(alpha+w0) + 2/(alpha+w1) + 2/(alpha+4*w1))"
+        "v_wiring residual should equal -(2/(alpha_w+w0) + 2/(alpha_w+w1) + 2/(alpha_w+4*w1))"
     );
 
     // Verify the end-to-end balance: b_range + v_wiring = 0.

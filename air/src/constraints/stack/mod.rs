@@ -4,15 +4,14 @@
 //! and stack overflow constraints.
 
 pub mod bus;
+pub mod columns;
 pub mod crypto;
 pub mod general;
 pub mod ops;
 pub mod overflow;
 pub mod stack_arith;
 
-use miden_crypto::stark::air::LiftedAirBuilder;
-
-use crate::{MainTraceRow, constraints::op_flags::OpFlags};
+use crate::{MainCols, MidenAirBuilder, constraints::op_flags::OpFlags};
 
 // ENTRY POINTS
 // ================================================================================================
@@ -20,11 +19,11 @@ use crate::{MainTraceRow, constraints::op_flags::OpFlags};
 /// Enforces stack main-trace constraints for this group.
 pub fn enforce_main<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: LiftedAirBuilder,
+    AB: MidenAirBuilder,
 {
     general::enforce_main(builder, local, next, op_flags);
     overflow::enforce_main(builder, local, next, op_flags);

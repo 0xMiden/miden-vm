@@ -50,7 +50,7 @@ thiserror.workspace = true
 miden-assembly = { workspace = true, features = ["testing"] }
 miden-utils-testing.workspace = true
 insta.workspace = true
-pretty_assertions = { version = "1.4" }
+pretty_assertions = { workspace = true, features = ["std"] }
 proptest.workspace = true
-rstest = { version = "0.26" }
+rstest = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }

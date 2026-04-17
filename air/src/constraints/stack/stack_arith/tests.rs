@@ -12,11 +12,9 @@ use miden_crypto::stark::{
 
 use super::enforce_main;
 use crate::{
-    MainTraceRow,
-    constraints::op_flags::{ExprDecoderAccess, OpFlags, generate_test_row},
-    trace::{
-        AUX_TRACE_RAND_CHALLENGES, AUX_TRACE_WIDTH, TRACE_WIDTH, decoder::USER_OP_HELPERS_OFFSET,
-    },
+    MainCols,
+    constraints::op_flags::{OpFlags, generate_test_row},
+    trace::{AUX_TRACE_RAND_CHALLENGES, AUX_TRACE_WIDTH, TRACE_WIDTH},
 };
 
 struct ConstraintEvalBuilder {
@@ -118,17 +116,18 @@ impl PeriodicAirBuilder for ConstraintEvalBuilder {
     }
 }
 
-fn set_u32_helpers(row: &mut MainTraceRow<Felt>, lo: u32, hi: u32) {
-    row.decoder[USER_OP_HELPERS_OFFSET] = Felt::new(lo as u64 & 0xffff);
-    row.decoder[USER_OP_HELPERS_OFFSET + 1] = Felt::new((lo as u64) >> 16);
-    row.decoder[USER_OP_HELPERS_OFFSET + 2] = Felt::new(hi as u64 & 0xffff);
-    row.decoder[USER_OP_HELPERS_OFFSET + 3] = Felt::new((hi as u64) >> 16);
-    row.decoder[USER_OP_HELPERS_OFFSET + 4] = Felt::ZERO;
+/// Sets the u32 helper registers (hasher_state[2..7]) in the decoder.
+fn set_u32_helpers(row: &mut MainCols<Felt>, lo: u32, hi: u32) {
+    row.decoder.hasher_state[2] = Felt::new(lo as u64 & 0xffff);
+    row.decoder.hasher_state[3] = Felt::new((lo as u64) >> 16);
+    row.decoder.hasher_state[4] = Felt::new(hi as u64 & 0xffff);
+    row.decoder.hasher_state[5] = Felt::new((hi as u64) >> 16);
+    row.decoder.hasher_state[6] = Felt::ZERO;
 }
 
-fn eval_stack_arith(local: &MainTraceRow<Felt>, next: &MainTraceRow<Felt>) -> Vec<QuadFelt> {
+fn eval_stack_arith(local: &MainCols<Felt>, next: &MainCols<Felt>) -> Vec<QuadFelt> {
     let mut builder = ConstraintEvalBuilder::new();
-    let op_flags = OpFlags::new(ExprDecoderAccess::new(local));
+    let op_flags = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
     enforce_main(&mut builder, local, next, &op_flags);
     builder.evaluations
 }
@@ -139,17 +138,15 @@ fn stack_arith_u32add_constraints_allow_non_u32_operands() {
     assert!(non_u32.as_canonical_u64() > u32::MAX as u64);
 
     let mut local = generate_test_row(opcodes::U32ADD as usize);
-    local.stack[0] = non_u32;
-    local.stack[1] = Felt::ONE;
+    local.stack.top[0] = non_u32;
+    local.stack.top[1] = Felt::ONE;
     set_u32_helpers(&mut local, 0, 0);
 
-    let op_flags: OpFlags<Felt> = OpFlags::new(ExprDecoderAccess::new(&local));
+    let next = generate_test_row(0);
+
+    let op_flags: OpFlags<Felt> = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
     assert_eq!(op_flags.u32add(), Felt::ONE);
     assert_eq!(op_flags.u32sub(), Felt::ZERO);
-
-    let mut next = generate_test_row(0);
-    next.stack[0] = Felt::ZERO;
-    next.stack[1] = Felt::ZERO;
 
     let evaluations = eval_stack_arith(&local, &next);
     assert!(
@@ -165,17 +162,17 @@ fn stack_arith_u32sub_constraints_allow_non_u32_operands() {
     assert!(non_u32.as_canonical_u64() > u32::MAX as u64);
 
     let mut local = generate_test_row(opcodes::U32SUB as usize);
-    local.stack[0] = Felt::new(12_289);
-    local.stack[1] = non_u32;
+    local.stack.top[0] = Felt::new(12_289);
+    local.stack.top[1] = non_u32;
     set_u32_helpers(&mut local, diff, 0);
 
-    let op_flags: OpFlags<Felt> = OpFlags::new(ExprDecoderAccess::new(&local));
+    let mut next = generate_test_row(0);
+    next.stack.top[0] = Felt::ONE;
+    next.stack.top[1] = Felt::new(diff as u64);
+
+    let op_flags: OpFlags<Felt> = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
     assert_eq!(op_flags.u32sub(), Felt::ONE);
     assert_eq!(op_flags.u32add(), Felt::ZERO);
-
-    let mut next = generate_test_row(0);
-    next.stack[0] = Felt::ONE;
-    next.stack[1] = Felt::new(diff as u64);
 
     let evaluations = eval_stack_arith(&local, &next);
     assert!(

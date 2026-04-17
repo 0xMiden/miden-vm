@@ -72,9 +72,10 @@ impl<'a> WiringBusBuilder<'a> {
         assert_eq!(wiring_bus[trace_offset], E::ZERO);
 
         // Build memory range check LogUp requests as a running sum, then merge into wiring_bus.
-        // For each memory row, subtract 1/(alpha+w0) + 1/(alpha+w1) + 1/(alpha+4*w1).
-        // The range checker provides matching responses.
-        let alpha = challenges.alpha;
+        // For each memory row, subtract 1/(alpha_rc+w0) + 1/(alpha_rc+w1) + 1/(alpha_rc+4*w1).
+        // Must use bus_prefix[RANGE_CHECK_BUS] to match the range checker's encoding.
+        use miden_air::trace::bus_types::RANGE_CHECK_BUS;
+        let alpha = challenges.bus_prefix[RANGE_CHECK_BUS];
         let mut mem_prefix = vec![E::ZERO; main_trace.num_rows()];
         for row_idx in 0..(main_trace.num_rows() - 1) {
             let row: RowIndex = (row_idx as u32).into();
