@@ -13,12 +13,16 @@
 //! let witness = AirWitness::new(&trace, &public_values, &[]);
 //! check_constraints(&air, &witness, &aux_builder, &challenges);
 //!
-//! // Multiple instances (ascending height order)
+//! // Multiple instances
 //! check_constraints_multi(
 //!     &[(&air_a, witness_a, &builder_a), (&air_b, witness_b, &builder_b)],
 //!     &challenges,
 //! );
 //! ```
+
+extern crate alloc;
+
+use alloc::vec::Vec;
 
 use miden_lifted_air::{
     AirBuilder, AuxBuilder, EmptyWindow, ExtensionBuilder, LiftedAir, PeriodicAirBuilder,
@@ -59,8 +63,7 @@ pub fn check_constraints<F, EF, A, B>(
 
 /// Evaluate constraints for multiple AIR instances and panic on failure.
 ///
-/// Each instance is a tuple of `(air, witness, aux_builder)`. Instances must be in
-/// ascending trace height order, matching the protocol's multi-trace convention.
+/// Each instance is a tuple of `(air, witness, aux_builder)`.
 ///
 /// Builds the auxiliary trace for each instance and checks constraints row by row.
 /// Uses shared challenges across all instances (caller samples from RNG in test code).
@@ -69,7 +72,6 @@ pub fn check_constraints<F, EF, A, B>(
 ///
 /// - If any AIR fails validation
 /// - If trace dimensions don't match their AIR
-/// - If instances are not in ascending height order
 /// - If challenges are insufficient
 /// - If any constraint evaluates to nonzero on any row
 pub fn check_constraints_multi<F, EF, A, B>(
@@ -83,22 +85,18 @@ pub fn check_constraints_multi<F, EF, A, B>(
 {
     assert!(!instances.is_empty(), "no instances provided");
 
-    let mut prev_height = 0usize;
+    // Sort by (trace_height, caller_index) to match InstanceShapes::from_trace_heights.
+    let mut perm: Vec<usize> = (0..instances.len()).collect();
+    perm.sort_by_key(|&i| (instances[i].1.trace.height(), i));
 
-    for (i, &(air, ref witness, aux_builder)) in instances.iter().enumerate() {
+    for (i, &orig_idx) in perm.iter().enumerate() {
+        let &(air, ref witness, aux_builder) = &instances[orig_idx];
+
         air.validate()
             .unwrap_or_else(|e| panic!("AIR validation failed for instance {i}: {e}"));
 
         let main = witness.trace;
         let height = main.height();
-
-        // Ascending height order.
-        assert!(
-            height >= prev_height,
-            "instances not in ascending height order: instance {i} has height {height} \
-             but previous had {prev_height}"
-        );
-        prev_height = height;
 
         // Main trace dimensions.
         assert!(

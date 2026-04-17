@@ -24,26 +24,10 @@ prescribe the *initial* challenger state used for Fiat-Shamir.
 
 ## Fiat-Shamir / transcript binding
 
-This crate does not enforce a single transcript layout. The protocol implementation
-assumes the challenger inside the channel has already observed all variable statement
-inputs (in particular the `public_values`).
-
-This is required to support applications that obtain public inputs out-of-band and
-do not want them duplicated inside the proof. If you do not bind public inputs into
-Fiat-Shamir, the sampled challenges are independent of them.
-
-Ergonomic recommendation: pre-seed the challenger (domain separator + AIR/version tag +
-statement metadata + public inputs) *before* constructing `ProverTranscript`, so you can
-bind without bloating the proof.
-
-## Multi-trace ordering
-
-For `prove_multi`, instances must be provided in ascending trace height order
-(smallest first). Internally, traces are committed and quotient numerators are
-accumulated in this order.
-
-Log trace heights are observed into the Fiat-Shamir challenger before the
-transcript begins, so the protocol identity depends on the input ordering.
+The caller must bind protocol parameters, public values, variable-length
+public inputs, AIR configurations, and `air_order` into the challenger
+before calling `prove_multi`. See the Rust module-level docs for the full contract
+and code examples.
 
 ## Protocol flow
 

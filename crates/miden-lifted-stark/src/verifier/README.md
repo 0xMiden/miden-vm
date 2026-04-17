@@ -25,47 +25,30 @@ prescribe the *initial* challenger state used for Fiat-Shamir.
 
 ## Fiat-Shamir / statement binding
 
-The verifier APIs take the statement out-of-band (`air` and `public_values`).
-Log trace heights are carried in the `StarkProof` and observed into the
-Fiat-Shamir challenger at the start of verification. The protocol assumes the
-challenger has already observed all other variable statement inputs (in
-particular `public_values`).
-
-This is required to support applications that obtain public inputs out-of-band and
-do not want them duplicated inside the proof.
-
-If your application treats any of these inputs as untrusted, you must authenticate
-them by binding them into the Fiat-Shamir challenger state (domain separation +
-AIR/version tag + statement metadata + public inputs), in the same way on both prover
-and verifier.
+The caller must produce the same challenger state as the prover — see the
+prover module-level docs for the full binding contract.
 
 ## Transcript boundaries
 
 `verify_multi` rejects trailing transcript data (`TranscriptNotConsumed`). If you
 bundle extra data in the same transcript, you must manage boundaries yourself.
 
-## Multi-trace ordering
-
-For `verify_multi`, instances must be provided in the same order the prover
-used — ascending trace height order for the current prover. Log trace heights
-are read from the proof and observed into the Fiat-Shamir challenger, so the
-protocol identity depends on the input ordering.
-
 ## Protocol flow
 
-0. Observe log trace heights into the challenger (from proof, not transcript).
-1. Receive main trace commitment.
-2. Sample aux randomness.
-3. Receive aux trace commitment.
-4. Sample constraint folding challenge `alpha` and cross-trace accumulator `beta`.
-5. Receive quotient commitment.
-6. Sample OOD point `z` (rejection-sampled outside trace domain), derive `z_next`.
-7. Verify PCS openings at `[z, z_next]` for main, aux, and quotient.
-8. Reconstruct `Q(z)` from the opened quotient chunks.
-9. For each trace instance j, set `y_j = z^{r_j}` and evaluate folded constraints at `y_j`.
-10. Accumulate across traces with `beta`.
-11. Check quotient identity: `accumulated == Q(z) * (z^N - 1)`.
-12. Ensure transcript is fully consumed.
+0. Validate `air_order` from the proof and reorder caller instances to match.
+1. Observe log trace heights into the challenger (from proof, not transcript).
+2. Receive main trace commitment.
+3. Sample aux randomness.
+4. Receive aux trace commitment.
+5. Sample constraint folding challenge `alpha` and cross-trace accumulator `beta`.
+6. Receive quotient commitment.
+7. Sample OOD point `z` (rejection-sampled outside trace domain), derive `z_next`.
+8. Verify PCS openings at `[z, z_next]` for main, aux, and quotient.
+9. Reconstruct `Q(z)` from the opened quotient chunks.
+10. For each trace instance j, set `y_j = z^{r_j}` and evaluate folded constraints at `y_j`.
+11. Accumulate across traces with `beta`.
+12. Check quotient identity: `accumulated == Q(z) * (z^N - 1)`.
+13. Ensure transcript is fully consumed.
 
 ## Mathematical background
 

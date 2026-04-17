@@ -204,7 +204,7 @@ fn main() {
         cli.traces.clone()
     };
 
-    // Sort by ascending height (required by the lifted prover).
+    // Sort by ascending height for deterministic output.
     specs.sort_by_key(|s| s.log_height);
 
     let has_miden = specs.iter().any(|s| s.air_type == AirType::Miden);

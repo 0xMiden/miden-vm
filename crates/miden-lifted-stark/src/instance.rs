@@ -6,7 +6,7 @@
 
 extern crate alloc;
 
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
 use miden_lifted_air::{AirStructureError, LiftedAir, VarLenPublicInputs, log2_strict_u8};
 use p3_challenger::CanObserve;
@@ -41,7 +41,7 @@ pub struct AirInstance<'a, F> {
 ///
 /// **Commitment:** callers **must** bind both `public_values` and
 /// `var_len_public_inputs` to the Fiat-Shamir challenger state before proving.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct AirWitness<'a, F> {
     /// Main trace matrix.
     pub trace: &'a RowMajorMatrix<F>,
@@ -92,55 +92,103 @@ impl<'a, F> AirWitness<'a, F> {
 
 /// Per-instance shape metadata carried on [`StarkProof`](crate::StarkProof).
 ///
-/// Holds one log₂ trace height per instance.
+/// Stores log₂ trace heights (absorbed into the Fiat-Shamir challenger)
+/// and the AIR ordering (not absorbed — see [`air_order`](Self::air_order)).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct InstanceShapes {
     // `pub(crate)` so in-crate tests can construct malformed shapes to
     // exercise the verifier-path validation in `validate_inputs`. External
     // callers go through `InstanceShapes::from_trace_heights`.
     pub(crate) log_trace_heights: Vec<u8>,
+    /// The AIR ordering: `air_order[j]` is the caller's original index of
+    /// the instance at position `j` in the proof's ordering.
+    pub(crate) air_order: Vec<u32>,
 }
 
 impl InstanceShapes {
-    /// Construct from raw trace heights. Rejects non-power-of-two heights
-    /// and non-ascending order, and stores their log₂.
+    /// Construct from raw trace heights (must be powers of two).
+    ///
+    /// Determines the proof's AIR ordering by sorting instances by
+    /// `(log_trace_height, caller_index)`. The resulting
+    /// [`air_order`](Self::air_order) maps each position in the proof's
+    /// ordering back to the caller's original index.
     pub fn from_trace_heights(trace_heights: Vec<usize>) -> Result<Self, InstanceValidationError> {
-        let mut log_trace_heights = Vec::with_capacity(trace_heights.len());
-        let mut log_prev: u8 = 0;
-        for h in trace_heights {
-            if !h.is_power_of_two() {
-                return Err(InstanceValidationError::InvalidTraceHeight { height: h });
-            }
-            let log_h = log2_strict_u8(h);
-            if log_h < log_prev {
-                return Err(InstanceValidationError::NotAscending);
-            }
-            log_trace_heights.push(log_h);
-            log_prev = log_h;
-        }
-        Ok(Self { log_trace_heights })
+        let log_heights: Vec<u8> = trace_heights
+            .iter()
+            .map(|&h| {
+                if !h.is_power_of_two() {
+                    return Err(InstanceValidationError::InvalidTraceHeight { height: h });
+                }
+                Ok(log2_strict_u8(h))
+            })
+            .collect::<Result<_, _>>()?;
+
+        // Sort by (log_height, caller_index) for a canonical ordering.
+        let mut perm: Vec<usize> = (0..log_heights.len()).collect();
+        perm.sort_by_key(|&i| (log_heights[i], i));
+
+        let sorted_log_heights: Vec<u8> = perm.iter().map(|&i| log_heights[i]).collect();
+        let air_order: Vec<u32> = perm.iter().map(|&i| i as u32).collect();
+
+        Ok(Self {
+            log_trace_heights: sorted_log_heights,
+            air_order,
+        })
     }
 
-    /// Log₂ of the trace height for each instance, in input order.
+    /// Log₂ of the trace height for each instance, in the proof's AIR
+    /// ordering.
     pub fn log_trace_heights(&self) -> &[u8] {
         &self.log_trace_heights
     }
 
-    pub fn len(&self) -> usize {
+    /// The AIR ordering used by the proof: `air_order()[j]` is the caller's
+    /// original index of the instance at position `j` in the proof's
+    /// ordering. Not absorbed into the Fiat-Shamir transcript.
+    pub fn air_order(&self) -> &[u32] {
+        &self.air_order
+    }
+
+    pub(crate) fn len(&self) -> usize {
         self.log_trace_heights.len()
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.log_trace_heights.is_empty()
+    /// Reorder `data` from the caller's natural order to the proof's AIR
+    /// ordering. Returns a `Vec` where position `j` holds
+    /// `data[air_order[j]]`.
+    ///
+    /// Validates that `air_order` is a valid permutation before applying it.
+    /// Returns an error if lengths mismatch or if `air_order` is malformed.
+    pub(crate) fn reorder<T>(&self, mut data: Vec<T>) -> Result<Vec<T>, InstanceValidationError> {
+        let n = data.len();
+        validate_air_order(&self.air_order, n)?;
+        let mut placed = vec![false; n];
+        for start in 0..n {
+            if placed[start] {
+                continue;
+            }
+            let mut j = start;
+            loop {
+                let src = self.air_order[j] as usize;
+                placed[j] = true;
+                if src == start {
+                    break;
+                }
+                data.swap(j, src);
+                j = src;
+            }
+        }
+        Ok(data)
     }
 
     pub fn size_in_bytes(&self) -> usize {
-        size_of_val(self.log_trace_heights.as_slice())
+        size_of_val(self.log_trace_heights.as_slice()) + size_of_val(self.air_order.as_slice())
     }
 
-    /// Absorb the shape metadata into a Fiat-Shamir challenger as one base
-    /// field element per `log_h`.
-    pub(crate) fn observe<F, C>(&self, challenger: &mut C)
+    /// Absorb the log trace heights into a Fiat-Shamir challenger as one
+    /// base field element per `log_h`. The `air_order` values are **not**
+    /// absorbed.
+    pub(crate) fn observe_heights<F, C>(&self, challenger: &mut C)
     where
         F: Field + PrimeCharacteristicRing,
         C: CanObserve<F>,
@@ -162,8 +210,6 @@ pub enum InstanceValidationError {
     AirStructure(#[from] AirStructureError),
     #[error("no instances provided")]
     Empty,
-    #[error("instances not in ascending height order")]
-    NotAscending,
     #[error("trace height {height} is not a power of two")]
     InvalidTraceHeight { height: usize },
     #[error("trace width mismatch: expected {expected}, got {actual}")]
@@ -187,10 +233,18 @@ pub enum InstanceValidationError {
         log_blowup: u8,
         two_adicity: usize,
     },
+    #[error("air_order length {air_order} does not match instance count {instances}")]
+    AirOrderLengthMismatch { instances: usize, air_order: usize },
+    #[error("invalid air_order permutation for {count} instances")]
+    InvalidAirOrder { count: usize },
+    #[error("log trace heights are not in ascending order")]
+    HeightsNotAscending,
 }
 
 /// Cross-check instances against their shapes and return the log of the
 /// maximum trace height.
+///
+/// Instances and shapes must already be in the proof's AIR ordering.
 ///
 /// Checks:
 /// - shape count matches instance count
@@ -199,7 +253,6 @@ pub enum InstanceValidationError {
 ///   `usize` bound only bites on 32-bit targets)
 /// - each AIR is structurally valid ([`LiftedAir::validate`])
 /// - each instance's public values / var-len inputs match its AIR
-/// - heights are ascending (prover-side constraint; verifier rejects defensively)
 /// - max height ≥ 2 (needed for the 2-row transition window)
 /// - each trace height covers the AIR's longest periodic column
 pub(crate) fn validate_inputs<F, EF, A>(
@@ -245,7 +298,7 @@ where
             });
         }
         if log_h < log_prev {
-            return Err(InstanceValidationError::NotAscending);
+            return Err(InstanceValidationError::HeightsNotAscending);
         }
         let trace_height = 1usize << log_h as usize;
         let max_period = air.periodic_columns().iter().map(Vec::len).max().unwrap_or(0);
@@ -263,4 +316,27 @@ where
         return Err(InstanceValidationError::Empty);
     }
     Ok(log_prev)
+}
+
+/// Validate that `air_order` is a valid permutation of `0..n`.
+///
+/// Called on the verifier side where `air_order` comes from an untrusted proof.
+pub(crate) fn validate_air_order(
+    air_order: &[u32],
+    n: usize,
+) -> Result<(), InstanceValidationError> {
+    if air_order.len() != n {
+        return Err(InstanceValidationError::AirOrderLengthMismatch {
+            instances: n,
+            air_order: air_order.len(),
+        });
+    }
+    let mut seen = vec![false; n];
+    for &idx in air_order {
+        let Some(slot @ false) = seen.get_mut(idx as usize) else {
+            return Err(InstanceValidationError::InvalidAirOrder { count: n });
+        };
+        *slot = true;
+    }
+    Ok(())
 }
