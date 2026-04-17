@@ -30,7 +30,7 @@ proptest-derive = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde-untagged = { workspace = true, optional = true }
 thiserror.workspace = true
-toml = { version = "1.0", default-features = false }
+toml = { workspace = true }
 
 [dev-dependencies]
 miden-core.workspace = true
@@ -38,7 +38,7 @@ miden-mast-package = { workspace = true, features = ["arbitrary"] }
 miden-test-serde-macros.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
-toml = { version = "1.0", default-features = false, features = ["std", "serde", "parse"] }
+toml = { workspace = true, features = ["std", "serde", "parse"] }
 
 [lints.rust]
 # This is needed until this warning appears in stable when this is commented out. Currently, it

@@ -2,6 +2,7 @@ use core::fmt::{Display, Formatter, Result as FmtResult};
 
 use miden_air::trace::{
     Challenges, MainTrace, RowIndex, bus_message,
+    bus_types::CHIPLETS_BUS,
     chiplets::{
         hasher,
         hasher::{
@@ -27,7 +28,7 @@ use crate::{
 //
 // All hasher chiplet bus messages use a common encoding structure:
 //
-//   challenges.alpha                     = alpha (randomness base, accessed directly)
+//   challenges.bus_prefix[CHIPLETS_BUS]  = alpha + 1*gamma (domain-separated base for this bus)
 //   challenges.beta_powers[0]            = beta^0 (label: transition type)
 //   challenges.beta_powers[1]            = beta^1 (addr: hasher chiplet address)
 //   challenges.beta_powers[2]            = beta^2 (node_index: Merkle path position, 0 for
@@ -35,7 +36,8 @@ use crate::{
 //   challenges.beta_powers[3..10]        = beta^3..beta^10 (state[0..7]: RATE0 || RATE1)
 //   challenges.beta_powers[11..14]       = beta^11..beta^14 (capacity[0..3])
 //
-// Message encoding: alpha + beta^0*label + beta^1*addr + beta^2*node_index
+// Message encoding: bus_prefix[CHIPLETS_BUS]
+//                   + beta^0*label + beta^1*addr + beta^2*node_index
 //                   + beta^3*state[0] + ... + beta^10*state[7]
 //                   + beta^11*capacity[0] + ... + beta^14*capacity[3]
 //
@@ -69,7 +71,8 @@ fn word_to_hasher_state(word: &[Felt; WORD_SIZE]) -> [Felt; hasher::STATE_WIDTH]
     state
 }
 
-/// Encodes hasher message as **alpha + <beta, [label, addr, node_index, state...]>**
+/// Encodes hasher message as **bus_prefix[CHIPLETS_BUS] + <beta, [label, addr, node_index,
+/// state...]>**.
 ///
 /// Used for tree operations (MPVERIFY, MRUPDATE) and generic hasher messages with node_index.
 #[inline(always)]
@@ -83,7 +86,7 @@ fn hasher_message_value<E, const N: usize>(
 where
     E: ExtensionField<Felt>,
 {
-    let mut acc = challenges.alpha
+    let mut acc = challenges.bus_prefix[CHIPLETS_BUS]
         + challenges.beta_powers[bus_message::LABEL_IDX] * transition_label
         + challenges.beta_powers[bus_message::ADDR_IDX] * addr_next
         + challenges.beta_powers[bus_message::NODE_INDEX_IDX] * node_index;
@@ -93,7 +96,8 @@ where
     acc
 }
 
-/// Encodes hasher message as **alpha + <beta, [label, addr, _, state[0..7]]>** (skips node_index).
+/// Encodes hasher message as **bus_prefix[CHIPLETS_BUS] + <beta, [label, addr, _, state[0..7]]>**
+/// (skips node_index).
 #[inline(always)]
 fn header_rate_value<E>(
     challenges: &Challenges<E>,
@@ -104,7 +108,7 @@ fn header_rate_value<E>(
 where
     E: ExtensionField<Felt>,
 {
-    let mut acc = challenges.alpha
+    let mut acc = challenges.bus_prefix[CHIPLETS_BUS]
         + challenges.beta_powers[bus_message::LABEL_IDX] * transition_label
         + challenges.beta_powers[bus_message::ADDR_IDX] * addr;
     for (i, &elem) in state.iter().enumerate() {
@@ -113,8 +117,8 @@ where
     acc
 }
 
-/// Encodes hasher message as **alpha + <beta, [label, addr, _, digest]>** (skips node_index, digest
-/// is RATE0 only).
+/// Encodes hasher message as **bus_prefix[CHIPLETS_BUS] + <beta, [label, addr, _, digest]>**
+/// (skips node_index, digest is RATE0 only).
 #[inline(always)]
 fn header_digest_value<E>(
     challenges: &Challenges<E>,
@@ -125,7 +129,7 @@ fn header_digest_value<E>(
 where
     E: ExtensionField<Felt>,
 {
-    let mut acc = challenges.alpha
+    let mut acc = challenges.bus_prefix[CHIPLETS_BUS]
         + challenges.beta_powers[bus_message::LABEL_IDX] * transition_label
         + challenges.beta_powers[bus_message::ADDR_IDX] * addr;
     for (i, &elem) in digest.iter().enumerate() {
@@ -547,26 +551,28 @@ where
     E: ExtensionField<Felt>,
 {
     // Permutation segment rows never produce chiplets bus responses.
-    if main_trace.chiplet_perm_seg(row) == ONE {
+    if main_trace.chiplet_s_perm(row) == ONE {
         return E::ONE;
     }
 
     // --- Precompute common values -----------------------------------------------
 
-    let selector0 = main_trace.chiplet_selector_0(row);
     let selector1 = main_trace.chiplet_selector_1(row);
     let selector2 = main_trace.chiplet_selector_2(row);
     let selector3 = main_trace.chiplet_selector_3(row);
-    let op_label = get_op_label(selector0, selector1, selector2, selector3);
+    // Hasher labels are computed with s0=0 (the old chiplet-level selector for hasher).
+    // chiplet_selector_0 is now s_ctrl (1 on controller rows), but labels encode
+    // [0, s0, s1, s2] to match the label constants defined in hasher.rs.
+    let op_label = get_op_label(ZERO, selector1, selector2, selector3);
     let addr_next = Felt::from(row + 1);
     let state = main_trace.chiplet_hasher_state(row);
     let node_index = main_trace.chiplet_node_index(row);
 
     // Hasher-internal selectors (not chiplet-level selectors).
     // chiplet selector1 = hasher s0, selector2 = hasher s1, selector3 = hasher s2.
-    let hs0 = selector1;
-    let hs1 = selector2;
-    let hs2 = selector3;
+    let s0 = selector1;
+    let s1 = selector2;
+    let s2 = selector3;
 
     let is_boundary = main_trace.chiplet_is_boundary(row);
 
@@ -582,7 +588,7 @@ where
     // The branches below are mutually exclusive. Each either returns a non-identity
     // response or falls through to return E::ONE (identity = no response).
 
-    if hs0 == ONE && hs1 == ZERO && hs2 == ZERO && is_boundary == ONE {
+    if s0 == ONE && s1 == ZERO && s2 == ZERO && is_boundary == ONE {
         // Sponge start (LINEAR_HASH, is_boundary=1): full 12-element state.
         // Matches SPAN / control block start request.
         let label = op_label + LABEL_OFFSET_START;
@@ -599,7 +605,7 @@ where
         _debugger.add_response(alloc::boxed::Box::new(msg), challenges);
 
         value
-    } else if hs0 == ONE && hs1 == ZERO && hs2 == ZERO {
+    } else if s0 == ONE && s1 == ZERO && s2 == ZERO {
         // Sponge continuation (LINEAR_HASH, is_boundary=0): rate-only message.
         // Label uses OUTPUT_LABEL_OFFSET because the decoder's RESPAN request uses
         // LINEAR_HASH_LABEL + 32.
@@ -619,7 +625,7 @@ where
         }
 
         value
-    } else if hs0 == ONE && (hs1 == ONE || hs2 == ONE) && is_boundary == ONE {
+    } else if s0 == ONE && (s1 == ONE || s2 == ONE) && is_boundary == ONE {
         // Tree start (MP_VERIFY / MR_UPDATE_OLD / MR_UPDATE_NEW, is_boundary=1): leaf word
         // selected by direction bit. Matches MPVERIFY / MRUPDATE first-input request.
         // Tree continuation inputs (is_boundary=0) produce no response.
@@ -648,7 +654,7 @@ where
         }
 
         value
-    } else if hs0 == ZERO && hs1 == ZERO && hs2 == ZERO {
+    } else if s0 == ZERO && s1 == ZERO && s2 == ZERO {
         // HOUT -- RETURN_HASH (0,0,0): digest-only response.
         // Matches END / MPVERIFY output / MRUPDATE output.
         let label = op_label + LABEL_OFFSET_END;
@@ -667,7 +673,7 @@ where
         }
 
         value
-    } else if hs0 == ZERO && hs1 == ZERO && hs2 == ONE && is_boundary == ONE {
+    } else if s0 == ZERO && s1 == ZERO && s2 == ONE && is_boundary == ONE {
         // SOUT final -- RETURN_STATE (0,0,1) with is_boundary=1: full 12-element state.
         // Matches HPERM output request. Intermediate SOUT (is_boundary=0) produces no response.
         let label = op_label + LABEL_OFFSET_END;
@@ -685,7 +691,7 @@ where
 
         value
     } else {
-        // No response: padding rows (hs0=0, hs1=1), tree continuations (is_boundary=0),
+        // No response: padding rows (s0=0, s1=1), tree continuations (is_boundary=0),
         // intermediate SOUT (is_boundary=0), or any other non-responding row.
         E::ONE
     }
@@ -704,8 +710,8 @@ impl<E> BusMessage<E> for ControlBlockRequestMessage
 where
     E: ExtensionField<Felt>,
 {
-    /// Encodes as **alpha + <beta, [label, addr, _, state[0..7], ..., op_code]>** (skips
-    /// node_index).
+    /// Encodes as **bus_prefix[CHIPLETS_BUS] + <beta, [label, addr, _, state[0..7], ...,
+    /// op_code]>** (skips node_index).
     fn value(&self, challenges: &Challenges<E>) -> E {
         // Header + rate portion + capacity domain element for op_code
         let mut acc = header_rate_value(
