@@ -243,16 +243,8 @@ where
                 )?
             },
             Continuation::FinishBasicBlock(node_id) => {
-                let basic_block_node =
-                    current_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
-
-                basic_block::finish_basic_block(
-                    &mut state,
-                    basic_block_node,
-                    node_id,
-                    current_forest,
-                )
-                .map_break(InternalBreakReason::from)?
+                basic_block::finish_basic_block(&mut state, node_id, current_forest)
+                    .map_break(InternalBreakReason::from)?
             },
             Continuation::EnterForest(previous_forest) => {
                 // Restore the previous forest
@@ -262,24 +254,6 @@ where
                 .processor
                 .execute_after_exit_decorators(node_id, current_forest, state.host)
                 .map_break(InternalBreakReason::from)?,
-            Continuation::AfterExitDecoratorsBasicBlock(node_id) => {
-                let basic_block_node =
-                    current_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
-
-                state
-                    .processor
-                    .execute_end_of_block_decorators(
-                        basic_block_node,
-                        node_id,
-                        current_forest,
-                        state.host,
-                    )
-                    .map_break(InternalBreakReason::from)?;
-                state
-                    .processor
-                    .execute_after_exit_decorators(node_id, current_forest, state.host)
-                    .map_break(InternalBreakReason::from)?;
-            },
         }
     }
 

@@ -1,4 +1,3 @@
-use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use miden_air::{
@@ -8,7 +7,7 @@ use miden_air::{
 use miden_core::{
     WORD_SIZE, Word, ZERO,
     crypto::{hash::Poseidon2, merkle::MerklePath},
-    mast::{BasicBlockNode, MastForest, MastNodeId},
+    mast::{MastForest, MastNodeId},
     precompile::{PrecompileTranscript, PrecompileTranscriptState},
 };
 
@@ -125,17 +124,6 @@ impl Processor for FastProcessor {
         }
 
         ControlFlow::Continue(())
-    }
-
-    #[inline(always)]
-    fn execute_end_of_block_decorators(
-        &self,
-        basic_block_node: &BasicBlockNode,
-        node_id: MastNodeId,
-        current_forest: &Arc<MastForest>,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason> {
-        self.execute_end_of_block_decorators(basic_block_node, node_id, current_forest, host)
     }
 }
 

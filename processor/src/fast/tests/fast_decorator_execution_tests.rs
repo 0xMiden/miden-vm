@@ -360,3 +360,39 @@ fn test_decorator_bypass_in_debug_mode() {
     processor.execute_sync(&program, &mut host).unwrap();
     assert!(counter.get() > 0, "decorators should be retrieved in debug mode");
 }
+
+/// Tracing on without debug must still run after_exit (and op-indexed) decorator retrieval — same
+/// gate as `execute_before_enter_decorators` / legacy end-of-block path.
+#[test]
+fn test_tracing_only_runs_decorators_fast() {
+    let program =
+        create_test_program(&[Decorator::Trace(1)], &[Decorator::Trace(2)], &[Operation::Noop]);
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default())
+        .with_tracing(true);
+    let counter = processor.decorator_retrieval_count.clone();
+    let mut host = TestHost::new();
+
+    processor.execute_sync(&program, &mut host).unwrap();
+    assert!(counter.get() > 0, "decorators should be retrieved when tracing is enabled");
+    assert_eq!(host.get_trace_count(1), 1);
+    assert_eq!(host.get_trace_count(2), 1);
+}
+
+/// Raw sentinel op index merges into after_exit at build time; trace-only mode must still fire it.
+#[test]
+fn test_tracing_only_sentinel_inner_decorator_fast() {
+    let program = create_test_program_with_inner_decorators(
+        &[],
+        &[],
+        &[Operation::Noop],
+        &[(1, Decorator::Trace(42))],
+    );
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default())
+        .with_tracing(true);
+    let mut host = TestHost::new();
+
+    processor.execute_sync(&program, &mut host).unwrap();
+    assert_eq!(host.get_trace_count(42), 1);
+}

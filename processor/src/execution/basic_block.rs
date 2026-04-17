@@ -186,15 +186,13 @@ where
         batch_offset_in_block += op_batch.ops().len();
     }
 
-    finish_basic_block(state, basic_block_node, node_id, current_forest)
-        .map_break(InternalBreakReason::from)
+    finish_basic_block(state, node_id, current_forest).map_break(InternalBreakReason::from)
 }
 
 /// Execute the finish phase of a basic block node.
 #[inline(always)]
 pub(super) fn finish_basic_block<P, H, S, T>(
     state: &mut ExecutionState<'_, P, H, S, T>,
-    basic_block_node: &BasicBlockNode,
     node_id: MastNodeId,
     current_forest: &Arc<MastForest>,
 ) -> ControlFlow<BreakReason>
@@ -217,16 +215,10 @@ where
         state.tracer,
         state.stopper,
         state.continuation_stack,
-        || Some(Continuation::AfterExitDecoratorsBasicBlock(node_id)),
+        || Some(Continuation::AfterExitDecorators(node_id)),
         current_forest,
     )?;
 
-    state.processor.execute_end_of_block_decorators(
-        basic_block_node,
-        node_id,
-        current_forest,
-        state.host,
-    )?;
     state
         .processor
         .execute_after_exit_decorators(node_id, current_forest, state.host)

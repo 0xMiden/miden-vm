@@ -1,9 +1,9 @@
-use alloc::{sync::Arc, vec::Vec};
+use alloc::vec::Vec;
 use core::ops::ControlFlow;
 
 use miden_core::{
     events::{EventId, SystemEvent},
-    mast::{BasicBlockNode, MastForest, MastNodeId},
+    mast::{MastForest, MastNodeId},
 };
 
 use crate::{
@@ -72,30 +72,6 @@ impl FastProcessor {
                 host,
             ))),
         }
-    }
-
-    /// Executes any decorator in a basic block that is to be executed after all operations in the
-    /// block. This only differs from [`Self::execute_after_exit_decorators`] in that these
-    /// decorators are stored in the basic block node itself.
-    #[inline(always)]
-    pub(super) fn execute_end_of_block_decorators(
-        &self,
-        basic_block_node: &BasicBlockNode,
-        node_id: MastNodeId,
-        current_forest: &Arc<MastForest>,
-        host: &mut impl BaseHost,
-    ) -> ControlFlow<BreakReason> {
-        if self.should_execute_decorators() {
-            #[cfg(test)]
-            self.record_decorator_retrieval();
-
-            let num_ops = basic_block_node.num_operations() as usize;
-            for decorator in current_forest.decorators_for_op(node_id, num_ops) {
-                self.execute_decorator(decorator, host)?;
-            }
-        }
-
-        ControlFlow::Continue(())
     }
 
     #[inline(always)]

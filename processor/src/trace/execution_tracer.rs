@@ -567,10 +567,9 @@ impl Tracer for ExecutionTracer {
             },
             Continuation::FinishExternal(_)
             | Continuation::EnterForest(_)
-            | Continuation::AfterExitDecorators(_)
-            | Continuation::AfterExitDecoratorsBasicBlock(_) => {
+            | Continuation::AfterExitDecorators(_) => {
                 panic!(
-                    "FinishExternal, EnterForest, AfterExitDecorators and AfterExitDecoratorsBasicBlock continuations are guaranteed not to be passed here"
+                    "FinishExternal, EnterForest, and AfterExitDecorators continuations are guaranteed not to be passed here"
                 )
             },
         }
