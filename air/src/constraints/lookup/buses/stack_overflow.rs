@@ -13,7 +13,7 @@
 use crate::constraints::{
     logup_msg::StackOverflowMsg,
     lookup::{
-        LookupColumn, LookupGroup,
+        Deg, LookupColumn, LookupGroup,
         main_air::{MainBusContext, MainLookupBuilder},
     },
 };
@@ -49,29 +49,53 @@ pub(in crate::constraints::lookup) fn emit_stack_overflow<LB>(
     let f_left_overflow = op_flags.left_shift() * f_overflow.clone();
     let f_dyncall_overflow = op_flags.dyncall() * f_overflow;
 
-    builder.next_column(|col| {
-        col.group(|g| {
-            // Right shift: push `(clk, s15, b1)` onto the overflow table.
-            g.add(op_flags.right_shift(), || StackOverflowMsg {
-                clk: clk.into(),
-                val: s15.into(),
-                prev: b1.into(),
-            });
+    builder.next_column(
+        |col| {
+            col.group(
+                "overflow_interactions",
+                |g| {
+                    // Right shift: push `(clk, s15, b1)` onto the overflow table.
+                    g.add(
+                        "right_shift",
+                        op_flags.right_shift(),
+                        || StackOverflowMsg {
+                            clk: clk.into(),
+                            val: s15.into(),
+                            prev: b1.into(),
+                        },
+                        Deg::NONE,
+                    );
 
-            // Left shift with non-empty overflow: pop `(b1, s15', b1')` off the overflow table.
-            g.remove(f_left_overflow, || StackOverflowMsg {
-                clk: b1.into(),
-                val: s15_next.into(),
-                prev: b1_next.into(),
-            });
+                    // Left shift with non-empty overflow: pop `(b1, s15', b1')` off the overflow
+                    // table.
+                    g.remove(
+                        "left_shift",
+                        f_left_overflow,
+                        || StackOverflowMsg {
+                            clk: b1.into(),
+                            val: s15_next.into(),
+                            prev: b1_next.into(),
+                        },
+                        Deg::NONE,
+                    );
 
-            // DYNCALL with non-empty overflow: pop `(b1, s15', h5)`. The new overflow pointer
-            // lives in `hasher_state[5]` after a DYNCALL, since `b1'` is reset by the call.
-            g.remove(f_dyncall_overflow, || StackOverflowMsg {
-                clk: b1.into(),
-                val: s15_next.into(),
-                prev: h5.into(),
-            });
-        });
-    });
+                    // DYNCALL with non-empty overflow: pop `(b1, s15', h5)`. The new overflow
+                    // pointer lives in `hasher_state[5]` after a DYNCALL, since
+                    // `b1'` is reset by the call.
+                    g.remove(
+                        "dyncall",
+                        f_dyncall_overflow,
+                        || StackOverflowMsg {
+                            clk: b1.into(),
+                            val: s15_next.into(),
+                            prev: h5.into(),
+                        },
+                        Deg::NONE,
+                    );
+                },
+                Deg::NONE,
+            );
+        },
+        Deg::NONE,
+    );
 }

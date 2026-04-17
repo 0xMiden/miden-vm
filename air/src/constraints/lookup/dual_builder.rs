@@ -33,7 +33,7 @@ use miden_core::{
 use miden_crypto::stark::air::RowWindow;
 
 use super::{
-    LookupBatch, LookupBuilder, LookupChallenges, LookupColumn, LookupGroup, LookupMessage,
+    Deg, LookupBatch, LookupBuilder, LookupChallenges, LookupColumn, LookupGroup, LookupMessage,
     chiplet_air::ChipletLookupBuilder, main_air::MainLookupBuilder,
 };
 
@@ -126,6 +126,7 @@ impl<'a> LookupBuilder for DualBuilder<'a> {
     fn next_column<'c, R>(
         &'c mut self,
         f: impl FnOnce(&mut Self::Column<'c>) -> R,
+        _deg: Deg,
     ) -> R {
         // Reset the group counter at the start of every column so each
         // `GroupMismatch` carries a column-local index.
@@ -179,7 +180,12 @@ impl<'c> LookupColumn for DualColumn<'c> {
     where
         Self: 'g;
 
-    fn group<'g, R>(&'g mut self, f: impl FnOnce(&mut Self::Group<'g>) -> R) -> R {
+    fn group<'g>(
+        &'g mut self,
+        _name: &'static str,
+        f: impl FnOnce(&mut Self::Group<'g>),
+        _deg: Deg,
+    ) {
         // Non-cached group: no dual-closure comparison possible, so just
         // run the closure against a fresh `DualGroup` and bump the
         // counter. The final `(u, v)` is discarded — we only fold
@@ -191,16 +197,17 @@ impl<'c> LookupColumn for DualColumn<'c> {
             v: QuadFelt::ZERO,
             _phantom: PhantomData,
         };
-        let result = f(&mut group);
+        f(&mut group);
         *self.group_idx_within_column += 1;
-        result
     }
 
-    fn group_with_cached_encoding<'g, R>(
+    fn group_with_cached_encoding<'g>(
         &'g mut self,
-        canonical: impl FnOnce(&mut Self::Group<'g>) -> R,
-        encoded: impl FnOnce(&mut Self::Group<'g>) -> R,
-    ) -> R {
+        _name: &'static str,
+        canonical: impl FnOnce(&mut Self::Group<'g>),
+        encoded: impl FnOnce(&mut Self::Group<'g>),
+        _deg: Deg,
+    ) {
         // Run both closures against their own independent state machines
         // seeded to `(u, v) = (ONE, ZERO)`, then compare the final pairs.
         let mut g_canonical = DualGroup {
@@ -216,8 +223,8 @@ impl<'c> LookupColumn for DualColumn<'c> {
             _phantom: PhantomData,
         };
 
-        let _r_canonical = canonical(&mut g_canonical);
-        let r_encoded = encoded(&mut g_encoded);
+        canonical(&mut g_canonical);
+        encoded(&mut g_encoded);
 
         if g_canonical.u != g_encoded.u || g_canonical.v != g_encoded.v {
             self.mismatches.push(GroupMismatch {
@@ -230,7 +237,6 @@ impl<'c> LookupColumn for DualColumn<'c> {
             });
         }
         *self.group_idx_within_column += 1;
-        r_encoded
     }
 }
 
@@ -259,8 +265,14 @@ impl<'g> LookupGroup for DualGroup<'g> {
     where
         Self: 'b;
 
-    fn insert<M>(&mut self, flag: Self::Expr, multiplicity: Self::Expr, msg: impl FnOnce() -> M)
-    where
+    fn insert<M>(
+        &mut self,
+        _name: &'static str,
+        flag: Self::Expr,
+        multiplicity: Self::Expr,
+        msg: impl FnOnce() -> M,
+        _deg: Deg,
+    ) where
         M: LookupMessage<Self::Expr, Self::ExprEF>,
     {
         // General case: `V_g += flag · multiplicity`.
@@ -269,11 +281,13 @@ impl<'g> LookupGroup for DualGroup<'g> {
         self.v += flag * multiplicity;
     }
 
-    fn batch<'b, R>(
+    fn batch<'b>(
         &'b mut self,
+        _name: &'static str,
         flag: Self::Expr,
-        build: impl FnOnce(&mut Self::Batch<'b>) -> R,
-    ) -> R {
+        build: impl FnOnce(&mut Self::Batch<'b>),
+        _deg: Deg,
+    ) {
         // Same batch algebra as `ConstraintGroup::batch`: start with
         // `(N, D) = (0, 1)`, run `build`, then fold the final `(N, D)`
         // into `(U_g, V_g)` via
@@ -284,11 +298,10 @@ impl<'g> LookupGroup for DualGroup<'g> {
             d: QuadFelt::ONE,
             _phantom: PhantomData,
         };
-        let result = build(&mut batch);
+        build(&mut batch);
         let DualBatch { n, d, .. } = batch;
         self.u += (d - QuadFelt::ONE) * flag;
         self.v += n * flag;
-        result
     }
 
     fn beta_powers(&self) -> &[Self::ExprEF] {
@@ -301,9 +314,11 @@ impl<'g> LookupGroup for DualGroup<'g> {
 
     fn insert_encoded(
         &mut self,
+        _name: &'static str,
         flag: Self::Expr,
         multiplicity: Self::Expr,
         encoded: impl FnOnce() -> Self::ExprEF,
+        _deg: Deg,
     ) {
         // Same update formula as `insert`, but the denominator is
         // user-supplied instead of coming from `LookupMessage::encode`.
@@ -333,7 +348,7 @@ impl<'b> LookupBatch for DualBatch<'b> {
     type Expr = Felt;
     type ExprEF = QuadFelt;
 
-    fn insert<M>(&mut self, multiplicity: Self::Expr, msg: M)
+    fn insert<M>(&mut self, _name: &'static str, multiplicity: Self::Expr, msg: M, _deg: Deg)
     where
         M: LookupMessage<Self::Expr, Self::ExprEF>,
     {
@@ -344,7 +359,13 @@ impl<'b> LookupBatch for DualBatch<'b> {
         self.d *= v_msg;
     }
 
-    fn insert_encoded(&mut self, multiplicity: Self::Expr, encoded: impl FnOnce() -> Self::ExprEF) {
+    fn insert_encoded(
+        &mut self,
+        _name: &'static str,
+        multiplicity: Self::Expr,
+        encoded: impl FnOnce() -> Self::ExprEF,
+        _deg: Deg,
+    ) {
         // Same as `insert`, but the denominator is user-supplied.
         let v_msg = encoded();
         let d_prev = self.d;

@@ -14,7 +14,7 @@
 //! aggregator.
 
 use super::{
-    LookupAir,
+    Deg, LookupAir,
     bus_id::NUM_BUS_IDS,
     chiplet_air::{CHIPLET_COLUMN_SHAPE, ChipletLookupAir, ChipletLookupBuilder},
     main_air::{MAIN_COLUMN_SHAPE, MainLookupAir, MainLookupBuilder},
@@ -81,7 +81,7 @@ where
         ChipletLookupAir.eval(builder);
         // Padding column — no interactions, stays zero. Keeps the aux trace width at 8
         // (word-aligned) for MASM Fiat-Shamir transcript compatibility.
-        builder.next_column(|_| {});
+        builder.next_column(|_| {}, Deg::NONE);
     }
 }
 
@@ -191,10 +191,10 @@ mod tests {
                 // SplitMix64 — a tiny high-quality mixer that produces a well-distributed
                 // u64 per call. We then reduce modulo the Goldilocks prime via `Felt::new`,
                 // which is the identity for inputs already in canonical form.
-                self.state = self.state.wrapping_add(0x9E3779B97F4A7C15);
+                self.state = self.state.wrapping_add(0x9e3779b97f4a7c15);
                 let mut z = self.state;
-                z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
-                z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+                z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+                z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
                 z ^= z >> 31;
                 Felt::new(z)
             }

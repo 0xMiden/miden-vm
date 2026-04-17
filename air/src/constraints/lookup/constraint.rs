@@ -45,7 +45,7 @@ use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess};
 
 use super::{
-    LookupAir, LookupBatch, LookupBuilder, LookupChallenges, LookupColumn, LookupGroup,
+    Deg, LookupAir, LookupBatch, LookupBuilder, LookupChallenges, LookupColumn, LookupGroup,
     LookupMessage, chiplet_air::ChipletLookupBuilder, main_air::MainLookupBuilder,
 };
 use crate::Felt;
@@ -138,6 +138,7 @@ where
     fn next_column<'a, R>(
         &'a mut self,
         f: impl FnOnce(&mut Self::Column<'a>) -> R,
+        _deg: Deg,
     ) -> R {
         // Open the column with an empty `(U, V) = (1, 0)` accumulator.
         // The column only holds a shared borrow of the challenges and
@@ -184,7 +185,7 @@ where
         let delta_transition = acc_next - acc.clone();
         self.ab.when_first_row().assert_zero_ext(acc.clone());
         self.ab.when_transition().assert_zero_ext(delta_transition * u - v);
-        self.ab.when_last_row().assert_eq_ext(acc , committed_final);
+        self.ab.when_last_row().assert_eq_ext(acc, committed_final);
 
         self.column_idx += 1;
         result
@@ -254,24 +255,30 @@ where
         Self: 'g,
         AB: 'g;
 
-    fn group<'g, R>(&'g mut self, f: impl FnOnce(&mut Self::Group<'g>) -> R) -> R {
+    fn group<'g>(
+        &'g mut self,
+        _name: &'static str,
+        f: impl FnOnce(&mut Self::Group<'g>),
+        _deg: Deg,
+    ) {
         let mut group = ConstraintGroup {
             challenges: self.challenges,
             u: AB::ExprEF::ONE,
             v: AB::ExprEF::ZERO,
             _phantom: PhantomData,
         };
-        let result = f(&mut group);
+        f(&mut group);
         let ConstraintGroup { u, v, .. } = group;
         self.fold_group(u, v);
-        result
     }
 
-    fn group_with_cached_encoding<'g, R>(
+    fn group_with_cached_encoding<'g>(
         &'g mut self,
-        _canonical: impl FnOnce(&mut Self::Group<'g>) -> R,
-        encoded: impl FnOnce(&mut Self::Group<'g>) -> R,
-    ) -> R {
+        _name: &'static str,
+        _canonical: impl FnOnce(&mut Self::Group<'g>),
+        encoded: impl FnOnce(&mut Self::Group<'g>),
+        _deg: Deg,
+    ) {
         // Constraint path: only the `encoded` closure runs; the
         // `canonical` closure is dropped unused. This matches the plan's
         // split where `canonical` is the prover-path description.
@@ -281,10 +288,9 @@ where
             v: AB::ExprEF::ZERO,
             _phantom: PhantomData,
         };
-        let result = encoded(&mut group);
+        encoded(&mut group);
         let ConstraintGroup { u, v, .. } = group;
         self.fold_group(u, v);
-        result
     }
 }
 
@@ -328,7 +334,7 @@ where
         Self: 'b,
         AB: 'b;
 
-    fn add<M>(&mut self, flag: Self::Expr, msg: impl FnOnce() -> M)
+    fn add<M>(&mut self, _name: &'static str, flag: Self::Expr, msg: impl FnOnce() -> M, _deg: Deg)
     where
         M: LookupMessage<Self::Expr, Self::ExprEF>,
     {
@@ -340,8 +346,13 @@ where
         self.v += flag;
     }
 
-    fn remove<M>(&mut self, flag: Self::Expr, msg: impl FnOnce() -> M)
-    where
+    fn remove<M>(
+        &mut self,
+        _name: &'static str,
+        flag: Self::Expr,
+        msg: impl FnOnce() -> M,
+        _deg: Deg,
+    ) where
         M: LookupMessage<Self::Expr, Self::ExprEF>,
     {
         // `remove` = multiplicity −1. `V_g += flag · (−1) = −flag`.
@@ -350,8 +361,14 @@ where
         self.v -= flag;
     }
 
-    fn insert<M>(&mut self, flag: Self::Expr, multiplicity: Self::Expr, msg: impl FnOnce() -> M)
-    where
+    fn insert<M>(
+        &mut self,
+        _name: &'static str,
+        flag: Self::Expr,
+        multiplicity: Self::Expr,
+        msg: impl FnOnce() -> M,
+        _deg: Deg,
+    ) where
         M: LookupMessage<Self::Expr, Self::ExprEF>,
     {
         // General case: `V_g += flag · multiplicity`.
@@ -360,11 +377,13 @@ where
         self.v += flag * multiplicity;
     }
 
-    fn batch<'b, R>(
+    fn batch<'b>(
         &'b mut self,
+        _name: &'static str,
         flag: Self::Expr,
-        build: impl FnOnce(&mut Self::Batch<'b>) -> R,
-    ) -> R {
+        build: impl FnOnce(&mut Self::Batch<'b>),
+        _deg: Deg,
+    ) {
         // Batch algebra: start with `(N, D) = (0, 1)`, run `build`,
         // then fold the final `(N, D)` into `(U_g, V_g)` via
         // `U_g += (D − 1) · flag`, `V_g += N · flag`.
@@ -374,11 +393,10 @@ where
             d: AB::ExprEF::ONE,
             _phantom: PhantomData,
         };
-        let result = build(&mut batch);
+        build(&mut batch);
         let ConstraintBatch { n, d, .. } = batch;
         self.u += (d - AB::ExprEF::ONE) * flag.clone();
         self.v += n * flag;
-        result
     }
 
     fn beta_powers(&self) -> &[Self::ExprEF] {
@@ -391,9 +409,11 @@ where
 
     fn insert_encoded(
         &mut self,
+        _name: &'static str,
         flag: Self::Expr,
         multiplicity: Self::Expr,
         encoded: impl FnOnce() -> Self::ExprEF,
+        _deg: Deg,
     ) {
         // Same `(U_g, V_g)` update as `insert`, but the denominator
         // comes straight from the user's pre-computed closure instead
@@ -436,7 +456,7 @@ where
     type Expr = AB::Expr;
     type ExprEF = AB::ExprEF;
 
-    fn add<M>(&mut self, msg: M)
+    fn add<M>(&mut self, _name: &'static str, msg: M, _deg: Deg)
     where
         M: LookupMessage<Self::Expr, Self::ExprEF>,
     {
@@ -447,7 +467,7 @@ where
         self.d = self.d.clone() * v;
     }
 
-    fn remove<M>(&mut self, msg: M)
+    fn remove<M>(&mut self, _name: &'static str, msg: M, _deg: Deg)
     where
         M: LookupMessage<Self::Expr, Self::ExprEF>,
     {
@@ -458,7 +478,7 @@ where
         self.d = self.d.clone() * v;
     }
 
-    fn insert<M>(&mut self, multiplicity: Self::Expr, msg: M)
+    fn insert<M>(&mut self, _name: &'static str, multiplicity: Self::Expr, msg: M, _deg: Deg)
     where
         M: LookupMessage<Self::Expr, Self::ExprEF>,
     {
@@ -469,7 +489,13 @@ where
         self.d = self.d.clone() * v;
     }
 
-    fn insert_encoded(&mut self, multiplicity: Self::Expr, encoded: impl FnOnce() -> Self::ExprEF) {
+    fn insert_encoded(
+        &mut self,
+        _name: &'static str,
+        multiplicity: Self::Expr,
+        encoded: impl FnOnce() -> Self::ExprEF,
+        _deg: Deg,
+    ) {
         // Same as `insert`, but the denominator is a user-supplied
         // pre-encoded `ExprEF` instead of a `LookupMessage::encode`
         // call.

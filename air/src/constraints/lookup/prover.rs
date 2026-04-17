@@ -57,7 +57,7 @@ use miden_core::{
 use miden_crypto::stark::air::RowWindow;
 
 use super::{
-    LookupAir, LookupBatch, LookupBuilder, LookupChallenges, LookupColumn, LookupGroup,
+    Deg, LookupAir, LookupBatch, LookupBuilder, LookupChallenges, LookupColumn, LookupGroup,
     LookupMessage, chiplet_air::ChipletLookupBuilder, fractions::LookupFractions,
     main_air::MainLookupBuilder,
 };
@@ -376,6 +376,7 @@ where
     fn next_column<'c, R>(
         &'c mut self,
         f: impl FnOnce(&mut Self::Column<'c>) -> R,
+        _deg: Deg,
     ) -> R {
         let idx = self.column_idx;
         let row_idx = self.row_idx;
@@ -469,7 +470,12 @@ where
     where
         Self: 'g;
 
-    fn group<'g, R>(&'g mut self, f: impl FnOnce(&mut Self::Group<'g>) -> R) -> R {
+    fn group<'g>(
+        &'g mut self,
+        _name: &'static str,
+        f: impl FnOnce(&mut Self::Group<'g>),
+        _deg: Deg,
+    ) {
         let mut group = ProverGroup {
             challenges: self.challenges,
             fractions: &mut *self.fractions,
@@ -480,11 +486,13 @@ where
         f(&mut group)
     }
 
-    fn group_with_cached_encoding<'g, R>(
+    fn group_with_cached_encoding<'g>(
         &'g mut self,
-        canonical: impl FnOnce(&mut Self::Group<'g>) -> R,
-        _encoded: impl FnOnce(&mut Self::Group<'g>) -> R,
-    ) -> R {
+        _name: &'static str,
+        canonical: impl FnOnce(&mut Self::Group<'g>),
+        _encoded: impl FnOnce(&mut Self::Group<'g>),
+        _deg: Deg,
+    ) {
         // Prover path: only the `canonical` closure runs; the `encoded`
         // closure is dropped unused. Both closures must describe
         // mathematically identical interaction sets, so picking the
@@ -554,7 +562,7 @@ where
     where
         Self: 'b;
 
-    fn add<M>(&mut self, flag: F, msg: impl FnOnce() -> M)
+    fn add<M>(&mut self, _name: &'static str, flag: F, msg: impl FnOnce() -> M, _deg: Deg)
     where
         M: LookupMessage<F, EF>,
     {
@@ -567,7 +575,7 @@ where
         self.fractions.push((F::ONE, v));
     }
 
-    fn remove<M>(&mut self, flag: F, msg: impl FnOnce() -> M)
+    fn remove<M>(&mut self, _name: &'static str, flag: F, msg: impl FnOnce() -> M, _deg: Deg)
     where
         M: LookupMessage<F, EF>,
     {
@@ -580,8 +588,14 @@ where
         self.fractions.push((F::NEG_ONE, v));
     }
 
-    fn insert<M>(&mut self, flag: F, multiplicity: F, msg: impl FnOnce() -> M)
-    where
+    fn insert<M>(
+        &mut self,
+        _name: &'static str,
+        flag: F,
+        multiplicity: F,
+        msg: impl FnOnce() -> M,
+        _deg: Deg,
+    ) where
         M: LookupMessage<F, EF>,
     {
         if flag == F::ZERO {
@@ -596,7 +610,13 @@ where
         self.fractions.push((multiplicity, v));
     }
 
-    fn batch<'b, R>(&'b mut self, flag: F, build: impl FnOnce(&mut Self::Batch<'b>) -> R) -> R {
+    fn batch<'b>(
+        &'b mut self,
+        _name: &'static str,
+        flag: F,
+        build: impl FnOnce(&mut Self::Batch<'b>),
+        _deg: Deg,
+    ) {
         // `active = false` turns every push inside the batch into a
         // no-op, which saves both the `msg.encode()` call and the `Vec`
         // push when the outer batch flag is zero. The `build` closure
@@ -680,7 +700,7 @@ where
     type Expr = F;
     type ExprEF = EF;
 
-    fn add<M>(&mut self, msg: M)
+    fn add<M>(&mut self, _name: &'static str, msg: M, _deg: Deg)
     where
         M: LookupMessage<F, EF>,
     {
@@ -692,7 +712,7 @@ where
         self.fractions.push((F::ONE, v));
     }
 
-    fn remove<M>(&mut self, msg: M)
+    fn remove<M>(&mut self, _name: &'static str, msg: M, _deg: Deg)
     where
         M: LookupMessage<F, EF>,
     {
@@ -704,7 +724,7 @@ where
         self.fractions.push((F::NEG_ONE, v));
     }
 
-    fn insert<M>(&mut self, multiplicity: F, msg: M)
+    fn insert<M>(&mut self, _name: &'static str, multiplicity: F, msg: M, _deg: Deg)
     where
         M: LookupMessage<F, EF>,
     {
@@ -717,7 +737,13 @@ where
         self.fractions.push((multiplicity, v));
     }
 
-    fn insert_encoded(&mut self, multiplicity: F, encoded: impl FnOnce() -> EF) {
+    fn insert_encoded(
+        &mut self,
+        _name: &'static str,
+        multiplicity: F,
+        encoded: impl FnOnce() -> EF,
+        _deg: Deg,
+    ) {
         if !self.active {
             return;
         }
@@ -743,7 +769,7 @@ mod tests {
     use super::*;
     use crate::{
         Felt,
-        constraints::lookup::{LookupAir, fractions::accumulate_slow, message::LookupMessage},
+        constraints::lookup::{Deg, LookupAir, fractions::accumulate_slow, message::LookupMessage},
         trace::Challenges,
     };
 
@@ -789,19 +815,53 @@ mod tests {
             1
         }
         fn eval(&self, builder: &mut LB) {
-            builder.next_column(|col| {
-                col.group(|g| {
-                    g.add(Felt::ONE, || SmokeMsg { value: Felt::ONE });
-                    g.remove(Felt::ONE, || SmokeMsg { value: Felt::new(2) });
-                });
-            });
-            builder.next_column(|col| {
-                col.group(|g| {
-                    g.batch(Felt::ONE, |b| {
-                        b.insert(Felt::ONE, SmokeMsg { value: Felt::new(3) });
-                    });
-                });
-            });
+            builder.next_column(
+                |col| {
+                    col.group(
+                        "smoke_grp_0",
+                        |g| {
+                            g.add(
+                                "smoke_add",
+                                Felt::ONE,
+                                || SmokeMsg { value: Felt::ONE },
+                                Deg::NONE,
+                            );
+                            g.remove(
+                                "smoke_remove",
+                                Felt::ONE,
+                                || SmokeMsg { value: Felt::new(2) },
+                                Deg::NONE,
+                            );
+                        },
+                        Deg::NONE,
+                    );
+                },
+                Deg::NONE,
+            );
+            builder.next_column(
+                |col| {
+                    col.group(
+                        "smoke_grp_1",
+                        |g| {
+                            g.batch(
+                                "smoke_batch",
+                                Felt::ONE,
+                                |b| {
+                                    b.insert(
+                                        "smoke_batch_insert",
+                                        Felt::ONE,
+                                        SmokeMsg { value: Felt::new(3) },
+                                        Deg::NONE,
+                                    );
+                                },
+                                Deg::NONE,
+                            );
+                        },
+                        Deg::NONE,
+                    );
+                },
+                Deg::NONE,
+            );
         }
     }
 

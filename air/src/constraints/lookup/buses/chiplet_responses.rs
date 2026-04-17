@@ -24,7 +24,7 @@ use crate::{
             AceInitMsg, BitwiseResponseMsg, HasherMsg, KernelRomResponseMsg, MemoryResponseMsg,
         },
         lookup::{
-            LookupColumn, LookupGroup,
+            Deg, LookupColumn, LookupGroup,
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
         },
         utils::BoolNot,
@@ -143,198 +143,271 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
 
     // --- Emit everything into a single LogUp column ---
 
-    builder.next_column(|col| {
-        col.group(|g| {
-            // Sponge start: full 12-lane state, node_index = 0.
-            g.add(f_sponge_start, || {
-                let addr = local.system.clk.into() + LB::Expr::ONE;
-                let state: [LB::Expr; 12] = array::from_fn(|i| {
-                    if i < 4 {
-                        rate_0[i].into()
-                    } else if i < 8 {
-                        rate_1[i - 4].into()
-                    } else {
-                        cap[i - 8].into()
-                    }
-                });
-                HasherMsg::State {
-                    label_value: LINEAR_HASH_LABEL as u16 + INPUT_LABEL_OFFSET,
-                    addr,
-                    node_index: LB::Expr::ZERO,
-                    state,
-                }
-            });
+    builder.next_column(
+        |col| {
+            col.group(
+                "chiplet_responses",
+                |g| {
+                    // Sponge start: full 12-lane state, node_index = 0.
+                    g.add(
+                        "sponge_start",
+                        f_sponge_start,
+                        || {
+                            let addr = local.system.clk.into() + LB::Expr::ONE;
+                            let state: [LB::Expr; 12] = array::from_fn(|i| {
+                                if i < 4 {
+                                    rate_0[i].into()
+                                } else if i < 8 {
+                                    rate_1[i - 4].into()
+                                } else {
+                                    cap[i - 8].into()
+                                }
+                            });
+                            HasherMsg::State {
+                                label_value: LINEAR_HASH_LABEL as u16 + INPUT_LABEL_OFFSET,
+                                addr,
+                                node_index: LB::Expr::ZERO,
+                                state,
+                            }
+                        },
+                        Deg::NONE,
+                    );
 
-            // Sponge RESPAN: rate-only 8 lanes, node_index = 0.
-            g.add(f_sponge_respan, || {
-                let addr = local.system.clk.into() + LB::Expr::ONE;
-                let rate: [LB::Expr; 8] =
-                    array::from_fn(|i| if i < 4 { rate_0[i].into() } else { rate_1[i - 4].into() });
-                HasherMsg::Rate {
-                    label_value: LINEAR_HASH_LABEL as u16 + OUTPUT_LABEL_OFFSET,
-                    addr,
-                    node_index: LB::Expr::ZERO,
-                    rate,
-                }
-            });
+                    // Sponge RESPAN: rate-only 8 lanes, node_index = 0.
+                    g.add(
+                        "sponge_respan",
+                        f_sponge_respan,
+                        || {
+                            let addr = local.system.clk.into() + LB::Expr::ONE;
+                            let rate: [LB::Expr; 8] = array::from_fn(|i| {
+                                if i < 4 { rate_0[i].into() } else { rate_1[i - 4].into() }
+                            });
+                            HasherMsg::Rate {
+                                label_value: LINEAR_HASH_LABEL as u16 + OUTPUT_LABEL_OFFSET,
+                                addr,
+                                node_index: LB::Expr::ZERO,
+                                rate,
+                            }
+                        },
+                        Deg::NONE,
+                    );
 
-            // MP_VERIFY input: leaf word. `leaf = (1-bit)·rate_0 + bit·rate_1` where
-            // `bit = node_index - 2·node_index_next` is the current Merkle direction bit.
-            g.add(f_mp, || {
-                let addr = local.system.clk.into() + LB::Expr::ONE;
-                let node_index: LB::Expr = ctrl.node_index.into();
-                let bit: LB::Expr = node_index.clone() - ctrl_next.node_index.into().double();
-                let one_minus_bit = bit.not();
-                let word: [LB::Expr; 4] = array::from_fn(|i| {
-                    one_minus_bit.clone() * rate_0[i].into() + bit.clone() * rate_1[i].into()
-                });
-                HasherMsg::Word {
-                    label_value: MP_VERIFY_LABEL as u16 + INPUT_LABEL_OFFSET,
-                    addr,
-                    node_index,
-                    word,
-                }
-            });
+                    // MP_VERIFY input: leaf word. `leaf = (1-bit)·rate_0 + bit·rate_1` where
+                    // `bit = node_index - 2·node_index_next` is the current Merkle direction bit.
+                    g.add(
+                        "mp_verify_input",
+                        f_mp,
+                        || {
+                            let addr = local.system.clk.into() + LB::Expr::ONE;
+                            let node_index: LB::Expr = ctrl.node_index.into();
+                            let bit: LB::Expr =
+                                node_index.clone() - ctrl_next.node_index.into().double();
+                            let one_minus_bit = bit.not();
+                            let word: [LB::Expr; 4] = array::from_fn(|i| {
+                                one_minus_bit.clone() * rate_0[i].into()
+                                    + bit.clone() * rate_1[i].into()
+                            });
+                            HasherMsg::Word {
+                                label_value: MP_VERIFY_LABEL as u16 + INPUT_LABEL_OFFSET,
+                                addr,
+                                node_index,
+                                word,
+                            }
+                        },
+                        Deg::NONE,
+                    );
 
-            // MR_UPDATE_OLD input: leaf word.
-            g.add(f_mv, || {
-                let addr = local.system.clk.into() + LB::Expr::ONE;
-                let node_index: LB::Expr = ctrl.node_index.into();
-                let bit: LB::Expr = node_index.clone() - ctrl_next.node_index.into().double();
-                let one_minus_bit = bit.not();
-                let word: [LB::Expr; 4] = array::from_fn(|i| {
-                    one_minus_bit.clone() * rate_0[i].into() + bit.clone() * rate_1[i].into()
-                });
-                HasherMsg::Word {
-                    label_value: MR_UPDATE_OLD_LABEL as u16 + INPUT_LABEL_OFFSET,
-                    addr,
-                    node_index,
-                    word,
-                }
-            });
+                    // MR_UPDATE_OLD input: leaf word.
+                    g.add(
+                        "mr_update_old_input",
+                        f_mv,
+                        || {
+                            let addr = local.system.clk.into() + LB::Expr::ONE;
+                            let node_index: LB::Expr = ctrl.node_index.into();
+                            let bit: LB::Expr =
+                                node_index.clone() - ctrl_next.node_index.into().double();
+                            let one_minus_bit = bit.not();
+                            let word: [LB::Expr; 4] = array::from_fn(|i| {
+                                one_minus_bit.clone() * rate_0[i].into()
+                                    + bit.clone() * rate_1[i].into()
+                            });
+                            HasherMsg::Word {
+                                label_value: MR_UPDATE_OLD_LABEL as u16 + INPUT_LABEL_OFFSET,
+                                addr,
+                                node_index,
+                                word,
+                            }
+                        },
+                        Deg::NONE,
+                    );
 
-            // MR_UPDATE_NEW input: leaf word.
-            g.add(f_mu, || {
-                let addr = local.system.clk.into() + LB::Expr::ONE;
-                let node_index: LB::Expr = ctrl.node_index.into();
-                let bit: LB::Expr = node_index.clone() - ctrl_next.node_index.into().double();
-                let one_minus_bit = bit.not();
-                let word: [LB::Expr; 4] = array::from_fn(|i| {
-                    one_minus_bit.clone() * rate_0[i].into() + bit.clone() * rate_1[i].into()
-                });
-                HasherMsg::Word {
-                    label_value: MR_UPDATE_NEW_LABEL as u16 + INPUT_LABEL_OFFSET,
-                    addr,
-                    node_index,
-                    word,
-                }
-            });
+                    // MR_UPDATE_NEW input: leaf word.
+                    g.add(
+                        "mr_update_new_input",
+                        f_mu,
+                        || {
+                            let addr = local.system.clk.into() + LB::Expr::ONE;
+                            let node_index: LB::Expr = ctrl.node_index.into();
+                            let bit: LB::Expr =
+                                node_index.clone() - ctrl_next.node_index.into().double();
+                            let one_minus_bit = bit.not();
+                            let word: [LB::Expr; 4] = array::from_fn(|i| {
+                                one_minus_bit.clone() * rate_0[i].into()
+                                    + bit.clone() * rate_1[i].into()
+                            });
+                            HasherMsg::Word {
+                                label_value: MR_UPDATE_NEW_LABEL as u16 + INPUT_LABEL_OFFSET,
+                                addr,
+                                node_index,
+                                word,
+                            }
+                        },
+                        Deg::NONE,
+                    );
 
-            // HOUT: digest = rate_0.
-            g.add(f_hout, || {
-                let addr = local.system.clk.into() + LB::Expr::ONE;
-                let node_index: LB::Expr = ctrl.node_index.into();
-                let word: [LB::Expr; 4] = rate_0.map(LB::Expr::from);
-                HasherMsg::Word {
-                    label_value: RETURN_HASH_LABEL as u16 + OUTPUT_LABEL_OFFSET,
-                    addr,
-                    node_index,
-                    word,
-                }
-            });
+                    // HOUT: digest = rate_0.
+                    g.add(
+                        "hout",
+                        f_hout,
+                        || {
+                            let addr = local.system.clk.into() + LB::Expr::ONE;
+                            let node_index: LB::Expr = ctrl.node_index.into();
+                            let word: [LB::Expr; 4] = rate_0.map(LB::Expr::from);
+                            HasherMsg::Word {
+                                label_value: RETURN_HASH_LABEL as u16 + OUTPUT_LABEL_OFFSET,
+                                addr,
+                                node_index,
+                                word,
+                            }
+                        },
+                        Deg::NONE,
+                    );
 
-            // SOUT: full 12-lane state (HPERM return), node_index = 0.
-            g.add(f_sout, || {
-                let addr = local.system.clk.into() + LB::Expr::ONE;
-                let state: [LB::Expr; 12] = array::from_fn(|i| {
-                    if i < 4 {
-                        rate_0[i].into()
-                    } else if i < 8 {
-                        rate_1[i - 4].into()
-                    } else {
-                        cap[i - 8].into()
-                    }
-                });
-                HasherMsg::State {
-                    label_value: RETURN_STATE_LABEL as u16 + OUTPUT_LABEL_OFFSET,
-                    addr,
-                    node_index: LB::Expr::ZERO,
-                    state,
-                }
-            });
+                    // SOUT: full 12-lane state (HPERM return), node_index = 0.
+                    g.add(
+                        "sout",
+                        f_sout,
+                        || {
+                            let addr = local.system.clk.into() + LB::Expr::ONE;
+                            let state: [LB::Expr; 12] = array::from_fn(|i| {
+                                if i < 4 {
+                                    rate_0[i].into()
+                                } else if i < 8 {
+                                    rate_1[i - 4].into()
+                                } else {
+                                    cap[i - 8].into()
+                                }
+                            });
+                            HasherMsg::State {
+                                label_value: RETURN_STATE_LABEL as u16 + OUTPUT_LABEL_OFFSET,
+                                addr,
+                                node_index: LB::Expr::ZERO,
+                                state,
+                            }
+                        },
+                        Deg::NONE,
+                    );
 
-            // Bitwise: runtime-muxed label `(1-op)·AND + op·XOR`.
-            g.add(is_bitwise_responding, || {
-                let bw_op: LB::Expr = bw.op_flag.into();
-                let label = bw_op.not() * LB::Expr::from(BITWISE_AND_LABEL)
-                    + bw_op * LB::Expr::from(BITWISE_XOR_LABEL);
-                BitwiseResponseMsg {
-                    label,
-                    a: bw.a.into(),
-                    b: bw.b.into(),
-                    z: bw.output.into(),
-                }
-            });
+                    // Bitwise: runtime-muxed label `(1-op)·AND + op·XOR`.
+                    g.add(
+                        "bitwise",
+                        is_bitwise_responding,
+                        || {
+                            let bw_op: LB::Expr = bw.op_flag.into();
+                            let label = bw_op.not() * LB::Expr::from(BITWISE_AND_LABEL)
+                                + bw_op * LB::Expr::from(BITWISE_XOR_LABEL);
+                            BitwiseResponseMsg {
+                                label,
+                                a: bw.a.into(),
+                                b: bw.b.into(),
+                                z: bw.output.into(),
+                            }
+                        },
+                        Deg::NONE,
+                    );
 
-            // Memory: runtime-muxed label + is_word mux keeps C1 transition at 8.
-            g.add(ctx.chiplet_active.memory.clone(), || {
-                let mem_is_read: LB::Expr = mem.is_read.into();
-                let is_word: LB::Expr = mem.is_word.into();
-                let mem_idx0: LB::Expr = mem.idx0.into();
-                let mem_idx1: LB::Expr = mem.idx1.into();
+                    // Memory: runtime-muxed label + is_word mux keeps C1 transition at 8.
+                    g.add(
+                        "memory",
+                        ctx.chiplet_active.memory.clone(),
+                        || {
+                            let mem_is_read: LB::Expr = mem.is_read.into();
+                            let is_word: LB::Expr = mem.is_word.into();
+                            let mem_idx0: LB::Expr = mem.idx0.into();
+                            let mem_idx1: LB::Expr = mem.idx1.into();
 
-                // Runtime label: `(1-is_read)*write_label + is_read*read_label`, each itself
-                // `(1-is_word)*_ELEMENT + is_word*_WORD`.
-                let write_label = is_word.not()
-                    * LB::Expr::from_u16(MEMORY_WRITE_ELEMENT_LABEL as u16)
-                    + is_word.clone() * LB::Expr::from_u16(MEMORY_WRITE_WORD_LABEL as u16);
-                let read_label = is_word.not()
-                    * LB::Expr::from_u16(MEMORY_READ_ELEMENT_LABEL as u16)
-                    + is_word.clone() * LB::Expr::from_u16(MEMORY_READ_WORD_LABEL as u16);
-                let label = mem_is_read.not() * write_label + mem_is_read * read_label;
+                            // Runtime label: `(1-is_read)*write_label + is_read*read_label`, each
+                            // itself `(1-is_word)*_ELEMENT +
+                            // is_word*_WORD`.
+                            let write_label = is_word.not()
+                                * LB::Expr::from_u16(MEMORY_WRITE_ELEMENT_LABEL as u16)
+                                + is_word.clone()
+                                    * LB::Expr::from_u16(MEMORY_WRITE_WORD_LABEL as u16);
+                            let read_label = is_word.not()
+                                * LB::Expr::from_u16(MEMORY_READ_ELEMENT_LABEL as u16)
+                                + is_word.clone()
+                                    * LB::Expr::from_u16(MEMORY_READ_WORD_LABEL as u16);
+                            let label = mem_is_read.not() * write_label + mem_is_read * read_label;
 
-                let addr = mem.word_addr.into()
-                    + mem_idx1.clone() * LB::Expr::from_u16(2)
-                    + mem_idx0.clone();
+                            let addr = mem.word_addr.into()
+                                + mem_idx1.clone() * LB::Expr::from_u16(2)
+                                + mem_idx0.clone();
 
-                let word: [LB::Expr; 4] = mem.values.map(LB::Expr::from);
-                let element = word[0].clone() * mem_idx0.not() * mem_idx1.not()
-                    + word[1].clone() * mem_idx0.clone() * mem_idx1.not()
-                    + word[2].clone() * mem_idx0.not() * mem_idx1.clone()
-                    + word[3].clone() * mem_idx0 * mem_idx1;
+                            let word: [LB::Expr; 4] = mem.values.map(LB::Expr::from);
+                            let element = word[0].clone() * mem_idx0.not() * mem_idx1.not()
+                                + word[1].clone() * mem_idx0.clone() * mem_idx1.not()
+                                + word[2].clone() * mem_idx0.not() * mem_idx1.clone()
+                                + word[3].clone() * mem_idx0 * mem_idx1;
 
-                MemoryResponseMsg {
-                    label,
-                    ctx: mem.ctx.into(),
-                    addr,
-                    clk: mem.clk.into(),
-                    is_word,
-                    element,
-                    word,
-                }
-            });
+                            MemoryResponseMsg {
+                                label,
+                                ctx: mem.ctx.into(),
+                                addr,
+                                clk: mem.clk.into(),
+                                is_word,
+                                element,
+                                word,
+                            }
+                        },
+                        Deg::NONE,
+                    );
 
-            // ACE init.
-            g.add(is_ace_init, || {
-                let num_eval = ace.read().num_eval.into() + LB::Expr::ONE;
-                let num_read = ace.id_0.into() + LB::Expr::ONE - num_eval.clone();
-                AceInitMsg {
-                    clk: ace.clk.into(),
-                    ctx: ace.ctx.into(),
-                    ptr: ace.ptr.into(),
-                    num_read,
-                    num_eval,
-                }
-            });
+                    // ACE init.
+                    g.add(
+                        "ace_init",
+                        is_ace_init,
+                        || {
+                            let num_eval = ace.read().num_eval.into() + LB::Expr::ONE;
+                            let num_read = ace.id_0.into() + LB::Expr::ONE - num_eval.clone();
+                            AceInitMsg {
+                                clk: ace.clk.into(),
+                                ctx: ace.ctx.into(),
+                                ptr: ace.ptr.into(),
+                                num_read,
+                                num_eval,
+                            }
+                        },
+                        Deg::NONE,
+                    );
 
-            // Kernel ROM: runtime-muxed s_first → label.
-            g.add(ctx.chiplet_active.kernel_rom.clone(), || {
-                let krom_s_first: LB::Expr = krom.s_first.into();
-                let label = krom_s_first.clone() * LB::Expr::from(KERNEL_PROC_INIT_LABEL)
-                    + krom_s_first.not() * LB::Expr::from(KERNEL_PROC_CALL_LABEL);
-                let digest: [LB::Expr; 4] = krom.root.map(LB::Expr::from);
-                KernelRomResponseMsg { label, digest }
-            });
-        });
-    });
+                    // Kernel ROM: runtime-muxed s_first → label.
+                    g.add(
+                        "kernel_rom",
+                        ctx.chiplet_active.kernel_rom.clone(),
+                        || {
+                            let krom_s_first: LB::Expr = krom.s_first.into();
+                            let label = krom_s_first.clone()
+                                * LB::Expr::from(KERNEL_PROC_INIT_LABEL)
+                                + krom_s_first.not() * LB::Expr::from(KERNEL_PROC_CALL_LABEL);
+                            let digest: [LB::Expr; 4] = krom.root.map(LB::Expr::from);
+                            KernelRomResponseMsg { label, digest }
+                        },
+                        Deg::NONE,
+                    );
+                },
+                Deg::NONE,
+            );
+        },
+        Deg::NONE,
+    );
 }

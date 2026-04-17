@@ -32,7 +32,7 @@ pub mod miden_air;
 pub mod prover;
 
 pub use aux_builder::MidenLookupAuxBuilder;
-pub use builder::{LookupBatch, LookupBuilder, LookupColumn, LookupGroup};
+pub use builder::{Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup};
 pub use bus_id::NUM_BUS_IDS;
 pub use challenges::LookupChallenges;
 pub use column_oracle::{ColumnOracleBuilder, collect_column_oracle_folds};

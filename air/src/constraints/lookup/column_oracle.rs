@@ -62,7 +62,7 @@ use miden_core::{
 use miden_crypto::stark::air::RowWindow;
 
 use super::{
-    LookupAir, LookupBatch, LookupBuilder, LookupChallenges, LookupColumn, LookupGroup,
+    Deg, LookupAir, LookupBatch, LookupBuilder, LookupChallenges, LookupColumn, LookupGroup,
     LookupMessage, chiplet_air::ChipletLookupBuilder, main_air::MainLookupBuilder,
 };
 
@@ -152,6 +152,7 @@ impl<'a> LookupBuilder for ColumnOracleBuilder<'a> {
     fn next_column<'c, R>(
         &'c mut self,
         f: impl FnOnce(&mut Self::Column<'c>) -> R,
+        _deg: Deg,
     ) -> R {
         let idx = self.column_idx;
         let mut col = OracleColumn {
@@ -202,22 +203,28 @@ impl<'c> LookupColumn for OracleColumn<'c> {
     where
         Self: 'g;
 
-    fn group<'g, R>(&'g mut self, f: impl FnOnce(&mut Self::Group<'g>) -> R) -> R {
+    fn group<'g>(
+        &'g mut self,
+        _name: &'static str,
+        f: impl FnOnce(&mut Self::Group<'g>),
+        _deg: Deg,
+    ) {
         let mut group = OracleGroup {
             challenges: self.challenges,
             u: QuadFelt::ONE,
             v: QuadFelt::ZERO,
         };
-        let result = f(&mut group);
+        f(&mut group);
         self.fold_group(group.u, group.v);
-        result
     }
 
-    fn group_with_cached_encoding<'g, R>(
+    fn group_with_cached_encoding<'g>(
         &'g mut self,
-        canonical: impl FnOnce(&mut Self::Group<'g>) -> R,
-        _encoded: impl FnOnce(&mut Self::Group<'g>) -> R,
-    ) -> R {
+        _name: &'static str,
+        canonical: impl FnOnce(&mut Self::Group<'g>),
+        _encoded: impl FnOnce(&mut Self::Group<'g>),
+        _deg: Deg,
+    ) {
         // Oracle runs only the canonical closure. The
         // `miden_lookup_air_cached_encoding_equivalence` test already guarantees canonical
         // and encoded produce identical `(U_g, V_g)` pairs, so running only one is
@@ -227,9 +234,8 @@ impl<'c> LookupColumn for OracleColumn<'c> {
             u: QuadFelt::ONE,
             v: QuadFelt::ZERO,
         };
-        let result = canonical(&mut group);
+        canonical(&mut group);
         self.fold_group(group.u, group.v);
-        result
     }
 }
 
@@ -258,8 +264,14 @@ impl<'g> LookupGroup for OracleGroup<'g> {
     where
         Self: 'b;
 
-    fn insert<M>(&mut self, flag: Self::Expr, multiplicity: Self::Expr, msg: impl FnOnce() -> M)
-    where
+    fn insert<M>(
+        &mut self,
+        _name: &'static str,
+        flag: Self::Expr,
+        multiplicity: Self::Expr,
+        msg: impl FnOnce() -> M,
+        _deg: Deg,
+    ) where
         M: LookupMessage<Self::Expr, Self::ExprEF>,
     {
         let v_msg = msg().encode(self.challenges);
@@ -267,11 +279,13 @@ impl<'g> LookupGroup for OracleGroup<'g> {
         self.v += flag * multiplicity;
     }
 
-    fn batch<'b, R>(
+    fn batch<'b>(
         &'b mut self,
+        _name: &'static str,
         flag: Self::Expr,
-        build: impl FnOnce(&mut Self::Batch<'b>) -> R,
-    ) -> R {
+        build: impl FnOnce(&mut Self::Batch<'b>),
+        _deg: Deg,
+    ) {
         // Start with `(N, D) = (0, 1)` (empty-batch identity), run the build closure,
         // then fold the final `(N, D)` into `(U_g, V_g)`:
         //   U_g += (D - 1) · flag
@@ -281,11 +295,10 @@ impl<'g> LookupGroup for OracleGroup<'g> {
             n: QuadFelt::ZERO,
             d: QuadFelt::ONE,
         };
-        let result = build(&mut batch);
+        build(&mut batch);
         let OracleBatch { n, d, .. } = batch;
         self.u += (d - QuadFelt::ONE) * flag;
         self.v += n * flag;
-        result
     }
 
     fn beta_powers(&self) -> &[Self::ExprEF] {
@@ -298,9 +311,11 @@ impl<'g> LookupGroup for OracleGroup<'g> {
 
     fn insert_encoded(
         &mut self,
+        _name: &'static str,
         flag: Self::Expr,
         multiplicity: Self::Expr,
         encoded: impl FnOnce() -> QuadFelt,
+        _deg: Deg,
     ) {
         // Not reached today (the oracle only runs canonical closures), but provided for
         // trait completeness.
@@ -327,7 +342,7 @@ impl<'b> LookupBatch for OracleBatch<'b> {
     type Expr = Felt;
     type ExprEF = QuadFelt;
 
-    fn insert<M>(&mut self, multiplicity: Self::Expr, msg: M)
+    fn insert<M>(&mut self, _name: &'static str, multiplicity: Self::Expr, msg: M, _deg: Deg)
     where
         M: LookupMessage<Self::Expr, Self::ExprEF>,
     {
@@ -337,7 +352,13 @@ impl<'b> LookupBatch for OracleBatch<'b> {
         self.d *= v_msg;
     }
 
-    fn insert_encoded(&mut self, multiplicity: Self::Expr, encoded: impl FnOnce() -> Self::ExprEF) {
+    fn insert_encoded(
+        &mut self,
+        _name: &'static str,
+        multiplicity: Self::Expr,
+        encoded: impl FnOnce() -> Self::ExprEF,
+        _deg: Deg,
+    ) {
         let v_msg = encoded();
         let d_prev = self.d;
         self.n = self.n * v_msg + d_prev * multiplicity;

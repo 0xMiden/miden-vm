@@ -63,7 +63,7 @@ use crate::constraints::{
     chiplets::columns::PeriodicCols,
     logup_msg::{AceWireMsg, HasherPermLinkMsg},
     lookup::{
-        LookupBatch, LookupColumn, LookupGroup,
+        Deg, LookupBatch, LookupColumn, LookupGroup,
         chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
     },
     utils::BoolNot,
@@ -160,81 +160,115 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
     let perm_state: [LB::Var; 12] = array::from_fn(|i| perm.state[i]);
     let perm_mult = perm.multiplicity;
 
-    builder.next_column(|col| {
-        // Single group hosts both buses. ACE rows (`chiplet_active.ace`), controller rows
-        // (`chiplet_active.controller`), and permutation rows (`chiplet_active.permutation`)
-        // are pairwise mutually exclusive via the chiplet tri-state, so the simple-group
-        // composition is sound. Merging into one group takes MAX over per-interaction
-        // degrees instead of multiplying sibling `(U_g, V_g)` pairs — critical for keeping
-        // this column's transition inside the degree-9 budget.
-        col.group(|g| {
-            // ---- ACE wiring (BUS_ACE_WIRING) ----
-            //
-            // Single `ace_flag`-gated batch with `sblock`-muxed multiplicities for wire_1
-            // and wire_2. `wire_0`'s `m_0` is invariant across the READ/EVAL split, so it
-            // lives in the batch as a plain trace-column multiplicity.
-            g.batch(ace_flag, move |b| {
-                let m_0: LB::Expr = m_0.into();
-                let m_1: LB::Expr = m_1.into();
-                let wire_1_mult = sblock.not() * m_1 - sblock.clone();
-                let wire_2_mult = LB::Expr::ZERO - sblock;
+    builder.next_column(
+        |col| {
+            // Single group hosts both buses. ACE rows (`chiplet_active.ace`), controller rows
+            // (`chiplet_active.controller`), and permutation rows (`chiplet_active.permutation`)
+            // are pairwise mutually exclusive via the chiplet tri-state, so the simple-group
+            // composition is sound. Merging into one group takes MAX over per-interaction
+            // degrees instead of multiplying sibling `(U_g, V_g)` pairs — critical for keeping
+            // this column's transition inside the degree-9 budget.
+            col.group(
+                "ace_perm_link",
+                |g| {
+                    // ---- ACE wiring (BUS_ACE_WIRING) ----
+                    //
+                    // Single `ace_flag`-gated batch with `sblock`-muxed multiplicities for wire_1
+                    // and wire_2. `wire_0`'s `m_0` is invariant across the READ/EVAL split, so it
+                    // lives in the batch as a plain trace-column multiplicity.
+                    g.batch(
+                        "ace_wiring",
+                        ace_flag,
+                        move |b| {
+                            let m_0: LB::Expr = m_0.into();
+                            let m_1: LB::Expr = m_1.into();
+                            let wire_1_mult = sblock.not() * m_1 - sblock.clone();
+                            let wire_2_mult = LB::Expr::ZERO - sblock;
 
-                let wire_0 = AceWireMsg {
-                    clk: ace_clk.into(),
-                    ctx: ace_ctx.into(),
-                    id: id_0.into(),
-                    v0: v_0.0.into(),
-                    v1: v_0.1.into(),
-                };
-                b.insert(m_0, wire_0);
+                            let wire_0 = AceWireMsg {
+                                clk: ace_clk.into(),
+                                ctx: ace_ctx.into(),
+                                id: id_0.into(),
+                                v0: v_0.0.into(),
+                                v1: v_0.1.into(),
+                            };
+                            b.insert("wire_0", m_0, wire_0, Deg::NONE);
 
-                let wire_1 = AceWireMsg {
-                    clk: ace_clk.into(),
-                    ctx: ace_ctx.into(),
-                    id: id_1.into(),
-                    v0: v_1.0.into(),
-                    v1: v_1.1.into(),
-                };
-                b.insert(wire_1_mult, wire_1);
+                            let wire_1 = AceWireMsg {
+                                clk: ace_clk.into(),
+                                ctx: ace_ctx.into(),
+                                id: id_1.into(),
+                                v0: v_1.0.into(),
+                                v1: v_1.1.into(),
+                            };
+                            b.insert("wire_1", wire_1_mult, wire_1, Deg::NONE);
 
-                let wire_2 = AceWireMsg {
-                    clk: ace_clk.into(),
-                    ctx: ace_ctx.into(),
-                    id: id_2.into(),
-                    v0: v_2.0.into(),
-                    v1: v_2.1.into(),
-                };
-                b.insert(wire_2_mult, wire_2);
-            });
+                            let wire_2 = AceWireMsg {
+                                clk: ace_clk.into(),
+                                ctx: ace_ctx.into(),
+                                id: id_2.into(),
+                                v0: v_2.0.into(),
+                                v1: v_2.1.into(),
+                            };
+                            b.insert("wire_2", wire_2_mult, wire_2, Deg::NONE);
+                        },
+                        Deg::NONE,
+                    );
 
-            // ---- Hasher perm-link (BUS_HASHER_PERM_LINK) ----
+                    // ---- Hasher perm-link (BUS_HASHER_PERM_LINK) ----
 
-            // Controller input: +1 / encode(label=0, ctrl.state).
-            g.add(f_ctrl_input, move || {
-                let state: [LB::Expr; 12] = ctrl_state.map(Into::into);
-                HasherPermLinkMsg { label: LB::Expr::ZERO, state }
-            });
+                    // Controller input: +1 / encode(label=0, ctrl.state).
+                    g.add(
+                        "perm_ctrl_input",
+                        f_ctrl_input,
+                        move || {
+                            let state: [LB::Expr; 12] = ctrl_state.map(Into::into);
+                            HasherPermLinkMsg { label: LB::Expr::ZERO, state }
+                        },
+                        Deg::NONE,
+                    );
 
-            // Controller output: +1 / encode(label=1, ctrl.state).
-            g.add(f_ctrl_output, move || {
-                let state: [LB::Expr; 12] = ctrl_state.map(Into::into);
-                HasherPermLinkMsg { label: LB::Expr::ONE, state }
-            });
+                    // Controller output: +1 / encode(label=1, ctrl.state).
+                    g.add(
+                        "perm_ctrl_output",
+                        f_ctrl_output,
+                        move || {
+                            let state: [LB::Expr; 12] = ctrl_state.map(Into::into);
+                            HasherPermLinkMsg { label: LB::Expr::ONE, state }
+                        },
+                        Deg::NONE,
+                    );
 
-            // Perm row 0: -m / encode(label=0, perm.state). Multiplicity is `0 - m` so the
-            // LogUp accumulator subtracts the fraction.
-            let perm_mult_input: LB::Expr = LB::Expr::ZERO - perm_mult.into();
-            g.insert(f_perm_row0, perm_mult_input, move || {
-                let state: [LB::Expr; 12] = perm_state.map(Into::into);
-                HasherPermLinkMsg { label: LB::Expr::ZERO, state }
-            });
+                    // Perm row 0: -m / encode(label=0, perm.state). Multiplicity is `0 - m` so the
+                    // LogUp accumulator subtracts the fraction.
+                    let perm_mult_input: LB::Expr = LB::Expr::ZERO - perm_mult.into();
+                    g.insert(
+                        "perm_row0",
+                        f_perm_row0,
+                        perm_mult_input,
+                        move || {
+                            let state: [LB::Expr; 12] = perm_state.map(Into::into);
+                            HasherPermLinkMsg { label: LB::Expr::ZERO, state }
+                        },
+                        Deg::NONE,
+                    );
 
-            // Perm row 15: -m / encode(label=1, perm.state).
-            let perm_mult_output: LB::Expr = LB::Expr::ZERO - perm_mult.into();
-            g.insert(f_perm_row15, perm_mult_output, move || {
-                let state: [LB::Expr; 12] = perm_state.map(Into::into);
-                HasherPermLinkMsg { label: LB::Expr::ONE, state }
-            });
-        });
-    });
+                    // Perm row 15: -m / encode(label=1, perm.state).
+                    let perm_mult_output: LB::Expr = LB::Expr::ZERO - perm_mult.into();
+                    g.insert(
+                        "perm_row15",
+                        f_perm_row15,
+                        perm_mult_output,
+                        move || {
+                            let state: [LB::Expr; 12] = perm_state.map(Into::into);
+                            HasherPermLinkMsg { label: LB::Expr::ONE, state }
+                        },
+                        Deg::NONE,
+                    );
+                },
+                Deg::NONE,
+            );
+        },
+        Deg::NONE,
+    );
 }

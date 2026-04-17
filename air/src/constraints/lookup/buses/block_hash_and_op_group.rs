@@ -35,7 +35,7 @@ use miden_core::field::PrimeCharacteristicRing;
 use crate::constraints::{
     logup_msg::{BlockHashMsg, OpGroupMsg},
     lookup::{
-        LookupBatch, LookupColumn, LookupGroup,
+        Deg, LookupBatch, LookupColumn, LookupGroup,
         main_air::{MainBusContext, MainLookupBuilder},
     },
     utils::{BoolNot, horner_eval_bits},
@@ -106,113 +106,186 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
     let gc_next: LB::Expr = dec_next.group_count.into();
     let f_rem = in_span * (gc.clone() - gc_next);
 
-    builder.next_column(|col| {
-        col.group(|g| {
-            // =================== G_block_hash BLOCK HASH QUEUE ===================
+    builder.next_column(
+        |col| {
+            col.group(
+                "merged_interactions",
+                |g| {
+                    // =================== G_block_hash BLOCK HASH QUEUE ===================
 
-            // JOIN: two children — `h_0` first, `h_1` second.
-            g.batch(f_join, |b| {
-                let parent: LB::Expr = addr_next.into();
-                let first_hash = h_0.map(LB::Expr::from);
-                let second_hash = h_1.map(LB::Expr::from);
-                b.add(BlockHashMsg::FirstChild {
-                    parent: parent.clone(),
-                    child_hash: first_hash,
-                });
-                b.add(BlockHashMsg::Child { parent, child_hash: second_hash });
-            });
+                    // JOIN: two children — `h_0` first, `h_1` second.
+                    g.batch(
+                        "join",
+                        f_join,
+                        |b| {
+                            let parent: LB::Expr = addr_next.into();
+                            let first_hash = h_0.map(LB::Expr::from);
+                            let second_hash = h_1.map(LB::Expr::from);
+                            b.add(
+                                "join_first_child",
+                                BlockHashMsg::FirstChild {
+                                    parent: parent.clone(),
+                                    child_hash: first_hash,
+                                },
+                                Deg::NONE,
+                            );
+                            b.add(
+                                "join_second_child",
+                                BlockHashMsg::Child { parent, child_hash: second_hash },
+                                Deg::NONE,
+                            );
+                        },
+                        Deg::NONE,
+                    );
 
-            // SPLIT: `s0`-muxed selection between `h_0` and `h_1`.
-            g.add(f_split, || {
-                let parent = addr_next.into();
-                let s0: LB::Expr = s0.into();
-                let one_minus_s0 = s0.not();
-                let child_hash = array::from_fn(|i| {
-                    s0.clone() * h_0[i].into() + one_minus_s0.clone() * h_1[i].into()
-                });
-                BlockHashMsg::Child { parent, child_hash }
-            });
+                    // SPLIT: `s0`-muxed selection between `h_0` and `h_1`.
+                    g.add(
+                        "split",
+                        f_split,
+                        || {
+                            let parent = addr_next.into();
+                            let s0: LB::Expr = s0.into();
+                            let one_minus_s0 = s0.not();
+                            let child_hash = array::from_fn(|i| {
+                                s0.clone() * h_0[i].into() + one_minus_s0.clone() * h_1[i].into()
+                            });
+                            BlockHashMsg::Child { parent, child_hash }
+                        },
+                        Deg::NONE,
+                    );
 
-            // LOOP/REPEAT body: first child is `h_0`.
-            g.add(f_loop_body, || {
-                let parent = addr_next.into();
-                let child_hash = h_0.map(LB::Expr::from);
-                BlockHashMsg::LoopBody { parent, child_hash }
-            });
+                    // LOOP/REPEAT body: first child is `h_0`.
+                    g.add(
+                        "loop_repeat",
+                        f_loop_body,
+                        || {
+                            let parent = addr_next.into();
+                            let child_hash = h_0.map(LB::Expr::from);
+                            BlockHashMsg::LoopBody { parent, child_hash }
+                        },
+                        Deg::NONE,
+                    );
 
-            // DYN/DYNCALL/CALL/SYSCALL: single child at `h_0`.
-            g.add(f_child, || {
-                let parent = addr_next.into();
-                let child_hash = h_0.map(LB::Expr::from);
-                BlockHashMsg::Child { parent, child_hash }
-            });
+                    // DYN/DYNCALL/CALL/SYSCALL: single child at `h_0`.
+                    g.add(
+                        "dyn_dyncall_call_syscall",
+                        f_child,
+                        || {
+                            let parent = addr_next.into();
+                            let child_hash = h_0.map(LB::Expr::from);
+                            BlockHashMsg::Child { parent, child_hash }
+                        },
+                        Deg::NONE,
+                    );
 
-            // END: pop the queue entry. `is_first_child` distinguishes the head-of-queue
-            // case via the next-row control-flow flags, and `is_loop_body` comes from the
-            // typed END overlay on the current row.
-            g.remove(f_end, || {
-                let parent = addr_next.into();
-                let child_hash = h_0.map(LB::Expr::from);
-                let is_first_child = LB::Expr::ONE
-                    - op_flags.end_next()
-                    - op_flags.repeat_next()
-                    - op_flags.halt_next();
-                let is_loop_body = dec.end_block_flags().is_loop_body.into();
-                BlockHashMsg::End {
-                    parent,
-                    child_hash,
-                    is_first_child,
-                    is_loop_body,
-                }
-            });
+                    // END: pop the queue entry. `is_first_child` distinguishes the head-of-queue
+                    // case via the next-row control-flow flags, and `is_loop_body` comes from the
+                    // typed END overlay on the current row.
+                    g.remove(
+                        "end",
+                        f_end,
+                        || {
+                            let parent = addr_next.into();
+                            let child_hash = h_0.map(LB::Expr::from);
+                            let is_first_child = LB::Expr::ONE
+                                - op_flags.end_next()
+                                - op_flags.repeat_next()
+                                - op_flags.halt_next();
+                            let is_loop_body = dec.end_block_flags().is_loop_body.into();
+                            BlockHashMsg::End {
+                                parent,
+                                child_hash,
+                                is_first_child,
+                                is_loop_body,
+                            }
+                        },
+                        Deg::NONE,
+                    );
 
-            // =================== G_op_group OP GROUP TABLE ===================
+                    // =================== G_op_group OP GROUP TABLE ===================
 
-            // g8: c0 triggers a 7-add batch (groups 1..=7). Groups 1..=3 come from `h_0`
-            // and groups 4..=7 from `h_1`.
-            let gc8 = gc.clone();
-            g.batch(c0.clone(), move |b| {
-                let batch_id: LB::Expr = addr_next.into();
-                for i in 1u16..=3 {
-                    let group_value = h_0[i as usize].into();
-                    b.add(OpGroupMsg::new(&batch_id, gc8.clone(), i, group_value));
-                }
-                for i in 4u16..=7 {
-                    let group_value = h_1[(i - 4) as usize].into();
-                    b.add(OpGroupMsg::new(&batch_id, gc8.clone(), i, group_value));
-                }
-            });
+                    // g8: c0 triggers a 7-add batch (groups 1..=7). Groups 1..=3 come from `h_0`
+                    // and groups 4..=7 from `h_1`.
+                    let gc8 = gc.clone();
+                    g.batch(
+                        "g8_batch",
+                        c0.clone(),
+                        move |b| {
+                            let batch_id: LB::Expr = addr_next.into();
+                            for i in 1u16..=3 {
+                                let group_value = h_0[i as usize].into();
+                                b.add(
+                                    "g8_group",
+                                    OpGroupMsg::new(&batch_id, gc8.clone(), i, group_value),
+                                    Deg::NONE,
+                                );
+                            }
+                            for i in 4u16..=7 {
+                                let group_value = h_1[(i - 4) as usize].into();
+                                b.add(
+                                    "g8_group",
+                                    OpGroupMsg::new(&batch_id, gc8.clone(), i, group_value),
+                                    Deg::NONE,
+                                );
+                            }
+                        },
+                        Deg::NONE,
+                    );
 
-            // g4: (1 - c0) · c1 · (1 - c2) triggers a 3-add batch (groups 1..=3 from `h_0`).
-            let gc4 = gc.clone();
-            g.batch(c0.not() * c1.clone() * c2.not(), move |b| {
-                let batch_id: LB::Expr = addr_next.into();
-                for i in 1u16..=3 {
-                    let group_value = h_0[i as usize].into();
-                    b.add(OpGroupMsg::new(&batch_id, gc4.clone(), i, group_value));
-                }
-            });
+                    // g4: (1 - c0) · c1 · (1 - c2) triggers a 3-add batch (groups 1..=3 from
+                    // `h_0`).
+                    let gc4 = gc.clone();
+                    g.batch(
+                        "g4_batch",
+                        c0.not() * c1.clone() * c2.not(),
+                        move |b| {
+                            let batch_id: LB::Expr = addr_next.into();
+                            for i in 1u16..=3 {
+                                let group_value = h_0[i as usize].into();
+                                b.add(
+                                    "g4_group",
+                                    OpGroupMsg::new(&batch_id, gc4.clone(), i, group_value),
+                                    Deg::NONE,
+                                );
+                            }
+                        },
+                        Deg::NONE,
+                    );
 
-            // g2: (1 - c0) · (1 - c1) · c2 is a single add for group 1 (from `h_0[1]`).
-            let gc2 = gc.clone();
-            let f_g2 = c0.not() * c1.not() * c2;
-            g.add(f_g2, move || {
-                let batch_id: LB::Expr = addr_next.into();
-                let group_value = h_0[1].into();
-                OpGroupMsg::new(&batch_id, gc2, 1, group_value)
-            });
+                    // g2: (1 - c0) · (1 - c1) · c2 is a single add for group 1 (from `h_0[1]`).
+                    let gc2 = gc.clone();
+                    let f_g2 = c0.not() * c1.not() * c2;
+                    g.add(
+                        "g2",
+                        f_g2,
+                        move || {
+                            let batch_id: LB::Expr = addr_next.into();
+                            let group_value = h_0[1].into();
+                            OpGroupMsg::new(&batch_id, gc2, 1, group_value)
+                        },
+                        Deg::NONE,
+                    );
 
-            // Removal: `in_span · (gc - gc_next)`-gated muxed removal whose group_value is
-            // `is_push · stk_next[0] + (1 - is_push) · (h0_next · 128 + opcode_next)`.
-            g.remove(f_rem, move || {
-                let opcode_next = horner_eval_bits::<7, _, LB::Expr>(&dec_next.op_bits);
-                let stk_next_0: LB::Expr = stk_next.get(0).into();
-                let h0_next: LB::Expr = dec_next.hasher_state[0].into();
-                let group_value = f_push.clone() * stk_next_0
-                    + f_push.not() * (h0_next * LB::Expr::from_u16(128) + opcode_next);
-                let batch_id = addr.into();
-                OpGroupMsg { batch_id, group_pos: gc, group_value }
-            });
-        });
-    });
+                    // Removal: `in_span · (gc - gc_next)`-gated muxed removal whose group_value is
+                    // `is_push · stk_next[0] + (1 - is_push) · (h0_next · 128 + opcode_next)`.
+                    g.remove(
+                        "op_group_removal",
+                        f_rem,
+                        move || {
+                            let opcode_next = horner_eval_bits::<7, _, LB::Expr>(&dec_next.op_bits);
+                            let stk_next_0: LB::Expr = stk_next.get(0).into();
+                            let h0_next: LB::Expr = dec_next.hasher_state[0].into();
+                            let group_value = f_push.clone() * stk_next_0
+                                + f_push.not() * (h0_next * LB::Expr::from_u16(128) + opcode_next);
+                            let batch_id = addr.into();
+                            OpGroupMsg { batch_id, group_pos: gc, group_value }
+                        },
+                        Deg::NONE,
+                    );
+                },
+                Deg::NONE,
+            );
+        },
+        Deg::NONE,
+    );
 }

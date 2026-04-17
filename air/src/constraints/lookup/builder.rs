@@ -25,11 +25,33 @@
 //! on `AB::Expr` / `AB::ExprEF` / etc.), while the prover-path adapter
 //! instantiates them with the concrete `F` / `EF` field types directly.
 
-// Task #6 (block-hash queue port) lands the first live
 use miden_core::field::{Algebra, ExtensionField, Field, PrimeCharacteristicRing};
 use miden_crypto::stark::air::WindowAccess;
 
 use super::message::LookupMessage;
+
+// DEGREE ANNOTATION
+// ================================================================================================
+
+/// Expected numerator / denominator degree for one interaction or scope.
+///
+/// Every builder method takes a `Deg` as its last argument so authors can
+/// declare the expected degrees inline. Production adapters ignore the value
+/// (it is `Copy` and dead-code-eliminated after inlining). A debug adapter
+/// can compare the declared degrees against the symbolic expression it just
+/// accumulated and panic with the interaction's `name` if they disagree.
+///
+/// - `n`: degree of the numerator polynomial (the `V` contribution).
+/// - `d`: degree of the denominator polynomial (the `U` contribution).
+#[derive(Copy, Clone, Debug, Default)]
+pub struct Deg {
+    pub n: usize,
+    pub d: usize,
+}
+
+impl Deg {
+    pub const NONE: Self = Self { n: 0, d: 0 };
+}
 
 // LOOKUP BUILDER
 // ================================================================================================
@@ -151,7 +173,7 @@ pub trait LookupBuilder: Sized {
     ///    accumulator.
     ///
     /// The closure's return value is forwarded unchanged.
-    fn next_column<'a, R>(&'a mut self, f: impl FnOnce(&mut Self::Column<'a>) -> R) -> R;
+    fn next_column<'a, R>(&'a mut self, f: impl FnOnce(&mut Self::Column<'a>) -> R, deg: Deg) -> R;
 }
 
 // LOOKUP COLUMN
@@ -199,7 +221,7 @@ pub trait LookupColumn {
     /// The `'a` lifetime on the group handle is tied to the `&'a mut
     /// self` borrow of the column for the same reason as
     /// [`LookupBuilder::column`].
-    fn group<'a, R>(&'a mut self, f: impl FnOnce(&mut Self::Group<'a>) -> R) -> R;
+    fn group<'a>(&'a mut self, name: &'static str, f: impl FnOnce(&mut Self::Group<'a>), deg: Deg);
 
     /// Open a group with two sibling descriptions for the same
     /// interaction set.
@@ -216,11 +238,13 @@ pub trait LookupColumn {
     /// pairs; the split is purely an optimization for expensive
     /// extension-field arithmetic on the symbolic path. Adapters are
     /// free to drop whichever closure they do not use.
-    fn group_with_cached_encoding<'a, R>(
+    fn group_with_cached_encoding<'a>(
         &'a mut self,
-        canonical: impl FnOnce(&mut Self::Group<'a>) -> R,
-        encoded: impl FnOnce(&mut Self::Group<'a>) -> R,
-    ) -> R;
+        name: &'static str,
+        canonical: impl FnOnce(&mut Self::Group<'a>),
+        encoded: impl FnOnce(&mut Self::Group<'a>),
+        deg: Deg,
+    );
 }
 
 // LOOKUP GROUP
@@ -264,21 +288,21 @@ pub trait LookupGroup {
     /// The default delegates to [`insert`](Self::insert) with multiplicity `ONE`.
     /// Adapters may override for optimization (e.g. the constraint path avoids
     /// the redundant `flag * ONE` symbolic node).
-    fn add<M>(&mut self, flag: Self::Expr, msg: impl FnOnce() -> M)
+    fn add<M>(&mut self, name: &'static str, flag: Self::Expr, msg: impl FnOnce() -> M, deg: Deg)
     where
         M: LookupMessage<Self::Expr, Self::ExprEF>,
     {
-        self.insert(flag, Self::Expr::ONE, msg);
+        self.insert(name, flag, Self::Expr::ONE, msg, deg);
     }
 
     /// Add a single interaction with multiplicity `-1`, gated by `flag`.
     ///
     /// The default delegates to [`insert`](Self::insert) with multiplicity `NEG_ONE`.
-    fn remove<M>(&mut self, flag: Self::Expr, msg: impl FnOnce() -> M)
+    fn remove<M>(&mut self, name: &'static str, flag: Self::Expr, msg: impl FnOnce() -> M, deg: Deg)
     where
         M: LookupMessage<Self::Expr, Self::ExprEF>,
     {
-        self.insert(flag, Self::Expr::NEG_ONE, msg);
+        self.insert(name, flag, Self::Expr::NEG_ONE, msg, deg);
     }
 
     /// Add a single interaction with explicit signed multiplicity, gated
@@ -286,8 +310,14 @@ pub trait LookupGroup {
     ///
     /// `multiplicity` is a base-field expression so callers can mix
     /// trace columns, constants, and boolean selectors freely.
-    fn insert<M>(&mut self, flag: Self::Expr, multiplicity: Self::Expr, msg: impl FnOnce() -> M)
-    where
+    fn insert<M>(
+        &mut self,
+        name: &'static str,
+        flag: Self::Expr,
+        multiplicity: Self::Expr,
+        msg: impl FnOnce() -> M,
+        deg: Deg,
+    ) where
         M: LookupMessage<Self::Expr, Self::ExprEF>;
 
     /// Open a batch of simultaneous interactions that all share the
@@ -300,15 +330,13 @@ pub trait LookupGroup {
     /// Multiple batches inside the same [`LookupGroup`] are **not**
     /// checked for mutual exclusion; adapters assume the author upholds
     /// this invariant (matching the existing `RationalSet` contract).
-    ///
-    /// The `'a` lifetime on the batch handle is tied to `&'a mut self`
-    /// for the same reason as [`LookupBuilder::column`] and
-    /// [`LookupColumn::group`].
-    fn batch<'a, R>(
+    fn batch<'a>(
         &'a mut self,
+        name: &'static str,
         flag: Self::Expr,
-        build: impl FnOnce(&mut Self::Batch<'a>) -> R,
-    ) -> R;
+        build: impl FnOnce(&mut Self::Batch<'a>),
+        deg: Deg,
+    );
 
     // ---- encoding primitives (cached-encoding path only) ----
 
@@ -332,7 +360,9 @@ pub trait LookupGroup {
     /// Default implementation panics — only valid inside the `encoded`
     /// closure of [`LookupColumn::group_with_cached_encoding`].
     fn beta_powers(&self) -> &[Self::ExprEF] {
-        panic!("beta_powers() is only available inside the `encoded` closure of group_with_cached_encoding")
+        panic!(
+            "beta_powers() is only available inside the `encoded` closure of group_with_cached_encoding"
+        )
     }
 
     /// Look up the precomputed bus prefix
@@ -351,7 +381,9 @@ pub trait LookupGroup {
     /// `num_bus_ids`.
     fn bus_prefix(&self, bus_id: usize) -> Self::ExprEF {
         let _ = bus_id;
-        panic!("bus_prefix() is only available inside the `encoded` closure of group_with_cached_encoding")
+        panic!(
+            "bus_prefix() is only available inside the `encoded` closure of group_with_cached_encoding"
+        )
     }
 
     /// Add a flag-gated interaction whose denominator is already an
@@ -369,12 +401,15 @@ pub trait LookupGroup {
     /// closure of [`LookupColumn::group_with_cached_encoding`].
     fn insert_encoded(
         &mut self,
-        flag: Self::Expr,
-        multiplicity: Self::Expr,
-        encoded: impl FnOnce() -> Self::ExprEF,
+        _name: &'static str,
+        _flag: Self::Expr,
+        _multiplicity: Self::Expr,
+        _encoded: impl FnOnce() -> Self::ExprEF,
+        _deg: Deg,
     ) {
-        let _ = (flag, multiplicity, encoded);
-        panic!("insert_encoded() is only available inside the `encoded` closure of group_with_cached_encoding")
+        panic!(
+            "insert_encoded() is only available inside the `encoded` closure of group_with_cached_encoding"
+        )
     }
 }
 
@@ -411,44 +446,34 @@ pub trait LookupBatch {
     /// Absorb an interaction with multiplicity `+1`.
     ///
     /// The default delegates to [`insert`](Self::insert) with multiplicity `ONE`.
-    fn add<M>(&mut self, msg: M)
+    fn add<M>(&mut self, name: &'static str, msg: M, deg: Deg)
     where
         M: LookupMessage<Self::Expr, Self::ExprEF>,
     {
-        self.insert(Self::Expr::ONE, msg);
+        self.insert(name, Self::Expr::ONE, msg, deg);
     }
 
     /// Absorb an interaction with multiplicity `-1`.
     ///
     /// The default delegates to [`insert`](Self::insert) with multiplicity `NEG_ONE`.
-    fn remove<M>(&mut self, msg: M)
+    fn remove<M>(&mut self, name: &'static str, msg: M, deg: Deg)
     where
         M: LookupMessage<Self::Expr, Self::ExprEF>,
     {
-        self.insert(Self::Expr::NEG_ONE, msg);
+        self.insert(name, Self::Expr::NEG_ONE, msg, deg);
     }
 
     /// Absorb an interaction with arbitrary signed multiplicity.
-    fn insert<M>(&mut self, multiplicity: Self::Expr, msg: M)
+    fn insert<M>(&mut self, name: &'static str, multiplicity: Self::Expr, msg: M, deg: Deg)
     where
         M: LookupMessage<Self::Expr, Self::ExprEF>;
 
     /// Absorb an interaction with an already-encoded denominator.
-    ///
-    /// Symmetric with [`LookupGroup::insert_encoded`], but at the batch
-    /// scope: the closure returns the final
-    /// `Self::ExprEF` value that would otherwise come out of
-    /// [`LookupMessage::encode`], and the batch folds it into its
-    /// running `(N, D)` pair directly. Use this when you are inside an
-    /// encoded-group batch (`ge.batch(flag, |b| …)`) and have already
-    /// computed the denominator from a cached fragment shared with the
-    /// sibling interactions in the batch — it saves you from wrapping
-    /// the pre-computed value in a throwaway `LookupMessage` impl just
-    /// to satisfy the `add` / `remove` / `insert` shape.
-    ///
-    /// The outer batch flag still gates the whole batch; individual
-    /// `insert_encoded` calls inside the closure always run (subject to
-    /// that one outer gate).
-    fn insert_encoded(&mut self, multiplicity: Self::Expr, encoded: impl FnOnce() -> Self::ExprEF);
+    fn insert_encoded(
+        &mut self,
+        name: &'static str,
+        multiplicity: Self::Expr,
+        encoded: impl FnOnce() -> Self::ExprEF,
+        deg: Deg,
+    );
 }
-

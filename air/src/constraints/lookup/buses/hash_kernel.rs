@@ -35,7 +35,7 @@ use crate::{
     constraints::{
         logup_msg::{MemoryHeader, MemoryMsg, RangeMsg, SiblingMsgBitOne, SiblingMsgBitZero},
         lookup::{
-            LookupBatch, LookupColumn, LookupGroup,
+            Deg, LookupBatch, LookupColumn, LookupGroup,
             chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
         },
         utils::BoolNot,
@@ -142,92 +142,140 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
     let mem_w0 = local.chiplets[MEMORY_WORD_ADDR_LO_COL_IDX - CHIPLETS_OFFSET];
     let mem_w1 = local.chiplets[MEMORY_WORD_ADDR_HI_COL_IDX - CHIPLETS_OFFSET];
 
-    builder.next_column(|col| {
-        col.group(|g| {
-            // --- SIBLING TABLE ---
-            // MV adds (old path), MU removes (new path). Each splits on bit into the
-            // BitZero (sibling at rate_1) and BitOne (sibling at rate_0) variants.
-            let gate = f_mv_all.clone() * one_minus_bit.clone();
-            g.add(gate, move || {
-                let mrupdate_id: LB::Expr = mrupdate_id.into();
-                let node_index: LB::Expr = node_index.into();
-                let h_hi = array::from_fn(|i| rate_1[i].into());
-                SiblingMsgBitZero { mrupdate_id, node_index, h_hi }
-            });
+    builder.next_column(
+        |col| {
+            col.group(
+                "sibling_ace_memory",
+                |g| {
+                    // --- SIBLING TABLE ---
+                    // MV adds (old path), MU removes (new path). Each splits on bit into the
+                    // BitZero (sibling at rate_1) and BitOne (sibling at rate_0) variants.
+                    let gate = f_mv_all.clone() * one_minus_bit.clone();
+                    g.add(
+                        "sibling_mv_b0",
+                        gate,
+                        move || {
+                            let mrupdate_id: LB::Expr = mrupdate_id.into();
+                            let node_index: LB::Expr = node_index.into();
+                            let h_hi = array::from_fn(|i| rate_1[i].into());
+                            SiblingMsgBitZero { mrupdate_id, node_index, h_hi }
+                        },
+                        Deg::NONE,
+                    );
 
-            let gate = f_mv_all * bit.clone();
-            g.add(gate, move || {
-                let mrupdate_id: LB::Expr = mrupdate_id.into();
-                let node_index: LB::Expr = node_index.into();
-                let h_lo = array::from_fn(|i| rate_0[i].into());
-                SiblingMsgBitOne { mrupdate_id, node_index, h_lo }
-            });
+                    let gate = f_mv_all * bit.clone();
+                    g.add(
+                        "sibling_mv_b1",
+                        gate,
+                        move || {
+                            let mrupdate_id: LB::Expr = mrupdate_id.into();
+                            let node_index: LB::Expr = node_index.into();
+                            let h_lo = array::from_fn(|i| rate_0[i].into());
+                            SiblingMsgBitOne { mrupdate_id, node_index, h_lo }
+                        },
+                        Deg::NONE,
+                    );
 
-            let gate = f_mu_all.clone() * one_minus_bit;
-            g.remove(gate, move || {
-                let mrupdate_id: LB::Expr = mrupdate_id.into();
-                let node_index: LB::Expr = node_index.into();
-                let h_hi = array::from_fn(|i| rate_1[i].into());
-                SiblingMsgBitZero { mrupdate_id, node_index, h_hi }
-            });
+                    let gate = f_mu_all.clone() * one_minus_bit;
+                    g.remove(
+                        "sibling_mu_b0",
+                        gate,
+                        move || {
+                            let mrupdate_id: LB::Expr = mrupdate_id.into();
+                            let node_index: LB::Expr = node_index.into();
+                            let h_hi = array::from_fn(|i| rate_1[i].into());
+                            SiblingMsgBitZero { mrupdate_id, node_index, h_hi }
+                        },
+                        Deg::NONE,
+                    );
 
-            let gate = f_mu_all * bit;
-            g.remove(gate, move || {
-                let mrupdate_id: LB::Expr = mrupdate_id.into();
-                let node_index: LB::Expr = node_index.into();
-                let h_lo = array::from_fn(|i| rate_0[i].into());
-                SiblingMsgBitOne { mrupdate_id, node_index, h_lo }
-            });
+                    let gate = f_mu_all * bit;
+                    g.remove(
+                        "sibling_mu_b1",
+                        gate,
+                        move || {
+                            let mrupdate_id: LB::Expr = mrupdate_id.into();
+                            let node_index: LB::Expr = node_index.into();
+                            let h_lo = array::from_fn(|i| rate_0[i].into());
+                            SiblingMsgBitOne { mrupdate_id, node_index, h_lo }
+                        },
+                        Deg::NONE,
+                    );
 
-            // --- ACE MEMORY READS (BUS_CHIPLETS) ---
-            // Word read on READ rows.
-            g.remove(f_ace_read, move || {
-                let clk = ace_clk.into();
-                let ctx = ace_ctx.into();
-                let addr = ace_ptr.into();
-                let word = [ace_v0.0.into(), ace_v0.1.into(), ace_v1.0.into(), ace_v1.1.into()];
-                MemoryMsg::Word {
-                    op_value: MEMORY_READ_WORD_LABEL as u16,
-                    header: MemoryHeader { ctx, addr, clk },
-                    word,
-                }
-            });
+                    // --- ACE MEMORY READS (BUS_CHIPLETS) ---
+                    // Word read on READ rows.
+                    g.remove(
+                        "ace_mem_read_word",
+                        f_ace_read,
+                        move || {
+                            let clk = ace_clk.into();
+                            let ctx = ace_ctx.into();
+                            let addr = ace_ptr.into();
+                            let word = [
+                                ace_v0.0.into(),
+                                ace_v0.1.into(),
+                                ace_v1.0.into(),
+                                ace_v1.1.into(),
+                            ];
+                            MemoryMsg::Word {
+                                op_value: MEMORY_READ_WORD_LABEL as u16,
+                                header: MemoryHeader { ctx, addr, clk },
+                                word,
+                            }
+                        },
+                        Deg::NONE,
+                    );
 
-            // Element read on EVAL rows.
-            g.remove(f_ace_eval, move || {
-                let clk = ace_clk.into();
-                let ctx = ace_ctx.into();
-                let addr = ace_ptr.into();
-                let id_1: LB::Expr = ace_id_1.into();
-                let id_2: LB::Expr = ace_id_2.into();
-                let eval_op: LB::Expr = ace_eval_op.into();
-                let element = id_1
-                    + id_2 * LB::Expr::from(ACE_INSTRUCTION_ID1_OFFSET)
-                    + (eval_op + LB::Expr::ONE) * LB::Expr::from(ACE_INSTRUCTION_ID2_OFFSET);
-                MemoryMsg::Element {
-                    op_value: MEMORY_READ_ELEMENT_LABEL as u16,
-                    header: MemoryHeader { ctx, addr, clk },
-                    element,
-                }
-            });
+                    // Element read on EVAL rows.
+                    g.remove(
+                        "ace_mem_eval_element",
+                        f_ace_eval,
+                        move || {
+                            let clk = ace_clk.into();
+                            let ctx = ace_ctx.into();
+                            let addr = ace_ptr.into();
+                            let id_1: LB::Expr = ace_id_1.into();
+                            let id_2: LB::Expr = ace_id_2.into();
+                            let eval_op: LB::Expr = ace_eval_op.into();
+                            let element = id_1
+                                + id_2 * LB::Expr::from(ACE_INSTRUCTION_ID1_OFFSET)
+                                + (eval_op + LB::Expr::ONE)
+                                    * LB::Expr::from(ACE_INSTRUCTION_ID2_OFFSET);
+                            MemoryMsg::Element {
+                                op_value: MEMORY_READ_ELEMENT_LABEL as u16,
+                                header: MemoryHeader { ctx, addr, clk },
+                                element,
+                            }
+                        },
+                        Deg::NONE,
+                    );
 
-            // --- MEMORY-SIDE RANGE CHECKS (BUS_RANGE_CHECK) ---
-            // Five removes per memory-active row:
-            // - `d0`, `d1` — the two 16-bit delta limbs used by the memory chiplet's sorted-access
-            //   constraints.
-            // - `w0`, `w1`, `4·w1` — the word-address decomposition limbs. The `4·w1` check
-            //   additionally enforces `w1 ∈ [0, 2^14)`, which bounds `word_addr = 4·(w0 + 2^16·w1)
-            //   < 2^32`.
-            g.batch(mem_active, move |b| {
-                b.remove(RangeMsg { value: mem_d0.into() });
-                b.remove(RangeMsg { value: mem_d1.into() });
-                let w0: LB::Expr = mem_w0.into();
-                let w1: LB::Expr = mem_w1.into();
-                let w1_mul4 = w1.clone() * LB::Expr::from_u16(4);
-                b.remove(RangeMsg { value: w0 });
-                b.remove(RangeMsg { value: w1 });
-                b.remove(RangeMsg { value: w1_mul4 });
-            });
-        });
-    });
+                    // --- MEMORY-SIDE RANGE CHECKS (BUS_RANGE_CHECK) ---
+                    // Five removes per memory-active row:
+                    // - `d0`, `d1` — the two 16-bit delta limbs used by the memory chiplet's
+                    //   sorted-access constraints.
+                    // - `w0`, `w1`, `4·w1` — the word-address decomposition limbs. The `4·w1` check
+                    //   additionally enforces `w1 ∈ [0, 2^14)`, which bounds `word_addr = 4·(w0 +
+                    //   2^16·w1) < 2^32`.
+                    g.batch(
+                        "memory_range_checks",
+                        mem_active,
+                        move |b| {
+                            b.remove("mem_d0", RangeMsg { value: mem_d0.into() }, Deg::NONE);
+                            b.remove("mem_d1", RangeMsg { value: mem_d1.into() }, Deg::NONE);
+                            let w0: LB::Expr = mem_w0.into();
+                            let w1: LB::Expr = mem_w1.into();
+                            let w1_mul4 = w1.clone() * LB::Expr::from_u16(4);
+                            b.remove("mem_w0", RangeMsg { value: w0 }, Deg::NONE);
+                            b.remove("mem_w1", RangeMsg { value: w1 }, Deg::NONE);
+                            b.remove("mem_w1_mul4", RangeMsg { value: w1_mul4 }, Deg::NONE);
+                        },
+                        Deg::NONE,
+                    );
+                },
+                Deg::NONE,
+            );
+        },
+        Deg::NONE,
+    );
 }

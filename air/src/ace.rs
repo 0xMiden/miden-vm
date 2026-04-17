@@ -4,10 +4,10 @@
 //! `build_ace_dag_for_air` with the LogUp auxiliary-trace boundary check:
 //!
 //!     0  =  Σ aux_bound[0..LOGUP_AUX_TRACE_WIDTH]
-//!             +  c_block_hash
-//!             +  c_log_precompile
-//!             +  c_kernel_rom
-//! 
+//!             + c_block_hash
+//!             + c_log_precompile
+//!             + c_kernel_rom
+//!
 //! Two of the three corrections depend only on fixed-length public inputs
 //! (`c_bh`, `c_lp`), so they are rebuilt directly inside the DAG as rational
 //! fractions `(n, d)` and folded into a running rational `(N, D)` without any
