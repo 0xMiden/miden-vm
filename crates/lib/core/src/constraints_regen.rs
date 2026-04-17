@@ -7,7 +7,7 @@ use std::{fs, io, println};
 
 use miden_ace_codegen::{AceCircuit, AceConfig, LayoutKind};
 use miden_air::ProcessorAir;
-use miden_core::{Felt, field::QuadFelt};
+use miden_core::{Felt, crypto::hash::Poseidon2, field::QuadFelt};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Mode {
@@ -40,7 +40,7 @@ pub fn compute_relation_digest(circuit_commitment: &[Felt; 4]) -> [Felt; 4] {
     let input: Vec<Felt> = core::iter::once(Felt::new(PROTOCOL_ID))
         .chain(circuit_commitment.iter().copied())
         .collect();
-    let digest = miden_utils_testing::crypto::Poseidon2::hash_elements(&input);
+    let digest = Poseidon2::hash_elements(&input);
     let elems = digest.as_elements();
     [elems[0], elems[1], elems[2], elems[3]]
 }
@@ -230,7 +230,7 @@ pub fn constraints_eval_masm_matches_air() -> Result<(), String> {
                 .map_err(|_| "invalid u64 in adv_map".to_string())
         })
         .collect::<Result<_, _>>()?;
-    let actual_hash = miden_utils_testing::crypto::Poseidon2::hash_elements(&actual_data);
+    let actual_hash = Poseidon2::hash_elements(&actual_data);
 
     let actual_hash_u64: Vec<u64> =
         actual_hash.as_elements().iter().map(|f| f.as_canonical_u64()).collect();
