@@ -23,9 +23,25 @@ features = ["std", "serde"]
 path = "../crates/assembly-syntax"
 features = ["std", "serde"]
 
+[dependencies.miden-assembly]
+path = "../crates/assembly"
+features = ["std"]
+
 [dependencies.miden-mast-package]
 path = "../crates/mast-package"
 features = ["std"]
+
+[dependencies.miden-package-registry]
+path = "../crates/package-registry"
+features = ["std", "serde", "resolver"]
+
+[dependencies.miden-project]
+path = "../crates/project"
+features = ["std", "serde"]
+
+[dependencies.toml]
+version = "1.0"
+features = ["parse", "display", "serde"]
 
 # Fuzz targets - each is a separate binary
 [[bin]]
@@ -176,6 +192,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "package_semantic_deserialize"
+path = "fuzz_targets/package_semantic_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "package_serde_deserialize"
 path = "fuzz_targets/package_serde_deserialize.rs"
 test = false
@@ -185,6 +208,27 @@ bench = false
 [[bin]]
 name = "mast_forest_serde_deserialize"
 path = "fuzz_targets/mast_forest_serde_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "project_toml_parse"
+path = "fuzz_targets/project_toml_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "project_load"
+path = "fuzz_targets/project_load.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "project_assemble"
+path = "fuzz_targets/project_assemble.rs"
 test = false
 doc = false
 bench = false

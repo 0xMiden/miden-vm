@@ -1,0 +1,8 @@
+[package]
+name = "mylib"
+version = "1.0.0"
+description = "A simple library"
+
+[lib]
+namespace = "mylib"
+path = "lib.masm"
