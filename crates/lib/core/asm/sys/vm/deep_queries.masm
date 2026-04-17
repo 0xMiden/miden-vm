@@ -74,22 +74,22 @@ end
 #! 3. alpha is the randomness used in order to build the DEEP polynomial.
 #!
 #! Inputs:  [Y, query_ptr]
-#! Outputs: [Y, q_x_at_alpha_1, q_x_at_alpha_0, q_x_at_alpha_1, q_x_at_alpha_0, index, query_ptr]
+#! Outputs: [Y, q_x_at_alpha_0, q_x_at_alpha_1, q_x_at_alpha_0, q_x_at_alpha_1, index, query_ptr]
 #!
 #! where:
 #! - Y is a "garbage" word.
 proc load_query_row
     # Process the main segment of the execution trace portion of the query
     exec.process_main_segment_execution_trace
-    #=> [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
+    #=> [Y, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
     # Process the auxiliary segment of the execution trace portion of the query
     exec.process_aux_segment_execution_trace
-    #=> [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
+    #=> [Y, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
     # Process the constraints composition polys trace portion of the query
     exec.process_constraints_composition_poly_trace
-    #=> [Y, q_x_at_alpha_1, q_x_at_alpha_0, q_x_at_alpha_1, q_x_at_alpha_0, index, query_ptr]
+    #=> [Y, q_x_at_alpha_0, q_x_at_alpha_1, q_x_at_alpha_0, q_x_at_alpha_1, index, query_ptr]
 end
 
 # MAIN TRACE SEGMENT PROCESSING
@@ -98,28 +98,28 @@ end
 #! Handles the logic for processing the main segment of the execution trace.
 #!
 #! Inputs: [Y, query_ptr]
-#! Output: [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
+#! Output: [Y, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 proc process_main_segment_execution_trace
     # Load the query index
-    dup.4 mem_loadw_be
+    dup.4 mem_loadw_le
     #=> [index, depth, y, y, query_ptr] where y are "garbage" values here and throughout
 
     # Get commitment to main segment of the execution trace
     movdn.3 movdn.2
     push.0.0
-    exec.constants::main_trace_com_ptr mem_loadw_be
+    exec.constants::main_trace_com_ptr mem_loadw_le
     #=>[MAIN_TRACE_TREE_ROOT, depth, index, query_ptr]
 
     # Use the commitment to get the leaf and save it
     dup.5 dup.5
     mtree_get
-    exec.constants::tmp3 mem_storew_be
+    exec.constants::tmp3 mem_storew_le
     adv.push_mapval
     #=>[LEAF_VALUE, MAIN_TRACE_TREE_ROOT, depth, index, query_ptr]
 
-    exec.constants::tmp2 mem_loadw_be
+    exec.constants::tmp2 mem_loadw_le
     swapw
-    #=>[LEAF_VALUE, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
+    #=>[LEAF_VALUE, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
     # Load the values of the main segment of the execution trace at the current query. We also
     # compute their hash and the value of their random linear combination using powers of a
@@ -130,10 +130,11 @@ proc process_main_segment_execution_trace
     #=> [Y, Y, 0, 0, 0, 0, ptr, y, y, y]
 
     exec.load_main_segment_execution_trace
-    #=> [Y, L, C, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
+    #=> [Y, L, C, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
     # Load the leaf value we got using `mtree_get` and compare it against the hash we just computed
-    exec.constants::tmp3 mem_loadw_be
+    swapw
+    exec.constants::tmp3 mem_loadw_le
     assert_eqw.err=LEAF_VALUE_MISMATCH
 end
 
@@ -142,9 +143,9 @@ end
 #! Inputs:  [Y, Y, 0, 0, 0, 0, ptr]
 #! Outputs: [Y, D, C, ptr]
 #!
-#! Cycles: 30
+#! Cycles: 27
 proc load_main_segment_execution_trace
-    repeat.10
+    repeat.9
         adv_pipe
         horner_eval_base
         exec.poseidon2::permute
@@ -157,34 +158,35 @@ end
 #! Handles the logic for processing the auxiliary segment of the execution trace, if such a trace
 #! exists.
 #!
-#! Inputs: [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
-#! Output: [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
+#! Inputs: [Y, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
+#! Output: [Y, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 proc process_aux_segment_execution_trace
     # Load aux trace commitment and get leaf
-    exec.constants::aux_trace_com_ptr mem_loadw_be
+    exec.constants::aux_trace_com_ptr mem_loadw_le
 
     # Get the leaf against the auxiliary trace commitment for the current query
     dup.9 dup.9
     mtree_get
-    exec.constants::tmp3 mem_storew_be
+    exec.constants::tmp3 mem_storew_le
     adv.push_mapval
-    #=> [L, R, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
+    #=> [L, R, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
     # Load the values of the auxiliary segment of the execution trace at the current query
 
     # Set up the stack
-    exec.constants::zero_word_ptr mem_loadw_be
+    exec.constants::zero_word_ptr mem_loadw_le
     swapw padw
-    #=> [Y, Y, C, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
+    #=> [Y, Y, C, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
     # Load the first 4 columns as a batch of 4 quadratic extension field elements.
     exec.load_aux_segment_execution_trace
-    #=> [Y, D, C, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
+    #=> [Y, D, C, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
     # Load the leaf value we got using `mtree_get` and compare it against the hash we just computed
-    exec.constants::tmp3 mem_loadw_be
+    swapw
+    exec.constants::tmp3 mem_loadw_le
     assert_eqw.err=LEAF_VALUE_MISMATCH
-    #=> [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
+    #=> [Y, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 end
 
 #! Loads the portion of the query associated to the auxiliary segment of the execution trace.
@@ -196,7 +198,7 @@ end
 proc load_aux_segment_execution_trace
     repeat.2
         adv_pipe
-        horner_eval_ext
+        horner_eval_base
         exec.poseidon2::permute
     end
 end
@@ -206,30 +208,31 @@ end
 
 #! Handles the logic for processing the constraints composition polynomials trace.
 #!
-#! Inputs: [Y, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
-#! Output: [Y, q_x_at_alpha_1, q_x_at_alpha_0, q_x_at_alpha_1, q_x_at_alpha_0, index, query_ptr]
+#! Inputs: [Y, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
+#! Output: [Y, q_x_at_alpha_0, q_x_at_alpha_1, q_x_at_alpha_0, q_x_at_alpha_1, index, query_ptr]
 proc process_constraints_composition_poly_trace
     # Load the commitment to the constraint trace
-    exec.constants::composition_poly_com_ptr mem_loadw_be
-    #=> [R, ptr_x, ptr_alpha_inv, acc1, acc0, depth, index, query_ptr]
+    exec.constants::composition_poly_com_ptr mem_loadw_le
+    #=> [R, ptr_x, ptr_alpha_inv, acc0, acc1, depth, index, query_ptr]
 
     # Get the leaf against the commitment
     dup.9 movup.9
     mtree_get
-    exec.constants::tmp3 mem_storew_be
+    exec.constants::tmp3 mem_storew_le
     adv.push_mapval
-    #=>[L, R, ptr_x, ptr_alpha_inv, acc1, acc0, index, query_ptr]
+    #=>[L, R, ptr_x, ptr_alpha_inv, acc0, acc1, index, query_ptr]
 
     # Load the 8 columns as quadratic extension field elements in batches of 4.
     padw
     swapw.2
     exec.load_constraints_composition_polys_trace
-    #=> [Y, L, Y, ptr_x, ptr_alpha_inv, acc1, acc0, index, query_ptr]
+    #=> [Y, L, Y, ptr_x, ptr_alpha_inv, acc0, acc1, index, query_ptr]
 
     # Load the leaf value we got using `mtree_get` and compare it against the hash we just computed
-    exec.constants::tmp3 mem_loadw_be
+    swapw
+    exec.constants::tmp3 mem_loadw_le
     assert_eqw.err=LEAF_VALUE_MISMATCH
-    #=> [Y, ptr_x, ptr_alpha_inv, acc1, acc0, index, query_ptr]
+    #=> [Y, ptr_x, ptr_alpha_inv, acc0, acc1, index, query_ptr]
 
     # Re-order the stack
     swapw
@@ -247,7 +250,7 @@ end
 proc load_constraints_composition_polys_trace
     repeat.2
         adv_pipe
-        horner_eval_ext
+        horner_eval_base
         exec.poseidon2::permute
     end
 end

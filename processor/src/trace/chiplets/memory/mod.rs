@@ -7,7 +7,7 @@ use miden_air::trace::{
         CLK_COL_IDX, CTX_COL_IDX, D_INV_COL_IDX, D0_COL_IDX, D1_COL_IDX,
         FLAG_SAME_CONTEXT_AND_WORD, IDX0_COL_IDX, IDX1_COL_IDX, IS_READ_COL_IDX,
         IS_WORD_ACCESS_COL_IDX, MEMORY_ACCESS_ELEMENT, MEMORY_ACCESS_WORD, MEMORY_READ,
-        MEMORY_WRITE, V_COL_RANGE, WORD_COL_IDX,
+        MEMORY_WRITE, V_COL_RANGE, WORD_ADDR_HI_COL_IDX, WORD_ADDR_LO_COL_IDX, WORD_COL_IDX,
     },
 };
 
@@ -53,8 +53,8 @@ const INIT_MEM_VALUE: Word = EMPTY_WORD;
 /// ## Execution trace
 /// The layout of the memory access trace is shown below.
 ///
-///   rw   ew   ctx  word_addr   idx0   idx1  clk   v0   v1   v2   v3   d0   d1   d_inv   f_scw
-/// ├────┴────┴────┴───────────┴──────┴──────┴────┴────┴────┴────┴────┴────┴────┴───────┴───────┤
+///   rw   ew   ctx  word_addr idx0   idx1  clk   v0   v1   v2   v3   d0   d1  d_inv f_scw w0 w1
+/// ├────┴────┴────┴──────────┴─────┴──────┴────┴────┴────┴────┴────┴────┴────┴─────┴─────┴───┴─┤
 ///
 /// In the above, the meaning of the columns is as follows:
 /// - `rw` is a selector column used to identify whether the memory operation is a read or a write
@@ -87,6 +87,10 @@ const INIT_MEM_VALUE: Word = EMPTY_WORD;
 ///   cycles computed as described above. It is the field inverse of `(d_1 * 2^16) + d_0`
 /// - `f_scw` is a flag indicating whether the context and the word of the current row are the same
 ///   as in the next row.
+/// - `w0` contains the lower 16 bits of the word index (`word_addr / 4`).
+/// - `w1` contains the upper 16 bits of the word index (`word_addr / 4`). Together with range
+///   checks on `w0`, `w1`, and `4 * w1`, these columns prove that memory addresses are valid 32-bit
+///   values.
 ///
 /// For the first row of the trace, values in `d0`, `d1`, and `d_inv` are set to zeros.
 #[derive(Debug, Default)]
@@ -251,7 +255,7 @@ impl Memory {
         // trace; we also adjust the clock cycle so that delta value for the first row would end
         // up being ZERO. if the trace is empty, return without any further processing.
         let (mut prev_ctx, mut prev_addr, mut prev_clk) = match self.get_first_row_info() {
-            Some((ctx, addr, clk)) => (ctx, addr, clk.as_canonical_u64() - 1),
+            Some((ctx, addr, clk)) => (ctx, addr, clk.as_canonical_u64().wrapping_sub(1)),
             None => return,
         };
 
@@ -271,11 +275,22 @@ impl Memory {
                     } else if prev_addr != addr {
                         u64::from(addr - prev_addr)
                     } else {
-                        clk - prev_clk
+                        clk.wrapping_sub(prev_clk)
                     };
 
                     let (delta_hi, delta_lo) = split_u32_into_u16(delta);
                     range.add_range_checks(row, &[delta_lo, delta_hi]);
+
+                    // word index decomposition range checks: prove addr is a valid 32-bit value
+                    // by checking w0, w1, and 4*w1 are all in [0, 2^16).
+                    // Since addr is u32 and word_index = addr/4, w1 = word_index >> 16 < 2^14,
+                    // so 4*w1 < 2^16 and fits by definition in u16.
+                    let word_index = addr / WORD_SIZE as u32;
+                    let w0 = (word_index & 0xffff) as u16;
+                    let w1 = (word_index >> 16) as u16;
+                    range.add_value(w0);
+                    range.add_value(w1);
+                    range.add_value(w1 << 2);
 
                     // update values for the next iteration of the loop
                     prev_ctx = ctx;
@@ -300,7 +315,7 @@ impl Memory {
         };
 
         // iterate through addresses in ascending order, and write trace row for each memory access
-        // into the trace. we expect the trace to be 15 columns wide.
+        // into the trace. we expect the trace to be 17 columns wide.
         let mut row: RowIndex = 0.into();
 
         for (ctx, segment) in self.trace {
@@ -362,6 +377,13 @@ impl Memory {
                     } else {
                         trace.set(row, FLAG_SAME_CONTEXT_AND_WORD, ZERO);
                     };
+
+                    // decompose word address into 16-bit limbs of word index
+                    let word_index = addr / WORD_SIZE as u32;
+                    let w0 = (word_index & 0xffff) as u16;
+                    let w1 = (word_index >> 16) as u16;
+                    trace.set(row, WORD_ADDR_LO_COL_IDX, Felt::from_u16(w0));
+                    trace.set(row, WORD_ADDR_HI_COL_IDX, Felt::from_u16(w1));
 
                     // update values for the next iteration of the loop
                     prev_ctx = ctx;

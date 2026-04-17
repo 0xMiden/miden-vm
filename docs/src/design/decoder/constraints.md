@@ -68,10 +68,10 @@ Also, when `REPEAT` operation is executed, the value in $h_4$ column (the `is_lo
 > f_{repeat} \cdot (1 - h_4) = 0 \text{ | degree} = 5
 > $$
 
-When `RESPAN` operation is executed, we need to make sure that the block ID is incremented by $32$:
+When `RESPAN` operation is executed, we need to make sure that the block ID is incremented by $2$:
 
 > $$
-> f_{respan} \cdot (a' - a - 32) = 0 \text{ | degree} = 5
+> f_{respan} \cdot (a' - a - 2) = 0 \text{ | degree} = 5
 > $$
 
 When `END` operation is executed and we are exiting a *loop* block (i.e., `is_loop`, value which is stored in $h_5$, is $1$), the value at the top of the operand stack must be $0$:
@@ -139,9 +139,9 @@ When the value in `in_span` column is set to $1$, control flow operations cannot
 ## Block hash computation constraints
 As described [previously](./index.md#program-block-hashing), when the VM starts executing a new block, it also initiates computation of the block's hash. There are two separate methodologies for computing block hashes.
 
-For *join* and *split* blocks, the hash is computed directly from the hashes of the block's children. The prover provides these child hashes non-deterministically by populating registers $h_0,..., h_7$. For *loop* blocks, only the loop body hash is provided in $h_0..h_3$ and the remaining registers $h_4..h_7$ are set to $0$ (padding to a full 8-element rate). For *dyn*, only the second half of the hasher registers ($h_4,\dots,h_7$) are forced to $0$, while the first half holds the callee digest read from memory; thus the input is not all zeros. The hasher is initialized using the hash chiplet, and we use the address of the hasher as the block's ID. The result of the hash is available $31$ rows down in the hasher table (i.e., at row with index equal to block ID plus $31$). We read the result from the hasher table at the time the `END` operation is executed for a given block.
+For *join* and *split* blocks, the hash is computed directly from the hashes of the block's children. The prover provides these child hashes non-deterministically by populating registers $h_0,..., h_7$. For *loop* blocks, only the loop body hash is provided in $h_0..h_3$ and the remaining registers $h_4..h_7$ are set to $0$ (padding to a full 8-element rate). For *dyn*, only the second half of the hasher registers ($h_4,\dots,h_7$) are forced to $0$, while the first half holds the callee digest read from memory; thus the input is not all zeros. The hasher is initialized using the hash chiplet, and we use the address of the controller input row as the block's ID. The result of the hash is then available in the paired controller output row at block ID plus $1$, and we read that result when the `END` operation is executed for the block.
 
-For *basic* blocks, the hash is computed by absorbing a linear sequence of instructions (organized into operation groups and batches) into the hasher and then returning the result. The prover provides operation batches non-deterministically by populating registers $h_0, ..., h_7$. Similarly to other blocks, the hasher is initialized using the hash chiplet at the start of the block, and we use the address of the hasher as the ID of the first operation batch in the block. As we absorb additional operation batches into the hasher (by executing `RESPAN` operation), the batch address is incremented by $32$. This moves the "pointer" into the hasher table $32$ rows down with every new batch. We read the result from the hasher table at the time the `END` operation is executed for a given block.
+For *basic* blocks, the hash is computed by absorbing a linear sequence of instructions (organized into operation groups and batches) into the hasher and then returning the result. The prover provides operation batches non-deterministically by populating registers $h_0, ..., h_7$. Similarly to other blocks, the hasher is initialized using the hash chiplet at the start of the block, and we use the address of the first controller input row as the ID of the first operation batch in the block. As we absorb additional operation batches into the hasher (by executing `RESPAN`), the next batch starts at the next controller input row, so the batch address is incremented by $2$. We read the result from the controller output row corresponding to the final batch when the `END` operation is executed for the block.
 
 ### Chiplets bus constraints
 
@@ -182,13 +182,13 @@ $$
 
 $$
 h_{respan} =
-\alpha_0 + \alpha_1 \cdot L_{respan} + \alpha_2 \cdot (a' - 1)
+\alpha_0 + \alpha_1 \cdot L_{respan} + \alpha_2 \cdot a'
 + \sum_{i=0}^7(\alpha_{4+i} \cdot h_i)
 $$
 
 $$
 h_{end} =
-\alpha_0 + \alpha_1 \cdot L_{end} + \alpha_2 \cdot (a + 31)
+\alpha_0 + \alpha_1 \cdot L_{end} + \alpha_2 \cdot (a + 1)
 + \sum_{i=0}^3(\alpha_{4+i} \cdot h_i)
 $$
 
@@ -520,7 +520,7 @@ When we are inside a *basic* block, values in block address columns (denoted as 
 > sp \cdot (a' - a) = 0 \text{ | degree} = 2
 > $$
 
-Notice that this constraint does not apply when we execute any of the control flow operations. For such operations, the prover sets the value of the $a$ column non-deterministically, except for the `RESPAN` operation. For the `RESPAN` operation the value in the $a$ column is incremented by $32$, which is enforced by a constraint described previously.
+Notice that this constraint does not apply when we execute any of the control flow operations. For such operations, the prover sets the value of the $a$ column non-deterministically, except for the `RESPAN` operation. For the `RESPAN` operation the value in the $a$ column is incremented by $2$, which is enforced by a constraint described previously.
 
 Notice also that this constraint implies that when the next operation is the `END` operation, the value in the $a$ column must also be copied over to the next row. This is exactly the behavior we want to enforce so that when the `END` operation is executed, the block address is set to the address of the current span batch.
 

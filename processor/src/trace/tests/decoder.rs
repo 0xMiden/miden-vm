@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use miden_air::trace::{
     AUX_TRACE_RAND_CHALLENGES, Challenges,
-    chiplets::hasher::HASH_CYCLE_LEN_FELT,
+    chiplets::hasher::CONTROLLER_ROWS_PER_PERM_FELT,
     decoder::{P1_COL_IDX, P2_COL_IDX, P3_COL_IDX},
 };
 use miden_utils_testing::rand::rand_array;
@@ -26,7 +26,6 @@ use crate::{
 // ================================================================================================
 
 #[test]
-#[expect(clippy::needless_range_loop)]
 fn decoder_p1_span_with_respan() {
     let (ops, _) = build_span_with_respan_ops();
     let trace = build_trace_from_ops(ops, &[]);
@@ -37,7 +36,8 @@ fn decoder_p1_span_with_respan() {
     let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
     let row_values = [
         BlockStackTableRow::new(ONE, ZERO, false).to_value(&challenges),
-        BlockStackTableRow::new(ONE + HASH_CYCLE_LEN_FELT, ZERO, false).to_value(&challenges),
+        BlockStackTableRow::new(ONE + CONTROLLER_ROWS_PER_PERM_FELT, ZERO, false)
+            .to_value(&challenges),
     ];
 
     // make sure the first entry is ONE
@@ -70,7 +70,6 @@ fn decoder_p1_span_with_respan() {
 }
 
 #[test]
-#[expect(clippy::needless_range_loop)]
 fn decoder_p1_join() {
     let program = {
         let mut mast_forest = MastForest::new();
@@ -95,12 +94,12 @@ fn decoder_p1_join() {
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
     let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
-    let a_33 = ONE + HASH_CYCLE_LEN_FELT;
-    let a_65 = a_33 + HASH_CYCLE_LEN_FELT;
+    let a_3 = ONE + CONTROLLER_ROWS_PER_PERM_FELT;
+    let a_5 = a_3 + CONTROLLER_ROWS_PER_PERM_FELT;
     let row_values = [
         BlockStackTableRow::new(ONE, ZERO, false).to_value(&challenges),
-        BlockStackTableRow::new(a_33, ONE, false).to_value(&challenges),
-        BlockStackTableRow::new(a_65, ONE, false).to_value(&challenges),
+        BlockStackTableRow::new(a_3, ONE, false).to_value(&challenges),
+        BlockStackTableRow::new(a_5, ONE, false).to_value(&challenges),
     ];
 
     // make sure the first entry is ONE
@@ -144,7 +143,6 @@ fn decoder_p1_join() {
 }
 
 #[test]
-#[expect(clippy::needless_range_loop)]
 fn decoder_p1_split() {
     let program = {
         let mut mast_forest = MastForest::new();
@@ -169,10 +167,10 @@ fn decoder_p1_split() {
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
     let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
-    let a_33 = ONE + HASH_CYCLE_LEN_FELT;
+    let a_3 = ONE + CONTROLLER_ROWS_PER_PERM_FELT;
     let row_values = [
         BlockStackTableRow::new(ONE, ZERO, false).to_value(&challenges),
-        BlockStackTableRow::new(a_33, ONE, false).to_value(&challenges),
+        BlockStackTableRow::new(a_3, ONE, false).to_value(&challenges),
     ];
 
     // make sure the first entry is ONE
@@ -205,7 +203,6 @@ fn decoder_p1_split() {
 }
 
 #[test]
-#[expect(clippy::needless_range_loop)]
 fn decoder_p1_loop_with_repeat() {
     let program = {
         let mut mast_forest = MastForest::new();
@@ -235,20 +232,20 @@ fn decoder_p1_loop_with_repeat() {
 
     let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
     // The loop node consumes the first hasher cycle; join/span addresses follow sequentially.
-    let a_33 = ONE + HASH_CYCLE_LEN_FELT; // address of the JOIN block in the first iteration
-    let a_65 = a_33 + HASH_CYCLE_LEN_FELT; // address of the first SPAN block in the first iteration
-    let a_97 = a_65 + HASH_CYCLE_LEN_FELT; // address of the second SPAN block in the first iteration
-    let a_129 = a_97 + HASH_CYCLE_LEN_FELT; // address of the JOIN block in the second iteration
-    let a_161 = a_129 + HASH_CYCLE_LEN_FELT; // address of the first SPAN block in the second iteration
-    let a_193 = a_161 + HASH_CYCLE_LEN_FELT; // address of the second SPAN block in the second iteration
+    let a_3 = ONE + CONTROLLER_ROWS_PER_PERM_FELT; // address of the JOIN block in the first iteration
+    let a_5 = a_3 + CONTROLLER_ROWS_PER_PERM_FELT; // address of the first SPAN block in the first iteration
+    let a_7 = a_5 + CONTROLLER_ROWS_PER_PERM_FELT; // address of the second SPAN block in the first iteration
+    let a_9 = a_7 + CONTROLLER_ROWS_PER_PERM_FELT; // address of the JOIN block in the second iteration
+    let a_11 = a_9 + CONTROLLER_ROWS_PER_PERM_FELT; // address of the first SPAN block in the second iteration
+    let a_13 = a_11 + CONTROLLER_ROWS_PER_PERM_FELT; // address of the second SPAN block in the second iteration
     let row_values = [
         BlockStackTableRow::new(ONE, ZERO, true).to_value(&challenges),
-        BlockStackTableRow::new(a_33, ONE, false).to_value(&challenges),
-        BlockStackTableRow::new(a_65, a_33, false).to_value(&challenges),
-        BlockStackTableRow::new(a_97, a_33, false).to_value(&challenges),
-        BlockStackTableRow::new(a_129, ONE, false).to_value(&challenges),
-        BlockStackTableRow::new(a_161, a_129, false).to_value(&challenges),
-        BlockStackTableRow::new(a_193, a_129, false).to_value(&challenges),
+        BlockStackTableRow::new(a_3, ONE, false).to_value(&challenges),
+        BlockStackTableRow::new(a_5, a_3, false).to_value(&challenges),
+        BlockStackTableRow::new(a_7, a_3, false).to_value(&challenges),
+        BlockStackTableRow::new(a_9, ONE, false).to_value(&challenges),
+        BlockStackTableRow::new(a_11, a_9, false).to_value(&challenges),
+        BlockStackTableRow::new(a_13, a_9, false).to_value(&challenges),
     ];
 
     // make sure the first entry is ONE
@@ -340,7 +337,6 @@ fn decoder_p1_loop_with_repeat() {
 // ================================================================================================
 
 #[test]
-#[expect(clippy::needless_range_loop)]
 fn decoder_p2_span_with_respan() {
     let program = {
         let mut mast_forest = MastForest::new();
@@ -379,7 +375,6 @@ fn decoder_p2_span_with_respan() {
 }
 
 #[test]
-#[expect(clippy::needless_range_loop)]
 fn decoder_p2_join() {
     let mut mast_forest = MastForest::new();
 
@@ -448,7 +443,6 @@ fn decoder_p2_join() {
 }
 
 #[test]
-#[expect(clippy::needless_range_loop)]
 fn decoder_p2_split_true() {
     // build program
     let mut mast_forest = MastForest::new();
@@ -507,7 +501,6 @@ fn decoder_p2_split_true() {
 }
 
 #[test]
-#[expect(clippy::needless_range_loop)]
 fn decoder_p2_split_false() {
     // build program
     let mut mast_forest = MastForest::new();
@@ -567,7 +560,6 @@ fn decoder_p2_split_false() {
 }
 
 #[test]
-#[expect(clippy::needless_range_loop)]
 fn decoder_p2_loop_with_repeat() {
     // build program
     let mut mast_forest = MastForest::new();
@@ -601,19 +593,19 @@ fn decoder_p2_loop_with_repeat() {
 
     let challenges = Challenges::<Felt>::new(challenges[0], challenges[1]);
     // The loop node consumes the first hasher cycle; join/span addresses follow sequentially.
-    let a_33 = ONE + HASH_CYCLE_LEN_FELT; // address of the JOIN block in the first iteration
-    let a_129 = a_33 + HASH_CYCLE_LEN_FELT * Felt::new(3); // address of the JOIN block in the second iteration
+    let a_3 = ONE + CONTROLLER_ROWS_PER_PERM_FELT; // address of the JOIN block in the first iteration
+    let a_9 = a_3 + CONTROLLER_ROWS_PER_PERM_FELT * Felt::new(3); // address of the JOIN block in the second iteration
     let program_hash_msg =
         BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&challenges);
     let loop_body_msg =
         BlockHashTableRow::new_test(ONE, join.digest(), false, true).collapse(&challenges);
-    let child1_iter1 = BlockHashTableRow::new_test(a_33, basic_block_1.digest(), true, false)
+    let child1_iter1 =
+        BlockHashTableRow::new_test(a_3, basic_block_1.digest(), true, false).collapse(&challenges);
+    let child2_iter1 = BlockHashTableRow::new_test(a_3, basic_block_2.digest(), false, false)
         .collapse(&challenges);
-    let child2_iter1 = BlockHashTableRow::new_test(a_33, basic_block_2.digest(), false, false)
-        .collapse(&challenges);
-    let child1_iter2 = BlockHashTableRow::new_test(a_129, basic_block_1.digest(), true, false)
-        .collapse(&challenges);
-    let child2_iter2 = BlockHashTableRow::new_test(a_129, basic_block_2.digest(), false, false)
+    let child1_iter2 =
+        BlockHashTableRow::new_test(a_9, basic_block_1.digest(), true, false).collapse(&challenges);
+    let child2_iter2 = BlockHashTableRow::new_test(a_9, basic_block_2.digest(), false, false)
         .collapse(&challenges);
 
     // p2 starts at identity (1)
@@ -711,7 +703,6 @@ fn decoder_p3_trace_empty_table() {
 }
 
 #[test]
-#[expect(clippy::needless_range_loop)]
 fn decoder_p3_trace_one_batch() {
     let stack = [1, 2, 3, 4, 5, 6, 7, 8];
     let ops = vec![
@@ -779,7 +770,6 @@ fn decoder_p3_trace_one_batch() {
 }
 
 #[test]
-#[expect(clippy::needless_range_loop)]
 fn decoder_p3_trace_two_batches() {
     let (ops, iv) = build_span_with_respan_ops();
     let trace = build_trace_from_ops(ops, &[]);
@@ -821,7 +811,7 @@ fn decoder_p3_trace_two_batches() {
     // --- second batch ---------------------------------------------------------------------------
     // make sure entries for 3 group are inserted at clock cycle 10 (when RESPAN is executed)
     // group 3 consists of two DROP operations which do not fit into group 0
-    let batch1_addr = ONE + HASH_CYCLE_LEN_FELT;
+    let batch1_addr = ONE + CONTROLLER_ROWS_PER_PERM_FELT;
     let op_group3 = build_op_group(&[Operation::Drop; 2]);
     let b1_values = [
         OpGroupTableRow::new(batch1_addr, Felt::new(3), iv[7]).to_value(&challenges),
@@ -893,7 +883,7 @@ impl BlockStackTableRow {
     /// at least 12 coefficients.
     pub fn to_value<E: ExtensionField<Felt>>(&self, challenges: &Challenges<E>) -> E {
         let is_loop = if self.is_loop { ONE } else { ZERO };
-        challenges.alpha
+        challenges.bus_prefix[miden_air::trace::bus_types::BLOCK_STACK_TABLE]
             + challenges.beta_powers[0] * self.block_id
             + challenges.beta_powers[1] * self.parent_id
             + challenges.beta_powers[2] * is_loop
@@ -928,7 +918,7 @@ impl OpGroupTableRow {
     /// Reduces this row to a single field element in the field specified by E. This requires
     /// at least 4 coefficients.
     pub fn to_value<E: ExtensionField<Felt>>(&self, challenges: &Challenges<E>) -> E {
-        challenges.alpha
+        challenges.bus_prefix[miden_air::trace::bus_types::OP_GROUP_TABLE]
             + challenges.beta_powers[0] * self.batch_id
             + challenges.beta_powers[1] * self.group_pos
             + challenges.beta_powers[2] * self.group_value

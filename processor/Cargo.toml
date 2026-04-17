@@ -19,7 +19,7 @@ bench = false
 doctest = false
 
 [features]
-concurrent = ["std"]
+concurrent = ["std", "miden-air/concurrent"]
 default = ["std"]
 std = [
     "miden-core/std",
@@ -46,19 +46,11 @@ rayon = { version = "1.10", default-features = false }
 tracing.workspace = true
 thiserror.workspace = true
 
-# Platform-specific tokio dependencies
-# On non-wasm targets, enable rt-multi-thread for better performance
-[target.'cfg(not(target_family = "wasm"))'.dependencies]
-tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
-
-# On wasm32, only basic tokio features are supported
-[target.'cfg(target_family = "wasm")'.dependencies]
-tokio = { workspace = true, features = ["rt", "macros"] }
-
 [dev-dependencies]
 miden-assembly = { workspace = true, features = ["testing"] }
 miden-utils-testing.workspace = true
 insta.workspace = true
-pretty_assertions = { version = "1.4" }
+pretty_assertions = { workspace = true, features = ["std"] }
 proptest.workspace = true
-rstest = { version = "0.26" }
+rstest = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }

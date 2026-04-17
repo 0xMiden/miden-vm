@@ -125,7 +125,18 @@ pub enum ProjectDependencyNodeProvenance {
         path: PathBuf,
         /// The version of the preassembled package
         selected: Version,
+        /// The target kind of the preassembled package
+        kind: crate::TargetType,
+        /// The dependency requirements declared by the preassembled package manifest
+        requirements: BTreeMap<PackageId, PreassembledDependencyMetadata>,
     },
+}
+
+/// The manifest dependency metadata pinned for a preassembled package.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreassembledDependencyMetadata {
+    pub version: Version,
+    pub kind: crate::TargetType,
 }
 
 /// Represents information about a package whose provenance is a Miden project in source form.
@@ -473,16 +484,9 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
                 continue;
             }
 
-            let Some(versions) = self.registry.available_versions(&package) else {
-                continue;
-            };
-
-            for record in versions.values() {
-                registry
-                    .insert_record(package.clone(), record.clone())
-                    .map_err(|error| Report::msg(error.to_string()))?;
-
-                for dependency in record.dependencies().keys() {
+            if let Some(versions) = registry.available_versions(&package) {
+                for dependency in versions.values().flat_map(|record| record.dependencies().keys())
+                {
                     if local_packages.contains(dependency) {
                         return Err(Report::msg(format!(
                             "dependency conflict for '{dependency}': local source or preassembled dependency conflicts with a registry dependency"
@@ -490,6 +494,26 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
                     }
                     if !copied.contains(dependency) {
                         pending.insert(dependency.clone());
+                    }
+                }
+                continue;
+            }
+
+            if let Some(versions) = self.registry.available_versions(&package) {
+                for record in versions.values() {
+                    registry
+                        .insert_record(package.clone(), record.clone())
+                        .map_err(|error| Report::msg(error.to_string()))?;
+
+                    for dependency in record.dependencies().keys() {
+                        if local_packages.contains(dependency) {
+                            return Err(Report::msg(format!(
+                                "dependency conflict for '{dependency}': local source or preassembled dependency conflicts with a registry dependency"
+                            )));
+                        }
+                        if !copied.contains(dependency) {
+                            pending.insert(dependency.clone());
+                        }
                     }
                 }
             }
@@ -765,17 +789,37 @@ impl<'a, R: PackageRegistry + ?Sized> ProjectDependencyGraphBuilder<'a, R> {
             self.ensure_version_satisfies(expected_name, requirement, selected.clone())?;
         }
 
+        let mut dependencies = Vec::with_capacity(package.manifest.num_dependencies());
+        let requirements = package_requirements(&package);
+        let mut solver_dependencies = BTreeMap::new();
+        for dependency in package.manifest.dependencies() {
+            solver_dependencies.insert(
+                dependency.name.clone(),
+                VersionRequirement::Exact(Version::new(
+                    dependency.version.clone(),
+                    dependency.digest,
+                )),
+            );
+
+            dependencies.push(ProjectDependencyEdge {
+                dependency: dependency.name.clone(),
+                linkage: Linkage::Dynamic,
+            });
+        }
+
         Ok(CollectedDependencyNode {
             graph_node: ProjectDependencyNode {
-                dependencies: Vec::new(),
+                dependencies,
                 name: PackageId::from(expected_name),
                 provenance: ProjectDependencyNodeProvenance::Preassembled {
                     path,
                     selected: selected.clone(),
+                    kind: package.kind,
+                    requirements,
                 },
                 version: selected.version.clone(),
             },
-            solver_dependencies: BTreeMap::new(),
+            solver_dependencies,
         })
     }
 
@@ -1029,6 +1073,24 @@ struct GitCheckout {
     checkout_path: PathBuf,
     manifest_path: PathBuf,
     resolved_revision: Arc<str>,
+}
+
+fn package_requirements(
+    package: &MastPackage,
+) -> BTreeMap<PackageId, PreassembledDependencyMetadata> {
+    package
+        .manifest
+        .dependencies()
+        .map(|dependency| {
+            (
+                dependency.name.clone(),
+                PreassembledDependencyMetadata {
+                    version: Version::new(dependency.version.clone(), dependency.digest),
+                    kind: dependency.kind,
+                },
+            )
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -1600,8 +1662,119 @@ mod tests {
             ProjectDependencyNodeProvenance::Preassembled {
                 ref path,
                 ref selected,
+                ..
             } if path == &package_path.canonicalize().unwrap()
                 && *selected == Version::new("1.0.0".parse().unwrap(), digest)
+        );
+    }
+
+    #[test]
+    fn preassembled_path_dependency_propagates_runtime_dependencies_into_resolution() {
+        let tempdir = TempDir::new().unwrap();
+        let runtime_package = build_registry_test_package("runtime", "1.0.0");
+        let runtime_version =
+            Version::new(runtime_package.version.clone(), runtime_package.digest());
+        let dep_package = MastPackage::generate(
+            "dep".into(),
+            "1.0.0".parse().unwrap(),
+            TargetType::Library,
+            [miden_mast_package::Dependency {
+                name: PackageId::from("runtime"),
+                version: runtime_version.version.clone(),
+                kind: TargetType::Library,
+                digest: runtime_package.digest(),
+            }],
+        );
+        let dep_package_path = tempdir.path().join("dep.masp");
+        fs::write(&dep_package_path, dep_package.to_bytes()).unwrap();
+
+        let root_dir = tempdir.path().join("root");
+        let root_manifest = write_package(
+            &root_dir,
+            "root",
+            "1.0.0",
+            Some("export.foo\nend\n"),
+            [Dependency::new(
+                Span::unknown("dep".into()),
+                DependencyVersionScheme::Path {
+                    path: Span::unknown(Uri::from(dep_package_path.as_path())),
+                    version: None,
+                },
+                Linkage::Dynamic,
+            )],
+        );
+
+        let mut registry = TestRegistry::default();
+        registry
+            .insert_record(
+                PackageId::from("runtime"),
+                PackageRecord::new(runtime_version.clone(), std::iter::empty()),
+            )
+            .unwrap();
+
+        let graph = builder(&registry, &tempdir.path().join("git"))
+            .build_from_path(&root_manifest)
+            .unwrap();
+        let dep = graph.get(&PackageId::from("dep")).unwrap();
+        let runtime = graph.get(&PackageId::from("runtime")).unwrap();
+
+        assert_eq!(
+            dep.dependencies,
+            vec![ProjectDependencyEdge {
+                dependency: PackageId::from("runtime"),
+                linkage: Linkage::Dynamic,
+            }]
+        );
+        assert_matches!(
+            runtime.provenance,
+            ProjectDependencyNodeProvenance::Registry { ref selected, .. }
+                if *selected == runtime_version
+        );
+    }
+
+    #[test]
+    fn preassembled_path_dependency_keeps_embedded_kernel_in_solver_requirements() {
+        let tempdir = TempDir::new().unwrap();
+        let kernel_package = MastPackage::generate(
+            "kernelpkg".into(),
+            "1.0.0".parse().unwrap(),
+            TargetType::Kernel,
+            [],
+        );
+        let kernel_version = Version::new(kernel_package.version.clone(), kernel_package.digest());
+        let dep_package = MastPackage::generate(
+            "dep".into(),
+            "1.0.0".parse().unwrap(),
+            TargetType::Library,
+            [miden_mast_package::Dependency {
+                name: PackageId::from("kernelpkg"),
+                version: kernel_version.version.clone(),
+                kind: TargetType::Kernel,
+                digest: kernel_package.digest(),
+            }],
+        );
+
+        let dep_package_path = tempdir.path().join("dep.masp");
+        fs::write(&dep_package_path, dep_package.to_bytes()).unwrap();
+
+        let registry = TestRegistry::default();
+        let node = builder(&registry, &tempdir.path().join("git"))
+            .load_preassembled_dependency(&dep_package_path, "dep", None)
+            .unwrap();
+
+        assert_eq!(
+            node.graph_node.dependencies,
+            vec![ProjectDependencyEdge {
+                dependency: PackageId::from("kernelpkg"),
+                linkage: Linkage::Dynamic,
+            }]
+        );
+        assert_eq!(
+            node.solver_dependencies,
+            BTreeMap::from([(
+                PackageId::from("kernelpkg"),
+                VersionRequirement::Exact(kernel_version),
+            )])
         );
     }
 

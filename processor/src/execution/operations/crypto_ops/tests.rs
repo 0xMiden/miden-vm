@@ -6,7 +6,7 @@ use miden_core::{
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
     field::{BasedVectorSpace, QuadFelt},
     mast::MastForest,
-    program::{MIN_STACK_DEPTH, StackInputs},
+    program::StackInputs,
 };
 use proptest::prelude::*;
 
@@ -806,19 +806,4 @@ fn test_op_mrupdate_merge_subtree() {
 /// Creates a Word from a u64 value (used for Merkle tree leaves).
 fn init_node(value: u64) -> Word {
     [Felt::new(value), ZERO, ZERO, ZERO].into()
-}
-
-/// Builds an expected stack state from the given values.
-///
-/// The values are provided in "stack order" (top of stack first), and the result is a Vec<Felt>
-/// that can be compared with `processor.stack_top()`, where the top of the stack is at the
-/// **last** index.
-#[allow(dead_code)]
-fn build_expected(values: &[u64]) -> Vec<Felt> {
-    let mut expected = vec![ZERO; MIN_STACK_DEPTH];
-    for (i, &value) in values.iter().enumerate() {
-        // In the result, top of stack is at index 15, second at 14, etc.
-        expected[15 - i] = Felt::new(value);
-    }
-    expected
 }

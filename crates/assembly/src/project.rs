@@ -13,8 +13,8 @@ use miden_core::serde::{Deserializable, Serializable};
 use miden_mast_package::{Package as MastPackage, Section, SectionId, TargetType};
 use miden_package_registry::{PackageId, PackageStore, Version as PackageVersion};
 use miden_project::{
-    Linkage, Package as ProjectPackage, Profile, ProjectDependencyNodeProvenance, ProjectSource,
-    ProjectSourceOrigin, Target,
+    Linkage, Package as ProjectPackage, PreassembledDependencyMetadata, Profile,
+    ProjectDependencyNodeProvenance, ProjectSource, ProjectSourceOrigin, Target,
 };
 
 use crate::{Assembler, assembler::debuginfo::DebugInfoSections, ast::Module};
@@ -411,8 +411,19 @@ where
                     package,
                 }
             },
-            ProjectDependencyNodeProvenance::Preassembled { path, selected } => {
-                let package = load_selected_preassembled_package(path, package_id, selected)?;
+            ProjectDependencyNodeProvenance::Preassembled {
+                path,
+                selected,
+                kind,
+                requirements,
+            } => {
+                let package = load_selected_preassembled_package(
+                    path,
+                    package_id,
+                    selected,
+                    *kind,
+                    requirements,
+                )?;
                 ResolvedPackage {
                     linked_kernel_package: self.resolve_linked_kernel_package(package.clone())?,
                     package,
@@ -694,6 +705,8 @@ fn load_selected_preassembled_package(
     path: &FsPath,
     expected_name: &PackageId,
     selected: &PackageVersion,
+    expected_kind: TargetType,
+    expected_requirements: &BTreeMap<PackageId, PreassembledDependencyMetadata>,
 ) -> Result<Arc<MastPackage>, Report> {
     let package = load_package_from_path(path)?;
     if &package.name != expected_name {
@@ -716,6 +729,26 @@ fn load_selected_preassembled_package(
         )));
     }
 
+    if package.kind != expected_kind {
+        return Err(Report::msg(format!(
+            "preassembled dependency '{}@{}' at '{}' no longer matches the dependency graph target kind '{}'",
+            expected_name,
+            actual,
+            path.display(),
+            expected_kind
+        )));
+    }
+
+    let actual_requirements = package_requirements(&package);
+    if &actual_requirements != expected_requirements {
+        return Err(Report::msg(format!(
+            "preassembled dependency '{}@{}' at '{}' no longer matches the dependency graph dependency requirements",
+            expected_name,
+            actual,
+            path.display()
+        )));
+    }
+
     Ok(package)
 }
 
@@ -726,4 +759,22 @@ fn load_package_from_path(path: &FsPath) -> Result<Arc<MastPackage>, Report> {
         Report::msg(format!("failed to decode package '{}': {error}", path.display()))
     })?;
     Ok(Arc::new(package))
+}
+
+fn package_requirements(
+    package: &MastPackage,
+) -> BTreeMap<PackageId, PreassembledDependencyMetadata> {
+    package
+        .manifest
+        .dependencies()
+        .map(|dependency| {
+            (
+                dependency.name.clone(),
+                PreassembledDependencyMetadata {
+                    version: PackageVersion::new(dependency.version.clone(), dependency.digest),
+                    kind: dependency.kind,
+                },
+            )
+        })
+        .collect()
 }

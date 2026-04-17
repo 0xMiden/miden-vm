@@ -2,7 +2,7 @@
 # =================================================================================================
 
 # General constants
-const ROOT_UNITY = 7277203076849721926
+const ROOT_UNITY = 1753635133440165772
 const DOMAIN_OFFSET = 7
 const DOMAIN_OFFSET_INV = 2635249152773512046
 
@@ -13,14 +13,9 @@ const NUM_AUX_TRACE_COEFS = 2
 const BLOWUP_FACTOR = 8
 const BLOWUP_FACTOR_LOG = 3
 
-# Number of fixed length public inputs with padding (in field elements)
-# This is composed of the input/output operand stacks (16 * 2) and the program digest (4) and four
-# zeros for padding to the next multiple of 4. Note that, then, the fixed length public inputs
-# which are stored as extension field elements will be double-word aligned.
-const NUM_FIXED_LEN_PUBLIC_INPUTS = 40
-
-# Op label for kernel procedures table messages
-const KERNEL_OP_LABEL = 48
+# FRI parameters (hardcoded; future versions may make these configurable)
+const LOG_FINAL_DEGREE = 7
+const FRI_FOLD_ARITY = 4
 
 # MEMORY POINTERS
 # =================================================================================================
@@ -30,10 +25,11 @@ const KERNEL_OP_LABEL = 48
 ## of constant size.
 
 ### Addresses to store the LDE domain parameters
+### The info word layout is [lde_size, log(lde_size), lde_g, 0].
 const LDE_DOMAIN_INFO_PTR = 3223322624
-const LDE_DOMAIN_GEN_PTR = 3223322625
-const LDE_DOMAIN_LOG_SIZE_PTR = 3223322626
-const LDE_DOMAIN_SIZE_PTR = 3223322627
+const LDE_DOMAIN_SIZE_PTR = 3223322624
+const LDE_DOMAIN_LOG_SIZE_PTR = 3223322625
+const LDE_DOMAIN_GEN_PTR = 3223322626
 
 ### Address to store the number of FRI queries
 const NUM_QUERIES_PTR = 3223322628
@@ -58,9 +54,6 @@ const FRI_QUERIES_ADDRESS_PTR = 3223322633
 ### Address to store the logarithm of the execution trace length
 const TRACE_LENGTH_LOG_PTR = 3223322634
 
-### Address to store the number of grinding bits
-const GRINDING_FACTOR_PTR = 3223322635
-
 ### Addresses to store the commitments to main, auxiliary and constraints composition polynomials traces
 const MAIN_TRACE_COM_PTR = 3223322636
 const AUX_TRACE_COM_PTR = 3223322640
@@ -77,9 +70,6 @@ const ALPHA_DEEP_ND_PTR = 3223322656
 
 ### Address to store the fixed terms, across all queries, of the DEEP queries.
 const OOD_FIXED_TERM_HORNER_EVALS_PTR = 3223322660
-
-### Address storing a pointer to the number of public inputs (in field elements)
-const NUM_PUBLIC_INPUTS_PTR = 3223322664
 
 ### Address storing trace domain generator
 const TRACE_DOMAIN_GENERATOR_PTR = 3223322665
@@ -101,6 +91,11 @@ const TMP2 = 3223322684
 const TMP3 = 3223322688
 const TMP4 = 3223322692
 
+### gamma = beta^MAX_MESSAGE_WIDTH for per-bus domain separation.
+### Stored as [gamma0, gamma1, 0, 0] (one extension field element, word-aligned).
+### Computed once in generate_aux_randomness, read by reduce_kernel_digests.
+const BUS_GAMMA_PTR = 3223322696
+
 ### Address to the word holding the non-deterministically loaded 2 random challenges, which will be
 ### checked for correctness once we receive the commitment to the auxiliary trace and are able to
 ### generate the auxiliary randomness
@@ -118,34 +113,74 @@ const NUM_ACE_INPUTS_PTR = 3223322721
 const NUM_ACE_GATES_PTR = 3223322722
 const MAX_CYCLE_LEN_LOG_PTR = 3223322723
 
+### Addresses to store proof-of-work bit counts.
+### query_pow_bits: PoW before query index sampling (PCS_PARAMS.query_pow_bits)
+### deep_pow_bits: PoW before DEEP challenge sampling (PCS_PARAMS.deep.deep_pow_bits)
+### folding_pow_bits: PoW per FRI folding round (PCS_PARAMS.fri.folding_pow_bits), same for all layers
+const QUERY_POW_BITS_PTR = 3223322724
+const DEEP_POW_BITS_PTR = 3223322725
+const FOLDING_POW_BITS_PTR = 3223322726
+
 ### Addresses of the digests of dynamically executed procedures
 const DYNAMIC_PROCEDURE_0_PTR = 3223322728
 const DYNAMIC_PROCEDURE_1_PTR = 3223322732
 const DYNAMIC_PROCEDURE_2_PTR = 3223322736
 const DYNAMIC_PROCEDURE_3_PTR = 3223322740
+const DYNAMIC_PROCEDURE_4_PTR = 3223322744
+
+### Random coin buffers
+const RANDOM_COIN_INPUT_BUF_PTR = 3223322748
+const RANDOM_COIN_INPUT_LEN_PTR = 3223322756
+const RANDOM_COIN_OUTPUT_LEN_PTR = 3223322757
 
 ## ACE related
 ## Starts at address 3225419776 = 2**31 + 2**30 + 2**22 and the memory region grows backward
-## and forward and is of variable length in both directions.
-## In the backward direction, the size is determined by the size of the fixed public inputs and
-## the number of (groups) of variable length inputs.
+## and forward, forming the ACE READ section consumed by `eval_circuit`.
 ##
-## In the forward direction, the size is determined by the number of OOD evaluations, which itself
-## is a function of the number of columns in all traces, the size of the ACE circuit description,
-## and the number of auxiliary ACE inputs, which is fixed to 12 base field elements.
+## In the backward direction, the size is determined by the fixed-length public inputs (FLPI)
+## and the variable-length public input reductions (VLPI). These regions are laid out by
+## `compute_and_store_public_inputs_address` in `stark/public_inputs.masm`.
+##
+## In the forward direction, the size is determined by the OOD evaluations, aux bus boundary
+## values, stark variables, and circuit constants.
+##
+## ACE READ section layout (low address -> high address):
+##
+##   pi_ptr -->  [  FLPI (m EF)                    ]  fixed-length public inputs
+##               [  VLPI reductions (k words)      ]  k groups, word-aligned (per-instance)
+##   anchor -->  [  aux_rand (1 word)              ]  AUX_RAND_ELEM_PTR (this address)
+##               [  OOD evaluations                ]  OOD_EVALUATIONS_PTR
+##               [  aux bus boundary               ]  AUX_BUS_BOUNDARY_PTR
+##               [  stark vars                     ]  AUXILIARY_ACE_INPUTS_PTR
+##               [  constants                      ]  ACE_CIRCUIT_STREAM_PTR
+##                                                    ... EVAL section follows ...
+##
+## The FLPI and VLPI pointers are dynamic (stored at PUBLIC_INPUTS_ADDRESS_PTR and
+## VARIABLE_LEN_PUBLIC_INPUTS_ADDRESS_PTR). All other pointers are fixed constants.
+##
+## Relationship to ACE codegen: Each VLPI group occupies 1 word (4 base felts = 2 EF
+## slots) due to word-alignment, so `k` groups map to `k * 2` EF slots in AceConfig.
 
 ### We use 2 extension field elements for a total of 4 base field elements.
 const AUX_RAND_ELEM_PTR = 3225419776
 
-### OOD evaluations require a total of (80 + 8) * 2 * 2 field elements for current and next trace
-### polynomials and 8 * 2 * 2 field elements for current and next constraint composition polynomials
+### OOD evaluations require a total of (72 + 16 + 16) * 2 * 2 field elements for current and next:
+### - 72 main trace columns (padded)
+### - 16 aux trace base columns (aux width * extension degree)
+### - 16 quotient chunk base columns (8 chunks * extension degree)
 const OOD_EVALUATIONS_PTR = 3225419780        # AUX_RAND_ELEM_PTR + 4
 
-### We need to allocate for 12 field
-const AUXILIARY_ACE_INPUTS_PTR = 3225420164   # AUXILIARY_ACE_INPUTS_PTR + (80 + 8 + 8) * 2 * 2
+### Auxiliary bus boundary values (8 extension field elements = 16 base elements).
+const AUX_BUS_BOUNDARY_PTR = 3225420196       # OOD_EVALUATIONS_PTR + (72 + 16 + 16) * 2 * 2
 
-### Address at the start of the memory region holding the arithmetic circuit for constraint evaluation
-const ACE_CIRCUIT_PTR = 3225420176            # AUXILIARY_ACE_INPUTS_PTR + 12
+### Auxiliary inputs for ACE (stark vars), 10 extension field elements = 20 base elements.
+const AUXILIARY_ACE_INPUTS_PTR = 3225420212   # AUX_BUS_BOUNDARY_PTR + 16
+
+### Address at the start of the memory region holding the arithmetic circuit description (constants + ops).
+const ACE_CIRCUIT_STREAM_PTR = 3225420232     # AUXILIARY_ACE_INPUTS_PTR + 20
+
+### Address at the start of the evaluation-gates portion of the arithmetic circuit (EVAL section).
+const ACE_CIRCUIT_PTR = 3225421380            # ACE_CIRCUIT_STREAM_PTR + num_const_felts
 
 ## FRI
 ##
@@ -214,18 +249,31 @@ pub proc get_blowup_factor_log
     push.BLOWUP_FACTOR_LOG
 end
 
+pub proc get_log_final_degree
+    push.LOG_FINAL_DEGREE
+end
+
+pub proc get_fri_fold_arity
+    push.FRI_FOLD_ARITY
+end
+
 #! Store details about the LDE domain.
 #!
 #! The info stored is `[lde_size, log(lde_size), lde_g, 0]`.
 pub proc set_lde_domain_info_word
-    push.LDE_DOMAIN_INFO_PTR mem_storew_be
+    push.LDE_DOMAIN_INFO_PTR mem_storew_le
 end
 
 #! Load details about the LDE domain.
 #!
 #! The info stored is `[lde_size, log(lde_size), lde_g, 0]`.
 pub proc get_lde_domain_info_word
-    push.LDE_DOMAIN_INFO_PTR mem_loadw_be
+    push.LDE_DOMAIN_INFO_PTR mem_loadw_le
+end
+
+#! Returns log(lde_size), i.e., the depth of the LDE domain Merkle tree.
+pub proc get_lde_domain_depth
+    push.LDE_DOMAIN_LOG_SIZE_PTR mem_load
 end
 
 pub proc set_lde_domain_generator
@@ -234,14 +282,6 @@ end
 
 pub proc get_lde_domain_generator
     push.LDE_DOMAIN_GEN_PTR mem_load
-end
-
-pub proc set_lde_domain_log_size
-    push.LDE_DOMAIN_LOG_SIZE_PTR mem_store
-end
-
-pub proc get_lde_domain_log_size
-    push.LDE_DOMAIN_LOG_SIZE_PTR mem_load
 end
 
 pub proc set_lde_domain_size
@@ -308,12 +348,28 @@ pub proc get_trace_length_log
     push.TRACE_LENGTH_LOG_PTR mem_load
 end
 
-pub proc set_grinding_factor
-    push.GRINDING_FACTOR_PTR mem_store
+pub proc set_query_pow_bits
+    push.QUERY_POW_BITS_PTR mem_store
 end
 
-pub proc get_grinding_factor
-    push.GRINDING_FACTOR_PTR mem_load
+pub proc get_query_pow_bits
+    push.QUERY_POW_BITS_PTR mem_load
+end
+
+pub proc set_deep_pow_bits
+    push.DEEP_POW_BITS_PTR mem_store
+end
+
+pub proc get_deep_pow_bits
+    push.DEEP_POW_BITS_PTR mem_load
+end
+
+pub proc set_folding_pow_bits
+    push.FOLDING_POW_BITS_PTR mem_store
+end
+
+pub proc get_folding_pow_bits
+    push.FOLDING_POW_BITS_PTR mem_load
 end
 
 pub proc main_trace_com_ptr
@@ -345,10 +401,6 @@ end
 
 pub proc ood_fixed_term_horner_evaluations_ptr
     push.OOD_FIXED_TERM_HORNER_EVALS_PTR
-end
-
-pub proc num_public_inputs_ptr
-    push.NUM_PUBLIC_INPUTS_PTR
 end
 
 pub proc set_trace_domain_generator
@@ -398,6 +450,22 @@ pub proc tmp4
     push.TMP4
 end
 
+pub proc random_coin_input_buf_ptr
+    push.RANDOM_COIN_INPUT_BUF_PTR
+end
+
+pub proc random_coin_input_len_ptr
+    push.RANDOM_COIN_INPUT_LEN_PTR
+end
+
+pub proc random_coin_output_len_ptr
+    push.RANDOM_COIN_OUTPUT_LEN_PTR
+end
+
+pub proc bus_gamma_ptr
+    push.BUS_GAMMA_PTR
+end
+
 pub proc aux_rand_nd_ptr
     push.AUX_RAND_ND_PTR
 end
@@ -418,8 +486,16 @@ pub proc ood_evaluations_ptr
     push.OOD_EVALUATIONS_PTR
 end
 
+pub proc aux_bus_boundary_ptr
+    push.AUX_BUS_BOUNDARY_PTR
+end
+
 pub proc auxiliary_ace_inputs_ptr
     push.AUXILIARY_ACE_INPUTS_PTR
+end
+
+pub proc ace_circuit_stream_ptr
+    push.ACE_CIRCUIT_STREAM_PTR
 end
 
 pub proc get_arithmetic_circuit_ptr
@@ -450,10 +526,14 @@ pub proc get_procedure_digest_process_public_inputs_ptr
     push.DYNAMIC_PROCEDURE_3_PTR
 end
 
+pub proc get_procedure_digest_observe_aux_trace_ptr
+    push.DYNAMIC_PROCEDURE_4_PTR
+end
+
 # HELPER
 # =================================================================================================
 
 #! Overwrites the top stack word with zeros.
 pub proc zeroize_stack_word
-    exec.zero_word_ptr mem_loadw_be
+    exec.zero_word_ptr mem_loadw_le
 end

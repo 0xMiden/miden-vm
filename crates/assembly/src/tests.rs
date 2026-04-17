@@ -5672,6 +5672,45 @@ end
 }
 
 #[test]
+fn regression_kernel_exports_are_syscall_only_for_all_non_syscall_entrypoints() {
+    let context = TestContext::default();
+    let source_manager = context.source_manager();
+
+    let kernel_src = r#"
+pub proc k1
+    push.1
+end
+"#;
+
+    let kernel = Assembler::new(source_manager.clone())
+        .assemble_kernel(kernel_src)
+        .expect("kernel assembly must succeed");
+
+    let cases = vec![
+        (
+            "exec",
+            "proc user\n    exec.::$kernel::k1\nend\n\nbegin\n    call.user\nend\n".to_string(),
+        ),
+        (
+            "call",
+            "proc user\n    call.::$kernel::k1\nend\n\nbegin\n    call.user\nend\n".to_string(),
+        ),
+        (
+            "procref",
+            "proc user\n    procref.::$kernel::k1\n    dropw\nend\n\nbegin\n    call.user\nend\n"
+                .to_string(),
+        ),
+    ];
+
+    for (kind, program_src) in cases {
+        let err = Assembler::with_kernel(source_manager.clone(), kernel.clone())
+            .assemble_program(program_src)
+            .expect_err(&format!("kernel exports should be syscall-only, but {kind} succeeded"));
+        assert_diagnostic!(err, "syscall");
+    }
+}
+
+#[test]
 fn test_linking_imported_symbols_with_duplicate_prefix_components() -> TestResult {
     let context = TestContext::default();
 

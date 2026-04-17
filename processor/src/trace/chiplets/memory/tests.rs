@@ -12,10 +12,10 @@ use miden_core::{ONE, WORD_SIZE, Word, ZERO, assert_matches, field::Field};
 
 use super::{
     CLK_COL_IDX, CTX_COL_IDX, D_INV_COL_IDX, D0_COL_IDX, D1_COL_IDX, EMPTY_WORD, Felt, Memory,
-    TraceFragment, V_COL_RANGE, WORD_COL_IDX,
+    TraceFragment, V_COL_RANGE, WORD_ADDR_HI_COL_IDX, WORD_ADDR_LO_COL_IDX, WORD_COL_IDX,
     segment::{MemoryAccessType, MemoryOperation},
 };
-use crate::{ContextId, MemoryAddress, MemoryError};
+use crate::{ContextId, MemoryAddress, MemoryError, trace::range::RangeChecker};
 
 #[test]
 fn mem_init() {
@@ -455,6 +455,17 @@ fn mem_get_state_at() {
     assert_eq!(mem.get_state_at(3.into(), clk), vec![]);
 }
 
+#[test]
+fn append_range_checks_does_not_panic_when_first_access_clk_is_zero() {
+    let mut mem = Memory::default();
+    mem.write(ContextId::root(), ZERO, 0.into(), ONE).unwrap();
+
+    let mut range_checker = RangeChecker::new();
+    mem.append_range_checks(0.into(), &mut range_checker);
+
+    assert!(range_checker.trace_len() > 0);
+}
+
 // HELPER STRUCT & FUNCTIONS
 // ================================================================================================
 
@@ -576,6 +587,12 @@ fn build_trace_row(
     } else {
         row[FLAG_SAME_CONTEXT_AND_WORD] = ZERO;
     }
+
+    // Word index decomposition: word_addr / 4
+    let word_addr: u32 = word.as_canonical_u64() as u32;
+    let word_index = word_addr / WORD_SIZE as u32;
+    row[WORD_ADDR_LO_COL_IDX] = Felt::from_u16((word_index & 0xffff) as u16);
+    row[WORD_ADDR_HI_COL_IDX] = Felt::from_u16((word_index >> 16) as u16);
 
     row
 }

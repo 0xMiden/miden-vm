@@ -1,0 +1,373 @@
+name: blake3 1-to-1 non-regression
+
+on:
+  push:
+    branches:
+      - main
+      - next
+  workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: Commit or ref to use as the baseline. Defaults to the current ref's first parent.
+        required: false
+        type: string
+      current_ref:
+        description: Commit or ref to benchmark. Defaults to the workflow ref.
+        required: false
+        type: string
+      regression_threshold_pct:
+        description: Allowed slowdown before the workflow fails.
+        required: false
+        default: "5"
+        type: string
+      rayon_num_threads:
+        description: RAYON_NUM_THREADS value used for the prove command.
+        required: false
+        default: "8"
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    name: Benchmark baseline vs current
+    runs-on: warp-ubuntu-latest-x64-4x
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    outputs:
+      summary: ${{ steps.summary.outputs.summary }}
+      regression: ${{ steps.compare.outputs.regression }}
+      status: ${{ steps.compare.outputs.status }}
+      baseline_sha: ${{ steps.compare.outputs.baseline_sha }}
+      current_sha: ${{ steps.compare.outputs.current_sha }}
+      program_delta_ms: ${{ steps.compare.outputs.program_delta_ms }}
+      program_delta_pct: ${{ steps.compare.outputs.program_delta_pct }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          toolchain="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)"
+          rustup toolchain install "${toolchain}" --profile minimal --target wasm32-unknown-unknown
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: Prepare benchmark directories
+        id: dirs
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_root="${RUNNER_TEMP}/blake3-nonregression-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          artifact_dir="${run_root}/artifacts"
+          worktree_dir="${run_root}/worktrees"
+          mkdir -p "${artifact_dir}" "${worktree_dir}"
+          {
+            echo "run_root=${run_root}"
+            echo "artifact_dir=${artifact_dir}"
+            echo "worktree_dir=${worktree_dir}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Resolve benchmark refs
+        id: refs
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          INPUT_BASELINE_REF: ${{ inputs.baseline_ref }}
+          INPUT_CURRENT_REF: ${{ inputs.current_ref }}
+          INPUT_THRESHOLD_PCT: ${{ inputs.regression_threshold_pct }}
+          INPUT_RAYON_THREADS: ${{ inputs.rayon_num_threads }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          resolve_commit() {
+            local ref="$1"
+            git rev-parse --verify --end-of-options "${ref}^{commit}"
+          }
+
+          fetch_commit_if_needed() {
+            local ref="$1"
+            local fetch_log
+            if resolve_commit "${ref}" >/dev/null 2>&1; then
+              return 0
+            fi
+            fetch_log="$(mktemp)"
+            if git fetch --no-tags --depth=1 origin "${ref}" >"${fetch_log}" 2>&1; then
+              rm -f "${fetch_log}"
+              resolve_commit "${ref}" >/dev/null 2>&1
+              return $?
+            fi
+            if grep -Eqi "couldn't find remote ref|not our ref|unadvertised object|reference is not a tree|no such remote ref" "${fetch_log}"; then
+              rm -f "${fetch_log}"
+              return 2
+            fi
+            cat "${fetch_log}" >&2
+            rm -f "${fetch_log}"
+            return 1
+          }
+
+          if [[ "${EVENT_NAME}" == "push" ]]; then
+            current_ref="${GITHUB_SHA}"
+            baseline_ref="${BEFORE_SHA}"
+            threshold_pct="5"
+            rayon_threads="8"
+          else
+            baseline_ref="${INPUT_BASELINE_REF}"
+            current_ref="${INPUT_CURRENT_REF}"
+            threshold_pct="${INPUT_THRESHOLD_PCT}"
+            rayon_threads="${INPUT_RAYON_THREADS}"
+          fi
+
+          if [[ -z "${current_ref}" ]]; then
+            current_ref="${GITHUB_SHA}"
+          fi
+
+          if [[ -z "${threshold_pct}" ]]; then
+            threshold_pct="5"
+          fi
+
+          if [[ -z "${rayon_threads}" ]]; then
+            rayon_threads="8"
+          fi
+
+          if [[ ! "${threshold_pct}" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+            echo "regression_threshold_pct must be numeric" >&2
+            exit 1
+          fi
+
+          if [[ ! "${rayon_threads}" =~ ^[0-9]+$ ]]; then
+            echo "rayon_num_threads must be an integer" >&2
+            exit 1
+          fi
+
+          if [[ -z "${baseline_ref}" || "${baseline_ref}" == "0000000000000000000000000000000000000000" ]]; then
+            baseline_ref="${current_ref}^"
+          fi
+
+          current_sha="$(resolve_commit "${current_ref}")"
+          fetch_status=0
+
+          if [[ "${EVENT_NAME}" == "push" && "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" ]]; then
+            if fetch_commit_if_needed "${baseline_ref}"; then
+              fetch_status=0
+            else
+              fetch_status=$?
+            fi
+          fi
+
+          if [[ "${EVENT_NAME}" == "push" && "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" && ${fetch_status} -eq 0 ]]; then
+            baseline_sha="$(resolve_commit "${baseline_ref}")"
+          elif [[ "${EVENT_NAME}" == "push" && "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" && ${fetch_status} -eq 2 ]]; then
+            echo "push baseline ${baseline_ref} is no longer available; refusing to compare against current_sha^" >&2
+            exit 1
+          elif resolve_commit "${baseline_ref}" >/dev/null 2>&1; then
+            baseline_sha="$(resolve_commit "${baseline_ref}")"
+          elif [[ "${EVENT_NAME}" == "push" && "${BEFORE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
+            baseline_ref="${current_sha}^"
+            baseline_sha="$(resolve_commit "${current_sha}^")"
+          elif [[ "${EVENT_NAME}" == "workflow_dispatch" && -z "${INPUT_BASELINE_REF}" ]]; then
+            baseline_ref="${current_sha}^"
+            baseline_sha="$(resolve_commit "${current_sha}^")"
+          else
+            echo "baseline_ref must resolve to a commit: ${baseline_ref}" >&2
+            exit 1
+          fi
+
+          baseline_ref="${baseline_sha}"
+
+          {
+            echo "baseline_ref=${baseline_ref}"
+            echo "current_ref=${current_ref}"
+            echo "baseline_sha=${baseline_sha}"
+            echo "current_sha=${current_sha}"
+            echo "threshold_pct=${threshold_pct}"
+            echo "rayon_threads=${rayon_threads}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Create worktrees
+        env:
+          WORKTREE_DIR: ${{ steps.dirs.outputs.worktree_dir }}
+          BASELINE_SHA: ${{ steps.refs.outputs.baseline_sha }}
+          CURRENT_SHA: ${{ steps.refs.outputs.current_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git worktree add --detach "${WORKTREE_DIR}/baseline" "${BASELINE_SHA}"
+          git worktree add --detach "${WORKTREE_DIR}/current" "${CURRENT_SHA}"
+
+      - name: Run baseline benchmark
+        env:
+          GITHUB_WORKSPACE_PATH: ${{ github.workspace }}
+          WORKTREE_DIR: ${{ steps.dirs.outputs.worktree_dir }}
+          ARTIFACT_DIR: ${{ steps.dirs.outputs.artifact_dir }}
+          RAYON_THREADS: ${{ steps.refs.outputs.rayon_threads }}
+          BASELINE_SHA: ${{ steps.refs.outputs.baseline_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 "${GITHUB_WORKSPACE_PATH}/scripts/blake3_nonregression.py" run \
+            --repo-root "${WORKTREE_DIR}/baseline" \
+            --output-dir "${ARTIFACT_DIR}/baseline" \
+            --rayon-num-threads "${RAYON_THREADS}" \
+            --git-ref "${BASELINE_SHA}"
+
+      - name: Run current benchmark
+        env:
+          GITHUB_WORKSPACE_PATH: ${{ github.workspace }}
+          WORKTREE_DIR: ${{ steps.dirs.outputs.worktree_dir }}
+          ARTIFACT_DIR: ${{ steps.dirs.outputs.artifact_dir }}
+          RAYON_THREADS: ${{ steps.refs.outputs.rayon_threads }}
+          CURRENT_SHA: ${{ steps.refs.outputs.current_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 "${GITHUB_WORKSPACE_PATH}/scripts/blake3_nonregression.py" run \
+            --repo-root "${WORKTREE_DIR}/current" \
+            --output-dir "${ARTIFACT_DIR}/current" \
+            --rayon-num-threads "${RAYON_THREADS}" \
+            --git-ref "${CURRENT_SHA}"
+
+      - name: Compare baseline and current results
+        id: compare
+        env:
+          GITHUB_WORKSPACE_PATH: ${{ github.workspace }}
+          ARTIFACT_DIR: ${{ steps.dirs.outputs.artifact_dir }}
+          THRESHOLD_PCT: ${{ steps.refs.outputs.threshold_pct }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 "${GITHUB_WORKSPACE_PATH}/scripts/blake3_nonregression.py" compare \
+            --baseline "${ARTIFACT_DIR}/baseline/result.json" \
+            --current "${ARTIFACT_DIR}/current/result.json" \
+            --summary-out "${ARTIFACT_DIR}/summary.md" \
+            --json-out "${ARTIFACT_DIR}/comparison.json" \
+            --threshold-pct "${THRESHOLD_PCT}" \
+            --github-output "${GITHUB_OUTPUT}"
+
+      - name: Publish job summary
+        if: always()
+        env:
+          ARTIFACT_DIR: ${{ steps.dirs.outputs.artifact_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f "${ARTIFACT_DIR}/summary.md" ]]; then
+            cat "${ARTIFACT_DIR}/summary.md" >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+      - name: Expose summary for downstream jobs
+        if: always()
+        id: summary
+        env:
+          ARTIFACT_DIR: ${{ steps.dirs.outputs.artifact_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f "${ARTIFACT_DIR}/summary.md" ]]; then
+            exit 0
+          fi
+          {
+            echo "summary<<EOF"
+            cat "${ARTIFACT_DIR}/summary.md"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: blake3-1to1-nonregression
+          path: ${{ steps.dirs.outputs.artifact_dir }}
+          if-no-files-found: warn
+
+      - name: Remove worktrees
+        if: always()
+        env:
+          RUN_ROOT: ${{ steps.dirs.outputs.run_root }}
+          WORKTREE_DIR: ${{ steps.dirs.outputs.worktree_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git worktree remove --force "${WORKTREE_DIR}/baseline" || true
+          git worktree remove --force "${WORKTREE_DIR}/current" || true
+          rm -rf "${RUN_ROOT}"
+
+      - name: Fail on regression
+        if: steps.compare.outputs.regression == 'true'
+        env:
+          PROGRAM_DELTA_PCT: ${{ steps.compare.outputs.program_delta_pct }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "blake3 1-to-1 benchmark regressed by ${PROGRAM_DELTA_PCT}%"
+          exit 1
+
+  comment:
+    name: Comment on pushed commit
+    runs-on: ubuntu-latest
+    needs:
+      - benchmark
+    if: always() && github.event_name == 'push' && needs.benchmark.outputs.current_sha != '' && needs.benchmark.outputs.summary != ''
+    permissions:
+      contents: write
+    steps:
+      - name: Create or update commit comment
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
+        env:
+          CURRENT_SHA: ${{ needs.benchmark.outputs.current_sha }}
+          MARKER: "<!-- blake3-1to1-nonregression -->"
+          BODY: ${{ needs.benchmark.outputs.summary }}
+        with:
+          script: |
+            const body = [
+              process.env.MARKER,
+              process.env.BODY,
+              '',
+              `Workflow run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            ].join('\n');
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const commitSha = process.env.CURRENT_SHA;
+            const marker = process.env.MARKER;
+
+            const comments = await github.paginate(
+              github.rest.repos.listCommentsForCommit,
+              {
+                owner,
+                repo,
+                commit_sha: commitSha,
+                per_page: 100,
+              },
+            );
+
+            const existing = comments.find(comment =>
+              comment.user?.type === 'Bot' && comment.body?.includes(marker)
+            );
+
+            if (existing) {
+              await github.rest.repos.updateCommitComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+              return;
+            }
+
+            await github.rest.repos.createCommitComment({
+              owner,
+              repo,
+              commit_sha: commitSha,
+              body,
+            });

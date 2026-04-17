@@ -40,12 +40,10 @@ pub use miden_processor::{
 #[cfg(not(target_family = "wasm"))]
 use miden_processor::{DefaultDebugHandler, trace::build_trace};
 use miden_processor::{
-    DefaultHost, ExecutionOutput, FastProcessor, Program, event::EventHandler,
-    trace::execution_tracer::TraceGenerationContext,
+    DefaultHost, ExecutionOutput, FastProcessor, Program, TraceBuildInputs, event::EventHandler,
 };
 #[cfg(not(target_family = "wasm"))]
 pub use miden_prover::prove_sync;
-use miden_prover::utils::range;
 pub use miden_prover::{ProvingOptions, prove};
 pub use miden_verifier::verify;
 pub use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
@@ -225,6 +223,63 @@ impl Test {
         }
     }
 
+    /// Adds kernel source to this test so it is assembled and linked during compilation.
+    #[track_caller]
+    pub fn with_kernel(self, kernel_source: impl ToString) -> Self {
+        self.with_kernel_source(
+            format!("kernel{}", core::panic::Location::caller().line()),
+            kernel_source,
+        )
+    }
+
+    /// Adds kernel source to this test so it is assembled and linked during compilation.
+    pub fn with_kernel_source(
+        mut self,
+        kernel_name: impl Into<String>,
+        kernel_source: impl ToString,
+    ) -> Self {
+        self.kernel_source = Some(self.source_manager.load(
+            SourceLanguage::Masm,
+            kernel_name.into().into(),
+            kernel_source.to_string(),
+        ));
+        self
+    }
+
+    /// Sets the stack inputs for this test using stack-ordered values.
+    #[track_caller]
+    pub fn with_stack_inputs(mut self, stack_inputs: impl AsRef<[u64]>) -> Self {
+        self.stack_inputs = StackInputs::try_from_ints(stack_inputs.as_ref().to_vec()).unwrap();
+        self
+    }
+
+    /// Adds a library to link in during assembly.
+    pub fn with_library(mut self, library: impl Into<Library>) -> Self {
+        self.libraries.push(library.into());
+        self
+    }
+
+    /// Adds a handler for a specific event when running the `Host`.
+    pub fn with_event_handler(mut self, event: EventName, handler: impl EventHandler) -> Self {
+        self.add_event_handler(event, handler);
+        self
+    }
+
+    /// Adds handlers for specific events when running the `Host`.
+    pub fn with_event_handlers(
+        mut self,
+        handlers: Vec<(EventName, Arc<dyn EventHandler>)>,
+    ) -> Self {
+        self.add_event_handlers(handlers);
+        self
+    }
+
+    /// Adds an extra module to link in during assembly.
+    pub fn with_module(mut self, path: impl AsRef<Path>, source: impl ToString) -> Self {
+        self.add_module(path, source);
+        self
+    }
+
     /// Add an extra module to link in during assembly
     pub fn add_module(&mut self, path: impl AsRef<Path>, source: impl ToString) {
         self.add_modules.push((path.as_ref().into(), source.to_string()));
@@ -286,8 +341,9 @@ impl Test {
         let execution_output = processor.execute_sync(&program, &mut host).unwrap();
 
         // validate the memory state
-        for (addr, mem_value) in
-            (range(mem_start_addr as usize, expected_mem.len())).zip(expected_mem.iter())
+        for (addr, mem_value) in ((mem_start_addr as usize)
+            ..(mem_start_addr as usize + expected_mem.len()))
+            .zip(expected_mem.iter())
         {
             let mem_state = execution_output
                 .memory
@@ -394,14 +450,14 @@ impl Test {
                     .with_core_trace_fragment_size(FRAGMENT_SIZE)
                     .unwrap(),
             );
-            fast_processor.execute_for_trace_sync(&program, &mut host)
+            fast_processor.execute_trace_inputs_sync(&program, &mut host)
         };
 
         // compare fast and slow processors' stack outputs
         self.assert_result_with_step_execution(&fast_stack_result);
 
-        fast_stack_result.and_then(|(execution_output, trace_generation_ctx)| {
-            let trace = build_trace(execution_output, trace_generation_ctx, program.to_info())?;
+        fast_stack_result.and_then(|trace_inputs| {
+            let trace = build_trace(trace_inputs)?;
 
             assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
             Ok(trace)
@@ -473,6 +529,7 @@ impl Test {
             stack_inputs,
             self.advice_inputs.clone(),
             &mut host,
+            miden_processor::ExecutionOptions::default(),
             ProvingOptions::default(),
         )
         .unwrap();
@@ -555,7 +612,7 @@ impl Test {
     #[cfg(not(target_family = "wasm"))]
     fn assert_result_with_step_execution(
         &self,
-        fast_result: &Result<(ExecutionOutput, TraceGenerationContext), ExecutionError>,
+        fast_result: &Result<TraceBuildInputs, ExecutionError>,
     ) {
         fn compare_results(
             left_result: Result<StackOutputs, &ExecutionError>,
@@ -610,7 +667,7 @@ impl Test {
         };
 
         compare_results(
-            fast_result.as_ref().map(|(output, _)| output.stack),
+            fast_result.as_ref().map(|trace_inputs| *trace_inputs.stack_outputs()),
             &fast_result_by_step,
             "fast processor",
             "fast processor by step",
@@ -706,33 +763,45 @@ pub fn get_column_name(col_idx: usize) -> String {
 
         // Decoder columns
         i if i == DECODER_TRACE_OFFSET + ADDR_COL_IDX => "decoder_addr".to_string(),
-        i if range(DECODER_TRACE_OFFSET + OP_BITS_OFFSET, NUM_OP_BITS).contains(&i) => {
+        i if (DECODER_TRACE_OFFSET + OP_BITS_OFFSET
+            ..DECODER_TRACE_OFFSET + OP_BITS_OFFSET + NUM_OP_BITS)
+            .contains(&i) =>
+        {
             format!("op_bits[{}]", i - (DECODER_TRACE_OFFSET + OP_BITS_OFFSET))
         },
-        i if range(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET, NUM_HASHER_COLUMNS).contains(&i) => {
+        i if (DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET
+            ..DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + NUM_HASHER_COLUMNS)
+            .contains(&i) =>
+        {
             format!("hasher_state[{}]", i - (DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET))
         },
         i if i == DECODER_TRACE_OFFSET + IN_SPAN_COL_IDX => "in_span".to_string(),
         i if i == DECODER_TRACE_OFFSET + GROUP_COUNT_COL_IDX => "group_count".to_string(),
         i if i == DECODER_TRACE_OFFSET + OP_INDEX_COL_IDX => "op_index".to_string(),
-        i if range(DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET, NUM_OP_BATCH_FLAGS)
+        i if (DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET
+            ..DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET + NUM_OP_BATCH_FLAGS)
             .contains(&i) =>
         {
             format!("op_batch_flag[{}]", i - (DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET))
         },
-        i if range(DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET, NUM_OP_BITS_EXTRA_COLS)
+        i if (DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET
+            ..DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + NUM_OP_BITS_EXTRA_COLS)
             .contains(&i) =>
         {
             format!("op_bits_extra[{}]", i - (DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET))
         },
-        i if range(DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET, NUM_OP_BITS_EXTRA_COLS)
+        i if (DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET
+            ..DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + NUM_OP_BITS_EXTRA_COLS)
             .contains(&i) =>
         {
             format!("op_bits_extra[{}]", i - (DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET))
         },
 
         // Stack columns
-        i if range(STACK_TRACE_OFFSET + STACK_TOP_OFFSET, MIN_STACK_DEPTH).contains(&i) => {
+        i if (STACK_TRACE_OFFSET + STACK_TOP_OFFSET
+            ..STACK_TRACE_OFFSET + STACK_TOP_OFFSET + MIN_STACK_DEPTH)
+            .contains(&i) =>
+        {
             format!("stack[{}]", i - (STACK_TRACE_OFFSET + STACK_TOP_OFFSET))
         },
         i if i == STACK_TRACE_OFFSET + B0_COL_IDX => "stack_b0".to_string(),

@@ -168,6 +168,13 @@ impl VisitMut for VerifyInvokeTargets<'_> {
     }
     fn visit_mut_procref(&mut self, target: &mut InvocationTarget) -> ControlFlow<()> {
         self.visit_mut_invoke_target(target)?;
+        // We intentionally use `InvokeKind::Exec` here rather than `InvokeKind::ProcRef`.
+        // A `procref` instruction captures a procedure reference for *later* invocation,
+        // but we must pessimistically treat it as an actual invocation because we cannot
+        // know the specific call kind at this point. `Exec` is the most general invocation
+        // kind, and the linker relies on this signal to correctly track procedure
+        // dependencies. Using `ProcRef` would only indicate "named somewhere" and would
+        // not carry the full weight of "this procedure is invoked".
         self.invoked.insert(Invoke::new(InvokeKind::Exec, target.clone()));
         ControlFlow::Continue(())
     }

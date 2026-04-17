@@ -155,13 +155,10 @@ impl Program {
             },
             Err(err) => Err(err),
         })
-        .map_err(|p| {
-            match p.downcast::<std::io::Error>() {
-                // SAFETY: It is guaranteed to be safe to read Box<std::io::Error>
-                Ok(err) => unsafe { core::ptr::read(&*err) },
-                // Propagate unknown panics
-                Err(err) => std::panic::resume_unwind(err),
-            }
+        .map_err(|p| match p.downcast::<std::io::Error>() {
+            Ok(err) => *err,
+            // Propagate unknown panics
+            Err(err) => std::panic::resume_unwind(err),
         })?
     }
 }

@@ -18,13 +18,11 @@
 //! - Lagrange-kernel weights and shifts for quotient chunk recomposition.
 //! - Constraint folding with the composition challenge and final root check.
 //!
-//! The current "stark vars" block is sufficient to derive both selector
-//! polynomials and the Lagrange-kernel weights used in quotient chunk
-//! recomposition:
-//! - Selector evaluations:
-//!   - `inv_vanishing = 1 / (z^N - 1)`
-//!   - `is_first = (z^N - 1) * inv(z - 1)`
-//!   - `is_last  = (z^N - 1) * inv(z - g^{-1})`
+//! The current "stark vars" block provides precomputed selectors and the
+//! Lagrange-kernel weights used in quotient chunk recomposition:
+//! - Precomputed selectors (computed in MASM, supplied as inputs):
+//!   - `is_first = (z^N - 1) / (z - 1)`
+//!   - `is_last  = (z^N - 1) / (z - g^{-1})`
 //!   - `is_transition = z - g^{-1}`
 //! - Lagrange kernel inputs:
 //!   - `s0 = offset^N` and `g = subgroup_gen^N` define the shifts `s_i = s0 * g^i`.
@@ -47,8 +45,7 @@
 //! Notes:
 //! - `quotient_next` is included in the READ layout and is mapped via
 //!   `InputKey::QuotientChunkCoord` with `offset = 1`.
-//! - `stark_vars` reserves at least 14 EF slots for the canonical verifier inputs. Extra slots are
-//!   left available for future aux inputs.
+//! - `stark_vars` reserves 10 EF slots for the canonical verifier inputs.
 
 mod keys;
 mod plan;

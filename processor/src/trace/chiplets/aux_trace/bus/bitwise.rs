@@ -1,7 +1,8 @@
 use core::fmt::{Display, Formatter, Result as FmtResult};
 
 use miden_air::trace::{
-    Challenges, MainTrace, RowIndex, chiplets::bitwise::OP_CYCLE_LEN as BITWISE_OP_CYCLE_LEN,
+    Challenges, MainTrace, RowIndex, bus_types::CHIPLETS_BUS,
+    chiplets::bitwise::OP_CYCLE_LEN as BITWISE_OP_CYCLE_LEN,
 };
 use miden_core::{Felt, ONE, ZERO, field::ExtensionField};
 
@@ -86,7 +87,7 @@ where
     E: ExtensionField<Felt>,
 {
     fn value(&self, challenges: &Challenges<E>) -> E {
-        challenges.encode([self.op_label, self.a, self.b, self.z])
+        challenges.encode(CHIPLETS_BUS, [self.op_label, self.a, self.b, self.z])
     }
 
     fn source(&self) -> &str {
