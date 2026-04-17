@@ -336,7 +336,7 @@ pub proc decrypt
     movdn.11
     # => [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, tag_ptr, ...]
 
-    # compute the pointer at which clear padding should be written on success
+    # compute padding_ptr = dst_ptr + 8 * num_blocks for the clear padding write on success
     dup.10 mul.8
     dup.10
     add
