@@ -394,7 +394,10 @@ pub struct HasherPermLinkMsg<E> {
 
 /// Kernel ROM message (5 elements): `[label, digest[4]]`.
 ///
-/// Constructed via [`KernelRomMsg::call`] (KERNEL_PROC_CALL_LABEL = 16).
+/// Constructed via [`KernelRomMsg::call`] (KERNEL_PROC_CALL_LABEL = 16) or
+/// [`KernelRomMsg::init`] (KERNEL_PROC_INIT_LABEL = 48). The chiplet emits an INIT
+/// `remove` (multiplicity 1) and a CALL `add` (with syscall multiplicity). The boundary
+/// correction adds once per INIT; the decoder removes once per SYSCALL for CALL.
 #[derive(Clone, Debug)]
 pub struct KernelRomMsg<E> {
     label: u16,
@@ -405,9 +408,16 @@ impl<E: PrimeCharacteristicRing + Clone> KernelRomMsg<E> {
     // KERNEL_PROC_CALL_LABEL = Felt::new(0b001111 + 1) = 16.
     const CALL_LABEL: u16 = 16;
     // KERNEL_PROC_INIT_LABEL = Felt::new(0b101111 + 1) = 48.
-    /// Kernel procedure call message (SYSCALL request side).
+    const INIT_LABEL: u16 = 48;
+
+    /// Kernel procedure call message (SYSCALL request side + chiplet-side CALL response).
     pub fn call(digest: [E; 4]) -> Self {
         Self { label: Self::CALL_LABEL, digest }
+    }
+
+    /// Kernel procedure init message (public-input request side + chiplet-side INIT response).
+    pub fn init(digest: [E; 4]) -> Self {
+        Self { label: Self::INIT_LABEL, digest }
     }
 }
 
@@ -499,18 +509,6 @@ pub struct MemoryResponseMsg<E> {
 }
 
 impl<E: PrimeCharacteristicRing + Clone> MemoryResponseMsg<E> {}
-
-/// Kernel ROM response message with a pre-computed (conditional) label expression.
-///
-/// The chiplet-side label depends on `s_first`: `s_first*INIT_LABEL + (1-s_first)*CALL_LABEL`.
-/// Unlike [`KernelRomMsg`] which bakes in a fixed label, this carries the label as an expression.
-#[derive(Clone, Debug)]
-pub struct KernelRomResponseMsg<E> {
-    pub label: E,
-    pub digest: [E; 4],
-}
-
-impl<E: PrimeCharacteristicRing + Clone> KernelRomResponseMsg<E> {}
 
 /// Bitwise chiplet response message with a pre-computed (conditional) label expression.
 ///
@@ -894,23 +892,6 @@ where
         // Runtime mux mirrors the legacy `encode`.
         let is_element: E = E::ONE - self.is_word.clone();
         element_msg * is_element + word_msg * self.is_word.clone()
-    }
-}
-
-impl<E, EF> LookupMessage<E, EF> for KernelRomResponseMsg<E>
-where
-    E: PrimeCharacteristicRing + Clone,
-    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
-{
-    fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        use super::lookup::bus_id::BUS_CHIPLETS;
-        let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_CHIPLETS].clone();
-        acc += bp[0].clone() * self.label.clone();
-        for i in 0..4 {
-            acc += bp[i + 1].clone() * self.digest[i].clone();
-        }
-        acc
     }
 }
 

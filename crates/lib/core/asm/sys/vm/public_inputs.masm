@@ -269,7 +269,7 @@ end
 #! Outputs: [...]
 #!
 #! where `digests_ptr` is a pointer to the kernel procedures digests. The reduced value
-#! `kernel_corr = -Σ_i 1 / kernel_proc_message(digest_i)` is stored as
+#! `kernel_corr = Σ_i 1 / kernel_proc_message(digest_i)` is stored as
 #! [kernel_corr0, kernel_corr1, 0, 0] at the original `digests_ptr`.
 proc reduce_kernel_digests
     # Assert that the number of kernel procedures is at most 1023
@@ -432,10 +432,8 @@ proc reduce_kernel_digests
     end
     # => [0, sum0, sum1, ...] where sum = Σ 1/term_i
 
-    # Negate to get kernel_corr = -Σ 1/term_i.
+    # kernel_corr = Σ 1/term_i (no negation: chiplet removes, boundary adds).
     drop
-    # => [sum0, sum1, ...]
-    ext2neg
     # => [kernel_corr0, kernel_corr1, ...]
 
     # Store the result at `digests_ptr` as `[kernel_corr0, kernel_corr1, 0, 0]`

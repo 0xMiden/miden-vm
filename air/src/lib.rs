@@ -454,8 +454,10 @@ fn transcript_messages<EF: ExtensionField<Felt>>(
 
 /// Builds the kernel procedure init message for the kernel ROM bus.
 ///
-/// Must match `KernelRomInitMessage::value()` on the prover side, which encodes
-/// `[KERNEL_PROC_INIT_LABEL, digest[0..4]]`.
+/// Encodes `[KERNEL_PROC_INIT_LABEL, digest[0..4]]` — must match the chiplet-side INIT remove
+/// emitted by the kernel ROM chiplet (one per declared kernel procedure). The CALL side of
+/// the bus is matched entirely between decoder-emitted SYSCALL removes and the chiplet's
+/// multiplicity-weighted CALL add, and does not need a public-input correction term.
 fn kernel_proc_message<EF: ExtensionField<Felt>>(
     challenges: &trace::Challenges<EF>,
     digest: &Word,
@@ -475,9 +477,9 @@ fn kernel_proc_message<EF: ExtensionField<Felt>>(
 /// Reduces kernel procedure digests from var-len public inputs into the LogUp boundary
 /// correction term for the chiplets bus.
 ///
-/// Returns `-Σ 1/d_kernel_proc_msg_i` where `d_kernel_proc_msg_i` is the encoded bus
-/// message for the i-th kernel procedure digest. The negation cancels the unmatched
-/// chiplet-side `add` contributions in columns M3 and C1.
+/// Returns `+Σ 1/d_kernel_proc_msg_i` where `d_kernel_proc_msg_i` is the encoded bus
+/// message for the i-th kernel procedure digest. This cancels the unmatched chiplet-side
+/// `remove` contributions in columns M3 and C1.
 ///
 /// Expects exactly one variable-length public input slice containing all kernel digests
 /// as concatenated `Felt`s (i.e. `len % WORD_SIZE == 0`).
@@ -510,5 +512,5 @@ fn kernel_logup_correction_from_var_len<EF: ExtensionField<Felt>>(
             .ok_or_else(|| -> ReductionError { "zero kernel ROM denominator".into() })?;
         sum += d_inv;
     }
-    Ok(-sum)
+    Ok(sum)
 }
