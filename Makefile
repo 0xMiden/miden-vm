@@ -120,7 +120,7 @@ check-features: ## Check curated feature combinations across the integrated work
 
 .PHONY: check-fuzz
 check-fuzz: ## Check miden-crypto-fuzz compilation
-	cd miden-crypto-fuzz && cargo check
+	cd crates/miden-crypto-fuzz && cargo check
 
 # --- building ------------------------------------------------------------------------------------
 
