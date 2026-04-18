@@ -614,11 +614,32 @@ impl<B: Backend> LargeSmtForest<B> {
             .open(tree.lineage(), key)
             .map_err(Into::<LargeSmtForestError>::into)?;
 
+        // Pre-collect the changed keys relevant to the target leaf and its deepest sibling
+        // in a single pass over the history delta, avoiding repeated full scans.
+        let sibling_leaf_index =
+            LeafIndex::new_max_depth(NodeIndex::from(leaf_index).sibling().position());
+        let mut target_leaf_changes = Vec::new();
+        let mut sibling_leaf_changes = Vec::new();
+        for (k, v) in view.changed_keys() {
+            let key_leaf = LeafIndex::from(k);
+            if key_leaf == leaf_index {
+                target_leaf_changes.push((k, v));
+            } else if key_leaf == sibling_leaf_index {
+                sibling_leaf_changes.push((k, v));
+            }
+        }
+
         // We compute the new leaf and new path by applying any reversions from the history on
         // top of the current state.
-        let new_leaf = Self::merge_leaves(opening.leaf(), view)?;
-        let new_path =
-            Self::merge_paths(&self.backend, tree.lineage(), leaf_index, opening.path(), view)?;
+        let new_leaf = Self::merge_leaves(opening.leaf(), view, &target_leaf_changes)?;
+        let new_path = Self::merge_paths(
+            &self.backend,
+            tree.lineage(),
+            leaf_index,
+            opening.path(),
+            view,
+            &sibling_leaf_changes,
+        )?;
 
         // Finally we can compose our combined opening.
         Ok(SmtProof::new(new_path, new_leaf)?)
@@ -1099,10 +1120,18 @@ impl<B: Backend> LargeSmtForest<B> {
     /// Applies the history delta given by `history_view` on top of the provided `full_tree_leaf` to
     /// produce the correct leaf for a historical opening.
     ///
+    /// `leaf_changes` must contain exactly the entries from the history's changed keys that belong
+    /// to the same leaf index as `full_tree_leaf`. Providing pre-filtered changes avoids repeated
+    /// full scans of the history delta.
+    ///
     /// # Errors
     ///
     /// - [`LargeSmtForestError::SmtLeafError`] if the combined leaf cannot be computed correctly
-    fn merge_leaves(full_tree_leaf: &SmtLeaf, history_view: HistoryView) -> Result<SmtLeaf> {
+    fn merge_leaves(
+        full_tree_leaf: &SmtLeaf,
+        history_view: HistoryView,
+        leaf_changes: &[(Word, Word)],
+    ) -> Result<SmtLeaf> {
         // We apply the historical delta on top of the existing entries to perform the reversion
         // back to the previous state.
         let mut leaf_entries = Map::new();
@@ -1116,12 +1145,9 @@ impl<B: Backend> LargeSmtForest<B> {
         }
 
         // The delta may have added items that we do not have (due to later removals), so we have to
-        // add those back, but only the ones for the leaf we care about.
-        leaf_entries.extend(
-            history_view
-                .changed_keys()
-                .filter(|(k, v)| LeafIndex::from(*k) == full_tree_leaf.index() && !v.is_empty()),
-        );
+        // add those back, but only the ones for the leaf we care about. The caller has already
+        // filtered `leaf_changes` to only contain entries for this leaf.
+        leaf_entries.extend(leaf_changes.iter().filter(|(_, v)| !v.is_empty()).copied());
 
         // At this point we should not see any entries with empty values, so in debug builds let's
         // sanity check this.
@@ -1149,6 +1175,7 @@ impl<B: Backend> LargeSmtForest<B> {
         leaf_index: LeafIndex<SMT_DEPTH>,
         full_tree_path: &SparseMerklePath,
         history_view: HistoryView,
+        sibling_leaf_changes: &[(Word, Word)],
     ) -> Result<SparseMerklePath> {
         let mut path_elems = [EMPTY_WORD; SMT_DEPTH as usize];
         let mut current_node_ix = NodeIndex::from(leaf_index);
@@ -1162,14 +1189,13 @@ impl<B: Backend> LargeSmtForest<B> {
                 // correct slot in the path elements array.
                 path_elems[depth as usize - 1] = *historical_value;
             } else if path_node_ix.depth() == SMT_DEPTH {
-                let sibling_leaf_index = LeafIndex::new_max_depth(path_node_ix.position());
-                let sibling_leaf_changed = history_view
-                    .changed_keys()
-                    .any(|(key, _)| LeafIndex::from(key) == sibling_leaf_index);
-
-                if sibling_leaf_changed {
+                // The caller has already collected the sibling leaf's changed keys, so we can
+                // check for changes without scanning the full delta again.
+                if !sibling_leaf_changes.is_empty() {
+                    let sibling_leaf_index = LeafIndex::new_max_depth(path_node_ix.position());
                     let sibling_leaf = backend.get_leaf(lineage, sibling_leaf_index)?;
-                    let sibling_leaf = Self::merge_leaves(&sibling_leaf, history_view)?;
+                    let sibling_leaf =
+                        Self::merge_leaves(&sibling_leaf, history_view, sibling_leaf_changes)?;
                     path_elems[depth as usize - 1] = sibling_leaf.hash();
                 } else {
                     let bounded_depth = NonZeroU8::new(depth).expect("depth ∈ 1 ..= SMT_DEPTH]");
