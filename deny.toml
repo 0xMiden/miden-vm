@@ -46,8 +46,9 @@ skip = [
 skip-tree = [
   # miden-crypto uses rand 0.9 while Plonky3 0.5 uses rand 0.10,
   # causing duplicate rand / rand_core / getrandom trees
+  { name = "cpufeatures", version = "0.2.17" },
   { name = "getrandom", version = "=0.2.17" },
-  { name = "rand", version = "=0.9.3" },
+  { name = "rand", version = "=0.9.4" },
   { name = "rand_core", version = "=0.6.4" },
   { name = "rand_core", version = "=0.9.5" },
 ]
