@@ -7,7 +7,7 @@ edition.workspace      = true
 keywords.workspace     = true
 license.workspace      = true
 name                   = "miden-crypto"
-readme                 = "../README.md"
+readme                 = "../../README.md"
 repository.workspace   = true
 rust-version.workspace = true
 version.workspace      = true
@@ -93,9 +93,10 @@ testing           = ["dep:proptest", "miden-field/testing"]
 
 [dependencies]
 # Miden dependencies
-miden-crypto-derive.workspace = true
-miden-field.workspace         = true
-miden-serde-utils.workspace   = true
+miden-crypto-derive = { workspace = true }
+miden-field         = { workspace = true }
+miden-lifted-stark  = { default-features = false, workspace = true }
+miden-serde-utils   = { workspace = true }
 
 # External dependencies
 blake3           = { workspace = true }
@@ -133,9 +134,6 @@ p3-matrix.workspace      = true
 p3-maybe-rayon.workspace = true
 p3-symmetric.workspace   = true
 p3-util.workspace        = true
-
-# Miden-specific Plonky3 crates
-miden-lifted-stark = { default-features = false, workspace = true }
 
 [dev-dependencies]
 assert_matches = { workspace = true }
