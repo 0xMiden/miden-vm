@@ -38,9 +38,9 @@ format: ## Run Format using nightly toolchain
 format-check: ## Run Format using nightly toolchain but only in check mode
 	cargo +nightly fmt --all --check
 
-.PHONY: machete
-machete: ## Runs machete to find unused dependencies
-	cargo machete
+.PHONY: shear
+shear: ## Runs cargo-shear to find unused or misplaced dependencies
+	cargo shear --deny-warnings
 
 .PHONY: toml
 toml: ## Runs Format for all TOML files
@@ -70,7 +70,7 @@ zeroize-audit: ## Run Zeroize audit using rustdoc JSON
 	cargo run --quiet --manifest-path tools/zeroize-audit/Cargo.toml -- "$$target_dir/doc/miden_crypto.json"
 
 .PHONY: lint
-lint: clippy fix format toml typos-check machete cargo-deny ## Run all linting tasks at once (Clippy, fixing, formatting, machete, cargo-deny)
+lint: clippy fix format toml typos-check shear cargo-deny ## Run all linting tasks at once (Clippy, fixing, formatting, cargo-shear, cargo-deny)
 
 # --- docs ----------------------------------------------------------------------------------------
 
@@ -216,15 +216,15 @@ check-tools: ## Checks if development tools are installed
 	@command -v typos >/dev/null 2>&1 && echo "[OK] typos is installed" || echo "[MISSING] typos is not installed (run: make install-tools)"
 	@command -v cargo nextest >/dev/null 2>&1 && echo "[OK] nextest is installed" || echo "[MISSING] nextest is not installed (run: make install-tools)"
 	@command -v taplo >/dev/null 2>&1 && echo "[OK] taplo is installed" || echo "[MISSING] taplo is not installed (run: make install-tools)"
-	@command -v cargo machete >/dev/null 2>&1 && echo "[OK] machete is installed" || echo "[MISSING] machete is not installed (run: make install-tools)"
+	@command -v cargo-shear >/dev/null 2>&1 && echo "[OK] cargo-shear is installed" || echo "[MISSING] cargo-shear is not installed (run: make install-tools)"
 	@command -v cargo deny >/dev/null 2>&1 && echo "[OK] cargo-deny is installed" || echo "[MISSING] cargo-deny is not installed (run: make install-tools)"
 
 .PHONY: install-tools
-install-tools: ## Installs development tools required by the Makefile (typos, nextest, taplo, machete, cargo-deny)
+install-tools: ## Installs development tools required by the Makefile (typos, nextest, taplo, cargo-shear, cargo-deny)
 	@echo "Installing development tools..."
 	cargo install typos-cli --locked
 	cargo install cargo-nextest --locked
 	cargo install taplo-cli --locked
-	cargo install cargo-machete --locked
+	cargo install cargo-shear --locked
 	cargo install cargo-deny --locked
 	@echo "Development tools installation complete!"

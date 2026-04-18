@@ -16,8 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: taiki-e/install-action@v2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
+      - uses: taiki-e/install-action@a2352fc6ce487f030a3aa709482d57823eadfb37 # pin@v2
         with:
           tool: typos
       - run: make typos-check
@@ -26,14 +26,14 @@ jobs:
     name: rustfmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
       - name: Rustup
         run: |
           rustup update --no-self-update nightly
           rustup +nightly component add rustfmt
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # pin@v2
         with:
-          save-if: ${{ github.event_name == 'push' && github.ref == format('refs/heads/{0}', inputs.target_branch) }}
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/next') }}
       - name: Fmt
         run: make format-check
 
@@ -41,7 +41,7 @@ jobs:
     name: clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       # Added: LLVM/Clang for RocksDB/bindgen
@@ -53,9 +53,9 @@ jobs:
         run: |
           rustup update --no-self-update
           rustup component add clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # pin@v2
         with:
-          save-if: ${{ github.event_name == 'push' && github.ref == format('refs/heads/{0}', inputs.target_branch) }}
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/next') }}
       - name: Clippy
         run: make clippy
 
@@ -63,8 +63,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: taiki-e/install-action@v2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
+      - uses: taiki-e/install-action@a2352fc6ce487f030a3aa709482d57823eadfb37 # pin@v2
         with:
           tool: taplo-cli
       - run: make toml-check
@@ -73,8 +73,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: taiki-e/install-action@v2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
+      - uses: taiki-e/install-action@a2352fc6ce487f030a3aa709482d57823eadfb37 # pin@v2
         with:
           tool: cargo-workspace-lints
       - run: |
@@ -84,7 +84,7 @@ jobs:
     name: doc
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       # Added: LLVM/Clang for RocksDB/bindgen
@@ -94,26 +94,31 @@ jobs:
           version: "17"
       - name: Rustup
         run: rustup update --no-self-update
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # pin@v2
         with:
-          save-if: ${{ github.event_name == 'push' && github.ref == format('refs/heads/{0}', inputs.target_branch) }}
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/next') }}
       - name: Build docs
         run: make doc
 
-  unused_deps:
-    name: check for unused dependencies
+  shear:
+    name: cargo-shear
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: machete
-        uses: bnjbvr/cargo-machete@main
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@b8be7f5e140177087325943c4a8e169d01c59b3d # pin@v2
+        with:
+          tool: cargo-shear
+      - name: Check Cargo manifests for unused dependencies
+        run: make shear
 
   cargo-deny:
     name: check dependencies with cargo-deny
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: taiki-e/install-action@v2
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
+      - uses: taiki-e/install-action@a2352fc6ce487f030a3aa709482d57823eadfb37 # pin@v2
         with:
           tool: cargo-deny
       - run: make cargo-deny
@@ -122,7 +127,7 @@ jobs:
     name: zeroize-audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
       - name: Rustup
         run: |
           rustup update --no-self-update nightly
@@ -133,14 +138,14 @@ jobs:
     name: check fuzz crate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
       - run: make check-fuzz
 
   check-features:
     name: check all feature combinations
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       # Added: LLVM/Clang for RocksDB/bindgen (needed for rocksdb feature)
@@ -150,11 +155,11 @@ jobs:
           version: "17"
       - name: Rustup
         run: rustup update --no-self-update
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@a2352fc6ce487f030a3aa709482d57823eadfb37 # pin@v2
         with:
           tool: cargo-hack
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # pin@v2
         with:
-          save-if: ${{ github.event_name == 'push' && github.ref == format('refs/heads/{0}', inputs.target_branch) }}
+          save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/next') }}
       - name: Check all feature combinations
         run: ./scripts/check-features.sh

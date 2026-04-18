@@ -27,11 +27,11 @@ jobs:
         args: [default, no-std, large-smt]
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@main
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
-      - uses: taiki-e/install-action@nextest
-      - uses: WarpBuilds/rust-cache@v2
+      - uses: taiki-e/install-action@dd81e62c198605dea8507fed3fb6834da354ded4 # pin@nextest
+      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # pin@v2
         with:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install LLVM/Clang
@@ -55,11 +55,11 @@ jobs:
         toolchain: [stable]
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@main
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
-      - uses: taiki-e/install-action@nextest
-      - uses: WarpBuilds/rust-cache@v2
+      - uses: taiki-e/install-action@dd81e62c198605dea8507fed3fb6834da354ded4 # pin@nextest
+      - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # pin@v2
         with:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Perform concurrent SMT tests
@@ -77,10 +77,10 @@ jobs:
       matrix:
         toolchain: [stable]
     steps:
-      - uses: actions/checkout@main
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # pin@v2
       - name: Install LLVM/Clang
         uses: ./.github/actions/install-llvm
         with:
@@ -96,7 +96,7 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'pull_request' && (github.base_ref == 'main' || github.base_ref == 'next') }}
     steps:
-      - uses: actions/checkout@main
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       - name: Install LLVM/Clang
@@ -118,7 +118,7 @@ jobs:
         toolchain: [stable, nightly]
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@main
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       - name: Run Miden STARK crate parallel tests

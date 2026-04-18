@@ -9,6 +9,9 @@ repository             = "https://github.com/0xMiden/crypto"
 rust-version.workspace = true
 version.workspace      = true
 
+[lib]
+doctest = false
+
 [dependencies]
 p3-field.workspace     = true
 p3-symmetric.workspace = true

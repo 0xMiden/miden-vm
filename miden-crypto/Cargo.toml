@@ -146,19 +146,17 @@ itertools      = { workspace = true }
 miden-field    = { features = ["testing"], workspace = true }
 proptest       = { features = ["alloc"], workspace = true }
 rand-utils     = { package = "winter-rand-utils", version = "0.13" }
-rstest         = { workspace = true }
 seq-macro      = { workspace = true }
 tempfile       = { workspace = true }
 
 [build-dependencies]
-cc   = { features = ["parallel"], optional = true, workspace = true }
-glob = { workspace = true }
+cc = { features = ["parallel"], optional = true, workspace = true }
 
 [lints]
 workspace = true
 
-[package.metadata.cargo-machete]
-ignored = ["getrandom", "rand-utils"]
+[package.metadata.cargo-shear]
+ignored = ["rand-utils"]
 
 [[test]]
 name              = "rocksdb_large_smt"

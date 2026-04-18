@@ -53,8 +53,18 @@ fn rng_value<T: Randomizable>(rng: &mut impl Rng) -> T {
 /// let x: u64 = rand_value();
 /// let y: u128 = rand_value();
 /// ```
+#[cfg(feature = "std")]
 pub fn rand_value<T: Randomizable>() -> T {
     rng_value(&mut rand::rng())
+}
+
+/// Generates a deterministic value of type `T` in `no_std` builds.
+///
+/// This keeps tests and feature-matrix checks buildable without relying on
+/// thread-local RNG support.
+#[cfg(not(feature = "std"))]
+pub fn rand_value<T: Randomizable>() -> T {
+    prng_value([0u8; 32])
 }
 
 /// Generates a random array of type T with N elements.

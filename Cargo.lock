@@ -1099,7 +1099,6 @@ dependencies = [
  "curve25519-dalek",
  "ed25519-dalek",
  "flume",
- "glob",
  "hex",
  "hkdf",
  "itertools 0.14.0",
@@ -1127,7 +1126,6 @@ dependencies = [
  "rand_hc",
  "rayon",
  "rocksdb",
- "rstest",
  "seq-macro",
  "serde",
  "sha2",
@@ -1172,7 +1170,6 @@ version = "0.24.0"
 dependencies = [
  "p3-air",
  "p3-field",
- "p3-goldilocks",
  "p3-matrix",
  "p3-util",
  "thiserror 2.0.18",

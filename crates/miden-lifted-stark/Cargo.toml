@@ -9,6 +9,9 @@ repository             = "https://github.com/0xMiden/crypto"
 rust-version.workspace = true
 version.workspace      = true
 
+[lib]
+doctest = false
+
 [dependencies]
 # Internal
 miden-lifted-air.workspace       = true
