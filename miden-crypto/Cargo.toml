@@ -82,7 +82,7 @@ required-features = ["std"]
 [features]
 concurrent        = ["dep:rayon", "miden-lifted-stark/parallel", "p3-maybe-rayon/parallel", "p3-util/parallel", "std"]
 default           = ["concurrent", "std"]
-executable        = ["concurrent", "dep:clap", "dep:rand-utils"]
+executable        = ["concurrent", "dep:clap"]
 fuzzing           = []
 internal          = ["concurrent"]
 persistent-forest = ["rocksdb", "serde"]
@@ -111,7 +111,6 @@ num-complex      = { workspace = true }
 once_cell        = { features = ["alloc", "critical-section"], workspace = true }
 proptest         = { features = ["alloc"], optional = true, workspace = true }
 rand             = { default-features = false, version = "0.9" }
-rand-utils       = { optional = true, package = "winter-rand-utils", version = "0.13" }
 rand_chacha      = { workspace = true }
 rand_core        = { workspace = true }
 rand_hc          = { workspace = true }
@@ -145,7 +144,6 @@ hex            = { features = ["alloc"], workspace = true }
 itertools      = { workspace = true }
 miden-field    = { features = ["testing"], workspace = true }
 proptest       = { features = ["alloc"], workspace = true }
-rand-utils     = { package = "winter-rand-utils", version = "0.13" }
 seq-macro      = { workspace = true }
 tempfile       = { workspace = true }
 
@@ -154,9 +152,6 @@ cc = { features = ["parallel"], optional = true, workspace = true }
 
 [lints]
 workspace = true
-
-[package.metadata.cargo-shear]
-ignored = ["rand-utils"]
 
 [[test]]
 name              = "rocksdb_large_smt"

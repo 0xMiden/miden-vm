@@ -156,19 +156,19 @@ bench: ## Run crypto benchmarks
 
 .PHONY: bench-smt-concurrent
 bench-smt-concurrent: ## Run SMT benchmarks with concurrent feature
-	cargo run --release --features concurrent,executable -- --size 1000000
+	cargo run --bin miden-crypto --release --features concurrent,executable -- --size 1000000
 
 .PHONY: bench-large-smt-memory
 bench-large-smt-memory: ## Run large SMT benchmarks with memory storage
-	cargo run --release --features concurrent,executable -- --size 1000000
+	cargo run --bin miden-crypto --release --features concurrent,executable -- --size 1000000
 
 .PHONY: bench-large-smt-rocksdb
 bench-large-smt-rocksdb: ## Run large SMT benchmarks with rocksdb storage
-	cargo run --release --features concurrent,rocksdb,executable -- --storage rocksdb --size 1000000
+	cargo run --bin miden-crypto --release --features concurrent,rocksdb,executable -- --storage rocksdb --size 1000000
 
 .PHONY: bench-large-smt-rocksdb-open
 bench-large-smt-rocksdb-open: ## Run large SMT benchmarks with rocksdb storage and open existing database
-	cargo run --release --features concurrent,rocksdb,executable -- --storage rocksdb --open
+	cargo run --bin miden-crypto --release --features concurrent,rocksdb,executable -- --storage rocksdb --open
 
 # --- fuzzing --------------------------------------------------------------------------------
 
