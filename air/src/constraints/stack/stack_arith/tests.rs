@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use miden_core::{
     Felt,
-    field::{PrimeCharacteristicRing, PrimeField64, QuadFelt},
+    field::{Field, PrimeCharacteristicRing, PrimeField64, QuadFelt},
     operations::opcodes,
 };
 use miden_crypto::stark::{
@@ -178,5 +178,65 @@ fn stack_arith_u32sub_constraints_allow_non_u32_operands() {
     assert!(
         evaluations.iter().all(|value| *value == QuadFelt::ZERO),
         "expected U32SUB constraints to accept a non-u32 operand with forged u32 outputs"
+    );
+}
+
+#[test]
+fn stack_arith_u32mul_constraints_allow_non_u32_sha256_rotr_operand() {
+    let non_u32 = Felt::new((u32::MAX as u64) + 2);
+    let rotr_7_multiplier = Felt::new(1 << 25);
+    let product = non_u32.as_canonical_u64() * rotr_7_multiplier.as_canonical_u64();
+    let lo = product as u32;
+    let hi = (product >> 32) as u32;
+
+    assert!(non_u32.as_canonical_u64() > u32::MAX as u64);
+
+    let mut local = generate_test_row(opcodes::U32MUL as usize);
+    local.stack.top[0] = rotr_7_multiplier;
+    local.stack.top[1] = non_u32;
+    set_u32_helpers(&mut local, lo, hi);
+    local.decoder.hasher_state[6] = Felt::new(u32::MAX as u64 - hi as u64).inverse();
+
+    let mut next = generate_test_row(0);
+    next.stack.top[0] = Felt::new(lo as u64);
+    next.stack.top[1] = Felt::new(hi as u64);
+
+    let op_flags: OpFlags<Felt> = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
+    assert_eq!(op_flags.u32mul(), Felt::ONE);
+
+    let evaluations = eval_stack_arith(&local, &next);
+    assert!(
+        evaluations.iter().all(|value| *value == QuadFelt::ZERO),
+        "expected U32MUL constraints to accept a non-u32 operand with forged rotr outputs"
+    );
+}
+
+#[test]
+fn stack_arith_u32div_constraints_allow_non_u32_sha256_shr_operand() {
+    let non_u32 = Felt::new((u32::MAX as u64) + 2);
+    let divisor = Felt::new(8);
+    let quotient = Felt::new(non_u32.as_canonical_u64() / divisor.as_canonical_u64());
+    let remainder = Felt::new(non_u32.as_canonical_u64() % divisor.as_canonical_u64());
+    let lo = (non_u32.as_canonical_u64() - quotient.as_canonical_u64()) as u32;
+    let hi = (divisor.as_canonical_u64() - remainder.as_canonical_u64() - 1) as u32;
+
+    assert!(non_u32.as_canonical_u64() > u32::MAX as u64);
+
+    let mut local = generate_test_row(opcodes::U32DIV as usize);
+    local.stack.top[0] = divisor;
+    local.stack.top[1] = non_u32;
+    set_u32_helpers(&mut local, lo, hi);
+
+    let mut next = generate_test_row(0);
+    next.stack.top[0] = remainder;
+    next.stack.top[1] = quotient;
+
+    let op_flags: OpFlags<Felt> = OpFlags::new(&local.decoder, &local.stack, &next.decoder);
+    assert_eq!(op_flags.u32div(), Felt::ONE);
+
+    let evaluations = eval_stack_arith(&local, &next);
+    assert!(
+        evaluations.iter().all(|value| *value == QuadFelt::ZERO),
+        "expected U32DIV constraints to accept a non-u32 operand with forged shr outputs"
     );
 }
