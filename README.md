@@ -127,7 +127,7 @@ Messages sealed as one type must be unsealed using the corresponding method, oth
 
 ## STARK proving system
 
-[STARK module](./miden-crypto/src/lib.rs) provides the Lifted STARK proving system, built on top of the [Plonky3](https://github.com/Plonky3/Plonky3) framework. The crates that used to live in the upstream `p3-miden` repo now live in this repo under [`crates/`](./crates/). It includes:
+[STARK module](./miden-crypto/src/lib.rs) provides the Lifted STARK proving system, built on top of the [Plonky3](https://github.com/Plonky3/Plonky3) framework. The crates that used to live in the upstream `p3-miden` repo now live in this repo under [`stark/`](./stark/). It includes:
 
 - AIR traits and builders for defining algebraic constraints.
 - A Lifted Merkle commitment scheme and FRI-based polynomial commitments.
