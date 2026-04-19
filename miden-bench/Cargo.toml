@@ -1,7 +1,7 @@
 [package]
 description            = "Profiling binary for lifted STARK and batch STARK provers."
 edition                = "2024"
-homepage               = "https://github.com/0xMiden/crypto/tree/main/crates"
+homepage               = "https://github.com/0xMiden/crypto"
 license                = "MIT OR Apache-2.0"
 name                   = "miden-bench"
 publish                = false
