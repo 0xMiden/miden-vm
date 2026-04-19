@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - next
   workflow_dispatch:
     inputs:
       baseline_ref:
@@ -59,7 +60,7 @@ jobs:
           rustup toolchain install "${toolchain}" --profile minimal --target wasm32-unknown-unknown
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - name: Prepare benchmark directories
         id: dirs

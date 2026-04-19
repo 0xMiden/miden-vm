@@ -14,7 +14,7 @@ use crate::{
 fn batch_ops_1() {
     // --- one operation ----------------------------------------------------------------------
     let ops = vec![Operation::Add];
-    let (batches, hash) = super::batch_and_hash_ops(ops.clone());
+    let (batches, hash) = super::batch_and_hash_ops(&ops);
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
@@ -28,7 +28,7 @@ fn batch_ops_1() {
 fn batch_ops_2() {
     // --- two operations ---------------------------------------------------------------------
     let ops = vec![Operation::Add, Operation::Mul];
-    let (batches, hash) = super::batch_and_hash_ops(ops.clone());
+    let (batches, hash) = super::batch_and_hash_ops(&ops);
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
@@ -42,7 +42,7 @@ fn batch_ops_2() {
 fn batch_ops_3() {
     // --- one group with one immediate value -------------------------------------------------
     let ops = vec![Operation::Add, Operation::Push(Felt::new(12345678))];
-    let (batches, hash) = super::batch_and_hash_ops(ops.clone());
+    let (batches, hash) = super::batch_and_hash_ops(&ops);
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
@@ -66,7 +66,7 @@ fn batch_ops_4() {
         Operation::Push(Felt::new(7)),
         Operation::Add,
     ];
-    let (batches, hash) = super::batch_and_hash_ops(ops.clone());
+    let (batches, hash) = super::batch_and_hash_ops(&ops);
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
@@ -99,7 +99,7 @@ fn batch_ops_5() {
         Operation::Add,
         Operation::Push(Felt::new(7)),
     ];
-    let (batches, hash) = super::batch_and_hash_ops(ops.clone());
+    let (batches, hash) = super::batch_and_hash_ops(&ops);
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
@@ -137,7 +137,7 @@ fn batch_ops_6() {
         Operation::Add,
     ];
 
-    let (batches, hash) = super::batch_and_hash_ops(ops.clone());
+    let (batches, hash) = super::batch_and_hash_ops(&ops);
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
@@ -169,7 +169,7 @@ fn batch_ops_7() {
         Operation::Add,
         Operation::Push(Felt::new(11)),
     ];
-    let (batches, hash) = super::batch_and_hash_ops(ops.clone());
+    let (batches, hash) = super::batch_and_hash_ops(&ops);
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
@@ -201,7 +201,7 @@ fn batch_ops_8() {
         Operation::Push(ONE),
         Operation::Push(Felt::new(2)),
     ];
-    let (batches, hash) = super::batch_and_hash_ops(ops.clone());
+    let (batches, hash) = super::batch_and_hash_ops(&ops);
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
@@ -244,7 +244,7 @@ fn batch_ops_9() {
         Operation::Pad,
     ];
 
-    let (batches, hash) = super::batch_and_hash_ops(ops.clone());
+    let (batches, hash) = super::batch_and_hash_ops(&ops);
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
@@ -359,7 +359,7 @@ proptest! {
     /// - Operations are correctly distributed across batches and groups.
     #[test]
     fn test_batch_creation_invariants(ops in op_non_control_sequence_strategy(50)) {
-        let (batches, _) = super::batch_and_hash_ops(ops.clone());
+        let (batches, _) = super::batch_and_hash_ops(&ops);
 
         // A basic block contains one or more batches
         assert!(!batches.is_empty(), "There should be at least one batch");
@@ -399,7 +399,7 @@ proptest! {
     /// - If no groups available, both operation and immediate move to next batch
     #[test]
     fn test_immediate_value_placement(ops in op_non_control_sequence_strategy(50)) {
-        let (batches, _) = super::batch_and_hash_ops(ops.clone());
+        let (batches, _) = super::batch_and_hash_ops(&ops);
 
         for batch in batches {
             let mut op_idx_in_group = 0;

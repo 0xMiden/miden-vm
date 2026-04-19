@@ -3,9 +3,7 @@
 
 name: signed commits
 
-permissions:
-  contents: read
-  pull-requests: write
+permissions: {}
 
 on:
   pull_request_target:
@@ -17,10 +15,43 @@ on:
 jobs:
   check-signed-commits:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
+      - name: Resolve author permission
+        id: perm
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
+        with:
+          script: |
+            const login = (context.payload.pull_request.user?.login || '').toLowerCase();
+            let permission = 'none';
+            try {
+              // Signed-commit checks only apply to maintainers.
+              // GitHub repo roles are too broad here because most access
+              // comes from org team permissions, so this probe reads the
+              // PR author's effective repo write access and decides who
+              // should be asked to sign commits.
+              const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                username: login,
+              });
+              permission = (data.permission || 'none').toLowerCase();
+            } catch (error) {
+              if (error.status !== 404) {
+                core.warning(`Failed to resolve collaborator permission for ${login}: ${error.message}`);
+              }
+            }
+
+            const enforce = ['admin', 'maintain', 'write'].includes(permission);
+            core.info(`author=${login} permission=${permission} enforce=${enforce}`);
+            core.setOutput('enforce', enforce ? 'true' : 'false');
+
       - name: Check for unsigned commits
+        if: steps.perm.outputs.enforce == 'true'
         id: check
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         with:
           script: |
             const prNumber = context.payload.pull_request.number;
@@ -51,8 +82,8 @@ jobs:
             );
 
       - name: Comment with remediation steps
-        if: failure() && steps.check.outputs.unsigned != ''
-        uses: actions/github-script@v7
+        if: failure() && steps.perm.outputs.enforce == 'true' && steps.check.outputs.unsigned != ''
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         env:
           UNSIGNED: ${{ steps.check.outputs.unsigned }}
           PRNUM: ${{ steps.check.outputs.pr_number }}

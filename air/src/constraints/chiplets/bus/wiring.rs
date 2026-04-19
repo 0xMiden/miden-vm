@@ -21,30 +21,23 @@
 //! The `idle_flag * delta` term is important as on bitwise, kernel-ROM, and padding rows, none of
 //! the stacked `v_wiring` contributors are active, but the accumulator must still propagate
 //! unchanged so its last-row boundary value remains bound to the earlier accumulation.
-//!
-//! TODO(Al): Revisit the above equations. The three assertions above could also be collapsed
-//! into a single assertion later once we rebase and remove tags.
+
+use core::borrow::Borrow;
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::{LiftedAirBuilder, WindowAccess};
+use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess};
 
 use crate::{
-    Felt, MainTraceRow,
+    Felt, MainCols, MidenAirBuilder,
     constraints::{
         bus::indices::V_WIRING,
-        chiplets::{
-            hasher::periodic::{P_IS_EXT, P_IS_INIT_EXT, P_IS_INT_EXT, P_IS_PACKED_INT},
-            selectors::{ace_chiplet_flag, memory_chiplet_flag},
-        },
-        tagging::{
-            TagGroup, TaggingAirBuilderExt, ids::TAG_WIRING_BUS_BASE, tagged_assert_zero_ext,
-        },
+        chiplets::{columns::PeriodicCols, selectors::ChipletSelectors},
     },
     trace::{
-        CHIPLETS_OFFSET, Challenges,
+        CHIPLETS_OFFSET, Challenges, bus_types,
         chiplets::{
-            HASHER_NODE_INDEX_COL_IDX, HASHER_PERM_SEG_COL_IDX, HASHER_STATE_COL_RANGE,
-            MEMORY_WORD_ADDR_HI_COL_IDX, MEMORY_WORD_ADDR_LO_COL_IDX,
+            HASHER_NODE_INDEX_COL_IDX, HASHER_STATE_COL_RANGE, MEMORY_WORD_ADDR_HI_COL_IDX,
+            MEMORY_WORD_ADDR_LO_COL_IDX,
             ace::{
                 CLK_IDX, CTX_IDX, ID_0_IDX, ID_1_IDX, ID_2_IDX, M_0_IDX, M_1_IDX,
                 SELECTOR_BLOCK_IDX, V_0_0_IDX, V_0_1_IDX, V_1_0_IDX, V_1_1_IDX, V_2_0_IDX,
@@ -58,16 +51,6 @@ use crate::{
 // ================================================================================================
 
 const ACE_OFFSET: usize = 4;
-
-const WIRING_BUS_ID: usize = TAG_WIRING_BUS_BASE;
-const WIRING_BUS_NAME: &str = "chiplets.bus.wiring.transition";
-const WIRING_MEM_NAME: &str = "chiplets.bus.wiring.memory_range";
-const WIRING_PERM_LINK_NAME: &str = "chiplets.bus.wiring.hasher_perm_link";
-const WIRING_BUS_NAMES: [&str; 3] = [WIRING_BUS_NAME, WIRING_MEM_NAME, WIRING_PERM_LINK_NAME];
-const WIRING_BUS_TAGS: TagGroup = TagGroup {
-    base: WIRING_BUS_ID,
-    names: &WIRING_BUS_NAMES,
-};
 
 // ENTRY POINT
 // ================================================================================================
@@ -86,11 +69,12 @@ const WIRING_BUS_TAGS: TagGroup = TagGroup {
 /// `idle_flag * delta` term forces the shared accumulator to propagate unchanged.
 pub fn enforce_wiring_bus_constraint<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    _next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    _next: &MainCols<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
+    selectors: &ChipletSelectors<AB::Expr>,
 ) where
-    AB: TaggingAirBuilderExt<F = Felt>,
+    AB: MidenAirBuilder,
 {
     // --- Auxiliary trace access ---
     let (v_local, v_next) = {
@@ -107,25 +91,24 @@ pub fn enforce_wiring_bus_constraint<AB>(
     // --- Periodic columns for hasher cycle detection ---
     // Row 0 = is_init_ext. Row 15 (boundary) = 1 - selector_sum.
     let (p_cycle_row_0, p_cycle_row_boundary) = {
-        let p = builder.periodic_values();
-        let row_0: AB::Expr = p[P_IS_INIT_EXT].into();
-        let selector_sum: AB::Expr = Into::<AB::Expr>::into(p[P_IS_INIT_EXT])
-            + Into::<AB::Expr>::into(p[P_IS_EXT])
-            + Into::<AB::Expr>::into(p[P_IS_PACKED_INT])
-            + Into::<AB::Expr>::into(p[P_IS_INT_EXT]);
+        let periodic: &PeriodicCols<AB::PeriodicVar> = builder.periodic_values().borrow();
+        let row_0: AB::Expr = periodic.hasher.is_init_ext.into();
+        let selector_sum: AB::Expr = Into::<AB::Expr>::into(periodic.hasher.is_init_ext)
+            + Into::<AB::Expr>::into(periodic.hasher.is_ext)
+            + Into::<AB::Expr>::into(periodic.hasher.is_packed_int)
+            + Into::<AB::Expr>::into(periodic.hasher.is_int_ext);
         let row_boundary = AB::Expr::ONE - selector_sum;
         (row_0, row_boundary)
     };
 
-    // --- Chiplet selectors ---
-    let s0: AB::Expr = local.chiplets[0].clone().into();
-    let s1: AB::Expr = local.chiplets[1].clone().into();
-    let s2: AB::Expr = local.chiplets[2].clone().into();
-    let s3: AB::Expr = local.chiplets[3].clone().into();
-
-    let ace_flag = ace_chiplet_flag(s0.clone(), s1.clone(), s2.clone(), s3);
-    let memory_flag = memory_chiplet_flag(s0.clone(), s1.clone(), s2);
-    let hasher_flag = AB::Expr::ONE - s0.clone();
+    // --- Chiplet region flags (from precomputed ChipletSelectors) ---
+    // hasher_flag covers both controller and permutation rows (their selector products
+    // are mutually exclusive, so addition gives the union). ace_flag and memory_flag
+    // come directly from the precomputed `is_active` selector products.
+    let ace_flag = selectors.ace.is_active.clone();
+    let memory_flag = selectors.memory.is_active.clone();
+    let hasher_flag =
+        selectors.controller.is_active.clone() + selectors.permutation.is_active.clone();
     let idle_flag = AB::Expr::ONE - ace_flag.clone() - memory_flag.clone() - hasher_flag.clone();
 
     // --- ACE term ---
@@ -139,6 +122,8 @@ pub fn enforce_wiring_bus_constraint<AB>(
         &delta,
         hasher_flag,
         idle_flag,
+        selectors.controller.is_active.clone(),
+        selectors.permutation.is_active.clone(),
         local,
         challenges,
         p_cycle_row_0,
@@ -146,10 +131,9 @@ pub fn enforce_wiring_bus_constraint<AB>(
     );
 
     // --- Three separate constraints ---
-    let mut idx = 0;
-    tagged_assert_zero_ext(builder, &WIRING_BUS_TAGS, &mut idx, ace_term);
-    tagged_assert_zero_ext(builder, &WIRING_BUS_TAGS, &mut idx, mem_term);
-    tagged_assert_zero_ext(builder, &WIRING_BUS_TAGS, &mut idx, perm_link_term);
+    builder.when_transition().assert_zero_ext(ace_term);
+    builder.when_transition().assert_zero_ext(mem_term);
+    builder.when_transition().assert_zero_ext(perm_link_term);
 }
 
 // ACE TERM
@@ -160,11 +144,11 @@ pub fn enforce_wiring_bus_constraint<AB>(
 fn compute_ace_term<AB>(
     delta: &AB::ExprEF,
     ace_flag: AB::Expr,
-    local: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF
 where
-    AB: TaggingAirBuilderExt<F = Felt>,
+    AB: MidenAirBuilder,
 {
     // Block selector: sblock = 0 for READ, sblock = 1 for EVAL
     let sblock: AB::Expr = load_ace_col::<AB>(local, SELECTOR_BLOCK_IDX);
@@ -220,26 +204,28 @@ where
 ///
 /// This is a SEPARATE constraint from the ACE wiring, using its own delta from the
 /// V_WIRING aux column. It subtracts 3 LogUp fractions per memory row:
-/// 1/(alpha+w0) + 1/(alpha+w1) + 1/(alpha+4w1).
+/// 1/(prefix+w0) + 1/(prefix+w1) + 1/(prefix+4w1).
+///
+/// Uses `bus_prefix[RANGE_CHECK_BUS]` to match the range checker's encoding.
 fn compute_memory_term<AB>(
     delta: &AB::ExprEF,
     memory_flag: AB::Expr,
-    local: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
 ) -> AB::ExprEF
 where
-    AB: TaggingAirBuilderExt<F = Felt>,
+    AB: MidenAirBuilder,
 {
-    let alpha = &challenges.alpha;
+    let prefix = &challenges.bus_prefix[bus_types::RANGE_CHECK_BUS];
 
     // Load word-index limbs
-    let w0: AB::Expr = local.chiplets[MEMORY_WORD_ADDR_LO_COL_IDX - CHIPLETS_OFFSET].clone().into();
-    let w1: AB::Expr = local.chiplets[MEMORY_WORD_ADDR_HI_COL_IDX - CHIPLETS_OFFSET].clone().into();
+    let w0: AB::Expr = local.chiplets[MEMORY_WORD_ADDR_LO_COL_IDX - CHIPLETS_OFFSET].into();
+    let w1: AB::Expr = local.chiplets[MEMORY_WORD_ADDR_HI_COL_IDX - CHIPLETS_OFFSET].into();
     let w1_mul4: AB::Expr = w1.clone() * AB::Expr::from_u16(4);
 
-    let den0: AB::ExprEF = alpha.clone() + Into::<AB::ExprEF>::into(w0);
-    let den1: AB::ExprEF = alpha.clone() + Into::<AB::ExprEF>::into(w1);
-    let den2: AB::ExprEF = alpha.clone() + Into::<AB::ExprEF>::into(w1_mul4);
+    let den0: AB::ExprEF = prefix.clone() + Into::<AB::ExprEF>::into(w0);
+    let den1: AB::ExprEF = prefix.clone() + Into::<AB::ExprEF>::into(w1);
+    let den2: AB::ExprEF = prefix.clone() + Into::<AB::ExprEF>::into(w1_mul4);
 
     // Common denominator and numerator
     let common_den = den0.clone() * den1.clone() * den2.clone();
@@ -256,11 +242,11 @@ where
 /// Computes the hasher perm-link contribution to the wiring bus and enforces idle propagation.
 ///
 /// This links hasher controller rows (dispatch) to hasher permutation segment (compute):
-/// - Hasher controller input (perm_seg=0, hs0=1): +1/msg_in
-/// - Hasher controller output (perm_seg=0, hs0=0, hs1=0): +1/msg_out
+/// - Hasher controller input (s_perm=0, s0=1): +1/msg_in
+/// - Hasher controller output (s_perm=0, s0=0, s1=0): +1/msg_out
 /// - Hasher permutation cycle row 0 (`is_init_ext = 1`): -m/msg_in
-/// - Hasher permutation boundary row (cycle row 15, i.e. `perm_seg=1` and all row-type selectors
-///   are 0): -m/msg_out
+/// - Hasher permutation boundary row (cycle row 15, i.e. `s_perm=1` and all row-type selectors are
+///   0): -m/msg_out
 /// - Idle bitwise / kernel-ROM / padding rows: `delta = 0`
 ///
 /// Common-denominator form:
@@ -274,45 +260,41 @@ fn compute_hasher_perm_link_term<AB>(
     delta: &AB::ExprEF,
     hasher_flag: AB::Expr,
     idle_flag: AB::Expr,
-    local: &MainTraceRow<AB::Var>,
+    ctrl_is_active: AB::Expr,
+    perm_is_active: AB::Expr,
+    local: &MainCols<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
     p_cycle_row_0: AB::Expr,
     p_cycle_row_boundary: AB::Expr,
 ) -> AB::ExprEF
 where
-    AB: TaggingAirBuilderExt<F = Felt>,
+    AB: MidenAirBuilder,
 {
-    // --- Load hasher-internal selectors ---
-    // chiplets[1] = hasher s0 (hs0), chiplets[2] = hasher s1 (hs1)
-    let hs0: AB::Expr = local.chiplets[1].clone().into();
-    let hs1: AB::Expr = local.chiplets[2].clone().into();
-
-    // perm_seg column
-    let perm_seg: AB::Expr =
-        local.chiplets[HASHER_PERM_SEG_COL_IDX - CHIPLETS_OFFSET].clone().into();
+    // --- Load hasher-internal sub-selectors (only meaningful on controller rows) ---
+    // On controller rows: chiplets[1] = s0 (input flag), chiplets[2] = s1.
+    let s0: AB::Expr = local.chiplets[1].into();
+    let s1: AB::Expr = local.chiplets[2].into();
 
     // node_index (= multiplicity on perm segment rows)
-    let m: AB::Expr = local.chiplets[HASHER_NODE_INDEX_COL_IDX - CHIPLETS_OFFSET].clone().into();
+    let m: AB::Expr = local.chiplets[HASHER_NODE_INDEX_COL_IDX - CHIPLETS_OFFSET].into();
 
     // --- Flags ---
     let one = AB::Expr::ONE;
-    let ctrl = one.clone() - perm_seg.clone(); // 1 on controller rows
 
-    // f_in: controller input row (perm_seg=0, hs0=1)
-    let f_in = ctrl.clone() * hs0.clone();
+    // f_in: controller input row (s_ctrl=1, s0=1)
+    let f_in = ctrl_is_active.clone() * s0.clone();
 
-    // f_out: controller output row (perm_seg=0, hs0=0, hs1=0)
-    let f_out = ctrl * (one.clone() - hs0) * (one - hs1);
+    // f_out: controller output row (s_ctrl=1, s0=0, s1=0)
+    let f_out = ctrl_is_active * (one.clone() - s0) * (one - s1);
 
-    // f_p_in: packed permutation row 0 (`is_init_ext = 1`)
-    let f_p_in = perm_seg.clone() * p_cycle_row_0;
+    // f_p_in: packed permutation row 0 (s_perm=1 * is_init_ext=1)
+    let f_p_in = perm_is_active.clone() * p_cycle_row_0;
 
-    // f_p_out: perm boundary row (perm_seg=1, cycle boundary)
-    let f_p_out = perm_seg * p_cycle_row_boundary;
+    // f_p_out: perm boundary row (s_perm=1 * cycle boundary)
+    let f_p_out = perm_is_active * p_cycle_row_boundary;
 
     // --- Messages ---
-    // msg = challenges.encode([label, h0, h1, ..., h11]) -- 13 elements
-    // TODO: labels 0/1 risk collisions with other v_wiring contributors (see hasher_perm.rs).
+    // msg = challenges.encode(HASHER_PERM_LINK, [label, h0, h1, ..., h11]) -- 13 elements
     let msg_in = encode_perm_link_message::<AB>(local, challenges, AB::Expr::ZERO);
     let msg_out = encode_perm_link_message::<AB>(local, challenges, AB::Expr::ONE);
 
@@ -334,25 +316,34 @@ where
     perm_link_term * hasher_flag + idle_term
 }
 
-/// Encodes a perm-link message: `challenges.encode([label, h0, h1, ..., h11])`.
+/// Encodes a perm-link message on the dedicated `HASHER_PERM_LINK` bus: `[label, h0, ..., h11]`.
 fn encode_perm_link_message<AB>(
-    local: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
     challenges: &Challenges<AB::ExprEF>,
     label: AB::Expr,
 ) -> AB::ExprEF
 where
-    AB: TaggingAirBuilderExt<F = Felt>,
+    AB: MidenAirBuilder,
 {
     let h_start = HASHER_STATE_COL_RANGE.start - CHIPLETS_OFFSET;
-
-    // Build array: [label, h0, h1, ..., h11]
-    let label_ef: AB::ExprEF = label.into();
-    let mut acc = challenges.alpha.clone() + challenges.beta_powers[0].clone() * label_ef;
-    for i in 0..12 {
-        let h_i: AB::ExprEF = local.chiplets[h_start + i].clone().into().into();
-        acc += challenges.beta_powers[1 + i].clone() * h_i;
-    }
-    acc
+    challenges.encode(
+        bus_types::HASHER_PERM_LINK,
+        [
+            label,
+            local.chiplets[h_start].into(),
+            local.chiplets[h_start + 1].into(),
+            local.chiplets[h_start + 2].into(),
+            local.chiplets[h_start + 3].into(),
+            local.chiplets[h_start + 4].into(),
+            local.chiplets[h_start + 5].into(),
+            local.chiplets[h_start + 6].into(),
+            local.chiplets[h_start + 7].into(),
+            local.chiplets[h_start + 8].into(),
+            local.chiplets[h_start + 9].into(),
+            local.chiplets[h_start + 10].into(),
+            local.chiplets[h_start + 11].into(),
+        ],
+    )
 }
 
 // INTERNAL HELPERS
@@ -365,7 +356,7 @@ struct AceWire<Expr> {
 }
 
 fn load_ace_wire<AB>(
-    row: &MainTraceRow<AB::Var>,
+    row: &MainCols<AB::Var>,
     id_idx: usize,
     v0_idx: usize,
     v1_idx: usize,
@@ -389,13 +380,16 @@ fn encode_wire<AB>(
 where
     AB: LiftedAirBuilder<F = Felt>,
 {
-    challenges.encode([clk.clone(), ctx.clone(), wire.id.clone(), wire.v0.clone(), wire.v1.clone()])
+    challenges.encode(
+        bus_types::ACE_WIRING_BUS,
+        [clk.clone(), ctx.clone(), wire.id.clone(), wire.v0.clone(), wire.v1.clone()],
+    )
 }
 
-fn load_ace_col<AB>(row: &MainTraceRow<AB::Var>, ace_col_idx: usize) -> AB::Expr
+fn load_ace_col<AB>(row: &MainCols<AB::Var>, ace_col_idx: usize) -> AB::Expr
 where
     AB: LiftedAirBuilder<F = Felt>,
 {
     let local_idx = ACE_OFFSET + ace_col_idx;
-    row.chiplets[local_idx].clone().into()
+    row.chiplets[local_idx].into()
 }
