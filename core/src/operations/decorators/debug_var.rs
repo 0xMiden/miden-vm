@@ -94,6 +94,11 @@ impl DebugVarInfo {
     pub fn value_location(&self) -> &DebugVarLocation {
         &self.value_location
     }
+
+    /// Replaces the value location in-place, preserving all other fields.
+    pub fn set_value_location(&mut self, value_location: DebugVarLocation) {
+        self.value_location = value_location;
+    }
 }
 
 /// Serde deserializer for `Arc<str>`.
@@ -148,6 +153,18 @@ pub enum DebugVarLocation {
     /// where offset is typically negative (locals are below FMP).
     /// For example, with 3 locals: local\[0\] has offset -3, local\[2\] has offset -1.
     Local(i16),
+    /// Variable is in WASM linear memory at an address computed from a global base
+    /// plus a byte offset: `value_of(global[global_index]) + byte_offset`.
+    ///
+    /// This corresponds to DWARF's `DW_OP_fbreg` where the frame base is a WASM
+    /// global (typically `__stack_pointer`). The byte offset is divided by the
+    /// element size (4 for i32) to get the Miden memory element address.
+    FrameBase {
+        /// WASM global index whose runtime value provides the base address
+        global_index: u32,
+        /// Byte offset from the base (may be positive or negative)
+        byte_offset: i64,
+    },
     /// Complex location described by expression bytes.
     /// This is used for variables that require computation to locate,
     /// such as struct fields or array elements.
@@ -161,6 +178,9 @@ impl fmt::Display for DebugVarLocation {
             Self::Memory(addr) => write!(f, "mem[{}]", addr),
             Self::Const(val) => write!(f, "const({})", val.as_canonical_u64()),
             Self::Local(offset) => write!(f, "FMP{:+}", offset),
+            Self::FrameBase { global_index, byte_offset } => {
+                write!(f, "global[{}]{:+}", global_index, byte_offset)
+            },
             Self::Expression(bytes) => {
                 write!(f, "expr(")?;
                 for (i, byte) in bytes.iter().enumerate() {
@@ -197,6 +217,11 @@ impl Serializable for DebugVarLocation {
                 target.write_u8(3);
                 target.write_bytes(&offset.to_le_bytes());
             },
+            Self::FrameBase { global_index, byte_offset } => {
+                target.write_u8(5);
+                target.write_u32(*global_index);
+                target.write_bytes(&byte_offset.to_le_bytes());
+            },
             Self::Expression(bytes) => {
                 target.write_u8(4);
                 bytes.write_into(target);
@@ -222,6 +247,12 @@ impl Deserializable for DebugVarLocation {
             4 => {
                 let bytes = Vec::<u8>::read_from(source)?;
                 Ok(Self::Expression(bytes))
+            },
+            5 => {
+                let global_index = source.read_u32()?;
+                let bytes = source.read_array::<8>()?;
+                let byte_offset = i64::from_le_bytes(bytes);
+                Ok(Self::FrameBase { global_index, byte_offset })
             },
             _ => Err(DeserializationError::InvalidValue(format!(
                 "invalid DebugVarLocation tag: {tag}"
@@ -316,6 +347,7 @@ mod tests {
             DebugVarLocation::Memory(0xdead_beef),
             DebugVarLocation::Const(Felt::new(999)),
             DebugVarLocation::Local(-3),
+            DebugVarLocation::FrameBase { global_index: 20, byte_offset: -12 },
             DebugVarLocation::Expression(vec![0x10, 0x20, 0x30]),
         ];
 

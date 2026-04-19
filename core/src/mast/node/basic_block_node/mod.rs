@@ -162,6 +162,21 @@ impl BasicBlockNode {
             })
             .collect()
     }
+
+    /// Adjusts padded operation indices back to raw indices for AssemblyOp mappings.
+    pub fn unadjust_asm_op_indices<T: Copy>(
+        asm_ops: Vec<(usize, T)>,
+        op_batches: &[OpBatch],
+    ) -> Vec<(usize, T)> {
+        let pad2raw = PaddedToRawPrefix::new(op_batches);
+        asm_ops
+            .into_iter()
+            .map(|(padded_idx, id)| {
+                let raw = padded_idx - pad2raw[padded_idx];
+                (raw, id)
+            })
+            .collect()
+    }
 }
 
 // ------------------------------------------------------------------------------------------------

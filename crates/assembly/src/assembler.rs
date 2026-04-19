@@ -537,6 +537,7 @@ impl Assembler {
             }
         });
         let mut mast_forest_builder = MastForestBuilder::new(staticlibs)?;
+        mast_forest_builder.set_emit_debug_info(self.emit_debug_info);
         let mut exports = {
             let mut exports = BTreeMap::new();
 
@@ -763,6 +764,7 @@ impl Assembler {
             }
         });
         let mut mast_forest_builder = MastForestBuilder::new(staticlibs)?;
+        mast_forest_builder.set_emit_debug_info(self.emit_debug_info);
 
         if let Some(advice_map) = self.linker[module_index].advice_map() {
             mast_forest_builder.merge_advice_map(advice_map)?;
@@ -1140,19 +1142,15 @@ impl Assembler {
                         next_depth,
                     )?;
 
+                    let asm_op = self.create_asmop_decorator(span, "if.true", proc_ctx);
                     let mut split_builder = SplitNodeBuilder::new([then_blk, else_blk]);
                     if let Some(decorator_ids) = block_builder.drain_decorators() {
                         split_builder.append_before_enter(decorator_ids);
                     }
 
-                    let split_node_id =
-                        block_builder.mast_forest_builder_mut().ensure_node(split_builder)?;
-
-                    // Add an assembly operation to the if node.
-                    let asm_op = self.create_asmop_decorator(span, "if.true", proc_ctx);
-                    block_builder
+                    let split_node_id = block_builder
                         .mast_forest_builder_mut()
-                        .register_node_asm_op(split_node_id, asm_op)?;
+                        .ensure_node_with_asm_op(split_builder, asm_op)?;
 
                     body_node_ids.push(split_node_id);
                 },
@@ -1205,7 +1203,10 @@ impl Assembler {
                     }
 
                     if let Some(decorator_ids) = block_builder.drain_decorators() {
-                        // Attach the decorators before the first instance of the repeated node
+                        // Attach decorators before the first iteration. We must carry the
+                        // original node's external metadata into the dedup fingerprint,
+                        // otherwise structurally identical nodes with different source mappings
+                        // can alias.
                         let first_repeat_builder = block_builder.mast_forest_builder()
                             [repeat_node_id]
                             .clone()
@@ -1213,7 +1214,10 @@ impl Assembler {
                             .with_before_enter(decorator_ids);
                         let first_repeat_node_id = block_builder
                             .mast_forest_builder_mut()
-                            .ensure_node(first_repeat_builder)?;
+                            .ensure_node_preserving_debug_vars(
+                                first_repeat_builder,
+                                repeat_node_id,
+                            )?;
 
                         body_node_ids.push(first_repeat_node_id);
                         let remaining_iterations =
@@ -1269,14 +1273,10 @@ impl Assembler {
                         loop_builder.append_before_enter(decorator_ids);
                     }
 
-                    let loop_node_id =
-                        block_builder.mast_forest_builder_mut().ensure_node(loop_builder)?;
-
-                    // Add an assembly operation to the loop node.
                     let asm_op = self.create_asmop_decorator(span, "while.true", proc_ctx);
-                    block_builder
+                    let loop_node_id = block_builder
                         .mast_forest_builder_mut()
-                        .register_node_asm_op(loop_node_id, asm_op)?;
+                        .ensure_node_with_asm_op(loop_builder, asm_op)?;
 
                     body_node_ids.push(loop_node_id);
                 },
@@ -1316,6 +1316,7 @@ impl Assembler {
             mast_forest_builder.ensure_block(
                 vec![Operation::Noop],
                 Vec::new(),
+                vec![],
                 vec![],
                 vec![],
                 vec![],
