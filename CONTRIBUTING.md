@@ -11,6 +11,20 @@ We want to make contributing to this project as easy and transparent as possible
 
 &nbsp;
 
+## Contribution Quality
+
+To keep review time focused on meaningful improvements, we generally do not accept:
+- Trivial typo fixes
+- Minor code or documentation changes that don't materially improve clarity or completeness
+
+Contributions should:
+- Include clear reasoning for the change
+- Be linked to an issue the author has been assigned to
+- Be testable / reviewable without unnecessary overhead
+- Pass all CI tests
+
+**We reserve the right to close PRs at our discretion, or batch trivial valid fixes into internal commits.**
+
 ## Flow
 We are using [Github Flow](https://docs.github.com/en/get-started/quickstart/github-flow), so all code changes happen through pull requests from a [forked repo](https://docs.github.com/en/get-started/quickstart/fork-a-repo).
 
@@ -42,6 +56,10 @@ i.e. this branches state:
 
 
   More about rebase [here](https://git-scm.com/docs/git-rebase) and [here](https://www.atlassian.com/git/tutorials/rewriting-history/git-rebase#:~:text=What%20is%20git%20rebase%3F,of%20a%20feature%20branching%20workflow.)
+
+### Signing commits
+
+We require all commits to be [signed](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification#ssh-commit-signature-verification).
 
 
 ### Commit messages
@@ -84,11 +102,12 @@ We use [semver](https://semver.org/) naming convention.
 
 ## Pre-PR checklist
 1. Repo forked and branch created from `next` according to the naming convention.
-2. Commit messages and code style follow conventions.
-3. Tests added for new functionality.
-4. Documentation/comments updated for all changes according to our documentation convention.
-5. Clippy and Rustfmt linting passed.
-6. New branch rebased from `next`.
+2. Every commit is [signed](https://docs.github.com/en/authentication/managing-commit-signature-verification/about-commit-signature-verification#ssh-commit-signature-verification).
+3. Commit messages and code style follow conventions.
+4. Tests added for new functionality.
+5. Documentation/comments updated for all changes according to our documentation convention.
+6. Clippy and Rustfmt linting passed.
+7. New branch rebased from `next`.
 
 &nbsp;
 

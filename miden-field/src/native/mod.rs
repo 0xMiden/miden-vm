@@ -1,11 +1,12 @@
 //! Off-chain implementation of [`crate::Felt`].
 
-use alloc::format;
+use alloc::{format, vec, vec::Vec};
 use core::{
     array, fmt,
     hash::{Hash, Hasher},
     iter::{Product, Sum},
-    ops::{Add, AddAssign, Deref, DerefMut, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
+    mem::{align_of, size_of},
+    ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
 };
 
 use miden_serde_utils::{
@@ -22,6 +23,7 @@ use p3_field::{
     quotient_map_large_iint, quotient_map_large_uint, quotient_map_small_int,
 };
 use p3_goldilocks::Goldilocks;
+use p3_util::flatten_to_base;
 use rand::{
     Rng,
     distr::{Distribution, StandardUniform},
@@ -49,12 +51,21 @@ impl Felt {
     /// The number of bytes which this field element occupies in memory.
     pub const NUM_BYTES: usize = Goldilocks::NUM_BYTES;
 
-    /// Creates a new field element from any `u64`.
+    /// Constructs a new field element from the provided `value`.
+    ///
+    /// # Errors
+    ///
+    /// - [`FeltFromIntError`] if the provided `value` is not a valid input.
+    pub fn new(value: u64) -> Result<Self, FeltFromIntError> {
+        Felt::from_canonical_checked(value).ok_or(FeltFromIntError(value))
+    }
+
+    /// Creates a new field element from any `u64` without performing reduction.
     ///
     /// Any `u64` value is accepted. No reduction is performed since Goldilocks uses a
     /// non-canonical internal representation.
     #[inline]
-    pub const fn new(value: u64) -> Self {
+    pub const fn new_unchecked(value: u64) -> Self {
         Self(Goldilocks::new(value))
     }
 
@@ -108,7 +119,7 @@ impl Felt {
     /// Plonky3's Goldilocks implementation.
     #[inline]
     pub fn as_canonical_u64_ct(&self) -> u64 {
-        let raw = raw_felt_u64(self);
+        let raw = raw_felt_u64(*self);
         // Mirrors Goldilocks::as_canonical_u64: conditional subtraction of ORDER.
         // A single subtraction is sufficient for any u64 value since 2*ORDER > u64::MAX.
         let reduced = raw.wrapping_sub(Self::ORDER);
@@ -118,14 +129,36 @@ impl Felt {
 }
 
 #[inline]
-fn raw_felt_u64(value: &Felt) -> u64 {
+fn raw_felt_u64(value: Felt) -> u64 {
     const _: () = {
-        assert!(core::mem::size_of::<Felt>() == core::mem::size_of::<u64>());
-        assert!(core::mem::align_of::<Felt>() == core::mem::align_of::<u64>());
+        assert!(size_of::<Felt>() == size_of::<u64>());
+        assert!(align_of::<Felt>() == align_of::<u64>());
         assert!(2u128 * (Felt::ORDER as u128) > u64::MAX as u128);
     };
     // SAFETY: Felt is repr(transparent) over Goldilocks, which is repr(transparent) over u64.
-    unsafe { core::mem::transmute_copy(value) }
+    unsafe { core::mem::transmute_copy(&value) }
+}
+
+/// Reinterprets a `Felt` slice as `Goldilocks`.
+///
+/// # Safety
+///
+/// `Felt` is `#[repr(transparent)]` over `Goldilocks`, so the element layout matches.
+#[inline]
+fn felts_as_goldilocks_slice(s: &[Felt]) -> &[Goldilocks] {
+    // SAFETY: `Felt` is `#[repr(transparent)]` over `Goldilocks`, so the element layout matches.
+    unsafe { core::slice::from_raw_parts(s.as_ptr().cast::<Goldilocks>(), s.len()) }
+}
+
+/// Reinterprets a `Felt` array as `Goldilocks`.
+///
+/// # Safety
+///
+/// `Felt` is `#[repr(transparent)]` over `Goldilocks`, so `[Felt; N]` matches `[Goldilocks; N]`.
+#[inline]
+fn felts_as_goldilocks_array<const N: usize>(a: &[Felt; N]) -> &[Goldilocks; N] {
+    // SAFETY: same layout as `felts_as_goldilocks_slice`, for a fixed `N`.
+    unsafe { &*(a as *const [Felt; N] as *const [Goldilocks; N]) }
 }
 
 impl fmt::Display for Felt {
@@ -153,6 +186,8 @@ impl Hash for Felt {
 // ================================================================================================
 
 impl Field for Felt {
+    // TODO: This should only be the case for WASM targets.
+    // Native targets should be able to leverage AVX2 / NEON optimizations from Plonky3.
     type Packing = Self;
 
     const GENERATOR: Self = Self(Goldilocks::GENERATOR);
@@ -190,7 +225,7 @@ impl PrimeCharacteristicRing for Felt {
 
     #[inline]
     fn from_bool(value: bool) -> Self {
-        Self::new(value.into())
+        Self::new_unchecked(value.into())
     }
 
     #[inline]
@@ -211,6 +246,29 @@ impl PrimeCharacteristicRing for Felt {
     #[inline]
     fn exp_u64(&self, power: u64) -> Self {
         self.0.exp_u64(power).into()
+    }
+
+    #[inline]
+    fn sum_array<const N: usize>(input: &[Self]) -> Self {
+        assert_eq!(N, input.len());
+        let g = felts_as_goldilocks_slice(input);
+        Self(Goldilocks::sum_array::<N>(g))
+    }
+
+    #[inline]
+    fn dot_product<const N: usize>(lhs: &[Self; N], rhs: &[Self; N]) -> Self {
+        let lhs_g = felts_as_goldilocks_array(lhs);
+        let rhs_g = felts_as_goldilocks_array(rhs);
+        Self(Goldilocks::dot_product(lhs_g, rhs_g))
+    }
+
+    #[inline]
+    fn zero_vec(len: usize) -> Vec<Self> {
+        // SAFETY:
+        // Due to `#[repr(transparent)]`, Felt, Goldilocks and u64 have the same size,
+        // alignment and memory layout making `flatten_to_base` safe.
+        // This will create a vector of Felt elements with value set to 0.
+        unsafe { flatten_to_base(vec![0u64; len]) }
     }
 }
 
@@ -403,7 +461,7 @@ impl TryFrom<u64> for Felt {
     type Error = FeltFromIntError;
 
     fn try_from(int: u64) -> Result<Felt, Self::Error> {
-        Felt::from_canonical_checked(int).ok_or(FeltFromIntError(int))
+        Felt::new(int)
     }
 }
 
@@ -415,22 +473,6 @@ impl FeltFromIntError {
     /// Returns the integer for which the conversion failed.
     pub fn as_u64(&self) -> u64 {
         self.0
-    }
-}
-
-impl Deref for Felt {
-    type Target = Goldilocks;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for Felt {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
     }
 }
 
@@ -594,7 +636,7 @@ impl Serializable for Felt {
     }
 
     fn get_size_hint(&self) -> usize {
-        core::mem::size_of::<u64>()
+        size_of::<u64>()
     }
 }
 
@@ -621,11 +663,11 @@ mod arbitrary {
         type Strategy = BoxedStrategy<Self>;
 
         fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-            let canonical = (0u64..Felt::ORDER).prop_map(Felt::new).boxed();
+            let canonical = (0u64..Felt::ORDER).prop_map(Felt::new_unchecked).boxed();
             // Goldilocks uses representation where values above the field order are valid and
             // represent wrapped field elements. Generate such values 1/5 of the time to exercise
             // this behavior.
-            let non_canonical = (Felt::ORDER..=u64::MAX).prop_map(Felt::new).boxed();
+            let non_canonical = (Felt::ORDER..=u64::MAX).prop_map(Felt::new_unchecked).boxed();
             prop_oneof![4 => canonical, 1 => non_canonical].no_shrink().boxed()
         }
     }

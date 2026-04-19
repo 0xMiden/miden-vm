@@ -471,7 +471,8 @@ mod tests {
         let entries: Vec<(Word, Word)> = (0..pair_count)
             .map(|n| {
                 let leaf_index = ((n as f64 / pair_count as f64) * 255.0) as u64;
-                let key = Word::new([ONE, ONE, Felt::new(n), Felt::new(leaf_index)]);
+                let key =
+                    Word::new([ONE, ONE, Felt::new_unchecked(n), Felt::new_unchecked(leaf_index)]);
                 let value = Word::new([ONE, ONE, ONE, ONE]);
                 (key, value)
             })
@@ -699,7 +700,7 @@ mod tests {
         fn merkle_path_roundtrip_equivalence(sparse in any::<SparseMerklePath>()) {
             // Convert SparseMerklePath to MerklePath and back
             let merkle = MerklePath::from(sparse.clone());
-            let reconstructed = SparseMerklePath::try_from(merkle.clone()).unwrap();
+            let reconstructed = SparseMerklePath::try_from(merkle).unwrap();
             prop_assert_eq!(sparse, reconstructed);
         }
     }
@@ -948,7 +949,9 @@ mod tests {
                 .prop_flat_map(|num_entries| {
                     prop::collection::vec((any::<u64>(), any::<Word>()), num_entries).prop_map(
                         |indices_n_values| {
-                            let entries: Vec<(Word, Word)> = indices_n_values
+                            // Ensure unique keys to avoid duplicates as we build the entries
+                            let mut seen = alloc::collections::BTreeSet::new();
+                            let unique_entries: Vec<(Word, Word)> = indices_n_values
                                 .into_iter()
                                 .enumerate()
                                 .map(|(n, (leaf_index, value))| {
@@ -956,19 +959,15 @@ mod tests {
                                     // Ensure we use valid leaf indices for the SMT depth
                                     let valid_leaf_index = leaf_index % (1u64 << 60); // Use large but valid range
                                     let key = Word::new([
-                                        Felt::new(n as u64),         // element 0
-                                        Felt::new(n as u64 + 1),     // element 1
-                                        Felt::new(n as u64 + 2),     // element 2
-                                        Felt::new(valid_leaf_index), // element 3 (leaf index)
+                                        Felt::new_unchecked(n as u64),         // element 0
+                                        Felt::new_unchecked(n as u64 + 1),     // element 1
+                                        Felt::new_unchecked(n as u64 + 2),     // element 2
+                                        Felt::new_unchecked(valid_leaf_index), // element 3 (leaf index)
                                     ]);
                                     (key, value)
                                 })
+                                .filter(|(key, _)| seen.insert(*key))
                                 .collect();
-
-                            // Ensure unique keys to avoid duplicates
-                            let mut seen = alloc::collections::BTreeSet::new();
-                            let unique_entries: Vec<_> =
-                                entries.into_iter().filter(|(key, _)| seen.insert(*key)).collect();
 
                             let tree = Smt::with_entries(unique_entries.clone()).unwrap();
                             RandomSmt { tree, entries: unique_entries }

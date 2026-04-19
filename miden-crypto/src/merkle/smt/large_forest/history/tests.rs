@@ -3,7 +3,9 @@
 
 use alloc::vec::Vec;
 
-use super::{ChangedKeys, History, NodeChanges, error::Result};
+use super::{
+    super::test_utils::UNUSED_ENTRY_COUNT, ChangedKeys, History, NodeChanges, error::Result,
+};
 use crate::{
     EMPTY_WORD, Felt, Word,
     field::PrimeCharacteristicRing,
@@ -34,8 +36,8 @@ fn roots() -> Result<()> {
     let mut history = History::empty(2);
     let root_1: Word = rng.value();
     let root_2: Word = rng.value();
-    history.add_version(root_1, 0, nodes.clone(), changed_keys.clone())?;
-    history.add_version(root_2, 1, nodes.clone(), changed_keys.clone())?;
+    history.add_version(root_1, 0, nodes.clone(), changed_keys.clone(), UNUSED_ENTRY_COUNT)?;
+    history.add_version(root_2, 1, nodes, changed_keys, UNUSED_ENTRY_COUNT)?;
 
     // We should be able to get all the roots.
     let roots = history.roots().collect::<Vec<_>>();
@@ -61,11 +63,35 @@ fn find_latest_corresponding_version() -> Result<()> {
     let v4 = 31;
     let v5 = 45;
 
-    history.add_version(rng.value(), v1, nodes.clone(), changed_keys.clone())?;
-    history.add_version(rng.value(), v2, nodes.clone(), changed_keys.clone())?;
-    history.add_version(rng.value(), v3, nodes.clone(), changed_keys.clone())?;
-    history.add_version(rng.value(), v4, nodes.clone(), changed_keys.clone())?;
-    history.add_version(rng.value(), v5, nodes.clone(), changed_keys.clone())?;
+    history.add_version(
+        rng.value(),
+        v1,
+        nodes.clone(),
+        changed_keys.clone(),
+        UNUSED_ENTRY_COUNT,
+    )?;
+    history.add_version(
+        rng.value(),
+        v2,
+        nodes.clone(),
+        changed_keys.clone(),
+        UNUSED_ENTRY_COUNT,
+    )?;
+    history.add_version(
+        rng.value(),
+        v3,
+        nodes.clone(),
+        changed_keys.clone(),
+        UNUSED_ENTRY_COUNT,
+    )?;
+    history.add_version(
+        rng.value(),
+        v4,
+        nodes.clone(),
+        changed_keys.clone(),
+        UNUSED_ENTRY_COUNT,
+    )?;
+    history.add_version(rng.value(), v5, nodes, changed_keys, UNUSED_ENTRY_COUNT)?;
 
     // When we query for a version that is older than the oldest in the history we should get an
     // error.
@@ -107,18 +133,18 @@ fn add_version() -> Result<()> {
 
     let root_1: Word = rng.value();
     let id_1 = 0;
-    history.add_version(root_1, id_1, nodes.clone(), changed_keys.clone())?;
+    history.add_version(root_1, id_1, nodes.clone(), changed_keys.clone(), UNUSED_ENTRY_COUNT)?;
     assert_eq!(history.num_versions(), 1);
 
     let root_2: Word = rng.value();
     let id_2 = 1;
-    history.add_version(root_2, id_2, nodes.clone(), changed_keys.clone())?;
+    history.add_version(root_2, id_2, nodes.clone(), changed_keys.clone(), UNUSED_ENTRY_COUNT)?;
     assert_eq!(history.num_versions(), 2);
 
     // At this point, adding any version should remove the oldest.
     let root_3: Word = rng.value();
     let id_3 = 2;
-    history.add_version(root_3, id_3, nodes.clone(), changed_keys.clone())?;
+    history.add_version(root_3, id_3, nodes.clone(), changed_keys.clone(), UNUSED_ENTRY_COUNT)?;
     assert_eq!(history.num_versions(), 2);
 
     // If we then query for that first version it won't be there anymore, but the other two
@@ -128,7 +154,11 @@ fn add_version() -> Result<()> {
     assert!(history.get_view_at(id_3).is_ok());
 
     // If we try and add a version with a non-monotonic version number, we should see an error.
-    assert!(history.add_version(root_3, id_1, nodes, changed_keys.clone()).is_err());
+    assert!(
+        history
+            .add_version(root_3, id_1, nodes, changed_keys, UNUSED_ENTRY_COUNT)
+            .is_err()
+    );
 
     Ok(())
 }
@@ -163,7 +193,7 @@ fn add_version_from_mutation_set() -> Result<()> {
     let mut history = History::empty(2);
     let version: VersionId = rng.value();
 
-    history.add_version_from_mutation_set(version, mutations)?;
+    history.add_version_from_mutation_set(version, mutations, UNUSED_ENTRY_COUNT)?;
 
     // Now we can check that it did things correctly.
     let view = history.get_view_at(version)?;
@@ -187,19 +217,19 @@ fn truncate() -> Result<()> {
 
     let root_1: Word = rng.value();
     let id_1 = 5;
-    history.add_version(root_1, id_1, nodes.clone(), changed_keys.clone())?;
+    history.add_version(root_1, id_1, nodes.clone(), changed_keys.clone(), UNUSED_ENTRY_COUNT)?;
 
     let root_2: Word = rng.value();
     let id_2 = 10;
-    history.add_version(root_2, id_2, nodes.clone(), changed_keys.clone())?;
+    history.add_version(root_2, id_2, nodes.clone(), changed_keys.clone(), UNUSED_ENTRY_COUNT)?;
 
     let root_3: Word = rng.value();
     let id_3 = 15;
-    history.add_version(root_3, id_3, nodes.clone(), changed_keys.clone())?;
+    history.add_version(root_3, id_3, nodes.clone(), changed_keys.clone(), UNUSED_ENTRY_COUNT)?;
 
     let root_4: Word = rng.value();
     let id_4 = 20;
-    history.add_version(root_4, id_4, nodes.clone(), changed_keys.clone())?;
+    history.add_version(root_4, id_4, nodes, changed_keys, UNUSED_ENTRY_COUNT)?;
 
     assert_eq!(history.num_versions(), 4);
 
@@ -239,11 +269,11 @@ fn clear() -> Result<()> {
 
     let root_1: Word = rng.value();
     let id_1 = 0;
-    history.add_version(root_1, id_1, nodes.clone(), changed_keys.clone())?;
+    history.add_version(root_1, id_1, nodes.clone(), changed_keys.clone(), UNUSED_ENTRY_COUNT)?;
 
     let root_2: Word = rng.value();
     let id_2 = 1;
-    history.add_version(root_2, id_2, nodes.clone(), changed_keys.clone())?;
+    history.add_version(root_2, id_2, nodes, changed_keys, UNUSED_ENTRY_COUNT)?;
 
     assert_eq!(history.num_versions(), 2);
 
@@ -286,7 +316,7 @@ fn view_at() -> Result<()> {
     changed_1.insert(l2_e1_key, l2_e1_value);
     changed_1.insert(l2_e2_key, l2_e2_value);
 
-    history.add_version(root_1, id_1, nodes_1.clone(), changed_1.clone())?;
+    history.add_version(root_1, id_1, nodes_1.clone(), changed_1.clone(), 3)?;
     assert_eq!(history.num_versions(), 1);
 
     // We then add another version that overlaps with the older version.
@@ -306,7 +336,7 @@ fn view_at() -> Result<()> {
     l3_e1_key[3] = Felt::from_u64(leaf_3_ix.position());
     let l3_e1_value: Word = rng.value();
     changed_2.insert(l3_e1_key, l3_e1_value);
-    history.add_version(root_2, id_2, nodes_2.clone(), changed_2.clone())?;
+    history.add_version(root_2, id_2, nodes_2.clone(), changed_2.clone(), 7)?;
     assert_eq!(history.num_versions(), 2);
 
     // And another version for the sake of the test.
@@ -327,7 +357,7 @@ fn view_at() -> Result<()> {
     let l1n_e1_value: Word = rng.value();
     changed_3.insert(l1n_e1_key, l1n_e1_value);
 
-    history.add_version(root_3, id_3, nodes_3.clone(), changed_3.clone())?;
+    history.add_version(root_3, id_3, nodes_3.clone(), changed_3.clone(), 15)?;
     assert_eq!(history.num_versions(), 3);
 
     // At this point, we can grab a view into the history. If we grab something older than the
@@ -337,6 +367,7 @@ fn view_at() -> Result<()> {
     // If we grab something valid, then we should get the right results. Let's grab the oldest
     // possible version to test the overlay logic.
     let view = history.get_view_at(id_1)?;
+    assert_eq!(view.entry_count(), 3);
 
     // Getting a node in the targeted version should just return it.
     assert_eq!(view.node_value(&NodeIndex::new(2, 1).unwrap()), Some(&n1_value));
@@ -387,6 +418,7 @@ fn view_at() -> Result<()> {
     let view = history.get_view_at(7)?;
     assert_eq!(view.node_value(&NodeIndex::new_unchecked(30, 1)), Some(&n5_value));
     assert!(view.node_value(&NodeIndex::new_unchecked(30, 2)).is_none());
+    assert_eq!(view.entry_count(), 15);
 
     Ok(())
 }
@@ -420,14 +452,16 @@ fn history_from_smt_non_overlapping() -> Result<()> {
     let mutations_v0 = smt.compute_mutations(vec![(key_1, value_1)]).unwrap();
     let reversion_set = smt.apply_mutations_with_reversion(mutations_v0).unwrap();
     let root_v0 = smt.root();
-    history.add_version_from_mutation_set(0, reversion_set)?;
+    // Before this mutation the tree was empty, so the entry count for version 0 is 0.
+    history.add_version_from_mutation_set(0, reversion_set, 0)?;
     assert_eq!(history.num_versions(), 1);
 
     // Version 1: Insert second key-value pair
     let mutations_v1 = smt.compute_mutations(vec![(key_2, value_2)]).unwrap();
     let reversion_set = smt.apply_mutations_with_reversion(mutations_v1).unwrap();
     let root_v1 = smt.root();
-    history.add_version_from_mutation_set(1, reversion_set)?;
+    // Before this mutation the tree had 1 entry (key_1), so the entry count for version 1 is 1.
+    history.add_version_from_mutation_set(1, reversion_set, 1)?;
 
     // Verify the roots for older states are tracked correctly in the history.
     assert!(history.is_known_root(initial_root));
@@ -441,10 +475,12 @@ fn history_from_smt_non_overlapping() -> Result<()> {
     let view_v0 = history.get_view_at(0)?;
     assert_eq!(view_v0.value(&key_1), Some(EMPTY_WORD));
     assert_eq!(view_v0.value(&key_2), Some(EMPTY_WORD));
+    assert_eq!(view_v0.entry_count(), 0);
 
     // When we query version 1 it should only make revert one change on top of the current tree.
     let view_v1 = history.get_view_at(1)?;
     assert_eq!(view_v1.value(&key_2), Some(EMPTY_WORD));
+    assert_eq!(view_v1.entry_count(), 1);
 
     // Verify querying a non-existent key returns None
     let nonexistent_key: Word = rng.value();
@@ -468,20 +504,116 @@ fn history_from_smt_overlapping() -> Result<()> {
     // Version 0: Insert initial value
     let mutations_v0 = smt.compute_mutations(vec![(key, value_v0)]).unwrap();
     let reversion_set = smt.apply_mutations_with_reversion(mutations_v0).unwrap();
-    history.add_version_from_mutation_set(0, reversion_set)?;
+    // Before this mutation the tree was empty, so the entry count for version 0 is 0.
+    history.add_version_from_mutation_set(0, reversion_set, 0)?;
 
     // Version 1: Update to new value
     let mutations_v1 = smt.compute_mutations(vec![(key, value_v1)]).unwrap();
     let reversion_set = smt.apply_mutations_with_reversion(mutations_v1).unwrap();
-    history.add_version_from_mutation_set(1, reversion_set)?;
+    // Before this mutation the tree had 1 entry (key), so the entry count for version 1 is 1.
+    history.add_version_from_mutation_set(1, reversion_set, 1)?;
 
     // In version 0 we should have the correct (empty) value when reverted.
     let view_v0 = history.get_view_at(0)?;
     assert_eq!(view_v0.value(&key), Some(EMPTY_WORD));
+    assert_eq!(view_v0.entry_count(), 0);
 
     // In version 1 we should have the value set in the transition to version 0.
     let view_v1 = history.get_view_at(1)?;
     assert_eq!(view_v1.value(&key), Some(value_v0));
+    assert_eq!(view_v1.entry_count(), 1);
+
+    Ok(())
+}
+
+#[test]
+fn entry_count_single_version() -> Result<()> {
+    let mut rng = ContinuousRng::new([0x1c; 32]);
+    let mut history = History::empty(3);
+
+    let root: Word = rng.value();
+    history.add_version(root, 0, NodeChanges::default(), ChangedKeys::default(), 42)?;
+
+    let view = history.get_view_at(0)?;
+    assert_eq!(view.entry_count(), 42);
+
+    Ok(())
+}
+
+#[test]
+fn entry_count_multiple_versions() -> Result<()> {
+    let mut rng = ContinuousRng::new([0x1d; 32]);
+    let mut history = History::empty(5);
+
+    // Add versions with different entry counts.
+    history.add_version(rng.value(), 0, NodeChanges::default(), ChangedKeys::default(), 0)?;
+    history.add_version(rng.value(), 1, NodeChanges::default(), ChangedKeys::default(), 5)?;
+    history.add_version(rng.value(), 2, NodeChanges::default(), ChangedKeys::default(), 3)?;
+    history.add_version(rng.value(), 3, NodeChanges::default(), ChangedKeys::default(), 10)?;
+
+    assert_eq!(history.get_view_at(0)?.entry_count(), 0);
+    assert_eq!(history.get_view_at(1)?.entry_count(), 5);
+    assert_eq!(history.get_view_at(2)?.entry_count(), 3);
+    assert_eq!(history.get_view_at(3)?.entry_count(), 10);
+
+    Ok(())
+}
+
+#[test]
+fn entry_count_after_eviction() -> Result<()> {
+    let mut rng = ContinuousRng::new([0x1e; 32]);
+    let mut history = History::empty(2);
+
+    // Add 3 versions to a history that can hold only 2, causing eviction of the oldest.
+    history.add_version(rng.value(), 0, NodeChanges::default(), ChangedKeys::default(), 1)?;
+    history.add_version(rng.value(), 1, NodeChanges::default(), ChangedKeys::default(), 5)?;
+    history.add_version(rng.value(), 2, NodeChanges::default(), ChangedKeys::default(), 10)?;
+
+    // Version 0 should have been evicted.
+    assert!(history.get_view_at(0).is_err());
+
+    // The remaining versions should still have the correct entry counts.
+    assert_eq!(history.get_view_at(1)?.entry_count(), 5);
+    assert_eq!(history.get_view_at(2)?.entry_count(), 10);
+
+    Ok(())
+}
+
+#[test]
+fn entry_count_after_truncation() -> Result<()> {
+    let mut rng = ContinuousRng::new([0x1f; 32]);
+    let mut history = History::empty(4);
+
+    history.add_version(rng.value(), 5, NodeChanges::default(), ChangedKeys::default(), 2)?;
+    history.add_version(rng.value(), 10, NodeChanges::default(), ChangedKeys::default(), 7)?;
+    history.add_version(rng.value(), 15, NodeChanges::default(), ChangedKeys::default(), 12)?;
+
+    // Truncate to version 10, removing version 5.
+    history.truncate(10);
+    assert_eq!(history.num_versions(), 2);
+
+    // The surviving versions should retain their entry counts.
+    assert_eq!(history.get_view_at(10)?.entry_count(), 7);
+    assert_eq!(history.get_view_at(15)?.entry_count(), 12);
+
+    Ok(())
+}
+
+#[test]
+fn entry_count_reaches_zero_through_removals() -> Result<()> {
+    let mut rng = ContinuousRng::new([0x20; 32]);
+    let mut history = History::empty(4);
+
+    // Simulate a tree that gains entries and then has them all removed.
+    history.add_version(rng.value(), 0, NodeChanges::default(), ChangedKeys::default(), 0)?;
+    history.add_version(rng.value(), 1, NodeChanges::default(), ChangedKeys::default(), 3)?;
+    history.add_version(rng.value(), 2, NodeChanges::default(), ChangedKeys::default(), 1)?;
+    history.add_version(rng.value(), 3, NodeChanges::default(), ChangedKeys::default(), 0)?;
+
+    assert_eq!(history.get_view_at(0)?.entry_count(), 0);
+    assert_eq!(history.get_view_at(1)?.entry_count(), 3);
+    assert_eq!(history.get_view_at(2)?.entry_count(), 1);
+    assert_eq!(history.get_view_at(3)?.entry_count(), 0);
 
     Ok(())
 }

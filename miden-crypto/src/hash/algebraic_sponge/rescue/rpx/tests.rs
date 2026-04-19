@@ -4,9 +4,7 @@ use alloc::{collections::BTreeSet, vec::Vec};
 use proptest::prelude::*;
 
 use super::{Felt, Rpx256};
-use crate::{
-    ONE, Word, ZERO, hash::algebraic_sponge::AlgebraicSponge, rand::test_utils::rand_value,
-};
+use crate::{ONE, Word, ZERO, rand::test_utils::rand_value};
 
 // The number of iterations to run the `ext_round_matches_reference_many` test.
 #[cfg(all(
@@ -20,7 +18,7 @@ const EXT_ROUND_TEST_ITERS: usize = 5_000_000;
 
 #[test]
 fn hash_elements_vs_merge() {
-    let elements = [Felt::new(rand_value()); 8];
+    let elements = [Felt::new_unchecked(rand_value()); 8];
 
     let digests: [Word; 2] = [
         Word::new(elements[..4].try_into().unwrap()),
@@ -34,7 +32,7 @@ fn hash_elements_vs_merge() {
 
 #[test]
 fn merge_vs_merge_in_domain() {
-    let elements = [Felt::new(rand_value()); 8];
+    let elements = [Felt::new_unchecked(rand_value()); 8];
 
     let digests: [Word; 2] = [
         Word::new(elements[..4].try_into().unwrap()),
@@ -57,33 +55,6 @@ fn merge_vs_merge_in_domain() {
 
     let merge_in_domain_result = Rpx256::merge_in_domain(&digests, domain);
     assert_ne!(merge_result, merge_in_domain_result);
-}
-
-#[test]
-fn hash_elements_vs_merge_with_int() {
-    let tmp = [Felt::new(rand_value()); 4];
-    let seed = Word::new(tmp);
-
-    // ----- value fits into a field element ------------------------------------------------------
-    let val: Felt = Felt::new(rand_value());
-    let m_result = <Rpx256 as AlgebraicSponge>::merge_with_int(seed, val.as_canonical_u64());
-
-    let mut elements = seed.as_elements().to_vec();
-    elements.push(val);
-    let h_result = Rpx256::hash_elements(&elements);
-
-    assert_eq!(m_result, h_result);
-
-    // ----- value does not fit into a field element ----------------------------------------------
-    let val = Felt::ORDER + 2;
-    let m_result = <Rpx256 as AlgebraicSponge>::merge_with_int(seed, val);
-
-    let mut elements = seed.as_elements().to_vec();
-    elements.push(Felt::new(val));
-    elements.push(ONE);
-    let h_result = Rpx256::hash_elements(&elements);
-
-    assert_eq!(m_result, h_result);
 }
 
 #[test]
@@ -111,7 +82,7 @@ fn hash_padding() {
 
 #[test]
 fn hash_elements_padding() {
-    let e1 = [Felt::new(rand_value()); 2];
+    let e1 = [Felt::new_unchecked(rand_value()); 2];
     let e2 = [e1[0], e1[1], ZERO];
 
     let r1 = Rpx256::hash_elements(&e1);
@@ -124,12 +95,12 @@ fn hash_elements() {
     let elements = [
         ZERO,
         ONE,
-        Felt::new(2),
-        Felt::new(3),
-        Felt::new(4),
-        Felt::new(5),
-        Felt::new(6),
-        Felt::new(7),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(4),
+        Felt::new_unchecked(5),
+        Felt::new_unchecked(6),
+        Felt::new_unchecked(7),
     ];
 
     let digests: [Word; 2] = [
@@ -205,7 +176,7 @@ fn sponge_zeroes_collision() {
 #[test]
 fn ext_round_matches_reference_many() {
     for i in 0..EXT_ROUND_TEST_ITERS {
-        let mut state = core::array::from_fn(|_| Felt::new(rand_value()));
+        let mut state = core::array::from_fn(|_| Felt::new_unchecked(rand_value()));
 
         for round in 0..7 {
             let mut got = state;
@@ -245,23 +216,23 @@ mod p3_tests {
         use cubic_ext::*;
 
         // Test with a simple element [1, 0, 0]
-        let x = [Felt::new(1), Felt::new(0), Felt::new(0)];
+        let x = [Felt::new_unchecked(1), Felt::new_unchecked(0), Felt::new_unchecked(0)];
         let x7 = power7(x);
         assert_eq!(x7, x, "1^7 should equal 1");
 
         // Test with [0, 1, 0] (just φ)
-        let phi = [Felt::new(0), Felt::new(1), Felt::new(0)];
+        let phi = [Felt::new_unchecked(0), Felt::new_unchecked(1), Felt::new_unchecked(0)];
         let phi7 = power7(phi);
         // φ^7 should be some combination - verify it's computed correctly
         assert_ne!(phi7, phi, "φ^7 should not equal φ");
 
         // Test with [1, 1, 1]
-        let x = [Felt::new(1), Felt::new(1), Felt::new(1)];
+        let x = [Felt::new_unchecked(1), Felt::new_unchecked(1), Felt::new_unchecked(1)];
         let x7 = power7(x);
         assert_ne!(x7, x, "(1+φ+φ²)^7 should not equal 1+φ+φ²");
 
         // Verify power7 is consistent
-        let x = [Felt::new(42), Felt::new(17), Felt::new(99)];
+        let x = [Felt::new_unchecked(42), Felt::new_unchecked(17), Felt::new_unchecked(99)];
         let x7_a = power7(x);
         let x7_b = power7(x);
         assert_eq!(x7_a, x7_b, "power7 should be deterministic");
@@ -269,20 +240,20 @@ mod p3_tests {
 
     #[test]
     fn test_rpx_permutation_basic() {
-        let mut state = [Felt::new(0); STATE_WIDTH];
+        let mut state = [Felt::new_unchecked(0); STATE_WIDTH];
 
         // Apply permutation
         let perm = RpxPermutation256;
         perm.permute_mut(&mut state);
 
         // State should be different from all zeros after permutation
-        assert_ne!(state, [Felt::new(0); STATE_WIDTH]);
+        assert_ne!(state, [Felt::new_unchecked(0); STATE_WIDTH]);
     }
 
     #[test]
     fn test_rpx_permutation_consistency() {
-        let mut state1 = [Felt::new(0); STATE_WIDTH];
-        let mut state2 = [Felt::new(0); STATE_WIDTH];
+        let mut state1 = [Felt::new_unchecked(0); STATE_WIDTH];
+        let mut state2 = [Felt::new_unchecked(0); STATE_WIDTH];
 
         // Apply permutation using the trait
         let perm = RpxPermutation256;
@@ -298,18 +269,18 @@ mod p3_tests {
     #[test]
     fn test_rpx_permutation_deterministic() {
         let input = [
-            Felt::new(1),
-            Felt::new(2),
-            Felt::new(3),
-            Felt::new(4),
-            Felt::new(5),
-            Felt::new(6),
-            Felt::new(7),
-            Felt::new(8),
-            Felt::new(9),
-            Felt::new(10),
-            Felt::new(11),
-            Felt::new(12),
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(8),
+            Felt::new_unchecked(9),
+            Felt::new_unchecked(10),
+            Felt::new_unchecked(11),
+            Felt::new_unchecked(12),
         ];
 
         let mut state1 = input;
@@ -329,14 +300,14 @@ mod p3_tests {
 
         // Test with 8 elements (exactly one rate)
         let input8 = [
-            Felt::new(1),
-            Felt::new(2),
-            Felt::new(3),
-            Felt::new(4),
-            Felt::new(5),
-            Felt::new(6),
-            Felt::new(7),
-            Felt::new(8),
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(8),
         ];
         let expected: [Felt; 4] = Rpx256::hash_elements(&input8).into();
         let result = hasher.hash_iter(input8);
@@ -344,22 +315,22 @@ mod p3_tests {
 
         // Test with 16 elements (two rates)
         let input16 = [
-            Felt::new(1),
-            Felt::new(2),
-            Felt::new(3),
-            Felt::new(4),
-            Felt::new(5),
-            Felt::new(6),
-            Felt::new(7),
-            Felt::new(8),
-            Felt::new(9),
-            Felt::new(10),
-            Felt::new(11),
-            Felt::new(12),
-            Felt::new(13),
-            Felt::new(14),
-            Felt::new(15),
-            Felt::new(16),
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(8),
+            Felt::new_unchecked(9),
+            Felt::new_unchecked(10),
+            Felt::new_unchecked(11),
+            Felt::new_unchecked(12),
+            Felt::new_unchecked(13),
+            Felt::new_unchecked(14),
+            Felt::new_unchecked(15),
+            Felt::new_unchecked(16),
         ];
         let expected: [Felt; 4] = Rpx256::hash_elements(&input16).into();
         let result = hasher.hash_iter(input16);
@@ -368,8 +339,18 @@ mod p3_tests {
 
     #[test]
     fn test_rpx_compression_vs_merge() {
-        let digest1 = [Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)];
-        let digest2 = [Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)];
+        let digest1 = [
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+        ];
+        let digest2 = [
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(8),
+        ];
 
         // Rpx256::merge expects &[Word; 2]
         let expected: [Felt; 4] = Rpx256::merge(&[digest1.into(), digest2.into()]).into();

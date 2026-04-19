@@ -12,7 +12,7 @@ mod common;
 const MATRIX_SIZES: &[usize] = &[64, 256, 1024];
 
 fn generate_felt_matrix(size: usize) -> Vec<Felt> {
-    (0..(size * size)).map(|i| Felt::new(i as u64)).collect()
+    (0..(size * size)).map(|i| Felt::new_unchecked(i as u64)).collect()
 }
 
 /// Unsafe transpose using uninit_vector

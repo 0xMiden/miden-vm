@@ -5,6 +5,8 @@
 //! existing [`Smt`] implementation, comparing the results of the persistent backend against it
 //! wherever relevant.
 
+use alloc::vec::Vec;
+
 use assert_matches::assert_matches;
 use itertools::Itertools;
 use tempfile::{TempDir, tempdir};
@@ -126,7 +128,12 @@ fn load_extant() -> Result<()> {
     assert_eq!(l2_value, Some(t2_value));
 
     // ...and entries.
-    let l1_entries = backend.entries(lineage_1)?.sorted().collect_vec();
+    let l1_entries = backend
+        .entries(lineage_1)?
+        .collect::<std::result::Result<Vec<_>, _>>()?
+        .into_iter()
+        .sorted()
+        .collect_vec();
     let t1_entries = tree_1
         .entries()
         .sorted()
@@ -134,7 +141,12 @@ fn load_extant() -> Result<()> {
         .collect_vec();
     assert_eq!(l1_entries, t1_entries);
 
-    let l2_entries = backend.entries(lineage_2)?.sorted().collect_vec();
+    let l2_entries = backend
+        .entries(lineage_2)?
+        .collect::<std::result::Result<Vec<_>, _>>()?
+        .into_iter()
+        .sorted()
+        .collect_vec();
     let t2_entries = tree_2
         .entries()
         .sorted()
@@ -493,22 +505,11 @@ fn entries() -> Result<()> {
     backend.update_tree(lineage_1, version, operations)?;
 
     // Now, the iterator should yield the expected three items.
-    assert_eq!(backend.entries(lineage_1)?.count(), 3);
-    assert!(
-        backend
-            .entries(lineage_1)?
-            .contains(&TreeEntry { key: key_1_1, value: value_1_1 }),
-    );
-    assert!(
-        backend
-            .entries(lineage_1)?
-            .contains(&TreeEntry { key: key_1_2, value: value_1_2 }),
-    );
-    assert!(
-        backend
-            .entries(lineage_1)?
-            .contains(&TreeEntry { key: key_1_3, value: value_1_3 }),
-    );
+    let entries = backend.entries(lineage_1)?.collect::<Result<Vec<_>>>()?;
+    assert_eq!(entries.len(), 3);
+    assert!(entries.contains(&TreeEntry { key: key_1_1, value: value_1_1 }));
+    assert!(entries.contains(&TreeEntry { key: key_1_2, value: value_1_2 }));
+    assert!(entries.contains(&TreeEntry { key: key_1_3, value: value_1_3 }));
 
     Ok(())
 }
@@ -614,6 +615,130 @@ fn update_tree() -> Result<()> {
     assert_eq!(backend.trees()?.count(), 1);
     assert!(backend.trees()?.any(|e| e.root() == tree_1.root()));
     assert_eq!(backend_revs_2, tree_revs_2);
+
+    Ok(())
+}
+
+#[test]
+fn add_lineages() -> Result<()> {
+    let (_file, mut backend) = default_backend()?;
+    let mut rng = ContinuousRng::new([0xa1; 32]);
+
+    // An empty batch should return an empty result and leave the backend unchanged.
+    let version: VersionId = rng.value();
+    let result = backend.add_lineages(version, SmtForestUpdateBatch::empty())?;
+    assert!(result.is_empty());
+    assert_eq!(backend.lineages()?.count(), 0);
+    assert_eq!(backend.trees()?.count(), 0);
+
+    // A single lineage with two inserts should work correctly.
+    let lineage_1: LineageId = rng.value();
+    let key_1_1: Word = rng.value();
+    let value_1_1: Word = rng.value();
+    let key_1_2: Word = rng.value();
+    let value_1_2: Word = rng.value();
+
+    let mut batch = SmtForestUpdateBatch::empty();
+    batch.operations(lineage_1).add_insert(key_1_1, value_1_1);
+    batch.operations(lineage_1).add_insert(key_1_2, value_1_2);
+
+    let result = backend.add_lineages(version, batch)?;
+    assert_eq!(result.len(), 1);
+
+    let mut ref_tree_1 = Smt::new();
+    ref_tree_1.insert(key_1_1, value_1_1)?;
+    ref_tree_1.insert(key_1_2, value_1_2)?;
+
+    assert_eq!(result[0].1.root(), ref_tree_1.root());
+    assert_eq!(backend.get(lineage_1, key_1_1)?, Some(value_1_1));
+    assert_eq!(backend.get(lineage_1, key_1_2)?, Some(value_1_2));
+
+    // Multi-lineage test with a fresh backend.
+    let (_file2, mut backend) = default_backend()?;
+
+    let lineage_a: LineageId = rng.value();
+    let lineage_b: LineageId = rng.value();
+    let lineage_c: LineageId = rng.value();
+
+    let key_a_1: Word = rng.value();
+    let value_a_1: Word = rng.value();
+    let key_a_2: Word = rng.value();
+    let value_a_2: Word = rng.value();
+    let key_b_1: Word = rng.value();
+    let value_b_1: Word = rng.value();
+    let key_b_2: Word = rng.value();
+    let value_b_2: Word = rng.value();
+    let key_c_1: Word = rng.value();
+    let value_c_1: Word = rng.value();
+    let key_c_2: Word = rng.value();
+    let value_c_2: Word = rng.value();
+
+    let mut batch = SmtForestUpdateBatch::empty();
+    batch.operations(lineage_a).add_insert(key_a_1, value_a_1);
+    batch.operations(lineage_a).add_insert(key_a_2, value_a_2);
+    batch.operations(lineage_b).add_insert(key_b_1, value_b_1);
+    batch.operations(lineage_b).add_insert(key_b_2, value_b_2);
+    batch.operations(lineage_c).add_insert(key_c_1, value_c_1);
+    batch.operations(lineage_c).add_insert(key_c_2, value_c_2);
+
+    let result = backend.add_lineages(version, batch)?;
+    assert_eq!(result.len(), 3);
+
+    // Build reference trees and verify roots.
+    let mut ref_a = Smt::new();
+    ref_a.insert(key_a_1, value_a_1)?;
+    ref_a.insert(key_a_2, value_a_2)?;
+
+    let mut ref_b = Smt::new();
+    ref_b.insert(key_b_1, value_b_1)?;
+    ref_b.insert(key_b_2, value_b_2)?;
+
+    let mut ref_c = Smt::new();
+    ref_c.insert(key_c_1, value_c_1)?;
+    ref_c.insert(key_c_2, value_c_2)?;
+
+    let root_a = result.iter().find(|(l, _)| *l == lineage_a).unwrap().1.root();
+    let root_b = result.iter().find(|(l, _)| *l == lineage_b).unwrap().1.root();
+    let root_c = result.iter().find(|(l, _)| *l == lineage_c).unwrap().1.root();
+    assert_eq!(root_a, ref_a.root());
+    assert_eq!(root_b, ref_b.root());
+    assert_eq!(root_c, ref_c.root());
+    assert_eq!(backend.lineages()?.count(), 3);
+
+    // Cross-lineage gets should work correctly.
+    assert_eq!(backend.get(lineage_a, key_a_1)?, Some(value_a_1));
+    assert_eq!(backend.get(lineage_b, key_b_2)?, Some(value_b_2));
+    assert_eq!(backend.get(lineage_c, key_c_1)?, Some(value_c_1));
+
+    // Verify gets spanning all three lineages.
+    assert_eq!(backend.get(lineage_a, key_a_1)?, Some(value_a_1));
+    assert_eq!(backend.get(lineage_b, key_b_1)?, Some(value_b_1));
+    assert_eq!(backend.get(lineage_c, key_c_2)?, Some(value_c_2));
+
+    // Duplicate lineage error: pre-add one lineage, then try a batch containing it.
+    let (_file3, mut backend) = default_backend()?;
+    let existing_lineage: LineageId = rng.value();
+    let new_lineage: LineageId = rng.value();
+
+    let mut ops = SmtUpdateBatch::default();
+    ops.add_insert(rng.value(), rng.value());
+    backend.add_lineage(existing_lineage, version, ops)?;
+
+    let lineage_count_before = backend.lineages()?.count();
+
+    let mut batch = SmtForestUpdateBatch::empty();
+    batch.operations(existing_lineage).add_insert(rng.value(), rng.value());
+    batch.operations(new_lineage).add_insert(rng.value(), rng.value());
+
+    let result = backend.add_lineages(version, batch);
+    assert!(result.is_err());
+    assert_matches!(
+        result.unwrap_err(),
+        BackendError::DuplicateLineage(l) if l == existing_lineage
+    );
+
+    // Backend state should be unchanged (atomicity).
+    assert_eq!(backend.lineages()?.count(), lineage_count_before);
 
     Ok(())
 }

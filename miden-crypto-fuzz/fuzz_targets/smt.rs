@@ -1,7 +1,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use miden_crypto::{Felt, ONE, Word, merkle::smt::Smt};
+use miden_crypto::{merkle::smt::Smt, Felt, Word, ONE};
 use rand::Rng; // Needed for randomizing the split percentage
 
 struct FuzzInput {
@@ -29,14 +29,18 @@ impl FuzzInput {
 
         for chunk in data.chunks_exact(40).take(num_entries) {
             let key = Word::new([
-                Felt::new(u64::from_le_bytes(chunk[0..8].try_into().unwrap())),
-                Felt::new(u64::from_le_bytes(chunk[8..16].try_into().unwrap())),
-                Felt::new(u64::from_le_bytes(chunk[16..24].try_into().unwrap())),
-                Felt::new(u64::from_le_bytes(chunk[24..32].try_into().unwrap())),
+                Felt::new_unchecked(u64::from_le_bytes(chunk[0..8].try_into().unwrap())),
+                Felt::new_unchecked(u64::from_le_bytes(chunk[8..16].try_into().unwrap())),
+                Felt::new_unchecked(u64::from_le_bytes(chunk[16..24].try_into().unwrap())),
+                Felt::new_unchecked(u64::from_le_bytes(chunk[24..32].try_into().unwrap())),
             ]);
-            let value =
-                [ONE, ONE, ONE, Felt::new(u64::from_le_bytes(chunk[32..40].try_into().unwrap()))]
-                    .into();
+            let value = [
+                ONE,
+                ONE,
+                ONE,
+                Felt::new_unchecked(u64::from_le_bytes(chunk[32..40].try_into().unwrap())),
+            ]
+            .into();
             entries.push((key, value));
         }
 

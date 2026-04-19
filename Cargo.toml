@@ -1,6 +1,16 @@
 [workspace]
-exclude  = ["miden-crypto-fuzz"]
-members  = ["miden-crypto", "miden-crypto-derive", "miden-field", "miden-serde-utils"]
+exclude = ["miden-crypto-fuzz"]
+members = [
+  "miden-bench",
+  "miden-crypto",
+  "miden-crypto-derive",
+  "miden-field",
+  "miden-serde-utils",
+  "stark/miden-lifted-air",
+  "stark/miden-lifted-stark",
+  "stark/miden-stark-transcript",
+  "stark/miden-stateful-hasher",
+]
 resolver = "3"
 
 [workspace.package]
@@ -11,12 +21,83 @@ keywords     = ["crypto", "hash", "merkle", "miden"]
 license      = "MIT OR Apache-2.0"
 repository   = "https://github.com/0xMiden/crypto"
 rust-version = "1.90"
-version      = "0.23.0"
+version      = "0.24.0"
 
 [workspace.dependencies]
-miden-crypto-derive = { path = "miden-crypto-derive", version = "0.23" }
-miden-field         = { path = "miden-field", version = "0.23" }
-miden-serde-utils   = { path = "miden-serde-utils", version = "0.23" }
+miden-crypto-derive    = { path = "miden-crypto-derive", version = "0.24" }
+miden-field            = { path = "miden-field", version = "0.24" }
+miden-lifted-air       = { default-features = false, path = "stark/miden-lifted-air", version = "0.24" }
+miden-lifted-stark     = { default-features = false, path = "stark/miden-lifted-stark", version = "0.24" }
+miden-serde-utils      = { path = "miden-serde-utils", version = "0.24" }
+miden-stark-transcript = { default-features = false, path = "stark/miden-stark-transcript", version = "0.24" }
+miden-stateful-hasher  = { default-features = false, path = "stark/miden-stateful-hasher", version = "0.24" }
+
+# Plonky3
+p3-air           = { default-features = false, version = "0.5" }
+p3-batch-stark   = { default-features = false, version = "0.5" }
+p3-blake3        = { default-features = false, version = "0.5" }
+p3-blake3-air    = { default-features = false, version = "0.5" }
+p3-bn254         = { default-features = false, version = "0.5" }
+p3-challenger    = { default-features = false, version = "0.5" }
+p3-commit        = { default-features = false, version = "0.5" }
+p3-dft           = { default-features = false, version = "0.5" }
+p3-field         = { default-features = false, version = "0.5" }
+p3-fri           = { default-features = false, version = "0.5" }
+p3-goldilocks    = { default-features = false, version = "0.5" }
+p3-interpolation = { default-features = false, version = "0.5" }
+p3-keccak        = { default-features = false, version = "0.5" }
+p3-keccak-air    = { default-features = false, version = "0.5" }
+p3-lookup        = { default-features = false, version = "0.5" }
+p3-matrix        = { default-features = false, version = "0.5" }
+p3-maybe-rayon   = { default-features = false, version = "0.5" }
+p3-merkle-tree   = { default-features = false, version = "0.5" }
+p3-mersenne-31   = { default-features = false, version = "0.5" }
+p3-poseidon2-air = { default-features = false, version = "0.5" }
+p3-symmetric     = { default-features = false, version = "0.5" }
+p3-uni-stark     = { default-features = false, version = "0.5" }
+p3-util          = { default-features = false, version = "0.5" }
+
+# Shared third-party dependencies used across workspace crates
+assert_matches   = { default-features = false, version = "1.5" }
+blake3           = { default-features = false, version = "1.8" }
+cc               = "1.2"
+chacha20poly1305 = "0.10"
+curve25519-dalek = { default-features = false, version = "4" }
+ed25519-dalek    = "2"
+flume            = "0.11.1"
+hex              = { default-features = false, version = "0.4" }
+hkdf             = { default-features = false, version = "0.12" }
+itertools        = "0.14"
+k256             = "0.13"
+num              = { default-features = false, version = "0.4" }
+num-complex      = { default-features = false, version = "0.4" }
+once_cell        = { default-features = false, version = "1.21" }
+proptest         = { default-features = false, version = "1.7" }
+quote            = "1.0"
+rand_chacha      = { default-features = false, version = "0.9" }
+rand_core        = { default-features = false, version = "0.9" }
+rand_hc          = "0.3"
+rayon            = "1.10"
+rocksdb          = { default-features = false, version = "0.24" }
+rstest           = "0.26"
+seq-macro        = "0.3"
+sha2             = { default-features = false, version = "0.10" }
+sha3             = { default-features = false, version = "0.10" }
+subtle           = { default-features = false, version = "2.6" }
+syn              = "2.0"
+tempfile         = "3.20"
+x25519-dalek     = { default-features = false, version = "2.0" }
+
+# Shared third-party dependencies used by imported Miden STARK crates
+clap               = { features = ["derive"], version = "4" }
+criterion          = { features = ["html_reports"], version = "0.8" }
+postcard           = { default-features = false, features = ["alloc"], version = "1" }
+rand               = { default-features = false, version = "0.10" }
+serde              = { default-features = false, features = ["alloc", "derive"], version = "1.0" }
+thiserror          = { default-features = false, version = "2.0" }
+tracing            = { default-features = false, features = ["attributes"], version = "0.1.37" }
+tracing-forest     = "0.1.6"
+tracing-subscriber = { features = ["env-filter", "fmt", "std"], version = "0.3.17" }
 
 [workspace.lints.rust]
 # Suppress warnings about `cfg(fuzzing)`, which is automatically set when using `cargo-fuzz`.

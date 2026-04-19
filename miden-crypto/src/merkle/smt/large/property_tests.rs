@@ -15,7 +15,7 @@ use crate::{
 // ================================================================================================
 
 fn arb_felt() -> impl Strategy<Value = Felt> {
-    prop_oneof![any::<u64>().prop_map(Felt::new), Just(ZERO), Just(ONE),]
+    prop_oneof![any::<u64>().prop_map(Felt::new_unchecked), Just(ZERO), Just(ONE),]
 }
 
 fn arb_word() -> impl Strategy<Value = Word> {

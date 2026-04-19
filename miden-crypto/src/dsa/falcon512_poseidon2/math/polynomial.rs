@@ -229,13 +229,13 @@ where
     type Output = Polynomial<F>;
     fn add(self, rhs: Self) -> Self::Output {
         let coefficients = if self.coefficients.len() >= rhs.coefficients.len() {
-            let mut coefficients = self.coefficients.clone();
+            let mut coefficients = self.coefficients;
             for (i, c) in rhs.coefficients.into_iter().enumerate() {
                 coefficients[i] += c;
             }
             coefficients
         } else {
-            let mut coefficients = rhs.coefficients.clone();
+            let mut coefficients = rhs.coefficients;
             for (i, c) in self.coefficients.into_iter().enumerate() {
                 coefficients[i] += c;
             }
@@ -255,7 +255,7 @@ where
                 self.coefficients[i] += c;
             }
         } else {
-            let mut coefficients = rhs.coefficients.clone();
+            let mut coefficients = rhs.coefficients;
             for (i, c) in self.coefficients.iter().enumerate() {
                 coefficients[i] += c.clone();
             }
@@ -457,7 +457,7 @@ where
         if self.is_zero() {
             Self::zero();
         }
-        let mut remainder = self.clone();
+        let mut remainder = self;
         let mut quotient = Polynomial::<F>::zero();
         while remainder.degree().unwrap() >= denominator.degree().unwrap() {
             let shift = remainder.degree().unwrap() - denominator.degree().unwrap();
@@ -580,6 +580,11 @@ impl Polynomial<FalconFelt> {
     /// Returns the coefficients of this polynomial as field elements.
     pub fn to_elements(&self) -> Vec<Felt> {
         self.coefficients.iter().map(|&a| Felt::from_u16(a.value() as u16)).collect()
+    }
+
+    /// Returns the coefficients of this polynomial as balanced signed values.
+    pub fn to_balanced_values(&self) -> Vec<i16> {
+        self.coefficients.iter().copied().map(FalconFelt::balanced_value).collect()
     }
 
     // POLYNOMIAL OPERATIONS

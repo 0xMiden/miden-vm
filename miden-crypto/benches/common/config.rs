@@ -54,14 +54,6 @@ pub const MERGE_INPUT_SIZES: &[usize] = &[
     512, // 512 bytes
 ];
 
-/// Integer sizes for merge_with_int tests
-pub const MERGE_INT_SIZES: &[usize] = &[
-    1, // Single byte integer
-    2, // 16-bit integer
-    4, // 32-bit integer
-    8, // 64-bit integer
-];
-
 // === Field Operations Configuration ===
 /// Field element counts for batch operations
 pub const FIELD_BATCH_SIZES: &[usize] = &[

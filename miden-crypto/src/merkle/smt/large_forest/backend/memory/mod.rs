@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 use crate::{
     EMPTY_WORD, Map, Word,
     merkle::smt::{
-        Smt, SmtProof, VersionId,
+        LeafIndex, SMT_DEPTH, Smt, SmtLeaf, SmtProof, VersionId,
         large_forest::{
             Backend,
             backend::{BackendError, MutationSet, Result},
@@ -47,11 +47,28 @@ impl Backend for InMemoryBackend {
     ///
     /// # Errors
     ///
-    /// - [`BackendError::UnknownLineage`] If the provided `lineage` is one not known by this
+    /// - [`BackendError::UnknownLineage`] if the provided `lineage` is one not known by this
     ///   backend.
     fn open(&self, lineage: LineageId, key: Word) -> Result<SmtProof> {
         let tree = self.trees.get(&lineage).ok_or(BackendError::UnknownLineage(lineage))?;
         Ok(tree.tree.open(&key))
+    }
+
+    /// Returns the leaf stored at `leaf_index` in the SMT with the specified `lineage`.
+    ///
+    /// If no leaf is explicitly stored at the given index, an empty leaf for that index is
+    /// returned.
+    ///
+    /// # Errors
+    ///
+    /// - [`BackendError::UnknownLineage`] if the provided `lineage` is one not known by this
+    ///   backend.
+    fn get_leaf(&self, lineage: LineageId, leaf_index: LeafIndex<SMT_DEPTH>) -> Result<SmtLeaf> {
+        let tree = self.trees.get(&lineage).ok_or(BackendError::UnknownLineage(lineage))?;
+        Ok(tree
+            .tree
+            .get_leaf_by_index(leaf_index)
+            .unwrap_or_else(|| SmtLeaf::new_empty(leaf_index)))
     }
 
     /// Returns the value associated with the provided `key` in the SMT with the specified
@@ -113,9 +130,9 @@ impl Backend for InMemoryBackend {
     ///
     /// - [`BackendError::UnknownLineage`] if the provided `lineage` is one not known by this
     ///   backend.
-    fn entries(&self, lineage: LineageId) -> Result<impl Iterator<Item = TreeEntry>> {
+    fn entries(&self, lineage: LineageId) -> Result<impl Iterator<Item = Result<TreeEntry>>> {
         let tree = self.trees.get(&lineage).ok_or(BackendError::UnknownLineage(lineage))?;
-        Ok(tree.tree.entries().map(|(k, v)| TreeEntry { key: *k, value: *v }))
+        Ok(tree.tree.entries().map(|(k, v)| Ok(TreeEntry { key: *k, value: *v })))
     }
 
     /// Adds the provided `lineage` to the forest.
@@ -141,7 +158,7 @@ impl Backend for InMemoryBackend {
 
         // A failure to compute mutations is a failure derived from user input, so we forward it as
         // appropriate.
-        let mutations = tree.compute_mutations(updates.into_iter().map(|o| o.into()))?;
+        let mutations = tree.compute_mutations(updates.into_iter().map(Into::into))?;
 
         // If computation of the mutations has succeeded but the application fails, then this should
         // be reported as an internal error, not a merkle error, to allow the caller to decide what
@@ -181,7 +198,7 @@ impl Backend for InMemoryBackend {
         // We compute the mutations as a precondition check, which will leave the underlying tree in
         // the same state if anything errors. Any error this yields is considered to be derived from
         // user-input and hence is forwarded as-is.
-        let mutations = tree.compute_mutations(updates.into_iter().map(|o| o.into()))?;
+        let mutations = tree.compute_mutations(updates.into_iter().map(Into::into))?;
 
         // The invariants on this method given by the `Backend` trait states that no new allocations
         // should be performed if the updates do not change the tree. As a result, we can
@@ -203,6 +220,70 @@ impl Backend for InMemoryBackend {
         tree_data.version = new_version;
 
         Ok(reversion_set)
+    }
+
+    /// Adds multiple new `lineages` to the tree, creating an empty tree for each and applying the
+    /// provided modifications to it, with the result being given the specified `version`.
+    ///
+    /// If the provide batch of modifications is empty for any given lineage, then the **empty tree
+    /// will be added** as the first version in that lineage.
+    ///
+    /// # Errors
+    ///
+    /// - [`BackendError::DuplicateLineage`] if any provided lineage conflicts with an already-known
+    ///   lineage. No data is changed in this case.
+    /// - [`BackendError::Merkle`] if any of the provided updates cannot be applied on top of the
+    ///   empty tree.
+    fn add_lineages(
+        &mut self,
+        version: VersionId,
+        lineages: SmtForestUpdateBatch,
+    ) -> Result<Vec<(LineageId, TreeWithRoot)>> {
+        // We start by checking that all lineages referred to in the batch of `updates` are valid,
+        // failing early with an error if need be.
+        let updates = lineages
+            .into_iter()
+            .map(|(lineage, ops)| {
+                if self.trees.contains_key(&lineage) {
+                    return Err(BackendError::DuplicateLineage(lineage));
+                }
+                Ok((lineage, ops))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        // Next, we compute all the relevant mutations to each tree, also failing with an error
+        // where relevant.
+        let mutations = updates
+            .into_iter()
+            .map(|(lineage, ops)| {
+                let tree = Smt::new();
+                let mutations = tree.compute_mutations(ops.into_iter().map(Into::into))?;
+                Ok((lineage, tree, mutations))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        // With the preconditions checked, we can unconditionally perform the changes on all trees.
+        // We apply all mutations first without modifying self.trees, so that if any mutation
+        // fails, no data is changed.
+        let applied = mutations
+            .into_iter()
+            .map(|(lineage, mut tree, mutations)| {
+                tree.apply_mutations(mutations).map_err(BackendError::internal_from)?;
+                Ok((lineage, tree))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        // Once they have all succeeded, we then modify the data in memory.
+        let results = applied
+            .into_iter()
+            .map(|(lineage, tree)| {
+                let root = tree.root();
+                self.trees.insert(lineage, TreeData { version, tree });
+                (lineage, TreeWithRoot::new(lineage, version, root))
+            })
+            .collect::<Vec<_>>();
+
+        Ok(results)
     }
 
     /// Performs the provided `updates` on the entire forest, returning the mutation sets that would
@@ -244,7 +325,7 @@ impl Backend for InMemoryBackend {
             .into_iter()
             .map(|(lineage, ops)| {
                 let tree = self.trees.get(&lineage).expect("Tree known to be present was not");
-                let mutations = tree.tree.compute_mutations(ops.into_iter().map(|o| o.into()))?;
+                let mutations = tree.tree.compute_mutations(ops.into_iter().map(Into::into))?;
                 Ok((lineage, mutations))
             })
             .collect::<Result<Vec<_>>>()?;

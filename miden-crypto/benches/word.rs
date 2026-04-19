@@ -1,7 +1,7 @@
 //! Comprehensive Word operation benchmarks
 //!
 //! This module benchmarks all Word operations implemented in the library
-//! with a focus on type conversions, serialization, and lexicographic ordering.
+//! with a focus on type conversions, serialization, and ordering.
 //!
 //! # Organization
 //!
@@ -9,7 +9,7 @@
 //! 1. Word creation and basic operations
 //! 2. Type conversions (bool, u8, u16, u32, u64)
 //! 3. Serialization and deserialization
-//! 4. Lexicographic ordering
+//! 4. Ordering (lexicographic)
 //! 5. Batch operations
 //!
 //! # Adding New Word Benchmarks
@@ -22,7 +22,7 @@
 
 use criterion::{Criterion, criterion_group, criterion_main};
 // Import Word modules
-use miden_crypto::{Felt, LexicographicWord, Word};
+use miden_crypto::{Felt, Word};
 
 // Import common utilities
 mod common;
@@ -33,16 +33,66 @@ use crate::config::{DEFAULT_MEASUREMENT_TIME, DEFAULT_SAMPLE_SIZE, FIELD_BATCH_S
 
 /// Configuration for Word testing
 const TEST_WORDS: [Word; 10] = [
-    Word::new([Felt::new(0), Felt::new(0), Felt::new(0), Felt::new(0)]),
-    Word::new([Felt::new(1), Felt::new(0), Felt::new(0), Felt::new(0)]),
-    Word::new([Felt::new(0), Felt::new(1), Felt::new(0), Felt::new(0)]),
-    Word::new([Felt::new(0), Felt::new(0), Felt::new(1), Felt::new(0)]),
-    Word::new([Felt::new(0), Felt::new(0), Felt::new(0), Felt::new(1)]),
-    Word::new([Felt::new(1), Felt::new(1), Felt::new(1), Felt::new(1)]),
-    Word::new([Felt::new(u64::MAX), Felt::new(0), Felt::new(0), Felt::new(0)]),
-    Word::new([Felt::new(0), Felt::new(u64::MAX), Felt::new(0), Felt::new(0)]),
-    Word::new([Felt::new(0), Felt::new(0), Felt::new(u64::MAX), Felt::new(0)]),
-    Word::new([Felt::new(0), Felt::new(0), Felt::new(0), Felt::new(u64::MAX)]),
+    Word::new([
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+    ]),
+    Word::new([
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+    ]),
+    Word::new([
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+    ]),
+    Word::new([
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(0),
+    ]),
+    Word::new([
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(1),
+    ]),
+    Word::new([
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(1),
+    ]),
+    Word::new([
+        Felt::new_unchecked(u64::MAX),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+    ]),
+    Word::new([
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(u64::MAX),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+    ]),
+    Word::new([
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(u64::MAX),
+        Felt::new_unchecked(0),
+    ]),
+    Word::new([
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(0),
+        Felt::new_unchecked(u64::MAX),
+    ]),
 ];
 
 // === Word Creation and Basic Operations ===
@@ -57,10 +107,10 @@ benchmark_with_setup_data! {
         let test_elements: Vec<[Felt; 4]> = (0u64..100)
             .map(|i| {
                 [
-                    Felt::new(i),
-                    Felt::new(i + 1),
-                    Felt::new(i + 2),
-                    Felt::new(i + 3),
+                    Felt::new_unchecked(i),
+                    Felt::new_unchecked(i + 1),
+                    Felt::new_unchecked(i + 2),
+                    Felt::new_unchecked(i + 3),
                 ]
             })
             .collect();
@@ -198,82 +248,42 @@ benchmark_with_setup! {
     },
 }
 
-// === Lexicographic Ordering Benchmarks ===
+// === Ordering Benchmarks ===
 
-// Lexicographic word creation
-benchmark_with_setup! {
-    word_lexicographic_new,
-    DEFAULT_MEASUREMENT_TIME,
-    DEFAULT_SAMPLE_SIZE,
-    "new",
-    || {},
-    |b: &mut criterion::Bencher| {
-        b.iter(|| {
-            for word in &TEST_WORDS {
-                let _lex_word = LexicographicWord::new(*word);
-            }
-        })
-    },
-}
-
-// Lexicographic word access
+// Word ordering comparisons (lexicographic)
 benchmark_with_setup_data! {
-    word_lexicographic_access,
+    word_cmp,
     DEFAULT_MEASUREMENT_TIME,
     DEFAULT_SAMPLE_SIZE,
-    "inner_access",
+    "cmp",
     || {
-        let lex_words: Vec<LexicographicWord> =
-            TEST_WORDS.iter().map(|w| LexicographicWord::new(*w)).collect();
-        lex_words
+        TEST_WORDS.to_vec()
     },
-    |b: &mut criterion::Bencher, lex_words: &Vec<LexicographicWord>| {
+    |b: &mut criterion::Bencher, words: &Vec<Word>| {
         b.iter(|| {
-            for lex_word in lex_words {
-                let _inner = lex_word.inner();
-            }
-        })
-    },
-}
-
-// Lexicographic ordering comparisons
-benchmark_with_setup_data! {
-    word_lexicographic_ordering,
-    DEFAULT_MEASUREMENT_TIME,
-    DEFAULT_SAMPLE_SIZE,
-    "partial_cmp",
-    || {
-        let lex_words: Vec<LexicographicWord> =
-            TEST_WORDS.iter().map(|w| LexicographicWord::new(*w)).collect();
-        lex_words
-    },
-    |b: &mut criterion::Bencher, lex_words: &Vec<LexicographicWord>| {
-        b.iter(|| {
-            for i in 0..lex_words.len() {
-                for j in i..lex_words.len() {
-                    let _result = lex_words[i].partial_cmp(&lex_words[j]);
+            for i in 0..words.len() {
+                for j in i..words.len() {
+                    let _result = words[i].cmp(&words[j]);
                 }
             }
         })
     },
 }
 
-// Lexicographic equality comparison
+// Word equality comparison
 benchmark_with_setup_data! {
-    word_lexicographic_eq,
+    word_eq,
     DEFAULT_MEASUREMENT_TIME,
     DEFAULT_SAMPLE_SIZE,
     "eq",
     || {
-        let lex_words: Vec<LexicographicWord> =
-            TEST_WORDS.iter().map(|w| LexicographicWord::new(*w)).collect();
-        lex_words
+        TEST_WORDS.to_vec()
     },
-    |b: &mut criterion::Bencher, lex_words: &Vec<LexicographicWord>| {
+    |b: &mut criterion::Bencher, words: &Vec<Word>| {
         b.iter(|| {
-            for i in 0..lex_words.len() {
-                for j in 0..lex_words.len() {
-                    let _result = lex_words[i] == lex_words[j];
+            for i in 0..words.len() {
+                for j in 0..words.len() {
+                    let _result = words[i] == words[j];
                 }
             }
         })
@@ -290,10 +300,10 @@ benchmark_batch! {
         let words: Vec<Word> = (0..count)
             .map(|i| {
                 Word::new([
-                    Felt::new(i as u64),
-                    Felt::new((i + 1) as u64),
-                    Felt::new((i + 2) as u64),
-                    Felt::new((i + 3) as u64),
+                    Felt::new_unchecked(i as u64),
+                    Felt::new_unchecked((i + 1) as u64),
+                    Felt::new_unchecked((i + 2) as u64),
+                    Felt::new_unchecked((i + 3) as u64),
                 ])
             })
             .collect();
@@ -321,11 +331,9 @@ criterion_group!(
     // Serialization benchmarks
     word_to_hex,
     word_to_vec,
-    // Lexicographic ordering benchmarks
-    word_lexicographic_new,
-    word_lexicographic_access,
-    word_lexicographic_ordering,
-    word_lexicographic_eq,
+    // Ordering benchmarks
+    word_cmp,
+    word_eq,
     // Batch operations benchmarks
     word_batch_elements,
 );

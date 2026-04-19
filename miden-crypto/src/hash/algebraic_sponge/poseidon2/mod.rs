@@ -1,21 +1,48 @@
+use once_cell::sync::Lazy;
+use p3_goldilocks::Goldilocks;
+use p3_symmetric::Permutation;
+
 use super::{
     AlgebraicSponge, CAPACITY_RANGE, DIGEST_RANGE, Felt, RATE_RANGE, RATE0_RANGE, RATE1_RANGE,
-    Range, STATE_WIDTH, Word, ZERO,
+    Range, STATE_WIDTH, Word,
+};
+use crate::{
+    ZERO,
+    hash::algebraic_sponge::poseidon2::constants::{
+        ARK_EXT_INITIAL, ARK_EXT_TERMINAL, ARK_INT, MAT_DIAG,
+    },
 };
 
 mod constants;
-use constants::{
-    ARK_EXT_INITIAL, ARK_EXT_TERMINAL, ARK_INT, MAT_DIAG, NUM_EXTERNAL_ROUNDS_HALF,
-    NUM_INTERNAL_ROUNDS,
-};
+use constants::{NUM_EXTERNAL_ROUNDS_HALF, NUM_INTERNAL_ROUNDS};
 
 #[cfg(test)]
 mod test;
 
+static P3_POSEIDON2: Lazy<p3_goldilocks::Poseidon2Goldilocks<12>> =
+    Lazy::new(p3_goldilocks::default_goldilocks_poseidon2_12);
+
+/// Applies Plonky3's optimized Poseidon2 permutation to a `[Felt; 12]` state.
+///
+/// `Felt` is `#[repr(transparent)]` over `Goldilocks`, so the transmute is safe.
+/// A process-global lazy static holds the permutation so round constants are not reallocated on
+/// every call (including `no_std`, via `once_cell` and the `critical-section` crate).
+#[inline(always)]
+fn p3_permute(state: &mut [Felt; STATE_WIDTH]) {
+    // SAFETY: Felt is #[repr(transparent)] over Goldilocks.
+    let gl_state =
+        unsafe { &mut *(state as *mut [Felt; STATE_WIDTH] as *mut [Goldilocks; STATE_WIDTH]) };
+
+    P3_POSEIDON2.permute_mut(gl_state);
+}
+
 /// Implementation of the Poseidon2 hash function with 256-bit output.
 ///
-/// The implementation follows the original [specification](https://eprint.iacr.org/2023/323) and
-/// its accompanying reference [implementation](https://github.com/HorizenLabs/poseidon2).
+/// The permutation is delegated to Plonky3's optimized `Poseidon2Goldilocks<12>`, which provides
+/// hardware-accelerated implementations on aarch64 (NEON inline assembly) and an optimized generic
+/// implementation on other architectures. The internal MDS diagonal uses small special values
+/// (-2, 1, 2, 1/2, 3, 4, ...) that enable multiplication via shifts and halves rather than full
+/// field multiplications.
 ///
 /// The parameters used to instantiate the function are:
 /// * Field: 64-bit prime field with modulus 2^64 - 2^32 + 1.
@@ -35,12 +62,11 @@ mod test;
 /// and it can be serialized into 32 bytes (256 bits).
 ///
 /// ## Hash output consistency
-/// Functions [hash_elements()](Poseidon2::hash_elements), [merge()](Poseidon2::merge), and
-/// [merge_with_int()](Poseidon2::merge_with_int) are internally consistent. That is, computing
-/// a hash for the same set of elements using these functions will always produce the same
-/// result. For example, merging two digests using [merge()](Poseidon2::merge) will produce the
-/// same result as hashing 8 elements which make up these digests using
-/// [hash_elements()](Poseidon2::hash_elements) function.
+/// Functions [hash_elements()](Poseidon2::hash_elements), and [merge()](Poseidon2::merge), are
+/// internally consistent. That is, computing a hash for the same set of elements using these
+/// functions will always produce the same result. For example, merging two digests using
+/// [merge()](Poseidon2::merge) will produce the same result as hashing 8 elements which make up
+/// these digests using [hash_elements()](Poseidon2::hash_elements) function.
 ///
 /// However, [hash()](Poseidon2::hash) function is not consistent with functions mentioned above.
 /// For example, if we take two field elements, serialize them to bytes and hash them using
@@ -76,17 +102,7 @@ pub struct Poseidon2();
 
 impl AlgebraicSponge for Poseidon2 {
     fn apply_permutation(state: &mut [Felt; STATE_WIDTH]) {
-        // 1. Apply (external) linear layer to the input
-        Self::apply_matmul_external(state);
-
-        // 2. Apply initial external rounds to the state
-        Self::initial_external_rounds(state);
-
-        // 3. Apply internal rounds to the state
-        Self::internal_rounds(state);
-
-        // 4. Apply terminal external rounds to the state
-        Self::terminal_external_rounds(state);
+        p3_permute(state);
     }
 }
 
@@ -164,12 +180,6 @@ impl Poseidon2 {
         <Self as AlgebraicSponge>::merge_many(values)
     }
 
-    /// Returns a hash of a digest and a u64 value.
-    #[inline(always)]
-    pub fn merge_with_int(seed: Word, value: u64) -> Word {
-        <Self as AlgebraicSponge>::merge_with_int(seed, value)
-    }
-
     /// Returns a hash of two digests and a domain identifier.
     #[inline(always)]
     pub fn merge_in_domain(values: &[Word; 2], domain: Felt) -> Word {
@@ -178,39 +188,6 @@ impl Poseidon2 {
 
     // POSEIDON2 PERMUTATION
     // --------------------------------------------------------------------------------------------
-
-    /// Applies the initial external rounds of the permutation.
-    #[allow(clippy::needless_range_loop)]
-    #[inline(always)]
-    fn initial_external_rounds(state: &mut [Felt; STATE_WIDTH]) {
-        for r in 0..NUM_EXTERNAL_ROUNDS_HALF {
-            Self::add_rc(state, &ARK_EXT_INITIAL[r]);
-            Self::apply_sbox(state);
-            Self::apply_matmul_external(state);
-        }
-    }
-
-    /// Applies the internal rounds of the permutation.
-    #[allow(clippy::needless_range_loop)]
-    #[inline(always)]
-    fn internal_rounds(state: &mut [Felt; STATE_WIDTH]) {
-        for r in 0..NUM_INTERNAL_ROUNDS {
-            state[0] += ARK_INT[r];
-            state[0] = state[0].exp_const_u64::<7>();
-            Self::matmul_internal(state, MAT_DIAG);
-        }
-    }
-
-    /// Applies the terminal external rounds of the permutation.
-    #[inline(always)]
-    #[allow(clippy::needless_range_loop)]
-    fn terminal_external_rounds(state: &mut [Felt; STATE_WIDTH]) {
-        for r in 0..NUM_EXTERNAL_ROUNDS_HALF {
-            Self::add_rc(state, &ARK_EXT_TERMINAL[r]);
-            Self::apply_sbox(state);
-            Self::apply_matmul_external(state);
-        }
-    }
 
     /// Applies the M_E (external) linear layer to the state in-place.
     ///
@@ -240,37 +217,30 @@ impl Poseidon2 {
         }
     }
 
-    /// Multiplies the state block-wise with a 4 x 4 MDS matrix.
+    /// Multiply a 4-element vector x by:
+    /// [ 2 3 1 1 ]
+    /// [ 1 2 3 1 ]
+    /// [ 1 1 2 3 ]
+    /// [ 3 1 1 2 ].
     #[inline(always)]
     fn matmul_m4(state: &mut [Felt; STATE_WIDTH]) {
-        let t4 = STATE_WIDTH / 4;
+        const N_CHUNKS: usize = STATE_WIDTH / 4;
 
-        for i in 0..t4 {
-            let idx = i * 4;
+        for i in 0..N_CHUNKS {
+            let base = i * 4;
+            let x = &mut state[base..base + 4];
 
-            let a = state[idx];
-            let b = state[idx + 1];
-            let c = state[idx + 2];
-            let d = state[idx + 3];
+            let t01 = x[0] + x[1];
+            let t23 = x[2] + x[3];
+            let t0123 = t01 + t23;
+            let t01123 = t0123 + x[1];
+            let t01233 = t0123 + x[3];
 
-            let t0 = a + b;
-            let t1 = c + d;
-            let two_b = b.double();
-            let two_d = d.double();
-
-            let t2 = two_b + t1;
-            let t3 = two_d + t0;
-
-            let t4 = t1.double().double() + t3;
-            let t5 = t0.double().double() + t2;
-
-            let t6 = t3 + t5;
-            let t7 = t2 + t4;
-
-            state[idx] = t6;
-            state[idx + 1] = t5;
-            state[idx + 2] = t7;
-            state[idx + 3] = t4;
+            // The order here is important. Need to overwrite x[0] and x[2] after x[1] and x[3].
+            x[3] = t01233 + x[0].double(); // 3*x[0] + x[1] + x[2] + 2*x[3]
+            x[1] = t01123 + x[2].double(); // x[0] + 2*x[1] + 3*x[2] + x[3]
+            x[0] = t01123 + t01; // 2*x[0] + 3*x[1] + x[2] + x[3]
+            x[2] = t01233 + t23; // x[0] + x[1] + 2*x[2] + 3*x[3]
         }
     }
 
@@ -318,27 +288,13 @@ impl Poseidon2 {
 // PLONKY3 INTEGRATION
 // ================================================================================================
 
-/// Plonky3-compatible Poseidon2 permutation implementation.
-///
-/// This module provides a Plonky3-compatible interface to the Poseidon2 hash function,
-/// implementing the `Permutation` and `CryptographicPermutation` traits from Plonky3.
-///
-/// This allows Poseidon2 to be used with Plonky3's cryptographic infrastructure, including:
-/// - PaddingFreeSponge for hashing
-/// - TruncatedPermutation for compression
-/// - DuplexChallenger for Fiat-Shamir transforms
 use p3_challenger::DuplexChallenger;
-use p3_symmetric::{
-    CryptographicPermutation, PaddingFreeSponge, Permutation, TruncatedPermutation,
-};
-
-// POSEIDON2 PERMUTATION FOR PLONKY3
-// ================================================================================================
+use p3_symmetric::{CryptographicPermutation, PaddingFreeSponge, TruncatedPermutation};
 
 /// Plonky3-compatible Poseidon2 permutation.
 ///
-/// This struct wraps the Poseidon2 permutation and implements Plonky3's `Permutation` and
-/// `CryptographicPermutation` traits, allowing Poseidon2 to be used within the Plonky3 ecosystem.
+/// This zero-sized wrapper delegates to Plonky3's optimized `Poseidon2Goldilocks<12>` and
+/// implements the `Permutation` and `CryptographicPermutation` traits.
 ///
 /// The permutation operates on a state of 12 field elements (STATE_WIDTH = 12), with:
 /// - Rate: 8 elements (positions 0-7)
@@ -387,7 +343,7 @@ impl Poseidon2Permutation256 {
 
 impl Permutation<[Felt; STATE_WIDTH]> for Poseidon2Permutation256 {
     fn permute_mut(&self, state: &mut [Felt; STATE_WIDTH]) {
-        Self::apply_permutation(state);
+        p3_permute(state);
     }
 }
 

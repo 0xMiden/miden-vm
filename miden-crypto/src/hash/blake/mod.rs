@@ -48,22 +48,12 @@ impl Blake3_256 {
         Digest::new(blake3::hash(bytes).into())
     }
 
-    // Note: merge/merge_many/merge_with_int methods were previously trait delegations
-    // (<Self as Hasher>::merge). They're now direct implementations as part of removing
-    // the Winterfell Hasher trait dependency. These are public API used in benchmarks.
     pub fn merge(values: &[Digest256; 2]) -> Digest256 {
         Self::hash(Digest::digests_as_bytes(values))
     }
 
     pub fn merge_many(values: &[Digest256]) -> Digest256 {
         Digest::new(blake3::hash(Digest::digests_as_bytes(values)).into())
-    }
-
-    pub fn merge_with_int(seed: Digest256, value: u64) -> Digest256 {
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(seed.as_bytes());
-        hasher.update(&value.to_le_bytes());
-        Digest::new(hasher.finalize().into())
     }
 
     /// Returns a hash of the provided field elements.
@@ -114,13 +104,6 @@ impl Blake3_192 {
 
     pub fn merge(values: &[Digest192; 2]) -> Digest192 {
         Self::hash(Digest::digests_as_bytes(values))
-    }
-
-    pub fn merge_with_int(seed: Digest192, value: u64) -> Digest192 {
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(seed.as_bytes());
-        hasher.update(&value.to_le_bytes());
-        Digest::new(shrink_array(hasher.finalize().into()))
     }
 
     /// Returns a hash of the provided field elements.

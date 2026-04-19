@@ -57,8 +57,15 @@ impl MmrPeaks {
     /// leaves in the underlying MMR.
     ///
     /// # Errors
-    /// Returns an error if the number of leaves and the number of peaks are inconsistent.
+    /// Returns an error if the number of leaves and the number of peaks are inconsistent, or if
+    /// the forest exceeds the maximum supported size.
     pub fn new(forest: Forest, peaks: Vec<Word>) -> Result<Self, MmrError> {
+        if !Forest::is_valid_size(forest.num_leaves()) {
+            return Err(MmrError::ForestSizeExceeded {
+                requested: forest.num_leaves(),
+                max: Forest::MAX_LEAVES,
+            });
+        }
         if forest.num_trees() != peaks.len() {
             return Err(MmrError::InvalidPeaks(format!(
                 "number of one bits in leaves is {} which does not equal peak length {}",

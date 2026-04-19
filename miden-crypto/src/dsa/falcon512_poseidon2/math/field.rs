@@ -18,17 +18,17 @@ impl FalconFelt {
         FalconFelt(canonical_representative)
     }
 
-    pub const fn value(&self) -> i16 {
+    pub const fn value(self) -> i16 {
         self.0 as i16
     }
 
-    pub fn balanced_value(&self) -> i16 {
+    pub fn balanced_value(self) -> i16 {
         let value = self.value();
         let g = (value > ((MODULUS) / 2)) as i16;
         value - (MODULUS) * g
     }
 
-    pub const fn multiply(&self, other: Self) -> Self {
+    pub const fn multiply(self, other: Self) -> Self {
         FalconFelt((self.0 * other.0) % MODULUS as u32)
     }
 }

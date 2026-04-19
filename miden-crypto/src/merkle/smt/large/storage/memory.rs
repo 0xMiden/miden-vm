@@ -51,7 +51,7 @@ impl SmtStorage for MemoryStorage {
 
     /// Gets the total number of key-value entries currently stored.
     fn entry_count(&self) -> Result<usize, StorageError> {
-        Ok(self.leaves.values().map(|leaf| leaf.num_entries()).sum())
+        Ok(self.leaves.values().map(SmtLeaf::num_entries).sum())
     }
 
     /// Inserts a key-value pair into the leaf at the given index.
@@ -288,16 +288,14 @@ impl SmtStorage for MemoryStorage {
     ///
     /// The iterator provides access to the current state of the leaves.
     fn iter_leaves(&self) -> Result<Box<dyn Iterator<Item = (u64, SmtLeaf)> + '_>, StorageError> {
-        let leaves_vec = self.leaves.iter().map(|(&k, v)| (k, v.clone())).collect::<Vec<_>>();
-        Ok(Box::new(leaves_vec.into_iter()))
+        Ok(Box::new(self.leaves.iter().map(|(&k, v)| (k, v.clone()))))
     }
 
     /// Returns an iterator over all Subtrees in the storage.
     ///
     /// The iterator provides access to the current subtrees from storage.
     fn iter_subtrees(&self) -> Result<Box<dyn Iterator<Item = Subtree> + '_>, StorageError> {
-        let subtrees_vec = self.subtrees.values().cloned().collect::<Vec<_>>();
-        Ok(Box::new(subtrees_vec.into_iter()))
+        Ok(Box::new(self.subtrees.values().cloned()))
     }
 
     /// Retrieves all depth 24 roots for fast tree rebuilding.

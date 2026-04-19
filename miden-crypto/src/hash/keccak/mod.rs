@@ -65,13 +65,6 @@ impl Keccak256 {
         Keccak256Digest::from(<[u8; DIGEST256_BYTES]>::from(hasher.finalize()))
     }
 
-    pub fn merge_with_int(seed: Keccak256Digest, value: u64) -> Keccak256Digest {
-        let mut hasher = sha3::Keccak256::new();
-        hasher.update(&*seed);
-        hasher.update(value.to_le_bytes());
-        Keccak256Digest::from(<[u8; DIGEST256_BYTES]>::from(hasher.finalize()))
-    }
-
     /// Returns a hash of the provided field elements.
     #[inline(always)]
     pub fn hash_elements<E>(elements: &[E]) -> Keccak256Digest

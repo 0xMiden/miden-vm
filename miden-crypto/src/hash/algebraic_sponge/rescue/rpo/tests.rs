@@ -14,15 +14,13 @@ const ALPHA: u64 = 7;
 const INV_ALPHA: u64 = 10540996611094048183;
 use crate::{
     ONE, Word, ZERO,
-    hash::algebraic_sponge::{
-        AlgebraicSponge, BINARY_CHUNK_SIZE, CAPACITY_RANGE, RATE_RANGE, RATE_WIDTH,
-    },
+    hash::algebraic_sponge::{BINARY_CHUNK_SIZE, CAPACITY_RANGE, RATE_RANGE, RATE_WIDTH},
     rand::test_utils::rand_value,
 };
 
 #[test]
 fn test_sbox() {
-    let state = [Felt::new(rand_value()); STATE_WIDTH];
+    let state = [Felt::new_unchecked(rand_value()); STATE_WIDTH];
 
     let mut expected = state;
     expected.iter_mut().for_each(|v| *v = v.exp_const_u64::<ALPHA>());
@@ -35,7 +33,7 @@ fn test_sbox() {
 
 #[test]
 fn test_inv_sbox() {
-    let state = [Felt::new(rand_value()); STATE_WIDTH];
+    let state = [Felt::new_unchecked(rand_value()); STATE_WIDTH];
 
     let mut expected = state;
     expected.iter_mut().for_each(|v| *v = v.exp_const_u64::<INV_ALPHA>());
@@ -48,7 +46,7 @@ fn test_inv_sbox() {
 
 #[test]
 fn hash_elements_vs_merge() {
-    let elements = [Felt::new(rand_value()); 8];
+    let elements = [Felt::new_unchecked(rand_value()); 8];
 
     let digests: [Word; 2] = [
         Word::new(elements[..4].try_into().unwrap()),
@@ -62,7 +60,7 @@ fn hash_elements_vs_merge() {
 
 #[test]
 fn merge_vs_merge_in_domain() {
-    let elements = [Felt::new(rand_value()); 8];
+    let elements = [Felt::new_unchecked(rand_value()); 8];
 
     let digests: [Word; 2] = [
         Word::new(elements[..4].try_into().unwrap()),
@@ -85,33 +83,6 @@ fn merge_vs_merge_in_domain() {
 
     let merge_in_domain_result = Rpo256::merge_in_domain(&digests, domain);
     assert_ne!(merge_result, merge_in_domain_result);
-}
-
-#[test]
-fn hash_elements_vs_merge_with_int() {
-    let tmp = [Felt::new(rand_value()); 4];
-    let seed = Word::new(tmp);
-
-    // ----- value fits into a field element ------------------------------------------------------
-    let val: Felt = Felt::new(rand_value());
-    let m_result = <Rpo256 as AlgebraicSponge>::merge_with_int(seed, val.as_canonical_u64());
-
-    let mut elements = seed.as_elements().to_vec();
-    elements.push(val);
-    let h_result = Rpo256::hash_elements(&elements);
-
-    assert_eq!(m_result, h_result);
-
-    // ----- value does not fit into a field element ----------------------------------------------
-    let val = Felt::ORDER + 2;
-    let m_result = <Rpo256 as AlgebraicSponge>::merge_with_int(seed, val);
-
-    let mut elements = seed.as_elements().to_vec();
-    elements.push(Felt::new(val));
-    elements.push(ONE);
-    let h_result = Rpo256::hash_elements(&elements);
-
-    assert_eq!(m_result, h_result);
 }
 
 #[test]
@@ -153,7 +124,7 @@ fn hash_padding_no_extra_permutation_call() {
     // padding when hashing bytes
     state[CAPACITY_RANGE.start] = Felt::from_u8(RATE_WIDTH as u8);
     // place the final padded chunk into the last rate element
-    state[RATE_RANGE.end - 1] = Felt::new(u64::from_le_bytes(final_chunk));
+    state[RATE_RANGE.end - 1] = Felt::new_unchecked(u64::from_le_bytes(final_chunk));
     Rpo256::apply_permutation(&mut state);
 
     assert_eq!(&r1[0..4], &state[DIGEST_RANGE]);
@@ -161,7 +132,7 @@ fn hash_padding_no_extra_permutation_call() {
 
 #[test]
 fn hash_elements_padding() {
-    let e1 = [Felt::new(rand_value()); 2];
+    let e1 = [Felt::new_unchecked(rand_value()); 2];
     let e2 = [e1[0], e1[1], ZERO];
 
     let r1 = Rpo256::hash_elements(&e1);
@@ -174,12 +145,12 @@ fn hash_elements() {
     let elements = [
         ZERO,
         ONE,
-        Felt::new(2),
-        Felt::new(3),
-        Felt::new(4),
-        Felt::new(5),
-        Felt::new(6),
-        Felt::new(7),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(4),
+        Felt::new_unchecked(5),
+        Felt::new_unchecked(6),
+        Felt::new_unchecked(7),
     ];
 
     let digests: [Word; 2] = [
@@ -215,23 +186,23 @@ fn hash_test_vectors() {
     let elements = [
         ZERO,
         ONE,
-        Felt::new(2),
-        Felt::new(3),
-        Felt::new(4),
-        Felt::new(5),
-        Felt::new(6),
-        Felt::new(7),
-        Felt::new(8),
-        Felt::new(9),
-        Felt::new(10),
-        Felt::new(11),
-        Felt::new(12),
-        Felt::new(13),
-        Felt::new(14),
-        Felt::new(15),
-        Felt::new(16),
-        Felt::new(17),
-        Felt::new(18),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(4),
+        Felt::new_unchecked(5),
+        Felt::new_unchecked(6),
+        Felt::new_unchecked(7),
+        Felt::new_unchecked(8),
+        Felt::new_unchecked(9),
+        Felt::new_unchecked(10),
+        Felt::new_unchecked(11),
+        Felt::new_unchecked(12),
+        Felt::new_unchecked(13),
+        Felt::new_unchecked(14),
+        Felt::new_unchecked(15),
+        Felt::new_unchecked(16),
+        Felt::new_unchecked(17),
+        Felt::new_unchecked(18),
     ];
 
     for (i, expected) in EXPECTED.iter().enumerate() {
@@ -288,118 +259,118 @@ proptest! {
 /// The verification script is located at `generate_test_vectors.py` in this directory.
 const EXPECTED: [Word; 19] = [
     Word::new([
-        Felt::new(8563248028282119176),
-        Felt::new(14757918088501470722),
-        Felt::new(14042820149444308297),
-        Felt::new(7607140247535155355),
+        Felt::new_unchecked(8563248028282119176),
+        Felt::new_unchecked(14757918088501470722),
+        Felt::new_unchecked(14042820149444308297),
+        Felt::new_unchecked(7607140247535155355),
     ]),
     Word::new([
-        Felt::new(8762449007102993687),
-        Felt::new(4386081033660325954),
-        Felt::new(5000814629424193749),
-        Felt::new(8171580292230495897),
+        Felt::new_unchecked(8762449007102993687),
+        Felt::new_unchecked(4386081033660325954),
+        Felt::new_unchecked(5000814629424193749),
+        Felt::new_unchecked(8171580292230495897),
     ]),
     Word::new([
-        Felt::new(16710087681096729759),
-        Felt::new(10808706421914121430),
-        Felt::new(14661356949236585983),
-        Felt::new(5683478730832134441),
+        Felt::new_unchecked(16710087681096729759),
+        Felt::new_unchecked(10808706421914121430),
+        Felt::new_unchecked(14661356949236585983),
+        Felt::new_unchecked(5683478730832134441),
     ]),
     Word::new([
-        Felt::new(5309818427047650994),
-        Felt::new(17172251659920546244),
-        Felt::new(8288476618870804357),
-        Felt::new(18080473279382182941),
+        Felt::new_unchecked(5309818427047650994),
+        Felt::new_unchecked(17172251659920546244),
+        Felt::new_unchecked(8288476618870804357),
+        Felt::new_unchecked(18080473279382182941),
     ]),
     Word::new([
-        Felt::new(3647545403045515695),
-        Felt::new(3358383208908083302),
-        Felt::new(8797161010298072910),
-        Felt::new(2412100201132087248),
+        Felt::new_unchecked(3647545403045515695),
+        Felt::new_unchecked(3358383208908083302),
+        Felt::new_unchecked(8797161010298072910),
+        Felt::new_unchecked(2412100201132087248),
     ]),
     Word::new([
-        Felt::new(8409780526028662686),
-        Felt::new(214479528340808320),
-        Felt::new(13626616722984122219),
-        Felt::new(13991752159726061594),
+        Felt::new_unchecked(8409780526028662686),
+        Felt::new_unchecked(214479528340808320),
+        Felt::new_unchecked(13626616722984122219),
+        Felt::new_unchecked(13991752159726061594),
     ]),
     Word::new([
-        Felt::new(4800410126693035096),
-        Felt::new(8293686005479024958),
-        Felt::new(16849389505608627981),
-        Felt::new(12129312715917897796),
+        Felt::new_unchecked(4800410126693035096),
+        Felt::new_unchecked(8293686005479024958),
+        Felt::new_unchecked(16849389505608627981),
+        Felt::new_unchecked(12129312715917897796),
     ]),
     Word::new([
-        Felt::new(5421234586123900205),
-        Felt::new(9738602082989433872),
-        Felt::new(7017816005734536787),
-        Felt::new(8635896173743411073),
+        Felt::new_unchecked(5421234586123900205),
+        Felt::new_unchecked(9738602082989433872),
+        Felt::new_unchecked(7017816005734536787),
+        Felt::new_unchecked(8635896173743411073),
     ]),
     Word::new([
-        Felt::new(11707446879505873182),
-        Felt::new(7588005580730590001),
-        Felt::new(4664404372972250366),
-        Felt::new(17613162115550587316),
+        Felt::new_unchecked(11707446879505873182),
+        Felt::new_unchecked(7588005580730590001),
+        Felt::new_unchecked(4664404372972250366),
+        Felt::new_unchecked(17613162115550587316),
     ]),
     Word::new([
-        Felt::new(6991094187713033844),
-        Felt::new(10140064581418506488),
-        Felt::new(1235093741254112241),
-        Felt::new(16755357411831959519),
+        Felt::new_unchecked(6991094187713033844),
+        Felt::new_unchecked(10140064581418506488),
+        Felt::new_unchecked(1235093741254112241),
+        Felt::new_unchecked(16755357411831959519),
     ]),
     Word::new([
-        Felt::new(18007834547781860956),
-        Felt::new(5262789089508245576),
-        Felt::new(4752286606024269423),
-        Felt::new(15626544383301396533),
+        Felt::new_unchecked(18007834547781860956),
+        Felt::new_unchecked(5262789089508245576),
+        Felt::new_unchecked(4752286606024269423),
+        Felt::new_unchecked(15626544383301396533),
     ]),
     Word::new([
-        Felt::new(5419895278045886802),
-        Felt::new(10747737918518643252),
-        Felt::new(14861255521757514163),
-        Felt::new(3291029997369465426),
+        Felt::new_unchecked(5419895278045886802),
+        Felt::new_unchecked(10747737918518643252),
+        Felt::new_unchecked(14861255521757514163),
+        Felt::new_unchecked(3291029997369465426),
     ]),
     Word::new([
-        Felt::new(16916426112258580265),
-        Felt::new(8714377345140065340),
-        Felt::new(14207246102129706649),
-        Felt::new(6226142825442954311),
+        Felt::new_unchecked(16916426112258580265),
+        Felt::new_unchecked(8714377345140065340),
+        Felt::new_unchecked(14207246102129706649),
+        Felt::new_unchecked(6226142825442954311),
     ]),
     Word::new([
-        Felt::new(7320977330193495928),
-        Felt::new(15630435616748408136),
-        Felt::new(10194509925259146809),
-        Felt::new(15938750299626487367),
+        Felt::new_unchecked(7320977330193495928),
+        Felt::new_unchecked(15630435616748408136),
+        Felt::new_unchecked(10194509925259146809),
+        Felt::new_unchecked(15938750299626487367),
     ]),
     Word::new([
-        Felt::new(9872217233988117092),
-        Felt::new(5336302253150565952),
-        Felt::new(9650742686075483437),
-        Felt::new(8725445618118634861),
+        Felt::new_unchecked(9872217233988117092),
+        Felt::new_unchecked(5336302253150565952),
+        Felt::new_unchecked(9650742686075483437),
+        Felt::new_unchecked(8725445618118634861),
     ]),
     Word::new([
-        Felt::new(12539853708112793207),
-        Felt::new(10831674032088582545),
-        Felt::new(11090804155187202889),
-        Felt::new(105068293543772992),
+        Felt::new_unchecked(12539853708112793207),
+        Felt::new_unchecked(10831674032088582545),
+        Felt::new_unchecked(11090804155187202889),
+        Felt::new_unchecked(105068293543772992),
     ]),
     Word::new([
-        Felt::new(7287113073032114129),
-        Felt::new(6373434548664566745),
-        Felt::new(8097061424355177769),
-        Felt::new(14780666619112596652),
+        Felt::new_unchecked(7287113073032114129),
+        Felt::new_unchecked(6373434548664566745),
+        Felt::new_unchecked(8097061424355177769),
+        Felt::new_unchecked(14780666619112596652),
     ]),
     Word::new([
-        Felt::new(17147873541222871127),
-        Felt::new(17350918081193545524),
-        Felt::new(5785390176806607444),
-        Felt::new(12480094913955467088),
+        Felt::new_unchecked(17147873541222871127),
+        Felt::new_unchecked(17350918081193545524),
+        Felt::new_unchecked(5785390176806607444),
+        Felt::new_unchecked(12480094913955467088),
     ]),
     Word::new([
-        Felt::new(17273934282489765074),
-        Felt::new(8007352780590012415),
-        Felt::new(16690624932024962846),
-        Felt::new(8137543572359747206),
+        Felt::new_unchecked(17273934282489765074),
+        Felt::new_unchecked(8007352780590012415),
+        Felt::new_unchecked(16690624932024962846),
+        Felt::new_unchecked(8137543572359747206),
     ]),
 ];
 
@@ -416,20 +387,20 @@ mod p3_tests {
 
     #[test]
     fn test_rpo_permutation_basic() {
-        let mut state = [Felt::new(0); STATE_WIDTH];
+        let mut state = [Felt::new_unchecked(0); STATE_WIDTH];
 
         // Apply permutation
         let perm = RpoPermutation256;
         perm.permute_mut(&mut state);
 
         // State should be different from all zeros after permutation
-        assert_ne!(state, [Felt::new(0); STATE_WIDTH]);
+        assert_ne!(state, [Felt::new_unchecked(0); STATE_WIDTH]);
     }
 
     #[test]
     fn test_rpo_permutation_consistency() {
-        let mut state1 = [Felt::new(0); STATE_WIDTH];
-        let mut state2 = [Felt::new(0); STATE_WIDTH];
+        let mut state1 = [Felt::new_unchecked(0); STATE_WIDTH];
+        let mut state2 = [Felt::new_unchecked(0); STATE_WIDTH];
 
         // Apply permutation using the trait
         let perm = RpoPermutation256;
@@ -445,18 +416,18 @@ mod p3_tests {
     #[test]
     fn test_rpo_permutation_deterministic() {
         let input = [
-            Felt::new(1),
-            Felt::new(2),
-            Felt::new(3),
-            Felt::new(4),
-            Felt::new(5),
-            Felt::new(6),
-            Felt::new(7),
-            Felt::new(8),
-            Felt::new(9),
-            Felt::new(10),
-            Felt::new(11),
-            Felt::new(12),
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(8),
+            Felt::new_unchecked(9),
+            Felt::new_unchecked(10),
+            Felt::new_unchecked(11),
+            Felt::new_unchecked(12),
         ];
 
         let mut state1 = input;
@@ -476,14 +447,14 @@ mod p3_tests {
 
         // Test with 8 elements (one rate)
         let input12 = [
-            Felt::new(1),
-            Felt::new(2),
-            Felt::new(3),
-            Felt::new(4),
-            Felt::new(5),
-            Felt::new(6),
-            Felt::new(7),
-            Felt::new(8),
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(8),
         ];
         let expected: [Felt; 4] = Rpo256::hash_elements(&input12).into();
         let result = hasher.hash_iter(input12);
@@ -491,22 +462,22 @@ mod p3_tests {
 
         // Test with 16 elements (two rates)
         let input16 = [
-            Felt::new(1),
-            Felt::new(2),
-            Felt::new(3),
-            Felt::new(4),
-            Felt::new(5),
-            Felt::new(6),
-            Felt::new(7),
-            Felt::new(8),
-            Felt::new(9),
-            Felt::new(10),
-            Felt::new(11),
-            Felt::new(12),
-            Felt::new(13),
-            Felt::new(14),
-            Felt::new(15),
-            Felt::new(16),
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(8),
+            Felt::new_unchecked(9),
+            Felt::new_unchecked(10),
+            Felt::new_unchecked(11),
+            Felt::new_unchecked(12),
+            Felt::new_unchecked(13),
+            Felt::new_unchecked(14),
+            Felt::new_unchecked(15),
+            Felt::new_unchecked(16),
         ];
         let expected: [Felt; 4] = Rpo256::hash_elements(&input16).into();
         let result = hasher.hash_iter(input16);
@@ -515,8 +486,18 @@ mod p3_tests {
 
     #[test]
     fn test_rpo_compression_vs_merge() {
-        let digest1 = [Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)];
-        let digest2 = [Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)];
+        let digest1 = [
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4),
+        ];
+        let digest2 = [
+            Felt::new_unchecked(5),
+            Felt::new_unchecked(6),
+            Felt::new_unchecked(7),
+            Felt::new_unchecked(8),
+        ];
 
         // Rpo256::merge expects &[Word; 2]
         let expected: [Felt; 4] = Rpo256::merge(&[digest1.into(), digest2.into()]).into();

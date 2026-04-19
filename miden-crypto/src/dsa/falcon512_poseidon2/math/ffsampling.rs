@@ -20,7 +20,7 @@ pub fn gram(b: [Polynomial<Complex64>; 4]) -> [Polynomial<Complex64>; 4] {
         for j in 0..N {
             for k in 0..N {
                 g[N * i + j] = g[N * i + j].clone()
-                    + b[N * i + k].hadamard_mul(&b[N * j + k].map(|c| c.conj()));
+                    + b[N * i + k].hadamard_mul(&b[N * j + k].map(Complex::conj));
             }
         }
     }
@@ -133,8 +133,8 @@ pub fn ffldl(gram_matrix: [Polynomial<Complex64>; 4]) -> LdlTree {
     if n > 2 {
         let (d00_left, d00_right) = d00.split_fft();
         let (d11_left, d11_right) = d11.split_fft();
-        let g0 = [d00_left.clone(), d00_right.clone(), d00_right.map(|c| c.conj()), d00_left];
-        let g1 = [d11_left.clone(), d11_right.clone(), d11_right.map(|c| c.conj()), d11_left];
+        let g0 = [d00_left.clone(), d00_right.clone(), d00_right.map(Complex::conj), d00_left];
+        let g1 = [d11_left.clone(), d11_right.clone(), d11_right.map(Complex::conj), d11_left];
         LdlTree::Branch(l10, Box::new(ffldl(g0)), Box::new(ffldl(g1)))
     } else {
         LdlTree::Branch(
@@ -219,7 +219,7 @@ mod tests {
         d11: &Polynomial<Complex64>,
     ) -> [Polynomial<Complex64>; 4] {
         // Compute conj(l10) for use in L*
-        let l10_conj = l10.map(|c| c.conj());
+        let l10_conj = l10.map(Complex::conj);
 
         // Compute G = L·D·L* using Hadamard operations (FFT domain)
         // G[0,0] = 1*d00*1 + 0*d11*0 = d00
@@ -258,7 +258,7 @@ mod tests {
         }
 
         // Ensure Hermitian property: g10 = conj(g01)
-        let g10 = g01.iter().map(|c| c.conj()).collect();
+        let g10 = g01.iter().map(Complex::conj).collect();
 
         [
             Polynomial::new(g00),
@@ -307,23 +307,19 @@ mod tests {
             // Verify reconstruction matches original (L·D·L* = G)
             assert!(
                 polynomials_approx_eq(&g_reconstructed[0], &g[0], 1e-10),
-                "degree {}: G[0,0] mismatch",
-                degree
+                "degree {degree}: G[0,0] mismatch"
             );
             assert!(
                 polynomials_approx_eq(&g_reconstructed[1], &g[1], 1e-10),
-                "degree {}: G[0,1] mismatch",
-                degree
+                "degree {degree}: G[0,1] mismatch"
             );
             assert!(
                 polynomials_approx_eq(&g_reconstructed[2], &g[2], 1e-10),
-                "degree {}: G[1,0] mismatch",
-                degree
+                "degree {degree}: G[1,0] mismatch"
             );
             assert!(
                 polynomials_approx_eq(&g_reconstructed[3], &g[3], 1e-10),
-                "degree {}: G[1,1] mismatch",
-                degree
+                "degree {degree}: G[1,1] mismatch"
             );
         }
     }

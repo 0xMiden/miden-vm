@@ -54,6 +54,7 @@ proptest! {
         }
     }
 
+
     #[test]
     fn get_correct(
         lineage in arbitrary_lineage(),
@@ -102,7 +103,7 @@ proptest! {
 
         // We're going to need an auxiliary tree to check the behavior.
         let mut tree = Smt::new();
-        let muts_1 =tree.compute_mutations(Vec::from(entries_v1.clone()).into_iter())?;
+        let muts_1 =tree.compute_mutations(Vec::from(entries_v1).into_iter())?;
         tree.apply_mutations(muts_1)?;
         let muts_2 =tree.compute_mutations(Vec::from(entries_v2.clone()).into_iter())?;
 
@@ -217,7 +218,9 @@ proptest! {
         // And we should have the same number of entries in each.
         let backend_entries = backend
             .entries(target_lineage)?
-            .map(|e| (e.key, e.value))
+            .map(|e| e.map(|e| (e.key, e.value)))
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
             .sorted()
             .collect_vec();
         let tree_entries = tree.entries().copied().sorted().collect_vec();
@@ -237,7 +240,7 @@ proptest! {
 
         // And create a normal tree to compare against.
         let mut tree = Smt::new();
-        let tree_mutations =tree.compute_mutations(Vec::from(entries.clone()).into_iter())?;
+        let tree_mutations =tree.compute_mutations(Vec::from(entries).into_iter())?;
         tree.apply_mutations(tree_mutations)?;
 
         // The root should return the same results as that.

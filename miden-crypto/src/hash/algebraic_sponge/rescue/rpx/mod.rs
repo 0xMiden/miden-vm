@@ -32,11 +32,10 @@ mod tests;
 /// and it can be serialized into 32 bytes (256 bits).
 ///
 /// ## Hash output consistency
-/// Functions [hash_elements()](Rpx256::hash_elements), [merge()](Rpx256::merge), and
-/// [merge_with_int()](Rpx256::merge_with_int) are internally consistent. That is, computing
-/// a hash for the same set of elements using these functions will always produce the same
-/// result. For example, merging two digests using [merge()](Rpx256::merge) will produce the
-/// same result as hashing 8 elements which make up these digests using
+/// Functions [hash_elements()](Rpx256::hash_elements), and [merge()](Rpx256::merge), are internally
+/// consistent. That is, computing a hash for the same set of elements using these functions will
+/// always produce the same result. For example, merging two digests using [merge()](Rpx256::merge)
+/// will produce the same result as hashing 8 elements which make up these digests using
 /// [hash_elements()](Rpx256::hash_elements) function.
 ///
 /// However, [hash()](Rpx256::hash) function is not consistent with functions mentioned above.
@@ -147,12 +146,6 @@ impl Rpx256 {
     #[inline(always)]
     pub fn merge_many(values: &[Word]) -> Word {
         <Self as AlgebraicSponge>::merge_many(values)
-    }
-
-    /// Returns a hash of a digest and a u64 value.
-    #[inline(always)]
-    pub fn merge_with_int(seed: Word, value: u64) -> Word {
-        <Self as AlgebraicSponge>::merge_with_int(seed, value)
     }
 
     /// Returns a hash of two digests and a domain identifier.

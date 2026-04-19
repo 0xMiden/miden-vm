@@ -66,7 +66,7 @@ benchmark_with_setup_data!(
         let entries = generate_words_merkle_std(256);
         MerkleTree::new(&entries).unwrap()
     },
-    |b: &mut criterion::Bencher<'_>, tree: &MerkleTree| {
+    |b: &mut Bencher<'_>, tree: &MerkleTree| {
         b.iter(|| {
             hint::black_box(tree.root());
         });
@@ -85,7 +85,7 @@ benchmark_with_setup_data!(
         let index = NodeIndex::new(8, 128).unwrap();
         (tree, index)
     },
-    |b: &mut criterion::Bencher<'_>, (tree, index): &(MerkleTree, NodeIndex)| {
+    |b: &mut Bencher<'_>, (tree, index): &(MerkleTree, NodeIndex)| {
         b.iter(|| {
             let _path = hint::black_box(tree.get_path(*index)).unwrap();
         })
@@ -117,7 +117,7 @@ benchmark_with_setup_data!(
         let entries = generate_words_merkle_std(256);
         MerkleTree::new(&entries).unwrap()
     },
-    |b: &mut criterion::Bencher<'_>, tree: &MerkleTree| {
+    |b: &mut Bencher<'_>, tree: &MerkleTree| {
         b.iter(|| {
             hint::black_box(tree.leaves().collect::<Vec<_>>());
         });
@@ -133,7 +133,7 @@ benchmark_with_setup_data!(
         let entries = generate_words_merkle_std(256);
         MerkleTree::new(&entries).unwrap()
     },
-    |b: &mut criterion::Bencher<'_>, tree: &MerkleTree| {
+    |b: &mut Bencher<'_>, tree: &MerkleTree| {
         b.iter(|| {
             hint::black_box(tree.inner_nodes().collect::<Vec<_>>());
         });
@@ -158,7 +158,7 @@ benchmark_with_setup_data!(
         let root = tree.root();
         (path, leaf_index, leaf, root)
     },
-    |b: &mut criterion::Bencher<'_>, (path, index, leaf, root): &(MerklePath, u64, Word, Word)| {
+    |b: &mut Bencher<'_>, (path, index, leaf, root): &(MerklePath, u64, Word, Word)| {
         b.iter(|| {
             let _ = path.verify(*index, hint::black_box(*leaf), hint::black_box(root));
         })

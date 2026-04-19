@@ -1,6 +1,5 @@
 //! Pseudo-random element generation.
 
-use miden_field::word::WORD_SIZE_BYTES;
 use rand::RngCore;
 
 use crate::{Felt, Word};
@@ -91,7 +90,7 @@ impl Randomizable for Felt {
             let value = u64::from_le_bytes(bytes);
             // Ensure the value is within the field modulus
             if value < Felt::ORDER {
-                Some(Felt::new(value))
+                Some(Felt::new_unchecked(value))
             } else {
                 None
             }
@@ -102,7 +101,7 @@ impl Randomizable for Felt {
 }
 
 impl Randomizable for Word {
-    const VALUE_SIZE: usize = WORD_SIZE_BYTES;
+    const VALUE_SIZE: usize = Word::SERIALIZED_SIZE;
 
     fn from_random_bytes(bytes: &[u8]) -> Option<Self> {
         let bytes_array: Option<[u8; 32]> = bytes.try_into().ok();
@@ -146,9 +145,13 @@ pub trait FeltRng: RngCore {
 pub fn random_felt() -> Felt {
     use rand::Rng;
     let mut rng = rand::rng();
-    // Goldilocks field order is 2^64 - 2^32 + 1
-    // Generate a random u64 and reduce modulo the field order
-    Felt::new(rng.random::<u64>())
+    // We use the `Felt::new` constructor to do rejection sampling here. It should effectively
+    // never repeat, but nevertheless gives us the correct distribution.
+    loop {
+        if let Ok(felt) = Felt::new(rng.random::<u64>()) {
+            return felt;
+        }
+    }
 }
 
 /// Generates a random word (4 field elements) for testing purposes.

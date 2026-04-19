@@ -11,7 +11,7 @@ use crate::{
     EMPTY_WORD, Word,
     hash::poseidon2::Poseidon2,
     merkle::smt::{
-        EmptySubtreeRoots, InnerNode, Map, MerkleError, NodeIndex, Smt, SparseMerkleTree,
+        EmptySubtreeRoots, InnerNode, Map, MerkleError, NodeIndex, Smt, SmtLeaf, SparseMerkleTree,
         full::concurrent::{
             PairComputations, SUBTREE_DEPTH, SubtreeLeaf, SubtreeLeavesIter, build_subtree,
         },
@@ -250,7 +250,7 @@ impl<S: SmtStorage> LargeSmt<S> {
 
         // Update cached counts before storing leaves
         self.leaf_count = initial_leaves.len();
-        self.entry_count = initial_leaves.values().map(|leaf| leaf.num_entries()).sum();
+        self.entry_count = initial_leaves.values().map(SmtLeaf::num_entries).sum();
 
         // Store the initial leaves
         self.storage.set_leaves(initial_leaves).expect("Failed to store initial leaves");

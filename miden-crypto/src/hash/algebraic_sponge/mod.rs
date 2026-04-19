@@ -144,7 +144,7 @@ pub(crate) trait AlgebraicSponge {
 
             // set the current rate element to the input. since we take at most 7 bytes, we are
             // guaranteed that the inputs data will fit into a single field element.
-            state[RATE_RANGE.start + rate_pos] = Felt::new(u64::from_le_bytes(buf));
+            state[RATE_RANGE.start + rate_pos] = Felt::new_unchecked(u64::from_le_bytes(buf));
 
             // proceed filling the range. if it's full, then we apply a permutation and reset the
             // counter to the beginning of the range.
@@ -190,29 +190,6 @@ pub(crate) trait AlgebraicSponge {
     fn merge_many(values: &[Word]) -> Word {
         let elements = Word::words_as_elements(values);
         Self::hash_elements(elements)
-    }
-
-    /// Returns hash(`seed` || `value`). This method is intended for use in PRNG and PoW contexts.
-    fn merge_with_int(seed: Word, value: u64) -> Word {
-        // initialize the state as follows:
-        // - seed is copied into the first 4 elements of the rate portion of the state.
-        // - if the value fits into a single field element, copy it into the fifth rate element and
-        //   set the first capacity element to 5.
-        // - if the value doesn't fit into a single field element, split it into two field elements,
-        //   copy them into rate elements 5 and 6 and set the first capacity element to 6.
-        let mut state = [ZERO; STATE_WIDTH];
-        state[RATE0_RANGE].copy_from_slice(seed.as_elements());
-        state[RATE1_RANGE.start] = Felt::new(value);
-        if value < Felt::ORDER {
-            state[CAPACITY_RANGE.start] = Felt::from_u8(5_u8);
-        } else {
-            state[RATE1_RANGE.start + 1] = Felt::new(value / Felt::ORDER);
-            state[CAPACITY_RANGE.start] = Felt::from_u8(6_u8);
-        }
-
-        // apply the permutation and return the digest portion of the rate
-        Self::apply_permutation(&mut state);
-        Word::new(state[DIGEST_RANGE].try_into().unwrap())
     }
 
     // DOMAIN IDENTIFIER HASHING

@@ -4,14 +4,14 @@ use core::cmp::Ordering;
 use miden_serde_utils::SliceReader;
 use proptest::prelude::*;
 
-use super::{Deserializable, Felt, Serializable, WORD_SIZE_BYTES, WORD_SIZE_FELTS, Word};
+use super::{Deserializable, Felt, Serializable, Word};
 use crate::word;
 
 // TESTS
 // ================================================================================================
 
 /// Returns a strategy which generates a `[u64; 4]` where all values are canonical field elements.
-fn any_word_elements_u64_canonical() -> BoxedStrategy<[u64; WORD_SIZE_FELTS]> {
+fn any_word_elements_u64_canonical() -> BoxedStrategy<[u64; Word::NUM_ELEMENTS]> {
     prop::array::uniform4(0u64..Felt::ORDER).no_shrink().boxed()
 }
 
@@ -29,7 +29,7 @@ proptest! {
     fn word_serialization_roundtrip(word in any::<Word>()) {
         let mut bytes = Vec::new();
         word.write_into(&mut bytes);
-        prop_assert_eq!(WORD_SIZE_BYTES, bytes.len());
+        prop_assert_eq!(Word::SERIALIZED_SIZE, bytes.len());
         prop_assert_eq!(bytes.len(), word.get_size_hint());
 
         let mut reader = SliceReader::new(&bytes);
@@ -46,72 +46,72 @@ proptest! {
     }
 
     #[test]
-    fn word_bool_conversion_roundtrip(v in any::<[bool; WORD_SIZE_FELTS]>()) {
+    fn word_bool_conversion_roundtrip(v in any::<[bool; Word::NUM_ELEMENTS]>()) {
         let word: Word = v.into();
-        prop_assert_eq!(v, <[bool; WORD_SIZE_FELTS]>::try_from(word).unwrap());
+        prop_assert_eq!(v, <[bool; Word::NUM_ELEMENTS]>::try_from(word).unwrap());
 
         let word: Word = (&v).into();
-        prop_assert_eq!(v, <[bool; WORD_SIZE_FELTS]>::try_from(&word).unwrap());
+        prop_assert_eq!(v, <[bool; Word::NUM_ELEMENTS]>::try_from(&word).unwrap());
     }
 
     #[test]
-    fn word_u8_conversion_roundtrip(v in any::<[u8; WORD_SIZE_FELTS]>()) {
+    fn word_u8_conversion_roundtrip(v in any::<[u8; Word::NUM_ELEMENTS]>()) {
         let word: Word = v.into();
-        prop_assert_eq!(v, <[u8; WORD_SIZE_FELTS]>::try_from(word).unwrap());
+        prop_assert_eq!(v, <[u8; Word::NUM_ELEMENTS]>::try_from(word).unwrap());
 
         let word: Word = (&v).into();
-        prop_assert_eq!(v, <[u8; WORD_SIZE_FELTS]>::try_from(&word).unwrap());
+        prop_assert_eq!(v, <[u8; Word::NUM_ELEMENTS]>::try_from(&word).unwrap());
     }
 
     #[test]
-    fn word_u16_conversion_roundtrip(v in any::<[u16; WORD_SIZE_FELTS]>()) {
+    fn word_u16_conversion_roundtrip(v in any::<[u16; Word::NUM_ELEMENTS]>()) {
         let word: Word = v.into();
-        prop_assert_eq!(v, <[u16; WORD_SIZE_FELTS]>::try_from(word).unwrap());
+        prop_assert_eq!(v, <[u16; Word::NUM_ELEMENTS]>::try_from(word).unwrap());
 
         let word: Word = (&v).into();
-        prop_assert_eq!(v, <[u16; WORD_SIZE_FELTS]>::try_from(&word).unwrap());
+        prop_assert_eq!(v, <[u16; Word::NUM_ELEMENTS]>::try_from(&word).unwrap());
     }
 
     #[test]
-    fn word_u32_conversion_roundtrip(v in any::<[u32; WORD_SIZE_FELTS]>()) {
+    fn word_u32_conversion_roundtrip(v in any::<[u32; Word::NUM_ELEMENTS]>()) {
         let word: Word = v.into();
-        prop_assert_eq!(v, <[u32; WORD_SIZE_FELTS]>::try_from(word).unwrap());
+        prop_assert_eq!(v, <[u32; Word::NUM_ELEMENTS]>::try_from(word).unwrap());
 
         let word: Word = (&v).into();
-        prop_assert_eq!(v, <[u32; WORD_SIZE_FELTS]>::try_from(&word).unwrap());
+        prop_assert_eq!(v, <[u32; Word::NUM_ELEMENTS]>::try_from(&word).unwrap());
     }
 
     #[test]
     fn word_u64_conversion_roundtrip(v in any_word_elements_u64_canonical()) {
         let word: Word = v.try_into().unwrap();
-        let round_trip: [u64; WORD_SIZE_FELTS] = word.into();
+        let round_trip: [u64; Word::NUM_ELEMENTS] = word.into();
         prop_assert_eq!(v, round_trip);
 
         let word: Word = (&v).try_into().unwrap();
-        let round_trip: [u64; WORD_SIZE_FELTS] = (&word).into();
+        let round_trip: [u64; Word::NUM_ELEMENTS] = (&word).into();
         prop_assert_eq!(v, round_trip);
     }
 
     #[test]
     fn word_felt_conversion_roundtrip(elements in prop::array::uniform4(any::<u64>())) {
-        let elements = elements.map(Felt::new);
+        let elements = elements.map(Felt::new_unchecked);
 
         let word: Word = elements.into();
-        let round_trip: [Felt; WORD_SIZE_FELTS] = word.into();
+        let round_trip: [Felt; Word::NUM_ELEMENTS] = word.into();
         prop_assert_eq!(elements, round_trip);
 
         let word: Word = (&elements).into();
-        let round_trip: [Felt; WORD_SIZE_FELTS] = (&word).into();
+        let round_trip: [Felt; Word::NUM_ELEMENTS] = (&word).into();
         prop_assert_eq!(elements, round_trip);
     }
 
     #[test]
     fn word_bytes_conversion_roundtrip(word in any::<Word>()) {
-        let bytes: [u8; WORD_SIZE_BYTES] = word.into();
+        let bytes: [u8; Word::SERIALIZED_SIZE] = word.into();
         let round_trip: Word = bytes.try_into().unwrap();
         prop_assert_eq!(word, round_trip);
 
-        let bytes: [u8; WORD_SIZE_BYTES] = (&word).into();
+        let bytes: [u8; Word::SERIALIZED_SIZE] = (&word).into();
         let round_trip: Word = (&bytes).try_into().unwrap();
         prop_assert_eq!(word, round_trip);
     }
@@ -135,10 +135,23 @@ proptest! {
 
 #[test]
 fn word_elements_array_layout_roundtrip() {
-    let mut word = Word::new([Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
+    let mut word = Word::new([
+        Felt::new_unchecked(1),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(3),
+        Felt::new_unchecked(4),
+    ]);
 
     let elements = word.as_elements_array();
-    assert_eq!(elements, &[Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
+    assert_eq!(
+        elements,
+        &[
+            Felt::new_unchecked(1),
+            Felt::new_unchecked(2),
+            Felt::new_unchecked(3),
+            Felt::new_unchecked(4)
+        ]
+    );
 
     let base = core::ptr::addr_of!(word.a);
     assert_eq!(elements.as_ptr(), base);
@@ -147,28 +160,28 @@ fn word_elements_array_layout_roundtrip() {
     assert_eq!(core::ptr::addr_of!(word.d), unsafe { base.add(3) });
 
     let elements_mut = word.as_elements_array_mut();
-    elements_mut[2] = Felt::new(42);
-    assert_eq!(word.c, Felt::new(42));
+    elements_mut[2] = Felt::new_unchecked(42);
+    assert_eq!(word.c, Felt::new_unchecked(42));
 }
 
 proptest! {
     #[test]
     fn word_index_matches_into_elements(word in any::<Word>()) {
         let elements = word.into_elements();
-        for idx in 0..WORD_SIZE_FELTS {
+        for idx in 0..Word::NUM_ELEMENTS {
             prop_assert_eq!(word[idx], elements[idx]);
         }
     }
 
     #[test]
-    fn word_index_mut_updates_all_elements(word in any::<Word>(), values in any::<[u64; WORD_SIZE_FELTS]>()) {
+    fn word_index_mut_updates_all_elements(word in any::<Word>(), values in any::<[u64; Word::NUM_ELEMENTS]>()) {
         let mut word = word;
 
         let mut expected = word.into_elements();
-        for idx in 0..WORD_SIZE_FELTS {
+        for idx in 0..Word::NUM_ELEMENTS {
             let value = values[idx];
-            expected[idx] = Felt::new(value);
-            word[idx] = Felt::new(value);
+            expected[idx] = Felt::new_unchecked(value);
+            word[idx] = Felt::new_unchecked(value);
         }
         prop_assert_eq!(word.into_elements(), expected);
     }
@@ -176,7 +189,7 @@ proptest! {
     #[test]
     fn word_index_mut_range_updates_slice(word in any::<Word>(), v0 in any::<u64>(), v1 in any::<u64>()) {
         let mut word = word;
-        let expected = [Felt::new(v0), Felt::new(v1)];
+        let expected = [Felt::new_unchecked(v0), Felt::new_unchecked(v1)];
 
         word[1..3].copy_from_slice(&expected);
         prop_assert_eq!(word[1], expected[0]);
@@ -218,17 +231,17 @@ fn word_macro(#[case] input: &str) {
     // Right pad to 64 hex digits (66 including prefix). This is required by the
     // Word::try_from(String) implementation.
     let padded_input = format!("{input:<66}").replace(" ", "0");
-    let expected = crate::Word::try_from(padded_input.as_str()).unwrap();
+    let expected = Word::try_from(padded_input.as_str()).unwrap();
 
     assert_eq!(uut, expected);
 }
 
 #[rstest::rstest]
-#[case::first_nibble("0x1000000000000000000000000000000000000000000000000000000000000000", crate::Word::new([Felt::new(16), Felt::new(0), Felt::new(0), Felt::new(0)]))]
-#[case::second_nibble("0x0100000000000000000000000000000000000000000000000000000000000000", crate::Word::new([Felt::new(1), Felt::new(0), Felt::new(0), Felt::new(0)]))]
-#[case::all_first_nibbles("0x1000000000000000100000000000000010000000000000001000000000000000", crate::Word::new([Felt::new(16), Felt::new(16), Felt::new(16), Felt::new(16)]))]
-#[case::all_first_nibbles_asc("0x1000000000000000200000000000000030000000000000004000000000000000", crate::Word::new([Felt::new(16), Felt::new(32), Felt::new(48), Felt::new(64)]))]
-fn word_macro_endianness(#[case] input: &str, #[case] expected: crate::Word) {
+#[case::first_nibble("0x1000000000000000000000000000000000000000000000000000000000000000", Word::new([Felt::new_unchecked(16), Felt::new_unchecked(0), Felt::new_unchecked(0), Felt::new_unchecked(0)]))]
+#[case::second_nibble("0x0100000000000000000000000000000000000000000000000000000000000000", Word::new([Felt::new_unchecked(1), Felt::new_unchecked(0), Felt::new_unchecked(0), Felt::new_unchecked(0)]))]
+#[case::all_first_nibbles("0x1000000000000000100000000000000010000000000000001000000000000000", Word::new([Felt::new_unchecked(16), Felt::new_unchecked(16), Felt::new_unchecked(16), Felt::new_unchecked(16)]))]
+#[case::all_first_nibbles_asc("0x1000000000000000200000000000000030000000000000004000000000000000", Word::new([Felt::new_unchecked(16), Felt::new_unchecked(32), Felt::new_unchecked(48), Felt::new_unchecked(64)]))]
+fn word_macro_endianness(#[case] input: &str, #[case] expected: Word) {
     let uut = word!(input);
     assert_eq!(uut, expected);
 }
@@ -248,7 +261,7 @@ proptest! {
         map.insert(word, 1);
 
         // Round-trip via bytes to create an equivalent key.
-        let bytes: [u8; WORD_SIZE_BYTES] = word.into();
+        let bytes: [u8; Word::SERIALIZED_SIZE] = word.into();
         let key2: Word = bytes.try_into().unwrap();
         prop_assert_eq!(word, key2);
 

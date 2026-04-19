@@ -16,7 +16,7 @@ pub mod utils;
 
 // RE-EXPORTS
 // ================================================================================================
-pub use miden_field::{Felt, LexicographicWord, Word, WordError, word};
+pub use miden_field::{Felt, Word, WordError, word};
 
 pub mod field {
     //! Traits and utilities for working with the Goldilocks finite field (i.e.,
@@ -45,7 +45,7 @@ pub mod parallel {
 pub mod stark {
     //! Lifted STARK proving system based on Plonky3.
     //!
-    //! Sub-modules from `p3-miden-lifted-stark`:
+    //! Sub-modules from `miden-lifted-stark`:
     //! - [`proof`] — [`proof::StarkProof`], [`proof::StarkDigest`], [`proof::StarkOutput`],
     //!   [`proof::StarkTranscript`]
     //! - [`air`] — AIR traits, builders, symbolic types (includes all of `p3-air`)
@@ -64,9 +64,9 @@ pub mod stark {
     //! - [`symmetric`] — Symmetric cryptographic primitives
 
     // Top-level types from lifted-stark
-    pub use p3_miden_lifted_stark::{GenericStarkConfig, StarkConfig};
+    pub use miden_lifted_stark::{GenericStarkConfig, StarkConfig};
     // Lifted-stark sub-modules (re-exported as-is)
-    pub use p3_miden_lifted_stark::{
+    pub use miden_lifted_stark::{
         air, debug, fri, hasher, lmcs, proof, prover, transcript, verifier,
     };
 
@@ -107,11 +107,6 @@ pub mod stark {
 #[cfg(feature = "std")]
 pub type Map<K, V> = std::collections::HashMap<K, V>;
 
-#[cfg(feature = "std")]
-pub use std::collections::hash_map::Entry as MapEntry;
-#[cfg(feature = "std")]
-pub use std::collections::hash_map::IntoIter as MapIntoIter;
-
 /// An alias for a key-value map.
 ///
 /// When the `std` feature is enabled, this is an alias for [`std::collections::HashMap`].
@@ -123,6 +118,10 @@ pub type Map<K, V> = alloc::collections::BTreeMap<K, V>;
 pub use alloc::collections::btree_map::Entry as MapEntry;
 #[cfg(not(feature = "std"))]
 pub use alloc::collections::btree_map::IntoIter as MapIntoIter;
+#[cfg(feature = "std")]
+pub use std::collections::hash_map::Entry as MapEntry;
+#[cfg(feature = "std")]
+pub use std::collections::hash_map::IntoIter as MapIntoIter;
 
 /// An alias for a simple set.
 ///
@@ -141,17 +140,14 @@ pub type Set<V> = alloc::collections::BTreeSet<V>;
 // CONSTANTS
 // ================================================================================================
 
-/// Number of field elements in a word.
-pub const WORD_SIZE: usize = word::WORD_SIZE_FELTS;
-
-/// Field element representing ZERO in the Miden base filed.
+/// Field element representing ZERO in the Miden base field.
 pub const ZERO: Felt = Felt::ZERO;
 
-/// Field element representing ONE in the Miden base filed.
+/// Field element representing ONE in the Miden base field.
 pub const ONE: Felt = Felt::ONE;
 
 /// Array of field elements representing word of ZEROs in the Miden base field.
-pub const EMPTY_WORD: Word = Word::new([ZERO; WORD_SIZE]);
+pub const EMPTY_WORD: Word = Word::new([ZERO; Word::NUM_ELEMENTS]);
 
 // TRAITS
 // ================================================================================================
@@ -177,8 +173,6 @@ pub trait SequentialCommit {
 // ================================================================================================
 
 mod batch_inversion {
-    use alloc::vec::Vec;
-
     use p3_maybe_rayon::prelude::*;
 
     use super::{Felt, ONE, ZERO, field::Field};
@@ -189,14 +183,12 @@ mod batch_inversion {
     pub fn batch_inversion_allow_zeros(values: &mut [Felt]) {
         const CHUNK_SIZE: usize = 1024;
 
-        // We need to work with a copy since we're modifying in place
-        let input: Vec<Felt> = values.to_vec();
-
-        input.par_chunks(CHUNK_SIZE).zip(values.par_chunks_mut(CHUNK_SIZE)).for_each(
-            |(input_chunk, output_chunk)| {
-                batch_inversion_helper(input_chunk, output_chunk);
-            },
-        );
+        values.par_chunks_mut(CHUNK_SIZE).for_each(|output_chunk| {
+            let len = output_chunk.len();
+            let mut scratch = [ZERO; CHUNK_SIZE];
+            scratch[..len].copy_from_slice(output_chunk);
+            batch_inversion_helper(&scratch[..len], output_chunk);
+        });
     }
 
     /// Montgomery's trick for batch inversion, handling zeros.
@@ -232,17 +224,43 @@ mod batch_inversion {
 
     #[cfg(test)]
     mod tests {
+        use alloc::vec::Vec;
+
         use super::*;
 
         #[test]
         fn test_batch_inversion_allow_zeros() {
-            let mut column = Vec::from([Felt::new(2), ZERO, Felt::new(4), Felt::new(5)]);
+            let mut column = Vec::from([
+                Felt::new_unchecked(2),
+                ZERO,
+                Felt::new_unchecked(4),
+                Felt::new_unchecked(5),
+            ]);
             batch_inversion_allow_zeros(&mut column);
 
-            assert_eq!(column[0], Felt::new(2).inverse());
+            assert_eq!(column[0], Felt::new_unchecked(2).inverse());
             assert_eq!(column[1], ZERO);
-            assert_eq!(column[2], Felt::new(4).inverse());
-            assert_eq!(column[3], Felt::new(5).inverse());
+            assert_eq!(column[2], Felt::new_unchecked(4).inverse());
+            assert_eq!(column[3], Felt::new_unchecked(5).inverse());
+        }
+
+        #[test]
+        fn test_batch_inversion_allow_zeros_spans_fixed_chunks() {
+            let mut v: Vec<Felt> = (1_u64..=2050).map(Felt::new_unchecked).collect();
+            let expected: Vec<Felt> = v.iter().copied().map(|x| x.inverse()).collect();
+            batch_inversion_allow_zeros(&mut v);
+            assert_eq!(v, expected);
+        }
+
+        #[test]
+        fn test_batch_inversion_allow_zeros_zero_on_chunk_boundary() {
+            let mut v = vec![Felt::new_unchecked(7); 1025];
+            v[1023] = ZERO;
+            batch_inversion_allow_zeros(&mut v);
+            assert_eq!(v[1023], ZERO);
+            for i in (0..1023).chain(1024..1025) {
+                assert_eq!(v[i], Felt::new_unchecked(7).inverse());
+            }
         }
     }
 }

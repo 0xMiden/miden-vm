@@ -1,0 +1,49 @@
+[package]
+description            = "Profiling binary for lifted STARK and batch STARK provers."
+edition                = "2024"
+homepage               = "https://github.com/0xMiden/crypto"
+license                = "MIT OR Apache-2.0"
+name                   = "miden-bench"
+publish                = false
+readme                 = "../README.md"
+repository             = "https://github.com/0xMiden/crypto"
+rust-version.workspace = true
+version.workspace      = true
+
+[dependencies]
+# Internal
+miden-lifted-stark = { features = ["testing"], workspace = true }
+
+# Plonky3
+p3-air.workspace           = true
+p3-batch-stark.workspace   = true
+p3-blake3.workspace        = true
+p3-blake3-air.workspace    = true
+p3-commit.workspace        = true
+p3-dft.workspace           = true
+p3-field.workspace         = true
+p3-fri.workspace           = true
+p3-goldilocks.workspace    = true
+p3-keccak.workspace        = true
+p3-keccak-air.workspace    = true
+p3-lookup.workspace        = true
+p3-matrix.workspace        = true
+p3-merkle-tree.workspace   = true
+p3-poseidon2-air.workspace = true
+p3-symmetric.workspace     = true
+p3-uni-stark.workspace     = true
+
+# Third-party
+clap.workspace               = true
+postcard.workspace           = true
+rand.workspace               = true
+tracing.workspace            = true
+tracing-forest               = { features = ["ansi", "smallvec"], workspace = true }
+tracing-subscriber.workspace = true
+
+[features]
+default  = []
+parallel = ["miden-lifted-stark/parallel"]
+
+[lints]
+workspace = true

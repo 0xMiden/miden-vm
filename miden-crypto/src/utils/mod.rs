@@ -93,7 +93,7 @@ pub fn bytes_to_elements_with_padding(bytes: &[u8]) -> Vec<Felt> {
                 buf[chunk.len()] = 1;
             }
 
-            Felt::new(u64::from_le_bytes(buf))
+            Felt::new_unchecked(u64::from_le_bytes(buf))
         })
         .collect()
 }
@@ -208,10 +208,10 @@ pub fn bytes_to_elements_exact(bytes: &[u8]) -> Option<Vec<Felt>> {
 ///
 /// let bytes = vec![0x01, 0x02, 0x03, 0x04, 0x05];
 /// let felts = bytes_to_packed_u32_elements(&bytes);
-/// assert_eq!(felts, vec![Felt::new(0x04030201), Felt::new(0x00000005)]);
+/// assert_eq!(felts, vec![Felt::new_unchecked(0x04030201), Felt::new_unchecked(0x00000005)]);
 /// ```
 pub fn bytes_to_packed_u32_elements(bytes: &[u8]) -> Vec<Felt> {
-    const BYTES_PER_U32: usize = core::mem::size_of::<u32>();
+    const BYTES_PER_U32: usize = size_of::<u32>();
 
     bytes
         .chunks(BYTES_PER_U32)

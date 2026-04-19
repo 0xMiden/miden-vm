@@ -184,7 +184,7 @@ mod tests {
             let mut v2;
 
             for i in 0..STATE_WIDTH {
-                v1[i] = Felt::new(a[i]);
+                v1[i] = Felt::new_unchecked(a[i]);
             }
             v2 = v1;
 

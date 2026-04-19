@@ -28,13 +28,13 @@ jobs:
         target: [primitives, collections, string, vint64, goldilocks, budgeted]
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@main
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # pin@nightly
         with:
           toolchain: nightly
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # pin@v2
       - name: Install cargo-fuzz
         run: cargo +nightly install cargo-fuzz --locked
       - name: Run fuzz target (smoke test)
@@ -52,13 +52,13 @@ jobs:
         target: [word, merkle, merkle_store, smt_serde, mmr, crypto, aead, signatures]
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@main
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # pin@nightly
         with:
           toolchain: nightly
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # pin@v2
       - name: Install cargo-fuzz
         run: cargo +nightly install cargo-fuzz --locked
       - name: Run fuzz target (smoke test)

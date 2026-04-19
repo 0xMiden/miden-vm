@@ -22,10 +22,10 @@ use crate::{
 /// This is used for deterministic tests that need reproducible sequences of random values.
 fn random_word<R: Rng>(rng: &mut R) -> Word {
     Word::new([
-        Felt::new(rng.random::<u64>() % Felt::ORDER),
-        Felt::new(rng.random::<u64>() % Felt::ORDER),
-        Felt::new(rng.random::<u64>() % Felt::ORDER),
-        Felt::new(rng.random::<u64>() % Felt::ORDER),
+        Felt::new_unchecked(rng.random::<u64>() % Felt::ORDER),
+        Felt::new_unchecked(rng.random::<u64>() % Felt::ORDER),
+        Felt::new_unchecked(rng.random::<u64>() % Felt::ORDER),
+        Felt::new_unchecked(rng.random::<u64>() % Felt::ORDER),
     ])
 }
 
@@ -429,7 +429,7 @@ fn partial_smt_add_proof_num_entries() {
     // key0 and key1 have the same felt at index 3 so they will be placed in the same leaf.
     let key0 = Word::from([ZERO, ZERO, ZERO, ONE]);
     let key1 = Word::from([ONE, ONE, ONE, ONE]);
-    let key2 = Word::from([ONE, ONE, ONE, Felt::new(5)]);
+    let key2 = Word::from([ONE, ONE, ONE, Felt::new_unchecked(5)]);
     let value0 = random_word(&mut rng);
     let value1 = random_word(&mut rng);
     let value2 = random_word(&mut rng);
@@ -485,14 +485,14 @@ fn partial_smt_tracking_visualization() {
     const LEAF_6: u64 = (1 << 63) | (1 << 62);
     const LEAF_7: u64 = (1 << 63) | (1 << 62) | (1 << 61);
 
-    let key_0 = Word::from([ZERO, ZERO, ZERO, Felt::new(LEAF_0)]);
-    let key_1 = Word::from([ZERO, ZERO, ZERO, Felt::new(LEAF_1)]);
-    let key_2 = Word::from([ZERO, ZERO, ZERO, Felt::new(LEAF_2)]);
-    let key_3 = Word::from([ZERO, ZERO, ZERO, Felt::new(LEAF_3)]);
-    let key_4 = Word::from([ZERO, ZERO, ZERO, Felt::new(LEAF_4)]);
-    let key_5 = Word::from([ZERO, ZERO, ZERO, Felt::new(LEAF_5)]);
-    let key_6 = Word::from([ZERO, ZERO, ZERO, Felt::new(LEAF_6)]);
-    let key_7 = Word::from([ZERO, ZERO, ZERO, Felt::new(LEAF_7)]);
+    let key_0 = Word::from([ZERO, ZERO, ZERO, Felt::new_unchecked(LEAF_0)]);
+    let key_1 = Word::from([ZERO, ZERO, ZERO, Felt::new_unchecked(LEAF_1)]);
+    let key_2 = Word::from([ZERO, ZERO, ZERO, Felt::new_unchecked(LEAF_2)]);
+    let key_3 = Word::from([ZERO, ZERO, ZERO, Felt::new_unchecked(LEAF_3)]);
+    let key_4 = Word::from([ZERO, ZERO, ZERO, Felt::new_unchecked(LEAF_4)]);
+    let key_5 = Word::from([ZERO, ZERO, ZERO, Felt::new_unchecked(LEAF_5)]);
+    let key_6 = Word::from([ZERO, ZERO, ZERO, Felt::new_unchecked(LEAF_6)]);
+    let key_7 = Word::from([ZERO, ZERO, ZERO, Felt::new_unchecked(LEAF_7)]);
 
     let mut rng = ChaCha20Rng::from_seed([12u8; 32]);
 
@@ -643,7 +643,7 @@ fn partial_smt_deserialize_invalid_leaf() {
     // Tamper with leaf value data (after position).
     // Byte position to flip.
     let leaf_value_offset = 32 + 8 + 8 + 10;
-    let mut tampered_bytes = bytes.clone();
+    let mut tampered_bytes = bytes;
     // Flip a byte in the leaf value data to corrupt it.
     tampered_bytes[leaf_value_offset] ^= 0xff;
 

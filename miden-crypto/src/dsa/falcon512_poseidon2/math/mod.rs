@@ -99,7 +99,7 @@ pub(crate) fn ntru_gen<R: Rng>(n: usize, rng: &mut R) -> [Polynomial<i16>; 4] {
         }
 
         let f_ntt = f.map(|&i| FalconFelt::new(i)).fft();
-        if f_ntt.coefficients.iter().any(|e| e.is_zero()) {
+        if f_ntt.coefficients.iter().any(Zero::is_zero) {
             continue;
         }
         let gamma = gram_schmidt_norm_squared(&f, &g);
@@ -190,8 +190,8 @@ fn gram_schmidt_norm_squared(f: &Polynomial<i16>, g: &Polynomial<i16>) -> f64 {
 
     let f_fft = f.map(|i| Complex64::new(*i as f64, 0.0)).fft();
     let g_fft = g.map(|i| Complex64::new(*i as f64, 0.0)).fft();
-    let f_adj_fft = f_fft.map(|c| c.conj());
-    let g_adj_fft = g_fft.map(|c| c.conj());
+    let f_adj_fft = f_fft.map(num::Complex::conj);
+    let g_adj_fft = g_fft.map(num::Complex::conj);
     let ffgg_fft = f_fft.hadamard_mul(&f_adj_fft) + g_fft.hadamard_mul(&g_adj_fft);
     let ffgg_fft_inverse = ffgg_fft.hadamard_inv();
     let qf_over_ffgg_fft = f_adj_fft.map(|c| c * (MODULUS as f64)).hadamard_mul(&ffgg_fft_inverse);
@@ -240,8 +240,8 @@ fn babai_reduce(
         .map(|bi| Complex64::new(i64::try_from(bi >> shift).unwrap() as f64, 0.0))
         .fft();
 
-    let f_star_adjusted = f_adjusted.map(|c| c.conj());
-    let g_star_adjusted = g_adjusted.map(|c| c.conj());
+    let f_star_adjusted = f_adjusted.map(num::Complex::conj);
+    let g_star_adjusted = g_adjusted.map(num::Complex::conj);
     let denominator_fft =
         f_adjusted.hadamard_mul(&f_star_adjusted) + g_adjusted.hadamard_mul(&g_star_adjusted);
 

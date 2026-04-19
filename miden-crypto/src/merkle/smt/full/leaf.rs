@@ -1,5 +1,4 @@
 use alloc::{string::ToString, vec::Vec};
-use core::cmp::Ordering;
 
 use super::EMPTY_WORD;
 use crate::{
@@ -314,13 +313,13 @@ impl SmtLeaf {
                     // This stays within MAX_LEAF_ENTRIES limit. We're only adding one entry to a
                     // single leaf
                     let mut pairs = vec![*kv_pair, (key, value)];
-                    pairs.sort_by(|(key_1, _), (key_2, _)| cmp_keys(*key_1, *key_2));
+                    pairs.sort_by(|(key_1, _), (key_2, _)| key_1.cmp(key_2));
                     *self = SmtLeaf::Multiple(pairs);
                     Ok(None)
                 }
             },
             SmtLeaf::Multiple(kv_pairs) => {
-                match kv_pairs.binary_search_by(|kv_pair| cmp_keys(kv_pair.0, key)) {
+                match kv_pairs.binary_search_by(|kv_pair| kv_pair.0.cmp(&key)) {
                     Ok(pos) => {
                         let old_value = kv_pairs[pos].1;
                         kv_pairs[pos].1 = value;
@@ -363,7 +362,7 @@ impl SmtLeaf {
                 }
             },
             SmtLeaf::Multiple(kv_pairs) => {
-                match kv_pairs.binary_search_by(|kv_pair| cmp_keys(kv_pair.0, key)) {
+                match kv_pairs.binary_search_by(|kv_pair| kv_pair.0.cmp(&key)) {
                     Ok(pos) => {
                         let old_value = kv_pairs[pos].1;
 
@@ -438,18 +437,4 @@ pub(crate) fn kv_to_elements((key, value): (Word, Word)) -> impl Iterator<Item =
     let value_elements = value.into_iter();
 
     key_elements.chain(value_elements)
-}
-
-/// Compares two keys, compared element-by-element using their integer representations starting with
-/// the most significant element.
-pub(crate) fn cmp_keys(key_1: Word, key_2: Word) -> Ordering {
-    for (v1, v2) in key_1.iter().zip(key_2.iter()).rev() {
-        let v1 = (*v1).as_canonical_u64();
-        let v2 = (*v2).as_canonical_u64();
-        if v1 != v2 {
-            return v1.cmp(&v2);
-        }
-    }
-
-    Ordering::Equal
 }

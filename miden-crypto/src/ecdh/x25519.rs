@@ -20,14 +20,13 @@ use rand::{CryptoRng, RngCore};
 use subtle::ConstantTimeEq;
 
 use crate::{
-    dsa::eddsa_25519_sha512::{PublicKey, SecretKey},
+    dsa::eddsa_25519_sha512::{KeyExchangeKey, PublicKey},
     ecdh::KeyAgreementScheme,
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing},
     },
 };
-
 // SHARED SECRETE
 // ================================================================================================
 
@@ -116,7 +115,7 @@ impl EphemeralSecretKey {
         // dependency matching ours
         use k256::elliptic_curve::rand_core::SeedableRng;
         let mut seed = Zeroizing::new([0_u8; 32]);
-        rand::RngCore::fill_bytes(rng, &mut *seed);
+        RngCore::fill_bytes(rng, &mut *seed);
         let rng = rand_hc::Hc128Rng::from_seed(*seed);
 
         let sk = x25519_dalek::EphemeralSecret::random_from_rng(rng);
@@ -182,7 +181,7 @@ impl KeyAgreementScheme for X25519 {
     type EphemeralSecretKey = EphemeralSecretKey;
     type EphemeralPublicKey = EphemeralPublicKey;
 
-    type SecretKey = SecretKey;
+    type SecretKey = KeyExchangeKey;
     type PublicKey = PublicKey;
 
     type SharedSecret = SharedSecret;
@@ -249,8 +248,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        dsa::eddsa_25519_sha512::SecretKey, ecdh::KeyAgreementError, rand::test_utils::seeded_rng,
-        utils::Deserializable,
+        dsa::eddsa_25519_sha512::KeyExchangeKey, ecdh::KeyAgreementError,
+        rand::test_utils::seeded_rng, utils::Deserializable,
     };
 
     #[test]
@@ -258,7 +257,7 @@ mod tests {
         let mut rng = seeded_rng([0u8; 32]);
 
         // 1. Generate the static key-pair for Alice
-        let sk = SecretKey::with_rng(&mut rng);
+        let sk = KeyExchangeKey::with_rng(&mut rng);
         let pk = sk.public_key();
 
         // 2. Generate the ephemeral key-pair for Bob
@@ -295,7 +294,7 @@ mod tests {
     #[test]
     fn exchange_static_ephemeral_rejects_zero_shared_secret() {
         let mut rng = seeded_rng([0u8; 32]);
-        let static_sk = SecretKey::with_rng(&mut rng);
+        let static_sk = KeyExchangeKey::with_rng(&mut rng);
 
         let low_order_bytes = EIGHT_TORSION[0].to_montgomery().to_bytes();
         let low_order_pk = EphemeralPublicKey {

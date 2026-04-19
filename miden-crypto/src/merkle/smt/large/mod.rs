@@ -64,12 +64,32 @@
 //! // Prepare initial entries
 //! let entries = vec![
 //!     (
-//!         Word::new([Felt::new(1), Felt::new(0), Felt::new(0), Felt::new(0)]),
-//!         Word::new([Felt::new(10), Felt::new(20), Felt::new(30), Felt::new(40)]),
+//!         Word::new([
+//!             Felt::new_unchecked(1),
+//!             Felt::new_unchecked(0),
+//!             Felt::new_unchecked(0),
+//!             Felt::new_unchecked(0),
+//!         ]),
+//!         Word::new([
+//!             Felt::new_unchecked(10),
+//!             Felt::new_unchecked(20),
+//!             Felt::new_unchecked(30),
+//!             Felt::new_unchecked(40),
+//!         ]),
 //!     ),
 //!     (
-//!         Word::new([Felt::new(2), Felt::new(0), Felt::new(0), Felt::new(0)]),
-//!         Word::new([Felt::new(11), Felt::new(22), Felt::new(33), Felt::new(44)]),
+//!         Word::new([
+//!             Felt::new_unchecked(2),
+//!             Felt::new_unchecked(0),
+//!             Felt::new_unchecked(0),
+//!             Felt::new_unchecked(0),
+//!         ]),
+//!         Word::new([
+//!             Felt::new_unchecked(11),
+//!             Felt::new_unchecked(22),
+//!             Felt::new_unchecked(33),
+//!             Felt::new_unchecked(44),
+//!         ]),
 //!     ),
 //! ];
 //!
@@ -93,11 +113,36 @@
 //! let storage = RocksDbStorage::open(RocksDbConfig::new("/path/to/db"))?;
 //! let mut smt = LargeSmt::load(storage)?;
 //!
-//! let k1 = Word::new([Felt::new(101), Felt::new(0), Felt::new(0), Felt::new(0)]);
-//! let v1 = Word::new([Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
-//! let k2 = Word::new([Felt::new(202), Felt::new(0), Felt::new(0), Felt::new(0)]);
-//! let k3 = Word::new([Felt::new(303), Felt::new(0), Felt::new(0), Felt::new(0)]);
-//! let v3 = Word::new([Felt::new(7), Felt::new(7), Felt::new(7), Felt::new(7)]);
+//! let k1 = Word::new([
+//!     Felt::new_unchecked(101),
+//!     Felt::new_unchecked(0),
+//!     Felt::new_unchecked(0),
+//!     Felt::new_unchecked(0),
+//! ]);
+//! let v1 = Word::new([
+//!     Felt::new_unchecked(1),
+//!     Felt::new_unchecked(2),
+//!     Felt::new_unchecked(3),
+//!     Felt::new_unchecked(4),
+//! ]);
+//! let k2 = Word::new([
+//!     Felt::new_unchecked(202),
+//!     Felt::new_unchecked(0),
+//!     Felt::new_unchecked(0),
+//!     Felt::new_unchecked(0),
+//! ]);
+//! let k3 = Word::new([
+//!     Felt::new_unchecked(303),
+//!     Felt::new_unchecked(0),
+//!     Felt::new_unchecked(0),
+//!     Felt::new_unchecked(0),
+//! ]);
+//! let v3 = Word::new([
+//!     Felt::new_unchecked(7),
+//!     Felt::new_unchecked(7),
+//!     Felt::new_unchecked(7),
+//!     Felt::new_unchecked(7),
+//! ]);
 //!
 //! // EMPTY_WORD marks deletions
 //! let updates = vec![(k1, v1), (k2, EMPTY_WORD), (k3, v3)];
@@ -128,12 +173,32 @@
 //! let storage = RocksDbStorage::open(RocksDbConfig::new(path))?;
 //! let entries = vec![
 //!     (
-//!         Word::new([Felt::new(1), Felt::new(0), Felt::new(0), Felt::new(0)]),
-//!         Word::new([Felt::new(10), Felt::new(20), Felt::new(30), Felt::new(40)]),
+//!         Word::new([
+//!             Felt::new_unchecked(1),
+//!             Felt::new_unchecked(0),
+//!             Felt::new_unchecked(0),
+//!             Felt::new_unchecked(0),
+//!         ]),
+//!         Word::new([
+//!             Felt::new_unchecked(10),
+//!             Felt::new_unchecked(20),
+//!             Felt::new_unchecked(30),
+//!             Felt::new_unchecked(40),
+//!         ]),
 //!     ),
 //!     (
-//!         Word::new([Felt::new(2), Felt::new(0), Felt::new(0), Felt::new(0)]),
-//!         Word::new([Felt::new(11), Felt::new(22), Felt::new(33), Felt::new(44)]),
+//!         Word::new([
+//!             Felt::new_unchecked(2),
+//!             Felt::new_unchecked(0),
+//!             Felt::new_unchecked(0),
+//!             Felt::new_unchecked(0),
+//!         ]),
+//!         Word::new([
+//!             Felt::new_unchecked(11),
+//!             Felt::new_unchecked(22),
+//!             Felt::new_unchecked(33),
+//!             Felt::new_unchecked(44),
+//!         ]),
 //!     ),
 //! ];
 //! let _smt = LargeSmt::with_entries(storage, entries)?;

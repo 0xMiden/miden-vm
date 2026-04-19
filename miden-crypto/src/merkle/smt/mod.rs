@@ -8,7 +8,7 @@ use core::{
 
 use super::{EmptySubtreeRoots, InnerNodeInfo, MerkleError, NodeIndex, SparseMerklePath};
 use crate::{
-    EMPTY_WORD, Map, Word,
+    EMPTY_WORD, Map, Set, Word,
     hash::poseidon2::Poseidon2,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
@@ -204,9 +204,9 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
     /// the Merkle tree, or [`drop()`] to discard them.
     ///
     /// # Errors
-    /// If mutations would exceed [`crate::merkle::smt::MAX_LEAF_ENTRIES`] (1024 entries) in a leaf,
-    /// returns
-    /// [`MerkleError::TooManyLeafEntries`].
+    /// - Returns [`MerkleError::DuplicateValuesForIndex`] if `kv_pairs` contains duplicate keys.
+    /// - If mutations would exceed [`crate::merkle::smt::MAX_LEAF_ENTRIES`] (1024 entries) in a
+    ///   leaf, returns [`MerkleError::TooManyLeafEntries`].
     fn compute_mutations(
         &self,
         kv_pairs: impl IntoIterator<Item = (Self::Key, Self::Value)>,
@@ -216,6 +216,13 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
 
     /// Sequential version of [`SparseMerkleTree::compute_mutations()`].
     /// This is the default implementation.
+    ///
+    /// # Errors
+    ///
+    /// - [`MerkleError::DuplicateValuesForIndex`] if `kv_pairs` contains multiple pairs with the
+    ///   same key.
+    /// - [`MerkleError::TooManyLeafEntries`] if the mutations would cause the tree to exceed
+    ///   [`crate::merkle::smt::MAX_LEAF_ENTRIES`] in a single leaf.
     fn compute_mutations_sequential(
         &self,
         kv_pairs: impl IntoIterator<Item = (Self::Key, Self::Value)>,
@@ -224,12 +231,18 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
 
         let mut new_root = self.root();
         let mut new_pairs: Map<Self::Key, Self::Value> = Default::default();
-        let mut node_mutations: NodeMutations = Default::default();
+        let mut node_mutations: NodeMutations = NodeMutations::new();
+        let mut seen_keys: Set<Self::Key> = Set::new();
 
         for (key, value) in kv_pairs {
+            // Reject duplicate keys.
+            if !seen_keys.insert(key.clone()) {
+                return Err(MerkleError::DuplicateValuesForIndex(
+                    Self::key_to_leaf_index(&key).position(),
+                ));
+            }
+
             // If the old value and the new value are the same, there is nothing to update.
-            // For the unusual case that kv_pairs has multiple values at the same key, we'll have
-            // to check the key-value pairs we've already seen to get the "effective" old value.
             let old_value = new_pairs.get(&key).cloned().unwrap_or_else(|| self.get_value(&key));
             if value == old_value {
                 continue;
@@ -249,7 +262,7 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
                 pairs_at_index.fold(self.get_leaf(&key), |acc, (k, v)| {
                     // Most of the time `pairs_at_index` should only contain a single entry (or
                     // none at all), as multi-leaves should be really rare.
-                    let existing_leaf = acc.clone();
+                    let existing_leaf = acc;
                     self.construct_prospective_leaf(existing_leaf, k, v)
                         .expect("current leaf should be valid")
                 })
@@ -511,6 +524,27 @@ pub(crate) trait SparseMerkleTree<const DEPTH: u8> {
 
     /// Maps a key to a leaf index
     fn key_to_leaf_index(key: &Self::Key) -> LeafIndex<DEPTH>;
+
+    /// Checks a slice of key-value pairs (assumed sorted by key) for duplicate keys.
+    ///
+    /// The input `sorted_kv_pairs` must be sorted for this function to return correct results, as
+    /// it only performs checks of adjacent elements.
+    ///
+    /// # Errors
+    ///
+    /// - [`MerkleError::DuplicateValuesForIndex`] at the first duplicate key found in
+    ///   `sorted_kv_pairs`.
+    #[cfg(feature = "concurrent")] // Currently only used in concurrent contexts
+    fn check_for_duplicate_keys(
+        sorted_kv_pairs: &[(Self::Key, Self::Value)],
+    ) -> Result<(), MerkleError> {
+        if let Some(window) = sorted_kv_pairs.windows(2).find(|w| w[0].0 == w[1].0) {
+            return Err(MerkleError::DuplicateValuesForIndex(
+                Self::key_to_leaf_index(&window[0].0).position(),
+            ));
+        }
+        Ok(())
+    }
 
     /// Maps a (SparseMerklePath, Self::Leaf) to an opening.
     ///

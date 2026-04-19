@@ -80,9 +80,9 @@ name              = "transpose"
 required-features = ["std"]
 
 [features]
-concurrent        = ["dep:rayon", "p3-maybe-rayon/parallel", "p3-miden-lifted-stark/parallel", "p3-util/parallel", "std"]
+concurrent        = ["dep:rayon", "miden-lifted-stark/parallel", "p3-maybe-rayon/parallel", "p3-util/parallel", "std"]
 default           = ["concurrent", "std"]
-executable        = ["concurrent", "dep:clap", "dep:rand-utils"]
+executable        = ["concurrent", "dep:clap"]
 fuzzing           = []
 internal          = ["concurrent"]
 persistent-forest = ["rocksdb", "serde"]
@@ -93,71 +93,63 @@ testing           = ["dep:proptest", "miden-field/testing"]
 
 [dependencies]
 # Miden dependencies
-miden-crypto-derive.workspace = true
-miden-field.workspace         = true
-miden-serde-utils.workspace   = true
+miden-crypto-derive = { workspace = true }
+miden-field         = { workspace = true }
+miden-lifted-stark  = { default-features = false, workspace = true }
+miden-serde-utils   = { workspace = true }
 
 # External dependencies
-blake3           = { default-features = false, version = "1.8" }
-chacha20poly1305 = { features = ["alloc", "stream"], version = "0.10" }
-clap             = { features = ["derive"], optional = true, version = "4.5" }
-curve25519-dalek = { default-features = false, version = "4" }
-ed25519-dalek    = { features = ["zeroize"], version = "2" }
-flume            = { version = "0.11.1" }
-hkdf             = { default-features = false, version = "0.12" }
-k256             = { features = ["ecdh", "ecdsa", "pkcs8"], version = "0.13" }
-num              = { default-features = false, features = ["alloc", "libm"], version = "0.4" }
-num-complex      = { default-features = false, version = "0.4" }
-proptest         = { default-features = false, features = ["alloc"], optional = true, version = "1.7" }
+blake3           = { workspace = true }
+chacha20poly1305 = { features = ["alloc", "stream"], workspace = true }
+clap             = { features = ["derive"], optional = true, workspace = true }
+curve25519-dalek = { workspace = true }
+ed25519-dalek    = { features = ["zeroize"], workspace = true }
+flume            = { workspace = true }
+hkdf             = { workspace = true }
+k256             = { features = ["ecdh", "ecdsa", "pkcs8"], workspace = true }
+num              = { features = ["alloc", "libm"], workspace = true }
+num-complex      = { workspace = true }
+once_cell        = { features = ["alloc", "critical-section"], workspace = true }
+proptest         = { features = ["alloc"], optional = true, workspace = true }
 rand             = { default-features = false, version = "0.9" }
-rand-utils       = { optional = true, package = "winter-rand-utils", version = "0.13" }
-rand_chacha      = { default-features = false, version = "0.9" }
-rand_core        = { default-features = false, version = "0.9" }
-rand_hc          = { version = "0.3" }
-rayon            = { optional = true, version = "1.10" }
-rocksdb          = { default-features = false, features = ["bindgen-runtime", "lz4"], optional = true, version = "0.24" }
-serde            = { default-features = false, features = ["derive"], optional = true, version = "1.0" }
-sha2             = { default-features = false, version = "0.10" }
-sha3             = { default-features = false, version = "0.10" }
-subtle           = { default-features = false, version = "2.6" }
-thiserror        = { default-features = false, version = "2.0" }
-x25519-dalek     = { default-features = false, features = ["static_secrets"], version = "2.0" }
+rand_chacha      = { workspace = true }
+rand_core        = { workspace = true }
+rand_hc          = { workspace = true }
+rayon            = { optional = true, workspace = true }
+rocksdb          = { features = ["bindgen-runtime", "lz4"], optional = true, workspace = true }
+serde            = { features = ["derive"], optional = true, workspace = true }
+sha2             = { workspace = true }
+sha3             = { workspace = true }
+subtle           = { workspace = true }
+thiserror        = { workspace = true }
+x25519-dalek     = { features = ["static_secrets"], workspace = true }
 
-# Upstream Plonky3 dependencies (matching p3-miden's published 0.5.0)
-p3-blake3      = { default-features = false, version = "0.5" }
-p3-challenger  = { default-features = false, version = "0.5" }
-p3-dft         = { default-features = false, version = "0.5" }
-p3-goldilocks  = { default-features = false, version = "0.5" }
-p3-keccak      = { default-features = false, version = "0.5" }
-p3-matrix      = { default-features = false, version = "0.5" }
-p3-maybe-rayon = { default-features = false, version = "0.5" }
-p3-symmetric   = { default-features = false, version = "0.5" }
-p3-util        = { default-features = false, version = "0.5" }
-
-# Miden-specific Plonky3 crates
-p3-miden-lifted-stark = { default-features = false, version = "0.5" }
+# Upstream Plonky3 dependencies
+p3-blake3.workspace      = true
+p3-challenger.workspace  = true
+p3-dft.workspace         = true
+p3-goldilocks.workspace  = true
+p3-keccak.workspace      = true
+p3-matrix.workspace      = true
+p3-maybe-rayon.workspace = true
+p3-symmetric.workspace   = true
+p3-util.workspace        = true
 
 [dev-dependencies]
-assert_matches = { default-features = false, version = "1.5" }
-criterion      = { features = ["html_reports"], version = "0.7" }
-hex            = { default-features = false, features = ["alloc"], version = "0.4" }
-itertools      = { version = "0.14" }
+assert_matches = { workspace = true }
+criterion      = { workspace = true }
+hex            = { features = ["alloc"], workspace = true }
+itertools      = { workspace = true }
 miden-field    = { features = ["testing"], workspace = true }
-proptest       = { default-features = false, features = ["alloc"], version = "1.7" }
-rand-utils     = { package = "winter-rand-utils", version = "0.13" }
-rstest         = { version = "0.26" }
-seq-macro      = { version = "0.3" }
-tempfile       = { version = "3.20" }
+proptest       = { features = ["alloc"], workspace = true }
+seq-macro      = { workspace = true }
+tempfile       = { workspace = true }
 
 [build-dependencies]
-cc   = { features = ["parallel"], optional = true, version = "1.2" }
-glob = "0.3"
+cc = { features = ["parallel"], optional = true, workspace = true }
 
 [lints]
 workspace = true
-
-[package.metadata.cargo-machete]
-ignored = ["getrandom", "rand-utils"]
 
 [[test]]
 name              = "rocksdb_large_smt"

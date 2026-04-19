@@ -23,7 +23,7 @@ proptest! {
 
         // Generate random field elements
         let data: Vec<Felt> = (0..data_len)
-            .map(|_| Felt::new(rng.random::<u64>()))
+            .map(|_| Felt::new_unchecked(rng.random::<u64>()))
             .collect();
 
         let encrypted = key.encrypt_elements_with_nonce(&data, &[], nonce).unwrap();
@@ -44,10 +44,10 @@ proptest! {
 
         // Generate random field elements
         let associated_data: Vec<Felt> = (0..associated_data_len)
-            .map(|_| Felt::new(rng.random::<u64>()))
+            .map(|_| Felt::new_unchecked(rng.random::<u64>()))
             .collect();
         let data: Vec<Felt> = (0..data_len)
-            .map(|_| Felt::new(rng.random::<u64>()))
+            .map(|_| Felt::new_unchecked(rng.random::<u64>()))
             .collect();
 
         let encrypted = key.encrypt_elements_with_nonce(&data, &associated_data, nonce).unwrap();

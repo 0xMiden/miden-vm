@@ -15,7 +15,7 @@ use crate::{
     merkle::{
         MerkleError,
         smt::{
-            SmtProof,
+            LeafIndex, SMT_DEPTH, SmtLeaf, SmtProof,
             large_forest::{
                 operation::{SmtForestUpdateBatch, SmtUpdateBatch},
                 root::{LineageId, TreeEntry, TreeWithRoot, VersionId},
@@ -83,6 +83,14 @@ where
     /// backend. The backend must return an error if the lineage does not exist.
     fn open(&self, lineage: LineageId, key: Word) -> Result<SmtProof>;
 
+    /// Returns the leaf stored at the provided `leaf_index` in the SMT with the specified
+    /// `lineage`. If no leaf is explicitly stored at the given index, the backend must return
+    /// an empty leaf for that index.
+    ///
+    /// It is the responsibility of the forest to ensure lineage existence before querying the
+    /// backend. The backend must return an error if the lineage does not exist.
+    fn get_leaf(&self, lineage: LineageId, leaf_index: LeafIndex<SMT_DEPTH>) -> Result<SmtLeaf>;
+
     /// Returns the value associated with the provided `key` in the SMT with the specified
     /// `lineage`, or [`None`] if no such value exists.
     ///
@@ -111,6 +119,14 @@ where
     ///
     /// It is the responsibility of the forest to ensure lineage existence before querying the
     /// backend. The backend must return an error if the lineage does not exist.
+    ///
+    /// # Expected Behavior
+    ///
+    /// Implementations must guarantee the following behavior in addition to the global invariants:
+    ///
+    /// - This method must be **cheap** to call, not requiring network or disk I/O to service the
+    ///   result. This usually implies in-memory caching of the data.
+    /// - This method must not return errors other than if the lineage does not exist.
     fn entry_count(&self, lineage: LineageId) -> Result<usize>;
 
     /// Returns an iterator that yields the populated (key-value) entries for the specified
@@ -121,7 +137,17 @@ where
     ///
     /// The iterator may yield entries in any arbitrary order, but must not yield entries for which
     /// the value is the empty word.
-    fn entries(&self, lineage: LineageId) -> Result<impl Iterator<Item = TreeEntry>>;
+    ///
+    /// # Expected Behavior
+    ///
+    /// Implementations must guarantee the following behavior in addition to the global invariants:
+    ///
+    /// - If any kind of error occurs during iteration that should be signaled to the user, the
+    ///   iterator must return `Some(Err(...))`. The caller should stop iteration after receiving an
+    ///   error as the iterator state is no longer valid.
+    /// - `None` will be returned upon successful completion, or at any time after an error has been
+    ///   returned.
+    fn entries(&self, lineage: LineageId) -> Result<impl Iterator<Item = Result<TreeEntry>>>;
 
     // SINGLE-TREE MODIFIERS
     // ============================================================================================
@@ -162,6 +188,22 @@ where
 
     // MULTI-TREE MODIFIERS
     // ============================================================================================
+
+    /// Adds multiple new `lineages` to the backend with the provided `version` and sets the
+    /// associated SMTs to have the value created by applying the provided updates to the empty
+    /// tree, returning the new root of that tree.
+    ///
+    /// # Expected Behavior
+    ///
+    /// Implementations must guarantee the following behavior in addition to the global invariants:
+    ///
+    /// - If any provided lineage conflicts with an already-existing lineage in the backend, it must
+    ///   return [`BackendError::DuplicateLineage`].
+    fn add_lineages(
+        &mut self,
+        version: VersionId,
+        lineages: SmtForestUpdateBatch,
+    ) -> Result<Vec<(LineageId, TreeWithRoot)>>;
 
     /// Performs the provided `updates` on the forest, setting all new tree states to have the
     /// provided `new_version` and returning a vector of the mutation sets that reverse the changes

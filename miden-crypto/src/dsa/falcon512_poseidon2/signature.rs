@@ -1,4 +1,4 @@
-use alloc::{string::ToString, vec::Vec};
+use alloc::string::ToString;
 use core::ops::Deref;
 
 use num::Zero;
@@ -225,7 +225,7 @@ impl TryFrom<&[i16; N]> for SignaturePoly {
 
 impl Serializable for &SignaturePoly {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        let sig_coeff: Vec<i16> = self.0.coefficients.iter().map(|a| a.balanced_value()).collect();
+        let sig_coeff = self.0.to_balanced_values();
         let mut sk_bytes = vec![0_u8; SIG_POLY_BYTE_LEN];
 
         let mut acc = 0;

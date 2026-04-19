@@ -142,6 +142,9 @@ const L0_FILE_COMPACTION_TRIGGER: c_int = 8;
 /// combine their batches in parallel.
 const MIN_LINEAGES_IN_BATCH_TO_PARALLELIZE: usize = 5;
 
+/// The minimum number of items per rayon chunk when parallelizing deserialization and extraction.
+const CHUNKING_UNIT: usize = 100;
+
 // PERSISTENT BACKEND
 // ================================================================================================
 
@@ -171,6 +174,12 @@ pub struct PersistentBackend {
     /// Care must be taken that this is _always_ kept in sync with the on-disk copy in the
     /// [`METADATA_CF`] column.
     lineages: HashMap<LineageId, TreeMetadata>,
+
+    /// Whether writes should be synchronously flushed to disk.
+    ///
+    /// Setting this to true will result in reduced throughput but may result in higher durability
+    /// in the presence of crashes.
+    sync_writes: bool,
 }
 
 // CONSTRUCTION
@@ -189,8 +198,9 @@ impl PersistentBackend {
     pub fn load(config: Config) -> Result<Self> {
         let db = Arc::new(Self::build_db_with_options(&config)?);
         let lineages = Self::read_all_metadata(db.clone())?;
+        let sync_writes = config.sync_writes;
 
-        Ok(Self { db, lineages })
+        Ok(Self { db, lineages, sync_writes })
     }
 }
 
@@ -218,7 +228,7 @@ impl Backend for PersistentBackend {
 
         // We then have to load both the corresponding leaf, and the siblings for its path out of
         // storage.
-        let mut leaf_index: NodeIndex = LeafIndex::from(key).into();
+        let leaf_index: NodeIndex = LeafIndex::from(key).into();
 
         // We calculate the roots of the subtrees in order to know their keys for loading. As an
         // opening only ever needs to retrieve 8 subtrees we just do this sequentially.
@@ -239,28 +249,28 @@ impl Backend for PersistentBackend {
             subtree_cache.insert(root, maybe_tree.unwrap_or_else(|| Subtree::new(root)));
         }
 
-        // Now we can read the necessary path from the cached subtree roots.
-        let mut path = Vec::with_capacity(SMT_DEPTH as usize);
-
-        while leaf_index.depth() > 0 {
-            let is_right = leaf_index.is_position_odd();
-            leaf_index = leaf_index.parent();
-
-            let root = Subtree::find_subtree_root(leaf_index);
-            let subtree = &subtree_cache[&root]; // Known to exist by construction.
-            let InnerNode { left, right } =
-                subtree.get_inner_node(leaf_index).unwrap_or_else(|| {
-                    EmptySubtreeRoots::get_inner_node(SMT_DEPTH, leaf_index.depth())
-                });
-
-            path.push(if is_right { left } else { right });
-        }
-
-        let merkle_path =
-            SparseMerklePath::from_sized_iter(path).expect("Always succeeds by construction");
+        let merkle_path = self.compute_path(leaf_index, &subtree_cache);
 
         // This is safe to do unchecked as we ensure that the path is valid by construction.
         Ok(SmtProof::new_unchecked(merkle_path, leaf))
+    }
+
+    /// Returns the leaf stored at `leaf_index` in the SMT with the specified `lineage`.
+    ///
+    /// If no leaf is explicitly stored at the given index, an empty leaf for that index is
+    /// returned.
+    ///
+    /// # Errors
+    ///
+    /// - [`BackendError::UnknownLineage`] if the provided `lineage` is not known by the backend.
+    /// - [`BackendError::Internal`] if the backing database cannot be accessed for some reason.
+    fn get_leaf(&self, lineage: LineageId, leaf_index: LeafIndex<SMT_DEPTH>) -> Result<SmtLeaf> {
+        if !self.lineages.contains_key(&lineage) {
+            return Err(BackendError::UnknownLineage(lineage));
+        }
+
+        let key = LeafKey { lineage, index: leaf_index.position() };
+        Ok(self.load_leaf_raw(&key)?.unwrap_or_else(|| SmtLeaf::new_empty(leaf_index)))
     }
 
     /// Returns the value associated with the provided `key` in the specified `lineage`, or [`None`]
@@ -340,7 +350,7 @@ impl Backend for PersistentBackend {
     ///
     /// - [`BackendError::UnknownLineage`] if the provided `lineage` is not one known by this
     ///   backend.
-    fn entries(&self, lineage: LineageId) -> Result<impl Iterator<Item = TreeEntry>> {
+    fn entries(&self, lineage: LineageId) -> Result<impl Iterator<Item = Result<TreeEntry>>> {
         if !self.lineages.contains_key(&lineage) {
             return Err(BackendError::UnknownLineage(lineage));
         }
@@ -468,6 +478,105 @@ impl Backend for PersistentBackend {
         Ok(reversion_set)
     }
 
+    /// Adds multiple new `lineages` to the tree, creating an empty tree for each and applying the
+    /// provided modifications to it, with the result being given the specified `version`.
+    ///
+    /// If the provide batch of modifications is empty for any given lineage, then the **empty tree
+    /// will be added** as the first version in that lineage.
+    ///
+    /// # Errors
+    ///
+    /// - [`BackendError::DuplicateLineage`] if any of the provided lineages already exists in the
+    ///   backend.
+    /// - [`BackendError::Internal`] if the database cannot be accessed at any point.
+    /// - [`BackendError::Merkle`] if an error occurs with the merkle tree semantics.
+    fn add_lineages(
+        &mut self,
+        version: VersionId,
+        lineages: SmtForestUpdateBatch,
+    ) -> Result<Vec<(LineageId, TreeWithRoot)>> {
+        // We start by checking that none of the lineages already exist, as we are expected by
+        // contract to error if any is a duplicate.
+        let updates = lineages
+            .into_iter()
+            .map(|(lineage, ops)| {
+                if self.lineages.contains_key(&lineage) {
+                    return Err(BackendError::DuplicateLineage(lineage));
+                }
+                Ok((lineage, ops))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let lineage_count = updates.len();
+
+        // If we have no lineages, then we can exit early.
+        if updates.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Build the initial metadata and set up empty write batches for each new lineage
+        let updates_with_batch = updates
+            .into_iter()
+            .map(|(lineage, ops)| {
+                let new_meta = TreeMetadata {
+                    version,
+                    root_value: *EmptySubtreeRoots::entry(SMT_DEPTH, 0),
+                    entry_count: 0,
+                };
+                let batch = WriteBatch::default();
+                (lineage, ops, new_meta, batch)
+            })
+            .collect::<Vec<_>>();
+
+        // Process lineages in parallel, updating each tree in its own write batch
+        let lineage_data = updates_with_batch
+            .into_par_iter()
+            .map(|(lineage, ops, new_meta, batch)| {
+                let ops = ops.into_iter().map(Into::into).collect();
+                let (batch, reversion, tree_data) =
+                    self.update_tree_in_write_batch(batch, lineage, new_meta, version, ops)?;
+                let batch = self.write_metadata(batch, lineage, &tree_data)?;
+                let root = tree_data.root_value;
+
+                Ok((batch, (lineage, tree_data, reversion), (lineage, root)))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let (batches, mutation_sets, roots): (Vec<_>, Vec<_>, Vec<_>) =
+            lineage_data.into_iter().fold(
+                (
+                    Vec::with_capacity(lineage_count),
+                    Vec::with_capacity(lineage_count),
+                    Vec::with_capacity(lineage_count),
+                ),
+                |(mut bs, mut ms, mut rs), (b, m, r)| {
+                    bs.push(b);
+                    ms.push(m);
+                    rs.push(r);
+                    (bs, ms, rs)
+                },
+            );
+
+        // Merge all the write batches into one atomic batch
+        let final_batch = if lineage_count > MIN_LINEAGES_IN_BATCH_TO_PARALLELIZE {
+            batches
+                .into_par_iter()
+                .fold(WriteBatch::new, |l, r| merge_batches(l, &r))
+                .reduce(WriteBatch::new, |l, r| merge_batches(l, &r))
+        } else {
+            batches.into_iter().fold(WriteBatch::new(), |l, r| merge_batches(l, &r))
+        };
+
+        // Atomically write to disk and update in-memory cache.
+        self.finalize_update(final_batch, mutation_sets.into_iter())?;
+
+        // Build the return value from the captured roots.
+        let results = roots
+            .into_iter()
+            .map(|(lineage, root)| (lineage, TreeWithRoot::new(lineage, version, root)))
+            .collect();
+
+        Ok(results)
+    }
+
     /// Performs the provided `updates` on the entire forest, returning the mutation sets that would
     /// reverse the changes to each lineage in the forest.
     ///
@@ -487,23 +596,17 @@ impl Backend for PersistentBackend {
     ) -> Result<Vec<(LineageId, MutationSet)>> {
         // We first have to check our precondition that all lineages are valid, returning an error
         // as required by our contract if any lineage is unknown to the backend.
-        let updates = updates
+        let updates: Vec<_> = updates
             .into_iter()
             .map(|(lineage, ops)| {
                 if !self.lineages.contains_key(&lineage) {
                     return Err(BackendError::UnknownLineage(lineage));
                 }
-
-                Ok((lineage, ops))
+                let tree_data = self.lineages.get(&lineage).expect("Known to exist").clone();
+                Ok((lineage, ops, tree_data))
             })
             .collect::<Result<Vec<_>>>()?;
         let lineage_count = updates.len();
-        let updates = updates
-            .into_iter()
-            .map(|(lineage, ops)| {
-                (lineage, ops, self.lineages.get(&lineage).expect("Known to exist").clone())
-            })
-            .collect::<Vec<_>>();
 
         // We want to update all trees as part of an atomic update to the backing database, but we
         // also want to do this in parallel. As we cannot share a transaction directly, we instead
@@ -520,7 +623,7 @@ impl Backend for PersistentBackend {
         let lineage_data = updates_with_batch
             .into_par_iter()
             .map(|(lineage, ops, tree_data, batch)| {
-                let ops = ops.into_iter().map(|op| op.into()).collect();
+                let ops = ops.into_iter().map(Into::into).collect();
                 let (batch, reversion, tree_data) =
                     self.update_tree_in_write_batch(batch, lineage, tree_data, new_version, ops)?;
                 let batch = self.write_metadata(batch, lineage, &tree_data)?;
@@ -555,6 +658,32 @@ impl Backend for PersistentBackend {
 /// This block contains methods for internal use only that provide useful functionality for the
 /// implementation of the backend.
 impl PersistentBackend {
+    /// Computes the merkle path for the provided `lineage` beginning at the provided `leaf_index`
+    /// using the pre-loaded `subtrees`.
+    fn compute_path(
+        &self,
+        mut leaf_index: NodeIndex,
+        subtrees: &HashMap<NodeIndex, Subtree>,
+    ) -> SparseMerklePath {
+        let mut path = Vec::with_capacity(SMT_DEPTH as usize);
+
+        while leaf_index.depth() > 0 {
+            let is_right = leaf_index.is_position_odd();
+            leaf_index = leaf_index.parent();
+
+            let root = Subtree::find_subtree_root(leaf_index);
+            let subtree = &subtrees[&root]; // Known to exist by construction.
+            let InnerNode { left, right } =
+                subtree.get_inner_node(leaf_index).unwrap_or_else(|| {
+                    EmptySubtreeRoots::get_inner_node(SMT_DEPTH, leaf_index.depth())
+                });
+
+            path.push(if is_right { left } else { right });
+        }
+
+        SparseMerklePath::from_sized_iter(path).expect("Always succeeds by construction")
+    }
+
     /// Performs `updates` on the tree in the specified lineage, assigning the new tree the
     /// provided `new_version`.
     ///
@@ -578,9 +707,15 @@ impl PersistentBackend {
         // of various other operations.
         updates.sort_by_key(|(k, _)| LeafIndex::from(*k).position());
 
-        // We then have to load the leaves that correspond to these pairs from storage.
-        let leaf_map = self
-            .get_leaves_for_keys(lineage, &updates.iter().map(|(k, _)| *k).collect::<Vec<_>>())?;
+        // We then have to load the leaves that correspond to these pairs from storage. If the tree
+        // is known to be empty (entry_count == 0), we skip the disk read entirely as all leaves
+        // are guaranteed to not exist. This is primarily an optimization for the case of adding
+        // new trees.
+        let leaf_map = if tree_metadata.entry_count == 0 {
+            HashMap::new()
+        } else {
+            self.get_leaves_for_keys(lineage, &updates.iter().map(|(k, _)| *k).collect::<Vec<_>>())?
+        };
 
         // We then process the leaves in parallel to determine the mutations that we need to apply
         // to the full tree.
@@ -961,7 +1096,7 @@ impl PersistentBackend {
             let leaf_index = LeafIndex::from(leaf_pairs[0].0);
 
             let maybe_old_leaf = leaf_map.get(&leaf_index.position()).and_then(Option::as_ref);
-            let old_entry_count = maybe_old_leaf.map(|leaf| leaf.num_entries()).unwrap_or_default();
+            let old_entry_count = maybe_old_leaf.map(SmtLeaf::num_entries).unwrap_or_default();
 
             // Whenever we change a value in the current leaf, we have to store the _old_ version of
             // that value in our reversion pairs.
@@ -1079,15 +1214,43 @@ impl PersistentBackend {
     ///
     /// - [`BackendError::Internal`] if the data cannot be loaded from the database.
     fn load_leaves(&self, lineage: LineageId, indices: &[u64]) -> Result<Vec<Option<SmtLeaf>>> {
-        let col = self.cf(LEAVES_CF)?;
         let keys = indices
             .iter()
-            .map(|index| LeafKey { lineage, index: *index }.to_bytes())
-            .collect::<Vec<Vec<_>>>();
-        let leaves = self.db.multi_get_cf(keys.iter().map(|k| (col, k.as_slice())));
+            .map(|index| LeafKey { lineage, index: *index })
+            .collect::<Vec<_>>();
+
+        self.load_leaves_direct(keys.iter())
+    }
+
+    /// Loads the concrete leaves from disk corresponding to the provided `keys`.
+    ///
+    /// # Errors
+    ///
+    /// - [`BackendError::Internal`] if the data cannot be loaded from the database.
+    fn load_leaves_direct<'b>(
+        &self,
+        keys: impl Iterator<Item = &'b LeafKey>,
+    ) -> Result<Vec<Option<SmtLeaf>>> {
+        let bytes = keys.map(Serializable::to_bytes).collect::<Vec<_>>();
+        self.load_leaves_raw(bytes.iter())
+    }
+
+    /// Loads the concrete leaves from disk corresponding to the provided `keys`.
+    ///
+    /// # Errors
+    ///
+    /// - [`BackendError::Internal`] if the data cannot be loaded from the database.
+    #[inline(always)]
+    fn load_leaves_raw<'b>(
+        &self,
+        key_bytes: impl Iterator<Item = &'b Vec<u8>>,
+    ) -> Result<Vec<Option<SmtLeaf>>> {
+        let col = self.cf(LEAVES_CF)?;
+        let leaves = self.db.multi_get_cf(key_bytes.map(|k| (col, k.as_slice())));
 
         leaves
-            .into_iter()
+            .into_par_iter()
+            .with_min_len(CHUNKING_UNIT)
             .map(|result| match result {
                 Ok(Some(bytes)) => {
                     Ok(Some(SmtLeaf::read_from_bytes_with_budget(&bytes, bytes.len())?))
@@ -1098,14 +1261,15 @@ impl PersistentBackend {
             .collect()
     }
 
-    /// Gets the leaf from disk in the provided `lineage` that would contain `key`.
-    fn load_leaf_for(&self, lineage: LineageId, key: Word) -> Result<Option<SmtLeaf>> {
+    /// Gets the leaf with the provided `key` from disk, or returns [`None`] if it is not stored.
+    ///
+    /// # Errors
+    ///
+    /// - [`BackendError::Internal`] if the database cannot be successfully queried.
+    #[inline(always)]
+    fn load_leaf_raw(&self, key: &LeafKey) -> Result<Option<SmtLeaf>> {
         let col = self.cf(LEAVES_CF)?;
-        let key_bytes = LeafKey {
-            lineage,
-            index: LeafIndex::from(key).position(),
-        }
-        .to_bytes();
+        let key_bytes = key.to_bytes();
         let leaf_bytes = self.db.get_cf(col, key_bytes)?;
         let leaf = match leaf_bytes {
             Some(bytes) => Some(SmtLeaf::read_from_bytes_with_budget(&bytes, bytes.len())?),
@@ -1115,6 +1279,19 @@ impl PersistentBackend {
         Ok(leaf)
     }
 
+    /// Gets the leaf from disk in the provided `lineage` that would contain `key`.
+    ///
+    /// # Errors
+    ///
+    /// - [`BackendError::Internal`] if the database cannot be successfully queried.
+    fn load_leaf_for(&self, lineage: LineageId, key: Word) -> Result<Option<SmtLeaf>> {
+        let key = LeafKey {
+            lineage,
+            index: LeafIndex::from(key).position(),
+        };
+        self.load_leaf_raw(&key)
+    }
+
     /// Gets the column family corresponding to the subtree with root index `index`.
     ///
     /// # Errors
@@ -1122,7 +1299,17 @@ impl PersistentBackend {
     /// - [`BackendError::Internal`] if the database cannot be accessed to get the column family.
     #[inline(always)]
     fn subtree_cf(&self, index: NodeIndex) -> Result<&db::ColumnFamily> {
-        let cf_name = subtree_cf_name(index.depth());
+        self.subtree_cf_depth(index.depth())
+    }
+
+    /// Gets the column family corresponding to the subtree with root index `index`.
+    ///
+    /// # Errors
+    ///
+    /// - [`BackendError::Internal`] if the database cannot be accessed to get the column family.
+    #[inline(always)]
+    fn subtree_cf_depth(&self, depth: u8) -> Result<&db::ColumnFamily> {
+        let cf_name = subtree_cf_name(depth);
         self.cf(cf_name)
     }
 
@@ -1145,7 +1332,7 @@ impl PersistentBackend {
     /// - [`BackendError::Internal`] if writing to the database fails for any reason.
     fn write(&self, batch: WriteBatch) -> Result<()> {
         let mut write_opts = db::WriteOptions::default();
-        write_opts.set_sync(false);
+        write_opts.set_sync(self.sync_writes);
         self.db.write_opt(batch, &write_opts)?;
 
         Ok(())

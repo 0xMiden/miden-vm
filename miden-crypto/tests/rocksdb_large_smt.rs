@@ -1,5 +1,5 @@
 use miden_crypto::{
-    EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO,
+    EMPTY_WORD, Felt, ONE, Word, ZERO,
     merkle::{
         InnerNodeInfo,
         smt::{LargeSmt, LargeSmtError, RocksDbConfig, RocksDbStorage},
@@ -23,8 +23,13 @@ fn setup_storage() -> (RocksDbStorage, TempDir) {
 fn generate_entries(pair_count: usize) -> Vec<(Word, Word)> {
     (0..pair_count)
         .map(|i| {
-            let key = Word::new([ONE, ONE, Felt::new(i as u64), Felt::new(i as u64 % 1000)]);
-            let value = Word::new([ONE, ONE, ONE, Felt::new(i as u64)]);
+            let key = Word::new([
+                ONE,
+                ONE,
+                Felt::new_unchecked(i as u64),
+                Felt::new_unchecked(i as u64 % 1000),
+            ]);
+            let value = Word::new([ONE, ONE, ONE, Felt::new_unchecked(i as u64)]);
             (key, value)
         })
         .collect()
@@ -36,7 +41,7 @@ fn rocksdb_sanity_insert_and_get() {
     let mut smt = LargeSmt::<RocksDbStorage>::new(storage).unwrap();
 
     let key = Word::new([ONE, ONE, ONE, ONE]);
-    let val = Word::new([ONE; WORD_SIZE]);
+    let val = Word::new([ONE; Word::NUM_ELEMENTS]);
 
     let prev = smt.insert(key, val).unwrap();
     assert_eq!(prev, EMPTY_WORD);
@@ -77,7 +82,12 @@ fn rocksdb_persistence_after_insertion() {
 
     let mut smt = LargeSmt::<RocksDbStorage>::with_entries(initial_storage, entries).unwrap();
     let key = Word::new([ONE, ONE, ONE, ONE]);
-    let new_value = Word::new([Felt::new(2), Felt::new(2), Felt::new(2), Felt::new(2)]);
+    let new_value = Word::new([
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(2),
+        Felt::new_unchecked(2),
+    ]);
     smt.insert(key, new_value).unwrap();
     let root = smt.root();
 
@@ -111,14 +121,24 @@ fn rocksdb_persistence_after_insert_batch_with_deletions() {
 
     // Add new entries
     for i in 20_000..25_000 {
-        let key = Word::new([ONE, ONE, Felt::new(i as u64), Felt::new(i as u64 % 1000)]);
-        let value = Word::new([ONE, ONE, ONE, Felt::new(i as u64)]);
+        let key = Word::new([
+            ONE,
+            ONE,
+            Felt::new_unchecked(i as u64),
+            Felt::new_unchecked(i as u64 % 1000),
+        ]);
+        let value = Word::new([ONE, ONE, ONE, Felt::new_unchecked(i as u64)]);
         batch_entries.push((key, value));
     }
 
     // Delete some existing entries
     for i in 0..1000 {
-        let key = Word::new([ONE, ONE, Felt::new(i as u64), Felt::new(i as u64 % 1000)]);
+        let key = Word::new([
+            ONE,
+            ONE,
+            Felt::new_unchecked(i as u64),
+            Felt::new_unchecked(i as u64 % 1000),
+        ]);
         batch_entries.push((key, EMPTY_WORD));
     }
 
@@ -189,7 +209,7 @@ fn rocksdb_load_with_root_mismatch_returns_error() {
             assert_eq!(expected, wrong_root);
             assert_eq!(actual, actual_root);
         },
-        other => panic!("Expected RootMismatch error, got {:?}", other),
+        other => panic!("Expected RootMismatch error, got {other:?}"),
     }
 }
 
@@ -230,7 +250,7 @@ fn rocksdb_new_fails_on_non_empty_storage() {
     assert!(result.is_err(), "new() should fail on non-empty storage");
     match result.unwrap_err() {
         LargeSmtError::StorageNotEmpty => {},
-        other => panic!("Expected StorageNotEmpty error, got {:?}", other),
+        other => panic!("Expected StorageNotEmpty error, got {other:?}"),
     }
 }
 

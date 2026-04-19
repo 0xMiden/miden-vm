@@ -258,34 +258,6 @@ macro_rules! benchmark_hash_merge_domain {
     };
 }
 
-// Creates a benchmark for hash merge with int operations
-#[macro_export]
-macro_rules! benchmark_hash_merge_with_int {
-    ($func_name:ident, $hasher_name:literal, $sizes:expr, $int_sizes:expr, $closure:expr) => {
-        fn $func_name(c: &mut Criterion) {
-            let mut group = c.benchmark_group(concat!("hash-", $hasher_name, "-merge-int"));
-            group.sample_size(10);
-
-            for size_ref in $sizes {
-                let size = *size_ref;
-                for int_size_ref in $int_sizes {
-                    let int_size = *int_size_ref;
-                    group.bench_with_input(
-                        criterion::BenchmarkId::new("merge_with_int", format!("{size}_{int_size}")),
-                        &(size, int_size),
-                        |b: &mut criterion::Bencher, param_ref: &(usize, usize)| {
-                            let (size_param, int_size_param) = *param_ref;
-                            $closure(b, (size_param, int_size_param))
-                        },
-                    );
-                }
-            }
-
-            group.finish();
-        }
-    };
-}
-
 // Creates a benchmark for hash merge many operations
 #[macro_export]
 macro_rules! benchmark_hash_merge_many {
@@ -705,7 +677,9 @@ macro_rules! benchmark_rand_reseed {
 
             let mut coin = <$coin_type>::new($seed);
             let new_seeds: Vec<miden_crypto::Word> = (0u64..10)
-                .map(|i| miden_crypto::Word::new([miden_crypto::Felt::new((i + 1) as u64); 4]))
+                .map(|i| {
+                    miden_crypto::Word::new([miden_crypto::Felt::new_unchecked((i + 1) as u64); 4])
+                })
                 .collect();
 
             group.bench_function("reseed", |b| {

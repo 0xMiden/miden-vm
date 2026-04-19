@@ -15,13 +15,13 @@ proptest! {
     #[test]
     fn prop_bytes_felts_roundtrip(bytes in prop::collection::vec(any::<u8>(), 0..500)) {
         // bytes -> felts -> bytes
-        let felts = super::bytes_to_elements_with_padding(&bytes);
-        let back = super::padded_elements_to_bytes(&felts).unwrap();
+        let felts = bytes_to_elements_with_padding(&bytes);
+        let back = padded_elements_to_bytes(&felts).unwrap();
         prop_assert_eq!(bytes, back);
 
         // And the other direction on valid encodings: felts come from bytes_to_felts,
         // so they must satisfy the padding invariant expected by felts_to_bytes.
-        let felts_roundtrip = super::bytes_to_elements_with_padding(&super::padded_elements_to_bytes(&felts).unwrap());
+        let felts_roundtrip = bytes_to_elements_with_padding(&padded_elements_to_bytes(&felts).unwrap());
         prop_assert_eq!(felts, felts_roundtrip);
     }
 
@@ -37,10 +37,10 @@ proptest! {
 
         // Generate random field elements
         let associated_data: Vec<Felt> = (0..associated_data_len)
-            .map(|_| Felt::new(rng.next_u64()))
+            .map(|_| Felt::new_unchecked(rng.next_u64()))
             .collect();
         let data: Vec<Felt> = (0..data_len)
-            .map(|_| Felt::new(rng.next_u64()))
+            .map(|_| Felt::new_unchecked(rng.next_u64()))
             .collect();
 
         let encrypted = key.encrypt_elements_with_nonce(&data, &associated_data, nonce).unwrap();
@@ -62,10 +62,10 @@ proptest! {
 
         // Generate random field elements
         let associated_data: Vec<Felt> = (0..associated_data_len)
-            .map(|_| Felt::new(rng.next_u64()))
+            .map(|_| Felt::new_unchecked(rng.next_u64()))
             .collect();
         let data: Vec<Felt> = (0..data_len)
-            .map(|_| Felt::new(rng.next_u64()))
+            .map(|_| Felt::new_unchecked(rng.next_u64()))
             .collect();
 
         let encrypted = key.encrypt_elements_with_nonce(&data, &associated_data, nonce).unwrap();
@@ -117,10 +117,10 @@ proptest! {
         let nonce2 = Nonce::from(nonce_word);
 
         let associated_data: Vec<Felt> = associated_data.into_iter()
-            .map(Felt::new)
+            .map(Felt::new_unchecked)
             .collect();
         let data: Vec<Felt> = data.into_iter()
-            .map(Felt::new)
+            .map(Felt::new_unchecked)
             .collect();
 
         let encrypted1 = key1.encrypt_elements_with_nonce(&data, &associated_data, nonce1).unwrap();
@@ -143,10 +143,10 @@ proptest! {
         let nonce2 = Nonce::from([ONE; 4]);
 
         let associated_data: Vec<Felt> = associated_data.into_iter()
-            .map(Felt::new)
+            .map(Felt::new_unchecked)
             .collect();
         let data: Vec<Felt> = data.into_iter()
-            .map(Felt::new)
+            .map(Felt::new_unchecked)
             .collect();
 
         let encrypted1 = key.encrypt_elements_with_nonce(&data,&associated_data, nonce1).unwrap();
@@ -218,7 +218,7 @@ fn test_single_element_encryption() {
     let nonce = Nonce::with_rng(&mut rng);
 
     let associated_data: Vec<Felt> = vec![ZERO; 8];
-    let data = vec![Felt::new(42)];
+    let data = vec![Felt::new_unchecked(42)];
     let encrypted = key.encrypt_elements_with_nonce(&data, &associated_data, nonce).unwrap();
     let decrypted =
         key.decrypt_elements_with_associated_data(&encrypted, &associated_data).unwrap();
@@ -237,7 +237,7 @@ fn test_large_data_encryption() {
 
     let associated_data: Vec<Felt> = vec![ONE; 8];
     // Test with data larger than rate
-    let data: Vec<Felt> = (0..100).map(|i| Felt::new(i as u64)).collect();
+    let data: Vec<Felt> = (0..100).map(|i| Felt::new_unchecked(i as u64)).collect();
 
     let encrypted = key.encrypt_elements_with_nonce(&data, &associated_data, nonce).unwrap();
     let decrypted =
@@ -254,7 +254,7 @@ fn test_encryption_various_lengths() {
     let associated_data: Vec<Felt> = vec![ONE; 8];
 
     for len in [1, 7, 8, 9, 15, 16, 17, 31, 32, 35, 39, 54, 67, 100, 1000] {
-        let data: Vec<Felt> = (0..len).map(|i| Felt::new(i as u64)).collect();
+        let data: Vec<Felt> = (0..len).map(|i| Felt::new_unchecked(i as u64)).collect();
 
         let nonce = Nonce::with_rng(&mut rng);
         let encrypted = key.encrypt_elements_with_nonce(&data, &associated_data, nonce).unwrap();
@@ -294,7 +294,7 @@ fn test_ciphertext_tampering_detection() {
     let nonce = Nonce::with_rng(&mut rng);
 
     let associated_data: Vec<Felt> = vec![ONE; 8];
-    let data = vec![Felt::new(123), Felt::new(456)];
+    let data = vec![Felt::new_unchecked(123), Felt::new_unchecked(456)];
     let mut encrypted = key.encrypt_elements_with_nonce(&data, &associated_data, nonce).unwrap();
 
     // Tamper with ciphertext
@@ -312,7 +312,7 @@ fn test_auth_tag_tampering_detection() {
     let nonce = Nonce::with_rng(&mut rng);
 
     let associated_data: Vec<Felt> = vec![ONE; 8];
-    let data = vec![Felt::new(123), Felt::new(456)];
+    let data = vec![Felt::new_unchecked(123), Felt::new_unchecked(456)];
     let mut encrypted = key.encrypt_elements_with_nonce(&data, &associated_data, nonce).unwrap();
 
     // Tamper with auth tag
@@ -333,7 +333,7 @@ fn test_wrong_key_detection() {
     let nonce = Nonce::with_rng(&mut rng);
 
     let associated_data: Vec<Felt> = vec![ONE; 8];
-    let data = vec![Felt::new(123), Felt::new(456)];
+    let data = vec![Felt::new_unchecked(123), Felt::new_unchecked(456)];
     let encrypted = key1.encrypt_elements_with_nonce(&data, &associated_data, nonce).unwrap();
 
     // Try to decrypt with wrong key
@@ -350,7 +350,7 @@ fn test_wrong_nonce_detection() {
     let nonce2 = Nonce::with_rng(&mut rng);
 
     let associated_data: Vec<Felt> = vec![ONE; 8];
-    let data = vec![Felt::new(123), Felt::new(456)];
+    let data = vec![Felt::new_unchecked(123), Felt::new_unchecked(456)];
     let mut encrypted = key.encrypt_elements_with_nonce(&data, &associated_data, nonce1).unwrap();
 
     // Try to decrypt with wrong nonce
@@ -453,7 +453,7 @@ mod security_tests {
         assert_eq!(key1, key2);
 
         // Should produce same ciphertext
-        let plaintext = vec![Felt::new(42), Felt::new(100)];
+        let plaintext = vec![Felt::new_unchecked(42), Felt::new_unchecked(100)];
         let nonce = Nonce::with_rng(&mut rng);
 
         let encrypted1 = key1.encrypt_elements_with_nonce(&plaintext, &[], nonce.clone()).unwrap();

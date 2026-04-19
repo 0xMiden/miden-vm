@@ -73,7 +73,7 @@ impl Nonce {
         // the `rand` dependency matching ours
         use chacha20poly1305::aead::rand_core::SeedableRng;
         let mut seed = [0_u8; 32];
-        rand::RngCore::fill_bytes(rng, &mut seed);
+        RngCore::fill_bytes(rng, &mut seed);
         let rng = rand_hc::Hc128Rng::from_seed(seed);
 
         Nonce {
@@ -123,7 +123,7 @@ impl SecretKey {
         // the `rand` dependency matching ours
         use chacha20poly1305::aead::rand_core::SeedableRng;
         let mut seed = [0_u8; 32];
-        rand::RngCore::fill_bytes(rng, &mut seed);
+        RngCore::fill_bytes(rng, &mut seed);
         let rng = rand_hc::Hc128Rng::from_seed(seed);
 
         let key = XChaCha20Poly1305::generate_key(rng);
@@ -348,7 +348,7 @@ impl AeadScheme for XChaCha {
             .map_err(|_| EncryptionError::FailedOperation)
     }
 
-    fn encrypt_bytes<R: rand::CryptoRng + rand::RngCore>(
+    fn encrypt_bytes<R: CryptoRng + RngCore>(
         key: &Self::Key,
         rng: &mut R,
         plaintext: &[u8],

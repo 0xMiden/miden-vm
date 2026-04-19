@@ -7,18 +7,26 @@ help:
 # -- variables --------------------------------------------------------------------------------------
 
 ALL_FEATURES_EXCEPT_ROCKSDB="concurrent executable internal serde std"
+MIDEN_STARK_TEST_PACKAGES=-p miden-lifted-air -p miden-lifted-stark -p miden-stateful-hasher -p miden-stark-transcript
 WARNINGS=RUSTDOCFLAGS="-D warnings"
 
 # -- linting --------------------------------------------------------------------------------------
 
 .PHONY: clippy
-clippy: ## Run Clippy with configs
-	cargo clippy --workspace --all-targets --all-features -- -D warnings
+clippy: ## Run Clippy with configs (alias for xclippy)
+	cargo xclippy
 
+.PHONY: xclippy
+xclippy: ## Run Clippy with the curated workspace lint set
+	cargo xclippy
 
 .PHONY: fix
-fix: ## Run Fix with configs
-	cargo +nightly fix --allow-staged --allow-dirty --all-targets --all-features
+fix: ## Run Fix with configs (alias for xclippy-fix)
+	cargo xclippy-fix
+
+.PHONY: xclippy-fix
+xclippy-fix: ## Run Clippy with --fix using the same lint set as xclippy
+	cargo xclippy-fix
 
 
 .PHONY: format
@@ -30,9 +38,9 @@ format: ## Run Format using nightly toolchain
 format-check: ## Run Format using nightly toolchain but only in check mode
 	cargo +nightly fmt --all --check
 
-.PHONY: machete
-machete: ## Runs machete to find unused dependencies
-	cargo machete
+.PHONY: shear
+shear: ## Runs cargo-shear to find unused or misplaced dependencies
+	cargo shear --deny-warnings
 
 .PHONY: toml
 toml: ## Runs Format for all TOML files
@@ -62,7 +70,7 @@ zeroize-audit: ## Run Zeroize audit using rustdoc JSON
 	cargo run --quiet --manifest-path tools/zeroize-audit/Cargo.toml -- "$$target_dir/doc/miden_crypto.json"
 
 .PHONY: lint
-lint: format fix clippy toml typos-check machete cargo-deny ## Run all linting tasks at once (Clippy, fixing, formatting, machete, cargo-deny)
+lint: clippy fix format toml typos-check shear cargo-deny ## Run all linting tasks at once (Clippy, fixing, formatting, cargo-shear, cargo-deny)
 
 # --- docs ----------------------------------------------------------------------------------------
 
@@ -89,8 +97,12 @@ test-smt-concurrent: ## Run only concurrent SMT tests
 test-docs:
 	cargo test --doc --all-features --profile test-release
 
+.PHONY: test-p3-parallel
+test-p3-parallel: ## Run Miden STARK crate tests with the parallel feature enabled
+	cargo test $(MIDEN_STARK_TEST_PACKAGES) -F miden-lifted-stark/parallel
+
 .PHONY: test-large-smt
-test-large-smt: ## Run only large SMT tests
+test-large-smt: ## Run large SMT unit tests and RocksDB integration tests
 	cargo nextest run --success-output immediate --profile large-smt --cargo-profile test-release --features rocksdb
 
 .PHONY: test
@@ -103,9 +115,8 @@ check: ## Check all targets and features for errors without code generation
 	cargo check --all-targets --all-features
 
 .PHONY: check-features
-check-features: ## Check miden-crypto feature combinations
-	cargo check -p miden-crypto --all-targets --no-default-features
-	cargo check -p miden-crypto --all-targets --features ${ALL_FEATURES_EXCEPT_ROCKSDB}
+check-features: ## Check curated feature combinations across the integrated workspace
+	./scripts/check-features.sh
 
 .PHONY: check-fuzz
 check-fuzz: ## Check miden-crypto-fuzz compilation
@@ -145,19 +156,19 @@ bench: ## Run crypto benchmarks
 
 .PHONY: bench-smt-concurrent
 bench-smt-concurrent: ## Run SMT benchmarks with concurrent feature
-	cargo run --release --features concurrent,executable -- --size 1000000
+	cargo run --bin miden-crypto --release --features concurrent,executable -- --size 1000000
 
 .PHONY: bench-large-smt-memory
 bench-large-smt-memory: ## Run large SMT benchmarks with memory storage
-	cargo run --release --features concurrent,executable -- --size 1000000
+	cargo run --bin miden-crypto --release --features concurrent,executable -- --size 1000000
 
 .PHONY: bench-large-smt-rocksdb
 bench-large-smt-rocksdb: ## Run large SMT benchmarks with rocksdb storage
-	cargo run --release --features concurrent,rocksdb,executable -- --storage rocksdb --size 1000000
+	cargo run --bin miden-crypto --release --features concurrent,rocksdb,executable -- --storage rocksdb --size 1000000
 
 .PHONY: bench-large-smt-rocksdb-open
 bench-large-smt-rocksdb-open: ## Run large SMT benchmarks with rocksdb storage and open existing database
-	cargo run --release --features concurrent,rocksdb,executable -- --storage rocksdb --open
+	cargo run --bin miden-crypto --release --features concurrent,rocksdb,executable -- --storage rocksdb --open
 
 # --- fuzzing --------------------------------------------------------------------------------
 
@@ -205,15 +216,15 @@ check-tools: ## Checks if development tools are installed
 	@command -v typos >/dev/null 2>&1 && echo "[OK] typos is installed" || echo "[MISSING] typos is not installed (run: make install-tools)"
 	@command -v cargo nextest >/dev/null 2>&1 && echo "[OK] nextest is installed" || echo "[MISSING] nextest is not installed (run: make install-tools)"
 	@command -v taplo >/dev/null 2>&1 && echo "[OK] taplo is installed" || echo "[MISSING] taplo is not installed (run: make install-tools)"
-	@command -v cargo machete >/dev/null 2>&1 && echo "[OK] machete is installed" || echo "[MISSING] machete is not installed (run: make install-tools)"
+	@command -v cargo-shear >/dev/null 2>&1 && echo "[OK] cargo-shear is installed" || echo "[MISSING] cargo-shear is not installed (run: make install-tools)"
 	@command -v cargo deny >/dev/null 2>&1 && echo "[OK] cargo-deny is installed" || echo "[MISSING] cargo-deny is not installed (run: make install-tools)"
 
 .PHONY: install-tools
-install-tools: ## Installs development tools required by the Makefile (typos, nextest, taplo, machete, cargo-deny)
+install-tools: ## Installs development tools required by the Makefile (typos, nextest, taplo, cargo-shear, cargo-deny)
 	@echo "Installing development tools..."
 	cargo install typos-cli --locked
 	cargo install cargo-nextest --locked
 	cargo install taplo-cli --locked
-	cargo install cargo-machete --locked
+	cargo install cargo-shear --locked
 	cargo install cargo-deny --locked
 	@echo "Development tools installation complete!"

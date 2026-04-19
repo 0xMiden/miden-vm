@@ -180,7 +180,7 @@ mod tests {
     #[test]
     fn test_peak_index() {
         // --- single peak forest ---------------------------------------------
-        let forest = Forest::new(11);
+        let forest = Forest::new(11).unwrap();
 
         // the first 4 leaves belong to peak 0
         for position in 0..8 {
@@ -189,7 +189,7 @@ mod tests {
         }
 
         // --- forest with non-consecutive peaks ------------------------------
-        let forest = Forest::new(11);
+        let forest = Forest::new(11).unwrap();
 
         // the first 8 leaves belong to peak 0
         for position in 0..8 {
@@ -208,7 +208,7 @@ mod tests {
         assert_eq!(proof.peak_index(), 2);
 
         // --- forest with consecutive peaks ----------------------------------
-        let forest = Forest::new(7);
+        let forest = Forest::new(7).unwrap();
 
         // the first 4 leaves belong to peak 0
         for position in 0..4 {
@@ -237,14 +237,14 @@ mod tests {
         // Create an MMR with 5 leaves
         let mut small_mmr = Mmr::new();
         for i in 0..5 {
-            small_mmr.add(int_to_node(i));
+            small_mmr.add(int_to_node(i)).unwrap();
         }
         let small_forest = small_mmr.forest();
 
         // Clone and add 5 more leaves to create larger MMR
         let mut large_mmr = small_mmr.clone();
         for i in 5..10 {
-            large_mmr.add(int_to_node(i));
+            large_mmr.add(int_to_node(i)).unwrap();
         }
 
         // Get proof for position 2 from the larger MMR
@@ -273,17 +273,17 @@ mod tests {
         // Create a MMR with 7 leaves
         let mut mmr = Mmr::new();
         for i in 0..7 {
-            mmr.add(int_to_node(i));
+            mmr.add(int_to_node(i)).unwrap();
         }
         let proof = mmr.open(2).unwrap();
         let path = proof.path();
 
         // Error: target forest doesn't include position
-        let small_forest = Forest::new(2);
+        let small_forest = Forest::new(2).unwrap();
         assert!(path.with_forest(small_forest).is_err());
 
         // Error: target forest is larger than current
-        let large_forest = Forest::new(15);
+        let large_forest = Forest::new(15).unwrap();
         assert!(path.with_forest(large_forest).is_err());
 
         // Same forest should work
