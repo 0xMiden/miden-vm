@@ -91,6 +91,13 @@ pub enum LinkerError {
         prev_values: Vec<Felt>,
         new_values: Vec<Felt>,
     },
+    #[error(
+        "source manager mismatch: module '{path}' was parsed with a different source manager than the one used by the assembler"
+    )]
+    #[diagnostic(help(
+        "ensure the module is parsed with the same source manager that is passed to the assembler"
+    ))]
+    SourceManagerMismatch { path: Arc<Path> },
     #[error("undefined type alias")]
     #[diagnostic()]
     UndefinedType {

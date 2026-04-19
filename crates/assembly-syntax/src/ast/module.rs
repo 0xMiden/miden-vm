@@ -126,6 +126,15 @@ pub struct Module {
     pub(crate) items: Vec<Export>,
     /// AdviceMap that this module expects to be loaded in the host before executing.
     pub(crate) advice_map: AdviceMap,
+    /// The source file from which this module was parsed, if any.
+    ///
+    /// This is `None` for programmatically-constructed modules (e.g. `new_kernel()`,
+    /// `new_executable()`) that have no backing source text.
+    ///
+    /// When present, it is used to verify that the source manager used during assembly is the
+    /// same one that was used to parse this module, via pointer identity
+    /// ([`SourceManager::is_manager_of`]).
+    source_file: Option<Arc<SourceFile>>,
 }
 
 /// Constants
@@ -144,7 +153,11 @@ impl Module {
 impl Module {
     /// Creates a new [Module] with the specified `kind` and fully-qualified path, e.g.
     /// `std::math::u64`.
-    pub fn new(kind: ModuleKind, path: impl AsRef<Path>) -> Self {
+    pub fn new(
+        kind: ModuleKind,
+        path: impl AsRef<Path>,
+        source_file: Option<Arc<SourceFile>>,
+    ) -> Self {
         let path = path.as_ref().to_absolute().into_owned();
         Self {
             span: Default::default(),
@@ -153,17 +166,18 @@ impl Module {
             kind,
             items: Default::default(),
             advice_map: Default::default(),
+            source_file,
         }
     }
 
     /// An alias for creating the default, but empty, `#kernel` [Module].
     pub fn new_kernel() -> Self {
-        Self::new(ModuleKind::Kernel, Path::kernel_path())
+        Self::new(ModuleKind::Kernel, Path::kernel_path(), None)
     }
 
     /// An alias for creating the default, but empty, `$exec` [Module].
     pub fn new_executable() -> Self {
-        Self::new(ModuleKind::Executable, Path::exec_path())
+        Self::new(ModuleKind::Executable, Path::exec_path(), None)
     }
 
     /// Specifies the source span in the source file in which this module was defined, that covers
@@ -438,6 +452,13 @@ impl Module {
     /// Returns a reference to the advice map derived from this module
     pub fn advice_map(&self) -> &AdviceMap {
         &self.advice_map
+    }
+
+    /// Returns the source file from which this module was parsed, if any.
+    ///
+    /// Returns `None` for programmatically-constructed modules that have no backing source text.
+    pub fn source_file(&self) -> Option<&Arc<SourceFile>> {
+        self.source_file.as_ref()
     }
 
     /// Get an iterator over the constants defined in this module.
