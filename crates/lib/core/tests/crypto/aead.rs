@@ -246,6 +246,10 @@ fn test_decrypt_with_known_values() {
         # Store the tag at address 1016
         push.{expected_tag:?} push.1016 mem_storew_le dropw
 
+        # Store unrelated data immediately after the plaintext output.
+        push.[91,92,93,94] push.2008 mem_storew_le dropw
+        push.[95,96,97,98] push.2012 mem_storew_le dropw
+
         # Decrypt: [key(4), nonce(4), src_ptr, dst_ptr, num_blocks]
         push.1           # num_blocks = 1 (data blocks only, padding is automatic)
         push.2000        # dst_ptr (where plaintext will be written)
@@ -263,12 +267,12 @@ fn test_decrypt_with_known_values() {
         padw push.2004 mem_loadw_le
         push.[14,15,16,17] eqw assert dropw dropw
 
-        # Verify padding block [1,0,0,0,0,0,0,0]
+        # Verify memory after the plaintext output is untouched.
         padw push.2008 mem_loadw_le
-        push.[1,0,0,0] eqw assert dropw dropw
+        push.[91,92,93,94] eqw assert dropw dropw
 
         padw push.2012 mem_loadw_le
-        padw eqw assert dropw dropw
+        push.[95,96,97,98] eqw assert dropw dropw
     end
     ",
         ciphertext_0 = &ciphertext[0..4],

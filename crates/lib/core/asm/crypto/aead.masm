@@ -80,9 +80,9 @@ end
 
 #! Encrypts plaintext data from memory using the `crypto_stream` instruction.
 #!
-#! This procedure encrypts plaintext and automatically adds a padding block at the end.
-#! The padding block [1, 0, 0, 0, 0, 0, 0, 0] is written to memory and encrypted, ensuring
-#! proper AEAD operation without requiring the caller to handle padding manually.
+#! This procedure encrypts plaintext and automatically includes a padding block at the end.
+#! The padding block [1, 0, 0, 0, 0, 0, 0, 0] is encrypted without requiring the caller
+#! to write padding into the plaintext buffer manually.
 #! This, however, requires the plaintext length to be a multiple of 8. This assumption is made
 #! both in this procedure as well as in the decryption procedure.
 #!
@@ -121,8 +121,7 @@ end
 #!
 #! Padding:
 #! - Padding is AUTOMATIC - caller should NOT pad the plaintext
-#! - The procedure writes [1, 0, 0, 0, 0, 0, 0, 0] to dst_ptr + (num_blocks * 8)
-#! - This padding block is then encrypted along with the data
+#! - The procedure writes encrypted padding to dst_ptr + (num_blocks * 8)
 #! - The plaintext buffer is not modified
 #! - For empty plaintext (num_blocks = 0), only the padding block is encrypted
 #!
@@ -186,19 +185,6 @@ pub proc encrypt
     drop
     # => [rate(8), capacity(4), src_ptr_final, dst_ptr_final, ...]
 
-    # write the cleartext padding block to dst_ptr_final
-    dup.13
-    # => [dst_ptr_final, rate(8), capacity(4), src_ptr_final, dst_ptr_final, ...]
-    push.[1,0,0,0]
-    dup.4
-    mem_storew_le dropw
-    # => [dst_ptr_final, rate(8), capacity(4), src_ptr_final, dst_ptr_final, ...]
-
-    padw
-    movup.4 add.4
-    mem_storew_le dropw
-    # => [rate(8), capacity(4), src_ptr_final, dst_ptr_final, ...]
-
     # apply permutation to refresh keystream for the final padded block
     hperm
     # => [rate'(8), capacity'(4), src_ptr_final, dst_ptr_final, ...]
@@ -237,8 +223,8 @@ end
 
 #! Decrypts and authenticates ciphertext using non-deterministic advice.
 #!
-#! This procedure implements AEAD decryption with automatic tag verification and
-#! automatic padding handling. It mirrors the encrypt procedure's padding behavior.
+#! This procedure implements AEAD decryption with automatic tag verification. It mirrors
+#! the encrypt procedure's padding behavior while leaving the plaintext output unpadded.
 #!
 #! Decryption Flow:
 #! 1. Computes tag location: src_ptr + (num_blocks + 1) * 8
@@ -264,10 +250,9 @@ end
 #!   The encrypted padding is at: src_ptr + (num_blocks * 8)
 #!   The tag is at: src_ptr + (num_blocks + 1) * 8
 #!
-#! - Output at dst_ptr: [plaintext_block_0(8), ..., plaintext_block_n(8), padding(8)]
-#!   Length: (num_blocks + 1) * 8 elements
-#!   The padding block [1, 0, 0, 0, 0, 0, 0, 0] is automatically written
-#!   Caller can ignore or remove the padding block if needed
+#! - Output at dst_ptr: [plaintext_block_0(8), ..., plaintext_block_n(8)]
+#!   Length: num_blocks * 8 elements
+#!   The padding block is authenticated but not written to the plaintext output.
 #!
 #! Event: Emits AEAD_DECRYPT event with (nonce, key, src_ptr, dst_ptr, num_blocks)
 #! The host event handler must:
@@ -306,7 +291,7 @@ end
 #! - The deterministic keystream creates a bijection between plaintext and ciphertext
 #! - Any deviation from correct plaintext causes assertion failure
 #!
-#! Note: This procedure does NOT remove padding. The caller must handle padding removal.
+#! Note: This procedure does not write the padding block to the plaintext output.
 #!
 #! Cycles (estimate): 177 + 3.5 * n
 #! Where:
@@ -336,74 +321,57 @@ pub proc decrypt
     movdn.11
     # => [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, tag_ptr, ...]
 
-    # compute padding_ptr = dst_ptr + 8 * num_blocks for the clear padding write on success
-    dup.10 mul.8
-    dup.10
-    add
-    movdn.11
-    # => [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, padding_ptr, tag_ptr, ...]
-
-    # Emit event to trigger host-side decryption
-    # The event handler will push plaintext data blocks onto the advice stack
+    # emit event to trigger host-side decryption
+    # the event handler will push plaintext data blocks onto the advice stack
     emit.AEAD_DECRYPT_EVENT
-    # => [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, padding_ptr, tag_ptr, ...]
-    # Advice stack now contains: plaintext data blocks (no padding) in reverse order compatible
+    # => [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, tag_ptr, ...]
+    # advice stack now contains: plaintext data blocks (no padding) in reverse order compatible
     # with adv_pipe
 
-    # Prepare to load plaintext data blocks from advice stack
+    # prepare to load plaintext data blocks from advice stack
     dup.10   # num_blocks
     dup.10   # dst_ptr
-    # => [dst_ptr, num_blocks, nonce(4), key(4), src_ptr, dst_ptr, num_blocks, padding_ptr, tag_ptr, ...]
+    # => [dst_ptr, num_blocks, nonce(4), key(4), src_ptr, dst_ptr, num_blocks, tag_ptr, ...]
 
-    # Setup for adv_pipe loop
+    # setup for adv_pipe loop
     padw padw padw
-    # => [0(4), 0(4), 0(4), dst_ptr, num_blocks, nonce(4), key(4), src_ptr, dst_ptr, num_blocks, padding_ptr, tag_ptr, ...]
+    # => [0(4), 0(4), 0(4), dst_ptr, num_blocks, nonce(4), key(4), src_ptr, dst_ptr, num_blocks, tag_ptr, ...]
 
     dup.13 neq.0
     # => [continue?, 0(4), 0(4), 0(4), dst_ptr, num_blocks, nonce(4), ...]
 
-    # Load plaintext data blocks from advice stack
+    # load plaintext data blocks from advice stack
     while.true
-        adv_pipe  # Reads 8 elements from advice, writes to dst_ptr, increments dst_ptr by 8
-        # => [DATA1(4), DATA0(4), 0(4), dst_ptr+8, num_blocks, nonce(4), key(4), src_ptr, dst_ptr, num_blocks, padding_ptr, tag_ptr, ...]
+        adv_pipe  # reads 8 elements from advice, writes to dst_ptr, increments dst_ptr by 8
+        # => [DATA1(4), DATA0(4), 0(4), dst_ptr+8, num_blocks, nonce(4), key(4), src_ptr, dst_ptr, num_blocks, tag_ptr, ...]
 
-        movup.13 sub.1        # Duplicate counter, decrement it
-        dup movdn.14          # Duplicate and move decremented value down to overwrite old counter
+        movup.13 sub.1        # duplicate counter, decrement it
+        dup movdn.14          # duplicate and move decremented value down to overwrite old counter
         neq.0
     end
 
-    # Clean up adv_pipe working area
+    # clean up adv_pipe working area
     dropw dropw dropw
-    # => [dst_ptr_final, 0, nonce(4), key(4), src_ptr, dst_ptr, num_blocks, padding_ptr, tag_ptr, ...]
+    # => [dst_ptr_final, 0, nonce(4), key(4), src_ptr, dst_ptr, num_blocks, tag_ptr, ...]
     drop drop
-    # => [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, padding_ptr, tag_ptr, ...]
+    # => [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, tag_ptr, ...]
 
-    # Swap src_ptr and dst_ptr to call encrypt on the plaintext
-    # This will re-encrypt the data blocks (adding padding automatically) to compute tag
+    # swap src_ptr and dst_ptr to call encrypt on the plaintext
+    # this will re-encrypt the data blocks (adding padding automatically) to compute tag
     movup.9 movup.9 swap movdn.9 movdn.9
-    # => [nonce(4), key(4), dst_ptr, src_ptr, num_blocks, padding_ptr, tag_ptr, ...]
+    # => [nonce(4), key(4), dst_ptr, src_ptr, num_blocks, tag_ptr, ...]
 
-    # Re-encrypt plaintext to compute authentication tag
+    # re-encrypt plaintext to compute authentication tag
     exec.encrypt
-    # => [computed_tag(4), padding_ptr, tag_ptr, ...]
+    # => [computed_tag(4), tag_ptr, ...]
 
-    # Verify computed tag matches expected tag from ciphertext
-    padw            # Prepare stack for loading expected tag
-    movup.9         # Get tag_ptr
-    mem_loadw_le    # Load expected tag from memory
-    # => [expected_tag(4), computed_tag(4), padding_ptr, ...]
+    # verify computed tag matches expected tag from ciphertext
+    padw            # prepare stack for loading expected tag
+    movup.8         # get tag_ptr
+    mem_loadw_le    # load expected tag from memory
+    # => [expected_tag(4), computed_tag(4), ...]
 
     eqw assert.err="AEAD tag mismatch"
-    dropw dropw
-    # => [padding_ptr, ...]
-
-    # write the clear padding block expected by the documented decrypt output
-    push.[1,0,0,0]
-    dup.4
-    mem_storew_le dropw
-
-    padw
-    movup.4 add.4
-    mem_storew_le dropw
+    dropw dropw     # clean up stack
     # => []
 end
