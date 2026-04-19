@@ -74,12 +74,12 @@ fn test_keccak_handler(input_u8: &[u8]) {
 
     let test = build_debug_test!(source, &[]);
 
-    let output = test.execute().unwrap();
+    let (output, _) = test.execute_for_output().unwrap();
 
-    let advice_stack = output.advice_provider().stack();
+    let advice_stack = output.advice.stack();
     assert_eq!(advice_stack, preimage.digest().as_ref());
 
-    let deferred = output.advice_provider().precompile_requests().to_vec();
+    let deferred = output.advice.precompile_requests().to_vec();
     assert_eq!(deferred.len(), 1, "advice deferred must contain one entry");
     let precompile_data = &deferred[0];
 
@@ -121,9 +121,9 @@ fn test_keccak_hash_bytes_impl(input_u8: &[u8]) {
 
     let test = build_debug_test!(source, &[]);
 
-    let output = test.execute().unwrap();
+    let (output, _) = test.execute_for_output().unwrap();
 
-    let stack = output.stack_outputs();
+    let stack = output.stack;
     let commitment = stack.get_word(0).unwrap();
     let tag = stack.get_word(4).unwrap();
     let precompile_commitment = PrecompileCommitment::new(tag, commitment);
@@ -134,13 +134,13 @@ fn test_keccak_hash_bytes_impl(input_u8: &[u8]) {
     let digest: [Felt; 8] = array::from_fn(|i| stack.get_element(8 + i).unwrap());
     assert_eq!(&digest, preimage.digest().as_ref(), "output digest does not match");
 
-    let deferred = output.advice_provider().precompile_requests().to_vec();
+    let deferred = output.advice.precompile_requests().to_vec();
     assert_eq!(deferred.len(), 1, "expected a single deferred request");
     assert_eq!(deferred[0].event_id(), KECCAK_HASH_BYTES_EVENT_NAME.to_event_id());
     assert_eq!(deferred[0].calldata(), preimage.as_ref());
     assert_eq!(deferred[0], preimage.into());
 
-    let advice_stack = output.advice_provider().stack();
+    let advice_stack = output.advice.stack();
     assert!(advice_stack.is_empty(), "advice stack should be empty after hash_bytes_impl");
 }
 

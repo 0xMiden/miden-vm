@@ -2,21 +2,20 @@ use alloc::vec::Vec;
 #[cfg(any(test, feature = "testing"))]
 use core::ops::Range;
 
-#[cfg(feature = "std")]
-use miden_air::trace::PADDED_TRACE_WIDTH;
 use miden_air::{
     AirWitness, AuxBuilder, ProcessorAir, PublicInputs, debug,
     trace::{
-        DECODER_TRACE_OFFSET, MainTrace, STACK_TRACE_OFFSET, TRACE_WIDTH,
+        DECODER_TRACE_OFFSET, MainTrace, PADDED_TRACE_WIDTH, TRACE_WIDTH,
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     },
 };
+use miden_core::{crypto::hash::Blake3_256, serde::Serializable};
 
 use crate::{
-    AdviceProvider, Felt, MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
+    Felt, MIN_STACK_DEPTH, Program, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
     fast::ExecutionOutput,
     field::{ExtensionField, QuadFelt},
-    precompile::{PrecompileRequest, PrecompileTranscript},
+    precompile::{PrecompileRequest, PrecompileTranscript, PrecompileTranscriptDigest},
     utils::{ColMatrix, Matrix, RowMajorMatrix},
 };
 
@@ -25,7 +24,7 @@ use miden_air::trace::Challenges;
 use utils::{AuxColumnBuilder, TraceFragment};
 
 pub mod chiplets;
-pub mod execution_tracer;
+pub(crate) mod execution_tracer;
 
 mod decoder;
 mod parallel;
@@ -39,9 +38,131 @@ mod tests;
 // RE-EXPORTS
 // ================================================================================================
 
+pub use execution_tracer::TraceGenerationContext;
 pub use miden_air::trace::RowIndex;
 pub use parallel::{CORE_TRACE_WIDTH, build_trace, build_trace_with_max_len};
 pub use utils::{ChipletsLengths, TraceLenSummary};
+
+/// Inputs required to build an execution trace from pre-executed data.
+#[derive(Debug)]
+pub struct TraceBuildInputs {
+    trace_output: TraceBuildOutput,
+    trace_generation_context: TraceGenerationContext,
+    program_info: ProgramInfo,
+}
+
+#[derive(Debug)]
+pub(crate) struct TraceBuildOutput {
+    stack_outputs: StackOutputs,
+    final_precompile_transcript: PrecompileTranscript,
+    precompile_requests: Vec<PrecompileRequest>,
+    precompile_requests_digest: [u8; 32],
+}
+
+impl TraceBuildOutput {
+    fn from_execution_output(execution_output: ExecutionOutput) -> Self {
+        let ExecutionOutput {
+            stack,
+            mut advice,
+            memory: _,
+            final_precompile_transcript,
+        } = execution_output;
+
+        Self {
+            stack_outputs: stack,
+            final_precompile_transcript,
+            precompile_requests: advice.take_precompile_requests(),
+            precompile_requests_digest: [0; 32],
+        }
+        .with_precompile_requests_digest()
+    }
+
+    fn with_precompile_requests_digest(mut self) -> Self {
+        self.precompile_requests_digest =
+            Blake3_256::hash(&self.precompile_requests.to_bytes()).into();
+        self
+    }
+
+    fn has_matching_precompile_requests_digest(&self) -> bool {
+        let expected_digest: [u8; 32] =
+            Blake3_256::hash(&self.precompile_requests.to_bytes()).into();
+        self.precompile_requests_digest == expected_digest
+    }
+}
+
+impl TraceBuildInputs {
+    pub(crate) fn from_execution(
+        program: &Program,
+        execution_output: ExecutionOutput,
+        trace_generation_context: TraceGenerationContext,
+    ) -> Self {
+        let trace_output = TraceBuildOutput::from_execution_output(execution_output);
+        let program_info = program.to_info();
+        Self {
+            trace_output,
+            trace_generation_context,
+            program_info,
+        }
+    }
+
+    /// Returns the stack outputs captured for the execution being replayed.
+    pub fn stack_outputs(&self) -> &StackOutputs {
+        &self.trace_output.stack_outputs
+    }
+
+    /// Returns deferred precompile requests generated during execution.
+    pub fn precompile_requests(&self) -> &[PrecompileRequest] {
+        &self.trace_output.precompile_requests
+    }
+
+    /// Returns the final precompile transcript observed during execution.
+    pub fn final_precompile_transcript(&self) -> &PrecompileTranscript {
+        &self.trace_output.final_precompile_transcript
+    }
+
+    /// Returns the digest of the final precompile transcript observed during execution.
+    pub fn precompile_transcript_digest(&self) -> PrecompileTranscriptDigest {
+        self.final_precompile_transcript().finalize()
+    }
+
+    /// Returns the program info captured for the execution being replayed.
+    pub fn program_info(&self) -> &ProgramInfo {
+        &self.program_info
+    }
+
+    // Kept for mismatch and edge-case tests that mutate replay inputs directly.
+    #[cfg(any(test, feature = "testing"))]
+    #[cfg_attr(all(feature = "testing", not(test)), expect(dead_code))]
+    pub(crate) fn into_parts(self) -> (TraceBuildOutput, TraceGenerationContext, ProgramInfo) {
+        (self.trace_output, self.trace_generation_context, self.program_info)
+    }
+
+    #[cfg(any(test, feature = "testing"))]
+    /// Returns the trace replay context captured during execution.
+    pub fn trace_generation_context(&self) -> &TraceGenerationContext {
+        &self.trace_generation_context
+    }
+
+    // Kept for tests that force invalid replay contexts without widening the public API.
+    #[cfg(any(test, feature = "testing"))]
+    #[cfg_attr(all(feature = "testing", not(test)), expect(dead_code))]
+    pub(crate) fn trace_generation_context_mut(&mut self) -> &mut TraceGenerationContext {
+        &mut self.trace_generation_context
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_parts(
+        trace_output: TraceBuildOutput,
+        trace_generation_context: TraceGenerationContext,
+        program_info: ProgramInfo,
+    ) -> Self {
+        Self {
+            trace_output,
+            trace_generation_context,
+            program_info,
+        }
+    }
+}
 
 // VM EXECUTION TRACE
 // ================================================================================================
@@ -52,7 +173,8 @@ pub use utils::{ChipletsLengths, TraceLenSummary};
 /// - Main traces of System, Decoder, Operand Stack, Range Checker, and Chiplets.
 /// - Auxiliary trace builders.
 /// - Information about the program (program hash and the kernel).
-/// - Information about execution outputs (stack state, advice provider, and precompile transcript).
+/// - Information about execution outputs (stack state, deferred precompile requests, and the final
+///   precompile transcript).
 /// - Summary of trace lengths of the main trace components.
 #[derive(Debug)]
 pub struct ExecutionTrace {
@@ -60,8 +182,8 @@ pub struct ExecutionTrace {
     aux_trace_builders: AuxTraceBuilders,
     program_info: ProgramInfo,
     stack_outputs: StackOutputs,
-    advice: AdviceProvider,
-    final_pc_transcript: PrecompileTranscript,
+    precompile_requests: Vec<PrecompileRequest>,
+    final_precompile_transcript: PrecompileTranscript,
     trace_len_summary: TraceLenSummary,
 }
 
@@ -69,20 +191,27 @@ impl ExecutionTrace {
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
 
-    pub fn new_from_parts(
+    pub(crate) fn new_from_parts(
         program_info: ProgramInfo,
-        execution_output: ExecutionOutput,
+        trace_output: TraceBuildOutput,
         main_trace: MainTrace,
         aux_trace_builders: AuxTraceBuilders,
         trace_len_summary: TraceLenSummary,
     ) -> Self {
+        let TraceBuildOutput {
+            stack_outputs,
+            final_precompile_transcript,
+            precompile_requests,
+            ..
+        } = trace_output;
+
         Self {
             main_trace,
             aux_trace_builders,
             program_info,
-            stack_outputs: execution_output.stack,
-            advice: execution_output.advice,
-            final_pc_transcript: execution_output.final_pc_transcript,
+            stack_outputs,
+            precompile_requests,
+            final_precompile_transcript,
             trace_len_summary,
         }
     }
@@ -111,7 +240,7 @@ impl ExecutionTrace {
             self.program_info.clone(),
             self.init_stack_state(),
             self.stack_outputs,
-            self.final_pc_transcript.state(),
+            self.final_precompile_transcript.state(),
         )
     }
 
@@ -137,37 +266,40 @@ impl ExecutionTrace {
 
     /// Returns the precompile requests generated during program execution.
     pub fn precompile_requests(&self) -> &[PrecompileRequest] {
-        self.advice.precompile_requests()
+        &self.precompile_requests
     }
 
-    /// Moves all accumulated precompile requests out of the trace, leaving it empty.
-    ///
-    /// Intended for proof packaging, where requests are serialized into the proof and no longer
-    /// needed in the trace after consumption.
-    pub fn take_precompile_requests(&mut self) -> Vec<PrecompileRequest> {
-        self.advice.take_precompile_requests()
-    }
-
-    /// Returns the final precompile transcript after executing all precompile requests.
+    /// Returns the final precompile transcript observed during execution.
     pub fn final_precompile_transcript(&self) -> PrecompileTranscript {
-        self.final_pc_transcript
+        self.final_precompile_transcript
+    }
+
+    /// Returns the digest of the final precompile transcript observed during execution.
+    pub fn precompile_transcript_digest(&self) -> PrecompileTranscriptDigest {
+        self.final_precompile_transcript().finalize()
+    }
+
+    /// Returns the owned execution outputs required for proof packaging.
+    pub fn into_outputs(self) -> (StackOutputs, Vec<PrecompileRequest>, PrecompileTranscript) {
+        (self.stack_outputs, self.precompile_requests, self.final_precompile_transcript)
     }
 
     /// Returns the initial state of the top 16 stack registers.
     pub fn init_stack_state(&self) -> StackInputs {
         let mut result = [ZERO; MIN_STACK_DEPTH];
+        let row = RowIndex::from(0_u32);
         for (i, result) in result.iter_mut().enumerate() {
-            *result = self.main_trace.get_column(i + STACK_TRACE_OFFSET)[0];
+            *result = self.main_trace.stack_element(i, row);
         }
         result.into()
     }
 
     /// Returns the final state of the top 16 stack registers.
     pub fn last_stack_state(&self) -> StackOutputs {
-        let last_step = self.last_step();
+        let last_step = RowIndex::from(self.last_step());
         let mut result = [ZERO; MIN_STACK_DEPTH];
         for (i, result) in result.iter_mut().enumerate() {
-            *result = self.main_trace.get_column(i + STACK_TRACE_OFFSET)[last_step];
+            *result = self.main_trace.stack_element(i, last_step);
         }
         result.into()
     }
@@ -175,9 +307,9 @@ impl ExecutionTrace {
     /// Returns helper registers state at the specified `clk` of the VM
     pub fn get_user_op_helpers_at(&self, clk: u32) -> [Felt; NUM_USER_OP_HELPERS] {
         let mut result = [ZERO; NUM_USER_OP_HELPERS];
+        let row = RowIndex::from(clk);
         for (i, result) in result.iter_mut().enumerate() {
-            *result = self.main_trace.get_column(DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + i)
-                [clk as usize];
+            *result = self.main_trace.get(row, DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + i);
         }
         result
     }
@@ -195,16 +327,6 @@ impl ExecutionTrace {
     /// Returns a summary of the lengths of main, range and chiplet traces.
     pub fn trace_len_summary(&self) -> &TraceLenSummary {
         &self.trace_len_summary
-    }
-
-    /// Returns the final advice provider state.
-    pub fn advice_provider(&self) -> &AdviceProvider {
-        &self.advice
-    }
-
-    /// Destructures this execution trace into the process’s final stack and advice states.
-    pub fn into_outputs(self) -> (StackOutputs, AdviceProvider) {
-        (self.stack_outputs, self.advice)
     }
 
     // DEBUG CONSTRAINT CHECKING
@@ -239,20 +361,20 @@ impl ExecutionTrace {
         debug::check_constraints(&ProcessorAir, witness, &aux_builder, &challenges);
     }
 
-    /// Converts the main trace from column-major to row-major format.
+    /// Returns the main trace as a row-major matrix for proving.
     ///
     /// Only includes the first [`TRACE_WIDTH`] columns (excluding padding columns added for
     /// Poseidon2 rate alignment), which is the width expected by the AIR.
     // TODO: the padding columns can be removed once we use the lifted-stark's virtual trace
     // alignment, which pads to the required rate width without materializing extra columns.
     pub fn to_row_major_matrix(&self) -> RowMajorMatrix<Felt> {
-        let trace_len = self.get_trace_len();
-        let mut col_major_data = Vec::with_capacity(TRACE_WIDTH * trace_len);
-        for col_idx in 0..TRACE_WIDTH {
-            col_major_data.extend_from_slice(self.main_trace.get_column(col_idx));
+        let stored_w = self.main_trace.width();
+        if stored_w == TRACE_WIDTH {
+            return self.main_trace.to_row_major();
         }
-        let col_major_matrix = RowMajorMatrix::new(col_major_data, trace_len);
-        col_major_matrix.transpose()
+
+        assert_eq!(stored_w, PADDED_TRACE_WIDTH);
+        self.main_trace.to_row_major_stripped(TRACE_WIDTH)
     }
 
     // HELPER METHODS
@@ -318,10 +440,27 @@ impl AuxTraceBuilders {
         // the expanded challenges to all sub-builders.
         let challenges = Challenges::<E>::new(challenges[0], challenges[1]);
 
-        let decoder_cols = self.decoder.build_aux_columns(main_trace, &challenges);
-        let stack_cols = self.stack.build_aux_columns(main_trace, &challenges);
-        let range_cols = self.range.build_aux_columns(main_trace, &challenges);
-        let chiplets_cols = self.chiplets.build_aux_columns(main_trace, &challenges);
+        let (decoder_cols, stack_cols, range_cols, chiplets_cols) = {
+            let ((decoder_cols, stack_cols), (range_cols, chiplets_cols)) = rayon::join(
+                || {
+                    rayon::join(
+                        || self.decoder.build_aux_columns(main_trace, &challenges),
+                        || self.stack.build_aux_columns(main_trace, &challenges),
+                    )
+                },
+                || {
+                    rayon::join(
+                        || self.range.build_aux_columns(main_trace, &challenges),
+                        || {
+                            let [a, b, c] =
+                                self.chiplets.build_aux_columns(main_trace, &challenges);
+                            vec![a, b, c]
+                        },
+                    )
+                },
+            );
+            (decoder_cols, stack_cols, range_cols, chiplets_cols)
+        };
 
         decoder_cols
             .into_iter()
@@ -334,11 +473,6 @@ impl AuxTraceBuilders {
 
 // PLONKY3 AUX TRACE BUILDER
 // ================================================================================================
-//
-// Implements the upstream `AuxBuilder` trait from `p3_miden_lifted_air` directly on
-// `AuxTraceBuilders`. Plonky3 uses row-major matrices while our existing aux trace building logic
-// uses column-major format. This impl adapts between the two by converting the main trace from
-// row-major to column-major, delegating to the existing logic, and converting the result back.
 
 impl<EF: ExtensionField<Felt>> AuxBuilder<Felt, EF> for AuxTraceBuilders {
     fn build_aux_trace(
@@ -351,33 +485,48 @@ impl<EF: ExtensionField<Felt>> AuxBuilder<Felt, EF> for AuxTraceBuilders {
         // Transpose the row-major main trace into column-major `MainTrace` needed by the
         // auxiliary trace builders. The last program row is the point where the clock
         // (column 0) stops incrementing.
-        let main_trace_col_major = {
+        let main_for_aux = {
             let num_rows = main.height();
-            // Detect last program row from row-major layout using column 0 (clock).
-            let last_program_row = (1..num_rows)
-                .find(|&i| {
-                    main.get(i, 0).expect("valid indices")
-                        != main.get(i - 1, 0).expect("valid indices") + Felt::ONE
-                })
-                .map_or(num_rows - 1, |i| i - 1);
+            // Find the last program row by binary search on the clock column.
+            let clk0 = main.get(0, 0).expect("valid indices");
+            let last_program_row = if num_rows <= 1 {
+                0
+            } else if main.get(num_rows - 1, 0).expect("valid indices")
+                == clk0 + Felt::new((num_rows - 1) as u64)
+            {
+                num_rows - 1
+            } else {
+                let mut lo = 1usize;
+                let mut hi = num_rows - 1;
+                while lo < hi {
+                    let mid = lo + (hi - lo) / 2;
+                    let expected = clk0 + Felt::new(mid as u64);
+                    if main.get(mid, 0).expect("valid indices") == expected {
+                        lo = mid + 1;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                lo - 1
+            };
             let transposed = main.transpose();
-            let columns: Vec<Vec<Felt>> = transposed.row_slices().map(|row| row.to_vec()).collect();
-            MainTrace::new(ColMatrix::new(columns), last_program_row.into())
+            MainTrace::from_transposed(transposed, RowIndex::from(last_program_row))
         };
 
-        // Build auxiliary columns in column-major format.
-        let aux_columns = self.build_aux_columns(&main_trace_col_major, challenges);
+        let aux_columns = self.build_aux_columns(&main_for_aux, challenges);
         assert!(!aux_columns.is_empty(), "aux columns should not be empty");
 
-        // Flatten column-major aux columns into a contiguous buffer, then transpose
-        // to the row-major layout expected by the lifted prover.
         let trace_len = main.height();
         let num_ef_cols = aux_columns.len();
-        let mut col_major_data = Vec::with_capacity(trace_len * num_ef_cols);
-        for col in aux_columns {
-            col_major_data.extend_from_slice(&col);
+        for col in &aux_columns {
+            debug_assert_eq!(col.len(), trace_len, "aux column length must match main height");
         }
-        let aux_trace = RowMajorMatrix::new(col_major_data, trace_len).transpose();
+
+        let mut flat = Vec::with_capacity(trace_len * num_ef_cols);
+        for col in &aux_columns {
+            flat.extend_from_slice(col);
+        }
+        let aux_trace = RowMajorMatrix::new(flat, trace_len).transpose();
 
         // Extract the last row from the row-major aux trace for Fiat-Shamir.
         let last_row = aux_trace

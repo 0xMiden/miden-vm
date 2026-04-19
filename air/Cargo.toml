@@ -25,6 +25,7 @@ testing = []
 
 [dependencies]
 # Miden dependencies
+miden-ace-codegen.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true
 miden-utils-indexing.workspace = true
@@ -34,4 +35,6 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+insta.workspace = true
+miden-ace-codegen = { workspace = true, features = ["testing"] }
 proptest.workspace = true

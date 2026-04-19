@@ -8,7 +8,7 @@ use miden_debug_types::{SourceFile, SourceSpan};
 use miden_utils_diagnostics::{Diagnostic, miette};
 
 use crate::{
-    ContextId, DebugError, Felt, Host, TraceError, Word,
+    BaseHost, ContextId, DebugError, Felt, TraceError, Word,
     advice::AdviceError,
     event::{EventError, EventId, EventName},
     fast::SystemEventError,
@@ -294,6 +294,21 @@ pub enum OperationError {
         err_code: Felt,
         err_msg: Option<Arc<str>>,
     },
+    #[error(
+        "u32 assertion failed with error {}: invalid values: {invalid_values:?}",
+        match err_msg {
+            Some(msg) => format!("message: {msg}"),
+            None => format!("code: {err_code}"),
+        }
+    )]
+    #[diagnostic(help(
+        "u32assert2 requires both stack values to be valid 32-bit unsigned integers"
+    ))]
+    U32AssertionFailed {
+        err_code: Felt,
+        err_msg: Option<Arc<str>>,
+        invalid_values: Vec<Felt>,
+    },
     #[error("FRI operation failed: {0}")]
     FriError(String),
     #[error(
@@ -347,7 +362,7 @@ impl OperationError {
         self,
         mast_forest: &MastForest,
         node_id: MastNodeId,
-        host: &impl Host,
+        host: &impl BaseHost,
     ) -> ExecutionError {
         let (label, source_file) = get_label_and_source_file(None, mast_forest, node_id, host);
         ExecutionError::OperationError { label, source_file, err: self }
@@ -378,7 +393,7 @@ fn get_label_and_source_file(
     op_idx: Option<usize>,
     mast_forest: &MastForest,
     node_id: MastNodeId,
-    host: &impl Host,
+    host: &impl BaseHost,
 ) -> (SourceSpan, Option<Arc<SourceFile>>) {
     mast_forest
         .get_assembly_op(node_id, op_idx)
@@ -397,7 +412,7 @@ pub fn advice_error_with_context(
     err: AdviceError,
     mast_forest: &MastForest,
     node_id: MastNodeId,
-    host: &impl Host,
+    host: &impl BaseHost,
 ) -> ExecutionError {
     let (label, source_file) = get_label_and_source_file(None, mast_forest, node_id, host);
     ExecutionError::AdviceError { label, source_file, err }
@@ -411,7 +426,7 @@ pub fn event_error_with_context(
     error: EventError,
     mast_forest: &MastForest,
     node_id: MastNodeId,
-    host: &impl Host,
+    host: &impl BaseHost,
     event_id: EventId,
     event_name: Option<EventName>,
 ) -> ExecutionError {
@@ -430,7 +445,7 @@ pub fn procedure_not_found_with_context(
     root_digest: Word,
     mast_forest: &MastForest,
     node_id: MastNodeId,
-    host: &impl Host,
+    host: &impl BaseHost,
 ) -> ExecutionError {
     let (label, source_file) = get_label_and_source_file(None, mast_forest, node_id, host);
     ExecutionError::ProcedureNotFound { label, source_file, root_digest }
@@ -453,7 +468,7 @@ pub trait MapExecErr<T> {
         self,
         mast_forest: &MastForest,
         node_id: MastNodeId,
-        host: &impl Host,
+        host: &impl BaseHost,
     ) -> Result<T, ExecutionError>;
 }
 
@@ -466,7 +481,7 @@ pub trait MapExecErrWithOpIdx<T> {
         self,
         mast_forest: &MastForest,
         node_id: MastNodeId,
-        host: &impl Host,
+        host: &impl BaseHost,
         op_idx: usize,
     ) -> Result<T, ExecutionError>;
 }
@@ -486,7 +501,7 @@ impl<T> MapExecErr<T> for Result<T, OperationError> {
         self,
         mast_forest: &MastForest,
         node_id: MastNodeId,
-        host: &impl Host,
+        host: &impl BaseHost,
     ) -> Result<T, ExecutionError> {
         match self {
             Ok(v) => Ok(v),
@@ -505,7 +520,7 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, OperationError> {
         self,
         mast_forest: &MastForest,
         node_id: MastNodeId,
-        host: &impl Host,
+        host: &impl BaseHost,
         op_idx: usize,
     ) -> Result<T, ExecutionError> {
         match self {
@@ -540,7 +555,7 @@ impl<T> MapExecErr<T> for Result<T, AdviceError> {
         self,
         mast_forest: &MastForest,
         node_id: MastNodeId,
-        host: &impl Host,
+        host: &impl BaseHost,
     ) -> Result<T, ExecutionError> {
         match self {
             Ok(v) => Ok(v),
@@ -570,7 +585,7 @@ impl<T> MapExecErr<T> for Result<T, MemoryError> {
         self,
         mast_forest: &MastForest,
         node_id: MastNodeId,
-        host: &impl Host,
+        host: &impl BaseHost,
     ) -> Result<T, ExecutionError> {
         match self {
             Ok(v) => Ok(v),
@@ -589,7 +604,7 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, MemoryError> {
         self,
         mast_forest: &MastForest,
         node_id: MastNodeId,
-        host: &impl Host,
+        host: &impl BaseHost,
         op_idx: usize,
     ) -> Result<T, ExecutionError> {
         match self {
@@ -610,7 +625,7 @@ impl<T> MapExecErr<T> for Result<T, SystemEventError> {
         self,
         mast_forest: &MastForest,
         node_id: MastNodeId,
-        host: &impl Host,
+        host: &impl BaseHost,
     ) -> Result<T, ExecutionError> {
         match self {
             Ok(v) => Ok(v),
@@ -639,7 +654,7 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, SystemEventError> {
         self,
         mast_forest: &MastForest,
         node_id: MastNodeId,
-        host: &impl Host,
+        host: &impl BaseHost,
         op_idx: usize,
     ) -> Result<T, ExecutionError> {
         match self {
@@ -670,7 +685,7 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, IoError> {
         self,
         mast_forest: &MastForest,
         node_id: MastNodeId,
-        host: &impl Host,
+        host: &impl BaseHost,
         op_idx: usize,
     ) -> Result<T, ExecutionError> {
         match self {
@@ -699,7 +714,7 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, CryptoError> {
         self,
         mast_forest: &MastForest,
         node_id: MastNodeId,
-        host: &impl Host,
+        host: &impl BaseHost,
         op_idx: usize,
     ) -> Result<T, ExecutionError> {
         match self {
@@ -727,7 +742,7 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, AceEvalError> {
         self,
         mast_forest: &MastForest,
         node_id: MastNodeId,
-        host: &impl Host,
+        host: &impl BaseHost,
         op_idx: usize,
     ) -> Result<T, ExecutionError> {
         match self {

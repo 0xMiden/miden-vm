@@ -14,15 +14,14 @@ use super::{
     NUM_DEGREE_4_OPS, NUM_DEGREE_5_OPS, NUM_DEGREE_6_OPS, NUM_DEGREE_7_OPS, OpFlags,
     generate_test_row, get_op_bits, get_op_index,
 };
-use crate::trace::decoder::IS_LOOP_FLAG_COL_IDX;
-
 // HELPER
 // ================================================================================================
 
 /// Creates OpFlags from an opcode using a generated test row.
 fn op_flags_for_opcode(opcode: usize) -> OpFlags<Felt> {
     let row = generate_test_row(opcode);
-    OpFlags::new(&row)
+    let row_next = generate_test_row(0); // next row defaults to NOOP
+    OpFlags::new(&row.decoder, &row.stack, &row_next.decoder)
 }
 
 fn naive_flag(bits: &[Felt; 7], opcode: u8) -> Felt {
@@ -186,7 +185,7 @@ fn degree_7_op_flags() {
         let expected_idx = get_op_index(opcode as u8);
 
         // Check degree 7 flags: exactly one should be ONE
-        for (i, &flag) in op_flags.degree7_op_flags().iter().enumerate() {
+        for (i, &flag) in op_flags.degree7_op_flags.iter().enumerate() {
             if i == expected_idx {
                 assert_eq!(flag, ONE, "Degree 7 flag {} should be ONE for opcode {}", i, opcode);
             } else {
@@ -195,21 +194,21 @@ fn degree_7_op_flags() {
         }
 
         // All other degree flags should be ZERO
-        for (i, &flag) in op_flags.degree6_op_flags().iter().enumerate() {
+        for (i, &flag) in op_flags.degree6_op_flags.iter().enumerate() {
             assert_eq!(
                 flag, ZERO,
                 "Degree 6 flag {} should be ZERO for degree 7 opcode {}",
                 i, opcode
             );
         }
-        for (i, &flag) in op_flags.degree5_op_flags().iter().enumerate() {
+        for (i, &flag) in op_flags.degree5_op_flags.iter().enumerate() {
             assert_eq!(
                 flag, ZERO,
                 "Degree 5 flag {} should be ZERO for degree 7 opcode {}",
                 i, opcode
             );
         }
-        for (i, &flag) in op_flags.degree4_op_flags().iter().enumerate() {
+        for (i, &flag) in op_flags.degree4_op_flags.iter().enumerate() {
             assert_eq!(
                 flag, ZERO,
                 "Degree 4 flag {} should be ZERO for degree 7 opcode {}",
@@ -232,7 +231,7 @@ fn degree_6_op_flags() {
         let expected_idx = get_op_index(opcode as u8);
 
         // Check degree 6 flags
-        for (i, &flag) in op_flags.degree6_op_flags().iter().enumerate() {
+        for (i, &flag) in op_flags.degree6_op_flags.iter().enumerate() {
             if i == expected_idx {
                 assert_eq!(flag, ONE, "Degree 6 flag {} should be ONE for opcode {}", i, opcode);
             } else {
@@ -241,21 +240,21 @@ fn degree_6_op_flags() {
         }
 
         // All other degree flags should be ZERO
-        for (i, &flag) in op_flags.degree7_op_flags().iter().enumerate() {
+        for (i, &flag) in op_flags.degree7_op_flags.iter().enumerate() {
             assert_eq!(
                 flag, ZERO,
                 "Degree 7 flag {} should be ZERO for degree 6 opcode {}",
                 i, opcode
             );
         }
-        for (i, &flag) in op_flags.degree5_op_flags().iter().enumerate() {
+        for (i, &flag) in op_flags.degree5_op_flags.iter().enumerate() {
             assert_eq!(
                 flag, ZERO,
                 "Degree 5 flag {} should be ZERO for degree 6 opcode {}",
                 i, opcode
             );
         }
-        for (i, &flag) in op_flags.degree4_op_flags().iter().enumerate() {
+        for (i, &flag) in op_flags.degree4_op_flags.iter().enumerate() {
             assert_eq!(
                 flag, ZERO,
                 "Degree 4 flag {} should be ZERO for degree 6 opcode {}",
@@ -277,7 +276,7 @@ fn degree_5_op_flags() {
         let expected_idx = get_op_index(opcode as u8);
 
         // Check degree 5 flags
-        for (i, &flag) in op_flags.degree5_op_flags().iter().enumerate() {
+        for (i, &flag) in op_flags.degree5_op_flags.iter().enumerate() {
             if i == expected_idx {
                 assert_eq!(flag, ONE, "Degree 5 flag {} should be ONE for opcode {}", i, opcode);
             } else {
@@ -286,21 +285,21 @@ fn degree_5_op_flags() {
         }
 
         // All other degree flags should be ZERO
-        for (i, &flag) in op_flags.degree7_op_flags().iter().enumerate() {
+        for (i, &flag) in op_flags.degree7_op_flags.iter().enumerate() {
             assert_eq!(
                 flag, ZERO,
                 "Degree 7 flag {} should be ZERO for degree 5 opcode {}",
                 i, opcode
             );
         }
-        for (i, &flag) in op_flags.degree6_op_flags().iter().enumerate() {
+        for (i, &flag) in op_flags.degree6_op_flags.iter().enumerate() {
             assert_eq!(
                 flag, ZERO,
                 "Degree 6 flag {} should be ZERO for degree 5 opcode {}",
                 i, opcode
             );
         }
-        for (i, &flag) in op_flags.degree4_op_flags().iter().enumerate() {
+        for (i, &flag) in op_flags.degree4_op_flags.iter().enumerate() {
             assert_eq!(
                 flag, ZERO,
                 "Degree 4 flag {} should be ZERO for degree 5 opcode {}",
@@ -321,16 +320,16 @@ fn optimized_flags_match_naive() {
         let (deg7, deg6, deg5, deg4) = naive_op_flags(bits);
         let op_flags = op_flags_for_opcode(opcode);
 
-        for (i, &flag) in op_flags.degree7_op_flags().iter().enumerate() {
+        for (i, &flag) in op_flags.degree7_op_flags.iter().enumerate() {
             assert_eq!(flag, deg7[i], "degree7 flag mismatch at index {}", i);
         }
-        for (i, &flag) in op_flags.degree6_op_flags().iter().enumerate() {
+        for (i, &flag) in op_flags.degree6_op_flags.iter().enumerate() {
             assert_eq!(flag, deg6[i], "degree6 flag mismatch at index {}", i);
         }
-        for (i, &flag) in op_flags.degree5_op_flags().iter().enumerate() {
+        for (i, &flag) in op_flags.degree5_op_flags.iter().enumerate() {
             assert_eq!(flag, deg5[i], "degree5 flag mismatch at index {}", i);
         }
-        for (i, &flag) in op_flags.degree4_op_flags().iter().enumerate() {
+        for (i, &flag) in op_flags.degree4_op_flags.iter().enumerate() {
             assert_eq!(flag, deg4[i], "degree4 flag mismatch at index {}", i);
         }
 
@@ -356,7 +355,7 @@ fn degree_4_op_flags() {
         let expected_idx = get_op_index(opcode as u8);
 
         // Check degree 4 flags
-        for (i, &flag) in op_flags.degree4_op_flags().iter().enumerate() {
+        for (i, &flag) in op_flags.degree4_op_flags.iter().enumerate() {
             if i == expected_idx {
                 assert_eq!(flag, ONE, "Degree 4 flag {} should be ONE for opcode {}", i, opcode);
             } else {
@@ -365,21 +364,21 @@ fn degree_4_op_flags() {
         }
 
         // All other degree flags should be ZERO
-        for (i, &flag) in op_flags.degree7_op_flags().iter().enumerate() {
+        for (i, &flag) in op_flags.degree7_op_flags.iter().enumerate() {
             assert_eq!(
                 flag, ZERO,
                 "Degree 7 flag {} should be ZERO for degree 4 opcode {}",
                 i, opcode
             );
         }
-        for (i, &flag) in op_flags.degree6_op_flags().iter().enumerate() {
+        for (i, &flag) in op_flags.degree6_op_flags.iter().enumerate() {
             assert_eq!(
                 flag, ZERO,
                 "Degree 6 flag {} should be ZERO for degree 4 opcode {}",
                 i, opcode
             );
         }
-        for (i, &flag) in op_flags.degree5_op_flags().iter().enumerate() {
+        for (i, &flag) in op_flags.degree5_op_flags.iter().enumerate() {
             assert_eq!(
                 flag, ZERO,
                 "Degree 5 flag {} should be ZERO for degree 4 opcode {}",
@@ -550,8 +549,9 @@ fn composite_end_flags() {
 
     // END with loop flag: left shift (need to modify the row)
     let mut row = generate_test_row(opcodes::END.into());
-    row.decoder[IS_LOOP_FLAG_COL_IDX] = ONE;
-    let op_flags_loop = OpFlags::new(&row);
+    row.decoder.hasher_state[5] = ONE; // is_loop flag
+    let row_next = generate_test_row(0);
+    let op_flags_loop: OpFlags<Felt> = OpFlags::new(&row.decoder, &row.stack, &row_next.decoder);
 
     for i in 0..16 {
         assert_eq!(
@@ -669,7 +669,7 @@ fn u32_rc_op_flag() {
 
     for op in u32_ops {
         let op_flags = op_flags_for_opcode(op.op_code().into());
-        assert_eq!(op_flags.u32_rc_op(), ONE, "u32_rc_op should be ONE for {:?}", op);
+        assert_eq!(op_flags.u32_rc_op, ONE, "u32_rc_op should be ONE for {:?}", op);
     }
 
     // Non-u32 operations
@@ -681,6 +681,6 @@ fn u32_rc_op_flag() {
 
     for op in non_u32_ops {
         let op_flags = op_flags_for_opcode(op.op_code().into());
-        assert_eq!(op_flags.u32_rc_op(), ZERO, "u32_rc_op should be ZERO for {:?}", op);
+        assert_eq!(op_flags.u32_rc_op, ZERO, "u32_rc_op should be ZERO for {:?}", op);
     }
 }

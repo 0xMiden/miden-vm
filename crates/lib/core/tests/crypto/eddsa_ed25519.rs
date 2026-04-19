@@ -66,12 +66,12 @@ fn test_eddsa_verify_prehash_cases() {
     );
 
     let test = build_debug_test!(source, &[]);
-    let output = test.execute().unwrap();
+    let (output, _) = test.execute_for_output().unwrap();
 
-    let result = output.stack_outputs().get_element(0).unwrap();
+    let result = output.stack.get_element(0).unwrap();
     assert_eq!(result, Felt::ONE, "verification result mismatch");
 
-    let deferred = output.advice_provider().precompile_requests().to_vec();
+    let deferred = output.advice.precompile_requests().to_vec();
     assert_eq!(deferred.len(), 1, "expected one deferred request");
     assert_eq!(deferred[0], valid_request.as_precompile_request());
 
@@ -94,12 +94,12 @@ fn test_eddsa_verify_prehash_cases() {
     );
 
     let test = build_debug_test!(source, &[]);
-    let output = test.execute().unwrap();
+    let (output, _) = test.execute_for_output().unwrap();
 
-    let result = output.stack_outputs().get_element(0).unwrap();
+    let result = output.stack.get_element(0).unwrap();
     assert_eq!(result, Felt::ZERO, "verification result mismatch");
 
-    let deferred = output.advice_provider().precompile_requests().to_vec();
+    let deferred = output.advice.precompile_requests().to_vec();
     assert_eq!(deferred.len(), 1, "expected one deferred request");
     assert_eq!(deferred[0], invalid_request.as_precompile_request());
 }
@@ -133,8 +133,8 @@ fn test_eddsa_verify_prehash_impl_commitment() {
         );
 
         let test = build_debug_test!(source, &[]);
-        let output = test.execute().unwrap();
-        let stack = output.stack_outputs();
+        let (output, _) = test.execute_for_output().unwrap();
+        let stack = output.stack;
 
         let commitment = stack.get_word(0).unwrap();
         let tag = stack.get_word(4).unwrap();
@@ -148,12 +148,12 @@ fn test_eddsa_verify_prehash_impl_commitment() {
         let result = stack.get_element(5).unwrap();
         assert_eq!(result, Felt::from_bool(expected_valid));
 
-        let deferred = output.advice_provider().precompile_requests().to_vec();
+        let deferred = output.advice.precompile_requests().to_vec();
         assert_eq!(deferred.len(), 1, "expected a single deferred request");
         assert_eq!(deferred[0], request.as_precompile_request());
 
         assert!(
-            output.advice_provider().stack().is_empty(),
+            output.advice.stack().is_empty(),
             "advice stack should be empty after verify_prehash_impl"
         );
     }
@@ -262,8 +262,8 @@ fn test_eddsa_verify_high_level_wrapper() {
         ",
     );
 
-    let mut test = build_debug_test!(&source);
-    test.add_event_handler(EVENT_EDDSA_SIG_TO_STACK, EddsaSignatureHandler::new(&secret_key));
+    let test = build_debug_test!(&source)
+        .with_event_handler(EVENT_EDDSA_SIG_TO_STACK, EddsaSignatureHandler::new(&secret_key));
 
     test.expect_stack(&[]);
     test.execute().unwrap();

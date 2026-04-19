@@ -58,13 +58,13 @@ impl AdviceMutation {
 // HOST TRAIT
 // ================================================================================================
 
-/// Defines an interface by which the VM can interact with the host.
+/// Defines the host functionality shared by both sync and async execution.
 ///
 /// There are three main categories of interactions between the VM and the host:
 /// 1. getting a library's MAST forest,
 /// 2. handling VM events (which can mutate the process' advice provider), and
 /// 3. handling debug and trace events.
-pub trait Host {
+pub trait BaseHost {
     // REQUIRED METHODS
     // --------------------------------------------------------------------------------------------
 
@@ -73,30 +73,6 @@ pub trait Host {
         &self,
         location: &Location,
     ) -> (SourceSpan, Option<Arc<SourceFile>>);
-
-    // Note: we don't use the `async` keyword in get_mast_forest and on_event, since we need to
-    // specify the `+ Send` bound to the returned Future, and `async` doesn't allow us to do that.
-
-    /// Returns MAST forest corresponding to the specified digest, or None if the MAST forest for
-    /// this digest could not be found in this host.
-    fn get_mast_forest(&self, node_digest: &Word) -> impl FutureMaybeSend<Option<Arc<MastForest>>>;
-
-    /// Handles the event emitted from the VM and provides advice mutations to be applied to
-    /// the advice provider.
-    ///
-    /// The event ID is available at the top of the stack (position 0) when this handler is called.
-    /// This allows the handler to access both the event ID and any additional context data that
-    /// may have been pushed onto the stack prior to the emit operation.
-    ///
-    /// ## Implementation notes
-    /// - Extract the event ID via `EventId::from_felt(process.get_stack_item(0))`
-    /// - Return errors without event names or IDs - the caller will enrich them via
-    ///   [`Host::resolve_event()`]
-    /// - System events (IDs 0-255) are handled by the VM before calling this method
-    fn on_event(
-        &mut self,
-        process: &ProcessorState<'_>,
-    ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>>;
 
     // PROVIDED METHODS
     // --------------------------------------------------------------------------------------------
@@ -126,12 +102,80 @@ pub trait Host {
     }
 }
 
+/// Defines a synchronous interface by which the VM can interact with the host during execution.
+pub trait SyncHost: BaseHost {
+    /// Returns MAST forest corresponding to the specified digest, or None if the MAST forest for
+    /// this digest could not be found in this host.
+    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>>;
+
+    /// Handles the event emitted from the VM and provides advice mutations to be applied to
+    /// the advice provider.
+    ///
+    /// The event ID is available at the top of the stack (position 0) when this handler is called.
+    /// This allows the handler to access both the event ID and any additional context data that
+    /// may have been pushed onto the stack prior to the emit operation.
+    ///
+    /// ## Implementation notes
+    /// - Extract the event ID via `EventId::from_felt(process.get_stack_item(0))`
+    /// - Return errors without event names or IDs - the caller will enrich them via
+    ///   [`BaseHost::resolve_event()`]
+    /// - System events (IDs 0-255) are handled by the VM before calling this method
+    fn on_event(&mut self, process: &ProcessorState<'_>)
+    -> Result<Vec<AdviceMutation>, EventError>;
+}
+
+/// Defines an async interface by which the VM can interact with the host during execution.
+///
+/// This mirrors the historic async host surface while allowing the sync-first core to depend on
+/// [`BaseHost`].
+pub trait Host: BaseHost {
+    // REQUIRED METHODS
+    // --------------------------------------------------------------------------------------------
+
+    /// Returns MAST forest corresponding to the specified digest, or None if the MAST forest for
+    /// this digest could not be found in this host.
+    fn get_mast_forest(&self, node_digest: &Word) -> impl FutureMaybeSend<Option<Arc<MastForest>>>;
+
+    /// Handles the event emitted from the VM and provides advice mutations to be applied to
+    /// the advice provider.
+    ///
+    /// The event ID is available at the top of the stack (position 0) when this handler is called.
+    /// This allows the handler to access both the event ID and any additional context data that
+    /// may have been pushed onto the stack prior to the emit operation.
+    ///
+    /// ## Implementation notes
+    /// - Extract the event ID via `EventId::from_felt(process.get_stack_item(0))`
+    /// - Return errors without event names or IDs - the caller will enrich them via
+    ///   [`BaseHost::resolve_event()`]
+    /// - System events (IDs 0-255) are handled by the VM before calling this method
+    fn on_event(
+        &mut self,
+        process: &ProcessorState<'_>,
+    ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>>;
+}
+
+impl<T> Host for T
+where
+    T: SyncHost,
+{
+    fn get_mast_forest(&self, node_digest: &Word) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
+        let result = SyncHost::get_mast_forest(self, node_digest);
+        async move { result }
+    }
+
+    fn on_event(
+        &mut self,
+        process: &ProcessorState<'_>,
+    ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
+        let result = SyncHost::on_event(self, process);
+        async move { result }
+    }
+}
+
 /// Alias for a `Future`
 ///
 /// Unless the compilation target family is `wasm`, we add `Send` to the required bounds. For
 /// `wasm` compilation targets there is no `Send` bound.
-///
-/// We also provide a blank implementation of this trait for all features.
 #[cfg(target_family = "wasm")]
 pub trait FutureMaybeSend<O>: Future<Output = O> {}
 
@@ -142,8 +186,6 @@ impl<T, O> FutureMaybeSend<O> for T where T: Future<Output = O> {}
 ///
 /// Unless the compilation target family is `wasm`, we add `Send` to the required bounds. For
 /// `wasm` compilation targets there is no `Send` bound.
-///
-/// We also provide a blank implementation of this trait for all features.
 #[cfg(not(target_family = "wasm"))]
 pub trait FutureMaybeSend<O>: Future<Output = O> + Send {}
 

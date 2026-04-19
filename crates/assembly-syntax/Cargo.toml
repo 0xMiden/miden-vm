@@ -59,7 +59,7 @@ thiserror.workspace = true
 env_logger.workspace = true
 miden-test-serde-macros.workspace = true
 proptest.workspace = true
-pretty_assertions = "1.4"
+pretty_assertions = { workspace = true, features = ["std"] }
 serde_json = { workspace = true }
 
 [build-dependencies]

@@ -1,14 +1,20 @@
 use alloc::{string::String, sync::Arc};
 
-use miden_air::trace::{AUX_TRACE_RAND_CHALLENGES, chiplets::hasher::HASH_CYCLE_LEN};
+use miden_air::trace::{
+    AUX_TRACE_RAND_CHALLENGES, DECODER_TRACE_OFFSET,
+    chiplets::hasher::HASH_CYCLE_LEN,
+    decoder::{HASHER_STATE_OFFSET, NUM_OP_BITS, OP_BITS_OFFSET},
+};
 use miden_core::{
-    Felt,
+    Felt, Word,
+    events::EventId,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
         JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor, MastNodeExt,
         SplitNodeBuilder,
     },
-    operations::Operation,
+    operations::{Operation, opcodes},
+    precompile::PrecompileRequest,
     program::{Kernel, Program, StackInputs},
 };
 use miden_utils_testing::{get_column_name, rand::rand_array};
@@ -17,7 +23,7 @@ use rstest::{fixture, rstest};
 
 use super::*;
 use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, HostLibrary,
+    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, HostLibrary, TraceBuildInputs,
     trace::trace_state::MemoryReadsReplay,
 };
 
@@ -327,10 +333,8 @@ fn test_trace_generation_at_fragment_boundaries(
         );
         let mut host = DefaultHost::default();
         host.load_library(create_simple_library()).unwrap();
-        let (execution_output, trace_fragment_contexts) =
-            processor.execute_for_trace_sync(&program, &mut host).unwrap();
-
-        build_trace(execution_output, trace_fragment_contexts, program.to_info()).unwrap()
+        let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
+        build_trace(trace_inputs).unwrap()
     };
 
     let trace_from_single_fragment = {
@@ -343,11 +347,10 @@ fn test_trace_generation_at_fragment_boundaries(
         );
         let mut host = DefaultHost::default();
         host.load_library(create_simple_library()).unwrap();
-        let (execution_output, trace_fragment_contexts) =
-            processor.execute_for_trace_sync(&program, &mut host).unwrap();
-        assert!(trace_fragment_contexts.core_trace_contexts.len() == 1);
+        let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
+        assert!(trace_inputs.trace_generation_context().core_trace_contexts.len() == 1);
 
-        build_trace(execution_output, trace_fragment_contexts, program.to_info()).unwrap()
+        build_trace(trace_inputs).unwrap()
     };
 
     // Ensure that the trace generated from multiple fragments is identical to the one generated
@@ -395,20 +398,15 @@ fn test_trace_generation_at_fragment_boundaries(
         trace_from_single_fragment.trace_len_summary(),
     );
 
-    // Verify merkle store data match deterministically.
-    let merkle_nodes_from_fragments: alloc::collections::BTreeMap<_, _> = trace_from_fragments
-        .advice_provider()
-        .merkle_store()
-        .inner_nodes()
-        .map(|info| (info.value, (info.left, info.right)))
-        .collect();
-    let merkle_nodes_from_single: alloc::collections::BTreeMap<_, _> = trace_from_single_fragment
-        .advice_provider()
-        .merkle_store()
-        .inner_nodes()
-        .map(|info| (info.value, (info.left, info.right)))
-        .collect();
-    assert_eq!(merkle_nodes_from_fragments, merkle_nodes_from_single,);
+    // Verify deferred precompile data match deterministically.
+    assert_eq!(
+        trace_from_fragments.precompile_requests(),
+        trace_from_single_fragment.precompile_requests(),
+    );
+    assert_eq!(
+        trace_from_fragments.final_precompile_transcript,
+        trace_from_single_fragment.final_precompile_transcript,
+    );
 
     // Verify aux trace columns match.
     let rand_elements = rand_array::<Felt, AUX_TRACE_RAND_CHALLENGES>();
@@ -435,6 +433,72 @@ fn test_trace_generation_at_fragment_boundaries(
 }
 
 #[test]
+fn test_nested_loop_end_flags_stable_across_fragmentation() {
+    // Small fragment size is chosen so that the fragment boundaries land on the outer loop replay:
+    // rows [0..6], [7..13], [14..].
+    //
+    // Execution for the chosen stack inputs:
+    //  0: LOOP
+    //  1:   LOOP
+    //  2:     BLOCK PAD DROP END
+    //  6:   END
+    //  7: REPEAT
+    //  8:   LOOP
+    //  9:     BLOCK PAD DROP END
+    // 13:   END
+    // 14: END
+    // 15: HALT
+    //
+    // Stack inputs, top first:
+    //  1) enter outer loop
+    //  2) enter inner loop
+    //  3) exit inner loop
+    //  4) repeat outer loop
+    //  5) enter inner loop
+    //  6) exit inner loop
+    //  7) exit outer loop
+    const SMALL_FRAGMENT_SIZE: usize = 7;
+    const LARGE_FRAGMENT_SIZE: usize = 1 << 20;
+
+    let program = nested_loop_program();
+    let stack_inputs = &[ONE, ONE, ZERO, ONE, ONE, ZERO, ZERO, SENTINEL_VALUE];
+
+    let trace_from_fragments = build_trace_for_program(&program, stack_inputs, SMALL_FRAGMENT_SIZE);
+    let trace_from_single_fragment =
+        build_trace_for_program(&program, stack_inputs, LARGE_FRAGMENT_SIZE);
+
+    let columns_from_fragments = trace_from_fragments
+        .main_trace()
+        .columns()
+        .map(|col| col.to_vec())
+        .collect::<Vec<_>>();
+    let columns_from_single_fragment = trace_from_single_fragment
+        .main_trace()
+        .columns()
+        .map(|col| col.to_vec())
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        columns_from_fragments, columns_from_single_fragment,
+        "nested-loop trace changed across fragment boundaries"
+    );
+
+    let end_flags = collect_end_flags(&trace_from_fragments);
+    assert!(
+        end_flags.contains(&[ONE, ZERO, ZERO, ZERO].into()),
+        "expected an END row for loop body basic block (is_loop_body=1)"
+    );
+    assert!(
+        end_flags.contains(&[ONE, ONE, ZERO, ZERO].into()),
+        "expected an END row for inner loop node (is_loop_body=1, loop_entered=1)"
+    );
+    assert!(
+        end_flags.contains(&[ZERO, ONE, ZERO, ZERO].into()),
+        "expected an END row for outer loop node (is_loop_body=0, loop_entered=1)"
+    );
+}
+
+#[test]
 fn test_partial_last_fragment_exists_for_h0_inversion_path() {
     // Keep this > 1 and non-dividing for join_program() to guarantee a short final fragment.
     const FRAGMENT_SIZE: usize = 11;
@@ -450,15 +514,14 @@ fn test_partial_last_fragment_exists_for_h0_inversion_path() {
     let mut host = DefaultHost::default();
     host.load_library(create_simple_library()).unwrap();
 
-    let (execution_output, trace_fragment_contexts) =
-        processor.execute_for_trace_sync(&program, &mut host).unwrap();
+    let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
 
     assert!(
-        trace_fragment_contexts.core_trace_contexts.len() > 1,
+        trace_inputs.trace_generation_context().core_trace_contexts.len() > 1,
         "repro precondition requires multiple fragments"
     );
 
-    let trace = build_trace(execution_output, trace_fragment_contexts, program.to_info()).unwrap();
+    let trace = build_trace(trace_inputs).unwrap();
     let total_rows_without_halt = trace.main_trace().num_rows() - 1;
 
     assert_ne!(
@@ -485,12 +548,11 @@ fn miri_repro_uninitialized_tail_read_during_h0_inversion() {
     );
     let mut host = DefaultHost::default();
     host.load_library(create_simple_library()).unwrap();
-    let (execution_output, trace_fragment_contexts) =
-        processor.execute_for_trace_sync(&program, &mut host).unwrap();
+    let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
 
-    assert!(trace_fragment_contexts.core_trace_contexts.len() > 1);
+    assert!(trace_inputs.trace_generation_context().core_trace_contexts.len() > 1);
 
-    let _ = build_trace(execution_output, trace_fragment_contexts, program.to_info());
+    let _ = build_trace(trace_inputs);
 }
 
 /// Creates a library with a single procedure containing just a SWAP operation.
@@ -596,6 +658,25 @@ fn loop_program() -> Program {
 
     program.make_root(root_join_node);
     Program::new(Arc::new(program), root_join_node)
+}
+
+/// (loop (loop (block pad drop)))
+fn nested_loop_program() -> Program {
+    let mut program = MastForest::new();
+
+    let inner_loop = {
+        let basic_block_pad_drop =
+            BasicBlockNodeBuilder::new(vec![Operation::Pad, Operation::Drop], Vec::new())
+                .add_to_forest(&mut program)
+                .unwrap();
+
+        LoopNodeBuilder::new(basic_block_pad_drop).add_to_forest(&mut program).unwrap()
+    };
+
+    let outer_loop = LoopNodeBuilder::new(inner_loop).add_to_forest(&mut program).unwrap();
+
+    program.make_root(outer_loop);
+    Program::new(Arc::new(program), outer_loop)
 }
 
 /// (join (
@@ -842,16 +923,15 @@ fn test_build_trace_returns_err_on_empty_memory_reads_replay() {
             .unwrap(),
     );
     let mut host = DefaultHost::default();
-    let (execution_output, mut trace_generation_context) =
-        processor.execute_for_trace_sync(&program, &mut host).unwrap();
+    let mut trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
 
     // Clear the memory reads replay so the replay processor will fail when the DYN node tries to
     // read the callee hash from memory.
-    for ctx in &mut trace_generation_context.core_trace_contexts {
+    for ctx in &mut trace_inputs.trace_generation_context_mut().core_trace_contexts {
         ctx.replay.memory_reads = MemoryReadsReplay::default();
     }
 
-    let result = build_trace(execution_output, trace_generation_context, program.to_info());
+    let result = build_trace(trace_inputs);
     assert!(
         result.is_err(),
         "build_trace should return Err when hasher replay has bad node ID"
@@ -875,8 +955,7 @@ fn test_build_trace_returns_err_on_bad_node_id_in_hasher_replay() {
             .unwrap(),
     );
     let mut host = DefaultHost::default();
-    let (execution_output, mut trace_generation_context) =
-        processor.execute_for_trace_sync(&program, &mut host).unwrap();
+    let mut trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
 
     // Inject a HashBasicBlock entry with a node ID that points to a non-existent node in an empty
     // forest.
@@ -886,16 +965,56 @@ fn test_build_trace_returns_err_on_bad_node_id_in_hasher_replay() {
     let valid_id = BasicBlockNodeBuilder::new(vec![Operation::Noop], Vec::new())
         .add_to_forest(&mut temp_forest)
         .unwrap();
-    trace_generation_context.hasher_for_chiplet.record_hash_basic_block(
-        empty_forest,
-        valid_id,
-        [ZERO; 4].into(),
-    );
+    trace_inputs
+        .trace_generation_context_mut()
+        .hasher_for_chiplet
+        .record_hash_basic_block(empty_forest, valid_id, [ZERO; 4].into());
 
-    let result = build_trace(execution_output, trace_generation_context, program.to_info());
+    let result = build_trace(trace_inputs);
     assert!(
         result.is_err(),
         "build_trace should return Err when hasher replay has bad node ID"
+    );
+}
+
+/// Verifies that `build_trace` rejects compatibility bundles that reuse matching public outputs
+/// but carry different deferred precompile requests.
+#[test]
+fn test_build_trace_rejects_mismatched_precompile_requests() {
+    const MAX_FRAGMENT_SIZE: usize = 1 << 20;
+
+    let program = basic_block_program_small();
+
+    let processor = FastProcessor::new_with_options(
+        StackInputs::new(DEFAULT_STACK).unwrap(),
+        AdviceInputs::default(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
+            .unwrap(),
+    );
+    let mut host = DefaultHost::default();
+    let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
+    let (trace_output, trace_generation_context, program_info) = trace_inputs.into_parts();
+
+    let mut other_trace_output = trace_output;
+    other_trace_output
+        .precompile_requests
+        .push(PrecompileRequest::new(EventId::from_u64(7), vec![1, 2, 3]));
+
+    let result = build_trace(TraceBuildInputs::from_parts(
+        other_trace_output,
+        trace_generation_context,
+        program_info,
+    ));
+
+    assert!(
+        matches!(
+            result,
+            Err(ExecutionError::Internal(
+                "trace inputs do not match deferred precompile requests"
+            ))
+        ),
+        "expected deferred-precompile-request mismatch error, got: {result:?}"
     );
 }
 
@@ -927,24 +1046,18 @@ fn test_build_trace_with_max_len_corner_cases(
             .unwrap(),
     );
     let mut host = DefaultHost::default();
-    let (execution_output, trace_generation_context) =
-        processor.execute_for_trace_sync(&program, &mut host).unwrap();
+    let trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
 
     // Compute the number of core trace rows generated, which includes the HALT row inserted by
     // `build_trace_with_max_len`.
-    let core_trace_len = trace_generation_context.core_trace_contexts.len()
-        * trace_generation_context.fragment_size
+    let core_trace_len = trace_inputs.trace_generation_context().core_trace_contexts.len()
+        * trace_inputs.trace_generation_context().fragment_size
         + 1;
 
     let max_trace_len = core_trace_len
         .checked_add_signed(max_trace_len_offset_from_core_trace_len)
         .unwrap();
-    let result = build_trace_with_max_len(
-        execution_output,
-        trace_generation_context,
-        program.to_info(),
-        max_trace_len,
-    );
+    let result = build_trace_with_max_len(trace_inputs, max_trace_len);
 
     assert_eq!(
         result.is_ok(),
@@ -979,18 +1092,12 @@ fn test_build_trace_returns_err_on_fragment_size_overflow() {
             .unwrap(),
     );
     let mut host = DefaultHost::default();
-    let (execution_output, mut trace_generation_context) =
-        processor.execute_for_trace_sync(&program, &mut host).unwrap();
+    let mut trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
 
     // Set fragment_size to usize::MAX so that `len() * fragment_size` overflows.
-    trace_generation_context.fragment_size = usize::MAX;
+    trace_inputs.trace_generation_context_mut().fragment_size = usize::MAX;
 
-    let result = build_trace_with_max_len(
-        execution_output,
-        trace_generation_context,
-        program.to_info(),
-        usize::MAX,
-    );
+    let result = build_trace_with_max_len(trace_inputs, usize::MAX);
 
     assert!(
         matches!(result, Err(ExecutionError::TraceLenExceeded(_))),
@@ -1016,13 +1123,12 @@ fn test_build_trace_returns_err_when_chiplets_trace_exceeds_max_len() {
             .unwrap(),
     );
     let mut host = DefaultHost::default();
-    let (execution_output, mut trace_generation_context) =
-        processor.execute_for_trace_sync(&program, &mut host).unwrap();
+    let mut trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
 
     // Note: the last fragment may have fewer rows than the fragment size, so this is really an
     // upper bound on the number of core trace rows
-    let core_trace_rows =
-        trace_generation_context.core_trace_contexts.len() * trace_generation_context.fragment_size;
+    let core_trace_rows = trace_inputs.trace_generation_context().core_trace_contexts.len()
+        * trace_inputs.trace_generation_context().fragment_size;
 
     // Inject enough hasher permutations so the chiplets trace exceeds core_trace_rows.
     // Each permute adds HASH_CYCLE_LEN rows to the hasher chiplet trace, so we need
@@ -1030,19 +1136,17 @@ fn test_build_trace_returns_err_when_chiplets_trace_exceeds_max_len() {
     // limit.
     let num_permutations = core_trace_rows / HASH_CYCLE_LEN + 1;
     for _ in 0..num_permutations {
-        trace_generation_context.hasher_for_chiplet.record_permute_input([ZERO; 12]);
+        trace_inputs
+            .trace_generation_context_mut()
+            .hasher_for_chiplet
+            .record_permute_input([ZERO; 12]);
     }
 
     // Set max_trace_len equal to core_trace_rows. The core trace check passes (not strictly
     // greater), but the inflated chiplets trace will exceed it.
     let max_trace_len = core_trace_rows;
 
-    let result = build_trace_with_max_len(
-        execution_output,
-        trace_generation_context,
-        program.to_info(),
-        max_trace_len,
-    );
+    let result = build_trace_with_max_len(trace_inputs, max_trace_len);
 
     assert!(
         matches!(result, Err(ExecutionError::TraceLenExceeded(_))),
@@ -1066,13 +1170,12 @@ fn test_build_trace_returns_err_on_empty_core_trace_contexts() {
             .unwrap(),
     );
     let mut host = DefaultHost::default();
-    let (execution_output, mut trace_generation_context) =
-        processor.execute_for_trace_sync(&program, &mut host).unwrap();
+    let mut trace_inputs = processor.execute_trace_inputs_sync(&program, &mut host).unwrap();
 
     // Clear core_trace_contexts to simulate an empty trace.
-    trace_generation_context.core_trace_contexts.clear();
+    trace_inputs.trace_generation_context_mut().core_trace_contexts.clear();
 
-    let result = build_trace(execution_output, trace_generation_context, program.to_info());
+    let result = build_trace(trace_inputs);
 
     assert!(
         matches!(result, Err(ExecutionError::Internal(_))),
@@ -1089,6 +1192,62 @@ fn testname() -> String {
     std::thread::current().name().unwrap().replace("::", "__")
 }
 
+fn build_trace_for_program(
+    program: &Program,
+    stack_inputs: &[Felt],
+    fragment_size: usize,
+) -> ExecutionTrace {
+    let processor = FastProcessor::new_with_options(
+        StackInputs::new(stack_inputs).unwrap(),
+        AdviceInputs::default(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(fragment_size)
+            .unwrap(),
+    );
+    let mut host = DefaultHost::default();
+    host.load_library(create_simple_library()).unwrap();
+    let trace_inputs = processor.execute_trace_inputs_sync(program, &mut host).unwrap();
+
+    build_trace(trace_inputs).unwrap()
+}
+
+fn collect_end_flags(trace: &ExecutionTrace) -> Vec<Word> {
+    let main_trace = trace.main_trace();
+
+    (0..main_trace.num_rows())
+        .filter_map(|row_idx| {
+            if read_opcode(main_trace, row_idx) == opcodes::END {
+                Some(
+                    [
+                        main_trace.get_column(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 4)
+                            [row_idx],
+                        main_trace.get_column(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 5)
+                            [row_idx],
+                        main_trace.get_column(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 6)
+                            [row_idx],
+                        main_trace.get_column(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + 7)
+                            [row_idx],
+                    ]
+                    .into(),
+                )
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn read_opcode(main_trace: &MainTrace, row_idx: usize) -> u8 {
+    let mut result = 0;
+    for i in 0..NUM_OP_BITS {
+        let op_bit = main_trace.get_column(DECODER_TRACE_OFFSET + OP_BITS_OFFSET + i)[row_idx]
+            .as_canonical_u64();
+        assert!(op_bit <= 1, "invalid op bit");
+        result += op_bit << i;
+    }
+    result as u8
+}
+
 /// Wrapper around `ExecutionTrace` that produces deterministic `Debug` output.
 ///
 /// `ExecutionTrace` contains a `MerkleStore` backed by `HashMap`, whose iteration order is
@@ -1100,19 +1259,12 @@ impl core::fmt::Debug for DeterministicTrace<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let trace = self.0;
 
-        // Collect merkle store nodes into a sorted BTreeMap for deterministic output
-        let sorted_nodes: alloc::collections::BTreeMap<_, _> = trace
-            .advice_provider()
-            .merkle_store()
-            .inner_nodes()
-            .map(|info| (info.value, (info.left, info.right)))
-            .collect();
-
         f.debug_struct("ExecutionTrace")
             .field("main_trace", trace.main_trace())
             .field("program_info", &trace.program_info())
             .field("stack_outputs", &trace.stack_outputs())
-            .field("merkle_store_nodes", &sorted_nodes)
+            .field("precompile_requests", &trace.precompile_requests())
+            .field("final_precompile_transcript", &trace.final_precompile_transcript)
             .field("trace_len_summary", &trace.trace_len_summary())
             .finish()
     }

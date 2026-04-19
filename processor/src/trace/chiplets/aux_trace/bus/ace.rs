@@ -1,6 +1,8 @@
 use core::fmt::{Display, Formatter, Result as FmtResult};
 
-use miden_air::trace::{Challenges, MainTrace, RowIndex, chiplets::ace::ACE_INIT_LABEL};
+use miden_air::trace::{
+    Challenges, MainTrace, RowIndex, bus_types::CHIPLETS_BUS, chiplets::ace::ACE_INIT_LABEL,
+};
 use miden_core::{Felt, ONE, field::ExtensionField};
 
 use crate::debug::{BusDebugger, BusMessage};
@@ -100,14 +102,17 @@ where
     E: ExtensionField<Felt>,
 {
     fn value(&self, challenges: &Challenges<E>) -> E {
-        challenges.encode([
-            self.op_label,
-            self.clk,
-            self.ctx,
-            self.ptr,
-            self.num_read_rows,
-            self.num_eval_rows,
-        ])
+        challenges.encode(
+            CHIPLETS_BUS,
+            [
+                self.op_label,
+                self.clk,
+                self.ctx,
+                self.ptr,
+                self.num_read_rows,
+                self.num_eval_rows,
+            ],
+        )
     }
 
     fn source(&self) -> &str {

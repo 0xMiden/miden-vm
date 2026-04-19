@@ -10,11 +10,10 @@ use miden_core::{
 };
 use miden_core_lib::{CoreLibrary, dsa::falcon512_poseidon2};
 use miden_processor::{
-    DefaultHost, ExecutionError, ProcessorState, Program, StackInputs,
+    DefaultHost, ExecutionError, FastProcessor, ProcessorState, Program, StackInputs,
     advice::{AdviceInputs, AdviceMutation},
     crypto::random::RandomCoin,
     event::EventError,
-    execute_sync,
     operation::OperationError,
 };
 use miden_utils_testing::{
@@ -284,8 +283,8 @@ fn test_move_sig_to_adv_stack() {
     let adv_stack = vec![];
     let store = MerkleStore::new();
 
-    let mut test = build_debug_test!(source, &op_stack, &adv_stack, store, advice_map.into_iter());
-    test.add_event_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature);
+    let test = build_debug_test!(source, &op_stack, &adv_stack, store, advice_map.into_iter())
+        .with_event_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature);
     test.expect_stack(&[])
 }
 
@@ -297,8 +296,8 @@ fn falcon_execution() {
     let message = random_word();
     let (source, op_stack, adv_stack, store, advice_map) = generate_test(sk, message);
 
-    let mut test = build_debug_test!(&source, &op_stack, &adv_stack, store, advice_map.into_iter());
-    test.add_event_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature);
+    let test = build_debug_test!(&source, &op_stack, &adv_stack, store, advice_map.into_iter())
+        .with_event_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature);
     test.expect_stack(&[])
 }
 
@@ -388,9 +387,9 @@ fn test_mod_12289_rejects_forged_remainder_zero(#[case] a_hi: u64, #[case] a_lo:
     // Use the upstream test builder directly so we do not auto-register the honest
     // falcon_div handler from CoreLibrary.
     let core_lib = miden_core_lib::CoreLibrary::default();
-    let mut test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack);
-    test.libraries.push(core_lib.library().clone());
-    test.add_event_handler(FALCON_DIV, malicious_falcon_div);
+    let test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack)
+        .with_library(core_lib.library().clone())
+        .with_event_handler(FALCON_DIV, malicious_falcon_div);
 
     // Hardened mod_12289 must reject forged advice.
     expect_exec_error_matches!(
@@ -435,9 +434,9 @@ fn test_mod_12289_rejects_forged_addition_overflow() {
     let adv_stack: Vec<u64> = vec![];
 
     let core_lib = miden_core_lib::CoreLibrary::default();
-    let mut test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack);
-    test.libraries.push(core_lib.library().clone());
-    test.add_event_handler(FALCON_DIV, malicious_falcon_div);
+    let test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack)
+        .with_library(core_lib.library().clone())
+        .with_event_handler(FALCON_DIV, malicious_falcon_div);
 
     expect_exec_error_matches!(
         test,
@@ -445,6 +444,50 @@ fn test_mod_12289_rejects_forged_addition_overflow() {
             err: OperationError::FailedAssertion { err_msg, .. },
             ..
         } if err_msg.as_deref() == Some("comparison failed: addition overflow")
+    );
+}
+
+#[test]
+fn test_mod_12289_rejects_non_u32_remainder_advice() {
+    const FALCON_DIV: EventName =
+        EventName::new("miden::core::crypto::dsa::falcon512_poseidon2::falcon_div");
+
+    fn malicious_falcon_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
+        let a_hi = process.get_stack_item(1).as_canonical_u64();
+        let a_lo = process.get_stack_item(2).as_canonical_u64();
+        let dividend = (a_hi << 32) | a_lo;
+        let quotient = dividend / M;
+
+        let q_hi = Felt::new(quotient >> 32);
+        let q_lo = Felt::new(quotient & 0xffff_ffff);
+        let forged_remainder = Felt::new(Felt::ORDER_U64 - 1);
+
+        let remainder = AdviceMutation::extend_stack([forged_remainder]);
+        let quotient = AdviceMutation::extend_stack([q_hi, q_lo]);
+        Ok(vec![remainder, quotient])
+    }
+
+    let source = "
+        use miden::core::crypto::dsa::falcon512_poseidon2
+        begin
+            exec.falcon512_poseidon2::mod_12289
+        end
+    ";
+
+    let op_stack = vec![0, 100_000];
+    let adv_stack: Vec<u64> = vec![];
+
+    let core_lib = miden_core_lib::CoreLibrary::default();
+    let mut test = miden_utils_testing::build_test_by_mode!(false, source, &op_stack, &adv_stack);
+    test.libraries.push(core_lib.library().clone());
+    test.add_event_handler(FALCON_DIV, malicious_falcon_div);
+
+    expect_exec_error_matches!(
+        test,
+        ExecutionError::OperationError {
+            err: OperationError::NotU32Values { values },
+            ..
+        } if values.iter().any(|value| value.as_canonical_u64() == Felt::ORDER_U64 - 1)
     );
 }
 
@@ -467,8 +510,11 @@ fn falcon_prove_verify() {
     host.register_handler(EVENT_FALCON_SIG_TO_STACK, Arc::new(push_falcon_signature))
         .unwrap();
 
-    let trace = execute_sync(&program, stack_inputs, advice_inputs, &mut host, Default::default())
-        .expect("failed to execute");
+    let trace_inputs =
+        FastProcessor::new_with_options(stack_inputs, advice_inputs, Default::default())
+            .execute_trace_inputs_sync(&program, &mut host)
+            .expect("failed to execute");
+    let trace = miden_processor::trace::build_trace(trace_inputs).expect("failed to build trace");
     trace.check_constraints();
 }
 

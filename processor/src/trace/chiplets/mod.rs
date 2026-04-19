@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::{CHIPLETS_WIDTH, chiplets::hasher::HasherState};
-use miden_core::{mast::OpBatch, program::Kernel};
+use miden_core::{mast::OpBatch, program::Kernel, utils::RowMajorMatrix};
 
 use crate::{
     Felt, ONE, Word, ZERO,
@@ -14,8 +14,6 @@ use bitwise::Bitwise;
 
 mod hasher;
 use hasher::Hasher;
-#[cfg(test)]
-pub(crate) use hasher::init_state_from_words;
 
 mod memory;
 use memory::Memory;
@@ -32,13 +30,14 @@ mod aux_trace;
 pub use aux_trace::AuxTraceBuilder;
 
 #[cfg(test)]
+#[allow(clippy::needless_range_loop)]
 mod tests;
 
 // TRACE
 // ================================================================================================
 
 pub struct ChipletsTrace {
-    pub(crate) trace: [Vec<Felt>; CHIPLETS_WIDTH],
+    pub(crate) trace: Vec<Felt>,
     pub(crate) aux_builder: AuxTraceBuilder,
 }
 
@@ -49,99 +48,88 @@ pub struct ChipletsTrace {
 /// and kernel ROM chiplets and is responsible for building a final execution trace from their
 /// stacked execution traces and chiplet selectors.
 ///
-/// The module's trace can be thought of as 6 stacked segments in the following form:
+/// The module's trace can be thought of as 6 stacked segments in the following form.
 ///
-/// * Hasher segment: contains the trace and selector for the hasher chiplet. This segment fills the
-///   first rows of the trace up to the length of the hasher `trace_len`.
-///   - column 0: selector column with values set to ZERO
-///   - columns 1-16: execution trace of hash chiplet
-///   - columns 17-20: unused columns padded with ZERO
+/// The chiplet system uses two physical selector columns (`s_ctrl = column 0` and
+/// `s_perm = column 20`) plus the virtual `s0 = 1 - (s_ctrl + s_perm)` to partition
+/// rows into three top-level regions. Columns 1-4 (`s1..s4`) subdivide the `s0` region.
 ///
-/// * Bitwise segment: contains the trace and selectors for the bitwise chiplet. This segment begins
-///   at the end of the hasher segment and fills the next rows of the trace for the `trace_len` of
-///   the bitwise chiplet.
-///   - column 0: selector column with values set to ONE
-///   - column 1: selector column with values set to ZERO
+/// * Hasher segment: fills the first rows of the trace up to the hasher `trace_len`. Split into
+///   controller (s_ctrl=1, s_perm=0) and permutation (s_ctrl=0, s_perm=1) sub-regions.
+///   - column 0 (s_ctrl): 1 on controller rows, 0 on permutation rows
+///   - columns 1-19: execution trace of hash chiplet
+///   - column 20 (s_perm): 0 on controller rows, 1 on permutation rows
+///
+/// * Bitwise segment: begins at the end of the hasher segment.
+///   - column 0 (s_ctrl): ZERO
+///   - column 1 (s1): ZERO
 ///   - columns 2-14: execution trace of bitwise chiplet
 ///   - columns 15-20: unused columns padded with ZERO
 ///
-/// * Memory segment: contains the trace and selectors for the memory chiplet.  This segment begins
-///   at the end of the bitwise segment and fills the next rows of the trace for the `trace_len` of
-///   the memory chiplet.
-///   - column 0-1: selector columns with values set to ONE
-///   - column 2: selector column with values set to ZERO
-///   - columns 3-17: execution trace of memory chiplet
-///   - columns 18-20: unused columns padded with ZERO
+/// * Memory segment: begins at the end of the bitwise segment.
+///   - column 0 (s_ctrl): ZERO
+///   - column 1 (s1): ONE
+///   - column 2 (s2): ZERO
+///   - columns 3-19: execution trace of memory chiplet
+///   - column 20: unused column padded with ZERO
 ///
-/// * ACE segment: contains the trace and selectors for the arithmetic circuit evaluation chiplet.
-///   This segment begins at the end of the memory segment and fills the next rows of the trace for
-///   the `trace_len` of the ACE chiplet.
-///   - column 0-2: selector columns with values set to ONE
-///   - column 3: selector column with values set to ZERO
+/// * ACE segment: begins at the end of the memory segment.
+///   - column 0 (s_ctrl): ZERO
+///   - column 1-2 (s1, s2): ONE
+///   - column 3 (s3): ZERO
 ///   - columns 4-20: execution trace of ACE chiplet
 ///
-/// * Kernel ROM segment: contains the trace and selectors for the kernel ROM chiplet * This segment
-///   begins at the end of the memory segment and fills the next rows of the trace for the
-///   `trace_len` of the kernel ROM chiplet.
-///   - column 0-3: selector columns with values set to ONE
-///   - column 4: selector column with values set to ZERO
+/// * Kernel ROM segment: begins at the end of the ACE segment.
+///   - column 0 (s_ctrl): ZERO
+///   - columns 1-3 (s1, s2, s3): ONE
+///   - column 4 (s4): ZERO
 ///   - columns 5-9: execution trace of kernel ROM chiplet
-///   - columns 10-20: unused column padded with ZERO
+///   - columns 10-20: unused columns padded with ZERO
 ///
-/// * Padding segment: unused. This segment begins at the end of the kernel ROM segment and fills
-///   the rest of the execution trace minus the number of random rows. When it finishes, the
-///   execution trace should have exactly enough rows remaining for the specified number of random
-///   rows.
-///   - columns 0-4: selector columns with values set to ONE
+/// * Padding segment: fills the rest of the trace.
+///   - column 0 (s_ctrl): ZERO
+///   - columns 1-4 (s1..s4): ONE
 ///   - columns 5-20: unused columns padded with ZERO
 ///
 ///
 /// The following is a pictorial representation of the chiplet module:
 ///
 /// ```text
-///             +---+--------------------------------------------------------------+------+
-///             | 0 |                                                              |------|
-///             | . |         Hash chiplet                                         |------|
-///             | . |         16 columns                                           |------|
-///             | . |       constraint degree 8                                    |------|
-///             | 0 |                                                              |------|
-///             +---+---+------------------------------------------------------+---+------+
-///             | 1 | 0 |                                                      |----------|
-///             | . | . |                  Bitwise chiplet                     |----------|
-///             | . | . |                    13 columns                        |----------|
-///             | . | . |               constraint degree 5                    |----------|
-///             | . | . |                                                      |----------|
-///             | . | 0 |                                                      |----------|
-///             | . +---+---+--------------------------------------------------+-----+----+
-///             | . | 1 | 0 |                                                        |----|
-///             | . | . | . |            Memory chiplet                              |----|
-///             | . | . | . |              15 columns                                |----|
-///             | . | . | . |          constraint degree 9                           |----|
-///             | . | . | 0 |                                                        |----|
-///             | . + . +---+---+----------------------------------------------------+----+
-///             | . | . | 1 | 0 |                                                         |
-///             | . | . | . | . |          ACE chiplet                                    |
-///             | . | . | . | . |            16 columns                                   |
-///             | . | . | . | . |        constraint degree 5                              |
-///             | . | . | . | 0 |                                                         |
-///             | . + . | . +---+---+---------------------------+-------------------------+
-///             | . | . | . | 1 | 0 |                           |-------------------------|
-///             | . | . | . | . | . |     Kernel ROM chiplet    |-------------------------|
-///             | . | . | . | . | . |     5 columns             |-------------------------|
-///             | . | . | . | . | . |     constraint degree 9   |-------------------------|
-///             | . | . | . | . | 0 |                           |-------------------------|
-///             | . + . | . | . +---+---+-----------------------+-------------------------+
-///             | . | . | . | . | 1 | 0 |-------------------------------------------------|
-///             | . | . | . | . | . | . |-------------------------------------------------|
-///             | . | . | . | . | . | . |-------------------------------------------------|
-///             | . | . | . | . | . | . |-------------------------------------------------|
-///             | . | . | . | . | . | . |-------------------- Padding --------------------|
-///             | . + . | . | . | . | . |-------------------------------------------------|
-///             | . | . | . | . | . | . |-------------------------------------------------|
-///             | . | . | . | . | . | . |-------------------------------------------------|
-///             | . | . | . | . | . | . |-------------------------------------------------|
-///             | 1 | 1 | 1 | 1 | 1 | 0 |-------------------------------------------------|
-///             +---+---+---+---+---------------------------------------------------------+
+///        s_ctrl s1  s2  s3  s4  s_perm
+///          [0] [1] [2] [3] [4]   [20]
+///         +---+----------------------------------------------------------+---+
+///  ctrl   | 1 |       Hash chiplet (controller rows)                     | 0 |
+///         | . |       20 columns                                         | . |
+///         | 1 |       constraint degree 9                                | 0 |
+///         +---+                                                          +---+
+///  perm   | 0 |       Hash chiplet (permutation rows)                    | 1 |
+///         | . |                                                          | . |
+///         | 0 |                                                          | 1 |
+///         +---+---+------------------------------------------------------+---+
+///         | 0 | 0 |                                                      |---|
+///         | . | . |                Bitwise chiplet                       |---|
+///         | . | . |                  13 columns                          |---|
+///         | 0 | 0 |             constraint degree 5                      |---|
+///         | . +---+---+--------------------------------------------------+---+
+///         | . | 1 | 0 |                                                  |---|
+///         | . | . | . |          Memory chiplet                          |---|
+///         | . | . | . |            17 columns                            |---|
+///         | . | . | 0 |        constraint degree 9                       |---|
+///         | . + . +---+---+----------------------------------------------+---+
+///         | . | . | 1 | 0 |                                              |---|
+///         | . | . | . | . |        ACE chiplet                           |---|
+///         | . | . | . | . |          16 columns                          |---|
+///         | . | . | . | 0 |      constraint degree 5                     |---|
+///         | . + . | . +---+---+-------------------------+--------------------+
+///         | . | . | . | 1 | 0 |                         |--------------------|
+///         | . | . | . | . | . |   Kernel ROM chiplet    |--------------------|
+///         | . | . | . | . | . |   5 columns             |--------------------|
+///         | . | . | . | . | 0 |   constraint degree 9   |--------------------|
+///         | . + . | . | . +---+-------------------------+--------------------+
+///         | . | . | . | . | 1 |-------- Padding ---------|                   |
+///         | . | . | . | . | . |                          |                   |
+///         | 0 | 1 | 1 | 1 | 1 |                          | 0                |
+///         +---+---+---+---+---+--------------------------+-------------------+
 /// ```
 #[derive(Debug)]
 pub struct Chiplets {
@@ -228,8 +216,15 @@ impl Chiplets {
             .expect("failed to convert vector to array");
         let ace_hint = self.fill_trace(&mut trace);
 
+        let mut col_flat = Vec::with_capacity(CHIPLETS_WIDTH * trace_len);
+        for col in &trace {
+            col_flat.extend_from_slice(col);
+        }
+        let col_mat = RowMajorMatrix::new(col_flat, trace_len);
+        let row_mat = col_mat.transpose();
+
         ChipletsTrace {
-            trace,
+            trace: row_mat.values,
             aux_builder: AuxTraceBuilder::new(ace_hint),
         }
     }
@@ -242,8 +237,10 @@ impl Chiplets {
     /// to identify each individual chiplet trace in addition to padding to fill the rest of
     /// the trace.
     fn fill_trace(self, trace: &mut [Vec<Felt>; CHIPLETS_WIDTH]) -> AceHints {
-        // get the rows where:usize  chiplets begin.
-        let bitwise_start: usize = self.bitwise_start().into();
+        // s_ctrl (trace[0]) is 1 on the hasher's controller rows and 0 elsewhere.
+        // The controller region is the padded prefix of the hasher region; `region_lengths`
+        // returns the same padded length that `finalize_trace` will materialize later.
+        let (hasher_ctrl_len, _hasher_perm_len) = self.hasher.region_lengths();
         let memory_start: usize = self.memory_start().into();
         let ace_start: usize = self.ace_start().into();
         let kernel_rom_start: usize = self.kernel_rom_start().into();
@@ -251,106 +248,105 @@ impl Chiplets {
 
         let Chiplets { hasher, bitwise, memory, kernel_rom, ace } = self;
 
-        // populate external selector columns for all chiplets
-        trace[0][bitwise_start..].fill(ONE);
+        // Populate external selector columns. Each is a contiguous 0/1 indicator; the trace
+        // is zero-initialized, so we only memset the regions where the selector is ONE.
+        // s_perm (trace[20]) is written row-by-row by the hasher itself during fragment fill.
+        trace[0][..hasher_ctrl_len].fill(ONE); // s_ctrl: hasher controller rows
         trace[1][memory_start..].fill(ONE);
         trace[2][ace_start..].fill(ONE);
         trace[3][kernel_rom_start..].fill(ONE);
         trace[4][padding_start..].fill(ONE);
 
-        // allocate fragments to be filled with the respective execution traces of each chiplet
-        let mut hasher_fragment = TraceFragment::new(CHIPLETS_WIDTH, hasher.trace_len());
-        let mut bitwise_fragment = TraceFragment::new(CHIPLETS_WIDTH, bitwise.trace_len());
-        let mut memory_fragment = TraceFragment::new(CHIPLETS_WIDTH, memory.trace_len());
-        let mut ace_fragment = TraceFragment::new(CHIPLETS_WIDTH, ace.trace_len());
-        let mut kernel_rom_fragment = TraceFragment::new(CHIPLETS_WIDTH, kernel_rom.trace_len());
+        // Fill chiplet traces via fragments. The block scopes the fragment borrows.
+        {
+            // allocate fragments to be filled with the respective execution traces of each chiplet
+            let mut hasher_fragment = TraceFragment::new(CHIPLETS_WIDTH, hasher.trace_len());
+            let mut bitwise_fragment = TraceFragment::new(CHIPLETS_WIDTH, bitwise.trace_len());
+            let mut memory_fragment = TraceFragment::new(CHIPLETS_WIDTH, memory.trace_len());
+            let mut ace_fragment = TraceFragment::new(CHIPLETS_WIDTH, ace.trace_len());
+            let mut kernel_rom_fragment =
+                TraceFragment::new(CHIPLETS_WIDTH, kernel_rom.trace_len());
 
-        // add the hasher, bitwise, memory, ACE, and kernel ROM segments to their respective
-        // fragments so they can be filled with the chiplet traces
-        for (column_num, column) in trace.iter_mut().enumerate().skip(1) {
-            match column_num {
-                1 => {
-                    // column 1 is relevant only for the hasher
-                    hasher_fragment.push_column_slice(column);
-                },
-                2 => {
-                    // column 2 is relevant to the hasher and to bitwise chiplet
-                    let rest = hasher_fragment.push_column_slice(column);
-                    bitwise_fragment.push_column_slice(rest);
-                },
-                3 => {
-                    // column 3 is relevant for hasher, bitwise, and memory chiplets
-                    let rest = hasher_fragment.push_column_slice(column);
-                    let rest = bitwise_fragment.push_column_slice(rest);
-                    memory_fragment.push_column_slice(rest);
-                },
-                4 | 10..=14 => {
-                    // columns 4 - 10 to 14 are relevant for hasher, bitwise, memory chiplets and
-                    // ace chiplet
-                    let rest = hasher_fragment.push_column_slice(column);
-                    let rest = bitwise_fragment.push_column_slice(rest);
-                    let rest = memory_fragment.push_column_slice(rest);
-                    ace_fragment.push_column_slice(rest);
-                },
-                5..=9 => {
-                    // columns 5 - 9 are relevant to all chiplets
-                    let rest = hasher_fragment.push_column_slice(column);
-                    let rest = bitwise_fragment.push_column_slice(rest);
-                    let rest = memory_fragment.push_column_slice(rest);
-                    let rest = ace_fragment.push_column_slice(rest);
-                    kernel_rom_fragment.push_column_slice(rest);
-                },
-                15 | 16 => {
-                    // columns 15 and 16 are relevant only for the hasher, memory and ace chiplets
-                    let rest = hasher_fragment.push_column_slice(column);
-                    // skip bitwise chiplet
-                    let (_, rest) = rest.split_at_mut(bitwise.trace_len());
-                    let rest = memory_fragment.push_column_slice(rest);
-                    ace_fragment.push_column_slice(rest);
-                },
-                17 => {
-                    // column 17 is relevant only for the memory chiplet
-                    // skip the hasher and bitwise chiplets
-                    let (_, rest) = column.split_at_mut(hasher.trace_len() + bitwise.trace_len());
-                    let rest = memory_fragment.push_column_slice(rest);
-                    ace_fragment.push_column_slice(rest);
-                },
-                18 | 19 => {
-                    // column 18 and 19 are relevant only for the ACE chiplet
-                    // skip the hasher, bitwise and memory chiplets
-                    let (_, rest) = column.split_at_mut(
-                        hasher.trace_len() + bitwise.trace_len() + memory.trace_len(),
-                    );
-                    ace_fragment.push_column_slice(rest);
-                },
-                _ => panic!("invalid column index"),
+            // add the hasher, bitwise, memory, ACE, and kernel ROM segments to their respective
+            // fragments so they can be filled with the chiplet traces
+            for (column_num, column) in trace.iter_mut().enumerate().skip(1) {
+                match column_num {
+                    1 => {
+                        // column 1 is relevant only for the hasher
+                        hasher_fragment.push_column_slice(column);
+                    },
+                    2 => {
+                        // column 2 is relevant to the hasher and to bitwise chiplet
+                        let rest = hasher_fragment.push_column_slice(column);
+                        bitwise_fragment.push_column_slice(rest);
+                    },
+                    3 => {
+                        // column 3 is relevant for hasher, bitwise, and memory chiplets
+                        let rest = hasher_fragment.push_column_slice(column);
+                        let rest = bitwise_fragment.push_column_slice(rest);
+                        memory_fragment.push_column_slice(rest);
+                    },
+                    4 | 10..=14 => {
+                        // columns 4 - 10 to 14 are relevant for hasher, bitwise, memory chiplets
+                        // and ace chiplet
+                        let rest = hasher_fragment.push_column_slice(column);
+                        let rest = bitwise_fragment.push_column_slice(rest);
+                        let rest = memory_fragment.push_column_slice(rest);
+                        ace_fragment.push_column_slice(rest);
+                    },
+                    5..=9 => {
+                        // columns 5 - 9 are relevant to all chiplets
+                        let rest = hasher_fragment.push_column_slice(column);
+                        let rest = bitwise_fragment.push_column_slice(rest);
+                        let rest = memory_fragment.push_column_slice(rest);
+                        let rest = ace_fragment.push_column_slice(rest);
+                        kernel_rom_fragment.push_column_slice(rest);
+                    },
+                    15 | 16 => {
+                        // columns 15 and 16 are relevant for the hasher, memory and ace chiplets
+                        let rest = hasher_fragment.push_column_slice(column);
+                        // skip bitwise chiplet
+                        let (_, rest) = rest.split_at_mut(bitwise.trace_len());
+                        let rest = memory_fragment.push_column_slice(rest);
+                        ace_fragment.push_column_slice(rest);
+                    },
+                    17..=19 => {
+                        // columns 17-19 are relevant for hasher, memory, and ace chiplets
+                        // (hasher: mrupdate_id/is_start/is_final; memory: f_scw/w0/w1; ace cols)
+                        let rest = hasher_fragment.push_column_slice(column);
+                        // skip bitwise chiplet
+                        let (_, rest) = rest.split_at_mut(bitwise.trace_len());
+                        let rest = memory_fragment.push_column_slice(rest);
+                        ace_fragment.push_column_slice(rest);
+                    },
+                    20 => {
+                        // column 20 is relevant only for the hasher chiplet (s_perm)
+                        hasher_fragment.push_column_slice(column);
+                    },
+                    _ => panic!("invalid column index"),
+                }
             }
+
+            // Fill independent chiplets in parallel: hasher, bitwise, memory, kernel_rom.
+            // ACE must be processed separately since it returns a value.
+            rayon::scope(|s| {
+                s.spawn(move |_| {
+                    hasher.fill_trace(&mut hasher_fragment);
+                });
+                s.spawn(move |_| {
+                    bitwise.fill_trace(&mut bitwise_fragment);
+                });
+                s.spawn(move |_| {
+                    memory.fill_trace(&mut memory_fragment);
+                });
+                s.spawn(move |_| {
+                    kernel_rom.fill_trace(&mut kernel_rom_fragment);
+                });
+            });
+
+            let ace_sections = ace.fill_trace(&mut ace_fragment);
+            AceHints::new(ace_start, ace_sections)
         }
-
-        // fill the fragments with the execution trace from each chiplet in parallel
-        // The chiplets are independent and can be processed concurrently
-
-        // Fill independent chiplets in parallel: hasher, bitwise, memory, kernel_rom
-        // Note: ACE must be processed separately since it returns a value
-        // Use ThreadPool::install() to prevent nested parallelism from column operations
-        rayon::scope(|s| {
-            s.spawn(move |_| {
-                hasher.fill_trace(&mut hasher_fragment);
-            });
-            s.spawn(move |_| {
-                bitwise.fill_trace(&mut bitwise_fragment);
-            });
-            s.spawn(move |_| {
-                memory.fill_trace(&mut memory_fragment);
-            });
-            s.spawn(move |_| {
-                kernel_rom.fill_trace(&mut kernel_rom_fragment);
-            });
-        });
-
-        // Process ACE chiplet separately as it returns ace_sections
-        let ace_sections = ace.fill_trace(&mut ace_fragment);
-        AceHints::new(ace_start, ace_sections)
     }
 }
 

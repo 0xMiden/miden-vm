@@ -13,7 +13,7 @@ use miden_core::{
 };
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
-    DefaultHost, ProcessorState, Program, StackInputs,
+    DefaultHost, ExecutionOptions, ProcessorState, Program, StackInputs,
     advice::{AdviceInputs, AdviceMutation},
     event::{EventError, EventHandler},
 };
@@ -30,11 +30,28 @@ fn truncate_stack() {
 }
 
 #[test]
-fn reduce_kernel_digests_too_many_procs_has_message() {
+fn reduce_kernel_digests_upper_bound() {
+    // init_seed contract:
+    //   Stack: [log(trace_length), rd0, rd1, rd2, rd3, ...]
+    //   Memory: num_queries, query_pow_bits, deep_pow_bits, folding_pow_bits
+    //
+    // process_public_inputs advice stack (consumed in order):
+    //   1. load_public_inputs: 40 fixed-length PI felts (5 iterations of 8)
+    //   2. reduce_variable_length_public_inputs:
+    //        - 1 felt (num_kernel_proc_digests)
+    //        - num_kernel_proc_digests * 8 felts (digests via adv_pipe)
+    //        - 4 felts (aux randomness via adv_loadw)
+    //   3. reduce_kernel_digests asserts num_kernel_proc_digests < 1024
     let source = "
         use miden::core::stark::random_coin
+        use miden::core::stark::constants
         use miden::core::sys::vm::public_inputs
         begin
+            push.27 exec.constants::set_number_queries
+            push.0  exec.constants::set_query_pow_bits
+            push.0  exec.constants::set_deep_pow_bits
+            push.16 exec.constants::set_folding_pow_bits
+            push.0.0.0.0 push.10
             exec.random_coin::init_seed
             exec.public_inputs::process_public_inputs
         end
@@ -46,40 +63,15 @@ fn reduce_kernel_digests_too_many_procs_has_message() {
     let kernel_procedures_digests = vec![0_u64; num_elements_kernel_proc_digests];
     let auxiliary_rand_values = [0_u64; 4];
 
-    let mut advice_stack = vec![num_elements_kernel_proc_digests as u64];
+    // Advice layout (consumed top-to-bottom):
+    //   40 fixed-len PI, 1 num_kernel_proc_digests, 8192 digest felts, 4 aux rand
+    let mut advice_stack = Vec::new();
     advice_stack.extend_from_slice(&fixed_length_public_inputs);
+    advice_stack.push(num_kernel_proc_digests as u64);
     advice_stack.extend_from_slice(&kernel_procedures_digests);
     advice_stack.extend_from_slice(&auxiliary_rand_values);
-    advice_stack.push(num_kernel_proc_digests as u64);
 
-    let mut initial_stack = vec![10, 27, 16, 200, 0x50010810, 40];
-    initial_stack.reverse();
-
-    let test = build_test!(source, &initial_stack, &advice_stack);
-    expect_assert_error_message!(test);
-}
-
-#[test]
-fn process_public_inputs_misaligned_var_len_has_message() {
-    let source = "
-        use miden::core::stark::random_coin
-        use miden::core::sys::vm::public_inputs
-        begin
-            exec.random_coin::init_seed
-            exec.public_inputs::process_public_inputs
-        end
-    ";
-
-    // Not divisible by 8, so the alignment assert in load_public_inputs should fire.
-    let num_var_len_pi = 1_u64;
-    let fixed_length_public_inputs = vec![0_u64; 40];
-    let mut advice_stack = vec![num_var_len_pi];
-    advice_stack.extend_from_slice(&fixed_length_public_inputs);
-
-    let mut initial_stack = vec![10, 27, 16, 200, 0x50010810, 40];
-    initial_stack.reverse();
-
-    let test = build_test!(source, &initial_stack, &advice_stack);
+    let test = build_test!(source, &[], &advice_stack);
     expect_assert_error_message!(test);
 }
 
@@ -130,8 +122,7 @@ fn log_precompile_request_procedure() {
 
     let handler = DummyLogPrecompileHandler { event_id, calldata: calldata.clone() };
 
-    let mut test = build_debug_test!(&source, &[]);
-    test.add_event_handler(EVENT_NAME, handler.clone());
+    let test = build_debug_test!(&source, &[]).with_event_handler(EVENT_NAME, handler.clone());
 
     let trace = test.execute().expect("failed to execute log_precompile test");
 
@@ -166,9 +157,15 @@ fn log_precompile_request_procedure() {
         .expect("failed to register dummy handler");
 
     let options = ProvingOptions::with_96_bit_security(HashFunction::Blake3_256);
-    let (stack_outputs, proof) =
-        miden_utils_testing::prove_sync(&program, stack_inputs, advice_inputs, &mut host, options)
-            .expect("failed to generate proof for log_precompile helper");
+    let (stack_outputs, proof) = miden_utils_testing::prove_sync(
+        &program,
+        stack_inputs,
+        advice_inputs,
+        &mut host,
+        ExecutionOptions::default(),
+        options,
+    )
+    .expect("failed to generate proof for log_precompile helper");
 
     // Proof should include the single deferred request that we expect.
     assert_eq!(proof.precompile_requests().len(), 1);
@@ -193,7 +190,7 @@ fn log_precompile_request_procedure() {
     );
 
     let program_info = ProgramInfo::from(program);
-    let (_, transcript_digest) = miden_verifier::verify_with_precompiles(
+    let (_, pc_transcript_digest) = miden_verifier::verify_with_precompiles(
         program_info,
         stack_inputs,
         stack_outputs,
@@ -201,7 +198,7 @@ fn log_precompile_request_procedure() {
         &verifier_registry,
     )
     .expect("proof verification with precompiles failed");
-    assert_eq!(transcript.finalize(), transcript_digest);
+    assert_eq!(transcript.finalize(), pc_transcript_digest);
 }
 
 #[derive(Clone)]

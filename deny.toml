@@ -49,7 +49,6 @@ deny = [
     #{ name = "ansi_term", version = "=0.11.0" },
 ]
 skip = [
-    { name = "cpufeatures" },
     # Allow duplicate spin versions - transitively pulled by p3-dft and flume
     { name = "spin" },
     # Allow duplicate rand versions - miden-field uses 0.10, miden-vm uses 0.9
@@ -67,6 +66,8 @@ skip-tree = [
     { name = "rustc_version", version = "=0.2.3" },
     # Allow unicode-width v0.1.x - miden-miette vs miden-formatting conflict (complex to fix)
     { name = "unicode-width", version = "=0.1.14" },
+    # Allow windows-sys v0.59.x - multiple Windows system libraries (hard to converge)
+    { name = "windows-sys", version = "=0.59.0" },
     # Allow syn v1.x and v2.x - our derive macros need v1.x while ecosystem uses v2.x
     { name = "syn", version = "=1.0.109" },
     { name = "syn", version = "=2.0.117" },

@@ -1,0 +1,81 @@
+use miden::core::crypto::hashes::poseidon2
+use miden::core::stark::constants
+use miden::core::stark::random_coin
+
+#! Observes the auxiliary trace for the Miden VM AIR.
+#!
+#! Draws auxiliary randomness, reseeds the transcript with the auxiliary trace commitment,
+#! and absorbs the 4 words of auxiliary trace boundary values (8 aux columns, each an
+#! extension field element = 16 base field elements = 4 words).
+#!
+#! The advice provider must supply exactly 5 words in order:
+#!   [commitment, W0, W1, W2, W3]
+#!
+#! The commitment is stored at aux_trace_com_ptr and the boundary values at
+#! aux_bus_boundary_ptr (sequentially).
+#!
+#! Precondition:  input_len=0 (guaranteed by the preceding reseed_direct in the generic verifier).
+#! Postcondition: input_len=0, output_len=8.
+#!
+#! Input:  [...]
+#! Output: [...]
+pub proc observe_aux_trace
+    # Draw random extension field elements for the auxiliary trace.
+    exec.random_coin::generate_aux_randomness
+    # => [...]
+
+    # Assert precondition: input buffer must be empty.
+    exec.constants::random_coin_input_len_ptr mem_load
+    assertz.err="observe_aux_trace: input buffer must be empty"
+
+    # Reseeding clears the output buffer.
+    push.0 exec.constants::random_coin_output_len_ptr mem_store
+
+    # --- Permutation 1: Absorb [COM, W0] ---
+
+    padw adv_loadw
+    exec.constants::aux_trace_com_ptr mem_storew_le
+    # => [COM, ...]
+
+    padw adv_loadw
+    exec.constants::aux_bus_boundary_ptr mem_storew_le
+    # => [W0, COM, ...]
+
+    swapw
+    exec.random_coin::get_capacity
+    movdnw.2
+    exec.poseidon2::permute
+    # => [R1', R2', C', ...]
+
+    # --- Permutation 2: Absorb [W1, W2] ---
+
+    # Overwrite R2' with W1, then R1' with W2.
+    swapw adv_loadw
+    exec.constants::aux_bus_boundary_ptr add.4 mem_storew_le
+    # => [W1, R1', C', ...]
+
+    swapw adv_loadw
+    exec.constants::aux_bus_boundary_ptr add.8 mem_storew_le
+    # => [W2, W1, C', ...]
+
+    swapw
+    exec.poseidon2::permute
+    # => [R1'', R2'', C'', ...]
+
+    # --- Permutation 3: Absorb [W3] into rate slot 1 only ---
+
+    # Overwrite R1'' with W3 from advice, keeping R2'' and C''.
+    adv_loadw
+    exec.constants::aux_bus_boundary_ptr add.12 mem_storew_le
+    # => [W3, R2'', C'', ...]
+
+    exec.poseidon2::permute
+    # => [R1_final, R2_final, C_final, ...]
+
+    # Store final sponge state.
+    exec.random_coin::store_random_coin_state
+    # => [...]
+
+    # Mark output buffer as full (8 elements available for sampling).
+    push.8 exec.constants::random_coin_output_len_ptr mem_store
+end

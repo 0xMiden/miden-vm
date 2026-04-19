@@ -1,4 +1,4 @@
-use miden_air::trace::{Challenges, RowIndex};
+use miden_air::trace::{Challenges, RowIndex, bus_types::BLOCK_HASH_TABLE};
 use miden_core::{Word, ZERO, field::ExtensionField, operations::opcodes};
 
 use super::{AuxColumnBuilder, Felt, MainTrace, ONE};
@@ -235,15 +235,18 @@ impl BlockHashTableRow {
     pub fn collapse<E: ExtensionField<Felt>>(&self, challenges: &Challenges<E>) -> E {
         let is_first_child = if self.is_first_child { ONE } else { ZERO };
         let is_loop_body = if self.is_loop_body { ONE } else { ZERO };
-        challenges.encode([
-            self.parent_block_id,
-            self.child_block_hash[0],
-            self.child_block_hash[1],
-            self.child_block_hash[2],
-            self.child_block_hash[3],
-            is_first_child,
-            is_loop_body,
-        ])
+        challenges.encode(
+            BLOCK_HASH_TABLE,
+            [
+                self.parent_block_id,
+                self.child_block_hash[0],
+                self.child_block_hash[1],
+                self.child_block_hash[2],
+                self.child_block_hash[3],
+                is_first_child,
+                is_loop_body,
+            ],
+        )
     }
 
     // TEST

@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_air::trace::{Challenges, MainTrace, RowIndex};
+use miden_air::trace::{Challenges, MainTrace, RowIndex, bus_types::STACK_OVERFLOW_TABLE};
 use miden_core::{field::ExtensionField, operations::opcodes};
 
 use super::Felt;
@@ -112,6 +112,6 @@ impl OverflowTableRow {
     /// Reduces this row to a single field element in the field specified by E. This requires
     /// at least 4 alpha values.
     pub fn to_value<E: ExtensionField<Felt>>(&self, challenges: &Challenges<E>) -> E {
-        challenges.encode([self.clk, self.val, self.prev])
+        challenges.encode(STACK_OVERFLOW_TABLE, [self.clk, self.val, self.prev])
     }
 }

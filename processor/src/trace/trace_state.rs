@@ -128,18 +128,17 @@ impl DecoderState {
 
     /// This function is called when we hit an `END` operation, signaling the end of execution for a
     /// node. It updates the decoder state to point to the previous node in the block stack (which
-    /// could be renamed to "node stack"), and returns the address of the node that just ended,
-    /// along with any flags associated with it.
+    /// could be renamed to "node stack"), and returns the address of the node that just ended.
     pub fn replay_node_end(
         &mut self,
         block_stack_replay: &mut BlockStackReplay,
-    ) -> Result<(Felt, NodeFlags), ExecutionError> {
+    ) -> Result<Felt, ExecutionError> {
         let node_end_data = block_stack_replay.replay_node_end()?;
 
         self.current_addr = node_end_data.prev_addr;
         self.parent_addr = node_end_data.prev_parent_addr;
 
-        Ok((node_end_data.ended_node_addr, node_end_data.flags))
+        Ok(node_end_data.ended_node_addr)
     }
 }
 
@@ -348,13 +347,11 @@ impl BlockStackReplay {
     pub fn record_node_end(
         &mut self,
         ended_node_addr: Felt,
-        flags: NodeFlags,
         prev_addr: Felt,
         prev_parent_addr: Felt,
     ) {
         self.node_end.push_back(NodeEndData {
             ended_node_addr,
-            flags,
             prev_addr,
             prev_parent_addr,
         });
@@ -425,16 +422,13 @@ impl NodeFlags {
 
 /// The data needed to fully recover the state on an END operation.
 ///
-/// We record `ended_node_addr` and `flags` in order to be able to properly populate the trace
-/// row for the node operation. Additionally, we record `prev_addr` and `prev_parent_addr` to
-/// allow emulating peeking into the block stack, which is needed when processing REPEAT or RESPAN
-/// nodes.
+/// We record `ended_node_addr` in order to be able to properly populate the trace row for the
+/// node operation. Additionally, we record `prev_addr` and `prev_parent_addr` to allow emulating
+/// peeking into the block stack, which is needed when processing REPEAT or RESPAN nodes.
 #[derive(Debug)]
 pub struct NodeEndData {
     /// the address of the node that is ending
     pub ended_node_addr: Felt,
-    /// the flags associated with the node that is ending
-    pub flags: NodeFlags,
     /// the address of the node sitting on top of the block stack after the END operation (or 0 if
     /// the block stack is empty)
     pub prev_addr: Felt,

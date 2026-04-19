@@ -3,6 +3,7 @@ use core::mem::MaybeUninit;
 
 use miden_air::trace::{
     Challenges, MainTrace, RowIndex,
+    bus_types::RANGE_CHECK_BUS,
     range::{M_COL_IDX, V_COL_IDX},
 };
 
@@ -68,7 +69,7 @@ impl AuxTraceBuilder {
         challenges: &Challenges<E>,
     ) -> Vec<E> {
         // run batch inversion on the lookup values
-        let divisors = get_divisors(&self.lookup_values, challenges.alpha);
+        let divisors = get_divisors(&self.lookup_values, challenges.bus_prefix[RANGE_CHECK_BUS]);
 
         // allocate memory for the running sum column and set the initial value to ZERO
         let mut b_range: Vec<MaybeUninit<E>> = uninit_vector(main_trace.num_rows());
@@ -98,8 +99,7 @@ impl AuxTraceBuilder {
             let mut new_value = current_value;
             // include the operation lookups
             for lookup in range_checks.iter() {
-                let value = divisors.get(lookup).expect("invalid lookup value");
-                new_value -= *value;
+                new_value -= divisors[*lookup as usize];
             }
             b_range[b_range_idx].write(new_value);
             current_value = new_value;
@@ -130,17 +130,14 @@ impl AuxTraceBuilder {
             let mut new_value = current_value;
             if *multiplicity != ZERO {
                 // add the value in the range checker: multiplicity / (alpha + lookup)
-                let value = divisors
-                    .get(&(lookup.as_canonical_u64() as u16))
-                    .expect("invalid lookup value");
-                new_value = current_value + *value * *multiplicity;
+                new_value =
+                    current_value + divisors[lookup.as_canonical_u64() as usize] * *multiplicity;
             }
 
             // subtract the range checks requested by operations
             if let Some(range_checks) = self.cycle_lookups.get(&(row_idx as u32).into()) {
                 for lookup in range_checks.iter() {
-                    let value = divisors.get(lookup).expect("invalid lookup value");
-                    new_value -= *value;
+                    new_value -= divisors[*lookup as usize];
                 }
             }
 
@@ -148,12 +145,15 @@ impl AuxTraceBuilder {
             current_value = new_value;
         }
 
-        // at this point, all range checks from user operations and the range checker should be
-        // matched - so, the last value must be ZERO;
-        assert_eq!(current_value, E::ZERO);
+        // At this point, b_range accounts for all cycle-based range check lookups (deltas from
+        // memory and stack) matched against the range checker table. The range table also contains
+        // entries for memory address decomposition (w0, w1, 4*w1) whose LogUp requests are on the
+        // wiring bus, not b_range. So b_range may have a non-zero residual equal to the sum of
+        // w0/w1/4*w1 LogUp fractions. The combined balance (b_range + v_wiring) is checked via
+        // reduced_aux_values.
 
         if b_range_idx < b_range.len() - 1 {
-            b_range[(b_range_idx + 1)..].fill(MaybeUninit::new(E::ZERO));
+            b_range[(b_range_idx + 1)..].fill(MaybeUninit::new(current_value));
         }
 
         // all elements are now initialized
@@ -164,7 +164,7 @@ impl AuxTraceBuilder {
 /// Runs batch inversion on all range check lookup values and returns a map which maps each value
 /// to the divisor used for including it in the LogUp lookup. In other words, the map contains
 /// mappings of x to 1/(alpha + x).
-fn get_divisors<E: ExtensionField<Felt>>(lookup_values: &[u16], alpha: E) -> BTreeMap<u16, E> {
+fn get_divisors<E: ExtensionField<Felt>>(lookup_values: &[u16], alpha: E) -> Vec<E> {
     // run batch inversion on the lookup values
     let mut values: Vec<MaybeUninit<E>> = uninit_vector(lookup_values.len());
     let mut inv_values: Vec<MaybeUninit<E>> = uninit_vector(lookup_values.len());
@@ -186,11 +186,11 @@ fn get_divisors<E: ExtensionField<Felt>>(lookup_values: &[u16], alpha: E) -> BTr
 
     // multiply the accumulated product by the original values to compute the inverses, then
     // build a map of inverses for the lookup values
-    let mut log_values = BTreeMap::new();
+    let mut log_values = vec![E::ZERO; 1 << 16];
     for i in (0..lookup_values.len()).rev() {
         inv_values[i] *= acc;
         acc *= values[i];
-        log_values.insert(lookup_values[i], inv_values[i]);
+        log_values[lookup_values[i] as usize] = inv_values[i];
     }
 
     log_values
