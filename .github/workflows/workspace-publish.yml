@@ -11,7 +11,7 @@ permissions:
 jobs:
   publish:
     if: ${{ github.repository_owner == '0xMiden' }}
-    runs-on: warp-ubuntu-latest-x64-4x
+    runs-on: warp-ubuntu-latest-x64-8x
     environment: release  # Optional: for enhanced security
 
     steps:

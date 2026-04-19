@@ -33,7 +33,7 @@ concurrency:
 jobs:
   benchmark:
     name: Benchmark baseline vs current
-    runs-on: warp-ubuntu-latest-x64-4x
+    runs-on: warp-ubuntu-latest-x64-8x
     timeout-minutes: 180
     permissions:
       contents: read
