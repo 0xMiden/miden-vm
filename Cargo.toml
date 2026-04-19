@@ -1,15 +1,15 @@
 [workspace]
 exclude = ["miden-crypto-fuzz"]
 members = [
-  "stark/miden-lifted-air",
-  "stark/miden-lifted-stark",
-  "stark/miden-stark-transcript",
-  "stark/miden-stateful-hasher",
   "miden-bench",
   "miden-crypto",
   "miden-crypto-derive",
   "miden-field",
   "miden-serde-utils",
+  "stark/miden-lifted-air",
+  "stark/miden-lifted-stark",
+  "stark/miden-stark-transcript",
+  "stark/miden-stateful-hasher",
 ]
 resolver = "3"
 
