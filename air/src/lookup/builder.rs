@@ -43,14 +43,10 @@ use super::message::LookupMessage;
 ///
 /// - `n`: degree of the numerator polynomial (the `V` contribution).
 /// - `d`: degree of the denominator polynomial (the `U` contribution).
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug)]
 pub struct Deg {
     pub n: usize,
     pub d: usize,
-}
-
-impl Deg {
-    pub const NONE: Self = Self { n: 0, d: 0 };
 }
 
 // LOOKUP BUILDER

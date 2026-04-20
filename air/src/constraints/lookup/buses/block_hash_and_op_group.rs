@@ -127,15 +127,15 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                                     parent: parent.clone(),
                                     child_hash: first_hash,
                                 },
-                                Deg::NONE,
+                                Deg { n: 5, d: 6 },
                             );
                             b.add(
                                 "join_second_child",
                                 BlockHashMsg::Child { parent, child_hash: second_hash },
-                                Deg::NONE,
+                                Deg { n: 5, d: 6 },
                             );
                         },
-                        Deg::NONE,
+                        Deg { n: 1, d: 2 },
                     );
 
                     // SPLIT: `s0`-muxed selection between `h_0` and `h_1`.
@@ -151,7 +151,7 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                             });
                             BlockHashMsg::Child { parent, child_hash }
                         },
-                        Deg::NONE,
+                        Deg { n: 5, d: 7 },
                     );
 
                     // LOOP/REPEAT body: first child is `h_0`.
@@ -163,7 +163,7 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                             let child_hash = h_0.map(LB::Expr::from);
                             BlockHashMsg::LoopBody { parent, child_hash }
                         },
-                        Deg::NONE,
+                        Deg { n: 6, d: 7 },
                     );
 
                     // DYN/DYNCALL/CALL/SYSCALL: single child at `h_0`.
@@ -175,7 +175,7 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                             let child_hash = h_0.map(LB::Expr::from);
                             BlockHashMsg::Child { parent, child_hash }
                         },
-                        Deg::NONE,
+                        Deg { n: 5, d: 6 },
                     );
 
                     // END: pop the queue entry. `is_first_child` distinguishes the head-of-queue
@@ -199,7 +199,7 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                                 is_loop_body,
                             }
                         },
-                        Deg::NONE,
+                        Deg { n: 4, d: 8 },
                     );
 
                     // =================== G_op_group OP GROUP TABLE ===================
@@ -217,7 +217,7 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                                 b.add(
                                     "g8_group",
                                     OpGroupMsg::new(&batch_id, gc8.clone(), i, group_value),
-                                    Deg::NONE,
+                                    Deg { n: 1, d: 2 },
                                 );
                             }
                             for i in 4u16..=7 {
@@ -225,11 +225,11 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                                 b.add(
                                     "g8_group",
                                     OpGroupMsg::new(&batch_id, gc8.clone(), i, group_value),
-                                    Deg::NONE,
+                                    Deg { n: 1, d: 2 },
                                 );
                             }
                         },
-                        Deg::NONE,
+                        Deg { n: 6, d: 7 },
                     );
 
                     // g4: (1 - c0) · c1 · (1 - c2) triggers a 3-add batch (groups 1..=3 from
@@ -245,11 +245,11 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                                 b.add(
                                     "g4_group",
                                     OpGroupMsg::new(&batch_id, gc4.clone(), i, group_value),
-                                    Deg::NONE,
+                                    Deg { n: 3, d: 4 },
                                 );
                             }
                         },
-                        Deg::NONE,
+                        Deg { n: 2, d: 3 },
                     );
 
                     // g2: (1 - c0) · (1 - c1) · c2 is a single add for group 1 (from `h_0[1]`).
@@ -263,7 +263,7 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                             let group_value = h_0[1].into();
                             OpGroupMsg::new(&batch_id, gc2, 1, group_value)
                         },
-                        Deg::NONE,
+                        Deg { n: 3, d: 4 },
                     );
 
                     // Removal: `in_span · (gc - gc_next)`-gated muxed removal whose group_value is
@@ -280,12 +280,12 @@ pub(in crate::constraints::lookup) fn emit_block_hash_and_op_group<LB>(
                             let batch_id = addr.into();
                             OpGroupMsg { batch_id, group_pos: gc, group_value }
                         },
-                        Deg::NONE,
+                        Deg { n: 2, d: 8 },
                     );
                 },
-                Deg::NONE,
+                Deg { n: 7, d: 8 },
             );
         },
-        Deg::NONE,
+        Deg { n: 7, d: 8 },
     );
 }
