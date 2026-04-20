@@ -12,7 +12,7 @@ use miden_core::field::QuadFelt;
 use miden_crypto::stark::air::symbolic::{AirLayout, SymbolicAirBuilder};
 
 use super::{
-    super::super::{ConstraintLookupBuilder, LookupAir},
+    super::super::{ConstraintLookupBuilder, LookupAir, RunningSumLookupAir},
     DebugStructureBuilder, DegreeMismatch, GroupMismatch, NumColumnsCheck, StructureReport,
     check_symbolic_degrees, validate_structure_only,
 };
@@ -112,7 +112,8 @@ pub fn validate<A>(
 ) -> ValidationReport
 where
     for<'a> A: LookupAir<DebugStructureBuilder<'a>>,
-    for<'ab> A: LookupAir<ConstraintLookupBuilder<'ab, SymbolicAirBuilder<Felt, QuadFelt>>>,
+    for<'ab> A: LookupAir<ConstraintLookupBuilder<'ab, SymbolicAirBuilder<Felt, QuadFelt>>>
+        + RunningSumLookupAir,
 {
     let StructureReport {
         air_name,

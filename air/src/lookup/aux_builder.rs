@@ -31,7 +31,8 @@ use miden_core::{
 };
 
 use super::{
-    Challenges, LookupAir, ProverLookupBuilder, accumulate, prover::build_lookup_fractions,
+    Challenges, LookupAir, ProverLookupBuilder, RunningSumLookupAir, accumulate,
+    prover::build_lookup_fractions,
 };
 
 /// Run the collection + accumulation phases for `air` over `main` and return the LogUp
@@ -50,7 +51,7 @@ pub fn build_logup_aux<A, F, EF>(
 where
     F: Field,
     EF: ExtensionField<F>,
-    for<'a> A: LookupAir<ProverLookupBuilder<'a, F, EF>>,
+    for<'a> A: LookupAir<ProverLookupBuilder<'a, F, EF>> + RunningSumLookupAir,
 {
     let fractions = build_lookup_fractions(air, main, periodic_columns, public_values, challenges);
 

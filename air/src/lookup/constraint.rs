@@ -52,7 +52,7 @@ use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess}
 
 use super::{
     Challenges, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
-    LookupMessage,
+    LookupMessage, RunningSumLookupAir,
 };
 
 // CONSTRAINT LOOKUP BUILDER
@@ -81,7 +81,7 @@ where
 {
     pub fn new<A>(ab: &'ab mut AB, air: &A) -> Self
     where
-        A: LookupAir<Self>,
+        A: LookupAir<Self> + RunningSumLookupAir,
     {
         let (alpha, beta): (AB::ExprEF, AB::ExprEF) = {
             let r = ab.permutation_randomness();

@@ -34,7 +34,7 @@ use super::{
 use crate::{
     Felt, MainCols,
     constraints::op_flags::OpFlags,
-    lookup::{LookupAir, LookupBuilder},
+    lookup::{LookupAir, LookupBuilder, RunningSumLookupAir},
 };
 
 // MAIN LOOKUP BUILDER
@@ -174,7 +174,9 @@ where
         emit_chiplet_requests::<LB>(builder, &ctx);
         emit_stack_overflow::<LB>(builder, &ctx);
     }
+}
 
+impl RunningSumLookupAir for MainLookupAir {
     fn running_sum_columns(&self) -> &[usize] {
         &[0]
     }

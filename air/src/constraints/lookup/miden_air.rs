@@ -18,7 +18,7 @@ use super::{
     chiplet_air::{CHIPLET_COLUMN_SHAPE, ChipletLookupAir, ChipletLookupBuilder},
     main_air::{MAIN_COLUMN_SHAPE, MainLookupAir, MainLookupBuilder},
 };
-use crate::lookup::LookupAir;
+use crate::lookup::{LookupAir, RunningSumLookupAir};
 
 // MIDEN LOOKUP AIR
 // ================================================================================================
@@ -91,7 +91,9 @@ where
         MainLookupAir.eval(builder);
         ChipletLookupAir.eval(builder);
     }
+}
 
+impl RunningSumLookupAir for MidenLookupAir {
     fn running_sum_columns(&self) -> &[usize] {
         &RUNNING_SUM_COLUMNS
     }

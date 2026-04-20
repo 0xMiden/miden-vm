@@ -13,7 +13,7 @@ use miden_crypto::stark::air::symbolic::{AirLayout, SymbolicAirBuilder};
 
 use crate::{
     Felt,
-    lookup::{ConstraintLookupBuilder, LookupAir},
+    lookup::{ConstraintLookupBuilder, LookupAir, RunningSumLookupAir},
 };
 
 /// Per-constraint degree mismatch record.
@@ -39,7 +39,8 @@ pub fn check_symbolic_degrees<A>(
     degree_budget: usize,
 ) -> Result<DegreeReport, DegreeReport>
 where
-    for<'ab> A: LookupAir<ConstraintLookupBuilder<'ab, SymbolicAirBuilder<Felt, QuadFelt>>>,
+    for<'ab> A: LookupAir<ConstraintLookupBuilder<'ab, SymbolicAirBuilder<Felt, QuadFelt>>>
+        + RunningSumLookupAir,
 {
     let mut builder = SymbolicAirBuilder::<Felt, QuadFelt>::new(layout);
 

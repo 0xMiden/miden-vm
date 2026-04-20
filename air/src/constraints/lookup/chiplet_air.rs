@@ -25,7 +25,7 @@ use super::{
 };
 use crate::{
     Felt, MainCols,
-    lookup::{LookupAir, LookupBuilder},
+    lookup::{LookupAir, LookupBuilder, RunningSumLookupAir},
 };
 
 // CHIPLET LOOKUP BUILDER
@@ -142,7 +142,9 @@ where
         emit_hash_kernel_table::<LB>(builder, &ctx);
         emit_v_wiring::<LB>(builder, &ctx);
     }
+}
 
+impl RunningSumLookupAir for ChipletLookupAir {
     fn running_sum_columns(&self) -> &[usize] {
         &[0]
     }

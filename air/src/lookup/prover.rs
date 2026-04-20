@@ -732,7 +732,9 @@ mod tests {
     use super::*;
     use crate::{
         Felt,
-        lookup::{Deg, LookupAir, fractions::accumulate_slow, message::LookupMessage},
+        lookup::{
+            Deg, LookupAir, RunningSumLookupAir, fractions::accumulate_slow, message::LookupMessage,
+        },
     };
 
     /// Minimal `LookupMessage` used by [`SmokeAir`] to drive a `Vec::push` into the
@@ -775,12 +777,6 @@ mod tests {
         }
         fn num_bus_ids(&self) -> usize {
             1
-        }
-        fn running_sum_columns(&self) -> &[usize] {
-            &[0]
-        }
-        fn fraction_columns_for(&self, _running_sum_col: usize) -> &[usize] {
-            &[1]
         }
         fn eval(&self, builder: &mut LB) {
             builder.next_column(
@@ -830,6 +826,15 @@ mod tests {
                 },
                 Deg { n: 0, d: 0 },
             );
+        }
+    }
+
+    impl RunningSumLookupAir for SmokeAir {
+        fn running_sum_columns(&self) -> &[usize] {
+            &[0]
+        }
+        fn fraction_columns_for(&self, _running_sum_col: usize) -> &[usize] {
+            &[1]
         }
     }
 

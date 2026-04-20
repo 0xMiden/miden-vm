@@ -553,7 +553,7 @@ mod tests {
     use super::*;
     use crate::{
         Felt,
-        lookup::{LookupAir, LookupBuilder},
+        lookup::{LookupAir, LookupBuilder, RunningSumLookupAir},
     };
 
     // Small deterministic LCG — reproducible stream for random-fixture cross-check tests.
@@ -652,6 +652,9 @@ mod tests {
             0
         }
         fn eval(&self, _builder: &mut LB) {}
+    }
+
+    impl RunningSumLookupAir for FakeAir {
         fn running_sum_columns(&self) -> &[usize] {
             &[0]
         }

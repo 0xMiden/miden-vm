@@ -101,14 +101,13 @@ pub trait LookupAir<LB: LookupBuilder> {
     /// Evaluate the lookup argument, describing its interactions through
     /// the builder's closure API.
     fn eval(&self, builder: &mut LB);
+}
 
+/// Running-sum metadata for LogUp accumulation and boundary constraints.
+///
+/// Kept separate from [`LookupAir`] so core interaction traits stay minimal.
+pub trait RunningSumLookupAir {
     /// Indices of columns that serve as running-sum accumulators.
-    ///
-    /// Each running-sum column accumulates its own per-row fraction value plus the per-row
-    /// values of all fraction columns returned by
-    /// [`fraction_columns_for`](Self::fraction_columns_for). Only running-sum columns have
-    /// boundary constraints and committed final values; fraction columns store per-row
-    /// rational values directly (`D_i * aux_i - N_i = 0`).
     fn running_sum_columns(&self) -> &[usize];
 
     /// For a given running-sum column, return the fraction-column indices it accumulates
