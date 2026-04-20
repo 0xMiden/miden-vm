@@ -33,7 +33,7 @@ pub mod logup_msg {
 }
 
 pub mod trace;
-use constraints::{columns::MainCols, lookup::bus_id::bus_types};
+use constraints::{columns::MainCols, logup_msg::BusId};
 use trace::TRACE_WIDTH;
 
 // RE-EXPORTS
@@ -301,12 +301,12 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
             .map_err(|_| -> ReductionError { "invalid transcript state slice".into() })?;
 
         let challenges = {
-            use crate::constraints::lookup::bus_id::{MIDEN_MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
+            use crate::constraints::logup_msg::{BusId, MIDEN_MAX_MESSAGE_WIDTH};
             lookup::Challenges::<EF>::new(
                 challenges[0],
                 challenges[1],
                 MIDEN_MAX_MESSAGE_WIDTH,
-                NUM_BUS_IDS,
+                BusId::COUNT,
             )
         };
 
@@ -396,7 +396,7 @@ fn program_hash_message<EF: ExtensionField<Felt>>(
     program_hash: &Word,
 ) -> EF {
     challenges.encode(
-        bus_types::BLOCK_HASH_TABLE,
+        BusId::BlockHashTable as usize,
         [
             Felt::ZERO, // parent_id = 0 (root block)
             program_hash[0],
@@ -421,7 +421,7 @@ fn transcript_messages<EF: ExtensionField<Felt>>(
     let encode = |state: PrecompileTranscriptState| {
         let cap: &[Felt] = state.as_ref();
         challenges.encode(
-            bus_types::LOG_PRECOMPILE_TRANSCRIPT,
+            BusId::LogPrecompileTranscript as usize,
             [Felt::from_u8(trace::LOG_PRECOMPILE_LABEL), cap[0], cap[1], cap[2], cap[3]],
         )
     };
@@ -430,24 +430,14 @@ fn transcript_messages<EF: ExtensionField<Felt>>(
 
 /// Builds the kernel procedure init message for the kernel ROM bus.
 ///
-/// Encodes `[KERNEL_PROC_INIT_LABEL, digest[0..4]]` — must match the chiplet-side INIT remove
-/// emitted by the kernel ROM chiplet (one per declared kernel procedure). The CALL side of
-/// the bus is matched entirely between decoder-emitted SYSCALL removes and the chiplet's
-/// multiplicity-weighted CALL add, and does not need a public-input correction term.
+/// Encodes `bus_prefix[KERNEL_ROM_INIT] + [digest[0..4]]` — must match the chiplet-side
+/// INIT remove (one per declared procedure). The boundary correction adds this once per
+/// kernel procedure so the INIT removes balance.
 fn kernel_proc_message<EF: ExtensionField<Felt>>(
     challenges: &lookup::Challenges<EF>,
     digest: &Word,
 ) -> EF {
-    challenges.encode(
-        bus_types::CHIPLETS_BUS,
-        [
-            trace::chiplets::kernel_rom::KERNEL_PROC_INIT_LABEL,
-            digest[0],
-            digest[1],
-            digest[2],
-            digest[3],
-        ],
-    )
+    challenges.encode(BusId::KernelRomInit as usize, [digest[0], digest[1], digest[2], digest[3]])
 }
 
 /// Reduces kernel procedure digests from var-len public inputs into the LogUp boundary

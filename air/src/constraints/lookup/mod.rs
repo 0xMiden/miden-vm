@@ -2,7 +2,7 @@
 //!
 //! Holds the Miden-specific pieces: the aggregator [`MidenLookupAir`] + its
 //! [`MainLookupAir`](main_air::MainLookupAir) / [`ChipletLookupAir`](chiplet_air::ChipletLookupAir)
-//! sub-AIRs, the eight bus emitters in [`buses`], the bus-id constants in [`bus_id`], the
+//! sub-AIRs, the eight bus emitters in [`buses`], the
 //! [`MidenLookupAuxBuilder`] `AuxBuilder` wrapper, and the Miden-side extension-trait impls
 //! pinning the generic [`ConstraintLookupBuilder`](crate::lookup::ConstraintLookupBuilder) /
 //! [`ProverLookupBuilder`](crate::lookup::ProverLookupBuilder) adapters to the Miden
@@ -14,7 +14,6 @@
 #![allow(dead_code, unused_imports)]
 
 pub mod aux_builder;
-pub mod bus_id;
 pub(crate) mod buses;
 pub mod chiplet_air;
 mod extension_impls;
@@ -22,5 +21,6 @@ pub mod main_air;
 pub mod miden_air;
 
 pub use aux_builder::MidenLookupAuxBuilder;
-pub use bus_id::NUM_BUS_IDS;
 pub use miden_air::MidenLookupAir;
+
+pub use super::logup_msg::{BusId, MIDEN_MAX_MESSAGE_WIDTH};

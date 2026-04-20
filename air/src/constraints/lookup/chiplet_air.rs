@@ -15,7 +15,7 @@ use core::borrow::Borrow;
 use miden_crypto::stark::air::WindowAccess;
 
 use super::{
-    bus_id::NUM_BUS_IDS,
+    BusId,
     buses::{
         ChipletActiveFlags,
         chiplet_responses::{self, emit_chiplet_responses},
@@ -126,9 +126,9 @@ where
     fn num_bus_ids(&self) -> usize {
         // Chiplet-trace emitters touch BUS_CHIPLETS, BUS_SIBLING_TABLE, BUS_RANGE_CHECK,
         // BUS_ACE_WIRING, and BUS_HASHER_PERM_LINK. The adapter's bus-prefix table is shared
-        // across every LookupAir it runs, so returning `NUM_BUS_IDS` (the total bus-type
+        // across every LookupAir it runs, so returning `BusId::COUNT` (the total bus-type
         // count) is the safe upper bound.
-        NUM_BUS_IDS
+        BusId::COUNT
     }
 
     fn eval(&self, builder: &mut LB) {

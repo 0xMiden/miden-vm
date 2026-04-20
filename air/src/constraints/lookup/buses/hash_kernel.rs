@@ -43,7 +43,6 @@ use crate::{
         chiplets::{
             MEMORY_WORD_ADDR_HI_COL_IDX, MEMORY_WORD_ADDR_LO_COL_IDX,
             ace::{ACE_INSTRUCTION_ID1_OFFSET, ACE_INSTRUCTION_ID2_OFFSET},
-            memory::{MEMORY_READ_ELEMENT_LABEL, MEMORY_READ_WORD_LABEL},
         },
     },
 };
@@ -215,11 +214,7 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                                 ace_v1.0.into(),
                                 ace_v1.1.into(),
                             ];
-                            MemoryMsg::Word {
-                                op_value: MEMORY_READ_WORD_LABEL as u16,
-                                header: MemoryHeader { ctx, addr, clk },
-                                word,
-                            }
+                            MemoryHeader { ctx, addr, clk }.read_word(word)
                         },
                         Deg::NONE,
                     );
@@ -239,11 +234,7 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                                 + id_2 * LB::Expr::from(ACE_INSTRUCTION_ID1_OFFSET)
                                 + (eval_op + LB::Expr::ONE)
                                     * LB::Expr::from(ACE_INSTRUCTION_ID2_OFFSET);
-                            MemoryMsg::Element {
-                                op_value: MEMORY_READ_ELEMENT_LABEL as u16,
-                                header: MemoryHeader { ctx, addr, clk },
-                                element,
-                            }
+                            MemoryHeader { ctx, addr, clk }.read_element(element)
                         },
                         Deg::NONE,
                     );
