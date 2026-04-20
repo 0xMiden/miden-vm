@@ -28,9 +28,13 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
+        with:
+          persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
-      - uses: taiki-e/install-action@dd81e62c198605dea8507fed3fb6834da354ded4 # pin@nextest
+      - uses: taiki-e/install-action@055f5df8c3f65ea01cd41e9dc855becd88953486 # pin@v2.75.18
+        with:
+          tool: cargo-nextest
       - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # pin@v2
         with:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
@@ -56,9 +60,13 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
+        with:
+          persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
-      - uses: taiki-e/install-action@dd81e62c198605dea8507fed3fb6834da354ded4 # pin@nextest
+      - uses: taiki-e/install-action@055f5df8c3f65ea01cd41e9dc855becd88953486 # pin@v2.75.18
+        with:
+          tool: cargo-nextest
       - uses: WarpBuilds/rust-cache@9d0cc3090d9c87de74ea67617b246e978735b1a1 # pin@v2
         with:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
@@ -78,6 +86,8 @@ jobs:
         toolchain: [stable]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
+        with:
+          persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # pin@v2
@@ -97,6 +107,8 @@ jobs:
     if: ${{ github.event_name == 'pull_request' && (github.base_ref == 'main' || github.base_ref == 'next') }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
+        with:
+          persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       - name: Install LLVM/Clang
@@ -119,6 +131,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
+        with:
+          persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       - name: Run Miden STARK crate parallel tests

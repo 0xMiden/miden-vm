@@ -17,7 +17,9 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
-      - uses: taiki-e/install-action@a2352fc6ce487f030a3aa709482d57823eadfb37 # pin@v2
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@055f5df8c3f65ea01cd41e9dc855becd88953486 # pin@v2.75.18
         with:
           tool: typos
       - run: make typos-check
@@ -27,6 +29,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
+        with:
+          persist-credentials: false
       - name: Rustup
         run: |
           rustup update --no-self-update nightly
@@ -42,6 +46,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
+        with:
+          persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       # Added: LLVM/Clang for RocksDB/bindgen
@@ -64,7 +70,9 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
-      - uses: taiki-e/install-action@a2352fc6ce487f030a3aa709482d57823eadfb37 # pin@v2
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@055f5df8c3f65ea01cd41e9dc855becd88953486 # pin@v2.75.18
         with:
           tool: taplo-cli
       - run: make toml-check
@@ -74,7 +82,9 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
-      - uses: taiki-e/install-action@a2352fc6ce487f030a3aa709482d57823eadfb37 # pin@v2
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@055f5df8c3f65ea01cd41e9dc855becd88953486 # pin@v2.75.18
         with:
           tool: cargo-workspace-lints
       - run: |
@@ -85,6 +95,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
+        with:
+          persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       # Added: LLVM/Clang for RocksDB/bindgen
@@ -107,7 +119,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
         with:
           persist-credentials: false
-      - uses: taiki-e/install-action@b8be7f5e140177087325943c4a8e169d01c59b3d # pin@v2
+      - uses: taiki-e/install-action@055f5df8c3f65ea01cd41e9dc855becd88953486 # pin@v2.75.18
         with:
           tool: cargo-shear
       - name: Check Cargo manifests for unused dependencies
@@ -118,7 +130,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
-      - uses: taiki-e/install-action@a2352fc6ce487f030a3aa709482d57823eadfb37 # pin@v2
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@055f5df8c3f65ea01cd41e9dc855becd88953486 # pin@v2.75.18
         with:
           tool: cargo-deny
       - run: make cargo-deny
@@ -128,6 +142,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
+        with:
+          persist-credentials: false
       - name: Rustup
         run: |
           rustup update --no-self-update nightly
@@ -139,6 +155,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
+        with:
+          persist-credentials: false
       - run: make check-fuzz
 
   check-features:
@@ -146,6 +164,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # pin@v4
+        with:
+          persist-credentials: false
       - name: Cleanup large tools for build space
         uses: ./.github/actions/cleanup-runner
       # Added: LLVM/Clang for RocksDB/bindgen (needed for rocksdb feature)
@@ -155,7 +175,7 @@ jobs:
           version: "17"
       - name: Rustup
         run: rustup update --no-self-update
-      - uses: taiki-e/install-action@a2352fc6ce487f030a3aa709482d57823eadfb37 # pin@v2
+      - uses: taiki-e/install-action@055f5df8c3f65ea01cd41e9dc855becd88953486 # pin@v2.75.18
         with:
           tool: cargo-hack
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # pin@v2
