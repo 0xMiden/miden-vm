@@ -27,8 +27,8 @@ type ProcHashBytes = [u8; 32];
 ///   m   h0   h1   h2   h3
 /// ├────┴────┴────┴────┴────┤
 ///
-/// - `m` is the number of SYSCALLs to this procedure (0 if declared but never called).
-///   It gates the chiplet-side CALL add; the INIT add is always emitted with multiplicity 1.
+/// - `m` is the number of SYSCALLs to this procedure (0 if declared but never called). It gates the
+///   chiplet-side CALL add; the INIT add is always emitted with multiplicity 1.
 /// - `h0..h3` is the procedure root digest.
 #[derive(Debug)]
 pub struct KernelRom {
