@@ -30,6 +30,7 @@ pub mod chiplet_air;
 pub mod constraint;
 #[cfg(any(test, feature = "bus-debug"))]
 pub mod debug;
+mod extension_impls;
 pub mod fractions;
 pub mod main_air;
 pub mod message;

@@ -58,8 +58,7 @@ use miden_crypto::stark::air::RowWindow;
 
 use super::{
     Deg, LookupAir, LookupBatch, LookupBuilder, LookupChallenges, LookupColumn, LookupGroup,
-    LookupMessage, chiplet_air::ChipletLookupBuilder, fractions::LookupFractions,
-    main_air::MainLookupBuilder,
+    LookupMessage, fractions::LookupFractions,
 };
 use crate::Felt;
 
@@ -410,28 +409,6 @@ where
         self.column_idx += 1;
         result
     }
-}
-
-// EXTENSION TRAIT IMPLS
-// ================================================================================================
-
-// Gated to `F = Felt` because the extension traits require `LookupBuilder<F = Felt>`. The
-// prover adapter is generic over `F: Field` in principle, but Miden only ever instantiates
-// it with `F = Felt`, so the narrowing is a nothing-burger in practice.
-//
-// Both impls are empty and pick up the default polynomial bodies today. The planned
-// prover-side optimization will override `build_op_flags` / `build_chiplet_active` with a
-// boolean fast path: on the prover side the decoder bits in each row are already concrete
-// 0/1, so `OpFlags` / `ChipletActiveFlags` can be evaluated via boolean algebra (bitwise
-// AND/OR on the known-boolean columns) instead of the polynomial products the constraint
-// path needs. This avoids multiplying through dead-flag products that are guaranteed zero
-// and cuts the per-row fraction-collection cost significantly.
-
-impl<'a, EF> MainLookupBuilder for ProverLookupBuilder<'a, Felt, EF> where EF: ExtensionField<Felt> {}
-
-impl<'a, EF> ChipletLookupBuilder for ProverLookupBuilder<'a, Felt, EF> where
-    EF: ExtensionField<Felt>
-{
 }
 
 // PROVER COLUMN
