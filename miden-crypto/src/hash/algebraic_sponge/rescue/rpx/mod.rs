@@ -1,3 +1,5 @@
+use miden_field::BasedVectorSpace;
+
 use super::{
     ARK1, ARK2, AlgebraicSponge, CAPACITY_RANGE, DIGEST_RANGE, Felt, MDS, NUM_ROUNDS, RATE_RANGE,
     RATE0_RANGE, RATE1_RANGE, Range, STATE_WIDTH, Word, add_constants,
@@ -131,7 +133,7 @@ impl Rpx256 {
 
     /// Returns a hash of the provided field elements.
     #[inline(always)]
-    pub fn hash_elements<E: crate::field::BasedVectorSpace<Felt>>(elements: &[E]) -> Word {
+    pub fn hash_elements<E: BasedVectorSpace<Felt>>(elements: &[E]) -> Word {
         <Self as AlgebraicSponge>::hash_elements(elements)
     }
 
@@ -152,6 +154,15 @@ impl Rpx256 {
     #[inline(always)]
     pub fn merge_in_domain(values: &[Word; 2], domain: Felt) -> Word {
         <Self as AlgebraicSponge>::merge_in_domain(values, domain)
+    }
+
+    /// Returns a hash of the provided `elements` and a domain identifier.
+    #[inline(always)]
+    pub fn hash_elements_in_domain<E: BasedVectorSpace<Felt>>(
+        elements: &[E],
+        domain: Felt,
+    ) -> Word {
+        <Self as AlgebraicSponge>::hash_elements_in_domain(elements, domain)
     }
 
     // RPX PERMUTATION

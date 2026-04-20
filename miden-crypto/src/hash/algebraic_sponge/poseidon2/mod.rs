@@ -163,7 +163,7 @@ impl Poseidon2 {
 
     /// Returns a hash of the provided field elements.
     #[inline(always)]
-    pub fn hash_elements<E: crate::field::BasedVectorSpace<Felt>>(elements: &[E]) -> Word {
+    pub fn hash_elements<E: BasedVectorSpace<Felt>>(elements: &[E]) -> Word {
         <Self as AlgebraicSponge>::hash_elements(elements)
     }
 
@@ -184,6 +184,15 @@ impl Poseidon2 {
     #[inline(always)]
     pub fn merge_in_domain(values: &[Word; 2], domain: Felt) -> Word {
         <Self as AlgebraicSponge>::merge_in_domain(values, domain)
+    }
+
+    /// Returns a hash of the provided `elements` and a domain identifier.
+    #[inline(always)]
+    pub fn hash_elements_in_domain<E: BasedVectorSpace<Felt>>(
+        elements: &[E],
+        domain: Felt,
+    ) -> Word {
+        <Self as AlgebraicSponge>::hash_elements_in_domain(elements, domain)
     }
 
     // POSEIDON2 PERMUTATION
@@ -290,6 +299,8 @@ impl Poseidon2 {
 
 use p3_challenger::DuplexChallenger;
 use p3_symmetric::{CryptographicPermutation, PaddingFreeSponge, TruncatedPermutation};
+
+use crate::field::BasedVectorSpace;
 
 /// Plonky3-compatible Poseidon2 permutation.
 ///
