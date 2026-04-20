@@ -154,7 +154,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                 state,
                             }
                         },
-                        Deg::NONE,
+                        Deg { n: 5, d: 6 },
                     );
 
                     // Sponge RESPAN: rate-only 8 lanes, node_index = 0.
@@ -173,7 +173,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                 rate,
                             }
                         },
-                        Deg::NONE,
+                        Deg { n: 5, d: 6 },
                     );
 
                     // MP_VERIFY input: leaf word. `leaf = (1-bit)·rate_0 + bit·rate_1` where
@@ -198,7 +198,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                 word,
                             }
                         },
-                        Deg::NONE,
+                        Deg { n: 5, d: 7 },
                     );
 
                     // MR_UPDATE_OLD input: leaf word.
@@ -222,7 +222,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                 word,
                             }
                         },
-                        Deg::NONE,
+                        Deg { n: 5, d: 7 },
                     );
 
                     // MR_UPDATE_NEW input: leaf word.
@@ -246,7 +246,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                 word,
                             }
                         },
-                        Deg::NONE,
+                        Deg { n: 5, d: 7 },
                     );
 
                     // HOUT: digest = rate_0.
@@ -264,7 +264,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                 word,
                             }
                         },
-                        Deg::NONE,
+                        Deg { n: 4, d: 5 },
                     );
 
                     // SOUT: full 12-lane state (HPERM return), node_index = 0.
@@ -289,7 +289,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                 state,
                             }
                         },
-                        Deg::NONE,
+                        Deg { n: 5, d: 6 },
                     );
 
                     // Bitwise: runtime op selector bit.
@@ -305,7 +305,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                 z: bw.output.into(),
                             }
                         },
-                        Deg::NONE,
+                        Deg { n: 3, d: 4 },
                     );
 
                     // Memory response: runtime (is_read, is_word) mux keeps C1 transition at 8.
@@ -338,7 +338,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                 word,
                             }
                         },
-                        Deg::NONE,
+                        Deg { n: 3, d: 7 },
                     );
 
                     // ACE init.
@@ -356,7 +356,7 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                                 num_eval,
                             }
                         },
-                        Deg::NONE,
+                        Deg { n: 5, d: 6 },
                     );
 
                     // Kernel ROM: two fractions per active row.
@@ -373,21 +373,21 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                             b.remove(
                                 "kernel_rom_init",
                                 KernelRomMsg::init(digest.clone()),
-                                Deg::NONE,
+                                Deg { n: 5, d: 6 },
                             );
                             b.insert(
                                 "kernel_rom_call",
                                 krom_mult,
                                 KernelRomMsg::call(digest),
-                                Deg::NONE,
+                                Deg { n: 6, d: 6 },
                             );
                         },
-                        Deg::NONE,
+                        Deg { n: 2, d: 2 },
                     );
                 },
-                Deg::NONE,
+                Deg { n: 7, d: 7 },
             );
         },
-        Deg::NONE,
+        Deg { n: 7, d: 7 },
     );
 }

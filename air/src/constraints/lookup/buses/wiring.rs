@@ -192,7 +192,7 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
                                 v0: v_0.0.into(),
                                 v1: v_0.1.into(),
                             };
-                            b.insert("wire_0", m_0, wire_0, Deg::NONE);
+                            b.insert("wire_0", m_0, wire_0, Deg { n: 5, d: 5 });
 
                             let wire_1 = AceWireMsg {
                                 clk: ace_clk.into(),
@@ -201,7 +201,7 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
                                 v0: v_1.0.into(),
                                 v1: v_1.1.into(),
                             };
-                            b.insert("wire_1", wire_1_mult, wire_1, Deg::NONE);
+                            b.insert("wire_1", wire_1_mult, wire_1, Deg { n: 6, d: 5 });
 
                             let wire_2 = AceWireMsg {
                                 clk: ace_clk.into(),
@@ -210,9 +210,9 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
                                 v0: v_2.0.into(),
                                 v1: v_2.1.into(),
                             };
-                            b.insert("wire_2", wire_2_mult, wire_2, Deg::NONE);
+                            b.insert("wire_2", wire_2_mult, wire_2, Deg { n: 5, d: 5 });
                         },
-                        Deg::NONE,
+                        Deg { n: 4, d: 3 },
                     );
 
                     // ---- Hasher perm-link (BUS_HASHER_PERM_LINK) ----
@@ -225,7 +225,7 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
                             let state: [LB::Expr; 12] = ctrl_state.map(Into::into);
                             HasherPermLinkMsg { label: LB::Expr::ZERO, state }
                         },
-                        Deg::NONE,
+                        Deg { n: 2, d: 3 },
                     );
 
                     // Controller output: +1 / encode(label=1, ctrl.state).
@@ -236,7 +236,7 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
                             let state: [LB::Expr; 12] = ctrl_state.map(Into::into);
                             HasherPermLinkMsg { label: LB::Expr::ONE, state }
                         },
-                        Deg::NONE,
+                        Deg { n: 3, d: 4 },
                     );
 
                     // Perm row 0: -m / encode(label=0, perm.state). Multiplicity is `0 - m` so the
@@ -250,7 +250,7 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
                             let state: [LB::Expr; 12] = perm_state.map(Into::into);
                             HasherPermLinkMsg { label: LB::Expr::ZERO, state }
                         },
-                        Deg::NONE,
+                        Deg { n: 3, d: 3 },
                     );
 
                     // Perm row 15: -m / encode(label=1, perm.state).
@@ -263,12 +263,12 @@ pub(in crate::constraints::lookup) fn emit_v_wiring<LB>(
                             let state: [LB::Expr; 12] = perm_state.map(Into::into);
                             HasherPermLinkMsg { label: LB::Expr::ONE, state }
                         },
-                        Deg::NONE,
+                        Deg { n: 3, d: 3 },
                     );
                 },
-                Deg::NONE,
+                Deg { n: 8, d: 7 },
             );
         },
-        Deg::NONE,
+        Deg { n: 8, d: 7 },
     );
 }

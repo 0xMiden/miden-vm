@@ -786,19 +786,19 @@ mod tests {
                                 "smoke_add",
                                 Felt::ONE,
                                 || SmokeMsg { value: Felt::ONE },
-                                Deg::NONE,
+                                Deg { n: 0, d: 0 },
                             );
                             g.remove(
                                 "smoke_remove",
                                 Felt::ONE,
                                 || SmokeMsg { value: Felt::new(2) },
-                                Deg::NONE,
+                                Deg { n: 0, d: 0 },
                             );
                         },
-                        Deg::NONE,
+                        Deg { n: 0, d: 0 },
                     );
                 },
-                Deg::NONE,
+                Deg { n: 0, d: 0 },
             );
             builder.next_column(
                 |col| {
@@ -813,16 +813,16 @@ mod tests {
                                         "smoke_batch_insert",
                                         Felt::ONE,
                                         SmokeMsg { value: Felt::new(3) },
-                                        Deg::NONE,
+                                        Deg { n: 0, d: 0 },
                                     );
                                 },
-                                Deg::NONE,
+                                Deg { n: 0, d: 0 },
                             );
                         },
-                        Deg::NONE,
+                        Deg { n: 0, d: 0 },
                     );
                 },
-                Deg::NONE,
+                Deg { n: 0, d: 0 },
             );
         }
     }

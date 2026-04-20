@@ -157,7 +157,7 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                             let h_hi = array::from_fn(|i| rate_1[i].into());
                             SiblingMsgBitZero { mrupdate_id, node_index, h_hi }
                         },
-                        Deg::NONE,
+                        Deg { n: 5, d: 6 },
                     );
 
                     let gate = f_mv_all * bit.clone();
@@ -170,7 +170,7 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                             let h_lo = array::from_fn(|i| rate_0[i].into());
                             SiblingMsgBitOne { mrupdate_id, node_index, h_lo }
                         },
-                        Deg::NONE,
+                        Deg { n: 5, d: 6 },
                     );
 
                     let gate = f_mu_all.clone() * one_minus_bit;
@@ -183,7 +183,7 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                             let h_hi = array::from_fn(|i| rate_1[i].into());
                             SiblingMsgBitZero { mrupdate_id, node_index, h_hi }
                         },
-                        Deg::NONE,
+                        Deg { n: 5, d: 6 },
                     );
 
                     let gate = f_mu_all * bit;
@@ -196,7 +196,7 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                             let h_lo = array::from_fn(|i| rate_0[i].into());
                             SiblingMsgBitOne { mrupdate_id, node_index, h_lo }
                         },
-                        Deg::NONE,
+                        Deg { n: 5, d: 6 },
                     );
 
                     // --- ACE MEMORY READS (BUS_CHIPLETS) ---
@@ -216,7 +216,7 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                             ];
                             MemoryHeader { ctx, addr, clk }.read_word(word)
                         },
-                        Deg::NONE,
+                        Deg { n: 5, d: 6 },
                     );
 
                     // Element read on EVAL rows.
@@ -236,7 +236,7 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                                     * LB::Expr::from(ACE_INSTRUCTION_ID2_OFFSET);
                             MemoryHeader { ctx, addr, clk }.read_element(element)
                         },
-                        Deg::NONE,
+                        Deg { n: 5, d: 6 },
                     );
 
                     // --- MEMORY-SIDE RANGE CHECKS (BUS_RANGE_CHECK) ---
@@ -250,21 +250,21 @@ pub(in crate::constraints::lookup) fn emit_hash_kernel_table<LB>(
                         "memory_range_checks",
                         mem_active,
                         move |b| {
-                            b.remove("mem_d0", RangeMsg { value: mem_d0.into() }, Deg::NONE);
-                            b.remove("mem_d1", RangeMsg { value: mem_d1.into() }, Deg::NONE);
+                            b.remove("mem_d0", RangeMsg { value: mem_d0.into() }, Deg { n: 3, d: 4 });
+                            b.remove("mem_d1", RangeMsg { value: mem_d1.into() }, Deg { n: 3, d: 4 });
                             let w0: LB::Expr = mem_w0.into();
                             let w1: LB::Expr = mem_w1.into();
                             let w1_mul4 = w1.clone() * LB::Expr::from_u16(4);
-                            b.remove("mem_w0", RangeMsg { value: w0 }, Deg::NONE);
-                            b.remove("mem_w1", RangeMsg { value: w1 }, Deg::NONE);
-                            b.remove("mem_w1_mul4", RangeMsg { value: w1_mul4 }, Deg::NONE);
+                            b.remove("mem_w0", RangeMsg { value: w0 }, Deg { n: 3, d: 4 });
+                            b.remove("mem_w1", RangeMsg { value: w1 }, Deg { n: 3, d: 4 });
+                            b.remove("mem_w1_mul4", RangeMsg { value: w1_mul4 }, Deg { n: 3, d: 4 });
                         },
-                        Deg::NONE,
+                        Deg { n: 4, d: 5 },
                     );
                 },
-                Deg::NONE,
+                Deg { n: 7, d: 8 },
             );
         },
-        Deg::NONE,
+        Deg { n: 7, d: 8 },
     );
 }
