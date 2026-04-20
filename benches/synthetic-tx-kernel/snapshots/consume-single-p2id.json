@@ -1,0 +1,18 @@
+{
+  "schema_version": "0",
+  "source": "protocol/bench-transaction:consume-single-p2id",
+  "timestamp": "unix-1776673245",
+  "miden_vm_version": "0.22",
+  "trace": {
+    "core_rows": 77699,
+    "chiplets_rows": 123129,
+    "range_rows": 20203
+  },
+  "shape": {
+    "hasher_rows": 120352,
+    "bitwise_rows": 416,
+    "memory_rows": 2297,
+    "kernel_rom_rows": 63,
+    "ace_rows": 0
+  }
+}

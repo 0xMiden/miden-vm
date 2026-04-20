@@ -1608,6 +1608,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "miden-synthetic-tx-kernel"
+version = "0.23.0"
+dependencies = [
+ "criterion",
+ "miden-core",
+ "miden-processor",
+ "miden-vm",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "miden-test-serde-macros"
 version = "0.1.0"
 dependencies = [
