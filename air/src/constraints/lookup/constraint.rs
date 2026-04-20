@@ -1,10 +1,9 @@
 //! Constraint-path adapter for the new closure-based lookup API.
 //!
-//! Implements [`LookupBuilder`] over any `LiftedAirBuilder` that runs on
-//! the base field `Felt`. The adapter mirrors the column-accumulator
-//! algebra in [`crate::constraints::logup`] (`Batch` / `RationalSet` /
-//! `Column`) but wraps it in the closure-based surface described by
-//! [`super::builder`].
+//! Implements [`LookupBuilder`] over any `LiftedAirBuilder`. The adapter
+//! mirrors the column-accumulator algebra in [`crate::constraints::logup`]
+//! (`Batch` / `RationalSet` / `Column`) but wraps it in the closure-based
+//! surface described by [`super::builder`].
 //!
 //! ## Algebra location
 //!
@@ -46,9 +45,8 @@ use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess}
 
 use super::{
     Deg, LookupAir, LookupBatch, LookupBuilder, LookupChallenges, LookupColumn, LookupGroup,
-    LookupMessage, chiplet_air::ChipletLookupBuilder, main_air::MainLookupBuilder,
+    LookupMessage,
 };
-use crate::Felt;
 
 // CONSTRAINT LOOKUP BUILDER
 // ================================================================================================
@@ -62,7 +60,7 @@ use crate::Felt;
 /// [`LookupBuilder::column`] call.
 pub struct ConstraintLookupBuilder<'ab, AB>
 where
-    AB: LiftedAirBuilder<F = Felt> + 'ab,
+    AB: LiftedAirBuilder + 'ab,
 {
     ab: &'ab mut AB,
     challenges: LookupChallenges<AB::ExprEF>,
@@ -71,7 +69,7 @@ where
 
 impl<'ab, AB> ConstraintLookupBuilder<'ab, AB>
 where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: LiftedAirBuilder,
 {
     /// Create a new adapter wrapping `ab`, sized from `air`.
     ///
@@ -105,7 +103,7 @@ where
 
 impl<'ab, AB> LookupBuilder for ConstraintLookupBuilder<'ab, AB>
 where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: LiftedAirBuilder,
 {
     type F = AB::F;
     type Expr = AB::Expr;
@@ -195,23 +193,6 @@ where
     }
 }
 
-// EXTENSION TRAIT IMPLS
-// ================================================================================================
-
-// Empty impls that pick up the default polynomial bodies of `build_op_flags` /
-// `build_chiplet_active`. A future prover-path adapter will override these on its own type;
-// the constraint path always wants the polynomial construction.
-
-impl<'ab, AB> MainLookupBuilder for ConstraintLookupBuilder<'ab, AB> where
-    AB: LiftedAirBuilder<F = Felt>
-{
-}
-
-impl<'ab, AB> ChipletLookupBuilder for ConstraintLookupBuilder<'ab, AB> where
-    AB: LiftedAirBuilder<F = Felt>
-{
-}
-
 // CONSTRAINT COLUMN
 // ================================================================================================
 
@@ -224,7 +205,7 @@ impl<'ab, AB> ChipletLookupBuilder for ConstraintLookupBuilder<'ab, AB> where
 /// directly after the closure returns.
 pub struct ConstraintColumn<'a, AB>
 where
-    AB: LiftedAirBuilder<F = Felt> + 'a,
+    AB: LiftedAirBuilder + 'a,
 {
     challenges: &'a LookupChallenges<AB::ExprEF>,
     u: AB::ExprEF,
@@ -234,7 +215,7 @@ where
 
 impl<'a, AB> ConstraintColumn<'a, AB>
 where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: LiftedAirBuilder,
 {
     /// Compose an inner-group `(U_g, V_g)` pair into this column's
     /// running `(U, V)` using the cross-multiplication rule
@@ -247,7 +228,7 @@ where
 
 impl<'a, AB> LookupColumn for ConstraintColumn<'a, AB>
 where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: LiftedAirBuilder,
 {
     type Expr = AB::Expr;
     type ExprEF = AB::ExprEF;
@@ -316,7 +297,7 @@ where
 /// buffer and no helper method call.
 pub struct ConstraintGroup<'a, AB>
 where
-    AB: LiftedAirBuilder<F = Felt> + 'a,
+    AB: LiftedAirBuilder + 'a,
 {
     challenges: &'a LookupChallenges<AB::ExprEF>,
     u: AB::ExprEF,
@@ -326,7 +307,7 @@ where
 
 impl<'a, AB> LookupGroup for ConstraintGroup<'a, AB>
 where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: LiftedAirBuilder,
 {
     type Expr = AB::Expr;
     type ExprEF = AB::ExprEF;
@@ -444,7 +425,7 @@ where
 /// can skip the `m · D` multiplication when `m = ±1`.
 pub struct ConstraintBatch<'a, AB>
 where
-    AB: LiftedAirBuilder<F = Felt> + 'a,
+    AB: LiftedAirBuilder + 'a,
 {
     challenges: &'a LookupChallenges<AB::ExprEF>,
     n: AB::ExprEF,
@@ -454,7 +435,7 @@ where
 
 impl<'a, AB> LookupBatch for ConstraintBatch<'a, AB>
 where
-    AB: LiftedAirBuilder<F = Felt>,
+    AB: LiftedAirBuilder,
 {
     type Expr = AB::Expr;
     type ExprEF = AB::ExprEF;
