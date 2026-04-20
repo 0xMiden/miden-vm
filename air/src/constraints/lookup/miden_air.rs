@@ -14,7 +14,7 @@
 //! aggregator.
 
 use super::{
-    bus_id::NUM_BUS_IDS,
+    BusId, MIDEN_MAX_MESSAGE_WIDTH,
     chiplet_air::{CHIPLET_COLUMN_SHAPE, ChipletLookupAir, ChipletLookupBuilder},
     main_air::{MAIN_COLUMN_SHAPE, MainLookupAir, MainLookupBuilder},
 };
@@ -71,11 +71,11 @@ where
         // `HasherMsg::State` is the widest live payload at 15 slots (label@β⁰, addr@β¹,
         // node_index@β², state[0..12]@β³..β¹⁴); the 16th slot is unused slack kept for
         // MASM transcript alignment.
-        crate::constraints::lookup::bus_id::MIDEN_MAX_MESSAGE_WIDTH
+        crate::constraints::logup_msg::MIDEN_MAX_MESSAGE_WIDTH
     }
 
     fn num_bus_ids(&self) -> usize {
-        NUM_BUS_IDS
+        BusId::COUNT
     }
 
     fn eval(&self, builder: &mut LB) {
@@ -108,7 +108,7 @@ mod tests {
     use super::MidenLookupAir;
     use crate::{
         Felt, NUM_PUBLIC_VALUES, ProcessorAir,
-        constraints::lookup::bus_id::{MIDEN_MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+        constraints::lookup::{BusId, MIDEN_MAX_MESSAGE_WIDTH},
         lookup::{
             Challenges,
             debug::{
@@ -175,7 +175,7 @@ mod tests {
                 QuadFelt::new([random_felt(), random_felt()]),
                 QuadFelt::new([random_felt(), random_felt()]),
                 MIDEN_MAX_MESSAGE_WIDTH,
-                NUM_BUS_IDS,
+                BusId::COUNT,
             );
 
             let mismatches = check_encoding_equivalence(
@@ -258,7 +258,7 @@ mod tests {
             QuadFelt::ONE,
             QuadFelt::ONE,
             MIDEN_MAX_MESSAGE_WIDTH,
-            NUM_BUS_IDS,
+            BusId::COUNT,
         );
 
         let _ = check_trace_balance(&MidenLookupAir, &main_trace, &periodic, &publics, &challenges);

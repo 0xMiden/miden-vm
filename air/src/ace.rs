@@ -156,7 +156,7 @@ fn encode_bus_message<EF>(
 where
     EF: ExtensionField<Felt>,
 {
-    use crate::constraints::lookup::bus_id::MIDEN_MAX_MESSAGE_WIDTH;
+    use crate::constraints::logup_msg::MIDEN_MAX_MESSAGE_WIDTH;
 
     let alpha = builder.input(InputKey::AuxRandAlpha);
     let beta = builder.input(InputKey::AuxRandBeta);
@@ -213,7 +213,7 @@ where
 pub fn logup_boundary_config() -> LogUpBoundaryConfig {
     use MessageElement::{Constant, PublicInput};
 
-    use crate::constraints::lookup::bus_id::bus_types;
+    use crate::constraints::logup_msg::BusId;
 
     let log_precompile_label = Felt::from_u8(trace::LOG_PRECOMPILE_LABEL);
 
@@ -254,17 +254,17 @@ pub fn logup_boundary_config() -> LogUpBoundaryConfig {
         fractions: vec![
             BusFraction {
                 sign: Sign::Plus,
-                bus: bus_types::BLOCK_HASH_TABLE,
+                bus: BusId::BlockHashTable as usize,
                 message: ph_msg,
             },
             BusFraction {
                 sign: Sign::Plus,
-                bus: bus_types::LOG_PRECOMPILE_TRANSCRIPT,
+                bus: BusId::LogPrecompileTranscript as usize,
                 message: default_lp_msg,
             },
             BusFraction {
                 sign: Sign::Minus,
-                bus: bus_types::LOG_PRECOMPILE_TRANSCRIPT,
+                bus: BusId::LogPrecompileTranscript as usize,
                 message: final_lp_msg,
             },
         ],

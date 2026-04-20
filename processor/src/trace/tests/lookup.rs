@@ -19,8 +19,8 @@
 use miden_air::{
     LOGUP_AUX_TRACE_WIDTH, LiftedAir, ProcessorAir,
     lookup::{
-        Challenges, MIDEN_MAX_MESSAGE_WIDTH, MidenLookupAir, NUM_BUS_IDS, accumulate,
-        accumulate_slow, build_lookup_fractions, debug::collect_column_oracle_folds,
+        BusId, Challenges, MIDEN_MAX_MESSAGE_WIDTH, MidenLookupAir, accumulate, accumulate_slow,
+        build_lookup_fractions, debug::collect_column_oracle_folds,
     },
 };
 use miden_core::{
@@ -60,7 +60,8 @@ fn build_lookup_fractions_on_tiny_span() {
     let alpha = QuadFelt::new([raw[0], raw[1]]);
     let beta = QuadFelt::new([raw[2], raw[3]]);
     let air = MidenLookupAir;
-    let challenges = Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
+    let challenges =
+        Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
 
     let fractions = build_lookup_fractions(&air, &main_trace, &periodic, &public_vals, &challenges);
 
@@ -131,7 +132,8 @@ fn build_lookup_fractions_matches_constraint_path_oracle() {
     let beta = QuadFelt::new([raw[2], raw[3]]);
     // --- Prover path: collect fractions and run the fused accumulator. ---
     let air = MidenLookupAir;
-    let challenges = Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
+    let challenges =
+        Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
     let fractions = build_lookup_fractions(&air, &main_trace, &periodic, &public_vals, &challenges);
     // `accumulate` returns a row-major matrix with `num_rows + 1` rows and `num_cols`
     // columns; row 0 is the zero initial condition and row `r + 1` column `c` holds the
@@ -202,7 +204,8 @@ fn diagnostic_assembler_path_terminals() {
     let alpha = QuadFelt::new([raw[0], raw[1]]);
     let beta = QuadFelt::new([raw[2], raw[3]]);
     let air = MidenLookupAir;
-    let challenges = Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
+    let challenges =
+        Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
     let fractions = build_lookup_fractions(&air, &main_trace, &periodic, &public_vals, &challenges);
     let aux = accumulate_slow(&fractions);
     let num_rows = trace.main_trace().num_rows();

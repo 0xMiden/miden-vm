@@ -20,10 +20,7 @@ use alloc::vec::Vec;
 use miden_core::{Felt, field::ExtensionField, utils::RowMajorMatrix};
 use miden_crypto::stark::air::AuxBuilder;
 
-use super::{
-    MidenLookupAir,
-    bus_id::{MIDEN_MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-};
+use super::{BusId, MIDEN_MAX_MESSAGE_WIDTH, MidenLookupAir};
 use crate::{
     constraints::chiplets::columns::PeriodicCols,
     lookup::{Challenges, aux_builder::build_logup_aux},
@@ -56,7 +53,7 @@ where
         let alpha = challenges[0];
         let beta = challenges[1];
         let lookup_challenges =
-            Challenges::<EF>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
+            Challenges::<EF>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, BusId::COUNT);
 
         // Periodic columns are part of the AIR's static layout — recomputing them per
         // call is cheap (a fixed set of `Vec<Felt>` constructors) and keeps the builder

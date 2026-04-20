@@ -5,9 +5,9 @@
 //! (implemented further down in this file) provides the `encode` method that
 //! produces the extension-field value.
 //!
-//! Chiplet messages (hasher, memory, bitwise) use a **header-as-builder** pattern:
-//! construct a header with the shared context, then call a named method that bakes in
-//! the operation label and produces the final message. The label enums are internal.
+//! Chiplet messages use interaction-specific bus domains instead of legacy selector-derived
+//! labels. Constructors select the interaction domain; payloads then start directly with
+//! semantic fields (addr/ctx/etc.).
 //!
 //! All structs are generic over `E` (base-field expression type, typically `AB::Expr`).
 
@@ -15,32 +15,95 @@ use miden_core::field::{Algebra, PrimeCharacteristicRing};
 
 use crate::lookup::Challenges;
 
+// BUS IDENTIFIERS
+// ================================================================================================
+
+/// Width of the `beta_powers` table `Challenges` precomputes for Miden's bus
+/// messages, i.e. the exponent of `gamma = beta^MIDEN_MAX_MESSAGE_WIDTH` used in
+/// `bus_prefix[i] = alpha + (i + 1) * gamma`.
+///
+/// Must match the Poseidon2 absorption loop in `crates/lib/core/asm/stark/` which
+/// reads the same β-power table during recursive verification.
+pub const MIDEN_MAX_MESSAGE_WIDTH: usize = 16;
+
+/// Domain-separated bus interaction identifier.
+///
+/// Each variant identifies a distinct bus interaction type. When encoding a message,
+/// the bus is cast to `usize` and indexes into
+/// [`Challenges::bus_prefix`](crate::trace::Challenges) to obtain the additive base
+/// `bus_prefix[bus] = alpha + (bus + 1) * gamma`.
+#[repr(usize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum BusId {
+    // --- Out-of-circuit (boundary correction / reduced_aux_values) ---
+    /// Kernel ROM init: kernel procedure digests from variable-length public inputs.
+    KernelRomInit = 0,
+    /// Block hash table (decoder p2): root program hash boundary correction.
+    BlockHashTable = 1,
+    /// Log-precompile transcript: initial/final capacity state boundary correction.
+    LogPrecompileTranscript = 2,
+
+    // --- In-circuit buses ---
+    KernelRomCall = 3,
+    HasherLinearHashInit = 4,
+    HasherReturnState = 5,
+    HasherAbsorption = 6,
+    HasherReturnHash = 7,
+    HasherMerkleVerifyInit = 8,
+    HasherMerkleOldInit = 9,
+    HasherMerkleNewInit = 10,
+    MemoryReadElement = 11,
+    MemoryWriteElement = 12,
+    MemoryReadWord = 13,
+    MemoryWriteWord = 14,
+    Bitwise = 15,
+    AceInit = 16,
+    /// Block stack table (decoder p1): tracks control flow block nesting.
+    BlockStackTable = 17,
+    /// Op group table (decoder p3): tracks operation batch consumption.
+    OpGroupTable = 18,
+    /// Stack overflow table.
+    StackOverflowTable = 19,
+    /// Sibling table: shares Merkle tree sibling nodes between old/new root computations.
+    SiblingTable = 20,
+    /// Range checker bus (LogUp).
+    RangeCheck = 21,
+    /// ACE wiring bus (LogUp).
+    AceWiring = 22,
+    /// Hasher perm-link bus.
+    HasherPermLink = 23,
+}
+
+impl BusId {
+    pub const COUNT: usize = 24;
+}
+
 // HASHER MESSAGES
 // ================================================================================================
 
 /// Hasher chiplet message. Variants differ by payload size.
 ///
-/// Constructed via associated functions — the label is baked in by each constructor.
-/// Encodes as `[label, addr, node_index, ...payload]`.
+/// Constructed via associated functions — the interaction kind is baked in by each constructor.
+/// Encodes as `bus_prefix[kind] + [addr, node_index, ...payload]`.
 #[derive(Clone, Debug)]
 pub enum HasherMsg<E> {
     /// 15-element message: addr + node_index + 12-lane sponge state.
     State {
-        label_value: u16,
+        kind: BusId,
         addr: E,
         node_index: E,
         state: [E; 12],
     },
     /// 11-element message: addr + node_index + 8-lane rate.
     Rate {
-        label_value: u16,
+        kind: BusId,
         addr: E,
         node_index: E,
         rate: [E; 8],
     },
     /// 7-element message: addr + node_index + 4-element word/digest.
     Word {
-        label_value: u16,
+        kind: BusId,
         addr: E,
         node_index: E,
         word: [E; 4],
@@ -54,9 +117,8 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     ///
     /// Used by: HPERM input, LOGPRECOMPILE input.
     pub fn linear_hash_init(addr: E, state: [E; 12]) -> Self {
-        use crate::trace::chiplets::hasher::LINEAR_HASH_LABEL;
         Self::State {
-            label_value: LINEAR_HASH_LABEL as u16 + 16,
+            kind: BusId::HasherLinearHashInit,
             addr,
             node_index: E::ZERO,
             state,
@@ -67,9 +129,8 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     ///
     /// Used by: JOIN, SPLIT, LOOP, SPAN, CALL, SYSCALL, DYN, DYNCALL.
     pub fn control_block(addr: E, rate: &[E; 8], opcode: u8) -> Self {
-        use crate::trace::chiplets::hasher::LINEAR_HASH_LABEL;
         Self::State {
-            label_value: LINEAR_HASH_LABEL as u16 + 16,
+            kind: BusId::HasherLinearHashInit,
             addr,
             node_index: E::ZERO,
             state: [
@@ -93,9 +154,8 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     ///
     /// Used by: HPERM output, LOGPRECOMPILE output.
     pub fn return_state(addr: E, state: [E; 12]) -> Self {
-        use crate::trace::chiplets::hasher::RETURN_STATE_LABEL;
         Self::State {
-            label_value: RETURN_STATE_LABEL as u16 + 32,
+            kind: BusId::HasherReturnState,
             addr,
             node_index: E::ZERO,
             state,
@@ -108,9 +168,8 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     ///
     /// Used by: RESPAN.
     pub fn absorption(addr: E, rate: [E; 8]) -> Self {
-        use crate::trace::chiplets::hasher::LINEAR_HASH_LABEL;
         Self::Rate {
-            label_value: LINEAR_HASH_LABEL as u16 + 32,
+            kind: BusId::HasherAbsorption,
             addr,
             node_index: E::ZERO,
             rate,
@@ -123,9 +182,8 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     ///
     /// Used by: END, MPVERIFY output, MRUPDATE output.
     pub fn return_hash(addr: E, word: [E; 4]) -> Self {
-        use crate::trace::chiplets::hasher::RETURN_HASH_LABEL;
         Self::Word {
-            label_value: RETURN_HASH_LABEL as u16 + 32,
+            kind: BusId::HasherReturnHash,
             addr,
             node_index: E::ZERO,
             word,
@@ -136,9 +194,8 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     ///
     /// Used by: MPVERIFY input.
     pub fn merkle_verify_init(addr: E, node_index: E, word: [E; 4]) -> Self {
-        use crate::trace::chiplets::hasher::MP_VERIFY_LABEL;
         Self::Word {
-            label_value: MP_VERIFY_LABEL as u16 + 16,
+            kind: BusId::HasherMerkleVerifyInit,
             addr,
             node_index,
             word,
@@ -149,9 +206,8 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     ///
     /// Used by: MRUPDATE old input.
     pub fn merkle_old_init(addr: E, node_index: E, word: [E; 4]) -> Self {
-        use crate::trace::chiplets::hasher::MR_UPDATE_OLD_LABEL;
         Self::Word {
-            label_value: MR_UPDATE_OLD_LABEL as u16 + 16,
+            kind: BusId::HasherMerkleOldInit,
             addr,
             node_index,
             word,
@@ -162,9 +218,8 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
     ///
     /// Used by: MRUPDATE new input.
     pub fn merkle_new_init(addr: E, node_index: E, word: [E; 4]) -> Self {
-        use crate::trace::chiplets::hasher::MR_UPDATE_NEW_LABEL;
         Self::Word {
-            label_value: MR_UPDATE_NEW_LABEL as u16 + 16,
+            kind: BusId::HasherMerkleNewInit,
             addr,
             node_index,
             word,
@@ -177,7 +232,7 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
 
 /// Common header for all memory messages: `[ctx, addr, clk]`.
 ///
-/// Call a named method to produce a [`MemoryMsg`] with the correct operation label baked in.
+/// Call a named method to produce a [`MemoryMsg`] with the correct interaction kind.
 #[derive(Clone, Debug)]
 pub struct MemoryHeader<E> {
     pub ctx: E,
@@ -188,9 +243,8 @@ pub struct MemoryHeader<E> {
 impl<E: PrimeCharacteristicRing + Clone> MemoryHeader<E> {
     /// Read a single element from memory.
     pub fn read_element(&self, element: E) -> MemoryMsg<E> {
-        use crate::trace::chiplets::memory::MEMORY_READ_ELEMENT_LABEL;
         MemoryMsg::Element {
-            op_value: MEMORY_READ_ELEMENT_LABEL as u16,
+            bus: BusId::MemoryReadElement,
             header: self.clone(),
             element,
         }
@@ -198,9 +252,8 @@ impl<E: PrimeCharacteristicRing + Clone> MemoryHeader<E> {
 
     /// Write a single element to memory.
     pub fn write_element(&self, element: E) -> MemoryMsg<E> {
-        use crate::trace::chiplets::memory::MEMORY_WRITE_ELEMENT_LABEL;
         MemoryMsg::Element {
-            op_value: MEMORY_WRITE_ELEMENT_LABEL as u16,
+            bus: BusId::MemoryWriteElement,
             header: self.clone(),
             element,
         }
@@ -208,9 +261,8 @@ impl<E: PrimeCharacteristicRing + Clone> MemoryHeader<E> {
 
     /// Read a 4-element word from memory.
     pub fn read_word(&self, word: [E; 4]) -> MemoryMsg<E> {
-        use crate::trace::chiplets::memory::MEMORY_READ_WORD_LABEL;
         MemoryMsg::Word {
-            op_value: MEMORY_READ_WORD_LABEL as u16,
+            bus: BusId::MemoryReadWord,
             header: self.clone(),
             word,
         }
@@ -218,9 +270,8 @@ impl<E: PrimeCharacteristicRing + Clone> MemoryHeader<E> {
 
     /// Write a 4-element word to memory.
     pub fn write_word(&self, word: [E; 4]) -> MemoryMsg<E> {
-        use crate::trace::chiplets::memory::MEMORY_WRITE_WORD_LABEL;
         MemoryMsg::Word {
-            op_value: MEMORY_WRITE_WORD_LABEL as u16,
+            bus: BusId::MemoryWriteWord,
             header: self.clone(),
             word,
         }
@@ -229,53 +280,60 @@ impl<E: PrimeCharacteristicRing + Clone> MemoryHeader<E> {
 
 /// Memory chiplet message. Variants differ by payload size.
 ///
-/// Constructed via methods on [`MemoryHeader`] — the operation label is baked in.
-/// Encodes as `[op_label, ctx, addr, clk, ...payload]`.
+/// Constructed via methods on [`MemoryHeader`] — the bus domain is baked in.
+/// Encodes as `bus_prefix[bus] + [ctx, addr, clk, ...payload]`.
 #[derive(Clone, Debug)]
 pub enum MemoryMsg<E> {
     /// 5-element message: header + one field element.
     Element {
-        op_value: u16,
+        bus: BusId,
         header: MemoryHeader<E>,
         element: E,
     },
     /// 8-element message: header + 4-element word.
     Word {
-        op_value: u16,
+        bus: BusId,
         header: MemoryHeader<E>,
         word: [E; 4],
     },
 }
 
-impl<E: PrimeCharacteristicRing + Clone> MemoryMsg<E> {}
-
 // BITWISE MESSAGE
 // ================================================================================================
 
-/// Bitwise chiplet message (4 elements): `[label, a, b, result]`.
-///
-/// Constructed via [`BitwiseMsg::and`] or [`BitwiseMsg::xor`].
+/// Bitwise chiplet message (4 elements): `[op, a, b, result]`.
 #[derive(Clone, Debug)]
 pub struct BitwiseMsg<E> {
-    op_value: u16,
+    pub op: E,
     pub a: E,
     pub b: E,
     pub result: E,
 }
 
 impl<E: PrimeCharacteristicRing> BitwiseMsg<E> {
-    /// Bitwise AND message (label = 2).
+    const AND_SELECTOR: u32 = 0;
+    const XOR_SELECTOR: u32 = 1;
+
+    /// Bitwise AND message (op selector = 0).
     pub fn and(a: E, b: E, result: E) -> Self {
-        Self { op_value: 2, a, b, result }
+        Self {
+            op: E::from_u32(Self::AND_SELECTOR),
+            a,
+            b,
+            result,
+        }
     }
 
-    /// Bitwise XOR message (label = 6).
+    /// Bitwise XOR message (op selector = 1).
     pub fn xor(a: E, b: E, result: E) -> Self {
-        Self { op_value: 6, a, b, result }
+        Self {
+            op: E::from_u32(Self::XOR_SELECTOR),
+            a,
+            b,
+            result,
+        }
     }
 }
-
-impl<E: PrimeCharacteristicRing + Clone> BitwiseMsg<E> {}
 
 // DECODER MESSAGES
 // ================================================================================================
@@ -305,8 +363,6 @@ pub enum BlockStackMsg<E> {
     },
 }
 
-impl<E: PrimeCharacteristicRing + Clone> BlockStackMsg<E> {}
-
 /// Block hash queue message (7 elements):
 /// `[parent, child_hash[4], is_first_child, is_loop_body]`.
 ///
@@ -335,8 +391,6 @@ pub enum BlockHashMsg<E> {
         is_loop_body: E,
     },
 }
-
-impl<E: PrimeCharacteristicRing + Clone> BlockHashMsg<E> {}
 
 /// Op group table message (3 elements): `[batch_id, group_pos, group_value]`.
 #[derive(Clone, Debug)]
@@ -392,39 +446,33 @@ pub struct HasherPermLinkMsg<E> {
 // KERNEL ROM MESSAGE
 // ================================================================================================
 
-/// Kernel ROM message (5 elements): `[label, digest[4]]`.
+/// Kernel ROM message (4 elements): `bus_prefix[bus] + [digest[4]]`.
 ///
-/// Constructed via [`KernelRomMsg::call`] (KERNEL_PROC_CALL_LABEL = 16) or
-/// [`KernelRomMsg::init`] (KERNEL_PROC_INIT_LABEL = 48). The chiplet emits an INIT
-/// `remove` (multiplicity 1) and a CALL `add` (with syscall multiplicity). The boundary
-/// correction adds once per INIT; the decoder removes once per SYSCALL for CALL.
+/// Two bus domains: INIT (one remove per declared procedure, balanced by the boundary
+/// correction from public inputs) and CALL (one insert per SYSCALL, carrying the
+/// multiplicity from kernel ROM column 0; balanced by decoder-emitted SYSCALL removes).
 #[derive(Clone, Debug)]
 pub struct KernelRomMsg<E> {
-    label: u16,
+    bus: BusId,
     pub digest: [E; 4],
 }
 
 impl<E: PrimeCharacteristicRing + Clone> KernelRomMsg<E> {
-    // KERNEL_PROC_CALL_LABEL = Felt::new(0b001111 + 1) = 16.
-    const CALL_LABEL: u16 = 16;
-    // KERNEL_PROC_INIT_LABEL = Felt::new(0b101111 + 1) = 48.
-    const INIT_LABEL: u16 = 48;
-
-    /// Kernel procedure call message (SYSCALL request side + chiplet-side CALL response).
+    /// Kernel procedure call message (SYSCALL request side + chiplet CALL response).
     pub fn call(digest: [E; 4]) -> Self {
-        Self { label: Self::CALL_LABEL, digest }
+        Self { bus: BusId::KernelRomCall, digest }
     }
 
-    /// Kernel procedure init message (public-input request side + chiplet-side INIT response).
+    /// Kernel procedure init message (public-input boundary + chiplet INIT response).
     pub fn init(digest: [E; 4]) -> Self {
-        Self { label: Self::INIT_LABEL, digest }
+        Self { bus: BusId::KernelRomInit, digest }
     }
 }
 
 // ACE MESSAGE
 // ================================================================================================
 
-/// ACE circuit evaluation init message (6 elements): `[label, clk, ctx, ptr, num_read, num_eval]`.
+/// ACE circuit evaluation init message (5 elements): `[clk, ctx, ptr, num_read, num_eval]`.
 #[derive(Clone, Debug)]
 pub struct AceInitMsg<E> {
     pub clk: E,
@@ -432,11 +480,6 @@ pub struct AceInitMsg<E> {
     pub ptr: E,
     pub num_read: E,
     pub num_eval: E,
-}
-
-impl<E: PrimeCharacteristicRing + Clone> AceInitMsg<E> {
-    /// ACE_INIT_LABEL = Felt(0b0111 + 1) = 8.
-    const LABEL: u16 = 8;
 }
 
 // RANGE CHECK MESSAGE
@@ -449,8 +492,6 @@ impl<E: PrimeCharacteristicRing + Clone> AceInitMsg<E> {
 pub struct RangeMsg<E> {
     pub value: E,
 }
-
-impl<E: PrimeCharacteristicRing + Clone> RangeMsg<E> {}
 
 // LOG-PRECOMPILE CAPACITY MESSAGE
 // ================================================================================================
@@ -487,8 +528,6 @@ pub struct AceWireMsg<E> {
     pub v1: E,
 }
 
-impl<E: PrimeCharacteristicRing + Clone> AceWireMsg<E> {}
-
 // CHIPLET RESPONSE MESSAGES
 // ================================================================================================
 
@@ -499,7 +538,7 @@ impl<E: PrimeCharacteristicRing + Clone> AceWireMsg<E> {}
 /// pre-computed from the chiplet columns (including the idx0/idx1 element mux).
 #[derive(Clone, Debug)]
 pub struct MemoryResponseMsg<E> {
-    pub label: E,
+    pub is_read: E,
     pub ctx: E,
     pub addr: E,
     pub clk: E,
@@ -508,28 +547,21 @@ pub struct MemoryResponseMsg<E> {
     pub word: [E; 4],
 }
 
-impl<E: PrimeCharacteristicRing + Clone> MemoryResponseMsg<E> {}
-
-/// Bitwise chiplet response message with a pre-computed (conditional) label expression.
-///
-/// The chiplet-side label is `(1-sel)*AND_LABEL + sel*XOR_LABEL`. Unlike [`BitwiseMsg`]
-/// which bakes in a fixed label, this carries the label as an expression.
+/// Bitwise chiplet response message with a runtime op-selector expression.
 #[derive(Clone, Debug)]
 pub struct BitwiseResponseMsg<E> {
-    pub label: E,
+    pub op: E,
     pub a: E,
     pub b: E,
     pub z: E,
 }
-
-impl<E: PrimeCharacteristicRing + Clone> BitwiseResponseMsg<E> {}
 
 // LOOKUP MESSAGE IMPLEMENTATIONS
 // ================================================================================================
 
 use crate::lookup::message::LookupMessage;
 
-// --- HasherMsg (BUS_CHIPLETS; label_value at β⁰) -------------------------------------------------
+// --- HasherMsg (interaction-specific bus ids; payload starts at β⁰) ------------------------------
 
 impl<E, EF> LookupMessage<E, EF> for HasherMsg<E>
 where
@@ -537,30 +569,64 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        use super::lookup::bus_id::BUS_CHIPLETS;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_CHIPLETS].clone();
+        let bus = match self {
+            Self::State { kind, .. } | Self::Rate { kind, .. } | Self::Word { kind, .. } => {
+                *kind as usize
+            },
+        };
+        let mut acc = challenges.bus_prefix[bus].clone();
         match self {
-            Self::State { label_value, addr, node_index, state } => {
-                acc += bp[0].clone() * E::from_u16(*label_value);
-                acc += bp[1].clone() * addr.clone();
-                acc += bp[2].clone() * node_index.clone();
+            Self::State { addr, node_index, state, .. } => {
+                acc += bp[0].clone() * addr.clone();
+                acc += bp[1].clone() * node_index.clone();
                 for i in 0..12 {
-                    acc += bp[i + 3].clone() * state[i].clone();
+                    acc += bp[i + 2].clone() * state[i].clone();
                 }
             },
-            Self::Rate { label_value, addr, node_index, rate } => {
-                acc += bp[0].clone() * E::from_u16(*label_value);
-                acc += bp[1].clone() * addr.clone();
-                acc += bp[2].clone() * node_index.clone();
+            Self::Rate { addr, node_index, rate, .. } => {
+                acc += bp[0].clone() * addr.clone();
+                acc += bp[1].clone() * node_index.clone();
                 for i in 0..8 {
-                    acc += bp[i + 3].clone() * rate[i].clone();
+                    acc += bp[i + 2].clone() * rate[i].clone();
                 }
             },
-            Self::Word { label_value, addr, node_index, word } => {
-                acc += bp[0].clone() * E::from_u16(*label_value);
-                acc += bp[1].clone() * addr.clone();
-                acc += bp[2].clone() * node_index.clone();
+            Self::Word { addr, node_index, word, .. } => {
+                acc += bp[0].clone() * addr.clone();
+                acc += bp[1].clone() * node_index.clone();
+                for i in 0..4 {
+                    acc += bp[i + 2].clone() * word[i].clone();
+                }
+            },
+        }
+        acc
+    }
+}
+
+// --- MemoryMsg (interaction-specific bus ids; payload starts at β⁰) ------------------------------
+
+impl<E, EF> LookupMessage<E, EF> for MemoryMsg<E>
+where
+    E: PrimeCharacteristicRing + Clone,
+    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
+{
+    fn encode(&self, challenges: &Challenges<EF>) -> EF {
+        let bp = &challenges.beta_powers;
+        let bus = match self {
+            Self::Element { bus, .. } | Self::Word { bus, .. } => *bus as usize,
+        };
+        let mut acc = challenges.bus_prefix[bus].clone();
+        match self {
+            Self::Element { header, element, .. } => {
+                acc += bp[0].clone() * header.ctx.clone();
+                acc += bp[1].clone() * header.addr.clone();
+                acc += bp[2].clone() * header.clk.clone();
+                acc += bp[3].clone() * element.clone();
+            },
+            Self::Word { header, word, .. } => {
+                acc += bp[0].clone() * header.ctx.clone();
+                acc += bp[1].clone() * header.addr.clone();
+                acc += bp[2].clone() * header.clk.clone();
                 for i in 0..4 {
                     acc += bp[i + 3].clone() * word[i].clone();
                 }
@@ -570,40 +636,8 @@ where
     }
 }
 
-// --- MemoryMsg (BUS_CHIPLETS; op_value at β⁰) ----------------------------------------------------
-
-impl<E, EF> LookupMessage<E, EF> for MemoryMsg<E>
-where
-    E: PrimeCharacteristicRing + Clone,
-    EF: PrimeCharacteristicRing + Clone + Algebra<E>,
-{
-    fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        use super::lookup::bus_id::BUS_CHIPLETS;
-        let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_CHIPLETS].clone();
-        match self {
-            Self::Element { op_value, header, element } => {
-                acc += bp[0].clone() * E::from_u16(*op_value);
-                acc += bp[1].clone() * header.ctx.clone();
-                acc += bp[2].clone() * header.addr.clone();
-                acc += bp[3].clone() * header.clk.clone();
-                acc += bp[4].clone() * element.clone();
-            },
-            Self::Word { op_value, header, word } => {
-                acc += bp[0].clone() * E::from_u16(*op_value);
-                acc += bp[1].clone() * header.ctx.clone();
-                acc += bp[2].clone() * header.addr.clone();
-                acc += bp[3].clone() * header.clk.clone();
-                for i in 0..4 {
-                    acc += bp[i + 4].clone() * word[i].clone();
-                }
-            },
-        }
-        acc
-    }
-}
-
-// --- BitwiseMsg (BUS_CHIPLETS; op_value at β⁰) ---------------------------------------------------
+// --- BitwiseMsg (BusId::Bitwise; op at β⁰)
+// ----------------------------------------------------------
 
 impl<E, EF> LookupMessage<E, EF> for BitwiseMsg<E>
 where
@@ -611,10 +645,9 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        use super::lookup::bus_id::BUS_CHIPLETS;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_CHIPLETS].clone();
-        acc += bp[0].clone() * E::from_u16(self.op_value);
+        let mut acc = challenges.bus_prefix[BusId::Bitwise as usize].clone();
+        acc += bp[0].clone() * self.op.clone();
         acc += bp[1].clone() * self.a.clone();
         acc += bp[2].clone() * self.b.clone();
         acc += bp[3].clone() * self.result.clone();
@@ -622,7 +655,7 @@ where
     }
 }
 
-// --- BlockStackMsg (BUS_BLOCK_STACK_TABLE; no label) ---------------------------------------------
+// --- BlockStackMsg (BusId::BlockStackTable) ---------------------------------------------
 
 impl<E, EF> LookupMessage<E, EF> for BlockStackMsg<E>
 where
@@ -630,9 +663,8 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        use super::lookup::bus_id::BUS_BLOCK_STACK_TABLE;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_BLOCK_STACK_TABLE].clone();
+        let mut acc = challenges.bus_prefix[BusId::BlockStackTable as usize].clone();
         match self {
             // `Simple` zero-pads to 10 slots in the legacy encoding. Slots `3..10`
             // contribute `β^k · 0 = 0` so they are elided from the loop.
@@ -666,7 +698,7 @@ where
     }
 }
 
-// --- BlockHashMsg (BUS_BLOCK_HASH_TABLE; no label) -----------------------------------------------
+// --- BlockHashMsg (BusId::BlockHashTable) -----------------------------------------------
 
 impl<E, EF> LookupMessage<E, EF> for BlockHashMsg<E>
 where
@@ -674,7 +706,6 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        use super::lookup::bus_id::BUS_BLOCK_HASH_TABLE;
         let bp = &challenges.beta_powers;
         // Per-variant fan-in: produce the (parent, child_hash, is_first_child, is_loop_body)
         // tuple, then emit a flat 7-slot payload. Mirrors the legacy `encode` ordering.
@@ -689,7 +720,7 @@ where
                 is_loop_body,
             } => (parent, child_hash, is_first_child.clone(), is_loop_body.clone()),
         };
-        let mut acc = challenges.bus_prefix[BUS_BLOCK_HASH_TABLE].clone();
+        let mut acc = challenges.bus_prefix[BusId::BlockHashTable as usize].clone();
         acc += bp[0].clone() * parent.clone();
         acc += bp[1].clone() * child_hash[0].clone();
         acc += bp[2].clone() * child_hash[1].clone();
@@ -701,7 +732,7 @@ where
     }
 }
 
-// --- OpGroupMsg (BUS_OP_GROUP_TABLE; no label) ---------------------------------------------------
+// --- OpGroupMsg (BusId::OpGroupTable) ---------------------------------------------------
 
 impl<E, EF> LookupMessage<E, EF> for OpGroupMsg<E>
 where
@@ -709,9 +740,8 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        use super::lookup::bus_id::BUS_OP_GROUP_TABLE;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_OP_GROUP_TABLE].clone();
+        let mut acc = challenges.bus_prefix[BusId::OpGroupTable as usize].clone();
         acc += bp[0].clone() * self.batch_id.clone();
         acc += bp[1].clone() * self.group_pos.clone();
         acc += bp[2].clone() * self.group_value.clone();
@@ -719,7 +749,7 @@ where
     }
 }
 
-// --- StackOverflowMsg (BUS_STACK_OVERFLOW_TABLE; no label) ---------------------------------------
+// --- StackOverflowMsg (BusId::StackOverflowTable) ---------------------------------------
 
 impl<E, EF> LookupMessage<E, EF> for StackOverflowMsg<E>
 where
@@ -727,9 +757,8 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        use super::lookup::bus_id::BUS_STACK_OVERFLOW_TABLE;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_STACK_OVERFLOW_TABLE].clone();
+        let mut acc = challenges.bus_prefix[BusId::StackOverflowTable as usize].clone();
         acc += bp[0].clone() * self.clk.clone();
         acc += bp[1].clone() * self.val.clone();
         acc += bp[2].clone() * self.prev.clone();
@@ -737,7 +766,8 @@ where
     }
 }
 
-// --- KernelRomMsg (BUS_CHIPLETS; `self.label` at β⁰) ---------------------------------------------
+// --- KernelRomMsg (BusId::KernelRomInit / BusId::KernelRomCall)
+// ------------------------------------
 
 impl<E, EF> LookupMessage<E, EF> for KernelRomMsg<E>
 where
@@ -745,18 +775,17 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        use super::lookup::bus_id::BUS_CHIPLETS;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_CHIPLETS].clone();
-        acc += bp[0].clone() * E::from_u16(self.label);
+        let mut acc = challenges.bus_prefix[self.bus as usize].clone();
         for i in 0..4 {
-            acc += bp[i + 1].clone() * self.digest[i].clone();
+            acc += bp[i].clone() * self.digest[i].clone();
         }
         acc
     }
 }
 
-// --- AceInitMsg (BUS_CHIPLETS; constant `LABEL` at β⁰) -------------------------------------------
+// --- AceInitMsg (BusId::AceInit)
+// -------------------------------------------------------------------
 
 impl<E, EF> LookupMessage<E, EF> for AceInitMsg<E>
 where
@@ -764,20 +793,18 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        use super::lookup::bus_id::BUS_CHIPLETS;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_CHIPLETS].clone();
-        acc += bp[0].clone() * E::from_u16(Self::LABEL);
-        acc += bp[1].clone() * self.clk.clone();
-        acc += bp[2].clone() * self.ctx.clone();
-        acc += bp[3].clone() * self.ptr.clone();
-        acc += bp[4].clone() * self.num_read.clone();
-        acc += bp[5].clone() * self.num_eval.clone();
+        let mut acc = challenges.bus_prefix[BusId::AceInit as usize].clone();
+        acc += bp[0].clone() * self.clk.clone();
+        acc += bp[1].clone() * self.ctx.clone();
+        acc += bp[2].clone() * self.ptr.clone();
+        acc += bp[3].clone() * self.num_read.clone();
+        acc += bp[4].clone() * self.num_eval.clone();
         acc
     }
 }
 
-// --- RangeMsg (BUS_RANGE_CHECK; no label) --------------------------------------------------------
+// --- RangeMsg (BusId::RangeCheck) --------------------------------------------------------
 
 impl<E, EF> LookupMessage<E, EF> for RangeMsg<E>
 where
@@ -785,15 +812,14 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        use super::lookup::bus_id::BUS_RANGE_CHECK;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_RANGE_CHECK].clone();
+        let mut acc = challenges.bus_prefix[BusId::RangeCheck as usize].clone();
         acc += bp[0].clone() * self.value.clone();
         acc
     }
 }
 
-// --- LogCapacityMsg (BUS_LOG_PRECOMPILE_TRANSCRIPT; constant `LABEL` at β⁰) ----------------------
+// --- LogCapacityMsg (BusId::LogPrecompileTranscript; payload label at β⁰) ----------------------
 
 impl<E, EF> LookupMessage<E, EF> for LogCapacityMsg<E>
 where
@@ -801,9 +827,8 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        use super::lookup::bus_id::BUS_LOG_PRECOMPILE_TRANSCRIPT;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_LOG_PRECOMPILE_TRANSCRIPT].clone();
+        let mut acc = challenges.bus_prefix[BusId::LogPrecompileTranscript as usize].clone();
         acc += bp[0].clone() * E::from_u16(Self::LABEL);
         for i in 0..4 {
             acc += bp[i + 1].clone() * self.capacity[i].clone();
@@ -812,7 +837,8 @@ where
     }
 }
 
-// --- HasherPermLinkMsg (BUS_HASHER_PERM_LINK; `label` at β⁰) -------------------------------------
+// --- HasherPermLinkMsg (BusId::HasherPermLink; payload label at β⁰)
+// -------------------------------------
 
 impl<E, EF> LookupMessage<E, EF> for HasherPermLinkMsg<E>
 where
@@ -820,9 +846,8 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        use super::lookup::bus_id::BUS_HASHER_PERM_LINK;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_HASHER_PERM_LINK].clone();
+        let mut acc = challenges.bus_prefix[BusId::HasherPermLink as usize].clone();
         acc += bp[0].clone() * self.label.clone();
         for i in 0..12 {
             acc += bp[i + 1].clone() * self.state[i].clone();
@@ -831,7 +856,7 @@ where
     }
 }
 
-// --- AceWireMsg (BUS_ACE_WIRING; no label) -------------------------------------------------------
+// --- AceWireMsg (BusId::AceWiring) -------------------------------------------------------
 
 impl<E, EF> LookupMessage<E, EF> for AceWireMsg<E>
 where
@@ -839,9 +864,8 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        use super::lookup::bus_id::BUS_ACE_WIRING;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_ACE_WIRING].clone();
+        let mut acc = challenges.bus_prefix[BusId::AceWiring as usize].clone();
         acc += bp[0].clone() * self.clk.clone();
         acc += bp[1].clone() * self.ctx.clone();
         acc += bp[2].clone() * self.id.clone();
@@ -854,12 +878,9 @@ where
 // LookupMessage impls for the response + sibling structs
 // ================================================================================================
 //
-// The three `*ResponseMsg` structs below carry `LookupMessage<E, EF>` impls used by the
-// `lookup/buses/chiplet_responses.rs` port. The runtime-muxed encoding (label at β⁰ taken
-// from a chiplet column) keeps the C1 transition at degree 8; a per-variant split would
-// bump it to 9. The per-variant split structs further down (one per distinct runtime label)
-// are also live; bus authors can pick whichever variant best fits the algebraic shape of
-// their port.
+// The `*ResponseMsg` structs below carry `LookupMessage<E, EF>` impls used by the
+// `lookup/buses/chiplet_responses.rs` port. The runtime-muxed encoding (bus prefix
+// muxed by is_read/is_word flags) keeps the C1 transition at degree 8.
 
 impl<E, EF> LookupMessage<E, EF> for MemoryResponseMsg<E>
 where
@@ -867,31 +888,37 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        use super::lookup::bus_id::BUS_CHIPLETS;
         let bp = &challenges.beta_powers;
-        let prefix = challenges.bus_prefix[BUS_CHIPLETS].clone();
+        let is_read = self.is_read.clone();
+        let is_write: E = E::ONE - is_read.clone();
+        let is_word = self.is_word.clone();
+        let is_element: E = E::ONE - is_word.clone();
 
-        // Element-case denominator: [label, ctx, addr, clk, element] at β⁰..β⁴.
-        let mut element_msg = prefix.clone();
-        element_msg += bp[0].clone() * self.label.clone();
-        element_msg += bp[1].clone() * self.ctx.clone();
-        element_msg += bp[2].clone() * self.addr.clone();
-        element_msg += bp[3].clone() * self.clk.clone();
-        element_msg += bp[4].clone() * self.element.clone();
+        // Mux only the bus prefix; the payload (ctx, addr, clk, ...) is shared.
+        let prefix = challenges.bus_prefix[BusId::MemoryReadElement as usize].clone()
+            * is_read.clone()
+            * is_element.clone()
+            + challenges.bus_prefix[BusId::MemoryWriteElement as usize].clone()
+                * is_write.clone()
+                * is_element.clone()
+            + challenges.bus_prefix[BusId::MemoryReadWord as usize].clone()
+                * is_read
+                * is_word.clone()
+            + challenges.bus_prefix[BusId::MemoryWriteWord as usize].clone()
+                * is_write
+                * is_word.clone();
 
-        // Word-case denominator: [label, ctx, addr, clk, word[0..4]] at β⁰..β⁷.
-        let mut word_msg = prefix;
-        word_msg += bp[0].clone() * self.label.clone();
-        word_msg += bp[1].clone() * self.ctx.clone();
-        word_msg += bp[2].clone() * self.addr.clone();
-        word_msg += bp[3].clone() * self.clk.clone();
+        let mut acc = prefix;
+        acc += bp[0].clone() * self.ctx.clone();
+        acc += bp[1].clone() * self.addr.clone();
+        acc += bp[2].clone() * self.clk.clone();
+
+        // Element payload (gated by is_element) vs word payload (gated by is_word).
+        acc += bp[3].clone() * self.element.clone() * is_element;
         for i in 0..4 {
-            word_msg += bp[i + 4].clone() * self.word[i].clone();
+            acc += bp[i + 3].clone() * self.word[i].clone() * is_word.clone();
         }
-
-        // Runtime mux mirrors the legacy `encode`.
-        let is_element: E = E::ONE - self.is_word.clone();
-        element_msg * is_element + word_msg * self.is_word.clone()
+        acc
     }
 }
 
@@ -901,10 +928,9 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        use super::lookup::bus_id::BUS_CHIPLETS;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_CHIPLETS].clone();
-        acc += bp[0].clone() * self.label.clone();
+        let mut acc = challenges.bus_prefix[BusId::Bitwise as usize].clone();
+        acc += bp[0].clone() * self.op.clone();
         acc += bp[1].clone() * self.a.clone();
         acc += bp[2].clone() * self.b.clone();
         acc += bp[3].clone() * self.z.clone();
@@ -912,36 +938,14 @@ where
     }
 }
 
-// PER-VARIANT RESPONSE + SIBLING MESSAGES
+// SIBLING MESSAGES
 // ================================================================================================
-//
-// These structs let the chiplet-response bus (C1) and the hash-kernel bus (C2) encode through
-// the `LookupMessage<E, EF>::encode` trait. Each implements `LookupMessage<E, EF>::encode` and
-// nothing else.
-//
-// The response structs each fan their per-label cases out into dedicated structs rather than
-// keeping a runtime `label: E` mux: the trait needs to resolve the label into a compile-time
-// `u16` at `encode`-time. Each variant hard-wires its label via a `const LABEL: u16`, and the
-// caller gates four mutually-exclusive flags (memory) or two ME flags (kernel ROM / bitwise)
-// so the running-sum contribution matches the unified single-interaction hybrid exactly.
 //
 // `SiblingMsg` is split into `SiblingMsgBitZero<E>` / `SiblingMsgBitOne<E>`, each carrying
 // the relevant hasher half, and encodes against the **sparse β layouts** (`[2, 7, 8, 9, 10]`
 // and `[2, 3, 4, 5, 6]`) that the responder-side hasher chiplet algebra requires. The trait
 // is permissive about *which* β positions an `encode` body touches; only the contiguous
-// convention is a suggestion, not a requirement. Preserving the non-contiguous layout keeps
-// the responder-side hasher chiplet algebra intact without touching the chiplet-side response
-// encoding.
-
-// --- MemoryResponseElementMsg (BUS_CHIPLETS) -----------------------------------------------------
-
-// Chiplet-side memory response for a **read-element** operation.
-
-// --- KernelRomResponse{Call,Init}Msg (BUS_CHIPLETS) ----------------------------------------------
-
-// --- BitwiseResponse{And,Xor}Msg (BUS_CHIPLETS) --------------------------------------------------
-
-// --- SiblingMsgBit{Zero,One} (BUS_SIBLING_TABLE, sparse β layouts) -------------------------------
+// convention is a suggestion, not a requirement.
 
 /// Sibling-table message when `bit = 0` — sibling lives at h[4..8] and the payload goes into
 /// β positions `[1, 2, 7, 8, 9, 10]`, matching the 2856 running-product layout
@@ -968,9 +972,8 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        use super::lookup::bus_id::BUS_SIBLING_TABLE;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_SIBLING_TABLE].clone();
+        let mut acc = challenges.bus_prefix[BusId::SiblingTable as usize].clone();
         acc += bp[1].clone() * self.mrupdate_id.clone();
         acc += bp[2].clone() * self.node_index.clone();
         acc += bp[7].clone() * self.h_hi[0].clone();
@@ -987,9 +990,8 @@ where
     EF: PrimeCharacteristicRing + Clone + Algebra<E>,
 {
     fn encode(&self, challenges: &Challenges<EF>) -> EF {
-        use super::lookup::bus_id::BUS_SIBLING_TABLE;
         let bp = &challenges.beta_powers;
-        let mut acc = challenges.bus_prefix[BUS_SIBLING_TABLE].clone();
+        let mut acc = challenges.bus_prefix[BusId::SiblingTable as usize].clone();
         acc += bp[1].clone() * self.mrupdate_id.clone();
         acc += bp[2].clone() * self.node_index.clone();
         acc += bp[3].clone() * self.h_lo[0].clone();

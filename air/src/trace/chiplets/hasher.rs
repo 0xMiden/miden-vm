@@ -130,44 +130,24 @@ pub const CONTROLLER_ROWS_PER_PERM_FELT: Felt = Felt::new(CONTROLLER_ROWS_PER_PE
 /// executing linear hash computation. These selectors can also be used for a simple 2-to-1 hash
 /// computation.
 pub const LINEAR_HASH: Selectors = [ONE, ZERO, ZERO];
-/// Unique label computed as 1 plus the full chiplet selector with the bits reversed.
-/// `selector = [0 | 1, 0, 0]`, `flag = rev(selector) + 1 = [0, 0, 1 | 0] + 1 = 3`
-pub const LINEAR_HASH_LABEL: u8 = 0b0010 + 1;
-
 /// Specifies a start of Merkle path verification computation or absorption of a new path node
 /// into the hasher state.
 pub const MP_VERIFY: Selectors = [ONE, ZERO, ONE];
-/// Unique label computed as 1 plus the full chiplet selector with the bits reversed.
-/// `selector = [0 | 1, 0, 1]`, `flag = rev(selector) + 1 = [1, 0, 1 | 0] + 1 = 11`
-pub const MP_VERIFY_LABEL: u8 = 0b1010 + 1;
 
 /// Specifies a start of Merkle path verification or absorption of a new path node into the hasher
 /// state for the "old" node value during Merkle root update computation.
 pub const MR_UPDATE_OLD: Selectors = [ONE, ONE, ZERO];
-/// Unique label computed as 1 plus the full chiplet selector with the bits reversed.
-/// `selector = [0 | 1, 1, 0]`, `flag = rev(selector) + 1 = [0, 1, 1 | 0] + 1 = 7`
-pub const MR_UPDATE_OLD_LABEL: u8 = 0b0110 + 1;
 
 /// Specifies a start of Merkle path verification or absorption of a new path node into the hasher
 /// state for the "new" node value during Merkle root update computation.
 pub const MR_UPDATE_NEW: Selectors = [ONE, ONE, ONE];
-/// Unique label computed as 1 plus the full chiplet selector with the bits reversed.
-/// `selector = [0 | 1, 1, 1]`, `flag = rev(selector) + 1 = [1, 1, 1 | 0] + 1 = 15`
-pub const MR_UPDATE_NEW_LABEL: u8 = 0b1110 + 1;
 
 /// Specifies a completion of a computation such that only the hash result (values in h0, h1, h2
 /// h3) is returned.
 pub const RETURN_HASH: Selectors = [ZERO, ZERO, ZERO];
-/// Unique label computed as 1 plus the full chiplet selector with the bits reversed.
-/// `selector = [0 | 0, 0, 0]`, `flag = rev(selector) + 1 = [0, 0, 0 | 0] + 1 = 1`
-#[expect(clippy::identity_op)]
-pub const RETURN_HASH_LABEL: u8 = 0b0000 + 1;
 
 /// Specifies a completion of a computation such that the entire hasher state (values in h0 through
 /// h11) is returned.
 pub const RETURN_STATE: Selectors = [ZERO, ZERO, ONE];
-/// Unique label computed as 1 plus the full chiplet selector with the bits reversed.
-/// `selector = [0 | 0, 0, 1]`, `flag = rev(selector) + 1 = [1, 0, 0 | 0] + 1 = 9`
-pub const RETURN_STATE_LABEL: u8 = 0b1000 + 1;
 
 // NOTE: Selectors s0/s1/s2 are unconstrained on perm segment rows.
