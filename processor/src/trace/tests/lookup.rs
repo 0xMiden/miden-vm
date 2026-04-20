@@ -20,7 +20,7 @@ use miden_air::{
     LOGUP_AUX_TRACE_WIDTH, LiftedAir, ProcessorAir,
     lookup::{
         LookupChallenges, MidenLookupAir, accumulate, accumulate_slow, build_lookup_fractions,
-        collect_column_oracle_folds,
+        debug::collect_column_oracle_folds,
     },
 };
 use miden_core::{

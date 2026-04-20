@@ -27,13 +27,24 @@ mod constraints;
 ///
 /// Re-exports the stable API of the internal `constraints::lookup` module so downstream
 /// crates (notably `miden-processor` tests) can drive `MidenLookupAir` through
-/// [`build_lookup_fractions`] without the rest of `constraints::lookup` leaking.
+/// [`build_lookup_fractions`](self::lookup::build_lookup_fractions) without the rest of
+/// `constraints::lookup` leaking.
 pub mod lookup {
     pub use crate::constraints::lookup::{
-        ColumnOracleBuilder, LookupAir, LookupChallenges, LookupFractions, LookupMessage,
-        MidenLookupAir, MidenLookupAuxBuilder, ProverLookupBuilder, accumulate, accumulate_slow,
-        build_lookup_fractions, collect_column_oracle_folds,
+        LookupAir, LookupChallenges, LookupFractions, LookupMessage, MidenLookupAir,
+        MidenLookupAuxBuilder, ProverLookupBuilder, accumulate, accumulate_slow,
+        build_lookup_fractions,
     };
+
+    /// Unified LogUp debugging surface — inventory, symbolic degree pass, scope enforcement,
+    /// encoding equivalence, real-trace balance, per-row oracle. See the module docs for
+    /// entry-point usage. Gated behind the `bus-debug` feature.
+    #[cfg(feature = "bus-debug")]
+    pub mod debug {
+        pub use crate::constraints::lookup::{
+            ColumnOracleBuilder, collect_column_oracle_folds, debug::*,
+        };
+    }
 }
 
 /// Re-exports the bus-message structs from the internal `constraints::logup_msg` module so

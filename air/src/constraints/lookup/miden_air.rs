@@ -92,176 +92,148 @@ where
 mod tests {
     extern crate std;
 
-    use std::{println, vec::Vec};
+    use std::{fmt::Write as _, println, string::String, vec, vec::Vec};
 
-    use miden_core::field::QuadFelt;
-    use miden_crypto::stark::air::{
-        LiftedAir, RowWindow,
-        symbolic::{AirLayout, SymbolicAirBuilder},
+    use miden_core::{
+        field::{PrimeCharacteristicRing, QuadFelt},
+        utils::RowMajorMatrix,
     };
+    use miden_crypto::{rand::random_felt, stark::air::LiftedAir};
 
-    use super::{LookupAir, MidenLookupAir};
+    use super::MidenLookupAir;
     use crate::{
         Felt, NUM_PUBLIC_VALUES, ProcessorAir,
         constraints::lookup::{
-            ConstraintLookupBuilder, DualBuilder, GroupMismatch, LookupChallenges,
+            LookupChallenges,
+            debug::{
+                check_challenge_scoping, check_encoding_equivalence, check_symbolic_degrees,
+                check_trace_balance, collect_inventory,
+            },
         },
-        trace::{AUX_TRACE_RAND_CHALLENGES, AUX_TRACE_WIDTH, TRACE_WIDTH},
+        trace::TRACE_WIDTH,
     };
 
-    /// Maximum allowed constraint degree (transition degree budget).
-    const DEGREE_BUDGET: usize = 9;
-
-    type SB = SymbolicAirBuilder<Felt, QuadFelt>;
-
-    fn make_builder() -> SB {
-        let num_periodic = LiftedAir::<Felt, QuadFelt>::periodic_columns(&ProcessorAir).len();
-        SymbolicAirBuilder::<Felt, QuadFelt>::new(AirLayout {
-            preprocessed_width: 0,
-            main_width: TRACE_WIDTH,
-            num_public_values: NUM_PUBLIC_VALUES,
-            permutation_width: AUX_TRACE_WIDTH,
-            num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
-            num_permutation_values: AUX_TRACE_WIDTH,
-            num_periodic_columns: num_periodic,
-        })
+    fn num_periodic() -> usize {
+        LiftedAir::<Felt, QuadFelt>::periodic_columns(&ProcessorAir).len()
     }
 
-    /// Degree-budget test: exercises every one of the 9 buses that
-    /// [`MidenLookupAir::eval`] wires up (M1..M4 + C1..C3, with M1 hosting block-stack +
-    /// u32rc + logpre + range-table and C3 hosting ACE wiring + hasher perm-link) and
-    /// asserts each extension constraint stays within the budget.
+    /// Degree-budget check: subsumed by
+    /// [`check_symbolic_degrees`](crate::constraints::lookup::debug::check_symbolic_degrees).
+    /// Exercises every one of the 9 buses `MidenLookupAir::eval` wires up and asserts each
+    /// emitted constraint stays within the transition degree budget.
     #[test]
     #[allow(clippy::print_stdout)]
     fn miden_lookup_air_degree_within_budget() {
-        let mut builder = make_builder();
-        let air = MidenLookupAir;
-        {
-            let mut lb = ConstraintLookupBuilder::new(&mut builder, &air);
-            air.eval(&mut lb);
-            // `lb` is dropped here, but the column finalization runs inside
-            // `LookupBuilder::column` when its closure returns, not at drop time, so no
-            // explicit drop is needed.
-        }
-
-        let ext = builder.extension_constraints();
-        println!("miden_lookup_air: {} extension constraints", ext.len());
-        for (i, c) in ext.iter().enumerate() {
-            let deg = c.degree_multiple();
-            println!("  LOOKUP[{i}] degree = {deg}");
-            assert!(
-                deg <= DEGREE_BUDGET,
-                "LOOKUP[{i}] degree {deg} exceeds budget {DEGREE_BUDGET}"
-            );
-        }
-
-        let base = builder.base_constraints();
-        println!("miden_lookup_air: {} base constraints", base.len());
-        for (i, c) in base.iter().enumerate() {
-            let deg = c.degree_multiple();
-            assert!(
-                deg <= DEGREE_BUDGET,
-                "LOOKUP_BASE[{i}] degree {deg} exceeds budget {DEGREE_BUDGET}"
-            );
+        let report = check_symbolic_degrees(&MidenLookupAir).unwrap_or_else(|r| {
+            panic!(
+                "symbolic degree pass failed: {} mismatches\n{:#?}",
+                r.mismatches.len(),
+                r.mismatches,
+            )
+        });
+        // Both constraint families should have at least one constraint each.
+        assert!(report.info.iter().any(|i: &String| i.contains("extension constraints")));
+        assert!(report.info.iter().any(|i: &String| i.contains("base constraints")));
+        for line in &report.info {
+            println!("{line}");
         }
     }
 
-    /// Cached-encoding equivalence test: runs [`MidenLookupAir::eval`] through the
-    /// test-only [`DualBuilder`], which executes BOTH closures of every
-    /// `group_with_cached_encoding` call and asserts they produce bit-for-bit identical
-    /// `(U_g, V_g)` pairs on every random row pair.
+    /// Cached-encoding equivalence check: subsumed by
+    /// [`check_encoding_equivalence`](crate::constraints::lookup::debug::check_encoding_equivalence).
+    /// Runs `MidenLookupAir::eval` through the canonical-vs-encoded equivalence checker on
+    /// a batch of random row pairs.
     #[test]
-    #[allow(clippy::print_stdout)]
     fn miden_lookup_air_cached_encoding_equivalence() {
-        /// Small deterministic PRNG. We don't need cryptographic quality — just a stable
-        /// stream of reproducible `Felt`s across runs. Uses a SplitMix64-style mixer on
-        /// `(seed, counter)` to avoid pulling in `miden_crypto::rand::test_utils`, which
-        /// is gated behind a feature flag that isn't available under
-        /// `--no-default-features`.
-        struct SeededRng {
-            state: u64,
-        }
-
-        impl SeededRng {
-            fn new(seed: u64) -> Self {
-                Self { state: seed }
-            }
-
-            fn next_felt(&mut self) -> Felt {
-                // SplitMix64 — a tiny high-quality mixer that produces a well-distributed
-                // u64 per call. We then reduce modulo the Goldilocks prime via `Felt::new`,
-                // which is the identity for inputs already in canonical form.
-                self.state = self.state.wrapping_add(0x9e3779b97f4a7c15);
-                let mut z = self.state;
-                z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
-                z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
-                z ^= z >> 31;
-                Felt::new(z)
-            }
-
-            fn next_quad(&mut self) -> QuadFelt {
-                QuadFelt::new([self.next_felt(), self.next_felt()])
-            }
-        }
-
-        let num_periodic = LiftedAir::<Felt, QuadFelt>::periodic_columns(&ProcessorAir).len();
-        let air = MidenLookupAir;
-        let mut num_rows_checked = 0usize;
-        let mut all_mismatches: Vec<(usize, GroupMismatch)> = Vec::new();
-
-        // 100 random row pairs: each iteration runs `MidenLookupAir::eval` through
-        // `DualBuilder`, which compares the canonical vs encoded closure of every
-        // `group_with_cached_encoding` call.
         const NUM_SAMPLES: usize = 100;
-        const SEED: u64 = 0xdead_beef_cafe_f00d;
-
-        let mut rng = SeededRng::new(SEED);
-
-        for sample_idx in 0..NUM_SAMPLES {
-            let current_row: Vec<Felt> = (0..TRACE_WIDTH).map(|_| rng.next_felt()).collect();
-            let next_row: Vec<Felt> = (0..TRACE_WIDTH).map(|_| rng.next_felt()).collect();
-            let periodic_values: Vec<Felt> = (0..num_periodic).map(|_| rng.next_felt()).collect();
-            let public_values: Vec<Felt> =
-                (0..NUM_PUBLIC_VALUES).map(|_| rng.next_felt()).collect();
-
-            let alpha = rng.next_quad();
-            let beta = rng.next_quad();
-            let challenges = LookupChallenges::<QuadFelt>::new(alpha, beta);
-
-            let main_window = RowWindow::from_two_rows(&current_row, &next_row);
-            let mut mismatches: Vec<GroupMismatch> = Vec::new();
-            {
-                let mut db = DualBuilder::new(
-                    main_window,
-                    &periodic_values,
-                    &public_values,
-                    &challenges,
-                    &mut mismatches,
-                );
-                air.eval(&mut db);
-            }
-            num_rows_checked += 1;
-
-            for m in mismatches {
-                all_mismatches.push((sample_idx, m));
-            }
-        }
-
-        println!(
-            "miden_lookup_air_cached_encoding_equivalence: {} samples, {} mismatches",
-            num_rows_checked,
-            all_mismatches.len(),
-        );
-        for (sample_idx, m) in &all_mismatches {
-            println!(
-                "  sample {sample_idx}: column {} group {} — canonical ({:?}, {:?}) vs encoded ({:?}, {:?})",
-                m.column_idx, m.group_idx, m.u_canonical, m.v_canonical, m.u_encoded, m.v_encoded,
+        for _ in 0..NUM_SAMPLES {
+            let current_row: Vec<Felt> = (0..TRACE_WIDTH).map(|_| random_felt()).collect();
+            let next_row: Vec<Felt> = (0..TRACE_WIDTH).map(|_| random_felt()).collect();
+            let periodic_values: Vec<Felt> = (0..num_periodic()).map(|_| random_felt()).collect();
+            let public_values: Vec<Felt> = (0..NUM_PUBLIC_VALUES).map(|_| random_felt()).collect();
+            let challenges = LookupChallenges::<QuadFelt>::new(
+                QuadFelt::new([random_felt(), random_felt()]),
+                QuadFelt::new([random_felt(), random_felt()]),
             );
+
+            let mismatches = check_encoding_equivalence(
+                &MidenLookupAir,
+                &current_row,
+                &next_row,
+                &periodic_values,
+                &public_values,
+                &challenges,
+            );
+            assert!(mismatches.is_empty(), "cached-encoding equivalence failed: {mismatches:#?}",);
         }
-        assert!(
-            all_mismatches.is_empty(),
-            "cached-encoding equivalence failed: {} mismatches",
-            all_mismatches.len(),
+    }
+
+    /// Inventory walk should cover every declared column with at least one group and
+    /// report a floor of interactions. Exact counts are brittle (depend on every bus's
+    /// structure) so we only assert generous lower bounds.
+    #[test]
+    fn inventory_is_non_empty() {
+        let inv = collect_inventory(
+            &MidenLookupAir,
+            "MidenLookupAir",
+            TRACE_WIDTH,
+            num_periodic(),
+            NUM_PUBLIC_VALUES,
         );
+        assert_eq!(inv.air_name, "MidenLookupAir");
+        // MidenLookupAir::num_columns() == 8 (4 main + 3 chiplet + 1 padding).
+        assert_eq!(inv.columns.len(), 8);
+        let groupy = inv.columns.iter().filter(|c| !c.groups.is_empty()).count();
+        assert!(
+            groupy >= 7,
+            "expected ≥7 non-empty columns, got {groupy}: {:#?}",
+            inv.columns.iter().map(|c| c.groups.len()).collect::<Vec<_>>(),
+        );
+        let total = inv.total_interactions();
+        assert!(total >= 20, "expected ≥20 interactions, got {total}");
+    }
+
+    #[test]
+    fn inventory_display_prints_columns() {
+        let inv = collect_inventory(
+            &MidenLookupAir,
+            "MidenLookupAir",
+            TRACE_WIDTH,
+            num_periodic(),
+            NUM_PUBLIC_VALUES,
+        );
+        let mut out = String::new();
+        write!(&mut out, "{inv}").unwrap();
+        assert!(out.contains("MidenLookupAir"), "display should contain air name");
+        assert!(out.contains("column["), "display should enumerate columns");
+    }
+
+    #[test]
+    fn scope_check_accepts_current_air() {
+        check_challenge_scoping(
+            &MidenLookupAir,
+            "MidenLookupAir",
+            TRACE_WIDTH,
+            num_periodic(),
+            NUM_PUBLIC_VALUES,
+        )
+        .expect("MidenLookupAir must not leak manual challenges into simple groups");
+    }
+
+    /// Smoke test: the trace-balance checker runs to completion on a tiny zero-valued trace
+    /// against `MidenLookupAir` without panicking. A zero-valued trace is not a valid program
+    /// execution so the report is expected to contain unmatched entries; this test only
+    /// asserts that the checker produces a report (instead of crashing).
+    #[test]
+    fn trace_balance_runs_on_zero_trace() {
+        const NUM_ROWS: usize = 4;
+        let data = vec![Felt::ZERO; TRACE_WIDTH * NUM_ROWS];
+        let main_trace = RowMajorMatrix::new(data, TRACE_WIDTH);
+        let periodic: Vec<Vec<Felt>> =
+            (0..num_periodic()).map(|_| vec![Felt::ZERO; NUM_ROWS]).collect();
+        let publics: Vec<Felt> = vec![Felt::ZERO; NUM_PUBLIC_VALUES];
+        let challenges = LookupChallenges::<QuadFelt>::new(QuadFelt::ONE, QuadFelt::ONE);
+
+        let _ = check_trace_balance(&MidenLookupAir, &main_trace, &periodic, &publics, &challenges);
     }
 }
