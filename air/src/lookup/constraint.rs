@@ -58,15 +58,6 @@ use super::{
 // CONSTRAINT LOOKUP BUILDER
 // ================================================================================================
 
-/// Deferred running-sum column: stores the column index and its `(U, V)` pair so that
-/// `finalize()` can emit the cross-column constraint after all columns are processed.
-struct DeferredRunningSum<EF> {
-    col_idx: usize,
-    u: EF,
-    v: EF,
-    fraction_cols: Vec<usize>,
-}
-
 /// Constraint-path [`LookupBuilder`] over a wrapped [`LiftedAirBuilder`].
 ///
 /// After calling `air.eval(&mut builder)`, call [`finalize`](Self::finalize) to emit the
@@ -81,7 +72,7 @@ where
     running_sum_set: Vec<usize>,
     fraction_map: Vec<Vec<usize>>,
     column_shape: Vec<usize>,
-    deferred: Vec<DeferredRunningSum<AB::ExprEF>>,
+    running_sum_last_row_acc: AB::ExprEF,
 }
 
 impl<'ab, AB> ConstraintLookupBuilder<'ab, AB>
@@ -113,7 +104,7 @@ where
             running_sum_set,
             fraction_map,
             column_shape,
-            deferred: Vec::new(),
+            running_sum_last_row_acc: AB::ExprEF::ZERO,
         }
     }
 
@@ -121,45 +112,14 @@ where
         self.running_sum_set.contains(&col)
     }
 
-    /// Emit deferred running-sum constraints after all columns have been processed.
+    /// Emit the final running-sum boundary assertion after all columns have been processed.
     ///
-    /// For each running-sum column `j` with fraction columns `{i_1, i_2, ...}`:
-    ///
-    /// - `when_first_row:  acc_j == 0`
-    /// - `when_transition: U_j * (acc_next_j - acc_j - Σ aux_next_{i_k}) - V_j == 0`
-    /// - `when_last_row:   Σ_j acc_j == committed_final`
+    /// Per-column running-sum constraints are emitted inline in `next_column`; here we only check:
+    /// `when_last_row: Σ_j acc_j == committed_final`.
     pub fn finalize(self) {
-        let Self { ab, deferred, .. } = self;
-        let mut last_row_acc_sum = AB::ExprEF::ZERO;
-        for ds in deferred {
-            let (acc, acc_next) = {
-                let mp = ab.permutation();
-                let acc: AB::ExprEF = mp.current_slice()[ds.col_idx].into();
-                let acc_next: AB::ExprEF = mp.next_slice()[ds.col_idx].into();
-                (acc, acc_next)
-            };
-
-            // Sum the fraction columns' next-row aux values (aux trace is offset by 1).
-            let frac_sum = {
-                let mp = ab.permutation();
-                let next = mp.next_slice();
-                let mut sum = AB::ExprEF::ZERO;
-                for &frac_col in &ds.fraction_cols {
-                    let aux_i: AB::ExprEF = next[frac_col].into();
-                    sum += aux_i;
-                }
-                sum
-            };
-
-            // Running-sum transition:
-            //   U * (acc_next - acc - Σ frac_aux) - V == 0
-            let delta = acc_next - acc.clone() - frac_sum;
-            ab.when_first_row().assert_zero_ext(acc.clone());
-            ab.when_transition().assert_zero_ext(delta * ds.u - ds.v);
-            last_row_acc_sum += acc;
-        }
+        let Self { ab, running_sum_last_row_acc, .. } = self;
         let committed_final: AB::ExprEF = ab.permutation_values()[0].clone().into();
-        ab.when_last_row().assert_eq_ext(last_row_acc_sum, committed_final);
+        ab.when_last_row().assert_eq_ext(running_sum_last_row_acc, committed_final);
     }
 }
 
@@ -218,11 +178,27 @@ where
         let is_padding = self.column_shape.get(col_idx).copied() == Some(0);
 
         if self.is_running_sum(col_idx) {
-            // Defer: we need all fraction columns' aux values before we can emit the
-            // running-sum constraint. Find the matching fraction columns.
+            // Running-sum column: emit boundary/transition constraints immediately and
+            // accumulate its last-row value into the single committed boundary assertion.
             let rs_pos = self.running_sum_set.iter().position(|&c| c == col_idx).unwrap();
-            let fraction_cols = self.fraction_map[rs_pos].clone();
-            self.deferred.push(DeferredRunningSum { col_idx, u, v, fraction_cols });
+            let (acc, acc_next, frac_sum) = {
+                let mp = self.ab.permutation();
+                let acc: AB::ExprEF = mp.current_slice()[col_idx].into();
+                let acc_next: AB::ExprEF = mp.next_slice()[col_idx].into();
+                let next = mp.next_slice();
+                let mut sum = AB::ExprEF::ZERO;
+                for &frac_col in &self.fraction_map[rs_pos] {
+                    let aux_i: AB::ExprEF = next[frac_col].into();
+                    sum += aux_i;
+                }
+                (acc, acc_next, sum)
+            };
+
+            // U_j * (acc_next_j - acc_j - Σ frac_aux_j) - V_j == 0
+            let delta = acc_next - acc.clone() - frac_sum;
+            self.ab.when_first_row().assert_zero_ext(acc.clone());
+            self.ab.when_transition().assert_zero_ext(delta * u - v);
+            self.running_sum_last_row_acc += acc;
         } else if !is_padding {
             // Fraction column: U_i * aux_next_i - V_i = 0 on transition rows.
             // Uses aux_next because aux[0] is the zero initial condition and
