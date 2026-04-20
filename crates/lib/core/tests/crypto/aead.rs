@@ -246,6 +246,10 @@ fn test_decrypt_with_known_values() {
         # Store the tag at address 1016
         push.{expected_tag:?} push.1016 mem_storew_le dropw
 
+        # Store unrelated data immediately after the plaintext output.
+        push.[91,92,93,94] push.2008 mem_storew_le dropw
+        push.[95,96,97,98] push.2012 mem_storew_le dropw
+
         # Decrypt: [key(4), nonce(4), src_ptr, dst_ptr, num_blocks]
         push.1           # num_blocks = 1 (data blocks only, padding is automatic)
         push.2000        # dst_ptr (where plaintext will be written)
@@ -263,12 +267,12 @@ fn test_decrypt_with_known_values() {
         padw push.2004 mem_loadw_le
         push.[14,15,16,17] eqw assert dropw dropw
 
-        # Verify padding block [1,0,0,0,0,0,0,0]
+        # Verify memory after the plaintext output is untouched.
         padw push.2008 mem_loadw_le
-        push.[1,0,0,0] eqw assert dropw dropw
+        push.[91,92,93,94] eqw assert dropw dropw
 
         padw push.2012 mem_loadw_le
-        padw eqw assert dropw dropw
+        push.[95,96,97,98] eqw assert dropw dropw
     end
     ",
         ciphertext_0 = &ciphertext[0..4],
@@ -370,6 +374,56 @@ fn test_encrypt_fails_on_overlap() {
 
     let test = build_test!(source, &[]);
     expect_assert_error_message!(test, contains "overlap");
+}
+
+#[test]
+fn test_encrypt_does_not_overwrite_source_adjacent_memory() {
+    let source = r#"
+    use miden::core::crypto::aead
+
+    begin
+        # Store one plaintext block at address 1000.
+        push.[11,12,13,14] push.1000 mem_storew_le dropw
+        push.[15,16,17,18] push.1004 mem_storew_le dropw
+
+        # Store unrelated data immediately after the plaintext buffer.
+        push.[91,92,93,94] push.1008 mem_storew_le dropw
+        push.[95,96,97,98] push.1012 mem_storew_le dropw
+
+        push.1
+        push.2000
+        push.1000
+        push.[1,2,3,4]
+        push.[5,6,7,8]
+        exec.aead::encrypt
+        dropw
+    end
+    "#;
+
+    build_test!(source, &[]).expect_stack_and_memory(&[], 1008, &[91, 92, 93, 94, 95, 96, 97, 98]);
+}
+
+#[test]
+fn test_encrypt_zero_blocks_does_not_overwrite_source_memory() {
+    let source = r#"
+    use miden::core::crypto::aead
+
+    begin
+        # Store unrelated data at src_ptr; encrypt with num_blocks = 0 should not touch it.
+        push.[41,42,43,44] push.1000 mem_storew_le dropw
+        push.[45,46,47,48] push.1004 mem_storew_le dropw
+
+        push.0
+        push.2000
+        push.1000
+        push.[1,2,3,4]
+        push.[5,6,7,8]
+        exec.aead::encrypt
+        dropw
+    end
+    "#;
+
+    build_test!(source, &[]).expect_stack_and_memory(&[], 1000, &[41, 42, 43, 44, 45, 46, 47, 48]);
 }
 
 #[test]
