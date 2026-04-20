@@ -5,8 +5,8 @@ use miden::core::stark::random_coin
 #! Observes the auxiliary trace for the Miden VM AIR.
 #!
 #! Draws auxiliary randomness, reseeds the transcript with the auxiliary trace commitment,
-#! and absorbs the boundary values (2 running-sum committed finals = 2 extension field
-#! elements = 4 base field elements = 1 word).
+#! and absorbs the boundary values (single committed final, carried in one word with
+#! one extra padding extension-field slot for MASM layout compatibility).
 #!
 #! The advice provider must supply exactly 2 words in order:
 #!   [commitment, W0]

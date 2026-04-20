@@ -54,8 +54,12 @@ const RUNNING_SUM_COLUMNS: [usize; 2] = [0, 4];
 const MAIN_FRACTION_COLS: [usize; 3] = [1, 2, 3];
 const CHIPLET_FRACTION_COLS: [usize; 2] = [5, 6];
 
-/// Number of committed final values (one per running-sum column).
-pub const NUM_LOGUP_COMMITTED_FINALS: usize = RUNNING_SUM_COLUMNS.len();
+/// Number of committed final values.
+///
+/// NOTE: while the internal LogUp accumulation currently uses two running-sum columns
+/// (main/chiplet split), we commit only a **single** boundary element for now. This keeps the
+/// proof shape aligned with a single-trace setup until the planned dual-trace migration lands.
+pub const NUM_LOGUP_COMMITTED_FINALS: usize = 1;
 
 impl<LB> LookupAir<LB> for MidenLookupAir
 where

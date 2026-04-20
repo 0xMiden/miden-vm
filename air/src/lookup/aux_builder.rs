@@ -20,10 +20,10 @@
 //! - `aux_trace` is the first `num_rows` rows of the accumulator — it starts at `ZERO` and ends at
 //!   the running sum **before** the last row's contribution. The last row's fraction contribution
 //!   does **not** appear in the aux trace.
-//! - `committed_finals` contains only the running-sum columns' values from the `num_rows`-th row
-//!   (one `EF` per running-sum column), observed by the Fiat-Shamir challenger.
+//! - `committed_finals` contains a single `EF` boundary element derived from the `num_rows`-th row
+//!   and observed by the Fiat-Shamir challenger.
 
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
 use miden_core::{
     field::{ExtensionField, Field},
@@ -70,7 +70,9 @@ where
     let last_row: Vec<EF> = data.split_off(num_rows * num_cols);
     debug_assert_eq!(last_row.len(), num_cols);
 
-    let committed: Vec<EF> = running_sum_cols.iter().map(|&col| last_row[col]).collect();
+    // Keep a single committed boundary element for now by collapsing both running-sum terminals
+    // into one scalar. This matches `NUM_LOGUP_COMMITTED_FINALS == 1`.
+    let committed = vec![running_sum_cols.iter().map(|&col| last_row[col]).sum()];
 
     let aux_trace = RowMajorMatrix::new(data, num_cols);
     (aux_trace, committed)

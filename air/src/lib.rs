@@ -324,7 +324,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
 
         let total_correction = c_block_hash + c_log_precompile + c_kernel_rom;
 
-        // Sum across the 2 running-sum committed finals (`NUM_LOGUP_COMMITTED_FINALS == 2`).
+        // Boundary carries a single committed value (`NUM_LOGUP_COMMITTED_FINALS == 1`).
         let aux_sum: EF = aux_values.iter().copied().sum();
 
         Ok(ReducedAuxValues {

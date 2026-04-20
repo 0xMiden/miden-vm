@@ -170,7 +170,9 @@ const AUX_RAND_ELEM_PTR = 3225419776
 ### - 16 quotient chunk base columns (8 chunks * extension degree)
 const OOD_EVALUATIONS_PTR = 3225419780        # AUX_RAND_ELEM_PTR + 4
 
-### Auxiliary bus boundary values (2 extension field elements = 4 base elements).
+### Auxiliary bus boundary values.
+### Currently we commit one extension-field value and reserve one extra EF slot as padding
+### to preserve MASM word-aligned layout.
 const AUX_BUS_BOUNDARY_PTR = 3225420196       # OOD_EVALUATIONS_PTR + (72 + 16 + 16) * 2 * 2
 
 ### Auxiliary inputs for ACE (stark vars), 10 extension field elements = 20 base elements.

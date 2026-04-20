@@ -127,17 +127,16 @@ where
     ///
     /// - `when_first_row:  acc_j == 0`
     /// - `when_transition: U_j * (acc_next_j - acc_j - Σ aux_next_{i_k}) - V_j == 0`
-    /// - `when_last_row:   acc_j == committed_final_k`
+    /// - `when_last_row:   Σ_j acc_j == committed_final`
     pub fn finalize(self) {
         let Self { ab, deferred, .. } = self;
-        for (committed_idx, ds) in deferred.into_iter().enumerate() {
-            let (acc, acc_next, committed_final) = {
+        let mut last_row_acc_sum = AB::ExprEF::ZERO;
+        for ds in deferred {
+            let (acc, acc_next) = {
                 let mp = ab.permutation();
                 let acc: AB::ExprEF = mp.current_slice()[ds.col_idx].into();
                 let acc_next: AB::ExprEF = mp.next_slice()[ds.col_idx].into();
-                let committed_final: AB::ExprEF =
-                    ab.permutation_values()[committed_idx].clone().into();
-                (acc, acc_next, committed_final)
+                (acc, acc_next)
             };
 
             // Sum the fraction columns' next-row aux values (aux trace is offset by 1).
@@ -157,8 +156,10 @@ where
             let delta = acc_next - acc.clone() - frac_sum;
             ab.when_first_row().assert_zero_ext(acc.clone());
             ab.when_transition().assert_zero_ext(delta * ds.u - ds.v);
-            ab.when_last_row().assert_eq_ext(acc, committed_final);
+            last_row_acc_sum += acc;
         }
+        let committed_final: AB::ExprEF = ab.permutation_values()[0].clone().into();
+        ab.when_last_row().assert_eq_ext(last_row_acc_sum, committed_final);
     }
 }
 

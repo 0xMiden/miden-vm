@@ -199,7 +199,7 @@ where
 /// Build the [`LogUpBoundaryConfig`] for the Miden VM ProcessorAir.
 ///
 /// This mirrors `ProcessorAir::reduced_aux_values` in `air/src/lib.rs`: it sums
-/// the `NUM_LOGUP_COMMITTED_FINALS` (2) aux boundary columns, adds the scalar kernel-ROM
+/// the `NUM_LOGUP_COMMITTED_FINALS` aux boundary columns, adds the scalar kernel-ROM
 /// correction supplied by MASM via `VlpiReduction(0)`, and folds the two open-
 /// bus corrections `c_block_hash` and `c_log_precompile` as rational fractions
 /// whose denominators are rebuilt from public inputs inside the DAG.
@@ -252,7 +252,7 @@ pub fn logup_boundary_config() -> LogUpBoundaryConfig {
     ];
 
     LogUpBoundaryConfig {
-        sum_columns: vec![0, 1],
+        sum_columns: vec![0],
         fractions: vec![
             BusFraction {
                 sign: Sign::Plus,
