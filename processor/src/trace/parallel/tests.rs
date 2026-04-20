@@ -1054,9 +1054,13 @@ fn test_build_trace_with_max_len_corner_cases(
 
     // Compute the number of core trace rows generated, which includes the HALT row inserted by
     // `build_trace_with_max_len`.
-    let core_trace_len = trace_inputs.trace_generation_context().core_trace_contexts.len()
-        * trace_inputs.trace_generation_context().fragment_size
-        + 1;
+    let trace_generation_context = trace_inputs.trace_generation_context();
+    let core_trace_len = trace_generation_context
+        .core_trace_contexts
+        .len()
+        .checked_mul(trace_generation_context.fragment_size)
+        .and_then(|n| n.checked_add(1))
+        .expect("core_trace_len arithmetic should not overflow in this test");
 
     let max_trace_len = core_trace_len
         .checked_add_signed(max_trace_len_offset_from_core_trace_len)
@@ -1131,14 +1135,20 @@ fn test_build_trace_returns_err_when_chiplets_trace_exceeds_max_len() {
 
     // Note: the last fragment may have fewer rows than the fragment size, so this is really an
     // upper bound on the number of core trace rows
-    let core_trace_rows = trace_inputs.trace_generation_context().core_trace_contexts.len()
-        * trace_inputs.trace_generation_context().fragment_size;
+    let trace_generation_context = trace_inputs.trace_generation_context();
+    let core_trace_rows = trace_generation_context
+        .core_trace_contexts
+        .len()
+        .checked_mul(trace_generation_context.fragment_size)
+        .expect("core_trace_rows arithmetic should not overflow in this test");
 
     // Inject enough hasher permutations so the chiplets trace exceeds core_trace_rows.
     // Each permute adds HASH_CYCLE_LEN rows to the hasher chiplet trace, so we need
     // core_trace_rows / HASH_CYCLE_LEN + 1 permutations to guarantee the chiplets trace exceeds the
     // limit.
-    let num_permutations = core_trace_rows / HASH_CYCLE_LEN + 1;
+    let num_permutations = (core_trace_rows / HASH_CYCLE_LEN)
+        .checked_add(1)
+        .expect("num_permutations arithmetic should not overflow in this test");
     for _ in 0..num_permutations {
         trace_inputs
             .trace_generation_context_mut()
@@ -1155,6 +1165,34 @@ fn test_build_trace_returns_err_when_chiplets_trace_exceeds_max_len() {
     assert!(
         matches!(result, Err(ExecutionError::TraceLenExceeded(_))),
         "expected TraceLenExceeded, got: {result:?}"
+    );
+}
+
+/// Verifies that `compute_main_trace_length` returns `TraceLenExceeded` when
+/// `next_power_of_two` overflows.
+#[test]
+fn test_compute_main_trace_length_returns_err_on_next_power_overflow() {
+    let max_trace_len = usize::MAX;
+    let result = compute_main_trace_length(usize::MAX, 0, 0, max_trace_len);
+
+    assert!(
+        matches!(result, Err(ExecutionError::TraceLenExceeded(max_len)) if max_len == max_trace_len),
+        "expected TraceLenExceeded({max_trace_len}), got: {result:?}"
+    );
+}
+
+/// Verifies that `pad_core_row_major` returns `TraceLenExceeded` when the padded CLK index cannot
+/// be represented as `u32`.
+#[test]
+fn test_pad_core_row_major_returns_err_on_clock_index_overflow() {
+    let mut core_trace_data = vec![ZERO; CORE_TRACE_WIDTH];
+    let max_trace_len = usize::MAX;
+
+    let result = pad_core_row_major(&mut core_trace_data, usize::MAX, max_trace_len);
+
+    assert!(
+        matches!(result, Err(ExecutionError::TraceLenExceeded(max_len)) if max_len == max_trace_len),
+        "expected TraceLenExceeded({max_trace_len}), got: {result:?}"
     );
 }
 

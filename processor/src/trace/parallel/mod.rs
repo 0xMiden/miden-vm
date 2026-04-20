@@ -157,6 +157,7 @@ pub fn build_trace_with_max_len(
         core_trace_contexts,
         program_info.kernel().clone(),
         fragment_size,
+        max_trace_len,
     )?;
 
     let core_trace_len = core_trace_data.len() / CORE_TRACE_WIDTH;
@@ -168,22 +169,31 @@ pub fn build_trace_with_max_len(
         TraceLenSummary::new(core_trace_len, range_table_len, ChipletsLengths::new(&chiplets));
 
     // Compute the final main trace length
-    let main_trace_len =
-        compute_main_trace_length(core_trace_len, range_table_len, chiplets.trace_len());
+    let main_trace_len = compute_main_trace_length(
+        core_trace_len,
+        range_table_len,
+        chiplets.trace_len(),
+        max_trace_len,
+    )?;
 
-    let ((range_checker_trace, chiplets_trace), ()) = rayon::join(
+    let (pad_result, (range_checker_trace, chiplets_trace)) = rayon::join(
+        || pad_core_row_major(&mut core_trace_data, main_trace_len, max_trace_len),
         || {
             rayon::join(
                 || range_checker.into_trace_with_table(range_table_len, main_trace_len),
                 || chiplets.into_trace(main_trace_len),
             )
         },
-        || pad_core_row_major(&mut core_trace_data, main_trace_len),
     );
+    pad_result?;
 
     // Create the MainTrace
     let main_trace = {
-        let last_program_row = RowIndex::from((core_trace_len as u32).saturating_sub(1));
+        let last_program_row = core_trace_len
+            .checked_sub(1)
+            .and_then(|n| u32::try_from(n).ok())
+            .map(RowIndex::from)
+            .ok_or(ExecutionError::TraceLenExceeded(max_trace_len))?;
         MainTrace::from_parts(
             core_trace_data,
             chiplets_trace.trace,
@@ -217,13 +227,16 @@ fn compute_main_trace_length(
     core_trace_len: usize,
     range_table_len: usize,
     chiplets_trace_len: usize,
-) -> usize {
+    max_trace_len: usize,
+) -> Result<usize, ExecutionError> {
     // Get the trace length required to hold all execution trace steps
     let max_len = range_table_len.max(core_trace_len).max(chiplets_trace_len);
 
     // Pad the trace length to the next power of two
-    let trace_len = max_len.next_power_of_two();
-    core::cmp::max(trace_len, MIN_TRACE_LEN)
+    let trace_len = max_len
+        .checked_next_power_of_two()
+        .ok_or(ExecutionError::TraceLenExceeded(max_trace_len))?;
+    Ok(core::cmp::max(trace_len, MIN_TRACE_LEN))
 }
 
 /// Generates row-major core trace in parallel from the provided trace fragment contexts.
@@ -231,11 +244,20 @@ fn generate_core_trace_row_major(
     core_trace_contexts: Vec<CoreTraceFragmentContext>,
     kernel: Kernel,
     fragment_size: usize,
+    max_trace_len: usize,
 ) -> Result<Vec<Felt>, ExecutionError> {
     let num_fragments = core_trace_contexts.len();
-    let total_allocated_rows = num_fragments * fragment_size;
+    let total_allocated_rows = num_fragments
+        .checked_mul(fragment_size)
+        .ok_or(ExecutionError::TraceLenExceeded(max_trace_len))?;
+    let total_allocated_cells = total_allocated_rows
+        .checked_mul(CORE_TRACE_WIDTH)
+        .ok_or(ExecutionError::TraceLenExceeded(max_trace_len))?;
+    let fragment_stride = fragment_size
+        .checked_mul(CORE_TRACE_WIDTH)
+        .ok_or(ExecutionError::TraceLenExceeded(max_trace_len))?;
 
-    let mut core_trace_data: Vec<Felt> = vec![ZERO; total_allocated_rows * CORE_TRACE_WIDTH];
+    let mut core_trace_data: Vec<Felt> = vec![ZERO; total_allocated_cells];
 
     // Save the first stack top for initialization
     let first_stack_top = if let Some(first_context) = core_trace_contexts.first() {
@@ -245,7 +267,7 @@ fn generate_core_trace_row_major(
     };
 
     let writers: Vec<RowMajorTraceWriter<'_, Felt>> = core_trace_data
-        .chunks_exact_mut(fragment_size * CORE_TRACE_WIDTH)
+        .chunks_exact_mut(fragment_stride)
         .map(|chunk| RowMajorTraceWriter::new(chunk, CORE_TRACE_WIDTH))
         .collect();
 
@@ -271,12 +293,14 @@ fn generate_core_trace_row_major(
 
     let mut stack_rows = Vec::new();
     let mut system_rows = Vec::new();
-    let mut total_core_trace_rows = 0;
+    let mut total_core_trace_rows: usize = 0;
 
     for final_state in fragment_results {
         stack_rows.push(final_state.last_stack_cols);
         system_rows.push(final_state.last_system_cols);
-        total_core_trace_rows += final_state.num_rows_written;
+        total_core_trace_rows = total_core_trace_rows
+            .checked_add(final_state.num_rows_written)
+            .ok_or(ExecutionError::TraceLenExceeded(max_trace_len))?;
     }
 
     // Fix up stack and system rows
@@ -294,8 +318,11 @@ fn generate_core_trace_row_major(
     {
         let h0_col_offset = STACK_TRACE_OFFSET + H0_COL_IDX;
         let w = CORE_TRACE_WIDTH;
-        core_trace_data[..total_core_trace_rows * w]
-            .par_chunks_mut(fragment_size * w)
+        let total_trace_cells = total_core_trace_rows
+            .checked_mul(w)
+            .ok_or(ExecutionError::TraceLenExceeded(max_trace_len))?;
+        core_trace_data[..total_trace_cells]
+            .par_chunks_mut(fragment_stride)
             .for_each(|fragment_chunk| {
                 let num_rows = fragment_chunk.len() / w;
                 let mut h0_vals: Vec<Felt> =
@@ -308,7 +335,10 @@ fn generate_core_trace_row_major(
     }
 
     // Truncate the core trace columns to the actual number of rows written.
-    core_trace_data.truncate(total_core_trace_rows * CORE_TRACE_WIDTH);
+    let total_trace_cells = total_core_trace_rows
+        .checked_mul(CORE_TRACE_WIDTH)
+        .ok_or(ExecutionError::TraceLenExceeded(max_trace_len))?;
+    core_trace_data.truncate(total_trace_cells);
 
     push_halt_opcode_row(
         &mut core_trace_data,
@@ -602,15 +632,30 @@ fn initialize_chiplets(
 }
 
 /// Pads the core trace to `main_trace_len` rows (HALT template, CLK incremented per row).
-fn pad_core_row_major(core_trace_data: &mut Vec<Felt>, main_trace_len: usize) {
+fn pad_core_row_major(
+    core_trace_data: &mut Vec<Felt>,
+    main_trace_len: usize,
+    max_trace_len: usize,
+) -> Result<(), ExecutionError> {
     let w = CORE_TRACE_WIDTH;
     let total_program_rows = core_trace_data.len() / w;
-    assert!(total_program_rows <= main_trace_len);
-    assert!(total_program_rows > 0);
+    if total_program_rows > main_trace_len {
+        return Err(ExecutionError::Internal("program rows exceed main trace length"));
+    }
+    if total_program_rows == 0 {
+        return Err(ExecutionError::Internal("core trace is empty"));
+    }
+    if main_trace_len
+        .checked_sub(1)
+        .and_then(|n| u32::try_from(n).ok())
+        .is_none()
+    {
+        return Err(ExecutionError::TraceLenExceeded(max_trace_len));
+    }
 
     let num_padding_rows = main_trace_len - total_program_rows;
     if num_padding_rows == 0 {
-        return;
+        return Ok(());
     }
     let last_row_start = (total_program_rows - 1) * w;
 
@@ -660,11 +705,22 @@ fn pad_core_row_major(core_trace_data: &mut Vec<Felt>, main_trace_len: usize) {
 
     // Pad CLK trace - fill with index values
 
-    core_trace_data.reserve(num_padding_rows * w);
+    let additional_cells = num_padding_rows
+        .checked_mul(w)
+        .ok_or(ExecutionError::TraceLenExceeded(max_trace_len))?;
+    core_trace_data
+        .try_reserve(additional_cells)
+        .map_err(|_| ExecutionError::TraceLenExceeded(max_trace_len))?;
     for idx in 0..num_padding_rows {
-        template[CLK_COL_IDX] = Felt::from_u32((total_program_rows + idx) as u32);
+        let clk = total_program_rows
+            .checked_add(idx)
+            .and_then(|n| u32::try_from(n).ok())
+            .ok_or(ExecutionError::TraceLenExceeded(max_trace_len))?;
+        template[CLK_COL_IDX] = Felt::from_u32(clk);
         core_trace_data.extend_from_slice(&template);
     }
+
+    Ok(())
 }
 
 /// Uses the provided `CoreTraceFragmentContext` to build and return a `ReplayProcessor` and
