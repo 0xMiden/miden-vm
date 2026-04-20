@@ -4,12 +4,12 @@
 //!
 //! | Module | Regime |
 //! |--------|--------|
-//! | [`validation`] | AIR self-checks — run against the `LookupAir` itself, no execution trace needed. Bundles encoding equivalence, scope, constants consistency, and the symbolic degree-budget pass via [`validation::validate`]. |
+//! | [`validation`] | AIR self-checks — run against the `LookupAir` itself, no execution trace needed. Bundles encoding equivalence, scope, constants consistency, and the symbolic degree-budget pass via [`validation::validate()`]. |
 //! | [`trace`] | Concrete-trace debugging — balance accumulator + per-column `(U, V)` oracle folds + mutex checks over a real main trace. |
 //!
 //! `validation::validate` takes a caller-supplied `AirLayout` and degree budget, so
 //! Miden-specific constants stay Miden-side in
-//! [`crate::constraints::lookup::validation`].
+//! `crate::constraints::lookup::validation`.
 
 pub mod trace;
 pub mod validation;

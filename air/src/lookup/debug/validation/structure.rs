@@ -2,7 +2,7 @@
 //!
 //! Runs an inventory walk on a random row pair and packages the results plus a
 //! `num_columns` consistency check into a [`StructureReport`]. The composed
-//! [`super::validate`] layers a symbolic degree-budget pass on top.
+//! [`super::validate()`] layers a symbolic degree-budget pass on top.
 
 use alloc::{string::String, vec::Vec};
 use core::fmt;
@@ -24,7 +24,7 @@ pub enum NumColumnsCheck {
 
 /// Bundled outcome of [`validate_structure_only`]. Covers every check that runs against
 /// the `LookupAir` itself — no degree-budget pass (that's
-/// [`check_symbolic_degrees`](super::check_symbolic_degrees), which [`super::validate`]
+/// [`check_symbolic_degrees`](super::check_symbolic_degrees), which [`super::validate()`]
 /// layers on top).
 #[derive(Debug)]
 pub struct StructureReport {
@@ -93,7 +93,7 @@ impl fmt::Display for StructureReport {
 /// 2. Scope violations (simple groups that touched `insert_encoded`).
 /// 3. `num_columns` consistency (declared vs observed).
 ///
-/// [`super::validate`] layers a symbolic degree-budget pass on top.
+/// [`super::validate()`] layers a symbolic degree-budget pass on top.
 pub fn validate_structure_only<A>(
     air: &A,
     air_name: &'static str,
