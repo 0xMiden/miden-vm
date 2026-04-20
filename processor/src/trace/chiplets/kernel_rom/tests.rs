@@ -28,108 +28,57 @@ fn kernel_rom_invalid_access() {
 
 #[test]
 fn kernel_rom_no_access() {
+    // Each declared procedure gets one row with multiplicity 0 when never called; the INIT
+    // side of the chiplets bus still matches the public-input-injected remove.
     let kernel = build_kernel();
     let rom = KernelRom::new(kernel);
 
     let expected_trace_len = 2;
     assert_eq!(expected_trace_len, rom.trace_len());
 
-    // generate trace
     let trace = build_trace(rom, expected_trace_len);
 
-    // the first row of the trace should correspond to the first procedure
-    let row = 0;
-
-    assert_eq!(trace[0][row], ONE); // s0
-    assert_eq!(trace[1][row], PROC1_HASH[0]);
-    assert_eq!(trace[2][row], PROC1_HASH[1]);
-    assert_eq!(trace[3][row], PROC1_HASH[2]);
-    assert_eq!(trace[4][row], PROC1_HASH[3]);
-
-    // the second row of the trace should correspond to the second procedure
-    let row = 1;
-
-    assert_eq!(trace[0][row], ONE); // s0
-    assert_eq!(trace[1][row], PROC2_HASH[0]);
-    assert_eq!(trace[2][row], PROC2_HASH[1]);
-    assert_eq!(trace[3][row], PROC2_HASH[2]);
-    assert_eq!(trace[4][row], PROC2_HASH[3]);
+    assert_row(&trace, 0, ZERO, PROC1_HASH);
+    assert_row(&trace, 1, ZERO, PROC2_HASH);
 }
 
 #[test]
 fn kernel_rom_with_access() {
+    // 5 accesses: 3 for proc1, 2 for proc2 -> multiplicities (3, 2).
     let kernel = build_kernel();
     let mut rom = KernelRom::new(kernel);
 
-    // generate 5 access: 3 for proc1 and 2 for proc2
     rom.access_proc(PROC1_HASH.into()).unwrap();
     rom.access_proc(PROC2_HASH.into()).unwrap();
     rom.access_proc(PROC1_HASH.into()).unwrap();
     rom.access_proc(PROC1_HASH.into()).unwrap();
     rom.access_proc(PROC2_HASH.into()).unwrap();
 
-    let expected_trace_len = 7;
+    let expected_trace_len = 2;
     assert_eq!(expected_trace_len, rom.trace_len());
 
-    // generate trace
     let trace = build_trace(rom, expected_trace_len);
 
-    // the first 5 rows of the trace should correspond to the first procedure
-    for row in 0..4 {
-        let s_first = row == 0;
-
-        assert_eq!(trace[0][row], Felt::from_bool(s_first)); // s_first
-        assert_eq!(trace[1][row], PROC1_HASH[0]);
-        assert_eq!(trace[2][row], PROC1_HASH[1]);
-        assert_eq!(trace[3][row], PROC1_HASH[2]);
-        assert_eq!(trace[4][row], PROC1_HASH[3]);
-    }
-
-    // the remaining 2 rows of the trace should correspond to the second procedure
-    for row in 4..7 {
-        let s_first = row == 4;
-
-        assert_eq!(trace[0][row], Felt::from_bool(s_first)); // s_first
-        assert_eq!(trace[1][row], PROC2_HASH[0]);
-        assert_eq!(trace[2][row], PROC2_HASH[1]);
-        assert_eq!(trace[3][row], PROC2_HASH[2]);
-        assert_eq!(trace[4][row], PROC2_HASH[3]);
-    }
+    assert_row(&trace, 0, Felt::from_u64(3), PROC1_HASH);
+    assert_row(&trace, 1, Felt::from_u64(2), PROC2_HASH);
 }
 
 #[test]
 fn kernel_rom_with_single_access() {
+    // Mixed: proc1 accessed twice, proc2 never -> multiplicities (2, 0).
     let kernel = build_kernel();
     let mut rom = KernelRom::new(kernel);
 
-    // generate 2 access for proc1
     rom.access_proc(PROC1_HASH.into()).unwrap();
     rom.access_proc(PROC1_HASH.into()).unwrap();
 
-    let expected_trace_len = 4;
+    let expected_trace_len = 2;
     assert_eq!(expected_trace_len, rom.trace_len());
 
-    // generate trace
     let trace = build_trace(rom, expected_trace_len);
 
-    // the first 3 rows of the trace should correspond to the first procedure
-    for row in 0..3 {
-        let s_first = row == 0;
-
-        assert_eq!(trace[0][row], Felt::from_bool(s_first)); // s_first
-        assert_eq!(trace[1][row], PROC1_HASH[0]);
-        assert_eq!(trace[2][row], PROC1_HASH[1]);
-        assert_eq!(trace[3][row], PROC1_HASH[2]);
-        assert_eq!(trace[4][row], PROC1_HASH[3]);
-    }
-
-    // the last row of the trace should correspond to the second procedure
-    let row = 3;
-    assert_eq!(trace[0][row], Felt::from_bool(true)); // s_first
-    assert_eq!(trace[1][row], PROC2_HASH[0]);
-    assert_eq!(trace[2][row], PROC2_HASH[1]);
-    assert_eq!(trace[3][row], PROC2_HASH[2]);
-    assert_eq!(trace[4][row], PROC2_HASH[3]);
+    assert_row(&trace, 0, Felt::from_u64(2), PROC1_HASH);
+    assert_row(&trace, 1, ZERO, PROC2_HASH);
 }
 
 // HELPER FUNCTIONS
@@ -148,4 +97,13 @@ fn build_trace(kernel_rom: KernelRom, num_rows: usize) -> Vec<Vec<Felt>> {
     kernel_rom.fill_trace(&mut fragment);
 
     trace
+}
+
+/// Asserts that row `row` carries the given multiplicity and procedure digest.
+fn assert_row(trace: &[Vec<Felt>], row: usize, multiplicity: Felt, digest: [Felt; WORD_SIZE]) {
+    assert_eq!(trace[0][row], multiplicity, "multiplicity mismatch at row {row}");
+    assert_eq!(trace[1][row], digest[0], "digest[0] mismatch at row {row}");
+    assert_eq!(trace[2][row], digest[1], "digest[1] mismatch at row {row}");
+    assert_eq!(trace[3][row], digest[2], "digest[2] mismatch at row {row}");
+    assert_eq!(trace[4][row], digest[3], "digest[3] mismatch at row {row}");
 }

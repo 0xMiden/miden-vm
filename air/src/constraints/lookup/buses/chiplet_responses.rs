@@ -21,7 +21,7 @@ use crate::{
     constraints::{
         chiplets::columns::PeriodicCols,
         logup_msg::{
-            AceInitMsg, BitwiseResponseMsg, HasherMsg, KernelRomResponseMsg, MemoryResponseMsg,
+            AceInitMsg, BitwiseResponseMsg, HasherMsg, KernelRomMsg, MemoryResponseMsg,
         },
         lookup::{
             Deg, LookupColumn, LookupGroup,
@@ -35,7 +35,6 @@ use crate::{
             LINEAR_HASH_LABEL, MP_VERIFY_LABEL, MR_UPDATE_NEW_LABEL, MR_UPDATE_OLD_LABEL,
             RETURN_HASH_LABEL, RETURN_STATE_LABEL,
         },
-        kernel_rom::{KERNEL_PROC_CALL_LABEL, KERNEL_PROC_INIT_LABEL},
         memory::{
             MEMORY_READ_ELEMENT_LABEL, MEMORY_READ_WORD_LABEL, MEMORY_WRITE_ELEMENT_LABEL,
             MEMORY_WRITE_WORD_LABEL,
@@ -51,9 +50,11 @@ const OUTPUT_LABEL_OFFSET: u16 = 32;
 ///
 /// All adds gate on per-chiplet `chiplet_active.*` flags which are mutually exclusive (at
 /// most one chiplet runs per row). Within the hasher branch, the 7 variants are gated by
-/// mutually exclusive `(s0, s1, s2, is_boundary)` combinations. Every other chiplet emits
-/// exactly one fraction when active. Per-row max: 1.
-pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 1;
+/// mutually exclusive `(s0, s1, s2, is_boundary)` combinations. The kernel-ROM branch
+/// emits two fractions per active row: an INIT-labeled remove (multiplicity 1) plus a
+/// CALL-labeled add with multiplicity equal to the row's `multiplicity` column. Every
+/// other chiplet emits exactly one fraction when active. Per-row max: 2.
+pub(in crate::constraints::lookup) const MAX_INTERACTIONS_PER_ROW: usize = 2;
 
 /// Emit the chiplet responses bus (C1).
 #[allow(clippy::too_many_lines)]
@@ -390,17 +391,28 @@ pub(in crate::constraints::lookup) fn emit_chiplet_responses<LB>(
                         Deg::NONE,
                     );
 
-                    // Kernel ROM: runtime-muxed s_first → label.
-                    g.add(
-                        "kernel_rom",
-                        ctx.chiplet_active.kernel_rom.clone(),
+                    // Kernel ROM: one row per declared procedure, two fractions per active row.
+                    // INIT-labeled remove (multiplicity 1) is balanced by the boundary correction
+                    // which adds once per declared procedure. CALL-labeled add carries the syscall
+                    // multiplicity from column 0.
+                    let kernel_gate = ctx.chiplet_active.kernel_rom.clone();
+                    let krom_mult: LB::Expr = krom.multiplicity.into();
+                    g.remove(
+                        "kernel_rom_init",
+                        kernel_gate.clone(),
                         || {
-                            let krom_s_first: LB::Expr = krom.s_first.into();
-                            let label = krom_s_first.clone()
-                                * LB::Expr::from(KERNEL_PROC_INIT_LABEL)
-                                + krom_s_first.not() * LB::Expr::from(KERNEL_PROC_CALL_LABEL);
                             let digest: [LB::Expr; 4] = krom.root.map(LB::Expr::from);
-                            KernelRomResponseMsg { label, digest }
+                            KernelRomMsg::init(digest)
+                        },
+                        Deg::NONE,
+                    );
+                    g.insert(
+                        "kernel_rom_call",
+                        kernel_gate,
+                        krom_mult,
+                        || {
+                            let digest: [LB::Expr; 4] = krom.root.map(LB::Expr::from);
+                            KernelRomMsg::call(digest)
                         },
                         Deg::NONE,
                     );

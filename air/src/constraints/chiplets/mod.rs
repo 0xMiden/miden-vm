@@ -7,7 +7,11 @@
 //! - bitwise chiplet main-trace constraints
 //! - memory chiplet main-trace constraints
 //! - ACE chiplet main-trace constraints
-//! - kernel ROM chiplet main-trace constraints
+//!
+//! The kernel ROM chiplet has no main-trace shape constraints under the all-LogUp layout:
+//! each declared kernel procedure occupies exactly one row, and soundness follows from the
+//! LogUp multiset equality on the chiplets bus (INIT-labeled remove balanced by public-input
+//! boundary adds, CALL-labeled add carrying the syscall multiplicity).
 //!
 //! Chiplet LogUp lookup-argument constraints are emitted by
 //! [`crate::constraints::lookup::ChipletLookupAir`] and wired through
@@ -17,7 +21,6 @@ pub mod ace;
 pub mod bitwise;
 pub mod columns;
 pub mod hasher_control;
-pub mod kernel_rom;
 pub mod memory;
 pub mod permutation;
 pub mod selectors;
@@ -48,5 +51,4 @@ pub fn enforce_main<AB>(
     bitwise::enforce_bitwise_constraints(builder, local, next, &selectors.bitwise);
     memory::enforce_memory_constraints(builder, local, next, &selectors.memory);
     ace::enforce_ace_constraints_all_rows(builder, local, next, &selectors.ace);
-    kernel_rom::enforce_kernel_rom_constraints(builder, local, next, &selectors.kernel_rom);
 }

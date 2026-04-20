@@ -78,6 +78,11 @@ pub struct ChipletFlags<E> {
 }
 
 /// Precomputed flags for all chiplets.
+///
+/// The kernel ROM chiplet has no entry here under the all-LogUp layout: it has no
+/// main-trace shape constraints, so per-region `is_transition` / `is_last` /
+/// `next_is_first` flags are unused. Its bus gate (`chiplet_active.kernel_rom`) is
+/// computed separately via [`ChipletActiveFlags`].
 #[derive(Clone)]
 pub struct ChipletSelectors<E> {
     pub controller: ChipletFlags<E>,
@@ -85,7 +90,6 @@ pub struct ChipletSelectors<E> {
     pub bitwise: ChipletFlags<E>,
     pub memory: ChipletFlags<E>,
     pub ace: ChipletFlags<E>,
-    pub kernel_rom: ChipletFlags<E>,
 }
 
 // ENTRY POINT
@@ -228,7 +232,6 @@ where
     let not_s1_next = s1_next.not();
     let not_s2_next = s2_next.not();
     let not_s3_next = s3_next.not();
-    let not_s4_next = s4_next.not();
 
     let is_transition_flag: AB::Expr = builder.is_transition();
 
@@ -254,20 +257,19 @@ where
     // --- Remaining chiplet active flags (subtraction trick: prefix - prefix * s_n) ---
     let is_bitwise = s0.clone() - s01.clone();
     let is_memory = s01.clone() - s012.clone();
-    let is_ace = s012.clone() - s0123.clone();
-    let is_kernel_rom = s0123.clone() - s01234;
+    let is_ace = s012.clone() - s0123;
+    // Kernel ROM active flag (`s0123 - s01234`) is not needed here: nothing consumes
+    // `ChipletSelectors::kernel_rom`. The bus gate comes from `ChipletActiveFlags`.
 
     // --- Remaining chiplet last-row flags: is_active * s_n' ---
     let is_bitwise_last = is_bitwise.clone() * s1_next;
     let is_memory_last = is_memory.clone() * s2_next;
     let is_ace_last = is_ace.clone() * s3_next;
-    let is_kernel_rom_last = is_kernel_rom.clone() * s4_next;
 
     // --- Remaining chiplet next-is-first flags: is_last[n-1] * (1 - s_n') ---
     let next_is_bitwise_first = perm_is_last.clone() * not_s1_next.clone();
     let next_is_memory_first = is_bitwise_last.clone() * not_s2_next.clone();
     let next_is_ace_first = is_memory_last.clone() * not_s3_next.clone();
-    let next_is_kernel_rom_first = is_ace_last.clone() * not_s4_next.clone();
 
     // --- Remaining chiplet transition flags ---
     // Each sub-s0 chiplet fires its transition flag when the current row is in that
@@ -278,8 +280,7 @@ where
     // always 1 whenever the prefix is active.
     let bitwise_transition = is_transition_flag.clone() * s0.clone() * not_s1_next;
     let memory_transition = is_transition_flag.clone() * s01.clone() * not_s2_next;
-    let ace_transition = is_transition_flag.clone() * s012.clone() * not_s3_next;
-    let kernel_rom_transition = is_transition_flag * s0123 * not_s4_next;
+    let ace_transition = is_transition_flag * s012 * not_s3_next;
 
     ChipletSelectors {
         controller: ChipletFlags {
@@ -311,12 +312,6 @@ where
             is_transition: ace_transition,
             is_last: is_ace_last,
             next_is_first: next_is_ace_first,
-        },
-        kernel_rom: ChipletFlags {
-            is_active: is_kernel_rom,
-            is_transition: kernel_rom_transition,
-            is_last: is_kernel_rom_last,
-            next_is_first: next_is_kernel_rom_first,
         },
     }
 }
