@@ -1,12 +1,12 @@
 //! Miden's bus identifier enumeration and the width of the β-power table used by
-//! [`Challenges`](crate::trace::Challenges) when encoding this AIR's bus messages.
+//! [`Challenges`](crate::lookup::Challenges) when encoding this AIR's bus messages.
 //!
 //! Every Miden bus emitter in `buses/*.rs` and every
 //! [`LookupMessage`](crate::constraints::lookup::LookupMessage) impl in `logup_msg.rs` picks its
 //! bus by name from the [`bus_types`] sub-module or the `BUS_*` re-exports below.
 //! [`MidenLookupAir`](super::MidenLookupAir) reports [`MIDEN_MAX_MESSAGE_WIDTH`] from
 //! `max_message_width()` and [`NUM_BUS_IDS`] from `num_bus_ids()`;
-//! [`Challenges::new`](crate::trace::Challenges::new) uses those two numbers to size its
+//! [`Challenges::new`](crate::lookup::Challenges::new) uses those two numbers to size its
 //! `beta_powers` and `bus_prefix` tables.
 
 /// Width of the `beta_powers` table `Challenges` precomputes for Miden's bus
@@ -20,8 +20,8 @@ pub const MIDEN_MAX_MESSAGE_WIDTH: usize = 16;
 /// Miden's bus interaction type constants for domain separation.
 ///
 /// Each constant identifies a distinct bus interaction type. When encoding a message,
-/// the bus index is passed to [`Challenges::encode`](crate::trace::Challenges::encode)
-/// or [`Challenges::encode_sparse`](crate::trace::Challenges::encode_sparse), which
+/// the bus index is passed to [`Challenges::encode`](crate::lookup::Challenges::encode)
+/// or [`Challenges::encode_sparse`](crate::lookup::Challenges::encode_sparse), which
 /// uses `bus_prefix[bus]` as the additive base instead of bare `alpha`.
 ///
 /// This ensures messages from different buses are always distinct, even if they share

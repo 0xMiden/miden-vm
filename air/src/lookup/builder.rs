@@ -346,7 +346,7 @@ pub trait LookupGroup {
     ///
     /// The slice length is exactly `W` — there is **no** trailing `β^W`
     /// entry, because that power is the per-bus step baked into every
-    /// [`LookupChallenges::bus_prefix`](super::LookupChallenges) entry
+    /// [`Challenges::bus_prefix`](super::Challenges) entry
     /// at builder-construction time. Authors that want to build their
     /// own encoded denominator loop should iterate over `beta_powers()`
     /// directly and slice to their own message width.

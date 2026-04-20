@@ -20,15 +20,11 @@ use miden_core::field::PrimeCharacteristicRing;
 use crate::{
     constraints::{
         chiplets::columns::PeriodicCols,
-        logup_msg::{
-            AceInitMsg, BitwiseResponseMsg, HasherMsg, KernelRomMsg, MemoryResponseMsg,
-        },
-        lookup::{
-            Deg, LookupColumn, LookupGroup,
-            chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
-        },
+        logup_msg::{AceInitMsg, BitwiseResponseMsg, HasherMsg, KernelRomMsg, MemoryResponseMsg},
+        lookup::chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
         utils::BoolNot,
     },
+    lookup::{Deg, LookupColumn, LookupGroup},
     trace::chiplets::{
         bitwise::{BITWISE_AND_LABEL, BITWISE_XOR_LABEL},
         hasher::{

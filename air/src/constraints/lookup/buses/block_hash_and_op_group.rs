@@ -32,13 +32,13 @@ use core::array;
 
 use miden_core::field::PrimeCharacteristicRing;
 
-use crate::constraints::{
-    logup_msg::{BlockHashMsg, OpGroupMsg},
-    lookup::{
-        Deg, LookupBatch, LookupColumn, LookupGroup,
-        main_air::{MainBusContext, MainLookupBuilder},
+use crate::{
+    constraints::{
+        logup_msg::{BlockHashMsg, OpGroupMsg},
+        lookup::main_air::{MainBusContext, MainLookupBuilder},
+        utils::{BoolNot, horner_eval_bits},
     },
-    utils::{BoolNot, horner_eval_bits},
+    lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
 };
 
 /// Upper bound on fractions this emitter pushes into its column per row.

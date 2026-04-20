@@ -10,12 +10,12 @@
 //!   aggregate; it consumes `(b1, s15', hasher_state[5])` because the new overflow pointer after a
 //!   DYNCALL is staged in the decoder hasher state, not in `b1'` (which is reset).
 
-use crate::constraints::{
-    logup_msg::StackOverflowMsg,
-    lookup::{
-        Deg, LookupColumn, LookupGroup,
-        main_air::{MainBusContext, MainLookupBuilder},
+use crate::{
+    constraints::{
+        logup_msg::StackOverflowMsg,
+        lookup::main_air::{MainBusContext, MainLookupBuilder},
     },
+    lookup::{Deg, LookupColumn, LookupGroup},
 };
 
 /// Upper bound on fractions this emitter pushes into its column per row.

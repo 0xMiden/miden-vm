@@ -14,11 +14,11 @@
 //! aggregator.
 
 use super::{
-    Deg, LookupAir,
     bus_id::NUM_BUS_IDS,
     chiplet_air::{CHIPLET_COLUMN_SHAPE, ChipletLookupAir, ChipletLookupBuilder},
     main_air::{MAIN_COLUMN_SHAPE, MainLookupAir, MainLookupBuilder},
 };
+use crate::lookup::{Deg, LookupAir};
 
 // MIDEN LOOKUP AIR
 // ================================================================================================
@@ -106,13 +106,13 @@ mod tests {
     use crate::{
         Felt, NUM_PUBLIC_VALUES, ProcessorAir,
         constraints::lookup::{
-            LookupChallenges,
             bus_id::{MIDEN_MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
             debug::{
                 check_challenge_scoping, check_encoding_equivalence, check_symbolic_degrees,
                 check_trace_balance, collect_inventory,
             },
         },
+        lookup::Challenges,
         trace::TRACE_WIDTH,
     };
 
@@ -154,7 +154,7 @@ mod tests {
             let next_row: Vec<Felt> = (0..TRACE_WIDTH).map(|_| random_felt()).collect();
             let periodic_values: Vec<Felt> = (0..num_periodic()).map(|_| random_felt()).collect();
             let public_values: Vec<Felt> = (0..NUM_PUBLIC_VALUES).map(|_| random_felt()).collect();
-            let challenges = LookupChallenges::<QuadFelt>::new(
+            let challenges = Challenges::<QuadFelt>::new(
                 QuadFelt::new([random_felt(), random_felt()]),
                 QuadFelt::new([random_felt(), random_felt()]),
                 MIDEN_MAX_MESSAGE_WIDTH,
@@ -237,7 +237,7 @@ mod tests {
         let periodic: Vec<Vec<Felt>> =
             (0..num_periodic()).map(|_| vec![Felt::ZERO; NUM_ROWS]).collect();
         let publics: Vec<Felt> = vec![Felt::ZERO; NUM_PUBLIC_VALUES];
-        let challenges = LookupChallenges::<QuadFelt>::new(
+        let challenges = Challenges::<QuadFelt>::new(
             QuadFelt::ONE,
             QuadFelt::ONE,
             MIDEN_MAX_MESSAGE_WIDTH,

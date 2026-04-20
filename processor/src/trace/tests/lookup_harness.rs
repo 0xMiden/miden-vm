@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 use miden_air::{
     LOGUP_AUX_TRACE_WIDTH, LiftedAir, ProcessorAir,
     lookup::{
-        LookupChallenges, LookupMessage, MIDEN_MAX_MESSAGE_WIDTH, MidenLookupAir, NUM_BUS_IDS,
+        Challenges, LookupMessage, MIDEN_MAX_MESSAGE_WIDTH, MidenLookupAir, NUM_BUS_IDS,
         accumulate, build_lookup_fractions,
     },
 };
@@ -55,7 +55,7 @@ pub(super) mod aux_col {
 /// Per-test view over the `accumulate`-built aux trace for a given [`ExecutionTrace`].
 ///
 /// Owns the 7-column `(num_rows + 1) × 7` accumulator matrix and the randomised
-/// [`LookupChallenges`] used to encode expected messages. Tests call [`Self::delta`] to
+/// [`Challenges`] used to encode expected messages. Tests call [`Self::delta`] to
 /// query per-row deltas on a specific aggregator column and [`Self::fraction`] to encode
 /// expected `LookupMessage`s into their matching `1 / denom` contributions.
 pub(super) struct LookupHarness {
@@ -68,7 +68,7 @@ pub(super) struct LookupHarness {
     num_cols: usize,
     /// Challenges used to encode all expected messages. Also exposed for callers that need to
     /// reach into `bus_prefix` / `beta_powers` directly.
-    pub challenges: LookupChallenges<QuadFelt>,
+    pub challenges: Challenges<QuadFelt>,
 }
 
 #[allow(dead_code)]
@@ -92,7 +92,7 @@ impl LookupHarness {
         let beta = QuadFelt::new([raw[2], raw[3]]);
         let air = MidenLookupAir;
         let challenges =
-            LookupChallenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
+            Challenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
 
         let fractions =
             build_lookup_fractions(&air, &main_trace, &periodic, &public_vals, &challenges);

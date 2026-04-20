@@ -506,7 +506,7 @@ mod tests {
     use super::*;
     use crate::{
         Felt,
-        constraints::lookup::{LookupAir, LookupBuilder},
+        lookup::{LookupAir, LookupBuilder},
     };
 
     // Small deterministic LCG — reproducible stream for random-fixture cross-check tests.
@@ -677,7 +677,7 @@ mod tests {
     #[test]
     fn new_reserves_capacity() {
         let air = FakeAir { shape: [3, 5] };
-        type LB<'a> = super::super::ProverLookupBuilder<'a, Felt, QuadFelt>;
+        type LB<'a> = crate::lookup::ProverLookupBuilder<'a, Felt, QuadFelt>;
         let fx: LookupFractions<Felt, QuadFelt> = LookupFractions::new::<_, LB<'_>>(&air, 10);
 
         assert_eq!(fx.num_columns(), 2);

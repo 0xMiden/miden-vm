@@ -13,7 +13,7 @@
 
 use miden_core::field::{Algebra, PrimeCharacteristicRing};
 
-use crate::trace::Challenges;
+use crate::lookup::Challenges;
 
 // HASHER MESSAGES
 // ================================================================================================
@@ -527,7 +527,7 @@ impl<E: PrimeCharacteristicRing + Clone> BitwiseResponseMsg<E> {}
 // LOOKUP MESSAGE IMPLEMENTATIONS
 // ================================================================================================
 
-use super::lookup::message::LookupMessage;
+use crate::lookup::message::LookupMessage;
 
 // --- HasherMsg (BUS_CHIPLETS; label_value at β⁰) -------------------------------------------------
 

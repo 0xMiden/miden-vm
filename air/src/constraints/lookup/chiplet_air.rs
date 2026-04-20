@@ -15,7 +15,6 @@ use core::borrow::Borrow;
 use miden_crypto::stark::air::WindowAccess;
 
 use super::{
-    LookupAir, LookupBuilder,
     bus_id::NUM_BUS_IDS,
     buses::{
         ChipletActiveFlags,
@@ -24,7 +23,10 @@ use super::{
         wiring::{self, emit_v_wiring},
     },
 };
-use crate::{Felt, MainCols};
+use crate::{
+    Felt, MainCols,
+    lookup::{LookupAir, LookupBuilder},
+};
 
 // CHIPLET LOOKUP BUILDER
 // ================================================================================================

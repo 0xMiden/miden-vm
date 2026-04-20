@@ -22,31 +22,7 @@ use miden_crypto::stark::air::{
 pub mod ace;
 pub mod config;
 mod constraints;
-
-/// Public surface for the prover-side LogUp collection phase.
-///
-/// Re-exports the stable API of the internal `constraints::lookup` module so downstream
-/// crates (notably `miden-processor` tests) can drive `MidenLookupAir` through
-/// [`build_lookup_fractions`](self::lookup::build_lookup_fractions) without the rest of
-/// `constraints::lookup` leaking.
-pub mod lookup {
-    pub use crate::constraints::lookup::{
-        LookupAir, LookupChallenges, LookupFractions, LookupMessage, MidenLookupAir,
-        MidenLookupAuxBuilder, ProverLookupBuilder, accumulate, accumulate_slow,
-        build_lookup_fractions,
-        bus_id::{MIDEN_MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
-    };
-
-    /// Unified LogUp debugging surface — inventory, symbolic degree pass, scope enforcement,
-    /// encoding equivalence, real-trace balance, per-row oracle. See the module docs for
-    /// entry-point usage. Gated behind the `bus-debug` feature.
-    #[cfg(feature = "bus-debug")]
-    pub mod debug {
-        pub use crate::constraints::lookup::{
-            ColumnOracleBuilder, collect_column_oracle_folds, debug::*,
-        };
-    }
-}
+pub mod lookup;
 
 /// Re-exports the bus-message structs from the internal `constraints::logup_msg` module so
 /// the processor's trace tests can hand-construct expected `LookupMessage` instances and
@@ -326,7 +302,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
 
         let challenges = {
             use crate::constraints::lookup::bus_id::{MIDEN_MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
-            trace::Challenges::<EF>::new(
+            lookup::Challenges::<EF>::new(
                 challenges[0],
                 challenges[1],
                 MIDEN_MAX_MESSAGE_WIDTH,
@@ -362,9 +338,9 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
     }
 
     fn eval<AB: MidenAirBuilder>(&self, builder: &mut AB) {
-        use crate::constraints::{
-            self,
-            lookup::{ConstraintLookupBuilder, LookupAir, MidenLookupAir},
+        use crate::{
+            constraints::{self, lookup::MidenLookupAir},
+            lookup::{ConstraintLookupBuilder, LookupAir},
         };
 
         let main = builder.main();
@@ -416,7 +392,7 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
 /// Must match `BlockHashTableRow::from_end().collapse()` on the prover side for the
 /// root block, which encodes `[parent_id=0, hash[0..4], is_first_child=0, is_loop_body=0]`.
 fn program_hash_message<EF: ExtensionField<Felt>>(
-    challenges: &trace::Challenges<EF>,
+    challenges: &lookup::Challenges<EF>,
     program_hash: &Word,
 ) -> EF {
     challenges.encode(
@@ -439,7 +415,7 @@ fn program_hash_message<EF: ExtensionField<Felt>>(
 /// The initial message uses the default (zero) capacity state; the final message uses
 /// the public-input transcript state.
 fn transcript_messages<EF: ExtensionField<Felt>>(
-    challenges: &trace::Challenges<EF>,
+    challenges: &lookup::Challenges<EF>,
     final_state: PrecompileTranscriptState,
 ) -> (EF, EF) {
     let encode = |state: PrecompileTranscriptState| {
@@ -459,7 +435,7 @@ fn transcript_messages<EF: ExtensionField<Felt>>(
 /// the bus is matched entirely between decoder-emitted SYSCALL removes and the chiplet's
 /// multiplicity-weighted CALL add, and does not need a public-input correction term.
 fn kernel_proc_message<EF: ExtensionField<Felt>>(
-    challenges: &trace::Challenges<EF>,
+    challenges: &lookup::Challenges<EF>,
     digest: &Word,
 ) -> EF {
     challenges.encode(
@@ -484,7 +460,7 @@ fn kernel_proc_message<EF: ExtensionField<Felt>>(
 /// Expects exactly one variable-length public input slice containing all kernel digests
 /// as concatenated `Felt`s (i.e. `len % WORD_SIZE == 0`).
 fn kernel_logup_correction_from_var_len<EF: ExtensionField<Felt>>(
-    challenges: &trace::Challenges<EF>,
+    challenges: &lookup::Challenges<EF>,
     var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
 ) -> Result<EF, ReductionError> {
     if var_len_public_inputs.len() != 1 {

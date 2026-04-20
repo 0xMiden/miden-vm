@@ -12,8 +12,7 @@ use miden_crypto::stark::air::RowWindow;
 
 use super::{
     super::super::{
-        Deg, LookupBatch, LookupBuilder, LookupChallenges, LookupColumn, LookupGroup,
-        LookupMessage, chiplet_air::ChipletLookupBuilder, main_air::MainLookupBuilder,
+        Challenges, Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup, LookupMessage,
     },
     DebugTraceState, MutualExclusionViolation, accumulate_balance,
 };
@@ -27,7 +26,7 @@ pub struct DebugTraceBuilder<'a> {
     main: RowWindow<'a, Felt>,
     periodic_values: &'a [Felt],
     public_values: &'a [Felt],
-    challenges: &'a LookupChallenges<QuadFelt>,
+    challenges: &'a Challenges<QuadFelt>,
     state: &'a mut DebugTraceState,
     row_idx: usize,
     column_idx: usize,
@@ -38,7 +37,7 @@ impl<'a> DebugTraceBuilder<'a> {
         main: RowWindow<'a, Felt>,
         periodic_values: &'a [Felt],
         public_values: &'a [Felt],
-        challenges: &'a LookupChallenges<QuadFelt>,
+        challenges: &'a Challenges<QuadFelt>,
         state: &'a mut DebugTraceState,
         row_idx: usize,
     ) -> Self {
@@ -104,14 +103,11 @@ impl<'a> LookupBuilder for DebugTraceBuilder<'a> {
     }
 }
 
-impl<'a> MainLookupBuilder for DebugTraceBuilder<'a> {}
-impl<'a> ChipletLookupBuilder for DebugTraceBuilder<'a> {}
-
 // COLUMN
 // ================================================================================================
 
 pub struct DebugTraceColumn<'c> {
-    challenges: &'c LookupChallenges<QuadFelt>,
+    challenges: &'c Challenges<QuadFelt>,
     state: &'c mut DebugTraceState,
     row_idx: usize,
     column_idx: usize,
@@ -204,7 +200,7 @@ impl<'c> LookupColumn for DebugTraceColumn<'c> {
 // ================================================================================================
 
 pub struct DebugTraceGroup<'g> {
-    challenges: &'g LookupChallenges<QuadFelt>,
+    challenges: &'g Challenges<QuadFelt>,
     state: &'g mut DebugTraceState,
     u: QuadFelt,
     v: QuadFelt,
@@ -339,7 +335,7 @@ impl<'g> LookupGroup for DebugTraceGroup<'g> {
 // ================================================================================================
 
 pub struct DebugTraceBatch<'b> {
-    challenges: &'b LookupChallenges<QuadFelt>,
+    challenges: &'b Challenges<QuadFelt>,
     state: &'b mut DebugTraceState,
     /// `false` if the outer group's flag was zero — batch-level short-circuit for balance
     /// accumulation. `(N, D)` still tracks normally so the outer group's `(U_g, V_g)` fold
