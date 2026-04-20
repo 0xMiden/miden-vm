@@ -36,10 +36,9 @@ impl Pattern {
         let input = input.as_ref();
         if !self.is_match(input) {
             panic!(
-                r"expected string was not found in emitted diagnostics:
-expected input to {self}
-matched against: `{input}`
-"
+                "expected string was not found in emitted diagnostics:\n\
+                 expected input to {self}\n\
+                 matched against: `{input}`"
             );
         }
     }
@@ -52,11 +51,10 @@ matched against: `{input}`
         let context = context.as_ref();
         if !self.is_match(input) {
             panic!(
-                r"expected string was not found in emitted diagnostics:
-expected input to {self}
-matched against: `{input}`
-full output: `{context}`
-"
+                "expected string was not found in emitted diagnostics:\n\
+                 expected input to {self}\n\
+                 matched against: `{input}`\n\
+                 full output: `{context}`"
             );
         }
     }
