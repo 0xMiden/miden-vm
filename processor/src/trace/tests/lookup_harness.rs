@@ -9,7 +9,10 @@ use alloc::vec::Vec;
 
 use miden_air::{
     LOGUP_AUX_TRACE_WIDTH, LiftedAir, ProcessorAir,
-    lookup::{LookupChallenges, LookupMessage, MidenLookupAir, accumulate, build_lookup_fractions},
+    lookup::{
+        LookupChallenges, LookupMessage, MIDEN_MAX_MESSAGE_WIDTH, MidenLookupAir, NUM_BUS_IDS,
+        accumulate, build_lookup_fractions,
+    },
 };
 use miden_core::{
     field::{Field, PrimeCharacteristicRing, QuadFelt},
@@ -87,9 +90,10 @@ impl LookupHarness {
         let raw = rand_array::<Felt, 4>();
         let alpha = QuadFelt::new([raw[0], raw[1]]);
         let beta = QuadFelt::new([raw[2], raw[3]]);
-        let challenges = LookupChallenges::<QuadFelt>::new(alpha, beta);
-
         let air = MidenLookupAir;
+        let challenges =
+            LookupChallenges::<QuadFelt>::new(alpha, beta, MIDEN_MAX_MESSAGE_WIDTH, NUM_BUS_IDS);
+
         let fractions =
             build_lookup_fractions(&air, &main_trace, &periodic, &public_vals, &challenges);
         let aux = accumulate(&fractions);

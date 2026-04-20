@@ -82,7 +82,12 @@ where
         // prover- and constraint-path challenges line up.
         let alpha = challenges[0];
         let beta = challenges[1];
-        let lookup_challenges = LookupChallenges::<EF>::new(alpha, beta);
+        let lookup_challenges = LookupChallenges::<EF>::new(
+            alpha,
+            beta,
+            super::bus_id::MIDEN_MAX_MESSAGE_WIDTH,
+            super::bus_id::NUM_BUS_IDS,
+        );
 
         // Periodic columns are part of the AIR's static layout — recomputing them per
         // call is cheap (a fixed set of `Vec<Felt>` constructors) and keeps the builder

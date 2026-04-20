@@ -34,6 +34,7 @@ pub mod lookup {
         LookupAir, LookupChallenges, LookupFractions, LookupMessage, MidenLookupAir,
         MidenLookupAuxBuilder, ProverLookupBuilder, accumulate, accumulate_slow,
         build_lookup_fractions,
+        bus_id::{MIDEN_MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
     };
 
     /// Unified LogUp debugging surface — inventory, symbolic degree pass, scope enforcement,
@@ -56,8 +57,8 @@ pub mod logup_msg {
 }
 
 pub mod trace;
-use constraints::columns::MainCols;
-use trace::{TRACE_WIDTH, bus_types};
+use constraints::{columns::MainCols, lookup::bus_id::bus_types};
+use trace::TRACE_WIDTH;
 
 // RE-EXPORTS
 // ================================================================================================
@@ -323,7 +324,15 @@ impl<EF: ExtensionField<Felt>> LiftedAir<Felt, EF> for ProcessorAir {
             .try_into()
             .map_err(|_| -> ReductionError { "invalid transcript state slice".into() })?;
 
-        let challenges = trace::Challenges::<EF>::new(challenges[0], challenges[1]);
+        let challenges = {
+            use crate::constraints::lookup::bus_id::{MIDEN_MAX_MESSAGE_WIDTH, NUM_BUS_IDS};
+            trace::Challenges::<EF>::new(
+                challenges[0],
+                challenges[1],
+                MIDEN_MAX_MESSAGE_WIDTH,
+                NUM_BUS_IDS,
+            )
+        };
 
         let invert = |x: EF| -> Result<EF, ReductionError> {
             x.try_inverse()

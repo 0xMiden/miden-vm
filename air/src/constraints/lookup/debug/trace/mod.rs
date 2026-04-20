@@ -1,7 +1,7 @@
 //! Combined real-trace balance + per-column `(U, V)` oracle debug surface.
 //!
 //! One walk over a concrete main trace, row by row, produces two outputs projected out of
-//! the shared [`run_trace_walk`] driver:
+//! the shared `run_trace_walk` driver:
 //!
 //! - **Balance** — signed multiplicities keyed by encoded denominator. Any residual at the end of
 //!   the walk is an unmatched interaction.
@@ -10,10 +10,10 @@
 //!
 //! Layout:
 //!
-//! - [`builder`] — the [`DebugTraceBuilder`] (plus column / group / batch handles) that drives each
+//! - [`builder`] — the `DebugTraceBuilder` (plus column / group / batch handles) that drives each
 //!   per-row walk.
 //! - This file — the report types ([`BalanceReport`], [`Unmatched`], …), the row-by-row
-//!   [`run_trace_walk`] driver, and the two public entry points.
+//!   `run_trace_walk` driver, and the two public entry points.
 
 use alloc::{
     collections::BTreeMap,

@@ -235,12 +235,12 @@ where
 /// range `[lo, hi)` can look up its flat-fraction slice in O(1). Sequential, O(num_rows ·
 /// num_cols) `usize` adds.
 ///
-/// **Phase 1 — chunked fused walk.** Split rows into groups of [`ACCUMULATE_ROWS_PER_CHUNK`]
+/// **Phase 1 — chunked fused walk.** Split rows into groups of `ACCUMULATE_ROWS_PER_CHUNK`
 /// and process each chunk independently (serial or rayon-parallel depending on the
 /// `concurrent` feature):
 ///
 /// 1. Montgomery inversion of the chunk's denominators into a chunk-local `scratch` buffer via
-///    [`invert_denoms_in_place`]: one forward prefix-product pass, one `try_inverse`, one backward
+///    `invert_denoms_in_place`: one forward prefix-product pass, one `try_inverse`, one backward
 ///    sweep. Scratch fits in L1/L2 at the 512-row tuning.
 /// 2. Forward walk by row over the chunk's counts slice. The `running: Vec<EF>` register starts at
 ///    `EF::ZERO` (every chunk computes a **local** prefix, ignoring earlier chunks). Each `(row,

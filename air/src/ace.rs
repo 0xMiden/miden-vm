@@ -147,7 +147,7 @@ where
 /// Encode a bus message as `bus_prefix[bus] + sum(beta^i * elements[i])`.
 ///
 /// The bus prefix provides domain separation: `bus_prefix[bus] = alpha + (bus+1) * gamma_bus`
-/// where `gamma_bus = beta^MAX_MESSAGE_WIDTH`. This matches [`trace::Challenges::encode`].
+/// where `gamma_bus = beta^MIDEN_MAX_MESSAGE_WIDTH`. This matches [`trace::Challenges::encode`].
 fn encode_bus_message<EF>(
     builder: &mut DagBuilder<EF>,
     bus: usize,
@@ -156,12 +156,14 @@ fn encode_bus_message<EF>(
 where
     EF: ExtensionField<Felt>,
 {
+    use crate::constraints::lookup::bus_id::MIDEN_MAX_MESSAGE_WIDTH;
+
     let alpha = builder.input(InputKey::AuxRandAlpha);
     let beta = builder.input(InputKey::AuxRandBeta);
 
-    // gamma_bus = beta^MAX_MESSAGE_WIDTH.
+    // gamma_bus = beta^MIDEN_MAX_MESSAGE_WIDTH.
     let mut gamma_bus = builder.constant(EF::ONE);
-    for _ in 0..trace::MAX_MESSAGE_WIDTH {
+    for _ in 0..MIDEN_MAX_MESSAGE_WIDTH {
         gamma_bus = builder.mul(gamma_bus, beta);
     }
 
@@ -210,7 +212,8 @@ where
 /// uniform at the cost of two extra mul gates.
 pub fn logup_boundary_config() -> LogUpBoundaryConfig {
     use MessageElement::{Constant, PublicInput};
-    use trace::bus_types;
+
+    use crate::constraints::lookup::bus_id::bus_types;
 
     let log_precompile_label = Felt::from_u8(trace::LOG_PRECOMPILE_LABEL);
 

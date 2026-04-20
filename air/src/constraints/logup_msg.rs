@@ -63,7 +63,7 @@ impl<E: PrimeCharacteristicRing + Clone> HasherMsg<E> {
         }
     }
 
-    /// Control block init: 8 rate lanes + opcode at capacity[1], zeros elsewhere.
+    /// Control block init: 8 rate lanes + opcode at `capacity[1]`, zeros elsewhere.
     ///
     /// Used by: JOIN, SPLIT, LOOP, SPAN, CALL, SYSCALL, DYN, DYNCALL.
     pub fn control_block(addr: E, rate: &[E; 8], opcode: u8) -> Self {
@@ -365,7 +365,7 @@ impl<E: PrimeCharacteristicRing + Clone> OpGroupMsg<E> {
 
 /// Stack overflow table message (3 elements): `[clk, val, prev]`.
 ///
-/// `clk` is the cycle at which the value spilled past stack[15], `val` is the spilled element,
+/// `clk` is the cycle at which the value spilled past `stack[15]`, `val` is the spilled element,
 /// and `prev` links to the previous overflow entry (the prior `b1`).
 #[derive(Clone, Debug)]
 pub struct StackOverflowMsg<E> {
@@ -394,8 +394,7 @@ pub struct HasherPermLinkMsg<E> {
 
 /// Kernel ROM message (5 elements): `[label, digest[4]]`.
 ///
-/// Constructed via [`KernelRomMsg::call`] (KERNEL_PROC_CALL_LABEL = 16) or
-/// [`KernelRomMsg::init`] (KERNEL_PROC_INIT_LABEL = 48).
+/// Constructed via [`KernelRomMsg::call`] (KERNEL_PROC_CALL_LABEL = 16).
 #[derive(Clone, Debug)]
 pub struct KernelRomMsg<E> {
     label: u16,

@@ -276,7 +276,12 @@ where
     let next = vec![Felt::ZERO; trace_width];
     let periodic = vec![Felt::ZERO; num_periodic];
     let publics = vec![Felt::ZERO; num_public_values];
-    let challenges = LookupChallenges::<QuadFelt>::new(QuadFelt::ONE, QuadFelt::ONE);
+    let challenges = LookupChallenges::<QuadFelt>::new(
+        QuadFelt::ONE,
+        QuadFelt::ONE,
+        air.max_message_width(),
+        air.num_bus_ids(),
+    );
     inspect_structure(air, air_name, &current, &next, &periodic, &publics, &challenges)
 }
 
@@ -445,7 +450,12 @@ where
     let publics: Vec<Felt> = (0..num_public_values).map(|_| random_felt()).collect();
     let alpha = QuadFelt::new([random_felt(), random_felt()]);
     let beta = QuadFelt::new([random_felt(), random_felt()]);
-    let challenges = LookupChallenges::<QuadFelt>::new(alpha, beta);
+    let challenges = LookupChallenges::<QuadFelt>::new(
+        alpha,
+        beta,
+        <A as LookupAir<DebugStructureBuilder<'_>>>::max_message_width(air),
+        <A as LookupAir<DebugStructureBuilder<'_>>>::num_bus_ids(air),
+    );
 
     let inventory =
         inspect_structure(air, air_name, &current, &next, &periodic, &publics, &challenges);

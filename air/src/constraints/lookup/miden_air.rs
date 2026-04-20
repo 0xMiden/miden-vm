@@ -25,7 +25,7 @@ use super::{
 
 /// Aggregator [`LookupAir`] for the Miden VM's 7-column LogUp argument.
 ///
-/// Zero-sized; `eval` delegates to [`MainLookupAir`] and [`ChipletLookupAir`] in sequence.
+/// Zero-sized; `eval` delegates to `MainLookupAir` and `ChipletLookupAir` in sequence.
 /// Consumers that want the full 7-column picture in one `eval` call reach for this type;
 /// consumers that want to address the main and chiplet halves independently (e.g. a future
 /// enum-dispatch wrapper) reach directly for the two sub-AIRs instead.
@@ -65,11 +65,13 @@ where
     }
 
     fn max_message_width(&self) -> usize {
-        // `HasherMsg::State` holds the widest payload on both sides: label@β⁰, addr@β¹,
-        // node_index@β², state[0..12]@β³..β¹⁴ — 15 slots. Every other message stays within
-        // 14 slots. Sized at 15 to leave slack-free accommodation for β¹⁴ without
-        // over-allocating. Hard-coded for the same reason as `num_columns`.
-        15
+        // Width of the `beta_powers` table precomputed by `Challenges::new`, also equal
+        // to the exponent of `gamma = beta^MIDEN_MAX_MESSAGE_WIDTH` used in the per-bus
+        // prefix. Must match the MASM recursive verifier's Poseidon2 absorption loop.
+        // `HasherMsg::State` is the widest live payload at 15 slots (label@β⁰, addr@β¹,
+        // node_index@β², state[0..12]@β³..β¹⁴); the 16th slot is unused slack kept for
+        // MASM transcript alignment.
+        crate::constraints::lookup::bus_id::MIDEN_MAX_MESSAGE_WIDTH
     }
 
     fn num_bus_ids(&self) -> usize {
@@ -105,6 +107,7 @@ mod tests {
         Felt, NUM_PUBLIC_VALUES, ProcessorAir,
         constraints::lookup::{
             LookupChallenges,
+            bus_id::{MIDEN_MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
             debug::{
                 check_challenge_scoping, check_encoding_equivalence, check_symbolic_degrees,
                 check_trace_balance, collect_inventory,
@@ -154,6 +157,8 @@ mod tests {
             let challenges = LookupChallenges::<QuadFelt>::new(
                 QuadFelt::new([random_felt(), random_felt()]),
                 QuadFelt::new([random_felt(), random_felt()]),
+                MIDEN_MAX_MESSAGE_WIDTH,
+                NUM_BUS_IDS,
             );
 
             let mismatches = check_encoding_equivalence(
@@ -232,7 +237,12 @@ mod tests {
         let periodic: Vec<Vec<Felt>> =
             (0..num_periodic()).map(|_| vec![Felt::ZERO; NUM_ROWS]).collect();
         let publics: Vec<Felt> = vec![Felt::ZERO; NUM_PUBLIC_VALUES];
-        let challenges = LookupChallenges::<QuadFelt>::new(QuadFelt::ONE, QuadFelt::ONE);
+        let challenges = LookupChallenges::<QuadFelt>::new(
+            QuadFelt::ONE,
+            QuadFelt::ONE,
+            MIDEN_MAX_MESSAGE_WIDTH,
+            NUM_BUS_IDS,
+        );
 
         let _ = check_trace_balance(&MidenLookupAir, &main_trace, &periodic, &publics, &challenges);
     }

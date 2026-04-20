@@ -11,45 +11,63 @@
 //! - **Verifier** (`reduced_aux_values`): `Challenges<EF>`
 //!
 //! See [`super::bus_message`] for the standard coefficient index layout.
-//! See [`super::bus_types`] for the bus interaction type constants.
 
+use alloc::{boxed::Box, vec::Vec};
 use core::ops::{AddAssign, Mul};
 
 use miden_core::field::PrimeCharacteristicRing;
 
-use super::{MAX_MESSAGE_WIDTH, bus_types::NUM_BUS_TYPES};
-
 /// Encodes multiset/LogUp contributions as **bus_prefix\[bus\] + \<beta, message\>**.
 ///
 /// - `alpha`: randomness base (kept public for direct access by range checker etc.)
-/// - `beta_powers`: precomputed powers `[beta^0, beta^1, ..., beta^(MAX_MESSAGE_WIDTH-1)]`
+/// - `beta_powers`: precomputed powers `[beta^0, beta^1, ..., beta^(max_message_width-1)]`
 /// - `bus_prefix`: per-bus domain separation constants `bus_prefix[i] = alpha + (i+1) *
-///   beta^MAX_MESSAGE_WIDTH`
+///   beta^max_message_width`
 ///
 /// The challenges are derived from permutation randomness:
 /// - `alpha = challenges[0]`
 /// - `beta  = challenges[1]`
 ///
-/// Precomputed once and passed by reference to all bus components.
+/// Widths (`beta_powers.len()` and `bus_prefix.len()`) come from the [`LookupAir`]'s
+/// `max_message_width()` / `num_bus_ids()` at construction time. The struct is built
+/// once and read-only thereafter — `Box<[EF]>` over `Vec<EF>` drops the unused
+/// capacity word and signals fixed length.
+///
+/// [`LookupAir`]: crate::constraints::lookup::LookupAir
 pub struct Challenges<EF: PrimeCharacteristicRing> {
     pub alpha: EF,
-    pub beta_powers: [EF; MAX_MESSAGE_WIDTH],
+    pub beta_powers: Box<[EF]>,
     /// Per-bus domain separation: `bus_prefix[i] = alpha + (i+1) * gamma`
-    /// where `gamma = beta^MAX_MESSAGE_WIDTH`.
-    pub bus_prefix: [EF; NUM_BUS_TYPES],
+    /// where `gamma = beta^max_message_width`.
+    pub bus_prefix: Box<[EF]>,
 }
 
 impl<EF: PrimeCharacteristicRing> Challenges<EF> {
-    /// Builds `alpha`, precomputed `beta` powers, and per-bus prefixes.
-    pub fn new(alpha: EF, beta: EF) -> Self {
-        let mut beta_powers = core::array::from_fn(|_| EF::ONE);
-        for i in 1..MAX_MESSAGE_WIDTH {
-            beta_powers[i] = beta_powers[i - 1].clone() * beta.clone();
+    /// Builds `alpha`, precomputed `beta` powers, and per-bus prefixes sized from the
+    /// [`LookupAir`]'s `max_message_width()` / `num_bus_ids()`.
+    ///
+    /// `beta_powers` holds `max_message_width` entries (indices `0..max_message_width`).
+    /// `bus_prefix` holds `num_bus_ids` entries.
+    /// `gamma = beta^max_message_width` (one power beyond the highest `beta_powers` index).
+    ///
+    /// [`LookupAir`]: crate::constraints::lookup::LookupAir
+    pub fn new(alpha: EF, beta: EF, max_message_width: usize, num_bus_ids: usize) -> Self {
+        assert!(max_message_width > 0, "max_message_width must be non-zero");
+
+        let mut beta_powers: Vec<EF> = Vec::with_capacity(max_message_width);
+        beta_powers.push(EF::ONE);
+        for i in 1..max_message_width {
+            beta_powers.push(beta_powers[i - 1].clone() * beta.clone());
         }
-        // gamma = beta^MAX_MESSAGE_WIDTH (one power beyond the message range)
-        let gamma = beta_powers[MAX_MESSAGE_WIDTH - 1].clone() * beta;
-        let bus_prefix =
-            core::array::from_fn(|i| alpha.clone() + gamma.clone() * EF::from_u32((i as u32) + 1));
+        let beta_powers = beta_powers.into_boxed_slice();
+
+        // gamma = beta^max_message_width (one power beyond the message range)
+        let gamma = beta_powers[max_message_width - 1].clone() * beta;
+
+        let bus_prefix: Box<[EF]> = (0..num_bus_ids)
+            .map(|i| alpha.clone() + gamma.clone() * EF::from_u32((i as u32) + 1))
+            .collect();
+
         Self { alpha, beta_powers, bus_prefix }
     }
 
@@ -62,10 +80,15 @@ impl<EF: PrimeCharacteristicRing> Challenges<EF> {
     where
         EF: Mul<BF, Output = EF> + AddAssign,
     {
-        const { assert!(K <= MAX_MESSAGE_WIDTH, "Message length exceeds beta_powers capacity") };
         debug_assert!(
-            bus < NUM_BUS_TYPES,
-            "Bus index {bus} exceeds NUM_BUS_TYPES ({NUM_BUS_TYPES})"
+            K <= self.beta_powers.len(),
+            "Message length {K} exceeds beta_powers capacity ({})",
+            self.beta_powers.len(),
+        );
+        debug_assert!(
+            bus < self.bus_prefix.len(),
+            "Bus index {bus} exceeds bus_prefix length ({})",
+            self.bus_prefix.len(),
         );
         let mut acc = self.bus_prefix[bus].clone();
         for (i, elem) in elems.into_iter().enumerate() {
@@ -89,8 +112,9 @@ impl<EF: PrimeCharacteristicRing> Challenges<EF> {
         EF: Mul<BF, Output = EF> + AddAssign,
     {
         debug_assert!(
-            bus < NUM_BUS_TYPES,
-            "Bus index {bus} exceeds NUM_BUS_TYPES ({NUM_BUS_TYPES})"
+            bus < self.bus_prefix.len(),
+            "Bus index {bus} exceeds bus_prefix length ({})",
+            self.bus_prefix.len(),
         );
         let mut acc = self.bus_prefix[bus].clone();
         for (idx, value) in layout.into_iter().zip(values) {

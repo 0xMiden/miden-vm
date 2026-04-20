@@ -72,8 +72,14 @@ mod tests {
 
     /// Helper: build challenges from the symbolic builder's randomness.
     fn make_challenges(builder: &mut SB) -> Challenges<ExprEF> {
+        use crate::constraints::lookup::{LookupAir, MidenLookupAir};
         let r = builder.permutation_randomness();
-        Challenges::new(r[0].into(), r[1].into())
+        Challenges::new(
+            r[0].into(),
+            r[1].into(),
+            MidenLookupAir.max_message_width(),
+            MidenLookupAir.num_bus_ids(),
+        )
     }
 
     /// Helper: encode a message from base-field expressions, return its degree.

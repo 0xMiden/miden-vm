@@ -1,4 +1,4 @@
-//! `DebugStructureBuilder` — the [`LookupBuilder`] adapter that records inventory +
+//! `DebugStructureBuilder` — the `LookupBuilder` adapter that records inventory +
 //! per-group `(U, V)` folds into a [`super::DebugStructure`].
 //!
 //! Pure implementation detail: instantiation happens inside

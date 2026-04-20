@@ -143,9 +143,9 @@ where
 // PROVER LOOKUP BUILDER
 // ================================================================================================
 
-/// Concrete-row [`LookupBuilder`] running on two rows of base-field values.
+/// Concrete-row `LookupBuilder` running on two rows of base-field values.
 ///
-/// See the [module docs](self) for the full runtime shape. Parameterised
+/// See the module docs for the full runtime shape. Parameterised
 /// by the base field `F` and the extension field `EF`; every `Expr` /
 /// `Var` / `VarEF` etc. associated type collapses to `F` or `EF`
 /// directly — there is no symbolic tree on the prover side.
@@ -276,7 +276,7 @@ where
 /// - `main_trace`: row-major main execution trace. Row access is zero-copy via
 ///   `main_trace.values.borrow()`.
 /// - `periodic_columns`: one `Vec<Felt>` per periodic column, each with its own period (from
-///   [`crate::constraints::chiplets::columns::PeriodicCols::periodic_columns`]).
+///   `PeriodicCols::periodic_columns` in `constraints::chiplets::columns`).
 /// - `public_values`: row-invariant public input slice.
 /// - `challenges`: precomputed LogUp challenges (shared across every row).
 ///
@@ -880,7 +880,10 @@ mod tests {
         // which is non-zero as long as the challenges are.
         let alpha = QuadFelt::new([Felt::new(7), Felt::new(11)]);
         let beta = QuadFelt::new([Felt::new(13), Felt::new(17)]);
-        let challenges = LookupChallenges::<QuadFelt>::new(alpha, beta);
+        // SmokeAir hard-codes `max_message_width = 1` / `num_bus_ids = 1` in its
+        // `LookupAir` impl — the trait-method path can't be called directly because
+        // `LookupAir<LB>` is generic over `LB` and disambiguation fails at a value call.
+        let challenges = LookupChallenges::<QuadFelt>::new(alpha, beta, 1, 1);
 
         // `SmokeAir::eval` never touches the main trace, periodic columns, or public
         // values — pass dummy zero-length slices.

@@ -37,8 +37,8 @@ use crate::trace::Challenges;
 /// (`AB::ExprEF` / `EF` respectively). The [`Algebra<E>`] bound on `EF` lets each message
 /// multiply a base-field payload by an `EF`-typed β-power without manually lifting.
 ///
-/// Implementors look up their bus identifier (a `BUS_*` constant from [`super::bus_id`] or
-/// a [`bus_types`](crate::trace::bus_types) constant), start the accumulator from
+/// Implementors look up their bus identifier (a `BUS_*` constant or a `bus_types` constant
+/// from the lookup module's `bus_id` submodule), start the accumulator from
 /// `challenges.bus_prefix[bus_id]`, and fold each payload value against
 /// `challenges.beta_powers[k]` with straight-line arithmetic.
 pub trait LookupMessage<E, EF>: core::fmt::Debug

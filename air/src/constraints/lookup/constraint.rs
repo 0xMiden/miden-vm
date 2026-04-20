@@ -82,11 +82,9 @@ where
     /// us read the shape without any turbofishing at the call site.
     ///
     /// Reads `ab.permutation_randomness()` to extract α = `r[0]` and β = `r[1]`, then builds
-    /// a [`LookupChallenges<AB::ExprEF>`] (= `crate::trace::Challenges`). The fixed-size
-    /// array layout means the `air.max_message_width()` / `air.num_bus_ids()` shape numbers
-    /// are no longer needed at construction time — they're enforced by the
-    /// `MAX_MESSAGE_WIDTH` / `NUM_BUS_TYPES` constants on the `Challenges` struct.
-    pub fn new<A>(ab: &'ab mut AB, _air: &A) -> Self
+    /// a [`LookupChallenges<AB::ExprEF>`] (= `crate::trace::Challenges`) sized from
+    /// `air.max_message_width()` / `air.num_bus_ids()`.
+    pub fn new<A>(ab: &'ab mut AB, air: &A) -> Self
     where
         A: LookupAir<Self>,
     {
@@ -94,7 +92,12 @@ where
             let r = ab.permutation_randomness();
             (r[0].into(), r[1].into())
         };
-        let challenges = LookupChallenges::<AB::ExprEF>::new(alpha, beta);
+        let challenges = LookupChallenges::<AB::ExprEF>::new(
+            alpha,
+            beta,
+            air.max_message_width(),
+            air.num_bus_ids(),
+        );
 
         Self { ab, challenges, column_idx: 0 }
     }

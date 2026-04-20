@@ -1,8 +1,8 @@
-//! `DebugTraceBuilder` — the [`LookupBuilder`] adapter that updates
+//! `DebugTraceBuilder` — the `LookupBuilder` adapter that updates
 //! [`super::DebugTraceState`] per row of a concrete main trace.
 //!
 //! Pure implementation detail: instantiation happens inside
-//! [`super::run_trace_walk`]. The builder, column, group, and batch handles all collapse
+//! `super::run_trace_walk`. The builder, column, group, and batch handles all collapse
 //! their associated types to `Felt` / `QuadFelt`.
 
 use core::marker::PhantomData;

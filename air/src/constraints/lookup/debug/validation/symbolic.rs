@@ -1,6 +1,6 @@
 //! Symbolic degree-budget pass.
 //!
-//! Thin free function that runs the production [`ConstraintLookupBuilder`] through a
+//! Thin free function that runs the production `ConstraintLookupBuilder` through a
 //! [`SymbolicAirBuilder`] and asserts every emitted extension/base constraint stays within
 //! [`DEGREE_BUDGET`]. Lives inside the [`super`] validation module because the degree
 //! check is a structural invariant of the AIR — not a runtime trace check. The sibling
