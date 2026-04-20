@@ -1,5 +1,6 @@
 use miden_air::trace::{
     Challenges, LOG_PRECOMPILE_LABEL, MainTrace, RowIndex,
+    bus_types::{LOG_PRECOMPILE_TRANSCRIPT, SIBLING_TABLE},
     chiplets::hasher::DIGEST_LEN,
     log_precompile::{HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE},
 };
@@ -128,8 +129,11 @@ fn encode_sibling_from_trace<E: ExtensionField<Felt>>(
         // Node is right child, sibling is left child at RATE0
         (SIBLING_RATE0_LAYOUT, &state[RATE0_RANGE])
     };
-    challenges
-        .encode_sparse(layout, [mrupdate_id, index, sibling[0], sibling[1], sibling[2], sibling[3]])
+    challenges.encode_sparse(
+        SIBLING_TABLE,
+        layout,
+        [mrupdate_id, index, sibling[0], sibling[1], sibling[2], sibling[3]],
+    )
 }
 
 /// Constructs the removals from the table for MU (new path) controller input rows.
@@ -177,13 +181,16 @@ where
 {
     fn value(&self, challenges: &Challenges<E>) -> E {
         let state_elements: [Felt; 4] = self.state.into();
-        challenges.encode([
-            Felt::from_u8(LOG_PRECOMPILE_LABEL),
-            state_elements[0],
-            state_elements[1],
-            state_elements[2],
-            state_elements[3],
-        ])
+        challenges.encode(
+            LOG_PRECOMPILE_TRANSCRIPT,
+            [
+                Felt::from_u8(LOG_PRECOMPILE_LABEL),
+                state_elements[0],
+                state_elements[1],
+                state_elements[2],
+                state_elements[3],
+            ],
+        )
     }
 
     fn source(&self) -> &str {

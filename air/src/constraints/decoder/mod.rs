@@ -5,21 +5,29 @@
 //!
 //! ## Constraint Categories
 //!
-//! 1. **Op Bit Constraints**: Ensure operation bits are binary
-//! 2. **Op Bits Extra Columns**: Ensure degree reduction columns are correctly computed
-//! 3. **Batch Flag Constraints**: Ensure batch flags are binary and properly set
-//! 4. **In-Span Constraints**: Ensure in-span flag transitions correctly
-//! 5. **Group Count Constraints**: Ensure group count transitions correctly
+//! 1. **In-span constraints**: Ensure the in-span flag transitions correctly.
+//! 2. **Op-bit binary constraints**: Ensure operation bits are binary.
+//! 3. **Extra columns (e0, e1)**: Degree-reduction columns for operation flag computation.
+//! 4. **Opcode-bit group constraints**: Eliminate unused opcode prefixes.
+//! 5. **General opcode-semantic constraints**: Per-operation invariants (SPLIT/LOOP, DYN, REPEAT,
+//!    END, HALT).
+//! 6. **Group count constraints**: Group-count transitions inside basic blocks.
+//! 7. **Op group decoding (h0) constraints**: Base-128 opcode packing in h0.
+//! 8. **Op index constraints**: Position tracking within an operation group.
+//! 9. **Batch flag constraints**: Batch size encoding and unused-lane zeroing.
+//! 10. **Block address (addr) constraints**: Hasher-table address management.
+//! 11. **Control flow constraint**: Mutual exclusivity of `in_span` and `f_ctrl`.
 //!
 //! ## Mental Model
 //!
 //! The decoder trace is the control-flow spine of the VM. Each row is either:
-//! - **inside a basic block** (sp = 1) where ops execute and counters advance, or
-//! - **a control-flow row** (sp = 0) that starts/ends/reshapes a block.
+//! - **inside a basic block** (`in_span` = 1) where ops execute and counters advance, or
+//! - **a control-flow row** (`in_span` = 0) that starts/ends/reshapes a block.
 //!
 //! The constraints below enforce three linked ideas:
 //! 1. **Opcode decoding is well-formed** (op bits and degree-reduction columns are consistent).
-//! 2. **Span state is coherent** (sp, group_count, op_index evolve exactly as control-flow allows).
+//! 2. **Span state is coherent** (`in_span`, `group_count`, `op_index` evolve exactly as
+//!    control-flow allows).
 //! 3. **Hasher lanes match batch semantics** (batch flags and h0..h7 encode the pending groups).
 //!
 //! Read the sections in that order: first the binary/format checks, then the span state machine,
@@ -27,242 +35,53 @@
 //!
 //! ## Decoder Trace Layout
 //!
-//! The decoder trace consists of the following columns:
-//! - `addr`: Block address (row address in hasher table)
-//! - `b0-b6`: 7 operation bits encoding the opcode
-//! - `h0-h7`: 8 hasher state columns (shared between decoding and program hashing)
-//! - `sp`: In-span flag (1 when inside basic block, 0 otherwise)
-//! - `gc`: Group count (remaining operation groups in current span)
-//! - `ox`: Operation index (position within current operation group, 0-8)
-//! - `c0, c1, c2`: Batch flags (encode number of groups in current batch)
-//! - `e0, e1`: Extra columns for degree reduction
+//! ```text
+//! addr | b0 b1 b2 b3 b4 b5 b6 | h0 h1 h2 h3 h4 h5 h6 h7 | sp | gc | ox | c0 c1 c2 | e0 e1
+//!  (1)        (7 op bits)             (8 hasher state)    (1)  (1)  (1)    (3)        (2)
+//! ```
+//!
+//! ### Hasher state dual-purpose (`h0`–`h7`)
+//!
+//! The 8 hasher-state columns serve different roles depending on the current operation:
+//!
+//! | Context     | h0         | h1..h3    | h4             | h5      | h6      | h7         |
+//! |-------------|------------|-----------|----------------|---------|---------|------------|
+//! | SPAN/RESPAN | packed ops | op groups | op group       | op group| op group| op group   |
+//! | END         | block hash₀| hash₁..₃ | is_loop_body   | is_loop | is_call | is_syscall |
+//! | User ops    | packed ops | op groups | user_op_helper | ...     | ...     | ...        |
+//!
+//! ## Operation Flag Degrees
+//!
+//! | Operation | Flag         | Degree |
+//! |-----------|:------------:|:------:|
+//! | JOIN      | f_join       |   5    |
+//! | SPLIT     | f_split      |   5    |
+//! | LOOP      | f_loop       |   5    |
+//! | REPEAT    | f_repeat     |   4    |
+//! | SPAN      | f_span       |   5    |
+//! | RESPAN    | f_respan     |   4    |
+//! | DYN       | f_dyn        |   5    |
+//! | END       | f_end        |   4    |
+//! | HALT      | f_halt       |   4    |
+//! | PUSH      | f_push       |   5    |
+//! | f_ctrl    | (composite)  |   5    |
 
-use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::{AirBuilder, LiftedAirBuilder};
+pub mod columns;
+
+use miden_crypto::stark::air::AirBuilder;
 
 use crate::{
-    MainTraceRow,
+    Felt, MainCols, MidenAirBuilder,
     constraints::{
-        op_flags::{ExprDecoderAccess, OpFlags},
-        tagging::{
-            TagGroup, TaggingAirBuilderExt, ids::TAG_DECODER_BASE, tagged_assert_zero,
-            tagged_assert_zero_integrity,
-        },
+        constants::{F_1, F_128},
+        decoder::columns::DecoderCols,
+        op_flags::OpFlags,
+        utils::{BoolNot, horner_eval_bits},
     },
-    trace::decoder as decoder_cols,
+    trace::chiplets::hasher::CONTROLLER_ROWS_PER_PERM_FELT,
 };
 
 pub mod bus;
-#[cfg(test)]
-pub mod tests;
-
-// CONSTANTS
-// ================================================================================================
-
-/// Index offset for block address column within decoder (column 0).
-const ADDR_OFFSET: usize = 0;
-
-/// Index offsets within the decoder array for op bits (b0-b6).
-/// Op bits start at index 1 in the decoder (after addr at index 0).
-const OP_BITS_OFFSET: usize = 1;
-
-/// Number of hasher controller rows per permutation request (= 2: input + output).
-/// This is the address increment per hash operation in the decoder's addr column.
-const ADDR_INCREMENT_PER_HASH: u64 =
-    crate::trace::chiplets::hasher::CONTROLLER_ROWS_PER_PERMUTATION as u64;
-
-/// Number of operation bits.
-const NUM_OP_BITS: usize = 7;
-
-/// Index offset for in-span column within decoder.
-const IN_SPAN_OFFSET: usize = 16;
-
-/// Index offset for group count column within decoder.
-const GROUP_COUNT_OFFSET: usize = 17;
-
-/// Index offset for operation index column within decoder.
-const OP_INDEX_OFFSET: usize = 18;
-
-/// Index offset for batch flags within decoder.
-const BATCH_FLAGS_OFFSET: usize = 19;
-
-/// Number of batch flag columns.
-const NUM_BATCH_FLAGS: usize = 3;
-
-/// Index offset for extra columns (e0, e1) within decoder.
-const EXTRA_COLS_OFFSET: usize = 22;
-
-/// Number of decoder constraints, in the order of `DECODER_NAMES`.
-/// - 7 op bits binary constraints
-/// - 2 extra columns constraints (e0, e1)
-/// - 3 op-bit group constraints (u32 b0, very-high b0/b1)
-/// - 3 batch flags binary constraints
-/// - 14 general constraints
-/// - 1 in-span boundary constraint (first row sp = 0)
-/// - 1 in-span binary constraint
-/// - 2 in-span transition constraints (after SPAN/RESPAN, sp' = 1)
-/// - 5 group count constraints
-/// - 2 op group decoding constraints
-/// - 4 op index constraints
-/// - 9 op batch flag constraints
-/// - 3 block address constraints
-/// - 1 control flow constraint (1 - sp - f_ctrl = 0)
-#[allow(dead_code)]
-pub const NUM_CONSTRAINTS: usize = 57;
-
-/// Base ID for decoder constraints (inclusive).
-const DECODER_BASE_ID: usize = TAG_DECODER_BASE;
-
-/// Decoder constraint namespaces in assertion order.
-const DECODER_NAMES: [&str; NUM_CONSTRAINTS] = [
-    // in-span constraints (boundary first, then transition rules)
-    "decoder.in_span.first_row",
-    "decoder.in_span.binary",
-    "decoder.in_span.span",
-    "decoder.in_span.respan",
-    // op bits binary (b0..b6)
-    "decoder.op_bits.b0.binary",
-    "decoder.op_bits.b1.binary",
-    "decoder.op_bits.b2.binary",
-    "decoder.op_bits.b3.binary",
-    "decoder.op_bits.b4.binary",
-    "decoder.op_bits.b5.binary",
-    "decoder.op_bits.b6.binary",
-    // extra columns (e0, e1)
-    "decoder.extra.e0",
-    "decoder.extra.e1",
-    // op-bit group constraints
-    "decoder.op_bits.u32_prefix.b0",
-    "decoder.op_bits.very_high.b0",
-    "decoder.op_bits.very_high.b1",
-    // batch flags binary (c0..c2)
-    "decoder.batch_flags.c0.binary",
-    "decoder.batch_flags.c1.binary",
-    "decoder.batch_flags.c2.binary",
-    // general constraints
-    "decoder.general.split_loop.s0.binary",
-    "decoder.general.dyn.h4.zero",
-    "decoder.general.dyn.h5.zero",
-    "decoder.general.dyn.h6.zero",
-    "decoder.general.dyn.h7.zero",
-    "decoder.general.repeat.s0.one",
-    "decoder.general.repeat.h4.one",
-    "decoder.general.end.loop.s0.zero",
-    "decoder.general.end_repeat.h0.carry",
-    "decoder.general.end_repeat.h1.carry",
-    "decoder.general.end_repeat.h2.carry",
-    "decoder.general.end_repeat.h3.carry",
-    "decoder.general.end_repeat.h4.carry",
-    "decoder.general.halt.next",
-    // group count constraints
-    "decoder.group_count.delta.binary",
-    "decoder.group_count.decrement.h0_or_imm",
-    "decoder.group_count.span_decrement",
-    "decoder.group_count.end_or_respan.hold",
-    "decoder.group_count.end.zero",
-    // op group decoding constraints
-    "decoder.op_group.shift",
-    "decoder.op_group.end_or_respan.h0.zero",
-    // op index constraints
-    "decoder.op_index.span_respan.reset",
-    "decoder.op_index.new_group.reset",
-    "decoder.op_index.increment",
-    "decoder.op_index.range",
-    // batch flag constraints and zeroing rules
-    "decoder.batch_flags.span_sum",
-    "decoder.batch_flags.zero_when_not_span",
-    "decoder.batch_flags.h4.zero",
-    "decoder.batch_flags.h5.zero",
-    "decoder.batch_flags.h6.zero",
-    "decoder.batch_flags.h7.zero",
-    "decoder.batch_flags.h2.zero",
-    "decoder.batch_flags.h3.zero",
-    "decoder.batch_flags.h1.zero",
-    // block address constraints
-    "decoder.addr.hold_in_span",
-    "decoder.addr.respan.increment",
-    "decoder.addr.halt.zero",
-    // control flow constraint
-    "decoder.control_flow.sp_complement",
-];
-
-/// Tag metadata for this constraint group.
-const DECODER_TAGS: TagGroup = TagGroup {
-    base: DECODER_BASE_ID,
-    names: &DECODER_NAMES,
-};
-
-// Relative offsets into DECODER_NAMES by constraint group.
-const IN_SPAN_BASE: usize = 0;
-const OP_BITS_BASE: usize = IN_SPAN_BASE + 4;
-const EXTRA_BASE: usize = OP_BITS_BASE + NUM_OP_BITS;
-const OP_BIT_GROUP_BASE: usize = EXTRA_BASE + 2;
-const BATCH_FLAGS_BINARY_BASE: usize = OP_BIT_GROUP_BASE + 3;
-const GENERAL_BASE: usize = BATCH_FLAGS_BINARY_BASE + NUM_BATCH_FLAGS;
-const GROUP_COUNT_BASE: usize = GENERAL_BASE + 14;
-const OP_GROUP_DECODING_BASE: usize = GROUP_COUNT_BASE + 5;
-const OP_INDEX_BASE: usize = OP_GROUP_DECODING_BASE + 2;
-const BATCH_FLAGS_BASE: usize = OP_INDEX_BASE + 4;
-const ADDR_BASE: usize = BATCH_FLAGS_BASE + 9;
-const CONTROL_FLOW_BASE: usize = ADDR_BASE + 3;
-
-/// The degrees of the decoder constraints.
-#[allow(dead_code)]
-pub const CONSTRAINT_DEGREES: [usize; NUM_CONSTRAINTS] = [
-    2, 2, 2, 2, 2, 2, 2, // op bits binary (degree 2)
-    4, 3, // e0 (degree 4), e1 (degree 3)
-    4, 3, 3, // u32 b0, very-high b0/b1
-    2, 2, 2, // batch flags binary (degree 2)
-    7, 6, 6, 6, 6, // general: split/loop top binary, dyn h4..h7 = 0
-    5, 5, // general: repeat top=1, repeat in-loop
-    6, // general: end + is_loop + s0
-    9, 9, 9, 9, 9, // general: end + repeat' copies h0..h4
-    8, // general: halt -> halt'
-    1, // sp first row (degree 1)
-    2, // sp binary (degree 2)
-    6, 5, // sp transition for SPAN (deg 5+1=6), RESPAN (deg 4+1=5)
-    3, // gc delta bounded (degree 3: sp * delta * (delta - 1))
-    8, // gc decrement implies (h0=0 or is_push=1)
-    6, // gc decrement on SPAN/RESPAN/PUSH
-    5, // gc stays when next is END or RESPAN
-    5, // gc zero at END
-    6, // op group decoding: h0 shift by op'
-    6, // op group decoding: h0 must be 0 before END/RESPAN
-    6, // ox reset on SPAN/RESPAN (degree 6)
-    6, // ox reset on new group (degree 6: sp * ng * ox')
-    7, // ox increment inside basic block (degree 7)
-    9, // ox range [0,8] (degree 9)
-    5, // batch flags sum (span/respan -> one of g1/g2/g4/g8)
-    6, // batch flags zero when not span/respan
-    4, 4, 4, 4, // h4..h7 zero when <=4 groups
-    4, 4, // h2..h3 zero when <=2 groups
-    4, // h1 zero when <=1 group
-    2, // addr unchanged inside basic block (degree 2)
-    5, // addr increment on RESPAN (degree 5)
-    5, // addr zero at HALT (degree 5)
-    5, // control flow: 1 - sp - f_ctrl = 0
-];
-
-// SMALL HELPERS
-// ================================================================================================
-
-/// Asserts a value is binary (0 or 1): `x * (x - 1) = 0`.
-fn assert_binary<AB>(builder: &mut AB, idx: usize, value: AB::Expr)
-where
-    AB: TaggingAirBuilderExt,
-{
-    assert_zero_integrity(builder, idx, value.clone() * (value - AB::Expr::ONE));
-}
-
-/// Computes the opcode value from op bits: `b0 + 2*b1 + ... + 64*b6`.
-fn op_bits_to_value<AB>(bits: &[AB::Expr; NUM_OP_BITS]) -> AB::Expr
-where
-    AB: LiftedAirBuilder,
-{
-    bits.iter().enumerate().fold(AB::Expr::ZERO, |acc, (i, bit)| {
-        acc + bit.clone() * AB::Expr::from_u16(1u16 << i)
-    })
-}
 
 // ENTRY POINTS
 // ================================================================================================
@@ -270,645 +89,429 @@ where
 /// Enforces decoder main-trace constraints (entry point).
 pub fn enforce_main<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
 ) where
-    AB: TaggingAirBuilderExt,
+    AB: MidenAirBuilder,
 {
-    // Load decoder columns using typed struct
-    let cols: DecoderColumns<AB::Expr> = DecoderColumns::from_row::<AB>(local);
-    let cols_next: DecoderColumns<AB::Expr> = DecoderColumns::from_row::<AB>(next);
-    let op_flags_next = OpFlags::new(ExprDecoderAccess::<AB::Var, AB::Expr>::new(next));
+    // --- Destructure current-row decoder columns ------------------------------------------------
+    let DecoderCols {
+        addr,
+        op_bits,
+        hasher_state,
+        in_span,
+        group_count,
+        op_index,
+        batch_flags,
+        extra,
+    } = local.decoder;
+    // b2 and b3 are not used directly in decoder constraints — they are consumed only
+    // by the op_flags module for individual opcode discrimination.
+    let [b0, b1, _, _, b4, b5, b6] = op_bits;
+    let [bc0, bc1, bc2] = batch_flags;
+    let [e0, e1] = extra;
+    let h0 = hasher_state[0];
 
-    enforce_in_span_constraints(builder, &cols, &cols_next, op_flags);
-    enforce_op_bits_binary(builder, &cols);
-    enforce_extra_columns(builder, &cols);
-    enforce_op_bit_group_constraints(builder, &cols);
-    enforce_batch_flags_binary(builder, &cols);
-    enforce_general_constraints(builder, local, next, op_flags, &op_flags_next);
-    enforce_group_count_constraints(builder, &cols, &cols_next, local, op_flags, &op_flags_next);
-    enforce_op_group_decoding_constraints(
-        builder,
-        &cols,
-        &cols_next,
-        local,
-        next,
-        op_flags,
-        &op_flags_next,
-    );
-    enforce_op_index_constraints(builder, &cols, &cols_next, op_flags);
-    enforce_batch_flags_constraints(builder, &cols, local, op_flags);
-    enforce_block_address_constraints(builder, &cols, &cols_next, op_flags);
-    enforce_control_flow_constraints(builder, &cols, op_flags);
-}
+    // End-block flags occupy hasher_state[4..8] during END operations.
+    let end_flags = local.decoder.end_block_flags();
+    let is_loop_body = end_flags.is_loop_body;
+    let is_loop = end_flags.is_loop;
 
-// INTERNAL HELPERS
-// ================================================================================================
+    // --- Destructure next-row decoder columns ---------------------------------------------------
+    let DecoderCols {
+        addr: addr_next,
+        op_bits: op_bits_next,
+        hasher_state: hasher_state_next,
+        in_span: in_span_next,
+        group_count: group_count_next,
+        op_index: op_index_next,
+        ..
+    } = next.decoder;
+    let h0_next = hasher_state_next[0];
 
-/// Typed access to decoder columns.
-///
-/// This struct provides named access to decoder columns, eliminating error-prone
-/// index arithmetic. Created from a `MainTraceRow` reference.
-///
-/// ## Layout
-/// - `addr`: Block address (row address in hasher table)
-/// - `op_bits[0..7]`: Operation bits b0-b6 encoding the opcode
-/// - `in_span`: In-span flag (sp) - 1 when inside basic block
-/// - `group_count`: Group count (gc) - remaining operation groups
-/// - `op_index`: Operation index (ox) - position within group (0-8)
-/// - `batch_flags[0..3]`: Batch flags c0, c1, c2
-/// - `extra[0..2]`: Extra columns e0, e1 for degree reduction
-///
-/// Note: the 8 decoder hasher-state lanes live in the decoder trace but are not included here.
-/// Constraints which depend on these lanes access them directly via `MainTraceRow` accessors.
-pub struct DecoderColumns<E> {
-    /// Block address (row address in hasher table)
-    pub addr: E,
-    /// Operation bits b0-b6 (7 bits encoding the opcode)
-    pub op_bits: [E; NUM_OP_BITS],
-    /// In-span flag (1 when inside basic block, 0 otherwise)
-    pub in_span: E,
-    /// Group count (remaining operation groups in current span)
-    pub group_count: E,
-    /// Operation index (position within current operation group, 0-8)
-    pub op_index: E,
-    /// Batch flags c0, c1, c2 (encode number of groups in current batch)
-    pub batch_flags: [E; NUM_BATCH_FLAGS],
-    /// Extra columns e0, e1 for degree reduction
-    pub extra: [E; 2],
-}
+    // --- Cached derived expressions -------------------------------------------------------------
+    // These values appear in multiple constraint sections below.
 
-impl<E: Clone> DecoderColumns<E> {
-    /// Extract decoder columns from a main trace row.
-    pub fn from_row<AB>(row: &MainTraceRow<AB::Var>) -> Self
-    where
-        AB: LiftedAirBuilder,
-        AB::Var: Into<E> + Clone,
+    // The change in group count across one row.
+    // Inside a span, delta_group_count is constrained to be boolean (0 or 1).
+    // When delta_group_count = 1, a group has been consumed (either a completed op group or a PUSH
+    // immediate). When delta_group_count = 0, the current group is still being decoded.
+    let delta_group_count: AB::Expr = group_count - group_count_next;
+
+    // PUSH is the only operation with an immediate value. When PUSH executes, it consumes
+    // an op group from h0 to read the immediate value pushed onto the stack, causing
+    // delta_group_count = 1. However, this is NOT a "new group start" for decoding purposes — the
+    // distinction matters for the new_group flag: new_group = delta_group_count - is_push.
+    let is_push = op_flags.push();
+
+    // =============================================
+    // In-span constraints
+    // =============================================
+    // The in_span flag indicates whether we are inside a basic block:
+    //   in_span = 1 when executing user operations,
+    //   in_span = 0 on control-flow rows (SPAN, RESPAN, END, JOIN, SPLIT, LOOP, etc.).
+    //
+    // in_span is pinned to 1 - f_ctrl on every row by the control-flow constraint at
+    // the end of this function (in_span + f_ctrl = 1), so in_span cannot become 1
+    // without a preceding SPAN or RESPAN that sets in_span' = 1 on the next row.
+
+    // Execution starts outside any basic block.
+    builder.when_first_row().assert_zero(in_span);
+
+    // The in-span flag is binary.
+    builder.assert_bool(in_span);
+
+    // After SPAN, next row enters a basic block.
+    builder.when_transition().when(op_flags.span()).assert_one(in_span_next);
+
+    // After RESPAN, next row stays in a basic block.
+    builder.when_transition().when(op_flags.respan()).assert_one(in_span_next);
+
+    // =============================================
+    // Op-bit binary constraints
+    // =============================================
+    // Each opcode bit must be 0 or 1.
+    builder.assert_bools(op_bits);
+
+    // =============================================
+    // Extra columns (e0, e1) — degree reduction
+    // =============================================
+    // Without these columns, operation flags for the upper opcode groups (U32, VeryHigh)
+    // would require products of up to 7 bits (degree 7), exceeding the constraint system's
+    // degree budget. By precomputing e0 and e1 in the trace and constraining them here,
+    // the op_flags module can reference these degree-1 columns instead.
+    //
+    //   e0 = b6 · (1 - b5) · b4    selects the "101" prefix (degree-5 ops)
+    //   e1 = b6 · b5               selects the "11" prefix (degree-4 ops)
+
+    // e0 must equal b6 · (1 - b5) · b4.
+    let e0_expected = b6 * b5.into().not() * b4;
+    builder.assert_eq(e0, e0_expected);
+
+    // e1 must equal b6 · b5.
+    let e1_expected = b6 * b5;
+    builder.assert_eq(e1, e1_expected);
+
+    // =============================================
+    // Opcode-bit group constraints
+    // =============================================
+    // Certain opcode prefixes have unused bit positions that must be zero to prevent
+    // invalid opcodes from being encoded. Both opcode groups use e0/e1 for degree reduction:
+    //
+    //   Prefix  | b6 b5 b4 | Meaning    | Constraint
+    //   --------+----------+------------+------------
+    //   U32     | 1  0  0  | 8 U32 ops  | b0 = 0
+    //   VeryHi  | 1  1  *  | 8 hi ops   | b0 = b1 = 0
+    //
+    // The U32 prefix is computed as b6·(1-b5)·(1-b4) = b6 - e1 - e0 (degree 1).
+    // The VeryHi prefix is b6·b5 = e1 (degree 1).
+
+    // When U32 prefix is active, b0 must be zero.
+    builder.when(b6 - e1 - e0).assert_zero(b0);
+
+    // When VeryHi prefix is active, both b0 and b1 must be zero.
     {
-        DecoderColumns {
-            addr: row.decoder[ADDR_OFFSET].clone().into(),
-            op_bits: core::array::from_fn(|i| row.decoder[OP_BITS_OFFSET + i].clone().into()),
-            in_span: row.decoder[IN_SPAN_OFFSET].clone().into(),
-            group_count: row.decoder[GROUP_COUNT_OFFSET].clone().into(),
-            op_index: row.decoder[OP_INDEX_OFFSET].clone().into(),
-            batch_flags: core::array::from_fn(|i| {
-                row.decoder[BATCH_FLAGS_OFFSET + i].clone().into()
-            }),
-            extra: core::array::from_fn(|i| row.decoder[EXTRA_COLS_OFFSET + i].clone().into()),
+        let builder = &mut builder.when(e1);
+        builder.assert_zero(b0);
+        builder.assert_zero(b1);
+    }
+
+    // =============================================
+    // General opcode-semantic constraints
+    // =============================================
+    // Per-operation invariants that don't fit into the generic counter/decoding sections.
+    //
+    // Operation | Constraint                          | Why
+    // ----------+-------------------------------------+------------------------------------
+    // SPLIT     | s0 in {0, 1}                        | s0 selects true/false branch
+    // LOOP      | s0 in {0, 1}                        | s0 determines enter (1) / skip (0)
+    // DYN       | h4 = h5 = h6 = h7 = 0               | callee digest lives in h0..h3 only
+    // REPEAT    | s0 = 1                              | loop condition must be true
+    // REPEAT    | is_loop_body (h4) = 1               | must be inside an active loop body
+    // END+loop  | is_loop (h5) => s0 = 0              | exiting loop: condition became false
+    // END+REP'  | h0'..h4' = h0..h4                   | carry block hash + loop flag for re-entry
+    // HALT      | f_halt => f_halt'                   | absorbing / terminal state
+
+    // SPLIT/LOOP: branch selector must be binary.
+    let branch_condition = local.stack.get(0);
+    builder
+        .when(op_flags.split() + op_flags.loop_op())
+        .assert_bool(branch_condition);
+
+    // DYN: the upper hasher lanes must be zero so the callee digest in h0..h3 is the
+    // only input to the hash chiplet.
+    {
+        let builder = &mut builder.when(op_flags.dyn_op());
+        let hasher_zeros = [hasher_state[4], hasher_state[5], hasher_state[6], hasher_state[7]];
+        builder.assert_zeros(hasher_zeros)
+    }
+
+    // REPEAT: top-of-stack must be 1 (loop condition true) and we must be inside an
+    // active loop body (is_loop_body = h4 = 1).
+    {
+        let loop_condition = local.stack.get(0);
+        let builder = &mut builder.when(op_flags.repeat());
+        builder.assert_one(loop_condition);
+        builder.assert_one(is_loop_body);
+    }
+
+    // END inside a loop: when ending a loop block (is_loop = h5 = 1), top-of-stack must
+    // be 0 — the loop exits because the condition became false.
+    let loop_condition = local.stack.get(0);
+    builder.when(op_flags.end()).when(is_loop).assert_zero(loop_condition);
+
+    // END followed by REPEAT: carry the block hash (h0..h3) and the is_loop_body flag
+    // (h4) into the next row so the loop body can be re-entered.
+    {
+        let gate = builder.is_transition() * op_flags.end() * op_flags.repeat_next();
+        let builder = &mut builder.when(gate);
+        for i in 0..5 {
+            builder.assert_eq(hasher_state_next[i], hasher_state[i]);
         }
     }
-}
 
-// CONSTRAINT HELPERS
-// ================================================================================================
+    // HALT is absorbing: once entered, the VM stays in HALT for all remaining rows.
+    builder.when_transition().when(op_flags.halt()).assert_one(op_flags.halt_next());
 
-/// Enforces in-span (sp) constraints.
-///
-/// The in-span flag indicates whether we're inside a basic block:
-/// - sp = 1 when executing operations inside a basic block
-/// - sp = 0 for SPAN, RESPAN, END, and control-flow operations
-///
-/// This is the entry point to the decoder state machine. Once sp is set by SPAN/RESPAN,
-/// the rest of the decoder constraints (gc, ox, batch flags) are interpreted relative to
-/// being inside that span.
-///
-/// Constraints:
-/// 1. sp is binary: sp * (sp - 1) = 0
-/// 2. After SPAN operation, sp' = 1: span_flag * (1 - sp') = 0
-/// 3. After RESPAN operation, sp' = 1: respan_flag * (1 - sp') = 0
-fn enforce_in_span_constraints<AB>(
-    builder: &mut AB,
-    cols: &DecoderColumns<AB::Expr>,
-    cols_next: &DecoderColumns<AB::Expr>,
-    op_flags: &OpFlags<AB::Expr>,
-) where
-    AB: TaggingAirBuilderExt,
-{
-    let sp = cols.in_span.clone();
-    let sp_next = cols_next.in_span.clone();
+    // =============================================
+    // Group count constraints
+    // =============================================
+    // The group_count column tracks remaining operation groups in the current basic block.
+    //
+    // ## Lifecycle
+    //
+    // 1. SPAN/RESPAN: the prover sets group_count non-deterministically to the batch's group count.
+    //    The constraint below forces delta_group_count = 1 on these rows.
+    // 2. Normal execution: each time a group is fully decoded (h0 reaches 0) or a PUSH consumes an
+    //    immediate, group_count decrements by 1 (delta_group_count = 1).
+    // 3. END: group_count must be 0 — all groups in the span have been consumed.
 
-    // Boundary: execution starts outside any basic block.
-    assert_zero_first_row(builder, IN_SPAN_BASE, sp.clone());
-
-    // Constraint 1: sp is binary, so span state is well-formed.
-    let sp_binary = sp.clone() * (sp - AB::Expr::ONE);
-    assert_zero_integrity(builder, IN_SPAN_BASE + 1, sp_binary);
-
-    // Constraint 2: After SPAN, the next row must be inside a span.
-    // span_flag * (1 - sp') = 0
-    let span_flag = op_flags.span();
-    assert_zero_transition(
-        builder,
-        IN_SPAN_BASE + 2,
-        span_flag * (AB::Expr::ONE - sp_next.clone()),
-    );
-
-    // Constraint 3: After RESPAN, the next row must be inside a span.
-    // respan_flag * (1 - sp') = 0
-    let respan_flag = op_flags.respan();
-    assert_zero_transition(builder, IN_SPAN_BASE + 3, respan_flag * (AB::Expr::ONE - sp_next));
-}
-
-/// Enforces that all operation bits (b0-b6) are binary (0 or 1).
-///
-/// For each bit bi: bi * (bi - 1) = 0
-fn enforce_op_bits_binary<AB>(builder: &mut AB, cols: &DecoderColumns<AB::Expr>)
-where
-    AB: TaggingAirBuilderExt,
-{
-    for i in 0..NUM_OP_BITS {
-        // Each opcode bit must be 0 or 1 to make decoding deterministic.
-        assert_binary(builder, OP_BITS_BASE + i, cols.op_bits[i].clone());
-    }
-}
-
-/// Enforces that the extra columns (e0, e1) are correctly computed from op bits.
-///
-/// These columns are used for degree reduction in operation flag computation:
-/// - e0 = b6 * (1 - b5) * b4
-/// - e1 = b6 * b5
-fn enforce_extra_columns<AB>(builder: &mut AB, cols: &DecoderColumns<AB::Expr>)
-where
-    AB: TaggingAirBuilderExt,
-{
-    let b4 = cols.op_bits[4].clone();
-    let b5 = cols.op_bits[5].clone();
-    let b6 = cols.op_bits[6].clone();
-
-    let e0 = cols.extra[0].clone();
-    let e1 = cols.extra[1].clone();
-
-    // e0 = b6 * (1 - b5) * b4.
-    // This extra register exists to reduce the degree of op-flag selectors for the
-    // `101...` opcode group (see docs/src/design/stack/op_constraints.md).
-    let expected_e0 = b6.clone() * (AB::Expr::ONE - b5.clone()) * b4;
-    assert_zero_integrity(builder, EXTRA_BASE, e0 - expected_e0);
-
-    // e1 = b6 * b5.
-    // This extra register exists to reduce the degree of op-flag selectors for the
-    // `11...` opcode group (see docs/src/design/stack/op_constraints.md).
-    let expected_e1 = b6 * b5;
-    assert_zero_integrity(builder, EXTRA_BASE + 1, e1 - expected_e1);
-}
-
-/// Enforces opcode-bit constraints for grouped opcode families.
-///
-/// - U32 ops (prefix `100`) must have b0 = 0.
-/// - Very-high-degree ops (prefix `11`) must have b0 = b1 = 0.
-fn enforce_op_bit_group_constraints<AB>(builder: &mut AB, cols: &DecoderColumns<AB::Expr>)
-where
-    AB: TaggingAirBuilderExt,
-{
-    let b0 = cols.op_bits[0].clone();
-    let b1 = cols.op_bits[1].clone();
-    let b4 = cols.op_bits[4].clone();
-    let b5 = cols.op_bits[5].clone();
-    let b6 = cols.op_bits[6].clone();
-
-    // U32 prefix pattern: b6=1, b5=0, b4=0. Under this prefix, b0 must be 0 to
-    // eliminate invalid opcodes in the U32 opcode subset.
-    let u32_prefix = b6.clone() * (AB::Expr::ONE - b5.clone()) * (AB::Expr::ONE - b4);
-    assert_zero_integrity(builder, OP_BIT_GROUP_BASE, u32_prefix * b0.clone());
-
-    // Very-high prefix pattern: b6=1, b5=1. Under this prefix, b0 and b1 must be 0
-    // to eliminate invalid opcodes in the very-high opcode subset.
-    let very_high_prefix = b6 * b5;
-    assert_zero_integrity(builder, OP_BIT_GROUP_BASE + 1, very_high_prefix.clone() * b0);
-    assert_zero_integrity(builder, OP_BIT_GROUP_BASE + 2, very_high_prefix * b1);
-}
-
-/// Enforces that batch flags (c0, c1, c2) are binary.
-///
-/// For each flag ci: ci * (ci - 1) = 0
-fn enforce_batch_flags_binary<AB>(builder: &mut AB, cols: &DecoderColumns<AB::Expr>)
-where
-    AB: TaggingAirBuilderExt,
-{
-    for i in 0..NUM_BATCH_FLAGS {
-        // Batch flags are selectors; they must be boolean.
-        assert_binary(builder, BATCH_FLAGS_BINARY_BASE + i, cols.batch_flags[i].clone());
-    }
-}
-
-/// Enforces general decoder constraints derived from opcode semantics.
-///
-/// These are the opcode-specific rules that aren't captured by the generic counters:
-/// - SPLIT/LOOP: s0 must be binary (branch selector)
-/// - DYN: upper hasher lanes are zero (callee hash lives in lower half)
-/// - REPEAT: must be inside loop body and s0 = 1
-/// - END + REPEAT': carry hasher state forward
-/// - HALT: absorbing
-fn enforce_general_constraints<AB>(
-    builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
-    op_flags: &OpFlags<AB::Expr>,
-    op_flags_next: &OpFlags<AB::Expr>,
-) where
-    AB: TaggingAirBuilderExt,
-{
-    let s0: AB::Expr = local.stack[0].clone().into();
-
-    // SPLIT/LOOP: top stack value must be binary (branch selector).
-    let split_or_loop = op_flags.split() + op_flags.loop_op();
-    let s0_binary = s0.clone() * (s0.clone() - AB::Expr::ONE);
-    assert_zero_integrity(builder, GENERAL_BASE, split_or_loop * s0_binary);
-
-    // DYN: the first half holds the callee digest; the second half must be zero.
-    let f_dyn = op_flags.dyn_op();
-    for i in 0..4 {
-        let hi: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 4 + i].clone().into();
-        assert_zero_integrity(builder, GENERAL_BASE + 1 + i, f_dyn.clone() * hi);
+    // Inside a span, group_count changes by at most 1. When it does change and this is not a PUSH,
+    // h0 must already be 0 (the group was fully decoded).
+    {
+        let gate = builder.is_transition() * in_span;
+        let builder = &mut builder.when(gate);
+        builder.assert_bool(delta_group_count.clone());
+        builder.when(delta_group_count.clone()).when(is_push.not()).assert_zero(h0);
     }
 
-    // REPEAT: top stack must be 1 and we must be in a loop body (h4=1).
-    let f_repeat = op_flags.repeat();
-    let h4: AB::Expr = local.decoder[decoder_cols::IS_LOOP_BODY_FLAG_COL_IDX].clone().into();
-    assert_zero_integrity(
-        builder,
-        GENERAL_BASE + 5,
-        f_repeat.clone() * (AB::Expr::ONE - s0.clone()),
-    );
-    assert_zero_integrity(builder, GENERAL_BASE + 6, f_repeat * (AB::Expr::ONE - h4));
+    // SPAN, RESPAN, and PUSH each consume exactly one group (delta_group_count = 1).
+    builder
+        .when_transition()
+        .when(op_flags.span() + op_flags.respan() + is_push.clone())
+        .assert_one(delta_group_count.clone());
 
-    // END inside a loop: if is_loop flag is set, top stack must be 0.
-    let f_end = op_flags.end();
-    let h5: AB::Expr = local.decoder[decoder_cols::IS_LOOP_FLAG_COL_IDX].clone().into();
-    assert_zero_integrity(builder, GENERAL_BASE + 7, f_end.clone() * h5 * s0);
+    // If delta_group_count = 1 on this row, the next row cannot be END or RESPAN — those ops need
+    // a fresh batch or span closure, not a mid-batch decrement.
+    builder
+        .when_transition()
+        .when(delta_group_count.clone())
+        .assert_zero(op_flags.end_next() + op_flags.respan_next());
 
-    // END followed by REPEAT: carry h0..h4 into the next row.
-    let f_repeat_next = op_flags_next.repeat();
-    for i in 0..5 {
-        let hi: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + i].clone().into();
-        let hi_next: AB::Expr = next.decoder[decoder_cols::HASHER_STATE_OFFSET + i].clone().into();
-        assert_zero_transition(
-            builder,
-            GENERAL_BASE + 8 + i,
-            f_end.clone() * f_repeat_next.clone() * (hi_next - hi),
-        );
+    // By the time END executes, all groups must have been consumed.
+    builder.when(op_flags.end()).assert_zero(group_count);
+
+    // =============================================
+    // Op group decoding (h0) constraints
+    // =============================================
+    // Register h0 holds the current operation group as a base-128 packed integer.
+    // Operations are packed least-significant first (each opcode is 7 bits):
+    //
+    //   h0 = op_0 + 128·op_1 + 128²·op_2 + ... + 128^(k-1)·op_(k-1)
+    //
+    // Each step, the VM peels off the lowest 7 bits of h0 — these bits equal the
+    // opcode that will appear in op_bits on the *next* row (op'). What remains
+    // after removing op' becomes h0':
+    //
+    //   h0 = h0' · 128 + op'        (no field division needed)
+    //
+    // ## same_group_count flag
+    //
+    //   same_group_count = in_span · in_span' · (1 - delta_group_count)
+    //
+    // This is 1 when we are inside a span on BOTH this and the next row AND the group
+    // count did not change — meaning we are still decoding ops from the same group.
+    // Note: same_group_count is mutually exclusive with f_span, f_respan, and is_push
+    // because those three always set delta_group_count = 1.
+    //
+    // ## h0_active flag
+    //
+    //   h0_active = f_span + f_respan + is_push + same_group_count
+    //
+    // The h0 shift constraint fires in exactly 4 situations:
+    // - f_span/f_respan: a new batch was just loaded; h0 has the first group.
+    // - is_push: PUSH consumed an immediate; h0 shifts to reveal the next op.
+    // - same_group_count: normal op execution within a group; h0 shifts by one opcode.
+    {
+        let f_span = op_flags.span();
+        let f_respan = op_flags.respan();
+
+        let same_group_count: AB::Expr = in_span * in_span_next * delta_group_count.not();
+        let op_next: AB::Expr = horner_eval_bits(&op_bits_next);
+
+        // When h0 is active, verify the base-128 shift.
+        let h0_shift = h0 - h0_next * F_128 - op_next;
+        let h0_active = f_span + f_respan + is_push.clone() + same_group_count;
+        builder.when_transition().when(h0_active).assert_zero(h0_shift);
+
+        // Before END or RESPAN, h0 must be empty (all ops in the group consumed).
+        let end_or_respan_next = op_flags.end_next() + op_flags.respan_next();
+        builder.when_transition().when(in_span).when(end_or_respan_next).assert_zero(h0);
     }
 
-    // HALT is absorbing: it can only be followed by HALT.
-    let f_halt = op_flags.halt();
-    let f_halt_next = op_flags_next.halt();
-    assert_zero_transition(builder, GENERAL_BASE + 13, f_halt * (AB::Expr::ONE - f_halt_next));
-}
+    // =============================================
+    // Op index constraints
+    // =============================================
+    // The op_index column tracks the position of the current operation within its operation
+    // group. op_index ranges from 0 to 8 (up to 9 operations per group), resets to 0 when
+    // entering a new group, and increments by 1 for each operation within a group.
+    //
+    // ## new_group flag
+    //
+    //   new_group = delta_group_count - is_push
+    //
+    // When new_group = 1, a genuine new group is starting: group_count decremented and it
+    // was NOT because of a PUSH immediate. When new_group = 0, we are still in the same
+    // group (either group_count didn't change, or it changed only because of PUSH).
+    {
+        let new_group: AB::Expr = delta_group_count - is_push;
 
-/// Enforces group count (gc) constraints.
-///
-/// The group count tracks remaining operation groups in the current basic block:
-/// - gc starts at the total number of groups when SPAN/RESPAN is executed
-/// - gc decrements by 1 when processing SPAN, RESPAN, or completing a group
-/// - gc must be 0 when END is executed
-///
-/// Intuition:
-/// - `delta_gc = gc - gc'` is the number of groups consumed on this row.
-/// - Inside a span, delta_gc can only be 0 or 1.
-/// - SPAN/RESPAN/PUSH must consume a group immediately, so delta_gc must be 1.
-///
-/// Constraints:
-/// 1. Inside basic block, gc can only stay same or decrement by 1: sp * delta_gc * (delta_gc - 1) =
-///    0  (where delta_gc = gc - gc')
-/// 2. When END is executed, gc must be 0: end_flag * gc = 0
-/// 3. During SPAN/RESPAN, gc must decrement by 1: (span_flag + respan_flag) * (1 - delta_gc) = 0
-fn enforce_group_count_constraints<AB>(
-    builder: &mut AB,
-    cols: &DecoderColumns<AB::Expr>,
-    cols_next: &DecoderColumns<AB::Expr>,
-    local: &MainTraceRow<AB::Var>,
-    op_flags: &OpFlags<AB::Expr>,
-    op_flags_next: &OpFlags<AB::Expr>,
-) where
-    AB: TaggingAirBuilderExt,
-{
-    let sp = cols.in_span.clone();
-    let gc = cols.group_count.clone();
-    let gc_next = cols_next.group_count.clone();
-    let h0: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET].clone().into();
+        // SPAN/RESPAN start a fresh batch, so op_index' = 0.
+        builder
+            .when_transition()
+            .when(op_flags.span() + op_flags.respan())
+            .assert_zero(op_index_next);
 
-    // delta_gc = gc - gc' (how much gc decrements; expected to be 0 or 1)
-    let delta_gc = gc.clone() - gc_next;
+        // When a new group starts inside a span, op_index' = 0.
+        // Gated by in_span to exclude SPAN/RESPAN rows (which are handled above).
+        builder
+            .when_transition()
+            .when(in_span)
+            .when(new_group.clone())
+            .assert_zero(op_index_next);
 
-    // is_push = push flag (PUSH is the only operation with immediate value)
-    let is_push = op_flags.push();
+        // When staying in the same group inside a span, op_index increments by 1.
+        // Gated by in_span_next to exclude the row before END/RESPAN (where in_span' = 0).
+        builder
+            .when_transition()
+            .when(in_span)
+            .when(in_span_next)
+            .when(new_group.not())
+            .assert_eq(op_index_next, op_index + F_1);
 
-    // Constraint 1: Inside a span, gc can only stay the same or decrement by 1.
-    // sp * delta_gc * (delta_gc - 1) = 0
-    // This ensures: if sp=1 and delta_gc != 0, then delta_gc must equal 1
-    assert_zero_transition(
-        builder,
-        GROUP_COUNT_BASE,
-        sp.clone() * delta_gc.clone() * (delta_gc.clone() - AB::Expr::ONE),
-    );
-
-    // Constraint 2: If gc decrements and this is not a PUSH-immediate row,
-    // then h0 must be zero (no immediate value packed into the group).
-    // sp * delta_gc * (1 - is_push) * h0 = 0
-    assert_zero_transition(
-        builder,
-        GROUP_COUNT_BASE + 1,
-        sp.clone() * delta_gc.clone() * (AB::Expr::ONE - is_push.clone()) * h0,
-    );
-
-    // Constraint 3: SPAN/RESPAN/PUSH must consume a group immediately.
-    // (span_flag + respan_flag + is_push) * (delta_gc - 1) = 0
-    let span_flag = op_flags.span();
-    let respan_flag = op_flags.respan();
-    assert_zero_transition(
-        builder,
-        GROUP_COUNT_BASE + 2,
-        (span_flag + respan_flag + is_push) * (delta_gc.clone() - AB::Expr::ONE),
-    );
-
-    // Constraint 4: If the next op is END or RESPAN, gc cannot decrement on this row.
-    // delta_gc * (end' + respan') = 0
-    let end_next = op_flags_next.end();
-    let respan_next = op_flags_next.respan();
-    assert_zero_transition(
-        builder,
-        GROUP_COUNT_BASE + 3,
-        delta_gc.clone() * (end_next + respan_next),
-    );
-
-    // Constraint 5: END closes the span, so gc must be 0.
-    // end_flag * gc = 0
-    let end_flag = op_flags.end();
-    assert_zero_integrity(builder, GROUP_COUNT_BASE + 4, end_flag * gc);
-}
-
-/// Enforces op group decoding constraints for the `h0` register.
-///
-/// `h0` is a packed buffer of pending op groups. When a group is started or continued,
-/// the next opcode is shifted into `h0` (base 2^7, because opcodes fit in 7 bits).
-/// When the next op is END or RESPAN, the buffer must be empty (h0 = 0).
-fn enforce_op_group_decoding_constraints<AB>(
-    builder: &mut AB,
-    cols: &DecoderColumns<AB::Expr>,
-    cols_next: &DecoderColumns<AB::Expr>,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
-    op_flags: &OpFlags<AB::Expr>,
-    op_flags_next: &OpFlags<AB::Expr>,
-) where
-    AB: TaggingAirBuilderExt,
-{
-    let sp = cols.in_span.clone();
-    let sp_next = cols_next.in_span.clone();
-
-    let gc = cols.group_count.clone();
-    let gc_next = cols_next.group_count.clone();
-    let delta_gc = gc - gc_next;
-
-    let f_span = op_flags.span();
-    let f_respan = op_flags.respan();
-    let is_push = op_flags.push();
-
-    // f_sgc is set when gc stays the same inside a basic block.
-    let f_sgc = sp.clone() * sp_next * (AB::Expr::ONE - delta_gc.clone());
-
-    let h0: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET].clone().into();
-    let h0_next: AB::Expr = next.decoder[decoder_cols::HASHER_STATE_OFFSET].clone().into();
-
-    // Compute op' from next-row op bits (b0' + 2*b1' + ... + 64*b6').
-    let op_next = op_bits_to_value::<AB>(&cols_next.op_bits);
-
-    // When SPAN/RESPAN/PUSH or when gc doesn't change, shift h0 by op'.
-    // (h0 - h0' * 2^7 - op') = 0 under the combined flag.
-    let op_group_base = AB::Expr::from_u16(1u16 << 7);
-    let h0_shift = h0.clone() - h0_next * op_group_base - op_next;
-    assert_zero_transition(
-        builder,
-        OP_GROUP_DECODING_BASE,
-        (f_span + f_respan + is_push + f_sgc) * h0_shift,
-    );
-
-    // If the next op is END or RESPAN, the current h0 must be 0 (no pending group).
-    let end_next = op_flags_next.end();
-    let respan_next = op_flags_next.respan();
-    assert_zero_transition(builder, OP_GROUP_DECODING_BASE + 1, sp * (end_next + respan_next) * h0);
-}
-
-/// Enforces op index (ox) constraints.
-///
-/// The op index tracks the position of the current operation within its operation group:
-/// - ox ranges from 0 to 8 (9 operations per group)
-/// - ox resets to 0 when entering a new group (SPAN, RESPAN, or group boundary)
-/// - ox increments by 1 for each operation within a group
-///
-/// Intuition:
-/// - `ng = delta_gc - is_push` is 1 when a new group starts (excluding PUSH-immediate rows).
-/// - When a new group starts, ox' must be 0.
-/// - Otherwise, ox increments by 1 while sp stays 1.
-///
-/// Constraints:
-/// 1. After SPAN/RESPAN, ox' = 0: (span_flag + respan_flag) * ox' = 0
-/// 2. When starting new group inside basic block (gc decrements), ox' = 0: sp * delta_gc * ox' = 0
-/// 3. When inside basic block and not starting new group, ox increments by 1: sp * sp' * (1 -
-///    delta_gc) * (ox' - ox - 1) = 0
-/// 4. Op index must be in range [0, 8]: ox * (ox-1) * (ox-2) * (ox-3) * (ox-4) * (ox-5) * (ox-6) *
-///    (ox-7) * (ox-8) = 0
-fn enforce_op_index_constraints<AB>(
-    builder: &mut AB,
-    cols: &DecoderColumns<AB::Expr>,
-    cols_next: &DecoderColumns<AB::Expr>,
-    op_flags: &OpFlags<AB::Expr>,
-) where
-    AB: TaggingAirBuilderExt,
-{
-    let sp = cols.in_span.clone();
-    let sp_next = cols_next.in_span.clone();
-    let gc = cols.group_count.clone();
-    let gc_next = cols_next.group_count.clone();
-    let ox = cols.op_index.clone();
-    let ox_next = cols_next.op_index.clone();
-
-    // delta_gc = gc - gc' (how much gc decrements; 1 when entering new group)
-    let delta_gc = gc.clone() - gc_next;
-
-    // is_push = push flag (PUSH is the only operation with immediate value)
-    let is_push = op_flags.push();
-
-    // ng = delta_gc - is_push
-    // This equals 1 when we're starting a new operation group (not due to immediate op)
-    let ng = delta_gc - is_push;
-
-    let span_flag = op_flags.span();
-    let respan_flag = op_flags.respan();
-
-    // Constraint 1: SPAN/RESPAN start a fresh group, so ox' = 0.
-    // (span_flag + respan_flag) * ox' = 0
-    assert_zero_transition(builder, OP_INDEX_BASE, (span_flag + respan_flag) * ox_next.clone());
-
-    // Constraint 2: When a new group starts inside a span, ox' = 0.
-    // sp * ng * ox' = 0
-    assert_zero_transition(builder, OP_INDEX_BASE + 1, sp.clone() * ng.clone() * ox_next.clone());
-
-    // Constraint 3: When staying in the same group, ox increments by 1.
-    // sp * sp' * (1 - ng) * (ox' - ox - 1) = 0
-    let delta_ox = ox_next - ox.clone() - AB::Expr::ONE;
-    assert_zero_transition(
-        builder,
-        OP_INDEX_BASE + 2,
-        sp * sp_next * (AB::Expr::ONE - ng) * delta_ox,
-    );
-
-    // Constraint 4: ox must be in range [0, 8] (9 ops per group).
-    // ∏_{i=0}^{8}(ox - i) = 0
-    let mut range_check = ox.clone();
-    for i in 1..=8u64 {
-        range_check *= ox.clone() - AB::Expr::from_u16(i as u16);
-    }
-    assert_zero_integrity(builder, OP_INDEX_BASE + 3, range_check);
-}
-
-/// Enforces op batch flag constraints and associated hasher-state zeroing rules.
-///
-/// Batch flags encode how many groups were emitted by SPAN/RESPAN:
-/// - g8, g4, g2, g1 correspond to batches of 8, 4, 2, or 1 groups. The hasher lanes h1..h7 store
-///   the group values; unused lanes must be zeroed.
-fn enforce_batch_flags_constraints<AB>(
-    builder: &mut AB,
-    cols: &DecoderColumns<AB::Expr>,
-    local: &MainTraceRow<AB::Var>,
-    op_flags: &OpFlags<AB::Expr>,
-) where
-    AB: TaggingAirBuilderExt,
-{
-    let bc0 = cols.batch_flags[0].clone();
-    let bc1 = cols.batch_flags[1].clone();
-    let bc2 = cols.batch_flags[2].clone();
-
-    // Batch flag decoding matches trace::decoder batch encodings.
-    let f_g8 = bc0.clone();
-    let f_g4 = (AB::Expr::ONE - bc0.clone()) * bc1.clone() * (AB::Expr::ONE - bc2.clone());
-    let f_g2 = (AB::Expr::ONE - bc0.clone()) * (AB::Expr::ONE - bc1.clone()) * bc2.clone();
-    let f_g1 = (AB::Expr::ONE - bc0) * bc1 * bc2;
-
-    let f_span = op_flags.span();
-    let f_respan = op_flags.respan();
-    let span_or_respan = f_span + f_respan;
-
-    // When SPAN or RESPAN, exactly one batch flag must be set.
-    assert_zero_integrity(
-        builder,
-        BATCH_FLAGS_BASE,
-        span_or_respan.clone() - (f_g1.clone() + f_g2.clone() + f_g4.clone() + f_g8),
-    );
-
-    // When not SPAN/RESPAN, all batch flags must be zero.
-    assert_zero_integrity(
-        builder,
-        BATCH_FLAGS_BASE + 1,
-        (AB::Expr::ONE - span_or_respan)
-            * (cols.batch_flags[0].clone()
-                + cols.batch_flags[1].clone()
-                + cols.batch_flags[2].clone()),
-    );
-
-    // When batch has <=4 groups, h4..h7 must be zero (unused lanes).
-    let small_batch = f_g1.clone() + f_g2.clone() + f_g4.clone();
-    for i in 0..4 {
-        let hi: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 4 + i].clone().into();
-        assert_zero_integrity(builder, BATCH_FLAGS_BASE + 2 + i, small_batch.clone() * hi);
+        // op_index must be in [0, 8] — 9 ops per group max.
+        let mut range_check: AB::Expr = op_index.into();
+        for i in 1..=8u64 {
+            range_check *= op_index - Felt::new(i);
+        }
+        builder.assert_zero(range_check);
     }
 
-    // When batch has <=2 groups, h2..h3 must be zero (unused lanes).
-    let tiny_batch = f_g1.clone() + f_g2.clone();
-    for i in 0..2 {
-        let hi: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 2 + i].clone().into();
-        assert_zero_integrity(builder, BATCH_FLAGS_BASE + 6 + i, tiny_batch.clone() * hi);
+    // =============================================
+    // Batch flag constraints
+    // =============================================
+    // Batch flags (c0, c1, c2) encode the number of op groups in the current batch.
+    // This matters for the last batch in a basic block (or the only batch), since all
+    // other batches must be completely full (8 groups).
+    //
+    // The flags are mutually exclusive (exactly one is set during SPAN/RESPAN).
+    // Unused hasher lanes must be zero to prevent the prover from smuggling
+    // arbitrary values through unused group slots. The zeroed lanes cascade:
+    //
+    //   Groups | Zeroed lanes
+    //   -------+--------------
+    //      8   | (none)
+    //      4   | h4..h7
+    //      2   | h2..h7
+    //      1   | h1..h7
+    {
+        // Batch flag bits must be binary.
+        builder.assert_bools([bc0, bc1, bc2]);
+
+        // 8 groups: c0 = 1 (c1, c2 don't matter).
+        let groups_8 = bc0;
+        // 4 groups: c0 = 0, c1 = 1, c2 = 0.
+        let not_bc0 = bc0.into().not();
+        let groups_4 = not_bc0.clone() * bc1 * bc2.into().not();
+        // 2 groups: c0 = 0, c1 = 0, c2 = 1.
+        let groups_2 = not_bc0.clone() * bc1.into().not() * bc2;
+        // 1 group: c0 = 0, c1 = 1, c2 = 1.
+        let groups_1 = not_bc0 * bc1 * bc2;
+
+        // Combined flags for the cascading lane-zeroing constraints.
+        let groups_1_or_2 = groups_1.clone() + groups_2.clone();
+        let groups_1_or_2_or_4 = groups_1_or_2.clone() + groups_4.clone();
+
+        let span_or_respan = op_flags.span() + op_flags.respan();
+
+        // During SPAN/RESPAN, exactly one batch flag must be set.
+        builder.assert_eq(span_or_respan.clone(), groups_1_or_2_or_4.clone() + groups_8);
+
+        // Outside SPAN/RESPAN, all batch flags must be zero.
+        builder.when(span_or_respan.not()).assert_zero(bc0 + bc1 + bc2);
+
+        // Fewer than 8 groups: h4..h7 are unused and must be zero.
+        {
+            let builder = &mut builder.when(groups_1_or_2_or_4);
+            for i in 0..4 {
+                builder.assert_zero(hasher_state[4 + i]);
+            }
+        }
+
+        // Fewer than 4 groups: h2..h3 are also unused.
+        {
+            let builder = &mut builder.when(groups_1_or_2);
+            for i in 0..2 {
+                builder.assert_zero(hasher_state[2 + i]);
+            }
+        }
+
+        // Only 1 group: h1 is also unused.
+        builder.when(groups_1).assert_zero(hasher_state[1]);
     }
 
-    // When batch has 1 group, h1 must be zero (unused lane).
-    let h1: AB::Expr = local.decoder[decoder_cols::HASHER_STATE_OFFSET + 1].clone().into();
-    assert_zero_integrity(builder, BATCH_FLAGS_BASE + 8, f_g1 * h1);
-}
+    // =============================================
+    // Block address (addr) constraints
+    // =============================================
+    // The block address links decoder rows to the hasher table, which computes Poseidon2
+    // hashes of MAST node contents. Each hash uses a controller input/output pair
+    // (CONTROLLER_ROWS_PER_PERMUTATION = 2 rows in the hasher table).
+    //
+    // When RESPAN starts a new batch within the same span, the hasher table needs a new
+    // controller pair, so addr increments by CONTROLLER_ROWS_PER_PERMUTATION.
 
-/// Enforces block address (addr) constraints.
-///
-/// The block address identifies the current code block in the hasher table:
-/// - addr stays constant inside a basic block (sp = 1)
-/// - addr increments by ADDR_INCREMENT_PER_HASH (= 2) after RESPAN
-/// - addr must be 0 when HALT is executed
-///
-/// Constraints:
-/// 1. sp * (addr' - addr) = 0
-/// 2. respan_flag * (addr' - addr - ADDR_INCREMENT_PER_HASH) = 0
-/// 3. halt_flag * addr = 0
-fn enforce_block_address_constraints<AB>(
-    builder: &mut AB,
-    cols: &DecoderColumns<AB::Expr>,
-    cols_next: &DecoderColumns<AB::Expr>,
-    op_flags: &OpFlags<AB::Expr>,
-) where
-    AB: TaggingAirBuilderExt,
-{
-    let sp = cols.in_span.clone();
-    let addr = cols.addr.clone();
-    let addr_next = cols_next.addr.clone();
+    // Inside a basic block, addr must stay the same (all ops in one batch share the same
+    // hasher-table address).
+    builder.when_transition().when(in_span).assert_eq(addr_next, addr);
 
-    // Constraint 1: Inside a span, address must stay the same.
-    // sp * (addr' - addr) = 0
-    assert_zero_transition(builder, ADDR_BASE, sp * (addr_next.clone() - addr.clone()));
+    // RESPAN moves to the next hash block (addr += CONTROLLER_ROWS_PER_PERMUTATION).
+    builder
+        .when_transition()
+        .when(op_flags.respan())
+        .assert_eq(addr_next, addr + CONTROLLER_ROWS_PER_PERM_FELT);
 
-    // Constraint 2: RESPAN advances the address by one controller pair (2 rows).
-    // respan_flag * (addr' - addr - ADDR_INCREMENT_PER_HASH) = 0
-    let addr_increment: AB::Expr = AB::Expr::from_u16(ADDR_INCREMENT_PER_HASH as u16);
-    let respan_flag = op_flags.respan();
-    assert_zero_transition(
-        builder,
-        ADDR_BASE + 1,
-        respan_flag * (addr_next - addr.clone() - addr_increment),
-    );
+    // HALT forces addr = 0 (execution ends at the root block).
+    builder.when(op_flags.halt()).assert_zero(addr);
 
-    // Constraint 3: HALT forces addr = 0.
-    // halt_flag * addr = 0
-    let halt_flag = op_flags.halt();
-    assert_zero_integrity(builder, ADDR_BASE + 2, halt_flag * addr);
-}
+    // =============================================
+    // Control flow constraint
+    // =============================================
+    // Every row is either inside a basic block (in_span = 1) or executing a control-flow
+    // operation (f_ctrl = 1). These two states are mutually exclusive and exhaustive.
+    //
+    // f_ctrl covers: JOIN, SPLIT, LOOP, SPAN, RESPAN, END, REPEAT, HALT, DYN, DYNCALL,
+    //                CALL, SYSCALL.
+    //
+    // This also implies in_span = 1 - f_ctrl, so in_span is automatically 0 on
+    // control-flow rows and 1 otherwise (given that in_span is binary, enforced above).
+    builder.assert_one(in_span + op_flags.control_flow());
 
-/// Enforces control flow constraints.
-///
-/// When outside a basic block (sp = 0), only control flow operations can execute.
-/// This is expressed as: fctrl = 1 - sp, or equivalently: (1 - sp) * (1 - fctrl) = 0
-///
-/// Control flow operations include:
-/// - SPAN, JOIN, SPLIT, LOOP (block start operations)
-/// - END, REPEAT, RESPAN, HALT (block transition operations)
-/// - DYN, DYNCALL, CALL, SYSCALL (procedure invocations)
-///
-/// Constraints:
-/// 1. When sp = 0, control_flow must be 1: (1 - sp) * (1 - fctrl) = 0
-fn enforce_control_flow_constraints<AB>(
-    builder: &mut AB,
-    cols: &DecoderColumns<AB::Expr>,
-    op_flags: &OpFlags<AB::Expr>,
-) where
-    AB: TaggingAirBuilderExt,
-{
-    let sp = cols.in_span.clone();
-
-    // Constraint: sp and control_flow must be complementary.
-    // 1 - sp - fctrl = 0
-    let ctrl_flag = op_flags.control_flow();
-    assert_zero_integrity(builder, CONTROL_FLOW_BASE, AB::Expr::ONE - sp - ctrl_flag);
-}
-
-fn assert_zero_transition<AB: TaggingAirBuilderExt>(builder: &mut AB, idx: usize, expr: AB::Expr) {
-    let mut idx = idx;
-    tagged_assert_zero(builder, &DECODER_TAGS, &mut idx, expr);
-}
-
-fn assert_zero_integrity<AB: TaggingAirBuilderExt>(builder: &mut AB, idx: usize, expr: AB::Expr) {
-    let mut idx = idx;
-    tagged_assert_zero_integrity(builder, &DECODER_TAGS, &mut idx, expr);
-}
-
-fn assert_zero_first_row<AB: TaggingAirBuilderExt>(builder: &mut AB, idx: usize, expr: AB::Expr) {
-    let id = DECODER_BASE_ID + idx;
-    let name = DECODER_NAMES[idx];
-    builder.tagged(id, name, |builder| {
-        builder.when_first_row().assert_zero(expr);
-    });
+    // Last-row boundary: the final row must be HALT. The processor pads the trace with
+    // HALT rows and the absorbing transition constraint keeps them there; this constraint
+    // makes it explicit in the AIR.
+    //
+    // TODO: with HALT guaranteed on the last row, some `when_transition()` guards in this
+    // module may be redundant (HALT is absorbing and addr = 0). Audit which can be removed.
+    builder.when_last_row().assert_one(op_flags.halt());
 }

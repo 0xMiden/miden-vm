@@ -9,34 +9,28 @@
 //!
 //! Rows contribute either a request term, a response term, or the identity (when no flag is set).
 //! The request/response values use the standard message format:
-//! `alpha + sum_i beta^i * element[i]`.
+//! `bus_prefix[bus] + sum_i beta^i * element[i]`.
 
 use miden_core::field::PrimeCharacteristicRing;
-use miden_crypto::stark::air::{LiftedAirBuilder, WindowAccess};
+use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess};
 
 use crate::{
-    Felt, MainTraceRow,
+    Felt, MainCols, MidenAirBuilder,
     constraints::{
-        bus::indices::B_HASH_KERNEL,
-        chiplets::hasher::flags,
-        op_flags::OpFlags,
-        tagging::{
-            TagGroup, TaggingAirBuilderExt, ids::TAG_HASH_KERNEL_BUS_BASE, tagged_assert_zero_ext,
-        },
+        bus::indices::B_HASH_KERNEL, chiplets::selectors::ChipletSelectors, op_flags::OpFlags,
     },
     trace::{
-        CHIPLETS_OFFSET, Challenges, LOG_PRECOMPILE_LABEL,
+        CHIPLETS_OFFSET, Challenges, LOG_PRECOMPILE_LABEL, bus_types,
         chiplets::{
-            HASHER_MRUPDATE_ID_COL_IDX, HASHER_NODE_INDEX_COL_IDX, HASHER_PERM_SEG_COL_IDX,
-            HASHER_SELECTOR_COL_RANGE, HASHER_STATE_COL_RANGE, NUM_ACE_SELECTORS,
+            HASHER_MRUPDATE_ID_COL_IDX, HASHER_NODE_INDEX_COL_IDX, HASHER_STATE_COL_RANGE,
+            NUM_ACE_SELECTORS,
             ace::{
                 ACE_INSTRUCTION_ID1_OFFSET, ACE_INSTRUCTION_ID2_OFFSET, CLK_IDX, CTX_IDX,
-                EVAL_OP_IDX, ID_1_IDX, ID_2_IDX, PTR_IDX, SELECTOR_BLOCK_IDX, V_0_0_IDX, V_0_1_IDX,
-                V_1_0_IDX, V_1_1_IDX,
+                EVAL_OP_IDX, ID_1_IDX, ID_2_IDX, PTR_IDX, V_0_0_IDX, V_0_1_IDX, V_1_0_IDX,
+                V_1_1_IDX,
             },
             memory::{MEMORY_READ_ELEMENT_LABEL, MEMORY_READ_WORD_LABEL},
         },
-        decoder::USER_OP_HELPERS_OFFSET,
         log_precompile::{HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE},
     },
 };
@@ -45,20 +39,9 @@ use crate::{
 // ================================================================================================
 
 // Column offsets relative to chiplets array.
-const S_START: usize = HASHER_SELECTOR_COL_RANGE.start - CHIPLETS_OFFSET;
 const H_START: usize = HASHER_STATE_COL_RANGE.start - CHIPLETS_OFFSET;
 const IDX_COL: usize = HASHER_NODE_INDEX_COL_IDX - CHIPLETS_OFFSET;
 const MRUPDATE_ID_COL: usize = HASHER_MRUPDATE_ID_COL_IDX - CHIPLETS_OFFSET;
-const PERM_SEG_COL: usize = HASHER_PERM_SEG_COL_IDX - CHIPLETS_OFFSET;
-
-/// Tag ID and namespace for the hash-kernel (virtual table) bus transition constraint.
-const HASH_KERNEL_BUS_ID: usize = TAG_HASH_KERNEL_BUS_BASE;
-const HASH_KERNEL_BUS_NAMESPACE: &str = "chiplets.bus.hash_kernel.transition";
-const HASH_KERNEL_BUS_NAMES: [&str; 1] = [HASH_KERNEL_BUS_NAMESPACE; 1];
-const HASH_KERNEL_BUS_TAGS: TagGroup = TagGroup {
-    base: HASH_KERNEL_BUS_ID,
-    names: &HASH_KERNEL_BUS_NAMES,
-};
 
 // ENTRY POINTS
 // ================================================================================================
@@ -71,12 +54,13 @@ const HASH_KERNEL_BUS_TAGS: TagGroup = TagGroup {
 /// 3. Log precompile transcript tracking
 pub fn enforce_hash_kernel_constraint<AB>(
     builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
+    local: &MainCols<AB::Var>,
+    next: &MainCols<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
     challenges: &Challenges<AB::ExprEF>,
+    selectors: &ChipletSelectors<AB::Expr>,
 ) where
-    AB: TaggingAirBuilderExt<F = Felt>,
+    AB: MidenAirBuilder,
 {
     // =========================================================================
     // AUXILIARY TRACE ACCESS
@@ -96,27 +80,21 @@ pub fn enforce_hash_kernel_constraint<AB>(
     // COMMON VALUES
     // =========================================================================
 
-    // Hasher chiplet rows have s0 = 0 (chiplet selector).
-    let chiplet_selector: AB::Expr = local.chiplets[0].clone().into();
-    let is_hasher: AB::Expr = one.clone() - chiplet_selector.clone();
+    // Controller flag from the precomputed chiplet selectors.
+    let controller_flag: AB::Expr = selectors.controller.is_active.clone();
 
-    // Hasher controller flag: active on hasher controller rows (perm_seg=0), not on
-    // hasher permutation segment rows (perm_seg=1).
-    let perm_seg: AB::Expr = local.chiplets[PERM_SEG_COL].clone().into();
-    let controller_flag: AB::Expr = is_hasher.clone() * (one.clone() - perm_seg);
-
-    // Hasher operation selectors (only meaningful on hasher controller rows)
-    let s0: AB::Expr = local.chiplets[S_START].clone().into();
-    let s1: AB::Expr = local.chiplets[S_START + 1].clone().into();
-    let s2: AB::Expr = local.chiplets[S_START + 2].clone().into();
+    // Hasher operation selectors (only meaningful on hasher controller rows).
+    // On controller rows: `s0=1` = input row, `(s0,s1,s2)` encodes the operation.
+    // On permutation rows these columns hold S-box witnesses — gated out by controller_flag.
+    let ctrl = local.controller();
 
     // Node index and mrupdate_id for sibling table
-    let node_index: AB::Expr = local.chiplets[IDX_COL].clone().into();
-    let node_index_next: AB::Expr = next.chiplets[IDX_COL].clone().into();
-    let mrupdate_id: AB::Expr = local.chiplets[MRUPDATE_ID_COL].clone().into();
+    let node_index: AB::Expr = local.chiplets[IDX_COL].into();
+    let node_index_next: AB::Expr = next.chiplets[IDX_COL].into();
+    let mrupdate_id: AB::Expr = local.chiplets[MRUPDATE_ID_COL].into();
 
     // Hasher state for sibling values
-    let h: [AB::Expr; 12] = core::array::from_fn(|i| local.chiplets[H_START + i].clone().into());
+    let h: [AB::Expr; 12] = core::array::from_fn(|i| local.chiplets[H_START + i].into());
 
     // =========================================================================
     // SIBLING TABLE FLAGS AND VALUES
@@ -125,8 +103,10 @@ pub fn enforce_hash_kernel_constraint<AB>(
     // In the controller/perm split, sibling table operations happen on controller input rows
     // for MU (new path - requests/removes) and MV (old path - responses/adds).
     // All MU/MV input rows participate (not just is_start=1).
-    let f_mu: AB::Expr = controller_flag.clone() * flags::f_mu(s0.clone(), s1.clone(), s2.clone());
-    let f_mv: AB::Expr = controller_flag.clone() * flags::f_mv(s0.clone(), s1.clone(), s2.clone());
+    // f_mu = s0 * s1 * s2
+    let f_mu: AB::Expr = controller_flag.clone() * ctrl.f_mu();
+    // f_mv = s0 * s1 * !s2
+    let f_mv: AB::Expr = controller_flag.clone() * ctrl.f_mv();
 
     // Direction bit b = input_node_index - 2 * output_node_index (next row is the paired output).
     let b: AB::Expr = node_index.clone() - node_index_next.clone().double();
@@ -142,58 +122,44 @@ pub fn enforce_hash_kernel_constraint<AB>(
     // ACE MEMORY FLAGS AND VALUES
     // =========================================================================
 
-    // ACE chiplet selector: s0=1, s1=1, s2=1, s3=0
-    let s3: AB::Expr = local.chiplets[3].clone().into();
-    let chiplet_s1: AB::Expr = local.chiplets[1].clone().into();
-    let chiplet_s2: AB::Expr = local.chiplets[2].clone().into();
+    // ACE row flag from the precomputed chiplet selectors.
+    let is_ace_row: AB::Expr = selectors.ace.is_active.clone();
+    let ace = local.ace();
 
-    let is_ace_row: AB::Expr =
-        chiplet_selector.clone() * chiplet_s1.clone() * chiplet_s2.clone() * (one.clone() - s3);
-
-    // Block selector determines read (0) vs eval (1)
-    let block_selector: AB::Expr =
-        local.chiplets[NUM_ACE_SELECTORS + SELECTOR_BLOCK_IDX].clone().into();
-
-    let f_ace_read: AB::Expr = is_ace_row.clone() * (one.clone() - block_selector.clone());
-    let f_ace_eval: AB::Expr = is_ace_row * block_selector;
+    let f_ace_read: AB::Expr = is_ace_row.clone() * ace.f_read();
+    let f_ace_eval: AB::Expr = is_ace_row * ace.f_eval();
 
     // ACE columns for memory messages
-    let ace_clk: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + CLK_IDX].clone().into();
-    let ace_ctx: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + CTX_IDX].clone().into();
-    let ace_ptr: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + PTR_IDX].clone().into();
+    let ace_clk: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + CLK_IDX].into();
+    let ace_ctx: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + CTX_IDX].into();
+    let ace_ptr: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + PTR_IDX].into();
 
     // Word read value: label + ctx + ptr + clk + 4-lane value.
     let v_ace_word = {
-        let v0_0: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + V_0_0_IDX].clone().into();
-        let v0_1: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + V_0_1_IDX].clone().into();
-        let v1_0: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + V_1_0_IDX].clone().into();
-        let v1_1: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + V_1_1_IDX].clone().into();
+        let v0_0: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + V_0_0_IDX].into();
+        let v0_1: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + V_0_1_IDX].into();
+        let v1_0: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + V_1_0_IDX].into();
+        let v1_1: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + V_1_1_IDX].into();
         let label: AB::Expr = AB::Expr::from(Felt::from_u8(MEMORY_READ_WORD_LABEL));
 
-        challenges.encode([
-            label,
-            ace_ctx.clone(),
-            ace_ptr.clone(),
-            ace_clk.clone(),
-            v0_0,
-            v0_1,
-            v1_0,
-            v1_1,
-        ])
+        challenges.encode(
+            bus_types::CHIPLETS_BUS,
+            [label, ace_ctx.clone(), ace_ptr.clone(), ace_clk.clone(), v0_0, v0_1, v1_0, v1_1],
+        )
     };
 
     // Element read value: label + ctx + ptr + clk + element.
     let v_ace_element = {
-        let id_1: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + ID_1_IDX].clone().into();
-        let id_2: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + ID_2_IDX].clone().into();
-        let eval_op: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + EVAL_OP_IDX].clone().into();
+        let id_1: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + ID_1_IDX].into();
+        let id_2: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + ID_2_IDX].into();
+        let eval_op: AB::Expr = local.chiplets[NUM_ACE_SELECTORS + EVAL_OP_IDX].into();
 
         let offset1: AB::Expr = AB::Expr::from(ACE_INSTRUCTION_ID1_OFFSET);
         let offset2: AB::Expr = AB::Expr::from(ACE_INSTRUCTION_ID2_OFFSET);
         let element = id_1 + id_2 * offset1 + (eval_op + one.clone()) * offset2;
         let label: AB::Expr = AB::Expr::from(Felt::from_u8(MEMORY_READ_ELEMENT_LABEL));
 
-        challenges.encode([label, ace_ctx, ace_ptr, ace_clk, element])
+        challenges.encode(bus_types::CHIPLETS_BUS, [label, ace_ctx, ace_ptr, ace_clk, element])
     };
 
     // =========================================================================
@@ -204,34 +170,38 @@ pub fn enforce_hash_kernel_constraint<AB>(
 
     // CAP_PREV from helper registers (provided and constrained by the decoder logic).
     let cap_prev: [AB::Expr; 4] = core::array::from_fn(|i| {
-        local.decoder[USER_OP_HELPERS_OFFSET + HELPER_CAP_PREV_RANGE.start + i]
-            .clone()
-            .into()
+        local.decoder.hasher_state[2 + HELPER_CAP_PREV_RANGE.start + i].into()
     });
 
     // CAP_NEXT from next-row stack.
     let cap_next: [AB::Expr; 4] =
-        core::array::from_fn(|i| next.stack[STACK_CAP_NEXT_RANGE.start + i].clone().into());
+        core::array::from_fn(|i| next.stack.get(STACK_CAP_NEXT_RANGE.start + i).into());
 
     let log_label: AB::Expr = AB::Expr::from(Felt::from_u8(LOG_PRECOMPILE_LABEL));
 
     // CAP_PREV value (request - removed).
-    let v_cap_prev = challenges.encode([
-        log_label.clone(),
-        cap_prev[0].clone(),
-        cap_prev[1].clone(),
-        cap_prev[2].clone(),
-        cap_prev[3].clone(),
-    ]);
+    let v_cap_prev = challenges.encode(
+        bus_types::LOG_PRECOMPILE_TRANSCRIPT,
+        [
+            log_label.clone(),
+            cap_prev[0].clone(),
+            cap_prev[1].clone(),
+            cap_prev[2].clone(),
+            cap_prev[3].clone(),
+        ],
+    );
 
     // CAP_NEXT value (response - inserted).
-    let v_cap_next = challenges.encode([
-        log_label,
-        cap_next[0].clone(),
-        cap_next[1].clone(),
-        cap_next[2].clone(),
-        cap_next[3].clone(),
-    ]);
+    let v_cap_next = challenges.encode(
+        bus_types::LOG_PRECOMPILE_TRANSCRIPT,
+        [
+            log_label,
+            cap_next[0].clone(),
+            cap_next[1].clone(),
+            cap_next[2].clone(),
+            cap_next[3].clone(),
+        ],
+    );
 
     // =========================================================================
     // RUNNING PRODUCT CONSTRAINT
@@ -255,13 +225,9 @@ pub fn enforce_hash_kernel_constraint<AB>(
     let p_local_ef: AB::ExprEF = p_local.into();
     let p_next_ef: AB::ExprEF = p_next.into();
 
-    let mut idx = 0;
-    tagged_assert_zero_ext(
-        builder,
-        &HASH_KERNEL_BUS_TAGS,
-        &mut idx,
-        p_next_ef * requests - p_local_ef * responses,
-    );
+    builder
+        .when_transition()
+        .assert_zero_ext(p_next_ef * requests - p_local_ef * responses);
 }
 
 // INTERNAL HELPERS
@@ -277,7 +243,8 @@ const SIBLING_B1_LAYOUT: [usize; 6] = [1, 2, 3, 4, 5, 6];
 
 /// Compute sibling value when b=0 (sibling at h[4..8], i.e., rate1).
 ///
-/// Message: `alpha + beta[1]*mrupdate_id + beta[2]*node_index + beta[7..11]*h[4..8]`
+/// Message: `bus_prefix[SIBLING_TABLE] + beta[1]*mrupdate_id + beta[2]*node_index +
+/// beta[7..11]*h[4..8]`
 fn compute_sibling_b0<AB>(
     challenges: &Challenges<AB::ExprEF>,
     mrupdate_id: &AB::Expr,
@@ -288,6 +255,7 @@ where
     AB: LiftedAirBuilder<F = Felt>,
 {
     challenges.encode_sparse(
+        bus_types::SIBLING_TABLE,
         SIBLING_B0_LAYOUT,
         [
             mrupdate_id.clone(),
@@ -302,7 +270,8 @@ where
 
 /// Compute sibling value when b=1 (sibling at h[0..4], i.e., rate0).
 ///
-/// Message: `alpha + beta[1]*mrupdate_id + beta[2]*node_index + beta[3..7]*h[0..4]`
+/// Message: `bus_prefix[SIBLING_TABLE] + beta[1]*mrupdate_id + beta[2]*node_index +
+/// beta[3..7]*h[0..4]`
 fn compute_sibling_b1<AB>(
     challenges: &Challenges<AB::ExprEF>,
     mrupdate_id: &AB::Expr,
@@ -313,6 +282,7 @@ where
     AB: LiftedAirBuilder<F = Felt>,
 {
     challenges.encode_sparse(
+        bus_types::SIBLING_TABLE,
         SIBLING_B1_LAYOUT,
         [
             mrupdate_id.clone(),

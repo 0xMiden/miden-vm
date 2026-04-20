@@ -115,7 +115,7 @@ impl BasicBlockNode {
         #[cfg(debug_assertions)]
         validate_decorators(operations.len(), &decorators);
 
-        let (op_batches, digest) = batch_and_hash_ops(operations);
+        let (op_batches, digest) = batch_and_hash_ops(&operations);
         // the prior line may have inserted some padding Noops in the op_batches
         // the decorator mapping should still point to the correct operation when that happens
         let reflowed_decorators = BasicBlockNode::adjust_decorators(decorators, &op_batches);
@@ -1345,7 +1345,7 @@ impl core::ops::Index<usize> for PaddedToRawPrefix {
 }
 
 /// Groups the provided operations into batches and computes the hash of the block.
-fn batch_and_hash_ops(ops: Vec<Operation>) -> (Vec<OpBatch>, Word) {
+fn batch_and_hash_ops(ops: &[Operation]) -> (Vec<OpBatch>, Word) {
     // Group the operations into batches.
     let batches = batch_ops(ops);
 
@@ -1358,11 +1358,11 @@ fn batch_and_hash_ops(ops: Vec<Operation>) -> (Vec<OpBatch>, Word) {
 
 /// Groups the provided operations into batches as described in the docs for this module (i.e., up
 /// to 9 operations per group, and 8 groups per batch).
-fn batch_ops(ops: Vec<Operation>) -> Vec<OpBatch> {
+fn batch_ops(ops: &[Operation]) -> Vec<OpBatch> {
     let mut batches = Vec::<OpBatch>::new();
     let mut batch_acc = OpBatchAccumulator::new();
 
-    for op in ops {
+    for op in ops.iter().copied() {
         // If the operation cannot be accepted into the current accumulator, add the contents of
         // the accumulator to the list of batches and start a new accumulator.
         if !batch_acc.can_accept_op(op) {
@@ -1459,7 +1459,7 @@ impl BasicBlockNodeBuilder {
                 #[cfg(debug_assertions)]
                 validate_decorators(operations.len(), &decorators);
 
-                let (op_batches, computed_digest) = batch_and_hash_ops(operations);
+                let (op_batches, computed_digest) = batch_and_hash_ops(&operations);
                 // Batch operations (adds padding NOOPs)
                 // Adjust decorators from raw to padded indices
                 let padded_decorators = BasicBlockNode::adjust_decorators(decorators, &op_batches);
@@ -1521,7 +1521,7 @@ impl BasicBlockNodeBuilder {
                 }
 
                 // Batch operations (adds padding NOOPs)
-                let (op_batches, computed_digest) = batch_and_hash_ops(operations);
+                let (op_batches, computed_digest) = batch_and_hash_ops(&operations);
 
                 // Use the forced digest if provided, otherwise use the computed digest
                 let digest = self.digest.unwrap_or(computed_digest);
@@ -1572,7 +1572,7 @@ impl MastForestContributor for BasicBlockNodeBuilder {
                 validate_decorators(operations.len(), &decorators);
 
                 // Batch operations (adds padding NOOPs)
-                let (op_batches, computed_digest) = batch_and_hash_ops(operations);
+                let (op_batches, computed_digest) = batch_and_hash_ops(&operations);
 
                 // Use the forced digest if provided, otherwise use the computed digest
                 let digest = self.digest.unwrap_or(computed_digest);
@@ -1628,7 +1628,7 @@ impl MastForestContributor for BasicBlockNodeBuilder {
         let (op_batches, digest, raw_decorators) = match &self.operation_data {
             OperationData::Raw { operations, decorators } => {
                 // Compute digest - use forced digest if available, otherwise compute normally
-                let (op_batches, computed_digest) = batch_and_hash_ops(operations.clone());
+                let (op_batches, computed_digest) = batch_and_hash_ops(operations);
                 let digest = self.digest.unwrap_or(computed_digest);
 
                 // Decorators are already in raw form - no conversion needed

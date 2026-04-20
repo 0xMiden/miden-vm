@@ -10,7 +10,6 @@
 //! - v_wiring (ACE wiring LogUp)
 
 /// Auxiliary trace column indices.
-#[allow(dead_code)]
 pub mod indices {
     /// Block stack table (decoder control flow)
     pub const P1_BLOCK_STACK: usize = 0;

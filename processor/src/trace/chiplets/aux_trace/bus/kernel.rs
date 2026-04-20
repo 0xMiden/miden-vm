@@ -2,6 +2,7 @@ use core::fmt::{Display, Formatter, Result as FmtResult};
 
 use miden_air::trace::{
     Challenges, MainTrace, RowIndex,
+    bus_types::CHIPLETS_BUS,
     chiplets::kernel_rom::{KERNEL_PROC_CALL_LABEL, KERNEL_PROC_INIT_LABEL},
 };
 use miden_core::{Felt, field::ExtensionField};
@@ -74,13 +75,16 @@ where
 {
     #[inline(always)]
     fn value(&self, challenges: &Challenges<E>) -> E {
-        challenges.encode([
-            KERNEL_PROC_CALL_LABEL,
-            self.kernel_proc_digest[0],
-            self.kernel_proc_digest[1],
-            self.kernel_proc_digest[2],
-            self.kernel_proc_digest[3],
-        ])
+        challenges.encode(
+            CHIPLETS_BUS,
+            [
+                KERNEL_PROC_CALL_LABEL,
+                self.kernel_proc_digest[0],
+                self.kernel_proc_digest[1],
+                self.kernel_proc_digest[2],
+                self.kernel_proc_digest[3],
+            ],
+        )
     }
 
     fn source(&self) -> &str {
@@ -106,13 +110,16 @@ where
 {
     #[inline(always)]
     fn value(&self, challenges: &Challenges<E>) -> E {
-        challenges.encode([
-            KERNEL_PROC_INIT_LABEL,
-            self.kernel_proc_digest[0],
-            self.kernel_proc_digest[1],
-            self.kernel_proc_digest[2],
-            self.kernel_proc_digest[3],
-        ])
+        challenges.encode(
+            CHIPLETS_BUS,
+            [
+                KERNEL_PROC_INIT_LABEL,
+                self.kernel_proc_digest[0],
+                self.kernel_proc_digest[1],
+                self.kernel_proc_digest[2],
+                self.kernel_proc_digest[3],
+            ],
+        )
     }
 
     fn source(&self) -> &str {
