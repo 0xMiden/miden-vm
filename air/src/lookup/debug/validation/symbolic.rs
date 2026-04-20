@@ -46,6 +46,7 @@ where
     {
         let mut lb = ConstraintLookupBuilder::new(&mut builder, air);
         air.eval(&mut lb);
+        lb.finalize();
     }
 
     let mut report = DegreeReport::default();

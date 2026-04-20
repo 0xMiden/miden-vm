@@ -26,9 +26,9 @@ use super::{ExecutionTrace, Felt};
 // ================================================================================================
 
 /// Aggregator column indices for [`MidenLookupAir`], mirroring the `eval` order
-/// `[M1, M_2+5, M3, M4, M5, C1, C2, C3]`. Keeping these constants here (rather than
-/// importing from `air/`) makes any future bus re-shuffle in the AIR a visible compile-time
-/// change.
+/// `[M1, M_2+5, M3, M4, C1, C2, C3]` (4 main-trace + 3 chiplet-trace = 7 columns).
+/// Keeping these constants here (rather than importing from `air/`) makes any future bus
+/// re-shuffle in the AIR a visible compile-time change.
 #[allow(dead_code)]
 pub(super) mod aux_col {
     /// M1 — `BUS_BLOCK_STACK_TABLE` + `BUS_RANGE_CHECK` (range-table response side).
@@ -37,16 +37,14 @@ pub(super) mod aux_col {
     pub const BLOCK_HASH_AND_OP_GROUP: usize = 1;
     /// M3 — `BUS_CHIPLETS` (requests from the decoder / stack side).
     pub const CHIPLET_REQUESTS: usize = 2;
-    /// M4 — `BUS_RANGE_CHECK` (stack/memory requests) + `BUS_LOG_PRECOMPILE_TRANSCRIPT`.
-    pub const RANGE_STACK_AND_LOGCAP: usize = 3;
-    /// M5 — `BUS_STACK_OVERFLOW_TABLE`.
-    pub const STACK_OVERFLOW: usize = 4;
+    /// M4 — `BUS_STACK_OVERFLOW_TABLE`.
+    pub const STACK_OVERFLOW: usize = 3;
     /// C1 — `BUS_CHIPLETS` (responses from the chiplet side).
-    pub const CHIPLET_RESPONSES: usize = 5;
+    pub const CHIPLET_RESPONSES: usize = 4;
     /// C2 — `BUS_CHIPLETS` (hash-kernel) + `BUS_SIBLING_TABLE`.
-    pub const HASH_KERNEL_AND_SIBLING: usize = 6;
+    pub const HASH_KERNEL_AND_SIBLING: usize = 5;
     /// C3 — `BUS_ACE_WIRING` + `BUS_HASHER_PERM_LINK` (both ride the shared v_wiring column).
-    pub const V_WIRING: usize = 7;
+    pub const V_WIRING: usize = 6;
 }
 
 // LOOKUP HARNESS
@@ -96,7 +94,9 @@ impl LookupHarness {
 
         let fractions =
             build_lookup_fractions(&air, &main_trace, &periodic, &public_vals, &challenges);
-        let aux = accumulate(&fractions);
+        let rs_cols: &[usize] = &[0, 4];
+        let frac_map: &[&[usize]] = &[&[1, 2, 3], &[5, 6]];
+        let aux = accumulate(&fractions, rs_cols, frac_map);
 
         let num_cols = aux.width();
         let num_rows = aux.height() - 1;

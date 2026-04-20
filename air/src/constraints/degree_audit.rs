@@ -51,7 +51,8 @@ mod tests {
             num_public_values: NUM_PUBLIC_VALUES,
             permutation_width: AUX_TRACE_WIDTH,
             num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
-            num_permutation_values: AUX_TRACE_WIDTH,
+            num_permutation_values:
+                crate::constraints::lookup::miden_air::NUM_LOGUP_COMMITTED_FINALS,
             num_periodic_columns: num_periodic,
         })
     }

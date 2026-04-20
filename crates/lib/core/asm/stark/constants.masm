@@ -170,17 +170,17 @@ const AUX_RAND_ELEM_PTR = 3225419776
 ### - 16 quotient chunk base columns (8 chunks * extension degree)
 const OOD_EVALUATIONS_PTR = 3225419780        # AUX_RAND_ELEM_PTR + 4
 
-### Auxiliary bus boundary values (8 extension field elements = 16 base elements).
+### Auxiliary bus boundary values (2 extension field elements = 4 base elements).
 const AUX_BUS_BOUNDARY_PTR = 3225420196       # OOD_EVALUATIONS_PTR + (72 + 16 + 16) * 2 * 2
 
 ### Auxiliary inputs for ACE (stark vars), 10 extension field elements = 20 base elements.
-const AUXILIARY_ACE_INPUTS_PTR = 3225420212   # AUX_BUS_BOUNDARY_PTR + 16
+const AUXILIARY_ACE_INPUTS_PTR = 3225420200   # AUX_BUS_BOUNDARY_PTR + 4
 
 ### Address at the start of the memory region holding the arithmetic circuit description (constants + ops).
-const ACE_CIRCUIT_STREAM_PTR = 3225420232     # AUXILIARY_ACE_INPUTS_PTR + 20
+const ACE_CIRCUIT_STREAM_PTR = 3225420220     # AUXILIARY_ACE_INPUTS_PTR + 20
 
 ### Address at the start of the evaluation-gates portion of the arithmetic circuit (EVAL section).
-const ACE_CIRCUIT_PTR = 3225421380            # ACE_CIRCUIT_STREAM_PTR + num_const_felts
+const ACE_CIRCUIT_PTR = 3225420820            # ACE_CIRCUIT_STREAM_PTR + num_const_felts
 
 ## FRI
 ##

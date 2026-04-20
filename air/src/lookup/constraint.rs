@@ -1,9 +1,15 @@
-//! Constraint-path adapter for the new closure-based lookup API.
+//! Constraint-path adapter for the closure-based lookup API.
 //!
 //! Implements [`LookupBuilder`] over any `LiftedAirBuilder`. The adapter
-//! mirrors the column-accumulator algebra in the per-group `(U, V)` / per-batch `(N, D)`
-//! running pairs and wraps it in the closure-based surface described by
-//! [`super::builder`].
+//! accumulates per-column `(U, V)` pairs through the closure API, then emits
+//! two kinds of constraints depending on the column role:
+//!
+//! - **Fraction columns** (non-running-sum): `D_i * aux_next_i - N_i = 0` on transition rows. Uses
+//!   `aux_next` because the aux trace is offset by 1 from the main trace: `aux[0]` is the zero
+//!   initial condition, `aux[r+1]` holds the value for main-trace row `r`.
+//! - **Running-sum columns**: boundary + transition constraints that reference the fraction
+//!   columns' `aux_next` values, emitted in [`ConstraintLookupBuilder::finalize`] after all columns
+//!   have been processed.
 //!
 //! ## Algebra location
 //!
@@ -36,8 +42,9 @@
 //! [`LookupBuilder::next_column`] call re-queries `ab.permutation()` to pick
 //! up the current-row / next-row `VarEF` values. `ab.permutation()` is
 //! cheap (it builds a window over references) and not caching keeps the
-//! builder a four-field struct.
+//! builder small.
 
+use alloc::vec::Vec;
 use core::marker::PhantomData;
 
 use miden_core::field::PrimeCharacteristicRing;
@@ -51,13 +58,19 @@ use super::{
 // CONSTRAINT LOOKUP BUILDER
 // ================================================================================================
 
+/// Deferred running-sum column: stores the column index and its `(U, V)` pair so that
+/// `finalize()` can emit the cross-column constraint after all columns are processed.
+struct DeferredRunningSum<EF> {
+    col_idx: usize,
+    u: EF,
+    v: EF,
+    fraction_cols: Vec<usize>,
+}
+
 /// Constraint-path [`LookupBuilder`] over a wrapped [`LiftedAirBuilder`].
 ///
-/// Construct via [`ConstraintLookupBuilder::new`]. The adapter caches the
-/// precomputed challenges ([`Challenges`] sized from the
-/// [`LookupAir`]) and a small column-index counter; the permutation row
-/// slices are re-queried from the wrapped `&mut AB` on every
-/// [`LookupBuilder::next_column`] call.
+/// After calling `air.eval(&mut builder)`, call [`finalize`](Self::finalize) to emit the
+/// running-sum columns' boundary and transition constraints.
 pub struct ConstraintLookupBuilder<'ab, AB>
 where
     AB: LiftedAirBuilder + 'ab,
@@ -65,23 +78,16 @@ where
     ab: &'ab mut AB,
     challenges: Challenges<AB::ExprEF>,
     column_idx: usize,
+    running_sum_set: Vec<usize>,
+    fraction_map: Vec<Vec<usize>>,
+    column_shape: Vec<usize>,
+    deferred: Vec<DeferredRunningSum<AB::ExprEF>>,
 }
 
 impl<'ab, AB> ConstraintLookupBuilder<'ab, AB>
 where
     AB: LiftedAirBuilder,
 {
-    /// Create a new adapter wrapping `ab`, sized from `air`.
-    ///
-    /// The `air` parameter is bound as `LookupAir<Self>`, which pins the
-    /// `LB` type parameter of [`LookupAir`] to this concrete adapter. The
-    /// canonical usage is a blanket `impl<LB: LookupBuilder> LookupAir<LB>
-    /// for MyAir`, which automatically satisfies the bound here and lets
-    /// us read the shape without any turbofishing at the call site.
-    ///
-    /// Reads `ab.permutation_randomness()` to extract α = `r[0]` and β = `r[1]`, then builds
-    /// a [`Challenges<AB::ExprEF>`] (= `crate::lookup::Challenges`) sized from
-    /// `air.max_message_width()` / `air.num_bus_ids()`.
     pub fn new<A>(ab: &'ab mut AB, air: &A) -> Self
     where
         A: LookupAir<Self>,
@@ -93,7 +99,66 @@ where
         let challenges =
             Challenges::<AB::ExprEF>::new(alpha, beta, air.max_message_width(), air.num_bus_ids());
 
-        Self { ab, challenges, column_idx: 0 }
+        let running_sum_set = air.running_sum_columns().to_vec();
+        let fraction_map: Vec<Vec<usize>> = running_sum_set
+            .iter()
+            .map(|&rs| air.fraction_columns_for(rs).to_vec())
+            .collect();
+        let column_shape = air.column_shape().to_vec();
+
+        Self {
+            ab,
+            challenges,
+            column_idx: 0,
+            running_sum_set,
+            fraction_map,
+            column_shape,
+            deferred: Vec::new(),
+        }
+    }
+
+    fn is_running_sum(&self, col: usize) -> bool {
+        self.running_sum_set.contains(&col)
+    }
+
+    /// Emit deferred running-sum constraints after all columns have been processed.
+    ///
+    /// For each running-sum column `j` with fraction columns `{i_1, i_2, ...}`:
+    ///
+    /// - `when_first_row:  acc_j == 0`
+    /// - `when_transition: U_j * (acc_next_j - acc_j - Σ aux_next_{i_k}) - V_j == 0`
+    /// - `when_last_row:   acc_j == committed_final_k`
+    pub fn finalize(self) {
+        let Self { ab, deferred, .. } = self;
+        for (committed_idx, ds) in deferred.into_iter().enumerate() {
+            let (acc, acc_next, committed_final) = {
+                let mp = ab.permutation();
+                let acc: AB::ExprEF = mp.current_slice()[ds.col_idx].into();
+                let acc_next: AB::ExprEF = mp.next_slice()[ds.col_idx].into();
+                let committed_final: AB::ExprEF =
+                    ab.permutation_values()[committed_idx].clone().into();
+                (acc, acc_next, committed_final)
+            };
+
+            // Sum the fraction columns' next-row aux values (aux trace is offset by 1).
+            let frac_sum = {
+                let mp = ab.permutation();
+                let next = mp.next_slice();
+                let mut sum = AB::ExprEF::ZERO;
+                for &frac_col in &ds.fraction_cols {
+                    let aux_i: AB::ExprEF = next[frac_col].into();
+                    sum += aux_i;
+                }
+                sum
+            };
+
+            // Running-sum transition:
+            //   U * (acc_next - acc - Σ frac_aux) - V == 0
+            let delta = acc_next - acc.clone() - frac_sum;
+            ab.when_first_row().assert_zero_ext(acc.clone());
+            ab.when_transition().assert_zero_ext(delta * ds.u - ds.v);
+            ab.when_last_row().assert_eq_ext(acc, committed_final);
+        }
     }
 }
 
@@ -137,11 +202,6 @@ where
         f: impl FnOnce(&mut Self::Column<'a>) -> R,
         _deg: Deg,
     ) -> R {
-        // Open the column with an empty `(U, V) = (1, 0)` accumulator.
-        // The column only holds a shared borrow of the challenges and
-        // the two running-pair slots — the `&mut AB` stays on the
-        // builder and is only reached back into for the finalize step
-        // below.
         let mut col = ConstraintColumn {
             challenges: &self.challenges,
             u: AB::ExprEF::ONE,
@@ -151,40 +211,30 @@ where
         let result = f(&mut col);
         let ConstraintColumn { u, v, .. } = col;
 
-        // Pick up `acc` / `acc_next` from `ab.permutation()` and the committed
-        // final from `ab.permutation_values()` now that the column borrow is released.
-        let (acc, acc_next, committed_final) = {
-            let mp = self.ab.permutation();
-            let acc: AB::ExprEF = mp.current_slice()[self.column_idx].into();
-            let acc_next: AB::ExprEF = mp.next_slice()[self.column_idx].into();
-            let committed_final: AB::ExprEF =
-                self.ab.permutation_values()[self.column_idx].clone().into();
-            (acc, acc_next, committed_final)
-        };
-
-        // LogUp boundary + transition + last-row constraints.
-        //
-        //   when_first_row:  acc[0] == 0
-        //   when_transition: (acc_next - acc) · U − V == 0          (rows 0..N-2)
-        //   when_last_row:   acc == committed_final
-        //
-        // ## Last-row binding
-        //
-        // The natural closing check is `when_last_row: (committed_final − acc) · U − V`,
-        // but `when_last_row`'s selector multiplies the expression by an extra polynomial
-        // factor that pushes M_2+5 to degree 10, exceeding the degree-9 budget.
-        //
-        // Our model assumes the last row of the AIR never fires any interactions: on the
-        // last row `U = 1, V = 0` for every column. This allows a lower-degree closing
-        // constraint — simply binding the accumulator to the committed final value:
-        //
-        //   `when_last_row: acc − committed_final == 0`    (degree 1 + selector)
-        let delta_transition = acc_next - acc.clone();
-        self.ab.when_first_row().assert_zero_ext(acc.clone());
-        self.ab.when_transition().assert_zero_ext(delta_transition * u - v);
-        self.ab.when_last_row().assert_eq_ext(acc, committed_final);
-
+        let col_idx = self.column_idx;
         self.column_idx += 1;
+
+        let is_padding = self.column_shape.get(col_idx).copied() == Some(0);
+
+        if self.is_running_sum(col_idx) {
+            // Defer: we need all fraction columns' aux values before we can emit the
+            // running-sum constraint. Find the matching fraction columns.
+            let rs_pos = self.running_sum_set.iter().position(|&c| c == col_idx).unwrap();
+            let fraction_cols = self.fraction_map[rs_pos].clone();
+            self.deferred.push(DeferredRunningSum { col_idx, u, v, fraction_cols });
+        } else if !is_padding {
+            // Fraction column: U_i * aux_next_i - V_i = 0 on transition rows.
+            // Uses aux_next because aux[0] is the zero initial condition and
+            // aux[r+1] holds the per-row fraction for main-trace row r.
+            let acc_next: AB::ExprEF = {
+                let mp = self.ab.permutation();
+                mp.next_slice()[col_idx].into()
+            };
+
+            self.ab.when_transition().assert_zero_ext(u * acc_next - v);
+        }
+        // Padding column (shape 0): no constraints.
+
         result
     }
 }
@@ -197,7 +247,7 @@ where
 /// Holds only the running `(U, V)` accumulator and a shared borrow of
 /// the precomputed [`Challenges`]. The wrapped `&mut AB` and the
 /// permutation `acc` / `acc_next` values do **not** live on the column
-/// any more — the enclosing `column` method handles finalization
+/// — the enclosing `next_column` method handles finalization
 /// directly after the closure returns.
 pub struct ConstraintColumn<'a, AB>
 where
@@ -213,9 +263,6 @@ impl<'a, AB> ConstraintColumn<'a, AB>
 where
     AB: LiftedAirBuilder,
 {
-    /// Compose an inner-group `(U_g, V_g)` pair into this column's
-    /// running `(U, V)` using the cross-multiplication rule
-    /// `V ← V·U_g + V_g·U`, `U ← U·U_g`.
     fn fold_group(&mut self, u_g: AB::ExprEF, v_g: AB::ExprEF) {
         self.v = self.v.clone() * u_g.clone() + v_g * self.u.clone();
         self.u = self.u.clone() * u_g;
@@ -259,9 +306,6 @@ where
         encoded: impl FnOnce(&mut Self::Group<'g>),
         _deg: Deg,
     ) {
-        // Constraint path: only the `encoded` closure runs; the
-        // `canonical` closure is dropped unused. This matches the plan's
-        // split where `canonical` is the prover-path description.
         let mut group = ConstraintGroup {
             challenges: self.challenges,
             u: AB::ExprEF::ONE,
@@ -278,10 +322,6 @@ where
 // ================================================================================================
 
 /// Per-group handle for the constraint path.
-///
-/// Implements [`LookupGroup`] with working `beta_powers`, `bus_prefix`,
-/// and `insert_encoded` overrides (the constraint path always has the
-/// precomputed challenge tables available).
 ///
 /// Accumulates an internal `(U_g, V_g)` pair as the author calls
 /// `add` / `remove` / `insert` / `batch`. The column consumes the pair
@@ -318,9 +358,6 @@ where
     where
         M: LookupMessage<Self::Expr, Self::ExprEF>,
     {
-        // `add` = multiplicity +1. `V_g += flag · 1 = flag`, skipping
-        // the redundant multiplication that a generic `insert` would
-        // emit.
         let v = msg().encode(self.challenges);
         self.u += (v - AB::ExprEF::ONE) * flag.clone();
         self.v += flag;
@@ -335,7 +372,6 @@ where
     ) where
         M: LookupMessage<Self::Expr, Self::ExprEF>,
     {
-        // `remove` = multiplicity −1. `V_g += flag · (−1) = −flag`.
         let v = msg().encode(self.challenges);
         self.u += (v - AB::ExprEF::ONE) * flag.clone();
         self.v -= flag;
@@ -351,7 +387,6 @@ where
     ) where
         M: LookupMessage<Self::Expr, Self::ExprEF>,
     {
-        // General case: `V_g += flag · multiplicity`.
         let v = msg().encode(self.challenges);
         self.u += (v - AB::ExprEF::ONE) * flag.clone();
         self.v += flag * multiplicity;
@@ -364,9 +399,6 @@ where
         build: impl FnOnce(&mut Self::Batch<'b>),
         _deg: Deg,
     ) {
-        // Batch algebra: start with `(N, D) = (0, 1)`, run `build`,
-        // then fold the final `(N, D)` into `(U_g, V_g)` via
-        // `U_g += (D − 1) · flag`, `V_g += N · flag`.
         let mut batch = ConstraintBatch {
             challenges: self.challenges,
             n: AB::ExprEF::ZERO,
@@ -395,9 +427,6 @@ where
         encoded: impl FnOnce() -> Self::ExprEF,
         _deg: Deg,
     ) {
-        // Same `(U_g, V_g)` update as `insert`, but the denominator
-        // comes straight from the user's pre-computed closure instead
-        // of a `LookupMessage::encode` call.
         let v = encoded();
         self.u += (v - AB::ExprEF::ONE) * flag.clone();
         self.v += flag * multiplicity;
@@ -407,18 +436,12 @@ where
 // CONSTRAINT BATCH
 // ================================================================================================
 
-/// Batch handle returned by [`LookupGroup::batch`] (and the delegated
-/// encoded-group path).
+/// Batch handle returned by [`LookupGroup::batch`].
 ///
 /// Wraps an internal `(N, D)` pair and absorbs each interaction via the
 /// cross-multiplication rule `N' = N·v + m·D`, `D' = D·v`. The
 /// enclosing [`ConstraintGroup::batch`] folds the final `(N, D)` into
 /// the group's `(U_g, V_g)` using the outer flag.
-///
-/// Per-interaction encoding lives on the message itself
-/// ([`LookupMessage::encode`]), and the `(N, D)` update is inlined at
-/// every call site (no `absorb` helper) so the `add` / `remove` paths
-/// can skip the `m · D` multiplication when `m = ±1`.
 pub struct ConstraintBatch<'a, AB>
 where
     AB: LiftedAirBuilder + 'a,
@@ -440,7 +463,6 @@ where
     where
         M: LookupMessage<Self::Expr, Self::ExprEF>,
     {
-        // `m = 1`: `(N, D) ← (N·v + D, D·v)`. Skips the `m · D` mul.
         let v = msg.encode(self.challenges);
         let d_prev = self.d.clone();
         self.n = self.n.clone() * v.clone() + d_prev;
@@ -451,7 +473,6 @@ where
     where
         M: LookupMessage<Self::Expr, Self::ExprEF>,
     {
-        // `m = −1`: `(N, D) ← (N·v − D, D·v)`.
         let v = msg.encode(self.challenges);
         let d_prev = self.d.clone();
         self.n = self.n.clone() * v.clone() - d_prev;
@@ -462,7 +483,6 @@ where
     where
         M: LookupMessage<Self::Expr, Self::ExprEF>,
     {
-        // General case: `(N, D) ← (N·v + m·D, D·v)`.
         let v = msg.encode(self.challenges);
         let d_prev = self.d.clone();
         self.n = self.n.clone() * v.clone() + d_prev * multiplicity;
@@ -476,9 +496,6 @@ where
         encoded: impl FnOnce() -> Self::ExprEF,
         _deg: Deg,
     ) {
-        // Same as `insert`, but the denominator is a user-supplied
-        // pre-encoded `ExprEF` instead of a `LookupMessage::encode`
-        // call.
         let v = encoded();
         let d_prev = self.d.clone();
         self.n = self.n.clone() * v.clone() + d_prev * multiplicity;

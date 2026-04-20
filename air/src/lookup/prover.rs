@@ -776,6 +776,12 @@ mod tests {
         fn num_bus_ids(&self) -> usize {
             1
         }
+        fn running_sum_columns(&self) -> &[usize] {
+            &[0]
+        }
+        fn fraction_columns_for(&self, _running_sum_col: usize) -> &[usize] {
+            &[1]
+        }
         fn eval(&self, builder: &mut LB) {
             builder.next_column(
                 |col| {
@@ -896,24 +902,31 @@ mod tests {
             assert_eq!(*m, expected_m);
         }
 
-        // Accumulator produces num_rows+1 entries per column, and the running sum for
-        // each column advances by a deterministic per-row delta.
-        let aux = accumulate_slow(&fractions);
+        // Accumulator produces num_rows+1 entries per column. Column 0 is a running sum
+        // that also absorbs column 1's per-row values. Column 1 is a fraction column
+        // with per-row values only.
+        let rs_cols: &[usize] = &[0];
+        let frac_map: Vec<&[usize]> = vec![&[1]];
+        let aux = accumulate_slow(&fractions, rs_cols, &frac_map);
         assert_eq!(aux.len(), 2);
         for col_aux in &aux {
             assert_eq!(col_aux.len(), NUM_ROWS + 1);
             assert_eq!(col_aux[0], QuadFelt::ZERO);
         }
 
-        // Column 0 row delta = 1/d(ONE) - 1/d(TWO); column 1 row delta = 1/d(THREE).
+        // Column 0 own per-row delta = 1/d(ONE) - 1/d(TWO); column 1 per-row value = 1/d(THREE).
         let d1 = SmokeMsg { value: Felt::ONE }.encode(&challenges);
         let d2 = SmokeMsg { value: Felt::new(2) }.encode(&challenges);
         let d3 = SmokeMsg { value: Felt::new(3) }.encode(&challenges);
         let delta0 = d1.try_inverse().unwrap() - d2.try_inverse().unwrap();
         let delta1 = d3.try_inverse().unwrap();
+        // Column 0 (running sum): each row delta = own delta + col 1's per-row value.
         for r in 0..NUM_ROWS {
-            assert_eq!(aux[0][r + 1] - aux[0][r], delta0);
-            assert_eq!(aux[1][r + 1] - aux[1][r], delta1);
+            assert_eq!(aux[0][r + 1] - aux[0][r], delta0 + delta1);
+        }
+        // Column 1 (fraction): each row stores per-row value directly, not accumulated.
+        for r in 0..NUM_ROWS {
+            assert_eq!(aux[1][r + 1], delta1);
         }
     }
 }

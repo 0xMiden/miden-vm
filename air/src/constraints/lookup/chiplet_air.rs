@@ -142,4 +142,15 @@ where
         emit_hash_kernel_table::<LB>(builder, &ctx);
         emit_v_wiring::<LB>(builder, &ctx);
     }
+
+    fn running_sum_columns(&self) -> &[usize] {
+        &[0]
+    }
+
+    fn fraction_columns_for(&self, running_sum_col: usize) -> &[usize] {
+        match running_sum_col {
+            0 => &[1, 2],
+            _ => panic!("column {running_sum_col} is not a running-sum column"),
+        }
+    }
 }

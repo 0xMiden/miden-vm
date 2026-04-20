@@ -5,14 +5,14 @@ use miden::core::stark::random_coin
 #! Observes the auxiliary trace for the Miden VM AIR.
 #!
 #! Draws auxiliary randomness, reseeds the transcript with the auxiliary trace commitment,
-#! and absorbs the 4 words of auxiliary trace boundary values (8 aux columns, each an
-#! extension field element = 16 base field elements = 4 words).
+#! and absorbs the boundary values (2 running-sum committed finals = 2 extension field
+#! elements = 4 base field elements = 1 word).
 #!
-#! The advice provider must supply exactly 5 words in order:
-#!   [commitment, W0, W1, W2, W3]
+#! The advice provider must supply exactly 2 words in order:
+#!   [commitment, W0]
 #!
 #! The commitment is stored at aux_trace_com_ptr and the boundary values at
-#! aux_bus_boundary_ptr (sequentially).
+#! aux_bus_boundary_ptr.
 #!
 #! Precondition:  input_len=0 (guaranteed by the preceding reseed_direct in the generic verifier).
 #! Postcondition: input_len=0, output_len=8.
@@ -31,7 +31,7 @@ pub proc observe_aux_trace
     # Reseeding clears the output buffer.
     push.0 exec.constants::random_coin_output_len_ptr mem_store
 
-    # --- Permutation 1: Absorb [COM, W0] ---
+    # --- Single permutation: Absorb [COM, W0] ---
 
     padw adv_loadw
     exec.constants::aux_trace_com_ptr mem_storew_le
@@ -46,31 +46,6 @@ pub proc observe_aux_trace
     movdnw.2
     exec.poseidon2::permute
     # => [R1', R2', C', ...]
-
-    # --- Permutation 2: Absorb [W1, W2] ---
-
-    # Overwrite R2' with W1, then R1' with W2.
-    swapw adv_loadw
-    exec.constants::aux_bus_boundary_ptr add.4 mem_storew_le
-    # => [W1, R1', C', ...]
-
-    swapw adv_loadw
-    exec.constants::aux_bus_boundary_ptr add.8 mem_storew_le
-    # => [W2, W1, C', ...]
-
-    swapw
-    exec.poseidon2::permute
-    # => [R1'', R2'', C'', ...]
-
-    # --- Permutation 3: Absorb [W3] into rate slot 1 only ---
-
-    # Overwrite R1'' with W3 from advice, keeping R2'' and C''.
-    adv_loadw
-    exec.constants::aux_bus_boundary_ptr add.12 mem_storew_le
-    # => [W3, R2'', C'', ...]
-
-    exec.poseidon2::permute
-    # => [R1_final, R2_final, C_final, ...]
 
     # Store final sponge state.
     exec.random_coin::store_random_coin_state

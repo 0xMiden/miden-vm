@@ -20,8 +20,8 @@
 //! - `aux_trace` is the first `num_rows` rows of the accumulator — it starts at `ZERO` and ends at
 //!   the running sum **before** the last row's contribution. The last row's fraction contribution
 //!   does **not** appear in the aux trace.
-//! - `committed_finals` is the `num_rows`-th row of the accumulator (one `EF` per column) — the
-//!   full running sum across the entire trace, observed by the Fiat-Shamir challenger.
+//! - `committed_finals` contains only the running-sum columns' values from the `num_rows`-th row
+//!   (one `EF` per running-sum column), observed by the Fiat-Shamir challenger.
 
 use alloc::vec::Vec;
 
@@ -54,7 +54,10 @@ where
 {
     let fractions = build_lookup_fractions(air, main, periodic_columns, public_values, challenges);
 
-    let full = accumulate(&fractions);
+    let running_sum_cols = air.running_sum_columns();
+    let fraction_map: Vec<&[usize]> =
+        running_sum_cols.iter().map(|&rs| air.fraction_columns_for(rs)).collect();
+    let full = accumulate(&fractions, running_sum_cols, &fraction_map);
     let num_cols = full.width;
     let num_rows = main.height();
     debug_assert_eq!(
@@ -64,8 +67,10 @@ where
     );
 
     let mut data = full.values;
-    let committed: Vec<EF> = data.split_off(num_rows * num_cols);
-    debug_assert_eq!(committed.len(), num_cols);
+    let last_row: Vec<EF> = data.split_off(num_rows * num_cols);
+    debug_assert_eq!(last_row.len(), num_cols);
+
+    let committed: Vec<EF> = running_sum_cols.iter().map(|&col| last_row[col]).collect();
 
     let aux_trace = RowMajorMatrix::new(data, num_cols);
     (aux_trace, committed)

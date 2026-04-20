@@ -37,7 +37,9 @@ pub use prover::{ProverLookupBuilder, build_lookup_fractions};
 // Miden-side re-exports for ergonomic access via `miden_air::lookup::*`. The canonical
 // definitions live in [`crate::constraints::lookup`] and [`crate::constraints::logup_msg`].
 pub use crate::constraints::logup_msg::{BusId, MIDEN_MAX_MESSAGE_WIDTH};
-pub use crate::constraints::lookup::{MidenLookupAir, MidenLookupAuxBuilder};
+pub use crate::constraints::lookup::{
+    MidenLookupAir, MidenLookupAuxBuilder, miden_air::NUM_LOGUP_COMMITTED_FINALS,
+};
 #[cfg(feature = "bus-debug")]
 pub use crate::lookup::debug::oracle::{ColumnOracleBuilder, collect_column_oracle_folds};
 
@@ -99,4 +101,17 @@ pub trait LookupAir<LB: LookupBuilder> {
     /// Evaluate the lookup argument, describing its interactions through
     /// the builder's closure API.
     fn eval(&self, builder: &mut LB);
+
+    /// Indices of columns that serve as running-sum accumulators.
+    ///
+    /// Each running-sum column accumulates its own per-row fraction value plus the per-row
+    /// values of all fraction columns returned by
+    /// [`fraction_columns_for`](Self::fraction_columns_for). Only running-sum columns have
+    /// boundary constraints and committed final values; fraction columns store per-row
+    /// rational values directly (`D_i * aux_i - N_i = 0`).
+    fn running_sum_columns(&self) -> &[usize];
+
+    /// For a given running-sum column, return the fraction-column indices it accumulates
+    /// in addition to its own fractions.
+    fn fraction_columns_for(&self, running_sum_col: usize) -> &[usize];
 }
