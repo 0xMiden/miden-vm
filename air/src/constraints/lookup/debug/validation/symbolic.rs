@@ -15,9 +15,9 @@ use miden_crypto::stark::air::{
     symbolic::{AirLayout, SymbolicAirBuilder},
 };
 
-use super::super::super::{ConstraintLookupBuilder, LookupAir};
 use crate::{
     Felt, NUM_PUBLIC_VALUES, ProcessorAir,
+    lookup::{ConstraintLookupBuilder, LookupAir},
     trace::{AUX_TRACE_RAND_CHALLENGES, AUX_TRACE_WIDTH, TRACE_WIDTH},
 };
 

@@ -30,7 +30,7 @@ use miden_core::{
 };
 use miden_crypto::stark::air::RowWindow;
 
-use super::super::{LookupAir, LookupChallenges};
+use super::super::{Challenges, LookupAir};
 use crate::Felt;
 
 pub mod builder;
@@ -149,7 +149,7 @@ pub fn check_trace_balance<A>(
     main_trace: &RowMajorMatrix<Felt>,
     periodic_columns: &[Vec<Felt>],
     public_values: &[Felt],
-    challenges: &LookupChallenges<QuadFelt>,
+    challenges: &Challenges<QuadFelt>,
 ) -> BalanceReport
 where
     for<'a> A: LookupAir<DebugTraceBuilder<'a>>,
@@ -164,7 +164,7 @@ pub fn collect_column_oracle_folds<A>(
     main_trace: &RowMajorMatrix<Felt>,
     periodic_columns: &[Vec<Felt>],
     public_values: &[Felt],
-    challenges: &LookupChallenges<QuadFelt>,
+    challenges: &Challenges<QuadFelt>,
 ) -> Vec<Vec<(QuadFelt, QuadFelt)>>
 where
     for<'a> A: LookupAir<DebugTraceBuilder<'a>>,
@@ -188,7 +188,7 @@ fn run_trace_walk<A>(
     main_trace: &RowMajorMatrix<Felt>,
     periodic_columns: &[Vec<Felt>],
     public_values: &[Felt],
-    challenges: &LookupChallenges<QuadFelt>,
+    challenges: &Challenges<QuadFelt>,
 ) -> TraceWalkOutput
 where
     for<'a> A: LookupAir<DebugTraceBuilder<'a>>,

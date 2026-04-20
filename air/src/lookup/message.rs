@@ -2,11 +2,11 @@
 //! `LookupAir` / `LookupBuilder` API.
 //!
 //! Each message owns its full encoding loop against a borrowed
-//! [`Challenges`](crate::trace::Challenges).
+//! [`Challenges`](crate::lookup::Challenges).
 //!
 //! ## Encoding contract
 //!
-//! Given a reference to [`Challenges<EF>`](crate::trace::Challenges), a message produces
+//! Given a reference to [`Challenges<EF>`](crate::lookup::Challenges), a message produces
 //! the denominator
 //!
 //! ```text
@@ -24,7 +24,7 @@
 
 use miden_core::field::{Algebra, PrimeCharacteristicRing};
 
-use crate::trace::Challenges;
+use crate::lookup::Challenges;
 
 // TRAIT
 // ================================================================================================

@@ -24,7 +24,7 @@
 //!
 //! The top-level [`ConstraintLookupBuilder`] reads α/β out of
 //! `ab.permutation_randomness()[0..2]` exactly once at construction time
-//! and stores them in a [`LookupChallenges<AB::ExprEF>`], which
+//! and stores them in a [`Challenges<AB::ExprEF>`], which
 //! precomputes both the β-power table (β⁰..β^(W-1)) and the bus-prefix
 //! table (`bus_prefix[i] = α + (i + 1) · β^W`) sized from the
 //! [`LookupAir`] passed to [`ConstraintLookupBuilder::new`]. The cached
@@ -44,7 +44,7 @@ use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::{ExtensionBuilder, LiftedAirBuilder, WindowAccess};
 
 use super::{
-    Deg, LookupAir, LookupBatch, LookupBuilder, LookupChallenges, LookupColumn, LookupGroup,
+    Challenges, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
     LookupMessage,
 };
 
@@ -54,7 +54,7 @@ use super::{
 /// Constraint-path [`LookupBuilder`] over a wrapped [`LiftedAirBuilder`].
 ///
 /// Construct via [`ConstraintLookupBuilder::new`]. The adapter caches the
-/// precomputed challenges ([`LookupChallenges`] sized from the
+/// precomputed challenges ([`Challenges`] sized from the
 /// [`LookupAir`]) and a small column-index counter; the permutation row
 /// slices are re-queried from the wrapped `&mut AB` on every
 /// [`LookupBuilder::column`] call.
@@ -63,7 +63,7 @@ where
     AB: LiftedAirBuilder + 'ab,
 {
     ab: &'ab mut AB,
-    challenges: LookupChallenges<AB::ExprEF>,
+    challenges: Challenges<AB::ExprEF>,
     column_idx: usize,
 }
 
@@ -80,7 +80,7 @@ where
     /// us read the shape without any turbofishing at the call site.
     ///
     /// Reads `ab.permutation_randomness()` to extract α = `r[0]` and β = `r[1]`, then builds
-    /// a [`LookupChallenges<AB::ExprEF>`] (= `crate::trace::Challenges`) sized from
+    /// a [`Challenges<AB::ExprEF>`] (= `crate::lookup::Challenges`) sized from
     /// `air.max_message_width()` / `air.num_bus_ids()`.
     pub fn new<A>(ab: &'ab mut AB, air: &A) -> Self
     where
@@ -90,12 +90,8 @@ where
             let r = ab.permutation_randomness();
             (r[0].into(), r[1].into())
         };
-        let challenges = LookupChallenges::<AB::ExprEF>::new(
-            alpha,
-            beta,
-            air.max_message_width(),
-            air.num_bus_ids(),
-        );
+        let challenges =
+            Challenges::<AB::ExprEF>::new(alpha, beta, air.max_message_width(), air.num_bus_ids());
 
         Self { ab, challenges, column_idx: 0 }
     }
@@ -199,7 +195,7 @@ where
 /// Per-column handle returned by [`ConstraintLookupBuilder::column`].
 ///
 /// Holds only the running `(U, V)` accumulator and a shared borrow of
-/// the precomputed [`LookupChallenges`]. The wrapped `&mut AB` and the
+/// the precomputed [`Challenges`]. The wrapped `&mut AB` and the
 /// permutation `acc` / `acc_next` values do **not** live on the column
 /// any more — the enclosing `column` method handles finalization
 /// directly after the closure returns.
@@ -207,7 +203,7 @@ pub struct ConstraintColumn<'a, AB>
 where
     AB: LiftedAirBuilder + 'a,
 {
-    challenges: &'a LookupChallenges<AB::ExprEF>,
+    challenges: &'a Challenges<AB::ExprEF>,
     u: AB::ExprEF,
     v: AB::ExprEF,
     _phantom: PhantomData<AB>,
@@ -299,7 +295,7 @@ pub struct ConstraintGroup<'a, AB>
 where
     AB: LiftedAirBuilder + 'a,
 {
-    challenges: &'a LookupChallenges<AB::ExprEF>,
+    challenges: &'a Challenges<AB::ExprEF>,
     u: AB::ExprEF,
     v: AB::ExprEF,
     _phantom: PhantomData<AB>,
@@ -427,7 +423,7 @@ pub struct ConstraintBatch<'a, AB>
 where
     AB: LiftedAirBuilder + 'a,
 {
-    challenges: &'a LookupChallenges<AB::ExprEF>,
+    challenges: &'a Challenges<AB::ExprEF>,
     n: AB::ExprEF,
     d: AB::ExprEF,
     _phantom: PhantomData<AB>,

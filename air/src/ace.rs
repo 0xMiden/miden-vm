@@ -147,7 +147,7 @@ where
 /// Encode a bus message as `bus_prefix[bus] + sum(beta^i * elements[i])`.
 ///
 /// The bus prefix provides domain separation: `bus_prefix[bus] = alpha + (bus+1) * gamma_bus`
-/// where `gamma_bus = beta^MIDEN_MAX_MESSAGE_WIDTH`. This matches [`trace::Challenges::encode`].
+/// where `gamma_bus = beta^MIDEN_MAX_MESSAGE_WIDTH`. This matches [`lookup::Challenges::encode`].
 fn encode_bus_message<EF>(
     builder: &mut DagBuilder<EF>,
     bus: usize,

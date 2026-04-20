@@ -23,7 +23,6 @@ use core::borrow::Borrow;
 use miden_crypto::stark::air::WindowAccess;
 
 use super::{
-    LookupAir, LookupBuilder,
     bus_id::NUM_BUS_IDS,
     buses::{
         block_hash_and_op_group::{self as block_hash_and_op_group, emit_block_hash_and_op_group},
@@ -32,7 +31,11 @@ use super::{
         stack_overflow::{self, emit_stack_overflow},
     },
 };
-use crate::{Felt, MainCols, constraints::op_flags::OpFlags};
+use crate::{
+    Felt, MainCols,
+    constraints::op_flags::OpFlags,
+    lookup::{LookupAir, LookupBuilder},
+};
 
 // MAIN LOOKUP BUILDER
 // ================================================================================================

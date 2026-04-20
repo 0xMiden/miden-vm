@@ -15,7 +15,7 @@
 //!
 //! The caller:
 //!
-//! 1. Builds one [`LookupChallenges<EF>`] once, outside the per-row loop.
+//! 1. Builds one [`Challenges<EF>`] once, outside the per-row loop.
 //! 2. Allocates one [`LookupFractions`] once via [`LookupFractions::new`], sized from
 //!    [`LookupAir::column_shape`]. Each column's internal Vec is `Vec::with_capacity(num_rows *
 //!    shape[col])` so pushes in the row loop never re-allocate.
@@ -57,10 +57,9 @@ use miden_core::{
 use miden_crypto::stark::air::RowWindow;
 
 use super::{
-    Deg, LookupAir, LookupBatch, LookupBuilder, LookupChallenges, LookupColumn, LookupGroup,
+    Challenges, Deg, LookupAir, LookupBatch, LookupBuilder, LookupColumn, LookupGroup,
     LookupMessage, fractions::LookupFractions,
 };
-use crate::Felt;
 
 // BUS DEBUG HOOK
 // ================================================================================================
@@ -149,7 +148,7 @@ where
 /// `Var` / `VarEF` etc. associated type collapses to `F` or `EF`
 /// directly — there is no symbolic tree on the prover side.
 ///
-/// The [`LookupChallenges`] table is **borrowed** from the caller: the
+/// The [`Challenges`] table is **borrowed** from the caller: the
 /// caller builds it once outside the row loop and passes a shared
 /// reference into every `new` call, so per-row construction is O(1) with
 /// no allocations.
@@ -161,7 +160,7 @@ where
     main: RowWindow<'a, F>,
     periodic_values: &'a [F],
     public_values: &'a [F],
-    challenges: &'a LookupChallenges<EF>,
+    challenges: &'a Challenges<EF>,
     /// Dense per-column fraction buffers shared across all rows. Each
     /// [`LookupBuilder::column`] call appends the current row's fractions to the end of
     /// `fractions.fractions[column_idx]` and pushes the row's interaction count into
@@ -204,7 +203,7 @@ where
         main: RowWindow<'a, F>,
         periodic_values: &'a [F],
         public_values: &'a [F],
-        challenges: &'a LookupChallenges<EF>,
+        challenges: &'a Challenges<EF>,
         air: &A,
         fractions: &'a mut LookupFractions<F, EF>,
     ) -> Self
@@ -221,7 +220,7 @@ where
         main: RowWindow<'a, F>,
         periodic_values: &'a [F],
         public_values: &'a [F],
-        challenges: &'a LookupChallenges<EF>,
+        challenges: &'a Challenges<EF>,
         air: &A,
         fractions: &'a mut LookupFractions<F, EF>,
         row_idx: usize,
@@ -252,30 +251,19 @@ where
 /// Walk a complete main trace through [`ProverLookupBuilder`] and return the dense
 /// [`LookupFractions`] buffer the collection phase produces.
 ///
-/// This is the top-level entry point for the prover-side LogUp collection phase. It:
-///
-/// 1. Allocates one [`LookupFractions`] sized from [`LookupAir::column_shape`] — the hot row loop
-///    never re-allocates as long as each row stays within its declared bound.
-/// 2. For each row `r`, builds a two-row `RowWindow` over `&flat[r * w .. (r + 1) * w]` and
-///    `&flat[((r + 1) % n) * w .. ..]` (wraparound on the last row — matches the constraint path's
-///    transition wraparound).
-/// 3. Composes the per-row periodic slice by indexing each periodic column at `r % col.len()` (the
-///    columns have varying periods — hasher columns are 16, bitwise columns are 8, etc.). A single
-///    reusable `Vec<Felt>` is filled in place per row.
-/// 4. Constructs a fresh `ProverLookupBuilder` per row and calls `air.eval(&mut lb)` — the bus
-///    emitters push fractions into the flat [`LookupFractions`] buffer and record per-row counts
-///    via the split-borrow in `LookupBuilder::column`.
-///
-/// The returned [`LookupFractions`] is ready for the fused batch-inversion + partial-sum
-/// fast path (not implemented here) or for the reference [`super::accumulate_slow`].
+/// Generic over the base field `F` and extension field `EF`. The caller supplies the
+/// main trace and periodic columns — this function does row slicing, periodic-column
+/// indexing, and fraction collection. The Miden-side
+/// [`MidenLookupAuxBuilder`](crate::constraints::lookup::MidenLookupAuxBuilder) wraps
+/// this with the Miden-specific periodic-column layout.
 ///
 /// # Arguments
 ///
-/// - `air`: the [`LookupAir`] to evaluate (typically [`super::miden_air::MidenLookupAir`]).
+/// - `air`: the [`LookupAir`] to evaluate (typically
+///   [`MidenLookupAir`](crate::constraints::lookup::MidenLookupAir)).
 /// - `main_trace`: row-major main execution trace. Row access is zero-copy via
 ///   `main_trace.values.borrow()`.
-/// - `periodic_columns`: one `Vec<Felt>` per periodic column, each with its own period (from
-///   `PeriodicCols::periodic_columns` in `constraints::chiplets::columns`).
+/// - `periodic_columns`: one `Vec<F>` per periodic column, each with its own period.
 /// - `public_values`: row-invariant public input slice.
 /// - `challenges`: precomputed LogUp challenges (shared across every row).
 ///
@@ -284,34 +272,33 @@ where
 /// Panics in debug builds if any row pushes more fractions into a column than that
 /// column's declared [`LookupAir::column_shape`] bound — this indicates the emitter's
 /// `MAX_INTERACTIONS_PER_ROW` const is too low and needs to be bumped.
-pub fn build_lookup_fractions<A, EF>(
+pub fn build_lookup_fractions<A, F, EF>(
     air: &A,
-    main_trace: &RowMajorMatrix<Felt>,
-    periodic_columns: &[Vec<Felt>],
-    public_values: &[Felt],
-    challenges: &LookupChallenges<EF>,
-) -> LookupFractions<Felt, EF>
+    main_trace: &RowMajorMatrix<F>,
+    periodic_columns: &[Vec<F>],
+    public_values: &[F],
+    challenges: &Challenges<EF>,
+) -> LookupFractions<F, EF>
 where
-    EF: ExtensionField<Felt>,
-    for<'a> A: LookupAir<ProverLookupBuilder<'a, Felt, EF>>,
+    F: Field,
+    EF: ExtensionField<F>,
+    for<'a> A: LookupAir<ProverLookupBuilder<'a, F, EF>>,
 {
     let num_rows = main_trace.height();
     let width = main_trace.width();
-    let flat: &[Felt] = main_trace.values.borrow();
+    let flat: &[F] = main_trace.values.borrow();
 
-    let mut fractions = LookupFractions::new::<A, ProverLookupBuilder<'_, Felt, EF>>(air, num_rows);
+    let mut fractions = LookupFractions::new::<A, ProverLookupBuilder<'_, F, EF>>(air, num_rows);
 
     // Per-row periodic slice, filled in place each row — no per-iteration allocation.
-    let mut periodic_row: Vec<Felt> = vec![Felt::ZERO; periodic_columns.len()];
+    let mut periodic_row: Vec<F> = vec![F::ZERO; periodic_columns.len()];
 
     for r in 0..num_rows {
-        // Zero-copy row slices over the flat matrix storage.
         let curr = &flat[r * width..(r + 1) * width];
         let nxt_idx = (r + 1) % num_rows;
         let next = &flat[nxt_idx * width..(nxt_idx + 1) * width];
         let window = RowWindow::from_two_rows(curr, next);
 
-        // Each periodic column is indexed at `r mod its own period`.
         for (i, col) in periodic_columns.iter().enumerate() {
             periodic_row[i] = col[r % col.len()];
         }
@@ -326,7 +313,6 @@ where
             r,
         );
         air.eval(&mut lb);
-        // `lb` drops here; the next iteration reborrows `fractions` fresh.
     }
 
     debug_assert_eq!(
@@ -425,7 +411,7 @@ where
     F: Field,
     EF: ExtensionField<F>,
 {
-    challenges: &'c LookupChallenges<EF>,
+    challenges: &'c Challenges<EF>,
     fractions: &'c mut Vec<(F, EF)>,
     /// Debug-only: current main-trace row index (see [`ProverLookupBuilder::row_idx`]).
     row_idx: usize,
@@ -517,7 +503,7 @@ where
     F: Field,
     EF: ExtensionField<F>,
 {
-    challenges: &'g LookupChallenges<EF>,
+    challenges: &'g Challenges<EF>,
     fractions: &'g mut Vec<(F, EF)>,
     /// Debug-only: current main-trace row index (see [`ProverLookupBuilder::row_idx`]).
     row_idx: usize,
@@ -659,7 +645,7 @@ where
     F: Field,
     EF: ExtensionField<F>,
 {
-    challenges: &'b LookupChallenges<EF>,
+    challenges: &'b Challenges<EF>,
     fractions: &'b mut Vec<(F, EF)>,
     active: bool,
     /// Debug-only: current main-trace row index (see [`ProverLookupBuilder::row_idx`]).
@@ -746,8 +732,7 @@ mod tests {
     use super::*;
     use crate::{
         Felt,
-        constraints::lookup::{Deg, LookupAir, fractions::accumulate_slow, message::LookupMessage},
-        trace::Challenges,
+        lookup::{Deg, LookupAir, fractions::accumulate_slow, message::LookupMessage},
     };
 
     /// Minimal `LookupMessage` used by [`SmokeAir`] to drive a `Vec::push` into the
@@ -860,7 +845,7 @@ mod tests {
         // SmokeAir hard-codes `max_message_width = 1` / `num_bus_ids = 1` in its
         // `LookupAir` impl — the trait-method path can't be called directly because
         // `LookupAir<LB>` is generic over `LB` and disambiguation fails at a value call.
-        let challenges = LookupChallenges::<QuadFelt>::new(alpha, beta, 1, 1);
+        let challenges = Challenges::<QuadFelt>::new(alpha, beta, 1, 1);
 
         // `SmokeAir::eval` never touches the main trace, periodic columns, or public
         // values — pass dummy zero-length slices.

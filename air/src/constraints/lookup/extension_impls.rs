@@ -20,11 +20,11 @@
 use miden_core::field::ExtensionField;
 use miden_crypto::stark::air::LiftedAirBuilder;
 
-use super::{
-    chiplet_air::ChipletLookupBuilder, constraint::ConstraintLookupBuilder,
-    main_air::MainLookupBuilder, prover::ProverLookupBuilder,
+use super::{chiplet_air::ChipletLookupBuilder, main_air::MainLookupBuilder};
+use crate::{
+    Felt,
+    lookup::{ConstraintLookupBuilder, ProverLookupBuilder},
 };
-use crate::Felt;
 
 // CONSTRAINT PATH
 // ================================================================================================
@@ -47,4 +47,23 @@ impl<'a, EF> MainLookupBuilder for ProverLookupBuilder<'a, Felt, EF> where EF: E
 impl<'a, EF> ChipletLookupBuilder for ProverLookupBuilder<'a, Felt, EF> where
     EF: ExtensionField<Felt>
 {
+}
+
+// DEBUG BUILDERS
+// ================================================================================================
+//
+// Empty impls for the Felt/QuadFelt-pinned debug builders. They pick up the default
+// polynomial bodies of `build_op_flags` / `build_chiplet_active`; the builders only run in
+// test / bus-debug contexts so there's no need for a boolean fast-path override.
+
+#[cfg(any(test, feature = "bus-debug"))]
+mod debug_impls {
+    use super::{ChipletLookupBuilder, MainLookupBuilder};
+    use crate::lookup::debug::{DebugStructureBuilder, DebugTraceBuilder};
+
+    impl<'a> MainLookupBuilder for DebugStructureBuilder<'a> {}
+    impl<'a> ChipletLookupBuilder for DebugStructureBuilder<'a> {}
+
+    impl<'a> MainLookupBuilder for DebugTraceBuilder<'a> {}
+    impl<'a> ChipletLookupBuilder for DebugTraceBuilder<'a> {}
 }

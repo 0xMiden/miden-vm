@@ -59,14 +59,14 @@ use core::{array, borrow::Borrow};
 
 use miden_core::field::PrimeCharacteristicRing;
 
-use crate::constraints::{
-    chiplets::columns::PeriodicCols,
-    logup_msg::{AceWireMsg, HasherPermLinkMsg},
-    lookup::{
-        Deg, LookupBatch, LookupColumn, LookupGroup,
-        chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
+use crate::{
+    constraints::{
+        chiplets::columns::PeriodicCols,
+        logup_msg::{AceWireMsg, HasherPermLinkMsg},
+        lookup::chiplet_air::{ChipletBusContext, ChipletLookupBuilder},
+        utils::BoolNot,
     },
-    utils::BoolNot,
+    lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
 };
 
 /// Upper bound on fractions this emitter pushes into its column per row.

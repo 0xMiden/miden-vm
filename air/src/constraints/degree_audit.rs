@@ -10,7 +10,7 @@
 //! ```
 //!
 //! TODO(rebase): the audit body below is written against the pre-2856 `MainTraceRow` /
-//! `ExprDecoderAccess` / `LookupChallenges` API. It is temporarily disabled while the
+//! `ExprDecoderAccess` / `Challenges` API. It is temporarily disabled while the
 //! lookup module is being adapted to the unified `MainCols` / `OpFlags::new(decoder, stack,
 //! decoder_next)` / `Challenges::encode(bus, elems)` API. Re-enable once the helpers are
 //! ported.

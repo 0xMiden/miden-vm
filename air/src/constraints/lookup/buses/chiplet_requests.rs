@@ -16,11 +16,9 @@ use miden_core::{FMP_ADDR, FMP_INIT_VALUE, field::PrimeCharacteristicRing, opera
 use crate::{
     constraints::{
         logup_msg::{AceInitMsg, BitwiseMsg, HasherMsg, KernelRomMsg, MemoryHeader},
-        lookup::{
-            Deg, LookupBatch, LookupColumn, LookupGroup,
-            main_air::{MainBusContext, MainLookupBuilder},
-        },
+        lookup::main_air::{MainBusContext, MainLookupBuilder},
     },
+    lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
     trace::{
         chiplets::hasher::CONTROLLER_ROWS_PER_PERMUTATION,
         log_precompile::{

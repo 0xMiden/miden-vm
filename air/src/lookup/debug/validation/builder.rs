@@ -12,8 +12,7 @@ use miden_crypto::stark::air::RowWindow;
 
 use super::{
     super::super::{
-        Deg, LookupBatch, LookupBuilder, LookupChallenges, LookupColumn, LookupGroup,
-        LookupMessage, chiplet_air::ChipletLookupBuilder, main_air::MainLookupBuilder,
+        Challenges, Deg, LookupBatch, LookupBuilder, LookupColumn, LookupGroup, LookupMessage,
     },
     ColumnRecord, DebugStructure, EncodingMode, GroupRecord, InteractionRecord, MultSign,
     PassRecord,
@@ -29,7 +28,7 @@ pub struct DebugStructureBuilder<'a> {
     main: RowWindow<'a, Felt>,
     periodic_values: &'a [Felt],
     public_values: &'a [Felt],
-    challenges: &'a LookupChallenges<QuadFelt>,
+    challenges: &'a Challenges<QuadFelt>,
     out: &'a mut DebugStructure,
     column_idx: usize,
 }
@@ -39,7 +38,7 @@ impl<'a> DebugStructureBuilder<'a> {
         main: RowWindow<'a, Felt>,
         periodic_values: &'a [Felt],
         public_values: &'a [Felt],
-        challenges: &'a LookupChallenges<QuadFelt>,
+        challenges: &'a Challenges<QuadFelt>,
         out: &'a mut DebugStructure,
     ) -> Self {
         Self {
@@ -103,14 +102,11 @@ impl<'a> LookupBuilder for DebugStructureBuilder<'a> {
     }
 }
 
-impl<'a> MainLookupBuilder for DebugStructureBuilder<'a> {}
-impl<'a> ChipletLookupBuilder for DebugStructureBuilder<'a> {}
-
 // COLUMN
 // ================================================================================================
 
 pub struct DebugStructureColumn<'c> {
-    challenges: &'c LookupChallenges<QuadFelt>,
+    challenges: &'c Challenges<QuadFelt>,
     column: &'c mut ColumnRecord,
     next_group_idx: usize,
 }
@@ -208,7 +204,7 @@ pub struct DebugStructureGroup<'g> {
     pass_rec: &'g mut PassRecord,
     u: QuadFelt,
     v: QuadFelt,
-    challenges: &'g LookupChallenges<QuadFelt>,
+    challenges: &'g Challenges<QuadFelt>,
 }
 
 impl<'g> LookupGroup for DebugStructureGroup<'g> {
@@ -329,7 +325,7 @@ impl<'g> LookupGroup for DebugStructureGroup<'g> {
 
 pub struct DebugStructureBatch<'b> {
     pass_rec: &'b mut PassRecord,
-    challenges: &'b LookupChallenges<QuadFelt>,
+    challenges: &'b Challenges<QuadFelt>,
     n: QuadFelt,
     d: QuadFelt,
 }

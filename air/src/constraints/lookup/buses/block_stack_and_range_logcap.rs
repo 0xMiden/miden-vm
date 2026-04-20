@@ -72,11 +72,9 @@ use miden_core::field::PrimeCharacteristicRing;
 use crate::{
     constraints::{
         logup_msg::{BlockStackMsg, LogCapacityMsg, RangeMsg},
-        lookup::{
-            Deg, LookupBatch, LookupColumn, LookupGroup,
-            main_air::{MainBusContext, MainLookupBuilder},
-        },
+        lookup::main_air::{MainBusContext, MainLookupBuilder},
     },
+    lookup::{Deg, LookupBatch, LookupColumn, LookupGroup},
     trace::log_precompile::{HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE},
 };
 

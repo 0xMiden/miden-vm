@@ -3,9 +3,6 @@ use core::ops::Range;
 use chiplets::hasher::RATE_LEN;
 use miden_core::utils::range;
 
-mod challenges;
-pub use challenges::Challenges;
-
 pub mod chiplets;
 pub mod decoder;
 pub mod range;
@@ -148,8 +145,7 @@ pub const AUX_TRACE_RAND_CHALLENGES: usize = 2;
 ///
 /// These define the standard positions for encoding bus messages using the pattern:
 /// `bus_prefix[bus] + sum(beta_powers\[i\] * elem\[i\])` where:
-/// - `bus_prefix[bus]` is the per-bus domain-separated base (see `bus_types` in the
-///   lookup module)
+/// - `bus_prefix[bus]` is the per-bus domain-separated base (see `bus_types` in the lookup module)
 /// - `beta_powers\[i\] = beta^i` are the powers of beta
 ///
 /// These indices refer to positions in the `beta_powers` array, not including the bus prefix.
