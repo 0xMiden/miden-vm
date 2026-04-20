@@ -1,8 +1,6 @@
 #!/bin/bash
 set -uo pipefail
 
-: "${BASE_REF:?BASE_REF is not set}"
-
 CHANGELOG_FILE="${1:-CHANGELOG.md}"
 
 if [ "${NO_CHANGELOG_LABEL:-false}" = "true" ]; then
@@ -10,6 +8,7 @@ if [ "${NO_CHANGELOG_LABEL:-false}" = "true" ]; then
     echo "\"no changelog\" label has been set"
     exit 0
 else
+    : "${BASE_REF:?BASE_REF is not set}"
     # a changelog check is required
     # fail if the diff is empty
     if git diff --exit-code "origin/${BASE_REF}" -- "${CHANGELOG_FILE}"; then
