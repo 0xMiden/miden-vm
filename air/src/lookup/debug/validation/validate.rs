@@ -1,35 +1,27 @@
-//! Miden-side AIR self-validation wrapper.
+//! Composed AIR self-validation entry point ([`validate`]).
 //!
-//! Layers the Miden-specific symbolic degree-budget pass
-//! ([`check_symbolic_degrees`]) on top of the generic
-//! [`validate_structure_only`](crate::lookup::debug::validation::validate_structure_only)
-//! entry point in [`crate::lookup::debug::validation`].
-//!
-//! See [`crate::lookup::debug::validation`] for the generic record types
-//! ([`StructureReport`], [`GroupMismatch`], [`ScopeReport`], …) and structure checks.
+//! Stacks the structural pass ([`super::validate_structure_only`]) and the symbolic
+//! degree-budget pass ([`super::check_symbolic_degrees`]) into one call and bundles both
+//! results into a [`ValidationReport`]. `layout` and `degree_budget` are caller-supplied
+//! so this file stays free of Miden-specific constants.
 
 use alloc::{string::String, vec::Vec};
 use core::fmt;
 
-pub mod symbolic;
+use miden_core::field::QuadFelt;
+use miden_crypto::stark::air::symbolic::{AirLayout, SymbolicAirBuilder};
 
-pub use symbolic::{DEGREE_BUDGET, DegreeMismatch, DegreeReport, check_symbolic_degrees};
-
-use crate::lookup::{
-    LookupAir,
-    debug::validation::{
-        DebugStructureBuilder, GroupMismatch, NumColumnsCheck, StructureReport,
-        validate_structure_only,
-    },
+use super::{
+    super::super::{ConstraintLookupBuilder, LookupAir},
+    DebugStructureBuilder, DegreeMismatch, GroupMismatch, NumColumnsCheck, StructureReport,
+    check_symbolic_degrees, validate_structure_only,
 };
-
-// VALIDATION REPORT
-// ================================================================================================
+use crate::Felt;
 
 /// Bundled outcome of [`validate`].
 ///
-/// Composes a [`StructureReport`] (from the generic structural checks) with the Miden-side
-/// symbolic degree-budget pass.
+/// Composes a [`StructureReport`] (from the generic structural checks) with a symbolic
+/// degree-budget pass.
 #[derive(Debug)]
 pub struct ValidationReport {
     pub air_name: &'static str,
@@ -40,7 +32,8 @@ pub struct ValidationReport {
     /// Empty on success. One string per simple-mode group that illegally called
     /// `insert_encoded`.
     pub scope_violations: Vec<String>,
-    /// Empty on success. One entry per constraint that exceeded [`DEGREE_BUDGET`].
+    /// Empty on success. One entry per constraint that exceeded the caller-supplied degree
+    /// budget.
     pub degree_mismatches: Vec<DegreeMismatch>,
 }
 
@@ -107,33 +100,34 @@ impl fmt::Display for ValidationReport {
 /// 2. Scope violations (simple groups that touched `insert_encoded`).
 /// 3. Symbolic degree-budget pass over the production `ConstraintLookupBuilder`.
 /// 4. `num_columns` consistency (declared vs observed).
+///
+/// `layout.main_width`, `layout.num_periodic_columns`, and `layout.num_public_values`
+/// drive the structural pass; the full `layout` sizes the symbolic builder used by
+/// [`check_symbolic_degrees`].
 pub fn validate<A>(
     air: &A,
     air_name: &'static str,
-    trace_width: usize,
-    num_periodic: usize,
-    num_public_values: usize,
+    layout: AirLayout,
+    degree_budget: usize,
 ) -> ValidationReport
 where
     for<'a> A: LookupAir<DebugStructureBuilder<'a>>,
-    for<'ab> A: LookupAir<
-        crate::lookup::ConstraintLookupBuilder<
-            'ab,
-            miden_crypto::stark::air::symbolic::SymbolicAirBuilder<
-                crate::Felt,
-                miden_core::field::QuadFelt,
-            >,
-        >,
-    >,
+    for<'ab> A: LookupAir<ConstraintLookupBuilder<'ab, SymbolicAirBuilder<Felt, QuadFelt>>>,
 {
     let StructureReport {
         air_name,
         num_columns,
         encoding_mismatches,
         scope_violations,
-    } = validate_structure_only(air, air_name, trace_width, num_periodic, num_public_values);
+    } = validate_structure_only(
+        air,
+        air_name,
+        layout.main_width,
+        layout.num_periodic_columns,
+        layout.num_public_values,
+    );
 
-    let degree_mismatches = match check_symbolic_degrees(air) {
+    let degree_mismatches = match check_symbolic_degrees(air, layout, degree_budget) {
         Ok(_) => Vec::new(),
         Err(report) => report.mismatches,
     };

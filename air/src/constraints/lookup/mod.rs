@@ -17,8 +17,6 @@ pub mod aux_builder;
 pub mod bus_id;
 pub(crate) mod buses;
 pub mod chiplet_air;
-#[cfg(any(test, feature = "bus-debug"))]
-pub mod debug;
 mod extension_impls;
 pub mod main_air;
 pub mod miden_air;

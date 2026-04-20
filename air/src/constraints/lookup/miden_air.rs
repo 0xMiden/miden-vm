@@ -100,40 +100,57 @@ mod tests {
         field::{PrimeCharacteristicRing, QuadFelt},
         utils::RowMajorMatrix,
     };
-    use miden_crypto::{rand::random_felt, stark::air::LiftedAir};
+    use miden_crypto::{
+        rand::random_felt,
+        stark::air::{LiftedAir, symbolic::AirLayout},
+    };
 
     use super::MidenLookupAir;
     use crate::{
         Felt, NUM_PUBLIC_VALUES, ProcessorAir,
-        constraints::lookup::{
-            bus_id::{MIDEN_MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+        constraints::lookup::bus_id::{MIDEN_MAX_MESSAGE_WIDTH, NUM_BUS_IDS},
+        lookup::{
+            Challenges,
             debug::{
                 check_challenge_scoping, check_encoding_equivalence, check_symbolic_degrees,
                 check_trace_balance, collect_inventory,
             },
         },
-        lookup::Challenges,
-        trace::TRACE_WIDTH,
+        trace::{AUX_TRACE_RAND_CHALLENGES, AUX_TRACE_WIDTH, TRACE_WIDTH},
     };
+
+    /// Transition-constraint degree budget enforced on the Miden AIR.
+    const DEGREE_BUDGET: usize = 9;
 
     fn num_periodic() -> usize {
         LiftedAir::<Felt, QuadFelt>::periodic_columns(&ProcessorAir).len()
     }
 
-    /// Degree-budget check: subsumed by
-    /// [`check_symbolic_degrees`](crate::constraints::lookup::debug::check_symbolic_degrees).
+    fn miden_air_layout() -> AirLayout {
+        AirLayout {
+            preprocessed_width: 0,
+            main_width: TRACE_WIDTH,
+            num_public_values: NUM_PUBLIC_VALUES,
+            permutation_width: AUX_TRACE_WIDTH,
+            num_permutation_challenges: AUX_TRACE_RAND_CHALLENGES,
+            num_permutation_values: AUX_TRACE_WIDTH,
+            num_periodic_columns: num_periodic(),
+        }
+    }
+
     /// Exercises every one of the 9 buses `MidenLookupAir::eval` wires up and asserts each
     /// emitted constraint stays within the transition degree budget.
     #[test]
     #[allow(clippy::print_stdout)]
     fn miden_lookup_air_degree_within_budget() {
-        let report = check_symbolic_degrees(&MidenLookupAir).unwrap_or_else(|r| {
-            panic!(
-                "symbolic degree pass failed: {} mismatches\n{:#?}",
-                r.mismatches.len(),
-                r.mismatches,
-            )
-        });
+        let report = check_symbolic_degrees(&MidenLookupAir, miden_air_layout(), DEGREE_BUDGET)
+            .unwrap_or_else(|r| {
+                panic!(
+                    "symbolic degree pass failed: {} mismatches\n{:#?}",
+                    r.mismatches.len(),
+                    r.mismatches,
+                )
+            });
         // Both constraint families should have at least one constraint each.
         assert!(report.info.iter().any(|i: &String| i.contains("extension constraints")));
         assert!(report.info.iter().any(|i: &String| i.contains("base constraints")));
@@ -143,7 +160,7 @@ mod tests {
     }
 
     /// Cached-encoding equivalence check: subsumed by
-    /// [`check_encoding_equivalence`](crate::constraints::lookup::debug::check_encoding_equivalence).
+    /// [`check_encoding_equivalence`](crate::lookup::debug::check_encoding_equivalence).
     /// Runs `MidenLookupAir::eval` through the canonical-vs-encoded equivalence checker on
     /// a batch of random row pairs.
     #[test]
